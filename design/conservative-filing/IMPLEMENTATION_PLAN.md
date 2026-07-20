@@ -72,9 +72,17 @@ memory: `git-checkout-eats-uncommitted-mutation-reverts`).
 - `crates/btctax-core/src/project/transition.rs` — `UniversalSnapshot` (`:19-22`), `universal_snapshot`
   (`:32-72`), Path-A seed overwrite (`:83`).
 - `crates/btctax-core/src/forms.rs` — `how_acquired_from` (`:265-275`).
+- `crates/btctax-core/src/void.rs` — `is_revocable_payload` (`:20-34`, arch I-2; non-`matches!`, NOT
+  compile-forced). **Do not touch `effective_alloc`/`voidable_decisions` semantics** (arch M-5).
 - `crates/btctax-cli/src/render.rs` — `basis_source_tag` (`:43-57`), `render_tax_outcome` (`:1204-1209`).
+- `crates/btctax-cli/src/cmd/tax.rs` — `TaxYearReport` advisory field(s) (`:238-247`, arch M-3, P3/P6 surface).
+- `crates/btctax-cli/src/main.rs` — `bulk_void_payload_summary` readable arm (`:2085-2133`, arch I-2).
+- `crates/btctax-cli/src/cmd/reconcile.rs` — allocation append sites (`:984`, `:1273`, Task 6).
+- `crates/btctax-cli/src/session.rs` — `safe_harbor_residue` (`:681-700`, arch I-3, exclude tranches).
 - `crates/btctax-tui-edit/src/edit/form.rs` — edit-ring (`:1756-1766`), `basis_source_display` (`:1770-1781`).
-- `crates/btctax-cli/src/cli.rs` + `src/main.rs` + a new `src/cmd/tranche.rs` — the `declare-tranche` verb.
+- `crates/btctax-tui-edit/src/edit/persist.rs` — TUI allocation append sites (`:1031`, `:1114`, Task 6).
+- `crates/btctax-tui/src/tabs/tags.rs` — `basis_source_rank` (`:29-40`) + `basis_source_tag` (`:54-65`, arch M-1).
+- `crates/btctax-cli/src/cli.rs` + `src/main.rs` + a new `src/cmd/tranche.rs` (registered in `src/cmd/mod.rs`) — the `declare-tranche` verb.
 - `crates/btctax-tui/src/tabs/tax.rs` (`:40`) — surface P6 nudge + P7 disclosure marker.
 
 ---
@@ -86,9 +94,17 @@ Everything else depends on Phase 1. Land it fully (Tasks 1–7) before Phase 2.
 ### Task 1: Schema + exhaustive-`match` sweep (compile-forced)
 
 **Files:**
-- Modify: `crates/btctax-core/src/event.rs` — add the `BasisSource` variant + the `DeclareTranche` payload.
-- Modify (compile-forced): `crates/btctax-core/src/forms.rs:265-275`, `crates/btctax-cli/src/render.rs:43-57`,
-  `crates/btctax-tui-edit/src/edit/form.rs:1756-1766` and `:1770-1781`.
+- Modify: `crates/btctax-core/src/event.rs` — add the `BasisSource` variant + the `DeclareTranche` payload;
+  update the `is_imported` doc (N-2: `DeclareTranche` folds as a primary movement, so "imported are the only
+  ones folded as primary movements" is now false).
+- Modify (compile-forced — **6** exhaustive `BasisSource` sites, not 4): `crates/btctax-core/src/forms.rs:265-275`
+  (`how_acquired_from`), `crates/btctax-cli/src/render.rs:43-57` (`basis_source_tag`),
+  `crates/btctax-tui-edit/src/edit/form.rs:1756-1766` (edit-ring) and `:1770-1781` (`basis_source_display`),
+  `crates/btctax-tui/src/tabs/tags.rs:29-40` (`basis_source_rank`) and `:54-65` (`basis_source_tag`).
+- Modify (NOT compile-forced — a non-exhaustive `matches!`, so the compiler will NOT flag it — arch I-2):
+  `crates/btctax-core/src/void.rs:20-34` (`is_revocable_payload`) — add `EventPayload::DeclareTranche(_)`.
+  Cosmetic sibling: `crates/btctax-cli/src/main.rs:2085-2133` (`bulk_void_payload_summary`, a `Debug` wildcard
+  today) — add a readable arm.
 - Test: `crates/btctax-core/tests/kat_tranche.rs` (new).
 
 **Interfaces:**
@@ -128,7 +144,8 @@ pub struct DeclareTranche {
 // event.rs EventPayload (:298-331), add a variant:
     DeclareTranche(DeclareTranche),
 ```
-Then the four sweep sites (all are exhaustive over the 9 `BasisSource`):
+Then the SIX exhaustive `BasisSource` sites (the compiler flags each; a 7th, `is_revocable_payload`, is
+`matches!` and will NOT be flagged — add it too):
 ```rust
 // forms.rs how_acquired_from (:265-275): add
     BasisSource::EstimatedConservative => Form8283HowAcquired::Review,
@@ -139,11 +156,20 @@ Then the four sweep sites (all are exhaustive over the 9 `BasisSource`):
     BasisSource::EstimatedConservative => BasisSource::ExchangeProvided,
 // tui-edit/edit/form.rs basis_source_display (:1770-1781): add
     BasisSource::EstimatedConservative => "estimated-conservative",
+// btctax-tui/src/tabs/tags.rs basis_source_rank (:29-40): rank it with the other origin-lost sources
+    BasisSource::EstimatedConservative => <rank alongside ReconstructedPerWallet>,
+// btctax-tui/src/tabs/tags.rs basis_source_tag (:54-65): add
+    BasisSource::EstimatedConservative => "estimated-conservative",
+// btctax-core/src/void.rs is_revocable_payload (:20-34) — NON-exhaustive matches!, NOT compiler-flagged.
+//   Without this, voidable_decisions excludes tranches → bulk-void + both TUI void flows treat a tranche
+//   as permanent, contradicting D-1a-d while the engine-side void still works (Task 3's KAT would pass
+//   over the gap). Add DeclareTranche to the revocable list:
+    | EventPayload::DeclareTranche(_)
+// btctax-cli/src/main.rs bulk_void_payload_summary (:2085-2133): add a readable arm (was a Debug wildcard).
 ```
-`EventPayload::DeclareTranche` is a decision, so also add it to any `is_imported`-style match as **not**
-imported (it stays out of the `:335-345` imported set — confirm the match is non-exhaustive or add the arm).
-- [ ] **Step 4: Run — expect PASS.** Also `cargo build -q -p btctax-core -p btctax-cli -p btctax-tui-edit` clean.
-- [ ] **Step 5: Commit** `feat(tranche): BasisSource::EstimatedConservative + EventPayload::DeclareTranche schema + sweep`.
+- [ ] **Step 4: Run — expect PASS.** Build ALL affected crates (M-1: the earlier line omitted `btctax-tui`,
+  giving a false local green): `cargo build -q -p btctax-core -p btctax-cli -p btctax-tui -p btctax-tui-edit`.
+- [ ] **Step 5: Commit** `feat(tranche): BasisSource::EstimatedConservative + EventPayload::DeclareTranche schema + full sweep (6 BasisSource sites + is_revocable_payload)`.
 
 ### Task 2: Fold a `DeclareTranche` into a `$0` `EstimatedConservative` lot (D-1, D-1a, D-2)
 
@@ -191,22 +217,32 @@ fn declare_tranche_folds_to_zero_basis_estimated_conservative_lot_homed_at_windo
 - [ ] **Step 3: Implement** — three edits:
 ```rust
 // resolve.rs timeline builder (:1055-1083). Today: `_ => continue` drops all decisions.
-// Add BEFORE that continue, an explicit admit for a DeclareTranche (honoring `voided`):
-if let EventPayload::DeclareTranche(t) = applied.get(&e.id).unwrap_or(&e.payload) {
-    if voided.contains(&e.id) { continue; }               // D-1a / arch r3 N-2: a voided tranche folds nothing
-    let seq = match &e.id { EventId::Decision { seq } => *seq, _ => 0 };
+// Add BEFORE that continue, an explicit admit for a DeclareTranche. GUARD on EventId::Decision (N-4):
+// pass-1c ClassifyRaw does NO payload-type validation of `as_`, so a hand-crafted vault could map an
+// IMPORT id to a DeclareTranche payload; without the id guard it would enter here with seq semantics
+// it doesn't have.
+if let (EventId::Decision { seq }, EventPayload::DeclareTranche(t)) =
+    (&e.id, applied.get(&e.id).unwrap_or(&e.payload))
+{
+    if voided.contains(&e.id) { continue; }               // D-1a-d / arch r3 N-2: a voided tranche folds nothing
     // Effective date = window_end, DECOUPLED from creation utc (D-1a-a): build a projection utc at
-    // midnight window_end so eff.date() == window_end and pool_key/conservation bucket correctly.
-    // The persisted LedgerEvent.utc_timestamp is untouched (no back-dating).
-    let eff_utc = window_end_to_utc(t.window_end);        // helper: OffsetDateTime, midnight UTC on window_end
+    // midnight window_end so eff.date() == window_end and pool_key/conservation bucket correctly. The
+    // persisted LedgerEvent.utc_timestamp is untouched (no back-dating). Idiom precedent:
+    // `candidate.date.midnight().assume_utc()` at optimize.rs:1280-1297.
+    let eff_utc = t.window_end.midnight().assume_utc();
     timeline.push(Eff {
         id: e.id.clone(), utc: eff_utc, tz: UtcOffset::UTC,
         src_priority: u8::MAX,                            // decisions sort after same-instant imports
-        src_ref: SourceRef::new(&format!("{seq}")),       // display only; ties break numerically below
+        // ★ D-1a-b / arch r1 I-1: a CONSTANT src_ref, NOT format!("{seq}"). sort_canonical compares
+        //   src_ref (a String-Ord) at key 3, BEFORE any later key — a per-seq string ("2" vs "10")
+        //   would decide the tie lexicographically and misorder seq 10 before seq 2 (the exact r3 N-4
+        //   failure the SPEC ★-forbids). A constant lets ties fall through to the numeric id key below.
+        src_ref: SourceRef::new(""),
         wallet: Some(t.wallet.clone()),
         op: build_op(&e.id, applied.get(&e.id).unwrap_or(&e.payload), /* … */),
         pseudo: false,                                    // D-5
     });
+    let _ = seq; // (seq is the tie-break key, applied in sort_canonical via EventId::Ord)
     continue;
 }
 
@@ -216,24 +252,33 @@ EventPayload::DeclareTranche(t) => Op::Acquire(Acquire {
     basis_source: BasisSource::EstimatedConservative,
 }),
 
-// resolve.rs sort_canonical (:1376-1382): add a final NUMERIC decision-seq tie-break (D-1a-b, arch r3 N-4)
-// so two same-window tranches are deterministic (they share utc/src_priority/src_ref):
+// resolve.rs sort_canonical (:1376-1382): add a final tie-break on the EventId itself. EventId derives
+// Ord and Decision{seq} compares `seq` as u64 NUMERICALLY (identity.rs) — so two same-window tranches
+// (identical utc/src_priority/empty src_ref) order by seq: 2 before 10 (D-1a-b, arch r1 I-1/r3 N-4).
 timeline.sort_by(|a, b| a.utc.cmp(&b.utc)
     .then(a.src_priority.cmp(&b.src_priority))
     .then(a.src_ref.cmp(&b.src_ref))
-    .then(decision_seq(&a.id).cmp(&decision_seq(&b.id))));  // fn decision_seq(id)->u64: Decision{seq}=>seq else 0
+    .then(a.id.cmp(&b.id)));   // Decision{seq}: numeric u64 compare; identical ids never both appear
 ```
-Add the `window_end_to_utc` + `decision_seq` helpers privately in `resolve.rs`.
+Add the `t.window_end.midnight().assume_utc()` inline (no helper needed).
 - [ ] **Step 4: Run — expect PASS.**
-- [ ] **Step 5: Mutation** — in `build_op`, change `usd_cost: Usd::ZERO` to a non-zero, and separately delete the
-  timeline-admit block: both must turn the test RED. Restore.
-- [ ] **Step 6: Commit** `feat(tranche): fold DeclareTranche via Op::Acquire — $0 EstimatedConservative lot at window_end`.
+- [ ] **Step 5: Mutation** — (a) change `usd_cost: Usd::ZERO` to non-zero → the lot test RED; (b) delete the
+  timeline-admit block → RED; (c) revert `src_ref: SourceRef::new("")` back to `format!("{seq}")` → the
+  Task-3 same-window ordering KAT (seqs 2 vs 10) must go RED, proving the constant-src_ref fix is load-bearing.
+  Restore each.
+- [ ] **Step 6: Commit** `feat(tranche): fold DeclareTranche via Op::Acquire — $0 EstimatedConservative lot at window_end (numeric-seq ordering, id-guarded admit)`.
 
-### Task 3: A `DeclareTranche` yields an `Op`, never `Op::Skip`; a VOIDED tranche folds nothing (D-1a-c, D-1a-d)
+> **Test-sketch API note (N-1):** the sketches use illustrative helpers. Real APIs: iterate `state.lots`
+> (not `st.all_lots()`); disposals are `state.disposals` filtered by year (not `st.disposals_in(y)`);
+> `how_acquired_from` is private → add a `pub use` in `forms`/`lib.rs` (already flagged). Mirror
+> `crates/btctax-core/tests/kat_forms.rs` for the `project(events, prices, config)` fixture setup.
 
-**Files:** Modify `resolve.rs` (done in Task 2 — this task adds the guard KATs). Test: `kat_tranche.rs`.
+### Task 3: `DeclareTranche` yields an `Op` never `Skip`; VOIDED folds nothing; is voidable on the product surfaces; same-window ordering (D-1a-c, D-1a-d, D-1a-b)
 
-- [ ] **Step 1: Failing tests** (two):
+**Files:** Modify `resolve.rs` (done in Task 2). Test: `kat_tranche.rs`. **Depends on** Task 1's
+`is_revocable_payload` arm (arch I-2) for the voidable KAT.
+
+- [ ] **Step 1: Failing tests** (four):
 ```rust
 #[test]
 fn declare_tranche_never_yields_op_skip() {
@@ -247,13 +292,40 @@ fn voided_declare_tranche_folds_no_lot() {
     let t  = decision_event(1, EventPayload::DeclareTranche(sample_tranche_in(&w)));
     let v  = decision_event(2, EventPayload::VoidDecisionEvent(VoidDecisionEvent { target_event_id: EventId::Decision { seq: 1 } }));
     let st = project(&[t, v], &prices(), &config());
-    assert!(st.all_lots().find(|l| l.wallet == w).is_none(), "a voided tranche folds nothing (D-1a-d)");
+    assert!(st.lots.iter().find(|l| l.wallet == w).is_none(), "a voided tranche folds nothing (D-1a-d)");
+}
+#[test]
+fn a_tranche_is_listed_as_a_voidable_decision_on_the_product_surface() {
+    // arch I-2: voidable_decisions is the SINGLE source of truth for bulk-void + both TUI void flows.
+    // Without the is_revocable_payload arm (Task 1), the engine-side void works but the product treats a
+    // tranche as PERMANENT — contradicting D-1a-d. Pin the product surface, not only the engine.
+    let events = vec![decision_event(1, EventPayload::DeclareTranche(sample_tranche()))];
+    let voidable = btctax_core::void::voidable_decisions(&events /* + the resolve inputs it needs */);
+    assert!(voidable.iter().any(|id| *id == EventId::Decision { seq: 1 }), "a tranche is sweep-voidable (D-1a-d)");
+}
+#[test]
+fn two_same_window_tranches_fold_in_seq_order_2_before_10() {
+    // ★ D-1a-b / arch r1 I-1 + N-3: two legitimately-additive same-window tranches (seqs 2 and 10) must
+    // fold deterministically in NUMERIC seq order — the constant-src_ref + EventId::Ord tie-break, NOT a
+    // lexicographic src_ref string (which would put 10 before 2).
+    let w = exchange_wallet();
+    let a = decision_event(2,  EventPayload::DeclareTranche(sample_tranche_in(&w)));  // same window
+    let b = decision_event(10, EventPayload::DeclareTranche(sample_tranche_in(&w)));  // same window
+    let st = project(&[b, a], &prices(), &config());  // note: pushed out of seq order
+    let lots: Vec<_> = st.lots.iter().filter(|l| l.wallet == w).collect();
+    assert_eq!(lots.len(), 2, "two same-window tranches are additive, not a duplicate-conflict (D-1a-d)");
+    // The origin ids carry the seq; the earlier-seq lot must sort first in the canonical timeline.
+    assert_eq!(lots[0].lot_id.origin_event_id, EventId::Decision { seq: 2 });
+    assert_eq!(lots[1].lot_id.origin_event_id, EventId::Decision { seq: 10 });
 }
 ```
-(If `build_op` is private, expose a `#[cfg(test)] pub(crate)` shim or assert via a projected lot instead.)
-- [ ] **Step 2–4:** the Task-2 implementation already satisfies both (the admit checks `voided`); run to confirm GREEN. If `voided.contains` was omitted, add it (RED→GREEN).
-- [ ] **Step 5: Mutation** — remove the `if voided.contains(&e.id) { continue; }` guard → `voided_declare_tranche_folds_no_lot` RED. Restore.
-- [ ] **Step 6: Commit** `test(tranche): pin no-Skip + voided-folds-nothing guards`.
+(If `build_op`/`voidable_decisions` need extra resolve inputs, mirror the existing `void.rs` tests, e.g.
+`crates/btctax-core/tests/voidable.rs`.)
+- [ ] **Step 2–4:** Task 1 + Task 2 satisfy all four; run to confirm GREEN. If any is RED, that finding wasn't folded — fix it.
+- [ ] **Step 5: Mutation** — (a) remove the `voided.contains` guard → `voided_…` RED; (b) revert the Task-1
+  `is_revocable_payload` arm → `…voidable_decision…` RED; (c) revert Task-2's constant src_ref → the seq-order
+  KAT RED. Restore each.
+- [ ] **Step 6: Commit** `test(tranche): pin no-Skip + voided-folds-nothing + product-voidable + same-window seq order`.
 
 ### Task 4: The `EstimatedConservative` tag survives BOTH overwrite sites (D-8, term-derived)
 
@@ -272,7 +344,8 @@ fn tranche_tag_survives_2025_path_a_seed_and_reaches_a_2025_disposal_leg() {
         sat: 100_000_000, wallet: w.clone(), window_start: date!(2015-01-01), window_end: date!(2015-12-31) }));
     let sell = import_sell(&w, date!(2025-06-01), 100_000_000, usd(60_000)); // > 1yr after window_end
     let st = project(&[t, sell], &prices(), &config_hifo());
-    let leg = st.disposals_in(2025).next().unwrap().legs.iter().find(|l| l.wallet == w).unwrap();
+    let leg = st.disposals.iter().filter(|d| d.disposed_at.year() == 2025)
+        .flat_map(|d| &d.legs).find(|l| l.wallet == w).unwrap();
     assert_eq!(leg.basis_source, BasisSource::EstimatedConservative, "tag survives Path-A seed (D-8)");
     assert_eq!(leg.term, Term::LongTerm, "term DERIVED from window_end (G-4), not assumed");
     // D-6 (inherited from the merged box fix — NOT reimplemented here): the tranche disposal flows to a
@@ -281,6 +354,9 @@ fn tranche_tag_survives_2025_path_a_seed_and_reaches_a_2025_disposal_leg() {
     let row = rows.iter().find(|r| r.cost_basis == Usd::ZERO).expect("the $0 tranche row");
     assert_eq!(row.part, Form8949Part::LongTerm, "LT → Part II (derived, D-6/G-4)");
     assert_eq!(row.box_, Form8949Box::L, "TY2025 no-1099-DA LT → Box L (inherited)");
+    // N-1 (tax): an Exchange-sold tranche row flags box_needs_review — the broker may have issued a
+    // 1099-DA, in which case the filer reclassifies to K/H by hand (existing behavior; cheap pin).
+    assert!(row.box_needs_review, "exchange-sold tranche → box_needs_review (reclass to K/H if 1099-DA)");
 }
 
 #[test]
@@ -295,6 +371,28 @@ fn a_short_term_tranche_disposal_is_box_i_never_hard_coded_long_term() {
     let row = btctax_core::form_8949(&st, 2025).into_iter().find(|r| r.cost_basis == Usd::ZERO).unwrap();
     assert_eq!(row.part, Form8949Part::ShortTerm);
     assert_eq!(row.box_, Form8949Box::I, "TY2025 no-1099-DA ST → Box I");
+}
+
+#[test]
+fn holding_period_boundary_is_iff_exactly_one_year() {
+    // tax M-1: pin SPEC P1's "LT IFF window_end > 1yr before disposal" END-TO-END through the tranche
+    // wiring, at the exact boundary — not only in conventions' unit test. is_long_term is strict `>`
+    // (conventions.rs), so a sale EXACTLY one year after window_end is SHORT-term (§1222 / Pub 544
+    // day-after convention); one day later is LONG-term.
+    let w = exchange_wallet();
+    let window_end = date!(2025-03-01);
+    let t = decision_event(1, EventPayload::DeclareTranche(DeclareTranche {
+        sat: 100_000_000, wallet: w.clone(), window_start: date!(2025-03-01), window_end }));
+    // exactly +1yr → ST / Box I
+    let st_exact = project(&[t.clone(), import_sell(&w, date!(2026-03-01), 100_000_000, usd(60_000))],
+                           &prices(), &config_hifo());
+    assert_eq!(st_exact.disposals.iter().flat_map(|d| &d.legs).find(|l| l.wallet == w).unwrap().term,
+               Term::ShortTerm, "exactly one year after window_end is SHORT-term (strict >)");
+    // +1yr+1day → LT / Box L
+    let st_plus1 = project(&[t, import_sell(&w, date!(2026-03-02), 100_000_000, usd(60_000))],
+                           &prices(), &config_hifo());
+    assert_eq!(st_plus1.disposals.iter().flat_map(|d| &d.legs).find(|l| l.wallet == w).unwrap().term,
+               Term::LongTerm, "one day past a year is LONG-term");
 }
 #[test]
 fn tranche_tag_survives_self_transfer_relocation() {
@@ -354,7 +452,7 @@ fn allocation_that_would_conserve_over_a_tranche_residue_is_kept_inert_and_tag_s
     assert!(st.blockers.iter().any(|b| matches!(b.kind, BlockerKind::SafeHarborUnconservable)),
             "the allocation is denied effectiveness by a Hard blocker");
     // and the tranche lot is still $0 EstimatedConservative (Path A, not discarded by Path B):
-    let lot = st.all_lots().find(|l| l.basis_source == BasisSource::EstimatedConservative)
+    let lot = st.lots.iter().find(|l| l.basis_source == BasisSource::EstimatedConservative)
         .expect("tranche survives via Path A");
     assert!(lot.remaining_sat > 0);
 }
@@ -381,30 +479,53 @@ pub struct UniversalSnapshot {
 - [ ] **Step 5: Mutation** — change `> 0` to `> Sat::MAX` (never fires) → RED. Restore.
 - [ ] **Step 6: Commit** `feat(tranche): projection-time backstop — deny Path-B effectiveness over a live tranche residue (D-8)`.
 
-### Task 6: The friendly record-time refusal — tranche ⇄ in-force allocation, BOTH directions (D-8 UX layer)
+### Task 6: The friendly record-time refusal — tranche ⇄ in-force allocation (D-8 UX layer)
 
-The backstop (Task 5) is the guarantee; this is the early, friendly error. Refuse recording a
-`DeclareTranche` when ANY in-force (non-voided) `SafeHarborAllocation` exists — **effective OR inert** —
-and symmetrically refuse recording a `SafeHarborAllocation` when a pre-2025 tranche exists.
+The backstop (Task 5) is the guarantee; this is the early, friendly error. **Scoping (tax r1 I-2):** the
+hazard (Path-B discard) touches ONLY the pre-2025 Universal residue — a tranche with
+`window_end ≥ TRANSITION_DATE (2025-01-01)` folds straight into a per-wallet pool with zero Rev-Proc-2024-28
+interaction. So:
+- **Tranche side:** refuse recording a `DeclareTranche` with `window_end < TRANSITION_DATE` when ANY
+  in-force (non-voided) `SafeHarborAllocation` exists — **effective OR inert** (arch r2 New-3: inert can be
+  flipped effective by the tranche). A `window_end ≥ 2025` tranche records CLEANLY even alongside an
+  effective allocation (else we permanently foreclose P7's MANDATORY disclosure for the mixed-records filer
+  with post-2025 undocumented coins — tax r1 I-2).
+- **Allocation side:** refuse recording a `SafeHarborAllocation` when a **pre-2025** tranche exists.
 
-**Files:**
-- Create: `crates/btctax-cli/src/cmd/tranche.rs` (the record path validates before appending).
-- Modify: wherever `EventPayload::SafeHarborAllocation` is appended in `btctax-cli` (grep for its
-  constructor) — add the symmetric refusal.
-- Test: `crates/btctax-cli/tests/declare_tranche_cli.rs`.
+**Files (arch r1 I-3 — all FOUR append sites, CLI *and* TUI, not just the CLI):**
+- Create: `crates/btctax-cli/src/cmd/tranche.rs` (the tranche record path validates before appending) +
+  register in `crates/btctax-cli/src/cmd/mod.rs`.
+- Modify the allocation append sites — add the symmetric refusal at each (or route both CLI sites through
+  one `session` chokepoint and both TUI sites through one `persist` chokepoint):
+  `crates/btctax-cli/src/cmd/reconcile.rs:984` (CLI allocate) + `:1273` (CLI attest);
+  `crates/btctax-tui-edit/src/edit/persist.rs:1031` (TUI allocate) + `:1114` (TUI attest).
+- Modify `crates/btctax-cli/src/session.rs:681-700` (`safe_harbor_residue`): exclude `DeclareTranche`
+  decisions from the pre-2025 allocatable residue (or refuse opening the allocate flow when a tranche
+  exists). Else the allocate opener pre-populates the tranche's `$0` sats as allocatable — authoring the
+  very coexistence allocation v1 forbids (and, for a ≥2025 tranche, a lot that isn't even pre-2025 residue →
+  a guaranteed-unconservable dead-end).
+- **Do NOT edit `crates/btctax-core/src/void.rs`** (arch r1 M-5): its `effective_alloc`/`voidable_decisions`
+  must stay as-is (inert allocations must remain voidable — pinned by `tests/transition.rs:379`,
+  `tests/voidable.rs:170`). The "in-force" predicate here is a NEW record-time check defined at the guard
+  sites: payload is `SafeHarborAllocation` ∧ its id not in `voided`.
+- Test: `crates/btctax-cli/tests/declare_tranche_cli.rs` (CLI) + a TUI-persist refusal KAT.
 
 **Interfaces:**
 - The refusal message HEDGES irrevocability (tax r2 N-3): *"revisit the in-app safe-harbor allocation; if
   your filed allocation is already final, unallocated pre-2025 units are a facts-and-circumstances matter
-  for a professional."* Scope "in-force" = the `effective_alloc` predicate in `void.rs:71-88` widened to
-  include inert (not-voided, regardless of `SafeHarborTimebar`/`SafeHarborUnconservable`).
+  for a professional."*
 
-- [ ] **Step 1: Failing test** (both directions) — assert the refusal + that no event is appended.
+- [ ] **Step 1: Failing tests** — (a) pre-2025 tranche refused under an in-force allocation (CLI); (b) same
+  refused via the TUI persist path; (c) allocation refused under a pre-2025 tranche; (d) **a ≥2025-window
+  tranche records CLEANLY alongside an effective allocation** (tax r1 I-2 — the foreclosure guard); (e) each
+  refusal appends NO event; (f) `safe_harbor_residue` does not list tranche sats as allocatable.
 - [ ] **Step 2: Run — expect FAIL.**
-- [ ] **Step 3: Implement** the two record-time guards (event-scan for any in-force allocation / any pre-2025 tranche).
+- [ ] **Step 3: Implement** the record-time guards at all four append sites + the `safe_harbor_residue` exclusion.
 - [ ] **Step 4: Run — expect PASS.**
-- [ ] **Step 5: Mutation** — scope the tranche-side check to *effective-only* allocations → the inert-direction test RED (this is exactly the arch r2 New-3 bug). Restore.
-- [ ] **Step 6: Commit** `feat(tranche): record-time mutual-exclusion refusal, both directions, hedged copy (D-8)`.
+- [ ] **Step 5: Mutation** — (a) drop the `window_end < TRANSITION_DATE` scope → the ≥2025-coexists test RED
+  (over-broad refusal); (b) scope the tranche-side check to *effective-only* allocations → the inert-direction
+  test RED (arch r2 New-3); (c) guard only the CLI sites → the TUI-persist test RED. Restore each.
+- [ ] **Step 6: Commit** `feat(tranche): record-time mutual-exclusion (pre-2025-scoped, all 4 append sites + residue) (D-8)`.
 
 ### Task 7: The `declare-tranche` CLI verb + clean (non-pseudo) export (D-5)
 
@@ -415,12 +536,15 @@ and symmetrically refuse recording a `SafeHarborAllocation` when a pre-2025 tran
 
 - [ ] **Step 1: Failing tests** — (a) the verb appends a `DeclareTranche` with `$0` basis and the given window/wallet;
   (b) a year with a filed tranche exports CLEAN (no `[PSEUDO]` banner / no attestation required) —
-  `pseudo_active()` stays false (D-5).
+  `pseudo_active()` stays false (D-5); (c) **input validation (tax M-3):** `--sat 0` (or negative) is
+  REFUSED with no event appended — a `sat ≤ 0` tranche would bump `stats.sigma_in` by a non-positive amount
+  (`fold.rs:596`), corrupting Σ-conservation; (d) `window_start > window_end` is REFUSED (undefined P5/P7
+  window). Warn (not refuse) on a future `window_end` (it merely strands the lot — conservative but confusing).
 - [ ] **Step 2–4:** implement the verb (mirror an existing decision-appending command, e.g. the safe-harbor
-  or classify verbs), RED→GREEN.
-- [ ] **Step 5: Mutation** — n/a for the verb wiring beyond the KATs; for the export-clean KAT, assert
-  `!report.watermarked` and no `AttestationRequired`.
-- [ ] **Step 6: Commit** `feat(tranche): declare-tranche CLI verb + clean non-pseudo export (D-5)`.
+  or classify verbs) with the `sat > 0` / `window_start ≤ window_end` record-time guards, RED→GREEN.
+- [ ] **Step 5: Mutation** — remove the `sat > 0` guard → the `--sat 0` refusal test RED; for the export-clean
+  KAT, assert `!report.watermarked` and no `AttestationRequired`. Restore.
+- [ ] **Step 6: Commit** `feat(tranche): declare-tranche CLI verb (validated) + clean non-pseudo export (D-5)`.
 
 - [ ] **Phase 1 gate:** `make check` + all CI-only jobs green; then dispatch an independent Fable review
   (tax + architecture lenses) of Phase 1 to 0C/0I before starting Phase 2. Persist verbatim; fold; re-review.
@@ -435,13 +559,21 @@ No new matching code. HIFO's `hifo_cmp` already sorts `usd_basis == 0` lots LAST
 
 **Files:** Test only — `crates/btctax-core/tests/kat_conservative.rs` (new).
 
-- [ ] **Step 1: Failing tests** (two):
+> **Method-staging note (arch M-2):** `config.pre2025_method` governs ONLY pre-2025-dated disposals;
+> post-2025 method comes from `MethodElection` records and defaults to HIFO (`fold.rs:33-45`). So a
+> `config_fifo()` fixture cannot make a 2025+ sale FIFO. Stage BOTH tests in the **pre-2025 Universal pool**
+> (tranche `window_end` + documented buy + sale all pre-2025, method = `config.pre2025_method`), OR use a
+> forward `MethodElection(Fifo)` for a post-2025 sale. Pin the year explicitly so the fixtures aren't a
+> confusing RED.
+
+- [ ] **Step 1: Failing tests** (two) — staged in the pre-2025 pool per the note:
 ```rust
 #[test]
 fn under_hifo_a_sale_draws_the_documented_lot_before_the_zero_basis_tranche() {
-    // Same wallet: one documented lot (basis > 0) + one tranche ($0). A partial sale under HIFO consumes
-    // the documented lot first (tranche $0 sorts LAST) → higher basis used first (P2).
-    let st = project(&[documented_buy(&w), tranche(&w), partial_sell(&w /* < total */)], &prices(), &config_hifo());
+    // Same wallet: one documented lot (basis > 0) + one tranche ($0), all pre-2025. A partial sale under
+    // HIFO consumes the documented lot first (tranche $0 sorts LAST) → higher basis used first (P2).
+    let st = project(&[documented_buy(&w), tranche(&w), partial_sell_pre2025(&w /* < total */)],
+                     &prices(), &config_hifo_pre2025());
     let leg = only_disposal_leg(&st);
     assert_ne!(leg.basis_source, BasisSource::EstimatedConservative, "HIFO draws the documented lot first");
 }
@@ -450,7 +582,8 @@ fn under_fifo_the_old_zero_basis_tranche_is_consumed_first_inversion() {
     // Pin D-9: under FIFO an OLD $0 tranche (early window_end) is consumed FIRST — a gain-maximizing
     // inversion. Correct application of the in-force method (never an understatement), and the reason
     // P3's method-inversion advisory exists.
-    let st = project(&[old_tranche(&w), later_documented_buy(&w), partial_sell(&w)], &prices(), &config_fifo());
+    let st = project(&[old_tranche(&w), later_documented_buy(&w), partial_sell_pre2025(&w)],
+                     &prices(), &config_fifo_pre2025());
     let leg = only_disposal_leg(&st);
     assert_eq!(leg.basis_source, BasisSource::EstimatedConservative, "FIFO consumes the old tranche first");
 }
@@ -470,23 +603,30 @@ fn under_fifo_the_old_zero_basis_tranche_is_consumed_first_inversion() {
 
 **Files:**
 - Create/extend: `crates/btctax-core/src/conservative.rs` — advisory builders.
-- Surface: wherever disposal advisories are already rendered (reuse the existing advisory channel the
-  report/TUI use — grep for the advisory `Vec` on the tax outcome).
-- Test: `kat_conservative.rs`.
+- **Surface (arch M-3 — the "advisory Vec on the tax outcome" does NOT exist):** `TaxOutcome` is just
+  `Computed | NotComputable` (`tax/types.rs:136-139`); report advisories are SCALAR `Option<String>` fields
+  on `TaxYearReport` (`crates/btctax-cli/src/cmd/tax.rs:238-247`: `advisory`, `gift_advisory`, appraisal),
+  rendered via `render_tax_outcome`'s single `advisory` param (`render.rs:1204`). Add new `Option<String>`
+  field(s) on `TaxYearReport` following the `gift_advisory` precedent (populate in `report_tax_year`, render
+  in `render_tax_outcome`), and mirror into the TUI Tax tab. **A surfacing KAT is REQUIRED** — as sketched,
+  tests that call only the `Option<String>` builder would pass even if P3's user-visible half were dropped.
+- Test: `kat_conservative.rs` (builders) + a CLI `report --tax-year` KAT (the advisory reaches stdout).
 
 **Interfaces:**
 - Produces: `fn tranche_dip_advisory(disposal) -> Option<String>` (Some iff a matched leg is
-  `EstimatedConservative`; names the window, `$0` basis, resulting gain; **provenance-neutral** — never
-  asserts "purchases"). `fn method_inversion_advisory(state, wallet, method) -> Option<String>` (Some iff
-  a non-HIFO in-force method would consume a tranche lot while a documented lot remains in the same wallet;
-  recommends a HIFO election).
+  `EstimatedConservative`; names the window, the basis **AS FILED** — `$0` in the fee-free case, or the
+  documented fee-sat basis when the TP8(c) carry lands on the tranche leg (tax r1 I-1) — and the resulting
+  gain; **provenance-neutral** — never asserts "purchases"). `fn method_inversion_advisory(state, wallet,
+  method) -> Option<String>` (Some iff a non-HIFO in-force method would consume a tranche lot while a
+  documented lot remains in the same wallet; recommends a HIFO election).
 
 - [ ] **Step 1: Failing tests** — dip advisory present iff a tranche leg is consumed; inversion advisory present
-  iff a non-HIFO method consumes a tranche while a documented lot remains; both absent otherwise; assert the
-  dip text contains no "purchase"/"bought" (provenance-neutral, tax min-8c).
-- [ ] **Step 2–4:** implement, RED→GREEN.
-- [ ] **Step 5: Mutation** — invert each `Option` guard → RED. Restore.
-- [ ] **Step 6: Commit** `feat(tranche): P3 dip + method-inversion advisory (D-9), provenance-neutral`.
+  iff a non-HIFO method consumes a tranche while a documented lot remains; both absent otherwise; the dip text
+  contains no "purchase"/"bought" (provenance-neutral, tax min-8c); **the advisory reaches `report --tax-year`
+  stdout** (surfacing KAT); and the fee-carry case states the basis **as filed**, not "$0" (tax r1 I-1).
+- [ ] **Step 2–4:** implement the builders + the `TaxYearReport` field + rendering, RED→GREEN.
+- [ ] **Step 5: Mutation** — invert each `Option` guard → RED; drop the report-field wiring → the surfacing KAT RED. Restore.
+- [ ] **Step 6: Commit** `feat(tranche): P3 dip + method-inversion advisory (D-9), provenance-neutral, basis-as-filed, surfaced`.
 
 ---
 
@@ -510,14 +650,17 @@ new production code beyond wiring the warning into the tranche/advisory path. Te
 
 **Files:** Extend `crates/btctax-core/src/conservative.rs`. Test: `kat_conservative.rs`.
 
-**Interfaces:**
-- Produces: `pub fn window_reference(prices: &dyn PriceProvider, start: TaxDate, end: TaxDate) -> Option<Usd>`
-  — the MIN **daily close** over `[start, end]` from the bundled dataset. **NOT a true floor** (intraday lows
-  can be lower — tax I-3); caveated in the doc + P6 copy. Partial overlap → min over the covered part **with a
-  caveat**; no overlap → `None`.
+**Interfaces (arch M-6 — the return type must CARRY the caveat, not just doc it):**
+- Produces: `pub fn window_reference(prices: &dyn PriceProvider, start: TaxDate, end: TaxDate) ->
+  Option<WindowRef>` where `pub struct WindowRef { pub min: Usd, pub coverage: Coverage }` and
+  `pub enum Coverage { Full, Partial }`. The MIN **daily close** over `[start, end]` from the bundled dataset
+  (`PriceProvider` is `usd_per_btc(date)` — `price.rs:5-8` — so iterate the days). **NOT a true floor**
+  (intraday lows can be lower — tax I-3). Partial overlap → `min` over the covered part + `Coverage::Partial`
+  (which P6 MUST surface in user-visible copy — tax r1 N-3, since a covered-part min can EXCEED the true
+  window min, inflating "~$X"); no overlap → `None`.
 
-- [ ] **Step 1: Failing tests** — min-close over a range; partial-overlap returns the covered min (flagged);
-  out-of-range → `None`.
+- [ ] **Step 1: Failing tests** — min-close over a range (`Coverage::Full`); partial-overlap returns the
+  covered min + `Coverage::Partial`; out-of-range → `None`.
 - [ ] **Step 2–4:** implement over the `PriceProvider`, RED→GREEN.
 - [ ] **Step 5: Mutation** — change `min` to `max`, and the empty-overlap `None` to `Some(0)` → RED. Restore.
 - [ ] **Step 6: Commit** `feat(tranche): P5 window_reference min-daily-close engine (informational, never filed)`.
@@ -529,25 +672,38 @@ new production code beyond wiring the warning into the tranche/advisory path. Te
 ### Task 12: `overpayment_delta` + surface it in `report --tax-year` and the TUI Tax tab
 
 **Files:**
-- Extend `crates/btctax-core/src/conservative.rs` — the delta computation (reuses the `whatif.rs` /
-  `optimize::synthetic_state` clone-fold-discard seam, `optimize.rs:1263-1301`).
-- Surface: `crates/btctax-cli/src/render.rs` (`render_tax_outcome` `:1204-1209`, below the tranche figures)
-  + `crates/btctax-tui/src/tabs/tax.rs` (`:40`).
+- Extend `crates/btctax-core/src/conservative.rs` — the delta computation. **Mechanism (arch M-4 — the cited
+  seam is Dispose-INJECTION, not basis-replacement):** `optimize::synthetic_state` (`optimize.rs:1264-1301`)
+  appends a synthetic `Op::Dispose`; computing `tax(window-reference)` instead requires re-folding with the
+  tranche's `Op::Acquire.usd_cost` REPLACED by the reference. Add a new clone-fold-discard variant following
+  the same pattern: `resolve(events, …)` → swap the tranche Eff's `op` (`Acquire.usd_cost = reference`) →
+  `fold` → `compute_tax_year`. It therefore needs `events + prices + config` (NOT a folded `LedgerState`,
+  from which no re-fold is possible).
+- Surface: `crates/btctax-cli/src/render.rs` (`render_tax_outcome` `:1204`, via the Task-9 `TaxYearReport`
+  advisory field) + `crates/btctax-tui/src/tabs/tax.rs` (`:40`).
 - Test: `kat_conservative.rs` + a CLI KAT.
 
-**Interfaces:**
-- Produces: `fn overpayment_delta(state, year, profile, tables, reference: Usd) -> Usd` = `tax($0) −
-  tax(window-reference)` for this year's consumed tranche legs; `$0` when the reference is `$0`/absent. Copy:
-  *"reconstructing this <window> tranche and importing the records could save ~$X — at the cost of a
-  documented basis an examiner can question."* For an **inherited** tranche, additionally note §1014
-  date-of-death FMV reconstruction (tax min-8a). Year-scope = tranche legs consumed in the report's year,
-  plus a one-line note if undisposed tranche sats remain. **Nothing `>$0` is filed** (D-7).
+**Interfaces (arch M-4 signature corrected; tax r1 M-4 / arch M-7 copy):**
+- Produces: `fn overpayment_delta(events, prices, config, year, profile, tables, refs: &[(TrancheId, Usd)])
+  -> Usd` = Σ over this year's consumed tranche legs of `tax($0) − tax(reference)`, using the **per-tranche**
+  reference (a year consuming legs from multiple differently-windowed tranches must not quote one wrong
+  "~$X"); `$0` when references are `$0`/absent. Copy: *"reconstructing this <window> tranche and importing
+  the records could save ~$X — at the cost of a documented basis an examiner can question."* The §1014 note
+  ships **unconditional and provenance-neutral** (tax r1 M-4 / arch M-7 — `DeclareTranche` carries NO
+  provenance field, and adding one would undercut min-8c): *"if these coins were inherited, basis is
+  reconstructable by law from date-of-death FMV — no purchase records needed"* (§1014(a); §1223(9) automatic
+  LT). When `WindowRef::coverage == Partial`, the copy carries the caveat (tax r1 N-3). Year-scope = tranche
+  legs consumed in the report's year, plus a one-line note if undisposed tranche sats remain. **Nothing
+  `>$0` is filed** (D-7).
 
-- [ ] **Step 1: Failing tests** — delta = `tax($0) − tax(reference)` for a fixed profile; `$0` when reference
-  absent; nudge present iff a filed `$0` tranche has a non-zero recoverable delta this year.
-- [ ] **Step 2–4:** implement via the what-if seam; render below the tranche figures + in the TUI Tax tab. RED→GREEN.
-- [ ] **Step 5: Mutation** — swap the subtraction operands (`reference − $0`) → sign flips, RED. Restore.
-- [ ] **Step 6: Commit** `feat(tranche): P6 overpayment-delta nudge in report + TUI Tax tab (G-3, never filed)`.
+- [ ] **Step 1: Failing tests** — delta = Σ `tax($0) − tax(reference)` for a fixed profile; `$0` when
+  references absent; a **multi-window** year sums per-tranche deltas (not a single reference); nudge present
+  iff a filed `$0` tranche has a non-zero recoverable delta this year; the §1014 line is present + provenance-
+  neutral; the partial-coverage caveat surfaces.
+- [ ] **Step 2–4:** implement the basis-replacement what-if variant; render via the Task-9 advisory field + TUI. RED→GREEN.
+- [ ] **Step 5: Mutation** — swap the subtraction operands (`reference − $0`) → sign flips, RED; feed one
+  reference to a two-window year → the multi-window test RED. Restore.
+- [ ] **Step 6: Commit** `feat(tranche): P6 per-tranche overpayment-delta nudge (basis-replacement what-if), surfaced (G-3, never filed)`.
 
 ---
 
@@ -563,15 +719,20 @@ new production code beyond wiring the warning into the tranche/advisory path. Te
 
 **Interfaces:**
 - Produces: `fn basis_methodology(state, year) -> Option<String>` — Some iff a filed tranche exists; enumerates
-  each tranche's window + `$0` position + the "records unreconstructable → conservative" rationale,
-  **provenance-neutral** and **term-correct** (states LT/ST as computed — NEVER hard-codes "long-term", G-4).
+  each tranche's window + the position **AS FILED** (`$0`, or the documented fee-sat basis when the TP8(c)
+  carry lands on the tranche leg — tax r1 I-1; do NOT unconditionally say "$0") + the "records
+  unreconstructable → conservative" rationale, **provenance-neutral** (never "purchases"/"bought" — tax
+  min-8c) and **term-correct** (states LT/ST as computed — NEVER hard-codes "long-term", G-4).
 
 - [ ] **Step 1: Failing tests** — present iff a filed tranche exists; enumerates each tranche; a filed-tranche
-  year WITHOUT it is a hard gap (assert presence); the text contains no hard-coded "long-term".
+  year WITHOUT it is a hard gap (assert presence); **the text is provenance-neutral** (contains no
+  "purchase"/"bought" — tax r1 M-2); and, using a **short-term-held** fixture tranche, the text contains no
+  hard-coded "long-term" (an ST fixture is REQUIRED for the mutation to discriminate — a legitimately-LT
+  fixture would contain "long-term" in the honest term-correct text, tax r1 M-2).
 - [ ] **Step 2–4:** implement + wire the export write + TUI marker. RED→GREEN.
-- [ ] **Step 5: Mutation** — hard-code "long-term" in the builder → the no-hard-LT test RED; make the builder
-  always return `None` → the presence test RED. Restore.
-- [ ] **Step 6: Commit** `feat(tranche): P7 mandatory methodology disclosure (basis_methodology.txt) (D-4)`.
+- [ ] **Step 5: Mutation** — hard-code "long-term" in the builder → the no-hard-LT test (ST fixture) RED; make
+  the builder always return `None` → the presence test RED; hard-code "purchased" → the provenance test RED. Restore.
+- [ ] **Step 6: Commit** `feat(tranche): P7 mandatory methodology disclosure (basis_methodology.txt), basis-as-filed, provenance-neutral (D-4)`.
 
 ---
 
@@ -595,15 +756,49 @@ new production code beyond wiring the warning into the tranche/advisory path. Te
 
 ## Phase 9 — Invariant KAT + whole-diff review
 
-### Task 15: No-loss invariant (tax min-7)
+### Task 15: No-loss-**from-the-estimate** invariant + the two fee corners (tax min-7, amended SPEC §6 / tax r1 I-1)
 
-**Files:** Test only — `kat_conservative.rs`.
+**Files:** Test only — `kat_conservative.rs`. **The unqualified "gain ≥ 0" invariant is FALSE on reachable
+inputs** (tax r1 I-1): the engine can put a negative gain / `>$0` basis on a tranche row via documented,
+real amounts — never the estimate. The scoped invariant + both corners must be pinned so the KAT can't ship
+a false claim (and so it would actually STOP on a real understatement).
 
-- [ ] **Step 1: Test** — a `$0`-basis tranche disposal can NEVER produce a loss (`gain = proceeds − $0 ≥ 0`),
-  so no §1211/§1212/§1091 interaction from a v1 tranche. Build a disposal of a tranche at any positive
-  proceeds and assert `leg.gain >= 0`; also assert a `$0`-proceeds disposal yields exactly `0`, not a loss.
-- [ ] **Step 2: Run — expect PASS** (characterization). If it can go negative, that's a Critical — STOP.
-- [ ] **Step 3: Commit** `test(tranche): no-loss invariant for $0-basis tranche disposals (tax min-7)`.
+- [ ] **Step 1: Tests** (three):
+```rust
+#[test]
+fn fee_free_tranche_disposal_never_files_a_loss() {
+    // The invariant's true core: absent fees, gain = proceeds − $0 ≥ 0.
+    let st = project(&[tranche(&w), fee_free_sell(&w, usd(50_000))], &prices(), &config_hifo());
+    assert!(only_disposal_leg(&st).gain >= Usd::ZERO);
+    // and a $0-proceeds disposal yields exactly 0, never a loss.
+    let st0 = project(&[tranche(&w), fee_free_sell(&w, Usd::ZERO)], &prices(), &config_hifo());
+    assert_eq!(only_disposal_leg(&st0).gain, Usd::ZERO);
+}
+#[test]
+fn negative_tranche_gain_comes_only_from_documented_fees_corner_a_usd_fee() {
+    // Corner (a): fee_usd > proceeds → net = proceeds − fee_usd < 0 (fold.rs net-netting). The negative
+    // gain is attributable to the DOCUMENTED USD fee (§1001(b) reduces amount realized), NOT the $0 estimate.
+    let st = project(&[tranche(&w), sell_with_usd_fee(&w, /*proceeds*/ usd(10), /*fee_usd*/ usd(40))],
+                     &prices(), &config_hifo());
+    let leg = only_disposal_leg(&st);
+    assert!(leg.gain < Usd::ZERO, "characterize: a documented USD fee can drive the tranche leg negative");
+    assert_eq!(leg.cost_basis, Usd::ZERO, "the ESTIMATE is still $0 — the loss is the fee, not the estimate");
+}
+#[test]
+fn tp8c_fee_sat_basis_can_land_on_the_last_tranche_leg_corner_b() {
+    // Corner (b): under HIFO the $0 tranche is consumed LAST, so the TP8(c) fee-sat basis re-home lands the
+    // DOCUMENTED fee-sat basis onto the tranche leg → its filed cost basis > $0 (and gain can go negative).
+    // Real documented basis (§1011), never the estimate. Pins that P3/P7 must state basis AS FILED.
+    let st = project(&[documented_buy(&w), tranche(&w), sell_with_onchain_fee(&w)], &prices(), &config_hifo());
+    let tranche_leg = only_disposal_leg_from(&st, BasisSource::EstimatedConservative);
+    assert!(tranche_leg.cost_basis > Usd::ZERO, "documented fee-sat basis re-homed onto the tranche leg (TP8c)");
+}
+```
+- [ ] **Step 2: Run — expect PASS** (characterization of existing engine behavior). If corner (a)/(b) instead
+  showed the *estimate* driving the loss (basis ≠ $0-plus-documented-fee), that IS a Critical — STOP.
+- [ ] **Step 3: Mutation** — n/a (characterization); the three tests together are the discrimination (fee-free
+  ≥ 0; the two negatives trace to documented fees with the estimate intact).
+- [ ] **Step 4: Commit** `test(tranche): no-loss-from-the-estimate invariant + the two documented-fee corners (tax min-7, SPEC §6 amended)`.
 
 ### Task 16: Whole-diff review to green + merge
 
