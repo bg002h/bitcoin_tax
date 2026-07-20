@@ -114,6 +114,24 @@ internal-move default · store Windows world-readable CI assertion.
 
 ---
 
+## ⚠★ SHIPPED BUG — Form 8949 uses pre-2025 boxes (C/F) for TY2025 digital assets (found 2026-07-20)
+
+**Surfaced by the conservative-filing SPEC tax review; affects the RELEASED product (v0.7.0 on `main`).** The
+2025 Form 8949 added **digital-asset-specific boxes** — Part I **G** (1099-DA, basis reported) / **H**
+(1099-DA, basis not reported) / **I** (no 1099-DA); Part II **J/K/L** analogues — and the 2025 i8949 says
+expressly *"Do not use box F to report long-term digital asset transactions"* (use J/K/L; G/H/I for
+short-term). btctax's `Form8949Box` enum has only **C and F** (`crates/btctax-core/src/forms.rs:34-40`) and
+emits them for ALL digital-asset rows → **non-compliant for TY2025 filings** (the forms a user files for
+2025). **Fix (its own project, owner deferred it behind the conservative-filing SPEC 2026-07-20):**
+year-aware box selection — C/F stay correct for **pre-2025** tax years; **G–L from TY2025**, derived from
+(term, whether a 1099-DA was received + basis-reported, custody). KEEP the existing `box_needs_review`
+"never fabricate a 1099 claim" semantics (don't auto-assert a received-1099-DA from custody alone — a
+foreign/non-filing-exchange disposal marked K would fabricate a received-form claim). TDD + tax-lens review.
+The conservative-filing feature's compliant 8949 output DEPENDS on this fix. — OPEN, **high priority**.
+Verify against the 2025 i8949 primary source before implementing. — owner-scheduled security/compliance work.
+
+---
+
 ## ★ POLISH BATCH — DONE (2026-07-20; the "5 that matter + cheap hardening" from the OPEN INDEX §B/§C)
 
 Each TDD + mutation-verified (cp-backup/restore experiments, never `git checkout`):
