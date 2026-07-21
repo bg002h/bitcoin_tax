@@ -246,6 +246,27 @@ fn post2025_tranche_records_cleanly_beside_effective_allocation() {
         1,
         "the ≥2025 tranche must be appended",
     );
+
+    // (tax review r1 Minor) Non-poisoning: a ≥2025 tranche folds into a post-transition per-wallet pool,
+    // NOT the pre-2025 Universal residue, so it does NOT deny the allocation effectiveness. Assert the
+    // allocation stays EFFECTIVE (no SafeHarborUnconservable/Timebar blocker) AND the tranche coexists.
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    assert!(
+        !state.blockers.iter().any(|b| matches!(
+            b.kind,
+            btctax_core::BlockerKind::SafeHarborUnconservable
+                | btctax_core::BlockerKind::SafeHarborTimebar
+        )),
+        "a ≥2025 tranche must NOT poison the effective allocation (Path B preserved): {:?}",
+        state.blockers
+    );
+    assert!(
+        state.lots.iter().any(|l| l.basis_source
+            == btctax_core::BasisSource::EstimatedConservative
+            && l.remaining_sat == 50_000_000),
+        "the ≥2025 tranche coexists as its own EstimatedConservative lot"
+    );
 }
 
 // ── (f) safe_harbor_residue omits tranche sats as allocatable ────────────────────────────────────
@@ -435,4 +456,30 @@ fn filed_tranche_year_exports_clean() {
     let out = dir.path().join("export_out");
     cmd::admin::export_snapshot(&vault, &pp(), &out, Some(2020), None)
         .expect("a filed-tranche year must export clean with NO attestation (not pseudo, D-5)");
+}
+
+/// (review r1 Minor) The CLI `safe_harbor_attest` ATTEST-site guard is exercised: with a pre-2025
+/// tranche on file, attest refuses with the TRANCHE message — the guard fires BEFORE the "no allocation
+/// to attest" path. Without the guard this returns the "no allocation" error instead → the assertion on
+/// the tranche wording is what kills the attest-guard mutation (untested-guard discipline).
+#[test]
+fn attest_refused_under_a_pre2025_tranche() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = vault_pre2025_buy(dir.path());
+    cmd::tranche::declare_tranche(
+        &vault,
+        &pp(),
+        50_000_000,
+        tranche_wallet(),
+        date!(2018 - 01 - 01),
+        date!(2018 - 12 - 31),
+        now(),
+    )
+    .unwrap();
+
+    let err = cmd::reconcile::safe_harbor_attest(&vault, &pp(), now()).unwrap_err();
+    assert!(
+        matches!(err, CliError::Usage(_)) && err.to_string().to_lowercase().contains("tranche"),
+        "attest must refuse with the TRANCHE message (guard fires before 'no allocation'): {err}"
+    );
 }

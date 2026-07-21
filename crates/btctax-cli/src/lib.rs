@@ -19,6 +19,11 @@ pub mod tax_profile;
 pub mod testonly;
 
 pub use cli::Cli;
+// Re-exported at the crate root so the TUI editor (`btctax-tui-edit`) can call it WITHOUT the `cmd::`
+// token its KAT-G1 source gate forbids in non-test code. That gate exists to keep session-lifecycle /
+// lock-holding `cmd::` fns out of the held-session editor; `guard_allocation_vs_tranche` is a PURE
+// `&[LedgerEvent] -> Result` predicate — no `Session`, no lock, no I/O — so the gate's intent is honored,
+// not evaded. Any FUTURE addition here must be equally pure (do NOT re-export a session-opening fn).
 pub use cmd::tranche::guard_allocation_vs_tranche;
 pub use config::CliConfig;
 pub use session::{

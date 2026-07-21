@@ -18,9 +18,17 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use time::{OffsetDateTime, UtcOffset};
 
-/// Hedges irrevocability (tax r2 N-3): a filed safe-harbor allocation cannot be silently unwound here.
-const IRREVOCABILITY_HINT: &str = "revisit the in-app safe-harbor allocation; if your filed allocation \
-    is already final, unallocated pre-2025 units are a facts-and-circumstances matter for a professional";
+/// Tranche-side hedge (tax r2 N-3): the user is recording a tranche and is blocked by an allocation, so
+/// the finality caveat is about that ALLOCATION. A filed safe-harbor allocation cannot be silently unwound.
+const ALLOCATION_IS_FINAL_HINT: &str = "revisit the in-app safe-harbor allocation; if your filed \
+    allocation is already final, unallocated pre-2025 units are a facts-and-circumstances matter for a \
+    professional";
+
+/// Allocation-side hedge (tax review r1 Nit): the user is recording an allocation and is blocked by a
+/// tranche, so the finality caveat is about that TRANCHE (a filed $0 basis), not the allocation.
+const TRANCHE_IS_FINAL_HINT: &str = "void the tranche first (`reconcile void <decision-ref>`); if you \
+    have already filed the tranche's $0 basis, unallocated pre-2025 units are a facts-and-circumstances \
+    matter for a professional";
 
 /// The set of event ids targeted by any `VoidDecisionEvent` in the log — the record-time "voided" view.
 ///
@@ -67,8 +75,8 @@ pub fn guard_allocation_vs_tranche(events: &[LedgerEvent]) -> Result<(), CliErro
     if pre2025_tranche_exists(events) {
         return Err(CliError::Usage(format!(
             "refusing to record a safe-harbor allocation while a pre-2025 conservative-filing tranche \
-             ($0 EstimatedConservative) is on file — v1 makes the two mutually exclusive. Void the \
-             tranche first, or {IRREVOCABILITY_HINT}."
+             ($0 EstimatedConservative) is on file — v1 makes the two mutually exclusive. \
+             {TRANCHE_IS_FINAL_HINT}."
         )));
     }
     Ok(())
@@ -84,7 +92,7 @@ fn guard_tranche_vs_allocation(
     if window_end < TRANSITION_DATE && in_force_allocation_exists(events) {
         return Err(CliError::Usage(format!(
             "refusing to record a pre-2025 conservative-filing tranche while a safe-harbor allocation \
-             is on file — v1 makes the two mutually exclusive; {IRREVOCABILITY_HINT}."
+             is on file — v1 makes the two mutually exclusive; {ALLOCATION_IS_FINAL_HINT}."
         )));
     }
     Ok(())

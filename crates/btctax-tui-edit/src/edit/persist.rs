@@ -5092,4 +5092,66 @@ mod tests {
             "the refused allocation must NOT be appended (fail-closed)"
         );
     }
+
+    /// Conservative-filing (review r1 Minor) — the TUI ATTEST-site guard is exercised:
+    /// `persist_safe_harbor_attest` refuses BEFORE appending the void when a pre-2025 tranche is on file,
+    /// so the two-decision batch is not half-applied. Kills the TUI attest-guard mutation.
+    #[test]
+    fn persist_safe_harbor_attest_refused_under_a_pre2025_tranche() {
+        use btctax_core::event::{EventPayload, SafeHarborAllocation};
+        use btctax_core::persistence::load_all;
+        use btctax_core::{AllocMethod, LotMethod};
+        use btctax_store::Passphrase;
+        use time::OffsetDateTime;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp = "d8-attest-pass";
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp.into()), &key).unwrap();
+        btctax_cli::cmd::tranche::declare_tranche(
+            &vault,
+            &Passphrase::new(pp.into()),
+            50_000_000,
+            btctax_core::WalletId::Exchange {
+                provider: "cold".into(),
+                account: "vault".into(),
+            },
+            time::macros::date!(2018 - 01 - 01),
+            time::macros::date!(2018 - 12 - 31),
+            OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap(),
+        )
+        .unwrap();
+
+        // A dummy prior allocation — the guard fires before it (or the prior_id) is ever used.
+        let dummy = SafeHarborAllocation {
+            lots: vec![],
+            as_of_date: btctax_core::conventions::TRANSITION_DATE,
+            method: AllocMethod::ActualPosition,
+            timely_allocation_attested: false,
+            pre2025_method: LotMethod::Fifo,
+        };
+        let mut session = btctax_cli::Session::open(&vault, &Passphrase::new(pp.into())).unwrap();
+        let err = persist_safe_harbor_attest(
+            &mut session,
+            btctax_core::EventId::decision(1),
+            dummy,
+            OffsetDateTime::from_unix_timestamp(1_700_000_100).unwrap(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, btctax_cli::CliError::Usage(_))
+                && err.to_string().to_lowercase().contains("tranche"),
+            "the TUI attest path must refuse with the tranche message before the void-append: {err}"
+        );
+        // Fail-closed: neither the void nor the re-attested allocation was appended.
+        let events = load_all(session.conn()).unwrap();
+        assert!(
+            !events.iter().any(|e| matches!(
+                e.payload,
+                EventPayload::VoidDecisionEvent(_) | EventPayload::SafeHarborAllocation(_)
+            )),
+            "the refused attest must append NOTHING (no half-applied void/re-attest)"
+        );
+    }
 }

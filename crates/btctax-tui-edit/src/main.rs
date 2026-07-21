@@ -3827,6 +3827,20 @@ fn summarize_void_payload(payload: &EventPayload) -> (&'static str, String, Opti
             None,
             true,
         ),
+        // D-8: a conservative-filing tranche is revocable (is_revocable_payload), so it appears in the
+        // void flows — render it human-readably (mirrors the CLI `bulk_void_payload_summary` sibling).
+        EventPayload::DeclareTranche(t) => (
+            "DeclareTranche",
+            format!(
+                "{} sat in {} (window {}..{})",
+                t.sat,
+                btctax_cli::render::wallet_label(&t.wallet),
+                t.window_start,
+                t.window_end
+            ),
+            None,
+            false,
+        ),
         _ => ("?", "?".to_string(), None, false),
     }
 }
@@ -9942,6 +9956,31 @@ mod tests {
             !summary.contains('{'),
             "no Debug struct braces (the mid-field truncation source): {summary}"
         );
+    }
+
+    /// D-8: a `DeclareTranche` row in the TUI void flows renders a HUMAN label (sat + wallet + window),
+    /// not the `?`/`?` wildcard placeholder — the whole-surface-sweep completeness the CLI sibling
+    /// (`bulk_void_payload_summary`) already had. The user reaches this surface via the D-8 refusal's own
+    /// "Void the tranche first" hint, so an unlabeled row would be a safety-relevant selection hazard.
+    #[test]
+    fn summarize_void_payload_declare_tranche_is_human() {
+        use time::macros::date;
+        let payload = EventPayload::DeclareTranche(btctax_core::event::DeclareTranche {
+            sat: 50_000_000,
+            wallet: btctax_core::WalletId::SelfCustody {
+                label: "cold".into(),
+            },
+            window_start: date!(2018 - 01 - 01),
+            window_end: date!(2018 - 12 - 31),
+        });
+        let (tag, summary, target, sha) = summarize_void_payload(&payload);
+        assert_eq!(tag, "DeclareTranche");
+        assert!(summary.contains("50000000"), "sat amount: {summary}");
+        assert!(summary.contains("cold"), "wallet label: {summary}");
+        assert!(summary.contains("2018"), "window dates: {summary}");
+        assert!(target.is_none(), "a tranche has no target event");
+        assert!(!sha, "a tranche is not a safe-harbor allocation");
+        assert!(!summary.contains('?'), "no placeholder: {summary}");
     }
 
     // ── Helper: type characters into the focused buffer ──────────────────────

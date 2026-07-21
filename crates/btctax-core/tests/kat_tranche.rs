@@ -563,6 +563,43 @@ fn allocation_that_would_conserve_over_a_tranche_residue_is_kept_inert_and_tag_s
     assert!(lot.remaining_sat > 0);
 }
 
+/// Task 5 / SPEC D-8 (arch review r1 Minor — the SPEC's explicitly-named ordering): the backstop is
+/// projection-time and evaluated per-allocation over the FULL timeline, so it fires INDEPENDENT of
+/// decision order. This is the twin of the KAT above with the seqs SWAPPED — the allocation recorded
+/// FIRST (seq 1), the tranche declared AFTER (seq 2). r3-New-1's inert-then-declare hazard: an
+/// allocation evaluated only at its own declaration time (before the tranche existed) could go effective
+/// and never be un-effective'd by the later tranche. Projection-time re-evaluation forecloses that.
+#[test]
+fn backstop_fires_when_the_allocation_is_recorded_before_the_tranche() {
+    let w = exch();
+    let a = alloc_ev(
+        1,
+        true,
+        LotMethod::Hifo,
+        vec![alloc_lot(&w, 100_000_000, 0, date!(2015 - 12 - 31))],
+    );
+    let t = tranche_ev(
+        2,
+        &w,
+        100_000_000,
+        date!(2015 - 01 - 01),
+        date!(2015 - 12 - 31),
+    );
+    let st = project(&[a, t], &prices(), &cfg());
+    assert!(
+        st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::SafeHarborUnconservable),
+        "the backstop denies effectiveness regardless of alloc-before-tranche ordering"
+    );
+    let lot = st
+        .lots
+        .iter()
+        .find(|l| l.basis_source == BasisSource::EstimatedConservative)
+        .expect("tranche survives via Path A even when the allocation was recorded first");
+    assert!(lot.remaining_sat > 0);
+}
+
 /// Task 7 (D-5): a filed tranche is NOT pseudo — its lot is real (`pseudo=false`) and the projection's
 /// `pseudo_active()` stays false, so a tranche year exports CLEAN (no `[PSEUDO]` watermark, no
 /// attestation gate). Contrast the pseudo-reconcile path, whose synthetic defaults DO trip the gate.
