@@ -13,7 +13,7 @@
 
 use btctax_core::conservative::{promote_prior_year_advisory, Coverage, Direction};
 use btctax_core::conservative_promote::{
-    clamped_leg_basis, filed_basis_for, PromoteEntry, PromoteRefusal,
+    clamped_leg_basis, consent_terms, filed_basis_for, PromoteEntry, PromoteRefusal,
 };
 use btctax_core::event::*;
 use btctax_core::forms::form_8283;
@@ -26,7 +26,7 @@ use btctax_core::state::{BlockerKind, DisposalLeg, LedgerState, RemovalKind};
 use btctax_core::tax::return_1040::assemble_absolute;
 use btctax_core::tax::return_inputs::{Owner, ReturnInputs, ScheduleAInputs, W2};
 use btctax_core::tax::testonly::{ty2024_params, ty2024_table};
-use btctax_core::tax::FilingStatus;
+use btctax_core::tax::{compute_tax_year, Carryforward, FilingStatus, TaxOutcome, TaxProfile};
 use btctax_core::voidable_decisions;
 use btctax_core::Usd;
 use rust_decimal_macros::dec;
@@ -1811,5 +1811,289 @@ fn the_void_direction_fires_amend_to_pay() {
             .iter()
             .any(|l| l.contains("1040-X") && l.to_lowercase().contains("additional tax")),
         "voiding a promote over a filed floor-year is amend-to-pay (1040-X, additional tax): {lines:?}"
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// Task 9 — BG-D6 `consent_terms`: the two-sided informed-consent figures the filer sees and the
+// promote records. Fold pair mirrors T8 (`promote_prior_year_advisory`) EXCEPT the promote is
+// SYNTHESIZED (consent runs BEFORE the promote is recorded), so the fixtures below carry NO
+// PromoteTranche event — `consent_terms` threads its own so the BG-D4 clamp binds. PRIVACY: synthetic.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// The `CURRENT_YEAR` for the sell-this-year KAT — the year a same-year sale+promote lands in. Core is
+/// clock-free, so "current" is just the sale's year; the point is `consent_terms` must NOT drop it.
+const CURRENT_YEAR: i32 = 2024;
+
+/// A profile that prices a 2024 short-term gain at a positive marginal rate (Single, $200k base income —
+/// the 32% bracket), so the clamped saving is a real, non-zero figure.
+fn consent_profile() -> TaxProfile {
+    TaxProfile {
+        filing_status: FilingStatus::Single,
+        ordinary_taxable_income: dec!(200_000),
+        magi_excluding_crypto: dec!(200_000),
+        qualified_dividends_and_other_pref_income: dec!(0),
+        other_net_capital_gain: dec!(0),
+        capital_loss_carryforward_in: Carryforward {
+            short: dec!(0),
+            long: dec!(0),
+        },
+        w2_ss_wages: dec!(0),
+        w2_medicare_wages: dec!(0),
+        schedule_c_expenses: dec!(0),
+    }
+}
+
+/// The TY2024 table indexed for `compute_tax_year` (2024 ships; other years are uncomputable).
+fn tables_2024() -> BTreeMap<i32, btctax_core::TaxTable> {
+    let mut m = BTreeMap::new();
+    m.insert(2024, ty2024_table());
+    m
+}
+
+/// The crypto-attributable federal tax for `year` under `st` (the same figure `consent_terms` folds).
+fn crypto_tax(events: &[LedgerEvent], st: &LedgerState, year: i32, profile: &TaxProfile) -> Usd {
+    match compute_tax_year(events, st, year, Some(profile), &tables_2024()) {
+        TaxOutcome::Computed(r) => r.total_federal_tax_attributable,
+        TaxOutcome::NotComputable(b) => panic!("expected computable {year}: {b:?}"),
+    }
+}
+
+/// The `ComputedTax.delta_usd` recorded for `year`, if any.
+fn computed_saving(terms: &[ConsentTerm], year: i32) -> Option<Usd> {
+    terms.iter().find_map(|t| match t {
+        ConsentTerm::ComputedTax {
+            year: y, delta_usd, ..
+        } if *y == year => Some(*delta_usd),
+        _ => None,
+    })
+}
+
+// ── promote-FREE fixtures (consent_terms synthesizes the promote) ──────────────────────────────────
+
+/// A whole 1-BTC tranche (window 2024-01) sold WHOLE at $8,000 — BELOW the $12,000 window-low floor.
+fn consent_sell_below_low() -> Vec<LedgerEvent> {
+    let w = exch();
+    let t = tranche_ev(1, &w, 100_000_000, date!(2024 - 01 - 01), date!(2024 - 01 - 10));
+    let sell = sell_ev("SELL", datetime!(2024-06-01 00:00 UTC), &w, 100_000_000, 8_000);
+    vec![t, sell]
+}
+
+/// A whole 1-BTC tranche (window 2024-01) sold WHOLE at $20,000 — ABOVE the $12,000 floor, in the
+/// current year (sold 2024-06, promoting 2024) — a normal positive saving.
+fn consent_sell_this_year() -> Vec<LedgerEvent> {
+    let w = exch();
+    let t = tranche_ev(1, &w, 100_000_000, date!(2024 - 01 - 01), date!(2024 - 01 - 10));
+    let sell = sell_ev("SELL", datetime!(2024-06-01 00:00 UTC), &w, 100_000_000, 20_000);
+    vec![t, sell]
+}
+
+/// A whole 1-BTC tranche (2017 window), never disposed. No disposal ⇒ NO year is flagged.
+fn consent_undisposed() -> Vec<LedgerEvent> {
+    let w = exch();
+    let t = tranche_ev(1, &w, 100_000_000, date!(2017 - 12 - 01), date!(2017 - 12 - 03));
+    vec![t]
+}
+
+/// A SHORT-TERM donation-only reorder WITHOUT the promote event: documented 0.4-BTC lot ($40k basis)
+/// co-held with a 0.4-BTC tranche (consent floor $50k ⇒ higher per-sat, HIFO draws it FIRST). A 2024
+/// donation of 0.4 BTC draws the tranche WITH the (synthetic) promote (documented-only $0 deduction) and
+/// the documented lot WITHOUT it ($40k) — a removal-leg diff with ZERO disposal change.
+fn consent_donation_only() -> Vec<LedgerEvent> {
+    let w = exch();
+    let buy = documented_buy("BUY", datetime!(2024-01-05 00:00 UTC), &w, 40_000_000, 40_000);
+    let t = tranche_ev(1, &w, 40_000_000, date!(2024 - 01 - 01), date!(2024 - 01 - 10));
+    let out = transfer_out("OUT", datetime!(2024-06-01 00:00 UTC), &w, 40_000_000);
+    let recl = donate_reclass(3, "OUT", dec!(60_000));
+    vec![buy, t, out, recl]
+}
+
+/// A carryover-cascade fixture (all POST-2025 so draws are per-wallet, not the pre-2025 global snapshot):
+/// wallet A holds a documented 0.4-BTC lot + a 0.4-BTC tranche; a 2025 sale of 0.4 BTC HIFO-reorders
+/// (promoted tranche floor $30k/BTC drawn FIRST; unpromoted $0 drawn last) → 2025's net capital gain
+/// changes (§1212(b) source). Wallet B holds an unrelated documented lot sold in 2026 — the promote never
+/// touches it (unflagged), but its carryover-linked lines still shift → CascadeNamed{2026}.
+fn consent_cascade() -> Vec<LedgerEvent> {
+    let a = exch();
+    let b = cold();
+    let buy_a = documented_buy("BUYA", datetime!(2025-01-05 00:00 UTC), &a, 40_000_000, 4_000);
+    let t = tranche_ev(1, &a, 40_000_000, date!(2025 - 01 - 01), date!(2025 - 01 - 10));
+    let sell_a = sell_ev("SELLA", datetime!(2025-09-01 00:00 UTC), &a, 40_000_000, 20_000);
+    let buy_b = documented_buy("BUYB", datetime!(2025-02-01 00:00 UTC), &b, 50_000_000, 10_000);
+    let sell_b = sell_ev("SELLB", datetime!(2026-03-01 00:00 UTC), &b, 50_000_000, 25_000);
+    vec![buy_a, t, sell_a, buy_b, sell_b]
+}
+
+/// Prices with a current close at the tranche declaration date (2026-01-01) — the deterministic clock-free
+/// "as-of" (the ledger's latest recorded instant) — so the undisposed hypothetical resolves to `Some`.
+fn prices_with_current_close() -> StaticPrices {
+    StaticPrices([(date!(2026 - 01 - 01), dec!(40_000))].into_iter().collect())
+}
+
+#[test]
+fn below_window_low_sale_quotes_the_clamped_saving_not_an_unclaimable_loss() {
+    // window-min $12k, sold at $8k. True promoted saving = tax on the $8k gain (clamped to $0 gain),
+    // NEVER a $4k loss the promote can't file (which the un-clamped `overpayment_delta_one` swap would).
+    let events = consent_sell_below_low();
+    let profile = consent_profile();
+    // The un-promoted baseline files exactly the $8k gain; its crypto tax IS `tax_on_gain(8_000)`.
+    let baseline = project(&events, &prices(), &cfg());
+    let tax_on_8k = crypto_tax(&events, &baseline, 2024, &profile);
+    let terms = consent_terms(
+        &events,
+        &prices(),
+        &cfg(),
+        &EventId::decision(1),
+        dec!(12_000),
+        Some(&profile),
+        &tables_2024(),
+    );
+    let saving = computed_saving(&terms, 2024).expect("a 2024 ComputedTax term");
+    assert!(saving > Usd::ZERO, "the clamped saving is a real positive figure");
+    assert_eq!(
+        saving, tax_on_8k,
+        "the recorded saving equals tax on the CLAMPED $8k gain (with-promote gain clamps to $0), \
+         never the inflated saving an un-clamped $4k loss would produce"
+    );
+}
+
+#[test]
+fn fully_undisposed_promote_records_an_unrealized_term_not_empty() {
+    // A fully-undisposed promote flags NO year → the Σ is empty; BG-D6 mandates an UNREALIZED line
+    // (never a bare nothing). With a current close, the hypothetical reduction is the clamped floor.
+    let events = consent_undisposed();
+    let terms = consent_terms(
+        &events,
+        &prices_with_current_close(),
+        &cfg(),
+        &EventId::decision(1),
+        dec!(12_000),
+        None, // no profile
+        &tables_2024(),
+    );
+    assert!(
+        terms
+            .iter()
+            .any(|t| matches!(t, ConsentTerm::Unrealized { .. })),
+        "unrealized hypothetical line present: {terms:?}"
+    );
+    assert!(
+        terms.iter().all(|t| !matches!(t, ConsentTerm::ComputedTax { delta_usd, .. } if *delta_usd == Usd::ZERO)),
+        "never a bare $0 ComputedTax: {terms:?}"
+    );
+    // today $40k/BTC ≥ floor $12k ⇒ the clamped gain reduction is the whole $12k floor.
+    assert!(
+        terms.iter().any(|t| matches!(t,
+            ConsentTerm::Unrealized { sat, hypothetical_reduction: Some(r), .. }
+                if *sat == 100_000_000 && *r == dec!(12_000))),
+        "the Some(reduction) is min(today-proceeds, floor) = the whole floor here: {terms:?}"
+    );
+}
+
+#[test]
+fn no_current_price_falls_back_to_the_floor_as_max_reduction() {
+    // Bundled prices end at release; "today" often has no close ⇒ fallback (None), never a dropped line.
+    let events = consent_undisposed();
+    let terms = consent_terms(
+        &events,
+        &prices(), // empty ⇒ no close at the as-of date
+        &cfg(),
+        &EventId::decision(1),
+        dec!(12_000),
+        None,
+        &tables_2024(),
+    );
+    assert!(
+        terms.iter().any(|t| matches!(
+            t,
+            ConsentTerm::Unrealized {
+                hypothetical_reduction: None,
+                ..
+            }
+        )),
+        "no-price ⇒ the floor itself ($filed_basis) named as the max reduction, not $0: {terms:?}"
+    );
+}
+
+#[test]
+fn a_computing_removal_flagged_year_carries_the_deduction_delta() {
+    // 2024 (table ships) + profile + a donation reorder → ComputedTax with Some(deduction_delta), NOT
+    // labeled uncomputable and NOT dropping the Schedule-A change (engine B can't price it). Donation-ONLY
+    // ⇒ the tax-Δ is exactly $0 AND the deduction-Δ is Some(≠0): pin BOTH.
+    let events = consent_donation_only();
+    let profile = consent_profile();
+    let terms = consent_terms(
+        &events,
+        &prices(),
+        &cfg(),
+        &EventId::decision(1),
+        dec!(50_000),
+        Some(&profile),
+        &tables_2024(),
+    );
+    assert!(
+        terms.iter().any(|t| matches!(t,
+            ConsentTerm::ComputedTax { year, delta_usd, deduction_delta_usd: Some(d) }
+                if *year == 2024 && *delta_usd == Usd::ZERO && *d != Usd::ZERO)),
+        "a donation-only computing year records {{delta:0, deduction:Some(≠0)}}, never uncomputable / bare $0: {terms:?}"
+    );
+}
+
+#[test]
+fn sell_this_year_then_promote_includes_the_current_year_term() {
+    // A sell-earlier-this-year-then-promote must have its CURRENT-year realized delta quoted, not dropped
+    // (no `< current` filter on the year set).
+    let events = consent_sell_this_year();
+    let profile = consent_profile();
+    let terms = consent_terms(
+        &events,
+        &prices(),
+        &cfg(),
+        &EventId::decision(1),
+        dec!(12_000),
+        Some(&profile),
+        &tables_2024(),
+    );
+    assert!(
+        terms.iter().any(|t| matches!(t,
+            ConsentTerm::ComputedTax { year, delta_usd, .. }
+                if *year == CURRENT_YEAR && *delta_usd > Usd::ZERO)),
+        "the current-year realized saving is quoted, not dropped: {terms:?}"
+    );
+}
+
+#[test]
+fn a_carryover_source_names_the_cascade_into_an_unflagged_later_year() {
+    // §1212(b)/§170(d): a flagged year that shifts a carryover reshapes LATER years' carryover-in, which
+    // the per-year engine cannot chain (static profile carryforward-in). Name the unflagged later
+    // activity year (2026), unquantified.
+    let events = consent_cascade();
+    let profile = consent_profile();
+    let mut tables = BTreeMap::new();
+    tables.insert(2025, ty2024_table()); // 2025 computes; 2026 has no table (the cascade target).
+    let terms = consent_terms(
+        &events,
+        &prices(),
+        &cfg(),
+        &EventId::decision(1),
+        dec!(12_000),
+        Some(&profile),
+        &tables,
+    );
+    assert!(
+        computed_saving(&terms, 2025).is_some(),
+        "the 2025 reorder is a computing ComputedTax term (carryover source): {terms:?}"
+    );
+    assert!(
+        terms
+            .iter()
+            .any(|t| matches!(t, ConsentTerm::CascadeNamed { year } if *year == 2026)),
+        "the §1212(b) carryover cascade into the unflagged 2026 year is named: {terms:?}"
+    );
+    assert!(
+        !terms
+            .iter()
+            .any(|t| matches!(t, ConsentTerm::CascadeNamed { year } if *year == 2025)),
+        "the carryover-SOURCE year itself is not cascade-named (it has its own term): {terms:?}"
     );
 }

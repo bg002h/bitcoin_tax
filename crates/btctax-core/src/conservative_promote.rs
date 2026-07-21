@@ -6,9 +6,17 @@
 //! r1 I-1) rather than each leg builder inventing its own shape.
 
 use crate::conservative::{window_reference, Coverage};
-use crate::conventions::{round_cents, Sat, TaxDate, Usd, SATS_PER_BTC};
+use crate::conventions::{round_cents, tax_date, Sat, TaxDate, Usd, SATS_PER_BTC};
+use crate::event::{
+    Acknowledgment, ConsentTerm, EventPayload, FloorMethod, LedgerEvent, PromoteTranche,
+};
 use crate::identity::EventId;
 use crate::price::PriceProvider;
+use crate::project::{project, ProjectionConfig};
+use crate::state::{Disposal, LedgerState, Removal, RemovalKind};
+use crate::tax::{compute_tax_year, TaxOutcome, TaxProfile, TaxTables};
+use std::collections::BTreeSet;
+use time::UtcOffset;
 
 /// BG-D3 refusal: `filed_basis_for` cannot produce a trustworthy promotion floor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,4 +114,320 @@ pub fn clamped_leg_basis(
     let documented_share = usd_basis_share - estimate_share; // UNCLAMPED (a documented fee carry ≥ 0)
     let estimate_basis = estimate_share.min((net_proceeds_share - documented_share).max(Usd::ZERO));
     documented_share + estimate_basis
+}
+
+/// The crypto-attributable federal tax for `year` under `state`, or `None` when the year is not
+/// computable (missing table/profile / a Hard blocker). Mirrors `conservative::tax_total` (private
+/// there); `consent_terms`'s fold-pair delta is a clean `without − with` cancellation over this.
+fn crypto_tax_of(
+    events: &[LedgerEvent],
+    state: &LedgerState,
+    year: i32,
+    profile: Option<&TaxProfile>,
+    tables: &dyn TaxTables,
+) -> Option<Usd> {
+    match compute_tax_year(events, state, year, profile, tables) {
+        TaxOutcome::Computed(r) => Some(r.total_federal_tax_attributable),
+        TaxOutcome::NotComputable(_) => None,
+    }
+}
+
+/// The whole-tranche `sat` DENOMINATOR for `tranche_id` (its `DeclareTranche.sat`), the pro-ration
+/// denominator for the undisposed hypothetical. Falls back to `remaining` (⇒ the full `filed_basis` as
+/// the pro-rata floor) only if the target is absent — which never happens for a real promote target.
+fn declare_tranche_sat(events: &[LedgerEvent], tranche_id: &EventId, remaining: Sat) -> Sat {
+    events
+        .iter()
+        .find_map(|e| match &e.payload {
+            EventPayload::DeclareTranche(t) if e.id == *tranche_id => Some(t.sat),
+            _ => None,
+        })
+        .unwrap_or(remaining)
+}
+
+/// BG-D6 (Task 9): the two-sided informed-consent figures the filer sees on the promotion screen AND that
+/// are snapshotted verbatim into `Acknowledgment.shown_terms` (T1). Promoting `tranche_id` to the
+/// whole-tranche `filed_basis` floor can rewrite a filed year's realized gain (a below-window-low sale
+/// files a CLAMPED $0 gain, never a loss), reorder a prior year's disposals/donations, and shift §1212(b)/
+/// §170(d) carryovers into later years — this quantifies each effect as a `ConsentTerm`.
+///
+/// ★ The figures re-fold through the **clamped promoted path**, not the raw `overpayment_delta_one` basis
+/// swap: a SYNTHETIC `PromoteTranche(tranche_id, filed_basis)` is threaded into the ledger and re-projected
+/// so the T3 rewrite AND the BG-D4 disposal/removal clamp bind (a $8k sale below a $12k floor quotes the
+/// saving on the CLAMPED $0 gain, never the $4k loss the promote could not file). Consent runs BEFORE the
+/// promote is recorded, so `events` carries no promote yet — the baseline fold is `events` as-is.
+///
+/// The year set ranges over EVERY year the fold-diff flags, INCLUDING the current/latest year (no
+/// `< current` filter — a sell-earlier-this-year-then-promote has its current-year realized delta quoted).
+/// Per flagged year: both folds price it (matching table + profile) ⇒ `ComputedTax { delta_usd (the tax
+/// SAVING = tax_without − tax_with), deduction_delta_usd }`, where `deduction_delta_usd = Some(the removal
+/// effect engine B CANNOT price — §170 charitable-deduction + §1015 gift-basis reduction)` when a removal
+/// leg diffed, else `None`. Engine B EXCLUDES crypto donations, so a DONATION-only computing year prices at
+/// `delta_usd: 0` while `deduction_delta_usd: Some(D≠0)` — CORRECT, not a bare $0 (only `{delta:0,
+/// deduction:None}` for a real change is forbidden; a pure 8949-date swap with no money is skipped, its
+/// dates named by the T8 prose advisory). An uncomputable year ⇒ `Uncomputable { gain_delta_usd,
+/// deduction_delta_usd }` (profile-free from the fold pair), never a silent $0.
+///
+/// Undisposed tranche sats ⇒ `Unrealized { sat, hypothetical_reduction, as_of }` — NEVER a bare
+/// nothing (a fully-undisposed promote flags no year, so this is what keeps the screen non-empty).
+/// `hypothetical_reduction = Some(min(today-proceeds, the pro-rata floor))` = the CLAMPED gain reduction if
+/// you sold the remainder at the current close, else `None` (the render names the floor itself as the max).
+/// "Today" is the deterministic, clock-free `as_of`: the ledger's latest recorded event date (core carries
+/// no wall clock); bundled prices often lack a close there ⇒ the `None` fallback.
+///
+/// A carryover-affecting flagged year (net capital gain/loss OR charitable deduction moved) reshapes LATER
+/// years' §1212(b)/§170(d) carryover-in, which the per-year engine CANNOT chain (it reads a static profile
+/// `carryforward_in`) ⇒ `CascadeNamed { year }` for each later ACTIVITY year the promote does not itself
+/// reorder (unflagged). NOTHING is written and NOTHING `>$0` is filed here — this feeds the consent screen.
+#[allow(clippy::too_many_arguments)]
+pub fn consent_terms(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    tranche_id: &EventId,
+    filed_basis: Usd,
+    profile: Option<&TaxProfile>,
+    tables: &dyn TaxTables,
+) -> Vec<ConsentTerm> {
+    // The fold pair. `without` = the events AS THEY STAND (the $0-tranche baseline; the promote is not yet
+    // recorded). `with` = the same events PLUS a synthetic `PromoteTranche(tranche_id, filed_basis)`,
+    // applied through the T3 rewrite path so the BG-D4 clamp binds (★ the clamped promoted path, not the
+    // un-clamped `overpayment_delta_one` swap).
+    let without_state = project(events, prices, config);
+    let with_events = with_synthetic_promote(events, tranche_id, filed_basis);
+    let with_state = project(&with_events, prices, config);
+
+    let mut terms: Vec<ConsentTerm> = Vec::new();
+
+    // Candidate years: every year in EITHER fold's disposals ∪ removals — INCLUDING the current/latest year
+    // (no `< current` filter, tax r3 I-1).
+    let mut years: BTreeSet<i32> = BTreeSet::new();
+    for st in [&with_state, &without_state] {
+        for d in &st.disposals {
+            years.insert(d.disposed_at.year());
+        }
+        for r in &st.removals {
+            years.insert(r.removed_at.year());
+        }
+    }
+
+    // The earliest flagged year whose net capital gain/loss or charitable deduction moved (§1212(b)/§170(d)
+    // carryover source), and the set of ALL flagged years (so the cascade names only UNFLAGGED later years).
+    let mut carryover_source: Option<i32> = None;
+    let mut flagged: BTreeSet<i32> = BTreeSet::new();
+
+    for &y in &years {
+        // Per-year leg SETS (whole Disposal/Removal; a Vec-eq catches a HIFO reorder AND an equal-basis /
+        // different-date swap — the BG-D9 corner a Σ-compare misses). Mirrors `promote_prior_year_advisory`.
+        let disp = |st: &LedgerState| -> Vec<Disposal> {
+            st.disposals
+                .iter()
+                .filter(|d| d.disposed_at.year() == y)
+                .cloned()
+                .collect()
+        };
+        let rem = |st: &LedgerState, k: RemovalKind| -> Vec<Removal> {
+            st.removals
+                .iter()
+                .filter(|r| r.removed_at.year() == y && r.kind == k)
+                .cloned()
+                .collect()
+        };
+        let disp_changed = disp(&with_state) != disp(&without_state);
+        let don_changed =
+            rem(&with_state, RemovalKind::Donation) != rem(&without_state, RemovalKind::Donation);
+        let gift_changed =
+            rem(&with_state, RemovalKind::Gift) != rem(&without_state, RemovalKind::Gift);
+        if !(disp_changed || don_changed || gift_changed) {
+            continue; // this year's filed content is unchanged by the promote
+        }
+        flagged.insert(y);
+
+        // Profile-free per-year deltas, oriented so a POSITIVE figure is what the promote REDUCES
+        // (without − with): gain over disposal legs, §170(e) deduction over donations, §1015 basis over gifts.
+        let gain = |st: &LedgerState| -> Usd {
+            st.disposals
+                .iter()
+                .filter(|d| d.disposed_at.year() == y)
+                .flat_map(|d| &d.legs)
+                .map(|l| l.gain)
+                .sum()
+        };
+        let ded = |st: &LedgerState| -> Usd {
+            st.removals
+                .iter()
+                .filter(|r| r.removed_at.year() == y && r.kind == RemovalKind::Donation)
+                .filter_map(|r| r.claimed_deduction)
+                .sum()
+        };
+        let gift_basis = |st: &LedgerState| -> Usd {
+            st.removals
+                .iter()
+                .filter(|r| r.removed_at.year() == y && r.kind == RemovalKind::Gift)
+                .flat_map(|r| &r.legs)
+                .map(|l| l.basis)
+                .sum()
+        };
+        let gain_delta = gain(&without_state) - gain(&with_state);
+        let don_delta = ded(&without_state) - ded(&with_state); // §170 charitable deduction reduction
+        let gift_delta = gift_basis(&without_state) - gift_basis(&with_state); // §1015 carryover reduction
+        // The removal effect engine B CANNOT price (tax r3 I-2): the charitable-deduction change PLUS the
+        // §1015 gift-basis change. `Some` iff a removal leg actually diffed.
+        let removal_delta = don_delta + gift_delta;
+        let removal_diffed = don_changed || gift_changed;
+
+        // Carryover source: net capital gain/loss changed (§1212(b)) OR the charitable deduction changed
+        // (§170(d)). A gift never touches a 1040 line, so it is EXCLUDED here.
+        if (disp_changed && gain_delta != Usd::ZERO) || (don_changed && don_delta != Usd::ZERO) {
+            carryover_source = Some(carryover_source.map_or(y, |c| c.min(y)));
+        }
+
+        // Computable iff BOTH folds price `y` (matching table + profile). A donation-only year prices with
+        // delta_usd == 0 because engine B excludes crypto donations — the effect rides `deduction_delta_usd`.
+        match (
+            crypto_tax_of(events, &with_state, y, profile, tables),
+            crypto_tax_of(events, &without_state, y, profile, tables),
+        ) {
+            (Some(t_with), Some(t_without)) => {
+                let delta_usd = t_without - t_with; // the federal-tax SAVING from promoting
+                let deduction_delta_usd = if removal_diffed {
+                    Some(removal_delta)
+                } else {
+                    None
+                };
+                // A bare `{delta:0, deduction:None}` (a real change with no money and no removal — a pure
+                // 8949-date swap) is FORBIDDEN; it is out of consent_terms' money-scope (the T8 prose
+                // advisory names those dates), so skip it rather than emit the "bare $0" defect.
+                if delta_usd != Usd::ZERO || deduction_delta_usd.is_some() {
+                    terms.push(ConsentTerm::ComputedTax {
+                        year: y,
+                        delta_usd,
+                        deduction_delta_usd,
+                    });
+                }
+            }
+            _ => {
+                // Uncomputable (no table/profile/blocked): the profile-free fold-pair deltas, never a
+                // silent $0. Skip only the all-zero degenerate date-swap.
+                if gain_delta != Usd::ZERO || removal_delta != Usd::ZERO {
+                    terms.push(ConsentTerm::Uncomputable {
+                        year: y,
+                        gain_delta_usd: gain_delta,
+                        deduction_delta_usd: removal_delta,
+                    });
+                }
+            }
+        }
+    }
+
+    // Cascade (§1212(b)/§170(d), named-unquantified): a carryover-affecting flagged year reshapes LATER
+    // years' carryover-in, which the per-year engine cannot chain (it reads a static profile
+    // `carryforward_in`). Name each later ACTIVITY year the promote does NOT itself reorder (unflagged) —
+    // an already-flagged later year is quantified by its own term.
+    if let Some(src) = carryover_source {
+        for &y in &years {
+            if y > src && !flagged.contains(&y) {
+                terms.push(ConsentTerm::CascadeNamed { year: y });
+            }
+        }
+    }
+
+    // Undisposed tranche sats ⇒ the UNREALIZED hypothetical (the with-promote holding). NEVER a bare
+    // nothing: a fully-undisposed promote flags no year, so this is what keeps the screen non-empty.
+    let remaining: Sat = with_state
+        .lots
+        .iter()
+        .filter(|l| l.lot_id.origin_event_id == *tranche_id)
+        .map(|l| l.remaining_sat)
+        .sum();
+    if remaining > 0 {
+        let tranche_sat = declare_tranche_sat(events, tranche_id, remaining);
+        let (hypothetical_reduction, as_of) =
+            unrealized_reduction(events, prices, filed_basis, tranche_sat, remaining);
+        terms.push(ConsentTerm::Unrealized {
+            sat: remaining,
+            hypothetical_reduction,
+            as_of,
+        });
+    }
+
+    terms
+}
+
+/// Thread a SYNTHETIC `PromoteTranche(tranche_id, filed_basis)` onto `events` so a fresh `project` binds
+/// the T3 rewrite + BG-D4 clamp. The decision id is `max(existing Decision seq) + 1` (collision-free); the
+/// consent/attestation fields are placeholders (they never affect the projection — a `PromoteTranche`
+/// folds as `Op::Skip`, and `live_promotes` reads only `target`/`filed_basis`, order-independent).
+fn with_synthetic_promote(
+    events: &[LedgerEvent],
+    tranche_id: &EventId,
+    filed_basis: Usd,
+) -> Vec<LedgerEvent> {
+    let seq = events
+        .iter()
+        .filter_map(|e| match e.id {
+            EventId::Decision { seq } => Some(seq),
+            _ => None,
+        })
+        .max()
+        .map_or(1, |m| m + 1);
+    let utc = events
+        .iter()
+        .map(|e| e.utc_timestamp)
+        .max()
+        .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
+    let mut out = events.to_vec();
+    out.push(LedgerEvent {
+        id: EventId::Decision { seq },
+        utc_timestamp: utc,
+        original_tz: UtcOffset::UTC,
+        wallet: None,
+        payload: EventPayload::PromoteTranche(PromoteTranche {
+            target: tranche_id.clone(),
+            method: FloorMethod::WindowLowClose,
+            filed_basis,
+            coverage: Coverage::Full,
+            provenance_attested: true,
+            acknowledgment: Acknowledgment {
+                phrase: String::new(),
+                shown_terms: Vec::new(),
+                provenance_text: String::new(),
+                provenance_version: String::new(),
+            },
+            part_ii_narrative: String::new(),
+        }),
+    });
+    out
+}
+
+/// The undisposed hypothetical (tax r3 N-2): if the `remaining` tranche sats were sold at the current
+/// close, the CLAMPED gain reduction promoting would provide, and the `as_of` date it was priced at.
+/// `Some(min(today-proceeds, the pro-rata floor))` when a close exists at the clock-free `as_of` (the
+/// ledger's latest event date); `None` when it does not (the render then names the floor itself as the
+/// theoretical max, since a $0-basis unit's gain can be reduced by at most its whole filed floor).
+fn unrealized_reduction(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    filed_basis: Usd,
+    tranche_sat: Sat,
+    remaining: Sat,
+) -> (Option<Usd>, Option<TaxDate>) {
+    let prorata_floor = if tranche_sat > 0 {
+        round_cents(filed_basis * Usd::from(remaining) / Usd::from(tranche_sat))
+    } else {
+        filed_basis
+    };
+    let as_of = events
+        .iter()
+        .map(|e| tax_date(e.utc_timestamp, e.original_tz))
+        .max();
+    match as_of.and_then(|d| prices.usd_per_btc(d).map(|px| (d, px))) {
+        Some((d, px)) => {
+            let today_proceeds = round_cents(px * Usd::from(remaining) / Usd::from(SATS_PER_BTC));
+            // Clamped: a $0-basis unit's gain can be reduced by at most the proceeds (never below $0) and
+            // never by more than the filed floor — exactly the BG-D4 leg clamp, applied to a today sale.
+            (Some(today_proceeds.min(prorata_floor)), Some(d))
+        }
+        None => (None, None),
+    }
 }
