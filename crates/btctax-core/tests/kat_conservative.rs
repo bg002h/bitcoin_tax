@@ -11,6 +11,7 @@
 //! config's `pre2025_method`. Years are pinned explicitly so the fixtures aren't a confusing RED.
 //! PRIVACY: synthetic values only.
 
+use btctax_core::conservative::{method_inversion_advisory, tranche_dip_advisory};
 use btctax_core::event::*;
 use btctax_core::identity::*;
 use btctax_core::price::StaticPrices;
@@ -187,5 +188,141 @@ fn under_fifo_the_old_zero_basis_tranche_is_consumed_first_inversion() {
         leg.basis_source,
         BasisSource::EstimatedConservative,
         "FIFO consumes the OLDEST lot first — the old $0 tranche (window_end 2015) — an inversion (D-9)"
+    );
+}
+
+// ── Phase 3 / Task 9: dip + method-inversion advisory builders (D-9) ────────────────────────────────
+
+/// P3 / D-9: `tranche_dip_advisory` fires for a disposal that consumed a tranche leg; it states the
+/// basis AS FILED (`$0` here — printed from `leg.basis`, never hard-coded) and the resulting gain, and
+/// is provenance-neutral (never "purchase"/"bought" — a tranche is undocumented BTC, not a known buy).
+#[test]
+fn dip_advisory_fires_states_basis_as_filed_and_is_provenance_neutral() {
+    let w = exch();
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2018 - 01 - 01),
+        date!(2018 - 12 - 31),
+    );
+    let sell = sell_ev(
+        "SELL",
+        datetime!(2020-06-01 00:00 UTC),
+        &w,
+        50_000_000,
+        40_000,
+    );
+    let st = project(&[t, sell], &prices(), &config_hifo_pre2025());
+    let disposal = st.disposals.first().expect("a disposal");
+    let adv = tranche_dip_advisory(disposal).expect("a tranche disposal produces a dip advisory");
+    assert!(adv.contains("$0"), "basis AS FILED ($0) must appear: {adv}");
+    assert!(
+        adv.contains("40000"),
+        "the reported gain must appear: {adv}"
+    );
+    let low = adv.to_lowercase();
+    assert!(
+        !low.contains("purchase") && !low.contains("bought"),
+        "provenance-neutral: no purchase/bought (tax min-8c): {adv}"
+    );
+}
+
+/// P3: no dip advisory for a fully-documented disposal (no tranche leg consumed).
+#[test]
+fn dip_advisory_absent_for_a_fully_documented_disposal() {
+    let w = exch();
+    let buy = documented_buy(
+        "BUY",
+        datetime!(2019-01-01 00:00 UTC),
+        &w,
+        100_000_000,
+        30_000,
+    );
+    let sell = sell_ev(
+        "SELL",
+        datetime!(2020-06-01 00:00 UTC),
+        &w,
+        50_000_000,
+        40_000,
+    );
+    let st = project(&[buy, sell], &prices(), &config_hifo_pre2025());
+    let disposal = st.disposals.first().expect("a disposal");
+    assert!(
+        tranche_dip_advisory(disposal).is_none(),
+        "a documented disposal must not produce a dip advisory"
+    );
+}
+
+/// P3 / D-9: `method_inversion_advisory` fires when a NON-HIFO in-force method could consume a $0
+/// tranche lot while a documented lot remains in the same wallet (the gain-maximizing inversion), and
+/// recommends a HIFO election. State = a tranche lot + a documented lot both remaining (no sale yet).
+#[test]
+fn inversion_advisory_fires_for_a_non_hifo_method_when_both_lot_kinds_remain() {
+    let w = exch();
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2018 - 01 - 01),
+        date!(2018 - 12 - 31),
+    );
+    let buy = documented_buy(
+        "BUY",
+        datetime!(2019-01-01 00:00 UTC),
+        &w,
+        100_000_000,
+        30_000,
+    );
+    let st = project(&[t, buy], &prices(), &config_fifo_pre2025());
+    let adv = method_inversion_advisory(&st, &w, LotMethod::Fifo)
+        .expect("a non-HIFO method with both lot kinds produces an inversion advisory");
+    assert!(
+        adv.to_uppercase().contains("HIFO"),
+        "the advisory recommends a HIFO election: {adv}"
+    );
+}
+
+/// P3: no inversion advisory under HIFO (HIFO already steers documented-first — no inversion).
+#[test]
+fn inversion_advisory_absent_under_hifo() {
+    let w = exch();
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2018 - 01 - 01),
+        date!(2018 - 12 - 31),
+    );
+    let buy = documented_buy(
+        "BUY",
+        datetime!(2019-01-01 00:00 UTC),
+        &w,
+        100_000_000,
+        30_000,
+    );
+    let st = project(&[t, buy], &prices(), &config_hifo_pre2025());
+    assert!(
+        method_inversion_advisory(&st, &w, LotMethod::Hifo).is_none(),
+        "HIFO does not invert — no advisory"
+    );
+}
+
+/// P3: no inversion advisory when the wallet holds NO documented lot (nothing to draw before the
+/// tranche — the inversion needs both a $0 tranche lot AND a documented lot present).
+#[test]
+fn inversion_advisory_absent_without_a_documented_lot() {
+    let w = exch();
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2018 - 01 - 01),
+        date!(2018 - 12 - 31),
+    );
+    let st = project(&[t], &prices(), &config_fifo_pre2025());
+    assert!(
+        method_inversion_advisory(&st, &w, LotMethod::Fifo).is_none(),
+        "a tranche-only wallet cannot invert (no documented lot to draw first)"
     );
 }

@@ -1,5 +1,6 @@
 //! btctax-core: domain model + pure deterministic event-sourced projection for the bitcoin_tax ledger.
 //! The projection (`project`) is total and never panics (spec §7.1); only `persistence` performs I/O.
+pub mod conservative;
 pub mod conventions;
 pub mod donation;
 pub mod event;

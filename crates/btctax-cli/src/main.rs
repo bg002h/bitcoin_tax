@@ -151,6 +151,7 @@ fn run() -> Result<ExitCode, CliError> {
                     gift_advisory,
                     schedule_se,
                     donation_appraisal,
+                    tranche_advisory,
                     dual_report,
                     pseudo_contributed,
                 } = cmd::tax::report_tax_year(vault, &pp, y, ptg_raw)?;
@@ -182,6 +183,11 @@ fn run() -> Result<ExitCode, CliError> {
                 // Chunk-1 D2: §170(f)(11)(F) year-aggregate donation appraisal advisory (non-gating;
                 // render-time only — does not feed engine B or the blocker set).
                 if let Some(msg) = donation_appraisal {
+                    println!("{msg}");
+                }
+                // Conservative-filing (P3 / D-9): tranche dip + method-inversion advisory (non-gating;
+                // render-time only — provenance-neutral, does not feed engine B or the blocker set).
+                if let Some(msg) = tranche_advisory {
                     println!("{msg}");
                 }
                 // §4 R3-M6 carryover write-back (opt-in; `report` is otherwise read-only). Persists this

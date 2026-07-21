@@ -245,6 +245,9 @@ pub struct TaxYearReport {
     pub schedule_se: Option<String>,
     /// §170(f)(11)(F) year-aggregate donation appraisal advisory.
     pub donation_appraisal: Option<String>,
+    /// Conservative-filing (D-9) advisory: per-disposal tranche dip lines + per-wallet method-inversion
+    /// warnings. Provenance-neutral; non-gating (never affects the outcome or exit code).
+    pub tranche_advisory: Option<String>,
     /// The §6 dual-report block (absolute filed return + crypto delta + the P5 advisories). `Some` only
     /// for a `ReturnInputs`-provenance year; `None` on the delta-only path.
     pub dual_report: Option<String>,
@@ -423,6 +426,12 @@ pub fn report_tax_year(
     let donation_appraisal_advisory =
         crate::render::render_donation_appraisal_advisory(&state, year);
 
+    // Conservative-filing (P3 / D-9): tranche dip + method-inversion advisory. Non-gating; render-time
+    // only, like the standalone-forms advisories above. The shared core assembler keeps the CLI + TUI
+    // surfaces identical.
+    let tranche_advisory =
+        btctax_core::conservative::tranche_report_advisory(&state, &events, s.prices(), &cfg, year);
+
     // M4 carryforward consistency advisory (Task 10): only when both this year's profile AND
     // the prior year's profile exist AND the prior year is Computed.  Never a hard blocker.
     let advisory: Option<String> = if let Some(p) = &profile {
@@ -456,6 +465,7 @@ pub fn report_tax_year(
         gift_advisory,
         schedule_se,
         donation_appraisal: donation_appraisal_advisory,
+        tranche_advisory,
         dual_report,
         pseudo_contributed,
     })

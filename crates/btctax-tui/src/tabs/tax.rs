@@ -178,6 +178,18 @@ pub(crate) fn render_tax_content(snap: &Snapshot, year: i32) -> String {
         let _ = write!(s, "{text}");
     }
 
+    // Conservative-filing (P3 / D-9) advisory — mirror of `report --tax-year`. The SAME shared core
+    // assembler the CLI uses, so the Tax tab and the report can never drift. Non-gating; render-only.
+    if let Some(text) = btctax_core::conservative::tranche_report_advisory(
+        &snap.state,
+        &snap.events,
+        &snap.prices,
+        &snap.cli_config.to_projection(),
+        year,
+    ) {
+        let _ = writeln!(s, "{text}");
+    }
+
     // Advisory blockers — shown for BOTH Computed and NotComputable outcomes.
     let advisories: Vec<_> = snap
         .state

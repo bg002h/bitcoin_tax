@@ -493,3 +493,60 @@ fn attest_refused_under_a_pre2025_tranche() {
         "attest must refuse with the TRANCHE message (guard fires before 'no allocation'): {err}"
     );
 }
+
+/// (P3 / Task 9 — surfacing KAT) The tranche dip advisory REACHES `report_tax_year` (the user-visible
+/// half): a pre-2025 tranche disposed in 2020 populates `TaxYearReport.tranche_advisory` with the
+/// dip text + the basis as filed. Dropping the report-field wiring makes this RED (surfacing mutation).
+#[test]
+fn tranche_dip_advisory_reaches_the_tax_year_report() {
+    use btctax_core::{Carryforward, FilingStatus, TaxProfile};
+    use rust_decimal_macros::dec;
+
+    let dir = tempfile::tempdir().unwrap();
+    let vault = empty_vault(dir.path());
+    cmd::tranche::declare_tranche(
+        &vault,
+        &pp(),
+        100_000_000,
+        tranche_wallet(),
+        date!(2018 - 01 - 01),
+        date!(2018 - 12 - 31),
+        now(),
+    )
+    .unwrap();
+    // A 2020 Coinbase Sell of 0.5 BTC consumes the tranche (pre-2025 Universal pool, HIFO — only lot).
+    let csv = dir.path().join("sell.csv");
+    std::fs::write(
+        &csv,
+        format!(
+            "{HEADER}cb-sell,2020-06-01 12:00:00 UTC,Sell,BTC,0.50000000,USD,80000.00,40000.00,40000.00,0.00,,,\r\n"
+        ),
+    )
+    .unwrap();
+    cmd::import::run(&vault, &pp(), &[csv]).unwrap();
+    let profile = TaxProfile {
+        filing_status: FilingStatus::Single,
+        ordinary_taxable_income: dec!(40000),
+        magi_excluding_crypto: dec!(60000),
+        qualified_dividends_and_other_pref_income: dec!(0),
+        other_net_capital_gain: dec!(0),
+        capital_loss_carryforward_in: Carryforward::default(),
+        w2_ss_wages: dec!(0),
+        w2_medicare_wages: dec!(0),
+        schedule_c_expenses: dec!(0),
+    };
+    cmd::tax::set_profile(&vault, &pp(), 2020, profile, false).unwrap();
+
+    let report = cmd::tax::report_tax_year(&vault, &pp(), 2020, dec!(0)).unwrap();
+    let adv = report
+        .tranche_advisory
+        .expect("the tranche dip advisory must reach the tax-year report (surfacing)");
+    assert!(
+        adv.to_lowercase().contains("undocumented"),
+        "the dip advisory text must surface: {adv}"
+    );
+    assert!(
+        adv.contains("$0"),
+        "basis as filed ($0) must surface: {adv}"
+    );
+}
