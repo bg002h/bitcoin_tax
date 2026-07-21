@@ -1,15 +1,16 @@
 # SPEC — Conservative / Defensive Filing, **Approach B** — sub-project 1: the basis-floor engine + Form 8275
 
-**Status:** DRAFT — **r1–r4 two-lens reviews FOLDED** (r1: tax 1C/4I + arch 0C/6I; r2: tax 0C/3I + arch 0C/1I;
-r3: tax 0C/2I + arch 0C/1I; r4: **arch GREEN 0C/0I** + tax 0C/1I — all persisted verbatim in
-`reviews/spec-{tax,architecture}-fable-review-r{1,2,3,4}.md`); pending the **r5** re-review to 0C/0I per
-`STANDARD_WORKFLOW.md`. The architecture lens has CONVERGED (r4 green). r4's tax Important was the terminal
-ring of the whole-surface class — cross-YEAR propagation: a flagged year Y's change flows through the two
-carryover chains the product models (§1212(b) capital-loss, §170(d) charitable) into Y+1's derived carryover-in
-lines, which are unflagged (Y+1's legs unchanged). Folded as a NAMING clause (loud-uncomputable pattern, no new
-machinery) in BG-D9/D6 + §3 census + §6 KAT; plus the gift-only quoting fix both lenses raised (§1015
-carryover-Δ, not a bare $0). Four rounds of surface censuses (tax lens) now find no further emitter or
-propagation path.
+**Status:** ✅ **GREEN — SPEC review loop CONVERGED at 0 Critical / 0 Important on BOTH lenses** (architecture
+green r4→r5; tax green r5). Five two-lens Fable rounds, all persisted verbatim in
+`reviews/spec-{tax,architecture}-fable-review-r{1..5}.md`: r1 tax 1C/4I + arch 0C/6I → r2 tax 0C/3I + arch
+0C/1I → r3 tax 0C/2I + arch 0C/1I → r4 arch **0C/0I** + tax 0C/1I → r5 **arch 0C/0I + tax 0C/0I**. Each round
+closed one ring of the whole-surface class and both independent lenses converged on the same defect every time:
+disposal legs (r1) → the §170(e)/8283/§1015 charitable surface incl. the second full-return emitter (r2) →
+removal-leg reorders + the current-year Σ + the uncomputable-audience-year blind spot (r3) → the cross-YEAR
+§1212(b)/§170(d) carryover cascade (r4) → exhausted (r5, fifth-pass census: QBI REIT/PTP verified
+crypto-insensitive, no third chain). Residual: 3 non-gating Nits folded (Acknowledgment three-flavor
+enumeration, "over both folds" wording ×1 shared). **Next: `writing-plans` for the Phase-1a/1b implementation
+plan.**
 **Branch:** `feat/conservative-filing-b` (off `main` @ the v0.8.0 release).
 **Parent:** the shipped Conservative-Filing v1 (`design/conservative-filing/SPEC.md`, v0.8.0). This spec is the
 first of Approach B's sub-projects; the guided **wizard** (sub-project 2) and **VARIOUS multi-date rows**
@@ -197,8 +198,9 @@ which honestly *widens* the window and *lowers* the floor. Both are anti-oversta
     table-independent — and the deduction-Δ *must* use the fold-pair figure even when the year computes, because
     engine B's `compute_tax_year` excludes crypto donations by design, tax r3 I-2) with an explicit *"tax not
     computable for year Y (no bundled table / no tax profile / blocked) — the reported gain/deduction still
-    changes by ~$G/~$D"* clause. The `Acknowledgment` snapshot records each term as computed-tax-Δ **or**
-    gain/deduction-Δ-with-uncomputable-flag, so the §6664(c) artifact stays honest; a genuinely-all-uncomputable
+    changes by ~$G/~$D"* clause. The `Acknowledgment` snapshot records each term as computed-tax-Δ, **or**
+    gain/deduction-Δ-with-uncomputable-flag, **or** a named-unquantified cross-year cascade term (three flavors —
+    arch r5 N-1), so the §6664(c) artifact stays honest; a genuinely-all-uncomputable
     promote never records a bare $0.
   - Plus interest, the penalty statement (BG-D10), and the wide-window "this floor is trivial" note when it
     applies. A **typed acknowledgment** — the consent phrase + a snapshot of the exact figures shown (each
@@ -316,7 +318,8 @@ which honestly *widens* the window and *lowers* the floor. Both are anti-oversta
       (Schedule D capital-loss carryforward, §1212(b); Schedule A charitable carryover, §170(d)) derive from
       year Y and may also require amendment, even though those years' crypto transactions are unchanged"*, quoting
       the Δ only where the machinery computes it (the `carryforward_out` diff when both folds compute Y; the
-      `charitable_carryover_out` diff when Y's absolute return computes) else named-unquantified. Both directions
+      `charitable_carryover_out` diff when Y's absolute return computes **over both folds** — arch r5 N-2 / tax r5
+      N-1) else named-unquantified. Both directions
       (the VOID direction is amend-to-refund, §6511-bounded).
   - **The VOID direction gets the SAME advisory (tax r1 M-5).** Voiding a promote over a year whose fold diff
     changes reverts the books to `$0` while a filed return still claims the floor — an amend-to-**pay** situation
