@@ -101,9 +101,16 @@ return + a **mandatory methodology disclosure**.
     "effective" alone is a bug: an inert (unconservable) allocation can be flipped effective by a
     later-declared tranche whose $0-basis sats complete its sat total (basis unchanged), at which point
     Path B silently discards the tranche (`transition.rs:88`) — the ordering r3-New-1 found. The friendly
-    refusal HEDGES real-world irrevocability (tax r2 N-3): "revisit the in-app safe-harbor allocation; if
-    your filed allocation is already final, unallocated pre-2025 units are a facts-and-circumstances matter
-    for a professional."
+    refusal HEDGES real-world irrevocability (tax r2 N-3) with a **DIRECTION-SPECIFIC** hint (the implemented
+    split — `ALLOCATION_IS_FINAL_HINT` / `TRANCHE_IS_FINAL_HINT`, `cmd/tranche.rs`): the allocation-side
+    refusal points at the allocation ("revisit the in-app safe-harbor allocation; if your filed allocation
+    is already final, unallocated pre-2025 units are a facts-and-circumstances matter for a professional"),
+    the tranche-side at voiding the tranche ("Void the tranche first (`reconcile void <decision-ref>`); if
+    you have already filed the tranche's $0 basis, unallocated pre-2025 units are a facts-and-circumstances
+    matter for a professional"). Both satisfy the normative hedge; each names the artifact the user is
+    blocked BY. (The record-time predicate treats a `SafeHarborAllocation` as in force when non-voided OR
+    still engine-effective despite a void — `reconcile void` already refuses voiding an effective allocation
+    (§7.4), so the effective-despite-void arm is defense-in-depth against a hand-crafted vault.)
   - **Projection-time invariant backstop (the real guarantee).** Independent of declaration order, a
     `SafeHarborAllocation` is **denied effectiveness** (kept inert → Path A → the tag survives via the seed
     exemption), via a loud `SafeHarborUnconservable`-class blocker, whenever the pre-2025 Universal residue

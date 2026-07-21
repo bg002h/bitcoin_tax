@@ -19,26 +19,22 @@ the rest are parked later). Only ownerless cross-cutting residue batches to the 
 
 - **[Minor] `in_force_allocation_exists` diverges from engine void semantics for a dangling void on an
   EFFECTIVE allocation.** (arch r1 Minor 1) — the record-time predicate treats ANY `VoidDecisionEvent`
-  target as not-in-force, but the engine keeps an *effective* allocation in force after a (conflicting)
-  void (`resolve.rs:466-472,1344-1352`). Product-reachable: allocate→effective → `reconcile void
-  decision|N` (Hard conflict, allocation stays effective) → `declare-tranche` pre-2025 records CLEANLY
-  (the friendly refusal the SPEC promises for "ANY in-force allocation" doesn't fire). The T5 backstop
-  still catches it loudly on the next projection (Path B → Path A), and the vault is already hard-blocked
-  by the bad void — so no wrong tax, only a missed friendly refusal. **Fix:** on the allocation side of the
-  predicate, count a void only if the allocation is engine-inert (mirror `voidable_decisions`' blocker-keyed
-  `effective_alloc`), or refuse the tranche when any non-voided-OR-effective allocation exists. **Owning
-  phase: T16 (whole-branch review)** — revisit the friendly-layer/engine-semantics alignment before merge.
+  target as not-in-force… **DONE (T16)** — TWO findings folded: (1) the review's "product-reachable via
+  `reconcile void`" premise was imprecise — `reconcile void` already REFUSES voiding an effective allocation
+  (§7.4 irrevocable), pinned by `reconcile_void_refuses_voiding_an_effective_allocation`; (2) as
+  defense-in-depth against a HAND-CRAFTED raw void, `in_force_allocation_exists(events, blockers)` now counts
+  a `SafeHarborAllocation` as in force when non-voided **OR** still engine-effective despite a void (no
+  timebar/unconservable blocker on its id — mirrors void.rs `effective_alloc`); `declare_tranche` projects
+  the existing events to supply the blockers. Mutation-proven RED by
+  `pre2025_tranche_refused_under_a_handcrafted_dangling_void_of_an_effective_allocation`.
 
-- **[Minor] `safe_harbor_residue`'s throwaway projection mis-states documented remainders when pre-2025
-  disposals actually consumed tranche sats.** (tax r1 Minor 4 + arch r1 Minor 3) — `session.rs:687-700`
-  excludes the `DeclareTranche` event but keeps pre-2025 disposal imports, so a filer whose pre-2025 sale
-  was covered by the tranche gets a short residue projection (an ignored "dispose short" blocker; the sale
-  eats documented lots the tranche covered) → the **TUI allocate opener** displays an understated/empty
-  allocatable residue. Fail-closed: the CLI allocate guards before residue, and TUI persist refuses, so
-  nothing wrong is recorded. **Fix:** the plan's own alternative — refuse opening the allocate flow when a
-  pre-2025 tranche exists (the CLI path already effectively does) — or pin the disposal-present skew as
-  accepted with a comment/test. **Owning phase: T16 (whole-branch review)** (TUI-opener UX; no P2–P8 phase
-  owns the allocate opener).
+- **[Minor] `safe_harbor_residue`'s throwaway projection mis-states documented remainders…** **DONE (T16)**
+  — took the plan's "refuse opening the flow" alternative: `safe_harbor_residue` now returns a friendly
+  `CliError::Usage` refusal when a pre-2025 tranche exists (a tranche and a safe-harbor allocation are
+  mutually exclusive — D-8 — so there is no valid allocatable residue). The CLI allocate path already
+  refuses earlier via `guard_allocation_vs_tranche`; the TUI opener surfaces this Err as its pre-flight
+  status instead of a skewed residue (its `Err` arm already handles it gracefully). Test updated:
+  `safe_harbor_residue_refuses_when_a_pre2025_tranche_exists`.
 
 - ~~**[Nit] `--wallet` is not validated against wallets known to the vault.**~~ **DONE (P8/T14)** —
   added `cmd::tranche::wallet_is_known` (pure: an import's `e.wallet` OR a prior tranche payload) + a
@@ -60,11 +56,10 @@ the rest are parked later). Only ownerless cross-cutting residue batches to the 
 
 ### From the Phase-1 fold re-review (r2, 2026-07-21)
 
-- **[Nit] SPEC.md §104 / IMPLEMENTATION_PLAN.md §556 quote the pre-split "both directions" hedge.** (tax
-  r2 Nit) — after the refusal-hint split into `ALLOCATION_IS_FINAL_HINT` / `TRANCHE_IS_FINAL_HINT`, the
-  allocation-side message no longer contains the verbatim quoted sentence (both directions still satisfy
-  the normative "hedges irrevocability" requirement). Doc-consistency only. **Owning phase: T16**
-  (whole-branch doc-consistency sweep).
+- ~~**[Nit] SPEC.md §104 / IMPLEMENTATION_PLAN.md §556 quote the pre-split "both directions" hedge.**~~
+  **DONE (T16)** — both docs now describe the DIRECTION-SPECIFIC split (`ALLOCATION_IS_FINAL_HINT` /
+  `TRANCHE_IS_FINAL_HINT`) and quote each hint, noting both satisfy the normative "hedges irrevocability"
+  requirement. Doc-consistency only (no code change).
 
 ## Folded during the Phase-1 gate (2026-07-21) — recorded for the audit trail
 

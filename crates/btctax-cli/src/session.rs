@@ -681,7 +681,23 @@ impl Session {
         let cfg = self.config()?;
         let pre2025_method = cfg.pre2025_method; // recorded field == the one used below
         let proj = cfg.to_projection();
-        let pre2025: Vec<LedgerEvent> = load_all(self.conn())?
+        let all = load_all(self.conn())?;
+        // T16 follow-up (arch r1 Minor 3 / tax r1 Minor 4): a pre-2025 tranche makes a safe-harbor
+        // allocation mutually-exclusive (D-8), so there is NO valid allocatable residue — and the residue
+        // projection below (which DROPs the tranche but keeps pre-2025 disposals that may have consumed its
+        // sats) would DISPLAY an understated/empty residue in the TUI allocate opener. Refuse opening the
+        // flow entirely, mirroring the record-time allocation guard: the CLI allocate path already refuses
+        // via `guard_allocation_vs_tranche` before reaching here, and the TUI opener surfaces this Err as
+        // its pre-flight status rather than showing a misleading residue.
+        if crate::cmd::tranche::pre2025_tranche_exists(&all) {
+            return Err(CliError::Usage(
+                "cannot open the safe-harbor allocate flow: a pre-2025 conservative-filing tranche ($0 \
+                 EstimatedConservative) is on file — v1 makes a tranche and a safe-harbor allocation \
+                 mutually exclusive (D-8). Void the tranche first to allocate."
+                    .to_string(),
+            ));
+        }
+        let pre2025: Vec<LedgerEvent> = all
             .into_iter()
             .filter(|e| match &e.id {
                 EventId::Import { .. } => {

@@ -279,14 +279,17 @@ fn post2025_tranche_records_cleanly_beside_effective_allocation() {
     );
 }
 
-// ── (f) safe_harbor_residue omits tranche sats as allocatable ────────────────────────────────────
+// ── (f) safe_harbor_residue REFUSES the opener when a pre-2025 tranche exists (T16 follow-up) ─────────
 
 #[test]
-fn safe_harbor_residue_omits_tranche_sats() {
+fn safe_harbor_residue_refuses_when_a_pre2025_tranche_exists() {
     let dir = tempfile::tempdir().unwrap();
     let vault = vault_pre2025_buy(dir.path());
 
-    // A pre-2025 tranche (0.50 BTC) recorded beside the documented 0.20-BTC buy.
+    // A pre-2025 tranche (0.50 BTC) beside the documented 0.20-BTC buy makes a safe-harbor allocation
+    // mutually-exclusive (D-8). The residue opener therefore REFUSES (rather than displaying a residue
+    // that a pre-2025 disposal could skew — arch r1 Minor 3 / tax r1 Minor 4). Matches the record-time
+    // allocation guard; the TUI opener surfaces this Err as its pre-flight status.
     cmd::tranche::declare_tranche(
         &vault,
         &pp(),
@@ -299,16 +302,12 @@ fn safe_harbor_residue_omits_tranche_sats() {
     .unwrap();
 
     let s = Session::open(&vault, &pp()).unwrap();
-    let (lots, _method) = s.safe_harbor_residue().unwrap();
-    let total_sat: i64 = lots.iter().map(|l| l.sat).sum();
-    assert_eq!(
-        total_sat, 20_000_000,
-        "the allocatable residue must be the documented buy only (0.20 BTC); the $0 tranche is NOT \
-         allocatable pre-2025 residue"
-    );
+    let err = s
+        .safe_harbor_residue()
+        .expect_err("a pre-2025 tranche must refuse the allocate-flow opener");
     assert!(
-        lots.iter().all(|l| l.usd_basis > btctax_core::Usd::ZERO),
-        "no $0 tranche lot may appear in the allocatable residue"
+        format!("{err}").contains("mutually exclusive"),
+        "the refusal names the D-8 mutual exclusion: {err}"
     );
 }
 
@@ -607,4 +606,77 @@ fn wallet_is_known_covers_imports_and_tranche_payloads_and_flags_phantoms() {
         !cmd::tranche::wallet_is_known(&evs, &phantom),
         "a never-referenced wallet is a phantom (→ warn)"
     );
+}
+
+/// (a2, T16 arch r1 Minor) The PRODUCT path is already protected: `reconcile void` REFUSES voiding an
+/// effective allocation (§7.4 irrevocable), so the "dangling void on an effective allocation" the review
+/// worried about is NOT product-reachable — it needs a hand-crafted raw `VoidDecisionEvent`. (The review's
+/// "product-reachable via reconcile void" premise was thus imprecise; documented here.)
+#[test]
+fn reconcile_void_refuses_voiding_an_effective_allocation() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = vault_effective_alloc(dir.path());
+    let alloc_id = effective_alloc_id(&vault);
+    let err = cmd::reconcile::void(&vault, &pp(), &alloc_id.canonical(), now()).unwrap_err();
+    assert!(
+        matches!(err, CliError::Usage(_)) && err.to_string().to_lowercase().contains("effective"),
+        "voiding an effective allocation is refused as irrevocable: {err}"
+    );
+}
+
+/// (a3, T16 arch r1 Minor) Defense-in-depth: even a HAND-CRAFTED raw void of an effective allocation
+/// (bypassing `reconcile void`'s §7.4 refusal above) still refuses a pre-2025 tranche — the record-time
+/// guard consults the engine's effective-vs-inert view (blockers), not just the raw void set, so the
+/// effective-but-voided allocation is STILL in force. Mirrors the P9 id-guard's hand-crafted-vault
+/// posture (the T5 projection backstop is the guarantee behind it).
+#[test]
+fn pre2025_tranche_refused_under_a_handcrafted_dangling_void_of_an_effective_allocation() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = vault_effective_alloc(dir.path());
+    let alloc_id = effective_alloc_id(&vault);
+    // Hand-craft a raw void of the effective allocation (bypasses reconcile-void's refusal).
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        btctax_core::persistence::append_decision(
+            s.conn(),
+            EventPayload::VoidDecisionEvent(btctax_core::event::VoidDecisionEvent {
+                target_event_id: alloc_id,
+            }),
+            now(),
+            time::UtcOffset::UTC,
+            None,
+        )
+        .unwrap();
+        s.save().unwrap();
+    }
+    let err = cmd::tranche::declare_tranche(
+        &vault,
+        &pp(),
+        50_000_000,
+        tranche_wallet(),
+        date!(2018 - 01 - 01),
+        date!(2018 - 12 - 31),
+        now(),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, CliError::Usage(_)),
+        "the effective-but-voided allocation still blocks the tranche: {err}"
+    );
+    assert_eq!(
+        count(&vault, |p| matches!(p, EventPayload::DeclareTranche(_))),
+        0,
+        "the refused tranche appends nothing (fail-closed)"
+    );
+}
+
+/// The persisted `SafeHarborAllocation`'s decision id (for voiding it).
+fn effective_alloc_id(vault: &Path) -> btctax_core::EventId {
+    let s = Session::open(vault, &pp()).unwrap();
+    btctax_core::persistence::load_all(s.conn())
+        .unwrap()
+        .into_iter()
+        .find(|e| matches!(e.payload, EventPayload::SafeHarborAllocation(_)))
+        .map(|e| e.id)
+        .expect("an allocation is on file")
 }

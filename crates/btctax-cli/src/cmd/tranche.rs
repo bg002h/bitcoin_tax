@@ -12,7 +12,9 @@ use crate::{CliError, Session};
 use btctax_core::conventions::TRANSITION_DATE;
 use btctax_core::event::DeclareTranche;
 use btctax_core::persistence::{append_decision, load_all};
-use btctax_core::{EventId, EventPayload, LedgerEvent, Sat, TaxDate, WalletId};
+use btctax_core::{
+    Blocker, BlockerKind, EventId, EventPayload, LedgerEvent, Sat, TaxDate, WalletId,
+};
 use btctax_store::Passphrase;
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -50,10 +52,27 @@ fn void_targets(events: &[LedgerEvent]) -> BTreeSet<EventId> {
 /// New-3: an inert allocation can be flipped effective, so it too collides with a new pre-2025 tranche).
 /// Deliberately NOT scoped to effective allocations (that would let a pre-2025 tranche slip in beside an
 /// inert one and silently discard it once the allocation later goes effective).
-pub fn in_force_allocation_exists(events: &[LedgerEvent]) -> bool {
+pub fn in_force_allocation_exists(events: &[LedgerEvent], blockers: &[Blocker]) -> bool {
     let voided = void_targets(events);
     events.iter().any(|e| {
-        matches!(e.payload, EventPayload::SafeHarborAllocation(_)) && !voided.contains(&e.id)
+        matches!(e.payload, EventPayload::SafeHarborAllocation(_)) && {
+            // In force = NON-voided (present, effective OR inert — an inert one can be flipped effective,
+            // arch r2 New-3) OR still EFFECTIVE despite a void. Arch r1 Minor (T16): the engine keeps an
+            // EFFECTIVE allocation in force after a (conflicting) void — voiding it fires a Hard
+            // DecisionConflict rather than removing it (`resolve` effective-vs-inert semantics), so a
+            // voided-BUT-effective allocation must still block a pre-2025 tranche. Effectiveness mirrors
+            // void.rs `effective_alloc`: no SafeHarborTimebar / SafeHarborUnconservable blocker on its id.
+            let non_voided = !voided.contains(&e.id);
+            let effective = {
+                let has = |k| {
+                    blockers
+                        .iter()
+                        .any(|b| b.kind == k && b.event.as_ref() == Some(&e.id))
+                };
+                !has(BlockerKind::SafeHarborTimebar) && !has(BlockerKind::SafeHarborUnconservable)
+            };
+            non_voided || effective
+        }
     })
 }
 
@@ -99,8 +118,9 @@ pub fn guard_allocation_vs_tranche(events: &[LedgerEvent]) -> Result<(), CliErro
 fn guard_tranche_vs_allocation(
     events: &[LedgerEvent],
     window_end: TaxDate,
+    blockers: &[Blocker],
 ) -> Result<(), CliError> {
-    if window_end < TRANSITION_DATE && in_force_allocation_exists(events) {
+    if window_end < TRANSITION_DATE && in_force_allocation_exists(events, blockers) {
         return Err(CliError::Usage(format!(
             "refusing to record a pre-2025 conservative-filing tranche while a safe-harbor allocation \
              is on file — v1 makes the two mutually exclusive; {ALLOCATION_IS_FINAL_HINT}."
@@ -149,7 +169,12 @@ pub fn declare_tranche(
             crate::render::wallet_label(&wallet)
         );
     }
-    guard_tranche_vs_allocation(&events, window_end)?;
+    // Project the EXISTING events (record-time, mirrors `would_conflict`) so the tranche-side guard sees
+    // the engine's effective-vs-inert allocation view — an EFFECTIVE-but-voided allocation still blocks a
+    // pre-2025 tranche (arch r1 Minor, T16).
+    let cfg = session.config()?;
+    let state = btctax_core::project::project(&events, session.prices(), &cfg.to_projection());
+    guard_tranche_vs_allocation(&events, window_end, &state.blockers)?;
     let payload = EventPayload::DeclareTranche(DeclareTranche {
         sat,
         wallet,

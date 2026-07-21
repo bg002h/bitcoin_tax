@@ -553,9 +553,12 @@ interaction. So:
 - Test: `crates/btctax-cli/tests/declare_tranche_cli.rs` (CLI) + a TUI-persist refusal KAT.
 
 **Interfaces:**
-- The refusal message HEDGES irrevocability (tax r2 N-3): *"revisit the in-app safe-harbor allocation; if
-  your filed allocation is already final, unallocated pre-2025 units are a facts-and-circumstances matter
-  for a professional."*
+- The refusal message HEDGES irrevocability (tax r2 N-3) with a **DIRECTION-SPECIFIC** hint (implemented as
+  the `ALLOCATION_IS_FINAL_HINT` / `TRANCHE_IS_FINAL_HINT` split in `cmd/tranche.rs`): the allocation-side
+  points at the allocation (*"revisit the in-app safe-harbor allocation; if your filed allocation is already
+  final, unallocated pre-2025 units are a facts-and-circumstances matter for a professional"*), the
+  tranche-side at voiding the tranche (*"Void the tranche first …; if you have already filed the tranche's
+  $0 basis, …"*). Both satisfy the normative hedge.
 
 - [ ] **Step 1: Failing tests** — (a) pre-2025 tranche refused under an **effective** allocation (CLI);
   (a2) pre-2025 tranche refused under an **inert** allocation (e.g. timebarred — arch r2 NEW-N-1; needed so
