@@ -250,6 +250,7 @@ fn make_removal_legs(
     st: &mut LedgerState,
     ev: &EventId,
     ev_pseudo: bool,
+    promotes: &PromoteSet,
 ) -> (Vec<RemovalLeg>, Option<TaxDate>) {
     let total_sat: i64 = consumed.iter().map(|c| c.sat).sum();
     let mut legs = Vec::new();
@@ -271,10 +272,31 @@ fn make_removal_legs(
             f
         };
         donor = donor.or(c.donor_acquired_at);
+        // BG-D11: a removal leg drawn from a PROMOTED lot carries its DOCUMENTED component ONLY — the
+        // ESTIMATE share EVAPORATES. A removal recognizes no gain (§170 for a donation, §1015 for a gift),
+        // so there is nothing to clamp the estimate INTO; the estimate must never fund a charitable
+        // deduction or an outbound §1015 carryover. Reuse the exact Task-4/5 clamp (`clamped_leg_basis`)
+        // with `net_proceeds_share = $0` — a removal's LITERAL proceeds: the estimate can be absorbed by
+        // nothing, so the clamp returns exactly the documented component (`gain_basis − estimate_share`),
+        // floored at $0 for any cent-scale rounding residue, while a GENUINE documented fee carry already
+        // baked into `c.gain_basis` (a prior self-transfer's `rehome_onto_lot`) is preserved unchanged.
+        // `promotes.get(..)` is `None` for a non-promoted lot ⇒ identity (returns `c.gain_basis`
+        // unchanged, byte-identical to the pre-BG-D11 path). This ONE site funds every downstream §170(e)
+        // consumer by construction — the fold's `claimed_deduction`, the full-return engine's
+        // `crypto_charitable_gifts` (Schedule A line 12), and Form 8283's `cost_basis` column — none is
+        // patched separately. The pool's `usd_basis` is still debited by the FULL `gain_basis` on consume
+        // (pools.rs `take_from`); the unclaimed floor evaporates — the §1015 NoGainNoLoss precedent
+        // (reported basis ≠ pool basis) makes this legal. A removal never enters the dual arm.
+        let basis = clamped_leg_basis(
+            promotes.get(&c.lot_id.origin_event_id),
+            c.sat,
+            c.gain_basis,
+            Usd::ZERO,
+        );
         legs.push(RemovalLeg {
             lot_id: c.lot_id.clone(),
             sat: c.sat,
-            basis: c.gain_basis,
+            basis,
             fmv_at_transfer: fmv,
             // acquired_at MUST be the SAME HP-start argument fed to `term_for` below so it can never
             // contradict `term`. Removals recognize no gain/loss → no loss-zone branching (unlike
@@ -1174,7 +1196,7 @@ pub(crate) fn fold_event(
             }
             if !consumed.is_empty() {
                 let (mut legs, donor_acquired_at) =
-                    make_removal_legs(&consumed, *fmv, date, st, &eff.id, ev_pseudo);
+                    make_removal_legs(&consumed, *fmv, date, st, &eff.id, ev_pseudo, &ctx.promotes);
                 // Task 11: fee step — consume fee_sat FIFO from source pool AFTER principal.
                 // (c) default: re-home carry onto last removal leg so donee carries FULL basis (C1).
                 // (b) config:  emits mini-disposition; empty carry; donee gets principal-only basis.
@@ -1252,7 +1274,7 @@ pub(crate) fn fold_event(
             }
             if !consumed.is_empty() {
                 let (mut legs, donor_acquired_at) =
-                    make_removal_legs(&consumed, *fmv, date, st, &eff.id, ev_pseudo);
+                    make_removal_legs(&consumed, *fmv, date, st, &eff.id, ev_pseudo, &ctx.promotes);
                 // Task 11: fee step — consume fee_sat FIFO from source pool AFTER principal.
                 // (c) default: re-home carry onto last removal leg so donee carries FULL basis (C1).
                 // (b) config:  emits mini-disposition; empty carry; donee gets principal-only basis.
