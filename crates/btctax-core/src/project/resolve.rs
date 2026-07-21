@@ -1384,6 +1384,7 @@ pub fn resolve(
             a.pre2025_method,
             &elections,
             &selections,
+            &promotes,
         );
         let alloc_sat: Sat = a.lots.iter().map(|l| l.sat).sum();
         let alloc_basis: Usd = a.lots.iter().map(|l| l.usd_basis).sum();

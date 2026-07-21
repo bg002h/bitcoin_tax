@@ -999,9 +999,14 @@ fn self_custody_nudge_absent_for_a_self_custody_tranche() {
 
 // ── Phase 9 / Task 15: no-loss-FROM-THE-ESTIMATE invariant + the two documented-fee corners + the ─────
 //    engine-integrity pins (SPEC §6 amended; tax min-7 / tax r1 I-1). CHARACTERIZATION — passes on write.
-//    The invariant is SCOPED: any negative / >$0 tranche-leg amount traces to DOCUMENTED fee_usd/fee-sat
-//    (or cent-scale pro-rata rounding), NEVER to the $0 estimate. If the ESTIMATE ever drove a loss / a
-//    >$0 filed basis, that is a Critical — STOP.
+//    The invariant is SCOPED: any negative tranche-leg amount traces to DOCUMENTED fee_usd/fee-sat (or
+//    cent-scale pro-rata rounding), NEVER to the estimate.
+//    ★ BG-D4 amendment (SPEC §3 item 6): the parent "nothing `>$0` ever filed" is re-scoped to UNPROMOTED
+//    tranches (whose estimate basis stays exactly $0 — the tests below). A PROMOTED tranche files its
+//    `filed_basis` floor as basis, so its estimate basis is `>$0`; the fold-time clamp (BG-D4,
+//    `clamped_leg_basis`) then guarantees a promoted-tranche leg's estimate-attributable gain is `≥ 0` and
+//    its estimate basis is `≥ $0` (never negative). Either way, if the ESTIMATE ever DROVE A LOSS, that is
+//    a Critical — STOP.
 
 /// A `Dispose` carrying a documented USD fee (corner (a)).
 fn sell_with_usd_fee(

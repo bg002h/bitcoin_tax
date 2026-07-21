@@ -67,3 +67,43 @@ pub struct PromoteEntry {
 
 /// Keyed by the target `DeclareTranche` `EventId` == a promoted leg's `lot_id.origin_event_id` (BG-D4).
 pub type PromoteSet = std::collections::BTreeMap<EventId, PromoteEntry>;
+
+/// BG-D4 — the disposal-leg loss clamp (Opus r3 tax I-1 formula). Files the promoted `filed_basis` floor
+/// as basis but NEVER manufactures a loss off the estimate: the estimate component is clamped against the
+/// proceeds REMAINING after the documented component, so it can neither drive a leg negative nor crowd the
+/// documented basis below zero (an estimate-ENABLED loss).
+///
+/// - `promote`: the stored promotion for this leg's tranche (`promotes.get(&lot_id.origin_event_id)`);
+///   `None` for a non-promoted lot ⇒ `usd_basis_share` is returned UNCHANGED (identity, behavior-preserving).
+/// - `leg_sat`: this leg's consumed sat (the pro-ration numerator).
+/// - `usd_basis_share`: the lot's pro-rata basis for this leg (`Consumed::gain_basis`) — MAY include a
+///   TP8(c) self-transfer fee carry re-homed into `usd_basis`, indistinguishable from the estimate.
+/// - `net_proceeds_share`: this leg's pro-rata share of the disposal's net proceeds.
+///
+/// ```text
+///   estimate_share   = round_cents(filed_basis × leg_sat / tranche_sat)   (from the STORED promote)
+///   documented_share = usd_basis_share − estimate_share                   (UNCLAMPED; may be < 0 at cent scale)
+///   estimate_basis   = clamp(net_proceeds_share − documented_share, $0, estimate_share)
+///   reported_basis   = documented_share + estimate_basis
+/// ```
+///
+/// ★ The clamp bound is `net − documented`, NOT bare `net`: without the `− documented_share` a documented
+/// fee carry would let the estimate absorb proceeds the documented basis also needs, filing a loss that is
+/// 100% but-for the estimate (floor $12k + $30 documented fee sold at $8k → `$30 + min($12k, $8k) = $8,030`
+/// = a −$30 estimate-enabled loss; the correct `net − documented` bound files `$8,000` = gain $0). A GENUINE
+/// documented loss (documented ALONE `> net`) still reaches negative: `estimate_basis → $0`,
+/// `reported = documented > net`. The unclaimed floor simply EVAPORATES (it never shifts to another leg).
+pub fn clamped_leg_basis(
+    promote: Option<&PromoteEntry>,
+    leg_sat: Sat,
+    usd_basis_share: Usd,
+    net_proceeds_share: Usd,
+) -> Usd {
+    let Some(p) = promote else {
+        return usd_basis_share; // not a promoted lot → basis unchanged
+    };
+    let estimate_share = round_cents(p.filed_basis * Usd::from(leg_sat) / Usd::from(p.tranche_sat));
+    let documented_share = usd_basis_share - estimate_share; // UNCLAMPED (a documented fee carry ≥ 0)
+    let estimate_basis = estimate_share.min((net_proceeds_share - documented_share).max(Usd::ZERO));
+    documented_share + estimate_basis
+}

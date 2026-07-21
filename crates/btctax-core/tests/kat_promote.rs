@@ -12,12 +12,12 @@
 //! PRIVACY: synthetic values only.
 
 use btctax_core::conservative::Coverage;
-use btctax_core::conservative_promote::{filed_basis_for, PromoteRefusal};
+use btctax_core::conservative_promote::{clamped_leg_basis, filed_basis_for, PromoteEntry, PromoteRefusal};
 use btctax_core::event::*;
 use btctax_core::identity::*;
 use btctax_core::price::StaticPrices;
-use btctax_core::project::{project, LotMethod, ProjectionConfig};
-use btctax_core::state::BlockerKind;
+use btctax_core::project::{evaluate_disposal, project, CandidateDisposal, LotMethod, ProjectionConfig};
+use btctax_core::state::{BlockerKind, DisposalLeg, LedgerState};
 use rust_decimal_macros::dec;
 use time::macros::{date, datetime, offset};
 
@@ -460,4 +460,231 @@ fn relocated_promoted_tranche_keeps_tag_and_floor() {
         "tag survives relocation (D-8)"
     );
     assert_eq!(lot.usd_basis, dec!(12_000), "the floor rides the relocation");
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// Task 4 — BG-D4 disposal-leg loss clamp (net − documented) + stored-`filed_basis` decomposition +
+// PromoteSet threaded through ALL FOUR FoldCtx sites. The clamp NEVER manufactures a loss off the
+// estimate; a promoted-tranche leg's estimate-attributable gain is ≥ 0 and its estimate basis is ≥ $0.
+// PRIVACY: synthetic values only.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// The single disposal leg across the whole projection (a promoted tranche drains as one lot).
+fn only_disposal_leg(st: &LedgerState) -> &DisposalLeg {
+    let legs: Vec<&DisposalLeg> = st.disposals.iter().flat_map(|d| &d.legs).collect();
+    assert_eq!(legs.len(), 1, "exactly one disposal leg in this scenario");
+    legs[0]
+}
+
+/// A documented Acquire (real basis) the fee-draw will consume.
+fn documented_buy(rf: &str, ts: time::OffsetDateTime, w: &WalletId, sat: i64, cost: i64) -> LedgerEvent {
+    imp(
+        rf,
+        ts,
+        w,
+        EventPayload::Acquire(Acquire {
+            sat,
+            usd_cost: rust_decimal::Decimal::from(cost),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    )
+}
+
+/// A confirmed self-transfer paying an on-chain `fee_sat` (mirrors `self_transfer`, adds the fee).
+/// The fee-sats are consumed FIFO from the SOURCE pool AFTER principal (TP8(c), TreatmentC default).
+#[allow(clippy::too_many_arguments)]
+fn self_transfer_with_fee(
+    out_rf: &str,
+    in_rf: &str,
+    from: &WalletId,
+    to: &WalletId,
+    sat: i64,
+    fee_sat: i64,
+    ts: time::OffsetDateTime,
+    link_seq: u64,
+) -> Vec<LedgerEvent> {
+    vec![
+        imp(
+            out_rf,
+            ts,
+            from,
+            EventPayload::TransferOut(TransferOut {
+                sat,
+                fee_sat: Some(fee_sat),
+                dest_addr: None,
+                txid: None,
+            }),
+        ),
+        imp(
+            in_rf,
+            ts,
+            to,
+            EventPayload::TransferIn(TransferIn {
+                sat,
+                src_addr: None,
+                txid: None,
+            }),
+        ),
+        dec_ev(
+            link_seq,
+            ts,
+            EventPayload::TransferLink(TransferLink {
+                out_event: EventId::import(Source::Coinbase, SourceRef::new(out_rf)),
+                in_event_or_wallet: TransferTarget::InEvent(EventId::import(
+                    Source::Coinbase,
+                    SourceRef::new(in_rf),
+                )),
+            }),
+        ),
+    ]
+}
+
+fn promote_entry(filed_basis: rust_decimal::Decimal, tranche_sat: i64) -> PromoteEntry {
+    PromoteEntry {
+        filed_basis,
+        tranche_sat,
+    }
+}
+
+// ── clamp-formula corners (direct, confounder-free unit tests of `clamped_leg_basis`) ──────────────
+
+/// ★ the `net − documented` bound (Opus r3 tax I-1): documented ALONE (> net) still reaches a REAL
+/// §1001(b) loss — the estimate evaporates to $0, reported basis = the documented component alone.
+#[test]
+fn a_genuine_documented_loss_still_reaches_negative() {
+    let e = promote_entry(dec!(12_000), 100_000_000);
+    // usd_basis $17k = $12k estimate + $5k documented; sold at net $3k. documented ($5k) > net ($3k).
+    let basis = clamped_leg_basis(Some(&e), 100_000_000, dec!(17_000), dec!(3_000));
+    assert_eq!(basis, dec!(5_000), "estimate → $0; reported = documented alone");
+    assert!(
+        dec!(3_000) - basis < dec!(0),
+        "gain = net − basis < 0: a genuine documented loss (attribution intact)"
+    );
+}
+
+/// ★ the crowd-out band `estimate ≤ net < estimate + documented` — the `net − documented` bound files $0,
+/// where a bare-`net` bound would file an estimate-ENABLED loss.
+#[test]
+fn sold_just_above_floor_band_still_files_zero_gain() {
+    let e = promote_entry(dec!(12_000), 100_000_000);
+    // usd_basis $14k = $12k estimate + $2k documented; sold at net $13k. estimate_basis = min(12k, 13k−2k).
+    let basis = clamped_leg_basis(Some(&e), 100_000_000, dec!(14_000), dec!(13_000));
+    assert_eq!(
+        basis,
+        dec!(13_000),
+        "estimate fills only the room documented leaves → gain $0 (bare-net would file −$1,000)"
+    );
+}
+
+/// The `max(·, $0)` floor: `fee_usd > proceeds` drives net < $0, but the estimate basis never goes negative.
+#[test]
+fn estimate_basis_never_goes_negative_when_fee_exceeds_proceeds() {
+    let e = promote_entry(dec!(12_000), 100_000_000);
+    let basis = clamped_leg_basis(Some(&e), 100_000_000, dec!(12_000), dec!(-500)); // net < 0
+    assert_eq!(basis, dec!(0), "estimate basis floored at $0, never negative");
+    assert!(basis >= dec!(0));
+}
+
+/// The `None` arm is the identity: a non-promoted lot's basis is returned unchanged (behavior-preserving).
+#[test]
+fn clamped_leg_basis_is_identity_when_not_promoted() {
+    assert_eq!(
+        clamped_leg_basis(None, 100_000_000, dec!(5_000), dec!(3_000)),
+        dec!(5_000),
+        "None ⇒ usd_basis_share unchanged"
+    );
+}
+
+// ── end-to-end clamp through the fold + optimizer (threaded FoldCtx) ────────────────────────────────
+
+/// A promoted tranche sold below its window-low floor files $0 gain, NOT a loss off the estimate —
+/// reported basis = proceeds (fold `make_disposal_legs`, `fold`'s FoldCtx).
+#[test]
+fn floor_below_window_low_files_zero_gain_not_a_loss() {
+    let w = exch();
+    let t = tranche_ev(1, &w, 100_000_000, date!(2025 - 01 - 01), date!(2025 - 01 - 10));
+    let p = promote_ev(2, EventId::decision(1), dec!(12_000));
+    let sell = sell_ev("SELL", datetime!(2025-06-01 00:00 UTC), &w, 100_000_000, 8_000);
+    let st = project(&[t, p, sell], &prices(), &cfg());
+    let leg = only_disposal_leg(&st);
+    assert_eq!(leg.gain, dec!(0), "estimate gain clamped ≥ 0 (BG-D4)");
+    assert_eq!(leg.basis, leg.proceeds, "basis = proceeds; no fabricated loss");
+}
+
+/// ★ Opus r3 tax I-1: a promoted tranche self-transferred with a $30 DOCUMENTED fee carry, then sold at
+/// net $8k, files gain $0 — the estimate yields to the documented fee (`net − documented`), NOT the −$30
+/// estimate-ENABLED loss a bare-`net` bound would file. The documented $30 is drawn from a SEPARATE
+/// documented lot (so it survives T5's fee-evaporation): HIFO takes the (highest-per-sat) tranche for
+/// principal, the FIFO fee-draw then takes the documented remainder, and `rehome_onto_lot` bakes the $30
+/// into the relocated tranche's `usd_basis` ($12,030) BEFORE the sale — the exact SPEC crowd-out corner.
+#[test]
+fn relocated_with_fee_then_promoted_sold_below_floor_files_zero_gain_not_an_estimate_enabled_loss() {
+    let ex = exch();
+    let sc = cold();
+    let t = tranche_ev(1, &ex, 100_000_000, date!(2025 - 01 - 01), date!(2025 - 01 - 10));
+    let p = promote_ev(2, EventId::decision(1), dec!(12_000));
+    // A separate documented lot the fee FIFO-draws from: 0.3 BTC for $30 (cheap per-sat, so HIFO takes
+    // the tranche for principal and leaves this whole lot for the fee → a $30 documented carry).
+    let doc = documented_buy("DOC", datetime!(2025-01-15 00:00 UTC), &ex, 30_000_000, 30);
+    let mut evs = vec![t, p, doc];
+    evs.extend(self_transfer_with_fee(
+        "XO",
+        "XI",
+        &ex,
+        &sc,
+        100_000_000,
+        30_000_000,
+        datetime!(2025-02-01 00:00 UTC),
+        9,
+    ));
+    evs.push(sell_ev("SELL", datetime!(2025-06-01 00:00 UTC), &sc, 100_000_000, 8_000));
+    let st = project(&evs, &prices(), &cfg());
+    let leg = only_disposal_leg(&st);
+    assert_eq!(
+        leg.gain,
+        dec!(0),
+        "no estimate-enabled loss; estimate yields to the documented fee (net − documented)"
+    );
+}
+
+/// The clamp also reaches a PRE-2025 disposal (Universal-pool fold path), not only post-2025 wallet-pool
+/// sales. (The `universal_snapshot` FoldCtx now carries the SAME promote set — the T5 fee-evaporation
+/// precondition; its snapshot-basis discrimination activates with T5's evaporation logic.)
+#[test]
+fn a_pre2025_promoted_disposal_below_floor_clamps_on_the_real_fold_path() {
+    let w = exch();
+    let t = tranche_ev(1, &w, 100_000_000, date!(2018 - 01 - 01), date!(2018 - 12 - 31));
+    let p = promote_ev(2, EventId::decision(1), dec!(12_000));
+    let sell = sell_ev("SELL", datetime!(2020-06-01 00:00 UTC), &w, 100_000_000, 8_000);
+    let st = project(&[t, p, sell], &prices(), &cfg());
+    assert_eq!(
+        only_disposal_leg(&st).gain,
+        dec!(0),
+        "the clamp reaches pre-2025 (Universal-pool) disposals too"
+    );
+}
+
+/// ★ Opus r3 arch I-1: the optimizer's per-disposal scoring (`evaluate_disposal` → `fold`, the SAME
+/// FoldCtx the real fold uses) applies the clamp — a promoted below-floor synthetic sale scores gain $0,
+/// not a phantom loss. Threading an empty promote set into that fold would file the −$4,000 phantom.
+#[test]
+fn the_optimizer_sees_the_clamped_promoted_basis_not_a_phantom() {
+    let w = exch();
+    let t = tranche_ev(1, &w, 100_000_000, date!(2025 - 01 - 01), date!(2025 - 01 - 10));
+    let p = promote_ev(2, EventId::decision(1), dec!(12_000));
+    let cand = CandidateDisposal {
+        existing_event: None,
+        wallet: w.clone(),
+        date: date!(2025 - 06 - 01),
+        sat: 100_000_000,
+        kind: DisposeKind::Sell,
+        proceeds: Some(dec!(8_000)), // below the $12k floor
+    };
+    let out = evaluate_disposal(&[t, p], &prices(), &cfg(), &cand, None).unwrap();
+    assert_eq!(
+        out.st_gain + out.lt_gain,
+        dec!(0),
+        "the optimizer scores the clamped promoted basis (gain $0, not the −$4k phantom)"
+    );
 }

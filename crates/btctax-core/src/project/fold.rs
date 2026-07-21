@@ -1,3 +1,4 @@
+use crate::conservative_promote::{clamped_leg_basis, PromoteSet};
 use crate::conventions::{
     is_long_term, long_term_default_acquired, round_cents, split_pro_rata, Sat, TaxDate, Usd,
     TRANSITION_DATE,
@@ -22,6 +23,11 @@ pub(crate) struct FoldCtx<'a> {
     pub config: &'a ProjectionConfig,
     pub elections: &'a [ElectionRec],
     pub selections: &'a BTreeMap<EventId, Vec<crate::event::LotPick>>,
+    /// BG-D4: the live promotion set (`Resolution.promotes`), keyed by a promoted leg's
+    /// `lot_id.origin_event_id`. Threaded so `make_disposal_legs` (and, via `consume_fee`, the fee
+    /// mini-disposition) can clamp a promoted tranche leg's estimate basis. Carried at EVERY FoldCtx
+    /// site (incl. `universal_snapshot`) so no fold path silently sees an un-clamped basis.
+    pub promotes: PromoteSet,
 }
 
 /// The lot-identification method applicable to a disposal on `wallet` at `date`:
@@ -126,6 +132,7 @@ fn make_disposal_legs(
     st: &mut LedgerState,
     ev: &EventId,
     ev_pseudo: bool,
+    promotes: &PromoteSet,
 ) -> Vec<DisposalLeg> {
     let total_sat: i64 = consumed.iter().map(|c| c.sat).sum();
     let mut legs = Vec::new();
@@ -190,7 +197,21 @@ fn make_disposal_legs(
                 )
             }
         } else {
-            let basis = c.gain_basis;
+            // BG-D4: a promoted tranche leg files the floor as basis but NEVER a loss off the estimate —
+            // clamp the estimate component against the proceeds remaining after the documented component.
+            // `promotes.get(..)` is `None` for a non-promoted lot ⇒ `clamped_leg_basis` returns
+            // `c.gain_basis` unchanged (byte-identical to the pre-BG-D4 path). `proceeds` is this leg's
+            // pro-rata share of `net` (the cent-remainder-takes-rest split above). A tranche lot never
+            // enters the dual arm (`rehome_onto_lot` never promotes `dual_loss_basis` None→Some), so this
+            // non-dual-arm placement is complete. The pool's `usd_basis` is still reduced by the FULL
+            // `gain_basis` on consume (pools.rs); the unclaimed floor evaporates — the §1015 NoGainNoLoss
+            // precedent (reported basis ≠ pool basis) makes this legal.
+            let basis = clamped_leg_basis(
+                promotes.get(&c.lot_id.origin_event_id),
+                c.sat,
+                c.gain_basis,
+                proceeds,
+            );
             let t = term_for(c.gain_hp_start, disposed);
             (
                 basis,
@@ -331,6 +352,7 @@ fn consume_fee(
     st: &mut LedgerState,
     ev: &EventId,
     ev_pseudo: bool,
+    promotes: &PromoteSet,
 ) -> FeeCarry {
     if fee_sat <= 0 {
         return FeeCarry::default();
@@ -359,7 +381,10 @@ fn consume_fee(
             // mini-disposition recognition record; proceeds = FMV(fee_sat); basis rides it (NOT re-homed).
             if !consumed.is_empty() {
                 let net = fmv_of(prices, date, fee_sat).unwrap_or(Usd::ZERO);
-                let legs = make_disposal_legs(&consumed, net, date, st, ev, ev_pseudo);
+                // NB (Opus r3 arch N-1): this call is INSIDE `consume_fee`, which takes `config`, not
+                // `ctx` — so it forwards `consume_fee`'s own `promotes` param, NOT `&ctx.promotes`. The
+                // TreatmentB fee mini-disposition thus clamps a promoted tranche's fee leg by construction.
+                let legs = make_disposal_legs(&consumed, net, date, st, ev, ev_pseudo, promotes);
                 st.disposals.push(Disposal {
                     event: ev.clone(),
                     kind: DisposeKind::Spend,
@@ -414,6 +439,7 @@ pub fn fold(
         config,
         elections: &res.elections,
         selections: &res.selections,
+        promotes: res.promotes.clone(), // BG-D4: real set at EVERY site (never PromoteSet::new())
     };
 
     for eff in &res.timeline {
@@ -464,6 +490,7 @@ pub fn pools_before(
         config,
         elections: &res.elections,
         selections: &res.selections,
+        promotes: res.promotes.clone(), // BG-D4: real set at EVERY site (never PromoteSet::new())
     };
     for eff in &res.timeline {
         // Fire the one-shot boundary seed the instant we cross into ≥2025 — BEFORE `target` is reached,
@@ -521,6 +548,7 @@ pub fn state_as_of(
         config,
         elections: &res.elections,
         selections: &res.selections,
+        promotes: res.promotes.clone(), // BG-D4: real set at EVERY site (never PromoteSet::new())
     };
     for eff in &res.timeline {
         // Fire the one-shot boundary seed the instant we cross into >= 2025, BEFORE folding any such
@@ -632,7 +660,8 @@ pub(crate) fn fold_event(
             }
             if !consumed.is_empty() {
                 let net = round_cents(*proceeds - *fee_usd); // TP2: disposition fee reduces proceeds
-                let mut legs = make_disposal_legs(&consumed, net, date, st, &eff.id, ev_pseudo);
+                let mut legs =
+                    make_disposal_legs(&consumed, net, date, st, &eff.id, ev_pseudo, &ctx.promotes);
                 // I-1: Task 11 fee step — consume fee_sat FIFO from source pool AFTER principal.
                 // Mirrors the gift/SelfTransfer pattern; native Dispose passes fee_sat=None (no-op).
                 // (c) default: re-home carry onto last disposal leg; fee-sat basis rolls into the
@@ -649,6 +678,7 @@ pub(crate) fn fold_event(
                     st,
                     &eff.id,
                     ev_pseudo,
+                    &ctx.promotes,
                 );
                 if let Some(last) = legs.last_mut() {
                     carry.rehome_onto_disposal_leg(last);
@@ -840,6 +870,7 @@ pub(crate) fn fold_event(
                 st,
                 &eff.id,
                 ev_pseudo,
+                &ctx.promotes,
             );
             if let Some(last) = relocated.last_mut() {
                 carry.rehome_onto_lot(last);
@@ -1130,6 +1161,7 @@ pub(crate) fn fold_event(
                     st,
                     &eff.id,
                     ev_pseudo,
+                    &ctx.promotes,
                 );
                 if let Some(last) = legs.last_mut() {
                     carry.rehome_onto_removal_leg(last);
@@ -1207,6 +1239,7 @@ pub(crate) fn fold_event(
                     st,
                     &eff.id,
                     ev_pseudo,
+                    &ctx.promotes,
                 );
                 if let Some(last) = legs.last_mut() {
                     carry.rehome_onto_removal_leg(last);
