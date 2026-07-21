@@ -1,3 +1,4 @@
+use crate::conservative_promote::{PromoteEntry, PromoteSet};
 use crate::conventions::{tax_date, Sat, TaxDate, Usd, TRANSITION_DATE, TY2025_RETURN_DUE};
 use crate::event::*;
 use crate::identity::{EventId, LotId, SourceRef, WalletId};
@@ -211,6 +212,13 @@ pub struct Resolution {
     /// `reconcile pseudo approve` persists — so "what you see == what you approve". Never written to the
     /// ledger by projection; only surfaced (count/advisory/`[PSEUDO]`) and consumed by `approve`.
     pub pseudo_decisions: Vec<PseudoDefault>,
+    /// Approach-B / BG-D1 (Task 3): the promotions in force this projection — target `DeclareTranche`
+    /// `EventId` -> the `PromoteEntry` (stored `filed_basis` + `tranche_sat`) that rewrote its
+    /// `Op::Acquire.usd_cost` at step 2 (below). Built by `live_promotes`; empty unless a `PromoteTranche`
+    /// decision is in force. Threaded onto `Resolution` (rather than consumed and discarded here) so the
+    /// fold (Task 4) can reach the same decomposition key for its own leg-builder needs — the ★ shared
+    /// type has one owner (`conservative_promote.rs`, arch r1 I-1).
+    pub promotes: PromoteSet,
 }
 
 /// The TYPE of a pseudo-reconcile synthetic default (sub-project 2) — drives the `approve` filter and the
@@ -413,8 +421,68 @@ fn build_op(
                 basis_source: BasisSource::EstimatedConservative,
             })
         }
+        // Approach-B (BG-D1, arch census item 11): a `PromoteTranche` decision never folds as its OWN
+        // `Op` — its entire effect is the target `DeclareTranche`'s `Op::Acquire.usd_cost` rewrite,
+        // performed in `resolve`'s step-2 admit branch (via `live_promotes`/`Resolution.promotes`), not a
+        // movement of its own. The `_ => Op::Skip` catch-all below already handled this correctly; this
+        // arm names it explicitly so the census has a non-silent home for the guarantee.
+        EventPayload::PromoteTranche(_) => Op::Skip,
         _ => Op::Skip,
     }
+}
+
+/// Approach-B / BG-D1 (Task 3): the promotions in force at pass-2 — target `DeclareTranche` `EventId` ->
+/// the stored WHOLE-tranche `filed_basis` + the target's `sat` (the BG-D4 decomposition key,
+/// `conservative_promote::PromoteEntry`). Built ONCE, before the step-2 timeline loop, from non-voided
+/// `PromoteTranche` decisions whose `target` resolves to a PRESENT, non-voided `DeclareTranche` event.
+///
+/// `blockers` is threaded now (unused this task) so the seam exists for Task 7, which fills the
+/// double-promote (two live promotes naming the same target) and absent/wrong-type/voided-target
+/// `DecisionConflict` pushes — v1 (this task) silently excludes those cases and takes the single live
+/// promote per target (latest-decision-seq-wins on a double-promote, `BTreeMap::insert` over ascending
+/// seq order — consistent with `manual_fmv`/`elections` above), matching the brief's scope: liveness
+/// rules are Task 7's job, not this task's.
+fn live_promotes(
+    events: &[LedgerEvent],
+    voided: &BTreeSet<EventId>,
+    _blockers: &mut Vec<Blocker>,
+) -> PromoteSet {
+    let by_id: BTreeMap<EventId, &LedgerEvent> = events.iter().map(|e| (e.id.clone(), e)).collect();
+    let mut decisions: Vec<(u64, &LedgerEvent)> = events
+        .iter()
+        .filter_map(|e| match e.id {
+            EventId::Decision { seq } => Some((seq, e)),
+            _ => None,
+        })
+        .collect();
+    decisions.sort_by_key(|(s, _)| *s);
+
+    let mut promotes = PromoteSet::new();
+    for (_seq, d) in &decisions {
+        if voided.contains(&d.id) {
+            continue;
+        }
+        let EventPayload::PromoteTranche(p) = &d.payload else {
+            continue;
+        };
+        if voided.contains(&p.target) {
+            continue; // Task 7: a promote of a VOIDED target is a conflict, not silently dropped
+        }
+        let Some(target_ev) = by_id.get(&p.target) else {
+            continue; // Task 7: absent-target conflict
+        };
+        let EventPayload::DeclareTranche(t) = &target_ev.payload else {
+            continue; // Task 7: wrong-type-target conflict
+        };
+        promotes.insert(
+            p.target.clone(),
+            PromoteEntry {
+                filed_basis: p.filed_basis,
+                tranche_sat: t.sat,
+            },
+        );
+    }
+    promotes
 }
 
 /// PASS 1. Task 7: staged decision resolution (§7.2 step 1); Task 12: §7.4 transition effectiveness.
@@ -1071,6 +1139,11 @@ pub fn resolve(
         });
     }
 
+    // Approach-B / BG-D1 (Task 3): the live promotions, built BEFORE the step-2 loop (needs `voided`,
+    // already collected in step 1a) so the DeclareTranche admit branch below can rewrite the promoted
+    // tranche's `Op::Acquire.usd_cost` while THIS SAME pass-2 build is still in progress — never after.
+    let promotes = live_promotes(events, &voided, &mut blockers);
+
     // ── 2. Build the effective imported timeline ─────────────────────────────────────────────────
     // For each imported event, apply `applied` overrides then `manual_fmv`, emit an `Eff`.
     // Unclassified with no ClassifyRaw → Op::Unclassified (blocker added in fold).
@@ -1101,6 +1174,24 @@ pub fn resolve(
                 &passthrough_skip,
                 &by_id,
             );
+            // ★ BG-D1 (Task 3, the LOAD-BEARING placement): if this tranche is PROMOTED, rewrite its
+            // Op::Acquire.usd_cost to the stored filed_basis HERE — inside resolve's step-2 build, before
+            // this Eff is pushed onto `timeline` — so step-3's `universal_snapshot` (§7.4 conservation)
+            // and every downstream void/relocation pass see the FLOOR, never the stale $0. A post-resolve
+            // mutation (the `overpayment_delta_one` what-if seam, conservative.rs) is the WRONG timing —
+            // it would adjudicate conservation against a residue that still reads $0. Only `usd_cost`
+            // changes: `basis_source` stays `EstimatedConservative` (the D-8 backstop keys on the TAG,
+            // not the amount — a promoted, > $0 tranche still denies a SafeHarborAllocation), and
+            // `acquired_at`/the tag exemptions elsewhere are untouched (term-invariance, relocation carry).
+            let op = match (op, promotes.get(&e.id)) {
+                (Op::Acquire(mut a), Some(entry))
+                    if a.basis_source == BasisSource::EstimatedConservative =>
+                {
+                    a.usd_cost = entry.filed_basis;
+                    Op::Acquire(a)
+                }
+                (op, _) => op,
+            };
             timeline.push(Eff {
                 id: e.id.clone(),
                 utc: t.window_end.midnight().assume_utc(), // effective date = window_end (D-1a-a)
@@ -1425,6 +1516,7 @@ pub fn resolve(
         elections,
         selections,
         pseudo_decisions,
+        promotes,
     }
 }
 

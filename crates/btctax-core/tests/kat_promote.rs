@@ -3,14 +3,23 @@
 //! (conservative.rs): it turns the window's min daily CLOSE (a per-BTC PRICE) into a whole-tranche basis
 //! by scaling `min * sat / SATS_PER_BTC` (the SAME formula `overpayment_delta_one` uses), and REFUSES to
 //! produce a floor unless the window has `Coverage::Full` (a `Partial`-covered min can EXCEED the true
-//! window min — conservative.rs `window_reference` doc; filing on it would UNDERSTATE a floor). PRIVACY:
-//! synthetic values only.
+//! window min — conservative.rs `window_reference` doc; filing on it would UNDERSTATE a floor).
+//!
+//! Task 3 adds the by-construction KATs for the PASS-2 rewrite itself (BG-D1, `resolve.rs` step 2): a
+//! `PromoteTranche` decision rewrites its target `DeclareTranche`'s `Op::Acquire.usd_cost` to the stored
+//! `filed_basis` — INSIDE `resolve`, before step-3's `universal_snapshot` runs — while `basis_source`
+//! stays `EstimatedConservative` (no new tag) and `acquired_at`/the relocation tag-carry are untouched.
+//! PRIVACY: synthetic values only.
 
 use btctax_core::conservative::Coverage;
 use btctax_core::conservative_promote::{filed_basis_for, PromoteRefusal};
+use btctax_core::event::*;
+use btctax_core::identity::*;
 use btctax_core::price::StaticPrices;
+use btctax_core::project::{project, LotMethod, ProjectionConfig};
+use btctax_core::state::BlockerKind;
 use rust_decimal_macros::dec;
-use time::macros::date;
+use time::macros::{date, datetime, offset};
 
 // ── fixture harness (mirrors tests/kat_tranche.rs / tests/kat_conservative.rs) ─────────────────────
 
@@ -102,4 +111,353 @@ fn no_coverage_is_hard_refused() {
     )
     .unwrap_err();
     assert!(matches!(err, PromoteRefusal::NoCoverage));
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// Task 3 — the pass-2 rewrite itself (BG-D1), by construction. Fixture harness mirrors
+// tests/kat_tranche.rs (`dec_ev`/`tranche_ev`/`void_ev`/`imp`/`sell_ev`/`self_transfer`/`alloc_ev`).
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+fn exch() -> WalletId {
+    WalletId::Exchange {
+        provider: "cb".into(),
+        account: "m".into(),
+    }
+}
+fn cold() -> WalletId {
+    WalletId::SelfCustody {
+        label: "cold".into(),
+    }
+}
+fn dec_ev(seq: u64, ts: time::OffsetDateTime, p: EventPayload) -> LedgerEvent {
+    LedgerEvent {
+        id: EventId::decision(seq),
+        utc_timestamp: ts,
+        original_tz: offset!(+00:00),
+        wallet: None,
+        payload: p,
+    }
+}
+/// A DeclareTranche decision event (mirrors kat_tranche.rs `tranche_ev`).
+fn tranche_ev(seq: u64, w: &WalletId, sat: i64, ws: time::Date, we: time::Date) -> LedgerEvent {
+    dec_ev(
+        seq,
+        datetime!(2026-01-01 00:00 UTC),
+        EventPayload::DeclareTranche(DeclareTranche {
+            sat,
+            wallet: w.clone(),
+            window_start: ws,
+            window_end: we,
+        }),
+    )
+}
+/// A PromoteTranche decision event: promotes `target`'s $0 basis to `filed_basis` (BG-D1/D2/D3).
+/// The consent/attestation/narrative fields are fixed valid placeholders — Task 3 exercises the
+/// resolve-side rewrite, not the record-time guard (narrative-emptiness validation is Task 10's).
+fn promote_ev(seq: u64, target: EventId, filed_basis: rust_decimal::Decimal) -> LedgerEvent {
+    dec_ev(
+        seq,
+        datetime!(2026-02-01 00:00 UTC),
+        EventPayload::PromoteTranche(PromoteTranche {
+            target,
+            method: FloorMethod::WindowLowClose,
+            filed_basis,
+            coverage: Coverage::Full,
+            provenance_attested: true,
+            acknowledgment: Acknowledgment {
+                phrase: "I understand and accept the risk".into(),
+                shown_terms: vec![],
+                provenance_text: "acquired by purchase within the declared window".into(),
+                provenance_version: "v1".into(),
+            },
+            part_ii_narrative: "cash P2P purchase, no records; window bounded on-chain".into(),
+        }),
+    )
+}
+fn imp(rf: &str, ts: time::OffsetDateTime, w: &WalletId, p: EventPayload) -> LedgerEvent {
+    LedgerEvent {
+        id: EventId::import(Source::Coinbase, SourceRef::new(rf)),
+        utc_timestamp: ts,
+        original_tz: offset!(+00:00),
+        wallet: Some(w.clone()),
+        payload: p,
+    }
+}
+fn sell_ev(
+    rf: &str,
+    ts: time::OffsetDateTime,
+    w: &WalletId,
+    sat: i64,
+    proceeds: i64,
+) -> LedgerEvent {
+    imp(
+        rf,
+        ts,
+        w,
+        EventPayload::Dispose(Dispose {
+            sat,
+            usd_proceeds: rust_decimal::Decimal::from(proceeds),
+            fee_usd: dec!(0),
+            kind: DisposeKind::Sell,
+        }),
+    )
+}
+/// A confirmed self-transfer: TransferOut (from) + TransferIn (to) + a TransferLink decision
+/// (mirrors kat_tranche.rs `self_transfer`).
+fn self_transfer(
+    out_rf: &str,
+    in_rf: &str,
+    from: &WalletId,
+    to: &WalletId,
+    sat: i64,
+    ts: time::OffsetDateTime,
+    link_seq: u64,
+) -> Vec<LedgerEvent> {
+    vec![
+        imp(
+            out_rf,
+            ts,
+            from,
+            EventPayload::TransferOut(TransferOut {
+                sat,
+                fee_sat: None,
+                dest_addr: None,
+                txid: None,
+            }),
+        ),
+        imp(
+            in_rf,
+            ts,
+            to,
+            EventPayload::TransferIn(TransferIn {
+                sat,
+                src_addr: None,
+                txid: None,
+            }),
+        ),
+        dec_ev(
+            link_seq,
+            ts,
+            EventPayload::TransferLink(TransferLink {
+                out_event: EventId::import(Source::Coinbase, SourceRef::new(out_rf)),
+                in_event_or_wallet: TransferTarget::InEvent(EventId::import(
+                    Source::Coinbase,
+                    SourceRef::new(in_rf),
+                )),
+            }),
+        ),
+    ]
+}
+/// A SafeHarborAllocation decision event (mirrors kat_tranche.rs `alloc_ev`).
+fn alloc_ev(
+    seq: u64,
+    attested: bool,
+    pre2025_method: LotMethod,
+    lots: Vec<AllocLot>,
+) -> LedgerEvent {
+    dec_ev(
+        seq,
+        datetime!(2024-12-01 00:00 UTC),
+        EventPayload::SafeHarborAllocation(SafeHarborAllocation {
+            lots,
+            as_of_date: date!(2025 - 01 - 01),
+            method: AllocMethod::ActualPosition,
+            timely_allocation_attested: attested,
+            pre2025_method,
+        }),
+    )
+}
+fn alloc_lot(w: &WalletId, sat: i64, basis: i64, acq: time::Date) -> AllocLot {
+    AllocLot {
+        wallet: w.clone(),
+        sat,
+        usd_basis: rust_decimal::Decimal::from(basis),
+        acquired_at: acq,
+        dual_loss_basis: None,
+        donor_acquired_at: None,
+    }
+}
+fn prices() -> StaticPrices {
+    StaticPrices::default()
+}
+fn cfg() -> ProjectionConfig {
+    ProjectionConfig::default()
+}
+
+/// ★ The load-bearing KAT (BG-D1): a promoted tranche's lot reads the FILED floor as `usd_basis`, while
+/// `basis_source` stays `EstimatedConservative` (no new tag — the D-8 backstop keys on the TAG) and
+/// `acquired_at` stays `window_end` (term-invariance: the rewrite touches ONLY `usd_cost`).
+#[test]
+fn promote_rewrites_usd_cost_but_keeps_the_tag() {
+    let w = exch();
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2017 - 12 - 01),
+        date!(2017 - 12 - 31),
+    );
+    let p = promote_ev(2, EventId::decision(1), dec!(12_000));
+    let st = project(&[t, p], &prices(), &cfg());
+    let lot = st.lots.iter().find(|l| l.wallet == w).unwrap();
+    assert_eq!(lot.usd_basis, dec!(12_000), "usd_cost rewritten to the floor");
+    assert_eq!(
+        lot.basis_source,
+        BasisSource::EstimatedConservative,
+        "NO new BasisSource (BG-D1)"
+    );
+    assert_eq!(
+        lot.acquired_at,
+        date!(2017 - 12 - 31),
+        "term-invariance: acquired_at still window_end (BG-D9/M-7)"
+    );
+}
+
+/// BG-D1: the D-8 backstop keys on the `EstimatedConservative` TAG, not the $0 amount — so a PROMOTED
+/// (>$0) tranche still denies a `SafeHarborAllocation` effectiveness, even one whose totals are crafted
+/// to match the PROMOTED residue exactly (proving the denial isn't a totals-mismatch coincidence — mirrors
+/// kat_tranche.rs's Task-5 backstop KAT `allocation_that_would_conserve_over_a_tranche_residue_...`).
+#[test]
+fn promoted_pre2025_tranche_still_trips_the_d8_backstop() {
+    let w = exch();
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2018 - 01 - 01),
+        date!(2018 - 12 - 31),
+    );
+    let p = promote_ev(2, EventId::decision(1), dec!(4_200));
+    let a = alloc_ev(
+        3,
+        true,
+        LotMethod::Hifo,
+        vec![alloc_lot(&w, 100_000_000, 4_200, date!(2018 - 12 - 31))],
+    );
+    let st = project(&[t, p, a], &prices(), &cfg());
+    assert!(
+        st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::SafeHarborUnconservable),
+        "a promoted pre-2025 tranche still trips the D-8 backstop (tag-keyed, BG-D1): {:?}",
+        st.blockers
+    );
+    let lot = st
+        .lots
+        .iter()
+        .find(|l| l.basis_source == BasisSource::EstimatedConservative)
+        .expect("the promoted tranche survives via Path A (not discarded by Path B)");
+    assert_eq!(lot.usd_basis, dec!(4_200), "the floor rides Path A untouched");
+}
+
+/// ★ BG-D1 / arch r1 M-3 — the LOAD-BEARING placement guarantee: the rewrite must land INSIDE `resolve`'s
+/// step 2, so step-3's `universal_snapshot` folds the PROMOTED (not the stale $0) tranche when evaluating
+/// a `SafeHarborAllocation`'s conservation.
+///
+/// Design (why this actually discriminates the timing, unlike a bare presence-check): HIFO consumption
+/// order is PER-SAT-COST keyed (`pools.rs::hifo_cmp`) — a `$0` lot is EXPLICITLY sorted LAST regardless of
+/// remaining_sat; once promoted to a floor whose per-sat cost EXCEEDS a co-held documented lot's, it sorts
+/// FIRST instead. A pre-2025 disposal sized to EXACTLY the tranche's own sat therefore drains a DIFFERENT
+/// lot depending on whether the floor is visible at fold time:
+///   - floor VISIBLE (this task, rewrite inside step 2): the disposal drains the (now-highest-cost)
+///     tranche FIRST and EXACTLY exhausts it (fully consumed → removed from the pool, `remaining_sat=0`
+///     ⇒ the D-8 `has_tranche_residue` prong is FALSE), leaving the documented lot COMPLETELY untouched.
+///     The 2025-01-01 residue is the documented lot alone (60M sat / $3,000) — an allocation listing
+///     exactly that conserves cleanly: NO `SafeHarborUnconservable`.
+///   - floor BLIND (the `overpayment_delta_one`/post-resolve timing bug — equivalent, from `resolve`'s own
+///     step-3 perspective, to never having applied the rewrite at all): the tranche still sorts LAST
+///     (its `usd_cost` never left `$0` inside THIS `resolve()` call), so the SAME disposal instead drains
+///     the documented lot first, leaving the TRANCHE fully intact — its own residue trips `has_tranche_residue`
+///     AND its basis ($0) leaves `snap.basis` at $1,000 instead of $3,000. EITHER way the SAME allocation
+///     now fails conservation.
+///
+/// So "this allocation conserves cleanly" is possible ONLY when step 3 saw the floor. Reverting the
+/// rewrite's placement (or removing it) flips this test from green to a wrongly-fired
+/// `SafeHarborUnconservable` — red, exactly the "Mutation to kill" the brief names.
+#[test]
+fn snapshot_timing_the_floor_is_visible_to_pass1_conservation() {
+    let w = exch();
+    // The promoted tranche: 0.4 BTC, filed floor $12,000 ⇒ $30,000/BTC — well above the documented lot's
+    // per-sat cost below, so once promoted it ranks FIRST under HIFO (unpromoted, $0, it would rank LAST).
+    let t = tranche_ev(
+        1,
+        &w,
+        40_000_000,
+        date!(2015 - 01 - 01),
+        date!(2015 - 12 - 31),
+    );
+    let p = promote_ev(2, EventId::decision(1), dec!(12_000));
+    // A documented lot: 0.6 BTC for $3,000 ($5,000/BTC) — cheaper per-sat than the promoted floor.
+    let buy = imp(
+        "BUY",
+        datetime!(2014-06-01 00:00 UTC),
+        &w,
+        EventPayload::Acquire(Acquire {
+            sat: 60_000_000,
+            usd_cost: dec!(3_000),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    // A pre-2025 disposal for EXACTLY the tranche's own sat — drains a DIFFERENT lot depending on whether
+    // the floor is visible (see doc above).
+    let sell = sell_ev("SELL", datetime!(2016-06-01 00:00 UTC), &w, 40_000_000, 50_000);
+    // An allocation listing EXACTLY the floor-VISIBLE residue: the untouched documented lot alone.
+    let a = alloc_ev(
+        4,
+        true,
+        LotMethod::Hifo,
+        vec![alloc_lot(&w, 60_000_000, 3_000, date!(2014 - 06 - 01))],
+    );
+    let st = project(&[t, p, buy, sell, a], &prices(), &cfg());
+    assert!(
+        !st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::SafeHarborUnconservable),
+        "conservation adjudicated against the FLOOR-visible residue (rewrite is in step 2, not \
+         post-resolve) — a floor-blind snapshot would instead see the tranche undrained (still ranked \
+         last under HIFO) and wrongly deny effectiveness: {:?}",
+        st.blockers
+    );
+}
+
+/// §6: a promoted tranche self-transferred Exchange→SelfCustody keeps BOTH `EstimatedConservative` AND
+/// the floor (fold.rs `SelfTransfer` relocation carries `usd_basis`/tag verbatim from the already-rewritten
+/// source lot — no fold.rs change needed; the rewrite happening upstream, in `resolve`, is what makes this
+/// hold by construction). Post-2025 tranche (mirrors kat_tranche.rs `tranche_tag_survives_self_transfer_relocation`)
+/// isolates the relocation exemption from pre-2025 Path-A reconstruction.
+#[test]
+fn relocated_promoted_tranche_keeps_tag_and_floor() {
+    let ex = exch();
+    let sc = cold();
+    let t = tranche_ev(
+        1,
+        &ex,
+        50_000_000,
+        date!(2025 - 01 - 01),
+        date!(2025 - 02 - 01),
+    );
+    let p = promote_ev(2, EventId::decision(1), dec!(12_000));
+    let mut evs = vec![t, p];
+    evs.extend(self_transfer(
+        "XO",
+        "XI",
+        &ex,
+        &sc,
+        50_000_000,
+        datetime!(2025-03-01 00:00 UTC),
+        9,
+    ));
+    let st = project(&evs, &prices(), &cfg());
+    let lot = st
+        .lots
+        .iter()
+        .find(|l| matches!(l.wallet, WalletId::SelfCustody { .. }))
+        .expect("a relocated lot in self-custody");
+    assert_eq!(
+        lot.basis_source,
+        BasisSource::EstimatedConservative,
+        "tag survives relocation (D-8)"
+    );
+    assert_eq!(lot.usd_basis, dec!(12_000), "the floor rides the relocation");
 }
