@@ -390,6 +390,15 @@ fn build_op(
             }
         }
         EventPayload::Unclassified(_) => Op::Unclassified,
+        // Conservative-filing (SPEC D-1): a tranche folds as a $0-basis acquire via the shared Op::Acquire
+        // arm — which yields acquired_at = eff.date() = window_end, usd_basis = $0, pool_key(window_end),
+        // and bumps sigma_in. No new fold arm needed; D-1a-e (sigma_in) is satisfied structurally.
+        EventPayload::DeclareTranche(t) => Op::Acquire(Acquire {
+            sat: t.sat,
+            usd_cost: Usd::ZERO,
+            fee_usd: Usd::ZERO,
+            basis_source: BasisSource::EstimatedConservative,
+        }),
         _ => Op::Skip,
     }
 }
@@ -1054,6 +1063,45 @@ pub fn resolve(
     // Non-import events (decisions, conflicts) are skipped — they have no timeline entry.
     let mut timeline = Vec::new();
     for e in events {
+        // Conservative-filing (SPEC D-1/D-1a): a `DeclareTranche` decision is the ONE decision that folds
+        // as a PRIMARY movement (via `Op::Acquire`). Admit it with a projection `Eff` whose date IS
+        // `window_end` — built from `window_end.midnight()` so `eff.date() == window_end` and `pool_key` /
+        // the pre-2025 conservation snapshot bucket it correctly, WITHOUT back-dating the persisted
+        // `utc_timestamp` (which keeps its creation-time meaning). Match on `&e.payload` directly (never
+        // `applied`): `ClassifyRaw` overrides are scoped to Unclassified imports, so a decision is never
+        // legitimately overridden, and reading through `applied` would let a hand-crafted `ClassifyRaw`
+        // suppress or forge a tranche. Guard on the Decision id for the same reason.
+        if let (EventId::Decision { .. }, EventPayload::DeclareTranche(t)) = (&e.id, &e.payload) {
+            if voided.contains(&e.id) {
+                continue; // a voided tranche folds nothing (D-1a-d)
+            }
+            let op = build_op(
+                &e.id,
+                &e.payload,
+                &manual_fmv,
+                &links,
+                &consumed_ins,
+                &inbound_class,
+                &outflow_class,
+                &income_reclassify,
+                &passthrough_skip,
+                &by_id,
+            );
+            timeline.push(Eff {
+                id: e.id.clone(),
+                utc: t.window_end.midnight().assume_utc(), // effective date = window_end (D-1a-a)
+                tz: UtcOffset::UTC,
+                src_priority: u8::MAX, // decisions sort after same-instant imports
+                // ★ CONSTANT src_ref (D-1a-b): sort_canonical compares src_ref (String-Ord) at key 3,
+                //   before the numeric EventId key — a per-seq string would misorder seq 10 vs 2. A
+                //   constant lets same-window ties fall through to the numeric id key.
+                src_ref: SourceRef::new(""),
+                wallet: Some(t.wallet.clone()),
+                op,
+                pseudo: false, // D-5: a tranche is filing-ready, never pseudo
+            });
+            continue;
+        }
         let (src_priority, src_ref) = match &e.id {
             EventId::Import { source, source_ref } => (source.priority(), source_ref.clone()),
             _ => continue,
@@ -1379,5 +1427,9 @@ pub fn sort_canonical(timeline: &mut [Eff]) {
             .cmp(&b.utc)
             .then(a.src_priority.cmp(&b.src_priority))
             .then(a.src_ref.cmp(&b.src_ref))
+            // ★ D-1a-b: final numeric tie-break on the EventId. Two same-window DeclareTranche Effs share
+            //   (utc, src_priority=MAX, src_ref=""); EventId::Decision{seq} compares `seq` as u64, so they
+            //   order 2-before-10 (NOT lexicographically). Import Effs never reach here (distinct src_ref).
+            .then(a.id.cmp(&b.id))
     });
 }
