@@ -80,7 +80,13 @@ pub fn seed_transition(mode: &TransitionMode, pools: &mut PoolSet, _st: &mut Led
             // Reconstruct: each remaining Universal lot moves to ITS holding wallet's pool, basis/acquired_at kept.
             // (Sats already removed into pending_reconciliation are not in the pool, so they are excluded here.)
             for mut lot in universal.into_iter().filter(|l| l.remaining_sat > 0) {
-                lot.basis_source = BasisSource::ReconstructedPerWallet;
+                // D-8: a conservative-filing tranche keeps its `EstimatedConservative` tag through the
+                // 2025 Path-A reconstruction — else the tag never reaches 2025+ disposal legs and the P3
+                // dip / P7 mandatory-disclosure layer silently drops. Path A keeps basis/acquired_at and
+                // routes to `PoolKey::Wallet`, so the exemption changes ONLY the tag (position identical).
+                if lot.basis_source != BasisSource::EstimatedConservative {
+                    lot.basis_source = BasisSource::ReconstructedPerWallet;
+                }
                 let key = PoolKey::Wallet(lot.wallet.clone());
                 pools.push_lot(key, lot);
             }

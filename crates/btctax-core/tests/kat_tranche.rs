@@ -6,10 +6,12 @@
 
 use btctax_core::event::*;
 use btctax_core::forms::how_acquired_from;
+use btctax_core::forms::{form_8949, Form8949Box, Form8949Part};
 use btctax_core::identity::*;
 use btctax_core::price::StaticPrices;
 use btctax_core::project::resolve::{resolve, sort_canonical, Op};
 use btctax_core::project::{project, ProjectionConfig};
+use btctax_core::state::Term;
 use btctax_core::voidable_decisions;
 use btctax_core::Form8283HowAcquired;
 use rust_decimal_macros::dec;
@@ -233,4 +235,261 @@ fn two_same_window_tranches_are_additive_not_a_duplicate_conflict() {
     );
     assert_eq!(lots[0].lot_id.origin_event_id, EventId::decision(2));
     assert_eq!(lots[1].lot_id.origin_event_id, EventId::decision(10));
+}
+
+// ── Task 4 fixtures: self-custody wallet, import sale, confirmed self-transfer ─────────────────────
+fn cold() -> WalletId {
+    WalletId::SelfCustody {
+        label: "cold".into(),
+    }
+}
+fn imp(rf: &str, ts: time::OffsetDateTime, w: &WalletId, p: EventPayload) -> LedgerEvent {
+    LedgerEvent {
+        id: EventId::import(Source::Coinbase, SourceRef::new(rf)),
+        utc_timestamp: ts,
+        original_tz: offset!(+00:00),
+        wallet: Some(w.clone()),
+        payload: p,
+    }
+}
+fn sell_ev(
+    rf: &str,
+    ts: time::OffsetDateTime,
+    w: &WalletId,
+    sat: i64,
+    proceeds: i64,
+) -> LedgerEvent {
+    imp(
+        rf,
+        ts,
+        w,
+        EventPayload::Dispose(Dispose {
+            sat,
+            usd_proceeds: rust_decimal::Decimal::from(proceeds),
+            fee_usd: dec!(0),
+            kind: DisposeKind::Sell,
+        }),
+    )
+}
+/// A confirmed self-transfer: TransferOut (from) + TransferIn (to) + a TransferLink decision.
+fn self_transfer(
+    out_rf: &str,
+    in_rf: &str,
+    from: &WalletId,
+    to: &WalletId,
+    sat: i64,
+    ts: time::OffsetDateTime,
+    link_seq: u64,
+) -> Vec<LedgerEvent> {
+    vec![
+        imp(
+            out_rf,
+            ts,
+            from,
+            EventPayload::TransferOut(TransferOut {
+                sat,
+                fee_sat: None,
+                dest_addr: None,
+                txid: None,
+            }),
+        ),
+        imp(
+            in_rf,
+            ts,
+            to,
+            EventPayload::TransferIn(TransferIn {
+                sat,
+                src_addr: None,
+                txid: None,
+            }),
+        ),
+        dec_ev(
+            link_seq,
+            ts,
+            EventPayload::TransferLink(TransferLink {
+                out_event: EventId::import(Source::Coinbase, SourceRef::new(out_rf)),
+                in_event_or_wallet: TransferTarget::InEvent(EventId::import(
+                    Source::Coinbase,
+                    SourceRef::new(in_rf),
+                )),
+            }),
+        ),
+    ]
+}
+
+/// Task 4 (D-8 + D-6/G-4): a PRE-2025 tranche survives the 2025 Path-A reconstruction with its tag, and a
+/// 2025 disposal of it carries `EstimatedConservative`, derives LONG-term, and files Part II / Box L (the
+/// TY2025 no-1099-DA digital-asset box, inherited from the merged box fix) with `box_needs_review`.
+#[test]
+fn tranche_tag_survives_2025_path_a_seed_and_reaches_a_2025_disposal_leg() {
+    let w = exch();
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2015 - 01 - 01),
+        date!(2015 - 12 - 31),
+    );
+    let sell = sell_ev(
+        "S25",
+        datetime!(2025-06-01 00:00 UTC),
+        &w,
+        100_000_000,
+        60_000,
+    ); // > 1yr after window_end
+    let st = project(&[t, sell], &prices(), &cfg());
+    let leg = st
+        .disposals
+        .iter()
+        .filter(|d| d.disposed_at.year() == 2025)
+        .flat_map(|d| &d.legs)
+        .find(|l| l.wallet == w)
+        .expect("a 2025 disposal leg");
+    assert_eq!(
+        leg.basis_source,
+        BasisSource::EstimatedConservative,
+        "tag survives Path-A seed (D-8)"
+    );
+    assert_eq!(
+        leg.term,
+        Term::LongTerm,
+        "term DERIVED from window_end (G-4), not assumed"
+    );
+    let rows = form_8949(&st, 2025);
+    let row = rows
+        .iter()
+        .find(|r| r.cost_basis == dec!(0))
+        .expect("the $0 tranche row");
+    assert_eq!(row.part, Form8949Part::LongTerm, "LT → Part II (D-6/G-4)");
+    assert_eq!(row.box_, Form8949Box::L, "TY2025 no-1099-DA LT → Box L");
+    assert!(
+        row.box_needs_review,
+        "exchange-sold tranche → box_needs_review (reclass to K/H if 1099-DA)"
+    );
+}
+
+/// Task 4 (G-4 other direction): a tranche sold < 1yr after window_end is SHORT-term → Part I / Box I,
+/// never silently long-term.
+#[test]
+fn a_short_term_tranche_disposal_is_box_i_never_hard_coded_long_term() {
+    let w = exch();
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2025 - 01 - 01),
+        date!(2025 - 02 - 01),
+    );
+    let sell = sell_ev(
+        "S25",
+        datetime!(2025-09-01 00:00 UTC),
+        &w,
+        100_000_000,
+        60_000,
+    ); // < 1yr
+    let st = project(&[t, sell], &prices(), &cfg());
+    let row = form_8949(&st, 2025)
+        .into_iter()
+        .find(|r| r.cost_basis == dec!(0))
+        .unwrap();
+    assert_eq!(row.part, Form8949Part::ShortTerm);
+    assert_eq!(row.box_, Form8949Box::I, "TY2025 no-1099-DA ST → Box I");
+}
+
+/// Task 4 (tax M-1): the holding period is "LT iff window_end > 1yr before disposal" — pinned at the
+/// EXACT boundary through the tranche wiring. Sale exactly one year after window_end is SHORT-term
+/// (strict `>`, §1222 / Pub 544 day-after); one day later is LONG-term.
+#[test]
+fn holding_period_boundary_is_iff_exactly_one_year() {
+    let w = exch();
+    let we = date!(2025 - 03 - 01);
+    let mk = |sell_ts: time::OffsetDateTime| {
+        let t = tranche_ev(1, &w, 100_000_000, date!(2025 - 03 - 01), we);
+        let s = sell_ev("S", sell_ts, &w, 100_000_000, 60_000);
+        let st = project(&[t, s], &prices(), &cfg());
+        st.disposals
+            .iter()
+            .flat_map(|d| &d.legs)
+            .find(|l| l.wallet == w)
+            .unwrap()
+            .term
+    };
+    assert_eq!(
+        mk(datetime!(2026-03-01 00:00 UTC)),
+        Term::ShortTerm,
+        "exactly one year after window_end is SHORT-term"
+    );
+    assert_eq!(
+        mk(datetime!(2026-03-02 00:00 UTC)),
+        Term::LongTerm,
+        "one day past a year is LONG-term"
+    );
+}
+
+/// Task 4 (tax N-2): D-6 is year-aware BOTH directions — a tranche disposed in a PRE-2025 tax year files
+/// the securities Box C (ST) / F (LT), not the digital-asset I/L.
+#[test]
+fn a_pre_2025_tranche_disposal_files_the_securities_boxes_c_f() {
+    let w = exch();
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2015 - 01 - 01),
+        date!(2015 - 12 - 31),
+    );
+    let sell = sell_ev(
+        "S20",
+        datetime!(2020-06-01 00:00 UTC),
+        &w,
+        100_000_000,
+        40_000,
+    ); // pre-2025, > 1yr → LT
+    let st = project(&[t, sell], &prices(), &cfg());
+    let row = form_8949(&st, 2020)
+        .into_iter()
+        .find(|r| r.cost_basis == dec!(0))
+        .unwrap();
+    assert_eq!(
+        row.box_,
+        Form8949Box::F,
+        "pre-2025 LT tranche → securities Box F, not digital-asset L"
+    );
+}
+
+/// Task 4 (D-8 / arch r2 New-2): a relocated tranche keeps its tag — exactly the Exchange→SelfCustody
+/// move P8 recommends — so the disposal leg keeps P3's dip advisory and P7's mandatory disclosure.
+#[test]
+fn tranche_tag_survives_self_transfer_relocation() {
+    let ex = exch();
+    let sc = cold();
+    // Post-2025 tranche (directly in the Exchange pool, no transition) → isolate the relocation exemption.
+    let t = tranche_ev(
+        1,
+        &ex,
+        50_000_000,
+        date!(2025 - 01 - 01),
+        date!(2025 - 02 - 01),
+    );
+    let mut evs = vec![t];
+    evs.extend(self_transfer(
+        "XO",
+        "XI",
+        &ex,
+        &sc,
+        50_000_000,
+        datetime!(2025-03-01 00:00 UTC),
+        9,
+    ));
+    let st = project(&evs, &prices(), &cfg());
+    let lot = st
+        .lots
+        .iter()
+        .find(|l| l.wallet == sc)
+        .expect("a relocated lot in self-custody");
+    assert_eq!(
+        lot.basis_source,
+        BasisSource::EstimatedConservative,
+        "tag survives relocation (D-8)"
+    );
 }

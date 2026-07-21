@@ -809,7 +809,15 @@ pub(crate) fn fold_event(
                     original_sat: c.sat,
                     remaining_sat: c.sat,
                     usd_basis: c.gain_basis,
-                    basis_source: BasisSource::CarriedFromTransfer,
+                    // D-8: a relocated tranche keeps its `EstimatedConservative` tag — exactly the
+                    // Exchange→SelfCustody move P8 recommends — so the disposal leg keeps P3's dip advisory
+                    // and P7's MANDATORY disclosure. usd_basis/acquired_at carry either way; only the tag
+                    // (the advisory/disclosure key) is at stake.
+                    basis_source: if c.basis_source == BasisSource::EstimatedConservative {
+                        BasisSource::EstimatedConservative
+                    } else {
+                        BasisSource::CarriedFromTransfer
+                    },
                     dual_loss_basis: c.loss_basis,
                     donor_acquired_at: c.donor_acquired_at,
                     basis_pending: c.basis_pending,
