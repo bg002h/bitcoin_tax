@@ -1,6 +1,6 @@
 # Conservative-Filing — Build Continuity (resume point)
 
-**Updated 2026-07-20: PHASE 1 + ALL IMPL TASKS T8–T15 DONE; T16 whole-branch two-lens Fable review r1 FOLDED (`0f30e01`) — all blocking findings fixed; r2 re-review DISPATCHED. Tree clean (full suite 2159 green, full CI-only gate green). Resume: await r2 → if 0C/0I, update memory + present merge-ready (merge = OWNER'S call).**
+**Updated 2026-07-20: PHASE 1 + ALL IMPL TASKS T8–T15 DONE; T16 review r1 folded (`0f30e01`), r2 re-review found the r1 I-1 fix incomplete → RE-ARCHITECTED + folded (`c66859a`); r3 verify DISPATCHED. Tree clean (full suite 2160 green, CI-only gate green). Resume: await r3 → if 0C/0I both lenses, update memory `conservative-filing-project` + present merge-ready (merge = OWNER'S call).**
 
 ## Where we are
 
