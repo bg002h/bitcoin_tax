@@ -2,7 +2,9 @@
 //! folding, no I/O. They are provenance-neutral (never assert "purchase"/"bought"; a tranche is
 //! undocumented BTC filed at its AS-FILED basis) and never instruct a tax-understating action.
 
+use crate::conventions::TaxDate;
 use crate::event::LedgerEvent;
+use crate::optimize::{persistability, Persistability};
 use crate::price::PriceProvider;
 use crate::project::{in_force_methods, ProjectionConfig};
 use crate::state::{Disposal, LedgerState};
@@ -78,6 +80,37 @@ pub fn method_inversion_advisory(
     }
 }
 
+/// P4 / D-3 custody-aware compliance warning: `Some` iff specifically identifying an undocumented
+/// (tranche) unit held at an EXCHANGE (broker) for a disposal on `sale_date` falls inside the 2027+
+/// broker envelope, where own-books specific identification is INSUFFICIENT — the broker must
+/// communicate the specific identification by the time of sale, or the sale defaults to FIFO. This is
+/// pure REUSE of the optimizer's `persistability` gate (D-3, verified TRUE by both lenses): the warning
+/// fires exactly when that gate returns `ForbiddenBroker2027` (a broker wallet with a `year >= 2027`
+/// sale). `SelfCustody` (own-books, never expires) and `≤2026` sales (the Notices 2025-7/2026-20
+/// own-books transitional relief, in force through 2026-12-31) return `None`. No transfer-statement
+/// modeling in v1 (D-3). `selection_made` is threaded to `persistability` faithfully — the
+/// `ForbiddenBroker2027` branch ignores it (the broker envelope precedes the contemporaneous lever),
+/// but threading it means this advisory inherits any future change to that gate's semantics rather than
+/// re-deriving the predicate. Provenance-neutral (never asserts "purchase"/"bought").
+pub fn tranche_broker_specific_id_advisory(
+    wallet: &WalletId,
+    sale_date: TaxDate,
+    selection_made: TaxDate,
+) -> Option<String> {
+    match persistability(wallet, sale_date, selection_made) {
+        Persistability::ForbiddenBroker2027 => Some(format!(
+            "Broker specific-ID warning — this {year} disposal draws undocumented BTC held at an \
+             exchange (broker). From 2027, own-books specific identification is INSUFFICIENT at a \
+             broker (the Notices 2025-7/2026-20 own-books transitional relief ended 2026-12-31): the \
+             broker must communicate the specific identification by the time of sale, or the sale \
+             defaults to FIFO. To keep own-books specific-ID for no-records units, hold them in \
+             self-custody.",
+            year = sale_date.year(),
+        )),
+        _ => None,
+    }
+}
+
 /// D-9 report-time assembly (surfaced by `report --tax-year` + the TUI Tax tab): the combined
 /// conservative-filing advisory for `year` — every dip advisory for a tranche disposal made in `year`,
 /// followed by a method-inversion warning for each wallet still holding a tranche lot whose in-force
@@ -93,7 +126,15 @@ pub fn tranche_report_advisory(
 ) -> Option<String> {
     let mut lines: Vec<String> = Vec::new();
 
-    // Dip advisories — one per disposal made in `year` that consumed a tranche leg.
+    // Dip advisories — one per disposal made in `year` that consumed a tranche leg — plus the P4/D-3
+    // custody-aware compliance warning for a disposal that draws a tranche lot held at a broker in the
+    // 2027+ envelope. Disposals are single-wallet, so the first tranche leg's wallet is representative.
+    // Scope decision (D-3, deliberate): the warning is DISPOSAL-scoped, NOT gated on an explicit
+    // `LotSelection` — it is prospective/conditional ("to specifically identify these units at a 2027+
+    // broker you need a broker-communicated selection..."), so it also reaches the filer who has not yet
+    // recorded a specific-ID but whose undocumented units sit at a broker (exactly the P8 self-custody
+    // audience). Informational, never gates; it errs toward SURFACING the 2027 limitation rather than
+    // risk under-warning (cf. SPEC D-8's accepted knowingly-over-broad friendly warning).
     for d in state
         .disposals
         .iter()
@@ -101,6 +142,18 @@ pub fn tranche_report_advisory(
     {
         if let Some(a) = tranche_dip_advisory(d) {
             lines.push(a);
+        }
+        if let Some(w) = d
+            .legs
+            .iter()
+            .find(|l| l.basis_source == BasisSource::EstimatedConservative)
+            .map(|l| &l.wallet)
+        {
+            // The disposal date doubles as `selection_made` — irrelevant to the ForbiddenBroker2027
+            // branch (the broker envelope precedes the contemporaneous lever) — see the builder doc.
+            if let Some(a) = tranche_broker_specific_id_advisory(w, d.disposed_at, d.disposed_at) {
+                lines.push(a);
+            }
         }
     }
 

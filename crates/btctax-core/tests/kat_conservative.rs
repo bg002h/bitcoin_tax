@@ -11,7 +11,10 @@
 //! config's `pre2025_method`. Years are pinned explicitly so the fixtures aren't a confusing RED.
 //! PRIVACY: synthetic values only.
 
-use btctax_core::conservative::{method_inversion_advisory, tranche_dip_advisory};
+use btctax_core::conservative::{
+    method_inversion_advisory, tranche_broker_specific_id_advisory, tranche_dip_advisory,
+    tranche_report_advisory,
+};
 use btctax_core::event::*;
 use btctax_core::identity::*;
 use btctax_core::price::StaticPrices;
@@ -28,8 +31,17 @@ fn exch() -> WalletId {
         account: "m".into(),
     }
 }
+fn self_custody() -> WalletId {
+    WalletId::SelfCustody {
+        label: "cold".into(),
+    }
+}
 fn prices() -> StaticPrices {
     StaticPrices::default()
+}
+/// The default projection config (post-2025 method = HIFO default; used for the ≥2025 P4 disposals).
+fn config() -> ProjectionConfig {
+    ProjectionConfig::default()
 }
 fn config_hifo_pre2025() -> ProjectionConfig {
     ProjectionConfig {
@@ -324,5 +336,129 @@ fn inversion_advisory_absent_without_a_documented_lot() {
     assert!(
         method_inversion_advisory(&st, &w, LotMethod::Fifo).is_none(),
         "a tranche-only wallet cannot invert (no documented lot to draw first)"
+    );
+}
+
+// ── Phase 4 / Task 10: custody-aware compliance warning (P4 / D-3; reuse) ────────────────────────────
+//
+// Pure REUSE of the optimizer's `persistability` broker envelope (D-3, verified TRUE by both lenses):
+// the warning fires exactly when a disposal draws an undocumented (tranche) unit held at an EXCHANGE
+// (broker) in the 2027+ envelope, where own-books specific identification is insufficient (Notices
+// 2025-7/2026-20 own-books transitional relief ended 2026-12-31). SelfCustody (own-books never expires)
+// and ≤2026 sales are silent. No transfer-statement modeling (D-3). The three discrimination KATs are
+// the test (Step-5 mutation is n/a for pure reuse); the marker phrase `Broker specific-ID warning`
+// distinguishes it from the dip/inversion advisories that share the assembler.
+
+/// P4 / D-3: the warning FIRES for a ≥2027 disposal that draws a tranche lot held at an exchange.
+#[test]
+fn broker_specific_id_warning_fires_for_a_2027_exchange_tranche_disposal() {
+    let w = exch();
+    let events = vec![
+        tranche_ev(
+            1,
+            &w,
+            100_000_000,
+            date!(2026 - 01 - 01),
+            date!(2026 - 01 - 31),
+        ),
+        sell_ev(
+            "SELL",
+            datetime!(2027-06-01 00:00 UTC),
+            &w,
+            100_000_000,
+            90_000,
+        ),
+    ];
+    let st = project(&events, &prices(), &config());
+    let adv = tranche_report_advisory(&st, &events, &prices(), &config(), 2027)
+        .expect("a 2027 exchange tranche disposal produces advisories");
+    assert!(
+        adv.contains("Broker specific-ID warning"),
+        "the P4 broker envelope warning must fire for a 2027 exchange tranche disposal: {adv}"
+    );
+}
+
+/// P4 / D-3: SILENT for self-custody — own-books specific identification never expires there. The dip
+/// advisory still fires (a tranche leg was consumed), so the assertion is marker-ABSENCE, not `None`.
+#[test]
+fn broker_specific_id_warning_silent_for_a_2027_self_custody_tranche_disposal() {
+    let w = self_custody();
+    let events = vec![
+        tranche_ev(
+            1,
+            &w,
+            100_000_000,
+            date!(2026 - 01 - 01),
+            date!(2026 - 01 - 31),
+        ),
+        sell_ev(
+            "SELL",
+            datetime!(2027-06-01 00:00 UTC),
+            &w,
+            100_000_000,
+            90_000,
+        ),
+    ];
+    let st = project(&events, &prices(), &config());
+    let adv = tranche_report_advisory(&st, &events, &prices(), &config(), 2027)
+        .expect("a tranche disposal still yields a dip advisory");
+    assert!(
+        !adv.contains("Broker specific-ID warning"),
+        "self-custody never triggers the broker envelope (own-books specific-ID never expires): {adv}"
+    );
+}
+
+/// P4 / D-3: SILENT for a ≤2026 exchange disposal — the Notices 2025-7/2026-20 own-books transitional
+/// relief still applies through 2026-12-31. Again marker-ABSENCE (the dip advisory still fires).
+#[test]
+fn broker_specific_id_warning_silent_below_2027() {
+    let w = exch();
+    let events = vec![
+        tranche_ev(
+            1,
+            &w,
+            100_000_000,
+            date!(2025 - 06 - 01),
+            date!(2025 - 06 - 30),
+        ),
+        sell_ev(
+            "SELL",
+            datetime!(2026-06-01 00:00 UTC),
+            &w,
+            100_000_000,
+            90_000,
+        ),
+    ];
+    let st = project(&events, &prices(), &config());
+    let adv = tranche_report_advisory(&st, &events, &prices(), &config(), 2026)
+        .expect("a tranche disposal still yields a dip advisory");
+    assert!(
+        !adv.contains("Broker specific-ID warning"),
+        "≤2026 own-books relief (Notices 2025-7/2026-20) — no broker envelope warning: {adv}"
+    );
+}
+
+/// P4 / D-3: the builder itself is a faithful `persistability` gate — `Some` iff `ForbiddenBroker2027`
+/// (broker wallet + ≥2027 sale). This pins the reuse independent of the assembler wiring above.
+#[test]
+fn broker_specific_id_advisory_builder_gates_on_the_2027_broker_envelope() {
+    assert!(
+        tranche_broker_specific_id_advisory(&exch(), date!(2027 - 06 - 01), date!(2027 - 06 - 01))
+            .is_some(),
+        "2027 exchange → ForbiddenBroker2027 → warns"
+    );
+    assert!(
+        tranche_broker_specific_id_advisory(
+            &self_custody(),
+            date!(2027 - 06 - 01),
+            date!(2027 - 06 - 01)
+        )
+        .is_none(),
+        "self-custody → never the broker envelope"
+    );
+    assert!(
+        tranche_broker_specific_id_advisory(&exch(), date!(2026 - 12 - 31), date!(2026 - 12 - 31))
+            .is_none(),
+        "2026 exchange → own-books transitional relief still applies"
     );
 }
