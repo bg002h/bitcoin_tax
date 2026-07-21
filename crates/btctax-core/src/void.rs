@@ -7,12 +7,13 @@
 use crate::event::{EventPayload, LedgerEvent};
 use crate::identity::EventId;
 use crate::state::{Blocker, BlockerKind};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Return `true` when `payload` is a revocable decision type.
 ///
 /// Revocable: TransferLink, ReclassifyOutflow, ClassifyInbound, ManualFmv, ClassifyRaw,
-/// MethodElection, LotSelection, ReclassifyIncome, SelfTransferPassthrough, SafeHarborAllocation.
+/// MethodElection, LotSelection, ReclassifyIncome, SelfTransferPassthrough, SafeHarborAllocation,
+/// DeclareTranche, PromoteTranche.
 /// Non-revocable (excluded from void list): SupersedeImport, RejectImport, VoidDecisionEvent,
 /// and imported event payloads (Acquire, Income, Dispose, TransferOut, TransferIn, Unclassified,
 /// ImportConflict — these carry Import EventIds, not Decision EventIds, so they cannot appear in
@@ -31,6 +32,8 @@ pub fn is_revocable_payload(payload: &EventPayload) -> bool {
             | EventPayload::SelfTransferPassthrough(_)
             | EventPayload::SafeHarborAllocation(_)
             | EventPayload::DeclareTranche(_)
+            // BG-D9 (Task 7): a promote is a layered decision — revoke it to revert the tranche to $0.
+            | EventPayload::PromoteTranche(_)
     )
 }
 
@@ -48,6 +51,11 @@ pub fn is_revocable_payload(payload: &EventPayload) -> bool {
 ///    (`resolve.rs:1030-1039`) — a permanent, damaging no-op that gates the whole tax year. INERT
 ///    allocations (timebarred OR unconservable) STAY voidable — the void applies cleanly (source
 ///    invariant `resolve.rs:1030-1031`; behavior pinned by `btctax-core/tests/transition.rs:403`).
+/// 5. `!promoted_target` — **BG-D9 (Task 7), the tranche analogue of #7.** A `DeclareTranche` named by
+///    EXACTLY ONE non-voided `PromoteTranche` (i.e. held in force by a LIVE promote) is excluded: voiding
+///    it is inert + `DecisionConflict` (`resolve.rs` deferred tranche-void adjudication), the same damaging
+///    no-op #7 guards against. ≥2 promotes is itself a conflict with NONE in force, so that tranche's void
+///    APPLIES and it STAYS voidable; the `PromoteTranche` decision itself is ALWAYS voidable (revoke → $0).
 ///
 /// Returned in `events` iteration order (the pre-sort filter order of the shipped single-void flow);
 /// callers sort by `seq` for display.
@@ -80,11 +88,33 @@ pub fn voidable_decisions<'a>(
         }
     };
 
+    // BG-D9 (Task 7): a `DeclareTranche` held in force by a LIVE promote is likewise excluded — voiding it
+    // is inert + `DecisionConflict` (`resolve.rs` tranche-void adjudication), a damaging no-op that mirrors
+    // the #7 effective-allocation exclusion. "Live" = EXACTLY one non-voided `PromoteTranche` names it —
+    // matching `live_promotes`' membership: ≥2 is itself a conflict with NONE in force, so that tranche's
+    // void APPLIES and it STAYS voidable. The `PromoteTranche` decision ITSELF stays voidable (revoke → $0).
+    let promote_count: BTreeMap<EventId, usize> = {
+        let mut m: BTreeMap<EventId, usize> = BTreeMap::new();
+        for e in events {
+            if let EventPayload::PromoteTranche(p) = &e.payload {
+                if !voided.contains(&e.id) {
+                    *m.entry(p.target.clone()).or_insert(0) += 1;
+                }
+            }
+        }
+        m
+    };
+    let promoted_target = |e: &LedgerEvent| {
+        matches!(e.payload, EventPayload::DeclareTranche(_))
+            && promote_count.get(&e.id).copied() == Some(1)
+    };
+
     events
         .iter()
         .filter(|e| matches!(e.id, EventId::Decision { .. }))
         .filter(|e| !voided.contains(&e.id))
         .filter(|e| is_revocable_payload(&e.payload))
         .filter(|e| !effective_alloc(e))
+        .filter(|e| !promoted_target(e))
         .collect()
 }

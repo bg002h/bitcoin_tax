@@ -12,17 +12,22 @@
 //! PRIVACY: synthetic values only.
 
 use btctax_core::conservative::Coverage;
-use btctax_core::conservative_promote::{clamped_leg_basis, filed_basis_for, PromoteEntry, PromoteRefusal};
+use btctax_core::conservative_promote::{
+    clamped_leg_basis, filed_basis_for, PromoteEntry, PromoteRefusal,
+};
 use btctax_core::event::*;
 use btctax_core::forms::form_8283;
 use btctax_core::identity::*;
 use btctax_core::price::StaticPrices;
-use btctax_core::project::{evaluate_disposal, project, CandidateDisposal, LotMethod, ProjectionConfig};
+use btctax_core::project::{
+    evaluate_disposal, project, would_conflict, CandidateDisposal, LotMethod, ProjectionConfig,
+};
 use btctax_core::state::{BlockerKind, DisposalLeg, LedgerState, RemovalKind};
 use btctax_core::tax::return_1040::assemble_absolute;
 use btctax_core::tax::return_inputs::{Owner, ReturnInputs, ScheduleAInputs, W2};
 use btctax_core::tax::testonly::{ty2024_params, ty2024_table};
 use btctax_core::tax::FilingStatus;
+use btctax_core::voidable_decisions;
 use btctax_core::Usd;
 use rust_decimal_macros::dec;
 use std::collections::BTreeMap;
@@ -307,7 +312,11 @@ fn promote_rewrites_usd_cost_but_keeps_the_tag() {
     let p = promote_ev(2, EventId::decision(1), dec!(12_000));
     let st = project(&[t, p], &prices(), &cfg());
     let lot = st.lots.iter().find(|l| l.wallet == w).unwrap();
-    assert_eq!(lot.usd_basis, dec!(12_000), "usd_cost rewritten to the floor");
+    assert_eq!(
+        lot.usd_basis,
+        dec!(12_000),
+        "usd_cost rewritten to the floor"
+    );
     assert_eq!(
         lot.basis_source,
         BasisSource::EstimatedConservative,
@@ -354,7 +363,11 @@ fn promoted_pre2025_tranche_still_trips_the_d8_backstop() {
         .iter()
         .find(|l| l.basis_source == BasisSource::EstimatedConservative)
         .expect("the promoted tranche survives via Path A (not discarded by Path B)");
-    assert_eq!(lot.usd_basis, dec!(4_200), "the floor rides Path A untouched");
+    assert_eq!(
+        lot.usd_basis,
+        dec!(4_200),
+        "the floor rides Path A untouched"
+    );
 }
 
 /// ★ BG-D1 / arch r1 M-3 — the LOAD-BEARING placement guarantee: the rewrite must land INSIDE `resolve`'s
@@ -408,7 +421,13 @@ fn snapshot_timing_the_floor_is_visible_to_pass1_conservation() {
     );
     // A pre-2025 disposal for EXACTLY the tranche's own sat — drains a DIFFERENT lot depending on whether
     // the floor is visible (see doc above).
-    let sell = sell_ev("SELL", datetime!(2016-06-01 00:00 UTC), &w, 40_000_000, 50_000);
+    let sell = sell_ev(
+        "SELL",
+        datetime!(2016-06-01 00:00 UTC),
+        &w,
+        40_000_000,
+        50_000,
+    );
     // An allocation listing EXACTLY the floor-VISIBLE residue: the untouched documented lot alone.
     let a = alloc_ev(
         4,
@@ -466,7 +485,11 @@ fn relocated_promoted_tranche_keeps_tag_and_floor() {
         BasisSource::EstimatedConservative,
         "tag survives relocation (D-8)"
     );
-    assert_eq!(lot.usd_basis, dec!(12_000), "the floor rides the relocation");
+    assert_eq!(
+        lot.usd_basis,
+        dec!(12_000),
+        "the floor rides the relocation"
+    );
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════
@@ -484,7 +507,13 @@ fn only_disposal_leg(st: &LedgerState) -> &DisposalLeg {
 }
 
 /// A documented Acquire (real basis) the fee-draw will consume.
-fn documented_buy(rf: &str, ts: time::OffsetDateTime, w: &WalletId, sat: i64, cost: i64) -> LedgerEvent {
+fn documented_buy(
+    rf: &str,
+    ts: time::OffsetDateTime,
+    w: &WalletId,
+    sat: i64,
+    cost: i64,
+) -> LedgerEvent {
     imp(
         rf,
         ts,
@@ -563,7 +592,11 @@ fn a_genuine_documented_loss_still_reaches_negative() {
     let e = promote_entry(dec!(12_000), 100_000_000);
     // usd_basis $17k = $12k estimate + $5k documented; sold at net $3k. documented ($5k) > net ($3k).
     let basis = clamped_leg_basis(Some(&e), 100_000_000, dec!(17_000), dec!(3_000));
-    assert_eq!(basis, dec!(5_000), "estimate → $0; reported = documented alone");
+    assert_eq!(
+        basis,
+        dec!(5_000),
+        "estimate → $0; reported = documented alone"
+    );
     assert!(
         dec!(3_000) - basis < dec!(0),
         "gain = net − basis < 0: a genuine documented loss (attribution intact)"
@@ -589,7 +622,11 @@ fn sold_just_above_floor_band_still_files_zero_gain() {
 fn estimate_basis_never_goes_negative_when_fee_exceeds_proceeds() {
     let e = promote_entry(dec!(12_000), 100_000_000);
     let basis = clamped_leg_basis(Some(&e), 100_000_000, dec!(12_000), dec!(-500)); // net < 0
-    assert_eq!(basis, dec!(0), "estimate basis floored at $0, never negative");
+    assert_eq!(
+        basis,
+        dec!(0),
+        "estimate basis floored at $0, never negative"
+    );
     assert!(basis >= dec!(0));
 }
 
@@ -610,13 +647,28 @@ fn clamped_leg_basis_is_identity_when_not_promoted() {
 #[test]
 fn floor_below_window_low_files_zero_gain_not_a_loss() {
     let w = exch();
-    let t = tranche_ev(1, &w, 100_000_000, date!(2025 - 01 - 01), date!(2025 - 01 - 10));
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2025 - 01 - 01),
+        date!(2025 - 01 - 10),
+    );
     let p = promote_ev(2, EventId::decision(1), dec!(12_000));
-    let sell = sell_ev("SELL", datetime!(2025-06-01 00:00 UTC), &w, 100_000_000, 8_000);
+    let sell = sell_ev(
+        "SELL",
+        datetime!(2025-06-01 00:00 UTC),
+        &w,
+        100_000_000,
+        8_000,
+    );
     let st = project(&[t, p, sell], &prices(), &cfg());
     let leg = only_disposal_leg(&st);
     assert_eq!(leg.gain, dec!(0), "estimate gain clamped ≥ 0 (BG-D4)");
-    assert_eq!(leg.basis, leg.proceeds, "basis = proceeds; no fabricated loss");
+    assert_eq!(
+        leg.basis, leg.proceeds,
+        "basis = proceeds; no fabricated loss"
+    );
 }
 
 /// ★ Opus r3 tax I-1: a promoted tranche self-transferred with a $30 DOCUMENTED fee carry, then sold at
@@ -626,10 +678,17 @@ fn floor_below_window_low_files_zero_gain_not_a_loss() {
 /// principal, the FIFO fee-draw then takes the documented remainder, and `rehome_onto_lot` bakes the $30
 /// into the relocated tranche's `usd_basis` ($12,030) BEFORE the sale — the exact SPEC crowd-out corner.
 #[test]
-fn relocated_with_fee_then_promoted_sold_below_floor_files_zero_gain_not_an_estimate_enabled_loss() {
+fn relocated_with_fee_then_promoted_sold_below_floor_files_zero_gain_not_an_estimate_enabled_loss()
+{
     let ex = exch();
     let sc = cold();
-    let t = tranche_ev(1, &ex, 100_000_000, date!(2025 - 01 - 01), date!(2025 - 01 - 10));
+    let t = tranche_ev(
+        1,
+        &ex,
+        100_000_000,
+        date!(2025 - 01 - 01),
+        date!(2025 - 01 - 10),
+    );
     let p = promote_ev(2, EventId::decision(1), dec!(12_000));
     // A separate documented lot the fee FIFO-draws from: 0.3 BTC for $30 (cheap per-sat, so HIFO takes
     // the tranche for principal and leaves this whole lot for the fee → a $30 documented carry).
@@ -645,7 +704,13 @@ fn relocated_with_fee_then_promoted_sold_below_floor_files_zero_gain_not_an_esti
         datetime!(2025-02-01 00:00 UTC),
         9,
     ));
-    evs.push(sell_ev("SELL", datetime!(2025-06-01 00:00 UTC), &sc, 100_000_000, 8_000));
+    evs.push(sell_ev(
+        "SELL",
+        datetime!(2025-06-01 00:00 UTC),
+        &sc,
+        100_000_000,
+        8_000,
+    ));
     let st = project(&evs, &prices(), &cfg());
     let leg = only_disposal_leg(&st);
     assert_eq!(
@@ -661,9 +726,21 @@ fn relocated_with_fee_then_promoted_sold_below_floor_files_zero_gain_not_an_esti
 #[test]
 fn a_pre2025_promoted_disposal_below_floor_clamps_on_the_real_fold_path() {
     let w = exch();
-    let t = tranche_ev(1, &w, 100_000_000, date!(2018 - 01 - 01), date!(2018 - 12 - 31));
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2018 - 01 - 01),
+        date!(2018 - 12 - 31),
+    );
     let p = promote_ev(2, EventId::decision(1), dec!(12_000));
-    let sell = sell_ev("SELL", datetime!(2020-06-01 00:00 UTC), &w, 100_000_000, 8_000);
+    let sell = sell_ev(
+        "SELL",
+        datetime!(2020-06-01 00:00 UTC),
+        &w,
+        100_000_000,
+        8_000,
+    );
     let st = project(&[t, p, sell], &prices(), &cfg());
     assert_eq!(
         only_disposal_leg(&st).gain,
@@ -678,7 +755,13 @@ fn a_pre2025_promoted_disposal_below_floor_clamps_on_the_real_fold_path() {
 #[test]
 fn the_optimizer_sees_the_clamped_promoted_basis_not_a_phantom() {
     let w = exch();
-    let t = tranche_ev(1, &w, 100_000_000, date!(2025 - 01 - 01), date!(2025 - 01 - 10));
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2025 - 01 - 01),
+        date!(2025 - 01 - 10),
+    );
     let p = promote_ev(2, EventId::decision(1), dec!(12_000));
     let cand = CandidateDisposal {
         existing_event: None,
@@ -722,7 +805,13 @@ fn the_optimizer_sees_the_clamped_promoted_basis_not_a_phantom() {
 fn promote_then_self_transfer_fee_then_sell_below_floor() -> Vec<LedgerEvent> {
     let ex = exch();
     let sc = cold();
-    let t = tranche_ev(1, &ex, 100_000_000, date!(2025 - 01 - 01), date!(2025 - 01 - 10));
+    let t = tranche_ev(
+        1,
+        &ex,
+        100_000_000,
+        date!(2025 - 01 - 01),
+        date!(2025 - 01 - 10),
+    );
     let p = promote_ev(2, EventId::decision(1), dec!(12_000));
     let mut evs = vec![t, p];
     // principal 99,990,000 sat + fee 10,000 sat = the WHOLE tranche (100,000,000 sat): the fee's FIFO
@@ -737,7 +826,13 @@ fn promote_then_self_transfer_fee_then_sell_below_floor() -> Vec<LedgerEvent> {
         datetime!(2025-02-01 00:00 UTC),
         9,
     ));
-    evs.push(sell_ev("SELL", datetime!(2025-06-01 00:00 UTC), &sc, 99_990_000, 0));
+    evs.push(sell_ev(
+        "SELL",
+        datetime!(2025-06-01 00:00 UTC),
+        &sc,
+        99_990_000,
+        0,
+    ));
     evs
 }
 
@@ -784,9 +879,21 @@ fn tranche_fee_draw_evaporates_estimate_then_sale_files_zero_loss() {
 fn the_pre2025_conservation_snapshot_sees_the_fee_evaporation_not_a_phantom_basis() {
     let w = exch();
     let sc = cold();
-    let t = tranche_ev(1, &w, 100_000_000, date!(2015 - 01 - 01), date!(2015 - 12 - 31));
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2015 - 01 - 01),
+        date!(2015 - 12 - 31),
+    );
     let p = promote_ev(2, EventId::decision(1), dec!(12_000));
-    let doc = documented_buy("DOC", datetime!(2016-01-01 00:00 UTC), &w, 50_000_000, 8_000);
+    let doc = documented_buy(
+        "DOC",
+        datetime!(2016-01-01 00:00 UTC),
+        &w,
+        50_000_000,
+        8_000,
+    );
     let mut evs = vec![t, p, doc];
     // principal (50M sat, HIFO-first) fully consumes DOC, leaving the tranche wholly untouched; the
     // fee (100M sat) then FIFO-draws the ENTIRE tranche — fully consuming it in this SAME event.
@@ -923,7 +1030,10 @@ fn full_return_noncash_12(st: &LedgerState, year: i32) -> Usd {
 /// The Form 8283 `cost_basis` column for the (first/only) donation leg — sourced from `leg.basis`.
 fn form_8283_cost_basis(st: &LedgerState, year: i32) -> Usd {
     let rows = form_8283(st, year, &BTreeMap::new());
-    assert!(!rows.is_empty(), "a donation produces at least one 8283 row");
+    assert!(
+        !rows.is_empty(),
+        "a donation produces at least one 8283 row"
+    );
     rows[0].cost_basis
 }
 
@@ -975,7 +1085,13 @@ fn promoted_tranche_donated_short_term_deducts_documented_only_on_both_emitters(
 #[test]
 fn promoted_tranche_gifted_carries_documented_only_1015_basis() {
     let w = exch();
-    let t = tranche_ev(1, &w, 100_000_000, date!(2024 - 01 - 01), date!(2024 - 01 - 10));
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2024 - 01 - 01),
+        date!(2024 - 01 - 10),
+    );
     let p = promote_ev(2, EventId::decision(1), dec!(12_000));
     let out = transfer_out("OUT", datetime!(2024-06-01 00:00 UTC), &w, 100_000_000);
     let recl = gift_reclass(3, "OUT", dec!(50_000));
@@ -990,7 +1106,10 @@ fn promoted_tranche_gifted_carries_documented_only_1015_basis() {
         "§1015 carryover documented-only (BG-D11): the estimate evaporates, never carries: {:?}",
         rem.legs.iter().map(|l| l.basis).collect::<Vec<_>>()
     );
-    assert_eq!(rem.claimed_deduction, None, "a Gift is not a §170 deduction");
+    assert_eq!(
+        rem.claimed_deduction, None,
+        "a Gift is not a §170 deduction"
+    );
 }
 
 /// BG-D11 (§6, tax r4 M-3) — a LONG-TERM donation still deducts FMV (the estimate/basis is uninvolved in
@@ -1033,7 +1152,13 @@ fn long_term_donation_deduction_is_fmv_and_8283_column_is_documented_only() {
 #[test]
 fn non_promoted_donation_still_deducts_full_documented_basis() {
     let w = exch();
-    let buy = documented_buy("BUY", datetime!(2024-01-10 00:00 UTC), &w, 100_000_000, 9_000);
+    let buy = documented_buy(
+        "BUY",
+        datetime!(2024-01-10 00:00 UTC),
+        &w,
+        100_000_000,
+        9_000,
+    );
     let out = transfer_out("OUT", datetime!(2024-06-01 00:00 UTC), &w, 100_000_000);
     let recl = donate_reclass(1, "OUT", dec!(50_000));
     let st = project(&[buy, out, recl], &prices(), &cfg());
@@ -1067,7 +1192,13 @@ fn non_promoted_donation_still_deducts_full_documented_basis() {
 fn promoted_removal_evaporates_estimate_but_keeps_the_documented_fee_carry() {
     let ex = exch();
     let sc = cold();
-    let t = tranche_ev(1, &ex, 100_000_000, date!(2024 - 01 - 01), date!(2024 - 01 - 10));
+    let t = tranche_ev(
+        1,
+        &ex,
+        100_000_000,
+        date!(2024 - 01 - 01),
+        date!(2024 - 01 - 10),
+    );
     let p = promote_ev(2, EventId::decision(1), dec!(12_000));
     // A separate documented lot the fee FIFO-draws from: 0.3 BTC for $30 (cheap per-sat, so HIFO takes
     // the tranche for principal and leaves this whole lot for the fee → a $30 documented carry).
@@ -1079,12 +1210,17 @@ fn promoted_removal_evaporates_estimate_but_keeps_the_documented_fee_carry() {
         &ex,
         &sc,
         100_000_000, // principal: the whole tranche
-        30_000_000,  // fee: drains the documented lot → $30 documented carry onto the relocated tranche
+        30_000_000, // fee: drains the documented lot → $30 documented carry onto the relocated tranche
         datetime!(2024-02-01 00:00 UTC),
         9,
     ));
     // Donate the relocated tranche short-term (acquired 2024-01-10, donated 2024-06-01) at FMV $50,000.
-    evs.push(transfer_out("OUT", datetime!(2024-06-01 00:00 UTC), &sc, 100_000_000));
+    evs.push(transfer_out(
+        "OUT",
+        datetime!(2024-06-01 00:00 UTC),
+        &sc,
+        100_000_000,
+    ));
     evs.push(donate_reclass(10, "OUT", dec!(50_000)));
     let st = project(&evs, &prices(), &cfg());
     let rem = st
@@ -1105,4 +1241,236 @@ fn promoted_removal_evaporates_estimate_but_keeps_the_documented_fee_carry() {
         "the full-return engine also sees the documented-only $30 (not the $12k estimate)"
     );
     assert_eq!(form_8283_cost_basis(&st, 2024), dec!(30));
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// Task 7 — BG-D9 engine-adjudicated lifecycle: a promote is revocable; a second promote on one target
+// conflicts (neither applies); a RAW void of a tranche held by a live promote is INERT + DecisionConflict
+// (never a dangling target); BOTH voids converge in either order with no brick; and a promoted tranche is
+// excluded from the bulk-void candidate set (the promote itself stays voidable). PRIVACY: synthetic only.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// A VoidDecisionEvent decision targeting `target` (mirrors kat_tranche.rs `void_ev`).
+fn void_ev(seq: u64, target: EventId) -> LedgerEvent {
+    dec_ev(
+        seq,
+        datetime!(2026-03-01 00:00 UTC),
+        EventPayload::VoidDecisionEvent(VoidDecisionEvent {
+            target_event_id: target,
+        }),
+    )
+}
+
+/// The single conservative-filing tranche lot's basis (the promoted/unpromoted DeclareTranche lot).
+fn tranche_lot_basis(st: &LedgerState) -> Usd {
+    let lots: Vec<&_> = st
+        .lots
+        .iter()
+        .filter(|l| l.basis_source == BasisSource::EstimatedConservative)
+        .collect();
+    assert_eq!(
+        lots.len(),
+        1,
+        "exactly one conservative-filing tranche lot in this scenario: {:?}",
+        st.lots
+    );
+    lots[0].usd_basis
+}
+
+/// BG-D9: two live promotes naming the SAME tranche → `DecisionConflict`, and NEITHER applies (NOT
+/// last-wins) — the tranche basis stays $0. (Mutation: last-wins would rewrite it to $20,000.)
+#[test]
+fn second_promote_on_one_target_conflicts_neither_applies() {
+    let w = exch();
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2017 - 12 - 01),
+        date!(2017 - 12 - 31),
+    );
+    let p1 = promote_ev(2, EventId::decision(1), dec!(12_000));
+    let p2 = promote_ev(3, EventId::decision(1), dec!(20_000));
+    let st = project(&[t, p1, p2], &prices(), &cfg());
+    assert!(
+        st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::DecisionConflict),
+        "two live promotes on one tranche → DecisionConflict: {:?}",
+        st.blockers
+    );
+    assert_eq!(
+        tranche_lot_basis(&st),
+        Usd::ZERO,
+        "neither promote applies under conflict (NOT last-wins): basis stays $0"
+    );
+}
+
+/// ★ BG-D9: a RAW void of the `DeclareTranche` while a promote is LIVE is resolver-INERT + `DecisionConflict`
+/// (never a dangling target). Adjudicated against the FINAL non-voided-promote set (deferred): the
+/// tranche-void does not apply, so the promote still rewrites the basis to the floor.
+#[test]
+fn void_of_tranche_with_live_promote_is_inert_and_conflicts() {
+    let w = exch();
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2017 - 12 - 01),
+        date!(2017 - 12 - 31),
+    );
+    let p = promote_ev(2, EventId::decision(1), dec!(12_000));
+    let v = void_ev(3, EventId::decision(1)); // raw void of the DeclareTranche while the promote is live
+    let st = project(&[t, p, v], &prices(), &cfg());
+    assert!(
+        st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::DecisionConflict),
+        "voiding a tranche with a live promote → DecisionConflict (never a dangling target): {:?}",
+        st.blockers
+    );
+    assert_eq!(
+        tranche_lot_basis(&st),
+        dec!(12_000),
+        "the tranche-void is INERT; the promote still applies (lot basis = floor)"
+    );
+}
+
+/// ★ BG-D9 acyclicity: voiding the tranche AND the promote converges in EITHER order — promote dead +
+/// tranche dropped, with NO spurious DecisionConflict (arch r3 N-1). Varies BOTH the pass-1a vec order and
+/// the decision-seq order. (Mutation: classifying the tranche-void inline in pass-1a reds this.)
+#[test]
+fn both_voids_either_order_converge_no_brick() {
+    let w = exch();
+    for order in [
+        // void the tranche (seq 3) then the promote (seq 4)
+        vec![
+            void_ev(3, EventId::decision(1)),
+            void_ev(4, EventId::decision(2)),
+        ],
+        // void the promote (seq 3) then the tranche (seq 4) — reversed vec + seq order
+        vec![
+            void_ev(3, EventId::decision(2)),
+            void_ev(4, EventId::decision(1)),
+        ],
+    ] {
+        let mut evs = vec![
+            tranche_ev(
+                1,
+                &w,
+                100_000_000,
+                date!(2017 - 12 - 01),
+                date!(2017 - 12 - 31),
+            ),
+            promote_ev(2, EventId::decision(1), dec!(12_000)),
+        ];
+        evs.extend(order);
+        let st = project(&evs, &prices(), &cfg());
+        assert!(
+            st.lots.iter().all(|l| l.wallet != w),
+            "both voids converge: promote dead + tranche dropped (no tranche lot): {:?}",
+            st.lots
+        );
+        assert!(
+            !st.blockers
+                .iter()
+                .any(|b| b.kind == BlockerKind::DecisionConflict),
+            "no spurious DecisionConflict when BOTH are voided (arch r3 N-1): {:?}",
+            st.blockers
+        );
+    }
+}
+
+/// BG-D9: a promoted `DeclareTranche` is EXCLUDED from the bulk-void candidate set (voiding it is inert),
+/// but the `PromoteTranche` decision ITSELF is voidable (revoke → revert to $0). Mirrors the #7
+/// effective-allocation exclusion.
+#[test]
+fn a_promoted_tranche_target_is_not_bulk_voidable() {
+    let w = exch();
+    let events = vec![
+        tranche_ev(
+            7,
+            &w,
+            100_000_000,
+            date!(2017 - 12 - 01),
+            date!(2017 - 12 - 31),
+        ),
+        promote_ev(8, EventId::decision(7), dec!(12_000)),
+    ];
+    let voidable = voidable_decisions(&events, &[]);
+    assert!(
+        !voidable.iter().any(|e| e.id == EventId::decision(7)),
+        "the promoted DeclareTranche is excluded while a promote is live"
+    );
+    assert!(
+        voidable.iter().any(|e| e.id == EventId::decision(8)),
+        "but the PromoteTranche decision itself IS voidable"
+    );
+}
+
+/// §6 / BG-D9: voiding ONLY the promote reverts the tranche to $0 with its `EstimatedConservative` tag
+/// intact and NO conflict (distinct from the both-voids end state, where the tranche is dropped).
+#[test]
+fn void_of_promote_alone_reverts_to_zero_tag_intact() {
+    let w = exch();
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2017 - 12 - 01),
+        date!(2017 - 12 - 31),
+    );
+    let p = promote_ev(2, EventId::decision(1), dec!(12_000));
+    let v = void_ev(3, EventId::decision(2)); // void the PROMOTE, not the tranche
+    let st = project(&[t, p, v], &prices(), &cfg());
+    let lot = st
+        .lots
+        .iter()
+        .find(|l| l.wallet == w)
+        .expect("the tranche lot survives (only the promote was voided)");
+    assert_eq!(
+        lot.usd_basis,
+        Usd::ZERO,
+        "voiding the promote reverts the tranche to $0"
+    );
+    assert_eq!(
+        lot.basis_source,
+        BasisSource::EstimatedConservative,
+        "the intact tranche keeps its EstimatedConservative tag"
+    );
+    assert!(
+        !st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::DecisionConflict),
+        "a plain promote-void is clean — no conflict: {:?}",
+        st.blockers
+    );
+}
+
+/// BG-D9: `would_conflict` surfaces the second-promote `DecisionConflict` at RECORD time (before the
+/// decision is appended) — the T10 CLI record-time guard depends on this free surfacing.
+#[test]
+fn would_conflict_surfaces_a_second_promote_at_record_time() {
+    let w = exch();
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2017 - 12 - 01),
+        date!(2017 - 12 - 31),
+    );
+    let p1 = promote_ev(2, EventId::decision(1), dec!(12_000));
+    // The incoming (not-yet-recorded) second promote on the already-promoted tranche.
+    let incoming = promote_ev(99, EventId::decision(1), dec!(20_000)).payload;
+    let hit = would_conflict(
+        &[t, p1],
+        &prices(),
+        &cfg(),
+        &incoming,
+        datetime!(2026-03-01 00:00 UTC),
+    );
+    assert!(
+        hit.is_some(),
+        "would_conflict flags the second promote at record time: {hit:?}"
+    );
 }
