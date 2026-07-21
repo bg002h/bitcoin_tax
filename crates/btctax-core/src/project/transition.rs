@@ -19,6 +19,11 @@ use std::collections::BTreeMap;
 pub struct UniversalSnapshot {
     pub held_sat: Sat,
     pub basis: Usd,
+    /// D-8 backstop: sat still held under an `EstimatedConservative` tranche tag in the pre-2025 Universal
+    /// residue (`remaining_sat > 0`). Non-zero ⇒ a `SafeHarborAllocation` MUST be denied effectiveness —
+    /// else a Path-B seed silently discards the tranche (`transition.rs`). A fully-consumed tranche leaves
+    /// nothing to discard, so the guard keys on `remaining_sat`, not mere presence (arch r4 Nit-2).
+    pub estimated_conservative_remaining_sat: Sat,
 }
 
 /// I-1: a TRANSITION-FREE fold of ONLY the pre-2025 effective timeline into the Universal pool. Reuses the
@@ -68,6 +73,11 @@ pub fn universal_snapshot(
     UniversalSnapshot {
         held_sat: lots.iter().map(|l| l.remaining_sat).sum(),
         basis: lots.iter().map(|l| l.usd_basis).sum(),
+        estimated_conservative_remaining_sat: lots
+            .iter()
+            .filter(|l| l.basis_source == BasisSource::EstimatedConservative)
+            .map(|l| l.remaining_sat)
+            .sum(),
     }
 }
 

@@ -11,9 +11,10 @@ use btctax_core::identity::*;
 use btctax_core::price::StaticPrices;
 use btctax_core::project::resolve::{resolve, sort_canonical, Op};
 use btctax_core::project::{project, ProjectionConfig};
-use btctax_core::state::Term;
+use btctax_core::state::{BlockerKind, Term};
 use btctax_core::voidable_decisions;
 use btctax_core::Form8283HowAcquired;
+use btctax_core::LotMethod;
 use rust_decimal_macros::dec;
 use time::macros::{date, datetime, offset};
 
@@ -492,4 +493,72 @@ fn tranche_tag_survives_self_transfer_relocation() {
         BasisSource::EstimatedConservative,
         "tag survives relocation (D-8)"
     );
+}
+
+// ── Task 5: safe-harbor allocation fixture (mirrors tests/transition.rs) ───────────────────────────
+fn alloc_ev(
+    seq: u64,
+    attested: bool,
+    pre2025_method: LotMethod,
+    lots: Vec<AllocLot>,
+) -> LedgerEvent {
+    dec_ev(
+        seq,
+        datetime!(2024-12-01 00:00 UTC),
+        EventPayload::SafeHarborAllocation(SafeHarborAllocation {
+            lots,
+            as_of_date: date!(2025 - 01 - 01),
+            method: AllocMethod::ActualPosition,
+            timely_allocation_attested: attested,
+            pre2025_method,
+        }),
+    )
+}
+fn alloc_lot(w: &WalletId, sat: i64, basis: i64, acq: time::Date) -> AllocLot {
+    AllocLot {
+        wallet: w.clone(),
+        sat,
+        usd_basis: rust_decimal::Decimal::from(basis),
+        acquired_at: acq,
+        dual_loss_basis: None,
+        donor_acquired_at: None,
+    }
+}
+
+/// Task 5 (D-8 projection-time backstop / arch r3 New-1): an allocation whose totals WOULD conserve over
+/// a pre-2025 residue containing a $0 EstimatedConservative tranche is DENIED effectiveness (Hard
+/// SafeHarborUnconservable → inert → Path A), so the tranche survives instead of being silently discarded
+/// by a Path-B seed. Independent of declaration order.
+#[test]
+fn allocation_that_would_conserve_over_a_tranche_residue_is_kept_inert_and_tag_survives() {
+    let w = exch();
+    // Pre-2025 tranche alone → the Universal residue is exactly {tranche: 100M sat, $0}.
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2015 - 01 - 01),
+        date!(2015 - 12 - 31),
+    );
+    // An allocation whose ONE lot matches that residue on totals (100M sat, $0 basis) — so WITHOUT the
+    // backstop it would go effective (Path B) and silently discard the tranche.
+    let a = alloc_ev(
+        2,
+        true,
+        LotMethod::Hifo,
+        vec![alloc_lot(&w, 100_000_000, 0, date!(2015 - 12 - 31))],
+    );
+    let st = project(&[t, a], &prices(), &cfg());
+    assert!(
+        st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::SafeHarborUnconservable),
+        "the allocation is denied effectiveness by the D-8 backstop"
+    );
+    let lot = st
+        .lots
+        .iter()
+        .find(|l| l.basis_source == BasisSource::EstimatedConservative)
+        .expect("tranche survives via Path A (not discarded by Path B)");
+    assert!(lot.remaining_sat > 0);
 }

@@ -1282,12 +1282,26 @@ pub fn resolve(
         );
         let alloc_sat: Sat = a.lots.iter().map(|l| l.sat).sum();
         let alloc_basis: Usd = a.lots.iter().map(|l| l.usd_basis).sum();
-        let unconservable = alloc_sat != snap.held_sat || alloc_basis != snap.basis;
+        // D-8 backstop (arch r3 New-1 — the real correctness invariant): a SafeHarborAllocation can NEVER
+        // go effective while the pre-2025 Universal residue still holds a conservative-filing tranche
+        // ($0 EstimatedConservative, remaining_sat > 0). Otherwise a Path-B seed would silently DISCARD
+        // the tranche (transition.rs). Independent of declaration order — this closes the inert-then-declare
+        // ordering that the record-time refusal alone cannot. Kept inert → Path A → the tranche tag survives.
+        let has_tranche_residue = snap.estimated_conservative_remaining_sat > 0;
+        let unconservable =
+            has_tranche_residue || alloc_sat != snap.held_sat || alloc_basis != snap.basis;
         if unconservable {
             blockers.push(Blocker {
                 kind: BlockerKind::SafeHarborUnconservable,
                 event: Some(d.id.clone()),
-                detail: "allocation totals != Universal remainder at 2025-01-01".into(),
+                detail: if has_tranche_residue {
+                    "a conservative-filing tranche ($0 EstimatedConservative) remains in the pre-2025 \
+                     residue — a safe-harbor allocation cannot conserve over it (v1 makes them mutually \
+                     exclusive; unallocated pre-2025 units are a facts-and-circumstances matter)"
+                        .into()
+                } else {
+                    "allocation totals != Universal remainder at 2025-01-01".into()
+                },
             });
             continue; // inert → Path A
         }
