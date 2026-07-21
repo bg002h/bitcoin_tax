@@ -18,6 +18,7 @@ use btctax_core::identity::*;
 use btctax_core::price::StaticPrices;
 use btctax_core::project::{evaluate_disposal, project, CandidateDisposal, LotMethod, ProjectionConfig};
 use btctax_core::state::{BlockerKind, DisposalLeg, LedgerState};
+use btctax_core::Usd;
 use rust_decimal_macros::dec;
 use time::macros::{date, datetime, offset};
 
@@ -686,5 +687,128 @@ fn the_optimizer_sees_the_clamped_promoted_basis_not_a_phantom() {
         out.st_gain + out.lt_gain,
         dec!(0),
         "the optimizer scores the clamped promoted basis (gain $0, not the −$4k phantom)"
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// Task 5 — BG-D4 fee-draw evaporation at `consume_fee` (TreatmentC): a promoted tranche is usually the
+// OLDEST lot, so a FIFO fee draw hits it first. `rehome_onto_lot` would otherwise re-home the RAW
+// floor-derived `gain_basis` onto the survivor, letting estimate money leak into a later disposal's
+// reported basis — a below-floor sale could then file a loss that is 100% estimate money. Task 5 makes
+// the ESTIMATE component of a consumed promoted fee fragment EVAPORATE; only the documented remainder
+// re-homes. PRIVACY: synthetic values only.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// The worked corner from the review: 1 BTC promoted to $12,000; a self-transfer moves the WHOLE
+/// position (no separate documented lot exists), paying a 10,000-sat fee drawn FIFO from the tranche —
+/// its only, hence oldest, lot. The fee's own $1.20 floor-derived basis must EVAPORATE rather than
+/// re-home onto the relocated surviving lot.
+///
+/// The final sale's proceeds are deliberately $0 (not a realistic price): the D-4 crowd-out clamp
+/// (`clamped_leg_basis`) already absorbs a small un-evaporated leak invisibly whenever proceeds exceed
+/// it (reported gain clamps to $0 either way — the leak is invisible at a normal "sold below the $12k
+/// floor" price like $8,000). The leak only surfaces as a REAL reported LOSS once it exceeds proceeds,
+/// so $0 is the sharpest value that discriminates: WITHOUT the fix the un-evaporated $1.20 re-homes
+/// onto the sole surviving lot and re-appears at sale as a documented-looking $1.20 basis exceeding the
+/// $0 proceeds — a genuine-looking §1001(b) loss of exactly the estimate money (Mutation to kill: the
+/// $1.20 estimate loss reappears). WITH the fix the fee's basis is $0, so the sale's basis clamps to
+/// the $0 proceeds too — gain $0, never negative.
+fn promote_then_self_transfer_fee_then_sell_below_floor() -> Vec<LedgerEvent> {
+    let ex = exch();
+    let sc = cold();
+    let t = tranche_ev(1, &ex, 100_000_000, date!(2025 - 01 - 01), date!(2025 - 01 - 10));
+    let p = promote_ev(2, EventId::decision(1), dec!(12_000));
+    let mut evs = vec![t, p];
+    // principal 99,990,000 sat + fee 10,000 sat = the WHOLE tranche (100,000,000 sat): the fee's FIFO
+    // draw has no other lot to hit, so it takes the tranche's LAST 10,000 sat (fully draining it).
+    evs.extend(self_transfer_with_fee(
+        "XO",
+        "XI",
+        &ex,
+        &sc,
+        99_990_000,
+        10_000,
+        datetime!(2025-02-01 00:00 UTC),
+        9,
+    ));
+    evs.push(sell_ev("SELL", datetime!(2025-06-01 00:00 UTC), &sc, 99_990_000, 0));
+    evs
+}
+
+#[test]
+fn tranche_fee_draw_evaporates_estimate_then_sale_files_zero_loss() {
+    let st = project(
+        &promote_then_self_transfer_fee_then_sell_below_floor(),
+        &prices(),
+        &cfg(),
+    );
+    let leg = only_disposal_leg(&st);
+    assert!(
+        leg.gain >= Usd::ZERO,
+        "the burned fee-sats' estimate component evaporated, not a filed loss (leg.gain = {})",
+        leg.gain
+    );
+}
+
+/// ★ the discriminating snapshot KAT Task 4 correctly deferred (arch r2 I-1 / the T5 fee-evaporation
+/// precondition for `universal_snapshot`'s threaded `PromoteSet`, transition.rs:65-67): a pre-2025
+/// promoted tranche (1 BTC, floor $12,000, $0.00012/sat) whose fee-sats are FIFO-drawn pre-2025 and are
+/// FULLY consumed in the process (100,000,000-sat fee — the whole tranche), landing the fee's carry on
+/// a SEPARATE documented lot (0.5 BTC / $8,000, $0.00016/sat — HIGHER per-sat, so HIFO, the default
+/// pre-2025 method, drains it FIRST for principal, leaving the tranche wholly untouched until the fee
+/// draw) relocated by the SAME self-transfer. `universal_snapshot` re-folds this SAME self-transfer
+/// independently, via the SAME shared `fold_event`/`consume_fee` (I-1) — so its residue basis for the
+/// surviving documented lot reflects T5's evaporation too, PROVIDED the snapshot's own `FoldCtx` also
+/// carries the real (non-empty) `PromoteSet` (Task 4's threading).
+///
+/// An allocation listing EXACTLY the EVAPORATED (documented-only) residue — $8,000, the lot's own
+/// original cost, no floor leaked in — conserves cleanly ONLY when the snapshot ALSO evaporates:
+///   - evaporation ON (this task): the fee's $12,000 floor-derived basis withholds entirely (estimate
+///     share == the fragment's whole gain_basis, since the tranche was untouched before the fee draw) →
+///     the documented lot's re-homed basis stays $8,000 → `alloc_basis` ($8,000) == `snap.basis`
+///     ($8,000) → NOT `SafeHarborUnconservable`.
+///   - evaporation OFF (the mutation / an empty `PromoteSet` at this FoldCtx site): the WHOLE $12,000
+///     floor re-homes onto the documented lot → `snap.basis` is a PHANTOM $20,000 ($8,000 + $12,000) →
+///     `alloc_basis` ($8,000) != `snap.basis` ($20,000) → `SafeHarborUnconservable` WRONGLY fires, even
+///     though sat conserves exactly either way (`alloc_sat` == `snap.held_sat` == 50,000,000 always).
+///
+/// So "this allocation conserves cleanly" is possible ONLY when the snapshot's own re-fold evaporated
+/// the fee too — exactly what makes the Task-4 `universal_snapshot` threading non-vacuous.
+#[test]
+fn the_pre2025_conservation_snapshot_sees_the_fee_evaporation_not_a_phantom_basis() {
+    let w = exch();
+    let sc = cold();
+    let t = tranche_ev(1, &w, 100_000_000, date!(2015 - 01 - 01), date!(2015 - 12 - 31));
+    let p = promote_ev(2, EventId::decision(1), dec!(12_000));
+    let doc = documented_buy("DOC", datetime!(2016-01-01 00:00 UTC), &w, 50_000_000, 8_000);
+    let mut evs = vec![t, p, doc];
+    // principal (50M sat, HIFO-first) fully consumes DOC, leaving the tranche wholly untouched; the
+    // fee (100M sat) then FIFO-draws the ENTIRE tranche — fully consuming it in this SAME event.
+    evs.extend(self_transfer_with_fee(
+        "XO",
+        "XI",
+        &w,
+        &sc,
+        50_000_000,
+        100_000_000,
+        datetime!(2017-01-01 00:00 UTC),
+        9,
+    ));
+    let a = alloc_ev(
+        10,
+        true,
+        LotMethod::Hifo,
+        vec![alloc_lot(&sc, 50_000_000, 8_000, date!(2016 - 01 - 01))],
+    );
+    evs.push(a);
+    let st = project(&evs, &prices(), &cfg());
+    assert!(
+        !st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::SafeHarborUnconservable),
+        "the snapshot's OWN re-fold shares T5's fee-evaporation (I-1): the allocation's documented-only \
+         $8,000 residue conserves cleanly. Without evaporation the snapshot would see the whole $12,000 \
+         floor leaked onto the documented lot ($20,000 phantom), wrongly mismatching alloc_basis: {:?}",
+        st.blockers
     );
 }

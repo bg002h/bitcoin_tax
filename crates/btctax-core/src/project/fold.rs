@@ -289,8 +289,11 @@ fn make_removal_legs(
     (legs, donor)
 }
 
-/// Carried basis of the burned fee-sats, to be RE-HOMED onto a surviving destination lot / removal leg
-/// under TP8 (c) so the FULL basis carries (C1). Under (b) this is empty (basis rode the mini-disposition).
+/// Carried basis of the burned fee-sats, to be RE-HOMED onto a surviving destination lot / removal leg /
+/// disposal leg under TP8 (c) so the FULL basis carries (C1) — EXCEPT a promoted tranche's ESTIMATE
+/// component, which `consume_fee` withholds before it ever reaches this struct (BG-D4 fee-evaporation:
+/// only the DOCUMENTED remainder of a promoted fragment carries; C1 still holds for whatever `consume_fee`
+/// decided IS the fee-sat basis). Under (b) this is empty (basis rode the mini-disposition).
 #[derive(Default)]
 struct FeeCarry {
     gain_basis: Usd,
@@ -368,8 +371,33 @@ fn consume_fee(
     stats.fee_sats_consumed += consumed.iter().map(|c| c.sat).sum::<Sat>(); // sole FR9 home
     match config.self_transfer_fee {
         FeeTreatment::TreatmentC => {
-            // Non-taxable: return the fee-sat basis for re-homing onto the survivor (C1: full basis carries).
-            let gain_basis: Usd = consumed.iter().map(|c| c.gain_basis).sum();
+            // Non-taxable: return the fee-sat basis for re-homing onto the survivor (C1: full basis carries)
+            // — EXCEPT for a promoted-tranche fragment's ESTIMATE component (BG-D4 fee-evaporation): a
+            // promoted tranche is usually the OLDEST lot, so a FIFO fee draw hits it first; re-homing its
+            // raw (floor-inflated) `gain_basis` onto the survivor would let that estimate money leak onto
+            // a LATER disposal as reported basis — a below-floor sale could then file a loss that is 100%
+            // estimate money (the exact corner `tranche_fee_draw_evaporates_estimate_then_sale_files_zero_loss`
+            // pins). So for a fragment whose `lot_id.origin_event_id ∈ promotes`, withhold its estimate
+            // share (`round_cents(filed_basis × frag.sat / tranche_sat)`, the SAME decomposition
+            // `clamped_leg_basis` uses) before summing — only the DOCUMENTED remainder re-homes; the
+            // estimate EVAPORATES (never re-appears anywhere else — basis forfeiture is always
+            // conservative). `promotes.get(..)` is `None` for a non-promoted lot ⇒ the fragment's full
+            // `gain_basis` carries unchanged (byte-identical to the pre-BG-D4 path). Only `gain_basis` is
+            // adjusted: a promoted `Acquire` lot is never dual-basis (`dual_loss_basis` starts `None` and
+            // only ever gets a gift's dual basis), so a promoted fragment's `loss_basis` is always `None`
+            // and the summation below already excludes it via `filter_map`.
+            let gain_basis: Usd = consumed
+                .iter()
+                .map(|c| match promotes.get(&c.lot_id.origin_event_id) {
+                    Some(entry) => {
+                        let estimate_share = round_cents(
+                            entry.filed_basis * Usd::from(c.sat) / Usd::from(entry.tranche_sat),
+                        );
+                        c.gain_basis - estimate_share
+                    }
+                    None => c.gain_basis,
+                })
+                .sum();
             let has_loss = consumed.iter().any(|c| c.loss_basis.is_some());
             let loss_basis = has_loss.then(|| consumed.iter().filter_map(|c| c.loss_basis).sum());
             FeeCarry {
