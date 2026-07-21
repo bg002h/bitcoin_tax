@@ -1,10 +1,10 @@
 # Conservative-Filing — Build Continuity (resume point)
 
-**Updated 2026-07-21: PHASE 1 (Tasks 1–7) COMPLETE + GATE GREEN. Everything below is committed; the tree is clean. Resume at Phase 2 / Task 8.**
+**Updated 2026-07-21: PHASE 1 (Tasks 1–7) COMPLETE + GATE GREEN; PHASE 2 T8/P2 + T9/P3 DONE. Everything below is committed; the tree is clean (full suite 2125 green). Resume at Phase 2 / Task 10.**
 
 ## Where we are
 
-- **Branch:** `feat/conservative-filing` (rebased onto `main`, carries the shipped 8949-box fix — D-6's prerequisite). ~24 commits ahead of main.
+- **Branch:** `feat/conservative-filing` (rebased onto `main`, carries the shipped 8949-box fix — D-6's prerequisite). 28 commits ahead of main; HEAD = `c001cdd` (last code commit `4eabbbe`).
 - **SPEC + PLAN are GREEN** (both tax + architecture lenses, 0C/0I): `design/conservative-filing/SPEC.md`, `design/conservative-filing/IMPLEMENTATION_PLAN.md`. Review rounds persisted in `design/conservative-filing/reviews/`.
 - **PHASE 1 (P1 core, Tasks 1–7) COMPLETE + gate-green**, inline TDD, each task green + mutation-proven; full workspace suite **2117 green**, clippy/fmt clean. **Phase-1 gate CLOSED:** all CI-only jobs green (nextest 2117 / clippy 0 / fmt / check-isolation / pii-scan / msrv 1.88 build) **AND** the independent two-lens Fable review is 0C/0I: r1 (tax 0C/0I, arch 0C/**1I**) → folded → r2 re-review (tax 0C/0I, arch 0C/0I). All four reviews persisted in `reviews/phase1-impl-{tax,architecture}-fable-review-r{1,2}.md`. Open follow-ups (all Minor/Nit, non-blocking) in `FOLLOWUPS.md` with owning phases.
 
@@ -27,7 +27,7 @@
 
 - **T8 / P2 — DONE** (`9f2c842`): HIFO-steering + FIFO-inversion characterization pins in `crates/btctax-core/tests/kat_conservative.rs` (passes-on-write; discrimination confirmed by method flip).
 - **T9 / P3 — DONE** (`4eabbbe`): new `crates/btctax-core/src/conservative.rs` — `tranche_dip_advisory` (basis-as-filed, provenance-neutral) + `method_inversion_advisory` (recommends HIFO election) + `tranche_report_advisory` (shared assembler). Surfaced via NEW `TaxYearReport.tranche_advisory` (`cmd/tax.rs`, printed in `main.rs`), mirrored into the TUI Tax tab (`btctax-tui/src/tabs/tax.rs`). Builders + surfacing KATs, mutations RED, binary-verified.
-- **T10 / P4**: custody warning — reuse `optimize.rs ForbiddenBroker2027`.
+- **T10 / P4 — RESUME HERE**: custody warning — reuse `optimize.rs` `ForbiddenBroker2027` (`persistability`/`is_broker`, ~`:455-495`) for a ≥2027 Exchange specific-ID of a tranche lot. **CAUTION — subtler than the plan's "light reuse":** decide exactly what the warning covers (the specific-ID / broker-envelope / tranche interaction) and **re-read SPEC P4 / D-3 first** (no transfer-statement modeling). Likely a small advisory builder in `conservative.rs` that calls `persistability`, wired into the tranche/advisory path. KATs (`kat_conservative.rs`): fires for a ≥2027 Exchange specific-ID; silent for SelfCustody; silent ≤2026 — the three KATs are the discrimination (Step-5 mutation is n/a for pure reuse).
 - **T11 / P5**: `window_reference -> Option<WindowRef{min,coverage}>`.
 - **T12 / P6**: per-tranche overpayment delta via a basis-replacement what-if (needs events+prices+config, NOT a folded state).
 - **T13 / P7**: `basis_methodology.txt` — provenance-neutral, term-correct, basis AS FILED.
