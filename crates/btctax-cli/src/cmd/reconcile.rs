@@ -13,10 +13,10 @@ use btctax_core::conventions::{tax_date, TRANSITION_DATE};
 use btctax_core::persistence::{append_decision, load_all};
 use btctax_core::{
     AllocMethod, BlockerKind, ClassifyInbound, ClassifyRaw, DisposeKind, DonationDetails, EventId,
-    EventPayload, InboundClass, IncomeKind, LotId, LotMethod, LotPick, LotSelection, ManualFmv,
-    MethodElection, OutflowClass, ReclassifyIncome, ReclassifyOutflow, RejectImport, RemovalKind,
-    SafeHarborAllocation, SelfTransferPassthrough, SupersedeImport, TaxDate, TransferLink,
-    TransferTarget, Usd, VoidDecisionEvent, WalletId,
+    EventPayload, InboundClass, IncomeKind, LedgerEvent, LotId, LotMethod, LotPick, LotSelection,
+    ManualFmv, MethodElection, OutflowClass, ReclassifyIncome, ReclassifyOutflow, RejectImport,
+    RemovalKind, SafeHarborAllocation, SelfTransferPassthrough, SupersedeImport, TaxDate,
+    TransferLink, TransferTarget, Usd, VoidDecisionEvent, WalletId,
 };
 use btctax_store::Passphrase;
 use std::path::Path;
@@ -231,6 +231,60 @@ pub fn set_fmv(
     append_and_save(&mut session, payload, now)
 }
 
+/// Whether any live `VoidDecisionEvent` names `target` (used to pick only a NON-voided promote when the
+/// void target is a promoted `DeclareTranche`).
+fn decision_is_voided(events: &[LedgerEvent], target: &EventId) -> bool {
+    events.iter().any(|e| {
+        matches!(&e.payload,
+            EventPayload::VoidDecisionEvent(v) if v.target_event_id == *target)
+    })
+}
+
+/// BG-D9 Task 8 (arch/tax r1 I-3): the prior-year fold-diff advisory in the VOID direction, or `Vec::new()`
+/// when the void `target` has no live promote to revert. Voiding a `PromoteTranche` — or a promoted-tranche
+/// `DeclareTranche` (whose live promote we identify) — reverts a filed floor basis toward `$0`, which can
+/// HIFO-reorder a PRIOR filed year's 8949/8283 (amend-to-PAY). Non-gating; the caller PRINTS it BEFORE
+/// recording the void. A single stored `profile` cannot fit the multi-year span, so `None` is passed (the
+/// tax-Δ arm falls back to the gain/deduction Δ sign — the amend direction is still correct).
+fn promote_void_advisory_lines(
+    session: &Session,
+    events: &[LedgerEvent],
+    target_event_id: &EventId,
+) -> Vec<String> {
+    // The promote whose EXCLUSION defines the baseline: the target IS a PromoteTranche, else a NON-voided
+    // PromoteTranche naming the target `DeclareTranche`.
+    let promote_id = events
+        .iter()
+        .find(|e| e.id == *target_event_id && matches!(e.payload, EventPayload::PromoteTranche(_)))
+        .map(|e| e.id.clone())
+        .or_else(|| {
+            events.iter().find_map(|e| match &e.payload {
+                EventPayload::PromoteTranche(pt)
+                    if pt.target == *target_event_id && !decision_is_voided(events, &e.id) =>
+                {
+                    Some(e.id.clone())
+                }
+                _ => None,
+            })
+        });
+    let Some(pid) = promote_id else {
+        return Vec::new();
+    };
+    let Ok(cfg) = session.config().map(|c| c.to_projection()) else {
+        return Vec::new();
+    };
+    let tables = btctax_adapters::BundledTaxTables::load();
+    btctax_core::conservative::promote_prior_year_advisory(
+        events,
+        session.prices(),
+        &cfg,
+        &pid,
+        btctax_core::conservative::Direction::Void,
+        None,
+        &tables,
+    )
+}
+
 /// FR8: void a revocable decision. Voiding a non-revocable / effective-allocation target raises
 /// `decision_conflicts` in the projection (no effect) — the CLI only appends; the engine adjudicates.
 ///
@@ -291,6 +345,13 @@ pub fn void(
              refs + decision status",
             target_event_id.canonical()
         )));
+    }
+
+    // BG-D9 Task 8 (arch/tax r1 I-3): if this void removes a live promote (or targets a promoted tranche),
+    // WARN — before recording, non-gating — about the PRIOR-year 8949/8283 rewrites the floor→$0 revert
+    // re-exposes (an amend-to-pay warning). Printed only when the target actually has a live promote.
+    for line in promote_void_advisory_lines(&session, &events, &target_event_id) {
+        println!("{line}");
     }
 
     // Append the VoidDecisionEvent (no save yet — we batch with the attestation clear below).
@@ -843,6 +904,13 @@ pub fn apply_bulk_void(
             _ => None,
         })
         .collect();
+    // BG-D9 Task 8: warn per promoted target (against the pre-batch snapshot) about the prior-year
+    // rewrites the floor→$0 revert re-exposes — before recording, non-gating.
+    for (target_event_id, _) in &targets {
+        for line in promote_void_advisory_lines(&session, &events, target_event_id) {
+            println!("{line}");
+        }
+    }
     for (target_event_id, disposal_to_clear) in &targets {
         // `?` on a mid-batch failure returns before `save` — the in-memory session is discarded, so
         // nothing lands on disk (CLI atomicity; the TUI path instead ROLLS BACK via persist_bulk_void).

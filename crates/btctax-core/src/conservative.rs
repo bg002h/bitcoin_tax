@@ -10,8 +10,8 @@ use crate::price::PriceProvider;
 use crate::project::fold::fold;
 use crate::project::resolve::{resolve, Op};
 use crate::project::{in_force_methods, project, ProjectionConfig};
-use crate::state::{Disposal, LedgerState, Term};
-use crate::tax::{compute_tax_year, TaxOutcome, TaxProfile, TaxTables};
+use crate::state::{Disposal, LedgerState, Removal, RemovalKind, Term};
+use crate::tax::{compute_tax_year, Carryforward, TaxOutcome, TaxProfile, TaxTables};
 use crate::{BasisSource, LotMethod, Usd, WalletId};
 use std::collections::BTreeSet;
 
@@ -540,4 +540,277 @@ pub fn tranche_report_advisory(
     } else {
         Some(lines.join("\n"))
     }
+}
+
+/// BG-D9 / Task 8: the direction of the amendment the prior-year advisory describes. `Promote` = ADDING
+/// the promote (baseline `$0` → filed floor); `Void` = REMOVING a live one (floor → `$0`). `Direction`
+/// selects which of the two folds is the filed-AFTER ("new") state and which is the filed-BEFORE ("old");
+/// the refund-vs-pay COPY is then chosen PER YEAR by the SIGN of that year's Δ — never hard-coded by the
+/// direction (tax r2 M-1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    Promote,
+    Void,
+}
+
+/// The WITH-crypto §1212(b) `carryforward_out` for `year` under `state`, or `None` when the year is not
+/// computable (missing table/profile / a Hard blocker). Feeds the cascade clause's optional quote.
+fn carryforward_out_of(
+    events: &[LedgerEvent],
+    state: &LedgerState,
+    year: i32,
+    profile: Option<&TaxProfile>,
+    tables: &dyn TaxTables,
+) -> Option<Carryforward> {
+    match compute_tax_year(events, state, year, profile, tables) {
+        TaxOutcome::Computed(r) => Some(r.carryforward_out),
+        TaxOutcome::NotComputable(_) => None,
+    }
+}
+
+/// BG-D9 prior-year fold-diff advisory (Task 8). Promoting an UNDISPOSED tranche — or voiding a live
+/// promote — rewrites that tranche's filed basis, which can HIFO-REORDER a PRIOR filed year's disposals
+/// OR removals (donations/gifts draw by the SAME method-elected `consume_principal`), silently rewriting
+/// that year's Form 8949 / 8283 / charitable deduction / §1015 carryover. This PURE builder folds the
+/// ledger twice — the promote EVENT present vs excluded (the `PromoteTranche` event, NEVER its
+/// `DeclareTranche` target: excluding the target deletes the lot and diffs every tranche-touching year,
+/// tax r1 M-1) — and diffs the per-year disposal ∪ removal LEG SETS.
+///
+/// The trigger is the leg-set diff, NOT `tax_total` (which is `None` for the feature's own 2018–2023
+/// audience years — only 2017/2024/2025/2026 tables ship — so `None == None` would read "no change" and
+/// MISS the rewrite, tax r2 I-3) and NOT Σ-gain (blind to an equal-basis / different-date reorder that
+/// changes 8949 rows without moving the sum). Removals matter because a promote can reorder a prior
+/// DONATION-only year with ZERO disposal change — the tax-Δ arm alone is blind (engine B excludes crypto
+/// donations, tax r3 I-2).
+///
+/// Amend direction follows the SIGN of the year's tax Δ (tax r2 M-1 — never hard-coded by direction): a
+/// change that LOWERS a filed year's tax → amend-to-REFUND (names §6511's refund limitation); one that
+/// RAISES it → amend-to-PAY ("additional tax, plus interest"). When the year is not computable, the sign
+/// is inferred from the gain/deduction Δ (a gain INCREASE or a deduction DECREASE raises tax). A GIFT-only
+/// reorder changes NO line of the donor's 1040 → the §1015 donee-basis change is named with NO amended
+/// return. A both-Δs-zero flagged year names the changed 8949/8283 content, never a bare `$0`. When a
+/// flagged year's net capital gain/loss OR charitable deduction changed, the §1212(b) + §170(d) carryover
+/// cascade into later filed years is named (the `carryforward_out` diff quoted when computable, else
+/// named-unquantified). NOTHING is written; this is informational, non-gating (D-7).
+#[allow(clippy::too_many_arguments)]
+pub fn promote_prior_year_advisory(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    promote_id: &EventId,
+    direction: Direction,
+    profile: Option<&TaxProfile>,
+    tables: &dyn TaxTables,
+) -> Vec<String> {
+    // The fold pair: `with` applies the promote (post-resolve); `without` EXCLUDES the promote event only —
+    // the DeclareTranche's $0 baseline lot survives, so the diff isolates the basis rewrite (tax r1 M-1).
+    let with_state = project(events, prices, config);
+    let without_events: Vec<LedgerEvent> = events
+        .iter()
+        .filter(|e| e.id != *promote_id)
+        .cloned()
+        .collect();
+    let without_state = project(&without_events, prices, config);
+
+    // `Direction` selects the filed-AFTER ("new") vs filed-BEFORE ("old") assignment. The refund/pay COPY
+    // is then per-year by the Δ SIGN (below), not by the direction.
+    let (new_state, old_state) = match direction {
+        Direction::Promote => (&with_state, &without_state),
+        Direction::Void => (&without_state, &with_state),
+    };
+
+    // Candidate years: every year appearing in EITHER fold's disposals or removals.
+    let mut years: BTreeSet<i32> = BTreeSet::new();
+    for st in [&with_state, &without_state] {
+        for d in &st.disposals {
+            years.insert(d.disposed_at.year());
+        }
+        for r in &st.removals {
+            years.insert(r.removed_at.year());
+        }
+    }
+
+    let verb = match direction {
+        Direction::Promote => "Promoting this tranche",
+        Direction::Void => "Voiding this promotion",
+    };
+
+    let mut lines: Vec<String> = Vec::new();
+    for y in years {
+        // Per-year leg SETS (the whole Disposal/Removal — both derive `Eq`; a HIFO reorder changes the
+        // legs' contents, an equal-basis / different-date swap changes their `acquired_at`, so a Vec-eq
+        // catches BOTH while a Σ-gain compare would miss the latter — the BG-D9 corner).
+        let disp = |st: &LedgerState| -> Vec<Disposal> {
+            st.disposals
+                .iter()
+                .filter(|d| d.disposed_at.year() == y)
+                .cloned()
+                .collect()
+        };
+        let rem = |st: &LedgerState, k: RemovalKind| -> Vec<Removal> {
+            st.removals
+                .iter()
+                .filter(|r| r.removed_at.year() == y && r.kind == k)
+                .cloned()
+                .collect()
+        };
+        let disp_changed = disp(new_state) != disp(old_state);
+        let don_changed =
+            rem(new_state, RemovalKind::Donation) != rem(old_state, RemovalKind::Donation);
+        let gift_changed = rem(new_state, RemovalKind::Gift) != rem(old_state, RemovalKind::Gift);
+        if !(disp_changed || don_changed || gift_changed) {
+            continue;
+        }
+
+        // Per-year Δs (new − old): gain over disposal legs, §170(e) deduction over donation removals,
+        // §1015 carryover basis over gift removals.
+        let gain = |st: &LedgerState| -> Usd {
+            st.disposals
+                .iter()
+                .filter(|d| d.disposed_at.year() == y)
+                .flat_map(|d| &d.legs)
+                .map(|l| l.gain)
+                .sum()
+        };
+        let ded = |st: &LedgerState| -> Usd {
+            st.removals
+                .iter()
+                .filter(|r| r.removed_at.year() == y && r.kind == RemovalKind::Donation)
+                .filter_map(|r| r.claimed_deduction)
+                .sum()
+        };
+        let gift_basis = |st: &LedgerState| -> Usd {
+            st.removals
+                .iter()
+                .filter(|r| r.removed_at.year() == y && r.kind == RemovalKind::Gift)
+                .flat_map(|r| &r.legs)
+                .map(|l| l.basis)
+                .sum()
+        };
+        let dgain = gain(new_state) - gain(old_state);
+        let dded = ded(new_state) - ded(old_state);
+        let dgift = gift_basis(new_state) - gift_basis(old_state);
+
+        // Tax Δ (best-effort): computable only when BOTH folds compute `y` (a matching table + profile —
+        // absent for the 2018–2023 audience years, so this is usually `None` and the copy leans on the
+        // gain/deduction Δ sign instead).
+        let dtax = match (
+            tax_total(events, new_state, y, profile, tables),
+            tax_total(events, old_state, y, profile, tables),
+        ) {
+            (Some(a), Some(b)) => Some(a - b),
+            _ => None,
+        };
+
+        // Amend direction by the SIGN of the year's tax Δ; when uncomputable, infer from the gain/deduction
+        // pressure (a gain INCREASE or a deduction DECREASE raises tax). Gift is EXCLUDED — it changes no
+        // 1040 line.
+        let tax_sign = match dtax {
+            Some(d) => d.cmp(&Usd::ZERO),
+            None => (dgain - dded).cmp(&Usd::ZERO),
+        };
+
+        let mut frags: Vec<String> = Vec::new();
+
+        // Disposal fragment (a $0-gain-but-changed-legs reorder names the 8949 content, never a bare "$0").
+        if disp_changed {
+            if dgain != Usd::ZERO {
+                frags.push(format!(
+                    "{verb} changes year {y}'s reported capital gain/loss by ~${g} (a HIFO reorder of that \
+                     year's disposals).",
+                    g = dgain.abs().round_dp(0),
+                ));
+            } else {
+                frags.push(format!(
+                    "{verb} changes the Form 8949 acquisition date and holding-period detail of year {y}'s \
+                     disposals (the reported gain is unchanged)."
+                ));
+            }
+        }
+        // Donation fragment.
+        if don_changed {
+            if dded != Usd::ZERO {
+                frags.push(format!(
+                    "{verb} changes year {y}'s §170(e) charitable deduction by ~${d}.",
+                    d = dded.abs().round_dp(0),
+                ));
+            } else {
+                frags.push(format!(
+                    "{verb} changes the Form 8283 donee and acquisition date records of year {y}'s \
+                     donation(s) (the deduction amount is unchanged)."
+                ));
+            }
+        }
+        // Tax-Δ clause — only a real (non-$0) monetary change; else name the uncomputability (never "$0").
+        match dtax {
+            Some(d) if d != Usd::ZERO => frags.push(format!(
+                "Its computed federal tax for {y} changes by ~${}.",
+                d.abs().round_dp(0),
+            )),
+            None if (disp_changed && dgain != Usd::ZERO) || (don_changed && dded != Usd::ZERO) => frags
+                .push(format!(
+                    "Its federal tax for {y} is not separately computable here (no table/profile/blocked)."
+                )),
+            _ => {}
+        }
+        // Amend-direction + Form 1040-X clause — disposal/donation only (a gift never touches the donor's
+        // 1040). Refund names §6511; the raise names additional tax + interest; a content-only (tax
+        // unchanged) reorder points at the corrected form on an amended return.
+        if disp_changed || don_changed {
+            match tax_sign {
+                std::cmp::Ordering::Less => frags.push(format!(
+                    "This LOWERS year {y}'s tax; if {y} was already filed, claiming the reduction requires a \
+                     Form 1040-X for {y} (Form 8275 attached), and any refund is limited by the §6511 \
+                     statute of limitations (generally 3 years from filing / 2 years from payment)."
+                )),
+                std::cmp::Ordering::Greater => frags.push(format!(
+                    "This RAISES year {y}'s tax; if {y} was already filed, correcting it requires a Form \
+                     1040-X for {y} (Form 8275 attached) reporting additional tax, plus interest."
+                )),
+                std::cmp::Ordering::Equal => frags.push(format!(
+                    "If year {y} was already filed, the corrected Form 8949/8283 detail belongs on an \
+                     amended return for {y} (the tax itself is unchanged)."
+                )),
+            }
+        }
+        // Cascade clause (§1212(b) + §170(d)) — when net capital gain/loss OR the charitable deduction moved.
+        if (disp_changed && dgain != Usd::ZERO) || (don_changed && dded != Usd::ZERO) {
+            let cf_quote = match (
+                carryforward_out_of(events, new_state, y, profile, tables),
+                carryforward_out_of(events, old_state, y, profile, tables),
+            ) {
+                (Some(n), Some(o)) if n.short != o.short || n.long != o.long => format!(
+                    " (year {y}'s §1212(b) carryforward-out changes by short ~${s}, long ~${l})",
+                    s = (n.short - o.short).abs().round_dp(0),
+                    l = (n.long - o.long).abs().round_dp(0),
+                ),
+                _ => String::new(),
+            };
+            frags.push(format!(
+                "Because year {y}'s net capital gain/loss or charitable deduction changed, its §1212(b) \
+                 capital-loss carryforward and its §170(d) charitable carryover into later years may shift \
+                 too, so the carryover-linked lines of later filed years may also require amendment{cf_quote}."
+            ));
+        }
+        // Gift fragment (§1015 carryover; donee-basis documentation ONLY — never an amended return).
+        if gift_changed {
+            if dgift != Usd::ZERO {
+                frags.push(format!(
+                    "{verb} changes the §1015 carryover basis passed to the donee for year {y}'s gift(s) by \
+                     ~${g} — donee-basis documentation only; the donor's own Form 1040 for {y} is \
+                     unaffected, so no amended return is required.",
+                    g = dgift.abs().round_dp(0),
+                ));
+            } else {
+                frags.push(format!(
+                    "{verb} changes the Form 8283 donee and acquisition date records of year {y}'s gift(s) \
+                     (the §1015 carryover basis is unchanged) — donee-basis documentation only; the donor's \
+                     own Form 1040 for {y} is unaffected."
+                ));
+            }
+        }
+
+        lines.push(frags.join(" "));
+    }
+    lines
 }

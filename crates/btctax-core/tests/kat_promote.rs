@@ -11,7 +11,7 @@
 //! stays `EstimatedConservative` (no new tag) and `acquired_at`/the relocation tag-carry are untouched.
 //! PRIVACY: synthetic values only.
 
-use btctax_core::conservative::Coverage;
+use btctax_core::conservative::{promote_prior_year_advisory, Coverage, Direction};
 use btctax_core::conservative_promote::{
     clamped_leg_basis, filed_basis_for, PromoteEntry, PromoteRefusal,
 };
@@ -1472,5 +1472,344 @@ fn would_conflict_surfaces_a_second_promote_at_record_time() {
     assert!(
         hit.is_some(),
         "would_conflict flags the second promote at record time: {hit:?}"
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// Task 8 — BG-D9 prior-year fold-diff advisory (disposal ∪ removal legs) + carryover-cascade naming +
+// the VOID-direction wiring. The advisory FOLDS the ledger twice (promote EVENT present vs excluded),
+// diffs the per-year disposal ∪ removal LEG SETS (NOT tax_total — None for 2018–2023; NOT Σ-gain —
+// blind to an equal-basis/different-date reorder), and names the amendment implication PER YEAR by the
+// SIGN of that year's Δ. PRIVACY: synthetic values only.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// An empty tax-table set (`table_for` → None for every year) so a table-less audience year (2018–2023,
+/// and here every year) reads as NOT computable — the fold-diff STILL fires (it never keys on tax_total).
+fn no_tables() -> BTreeMap<i32, btctax_core::TaxTable> {
+    BTreeMap::new()
+}
+
+/// A pre-2025 disposal-reorder scenario: a documented 0.6-BTC lot ($5,000/BTC) co-held with a promoted
+/// 0.4-BTC tranche (floor $12,000 whole ⇒ $30,000/BTC — HIGHER per-sat, so HIFO draws it FIRST once
+/// promoted; unpromoted at $0 it sorts LAST). A 2018 sell of EXACTLY 0.4 BTC therefore drains the tranche
+/// WITH the promote (gain $8,000) and the documented lot WITHOUT it (gain $18,000) — a leg-set diff. The
+/// promote is `EventId::decision(2)`. Sold ABOVE the floor so both folds file a real positive gain.
+fn mixed_vintage_hifo_2018_disposal() -> Vec<LedgerEvent> {
+    let w = exch();
+    let buy = documented_buy(
+        "BUY",
+        datetime!(2017-01-01 00:00 UTC),
+        &w,
+        60_000_000,
+        3_000,
+    );
+    let t = tranche_ev(
+        1,
+        &w,
+        40_000_000,
+        date!(2018 - 01 - 01),
+        date!(2018 - 03 - 31),
+    );
+    let p = promote_ev(2, EventId::decision(1), dec!(12_000));
+    let sell = sell_ev(
+        "SELL",
+        datetime!(2018-09-01 00:00 UTC),
+        &w,
+        40_000_000,
+        20_000,
+    );
+    vec![buy, t, p, sell]
+}
+
+/// A below-floor variant of the disposal reorder: proceeds $8,000 < the $12,000 floor, so WITH the promote
+/// the tranche leg's gain clamps to $0 (D-4), while WITHOUT it the documented lot files a $6,000 gain — a
+/// net-capital-gain change that must name the §1212(b) carryover cascade.
+fn loss_stealing_reorder() -> Vec<LedgerEvent> {
+    let w = exch();
+    let buy = documented_buy(
+        "BUY",
+        datetime!(2017-01-01 00:00 UTC),
+        &w,
+        60_000_000,
+        3_000,
+    );
+    let t = tranche_ev(
+        1,
+        &w,
+        40_000_000,
+        date!(2018 - 01 - 01),
+        date!(2018 - 03 - 31),
+    );
+    let p = promote_ev(2, EventId::decision(1), dec!(12_000));
+    let sell = sell_ev(
+        "SELL",
+        datetime!(2018-09-01 00:00 UTC),
+        &w,
+        40_000_000,
+        8_000,
+    );
+    vec![buy, t, p, sell]
+}
+
+/// A SHORT-TERM donation-only reorder: a documented 0.4-BTC lot ($40,000 basis) co-held with a promoted
+/// 0.4-BTC tranche (floor $50,000 ⇒ higher per-sat, HIFO draws it FIRST). A 2024 donation of EXACTLY 0.4
+/// BTC therefore draws the tranche WITH the promote (D-11 documented-only $0 ⇒ ST deduction $0) and the
+/// documented lot WITHOUT it (ST deduction min($60k,$40k)=$40k) — a removal-leg diff with ZERO disposal
+/// change (the disposal∪removal diff catches it; a disposals-only diff would miss it entirely).
+fn prior_donation_only_reorder() -> Vec<LedgerEvent> {
+    let w = exch();
+    let buy = documented_buy(
+        "BUY",
+        datetime!(2024-01-05 00:00 UTC),
+        &w,
+        40_000_000,
+        40_000,
+    );
+    let t = tranche_ev(
+        1,
+        &w,
+        40_000_000,
+        date!(2024 - 01 - 01),
+        date!(2024 - 01 - 10),
+    );
+    let p = promote_ev(2, EventId::decision(1), dec!(50_000));
+    let out = transfer_out("OUT", datetime!(2024-06-01 00:00 UTC), &w, 40_000_000);
+    let recl = donate_reclass(3, "OUT", dec!(60_000));
+    vec![buy, t, p, out, recl]
+}
+
+/// A GIFT-only reorder (same shape as the donation reorder, GiftOut instead of Donate): WITH the promote
+/// the gift draws the tranche (§1015 carryover = documented-only $0), WITHOUT it the documented lot
+/// ($40,000 carryover). A gift changes NO line of the donor's 1040 → the advisory must NOT tell the donor
+/// to amend.
+fn prior_gift_only_reorder() -> Vec<LedgerEvent> {
+    let w = exch();
+    let buy = documented_buy(
+        "BUY",
+        datetime!(2024-01-05 00:00 UTC),
+        &w,
+        40_000_000,
+        40_000,
+    );
+    let t = tranche_ev(
+        1,
+        &w,
+        40_000_000,
+        date!(2024 - 01 - 01),
+        date!(2024 - 01 - 10),
+    );
+    let p = promote_ev(2, EventId::decision(1), dec!(50_000));
+    let out = transfer_out("OUT", datetime!(2024-06-01 00:00 UTC), &w, 40_000_000);
+    let recl = gift_reclass(3, "OUT", dec!(50_000));
+    vec![buy, t, p, out, recl]
+}
+
+/// An equal-basis / different-DATE reorder that changes the 8283 rows but NOT the deduction: two LONG-TERM
+/// lots (documented $12,000 acquired 2022-01-05; tranche promoted floor $30,000, window_end 2022-01-10)
+/// donated 2024-06-01. LT ⇒ deduction = FMV either way (Δded = $0), but the drawn lot's acquisition date /
+/// 8283 basis column differ — the leg SET changes with ZERO gain/deduction Δ (the BG-D9 corner Σ-gain
+/// misses).
+fn equal_basis_date_swap_reorder() -> Vec<LedgerEvent> {
+    let w = exch();
+    let buy = documented_buy(
+        "BUY",
+        datetime!(2022-01-05 00:00 UTC),
+        &w,
+        40_000_000,
+        12_000,
+    );
+    let t = tranche_ev(
+        1,
+        &w,
+        40_000_000,
+        date!(2022 - 01 - 01),
+        date!(2022 - 01 - 10),
+    );
+    let p = promote_ev(2, EventId::decision(1), dec!(30_000));
+    let out = transfer_out("OUT", datetime!(2024-06-01 00:00 UTC), &w, 40_000_000);
+    let recl = donate_reclass(3, "OUT", dec!(50_000));
+    vec![buy, t, p, out, recl]
+}
+
+/// A short-term donation reorder whose DEDUCTION changes (Δded ≠ 0) — so the §170(d) charitable-carryover
+/// cascade arm fires. Same shape as `prior_donation_only_reorder`.
+fn prior_donation_reorder_over_ceiling() -> Vec<LedgerEvent> {
+    prior_donation_only_reorder()
+}
+
+/// A void-of-promote over a filed floor-year: the SAME disposal-reorder events, adjudicated in the VOID
+/// direction (voiding the live promote reverts the tranche floor → $0, raising the filed year's gain).
+fn void_promote_over_filed_year() -> Vec<LedgerEvent> {
+    mixed_vintage_hifo_2018_disposal()
+}
+
+/// ★ BG-D9 (tax r2 I-3 / M-1): a table-less/profile-less 2018 disposal reorder STILL fires the advisory
+/// (leg-set diff, not tax_total), and a basis-INCREASE (gain-decrease) year names §6511 for the refund —
+/// NOT "additional tax". A `tax_total`-keyed predicate would read `None == None` and MISS the rewrite.
+#[test]
+fn undisposed_promote_that_hifo_reorders_a_prior_year_fires_the_advisory() {
+    let events = mixed_vintage_hifo_2018_disposal();
+    let tables = no_tables();
+    let lines = promote_prior_year_advisory(
+        &events,
+        &prices(),
+        &cfg(),
+        &EventId::decision(2),
+        Direction::Promote,
+        None,
+        &tables,
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains("2018") && l.contains("1040-X")),
+        "the 2018 rewrite is named with its Form 1040-X implication: {lines:?}"
+    );
+    let joined = lines.join(" ");
+    assert!(
+        joined.contains("§6511") && !joined.contains("additional tax"),
+        "a basis-increase (refund) year names §6511, NOT 'additional tax' (amend direction by Δ sign): {joined}"
+    );
+}
+
+/// BG-D9 (tax r3 I-2): a removal-leg (donation) reorder with ZERO disposal change is caught by the
+/// disposal∪removal diff and names the deduction change.
+#[test]
+fn promote_reordering_a_prior_donation_only_year_fires_and_names_the_deduction() {
+    let events = prior_donation_only_reorder();
+    let tables = no_tables();
+    let lines = promote_prior_year_advisory(
+        &events,
+        &prices(),
+        &cfg(),
+        &EventId::decision(2),
+        Direction::Promote,
+        None,
+        &tables,
+    );
+    assert!(
+        lines.iter().any(|l| l.contains("charitable deduction")),
+        "the donation-only reorder names the charitable-deduction change: {lines:?}"
+    );
+}
+
+/// BG-D9 (tax r4 I-1): a reorder that changes a filed year's net capital gain/loss names the §1212(b)
+/// carryforward cascade into later filed years.
+#[test]
+fn a_loss_stealing_reorder_names_the_1212b_carryover_cascade() {
+    let events = loss_stealing_reorder();
+    let tables = no_tables();
+    let lines = promote_prior_year_advisory(
+        &events,
+        &prices(),
+        &cfg(),
+        &EventId::decision(2),
+        Direction::Promote,
+        None,
+        &tables,
+    );
+    assert!(
+        lines.iter().any(
+            |l| l.contains("carryover-linked lines of later filed years") && l.contains("§1212(b)")
+        ),
+        "the net-cap-gain change names the §1212(b) carryover cascade: {lines:?}"
+    );
+}
+
+/// BG-D9 (tax r4 M-1): a gift changes NO line of the donor's 1040 → the §1015 carryover-Δ is named
+/// (donee-basis documentation) with NO 1040-X, and never a bare "$0 / $0".
+#[test]
+fn a_gift_only_reorder_quotes_the_1015_carryover_and_asserts_no_1040x() {
+    let events = prior_gift_only_reorder();
+    let tables = no_tables();
+    let lines = promote_prior_year_advisory(
+        &events,
+        &prices(),
+        &cfg(),
+        &EventId::decision(2),
+        Direction::Promote,
+        None,
+        &tables,
+    );
+    let joined = lines.join(" ");
+    assert!(
+        joined.contains("donee-basis") && !joined.contains("$0 / $0"),
+        "the gift reorder names the donee-basis (§1015) change, never a bare $0 / $0: {joined}"
+    );
+    assert!(
+        !joined.contains("1040-X"),
+        "a gift reorder must NOT tell the donor to amend (no 1040-X): {joined}"
+    );
+}
+
+/// BG-D9: an equal-basis / different-date reorder (Δgain = Δded = $0) that changes the 8949/8283 dates
+/// names the CHANGED CONTENT, never a bare "$0".
+#[test]
+fn a_both_deltas_zero_flagged_year_names_the_changed_content_not_a_bare_zero() {
+    let events = equal_basis_date_swap_reorder();
+    let tables = no_tables();
+    let lines = promote_prior_year_advisory(
+        &events,
+        &prices(),
+        &cfg(),
+        &EventId::decision(2),
+        Direction::Promote,
+        None,
+        &tables,
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains("acquisition date") || l.contains("donee")),
+        "a zero-Δ reorder names the changed 8949/8283 content: {lines:?}"
+    );
+    assert!(
+        !lines.iter().any(|l| l.trim().ends_with("$0")),
+        "no line reports a bare $0: {lines:?}"
+    );
+}
+
+/// BG-D9: a donation reorder whose deduction changed names the §170(d) charitable-carryover cascade.
+#[test]
+fn a_donation_reorder_names_the_170d_charitable_carryover_direction() {
+    let events = prior_donation_reorder_over_ceiling();
+    let tables = no_tables();
+    let lines = promote_prior_year_advisory(
+        &events,
+        &prices(),
+        &cfg(),
+        &EventId::decision(2),
+        Direction::Promote,
+        None,
+        &tables,
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains("§170(d)") && l.contains("charitable carryover")),
+        "the donation reorder names the §170(d) charitable-carryover cascade: {lines:?}"
+    );
+}
+
+/// §6: the SAME advisory in the VOID direction — voiding a live promote over a filed floor-year reverts
+/// the floor → $0, RAISING the filed year's gain → amend-to-PAY (1040-X, additional tax).
+#[test]
+fn the_void_direction_fires_amend_to_pay() {
+    let events = void_promote_over_filed_year();
+    let tables = no_tables();
+    let lines = promote_prior_year_advisory(
+        &events,
+        &prices(),
+        &cfg(),
+        &EventId::decision(2),
+        Direction::Void,
+        None,
+        &tables,
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains("1040-X") && l.to_lowercase().contains("additional tax")),
+        "voiding a promote over a filed floor-year is amend-to-pay (1040-X, additional tax): {lines:?}"
     );
 }
