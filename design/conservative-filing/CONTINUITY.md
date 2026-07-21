@@ -25,8 +25,8 @@
 
 **Phase 1 is DONE + gate-green (above). Reconcile FOLLOWUPS.md at each phase entry** (do the items that phase owns — e.g. P8/T14 owns the `--wallet` + UTC-warning Nits; P9/T15 owns the build_op id-guard hardening + the 8949-date/Σ-conservation test-pins; T16 owns the in_force dangling-void + residue-skew + doc-consistency items).
 
-- **T8 / P2** (test-only, characterization — passes on write): pin HIFO draws-documented-first + the FIFO inversion. Stage in the **pre-2025 Universal pool** (config method governs pre-2025; post-2025 method = MethodElection, defaults HIFO). New `crates/btctax-core/tests/kat_conservative.rs`. If a test FAILS on write, the emergence assumption is wrong — STOP, don't add matching code.
-- **T9 / P3**: `tranche_dip_advisory` + `method_inversion_advisory`. Surface via NEW `Option<String>` field(s) on `TaxYearReport` (`cmd/tax.rs:~238`, follow the `gift_advisory` precedent — there is NO "advisory Vec"), rendered in `render_tax_outcome`, mirrored into the TUI Tax tab. A surfacing KAT (advisory reaches stdout) is REQUIRED.
+- **T8 / P2 — DONE** (`9f2c842`): HIFO-steering + FIFO-inversion characterization pins in `crates/btctax-core/tests/kat_conservative.rs` (passes-on-write; discrimination confirmed by method flip).
+- **T9 / P3 — DONE** (`4eabbbe`): new `crates/btctax-core/src/conservative.rs` — `tranche_dip_advisory` (basis-as-filed, provenance-neutral) + `method_inversion_advisory` (recommends HIFO election) + `tranche_report_advisory` (shared assembler). Surfaced via NEW `TaxYearReport.tranche_advisory` (`cmd/tax.rs`, printed in `main.rs`), mirrored into the TUI Tax tab (`btctax-tui/src/tabs/tax.rs`). Builders + surfacing KATs, mutations RED, binary-verified.
 - **T10 / P4**: custody warning — reuse `optimize.rs ForbiddenBroker2027`.
 - **T11 / P5**: `window_reference -> Option<WindowRef{min,coverage}>`.
 - **T12 / P6**: per-tranche overpayment delta via a basis-replacement what-if (needs events+prices+config, NOT a folded state).
@@ -43,4 +43,4 @@
 - Reviews are two-lens Fable (`model:"fable"`, `subagent_type:"general-purpose"`), run in parallel; persist each verbatim before folding; re-review after every fold including the last.
 
 ## One-line resume
-`feat/conservative-filing` @ `4d86df8`; PLAN green; **Phase 1 (Tasks 1–7) DONE + gate-green** (2117 tests; two-lens Fable review 0C/0I r1→r2); **start at Task 8 / Phase 2** (HIFO-steering characterization pins in a new `kat_conservative.rs`) per `IMPLEMENTATION_PLAN.md`. Reconcile `FOLLOWUPS.md` at each phase entry. Merge to main is the OWNER'S call.
+`feat/conservative-filing` @ `4eabbbe`; PLAN green; **Phase 1 (Tasks 1–7) DONE + gate-green**; **Phase 2 in progress — T8/P2 + T9/P3 DONE** (2125 tests green); **resume at Task 10 / P4** (fire the existing `optimize.rs ForbiddenBroker2027` envelope for a ≥2027 Exchange specific-ID; test-led reuse, likely no new production code) per `IMPLEMENTATION_PLAN.md` §Task 10. Reconcile `FOLLOWUPS.md` at each phase entry. Merge to main is the OWNER'S call.
