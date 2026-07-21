@@ -6,6 +6,46 @@ the rest are parked later). Only ownerless cross-cutting residue batches to the 
 
 ## Open
 
+### T16 whole-branch two-lens Fable review r1 (2026-07-20) — FOLDED; blocking findings fixed, residuals filed
+
+Reviews persisted verbatim in `reviews/phase2-whole-branch-{tax,architecture}-fable-review-r1.md`
+(counts: tax 0C/3I/4M/4N; architecture 1C/2I/4M/5N). **All BLOCKING findings fixed + tested + (where a
+predicate changed) mutation-proven**, in one fold:
+
+- **[Critical] Date panic** (`conservative.rs` `.expect` Dec-31) — FIXED: `if let Ok(as_of)` skip; KAT
+  `tranche_report_advisory_does_not_panic_on_an_out_of_range_year`.
+- **[Important] backstop poisons a voided-inert allocation → every year NotComputable** (`resolve.rs`) —
+  FIXED: the tranche-residue Hard is skipped for a void-targeted allocation (§7.4 retires an inert one /
+  Hard-conflicts an effective one), and the totals-mismatch compares against the DOCUMENTED residue
+  (`held_sat − tranche_sat`). KAT `void_inert_alloc_then_declare_..._keeps_the_year_computable`, both
+  halves mutation-proven RED.
+- **[Important] P6 per-BTC reference used as the total lot basis** (`conservative.rs`) — FIXED: scaled
+  `reference × sat / SATS_PER_BTC`; KAT `overpayment_delta_scales_the_per_btc_reference_...` (2-BTC == 2×).
+- **[Important] `export-irs-pdf` / full-return packet omitted `basis_methodology.txt`** (`cmd/admin.rs`) —
+  FIXED: the shared writer now runs on both PDF paths; KAT `export_irs_pdf_writes_basis_methodology_...`.
+- **[Important] TUI Tax tab re-projected the whole ledger every draw tick** (`conservative.rs`) — FIXED:
+  no-tranche early-return before any `project()` (a no-tranche vault pays zero again).
+- **Minors folded inline:** header no longer asserts "$0 as filed" over a `>$0` fee-leg (M-1); overpayment
+  per-tranche delta CLAMPED at $0 + doc corrected (M-2 arch); `overpayment_delta_one` requires
+  `EstimatedConservative` (M-3 arch); residue refusal carries the D-8 finality hedge (M-3 tax); inversion
+  advisory names BOTH levers (M-4 tax); phantom-wallet WARN moved AFTER the guard (N-1 arch); advisory
+  money `{:.2}` (N-2); P4 copy de-retrospected (N-3/N-4 tax/arch).
+
+**Residual Minor/Nit — FILED (non-blocking), owner = post-v1 cleanup:**
+- **[Minor] disclosure omits `window_start`** (tax M-2) — the export CSV/PDF path does not thread `events`
+  to `basis_methodology(state, year)`, only `state` (which carries `window_end` via `acquired_at`, not
+  `window_start`); threading it through `write_form_csvs`/`write_csv_exports` is disproportionate. Mitigated
+  by labeling the shown date "the conservative window-end date" (the binding date for term). The P6 nudge,
+  which HAS `events`, already prints the full `{ws}–{we}`.
+- **[Minor] CLI/TUI drift in the pseudo-placeholder corner** (arch M-4) — under pseudo mode the CLI resolves
+  an all-`$0` placeholder profile and the TUI passes none. Benign in practice: an all-`$0` profile yields a
+  `$0` overpayment delta → the P6 nudge does not fire either way; a defensive provenance-gate is optional.
+- **[Nit] `window_reference` day-iterates an unbounded user window** (arch N-3) — the arch-I-2 early-return
+  means it now runs ONLY for actual tranches; an absurd `window_start` (year 1) is a bounded ~740k no-op
+  probe. A `declare-tranche` window-floor (dataset start) is the follow-up.
+- **[Nit] `write_csv_exports` path untested for `basis_methodology.txt`** (arch N-5) — same shared
+  `write_basis_methodology_txt` helper the `write_form_csvs` (tested) and `export-irs-pdf` (tested) paths use.
+
 ### From the Phase-1 implementation review (r1, 2026-07-21) — all Minor/Nit, non-blocking
 
 - ~~**[Minor] `build_op`'s DeclareTranche arm + engine-level input validation are reachable only from the

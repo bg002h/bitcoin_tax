@@ -680,3 +680,43 @@ fn effective_alloc_id(vault: &Path) -> btctax_core::EventId {
         .map(|e| e.id)
         .expect("an allocation is on file")
 }
+
+/// (I-1, T16 review r1) The SUPPORTED flow must NOT brick the vault: void an INERT allocation, then
+/// declare a pre-2025 tranche (the guard ADMITS it — the voided-inert allocation is not in force). Before
+/// the fix the D-8 backstop re-evaluated the voided allocation and pushed a PERMANENT Hard
+/// SafeHarborUnconservable → every year NotComputable, with no clearing move. Now Path A governs, the
+/// tranche lot survives, and no Hard blocker is emitted.
+#[test]
+fn void_inert_alloc_then_declare_pre2025_tranche_keeps_the_year_computable() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = vault_inert_alloc(dir.path());
+    let alloc_id = effective_alloc_id(&vault);
+    cmd::reconcile::void(&vault, &pp(), &alloc_id.canonical(), now()).unwrap(); // inert ⇒ voidable
+    cmd::tranche::declare_tranche(
+        &vault,
+        &pp(),
+        50_000_000,
+        tranche_wallet(),
+        date!(2018 - 01 - 01),
+        date!(2018 - 12 - 31),
+        now(),
+    )
+    .unwrap(); // ADMITTED (voided-inert allocation is not in force)
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    assert!(
+        !state
+            .blockers
+            .iter()
+            .any(|b| b.kind == btctax_core::BlockerKind::SafeHarborUnconservable),
+        "no Hard SafeHarborUnconservable on the voided-inert allocation (I-1): {:?}",
+        state.blockers
+    );
+    assert!(
+        state.lots.iter().any(|l| l.basis_source
+            == btctax_core::BasisSource::EstimatedConservative
+            && l.remaining_sat > 0),
+        "the tranche lot survives via Path A (tag intact)"
+    );
+}

@@ -693,7 +693,9 @@ impl Session {
             return Err(CliError::Usage(
                 "cannot open the safe-harbor allocate flow: a pre-2025 conservative-filing tranche ($0 \
                  EstimatedConservative) is on file — v1 makes a tranche and a safe-harbor allocation \
-                 mutually exclusive (D-8). Void the tranche first to allocate."
+                 mutually exclusive (D-8). Void the tranche first (`reconcile void <decision-ref>`); if \
+                 you have already filed the tranche's $0 basis, unallocated pre-2025 units are a \
+                 facts-and-circumstances matter for a professional."
                     .to_string(),
             ));
         }

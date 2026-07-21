@@ -1318,3 +1318,66 @@ fn classify_raw_declaretranche_on_an_import_folds_nothing_id_guard() {
         "a ClassifyRaw-routed DeclareTranche on an IMPORT id folds NO lot (build_op EventId::Decision guard)"
     );
 }
+
+// ── T16 review folds (r1) ────────────────────────────────────────────────────────────────────────────
+
+/// I-2 (both lenses): `overpayment_delta` scales the per-BTC window reference to the WHOLE-LOT basis
+/// (`reference × sat / 1e8`). A 2-BTC tranche at $20k/BTC has a $40k basis, so its delta is EXACTLY 2× a
+/// 1-BTC tranche's at the same price + proportional proceeds (both ST in the same 22% bracket, no NIIT).
+/// Before the fix both used a $20k basis → equal deltas (the bug the all-1-BTC fixtures hid).
+#[test]
+fn overpayment_delta_scales_the_per_btc_reference_to_the_whole_lot_basis() {
+    let w = self_custody();
+    let prof = tax_profile(60_000);
+    let reference = rust_decimal::Decimal::from(20_000); // USD per WHOLE BTC
+    let delta = |sat: i64, proceeds: i64| {
+        let events = vec![
+            tranche_ev(1, &w, sat, date!(2025 - 06 - 01), date!(2025 - 06 - 30)),
+            sell_ev("SELL", datetime!(2026-06-01 00:00 UTC), &w, sat, proceeds),
+        ];
+        overpayment_delta(
+            &events,
+            &prices(),
+            &config(),
+            2026,
+            Some(&prof),
+            &synth(2026),
+            &[(EventId::decision(1), reference)],
+        )
+    };
+    let one_btc = delta(100_000_000, 50_000);
+    let two_btc = delta(200_000_000, 100_000);
+    assert!(one_btc > dec!(0), "the 1-BTC delta is positive: {one_btc}");
+    assert_eq!(
+        two_btc,
+        one_btc * dec!(2),
+        "a 2-BTC tranche has 2× the reconstructed basis → 2× the saving (per-BTC scaling, I-2): \
+         1-BTC={one_btc} 2-BTC={two_btc}"
+    );
+}
+
+/// C-1 (arch): `tranche_report_advisory` must NOT panic on an out-of-range `--tax-year` when a tranche
+/// lot is held (`--tax-year` is an unvalidated CLI i32; year 10000 is outside `time::Date`'s range and
+/// cannot build a Dec-31 as-of). It skips the inversion lookup gracefully.
+#[test]
+fn tranche_report_advisory_does_not_panic_on_an_out_of_range_year() {
+    let w = self_custody();
+    let events = vec![tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2018 - 01 - 01),
+        date!(2018 - 12 - 31),
+    )];
+    let st = project(&events, &prices(), &config());
+    // Year 10000 is outside time::Date's ±9999 range — must not panic (returns without the inversion warn).
+    let _ = tranche_report_advisory(
+        &st,
+        &events,
+        &prices(),
+        &config(),
+        10_000,
+        None,
+        &synth(10_000),
+    );
+}

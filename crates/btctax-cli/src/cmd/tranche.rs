@@ -159,8 +159,15 @@ pub fn declare_tranche(
 
     let mut session = Session::open(vault_path, pp)?;
     let events = load_all(session.conn())?;
-    // P8 Nit: warn (never refuse) on a `--wallet` that no prior event references — a likely typo that
-    // strands the $0 lot in a phantom wallet (still files at $0). The lot records regardless.
+    // Guard FIRST (arch N-1): project the EXISTING events (record-time, mirrors `would_conflict`) so the
+    // tranche-side guard sees the engine's effective-vs-inert allocation view — an EFFECTIVE-but-voided
+    // allocation still blocks a pre-2025 tranche (arch r1 Minor, T16). Running it before the phantom-wallet
+    // warning means a REFUSED declaration never emits the misleading "stranded lot" note.
+    let cfg = session.config()?;
+    let state = btctax_core::project::project(&events, session.prices(), &cfg.to_projection());
+    guard_tranche_vs_allocation(&events, window_end, &state.blockers)?;
+    // The declaration WILL be recorded now — warn (never refuse) on a `--wallet` that no prior event
+    // references (a likely typo that strands the $0 lot in a phantom wallet; it still files at $0).
     if !wallet_is_known(&events, &wallet) {
         eprintln!(
             "warning: --wallet {} has no prior events in this vault; if this is a typo the $0 tranche \
@@ -169,12 +176,6 @@ pub fn declare_tranche(
             crate::render::wallet_label(&wallet)
         );
     }
-    // Project the EXISTING events (record-time, mirrors `would_conflict`) so the tranche-side guard sees
-    // the engine's effective-vs-inert allocation view — an EFFECTIVE-but-voided allocation still blocks a
-    // pre-2025 tranche (arch r1 Minor, T16).
-    let cfg = session.config()?;
-    let state = btctax_core::project::project(&events, session.prices(), &cfg.to_projection());
-    guard_tranche_vs_allocation(&events, window_end, &state.blockers)?;
     let payload = EventPayload::DeclareTranche(DeclareTranche {
         sat,
         wallet,

@@ -916,9 +916,10 @@ pub fn write_form_csvs(
 }
 
 /// P7 (D-4): write the MANDATORY conservative-filing methodology disclosure (`basis_methodology.txt`,
-/// 0o600) alongside the year's form CSVs whenever a tranche is in the year's filed set. A no-tranche
+/// 0o600) alongside the year's form artifacts whenever a tranche is in the year's filed set. A no-tranche
 /// year writes NOTHING — the i8949 basis explanation is required only when actual cost is not used.
-fn write_basis_methodology_txt(
+/// `pub(crate)` so the `export-irs-pdf` / full-return packet writers (`cmd/admin.rs`) emit it too (I-3).
+pub(crate) fn write_basis_methodology_txt(
     out_dir: &Path,
     state: &LedgerState,
     year: i32,

@@ -9,7 +9,7 @@ use btctax_core::identity::*;
 use btctax_store::Passphrase;
 use rust_decimal_macros::dec;
 use std::path::PathBuf;
-use time::macros::{datetime, offset};
+use time::macros::{date, datetime, offset};
 
 fn pp() -> Passphrase {
     Passphrase::new("pw".into())
@@ -818,4 +818,53 @@ fn the_two_pipelines_cannot_overwrite_each_others_files() {
             "★ the slice OVERWROTE the packet's {name} — a cents form inside a whole-dollar return"
         );
     }
+}
+
+/// I-3 (T16 review r1 / D-4): `export-irs-pdf` writes the MANDATORY `basis_methodology.txt` alongside the
+/// PDF packet whenever a $0-basis tranche row is filed — the disclosure must ride the flagship
+/// filing-ready artifact, not only the CSV paths.
+#[test]
+fn export_irs_pdf_writes_basis_methodology_when_a_tranche_is_filed() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    // A 2025 tranche (in `wallet()`) + a 2025 Sell of it → a $0-basis tranche row filed in 2025.
+    cmd::tranche::declare_tranche(
+        &vault,
+        &pp(),
+        1_000_000,
+        wallet(),
+        date!(2025 - 01 - 01),
+        date!(2025 - 01 - 31),
+        datetime!(2026-01-01 0:00 UTC),
+    )
+    .unwrap();
+    let sell = vec![ev(
+        "sell-t",
+        datetime!(2025-06-15 12:00 UTC),
+        EventPayload::Dispose(Dispose {
+            sat: 1_000_000,
+            usd_proceeds: dec!(500),
+            fee_usd: dec!(0),
+            kind: DisposeKind::Sell,
+        }),
+    )];
+    let mut s = Session::open(&vault, &pp()).unwrap();
+    btctax_core::persistence::append_import_batch(s.conn(), &sell).unwrap();
+    s.save().unwrap();
+    drop(s); // release the vault lock before the export opens its own session
+
+    let out = tempfile::tempdir().unwrap();
+    cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2025, &[], None).unwrap();
+    let disclosure = out.path().join("basis_methodology.txt");
+    assert!(
+        disclosure.exists(),
+        "the PDF packet must write the mandatory basis_methodology.txt (I-3 / D-4)"
+    );
+    assert!(
+        std::fs::read_to_string(&disclosure)
+            .unwrap()
+            .contains("Basis methodology disclosure"),
+        "the disclosure content is present"
+    );
 }

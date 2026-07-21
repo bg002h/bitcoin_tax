@@ -2,7 +2,7 @@
 //! folding, no I/O. They are provenance-neutral (never assert "purchase"/"bought"; a tranche is
 //! undocumented BTC filed at its AS-FILED basis) and never instruct a tax-understating action.
 
-use crate::conventions::TaxDate;
+use crate::conventions::{round_cents, TaxDate, SATS_PER_BTC};
 use crate::event::{EventPayload, LedgerEvent};
 use crate::identity::EventId;
 use crate::optimize::{persistability, Persistability};
@@ -30,7 +30,7 @@ pub fn tranche_dip_advisory(disposal: &Disposal) -> Option<String> {
         .map(|l| {
             format!(
                 "Conservative-filing dip — {sat} sat of undocumented BTC (estimated acquired by {acq}) \
-                 disposed on {date} at ${basis} basis as filed, reporting ${gain} gain. If you can \
+                 disposed on {date} at ${basis:.2} basis as filed, reporting ${gain:.2} gain. If you can \
                  substantiate a higher basis for these units, recording it lowers the reported gain \
                  (never below the amount you can document).",
                 sat = l.sat,
@@ -77,7 +77,9 @@ pub fn method_inversion_advisory(
             "Method-inversion warning — the in-force lot method for this wallet is {method:?} (not HIFO). \
              Under it a disposal can draw a $0-basis conservative-filing unit before your documented \
              higher-basis units, maximizing the reported gain. Electing HIFO would draw the documented \
-             units first: `btctax config --set-forward-method hifo`."
+             units first — set it forward with `btctax config --set-forward-method hifo` (which binds \
+             2025+ disposals); for a pre-2025-dated disposal, elect HIFO as the pre-2025 method \
+             (tax r1 M-4: a forward election cannot change a pre-2025-dated disposal)."
         ))
     } else {
         None
@@ -137,8 +139,9 @@ pub fn basis_methodology(state: &LedgerState, year: i32) -> Option<String> {
                 Term::ShortTerm => "short-term",
             };
             items.push(format!(
-                "  \u{2022} {sat} sat of undocumented BTC, estimated acquired by {acq}, disposed on \
-                 {date}, filed at ${basis} basis ({term} holding period).",
+                "  \u{2022} {sat} sat of undocumented BTC, estimated acquired by {acq} (the conservative \
+                 window-end date), disposed on {date}, filed at ${basis:.2} basis ({term} holding \
+                 period).",
                 sat = l.sat,
                 acq = l.acquired_at,
                 date = d.disposed_at,
@@ -151,12 +154,14 @@ pub fn basis_methodology(state: &LedgerState, year: i32) -> Option<String> {
     }
     let mut out = format!(
         "Basis methodology disclosure (conservative filing) \u{2014} tax year {year}\n\n\
-         For the units below, the actual cost basis could not be substantiated from available records. \
-         A conservative $0 basis (the IRS fallback for unprovable basis) was used as filed; a $0 basis \
-         cannot understate gain. Each unit's holding period is derived from its estimated acquisition \
-         date and reported below as computed, never assumed. If records are later reconstructed, a \
-         higher documented basis may be substantiated \u{2014} lowering the reported gain, never below \
-         the amount that can be documented.\n\n"
+         For the units below, the actual cost basis could not be substantiated from available records, \
+         so a conservative estimate was filed \u{2014} the basis filed for each unit is shown on its \
+         line (the IRS `$0` fallback for unprovable basis, which cannot understate gain; a `>$0` amount \
+         reflects documented on-chain fee basis re-homed onto that unit under \u{00a7}1011, never the \
+         estimate). Each unit's holding period is derived from its estimated acquisition date and \
+         reported as computed, never assumed. If records are later reconstructed, a higher documented \
+         basis may be substantiated \u{2014} lowering the reported gain, never below the amount that can \
+         be documented.\n\n"
     );
     out.push_str(&items.join("\n"));
     Some(out)
@@ -236,10 +241,10 @@ pub fn tranche_broker_specific_id_advisory(
         Persistability::ForbiddenBroker2027 => Some(format!(
             "Broker specific-ID warning — this {year} disposal draws undocumented BTC held at an \
              exchange (broker). From 2027, own-books specific identification is INSUFFICIENT at a \
-             broker (the Notices 2025-7/2026-20 own-books transitional relief ended 2026-12-31): the \
-             broker must communicate the specific identification by the time of sale, or the sale \
-             defaults to FIFO. To keep own-books specific-ID for no-records units, hold them in \
-             self-custody.",
+             broker (the Notices 2025-7/2026-20 own-books transitional relief runs only through \
+             2026-12-31): to specifically identify units the broker must be given the identification by \
+             the time of sale, otherwise the sale falls back to FIFO. To keep own-books specific-ID for \
+             no-records units, hold them in self-custody.",
             year = sale_date.year(),
         )),
         _ => None,
@@ -266,8 +271,15 @@ fn tax_total(
 /// with ONLY `tranche_id`'s `Op::Acquire.usd_cost` swapped to `reference` (a clone-fold-discard; NOTHING
 /// is written, and NOTHING `>$0` is filed — D-7). `baseline` is the pre-computed `tax($0)`. Returns `$0`
 /// when the reference is `≤$0` (nothing to reconstruct to), the tranche is not in the timeline (voided /
-/// undisposed origin absent), or the with-scenario year is uncomputable. Never negative: a higher basis
-/// lowers the realized gain, so `baseline ≥ with`.
+/// undisposed origin absent), or the with-scenario year is uncomputable.
+///
+/// `reference` is a **price** — USD per WHOLE BTC (the window-min close). The swapped `Acquire.usd_cost`
+/// is the WHOLE-LOT basis for the tranche's `sat` sats, so it is scaled `reference × sat / SATS_PER_BTC`
+/// (arch/tax I-2 — the fixture bug that hid this used only 1-BTC tranches). The result is CLAMPED at `$0`:
+/// a saving is never negative, and while a basis-swap-induced HIFO reorder could in principle raise a
+/// single year's tax (a per-tranche negative term), a "could save" figure of `< 0` is meaningless — the
+/// clamp matches the nudge's own `delta <= 0` skip (arch M-2). The swap is scoped to a Decision-id
+/// `EstimatedConservative` acquire, so a non-tranche id yields `$0` as the doc claims (arch M-3).
 #[allow(clippy::too_many_arguments)]
 fn overpayment_delta_one(
     events: &[LedgerEvent],
@@ -286,9 +298,15 @@ fn overpayment_delta_one(
     let mut res = resolve(events, prices, config);
     let mut swapped = false;
     for eff in res.timeline.iter_mut() {
-        if eff.id == *tranche_id {
-            if let Op::Acquire(a) = &mut eff.op {
-                a.usd_cost = reference;
+        // Scope the swap to THIS tranche's Decision-id $0 EstimatedConservative acquire (arch M-3): never
+        // rewrite a documented import Acquire that happens to share the id space.
+        if eff.id != *tranche_id || !matches!(eff.id, EventId::Decision { .. }) {
+            continue;
+        }
+        if let Op::Acquire(a) = &mut eff.op {
+            if a.basis_source == BasisSource::EstimatedConservative {
+                // `reference` is USD/BTC; `usd_cost` is the whole-lot basis for `a.sat` sats (I-2).
+                a.usd_cost = round_cents(reference * Usd::from(a.sat) / Usd::from(SATS_PER_BTC));
                 swapped = true;
             }
         }
@@ -298,7 +316,7 @@ fn overpayment_delta_one(
     }
     let with_state = fold(res, prices, config);
     match tax_total(events, &with_state, year, profile, tables) {
-        Some(with_tax) => baseline - with_tax,
+        Some(with_tax) => (baseline - with_tax).max(Usd::ZERO), // a saving is never negative (arch M-2)
         None => Usd::ZERO,
     }
 }
@@ -355,8 +373,17 @@ fn overpayment_nudge_lines(
     tables: &dyn TaxTables,
 ) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
-    // No profile ⇒ no computable tax ⇒ no overpayment figure (the dip/broker/inversion advisories still
-    // surface without one — only this quantified nudge needs the tax engine).
+    // arch I-2 PERF: the TUI Tax tab calls this assembler on EVERY draw tick (~10 Hz). The nudge below runs
+    // a full `project()` of the whole ledger — so short-circuit BEFORE any projection when the vault holds
+    // no `DeclareTranche` at all (the common case: every non-conservative-filing user pays ZERO here, as
+    // the pre-branch tab did). A profile is likewise required (no tax without one).
+    if profile.is_none()
+        || !events
+            .iter()
+            .any(|e| matches!(e.payload, EventPayload::DeclareTranche(_)))
+    {
+        return lines;
+    }
     let baseline = match tax_total(
         events,
         &project(events, prices, config),
@@ -482,13 +509,16 @@ pub fn tranche_report_advisory(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
+    // C-1: `--tax-year` is an unvalidated CLI i32; a year outside `time::Date`'s ±9999 range cannot build
+    // a Dec-31 as-of. Skip the in-force-method lookup (⇒ no inversion warning) rather than panic — the
+    // rest of the advisory (dip / broker / nudge) still surfaces for such an absurd year.
     if !tranche_wallets.is_empty() {
-        let as_of = time::Date::from_calendar_date(year, time::Month::December, 31)
-            .expect("Dec 31 is always a valid date");
-        let methods = in_force_methods(events, prices, config, as_of, &tranche_wallets);
-        for (w, m) in tranche_wallets.iter().zip(methods) {
-            if let Some(a) = method_inversion_advisory(state, w, m.method) {
-                lines.push(a);
+        if let Ok(as_of) = time::Date::from_calendar_date(year, time::Month::December, 31) {
+            let methods = in_force_methods(events, prices, config, as_of, &tranche_wallets);
+            for (w, m) in tranche_wallets.iter().zip(methods) {
+                if let Some(a) = method_inversion_advisory(state, w, m.method) {
+                    lines.push(a);
+                }
             }
         }
     }

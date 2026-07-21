@@ -298,6 +298,11 @@ pub fn export_irs_pdf(
 
     mkdir_out(out_dir)?;
 
+    // I-3 (D-4): the MANDATORY conservative-filing methodology disclosure rides the PDF packet too, not
+    // just the CSV paths — a filer mailing the flagship filing-ready artifact must get the i8949-required
+    // basis explanation whenever a $0-basis tranche row is present. Writes nothing for a no-tranche year.
+    crate::render::write_basis_methodology_txt(out_dir, &state, tax_year)?;
+
     // ── Form 8949 + Schedule D (always applicable). ──
     let f8949_path = if wants(forms, FormArg::F8949) {
         let bytes = stamp(btctax_forms::fill_form_8949(&rows, tax_year)?)?;
@@ -546,6 +551,8 @@ fn export_full_return(
     let packet = btctax_forms::fill_full_return(&printed, tax_year)?;
 
     mkdir_out(out_dir)?;
+    // I-3 (D-4): the MANDATORY methodology disclosure rides the full-return packet too (see export_irs_pdf).
+    crate::render::write_basis_methodology_txt(out_dir, state, tax_year)?;
     let mut manifest = String::from("# btctax full-return packet — staple in this order\n");
     let mut paths: Vec<PathBuf> = Vec::new();
     for form in &packet {
