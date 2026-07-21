@@ -2,15 +2,16 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** DRAFT — **plan-review r1 + r2 + r3 FOLDED** (r1: tax 0C/8I + arch 0C/6I [Fable]; r2: tax 0C/1I +
-arch 0C/2I [Fable]; r3: tax 0C/1I + arch 0C/1I [**Opus**, per user direction], all persisted verbatim in
-`reviews/plan-{tax,architecture}-{fable-review-r{1,2},opus-review-r3}.md`); pending the **r4** re-review to 0C/0I
-(Opus) per `STANDARD_WORKFLOW.md` **before any execution**. r3 (fresh Opus lenses) verified all r2 folds
-genuinely resolved and found two the Fable rounds missed: **(arch)** `FoldCtx` has **FOUR** construction sites,
-not two (`fold`/`universal_snapshot` + the optimizer's `pools_before`/`state_as_of`) — T4 now threads all four;
-**(tax)** a real **SPEC BG-D4 formula bug** — the clamp bound omitted `documented_share`, filing an
-estimate-ENABLED loss when a fee carry is present → **the GREEN SPEC was amended** (clamp bound `net − documented`)
-+ T4 KATs flipped/added. Plus small drift-copy / KAT-pin fixes.
+**Status:** ✅ **GREEN — PLAN review loop CONVERGED at 0 Critical / 0 Important on BOTH lenses** (r4 Opus: tax
+0C/0I/0M/0N + arch 0C/0I/0M/1N-folded). Four two-lens rounds — r1/r2 Fable, **r3/r4 Opus** (per user direction),
+all persisted verbatim in `reviews/plan-{tax,architecture}-{fable-review-r{1,2},opus-review-r{3,4}}.md`: r1 tax
+0C/8I + arch 0C/6I → r2 0C/1I + 0C/2I → r3 0C/1I + 0C/1I → r4 **0C/0I + 0C/0I**. The Opus switch (r3+) caught
+two defects five Fable spec-rounds + two Fable plan-rounds missed: the FOUR-site `FoldCtx` (compile break the
+empty-set shortcut would have hidden while corrupting the optimizer) and a genuine **BG-D4 formula bug in the
+already-green SPEC** (the clamp stacked `documented_share` on a `net`-clamped estimate → estimate-enabled loss;
+the SPEC was amended to clamp `net − documented`, re-verified tax-correct across every corner in r4). The plan
+is buildable exactly as written. **Next: USER go/no-go + execution-mode choice (subagent-driven vs inline)
+before any code is written.**
 
 **Goal:** Let a filer knowingly promote a v1 `$0`-basis conservative tranche to a filed **`>$0` basis floor**
 (window-min daily close), backed by a mandatory **Form 8275**, with every gate/advisory/decomposition the GREEN
@@ -532,7 +533,7 @@ the relocation tag-carry reds `relocated_promoted_tranche_keeps_tag_and_floor`.
 - [ ] **Step 5: Commit.**
   ```bash
   git add crates/btctax-core/src/project/fold.rs crates/btctax-core/src/project/transition.rs crates/btctax-core/src/conservative_promote.rs crates/btctax-core/tests/kat_promote.rs
-  git commit -m "feat(promote): BG-D4 disposal-leg clamp from stored filed_basis + thread PromoteSet into BOTH FoldCtx sites (fold + universal_snapshot)"
+  git commit -m "feat(promote): BG-D4 disposal-leg clamp (net−documented) from stored filed_basis + thread PromoteSet into ALL FOUR FoldCtx sites"
   ```
 
 **Mutation to kill:** decomposing from `c.gain_basis` instead of the stored `filed_basis` reds
