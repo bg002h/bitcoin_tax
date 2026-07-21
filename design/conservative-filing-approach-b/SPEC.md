@@ -1,15 +1,15 @@
 # SPEC — Conservative / Defensive Filing, **Approach B** — sub-project 1: the basis-floor engine + Form 8275
 
-**Status:** DRAFT — **r1 + r2 + r3 two-lens reviews FOLDED** (r1: tax 1C/4I + arch 0C/6I; r2: tax 0C/3I + arch
-0C/1I; r3: tax 0C/2I + arch 0C/1I — all persisted verbatim in
-`reviews/spec-{tax,architecture}-fable-review-r{1,2,3}.md`); pending the **r4** re-review to 0C/0I per
-`STANDARD_WORKFLOW.md`. Each round's residue narrowed and both lenses CONVERGED: r3's blocker (both lenses,
-independently) was that the r2 fold-diff was DISPOSAL-scoped while BG-D11 (same fold) made prior-year REMOVAL
-legs promote-sensitive — a promote that HIFO-reorders a prior donation-only year rewrote its Schedule A/8283
-silently past all three detection paths. Fixed by one keying stroke — the fold-diff now ranges over disposal
-AND removal legs, quoting a profile-free deduction-Δ (BG-D6/D9) — plus the dropped current-year Σ term (tax r3
-I-1). The tax lens's independent third-pass surface census confirms NO other filed surface a promoted basis
-reaches funds a deduction/credit/outbound carry.
+**Status:** DRAFT — **r1–r4 two-lens reviews FOLDED** (r1: tax 1C/4I + arch 0C/6I; r2: tax 0C/3I + arch 0C/1I;
+r3: tax 0C/2I + arch 0C/1I; r4: **arch GREEN 0C/0I** + tax 0C/1I — all persisted verbatim in
+`reviews/spec-{tax,architecture}-fable-review-r{1,2,3,4}.md`); pending the **r5** re-review to 0C/0I per
+`STANDARD_WORKFLOW.md`. The architecture lens has CONVERGED (r4 green). r4's tax Important was the terminal
+ring of the whole-surface class — cross-YEAR propagation: a flagged year Y's change flows through the two
+carryover chains the product models (§1212(b) capital-loss, §170(d) charitable) into Y+1's derived carryover-in
+lines, which are unflagged (Y+1's legs unchanged). Folded as a NAMING clause (loud-uncomputable pattern, no new
+machinery) in BG-D9/D6 + §3 census + §6 KAT; plus the gift-only quoting fix both lenses raised (§1015
+carryover-Δ, not a bare $0). Four rounds of surface censuses (tax lens) now find no further emitter or
+propagation path.
 **Branch:** `feat/conservative-filing-b` (off `main` @ the v0.8.0 release).
 **Parent:** the shipped Conservative-Filing v1 (`design/conservative-filing/SPEC.md`, v0.8.0). This spec is the
 first of Approach B's sub-projects; the guided **wizard** (sub-project 2) and **VARIOUS multi-date rows**
@@ -173,7 +173,12 @@ which honestly *widens* the window and *lowers* the floor. Both are anti-oversta
     promote before filing — is silently dropped; tax r2 M-2 / tax r3 I-1). The per-year term ranges over BOTH
     surfaces the promote rewrites (tax r3 I-2): a disposal-flagged year quotes the clamped gain/tax-Δ; a
     **removal-flagged year** (a HIFO reorder changed a donation/gift draw) quotes the profile-free
-    **deduction-Δ** (`Σ claimed_deduction` from the fold pair), never $0. PLUS, for sats not yet disposed, an
+    **deduction-Δ** for donation legs (`Σ claimed_deduction`) or the **§1015 carryover-basis-Δ** for gift legs
+    (`Σ leg.basis` — gifts carry `claimed_deduction: None`; both directions per BG-D9's donation/gift
+    distinction, tax r4 / arch r4 M-1), never a bare $0. Each flagged year also carries the **carryover-cascade
+    note** (BG-D9's §1212(b)/§170(d) clause): the exposure of later filed years whose carryover-in lines derive
+    from a flagged year is recorded in the `Acknowledgment` as a **named-unquantified** term when the machinery
+    cannot price it (never silently absent; tax r4 I-1). PLUS, for sats not yet disposed, an
     explicit **unrealized** line — *"saving and exposure accrue at disposal; at today's price the floor would
     reduce reported gain by ~$X (hypothetical, not a filed figure)"* — **never a bare $0**; and when there is no
     bundled close for "today" (data ends at release; tax r3 N-2), fall back to the latest bundled close + its
@@ -281,13 +286,38 @@ which honestly *widens* the window and *lowers* the floor. Both are anti-oversta
     This also resolves the partially-disposed ambiguity ("disposed" = has any disposed leg). Copy: *"this promote
     changes year Y's reported gain by ~$G **and its charitable deduction by ~$D** [and computed tax by ~$Δ, when Y
     computes]; if Y was already filed, claiming it requires a Form 1040-X for Y with the 8275 attached"* — the
-    ~$D clause appears whenever a removal leg diffs (profile-free, `Σ claimed_deduction` from the fold pair, and
-    the copy must NOT imply the ~$Δ tax figure captures the deduction effect — engine B can't price it); the
     tax-Δ clause appears only when Y computes, otherwise a *"tax not computable for Y (no table/profile/blocked)"*
     note; conditional on "if Y was already filed" (the engine has no filed-year concept, so it must not assert an
     amendment is required); and it notes **§6511** (a refund claim for an old year — e.g. 2019 — is likely
-    time-barred: 3 years from filing / 2 from payment, tax r1 M-5). The collapsed deduction also corrupts the
-    §170(d) carryover chain — the amend is to-PAY in the donation-reorder case.
+    time-barred: 3 years from filing / 2 from payment, tax r1 M-5). The tax-Δ figure must **NOT** be implied to
+    capture the deduction effect — engine B can't price crypto donations.
+    - **The removal-flagged term distinguishes DONATION legs from GIFT legs (tax r4 / arch r4 M-1).** A
+      DONATION-flagged year quotes `Σ claimed_deduction` from the fold pair (profile-free, `Some(..)` on the
+      `Removal`) as ~$D, with the 1040-X clause. A **GIFT**-flagged year has `claimed_deduction: None` (a gift is
+      no deduction on the donor's 1040), so quoting `Σ claimed_deduction` would print a bare `$0` that the "never
+      $0" rule forbids AND falsely imply a donor 1040-X; instead quote the **§1015 carryover-basis-Δ** (`Σ
+      leg.basis` over the year's gift removal legs — equally profile-free) and say *"the recorded donee-basis
+      (§1015 carryover) documentation for year Y changes; the donor's Form 1040 is unaffected (note the Form 709
+      basis column where one was filed)"* — no 1040-X assertion. When BOTH Δs are `$0` for a flagged year (e.g. a
+      reorder swapping equal-basis same-term lots), name the changed filed content (8283 acquisition dates /
+      donee-basis records) rather than a bare `$0`.
+    - **★ Cross-YEAR carryover cascade — name it, per the loud-uncomputable pattern (tax r4 I-1).** Year Y is not
+      the whole amendment set: a change to Y's net capital gain/loss or its charitable deduction propagates
+      through TWO return-level carryover chains the product itself models — **§1212(b)/§1211(b) capital-loss**
+      (engine B's per-year `carryforward_out` feeds Y+1's `capital_loss_carryforward_in`,
+      `carryforward_consistency`) and **§170(d) charitable** (`write_back_carryover`/`apply_carryover_writeback`
+      stamps Y's computed `charitable_carryover_out` into Y+1's stored `ReturnInputs`, silently overwriting a
+      Computed-provenance value) — into LATER filed years whose crypto legs are byte-identical between the folds
+      (so they never flag, are absent from the consent Σ, and engine B's per-year tax-Δ is blind because it
+      applies the same `capital_loss_carryforward_in` in both folds). Worked corner: a promote-reorder that
+      absorbs a prior year's $6k loss into Y strands the filed $3k carryforward deduction on Y+1 (amend-to-PAY,
+      silent). Quantifying the cascade is profile/AGI-gated, so — exactly like the uncomputable-year rule — the
+      spec floor is **naming, not computing**: the advisory adds *"carryover-linked lines of later filed years
+      (Schedule D capital-loss carryforward, §1212(b); Schedule A charitable carryover, §170(d)) derive from
+      year Y and may also require amendment, even though those years' crypto transactions are unchanged"*, quoting
+      the Δ only where the machinery computes it (the `carryforward_out` diff when both folds compute Y; the
+      `charitable_carryover_out` diff when Y's absolute return computes) else named-unquantified. Both directions
+      (the VOID direction is amend-to-refund, §6511-bounded).
   - **The VOID direction gets the SAME advisory (tax r1 M-5).** Voiding a promote over a year whose fold diff
     changes reverts the books to `$0` while a filed return still claims the floor — an amend-to-**pay** situation
     (1040-X owing), symmetric to the promote direction; the fold-diff trigger covers both directions.
@@ -390,6 +420,13 @@ sites verified against current source.
    (`pools.rs`, acquisition-date FIFO) + the three `FeeCarry` re-home sites (`rehome_onto_lot`,
    `rehome_onto_disposal_leg`, `rehome_onto_removal_leg`, `fold.rs`) must decompose the consumed fee-sats so the
    estimate component evaporates and only documented fee basis re-homes.
+8c. **The cross-year carryover chains (BG-D9 cascade / tax r4 I-1) — promote-adjacent, at minimum enumerated so
+   the silent-overwrite path is considered:** `carryforward_consistency` (`tax/compute.rs`, wired `cmd/tax.rs`)
+   for §1212(b) capital-loss (its "verify your prior return" copy is promote-blind), and
+   `write_back_carryover` / `apply_carryover_writeback` (`cmd/tax.rs` / `tax/return_1040.rs`) for §170(d)
+   charitable — the latter STAMPS a flagged year's computed `charitable_carryover_out` into Y+1's stored
+   `ReturnInputs`, silently overwriting a Computed-provenance value. The plan decides whether their copy becomes
+   promote-aware; the census must list them so the cascade isn't rediscovered at implementation time.
 
 **Payload-side (no compiler help — enumerate or ship silent):**
 9. `void.rs` `is_revocable_payload` (`matches!`) — add `PromoteTranche`, else it is absent from the bulk + TUI
@@ -484,13 +521,22 @@ Every primitive TDD + mutation-proven; full suite + all CI-only jobs green; SPEC
   the CLI path, cannot dangle the target — mirrors void-of-effective-allocation); **both voids in EITHER order**
   (void-tranche then void-promote, and the reverse) converge to promote-dead + tranche-voided, never a bricked
   ledger (arch r2 M-1; and BG-D9-ii is scoped to non-voided promotes so the both-voids end state emits no
-  spurious Hard — arch r3 N-1); a promote with a non-voided absent/wrong-type target → hard `DecisionConflict`;
-  `safe_harbor_residue` does not project a dangling promote; **the prior-year advisory fires on an
-  UNDISPOSED-tranche promote that HIFO-reorders a prior year — INCLUDING a table-less/profile-less year AND a
-  prior DONATION/GIFT-only year with NO disposal-leg change** (the fold-diff over disposal legs **AND removal
-  legs**, quoting the deduction-Δ for a removal-reordered year; NOT computed-`tax_total`, NOT a Σ-gain diff, NOT
-  "disposed" — arch r1 I-4 + tax r1 I-4, re-keyed arch r2 I-1 / tax r2 I-3, widened arch r3 I-1 / tax r3 I-2), in
-  BOTH the promote and void directions; the copy is conditional ("if Y was already filed") and notes §6511.
+  spurious Hard — arch r3 N-1); a **non-voided promote** with an absent/wrong-type target → hard
+  `DecisionConflict` (arch r4 N-1 word-order); `safe_harbor_residue` does not project a dangling promote; **the
+  prior-year advisory fires on an UNDISPOSED-tranche promote that HIFO-reorders a prior year — INCLUDING a
+  table-less/profile-less year AND a prior DONATION/GIFT-only year with NO disposal-leg change** (the fold-diff
+  over disposal legs **AND removal legs**, quoting the deduction-Δ for a donation-reordered year; NOT
+  computed-`tax_total`, NOT a Σ-gain diff, NOT "disposed" — arch r1 I-4 + tax r1 I-4, re-keyed arch r2 I-1 / tax
+  r2 I-3, widened arch r3 I-1 / tax r3 I-2), in BOTH the promote and void directions; the copy is conditional
+  ("if Y was already filed") and notes §6511.
+- **Removal-flag quoting + cross-year cascade (BG-D9/D6 / tax r4 I-1 + M-1):** a **GIFT-only** prior-year
+  reorder (no disposal leg, `claimed_deduction: None`) STILL fires the advisory, quoting the §1015
+  carryover-basis-Δ (`Σ leg.basis`) — NOT a bare `$0` — with the "donee-basis documentation changes; the donor's
+  1040 is unaffected" copy and NO 1040-X assertion; a both-Δs-zero flagged year names the changed 8283
+  dates/donee records instead of `$0`. **The carryover cascade is NAMED:** a loss-stealing reorder (a promote
+  that absorbs a prior year's capital loss into year Y) flags Y AND the advisory names the §1212(b) carryforward
+  cascade into the later filed year whose crypto legs are unchanged; the §170(d) `write_back_carryover` direction
+  is likewise named — both quoted where the machinery computes, else named-unquantified (loud, never silent).
 - **Payload-side census (arch r1 I-6):** `PromoteTranche` appears in the bulk + TUI void candidate lists
   (`is_revocable_payload`), renders a real label (not `"?"`/Debug) in the bulk-void + void-flow summaries, and
   has the stock no-fingerprint KAT (`persistence.rs`); a promoted tranche's `DeclareTranche` is excluded from
