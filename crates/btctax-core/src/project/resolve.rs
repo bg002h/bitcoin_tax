@@ -393,12 +393,23 @@ fn build_op(
         // Conservative-filing (SPEC D-1): a tranche folds as a $0-basis acquire via the shared Op::Acquire
         // arm — which yields acquired_at = eff.date() = window_end, usd_basis = $0, pool_key(window_end),
         // and bumps sigma_in. No new fold arm needed; D-1a-e (sigma_in) is satisfied structurally.
-        EventPayload::DeclareTranche(t) => Op::Acquire(Acquire {
-            sat: t.sat,
-            usd_cost: Usd::ZERO,
-            fee_usd: Usd::ZERO,
-            basis_source: BasisSource::EstimatedConservative,
-        }),
+        //
+        // P9/T15 hardening (review Minor): the arm is guarded on `EventId::Decision` AND `sat > 0`. The
+        // legitimate decision-admit path (resolve pass-2, ~:1090) already matches only a Decision-id
+        // DeclareTranche, but the IMPORT-processing path also calls `build_op` — so a hand-crafted vault
+        // routing a DeclareTranche payload through an Import id (or a `ClassifyRaw{as_: DeclareTranche}`)
+        // would otherwise fold a bogus lot homed at the IMPORT timestamp (bypassing D-2's window_end) and
+        // skip cmd/tranche.rs's record-time `sat > 0` guard (a `sat <= 0` acquire corrupts Σ-conservation
+        // by bumping `sigma_in` non-positively). Guarding here folds NOTHING (`Op::Skip`) for either
+        // malformed shape, matching the engine's posture on any other malformed hand-crafted payload.
+        EventPayload::DeclareTranche(t) if matches!(id, EventId::Decision { .. }) && t.sat > 0 => {
+            Op::Acquire(Acquire {
+                sat: t.sat,
+                usd_cost: Usd::ZERO,
+                fee_usd: Usd::ZERO,
+                basis_source: BasisSource::EstimatedConservative,
+            })
+        }
         _ => Op::Skip,
     }
 }

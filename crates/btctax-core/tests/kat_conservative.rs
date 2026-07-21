@@ -996,3 +996,325 @@ fn self_custody_nudge_absent_for_a_self_custody_tranche() {
         "a self-custody tranche needs no self-custody nudge"
     );
 }
+
+// ── Phase 9 / Task 15: no-loss-FROM-THE-ESTIMATE invariant + the two documented-fee corners + the ─────
+//    engine-integrity pins (SPEC §6 amended; tax min-7 / tax r1 I-1). CHARACTERIZATION — passes on write.
+//    The invariant is SCOPED: any negative / >$0 tranche-leg amount traces to DOCUMENTED fee_usd/fee-sat
+//    (or cent-scale pro-rata rounding), NEVER to the $0 estimate. If the ESTIMATE ever drove a loss / a
+//    >$0 filed basis, that is a Critical — STOP.
+
+/// A `Dispose` carrying a documented USD fee (corner (a)).
+fn sell_with_usd_fee(
+    rf: &str,
+    ts: time::OffsetDateTime,
+    w: &WalletId,
+    sat: i64,
+    proceeds: i64,
+    fee_usd: i64,
+) -> LedgerEvent {
+    imp(
+        rf,
+        ts,
+        w,
+        EventPayload::Dispose(Dispose {
+            sat,
+            usd_proceeds: rust_decimal::Decimal::from(proceeds),
+            fee_usd: rust_decimal::Decimal::from(fee_usd),
+            kind: DisposeKind::Sell,
+        }),
+    )
+}
+
+/// P9 invariant CORE: absent fees, a tranche leg's gain = proceeds − $0 ≥ 0 — the $0 estimate can never
+/// file a loss. A $0-proceeds fee-free disposal yields exactly $0 (never negative).
+#[test]
+fn fee_free_tranche_disposal_never_files_a_loss() {
+    let w = self_custody();
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2018 - 01 - 01),
+        date!(2018 - 12 - 31),
+    );
+    let st = project(
+        &[
+            t.clone(),
+            sell_ev(
+                "SELL",
+                datetime!(2020-06-01 00:00 UTC),
+                &w,
+                100_000_000,
+                50_000,
+            ),
+        ],
+        &prices(),
+        &config_hifo_pre2025(),
+    );
+    assert!(
+        only_disposal_leg(&st).gain >= dec!(0),
+        "fee-free tranche gain ≥ 0 (the estimate never loses)"
+    );
+
+    let st0 = project(
+        &[
+            t,
+            sell_ev("SELL", datetime!(2020-06-01 00:00 UTC), &w, 100_000_000, 0),
+        ],
+        &prices(),
+        &config_hifo_pre2025(),
+    );
+    assert_eq!(
+        only_disposal_leg(&st0).gain,
+        dec!(0),
+        "a $0-proceeds fee-free disposal is exactly $0"
+    );
+}
+
+/// P9 corner (a): a documented USD fee > proceeds nets the amount realized below $0 (§1001(b)), so the
+/// tranche leg's GAIN is negative — but its filed cost basis is still the $0 ESTIMATE. The loss is the
+/// documented fee, never the estimate.
+#[test]
+fn negative_tranche_gain_comes_only_from_documented_fees_corner_a_usd_fee() {
+    let w = self_custody();
+    let st = project(
+        &[
+            tranche_ev(
+                1,
+                &w,
+                100_000_000,
+                date!(2018 - 01 - 01),
+                date!(2018 - 12 - 31),
+            ),
+            sell_with_usd_fee(
+                "SELL",
+                datetime!(2020-06-01 00:00 UTC),
+                &w,
+                100_000_000,
+                10,
+                40,
+            ),
+        ],
+        &prices(),
+        &config_hifo_pre2025(),
+    );
+    let leg = only_disposal_leg(&st);
+    assert!(
+        leg.gain < dec!(0),
+        "a documented USD fee > proceeds drives the tranche leg negative"
+    );
+    assert_eq!(
+        leg.basis,
+        dec!(0),
+        "the ESTIMATE is still $0 — the loss is the documented fee, not the estimate"
+    );
+}
+
+/// P9 pin (tax r1 Nit 2): the tranche 8949 row's date-acquired IS the window_end, end-to-end through the
+/// D-6 wiring (col b). Held indirectly by `lot.acquired_at == window_end` + forms copying it; this pins
+/// col (b) directly on the emitted row.
+#[test]
+fn tranche_8949_row_date_acquired_is_window_end() {
+    let w = exch();
+    let st = project(
+        &[
+            tranche_ev(
+                1,
+                &w,
+                100_000_000,
+                date!(2015 - 01 - 01),
+                date!(2015 - 12 - 31),
+            ),
+            sell_ev(
+                "SELL",
+                datetime!(2020-06-01 00:00 UTC),
+                &w,
+                100_000_000,
+                40_000,
+            ),
+        ],
+        &prices(),
+        &config_hifo_pre2025(),
+    );
+    let row = btctax_core::form_8949(&st, 2020)
+        .into_iter()
+        .find(|r| r.cost_basis == dec!(0))
+        .expect("the $0 tranche 8949 row");
+    assert_eq!(
+        row.date_acquired,
+        date!(2015 - 12 - 31),
+        "col (b) date-acquired == window_end (D-2/D-6)"
+    );
+}
+
+/// P9 pin (tax r1 Nit 3): Σ-conservation (FR9) holds over a projection containing a tranche — the tranche
+/// Acquire bumps `sigma_in` structurally (D-1a-e), so in == disposed + held.
+#[test]
+fn sigma_conservation_holds_with_a_tranche() {
+    let w = self_custody();
+    let st = project(
+        &[
+            tranche_ev(
+                1,
+                &w,
+                100_000_000,
+                date!(2018 - 01 - 01),
+                date!(2018 - 12 - 31),
+            ),
+            sell_ev(
+                "SELL",
+                datetime!(2020-06-01 00:00 UTC),
+                &w,
+                40_000_000,
+                20_000,
+            ),
+        ],
+        &prices(),
+        &config_hifo_pre2025(),
+    );
+    assert!(
+        btctax_core::conservation_report(&st).balanced,
+        "a tranche projection must conserve sat (FR9): {:?}",
+        btctax_core::conservation_report(&st)
+    );
+}
+
+/// P9 FOLLOWUP (review Minor): the build_op `sat > 0` guard — a hand-crafted Decision-id DeclareTranche
+/// with `sat <= 0` (the CLI record path refuses it) folds NOTHING (Op::Skip), so it can neither create a
+/// bogus lot nor corrupt Σ-conservation by bumping `sigma_in` non-positively.
+#[test]
+fn sat_le_zero_decision_tranche_folds_nothing_and_conserves() {
+    let w = self_custody();
+    let bad = LedgerEvent {
+        id: EventId::decision(1),
+        utc_timestamp: datetime!(2026-01-01 00:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: None,
+        payload: EventPayload::DeclareTranche(DeclareTranche {
+            sat: -1, // hand-crafted: the CLI refuses sat <= 0
+            wallet: w.clone(),
+            window_start: date!(2018 - 01 - 01),
+            window_end: date!(2018 - 12 - 31),
+        }),
+    };
+    let st = project(&[bad], &prices(), &config());
+    assert!(
+        !st.lots
+            .iter()
+            .any(|l| l.basis_source == BasisSource::EstimatedConservative),
+        "a sat <= 0 tranche folds no lot (build_op sat>0 guard)"
+    );
+    assert!(
+        btctax_core::conservation_report(&st).balanced,
+        "and Σ-conservation is intact (no non-positive sigma_in bump)"
+    );
+}
+
+/// P9 corner (b), reachable staging (plan-tax r2 NEW-1): a specific-ID sale NAMES the full tranche as the
+/// principal while a DOCUMENTED lot remains; the on-chain `fee_sat` then consumes FIFO from that remainder
+/// (resolve §A.4(a)) and its DOCUMENTED basis re-homes onto the last disposal leg — the tranche leg —
+/// under TP8(c) (fold.rs `rehome_onto_disposal_leg`). So the tranche leg's FILED basis is > $0: real
+/// documented basis (§1011), NEVER the estimate. This is why P3/P7 print the basis AS FILED, not "$0".
+#[test]
+fn tp8c_fee_sat_basis_can_land_on_the_last_tranche_leg_corner_b() {
+    let w = self_custody();
+    let doc = documented_buy("DOC", datetime!(2025-02-01 00:00 UTC), &w, 60_000, 30);
+    let t = tranche_ev(1, &w, 100_000, date!(2025 - 01 - 01), date!(2025 - 01 - 31));
+    let out = LedgerEvent {
+        id: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+        utc_timestamp: datetime!(2025-07-01 00:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: Some(w.clone()),
+        payload: EventPayload::TransferOut(TransferOut {
+            sat: 100_000,
+            fee_sat: Some(500),
+            dest_addr: None,
+            txid: None,
+        }),
+    };
+    let reclass = LedgerEvent {
+        id: EventId::decision(2),
+        utc_timestamp: datetime!(2025-08-01 00:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: None,
+        payload: EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+            as_: OutflowClass::Dispose {
+                kind: DisposeKind::Sell,
+            },
+            principal_proceeds_or_fmv: rust_decimal::Decimal::from(120),
+            fee_usd: None,
+            donee: None,
+        }),
+    };
+    let select = LedgerEvent {
+        id: EventId::decision(3),
+        utc_timestamp: datetime!(2025-08-01 00:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: None,
+        payload: EventPayload::LotSelection(LotSelection {
+            disposal_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+            lots: vec![LotPick {
+                lot: LotId {
+                    origin_event_id: EventId::decision(1),
+                    split_sequence: 0,
+                },
+                sat: 100_000,
+            }],
+        }),
+    };
+    let st = project(&[doc, t, out, reclass, select], &prices(), &config());
+    let tranche_leg = st
+        .disposals
+        .iter()
+        .flat_map(|d| &d.legs)
+        .find(|l| l.basis_source == BasisSource::EstimatedConservative)
+        .expect("a tranche disposal leg");
+    assert!(
+        tranche_leg.basis > dec!(0),
+        "documented fee-sat basis re-homed onto the tranche leg (TP8c) — basis AS FILED > $0, never the \
+         estimate: got {}",
+        tranche_leg.basis
+    );
+}
+
+/// P9 FOLLOWUP (review Minor): the build_op `EventId::Decision` id-guard. A hand-crafted vault can route a
+/// DeclareTranche payload through the IMPORT path via `ClassifyRaw{as_: DeclareTranche}` (pass-1c applies
+/// the override WITHOUT payload-type validation). Without the id-guard that would fold a bogus $0 lot
+/// homed at the IMPORT timestamp (bypassing D-2's window_end); the guard makes it fold NOTHING (Op::Skip).
+/// No product surface can author this (the `classify-raw` verb refuses non-`is_imported()` payloads).
+#[test]
+fn classify_raw_declaretranche_on_an_import_folds_nothing_id_guard() {
+    let w = self_custody();
+    let raw = LedgerEvent {
+        id: EventId::import(Source::Coinbase, SourceRef::new("RAW")),
+        utc_timestamp: datetime!(2023-06-01 00:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: Some(w.clone()),
+        payload: EventPayload::Unclassified(Unclassified {
+            raw: "hand-crafted".into(),
+        }),
+    };
+    let classify = LedgerEvent {
+        id: EventId::decision(1),
+        utc_timestamp: datetime!(2026-01-01 00:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: None,
+        payload: EventPayload::ClassifyRaw(ClassifyRaw {
+            target: EventId::import(Source::Coinbase, SourceRef::new("RAW")),
+            as_: Box::new(EventPayload::DeclareTranche(DeclareTranche {
+                sat: 100_000_000,
+                wallet: w.clone(),
+                window_start: date!(2018 - 01 - 01),
+                window_end: date!(2018 - 12 - 31),
+            })),
+        }),
+    };
+    let st = project(&[raw, classify], &prices(), &config());
+    assert!(
+        !st.lots
+            .iter()
+            .any(|l| l.basis_source == BasisSource::EstimatedConservative),
+        "a ClassifyRaw-routed DeclareTranche on an IMPORT id folds NO lot (build_op EventId::Decision guard)"
+    );
+}
