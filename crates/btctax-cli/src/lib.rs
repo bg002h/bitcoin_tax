@@ -19,6 +19,7 @@ pub mod tax_profile;
 pub mod testonly;
 
 pub use cli::Cli;
+pub use cmd::tranche::guard_allocation_vs_tranche;
 pub use config::CliConfig;
 pub use session::{
     BulkFilter, BulkIncomeFilter, BulkIncomePlan, BulkIncomeRow, BulkLinkPlan, BulkLinkRow,

@@ -7,4 +7,5 @@ pub mod inspect;
 pub mod optimize;
 pub mod reconcile;
 pub mod tax;
+pub mod tranche;
 pub mod whatif;

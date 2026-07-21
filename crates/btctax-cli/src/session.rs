@@ -687,7 +687,15 @@ impl Session {
                 EventId::Import { .. } => {
                     tax_date(e.utc_timestamp, e.original_tz) < TRANSITION_DATE
                 }
-                _ => !matches!(e.payload, EventPayload::SafeHarborAllocation(_)),
+                // D-8: DROP SafeHarborAllocation (residue stays allocation-INDEPENDENT) AND DeclareTranche
+                // (a $0 conservative-filing tranche is NOT allocatable pre-2025 residue — else the allocate
+                // opener would self-poison by listing the tranche's $0 sats, authoring the very coexistence
+                // v1 forbids). A pre-2025 tranche makes the allocation refuse anyway; excluding it here keeps
+                // the opener honest and stops a ≥2025 tranche's post-transition lot from leaking in.
+                _ => !matches!(
+                    e.payload,
+                    EventPayload::SafeHarborAllocation(_) | EventPayload::DeclareTranche(_)
+                ),
             })
             .collect();
         let prices = self.prices();

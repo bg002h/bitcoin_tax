@@ -950,6 +950,11 @@ pub fn safe_harbor_allocate(
 ) -> Result<EventId, CliError> {
     let mut session = Session::open(vault_path, pp)?;
 
+    // D-8: refuse recording an allocation while a pre-2025 conservative-filing tranche is on file
+    // (v1 makes them mutually exclusive). Chokepoint shared with `safe_harbor_attest` and both TUI
+    // persist sites; the engine `SafeHarborUnconservable` backstop is the guarantee behind it.
+    crate::cmd::tranche::guard_allocation_vs_tranche(&load_all(session.conn())?)?;
+
     // R-M7b / D3: attestation gate — EARLY, before empty-lots / conservation work.
     // A SafeHarborAllocation permanently records pre2025_method and is irrevocable; require an
     // explicit declared+attested pre-2025 method so the commitment is a deliberate, attested choice
@@ -1188,6 +1193,10 @@ pub fn safe_harbor_attest(
 ) -> Result<EventId, CliError> {
     let mut session = Session::open(vault_path, pp)?;
     let (events, state, _cfg) = session.load_events_and_project()?;
+
+    // D-8: refuse re-appending an allocation while a pre-2025 tranche is on file (defense-in-depth —
+    // the guarded record paths already keep them apart; this closes any future unguarded coexistence).
+    crate::cmd::tranche::guard_allocation_vs_tranche(&events)?;
 
     // Eng-I1 / I-2(a): EXCLUDE voided allocations from the single-allocation guard, so the legitimate
     // allocate→inert→void→re-allocate→attest workflow (which leaves an OLD, voided allocation in the log)

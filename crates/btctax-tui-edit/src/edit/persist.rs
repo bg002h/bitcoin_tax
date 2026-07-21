@@ -1027,6 +1027,10 @@ pub fn persist_safe_harbor_allocate(
     use btctax_core::event::SafeHarborAllocation;
     use btctax_core::EventPayload;
 
+    // D-8: refuse recording an allocation while a pre-2025 conservative-filing tranche is on file
+    // (v1 makes them mutually exclusive). Same chokepoint as the CLI sites; nothing is appended.
+    btctax_cli::guard_allocation_vs_tranche(&btctax_core::persistence::load_all(session.conn())?)?;
+
     let pre = session.snapshot()?;
     let payload = EventPayload::SafeHarborAllocation(SafeHarborAllocation {
         lots,
@@ -1095,6 +1099,10 @@ pub fn persist_safe_harbor_attest(
         EventPayload,
     };
     use time::UtcOffset;
+
+    // D-8: refuse re-appending an allocation while a pre-2025 tranche is on file (defense-in-depth,
+    // symmetric with the CLI `safe_harbor_attest` site).
+    btctax_cli::guard_allocation_vs_tranche(&btctax_core::persistence::load_all(session.conn())?)?;
 
     let void_id = append_decision(
         session.conn(),
@@ -5026,5 +5034,62 @@ mod tests {
         );
         let post = load_all_ordered(session.conn()).unwrap();
         assert_eq!(post, pre, "refusal writes nothing");
+    }
+
+    /// Conservative-filing Task 6 (b) — the TUI persist path enforces the SAME D-8 mutual-exclusion as
+    /// the CLI: `persist_safe_harbor_allocate` REFUSES while a pre-2025 tranche is on file, appending
+    /// nothing. Mutation-proves the guard is wired at the TUI allocate site, not only the CLI ones.
+    #[test]
+    fn persist_safe_harbor_allocate_refused_under_a_pre2025_tranche() {
+        use btctax_core::event::EventPayload;
+        use btctax_core::persistence::load_all;
+        use btctax_core::{AllocMethod, LotMethod};
+        use btctax_store::Passphrase;
+        use time::{macros::date, OffsetDateTime};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp = "d8-tui-pass";
+        btctax_cli::cmd::init::run(&vault, &Passphrase::new(pp.into()), &key).unwrap();
+
+        // A pre-2025 tranche on file (accepted — no allocation exists yet).
+        btctax_cli::cmd::tranche::declare_tranche(
+            &vault,
+            &Passphrase::new(pp.into()),
+            50_000_000,
+            btctax_core::WalletId::Exchange {
+                provider: "cold".into(),
+                account: "vault".into(),
+            },
+            date!(2018 - 01 - 01),
+            date!(2018 - 12 - 31),
+            OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap(),
+        )
+        .unwrap();
+
+        // The TUI allocate persist path must refuse (guard fires before the lots are used).
+        let mut session = btctax_cli::Session::open(&vault, &Passphrase::new(pp.into())).unwrap();
+        let err = persist_safe_harbor_allocate(
+            &mut session,
+            vec![],
+            AllocMethod::ActualPosition,
+            LotMethod::Fifo,
+            OffsetDateTime::from_unix_timestamp(1_700_000_100).unwrap(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, PersistError::NoChange(btctax_cli::CliError::Usage(_))),
+            "expected a NoChange/Usage refusal; got {err:?}"
+        );
+        assert_eq!(
+            load_all(session.conn())
+                .unwrap()
+                .iter()
+                .filter(|e| matches!(e.payload, EventPayload::SafeHarborAllocation(_)))
+                .count(),
+            0,
+            "the refused allocation must NOT be appended (fail-closed)"
+        );
     }
 }
