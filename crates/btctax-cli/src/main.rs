@@ -1153,6 +1153,28 @@ fn dispatch_reconcile(
             cmd::reconcile::safe_harbor_allocate(vault, &pp, m, attest, now)?
         }
         Reconcile::SafeHarborAttest => cmd::reconcile::safe_harbor_attest(vault, &pp, now)?,
+        Reconcile::DeclareTranche {
+            amount,
+            wallet,
+            window_start,
+            window_end,
+        } => {
+            // `--amount` accepts a sat integer OR a BTC decimal (a value with a `.` is BTC), mirroring
+            // `whatif consult --sell`. The `sat > 0` / window-ordering refusals live in the record path.
+            let sat = btctax_core::whatif::parse_sell_arg(&amount)
+                .map_err(|e| CliError::Usage(format!("bad --amount {amount:?}: {e}")))?;
+            let wallet = eventref::parse_wallet_id(&wallet)?;
+            let ws = eventref::parse_date_arg(&window_start)?;
+            let we = eventref::parse_date_arg(&window_end)?;
+            // Warn (not refuse) on a future window_end: it merely strands the $0 lot at that date.
+            if we > btctax_core::conventions::tax_date(now, UtcOffset::UTC) {
+                eprintln!(
+                    "warning: --window-end {we} is in the future; the $0 tranche lot is homed there \
+                     and will not appear in an earlier tax year until then"
+                );
+            }
+            cmd::tranche::declare_tranche(vault, &pp, sat, wallet, ws, we, now)?
+        }
         Reconcile::SelectLots { disposal, from } => {
             let picks = from
                 .iter()

@@ -879,6 +879,25 @@ pub enum Reconcile {
     /// promotes chosen defaults to real (attested) decisions.
     #[command(subcommand)]
     Pseudo(Pseudo),
+    /// Conservative-filing (D-8): declare undocumented BTC at $0 basis — the IRS fallback for
+    /// unprovable basis. Folds to a single `EstimatedConservative` lot homed at `--window-end`
+    /// (the latest plausible acquisition → conservative holding period). Filing-ready, NOT pseudo.
+    /// v1 makes a pre-2025 tranche and a safe-harbor allocation mutually exclusive.
+    DeclareTranche {
+        /// Amount of undocumented BTC (required). A satoshi integer OR a BTC decimal, e.g. `0.5`
+        /// or `50000000` (a value with a `.` is BTC; a bare integer is satoshis). Must be > 0.
+        #[arg(long)]
+        amount: String,
+        /// Wallet holding the coins, e.g. `self:cold` or `exchange:coinbase:default`.
+        #[arg(long)]
+        wallet: String,
+        /// Earliest plausible acquisition date (YYYY-MM-DD).
+        #[arg(long)]
+        window_start: String,
+        /// Latest plausible acquisition date (YYYY-MM-DD) — the lot is homed here.
+        #[arg(long)]
+        window_end: String,
+    },
 }
 
 /// `reconcile pseudo <action>` — the pseudo-reconcile mode sub-verbs (sub-project 2).

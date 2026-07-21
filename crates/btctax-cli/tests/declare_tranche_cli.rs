@@ -280,3 +280,159 @@ fn safe_harbor_residue_omits_tranche_sats() {
         "no $0 tranche lot may appear in the allocatable residue"
     );
 }
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// Task 7 — the `declare-tranche` verb record path: input validation + clean (non-pseudo) export (D-5)
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// A bare vault (no imports) — the tranche record path opens/appends on its own.
+fn empty_vault(dir: &Path) -> std::path::PathBuf {
+    let vault = dir.join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.join("k.asc")).unwrap();
+    vault
+}
+
+/// (Task 7 a) the verb's record path appends a tranche that folds to the D-1 lot: $0 basis,
+/// `EstimatedConservative`, homed at `window_end`, in the declared wallet, NOT pseudo.
+#[test]
+fn declare_tranche_records_and_folds_to_zero_basis_lot() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = empty_vault(dir.path());
+
+    cmd::tranche::declare_tranche(
+        &vault,
+        &pp(),
+        50_000_000,
+        tranche_wallet(),
+        date!(2020 - 01 - 01),
+        date!(2020 - 12 - 31),
+        now(),
+    )
+    .unwrap();
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    let lot = state
+        .lots
+        .iter()
+        .find(|l| l.wallet == tranche_wallet())
+        .expect("a tranche lot in the declared wallet");
+    assert_eq!(
+        lot.usd_basis,
+        btctax_core::Usd::ZERO,
+        "tranche basis is $0 (D-7)"
+    );
+    assert_eq!(
+        lot.basis_source,
+        btctax_core::BasisSource::EstimatedConservative
+    );
+    assert_eq!(
+        lot.acquired_at,
+        date!(2020 - 12 - 31),
+        "homed at window_end (D-2)"
+    );
+    assert!(!lot.pseudo, "a filed tranche is NOT pseudo (D-5)");
+    assert!(
+        !state.pseudo_active(),
+        "a real tranche never activates pseudo mode (D-5)"
+    );
+}
+
+/// (Task 7 c) a `sat <= 0` tranche is REFUSED at record time — a non-positive sat would bump
+/// `stats.sigma_in` by a non-positive amount (`fold.rs`), corrupting Σ-conservation. No event appended.
+#[test]
+fn declare_tranche_refuses_nonpositive_sat() {
+    for bad in [0_i64, -1] {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = empty_vault(dir.path());
+        let err = cmd::tranche::declare_tranche(
+            &vault,
+            &pp(),
+            bad,
+            tranche_wallet(),
+            date!(2020 - 01 - 01),
+            date!(2020 - 12 - 31),
+            now(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, CliError::Usage(_)) && err.to_string().contains("> 0"),
+            "sat {bad} must be refused: {err}"
+        );
+        assert_eq!(
+            count(&vault, |p| matches!(p, EventPayload::DeclareTranche(_))),
+            0,
+            "the refused tranche must NOT be appended (fail-closed)"
+        );
+    }
+}
+
+/// (Task 7 d) `window_start > window_end` is REFUSED (an undefined P5/P7 window). No event appended.
+#[test]
+fn declare_tranche_refuses_inverted_window() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = empty_vault(dir.path());
+    let err = cmd::tranche::declare_tranche(
+        &vault,
+        &pp(),
+        50_000_000,
+        tranche_wallet(),
+        date!(2020 - 12 - 31),
+        date!(2020 - 01 - 01),
+        now(),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, CliError::Usage(_)) && err.to_string().to_lowercase().contains("window"),
+        "an inverted window must be refused: {err}"
+    );
+    assert_eq!(
+        count(&vault, |p| matches!(p, EventPayload::DeclareTranche(_))),
+        0,
+    );
+}
+
+/// (Task 7 warn-not-refuse) a FUTURE `window_end` is ACCEPTED (it merely strands the lot; conservative
+/// but confusing). The verb warns on stderr; the record path itself does NOT refuse.
+#[test]
+fn declare_tranche_accepts_future_window_end() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = empty_vault(dir.path());
+    // `now()` is 2026-01-01; a 2027 window_end is in the future.
+    cmd::tranche::declare_tranche(
+        &vault,
+        &pp(),
+        50_000_000,
+        tranche_wallet(),
+        date!(2027 - 01 - 01),
+        date!(2027 - 12 - 31),
+        now(),
+    )
+    .expect("a future window_end warns but does not refuse");
+    assert_eq!(
+        count(&vault, |p| matches!(p, EventPayload::DeclareTranche(_))),
+        1,
+    );
+}
+
+/// (Task 7 b) a year with a filed tranche exports CLEAN: `export_snapshot` with NO attestation returns
+/// Ok (no `AttestationRequired`), because a real tranche never activates pseudo mode (D-5).
+#[test]
+fn filed_tranche_year_exports_clean() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = empty_vault(dir.path());
+    cmd::tranche::declare_tranche(
+        &vault,
+        &pp(),
+        50_000_000,
+        tranche_wallet(),
+        date!(2020 - 01 - 01),
+        date!(2020 - 12 - 31),
+        now(),
+    )
+    .unwrap();
+
+    let out = dir.path().join("export_out");
+    cmd::admin::export_snapshot(&vault, &pp(), &out, Some(2020), None)
+        .expect("a filed-tranche year must export clean with NO attestation (not pseudo, D-5)");
+}

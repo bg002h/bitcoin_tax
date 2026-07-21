@@ -1,0 +1,25 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-reconcile-declare-tranche 1  btctax "btctax manual"
+.SH NAME
+declare\-tranche \- Conservative\-filing (D\-8): declare undocumented BTC at $0 basis — the IRS fallback for unprovable basis. Folds to a single `EstimatedConservative` lot homed at `\-\-window\-end` (the latest plausible acquisition → conservative holding period). Filing\-ready, NOT pseudo. v1 makes a pre\-2025 tranche and a safe\-harbor allocation mutually exclusive
+.SH SYNOPSIS
+\fBdeclare\-tranche\fR <\fB\-\-amount\fR> <\fB\-\-wallet\fR> <\fB\-\-window\-start\fR> <\fB\-\-window\-end\fR> [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Conservative\-filing (D\-8): declare undocumented BTC at $0 basis — the IRS fallback for unprovable basis. Folds to a single `EstimatedConservative` lot homed at `\-\-window\-end` (the latest plausible acquisition → conservative holding period). Filing\-ready, NOT pseudo. v1 makes a pre\-2025 tranche and a safe\-harbor allocation mutually exclusive
+.SH OPTIONS
+.TP
+\fB\-\-amount\fR \fI<AMOUNT>\fR
+Amount of undocumented BTC (required). A satoshi integer OR a BTC decimal, e.g. `0.5` or `50000000` (a value with a `.` is BTC; a bare integer is satoshis). Must be > 0
+.TP
+\fB\-\-wallet\fR \fI<WALLET>\fR
+Wallet holding the coins, e.g. `self:cold` or `exchange:coinbase:default`
+.TP
+\fB\-\-window\-start\fR \fI<WINDOW_START>\fR
+Earliest plausible acquisition date (YYYY\-MM\-DD)
+.TP
+\fB\-\-window\-end\fR \fI<WINDOW_END>\fR
+Latest plausible acquisition date (YYYY\-MM\-DD) — the lot is homed here
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

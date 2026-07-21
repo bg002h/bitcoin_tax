@@ -104,6 +104,20 @@ pub fn declare_tranche(
     window_end: TaxDate,
     now: OffsetDateTime,
 ) -> Result<EventId, CliError> {
+    // Input validation (record-time refuse — no vault access needed).
+    if sat <= 0 {
+        // A `sat <= 0` tranche would bump `stats.sigma_in` by a non-positive amount (fold.rs),
+        // corrupting Σ-conservation; there is no such thing as declaring zero/negative undocumented BTC.
+        return Err(CliError::Usage(format!(
+            "tranche amount must be > 0 sat (got {sat})"
+        )));
+    }
+    if window_start > window_end {
+        return Err(CliError::Usage(format!(
+            "tranche window_start ({window_start}) must be <= window_end ({window_end})"
+        )));
+    }
+
     let mut session = Session::open(vault_path, pp)?;
     let events = load_all(session.conn())?;
     guard_tranche_vs_allocation(&events, window_end)?;

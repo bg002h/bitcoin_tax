@@ -562,3 +562,31 @@ fn allocation_that_would_conserve_over_a_tranche_residue_is_kept_inert_and_tag_s
         .expect("tranche survives via Path A (not discarded by Path B)");
     assert!(lot.remaining_sat > 0);
 }
+
+/// Task 7 (D-5): a filed tranche is NOT pseudo — its lot is real (`pseudo=false`) and the projection's
+/// `pseudo_active()` stays false, so a tranche year exports CLEAN (no `[PSEUDO]` watermark, no
+/// attestation gate). Contrast the pseudo-reconcile path, whose synthetic defaults DO trip the gate.
+#[test]
+fn a_filed_tranche_projection_is_not_pseudo_active() {
+    let w = exch();
+    let ev = tranche_ev(
+        1,
+        &w,
+        50_000_000,
+        date!(2020 - 01 - 01),
+        date!(2020 - 12 - 31),
+    );
+    let st = project(&[ev], &prices(), &cfg());
+    // Non-vacuous: the tranche lot really is in the projection...
+    let lot = st
+        .lots
+        .iter()
+        .find(|l| l.basis_source == BasisSource::EstimatedConservative)
+        .expect("a tranche lot");
+    assert!(!lot.pseudo, "a filed tranche lot is real, not pseudo (D-5)");
+    // ...and it does not activate pseudo mode (the export-refusal signal, state.rs).
+    assert!(
+        !st.pseudo_active(),
+        "a real tranche never activates pseudo mode → clean, non-watermarked export (D-5)"
+    );
+}
