@@ -26,7 +26,7 @@ const ALLOCATION_IS_FINAL_HINT: &str = "revisit the in-app safe-harbor allocatio
 
 /// Allocation-side hedge (tax review r1 Nit): the user is recording an allocation and is blocked by a
 /// tranche, so the finality caveat is about that TRANCHE (a filed $0 basis), not the allocation.
-const TRANCHE_IS_FINAL_HINT: &str = "void the tranche first (`reconcile void <decision-ref>`); if you \
+const TRANCHE_IS_FINAL_HINT: &str = "Void the tranche first (`reconcile void <decision-ref>`); if you \
     have already filed the tranche's $0 basis, unallocated pre-2025 units are a facts-and-circumstances \
     matter for a professional";
 

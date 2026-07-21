@@ -261,6 +261,16 @@ fn post2025_tranche_records_cleanly_beside_effective_allocation() {
         "a ≥2025 tranche must NOT poison the effective allocation (Path B preserved): {:?}",
         state.blockers
     );
+    // Path B is DIRECTLY pinned (not just blocker-absence): the effective allocation seeds the pre-2025
+    // documented lot with `SafeHarborAllocated` — so a regression flipping this filer to Path A (even one
+    // that emits no blocker) goes RED here, foreclosing the Rev-Proc-2024-28 flexibility strip.
+    assert!(
+        state
+            .lots
+            .iter()
+            .any(|l| l.basis_source == btctax_core::BasisSource::SafeHarborAllocated),
+        "the pre-2025 residue must be SEEDED under the effective allocation (Path B), not reconstructed"
+    );
     assert!(
         state.lots.iter().any(|l| l.basis_source
             == btctax_core::BasisSource::EstimatedConservative

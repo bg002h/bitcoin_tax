@@ -48,6 +48,29 @@ the rest are parked later). Only ownerless cross-cutting residue batches to the 
   refuse) when `--wallet` names a wallet with no prior events. **Owning phase: P8 / Task 14** (the
   self-custody nudge / advisory task — the reviewer's suggested home).
 
+- **[Nit] The future-`window_end` warning computes "today" in UTC, not the filer's zone.** (tax r1 Nit) —
+  `main.rs` dispatch compares `window_end` against `tax_date(now, UtcOffset::UTC)`; near midnight in a
+  behind-UTC zone it can UNDER-warn (never mis-record — the warning is advisory, the lot still homes at
+  `window_end`). **Fix:** use the filer's configured offset if/when one exists. **Owning phase: P8 / Task 14.**
+
+### Filed test-pins the review named (were only in the review doc until r2 — arch r2 Nit 2)
+
+- **[Nit] No test asserts `row.date_acquired == window_end` on a tranche 8949 row.** (tax r1 Nit 2) — the
+  D-6 column mapping is held indirectly (`lot.acquired_at == window_end` + `forms.rs` copies it to
+  `date_acquired`); a direct one-assert would pin col (b) end-to-end. **Owning phase: P9 / Task 15**
+  (the invariant/test-pin task).
+- **[Nit] No Σ-conservation assert over a projection containing a tranche.** (tax r1 Nit 3) — the
+  `sigma_in` bump is structural (shared `Op::Acquire` arm) but unpinned. **Owning phase: P9 / Task 15**
+  (beside the never-understate invariant KAT).
+
+### From the Phase-1 fold re-review (r2, 2026-07-21)
+
+- **[Nit] SPEC.md §104 / IMPLEMENTATION_PLAN.md §556 quote the pre-split "both directions" hedge.** (tax
+  r2 Nit) — after the refusal-hint split into `ALLOCATION_IS_FINAL_HINT` / `TRANCHE_IS_FINAL_HINT`, the
+  allocation-side message no longer contains the verbatim quoted sentence (both directions still satisfy
+  the normative "hedges irrevocability" requirement). Doc-consistency only. **Owning phase: T16**
+  (whole-branch doc-consistency sweep).
+
 ## Folded during the Phase-1 gate (2026-07-21) — recorded for the audit trail
 
 - **[Important] TUI void flows rendered a DeclareTranche as `?`/`?`** (arch r1) — FIXED: added the
@@ -57,8 +80,9 @@ the rest are parked later). Only ownerless cross-cutting residue batches to the 
 - **[Minor] Backstop KAT missed the SPEC-named inert-then-declare ordering** (arch r1 Minor 4) — FIXED:
   seq-swapped twin KAT (`backstop_fires_when_the_allocation_is_recorded_before_the_tranche`).
 - **[Minor] ≥2025 non-poisoning had no assertion** (tax r1 Minor 2) — FIXED: extended CLI test (d) to
-  assert the allocation stays effective + the ≥2025 tranche coexists.
+  assert the allocation stays effective + the ≥2025 tranche coexists, and (r2 tax Minor) DIRECTLY pins
+  Path B via `basis_source == SafeHarborAllocated` so a no-blocker Path-A flip goes RED.
 - **[Nit] Direction-crossed refusal hint** (tax r1) — FIXED: split into `ALLOCATION_IS_FINAL_HINT` /
-  `TRANCHE_IS_FINAL_HINT`.
+  `TRANCHE_IS_FINAL_HINT`; (r2 arch/tax Nit) capitalized the sentence-initial "Void".
 - **[Nit] KAT-G1 re-export needed a rationale comment** (arch r1) — FIXED: comment at the `lib.rs`
   re-export stating the pure-predicate exemption.
