@@ -8,19 +8,22 @@
 //! Task 10 — so the promote is appended directly, exactly as `declare_tranche_cli.rs` hand-crafts a raw
 //! void). PRIVACY: synthetic values in a tempdir; no user file is read.
 
-use btctax_cli::Session;
+use btctax_cli::cmd::promote::ProvenanceKind;
+use btctax_cli::eventref::parse_event_id;
+use btctax_cli::{cmd, CliError, Session, PROMOTE_ACK_PHRASE};
 use btctax_core::conservative::Coverage;
 use btctax_core::event::{
-    Acknowledgment, Acquire, BasisSource, DeclareTranche, Dispose, DisposeKind, EventPayload,
-    FloorMethod, PromoteTranche,
+    Acknowledgment, Acquire, BasisSource, ConsentTerm, DeclareTranche, Dispose, DisposeKind,
+    EventPayload, FloorMethod, PromoteTranche,
 };
 use btctax_core::identity::{EventId, Source, SourceRef, WalletId};
 use btctax_core::persistence::{append_decision, append_import_batch, load_all};
 use btctax_core::LedgerEvent;
 use btctax_store::Passphrase;
 use rust_decimal_macros::dec;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use time::macros::datetime;
+use time::macros::{date, datetime};
 use time::UtcOffset;
 
 fn pp() -> Passphrase {
@@ -173,5 +176,401 @@ fn voiding_a_promoted_tranche_prints_the_void_direction_advisory() {
         decision_count(&vault),
         before + 1,
         "the void decision is still recorded after the warning"
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// Task 10 — the `promote-tranche` verb: BG-D5 provenance + BG-D6 consent recording + BG-D7 Part II.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// The wallet MY OWN `declare_tranche` fixtures below use (distinct from `wallet()` above, which the T8
+/// fixtures share with a documented buy/sell).
+fn tranche_wallet() -> WalletId {
+    WalletId::SelfCustody {
+        label: "promote-t10".into(),
+    }
+}
+
+fn count<P: Fn(&EventPayload) -> bool>(vault: &Path, pred: P) -> usize {
+    let s = Session::open(vault, &pp()).unwrap();
+    load_all(s.conn())
+        .unwrap()
+        .iter()
+        .filter(|e| pred(&e.payload))
+        .count()
+}
+
+/// The single recorded `PromoteTranche` payload (panics if there isn't exactly one).
+fn only_promote(vault: &Path) -> PromoteTranche {
+    let s = Session::open(vault, &pp()).unwrap();
+    load_all(s.conn())
+        .unwrap()
+        .into_iter()
+        .find_map(|e| match e.payload {
+            EventPayload::PromoteTranche(p) => Some(p),
+            _ => None,
+        })
+        .expect("exactly one PromoteTranche recorded")
+}
+
+/// A vault with a single declared (UNPROMOTED) tranche inside a fully price-covered window
+/// (2020-01-01..2020-01-10 — the bundled daily-close dataset spans 2010-07-17..release with no gaps, so
+/// `filed_basis_for` always succeeds here). Returns (vault, the tranche's canonical target ref).
+fn vault_with_tranche(dir: &Path) -> (PathBuf, String) {
+    let vault = dir.join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.join("k.asc")).unwrap();
+    let id = cmd::tranche::declare_tranche(
+        &vault,
+        &pp(),
+        40_000_000,
+        tranche_wallet(),
+        date!(2020 - 01 - 01),
+        date!(2020 - 01 - 10),
+        now(),
+    )
+    .unwrap();
+    (vault, id.canonical())
+}
+
+/// A vault with a tranche that is ALREADY promoted (hand-crafted, mirroring `declare_tranche_cli.rs`'s
+/// `promote_ev` style) — so a SECOND `promote_tranche` call on the same target must be refused by
+/// `would_conflict` (BG-D9). Returns (vault, the ORIGINAL tranche's target ref).
+fn vault_with_promoted_tranche(dir: &Path) -> (PathBuf, String) {
+    let (vault, target_ref) = vault_with_tranche(dir);
+    let target = parse_event_id(&target_ref).unwrap();
+    let mut s = Session::open(&vault, &pp()).unwrap();
+    append_decision(
+        s.conn(),
+        EventPayload::PromoteTranche(PromoteTranche {
+            target,
+            method: FloorMethod::WindowLowClose,
+            filed_basis: dec!(1_000),
+            coverage: Coverage::Full,
+            provenance_attested: true,
+            acknowledgment: Acknowledgment {
+                phrase: PROMOTE_ACK_PHRASE.into(),
+                shown_terms: vec![],
+                provenance_text: "acquired by purchase within the declared window".into(),
+                provenance_version: "v1".into(),
+            },
+            part_ii_narrative: "cash P2P purchase, no records; window bounded on-chain".into(),
+        }),
+        now(),
+        UtcOffset::UTC,
+        None,
+    )
+    .unwrap();
+    s.save().unwrap();
+    (vault, target_ref)
+}
+
+fn consent_terms_fixture() -> Vec<ConsentTerm> {
+    vec![ConsentTerm::ComputedTax {
+        year: 2020,
+        delta_usd: dec!(500),
+        deduction_delta_usd: None,
+    }]
+}
+
+fn consent_terms_with_deduction_and_unrealized() -> Vec<ConsentTerm> {
+    vec![
+        ConsentTerm::ComputedTax {
+            year: 2020,
+            delta_usd: dec!(0),
+            deduction_delta_usd: Some(dec!(300)),
+        },
+        ConsentTerm::Unrealized {
+            sat: 10_000_000,
+            hypothetical_reduction: Some(dec!(1_000)),
+            as_of: Some(date!(2020 - 06 - 01)),
+        },
+    ]
+}
+
+/// §6 / tax r1 M-6: refuse Gift/Inheritance/Mining/Earned/Airdrop/Fork — not just Gift (BG-D5's closed
+/// enumeration). Fail-closed: nothing is ever recorded across the whole sweep.
+#[test]
+fn every_non_purchase_provenance_is_refused_fail_closed() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, target) = vault_with_tranche(dir.path());
+    for pk in [
+        ProvenanceKind::Gift,
+        ProvenanceKind::Inheritance,
+        ProvenanceKind::Mining,
+        ProvenanceKind::Earned,
+        ProvenanceKind::Airdrop,
+        ProvenanceKind::Fork,
+    ] {
+        let err = cmd::promote::promote_tranche(
+            &vault,
+            &pp(),
+            &target,
+            pk,
+            "facts".into(),
+            None,
+            now(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, CliError::Usage(ref m) if m.contains("purchase") && m.contains("real acquisition")),
+            "{pk:?} must be refused naming 'purchase' + 'real acquisition': {err}"
+        );
+    }
+    assert_eq!(
+        count(&vault, |p| matches!(p, EventPayload::PromoteTranche(_))),
+        0,
+        "fail-closed: nothing recorded across the whole non-purchase sweep (BG-D5)"
+    );
+}
+
+/// BG-D7: an empty/whitespace Part II narrative is refused AT RECORD TIME (present-by-construction) —
+/// even with a valid provenance and a correct acknowledgment.
+#[test]
+fn empty_part_ii_narrative_is_refused_at_record_time() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, target) = vault_with_tranche(dir.path());
+    let err = cmd::promote::promote_tranche(
+        &vault,
+        &pp(),
+        &target,
+        ProvenanceKind::Purchase,
+        "  ".into(),
+        Some(PROMOTE_ACK_PHRASE),
+        now(),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, CliError::Usage(ref m) if m.contains("Part II")),
+        "an empty narrative must be refused naming 'Part II': {err}"
+    );
+    assert_eq!(
+        count(&vault, |p| matches!(p, EventPayload::PromoteTranche(_))),
+        0
+    );
+}
+
+/// A fully-valid promote records: the filed_basis floor is `>$0`, the acknowledgment phrase is stored
+/// verbatim, and `provenance_attested` is `true`.
+#[test]
+fn a_recorded_promote_carries_the_acknowledgment_and_stored_floor() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, target) = vault_with_tranche(dir.path());
+    cmd::promote::promote_tranche(
+        &vault,
+        &pp(),
+        &target,
+        ProvenanceKind::Purchase,
+        "cash P2P, no records".into(),
+        Some(PROMOTE_ACK_PHRASE),
+        now(),
+    )
+    .unwrap();
+    let p = only_promote(&vault);
+    assert!(p.filed_basis > btctax_core::Usd::ZERO, "filed_basis must be > $0: {p:?}");
+    assert!(!p.acknowledgment.phrase.is_empty());
+    assert_eq!(p.acknowledgment.phrase, PROMOTE_ACK_PHRASE);
+    assert!(p.provenance_attested);
+    assert_eq!(p.part_ii_narrative, "cash P2P, no records");
+}
+
+/// BG-D9: a second promote on an already-promoted target is refused via the `would_conflict` pre-check
+/// (NOT last-wins) — the record-time UX-P4-3 layer over the engine's own `DecisionConflict`.
+#[test]
+fn a_second_promote_is_refused_by_would_conflict() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, target) = vault_with_promoted_tranche(dir.path());
+    let err = cmd::promote::promote_tranche(
+        &vault,
+        &pp(),
+        &target,
+        ProvenanceKind::Purchase,
+        "x".into(),
+        Some(PROMOTE_ACK_PHRASE),
+        now(),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, CliError::Usage(ref m) if m.contains("conflict")),
+        "a second promote must be refused naming 'conflict': {err}"
+    );
+    assert_eq!(
+        count(&vault, |p| matches!(p, EventPayload::PromoteTranche(_))),
+        1,
+        "still exactly the ORIGINAL promote — the second attempt appended nothing"
+    );
+}
+
+/// §6 copy bullet covers the CONSENT copy too (not just the 8275/T13 narrative): the penalty base names
+/// "of the resulting additional tax" + "plus interest", and NEVER says "safe harbor" (not even to deny it).
+#[test]
+fn the_consent_copy_names_the_underpayment_base_and_never_says_safe_harbor() {
+    let screen = cmd::promote::render_consent(&consent_terms_fixture(), &BTreeSet::new());
+    assert!(!screen.to_lowercase().contains("safe harbor"));
+    assert!(screen.contains("of the resulting additional tax") && screen.contains("plus interest"));
+}
+
+/// tax r2 M-2: a fixture with a `ComputedTax{deduction_delta: Some}` term AND an `Unrealized` term pins
+/// BOTH labels the consent screen must carry.
+#[test]
+fn consent_copy_pins_the_deduction_exclusion_and_unrealized_labels() {
+    let screen = cmd::promote::render_consent(
+        &consent_terms_with_deduction_and_unrealized(),
+        &BTreeSet::new(),
+    );
+    assert!(
+        screen.contains("does NOT capture this charitable-deduction change"),
+        "tax-Δ-excludes-deduction sentence: {screen}"
+    );
+    assert!(
+        screen.contains("hypothetical, not a filed figure"),
+        "unrealized label rendered: {screen}"
+    );
+}
+
+/// T9 handoff (progress.md): `consent_terms`'s `deduction_delta_usd` sums the §170(e) charitable-deduction
+/// change AND the §1015 gift-basis change into one figure. When the render is told (via
+/// `gift_only_years`) that a flagged year's removal was GIFT-only, it must label that year's Δ as a
+/// donee-basis (§1015) documentation change — the donor's 1040 is unaffected — NEVER a Schedule-A
+/// deduction.
+#[test]
+fn consent_copy_labels_a_gift_only_year_as_donee_basis_not_schedule_a() {
+    let terms = vec![ConsentTerm::ComputedTax {
+        year: 2020,
+        delta_usd: dec!(0),
+        deduction_delta_usd: Some(dec!(400)),
+    }];
+    let mut gift_only_years = BTreeSet::new();
+    gift_only_years.insert(2020);
+    let screen = cmd::promote::render_consent(&terms, &gift_only_years);
+    assert!(
+        screen.contains("donee-basis (§1015)") && screen.contains("donor's 1040 is unaffected"),
+        "a gift-only year must be labeled donee-basis, not Schedule-A: {screen}"
+    );
+    // The disambiguation is an explicit "NOT a Schedule-A deduction" qualifier (not a bare, unqualified
+    // "Schedule-A deduction" claim) — assert the qualifier, not mere absence of the substring (which
+    // would also fail the correct denial wording, unlike the SPEC's literal "never says safe harbor").
+    assert!(
+        screen.contains("NOT a Schedule-A deduction"),
+        "the gift-only year's Δ must be explicitly denied as a Schedule-A deduction: {screen}"
+    );
+}
+
+/// The SAME gift-only relabeling applies to an `Uncomputable` term (its `deduction_delta_usd` is a bare
+/// `Usd`, not `Option`, but the mislabeling risk — and the T9 handoff — is identical).
+#[test]
+fn consent_copy_labels_a_gift_only_uncomputable_year_as_donee_basis_not_schedule_a() {
+    let terms = vec![ConsentTerm::Uncomputable {
+        year: 2019,
+        gain_delta_usd: dec!(0),
+        deduction_delta_usd: dec!(250),
+    }];
+    let mut gift_only_years = BTreeSet::new();
+    gift_only_years.insert(2019);
+    let screen = cmd::promote::render_consent(&terms, &gift_only_years);
+    assert!(
+        screen.contains("donee-basis (§1015)") && screen.contains("NOT a Schedule-A deduction"),
+        "a gift-only UNCOMPUTABLE year must also be labeled donee-basis, not Schedule-A: {screen}"
+    );
+}
+
+/// Run `btctax --vault <vault> reconcile promote-tranche <target> --provenance purchase --part-ii-file
+/// <path> [extra...]`; returns (exit, stdout, stderr). stdin is NOT a terminal under `Command::output()`,
+/// so this always drives the NON-interactive main.rs branch.
+fn run_promote(
+    vault: &Path,
+    target: &str,
+    part_ii_path: &Path,
+    extra: &[&str],
+) -> (i32, String, String) {
+    let bin = env!("CARGO_BIN_EXE_btctax");
+    let mut c = std::process::Command::new(bin);
+    c.arg("--vault")
+        .arg(vault.to_str().unwrap())
+        .arg("reconcile")
+        .arg("promote-tranche")
+        .arg(target)
+        .arg("--provenance")
+        .arg("purchase")
+        .arg("--part-ii-file")
+        .arg(part_ii_path.to_str().unwrap())
+        .env("BTCTAX_PASSPHRASE", "pw");
+    for a in extra {
+        c.arg(a);
+    }
+    let out = c.output().expect("btctax binary must execute");
+    (
+        out.status.code().expect("exits normally"),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// N-2 (BG-D6): the non-TTY path with no `--i-acknowledge` still REFUSES (exit != 0) but prints the
+/// computed consent figures to stdout BEFORE refusing — a scripted caller can always see what it declined
+/// to acknowledge. Drives the REAL binary so the main.rs wiring (not just the library fn) is exercised.
+#[test]
+fn non_tty_missing_acknowledge_still_prints_the_consent_screen_and_refuses() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, target) = vault_with_tranche(dir.path());
+    let part_ii = dir.path().join("part_ii.txt");
+    std::fs::write(&part_ii, "cash P2P purchase, no records; window bounded on-chain").unwrap();
+
+    let (code, stdout, stderr) = run_promote(&vault, &target, &part_ii, &[]);
+    assert_ne!(code, 0, "missing --i-acknowledge must refuse; stderr: {stderr}");
+    assert!(
+        stdout.contains("of the resulting additional tax"),
+        "the consent screen prints even on refusal (N-2): {stdout}"
+    );
+    assert_eq!(
+        count(&vault, |p| matches!(p, EventPayload::PromoteTranche(_))),
+        0,
+        "the refused promote must NOT be appended (fail-closed)"
+    );
+
+    // The non-interactive success path: --i-acknowledge with the exact phrase records it.
+    let (code2, stdout2, stderr2) =
+        run_promote(&vault, &target, &part_ii, &["--i-acknowledge", PROMOTE_ACK_PHRASE]);
+    assert_eq!(code2, 0, "a correct --i-acknowledge must succeed; stderr: {stderr2}");
+    assert!(stdout2.contains("of the resulting additional tax"));
+    assert_eq!(
+        count(&vault, |p| matches!(p, EventPayload::PromoteTranche(_))),
+        1
+    );
+}
+
+/// A vault with a tranche declared over a WIDE (> 1 year) window — still fully price-covered.
+fn vault_with_wide_window_tranche(dir: &Path) -> (PathBuf, String) {
+    let vault = dir.join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.join("k.asc")).unwrap();
+    let id = cmd::tranche::declare_tranche(
+        &vault,
+        &pp(),
+        40_000_000,
+        tranche_wallet(),
+        date!(2015 - 01 - 01),
+        date!(2018 - 01 - 01),
+        now(),
+    )
+    .unwrap();
+    (vault, id.canonical())
+}
+
+/// SPEC §1 "two honest limits": a wide (> 1 year) declared window tends to yield a LOW ("trivial")
+/// floor — the CONSENT flow must surface this caution so the filer can weigh whether promoting is even
+/// worth the Form 8275 disclosure surface.
+#[test]
+fn a_wide_window_promote_prints_the_trivial_floor_caution() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, target) = vault_with_wide_window_tranche(dir.path());
+    let part_ii = dir.path().join("part_ii.txt");
+    std::fs::write(&part_ii, "cash P2P purchase, no records; wide multi-year window").unwrap();
+
+    let (code, stdout, stderr) =
+        run_promote(&vault, &target, &part_ii, &["--i-acknowledge", PROMOTE_ACK_PHRASE]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    let lower = stdout.to_lowercase();
+    assert!(
+        lower.contains("trivial") && lower.contains("wide"),
+        "a wide window must print the trivial-floor caution: {stdout}"
     );
 }

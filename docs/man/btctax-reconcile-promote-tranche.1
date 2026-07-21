@@ -1,0 +1,45 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-reconcile-promote-tranche 1  btctax "btctax manual"
+.SH NAME
+promote\-tranche \- Approach\-B: promote an already\-declared `DeclareTranche` (D\-8\*(Aqs $0 IRS fallback) to a filed `>$0` basis floor (the minimum daily closing price over the attested acquisition window), behind a mandatory purchase\-provenance attestation (BG\-D5), a two\-sided informed\-consent screen (BG\-D6), and a Form 8275 Part II narrative (BG\-D7). Mitigates penalty exposure; does not eliminate it or guarantee immunity — read the consent screen this verb prints before acknowledging
+.SH SYNOPSIS
+\fBpromote\-tranche\fR <\fB\-\-provenance\fR> <\fB\-\-part\-ii\-file\fR> [\fB\-\-i\-acknowledge\fR] [\fB\-h\fR|\fB\-\-help\fR] <\fITARGET\fR> 
+.SH DESCRIPTION
+Approach\-B: promote an already\-declared `DeclareTranche` (D\-8\*(Aqs $0 IRS fallback) to a filed `>$0` basis floor (the minimum daily closing price over the attested acquisition window), behind a mandatory purchase\-provenance attestation (BG\-D5), a two\-sided informed\-consent screen (BG\-D6), and a Form 8275 Part II narrative (BG\-D7). Mitigates penalty exposure; does not eliminate it or guarantee immunity — read the consent screen this verb prints before acknowledging
+.SH OPTIONS
+.TP
+\fB\-\-provenance\fR \fI<PROVENANCE>\fR
+The units\*(Aq real acquisition provenance. Promotion requires `purchase`; every other value is refused and pointed at modeling the real acquisition instead (BG\-D5)
+.br
+
+.br
+\fIPossible values:\fR
+.RS 14
+.IP \(bu 2
+purchase
+.IP \(bu 2
+gift
+.IP \(bu 2
+inheritance
+.IP \(bu 2
+mining
+.IP \(bu 2
+earned
+.IP \(bu 2
+airdrop
+.IP \(bu 2
+fork
+.RE
+.TP
+\fB\-\-part\-ii\-file\fR \fI<PART_II_FILE>\fR
+Path to a text file holding the Form 8275 Part II narrative (filer facts, Reg. §1.6662\-4(f), "in sufficient detail"). An empty or whitespace\-only file is refused at record time (BG\-D7)
+.TP
+\fB\-\-i\-acknowledge\fR \fI<I_ACKNOWLEDGE>\fR
+Non\-interactive consent: the exact acknowledgment phrase shown on the consent screen. On an interactive terminal, omitting this shows the screen and prompts for the phrase
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+<\fITARGET\fR>
+The `DeclareTranche` decision to promote (see `btctax events list` for the ref)

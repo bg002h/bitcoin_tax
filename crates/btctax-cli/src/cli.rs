@@ -898,6 +898,27 @@ pub enum Reconcile {
         #[arg(long)]
         window_end: String,
     },
+    /// Approach-B: promote an already-declared `DeclareTranche` (D-8's $0 IRS fallback) to a filed `>$0`
+    /// basis floor (the minimum daily closing price over the attested acquisition window), behind a
+    /// mandatory purchase-provenance attestation (BG-D5), a two-sided informed-consent screen (BG-D6),
+    /// and a Form 8275 Part II narrative (BG-D7). Mitigates penalty exposure; does not eliminate it or
+    /// guarantee immunity — read the consent screen this verb prints before acknowledging.
+    PromoteTranche {
+        /// The `DeclareTranche` decision to promote (see `btctax events list` for the ref).
+        target: String,
+        /// The units' real acquisition provenance. Promotion requires `purchase`; every other value is
+        /// refused and pointed at modeling the real acquisition instead (BG-D5).
+        #[arg(long, value_enum)]
+        provenance: crate::cmd::promote::ProvenanceKind,
+        /// Path to a text file holding the Form 8275 Part II narrative (filer facts, Reg. §1.6662-4(f),
+        /// "in sufficient detail"). An empty or whitespace-only file is refused at record time (BG-D7).
+        #[arg(long)]
+        part_ii_file: PathBuf,
+        /// Non-interactive consent: the exact acknowledgment phrase shown on the consent screen. On an
+        /// interactive terminal, omitting this shows the screen and prompts for the phrase.
+        #[arg(long)]
+        i_acknowledge: Option<String>,
+    },
 }
 
 /// `reconcile pseudo <action>` — the pseudo-reconcile mode sub-verbs (sub-project 2).

@@ -1185,6 +1185,71 @@ fn dispatch_reconcile(
             }
             cmd::tranche::declare_tranche(vault, &pp, sat, wallet, ws, we, now)?
         }
+        Reconcile::PromoteTranche {
+            target,
+            provenance,
+            part_ii_file,
+            i_acknowledge,
+        } => {
+            let part_ii = std::fs::read_to_string(&part_ii_file).map_err(|e| CliError::PathIo {
+                path: part_ii_file.display().to_string(),
+                hint: "check the --part-ii-file path; it must be a readable UTF-8 text file".into(),
+                source: e,
+            })?;
+            // Resolve the acknowledgment (BG-D6), mirroring the shipped `--attest`/ATTEST_PHRASE
+            // precedent (export-snapshot/export-irs-pdf): an explicit `--i-acknowledge` is used verbatim
+            // (one call). Otherwise, on an interactive terminal, the FIRST call (ack=None) prints the
+            // advisory + consent screen as a side effect before it refuses for a missing ack — exactly
+            // the figures the filer needs to decide — so we discard that expected error, prompt, and
+            // make a second real call with the typed phrase. Piped + no flag ⇒ one call with `None`; the
+            // library still prints the figures before refusing (N-2).
+            match i_acknowledge {
+                Some(phrase) => cmd::promote::promote_tranche(
+                    vault,
+                    &pp,
+                    &target,
+                    provenance,
+                    part_ii,
+                    Some(&phrase),
+                    now,
+                )?,
+                None => {
+                    use std::io::IsTerminal;
+                    if std::io::stdin().is_terminal() {
+                        let _ = cmd::promote::promote_tranche(
+                            vault,
+                            &pp,
+                            &target,
+                            provenance,
+                            part_ii.clone(),
+                            None,
+                            now,
+                        );
+                        print!(
+                            "Type the exact phrase shown above to proceed\n  {}\n> ",
+                            cmd::promote::PROMOTE_ACK_PHRASE
+                        );
+                        use std::io::Write;
+                        std::io::stdout().flush().ok();
+                        let mut line = String::new();
+                        std::io::stdin().read_line(&mut line)?;
+                        cmd::promote::promote_tranche(
+                            vault,
+                            &pp,
+                            &target,
+                            provenance,
+                            part_ii,
+                            Some(&line),
+                            now,
+                        )?
+                    } else {
+                        cmd::promote::promote_tranche(
+                            vault, &pp, &target, provenance, part_ii, None, now,
+                        )?
+                    }
+                }
+            }
+        }
         Reconcile::SelectLots { disposal, from } => {
             let picks = from
                 .iter()

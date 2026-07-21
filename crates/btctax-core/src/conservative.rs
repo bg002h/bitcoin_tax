@@ -592,6 +592,12 @@ fn carryforward_out_of(
 /// flagged year's net capital gain/loss OR charitable deduction changed, the §1212(b) + §170(d) carryover
 /// cascade into later filed years is named (the `carryforward_out` diff quoted when computable, else
 /// named-unquantified). NOTHING is written; this is informational, non-gating (D-7).
+///
+/// `current` (Task 10 handoff, progress.md): candidate years are filtered to `< current` — a year `>=
+/// current` is presumed NOT YET FILED (still being authored), so it would be wrong to point it at a
+/// Form 1040-X. The caller supplies `current` from its OWN injected `now` (the BTCTAX_NOW seam), never a
+/// wall clock — this fn stays clock-free. Both directions are filtered identically: a void reverting a
+/// promote is just as premature to call "amended" for the year still being authored.
 #[allow(clippy::too_many_arguments)]
 pub fn promote_prior_year_advisory(
     events: &[LedgerEvent],
@@ -601,6 +607,7 @@ pub fn promote_prior_year_advisory(
     direction: Direction,
     profile: Option<&TaxProfile>,
     tables: &dyn TaxTables,
+    current: i32,
 ) -> Vec<String> {
     // The fold pair: `with` applies the promote (post-resolve); `without` EXCLUDES the promote event only —
     // the DeclareTranche's $0 baseline lot survives, so the diff isolates the basis rewrite (tax r1 M-1).
@@ -619,7 +626,10 @@ pub fn promote_prior_year_advisory(
         Direction::Void => (&without_state, &with_state),
     };
 
-    // Candidate years: every year appearing in EITHER fold's disposals or removals.
+    // Candidate years: every year appearing in EITHER fold's disposals or removals, filtered to `<
+    // current` — a year still being authored (>= current) is never told it needs a Form 1040-X (T10
+    // handoff). This is the advisory's OWN filter; the BG-D6 consent Σ (`consent_terms`) deliberately runs
+    // the fold-diff WITHOUT it, since the realized-saving total must include the current year.
     let mut years: BTreeSet<i32> = BTreeSet::new();
     for st in [&with_state, &without_state] {
         for d in &st.disposals {
@@ -629,6 +639,7 @@ pub fn promote_prior_year_advisory(
             years.insert(r.removed_at.year());
         }
     }
+    years.retain(|y| *y < current);
 
     let verb = match direction {
         Direction::Promote => "Promoting this tranche",

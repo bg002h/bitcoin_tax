@@ -1489,6 +1489,11 @@ fn no_tables() -> BTreeMap<i32, btctax_core::TaxTable> {
     BTreeMap::new()
 }
 
+/// A `current` cutoff far beyond any fixture year below — these tests are NOT about the T10 `< current`
+/// filter (that is pinned separately, `the_current_cutoff_excludes_the_year_still_being_authored`), so a
+/// sentinel this large is a no-op: every fixture year stays `< FAR_FUTURE`.
+const FAR_FUTURE: i32 = 9999;
+
 /// A pre-2025 disposal-reorder scenario: a documented 0.6-BTC lot ($5,000/BTC) co-held with a promoted
 /// 0.4-BTC tranche (floor $12,000 whole ⇒ $30,000/BTC — HIGHER per-sat, so HIFO draws it FIRST once
 /// promoted; unpromoted at $0 it sorts LAST). A 2018 sell of EXACTLY 0.4 BTC therefore drains the tranche
@@ -1658,6 +1663,7 @@ fn undisposed_promote_that_hifo_reorders_a_prior_year_fires_the_advisory() {
         Direction::Promote,
         None,
         &tables,
+        FAR_FUTURE,
     );
     assert!(
         lines
@@ -1686,6 +1692,7 @@ fn promote_reordering_a_prior_donation_only_year_fires_and_names_the_deduction()
         Direction::Promote,
         None,
         &tables,
+        FAR_FUTURE,
     );
     assert!(
         lines.iter().any(|l| l.contains("charitable deduction")),
@@ -1707,6 +1714,7 @@ fn a_loss_stealing_reorder_names_the_1212b_carryover_cascade() {
         Direction::Promote,
         None,
         &tables,
+        FAR_FUTURE,
     );
     assert!(
         lines.iter().any(
@@ -1730,6 +1738,7 @@ fn a_gift_only_reorder_quotes_the_1015_carryover_and_asserts_no_1040x() {
         Direction::Promote,
         None,
         &tables,
+        FAR_FUTURE,
     );
     let joined = lines.join(" ");
     assert!(
@@ -1756,6 +1765,7 @@ fn a_both_deltas_zero_flagged_year_names_the_changed_content_not_a_bare_zero() {
         Direction::Promote,
         None,
         &tables,
+        FAR_FUTURE,
     );
     assert!(
         lines
@@ -1782,6 +1792,7 @@ fn a_donation_reorder_names_the_170d_charitable_carryover_direction() {
         Direction::Promote,
         None,
         &tables,
+        FAR_FUTURE,
     );
     assert!(
         lines
@@ -1805,12 +1816,51 @@ fn the_void_direction_fires_amend_to_pay() {
         Direction::Void,
         None,
         &tables,
+        FAR_FUTURE,
     );
     assert!(
         lines
             .iter()
             .any(|l| l.contains("1040-X") && l.to_lowercase().contains("additional tax")),
         "voiding a promote over a filed floor-year is amend-to-pay (1040-X, additional tax): {lines:?}"
+    );
+}
+
+/// ★ Task 10 handoff (progress.md): `current` filters candidate years to `< current` — the year still
+/// being authored (>= current) must NOT be told it needs a Form 1040-X. `mixed_vintage_hifo_2018_disposal`
+/// flags exactly year 2018 (its 2018-09-01 sell). `current = 2018` excludes it (2018 is NOT < 2018);
+/// `current = 2019` includes it (2018 < 2019) — the same fixture, only the cutoff differs.
+#[test]
+fn the_current_cutoff_excludes_the_year_still_being_authored() {
+    let events = mixed_vintage_hifo_2018_disposal();
+    let tables = no_tables();
+    let excluded = promote_prior_year_advisory(
+        &events,
+        &prices(),
+        &cfg(),
+        &EventId::decision(2),
+        Direction::Promote,
+        None,
+        &tables,
+        2018,
+    );
+    assert!(
+        excluded.is_empty(),
+        "current=2018 must exclude year 2018 (still being authored, not yet filed): {excluded:?}"
+    );
+    let included = promote_prior_year_advisory(
+        &events,
+        &prices(),
+        &cfg(),
+        &EventId::decision(2),
+        Direction::Promote,
+        None,
+        &tables,
+        2019,
+    );
+    assert!(
+        included.iter().any(|l| l.contains("2018") && l.contains("1040-X")),
+        "current=2019 must still include the (now presumed-filed) year 2018: {included:?}"
     );
 }
 
