@@ -12,8 +12,9 @@
 //! PRIVACY: synthetic values only.
 
 use btctax_core::conservative::{
-    method_inversion_advisory, overpayment_delta, tranche_broker_specific_id_advisory,
-    tranche_dip_advisory, tranche_report_advisory, window_reference, Coverage,
+    basis_methodology, method_inversion_advisory, overpayment_delta,
+    tranche_broker_specific_id_advisory, tranche_dip_advisory, tranche_report_advisory,
+    window_reference, Coverage,
 };
 use btctax_core::event::*;
 use btctax_core::identity::*;
@@ -832,5 +833,115 @@ fn overpayment_nudge_absent_without_a_profile() {
     assert!(
         !text.contains("Overpayment nudge"),
         "no profile ⇒ no quantified overpayment nudge: {text}"
+    );
+}
+
+// ── Phase 7 / Task 13: mandatory methodology disclosure (D-4; basis-as-filed, term-correct) ──────────
+//
+// `basis_methodology(state, year)` is the i8949 basis explanation the conservative flow MUST emit
+// whenever a tranche is filed. Provenance-neutral (a tranche is undocumented BTC, never a purchase) and
+// term-correct (short/long DERIVED from the leg, never hard-coded "long-term" — G-4). Never files >$0.
+
+/// P7: present for a filed-tranche year, enumerates EACH filed tranche, and is provenance-neutral.
+#[test]
+fn basis_methodology_present_enumerates_each_tranche_and_is_provenance_neutral() {
+    let w = self_custody();
+    let events = vec![
+        tranche_ev(
+            1,
+            &w,
+            100_000_000,
+            date!(2015 - 01 - 01),
+            date!(2015 - 12 - 31),
+        ),
+        tranche_ev(
+            2,
+            &w,
+            100_000_000,
+            date!(2016 - 01 - 01),
+            date!(2016 - 12 - 31),
+        ),
+        sell_ev(
+            "SELL",
+            datetime!(2026-06-01 00:00 UTC),
+            &w,
+            200_000_000,
+            120_000,
+        ),
+    ];
+    let st = project(&events, &prices(), &config());
+    let text = basis_methodology(&st, 2026)
+        .expect("a filed-tranche year has a mandatory disclosure (D-4)");
+    assert!(
+        text.contains("2015-12-31") && text.contains("2016-12-31"),
+        "each filed tranche is enumerated by its estimated acquisition date: {text}"
+    );
+    let low = text.to_lowercase();
+    assert!(
+        !low.contains("purchase") && !low.contains("bought"),
+        "provenance-neutral (tax min-8c): {text}"
+    );
+}
+
+/// P7: absent when no tranche is in the year's filed set (a fully-documented disposal needs no §basis
+/// explanation from this flow).
+#[test]
+fn basis_methodology_absent_when_no_tranche_is_filed_this_year() {
+    let w = self_custody();
+    let events = vec![
+        documented_buy(
+            "BUY",
+            datetime!(2025-06-01 00:00 UTC),
+            &w,
+            100_000_000,
+            30_000,
+        ),
+        sell_ev(
+            "SELL",
+            datetime!(2026-06-01 00:00 UTC),
+            &w,
+            100_000_000,
+            50_000,
+        ),
+    ];
+    let st = project(&events, &prices(), &config());
+    assert!(
+        basis_methodology(&st, 2026).is_none(),
+        "no tranche filed this year → no disclosure"
+    );
+}
+
+/// P7 / G-4: term is DERIVED — a SHORT-term tranche disposal states "short-term" and the text contains
+/// NO hard-coded "long-term". (An ST fixture is REQUIRED for the mutation to discriminate — a legitimately
+/// long-term fixture would honestly contain "long-term".)
+#[test]
+fn basis_methodology_is_term_correct_short_term_never_hard_codes_long_term() {
+    let w = self_custody();
+    let events = vec![
+        // window_end 2026-01-31; disposed 2026-06-01 → < 1yr → SHORT-term.
+        tranche_ev(
+            1,
+            &w,
+            100_000_000,
+            date!(2026 - 01 - 01),
+            date!(2026 - 01 - 31),
+        ),
+        sell_ev(
+            "SELL",
+            datetime!(2026-06-01 00:00 UTC),
+            &w,
+            100_000_000,
+            50_000,
+        ),
+    ];
+    let st = project(&events, &prices(), &config());
+    let text = basis_methodology(&st, 2026).expect("a filed tranche has a disclosure");
+    assert!(
+        text.contains("short-term"),
+        "an ST tranche disposal states short-term (derived): {text}"
+    );
+    assert!(
+        !text.contains("long-term"),
+        "term is DERIVED, never hard-coded long-term (G-4): {text}"
     );
 }

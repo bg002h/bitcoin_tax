@@ -9,7 +9,7 @@
 //! - The raw chars are NEVER logged or rendered; only `●`×char_count is displayed.
 //!
 //! # Read-only contract
-//! never writes the vault or any decrypted image of it; writes only the four form CSVs
+//! never writes the vault or any decrypted image of it; writes only the year's form artifacts
 //! via `export.rs` on explicit user confirmation. This module performs no writes.
 
 use crate::app::Snapshot;
@@ -572,7 +572,7 @@ mod tests {
     // This behavioral test adds a runtime confirmation: open→build-Snapshot→drop leaves
     // the vault file BYTE-IDENTICAL to what it was before.
     //
-    // KAT-E3 extends it: do_export (writing the four form CSVs) must ALSO leave the vault
+    // KAT-E3 extends it: do_export (writing the form artifacts) must ALSO leave the vault
     // byte-identical. The export writes ONLY to the timestamped export subdirectory; the
     // vault file itself is never touched.
 

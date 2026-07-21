@@ -1,13 +1,15 @@
 //! Export module — the ONLY module in `btctax-tui` permitted to perform write-class I/O.
 //!
 //! # Guarantee
-//! "never writes the vault or any decrypted image of it; writes only the four form CSVs
-//! via `export.rs` on explicit user confirmation."
+//! "never writes the vault or any decrypted image of it; writes only the year's form
+//! artifacts via `export.rs` on explicit user confirmation."
 //!
 //! This module writes ONLY: the timestamped export directory (via
-//! `fsperms::mkdir_owner_only_exclusive`) and the four named form CSVs (via
-//! `btctax_cli::render::write_form_csvs`).  No other write-class I/O occurs anywhere in
-//! `btctax-tui` source — the mechanized gate (KAT-E10) enforces this on every `cargo test`.
+//! `fsperms::mkdir_owner_only_exclusive`) and the year's form artifacts (via
+//! `btctax_cli::render::write_form_csvs`) — the four named form CSVs plus, when a
+//! conservative-filing tranche is in the filed set, the mandatory `basis_methodology.txt`
+//! disclosure (P7 / D-4).  No other write-class I/O occurs anywhere in `btctax-tui`
+//! source — the mechanized gate (KAT-E10) enforces this on every `cargo test`.
 
 use crate::app::Snapshot;
 use btctax_core::{compute_se_tax, TaxTables};
@@ -105,17 +107,22 @@ pub fn se_result_for(snap: &Snapshot, year: i32) -> Option<btctax_core::SeTaxRes
 ///
 /// Always includes `form8949.csv`, `schedule_d.csv`, `form8283.csv`.
 /// Includes `schedule_se.csv` iff `se_result_for(snap, year)` is `Some`.
+/// Includes `basis_methodology.txt` iff a conservative-filing tranche is in the year's filed set
+/// (P7 / D-4 — the MANDATORY basis-explanation artifact; `write_form_csvs` writes it in the same case).
 pub fn compute_files(snap: &Snapshot, year: i32) -> Vec<&'static str> {
     let mut files = vec!["form8949.csv", "schedule_d.csv", "form8283.csv"];
     if se_result_for(snap, year).is_some() {
         files.push("schedule_se.csv");
+    }
+    if btctax_core::conservative::basis_methodology(&snap.state, year).is_some() {
+        files.push("basis_methodology.txt");
     }
     files
 }
 
 // ── Export execution ──────────────────────────────────────────────────────────
 
-/// Perform the export: create the exclusive directory and write the four form CSVs.
+/// Perform the export: create the exclusive directory and write the year's form artifacts.
 ///
 /// 1. Calls `fsperms::mkdir_owner_only_exclusive(out_dir)` [D1b, R0-I1] — FAILS with
 ///    `AlreadyExists` if the dir pre-exists; nothing is written in that case.
@@ -208,6 +215,59 @@ mod tests {
             bulk_estimated: BTreeMap::new(),
             prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
         }
+    }
+
+    /// P7 / D-4: `compute_files` lists `basis_methodology.txt` as a required artifact iff a tranche is
+    /// in the year's filed set (mirrors what `write_form_csvs` actually writes).
+    #[test]
+    fn compute_files_lists_basis_methodology_when_a_tranche_is_filed() {
+        use btctax_core::event::{DeclareTranche, Dispose, DisposeKind, EventPayload, LedgerEvent};
+        use btctax_core::identity::WalletId;
+        use btctax_core::price::StaticPrices;
+        use btctax_core::project::{project, ProjectionConfig};
+        use time::macros::offset;
+        let w = WalletId::SelfCustody {
+            label: "cold".into(),
+        };
+        let tranche = LedgerEvent {
+            id: EventId::decision(1),
+            utc_timestamp: datetime!(2026-01-01 00:00 UTC),
+            original_tz: offset!(+00:00),
+            wallet: None,
+            payload: EventPayload::DeclareTranche(DeclareTranche {
+                sat: 100_000_000,
+                wallet: w.clone(),
+                window_start: make_date(2015, 1, 1),
+                window_end: make_date(2015, 12, 31),
+            }),
+        };
+        let sell = LedgerEvent {
+            id: make_event_id("SELL"),
+            utc_timestamp: datetime!(2026-06-01 00:00 UTC),
+            original_tz: offset!(+00:00),
+            wallet: Some(w.clone()),
+            payload: EventPayload::Dispose(Dispose {
+                sat: 100_000_000,
+                usd_proceeds: Decimal::from(90_000i64),
+                fee_usd: Decimal::ZERO,
+                kind: DisposeKind::Sell,
+            }),
+        };
+        let st = project(
+            &[tranche, sell],
+            &StaticPrices::default(),
+            &ProjectionConfig::default(),
+        );
+        let snap = make_snapshot(st, BTreeMap::new());
+        assert!(
+            compute_files(&snap, 2026).contains(&"basis_methodology.txt"),
+            "the mandatory disclosure is a listed required artifact when a tranche is filed"
+        );
+        let empty = make_snapshot(LedgerState::default(), BTreeMap::new());
+        assert!(
+            !compute_files(&empty, 2026).contains(&"basis_methodology.txt"),
+            "no tranche filed ⇒ not listed"
+        );
     }
 
     /// Build a `TaxProfile` for Single filer with the given SE-relevant fields.

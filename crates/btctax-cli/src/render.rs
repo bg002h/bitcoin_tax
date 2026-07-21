@@ -868,12 +868,13 @@ pub fn write_csv_exports(
         write_form8949_csv(out_dir, state, year)?;
         write_schedule_d_csv(out_dir, state, year)?;
         write_form8283_csv(out_dir, state, year, donation_details)?;
-        // P2-D / Chunk B: standalone Schedule SE §1401 figure — written only when there IS SE tax
-        // (a computed SeTaxResult); omitted when there is no business SE income OR when the year
-        // is fully expensed (expenses ≥ gross → net_se == 0 → compute_se_tax returns None — [N4]).
-        // The "fully expensed" render advisory (render_schedule_se) surfaces the liability status
-        // ("no §1401 SE tax"); the CSV writer sees None in both the no-income and fully-expensed
-        // cases — same omission, different reason.
+        write_basis_methodology_txt(out_dir, state, year)?; // P7 / D-4 (mandatory when a tranche is filed)
+                                                            // P2-D / Chunk B: standalone Schedule SE §1401 figure — written only when there IS SE tax
+                                                            // (a computed SeTaxResult); omitted when there is no business SE income OR when the year
+                                                            // is fully expensed (expenses ≥ gross → net_se == 0 → compute_se_tax returns None — [N4]).
+                                                            // The "fully expensed" render advisory (render_schedule_se) surfaces the liability status
+                                                            // ("no §1401 SE tax"); the CSV writer sees None in both the no-income and fully-expensed
+                                                            // cases — same omission, different reason.
         if let Some(se) = se_result {
             write_schedule_se_csv(out_dir, se)?;
         }
@@ -881,12 +882,13 @@ pub fn write_csv_exports(
     Ok(())
 }
 
-/// Write the four year-scoped form CSVs for `year` into `out_dir`.
+/// Write the year-scoped form artifacts for `year` into `out_dir`.
 ///
 /// Creates `out_dir` owner-only (0o700) if absent (tolerant `mkdir_owner_only`, mkdir-p);
-/// each CSV is written via `fsperms::open_owner_only` (0o600).  Only `form8949.csv`,
-/// `schedule_d.csv`, `form8283.csv`, and — when `se_result` is `Some` — `schedule_se.csv`
-/// are written. The all-years dump CSVs (`lots.csv`, `disposals.csv`, `removals.csv`,
+/// each file is written via `fsperms::open_owner_only` (0o600).  Writes `form8949.csv`,
+/// `schedule_d.csv`, `form8283.csv`; `schedule_se.csv` when `se_result` is `Some`; and the
+/// mandatory `basis_methodology.txt` (P7 / D-4) when a conservative-filing tranche is in the
+/// year's filed set. The all-years dump CSVs (`lots.csv`, `disposals.csv`, `removals.csv`,
 /// `income.csv`) are NOT written; `export_snapshot` / `snapshot.sqlite` are NEVER called
 /// or written.
 ///
@@ -906,8 +908,25 @@ pub fn write_form_csvs(
     write_form8949_csv(out_dir, state, year)?;
     write_schedule_d_csv(out_dir, state, year)?;
     write_form8283_csv(out_dir, state, year, donation_details)?;
+    write_basis_methodology_txt(out_dir, state, year)?; // P7 / D-4 (mandatory when a tranche is filed)
     if let Some(se) = se_result {
         write_schedule_se_csv(out_dir, se)?;
+    }
+    Ok(())
+}
+
+/// P7 (D-4): write the MANDATORY conservative-filing methodology disclosure (`basis_methodology.txt`,
+/// 0o600) alongside the year's form CSVs whenever a tranche is in the year's filed set. A no-tranche
+/// year writes NOTHING — the i8949 basis explanation is required only when actual cost is not used.
+fn write_basis_methodology_txt(
+    out_dir: &Path,
+    state: &LedgerState,
+    year: i32,
+) -> Result<(), crate::CliError> {
+    use std::io::Write as _;
+    if let Some(text) = btctax_core::conservative::basis_methodology(state, year) {
+        let mut file = fsperms::open_owner_only(&out_dir.join("basis_methodology.txt"))?;
+        writeln!(file, "{text}")?;
     }
     Ok(())
 }

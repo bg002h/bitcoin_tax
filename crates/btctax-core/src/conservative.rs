@@ -10,7 +10,7 @@ use crate::price::PriceProvider;
 use crate::project::fold::fold;
 use crate::project::resolve::{resolve, Op};
 use crate::project::{in_force_methods, project, ProjectionConfig};
-use crate::state::{Disposal, LedgerState};
+use crate::state::{Disposal, LedgerState, Term};
 use crate::tax::{compute_tax_year, TaxOutcome, TaxProfile, TaxTables};
 use crate::{BasisSource, LotMethod, Usd, WalletId};
 use std::collections::BTreeSet;
@@ -82,6 +82,57 @@ pub fn method_inversion_advisory(
     } else {
         None
     }
+}
+
+/// P7 mandatory methodology disclosure (D-4): the free-form basis explanation the i8949 requires
+/// whenever actual cost is NOT used. `Some` iff a conservative-filing tranche is in `year`'s filed set
+/// (a disposal leg tagged `EstimatedConservative`); it enumerates each such filed unit — its estimated
+/// acquisition (the tranche `window_end`, carried as the leg's `acquired_at`), the basis **AS FILED**
+/// (`leg.basis` printed directly — `$0`, or the documented TP8(c) fee-sat basis when that carry landed
+/// on the tranche leg; NEVER unconditionally "$0", tax r1 I-1), and the holding period **as computed**
+/// (short/long — DERIVED from the leg's `term`, NEVER hard-coded "long-term", G-4). Provenance-neutral:
+/// a tranche is undocumented BTC, never asserted as a purchase (tax min-8c). `None` (no disclosure) when
+/// no tranche is filed for `year`. Informational/compliance text only — nothing `>$0` is ever filed.
+pub fn basis_methodology(state: &LedgerState, year: i32) -> Option<String> {
+    let mut items: Vec<String> = Vec::new();
+    for d in state
+        .disposals
+        .iter()
+        .filter(|d| d.disposed_at.year() == year)
+    {
+        for l in d
+            .legs
+            .iter()
+            .filter(|l| l.basis_source == BasisSource::EstimatedConservative)
+        {
+            let term = match l.term {
+                Term::LongTerm => "long-term",
+                Term::ShortTerm => "short-term",
+            };
+            items.push(format!(
+                "  \u{2022} {sat} sat of undocumented BTC, estimated acquired by {acq}, disposed on \
+                 {date}, filed at ${basis} basis ({term} holding period).",
+                sat = l.sat,
+                acq = l.acquired_at,
+                date = d.disposed_at,
+                basis = l.basis,
+            ));
+        }
+    }
+    if items.is_empty() {
+        return None;
+    }
+    let mut out = format!(
+        "Basis methodology disclosure (conservative filing) \u{2014} tax year {year}\n\n\
+         For the units below, the actual cost basis could not be substantiated from available records. \
+         A conservative $0 basis (the IRS fallback for unprovable basis) was used as filed; a $0 basis \
+         cannot understate gain. Each unit's holding period is derived from its estimated acquisition \
+         date and reported below as computed, never assumed. If records are later reconstructed, a \
+         higher documented basis may be substantiated \u{2014} lowering the reported gain, never below \
+         the amount that can be documented.\n\n"
+    );
+    out.push_str(&items.join("\n"));
+    Some(out)
 }
 
 /// P5 coverage caveat (arch M-6): whether `window_reference`'s `min` spans EVERY day in the queried

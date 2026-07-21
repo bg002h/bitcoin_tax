@@ -1,6 +1,6 @@
 //! Tax tab — renders the `compute_tax_year` result as a text report.
 //!
-//! never writes the vault or any decrypted image of it; writes only the four form CSVs
+//! never writes the vault or any decrypted image of it; writes only the year's form artifacts
 //! via `export.rs` on explicit user confirmation. This module performs no writes.
 //! No float — all money values are exact `Decimal` formatted with `{:.2}`.
 

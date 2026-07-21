@@ -24,7 +24,7 @@
 //!   4. Panic             — panic hook calls `restore_terminal()` before the default hook [R0-M4].
 //!      (`TerminalGuard` also runs during unwind; having both is belt-and-suspenders.)
 //!
-//! never writes the vault or any decrypted image of it; writes only the four form CSVs
+//! never writes the vault or any decrypted image of it; writes only the year's form artifacts
 //! via `export.rs` on explicit user confirmation. This module performs no writes.
 
 // ── Module declarations ───────────────────────────────────────────────────────

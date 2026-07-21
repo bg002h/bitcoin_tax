@@ -1,6 +1,6 @@
 //! Core application state: `Screen`, `Tab`, `Snapshot`, and `App`.
 //!
-//! never writes the vault or any decrypted image of it; writes only the four form CSVs
+//! never writes the vault or any decrypted image of it; writes only the year's form artifacts
 //! via `export.rs` on explicit user confirmation. This module performs no writes.
 
 use crate::export::ExportConfirmState;
