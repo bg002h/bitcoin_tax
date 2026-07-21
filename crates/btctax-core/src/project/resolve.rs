@@ -242,10 +242,13 @@ pub struct PseudoDefault {
     pub kind: PseudoKind,
 }
 
-/// Private outcome of resolving an `ImportConflict` via a decision.
+/// Private outcome of resolving an `ImportConflict` via a decision. `Accept` boxes its payload:
+/// `EventPayload` grew past clippy's `large_enum_variant` threshold once Approach-B's `PromoteTranche`
+/// decision (task-1-brief.md) joined the sum type — the same reason `ImportConflict.new_payload` and
+/// `ClassifyRaw.as_` already box an inner `EventPayload`.
 enum Resolved {
     /// The new payload is accepted; inner `EventId` is the original import target.
-    Accept(EventPayload, EventId),
+    Accept(Box<EventPayload>, EventId),
     /// The conflict is rejected; the original import stands unchanged.
     Reject,
 }
@@ -523,7 +526,7 @@ pub fn resolve(
                 {
                     conflict_res.insert(
                         s.conflict_event.clone(),
-                        Resolved::Accept((*c.new_payload).clone(), c.target.clone()),
+                        Resolved::Accept(c.new_payload.clone(), c.target.clone()),
                     );
                 }
             }
@@ -543,7 +546,7 @@ pub fn resolve(
         if let EventPayload::ImportConflict(c) = &e.payload {
             match conflict_res.get(&e.id) {
                 Some(Resolved::Accept(payload, target)) => {
-                    applied.insert(target.clone(), payload.clone());
+                    applied.insert(target.clone(), (**payload).clone());
                 }
                 Some(Resolved::Reject) => {} // original import stands unchanged
                 None => {

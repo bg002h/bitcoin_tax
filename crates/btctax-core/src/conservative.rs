@@ -170,7 +170,7 @@ pub fn basis_methodology(state: &LedgerState, year: i32) -> Option<String> {
 /// P5 coverage caveat (arch M-6): whether `window_reference`'s `min` spans EVERY day in the queried
 /// window (`Full`) or only the subset with bundled data (`Partial`). A `Partial` covered-part min can
 /// EXCEED the true window min, so P6 MUST surface this in user-visible copy (tax r1 N-3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Coverage {
     Full,
     Partial,
