@@ -2,13 +2,14 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** DRAFT — **plan-review r1 FOLDED** (tax 0C/8I/7M/3N + arch 0C/6I/4M/2N, both persisted verbatim in
-`reviews/plan-{tax,architecture}-fable-review-r1.md`); pending the **r2** re-review to 0C/0I per
-`STANDARD_WORKFLOW.md` **before any execution**. r1 confirmed the engine core (T2–T7 decomposition/evaporation/
-void-adjudication) faithful + all ~60 source citations accurate; the folded findings were completeness/wiring
-gaps — the `PromoteSet` threading (T2/T3/T4), the void-adjudication insertion point (T7), the advisory's call
-sites both directions (T8/T10), the verify-drift task (T11), `ConsentTerm`/`Printed8275` shapes (T1/T13), the
-8275 Part-I amount + year coverage (T13/T15), and under-pinned KATs.
+**Status:** DRAFT — **plan-review r1 + r2 FOLDED** (r1: tax 0C/8I + arch 0C/6I; r2: tax 0C/1I + arch 0C/2I,
+all persisted verbatim in `reviews/plan-{tax,architecture}-fable-review-r{1,2}.md`); pending the **r3** re-review
+to 0C/0I per `STANDARD_WORKFLOW.md` **before any execution** (r3-onward run on **Opus** per user direction). r2
+verified 7/8 tax + 5/6 arch r1 Importants genuinely resolved; the residue was the CONVERGED verify-drift
+false-cover (I *claimed* it folded to T11 in r1 but had not written it — now REALLY in **T11 Step 3b** with
+`promote_drift_advisory` + `cmd/inspect.rs::verify` + a KAT), the second `FoldCtx` site in `universal_snapshot`
+(→ T4 threads the `PromoteSet` there too, closing a snapshot-divergence bug), the T8 amend-direction sign
+(refund vs pay), and small consent-copy / `PROMOTE_ACK_PHRASE` / `Printed8275`-commit fixes.
 
 **Goal:** Let a filer knowingly promote a v1 `$0`-basis conservative tranche to a filed **`>$0` basis floor**
 (window-min daily close), backed by a mandatory **Form 8275**, with every gate/advisory/decomposition the GREEN
@@ -126,7 +127,9 @@ Every task's requirements implicitly include this section. Exact values copied f
   payload-side render arms (T12).
 - `crates/btctax-core/src/forms.rs`, `crates/btctax-core/src/tax/{return_1040,printed}.rs` — verified to inherit
   BG-D11 by construction; KAT-covered, not independently patched (T6).
-- `crates/btctax-core/src/tax/compute.rs`, `crates/btctax-cli/src/cmd/tax.rs` — carryover-cascade naming hooks (T8).
+- `crates/btctax-core/src/tax/compute.rs`, `crates/btctax-cli/src/cmd/tax.rs` — **READ-ONLY reference** for T8's
+  cascade quoting (`carryforward_out` / `charitable_carryover_out` diffs); T8 records the spec-blessed decision
+  NOT to make their existing copy promote-aware (§3 item 8c), so these are NOT modified.
 - `crates/btctax-cli/src/cli.rs`, `main.rs`, `render.rs`, `cmd/admin.rs`, `lib.rs` — the CLI verb (T10), the §3
   copy sweep (T11), the real export-refusal gate (T14).
 - `crates/btctax-forms/src/{lib,pdf,map,packet}.rs`, `crates/btctax-core/src/tax/packet.rs`,
@@ -358,8 +361,10 @@ place a later task learns its neighbors' exact names/types (implementers see onl
   }
   #[test]
   fn a_promoted_tranche_still_refuses_a_safe_harbor_allocation_at_record_time() {
-      // §6: both record-time refusal directions still fire for a PROMOTED (>$0) tranche — the guards are
-      // tag-keyed (cmd/tranche.rs:93-97 / session.rs:694), so a promote on file must not slip past them.
+      // §6: the record-time refusal still fires for a PROMOTED (>$0) tranche. BOTH guards (the CLI
+      // `guard_allocation_vs_tranche` cmd/tranche.rs:92 AND the TUI opener session.rs:692) call the ONE
+      // tag-keyed `pre2025_tranche_exists` predicate, so exercising it with a promote on file covers both by
+      // construction (arch r2 M-4 / tax r2 — verified shared predicate).
       let events = tranche_then_promote_events(dec!(12_000));
       assert!(cmd::tranche::guard_allocation_vs_tranche(&events).is_err(),
           "a promoted pre-2025 tranche still blocks a safe-harbor allocation (D-8, tag-keyed)");
@@ -403,9 +408,16 @@ the relocation tag-carry reds `relocated_promoted_tranche_keeps_tag_and_floor`.
 
 **Files:**
 - Modify: `crates/btctax-core/src/project/fold.rs` (★ FIRST thread the `PromoteSet`: add `promotes: PromoteSet`
-  to `FoldCtx` :21, populate it in `fold` :376 from `res.promotes` (T3), and pass `&ctx.promotes` to the six
-  builder call sites :362/:635/:641/:832/:1118/:1122/:1195/:1199 — arch r1 I-1; then `make_disposal_legs`
-  non-dual arm :192-202)
+  to `FoldCtx` :21, populate it in `fold` :376 from `res.promotes` (T3), and pass `&ctx.promotes` to the **eight**
+  builder call sites :362/:635/:641/:832/:1118/:1122/:1195/:1199 (2× disposal, 2× removal, 4× fee — arch r1 N-1;
+  arch r1 I-1); then `make_disposal_legs` non-dual arm :192-202)
+- ★ Modify: `crates/btctax-core/src/project/transition.rs` (the **SECOND** `FoldCtx` construction site, :60,
+  inside `universal_snapshot` — "Same FoldCtx the real fold uses, so the pre-2025 residue cannot diverge"; arch
+  r2 I-1). Thread a `promotes: &PromoteSet` param into `universal_snapshot` and its inner `FoldCtx`; the single
+  call site (resolve.rs:1286, step 3) has `promotes` in scope. **Without this, the pre-2025 conservation
+  snapshot folds with an EMPTY promote set → T5's fee-evaporation does NOT apply in the snapshot → `snap.basis`
+  diverges from the real fold → the §7.4 `alloc_basis != snap.basis` check (resolve.rs:1305) adjudicates against
+  a phantom basis exactly in the fully-consumed-tranche case where the D-8 tag-arm no longer fires.**
 - Create helper in: `crates/btctax-core/src/conservative_promote.rs` (`clamped_leg_basis`)
 - Modify: `crates/btctax-core/tests/kat_conservative.rs` (amend the parent Invariant KAT wording per BG-D4 —
   SPEC §3 item 6; the attribution sentence now reads "…never the estimate; a promoted-tranche leg's
@@ -453,8 +465,19 @@ the relocation tag-carry reds `relocated_promoted_tranche_keeps_tag_and_floor`.
       let leg = only_disposal_leg(&st);
       assert!(leg.basis >= Usd::ZERO, "estimate basis ≥ $0");
   }
+  #[test]
+  fn the_pre2025_conservation_snapshot_sees_the_fee_evaporation_not_a_phantom_basis() {
+      // ★ arch r2 I-1: the SECOND FoldCtx (universal_snapshot, transition.rs:60) must carry the SAME promote
+      // set. A pre-2025 promoted tranche whose fee-sats are FIFO-drawn pre-2025 and is then FULLY consumed
+      // pre-2025, plus a SafeHarborAllocation: the D-8 tag-arm does NOT fire (0 EstimatedConservative sat left),
+      // so `alloc_basis != snap.basis` is the only guard — and it must compare against the EVAPORATED
+      // (documented-only) residue basis the real fold produced, not the full-FeeCarry phantom.
+      let st = project(&promoted_pre2025_fee_drawn_fully_consumed_plus_alloc(), &prices(), &cfg());
+      // conservation holds (or the correct blocker fires) because the snapshot folded WITH the promote set:
+      assert!(conservation_adjudicated_against_evaporated_residue(&st));
+  }
   ```
-- [ ] **Step 2: Run — expect FAIL.** Run: `cargo test -p btctax-core --test kat_promote -- clamp floor relocated estimate_basis 2>&1 | tail -30`
+- [ ] **Step 2: Run — expect FAIL.** Run: `cargo test -p btctax-core --test kat_promote -- clamp floor relocated estimate_basis snapshot_sees 2>&1 | tail -30`
 - [ ] **Step 3: Implement.** First do the `FoldCtx`/`Resolution` threading (Files above), so `&ctx.promotes`
   reaches every builder. In `make_disposal_legs` (add `promotes: &PromoteSet`), non-dual arm (fold.rs:192-202),
   replace `basis = c.gain_basis` with
@@ -471,14 +494,15 @@ the relocation tag-carry reds `relocated_promoted_tranche_keeps_tag_and_floor`.
   amend + re-green the parent Invariant KAT (`kat_conservative.rs`, SPEC §3 item 6); `make check`.
 - [ ] **Step 5: Commit.**
   ```bash
-  git add crates/btctax-core/src/project/fold.rs crates/btctax-core/src/conservative_promote.rs crates/btctax-core/tests/kat_promote.rs
-  git commit -m "feat(promote): BG-D4 disposal-leg clamp decomposed from stored filed_basis (never a loss, never negative)"
+  git add crates/btctax-core/src/project/fold.rs crates/btctax-core/src/project/transition.rs crates/btctax-core/src/conservative_promote.rs crates/btctax-core/tests/kat_promote.rs
+  git commit -m "feat(promote): BG-D4 disposal-leg clamp from stored filed_basis + thread PromoteSet into BOTH FoldCtx sites (fold + universal_snapshot)"
   ```
 
 **Mutation to kill:** decomposing from `c.gain_basis` instead of the stored `filed_basis` reds
 `relocated_with_fee_then_promoted_keeps_documented_fee_unclamped`; a bare `min(est, net)` (no `max(net,0)`)
 reds `estimate_basis_never_goes_negative_when_fee_exceeds_proceeds`; clamping to `net` unconditionally (not
-just the estimate share) reds the documented-fee-negative KAT.
+just the estimate share) reds the documented-fee-negative KAT; passing `&PromoteSet::new()` into
+`universal_snapshot` (the empty-set shortcut) reds `the_pre2025_conservation_snapshot_sees_the_fee_evaporation_not_a_phantom_basis`.
 
 ### Task 5: BG-D4 fee-draw evaporation at `consume_fee` / `FeeCarry`
 
@@ -703,8 +727,12 @@ reds `second_promote_on_one_target_conflicts_neither_applies`.
   fn undisposed_promote_that_hifo_reorders_a_prior_year_fires_the_advisory() {
       // Table-less/profile-less 2018 year (only 2017/2024/2025/2026 tables ship): the fold-diff STILL fires
       // (leg-set diff, profile/table-independent) — the tax_total-keyed r1 predicate could not (tax r2 I-3).
+      // A HIFO reorder that draws the higher-basis tranche into 2018 LOWERS its gain → amend-to-REFUND (tax r2 M-1).
       let lines = promote_prior_year_advisory(&mixed_vintage_hifo_2018_disposal(), .., Direction::Promote, None, ..);
       assert!(lines.iter().any(|l| l.contains("2018") && l.contains("1040-X")));
+      let joined = lines.join(" ");
+      assert!(joined.contains("§6511") && !joined.contains("additional tax"),
+          "a basis-increase (refund) year names §6511, NOT 'additional tax' (amend-direction by Δ sign)");
   }
   #[test]
   fn promote_reordering_a_prior_DONATION_only_year_fires_and_names_the_deduction() {
@@ -762,8 +790,11 @@ reds `second_promote_on_one_target_conflicts_neither_applies`.
   profile/blocked)"`; note §6511. When Y's net capital gain/loss OR charitable deduction changed, append the
   cascade clause naming §1212(b) (Schedule D carryforward) AND §170(d) (Schedule A charitable carryover) —
   quoting the `carryforward_out` / `charitable_carryover_out` diff only when computable, else named-unquantified.
-  `Direction::Void` = the same diff over the promote-removed vs promote-present pair, amend-to-**pay** (promote
-  direction) / amend-to-refund (void) copy.
+  **Amend direction follows the SIGN of the year's tax Δ (tax r2 M-1 — do NOT hard-code):** a PROMOTE that
+  raises a filed year's basis lowers its tax → amend-to-**refund** (name **§6511**'s refund limitation); a
+  PROMOTE (or the VOID direction) that raises a filed year's tax → amend-to-**pay** ("additional tax, plus
+  interest"). Voiding a promote reverts filed floor-basis to `$0` → amend-to-**pay**. (`Direction` selects the
+  fold pair; the copy is chosen per-year by the Δ sign, not by the direction.)
 - [ ] **Step 3b: Wire `Direction::Void`.** In the void verb (`cmd/reconcile.rs`) + the bulk-void path, when the
   void target is a `PromoteTranche` or a promoted-tranche `DeclareTranche`, compute + print
   `promote_prior_year_advisory(.., Direction::Void, ..)` before recording (a warning, non-gating).
@@ -850,8 +881,13 @@ CLI void-direction test.
   `hypothetical_reduction = Some(the today-price clamped gain reduction)` when a current close exists, else
   `None` (the render says "no current price data — the floor itself, $filed_basis, is the maximum gain
   reduction" — tax r3 N-2). When a later year's carryover-in derives from a flagged year and cannot be priced →
-  `ConsentTerm::CascadeNamed { year }`. NEVER emit `ComputedTax{delta:0}` for a real change; NEVER return an
-  empty vec for a promote with latent exposure.
+  `ConsentTerm::CascadeNamed { year }`. **A bare `ComputedTax{ delta_usd: 0, deduction_delta_usd: None }` is
+  forbidden for a real change (that is the "bare $0" defect); but `ComputedTax{ delta_usd: 0, deduction_delta_usd:
+  Some(D≠0) }` is the CORRECT term for a DONATION-only computing year — engine B prices its tax-Δ at exactly $0
+  while the deduction changed by D (tax r2 M-3), and the copy names the excluded deduction effect.** NEVER
+  mislabel a computing year `Uncomputable`; NEVER return an empty vec for a promote with latent exposure.
+  (The KAT fixture `promote_reorders_2024_donation_with_profile` is donation-ONLY, so `delta_usd == 0` is the
+  exercised path.)
 - [ ] **Step 4: Run — expect PASS** + `make check`.
 - [ ] **Step 5: Commit.**
   ```bash
@@ -905,23 +941,30 @@ year reds `undisposed_promote_records_no_bare_zero`; keeping the `< current` fil
       assert!(screen.contains("of the resulting additional tax") && screen.contains("plus interest")); // N-2
   }
   #[test]
+  fn consent_copy_pins_the_deduction_exclusion_and_unrealized_labels() {
+      // tax r2 M-2: a fixture with a ComputedTax{deduction_delta: Some} term AND an Unrealized term.
+      let screen = cmd::promote::render_consent(&consent_terms_with_deduction_and_unrealized());
+      assert!(screen.contains("does NOT capture this charitable-deduction change"), "tax-Δ-excludes-deduction sentence");
+      assert!(screen.contains("hypothetical, not a filed figure"), "unrealized label rendered");
+  }
+  #[test]
   fn empty_part_ii_narrative_is_refused_at_record_time() {
       let v = vault_with_tranche();
-      let err = cmd::promote::promote_tranche(&v, &pp(), "d1", ProvenanceKind::Purchase, "  ".into(), Some(ATTEST_PHRASE), now()).unwrap_err();
+      let err = cmd::promote::promote_tranche(&v, &pp(), "d1", ProvenanceKind::Purchase, "  ".into(), Some(PROMOTE_ACK_PHRASE), now()).unwrap_err();
       assert!(matches!(err, CliError::Usage(m) if m.contains("Part II")));  // BG-D7 present-by-construction
   }
   #[test]
   fn a_recorded_promote_carries_the_acknowledgment_and_stored_floor() {
       let v = vault_with_tranche();
       cmd::promote::promote_tranche(&v, &pp(), "d1", ProvenanceKind::Purchase, "cash P2P, no records".into(),
-          Some(ATTEST_PHRASE), now()).unwrap();
+          Some(PROMOTE_ACK_PHRASE), now()).unwrap();
       let p = only_promote(&v);
       assert!(p.filed_basis > Usd::ZERO && !p.acknowledgment.phrase.is_empty() && p.provenance_attested);
   }
   #[test]
   fn a_second_promote_is_refused_by_would_conflict() {
       let v = vault_with_promoted_tranche();
-      let err = cmd::promote::promote_tranche(&v, &pp(), "d1", ProvenanceKind::Purchase, "x".into(), Some(ATTEST_PHRASE), now()).unwrap_err();
+      let err = cmd::promote::promote_tranche(&v, &pp(), "d1", ProvenanceKind::Purchase, "x".into(), Some(PROMOTE_ACK_PHRASE), now()).unwrap_err();
       assert!(matches!(err, CliError::Usage(m) if m.contains("conflict")));  // BG-D9 via would_conflict
   }
   ```
@@ -933,7 +976,10 @@ year reds `undisposed_promote_records_no_bare_zero`; keeping the `< current` fil
   print `promote_prior_year_advisory(.., Direction::Promote, ..)` (T8 — the 1040-X/§6511/cascade lines) BEFORE
   the consent prompt (arch/tax r1 I-3 — this is the ONLY promote-direction call site of the advisory)**; render
   the consent screen (`render_consent` — BG-D6/D10 copy: penalty base = "of the resulting additional tax",
-  "plus interest", NEVER "safe harbor", the wide-window "this floor is trivial" note); require
+  "plus interest", NEVER "safe harbor", the wide-window "this floor is trivial" note; **a term carrying
+  `deduction_delta_usd: Some` also renders "the computed tax figure does NOT capture this charitable-deduction
+  change (priced only on the full return)" — tax r2 M-2 / BG-D9; an `Unrealized` term renders the
+  "(hypothetical, not a filed figure)" label — tax r2 M-2 / BG-D6**); require
   `--i-acknowledge <PROMOTE_ACK_PHRASE>` on the non-TTY path **with the computed figures still printed to
   stdout** (N-2); build `PromoteTranche{..}` with `Acknowledgment{ phrase: PROMOTE_ACK_PHRASE, shown_terms:
   consent_terms, provenance_text, provenance_version }`; **pre-check** `would_conflict` (BG-D9 second-promote) →
@@ -957,11 +1003,17 @@ pre-check reds `a_second_promote_is_refused_by_would_conflict`.
 - Modify: `crates/btctax-cli/src/cmd/tranche.rs` (`TRANCHE_IS_FINAL_HINT` :29-31, the "$0" refusal :95, the
   phantom-wallet copy :156-161), `crates/btctax-cli/src/session.rs:694-695`, `crates/btctax-core/src/project/resolve.rs`
   (the `SafeHarborUnconservable` blocker `$0` detail :1305-1315)
+- ★ Modify: `crates/btctax-core/src/conservative_promote.rs` (new `promote_drift_advisory`) +
+  `crates/btctax-cli/src/cmd/inspect.rs` (`verify` :146 / `VerifyReport` — the **BG-D3 verify-drift advisory**,
+  tax r2 I-1 / arch r2 I-2; `verify`'s current signature is vault+passphrase only, so THREAD a `PriceProvider`
+  + a drift field into `VerifyReport`). This is a REAL owned step — NOT the false-cover the self-review claimed.
 - Test: `crates/btctax-core/tests/kat_promote.rs`, `crates/btctax-cli/tests/promote_cli.rs`
 
 **Interfaces:**
 - Consumes: the promote set (reach a promoted leg/lot via `origin_event_id`); T8's advisory replaces the stale
-  method-inversion/self-custody framing where a promoted lot is involved.
+  method-inversion/self-custody framing where a promoted lot is involved; T2 `filed_basis_for` (for the drift recompute).
+- Produces: `pub fn promote_drift_advisory(events: &[LedgerEvent], prices: &dyn PriceProvider) -> Vec<String>` —
+  per live promote, recompute `filed_basis_for` vs the STORED `filed_basis`, direction-aware.
 
 - [ ] **Step 1: Write the failing KATs:**
   ```rust
@@ -986,8 +1038,20 @@ pre-check reds `a_second_promote_is_refused_by_would_conflict`.
       // the quoted funnel saving must equal the clamped promote delta (not the unclamped what-if):
       assert_eq!(funnel_quoted_saving(&lines), clamped_promote_saving(&unpromoted_below_low_tranche()));
   }
+  #[test]
+  fn verify_drift_advisory_is_direction_aware_and_the_fold_still_uses_the_stored_number() {
+      // BG-D3 (tax r2 I-1 / arch r2 I-2): a later price-data change that lowers the window min → the STORED
+      // floor now recomputes ABOVE the reference → "void + re-promote to the corrected lower number" (G-4).
+      let ev = promote_at_stored_floor(dec!(12_000));
+      let hi = prices_where_window_min_recomputes(dec!(9_000)); // corrected data ⇒ stored 12k > recomputed 9k
+      let drift = promote_drift_advisory(&ev, &hi);
+      assert!(drift.iter().any(|l| l.contains("void") && l.contains("re-promote")), "direction-aware overstated-floor hint");
+      // ★ the FOLD is unaffected — it uses the STORED filed_basis, not the recomputed one:
+      let st = project(&ev, &hi, &cfg());
+      assert_eq!(only_lot(&st).usd_basis, dec!(12_000), "fold uses the STORED number forever");
+  }
   ```
-- [ ] **Step 2: Run — expect FAIL.** Run: `cargo test -p btctax-core --test kat_promote -- basis_methodology dip_and_self funnel 2>&1 | tail -20`
+- [ ] **Step 2: Run — expect FAIL.** Run: `cargo test -p btctax-core --test kat_promote -- basis_methodology dip_and_self funnel verify_drift 2>&1 | tail -20`
 - [ ] **Step 3: Implement.** `basis_methodology` (:141-165): distinguish promoted legs (via
   `leg.lot_id.origin_event_id ∈ promote set`) — the promoted `>$0` line gets the estimate disclosure ("basis
   estimated at the minimum daily closing price over the attested acquisition window (Cohan)"; the clamped-leg
@@ -1005,11 +1069,18 @@ pre-check reds `a_second_promote_is_refused_by_would_conflict`.
   not to this doc comment, which this task DOES fix**; re-scope every "$0-only" test (kat_tranche/kat_conservative)
   to "unpromoted". **Whole-surface rule:** grep `"$0"` + man/docs/goldens in one pass (project memory
   `whole-surface-sweep-on-taxonomy-change`).
+- [ ] **Step 3b: The BG-D3 verify-drift advisory (the REAL owned step — tax r2 I-1 / arch r2 I-2).** Implement
+  `promote_drift_advisory` in `conservative_promote.rs`: for each live promote, recompute `filed_basis_for`
+  against the CURRENT `prices` and compare to the STORED `filed_basis`. Stored **above** the recomputed
+  reference on a not-yet-filed position → the "void + re-promote to the corrected lower number" G-4 hint;
+  stored **below** → an understated-floor advisory; already-filed years → advisory-only (the filed number
+  stands). Surface it through `cmd/inspect.rs::verify` — thread a `PriceProvider` into `verify` and add a
+  `drift: Vec<String>` field to `VerifyReport`. The FOLD is unchanged (it always uses the STORED number, T3).
 - [ ] **Step 4: Run — expect PASS** + `make check` + regen any advisory goldens (`make examples` if J-journeys touch tranche copy).
 - [ ] **Step 5: Commit.**
   ```bash
-  git add crates/btctax-core/src/conservative.rs crates/btctax-cli/src/cmd/tranche.rs crates/btctax-cli/src/session.rs crates/btctax-core/src/project/resolve.rs crates/btctax-core/tests/kat_promote.rs
-  git commit -m "feat(promote): §3 tag-side census — promote-aware advisories + \$0 copy sweep"
+  git add crates/btctax-core/src/conservative.rs crates/btctax-core/src/conservative_promote.rs crates/btctax-cli/src/cmd/inspect.rs crates/btctax-cli/src/cmd/tranche.rs crates/btctax-cli/src/session.rs crates/btctax-core/src/project/resolve.rs crates/btctax-core/tests/kat_promote.rs
+  git commit -m "feat(promote): §3 tag-side census — promote-aware advisories + \$0 copy sweep + BG-D3 verify-drift advisory"
   ```
 
 **Mutation to kill:** leaving `basis_methodology`'s "never the estimate" sentence reds
@@ -1038,8 +1109,15 @@ misstate that the >$0 is documented fee basis, not the estimate — a §6662 hon
       let (tag, _, _, _) = summarize_void_payload(&promote_payload());
       assert_ne!(tag, "?");
   }
+  #[test]
+  fn safe_harbor_residue_does_not_project_a_dangling_promote() {
+      // §6 (arch r2 M-3): a promote layered on a dropped DeclareTranche must ALSO be dropped from the
+      // pre-2025 residue, or it projects with no target.
+      let residue = safe_harbor_residue(&events_with_pre2025_promoted_tranche());
+      assert!(!residue.iter().any(|e| matches!(e.payload, EventPayload::PromoteTranche(_))));
+  }
   ```
-- [ ] **Step 2: Run — expect FAIL.** Run: `cargo test -p btctax-cli -- bulk_void_summary_renders_a_promote 2>&1 | tail; cargo test -p btctax-tui-edit -- tui_void_flow_labels 2>&1 | tail`
+- [ ] **Step 2: Run — expect FAIL.** Run: `cargo test -p btctax-cli -- bulk_void_summary_renders_a_promote safe_harbor_residue_does_not 2>&1 | tail; cargo test -p btctax-tui-edit -- tui_void_flow_labels 2>&1 | tail`
 - [ ] **Step 3: Implement.** Add a `PromoteTranche(p) => format!("PromoteTranche of {} → ${} floor", p.target.canonical(), p.filed_basis)`
   arm (`.canonical()` — `EventId` has no `Display`, arch r1 N-1) to `bulk_void_payload_summary` (before the
   `other =>` at :2171) and the decision-list render (:2164-2172);
@@ -1062,6 +1140,8 @@ misstate that the >$0 is documented fee basis, not the estimate — a §6662 hon
 
 **Files:**
 - Create: `crates/btctax-core/src/tax/form8275.rs` (+ `mod form8275;` in `tax/mod.rs`)
+- Modify: `crates/btctax-core/src/tax/printed.rs` (add `Printed8275` + `printed_8275`, mirroring `Printed8283Rows`
+  :135 — arch r2 M-1; MUST be in this task's commit, else T15/T16 consume an uncommitted type)
 - Reference: `basis_methodology` (`conservative.rs:125-168`) is the Part-I seed; the promote's `part_ii_narrative`
   (on the event) is Part II.
 - Test: `crates/btctax-core/tests/kat_promote.rs`
@@ -1133,8 +1213,8 @@ misstate that the >$0 is documented fee basis, not the estimate — a §6662 hon
 - [ ] **Step 4: Run — expect PASS** + `make check`.
 - [ ] **Step 5: Commit.**
   ```bash
-  git add crates/btctax-core/src/tax/form8275.rs crates/btctax-core/src/tax/mod.rs crates/btctax-core/tests/kat_promote.rs
-  git commit -m "feat(promote): Form 8275 content (Part I auto + Part II narrative) + BG-D7/D10 honest copy"
+  git add crates/btctax-core/src/tax/form8275.rs crates/btctax-core/src/tax/printed.rs crates/btctax-core/src/tax/mod.rs crates/btctax-core/tests/kat_promote.rs
+  git commit -m "feat(promote): Form 8275 content (Part I auto + Part II narrative + Printed8275) + BG-D7/D10 honest copy"
   ```
 
 **Mutation to kill:** emitting "safe harbor" or "40% on the disallowed basis" reds
@@ -1193,7 +1273,7 @@ misstate that the >$0 is documented fee basis, not the estimate — a §6662 hon
   ```
 
 **Mutation to kill:** implementing the gate as the always-writes `basis_methodology.txt` pattern (never refuses)
-reds `export_with_a_promoted_leg_but_no_8275_content_refuses_before_bytes`.
+reds `export_with_a_promoted_leg_but_incomplete_8275_refuses_before_bytes`.
 
 ---
 
@@ -1306,7 +1386,8 @@ GitHub release + `cargo publish --workspace`) per the [[crate-publishing-state]]
 ## Self-Review (author checklist — run against the SPEC)
 
 **Spec coverage:** BG-D1 → T1/T3; BG-D2 → T1 (`FloorMethod`); BG-D3 compute → T2, **verify-drift advisory →
-T11 (added, plan-r1 I-2/I-4)**; BG-D4 clamp → T4 (+ `PromoteSet` threading), fee-evaporation → T5; BG-D5 → T10;
+T11 Step 3b (`promote_drift_advisory` + `cmd/inspect.rs::verify` + KAT — REALLY written in the r2 fold; the r1
+"→ T11" claim was false cover, now honest)**; BG-D4 clamp → T4 (+ `PromoteSet` threading), fee-evaporation → T5; BG-D5 → T10;
 BG-D6 → T9 (terms incl. the unrealized flavor) + T10 (recording + consent copy); BG-D7 → T10 (Part II gate) +
 T13 (content, 8949-scoped Part I); BG-D8 → T14 (real refusal via `incomplete`) + T16 (PDF); BG-D9 lifecycle →
 T7 (deferred void, correct insertion point), advisory+cascade → T8 (fn) + T10/T8-3b (**wired both directions**);
@@ -1323,6 +1404,18 @@ floor-vs-as-filed 8275 amount (→ T13), an uncreated `Printed8275` (→ T13), 8
 aliasing), and several under-pinned/vacuous KATs (→ folded into the owning tasks). All 8+6 Importants + 11
 Minors/Nits folded; the `Usd::from_dollars` → `dec!` sweep applied file-wide; `EventId` rendered via
 `.canonical()`.
+
+**Plan-review r2 fold (both lenses):** r2 verified 7/8 tax + 5/6 arch r1 Importants genuinely resolved. The
+residue: the CONVERGED verify-drift **false cover** (r1 claimed it "→ T11 (added)" but the step was never
+written — now REALLY written as T11 Step 3b: `promote_drift_advisory` + `cmd/inspect.rs::verify` threading + a
+both-directions KAT that also pins the fold uses the STORED number); the SECOND `FoldCtx` site
+(`transition.rs:60` in `universal_snapshot` → T4 now threads the `PromoteSet` there too + a snapshot-divergence
+KAT, closing a phantom-basis conservation bug in the fully-consumed-tranche case); the T8 amend-direction sign
+(promote = amend-to-**refund**/§6511, void = amend-to-**pay** — copy follows the Δ sign, not the direction); and
+Minors — `Printed8275` added to T13's commit, the three `ATTEST_PHRASE` snippets → `PROMOTE_ACK_PHRASE`, the
+`safe_harbor_residue` no-dangling KAT (T12), the two consent-copy sentences pinned (T10), the
+`ComputedTax{delta:0, deduction:Some}` permission (T9 M-3), the `compute.rs`/`cmd/tax.rs` file-map entry moved
+to read-only, and the T14 mutation KAT-name aligned.
 
 **Placeholder scan:** no "TBD"/"handle edge cases"/"similar to Task N" — each task carries its own real test +
 implementation sketch + exact insertion points. (Test/impl bodies use the SPEC's exact formulae and the
