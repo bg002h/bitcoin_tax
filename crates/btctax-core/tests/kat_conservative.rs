@@ -12,7 +12,7 @@
 //! PRIVACY: synthetic values only.
 
 use btctax_core::conservative::{
-    basis_methodology, method_inversion_advisory, overpayment_delta,
+    basis_methodology, method_inversion_advisory, overpayment_delta, self_custody_nudge,
     tranche_broker_specific_id_advisory, tranche_dip_advisory, tranche_report_advisory,
     window_reference, Coverage,
 };
@@ -943,5 +943,56 @@ fn basis_methodology_is_term_correct_short_term_never_hard_codes_long_term() {
     assert!(
         !text.contains("long-term"),
         "term is DERIVED, never hard-coded long-term (G-4): {text}"
+    );
+}
+
+// ── Phase 8 / Task 14: self-custody nudge (advisory) ─────────────────────────────────────────────────
+
+/// P8: present for an EXCHANGE-held tranche lot — suggest moving no-records units to self-custody
+/// (own-books specific-ID never expires there) and recommend a HIFO election (D-9).
+#[test]
+fn self_custody_nudge_present_for_an_exchange_tranche() {
+    let w = exch();
+    let st = project(
+        &[tranche_ev(
+            1,
+            &w,
+            100_000_000,
+            date!(2018 - 01 - 01),
+            date!(2018 - 12 - 31),
+        )],
+        &prices(),
+        &config(),
+    );
+    let adv =
+        self_custody_nudge(&st).expect("an exchange-held tranche gets the self-custody nudge");
+    assert!(
+        adv.to_uppercase().contains("HIFO"),
+        "the nudge recommends a HIFO election: {adv}"
+    );
+    assert!(
+        adv.to_lowercase().contains("self-custody"),
+        "the nudge names self-custody: {adv}"
+    );
+}
+
+/// P8: absent for a SelfCustody-held tranche — own-books specific-ID already never expires there.
+#[test]
+fn self_custody_nudge_absent_for_a_self_custody_tranche() {
+    let w = self_custody();
+    let st = project(
+        &[tranche_ev(
+            1,
+            &w,
+            100_000_000,
+            date!(2018 - 01 - 01),
+            date!(2018 - 12 - 31),
+        )],
+        &prices(),
+        &config(),
+    );
+    assert!(
+        self_custody_nudge(&st).is_none(),
+        "a self-custody tranche needs no self-custody nudge"
     );
 }

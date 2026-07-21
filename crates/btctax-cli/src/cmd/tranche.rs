@@ -69,6 +69,17 @@ pub fn pre2025_tranche_exists(events: &[LedgerEvent]) -> bool {
     })
 }
 
+/// P8 Nit: is `wallet` referenced by any prior event — an import's `wallet`, or a prior tranche
+/// declaration's target wallet? A `false` result means `--wallet` likely has a TYPO. This drives a WARN
+/// only, NEVER a refusal: a `$0` tranche lot in any wallet still files at `$0` (tax-neutral), so a typo
+/// merely strands the lot in a phantom wallet rather than mis-stating tax. Pure over the event log.
+pub fn wallet_is_known(events: &[LedgerEvent], wallet: &WalletId) -> bool {
+    events.iter().any(|e| {
+        e.wallet.as_ref() == Some(wallet)
+            || matches!(&e.payload, EventPayload::DeclareTranche(t) if &t.wallet == wallet)
+    })
+}
+
 /// ALLOCATION-side guard (the chokepoint for all four allocation append sites): refuse recording a
 /// `SafeHarborAllocation` while a pre-2025 tranche is on file. v1 makes them mutually exclusive (D-8).
 pub fn guard_allocation_vs_tranche(events: &[LedgerEvent]) -> Result<(), CliError> {
@@ -128,6 +139,16 @@ pub fn declare_tranche(
 
     let mut session = Session::open(vault_path, pp)?;
     let events = load_all(session.conn())?;
+    // P8 Nit: warn (never refuse) on a `--wallet` that no prior event references — a likely typo that
+    // strands the $0 lot in a phantom wallet (still files at $0). The lot records regardless.
+    if !wallet_is_known(&events, &wallet) {
+        eprintln!(
+            "warning: --wallet {} has no prior events in this vault; if this is a typo the $0 tranche \
+             lot is stranded in a phantom wallet (it still files at $0). Re-run with the intended \
+             --wallet if this was unintended.",
+            crate::render::wallet_label(&wallet)
+        );
+    }
     guard_tranche_vs_allocation(&events, window_end)?;
     let payload = EventPayload::DeclareTranche(DeclareTranche {
         sat,

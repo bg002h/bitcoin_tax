@@ -84,6 +84,33 @@ pub fn method_inversion_advisory(
     }
 }
 
+/// P8 self-custody nudge (advisory): `Some` iff a conservative-filing tranche lot ($0
+/// `EstimatedConservative`, remaining) is held in an EXCHANGE (broker) wallet. Suggests holding the
+/// oldest / no-records units in self-custody — where own-books specific identification never expires (a
+/// broker's own-books identification is insufficient from 2027, the P4 warning) — and recommends a HIFO
+/// election so a disposal draws documented units before the $0 units (D-9). Absent when every tranche
+/// lot is already in self-custody (or none is held). Provenance-neutral; never instructs an
+/// understating action.
+pub fn self_custody_nudge(state: &LedgerState) -> Option<String> {
+    let has_exchange_tranche = state.lots.iter().any(|l| {
+        l.remaining_sat > 0
+            && l.basis_source == BasisSource::EstimatedConservative
+            && matches!(l.wallet, WalletId::Exchange { .. })
+    });
+    if has_exchange_tranche {
+        Some(
+            "Self-custody nudge — undocumented (conservative-filing) units are held at an exchange. \
+             Holding your oldest / no-records units in self-custody keeps own-books specific \
+             identification available indefinitely (a broker's own-books identification is insufficient \
+             from 2027). Also consider electing HIFO so a disposal draws documented units before the \
+             $0-basis units: `btctax config --set-forward-method hifo`."
+                .to_string(),
+        )
+    } else {
+        None
+    }
+}
+
 /// P7 mandatory methodology disclosure (D-4): the free-form basis explanation the i8949 requires
 /// whenever actual cost is NOT used. `Some` iff a conservative-filing tranche is in `year`'s filed set
 /// (a disposal leg tagged `EstimatedConservative`); it enumerates each such filed unit — its estimated
@@ -464,6 +491,12 @@ pub fn tranche_report_advisory(
                 lines.push(a);
             }
         }
+    }
+
+    // P8 self-custody nudge (advisory; holding-based — surfaces whenever an exchange-held tranche lot
+    // remains, independent of `year`).
+    if let Some(a) = self_custody_nudge(state) {
+        lines.push(a);
     }
 
     // P6 overpayment-delta nudge (basis-replacement what-if; informational, never filed — D-7). Needs

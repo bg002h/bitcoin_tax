@@ -1173,6 +1173,10 @@ fn dispatch_reconcile(
             let ws = eventref::parse_date_arg(&window_start)?;
             let we = eventref::parse_date_arg(&window_end)?;
             // Warn (not refuse) on a future window_end: it merely strands the $0 lot at that date.
+            // "Today" is computed in UTC because there is no filer-configured time zone in `CliConfig`
+            // (P8 Nit, resolved-as-documented): near midnight in a behind-UTC zone this can UNDER-warn,
+            // but it never mis-records — the lot homes at `window_end` regardless, and the warning is
+            // purely advisory. Switch to the filer's offset here if/when one is added to the config.
             if we > btctax_core::conventions::tax_date(now, UtcOffset::UTC) {
                 eprintln!(
                     "warning: --window-end {we} is in the future; the $0 tranche lot is homed there \

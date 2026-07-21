@@ -550,3 +550,61 @@ fn tranche_dip_advisory_reaches_the_tax_year_report() {
         "basis as filed ($0) must surface: {adv}"
     );
 }
+
+/// P8 Nit — `wallet_is_known` recognizes a wallet referenced by a prior import (`e.wallet`) OR a prior
+/// tranche declaration (payload), and reports a never-referenced wallet as a phantom (→ WARN, not refuse).
+#[test]
+fn wallet_is_known_covers_imports_and_tranche_payloads_and_flags_phantoms() {
+    use btctax_core::event::{Acquire, DeclareTranche};
+    use btctax_core::identity::{EventId, Source, SourceRef};
+    use btctax_core::{BasisSource, LedgerEvent};
+    use rust_decimal_macros::dec;
+    use time::macros::date;
+    let imported = WalletId::Exchange {
+        provider: "cb".into(),
+        account: "m".into(),
+    };
+    let declared = WalletId::SelfCustody {
+        label: "cold".into(),
+    };
+    let phantom = WalletId::SelfCustody {
+        label: "typo".into(),
+    };
+    let import = LedgerEvent {
+        id: EventId::import(Source::Coinbase, SourceRef::new("x")),
+        utc_timestamp: now(),
+        original_tz: time::UtcOffset::UTC,
+        wallet: Some(imported.clone()),
+        payload: EventPayload::Acquire(Acquire {
+            sat: 1,
+            usd_cost: dec!(1),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    };
+    let tranche = LedgerEvent {
+        id: EventId::decision(1),
+        utc_timestamp: now(),
+        original_tz: time::UtcOffset::UTC,
+        wallet: None,
+        payload: EventPayload::DeclareTranche(DeclareTranche {
+            sat: 1,
+            wallet: declared.clone(),
+            window_start: date!(2018 - 01 - 01),
+            window_end: date!(2018 - 12 - 31),
+        }),
+    };
+    let evs = vec![import, tranche];
+    assert!(
+        cmd::tranche::wallet_is_known(&evs, &imported),
+        "an import's e.wallet is known"
+    );
+    assert!(
+        cmd::tranche::wallet_is_known(&evs, &declared),
+        "a tranche payload's wallet is known"
+    );
+    assert!(
+        !cmd::tranche::wallet_is_known(&evs, &phantom),
+        "a never-referenced wallet is a phantom (→ warn)"
+    );
+}

@@ -43,15 +43,15 @@ the rest are parked later). Only ownerless cross-cutting residue batches to the 
   accepted with a comment/test. **Owning phase: T16 (whole-branch review)** (TUI-opener UX; no P2–P8 phase
   owns the allocate opener).
 
-- **[Nit] `--wallet` is not validated against wallets known to the vault.** (tax r1 Nit) — a typo strands
-  the `$0` lot in a phantom wallet (tax-neutral: it still files at $0 in whatever wallet). **Fix:** warn (not
-  refuse) when `--wallet` names a wallet with no prior events. **Owning phase: P8 / Task 14** (the
-  self-custody nudge / advisory task — the reviewer's suggested home).
+- ~~**[Nit] `--wallet` is not validated against wallets known to the vault.**~~ **DONE (P8/T14)** —
+  added `cmd::tranche::wallet_is_known` (pure: an import's `e.wallet` OR a prior tranche payload) + a
+  WARN (never refuse) in `declare_tranche` when `--wallet` is a phantom. Predicate test in
+  `declare_tranche_cli.rs`.
 
-- **[Nit] The future-`window_end` warning computes "today" in UTC, not the filer's zone.** (tax r1 Nit) —
-  `main.rs` dispatch compares `window_end` against `tax_date(now, UtcOffset::UTC)`; near midnight in a
-  behind-UTC zone it can UNDER-warn (never mis-record — the warning is advisory, the lot still homes at
-  `window_end`). **Fix:** use the filer's configured offset if/when one exists. **Owning phase: P8 / Task 14.**
+- ~~**[Nit] The future-`window_end` warning computes "today" in UTC, not the filer's zone.**~~ **RESOLVED-AS-DOCUMENTED
+  (P8/T14)** — `CliConfig` has NO filer time-zone field, so the Nit's "if/when one exists" precondition is
+  unmet. Documented the accepted UTC caveat inline at the `main.rs` warning site (advisory-only; never
+  mis-records — the lot homes at `window_end` regardless). Switch to the filer offset if/when one is added.
 
 ### Filed test-pins the review named (were only in the review doc until r2 — arch r2 Nit 2)
 
