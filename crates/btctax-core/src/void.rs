@@ -30,6 +30,7 @@ pub fn is_revocable_payload(payload: &EventPayload) -> bool {
             | EventPayload::ReclassifyIncome(_)
             | EventPayload::SelfTransferPassthrough(_)
             | EventPayload::SafeHarborAllocation(_)
+            | EventPayload::DeclareTranche(_)
     )
 }
 

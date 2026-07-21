@@ -262,7 +262,11 @@ pub enum Form8283HowAcquired {
 }
 
 /// Map a leg's `BasisSource` to its Form 8283 "how acquired" category [R0-N2].
-fn how_acquired_from(bs: BasisSource) -> Form8283HowAcquired {
+///
+/// `EstimatedConservative` (a conservative-filing tranche) → `Review`: the origin is unprovable, so a
+/// donation of it needs manual handling — an LT-held tranche donation deducts FMV, an ST-held one is
+/// limited to basis = $0 per §170(e)(1)(A). (This is the Form 8283 donor field, NOT an 8949 column.)
+pub fn how_acquired_from(bs: BasisSource) -> Form8283HowAcquired {
     use Form8283HowAcquired as H;
     match bs {
         BasisSource::ExchangeProvided | BasisSource::ComputedFromCost => H::Purchased,
@@ -271,7 +275,8 @@ fn how_acquired_from(bs: BasisSource) -> Form8283HowAcquired {
         BasisSource::CarriedFromTransfer
         | BasisSource::SafeHarborAllocated
         | BasisSource::ReconstructedPerWallet
-        | BasisSource::SelfTransferInbound => H::Review,
+        | BasisSource::SelfTransferInbound
+        | BasisSource::EstimatedConservative => H::Review,
     }
 }
 

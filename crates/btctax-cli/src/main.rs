@@ -2129,6 +2129,13 @@ fn bulk_void_payload_summary(p: &btctax_core::EventPayload) -> String {
                 a.as_of_date
             )
         }
+        EventPayload::DeclareTranche(t) => format!(
+            "DeclareTranche {} sat in {} (window {}..{})",
+            t.sat,
+            render::wallet_label(&t.wallet),
+            t.window_start,
+            t.window_end
+        ),
         other => format!("{other:?}"),
     }
 }

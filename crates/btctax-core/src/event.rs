@@ -27,6 +27,11 @@ pub enum BasisSource {
     /// "my own coins" returning. Used whether the basis was user-supplied or defaulted to $0; the
     /// defaulted-vs-supplied signal rides the `SelfTransferInboundZeroBasis` advisory, not this source.
     SelfTransferInbound,
+    /// Conservative-filing: undocumented coins declared at $0 basis (the IRS fallback) via
+    /// `EventPayload::DeclareTranche`, homed at `window_end`. Filing-ready (NOT pseudo). The tag is
+    /// exempt from both `basis_source` overwrite sites so it reaches every disposal leg it serves and
+    /// drives the P3 dip / P7 mandatory-disclosure layer. See conservative-filing SPEC D-1/D-8.
+    EstimatedConservative,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -206,6 +211,21 @@ pub struct ClassifyRaw {
     pub as_: Box<EventPayload>, // the supplied imported payload
 }
 
+/// Conservative-filing: declare a batch of undocumented BTC (`sat`, in a `wallet`, acquired somewhere
+/// in `[window_start, window_end]`) at **$0 basis** — the IRS fallback for unprovable basis. It folds
+/// (via the shared `Op::Acquire` path) into a lot with `usd_basis = 0`, `basis_source =
+/// EstimatedConservative`, `acquired_at = window_end` (the latest plausible acquisition → conservative
+/// for the holding period; never overclaims long-term), and the declared `wallet`. v1 declares $0 ONLY
+/// (no floor). See conservative-filing SPEC D-1/D-2/D-7. Old-binary limitation: a vault containing this
+/// variant fails to load on a pre-tranche binary (serde unknown-variant) — harmless (no installed base).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeclareTranche {
+    pub sat: Sat,
+    pub wallet: WalletId,
+    pub window_start: TaxDate,
+    pub window_end: TaxDate,
+}
+
 /// SE-completion Chunk C (D1): flip the `business` flag (and optionally `kind`) of an already-imported
 /// `Income` event. Corrects the `business: false` hard-code that River (and other adapters) emit at
 /// ingest time, enabling SE-tax treatment for professional miners / stakers who cannot use `ClassifyRaw`
@@ -328,10 +348,16 @@ pub enum EventPayload {
     /// variant FAILS to load on a pre-Cycle-B binary (serde unknown-variant; see `SelfTransferPassthrough`
     /// struct doc). A vault WITHOUT this variant loads on any binary.
     SelfTransferPassthrough(SelfTransferPassthrough),
+    /// Conservative-filing: declare undocumented BTC at $0 basis. Unlike the other decisions it folds as
+    /// a **primary movement** (via `Op::Acquire`), so `is_imported()` stays `false` for it even though it
+    /// creates a lot. See `DeclareTranche` struct doc + conservative-filing SPEC D-1/D-1a.
+    DeclareTranche(DeclareTranche),
 }
 
 impl EventPayload {
-    /// True for the six adapter-emitted imported payloads (the only ones folded as primary movements).
+    /// True for the six adapter-emitted imported payloads. NB these are not the only payloads folded as
+    /// primary movements — `DeclareTranche` (a decision) also folds a lot via `Op::Acquire` — but it is
+    /// deliberately NOT "imported" (it is a manual conservative-filing declaration, not adapter data).
     pub fn is_imported(&self) -> bool {
         matches!(
             self,

@@ -1763,6 +1763,7 @@ pub fn cycle_basis_source(bs: BasisSource) -> BasisSource {
         BasisSource::SafeHarborAllocated => BasisSource::ReconstructedPerWallet,
         BasisSource::ReconstructedPerWallet => BasisSource::ExchangeProvided,
         BasisSource::SelfTransferInbound => BasisSource::ExchangeProvided, // off-ring defensive exit
+        BasisSource::EstimatedConservative => BasisSource::ExchangeProvided, // off-ring (system-assigned tranche tag)
     }
 }
 
@@ -1778,6 +1779,7 @@ pub fn basis_source_display(bs: BasisSource) -> &'static str {
         BasisSource::SafeHarborAllocated => "safe-harbor-allocated",
         BasisSource::ReconstructedPerWallet => "reconstructed-per-wallet",
         BasisSource::SelfTransferInbound => "self-transfer-inbound",
+        BasisSource::EstimatedConservative => "estimated-conservative",
     }
 }
 

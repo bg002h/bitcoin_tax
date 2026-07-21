@@ -51,6 +51,7 @@ fn basis_source_tag(bs: BasisSource) -> &'static str {
         BasisSource::SafeHarborAllocated => "safe_harbor",
         BasisSource::ReconstructedPerWallet => "reconstructed",
         BasisSource::SelfTransferInbound => "self_transfer_in",
+        BasisSource::EstimatedConservative => "estimated_conservative",
     }
 }
 

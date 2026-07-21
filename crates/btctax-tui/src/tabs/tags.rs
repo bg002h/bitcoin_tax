@@ -37,6 +37,7 @@ pub(super) fn basis_source_rank(src: BasisSource) -> u8 {
         BasisSource::SafeHarborAllocated => 6,
         BasisSource::ReconstructedPerWallet => 7,
         BasisSource::SelfTransferInbound => 8,
+        BasisSource::EstimatedConservative => 9,
     }
 }
 
@@ -62,6 +63,7 @@ pub(super) fn basis_source_tag(src: BasisSource) -> &'static str {
         BasisSource::SafeHarborAllocated => "safe_harbor",
         BasisSource::ReconstructedPerWallet => "reconstructed",
         BasisSource::SelfTransferInbound => "self_transfer_in",
+        BasisSource::EstimatedConservative => "estimated_conservative",
     }
 }
 
