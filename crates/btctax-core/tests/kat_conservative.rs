@@ -13,7 +13,7 @@
 
 use btctax_core::conservative::{
     method_inversion_advisory, tranche_broker_specific_id_advisory, tranche_dip_advisory,
-    tranche_report_advisory,
+    tranche_report_advisory, window_reference, Coverage,
 };
 use btctax_core::event::*;
 use btctax_core::identity::*;
@@ -38,6 +38,15 @@ fn self_custody() -> WalletId {
 }
 fn prices() -> StaticPrices {
     StaticPrices::default()
+}
+/// A deterministic date→close map for the P5 `window_reference` KATs.
+fn priced(entries: &[(time::Date, i64)]) -> StaticPrices {
+    StaticPrices(
+        entries
+            .iter()
+            .map(|(d, p)| (*d, rust_decimal::Decimal::from(*p)))
+            .collect(),
+    )
 }
 /// The default projection config (post-2025 method = HIFO default; used for the ≥2025 P4 disposals).
 fn config() -> ProjectionConfig {
@@ -460,5 +469,64 @@ fn broker_specific_id_advisory_builder_gates_on_the_2027_broker_envelope() {
         tranche_broker_specific_id_advisory(&exch(), date!(2026 - 12 - 31), date!(2026 - 12 - 31))
             .is_none(),
         "2026 exchange → own-books transitional relief still applies"
+    );
+}
+
+// ── Phase 5 / Task 11: window reference-price engine (informational only; NEVER filed — D-7) ─────────
+//
+// `window_reference` is the MIN daily CLOSE over [start, end]. It is NOT a true floor (intraday lows can
+// be lower — tax I-3), so the return type CARRIES a `Coverage` caveat (arch M-6) that P6 must surface: a
+// covered-part min over a partially-covered window can EXCEED the true window min. Never filed (D-7).
+
+/// P5: a fully-covered window returns the MIN daily close and `Coverage::Full`.
+#[test]
+fn window_reference_full_coverage_returns_min_daily_close() {
+    let p = priced(&[
+        (date!(2018 - 01 - 01), 100),
+        (date!(2018 - 01 - 02), 80),
+        (date!(2018 - 01 - 03), 120),
+    ]);
+    let wr = window_reference(&p, date!(2018 - 01 - 01), date!(2018 - 01 - 03))
+        .expect("a fully-covered window has a min");
+    assert_eq!(
+        wr.min,
+        rust_decimal::Decimal::from(80),
+        "min daily close over the window"
+    );
+    assert_eq!(
+        wr.coverage,
+        Coverage::Full,
+        "every day in the window has a close → Full"
+    );
+}
+
+/// P5: a partially-covered window (a gap in the data) returns the min over the COVERED days and flags
+/// `Coverage::Partial` — the caveat P6 must surface (tax r1 N-3), since the covered-part min can exceed
+/// the true window min.
+#[test]
+fn window_reference_partial_overlap_returns_covered_min_and_flags_partial() {
+    // 2018-01-02 is MISSING → covered = {01, 03}; min over the covered part; Partial.
+    let p = priced(&[(date!(2018 - 01 - 01), 100), (date!(2018 - 01 - 03), 60)]);
+    let wr = window_reference(&p, date!(2018 - 01 - 01), date!(2018 - 01 - 03))
+        .expect("a partially-covered window still has a covered min");
+    assert_eq!(
+        wr.min,
+        rust_decimal::Decimal::from(60),
+        "min over the COVERED days only"
+    );
+    assert_eq!(
+        wr.coverage,
+        Coverage::Partial,
+        "a gap in coverage must be flagged (tax r1 N-3)"
+    );
+}
+
+/// P5: a window with NO covered day returns `None` — never fabricate a floor over a data gap (D-7).
+#[test]
+fn window_reference_no_overlap_returns_none() {
+    let p = priced(&[(date!(2019 - 01 - 01), 50)]); // outside the queried window
+    assert!(
+        window_reference(&p, date!(2018 - 01 - 01), date!(2018 - 01 - 03)).is_none(),
+        "no covered day in the window → None (never fabricate a floor)"
     );
 }

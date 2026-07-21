@@ -8,7 +8,7 @@ use crate::optimize::{persistability, Persistability};
 use crate::price::PriceProvider;
 use crate::project::{in_force_methods, ProjectionConfig};
 use crate::state::{Disposal, LedgerState};
-use crate::{BasisSource, LotMethod, WalletId};
+use crate::{BasisSource, LotMethod, Usd, WalletId};
 use std::collections::BTreeSet;
 
 /// D-9 dip advisory: `Some` iff the disposal consumed at least one conservative-filing tranche leg
@@ -78,6 +78,59 @@ pub fn method_inversion_advisory(
     } else {
         None
     }
+}
+
+/// P5 coverage caveat (arch M-6): whether `window_reference`'s `min` spans EVERY day in the queried
+/// window (`Full`) or only the subset with bundled data (`Partial`). A `Partial` covered-part min can
+/// EXCEED the true window min, so P6 MUST surface this in user-visible copy (tax r1 N-3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Coverage {
+    Full,
+    Partial,
+}
+
+/// P5 window reference-price result: the min daily close (`min`) plus its `coverage` caveat.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowRef {
+    pub min: Usd,
+    pub coverage: Coverage,
+}
+
+/// P5 window reference-price: the MIN daily CLOSE over `[start, end]` from `prices`. INFORMATIONAL ONLY
+/// and NEVER filed (D-7) — it feeds only P6's overpayment-delta nudge. NOT a true floor: an intraday low
+/// can be below any daily close (tax I-3), so the result CARRIES a `Coverage` caveat (arch M-6) rather
+/// than pretending to be a floor. `Coverage::Partial` means some days in the window had no bundled close
+/// (the covered-part min can then EXCEED the true window min — P6 surfaces the caveat). `None` when NO
+/// day in the window has a close (no overlap — never fabricate a floor over a data gap); `start > end`
+/// (an empty window — already refused at the declare-tranche record guard) is likewise `None`.
+pub fn window_reference(
+    prices: &dyn PriceProvider,
+    start: TaxDate,
+    end: TaxDate,
+) -> Option<WindowRef> {
+    let mut min: Option<Usd> = None;
+    let mut covered: u64 = 0;
+    let mut total: u64 = 0;
+    let mut day = start;
+    while day <= end {
+        total += 1;
+        if let Some(px) = prices.usd_per_btc(day) {
+            covered += 1;
+            min = Some(min.map_or(px, |m| if px < m { px } else { m }));
+        }
+        match day.next_day() {
+            Some(d) => day = d,
+            None => break, // time::Date::MAX — end already processed above
+        }
+    }
+    min.map(|m| WindowRef {
+        min: m,
+        coverage: if covered == total {
+            Coverage::Full
+        } else {
+            Coverage::Partial
+        },
+    })
 }
 
 /// P4 / D-3 custody-aware compliance warning: `Some` iff specifically identifying an undocumented
