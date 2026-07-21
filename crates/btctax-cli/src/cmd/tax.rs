@@ -429,8 +429,15 @@ pub fn report_tax_year(
     // Conservative-filing (P3 / D-9): tranche dip + method-inversion advisory. Non-gating; render-time
     // only, like the standalone-forms advisories above. The shared core assembler keeps the CLI + TUI
     // surfaces identical.
-    let tranche_advisory =
-        btctax_core::conservative::tranche_report_advisory(&state, &events, s.prices(), &cfg, year);
+    let tranche_advisory = btctax_core::conservative::tranche_report_advisory(
+        &state,
+        &events,
+        s.prices(),
+        &cfg,
+        year,
+        profile.as_ref(),
+        &tables,
+    );
 
     // M4 carryforward consistency advisory (Task 10): only when both this year's profile AND
     // the prior year's profile exist AND the prior year is Computed.  Never a hard blocker.

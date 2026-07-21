@@ -3,11 +3,15 @@
 //! undocumented BTC filed at its AS-FILED basis) and never instruct a tax-understating action.
 
 use crate::conventions::TaxDate;
-use crate::event::LedgerEvent;
+use crate::event::{EventPayload, LedgerEvent};
+use crate::identity::EventId;
 use crate::optimize::{persistability, Persistability};
 use crate::price::PriceProvider;
-use crate::project::{in_force_methods, ProjectionConfig};
+use crate::project::fold::fold;
+use crate::project::resolve::{resolve, Op};
+use crate::project::{in_force_methods, project, ProjectionConfig};
 use crate::state::{Disposal, LedgerState};
+use crate::tax::{compute_tax_year, TaxOutcome, TaxProfile, TaxTables};
 use crate::{BasisSource, LotMethod, Usd, WalletId};
 use std::collections::BTreeSet;
 
@@ -164,18 +168,198 @@ pub fn tranche_broker_specific_id_advisory(
     }
 }
 
-/// D-9 report-time assembly (surfaced by `report --tax-year` + the TUI Tax tab): the combined
+/// The crypto-attributable federal tax for `year` (the engine's single objective), or `None` when the
+/// year is not computable (a Hard blocker / missing table / missing profile). Shared by the P6 baseline
+/// and every basis-replacement re-fold so the delta is a clean `with − without` cancellation.
+fn tax_total(
+    events: &[LedgerEvent],
+    state: &LedgerState,
+    year: i32,
+    profile: Option<&TaxProfile>,
+    tables: &dyn TaxTables,
+) -> Option<Usd> {
+    match compute_tax_year(events, state, year, profile, tables) {
+        TaxOutcome::Computed(r) => Some(r.total_federal_tax_attributable),
+        TaxOutcome::NotComputable(_) => None,
+    }
+}
+
+/// P6 per-tranche basis-replacement delta (arch M-4): `tax($0) − tax(reference)` for `year`, re-folding
+/// with ONLY `tranche_id`'s `Op::Acquire.usd_cost` swapped to `reference` (a clone-fold-discard; NOTHING
+/// is written, and NOTHING `>$0` is filed — D-7). `baseline` is the pre-computed `tax($0)`. Returns `$0`
+/// when the reference is `≤$0` (nothing to reconstruct to), the tranche is not in the timeline (voided /
+/// undisposed origin absent), or the with-scenario year is uncomputable. Never negative: a higher basis
+/// lowers the realized gain, so `baseline ≥ with`.
+#[allow(clippy::too_many_arguments)]
+fn overpayment_delta_one(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    year: i32,
+    profile: Option<&TaxProfile>,
+    tables: &dyn TaxTables,
+    tranche_id: &EventId,
+    reference: Usd,
+    baseline: Usd,
+) -> Usd {
+    if reference <= Usd::ZERO {
+        return Usd::ZERO; // replacing $0 with $0 (D-7 floor) changes no realized gain
+    }
+    let mut res = resolve(events, prices, config);
+    let mut swapped = false;
+    for eff in res.timeline.iter_mut() {
+        if eff.id == *tranche_id {
+            if let Op::Acquire(a) = &mut eff.op {
+                a.usd_cost = reference;
+                swapped = true;
+            }
+        }
+    }
+    if !swapped {
+        return Usd::ZERO; // no matching tranche Acquire (voided / not a tranche id)
+    }
+    let with_state = fold(res, prices, config);
+    match tax_total(events, &with_state, year, profile, tables) {
+        Some(with_tax) => baseline - with_tax,
+        None => Usd::ZERO,
+    }
+}
+
+/// P6 overpayment-delta (arch M-4; the G-3 lever): the federal-tax OVERPAYMENT the `$0` conservative
+/// filing costs for `year` versus reconstructing each named tranche to its reference price. `Σ` over
+/// `refs` of `tax($0) − tax(reference)`, each term a clone-fold-discard re-fold with ONLY that tranche's
+/// basis swapped — the PER-TRANCHE reference (a year spanning differently-windowed tranches must never
+/// quote one joint number). Every dollar comes from the single audited `compute_tax_year`; NOTHING is
+/// written and NOTHING `>$0` is filed (D-7) — this figure only feeds the informational nudge. `$0` when a
+/// reference is `$0`/absent, a tranche is undisposed this year, or the year is not computable.
+#[allow(clippy::too_many_arguments)]
+pub fn overpayment_delta(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    year: i32,
+    profile: Option<&TaxProfile>,
+    tables: &dyn TaxTables,
+    refs: &[(EventId, Usd)],
+) -> Usd {
+    let baseline = match tax_total(
+        events,
+        &project(events, prices, config),
+        year,
+        profile,
+        tables,
+    ) {
+        Some(t) => t,
+        None => return Usd::ZERO,
+    };
+    refs.iter()
+        .map(|(id, reference)| {
+            overpayment_delta_one(
+                events, prices, config, year, profile, tables, id, *reference, baseline,
+            )
+        })
+        .sum()
+}
+
+/// P6 nudge lines (the G-3 lever, surfaced by `tranche_report_advisory`): for each filed tranche whose
+/// `$0` basis cost federal tax in `year`, one line quantifying the saving from reconstructing it to its
+/// window reference price, then the mandatory §1014 note (unconditional + provenance-neutral) and a
+/// trailing note if undisposed tranche units remain. Empty without a profile (⇒ no tax ⇒ no figure), an
+/// uncomputable year, or no tranche with a recoverable delta. Provenance-neutral: never asserts a
+/// purchase; nothing `>$0` is ever filed (D-7 — this is informational only).
+fn overpayment_nudge_lines(
+    events: &[LedgerEvent],
+    state: &LedgerState,
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    year: i32,
+    profile: Option<&TaxProfile>,
+    tables: &dyn TaxTables,
+) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    // No profile ⇒ no computable tax ⇒ no overpayment figure (the dip/broker/inversion advisories still
+    // surface without one — only this quantified nudge needs the tax engine).
+    let baseline = match tax_total(
+        events,
+        &project(events, prices, config),
+        year,
+        profile,
+        tables,
+    ) {
+        Some(t) => t,
+        None => return lines,
+    };
+    let mut any = false;
+    for e in events {
+        let EventPayload::DeclareTranche(t) = &e.payload else {
+            continue;
+        };
+        let Some(wr) = window_reference(prices, t.window_start, t.window_end) else {
+            continue; // no reference price ⇒ nothing to quantify (D-7: never fabricate one)
+        };
+        let delta = overpayment_delta_one(
+            events, prices, config, year, profile, tables, &e.id, wr.min, baseline,
+        );
+        if delta <= Usd::ZERO {
+            continue; // this tranche cost no reconstructable tax in `year`
+        }
+        any = true;
+        let mut line = format!(
+            "Overpayment nudge — reconstructing this {ws}\u{2013}{we} tranche and importing the records \
+             could save ~${saving} of federal tax this year, at the cost of a documented basis an \
+             examiner can question.",
+            ws = t.window_start,
+            we = t.window_end,
+            saving = delta.round_dp(0),
+        );
+        if wr.coverage == Coverage::Partial {
+            line.push_str(
+                " (Partial-window estimate: some days in the window had no price data, so the true \
+                 saving may differ.)",
+            );
+        }
+        lines.push(line);
+    }
+    if any {
+        // §1014 note — UNCONDITIONAL + provenance-neutral (a tranche carries no provenance field; adding
+        // one would undercut min-8c). Never asserts a purchase; the inherited path needs NO cost records.
+        lines.push(
+            "If any of these coins were inherited, their basis is reconstructable by law from the \
+             date-of-death fair market value \u{2014} no cost records needed (\u{00a7}1014(a); the \
+             holding period is automatically long-term, \u{00a7}1223(9))."
+                .to_string(),
+        );
+        // Year-scope caveat: this figure is only the units DISPOSED in `year` (undisposed tranche units
+        // still holding a $0 basis are not counted here).
+        if state
+            .lots
+            .iter()
+            .any(|l| l.basis_source == BasisSource::EstimatedConservative && l.remaining_sat > 0)
+        {
+            lines.push(format!(
+                "This figure covers only the conservative-filing units disposed in {year}; undisposed \
+                 tranche units remain."
+            ));
+        }
+    }
+    lines
+}
+
+/// D-9 + P6 report-time assembly (surfaced by `report --tax-year` + the TUI Tax tab): the combined
 /// conservative-filing advisory for `year` — every dip advisory for a tranche disposal made in `year`,
-/// followed by a method-inversion warning for each wallet still holding a tranche lot whose in-force
-/// method (at `year`-end) is non-HIFO with a documented lot also present. `None` when there is nothing
-/// to say. Pure over the projected `state` + `events` + `prices` + `config`; both frontends share it so
-/// the CLI and TUI can never drift.
+/// the P4 broker-envelope warning, a method-inversion warning per wallet still holding a tranche lot
+/// whose in-force method (at `year`-end) is non-HIFO with a documented lot also present, and the P6
+/// overpayment-delta nudges (which need `profile`/`tables` for the tax engine — the other advisories do
+/// not). `None` when there is nothing to say. Both frontends share it so the CLI and TUI can never drift.
+#[allow(clippy::too_many_arguments)]
 pub fn tranche_report_advisory(
     state: &LedgerState,
     events: &[LedgerEvent],
     prices: &dyn PriceProvider,
     config: &ProjectionConfig,
     year: i32,
+    profile: Option<&TaxProfile>,
+    tables: &dyn TaxTables,
 ) -> Option<String> {
     let mut lines: Vec<String> = Vec::new();
 
@@ -230,6 +414,12 @@ pub fn tranche_report_advisory(
             }
         }
     }
+
+    // P6 overpayment-delta nudge (basis-replacement what-if; informational, never filed — D-7). Needs
+    // the tax engine, so it is gated on a profile/tables being available (a delta-only report has none).
+    lines.extend(overpayment_nudge_lines(
+        events, state, prices, config, year, profile, tables,
+    ));
 
     if lines.is_empty() {
         None

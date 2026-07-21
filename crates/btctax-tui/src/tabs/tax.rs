@@ -186,6 +186,8 @@ pub(crate) fn render_tax_content(snap: &Snapshot, year: i32) -> String {
         &snap.prices,
         &snap.cli_config.to_projection(),
         year,
+        snap.profiles.get(&year),
+        &snap.tables,
     ) {
         let _ = writeln!(s, "{text}");
     }

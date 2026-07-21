@@ -12,17 +12,86 @@
 //! PRIVACY: synthetic values only.
 
 use btctax_core::conservative::{
-    method_inversion_advisory, tranche_broker_specific_id_advisory, tranche_dip_advisory,
-    tranche_report_advisory, window_reference, Coverage,
+    method_inversion_advisory, overpayment_delta, tranche_broker_specific_id_advisory,
+    tranche_dip_advisory, tranche_report_advisory, window_reference, Coverage,
 };
 use btctax_core::event::*;
 use btctax_core::identity::*;
 use btctax_core::price::StaticPrices;
 use btctax_core::project::{project, ProjectionConfig};
 use btctax_core::state::{DisposalLeg, LedgerState};
+use btctax_core::tax::tables::{
+    LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule, TaxTable, TaxTables,
+};
+use btctax_core::tax::types::{Carryforward, FilingStatus, TaxProfile};
 use btctax_core::LotMethod;
 use rust_decimal_macros::dec;
+use std::collections::BTreeMap;
 use time::macros::{date, datetime, offset};
+
+// ── tax profile + table fixtures (mirror tests/whatif.rs `synth`/`profile`) ─────────────────────────
+struct OneTable(TaxTable);
+impl TaxTables for OneTable {
+    fn table_for(&self, year: i32) -> Option<&TaxTable> {
+        (year == self.0.year).then_some(&self.0)
+    }
+}
+fn synth(year: i32) -> OneTable {
+    let mut ordinary = BTreeMap::new();
+    ordinary.insert(
+        FilingStatus::Single,
+        OrdinarySchedule {
+            brackets: vec![
+                OrdinaryBracket {
+                    lower: dec!(0),
+                    rate: dec!(0.10),
+                },
+                OrdinaryBracket {
+                    lower: dec!(50000),
+                    rate: dec!(0.22),
+                },
+                OrdinaryBracket {
+                    lower: dec!(250000),
+                    rate: dec!(0.32),
+                },
+            ],
+        },
+    );
+    let mut ltcg = BTreeMap::new();
+    ltcg.insert(
+        FilingStatus::Single,
+        LtcgBreakpoints {
+            max_zero: dec!(40000),
+            max_fifteen: dec!(400000),
+        },
+    );
+    OneTable(TaxTable {
+        year,
+        source: "SYNTHETIC",
+        ordinary,
+        ltcg,
+        gift_annual_exclusion: dec!(19000),
+        ss_wage_base: dec!(176100),
+        gift_lifetime_exclusion: dec!(13_990_000),
+    })
+}
+/// A Single filer with ordinary taxable income `ord` (so a crypto ST gain stacks at the ordinary rate).
+fn tax_profile(ord: i64) -> TaxProfile {
+    TaxProfile {
+        filing_status: FilingStatus::Single,
+        ordinary_taxable_income: rust_decimal::Decimal::from(ord),
+        magi_excluding_crypto: rust_decimal::Decimal::from(ord),
+        qualified_dividends_and_other_pref_income: dec!(0),
+        other_net_capital_gain: dec!(0),
+        capital_loss_carryforward_in: Carryforward {
+            short: dec!(0),
+            long: dec!(0),
+        },
+        w2_ss_wages: dec!(0),
+        w2_medicare_wages: dec!(0),
+        schedule_c_expenses: dec!(0),
+    }
+}
 
 // ── fixtures (mirror tests/kat_tranche.rs) ──────────────────────────────────────────────────────────
 fn exch() -> WalletId {
@@ -379,7 +448,7 @@ fn broker_specific_id_warning_fires_for_a_2027_exchange_tranche_disposal() {
         ),
     ];
     let st = project(&events, &prices(), &config());
-    let adv = tranche_report_advisory(&st, &events, &prices(), &config(), 2027)
+    let adv = tranche_report_advisory(&st, &events, &prices(), &config(), 2027, None, &synth(2027))
         .expect("a 2027 exchange tranche disposal produces advisories");
     assert!(
         adv.contains("Broker specific-ID warning"),
@@ -409,7 +478,7 @@ fn broker_specific_id_warning_silent_for_a_2027_self_custody_tranche_disposal() 
         ),
     ];
     let st = project(&events, &prices(), &config());
-    let adv = tranche_report_advisory(&st, &events, &prices(), &config(), 2027)
+    let adv = tranche_report_advisory(&st, &events, &prices(), &config(), 2027, None, &synth(2027))
         .expect("a tranche disposal still yields a dip advisory");
     assert!(
         !adv.contains("Broker specific-ID warning"),
@@ -439,7 +508,7 @@ fn broker_specific_id_warning_silent_below_2027() {
         ),
     ];
     let st = project(&events, &prices(), &config());
-    let adv = tranche_report_advisory(&st, &events, &prices(), &config(), 2026)
+    let adv = tranche_report_advisory(&st, &events, &prices(), &config(), 2026, None, &synth(2026))
         .expect("a tranche disposal still yields a dip advisory");
     assert!(
         !adv.contains("Broker specific-ID warning"),
@@ -528,5 +597,240 @@ fn window_reference_no_overlap_returns_none() {
     assert!(
         window_reference(&p, date!(2018 - 01 - 01), date!(2018 - 01 - 03)).is_none(),
         "no covered day in the window → None (never fabricate a floor)"
+    );
+}
+
+// ── Phase 6 / Task 12: overpayment-delta nudge (informational; the G-3 lever; NEVER filed — D-7) ─────
+//
+// `overpayment_delta` is the basis-replacement clone-fold-discard what-if (arch M-4): Σ over `refs` of
+// tax($0) − tax(reference), each term a re-fold with ONLY that tranche's Op::Acquire.usd_cost swapped.
+// Every dollar comes from the single audited `compute_tax_year`; NOTHING >$0 is ever filed (D-7). The
+// scenarios stage a post-2025 self-custody tranche disposal (avoids the broker/transition machinery) so
+// the ST/LT gain is realized under a Single profile's ordinary/LTCG stack.
+
+/// P6: reconstructing a consumed tranche to a >$0 reference lowers the realized gain, so the delta is a
+/// positive federal-tax saving.
+#[test]
+fn overpayment_delta_positive_when_reconstructing_a_consumed_tranche_lowers_the_gain() {
+    let w = self_custody();
+    let events = vec![
+        tranche_ev(
+            1,
+            &w,
+            100_000_000,
+            date!(2025 - 06 - 01),
+            date!(2025 - 06 - 30),
+        ),
+        sell_ev(
+            "SELL",
+            datetime!(2026-06-01 00:00 UTC),
+            &w,
+            100_000_000,
+            50_000,
+        ),
+    ];
+    let refs = vec![(EventId::decision(1), rust_decimal::Decimal::from(20_000))];
+    let d = overpayment_delta(
+        &events,
+        &prices(),
+        &config(),
+        2026,
+        Some(&tax_profile(60_000)),
+        &synth(2026),
+        &refs,
+    );
+    assert!(
+        d > dec!(0),
+        "reconstructing the $0 tranche to a $20k basis lowers the gain and the tax: {d}"
+    );
+}
+
+/// P6: a $0 reference (or no references) recovers nothing — replacing $0 with $0 changes no gain (D-7).
+#[test]
+fn overpayment_delta_is_zero_when_reference_is_zero_or_absent() {
+    let w = self_custody();
+    let events = vec![
+        tranche_ev(
+            1,
+            &w,
+            100_000_000,
+            date!(2025 - 06 - 01),
+            date!(2025 - 06 - 30),
+        ),
+        sell_ev(
+            "SELL",
+            datetime!(2026-06-01 00:00 UTC),
+            &w,
+            100_000_000,
+            50_000,
+        ),
+    ];
+    let prof = tax_profile(60_000);
+    let zero_ref = overpayment_delta(
+        &events,
+        &prices(),
+        &config(),
+        2026,
+        Some(&prof),
+        &synth(2026),
+        &[(EventId::decision(1), dec!(0))],
+    );
+    assert_eq!(zero_ref, dec!(0), "a $0 reference recovers nothing");
+    let none = overpayment_delta(
+        &events,
+        &prices(),
+        &config(),
+        2026,
+        Some(&prof),
+        &synth(2026),
+        &[],
+    );
+    assert_eq!(none, dec!(0), "no tranche references → $0 delta");
+}
+
+/// P6: a year consuming legs from two differently-windowed tranches SUMS the per-tranche deltas, each
+/// with ITS OWN reference (not one joint number). The two-tranche delta == the sum of the two
+/// single-tranche deltas; different references make the "one reference for all" mutation discriminable.
+#[test]
+fn overpayment_delta_sums_per_tranche_with_each_tranches_own_reference() {
+    let w = self_custody();
+    let events = vec![
+        tranche_ev(
+            1,
+            &w,
+            100_000_000,
+            date!(2024 - 01 - 01),
+            date!(2024 - 06 - 30),
+        ),
+        tranche_ev(
+            2,
+            &w,
+            100_000_000,
+            date!(2025 - 01 - 01),
+            date!(2025 - 06 - 30),
+        ),
+        sell_ev(
+            "SELL",
+            datetime!(2026-06-01 00:00 UTC),
+            &w,
+            200_000_000,
+            120_000,
+        ),
+    ];
+    let prof = tax_profile(60_000);
+    let r1 = (EventId::decision(1), rust_decimal::Decimal::from(10_000));
+    let r2 = (EventId::decision(2), rust_decimal::Decimal::from(30_000));
+    let call = |refs: &[(EventId, rust_decimal::Decimal)]| {
+        overpayment_delta(
+            &events,
+            &prices(),
+            &config(),
+            2026,
+            Some(&prof),
+            &synth(2026),
+            refs,
+        )
+    };
+    let just1 = call(std::slice::from_ref(&r1));
+    let just2 = call(std::slice::from_ref(&r2));
+    let both = call(&[r1.clone(), r2.clone()]);
+    assert!(
+        just1 > dec!(0) && just2 > dec!(0),
+        "each tranche independently recovers tax: {just1} / {just2}"
+    );
+    assert_eq!(
+        both,
+        just1 + just2,
+        "the two-tranche delta is the SUM of per-tranche deltas, each with its own reference (P6)"
+    );
+}
+
+/// P6: the nudge surfaces through `tranche_report_advisory` with the mandatory §1014 note and, for a
+/// partially-covered window, the partial-coverage caveat — and stays provenance-neutral (no purchase).
+#[test]
+fn overpayment_nudge_surfaces_in_the_report_with_1014_note_and_partial_caveat() {
+    let w = self_custody();
+    let events = vec![
+        tranche_ev(
+            1,
+            &w,
+            100_000_000,
+            date!(2025 - 06 - 01),
+            date!(2025 - 06 - 30),
+        ),
+        sell_ev(
+            "SELL",
+            datetime!(2026-06-01 00:00 UTC),
+            &w,
+            100_000_000,
+            50_000,
+        ),
+    ];
+    // Prices cover only two days in the window → Partial coverage; min close $18,000.
+    let px = priced(&[
+        (date!(2025 - 06 - 01), 20_000),
+        (date!(2025 - 06 - 15), 18_000),
+    ]);
+    let st = project(&events, &px, &config());
+    let adv = tranche_report_advisory(
+        &st,
+        &events,
+        &px,
+        &config(),
+        2026,
+        Some(&tax_profile(60_000)),
+        &synth(2026),
+    )
+    .expect("a tranche disposal with a recoverable delta produces a nudge");
+    assert!(
+        adv.contains("Overpayment nudge"),
+        "the P6 nudge must surface: {adv}"
+    );
+    assert!(
+        adv.contains("\u{00a7}1014"),
+        "the mandatory §1014 note must be present: {adv}"
+    );
+    assert!(
+        adv.contains("Partial-window estimate"),
+        "the partial-coverage caveat must surface (tax r1 N-3): {adv}"
+    );
+    let low = adv.to_lowercase();
+    assert!(
+        !low.contains("purchase") && !low.contains("bought"),
+        "provenance-neutral (tax min-8c): {adv}"
+    );
+}
+
+/// P6: without a profile there is no computable tax, so no QUANTIFIED nudge surfaces (the dip advisory
+/// still does) — the nudge is gated on the tax engine.
+#[test]
+fn overpayment_nudge_absent_without_a_profile() {
+    let w = self_custody();
+    let events = vec![
+        tranche_ev(
+            1,
+            &w,
+            100_000_000,
+            date!(2025 - 06 - 01),
+            date!(2025 - 06 - 30),
+        ),
+        sell_ev(
+            "SELL",
+            datetime!(2026-06-01 00:00 UTC),
+            &w,
+            100_000_000,
+            50_000,
+        ),
+    ];
+    let px = priced(&[
+        (date!(2025 - 06 - 01), 20_000),
+        (date!(2025 - 06 - 15), 18_000),
+    ]);
+    let st = project(&events, &px, &config());
+    let text = tranche_report_advisory(&st, &events, &px, &config(), 2026, None, &synth(2026))
+        .unwrap_or_default();
+    assert!(
+        !text.contains("Overpayment nudge"),
+        "no profile ⇒ no quantified overpayment nudge: {text}"
     );
 }
