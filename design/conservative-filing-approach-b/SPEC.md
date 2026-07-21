@@ -1,13 +1,15 @@
 # SPEC — Conservative / Defensive Filing, **Approach B** — sub-project 1: the basis-floor engine + Form 8275
 
-**Status:** DRAFT — **r1 + r2 two-lens reviews FOLDED** (r1: tax 1C/4I + arch 0C/6I; r2: tax 0C/3I + arch
-0C/1I — all persisted verbatim in `reviews/spec-{tax,architecture}-fable-review-r{1,2}.md`); pending the **r3**
-re-review to 0C/0I per `STANDARD_WORKFLOW.md`. r2 verified all 16 r1 findings genuinely resolved; its residue
-was completeness of the §170(e)/decomposition sweep — a SECOND §170(e) emitter (full-return Schedule A) + the
-Form 8283 basis column, now closed at ONE site (the removal-leg builder, BG-D11); the FIFO fee-draw
-back-channel (estimate evaporates, BG-D4); and the CONVERGED blocker both lenses raised — the prior-year
-advisory + consent Σ keyed on computed-`tax_total`, `None` for the feature's own 2018–2023 audience years
-(only 2017/2024/2025/2026 tables ship), re-keyed to a profile/table-independent **fold diff** (BG-D6/D9).
+**Status:** DRAFT — **r1 + r2 + r3 two-lens reviews FOLDED** (r1: tax 1C/4I + arch 0C/6I; r2: tax 0C/3I + arch
+0C/1I; r3: tax 0C/2I + arch 0C/1I — all persisted verbatim in
+`reviews/spec-{tax,architecture}-fable-review-r{1,2,3}.md`); pending the **r4** re-review to 0C/0I per
+`STANDARD_WORKFLOW.md`. Each round's residue narrowed and both lenses CONVERGED: r3's blocker (both lenses,
+independently) was that the r2 fold-diff was DISPOSAL-scoped while BG-D11 (same fold) made prior-year REMOVAL
+legs promote-sensitive — a promote that HIFO-reorders a prior donation-only year rewrote its Schedule A/8283
+silently past all three detection paths. Fixed by one keying stroke — the fold-diff now ranges over disposal
+AND removal legs, quoting a profile-free deduction-Δ (BG-D6/D9) — plus the dropped current-year Σ term (tax r3
+I-1). The tax lens's independent third-pass surface census confirms NO other filed surface a promoted basis
+reaches funds a deduction/credit/outbound carry.
 **Branch:** `feat/conservative-filing-b` (off `main` @ the v0.8.0 release).
 **Parent:** the shipped Conservative-Filing v1 (`design/conservative-filing/SPEC.md`, v0.8.0). This spec is the
 first of Approach B's sub-projects; the guided **wizard** (sub-project 2) and **VARIOUS multi-date rows**
@@ -164,11 +166,19 @@ which honestly *widens* the window and *lowers* the floor. Both are anti-oversta
     product itself sells.** `overpayment_delta_one` is year-scoped to *realized* disposals (`conservative.rs`
     re-folds `compute_tax_year`), so for an undisposed tranche `tax($0) − tax(floor) = $0` in every year — a
     bare "$0 saving / $0 exposure" is FALSE in both directions for a five-figure latent position. So: the saving
-    = `Σ` of per-year clamped deltas over **every year the BG-D9 fold-diff flags, evaluated on the POST-promote
-    fold** (NOT "years that already have disposed legs" read pre-promote — that omits the very prior year a HIFO
-    reorder newly draws the tranche into, understating the recorded exposure; tax r2 M-2); PLUS, for sats not
-    yet disposed, an explicit **unrealized** line — *"saving and exposure accrue at disposal; at today's price
-    the floor would reduce reported gain by ~$X (hypothetical, not a filed figure)"* — **never a bare $0.**
+    = `Σ` of per-year clamped deltas over **every year the pre/post fold pair differs in filed content,
+    INCLUDING the current year** (equivalently: the BG-D9 diff run WITHOUT its `< current` advisory filter — the
+    advisory keeps `< current` only because already-filed years need the 1040-X copy, but the realized-saving Σ
+    MUST include the current year, else the dominant term of the most common flow — sell earlier this year, then
+    promote before filing — is silently dropped; tax r2 M-2 / tax r3 I-1). The per-year term ranges over BOTH
+    surfaces the promote rewrites (tax r3 I-2): a disposal-flagged year quotes the clamped gain/tax-Δ; a
+    **removal-flagged year** (a HIFO reorder changed a donation/gift draw) quotes the profile-free
+    **deduction-Δ** (`Σ claimed_deduction` from the fold pair), never $0. PLUS, for sats not yet disposed, an
+    explicit **unrealized** line — *"saving and exposure accrue at disposal; at today's price the floor would
+    reduce reported gain by ~$X (hypothetical, not a filed figure)"* — **never a bare $0**; and when there is no
+    bundled close for "today" (data ends at release; tax r3 N-2), fall back to the latest bundled close + its
+    date, or state *"no current price data — the floor itself, $`filed_basis`, is the maximum gain reduction"*,
+    never a silent $0 or a dropped line.
   - **★ Uncomputable years must be surfaced as uncomputable, NEVER a silent $0 term (tax r2 I-3 = arch r2 I-1,
     the CONVERGED r2 blocker).** Every `tax($0) − tax(floor)` term routes through `compute_tax_year`, which
     returns `None` (→ `overpayment_delta_one` yields `Usd::ZERO`) for any year with **no bundled tax table**
@@ -178,10 +188,13 @@ which honestly *widens* the window and *lowers* the floor. Both are anti-oversta
     `$0` here re-enters the exact "bare $0" defect through the uncomputable door and poisons the recorded
     `Acknowledgment`. So the consent quantification is defined on the before/after **fold pair** the machinery
     already produces: quote the tax-Δ **only when both folds compute that year**; otherwise show the
-    **gain-Δ / 8949-leg delta** (profile- and table-independent) with an explicit *"tax not computable for year
-    Y (no bundled table / no tax profile / blocked) — the reported gain still changes by ~$G"* clause. The
-    `Acknowledgment` snapshot records each term as computed-tax-Δ **or** gain-Δ-with-uncomputable-flag, so the
-    §6664(c) artifact stays honest; a genuinely-all-uncomputable promote never records a bare $0.
+    **gain-Δ (disposal-flagged) / deduction-Δ (removal-flagged) / filed-content delta** (all profile- and
+    table-independent — and the deduction-Δ *must* use the fold-pair figure even when the year computes, because
+    engine B's `compute_tax_year` excludes crypto donations by design, tax r3 I-2) with an explicit *"tax not
+    computable for year Y (no bundled table / no tax profile / blocked) — the reported gain/deduction still
+    changes by ~$G/~$D"* clause. The `Acknowledgment` snapshot records each term as computed-tax-Δ **or**
+    gain/deduction-Δ-with-uncomputable-flag, so the §6664(c) artifact stays honest; a genuinely-all-uncomputable
+    promote never records a bare $0.
   - Plus interest, the penalty statement (BG-D10), and the wide-window "this floor is trivial" note when it
     applies. A **typed acknowledgment** — the consent phrase + a snapshot of the exact figures shown (each
     flagged computed-tax vs gain-only) + the attested provenance — **is recorded ON the event** (BG-D1's
@@ -225,8 +238,10 @@ which honestly *widens* the window and *lowers* the floor. Both are anti-oversta
     `DeclareTranche` but would keep a `PromoteTranche`) can produce the dangling shape with no CLI in the loop.
     So: (i) voiding a `DeclareTranche` that has a live promote is **resolver-adjudicated** — the void is inert +
     `DecisionConflict`, mirroring void-of-effective-allocation (`resolve.rs`), surfacing at record time for free
-    via `would_conflict` (`project/mod.rs`); (ii) a `PromoteTranche` whose target is absent/voided/wrong-type is
-    a hard `DecisionConflict` (the pass-1d/1e validation pattern), never silently inert; (iii) `PromoteTranche`
+    via `would_conflict` (`project/mod.rs`); (ii) a **non-voided** `PromoteTranche` whose target is
+    absent/wrong-type is a hard `DecisionConflict` (the pass-1d/1e validation pattern), never silently inert —
+    scoped to non-voided promotes so the both-voids end state (promote dead + tranche voided) does NOT emit a
+    spurious permanent Hard (arch r3 N-1); (iii) `PromoteTranche`
     is added to the `voidable_decisions`/`is_revocable_payload` set AND `DeclareTranche` is EXCLUDED from the
     bulk-void candidate set while it carries a live promote (`void.rs` — today `DeclareTranche` is
     unconditionally a candidate), so the bulk sweep cannot create the dangling shape either.
@@ -254,15 +269,25 @@ which honestly *widens* the window and *lowers* the floor. Both are anti-oversta
     year with no bundled table (**only 2017/2024/2025/2026 ship**, so 2018–2023 never compute), no `TaxProfile`,
     or any unrelated Hard blocker, i.e. exactly the feature's old-filed-year audience; the advisory would be
     structurally unable to fire while the legs rewrite. So the advisory fires for **any year `< current` whose
-    per-year DISPOSAL-LEG set (equivalently Σ-gain / 8949 content) differs between the pre- and post-promote
-    fold** — profile/table/blocker-independent, the fold pair the machinery already produces — which also
-    resolves the partially-disposed ambiguity ("disposed" = has any disposed leg). Copy: *"this promote changes
-    year Y's reported gain by ~$G [and computed tax by ~$Δ, when Y computes]; if Y was already filed, claiming it
-    requires a Form 1040-X for Y with the 8275 attached"* — the tax-Δ clause appears only when Y computes,
-    otherwise a *"tax not computable for Y (no table/profile/blocked)"* note; conditional on "if Y was already
-    filed" (the engine has no filed-year concept, so it must not assert an amendment is required); and it notes
-    **§6511** (a refund claim for an old year — e.g. 2019 — is likely time-barred: 3 years from filing / 2 from
-    payment, tax r1 M-5).
+    per-year FILED-CONTENT set differs between the pre- and post-promote fold** — profile/table/blocker-
+    independent, the fold pair the machinery already produces. The operative predicate is the **leg-SET diff, NOT
+    a Σ-gain diff** (tax r3 N-1: a reorder swapping equal-basis different-date lots changes the filed 8949 rows
+    and legs with Σ-gain unchanged — Σ-gain is a usually-visible consequence, not an equivalence). Crucially the
+    filed-content set is **disposal legs (8949) AND removal legs (8283 / Schedule-A donation + §1015 gift
+    carryover)** — because donations/gifts draw through the SAME method-elected `consume_principal` as disposals
+    (`fold.rs` `Op::GiftOut`/`Op::Donate`), so the same HIFO reorder silently rewrites a prior DONATION-only
+    year's deduction with ZERO disposal-leg / 8949 change, and no other gate catches it (a removal recognizes no
+    gain, and engine B excludes crypto donations by design — tax r3 I-2 = arch r3 I-1, the CONVERGED r3 blocker).
+    This also resolves the partially-disposed ambiguity ("disposed" = has any disposed leg). Copy: *"this promote
+    changes year Y's reported gain by ~$G **and its charitable deduction by ~$D** [and computed tax by ~$Δ, when Y
+    computes]; if Y was already filed, claiming it requires a Form 1040-X for Y with the 8275 attached"* — the
+    ~$D clause appears whenever a removal leg diffs (profile-free, `Σ claimed_deduction` from the fold pair, and
+    the copy must NOT imply the ~$Δ tax figure captures the deduction effect — engine B can't price it); the
+    tax-Δ clause appears only when Y computes, otherwise a *"tax not computable for Y (no table/profile/blocked)"*
+    note; conditional on "if Y was already filed" (the engine has no filed-year concept, so it must not assert an
+    amendment is required); and it notes **§6511** (a refund claim for an old year — e.g. 2019 — is likely
+    time-barred: 3 years from filing / 2 from payment, tax r1 M-5). The collapsed deduction also corrupts the
+    §170(d) carryover chain — the amend is to-PAY in the donation-reorder case.
   - **The VOID direction gets the SAME advisory (tax r1 M-5).** Voiding a promote over a year whose fold diff
     changes reverts the books to `$0` while a filed return still claims the floor — an amend-to-**pay** situation
     (1040-X owing), symmetric to the promote direction; the fold-diff trigger covers both directions.
@@ -356,7 +381,11 @@ sites verified against current source.
    (`forms.rs` `Form8283Row.cost_basis` → `tax/printed.rs` → `btctax-forms/src/form8283.rs` → `removals.csv` in
    `render.rs`, ST **and** LT); and the now-false `forms.rs` "$0" doc sentence. **Verified NO-change forms sites
    (arch r1 N-3), listed so the plan doesn't re-derive them:** 8949 col (e) reads `leg.basis` (`forms.rs`) and
-   Form 8283 `how_acquired_from` stays `Review` (`forms.rs`).
+   Form 8283 `how_acquired_from` stays `Review` (`forms.rs`). **★ Prior-year-diff wiring (tax r3 I-2):** because
+   removals draw by the elected method (HIFO default) exactly like disposals, the BG-D9 advisory / BG-D6 consent
+   fold-diff must range over `state.removals` per prior year (`crypto_charitable_gifts` recomputes a prior year's
+   Schedule A from the rewritten legs), NOT just `state.disposals` — both leg types derive `PartialEq`/`Eq`, so
+   it is the same set comparison.
 8b. **The FIFO fee-draw back-channel (BG-D4 fee-evaporation / tax r2 I-2):** `consume_fee` / `consume_fifo`
    (`pools.rs`, acquisition-date FIFO) + the three `FeeCarry` re-home sites (`rehome_onto_lot`,
    `rehome_onto_disposal_leg`, `rehome_onto_removal_leg`, `fold.rs`) must decompose the consumed fee-sats so the
@@ -442,21 +471,26 @@ Every primitive TDD + mutation-proven; full suite + all CI-only jobs green; SPEC
 - **The gates:** promote refused without the provenance attestation, incl. a mined/earned/airdrop/fork filer
   (BG-D5); the consent quantification is CLAMPED (a below-window-low sale quotes the clamped saving, not an
   unclaimable loss — tax r1 I-3), NON-ZERO/unrealized-labeled for an undisposed tranche (never a bare $0 — tax
-  r1 I-2), and for an **uncomputable year** (no bundled table / no profile / blocked) shows the gain-Δ with an
-  explicit "tax not computable" flag rather than a silent $0 (tax r2 I-3 / arch r2 I-1); the typed acknowledgment
-  (phrase + shown figures, each flagged computed-tax vs gain-only + provenance) recorded on the event (BG-D6); an
-  empty/scaffold-only Part II narrative is refused at record time (BG-D7); a packet with a promoted leg but no
-  8275 artifact is a REAL export REFUSAL, not a silent gap (BG-D8); clean export (no watermark).
+  r1 I-2), and for an **uncomputable year** (no bundled table / no profile / blocked) shows the gain-Δ /
+  deduction-Δ with an explicit "tax not computable" flag rather than a silent $0 (tax r2 I-3 / arch r2 I-1);
+  **the Σ INCLUDES the current year's realized delta** (a tranche disposed earlier this year, then promoted
+  before filing — the dominant term of the most common flow — is quoted, not dropped; tax r3 I-1); the typed
+  acknowledgment (phrase + shown figures, each flagged computed-tax vs gain/deduction-only + provenance)
+  recorded on the event (BG-D6); an empty/scaffold-only Part II narrative is refused at record time (BG-D7); a
+  packet with a promoted leg but no 8275 artifact is a REAL export REFUSAL, not a silent gap (BG-D8); clean
+  export (no watermark).
 - **Lifecycle (BG-D9), engine-adjudicated:** void → reverts to `$0`; second promote → `DecisionConflict`;
   **void-of-tranche-with-live-promote → resolver-inert + `DecisionConflict`** (a RAW/hand-crafted void, not just
   the CLI path, cannot dangle the target — mirrors void-of-effective-allocation); **both voids in EITHER order**
   (void-tranche then void-promote, and the reverse) converge to promote-dead + tranche-voided, never a bricked
-  ledger (arch r2 M-1); a promote with an absent/voided/wrong-type target → hard `DecisionConflict`;
+  ledger (arch r2 M-1; and BG-D9-ii is scoped to non-voided promotes so the both-voids end state emits no
+  spurious Hard — arch r3 N-1); a promote with a non-voided absent/wrong-type target → hard `DecisionConflict`;
   `safe_harbor_residue` does not project a dangling promote; **the prior-year advisory fires on an
-  UNDISPOSED-tranche promote that HIFO-reorders a prior year — INCLUDING a table-less/profile-less year** (the
-  fold-diff / leg-set trigger, NOT computed-`tax_total`, NOT "disposed" — arch r1 I-4 + tax r1 I-4, re-keyed for
-  arch r2 I-1 / tax r2 I-3), in BOTH the promote and void directions; the copy is conditional ("if Y was already
-  filed") and notes §6511.
+  UNDISPOSED-tranche promote that HIFO-reorders a prior year — INCLUDING a table-less/profile-less year AND a
+  prior DONATION/GIFT-only year with NO disposal-leg change** (the fold-diff over disposal legs **AND removal
+  legs**, quoting the deduction-Δ for a removal-reordered year; NOT computed-`tax_total`, NOT a Σ-gain diff, NOT
+  "disposed" — arch r1 I-4 + tax r1 I-4, re-keyed arch r2 I-1 / tax r2 I-3, widened arch r3 I-1 / tax r3 I-2), in
+  BOTH the promote and void directions; the copy is conditional ("if Y was already filed") and notes §6511.
 - **Payload-side census (arch r1 I-6):** `PromoteTranche` appears in the bulk + TUI void candidate lists
   (`is_revocable_payload`), renders a real label (not `"?"`/Debug) in the bulk-void + void-flow summaries, and
   has the stock no-fingerprint KAT (`persistence.rs`); a promoted tranche's `DeclareTranche` is excluded from
