@@ -73,6 +73,21 @@ r1 I-1 fix was INCOMPLETE (1C carried-forward-analysis / 3I). **All r2 blocking 
   re-projects per draw tick (the no-tranche common case is fixed; snapshot-memoization of the advisory is
   the follow-up — arch r2-M-1).
 
+### T16 whole-branch review r3 (2026-07-20) — the re-review of the r2 re-architecture: **0C/0I BOTH lenses — CONVERGED**
+
+Both r3 lenses verified the I-1 re-architecture (`c66859a`) independently + adversarially (each built a scratch
+harness + ran temporary, restored mutations): **architecture 0C/0I/0M/2N**, **tax 0C/0I/1M/1N**. Confirmed:
+no silent Path-B discard is reachable (structural — the retraction touches only `blockers`, never `effective`);
+all four voided×{effective,inert} states hold; the D-8 backstop arm is re-pinned; the retraction is
+event-id-scoped, deterministic, and cannot unmask a different allocation's Hard; SPEC D-8 matches the code.
+- **Folded:** the tax-lens Minor (retraction event-id scoping was correct but UNPINNED — every repo void-flow
+  had a single allocation) → new KAT `retraction_is_scoped_to_the_retired_allocations_own_id`
+  (`kat_tranche.rs`), mutation-proven (dropping `b.event == v.target` → RED). Fixed the resolve.rs
+  "inert/absent" doc nit.
+- **Residual — FILED (non-blocking):** [Nit] render.rs stale-timebar arm hints `attest` for a voided-retired
+  allocation (dead-end corner UX; pre-existing, pinned by verify_report); [Nit] `void.rs:47-50` stale
+  resolve.rs line-number citations (pre-existing drift).
+
 ### From the Phase-1 implementation review (r1, 2026-07-21) — all Minor/Nit, non-blocking
 
 - ~~**[Minor] `build_op`'s DeclareTranche arm + engine-level input validation are reachable only from the

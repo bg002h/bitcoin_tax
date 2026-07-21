@@ -1354,7 +1354,7 @@ pub fn resolve(
     }
 
     // (5) Irrevocability (§7.4(2)): a Void of an EFFECTIVE allocation → conflict (it stays in force); a
-    //     Void of an inert/absent allocation APPLIES → the allocation is RETIRED.
+    //     Void of an inert allocation APPLIES → the allocation is RETIRED.
     for v in &allocation_voids {
         if effective.iter().any(|(id, _, _)| id == &v.target) {
             blockers.push(Blocker {

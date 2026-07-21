@@ -671,3 +671,51 @@ fn voided_allocation_with_a_rekeyed_totals_mismatch_is_retired_over_a_tranche() 
         st.blockers
     );
 }
+
+/// Task 5 / T16 review r3 (tax-lens Minor): the §7.4 blocker RETRACTION is scoped to the RETIRED
+/// allocation's OWN id — it must NOT clear a DIFFERENT, live allocation's Hard. Two allocations both
+/// denied over a tranche residue; ONE is voided (→ retired, its Hard retracted), the OTHER stays live (→
+/// its Hard SURVIVES). Pins the `b.event == v.target` half of the retain predicate (every other repo
+/// void-flow has a single allocation, so this is the only test that kills a drop-the-event-id-scope mutant).
+#[test]
+fn retraction_is_scoped_to_the_retired_allocations_own_id() {
+    let w = exch();
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2015 - 01 - 01),
+        date!(2015 - 12 - 31),
+    );
+    // Two allocations, each listing the 100M/$0 residue — both denied effectiveness by the tranche arm.
+    let a1 = alloc_ev(
+        2,
+        true,
+        LotMethod::Hifo,
+        vec![alloc_lot(&w, 100_000_000, 0, date!(2015 - 12 - 31))],
+    );
+    let a2 = alloc_ev(
+        3,
+        true,
+        LotMethod::Hifo,
+        vec![alloc_lot(&w, 100_000_000, 0, date!(2015 - 12 - 31))],
+    );
+    let v = void_ev(4, EventId::decision(2)); // void ONLY a1
+    let st = project(&[t, a1, a2, v], &prices(), &cfg());
+    let unconservable_on = |seq: u64| {
+        st.blockers.iter().any(|b| {
+            b.kind == BlockerKind::SafeHarborUnconservable
+                && b.event == Some(EventId::decision(seq))
+        })
+    };
+    assert!(
+        !unconservable_on(2),
+        "the VOIDED allocation (a1)'s Hard is retracted (retired): {:?}",
+        st.blockers
+    );
+    assert!(
+        unconservable_on(3),
+        "the LIVE allocation (a2)'s Hard SURVIVES — the retraction is id-scoped, not blanket: {:?}",
+        st.blockers
+    );
+}

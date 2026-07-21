@@ -1,6 +1,6 @@
 # Conservative-Filing — Build Continuity (resume point)
 
-**Updated 2026-07-20: PHASE 1 + ALL IMPL TASKS T8–T15 DONE; T16 review r1 folded (`0f30e01`), r2 re-review found the r1 I-1 fix incomplete → RE-ARCHITECTED + folded (`c66859a`); r3 verify DISPATCHED. Tree clean (full suite 2160 green, CI-only gate green). Resume: await r3 → if 0C/0I both lenses, update memory `conservative-filing-project` + present merge-ready (merge = OWNER'S call).**
+**Updated 2026-07-20: CONSERVATIVE-FILING v1 COMPLETE — all impl tasks T8–T15 + T16 whole-branch review CONVERGED to 0C/0I on BOTH lenses (r1 fold `0f30e01` → r2 re-architecture `c66859a` → r3 verify GREEN). Full suite 2161 green + full CI-only gate green. Owner AUTHORIZED merge-on-convergence → MERGING to main.**
 
 ## Where we are
 
