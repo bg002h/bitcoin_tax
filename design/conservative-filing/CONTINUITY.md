@@ -1,6 +1,6 @@
 # Conservative-Filing — Build Continuity (resume point)
 
-**Updated 2026-07-21: PHASE 1 (Tasks 1–7) COMPLETE + GATE GREEN; PHASE 2 T8/P2 + T9/P3 DONE. Everything below is committed; the tree is clean (full suite 2125 green). Resume at Phase 2 / Task 10.**
+**Updated 2026-07-21: PHASE 1 (Tasks 1–7) COMPLETE + GATE GREEN; PHASE 2 T8/P2 + T9/P3 DONE; PHASE 4 T10/P4 DONE (`ad77d44`). Everything below is committed; the tree is clean (full suite 2129 green). Resume at Task 11 / P5.**
 
 ## Where we are
 
@@ -27,8 +27,8 @@
 
 - **T8 / P2 — DONE** (`9f2c842`): HIFO-steering + FIFO-inversion characterization pins in `crates/btctax-core/tests/kat_conservative.rs` (passes-on-write; discrimination confirmed by method flip).
 - **T9 / P3 — DONE** (`4eabbbe`): new `crates/btctax-core/src/conservative.rs` — `tranche_dip_advisory` (basis-as-filed, provenance-neutral) + `method_inversion_advisory` (recommends HIFO election) + `tranche_report_advisory` (shared assembler). Surfaced via NEW `TaxYearReport.tranche_advisory` (`cmd/tax.rs`, printed in `main.rs`), mirrored into the TUI Tax tab (`btctax-tui/src/tabs/tax.rs`). Builders + surfacing KATs, mutations RED, binary-verified.
-- **T10 / P4 — RESUME HERE**: custody warning — reuse `optimize.rs` `ForbiddenBroker2027` (`persistability`/`is_broker`, ~`:455-495`) for a ≥2027 Exchange specific-ID of a tranche lot. **CAUTION — subtler than the plan's "light reuse":** decide exactly what the warning covers (the specific-ID / broker-envelope / tranche interaction) and **re-read SPEC P4 / D-3 first** (no transfer-statement modeling). Likely a small advisory builder in `conservative.rs` that calls `persistability`, wired into the tranche/advisory path. KATs (`kat_conservative.rs`): fires for a ≥2027 Exchange specific-ID; silent for SelfCustody; silent ≤2026 — the three KATs are the discrimination (Step-5 mutation is n/a for pure reuse).
-- **T11 / P5**: `window_reference -> Option<WindowRef{min,coverage}>`.
+- **T10 / P4 — DONE** (`ad77d44`): custody warning. New `tranche_broker_specific_id_advisory` in `conservative.rs` — thin reuse of `optimize::persistability`, `Some` iff `ForbiddenBroker2027` (broker wallet + ≥2027 sale); SelfCustody + ≤2026 silent. Wired into `tranche_report_advisory` (auto-surfaced, both frontends unchanged), **disposal-scoped not LotSelection-gated** (prospective/conditional, over-broad-by-design per D-8 precedent; documented inline for T16). 4 KATs (3 discrimination through the assembler + 1 direct builder), both new predicates mutation-proven RED. 2129 green.
+- **T11 / P5 — RESUME HERE**: `window_reference(prices, start, end) -> Option<Usd>` (min daily CLOSE over the window; partial-overlap caveat; out-of-range → None). Informational ONLY, NEVER filed (D-7); feeds only P6's delta. New builder in `conservative.rs`; bundled price data is 5,801 rows 2010→2026. KATs: min-close over range; partial-overlap; out-of-range None.
 - **T12 / P6**: per-tranche overpayment delta via a basis-replacement what-if (needs events+prices+config, NOT a folded state).
 - **T13 / P7**: `basis_methodology.txt` — provenance-neutral, term-correct, basis AS FILED.
 - **T14 / P8**: self-custody nudge. Owns FOLLOWUPS: `--wallet`-not-known warn + future-`window_end` filer-zone.
@@ -43,4 +43,4 @@
 - Reviews are two-lens Fable (`model:"fable"`, `subagent_type:"general-purpose"`), run in parallel; persist each verbatim before folding; re-review after every fold including the last.
 
 ## One-line resume
-`feat/conservative-filing` @ `4eabbbe`; PLAN green; **Phase 1 (Tasks 1–7) DONE + gate-green**; **Phase 2 in progress — T8/P2 + T9/P3 DONE** (2125 tests green); **resume at Task 10 / P4** (fire the existing `optimize.rs ForbiddenBroker2027` envelope for a ≥2027 Exchange specific-ID; test-led reuse, likely no new production code) per `IMPLEMENTATION_PLAN.md` §Task 10. Reconcile `FOLLOWUPS.md` at each phase entry. Merge to main is the OWNER'S call.
+`feat/conservative-filing` @ `ad77d44`; PLAN green; **Phase 1 (Tasks 1–7) DONE + gate-green**; **T8/P2 + T9/P3 + T10/P4 DONE** (2129 tests green); **resume at Task 11 / P5** (`window_reference` min-close engine, informational-only, never filed — D-7) per `IMPLEMENTATION_PLAN.md` §Task 11. Reconcile `FOLLOWUPS.md` at each phase entry (P5/T11 owns none — all open items are P8/T14, P9/T15, T16). Merge to main is the OWNER'S call.
