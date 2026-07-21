@@ -78,8 +78,8 @@ pub fn method_inversion_advisory(
              Under it a disposal can draw a $0-basis conservative-filing unit before your documented \
              higher-basis units, maximizing the reported gain. Electing HIFO would draw the documented \
              units first — set it forward with `btctax config --set-forward-method hifo` (which binds \
-             2025+ disposals); for a pre-2025-dated disposal, elect HIFO as the pre-2025 method \
-             (tax r1 M-4: a forward election cannot change a pre-2025-dated disposal)."
+             2025+ disposals); a forward election cannot change a PRE-2025-dated disposal, so for those \
+             elect HIFO as the pre-2025 method instead."
         ))
     } else {
         None

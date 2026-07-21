@@ -12,9 +12,7 @@ use crate::{CliError, Session};
 use btctax_core::conventions::TRANSITION_DATE;
 use btctax_core::event::DeclareTranche;
 use btctax_core::persistence::{append_decision, load_all};
-use btctax_core::{
-    Blocker, BlockerKind, EventId, EventPayload, LedgerEvent, Sat, TaxDate, WalletId,
-};
+use btctax_core::{EventId, EventPayload, LedgerEvent, Sat, TaxDate, WalletId};
 use btctax_store::Passphrase;
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -52,27 +50,16 @@ fn void_targets(events: &[LedgerEvent]) -> BTreeSet<EventId> {
 /// New-3: an inert allocation can be flipped effective, so it too collides with a new pre-2025 tranche).
 /// Deliberately NOT scoped to effective allocations (that would let a pre-2025 tranche slip in beside an
 /// inert one and silently discard it once the allocation later goes effective).
-pub fn in_force_allocation_exists(events: &[LedgerEvent], blockers: &[Blocker]) -> bool {
+pub fn in_force_allocation_exists(events: &[LedgerEvent]) -> bool {
+    // In force = a NON-voided `SafeHarborAllocation` (present, effective OR inert — an inert one can be
+    // flipped effective, arch r2 New-3). A voided allocation is NOT in force here: the ENGINE resolves the
+    // void (T16 review r2 / I-1) — a void of an inert allocation retires it (§7.4 retirement pass), and a
+    // void of an effective allocation raises a Hard `DecisionConflict` there; either way the record-time
+    // predicate correctly ADMITS the tranche and the engine backstop is the guarantee. (This replaces the
+    // r1 blocker-absence "effective" mirror, which coupled badly with the backstop's blocker retraction.)
     let voided = void_targets(events);
     events.iter().any(|e| {
-        matches!(e.payload, EventPayload::SafeHarborAllocation(_)) && {
-            // In force = NON-voided (present, effective OR inert — an inert one can be flipped effective,
-            // arch r2 New-3) OR still EFFECTIVE despite a void. Arch r1 Minor (T16): the engine keeps an
-            // EFFECTIVE allocation in force after a (conflicting) void — voiding it fires a Hard
-            // DecisionConflict rather than removing it (`resolve` effective-vs-inert semantics), so a
-            // voided-BUT-effective allocation must still block a pre-2025 tranche. Effectiveness mirrors
-            // void.rs `effective_alloc`: no SafeHarborTimebar / SafeHarborUnconservable blocker on its id.
-            let non_voided = !voided.contains(&e.id);
-            let effective = {
-                let has = |k| {
-                    blockers
-                        .iter()
-                        .any(|b| b.kind == k && b.event.as_ref() == Some(&e.id))
-                };
-                !has(BlockerKind::SafeHarborTimebar) && !has(BlockerKind::SafeHarborUnconservable)
-            };
-            non_voided || effective
-        }
+        matches!(e.payload, EventPayload::SafeHarborAllocation(_)) && !voided.contains(&e.id)
     })
 }
 
@@ -118,9 +105,8 @@ pub fn guard_allocation_vs_tranche(events: &[LedgerEvent]) -> Result<(), CliErro
 fn guard_tranche_vs_allocation(
     events: &[LedgerEvent],
     window_end: TaxDate,
-    blockers: &[Blocker],
 ) -> Result<(), CliError> {
-    if window_end < TRANSITION_DATE && in_force_allocation_exists(events, blockers) {
+    if window_end < TRANSITION_DATE && in_force_allocation_exists(events) {
         return Err(CliError::Usage(format!(
             "refusing to record a pre-2025 conservative-filing tranche while a safe-harbor allocation \
              is on file — v1 makes the two mutually exclusive; {ALLOCATION_IS_FINAL_HINT}."
@@ -159,13 +145,11 @@ pub fn declare_tranche(
 
     let mut session = Session::open(vault_path, pp)?;
     let events = load_all(session.conn())?;
-    // Guard FIRST (arch N-1): project the EXISTING events (record-time, mirrors `would_conflict`) so the
-    // tranche-side guard sees the engine's effective-vs-inert allocation view — an EFFECTIVE-but-voided
-    // allocation still blocks a pre-2025 tranche (arch r1 Minor, T16). Running it before the phantom-wallet
-    // warning means a REFUSED declaration never emits the misleading "stranded lot" note.
-    let cfg = session.config()?;
-    let state = btctax_core::project::project(&events, session.prices(), &cfg.to_projection());
-    guard_tranche_vs_allocation(&events, window_end, &state.blockers)?;
+    // Guard FIRST (arch N-1), before the phantom-wallet warning, so a REFUSED declaration never emits the
+    // misleading "stranded lot" note. A pre-2025 tranche is refused while a NON-voided allocation is on
+    // file; a voided allocation is resolved by the engine (T16 review r2 / I-1), so no projection is needed
+    // here.
+    guard_tranche_vs_allocation(&events, window_end)?;
     // The declaration WILL be recorded now — warn (never refuse) on a `--wallet` that no prior event
     // references (a likely typo that strands the $0 lot in a phantom wallet; it still files at $0).
     if !wallet_is_known(&events, &wallet) {

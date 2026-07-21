@@ -108,9 +108,10 @@ return + a **mandatory methodology disclosure**.
     the tranche-side at voiding the tranche ("Void the tranche first (`reconcile void <decision-ref>`); if
     you have already filed the tranche's $0 basis, unallocated pre-2025 units are a facts-and-circumstances
     matter for a professional"). Both satisfy the normative hedge; each names the artifact the user is
-    blocked BY. (The record-time predicate treats a `SafeHarborAllocation` as in force when non-voided OR
-    still engine-effective despite a void — `reconcile void` already refuses voiding an effective allocation
-    (§7.4), so the effective-despite-void arm is defense-in-depth against a hand-crafted vault.)
+    blocked BY. (The record-time predicate treats a `SafeHarborAllocation` as in force iff it is NON-voided;
+    a VOIDED allocation is left to the engine — T16 review r2 / I-1 — so the record-time layer stays a pure
+    event-scan and the engine's void semantics are the single source of truth. The r1 "effective-despite-a-
+    void" mirror was removed: it coupled badly with the backstop's blocker retraction below.)
   - **Projection-time invariant backstop (the real guarantee).** Independent of declaration order, a
     `SafeHarborAllocation` is **denied effectiveness** (kept inert → Path A → the tag survives via the seed
     exemption), via a loud `SafeHarborUnconservable`-class blocker, whenever the pre-2025 Universal residue
@@ -119,6 +120,16 @@ return + a **mandatory methodology disclosure**.
     field). This makes "a tranche and an EFFECTIVE Path-B allocation can never coexist" a construction — no
     ordering (incl. inert-then-declare) reaches the silent discard. The record-time refusal is the friendly
     early error; this guard is the correctness invariant.
+    - **Void retirement (T16 review r2 / I-1).** The backstop fires for EVERY allocation, voided or not; a
+      VOIDED-inert allocation would otherwise carry a **permanent** Hard `SafeHarborUnconservable` (the void
+      cannot be re-issued), bricking every year on the SUPPORTED flow "void an inert allocation, then declare
+      a pre-2025 tranche". So the §7.4 irrevocability pass, when a void APPLIES (the allocation is not
+      effective), **retracts** that Hard for the retired allocation — reason-agnostic (tranche-residue,
+      re-keyed totals-mismatch, or timebar), so no blind spot. The allocation stays inert (Path A, tag
+      survives); a NON-voided allocation keeps its Hard (the deny-effectiveness guarantee, still pinned by
+      the Task-5 backstop KATs). A voided-but-would-be-EFFECTIVE allocation (only via a hand-crafted raw
+      void — `reconcile void` refuses voiding an effective allocation) is likewise denied effectiveness and
+      retired, so it too never seeds Path B: the tag always survives.
   - **Consequence (stated, not accidental — arch r4 Nit-4):** a filer with BOTH documented pre-2025 lots and
     $0 tranches forgoes Rev. Proc. 2024-28 *reallocation flexibility* (Path B), but loses NO basis — Path A
     carries documented lots' basis + `acquired_at` per-wallet unchanged (`transition.rs:80-85`). Coexistence

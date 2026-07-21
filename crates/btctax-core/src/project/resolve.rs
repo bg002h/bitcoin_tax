@@ -1297,44 +1297,25 @@ pub fn resolve(
         // go effective while the pre-2025 Universal residue still holds a conservative-filing tranche
         // ($0 EstimatedConservative, remaining_sat > 0). Otherwise a Path-B seed would silently DISCARD
         // the tranche (transition.rs). Independent of declaration order — this closes the inert-then-declare
-        // ordering that the record-time refusal alone cannot. Kept inert → Path A → the tranche tag survives.
+        // ordering the record-time refusal alone cannot. Kept inert → Path A → the tranche tag survives.
+        // Fires for EVERY allocation (voided or not) — a VOIDED-inert allocation's inert blockers are then
+        // RETRACTED by the §7.4 retirement pass below, so the supported void-inert-then-declare flow
+        // computes via Path A while a NON-voided allocation keeps its Hard (the guarantee) — T16 review r2.
         let has_tranche_residue = snap.estimated_conservative_remaining_sat > 0;
-        // A totals-mismatch is order-independent and blocks even a voided allocation (pre-existing).
-        // Compare against the DOCUMENTED residue: a tranche's $0 sats are counted in the Universal
-        // `held_sat` but are NOT part of what an allocation lists (a tranche and an allocation are mutually
-        // exclusive, D-8), so subtract them (tranche basis is $0, so `basis` is unaffected). Without this a
-        // tranche inflates `held_sat` and trips this Hard totals-mismatch — which the void-retirement below
-        // could never reach — bricking the void-inert-then-declare flow (I-1).
-        let documented_held = snap.held_sat - snap.estimated_conservative_remaining_sat;
-        if alloc_sat != documented_held || alloc_basis != snap.basis {
+        let unconservable =
+            has_tranche_residue || alloc_sat != snap.held_sat || alloc_basis != snap.basis;
+        if unconservable {
             blockers.push(Blocker {
                 kind: BlockerKind::SafeHarborUnconservable,
                 event: Some(d.id.clone()),
-                detail: "allocation totals != Universal remainder at 2025-01-01".into(),
-            });
-            continue; // inert → Path A
-        }
-        // T16 review r1 (I-1): the D-8 tranche-residue backstop DENIES EFFECTIVENESS — it must keep an
-        // otherwise-effective allocation inert (Path A) so a Path-B seed can't silently discard the
-        // tranche. But it must NOT fire on an allocation that carries an on-file VOID: allocation voids are
-        // tracked in `allocation_voids` (not `voided`), so this loop still re-evaluates a voided allocation
-        // — and a Hard blocker on an already-voided allocation cannot be cleared (the void can't be
-        // re-issued), bricking every year on the SUPPORTED flow "void an inert allocation, then declare a
-        // pre-2025 tranche". For a void-targeted allocation we fall through: if it is genuinely inert
-        // (timebarred, below) the §7.4 pass retires it → Path A, year computes; if it would be effective
-        // (hand-crafted raw void — `reconcile void` refuses voiding an effective allocation) it enters
-        // `effective` and the §7.4 pass raises a Hard `DecisionConflict`, so it is still loudly blocked and
-        // never silently discards the tranche.
-        let is_void_targeted = allocation_voids.iter().any(|av| av.target == d.id);
-        if has_tranche_residue && !is_void_targeted {
-            blockers.push(Blocker {
-                kind: BlockerKind::SafeHarborUnconservable,
-                event: Some(d.id.clone()),
-                detail: "a conservative-filing tranche ($0 EstimatedConservative) remains in the \
-                         pre-2025 residue — a safe-harbor allocation cannot conserve over it (v1 makes \
-                         them mutually exclusive; unallocated pre-2025 units are a facts-and-circumstances \
-                         matter)"
-                    .into(),
+                detail: if has_tranche_residue {
+                    "a conservative-filing tranche ($0 EstimatedConservative) remains in the pre-2025 \
+                     residue — a safe-harbor allocation cannot conserve over it (v1 makes them mutually \
+                     exclusive; unallocated pre-2025 units are a facts-and-circumstances matter)"
+                        .into()
+                } else {
+                    "allocation totals != Universal remainder at 2025-01-01".into()
+                },
             });
             continue; // inert → Path A
         }
@@ -1373,13 +1354,29 @@ pub fn resolve(
     }
 
     // (5) Irrevocability (§7.4(2)): a Void of an EFFECTIVE allocation → conflict (it stays in force); a
-    //     Void of an inert/absent allocation simply applies (no conflict; Path A already governs).
+    //     Void of an inert/absent allocation APPLIES → the allocation is RETIRED.
     for v in &allocation_voids {
         if effective.iter().any(|(id, _, _)| id == &v.target) {
             blockers.push(Blocker {
                 kind: BlockerKind::DecisionConflict,
                 event: Some(v.void_id.clone()),
                 detail: "void targets an effective SafeHarborAllocation (irrevocable, §7.4)".into(),
+            });
+        } else {
+            // The void APPLIES → the inert allocation is RETIRED (Path A already governs). RETRACT the Hard
+            // `SafeHarborUnconservable` the backstop pushed for it (T16 review r2 / I-1): a retired
+            // allocation is gone, so a Hard left on it — e.g. from the tranche-residue arm on the SUPPORTED
+            // void-inert-then-declare flow, or a totals-mismatch after a later pre-2025 disposal re-keys the
+            // FIFO draw — would brick every year with NO clearing move (the void cannot be re-issued).
+            // Retracting is independent of WHICH inert reason produced the Hard, so there is no blind spot.
+            // ONLY the Hard `SafeHarborUnconservable` is retracted; the Advisory `SafeHarborTimebar` is
+            // deliberately LEFT as a stale advisory (existing behavior, `verify_report.rs:161`) — it is
+            // non-blocking, so it never bricks a year. The tranche's tag survives via Path A; a NON-voided
+            // allocation keeps its Hard (the D-8 deny-effectiveness guarantee is untouched — still pinned
+            // by the Task-5 backstop KATs).
+            blockers.retain(|b| {
+                !(b.event.as_ref() == Some(&v.target)
+                    && b.kind == BlockerKind::SafeHarborUnconservable)
             });
         }
     }

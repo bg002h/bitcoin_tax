@@ -46,6 +46,33 @@ predicate changed) mutation-proven**, in one fold:
 - **[Nit] `write_csv_exports` path untested for `basis_methodology.txt`** (arch N-5) — same shared
   `write_basis_methodology_txt` helper the `write_form_csvs` (tested) and `export-irs-pdf` (tested) paths use.
 
+### T16 whole-branch review r2 (2026-07-20) — FOLDED (re-review of the r1 fix fold)
+
+r2 tax lens: **0C/0I — GREEN** (all three r1 Importants verified resolved). r2 architecture lens found the
+r1 I-1 fix was INCOMPLETE (1C carried-forward-analysis / 3I). **All r2 blocking findings fixed + mutation-proven:**
+- **[Important] r2-I-1 — the r1 `documented_held` fix had a blind spot** (a pre-2025 disposal re-keying the
+  FIFO draw → totals-mismatch, not tranche-residue). **RE-ARCHITECTED**: the backstop loop reverted to
+  original (re-pins the D-8 arm), and the §7.4 irrevocability pass now **retracts** the Hard
+  `SafeHarborUnconservable` for a retired (voided-inert) allocation — reason-agnostic, no blind spot. Only
+  the Hard is retracted (the Advisory timebar is left, `verify_report.rs:161`). KATs
+  `void_inert_alloc_then_declare_...` + `voided_allocation_with_a_rekeyed_totals_mismatch_is_retired_over_a_tranche`,
+  both mutation-proven RED.
+- **[Important] r2-I-2 — the r1 fix silently de-pinned the D-8 backstop arm** (the Task-5 KATs passed via the
+  wrong arm). **FIXED** by the revert; mutation `has_tranche_residue = false` now RED on the Task-5 KATs.
+- **[Important] r2-I-3 — SPEC "denied effectiveness, tag survives" was violated** (r1 conditioned denial on
+  `!is_void_targeted` → Path B for a voided-effective cell). **FIXED**: the re-architecture keeps the tag
+  surviving (Path A) in ALL cells; SPEC D-8 updated with the void-retirement note; KAT
+  `handcrafted_void_of_effective_alloc_then_tranche_admits_and_survives_via_path_a` pins no Path-B seed.
+- The r1 guard-level `in_force_allocation_exists(events, blockers)` "effective-mirror" (added in T16(a)) was
+  REVERTED to `non_voided`-only (correct for all product states; the engine handles the void); the
+  `declare_tranche` record-time projection was removed.
+- r2 residuals folded inline: leaked internal citation "(tax r1 M-4)" removed from the inversion advisory
+  product copy (tax r2-M-1); the I-1 KAT now pins "no Hard blocker ⇒ computes" (r2-N-1).
+- **Residual — FILED:** [Minor] `export_full_return`'s `basis_methodology.txt` write is unpinned (same
+  tested helper as `export-irs-pdf`, whose write IS KAT-pinned); [Minor] with-tranche TUI Tax-tab still
+  re-projects per draw tick (the no-tranche common case is fixed; snapshot-memoization of the advisory is
+  the follow-up — arch r2-M-1).
+
 ### From the Phase-1 implementation review (r1, 2026-07-21) — all Minor/Nit, non-blocking
 
 - ~~**[Minor] `build_op`'s DeclareTranche arm + engine-level input validation are reachable only from the

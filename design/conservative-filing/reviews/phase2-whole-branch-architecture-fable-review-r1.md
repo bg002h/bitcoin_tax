@@ -293,3 +293,133 @@ blockers after voiding a totals-mismatch allocation (NO tranche):
 
 (Pre-branch semantics; recorded for scoping — the branch's new contribution is the guard-blessed
 route in Evidence A.)
+
+---
+
+## r2 — re-review of the fold (commit `0f30e01`)
+
+**Reviewer:** the same independent Fable agent (architecture/correctness lens). **Date:** 2026-07-20.
+**Scope:** (a) resolution of r1 C-1/I-1/I-2; (b) adversarial review of the fixes themselves. All citations
+verified against current source at `0f30e01`. `make check` re-run on the clean tree: **2159/2159 green**.
+Two findings verified empirically (scratchpad probe harness + a temporary, fully-restored mutation run;
+transcripts in Evidence r2 below; repo left byte-identical, `git status` clean).
+
+**Verdict: 0 Critical / 3 Important / 1 Minor / 1 Nit. NOT green.**
+
+r1 C-1 is **resolved** (`conservative.rs:516` `if let Ok(as_of)` — no panic path; KAT
+`tranche_report_advisory_does_not_panic_on_an_out_of_range_year` pins year 10000). r1 I-2 is **resolved
+for its headline** (`conservative.rs:380-386` early-returns before any `project()` when the profile is
+absent or no `DeclareTranche` exists — a no-tranche vault is back to zero projections per draw; residual
+at r2-M-1). r1 I-1 is **partially resolved** — the KAT-shaped instance is fixed, the class is not
+(r2-I-1). The tax-lens folds spot-checked in passing (admin.rs shared methodology writer with the correct
+no-tranche `Option` gate on both PDF paths; guard-before-WARN reorder; `overpayment_delta_one`
+Decision/EstimatedConservative scoping + `$0` clamp, deterministic and borrow-safe) are sound.
+
+### IMPORTANT
+
+#### r2-I-1. (r1 I-1 carried — incompletely resolved) The supported void-inert-then-declare flow still
+bricks whenever ANY pre-2025 disposal postdates the tranche window: the totals arm re-keys against the
+re-drawn residue
+
+`resolve.rs:1308-1315`. The fix's premise — "tranche basis is $0, so `basis` is unaffected"
+(comment at `:1302-1307`) — is false in the presence of a pre-2025 disposal dated after `window_end`:
+inserting the $0 lot (homed at `window_end`, typically the OLDEST lot) re-keys the recorded-method draw
+of every subsequent pre-2025 disposal. Under FIFO — the §7.4 legal default the engine itself advertises
+(`Pre2025MethodNote`) — the disposal now consumes tranche sats instead of documented sats, so the
+documented residue's **sat AND basis both shift** relative to what the (correctly conserving, later
+voided) allocation listed. `documented_held` fixes only the static inflation, not the re-draw.
+
+**Failure scenario (verified — Evidence r2-B):** buy 0.2 BTC 2024-01 → sell 0.05 2024-06 (pre-2025) →
+sell 0.05 2025-06 → `safe-harbor-allocate` (conserves: 15M sat/$6375; timebar-inert) → `reconcile void`
+(permitted) → `declare-tranche` window 2015 (guard ADMITS — pre-tranche the alloc shows only the Timebar
+advisory) → projection: **Hard `SafeHarborUnconservable` on the VOIDED allocation** ("allocation totals
+!= Universal remainder": documented residue is now 20M/$8500, the alloc lists 15M/$6375) → every year
+NotComputable, un-clearable — r1 I-1's exact brick through the arm the fix left standing. The identical
+flow WITHOUT the 2024 sell (the shipped KAT's shape, `declare_tranche_cli.rs:690`) is clean (Evidence
+r2-B2) — the KAT fixture sits exactly in the fix's blind spot. Fix constraint: a void-targeted
+allocation that the §7.4 pass will retire needs NO conservation Hard at all (conservation's only job for
+a voided allocation is deciding effective-vs-inert for the dangling-void arm); alternatively compute its
+conservation against the tranche-free residue. Add the probe-B KAT (one extra CSV row in
+`vault_inert_alloc`).
+
+#### r2-I-2. (NEW) The D-8 deny-effectiveness arm is now completely UNPINNED — deleting it leaves the
+entire 2159-test suite green, and the silent Path-B discard returns undetected
+
+`resolve.rs:1329-1339`. The totals restructure silently **de-pinned the two Task-5 KATs**: their
+allocations mirror the TRANCHE's totals (100M sat/$0 — `kat_tranche.rs:533,:573`), which under the new
+key mismatch `documented_held` (= 0), so both now assert `SafeHarborUnconservable` via the **totals**
+arm and no longer discriminate the tranche arm at all. **Verified empirically (Evidence r2-M):** with
+`has_tranche_residue && !is_void_targeted` mutated to `false`, `make check` is **2159/2159 green**, and
+a documented-lots allocation beside a live 100M-sat tranche goes silently effective — zero blockers,
+`EstimatedConservative remaining_sat = 0` after the 2025 seed, **total holdings 40M sat while the filer
+holds 140M**. That is precisely the arch-r3-New-1 catastrophe D-8 exists to foreclose, reachable again
+with no test holding the door. (The fold's "both halves mutation-proven RED" claim is true only of the
+two narrower mutations — dropping the subtraction, dropping the negation — both killed by the new
+void-inert KAT; the arm-deletion mutation, i.e. the guarantee itself, is killed by nothing.) Fix: an
+engine-level KAT in the probe-A shape — documented buy + tranche + a NON-voided allocation listing
+exactly the documented residue (+ a ≥2025 event so the seed fires) → asserts the Hard fires AND the
+tranche survives; and re-point the two Task-5 KATs (or their comments) at what they now exercise.
+
+#### r2-I-3. (NEW) SPEC D-8's normative backstop sentence is now false as written — the fold changed the
+guarantee's letter (conditional denial; the dangling-void cell now Path-B-seeds under a Hard
+`DecisionConflict`) without amending the SPEC
+
+`SPEC.md:114-121` still mandates, unconditionally: "a `SafeHarborAllocation` is **denied effectiveness**
+(kept inert → Path A → the tag survives …) … **whenever** the pre-2025 Universal residue contains an
+`EstimatedConservative` lot with `remaining_sat > 0`". The implementation now conditions denial on
+`!is_void_targeted` (`resolve.rs:1328-1329`), and in the voided×would-be-effective cell the allocation
+**enters `effective`** → §7.4 raises the Hard `DecisionConflict` (`resolve.rs:1377-1385`, severity
+verified `state.rs:80-96`) → `TransitionMode::PathB` seeds and **the tag does NOT survive in the folded
+state** (holdings/lots show the tranche gone) — loud (every year NotComputable; nothing can be filed
+off the discarded state), but the SPEC's "can never coexist … a construction" and "the tag survives"
+are both now false in that cell. The cell is reachable beyond hand-crafting: void-inert → declare →
+later reject/void the year's only 2025 disposition → the time-bar un-bars and the voided allocation
+flips effective. No KAT pins the cell's outcome (loud Hard + no filing), and the substituted invariant
+lives only in a code comment — a future reviewer reading D-8 will "correct" the code back to
+unconditional denial and reinstate the r1 I-1 brick (or vice versa). Fix: amend SPEC D-8 to state the
+actual invariant ("denied effectiveness while non-void-targeted; a void-targeted allocation is either
+retired by §7.4 (inert) or Hard-`DecisionConflict`ed (effective) — in every case no filing can occur
+over a discarded tranche"), and pin the cell with a KAT. Engine change not required if the amendment is
+accepted; r2-I-1/I-2's fixes must then hold the amended letter.
+
+### MINOR
+
+- **r2-M-1.** The with-tranche TUI Tax tab still runs `2 + T` full projections per ~100 ms draw tick
+  (`tabs/tax.rs` → `tranche_report_advisory` → `overpayment_nudge_lines` past the new gate) — the
+  memoize-into-`Snapshot` half of r1 I-2's fix shape was not done and is NOT among the filed FOLLOWUPS
+  residuals. Scoped now to conservative-filing users (opt-in feature, small-ledger persona), hence Minor,
+  but file it with an owner.
+
+### NIT
+
+- **r2-N-1.** `void_inert_alloc_then_declare_pre2025_tranche_keeps_the_year_computable`
+  (`declare_tranche_cli.rs:690`) never calls `compute_tax_year` — it asserts blocker-absence and infers
+  computability from the remaining Timebar being Advisory. True today; the name promises more than the
+  assertion holds.
+
+### Evidence r2 (scratchpad probes; repo byte-identical after — `git status` clean, `make check` 2159 green)
+
+**r2-B / r2-B2 — the carried I-1 (current, unmutated source):**
+
+```
+--- B-pre: void-inert alloc, BEFORE the tranche (guard's view) ---
+  [SafeHarborTimebar] severity=Advisory event=Some("decision|1")   -> not in force, tranche ADMITTED
+--- B-post: void-inert alloc + tranche + pre-2025 sell ---
+  [SafeHarborUnconservable] severity=Hard event=Some("decision|1") :: allocation totals != Universal remainder at 2025-01-01
+  EstimatedConservative remaining_sat = 95000000
+--- B2: void-inert alloc + tranche, NO pre-2025 sell (KAT shape) ---
+  [SafeHarborTimebar] severity=Advisory event=Some("decision|1")   (clean — Path A, year computes)
+```
+
+**r2-M — the arm-deletion mutation (`has_tranche_residue && !is_void_targeted` → `false`), then restored:**
+
+```
+make check → Summary [21.2s] 2159 tests run: 2159 passed   (the guarantee is unpinned)
+--- A2: documented-lots alloc + tranche + 2025 sell (seed fires) ---
+  (no blockers)
+  EstimatedConservative remaining_sat = 0
+  total holdings sat = 40000000  (user actually holds 140_000_000)
+```
+
+**Probe A (current source, sanity):** the same configuration on the UNMUTATED tree fires the tranche arm
+(`Hard SafeHarborUnconservable`, tranche survives) — the arm is correct; it is merely untested (r2-I-2).

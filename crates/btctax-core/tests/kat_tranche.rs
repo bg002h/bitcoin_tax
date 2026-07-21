@@ -627,3 +627,47 @@ fn a_filed_tranche_projection_is_not_pseudo_active() {
         "a real tranche never activates pseudo mode → clean, non-watermarked export (D-5)"
     );
 }
+
+/// Task 5 / T16 review r2 (I-1 blind spot): a VOIDED allocation whose blocker is a TOTALS-mismatch caused
+/// by a pre-2025 disposal RE-KEYING the residue (the tranche's $0 lot, homed at window_end, is consumed
+/// FIFO by a later pre-2025 sale, so `estimated_conservative_remaining → 0` yet the allocation's listed
+/// totals no longer match) is RETIRED by the §7.4 retirement pass — NOT left with a permanent Hard. This
+/// is the exact case the r1 `documented_held` fix missed (it subtracted only the REMAINING tranche sat);
+/// the reason-agnostic blocker retraction handles totals-mismatch, tranche-residue, and timebar alike.
+#[test]
+fn voided_allocation_with_a_rekeyed_totals_mismatch_is_retired_over_a_tranche() {
+    let w = exch();
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2015 - 01 - 01),
+        date!(2015 - 12 - 31),
+    );
+    // A pre-2025 sale (2024) fully consumes the tranche (FIFO: homed 2015-12-31, before 2024) → the
+    // pre-2025 Universal residue is re-keyed.
+    let sell = sell_ev(
+        "SELL",
+        datetime!(2024-06-01 00:00 UTC),
+        &w,
+        100_000_000,
+        40_000,
+    );
+    // An allocation listing the ORIGINAL 100M/$0 residue — now a TOTALS-mismatch against the post-sale snapshot.
+    let a = alloc_ev(
+        2,
+        true,
+        LotMethod::Hifo,
+        vec![alloc_lot(&w, 100_000_000, 0, date!(2015 - 12 - 31))],
+    );
+    let v = void_ev(3, EventId::decision(2));
+    let st = project(&[t, sell, a, v], &prices(), &cfg());
+    assert!(
+        !st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::SafeHarborUnconservable),
+        "the voided allocation's re-keyed totals-mismatch Unconservable is RETRACTED (retired) — no \
+         permanent Hard: {:?}",
+        st.blockers
+    );
+}

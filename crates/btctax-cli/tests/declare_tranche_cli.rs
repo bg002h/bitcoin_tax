@@ -624,13 +624,15 @@ fn reconcile_void_refuses_voiding_an_effective_allocation() {
     );
 }
 
-/// (a3, T16 arch r1 Minor) Defense-in-depth: even a HAND-CRAFTED raw void of an effective allocation
-/// (bypassing `reconcile void`'s §7.4 refusal above) still refuses a pre-2025 tranche — the record-time
-/// guard consults the engine's effective-vs-inert view (blockers), not just the raw void set, so the
-/// effective-but-voided allocation is STILL in force. Mirrors the P9 id-guard's hand-crafted-vault
-/// posture (the T5 projection backstop is the guarantee behind it).
+/// (a3, T16 review r2 / I-1) A HAND-CRAFTED raw void of an EFFECTIVE allocation (bypassing `reconcile
+/// void`'s §7.4 refusal above) followed by a pre-2025 tranche: the record-time guard ADMITS the tranche
+/// (a voided allocation is not in force — the ENGINE resolves the void), and the projection resolves
+/// SAFELY — the D-8 backstop denies the allocation effectiveness, the §7.4 retirement pass retires it,
+/// and Path A governs so the tranche SURVIVES. Crucially: NO silent Path-B discard (the allocation never
+/// seeds `SafeHarborAllocated` lots), which is what the SPEC's "denied effectiveness, tag survives"
+/// promises even for this hand-crafted corner.
 #[test]
-fn pre2025_tranche_refused_under_a_handcrafted_dangling_void_of_an_effective_allocation() {
+fn handcrafted_void_of_effective_alloc_then_tranche_admits_and_survives_via_path_a() {
     let dir = tempfile::tempdir().unwrap();
     let vault = vault_effective_alloc(dir.path());
     let alloc_id = effective_alloc_id(&vault);
@@ -649,7 +651,8 @@ fn pre2025_tranche_refused_under_a_handcrafted_dangling_void_of_an_effective_all
         .unwrap();
         s.save().unwrap();
     }
-    let err = cmd::tranche::declare_tranche(
+    // ADMITTED — the voided allocation is not in force.
+    cmd::tranche::declare_tranche(
         &vault,
         &pp(),
         50_000_000,
@@ -658,15 +661,32 @@ fn pre2025_tranche_refused_under_a_handcrafted_dangling_void_of_an_effective_all
         date!(2018 - 12 - 31),
         now(),
     )
-    .unwrap_err();
+    .unwrap();
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    // The tranche survives via Path A — and the allocation NEVER seeds a Path-B `SafeHarborAllocated` lot
+    // (no silent discard). The year is computable (no Hard SafeHarborUnconservable left on the voided alloc).
     assert!(
-        matches!(err, CliError::Usage(_)),
-        "the effective-but-voided allocation still blocks the tranche: {err}"
+        state.lots.iter().any(|l| l.basis_source
+            == btctax_core::BasisSource::EstimatedConservative
+            && l.remaining_sat > 0),
+        "the tranche survives via Path A (tag intact)"
     );
-    assert_eq!(
-        count(&vault, |p| matches!(p, EventPayload::DeclareTranche(_))),
-        0,
-        "the refused tranche appends nothing (fail-closed)"
+    assert!(
+        !state
+            .lots
+            .iter()
+            .any(|l| l.basis_source == btctax_core::BasisSource::SafeHarborAllocated),
+        "no Path-B seed lot — the tranche is never silently discarded (SPEC D-8)"
+    );
+    assert!(
+        !state
+            .blockers
+            .iter()
+            .any(|b| b.kind == btctax_core::BlockerKind::SafeHarborUnconservable),
+        "no Hard SafeHarborUnconservable left on the retired allocation: {:?}",
+        state.blockers
     );
 }
 
@@ -705,12 +725,14 @@ fn void_inert_alloc_then_declare_pre2025_tranche_keeps_the_year_computable() {
 
     let s = Session::open(&vault, &pp()).unwrap();
     let (state, _) = s.project().unwrap();
+    // No Hard blocker of ANY kind survives on the retired allocation ⇒ the year is computable (r2-N-1: pin
+    // computability directly, not just the absence of the specific Unconservable).
     assert!(
         !state
             .blockers
             .iter()
-            .any(|b| b.kind == btctax_core::BlockerKind::SafeHarborUnconservable),
-        "no Hard SafeHarborUnconservable on the voided-inert allocation (I-1): {:?}",
+            .any(|b| b.kind.severity() == btctax_core::Severity::Hard),
+        "no Hard blocker survives the void-inert-then-declare flow ⇒ every year computes (I-1): {:?}",
         state.blockers
     );
     assert!(
