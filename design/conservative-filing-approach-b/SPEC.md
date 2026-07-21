@@ -9,8 +9,13 @@ disposal legs (r1) → the §170(e)/8283/§1015 charitable surface incl. the sec
 removal-leg reorders + the current-year Σ + the uncomputable-audience-year blind spot (r3) → the cross-YEAR
 §1212(b)/§170(d) carryover cascade (r4) → exhausted (r5, fifth-pass census: QBI REIT/PTP verified
 crypto-insensitive, no third chain). Residual: 3 non-gating Nits folded (Acknowledgment three-flavor
-enumeration, "over both folds" wording ×1 shared). **Next: `writing-plans` for the Phase-1a/1b implementation
-plan.**
+enumeration, "over both folds" wording ×1 shared).
+**★ POST-GREEN AMENDMENT (2026-07-21, plan-review-Opus r3 tax I-1):** BG-D4's clamp bound was corrected from
+`clamp(net, $0, estimate)` to `clamp(net − documented, $0, estimate)` — the old formula stacked the unclamped
+`documented_share` on top of a net-clamped estimate, filing an estimate-ENABLED loss when a TP8(c) fee carry
+was present (the 5-round SPEC review's prose invariant was right but the formula didn't implement it). The
+§6 loss-clamp KAT is updated (relocated-fee-below-floor → `gain = $0`, not `< 0`). Re-verified in the plan's
+r4 two-lens review (Opus).
 **Branch:** `feat/conservative-filing-b` (off `main` @ the v0.8.0 release).
 **Parent:** the shipped Conservative-Filing v1 (`design/conservative-filing/SPEC.md`, v0.8.0). This spec is the
 first of Approach B's sub-projects; the guided **wizard** (sub-project 2) and **VARIOUS multi-date rows**
@@ -116,11 +121,17 @@ which honestly *widens* the window and *lowers* the floor. Both are anti-oversta
     *coherently* from one declared fact. A date that moved term without moving the window is the exact
     incoherence G-4 forbids.
 - **BG-D4 The loss clamp (fold-time) — the never-understate structural guarantee.** Per disposal leg, the
-  **estimate-claimed basis is `clamp(net_proceeds_share, $0, estimate_share)` = `min(estimate_share,
-  max(net_proceeds_share, $0))`** — the estimate-attributable gain is clamped `≥ 0` AND the estimate basis is
-  never negative (this closes both the parent-KAT `fee_usd > proceeds` corner (`fold.rs` netting) and the
-  cent-scale negative-remainder corner — tax r1 I-1/M-2; a `min(floor, net)` alone would file a NEGATIVE
-  estimate basis). **Unclaimed floor EVAPORATES** (it never shifts to another leg — fabrication).
+  **estimate-claimed basis is clamped against the proceeds REMAINING after the documented component**:
+  `estimate_basis = clamp(net_proceeds_share − documented_share, $0, estimate_share) = min(estimate_share,
+  max(net_proceeds_share − documented_share, $0))`; `reported_basis = documented_share + estimate_basis`. The
+  estimate-attributable gain is clamped `≥ 0` AND the estimate basis is never negative (this closes the parent-KAT
+  `fee_usd > proceeds` corner (`fold.rs` netting), the cent-scale negative-remainder corner — tax r1 I-1/M-2 —
+  and the **documented-crowd-out corner** where a documented fee carry `> 0` combined with a plain
+  `clamp(net, …)` bound would let the estimate absorb proceeds the documented basis also needs, filing an
+  estimate-ENABLED loss: floor $12k + $30 fee carry sold at $8k → `30 + min(12k, 8k) = 8,030` = a −$30 loss
+  that is 100% but-for the estimate — **plan-review-Opus r3 tax I-1**; subtracting `documented_share` from the
+  clamp bound files `gain = $0` there, and lets a *genuine* documented loss (documented ALONE `> net`) still
+  reach negative). **Unclaimed floor EVAPORATES** (it never shifts to another leg — fabrication).
   - **★ The estimate component is the STORED `filed_basis` pro-rated over the tranche's sats — NOT the lot's
     `usd_basis` (arch r1 I-2 / tax r1 I-1).** The TP8(c) SELF-TRANSFER fee carry re-homes documented fee basis
     *into* the surviving lot's `usd_basis` (`rehome_onto_lot`, `fold.rs`) — via the product's own P8-recommended
@@ -495,9 +506,11 @@ Every primitive TDD + mutation-proven; full suite + all CI-only jobs green; SPEC
   survives a price-data change (fold uses stored, verify flags drift, direction-aware per N-3).
 - **The loss clamp (BG-D4):** a floor on a tranche sold BELOW the window low files `$0` gain, NOT a loss;
   the estimate basis never goes negative in the `fee_usd > proceeds` / cent-scale-negative-remainder corners
-  (I-1/M-2); **a relocated-with-fee-then-promoted tranche sold below floor keeps its documented fee component
-  UNCLAMPED** — the estimate share is decomposed from the stored `filed_basis`, not the merged `lot.usd_basis`
-  (arch r1 I-2 / tax r1 I-1); the amended invariant KAT.
+  (I-1/M-2); the estimate share is decomposed from the stored `filed_basis`, not the merged `lot.usd_basis`
+  (arch r1 I-2 / tax r1 I-1). **★ A relocated-with-fee-then-promoted tranche sold below floor files `gain = $0`
+  — the estimate yields to the documented fee (clamp bound = `net − documented`), never manufacturing an
+  estimate-ENABLED loss (Opus r3 tax I-1); a genuine documented loss (documented ALONE `> net`, e.g.
+  `fee_usd > proceeds`) still reaches negative — attribution intact.** The amended invariant KAT.
 - **Estimate-never-funds-a-deduction (BG-D11 / tax r1 C-1 + tax r2 I-1/M-1):** a promoted tranche donated to
   charity while SHORT-TERM files a `$0`/documented §170(e)(1)(A) deduction (NOT the floor) on **BOTH emitters** —
   the fold's `claimed_deduction` / Form 8283 **and** the full-return `crypto_charitable_gifts` → Schedule A

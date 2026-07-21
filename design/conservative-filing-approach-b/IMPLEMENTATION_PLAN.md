@@ -2,14 +2,15 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** DRAFT — **plan-review r1 + r2 FOLDED** (r1: tax 0C/8I + arch 0C/6I; r2: tax 0C/1I + arch 0C/2I,
-all persisted verbatim in `reviews/plan-{tax,architecture}-fable-review-r{1,2}.md`); pending the **r3** re-review
-to 0C/0I per `STANDARD_WORKFLOW.md` **before any execution** (r3-onward run on **Opus** per user direction). r2
-verified 7/8 tax + 5/6 arch r1 Importants genuinely resolved; the residue was the CONVERGED verify-drift
-false-cover (I *claimed* it folded to T11 in r1 but had not written it — now REALLY in **T11 Step 3b** with
-`promote_drift_advisory` + `cmd/inspect.rs::verify` + a KAT), the second `FoldCtx` site in `universal_snapshot`
-(→ T4 threads the `PromoteSet` there too, closing a snapshot-divergence bug), the T8 amend-direction sign
-(refund vs pay), and small consent-copy / `PROMOTE_ACK_PHRASE` / `Printed8275`-commit fixes.
+**Status:** DRAFT — **plan-review r1 + r2 + r3 FOLDED** (r1: tax 0C/8I + arch 0C/6I [Fable]; r2: tax 0C/1I +
+arch 0C/2I [Fable]; r3: tax 0C/1I + arch 0C/1I [**Opus**, per user direction], all persisted verbatim in
+`reviews/plan-{tax,architecture}-{fable-review-r{1,2},opus-review-r3}.md`); pending the **r4** re-review to 0C/0I
+(Opus) per `STANDARD_WORKFLOW.md` **before any execution**. r3 (fresh Opus lenses) verified all r2 folds
+genuinely resolved and found two the Fable rounds missed: **(arch)** `FoldCtx` has **FOUR** construction sites,
+not two (`fold`/`universal_snapshot` + the optimizer's `pools_before`/`state_as_of`) — T4 now threads all four;
+**(tax)** a real **SPEC BG-D4 formula bug** — the clamp bound omitted `documented_share`, filing an
+estimate-ENABLED loss when a fee carry is present → **the GREEN SPEC was amended** (clamp bound `net − documented`)
++ T4 KATs flipped/added. Plus small drift-copy / KAT-pin fixes.
 
 **Goal:** Let a filer knowingly promote a v1 `$0`-basis conservative tranche to a filed **`>$0` basis floor**
 (window-min daily close), backed by a mandatory **Form 8275**, with every gate/advisory/decomposition the GREEN
@@ -408,16 +409,23 @@ the relocation tag-carry reds `relocated_promoted_tranche_keeps_tag_and_floor`.
 
 **Files:**
 - Modify: `crates/btctax-core/src/project/fold.rs` (★ FIRST thread the `PromoteSet`: add `promotes: PromoteSet`
-  to `FoldCtx` :21, populate it in `fold` :376 from `res.promotes` (T3), and pass `&ctx.promotes` to the **eight**
-  builder call sites :362/:635/:641/:832/:1118/:1122/:1195/:1199 (2× disposal, 2× removal, 4× fee — arch r1 N-1;
-  arch r1 I-1); then `make_disposal_legs` non-dual arm :192-202)
-- ★ Modify: `crates/btctax-core/src/project/transition.rs` (the **SECOND** `FoldCtx` construction site, :60,
-  inside `universal_snapshot` — "Same FoldCtx the real fold uses, so the pre-2025 residue cannot diverge"; arch
-  r2 I-1). Thread a `promotes: &PromoteSet` param into `universal_snapshot` and its inner `FoldCtx`; the single
-  call site (resolve.rs:1286, step 3) has `promotes` in scope. **Without this, the pre-2025 conservation
-  snapshot folds with an EMPTY promote set → T5's fee-evaporation does NOT apply in the snapshot → `snap.basis`
-  diverges from the real fold → the §7.4 `alloc_basis != snap.basis` check (resolve.rs:1305) adjudicates against
-  a phantom basis exactly in the fully-consumed-tranche case where the D-8 tag-arm no longer fires.**
+  to `FoldCtx` :21, and populate it from `res.promotes` at **ALL THREE `FoldCtx` construction sites in this file
+  — `fold` :413, `pools_before` :463, `state_as_of` :520** (Opus r3 arch I-1 — `FoldCtx` has FOUR sites total,
+  not two; all three fold.rs sites take `res: Resolution`, so `res.promotes` is in scope; `optimize.rs` calls
+  these fns by unchanged signature, so no new file); then pass the promote set to the **eight** builder call
+  sites :362/:635/:641/:832/:1118/:1122/:1195/:1199 (2× disposal, 2× removal, 4× fee). ★ **NB (Opus r3 arch
+  N-1):** site :362 is INSIDE `consume_fee` (which takes `config`, not `ctx`), so pass `consume_fee`'s
+  forwarded `promotes` param there (T5), NOT `&ctx.promotes`; then `make_disposal_legs` non-dual arm :192-202)
+- ★ Modify: `crates/btctax-core/src/project/transition.rs` (the FOURTH `FoldCtx` construction site, :60, inside
+  `universal_snapshot` — "Same FoldCtx the real fold uses, so the pre-2025 residue cannot diverge"; arch r2 I-1).
+  Thread a `promotes: &PromoteSet` param into `universal_snapshot` and its inner `FoldCtx`; the single call site
+  (resolve.rs:1286, step 3) has `promotes` in scope. **Without threading EVERY FoldCtx site: (a) an EMPTY set at
+  the snapshot → the pre-2025 conservation fold skips T5's fee-evaporation → `snap.basis` diverges → the §7.4
+  `alloc_basis != snap.basis` check (resolve.rs:1305) adjudicates against a phantom basis in the
+  fully-consumed-tranche case (arch r2 I-1); (b) an EMPTY set at `state_as_of` (the optimizer's finalized
+  LedgerState, `optimize::consult_sale`) → the optimizer gets un-clamped/un-evaporated basis for a promoted
+  disposal → wrong tax-minimization advice (Opus r3 arch I-1). Adding the field simply won't COMPILE (E0063)
+  until all four sites are updated — the empty-set shortcut is the hazard.**
 - Create helper in: `crates/btctax-core/src/conservative_promote.rs` (`clamped_leg_basis`)
 - Modify: `crates/btctax-core/tests/kat_conservative.rs` (amend the parent Invariant KAT wording per BG-D4 —
   SPEC §3 item 6; the attribution sentence now reads "…never the estimate; a promoted-tranche leg's
@@ -431,10 +439,15 @@ the relocation tag-carry reds `relocated_promoted_tranche_keeps_tag_and_floor`.
   `make_removal_legs` T6, `consume_fee` T5) each gain a `promotes: &PromoteSet` param.
 - Produces:
   ```rust
-  // conservative_promote.rs — BG-D4. `usd_basis_share` = c.gain_basis (may include a TP8(c) fee carry).
-  //   estimate_share = filed_basis × leg_sat / tranche_sat  (from the STORED promote, NOT usd_basis_share)
-  //   documented_share = usd_basis_share − estimate_share   (UNCLAMPED)
-  //   reported_basis   = documented_share + clamp(net_proceeds_share, $0, estimate_share)
+  // conservative_promote.rs — BG-D4 (Opus r3 tax I-1 formula). `usd_basis_share` = c.gain_basis (may include a
+  // TP8(c) fee carry).
+  //   estimate_share    = filed_basis × leg_sat / tranche_sat  (from the STORED promote, NOT usd_basis_share)
+  //   documented_share  = usd_basis_share − estimate_share     (UNCLAMPED; a documented fee carry ≥ 0)
+  //   estimate_basis    = clamp(net_proceeds_share − documented_share, $0, estimate_share)   ← bound minus documented
+  //   reported_basis    = documented_share + estimate_basis
+  // ★ The estimate is clamped against the proceeds REMAINING after documented basis, so the estimate never
+  //   crowds the documented component below zero (an estimate-ENABLED loss). A genuine documented loss
+  //   (documented ALONE > net) still reaches negative: estimate_basis → $0, reported = documented > net.
   pub fn clamped_leg_basis(
       promote: Option<&PromoteEntry>, leg_sat: Sat, usd_basis_share: Usd, net_proceeds_share: Usd,
   ) -> Usd; // returns usd_basis_share unchanged when promote is None
@@ -451,12 +464,26 @@ the relocation tag-carry reds `relocated_promoted_tranche_keeps_tag_and_floor`.
       assert!(leg.gain >= Usd::ZERO && leg.basis == leg.proceeds, "basis = proceeds, no fabricated loss");
   }
   #[test]
-  fn relocated_with_fee_then_promoted_keeps_documented_fee_unclamped() {
-      // The documented fee carry (TP8(c), merged into usd_basis) stays UNCLAMPED; the estimate share is
-      // decomposed from the STORED filed_basis, not lot.usd_basis (arch r1 I-2 / tax r1 I-1).
-      let st = project(&promote_relocate_fee_then_sell_below_floor(), &prices(), &cfg());
+  fn relocated_with_fee_then_promoted_sold_below_floor_files_zero_gain_not_an_estimate_enabled_loss() {
+      // ★ Opus r3 tax I-1: floor $12k + a $30 documented fee carry, sold at net $8k. The estimate yields to
+      // the documented fee (clamp bound = net − documented), so gain = $0 — NOT the −$30 estimate-ENABLED
+      // loss the old `clamp(net, …)` bound filed (the documented-only outcome here is a $7,970 GAIN).
+      let st = project(&promote_relocate_fee30_then_sell_net8k_floor12k(), &prices(), &cfg());
       let leg = only_disposal_leg(&st);
-      assert!(leg.gain < Usd::ZERO, "the documented fee corner still reaches negative (attribution intact)");
+      assert_eq!(leg.gain, Usd::ZERO, "no estimate-enabled loss; estimate yields to documented (BG-1)");
+  }
+  #[test]
+  fn a_genuine_documented_loss_still_reaches_negative() {
+      // documented ALONE > net (e.g. fee_usd > proceeds): estimate_basis → $0, reported = documented > net,
+      // gain < 0 = a REAL §1001(b) documented loss (attribution intact).
+      let st = project(&promote_then_dispose_documented_alone_gt_proceeds(), &prices(), &cfg());
+      assert!(only_disposal_leg(&st).gain < Usd::ZERO, "a pure documented loss still reaches negative");
+  }
+  #[test]
+  fn sold_just_above_floor_band_still_files_zero_gain() {
+      // The crowd-out also bit `estimate ≤ net < estimate + documented`; the net − documented bound fixes it.
+      let st = project(&promote_sold_in_estimate_plus_documented_band(), &prices(), &cfg());
+      assert_eq!(only_disposal_leg(&st).gain, Usd::ZERO, "estimate fills only the room documented leaves (Opus r3 tax I-1)");
   }
   #[test]
   fn estimate_basis_never_goes_negative_when_fee_exceeds_proceeds() {
@@ -476,6 +503,15 @@ the relocation tag-carry reds `relocated_promoted_tranche_keeps_tag_and_floor`.
       // conservation holds (or the correct blocker fires) because the snapshot folded WITH the promote set:
       assert!(conservation_adjudicated_against_evaporated_residue(&st));
   }
+  #[test]
+  fn the_optimizer_sees_the_clamped_promoted_basis_not_a_phantom() {
+      // ★ Opus r3 arch I-1: state_as_of (fold.rs:520 → optimize::consult_sale) builds a FoldCtx too. If it
+      // threads an EMPTY promote set the optimizer sees un-clamped/un-evaporated basis for a promoted disposal
+      // → wrong tax-minimization advice. Exercise the optimizer over a promoted below-window-low disposal.
+      let advice = optimize::consult_sale(&promoted_below_floor_optimizer_scenario(), ..);
+      assert_eq!(advice.leg_gain_for(the_promoted_disposal), Usd::ZERO,
+          "the optimizer's finalized state uses the clamped promoted basis (gain $0, not the phantom)");
+  }
   ```
 - [ ] **Step 2: Run — expect FAIL.** Run: `cargo test -p btctax-core --test kat_promote -- clamp floor relocated estimate_basis snapshot_sees 2>&1 | tail -30`
 - [ ] **Step 3: Implement.** First do the `FoldCtx`/`Resolution` threading (Files above), so `&ctx.promotes`
@@ -486,7 +522,8 @@ the relocation tag-carry reds `relocated_promoted_tranche_keeps_tag_and_floor`.
   at :133-140). `clamped_leg_basis`: if `promote` is `None`, return `usd_basis_share`; else compute
   `estimate_share = round_cents(filed_basis * Usd::from(leg_sat) / Usd::from(tranche_sat))`,
   `documented_share = usd_basis_share − estimate_share`,
-  return `documented_share + min(estimate_share, max(net_proceeds_share, Usd::ZERO))`. `gain = round_cents(proceeds − basis)`
+  return `documented_share + min(estimate_share, max(net_proceeds_share − documented_share, Usd::ZERO))`
+  (★ the bound is `net − documented`, Opus r3 tax I-1 — NOT bare `net`). `gain = round_cents(proceeds − basis)`
   (unchanged formula). The §1015 NoGainNoLoss precedent (fold.rs:181-190, reported≠consumed) makes this legal;
   a tranche lot never enters the dual arm (`rehome_onto_lot` never promotes `dual_loss_basis` None→Some), so
   the non-dual-arm placement is complete.
@@ -499,10 +536,14 @@ the relocation tag-carry reds `relocated_promoted_tranche_keeps_tag_and_floor`.
   ```
 
 **Mutation to kill:** decomposing from `c.gain_basis` instead of the stored `filed_basis` reds
-`relocated_with_fee_then_promoted_keeps_documented_fee_unclamped`; a bare `min(est, net)` (no `max(net,0)`)
-reds `estimate_basis_never_goes_negative_when_fee_exceeds_proceeds`; clamping to `net` unconditionally (not
-just the estimate share) reds the documented-fee-negative KAT; passing `&PromoteSet::new()` into
-`universal_snapshot` (the empty-set shortcut) reds `the_pre2025_conservation_snapshot_sees_the_fee_evaporation_not_a_phantom_basis`.
+`relocated_with_fee_then_promoted_sold_below_floor_files_zero_gain_not_an_estimate_enabled_loss`; a bare
+`min(est, net)` (no `max(·,0)`) reds `estimate_basis_never_goes_negative_when_fee_exceeds_proceeds`;
+**clamping against bare `net` instead of `net − documented_share` (the old SPEC formula) reds
+`relocated_with_fee_then_promoted_sold_below_floor_files_zero_gain…` and `sold_just_above_floor_band_still_files_zero_gain`**
+(the estimate-enabled loss, Opus r3 tax I-1); dropping the `net − documented` subtraction entirely for the
+documented-alone-`>`-net case reds `a_genuine_documented_loss_still_reaches_negative`; passing `&PromoteSet::new()`
+into any `FoldCtx` site reds `the_pre2025_conservation_snapshot_sees_the_fee_evaporation_not_a_phantom_basis`
+and the optimizer KAT (below).
 
 ### Task 5: BG-D4 fee-draw evaporation at `consume_fee` / `FeeCarry`
 
@@ -860,7 +901,10 @@ CLI void-direction test.
       // 2024 (table ships) + profile + a donation reorder → ComputedTax with Some(deduction_delta), NOT
       // labeled uncomputable and NOT dropping the Schedule-A change (engine B can't price it — tax r3 I-2 / plan I-4).
       let terms = consent_terms(&promote_reorders_2024_donation_with_profile(), .., Some(&profile), ..);
-      assert!(terms.iter().any(|t| matches!(t, ConsentTerm::ComputedTax { deduction_delta_usd: Some(d), .. } if *d != Usd::ZERO)));
+      // donation-ONLY fixture → the tax-Δ is exactly $0 AND the deduction-Δ is Some(≠0): pin BOTH so a mutation
+      // emitting {delta: nonzero, deduction: Some} does not survive (Opus r3 tax N-1).
+      assert!(terms.iter().any(|t| matches!(t,
+          ConsentTerm::ComputedTax { delta_usd, deduction_delta_usd: Some(d), .. } if *delta_usd == Usd::ZERO && *d != Usd::ZERO)));
   }
   #[test]
   fn sell_this_year_then_promote_includes_the_current_year_term() {
@@ -1045,12 +1089,20 @@ pre-check reds `a_second_promote_is_refused_by_would_conflict`.
       let ev = promote_at_stored_floor(dec!(12_000));
       let hi = prices_where_window_min_recomputes(dec!(9_000)); // corrected data ⇒ stored 12k > recomputed 9k
       let drift = promote_drift_advisory(&ev, &hi);
-      assert!(drift.iter().any(|l| l.contains("void") && l.contains("re-promote")), "direction-aware overstated-floor hint");
+      // stored ABOVE recomputed → overstated basis → conditional void+re-promote copy (BG-D9-style "if not yet
+      // filed"; the engine has NO filed-year concept, so it's CONDITIONAL COPY, not an engine branch — Opus r3 tax M-1):
+      assert!(drift.iter().any(|l| l.contains("void") && l.contains("re-promote") && l.contains("not yet filed")));
+      // stored BELOW recomputed → understated-floor advisory (tax-safe; still surfaced):
+      let lo = prices_where_window_min_recomputes(dec!(15_000)); // stored 12k < recomputed 15k
+      assert!(!promote_drift_advisory(&ev, &lo).is_empty(), "the below-direction understated-floor advisory also fires");
       // ★ the FOLD is unaffected — it uses the STORED filed_basis, not the recomputed one:
       let st = project(&ev, &hi, &cfg());
       assert_eq!(only_lot(&st).usd_basis, dec!(12_000), "fold uses the STORED number forever");
   }
   ```
+  Plus a CLI-surface test in `promote_cli.rs` (arch r3 M-1): `verify` (with the threaded `PriceProvider`)
+  returns a `VerifyReport` whose `drift` field is **non-empty** for a drifted promote — pins that the advisory
+  is actually WIRED into `verify`/`build_verify`, not just the core fn.
 - [ ] **Step 2: Run — expect FAIL.** Run: `cargo test -p btctax-core --test kat_promote -- basis_methodology dip_and_self funnel verify_drift 2>&1 | tail -20`
 - [ ] **Step 3: Implement.** `basis_methodology` (:141-165): distinguish promoted legs (via
   `leg.lot_id.origin_event_id ∈ promote set`) — the promoted `>$0` line gets the estimate disclosure ("basis
@@ -1072,10 +1124,12 @@ pre-check reds `a_second_promote_is_refused_by_would_conflict`.
 - [ ] **Step 3b: The BG-D3 verify-drift advisory (the REAL owned step — tax r2 I-1 / arch r2 I-2).** Implement
   `promote_drift_advisory` in `conservative_promote.rs`: for each live promote, recompute `filed_basis_for`
   against the CURRENT `prices` and compare to the STORED `filed_basis`. Stored **above** the recomputed
-  reference on a not-yet-filed position → the "void + re-promote to the corrected lower number" G-4 hint;
-  stored **below** → an understated-floor advisory; already-filed years → advisory-only (the filed number
-  stands). Surface it through `cmd/inspect.rs::verify` — thread a `PriceProvider` into `verify` and add a
-  `drift: Vec<String>` field to `VerifyReport`. The FOLD is unchanged (it always uses the STORED number, T3).
+  reference → the overstated-basis case, emitting **conditional COPY** (the engine has NO filed-year concept —
+  Opus r3 tax M-1, mirroring BG-D9): *"if this position is not yet filed, void + re-promote to the corrected
+  lower number $X (G-4); if already filed, the filed number stands — advisory only."* Stored **below** the
+  recomputed reference → an understated-floor advisory (tax-safe, still surfaced). Surface it through
+  `cmd/inspect.rs::verify` — thread a `PriceProvider` into `verify` and add a `drift: Vec<String>` field to
+  `VerifyReport`, populated in `build_verify`. The FOLD is unchanged (it always uses the STORED number, T3).
 - [ ] **Step 4: Run — expect PASS** + `make check` + regen any advisory goldens (`make examples` if J-journeys touch tranche copy).
 - [ ] **Step 5: Commit.**
   ```bash
@@ -1404,6 +1458,19 @@ floor-vs-as-filed 8275 amount (→ T13), an uncreated `Printed8275` (→ T13), 8
 aliasing), and several under-pinned/vacuous KATs (→ folded into the owning tasks). All 8+6 Importants + 11
 Minors/Nits folded; the `Usd::from_dollars` → `dec!` sweep applied file-wide; `EventId` rendered via
 `.canonical()`.
+
+**Plan-review r3 fold (Opus, both lenses):** r3 verified every r2 fold genuinely resolved and surfaced two
+findings the Fable rounds missed. **Arch I-1:** `FoldCtx` has FOUR construction sites (`fold` fold.rs:413,
+`universal_snapshot` transition.rs:60, AND `pools_before` fold.rs:463 + `state_as_of` fold.rs:520 — the two
+optimizer surfaces); T4 now threads `res.promotes` into all four (the empty-set shortcut at `state_as_of` would
+hand the optimizer un-clamped basis) + an optimizer KAT + the `consume_fee`-param note (N-1). **Tax I-1:** a
+genuine bug in the GREEN SPEC's BG-D4 FORMULA — `clamp(net, $0, estimate)` stacked the unclamped
+`documented_share` on top, filing an estimate-ENABLED loss when a TP8(c) fee carry is present (floor $12k + $30
+fee sold $8k → −$30, where documented-only is a $7,970 GAIN); **the SPEC was amended** to `clamp(net − documented,
+$0, estimate)` (prose invariant was already right; the formula didn't implement it), and T4's mis-pinning KAT
+flipped to `gain == $0` + a just-above-floor-band KAT + a genuine-documented-loss KAT added. Plus: the drift
+advisory reframed as conditional COPY (no engine filed-year branch) + below-direction + a `VerifyReport`-surface
+KAT (tax/arch M-1); the T9 KAT now pins `delta_usd == 0` (tax N-1); the four-site framing corrected here (N-2).
 
 **Plan-review r2 fold (both lenses):** r2 verified 7/8 tax + 5/6 arch r1 Importants genuinely resolved. The
 residue: the CONVERGED verify-drift **false cover** (r1 claimed it "→ T11 (added)" but the step was never
