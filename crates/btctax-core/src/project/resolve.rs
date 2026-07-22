@@ -444,6 +444,16 @@ fn build_op(
     }
 }
 
+/// UX-P4-3: the ONE unified `DecisionConflict` remedy pointer (SPEC §3.2, names `events list` §3.6),
+/// shared by `live_promotes` and `resolve` (arch Nit-1: formerly two in-sync local consts). Surface-
+/// neutral by design — it works at `verify` (the conflicting decision IS recorded; the list shows its
+/// `decision|N` to void) AND at record time (nothing was recorded; the list shows the valid refs).
+/// Duplicate details add "; void the prior decision to re-decide" (a prior decision exists on both
+/// surfaces) — EXCEPT the classify-raw arm, whose prior may be a non-revocable accepted `SupersedeImport`,
+/// so it says "if the prior decision is revocable, void it to re-decide" (review r2 M1). Deliberately NOT
+/// "void the decision to clear this blocker" — that misreads at record time, where nothing was appended.
+const CONFLICT_HINT: &str = "see `btctax events list` for event refs + decision status";
+
 /// Approach-B / BG-D1 (Task 3): the promotions in force at pass-2 — target `DeclareTranche` `EventId` ->
 /// the stored WHOLE-tranche `filed_basis` + the target's `sat` (the BG-D4 decomposition key,
 /// `conservative_promote::PromoteEntry`). Built ONCE, before the step-2 timeline loop, from non-voided
@@ -461,8 +471,7 @@ fn live_promotes(
     voided: &BTreeSet<EventId>,
     blockers: &mut Vec<Blocker>,
 ) -> PromoteSet {
-    // The one unified DecisionConflict remedy pointer (kept in sync with `resolve`'s local const).
-    const CONFLICT_HINT: &str = "see `btctax events list` for event refs + decision status";
+    // `CONFLICT_HINT`: the shared module-level remedy pointer (defined above).
     let by_id: BTreeMap<EventId, &LedgerEvent> = events.iter().map(|e| (e.id.clone(), e)).collect();
     let mut decisions: Vec<(u64, &LedgerEvent)> = events
         .iter()
@@ -553,15 +562,7 @@ pub fn resolve(
     let by_id: BTreeMap<EventId, &LedgerEvent> = events.iter().map(|e| (e.id.clone(), e)).collect();
     let mut blockers: Vec<Blocker> = Vec::new();
 
-    // UX-P4-3: the ONE unified `DecisionConflict` remedy pointer (SPEC §3.2, names `events list` §3.6).
-    // Surface-neutral by design — it works at `verify` (the conflicting decision IS recorded; the list
-    // shows its `decision|N` to void) AND at record time (nothing was recorded; the list shows the
-    // valid refs). Duplicate details add "; void the prior decision to re-decide" (a prior decision
-    // exists on both surfaces) — EXCEPT the classify-raw arm, whose prior may be a non-revocable
-    // accepted `SupersedeImport`, so it says "if the prior decision is revocable, void it to re-decide"
-    // (review r2 M1). Deliberately NOT "void the decision to clear this blocker" — that misreads at
-    // record time, where nothing was appended.
-    const CONFLICT_HINT: &str = "see `btctax events list` for event refs + decision status";
+    // `CONFLICT_HINT`: the shared module-level `DecisionConflict` remedy pointer (defined above).
 
     // ── Pseudo-reconcile mode (sub-project 2) ────────────────────────────────────────────────────
     // When on, synthesize DELIBERATELY-FICTIONAL default decisions at the map/`Eff` layer (never
