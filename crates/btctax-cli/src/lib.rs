@@ -3,6 +3,7 @@
 //! (spec §11). The library is I/O-explicit and deterministic; the binary (`main.rs`) is a thin clap
 //! dispatch. PRIVACY: tests use only temp vaults + synthetic fixtures; no real user file is ever read.
 pub mod bulk_estimated;
+pub mod chokepoint;
 pub mod cli;
 pub mod cmd;
 pub mod config;
