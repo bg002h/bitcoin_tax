@@ -903,6 +903,11 @@ pub enum Reconcile {
     /// mandatory purchase-provenance attestation (BG-D5), a two-sided informed-consent screen (BG-D6),
     /// and a Form 8275 Part II narrative (BG-D7). Mitigates penalty exposure; does not eliminate it or
     /// guarantee immunity — read the consent screen this verb prints before acknowledging.
+    // Hidden until Task 16 wires the official Form 8275 AcroForm (Reg §1.6662-4(f) adequate disclosure);
+    // un-hide there. The verb still WORKS and parses fully (a hidden command is absent from `--help` only)
+    // — this keeps an accidental pre-1b tag from advertising an inadequate-disclosure path (arch Minor-4,
+    // defense-in-depth).
+    #[command(hide = true)]
     PromoteTranche {
         /// The `DeclareTranche` decision to promote (see `btctax events list` for the ref).
         target: String,
