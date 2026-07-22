@@ -1480,6 +1480,26 @@ fn would_conflict_surfaces_a_second_promote_at_record_time() {
     );
 }
 
+/// ★ Phase-1a T7 (BG-D9): a `PromoteTranche` whose `target` is an ABSENT decision (never recorded at
+/// all, not merely voided) is a `DecisionConflict` too — the `live_promotes` None-arm (resolve.rs
+/// `by_id.get(&p.target)` misses) fires the SAME remedy as a wrong-type/voided target, so a promote can
+/// never dangle silently off a bad ref. No `DeclareTranche` is even declared here — the promote is the
+/// only decision in the whole projection, so this isolates the None arm from the ≥2-live-promotes arm
+/// (a different `promote_count`-keyed branch just above it in `live_promotes`).
+#[test]
+fn promote_targeting_an_absent_decision_conflicts() {
+    let p = promote_ev(1, EventId::decision(999), dec!(12_000));
+    let st = project(&[p], &prices(), &cfg());
+    assert!(
+        st.blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::DecisionConflict),
+        "a PromoteTranche targeting an absent decision id is a DecisionConflict (never a dangling \
+         promote): {:?}",
+        st.blockers
+    );
+}
+
 // ════════════════════════════════════════════════════════════════════════════════════════════════
 // Task 8 — BG-D9 prior-year fold-diff advisory (disposal ∪ removal legs) + carryover-cascade naming +
 // the VOID-direction wiring. The advisory FOLDS the ledger twice (promote EVENT present vs excluded),
@@ -2522,6 +2542,27 @@ fn disclosure_is_some_iff_a_promoted_leg_is_filed_this_year() {
     assert!(
         disclosure_8275(&unpromoted, &unpromoted_state, 2024).is_none(),
         "an UNPROMOTED tranche (still filed at $0) takes no estimated position — nothing to disclose"
+    );
+}
+
+/// ★ Phase-1a T13: the happy path — Part II carries the promote's OWN recorded `part_ii_narrative`
+/// VERBATIM (not empty, not a placeholder), and the disclosure is COMPLETE (`!incomplete`) whenever
+/// that narrative is non-empty. Mirrors `disclosure_is_some_iff_a_promoted_leg_is_filed_this_year`'s
+/// fixture (`promoted_disposal_events`/`promoted_state`), whose `promote_ev` records the real narrative
+/// `"cash P2P purchase, no records; window bounded on-chain"` (see the `promote_ev` helper above).
+#[test]
+fn disclosure_part_ii_carries_the_narrative_verbatim_and_is_complete() {
+    let events = promoted_disposal_events();
+    let state = promoted_state();
+    let d =
+        disclosure_8275(&events, &state, 2024).expect("a promoted disposal leg files this year");
+    assert_eq!(
+        d.part_ii, "cash P2P purchase, no records; window bounded on-chain",
+        "Part II carries the fixture's OWN recorded narrative verbatim"
+    );
+    assert!(
+        !d.incomplete,
+        "a non-empty Part II narrative is a COMPLETE disclosure"
     );
 }
 

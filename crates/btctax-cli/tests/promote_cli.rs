@@ -10,7 +10,7 @@
 
 use btctax_cli::cmd::promote::ProvenanceKind;
 use btctax_cli::eventref::parse_event_id;
-use btctax_cli::{cmd, CliError, Session, PROMOTE_ACK_PHRASE};
+use btctax_cli::{cmd, return_inputs, CliError, Session, PROMOTE_ACK_PHRASE};
 use btctax_core::conservative::Coverage;
 use btctax_core::event::{
     Acknowledgment, Acquire, BasisSource, ConsentTerm, DeclareTranche, Dispose, DisposeKind,
@@ -764,5 +764,115 @@ fn a_clean_promoted_export_writes_the_8275_by_name_no_watermark() {
     assert!(
         !report.watermarked,
         "a real promoted ledger exports CLEAN (no DRAFT watermark)"
+    );
+}
+
+/// Plant a minimally-valid `return_inputs` row for `year` so `export_irs_pdf` DISPATCHES to the
+/// full-return pipeline (`return_inputs::exists` is the dispatch's own discriminator, admin.rs
+/// `export_irs_pdf`). Mirrors `export_irs_pdf.rs`'s
+/// `export_dispatches_a_full_return_year_to_the_full_packet` fixture — an identified Single filer with
+/// every live declaration answered, so a real (non-refusing) full-return packet can assemble.
+fn plant_full_return_ri(vault: &Path, year: i32) {
+    use btctax_core::tax::return_inputs::{Person, ReturnInputs};
+    use btctax_core::tax::types::FilingStatus;
+
+    let mut s = Session::open(vault, &pp()).unwrap();
+    let mut ri = ReturnInputs {
+        filing_status: FilingStatus::Single,
+        header: btctax_core::tax::testonly::not_a_dependent(),
+        ..Default::default()
+    };
+    ri.header.taxpayer = Person {
+        first_name: "Pat".into(),
+        last_name: "Roe".into(),
+        ssn: "222-33-4444".into(),
+        ..Default::default()
+    };
+    btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+    return_inputs::set(s.conn(), year, &ri).unwrap();
+    s.save().unwrap();
+}
+
+/// ★ Phase-1a T14 (BG-D8): the refuse-before-bytes gate at the FULL-RETURN placement
+/// (`export_full_return`'s OWN `promote_export_gate` call, admin.rs) — distinct from the crypto-slice
+/// call site `export_with_a_promoted_leg_but_incomplete_8275_refuses_before_bytes` pins above. Planting
+/// a `return_inputs` row for `T14_YEAR` on the SAME raw-vault-incomplete fixture makes `export_irs_pdf`
+/// DISPATCH to `export_full_return`, so this confirms that placement's gate call fires too — before any
+/// bytes are written.
+#[test]
+fn export_full_return_refuses_before_bytes_on_incomplete_8275() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = raw_vault_promote_with_empty_part_ii(dir.path());
+    plant_full_return_ri(&vault, T14_YEAR);
+    let out = dir.path().join("export_out"); // deliberately NOT pre-created
+
+    let err = cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None).unwrap_err();
+    assert!(
+        matches!(err, CliError::Usage(ref m) if m.contains("Form 8275")),
+        "the FULL-RETURN placement must refuse a promoted leg without a complete Form 8275: {err}"
+    );
+    assert!(
+        std::fs::read_dir(&out)
+            .map(|mut d| d.next().is_none())
+            .unwrap_or(true),
+        "a refused full-return export leaves out_dir untouched (zero bytes written)"
+    );
+}
+
+/// ★ Phase-1a T14 (BG-D8): the SAME refuse-before-bytes gate at the `export_snapshot` placement — a
+/// THIRD distinct call site (`export_snapshot`'s own `promote_export_gate` call, admin.rs) from both
+/// `export_irs_pdf`'s crypto-slice and full-return placements.
+#[test]
+fn export_snapshot_refuses_before_bytes_on_incomplete_8275() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = raw_vault_promote_with_empty_part_ii(dir.path());
+    let out = dir.path().join("export_out"); // deliberately NOT pre-created
+
+    let err = cmd::admin::export_snapshot(&vault, &pp(), &out, Some(T14_YEAR), None).unwrap_err();
+    assert!(
+        matches!(err, CliError::Usage(ref m) if m.contains("Form 8275")),
+        "export_snapshot must refuse a promoted leg without a complete Form 8275: {err}"
+    );
+    assert!(
+        std::fs::read_dir(&out)
+            .map(|mut d| d.next().is_none())
+            .unwrap_or(true),
+        "a refused export_snapshot leaves out_dir untouched (zero bytes written)"
+    );
+}
+
+/// ★ Phase-1a T14 (BG-D8): the success-emit of `form_8275.txt` at the FULL-RETURN placement — a
+/// COMPLETE promoted disclosure (T10-recorded, non-empty Part II), exported via `export_irs_pdf`
+/// DISPATCHED to `export_full_return` (a `return_inputs` row planted for `T14_YEAR`), writes the
+/// disclosure by its OWN name — exactly as `a_clean_promoted_export_writes_the_8275_by_name_no_
+/// watermark` pins for the crypto-slice call site.
+#[test]
+fn export_full_return_writes_form_8275_txt_by_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = vault_with_promoted_disposal_via_cli(dir.path());
+    plant_full_return_ri(&vault, T14_YEAR);
+    let out = dir.path().join("export_out");
+
+    cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None)
+        .expect("a complete promoted disclosure exports via the dispatched full-return path");
+    assert!(
+        out.join("form_8275.txt").exists(),
+        "the full-return packet emits the 8275 content by its OWN name (form_8275.txt)"
+    );
+}
+
+/// ★ Phase-1a T14 (BG-D8): the SAME success-emit of `form_8275.txt` at the `export_snapshot`
+/// placement.
+#[test]
+fn export_snapshot_writes_form_8275_txt_by_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = vault_with_promoted_disposal_via_cli(dir.path());
+    let out = dir.path().join("export_out");
+
+    cmd::admin::export_snapshot(&vault, &pp(), &out, Some(T14_YEAR), None)
+        .expect("a complete promoted disclosure exports via export_snapshot");
+    assert!(
+        out.join("form_8275.txt").exists(),
+        "export_snapshot emits the 8275 content by its OWN name (form_8275.txt)"
     );
 }
