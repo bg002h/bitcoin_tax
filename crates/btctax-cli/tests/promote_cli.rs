@@ -8,6 +8,7 @@
 //! Task 10 — so the promote is appended directly, exactly as `declare_tranche_cli.rs` hand-crafts a raw
 //! void). PRIVACY: synthetic values in a tempdir; no user file is read.
 
+use btctax_cli::cli::FormArg;
 use btctax_cli::cmd::promote::ProvenanceKind;
 use btctax_cli::eventref::parse_event_id;
 use btctax_cli::{cmd, return_inputs, CliError, Session, PROMOTE_ACK_PHRASE};
@@ -815,6 +816,34 @@ fn a_clean_promoted_export_writes_the_8275_by_name_no_watermark() {
     assert!(
         !report.watermarked,
         "a real promoted ledger exports CLEAN (no DRAFT watermark)"
+    );
+}
+
+/// ★ Whole-branch tax M-1: the Form 8275 is the MANDATORY disclosure — it must travel WITH the promoted
+/// 8949 position, so it rides UNCONDITIONALLY even when `--forms f8949` narrows the slice to exclude it.
+/// Otherwise the estimate position would export without its official disclosure PDF (Reg §1.6662-4(f)
+/// makes disclosure adequate only on a COMPLETED Form 8275). Mutation-verified: restoring the
+/// `wants(forms, FormArg::Form8275)` gate around the 8275 fill reds this.
+#[test]
+fn a_narrowed_forms_f8949_slice_still_emits_the_mandatory_8275_pdf_on_a_promoted_year() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = vault_with_promoted_disposal_via_cli(dir.path());
+    let out = dir.path().join("export_out");
+
+    // `--forms f8949` ONLY — deliberately excludes f8275 from the requested slice.
+    let report =
+        cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[FormArg::F8949], None).unwrap();
+    assert!(
+        out.join("f8949.pdf").exists(),
+        "the requested 8949 slice is written"
+    );
+    assert!(
+        out.join("form_8275.pdf").exists(),
+        "the MANDATORY 8275 disclosure PDF rides even though --forms excluded it (BG-D8)"
+    );
+    assert!(
+        report.form_8275_path.is_some(),
+        "the report records the mandatory 8275 PDF path"
     );
 }
 

@@ -553,15 +553,20 @@ pub fn export_irs_pdf(
     // the `write_form_8275_txt` content emitted above; no filer identity (mirrors the Form 8283
     // crypto-slice fill). `promote_export_gate` already guaranteed a complete Part II, and the overflow
     // pre-check above already guaranteed the Part I rows fit this revision's capacity. ──
+    // BG-D8 (whole-branch tax M-1): the Form 8275 is the MANDATORY disclosure that must travel WITH the
+    // promoted 8949 position — so it rides UNCONDITIONALLY whenever a promoted disposal leg is filed,
+    // NOT behind `wants(forms, Form8275)`. Otherwise `--forms f8949` would export the estimate position
+    // without its official disclosure PDF (Reg §1.6662-4(f) makes disclosure adequate only on a COMPLETED
+    // Form 8275). This mirrors the always-emitted `form_8275.txt` and the unconditional overflow refusal:
+    // the disclosure is never a `--forms`-narrowable slice. (`printed_8275` is `Some` iff a promoted
+    // disposal leg files this year; a non-promoted export writes no 8275.)
     let mut form_8275_path = None;
-    if wants(forms, FormArg::Form8275) {
-        if let Some(p) = &printed_8275 {
-            if let Some(bytes) = btctax_forms::fill_form_8275_slice(p, tax_year)? {
-                let bytes = stamp(bytes)?;
-                let path = out_dir.join("form_8275.pdf");
-                write_bytes_owner_only(&path, &bytes)?;
-                form_8275_path = Some(path);
-            }
+    if let Some(p) = &printed_8275 {
+        if let Some(bytes) = btctax_forms::fill_form_8275_slice(p, tax_year)? {
+            let bytes = stamp(bytes)?;
+            let path = out_dir.join("form_8275.pdf");
+            write_bytes_owner_only(&path, &bytes)?;
+            form_8275_path = Some(path);
         }
     }
 
