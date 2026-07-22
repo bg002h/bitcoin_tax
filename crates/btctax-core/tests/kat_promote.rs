@@ -1951,6 +1951,92 @@ fn flagged_years_pins_a_prior_gift_only_reorder() {
     );
 }
 
+/// ★ DFW M-new-1 (both P-A gate-review lenses, CONFIRMED at source): `promote_changed_years` — and thus
+/// `flagged_years` — now forces `pseudo_reconcile = false` on its OWN config copy, mirroring
+/// `would_conflict` (`project/mod.rs:119`), so the result is stable regardless of the CALLER's `cfg`.
+///
+/// Fixture: an unresolved `ImportConflict` whose ORIGINAL import already carries a real ($100) basis and
+/// whose conflicting re-import proposes a HIGHER ($700) basis (mirrors `pseudo_reconcile.rs`'s shipped
+/// `import_conflict_cleared_via_accept_first`) — pseudo-OFF the $100 original stands; pseudo-ON the
+/// accept-first default adopts $700. A co-held, LIVE-promoted tranche (floor $400 — strictly between the
+/// two) means: pseudo-OFF, the tranche's $400/sat OUTRANKS the $100/sat alternate under HIFO, so the
+/// PROMOTE's own dollar leg is what changes between with/without-promote (flags 2026); pseudo-ON, the
+/// $700/sat accept-first lot OUTRANKS the tranche EVEN WHEN PROMOTED ($400), so the identical lot is
+/// drawn with/without-promote (2026 is NOT flagged) — UNLESS pseudo is forced off internally, in which
+/// case both calls agree (mutation: remove the forced pseudo-off line inside `promote_changed_years` →
+/// this KAT reds, since the pseudo-true call would then disagree with the pseudo-false call).
+#[test]
+fn flagged_years_forces_pseudo_off_regardless_of_caller_cfg() {
+    let w = exch();
+    let original = imp(
+        "ORIG",
+        datetime!(2026-01-01 00:00 UTC),
+        &w,
+        EventPayload::Acquire(Acquire {
+            sat: 1_000_000,
+            usd_cost: dec!(100),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    );
+    let new_payload = EventPayload::Acquire(Acquire {
+        sat: 1_000_000,
+        usd_cost: dec!(700),
+        fee_usd: dec!(0),
+        basis_source: BasisSource::ExchangeProvided,
+    });
+    let fp = Fingerprint::of_bytes(b"m-new-1-fixture");
+    let conflict = LedgerEvent {
+        id: EventId::conflict(Source::Coinbase, SourceRef::new("ORIG"), &fp),
+        utc_timestamp: datetime!(2026-01-02 00:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: Some(w.clone()),
+        payload: EventPayload::ImportConflict(ImportConflict {
+            target: EventId::import(Source::Coinbase, SourceRef::new("ORIG")),
+            new_payload: Box::new(new_payload),
+            new_fingerprint: fp,
+        }),
+    };
+    let t = tranche_ev(
+        1,
+        &w,
+        1_000_000,
+        date!(2026 - 01 - 03),
+        date!(2026 - 01 - 05),
+    );
+    let p = promote_ev(2, EventId::decision(1), dec!(400));
+    let sell = sell_ev(
+        "SELL",
+        datetime!(2026-06-01 00:00 UTC),
+        &w,
+        1_000_000,
+        2_000,
+    );
+    let events = vec![original, conflict, t, p, sell];
+
+    let mut cfg_true = cfg();
+    cfg_true.pseudo_reconcile = true;
+    let mut cfg_false = cfg();
+    cfg_false.pseudo_reconcile = false;
+
+    // `state` (for the `live_promote_ids` lookup) — promote liveness is pseudo-independent either way.
+    let state = project(&events, &prices(), &cfg_false);
+    let tables = no_tables();
+
+    let years_true = flagged_years(&events, &state, &prices(), &tables, &cfg_true, FAR_FUTURE);
+    let years_false = flagged_years(&events, &state, &prices(), &tables, &cfg_false, FAR_FUTURE);
+    assert_eq!(
+        years_true, years_false,
+        "flagged_years must force pseudo off internally regardless of the caller's cfg: \
+         pseudo-true={years_true:?} pseudo-false={years_false:?}"
+    );
+    assert!(
+        years_false.contains(&2026),
+        "sanity: the tranche's own promote/basis change genuinely flags 2026 in the pseudo-off \
+         computation: {years_false:?}"
+    );
+}
+
 // ════════════════════════════════════════════════════════════════════════════════════════════════
 // Task 9 — BG-D6 `consent_terms`: the two-sided informed-consent figures the filer sees and the
 // promote records. Fold pair mirrors T8 (`promote_prior_year_advisory`) EXCEPT the promote is

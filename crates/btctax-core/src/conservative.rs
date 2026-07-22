@@ -951,6 +951,13 @@ fn live_promote_ids(events: &[LedgerEvent], state: &LedgerState) -> Vec<EventId>
 /// mirroring the existing `gift_only_flagged_years` (`chokepoint/mod.rs`) precedent of re-deriving a
 /// structured year set from the SAME with/without fold pair rather than parsing or refactoring the prose
 /// builder.
+///
+/// ★ DFW M-new-1 (both P-A gate-review lenses): **pseudo is forced OFF** on an own config copy, mirroring
+/// `would_conflict` (`project/mod.rs:119`) and every other shadow projection in this module — unlike a
+/// real decision, a Phase-B pseudo default (e.g. a synthetic `SelfTransferMine{$0}`) is NOT stable across
+/// this fold pair, so leaving the caller's `pseudo_reconcile` bit untouched here could make the flagged
+/// year SET depend on whether the caller's config happened to have pseudo mode on — silently dropping (or
+/// adding) a year from the DFW-D11 export set. `flagged_years` (below) inherits this fix for free.
 fn promote_changed_years(
     events: &[LedgerEvent],
     prices: &dyn PriceProvider,
@@ -958,6 +965,9 @@ fn promote_changed_years(
     promote_id: &EventId,
     current: i32,
 ) -> BTreeSet<i32> {
+    let mut config = *config;
+    config.pseudo_reconcile = false;
+    let config = &config;
     let with_state = project(events, prices, config);
     let without_events: Vec<LedgerEvent> = events
         .iter()
@@ -1011,6 +1021,10 @@ fn promote_changed_years(
 /// signature symmetry with `promote_prior_year_advisory` and its callers (a caller assembling
 /// `plan_export` already holds the SAME `events`/`state`/`prices`/`tables`/`cfg` bundle for the sibling
 /// advisory call) — the leg-set-equality criterion itself never needs a tax table, so it goes unused here.
+/// ★ DFW M-new-1: pseudo is forced off INSIDE `promote_changed_years` (below) on its own config copy, so
+/// this fn's year-set is stable regardless of whether the caller's `cfg` happens to carry
+/// `pseudo_reconcile = true` — a defensive-filing caller's config may be pseudo-active even though its
+/// OWN `state` is not (DFW-D6), and every shadow projection this feature touches must force pseudo off.
 pub fn flagged_years(
     events: &[LedgerEvent],
     state: &LedgerState,
