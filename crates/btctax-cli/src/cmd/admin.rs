@@ -396,7 +396,7 @@ pub(crate) fn export_irs_pdf_from_session(
 
     // BG-D8 completeness gate (crypto-slice path) — a promoted-basis leg without its complete Form 8275
     // is a HARD refusal, checked FIRST (before the pseudo watermark check and any byte written).
-    promote_export_gate(&state, &events, Some(tax_year))?;
+    promote_export_gate(state, events, Some(tax_year))?;
 
     // Attestation gate — no fictional tax form leaves the machine unguarded, and a refusal
     // writes no bytes. (A fully-real ledger ignores `attest`.)
@@ -406,13 +406,13 @@ pub(crate) fn export_irs_pdf_from_session(
     }
 
     // Reuse the projection's capital-gains data verbatim (no recompute).
-    let rows = btctax_core::form_8949(&state, tax_year);
-    let totals = btctax_core::schedule_d(&state, tax_year);
+    let rows = btctax_core::form_8949(state, tax_year);
+    let totals = btctax_core::schedule_d(state, tax_year);
 
     // Form 8275 (Disclosure Statement) — Task 16: `Some` iff a promoted-basis disposal leg files in
     // `tax_year` (the same `disclosure_8275` scoping `promote_export_gate` above already used to confirm
     // completeness).
-    let printed_8275 = btctax_core::tax::form8275::disclosure_8275(&events, &state, tax_year)
+    let printed_8275 = btctax_core::tax::form8275::disclosure_8275(events, state, tax_year)
         .map(|d| btctax_core::tax::printed::printed_8275(&d));
     // Task 16 / ADD-2 (mirrors `export_full_return`'s pre-check below): v1 does not paginate Form 8275 —
     // refuse HERE, before `mkdir_out`, so an overflowing year (> 6 promoted disposal legs) names the year
@@ -445,10 +445,10 @@ pub(crate) fn export_irs_pdf_from_session(
     // I-3 (D-4): the MANDATORY conservative-filing methodology disclosure rides the PDF packet too, not
     // just the CSV paths — a filer mailing the flagship filing-ready artifact must get the i8949-required
     // basis explanation whenever a $0-basis tranche row is present. Writes nothing for a no-tranche year.
-    crate::render::write_basis_methodology_txt(out_dir, &state, tax_year)?;
+    crate::render::write_basis_methodology_txt(out_dir, state, tax_year)?;
     // BG-D8: the Form 8275 disclosure rides the packet by its OWN name. The gate above guaranteed a
     // promoted leg reaching here has a complete Part II. Writes nothing for a no-promoted-leg year.
-    crate::render::write_form_8275_txt(out_dir, &state, &events, tax_year)?;
+    crate::render::write_form_8275_txt(out_dir, state, events, tax_year)?;
 
     // ── Form 8949 + Schedule D (always applicable). ──
     let f8949_path = if wants(forms, FormArg::F8949) {
@@ -471,14 +471,14 @@ pub(crate) fn export_irs_pdf_from_session(
     // ── Schedule SE (self-employment tax). Compute the §1401 figure from the year's TaxProfile. ──
     let se_computed = {
         let tables = BundledTaxTables::load();
-        let profile = match session.resolve_screened(&state, tax_year, &tables)? {
+        let profile = match session.resolve_screened(state, tax_year, &tables)? {
             crate::resolve::ProfileOutcome::Ready { profile, .. } => profile,
             crate::resolve::ProfileOutcome::Uncomputable { .. } => None, // export proceeds; SE omitted
         };
         profile.and_then(|p| {
             tables.table_for(tax_year).and_then(|t| {
                 compute_se_tax(
-                    &state,
+                    state,
                     tax_year,
                     p.filing_status,
                     t,
@@ -493,7 +493,7 @@ pub(crate) fn export_irs_pdf_from_session(
     // Discriminator: SE income present but `compute_se_tax` returned None (no profile / no table) → a
     // NOTE, not a silent skip (mirrors the render layer; never a fabricated form).
     let se_income_without_profile =
-        se_computed.is_none() && !se_net_income(&state, tax_year).is_zero();
+        se_computed.is_none() && !se_net_income(state, tax_year).is_zero();
     let mut schedule_se_path = None;
     let mut se_below_floor = false;
     let mut se_addl_medicare = None;
@@ -520,7 +520,7 @@ pub(crate) fn export_irs_pdf_from_session(
     let mut form_8283_section_b = None;
     if wants(forms, FormArg::Form8283) {
         let details = session.donation_details()?;
-        let rows_8283 = btctax_core::form_8283(&state, tax_year, &details);
+        let rows_8283 = btctax_core::form_8283(state, tax_year, &details);
         if let Some(bytes) = btctax_forms::fill_form_8283(&rows_8283, tax_year)? {
             form_8283_needs_review = rows_8283.iter().any(|r| r.needs_review);
             form_8283_section_b = rows_8283
