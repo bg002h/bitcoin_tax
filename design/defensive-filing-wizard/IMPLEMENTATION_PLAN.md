@@ -3,6 +3,9 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development (recommended) or
 > superpowers:executing-plans. Steps use checkbox (`- [ ]`) syntax. **Reviewers:** plan-review r1 =
 > Fable (architecture lens) + Opus (tax lens); r2+ = Opus both lenses (user-directed).
+>
+> **★ REVIEW STATUS: GREEN @ r5 (both lenses 0 Critical / 0 Important).** The plan-review loop converged over
+> 5 rounds (r1 Fable+Opus → r2–r5 Opus both). All C/I folded; residual r5 Nits folded inline. Ready to build.
 
 **Goal:** A derived "Defensive filing" dashboard in `btctax-tui-edit` that walks a filer whose *sales are
 imported but purchases are gone* through covering each `UncoveredDisposal` shortfall with a declared
@@ -53,7 +56,7 @@ stays engine-enforced.
 
 **`btctax-core`** (pure, KAT-able):
 - Create `crates/btctax-core/src/defensive/mod.rs` — `journey_view(events, state, prices, tables: &dyn
-  TaxTables, cfg) -> DefensiveFilingView` (★ C-1: `&dyn TaxTables`, the core trait — NOT the adapters
+  TaxTables, cfg, current: i32) -> DefensiveFilingView` (★ C-1: `&dyn TaxTables`, the core trait — NOT the adapters
   `BundledTaxTables`; every shipped core fn does this. The flavor gate is `tables.table_for(y).is_some()`);
   the `DefensiveFilingView`/`ShortfallCandidate`/`TrancheRow`/`Advisory` types.
 - Create `crates/btctax-core/src/defensive/discovery.rs` — the structured shortfall signal + the DFW-D4
@@ -239,7 +242,7 @@ semantics byte-for-byte.
 // ★ structured year-set (r1): promote_prior_year_advisory returns Vec<String> — unusable; add a typed fn.
 // crates/btctax-core/src/conservative.rs (beside promote_prior_year_advisory):
 pub fn flagged_years(events: &[LedgerEvent], state: &LedgerState, prices: &dyn PriceProvider,
-    tables: &dyn TaxTables, cfg: &ProjectionConfig) -> BTreeSet<i32>;   // BG-D9 fold-diff years, disposal∪removal
+    tables: &dyn TaxTables, cfg: &ProjectionConfig, current: i32) -> BTreeSet<i32>;   // ⋃ per-promote BG-D9 fold-diff years (disposal∪removal), retained < current (★ tax-N-1/N-2 — mirrors promote_prior_year_advisory + conservative.rs:729)
 // crates/btctax-cli/src/chokepoint/mod.rs:
 pub fn promoted_filing_years(state: &LedgerState) -> BTreeSet<i32>;      // extracted from admin.rs:84-98 (8275 gate ONLY)
 pub struct ExportPlan { pub years: BTreeSet<i32>, pub out_dir: PathBuf, pub forms: Vec<FormArg> }
@@ -258,11 +261,12 @@ pub(crate) fn export_irs_pdf_from_session(session: &Session, state: &LedgerState
 pub use crate::cmd::admin::IrsPdfReport;   // crate-root re-export
 pub fn apply_export(session: &Session, plan: ExportPlan) -> Result<Vec<IrsPdfReport>, CliError>;  // &Session (export mutates no events)
 ```
-`plan_export.years` = `{current} ∪ { y ∈ flagged_years(...) : y < current }` (DFW-D11; recomputed from state —
-the BG-D9 fold-diff over disposal AND removal legs; **strictly ⊇** `promoted_filing_years`). ★ tax-N-1: the
-`< current` filter mirrors `promote_prior_year_advisory`'s prior-year filter (`conservative.rs:729`) so a year
-≥ current still being AUTHORED is never emitted a premature 1040-X packet — `{current}` supplies the current
-year. ★ tax-M-1: `flagged_years` is the UNION of per-promote fold-diffs (matching `promote_prior_year_advisory`'s per-`promote_id` semantics — NOT a
+`plan_export.years` = `{current} ∪ flagged_years(..., current)` (DFW-D11; recomputed from state — the BG-D9
+fold-diff over disposal AND removal legs; **strictly ⊇** `promoted_filing_years`). ★ tax-N-1: `flagged_years`
+retains only years `< current` INSIDE the fn (mirroring `promote_prior_year_advisory` + `conservative.rs:729`)
+so a year ≥ current still being AUTHORED is never emitted a premature 1040-X packet — `{current}` supplies the
+current year, and `journey_view`'s display field reads the SAME filtered fn (★ tax-N-2 — no display-vs-export
+drift). ★ tax-M-1: `flagged_years` is the UNION of per-promote fold-diffs (matching `promote_prior_year_advisory`'s per-`promote_id` semantics — NOT a
 single whole-state with-all-vs-without-all diff, where two promotes' per-year effects could cancel and drop a
 year). `apply_export` writes ONE packet per year by calling `export_irs_pdf_from_session(session, …, year, …)`
 per year; the full-vs-slice `return_inputs::exists` dispatch lives ONCE INSIDE `_from_session` (exactly as
@@ -295,8 +299,9 @@ open under the TUI's held `VaultLock` deadlocks, `session.rs:662`). `promoted_fi
   unrealizable at leg-set-equality altitude, so it is deliberately NOT asserted.
 - [ ] **Step 5: Run — FAIL** (functions not defined).
 - [ ] **Step 6: Implement** `promoted_filing_years` (extract `admin.rs:84-98`), `flagged_years` (the UNION of
-  per-promote fold-diffs via `promote_prior_year_advisory`'s per-`promote_id` iteration — ★ tax-M-1, NOT a
-  single whole-state diff), the crate-root `IrsPdfReport` re-export (arch-n-1), and the export `plan/apply`
+  per-promote fold-diffs via `promote_prior_year_advisory`'s per-`promote_id` iteration, then
+  `years.retain(|y| *y < current)` — ★ tax-M-1/N-1, NOT a single whole-state diff), the crate-root
+  `IrsPdfReport` re-export (arch-n-1), and the export `plan/apply`
   trio — `apply_export` calls `export_irs_pdf_from_session(session, …, year, …)` per year (the
   `return_inputs::exists` slice-vs-full dispatch lives ONCE inside `_from_session`), NO re-`Session::open`;
   point `promote_export_gate(None)` at `promoted_filing_years` (single-source).
@@ -339,7 +344,7 @@ consumer `:714` — a DIRECT `pre2025_tranche_exists` call, not via a guard); Te
 ```rust
 // ★ I-new-1 (finishing r1-C-2): the three pure event-scan predicates MOVED from cmd/tranche.rs to core
 // (events-only, use btctax_core::conventions::TRANSITION_DATE). crates/btctax-core/src/tranche_guard.rs:
-pub fn void_targets(events: &[LedgerEvent]) -> BTreeSet<EventId>;          // was tranche.rs:40 (private)
+pub(crate) fn void_targets(events: &[LedgerEvent]) -> BTreeSet<EventId>;   // was tranche.rs:40 (private fn); stays module-private in core (★ arch-n-new-3)
 pub fn in_force_allocation_exists(events: &[LedgerEvent]) -> bool;         // was tranche.rs:54 (pub, cli-only)
 pub fn pre2025_tranche_exists(events: &[LedgerEvent]) -> bool;             // was tranche.rs:71 (pub, cli-only)
 pub struct Shortfall { pub event: EventId, pub wallet: Option<WalletId>, pub date: TaxDate,
@@ -368,14 +373,16 @@ aggregated per event into `Shortfall{short_sat = Σ(principal+fee), fee_sat = Σ
   is a private `fn` today — keep it `pub(crate)`/module-private in core, a deliberate visibility choice, not
   a verbatim signature); all events-only, using `btctax_core::conventions::TRANSITION_DATE`. Add
   `pub mod tranche_guard;` + `pub mod defensive;` (with a `defensive/mod.rs` skeleton `pub mod discovery;`)
-  to core `lib.rs`. Rewire all FIVE predicate CALL SITES to `btctax_core::tranche_guard::*` and DELETE the
-  cli copies: 4 sites inside the two guards `guard_tranche_vs_allocation`/`guard_allocation_vs_tranche`
-  (`:107,93` — the GUARDS themselves STAY in cli; only their internal predicate calls at
-  `tranche.rs:61,72,94,111` rewire), AND ★ **arch-I-new-2/tax-M-2** the FIFTH, DIRECT consumer
-  `session.rs:714` (`crate::cmd::tranche::pre2025_tranche_exists(&all)` → `btctax_core::tranche_guard::
-  pre2025_tranche_exists(&all)` — rewire, do NOT leave a duplicate). The four allocation APPEND sites
-  (`reconcile.rs:1015,1258`, `edit/persist.rs:1032,1105`) call the STAYING `guard_allocation_vs_tranche` and
-  are preserved automatically (no rewire).
+  to core `lib.rs`. ★ arch-n-new-1: the two `void_targets(events)` calls at `tranche.rs:61,72` are INSIDE the
+  moving `in_force_allocation_exists`/`pre2025_tranche_exists` predicates, so they move to core WITH them
+  (intra-module, NO external rewire). Rewire the THREE external predicate call sites to
+  `btctax_core::tranche_guard::*` and DELETE the cli copies: `pre2025_tranche_exists` inside
+  `guard_allocation_vs_tranche` (`tranche.rs:94`) and `in_force_allocation_exists` inside
+  `guard_tranche_vs_allocation` (`tranche.rs:111`) — the GUARDS themselves STAY in cli — AND ★
+  **arch-I-new-2/tax-M-2** the FIFTH, DIRECT consumer `session.rs:714`
+  (`crate::cmd::tranche::pre2025_tranche_exists(&all)` → `btctax_core::tranche_guard::pre2025_tranche_exists(&all)`
+  — rewire, do NOT leave a duplicate). The four allocation APPEND sites (`reconcile.rs:1015,1258`,
+  `edit/persist.rs:1032,1105`) call the STAYING `guard_allocation_vs_tranche` and are preserved automatically (no rewire).
 - [ ] **Step 3: Sweep stale locator comments + run.** Update `declare_tranche_cli.rs`'s `:320/:352/:358`
   comments that say the predicate "lives HERE (btctax-cli)" / cite `session.rs:692` (now → the core
   `tranche_guard` module); run the shipped allocation-guard KATs still green + `make check`; Commit
@@ -413,10 +420,10 @@ pub enum SavingFlavor { ComputedTax { year: i32, delta: Usd }, Uncomputable { ye
     Named(String) }
 pub struct PoolShort { pub pool: PoolKey, pub short_sat: i64, pub live_tranche_sat: i64 }  // ★ I-3 pool-level
 pub struct DefensiveFilingView { pub candidates: Vec<Shortfall>, pub resolve_first: Vec<Triage>,
-    pub tranches: Vec<TrancheRow>, pub still_short: Vec<PoolShort>, pub flagged_years: BTreeSet<i32>,
+    pub tranches: Vec<TrancheRow>, pub still_short: Vec<PoolShort>, pub flagged_years: BTreeSet<i32>,  // ★ tax-N-2: = flagged_years(..., current) — the SAME `< current`-filtered set the export uses (no display drift)
     pub safe_harbor_blocked: bool }
 pub fn journey_view(events: &[LedgerEvent], state: &LedgerState, prices: &dyn PriceProvider,
-    tables: &dyn TaxTables, cfg: &ProjectionConfig) -> DefensiveFilingView;
+    tables: &dyn TaxTables, cfg: &ProjectionConfig, current: i32) -> DefensiveFilingView;  // current = the wizard's clock-free current tax year (as plan_export)
 ```
 All shadow projections force `pseudo_reconcile=false` (DFW-D6); AND `journey_view` opens with
 `debug_assert!(!state.pseudo_active())` (★ arch-m-new-4 — the DFW-D6 precondition the Task 7 entry gate
@@ -453,8 +460,9 @@ the shortfall's pool ∧ `we <= short date` while the pool is still short — no
 ```
 - [ ] **Step 2: Run — FAIL.**
 - [ ] **Step 3: Implement `journey_view`** composing `shortfalls`/`triage` (Task 5), `clamped_promote_year_saving`,
-  the with/without-promote shadow fold-pairs, `flagged_years()` (★ arch-m-4: the STRUCTURED `BTreeSet` fn from
-  Task 3 for the `flagged_years` field — NOT the `Vec<String>` `promote_prior_year_advisory`, else the banned
+  the with/without-promote shadow fold-pairs, `flagged_years(..., current)` (★ arch-m-4: the STRUCTURED
+  `BTreeSet` fn from Task 3 for the `flagged_years` field, `< current`-filtered — the SAME set export uses, ★
+  tax-N-2; NOT the `Vec<String>` `promote_prior_year_advisory`, else the banned
   string-parse re-enters), the derived advisories — `OverCovered`/`NowDisplacing` (shadows), `FeeOnlyPromoteNoop`
   (covered `Shortfall.short_sat == fee_sat`), and `MethodInversion`/`TrancheDip` surfaced verbatim from
   `conservative::method_inversion_advisory`/`tranche_dip_advisory` (`:61,27`) — and
