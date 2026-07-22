@@ -28,6 +28,10 @@ pub const SCHEDULE_D_PDF_2024: &[u8] = include_bytes!("../forms/2024/schedule_d.
 pub const SCHEDULE_SE_PDF_2024: &[u8] = include_bytes!("../forms/2024/schedule_se.pdf");
 /// The bundled Form 8283, Rev. 12-2023 (TY2024; official IRS fillable PDF, US-gov public domain).
 pub const F8283_PDF_2024: &[u8] = include_bytes!("../forms/2024/f8283.pdf");
+/// The bundled Form 8275, Rev. 10-2024 (official IRS fillable PDF, US-gov public domain). ★ Form 8275
+/// is REVISION-versioned, not tax-year-versioned: this ONE asset is aliased to EVERY `SUPPORTED_YEAR`
+/// by [`f8275_pdf`] — there is no separate `F8275_PDF_2017` / `F8275_PDF_2025`.
+pub const F8275_PDF_2024: &[u8] = include_bytes!("../forms/2024/f8275.pdf");
 /// The bundled TY2024 Form 1040 (official IRS fillable PDF, US-gov public domain).
 pub const F1040_PDF_2024: &[u8] = include_bytes!("../forms/2024/f1040.pdf");
 /// The bundled TY2024 Form 8959, Additional Medicare Tax (official IRS fillable PDF, public domain).
@@ -168,6 +172,18 @@ pub fn f8283_pdf(year: i32) -> Result<&'static [u8], FormsError> {
         2017 => Ok(F8283_PDF_2017),
         2024 => Ok(F8283_PDF_2024),
         2025 => Ok(F8283_PDF_2025),
+        _ => Err(FormsError::UnsupportedYear(year)),
+    }
+}
+
+/// The bundled Form 8275 PDF bytes for a supported tax year. ★ Form 8275 is REVISION-versioned, not
+/// tax-year-versioned: the single bundled Rev. 10-2024 asset is returned for EVERY `SUPPORTED_YEAR`
+/// (2017/2024/2025) — never `UnsupportedYear` for those three, unlike every other form here that
+/// bundles a distinct PDF per year. This is what lets a promoted 2025 (or 2017) disposal attach a real
+/// Form 8275 rather than being permanently refused for want of a "2025 revision" that does not exist.
+pub fn f8275_pdf(year: i32) -> Result<&'static [u8], FormsError> {
+    match year {
+        2017 | 2024 | 2025 => Ok(F8275_PDF_2024),
         _ => Err(FormsError::UnsupportedYear(year)),
     }
 }
@@ -374,6 +390,27 @@ pub fn index(fields: &[Field]) -> HashMap<String, Field> {
     fields.iter().map(|f| (f.fqn.clone(), f.clone())).collect()
 }
 
+/// Encode a text value for a PDF string object. Pure ASCII is written as literal bytes (identical to
+/// PDFDocEncoding for that range — every existing byte-golden is plain ASCII, so this preserves them
+/// exactly). Any other content is written as **UTF-16BE with the `FEFF` BOM** — Adobe's own convention
+/// for a Unicode string, and precisely what [`decode_pdf_text`] decodes back on read-back. Writing raw
+/// UTF-8 bytes instead (the naive choice) is neither valid PDFDocEncoding nor valid UTF-16: a viewer
+/// (and our own read-back) would render it as mojibake — silently wrong text on a FILED disclosure is
+/// exactly the defect class this crate refuses to ship (surfaced by Form 8275's `Part1Item.line`, the
+/// first domain string in this crate to carry a non-ASCII character, an em dash).
+fn encode_pdf_text(s: &str) -> Vec<u8> {
+    if s.is_ascii() {
+        return s.as_bytes().to_vec();
+    }
+    let mut out = Vec::with_capacity(2 + s.len() * 2);
+    out.extend_from_slice(&[0xFE, 0xFF]);
+    for unit in s.encode_utf16() {
+        out.push((unit >> 8) as u8);
+        out.push((unit & 0xFF) as u8);
+    }
+    out
+}
+
 /// Apply a batch of writes. Errors (fails closed) if any field name is absent from the PDF.
 pub fn apply_writes(
     doc: &mut Document,
@@ -389,7 +426,7 @@ pub fn apply_writes(
             FieldValue::Text(s) => {
                 dict.set(
                     "V",
-                    Object::String(s.clone().into_bytes(), StringFormat::Literal),
+                    Object::String(encode_pdf_text(s), StringFormat::Literal),
                 );
             }
             FieldValue::Check { on } => {

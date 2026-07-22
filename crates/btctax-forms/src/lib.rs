@@ -22,6 +22,7 @@ mod fill8949;
 mod fill8949_full;
 mod form1040;
 mod form1040_full;
+mod form8275;
 mod form8283;
 mod form8959;
 mod form8960;
@@ -45,9 +46,9 @@ mod watermark;
 pub use error::FormsError;
 pub use form1040::{Form1040Fill, Form1040Inputs};
 pub use map::{
-    Form1040Map, Form8283Map, Form8949Map, Form8959Map, Form8960Map, Form8995Map, Schedule1Map,
-    Schedule2Map, Schedule3Map, ScheduleAMap, ScheduleBMap, ScheduleCMap, ScheduleDMap,
-    ScheduleSeMap,
+    Form1040Map, Form8275Map, Form8283Map, Form8949Map, Form8959Map, Form8960Map, Form8995Map,
+    Schedule1Map, Schedule2Map, Schedule3Map, ScheduleAMap, ScheduleBMap, ScheduleCMap,
+    ScheduleDMap, ScheduleSeMap,
 };
 pub use schedule_se::SE_FLOOR;
 
@@ -263,6 +264,22 @@ pub fn fill_schedule_d_full(
     schedule_d_full::fill_schedule_d_full_with_map(lines, header, &map)
 }
 
+/// Fill **Form 8275** (Disclosure Statement) for `year` from the T13 printed disclosure
+/// (`btctax_core::tax::printed::printed_8275`) + the FILER's identity. `Ok(None)` when there is no
+/// Part I content to disclose.
+///
+/// Year coverage is MANDATORY, not conditional: Form 8275 is REVISION-versioned, not
+/// tax-year-versioned, so the single bundled Rev. 10-2024 asset is aliased to EVERY `SUPPORTED_YEAR`
+/// (2017/2024/2025) — a promoted disposal filed in any supported year gets a real fillable
+/// disclosure, never a permanent refusal for want of a "2025 revision" that does not exist.
+pub fn fill_form_8275(
+    printed: &btctax_core::tax::printed::Printed8275,
+    header: &btctax_core::tax::packet::ReturnHeader,
+    year: i32,
+) -> Result<Option<Vec<u8>>, FormsError> {
+    form8275::fill_form_8275(printed, header, year)
+}
+
 /// Fill the **full-return Form 8283** for `year` — whole-dollar rows plus the FILER's identity block
 /// (which the crypto slice never writes). `Ok(None)` when there are no donation rows.
 pub fn fill_form_8283_full(
@@ -372,6 +389,7 @@ pub mod testonly {
     pub use crate::fill8949_full::fill_8949_full_with_map;
     pub use crate::form1040::{fill_form_1040_capgains as fill_1040_with_map, Form1040Fill};
     pub use crate::form1040_full::fill_form_1040_full_with_map;
+    pub use crate::form8275::fill_form_8275_with_map as fill_8275_with_map;
     pub use crate::form8283::fill_form_8283 as fill_8283_with_map;
     pub use crate::form8959::fill_form_8959_with_map;
     pub use crate::form8960::fill_form_8960_with_map;
@@ -379,22 +397,22 @@ pub mod testonly {
     // The committed map TOML, for the line-keyed inverse transcriber (`extract_lines`). Downstream
     // read-back tests need the map itself, not just its parsed struct.
     pub use crate::map::{
-        AmountCols, Form1040Map, Form8283Map, Form8949Map, Form8959Map, Form8960Map, Form8995Map,
-        MoneyCell, MoneyPair, PartMap, Schedule1Map, Schedule2Map, Schedule3Map, ScheduleAMap,
-        ScheduleBMap, ScheduleCMap, ScheduleDMap, ScheduleSeMap,
+        AmountCols, Form1040Map, Form8275Map, Form8275Row, Form8283Map, Form8949Map, Form8959Map,
+        Form8960Map, Form8995Map, MoneyCell, MoneyPair, PartMap, Schedule1Map, Schedule2Map,
+        Schedule3Map, ScheduleAMap, ScheduleBMap, ScheduleCMap, ScheduleDMap, ScheduleSeMap,
     };
     pub use crate::map::{
-        F1040_MAP_2024, F8283_MAP_2024, F8949_MAP_2024, F8959_MAP_2024, F8960_MAP_2024,
-        F8995_MAP_2024, SCHEDULE_1_MAP_2024, SCHEDULE_2_MAP_2024, SCHEDULE_3_MAP_2024,
-        SCHEDULE_A_MAP_2024, SCHEDULE_B_MAP_2024, SCHEDULE_C_MAP_2024, SCHEDULE_D_MAP_2024,
-        SCHEDULE_SE_MAP_2024,
+        F1040_MAP_2024, F8275_MAP_2024, F8283_MAP_2024, F8949_MAP_2024, F8959_MAP_2024,
+        F8960_MAP_2024, F8995_MAP_2024, SCHEDULE_1_MAP_2024, SCHEDULE_2_MAP_2024,
+        SCHEDULE_3_MAP_2024, SCHEDULE_A_MAP_2024, SCHEDULE_B_MAP_2024, SCHEDULE_C_MAP_2024,
+        SCHEDULE_D_MAP_2024, SCHEDULE_SE_MAP_2024,
     };
     pub use crate::pdf::{
         button_on_states, checkbox_on, collect_fields, index, load, text_value, Field,
-        F1040_PDF_2017, F1040_PDF_2024, F1040_PDF_2025, F8283_PDF_2017, F8283_PDF_2024,
-        F8283_PDF_2025, F8949_PDF_2017, F8949_PDF_2024, F8949_PDF_2025, F8959_PDF_2024,
-        SCHEDULE_D_PDF_2017, SCHEDULE_D_PDF_2024, SCHEDULE_D_PDF_2025, SCHEDULE_SE_PDF_2017,
-        SCHEDULE_SE_PDF_2024, SCHEDULE_SE_PDF_2025,
+        F1040_PDF_2017, F1040_PDF_2024, F1040_PDF_2025, F8275_PDF_2024, F8283_PDF_2017,
+        F8283_PDF_2024, F8283_PDF_2025, F8949_PDF_2017, F8949_PDF_2024, F8949_PDF_2025,
+        F8959_PDF_2024, SCHEDULE_D_PDF_2017, SCHEDULE_D_PDF_2024, SCHEDULE_D_PDF_2025,
+        SCHEDULE_SE_PDF_2017, SCHEDULE_SE_PDF_2024, SCHEDULE_SE_PDF_2025,
     };
     pub use crate::schedule23::{
         fill_schedule_1_with_map, fill_schedule_2_with_map, fill_schedule_3_with_map,

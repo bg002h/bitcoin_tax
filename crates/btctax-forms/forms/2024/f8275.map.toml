@@ -1,0 +1,50 @@
+# Form 8275 (Disclosure Statement), Rev. October 2024 — the OFFICIAL IRS fillable PDF's AcroForm field
+# map. This is the ONE bundled revision, aliased to EVERY SUPPORTED_YEAR (2017/2024/2025) by
+# `Form8275Map::for_year` — Form 8275 is revision-versioned, not tax-year-versioned, so there is no
+# separate 2017/2025 copy of this file (see `map.rs`'s module doc + `pdf.rs::f8275_pdf`).
+#
+# Column (a) "Rev. Rul., Rev. Proc., etc." and column (e) "Line No." (a genuine 3-character comb cell)
+# are deliberately UNMAPPED — see `Form8275Row`'s doc comment for why.
+form = "f8275"
+year = 2024
+part_ii_narrative = "topmostSubform[0].Page1[0].p1-t80[0]"
+
+[identity]
+name = "topmostSubform[0].Page1[0].p1-t1[0]"
+ssn = "topmostSubform[0].Page1[0].p1-t2[0]"
+
+[[rows]]
+item = "topmostSubform[0].Page1[0].Table_Part1[0].Line1[0].p1-t4[0]"
+desc = "topmostSubform[0].Page1[0].Table_Part1[0].Line1[0].#subform[0].p1-t5[0]"
+form_schedule = "topmostSubform[0].Page1[0].Table_Part1[0].Line1[0].p1-t7[0]"
+amount = "topmostSubform[0].Page1[0].Table_Part1[0].Line1[0].p1-t9[0]"
+
+[[rows]]
+item = "topmostSubform[0].Page1[0].Table_Part1[0].Line2[0].p1-t11[0]"
+desc = "topmostSubform[0].Page1[0].Table_Part1[0].Line2[0].#subform[0].p1-t12[0]"
+form_schedule = "topmostSubform[0].Page1[0].Table_Part1[0].Line2[0].p1-t14[0]"
+amount = "topmostSubform[0].Page1[0].Table_Part1[0].Line2[0].p1-t16[0]"
+
+[[rows]]
+item = "topmostSubform[0].Page1[0].Table_Part1[0].Line3[0].p1-t18[0]"
+desc = "topmostSubform[0].Page1[0].Table_Part1[0].Line3[0].#subform[0].p1-t19[0]"
+form_schedule = "topmostSubform[0].Page1[0].Table_Part1[0].Line3[0].p1-t21[0]"
+amount = "topmostSubform[0].Page1[0].Table_Part1[0].Line3[0].p1-t23[0]"
+
+[[rows]]
+item = "topmostSubform[0].Page1[0].Table_Part1[0].Line4[0].p1-t25[0]"
+desc = "topmostSubform[0].Page1[0].Table_Part1[0].Line4[0].#subform[0].p1-t26[0]"
+form_schedule = "topmostSubform[0].Page1[0].Table_Part1[0].Line4[0].p1-t28[0]"
+amount = "topmostSubform[0].Page1[0].Table_Part1[0].Line4[0].p1-t30[0]"
+
+[[rows]]
+item = "topmostSubform[0].Page1[0].Table_Part1[0].Line5[0].p1-t32[0]"
+desc = "topmostSubform[0].Page1[0].Table_Part1[0].Line5[0].#subform[0].p1-t33[0]"
+form_schedule = "topmostSubform[0].Page1[0].Table_Part1[0].Line5[0].p1-t35[0]"
+amount = "topmostSubform[0].Page1[0].Table_Part1[0].Line5[0].p1-t37[0]"
+
+[[rows]]
+item = "topmostSubform[0].Page1[0].Table_Part1[0].Line6[0].p1-t39[0]"
+desc = "topmostSubform[0].Page1[0].Table_Part1[0].Line6[0].#subform[0].p1-t40[0]"
+form_schedule = "topmostSubform[0].Page1[0].Table_Part1[0].Line6[0].p1-t42[0]"
+amount = "topmostSubform[0].Page1[0].Table_Part1[0].Line6[0].p1-t44[0]"
