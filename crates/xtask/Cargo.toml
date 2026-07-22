@@ -1,6 +1,6 @@
 [package]
 name = "xtask"
-version = "0.8.0"
+version = "0.9.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
@@ -10,13 +10,13 @@ publish = false
 # `btctax` binary / btctax-cli). `cargo run -p xtask -- docs` regenerates docs/man/*.1 + PDFs.
 
 [dependencies]
-btctax-cli = { path = "../btctax-cli", version = "0.8.0" }
+btctax-cli = { path = "../btctax-cli", version = "0.9.0" }
 # For the btctax-update-prices man page (its clap Cli). xtask is dev-only + `publish = false`, so this
 # does NOT put a network dependency on any shipped tax crate (the isolation gate checks the tax crates).
-btctax-update-prices = { path = "../btctax-update-prices", version = "0.8.0" }
+btctax-update-prices = { path = "../btctax-update-prices", version = "0.9.0" }
 # For `dump-fields`: reuses the shipped AcroForm reader (testonly re-exports load/collect_fields)
 # so the map author sees exactly the field names the filler will see — not a second parser's view.
-btctax-forms = { path = "../btctax-forms", version = "0.8.0" }
+btctax-forms = { path = "../btctax-forms", version = "0.9.0" }
 clap = "4.5"          # for `clap::Command` + the `CommandFactory` trait (Cli::command())
 clap_mangen = "0.2"   # roff man-page generator (clap 4.x-compatible); generator-only
 # `xtask examples` builds synthetic vaults in a tempdir and runs the real `btctax` binary to capture

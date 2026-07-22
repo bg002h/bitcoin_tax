@@ -1,6 +1,6 @@
 [package]
 name = "btctax-tui-edit"
-version = "0.8.0"
+version = "0.9.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -15,12 +15,12 @@ name = "btctax-tui-edit"
 path = "src/main.rs"
 
 [dependencies]
-btctax-tui        = { path = "../btctax-tui", version = "0.8.0" }
-btctax-cli        = { path = "../btctax-cli", version = "0.8.0" }
-btctax-core       = { path = "../btctax-core", version = "0.8.0" }
-btctax-input-form = { path = "../btctax-input-form", version = "0.8.0" }
-btctax-store      = { path = "../btctax-store", version = "0.8.0" }
-btctax-adapters   = { path = "../btctax-adapters", version = "0.8.0" }
+btctax-tui        = { path = "../btctax-tui", version = "0.9.0" }
+btctax-cli        = { path = "../btctax-cli", version = "0.9.0" }
+btctax-core       = { path = "../btctax-core", version = "0.9.0" }
+btctax-input-form = { path = "../btctax-input-form", version = "0.9.0" }
+btctax-store      = { path = "../btctax-store", version = "0.9.0" }
+btctax-adapters   = { path = "../btctax-adapters", version = "0.9.0" }
 # [R0-M1] Explicit pinned versions — NO [workspace.dependencies] table exists.
 ratatui      = "0.29"
 crossterm    = "0.28"

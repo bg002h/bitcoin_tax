@@ -1,6 +1,6 @@
 [package]
 name = "btctax-oracle-harness"
-version = "0.8.0"
+version = "0.9.0"
 edition.workspace = true
 license.workspace = true
 # ★ UNPUBLISHED — this is a test-only harness for the oracle sweep (§9), never a shipped artifact.
@@ -15,9 +15,9 @@ homepage.workspace = true
 [dependencies]
 # The tax model + assembly chain + the §9 reproduction/classification helpers (`oracle_diff`) and the
 # golden fixtures (`testonly`). `testonly`/`oracle_diff` are plain `pub mod`s, so both are reachable.
-btctax-core = { path = "../btctax-core", version = "0.8.0" }
+btctax-core = { path = "../btctax-core", version = "0.9.0" }
 # The PDF fill + the line-keyed inverse transcriber (`fill_full_return` / `extract_lines`).
-btctax-forms = { path = "../btctax-forms", version = "0.8.0" }
+btctax-forms = { path = "../btctax-forms", version = "0.9.0" }
 # The stdin/stdout JSON contract. This is the dependency that must NOT reach the published library —
 # it lives here, in the unpublished harness, and nowhere downstream.
 serde_json = { version = "1", features = ["preserve_order"] }
