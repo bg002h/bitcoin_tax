@@ -1147,6 +1147,45 @@ fn promoted_export_with_more_than_6_legs_refuses_cleanly_not_panics() {
     );
 }
 
+/// ADD-2 twin of the above for the CRYPTO-SLICE pre-check (admin.rs, the `printed_8275` block) — the
+/// sibling above plants a full-return RI and so exercises only the full-return pre-check. This one
+/// omits `plant_full_return_ri`, so `export_irs_pdf` takes the crypto-slice path and the >6-row refusal
+/// must come from the crypto-slice block. Deleting only that block (leaving the full-return copy) would
+/// survive the sibling KAT but must RED here.
+#[test]
+fn promoted_crypto_slice_export_with_more_than_6_legs_refuses_cleanly_not_panics() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = vault_with_n_promoted_disposal_legs(dir.path(), T14_YEAR, 7);
+    // NB: no `plant_full_return_ri` — this drives the crypto-slice export path.
+    let out = dir.path().join("export_out"); // deliberately NOT pre-created
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None)
+    }));
+    let err = match result {
+        Ok(Err(e)) => e,
+        Ok(Ok(_)) => {
+            panic!("a 7-leg promoted crypto-slice export (> the 6-row capacity) must refuse, not succeed")
+        }
+        Err(_) => panic!("a 7-leg promoted crypto-slice export must refuse CLEANLY, not panic"),
+    };
+    assert!(
+        matches!(err, CliError::Usage(ref m)
+            if m.contains(&T14_YEAR.to_string()) && m.contains("7 promoted disposal leg")),
+        "the crypto-slice refusal names the year and the leg count: {err}"
+    );
+    assert!(
+        err.to_string().contains("void one of the promotes"),
+        "the crypto-slice refusal names a concrete remedy: {err}"
+    );
+    assert!(
+        std::fs::read_dir(&out)
+            .map(|mut d| d.next().is_none())
+            .unwrap_or(true),
+        "a crypto-slice overflow refusal leaves out_dir untouched (refuse-before-bytes)"
+    );
+}
+
 /// A vault with TWO promoted disposal legs filed in DIFFERENT years — each its own declared+promoted
 /// tranche, in its own wallet, drained by its own sell.
 fn vault_with_two_promoted_years(dir: &Path, year_a: i32, year_b: i32) -> PathBuf {

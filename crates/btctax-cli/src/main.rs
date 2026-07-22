@@ -720,7 +720,7 @@ fn run() -> Result<ExitCode, CliError> {
             .flatten()
             .map(|p| p.display().to_string())
             .collect();
-            // UX-P1-4: only the crypto-SLICE path fills these five; on the FULL-RETURN path they are all
+            // UX-P1-4: only the crypto-SLICE path fills these six; on the FULL-RETURN path they are all
             // None, so this header would print with an empty list before the authoritative "Full-return
             // packet —" block below. Print it only when there is a slice list to show.
             if !written.is_empty() {

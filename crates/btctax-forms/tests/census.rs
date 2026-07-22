@@ -311,6 +311,6 @@ fn every_census_form_demonstrated_in_j6() {
     );
     assert_eq!(
         names, expected,
-        "J6's full-return packet stems must be EXACTLY the 14 census keys — got {names:?}"
+        "J6's full-return packet stems must be EXACTLY the 15 census keys — got {names:?}"
     );
 }
