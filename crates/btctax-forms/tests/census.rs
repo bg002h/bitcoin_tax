@@ -25,7 +25,9 @@ use btctax_core::tax::form8275::Part1Item;
 use btctax_core::tax::packet::{assemble_printed_return, PrintedReturn};
 use btctax_core::tax::printed::{form_8283_printed, Printed8275};
 use btctax_core::tax::return_1040::assemble_absolute;
-use btctax_core::tax::testonly::{kitchen_sink_household, ty2024_params, ty2024_table, w2_only_household};
+use btctax_core::tax::testonly::{
+    kitchen_sink_household, ty2024_params, ty2024_table, w2_only_household,
+};
 use btctax_core::EventPayload;
 use btctax_forms::fill_full_return;
 use rust_decimal_macros::dec;
@@ -189,16 +191,9 @@ fn full_return_packet_emits_8275_iff_a_promoted_leg_is_filed() {
     });
 
     let ar = assemble_absolute(&ri, &state, &params, &table, 2024);
-    let pr_unpromoted = assemble_printed_return(
-        &ri,
-        &state,
-        &BTreeMap::new(),
-        &ar,
-        &table,
-        2024,
-        &[],
-    )
-    .expect("the fixture assembles");
+    let pr_unpromoted =
+        assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, &table, 2024, &[])
+            .expect("the fixture assembles");
     assert!(
         pr_unpromoted.forms.f8275.is_none(),
         "a plain (non-promoted) disposal leg discloses nothing"
@@ -244,7 +239,11 @@ fn full_return_packet_emits_8275_iff_a_promoted_leg_is_filed() {
         .as_ref()
         .expect("a promoted disposal leg discloses via f8275");
     assert_eq!(f8275.part_i.len(), 1, "one promoted leg ⇒ one Part I item");
-    assert_eq!(f8275.part_i[0].amount, dec!(300), "the AS-FILED col (e) basis");
+    assert_eq!(
+        f8275.part_i[0].amount,
+        dec!(300),
+        "the AS-FILED col (e) basis"
+    );
     assert_eq!(
         f8275.part_ii,
         "cash P2P purchase, no records; window bounded on-chain"

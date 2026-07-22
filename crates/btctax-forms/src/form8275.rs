@@ -40,7 +40,7 @@ fn push_free(
     ));
 }
 
-/// Fill Form 8275 for `year` from the T13 printed disclosure + the filer's identity.
+/// Fill Form 8275 for `year` from the T13 printed disclosure + the FULL-RETURN filer's identity.
 ///
 /// `Ok(None)` when `printed.part_i` is empty — there is no position to disclose (T13's
 /// `disclosure_8275` already returns `None` upstream for a year with no promoted disposal leg, but a
@@ -55,14 +55,38 @@ pub fn fill_form_8275(
     year: i32,
 ) -> Result<Option<Vec<u8>>, FormsError> {
     let map = Form8275Map::for_year(year)?;
-    fill_form_8275_with_map(printed, header, &map)
+    fill_form_8275_inner(printed, Some(header), &map)
+}
+
+/// Fill Form 8275 for `year` for the **crypto-slice** `export-irs-pdf` path (Task 16) — NO filer
+/// identity: mirrors `form8283::fill_form_8283`, which writes its property rows the same way (the
+/// crypto slice never wrote an identity block; its 8275 rides beside a return btctax did not produce).
+/// `Ok(None)` when `printed.part_i` is empty (no promoted disposal leg filed in `year`).
+pub fn fill_form_8275_slice(
+    printed: &Printed8275,
+    year: i32,
+) -> Result<Option<Vec<u8>>, FormsError> {
+    let map = Form8275Map::for_year(year)?;
+    fill_form_8275_inner(printed, None, &map)
 }
 
 /// The map-parametrized fill (exposed via `testonly` for fault-injection KATs — mirrors
-/// `fill_schedule_se_with_map` / `fill_1040_with_map`).
+/// `fill_schedule_se_with_map` / `fill_1040_with_map`). Kept identity-REQUIRED (unlike
+/// `fill_form_8283`'s `Option`) at this call surface — every existing caller (the full-return packet,
+/// `sp4.rs`'s KATs) has one; the crypto-slice caller goes through [`fill_form_8275_slice`] instead.
 pub fn fill_form_8275_with_map(
     printed: &Printed8275,
     header: &ReturnHeader,
+    map: &Form8275Map,
+) -> Result<Option<Vec<u8>>, FormsError> {
+    fill_form_8275_inner(printed, Some(header), map)
+}
+
+/// The shared fill: `filer: None` (crypto-slice) skips the identity cells entirely, exactly as
+/// `form8283::fill_form_8283_inner` does for its `filer: None` case.
+fn fill_form_8275_inner(
+    printed: &Printed8275,
+    filer: Option<&ReturnHeader>,
     map: &Form8275Map,
 ) -> Result<Option<Vec<u8>>, FormsError> {
     if printed.part_i.is_empty() {
@@ -98,16 +122,20 @@ pub fn fill_form_8275_with_map(
     // splitting; mirrors form8283's whole-address identity writes).
     push_free(&mut w, &mut p, &map.part_ii_narrative, &printed.part_ii);
 
-    // The blank's fields are needed for the identity cells' /MaxLen.
-    let blank_for_identity = pdf::collect_fields(&pdf::load(pdf::f8275_pdf(map.year)?)?)?;
-    crate::cells::push_identity(
-        &mut w,
-        &mut p,
-        &map.identity,
-        &header.name_line,
-        &header.taxpayer.ssn,
-        &blank_for_identity,
-    )?;
+    // The FILER's identity — "Name(s) shown on return" + identifying number. `None` on the crypto-slice
+    // path (Task 16): the disclosure still rides the export even with no `ReturnInputs` on file.
+    if let Some(header) = filer {
+        // The blank's fields are needed for the identity cells' /MaxLen.
+        let blank_for_identity = pdf::collect_fields(&pdf::load(pdf::f8275_pdf(map.year)?)?)?;
+        crate::cells::push_identity(
+            &mut w,
+            &mut p,
+            &map.identity,
+            &header.name_line,
+            &header.taxpayer.ssn,
+            &blank_for_identity,
+        )?;
+    }
 
     let writes = w;
     let placements = p;

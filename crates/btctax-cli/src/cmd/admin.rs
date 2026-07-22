@@ -206,7 +206,8 @@ pub fn export_snapshot(
             // whichever year a `Some(y)` caller happened to name. Year-suffixed filenames (never the
             // bare `form_8275.txt`): a real vault can have promoted disposal legs in more than one tax
             // year, and the bare name would let a second year silently overwrite the first's disclosure.
-            let mut promoted_years: std::collections::BTreeSet<i32> = std::collections::BTreeSet::new();
+            let mut promoted_years: std::collections::BTreeSet<i32> =
+                std::collections::BTreeSet::new();
             for d in &state.disposals {
                 if d.legs
                     .iter()
@@ -287,6 +288,10 @@ pub struct IrsPdfReport {
     pub form_1040_filled_7a: bool,
     /// The 1040 was skipped for a NET LOSS on line 7a (the §1211 line-21 cap is the filer's).
     pub form_1040_loss: bool,
+    /// Form 8275 (Disclosure Statement) — Task 16: written only on the crypto-slice path, only when a
+    /// promoted-basis disposal leg files in `tax_year` (and selected). Always `None` on the full-return
+    /// path — its 8275 is inside `full_return_paths` instead (sequence-prefixed, e.g. `92_f8275.pdf`).
+    pub form_8275_path: Option<PathBuf>,
     /// ★ The FULL-RETURN packet's files, in Attachment Sequence order (empty on the crypto-slice path).
     /// The two paths write NON-OVERLAPPING names, so no two runs can be collated into a chimera return.
     pub full_return_paths: Vec<PathBuf>,
@@ -389,6 +394,28 @@ pub fn export_irs_pdf(
     // Reuse the projection's capital-gains data verbatim (no recompute).
     let rows = btctax_core::form_8949(&state, tax_year);
     let totals = btctax_core::schedule_d(&state, tax_year);
+
+    // Form 8275 (Disclosure Statement) — Task 16: `Some` iff a promoted-basis disposal leg files in
+    // `tax_year` (the same `disclosure_8275` scoping `promote_export_gate` above already used to confirm
+    // completeness).
+    let printed_8275 = btctax_core::tax::form8275::disclosure_8275(&events, &state, tax_year)
+        .map(|d| btctax_core::tax::printed::printed_8275(&d));
+    // Task 16 / ADD-2 (mirrors `export_full_return`'s pre-check below): v1 does not paginate Form 8275 —
+    // refuse HERE, before `mkdir_out`, so an overflowing year (> 6 promoted disposal legs) names the year
+    // + a concrete remedy and writes ZERO bytes, instead of a bare `FormsError::Overflow` display after
+    // other files (`basis_methodology.txt`, `form_8275.txt`) already exist on disk.
+    if let Some(p) = &printed_8275 {
+        let cap = btctax_forms::Form8275Map::for_year(tax_year)?.rows.len();
+        if p.part_i.len() > cap {
+            return Err(CliError::Usage(format!(
+                "cannot export {tax_year}: {n} promoted disposal leg(s) each need a Form 8275 Part I \
+                 row, but this revision holds only {cap} — Form 8275 cannot yet paginate beyond {cap} \
+                 rows. File the 8275 manually for {tax_year}, or reduce the number of promoted disposal \
+                 legs filed in {tax_year} (e.g. void one of the promotes) and re-export.",
+                n = p.part_i.len(),
+            )));
+        }
+    }
 
     // A pseudo-active fill DRAFT-watermarks every page before it hits disk.
     let stamp = |bytes: Vec<u8>| -> Result<Vec<u8>, CliError> {
@@ -522,6 +549,22 @@ pub fn export_irs_pdf(
         }
     }
 
+    // ── Form 8275 (Disclosure Statement) — the OFFICIAL PDF, crypto-slice fill (Task 16). Rides beside
+    // the `write_form_8275_txt` content emitted above; no filer identity (mirrors the Form 8283
+    // crypto-slice fill). `promote_export_gate` already guaranteed a complete Part II, and the overflow
+    // pre-check above already guaranteed the Part I rows fit this revision's capacity. ──
+    let mut form_8275_path = None;
+    if wants(forms, FormArg::Form8275) {
+        if let Some(p) = &printed_8275 {
+            if let Some(bytes) = btctax_forms::fill_form_8275_slice(p, tax_year)? {
+                let bytes = stamp(bytes)?;
+                let path = out_dir.join("form_8275.pdf");
+                write_bytes_owner_only(&path, &bytes)?;
+                form_8275_path = Some(path);
+            }
+        }
+    }
+
     let unresolved_hard = state
         .blockers
         .iter()
@@ -547,6 +590,7 @@ pub fn export_irs_pdf(
         form_1040_path,
         form_1040_filled_7a,
         form_1040_loss,
+        form_8275_path,
     })
 }
 
@@ -752,6 +796,9 @@ fn export_full_return(
         form_1040_path: None,
         form_1040_filled_7a: false,
         form_1040_loss: false,
+        // The full-return path's 8275 (when present) is inside `full_return_paths` — sequence-prefixed
+        // (`92_f8275.pdf`), not this crypto-slice-only bare-named field.
+        form_8275_path: None,
     })
 }
 

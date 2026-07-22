@@ -927,3 +927,307 @@ fn export_snapshot_writes_form_8275_txt_by_name() {
         "export_snapshot emits the 8275 content by its OWN name (form_8275.txt)"
     );
 }
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// Task 16 — wiring the OFFICIAL Form 8275 fillable PDF into the export paths; BG-D8's gate re-pointed
+// at it. Four KATs: year-2025/2017 end-to-end (arch r1 I-6 — the year-aliasing must reach the export
+// layer, not just `fill_form_8275` itself, which `sp4.rs` already pins), the completeness gate still
+// refuses before ANY byte (including the new PDF) when Part II is incomplete, a > 6-leg promoted year
+// refuses CLEANLY (no panic, no half-written packet), and the all-years `export_snapshot` dump still
+// co-emits one `form_8275_{year}.txt` per promoted year (M2).
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// Generalizes `vault_with_promoted_disposal_via_cli` (T14, fixed to 2024) to an ARBITRARY supported
+/// `year` — T16's KAT needs 2025 and 2017, since Form 8275's bundled asset aliases every
+/// `SUPPORTED_YEAR`. Same shape: one declared+promoted tranche (a Q1 `year` window), drained by a
+/// single Q3 `year` sell — a promoted DISPOSAL leg filed in `year` with a COMPLETE Form 8275.
+fn vault_with_promoted_disposal_via_cli_year(dir: &Path, year: i32) -> PathBuf {
+    let vault = dir.join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.join("k.asc")).unwrap();
+    let window_start = time::Date::from_calendar_date(year, time::Month::January, 1).unwrap();
+    let window_end = time::Date::from_calendar_date(year, time::Month::March, 31).unwrap();
+    let tranche_id = cmd::tranche::declare_tranche(
+        &vault,
+        &pp(),
+        40_000_000,
+        wallet(),
+        window_start,
+        window_end,
+        now(),
+    )
+    .unwrap();
+    cmd::promote::promote_tranche(
+        &vault,
+        &pp(),
+        &tranche_id.canonical(),
+        ProvenanceKind::Purchase,
+        "cash P2P purchase, no records; window bounded on-chain".into(),
+        Some(PROMOTE_ACK_PHRASE),
+        now(),
+    )
+    .unwrap();
+    let sell_ts = time::Date::from_calendar_date(year, time::Month::September, 1)
+        .unwrap()
+        .with_hms(0, 0, 0)
+        .unwrap()
+        .assume_utc();
+    let sell = imp(
+        "T16-SELL",
+        sell_ts,
+        EventPayload::Dispose(Dispose {
+            sat: 40_000_000,
+            usd_proceeds: dec!(20_000),
+            fee_usd: dec!(0),
+            kind: DisposeKind::Sell,
+        }),
+    );
+    let mut s = Session::open(&vault, &pp()).unwrap();
+    append_import_batch(s.conn(), &[sell]).unwrap();
+    s.save().unwrap();
+    vault
+}
+
+/// ★ T16 KAT 1 (plan Step-1; arch r1 I-6 — the most important). A promoted disposal filed in a
+/// NON-2024 supported year (2025, then 2017) exports the OFFICIAL Form 8275 PDF via the crypto-slice
+/// `export_irs_pdf` — proving the bundled 8275 asset's year-aliasing ({2017, 2024, 2025}) works
+/// END-TO-END at the export layer (`sp4.rs` already pins the aliasing inside `fill_form_8275` itself;
+/// this is the wiring on top of it). A promoted CURRENT-year (2025) export must never be permanently
+/// refused for want of a "2025 revision" that does not exist.
+#[test]
+fn a_promoted_2025_export_fills_the_8275_and_the_gate_passes() {
+    for year in [2025, 2017] {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = vault_with_promoted_disposal_via_cli_year(dir.path(), year);
+        let out = dir.path().join("export_out");
+
+        let report = cmd::admin::export_irs_pdf(&vault, &pp(), &out, year, &[], None)
+            .unwrap_or_else(|e| panic!("year {year}: a complete promote must export cleanly: {e}"));
+        assert!(
+            out.join("form_8275.pdf").exists(),
+            "year {year}: the crypto-slice export must fill the official Form 8275 PDF"
+        );
+        assert_eq!(
+            report.form_8275_path,
+            Some(out.join("form_8275.pdf")),
+            "year {year}: the report names the written 8275 PDF"
+        );
+        assert!(
+            !report.watermarked,
+            "year {year}: a real (non-pseudo) ledger exports CLEAN"
+        );
+    }
+}
+
+/// ★ T16 KAT 2 (plan Step-1). The SAME BG-D8 completeness gate — now with the crypto-slice path ALSO
+/// trying to fill the official PDF (not just `form_8275.txt`) — still refuses BEFORE any byte reaches
+/// disk when a promoted leg's Part II is incomplete: neither the content file nor the new PDF partially
+/// writes.
+#[test]
+fn export_gate_now_refuses_when_the_8275_pdf_is_absent() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = raw_vault_promote_with_empty_part_ii(dir.path());
+    let out = dir.path().join("export_out"); // deliberately NOT pre-created
+
+    let err = cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None).unwrap_err();
+    assert!(
+        matches!(err, CliError::Usage(ref m) if m.contains("Form 8275")),
+        "an incomplete Form 8275 must still refuse the export post-T16: {err}"
+    );
+    assert!(
+        std::fs::read_dir(&out)
+            .map(|mut d| d.next().is_none())
+            .unwrap_or(true),
+        "a refused export leaves out_dir untouched — not even a partial form_8275.pdf"
+    );
+    assert!(!out.join("form_8275.pdf").exists());
+    assert!(!out.join("form_8275.txt").exists());
+}
+
+/// A vault with `n` DISTINCT promoted disposal legs, each in its OWN wallet (so its sell can only
+/// drain its own tranche's lot — no cross-wallet lot-selection ordering to reason about), all filed in
+/// `year`.
+fn vault_with_n_promoted_disposal_legs(dir: &Path, year: i32, n: u32) -> PathBuf {
+    let vault = dir.join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.join("k.asc")).unwrap();
+    let window_start = time::Date::from_calendar_date(year, time::Month::January, 1).unwrap();
+    let window_end = time::Date::from_calendar_date(year, time::Month::March, 31).unwrap();
+    let sell_ts = time::Date::from_calendar_date(year, time::Month::September, 1)
+        .unwrap()
+        .with_hms(0, 0, 0)
+        .unwrap()
+        .assume_utc();
+    for i in 0..n {
+        let w = WalletId::Exchange {
+            provider: "coinbase".into(),
+            account: format!("overflow{i}"),
+        };
+        let tranche_id = cmd::tranche::declare_tranche(
+            &vault,
+            &pp(),
+            40_000_000,
+            w.clone(),
+            window_start,
+            window_end,
+            now(),
+        )
+        .unwrap();
+        cmd::promote::promote_tranche(
+            &vault,
+            &pp(),
+            &tranche_id.canonical(),
+            ProvenanceKind::Purchase,
+            format!("cash P2P purchase #{i}, no records; window bounded on-chain"),
+            Some(PROMOTE_ACK_PHRASE),
+            now(),
+        )
+        .unwrap();
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        append_import_batch(
+            s.conn(),
+            &[LedgerEvent {
+                id: EventId::import(
+                    Source::Coinbase,
+                    SourceRef::new(format!("OVERFLOW-SELL-{i}")),
+                ),
+                utc_timestamp: sell_ts,
+                original_tz: UtcOffset::UTC,
+                wallet: Some(w),
+                payload: EventPayload::Dispose(Dispose {
+                    sat: 40_000_000,
+                    usd_proceeds: dec!(20_000),
+                    fee_usd: dec!(0),
+                    kind: DisposeKind::Sell,
+                }),
+            }],
+        )
+        .unwrap();
+        s.save().unwrap();
+    }
+    vault
+}
+
+/// ★ T16 KAT 3: Form 8275 v1 does not paginate — a year with MORE promoted disposal legs than the
+/// revision's 6-row Part I capacity refuses CLEANLY (naming the year, the leg count, and a remedy),
+/// never panics, and writes ZERO bytes (refuse-before-bytes) — pinning `export_full_return`'s Task-16 /
+/// ADD-2 pre-check (admin.rs). Full-return tables are TY2024-only (v1), so the overflowing year must be
+/// `T14_YEAR`.
+#[test]
+fn promoted_export_with_more_than_6_legs_refuses_cleanly_not_panics() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = vault_with_n_promoted_disposal_legs(dir.path(), T14_YEAR, 7);
+    plant_full_return_ri(&vault, T14_YEAR);
+    let out = dir.path().join("export_out"); // deliberately NOT pre-created
+
+    // This KAT's own job is to prove there is NO panic — assert it directly rather than relying on the
+    // harness to merely report one.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None)
+    }));
+    let err = match result {
+        Ok(Err(e)) => e,
+        Ok(Ok(_)) => {
+            panic!("a 7-leg promoted year (> the 6-row capacity) must refuse, not succeed")
+        }
+        Err(_) => panic!("a 7-leg promoted year must refuse CLEANLY, not panic"),
+    };
+    assert!(
+        matches!(err, CliError::Usage(ref m)
+            if m.contains(&T14_YEAR.to_string()) && m.contains("7 promoted disposal leg")),
+        "the refusal names the year and the leg count: {err}"
+    );
+    assert!(
+        err.to_string().contains("void one of the promotes"),
+        "the refusal names a concrete remedy: {err}"
+    );
+    assert!(
+        std::fs::read_dir(&out)
+            .map(|mut d| d.next().is_none())
+            .unwrap_or(true),
+        "an overflow refusal leaves out_dir untouched (refuse-before-bytes) — no half-written packet"
+    );
+}
+
+/// A vault with TWO promoted disposal legs filed in DIFFERENT years — each its own declared+promoted
+/// tranche, in its own wallet, drained by its own sell.
+fn vault_with_two_promoted_years(dir: &Path, year_a: i32, year_b: i32) -> PathBuf {
+    let vault = dir.join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.join("k.asc")).unwrap();
+    for (i, year) in [year_a, year_b].into_iter().enumerate() {
+        let w = WalletId::Exchange {
+            provider: "coinbase".into(),
+            account: format!("m2-{i}"),
+        };
+        let window_start = time::Date::from_calendar_date(year, time::Month::January, 1).unwrap();
+        let window_end = time::Date::from_calendar_date(year, time::Month::March, 31).unwrap();
+        let tranche_id = cmd::tranche::declare_tranche(
+            &vault,
+            &pp(),
+            40_000_000,
+            w.clone(),
+            window_start,
+            window_end,
+            now(),
+        )
+        .unwrap();
+        cmd::promote::promote_tranche(
+            &vault,
+            &pp(),
+            &tranche_id.canonical(),
+            ProvenanceKind::Purchase,
+            format!("cash P2P purchase, no records; {year} window bounded on-chain"),
+            Some(PROMOTE_ACK_PHRASE),
+            now(),
+        )
+        .unwrap();
+        let sell_ts = time::Date::from_calendar_date(year, time::Month::September, 1)
+            .unwrap()
+            .with_hms(0, 0, 0)
+            .unwrap()
+            .assume_utc();
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        append_import_batch(
+            s.conn(),
+            &[LedgerEvent {
+                id: EventId::import(Source::Coinbase, SourceRef::new(format!("M2-SELL-{i}"))),
+                utc_timestamp: sell_ts,
+                original_tz: UtcOffset::UTC,
+                wallet: Some(w),
+                payload: EventPayload::Dispose(Dispose {
+                    sat: 40_000_000,
+                    usd_proceeds: dec!(20_000),
+                    fee_usd: dec!(0),
+                    kind: DisposeKind::Sell,
+                }),
+            }],
+        )
+        .unwrap();
+        s.save().unwrap();
+    }
+    vault
+}
+
+/// ★ T16 KAT 4 (M2): the all-years `export_snapshot` dump (`tax_year: None`) with TWO different
+/// promoted years in range must co-emit BOTH `form_8275_{year}.txt` files — never a bare,
+/// collision-prone `form_8275.txt` that a second promoted year would silently overwrite.
+#[test]
+fn all_years_snapshot_writes_one_8275_txt_per_promoted_year() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = vault_with_two_promoted_years(dir.path(), 2024, 2017);
+    let out = dir.path().join("export_out");
+
+    cmd::admin::export_snapshot(&vault, &pp(), &out, None, None)
+        .expect("an all-years snapshot with two complete promoted years must succeed");
+
+    assert!(
+        out.join("form_8275_2024.txt").exists(),
+        "the 2024 promoted year's disclosure is co-emitted"
+    );
+    assert!(
+        out.join("form_8275_2017.txt").exists(),
+        "the 2017 promoted year's disclosure is co-emitted"
+    );
+    assert!(
+        !out.join("form_8275.txt").exists(),
+        "the all-years dump never uses the bare, collision-prone name"
+    );
+}

@@ -714,6 +714,7 @@ fn run() -> Result<ExitCode, CliError> {
                 report.schedule_se_path.as_ref(),
                 report.form_8283_path.as_ref(),
                 report.form_1040_path.as_ref(),
+                report.form_8275_path.as_ref(),
             ]
             .into_iter()
             .flatten()

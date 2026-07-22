@@ -280,6 +280,17 @@ pub fn fill_form_8275(
     form8275::fill_form_8275(printed, header, year)
 }
 
+/// Fill **Form 8275** for `year` on the **crypto-slice** `export-irs-pdf` path (Task 16) — NO filer
+/// identity (mirrors [`fill_form_8283`], whose crypto-slice fill also writes no identity block): the
+/// disclosure still rides the export even when there is no `ReturnInputs` on file. `Ok(None)` when
+/// there is no Part I content to disclose.
+pub fn fill_form_8275_slice(
+    printed: &btctax_core::tax::printed::Printed8275,
+    year: i32,
+) -> Result<Option<Vec<u8>>, FormsError> {
+    form8275::fill_form_8275_slice(printed, year)
+}
+
 /// Fill the **full-return Form 8283** for `year` — whole-dollar rows plus the FILER's identity block
 /// (which the crypto slice never writes). `Ok(None)` when there are no donation rows.
 pub fn fill_form_8283_full(

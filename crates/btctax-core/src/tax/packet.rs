@@ -555,7 +555,8 @@ pub fn assemble_printed_forms(
     // Form 8275 (Task 16) — `Some` iff a promoted-basis DISPOSAL leg files in `year`; the printed
     // (whole-dollar-rounded Part I) content of `crate::tax::form8275::disclosure_8275`, whose own
     // scoping already omits a promoted REMOVAL-only year (BG-D11).
-    let f8275 = crate::tax::form8275::disclosure_8275(events, state, year).map(|d| printed_8275(&d));
+    let f8275 =
+        crate::tax::form8275::disclosure_8275(events, state, year).map(|d| printed_8275(&d));
 
     let f1040 = form_1040_lines(
         ar,
@@ -911,8 +912,16 @@ mod tests {
     fn the_assembled_packet_ties_the_1040_to_its_attachments() {
         let (ri, state) = kitchen_sink_household();
         let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
-        let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, &ty2024_table(), 2024, &[])
-            .unwrap();
+        let pr = assemble_printed_return(
+            &ri,
+            &state,
+            &BTreeMap::new(),
+            &ar,
+            &ty2024_table(),
+            2024,
+            &[],
+        )
+        .unwrap();
 
         let sch_1 = pr
             .forms
@@ -1023,8 +1032,16 @@ mod tests {
     fn the_packet_omits_every_form_that_is_not_required() {
         let (ri, state) = w2_only_household();
         let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
-        let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, &ty2024_table(), 2024, &[])
-            .unwrap();
+        let pr = assemble_printed_return(
+            &ri,
+            &state,
+            &BTreeMap::new(),
+            &ar,
+            &ty2024_table(),
+            2024,
+            &[],
+        )
+        .unwrap();
 
         assert!(
             pr.forms.sch_1.is_none(),
@@ -1056,8 +1073,16 @@ mod tests {
     fn the_printed_8959_reads_the_same_box5_sum_the_computed_8959_used() {
         let (ri, state) = kitchen_sink_household();
         let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
-        let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, &ty2024_table(), 2024, &[])
-            .unwrap();
+        let pr = assemble_printed_return(
+            &ri,
+            &state,
+            &BTreeMap::new(),
+            &ar,
+            &ty2024_table(),
+            2024,
+            &[],
+        )
+        .unwrap();
 
         let box5_sum: crate::conventions::Usd = ri.w2s.iter().map(|w| w.box5_medicare_wages).sum();
         assert_eq!(ar.printed_inputs.medicare_wages, box5_sum);

@@ -690,9 +690,10 @@ pub struct Form8275Map {
     /// Tax year this map instance is stamped for (re-stamped by `for_year`; the field SET is identical
     /// across every supported year — see the module doc).
     pub year: i32,
-    /// The FILER's identity — "Name(s) shown on return" + "Identifying number shown on return".
-    /// REQUIRED: unlike Form 8283's crypto-slice fill, Form 8275 has exactly ONE `fill_form_8275` entry
-    /// point and it always takes a `ReturnHeader` — an unnamed disclosure statement is not filable.
+    /// The FILER's identity — "Name(s) shown on return" + "Identifying number shown on return". The map
+    /// always DECLARES these cells (unlike Form 8283, whose 2017 revision structurally lacks an identity
+    /// block), but Task 16's crypto-slice fill (`fill_form_8275_slice`) leaves them unwritten — mirroring
+    /// Form 8283's own crypto-slice fill, which writes no identity either.
     pub identity: IdentityCells,
     /// Part I rows (6 on this revision) — the per-copy capacity `fill_form_8275` refuses beyond.
     pub rows: Vec<Form8275Row>,
