@@ -56,10 +56,16 @@ pub fn filed_basis_for(
     match window_reference(prices, window_start, window_end) {
         None => Err(PromoteRefusal::NoCoverage),
         Some(wr) if wr.coverage == Coverage::Partial => Err(PromoteRefusal::PartialCoverage),
-        Some(wr) => Ok(ComputedFloor {
+        Some(wr) if wr.coverage == Coverage::Full => Ok(ComputedFloor {
             filed_basis: round_cents(wr.min * Usd::from(sat) / Usd::from(SATS_PER_BTC)),
             coverage: Coverage::Full,
         }),
+        // Only `Coverage::Full` is provably the TRUE window min, so only it may take the filed/computed
+        // path. A future `Coverage` variant must NOT silently fall through to Full (that would overstate
+        // basis → understate gain, violating G-4); refuse it (reusing `PartialCoverage` — same "not
+        // provably the true min" cause). Explicit so a new variant is a compile-forced decision HERE, not
+        // a silent Full default (arch Minor-2 / tax M3).
+        Some(_) => Err(PromoteRefusal::PartialCoverage),
     }
 }
 
