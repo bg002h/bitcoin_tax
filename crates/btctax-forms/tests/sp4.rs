@@ -81,6 +81,8 @@ const ROW1_AMOUNT: &str = "topmostSubform[0].Page1[0].Table_Part1[0].Line1[0].p1
 const ROW1_CITATION_A: &str = "topmostSubform[0].Page1[0].Table_Part1[0].Line1[0].p1-t3[0]";
 const ROW1_LINE_NO_E: &str = "topmostSubform[0].Page1[0].Table_Part1[0].Line1[0].p1-t8[0]";
 const ROW2_ITEM: &str = "topmostSubform[0].Page1[0].Table_Part1[0].Line2[0].p1-t11[0]";
+const ROW2_DESC: &str = "topmostSubform[0].Page1[0].Table_Part1[0].Line2[0].#subform[0].p1-t12[0]";
+const ROW2_FORM_SCHEDULE: &str = "topmostSubform[0].Page1[0].Table_Part1[0].Line2[0].p1-t14[0]";
 const ROW2_AMOUNT: &str = "topmostSubform[0].Page1[0].Table_Part1[0].Line2[0].p1-t16[0]";
 const PART_II_LINE1: &str = "topmostSubform[0].Page1[0].p1-t80[0]";
 const IDENTITY_NAME: &str = "topmostSubform[0].Page1[0].p1-t1[0]";
@@ -136,6 +138,57 @@ fn form_8275_fills_part_i_part_ii_and_identity() {
     // Column (a) [citation] and (e) [Line No.] are never written — no applicable data.
     assert_eq!(tv(&doc, &fields, ROW1_CITATION_A), None);
     assert_eq!(tv(&doc, &fields, ROW1_LINE_NO_E), None);
+}
+
+/// ★ T15 review Minor-2: the free-text `verify_flat` oracle checks page + `/MaxLen` + no-unmapped, so a
+/// map that SWAPPED two wide same-page cells (item↔desc, form_schedule↔item, or a row1↔row2 reorder)
+/// would fail-closed-silently — verify_flat can't tell a wide cell's neighbour apart. This per-field
+/// SENTINEL readback closes that: EVERY writable Part-I field (both rows' item/desc/form/amount) gets a
+/// DISTINCT value, and we read each back BY FIELD NAME and assert its own sentinel landed there — so any
+/// map swap between two written fields reds this (the existing fill KAT missed row-2 desc/form_schedule
+/// and shared "Form 8949" across both rows' form cells, so a form-cell swap survived it).
+#[test]
+fn form_8275_lands_each_part_i_field_in_its_own_widget_no_swap() {
+    let printed = Printed8275 {
+        part_i: vec![
+            Part1Item {
+                form: "R1FORM".into(),
+                line: "R1ITEM".into(),
+                description: "R1DESC".into(),
+                amount: dec!(11111),
+            },
+            Part1Item {
+                form: "R2FORM".into(),
+                line: "R2ITEM".into(),
+                description: "R2DESC".into(),
+                amount: dec!(22222),
+            },
+        ],
+        part_ii: "R_PARTII_NARRATIVE".into(),
+    };
+    let pdf = btctax_forms::fill_form_8275(&printed, &kitchen_sink_header(), 2024)
+        .unwrap()
+        .expect("non-empty part_i");
+    let (doc, fields) = fields_of(&pdf);
+
+    // Each distinct sentinel lands in its OWN widget — a swap of any two would cross the values.
+    for (fqn, want) in [
+        (ROW1_ITEM, "R1ITEM"),
+        (ROW1_DESC, "R1DESC"),
+        (ROW1_FORM_SCHEDULE, "Form R1FORM"),
+        (ROW1_AMOUNT, "11111"),
+        (ROW2_ITEM, "R2ITEM"),
+        (ROW2_DESC, "R2DESC"),
+        (ROW2_FORM_SCHEDULE, "Form R2FORM"),
+        (ROW2_AMOUNT, "22222"),
+        (PART_II_LINE1, "R_PARTII_NARRATIVE"),
+    ] {
+        assert_eq!(
+            tv(&doc, &fields, fqn).as_deref(),
+            Some(want),
+            "field {fqn} must hold its own sentinel {want:?} (a map swap would cross it)"
+        );
+    }
 }
 
 #[test]
