@@ -144,41 +144,49 @@ engine-invisible; forward-planning only). There is **no manual "I hold N BTC" da
        shortfall's pool AND `window_end` ≤ the short op's date. Render as ONE pool state ("a tranche of
        N sat is live here but this op is still short by S — review the window/wallet; do NOT declare
        again"), never a per-tranche attribution.
-     - **Over-covered / displacing (tax-I-4/I-A + arch-C-1 — the BG-1-critical direction).** The hazard is
-       **displacement of documented basis**, NOT "covers no shortfall" (that binary is BOTH too broad —
-       it catches a legitimately undisposed tranche, arch-C-1 — AND too narrow — it misses a *partially*
-       over-sized tranche, tax-I-A). Precise predicate, via the same shadow-projection machinery
-       (project WITH the target tranche promoted vs project WITHOUT it): the tranche is **displacing** iff
-       some real disposal/removal in its pool draws the tranche's promoted `>$0` floor **in place of the
-       documented (non-`EstimatedConservative`) basis it would otherwise draw** (the floor exits
-       `hifo_cmp`'s `usd_basis==0` sort-last case and HIFO-reorders ahead of documented lots →
-       understated gain on the double-counted sat). This fires for a full phantom AND for the excess of a
-       partially over-sized tranche (declare `short_sat`=100M, a later real import supplies 60M in-pool
-       before the disposal → 60M excess displaces documented coins). It does **NOT** fire for:
-       - a **fully-undisposed** tranche (nothing draws it → no displacement) — so the shipped, BG-D6-
-         guaranteed `ConsentTerm::Unrealized` forward-promote (`kat_promote.rs:fully_undisposed_promote…`)
-         is **preserved on both surfaces**; nor
-       - a **correctly-sized covering** tranche (it fills only genuinely-short sat that had no documented
-         alternative → displaces nothing).
-       Because the predicate fires ONLY on a genuine filing hazard, it is a **refusal-grade check on the
-       shared promote chokepoint** (like `would_conflict`, correct on the CLI verb AND the dashboard — no
-       CLI-vs-dashboard carve needed, since promoting a displacing tranche is never legitimate on either).
-       Whole-tranche-only (a sub-1 non-goal) forbids a partial clamp, so the remedy is **refuse + route to
-       void + re-declare at the covered size**. The dashboard also surfaces the derived "over-covered by N
-       sat — void + re-declare" state (mirror of didn't-cover). Same shadow-projection; derived; no new
-       tax logic. **KATs (§5):** a fully-undisposed tranche STILL promotes and records the Unrealized term
-       (the shipped guarantee — mutation: keep the binary "covers no shortfall" predicate → the undisposed
-       promote is wrongly refused → reds); a partial-over-coverage promote is refused as over-covering by
-       the excess sat (mutation: keep the binary predicate → the 100M promote is admitted → reds); a
-       correctly-sized cover promotes.
+     - **Over-covered / displacing — a DASHBOARD ADVISORY, NOT a hard refusal (arch-r3 C-1 adjudication;
+       tax-r3 M-1/N-1/N-2/N-3).** The over-coverage hazard (a double-counted tranche whose promoted floor
+       is HIFO-drawn in place of documented basis → understated gain) is **ledger-identical** to a
+       *legitimate* vintage reorder (a real documented lot + a real no-records tranche the filer attested,
+       where HIFO legitimately draws the higher-basis promoted lot — the shipped `mixed_vintage_hifo_2018_
+       disposal` KAT): same `(tranche, disposal)` signature, opposite verdicts. **Only the filer's
+       provenance attestation distinguishes them**, and DFW-D8/D3 forbid recording the per-tranche target
+       that could link them. Therefore the tool **CANNOT hard-refuse** — a refusal on the shared promote
+       chokepoint would false-block the legitimate promote and remove a shipped capability (BG-1's own
+       "surface the concern, never forbid the filer's attested choice", and DFW-D11's warn-not-forbid
+       posture for the same class of reorder). So:
+       - The **shared promote chokepoint stays behavior-preserving** — NO over-coverage guard is added
+         (matching the shipped verb; the `Unrealized` forward-promote, the correctly-sized cover, AND
+         `mixed_vintage` all promote unchanged; §5's "changes no shipped promote KAT" is TRUE).
+       - The **dashboard derives a loud over-covered ADVISORY**: a live tranche whose sat exceed the sat
+         it actually covers in the without-promote fold — a **sat-count** comparison, covering BOTH
+         per-sat orderings (tax-M-1), independent of whether a displacement currently manifests. Copy:
+         "this tranche is larger than the shortfall it covers by N sat — if a later import supplied those
+         coins, promoting files an estimated basis on documented coins (understated gain); void +
+         re-declare at the covered size. If these are genuinely your no-records coins, promoting is fine."
+       - A complementary **"recorded promote is now displacing" advisory** (tax-N-3) mirrors the shipped
+         `promote_drift_advisory` (`conservative_promote.rs:89`): surface when a recorded promote's floor
+         now displaces documented basis (detected by `basis_source` COMPOSITION — a documented leg in the
+         without-fold replaced by an `EstimatedConservative` floor leg in the with-fold, NOT a bare
+         leg-set inequality; tax-N-1). Both advisories are derived; no new tax logic; no gate moved.
+       - **Residual (filed against sub-1, §8):** the shipped CLI `promote_tranche` has no displacement
+         guard, so a CLI declare→import→promote can file understated gain today (tax-N-2). This is
+         **not hard-fixable** (ledger-identical to legitimate use) — the dashboard advisory helps
+         dashboard users; the mandatory Form 8275 disclosure + §6662 regime backstop the attested
+         position. Noted, not blocking.
+       **KATs (§5):** a fully-undisposed tranche, a correctly-sized cover, AND a `mixed_vintage` reorder
+       all promote unchanged (no shipped promote KAT changes); an over-sized tranche renders the
+       over-covered dashboard advisory (mutation: derive the advisory from displacement-only → the
+       reverse-ordering over-size shows nothing → reds).
 
 - **DFW-D6 (pseudo gate — C-2; SPEC-r1 tax-I-2).** The whole journey is gated on
   **`!state.pseudo_active()`** with routing guidance ("resolve/approve pseudo defaults first"); a
   defensive-filing journey over synthetic estimates is incoherent. ★ **Correction:** pseudo-reconcile is
   NOT shortfall-stable — Phase B synthesizes a real `SelfTransferMine{basis:None}` lot for every
   unresolved `TransferIn` (`resolve.rs:~1156`), whose sats CAN clear a `dispose short` (likewise an
-  accept-first `ImportConflict`). So EVERY chokepoint shadow projection — the **discovery** signal
-  (DFW-D7), the **DFW-D5 clearance** re-projection, AND the **consent/savings** computation — MUST force
+  accept-first `ImportConflict`). So EVERY chokepoint / journey-view shadow projection — the **discovery**
+  signal (DFW-D7), the **DFW-D5 clearance** re-projection, the **DFW-D5.3 over-covered / drift-advisory**
+  with/without folds (tax-r3 M-2), AND the **consent/savings** computation — MUST force
   `pseudo_reconcile = false` (exactly as `would_conflict` does, `project/mod.rs:~119`); the chokepoint
   must not depend on its caller's journey gate (the CLI drivers have none). The **latent sub-project-1
   gap** (`cmd/promote.rs:396` folds the stored `pseudo_reconcile` into `consent_terms` /
@@ -292,11 +300,11 @@ reviewed to **0C/0I under BOTH the tax and architecture lenses** before merge. *
   a reason (mutation: prefill `window_end == short-op date` → reds); the CLI free-form declare (`None`) is
   NOT refused (shipped semantics preserved); a cleared tranche removes the shortfall row; a live tranche
   whose pool matches an unresolved short renders the pool-level "still short — don't declare again" state.
-- **DFW-D5.3 displacement (over-coverage):** a **fully-undisposed** tranche STILL promotes and records the
-  `Unrealized` term (mutation: binary "covers no shortfall" predicate → wrongly refused → reds); a
-  **partial over-coverage** (declare 100M → later 60M in-pool import before the disposal) promote is
-  **refused** as displacing 60M documented sat (mutation: binary predicate → 100M promote admitted →
-  reds); a **correctly-sized cover** promotes.
+- **DFW-D5.3 over-covered ADVISORY (not a refusal):** a **fully-undisposed** tranche, a **correctly-sized
+  cover**, AND a **`mixed_vintage`** documented-lot+promoted-tranche reorder all **promote unchanged** (no
+  shipped promote KAT changes — the shared gate is behavior-preserving); an **over-sized** tranche (declare
+  100M → later 60M in-pool import) renders the derived **over-covered dashboard advisory** (mutation:
+  derive it from displacement-only → a reverse-per-sat-ordering over-size shows nothing → reds).
 - **DFW-D6 pseudo (all shadows):** with pseudo active the journey refuses+routes; and at the chokepoint
   the **discovery**, **clearance**, AND **consent/savings** projections all force `pseudo_reconcile=false`
   — a `SelfTransferMine{$0}`-cleared shortfall is NOT hidden and no pseudo number reaches a recorded
@@ -331,7 +339,14 @@ binary (tax-I-A: misses partial over-coverage) and too broad (arch-C-1: refuses 
 promote). **Folded here** into ONE displacement-based predicate (fires iff promoting displaces documented
 basis on a real disposal; not on undisposed/correctly-sized), + per-event `short_sat` (arch-m-1) +
 behavior-preserving carve for the DFW-D6 fix (arch-m-2) + fee-only promote suppress (tax-N-1). Re-review
-= **SPEC r3 on OPUS**. Reviews verbatim in `reviews/`.
+= **SPEC r3 on OPUS**: tax **GREEN** 0C/0I/2M/3N, arch **1C** — the lenses CONFLICTED on DFW-D5.3's hard
+over-coverage refusal (tax wanted it — closes a CLI double-count gap, N-2; arch rejected it — false-blocks
+the shipped `mixed_vintage` legitimate promote, ledger-identical to the hazard). **Controller adjudicated
+for the architecture lens** (its point is decisive: the hazard and a legitimate reorder are
+ledger-indistinguishable, so a hard refusal necessarily removes a shipped capability): DFW-D5.3 **demoted
+to a dashboard advisory**, shared promote gate behavior-preserving; the CLI gap → a §8 known-limitation
+(not hard-fixable; 8275/§6662 backstop). + tax M-1/M-2/N-1/N-3 folded. Re-review = **SPEC r4 on OPUS**.
+Reviews verbatim in `reviews/`.
 
 ## 7. Phasing (ONE ship gate; internal phases free — no installed base)
 
@@ -350,5 +365,11 @@ behavior-preserving carve for the DFW-D6 fix (arch-m-2) + fee-only promote suppr
 - **★ File against sub-project 1 (independent of this feature):** the CLI `promote_tranche` can already
   fold pseudo numbers into the recorded `Acknowledgment` (DFW-D6 / C-2). Fix at the shared chokepoint;
   add the latent-gap KAT. This is a real (if narrow) sub-project-1 defect, not new to the wizard.
+- **Known limitation (not hard-fixable) — CLI displacement gap (tax-r3 N-2):** the shipped CLI
+  `promote_tranche` has no displacement guard, so a declare→import-documented-coins→promote sequence can
+  file understated gain. It is **ledger-identical to a legitimate vintage reorder** (`mixed_vintage`), so
+  no hard gate can distinguish it (DFW-D5.3); the dashboard over-covered/drift ADVISORIES surface it for
+  dashboard users, and the mandatory Form 8275 disclosure + the §6662 regime backstop the attested
+  position. Record as a known limitation of the attested-provenance model, not a defect to gate on.
 - See `[[conservative-filing-approach-b]]`, `[[answeredness-invariant]]`, `[[self-transfer-completion-policy]]`,
   `[[full-return-draft-gate-policy]]`, `[[tax-authority-hierarchy]]`.
