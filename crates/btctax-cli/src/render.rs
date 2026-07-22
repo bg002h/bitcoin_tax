@@ -942,17 +942,34 @@ pub fn write_form_csvs(
 ///   BEFORE any bytes when a promoted leg's Part II is empty/incomplete, so a promoted leg reaching HERE
 ///   is guaranteed to carry a complete Part II — this always emits a filing-ready disclosure.
 ///
-/// `pub(crate)` so the `export-snapshot` CSV / `export-irs-pdf` / full-return packet writers
-/// (`cmd/admin.rs`) emit it at their `write_basis_methodology_txt` call sites.
-pub(crate) fn write_form_8275_txt(
+/// `pub` so the `export-snapshot` CSV / `export-irs-pdf` / full-return packet writers (`cmd/admin.rs`)
+/// AND the TUI export path (`btctax-tui::export::do_export`, Approach-B Task 17) emit it at their
+/// `write_basis_methodology_txt` call sites — the TUI reaches it via `btctax_cli::render::…` (no `cmd::`
+/// token, so its KAT-E10 source gate stays green).
+pub fn write_form_8275_txt(
     out_dir: &Path,
     state: &LedgerState,
     events: &[LedgerEvent],
     year: i32,
 ) -> Result<(), crate::CliError> {
+    write_form_8275_txt_named(out_dir, state, events, year, "form_8275.txt")
+}
+
+/// The `write_form_8275_txt` write, under an explicit `filename`. Task 16 / M2: the all-years
+/// `export_snapshot` dump (`tax_year: None`) can have MULTIPLE promoted years in the exported range,
+/// and every one of them would otherwise collide on the same bare `form_8275.txt` — silently
+/// overwriting all but the last. The single-year call sites keep the bare name (`write_form_8275_txt`
+/// above); the all-years path names each file `form_8275_{year}.txt` instead.
+pub(crate) fn write_form_8275_txt_named(
+    out_dir: &Path,
+    state: &LedgerState,
+    events: &[LedgerEvent],
+    year: i32,
+    filename: &str,
+) -> Result<(), crate::CliError> {
     use std::io::Write as _;
     if let Some(disc) = btctax_core::tax::form8275::disclosure_8275(events, state, year) {
-        let mut file = fsperms::open_owner_only(&out_dir.join("form_8275.txt"))?;
+        let mut file = fsperms::open_owner_only(&out_dir.join(filename))?;
         // `render()` already terminates with a newline — write, don't writeln (no trailing blank line).
         write!(file, "{}", disc.render())?;
     }

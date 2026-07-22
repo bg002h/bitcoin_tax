@@ -48,6 +48,11 @@ pub const SCHEDULE_D_MAP_2024: &str = include_str!("../forms/2024/schedule_d.map
 pub const SCHEDULE_SE_MAP_2024: &str = include_str!("../forms/2024/schedule_se.map.toml");
 /// The TY2024 Form 8283 map (Rev. 12-2023, embedded at compile time).
 pub const F8283_MAP_2024: &str = include_str!("../forms/2024/f8283.map.toml");
+/// The Form 8275 map (Rev. 10-2024, embedded at compile time). ★ Form 8275 is REVISION-versioned, not
+/// tax-year-versioned: this ONE map + its bundled PDF are aliased to EVERY `SUPPORTED_YEAR` — there is
+/// no `F8275_MAP_2017` / `F8275_MAP_2025` (`Form8275Map::for_year` reuses this same parsed map,
+/// re-stamping only the `year` field).
+pub const F8275_MAP_2024: &str = include_str!("../forms/2024/f8275.map.toml");
 /// The TY2024 Form 1040 map (embedded at compile time).
 pub const F1040_MAP_2024: &str = include_str!("../forms/2024/f1040.map.toml");
 /// The TY2024 Form 8959 (Additional Medicare Tax) map (embedded at compile time).
@@ -652,6 +657,91 @@ impl Form8283Map {
             v.extend(r.cost.fields());
             v.extend(r.deduction.fields());
         }
+        v
+    }
+}
+
+/// One Form 8275 Part I row (Rev. 10-2024): the columns btctax actually fills, keyed to a T13
+/// `Part1Item`. **FREE-TEXT, no money-grid clustering** (arch/T15): every cell here is written via
+/// `push_free`/`FlatPlacement::free`, not the column-x-clustered `push_cell` form8283/Schedule-SE use.
+///
+/// Column (a) "Rev. Rul., Rev. Proc., etc." and column (e) "Line No." (a `/MaxLen 3` cell — far too
+/// narrow for our descriptive `Part1Item.line` string, e.g. "Part I — column (e)") are **deliberately
+/// absent**: there is no citation to disclose, and Form 8949 has no discrete numbered "line" (it is a
+/// per-transaction, lettered-COLUMN schedule) — nothing correct could be written to either.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Form8275Row {
+    /// (b) "Item or Group of Items" — the position's form-location descriptor (`Part1Item.line`).
+    pub item: String,
+    /// (c) "Detailed Description of Items" — the Cohan-estimate explanation (`Part1Item.description`).
+    pub desc: String,
+    /// (d) "Form or Schedule" — the filed form the position appears on (`Part1Item.form`, e.g. "8949").
+    pub form_schedule: String,
+    /// (f) "Amount".
+    pub amount: String,
+}
+
+/// The Form 8275 (Disclosure Statement, Rev. 10-2024) field map. **One revision, aliased to every
+/// `SUPPORTED_YEAR`** — see [`F8275_MAP_2024`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct Form8275Map {
+    /// `"f8275"`.
+    pub form: String,
+    /// Tax year this map instance is stamped for (re-stamped by `for_year`; the field SET is identical
+    /// across every supported year — see the module doc).
+    pub year: i32,
+    /// The FILER's identity — "Name(s) shown on return" + "Identifying number shown on return". The map
+    /// always DECLARES these cells (unlike Form 8283, whose 2017 revision structurally lacks an identity
+    /// block), but Task 16's crypto-slice fill (`fill_form_8275_slice`) leaves them unwritten — mirroring
+    /// Form 8283's own crypto-slice fill, which writes no identity either.
+    pub identity: IdentityCells,
+    /// Part I rows (6 on this revision) — the per-copy capacity `fill_form_8275` refuses beyond.
+    pub rows: Vec<Form8275Row>,
+    /// Part II "Detailed Explanation" — the single free-text field the filer's combined narrative
+    /// (`Printed8275::part_ii`) is written to whole (no per-line splitting; mirrors how form8283 writes
+    /// a whole address into one wide identity cell).
+    pub part_ii_narrative: String,
+}
+
+impl Form8275Map {
+    /// Parse the committed TOML.
+    pub fn parse(toml_src: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(toml_src)
+    }
+
+    /// The bundled Rev. 10-2024 map, as committed (`year` field reads 2024).
+    pub fn ty2024() -> Self {
+        Self::parse(F8275_MAP_2024).expect("bundled f8275 map parses")
+    }
+
+    /// The map for a supported tax year. ★ Form 8275 is REVISION-versioned, not tax-year-versioned:
+    /// the ONE bundled Rev. 10-2024 map/asset is aliased to EVERY `SUPPORTED_YEAR` (2017/2024/2025) —
+    /// only the `year` tag is re-stamped to the caller's requested year. This is what keeps a promoted
+    /// 2025 (or 2017) disposal's Form 8275 export from being permanently refused for want of a
+    /// "2025 map" that would never structurally differ from this one.
+    pub fn for_year(year: i32) -> Result<Self, FormsError> {
+        match year {
+            2017 | 2024 | 2025 => {
+                let mut m = Self::ty2024();
+                m.year = year;
+                Ok(m)
+            }
+            _ => Err(FormsError::UnsupportedYear(year)),
+        }
+    }
+
+    /// Every field name the map targets (for the `map_YYYY_matches_bundled_pdf_fieldset` guard).
+    pub fn field_names(&self) -> Vec<&str> {
+        let mut v = vec![self.identity.name.as_str(), self.identity.ssn.as_str()];
+        for r in &self.rows {
+            v.extend([
+                r.item.as_str(),
+                r.desc.as_str(),
+                r.form_schedule.as_str(),
+                r.amount.as_str(),
+            ]);
+        }
+        v.push(self.part_ii_narrative.as_str());
         v
     }
 }

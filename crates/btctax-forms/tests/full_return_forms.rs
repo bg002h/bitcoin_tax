@@ -2127,6 +2127,7 @@ fn the_packet_is_all_or_nothing_when_a_member_filler_refuses() {
         &ar,
         &ty2024_table(),
         2024,
+        &[],
     )
     .unwrap();
 
@@ -2163,6 +2164,7 @@ fn the_packet_emits_every_required_form_in_attachment_sequence_order() {
         &ar,
         &ty2024_table(),
         2024,
+        &[],
     )
     .unwrap();
 
@@ -2210,6 +2212,7 @@ fn a_w2_only_household_files_a_1040_and_nothing_else() {
         &ar,
         &ty2024_table(),
         2024,
+        &[],
     )
     .unwrap();
 
@@ -2239,6 +2242,7 @@ fn the_reports_amount_owed_is_the_figure_printed_on_the_filed_1040() {
         &ar,
         &ty2024_table(),
         2024,
+        &[],
     );
 
     // The figure the report prints (it renders `printed.f1040`, not `ar`).

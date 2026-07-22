@@ -28,6 +28,13 @@ pub use cmd::tranche::guard_allocation_vs_tranche;
 // Re-exported at the crate root mirroring `ATTEST_PHRASE` (below): a plain, distinct consent-phrase
 // constant, not a `cmd::`-scoped session/lock fn, so it belongs beside the other top-level phrase gates.
 pub use cmd::promote::PROMOTE_ACK_PHRASE;
+// Re-exported at the crate root so the TUI export path (`btctax-tui::export::do_export`) can call the
+// BG-D8 completeness gate WITHOUT the `cmd::` token its KAT-E10 source gate forbids in non-test code
+// (Approach-B Task 17). Like `guard_allocation_vs_tranche` above, this is a PURE
+// `(&LedgerState, &[LedgerEvent], Option<i32>) -> Result` predicate — no `Session`, no lock, no I/O — so
+// the gate's intent (keep session-lifecycle `cmd::` fns out of the held-session viewer) is honored, not
+// evaded. Any FUTURE addition here must be equally pure (do NOT re-export a session-opening fn).
+pub use cmd::admin::promote_export_gate;
 pub use config::CliConfig;
 pub use session::{
     BulkFilter, BulkIncomeFilter, BulkIncomePlan, BulkIncomeRow, BulkLinkPlan, BulkLinkRow,

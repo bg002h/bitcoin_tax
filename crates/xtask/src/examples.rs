@@ -134,8 +134,10 @@ fn shell_quote(arg: &str) -> String {
 }
 
 /// Emit one `$ btctax …` block (command + verbatim stdout + exit-code marker, + labelled stderr when
-/// `show_stderr`) into `md`.
-fn emit(md: &mut String, bin: &Path, cwd: &Path, cmd: &Cmd) {
+/// `show_stderr`) into `md`. Returns the command's raw stdout (most callers ignore it; a journey that
+/// needs to thread a printed ref — e.g. `declare-tranche`'s "Recorded decision …" — into a LATER step
+/// reads it from here instead of re-deriving/guessing the sequence number).
+fn emit(md: &mut String, bin: &Path, cwd: &Path, cmd: &Cmd) -> String {
     let shown = format!(
         "btctax {}",
         cmd.args
@@ -163,6 +165,7 @@ fn emit(md: &mut String, bin: &Path, cwd: &Path, cmd: &Cmd) {
         }
         md.push_str("```\n");
     }
+    stdout
 }
 
 /// The front matter: the pinned-env convention + the honest passphrase sentence + the version pin.
@@ -706,8 +709,23 @@ fn journey_j1(md: &mut String, bin: &Path) {
     );
 }
 
-/// J6 — a COMPLETE Form 1040: crypto activity (mining income, a sale, a donation) combined with a full
-/// non-crypto household imported from a TOML, exporting all fourteen forms of the return in one packet.
+/// Task 16 — Frank's Form 8275 Part II narrative for the promoted tranche J6 declares below. Local to
+/// this journey (not `btctax_cli::testonly`'s shared corpora): it is prose the FILER authors, not an
+/// exchange export.
+const J6_TRANCHE_NARRATIVE: &str = "Purchased for cash from a friend in early 2024; no exchange \
+    receipt exists, but the coins first appear on-chain within the declared window, bounding the \
+    acquisition date.\n";
+
+/// Task 16 — a small 2024 Coinbase sale (0.001 BTC, AFTER the tranche's `--window-end` and BEFORE the
+/// existing charitable donation) that drains the promoted tranche declared below — one promoted
+/// disposal leg, so the full-return packet's Form 8275 has exactly one Part I row to disclose.
+const J6_TRANCHE_SELL_CSV: &str = "\r\nTransactions\r\nUser,00000000-0000-0000-0000-000000000000\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
+tranche-sell,2024-07-01 12:00:00 UTC,Sell,BTC,0.00100000,USD,65000.00,65.00,65.00,0.00,,,\r\n";
+
+/// J6 — a COMPLETE Form 1040: crypto activity (mining income, a sale, a promoted-basis disposal, and a
+/// donation) combined with a full non-crypto household imported from a TOML, exporting all fifteen
+/// forms of the return in one packet.
 fn journey_j6(md: &mut String, bin: &Path) {
     md.push_str(
         "\n## J6 — a complete return (the full 1040 packet)\n\n\
@@ -803,6 +821,74 @@ fn journey_j6(md: &mut String, bin: &Path) {
     );
     md.push_str("\nCheck the ledger balances and the §170(e) deduction is computed:\n\n");
     emit(md, bin, cwd, &plain(&["--vault", "v.pgp", "verify"]));
+
+    md.push_str(
+        "\nFrank also has a small parcel of undocumented Bitcoin — bought for cash from a friend years\n\
+         ago, no receipt. Rather than file it at the IRS-fallback `$0` basis, he can PROMOTE it to a filed\n\
+         floor (the minimum daily closing price over an attested acquisition window), disclosed on a Form\n\
+         8275. First, declare the tranche:\n\n",
+    );
+    write_corpus(cwd, "tranche_narrative.txt", J6_TRANCHE_NARRATIVE);
+    let declare_stdout = emit(
+        md,
+        bin,
+        cwd,
+        &plain(&[
+            "--vault",
+            "v.pgp",
+            "reconcile",
+            "declare-tranche",
+            "--amount",
+            "0.00100000",
+            "--wallet",
+            "exchange:coinbase:default",
+            "--window-start",
+            "2024-01-01",
+            "--window-end",
+            "2024-03-31",
+        ]),
+    );
+    let tranche_ref = declare_stdout
+        .lines()
+        .find_map(|l| l.strip_prefix("Recorded decision "))
+        .expect("declare-tranche prints its decision ref")
+        .trim()
+        .to_string();
+    md.push_str(
+        "\nPromoting requires purchase provenance, a Form 8275 Part II narrative (his own acquisition\n\
+         facts, in a text file), and an explicit acknowledgment of the disclosed estimated-basis risk —\n\
+         the consent screen below shows the computed effect before he acknowledges it:\n\n",
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&[
+            "--vault",
+            "v.pgp",
+            "reconcile",
+            "promote-tranche",
+            &tranche_ref,
+            "--provenance",
+            "purchase",
+            "--part-ii-file",
+            "tranche_narrative.txt",
+            "--i-acknowledge",
+            btctax_cli::PROMOTE_ACK_PHRASE,
+        ]),
+    );
+    md.push_str(
+        "\nA later sale of those same units is a PROMOTED disposal: its estimated basis must be\n\
+         disclosed, and Form 8275 attaches automatically to the full-return packet below:\n\n",
+    );
+    write_corpus(cwd, "tranche_sell.csv", J6_TRANCHE_SELL_CSV);
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "import", "tranche_sell.csv"]),
+    );
+
     md.push_str(
         "\nNow the non-crypto side. `income import` reads the offline TOML — wages, interest (Schedule B),\n\
          dividends, the itemized deductions (Schedule A), and the fail-loud yes/no questions the return\n\

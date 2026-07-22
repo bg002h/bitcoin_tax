@@ -2644,6 +2644,47 @@ fn a_clamped_leg_disclosure_adds_the_no_loss_sentence_and_files_the_clamped_amou
     );
 }
 
+/// ★ Whole-branch tax M1 guard: the no-loss suffix condition is `leg.basis >= leg.proceeds`
+/// (gain <= 0), widened from the old `== leg.proceeds` so it also catches a below-floor promoted leg
+/// whose documented fee carry pushes basis ABOVE proceeds (gain < 0 — that exotic corner is the M1
+/// target). This KAT pins the OTHER edge — the change must NOT over-fire: a promoted leg sold ABOVE its
+/// floor takes the full floor as basis (no clamp), files a POSITIVE gain, and must carry NO suffix.
+/// Mutation-proven: replacing `>=` with a tautology (e.g. `>= Decimal::ZERO`) reds this.
+#[test]
+fn an_above_floor_promoted_sale_files_positive_gain_and_no_no_loss_suffix() {
+    let w = exch();
+    let events = vec![
+        tranche_ev(
+            1,
+            &w,
+            100_000_000,
+            date!(2024 - 01 - 01),
+            date!(2024 - 01 - 10),
+        ),
+        promote_ev(2, EventId::decision(1), dec!(5_000)), // a LOW floor
+        sell_ev(
+            "SELL",
+            datetime!(2024-06-01 00:00 UTC),
+            &w,
+            100_000_000,
+            8_000, // sold ABOVE the $5,000 floor
+        ),
+    ];
+    let state = project(&events, &prices(), &cfg());
+    let leg = only_disposal_leg(&state);
+    assert!(leg.gain > dec!(0), "sold above the floor ⇒ positive gain");
+    assert_eq!(leg.basis, dec!(5_000), "the full floor is filed (no clamp)");
+    let d =
+        disclosure_8275(&events, &state, 2024).expect("a promoted disposal leg files this year");
+    assert!(
+        !d.part_i[0]
+            .description
+            .contains("limited so as not to report a loss"),
+        "an above-floor (gain > 0) promoted sale must NOT carry the no-loss suffix: {}",
+        d.part_i[0].description
+    );
+}
+
 /// BG-D11: a promoted tranche DONATED short-term files documented-only ($0 — the estimate evaporates,
 /// `conservative_promote::clamped_leg_basis` with a $0 removal `net_proceeds_share`), so it takes NO
 /// estimated position on the return. Part I must be 8949-DISPOSAL-scoped only — no 8283/removal item.

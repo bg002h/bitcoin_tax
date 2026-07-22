@@ -203,10 +203,12 @@ pub enum Command {
         #[arg(long)]
         tax_year: i32,
         /// Restrict the crypto-slice packet to specific forms (repeat or comma-separate). Values:
-        /// `f8949`, `schedule-d`, `schedule-se`, `form8283`, `form1040`. Default = every applicable form
-        /// (f8949 + schedule-d always; schedule-se when SE income ≥ the $400 floor; form8283 when there
-        /// are donations; form1040 when there is reportable digital-asset activity). A named form is still
-        /// skipped when it does not apply. Ignored on a full-return year (that path fills the whole packet).
+        /// `f8949`, `schedule-d`, `schedule-se`, `form8283`, `form1040`, `form8275`. Default = every
+        /// applicable form (f8949 + schedule-d always; schedule-se when SE income ≥ the $400 floor;
+        /// form8283 when there are donations; form1040 when there is reportable digital-asset activity;
+        /// form8275 when a promoted-basis disposal leg files in the year — Approach-B's Cohan-estimate
+        /// disclosure). A named form is still skipped when it does not apply. Ignored on a full-return
+        /// year (that path fills the whole packet).
         #[arg(long, value_enum, value_delimiter = ',')]
         forms: Vec<FormArg>,
         /// Attestation phrase required to export while the ledger is PSEUDO-RECONCILED (a synthetic
@@ -903,11 +905,6 @@ pub enum Reconcile {
     /// mandatory purchase-provenance attestation (BG-D5), a two-sided informed-consent screen (BG-D6),
     /// and a Form 8275 Part II narrative (BG-D7). Mitigates penalty exposure; does not eliminate it or
     /// guarantee immunity — read the consent screen this verb prints before acknowledging.
-    // Hidden until Task 16 wires the official Form 8275 AcroForm (Reg §1.6662-4(f) adequate disclosure);
-    // un-hide there. The verb still WORKS and parses fully (a hidden command is absent from `--help` only)
-    // — this keeps an accidental pre-1b tag from advertising an inadequate-disclosure path (arch Minor-4,
-    // defense-in-depth).
-    #[command(hide = true)]
     PromoteTranche {
         /// The `DeclareTranche` decision to promote (see `btctax events list` for the ref).
         target: String,
@@ -993,6 +990,8 @@ pub enum FormArg {
     Form8283,
     /// Form 1040 (capital-gains cells + the digital-asset question).
     Form1040,
+    /// Form 8275 (Disclosure Statement — Approach-B's Cohan-estimate promoted-basis disclosure).
+    Form8275,
 }
 
 #[derive(Copy, Clone, ValueEnum)]

@@ -8,8 +8,18 @@
 //! `fsperms::mkdir_owner_only_exclusive`) and the year's form artifacts (via
 //! `btctax_cli::render::write_form_csvs`) — the four named form CSVs plus, when a
 //! conservative-filing tranche is in the filed set, the mandatory `basis_methodology.txt`
-//! disclosure (P7 / D-4).  No other write-class I/O occurs anywhere in `btctax-tui`
-//! source — the mechanized gate (KAT-E10) enforces this on every `cargo test`.
+//! disclosure (P7 / D-4), plus — when a PROMOTED-basis disposal leg files in the year — the
+//! mandatory `form_8275.txt` disclosure (BG-D8 / Reg §1.6662-4(f)).  No other write-class I/O
+//! occurs anywhere in `btctax-tui` source — the mechanized gate (KAT-E10) enforces this on every
+//! `cargo test`.
+//!
+//! # BG-D8 completeness gate (Approach-B Task 17)
+//! Before any bytes are written, `do_export` calls `btctax_cli::promote_export_gate` (the SAME
+//! refuse-before-bytes gate the CLI export paths run): a promoted-basis disposal leg filed without a
+//! COMPLETE Form 8275 (an empty Part II narrative) is a HARD refusal, so a refused export creates no
+//! export directory and writes zero bytes.  The gate is called via the crate-root re-export
+//! (`btctax_cli::promote_export_gate`), never `btctax_cli::cmd::…`, so KAT-E10's `cmd::` prohibition
+//! stays satisfied.
 
 use crate::app::Snapshot;
 use btctax_core::{compute_se_tax, TaxTables};
@@ -124,10 +134,21 @@ pub fn compute_files(snap: &Snapshot, year: i32) -> Vec<&'static str> {
 
 /// Perform the export: create the exclusive directory and write the year's form artifacts.
 ///
+/// 0. **BG-D8 completeness gate (Task 17), refuse-before-bytes:** calls
+///    `btctax_cli::promote_export_gate(&snap.state, &snap.events, Some(year))` FIRST — before the
+///    `mkdir` and any byte — so a promoted-basis disposal leg filed without a COMPLETE Form 8275
+///    (empty Part II, Reg §1.6662-4(f)) is a HARD refusal that creates NO out_dir and writes ZERO
+///    bytes.  This is the SAME gate the CLI export paths (`cmd/admin.rs`) run; the TUI reaches it via
+///    the crate-root re-export, never `btctax_cli::cmd::…`, so KAT-E10 stays green.
 /// 1. Calls `fsperms::mkdir_owner_only_exclusive(out_dir)` [D1b, R0-I1] — FAILS with
 ///    `AlreadyExists` if the dir pre-exists; nothing is written in that case.
 /// 2. Assembles the SE result PROFILE-GATED (mirrors `cmd/tax.rs:79–106`).
 /// 3. Calls `btctax_cli::render::write_form_csvs` with the assembled inputs.
+/// 4. **BG-D8 emit:** calls `btctax_cli::render::write_form_8275_txt` — which self-gates on
+///    `disclosure_8275` and so writes `form_8275.txt` iff a promoted disposal leg files in `year`
+///    (writes nothing otherwise) — exactly as the CLI CSV export co-emits the disclosure by its own
+///    name.  The gate in step 0 already guaranteed a promoted leg reaching here carries a complete
+///    Part II.
 ///
 /// Returns the written dir path on success.  On `AlreadyExists` (same-second re-export
 /// OR pre-created dir) returns an error with nothing written — the exclusive-create
@@ -139,12 +160,19 @@ pub fn do_export(
     snap: &Snapshot,
     state: &ExportConfirmState,
 ) -> Result<PathBuf, btctax_cli::CliError> {
+    let year = state.year;
+
+    // ── BG-D8 completeness gate (Task 17), refuse-before-bytes — MUST precede the mkdir. ──
+    // A promoted-basis disposal leg filed without a COMPLETE Form 8275 (empty Part II) is a HARD
+    // refusal (Reg §1.6662-4(f)); a refused export creates no out_dir and writes zero bytes. Reached
+    // via the crate-root re-export (no `cmd::` token — KAT-E10).
+    btctax_cli::promote_export_gate(&snap.state, &snap.events, Some(year))?;
+
     // EXCLUSIVE create — must precede write_form_csvs [R0-I1].
     // Fails with AlreadyExists on a pre-existing dir; nothing is written.
     fsperms::mkdir_owner_only_exclusive(&state.out_dir).map_err(btctax_cli::CliError::Store)?;
 
     // SE assembly — PROFILE-GATED, mirrors cmd/tax.rs:79–106 exactly.
-    let year = state.year;
     let se_result = match snap.profiles.get(&year) {
         Some(p) => {
             let table_opt = snap.tables.table_for(year);
@@ -170,6 +198,12 @@ pub fn do_export(
         se_result.as_ref(),
         &snap.donation_details,
     )?;
+
+    // BG-D8 (Task 17): co-emit the Form 8275 disclosure by its OWN name, exactly as the CLI CSV export
+    // does (cmd/admin.rs::export_snapshot). Self-gates on `disclosure_8275` — writes `form_8275.txt`
+    // iff a promoted disposal leg files in `year`, nothing otherwise. The gate at the top of this fn
+    // already guaranteed any promoted leg reaching here carries a complete Part II.
+    btctax_cli::render::write_form_8275_txt(&state.out_dir, &snap.state, &snap.events, year)?;
 
     Ok(state.out_dir.clone())
 }
@@ -754,6 +788,166 @@ mod tests {
         assert_eq!(
             sentinel_content, b"sentinel content",
             "sentinel file must be byte-identical after failed export"
+        );
+    }
+
+    // ── KAT-E12/E13 — BG-D8 gate + emit at the TUI export boundary (Approach-B Task 17) ──────
+
+    /// Build a promoted-disposal Snapshot filing in 2026: a 1-BTC tranche (2015 window) PROMOTED to a
+    /// $12,000 floor, then a 1-BTC 2026 sell that drains it — so the resulting disposal leg is a
+    /// PROMOTED leg filed in 2026. `part_ii_narrative` controls Form 8275 COMPLETENESS: `""` (empty) →
+    /// `disclosure_8275().incomplete == true` (the raw-vault-bypass state this gate backstops — mirrors
+    /// promote_cli.rs's `raw_vault_promote_with_empty_part_ii`; the T10 CLI verb refuses an empty
+    /// narrative at record time, so only a direct `project` of a hand-built promote reaches it); a
+    /// non-empty narrative → a COMPLETE disclosure. The promote populates `promoted_origins`
+    /// (`live_promotes` does not inspect the narrative), and the sell (the tranche's only lot) files the
+    /// promoted disposal leg.
+    fn promoted_snapshot(part_ii_narrative: &str) -> Snapshot {
+        use btctax_core::conservative::Coverage;
+        use btctax_core::event::{
+            Acknowledgment, DeclareTranche, Dispose, DisposeKind, EventPayload, FloorMethod,
+            LedgerEvent, PromoteTranche,
+        };
+        use btctax_core::identity::WalletId;
+        use btctax_core::price::StaticPrices;
+        use btctax_core::project::{project, ProjectionConfig};
+        use time::macros::offset;
+
+        let w = WalletId::SelfCustody {
+            label: "cold".into(),
+        };
+        let tranche_id = EventId::decision(1);
+        let tranche = LedgerEvent {
+            id: tranche_id.clone(),
+            utc_timestamp: datetime!(2026-01-01 00:00 UTC),
+            original_tz: offset!(+00:00),
+            wallet: None,
+            payload: EventPayload::DeclareTranche(DeclareTranche {
+                sat: 100_000_000,
+                wallet: w.clone(),
+                window_start: make_date(2015, 1, 1),
+                window_end: make_date(2015, 12, 31),
+            }),
+        };
+        let promote = LedgerEvent {
+            id: EventId::decision(2),
+            utc_timestamp: datetime!(2026-01-02 00:00 UTC),
+            original_tz: offset!(+00:00),
+            wallet: None,
+            payload: EventPayload::PromoteTranche(PromoteTranche {
+                target: tranche_id,
+                method: FloorMethod::WindowLowClose,
+                filed_basis: Decimal::from(12_000i64),
+                coverage: Coverage::Full,
+                provenance_attested: true,
+                acknowledgment: Acknowledgment {
+                    phrase: btctax_cli::PROMOTE_ACK_PHRASE.into(),
+                    shown_terms: vec![],
+                    provenance_text: "acquired by purchase within the declared window".into(),
+                    provenance_version: "v1".into(),
+                },
+                part_ii_narrative: part_ii_narrative.into(),
+            }),
+        };
+        let sell = LedgerEvent {
+            id: make_event_id("T17-SELL"),
+            utc_timestamp: datetime!(2026-06-01 00:00 UTC),
+            original_tz: offset!(+00:00),
+            wallet: Some(w.clone()),
+            payload: EventPayload::Dispose(Dispose {
+                sat: 100_000_000,
+                usd_proceeds: Decimal::from(90_000i64),
+                fee_usd: Decimal::ZERO,
+                kind: DisposeKind::Sell,
+            }),
+        };
+        let events = vec![tranche, promote, sell];
+        let state = project(
+            &events,
+            &StaticPrices::default(),
+            &ProjectionConfig::default(),
+        );
+        Snapshot {
+            events,
+            state,
+            cli_config: CliConfig::default(),
+            profiles: BTreeMap::new(),
+            refused: BTreeMap::new(),
+            tables: BundledTaxTables::load(),
+            donation_details: BTreeMap::new(),
+            bulk_estimated: BTreeMap::new(),
+            prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
+        }
+    }
+
+    /// ★ KAT-E12 (Task 17, HARD / BG-D8 refuse): a TUI `do_export` of a promoted year whose Form 8275
+    /// Part II is INCOMPLETE (empty narrative — the raw-vault-bypass state) is REFUSED, and refused
+    /// BEFORE any bytes: the out_dir is never created. This is the refuse-before-bytes half of the
+    /// deliverable — it puts the TUI export path behind the SAME `promote_export_gate` the CLI export
+    /// paths run (`cmd/admin.rs`). The test is self-verifying: it can only pass when the promote is live
+    /// AND incomplete (a non-promoting fixture → gate `Ok` → `do_export` succeeds → `expect_err` fails).
+    /// Mutation-verify: deleting the `promote_export_gate` call at the top of `do_export` REDs this (the
+    /// export then proceeds, creating out_dir + writing the CSVs).
+    #[test]
+    fn e12_tui_export_refuses_incomplete_8275_before_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        // The vault file is never created — `export_dir_for` only reads its `.parent()`.
+        let vault = dir.path().join("vault.pgp");
+        let export_now = datetime!(2026-07-01 09:00:00 UTC);
+        let out_dir = export_dir_for(&vault, export_now);
+
+        let snap = promoted_snapshot(""); // EMPTY Part II ⇒ incomplete Form 8275
+        let modal = ExportConfirmState {
+            year: 2026,
+            out_dir: out_dir.clone(),
+            files: compute_files(&snap, 2026),
+            export_now,
+            attest: None,
+        };
+
+        let err = do_export(&snap, &modal)
+            .expect_err("a promoted leg without a complete Form 8275 must be REFUSED");
+        assert!(
+            matches!(&err, btctax_cli::CliError::Usage(m) if m.contains("Form 8275")),
+            "the refusal must name 'Form 8275' (the BG-D8 gate), not some other error; got: {err}"
+        );
+        // Refuse-before-bytes: the gate runs BEFORE the exclusive mkdir, so out_dir was never created.
+        assert!(
+            !out_dir.exists(),
+            "a refused TUI export leaves out_dir UNCREATED (zero bytes written)"
+        );
+    }
+
+    /// ★ KAT-E13 (Task 17, BG-D8 emit): a TUI `do_export` of a promoted year with a COMPLETE Form 8275
+    /// (non-empty Part II) SUCCEEDS and writes `form_8275.txt` into out_dir alongside the form CSVs —
+    /// exactly as the CLI CSV export co-emits the disclosure by its OWN name (`export_snapshot`,
+    /// cmd/admin.rs). Without the `write_form_8275_txt` emit, a promoted year would export CSVs but
+    /// silently OMIT the mandatory disclosure — the BG-D8 defect this task closes.
+    #[test]
+    fn e13_tui_export_emits_form_8275_txt_for_complete_promoted_leg() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let export_now = datetime!(2026-07-01 10:00:00 UTC);
+        let out_dir = export_dir_for(&vault, export_now);
+
+        let snap = promoted_snapshot("cash P2P purchase, no records; window bounded on-chain");
+        let modal = ExportConfirmState {
+            year: 2026,
+            out_dir: out_dir.clone(),
+            files: compute_files(&snap, 2026),
+            export_now,
+            attest: None,
+        };
+
+        do_export(&snap, &modal).expect("a clean promoted export must succeed");
+        assert!(
+            out_dir.join("form_8275.txt").exists(),
+            "a complete promoted export co-emits the disclosure by its OWN name (form_8275.txt)"
+        );
+        // The 8275 rides WITH the packet, not instead of it — the form CSVs are alongside it.
+        assert!(
+            out_dir.join("form8949.csv").exists(),
+            "the form CSVs are written alongside form_8275.txt"
         );
     }
 

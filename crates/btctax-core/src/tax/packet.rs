@@ -15,6 +15,7 @@
 //! composition site; the KATs below go *through* it, so the tested wiring is the shipped wiring.
 
 use crate::donation::DonationDetails;
+use crate::event::LedgerEvent;
 use crate::identity::EventId;
 use crate::state::LedgerState;
 use crate::tax::other_taxes::{form_8959_lines, form_8960_lines, Form8959Lines, Form8960Lines};
@@ -25,6 +26,7 @@ use crate::tax::printed::{
     ScheduleALines, ScheduleBLines, ScheduleCLines, ScheduleDLines, ScheduleSeLines,
 };
 use crate::tax::printed::{form_8283_printed, Printed8283Rows, FORM_8283_THRESHOLD};
+use crate::tax::printed::{printed_8275, Printed8275};
 use crate::tax::qbi::{form_8995_lines, Form8995Lines};
 use crate::tax::questions::{QuestionId, FORM_QUESTIONS};
 use crate::tax::return_1040::{is_aged, AbsoluteReturn};
@@ -448,6 +450,13 @@ pub struct PrintedForms {
     /// the attachment, and the §170(b) ceilings legitimately make it smaller than the sum of the 8283's
     /// per-donation amounts (SPEC §3.1, the citation-composition rule).
     pub f8283: Option<Printed8283Rows>,
+    /// Form 8275 (Disclosure Statement) — Approach-B Task 16. `Some` iff a promoted-basis Form 8949
+    /// DISPOSAL leg files in `year` ([`crate::tax::form8275::disclosure_8275`]'s own scoping: a
+    /// promoted REMOVAL-only year files documented-only and takes no estimated position to disclose,
+    /// BG-D11). Reg §1.6662-4(f) makes disclosure adequate only on a COMPLETED Form 8275, which is why
+    /// an incomplete Part II gates the export (`cmd::admin::promote_export_gate`) rather than filing a
+    /// silently-blank one.
+    pub f8275: Option<Printed8275>,
 }
 
 /// ★ **The single composition site.** Build every printed chain from one `AbsoluteReturn`, in dependency
@@ -465,11 +474,12 @@ pub fn assemble_printed_return(
     ar: &AbsoluteReturn,
     table: &TaxTable,
     year: i32,
+    events: &[LedgerEvent],
 ) -> Result<PrintedReturn, HeaderError> {
     Ok(PrintedReturn {
         header: ReturnHeader::build(ri, year)?,
         filing_status: ri.filing_status,
-        forms: assemble_printed_forms(ri, state, donation_details, ar, table, year),
+        forms: assemble_printed_forms(ri, state, donation_details, ar, table, year, events),
     })
 }
 
@@ -486,6 +496,7 @@ pub fn assemble_printed_forms(
     ar: &AbsoluteReturn,
     table: &TaxTable,
     year: i32,
+    events: &[LedgerEvent],
 ) -> PrintedForms {
     let status = ri.filing_status;
     let pi = &ar.printed_inputs;
@@ -541,6 +552,12 @@ pub fn assemble_printed_forms(
         .filter(|a| a.line12 > FORM_8283_THRESHOLD)
         .and_then(|_| form_8283_printed(&crate::forms::form_8283(state, year, donation_details)));
 
+    // Form 8275 (Task 16) — `Some` iff a promoted-basis DISPOSAL leg files in `year`; the printed
+    // (whole-dollar-rounded Part I) content of `crate::tax::form8275::disclosure_8275`, whose own
+    // scoping already omits a promoted REMOVAL-only year (BG-D11).
+    let f8275 =
+        crate::tax::form8275::disclosure_8275(events, state, year).map(|d| printed_8275(&d));
+
     let f1040 = form_1040_lines(
         ar,
         &income,
@@ -571,6 +588,7 @@ pub fn assemble_printed_forms(
         f8960,
         f8995,
         f8283,
+        f8275,
     }
 }
 
@@ -894,8 +912,16 @@ mod tests {
     fn the_assembled_packet_ties_the_1040_to_its_attachments() {
         let (ri, state) = kitchen_sink_household();
         let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
-        let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, &ty2024_table(), 2024)
-            .unwrap();
+        let pr = assemble_printed_return(
+            &ri,
+            &state,
+            &BTreeMap::new(),
+            &ar,
+            &ty2024_table(),
+            2024,
+            &[],
+        )
+        .unwrap();
 
         let sch_1 = pr
             .forms
@@ -1006,8 +1032,16 @@ mod tests {
     fn the_packet_omits_every_form_that_is_not_required() {
         let (ri, state) = w2_only_household();
         let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
-        let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, &ty2024_table(), 2024)
-            .unwrap();
+        let pr = assemble_printed_return(
+            &ri,
+            &state,
+            &BTreeMap::new(),
+            &ar,
+            &ty2024_table(),
+            2024,
+            &[],
+        )
+        .unwrap();
 
         assert!(
             pr.forms.sch_1.is_none(),
@@ -1039,8 +1073,16 @@ mod tests {
     fn the_printed_8959_reads_the_same_box5_sum_the_computed_8959_used() {
         let (ri, state) = kitchen_sink_household();
         let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
-        let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, &ty2024_table(), 2024)
-            .unwrap();
+        let pr = assemble_printed_return(
+            &ri,
+            &state,
+            &BTreeMap::new(),
+            &ar,
+            &ty2024_table(),
+            2024,
+            &[],
+        )
+        .unwrap();
 
         let box5_sum: crate::conventions::Usd = ri.w2s.iter().map(|w| w.box5_medicare_wages).sum();
         assert_eq!(ar.printed_inputs.medicare_wages, box5_sum);

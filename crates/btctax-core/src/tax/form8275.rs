@@ -28,8 +28,9 @@ use std::collections::BTreeSet;
 const PART_I_DESCRIPTION: &str = "basis estimated at the minimum daily closing price over the \
      attested acquisition window (Cohan; the bearing-heavily minimum)";
 
-/// Appended to a leg's description when BG-D4's loss clamp bound (`leg.basis == leg.proceeds`): the
-/// estimate was limited so as not to report a loss the estimate itself manufactured. Exact substring
+/// Appended to a promoted leg's description when BG-D4's loss clamp bit (`leg.basis >= leg.proceeds`,
+/// i.e. gain <= 0): the estimate was limited so as not to report a loss the estimate itself
+/// manufactured. Exact substring
 /// `a_clamped_leg_disclosure_adds_the_no_loss_sentence_and_files_the_clamped_amount` pins.
 const NO_LOSS_SUFFIX: &str = "; limited so as not to report a loss from the estimate";
 
@@ -123,10 +124,15 @@ pub fn disclosure_8275(
         {
             targets.insert(leg.lot_id.origin_event_id.clone());
             let mut description = PART_I_DESCRIPTION.to_string();
-            // BG-D4: `leg.basis == leg.proceeds` is the same clamp-bound heuristic
-            // `conservative::basis_methodology` uses — a below-floor sale limited so as not to
-            // manufacture a loss off the estimate.
-            if leg.basis == leg.proceeds {
+            // BG-D4: `leg.basis >= leg.proceeds` (i.e. gain <= 0) is the clamp-bound heuristic
+            // `conservative::basis_methodology` uses. For a PROMOTED leg (this loop is
+            // `promoted_origins`-scoped), gain <= 0 means the estimate was limited so as not to
+            // manufacture a loss off it: the pure below-floor clamp files `basis == proceeds` (gain 0),
+            // and a below-floor sale that ALSO carries a documented TP8(c) fee (re-homed AFTER the
+            // clamp) files `basis == proceeds + documented_fee > proceeds` (a small documented loss) —
+            // the `==`-only test used to miss that corner (whole-branch tax review M1). (A promoted leg
+            // sold ABOVE its floor files `basis = floor < proceeds`, gain > 0, so this stays false.)
+            if leg.basis >= leg.proceeds {
                 description.push_str(NO_LOSS_SUFFIX);
             }
             let line = match leg.term {

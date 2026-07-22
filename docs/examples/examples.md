@@ -446,6 +446,38 @@ Per-disposal compliance (post-2025): 0
 Promote-basis drift advisories: 0
 ```
 
+Frank also has a small parcel of undocumented Bitcoin — bought for cash from a friend years
+ago, no receipt. Rather than file it at the IRS-fallback `$0` basis, he can PROMOTE it to a filed
+floor (the minimum daily closing price over an attested acquisition window), disclosed on a Form
+8275. First, declare the tranche:
+
+```console
+$ btctax --vault v.pgp reconcile declare-tranche --amount 0.00100000 --wallet "exchange:coinbase:default" --window-start 2024-01-01 --window-end 2024-03-31
+Recorded decision decision|3
+```
+
+Promoting requires purchase provenance, a Form 8275 Part II narrative (his own acquisition
+facts, in a text file), and an explicit acknowledgment of the disclosed estimated-basis risk —
+the consent screen below shows the computed effect before he acknowledges it:
+
+```console
+$ btctax --vault v.pgp reconcile promote-tranche "decision|3" --provenance purchase --part-ii-file tranche_narrative.txt --i-acknowledge "I understand and accept this estimated-basis risk"
+Promoting this tranche changes year 2024's §170(e) charitable deduction by ~$60. Its federal tax for 2024 is not separately computable here (no table/profile/blocked). This RAISES year 2024's tax; if 2024 was already filed, correcting it requires a Form 1040-X for 2024 (Form 8275 attached) reporting additional tax, plus interest. Because year 2024's net capital gain/loss or charitable deduction changed, its §1212(b) capital-loss carryforward and its §170(d) charitable carryover into later years may shift too, so the carryover-linked lines of later filed years may also require amendment.
+Promoting this tranche is a KNOWING choice to file a >$0 basis floor (the minimum daily closing price over the attested acquisition window) instead of the IRS-fallback $0. If an exam determines the correct basis is $0, the penalty is 20% ordinary / 40% worst-case of the resulting additional tax (the underpayment attributable to the misstatement), plus interest; the Form 8275 disclosure and the good-faith window-low-close methodology mitigate this exposure, but do not eliminate it and do not guarantee immunity from penalty.
+Year 2024: tax not computable here (no table/profile/blocked) — promoting changes the reported gain by ~$0.00 and the deduction/basis by ~$60.00.
+Recorded decision decision|4
+```
+
+A later sale of those same units is a PROMOTED disposal: its estimated basis must be
+disclosed, and Form 8275 attaches automatically to the full-return packet below:
+
+```console
+$ btctax --vault v.pgp import tranche_sell.csv
+Import:
+  coinbase [tranche_sell.csv]: parsed 1 rows -> 1 BTC events (0 dropped no-BTC, 0 unclassified)
+  appended 1 | duplicates 0 | NEW import-conflicts 0
+```
+
 Now the non-crypto side. `income import` reads the offline TOML — wages, interest (Schedule B),
 dividends, the itemized deductions (Schedule A), and the fail-loud yes/no questions the return
 requires. Unknown keys are rejected, never silently dropped:
@@ -625,7 +657,7 @@ plus a `manifest.txt`:
 ```console
 $ btctax --vault v.pgp export-irs-pdf --out irs --tax-year 2024
 
-Full-return packet — 14 form(s), in IRS Attachment Sequence order:
+Full-return packet — 15 form(s), in IRS Attachment Sequence order:
   irs/00_f1040.pdf
   irs/01_f1040s1.pdf
   irs/02_f1040s2.pdf
@@ -639,6 +671,7 @@ Full-return packet — 14 form(s), in IRS Attachment Sequence order:
   irs/55_f8995.pdf
   irs/71_f8959.pdf
   irs/72_f8960.pdf
+  irs/92_f8275.pdf
   irs/155_f8283.pdf
   irs/manifest.txt  ← your stapling order
 ```

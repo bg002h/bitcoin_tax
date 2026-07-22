@@ -156,9 +156,11 @@ pub fn basis_methodology(state: &LedgerState, year: i32) -> Option<String> {
             // leg alone, so the promote set (recorded on the state at fold time) is the discriminator.
             let disclosure = if state.promoted_origins.contains(&l.lot_id.origin_event_id) {
                 any_promoted = true;
-                // A basis clamped down to the proceeds (a sale below the floor, `basis == proceeds`)
-                // was limited so as not to report a loss off the estimate (BG-D4).
-                let clamp = if l.basis == l.proceeds {
+                // A clamped basis (a below-floor sale, gain <= 0, i.e. `basis >= proceeds`) was limited
+                // so as not to report a loss off the estimate (BG-D4). `>=` (not `==`) also catches the
+                // below-floor sale that carries a documented TP8(c) fee re-homed AFTER the clamp
+                // (`basis == proceeds + documented_fee`, a small documented loss) — whole-branch tax M1.
+                let clamp = if l.basis >= l.proceeds {
                     ", limited so as not to report a loss"
                 } else {
                     ""

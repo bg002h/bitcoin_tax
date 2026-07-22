@@ -704,7 +704,7 @@ fn assemble(inputs: &GoldenInputs) -> Option<Ready> {
     if screen_absolute(&ri, &ar, &params).is_some() {
         return None; // e.g. the Form 6251 AMT screen — out of the sweep's domain
     }
-    let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, &table, YEAR).ok()?; // identity would not print (D-2)
+    let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, &table, YEAR, &[]).ok()?; // identity would not print (D-2)
     let forms = fill_full_return(&pr, YEAR).ok()?; // a member filler refused (overflow etc.)
     Some((ar, pr, forms))
 }
