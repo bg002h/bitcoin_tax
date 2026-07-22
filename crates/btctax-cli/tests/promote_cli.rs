@@ -600,3 +600,151 @@ fn a_wide_window_promote_prints_the_trivial_floor_caution() {
         "a wide window must print the trivial-floor caution: {stdout}"
     );
 }
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// Task 14 — BG-D8 the export-refusal COMPLETENESS gate: a promoted-basis DISPOSAL leg filed WITHOUT its
+// complete Form 8275 is a HARD REFUSAL (Reg §1.6662-4(f): disclosure is adequate only on a COMPLETED
+// Form 8275). A REAL refuse-before-bytes gate (the pseudo-export-block precedent), NOT the always-written
+// basis_methodology.txt pattern; on SUCCESS the disclosure is emitted by its OWN name (form_8275.txt).
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// The tax year both Task-14 fixtures dispose in — a SHIPPED IRS-PDF year (this build bundles 2017/2024/
+/// 2025) so the CLEAN export actually fills a packet; the tranche is declared pre-2025 so a promote is
+/// meaningful.
+const T14_YEAR: i32 = 2024;
+
+/// A 2024 sell of exactly 0.4 BTC in `wallet()` — drains the 0.4-BTC tranche (its only lot), so the
+/// resulting disposal leg is a PROMOTED leg filed in `T14_YEAR`.
+fn t14_sell() -> LedgerEvent {
+    imp(
+        "T14-SELL",
+        datetime!(2024 - 09 - 01 0:00 UTC),
+        EventPayload::Dispose(Dispose {
+            sat: 40_000_000,
+            usd_proceeds: dec!(20_000),
+            fee_usd: dec!(0),
+            kind: DisposeKind::Sell,
+        }),
+    )
+}
+
+/// ★ The raw-vault BYPASS: declare a tranche (CLI), then HAND-APPEND a `PromoteTranche` with an EMPTY
+/// `part_ii_narrative` — the T10 CLI refuses an empty narrative at record time (BG-D7), so only a raw
+/// `append_decision` can force `disclosure_8275().incomplete == true` — then import a sell that drains the
+/// promoted tranche. Net effect: a promoted DISPOSAL leg filed in 2024 whose Form 8275 Part II is empty.
+fn raw_vault_promote_with_empty_part_ii(dir: &Path) -> PathBuf {
+    let vault = dir.join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.join("k.asc")).unwrap();
+    let tranche_id = cmd::tranche::declare_tranche(
+        &vault,
+        &pp(),
+        40_000_000,
+        wallet(),
+        date!(2024 - 01 - 01),
+        date!(2024 - 03 - 31),
+        now(),
+    )
+    .unwrap();
+    let mut s = Session::open(&vault, &pp()).unwrap();
+    append_decision(
+        s.conn(),
+        EventPayload::PromoteTranche(PromoteTranche {
+            target: tranche_id,
+            method: FloorMethod::WindowLowClose,
+            filed_basis: dec!(12_000),
+            coverage: Coverage::Full,
+            provenance_attested: true,
+            acknowledgment: Acknowledgment {
+                phrase: PROMOTE_ACK_PHRASE.into(),
+                shown_terms: vec![],
+                provenance_text: "acquired by purchase within the declared window".into(),
+                provenance_version: "v1".into(),
+            },
+            part_ii_narrative: String::new(), // ★ EMPTY — the raw-vault bypass (the CLI refuses this)
+        }),
+        now(),
+        UtcOffset::UTC,
+        None,
+    )
+    .unwrap();
+    append_import_batch(s.conn(), &[t14_sell()]).unwrap();
+    s.save().unwrap();
+    vault
+}
+
+/// The T10-path CLEAN fixture: declare a tranche (CLI) + promote it via the REAL `promote-tranche` verb
+/// (which enforces a non-empty Part II — a COMPLETE Form 8275), then import a sell that drains it — a
+/// promoted 2024 disposal leg with a complete disclosure.
+fn vault_with_promoted_disposal_via_cli(dir: &Path) -> PathBuf {
+    let vault = dir.join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.join("k.asc")).unwrap();
+    let tranche_id = cmd::tranche::declare_tranche(
+        &vault,
+        &pp(),
+        40_000_000,
+        wallet(),
+        date!(2024 - 01 - 01),
+        date!(2024 - 03 - 31),
+        now(),
+    )
+    .unwrap();
+    cmd::promote::promote_tranche(
+        &vault,
+        &pp(),
+        &tranche_id.canonical(),
+        ProvenanceKind::Purchase,
+        "cash P2P purchase, no records; window bounded on-chain".into(),
+        Some(PROMOTE_ACK_PHRASE),
+        now(),
+    )
+    .unwrap();
+    let mut s = Session::open(&vault, &pp()).unwrap();
+    append_import_batch(s.conn(), &[t14_sell()]).unwrap();
+    s.save().unwrap();
+    vault
+}
+
+/// ★ BG-D8: an export whose packet contains a promoted-basis leg but only an INCOMPLETE Form 8275 (empty
+/// Part II) is REFUSED — and refused BEFORE any bytes are written (the out_dir is left untouched). The
+/// refusing state is reached only via the raw-vault bypass (the T10 CLI can't record an empty narrative).
+#[test]
+fn export_with_a_promoted_leg_but_incomplete_8275_refuses_before_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = raw_vault_promote_with_empty_part_ii(dir.path());
+    let out = dir.path().join("export_out"); // deliberately NOT pre-created
+
+    let err = cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None).unwrap_err();
+    assert!(
+        matches!(err, CliError::Usage(ref m) if m.contains("Form 8275")),
+        "a promoted leg without a complete Form 8275 must be REFUSED naming 'Form 8275': {err}"
+    );
+    // Refuse-before-bytes: a refused export writes ZERO bytes — the out_dir was never even created (or is
+    // empty). This is what makes it a REAL gate, not the always-writes basis_methodology.txt pattern.
+    assert!(
+        std::fs::read_dir(&out)
+            .map(|mut d| d.next().is_none())
+            .unwrap_or(true),
+        "a refused export leaves out_dir untouched (zero bytes written)"
+    );
+}
+
+/// ★ BG-D8: a CLEAN promoted export (real ledger, complete Form 8275) SUCCEEDS and emits the disclosure by
+/// its OWN name — `form_8275.txt`, NOT `form_8275.txt || basis_methodology.txt` (basis_methodology is
+/// ALWAYS written, so the disjunction would be a vacuous assertion — tax r1 I-8). No DRAFT watermark.
+#[test]
+fn a_clean_promoted_export_writes_the_8275_by_name_no_watermark() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = vault_with_promoted_disposal_via_cli(dir.path());
+    let out = dir.path().join("export_out");
+
+    let report = cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None).unwrap();
+    assert!(
+        out.join("form_8275.txt").exists(),
+        "a clean promoted export emits the 8275 content by its OWN name (form_8275.txt)"
+    );
+    // Clean export — a real (not pseudo) ledger is never DRAFT-watermarked.
+    assert!(
+        !report.watermarked,
+        "a real promoted ledger exports CLEAN (no DRAFT watermark)"
+    );
+}

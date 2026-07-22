@@ -46,6 +46,17 @@ predicate changed) mutation-proven**, in one fold:
 - **[Nit] `write_csv_exports` path untested for `basis_methodology.txt`** (arch N-5) — same shared
   `write_basis_methodology_txt` helper the `write_form_csvs` (tested) and `export-irs-pdf` (tested) paths use.
 
+- **[Minor] The TUI export path (`write_form_csvs`) is NOT behind the BG-D8 gate** (T14, owner = **Phase 1b**) —
+  Task 14 put `promote_export_gate` + the `form_8275.txt` emit on the THREE CLI export fns (`export_snapshot`,
+  `export_irs_pdf`, `export_full_return`), paired at the CLI layer exactly where the pseudo-attestation gate
+  lives (NOT threaded through the shared render.rs writers — the same "disproportionate to thread `events`
+  through `write_form_csvs`/`write_csv_exports`" call the tax-M-2 Minor above already made). The btctax-tui
+  export (`btctax_tui::export::do_export` → `write_form_csvs`) therefore neither gates the hand-crafted
+  incomplete-8275 corner nor emits `form_8275.txt` for a completed promoted leg. DORMANT in Phase 1a: the
+  incomplete state is only raw-vault-reachable, and `promote` is CLI-only / not in a released binary until
+  Phase 1b. Fold when Phase 1b exposes `promote` on the released/TUI surface (gate `write_form_csvs`, or route
+  the TUI export through the gated CLI fns).
+
 ### T16 whole-branch review r2 (2026-07-20) — FOLDED (re-review of the r1 fix fold)
 
 r2 tax lens: **0C/0I — GREEN** (all three r1 Importants verified resolved). r2 architecture lens found the

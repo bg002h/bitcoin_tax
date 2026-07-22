@@ -930,6 +930,35 @@ pub fn write_form_csvs(
     Ok(())
 }
 
+/// BG-D8 (Task 14): write the Form 8275 disclosure (`form_8275.txt`, 0o600) — by its OWN name — alongside
+/// the year's form artifacts whenever a promoted DISPOSAL leg files in `year`. Writes NOTHING for a year
+/// with no promoted disposal leg (`disclosure_8275` → `None`).
+///
+/// ★ Distinct from [`write_basis_methodology_txt`] in TWO ways the review loop pinned:
+/// - **Its own name.** The gate + the success KAT key on `form_8275.txt`, never a `form_8275.txt ||
+///   basis_methodology.txt` disjunction — `basis_methodology.txt` is written unconditionally for a
+///   promoted year, so the disjunction would be a vacuous assertion (tax r1 I-8).
+/// - **The gate ran first.** The completeness gate ([`crate::cmd::admin::promote_export_gate`]) refuses
+///   BEFORE any bytes when a promoted leg's Part II is empty/incomplete, so a promoted leg reaching HERE
+///   is guaranteed to carry a complete Part II — this always emits a filing-ready disclosure.
+///
+/// `pub(crate)` so the `export-snapshot` CSV / `export-irs-pdf` / full-return packet writers
+/// (`cmd/admin.rs`) emit it at their `write_basis_methodology_txt` call sites.
+pub(crate) fn write_form_8275_txt(
+    out_dir: &Path,
+    state: &LedgerState,
+    events: &[LedgerEvent],
+    year: i32,
+) -> Result<(), crate::CliError> {
+    use std::io::Write as _;
+    if let Some(disc) = btctax_core::tax::form8275::disclosure_8275(events, state, year) {
+        let mut file = fsperms::open_owner_only(&out_dir.join("form_8275.txt"))?;
+        // `render()` already terminates with a newline — write, don't writeln (no trailing blank line).
+        write!(file, "{}", disc.render())?;
+    }
+    Ok(())
+}
+
 /// P7 (D-4): write the MANDATORY conservative-filing methodology disclosure (`basis_methodology.txt`,
 /// 0o600) alongside the year's form artifacts whenever a tranche is in the year's filed set. A no-tranche
 /// year writes NOTHING — the i8949 basis explanation is required only when actual cost is not used.
