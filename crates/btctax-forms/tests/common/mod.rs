@@ -137,7 +137,7 @@ pub fn full_return(h: &GoldenHousehold) -> FullReturn {
     let table = ty2024_table();
     let ar = assemble_absolute(&ri, &state, &params, &table, 2024);
     // No golden household makes a charitable donation, so there are no §170(e) details to carry.
-    let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, &table, 2024)
+    let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, &table, 2024, &[])
         .expect("the golden households carry well-formed SSNs");
     let forms = fill_full_return(&pr, 2024)
         .unwrap_or_else(|e| panic!("{}: the packet must fill — {e}", h.name));

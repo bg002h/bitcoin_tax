@@ -351,7 +351,7 @@ pub fn report_tax_year(
                         // ARTIFACT needs a name and an SSN).
                         let details = s.donation_details()?;
                         let printed = btctax_core::tax::packet::assemble_printed_forms(
-                            &ri, &state, &details, &ar, table, year,
+                            &ri, &state, &details, &ar, table, year, &events,
                         );
                         let mut block = crate::render::render_dual_report(
                             year,

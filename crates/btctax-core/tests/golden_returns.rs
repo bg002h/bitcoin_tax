@@ -188,7 +188,7 @@ fn adjudicate_household(
     let ar = assemble_absolute(&ri, &state, params, table, 2024);
     // The FILED forms. No golden household makes a charitable donation, so there are no §170(e)
     // details to carry.
-    let printed = assemble_printed_forms(&ri, &state, &BTreeMap::new(), &ar, table, 2024);
+    let printed = assemble_printed_forms(&ri, &state, &BTreeMap::new(), &ar, table, 2024, &[]);
     let e = &h.expected_ots;
     let t = &h.expected_taxcalc;
 

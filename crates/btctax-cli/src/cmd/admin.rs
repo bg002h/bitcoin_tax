@@ -193,11 +193,39 @@ pub fn export_snapshot(
     )
     .map_err(|e| crate::cli_io_with_path(e, out_dir, crate::EXPORT_OUT_HINT))?;
     // BG-D8: emit the Form 8275 disclosure by its OWN name alongside the year-scoped packet (mirrors the
-    // basis_methodology.txt emit inside write_csv_exports). Only a year-scoped export writes the per-year
-    // form artifacts; the gate above already guaranteed any promoted leg's Part II is complete.
-    if let Some(y) = tax_year {
-        crate::render::write_form_8275_txt(out_dir, &state, &events, y)
-            .map_err(|e| crate::cli_io_with_path(e, out_dir, crate::EXPORT_OUT_HINT))?;
+    // basis_methodology.txt emit inside write_csv_exports). The gate above already guaranteed every
+    // promoted leg in the exported range carries a complete Part II.
+    match tax_year {
+        Some(y) => {
+            crate::render::write_form_8275_txt(out_dir, &state, &events, y)
+                .map_err(|e| crate::cli_io_with_path(e, out_dir, crate::EXPORT_OUT_HINT))?;
+        }
+        None => {
+            // Task 16 / M2: the all-years dump emits promoted rows (lots/disposals.csv) for EVERY
+            // promoted year in range, so it must co-emit the 8275 for every one of them too — not just
+            // whichever year a `Some(y)` caller happened to name. Year-suffixed filenames (never the
+            // bare `form_8275.txt`): a real vault can have promoted disposal legs in more than one tax
+            // year, and the bare name would let a second year silently overwrite the first's disclosure.
+            let mut promoted_years: std::collections::BTreeSet<i32> = std::collections::BTreeSet::new();
+            for d in &state.disposals {
+                if d.legs
+                    .iter()
+                    .any(|l| state.promoted_origins.contains(&l.lot_id.origin_event_id))
+                {
+                    promoted_years.insert(d.disposed_at.year());
+                }
+            }
+            for y in promoted_years {
+                crate::render::write_form_8275_txt_named(
+                    out_dir,
+                    &state,
+                    &events,
+                    y,
+                    &format!("form_8275_{y}.txt"),
+                )
+                .map_err(|e| crate::cli_io_with_path(e, out_dir, crate::EXPORT_OUT_HINT))?;
+            }
+        }
     }
     // [R0-I1] Count UNRESOLVED Hard blockers only. Any Hard blocker gates every year, so the count
     // alone (no per-year `compute_tax_year` call, no profile/tables dependency) drives the main.rs
@@ -622,13 +650,30 @@ fn export_full_return(
 
     let details = session.donation_details()?;
     let printed = btctax_core::tax::packet::assemble_printed_return(
-        &ri, state, &details, &ar, table, tax_year,
+        &ri, state, &details, &ar, table, tax_year, events,
     )
     .map_err(|e| {
         // `HeaderError`'s Display carries the right remedy per variant (a malformed SSN, an unanswered
         // declaration, or an MFJ return with no spouse) — no longer always "fix the identity" (P9 §3.2).
         CliError::Usage(format!("the {tax_year} return cannot be printed: {e}"))
     })?;
+
+    // Task 16 / ADD-2: Form 8275 v1 does not paginate (unlike Form 8283's `overflow::merge_copies`) — a
+    // promoted year with more than the revision's Part I row capacity (6 rows) cannot be filled at all.
+    // Refuse HERE, before the whole-packet fill, so the failure names the year + a concrete remedy
+    // instead of surfacing as a bare `FormsError::Overflow` display deep inside an all-or-nothing fill.
+    if let Some(f8275) = &printed.forms.f8275 {
+        let cap = btctax_forms::Form8275Map::for_year(tax_year)?.rows.len();
+        if f8275.part_i.len() > cap {
+            return Err(CliError::Usage(format!(
+                "cannot export {tax_year}: {n} promoted disposal leg(s) each need a Form 8275 Part I \
+                 row, but this revision holds only {cap} — Form 8275 cannot yet paginate beyond {cap} \
+                 rows. File the 8275 manually for {tax_year}, or reduce the number of promoted disposal \
+                 legs filed in {tax_year} (e.g. void one of the promotes) and re-export.",
+                n = f8275.part_i.len(),
+            )));
+        }
+    }
 
     // ★ ALL-OR-NOTHING: every form fills BEFORE anything is written.
     let packet = btctax_forms::fill_full_return(&printed, tax_year)?;

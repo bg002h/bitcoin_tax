@@ -54,6 +54,7 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<Vec<NamedForm>,
                 f8960,
                 f8995,
                 f8283,
+                f8275,
             },
     } = pr;
 
@@ -151,6 +152,15 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<Vec<NamedForm>,
     }
     if let Some(l) = f8960 {
         push("f8960", Some("72"), crate::fill_form_8960(l, header, year)?);
+    }
+    // Form 8275 (Task 16) — Attachment Sequence No. 92. `Ok(None)` only when `printed.part_i` is
+    // empty, which cannot happen here (`f8275` is `Some` only when core's `disclosure_8275` found a
+    // promoted disposal leg, and that always yields a non-empty Part I) — the `if let` is defensive,
+    // mirroring the same belt-and-suspenders pattern `fill_form_8959` uses above.
+    if let Some(p) = f8275 {
+        if let Some(bytes) = crate::fill_form_8275(p, header, year)? {
+            push("f8275", Some("92"), bytes);
+        }
     }
     if let Some(rows) = f8283 {
         if let Some(bytes) = crate::fill_form_8283_full(rows, header, year)? {
