@@ -37,6 +37,13 @@ stays engine-enforced.
   behavior-preserving. Scoped to `covered_sat > 0 && live_sat > covered_sat`.
 - **Whole-tranche only** (sub-1 non-goal): no partial-sat promote/clamp; remedy for over-size = void +
   re-declare.
+- **Write confinement (KAT-G1, `edit/persist.rs:1897`):** in `btctax-tui-edit`, `edit/persist.rs` is the
+  ONLY module permitted to name the mutation surface — every `chokepoint::apply_*` call lives in a
+  `persist.rs` wrapper; flows/dashboard only COLLECT input + read `plan_*`/`journey_view`. The gate's
+  allowlist + guarantee text + self-check are extended in the SAME task that adds each write path.
+- **Core takes core types only:** core fns take `&dyn TaxTables` (never the adapters `BundledTaxTables`)
+  and never call a `btctax-cli` symbol (no core→cli inversion). The tui-edit drivers reach the chokepoint
+  via a `btctax_cli` crate-ROOT re-export (never a `cmd::` path — KAT-G1/the source gate ban it).
 - `make check` + `cargo fmt --all --check` + the CI-only jobs (msrv-1.88, net-isolation, pii-scan,
   examples/man drift, forms-census) green; every primitive TDD + mutation-proven; two-lens review to 0C/0I.
 
@@ -45,14 +52,24 @@ stays engine-enforced.
 ## File Structure Map
 
 **`btctax-core`** (pure, KAT-able):
-- Create `crates/btctax-core/src/defensive/mod.rs` — `journey_view(events, state, prices, tables, cfg)
-  -> DefensiveFilingView`; the `DefensiveFilingView`/`ShortfallCandidate`/`TrancheRow`/`Advisory` types.
+- Create `crates/btctax-core/src/defensive/mod.rs` — `journey_view(events, state, prices, tables: &dyn
+  TaxTables, cfg) -> DefensiveFilingView` (★ C-1: `&dyn TaxTables`, the core trait — NOT the adapters
+  `BundledTaxTables`; every shipped core fn does this. The flavor gate is `tables.table_for(y).is_some()`);
+  the `DefensiveFilingView`/`ShortfallCandidate`/`TrancheRow`/`Advisory` types.
 - Create `crates/btctax-core/src/defensive/discovery.rs` — the structured shortfall signal + the DFW-D4
   triage classifier (coverable / data-fix / resolve-first).
 - Create `crates/btctax-core/src/defensive/era.rs` — the era→window preset table + `era_window(preset)`.
-- Modify `crates/btctax-core/src/lib.rs` — `pub mod defensive;`.
-- Modify `crates/btctax-core/src/state.rs` — a derived structured shortfall accessor (or expose the fold's
-  sat-shortfall records) so `discovery.rs` need not parse `Blocker.detail`.
+- **★ C-2: move the three pure event-scan predicates into core** — Create
+  `crates/btctax-core/src/tranche_guard.rs`: `void_targets(events)`, `in_force_allocation_exists(events)`,
+  `pre2025_tranche_exists(events, we)` (they use only core types + `conventions::TRANSITION_DATE`; today
+  private/`cmd::`-only in `cmd/tranche.rs:54,71,107`). `cmd/tranche.rs` keeps its thin `CliError`-wrapping
+  guards OVER these (single source preserved for all four allocation append sites); `journey_view` +
+  the declare flow read the core predicate directly.
+- Modify `crates/btctax-core/src/lib.rs` — `pub mod defensive; pub mod tranche_guard;`.
+- Modify `crates/btctax-core/src/state.rs` + `project/fold.rs` — a derived structured
+  `state.shortfalls: Vec<Shortfall>` populated at the SIX sat-carrying `UncoveredDisposal` emit sites
+  (`:388,712,833,878,1198,1276`), **retaining the principal-vs-fee `kind`** (★ I-4 — `FeeOnlyPromoteNoop`
+  needs it) — so `discovery.rs` need not parse `Blocker.detail`. Additive/derived only (no filed-number change).
 
 **`btctax-cli`** (the chokepoints — the single home of verb glue):
 - Create `crates/btctax-cli/src/chokepoint/mod.rs` — the `plan/confirm/apply` trios for declare / promote /
@@ -68,10 +85,18 @@ stays engine-enforced.
 
 **`btctax-tui-edit`** (the dashboard + flows):
 - Create `crates/btctax-tui-edit/src/defensive_dashboard.rs` — the dashboard screen (derived rows,
-  fork, advisories) + key-dispatch that LAUNCHES the sibling flows.
+  fork, advisories) + key-dispatch that LAUNCHES the sibling flows. Read-only + dispatch; **NO direct
+  write/chokepoint-apply calls** (C-3).
 - Create `crates/btctax-tui-edit/src/edit/declare_flow.rs`, `promote_flow.rs` — the `*_flow` structs
-  (`.step`), thin drivers over the chokepoints; the era-preset + live-readout declare UX; the promote
-  consent TypedWord gate + Part II authoring.
+  (`.step`), which COLLECT input + read `journey_view`/`plan_*`; the era-preset + live-readout declare UX;
+  the promote consent TypedWord gate + Part II authoring. Flows do NOT call `apply_*` directly (C-3).
+- **★ C-3: Modify `crates/btctax-tui-edit/src/edit/persist.rs`** — the write-confinement module (KAT-G1,
+  `persist.rs:1897`; `edit/mod.rs:1-9` = "`persist` is the ONLY module permitted to name the mutation
+  surface"). Add `persist_declare_tranche` / `persist_promote_tranche` / `persist_defensive_export`
+  wrappers — these are the ONLY place that calls `chokepoint::apply_declare`/`apply_promote`/`apply_export`.
+  Extend KAT-G1's `persist_only_tokens` with `apply_declare(`/`apply_promote(`/`apply_export(`, amend the
+  `edit/mod.rs` guarantee text for the editor's new (chokepoint-only) export surface, and plant one new
+  token in the G1 self-check.
 - Modify `crates/btctax-tui-edit/src/editor.rs` — `EditorScreen::DefensiveFiling`; the flow fields +
   the one-flow debug assertion (M-4); the `!pseudo_active()` entry gate.
 - Modify `crates/btctax-tui-edit/src/draw_edit.rs` — render the dashboard + the two flows.
@@ -115,9 +140,13 @@ pub fn apply_promote(session: &mut Session, plan: PromotePlan, acknowledge: Opti
 - [ ] **Step 2: Run — PASS** (`cargo test -p btctax-cli --test chokepoint_promote pins_shipped_promote`).
 - [ ] **Step 3: Write `chokepoint/mod.rs`** — move the promote pipeline (`promote.rs:364-488`) verbatim
   into `plan_promote`/`render_consent`/`apply_promote`, splitting at the ack: everything up to and incl.
-  consent render → `plan_promote` + `render_consent`; `require_promote_ack` + `would_conflict` + append →
-  `apply_promote(acknowledge)`. Add the `pseudo_reconcile=false` copy in `plan_promote`. Move the private
-  `gift_only_flagged_years`/`wide_window_note` here (or `pub(crate)`).
+  consent computation → `plan_promote` (which captures BOTH `terms` AND `advisory_lines` — the
+  synthetic-promote advisory + `gift_only_flagged_years` relabel + `wide_window_note` — into the
+  `PromotePlan`); ★ **I-2:** `render_consent(&plan)` renders the terms AND `plan.advisory_lines` in the
+  shipped order, so the full filer-visible string is byte-identical (the shipped verb prints advisory +
+  consent together — do NOT drop the advisory emission). `require_promote_ack` + `would_conflict` + append
+  → `apply_promote(acknowledge)`. Add the `pseudo_reconcile=false` copy in `plan_promote`. Move the
+  private `gift_only_flagged_years`/`wide_window_note` here (`pub(crate)`).
 - [ ] **Step 4: Reduce `cmd/promote.rs::promote_tranche` to a thin driver** — `Session::open` → build
   args → `plan_promote` (map `Refusal` to `CliError`) → `println!(render_consent(&plan))` →
   prompt/collect ack → `apply_promote(session, plan, ack, now)`. No pipeline logic remains in the verb.
@@ -163,7 +192,7 @@ semantics byte-for-byte.
 - [ ] **Step 4: Reduce `cmd/tranche.rs::declare_tranche` to a thin driver** passing `target_shortfall=None`.
 - [ ] **Step 5: KATs** — (a) CLI `None` path: a targets-no-shortfall declare is NOT refused (shipped
   preserved); (b) `Some` path: a candidate whose `we == disposal date` fails clearance → `Refusal::Coverage`
-  (mutation: prefill `we` before the disposal → passes). Run `declare_tranche_cli.rs` (shipped) → green.
+  (mutation: prefill `we` before the disposal → passes). ★ arch-I-5: a third KAT — the clearance shadow forces `pseudo_reconcile=false` (a pseudo `SelfTransferMine{$0}` must not mask a real shortfall); AND a candidate that DOES clear → `apply_declare` removes the shortfall row (the cleared-row KAT). Run `declare_tranche_cli.rs` (shipped) → green.
 - [ ] **Step 6: `make check` + fmt; Commit** `refactor(chokepoint): declare plan/apply + target-scoped clearance`.
 
 ### Task 3 — Extract the EXPORT chokepoint (degenerate trio) + the fold-diff export year-set
@@ -172,22 +201,30 @@ semantics byte-for-byte.
 
 **Interfaces — Produces:**
 ```rust
-pub fn promoted_filing_years(state: &LedgerState) -> BTreeSet<i32>;  // extracted from admin.rs:84-98 (8275 gate)
-pub fn export_year_set(events: &[LedgerEvent], state: &LedgerState, prices: &dyn PriceProvider,
-    cfg: &ProjectionConfig, current_year: i32) -> BTreeSet<i32>;      // {current} ∪ BG-D9 fold-diff years
-pub fn plan_export(...) -> Result<ExportPlan, Refusal>;  // gates over &Session/state; NO consent/ack
-pub fn apply_export(session: &mut Session, plan: ExportPlan) -> Result<IrsPdfReport, CliError>;  // write files
+// ★ I-1: a STRUCTURED year-set in btctax-core (promote_prior_year_advisory returns Vec<String> — unusable).
+// crates/btctax-core/src/conservative.rs (beside promote_prior_year_advisory):
+pub fn flagged_years(events: &[LedgerEvent], state: &LedgerState, prices: &dyn PriceProvider,
+    tables: &dyn TaxTables, cfg: &ProjectionConfig) -> BTreeSet<i32>;   // BG-D9 fold-diff years, disposal∪removal
+// crates/btctax-cli/src/chokepoint/mod.rs:
+pub fn promoted_filing_years(state: &LedgerState) -> BTreeSet<i32>;      // extracted from admin.rs:84-98 (8275 gate ONLY)
+pub struct ExportPlan { pub years: BTreeSet<i32>, pub out_dir: PathBuf, pub forms: Vec<FormArg> }
+pub fn plan_export(events: &[LedgerEvent], state: &LedgerState, prices: &dyn PriceProvider,
+    tables: &dyn TaxTables, cfg: &ProjectionConfig, current_year: i32, out_dir: PathBuf, forms: Vec<FormArg>)
+    -> Result<ExportPlan, Refusal>;   // gates over state; NO consent/ack; refuses when pseudo_active (DFW-D11)
+pub fn apply_export(session: &mut Session, plan: ExportPlan) -> Result<Vec<IrsPdfReport>, CliError>;  // one packet per year
 ```
-`export_year_set` enumerates the years the `promote_prior_year_advisory` fold-pair flags across all live
-promotes (over disposal AND removal legs) ∪ current, recomputed from state (DFW-D11); NOT
-`promoted_filing_years` (that stays the 8275-completeness gate enumeration only).
+`plan_export.years` = `{current} ∪ flagged_years(...)` (DFW-D11; recomputed from state — the BG-D9 fold-diff
+over disposal AND removal legs; **strictly ⊇** `promoted_filing_years`). `apply_export` writes ONE packet
+per year (each via the shipped gated `export_irs_pdf`/full-return path, parameterized over `&Session`/state,
+no re-`Session::open`). `promoted_filing_years` stays the 8275-completeness gate enumeration only — single-
+sourced into `promote_export_gate`'s `None` arm.
 
 - [ ] **Step 1: KAT — export set includes a removal-reordered prior year with NO promoted disposal leg.**
   Build: undisposed 2016-window promoted tranche + a 2025 donation whose lots the promote's HIFO reorder
-  changes. Assert `export_year_set(...).contains(&2025)` AND `promoted_filing_years(state)` does NOT.
+  changes. Assert `flagged_years(...).contains(&2025)` AND `promoted_filing_years(state)` does NOT.
   (Mutation: define the export set as `promoted_filing_years` → 2025 dropped → reds.)
 - [ ] **Step 2: Run — FAIL** (functions not defined).
-- [ ] **Step 3: Implement** `promoted_filing_years` (extract `admin.rs:84-98`), `export_year_set` (the
+- [ ] **Step 3: Implement** `promoted_filing_years` (extract `admin.rs:84-98`), `flagged_years` (the
   fold-diff enumeration via `promote_prior_year_advisory`), and the export `plan/apply` degenerate trio;
   point `promote_export_gate(None)` at `promoted_filing_years` (single-source).
 - [ ] **Step 4: Run — PASS** + full `promote_cli.rs`/census green.
@@ -240,6 +277,7 @@ sites — `:388,712,833,878,1198,1276` — summed per event). `triage`: a `Short
 #[test] fn gift_out_without_wallet_yields_zero_declare_candidates() { /* → DataFix, no candidate */ }
 #[test] fn donate_without_wallet_yields_zero_declare_candidates() { /* → DataFix */ }
 #[test] fn shortfall_behind_open_unclassified_is_resolve_first() { /* same pool+timeframe → ResolveFirst, no candidate */ }
+#[test] fn pending_out_short_routes_through_unmatched_outflows_first() { /* ★ tax-I-1/arch-I-5 the C-1 double-count guard: a pending-out short with a co-emitted UnmatchedOutflows → ResolveFirst, NOT a DeclareCandidate (a later TransferLink may reshape it) */ }
 #[test] fn principal_plus_fee_short_on_one_event_aggregate_to_one_shortfall() { /* per-event sum */ }
 #[test] fn shortfalls_never_parses_blocker_detail() { /* grep-guard: discovery.rs contains no ".detail" */ }
 ```
@@ -257,14 +295,16 @@ sites — `:388,712,833,878,1198,1276` — summed per event). `triage`: a `Short
 ```rust
 pub struct TrancheRow { pub target: EventId, pub sat: i64, pub status: TrancheStatus,
     pub clamped_saving: Vec<SavingFlavor>, pub advisories: Vec<Advisory> }
-pub enum TrancheStatus { DeclaredZero, Promoted, DidNotCover { pool_short_sat: i64 } }
+pub enum TrancheStatus { DeclaredZero, Promoted }   // ★ I-3: NO per-tranche DidNotCover (DFW-D3/D5.3 forbid attribution)
 pub enum Advisory { OverCovered { by_sat: i64 }, NowDisplacing, MethodInversion(String), FeeOnlyPromoteNoop }
 pub enum SavingFlavor { ComputedTax { year: i32, delta: Usd }, Uncomputable { year: i32, gain_delta: Usd },
     Named(String) }
+pub struct PoolShort { pub pool: PoolKey, pub short_sat: i64, pub live_tranche_sat: i64 }  // ★ I-3 pool-level
 pub struct DefensiveFilingView { pub candidates: Vec<Shortfall>, pub resolve_first: Vec<Triage>,
-    pub tranches: Vec<TrancheRow>, pub export_years: BTreeSet<i32>, pub safe_harbor_blocked: bool }
+    pub tranches: Vec<TrancheRow>, pub still_short: Vec<PoolShort>, pub flagged_years: BTreeSet<i32>,
+    pub safe_harbor_blocked: bool }
 pub fn journey_view(events: &[LedgerEvent], state: &LedgerState, prices: &dyn PriceProvider,
-    tables: &BundledTaxTables, cfg: &ProjectionConfig) -> DefensiveFilingView;
+    tables: &dyn TaxTables, cfg: &ProjectionConfig) -> DefensiveFilingView;
 ```
 All shadow projections force `pseudo_reconcile=false` (DFW-D6). `clamped_saving` = clamped only
 (`clamped_promote_year_saving`), three-flavor: `ComputedTax` only when both folds price the year (table ∈
@@ -272,8 +312,10 @@ All shadow projections force `pseudo_reconcile=false` (DFW-D6). `clamped_saving`
 advisories are **derived** (no gate): `OverCovered{by_sat}` iff (`covered_sat>0` ∧ `live_sat>covered_sat`)
 via a without-promote sat-count shadow (DFW-D5.3, M-1 scope — NOT for a fully-undisposed tranche);
 `NowDisplacing` iff a `basis_source`-composition with/without-promote fold-diff shows a documented leg
-replaced by an `EstimatedConservative` floor leg (mirrors `promote_drift_advisory`); `DidNotCover` iff a
-live tranche's pool matches an unresolved shortfall (`pool_key(we,wallet)` ∧ `we <= short date`).
+replaced by an `EstimatedConservative` floor leg (mirrors `promote_drift_advisory`); the pool-level `still_short`
+(★ I-3 — one combined `PoolShort` per pool, NOT a per-tranche status): a `PoolShort{pool, short_sat,
+live_tranche_sat}` iff a live `DeclareTranche` has `pool_key(we,wallet)` = the shortfall's pool ∧
+`we <= short date` while the pool is still short — no per-tranche attribution.
 
 - [ ] **Step 1: KATs.**
 ```rust
@@ -281,14 +323,17 @@ live tranche's pool matches an unresolved shortfall (`pool_key(we,wallet)` ∧ `
 #[test] fn over_sized_tranche_shows_over_covered_by_excess() { /* declare 100M, 60M in-pool import → OverCovered{by_sat:60_000_000} */ }
 #[test] fn a_correctly_sized_cover_and_mixed_vintage_show_no_over_covered() { /* neither over-covered */ }
 #[test] fn promoted_tranche_now_displacing_shows_now_displacing_advisory() { /* basis_source composition diff */ }
+#[test] fn now_displacing_uses_basis_source_composition_not_leg_set_inequality() { /* ★ tax-M negative: a correctly-sized cover ALSO changes legs ($0→floor same lot) → must NOT show NowDisplacing */ }
 #[test] fn uncomputable_audience_year_2020_shows_gain_delta_not_a_dollar_tax() { /* SavingFlavor::Uncomputable */ }
+#[test] fn table_year_with_no_TaxProfile_shows_uncomputable_not_a_bare_dollar() { /* ★ tax-I-2: 2024 table exists but no stored profile → Uncomputable, never ComputedTax */ }
+#[test] fn a_live_tranche_not_clearing_its_pool_shows_pool_still_short() { /* ★ tax-I-3/arch-I-5: DefensiveFilingView.still_short has ONE PoolShort; no per-tranche DidNotCover */ }
 #[test] fn journey_view_forces_pseudo_off() { /* pseudo-active vault → candidates/savings unchanged by pseudo */ }
 #[test] fn zero_declared_tranche_status_is_DeclaredZero_never_incomplete() { /* DFW-D3 */ }
 ```
 - [ ] **Step 2: Run — FAIL.**
 - [ ] **Step 3: Implement `journey_view`** composing `shortfalls`/`triage` (Task 5), `clamped_promote_year_saving`,
   the with/without-promote shadow fold-pairs, `promote_prior_year_advisory` (export years), the era-independent
-  advisories, `guard_tranche_vs_allocation` (safe_harbor_blocked). Pure; mutation-proven per advisory.
+  advisories, `tranche_guard::in_force_allocation_exists`+`pre2025_tranche_exists` (safe_harbor_blocked — the CORE predicate, C-2, never the cli-private guard). Pure; mutation-proven per advisory.
 - [ ] **Step 4: Run — PASS** + `make check`.
 - [ ] **Step 5: Commit** `feat(defensive): journey_view + derived over-covered/drift/saving advisories`.
 
@@ -336,10 +381,10 @@ window; the before-op prefill governs on conflict (DFW-D9).
 - [ ] **Step 1: KATs.** (a) `era_window` for each preset maps to a concrete window; (b) declare-flow
   prefill puts `window_end` before the disposal + the source wallet; (c) `Coverage::Partial`/`NoCoverage`
   refusal surfaces live in the readout; (d) the safe-harbor exclusion is a first-class entry state
-  (`guard_tranche_vs_allocation` pre-2025 + in-force allocation); (e) editing the window blanks the
+  (the CORE `tranche_guard::{pre2025_tranche_exists, in_force_allocation_exists}`, C-2 — never the cli guard); (e) editing the window blanks the
   on-demand saving ("stale — recompute").
 - [ ] **Step 2: Run — FAIL.**
-- [ ] **Step 3: Implement** `era.rs` (the reviewed preset table), the declare flow (thin driver over
+- [ ] **Step 3: Implement** `era.rs` (the reviewed preset table), the declare flow (COLLECTS window/sat + reads `plan_declare(Some(shortfall.event))`; the WRITE goes through `persist_declare_tranche` in `edit/persist.rs` — C-3/KAT-G1; a thin driver over
   `plan_declare(Some)`), the live-readout, the safe-harbor precheck. Attestation-substance copy: the
   window is the filer's OWN knowledge (DFW-D9).
 - [ ] **Step 4: Run — PASS** + `make check`.
@@ -361,7 +406,7 @@ One tranche at a time (DFW-D12).
   `Unrealized` term (behavior-preserving — DFW-D5.3).
 - [ ] **Step 2: Run — FAIL.**
 - [ ] **Step 3: Implement** the promote flow (thin driver; Part II authoring; TypedWord gate). No `cmd::`
-  token (route via the `btctax_cli::chokepoint::*` re-export — the e10 gate).
+  token. ★ C-3: the WRITE goes through `persist_promote_tranche` in `edit/persist.rs` (KAT-G1) — the flow only COLLECTS Part II + ack and reads `plan_promote`/`render_consent`; reach the chokepoint via the `btctax_cli` crate-root re-export (no `cmd::`).
 - [ ] **Step 4: Run — PASS** + `make check` (incl. e10).
 - [ ] **Step 5: Commit** `feat(tui-edit): promote flow (Part II authoring + consent TypedWord gate)`.
 
@@ -375,14 +420,14 @@ One tranche at a time (DFW-D12).
 
 **Files:** Modify `defensive_dashboard.rs` (the `x` action); Test: dashboard `#[cfg(test)]`
 
-**Interfaces — Consumes:** `chokepoint::{export_year_set, plan_export, apply_export}`.
+**Interfaces — Consumes:** `btctax_core::conservative::flagged_years` + `btctax_cli::chokepoint::{plan_export, apply_export}`.
 
 - [ ] **Step 1: KATs.** (a) `x` on a vault with a promoted 2025 leg + a 2024 removal-reordered year exports
-  BOTH years' packets (`export_year_set`); (b) a pseudo-active vault refuses+routes (never prompts the
+  BOTH years' packets (`plan_export.years`); (b) a pseudo-active vault refuses+routes (never prompts the
   attest phrase — DFW-D11); (c) the packet includes `form_8275.pdf` for the promoted leg (reuses the
   shipped gated export via the chokepoint).
 - [ ] **Step 2: Run — FAIL.**
-- [ ] **Step 3: Implement** the `x` action over `plan_export`/`apply_export`, driving the export set.
+- [ ] **Step 3: Implement** the `x` action: the dashboard reads `plan_export`, the WRITE goes through `persist_defensive_export` in `edit/persist.rs` (★ C-3/KAT-G1 — the editor's FIRST export surface; extend the G1 allowlist + guarantee text this task).
 - [ ] **Step 4: Run — PASS** + `make check`.
 - [ ] **Step 5: Commit** `feat(tui-edit): defensive-filing export step (year-set, no pseudo-attest)`.
 
@@ -400,4 +445,4 @@ publish) is a SEPARATE user call after the whole feature is green + merged.
   era/safe-harbor; DFW-D10→Task 6 flavors + Task 8 readout; DFW-D11→Task 3 year-set + Task 10 export;
   DFW-D12→Task 9 one-at-a-time. §8 sub-1 pseudo fix → Task 1. All 12 decisions have a task.
 - **Placeholders:** none (interfaces + KATs + code sketches concrete). **Type consistency:** `Shortfall`/
-  `TrancheRow`/`SavingFlavor`/`plan_promote`/`plan_declare`/`export_year_set` names consistent across tasks.
+  `TrancheRow`/`SavingFlavor`/`plan_promote`/`plan_declare`/`flagged_years`/`plan_export` names consistent across tasks.
