@@ -231,45 +231,31 @@ pub fn set_fmv(
     append_and_save(&mut session, payload, now)
 }
 
-/// Whether any live `VoidDecisionEvent` names `target` (used to pick only a NON-voided promote when the
-/// void target is a promoted `DeclareTranche`).
-fn decision_is_voided(events: &[LedgerEvent], target: &EventId) -> bool {
-    events.iter().any(|e| {
-        matches!(&e.payload,
-            EventPayload::VoidDecisionEvent(v) if v.target_event_id == *target)
-    })
-}
-
 /// BG-D9 Task 8 (arch/tax r1 I-3): the prior-year fold-diff advisory in the VOID direction, or `Vec::new()`
-/// when the void `target` has no live promote to revert. Voiding a `PromoteTranche` — or a promoted-tranche
-/// `DeclareTranche` (whose live promote we identify) — reverts a filed floor basis toward `$0`, which can
-/// HIFO-reorder a PRIOR filed year's 8949/8283 (amend-to-PAY). Non-gating; the caller PRINTS it BEFORE
-/// recording the void. A single stored `profile` cannot fit the multi-year span, so `None` is passed (the
-/// tax-Δ arm falls back to the gain/deduction Δ sign — the amend direction is still correct). `now` (the
-/// void's own injected creation-time) supplies the advisory's `current` tax-year cutoff (Task 10 handoff)
-/// — the BTCTAX_NOW seam, never a wall clock.
+/// when the void `target` is not an EFFECTIVE promote void. Voiding a `PromoteTranche` decision reverts a
+/// filed floor basis toward `$0`, which can HIFO-reorder a PRIOR filed year's 8949/8283 (amend-to-PAY).
+/// Non-gating; the caller PRINTS it BEFORE recording the void. A single stored `profile` cannot fit the
+/// multi-year span, so `None` is passed (the tax-Δ arm falls back to the gain/deduction Δ sign — the amend
+/// direction is still correct). `now` (the void's own injected creation-time) supplies the advisory's
+/// `current` tax-year cutoff (Task 10 handoff) — the BTCTAX_NOW seam, never a wall clock.
 fn promote_void_advisory_lines(
     session: &Session,
     events: &[LedgerEvent],
     target_event_id: &EventId,
     now: OffsetDateTime,
 ) -> Vec<String> {
-    // The promote whose EXCLUSION defines the baseline: the target IS a PromoteTranche, else a NON-voided
-    // PromoteTranche naming the target `DeclareTranche`.
+    // Only an EFFECTIVE void reverts a filed floor: the void `target` IS a `PromoteTranche` decision.
+    // The DeclareTranche-with-live-promote void does NOT reach here — it is refused UPSTREAM at record
+    // time by `guard_decision_conflict`/`would_conflict` (the engine holds the tranche in force via its
+    // live promote → an inert `DecisionConflict`; record-time == resolver by construction), and the
+    // bulk/TUI void plans exclude it via `voidable_decisions`' `promoted_target` filter. So this fn only
+    // ever sees the effective PromoteTranche-target void — never a DeclareTranche target (arch r1 M-3: the
+    // former `.or_else` DeclareTranche path was unreachable dead code that would have printed a reversion
+    // + amend advisory for a void that changes nothing).
     let promote_id = events
         .iter()
         .find(|e| e.id == *target_event_id && matches!(e.payload, EventPayload::PromoteTranche(_)))
-        .map(|e| e.id.clone())
-        .or_else(|| {
-            events.iter().find_map(|e| match &e.payload {
-                EventPayload::PromoteTranche(pt)
-                    if pt.target == *target_event_id && !decision_is_voided(events, &e.id) =>
-                {
-                    Some(e.id.clone())
-                }
-                _ => None,
-            })
-        });
+        .map(|e| e.id.clone());
     let Some(pid) = promote_id else {
         return Vec::new();
     };

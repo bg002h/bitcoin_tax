@@ -179,6 +179,57 @@ fn voiding_a_promoted_tranche_prints_the_void_direction_advisory() {
     );
 }
 
+/// ★ arch r1 M-3 (Phase-1a fold): voiding the promoted **DeclareTranche** (NOT the promote) is REFUSED
+/// upstream by `guard_decision_conflict`/`would_conflict` at record time — the engine holds the tranche in
+/// force via its live promote (an inert `DecisionConflict`, `resolve.rs` tranche-void adjudication). The
+/// refusal fires BEFORE `promote_void_advisory_lines`, so NO Void-direction amend-to-PAY advisory is ever
+/// printed for this (inert) void. This regression-locks the guard so the removed `.or_else` DeclareTranche
+/// branch (which would have wrongly printed a reversion + amend-to-PAY for a void that changes nothing)
+/// stays unreachable. Green both before AND after the `.or_else` removal — it pins the reachable guardrail,
+/// not a mutation of the dead branch (the behavior was already correct; this locks it).
+#[test]
+fn voiding_a_promoted_declare_tranche_is_refused_and_prints_no_amend_advisory() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, _promote_id) = build_promoted_vault(dir.path());
+    // The DeclareTranche decision the promote targets (build_promoted_vault appends it as decision 1).
+    let tranche_id = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let id = load_all(s.conn())
+            .unwrap()
+            .into_iter()
+            .find(|e| matches!(e.payload, EventPayload::DeclareTranche(_)))
+            .map(|e| e.id)
+            .expect("the promoted DeclareTranche is present");
+        id
+    };
+    let before = decision_count(&vault);
+
+    let (code, stdout, stderr) = run_void(&vault, &tranche_id.canonical());
+
+    // Refused at record time with the inert-void `DecisionConflict` reason (the resolver == record-time
+    // guard by construction).
+    assert_ne!(
+        code, 0,
+        "voiding a promote-held DeclareTranche must be refused; stdout={stdout} stderr={stderr}"
+    );
+    assert!(
+        stderr.contains("cannot record this decision")
+            && stderr.contains("held in force by a live PromoteTranche"),
+        "the refusal names the inert-void reason: {stderr}"
+    );
+    // The wrong guidance never prints: no Void-direction amend-to-PAY advisory reaches stdout.
+    assert!(
+        !stdout.to_lowercase().contains("additional tax") && !stdout.contains("1040-X"),
+        "an inert (refused) void must print NO amend-to-PAY promote-void advisory: {stdout}"
+    );
+    // Fail-closed: nothing was recorded.
+    assert_eq!(
+        decision_count(&vault),
+        before,
+        "a refused void appends no decision"
+    );
+}
+
 /// ★ Task 11 (BG-D3, arch r3 M-1): the verify-drift advisory is WIRED into `verify`/`build_verify`, not
 /// just the core fn. `build_promoted_vault` files a $12,000 floor for a 0.4-BTC 2018-Q1 tranche
 /// ($30,000/BTC — far ABOVE any 2018 daily close), so recomputing `filed_basis_for` against the CURRENT
