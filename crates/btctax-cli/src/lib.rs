@@ -36,6 +36,11 @@ pub use cmd::promote::PROMOTE_ACK_PHRASE;
 // the gate's intent (keep session-lifecycle `cmd::` fns out of the held-session viewer) is honored, not
 // evaded. Any FUTURE addition here must be equally pure (do NOT re-export a session-opening fn).
 pub use cmd::admin::promote_export_gate;
+// Re-exported at the crate root (Defensive Filing Wizard Task 3, ★ arch-n-1) so a future TUI export
+// surface (`btctax-tui-edit`'s `persist.rs`, Task 10) can name `IrsPdfReport` WITHOUT the `cmd::` token
+// its KAT-G1 source gate forbids in non-test code (mirrors `promote_export_gate` above). `IrsPdfReport`
+// is a plain data struct (no `Session`, no lock, no I/O) — the gate's intent is honored, not evaded.
+pub use cmd::admin::IrsPdfReport;
 pub use config::CliConfig;
 pub use session::{
     BulkFilter, BulkIncomeFilter, BulkIncomePlan, BulkIncomeRow, BulkLinkPlan, BulkLinkRow,

@@ -12,8 +12,8 @@
 //! PRIVACY: synthetic values only.
 
 use btctax_core::conservative::{
-    basis_methodology, overpayment_nudge_lines, promote_prior_year_advisory, self_custody_nudge,
-    tranche_dip_advisory, Coverage, Direction,
+    basis_methodology, flagged_years, overpayment_nudge_lines, promote_prior_year_advisory,
+    self_custody_nudge, tranche_dip_advisory, Coverage, Direction,
 };
 use btctax_core::conservative_promote::{
     clamped_leg_basis, clamped_promote_year_saving, consent_terms, filed_basis_for,
@@ -1888,6 +1888,66 @@ fn the_current_cutoff_excludes_the_year_still_being_authored() {
             .iter()
             .any(|l| l.contains("2018") && l.contains("1040-X")),
         "current=2019 must still include the (now presumed-filed) year 2018: {included:?}"
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// Defensive Filing Wizard sub-2, Task 3 (DFW-D11) — `flagged_years`: the STRUCTURED (`BTreeSet<i32>`)
+// twin of `promote_prior_year_advisory`'s year-set, reusing the SAME fixtures above at the unit-test
+// altitude (the CLI-level two-arm characterization + the removal-reorder / two-live-promote KATs live in
+// `btctax-cli/tests/promote_cli.rs` per the task brief).
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// `flagged_years` pins the SAME disposal-reorder year (2018) `promote_prior_year_advisory` names above,
+/// filtered by the SAME `< current` cutoff (mirrors `the_current_cutoff_excludes_the_year_still_being_
+/// authored`, at the structured-fn altitude).
+#[test]
+fn flagged_years_pins_the_prior_disposal_reorder_filtered_by_current() {
+    let events = mixed_vintage_hifo_2018_disposal();
+    let state = project(&events, &prices(), &cfg());
+    let tables = no_tables();
+
+    let excluded = flagged_years(&events, &state, &prices(), &tables, &cfg(), 2018);
+    assert!(
+        excluded.is_empty(),
+        "current=2018 must exclude year 2018 (still being authored): {excluded:?}"
+    );
+
+    let included = flagged_years(&events, &state, &prices(), &tables, &cfg(), 2019);
+    assert!(
+        included.contains(&2018),
+        "current=2019 must still include the (now presumed-filed) year 2018: {included:?}"
+    );
+}
+
+/// `flagged_years` catches a REMOVAL-only (donation) reorder with ZERO disposal change — the
+/// disposal-legs-only `promoted_filing_years` (chokepoint/mod.rs, the 8275-gate enumeration) would MISS
+/// this year entirely; `flagged_years` must not (DFW-D11's whole reason to exist).
+#[test]
+fn flagged_years_pins_a_prior_donation_only_reorder() {
+    let events = prior_donation_only_reorder();
+    let state = project(&events, &prices(), &cfg());
+    let tables = no_tables();
+
+    let years = flagged_years(&events, &state, &prices(), &tables, &cfg(), FAR_FUTURE);
+    assert!(
+        years.contains(&2024),
+        "a donation-only reorder with no disposal change must still be flagged: {years:?}"
+    );
+}
+
+/// `flagged_years` ALSO catches a GIFT-only reorder (the other removal kind) — a gift changes no 1040
+/// line but still rewrites the §1015 donee-basis carryover, so it must be in the export set too.
+#[test]
+fn flagged_years_pins_a_prior_gift_only_reorder() {
+    let events = prior_gift_only_reorder();
+    let state = project(&events, &prices(), &cfg());
+    let tables = no_tables();
+
+    let years = flagged_years(&events, &state, &prices(), &tables, &cfg(), FAR_FUTURE);
+    assert!(
+        years.contains(&2024),
+        "a gift-only reorder must still be flagged: {years:?}"
     );
 }
 

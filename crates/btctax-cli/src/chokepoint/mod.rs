@@ -54,6 +54,8 @@
 //! identical `CliError::Usage(msg)` via `From<Refusal>` (below), so this is a pure internal-taxonomy
 //! choice: the filer-facing message text is unchanged from the shipped verb either way.
 
+use crate::cli::FormArg;
+use crate::cmd::admin::IrsPdfReport;
 use crate::cmd::promote::{
     render_consent as render_consent_terms, ProvenanceKind, PROMOTE_ACK_PHRASE, PROVENANCE_TEXT,
     PROVENANCE_VERSION,
@@ -69,8 +71,11 @@ use btctax_core::persistence::{append_decision, load_all};
 use btctax_core::price::PriceProvider;
 use btctax_core::project::ProjectionConfig;
 use btctax_core::state::BlockerKind;
-use btctax_core::{project, EventId, LedgerEvent, RemovalKind, Sat, TaxDate, Usd, WalletId};
+use btctax_core::{
+    project, EventId, LedgerEvent, LedgerState, RemovalKind, Sat, TaxDate, TaxTables, Usd, WalletId,
+};
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 use time::{OffsetDateTime, UtcOffset};
 
 /// Everything computed BEFORE the filer types the acknowledgment phrase (the `PromoteTranche` decision
@@ -600,4 +605,120 @@ pub fn apply_declare(
     let id = append_decision(session.conn(), plan.payload, now, UtcOffset::UTC, None)?;
     session.save()?;
     Ok(id)
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// Task 3 — the EXPORT chokepoint (degenerate trio): `plan_export`/`apply_export`, composed over the
+// ALREADY-SHIPPED `export_irs_pdf_from_session` (`cmd::admin`, ★ arch-C-1) so a future TUI can drive the
+// EXACT SAME gated IRS-PDF export pipeline the CLI does WITHOUT a second `Session::open` (a second open
+// under the TUI's held `VaultLock` deadlocks the editor, `session.rs:662`). Unlike promote/declare,
+// export APPENDS no decision — there is no acknowledgment gate, and `apply_export` takes `&Session`
+// (never `&mut`), mirroring `export_full_return`'s own `&Session` parameterization.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// BG-D8's 8275-completeness year enumeration ONLY — extracted verbatim from `promote_export_gate`'s
+/// `None` arm (`cmd/admin.rs`) so the gate and any other 8275-completeness caller single-source it (SPEC
+/// DFW-D11: "single-sourced ... but it is NOT the export set"). A year is included iff a PROMOTED
+/// disposal leg (`lot_id.origin_event_id ∈ state.promoted_origins`) files in it — DISPOSAL legs only; a
+/// promote's REMOVAL (donation/gift) reorder is invisible here by design — that is exactly what
+/// `flagged_years` (`btctax_core::conservative`), below, exists to also catch.
+pub fn promoted_filing_years(state: &LedgerState) -> BTreeSet<i32> {
+    let mut years = BTreeSet::new();
+    for d in &state.disposals {
+        if d.legs
+            .iter()
+            .any(|l| state.promoted_origins.contains(&l.lot_id.origin_event_id))
+        {
+            years.insert(d.disposed_at.year());
+        }
+    }
+    years
+}
+
+/// A planned multi-year IRS-PDF export (DFW-D11): the year-set, the shared `--out` base directory, and
+/// the `--forms` slice (honored on a crypto-slice year, ignored on a full-return year —
+/// `IrsPdfReport::forms_ignored_full_return` says so per year). `apply_export` writes each year's packet
+/// into its OWN `out_dir/<year>` subdirectory (never the bare `out_dir` itself) — the crypto-slice
+/// pipeline writes BARE filenames (`f8949.pdf`, `schedule_d.pdf`, …) for exactly one tax year at a time,
+/// so a shared, un-suffixed directory across two exported years would let the second year silently
+/// clobber the first's packet (the same chimera-return hazard `export_full_return`'s sequence-prefixed
+/// names guard against).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExportPlan {
+    pub years: BTreeSet<i32>,
+    pub out_dir: PathBuf,
+    pub forms: Vec<FormArg>,
+}
+
+/// Plan a multi-year IRS-PDF export (DFW-D11) — gates over already-projected `state` ONLY; NO
+/// consent/acknowledgment (export mutates no events; arch-m-new-3: no `Session` here either — the caller
+/// supplies its own already-loaded `events`/`state`/`prices`/`tables`/`cfg`, mirroring `plan_promote`).
+/// Refuses when `state.pseudo_active()`: unlike `export_irs_pdf`'s CLI/`export-snapshot` attest-phrase
+/// escape hatch, this composed export step NEVER prompts for one (the standing DRAFT-gate policy) — a
+/// pseudo-active vault must resolve/turn off pseudo mode (or approve + attest through the existing
+/// single-year CLI path) before this chokepoint will plan anything.
+///
+/// `years = {current_year} ∪ flagged_years(events, state, prices, tables, cfg, current_year)` — STRICTLY
+/// a superset of `promoted_filing_years(state)` (SPEC DFW-D11): the fold-diff set also catches a
+/// promote's HIFO reorder of a prior year's donation/gift with NO promoted disposal leg in that year at
+/// all.
+#[allow(clippy::too_many_arguments)]
+pub fn plan_export(
+    events: &[LedgerEvent],
+    state: &LedgerState,
+    prices: &dyn PriceProvider,
+    tables: &dyn TaxTables,
+    cfg: &ProjectionConfig,
+    current_year: i32,
+    out_dir: PathBuf,
+    forms: Vec<FormArg>,
+) -> Result<ExportPlan, Refusal> {
+    if state.pseudo_active() {
+        return Err(Refusal::Coverage(
+            "cannot export: the ledger is pseudo-reconciled (a synthetic, non-persisted default \
+             contributes to the projection) — this composed export step never prompts for an \
+             attestation override. Run `btctax reconcile pseudo off` (or approve + attest the \
+             defaults through the single-year `export-irs-pdf`/`export-snapshot` CLI path) before \
+             exporting."
+                .to_string(),
+        ));
+    }
+
+    let mut years = conservative::flagged_years(events, state, prices, tables, cfg, current_year);
+    years.insert(current_year);
+
+    Ok(ExportPlan {
+        years,
+        out_dir,
+        forms,
+    })
+}
+
+/// Apply a planned export: write ONE IRS-PDF packet per `plan.years`, each into its own `out_dir/<year>`
+/// subdirectory, via the ALREADY-SHIPPED `export_irs_pdf_from_session` (★ arch-C-1, `cmd::admin`) — the
+/// SAME `return_inputs::exists` full-vs-slice dispatch the CLI's `export_irs_pdf` runs, exercised ONCE
+/// per year, INSIDE that fn (never duplicated here — ★ m-new-1). Reloads `events`/`state` fresh from
+/// `session` (arch-m-new-3 pattern) — a single synchronous CLI/TUI invocation cannot append anything
+/// between `plan_export` and `apply_export`, so this is behavior-preserving. `attest: None` throughout:
+/// `plan_export` already refused a pseudo-active state, so the watermark/attestation branch inside
+/// `_from_session` is unreachable here. NO `Session::open` anywhere — `session` is already open and held
+/// by the caller (the CLI's thin driver, or a future TUI); a second open under a held `VaultLock`
+/// deadlocks (`session.rs:662`).
+pub fn apply_export(session: &Session, plan: ExportPlan) -> Result<Vec<IrsPdfReport>, CliError> {
+    let (events, state, _cfg) = session.load_events_and_project()?;
+    let mut reports = Vec::with_capacity(plan.years.len());
+    for year in &plan.years {
+        let year_dir = plan.out_dir.join(year.to_string());
+        let report = crate::cmd::admin::export_irs_pdf_from_session(
+            session,
+            &state,
+            &events,
+            &year_dir,
+            *year,
+            &plan.forms,
+            None,
+        )?;
+        reports.push(report);
+    }
+    Ok(reports)
 }

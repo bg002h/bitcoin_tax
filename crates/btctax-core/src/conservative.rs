@@ -912,3 +912,122 @@ pub fn promote_prior_year_advisory(
     }
     lines
 }
+
+/// ★ arch-m-6 mirror (BG-D1, Task 3/DFW-D11): the LIVE (non-voided) `PromoteTranche` decision `EventId`s
+/// whose target is actually in force. `state.promoted_origins` (`project/fold.rs:497`, the pass-2
+/// resolver's own membership) is the single PUBLIC surface for "which `DeclareTranche` targets are held
+/// by EXACTLY one non-voided promote" — this fn walks `events` to recover the PROMOTE decision's OWN id
+/// (the `promote_id` `promote_prior_year_advisory` keys on, never the target). A promote whose target is
+/// NOT in `promoted_origins` (absent/wrong-type/voided target, or a ≥2-promote conflict) is excluded — it
+/// holds no filed floor to fold-diff.
+fn live_promote_ids(events: &[LedgerEvent], state: &LedgerState) -> Vec<EventId> {
+    let voided: BTreeSet<EventId> = events
+        .iter()
+        .filter_map(|e| match &e.payload {
+            EventPayload::VoidDecisionEvent(v) => Some(v.target_event_id.clone()),
+            _ => None,
+        })
+        .collect();
+    events
+        .iter()
+        .filter_map(|e| match &e.payload {
+            EventPayload::PromoteTranche(p)
+                if !voided.contains(&e.id) && state.promoted_origins.contains(&p.target) =>
+            {
+                Some(e.id.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The BG-D9 fold-diff YEAR SET for ONE promote (disposal ∪ removal legs, retained `< current`) — mirrors
+/// `promote_prior_year_advisory`'s own candidate-year + change-detection logic (above, the `years`
+/// build-up + the `disp_changed`/`don_changed`/`gift_changed` predicate) exactly, but returns the
+/// structured years instead of rendered text (★ structured year-set, r1: `promote_prior_year_advisory`
+/// returns `Vec<String>` — unusable for a caller that needs to KNOW which years, not read about them).
+/// Deliberately duplicated rather than sharing code with `promote_prior_year_advisory`:  that fn
+/// additionally renders per-year prose (amend direction, the tax-Δ via `tables`) this fn has no use for —
+/// mirroring the existing `gift_only_flagged_years` (`chokepoint/mod.rs`) precedent of re-deriving a
+/// structured year set from the SAME with/without fold pair rather than parsing or refactoring the prose
+/// builder.
+fn promote_changed_years(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    promote_id: &EventId,
+    current: i32,
+) -> BTreeSet<i32> {
+    let with_state = project(events, prices, config);
+    let without_events: Vec<LedgerEvent> = events
+        .iter()
+        .filter(|e| e.id != *promote_id)
+        .cloned()
+        .collect();
+    let without_state = project(&without_events, prices, config);
+
+    let mut years: BTreeSet<i32> = BTreeSet::new();
+    for st in [&with_state, &without_state] {
+        for d in &st.disposals {
+            years.insert(d.disposed_at.year());
+        }
+        for r in &st.removals {
+            years.insert(r.removed_at.year());
+        }
+    }
+    years.retain(|y| *y < current);
+
+    years
+        .into_iter()
+        .filter(|&y| {
+            let disp = |st: &LedgerState| -> Vec<Disposal> {
+                st.disposals
+                    .iter()
+                    .filter(|d| d.disposed_at.year() == y)
+                    .cloned()
+                    .collect()
+            };
+            let rem = |st: &LedgerState, k: RemovalKind| -> Vec<Removal> {
+                st.removals
+                    .iter()
+                    .filter(|r| r.removed_at.year() == y && r.kind == k)
+                    .cloned()
+                    .collect()
+            };
+            let disp_changed = disp(&with_state) != disp(&without_state);
+            let don_changed = rem(&with_state, RemovalKind::Donation)
+                != rem(&without_state, RemovalKind::Donation);
+            let gift_changed =
+                rem(&with_state, RemovalKind::Gift) != rem(&without_state, RemovalKind::Gift);
+            disp_changed || don_changed || gift_changed
+        })
+        .collect()
+}
+
+/// ★ tax-N-1/M-1 (Task 3, DFW-D11): the structured export year-set — the UNION, across every LIVE
+/// promote, of that promote's OWN BG-D9 fold-diff years (disposal ∪ removal legs, `< current`) — NOT a
+/// single whole-state with-ALL-promotes-vs-without-ALL-promotes diff (where two promotes' per-year
+/// effects could cancel and silently drop a year neither fold alone would miss). `tables` is accepted for
+/// signature symmetry with `promote_prior_year_advisory` and its callers (a caller assembling
+/// `plan_export` already holds the SAME `events`/`state`/`prices`/`tables`/`cfg` bundle for the sibling
+/// advisory call) — the leg-set-equality criterion itself never needs a tax table, so it goes unused here.
+pub fn flagged_years(
+    events: &[LedgerEvent],
+    state: &LedgerState,
+    prices: &dyn PriceProvider,
+    _tables: &dyn TaxTables,
+    cfg: &ProjectionConfig,
+    current: i32,
+) -> BTreeSet<i32> {
+    let mut years: BTreeSet<i32> = BTreeSet::new();
+    for promote_id in live_promote_ids(events, state) {
+        years.extend(promote_changed_years(
+            events,
+            prices,
+            cfg,
+            &promote_id,
+            current,
+        ));
+    }
+    years
+}
