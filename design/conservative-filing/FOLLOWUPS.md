@@ -46,6 +46,13 @@ predicate changed) mutation-proven**, in one fold:
 - **[Nit] `write_csv_exports` path untested for `basis_methodology.txt`** (arch N-5) — same shared
   `write_basis_methodology_txt` helper the `write_form_csvs` (tested) and `export-irs-pdf` (tested) paths use.
 
+- **[MOVED → Approach-B FOLLOWUPS] The TUI export-path BG-D8 gap** (raised T14, re-tagged HARD for
+  Phase-1b/T16) now lives with the other Approach-B export-surface follow-ups in
+  `design/conservative-filing-approach-b/FOLLOWUPS.md` (§ "Open — Phase 1b (T16) export-surface
+  requirements"), co-located with tax-review M1 (8275 no-loss suffix) and M2 (all-years CSV 8275.txt).
+  Approach-B is a distinct sub-project on `feat/conservative-filing-b`; its follow-ups belong to its own
+  artifact, not this (merged v1) file.
+
 ### T16 whole-branch review r2 (2026-07-20) — FOLDED (re-review of the r1 fix fold)
 
 r2 tax lens: **0C/0I — GREEN** (all three r1 Importants verified resolved). r2 architecture lens found the

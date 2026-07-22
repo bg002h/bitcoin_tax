@@ -1,7 +1,7 @@
 use crate::conventions::{Sat, TaxDate, Usd};
 use crate::event::{BasisSource, DisposeKind, IncomeKind};
 use crate::identity::{EventId, LotId, WalletId};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Term {
@@ -275,6 +275,14 @@ pub struct LedgerState {
     /// interim export-refusal guard [R0-I3], and sub-3's typed-attest gate. `> 0` ⇔ a
     /// `PseudoReconcileActive` advisory blocker is present and every `[PSEUDO]`-flagged row is fictional.
     pub pseudo_synthetic_count: usize,
+    /// Task 11 (BG-D3 tag-side census): the set of `DeclareTranche` origin event ids whose tranche is
+    /// PROMOTED in this projection (a live `PromoteTranche` rewrote its `$0` basis to a filed `>$0`
+    /// floor). A disposal/removal leg or a lot is promoted iff `lot_id.origin_event_id ∈
+    /// promoted_origins`. Populated by `fold` from `Resolution.promotes`; empty when no promote is live.
+    /// Lets the state-only advisories (`basis_methodology`, the overpayment nudge) distinguish a promoted
+    /// `>$0` estimate floor from a documented on-chain fee carry WITHOUT re-deriving the promote set —
+    /// both are `EstimatedConservative` with `>$0` basis, indistinguishable from the leg alone.
+    pub promoted_origins: BTreeSet<EventId>,
 }
 impl LedgerState {
     /// Pseudo-reconcile (sub-project 2): `true` when any synthetic default contributes to this

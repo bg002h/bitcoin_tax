@@ -356,6 +356,28 @@ fn default_prices() -> Result<Box<dyn PriceProvider>, CliError> {
     )?))
 }
 
+/// The pre-2025 residue event filter `safe_harbor_residue` (below) projects over (D3). Kept as its own
+/// fn so the drop rule is independently unit-testable (T12, arch r2 M-3).
+fn pre2025_residue_events(all: Vec<LedgerEvent>) -> Vec<LedgerEvent> {
+    all.into_iter()
+        .filter(|e| match &e.id {
+            EventId::Import { .. } => tax_date(e.utc_timestamp, e.original_tz) < TRANSITION_DATE,
+            // D-8: DROP SafeHarborAllocation (residue stays allocation-INDEPENDENT), DeclareTranche (a
+            // $0 conservative-filing tranche is NOT allocatable pre-2025 residue — else the allocate
+            // opener would self-poison by listing the tranche's $0 sats, authoring the very coexistence
+            // v1 forbids), AND PromoteTranche (T12: a promote's `target` is a DeclareTranche, which is
+            // ALWAYS dropped here — leaving the promote in would dangle it against an absent target in
+            // this sub-projection).
+            _ => !matches!(
+                e.payload,
+                EventPayload::SafeHarborAllocation(_)
+                    | EventPayload::DeclareTranche(_)
+                    | EventPayload::PromoteTranche(_)
+            ),
+        })
+        .collect()
+}
+
 impl Session {
     /// Create a brand-new encrypted vault, then initialize the core event schema and the CLI config
     /// table, and persist. (`Vault::create` already saved once; we re-save after the DDL.)
@@ -692,30 +714,15 @@ impl Session {
         if crate::cmd::tranche::pre2025_tranche_exists(&all) {
             return Err(CliError::Usage(
                 "cannot open the safe-harbor allocate flow: a pre-2025 conservative-filing tranche ($0 \
-                 EstimatedConservative) is on file — v1 makes a tranche and a safe-harbor allocation \
-                 mutually exclusive (D-8). Void the tranche first (`reconcile void <decision-ref>`); if \
-                 you have already filed the tranche's $0 basis, unallocated pre-2025 units are a \
-                 facts-and-circumstances matter for a professional."
+                 or a promoted floor, EstimatedConservative) is on file — v1 makes a tranche and a \
+                 safe-harbor allocation mutually exclusive (D-8). Void the tranche first (`reconcile void \
+                 <decision-ref>`); if you have already filed the tranche's basis ($0 or a promoted \
+                 floor), unallocated pre-2025 units are a facts-and-circumstances matter for a \
+                 professional."
                     .to_string(),
             ));
         }
-        let pre2025: Vec<LedgerEvent> = all
-            .into_iter()
-            .filter(|e| match &e.id {
-                EventId::Import { .. } => {
-                    tax_date(e.utc_timestamp, e.original_tz) < TRANSITION_DATE
-                }
-                // D-8: DROP SafeHarborAllocation (residue stays allocation-INDEPENDENT) AND DeclareTranche
-                // (a $0 conservative-filing tranche is NOT allocatable pre-2025 residue — else the allocate
-                // opener would self-poison by listing the tranche's $0 sats, authoring the very coexistence
-                // v1 forbids). A pre-2025 tranche makes the allocation refuse anyway; excluding it here keeps
-                // the opener honest and stops a ≥2025 tranche's post-transition lot from leaking in.
-                _ => !matches!(
-                    e.payload,
-                    EventPayload::SafeHarborAllocation(_) | EventPayload::DeclareTranche(_)
-                ),
-            })
-            .collect();
+        let pre2025: Vec<LedgerEvent> = pre2025_residue_events(all);
         let prices = self.prices();
         let residue = project(&pre2025, prices, &proj);
         let lots = residue
@@ -1386,6 +1393,73 @@ mod tests {
         let (state, _cfg) = s.project().unwrap();
         assert!(state.lots.is_empty());
         assert!(state.blockers.is_empty());
+    }
+
+    /// T12 (arch r2 M-3): a `PromoteTranche` layered on a dropped `DeclareTranche` must ALSO be dropped
+    /// from the pre-2025 residue event list, or it projects with a dangling target (the tranche it
+    /// promotes is ALWAYS excluded here, per D-8, regardless of the promote).
+    #[test]
+    fn safe_harbor_residue_does_not_project_a_dangling_promote() {
+        use btctax_core::conservative::Coverage;
+        use btctax_core::{Acknowledgment, DeclareTranche, FloorMethod, PromoteTranche};
+        use rust_decimal_macros::dec;
+        use time::macros::date;
+
+        fn events_with_pre2025_promoted_tranche() -> Vec<LedgerEvent> {
+            let tranche_id = EventId::decision(1);
+            vec![
+                LedgerEvent {
+                    id: tranche_id.clone(),
+                    utc_timestamp: time::macros::datetime!(2018 - 06 - 01 0:00 UTC),
+                    original_tz: time::UtcOffset::UTC,
+                    wallet: None,
+                    payload: EventPayload::DeclareTranche(DeclareTranche {
+                        sat: 50_000_000,
+                        wallet: WalletId::SelfCustody {
+                            label: "cold".into(),
+                        },
+                        window_start: date!(2018 - 01 - 01),
+                        window_end: date!(2018 - 12 - 31),
+                    }),
+                },
+                LedgerEvent {
+                    id: EventId::decision(2),
+                    utc_timestamp: time::macros::datetime!(2026 - 01 - 01 0:00 UTC),
+                    original_tz: time::UtcOffset::UTC,
+                    wallet: None,
+                    payload: EventPayload::PromoteTranche(PromoteTranche {
+                        target: tranche_id,
+                        method: FloorMethod::WindowLowClose,
+                        filed_basis: dec!(12_000),
+                        coverage: Coverage::Full,
+                        provenance_attested: true,
+                        acknowledgment: Acknowledgment {
+                            phrase: "I understand and accept the risk".into(),
+                            shown_terms: vec![],
+                            provenance_text: "acquired by purchase within the declared window"
+                                .into(),
+                            provenance_version: "v1".into(),
+                        },
+                        part_ii_narrative: "cash P2P purchase, no records; window bounded on-chain"
+                            .into(),
+                    }),
+                },
+            ]
+        }
+
+        let residue = pre2025_residue_events(events_with_pre2025_promoted_tranche());
+        assert!(
+            !residue
+                .iter()
+                .any(|e| matches!(e.payload, EventPayload::PromoteTranche(_))),
+            "a promote layered on a dropped DeclareTranche must not leak into the pre-2025 residue"
+        );
+        assert!(
+            !residue
+                .iter()
+                .any(|e| matches!(e.payload, EventPayload::DeclareTranche(_))),
+            "sanity: the tranche itself stays dropped (existing D-8 behavior)"
+        );
     }
 
     /// `Session::snapshot`/`restore` delegate to the vault and revert an in-memory mutation

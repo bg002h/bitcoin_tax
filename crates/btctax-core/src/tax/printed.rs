@@ -165,6 +165,34 @@ pub fn form_8283_printed(rows: &[crate::forms::Form8283Row]) -> Option<Printed82
 /// threshold is printed on Schedule A line 12 itself ("You must attach Form 8283 if over $500").
 pub const FORM_8283_THRESHOLD: Usd = rust_decimal_macros::dec!(500);
 
+// ── Form 8275 — the printed Part I amounts (Task 13, arch r1 I-5) ──────────────────────────────────
+
+/// The PRINTED Form 8275 content: Part I items with `amount` whole-dollar rounded for the filed
+/// packet (mirrors `Printed8283Rows` above), and Part II carried through unrounded (it is text, not
+/// money). Unlike `Printed8283Rows` this is a plain struct, not a newtype — Part II has no
+/// exact-cents twin to guard against mixing with (T15/T16's Produces shape, arch r1 I-5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Printed8275 {
+    pub part_i: Vec<crate::tax::form8275::Part1Item>,
+    pub part_ii: String,
+}
+
+/// Round a `Disclosure8275`'s Part I amounts for the filed packet. Part II is the filer's own
+/// narrative text — never rounded, carried through verbatim.
+pub fn printed_8275(d: &crate::tax::form8275::Disclosure8275) -> Printed8275 {
+    Printed8275 {
+        part_i: d
+            .part_i
+            .iter()
+            .map(|i| crate::tax::form8275::Part1Item {
+                amount: round_dollar(i.amount),
+                ..i.clone()
+            })
+            .collect(),
+        part_ii: d.part_ii.clone(),
+    }
+}
+
 // ── Schedule SE — the printed chain (ARCH-P6.3a D5) ─────────────────────────────────────────────
 
 /// The printable **Schedule SE** line chain.

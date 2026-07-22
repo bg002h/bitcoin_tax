@@ -1,3 +1,4 @@
+use crate::conservative_promote::{PromoteEntry, PromoteSet};
 use crate::conventions::{tax_date, Sat, TaxDate, Usd, TRANSITION_DATE, TY2025_RETURN_DUE};
 use crate::event::*;
 use crate::identity::{EventId, LotId, SourceRef, WalletId};
@@ -140,6 +141,19 @@ pub struct AllocationVoid {
     pub target: EventId,
 }
 
+/// BG-D9 (Task 7): a `VoidDecisionEvent` whose target is a `DeclareTranche` that HAS at least one
+/// `PromoteTranche` referencing it. Collected in pass-1a (never classified "live" inline — that would be
+/// order-dependent, arch r2 M-1) and adjudicated AFTER `live_promotes` builds the FINAL non-voided-promote
+/// set, but BEFORE step 2's admit branch reads `voided` (the load-bearing insertion point, arch r1 I-2):
+/// the target still carries a LIVE promote → the void is inert + `DecisionConflict` (never a dangling
+/// target); else the void APPLIES (`voided.insert(target)`) so the step-2 admit branch drops the tranche.
+/// Mirrors `AllocationVoid`'s deferred step-3 pattern, at the pre-step-2 insertion point.
+#[derive(Debug, Clone)]
+struct TrancheVoid {
+    void_id: EventId,
+    target: EventId,
+}
+
 /// An in-force forward method election (§A.5(a)). Collected in `resolve` from non-voided, non-backdated
 /// `MethodElection` decisions; the latest-in-force by `(effective_from, decision_seq)` governs per-wallet
 /// disposals on/after `effective_from` (NFR4: a total order, no `Date::now`/RNG).
@@ -211,6 +225,13 @@ pub struct Resolution {
     /// `reconcile pseudo approve` persists — so "what you see == what you approve". Never written to the
     /// ledger by projection; only surfaced (count/advisory/`[PSEUDO]`) and consumed by `approve`.
     pub pseudo_decisions: Vec<PseudoDefault>,
+    /// Approach-B / BG-D1 (Task 3): the promotions in force this projection — target `DeclareTranche`
+    /// `EventId` -> the `PromoteEntry` (stored `filed_basis` + `tranche_sat`) that rewrote its
+    /// `Op::Acquire.usd_cost` at step 2 (below). Built by `live_promotes`; empty unless a `PromoteTranche`
+    /// decision is in force. Threaded onto `Resolution` (rather than consumed and discarded here) so the
+    /// fold (Task 4) can reach the same decomposition key for its own leg-builder needs — the ★ shared
+    /// type has one owner (`conservative_promote.rs`, arch r1 I-1).
+    pub promotes: PromoteSet,
 }
 
 /// The TYPE of a pseudo-reconcile synthetic default (sub-project 2) — drives the `approve` filter and the
@@ -242,10 +263,13 @@ pub struct PseudoDefault {
     pub kind: PseudoKind,
 }
 
-/// Private outcome of resolving an `ImportConflict` via a decision.
+/// Private outcome of resolving an `ImportConflict` via a decision. `Accept` boxes its payload:
+/// `EventPayload` grew past clippy's `large_enum_variant` threshold once Approach-B's `PromoteTranche`
+/// decision (task-1-brief.md) joined the sum type — the same reason `ImportConflict.new_payload` and
+/// `ClassifyRaw.as_` already box an inner `EventPayload`.
 enum Resolved {
     /// The new payload is accepted; inner `EventId` is the original import target.
-    Accept(EventPayload, EventId),
+    Accept(Box<EventPayload>, EventId),
     /// The conflict is rejected; the original import stands unchanged.
     Reject,
 }
@@ -410,8 +434,118 @@ fn build_op(
                 basis_source: BasisSource::EstimatedConservative,
             })
         }
+        // Approach-B (BG-D1, arch census item 11): a `PromoteTranche` decision never folds as its OWN
+        // `Op` — its entire effect is the target `DeclareTranche`'s `Op::Acquire.usd_cost` rewrite,
+        // performed in `resolve`'s step-2 admit branch (via `live_promotes`/`Resolution.promotes`), not a
+        // movement of its own. The `_ => Op::Skip` catch-all below already handled this correctly; this
+        // arm names it explicitly so the census has a non-silent home for the guarantee.
+        EventPayload::PromoteTranche(_) => Op::Skip,
         _ => Op::Skip,
     }
+}
+
+/// UX-P4-3: the ONE unified `DecisionConflict` remedy pointer (SPEC §3.2, names `events list` §3.6),
+/// shared by `live_promotes` and `resolve` (arch Nit-1: formerly two in-sync local consts). Surface-
+/// neutral by design — it works at `verify` (the conflicting decision IS recorded; the list shows its
+/// `decision|N` to void) AND at record time (nothing was recorded; the list shows the valid refs).
+/// Duplicate details add "; void the prior decision to re-decide" (a prior decision exists on both
+/// surfaces) — EXCEPT the classify-raw arm, whose prior may be a non-revocable accepted `SupersedeImport`,
+/// so it says "if the prior decision is revocable, void it to re-decide" (review r2 M1). Deliberately NOT
+/// "void the decision to clear this blocker" — that misreads at record time, where nothing was appended.
+const CONFLICT_HINT: &str = "see `btctax events list` for event refs + decision status";
+
+/// Approach-B / BG-D1 (Task 3): the promotions in force at pass-2 — target `DeclareTranche` `EventId` ->
+/// the stored WHOLE-tranche `filed_basis` + the target's `sat` (the BG-D4 decomposition key,
+/// `conservative_promote::PromoteEntry`). Built ONCE, before the step-2 timeline loop, from non-voided
+/// `PromoteTranche` decisions whose `target` resolves to a PRESENT, non-voided `DeclareTranche` event.
+///
+/// BG-D9 (Task 7): `blockers` is now FILLED — a `PromoteTranche` decision is engine-adjudicated, not
+/// silently dropped. A target named by ≥2 non-voided promotes → `DecisionConflict` on EACH such promote,
+/// apply NEITHER (NOT last-wins). A non-voided promote whose target is absent / wrong-type / voided →
+/// `DecisionConflict`. Only NON-voided promotes are adjudicated (a voided promote is inert — no blocker;
+/// arch r3 N-1). The result set `promotes` therefore contains a target iff EXACTLY ONE non-voided promote
+/// names a present, non-voided `DeclareTranche` — i.e. iff voiding that tranche would be inert (the
+/// invariant `voidable_decisions`' `promoted_target` exclusion keys on).
+fn live_promotes(
+    events: &[LedgerEvent],
+    voided: &BTreeSet<EventId>,
+    blockers: &mut Vec<Blocker>,
+) -> PromoteSet {
+    // `CONFLICT_HINT`: the shared module-level remedy pointer (defined above).
+    let by_id: BTreeMap<EventId, &LedgerEvent> = events.iter().map(|e| (e.id.clone(), e)).collect();
+    let mut decisions: Vec<(u64, &LedgerEvent)> = events
+        .iter()
+        .filter_map(|e| match e.id {
+            EventId::Decision { seq } => Some((seq, e)),
+            _ => None,
+        })
+        .collect();
+    decisions.sort_by_key(|(s, _)| *s);
+
+    // Count NON-VOIDED promotes per target so a target named by ≥2 is a conflict (both inert), NOT a
+    // silent latest-seq-wins. Built over the SAME non-voided promote set the apply loop below iterates.
+    let mut promote_count: BTreeMap<EventId, usize> = BTreeMap::new();
+    for (_seq, d) in &decisions {
+        if voided.contains(&d.id) {
+            continue;
+        }
+        if let EventPayload::PromoteTranche(p) = &d.payload {
+            *promote_count.entry(p.target.clone()).or_insert(0) += 1;
+        }
+    }
+
+    let mut promotes = PromoteSet::new();
+    for (_seq, d) in &decisions {
+        if voided.contains(&d.id) {
+            continue; // a voided promote is inert — never a conflict (arch r3 N-1)
+        }
+        let EventPayload::PromoteTranche(p) = &d.payload else {
+            continue;
+        };
+        // ≥2 non-voided promotes on one target → conflict, apply NEITHER (not last-wins).
+        if promote_count.get(&p.target).copied().unwrap_or(0) >= 2 {
+            blockers.push(Blocker {
+                kind: BlockerKind::DecisionConflict,
+                event: Some(d.id.clone()),
+                detail: format!(
+                    "multiple live PromoteTranche decisions name the same tranche {} — none applies; \
+                     void all but one to choose a floor — {CONFLICT_HINT}",
+                    p.target.canonical()
+                ),
+            });
+            continue;
+        }
+        // The target must be a PRESENT, non-voided `DeclareTranche`; else the promote is a conflict
+        // (absent / wrong-type / voided target). A promoted tranche is never in `voided` at this point
+        // (its void is deferred, not applied inline) — the `!voided` guard is defensive.
+        let live_target = match by_id.get(&p.target).map(|e| &e.payload) {
+            Some(EventPayload::DeclareTranche(t)) if !voided.contains(&p.target) => Some(t),
+            _ => None,
+        };
+        match live_target {
+            Some(t) => {
+                promotes.insert(
+                    p.target.clone(),
+                    PromoteEntry {
+                        filed_basis: p.filed_basis,
+                        tranche_sat: t.sat,
+                    },
+                );
+            }
+            None => {
+                blockers.push(Blocker {
+                    kind: BlockerKind::DecisionConflict,
+                    event: Some(d.id.clone()),
+                    detail: format!(
+                        "PromoteTranche targets {} which is not a live DeclareTranche (absent, wrong \
+                         type, or voided) — {CONFLICT_HINT}",
+                        p.target.canonical()
+                    ),
+                });
+            }
+        }
+    }
+    promotes
 }
 
 /// PASS 1. Task 7: staged decision resolution (§7.2 step 1); Task 12: §7.4 transition effectiveness.
@@ -428,15 +562,7 @@ pub fn resolve(
     let by_id: BTreeMap<EventId, &LedgerEvent> = events.iter().map(|e| (e.id.clone(), e)).collect();
     let mut blockers: Vec<Blocker> = Vec::new();
 
-    // UX-P4-3: the ONE unified `DecisionConflict` remedy pointer (SPEC §3.2, names `events list` §3.6).
-    // Surface-neutral by design — it works at `verify` (the conflicting decision IS recorded; the list
-    // shows its `decision|N` to void) AND at record time (nothing was recorded; the list shows the
-    // valid refs). Duplicate details add "; void the prior decision to re-decide" (a prior decision
-    // exists on both surfaces) — EXCEPT the classify-raw arm, whose prior may be a non-revocable
-    // accepted `SupersedeImport`, so it says "if the prior decision is revocable, void it to re-decide"
-    // (review r2 M1). Deliberately NOT "void the decision to clear this blocker" — that misreads at
-    // record time, where nothing was appended.
-    const CONFLICT_HINT: &str = "see `btctax events list` for event refs + decision status";
+    // `CONFLICT_HINT`: the shared module-level `DecisionConflict` remedy pointer (defined above).
 
     // ── Pseudo-reconcile mode (sub-project 2) ────────────────────────────────────────────────────
     // When on, synthesize DELIBERATELY-FICTIONAL default decisions at the map/`Eff` layer (never
@@ -458,6 +584,17 @@ pub fn resolve(
     //   Void of SafeHarborAllocation → collected in allocation_voids (deferred to Task 12).
     let mut voided: BTreeSet<EventId> = BTreeSet::new();
     let mut allocation_voids: Vec<AllocationVoid> = Vec::new();
+    // BG-D9 (Task 7): a void of a `DeclareTranche` that ANY `PromoteTranche` references is DEFERRED
+    // (order-independent, arch r2 M-1) and adjudicated after `live_promotes`. `promote_targets` is the
+    // STATIC set of ids any promote (voided or not) names — the defer trigger. Do NOT read "live" here.
+    let mut tranche_voids: Vec<TrancheVoid> = Vec::new();
+    let promote_targets: BTreeSet<EventId> = events
+        .iter()
+        .filter_map(|e| match &e.payload {
+            EventPayload::PromoteTranche(p) => Some(p.target.clone()),
+            _ => None,
+        })
+        .collect();
     for e in events {
         if let EventPayload::VoidDecisionEvent(v) = &e.payload {
             match by_id.get(&v.target_event_id).map(|t| &t.payload) {
@@ -480,6 +617,25 @@ pub fn resolve(
                         void_id: e.id.clone(),
                         target: v.target_event_id.clone(),
                     });
+                }
+                Some(EventPayload::PromoteTranche(_)) => {
+                    // BG-D9: a promote-void ALWAYS applies inline+unconditionally — its liveness never
+                    // depends on another decision, so there is no order-dependence to defer. (This is
+                    // what the `Some(_)` catch-all already did; named explicitly for the census.)
+                    voided.insert(v.target_event_id.clone());
+                }
+                Some(EventPayload::DeclareTranche(_)) => {
+                    // BG-D9: a void of a tranche that a promote references is DEFERRED (adjudicated
+                    // against the FINAL live-promote set after `live_promotes`, before step 2). A void of
+                    // a tranche NO promote references applies inline (existing D-1a-d behavior).
+                    if promote_targets.contains(&v.target_event_id) {
+                        tranche_voids.push(TrancheVoid {
+                            void_id: e.id.clone(),
+                            target: v.target_event_id.clone(),
+                        });
+                    } else {
+                        voided.insert(v.target_event_id.clone());
+                    }
                 }
                 Some(_) => {
                     voided.insert(v.target_event_id.clone());
@@ -523,7 +679,7 @@ pub fn resolve(
                 {
                     conflict_res.insert(
                         s.conflict_event.clone(),
-                        Resolved::Accept((*c.new_payload).clone(), c.target.clone()),
+                        Resolved::Accept(c.new_payload.clone(), c.target.clone()),
                     );
                 }
             }
@@ -543,7 +699,7 @@ pub fn resolve(
         if let EventPayload::ImportConflict(c) = &e.payload {
             match conflict_res.get(&e.id) {
                 Some(Resolved::Accept(payload, target)) => {
-                    applied.insert(target.clone(), payload.clone());
+                    applied.insert(target.clone(), (**payload).clone());
                 }
                 Some(Resolved::Reject) => {} // original import stands unchanged
                 None => {
@@ -1068,6 +1224,39 @@ pub fn resolve(
         });
     }
 
+    // Approach-B / BG-D1 (Task 3): the live promotions, built BEFORE the step-2 loop (needs `voided`,
+    // already collected in step 1a) so the DeclareTranche admit branch below can rewrite the promoted
+    // tranche's `Op::Acquire.usd_cost` while THIS SAME pass-2 build is still in progress — never after.
+    let promotes = live_promotes(events, &voided, &mut blockers);
+
+    // ── 1a-adjudicate. BG-D9 deferred tranche-void resolution (arch r1 I-2) ───────────────────────
+    // Adjudicate the deferred `tranche_voids` against the FINAL non-voided-promote set — HERE, after
+    // `live_promotes` (so `promotes` is settled) but BEFORE step 2's admit branch reads `voided` (a
+    // `voided.insert` at step 3, after the timeline is built, would be a no-op). A target that still
+    // carries a LIVE promote → the void is INERT + `DecisionConflict` (never a dangling target); else the
+    // void APPLIES so the step-2 admit branch (`if voided.contains(&e.id)`) drops the tranche. This mirrors
+    // `allocation_voids`' deferred step-3 pattern, at the pre-step-2 insertion point.
+    //
+    // ACYCLICITY: promote-liveness (`promotes`) depends ONLY on promote-targeted voids — all applied
+    // inline in pass-1a — so `live_promotes` above never observed a deferred tranche-void; inserting them
+    // now cannot change `promotes`. The two-stage evaluation is therefore order-independent (both void
+    // orders converge: BOTH voided ⇒ promote dead + tranche dropped, no spurious conflict).
+    for tv in &tranche_voids {
+        if promotes.contains_key(&tv.target) {
+            blockers.push(Blocker {
+                kind: BlockerKind::DecisionConflict,
+                event: Some(tv.void_id.clone()),
+                detail: format!(
+                    "void targets a DeclareTranche held in force by a live PromoteTranche — the void is \
+                     inert (never a dangling target); void the promote to revert the tranche to $0, or \
+                     void both to drop it — {CONFLICT_HINT}"
+                ),
+            });
+        } else {
+            voided.insert(tv.target.clone());
+        }
+    }
+
     // ── 2. Build the effective imported timeline ─────────────────────────────────────────────────
     // For each imported event, apply `applied` overrides then `manual_fmv`, emit an `Eff`.
     // Unclassified with no ClassifyRaw → Op::Unclassified (blocker added in fold).
@@ -1098,6 +1287,24 @@ pub fn resolve(
                 &passthrough_skip,
                 &by_id,
             );
+            // ★ BG-D1 (Task 3, the LOAD-BEARING placement): if this tranche is PROMOTED, rewrite its
+            // Op::Acquire.usd_cost to the stored filed_basis HERE — inside resolve's step-2 build, before
+            // this Eff is pushed onto `timeline` — so step-3's `universal_snapshot` (§7.4 conservation)
+            // and every downstream void/relocation pass see the FLOOR, never the stale $0. A post-resolve
+            // mutation (the `overpayment_delta_one` what-if seam, conservative.rs) is the WRONG timing —
+            // it would adjudicate conservation against a residue that still reads $0. Only `usd_cost`
+            // changes: `basis_source` stays `EstimatedConservative` (the D-8 backstop keys on the TAG,
+            // not the amount — a promoted, > $0 tranche still denies a SafeHarborAllocation), and
+            // `acquired_at`/the tag exemptions elsewhere are untouched (term-invariance, relocation carry).
+            let op = match (op, promotes.get(&e.id)) {
+                (Op::Acquire(mut a), Some(entry))
+                    if a.basis_source == BasisSource::EstimatedConservative =>
+                {
+                    a.usd_cost = entry.filed_basis;
+                    Op::Acquire(a)
+                }
+                (op, _) => op,
+            };
             timeline.push(Eff {
                 id: e.id.clone(),
                 utc: t.window_end.midnight().assume_utc(), // effective date = window_end (D-1a-a)
@@ -1290,6 +1497,7 @@ pub fn resolve(
             a.pre2025_method,
             &elections,
             &selections,
+            &promotes,
         );
         let alloc_sat: Sat = a.lots.iter().map(|l| l.sat).sum();
         let alloc_basis: Usd = a.lots.iter().map(|l| l.usd_basis).sum();
@@ -1309,9 +1517,10 @@ pub fn resolve(
                 kind: BlockerKind::SafeHarborUnconservable,
                 event: Some(d.id.clone()),
                 detail: if has_tranche_residue {
-                    "a conservative-filing tranche ($0 EstimatedConservative) remains in the pre-2025 \
-                     residue — a safe-harbor allocation cannot conserve over it (v1 makes them mutually \
-                     exclusive; unallocated pre-2025 units are a facts-and-circumstances matter)"
+                    "a conservative-filing tranche ($0 or a promoted floor, EstimatedConservative) \
+                     remains in the pre-2025 residue — a safe-harbor allocation cannot conserve over it \
+                     (v1 makes them mutually exclusive; unallocated pre-2025 units are a \
+                     facts-and-circumstances matter)"
                         .into()
                 } else {
                     "allocation totals != Universal remainder at 2025-01-01".into()
@@ -1422,6 +1631,7 @@ pub fn resolve(
         elections,
         selections,
         pseudo_decisions,
+        promotes,
     }
 }
 

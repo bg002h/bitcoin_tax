@@ -77,9 +77,14 @@ return + a **mandatory methodology disclosure**.
   Date acquired (col b) = the **window-end date** the row already carries — a single-row tranche is i8949-
   compliant without "VARIOUS", which has no typed representation path (arch I-3; VARIOUS-multi-date deferred).
   Basis (col e) = $0. **No** adjustment code (you supply a missing basis, not correct a reported one).
-- **D-7 v1 declares & files `$0` ONLY** (arch I-7). `DeclareTranche` carries no floor; nothing `> $0` is ever
-  written to a filed 8949 by the conservative flow. The window-low reference (P5) feeds ONLY P6's
-  informational delta. Filing a `> $0` floor moves to Approach B (with D-10).
+- **D-7 an UNPROMOTED tranche declares & files `$0` ONLY** (arch I-7; re-scoped for Approach B, Task 11).
+  A bare `DeclareTranche` carries no floor; nothing `> $0` is written to a filed 8949 by the conservative
+  flow **for an unpromoted tranche**. The window-low reference (P5) feeds P6's informational delta.
+  ★ Filing a `> $0` floor IS now available via **Approach B** — a `PromoteTranche` (BG-D1/D2/D3) that
+  rewrites the tranche's `$0` to a filed window-low floor behind the D-10 consent/8275 gate. A PROMOTED
+  tranche therefore DOES file a `> $0` basis; the `$0`-assuming advisories/copy are promote-aware
+  (Task 11 tag-side census), and `promote_drift_advisory` (BG-D3) flags a stored floor that later
+  recomputes away from current price data.
 - **D-8 The tag MUST survive BOTH overwrite sites (arch C1 + r2 New-2).** The `EstimatedConservative` tag is
   hard-overwritten at exactly two sites (assignment-site sweep): the 2025 Path-A seed
   (`basis_source = ReconstructedPerWallet`, `transition.rs:83`) and the self-transfer RELOCATION arm

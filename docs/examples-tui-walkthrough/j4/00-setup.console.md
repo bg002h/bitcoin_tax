@@ -20,6 +20,7 @@ Pre-2025 method (attested historical fact): HIFO (attested: false)
 Standing orders (MethodElection): 0
 Lot selections recorded: 0
 Per-disposal compliance (post-2025): 0
+Promote-basis drift advisories: 0
 ```
 ```console
 $ btctax --vault v.pgp tax-profile --year 2025 --filing-status single --ordinary-taxable-income 100000 --magi-excluding-crypto 100000 --qualified-dividends 0

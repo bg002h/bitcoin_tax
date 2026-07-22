@@ -999,9 +999,14 @@ fn self_custody_nudge_absent_for_a_self_custody_tranche() {
 
 // ── Phase 9 / Task 15: no-loss-FROM-THE-ESTIMATE invariant + the two documented-fee corners + the ─────
 //    engine-integrity pins (SPEC §6 amended; tax min-7 / tax r1 I-1). CHARACTERIZATION — passes on write.
-//    The invariant is SCOPED: any negative / >$0 tranche-leg amount traces to DOCUMENTED fee_usd/fee-sat
-//    (or cent-scale pro-rata rounding), NEVER to the $0 estimate. If the ESTIMATE ever drove a loss / a
-//    >$0 filed basis, that is a Critical — STOP.
+//    The invariant is SCOPED: any negative tranche-leg amount traces to DOCUMENTED fee_usd/fee-sat (or
+//    cent-scale pro-rata rounding), NEVER to the estimate.
+//    ★ BG-D4 amendment (SPEC §3 item 6): the parent "nothing `>$0` ever filed" is re-scoped to UNPROMOTED
+//    tranches (whose estimate basis stays exactly $0 — the tests below). A PROMOTED tranche files its
+//    `filed_basis` floor as basis, so its estimate basis is `>$0`; the fold-time clamp (BG-D4,
+//    `clamped_leg_basis`) then guarantees a promoted-tranche leg's estimate-attributable gain is `≥ 0` and
+//    its estimate basis is `≥ $0` (never negative). Either way, if the ESTIMATE ever DROVE A LOSS, that is
+//    a Critical — STOP.
 
 /// A `Dispose` carrying a documented USD fee (corner (a)).
 fn sell_with_usd_fee(
@@ -1275,6 +1280,75 @@ fn tp8c_fee_sat_basis_can_land_on_the_last_tranche_leg_corner_b() {
         "documented fee-sat basis re-homed onto the tranche leg (TP8c) — basis AS FILED > $0, never the \
          estimate: got {}",
         tranche_leg.basis
+    );
+}
+
+/// ★ Phase-1a T11: `basis_methodology`'s discrimination is DOCUMENTED-fee vs PROMOTED, keyed on
+/// `state.promoted_origins` — NEVER on the bare `>$0` amount. This is the SAME NON-promoted (no
+/// `PromoteTranche` decision at all) fixture as `tp8c_fee_sat_basis_can_land_on_the_last_tranche_leg_
+/// corner_b` just above: its tranche leg files `>$0` purely from a documented on-chain fee re-homed
+/// under §1011 (TP8c). `basis_methodology` must describe that leg with the documented (§1011) sentence
+/// and must NEVER emit the Cohan "estimated at the minimum daily closing price" sentence — that
+/// disclosure is reserved for a PROMOTED leg (conservative.rs `basis_methodology`'s `any_promoted`
+/// gate).
+#[test]
+fn basis_methodology_names_documented_fee_not_cohan_estimate_for_a_non_promoted_gt0_leg() {
+    let w = self_custody();
+    let doc = documented_buy("DOC", datetime!(2025-02-01 00:00 UTC), &w, 60_000, 30);
+    let t = tranche_ev(1, &w, 100_000, date!(2025 - 01 - 01), date!(2025 - 01 - 31));
+    let out = LedgerEvent {
+        id: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+        utc_timestamp: datetime!(2025-07-01 00:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: Some(w.clone()),
+        payload: EventPayload::TransferOut(TransferOut {
+            sat: 100_000,
+            fee_sat: Some(500),
+            dest_addr: None,
+            txid: None,
+        }),
+    };
+    let reclass = LedgerEvent {
+        id: EventId::decision(2),
+        utc_timestamp: datetime!(2025-08-01 00:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: None,
+        payload: EventPayload::ReclassifyOutflow(ReclassifyOutflow {
+            transfer_out_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+            as_: OutflowClass::Dispose {
+                kind: DisposeKind::Sell,
+            },
+            principal_proceeds_or_fmv: rust_decimal::Decimal::from(120),
+            fee_usd: None,
+            donee: None,
+        }),
+    };
+    let select = LedgerEvent {
+        id: EventId::decision(3),
+        utc_timestamp: datetime!(2025-08-01 00:00 UTC),
+        original_tz: offset!(+00:00),
+        wallet: None,
+        payload: EventPayload::LotSelection(LotSelection {
+            disposal_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+            lots: vec![LotPick {
+                lot: LotId {
+                    origin_event_id: EventId::decision(1),
+                    split_sequence: 0,
+                },
+                sat: 100_000,
+            }],
+        }),
+    };
+    let st = project(&[doc, t, out, reclass, select], &prices(), &config());
+    let text =
+        basis_methodology(&st, 2025).expect("a >$0 tranche leg files a disclosure this year");
+    assert!(
+        text.contains("documented on-chain fee basis re-homed onto that unit under \u{00a7}1011"),
+        "the documented-fee (§1011) sentence must appear for a non-promoted >$0 leg: {text}"
+    );
+    assert!(
+        !text.contains("estimated at the minimum daily closing price"),
+        "the Cohan estimate sentence is PROMOTED-only — must NOT appear for a documented-fee leg: {text}"
     );
 }
 

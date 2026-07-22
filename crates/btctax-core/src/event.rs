@@ -28,9 +28,11 @@ pub enum BasisSource {
     /// defaulted-vs-supplied signal rides the `SelfTransferInboundZeroBasis` advisory, not this source.
     SelfTransferInbound,
     /// Conservative-filing: undocumented coins declared at $0 basis (the IRS fallback) via
-    /// `EventPayload::DeclareTranche`, homed at `window_end`. Filing-ready (NOT pseudo). The tag is
-    /// exempt from both `basis_source` overwrite sites so it reaches every disposal leg it serves and
-    /// drives the P3 dip / P7 mandatory-disclosure layer. See conservative-filing SPEC D-1/D-8.
+    /// `EventPayload::DeclareTranche`, homed at `window_end`. Filing-ready (NOT pseudo). The tag SURVIVES a
+    /// `PromoteTranche` (BG-D1) that rewrites the basis to a filed `>$0` window-low floor — the tag keys on
+    /// PROVENANCE (undocumented BTC), NOT the amount, so a promoted tranche is still `EstimatedConservative`
+    /// (a `>$0` estimate). The tag is exempt from both `basis_source` overwrite sites so it reaches every
+    /// disposal leg it serves and drives the P3 dip / P7 mandatory-disclosure layer. See SPEC D-1/D-8.
     EstimatedConservative,
 }
 
@@ -215,9 +217,11 @@ pub struct ClassifyRaw {
 /// in `[window_start, window_end]`) at **$0 basis** — the IRS fallback for unprovable basis. It folds
 /// (via the shared `Op::Acquire` path) into a lot with `usd_basis = 0`, `basis_source =
 /// EstimatedConservative`, `acquired_at = window_end` (the latest plausible acquisition → conservative
-/// for the holding period; never overclaims long-term), and the declared `wallet`. v1 declares $0 ONLY
-/// (no floor). See conservative-filing SPEC D-1/D-2/D-7. Old-binary limitation: a vault containing this
-/// variant fails to load on a pre-tranche binary (serde unknown-variant) — harmless (no installed base).
+/// for the holding period; never overclaims long-term), and the declared `wallet`. A `DeclareTranche`
+/// itself always files `$0`; a subsequent `PromoteTranche` (Approach-B, BG-D1) may later rewrite that
+/// `$0` to a filed `>$0` window-low floor (the tag stays `EstimatedConservative`). See
+/// conservative-filing SPEC D-1/D-2/D-7. Old-binary limitation: a vault containing this variant fails to
+/// load on a pre-tranche binary (serde unknown-variant) — harmless (no installed base).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeclareTranche {
     pub sat: Sat,
@@ -314,6 +318,83 @@ pub struct LotSelection {
     pub lots: Vec<LotPick>,
 }
 
+/// Approach-B: the ONE method by which a promoted tranche's filed-basis floor is computed (BG-D2 —
+/// exactly one method exists; there is no per-promotion method choice).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FloorMethod {
+    WindowLowClose,
+}
+
+/// Approach-B (BG-D6 flavors; arch r5 N-1; plan-r1 tax I-4/I-5): one figure shown to the filer as part
+/// of the promotion consent screen, and snapshotted verbatim into `Acknowledgment.shown_terms`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ConsentTerm {
+    /// A COMPUTING year. `deduction_delta_usd` is Some when a removal (donation/gift) leg diffed — engine B's
+    /// computed tax-Δ EXCLUDES crypto donations by design (tax r3 I-2), so the deduction effect rides HERE,
+    /// fold-pair-derived, and the copy must say the tax-Δ does not capture it.
+    ComputedTax {
+        year: i32,
+        delta_usd: Usd,
+        deduction_delta_usd: Option<Usd>,
+    },
+    /// A year the tax engine can't price (no table/profile/blocked): the profile-free fold-pair deltas.
+    Uncomputable {
+        year: i32,
+        gain_delta_usd: Usd,
+        deduction_delta_usd: Usd,
+    },
+    /// Undisposed sats: hypothetical-not-filed line, with the tax r3 N-2 no-current-price fallback.
+    Unrealized {
+        sat: Sat,
+        hypothetical_reduction: Option<Usd>,
+        as_of: Option<TaxDate>,
+    },
+    /// §1212(b)/§170(d), named-unquantified (tax r4 I-1).
+    CascadeNamed { year: i32 },
+}
+
+/// Approach-B (BG-D6): the §6664(c) good-faith artifact — the exact consent phrase typed, the exact
+/// figures shown at that moment, and the attested provenance statement (verbatim + its text version).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Acknowledgment {
+    /// The typed consent phrase.
+    pub phrase: String,
+    /// Snapshot of the exact figures shown.
+    pub shown_terms: Vec<ConsentTerm>,
+    /// BG-D5 attested statement (verbatim).
+    pub provenance_text: String,
+    /// Attestation-text version.
+    pub provenance_version: String,
+}
+
+/// Approach-B: promote an already-declared `DeclareTranche` (`target`, BG-D1) from its $0 basis to a
+/// filed `>$0` basis floor computed by `method` (BG-D2), captured at record time as the WHOLE-tranche
+/// `filed_basis` (BG-D3, STORED — never recomputed live) alongside the `coverage` snapshot that produced
+/// it (`Full` required at record time). `provenance_attested` (BG-D5) and `acknowledgment` (BG-D6) are the
+/// good-faith (§6664(c)) record of what was shown and accepted; `part_ii_narrative` (BG-D7) is the Form
+/// 8275 Part II explanation (empty/scaffold-only text is refused at the record guard, Task 10). Per
+/// BG-D1, promotion does NOT introduce a new `BasisSource`: the promoted lot still reads
+/// `EstimatedConservative` — only its filed basis and the accompanying disclosure change. Old-binary
+/// limitation: a vault containing this variant fails to load on a pre-promote binary (serde
+/// unknown-variant) — harmless, no installed base.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromoteTranche {
+    /// The `DeclareTranche` decision this promotes (BG-D1).
+    pub target: EventId,
+    /// BG-D2.
+    pub method: FloorMethod,
+    /// BG-D3: WHOLE-tranche, computed at record time + STORED.
+    pub filed_basis: Usd,
+    /// BG-D3 snapshot (`Full` required at record time).
+    pub coverage: crate::conservative::Coverage,
+    /// BG-D5.
+    pub provenance_attested: bool,
+    /// BG-D6.
+    pub acknowledgment: Acknowledgment,
+    /// BG-D7 (empty/scaffold-only refused at record time, T10).
+    pub part_ii_narrative: String,
+}
+
 /// The single payload sum-type carried by every `LedgerEvent` (§6.3/§6.4).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EventPayload {
@@ -352,6 +433,15 @@ pub enum EventPayload {
     /// a **primary movement** (via `Op::Acquire`), so `is_imported()` stays `false` for it even though it
     /// creates a lot. See `DeclareTranche` struct doc + conservative-filing SPEC D-1/D-1a.
     DeclareTranche(DeclareTranche),
+    /// Approach-B: promote an already-declared `DeclareTranche` from $0 basis to a filed `>$0` basis floor
+    /// plus a Form 8275 Part II disclosure. Old-binary limitation: this variant was added post-initial-release.
+    /// A vault that CONTAINS a `PromoteTranche` event FAILS to load on a binary that predates it: serde's
+    /// externally-tagged enum emits a LOUD unknown-variant error and the entire vault load fails. This is
+    /// the accepted trade-off for every decision-type addition (each new variant is a forward-only change;
+    /// see the identical `ReclassifyIncome` / `SelfTransferPassthrough` struct docs). A vault WITHOUT this
+    /// variant loads correctly on any binary (there is no `PromoteTranche` event to fail on). See
+    /// `PromoteTranche` struct doc.
+    PromoteTranche(PromoteTranche),
 }
 
 impl EventPayload {
@@ -572,6 +662,41 @@ mod tests {
                 in_event: EventId::import(Source::Coinbase, SourceRef::new("in|cb-in-001")),
                 out_event: EventId::import(Source::River, SourceRef::new("out|river-out-001")),
             }),
+            // Approach-B Task 1: PromoteTranche (the $0 -> filed-basis-floor promotion decision).
+            EventPayload::PromoteTranche(PromoteTranche {
+                target: EventId::decision(1),
+                method: FloorMethod::WindowLowClose,
+                filed_basis: dec!(12_000),
+                coverage: crate::conservative::Coverage::Full,
+                provenance_attested: true,
+                acknowledgment: Acknowledgment {
+                    phrase: "I understand and accept the risk".into(),
+                    shown_terms: vec![
+                        ConsentTerm::ComputedTax {
+                            year: 2025,
+                            delta_usd: dec!(500.00),
+                            deduction_delta_usd: Some(dec!(50.00)),
+                        },
+                        ConsentTerm::Uncomputable {
+                            year: 2026,
+                            gain_delta_usd: dec!(200.00),
+                            deduction_delta_usd: dec!(0),
+                        },
+                        ConsentTerm::Unrealized {
+                            sat: 25_000,
+                            hypothetical_reduction: Some(dec!(75.00)),
+                            as_of: Some(
+                                time::Date::from_calendar_date(2026, time::Month::January, 1)
+                                    .unwrap(),
+                            ),
+                        },
+                        ConsentTerm::CascadeNamed { year: 2027 },
+                    ],
+                    provenance_text: "acquired by purchase within the declared window".into(),
+                    provenance_version: "v1".into(),
+                },
+                part_ii_narrative: "cash P2P purchase, no records; window bounded on-chain".into(),
+            }),
         ];
         for p in payloads {
             let ev = sample(p);
@@ -657,6 +782,26 @@ mod tests {
             out_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
         });
         assert!(crate::persistence::fingerprint(&stp).is_none());
+    }
+
+    #[test]
+    fn promote_tranche_decision_has_no_fingerprint() {
+        // Mirrors declare_tranche_decision_has_no_fingerprint: decisions are never fingerprinted.
+        let p = EventPayload::PromoteTranche(PromoteTranche {
+            target: EventId::decision(1),
+            method: FloorMethod::WindowLowClose,
+            filed_basis: dec!(12_000),
+            coverage: crate::conservative::Coverage::Full,
+            provenance_attested: true,
+            acknowledgment: Acknowledgment {
+                phrase: "I understand and accept the risk".into(),
+                shown_terms: vec![],
+                provenance_text: "acquired by purchase within the declared window".into(),
+                provenance_version: "v1".into(),
+            },
+            part_ii_narrative: "cash P2P purchase, no records; window bounded on-chain".into(),
+        });
+        assert!(crate::persistence::fingerprint(&p).is_none());
     }
 
     #[test]

@@ -41,6 +41,7 @@ pub fn universal_snapshot(
     method: LotMethod,
     elections: &[ElectionRec],
     selections: &BTreeMap<EventId, Vec<LotPick>>,
+    promotes: &crate::conservative_promote::PromoteSet,
 ) -> UniversalSnapshot {
     let cfg = ProjectionConfig {
         pre2025_method: method,
@@ -61,6 +62,9 @@ pub fn universal_snapshot(
         config: &cfg,
         elections,
         selections,
+        // BG-D4 (arch r2 I-1): the SAME promote set the real fold uses — so the pre-2025 conservation
+        // residue cannot diverge (the fee-evaporation precondition; NEVER a `PromoteSet::new()` here).
+        promotes: promotes.clone(),
     };
     for eff in &pre {
         fold_event(eff, prices, &ctx, &mut pools, &mut sink, &mut stats);

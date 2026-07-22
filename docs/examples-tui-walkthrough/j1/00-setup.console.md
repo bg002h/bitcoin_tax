@@ -21,6 +21,7 @@ Standing orders (MethodElection): 0
 Lot selections recorded: 0
 Per-disposal compliance (post-2025): 1
   import|coinbase|trade|cb-sell @ 2025-06-15 :: non_compliant
+Promote-basis drift advisories: 0
 ```
 ```console
 $ btctax --vault v.pgp tax-profile --year 2025 --filing-status single --ordinary-taxable-income 100000 --magi-excluding-crypto 100000 --qualified-dividends 0

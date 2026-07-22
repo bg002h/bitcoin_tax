@@ -25,6 +25,9 @@ pub use cli::Cli;
 // `&[LedgerEvent] -> Result` predicate — no `Session`, no lock, no I/O — so the gate's intent is honored,
 // not evaded. Any FUTURE addition here must be equally pure (do NOT re-export a session-opening fn).
 pub use cmd::tranche::guard_allocation_vs_tranche;
+// Re-exported at the crate root mirroring `ATTEST_PHRASE` (below): a plain, distinct consent-phrase
+// constant, not a `cmd::`-scoped session/lock fn, so it belongs beside the other top-level phrase gates.
+pub use cmd::promote::PROMOTE_ACK_PHRASE;
 pub use config::CliConfig;
 pub use session::{
     BulkFilter, BulkIncomeFilter, BulkIncomePlan, BulkIncomeRow, BulkLinkPlan, BulkLinkRow,

@@ -6,8 +6,8 @@ use crate::render::write_csv_exports;
 use crate::{require_attestation, CliConfig, CliError, Session};
 use btctax_adapters::BundledTaxTables;
 use btctax_core::{
-    compute_se_tax, se_net_income, FeeTreatment, LotMethod, ScheduleDPart, Severity, TaxTables,
-    Usd, DIGITAL_ASSET_8949_FIRST_YEAR,
+    compute_se_tax, se_net_income, FeeTreatment, LedgerEvent, LotMethod, ScheduleDPart, Severity,
+    TaxTables, Usd, DIGITAL_ASSET_8949_FIRST_YEAR,
 };
 use btctax_forms::Form1040Inputs;
 use btctax_store::{fsperms, Passphrase};
@@ -57,6 +57,64 @@ pub fn set_pre2025_method(
     session.config()
 }
 
+/// **BG-D8 (Task 14) — the export COMPLETENESS gate.** REFUSES the export (writing ZERO bytes: called
+/// FIRST in each export fn, before any `mkdir_out`/file write) when a promoted-basis DISPOSAL leg is filed
+/// in the exported range but its Form 8275 disclosure is absent or INCOMPLETE (an empty/scaffold-only Part
+/// II). Reg §1.6662-4(f) makes a disclosure adequate only on a COMPLETED Form 8275; a promoted leg filed
+/// without one is inadequate disclosure — a HARD refusal, never a warning.
+///
+/// Mirrors the pseudo-active attestation slot (`if state.pseudo_active() { require_attestation(...)? }`):
+/// a real refuse-before-bytes gate. It is deliberately NOT the always-written `basis_methodology.txt`
+/// pattern (which unconditionally writes and can never refuse) — a refused export leaves `out_dir`
+/// untouched.
+///
+/// `year: Some(y)` scopes the check to `y` (the per-year PDF packets). `year: None` — the non-year-scoped
+/// CSV/snapshot export — means "ANY year with a promoted filed disposal leg in the exported range" (N-3),
+/// so an all-years dump can never smuggle out an inadequately-disclosed promoted position either.
+///
+/// The refusing state is only reachable via a hand-crafted raw-vault write (an empty `part_ii_narrative`):
+/// the T10 `promote-tranche` verb refuses an empty narrative at record time (BG-D7), so a CLI-recorded
+/// promote is complete by construction — this gate is the type-level backstop for the corner it cannot.
+pub fn promote_export_gate(
+    state: &btctax_core::state::LedgerState,
+    events: &[LedgerEvent],
+    year: Option<i32>,
+) -> Result<(), CliError> {
+    // The year(s) to check: the requested one, or — for the whole-range CSV/snapshot dump — every year in
+    // which a promoted disposal leg files.
+    let years: Vec<i32> = match year {
+        Some(y) => vec![y],
+        None => {
+            let mut ys = std::collections::BTreeSet::new();
+            for d in &state.disposals {
+                if d.legs
+                    .iter()
+                    .any(|l| state.promoted_origins.contains(&l.lot_id.origin_event_id))
+                {
+                    ys.insert(d.disposed_at.year());
+                }
+            }
+            ys.into_iter().collect()
+        }
+    };
+    for y in years {
+        // `disclosure_8275` is `Some` iff a promoted DISPOSAL leg files in `y`; refuse when its Part II is
+        // empty/incomplete (the `incomplete` flag T13 exposes for exactly this gate).
+        if let Some(disc) = btctax_core::tax::form8275::disclosure_8275(events, state, y) {
+            if disc.incomplete {
+                return Err(CliError::Usage(format!(
+                    "refusing to export a packet with a promoted-basis leg but no complete Form 8275 \
+                     disclosure for {y}: Reg \u{00a7}1.6662-4(f) makes disclosure adequate only on a \
+                     COMPLETED Form 8275, and this promoted disposal has an empty Part II narrative. \
+                     Record the Part II explanation (re-run `btctax reconcile promote-tranche … \
+                     --part-ii-file <path>`) before exporting."
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// FR10 / NFR2 exception: decrypted SQLite image (via the store) + the projected ledger as CSV.
 /// When `tax_year` is `Some(y)`, the per-tax-year Form 8949 + Schedule D CSVs are also written,
 /// year-scoped to `y` (P2-B); when `None`, only the all-years CSVs are written.
@@ -73,10 +131,15 @@ pub fn export_snapshot(
     attest: Option<&str>,
 ) -> Result<ExportReport, CliError> {
     let session = Session::open(vault_path, pp)?;
-    // Attestation gate: REFUSE before ANY bytes are written when a synthetic default contributes and the
-    // attestation is missing/wrong — no fictional snapshot/8949/Schedule D leaves the machine unguarded.
-    // Checked FIRST (before the vault snapshot / CSV writes), so a refused export leaves out_dir untouched.
-    let (state, _cfg) = session.project()?;
+    // Two refuse-before-bytes gates, checked FIRST (before the vault snapshot / CSV writes) so a refused
+    // export leaves out_dir untouched:
+    //  1. BG-D8 completeness gate — a promoted-basis leg filed without its complete Form 8275 is a HARD
+    //     refusal (Reg §1.6662-4(f)). `year: None` (a whole-range dump) means "ANY year with a promoted
+    //     filed leg" (N-3), so the all-years CSV cannot smuggle an inadequately-disclosed position either.
+    //  2. Attestation gate — no fictional snapshot/8949/Schedule D leaves the machine unguarded when a
+    //     synthetic default contributes and the attestation is missing/wrong.
+    let (events, state, _cfg) = session.load_events_and_project()?;
+    promote_export_gate(&state, &events, tax_year)?;
     if state.pseudo_active() {
         require_attestation(attest)?;
     }
@@ -129,6 +192,13 @@ pub fn export_snapshot(
         &donation_details,
     )
     .map_err(|e| crate::cli_io_with_path(e, out_dir, crate::EXPORT_OUT_HINT))?;
+    // BG-D8: emit the Form 8275 disclosure by its OWN name alongside the year-scoped packet (mirrors the
+    // basis_methodology.txt emit inside write_csv_exports). Only a year-scoped export writes the per-year
+    // form artifacts; the gate above already guaranteed any promoted leg's Part II is complete.
+    if let Some(y) = tax_year {
+        crate::render::write_form_8275_txt(out_dir, &state, &events, y)
+            .map_err(|e| crate::cli_io_with_path(e, out_dir, crate::EXPORT_OUT_HINT))?;
+    }
     // [R0-I1] Count UNRESOLVED Hard blockers only. Any Hard blocker gates every year, so the count
     // alone (no per-year `compute_tax_year` call, no profile/tables dependency) drives the main.rs
     // stderr "INFORMATIONAL, not final" disclosure. Advisory blockers never count.
@@ -253,7 +323,7 @@ pub fn export_irs_pdf(
     attest: Option<&str>,
 ) -> Result<IrsPdfReport, CliError> {
     let session = Session::open(vault_path, pp)?;
-    let (state, _cfg) = session.project()?;
+    let (events, state, _cfg) = session.load_events_and_project()?;
 
     // ★ THE DISPATCH (P6.5). Exactly one function decides which pipeline runs, and the two write
     // NON-OVERLAPPING filenames, so artifacts from two runs can never be collated into a chimera
@@ -268,13 +338,18 @@ pub fn export_irs_pdf(
     // type-level impossibility to a branch, which is why the branch is HERE, alone, and pinned by KATs
     // in BOTH directions.
     if crate::return_inputs::exists(session.conn(), tax_year)? {
-        let mut report = export_full_return(&session, &state, out_dir, tax_year, attest)?;
+        // The full-return pipeline runs the BG-D8 gate itself (checked first there too).
+        let mut report = export_full_return(&session, &state, &events, out_dir, tax_year, attest)?;
         // UX-P4-5: a --forms slice cannot be honored on a full-return year (the 14-form packet is
         // jointly computed; a slice of it is tax-unsound). The packet still writes in full; flag the
         // ignored slice so the caller warns.
         report.forms_ignored_full_return = !forms.is_empty();
         return Ok(report);
     }
+
+    // BG-D8 completeness gate (crypto-slice path) — a promoted-basis leg without its complete Form 8275
+    // is a HARD refusal, checked FIRST (before the pseudo watermark check and any byte written).
+    promote_export_gate(&state, &events, Some(tax_year))?;
 
     // Attestation gate — no fictional tax form leaves the machine unguarded, and a refusal
     // writes no bytes. (A fully-real ledger ignores `attest`.)
@@ -302,6 +377,9 @@ pub fn export_irs_pdf(
     // just the CSV paths — a filer mailing the flagship filing-ready artifact must get the i8949-required
     // basis explanation whenever a $0-basis tranche row is present. Writes nothing for a no-tranche year.
     crate::render::write_basis_methodology_txt(out_dir, &state, tax_year)?;
+    // BG-D8: the Form 8275 disclosure rides the packet by its OWN name. The gate above guaranteed a
+    // promoted leg reaching here has a complete Part II. Writes nothing for a no-promoted-leg year.
+    crate::render::write_form_8275_txt(out_dir, &state, &events, tax_year)?;
 
     // ── Form 8949 + Schedule D (always applicable). ──
     let f8949_path = if wants(forms, FormArg::F8949) {
@@ -487,6 +565,7 @@ pub fn backup_key(vault_path: &Path, pp: &Passphrase, out_path: &Path) -> Result
 fn export_full_return(
     session: &Session,
     state: &btctax_core::state::LedgerState,
+    events: &[LedgerEvent],
     out_dir: &Path,
     tax_year: i32,
     attest: Option<&str>,
@@ -494,6 +573,10 @@ fn export_full_return(
     use btctax_adapters::{BundledFullReturnTables, BundledTaxTables};
     use btctax_core::tax::tables::{FullReturnTables, TaxTables};
     use std::fmt::Write as _;
+
+    // BG-D8 completeness gate — checked FIRST (before the tables lookup, the fail-closed screens, and any
+    // byte written): a promoted-basis leg without its complete Form 8275 is a HARD refusal.
+    promote_export_gate(state, events, Some(tax_year))?;
 
     let tables = BundledTaxTables::load();
     let fr_tables = BundledFullReturnTables::load();
@@ -553,6 +636,9 @@ fn export_full_return(
     mkdir_out(out_dir)?;
     // I-3 (D-4): the MANDATORY methodology disclosure rides the full-return packet too (see export_irs_pdf).
     crate::render::write_basis_methodology_txt(out_dir, state, tax_year)?;
+    // BG-D8: the Form 8275 disclosure rides the full-return packet by its OWN name (gate above guaranteed
+    // a complete Part II). Writes nothing for a no-promoted-leg year.
+    crate::render::write_form_8275_txt(out_dir, state, events, tax_year)?;
     let mut manifest = String::from("# btctax full-return packet — staple in this order\n");
     let mut paths: Vec<PathBuf> = Vec::new();
     for form in &packet {

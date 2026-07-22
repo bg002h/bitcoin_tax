@@ -68,6 +68,8 @@ fn estimated_conservative_donor_field_is_review() {
 
 /// Task 2 (D-1/D-1a/D-2): a `DeclareTranche` folds (via the reused `Op::Acquire` arm) to exactly the
 /// D-1 lot — $0 basis, `EstimatedConservative`, `acquired_at = window_end`, declared wallet, NOT pseudo.
+/// This is the UNPROMOTED tranche (D-7 re-scoped, Task 11): a subsequent `PromoteTranche` rewrites the $0
+/// to a filed floor; here no promote is present, so the $0 default is the invariant.
 #[test]
 fn declare_tranche_folds_to_zero_basis_estimated_conservative_lot_homed_at_window_end() {
     let w = exch();
@@ -84,7 +86,11 @@ fn declare_tranche_folds_to_zero_basis_estimated_conservative_lot_homed_at_windo
         .iter()
         .find(|l| l.wallet == w)
         .expect("a tranche lot");
-    assert_eq!(lot.usd_basis, dec!(0), "tranche basis is $0 (G-2/D-7)");
+    assert_eq!(
+        lot.usd_basis,
+        dec!(0),
+        "an unpromoted tranche basis is $0 (G-2/D-7)"
+    );
     assert_eq!(lot.basis_source, BasisSource::EstimatedConservative);
     assert_eq!(
         lot.acquired_at,
