@@ -64,8 +64,10 @@ stays engine-enforced.
   `pre2025_tranche_exists(events)` (★ tax-N-1: the shipped predicate takes only `events` — NO `we` arg; they
   use only core types + `conventions::TRANSITION_DATE`; today in `cmd/tranche.rs` — `void_targets`:40
   (private), `in_force_allocation_exists`:54, `pre2025_tranche_exists`:71 (the last two `pub` but
-  cli-crate-only); `guard_tranche_vs_allocation`:107 STAYS in cli). `cmd/tranche.rs` keeps its thin
-  `CliError`-wrapping guards OVER these (single source preserved for all four allocation append sites);
+  cli-crate-only); `guard_tranche_vs_allocation`:107 + `guard_allocation_vs_tranche`:93 STAY in cli). The
+  guards keep their thin `CliError`-wrapping OVER these (single source preserved for the four allocation
+  append sites); ★ **arch-I-new-2**: `session.rs:714` is a FIFTH, DIRECT consumer (`pre2025_tranche_exists`,
+  not via a guard — the safe-harbor allocate-opener precheck) that rewires to the core predicate too.
   `journey_view` + the declare flow read the core predicate directly.
 - Modify `crates/btctax-core/src/lib.rs` — `pub mod defensive; pub mod tranche_guard;`.
 - Modify `crates/btctax-core/src/state.rs` + `project/fold.rs` — a derived structured `state.shortfalls`
@@ -88,7 +90,7 @@ stays engine-enforced.
 - Modify `crates/btctax-cli/src/cmd/admin.rs` — export driver over the export chokepoint; extract
   `promoted_filing_years(state)`; the fold-diff export year-set. **★ arch-C-1:** ALSO extract the
   crypto-slice body + the full-vs-slice `return_inputs::exists` dispatch out of the self-opening
-  `export_irs_pdf` (`:350` — opens its OWN `Session` at `:358`, slice body `:385-583`) into a `&Session`
+  `export_irs_pdf` (`:350` — opens its OWN `Session` at `:358`, slice body `:385-599`) into a `&Session`
   inner `export_irs_pdf_from_session(&Session, …)` (mirroring the already-`&Session` `export_full_return:642`),
   so `apply_export` composes over the TUI's already-open `&Session` — a second `Session::open` under the
   editor's held `VaultLock` deadlocks (`session.rs:662`). `export_irs_pdf(vault_path, pp, …)` stays as a
@@ -256,9 +258,11 @@ pub(crate) fn export_irs_pdf_from_session(session: &Session, state: &LedgerState
 pub use crate::cmd::admin::IrsPdfReport;   // crate-root re-export
 pub fn apply_export(session: &Session, plan: ExportPlan) -> Result<Vec<IrsPdfReport>, CliError>;  // &Session (export mutates no events)
 ```
-`plan_export.years` = `{current} ∪ flagged_years(...)` (DFW-D11; recomputed from state — the BG-D9 fold-diff
-over disposal AND removal legs; **strictly ⊇** `promoted_filing_years`). ★ tax-M-1: `flagged_years` is the
-UNION of per-promote fold-diffs (matching `promote_prior_year_advisory`'s per-`promote_id` semantics — NOT a
+`plan_export.years` = `{current} ∪ { y ∈ flagged_years(...) : y < current }` (DFW-D11; recomputed from state —
+the BG-D9 fold-diff over disposal AND removal legs; **strictly ⊇** `promoted_filing_years`). ★ tax-N-1: the
+`< current` filter mirrors `promote_prior_year_advisory`'s prior-year filter (`conservative.rs:729`) so a year
+≥ current still being AUTHORED is never emitted a premature 1040-X packet — `{current}` supplies the current
+year. ★ tax-M-1: `flagged_years` is the UNION of per-promote fold-diffs (matching `promote_prior_year_advisory`'s per-`promote_id` semantics — NOT a
 single whole-state with-all-vs-without-all diff, where two promotes' per-year effects could cancel and drop a
 year). `apply_export` writes ONE packet per year by calling `export_irs_pdf_from_session(session, …, year, …)`
 per year; the full-vs-slice `return_inputs::exists` dispatch lives ONCE INSIDE `_from_session` (exactly as
@@ -276,16 +280,19 @@ open under the TUI's held `VaultLock` deadlocks, `session.rs:662`). `promoted_fi
 - [ ] **Step 3: Extract `export_irs_pdf_from_session`** (★ arch-C-1, task-sized surgery like Task 1's
   promote extraction) — the thin `export_irs_pdf(vault_path, pp, …)` KEEPS `Session::open` (`:358`) and calls
   the inner; ★ arch-n-new-1: everything AFTER the open — the full-vs-slice `return_inputs::exists` dispatch
-  (`:373`), the `export_full_return` delegation, AND the crypto-slice body (`:385-583`) — moves INTO the
+  (`:373`), the `export_full_return` delegation, AND the crypto-slice body (`:385-599`) — moves INTO the
   `&Session` `_from_session` (its slice branch mirrors `export_full_return:642`). Re-run Step 1's
   characterization (both arms) → still PASS (the thin opener emits the identical packet — behavior-preserving).
 - [ ] **Step 4: KAT — export set includes a removal-reordered prior year with NO promoted disposal leg.**
   Build: undisposed 2016-window promoted tranche + a 2025 donation whose lots the promote's HIFO reorder
   changes. Assert `flagged_years(...).contains(&2025)` AND `promoted_filing_years(state)` does NOT.
   (Mutation: define the export set as `promoted_filing_years` → 2025 dropped → reds.) ★ tax-M-1: ADD a
-  two-live-promote KAT — two promotes each flagging a DIFFERENT removal-reordered prior year; assert BOTH
-  years ∈ `plan_export.years` (mutation: a single whole-state with-all-vs-without-all diff whose two promotes'
-  per-year effects cancel → a year drops → reds; the per-promote union survives).
+  two-live-promote POSITIVE coverage KAT — two promotes flagging DIFFERENT removal-reordered prior years
+  Y1≠Y2; assert BOTH ∈ `plan_export.years` (realizable mutation: `flagged_years` iterates only ONE promote /
+  last-promote-wins → the other year drops → reds — this pins per-promote ITERATION). NB: disjoint years
+  can't cancel, so this does NOT falsify union-vs-whole-state (a whole-state diff also returns {Y1,Y2}); the
+  union is taken as the DFW-D11-mandated provably-safe superset — a same-year cancellation fixture is
+  unrealizable at leg-set-equality altitude, so it is deliberately NOT asserted.
 - [ ] **Step 5: Run — FAIL** (functions not defined).
 - [ ] **Step 6: Implement** `promoted_filing_years` (extract `admin.rs:84-98`), `flagged_years` (the UNION of
   per-promote fold-diffs via `promote_prior_year_advisory`'s per-`promote_id` iteration — ★ tax-M-1, NOT a
@@ -323,8 +330,10 @@ two-lens review (r1 = Fable arch / Opus tax; r2+ Opus) to 0C/0I before P-B.
 `pub mod discovery;` — Task 6 fills in `journey_view`; ★ arch-m-new-2), `crates/btctax-core/src/defensive/discovery.rs`;
 Modify `crates/btctax-core/src/lib.rs` (`pub mod tranche_guard; pub mod defensive;`), `crates/btctax-core/src/state.rs`,
 `crates/btctax-core/src/project/fold.rs` (populate `state.shortfalls`; ★ arch-m-new-2), `crates/btctax-cli/src/cmd/tranche.rs`
-(rewire guards over the moved predicates); Test: `crates/btctax-core/tests/defensive_discovery.rs`,
-`crates/btctax-cli/tests/declare_tranche_cli.rs` (shipped allocation-guard KATs — stay green).
+(rewire guards over the moved predicates), `crates/btctax-cli/src/session.rs` (★ arch-I-new-2: rewire the FIFTH
+consumer `:714` — a DIRECT `pre2025_tranche_exists` call, not via a guard); Test: `crates/btctax-core/tests/defensive_discovery.rs`,
+`crates/btctax-cli/tests/declare_tranche_cli.rs` (shipped allocation-guard KATs — stay green; sweep its stale
+`:320/:352/:358` "lives HERE (btctax-cli)"/`session.rs:692` locator comments).
 
 **Interfaces — Produces:**
 ```rust
@@ -353,14 +362,23 @@ aggregated per event into `Shortfall{short_sat = Σ(principal+fee), fee_sat = Σ
   shipped `declare_tranche_cli.rs` allocation-guard KATs are green (a `$0` declare succeeds; a pre-2025-
   tranche-vs-in-force-allocation conflict refuses at `guard_tranche_vs_allocation`/`guard_allocation_vs_tranche`).
   These are the behavior baseline for the cross-crate move.
-- [ ] **Step 2: Move the three predicates to core + rewire cli.** Create `crates/btctax-core/src/tranche_guard.rs`
-  with `void_targets`/`in_force_allocation_exists`/`pre2025_tranche_exists` moved verbatim from `cmd/tranche.rs`
-  (`:40,54,71` — events-only, `btctax_core::conventions::TRANSITION_DATE`); add `pub mod tranche_guard;` +
-  `pub mod defensive;` (with a `defensive/mod.rs` skeleton `pub mod discovery;`) to core `lib.rs`; rewire
-  `cmd/tranche.rs` so `guard_tranche_vs_allocation`/`guard_allocation_vs_tranche` (`:107,93` — these STAY in
-  cli) call `btctax_core::tranche_guard::*`, and DELETE the cli copies (single source; all four allocation
-  append sites preserved).
-- [ ] **Step 3: Run — the shipped allocation-guard KATs still green + `make check`; Commit**
+- [ ] **Step 2: Move the three predicates to core + rewire ALL FIVE cli consumers.** Create
+  `crates/btctax-core/src/tranche_guard.rs` with `in_force_allocation_exists`/`pre2025_tranche_exists`
+  moved verbatim from `cmd/tranche.rs` (`:54,71`) and `void_targets` (`:40`) moved too (★ arch-n-new-3: it
+  is a private `fn` today — keep it `pub(crate)`/module-private in core, a deliberate visibility choice, not
+  a verbatim signature); all events-only, using `btctax_core::conventions::TRANSITION_DATE`. Add
+  `pub mod tranche_guard;` + `pub mod defensive;` (with a `defensive/mod.rs` skeleton `pub mod discovery;`)
+  to core `lib.rs`. Rewire all FIVE predicate CALL SITES to `btctax_core::tranche_guard::*` and DELETE the
+  cli copies: 4 sites inside the two guards `guard_tranche_vs_allocation`/`guard_allocation_vs_tranche`
+  (`:107,93` — the GUARDS themselves STAY in cli; only their internal predicate calls at
+  `tranche.rs:61,72,94,111` rewire), AND ★ **arch-I-new-2/tax-M-2** the FIFTH, DIRECT consumer
+  `session.rs:714` (`crate::cmd::tranche::pre2025_tranche_exists(&all)` → `btctax_core::tranche_guard::
+  pre2025_tranche_exists(&all)` — rewire, do NOT leave a duplicate). The four allocation APPEND sites
+  (`reconcile.rs:1015,1258`, `edit/persist.rs:1032,1105`) call the STAYING `guard_allocation_vs_tranche` and
+  are preserved automatically (no rewire).
+- [ ] **Step 3: Sweep stale locator comments + run.** Update `declare_tranche_cli.rs`'s `:320/:352/:358`
+  comments that say the predicate "lives HERE (btctax-cli)" / cite `session.rs:692` (now → the core
+  `tranche_guard` module); run the shipped allocation-guard KATs still green + `make check`; Commit
   `refactor(core): move tranche_guard predicates to btctax-core (C-2)` (behavior-preserving).
 **Steps 4–8 = the structured shortfall signal:**
 - [ ] **Step 4: KATs (DFW-D4, §5).**
@@ -576,3 +594,11 @@ publish) is a SEPARATE user call after the whole feature is green + merged.
   from `plan_promote`/`plan_declare`; m-new-4 — `journey_view` `debug_assert!(!pseudo_active)` discovery
   guard; tax-M-1 — `flagged_years` per-promote union + two-promote KAT; tax-N-1 — `Refusal::Target` doc
   (already-promoted is apply-time `would_conflict`). Tax r3 was GREEN; arch r3 was 0C/1I.
+- **r4 fold (this pass):** arch **I-new-2** = tax **M-2** (both lenses independently) — the C-2 move missed a
+  FIFTH predicate consumer, `session.rs:714`'s direct `pre2025_tranche_exists`; Task 5 now rewires it (the 4
+  allocation append sites call the STAYING guard, preserved automatically — grep-verified there is no sixth).
+  arch n-new-2 slice body `:385-599`; arch n-new-3 `void_targets` visibility (`pub(crate)`, not verbatim);
+  tax-M-1 the two-promote KAT reframed to a realizable per-promote-iteration mutation (union-vs-whole-state
+  is unfalsifiable at leg-set altitude → union is the DFW-D11 safe superset, documented not asserted); tax-N-1
+  `flagged_years` filtered `< current` (mirrors `conservative.rs:729`) so an in-authoring year gets no premature
+  1040-X. Tax r4 GREEN 0C/0I; arch r4 0C/1I.
