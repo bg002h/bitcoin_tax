@@ -90,7 +90,11 @@ engine-invisible; forward-planning only). There is **no manual "I hold N BTC" da
   unconditional claim. **Advisory rows (tax-N-2):** the dashboard SHOULD surface the shipped, state-
   derived `method_inversion_advisory` / `tranche_dip_advisory` on tranche rows — under an elected FIFO a
   tranche's `$0`/floor basis lands on EARLIER disposals than the covered shortfall implies (coverage is
-  method-invariant; basis *allocation* is not).
+  method-invariant; basis *allocation* is not). **Fee-only coverage (tax-r2 N-1):** a tranche that covers
+  only a `consume_fee` fee-short yields ~$0 from promoting — fee-sats draw acquisition-date FIFO
+  (method-independent) and BG-D4's fee-evaporation forfeits the estimate component — so the fork SHOULD
+  suppress/annotate the promote branch on a fee-only-coverage tranche (do not dangle a five-figure-looking
+  saving that yields nothing). UX, not a filed-number issue.
 
 - **DFW-D4 (triage — cover-with-a-tranche vs fix-the-data — N-1; SPEC-r1 tax-I-3/arch-I-1).** A
   shortfall is NOT always a missing acquisition. The triage MUST be **total by construction** — the
@@ -140,13 +144,33 @@ engine-invisible; forward-planning only). There is **no manual "I hold N BTC" da
        shortfall's pool AND `window_end` ≤ the short op's date. Render as ONE pool state ("a tranche of
        N sat is live here but this op is still short by S — review the window/wallet; do NOT declare
        again"), never a per-tranche attribution.
-     - **Redundant / over-covered (tax-I-4 — the BG-1-critical direction):** a live `EstimatedConservative`
-       tranche whose removal leaves NO `UncoveredDisposal` that it was clearing is a **phantom** (a later
-       import/classify supplied the real coins). Surface "this tranche no longer covers anything real —
-       void it" routing; AND the **promote chokepoint** carries a refusal-grade check — a target tranche
-       that currently covers no shortfall is refused, because a promoted phantom's `>$0` per-sat basis
-       exits `hifo_cmp`'s sort-last case and is drawn FIRST → **understated gain on double-counted
-       coins** (the direction BG-1 forbids). Same shadow-projection machinery; derived; no new tax logic.
+     - **Over-covered / displacing (tax-I-4/I-A + arch-C-1 — the BG-1-critical direction).** The hazard is
+       **displacement of documented basis**, NOT "covers no shortfall" (that binary is BOTH too broad —
+       it catches a legitimately undisposed tranche, arch-C-1 — AND too narrow — it misses a *partially*
+       over-sized tranche, tax-I-A). Precise predicate, via the same shadow-projection machinery
+       (project WITH the target tranche promoted vs project WITHOUT it): the tranche is **displacing** iff
+       some real disposal/removal in its pool draws the tranche's promoted `>$0` floor **in place of the
+       documented (non-`EstimatedConservative`) basis it would otherwise draw** (the floor exits
+       `hifo_cmp`'s `usd_basis==0` sort-last case and HIFO-reorders ahead of documented lots →
+       understated gain on the double-counted sat). This fires for a full phantom AND for the excess of a
+       partially over-sized tranche (declare `short_sat`=100M, a later real import supplies 60M in-pool
+       before the disposal → 60M excess displaces documented coins). It does **NOT** fire for:
+       - a **fully-undisposed** tranche (nothing draws it → no displacement) — so the shipped, BG-D6-
+         guaranteed `ConsentTerm::Unrealized` forward-promote (`kat_promote.rs:fully_undisposed_promote…`)
+         is **preserved on both surfaces**; nor
+       - a **correctly-sized covering** tranche (it fills only genuinely-short sat that had no documented
+         alternative → displaces nothing).
+       Because the predicate fires ONLY on a genuine filing hazard, it is a **refusal-grade check on the
+       shared promote chokepoint** (like `would_conflict`, correct on the CLI verb AND the dashboard — no
+       CLI-vs-dashboard carve needed, since promoting a displacing tranche is never legitimate on either).
+       Whole-tranche-only (a sub-1 non-goal) forbids a partial clamp, so the remedy is **refuse + route to
+       void + re-declare at the covered size**. The dashboard also surfaces the derived "over-covered by N
+       sat — void + re-declare" state (mirror of didn't-cover). Same shadow-projection; derived; no new
+       tax logic. **KATs (§5):** a fully-undisposed tranche STILL promotes and records the Unrealized term
+       (the shipped guarantee — mutation: keep the binary "covers no shortfall" predicate → the undisposed
+       promote is wrongly refused → reds); a partial-over-coverage promote is refused as over-covering by
+       the excess sat (mutation: keep the binary predicate → the 100M promote is admitted → reds); a
+       correctly-sized cover promotes.
 
 - **DFW-D6 (pseudo gate — C-2; SPEC-r1 tax-I-2).** The whole journey is gated on
   **`!state.pseudo_active()`** with routing guidance ("resolve/approve pseudo defaults first"); a
@@ -165,10 +189,14 @@ engine-invisible; forward-planning only). There is **no manual "I hold N BTC" da
   `TaxYearNotComputable` → the BG-D6 three-flavor discipline records the honest gain-Δ / named-
   unquantified consent artifact.
 
-- **DFW-D7 (structured shortfall signal — N-3).** `journey_view` MUST consume a **structured** shortfall
-  record `{event, wallet, date, short_sat}` (a small derived `state` signal or a recompute inside
-  `journey_view`) — it MUST NOT parse `Blocker.detail`'s display string. Derived state only; no new tax
-  logic.
+- **DFW-D7 (structured shortfall signal — N-3; SPEC-r2 arch-m-1).** `journey_view` MUST consume a
+  **structured** shortfall record `{event, wallet, date, short_sat}` (a small derived `state` signal or a
+  recompute inside `journey_view`) — it MUST NOT parse `Blocker.detail`'s display string. **`short_sat`
+  is the per-EVENT aggregate:** a single disposal `EventId` can carry BOTH a principal short and a
+  `consume_fee` fee short (two `UncoveredDisposal` on one event, distinguishable only by the detail
+  string), so the record sums them and the **DFW-D5.2 clearance target is the `EventId`, tested
+  event-level** (no `UncoveredDisposal` remains on the target event). DFW-D8's "excess above `short_sat`"
+  is likewise the event aggregate. Derived state only; no new tax logic.
 
 - **DFW-D8 (declare guardrail — I-6; SPEC-r1 tax-N-1).** Declaring is **`$0`, revocable (until promoted
   — DFW-D3 carve), NO Form 8275** — a plain confirmation matching the shipped verb (input validation +
@@ -260,12 +288,15 @@ reviewed to **0C/0I under BOTH the tax and architecture lenses** before merge. *
   classify remedy FIRST and offers no declare candidate; a `pending-out` short routes through
   `UnmatchedOutflows` first. Classifier keys on `short_sat` presence (grep guard: no `Blocker.detail`
   parse).
-- **DFW-D5 coverage + over-coverage:** a dashboard candidate (`Some` target) whose prefill would NOT
-  clear is refused with a reason (mutation: prefill `window_end == short-op date` → reds); the CLI
-  free-form declare (`None`) is NOT refused (shipped semantics preserved); a cleared tranche removes the
-  shortfall row; a live tranche whose pool matches an unresolved short renders the pool-level "still
-  short — don't declare again" state; a declare→later-classify vault renders the **redundant/void-me**
-  state AND the promote plan for that phantom tranche is **refused** (covers no shortfall).
+- **DFW-D5 coverage:** a dashboard candidate (`Some` target) whose prefill would NOT clear is refused with
+  a reason (mutation: prefill `window_end == short-op date` → reds); the CLI free-form declare (`None`) is
+  NOT refused (shipped semantics preserved); a cleared tranche removes the shortfall row; a live tranche
+  whose pool matches an unresolved short renders the pool-level "still short — don't declare again" state.
+- **DFW-D5.3 displacement (over-coverage):** a **fully-undisposed** tranche STILL promotes and records the
+  `Unrealized` term (mutation: binary "covers no shortfall" predicate → wrongly refused → reds); a
+  **partial over-coverage** (declare 100M → later 60M in-pool import before the disposal) promote is
+  **refused** as displacing 60M documented sat (mutation: binary predicate → 100M promote admitted →
+  reds); a **correctly-sized cover** promotes.
 - **DFW-D6 pseudo (all shadows):** with pseudo active the journey refuses+routes; and at the chokepoint
   the **discovery**, **clearance**, AND **consent/savings** projections all force `pseudo_reconcile=false`
   — a `SelfTransferMine{$0}`-cleared shortfall is NOT hidden and no pseudo number reaches a recorded
@@ -279,7 +310,11 @@ reviewed to **0C/0I under BOTH the tax and architecture lenses** before merge. *
   an explicit optional branch; export is always-available, never "done".
 - **DFW-D7:** `journey_view` reads the structured `{event,wallet,date,short_sat}` (no `Blocker.detail`
   string parse — grep guard).
-- Plus the shipped BG-D1..D11 KATs remain green (the chokepoint extraction is behavior-preserving).
+- Plus the shipped BG-D1..D11 KATs remain green (the chokepoint extraction is behavior-preserving) —
+  **EXCEPT** the DFW-D6 chokepoint pseudo-off correction (arch-r2 m-2), which is a **bug fix** to the
+  latent sub-1 pseudo-`Acknowledgment` gap: the KATs it changes are the buggy ones, replaced by the
+  latent-gap KAT. (This is the ONLY intended behavior change; C-1's over-coverage refusal must NOT change
+  any shipped promote KAT — the undisposed-still-promotes KAT proves it.)
 
 ## 6. Design provenance
 
@@ -290,8 +325,13 @@ SPEC then passed a two-lens **SPEC review r1** (Fable): tax 0C/5I, arch 0C/4I �
 design reshape; **folded here** (triage total-by-`short_sat` DFW-D4; target-parameterized clearance +
 over-coverage state DFW-D5; all-shadows pseudo-off DFW-D6; ack-inside-`apply` + full-driver parity
 DFW-D2; fold-diff export set DFW-D11; both-folds-compute flavors DFW-D10; Coverage/preset/revocability
-copy DFW-D9/D3/D8). Re-review = **SPEC r2 on OPUS** (user-directed model switch). Reviews verbatim in
-`reviews/`.
+copy DFW-D9/D3/D8). Re-review = **SPEC r2 on OPUS** (user-directed model switch): tax 0C/1I/1N, arch **1C**/0I/2m — the model
+switch caught what the Fable rounds missed: DFW-D5.3's over-coverage refusal was simultaneously too
+binary (tax-I-A: misses partial over-coverage) and too broad (arch-C-1: refuses a legit undisposed
+promote). **Folded here** into ONE displacement-based predicate (fires iff promoting displaces documented
+basis on a real disposal; not on undisposed/correctly-sized), + per-event `short_sat` (arch-m-1) +
+behavior-preserving carve for the DFW-D6 fix (arch-m-2) + fee-only promote suppress (tax-N-1). Re-review
+= **SPEC r3 on OPUS**. Reviews verbatim in `reviews/`.
 
 ## 7. Phasing (ONE ship gate; internal phases free — no installed base)
 
