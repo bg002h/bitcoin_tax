@@ -414,8 +414,8 @@ fn consume_fee(
                     // Withhold this fragment's estimate share (the SHARED `estimate_share_of` formula —
                     // byte-identical to `clamped_leg_basis`, arch Minor-1) so only the DOCUMENTED remainder
                     // re-homes. `.max($0)` (tax N2): a cent-scale rounding residue must never make a
-                    // fragment's withheld contribution negative — the direction is already conservative,
-                    // this just floors each fragment at $0.
+                    // fragment's re-homed remainder (`gain_basis − estimate_share`) negative — the
+                    // direction is already conservative, this just floors each re-homed fragment at $0.
                     Some(entry) => (c.gain_basis - estimate_share_of(entry, c.sat)).max(Usd::ZERO),
                     None => c.gain_basis,
                 })
