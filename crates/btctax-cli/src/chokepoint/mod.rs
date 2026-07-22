@@ -35,6 +35,24 @@
 //! ★ **arch-m-new-3:** `plan_promote` takes no `Session`/`state` — the shipped pipeline rebuilds
 //! everything from `events` (`promote.rs:364-488`) — so a caller (CLI or future TUI) supplies its own
 //! already-loaded `events`/`prices`/`cfg`.
+//!
+//! **Task 2 — the DECLARE chokepoint:** `plan_declare`/`apply_declare`, extracted from the shipped
+//! `cmd::tranche::declare_tranche` (`tranche.rs:120-175`). `plan_declare` gates on the shipped set
+//! (`sat>0`, `ws<=we`, `guard_tranche_vs_allocation` — the LAST one stays defined in `cmd::tranche`, not
+//! duplicated here) ALWAYS; **iff `target_shortfall = Some(id)`** it ALSO runs the DFW-D5.2 target-scoped
+//! clearance shadow: append the candidate `DeclareTranche` → re-project (pseudo FORCED off, mirroring
+//! `would_conflict`) → assert no `BlockerKind::UncoveredDisposal` remains on `id`; else `Refusal::Coverage`.
+//! `target_shortfall = None` (the CLI free-form path) is the shipped `declare_tranche` gate set,
+//! BYTE-FOR-BYTE (DFW-D8/SPEC §5) — no clearance shadow runs at all. `apply_declare` is a plain
+//! append+save (declaring is `$0`/revocable/no-Form-8275 — DFW-D8 — so unlike promote there is no
+//! acknowledgment gate and no `would_conflict` pre-check; the shipped verb never ran one either).
+//!
+//! ★ **Refusal-variant note:** the shared `Refusal` enum stays CLOSED at the four Task-1 variants (the
+//! plan review explicitly rejected adding a new `Conflict` variant for this task). The shipped-set gates
+//! (sat/window/allocation) have no promote-shaped variant of their own, so — like the new clearance
+//! failure the brief names explicitly — they map to `Refusal::Coverage`. Every variant collapses to the
+//! identical `CliError::Usage(msg)` via `From<Refusal>` (below), so this is a pure internal-taxonomy
+//! choice: the filer-facing message text is unchanged from the shipped verb either way.
 
 use crate::cmd::promote::{
     render_consent as render_consent_terms, ProvenanceKind, PROMOTE_ACK_PHRASE, PROVENANCE_TEXT,
@@ -50,7 +68,8 @@ use btctax_core::event::{
 use btctax_core::persistence::{append_decision, load_all};
 use btctax_core::price::PriceProvider;
 use btctax_core::project::ProjectionConfig;
-use btctax_core::{project, EventId, LedgerEvent, RemovalKind, TaxDate, Usd};
+use btctax_core::state::BlockerKind;
+use btctax_core::{project, EventId, LedgerEvent, RemovalKind, Sat, TaxDate, Usd, WalletId};
 use std::collections::BTreeSet;
 use time::{OffsetDateTime, UtcOffset};
 
@@ -86,7 +105,10 @@ pub enum Refusal {
     Target(String),
     /// BG-D5: a non-`Purchase` provenance.
     Provenance(String),
-    /// BG-D3: `filed_basis_for` could not produce a trustworthy floor (`NoCoverage`/`PartialCoverage`).
+    /// BG-D3 (promote): `filed_basis_for` could not produce a trustworthy floor
+    /// (`NoCoverage`/`PartialCoverage`). ALSO (Task 2, declare): the shipped-set gates (`sat>0`, `ws<=we`,
+    /// `guard_tranche_vs_allocation`) AND the DFW-D5.2 target-scoped clearance shadow (a candidate tranche
+    /// that does not clear the named shortfall) — see the module doc's "Refusal-variant note".
     Coverage(String),
     /// BG-D7: an empty/whitespace Form 8275 Part II narrative.
     PartII(String),
@@ -447,6 +469,134 @@ pub fn apply_promote(
         )));
     }
 
+    let id = append_decision(session.conn(), plan.payload, now, UtcOffset::UTC, None)?;
+    session.save()?;
+    Ok(id)
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// Task 2 — the DECLARE chokepoint: `plan_declare`/`apply_declare` (module doc has the full contract).
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// Everything needed to append a `DeclareTranche` decision. Unlike `PromotePlan`, declaring has no
+/// acknowledgment gate or consent screen (DFW-D8 — a plain `$0`, revocable confirmation) — so there is
+/// nothing else to carry beside the payload itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeclarePlan {
+    /// The `EventPayload::DeclareTranche` `apply_declare` appends verbatim.
+    pub payload: EventPayload,
+}
+
+/// Plan a `DeclareTranche` decision. Gates on the shipped set ALWAYS — `sat>0`, `ws<=we`,
+/// `guard_tranche_vs_allocation` (`cmd::tranche`, the single source of that guard for all four allocation
+/// append sites — NOT duplicated here) — replicating `cmd/tranche.rs:134-154` exactly (arch-m-new-3: no
+/// `Session` — the caller supplies its own already-loaded `events`/`prices`/`cfg`, mirroring
+/// `plan_promote`).
+///
+/// **Iff `target_shortfall = Some(id)`**, ALSO runs the DFW-D5.2 target-scoped clearance shadow: append
+/// the candidate `DeclareTranche` → re-project (pseudo FORCED off on a config COPY, mirroring
+/// `would_conflict`, `project/mod.rs:118`) → assert no `BlockerKind::UncoveredDisposal` remains on `id`;
+/// else `Refusal::Coverage`. **Forcing pseudo off here is load-bearing (arch-I-5):** a synthetic
+/// `SelfTransferMine{$0}` pseudo default must never stand in for a real, documented cover — else a
+/// dashboard candidate could be reported as "clears the shortfall" when only a fictional, non-persisted
+/// default actually covered it.
+///
+/// `target_shortfall = None` (the CLI free-form `declare-tranche` path) never runs the clearance shadow —
+/// the shipped verb's gate set, byte-for-byte (DFW-D8/SPEC §5).
+#[allow(clippy::too_many_arguments)]
+pub fn plan_declare(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    cfg: &ProjectionConfig,
+    sat: Sat,
+    wallet: WalletId,
+    window_start: TaxDate,
+    window_end: TaxDate,
+    target_shortfall: Option<EventId>,
+    now: OffsetDateTime,
+) -> Result<DeclarePlan, Refusal> {
+    // The shipped gate set (cmd/tranche.rs:134-154), byte-for-byte.
+    if sat <= 0 {
+        // A `sat <= 0` tranche would bump `stats.sigma_in` by a non-positive amount (fold.rs),
+        // corrupting Σ-conservation; there is no such thing as declaring zero/negative undocumented BTC.
+        return Err(Refusal::Coverage(format!(
+            "tranche amount must be > 0 sat (got {sat})"
+        )));
+    }
+    if window_start > window_end {
+        return Err(Refusal::Coverage(format!(
+            "tranche window_start ({window_start}) must be <= window_end ({window_end})"
+        )));
+    }
+    crate::cmd::tranche::guard_tranche_vs_allocation(events, window_end).map_err(|e| match e {
+        CliError::Usage(m) => Refusal::Coverage(m),
+        other => Refusal::Coverage(other.to_string()), // unreachable today (the guard only ever returns Usage)
+    })?;
+
+    let payload = EventPayload::DeclareTranche(DeclareTranche {
+        sat,
+        wallet,
+        window_start,
+        window_end,
+    });
+
+    // DFW-D5.2: the target-scoped clearance shadow — ONLY when the caller names a shortfall to cover.
+    if let Some(id) = target_shortfall {
+        // ★ arch-I-5: pseudo FORCED off on a COPY (ProjectionConfig is Copy) — mirrors `would_conflict`
+        // (project/mod.rs:118). Without this, a pseudo-active vault could report a candidate as clearing
+        // a shortfall that only a synthetic, non-persisted SelfTransferMine{$0} default actually covered.
+        let mut honest_cfg = *cfg;
+        honest_cfg.pseudo_reconcile = false;
+
+        // Append the candidate as the resolver would (the next decision seq — mirrors `would_conflict`
+        // and `with_synthetic_promote` above).
+        let next_seq = events
+            .iter()
+            .filter_map(|e| match e.id {
+                EventId::Decision { seq } => Some(seq),
+                _ => None,
+            })
+            .max()
+            .map_or(1, |m| m + 1);
+        let candidate = LedgerEvent {
+            id: EventId::decision(next_seq),
+            utc_timestamp: now,
+            original_tz: UtcOffset::UTC,
+            wallet: None,
+            payload: payload.clone(),
+        };
+        let mut with_candidate = events.to_vec();
+        with_candidate.push(candidate);
+
+        let state = project(&with_candidate, prices, &honest_cfg);
+        let still_uncovered = state
+            .blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::UncoveredDisposal && b.event.as_ref() == Some(&id));
+        if still_uncovered {
+            return Err(Refusal::Coverage(format!(
+                "this candidate tranche does not clear the shortfall on {} — after adding it, an \
+                 UncoveredDisposal blocker still remains on that event. A tranche's synthetic acquisition \
+                 lands at window_end and sorts AFTER a same-instant import, so window_end must be \
+                 STRICTLY BEFORE the short event's date (and the wallet/sat must actually cover it) to \
+                 clear it.",
+                id.canonical()
+            )));
+        }
+    }
+
+    Ok(DeclarePlan { payload })
+}
+
+/// Apply a planned declare: append + save. No acknowledgment gate and no `would_conflict` pre-check
+/// (DFW-D8 — declaring is a plain `$0`, revocable confirmation, unlike promote's typed-phrase tier; the
+/// shipped verb never ran a `would_conflict` check either — `cmd/tranche.rs:166-174` appends immediately
+/// once `guard_tranche_vs_allocation` passes).
+pub fn apply_declare(
+    session: &mut Session,
+    plan: DeclarePlan,
+    now: OffsetDateTime,
+) -> Result<EventId, CliError> {
     let id = append_decision(session.conn(), plan.payload, now, UtcOffset::UTC, None)?;
     session.save()?;
     Ok(id)
