@@ -86,7 +86,11 @@ fn declare_tranche_folds_to_zero_basis_estimated_conservative_lot_homed_at_windo
         .iter()
         .find(|l| l.wallet == w)
         .expect("a tranche lot");
-    assert_eq!(lot.usd_basis, dec!(0), "an unpromoted tranche basis is $0 (G-2/D-7)");
+    assert_eq!(
+        lot.usd_basis,
+        dec!(0),
+        "an unpromoted tranche basis is $0 (G-2/D-7)"
+    );
     assert_eq!(lot.basis_source, BasisSource::EstimatedConservative);
     assert_eq!(
         lot.acquired_at,

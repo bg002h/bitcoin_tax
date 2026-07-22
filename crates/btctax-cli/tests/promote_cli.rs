@@ -327,16 +327,9 @@ fn every_non_purchase_provenance_is_refused_fail_closed() {
         ProvenanceKind::Airdrop,
         ProvenanceKind::Fork,
     ] {
-        let err = cmd::promote::promote_tranche(
-            &vault,
-            &pp(),
-            &target,
-            pk,
-            "facts".into(),
-            None,
-            now(),
-        )
-        .unwrap_err();
+        let err =
+            cmd::promote::promote_tranche(&vault, &pp(), &target, pk, "facts".into(), None, now())
+                .unwrap_err();
         assert!(
             matches!(err, CliError::Usage(ref m) if m.contains("purchase") && m.contains("real acquisition")),
             "{pk:?} must be refused naming 'purchase' + 'real acquisition': {err}"
@@ -392,7 +385,10 @@ fn a_recorded_promote_carries_the_acknowledgment_and_stored_floor() {
     )
     .unwrap();
     let p = only_promote(&vault);
-    assert!(p.filed_basis > btctax_core::Usd::ZERO, "filed_basis must be > $0: {p:?}");
+    assert!(
+        p.filed_basis > btctax_core::Usd::ZERO,
+        "filed_basis must be > $0: {p:?}"
+    );
     assert!(!p.acknowledgment.phrase.is_empty());
     assert_eq!(p.acknowledgment.phrase, PROMOTE_ACK_PHRASE);
     assert!(p.provenance_attested);
@@ -539,10 +535,17 @@ fn non_tty_missing_acknowledge_still_prints_the_consent_screen_and_refuses() {
     let dir = tempfile::tempdir().unwrap();
     let (vault, target) = vault_with_tranche(dir.path());
     let part_ii = dir.path().join("part_ii.txt");
-    std::fs::write(&part_ii, "cash P2P purchase, no records; window bounded on-chain").unwrap();
+    std::fs::write(
+        &part_ii,
+        "cash P2P purchase, no records; window bounded on-chain",
+    )
+    .unwrap();
 
     let (code, stdout, stderr) = run_promote(&vault, &target, &part_ii, &[]);
-    assert_ne!(code, 0, "missing --i-acknowledge must refuse; stderr: {stderr}");
+    assert_ne!(
+        code, 0,
+        "missing --i-acknowledge must refuse; stderr: {stderr}"
+    );
     assert!(
         stdout.contains("of the resulting additional tax"),
         "the consent screen prints even on refusal (N-2): {stdout}"
@@ -554,9 +557,16 @@ fn non_tty_missing_acknowledge_still_prints_the_consent_screen_and_refuses() {
     );
 
     // The non-interactive success path: --i-acknowledge with the exact phrase records it.
-    let (code2, stdout2, stderr2) =
-        run_promote(&vault, &target, &part_ii, &["--i-acknowledge", PROMOTE_ACK_PHRASE]);
-    assert_eq!(code2, 0, "a correct --i-acknowledge must succeed; stderr: {stderr2}");
+    let (code2, stdout2, stderr2) = run_promote(
+        &vault,
+        &target,
+        &part_ii,
+        &["--i-acknowledge", PROMOTE_ACK_PHRASE],
+    );
+    assert_eq!(
+        code2, 0,
+        "a correct --i-acknowledge must succeed; stderr: {stderr2}"
+    );
     assert!(stdout2.contains("of the resulting additional tax"));
     assert_eq!(
         count(&vault, |p| matches!(p, EventPayload::PromoteTranche(_))),
@@ -589,10 +599,18 @@ fn a_wide_window_promote_prints_the_trivial_floor_caution() {
     let dir = tempfile::tempdir().unwrap();
     let (vault, target) = vault_with_wide_window_tranche(dir.path());
     let part_ii = dir.path().join("part_ii.txt");
-    std::fs::write(&part_ii, "cash P2P purchase, no records; wide multi-year window").unwrap();
+    std::fs::write(
+        &part_ii,
+        "cash P2P purchase, no records; wide multi-year window",
+    )
+    .unwrap();
 
-    let (code, stdout, stderr) =
-        run_promote(&vault, &target, &part_ii, &["--i-acknowledge", PROMOTE_ACK_PHRASE]);
+    let (code, stdout, stderr) = run_promote(
+        &vault,
+        &target,
+        &part_ii,
+        &["--i-acknowledge", PROMOTE_ACK_PHRASE],
+    );
     assert_eq!(code, 0, "stderr: {stderr}");
     let lower = stdout.to_lowercase();
     assert!(

@@ -1864,7 +1864,9 @@ fn the_current_cutoff_excludes_the_year_still_being_authored() {
         2019,
     );
     assert!(
-        included.iter().any(|l| l.contains("2018") && l.contains("1040-X")),
+        included
+            .iter()
+            .any(|l| l.contains("2018") && l.contains("1040-X")),
         "current=2019 must still include the (now presumed-filed) year 2018: {included:?}"
     );
 }
@@ -1929,8 +1931,20 @@ fn computed_saving(terms: &[ConsentTerm], year: i32) -> Option<Usd> {
 /// A whole 1-BTC tranche (window 2024-01) sold WHOLE at $8,000 — BELOW the $12,000 window-low floor.
 fn consent_sell_below_low() -> Vec<LedgerEvent> {
     let w = exch();
-    let t = tranche_ev(1, &w, 100_000_000, date!(2024 - 01 - 01), date!(2024 - 01 - 10));
-    let sell = sell_ev("SELL", datetime!(2024-06-01 00:00 UTC), &w, 100_000_000, 8_000);
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2024 - 01 - 01),
+        date!(2024 - 01 - 10),
+    );
+    let sell = sell_ev(
+        "SELL",
+        datetime!(2024-06-01 00:00 UTC),
+        &w,
+        100_000_000,
+        8_000,
+    );
     vec![t, sell]
 }
 
@@ -1938,15 +1952,33 @@ fn consent_sell_below_low() -> Vec<LedgerEvent> {
 /// current year (sold 2024-06, promoting 2024) — a normal positive saving.
 fn consent_sell_this_year() -> Vec<LedgerEvent> {
     let w = exch();
-    let t = tranche_ev(1, &w, 100_000_000, date!(2024 - 01 - 01), date!(2024 - 01 - 10));
-    let sell = sell_ev("SELL", datetime!(2024-06-01 00:00 UTC), &w, 100_000_000, 20_000);
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2024 - 01 - 01),
+        date!(2024 - 01 - 10),
+    );
+    let sell = sell_ev(
+        "SELL",
+        datetime!(2024-06-01 00:00 UTC),
+        &w,
+        100_000_000,
+        20_000,
+    );
     vec![t, sell]
 }
 
 /// A whole 1-BTC tranche (2017 window), never disposed. No disposal ⇒ NO year is flagged.
 fn consent_undisposed() -> Vec<LedgerEvent> {
     let w = exch();
-    let t = tranche_ev(1, &w, 100_000_000, date!(2017 - 12 - 01), date!(2017 - 12 - 03));
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2017 - 12 - 01),
+        date!(2017 - 12 - 03),
+    );
     vec![t]
 }
 
@@ -1956,8 +1988,20 @@ fn consent_undisposed() -> Vec<LedgerEvent> {
 /// the documented lot WITHOUT it ($40k) — a removal-leg diff with ZERO disposal change.
 fn consent_donation_only() -> Vec<LedgerEvent> {
     let w = exch();
-    let buy = documented_buy("BUY", datetime!(2024-01-05 00:00 UTC), &w, 40_000_000, 40_000);
-    let t = tranche_ev(1, &w, 40_000_000, date!(2024 - 01 - 01), date!(2024 - 01 - 10));
+    let buy = documented_buy(
+        "BUY",
+        datetime!(2024-01-05 00:00 UTC),
+        &w,
+        40_000_000,
+        40_000,
+    );
+    let t = tranche_ev(
+        1,
+        &w,
+        40_000_000,
+        date!(2024 - 01 - 01),
+        date!(2024 - 01 - 10),
+    );
     let out = transfer_out("OUT", datetime!(2024-06-01 00:00 UTC), &w, 40_000_000);
     let recl = donate_reclass(3, "OUT", dec!(60_000));
     vec![buy, t, out, recl]
@@ -1971,18 +2015,52 @@ fn consent_donation_only() -> Vec<LedgerEvent> {
 fn consent_cascade() -> Vec<LedgerEvent> {
     let a = exch();
     let b = cold();
-    let buy_a = documented_buy("BUYA", datetime!(2025-01-05 00:00 UTC), &a, 40_000_000, 4_000);
-    let t = tranche_ev(1, &a, 40_000_000, date!(2025 - 01 - 01), date!(2025 - 01 - 10));
-    let sell_a = sell_ev("SELLA", datetime!(2025-09-01 00:00 UTC), &a, 40_000_000, 20_000);
-    let buy_b = documented_buy("BUYB", datetime!(2025-02-01 00:00 UTC), &b, 50_000_000, 10_000);
-    let sell_b = sell_ev("SELLB", datetime!(2026-03-01 00:00 UTC), &b, 50_000_000, 25_000);
+    let buy_a = documented_buy(
+        "BUYA",
+        datetime!(2025-01-05 00:00 UTC),
+        &a,
+        40_000_000,
+        4_000,
+    );
+    let t = tranche_ev(
+        1,
+        &a,
+        40_000_000,
+        date!(2025 - 01 - 01),
+        date!(2025 - 01 - 10),
+    );
+    let sell_a = sell_ev(
+        "SELLA",
+        datetime!(2025-09-01 00:00 UTC),
+        &a,
+        40_000_000,
+        20_000,
+    );
+    let buy_b = documented_buy(
+        "BUYB",
+        datetime!(2025-02-01 00:00 UTC),
+        &b,
+        50_000_000,
+        10_000,
+    );
+    let sell_b = sell_ev(
+        "SELLB",
+        datetime!(2026-03-01 00:00 UTC),
+        &b,
+        50_000_000,
+        25_000,
+    );
     vec![buy_a, t, sell_a, buy_b, sell_b]
 }
 
 /// Prices with a current close at the tranche declaration date (2026-01-01) — the deterministic clock-free
 /// "as-of" (the ledger's latest recorded instant) — so the undisposed hypothetical resolves to `Some`.
 fn prices_with_current_close() -> StaticPrices {
-    StaticPrices([(date!(2026 - 01 - 01), dec!(40_000))].into_iter().collect())
+    StaticPrices(
+        [(date!(2026 - 01 - 01), dec!(40_000))]
+            .into_iter()
+            .collect(),
+    )
 }
 
 #[test]
@@ -2004,7 +2082,10 @@ fn below_window_low_sale_quotes_the_clamped_saving_not_an_unclaimable_loss() {
         &tables_2024(),
     );
     let saving = computed_saving(&terms, 2024).expect("a 2024 ComputedTax term");
-    assert!(saving > Usd::ZERO, "the clamped saving is a real positive figure");
+    assert!(
+        saving > Usd::ZERO,
+        "the clamped saving is a real positive figure"
+    );
     assert_eq!(
         saving, tax_on_8k,
         "the recorded saving equals tax on the CLAMPED $8k gain (with-promote gain clamps to $0), \
@@ -2033,7 +2114,9 @@ fn fully_undisposed_promote_records_an_unrealized_term_not_empty() {
         "unrealized hypothetical line present: {terms:?}"
     );
     assert!(
-        terms.iter().all(|t| !matches!(t, ConsentTerm::ComputedTax { delta_usd, .. } if *delta_usd == Usd::ZERO)),
+        terms.iter().all(
+            |t| !matches!(t, ConsentTerm::ComputedTax { delta_usd, .. } if *delta_usd == Usd::ZERO)
+        ),
         "never a bare $0 ComputedTax: {terms:?}"
     );
     // today $40k/BTC ≥ floor $12k ⇒ the clamped gain reduction is the whole $12k floor.
@@ -2168,9 +2251,21 @@ fn a_carryover_source_names_the_cascade_into_an_unflagged_later_year() {
 /// basis, $8,000 gain). `state.promoted_origins` therefore contains `decision(1)`.
 fn promoted_state() -> LedgerState {
     let w = exch();
-    let t = tranche_ev(1, &w, 100_000_000, date!(2024 - 01 - 01), date!(2024 - 01 - 10));
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2024 - 01 - 01),
+        date!(2024 - 01 - 10),
+    );
     let p = promote_ev(2, EventId::decision(1), dec!(12_000));
-    let sell = sell_ev("SELL", datetime!(2024-06-01 00:00 UTC), &w, 100_000_000, 20_000);
+    let sell = sell_ev(
+        "SELL",
+        datetime!(2024-06-01 00:00 UTC),
+        &w,
+        100_000_000,
+        20_000,
+    );
     project(&[t, p, sell], &prices(), &cfg())
 }
 
@@ -2179,7 +2274,8 @@ fn promoted_state() -> LedgerState {
 /// (Cohan) disclosure. Mutation to kill: leaving the "never the estimate" sentence.
 #[test]
 fn basis_methodology_no_longer_claims_never_the_estimate_for_a_promoted_leg() {
-    let text = basis_methodology(&promoted_state(), 2024).expect("a filed tranche has a disclosure");
+    let text =
+        basis_methodology(&promoted_state(), 2024).expect("a filed tranche has a disclosure");
     assert!(
         !text.contains("never the estimate"),
         "a promoted `>$0` basis IS the estimate re-homed — the false 'never the estimate' sentence \
@@ -2191,7 +2287,10 @@ fn basis_methodology_no_longer_claims_never_the_estimate_for_a_promoted_leg() {
     );
     // provenance-neutral regression (tax min-8c): still never a purchase.
     let low = text.to_lowercase();
-    assert!(!low.contains("purchase") && !low.contains("bought"), "provenance-neutral: {text}");
+    assert!(
+        !low.contains("purchase") && !low.contains("bought"),
+        "provenance-neutral: {text}"
+    );
 }
 
 /// §3 item 2: a promoted tranche is no longer "$0-basis" — the dip advisory prints its basis AS FILED
@@ -2200,11 +2299,23 @@ fn basis_methodology_no_longer_claims_never_the_estimate_for_a_promoted_leg() {
 #[test]
 fn dip_and_self_custody_copy_distinguishes_a_promoted_tranche() {
     let w = exch();
-    let t = tranche_ev(1, &w, 100_000_000, date!(2024 - 01 - 01), date!(2024 - 01 - 10));
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2024 - 01 - 01),
+        date!(2024 - 01 - 10),
+    );
     let p = promote_ev(2, EventId::decision(1), dec!(12_000));
     // Sell HALF (0.5 BTC at $10,000; floor for 0.5 BTC = $6,000) so a promoted exchange tranche lot
     // REMAINS to trigger the self-custody nudge, and a promoted disposal leg exists for the dip.
-    let sell = sell_ev("SELL", datetime!(2024-06-01 00:00 UTC), &w, 50_000_000, 10_000);
+    let sell = sell_ev(
+        "SELL",
+        datetime!(2024-06-01 00:00 UTC),
+        &w,
+        50_000_000,
+        10_000,
+    );
     let st = project(&[t, p, sell], &prices(), &cfg());
     let disposal = st.disposals.first().expect("a disposal");
     let dip = tranche_dip_advisory(disposal);
@@ -2212,7 +2323,8 @@ fn dip_and_self_custody_copy_distinguishes_a_promoted_tranche() {
         dip.as_deref().is_some_and(|s| !s.contains("$0")),
         "a promoted dip is basis-as-filed (never $0): {dip:?}"
     );
-    let nudge = self_custody_nudge(&st).expect("a remaining exchange promoted tranche still nudges");
+    let nudge =
+        self_custody_nudge(&st).expect("a remaining exchange promoted tranche still nudges");
     assert!(
         !nudge.contains("$0"),
         "the self-custody copy no longer asserts a $0-basis unit for a promoted tranche: {nudge}"
@@ -2236,8 +2348,20 @@ fn prices_2024_window_min_12k() -> StaticPrices {
 /// window-low floor, so the un-clamped basis swap would over-quote a $4k loss the promote cannot file.
 fn unpromoted_below_low_tranche() -> Vec<LedgerEvent> {
     let w = exch();
-    let t = tranche_ev(1, &w, 100_000_000, date!(2024 - 01 - 01), date!(2024 - 01 - 03));
-    let sell = sell_ev("SELL", datetime!(2024-06-01 00:00 UTC), &w, 100_000_000, 8_000);
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2024 - 01 - 01),
+        date!(2024 - 01 - 03),
+    );
+    let sell = sell_ev(
+        "SELL",
+        datetime!(2024-06-01 00:00 UTC),
+        &w,
+        100_000_000,
+        8_000,
+    );
     vec![t, sell]
 }
 
@@ -2252,13 +2376,21 @@ fn funnel_quoted_saving(lines: &[String]) -> Usd {
         .chars()
         .take_while(|c| c.is_ascii_digit() || *c == ',' || *c == '.')
         .collect();
-    num.replace(',', "").parse::<Usd>().expect("a numeric saving")
+    num.replace(',', "")
+        .parse::<Usd>()
+        .expect("a numeric saving")
 }
 
 /// The expected CLAMPED promote saving for the below-low fixture — the SAME `clamped_promote_year_saving`
 /// helper the impl quotes (NOT the un-clamped `overpayment_delta_one`), rounded to whole dollars.
 fn clamped_promote_saving(events: &[LedgerEvent], px: &StaticPrices, profile: &TaxProfile) -> Usd {
-    let cf = filed_basis_for(px, 100_000_000, date!(2024 - 01 - 01), date!(2024 - 01 - 03)).unwrap();
+    let cf = filed_basis_for(
+        px,
+        100_000_000,
+        date!(2024 - 01 - 01),
+        date!(2024 - 01 - 03),
+    )
+    .unwrap();
     clamped_promote_year_saving(
         events,
         px,
@@ -2305,7 +2437,13 @@ fn the_promote_funnel_line_quotes_the_clamped_delta() {
 /// recomputes above/below `stored` drives the two directions.
 fn promote_at_stored_floor(stored: rust_decimal::Decimal) -> Vec<LedgerEvent> {
     let w = exch();
-    let t = tranche_ev(1, &w, 100_000_000, date!(2017 - 12 - 01), date!(2017 - 12 - 03));
+    let t = tranche_ev(
+        1,
+        &w,
+        100_000_000,
+        date!(2017 - 12 - 01),
+        date!(2017 - 12 - 03),
+    );
     let p = promote_ev(2, EventId::decision(1), stored);
     vec![t, p]
 }

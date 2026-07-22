@@ -89,7 +89,9 @@ pub fn promote_drift_advisory(events: &[LedgerEvent], prices: &dyn PriceProvider
     for (target, entry) in &promotes {
         // The promoted tranche's window (for the recompute) — always present for a live promote target.
         let Some((ws, we)) = events.iter().find_map(|e| match &e.payload {
-            EventPayload::DeclareTranche(t) if e.id == *target => Some((t.window_start, t.window_end)),
+            EventPayload::DeclareTranche(t) if e.id == *target => {
+                Some((t.window_start, t.window_end))
+            }
             _ => None,
         }) else {
             continue;
@@ -330,8 +332,8 @@ pub fn consent_terms(
         let gain_delta = gain(&without_state) - gain(&with_state);
         let don_delta = ded(&without_state) - ded(&with_state); // §170 charitable deduction reduction
         let gift_delta = gift_basis(&without_state) - gift_basis(&with_state); // §1015 carryover reduction
-        // The removal effect engine B CANNOT price (tax r3 I-2): the charitable-deduction change PLUS the
-        // §1015 gift-basis change. `Some` iff a removal leg actually diffed.
+                                                                               // The removal effect engine B CANNOT price (tax r3 I-2): the charitable-deduction change PLUS the
+                                                                               // §1015 gift-basis change. `Some` iff a removal leg actually diffed.
         let removal_delta = don_delta + gift_delta;
         let removal_diffed = don_changed || gift_changed;
 

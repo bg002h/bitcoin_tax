@@ -12,7 +12,9 @@ use crate::{CliError, Session};
 use btctax_core::conservative::{self, Direction};
 use btctax_core::conservative_promote::{self, PromoteRefusal};
 use btctax_core::conventions::tax_date;
-use btctax_core::event::{Acknowledgment, ConsentTerm, DeclareTranche, FloorMethod, PromoteTranche};
+use btctax_core::event::{
+    Acknowledgment, ConsentTerm, DeclareTranche, FloorMethod, PromoteTranche,
+};
 use btctax_core::persistence::{append_decision, load_all};
 use btctax_core::price::PriceProvider;
 use btctax_core::project::{project, ProjectionConfig};
@@ -81,9 +83,9 @@ const CONSENT_INTRO: &str = "Promoting this tranche is a KNOWING choice to file 
 
 /// True iff a live (non-voided) `VoidDecisionEvent` names `id`.
 fn is_voided(events: &[LedgerEvent], id: &EventId) -> bool {
-    events.iter().any(|e| {
-        matches!(&e.payload, EventPayload::VoidDecisionEvent(v) if v.target_event_id == *id)
-    })
+    events.iter().any(
+        |e| matches!(&e.payload, EventPayload::VoidDecisionEvent(v) if v.target_event_id == *id),
+    )
 }
 
 /// Resolve `target_event_id` to a LIVE (present, non-voided) `DeclareTranche`, or refuse. This is a
@@ -227,21 +229,22 @@ fn gift_only_flagged_years(
         }
     }
 
-    let rem = |st: &btctax_core::LedgerState, y: i32, k: RemovalKind| -> Vec<btctax_core::Removal> {
-        st.removals
-            .iter()
-            .filter(|r| r.removed_at.year() == y && r.kind == k)
-            .cloned()
-            .collect()
-    };
+    let rem =
+        |st: &btctax_core::LedgerState, y: i32, k: RemovalKind| -> Vec<btctax_core::Removal> {
+            st.removals
+                .iter()
+                .filter(|r| r.removed_at.year() == y && r.kind == k)
+                .cloned()
+                .collect()
+        };
 
     years
         .into_iter()
         .filter(|&y| {
             let gift_changed =
                 rem(&with_state, y, RemovalKind::Gift) != rem(&without_state, y, RemovalKind::Gift);
-            let don_changed =
-                rem(&with_state, y, RemovalKind::Donation) != rem(&without_state, y, RemovalKind::Donation);
+            let don_changed = rem(&with_state, y, RemovalKind::Donation)
+                != rem(&without_state, y, RemovalKind::Donation);
             gift_changed && !don_changed
         })
         .collect()
