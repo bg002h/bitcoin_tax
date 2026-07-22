@@ -88,3 +88,19 @@ T17 (`fe8e9d4`); M2 all-years CSV co-emit → T16 (`e7d63b9`); overflow-graceful
 - **[Nit] `push_free` duplicated** across `form8275.rs` and `form8283.rs` (T15 review) — byte-for-byte;
   candidate to hoist into `cells.rs`. Also the inert `let writes = w; let placements = p;` rebinding in
   `form8275.rs` (inherited from form8283) can go.
+
+## Post-release residue (cosmetic Minors/Nits from the Phase-1b whole-branch review; v0.9.0 shipped with these)
+
+Both Phase-1b whole-branch lenses were GREEN 0C/0I; these are the non-gating residue, recorded for a
+future patch cycle. None affects a filed/disclosed NUMBER.
+
+- **[Minor] Whole-dollar (official 8275 PDF) vs exact-cents (crypto-slice 8949 + `form_8275.txt`)
+  rounding inconsistency** (tax whole-branch M2) — sub-dollar; the PDF rounds Part I amounts to whole
+  dollars (IRS convention) while the txt/8949 carry cents. Pick one presentation or document the split.
+- **[Minor] TUI modal `compute_files` under-lists `form_8275.txt`** (tax whole-branch M3) — the export
+  confirm modal's file preview omits the co-emitted `form_8275.txt`; the file IS written (T17), only the
+  preview list is short. Add it to the modal's enumerated files.
+- **[Minor] Overflow-refusal message literal duplicated** across the crypto-slice + full-return pre-checks
+  (arch whole-branch) — extract the shared format string.
+- **[Minor] Promoted-year collection duplicated** (arch whole-branch) — the set of years-with-a-promoted-
+  leg is gathered in more than one place; hoist to one helper.
