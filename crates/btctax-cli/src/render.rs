@@ -942,9 +942,11 @@ pub fn write_form_csvs(
 ///   BEFORE any bytes when a promoted leg's Part II is empty/incomplete, so a promoted leg reaching HERE
 ///   is guaranteed to carry a complete Part II — this always emits a filing-ready disclosure.
 ///
-/// `pub(crate)` so the `export-snapshot` CSV / `export-irs-pdf` / full-return packet writers
-/// (`cmd/admin.rs`) emit it at their `write_basis_methodology_txt` call sites.
-pub(crate) fn write_form_8275_txt(
+/// `pub` so the `export-snapshot` CSV / `export-irs-pdf` / full-return packet writers (`cmd/admin.rs`)
+/// AND the TUI export path (`btctax-tui::export::do_export`, Approach-B Task 17) emit it at their
+/// `write_basis_methodology_txt` call sites — the TUI reaches it via `btctax_cli::render::…` (no `cmd::`
+/// token, so its KAT-E10 source gate stays green).
+pub fn write_form_8275_txt(
     out_dir: &Path,
     state: &LedgerState,
     events: &[LedgerEvent],
