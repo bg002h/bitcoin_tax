@@ -595,6 +595,11 @@ pub struct VerifyReport {
     pub selection_count: usize,
     /// Task 8: per-disposal compliance (post-2025 only).
     pub compliance: Vec<DisposalCompliance>,
+    /// Task 11 (BG-D3): per-live-promote verify-drift advisory — the stored filed floor recomputed
+    /// against CURRENT price data (overstated → conditional void+re-promote; understated → surfaced).
+    /// Empty when no live promote drifts. Informational; never gates (the fold still uses the stored
+    /// number).
+    pub drift: Vec<String>,
 }
 
 impl VerifyReport {
@@ -655,7 +660,12 @@ fn safe_harbor_status(state: &LedgerState, _events: &[LedgerEvent]) -> String {
     }
 }
 
-pub fn build_verify(state: &LedgerState, events: &[LedgerEvent], cli: &CliConfig) -> VerifyReport {
+pub fn build_verify(
+    state: &LedgerState,
+    events: &[LedgerEvent],
+    prices: &dyn btctax_core::price::PriceProvider,
+    cli: &CliConfig,
+) -> VerifyReport {
     let conservation = conservation_report(state);
     let mut hard = Vec::new();
     let mut advisory = Vec::new();
@@ -689,6 +699,10 @@ pub fn build_verify(state: &LedgerState, events: &[LedgerEvent], cli: &CliConfig
     // Per-disposal compliance (§A.5): side-effect-free projection.
     let compliance = disposal_compliance(events, state);
 
+    // Task 11 (BG-D3): the per-live-promote verify-drift advisory — recompute each stored floor against
+    // CURRENT prices (overstated → conditional void+re-promote; understated → surfaced). Empty otherwise.
+    let drift = btctax_core::conservative_promote::promote_drift_advisory(events, prices);
+
     VerifyReport {
         conservation,
         hard,
@@ -701,6 +715,7 @@ pub fn build_verify(state: &LedgerState, events: &[LedgerEvent], cli: &CliConfig
         elections,
         selection_count,
         compliance,
+        drift,
     }
 }
 
@@ -2499,6 +2514,12 @@ pub fn render_verify(r: &VerifyReport) -> String {
             c.date,
             compliance_status_tag(&c.status)
         );
+    }
+    // Task 11 (BG-D3): the per-live-promote verify-drift advisory (a stored floor that recomputes away
+    // from current price data). Informational — never gates.
+    let _ = writeln!(out, "Promote-basis drift advisories: {}", r.drift.len());
+    for d in &r.drift {
+        let _ = writeln!(out, "  {d}");
     }
     out
 }

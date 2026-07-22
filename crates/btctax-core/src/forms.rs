@@ -265,7 +265,8 @@ pub enum Form8283HowAcquired {
 ///
 /// `EstimatedConservative` (a conservative-filing tranche) → `Review`: the origin is unprovable, so a
 /// donation of it needs manual handling — an LT-held tranche donation deducts FMV, an ST-held one is
-/// limited to basis = $0 per §170(e)(1)(A). (This is the Form 8283 donor field, NOT an 8949 column.)
+/// limited to its DOCUMENTED basis per §170(e)(1)(A) (`$0` for an unpromoted tranche; the estimate/floor
+/// never funds a deduction — BG-D11). (This is the Form 8283 donor field, NOT an 8949 column.)
 pub fn how_acquired_from(bs: BasisSource) -> Form8283HowAcquired {
     use Form8283HowAcquired as H;
     match bs {

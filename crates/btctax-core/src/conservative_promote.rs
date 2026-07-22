@@ -12,6 +12,7 @@ use crate::event::{
 };
 use crate::identity::EventId;
 use crate::price::PriceProvider;
+use crate::project::resolve::resolve;
 use crate::project::{project, ProjectionConfig};
 use crate::state::{Disposal, LedgerState, Removal, RemovalKind};
 use crate::tax::{compute_tax_year, TaxOutcome, TaxProfile, TaxTables};
@@ -60,6 +61,64 @@ pub fn filed_basis_for(
             coverage: Coverage::Full,
         }),
     }
+}
+
+/// ★ BG-D3 verify-drift advisory (Task 11; tax r2 I-1 / arch r2 I-2): for each LIVE promote, recompute
+/// `filed_basis_for` against the CURRENT `prices` and compare to the STORED `filed_basis`. A later
+/// price-data correction can move the recomputed window min, so a filed floor can DRIFT away from what the
+/// same method would compute today:
+///
+/// - stored **above** the recomputed reference → the stored floor is OVERSTATED (an over-claimed basis, a
+///   §6662 exposure). The engine has NO filed-year concept (Opus r3 tax M-1, mirroring BG-D9), so this is
+///   CONDITIONAL COPY, not an engine branch: *"if this position is not yet filed, void + re-promote to the
+///   corrected lower number $X (G-4); if already filed, the filed number stands — advisory only."*
+/// - stored **below** the recomputed reference → the stored floor is UNDERSTATED (conservative — it
+///   reports at least as much gain as the corrected floor would). Tax-safe, but still SURFACED.
+///
+/// A promote whose window no longer has `Coverage::Full` (a price gap opened) yields no trustworthy
+/// recompute → skipped (never fabricate a drift claim over a data gap, mirroring `filed_basis_for`'s
+/// refusal). The live-promote set is read from `resolve` (so a voided/conflicting promote is excluded,
+/// exactly as the fold sees it). ★ The FOLD is UNCHANGED — it always folds the STORED `filed_basis` (T3);
+/// this builder is informational only, NOTHING is written.
+pub fn promote_drift_advisory(events: &[LedgerEvent], prices: &dyn PriceProvider) -> Vec<String> {
+    // Liveness (voids/conflicts) is config-independent, and `filed_basis_for` reads only prices + window,
+    // so a default projection config suffices to extract the live promote set.
+    let config = ProjectionConfig::default();
+    let promotes = resolve(events, prices, &config).promotes;
+    let mut lines: Vec<String> = Vec::new();
+    for (target, entry) in &promotes {
+        // The promoted tranche's window (for the recompute) — always present for a live promote target.
+        let Some((ws, we)) = events.iter().find_map(|e| match &e.payload {
+            EventPayload::DeclareTranche(t) if e.id == *target => Some((t.window_start, t.window_end)),
+            _ => None,
+        }) else {
+            continue;
+        };
+        let stored = entry.filed_basis;
+        let recomputed = match filed_basis_for(prices, entry.tranche_sat, ws, we) {
+            Ok(cf) => cf.filed_basis,
+            Err(_) => continue, // current data can't produce a trustworthy floor → no drift claim
+        };
+        match stored.cmp(&recomputed) {
+            std::cmp::Ordering::Greater => lines.push(format!(
+                "Promote-drift — the filed basis floor for the {ws}\u{2013}{we} tranche (${stored:.2} \
+                 stored) now recomputes to ${recomputed:.2} against current price data \u{2014} LOWER, so \
+                 the stored floor is OVERSTATED. If this position is not yet filed, void the promote and \
+                 re-promote to the corrected lower number ${recomputed:.2} (G-4). If it is already filed, \
+                 the filed number stands \u{2014} advisory only (the engine keeps folding the stored \
+                 basis)."
+            )),
+            std::cmp::Ordering::Less => lines.push(format!(
+                "Promote-drift — the filed basis floor for the {ws}\u{2013}{we} tranche (${stored:.2} \
+                 stored) now recomputes to ${recomputed:.2} against current price data \u{2014} HIGHER, so \
+                 the stored floor is UNDERSTATED (conservative: it reports at least as much gain as the \
+                 corrected floor would). No amendment is required; you may re-promote to the higher floor \
+                 to reduce the reported gain going forward."
+            )),
+            std::cmp::Ordering::Equal => {} // no drift
+        }
+    }
+    lines
 }
 
 /// The BG-D4/D11 decomposition key (★ the shared type every leg-builder task (T4/T5/T6) consumes;
@@ -398,6 +457,37 @@ fn with_synthetic_promote(
         }),
     });
     out
+}
+
+/// Task 11 (§3 item 3 / tax r1 I-3): the CLAMPED federal-tax saving for `year` from promoting `tranche_id`
+/// to `filed_basis`, through the SAME synthetic-promote clamped path `consent_terms` uses (the T3 rewrite
+/// AND the BG-D4 disposal/removal clamp bind) — NOT the un-clamped `overpayment_delta_one` basis swap.
+/// Returns `tax_without − tax_with` for `year`, clamped `≥ $0`; `$0` when `year` is not computable in
+/// either fold (no table/profile/blocked). A below-window-low sale therefore quotes the saving on the
+/// CLAMPED `$0` gain, never the loss the promote could not file. NOTHING is written and NOTHING `>$0` is
+/// filed — this feeds the overpayment funnel line only. `events` carries no promote yet (the baseline
+/// fold is `events` as-is; the with-fold threads a synthetic promote).
+#[allow(clippy::too_many_arguments)]
+pub fn clamped_promote_year_saving(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    tranche_id: &EventId,
+    filed_basis: Usd,
+    year: i32,
+    profile: Option<&TaxProfile>,
+    tables: &dyn TaxTables,
+) -> Usd {
+    let without_state = project(events, prices, config);
+    let with_events = with_synthetic_promote(events, tranche_id, filed_basis);
+    let with_state = project(&with_events, prices, config);
+    match (
+        crypto_tax_of(events, &with_state, year, profile, tables),
+        crypto_tax_of(events, &without_state, year, profile, tables),
+    ) {
+        (Some(t_with), Some(t_without)) => (t_without - t_with).max(Usd::ZERO),
+        _ => Usd::ZERO,
+    }
 }
 
 /// The undisposed hypothetical (tax r3 N-2): if the `remaining` tranche sats were sold at the current

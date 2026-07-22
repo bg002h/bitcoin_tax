@@ -82,6 +82,7 @@ Standing orders (MethodElection): 0
 Lot selections recorded: 0
 Per-disposal compliance (post-2025): 1
   import|coinbase|trade|cb-sell @ 2025-06-15 :: non_compliant
+Promote-basis drift advisories: 0
 ```
 
 The year's tax is *not computable* until a tax profile is set (btctax refuses to guess your
@@ -174,6 +175,7 @@ Standing orders (MethodElection): 0
 Lot selections recorded: 0
 Per-disposal compliance (post-2025): 1
   import|coinbase|out|cb-donate @ 2025-09-01 :: non_compliant
+Promote-basis drift advisories: 0
 ```
 
 Fill Form 8283. Because this gift spans two lots, the Section B form carries two property rows;
@@ -226,6 +228,7 @@ Pre-2025 method (attested historical fact): HIFO (attested: false)
 Standing orders (MethodElection): 0
 Lot selections recorded: 0
 Per-disposal compliance (post-2025): 0
+Promote-basis drift advisories: 0
 [exit 1]
 ```
 
@@ -248,6 +251,7 @@ Pre-2025 method (attested historical fact): HIFO (attested: false)
 Standing orders (MethodElection): 0
 Lot selections recorded: 0
 Per-disposal compliance (post-2025): 0
+Promote-basis drift advisories: 0
 ```
 
 ## J4 — mining/staking income and self-employment tax
@@ -439,6 +443,7 @@ Pre-2025 method (attested historical fact): HIFO (attested: false)
 Standing orders (MethodElection): 0
 Lot selections recorded: 0
 Per-disposal compliance (post-2025): 0
+Promote-basis drift advisories: 0
 ```
 
 Now the non-crypto side. `income import` reads the offline TOML — wages, interest (Schedule B),
@@ -674,6 +679,7 @@ Pre-2025 method (attested historical fact): HIFO (attested: false)
 Standing orders (MethodElection): 0
 Lot selections recorded: 0
 Per-disposal compliance (post-2025): 0
+Promote-basis drift advisories: 0
 [exit 1]
 ```
 
@@ -697,6 +703,7 @@ Pre-2025 method (attested historical fact): HIFO (attested: false)
 Standing orders (MethodElection): 0
 Lot selections recorded: 0
 Per-disposal compliance (post-2025): 0
+Promote-basis drift advisories: 0
 ```
 
 With a profile set, the hand-entered FMV is the ordinary income the report attributes to
@@ -759,6 +766,7 @@ Pre-2025 method (attested historical fact): HIFO (attested: false)
 Standing orders (MethodElection): 0
 Lot selections recorded: 0
 Per-disposal compliance (post-2025): 0
+Promote-basis drift advisories: 0
 [exit 1]
 ```
 
@@ -793,6 +801,7 @@ Pre-2025 method (attested historical fact): HIFO (attested: false)
 Standing orders (MethodElection): 0
 Lot selections recorded: 0
 Per-disposal compliance (post-2025): 0
+Promote-basis drift advisories: 0
 ```
 
 ## J9 — identifying specific lots for a disposal (`select-lots`)
@@ -847,4 +856,5 @@ Standing orders (MethodElection): 0
 Lot selections recorded: 1
 Per-disposal compliance (post-2025): 1
   import|coinbase|trade|sale @ 2025-06-01 :: contemporaneous
+Promote-basis drift advisories: 0
 ```

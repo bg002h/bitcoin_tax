@@ -28,9 +28,11 @@ pub enum BasisSource {
     /// defaulted-vs-supplied signal rides the `SelfTransferInboundZeroBasis` advisory, not this source.
     SelfTransferInbound,
     /// Conservative-filing: undocumented coins declared at $0 basis (the IRS fallback) via
-    /// `EventPayload::DeclareTranche`, homed at `window_end`. Filing-ready (NOT pseudo). The tag is
-    /// exempt from both `basis_source` overwrite sites so it reaches every disposal leg it serves and
-    /// drives the P3 dip / P7 mandatory-disclosure layer. See conservative-filing SPEC D-1/D-8.
+    /// `EventPayload::DeclareTranche`, homed at `window_end`. Filing-ready (NOT pseudo). The tag SURVIVES a
+    /// `PromoteTranche` (BG-D1) that rewrites the basis to a filed `>$0` window-low floor — the tag keys on
+    /// PROVENANCE (undocumented BTC), NOT the amount, so a promoted tranche is still `EstimatedConservative`
+    /// (a `>$0` estimate). The tag is exempt from both `basis_source` overwrite sites so it reaches every
+    /// disposal leg it serves and drives the P3 dip / P7 mandatory-disclosure layer. See SPEC D-1/D-8.
     EstimatedConservative,
 }
 
@@ -215,9 +217,11 @@ pub struct ClassifyRaw {
 /// in `[window_start, window_end]`) at **$0 basis** — the IRS fallback for unprovable basis. It folds
 /// (via the shared `Op::Acquire` path) into a lot with `usd_basis = 0`, `basis_source =
 /// EstimatedConservative`, `acquired_at = window_end` (the latest plausible acquisition → conservative
-/// for the holding period; never overclaims long-term), and the declared `wallet`. v1 declares $0 ONLY
-/// (no floor). See conservative-filing SPEC D-1/D-2/D-7. Old-binary limitation: a vault containing this
-/// variant fails to load on a pre-tranche binary (serde unknown-variant) — harmless (no installed base).
+/// for the holding period; never overclaims long-term), and the declared `wallet`. A `DeclareTranche`
+/// itself always files `$0`; a subsequent `PromoteTranche` (Approach-B, BG-D1) may later rewrite that
+/// `$0` to a filed `>$0` window-low floor (the tag stays `EstimatedConservative`). See
+/// conservative-filing SPEC D-1/D-2/D-7. Old-binary limitation: a vault containing this variant fails to
+/// load on a pre-tranche binary (serde unknown-variant) — harmless (no installed base).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeclareTranche {
     pub sat: Sat,

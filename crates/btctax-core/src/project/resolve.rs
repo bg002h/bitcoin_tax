@@ -1516,9 +1516,10 @@ pub fn resolve(
                 kind: BlockerKind::SafeHarborUnconservable,
                 event: Some(d.id.clone()),
                 detail: if has_tranche_residue {
-                    "a conservative-filing tranche ($0 EstimatedConservative) remains in the pre-2025 \
-                     residue — a safe-harbor allocation cannot conserve over it (v1 makes them mutually \
-                     exclusive; unallocated pre-2025 units are a facts-and-circumstances matter)"
+                    "a conservative-filing tranche ($0 or a promoted floor, EstimatedConservative) \
+                     remains in the pre-2025 residue — a safe-harbor allocation cannot conserve over it \
+                     (v1 makes them mutually exclusive; unallocated pre-2025 units are a \
+                     facts-and-circumstances matter)"
                         .into()
                 } else {
                     "allocation totals != Universal remainder at 2025-01-01".into()

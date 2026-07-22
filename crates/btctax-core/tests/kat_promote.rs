@@ -11,9 +11,13 @@
 //! stays `EstimatedConservative` (no new tag) and `acquired_at`/the relocation tag-carry are untouched.
 //! PRIVACY: synthetic values only.
 
-use btctax_core::conservative::{promote_prior_year_advisory, Coverage, Direction};
+use btctax_core::conservative::{
+    basis_methodology, overpayment_nudge_lines, promote_prior_year_advisory, self_custody_nudge,
+    tranche_dip_advisory, Coverage, Direction,
+};
 use btctax_core::conservative_promote::{
-    clamped_leg_basis, consent_terms, filed_basis_for, PromoteEntry, PromoteRefusal,
+    clamped_leg_basis, clamped_promote_year_saving, consent_terms, filed_basis_for,
+    promote_drift_advisory, PromoteEntry, PromoteRefusal,
 };
 use btctax_core::event::*;
 use btctax_core::forms::form_8283;
@@ -2145,5 +2149,192 @@ fn a_carryover_source_names_the_cascade_into_an_unflagged_later_year() {
             .iter()
             .any(|t| matches!(t, ConsentTerm::CascadeNamed { year } if *year == 2025)),
         "the carryover-SOURCE year itself is not cascade-named (it has its own term): {terms:?}"
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// Task 11 — §3 tag-side census: promote-aware advisories + the BG-D3 verify-drift advisory. A promoted
+// tranche is now `>$0` but keeps the `EstimatedConservative` tag, so the `$0`-assuming copy that keys on
+// that tag is FALSE for a promoted leg. These KATs pin: (1) `basis_methodology` no longer claims a `>$0`
+// is "never the estimate" for a promoted leg; (2) the dip/self-custody copy is basis-as-filed for a
+// promoted tranche; (3) the overpayment nudge's `promote-tranche` funnel quotes the CLAMPED delta (never
+// the un-clamped over-quote); (4) the direction-aware `promote_drift_advisory`, and that the FOLD still
+// uses the STORED number. PRIVACY: synthetic values only.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// A projected state whose single disposal leg is a PROMOTED tranche (>$0 basis = the estimate re-homed):
+/// 1-BTC tranche promoted to a $12,000 floor, sold WHOLE at $20,000 (above the floor ⇒ leg files $12,000
+/// basis, $8,000 gain). `state.promoted_origins` therefore contains `decision(1)`.
+fn promoted_state() -> LedgerState {
+    let w = exch();
+    let t = tranche_ev(1, &w, 100_000_000, date!(2024 - 01 - 01), date!(2024 - 01 - 10));
+    let p = promote_ev(2, EventId::decision(1), dec!(12_000));
+    let sell = sell_ev("SELL", datetime!(2024-06-01 00:00 UTC), &w, 100_000_000, 20_000);
+    project(&[t, p, sell], &prices(), &cfg())
+}
+
+/// ★ tag-side census (§6662 honesty): the `>$0` promoted basis IS the estimate re-homed, so the
+/// disclosure must NOT claim a `>$0` is "never the estimate", and the promoted leg gets the estimate
+/// (Cohan) disclosure. Mutation to kill: leaving the "never the estimate" sentence.
+#[test]
+fn basis_methodology_no_longer_claims_never_the_estimate_for_a_promoted_leg() {
+    let text = basis_methodology(&promoted_state(), 2024).expect("a filed tranche has a disclosure");
+    assert!(
+        !text.contains("never the estimate"),
+        "a promoted `>$0` basis IS the estimate re-homed — the false 'never the estimate' sentence \
+         must be gone: {text}"
+    );
+    assert!(
+        text.contains("estimated at the minimum daily closing price"),
+        "the promoted leg gets the estimate (Cohan) disclosure: {text}"
+    );
+    // provenance-neutral regression (tax min-8c): still never a purchase.
+    let low = text.to_lowercase();
+    assert!(!low.contains("purchase") && !low.contains("bought"), "provenance-neutral: {text}");
+}
+
+/// §3 item 2: a promoted tranche is no longer "$0-basis" — the dip advisory prints its basis AS FILED
+/// (never `$0`), and the self-custody nudge for a REMAINING promoted exchange tranche no longer asserts a
+/// `$0`-basis unit.
+#[test]
+fn dip_and_self_custody_copy_distinguishes_a_promoted_tranche() {
+    let w = exch();
+    let t = tranche_ev(1, &w, 100_000_000, date!(2024 - 01 - 01), date!(2024 - 01 - 10));
+    let p = promote_ev(2, EventId::decision(1), dec!(12_000));
+    // Sell HALF (0.5 BTC at $10,000; floor for 0.5 BTC = $6,000) so a promoted exchange tranche lot
+    // REMAINS to trigger the self-custody nudge, and a promoted disposal leg exists for the dip.
+    let sell = sell_ev("SELL", datetime!(2024-06-01 00:00 UTC), &w, 50_000_000, 10_000);
+    let st = project(&[t, p, sell], &prices(), &cfg());
+    let disposal = st.disposals.first().expect("a disposal");
+    let dip = tranche_dip_advisory(disposal);
+    assert!(
+        dip.as_deref().is_some_and(|s| !s.contains("$0")),
+        "a promoted dip is basis-as-filed (never $0): {dip:?}"
+    );
+    let nudge = self_custody_nudge(&st).expect("a remaining exchange promoted tranche still nudges");
+    assert!(
+        !nudge.contains("$0"),
+        "the self-custody copy no longer asserts a $0-basis unit for a promoted tranche: {nudge}"
+    );
+}
+
+/// A FULLY-covered 2024 window (2024-01-01..03) whose min daily close is $12,000/BTC.
+fn prices_2024_window_min_12k() -> StaticPrices {
+    StaticPrices(
+        [
+            (date!(2024 - 01 - 01), dec!(12_000)),
+            (date!(2024 - 01 - 02), dec!(15_000)),
+            (date!(2024 - 01 - 03), dec!(14_000)),
+        ]
+        .into_iter()
+        .collect(),
+    )
+}
+
+/// An UNPROMOTED 1-BTC tranche (window 2024-01-01..03, min $12,000) sold WHOLE at $8,000 — BELOW the
+/// window-low floor, so the un-clamped basis swap would over-quote a $4k loss the promote cannot file.
+fn unpromoted_below_low_tranche() -> Vec<LedgerEvent> {
+    let w = exch();
+    let t = tranche_ev(1, &w, 100_000_000, date!(2024 - 01 - 01), date!(2024 - 01 - 03));
+    let sell = sell_ev("SELL", datetime!(2024-06-01 00:00 UTC), &w, 100_000_000, 8_000);
+    vec![t, sell]
+}
+
+/// Parse the `~$N` saving out of the `promote-tranche` funnel line.
+fn funnel_quoted_saving(lines: &[String]) -> Usd {
+    let l = lines
+        .iter()
+        .find(|l| l.contains("promote-tranche"))
+        .expect("a promote-tranche funnel line is present");
+    let after = l.split("~$").nth(1).expect("the funnel line quotes ~$N");
+    let num: String = after
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == ',' || *c == '.')
+        .collect();
+    num.replace(',', "").parse::<Usd>().expect("a numeric saving")
+}
+
+/// The expected CLAMPED promote saving for the below-low fixture — the SAME `clamped_promote_year_saving`
+/// helper the impl quotes (NOT the un-clamped `overpayment_delta_one`), rounded to whole dollars.
+fn clamped_promote_saving(events: &[LedgerEvent], px: &StaticPrices, profile: &TaxProfile) -> Usd {
+    let cf = filed_basis_for(px, 100_000_000, date!(2024 - 01 - 01), date!(2024 - 01 - 03)).unwrap();
+    clamped_promote_year_saving(
+        events,
+        px,
+        &cfg(),
+        &EventId::decision(1),
+        cf.filed_basis,
+        2024,
+        Some(profile),
+        &tables_2024(),
+    )
+    .round_dp(0)
+}
+
+/// §3 item 2 / tax r1 I-3: an unpromoted tranche's nudge advertises a saving the CLAMPED promote can
+/// deliver (tax on the clamped $8k gain), NEVER an un-clamped over-quote (the $4k unfileable loss).
+#[test]
+fn the_promote_funnel_line_quotes_the_clamped_delta() {
+    let events = unpromoted_below_low_tranche();
+    let px = prices_2024_window_min_12k();
+    let profile = consent_profile();
+    let st = project(&events, &px, &cfg());
+    let lines = overpayment_nudge_lines(
+        &events,
+        &st,
+        &px,
+        &cfg(),
+        2024,
+        Some(&profile),
+        &tables_2024(),
+    );
+    assert!(
+        lines.iter().any(|l| l.contains("promote-tranche")),
+        "an unpromoted tranche gets a promote-tranche funnel line: {lines:?}"
+    );
+    assert_eq!(
+        funnel_quoted_saving(&lines),
+        clamped_promote_saving(&events, &px, &profile),
+        "the funnel quotes the CLAMPED promote delta, never the un-clamped over-quote"
+    );
+}
+
+/// A 1-BTC tranche (window 2017-12-01..03) promoted to a STORED `stored` floor. The recompute in
+/// `promote_drift_advisory` runs against the CURRENT prices passed to it — so passing a window whose min
+/// recomputes above/below `stored` drives the two directions.
+fn promote_at_stored_floor(stored: rust_decimal::Decimal) -> Vec<LedgerEvent> {
+    let w = exch();
+    let t = tranche_ev(1, &w, 100_000_000, date!(2017 - 12 - 01), date!(2017 - 12 - 03));
+    let p = promote_ev(2, EventId::decision(1), stored);
+    vec![t, p]
+}
+
+/// ★ BG-D3 (tax r2 I-1 / arch r2 I-2): the verify-drift advisory is direction-aware, and the FOLD is
+/// unaffected — it always uses the STORED `filed_basis`, never the recomputed reference.
+#[test]
+fn verify_drift_advisory_is_direction_aware_and_the_fold_still_uses_the_stored_number() {
+    let ev = promote_at_stored_floor(dec!(12_000));
+    // Corrected data LOWERS the window min ($9k) ⇒ stored $12k recomputes ABOVE the reference (overstated).
+    let overstated = promote_drift_advisory(&ev, &prices_with_window_min(9_000));
+    assert!(
+        overstated
+            .iter()
+            .any(|l| l.contains("void") && l.contains("re-promote") && l.contains("not yet filed")),
+        "stored ABOVE recomputed → conditional void+re-promote copy (BG-D9-style 'if not yet filed'): \
+         {overstated:?}"
+    );
+    // Corrected data RAISES the window min ($15k) ⇒ stored $12k recomputes BELOW the reference (understated).
+    let understated = promote_drift_advisory(&ev, &prices_with_window_min(15_000));
+    assert!(
+        !understated.is_empty(),
+        "the below-direction understated-floor advisory also fires (tax-safe, still surfaced): \
+         {understated:?}"
+    );
+    // ★ the FOLD is unaffected — it uses the STORED filed_basis, not the recomputed one.
+    let st = project(&ev, &prices_with_window_min(9_000), &cfg());
+    assert_eq!(
+        tranche_lot_basis(&st),
+        dec!(12_000),
+        "the fold uses the STORED number forever, regardless of a later price-data change"
     );
 }

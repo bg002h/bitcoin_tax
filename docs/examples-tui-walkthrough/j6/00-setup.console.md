@@ -35,6 +35,7 @@ Pre-2025 method (attested historical fact): HIFO (attested: false)
 Standing orders (MethodElection): 0
 Lot selections recorded: 0
 Per-disposal compliance (post-2025): 0
+Promote-basis drift advisories: 0
 ```
 ```console
 $ btctax --vault v.pgp income import --year 2024 --file fullreturn.toml

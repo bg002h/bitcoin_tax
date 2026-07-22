@@ -62,7 +62,8 @@ pub(crate) fn draw(frame: &mut Frame, area: Rect, app: &App) {
 ///
 /// Calls `build_verify` (pure read-only builder) and formats the `VerifyReport` fields.
 pub(crate) fn render_compliance_content(snap: &Snapshot) -> String {
-    let verify = build_verify(&snap.state, &snap.events, &snap.cli_config);
+    // Task 11 (BG-D3): thread the snapshot's active price provider so the verify-drift advisory recomputes.
+    let verify = build_verify(&snap.state, &snap.events, &snap.prices, &snap.cli_config);
     let mut s = String::new();
 
     // ── Conservation ──────────────────────────────────────────────────────────────────────────
@@ -162,6 +163,19 @@ pub(crate) fn render_compliance_content(snap: &Snapshot) -> String {
                 dc.date,
                 compliance_status_tag(&dc.status)
             );
+        }
+    }
+
+    // ── Promote-basis drift advisories (Task 11 / BG-D3) ──────────────────────────────────────
+    if !verify.drift.is_empty() {
+        let _ = writeln!(s);
+        let _ = writeln!(
+            s,
+            "  Promote-basis drift advisories ({}):",
+            verify.drift.len()
+        );
+        for d in &verify.drift {
+            let _ = writeln!(s, "    {d}");
         }
     }
 

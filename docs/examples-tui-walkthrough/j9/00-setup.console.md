@@ -21,4 +21,5 @@ Standing orders (MethodElection): 0
 Lot selections recorded: 0
 Per-disposal compliance (post-2025): 1
   import|coinbase|trade|sale @ 2025-06-01 :: non_compliant
+Promote-basis drift advisories: 0
 ```

@@ -25,10 +25,11 @@ const ALLOCATION_IS_FINAL_HINT: &str = "revisit the in-app safe-harbor allocatio
     professional";
 
 /// Allocation-side hedge (tax review r1 Nit): the user is recording an allocation and is blocked by a
-/// tranche, so the finality caveat is about that TRANCHE (a filed $0 basis), not the allocation.
+/// tranche, so the finality caveat is about that TRANCHE (a filed basis — `$0` or a promoted floor), not
+/// the allocation.
 const TRANCHE_IS_FINAL_HINT: &str = "Void the tranche first (`reconcile void <decision-ref>`); if you \
-    have already filed the tranche's $0 basis, unallocated pre-2025 units are a facts-and-circumstances \
-    matter for a professional";
+    have already filed the tranche's basis ($0 or a promoted floor), unallocated pre-2025 units are a \
+    facts-and-circumstances matter for a professional";
 
 /// The set of event ids targeted by any `VoidDecisionEvent` in the log — the record-time "voided" view.
 ///
@@ -77,8 +78,9 @@ pub fn pre2025_tranche_exists(events: &[LedgerEvent]) -> bool {
 
 /// P8 Nit: is `wallet` referenced by any prior event — an import's `wallet`, or a prior tranche
 /// declaration's target wallet? A `false` result means `--wallet` likely has a TYPO. This drives a WARN
-/// only, NEVER a refusal: a `$0` tranche lot in any wallet still files at `$0` (tax-neutral), so a typo
-/// merely strands the lot in a phantom wallet rather than mis-stating tax. Pure over the event log.
+/// only, NEVER a refusal: a conservative-filing tranche lot in any wallet still files at its conservative
+/// basis ($0, or a promoted floor) — tax-neutral — so a typo merely strands the lot in a phantom wallet
+/// rather than mis-stating tax. Pure over the event log.
 pub fn wallet_is_known(events: &[LedgerEvent], wallet: &WalletId) -> bool {
     events.iter().any(|e| {
         e.wallet.as_ref() == Some(wallet)
@@ -92,8 +94,8 @@ pub fn guard_allocation_vs_tranche(events: &[LedgerEvent]) -> Result<(), CliErro
     if pre2025_tranche_exists(events) {
         return Err(CliError::Usage(format!(
             "refusing to record a safe-harbor allocation while a pre-2025 conservative-filing tranche \
-             ($0 EstimatedConservative) is on file — v1 makes the two mutually exclusive. \
-             {TRANCHE_IS_FINAL_HINT}."
+             ($0 or a promoted floor, EstimatedConservative) is on file — v1 makes the two mutually \
+             exclusive. {TRANCHE_IS_FINAL_HINT}."
         )));
     }
     Ok(())
@@ -151,12 +153,13 @@ pub fn declare_tranche(
     // here.
     guard_tranche_vs_allocation(&events, window_end)?;
     // The declaration WILL be recorded now — warn (never refuse) on a `--wallet` that no prior event
-    // references (a likely typo that strands the $0 lot in a phantom wallet; it still files at $0).
+    // references (a likely typo that strands the tranche lot in a phantom wallet; it still files at its
+    // conservative basis).
     if !wallet_is_known(&events, &wallet) {
         eprintln!(
-            "warning: --wallet {} has no prior events in this vault; if this is a typo the $0 tranche \
-             lot is stranded in a phantom wallet (it still files at $0). Re-run with the intended \
-             --wallet if this was unintended.",
+            "warning: --wallet {} has no prior events in this vault; if this is a typo the conservative \
+             tranche lot is stranded in a phantom wallet (it still files at its conservative basis — $0, \
+             or a promoted floor). Re-run with the intended --wallet if this was unintended.",
             crate::render::wallet_label(&wallet)
         );
     }

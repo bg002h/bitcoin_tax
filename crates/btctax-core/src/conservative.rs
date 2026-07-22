@@ -2,6 +2,7 @@
 //! folding, no I/O. They are provenance-neutral (never assert "purchase"/"bought"; a tranche is
 //! undocumented BTC filed at its AS-FILED basis) and never instruct a tax-understating action.
 
+use crate::conservative_promote::{clamped_promote_year_saving, filed_basis_for};
 use crate::conventions::{round_cents, TaxDate, SATS_PER_BTC};
 use crate::event::{EventPayload, LedgerEvent};
 use crate::identity::EventId;
@@ -18,8 +19,9 @@ use std::collections::BTreeSet;
 /// D-9 dip advisory: `Some` iff the disposal consumed at least one conservative-filing tranche leg
 /// (`EstimatedConservative`). One line per such leg, naming the estimated acquisition (`acquired_at` =
 /// the tranche's `window_end`), the basis **AS FILED** — `leg.basis` printed directly, so a `$0` filing
-/// says `$0` and a TP8(c) fee-sat carry that landed on the tranche leg says the documented fee basis
-/// (tax r1 I-1) — and the resulting gain. Provenance-neutral: never "purchase"/"bought" (a tranche is
+/// says `$0`, a TP8(c) fee-sat carry that landed on the tranche leg says the documented fee basis, and a
+/// PROMOTED tranche says its filed floor (never `$0`; Task 11 tag-side census, tax r1 I-1) — and the
+/// resulting gain. Provenance-neutral: never "purchase"/"bought" (a tranche is
 /// undocumented BTC, not a known buy), and it points to *substantiating* a higher basis (which only ever
 /// LOWERS the reported gain toward the documented amount — never understates below it).
 pub fn tranche_dip_advisory(disposal: &Disposal) -> Option<String> {
@@ -49,11 +51,13 @@ pub fn tranche_dip_advisory(disposal: &Disposal) -> Option<String> {
 }
 
 /// D-9 method-inversion advisory: `Some` iff the in-force `method` for `wallet` is NON-HIFO **and** the
-/// wallet still holds BOTH a conservative-filing tranche lot ($0 `EstimatedConservative`, remaining) and
-/// a documented lot (remaining). Under a non-HIFO method a future disposal can draw the $0 tranche lot
-/// before the documented higher-basis units — the gain-maximizing inversion of P2's emergent HIFO
-/// steering. The advisory recommends a HIFO election. HIFO itself never inverts (it sorts $0 lots last),
-/// and with no documented lot present there is nothing to draw first, so both cases return `None`.
+/// wallet still holds BOTH a conservative-filing tranche lot (`EstimatedConservative`, remaining — at its
+/// as-filed basis, `$0` or a promoted floor) and a documented lot (remaining). Under a non-HIFO method a
+/// future disposal can draw the low-basis conservative-filing lot before the documented higher-basis
+/// units — the gain-maximizing inversion of P2's emergent HIFO steering. The advisory recommends a HIFO
+/// election. HIFO itself never inverts (it sorts by per-sat cost), and with no documented lot present
+/// there is nothing to draw first, so both cases return `None`. Task 11: the copy is basis-as-filed (no
+/// longer asserts a `$0`-basis unit — a promoted tranche is `>$0`).
 pub fn method_inversion_advisory(
     state: &LedgerState,
     wallet: &WalletId,
@@ -75,24 +79,25 @@ pub fn method_inversion_advisory(
     if has_tranche && has_documented {
         Some(format!(
             "Method-inversion warning — the in-force lot method for this wallet is {method:?} (not HIFO). \
-             Under it a disposal can draw a $0-basis conservative-filing unit before your documented \
-             higher-basis units, maximizing the reported gain. Electing HIFO would draw the documented \
-             units first — set it forward with `btctax config --set-forward-method hifo` (which binds \
-             2025+ disposals); a forward election cannot change a PRE-2025-dated disposal, so for those \
-             elect HIFO as the pre-2025 method instead."
+             Under it a disposal can draw a conservative-filing unit (at its as-filed basis) before your \
+             documented higher-basis units, maximizing the reported gain. Electing HIFO would draw the \
+             highest-basis units first — set it forward with `btctax config --set-forward-method hifo` \
+             (which binds 2025+ disposals); a forward election cannot change a PRE-2025-dated disposal, so \
+             for those elect HIFO as the pre-2025 method instead."
         ))
     } else {
         None
     }
 }
 
-/// P8 self-custody nudge (advisory): `Some` iff a conservative-filing tranche lot ($0
-/// `EstimatedConservative`, remaining) is held in an EXCHANGE (broker) wallet. Suggests holding the
-/// oldest / no-records units in self-custody — where own-books specific identification never expires (a
-/// broker's own-books identification is insufficient from 2027, the P4 warning) — and recommends a HIFO
-/// election so a disposal draws documented units before the $0 units (D-9). Absent when every tranche
-/// lot is already in self-custody (or none is held). Provenance-neutral; never instructs an
-/// understating action.
+/// P8 self-custody nudge (advisory): `Some` iff a conservative-filing tranche lot (`EstimatedConservative`,
+/// remaining — at its as-filed basis, `$0` or a promoted floor) is held in an EXCHANGE (broker) wallet.
+/// Suggests holding the oldest / no-records units in self-custody — where own-books specific
+/// identification never expires (a broker's own-books identification is insufficient from 2027, the P4
+/// warning) — and recommends a HIFO election so a disposal draws the highest-basis documented units
+/// before the conservative-filing units (D-9). Absent when every tranche lot is already in self-custody
+/// (or none is held). Provenance-neutral; never instructs an understating action. Task 11: the copy is
+/// basis-as-filed (no longer asserts a `$0`-basis unit).
 pub fn self_custody_nudge(state: &LedgerState) -> Option<String> {
     let has_exchange_tranche = state.lots.iter().any(|l| {
         l.remaining_sat > 0
@@ -104,8 +109,8 @@ pub fn self_custody_nudge(state: &LedgerState) -> Option<String> {
             "Self-custody nudge — undocumented (conservative-filing) units are held at an exchange. \
              Holding your oldest / no-records units in self-custody keeps own-books specific \
              identification available indefinitely (a broker's own-books identification is insufficient \
-             from 2027). Also consider electing HIFO so a disposal draws documented units before the \
-             $0-basis units: `btctax config --set-forward-method hifo`."
+             from 2027). Also consider electing HIFO so a disposal draws your highest-basis documented \
+             units before the conservative-filing units: `btctax config --set-forward-method hifo`."
                 .to_string(),
         )
     } else {
@@ -117,13 +122,21 @@ pub fn self_custody_nudge(state: &LedgerState) -> Option<String> {
 /// whenever actual cost is NOT used. `Some` iff a conservative-filing tranche is in `year`'s filed set
 /// (a disposal leg tagged `EstimatedConservative`); it enumerates each such filed unit — its estimated
 /// acquisition (the tranche `window_end`, carried as the leg's `acquired_at`), the basis **AS FILED**
-/// (`leg.basis` printed directly — `$0`, or the documented TP8(c) fee-sat basis when that carry landed
-/// on the tranche leg; NEVER unconditionally "$0", tax r1 I-1), and the holding period **as computed**
-/// (short/long — DERIVED from the leg's `term`, NEVER hard-coded "long-term", G-4). Provenance-neutral:
-/// a tranche is undocumented BTC, never asserted as a purchase (tax min-8c). `None` (no disclosure) when
-/// no tranche is filed for `year`. Informational/compliance text only — nothing `>$0` is ever filed.
+/// (`leg.basis` printed directly — `$0`, the documented TP8(c) fee-sat basis when that carry landed on
+/// the tranche leg, or a PROMOTED estimate floor; NEVER unconditionally "$0", tax r1 I-1), and the
+/// holding period **as computed** (short/long — DERIVED from the leg's `term`, NEVER hard-coded
+/// "long-term", G-4). Provenance-neutral: a tranche is undocumented BTC, never asserted as a purchase
+/// (tax min-8c). `None` (no disclosure) when no tranche is filed for `year`.
+///
+/// Task 11 (BG-D3 tag-side census): once a tranche is PROMOTED, its `>$0` basis IS the estimate re-homed,
+/// so the old blanket "a `>$0` amount reflects documented fee basis, never the estimate" sentence is
+/// FALSE. A promoted leg (`lot_id.origin_event_id ∈ state.promoted_origins`) gets the estimate (Cohan)
+/// disclosure inline — plus the "limited so as not to report a loss" note when its basis was clamped to
+/// the proceeds (a below-floor sale). The documented-fee framing stays for a NON-promoted `>$0` fee leg;
+/// the `$0` framing stays for an unpromoted `$0` tranche.
 pub fn basis_methodology(state: &LedgerState, year: i32) -> Option<String> {
     let mut items: Vec<String> = Vec::new();
+    let mut any_promoted = false;
     for d in state
         .disposals
         .iter()
@@ -138,10 +151,29 @@ pub fn basis_methodology(state: &LedgerState, year: i32) -> Option<String> {
                 Term::LongTerm => "long-term",
                 Term::ShortTerm => "short-term",
             };
+            // Task 11: distinguish a PROMOTED leg (its `>$0` basis is the estimate re-homed) from a
+            // documented-fee `>$0` carry — both are `EstimatedConservative`, indistinguishable from the
+            // leg alone, so the promote set (recorded on the state at fold time) is the discriminator.
+            let disclosure = if state.promoted_origins.contains(&l.lot_id.origin_event_id) {
+                any_promoted = true;
+                // A basis clamped down to the proceeds (a sale below the floor, `basis == proceeds`)
+                // was limited so as not to report a loss off the estimate (BG-D4).
+                let clamp = if l.basis == l.proceeds {
+                    ", limited so as not to report a loss"
+                } else {
+                    ""
+                };
+                format!(
+                    " \u{2014} basis estimated at the minimum daily closing price over the attested \
+                     acquisition window (Cohan){clamp}"
+                )
+            } else {
+                String::new()
+            };
             items.push(format!(
                 "  \u{2022} {sat} sat of undocumented BTC, estimated acquired by {acq} (the conservative \
                  window-end date), disposed on {date}, filed at ${basis:.2} basis ({term} holding \
-                 period).",
+                 period){disclosure}.",
                 sat = l.sat,
                 acq = l.acquired_at,
                 date = d.disposed_at,
@@ -152,16 +184,25 @@ pub fn basis_methodology(state: &LedgerState, year: i32) -> Option<String> {
     if items.is_empty() {
         return None;
     }
+    // The `>$0` explanation is now case-correct: a documented fee re-homed under §1011 is the default,
+    // AND — only when a promoted leg is present — the promoted estimate floor described on its own line
+    // (never the blanket "never the estimate" claim that a promote makes false).
+    let promoted_clause = if any_promoted {
+        ", or \u{2014} for a unit whose tranche has been promoted (noted on its line) \u{2014} the \
+         conservative estimated basis floor itself"
+    } else {
+        ""
+    };
     let mut out = format!(
         "Basis methodology disclosure (conservative filing) \u{2014} tax year {year}\n\n\
          For the units below, the actual cost basis could not be substantiated from available records, \
          so a conservative estimate was filed \u{2014} the basis filed for each unit is shown on its \
-         line (the IRS `$0` fallback for unprovable basis, which cannot understate gain; a `>$0` amount \
-         reflects documented on-chain fee basis re-homed onto that unit under \u{00a7}1011, never the \
-         estimate). Each unit's holding period is derived from its estimated acquisition date and \
-         reported as computed, never assumed. If records are later reconstructed, a higher documented \
-         basis may be substantiated \u{2014} lowering the reported gain, never below the amount that can \
-         be documented.\n\n"
+         line (the IRS `$0` fallback for unprovable basis, which cannot understate gain). A `>$0` amount \
+         reflects a documented on-chain fee basis re-homed onto that unit under \u{00a7}1011{promoted_clause}. \
+         Each unit's holding period is derived from its estimated acquisition date and reported as \
+         computed, never assumed. If records are later reconstructed, a higher documented basis may be \
+         substantiated \u{2014} lowering the reported gain, never below the amount that can be \
+         documented.\n\n"
     );
     out.push_str(&items.join("\n"));
     Some(out)
@@ -357,13 +398,17 @@ pub fn overpayment_delta(
         .sum()
 }
 
-/// P6 nudge lines (the G-3 lever, surfaced by `tranche_report_advisory`): for each filed tranche whose
-/// `$0` basis cost federal tax in `year`, one line quantifying the saving from reconstructing it to its
-/// window reference price, then the mandatory §1014 note (unconditional + provenance-neutral) and a
-/// trailing note if undisposed tranche units remain. Empty without a profile (⇒ no tax ⇒ no figure), an
-/// uncomputable year, or no tranche with a recoverable delta. Provenance-neutral: never asserts a
-/// purchase; nothing `>$0` is ever filed (D-7 — this is informational only).
-fn overpayment_nudge_lines(
+/// P6 nudge lines (the G-3 lever, surfaced by `tranche_report_advisory`): for each filed UNPROMOTED
+/// tranche whose `$0` basis cost federal tax in `year`, (a) the reconstruct-to-actual-records nudge (its
+/// window reference price, the UNCLAMPED what-if — a real reconstructed basis can legitimately file a
+/// loss), plus (b) Task 11's `promote-tranche` funnel line quoting the CLAMPED promote saving (never the
+/// unclamped over-quote, tax r1 I-3) when the window is fully covered (`filed_basis_for` succeeds); then
+/// the mandatory §1014 note and a trailing note if undisposed tranche units remain. A PROMOTED tranche
+/// (its basis is filed) gets a status line instead of a nudge (§3 item 3). Empty without a profile (⇒ no
+/// tax ⇒ no figure), an uncomputable year, or no tranche with a recoverable delta. Provenance-neutral:
+/// never asserts a purchase; nothing `>$0` is ever filed (D-7 — this is informational only).
+#[allow(clippy::too_many_arguments)]
+pub fn overpayment_nudge_lines(
     events: &[LedgerEvent],
     state: &LedgerState,
     prices: &dyn PriceProvider,
@@ -399,31 +444,71 @@ fn overpayment_nudge_lines(
         let EventPayload::DeclareTranche(t) = &e.payload else {
             continue;
         };
+        // Task 11 (§3 item 3): a PROMOTED tranche's basis is FILED — neither the overpayment nudge nor the
+        // promote funnel apply. Emit a status line instead (never a `$0`-assuming nudge).
+        if state.promoted_origins.contains(&e.id) {
+            lines.push(format!(
+                "Promote status — the {ws}\u{2013}{we} tranche is already promoted to a filed basis \
+                 floor; its basis is filed, so the overpayment nudge and the promote funnel no longer \
+                 apply to it.",
+                ws = t.window_start,
+                we = t.window_end,
+            ));
+            continue;
+        }
         let Some(wr) = window_reference(prices, t.window_start, t.window_end) else {
             continue; // no reference price ⇒ nothing to quantify (D-7: never fabricate one)
         };
+        // (a) The reconstruct-to-actual-records nudge — the UNCLAMPED what-if (window reference price).
         let delta = overpayment_delta_one(
             events, prices, config, year, profile, tables, &e.id, wr.min, baseline,
         );
-        if delta <= Usd::ZERO {
-            continue; // this tranche cost no reconstructable tax in `year`
-        }
-        any = true;
-        let mut line = format!(
-            "Overpayment nudge — reconstructing this {ws}\u{2013}{we} tranche and importing the records \
-             could save ~${saving} of federal tax this year, at the cost of a documented basis an \
-             examiner can question.",
-            ws = t.window_start,
-            we = t.window_end,
-            saving = delta.round_dp(0),
-        );
-        if wr.coverage == Coverage::Partial {
-            line.push_str(
-                " (Partial-window estimate: some days in the window had no price data, so the true \
-                 saving may differ.)",
+        if delta > Usd::ZERO {
+            any = true;
+            let mut line = format!(
+                "Overpayment nudge — reconstructing this {ws}\u{2013}{we} tranche and importing the \
+                 records could save ~${saving} of federal tax this year, at the cost of a documented \
+                 basis an examiner can question.",
+                ws = t.window_start,
+                we = t.window_end,
+                saving = delta.round_dp(0),
             );
+            if wr.coverage == Coverage::Partial {
+                line.push_str(
+                    " (Partial-window estimate: some days in the window had no price data, so the true \
+                     saving may differ.)",
+                );
+            }
+            lines.push(line);
         }
-        lines.push(line);
+        // (b) Task 11 — the `promote-tranche` funnel line: the CLAMPED promote saving (the T9 clamped
+        // path, NOT the unclamped `overpayment_delta_one` over-quote — tax r1 I-3). Only a fully-covered
+        // window is promotable (`filed_basis_for` hard-refuses a Partial/no-coverage window), so a Partial
+        // window gets the reconstruct nudge above but no promote funnel.
+        if let Ok(cf) = filed_basis_for(prices, t.sat, t.window_start, t.window_end) {
+            let clamped = clamped_promote_year_saving(
+                events,
+                prices,
+                config,
+                &e.id,
+                cf.filed_basis,
+                year,
+                profile,
+                tables,
+            );
+            if clamped > Usd::ZERO {
+                lines.push(format!(
+                    "Promote-tranche funnel — promoting this {ws}\u{2013}{we} tranche to its filed \
+                     window-low floor (${floor:.2}) could save ~${saving} of federal tax this year, \
+                     quoted on the CLAMPED promoted gain (a sale below the floor files $0 gain, never a \
+                     loss the promote cannot file): `btctax reconcile promote-tranche`.",
+                    ws = t.window_start,
+                    we = t.window_end,
+                    floor = cf.filed_basis,
+                    saving = clamped.round_dp(0),
+                ));
+            }
+        }
     }
     if any {
         // §1014 note — UNCONDITIONAL + provenance-neutral (a tranche carries no provenance field; adding

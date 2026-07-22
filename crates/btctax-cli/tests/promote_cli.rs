@@ -179,6 +179,32 @@ fn voiding_a_promoted_tranche_prints_the_void_direction_advisory() {
     );
 }
 
+/// ★ Task 11 (BG-D3, arch r3 M-1): the verify-drift advisory is WIRED into `verify`/`build_verify`, not
+/// just the core fn. `build_promoted_vault` files a $12,000 floor for a 0.4-BTC 2018-Q1 tranche
+/// ($30,000/BTC — far ABOVE any 2018 daily close), so recomputing `filed_basis_for` against the CURRENT
+/// bundled prices lands well below the stored floor ⇒ the OVERSTATED-basis drift advisory fires and rides
+/// the `VerifyReport.drift` field. Threading a `PriceProvider` into `verify` is what makes this non-vacuous.
+#[test]
+fn verify_surfaces_the_promote_drift_advisory_for_a_drifted_promote() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, _promote_id) = build_promoted_vault(dir.path());
+    let report = cmd::inspect::verify(&vault, &pp()).unwrap();
+    assert!(
+        !report.drift.is_empty(),
+        "verify's VerifyReport.drift must be non-empty for a drifted promote (wired into build_verify): \
+         {:?}",
+        report.drift
+    );
+    assert!(
+        report
+            .drift
+            .iter()
+            .any(|l| l.contains("void") && l.contains("re-promote") && l.contains("not yet filed")),
+        "the stored floor is OVERSTATED (recomputes lower) → the conditional void+re-promote copy: {:?}",
+        report.drift
+    );
+}
+
 // ════════════════════════════════════════════════════════════════════════════════════════════════
 // Task 10 — the `promote-tranche` verb: BG-D5 provenance + BG-D6 consent recording + BG-D7 Part II.
 // ════════════════════════════════════════════════════════════════════════════════════════════════

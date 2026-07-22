@@ -147,5 +147,7 @@ pub fn verify(vault_path: &Path, pp: &Passphrase) -> Result<VerifyReport, CliErr
     let session = Session::open(vault_path, pp)?;
     let (events, state, _cfg) = session.load_events_and_project()?;
     let cli = session.config()?;
-    Ok(build_verify(&state, &events, &cli))
+    // Task 11 (BG-D3): the verify-drift advisory recomputes each stored promote floor against the active
+    // price provider, so thread the session's prices into `build_verify`.
+    Ok(build_verify(&state, &events, session.prices(), &cli))
 }

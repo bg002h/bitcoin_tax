@@ -491,6 +491,10 @@ pub fn fold(
         selections: &res.selections,
         promotes: res.promotes.clone(), // BG-D4: real set at EVERY site (never PromoteSet::new())
     };
+    // Task 11 (BG-D3 tag-side census): record which tranche origins are promoted so the state-only
+    // advisories can distinguish a promoted `>$0` estimate floor from a documented fee carry (both are
+    // `EstimatedConservative`, `>$0`). Keys of the live promote set == the promoted `DeclareTranche` ids.
+    st.promoted_origins = ctx.promotes.keys().cloned().collect();
 
     for eff in &res.timeline {
         if !seeded && eff.date() >= TRANSITION_DATE {
