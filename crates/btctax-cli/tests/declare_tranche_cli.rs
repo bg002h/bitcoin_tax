@@ -317,11 +317,14 @@ fn safe_harbor_residue_refuses_when_a_pre2025_tranche_exists() {
 
 // ── (g) a PROMOTED pre-2025 tranche still refuses the allocation guard (approach-B Task 3, BG-D1) ──
 //
-// NB placement: `guard_allocation_vs_tranche`/`pre2025_tranche_exists` live HERE (btctax-cli), not in
-// btctax-core — btctax-core cannot depend on btctax-cli (the dependency runs the other way), so this
-// KAT cannot literally live beside the other four Task-3 by-construction KATs in
-// `crates/btctax-core/tests/kat_promote.rs` as the task brief's file listing suggested; it belongs
-// wherever the guard itself lives. Both functions are PURE over `&[LedgerEvent]` (no vault needed).
+// NB placement: `guard_allocation_vs_tranche` lives HERE (btctax-cli) — it maps a refusal to a
+// `CliError`, a cli-only concern. `pre2025_tranche_exists` itself MOVED to
+// `btctax_core::tranche_guard` (Defensive Filing Wizard Task 5, C-2) so core callers can read it
+// without a cli→core dependency inversion; the guard calls the core predicate. This KAT still cannot
+// literally live beside the other four Task-3 by-construction KATs in
+// `crates/btctax-core/tests/kat_promote.rs` as the task brief's file listing suggested, since the
+// GUARD (the thing this KAT exercises) is still cli-only. Both functions are PURE over
+// `&[LedgerEvent]` (no vault needed).
 
 /// A PromoteTranche decision event promoting `target` to `filed_basis` (mirrors the equivalent
 /// `promote_ev` helper in `kat_promote.rs`; duplicated here since the two crates' test binaries can't
@@ -349,14 +352,16 @@ fn promote_ev(seq: u64, target: EventId, filed_basis: rust_decimal::Decimal) -> 
     }
 }
 
-/// Task 3 (BG-D1 / arch r2 M-4, tax r2 — verified shared predicate): `pre2025_tranche_exists` is keyed
-/// on the mere PRESENCE of a non-voided pre-2025 `DeclareTranche` — it never inspects the lot's basis
-/// or looks for a `PromoteTranche` decision at all. So a PROMOTED (>$0 filed) tranche still refuses a
-/// safe-harbor allocation at record time, exactly like an un-promoted ($0) one. `guard_allocation_vs_tranche`
-/// is the ONE chokepoint for all four allocation append sites (CLI `safe_harbor_allocate`/`safe_harbor_attest`,
-/// TUI `persist_safe_harbor_allocate`/`persist_safe_harbor_attest`) AND the TUI opener's pre-flight
-/// consult (`session.rs:692`, via the same `pre2025_tranche_exists`) — exercising the shared predicate
-/// here covers all of them by construction.
+/// Task 3 (BG-D1 / arch r2 M-4, tax r2 — verified shared predicate): `pre2025_tranche_exists`
+/// (`btctax_core::tranche_guard`, moved from btctax-cli in Defensive Filing Wizard Task 5 / C-2) is
+/// keyed on the mere PRESENCE of a non-voided pre-2025 `DeclareTranche` — it never inspects the lot's
+/// basis or looks for a `PromoteTranche` decision at all. So a PROMOTED (>$0 filed) tranche still
+/// refuses a safe-harbor allocation at record time, exactly like an un-promoted ($0) one.
+/// `guard_allocation_vs_tranche` is the ONE chokepoint for all four allocation append sites (CLI
+/// `safe_harbor_allocate`/`safe_harbor_attest`, TUI `persist_safe_harbor_allocate`/
+/// `persist_safe_harbor_attest`) AND the TUI opener's pre-flight consult (`session.rs:692`, via the
+/// same core `pre2025_tranche_exists`) — exercising the shared predicate here covers all of them by
+/// construction.
 #[test]
 fn a_promoted_tranche_still_refuses_a_safe_harbor_allocation_at_record_time() {
     let tranche = LedgerEvent {
