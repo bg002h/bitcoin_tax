@@ -45,6 +45,11 @@ pub enum EditorScreen {
     Unlock,
     Locked,
     Browse,
+    /// The Defensive Filing Wizard dashboard (Task 7, Phase P-B): a READ-ONLY, derived render of
+    /// `btctax_core::defensive::journey_view` over the Browse screen's own snapshot. Entered via
+    /// `EditorApp::open_defensive_filing` (the DFW-D6 pseudo-active gate); its own per-screen state
+    /// lives in `EditorApp::defensive_dashboard`.
+    DefensiveFiling,
 }
 
 /// Top-level editor application state.
@@ -115,6 +120,11 @@ pub struct EditorApp {
     /// with the other flow gates (modals → flows → this → Browse), so `q`/Esc never fall through
     /// to a quit arm while it is blocking. At most one flow is `Some` at a time (the invariant).
     pub tax_inputs_form: Option<TaxInputsFormState>,
+    /// The Defensive Filing Wizard dashboard's own per-screen state (Task 7, Phase P-B). `Some` while
+    /// `screen == EditorScreen::DefensiveFiling` — set by `open_defensive_filing`, which computes the
+    /// ONE `journey_view` this state carries. READ-ONLY (C-3): nothing here is ever written to a
+    /// chokepoint; it is a derived read plus a pure UI cursor, exactly like every other screen's state.
+    pub defensive_dashboard: Option<crate::defensive_dashboard::DefensiveDashboardState>,
     /// The per-mutation confirmation modal. `Some` while awaiting Enter/Esc.
     ///
     /// Modal dispatch precedes form and screen dispatch (the R0-M4 lesson —
@@ -308,6 +318,7 @@ impl EditorApp {
             forms_state: TableState::default(),
             profile_form: None,
             tax_inputs_form: None,
+            defensive_dashboard: None,
             mutation_modal: None,
             classify_inbound_flow: None,
             classify_inbound_modal: None,
@@ -391,6 +402,88 @@ impl EditorApp {
                 self.unlock.error = Some(msg);
             }
         }
+    }
+
+    /// M-4 (SPEC DFW-D2 "Plan→apply staleness"): count of `EditorApp`'s own `*_flow` `Option` fields
+    /// currently `Some` — the load-bearing quantity behind the "one-flow" invariant every flow field's
+    /// own doc comment already claims informally. `pub(crate)` so the Task 7 dashboard's own tests (in
+    /// the sibling `defensive_dashboard` module) can exercise the debug assertion below directly.
+    pub(crate) fn open_flow_count(&self) -> usize {
+        [
+            self.classify_inbound_flow.is_some(),
+            self.reclassify_outflow_flow.is_some(),
+            self.reclassify_income_flow.is_some(),
+            self.set_fmv_flow.is_some(),
+            self.void_flow.is_some(),
+            self.select_lots_flow.is_some(),
+            self.set_donation_details_flow.is_some(),
+            self.link_transfer_flow.is_some(),
+            self.classify_raw_flow.is_some(),
+            self.safe_harbor_attest_flow.is_some(),
+            self.resolve_conflict_flow.is_some(),
+            self.optimize_accept_flow.is_some(),
+            self.safe_harbor_allocate_flow.is_some(),
+            self.bulk_link_flow.is_some(),
+            self.bulk_sti_flow.is_some(),
+            self.bulk_income_flow.is_some(),
+            self.bulk_resolve_flow.is_some(),
+            self.bulk_void_flow.is_some(),
+            self.bulk_reclassify_outflow_flow.is_some(),
+            self.match_self_transfers_flow.is_some(),
+            self.method_election_flow.is_some(),
+        ]
+        .into_iter()
+        .filter(|open| *open)
+        .count()
+    }
+
+    /// DFW-D6 dashboard entry gate: refuse (with routing guidance, never a silent no-op) when the
+    /// projected state is pseudo-active — a defensive-filing journey over synthetic (pseudo-reconciled)
+    /// estimates is incoherent (a Phase-B `SelfTransferMine{$0}` default can silently clear a REAL
+    /// shortfall this feature exists to surface). Mirrors `journey_view`'s own
+    /// `debug_assert!(!state.pseudo_active())` precondition — THIS is the enforcement point that core
+    /// doc comment names. A missing snapshot (still on Unlock/Locked) is a silent no-op: there is
+    /// nothing yet to derive a view from, and this is unreachable via the real Browse-only entry path.
+    ///
+    /// On success: the M-4 one-flow debug assertion (no other `*_flow` may be mid-transaction when the
+    /// dashboard's own `journey_view` snapshot is taken — a later flow mutation would immediately stale
+    /// it), then computes `journey_view` ONCE from the current snapshot and transitions to
+    /// `EditorScreen::DefensiveFiling`.
+    pub fn open_defensive_filing(&mut self) {
+        let Some(snap) = self.snapshot.as_ref() else {
+            return;
+        };
+        if snap.state.pseudo_active() {
+            self.status = Some(
+                "Defensive Filing is unavailable: pseudo-reconcile synthetic defaults are contributing \
+                 to this projection, which could silently mask a real shortfall this journey exists to \
+                 surface. Resolve or approve the pending defaults first ('P' to approve here, or turn \
+                 pseudo mode off via the CLI's reconcile command), then re-enter."
+                    .to_string(),
+            );
+            return;
+        }
+
+        debug_assert!(
+            self.open_flow_count() <= 1,
+            "one-flow invariant violated entering DefensiveFiling: {} flows open simultaneously",
+            self.open_flow_count()
+        );
+
+        let cfg = snap.cli_config.to_projection();
+        let current = self.clock.now().year();
+        let view = btctax_core::defensive::journey_view(
+            &snap.events,
+            &snap.state,
+            &snap.prices,
+            &snap.tables,
+            &cfg,
+            current,
+        );
+        self.defensive_dashboard = Some(crate::defensive_dashboard::DefensiveDashboardState::new(
+            view,
+        ));
+        self.screen = EditorScreen::DefensiveFiling;
     }
 
     /// `BTCTAX_PASSPHRASE` fast-path: open directly when the env var is set.

@@ -569,6 +569,74 @@ fn a_live_tranche_not_clearing_its_pool_shows_pool_still_short() {
     );
 }
 
+#[test]
+fn two_shortfalls_in_the_same_pool_sum_short_sat_without_double_counting_the_live_tranche() {
+    // ★ Task-6-review Minor-2: a SINGLE live tranche, too small to clear EITHER of two distinct
+    // shortfalls in the SAME pool. `short_sat` must be the SUM of both shortfalls; `live_tranche_sat`
+    // must be the tranche's OWN (shared) supply, NOT double-counted across the two shortfall records
+    // that both "match" it (mutation: change the short_sat SUM reducer to `.max()` — the KAT must red).
+    let w = exch();
+    let events = vec![
+        tranche_ev(
+            1,
+            &w,
+            20_000_000,
+            date!(2026 - 01 - 01),
+            date!(2026 - 01 - 10),
+        ),
+        // Consumes the ENTIRE 20M tranche; short by 50M - 20M = 30M.
+        sell_ev(
+            "SELL1",
+            datetime!(2026-03-01 00:00 UTC),
+            &w,
+            50_000_000,
+            25_000,
+        ),
+        // The tranche is now fully consumed (by SELL1) — this second, LATER disposal in the SAME pool
+        // is short by its FULL 60M (nothing left to draw).
+        sell_ev(
+            "SELL2",
+            datetime!(2026-04-01 00:00 UTC),
+            &w,
+            60_000_000,
+            30_000,
+        ),
+    ];
+    let state = project(&events, &prices(), &cfg());
+
+    // Sanity: two DISTINCT shortfall records exist (one per disposal event) before we even reach
+    // `journey_view` — confirms the fixture actually produces two aggregates, not one.
+    let raw = btctax_core::defensive::discovery::shortfalls(&state);
+    assert_eq!(
+        raw.len(),
+        2,
+        "fixture must produce two distinct per-event shortfalls: {raw:?}"
+    );
+    let expected_sum: i64 = raw.iter().map(|s| s.short_sat).sum();
+    assert_eq!(
+        expected_sum, 90_000_000,
+        "sanity: 30M (SELL1 residual) + 60M (SELL2, tranche already exhausted): {raw:?}"
+    );
+
+    let view = journey_view(&events, &state, &prices(), &no_tables(), &cfg(), FAR_FUTURE);
+    assert_eq!(
+        view.still_short.len(),
+        1,
+        "exactly ONE combined pool-level row for the two same-pool shortfalls: {:?}",
+        view.still_short
+    );
+    let ps = &view.still_short[0];
+    assert_eq!(
+        ps.short_sat, expected_sum,
+        "short_sat must be the SUM of both shortfalls (90M), never a `.max()` (60M): {ps:?}"
+    );
+    assert_eq!(
+        ps.live_tranche_sat, 20_000_000,
+        "live_tranche_sat must be the tranche's OWN (shared) supply — NOT double-counted to 40M just \
+         because two shortfall records both match it: {ps:?}"
+    );
+}
+
 // ════════════════════════════════════════════════════════════════════════════════════════════════
 // FeeOnlyPromoteNoop (★ arch-I-2/tax-M-1)
 // ════════════════════════════════════════════════════════════════════════════════════════════════

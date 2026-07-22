@@ -53,6 +53,7 @@ pub fn draw(frame: &mut Frame, app: &mut EditorApp) {
         EditorScreen::Unlock => draw_unlock(frame, app),
         EditorScreen::Locked => draw_locked(frame),
         EditorScreen::Browse => draw_browse(frame, app),
+        EditorScreen::DefensiveFiling => draw_defensive_filing(frame, app),
     }
 }
 
@@ -82,6 +83,32 @@ fn draw_locked(frame: &mut Frame) {
     )
     .alignment(Alignment::Center);
     frame.render_widget(msg, inner);
+}
+
+/// Render the Defensive Filing Wizard dashboard (Task 7, Phase P-B): a READ-ONLY, derived text render
+/// of `crate::defensive_dashboard::render_dashboard`. `app.defensive_dashboard` is `Some` whenever this
+/// screen is active (set by `EditorApp::open_defensive_filing`); the `None` arm is a defensive fallback,
+/// never reached via the real entry path.
+fn draw_defensive_filing(frame: &mut Frame, app: &EditorApp) {
+    let area = frame.area();
+    let block = Block::default()
+        .title(" btctax-tui-edit [EDITOR] — Defensive Filing ")
+        .borders(Borders::ALL);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let Some(dash) = app.defensive_dashboard.as_ref() else {
+        let msg = Paragraph::new("No dashboard state — press Esc to return to Browse.");
+        frame.render_widget(msg, inner);
+        return;
+    };
+
+    let lines: Vec<Line> = crate::defensive_dashboard::render_dashboard(&dash.view)
+        .into_iter()
+        .map(Line::from)
+        .collect();
+    let para = Paragraph::new(lines).wrap(Wrap { trim: false });
+    frame.render_widget(para, inner);
 }
 
 /// Render the browse screen: EDITOR-marked tab bar + viewer tab content + EDITOR footer.

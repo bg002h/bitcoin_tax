@@ -8,6 +8,7 @@
 //! RAII + panic hook; `restore_terminal` called explicitly for belt-and-suspenders).
 //! This module performs no writes.
 
+mod defensive_dashboard;
 mod draw_edit;
 mod edit;
 mod editor;
@@ -456,6 +457,40 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                 // KEEP IN SYNC with KEYMAP overlay (draw_help_overlay). `?` opens the full-keymap help.
                 KeyCode::Char('?') => app.help_open = true,
                 _ => {}
+            }
+        }
+        // The Defensive Filing Wizard dashboard (Task 7, Phase P-B) — READ-ONLY + dispatch-scaffolding
+        // ONLY (C-3). `Esc`/`q` return to Browse; every other key is handed to
+        // `defensive_dashboard::handle_defensive_dashboard_key`, which only names an intent and moves
+        // the cursor. Launching the named intent's flow (`declare`/`promote`, Phase P-C) or chokepoint
+        // step (`export`, Phase P-D) is NOT implemented yet — those tasks wire the match below.
+        EditorScreen::DefensiveFiling => {
+            app.status = None;
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    app.screen = EditorScreen::Browse;
+                    app.defensive_dashboard = None;
+                }
+                _ => {
+                    if let Some(dash) = app.defensive_dashboard.as_mut() {
+                        let intent = defensive_dashboard::handle_defensive_dashboard_key(dash, key);
+                        app.status = match intent {
+                            defensive_dashboard::DashboardIntent::None => None,
+                            defensive_dashboard::DashboardIntent::Declare(_) => {
+                                Some("declare — coming soon (Phase P-C)".to_string())
+                            }
+                            defensive_dashboard::DashboardIntent::Promote(_) => {
+                                Some("promote — coming soon (Phase P-C)".to_string())
+                            }
+                            defensive_dashboard::DashboardIntent::Export => {
+                                Some("export — coming soon (Phase P-D)".to_string())
+                            }
+                            defensive_dashboard::DashboardIntent::RouteResolveFirst(_) => {
+                                Some("resolve-first routing — coming soon (Phase P-C)".to_string())
+                            }
+                        };
+                    }
+                }
             }
         }
     }
