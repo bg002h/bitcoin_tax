@@ -5,14 +5,14 @@ Follow-ups for the basis-floor / PromoteTranche feature (`feat/conservative-fili
 closes.** Each entry records its **owning phase** so reconciliation is a grep (STANDARD_WORKFLOW §
 in-phase burndown). Only ownerless residue batches to the end.
 
-## Open — Phase 1b export-surface work (T16 wiring + T17 completeness)
+## Phase-1b export-surface work — ✅ ALL FOLDED (kept for the audit trail)
 
-Phase 1b is decomposed: **T16** = wire the 8275 PDF into the CLI export/full-return + un-hide + the
-overflow-graceful consumer; **T17** = export-surface COMPLETENESS (the HARD TUI-export gate + the
-whole-branch M1/M2 + the oracle-hardening KAT). The Phase-1a completeness GATE (`promote_export_gate`,
-refuse-before-bytes on the three CLI export fns) already prevents any INADEQUATE-disclosure filing from
-escaping today; these close the remaining surface coverage. **Both T16 and T17 briefs MUST reference this
-section; every item here is burned down before the Phase-1b whole-branch gate.**
+Phase 1b was decomposed: **T16** = wire the 8275 PDF into the CLI export/full-return + un-hide + the
+overflow-graceful consumer; **T17** = the HARD TUI-export gate. The whole-branch M1/M2 + the oracle KAT
+were folded by the controller. **STATUS (all done, full CI green @ `6505c18`):** TUI-export HARD gate →
+T17 (`fe8e9d4`); M2 all-years CSV co-emit → T16 (`e7d63b9`); overflow-graceful → T16 (`a3d3392`); M1
+8275 no-loss suffix → `0e7a59a` (both emitters, guard KAT mutation-verified); sentinel oracle KAT →
+`6505c18` (mutation-verified vs a map swap); provenance → resolved. Nothing open below.
 
 - **[★ HARD BG-D8 requirement — owner T17 — NOT a deferrable cleanup] The TUI export path
   (`btctax_tui::export::do_export` → `write_form_csvs`) must come behind the BG-D8 gate.** (Raised T14;
