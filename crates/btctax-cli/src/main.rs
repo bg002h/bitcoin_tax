@@ -2145,6 +2145,11 @@ fn bulk_resolve_payload_summary(p: &btctax_core::EventPayload) -> String {
                 u.raw.chars().take(40).collect::<String>()
             )
         }
+        // Approach-B (arch r2 N-2, DELIBERATE): no `PromoteTranche` arm here — this summary renders
+        // IMPORTED-conflict payloads only (bulk-resolve-conflict resolves `ImportConflict` rows between
+        // an existing and an incoming import); a `PromoteTranche` decision can never appear as a
+        // `current`/`new` payload in this preview, so there is nothing to render. Do NOT "fix" this by
+        // copying the `bulk_void_payload_summary` arm here — see `bulk_resolve_summary_has_no_promote_arm_by_design`.
         other => format!("{other:?}"),
     }
 }
@@ -2233,6 +2238,14 @@ fn bulk_void_payload_summary(p: &btctax_core::EventPayload) -> String {
             t.window_start,
             t.window_end
         ),
+        // Approach-B (BG-D1): a promote is ALSO revocable (`is_revocable_payload`) — render it human-
+        // readably too (mirrors the tui-edit `summarize_void_payload` sibling, T12). `.canonical()` —
+        // `EventId` has no `Display` (arch r1 N-1).
+        EventPayload::PromoteTranche(p) => format!(
+            "PromoteTranche of {} → ${} floor",
+            p.target.canonical(),
+            p.filed_basis
+        ),
         other => format!("{other:?}"),
     }
 }
@@ -2307,6 +2320,55 @@ mod tests {
         let s = bulk_void_payload_summary(&p);
         assert!(s.contains("MethodElection HIFO"), "human method label: {s}");
         assert!(!s.contains("Hifo"), "no raw Debug variant name: {s}");
+    }
+
+    /// Build a representative `PromoteTranche` payload for the T12 render KATs.
+    fn promote_payload() -> btctax_core::EventPayload {
+        use btctax_core::conservative::Coverage;
+        use btctax_core::{Acknowledgment, EventId, EventPayload, FloorMethod, PromoteTranche};
+        use rust_decimal_macros::dec;
+        EventPayload::PromoteTranche(PromoteTranche {
+            target: EventId::decision(1),
+            method: FloorMethod::WindowLowClose,
+            filed_basis: dec!(12_000),
+            coverage: Coverage::Full,
+            provenance_attested: true,
+            acknowledgment: Acknowledgment {
+                phrase: "I understand and accept the risk".into(),
+                shown_terms: vec![],
+                provenance_text: "acquired by purchase within the declared window".into(),
+                provenance_version: "v1".into(),
+            },
+            part_ii_narrative: "cash P2P purchase, no records; window bounded on-chain".into(),
+        })
+    }
+
+    /// T12 (BG-D1 payload-side census): the bulk-void summary renders a `PromoteTranche` payload
+    /// HUMANLY (the promoted-to floor + its target), not the raw `{:?}` Debug struct (which would leak
+    /// `filed_basis: 12000` field syntax mid-column) — the silent hazard this task closes on the
+    /// payload side.
+    #[test]
+    fn bulk_void_summary_renders_a_promote_readably_not_debug() {
+        let s = bulk_void_payload_summary(&promote_payload());
+        assert!(s.contains("PromoteTranche"), "{s}");
+        assert!(
+            !s.contains("filed_basis:"),
+            "human-readable, not {{:?}} debug: {s}"
+        );
+        assert!(s.contains("12000"), "shows the filed floor: {s}");
+    }
+
+    /// T12 (arch r2 N-2, false-lead pin): `bulk_resolve_payload_summary` deliberately has NO
+    /// `PromoteTranche` arm — it renders imported-conflict payloads only, and a `PromoteTranche`
+    /// decision is unreachable there (bulk-resolve-conflict resolves `ImportConflict` rows, never a
+    /// decision payload). This is a documentation/no-op pin, not a behavior requirement, so a future
+    /// grep for "PromoteTranche" doesn't "fix" the omission believing it's this task's gap.
+    #[test]
+    fn bulk_resolve_summary_has_no_promote_arm_by_design() {
+        let s = bulk_resolve_payload_summary(&promote_payload());
+        // Falls through to the `other => {other:?}` debug fallback — acceptable precisely BECAUSE this
+        // path is unreachable in the real flow.
+        assert!(s.contains("PromoteTranche"), "{s}");
     }
 
     /// Parse a `reconcile bulk-resolve-conflict …` invocation via the real clap derivation.

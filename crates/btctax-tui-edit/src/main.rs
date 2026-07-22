@@ -3841,6 +3841,20 @@ fn summarize_void_payload(payload: &EventPayload) -> (&'static str, String, Opti
             None,
             false,
         ),
+        // Approach-B (BG-D1): a promote is ALSO revocable (`is_revocable_payload`), so it appears in the
+        // void flows — render it human-readably (mirrors the CLI `bulk_void_payload_summary` sibling,
+        // T12). `inner_target` = the `DeclareTranche` it promotes (voiding just the promote reverts the
+        // tranche to its filed $0 basis).
+        EventPayload::PromoteTranche(p) => (
+            "PromoteTranche",
+            format!(
+                "of {} \u{2192} ${} floor",
+                p.target.canonical(),
+                p.filed_basis
+            ),
+            Some(p.target.clone()),
+            false,
+        ),
         _ => ("?", "?".to_string(), None, false),
     }
 }
@@ -9980,6 +9994,41 @@ mod tests {
         assert!(summary.contains("2018"), "window dates: {summary}");
         assert!(target.is_none(), "a tranche has no target event");
         assert!(!sha, "a tranche is not a safe-harbor allocation");
+        assert!(!summary.contains('?'), "no placeholder: {summary}");
+    }
+
+    /// T12 (BG-D1 payload-side census): a `PromoteTranche` row in the TUI void flows renders a HUMAN
+    /// label (the promoted-to floor + its target), not the `?`/`?` wildcard placeholder — mirrors
+    /// `summarize_void_payload_declare_tranche_is_human` and the CLI sibling
+    /// (`bulk_void_payload_summary`).
+    #[test]
+    fn tui_void_flow_labels_a_promote_not_question_mark() {
+        use rust_decimal_macros::dec;
+        let target = EventId::decision(1);
+        let payload = EventPayload::PromoteTranche(btctax_core::event::PromoteTranche {
+            target: target.clone(),
+            method: btctax_core::event::FloorMethod::WindowLowClose,
+            filed_basis: dec!(12_000),
+            coverage: btctax_core::conservative::Coverage::Full,
+            provenance_attested: true,
+            acknowledgment: btctax_core::event::Acknowledgment {
+                phrase: "I understand and accept the risk".into(),
+                shown_terms: vec![],
+                provenance_text: "acquired by purchase within the declared window".into(),
+                provenance_version: "v1".into(),
+            },
+            part_ii_narrative: "cash P2P purchase, no records; window bounded on-chain".into(),
+        });
+        let (tag, summary, inner_target, sha) = summarize_void_payload(&payload);
+        assert_ne!(tag, "?", "must not fall through to the placeholder tag");
+        assert_eq!(tag, "PromoteTranche");
+        assert!(summary.contains("12000"), "filed basis floor: {summary}");
+        assert_eq!(
+            inner_target,
+            Some(target),
+            "targets the DeclareTranche it promotes"
+        );
+        assert!(!sha, "a promote is not a safe-harbor allocation");
         assert!(!summary.contains('?'), "no placeholder: {summary}");
     }
 
