@@ -158,11 +158,14 @@ engine-invisible; forward-planning only). There is **no manual "I hold N BTC" da
        - The **shared promote chokepoint stays behavior-preserving** — NO over-coverage guard is added
          (matching the shipped verb; the `Unrealized` forward-promote, the correctly-sized cover, AND
          `mixed_vintage` all promote unchanged; §5's "changes no shipped promote KAT" is TRUE).
-       - The **dashboard derives a loud over-covered ADVISORY**: a live tranche whose sat exceed the sat
-         it actually covers in the without-promote fold — a **sat-count** comparison, covering BOTH
-         per-sat orderings (tax-M-1), independent of whether a displacement currently manifests. Copy:
-         "this tranche is larger than the shortfall it covers by N sat — if a later import supplied those
-         coins, promoting files an estimated basis on documented coins (understated gain); void +
+       - The **dashboard derives a loud over-covered ADVISORY**, **scoped to a shortfall-residual
+         context** (tax-r4 M-1): fire ONLY when the tranche **covers a shortfall** in the without-promote
+         fold (`covered_sat > 0`) AND its **live sat exceed that covered sat** — a **sat-count** comparison
+         covering BOTH per-sat orderings, independent of whether a displacement currently manifests. A
+         **fully-undisposed** tranche (`covered_sat == 0`) is a legitimate forward-hold, NOT over-covered —
+         it gets no over-covered advisory (the "void + re-declare" remedy would be wrong advice for it).
+         Copy: "this tranche is larger than the shortfall it covers by N sat — if a later import supplied
+         those coins, promoting files an estimated basis on documented coins (understated gain); void +
          re-declare at the covered size. If these are genuinely your no-records coins, promoting is fine."
        - A complementary **"recorded promote is now displacing" advisory** (tax-N-3) mirrors the shipped
          `promote_drift_advisory` (`conservative_promote.rs:89`): surface when a recorded promote's floor
@@ -302,9 +305,11 @@ reviewed to **0C/0I under BOTH the tax and architecture lenses** before merge. *
   whose pool matches an unresolved short renders the pool-level "still short — don't declare again" state.
 - **DFW-D5.3 over-covered ADVISORY (not a refusal):** a **fully-undisposed** tranche, a **correctly-sized
   cover**, AND a **`mixed_vintage`** documented-lot+promoted-tranche reorder all **promote unchanged** (no
-  shipped promote KAT changes — the shared gate is behavior-preserving); an **over-sized** tranche (declare
-  100M → later 60M in-pool import) renders the derived **over-covered dashboard advisory** (mutation:
-  derive it from displacement-only → a reverse-per-sat-ordering over-size shows nothing → reds).
+  shipped promote KAT changes — the shared gate is behavior-preserving); a **fully-undisposed** tranche
+  shows **NO** over-covered advisory (`covered_sat==0` — M-1 scoping; the void+re-declare remedy would
+  misfire); an **over-sized** tranche (declare 100M → later 60M in-pool import, `covered_sat==40M<100M`)
+  renders the derived **over-covered dashboard advisory** (mutation: derive it from displacement-only → a
+  reverse-per-sat-ordering over-size shows nothing → reds).
 - **DFW-D6 pseudo (all shadows):** with pseudo active the journey refuses+routes; and at the chokepoint
   the **discovery**, **clearance**, AND **consent/savings** projections all force `pseudo_reconcile=false`
   — a `SelfTransferMine{$0}`-cleared shortfall is NOT hidden and no pseudo number reaches a recorded
@@ -321,8 +326,9 @@ reviewed to **0C/0I under BOTH the tax and architecture lenses** before merge. *
 - Plus the shipped BG-D1..D11 KATs remain green (the chokepoint extraction is behavior-preserving) —
   **EXCEPT** the DFW-D6 chokepoint pseudo-off correction (arch-r2 m-2), which is a **bug fix** to the
   latent sub-1 pseudo-`Acknowledgment` gap: the KATs it changes are the buggy ones, replaced by the
-  latent-gap KAT. (This is the ONLY intended behavior change; C-1's over-coverage refusal must NOT change
-  any shipped promote KAT — the undisposed-still-promotes KAT proves it.)
+  latent-gap KAT. (This is the ONLY intended behavior change; the over-coverage check is a derived
+  dashboard **advisory**, NOT a chokepoint gate — the shared promote gate is untouched, so it changes NO
+  shipped promote KAT, proven by the `mixed_vintage` / undisposed / correctly-sized promotes.)
 
 ## 6. Design provenance
 
