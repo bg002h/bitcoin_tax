@@ -143,6 +143,14 @@ pub struct PromoteEntry {
 /// Keyed by the target `DeclareTranche` `EventId` == a promoted leg's `lot_id.origin_event_id` (BG-D4).
 pub type PromoteSet = std::collections::BTreeMap<EventId, PromoteEntry>;
 
+/// BG-D4 pro-rata: a promoted tranche's ESTIMATE share for a `leg_sat` draw against its stored floor —
+/// `round_cents(filed_basis × leg_sat / tranche_sat)`. The SINGLE owner of this decomposition formula
+/// (arch r1 Minor-1): both `clamped_leg_basis` (the disposal/removal leg clamp) and `consume_fee`
+/// (fold.rs, the TP8(c) fee-evaporation withholding) call it, so the two can never silently drift apart.
+pub fn estimate_share_of(p: &PromoteEntry, leg_sat: Sat) -> Usd {
+    round_cents(p.filed_basis * Usd::from(leg_sat) / Usd::from(p.tranche_sat))
+}
+
 /// BG-D4 — the disposal-leg loss clamp (Opus r3 tax I-1 formula). Files the promoted `filed_basis` floor
 /// as basis but NEVER manufactures a loss off the estimate: the estimate component is clamped against the
 /// proceeds REMAINING after the documented component, so it can neither drive a leg negative nor crowd the
@@ -177,7 +185,7 @@ pub fn clamped_leg_basis(
     let Some(p) = promote else {
         return usd_basis_share; // not a promoted lot → basis unchanged
     };
-    let estimate_share = round_cents(p.filed_basis * Usd::from(leg_sat) / Usd::from(p.tranche_sat));
+    let estimate_share = estimate_share_of(p, leg_sat);
     let documented_share = usd_basis_share - estimate_share; // UNCLAMPED (a documented fee carry ≥ 0)
     let estimate_basis = estimate_share.min((net_proceeds_share - documented_share).max(Usd::ZERO));
     documented_share + estimate_basis

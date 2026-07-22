@@ -1,4 +1,4 @@
-use crate::conservative_promote::{clamped_leg_basis, PromoteSet};
+use crate::conservative_promote::{clamped_leg_basis, estimate_share_of, PromoteSet};
 use crate::conventions::{
     is_long_term, long_term_default_acquired, round_cents, split_pro_rata, Sat, TaxDate, Usd,
     TRANSITION_DATE,
@@ -411,12 +411,12 @@ fn consume_fee(
             let gain_basis: Usd = consumed
                 .iter()
                 .map(|c| match promotes.get(&c.lot_id.origin_event_id) {
-                    Some(entry) => {
-                        let estimate_share = round_cents(
-                            entry.filed_basis * Usd::from(c.sat) / Usd::from(entry.tranche_sat),
-                        );
-                        c.gain_basis - estimate_share
-                    }
+                    // Withhold this fragment's estimate share (the SHARED `estimate_share_of` formula —
+                    // byte-identical to `clamped_leg_basis`, arch Minor-1) so only the DOCUMENTED remainder
+                    // re-homes. `.max($0)` (tax N2): a cent-scale rounding residue must never make a
+                    // fragment's withheld contribution negative — the direction is already conservative,
+                    // this just floors each fragment at $0.
+                    Some(entry) => (c.gain_basis - estimate_share_of(entry, c.sat)).max(Usd::ZERO),
                     None => c.gain_basis,
                 })
                 .sum();
