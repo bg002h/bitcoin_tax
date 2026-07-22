@@ -27,6 +27,7 @@ use btctax_core::project::{
     evaluate_disposal, project, would_conflict, CandidateDisposal, LotMethod, ProjectionConfig,
 };
 use btctax_core::state::{BlockerKind, DisposalLeg, LedgerState, RemovalKind};
+use btctax_core::tax::form8275::disclosure_8275;
 use btctax_core::tax::return_1040::assemble_absolute;
 use btctax_core::tax::return_inputs::{Owner, ReturnInputs, ScheduleAInputs, W2};
 use btctax_core::tax::testonly::{ty2024_params, ty2024_table};
@@ -2336,5 +2337,172 @@ fn verify_drift_advisory_is_direction_aware_and_the_fold_still_uses_the_stored_n
         tranche_lot_basis(&st),
         dec!(12_000),
         "the fold uses the STORED number forever, regardless of a later price-data change"
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// Task 13 — Form 8275 content (Part I auto + Part II narrative) + BG-D7/D10 honest copy. PRIVACY:
+// synthetic values only.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// The raw events behind `promoted_state()` (Task 11): a 1-BTC tranche promoted to a $12,000 floor,
+/// sold WHOLE at $20,000 — ABOVE the floor, so BG-D4's clamp does NOT bind.
+fn promoted_disposal_events() -> Vec<LedgerEvent> {
+    let w = exch();
+    vec![
+        tranche_ev(
+            1,
+            &w,
+            100_000_000,
+            date!(2024 - 01 - 01),
+            date!(2024 - 01 - 10),
+        ),
+        promote_ev(2, EventId::decision(1), dec!(12_000)),
+        sell_ev(
+            "SELL",
+            datetime!(2024-06-01 00:00 UTC),
+            &w,
+            100_000_000,
+            20_000,
+        ),
+    ]
+}
+
+/// ★ `disclosure_8275` is `Some` iff a PROMOTED disposal leg is filed in `year` — an unpromoted
+/// (still-$0) tranche takes no estimated position, so there is nothing to disclose.
+#[test]
+fn disclosure_is_some_iff_a_promoted_leg_is_filed_this_year() {
+    let events = promoted_disposal_events();
+    let state = promoted_state();
+    assert!(
+        disclosure_8275(&events, &state, 2024).is_some(),
+        "a promoted disposal leg filed this year yields a disclosure"
+    );
+
+    let unpromoted = unpromoted_below_low_tranche();
+    let unpromoted_state = project(&unpromoted, &prices(), &cfg());
+    assert!(
+        disclosure_8275(&unpromoted, &unpromoted_state, 2024).is_none(),
+        "an UNPROMOTED tranche (still filed at $0) takes no estimated position — nothing to disclose"
+    );
+}
+
+/// BG-D7/D10: `render()` names the underpayment as the penalty base, the §6662(h) 40% worst-case, and
+/// the corrected §6664(c)(2) cite — and NEVER "safe harbor" (a promoted floor is a disclosed estimate,
+/// not a harbor).
+#[test]
+fn disclosure_copy_names_the_underpayment_penalty_base_never_safe_harbor() {
+    let events = promoted_disposal_events();
+    let state = promoted_state();
+    let d = disclosure_8275(&events, &state, 2024).unwrap();
+    let text = d.render();
+    assert!(
+        !text.to_lowercase().contains("safe harbor"),
+        "never 'safe harbor' (BG-D7): {text}"
+    );
+    assert!(
+        text.contains("of the resulting additional tax"),
+        "the penalty base is the underpayment, not the disallowed basis (BG-D10 / tax r1 M-3): {text}"
+    );
+    assert!(text.contains("40%"), "the §6662(h) worst-case rate: {text}");
+    assert!(
+        text.contains("\u{00a7}6664(c)(2)"),
+        "the corrected reasonable-cause cite (tax r2 N-1): {text}"
+    );
+}
+
+/// A 1-BTC tranche promoted to a $12,000 floor, sold WHOLE at $8,000 — BELOW the floor, so BG-D4's
+/// loss clamp binds: the leg files `basis == proceeds == $8,000`, never the $12,000 pre-clamp floor.
+fn promote_sold_below_floor_events() -> Vec<LedgerEvent> {
+    let w = exch();
+    vec![
+        tranche_ev(
+            1,
+            &w,
+            100_000_000,
+            date!(2024 - 01 - 01),
+            date!(2024 - 01 - 10),
+        ),
+        promote_ev(2, EventId::decision(1), dec!(12_000)),
+        sell_ev(
+            "SELL",
+            datetime!(2024-06-01 00:00 UTC),
+            &w,
+            100_000_000,
+            8_000,
+        ),
+    ]
+}
+
+/// ★ BG-D7 (tax r1 M-4/I-6): the Part I amount is the AS-FILED 8949 col (e) = the clamped basis (= net
+/// proceeds), NOT the floor — disclosing the floor while filing less recreates the examiner mismatch.
+#[test]
+fn a_clamped_leg_disclosure_adds_the_no_loss_sentence_and_files_the_clamped_amount() {
+    let events = promote_sold_below_floor_events();
+    let state = project(&events, &prices(), &cfg());
+    let d =
+        disclosure_8275(&events, &state, 2024).expect("a promoted disposal leg files this year");
+    let text = d.render();
+    assert!(
+        text.contains("limited so as not to report a loss from the estimate"),
+        "the clamped-leg no-loss sentence: {text}"
+    );
+    let disposal = state.disposals.first().expect("the disposal");
+    let leg = disposal.legs.first().expect("the leg");
+    assert_eq!(
+        leg.basis,
+        dec!(8_000),
+        "BG-D4's clamp bound to the $8,000 net proceeds"
+    );
+    assert_eq!(
+        d.part_i[0].amount, leg.basis,
+        "Part I amount = the AS-FILED 8949 col (e) basis"
+    );
+    assert_ne!(
+        d.part_i[0].amount,
+        dec!(12_000),
+        "NOT the pre-clamp $12,000 floor"
+    );
+}
+
+/// BG-D11: a promoted tranche DONATED short-term files documented-only ($0 — the estimate evaporates,
+/// `conservative_promote::clamped_leg_basis` with a $0 removal `net_proceeds_share`), so it takes NO
+/// estimated position on the return. Part I must be 8949-DISPOSAL-scoped only — no 8283/removal item.
+#[test]
+fn removal_donation_legs_are_absent_from_part_i() {
+    let events = promote_then_donate(
+        100_000_000,
+        dec!(60_000),
+        dec!(50_000),
+        date!(2024 - 01 - 01),
+        date!(2024 - 01 - 10),
+        datetime!(2024-06-01 00:00 UTC),
+    );
+    let state = project(&events, &prices(), &cfg());
+    let d = disclosure_8275(&events, &state, 2024);
+    assert!(
+        d.as_ref()
+            .is_none_or(|d| d.part_i.iter().all(|i| i.form == "8949")),
+        "no 8283/removal items in Part I: {d:?}"
+    );
+}
+
+/// `printed_8275` mirrors `Printed8283Rows`: Part I `amount`s are whole-dollar rounded (IRS half-up,
+/// away from zero) at the line; Part II (text, not money) carries through unrounded.
+#[test]
+fn printed_8275_rounds_part_i_amounts_to_whole_dollars() {
+    let events = promoted_disposal_events();
+    let state = promoted_state();
+    let mut d = disclosure_8275(&events, &state, 2024).unwrap();
+    d.part_i[0].amount = dec!(12_000.50);
+    let printed = btctax_core::tax::printed::printed_8275(&d);
+    assert_eq!(
+        printed.part_i[0].amount,
+        dec!(12_001),
+        "whole-dollar rounded at the line (IRS half-up: $12,000.50 -> $12,001)"
+    );
+    assert_eq!(
+        printed.part_ii, d.part_ii,
+        "Part II (text, not money) carries through unrounded"
     );
 }
