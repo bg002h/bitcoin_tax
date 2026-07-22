@@ -46,21 +46,12 @@ predicate changed) mutation-proven**, in one fold:
 - **[Nit] `write_csv_exports` path untested for `basis_methodology.txt`** (arch N-5) — same shared
   `write_basis_methodology_txt` helper the `write_form_csvs` (tested) and `export-irs-pdf` (tested) paths use.
 
-- **[Phase-1a: dormant Minor / ★ Phase-1b: HARD BG-D8 requirement — NOT a deferrable cleanup] The TUI export
-  path (`write_form_csvs`) is NOT behind the BG-D8 gate** (raised T14; owner = **Phase 1b / T16**; severity
-  re-tagged per the T14 Opus review) — Task 14 put `promote_export_gate` + the `form_8275.txt` emit on the THREE
-  CLI export fns (`export_snapshot`, `export_irs_pdf`, `export_full_return`), paired at the CLI layer exactly
-  where the pseudo-attestation gate lives (NOT threaded through the shared render.rs writers — the same
-  "disproportionate to thread `events` through `write_form_csvs`/`write_csv_exports`" call the tax-M-2 Minor
-  above already made). The btctax-tui export (`btctax_tui::export::do_export` → `write_form_csvs`) therefore
-  neither gates the hand-crafted incomplete-8275 corner nor emits `form_8275.txt` for a completed promoted leg.
-  DORMANT in Phase 1a (Minor): the incomplete state is only raw-vault-reachable, and `promote` is CLI-only / not
-  in a released binary until Phase 1b. **★ In Phase 1b this is a HARD (Critical-class) BG-D8 requirement on T16,
-  not the Minor tag: once `promote` reaches the released/TUI surface, a TUI-exported promoted packet would (a)
-  never refuse an incomplete 8275 and (b) omit `form_8275.txt` even for a COMPLETE promoted leg — a direct
-  BG-D8 (Reg §1.6662-4(f) inadequate-disclosure) violation. T16 MUST gate `write_form_csvs` (or route the TUI
-  export through the gated CLI fns) AND carry its own refusal + emit KATs on the TUI surface; it cannot ship 1b
-  without it.**
+- **[MOVED → Approach-B FOLLOWUPS] The TUI export-path BG-D8 gap** (raised T14, re-tagged HARD for
+  Phase-1b/T16) now lives with the other Approach-B export-surface follow-ups in
+  `design/conservative-filing-approach-b/FOLLOWUPS.md` (§ "Open — Phase 1b (T16) export-surface
+  requirements"), co-located with tax-review M1 (8275 no-loss suffix) and M2 (all-years CSV 8275.txt).
+  Approach-B is a distinct sub-project on `feat/conservative-filing-b`; its follow-ups belong to its own
+  artifact, not this (merged v1) file.
 
 ### T16 whole-branch review r2 (2026-07-20) — FOLDED (re-review of the r1 fix fold)
 
