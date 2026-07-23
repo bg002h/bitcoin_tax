@@ -165,6 +165,15 @@ pub fn render_promote_flow(state: &PromoteFlowState) -> Vec<String> {
                 lines.push(line.to_string());
             }
             lines.push(String::new());
+            // T9-review Minor-1: echo the purchase attestation adjacent to the moment of consent —
+            // `rendered` (`btctax_cli::render_consent(&plan)`) never includes `PROVENANCE_TEXT` (it's
+            // built purely from `plan.advisory_lines`/`plan.terms`/`plan.gift_only_years`/
+            // `plan.post_consent_note` — see `chokepoint::render_consent`), so without this line the
+            // Part II screen is the ONLY place the filer sees what they're attesting. DISPLAY-only: this
+            // is the flow's own render, not `render_consent`/`shown_terms` — the recorded `Acknowledgment`
+            // is untouched.
+            lines.push(format!("You attest: {}", btctax_cli::PROVENANCE_TEXT));
+            lines.push(String::new());
             lines.push(format!(
                 "Type the acknowledgment phrase EXACTLY to record this promote: {:?}",
                 btctax_cli::PROMOTE_ACK_PHRASE
@@ -352,6 +361,40 @@ mod tests {
                 panic!("a valid narrative over a fully-covered window must advance to Consent: {error:?}")
             }
         }
+    }
+
+    // ── T9-review Minor-1: the Consent step ECHOES the purchase attestation adjacent to the ack ──────
+
+    #[test]
+    fn consent_step_renders_the_purchase_attestation_echo_above_the_ack_prompt() {
+        let (id, events) = tranche_events(date!(2020 - 01 - 01), date!(2020 - 01 - 10), 40_000_000);
+        let prices = full_price_coverage(date!(2020 - 01 - 01), date!(2020 - 01 - 10));
+        let mut state = PromoteFlowState::new(id);
+        type_str(
+            &mut state.part_ii,
+            "cash P2P purchase, no records; on-chain window bounded",
+        );
+        state.review(&events, &prices, &cfg(), now());
+        assert!(
+            matches!(state.step, PromoteFlowStep::Consent { .. }),
+            "this fixture's review() must reach Consent"
+        );
+        let rendered = render_promote_flow(&state).join("\n");
+        let attest_line = format!("You attest: {}", btctax_cli::PROVENANCE_TEXT);
+        assert!(
+            rendered.contains(&attest_line),
+            "the Consent step must echo the purchase attestation adjacent to the ack prompt: {rendered}"
+        );
+        // Adjacency: the echo must sit ABOVE the ack prompt (right before the moment of consent), not
+        // buried after it.
+        let attest_pos = rendered.find(&attest_line).expect("checked above");
+        let ack_prompt_pos = rendered
+            .find("Type the acknowledgment phrase EXACTLY")
+            .expect("the ack prompt must render");
+        assert!(
+            attest_pos < ack_prompt_pos,
+            "the attestation echo must render ABOVE the ack prompt: {rendered}"
+        );
     }
 
     // ── (a) / T4 tie-in: the TUI promote path records an Acknowledgment Eq-identical to the CLI ─────

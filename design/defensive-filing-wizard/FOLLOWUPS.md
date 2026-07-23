@@ -17,12 +17,26 @@ Legend: **[open]** not started · **[done]** burned down (kept for provenance) �
   window; the filed floor is `filed_basis_for` requiring `Coverage::Full`), so it does NOT gate correctness — but the
   actual windows + labels are a product/copy + date-boundary decision the owner should make (or bless the calendar
   buckets) before ship. *(Closes T8-review Minor-1 by existing: `era.rs` cites this file.)*
-- **[open] `declare_flow::nudge_window_start` has no lower bound** (T8-review Minor-2). Can move `window_start` past
-  `window_end`/before genesis. Filing-safe (surfaced live as `NoCoverage`; `plan_declare` refuses at confirm). UX polish;
-  contained to `declare_flow.rs`. (Owner: **P-C/Task 9** polish.)
+- **[done] `declare_flow::nudge_window_start` has no lower bound** (T8-review Minor-2). Was able to move
+  `window_start` past `window_end`/before genesis. Filing-safe (surfaced live as `NoCoverage`; `plan_declare` refuses
+  at confirm), so this was a UX-robustness fix, not a correctness gate. Clamped `nudge_window_start` to
+  `window_start <= window_end` and to never precede Bitcoin's genesis block (`era_window(ALL_PRESETS[0]).0`,
+  2009-01-03 — the SAME floor already governing the oldest era preset; no new date invented). KAT:
+  `declare_flow::tests::nudging_window_start_never_crosses_past_window_end_or_before_genesis`. (Owner: **P-C/Task 9**
+  polish — DONE.)
 
 ## P-C / Task 9 (the promote flow)
 
+- **[done] T9-review Minor-1 — the Consent step didn't echo the purchase attestation.** The Part II
+  authoring screen shows `PROVENANCE_TEXT` ("By continuing, you attest: ...") but the Consent screen —
+  where the filer types the TypedWord ack — did not restate it, even though `render_consent(&plan)`
+  (the shipped chokepoint text) never includes `PROVENANCE_TEXT` (it's built purely from
+  `plan.advisory_lines`/`plan.terms`/`plan.gift_only_years`/`plan.post_consent_note`). Added a one-line
+  echo ("You attest: {PROVENANCE_TEXT}") right above the ack prompt in `render_promote_flow`'s `Consent`
+  arm — DISPLAY-only, in the flow's own render, never touching the chokepoint `render_consent` or the
+  recorded `Acknowledgment`/`shown_terms`. KAT:
+  `promote_flow::tests::consent_step_renders_the_purchase_attestation_echo_above_the_ack_prompt`.
+  (Owner: **P-C/Task 9** — DONE.)
 - **[done: no split needed] T2-M1 — `Refusal::Coverage` overload.** Confirmed at Task 9, the FIRST (and only)
   `Refusal`-consuming TUI flow: `promote_flow.rs`'s `review()` never branches on a `Refusal` variant — it only maps
   the WHOLE enum through `From<Refusal> for CliError` and displays `.to_string()` (grepped: the sole `Refusal::`

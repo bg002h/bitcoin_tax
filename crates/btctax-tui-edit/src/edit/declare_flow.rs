@@ -92,11 +92,26 @@ impl DeclareFlowState {
     }
 
     /// Nudge `window_start` by `days` (may move earlier or later than the current preset's own start —
-    /// a manual DFW-D9 edit). Invalidates the on-demand tax-Δ (M-1). No lower bound other than
-    /// `window_start <= window_end` (enforced at `plan_declare`/confirm time, not here — the live
-    /// readout surfaces an invalid ordering via `floor_readout` returning `NoCoverage`).
+    /// a manual DFW-D9 edit), CLAMPED so it can never move PAST `window_end` (`window_start <= window_end`
+    /// is preserved here defensively — T8-review Minor-2: `plan_declare`/confirm-time already refuses a
+    /// degenerate ordering, but leaving it unbounded here let a manual nudge surface a nonsensical
+    /// inverted-window `NoCoverage` in the live readout for no reason) and never before the earliest
+    /// sensible date — Bitcoin's genesis block, `era_window(ALL_PRESETS[0]).0` (2009-01-03), the SAME
+    /// floor already governing the oldest era preset (`DeclareFlowState::new`'s own seed) — no new date
+    /// invented here. Invalidates the on-demand tax-Δ (M-1).
     pub fn nudge_window_start(&mut self, days: i64) {
-        self.window_start = shift_date(self.window_start, days);
+        let candidate = shift_date(self.window_start, days);
+        let genesis = era_window(ALL_PRESETS[0]).0;
+        let floored = if candidate < genesis {
+            genesis
+        } else {
+            candidate
+        };
+        self.window_start = if floored > self.window_end {
+            self.window_end
+        } else {
+            floored
+        };
         self.tax_delta = None;
     }
 
@@ -445,6 +460,30 @@ mod tests {
         assert!(
             state.tax_delta.is_none(),
             "any window edit must blank the cached tax-Δ"
+        );
+    }
+
+    // ── T8-review Minor-2: nudge_window_start is bounded (never past window_end, never before genesis) ─
+
+    #[test]
+    fn nudging_window_start_never_crosses_past_window_end_or_before_genesis() {
+        let sf = shortfall_on(date!(2020 - 06 - 15));
+        let mut state = DeclareFlowState::new(sf, wallet(), false);
+        // Pin window_end close to window_start so a large positive nudge would otherwise cross it.
+        state.window_end = date!(2009 - 01 - 10);
+        state.nudge_window_start(9_999);
+        assert_eq!(
+            state.window_start, state.window_end,
+            "window_start must clamp AT window_end, never past it: {:?}",
+            state.window_start
+        );
+
+        // A large negative nudge must clamp at Bitcoin's genesis block, never before it.
+        state.nudge_window_start(-3_650);
+        assert_eq!(
+            state.window_start,
+            date!(2009 - 01 - 03),
+            "window_start must clamp at Bitcoin's genesis block (2009-01-03), never before it"
         );
     }
 
