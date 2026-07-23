@@ -125,6 +125,12 @@ pub struct EditorApp {
     /// ONE `journey_view` this state carries. READ-ONLY (C-3): nothing here is ever written to a
     /// chokepoint; it is a derived read plus a pure UI cursor, exactly like every other screen's state.
     pub defensive_dashboard: Option<crate::defensive_dashboard::DefensiveDashboardState>,
+    /// The Declare flow's own state (Task 8, Phase P-C). `Some` while the flow is open — opened by
+    /// `main.rs`'s `open_declare_flow` from a `DashboardIntent::Declare` on the dashboard. Dispatch
+    /// order: declare_flow (flow layer) → ... (mirrors every other `*_flow` field). C-3: this field is
+    /// mutated by the flow's own key handler ONLY — the WRITE it eventually triggers goes through
+    /// `edit::persist::persist_declare_tranche`, never a direct `chokepoint::apply_declare` call.
+    pub declare_flow: Option<crate::edit::declare_flow::DeclareFlowState>,
     /// The per-mutation confirmation modal. `Some` while awaiting Enter/Esc.
     ///
     /// Modal dispatch precedes form and screen dispatch (the R0-M4 lesson —
@@ -319,6 +325,7 @@ impl EditorApp {
             profile_form: None,
             tax_inputs_form: None,
             defensive_dashboard: None,
+            declare_flow: None,
             mutation_modal: None,
             classify_inbound_flow: None,
             classify_inbound_modal: None,
@@ -431,6 +438,7 @@ impl EditorApp {
             self.bulk_reclassify_outflow_flow.is_some(),
             self.match_self_transfers_flow.is_some(),
             self.method_election_flow.is_some(),
+            self.declare_flow.is_some(),
         ]
         .into_iter()
         .filter(|open| *open)
@@ -450,6 +458,14 @@ impl EditorApp {
     /// it), then computes `journey_view` ONCE from the current snapshot and transitions to
     /// `EditorScreen::DefensiveFiling`.
     pub fn open_defensive_filing(&mut self) {
+        // ★ arch-Minor2: the residue-latch guard ~26/35 sibling `open_*` fns check FIRST (mirrors
+        // `open_profile_form`/`open_void_flow` in main.rs) — while a failed save's residue is live, NO
+        // mutating opener may proceed (the dashboard itself is read-only, but it is the entry point to
+        // the Declare/Promote WRITE flows Tasks 8-9 build, so it must refuse here too).
+        if let Some(s) = self.residue_latch_status() {
+            self.status = Some(s);
+            return;
+        }
         let Some(snap) = self.snapshot.as_ref() else {
             return;
         };

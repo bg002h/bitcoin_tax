@@ -41,6 +41,18 @@ pub use cmd::admin::promote_export_gate;
 // its KAT-G1 source gate forbids in non-test code (mirrors `promote_export_gate` above). `IrsPdfReport`
 // is a plain data struct (no `Session`, no lock, no I/O) — the gate's intent is honored, not evaded.
 pub use cmd::admin::IrsPdfReport;
+// Re-exported at the crate root (Defensive Filing Wizard Task 8, ★ C-3) so the TUI Declare flow
+// (`btctax-tui-edit`'s `edit/declare_flow.rs` + `edit/persist.rs`) can drive the DECLARE chokepoint
+// WITHOUT the `cmd::` token its KAT-G1 source gate forbids in non-test code — mirrors
+// `promote_export_gate`/`IrsPdfReport` above. `plan_declare` is a pure `(events, prices, cfg, ...) ->
+// Result` planner (no `Session`, no lock, no I/O); `DeclarePlan`/`Refusal` are plain data types.
+// `apply_declare` DOES touch the mutation surface (`append_decision` + `session.save()`) — it is
+// re-exported here ONLY so `edit/persist.rs`'s `persist_declare_tranche` wrapper can reach it (KAT-G1's
+// `persist_only_tokens` confines the LITERAL `apply_declare(` call token to that one file crate-wide;
+// re-exporting the name itself does not weaken that confinement — the gate scans call sites, not
+// import lists). Any FUTURE addition here must be equally justified (do NOT re-export a second
+// session-opening or unconfined-write fn).
+pub use chokepoint::{apply_declare, plan_declare, DeclarePlan, Refusal};
 pub use config::CliConfig;
 pub use session::{
     BulkFilter, BulkIncomeFilter, BulkIncomePlan, BulkIncomeRow, BulkLinkPlan, BulkLinkRow,

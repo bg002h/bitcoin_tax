@@ -360,6 +360,12 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         handle_optimize_accept_flow_key(app, key);
         return;
     }
+    // ── Declare-flow dispatch (Task 8, Phase P-C) — BEFORE form + screen dispatch ─────
+    // A flow like the others: `q`/Esc must never fall through to a Browse quit arm while it blocks.
+    if app.declare_flow.is_some() {
+        handle_declare_flow_key(app, key);
+        return;
+    }
     // ── Tax-inputs flow dispatch — BEFORE form + screen dispatch ──────────────
     // A flow like the others: `q`/Esc must never fall through to a Browse quit arm while it blocks.
     if app.tax_inputs_form.is_some() {
@@ -454,16 +460,22 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                 // Pseudo-reconcile (sub-project 2): approve pending synthetic defaults (only meaningful
                 // when the pseudo banner is showing; a no-op status otherwise).
                 KeyCode::Char('P') => open_pseudo_approve_flow(app),
+                // ★ T7-entrykey (Task 8): the Defensive Filing Wizard dashboard entry — `w` for
+                // "wizard" (a free letter; not yet bound to anything else in Browse). Refuses (with
+                // routing guidance) while pseudo-active — see `EditorApp::open_defensive_filing`'s own
+                // DFW-D6 gate + the residue-latch guard it now also checks (arch-Minor2).
+                KeyCode::Char('w') => app.open_defensive_filing(),
                 // KEEP IN SYNC with KEYMAP overlay (draw_help_overlay). `?` opens the full-keymap help.
                 KeyCode::Char('?') => app.help_open = true,
                 _ => {}
             }
         }
         // The Defensive Filing Wizard dashboard (Task 7, Phase P-B) — READ-ONLY + dispatch-scaffolding
-        // ONLY (C-3). `Esc`/`q` return to Browse; every other key is handed to
+        // (C-3). `Esc`/`q` return to Browse; every other key is handed to
         // `defensive_dashboard::handle_defensive_dashboard_key`, which only names an intent and moves
-        // the cursor. Launching the named intent's flow (`declare`/`promote`, Phase P-C) or chokepoint
-        // step (`export`, Phase P-D) is NOT implemented yet — those tasks wire the match below.
+        // the cursor. `Declare` (Task 8) opens the Declare flow (dispatched ABOVE this match, in the
+        // flow-dispatch layer, once `app.declare_flow` is `Some`); `Promote`/`Export` remain scaffolded
+        // (Tasks 9-10).
         EditorScreen::DefensiveFiling => {
             app.status = None;
             match key.code {
@@ -474,21 +486,23 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                 _ => {
                     if let Some(dash) = app.defensive_dashboard.as_mut() {
                         let intent = defensive_dashboard::handle_defensive_dashboard_key(dash, key);
-                        app.status = match intent {
-                            defensive_dashboard::DashboardIntent::None => None,
-                            defensive_dashboard::DashboardIntent::Declare(_) => {
-                                Some("declare — coming soon (Phase P-C)".to_string())
+                        match intent {
+                            defensive_dashboard::DashboardIntent::None => {}
+                            defensive_dashboard::DashboardIntent::Declare(id) => {
+                                open_declare_flow(app, id);
                             }
                             defensive_dashboard::DashboardIntent::Promote(_) => {
-                                Some("promote — coming soon (Phase P-C)".to_string())
+                                app.status = Some("promote — coming soon (Phase P-C)".to_string());
                             }
                             defensive_dashboard::DashboardIntent::Export => {
-                                Some("export — coming soon (Phase P-D)".to_string())
+                                app.status = Some("export — coming soon (Phase P-D)".to_string());
                             }
                             defensive_dashboard::DashboardIntent::RouteResolveFirst(_) => {
-                                Some("resolve-first routing — coming soon (Phase P-C)".to_string())
+                                app.status = Some(
+                                    "resolve-first routing — coming soon (Phase P-C)".to_string(),
+                                );
                             }
-                        };
+                        }
                     }
                 }
             }
@@ -731,6 +745,7 @@ impl EditorApp {
         self.match_self_transfers_modal = None;
         self.method_election_flow = None;
         self.method_election_modal = None;
+        self.declare_flow = None;
     }
 }
 
@@ -3952,6 +3967,248 @@ fn open_void_flow(app: &mut EditorApp) {
         list: TargetList::new(items),
         step: VoidStep::List,
     });
+}
+
+// ── The Declare flow (Task 8, Phase P-C) ──────────────────────────────────────
+
+/// Open the Declare flow for the dashboard candidate named by `DashboardIntent::Declare(target)`
+/// (`target` == the targeted `Shortfall.event`). Re-derives the `Shortfall` from the dashboard's OWN
+/// ALREADY-COMPUTED `journey_view` — DFW-D1 "no second gating authority": nothing here re-derives
+/// discovery/triage independently. Refuses (status only, dashboard stays open) when: the residue latch
+/// is set, the dashboard state is missing, the candidate is no longer present (a stale
+/// cursor/re-render race), or the candidate's own wallet is somehow absent (defensive —
+/// `discovery::triage` never routes a walletless shortfall to `candidates`).
+fn open_declare_flow(app: &mut EditorApp, target: btctax_core::EventId) {
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
+        return;
+    }
+    let Some(dash) = app.defensive_dashboard.as_ref() else {
+        return;
+    };
+    let Some(shortfall) = dash
+        .view
+        .candidates
+        .iter()
+        .find(|s| s.event == target)
+        .cloned()
+    else {
+        app.status = Some(
+            "that declare candidate is no longer present (the dashboard may be stale) — re-enter \
+             Defensive Filing"
+                .to_string(),
+        );
+        return;
+    };
+    let Some(wallet) = shortfall.wallet.clone() else {
+        app.status = Some(
+            "this shortfall carries no wallet on record — it should have routed as a data-fix, not a \
+             declare candidate"
+                .to_string(),
+        );
+        return;
+    };
+    // ★ DFW-D9 M-3 / KAT(d): copy the ALREADY-CORE-PREDICATE-DERIVED flag straight from the dashboard's
+    // own journey_view — never re-derive it from the cli-private `guard_tranche_vs_allocation`.
+    let safe_harbor_blocked = dash.view.safe_harbor_blocked;
+
+    debug_assert!(
+        app.open_flow_count() <= 1,
+        "one-flow invariant violated entering the Declare flow: {} flows open simultaneously",
+        app.open_flow_count()
+    );
+
+    app.declare_flow = Some(crate::edit::declare_flow::DeclareFlowState::new(
+        shortfall,
+        wallet,
+        safe_harbor_blocked,
+    ));
+}
+
+/// Handle a key press while the Declare flow is open. Dispatch order: this fn is claimed in the
+/// flow-dispatch layer (BEFORE form/screen dispatch) once `app.declare_flow` is `Some`, exactly like
+/// every other `*_flow`.
+fn handle_declare_flow_key(app: &mut EditorApp, key: KeyEvent) {
+    use crate::edit::declare_flow::DeclareFlowStep;
+
+    let step = match app.declare_flow.as_ref() {
+        Some(f) => f.step,
+        None => return,
+    };
+
+    match step {
+        DeclareFlowStep::Edit => match key.code {
+            KeyCode::Esc => {
+                app.declare_flow = None;
+            }
+            KeyCode::Tab => {
+                if let Some(flow) = app.declare_flow.as_mut() {
+                    flow.cycle_preset();
+                }
+            }
+            KeyCode::Char('h') | KeyCode::Left => {
+                if let Some(flow) = app.declare_flow.as_mut() {
+                    flow.nudge_window_start(-1);
+                }
+            }
+            KeyCode::Char('l') | KeyCode::Right => {
+                if let Some(flow) = app.declare_flow.as_mut() {
+                    flow.nudge_window_start(1);
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if let Some(flow) = app.declare_flow.as_mut() {
+                    flow.nudge_window_end(-1);
+                }
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if let Some(flow) = app.declare_flow.as_mut() {
+                    flow.nudge_window_end(1);
+                }
+            }
+            KeyCode::Char('+') => {
+                if let Some(flow) = app.declare_flow.as_mut() {
+                    flow.nudge_sat(1_000);
+                }
+            }
+            KeyCode::Char('-') => {
+                if let Some(flow) = app.declare_flow.as_mut() {
+                    flow.nudge_sat(-1_000);
+                }
+            }
+            KeyCode::Char('t') => {
+                // ★ T6-Minor1: source the REAL events/prices/cfg/tables + the REAL stored/resolved
+                // TaxProfile for the shortfall's own year at the session/snapshot layer — never
+                // journey_view's structurally-Uncomputable `None`.
+                let Some(snap) = app.snapshot.as_ref() else {
+                    return;
+                };
+                let cfg = snap.cli_config.to_projection();
+                if let Some(flow) = app.declare_flow.as_mut() {
+                    let year = flow.shortfall.date.year();
+                    let profile = snap.profiles.get(&year);
+                    flow.compute_tax_delta(&snap.events, &snap.prices, &cfg, &snap.tables, profile);
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(flow) = app.declare_flow.as_mut() {
+                    flow.step = DeclareFlowStep::Confirm;
+                }
+            }
+            _ => {}
+        },
+        DeclareFlowStep::Confirm => match key.code {
+            KeyCode::Esc => {
+                if let Some(flow) = app.declare_flow.as_mut() {
+                    flow.step = DeclareFlowStep::Edit;
+                }
+            }
+            KeyCode::Enter => declare_flow_confirm(app),
+            _ => {}
+        },
+    }
+}
+
+/// The Declare flow's Confirm step Enter (DFW-D8: plain confirmation, `$0`, revocable, no Form 8275).
+/// Re-runs `plan_declare` FRESH (the CURRENT window/sat/wallet — never a stale cached plan) via
+/// `flow.clearance`; a refusal bounces back to Edit with the reason surfaced (DFW-D5: "a refusal with a
+/// reason, not a silent append"). On success, the WRITE goes through
+/// `edit::persist::persist_declare_tranche` — the ONLY caller of `apply_declare` in this crate (C-3).
+fn declare_flow_confirm(app: &mut EditorApp) {
+    let (sat, wallet, window_start, window_end, target_event) = match app.declare_flow.as_ref() {
+        Some(f) => (
+            f.sat,
+            f.wallet.clone(),
+            f.window_start,
+            f.window_end,
+            f.shortfall.event.clone(),
+        ),
+        None => return,
+    };
+    let Some(snap) = app.snapshot.as_ref() else {
+        return;
+    };
+    let cfg = snap.cli_config.to_projection();
+    let now = app.clock.now();
+
+    let plan_result = btctax_cli::plan_declare(
+        &snap.events,
+        &snap.prices,
+        &cfg,
+        sat,
+        wallet,
+        window_start,
+        window_end,
+        Some(target_event),
+        now,
+    );
+
+    let plan = match plan_result {
+        Ok(plan) => plan,
+        Err(refusal) => {
+            let err: btctax_cli::CliError = refusal.into();
+            app.status = Some(format!("declare refused: {err}"));
+            if let Some(flow) = app.declare_flow.as_mut() {
+                flow.step = crate::edit::declare_flow::DeclareFlowStep::Edit;
+            }
+            return;
+        }
+    };
+
+    let save_result = {
+        let session = match app.session.as_mut() {
+            Some(s) => s,
+            None => {
+                app.declare_flow = None;
+                return;
+            }
+        };
+        crate::edit::persist::persist_declare_tranche(session, plan, now)
+    };
+
+    match save_result {
+        Ok(_id) => {
+            let new_snap = {
+                let session = app.session.as_ref().unwrap();
+                btctax_tui::unlock::build_snapshot(session)
+            };
+            app.declare_flow = None;
+            match new_snap {
+                Ok((snap, _)) => {
+                    app.snapshot = Some(snap);
+                    app.status =
+                        Some("declared a $0 tranche — revocable until promoted".to_string());
+                    // Refresh the dashboard's own view off the NEW snapshot so the just-cleared
+                    // candidate no longer shows (mirrors journey_view's own recompute — no cached
+                    // second source of truth).
+                    if let Some(snap) = app.snapshot.as_ref() {
+                        let cfg = snap.cli_config.to_projection();
+                        let current = app.clock.now().year();
+                        let view = btctax_core::defensive::journey_view(
+                            &snap.events,
+                            &snap.state,
+                            &snap.prices,
+                            &snap.tables,
+                            &cfg,
+                            current,
+                        );
+                        app.defensive_dashboard = Some(
+                            crate::defensive_dashboard::DefensiveDashboardState::new(view),
+                        );
+                    }
+                }
+                Err(e) => {
+                    app.status = Some(format!(
+                        "Saved but re-projection failed ({e}) — restart to refresh"
+                    ));
+                }
+            }
+        }
+        Err(e) => {
+            app.declare_flow = None;
+            app.on_persist_error(e);
+        }
+    }
 }
 
 // ── Status deriver for void ───────────────────────────────────────────────────
@@ -12537,6 +12794,205 @@ mod tests {
         app.snapshot = Some(snap);
         app.selected_year = 2025;
         app
+    }
+
+    // ── (d): open_declare_flow threads safe_harbor_blocked from the dashboard's own journey_view ─────
+    // (the CORE tranche_guard predicates — never re-derived from the cli-private guard) ──────────────
+
+    #[test]
+    fn open_declare_flow_threads_safe_harbor_blocked_from_the_dashboard_view() {
+        use btctax_core::defensive::discovery::Shortfall;
+        use btctax_core::defensive::DefensiveFilingView;
+        use btctax_core::{EventId, WalletId};
+        use std::collections::BTreeSet;
+        use time::macros::date;
+
+        let wallet = WalletId::Exchange {
+            provider: "cb".into(),
+            account: "m".into(),
+        };
+        let shortfall = Shortfall {
+            event: EventId::decision(1),
+            wallet: Some(wallet),
+            date: date!(2020 - 06 - 15),
+            short_sat: 10_000_000,
+            fee_sat: 0,
+        };
+        let view = DefensiveFilingView {
+            candidates: vec![shortfall],
+            resolve_first: vec![],
+            tranches: vec![],
+            still_short: vec![],
+            flagged_years: BTreeSet::new(),
+            safe_harbor_blocked: true, // as computed by journey_view's core-predicate check
+        };
+        let mut app = EditorApp::new(PathBuf::from("/test/vault.pgp"));
+        app.defensive_dashboard = Some(crate::defensive_dashboard::DefensiveDashboardState::new(
+            view,
+        ));
+
+        open_declare_flow(&mut app, EventId::decision(1));
+
+        let flow = app
+            .declare_flow
+            .as_ref()
+            .expect("the flow must open for a real candidate");
+        assert!(
+            flow.safe_harbor_blocked,
+            "safe_harbor_blocked must thread through from the dashboard's own journey_view, never \
+             re-derived"
+        );
+    }
+
+    // ── ★ Task 8 end-to-end: Declare flow open → confirm → REAL persist via persist_declare_tranche ──
+
+    #[test]
+    fn declare_flow_end_to_end_persists_a_real_zero_basis_tranche() {
+        use btctax_core::event::{Dispose, DisposeKind, EventPayload};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::{EventId, LedgerEvent, WalletId};
+        use time::macros::datetime;
+
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        let wallet = WalletId::Exchange {
+            provider: "cb".into(),
+            account: "m".into(),
+        };
+
+        // A bare Dispose (no prior Acquire at all) — a real UncoveredDisposal shortfall, no records.
+        {
+            let session = app.session.as_mut().unwrap();
+            let batch = vec![LedgerEvent {
+                id: EventId::import(Source::Coinbase, SourceRef::new("SELL")),
+                utc_timestamp: datetime!(2024-06-15 00:00 UTC),
+                original_tz: time::UtcOffset::UTC,
+                wallet: Some(wallet.clone()),
+                payload: EventPayload::Dispose(Dispose {
+                    sat: 10_000_000,
+                    usd_proceeds: rust_decimal_macros::dec!(5_000),
+                    fee_usd: rust_decimal_macros::dec!(0),
+                    kind: DisposeKind::Sell,
+                }),
+            }];
+            btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+            session.save().unwrap();
+        }
+        let refreshed = {
+            let session = app.session.as_ref().unwrap();
+            btctax_tui::unlock::build_snapshot(session).unwrap().0
+        };
+        app.snapshot = Some(refreshed);
+
+        // Enter the dashboard — a real DeclareCandidate must appear.
+        app.open_defensive_filing();
+        assert_eq!(app.screen, EditorScreen::DefensiveFiling);
+        let target = {
+            let dash = app.defensive_dashboard.as_ref().unwrap();
+            assert_eq!(
+                dash.view.candidates.len(),
+                1,
+                "the bare Dispose must yield exactly one declare candidate: {:?}",
+                dash.view.candidates
+            );
+            dash.view.candidates[0].event.clone()
+        };
+
+        // Open the Declare flow for it (DFW-D5 prefill).
+        open_declare_flow(&mut app, target);
+        let flow_ok = {
+            let flow = app
+                .declare_flow
+                .as_ref()
+                .expect("the Declare flow must open for a real candidate");
+            assert!(
+                flow.window_end < flow.shortfall.date,
+                "DFW-D5 before-op clamp"
+            );
+            assert_eq!(flow.wallet, wallet, "DFW-D5 source-pool wallet");
+            true
+        };
+        assert!(flow_ok);
+
+        // Confirm — the WRITE goes through persist_declare_tranche (C-3).
+        if let Some(flow) = app.declare_flow.as_mut() {
+            flow.step = crate::edit::declare_flow::DeclareFlowStep::Confirm;
+        }
+        declare_flow_confirm(&mut app);
+
+        assert!(
+            app.declare_flow.is_none(),
+            "a successful declare must close the flow"
+        );
+        let status = app.status.clone().unwrap_or_default();
+        assert!(
+            status.contains("$0") || status.to_lowercase().contains("declared"),
+            "status must confirm the $0 declare: {status:?}"
+        );
+
+        // The dashboard's own refreshed view must no longer show the (now-cleared) candidate.
+        let dash = app
+            .defensive_dashboard
+            .as_ref()
+            .expect("the refreshed dashboard view must be recomputed after a successful declare");
+        assert!(
+            dash.view.candidates.is_empty(),
+            "the declared tranche must clear the shortfall: {:?}",
+            dash.view.candidates
+        );
+        assert_eq!(
+            dash.view.tranches.len(),
+            1,
+            "exactly one live DeclaredZero tranche must now exist: {:?}",
+            dash.view.tranches
+        );
+
+        // Sanity: re-open a FRESH session (simulating a restart) and confirm the DeclareTranche was
+        // really written to disk, not just held in memory.
+        drop(app); // release the VaultLock
+        let session2 = btctax_cli::Session::open(&_dir.path().join("vault.pgp"), &{
+            btctax_store::Passphrase::new("empty-vault-pass".into())
+        })
+        .unwrap();
+        let events2 = btctax_core::persistence::load_all(session2.conn()).unwrap();
+        assert!(
+            events2
+                .iter()
+                .any(|e| matches!(e.payload, EventPayload::DeclareTranche(_))),
+            "a DeclareTranche decision must be durably persisted to disk"
+        );
+    }
+
+    // ── ★ T7-entrykey (Task 8): Browse `w` wires the Defensive Filing dashboard entry ────────────────
+
+    #[test]
+    fn w_key_enters_defensive_filing_dashboard_from_browse() {
+        let mut app = browse_app_with_empty_snapshot();
+        handle_key(&mut app, press(KeyCode::Char('w')));
+        assert_eq!(
+            app.screen,
+            EditorScreen::DefensiveFiling,
+            "'w' must enter the Defensive Filing dashboard from Browse"
+        );
+        assert!(app.defensive_dashboard.is_some());
+    }
+
+    #[test]
+    fn w_key_still_refuses_when_pseudo_active() {
+        let mut app = browse_app_with_empty_snapshot();
+        if let Some(snap) = app.snapshot.as_mut() {
+            snap.state.pseudo_synthetic_count = 3;
+        }
+        handle_key(&mut app, press(KeyCode::Char('w')));
+        assert_eq!(
+            app.screen,
+            EditorScreen::Browse,
+            "DFW-D6: 'w' must NOT enter Defensive Filing while pseudo-active"
+        );
+        assert!(app.defensive_dashboard.is_none());
+        let status = app
+            .status
+            .expect("a refusal must set routing guidance status");
+        assert!(status.to_lowercase().contains("pseudo"));
     }
 
     /// `s` now SORTS the focused column (toggles direction) and NO LONGER opens select-lots.

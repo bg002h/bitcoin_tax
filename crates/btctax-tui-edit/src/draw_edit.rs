@@ -97,13 +97,33 @@ fn draw_defensive_filing(frame: &mut Frame, app: &EditorApp) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    // The Declare flow (Task 8), when open, takes over the content area — mirrors every other
+    // `*_flow` overlay drawn atop its own screen. `app.declare_flow.is_some()` is only reachable via
+    // `open_declare_flow`, which requires a live `snapshot` (it reads the dashboard's own already-
+    // computed view) — the `None` arm below is therefore unreached in practice, mirroring the
+    // dashboard's own defensive fallback just below.
+    if let Some(flow) = app.declare_flow.as_ref() {
+        let Some(snap) = app.snapshot.as_ref() else {
+            let msg = Paragraph::new("No snapshot — press Esc to cancel.");
+            frame.render_widget(msg, inner);
+            return;
+        };
+        let lines: Vec<Line> = crate::edit::declare_flow::render_declare_flow(flow, &snap.prices)
+            .into_iter()
+            .map(Line::from)
+            .collect();
+        let para = Paragraph::new(lines).wrap(Wrap { trim: false });
+        frame.render_widget(para, inner);
+        return;
+    }
+
     let Some(dash) = app.defensive_dashboard.as_ref() else {
         let msg = Paragraph::new("No dashboard state — press Esc to return to Browse.");
         frame.render_widget(msg, inner);
         return;
     };
 
-    let lines: Vec<Line> = crate::defensive_dashboard::render_dashboard(&dash.view)
+    let lines: Vec<Line> = crate::defensive_dashboard::render_dashboard(&dash.view, dash.cursor)
         .into_iter()
         .map(Line::from)
         .collect();

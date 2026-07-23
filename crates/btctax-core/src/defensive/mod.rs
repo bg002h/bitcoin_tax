@@ -22,6 +22,7 @@
 //! number (a `PromoteTranche`/`DeclareTranche` is never written here).
 
 pub mod discovery;
+pub mod era;
 
 use crate::conservative::{flagged_years, method_inversion_advisory, tranche_dip_advisory};
 use crate::conservative_promote::{
@@ -29,16 +30,17 @@ use crate::conservative_promote::{
 };
 use crate::defensive::discovery::{shortfalls, triage, Shortfall, Triage};
 use crate::event::{BasisSource, DeclareTranche, EventPayload};
-use crate::identity::EventId;
+use crate::identity::{EventId, WalletId};
 use crate::price::PriceProvider;
 use crate::project::pools::{pool_key, PoolKey};
 use crate::project::{in_force_methods, project, ProjectionConfig};
 use crate::state::LedgerState;
-use crate::tax::{compute_tax_year, TaxOutcome, TaxTables};
+use crate::tax::{compute_tax_year, TaxOutcome, TaxProfile, TaxTables};
 use crate::tranche_guard::{in_force_allocation_exists, pre2025_tranche_exists, void_targets};
 use crate::LedgerEvent;
 use crate::Usd;
 use std::collections::BTreeSet;
+use time::UtcOffset;
 
 /// One row per LIVE (non-voided) `DeclareTranche` in the vault (★ I-3: status is `DeclaredZero` OR
 /// `Promoted` ONLY — DFW-D3/D5.3 forbid recording a per-tranche "did/didn't cover" attribution; that
@@ -83,6 +85,16 @@ pub enum Advisory {
     /// are ALL fee-component (`Shortfall.short_sat == Shortfall.fee_sat`) — promoting this tranche would
     /// only ever substantiate fee-sat basis, never principal.
     FeeOnlyPromoteNoop,
+    /// ★ Task 8 / P-B-tax-Minor: a **forward-looking** `NowDisplacing` sibling for a NOT-yet-promoted
+    /// (`DeclaredZero`) row — the `mixed_vintage` shape (`covered_sat == 0`, so `OverCovered`/
+    /// `FeeOnlyPromoteNoop` never fire): a with-SYNTHETIC-promote / real(without) fold-diff over
+    /// `basis_source` COMPOSITION (mirrors `NowDisplacing`'s own real-promote diff, one layer earlier)
+    /// shows that promoting WOULD displace a documented (non-`EstimatedConservative`) leg on a real
+    /// disposal under HIFO. Fired ONLY when `covered_sat == 0`, so it never doubles up with
+    /// `OverCovered`'s own remedy. Caveats any positive `SavingFlavor::Uncomputable.gain_delta` this row
+    /// also carries — that gain-Δ is a HIFO reorder artifact, not a straightforward saving, and must
+    /// never be read as an unqualified "if you promote, you save $N" figure.
+    WouldDisplaceIfPromoted,
 }
 
 /// The three-flavor clamped promote-saving discipline (BG-D6/DFW-D10): a bare `$X (year Y)` is NEVER
@@ -183,28 +195,20 @@ fn covering_shortfalls(
         .collect()
 }
 
-/// `Advisory::NowDisplacing` (mirrors `promote_drift_advisory`'s with/without shape, over `basis_source`
-/// COMPOSITION rather than a price recompute — DFW-D5.3/tax-N-1): for each disposal that draws a leg from
-/// `tranche_id` in the CURRENT (with-promote) fold, does the SAME disposal event, WITHOUT this promote,
-/// draw a documented (non-`EstimatedConservative`) source that the with-promote fold no longer draws?
-/// Composition (the SET of basis sources present), not leg-Vec inequality (★ tax-M negative KAT): a
-/// correctly-sized cover's OWN leg changing `$0` → floor is NOT a composition change (both sets are
-/// `{EstimatedConservative}`) and must not fire.
-fn now_displacing(
-    events: &[LedgerEvent],
-    prices: &dyn PriceProvider,
-    off_cfg: &ProjectionConfig,
+/// The shared with/without `basis_source` COMPOSITION diff behind BOTH `Advisory::NowDisplacing` (a
+/// real, already-live promote) and `Advisory::WouldDisplaceIfPromoted` (a not-yet-promoted tranche's
+/// forward-looking sibling, ★ Task 8 / P-B-tax-Minor) — factored out so the two callers never let the
+/// composition-vs-leg-Vec-inequality distinction (★ tax-M negative KAT) drift apart: for each disposal
+/// that draws a leg from `tranche_id` in `with_state`, does the SAME disposal event in `without_state`
+/// draw a documented (non-`EstimatedConservative`) source that `with_state` no longer draws? Composition
+/// (the SET of basis sources present), not leg-Vec inequality: a correctly-sized cover's OWN leg
+/// changing `$0` → floor is NOT a composition change (both sets are `{EstimatedConservative}`) and must
+/// not fire.
+fn displaces_documented_basis(
+    with_state: &LedgerState,
+    without_state: &LedgerState,
     tranche_id: &EventId,
-    promote_id: &EventId,
 ) -> bool {
-    let with_state = project(events, prices, off_cfg);
-    let without_events: Vec<LedgerEvent> = events
-        .iter()
-        .filter(|e| e.id != *promote_id)
-        .cloned()
-        .collect();
-    let without_state = project(&without_events, prices, off_cfg);
-
     for wd in &with_state.disposals {
         let touches_tranche = wd
             .legs
@@ -226,6 +230,44 @@ fn now_displacing(
         }
     }
     false
+}
+
+/// `Advisory::NowDisplacing` (mirrors `promote_drift_advisory`'s with/without shape, over `basis_source`
+/// COMPOSITION rather than a price recompute — DFW-D5.3/tax-N-1): a LIVE promote's floor now displaces
+/// documented basis on a real disposal.
+fn now_displacing(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    off_cfg: &ProjectionConfig,
+    tranche_id: &EventId,
+    promote_id: &EventId,
+) -> bool {
+    let with_state = project(events, prices, off_cfg);
+    let without_events: Vec<LedgerEvent> = events
+        .iter()
+        .filter(|e| e.id != *promote_id)
+        .cloned()
+        .collect();
+    let without_state = project(&without_events, prices, off_cfg);
+    displaces_documented_basis(&with_state, &without_state, tranche_id)
+}
+
+/// `Advisory::WouldDisplaceIfPromoted` (★ Task 8 / P-B-tax-Minor): the FORWARD-looking sibling of
+/// `now_displacing` for a NOT-yet-promoted tranche — `without_state` is the caller's REAL (already
+/// unpromoted) `state` directly (no re-projection needed: a `DeclaredZero` row's real state already IS
+/// the "without" side); `with_state` is a SYNTHETIC-promote shadow built via `with_synthetic_promote`
+/// (the same technique `clamped_saving_for` already reuses one layer over).
+fn would_displace_if_promoted(
+    events: &[LedgerEvent],
+    without_state: &LedgerState,
+    prices: &dyn PriceProvider,
+    off_cfg: &ProjectionConfig,
+    tranche_id: &EventId,
+    filed_basis: Usd,
+) -> bool {
+    let with_events = with_synthetic_promote(events, tranche_id, filed_basis);
+    let with_state = project(&with_events, prices, off_cfg);
+    displaces_documented_basis(&with_state, without_state, tranche_id)
 }
 
 /// `TrancheRow.clamped_saving` (DFW-D10, BG-D6 three-flavor discipline; `clamped_promote_year_saving`,
@@ -358,6 +400,24 @@ fn build_tranche_row(
         if covering.iter().all(|s| s.short_sat == s.fee_sat) {
             advisories.push(Advisory::FeeOnlyPromoteNoop);
         }
+    } else if !promoted {
+        // ★ Task 8 / P-B-tax-Minor: covered_sat == 0 (the mixed_vintage shape — OverCovered/
+        // FeeOnlyPromoteNoop never fire here) AND not yet promoted — check the FORWARD-looking
+        // displacement hazard so a positive Uncomputable.gain_delta this row also carries is never
+        // read as an unqualified "saving". Cheap: filed_basis_for is pure price lookups (no re-project);
+        // only fires the one extra synthetic-promote shadow when a floor is even computable.
+        if let Ok(cf) = filed_basis_for(prices, t.sat, t.window_start, t.window_end) {
+            if would_displace_if_promoted(
+                events,
+                state,
+                prices,
+                off_cfg,
+                tranche_id,
+                cf.filed_basis,
+            ) {
+                advisories.push(Advisory::WouldDisplaceIfPromoted);
+            }
+        }
     }
 
     // NowDisplacing — only meaningful once a live promote exists to exclude in the shadow.
@@ -407,6 +467,118 @@ fn build_tranche_row(
         status,
         clamped_saving,
         advisories,
+    }
+}
+
+/// ★ Task 8 (DFW-D9/D10, "on-demand tax-Δ"; folds T6-Minor1): the Declare flow's PREVIEW of the clamped
+/// promote-saving a filer would realize for `year` IF they declared a NOT-YET-RECORDED tranche
+/// (`sat`/`wallet`/window) AND immediately promoted it to its computed floor. This is `clamped_saving_for`
+/// one layer further out: that fn requires `tranche_id` to already be a LIVE `DeclareTranche` in `events`;
+/// this fn PREVIEWS one that does not exist yet (the Declare flow's confirm step has not run
+/// `persist_declare_tranche` yet when this is called) by first synthesizing the prospective
+/// `DeclareTranche` itself — mirroring `with_synthetic_promote`'s own synthetic-event technique, one
+/// layer earlier — then reusing the IDENTICAL with/without-promote fold-diff + BG-D6 three-flavor
+/// classification. **No new tax RULE** — only new plumbing to preview a tranche before it is ever
+/// appended.
+///
+/// Scoped to ONE `year` (the caller passes the targeted shortfall's own disposal year): the Declare flow
+/// always targets exactly one shortfall/disposal, unlike `journey_view`'s multi-year loop over an
+/// ALREADY-recorded tranche's (possibly many) realized years.
+///
+/// ★ T6-Minor1: unlike `journey_view` (which has no `TaxProfile` parameter and always passes `None`,
+/// making every `clamped_saving` entry structurally `Uncomputable`), THIS fn takes `profile: Option<&
+/// TaxProfile>` — the caller (the Declare flow, `btctax-tui-edit`) sources the REAL stored/resolved
+/// `TaxProfile` for `year` at the session/snapshot layer and threads it through, so `ComputedTax` is
+/// actually reachable here, not merely a live-but-unreachable branch.
+#[allow(clippy::too_many_arguments)]
+pub fn declare_preview_saving(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    cfg: &ProjectionConfig,
+    tables: &dyn TaxTables,
+    sat: i64,
+    wallet: WalletId,
+    window_start: crate::TaxDate,
+    window_end: crate::TaxDate,
+    year: i32,
+    profile: Option<&TaxProfile>,
+) -> SavingFlavor {
+    let off_cfg = pseudo_off(cfg);
+
+    let cf = match filed_basis_for(prices, sat, window_start, window_end) {
+        Ok(cf) => cf,
+        Err(_) => {
+            return SavingFlavor::Named(
+                "no preview saving is computable for this window — it lacks full price coverage \
+                 (Coverage::Full) to compute a promotion floor"
+                    .to_string(),
+            );
+        }
+    };
+
+    // Synthesize the prospective DeclareTranche (mirrors with_synthetic_promote's own seq/timestamp
+    // technique, one layer further out — a fresh Decision id that collides with nothing real).
+    let seq = events
+        .iter()
+        .filter_map(|e| match e.id {
+            EventId::Decision { seq } => Some(seq),
+            _ => None,
+        })
+        .max()
+        .map_or(1, |m| m + 1);
+    let utc = events
+        .iter()
+        .map(|e| e.utc_timestamp)
+        .max()
+        .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
+    let synthetic_id = EventId::Decision { seq };
+    let mut with_declare = events.to_vec();
+    with_declare.push(LedgerEvent {
+        id: synthetic_id.clone(),
+        utc_timestamp: utc,
+        original_tz: UtcOffset::UTC,
+        wallet: None,
+        payload: EventPayload::DeclareTranche(DeclareTranche {
+            sat,
+            wallet,
+            window_start,
+            window_end,
+        }),
+    });
+
+    let without_state = project(&with_declare, prices, &off_cfg);
+    let with_events = with_synthetic_promote(&with_declare, &synthetic_id, cf.filed_basis);
+    let with_state = project(&with_events, prices, &off_cfg);
+
+    match (
+        compute_tax_year(&with_declare, &with_state, year, profile, tables),
+        compute_tax_year(&with_declare, &without_state, year, profile, tables),
+    ) {
+        (TaxOutcome::Computed(_), TaxOutcome::Computed(_)) => {
+            let delta = clamped_promote_year_saving(
+                &with_declare,
+                prices,
+                &off_cfg,
+                &synthetic_id,
+                cf.filed_basis,
+                year,
+                profile,
+                tables,
+            );
+            SavingFlavor::ComputedTax { year, delta }
+        }
+        _ => {
+            let gain_for_year = |st: &LedgerState, year: i32| -> Usd {
+                st.disposals
+                    .iter()
+                    .filter(|d| d.disposed_at.year() == year)
+                    .flat_map(|d| &d.legs)
+                    .map(|l| l.gain)
+                    .sum()
+            };
+            let gain_delta = gain_for_year(&without_state, year) - gain_for_year(&with_state, year);
+            SavingFlavor::Uncomputable { year, gain_delta }
+        }
     }
 }
 

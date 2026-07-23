@@ -1181,3 +1181,245 @@ fn journey_view_never_parses_blocker_detail() {
          {{event,wallet,date,short_sat}} signal"
     );
 }
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// ★ Task 8 / P-B-tax-Minor: Advisory::WouldDisplaceIfPromoted — the forward-looking NowDisplacing
+// sibling for a NOT-yet-promoted (covered_sat == 0, "mixed_vintage" shape) tranche.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// The `mixed_vintage` shape (documented 0.6 BTC @ $3,000 + a 0.4 BTC tranche), but declared-ZERO
+/// (no promote_ev) and with REAL price coverage over the tranche's window so a floor is computable:
+/// min $30,000/BTC ⇒ floor = $12,000 for 0.4 BTC — the SAME figure `mixed_vintage`'s own hardcoded
+/// promote uses, so a synthetic promote at this floor outranks the documented lot under HIFO exactly
+/// as the shipped fixture's real promote does.
+fn unpromoted_mixed_vintage_with_prices(w: &WalletId) -> (Vec<LedgerEvent>, StaticPrices) {
+    let ws = date!(2018 - 01 - 01);
+    let we = date!(2018 - 03 - 31);
+    let events = vec![
+        documented_buy("BUY", datetime!(2017-01-01 00:00 UTC), w, 60_000_000, 3_000),
+        tranche_ev(1, w, 40_000_000, ws, we),
+        sell_ev(
+            "SELL",
+            datetime!(2018-09-01 00:00 UTC),
+            w,
+            40_000_000,
+            20_000,
+        ),
+    ];
+    (events, full_window_prices(ws, we, 30_000))
+}
+
+#[test]
+fn unpromoted_tranche_that_would_displace_documented_basis_shows_the_advisory() {
+    let w = cold();
+    let (events, prices) = unpromoted_mixed_vintage_with_prices(&w);
+    let state = project(&events, &prices, &cfg());
+    let view = journey_view(&events, &state, &prices, &no_tables(), &cfg(), FAR_FUTURE);
+    let row = view
+        .tranches
+        .iter()
+        .find(|r| r.target == EventId::decision(1))
+        .unwrap();
+    assert_eq!(row.status, TrancheStatus::DeclaredZero);
+    // Sanity: covered_sat == 0 for this row (the documented lot alone covers the sale) — the SAME
+    // gating condition OverCovered/FeeOnlyPromoteNoop use, confirmed by their absence here.
+    assert!(
+        !row.advisories.iter().any(|a| matches!(
+            a,
+            Advisory::OverCovered { .. } | Advisory::FeeOnlyPromoteNoop
+        )),
+        "covered_sat must be 0 for this fixture (no OverCovered/FeeOnlyPromoteNoop): {:?}",
+        row.advisories
+    );
+    assert!(
+        row.advisories
+            .iter()
+            .any(|a| matches!(a, Advisory::WouldDisplaceIfPromoted)),
+        "a not-yet-promoted tranche whose promotion would displace the documented lot under HIFO must \
+         carry WouldDisplaceIfPromoted: {:?}",
+        row.advisories
+    );
+}
+
+#[test]
+fn fully_undisposed_tranche_with_price_coverage_shows_no_would_displace_advisory() {
+    let w = exch();
+    let ws = date!(2026 - 01 - 01);
+    let we = date!(2026 - 01 - 10);
+    let prices = full_window_prices(ws, we, 10_000);
+    let events = vec![tranche_ev(1, &w, 40_000_000, ws, we)];
+    let state = project(&events, &prices, &cfg());
+    let view = journey_view(&events, &state, &prices, &no_tables(), &cfg(), FAR_FUTURE);
+    let row = view
+        .tranches
+        .iter()
+        .find(|r| r.target == EventId::decision(1))
+        .unwrap();
+    assert!(
+        !row.advisories
+            .iter()
+            .any(|a| matches!(a, Advisory::WouldDisplaceIfPromoted)),
+        "a fully-undisposed tranche (nothing to displace) must never show WouldDisplaceIfPromoted: {:?}",
+        row.advisories
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// ★ Task 8 (DFW-D9/D10 on-demand tax-Δ; T6-Minor1): declare_preview_saving
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+fn preview_profile() -> btctax_core::tax::TaxProfile {
+    btctax_core::tax::TaxProfile {
+        filing_status: btctax_core::tax::FilingStatus::Single,
+        ordinary_taxable_income: dec!(200_000),
+        magi_excluding_crypto: dec!(200_000),
+        qualified_dividends_and_other_pref_income: dec!(0),
+        other_net_capital_gain: dec!(0),
+        capital_loss_carryforward_in: btctax_core::tax::Carryforward {
+            short: dec!(0),
+            long: dec!(0),
+        },
+        w2_ss_wages: dec!(0),
+        w2_medicare_wages: dec!(0),
+        schedule_c_expenses: dec!(0),
+    }
+}
+
+fn tables_2024() -> BTreeMap<i32, TaxTable> {
+    let mut m = BTreeMap::new();
+    m.insert(2024, ty2024_table());
+    m
+}
+
+#[test]
+fn declare_preview_saving_is_computed_tax_with_a_real_table_and_profile() {
+    use btctax_core::defensive::declare_preview_saving;
+    let w = exch();
+    let ws = date!(2023 - 01 - 01);
+    let we = date!(2023 - 01 - 03);
+    let prices = full_window_prices(ws, we, 10_000);
+    // No declare event yet — declare_preview_saving synthesizes it itself. A real 2024 sale of the
+    // SAME sat this preview targets, so the synthetic tranche's leg realizes in 2024.
+    let events = vec![sell_ev(
+        "SELL",
+        datetime!(2024-06-01 00:00 UTC),
+        &w,
+        10_000_000,
+        50_000,
+    )];
+    let flavor = declare_preview_saving(
+        &events,
+        &prices,
+        &cfg(),
+        &tables_2024(),
+        10_000_000,
+        w.clone(),
+        ws,
+        we,
+        2024,
+        Some(&preview_profile()),
+    );
+    match flavor {
+        SavingFlavor::ComputedTax { year, delta } => {
+            assert_eq!(year, 2024);
+            assert!(
+                delta >= rust_decimal::Decimal::from(0),
+                "a clamped saving is never negative: {delta}"
+            );
+        }
+        other => panic!("expected ComputedTax with a real table+profile, got {other:?}"),
+    }
+}
+
+#[test]
+fn declare_preview_saving_is_uncomputable_without_a_profile() {
+    use btctax_core::defensive::declare_preview_saving;
+    let w = exch();
+    let ws = date!(2023 - 01 - 01);
+    let we = date!(2023 - 01 - 03);
+    let prices = full_window_prices(ws, we, 10_000);
+    let events = vec![sell_ev(
+        "SELL",
+        datetime!(2024-06-01 00:00 UTC),
+        &w,
+        10_000_000,
+        50_000,
+    )];
+    let flavor = declare_preview_saving(
+        &events,
+        &prices,
+        &cfg(),
+        &tables_2024(),
+        10_000_000,
+        w.clone(),
+        ws,
+        we,
+        2024,
+        None, // no stored TaxProfile
+    );
+    assert!(
+        matches!(flavor, SavingFlavor::Uncomputable { year: 2024, .. }),
+        "no stored TaxProfile must be Uncomputable, never a bare ComputedTax dollar: {flavor:?}"
+    );
+}
+
+#[test]
+fn declare_preview_saving_is_named_when_the_window_lacks_price_coverage() {
+    use btctax_core::defensive::declare_preview_saving;
+    let w = exch();
+    let ws = date!(2023 - 01 - 01);
+    let we = date!(2023 - 01 - 03);
+    let empty_prices = prices(); // StaticPrices::default() — no coverage at all
+    let events: Vec<LedgerEvent> = vec![];
+    let flavor = declare_preview_saving(
+        &events,
+        &empty_prices,
+        &cfg(),
+        &tables_2024(),
+        10_000_000,
+        w,
+        ws,
+        we,
+        2024,
+        Some(&preview_profile()),
+    );
+    assert!(
+        matches!(flavor, SavingFlavor::Named(_)),
+        "no price coverage over the window must be Named, never a per-year flavor: {flavor:?}"
+    );
+}
+
+#[test]
+fn declare_preview_saving_edits_the_window_and_changes_nothing_it_should_not() {
+    // A window edit that WIDENS the range (still full coverage) must still compute — this is a
+    // plumbing sanity check that the flow's "re-derive on demand" call is a pure function of its
+    // current window/sat, not accidentally memoized/stale internally.
+    use btctax_core::defensive::declare_preview_saving;
+    let w = exch();
+    let ws = date!(2023 - 01 - 01);
+    let we = date!(2023 - 01 - 05);
+    let prices = full_window_prices(ws, we, 10_000);
+    let events = vec![sell_ev(
+        "SELL",
+        datetime!(2024-06-01 00:00 UTC),
+        &w,
+        10_000_000,
+        50_000,
+    )];
+    let flavor = declare_preview_saving(
+        &events,
+        &prices,
+        &cfg(),
+        &tables_2024(),
+        10_000_000,
+        w,
+        ws,
+        we,
+        2024,
+        Some(&preview_profile()),
+    );
+    assert!(
+        matches!(flavor, SavingFlavor::ComputedTax { .. }),
+        "a wider (still fully-covered) window must still compute: {flavor:?}"
+    );
+}

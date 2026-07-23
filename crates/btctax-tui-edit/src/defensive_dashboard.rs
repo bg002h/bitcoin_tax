@@ -173,6 +173,13 @@ fn render_advisory_line(a: &Advisory) -> String {
         Advisory::FeeOnlyPromoteNoop => "  [advisory] the shortfall(s) this tranche covers are all \
              fee-component — promoting would only ever substantiate fee-sat basis, never principal"
             .to_string(),
+        // ★ Task 8 / P-B-tax-Minor: caveat a displacement-driven gain-Δ — never shown as an unqualified
+        // "saving".
+        Advisory::WouldDisplaceIfPromoted => "  [advisory] promoting this tranche would displace \
+             documented basis on a real disposal (a HIFO reorder) — any saving/gain-\u{394} shown above \
+             would UNDERSTATE the gain a documented lot would actually realize; treat it as a caveat, \
+             not a straightforward saving"
+            .to_string(),
     }
 }
 
@@ -228,23 +235,42 @@ fn render_tranche_row(row: &TrancheRow) -> Vec<String> {
     lines
 }
 
+/// ★ arch-Minor1: prefix `"> "` on `text` iff `idx == cursor` — the ONE marker primitive
+/// `render_dashboard` uses at every cursor-addressable row, so `j`/`k` movement (already wired,
+/// Task 7) is VISIBLE before `d`/`p`/Enter act on the cursor row.
+fn mark_row(idx: usize, cursor: usize, text: String) -> String {
+    if idx == cursor {
+        format!("> {text}")
+    } else {
+        text
+    }
+}
+
 /// The full dashboard render — a pure derived text render of `journey_view`'s own output. Section
 /// order (resolve-first, candidates, tranches, still-short) MUST mirror `row_order`'s cursor addressing.
+/// `cursor` (★ arch-Minor1) is `DefensiveDashboardState::cursor` — the SAME index `row_order` addresses,
+/// so the marked line is always the row `d`/`p`/Enter would act on.
 ///
 /// DFW-D3/M-5: the `[x] export` line is pushed UNCONDITIONALLY, last — always available, regardless of
 /// dashboard state, and never phrased as a "done" checkbox (exports write files, not events).
-pub fn render_dashboard(view: &DefensiveFilingView) -> Vec<String> {
+pub fn render_dashboard(view: &DefensiveFilingView, cursor: usize) -> Vec<String> {
     let mut lines = vec![
         "Defensive Filing — journey dashboard (derived; nothing here is filed until you act)"
             .to_string(),
         String::new(),
     ];
+    let mut row_idx = 0usize;
 
     if !view.resolve_first.is_empty() {
         lines.push("Resolve first:".to_string());
         for t in &view.resolve_first {
             if let Triage::ResolveFirst { shortfall, blocker } = t {
-                lines.push(render_resolve_first_row(shortfall, *blocker));
+                lines.push(mark_row(
+                    row_idx,
+                    cursor,
+                    render_resolve_first_row(shortfall, *blocker),
+                ));
+                row_idx += 1;
             }
         }
         lines.push(String::new());
@@ -253,7 +279,8 @@ pub fn render_dashboard(view: &DefensiveFilingView) -> Vec<String> {
     if !view.candidates.is_empty() {
         lines.push("Declare candidates:".to_string());
         for s in &view.candidates {
-            lines.push(render_candidate_row(s));
+            lines.push(mark_row(row_idx, cursor, render_candidate_row(s)));
+            row_idx += 1;
         }
         lines.push(String::new());
     }
@@ -261,7 +288,12 @@ pub fn render_dashboard(view: &DefensiveFilingView) -> Vec<String> {
     if !view.tranches.is_empty() {
         lines.push("Declared tranches:".to_string());
         for row in &view.tranches {
-            lines.extend(render_tranche_row(row));
+            let mut rendered = render_tranche_row(row);
+            if let Some(first) = rendered.first_mut() {
+                *first = mark_row(row_idx, cursor, std::mem::take(first));
+            }
+            lines.extend(rendered);
+            row_idx += 1;
         }
         lines.push(String::new());
     }
@@ -269,7 +301,8 @@ pub fn render_dashboard(view: &DefensiveFilingView) -> Vec<String> {
     if !view.still_short.is_empty() {
         lines.push("Still short:".to_string());
         for ps in &view.still_short {
-            lines.push(render_pool_short_row(ps));
+            lines.push(mark_row(row_idx, cursor, render_pool_short_row(ps)));
+            row_idx += 1;
         }
         lines.push(String::new());
     }
@@ -503,12 +536,94 @@ mod tests {
         );
     }
 
+    // ── ★ arch-Minor2 (P-B-tax-Minor render): WouldDisplaceIfPromoted caveat copy ─────────────────────
+
+    #[test]
+    fn would_displace_advisory_renders_the_understatement_caveat() {
+        let row = tranche_row(
+            1,
+            40_000_000,
+            TrancheStatus::DeclaredZero,
+            vec![Advisory::WouldDisplaceIfPromoted],
+        );
+        let rendered = render_tranche_row(&row).join("\n");
+        assert!(
+            rendered.to_lowercase().contains("understate"),
+            "must caveat the gain-\u{394} as an understatement, never an unqualified saving: {rendered}"
+        );
+        assert!(
+            rendered.contains("[optional] promote"),
+            "WouldDisplaceIfPromoted is a caveat, not a suppression — the promote branch stays offered: \
+             {rendered}"
+        );
+    }
+
+    // ── ★ arch-Minor1: the dashboard cursor marker ─────────────────────────────────────────────────────
+
+    #[test]
+    fn cursor_marks_only_the_addressed_row() {
+        let view = DefensiveFilingView {
+            candidates: vec![shortfall(1, 10_000), shortfall(2, 20_000)],
+            ..empty_view()
+        };
+        // row_order addresses [Candidate(0), Candidate(1)] — cursor=1 is the SECOND candidate.
+        let rendered = render_dashboard(&view, 1);
+        let first_candidate = rendered
+            .iter()
+            .find(|l| l.contains("short 10000 sat"))
+            .expect("first candidate row present");
+        let second_candidate = rendered
+            .iter()
+            .find(|l| l.contains("short 20000 sat"))
+            .expect("second candidate row present");
+        assert!(
+            !first_candidate.starts_with("> "),
+            "the NON-cursor row must carry no marker: {first_candidate:?}"
+        );
+        assert!(
+            second_candidate.starts_with("> "),
+            "the cursor-addressed row must carry the '> ' marker: {second_candidate:?}"
+        );
+    }
+
+    #[test]
+    fn cursor_marks_the_tranche_header_line_only_not_its_advisory_lines() {
+        let view = DefensiveFilingView {
+            tranches: vec![tranche_row(
+                1,
+                40_000_000,
+                TrancheStatus::DeclaredZero,
+                vec![Advisory::WouldDisplaceIfPromoted],
+            )],
+            ..empty_view()
+        };
+        // row_order addresses [Tranche(0)] — cursor=0 is the (only) tranche.
+        let rendered = render_dashboard(&view, 0);
+        let header = rendered
+            .iter()
+            .find(|l| l.contains("sat (declared):"))
+            .expect("tranche header present");
+        assert!(
+            header.starts_with("> "),
+            "the tranche header line must carry the marker: {header:?}"
+        );
+        let advisory_line = rendered
+            .iter()
+            .find(|l| l.contains("[advisory]"))
+            .expect("advisory line present");
+        assert!(
+            !advisory_line.starts_with("> "),
+            "a sub-line (advisory) of the addressed row must NOT itself carry the marker: \
+             {advisory_line:?}"
+        );
+    }
+
     // ── (d): x/export is ALWAYS-available, never a "done" checkbox ────────────────────────────────────
 
     #[test]
     fn export_is_always_available_never_a_done_checkbox() {
         // Empty dashboard: nothing to declare, nothing tranched, nothing short.
-        let rendered_empty = render_dashboard(&empty_view()).join("\n");
+        let rendered_empty = render_dashboard(&empty_view(), 0).join("\n");
         assert!(
             rendered_empty.contains("[x] export"),
             "export must be offered even with an EMPTY dashboard: {rendered_empty}"
@@ -532,7 +647,7 @@ mod tests {
             flagged_years: Default::default(),
             safe_harbor_blocked: false,
         };
-        let rendered_busy = render_dashboard(&busy).join("\n");
+        let rendered_busy = render_dashboard(&busy, 0).join("\n");
         assert!(
             rendered_busy.contains("[x] export"),
             "export must ALSO be offered on a busy dashboard: {rendered_busy}"
@@ -651,6 +766,32 @@ mod tests {
         assert!(
             status.to_lowercase().contains("resolve") || status.to_lowercase().contains("approve"),
             "routing guidance must tell the filer what to do next: {status}"
+        );
+    }
+
+    // ── ★ arch-Minor2: the residue-latch guard (mirrors ~26/35 sibling `open_*` fns) ──────────────────
+
+    #[test]
+    fn entry_refuses_when_the_rollback_failed_latch_is_set() {
+        let mut app = EditorApp::new(PathBuf::from("/test/vault.pgp"));
+        app.screen = EditorScreen::Browse;
+        app.snapshot = Some(snapshot_with_pseudo_count(0));
+        app.rollback_failed = true;
+
+        app.open_defensive_filing();
+
+        assert_eq!(
+            app.screen,
+            EditorScreen::Browse,
+            "the residue latch must refuse entry (stay on Browse), never transition"
+        );
+        assert!(app.defensive_dashboard.is_none());
+        let status = app
+            .status
+            .expect("a residue-latch refusal must set a status");
+        assert!(
+            status.to_lowercase().contains("quit"),
+            "the residue-latch status must carry the quit-first remedy: {status}"
         );
     }
 
