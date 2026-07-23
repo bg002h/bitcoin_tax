@@ -815,3 +815,90 @@ fn void_inert_alloc_then_declare_pre2025_tranche_keeps_the_year_computable() {
         "the tranche lot survives via Path A (tag intact)"
     );
 }
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// ★ T2-M2 follow-up (FOLLOWUPS.md, Task 9): the shipped phantom-wallet stderr warning
+// (`cmd/tranche.rs::declare_tranche`, `eprintln!` AFTER `plan_declare` succeeds) is preserved
+// byte-for-byte by the Defensive Filing Wizard's chokepoint extraction (Task 2), but no test pinned
+// its actual EMISSION. `eprintln!` cannot be intercepted in-process, so this spawns the REAL `btctax`
+// binary (mirrors `chokepoint_parity.rs`'s own subprocess convention) and captures its real stderr.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// Run `btctax --vault <vault> reconcile declare-tranche <args...>`; returns (exit, stderr).
+fn run_declare(vault: &Path, args: &[&str]) -> (i32, String) {
+    let bin = env!("CARGO_BIN_EXE_btctax");
+    let mut c = std::process::Command::new(bin);
+    c.arg("--vault")
+        .arg(vault.to_str().unwrap())
+        .arg("reconcile")
+        .arg("declare-tranche");
+    for a in args {
+        c.arg(a);
+    }
+    c.env("BTCTAX_PASSPHRASE", "pw");
+    let out = c.output().expect("btctax binary must execute");
+    (
+        out.status.code().expect("exits normally"),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// (a) A never-before-referenced `--wallet` on an otherwise-valid declare EMITS the shipped
+/// phantom-wallet warning verbatim, on a SUCCESSFUL (exit 0) run.
+#[test]
+fn phantom_wallet_warning_is_emitted_verbatim_on_a_successful_declare() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    let (code, stderr) = run_declare(
+        &vault,
+        &[
+            "--amount",
+            "0.5",
+            "--wallet",
+            "self:phantom",
+            "--window-start",
+            "2020-01-01",
+            "--window-end",
+            "2020-12-31",
+        ],
+    );
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert!(
+        stderr.contains("phantom wallet"),
+        "the shipped phantom-wallet warning must be emitted verbatim on success: {stderr:?}"
+    );
+    assert!(
+        stderr.contains("self:phantom"),
+        "the warning must name the offending --wallet: {stderr:?}"
+    );
+}
+
+/// (b) A REFUSED declare (a non-positive `--amount`) never reaches the wallet-check — it is SILENT
+/// (the `eprintln!` sits AFTER `plan_declare`'s own `?`, so a refused plan never runs it).
+#[test]
+fn phantom_wallet_warning_is_silent_on_a_refused_declare() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    let (code, stderr) = run_declare(
+        &vault,
+        &[
+            "--amount",
+            "0",
+            "--wallet",
+            "self:phantom",
+            "--window-start",
+            "2020-01-01",
+            "--window-end",
+            "2020-12-31",
+        ],
+    );
+    assert_ne!(code, 0, "a non-positive amount must be refused");
+    assert!(
+        !stderr.contains("phantom wallet"),
+        "a refused declare must NEVER reach the phantom-wallet warning: {stderr:?}"
+    );
+}

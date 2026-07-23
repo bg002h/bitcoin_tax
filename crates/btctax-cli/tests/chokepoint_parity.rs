@@ -19,7 +19,7 @@ use btctax_cli::cmd::promote::ProvenanceKind;
 use btctax_cli::{chokepoint, cmd, eventref, CliError, Session, PROMOTE_ACK_PHRASE};
 use btctax_core::event::{
     Acquire, BasisSource, DeclareTranche, EventPayload, OutflowClass, PromoteTranche,
-    ReclassifyOutflow, TransferOut,
+    ReclassifyOutflow, TransferOut, VoidDecisionEvent,
 };
 use btctax_core::identity::{EventId, Source, SourceRef, WalletId};
 use btctax_core::persistence::{append_decision, append_import_batch, load_all};
@@ -475,4 +475,133 @@ fn bg_d7_empty_part_ii_refusal_is_identical_across_drivers() {
         ProvenanceKind::Purchase,
         "   ",
     );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// ★ T4 follow-up (FOLLOWUPS.md, Task 9): `Refusal::Target` parity — the resolve-live gate
+// (unknown/voided/wrong-type target) had NO parity coverage until now. Fires INSIDE `plan_promote`
+// BEFORE any consent is ever computed (same "pre-render" shape as the BG-D5/BG-D3/BG-D7 cases above),
+// so this reuses the same three-part proof: (i) the CLI verb refuses printing NOTHING to stdout; (ii)
+// `plan_promote` itself refuses with `Refusal::Target`, mapped through the SAME `From<Refusal>`; (iii)
+// nothing is recorded on either side.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// Build TWO fresh, IDENTICALLY-constructed vaults via `build` (each returning the vault path + a BAD
+/// target ref for that vault) and assert both drivers refuse IDENTICALLY.
+fn assert_target_refusal_parity(build: impl Fn(&Path) -> (PathBuf, String)) {
+    let dir_a = tempfile::tempdir().unwrap();
+    let dir_b = tempfile::tempdir().unwrap();
+    let (vault_a, target_a) = build(dir_a.path());
+    let (vault_b, target_b) = build(dir_b.path());
+    assert_eq!(
+        target_a, target_b,
+        "identical construction on two fresh vaults must yield identical target refs"
+    );
+
+    let part_ii_text = "cash P2P purchase, no records";
+    let part_ii_path = dir_a.path().join("part_ii.txt");
+    std::fs::write(&part_ii_path, part_ii_text).unwrap();
+
+    let (code_a, stdout_a, stderr_a) = run_promote(
+        &vault_a,
+        &target_a,
+        "purchase",
+        &part_ii_path,
+        &["--i-acknowledge", PROMOTE_ACK_PHRASE],
+    );
+    assert_ne!(
+        code_a, 0,
+        "a bad target must be refused; stdout={stdout_a} stderr={stderr_a}"
+    );
+    assert!(
+        stdout_a.is_empty(),
+        "a pre-consent (resolve-live) refusal must print NOTHING to stdout: {stdout_a:?}"
+    );
+
+    let target_id_b = eventref::parse_event_id(&target_b).unwrap();
+    let session_b = Session::open(&vault_b, &pp()).unwrap();
+    let events_b = load_all(session_b.conn()).unwrap();
+    let cfg_b = session_b.config().unwrap().to_projection();
+    let refusal_b = chokepoint::plan_promote(
+        &events_b,
+        session_b.prices(),
+        &cfg_b,
+        &target_id_b,
+        ProvenanceKind::Purchase,
+        part_ii_text,
+        now(),
+    )
+    .expect_err("a bad target must refuse plan_promote directly too");
+    assert!(
+        matches!(refusal_b, chokepoint::Refusal::Target(_)),
+        "the resolve-live gate must map to Refusal::Target specifically: {refusal_b:?}"
+    );
+    let err_b: CliError = refusal_b.into();
+    drop(session_b); // release the vault lock before re-opening vault_b below
+
+    assert_eq!(
+        stderr_a,
+        format!("error: {err_b}\n"),
+        "the CLI-driven refusal text must be byte-identical to plan_promote's Refusal::Target, mapped \
+         through the SAME From<Refusal> for CliError"
+    );
+
+    assert_eq!(count_promotes(&vault_a), 0);
+    assert_eq!(count_promotes(&vault_b), 0);
+}
+
+/// (i) an UNKNOWN decision ref — never appended at all.
+#[test]
+fn bg_target_unknown_ref_refusal_is_identical_across_drivers() {
+    assert_target_refusal_parity(|dir| {
+        let vault = dir.join("vault.pgp");
+        cmd::init::run(&vault, &pp(), &dir.join("k.asc")).unwrap();
+        (vault, EventId::decision(999_999).canonical())
+    });
+}
+
+/// (ii) a VOIDED tranche — present, but no longer LIVE.
+#[test]
+fn bg_target_voided_tranche_refusal_is_identical_across_drivers() {
+    assert_target_refusal_parity(|dir| {
+        let (vault, target) =
+            simple_tranche_vault(dir, date!(2020 - 01 - 01), date!(2020 - 01 - 10));
+        let target_id = eventref::parse_event_id(&target).unwrap();
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        append_decision(
+            s.conn(),
+            EventPayload::VoidDecisionEvent(VoidDecisionEvent {
+                target_event_id: target_id,
+            }),
+            now(),
+            UtcOffset::UTC,
+            None,
+        )
+        .unwrap();
+        s.save().unwrap();
+        (vault, target)
+    });
+}
+
+/// (iii) a WRONG-TYPE target — a real, live, non-voided event that is simply not a `DeclareTranche`
+/// (here: the imported `Acquire` itself).
+#[test]
+fn bg_target_wrong_type_refusal_is_identical_across_drivers() {
+    assert_target_refusal_parity(|dir| {
+        let vault = dir.join("vault.pgp");
+        let mut s = Session::create(&vault, &pp()).unwrap();
+        let buy = imp(
+            "BUY",
+            datetime!(2020-01-01 00:00 UTC),
+            EventPayload::Acquire(Acquire {
+                sat: 100_000_000,
+                usd_cost: dec!(10_000),
+                fee_usd: dec!(0),
+                basis_source: BasisSource::ExchangeProvided,
+            }),
+        );
+        append_import_batch(s.conn(), std::slice::from_ref(&buy)).unwrap();
+        s.save().unwrap();
+        (vault, buy.id.canonical())
+    });
 }

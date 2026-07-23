@@ -366,6 +366,12 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         handle_declare_flow_key(app, key);
         return;
     }
+    // ── Promote-flow dispatch (Task 9, Phase P-C) — BEFORE form + screen dispatch ─────
+    // A flow like the others: `q`/Esc must never fall through to a Browse quit arm while it blocks.
+    if app.promote_flow.is_some() {
+        handle_promote_flow_key(app, key);
+        return;
+    }
     // ── Tax-inputs flow dispatch — BEFORE form + screen dispatch ──────────────
     // A flow like the others: `q`/Esc must never fall through to a Browse quit arm while it blocks.
     if app.tax_inputs_form.is_some() {
@@ -473,9 +479,9 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         // The Defensive Filing Wizard dashboard (Task 7, Phase P-B) — READ-ONLY + dispatch-scaffolding
         // (C-3). `Esc`/`q` return to Browse; every other key is handed to
         // `defensive_dashboard::handle_defensive_dashboard_key`, which only names an intent and moves
-        // the cursor. `Declare` (Task 8) opens the Declare flow (dispatched ABOVE this match, in the
-        // flow-dispatch layer, once `app.declare_flow` is `Some`); `Promote`/`Export` remain scaffolded
-        // (Tasks 9-10).
+        // the cursor. `Declare` (Task 8) opens the Declare flow and `Promote` (Task 9) opens the Promote
+        // flow (both dispatched ABOVE this match, in the flow-dispatch layer, once `app.declare_flow` /
+        // `app.promote_flow` is `Some`); `Export` remains scaffolded (Task 10).
         EditorScreen::DefensiveFiling => {
             app.status = None;
             match key.code {
@@ -491,8 +497,8 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                             defensive_dashboard::DashboardIntent::Declare(id) => {
                                 open_declare_flow(app, id);
                             }
-                            defensive_dashboard::DashboardIntent::Promote(_) => {
-                                app.status = Some("promote — coming soon (Phase P-C)".to_string());
+                            defensive_dashboard::DashboardIntent::Promote(id) => {
+                                open_promote_flow(app, id);
                             }
                             defensive_dashboard::DashboardIntent::Export => {
                                 app.status = Some("export — coming soon (Phase P-D)".to_string());
@@ -746,6 +752,7 @@ impl EditorApp {
         self.method_election_flow = None;
         self.method_election_modal = None;
         self.declare_flow = None;
+        self.promote_flow = None;
     }
 }
 
@@ -4206,6 +4213,257 @@ fn declare_flow_confirm(app: &mut EditorApp) {
         }
         Err(e) => {
             app.declare_flow = None;
+            app.on_persist_error(e);
+        }
+    }
+}
+
+// ── The Promote flow (Task 9, Phase P-C) ──────────────────────────────────────
+
+/// Open the Promote flow for the dashboard row named by `DashboardIntent::Promote(target)`. Re-verifies
+/// the target is STILL a live, unpromoted (`DeclaredZero`) row in the dashboard's OWN already-computed
+/// `journey_view` — DFW-D1 "no second gating authority": nothing here re-derives tranche status
+/// independently (mirrors `open_declare_flow`'s own re-derivation-from-the-dashboard discipline).
+/// Refuses (status only, dashboard stays open) when: the residue latch is set, the dashboard state is
+/// missing, or the row is no longer present / already promoted (a stale cursor/re-render race).
+fn open_promote_flow(app: &mut EditorApp, target: btctax_core::EventId) {
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
+        return;
+    }
+    let Some(dash) = app.defensive_dashboard.as_ref() else {
+        return;
+    };
+    let still_promotable = dash.view.tranches.iter().any(|r| {
+        r.target == target && r.status == btctax_core::defensive::TrancheStatus::DeclaredZero
+    });
+    if !still_promotable {
+        app.status = Some(
+            "that tranche is no longer a promote candidate (already promoted, or the dashboard is \
+             stale) — re-enter Defensive Filing"
+                .to_string(),
+        );
+        return;
+    }
+
+    debug_assert!(
+        app.open_flow_count() <= 1,
+        "one-flow invariant violated entering the Promote flow: {} flows open simultaneously",
+        app.open_flow_count()
+    );
+
+    app.promote_flow = Some(crate::edit::promote_flow::PromoteFlowState::new(target));
+}
+
+/// Dispatch a key press while the Promote flow is open, by its current step.
+fn handle_promote_flow_key(app: &mut EditorApp, key: KeyEvent) {
+    use crate::edit::promote_flow::PromoteFlowStep;
+
+    let is_consent = matches!(
+        app.promote_flow.as_ref().map(|f| &f.step),
+        Some(PromoteFlowStep::Consent { .. })
+    );
+    if is_consent {
+        handle_promote_flow_consent_key(app, key);
+    } else {
+        handle_promote_flow_part_ii_key(app, key);
+    }
+}
+
+/// Handle a key press while the Part II authoring step is active.
+///
+/// Multiline (DFW-D12/M-2): `Enter` inserts a newline into the buffer — it does NOT submit. `Tab`
+/// reviews the narrative (`promote_flow_review`, below): a fresh `plan_promote` either advances to the
+/// Consent step or bounces back INLINE with a refusal reason, preserving the buffer either way. `Esc`
+/// cancels the whole flow (there is nothing yet to lose — the buffer is UI-only until `Tab` succeeds).
+fn handle_promote_flow_part_ii_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => {
+            app.promote_flow = None;
+        }
+        KeyCode::Backspace => {
+            if let Some(flow) = app.promote_flow.as_mut() {
+                flow.part_ii.pop_char();
+            }
+        }
+        KeyCode::Enter => {
+            if let Some(flow) = app.promote_flow.as_mut() {
+                flow.part_ii.push_char('\n');
+            }
+        }
+        KeyCode::Tab => promote_flow_review(app),
+        KeyCode::Char(c) => {
+            if let Some(flow) = app.promote_flow.as_mut() {
+                flow.part_ii.push_char(c);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// `Tab` at the Part II step: run `plan_promote` FRESH over the CURRENT session snapshot (never a stale
+/// cached plan — mirrors `declare_flow_confirm`'s own "re-run fresh" discipline, applied one step
+/// earlier here since Promote's consent screen itself needs a real, freshly-computed `PromotePlan`).
+fn promote_flow_review(app: &mut EditorApp) {
+    let Some(snap) = app.snapshot.as_ref() else {
+        return;
+    };
+    let cfg = snap.cli_config.to_projection();
+    let now = app.clock.now();
+    if let Some(flow) = app.promote_flow.as_mut() {
+        flow.review(&snap.events, &snap.prices, &cfg, now);
+    }
+}
+
+/// Handle a key press while the Consent step (the TypedWord ack gate) is active.
+///
+/// All printable chars are consumed by the ack buffer. `Backspace` removes the last char. `Enter`
+/// validates the typed phrase against `PROMOTE_ACK_PHRASE` (mirrors `handle_attest_typed_word_key`'s own
+/// exact-compare pre-check): a match calls `promote_flow_confirm`; a mismatch sets an inline error and
+/// PRESERVES the buffer (the filer corrects via Backspace) — the REAL fail-closed gate is
+/// `apply_promote`'s own `require_promote_ack`, reached via `persist_promote_tranche`; this pre-check is
+/// a UX nicety over the SAME shared `PROMOTE_ACK_PHRASE` constant, not a second gating authority. `Esc`
+/// steps back to Part II authoring (one step per press), preserving the narrative buffer.
+fn handle_promote_flow_consent_key(app: &mut EditorApp, key: KeyEvent) {
+    use crate::edit::promote_flow::PromoteFlowStep;
+
+    match key.code {
+        KeyCode::Esc => {
+            if let Some(flow) = app.promote_flow.as_mut() {
+                flow.step = PromoteFlowStep::PartII { error: None };
+            }
+            return;
+        }
+        KeyCode::Backspace => {
+            if let Some(crate::edit::promote_flow::PromoteFlowState {
+                step: PromoteFlowStep::Consent { ack, .. },
+                ..
+            }) = app.promote_flow.as_mut()
+            {
+                ack.pop_char();
+            }
+            return;
+        }
+        KeyCode::Char(c) => {
+            if let Some(crate::edit::promote_flow::PromoteFlowState {
+                step: PromoteFlowStep::Consent { ack, error, .. },
+                ..
+            }) = app.promote_flow.as_mut()
+            {
+                ack.push_char(c);
+                *error = None;
+            }
+            return;
+        }
+        KeyCode::Enter => {}
+        _ => return,
+    }
+
+    let typed = match app.promote_flow.as_ref().map(|f| &f.step) {
+        Some(PromoteFlowStep::Consent { ack, .. }) => ack.as_str().trim().to_string(),
+        _ => return,
+    };
+    if typed != btctax_cli::PROMOTE_ACK_PHRASE {
+        if let Some(crate::edit::promote_flow::PromoteFlowState {
+            step: PromoteFlowStep::Consent { error, .. },
+            ..
+        }) = app.promote_flow.as_mut()
+        {
+            *error = Some(format!(
+                "the acknowledgment phrase did not match. Type it EXACTLY (trimmed, case-sensitive): \
+                 {:?}.",
+                btctax_cli::PROMOTE_ACK_PHRASE
+            ));
+        }
+        return;
+    }
+
+    promote_flow_confirm(app);
+}
+
+/// The Promote flow's Consent-step Enter, once the typed ack matches: extracts the ALREADY-COMPUTED
+/// `PromotePlan` (computed once at `promote_flow_review`'s PartII→Consent transition — never recomputed
+/// here, mirroring the CLI thin driver's own single `plan_promote` call) and hands it, with the typed
+/// phrase, to `edit::persist::persist_promote_tranche` — the ONLY caller of `apply_promote` in this
+/// crate (C-3). On success, re-projects the snapshot and refreshes the dashboard's own `journey_view` off
+/// the NEW snapshot so the just-promoted row updates from "declared" to "promoted" without a manual
+/// re-enter (mirrors `declare_flow_confirm`'s own refresh).
+fn promote_flow_confirm(app: &mut EditorApp) {
+    use crate::edit::promote_flow::PromoteFlowStep;
+
+    let plan = match app.promote_flow.as_mut() {
+        Some(flow) => {
+            match std::mem::replace(&mut flow.step, PromoteFlowStep::PartII { error: None }) {
+                PromoteFlowStep::Consent { plan, .. } => plan,
+                other => {
+                    // Not at Consent (shouldn't happen via the key dispatch above) — restore and bail.
+                    flow.step = other;
+                    return;
+                }
+            }
+        }
+        None => return,
+    };
+
+    let now = app.clock.now();
+    let save_result = {
+        let session = match app.session.as_mut() {
+            Some(s) => s,
+            None => {
+                app.promote_flow = None;
+                return;
+            }
+        };
+        crate::edit::persist::persist_promote_tranche(
+            session,
+            *plan,
+            Some(btctax_cli::PROMOTE_ACK_PHRASE),
+            now,
+        )
+    };
+
+    match save_result {
+        Ok(_id) => {
+            let new_snap = {
+                let session = app.session.as_ref().unwrap();
+                btctax_tui::unlock::build_snapshot(session)
+            };
+            app.promote_flow = None;
+            match new_snap {
+                Ok((snap, _)) => {
+                    app.snapshot = Some(snap);
+                    app.status = Some(
+                        "promoted — filed the computed floor as documented basis (no longer revocable)"
+                            .to_string(),
+                    );
+                    // Refresh the dashboard's own view off the NEW snapshot so the just-promoted row
+                    // no longer offers 'p' (mirrors journey_view's own recompute — no cached second
+                    // source of truth).
+                    if let Some(snap) = app.snapshot.as_ref() {
+                        let cfg = snap.cli_config.to_projection();
+                        let current = app.clock.now().year();
+                        let view = btctax_core::defensive::journey_view(
+                            &snap.events,
+                            &snap.state,
+                            &snap.prices,
+                            &snap.tables,
+                            &cfg,
+                            current,
+                        );
+                        app.defensive_dashboard = Some(
+                            crate::defensive_dashboard::DefensiveDashboardState::new(view),
+                        );
+                    }
+                }
+                Err(e) => {
+                    app.status = Some(format!(
+                        "Saved but re-projection failed ({e}) — restart to refresh"
+                    ));
+                }
+            }
+        }
+        Err(e) => {
+            app.promote_flow = None;
             app.on_persist_error(e);
         }
     }
@@ -12959,6 +13217,187 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e.payload, EventPayload::DeclareTranche(_))),
             "a DeclareTranche decision must be durably persisted to disk"
+        );
+    }
+
+    // ── ★ Task 9 end-to-end: Promote flow open → author Part II (real keystrokes, multiline) →
+    // review → TypedWord ack → REAL persist via persist_promote_tranche ─────────────────────────────
+
+    #[test]
+    fn promote_flow_end_to_end_records_a_real_promote_via_persist_promote_tranche() {
+        use btctax_core::defensive::TrancheStatus;
+        use btctax_core::event::{DeclareTranche, EventPayload};
+        use btctax_core::persistence::append_decision;
+        use btctax_core::WalletId;
+        use time::macros::date;
+        use time::UtcOffset;
+
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        let wallet = WalletId::SelfCustody {
+            label: "cold".into(),
+        };
+        let now = app.clock.now();
+
+        // Hand-craft a live, unpromoted `DeclareTranche` over a window the bundled daily-close dataset
+        // fully covers (2020-01-01..2020-01-10 — see `promote_cli.rs`'s `vault_with_tranche` doc).
+        let target = {
+            let session = app.session.as_mut().unwrap();
+            let id = append_decision(
+                session.conn(),
+                EventPayload::DeclareTranche(DeclareTranche {
+                    sat: 40_000_000,
+                    wallet: wallet.clone(),
+                    window_start: date!(2020 - 01 - 01),
+                    window_end: date!(2020 - 01 - 10),
+                }),
+                now,
+                UtcOffset::UTC,
+                None,
+            )
+            .unwrap();
+            session.save().unwrap();
+            id
+        };
+        let refreshed = {
+            let session = app.session.as_ref().unwrap();
+            btctax_tui::unlock::build_snapshot(session).unwrap().0
+        };
+        app.snapshot = Some(refreshed);
+
+        // Enter the dashboard — the tranche must appear as a live DeclaredZero row.
+        app.open_defensive_filing();
+        assert_eq!(app.screen, EditorScreen::DefensiveFiling);
+        {
+            let dash = app.defensive_dashboard.as_ref().unwrap();
+            assert_eq!(dash.view.tranches.len(), 1, "{:?}", dash.view.tranches);
+            assert_eq!(dash.view.tranches[0].target, target);
+            assert_eq!(dash.view.tranches[0].status, TrancheStatus::DeclaredZero);
+        }
+
+        // Open the Promote flow for it (mirrors `DashboardIntent::Promote(target)`'s own dispatch).
+        open_promote_flow(&mut app, target.clone());
+        assert!(
+            app.promote_flow.is_some(),
+            "the Promote flow must open for a real DeclaredZero row"
+        );
+
+        // Author the Part II narrative through REAL keystrokes — proves the multiline path (an embedded
+        // Enter inserts a newline, it does NOT submit) and the Tab-driven review wiring.
+        for c in "cash P2P purchase, no records".chars() {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+        handle_key(&mut app, press(KeyCode::Enter)); // a newline, not a submit
+        for c in "on-chain window bounded".chars() {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+        assert!(
+            app.promote_flow.is_some(),
+            "an embedded Enter must stay on the PartII step, never close/advance on its own"
+        );
+        handle_key(&mut app, press(KeyCode::Tab)); // review → Consent
+
+        {
+            let flow = app
+                .promote_flow
+                .as_ref()
+                .expect("the flow stays open, now at Consent");
+            assert!(
+                matches!(
+                    flow.step,
+                    crate::edit::promote_flow::PromoteFlowStep::Consent { .. }
+                ),
+                "a valid multiline narrative over a fully-covered window must reach Consent: {:?}",
+                flow.step
+            );
+        }
+
+        // A WRONG ack phrase must refuse fail-closed, preserve the buffer, and record nothing.
+        for c in "not the phrase".chars() {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.promote_flow.is_some(),
+            "a wrong ack phrase must NOT close the flow"
+        );
+        {
+            let flow = app.promote_flow.as_ref().unwrap();
+            match &flow.step {
+                crate::edit::promote_flow::PromoteFlowStep::Consent { error, .. } => {
+                    assert!(
+                        error.is_some(),
+                        "a wrong ack phrase must surface an inline error"
+                    );
+                }
+                other => panic!("must stay at Consent after a wrong ack: {other:?}"),
+            }
+        }
+
+        // Backspace off the wrong text, then type the REAL ack phrase and submit.
+        for _ in 0.."not the phrase".len() {
+            handle_key(&mut app, press(KeyCode::Backspace));
+        }
+        for c in btctax_cli::PROMOTE_ACK_PHRASE.chars() {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        assert!(
+            app.promote_flow.is_none(),
+            "a successful promote must close the flow"
+        );
+        let status = app.status.clone().unwrap_or_default();
+        assert!(
+            status.to_lowercase().contains("promot"),
+            "status must confirm the promote: {status:?}"
+        );
+
+        // The dashboard's own refreshed view must flip the row to Promoted.
+        let dash = app
+            .defensive_dashboard
+            .as_ref()
+            .expect("the refreshed dashboard view must be recomputed after a successful promote");
+        assert_eq!(dash.view.tranches.len(), 1);
+        assert_eq!(
+            dash.view.tranches[0].status,
+            TrancheStatus::Promoted,
+            "the row must flip to Promoted: {:?}",
+            dash.view.tranches[0]
+        );
+
+        // Sanity: re-open a FRESH session (simulating a restart) and confirm the PromoteTranche was
+        // really written to disk, not just held in memory — and that it carries a REAL (>$0) floor,
+        // the real ack phrase, and a non-empty shown_terms (the fully-undisposed Unrealized term, d).
+        drop(app); // release the VaultLock
+        let session2 = btctax_cli::Session::open(&_dir.path().join("vault.pgp"), &{
+            btctax_store::Passphrase::new("empty-vault-pass".into())
+        })
+        .unwrap();
+        let events2 = btctax_core::persistence::load_all(session2.conn()).unwrap();
+        let promoted = events2
+            .into_iter()
+            .find_map(|e| match e.payload {
+                EventPayload::PromoteTranche(p) => Some(p),
+                _ => None,
+            })
+            .expect("a PromoteTranche decision must be durably persisted to disk");
+        assert_eq!(promoted.target, target);
+        assert_eq!(
+            promoted.acknowledgment.phrase,
+            btctax_cli::PROMOTE_ACK_PHRASE
+        );
+        assert_eq!(
+            promoted.part_ii_narrative,
+            "cash P2P purchase, no records\non-chain window bounded"
+        );
+        assert!(
+            promoted.filed_basis > btctax_core::Usd::ZERO,
+            "a real floor must have been filed, not $0: {}",
+            promoted.filed_basis
+        );
+        assert!(
+            !promoted.acknowledgment.shown_terms.is_empty(),
+            "a fully-undisposed promote must record a non-empty shown_terms (the Unrealized term, d)"
         );
     }
 

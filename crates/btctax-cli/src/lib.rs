@@ -29,6 +29,12 @@ pub use cmd::tranche::guard_allocation_vs_tranche;
 // Re-exported at the crate root mirroring `ATTEST_PHRASE` (below): a plain, distinct consent-phrase
 // constant, not a `cmd::`-scoped session/lock fn, so it belongs beside the other top-level phrase gates.
 pub use cmd::promote::PROMOTE_ACK_PHRASE;
+// Re-exported at the crate root (Defensive Filing Wizard Task 9) alongside `PROMOTE_ACK_PHRASE`: the
+// TUI Promote flow (`btctax-tui-edit`'s `edit/promote_flow.rs`) needs `ProvenanceKind::Purchase` to call
+// `plan_promote` WITHOUT the `cmd::` token its KAT-G1 source gate forbids in non-test code, and
+// `PROVENANCE_TEXT` to show the filer what BG-D5 attestation is being made on their behalf. Both are
+// plain data (a `Copy` enum; a `&'static str`) — no `Session`, no lock, no I/O.
+pub use cmd::promote::{ProvenanceKind, PROVENANCE_TEXT};
 // Re-exported at the crate root so the TUI export path (`btctax-tui::export::do_export`) can call the
 // BG-D8 completeness gate WITHOUT the `cmd::` token its KAT-E10 source gate forbids in non-test code
 // (Approach-B Task 17). Like `guard_allocation_vs_tranche` above, this is a PURE
@@ -53,6 +59,19 @@ pub use cmd::admin::IrsPdfReport;
 // import lists). Any FUTURE addition here must be equally justified (do NOT re-export a second
 // session-opening or unconfined-write fn).
 pub use chokepoint::{apply_declare, plan_declare, DeclarePlan, Refusal};
+// Re-exported at the crate root (Defensive Filing Wizard Task 9, ★ C-3) so the TUI Promote flow
+// (`btctax-tui-edit`'s `edit/promote_flow.rs` + `edit/persist.rs`) can drive the PROMOTE chokepoint
+// WITHOUT the `cmd::` token its KAT-G1 source gate forbids in non-test code — mirrors the
+// `plan_declare`/`DeclarePlan`/`apply_declare` re-export directly above. `plan_promote`/`render_consent`
+// are pure `(events, ...) -> Result` / `(&PromotePlan) -> String` fns (no `Session`, no lock, no I/O);
+// `PromotePlan` is a plain data type; `Refusal` is ALREADY re-exported above (the SAME shared enum both
+// `plan_declare` and `plan_promote` return). `apply_promote` DOES touch the mutation surface — it is
+// re-exported here ONLY so `edit/persist.rs`'s `persist_promote_tranche` wrapper can reach it (KAT-G1's
+// `persist_only_tokens` confines the LITERAL `apply_promote(` call token to that one file crate-wide;
+// re-exporting the name itself does not weaken that confinement — the gate scans call sites, not import
+// lists). Any FUTURE addition here must be equally justified (do NOT re-export a second session-opening
+// or unconfined-write fn).
+pub use chokepoint::{apply_promote, plan_promote, render_consent, PromotePlan};
 pub use config::CliConfig;
 pub use session::{
     BulkFilter, BulkIncomeFilter, BulkIncomePlan, BulkIncomeRow, BulkLinkPlan, BulkLinkRow,

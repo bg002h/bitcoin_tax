@@ -446,6 +446,34 @@ pub fn persist_declare_tranche(
     }
 }
 
+/// ★ Task 9 (C-3/KAT-G1): the Promote flow's WRITE — and the ONLY call site of
+/// `btctax_cli::apply_promote` anywhere in this crate (mechanically enforced by
+/// `kat_g1_mechanized_source_gate`'s `persist_only_tokens`, below). The Promote flow
+/// (`edit/promote_flow.rs`) COLLECTS the Part II narrative + the typed ack phrase and reads
+/// `btctax_cli::plan_promote`/`render_consent` for its consent screen (pure planners — no mutation, so
+/// neither is confined here); it hands the resulting `PromotePlan` + the typed phrase to THIS wrapper to
+/// actually persist. Mirrors `persist_declare_tranche` exactly.
+///
+/// # Failed-save rollback [save-rollback]
+/// `btctax_cli::apply_promote` bundles the BG-D6 acknowledgment gate + the BG-D9 `would_conflict`
+/// pre-check + append+save INTERNALLY, with no snapshot/rollback of its own — so THIS wrapper snapshots
+/// before calling it and, on ANY `Err`, reverts via `rollback`. A wrong/missing ack phrase fails INSIDE
+/// `apply_promote` BEFORE any append (`require_promote_ack` runs first), so the revert is a no-op in
+/// that case; if the ack matched but a LATER step (`would_conflict`, append, save) failed, the revert
+/// discards any residue — the same "safe either way" reasoning `persist_declare_tranche`'s doc gives.
+pub fn persist_promote_tranche(
+    session: &mut btctax_cli::Session,
+    plan: btctax_cli::PromotePlan,
+    acknowledge: Option<&str>,
+    now: time::OffsetDateTime,
+) -> Result<btctax_core::EventId, PersistError> {
+    let pre = session.snapshot()?;
+    match btctax_cli::apply_promote(session, plan, acknowledge, now) {
+        Ok(id) => Ok(id),
+        Err(e) => Err(rollback(session, &pre, e)),
+    }
+}
+
 /// Append a `VoidDecisionEvent` decision and atomically save the vault.
 ///
 /// `target_event_id` is the EventId of the revocable decision to void.
@@ -1987,6 +2015,10 @@ mod tests {
         // `persist_declare_tranche` in THIS file; the Declare flow (`edit/declare_flow.rs`) only reads
         // `btctax_cli::plan_declare` (a pure planner — not gated, mirrors `plan_promote` staying
         // ungated too).
+        // ★ Task 9 (C-3): "apply_promote(" added — the Defensive Filing Wizard's PROMOTE chokepoint
+        // write (`btctax_cli::apply_promote`, re-exported at the crate root). Confined to
+        // `persist_promote_tranche` in THIS file; the Promote flow (`edit/promote_flow.rs`) only reads
+        // `btctax_cli::plan_promote`/`render_consent` (pure planners — not gated).
         let persist_only_tokens: &[&str] = &[
             "conn(",
             "save(",
@@ -1996,6 +2028,7 @@ mod tests {
             "optimize_attest::set",
             "restore(",
             "apply_declare(",
+            "apply_promote(",
         ];
 
         // Test-region forbidden everywhere (no viewer export surface in the editor):
@@ -2175,6 +2208,8 @@ mod tests {
             let tok_oa_set = format!("{}::{}", "optimize_attest", "set"); // "optimize_attest::set"
                                                                           // ★ Task 8 (C-3): apply_declare( added to persist_only_tokens.
             let tok_apply_declare = format!("{}(", "apply_declare"); // "apply_declare("
+                                                                     // ★ Task 9 (C-3): apply_promote( added to persist_only_tokens.
+            let tok_apply_promote = format!("{}(", "apply_promote"); // "apply_promote("
 
             let content = format!(
                 "// planted self-check file\n\
@@ -2187,6 +2222,7 @@ mod tests {
                  \tlet _ = {tok_dd_set}(conn, &id, &d);\n\
                  \tlet _ = {tok_oa_set}(conn, &id, &a, &at);\n\
                  \tlet _ = {tok_apply_declare}session, plan, now);\n\
+                 \tlet _ = {tok_apply_promote}session, plan, ack, now);\n\
                  }}\n"
             );
             std::fs::write(&planted_path, &content).unwrap();
@@ -2220,6 +2256,10 @@ mod tests {
             assert!(
                 hits_persist.iter().any(|(t, _)| t == "apply_declare("),
                 "self-check FAILED: scanner did not detect planted apply_declare( token [Task 8 / C-3] — gate is broken"
+            );
+            assert!(
+                hits_persist.iter().any(|(t, _)| t == "apply_promote("),
+                "self-check FAILED: scanner did not detect planted apply_promote( token [Task 9 / C-3] — gate is broken"
             );
 
             // Verify scanner catches the R0-I1 vault-creating constructor.

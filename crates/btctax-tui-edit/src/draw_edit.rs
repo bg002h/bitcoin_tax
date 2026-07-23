@@ -117,6 +117,19 @@ fn draw_defensive_filing(frame: &mut Frame, app: &EditorApp) {
         return;
     }
 
+    // The Promote flow (Task 9), when open, likewise takes over the content area. Reachable only via
+    // `open_promote_flow`, which requires a live `defensive_dashboard` (itself only present with a live
+    // `snapshot`) — no `None`-snapshot fallback is needed here.
+    if let Some(flow) = app.promote_flow.as_ref() {
+        let lines: Vec<Line> = crate::edit::promote_flow::render_promote_flow(flow)
+            .into_iter()
+            .map(Line::from)
+            .collect();
+        let para = Paragraph::new(lines).wrap(Wrap { trim: false });
+        frame.render_widget(para, inner);
+        return;
+    }
+
     let Some(dash) = app.defensive_dashboard.as_ref() else {
         let msg = Paragraph::new("No dashboard state — press Esc to return to Browse.");
         frame.render_widget(msg, inner);

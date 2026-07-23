@@ -23,14 +23,22 @@ Legend: **[open]** not started · **[done]** burned down (kept for provenance) �
 
 ## P-C / Task 9 (the promote flow)
 
-- **[open] T2-M1 — `Refusal::Coverage` overload.** Reconcile at the FIRST `Refusal`-consuming flow: split the enum ONLY
-  if a concrete branch materializes (P-A/P-B gates found none — the routing signal is `safe_harbor_blocked` upstream, not
-  the enum; widening now = YAGNI). (Owner: **P-C/Task 8-9**.)
-- **[open] T2-M2 — phantom-wallet stderr byte-assertion.** The `None`-path driver preserves the shipped `eprintln!`
-  (`tranche.rs:159`) byte-for-byte but no test pins the emission. Add a stderr KAT. (Owner: **P-C**.)
-- **[open] T4 — `Refusal::Target` parity uncovered.** No test exercises the resolve-live (unknown/voided/wrong-type)
-  refusal; maps through the same `From<Refusal>`. Add a bad-target parity case when the promote flow (Task 9) exercises
-  target selection. (Owner: **P-C/Task 9**.)
+- **[done: no split needed] T2-M1 — `Refusal::Coverage` overload.** Confirmed at Task 9, the FIRST (and only)
+  `Refusal`-consuming TUI flow: `promote_flow.rs`'s `review()` never branches on a `Refusal` variant — it only maps
+  the WHOLE enum through `From<Refusal> for CliError` and displays `.to_string()` (grepped: the sole `Refusal::`
+  mention in `btctax-tui-edit/src` is a doc comment, not a match arm). The routing signal the flow uses upstream is
+  `journey_view`'s own `TrancheStatus`/`safe_harbor_blocked`, never the `Refusal` enum. No enum split needed — closing
+  as YAGNI-confirmed, not merely YAGNI-presumed. (Owner: **P-C/Task 8-9** — DONE.)
+- **[done] T2-M2 — phantom-wallet stderr byte-assertion.** Added `phantom_wallet_warning_is_emitted_verbatim_on_a_successful_declare`
+  / `phantom_wallet_warning_is_silent_on_a_refused_declare` to `crates/btctax-cli/tests/declare_tranche_cli.rs` (spawns
+  the real `btctax` binary — `eprintln!` cannot be intercepted in-process — mirrors `chokepoint_parity.rs`'s subprocess
+  convention): pins the shipped phantom-wallet warning is emitted verbatim on an unknown-wallet declare AND silent on a
+  refused (non-positive `--amount`) declare. (Owner: **P-C** — DONE.)
+- **[done] T4 — `Refusal::Target` parity uncovered.** Added `assert_target_refusal_parity` + three KATs
+  (`bg_target_unknown_ref_refusal_is_identical_across_drivers` / `..._voided_tranche_..` / `..._wrong_type_..`) to
+  `crates/btctax-cli/tests/chokepoint_parity.rs`: an unknown/voided/wrong-type target is refused byte-identically
+  across the CLI verb and `chokepoint::plan_promote`, both mapping through the SAME `From<Refusal>`, and asserted to
+  be the `Refusal::Target` variant specifically. (Owner: **P-C/Task 9** — DONE.)
 
 ## Task 10 / P-D (the export step)
 

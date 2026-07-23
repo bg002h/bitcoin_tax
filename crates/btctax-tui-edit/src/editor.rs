@@ -131,6 +131,13 @@ pub struct EditorApp {
     /// mutated by the flow's own key handler ONLY — the WRITE it eventually triggers goes through
     /// `edit::persist::persist_declare_tranche`, never a direct `chokepoint::apply_declare` call.
     pub declare_flow: Option<crate::edit::declare_flow::DeclareFlowState>,
+    /// The Promote flow's own state (Task 9, Phase P-C). `Some` while the flow is open — opened by
+    /// `main.rs`'s `open_promote_flow` from a `DashboardIntent::Promote` on the dashboard. Dispatch
+    /// order: promote_flow (flow layer) → ... (mirrors every other `*_flow` field, incl. `declare_flow`
+    /// directly above). C-3: this field is mutated by the flow's own key handler ONLY — the WRITE it
+    /// eventually triggers goes through `edit::persist::persist_promote_tranche`, never a direct
+    /// `chokepoint::apply_promote` call.
+    pub promote_flow: Option<crate::edit::promote_flow::PromoteFlowState>,
     /// The per-mutation confirmation modal. `Some` while awaiting Enter/Esc.
     ///
     /// Modal dispatch precedes form and screen dispatch (the R0-M4 lesson —
@@ -326,6 +333,7 @@ impl EditorApp {
             tax_inputs_form: None,
             defensive_dashboard: None,
             declare_flow: None,
+            promote_flow: None,
             mutation_modal: None,
             classify_inbound_flow: None,
             classify_inbound_modal: None,
@@ -439,6 +447,7 @@ impl EditorApp {
             self.match_self_transfers_flow.is_some(),
             self.method_election_flow.is_some(),
             self.declare_flow.is_some(),
+            self.promote_flow.is_some(),
         ]
         .into_iter()
         .filter(|open| *open)
