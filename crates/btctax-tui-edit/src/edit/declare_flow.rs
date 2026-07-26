@@ -103,11 +103,29 @@ impl DeclareFlowState {
     /// `window_start` is then floored at the (already-clamped) `window_end`, so cycling to a preset that
     /// STARTS after the short op can never leave an INVERTED window — which `window_reference` reports as
     /// "no price data covers this window at all", blaming missing data for an incoherent window (mirrors
-    /// the clamp `nudge_window_start` already carries). Invalidates the on-demand tax-Δ (M-1).
+    /// the clamp `nudge_window_start` already carries).
+    ///
+    /// ★ tax Minor 1 (P-C gate r2): a preset whose own `start` is AFTER the DFW-D5 before-op boundary
+    /// cannot apply to this shortfall at all — M-1's clamp still makes it COHERENT (never inverted), but
+    /// collapses it to a degenerate ONE-DAY window pinned at the before-op day, silently in the LEAST
+    /// conservative direction (the highest floor the flow can produce, and a SHORT-term holding date —
+    /// the opposite of DFW-D9's "wider window → lower floor"). Presets are ordered OLDEST-first and
+    /// applicability (`start <= before_op`) is therefore monotonic, so such presets are skipped when
+    /// cycling rather than landing on and rendering one; the loop is bounded at `ALL_PRESETS.len()` steps
+    /// (the oldest preset, genesis, applies to every real BTC-era shortfall, so it always terminates).
+    /// Invalidates the on-demand tax-Δ (M-1).
     pub fn cycle_preset(&mut self) {
-        self.preset = next_preset(self.preset);
-        let (start, end) = era_window(self.preset);
         let before_op = before_op_date(&self.shortfall);
+        let mut candidate = next_preset(self.preset);
+        for _ in 0..ALL_PRESETS.len() {
+            let (start, _) = era_window(candidate);
+            if start <= before_op {
+                break;
+            }
+            candidate = next_preset(candidate);
+        }
+        self.preset = candidate;
+        let (start, end) = era_window(self.preset);
         self.window_end = if end < before_op { end } else { before_op };
         self.window_start = start.min(self.window_end);
         self.invalidate_tax_delta();
@@ -878,6 +896,37 @@ mod tests {
             state.window_start <= state.window_end,
             "post-cycle window must be coherent: {rendered}"
         );
+    }
+
+    /// ★ tax Minor 1 (P-C gate r2): before this fix, a 2018-06-01 shortfall (before-op = 2018-05-31)
+    /// cycling onto `Y2021To2024` (start 2021-01-01, strictly after the before-op boundary) collapsed
+    /// `window_start == window_end == 2018-05-31` — a ONE-DAY window, silently: `plan_declare` would
+    /// have REFUSED this before the M-1 clamp, but the clamp now makes it merely COHERENT rather than
+    /// meaningful. A one-day window is the HIGHEST floor the flow can produce (the LEAST conservative
+    /// direction — opposite DFW-D9's "wider window → lower floor") and forces a SHORT-term holding date.
+    /// `cycle_preset` must SKIP a preset that cannot apply to this shortfall rather than land on it.
+    #[test]
+    fn cycling_never_lands_on_a_preset_that_collapses_the_window_to_a_single_degenerate_day() {
+        let sf = shortfall_on(date!(2018 - 06 - 01));
+        let before_op = date!(2018 - 05 - 31);
+        let mut state = DeclareFlowState::new(sf, wallet(), false);
+        for _ in 0..(ALL_PRESETS.len() * 3) {
+            state.cycle_preset();
+            let (preset_start, _) = era_window(state.preset);
+            assert!(
+                preset_start <= before_op,
+                "{:?} starts {preset_start}, strictly after this shortfall's before-op boundary \
+                 ({before_op}) — it cannot apply to this shortfall and must be SKIPPED when cycling, \
+                 not landed on",
+                state.preset
+            );
+            assert_ne!(
+                state.window_start, state.window_end,
+                "{:?} collapsed the window to a single degenerate day ({}) — the highest floor / \
+                 shortest (short-term) holding date the flow can silently produce",
+                state.preset, state.window_start
+            );
+        }
     }
 
     #[test]

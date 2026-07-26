@@ -226,6 +226,37 @@ impl PromoteFlowState {
 
 // ── Render (pure; no ratatui dependency here — draw_edit.rs wraps these lines in a Paragraph) ─────────
 
+/// The Provenance step's "why only a purchase" line (★ tax Nit 1 / arch M-r2-2, P-C gate r2).
+///
+/// The enumeration of non-`Purchase` kinds is built from `ProvenanceKind::ALL` — the SAME closed list
+/// the picker below and `refuse_non_purchase`'s refusal already derive from — so a new/renamed variant
+/// is named here automatically instead of leaving a second, hand-maintained copy to drift stale (this
+/// project's known taxonomy-drift failure class).
+///
+/// The basis MECHANISM is stated per regime rather than the previous blended "FMV at receipt, or
+/// donor/decedent carryover", which paired the wrong mechanism with the wrong kind: a **gift** keeps
+/// the donor's §1015 carryover basis; an **inheritance** steps up to fair market value at the date of
+/// death, §1014 — never a carryover; everything else (mining/staking/earning/airdrop/fork) uses fair
+/// market value AT RECEIPT (Notice 2014-21; Rev. Rul. 2019-24; Rev. Rul. 2023-14).
+fn non_purchase_basis_note() -> String {
+    let non_purchase: Vec<&str> = btctax_cli::ProvenanceKind::ALL
+        .iter()
+        .filter(|k| **k != btctax_cli::ProvenanceKind::Purchase)
+        .map(|k| k.label())
+        .collect();
+    let (last, rest) = non_purchase
+        .split_last()
+        .expect("ALL always carries at least one non-Purchase kind");
+    let enumeration = format!("{}, or {last}", rest.join(", "));
+    format!(
+        "Only a PURCHASE can be promoted to a >$0 estimated-basis floor: units acquired by \
+         {enumeration} already have a documented, real basis of their own — a gift carries the \
+         donor's carryover basis, an inheritance steps up to fair market value at the date of \
+         death, and the rest carry a fair-market-value-at-receipt basis — model that real \
+         acquisition instead."
+    )
+}
+
 /// The full Promote flow render — a pure derived text render (mirrors `render_declare_flow`'s own "pure
 /// String builder" shape).
 pub fn render_promote_flow(state: &PromoteFlowState) -> Vec<String> {
@@ -241,13 +272,7 @@ pub fn render_promote_flow(state: &PromoteFlowState) -> Vec<String> {
                  cannot and will not answer it for you."
                     .to_string(),
             );
-            lines.push(
-                "Only a PURCHASE can be promoted to a >$0 estimated-basis floor: units acquired by gift, \
-                 inheritance, mining, staking/earning, airdrop or fork already have a documented, real \
-                 basis (FMV at receipt, or donor/decedent carryover) — model that real acquisition \
-                 instead."
-                    .to_string(),
-            );
+            lines.push(non_purchase_basis_note());
             lines.push(String::new());
             for (i, kind) in btctax_cli::ProvenanceKind::ALL.iter().enumerate() {
                 let marker = if state.provenance == Some(*kind) {
@@ -458,6 +483,27 @@ mod tests {
             rendered.contains("none yet"),
             "nothing may be pre-selected FOR the filer: {rendered}"
         );
+    }
+
+    /// arch M-r2-2 (P-C gate r2): the "why only a purchase" PROSE — not just the picker rows below it —
+    /// must name every non-`Purchase` label. Kept even though `non_purchase_basis_note` builds the
+    /// enumeration from `ProvenanceKind::ALL` (so this can't drift stale), as documentation-grade
+    /// regression insurance against a future hand-edit re-introducing a hardcoded copy.
+    #[test]
+    fn the_provenance_restriction_prose_names_every_non_purchase_label() {
+        let note = non_purchase_basis_note();
+        for kind in btctax_cli::ProvenanceKind::ALL {
+            if kind == btctax_cli::ProvenanceKind::Purchase {
+                continue;
+            }
+            assert!(
+                note.contains(kind.label()),
+                "the provenance-restriction PROSE must name every non-Purchase label, not just the \
+                 picker rows below it — {:?} ({}) missing: {note}",
+                kind,
+                kind.label()
+            );
+        }
     }
 
     #[test]

@@ -93,6 +93,28 @@ P-C-owned remains open.)*
 - **[open] Browse footer does not list `w`** (the overlay does, and `?` points at the overlay). Adding it pushed `?: help`
   off the 120-col footer and golden tests caught it; deliberately reverted with an in-source rationale. Revisit only if the
   footer is ever reflowed.
+- **[open] tax Minor 2 — flow renders have no scrolling; the NOTICE rect makes the promote Consent surface 3 rows
+  shorter.** `draw_edit.rs:162-174` + `DEFENSIVE_NOTICE_LINES = 3`: one `Paragraph` with `Wrap`, no `.scroll(...)`, so
+  content beyond the rect is not drawn — pre-existing, but the P-C gate r2 fix wave makes it 3 rows worse on the narrow
+  path (a `RolledBack` sets a status, the flow bounces to `PartII`, the filer Tabs back). Tax stake:
+  `Acknowledgment.shown_terms` records terms as SHOWN; on a short terminal a trailing term can be recorded as shown
+  without being rendered. Fix: scroll support or an "N more lines" indicator.
+- **[open] arch N-r2-1 — `Esc` at the promote flow's PartII step cancels the WHOLE flow rather than stepping back to
+  Provenance** (`handle_promote_flow_part_ii_key`), while `Esc` at Consent steps back one. Harmless (PartII is only
+  reachable via an attested `Purchase`) — worth a doc line only.
+- **[open] arch N-r2-2 — the NOTICE's ~230-char CRITICAL status clips below ~77 columns.** Graceful (never a panic),
+  and "Quit the editor NOW" survives in the first ~120 chars, so this is cosmetic.
+- **[open] arch N-r2-3 — both I-2 render KATs (`draw_edit.rs:7068` + sibling) exercise the DASHBOARD surface only.**
+  Add one case with `promote_flow` open (cheap insurance against a regression narrower than the dashboard).
+- **[open] N-r2-4 residue — three r1 Nits neither folded nor filed.** (a) tax N-3: the tautological
+  `empty_events.len() == 0` assert plus two `let _ = ...` import-keepers in
+  `declare_flow::tests::clearance_reflects_plan_declare_and_is_a_pure_read` (`declare_flow.rs:736-756`) —
+  `empty_events` is a shared `&[LedgerEvent]`, so the borrow checker already guarantees no mutation; the assert and
+  the import-keepers test nothing. (b) tax N-4: the test name
+  `defensive_journey.rs::declare_preview_saving_edits_the_window_and_changes_nothing_it_should_not` is misleading —
+  the body makes a single call over a fixed window and never edits anything; rename or rewrite to actually exercise
+  re-derivation across an edit. (c) the existing "Debug-format rows" item below is now widened to cover the two new
+  flow renders.
 
 ## Task 10 / P-D (the export step)
 
@@ -108,8 +130,16 @@ P-C-owned remains open.)*
 - **[open] T7-copy** — `defensive_dashboard.rs`: "[optional, SUPPRESSED] promote" reads as *disabled* though core does NOT
   refuse a fee-only promote (DFW-D1 no-second-gate); `[x] export` bracket notation inconsistent with the `'d'`/`'p'`
   quoted-key style.
-- **[open] Debug-format rows** (P-B arch N1) — `render_candidate/tranche/pool_short/resolve_first_row` emit `{:?}` on
-  `EventId`/`PoolKey`/`BlockerKind` (e.g. `Decision { seq: 1 }`) — ugly for a filer; give them filer-facing formatting.
+- **[open] Debug-format rows** (P-B arch N1; widened at the P-C gate r2 / N-r2-4(c)) —
+  `render_candidate/tranche/pool_short/resolve_first_row` emit `{:?}` on `EventId`/`PoolKey`/`BlockerKind` (e.g.
+  `Decision { seq: 1 }`) — ugly for a filer; give them filer-facing formatting. Same class in the two P-C flow
+  renders: `render_declare_flow`/`render_promote_flow` add `{:?}` on shortfall/wallet/era-preset/tranche (e.g.
+  "shortfall Decision { seq: 1 }", `wallet: SelfCustody { label: "..." }`, `era preset: Y2009To2011`, "tranche
+  Decision { seq: 1 }").
+- **[open] tax Nit 2** — the Provenance screen states which answer passes the gate BEFORE the filer answers ("Only a
+  PURCHASE can be promoted…" renders above the picker) — honest disclosure of the rule (same wording
+  `refuse_non_purchase` uses), but mildly leading on a screen whose purpose is an unprompted filer answer. Consider
+  moving that sentence into the refusal path.
 - **[open] Free-text date/sat entry** (T8-review Nit) — the declare flow edits via nudge (±1d/±1000 sat) + preset-cycling
   (a legitimate DFW-D9 "edit"); free-text entry, if wanted, is a contained `declare_flow.rs` follow-up.
 - **[open] Plan-doc drift** — `IMPLEMENTATION_PLAN.md:61` File-Map names `ShortfallCandidate`; the shipped type is `Shortfall`.

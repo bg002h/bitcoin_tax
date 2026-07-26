@@ -14,9 +14,9 @@
 //! non-narrative calendar-year spans** (no named-exchange/historical-event claims, e.g. no "Silk Road
 //! era" framing) spanning Bitcoin's genesis block (2009-01-03) through the pre-2025 pooling cutover —
 //! chosen ONLY so the MECHANISM (confirm/edit, prefill-precedence, live readout, era-cycling) can be
-//! built and KAT-proven end-to-end. **This table is NOT a product-approved artifact.** A P-C-owned
-//! follow-up (filed in `FOLLOWUPS.md`) tracks the outstanding copy/date-boundary review; per the
-//! standing workflow's "phase-owned follow-up" rule it must be burned down before the P-C gate closes.
+//! built and KAT-proven end-to-end. **This table is NOT a product-approved artifact.** A follow-up
+//! (filed in `FOLLOWUPS.md`) tracks the outstanding copy/date-boundary review; RE-OWNED to **P-D/ship**
+//! at the P-C gate (a USER decision the phase cannot discharge) — see `FOLLOWUPS.md`.
 
 use crate::conventions::TaxDate;
 use time::macros::date;
