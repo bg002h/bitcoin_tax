@@ -118,12 +118,25 @@ P-C-owned remains open.)*
 
 ## Task 10 / P-D (the export step)
 
-- **[open] T3-M2 — `apply_export` has no per-year error isolation.** A flagged year with no bundled form template `?`-returns
-  and aborts the batch (already-written years stay correct; fails loud; no unattested/pseudo packet escapes). Task 10's
-  multi-year driver should decide per-year "2 of 3 exported, year 3 failed" reporting — MAY revise `apply_export`'s return
-  type (`Vec<Result<…>>` vs `Result<Vec<…>>`); acceptable, no external consumers (no-users-yet). (Owner: **Task 10**.)
-- **[open] T3-M1 — per-year `out_dir/<year>/` subdir is an unbriefed layout contract** (decided + KAT-pinned in P-A). Task 10's
-  TUI must surface/read under it. (Owner: **Task 10**, display-only.)
+- **[done] T3-M2 — `apply_export` has no per-year error isolation.** Fixed: `apply_export`'s return type became
+  `Result<ExportOutcomes, CliError>` where `ExportOutcomes = Vec<(i32, Result<IrsPdfReport, CliError>)>` — the outer
+  `Result` covers only the "couldn't even reload events/state from `session`" failure; the per-year loop no longer `?`s
+  on a single year's failure, so a flagged/current year outside the bundled IRS-form-template set fails LOUD for THAT
+  year alone while every other planned year is still attempted (ascending `BTreeSet` order) and already-written years
+  stay correct on disk. `defensive_dashboard::render_export_status` (`btctax-tui-edit`) turns the per-year outcome set
+  into the "N of M year(s) written … — YEAR failed: reason" `app.status` text. KAT:
+  `promote_cli.rs::apply_export_isolates_a_per_year_failure_and_still_writes_the_other_years` (an unsupported year,
+  2016, ordered ASCENDING-BEFORE a supported one, 2025 — pins that an EARLY failure does not abort a LATER success).
+  (Owner: **Task 10** — DONE.)
+- **[done] T3-M1 — per-year `out_dir/<year>/` subdir is an unbriefed layout contract** (decided + KAT-pinned in P-A).
+  Fixed: `defensive_dashboard::render_export_status` names EVERY successfully-exported year's own `out_dir/<year>`
+  path (not just "done") in the `app.status` NOTICE text; `defensive_dashboard::defensive_export_dir_for` computes the
+  shared base directory (mirrors `btctax_tui::export::export_dir_for`'s pure/testable shape, under a DISTINCT
+  `btctax-defensive-export-` prefix so a same-second single-year CLI/viewer export can never collide with it). KATs:
+  `render_export_status_names_every_year_and_its_own_out_dir_path_on_full_success` +
+  `render_export_status_reports_a_partial_success_and_names_the_failing_year_and_reason` (both `defensive_dashboard.rs`)
+  + the `main.rs` end-to-end KAT `x_exports_both_a_promoted_2025_leg_and_a_2024_removal_reordered_year_including_form_8275`,
+  which reads the real files back off disk under the computed `out_dir/<year>/`. (Owner: **Task 10**, display-only — DONE.)
 
 ## Copy pass / whole-branch review (ownerless residue — batch to the end)
 

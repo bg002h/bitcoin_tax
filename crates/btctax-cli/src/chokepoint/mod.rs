@@ -651,6 +651,17 @@ pub struct ExportPlan {
     pub forms: Vec<FormArg>,
 }
 
+/// ★ T3-M2 (Task 10): ONE year's `apply_export` outcome — the planned tax year paired with either its
+/// written `IrsPdfReport` or the `CliError` that failed IT ALONE (per-year isolation: a failure here
+/// never aborts the other years' attempts). A named alias (clippy `type_complexity`) so
+/// `persist_defensive_export`/`render_export_status` (`btctax-tui-edit`) can name the SAME shape without
+/// repeating the nested `(i32, Result<..>)`.
+pub type ExportOutcome = (i32, Result<IrsPdfReport, CliError>);
+
+/// `apply_export`'s full per-year outcome set — one [`ExportOutcome`] per `plan.years`, in ascending
+/// order, NEVER an all-or-nothing abort on the first failing year.
+pub type ExportOutcomes = Vec<ExportOutcome>;
+
 /// Plan a multi-year IRS-PDF export (DFW-D11) — gates over already-projected `state` ONLY; NO
 /// consent/acknowledgment (export mutates no events; arch-m-new-3: no `Session` here either — the caller
 /// supplies its own already-loaded `events`/`state`/`prices`/`tables`/`cfg`, mirroring `plan_promote`).
@@ -705,12 +716,23 @@ pub fn plan_export(
 /// `_from_session` is unreachable here. NO `Session::open` anywhere — `session` is already open and held
 /// by the caller (the CLI's thin driver, or a future TUI); a second open under a held `VaultLock`
 /// deadlocks (`session.rs:662`).
-pub fn apply_export(session: &Session, plan: ExportPlan) -> Result<Vec<IrsPdfReport>, CliError> {
+///
+/// ★ T3-M2 (Task 10) — PER-YEAR ISOLATION: a failure writing ONE year's packet (e.g. a flagged/current
+/// year that falls outside the bundled IRS-form-template set, `btctax_forms::SUPPORTED_YEARS`) does NOT
+/// abort the batch. Every year in `plan.years` is attempted, in ascending order (`plan.years` is a
+/// `BTreeSet`), and its outcome is reported INDIVIDUALLY as `(year, Result<IrsPdfReport, CliError>)`.
+/// Years already written to disk before a LATER year's failure stay correct — nothing already written is
+/// rolled back (each year's packet is an independent, self-contained write; export performs no in-memory
+/// mutation to revert). No unattested/pseudo packet can ever escape a per-year failure: `plan_export`
+/// already refused a pseudo-active ledger up front, and `attest: None` is passed on every call regardless
+/// of outcome. The outer `Result` covers only the ONE failure mode common to every year — re-loading
+/// `events`/`state` from `session` — which, if it fails, means NOTHING could even be attempted.
+pub fn apply_export(session: &Session, plan: ExportPlan) -> Result<ExportOutcomes, CliError> {
     let (events, state, _cfg) = session.load_events_and_project()?;
     let mut reports = Vec::with_capacity(plan.years.len());
     for year in &plan.years {
         let year_dir = plan.out_dir.join(year.to_string());
-        let report = crate::cmd::admin::export_irs_pdf_from_session(
+        let outcome = crate::cmd::admin::export_irs_pdf_from_session(
             session,
             &state,
             &events,
@@ -718,8 +740,8 @@ pub fn apply_export(session: &Session, plan: ExportPlan) -> Result<Vec<IrsPdfRep
             *year,
             &plan.forms,
             None,
-        )?;
-        reports.push(report);
+        );
+        reports.push((*year, outcome));
     }
     Ok(reports)
 }

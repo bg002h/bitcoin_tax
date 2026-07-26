@@ -1727,9 +1727,21 @@ fn apply_export_writes_one_packet_per_year_into_its_own_subdirectory() {
     );
 
     // Drive `apply_export` over the SAME already-open `session` `plan_export` used above — no second open.
-    let reports =
-        chokepoint::apply_export(&session, plan).expect("apply_export must write cleanly");
-    assert_eq!(reports.len(), 3, "one IrsPdfReport per planned year");
+    let reports = chokepoint::apply_export(&session, plan)
+        .expect("apply_export's outer call must succeed (events/state reload cannot fail here)");
+    assert_eq!(
+        reports.len(),
+        3,
+        "one (year, outcome) pair per planned year"
+    );
+
+    for (year, outcome) in &reports {
+        assert!(
+            outcome.is_ok(),
+            "year {year} must export cleanly (all three years are bundled-form-supported): \
+             {outcome:?}"
+        );
+    }
 
     for year in [2017, 2024, 2025] {
         let year_dir = out_dir.join(year.to_string());
@@ -1742,4 +1754,79 @@ fn apply_export_writes_one_packet_per_year_into_its_own_subdirectory() {
             "year {year} must get its OWN schedule_d.pdf: {year_dir:?}"
         );
     }
+}
+
+/// ★ T3-M2 (Task 10) — PER-YEAR ISOLATION: a mixed success/failure year set. `plan.years` spans an
+/// UNSUPPORTED year (2016 — outside `btctax_forms::SUPPORTED_YEARS = [2017, 2024, 2025]`, processed
+/// FIRST since `plan.years` is a `BTreeSet` in ascending order) and a SUPPORTED year (2025). Asserts
+/// `apply_export` does NOT abort on the 2016 failure: it returns `Ok` with BOTH years reported
+/// individually, 2016 as `Err` and 2025 as `Ok`, and the 2025 packet is written to disk for real —
+/// pinning "already-written/still-attemptable years stay correct" even when an EARLIER year in
+/// iteration order fails (mutation: an early `?` on the per-year outcome reds this).
+#[test]
+fn apply_export_isolates_a_per_year_failure_and_still_writes_the_other_years() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    // donation_year=2016 lands the removal-reorder INSIDE the tranche's own unsupported-year window —
+    // `flagged_years` flags 2016 (< current=2025) with no bundled Form 8949/Schedule D template.
+    seed_removal_reorder(&vault, "a", 2016);
+
+    let session = Session::open(&vault, &pp()).unwrap();
+    let (events, state, cfg) = session.load_events_and_project().unwrap();
+    let tables = btctax_adapters::BundledTaxTables::load();
+    let out_dir = dir.path().join("export_out");
+    let current = 2025; // bundled-form-supported, so the CURRENT-year packet succeeds regardless
+
+    let plan = chokepoint::plan_export(
+        &events,
+        &state,
+        session.prices(),
+        &tables,
+        &cfg,
+        current,
+        out_dir.clone(),
+        vec![],
+    )
+    .unwrap();
+    assert_eq!(
+        plan.years.iter().copied().collect::<Vec<_>>(),
+        vec![2016, 2025],
+        "sanity: an unsupported year (2016) ascending-BEFORE a supported one (2025)"
+    );
+
+    let reports = chokepoint::apply_export(&session, plan)
+        .expect("the outer call must succeed even though one year's packet fails");
+    assert_eq!(
+        reports.len(),
+        2,
+        "one (year, outcome) pair per planned year"
+    );
+
+    let outcome_2016 = &reports.iter().find(|(y, _)| *y == 2016).unwrap().1;
+    assert!(
+        outcome_2016.is_err(),
+        "2016 has no bundled IRS-form template and must fail: {outcome_2016:?}"
+    );
+    let msg = outcome_2016.as_ref().unwrap_err().to_string();
+    assert!(
+        msg.contains("2016") || msg.to_lowercase().contains("unsupported"),
+        "the 2016 failure must name the reason: {msg}"
+    );
+
+    let outcome_2025 = &reports.iter().find(|(y, _)| *y == 2025).unwrap().1;
+    assert!(
+        outcome_2025.is_ok(),
+        "2025 IS bundled-form-supported and must still export despite 2016's failure: {outcome_2025:?}"
+    );
+    let year_dir_2025 = out_dir.join("2025");
+    assert!(
+        year_dir_2025.join("f8949.pdf").exists(),
+        "the 2025 packet must be written for real, on disk, despite the EARLIER 2016 failure: \
+         {year_dir_2025:?}"
+    );
+    assert!(
+        year_dir_2025.join("schedule_d.pdf").exists(),
+        "2025's schedule_d.pdf must also be written: {year_dir_2025:?}"
+    );
 }

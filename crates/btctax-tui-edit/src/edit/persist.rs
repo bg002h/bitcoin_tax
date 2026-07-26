@@ -474,6 +474,34 @@ pub fn persist_promote_tranche(
     }
 }
 
+/// ★ Task 10 (C-3/KAT-G1): the export step's WRITE — the wizard's THIRD and FINAL write path, and the
+/// ONLY call site of `btctax_cli::apply_export` anywhere in this crate (mechanically enforced by
+/// `kat_g1_mechanized_source_gate`'s `persist_only_tokens`, below). `main.rs`'s `execute_defensive_export`
+/// reads `btctax_cli::plan_export` (a pure planner — no mutation, so it is NOT confined here, mirroring
+/// `plan_declare`/`plan_promote`) and hands the resulting `ExportPlan` to THIS wrapper to actually export.
+///
+/// # A thin pass-through, NOT a snapshot/rollback wrapper
+/// Unlike `persist_declare_tranche`/`persist_promote_tranche`, `btctax_cli::apply_export` takes `&Session`
+/// (never `&mut`) and appends no decision / calls no `session.save()` internally — export is a pure FILE
+/// write (one IRS-PDF packet per planned year, each into its own `out_dir/<year>/`), never a vault
+/// mutation, so there is nothing to snapshot before or roll back after (mirrors `apply_export`'s own doc:
+/// "export mutates no events"). `PersistError`'s snapshot/rollback machinery exists for the append+save
+/// mutation surface this fn never touches; using it here would be a false invariant, so this wrapper
+/// returns `apply_export`'s own `Result` verbatim instead.
+///
+/// # Per-year isolation flows through verbatim [T3-M2]
+/// `apply_export`'s `Ok` carries a `btctax_cli::ExportOutcomes` — one outcome PER planned year, never an
+/// all-or-nothing abort on the first failing year. This wrapper does not collapse or
+/// reinterpret that structure; the caller renders it via `defensive_dashboard::render_export_status`
+/// (★ T3-M1: the per-year `out_dir/<year>` paths are surfaced there, not just "done"). The outer `Err`
+/// covers only the one failure mode common to every year (re-loading `events`/`state` from `session`).
+pub fn persist_defensive_export(
+    session: &btctax_cli::Session,
+    plan: btctax_cli::ExportPlan,
+) -> Result<btctax_cli::ExportOutcomes, btctax_cli::CliError> {
+    btctax_cli::apply_export(session, plan)
+}
+
 /// Append a `VoidDecisionEvent` decision and atomically save the vault.
 ///
 /// `target_event_id` is the EventId of the revocable decision to void.
@@ -2019,6 +2047,11 @@ mod tests {
         // write (`btctax_cli::apply_promote`, re-exported at the crate root). Confined to
         // `persist_promote_tranche` in THIS file; the Promote flow (`edit/promote_flow.rs`) only reads
         // `btctax_cli::plan_promote`/`render_consent` (pure planners — not gated).
+        // ★ Task 10 (C-3): "apply_export(" added — the Defensive Filing Wizard's EXPORT chokepoint write
+        // (`btctax_cli::apply_export`, re-exported at the crate root). Confined to
+        // `persist_defensive_export` in THIS file; `main.rs`'s `execute_defensive_export` (the `x`
+        // action's dispatch — export has no multi-step flow module of its own) only reads
+        // `btctax_cli::plan_export` (a pure planner — not gated).
         let persist_only_tokens: &[&str] = &[
             "conn(",
             "save(",
@@ -2029,6 +2062,7 @@ mod tests {
             "restore(",
             "apply_declare(",
             "apply_promote(",
+            "apply_export(",
         ];
 
         // Test-region forbidden everywhere (no viewer export surface in the editor):
@@ -2210,6 +2244,8 @@ mod tests {
             let tok_apply_declare = format!("{}(", "apply_declare"); // "apply_declare("
                                                                      // ★ Task 9 (C-3): apply_promote( added to persist_only_tokens.
             let tok_apply_promote = format!("{}(", "apply_promote"); // "apply_promote("
+                                                                     // ★ Task 10 (C-3): apply_export( added to persist_only_tokens.
+            let tok_apply_export = format!("{}(", "apply_export"); // "apply_export("
 
             let content = format!(
                 "// planted self-check file\n\
@@ -2223,6 +2259,7 @@ mod tests {
                  \tlet _ = {tok_oa_set}(conn, &id, &a, &at);\n\
                  \tlet _ = {tok_apply_declare}session, plan, now);\n\
                  \tlet _ = {tok_apply_promote}session, plan, ack, now);\n\
+                 \tlet _ = {tok_apply_export}session, plan);\n\
                  }}\n"
             );
             std::fs::write(&planted_path, &content).unwrap();
@@ -2260,6 +2297,10 @@ mod tests {
             assert!(
                 hits_persist.iter().any(|(t, _)| t == "apply_promote("),
                 "self-check FAILED: scanner did not detect planted apply_promote( token [Task 9 / C-3] — gate is broken"
+            );
+            assert!(
+                hits_persist.iter().any(|(t, _)| t == "apply_export("),
+                "self-check FAILED: scanner did not detect planted apply_export( token [Task 10 / C-3] — gate is broken"
             );
 
             // Verify scanner catches the R0-I1 vault-creating constructor.

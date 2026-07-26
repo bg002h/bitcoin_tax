@@ -5,19 +5,24 @@
 //!
 //! **READ-ONLY + DISPATCH ONLY (C-3).** This file contains no `chokepoint::apply_*` call and no
 //! write-class token — KAT-G1's `kat_g1_mechanized_source_gate` (`edit/persist.rs:1897`) enforces this
-//! mechanically for every non-test line in this crate outside `edit/persist.rs`.
-//!
-//! **The flow-launch seam (Tasks 8-10).** `declare_flow`/`promote_flow` (Phase P-C) and the chokepoint-
-//! driven export step (Phase P-D, Task 10) do not exist yet. [`handle_defensive_dashboard_key`] therefore
-//! only NAMES the intent a key press represents ([`DashboardIntent`]) and moves the cursor — it never
-//! opens a flow, never calls a chokepoint, and mutates nothing but its own `cursor` field. The future
-//! `main.rs` wiring matches `DashboardIntent::{Declare,Promote,RouteResolveFirst,Export}` and opens the
-//! corresponding flow/chokepoint step once those tasks land.
+//! mechanically for every non-test line in this crate outside `edit/persist.rs`. [`handle_defensive_
+//! dashboard_key`] only NAMES the intent a key press represents ([`DashboardIntent`]) and moves the
+//! cursor — it never opens a flow, never calls a chokepoint, and mutates nothing but its own `cursor`
+//! field. `main.rs`'s dispatch matches `DashboardIntent::{Declare,Promote,RouteResolveFirst,Export}` and
+//! opens the corresponding flow (Declare/Promote, Phase P-C) or drives the chokepoint directly (Export,
+//! Task 10, Phase P-D — a degenerate one-shot action with no multi-step flow of its own; see
+//! `main.rs::execute_defensive_export`). This module's own Task 10 contribution is limited to the two
+//! PURE helpers below (`defensive_export_dir_for`/`render_export_status`) — the actual
+//! `plan_export`/`persist_defensive_export` orchestration lives in `main.rs`, mirroring where
+//! `plan_declare`/`plan_promote` are driven from (`declare_flow_confirm`/`promote_flow_confirm`), so this
+//! file's READ-ONLY + DISPATCH ONLY claim above stays literally true.
 
 use btctax_core::defensive::discovery::{Shortfall, Triage};
 use btctax_core::defensive::{Advisory, DefensiveFilingView, PoolShort, TrancheRow, TrancheStatus};
 use btctax_core::{BlockerKind, EventId};
 use crossterm::event::{KeyCode, KeyEvent};
+use std::path::{Path, PathBuf};
+use time::OffsetDateTime;
 
 /// Per-screen UI-only state for `EditorScreen::DefensiveFiling`: the ONE `journey_view` computed at
 /// entry (`EditorApp::open_defensive_filing`, DFW-D6 gate) plus a row cursor for
@@ -124,6 +129,68 @@ pub fn handle_defensive_dashboard_key(
         },
         _ => DashboardIntent::None,
     }
+}
+
+// ── Export (Task 10, Phase P-D) — pure helpers only; this file stays READ-ONLY + DISPATCH ONLY (C-3) ──
+//
+// The `x` action's WRITE orchestration (`btctax_cli::plan_export` → `edit::persist::persist_defensive_
+// export`) lives in `main.rs` (mirrors `declare_flow_confirm`/`promote_flow_confirm`, which likewise keep
+// the chokepoint calls at the dispatch layer, not inside a flow/dashboard module) — this file contributes
+// only the two PURE functions below, so `render_dashboard`'s own doc claim ("no chokepoint::apply_* call
+// and no write-class token") stays literally true even after Task 10.
+
+/// Compute the DEFENSIVE-FILING multi-year export's BASE output directory from the vault path and an
+/// injected timestamp — mirrors `btctax_tui::export::export_dir_for`'s pure, testable shape, under a
+/// DISTINCT prefix (`btctax-defensive-export-` vs the viewer's `btctax-export-`) so a same-second
+/// single-year CLI/viewer export into the same vault-parent directory can never collide with this
+/// multi-year packet. `apply_export` then writes each planned year into its OWN `<this>/<year>/`
+/// subdirectory (★ T3-M1 — the P-A layout contract). Pure — no filesystem access.
+pub fn defensive_export_dir_for(vault_path: &Path, now: OffsetDateTime) -> PathBuf {
+    use time::macros::format_description;
+    let parent = vault_path.parent().unwrap_or(Path::new("."));
+    let ts = now
+        .format(format_description!(
+            "[year][month][day]-[hour][minute][second]Z"
+        ))
+        .expect("timestamp format is infallible");
+    parent.join(format!("btctax-defensive-export-{ts}"))
+}
+
+/// Render the filer-facing outcome of a defensive-filing export — the ONE place that turns
+/// `persist_defensive_export`'s per-year `btctax_cli::ExportOutcomes` (★ T3-M2: per-year isolation,
+/// never an all-or-nothing abort) into the `app.status` NOTICE text (★ T3-M1: the per-year
+/// `out_dir/<year>` paths are named, not just "done"). `reports` is iterated in the order given (the
+/// caller passes `plan.years`' own ascending `BTreeSet` order); a year with no bundled IRS-form template
+/// (or any other per-year failure) is named individually alongside its reason, WITHOUT hiding the years
+/// that DID export. Pure; no I/O.
+pub fn render_export_status(out_dir: &Path, reports: &[btctax_cli::ExportOutcome]) -> String {
+    let total = reports.len();
+    let ok_years: Vec<i32> = reports
+        .iter()
+        .filter(|(_, r)| r.is_ok())
+        .map(|(y, _)| *y)
+        .collect();
+    let failed: Vec<(i32, String)> = reports
+        .iter()
+        .filter_map(|(y, r)| r.as_ref().err().map(|e| (*y, e.to_string())))
+        .collect();
+
+    let mut msg = format!(
+        "export: {} of {total} year(s) written under {}",
+        ok_years.len(),
+        out_dir.display()
+    );
+    if !ok_years.is_empty() {
+        let parts: Vec<String> = ok_years
+            .iter()
+            .map(|y| format!("{y} \u{2192} {}", out_dir.join(y.to_string()).display()))
+            .collect();
+        msg.push_str(&format!(" [{}]", parts.join(", ")));
+    }
+    for (y, reason) in &failed {
+        msg.push_str(&format!(" \u{2014} {y} failed: {reason}"));
+    }
+    msg
 }
 
 // ── Render (pure; no ratatui dependency here — draw_edit.rs wraps these lines in a Paragraph) ────────
@@ -338,7 +405,7 @@ mod tests {
     };
     use crate::editor::{EditorApp, EditorScreen};
     use btctax_adapters::BundledTaxTables;
-    use btctax_cli::CliConfig;
+    use btctax_cli::{CliConfig, CliError, IrsPdfReport};
     use btctax_core::project::pools::PoolKey;
     use btctax_core::state::LedgerState;
     use btctax_core::{Source, SourceRef, WalletId};
@@ -655,6 +722,137 @@ mod tests {
         assert!(
             !rendered_busy.to_lowercase().contains("done"),
             "export must never read as 'done' even once other work exists: {rendered_busy}"
+        );
+    }
+
+    // ── Task 10 (P-D): the export helpers — `defensive_export_dir_for` / `render_export_status` ────────
+
+    #[test]
+    fn defensive_export_dir_for_is_deterministic_vault_parent_scoped_and_distinct_from_the_viewer_export_dir(
+    ) {
+        let vault = PathBuf::from("/home/filer/vault.pgp");
+        let ts = time::macros::datetime!(2025-10-24 14:30:22 UTC);
+        let dir1 = defensive_export_dir_for(&vault, ts);
+        let dir2 = defensive_export_dir_for(&vault, ts);
+        assert_eq!(dir1, dir2, "pure function: same inputs, same output");
+        assert_eq!(
+            dir1,
+            PathBuf::from("/home/filer/btctax-defensive-export-20251024-143022Z")
+        );
+        assert!(
+            dir1.starts_with("/home/filer"),
+            "must be scoped under the VAULT's own parent directory: {dir1:?}"
+        );
+        // Distinct prefix from `btctax_tui::export::export_dir_for`'s "btctax-export-" — a same-second
+        // single-year CLI/viewer export can never collide with this multi-year packet's directory.
+        assert!(
+            dir1.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("btctax-defensive-export-"),
+            "must NOT collide with the viewer's own 'btctax-export-' prefix: {dir1:?}"
+        );
+    }
+
+    /// ★ T3-M1: a fully-successful export names EVERY year's own `out_dir/<year>` path — "done" alone is
+    /// not enough (the P-A layout contract must be surfaced, not just implied).
+    #[test]
+    fn render_export_status_names_every_year_and_its_own_out_dir_path_on_full_success() {
+        let out_dir = PathBuf::from("/tmp/btctax-defensive-export-x");
+        let ok_report = |year: i32| IrsPdfReport {
+            f8949_path: None,
+            schedule_d_path: None,
+            tax_year: year,
+            unresolved_hard: 0,
+            broker_reported_rows: 0,
+            watermarked: false,
+            schedule_se_path: None,
+            se_below_floor: false,
+            se_addl_medicare: None,
+            se_income_without_profile: false,
+            form_8283_path: None,
+            form_8283_needs_review: false,
+            form_8283_section_b: None,
+            form_1040_path: None,
+            form_1040_filled_7a: false,
+            form_1040_loss: false,
+            form_8275_path: None,
+            full_return_paths: vec![],
+            full_return_manifest: None,
+            forms_ignored_full_return: false,
+        };
+        let reports: Vec<btctax_cli::ExportOutcome> =
+            vec![(2024, Ok(ok_report(2024))), (2025, Ok(ok_report(2025)))];
+        let status = render_export_status(&out_dir, &reports);
+        assert!(
+            status.contains("2 of 2"),
+            "must name the full success count: {status:?}"
+        );
+        assert!(
+            status.contains(&out_dir.join("2024").display().to_string()),
+            "must name 2024's OWN out_dir/<year> path (T3-M1): {status:?}"
+        );
+        assert!(
+            status.contains(&out_dir.join("2025").display().to_string()),
+            "must name 2025's OWN out_dir/<year> path (T3-M1): {status:?}"
+        );
+        assert!(
+            !status.to_lowercase().contains("fail"),
+            "a fully-successful export must not read as a failure: {status:?}"
+        );
+    }
+
+    /// ★ T3-M2: a mixed success/failure batch is reported PER YEAR — "2 of 3 exported; year 3 failed:
+    /// <reason>" — never a bare all-or-nothing abort, and the reason string is preserved verbatim.
+    #[test]
+    fn render_export_status_reports_a_partial_success_and_names_the_failing_year_and_reason() {
+        let out_dir = PathBuf::from("/tmp/btctax-defensive-export-x");
+        let ok_2025 = IrsPdfReport {
+            f8949_path: Some(out_dir.join("2025").join("f8949.pdf")),
+            schedule_d_path: None,
+            tax_year: 2025,
+            unresolved_hard: 0,
+            broker_reported_rows: 0,
+            watermarked: false,
+            schedule_se_path: None,
+            se_below_floor: false,
+            se_addl_medicare: None,
+            se_income_without_profile: false,
+            form_8283_path: None,
+            form_8283_needs_review: false,
+            form_8283_section_b: None,
+            form_1040_path: None,
+            form_1040_filled_7a: false,
+            form_1040_loss: false,
+            form_8275_path: None,
+            full_return_paths: vec![],
+            full_return_manifest: None,
+            forms_ignored_full_return: false,
+        };
+        let reports: Vec<btctax_cli::ExportOutcome> = vec![
+            (
+                2016,
+                Err(CliError::Usage(
+                    "unsupported tax year 2016: this build bundles IRS forms for 2017, 2024 and 2025 \
+                     only"
+                        .to_string(),
+                )),
+            ),
+            (2025, Ok(ok_2025)),
+        ];
+        let status = render_export_status(&out_dir, &reports);
+        assert!(
+            status.contains("1 of 2"),
+            "must name the partial-success count (T3-M2): {status:?}"
+        );
+        assert!(
+            status.contains("2016") && status.to_lowercase().contains("unsupported"),
+            "must name the FAILING year and its reason verbatim: {status:?}"
+        );
+        assert!(
+            status.contains(&out_dir.join("2025").display().to_string()),
+            "the SUCCESSFUL year's own path must still be named, not swallowed by the failure (T3-M1): \
+             {status:?}"
         );
     }
 

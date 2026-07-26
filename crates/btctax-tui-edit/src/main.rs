@@ -485,9 +485,11 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
         // The Defensive Filing Wizard dashboard (Task 7, Phase P-B) — READ-ONLY + dispatch-scaffolding
         // (C-3). `Esc`/`q` return to Browse; every other key is handed to
         // `defensive_dashboard::handle_defensive_dashboard_key`, which only names an intent and moves
-        // the cursor. `Declare` (Task 8) opens the Declare flow and `Promote` (Task 9) opens the Promote
+        // the cursor. `Declare` (Task 8) opens the Declare flow, `Promote` (Task 9) opens the Promote
         // flow (both dispatched ABOVE this match, in the flow-dispatch layer, once `app.declare_flow` /
-        // `app.promote_flow` is `Some`); `Export` remains scaffolded (Task 10).
+        // `app.promote_flow` is `Some`), and `Export` (Task 10) drives the export chokepoint DIRECTLY —
+        // it has no multi-step flow of its own (DFW-D11: no consent/ack), so `execute_defensive_export`
+        // both plans and applies in one shot and the dashboard stays open regardless of the outcome.
         EditorScreen::DefensiveFiling => {
             app.status = None;
             match key.code {
@@ -507,7 +509,7 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                                 open_promote_flow(app, id);
                             }
                             defensive_dashboard::DashboardIntent::Export => {
-                                app.status = Some("export — coming soon (Phase P-D)".to_string());
+                                execute_defensive_export(app);
                             }
                             defensive_dashboard::DashboardIntent::RouteResolveFirst(_) => {
                                 app.status = Some(
@@ -4554,6 +4556,63 @@ fn promote_flow_confirm(app: &mut EditorApp) {
             }
         }
     }
+}
+
+// ── The Export step (Task 10, Phase P-D) ───────────────────────────────────────
+
+/// The `x` (export) action's dispatch (`DashboardIntent::Export`) — the wizard's THIRD and FINAL write
+/// path. Unlike Declare/Promote, export has NO multi-step flow of its own (DFW-D11: no consent/ack, no
+/// typed-word gate — export mutates no events) — so this fn both plans and applies in one keypress,
+/// mirroring `declare_flow_confirm`/`promote_flow_confirm`'s own "recompute the plan FRESH off the
+/// current snapshot at write-time" discipline (DFW-D1: no second gating authority, no stale cached plan).
+///
+/// `plan_export` gates over the CURRENT snapshot (refuses when `state.pseudo_active()` — DFW-D11 — this
+/// composed export step NEVER prompts an attest phrase, unlike the single-year CLI `export-irs-pdf`
+/// path). On success, the WRITE goes through `edit::persist::persist_defensive_export` — the ONLY caller
+/// of `apply_export` in this crate (C-3/KAT-G1). Every refusal/failure/outcome is surfaced straight to
+/// `app.status` (the DefensiveFiling screen's NOTICE rect, ★ P-C gate arch I-2) and the dashboard stays
+/// open regardless of the outcome (DFW-D3/M-5: `x` is never a "done" checkbox — nothing here disables it
+/// after any result, success or failure).
+fn execute_defensive_export(app: &mut EditorApp) {
+    if let Some(s) = app.residue_latch_status() {
+        app.status = Some(s);
+        return;
+    }
+    let Some(snap) = app.snapshot.as_ref() else {
+        return;
+    };
+    let cfg = snap.cli_config.to_projection();
+    let now = app.clock.now();
+    let current = now.year();
+    let out_dir = defensive_dashboard::defensive_export_dir_for(&app.vault_path, now);
+
+    let plan = match btctax_cli::plan_export(
+        &snap.events,
+        &snap.state,
+        &snap.prices,
+        &snap.tables,
+        &cfg,
+        current,
+        out_dir.clone(),
+        vec![],
+    ) {
+        Ok(plan) => plan,
+        Err(refusal) => {
+            let err: btctax_cli::CliError = refusal.into();
+            app.status = Some(format!("export refused: {err}"));
+            return;
+        }
+    };
+
+    let Some(session) = app.session.as_ref() else {
+        return;
+    };
+    app.status = Some(
+        match crate::edit::persist::persist_defensive_export(session, plan) {
+            Ok(reports) => defensive_dashboard::render_export_status(&out_dir, &reports),
+            Err(e) => format!("export failed: {e}"),
+        },
+    );
 }
 
 // ── Status deriver for void ───────────────────────────────────────────────────
@@ -13871,6 +13930,291 @@ mod tests {
             0,
             "★ BG-D5: a non-purchase provenance must record NOTHING"
         );
+    }
+
+    // ── Task 10 (P-D): the export step (`x` → `execute_defensive_export`) ────────────────────────────
+
+    /// A vault with (A) a promoted 2016-window tranche DRAINED by a real 2025 SALE — a promoted-basis
+    /// DISPOSAL leg filing in 2025, giving both "a promoted 2025 leg" (KAT a) and a complete Form 8275
+    /// to reuse (KAT c) — and (B) a SEPARATE wallet's promoted tranche whose later 2024 DONATION
+    /// HIFO-reorders which lot the donation draws (a removal-only reorder with NO promoted disposal leg
+    /// in 2024 at all — mirrors `promote_cli.rs`'s `seed_removal_reorder` at CLI-driver altitude, KAT a).
+    ///
+    /// Vault content is built via RAW `cmd::` calls BEFORE the `EditorApp` ever opens the vault (each
+    /// `cmd::` fn self-opens + closes/drops its OWN session) — the editor's own `Session::open` happens
+    /// LAST, so there is never a second open under a held `VaultLock` (`session.rs:662`). `app.clock` is
+    /// PINNED to the same fixed instant the fixture was built under, so `execute_defensive_export`'s
+    /// `current` year is deterministic regardless of wall-clock date.
+    fn vault_with_promoted_2025_leg_and_2024_reorder() -> (EditorApp, tempfile::TempDir) {
+        use btctax_core::event::{Acquire, BasisSource, Dispose, DisposeKind, TransferOut};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::{LedgerEvent, WalletId};
+        use rust_decimal_macros::dec;
+        use time::macros::{date, datetime};
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("k.asc");
+        let pp_str = "empty-vault-pass";
+        let pp = btctax_store::Passphrase::new(pp_str.into());
+        // ★ 2025-12-31, NOT 2026: `plan_export.years = {current} ∪ flagged_years(..., current)` ALWAYS
+        // includes `{current}` directly (not just as a `< current` fold-diff candidate) — pinning
+        // `current` to a year OUTSIDE `btctax_forms::SUPPORTED_YEARS` (2026 is not bundled) would make
+        // the export's OWN current-year packet fail alongside the two years this fixture targets. 2025
+        // IS bundled, and both the wallet-A sale (2025-09-01) and the wallet-B donation (2024-06-01) sit
+        // strictly before it, so `flagged_years(..., current=2025)` still catches 2024 while `{current}`
+        // supplies 2025 directly.
+        let fixed_now = datetime!(2025 - 12 - 31 0:00 UTC);
+
+        btctax_cli::cmd::init::run(&vault, &pp, &key).unwrap();
+
+        // (A) wallet #1 — a promoted tranche drained EXACTLY by a bare 2025 sale (no competing lot, so
+        // the sale draws 100% from the promoted origin — mirrors `promote_cli.rs`'s
+        // `vault_with_promoted_disposal_via_cli`). ★ The window is POST-`TRANSITION_DATE` (2025-01-01),
+        // NOT the pre-2025 window `seed_removal_reorder` uses for wallet B below: `pool_key` un-partitions
+        // every PRE-2025 lot into ONE `PoolKey::Universal` pool (§7.4) but partitions POST-2025 lots
+        // `PoolKey::Wallet(..)` — a pre-2025 tranche cannot cover a POST-2025 disposal in the SAME wallet
+        // without an intervening Safe-Harbor allocation (out of scope here), so the tranche's OWN window
+        // must sit on the SAME side of the transition as the sale it is meant to cover.
+        let wallet_a = WalletId::SelfCustody {
+            label: "t10-a".into(),
+        };
+        let tranche_a = btctax_cli::cmd::tranche::declare_tranche(
+            &vault,
+            &pp,
+            40_000_000,
+            wallet_a.clone(),
+            date!(2025 - 01 - 01),
+            date!(2025 - 01 - 10),
+            fixed_now,
+        )
+        .unwrap();
+        btctax_cli::cmd::promote::promote_tranche(
+            &vault,
+            &pp,
+            &tranche_a.canonical(),
+            btctax_cli::ProvenanceKind::Purchase,
+            "cash P2P purchase (a), no records; window bounded on-chain".to_string(),
+            Some(btctax_cli::PROMOTE_ACK_PHRASE),
+            fixed_now,
+        )
+        .unwrap();
+        {
+            let mut s = btctax_cli::Session::open(&vault, &pp).unwrap();
+            let sell = LedgerEvent {
+                id: EventId::import(Source::Coinbase, SourceRef::new("T10-SELL-2025")),
+                utc_timestamp: datetime!(2025 - 09 - 01 0:00 UTC),
+                original_tz: time::UtcOffset::UTC,
+                wallet: Some(wallet_a.clone()),
+                payload: EventPayload::Dispose(Dispose {
+                    sat: 40_000_000,
+                    usd_proceeds: dec!(20_000),
+                    fee_usd: dec!(0),
+                    kind: DisposeKind::Sell,
+                }),
+            };
+            btctax_core::persistence::append_import_batch(s.conn(), &[sell]).unwrap();
+            s.save().unwrap();
+        }
+
+        // (B) wallet #2 — the removal-only 2024 reorder (a documented $1-cost lot + a promoted tranche
+        // whose floor is FAR higher, so the LATER donation HIFO-draws the promoted lot; mirrors
+        // `promote_cli.rs::seed_removal_reorder`).
+        let wallet_b = WalletId::SelfCustody {
+            label: "t10-b".into(),
+        };
+        {
+            let mut s = btctax_cli::Session::open(&vault, &pp).unwrap();
+            let buy = LedgerEvent {
+                id: EventId::import(Source::Coinbase, SourceRef::new("T10-BUY-B")),
+                utc_timestamp: datetime!(2015 - 06 - 01 0:00 UTC),
+                original_tz: time::UtcOffset::UTC,
+                wallet: Some(wallet_b.clone()),
+                payload: EventPayload::Acquire(Acquire {
+                    sat: 100_000_000,
+                    usd_cost: dec!(1),
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            };
+            let give = LedgerEvent {
+                id: EventId::import(Source::Coinbase, SourceRef::new("T10-GIVEOUT-B")),
+                utc_timestamp: datetime!(2024 - 06 - 01 0:00 UTC),
+                original_tz: time::UtcOffset::UTC,
+                wallet: Some(wallet_b.clone()),
+                payload: EventPayload::TransferOut(TransferOut {
+                    sat: 40_000_000,
+                    fee_sat: None,
+                    dest_addr: None,
+                    txid: None,
+                }),
+            };
+            btctax_core::persistence::append_import_batch(s.conn(), &[buy, give]).unwrap();
+            s.save().unwrap();
+        }
+        let tranche_b = btctax_cli::cmd::tranche::declare_tranche(
+            &vault,
+            &pp,
+            40_000_000,
+            wallet_b.clone(),
+            date!(2016 - 01 - 01),
+            date!(2016 - 03 - 31),
+            fixed_now,
+        )
+        .unwrap();
+        btctax_cli::cmd::promote::promote_tranche(
+            &vault,
+            &pp,
+            &tranche_b.canonical(),
+            btctax_cli::ProvenanceKind::Purchase,
+            "cash P2P purchase (b), no records; window bounded on-chain".to_string(),
+            Some(btctax_cli::PROMOTE_ACK_PHRASE),
+            fixed_now,
+        )
+        .unwrap();
+        btctax_cli::cmd::reconcile::reclassify_outflow(
+            &vault,
+            &pp,
+            &EventId::import(Source::Coinbase, SourceRef::new("T10-GIVEOUT-B")).canonical(),
+            OutflowClass::Donate {
+                appraisal_required: false,
+            },
+            dec!(5_000),
+            None,
+            None,
+            fixed_now,
+        )
+        .unwrap();
+
+        // NOW open the editor — its held Session is the ONLY one alive from here on.
+        let mut app = EditorApp::new(vault.clone());
+        for c in pp_str.chars() {
+            app.unlock.push_char(c);
+        }
+        app.do_unlock();
+        assert_eq!(
+            app.screen,
+            EditorScreen::Browse,
+            "fixture: the vault must unlock cleanly"
+        );
+        app.clock = btctax_tui::clock::Clock::Pinned(fixed_now);
+        (app, dir)
+    }
+
+    /// ★ Task 10 KAT (a)+(c): `x` on a vault with a promoted 2025 leg + a 2024 removal-reordered year
+    /// exports BOTH years' packets (`plan_export.years`) — AND the 2025 packet includes `form_8275.pdf`
+    /// for the promoted leg (reuses the shipped gated export via the chokepoint).
+    #[test]
+    fn x_exports_both_a_promoted_2025_leg_and_a_2024_removal_reordered_year_including_form_8275() {
+        let (mut app, _dir) = vault_with_promoted_2025_leg_and_2024_reorder();
+        app.open_defensive_filing();
+        assert_eq!(app.screen, EditorScreen::DefensiveFiling);
+
+        handle_key(&mut app, press(KeyCode::Char('x')));
+
+        assert_eq!(
+            app.screen,
+            EditorScreen::DefensiveFiling,
+            "DFW-D3/M-5: x is never a 'done' checkbox — the dashboard stays open"
+        );
+        let status = app.status.clone().unwrap_or_default();
+        assert!(
+            status.contains("2 of 2"),
+            "both years must export cleanly: {status:?}"
+        );
+        assert!(
+            status.contains("2024") && status.contains("2025"),
+            "both the removal-reordered 2024 AND the promoted-disposal 2025 year must be named: \
+             {status:?}"
+        );
+        assert!(
+            !status.to_lowercase().contains("fail"),
+            "a fully-clean export must not read as a failure: {status:?}"
+        );
+
+        // Recover the out_dir this run actually used from the status text is fragile; recompute it the
+        // SAME way `execute_defensive_export` did (the SAME pinned clock + vault_path).
+        let out_dir =
+            crate::defensive_dashboard::defensive_export_dir_for(&app.vault_path, app.clock.now());
+        assert!(
+            out_dir.join("2024").join("f8949.pdf").exists(),
+            "the 2024 packet must be written for real: {out_dir:?}"
+        );
+        assert!(
+            out_dir.join("2025").join("f8949.pdf").exists(),
+            "the 2025 packet must be written for real: {out_dir:?}"
+        );
+        assert!(
+            out_dir.join("2025").join("form_8275.pdf").exists(),
+            "★ KAT (c): the 2025 packet (the promoted DISPOSAL leg's own year) must include \
+             form_8275.pdf: {out_dir:?}"
+        );
+    }
+
+    /// ★ Task 10 KAT (b): a pseudo-active vault refuses + routes — and NEVER prompts the attest phrase
+    /// (DFW-D11: this composed export step has no attestation escape hatch at all, unlike the single-year
+    /// CLI `export-irs-pdf`/`export-snapshot` path).
+    #[test]
+    fn x_on_a_pseudo_active_vault_refuses_and_routes_never_prompting_the_attest_phrase() {
+        let mut app = EditorApp::new(PathBuf::from("/test/vault.pgp"));
+        app.screen = EditorScreen::Browse;
+        app.snapshot = Some(snapshot_with_pseudo_count(3));
+        app.open_defensive_filing();
+        // DFW-D6: entry itself refuses while pseudo-active, so re-derive the dashboard state directly to
+        // exercise the EXPORT gate specifically (plan_export's OWN pseudo-active refusal), mirroring how
+        // `entry_refuses_when_pseudo_active_with_routing_guidance` already pins the entry gate separately.
+        assert!(
+            app.defensive_dashboard.is_none(),
+            "fixture sanity: DFW-D6 entry refuses first"
+        );
+
+        // Drive the export action directly against a pseudo-active snapshot (bypassing entry) to pin
+        // `plan_export`'s OWN pseudo-active refusal at the export chokepoint itself.
+        app.status = None;
+        execute_defensive_export(&mut app);
+
+        let status = app
+            .status
+            .clone()
+            .expect("a pseudo-active export must refuse with a reason, never a silent no-op");
+        assert!(
+            status.to_lowercase().contains("pseudo"),
+            "must name the pseudo-reconcile cause (DFW-D11): {status:?}"
+        );
+        assert!(
+            status.to_lowercase().contains("refused"),
+            "must read as a refusal, not a success: {status:?}"
+        );
+        assert!(
+            !status.contains(btctax_cli::ATTEST_PHRASE),
+            "DFW-D11: this composed export step must NEVER surface the literal typed attest phrase — \
+             the refusal routes the filer to `reconcile pseudo off` (or the single-year CLI path, which \
+             carries its OWN separate attest prompt) instead: {status:?}"
+        );
+        assert!(
+            app.session.is_none(),
+            "the refusal must never even reach the session/write step"
+        );
+    }
+
+    /// A helper mirroring `snapshot_with_pseudo_count` (defined in `defensive_dashboard.rs`'s own test
+    /// module) — duplicated here (not `pub(crate)`) because `main.rs`'s test module needs its own
+    /// no-real-vault pseudo-active fixture to drive `execute_defensive_export` directly.
+    fn snapshot_with_pseudo_count(count: usize) -> btctax_tui::app::Snapshot {
+        btctax_tui::app::Snapshot {
+            events: vec![],
+            state: btctax_core::state::LedgerState {
+                pseudo_synthetic_count: count,
+                ..Default::default()
+            },
+            cli_config: btctax_cli::CliConfig::default(),
+            profiles: std::collections::BTreeMap::new(),
+            refused: std::collections::BTreeMap::new(),
+            tables: btctax_adapters::BundledTaxTables::load(),
+            donation_details: std::collections::BTreeMap::new(),
+            bulk_estimated: std::collections::BTreeMap::new(),
+            prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
+        }
     }
 
     // ── ★ T7-entrykey (Task 8): Browse `w` wires the Defensive Filing dashboard entry ────────────────
