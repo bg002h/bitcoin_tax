@@ -424,8 +424,11 @@ answer, complete and defensible on its own, and freely revocable. **For many fil
 
 Optionally — never by default, never as a "next step" — you can **promote** that tranche to a `>$0` estimated
 basis. btctax uses the **lowest closing price in your declared window**, which is the most conservative estimate
-that window can support; it will never manufacture a loss, and it will never exceed basis you can already
-document. A promotion requires, in order:
+that window can support. Two things are guaranteed: the estimate **never absorbs proceeds your documented basis
+needs**, so a promotion can never manufacture a loss; and a promotion is **refused outright for every
+acquisition provenance that already has a real basis in law**. A promoted floor is still an *estimate*, and on
+a wide window it can exceed what you could document for the same coins — the dashboard says so out loud when it
+would displace documented basis. A promotion requires, in order:
 
 - an explicit **acquisition-provenance attestation** — you pick from a closed list, and only *purchase* can be
   promoted (gift, inheritance, mining, staking, airdrop and fork already have a real basis in law, so btctax
@@ -434,16 +437,23 @@ document. A promotion requires, in order:
   packet, not optional boilerplate; and
 - typing an **acknowledgment phrase** confirming you understand this is an estimate that carries §6662 exposure.
 
-The dashboard shows what the promotion would actually change — the tax delta where it can be computed, and
-loud advisories when a tranche covers more than the shortfall needs, or when promoting would displace basis you
-already have documented. Everything you were shown at consent is recorded verbatim with the decision, so the
-§6664(c) good-faith record matches the screen you agreed to.
+The dashboard shows what the promotion would actually change — per affected year, the change in **realized
+gain**, labelled as a gain figure and explicitly *not* a tax saving — plus loud advisories when a tranche covers
+more than the shortfall needs, or when promoting would displace basis you already have documented. (A dollar
+*tax* figure needs a stored tax profile and a bundled rate table for that year; press **`t`** in the declare
+flow to compute one on demand where both exist.) The full consent text — every advisory and every term — is
+recorded **verbatim** with the decision, as the §6664(c) good-faith record of what the decision was based on.
 
 ### Export
 
-Press **`x`** to export. btctax works out which years your promotion actually changed — not just the year you're
-filing — and writes one packet per year into `<out-dir>/<year>/`, each including the Form 8275 for any promoted
-basis it discloses.
+Press **`x`** to export. btctax works out which years your decision actually changed — not just the year you're
+filing, and including the years a plain `$0` declare re-filed — and writes one packet per year into
+`<out-dir>/<year>/`, each including the Form 8275 for any promoted basis it discloses.
+
+btctax bundles official IRS form templates for **2017, 2024 and 2025** only. A flagged year outside that set —
+which includes 2018–2023, the years a lost-records shortfall most often lands in — is reported as *"no bundled
+IRS templates … amend by hand"* rather than written: no packet, no half-written directory, and every other
+planned year still exported.
 
 > Same philosophy as the rest of btctax: it will not answer a filing question for you. The window is your
 > knowledge, the provenance is your attestation, the narrative is your explanation — btctax computes the

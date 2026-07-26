@@ -43,7 +43,12 @@ impl ProvenanceKind {
     /// the CLI filer select it, and `btctax-tui-edit` does not depend on `clap`, so it cannot reach
     /// `ValueEnum::value_variants()`. Kept in lock-step with the enum by
     /// `tests::provenance_all_covers_every_clap_value_variant`.
-    pub const ALL: [ProvenanceKind; 7] = [
+    ///
+    /// ★ A **slice**, not a fixed-length array (whole-branch arch Nit-N1, narrowed before the first
+    /// publish): `[ProvenanceKind; 7]` bakes the variant COUNT into the public type, so adding a
+    /// provenance kind would be a breaking change for every downstream matcher. As a slice that addition
+    /// is purely additive.
+    pub const ALL: &'static [ProvenanceKind] = &[
         ProvenanceKind::Purchase,
         ProvenanceKind::Gift,
         ProvenanceKind::Inheritance,

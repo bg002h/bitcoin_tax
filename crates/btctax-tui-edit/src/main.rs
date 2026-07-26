@@ -4145,9 +4145,11 @@ fn handle_declare_flow_key(app: &mut EditorApp, key: KeyEvent) {
 }
 
 /// The Declare flow's Confirm step Enter (DFW-D8: plain confirmation, `$0`, revocable, no Form 8275).
-/// Re-runs `plan_declare` FRESH (the CURRENT window/sat/wallet — never a stale cached plan) via
-/// `flow.clearance`; a refusal bounces back to Edit with the reason surfaced (DFW-D5: "a refusal with a
-/// reason, not a silent append"). On success, the WRITE goes through
+/// Re-runs `btctax_cli::plan_declare` FRESH here at the tail (the CURRENT window/sat/wallet — never a
+/// stale cached plan; ★ arch N5: the earlier `flow.clearance` probe this doc used to cite was DELETED at
+/// the whole-branch fold — it was a second, drifting gating authority, which DFW-D1 forbids). A refusal
+/// bounces back to Edit with the reason surfaced (DFW-D5: "a refusal with a reason, not a silent
+/// append"). On success, the WRITE goes through
 /// `edit::persist::persist_declare_tranche` — the ONLY caller of `apply_declare` in this crate (C-3).
 fn declare_flow_confirm(app: &mut EditorApp) {
     let (sat, wallet, window_start, window_end, target_event) = match app.declare_flow.as_ref() {
@@ -14089,12 +14091,16 @@ mod tests {
 
         // (A) wallet #1 — a promoted tranche drained EXACTLY by a bare 2025 sale (no competing lot, so
         // the sale draws 100% from the promoted origin — mirrors `promote_cli.rs`'s
-        // `vault_with_promoted_disposal_via_cli`). ★ The window is POST-`TRANSITION_DATE` (2025-01-01),
-        // NOT the pre-2025 window `seed_removal_reorder` uses for wallet B below: `pool_key` un-partitions
-        // every PRE-2025 lot into ONE `PoolKey::Universal` pool (§7.4) but partitions POST-2025 lots
-        // `PoolKey::Wallet(..)` — a pre-2025 tranche cannot cover a POST-2025 disposal in the SAME wallet
-        // without an intervening Safe-Harbor allocation (out of scope here), so the tranche's OWN window
-        // must sit on the SAME side of the transition as the sale it is meant to cover.
+        // `vault_with_promoted_disposal_via_cli`). ★ CORRECTED (whole-branch r2 tax I-1): this comment
+        // used to claim the POST-`TRANSITION_DATE` window was REQUIRED — "a pre-2025 tranche cannot cover
+        // a POST-2025 disposal in the SAME wallet". That is FALSE under the default Path A:
+        // `project::transition::seed_transition` drains every Universal residue lot into
+        // `PoolKey::Wallet(lot.wallet)` at the cutover, preserving `BasisSource::EstimatedConservative`
+        // (D-8) — pinned by `kat_tranche.rs::tranche_tag_survives_2025_path_a_seed_and_reaches_a_2025_disposal_leg`.
+        // A pre-2025 window would have worked here too. The 2025 window is kept because it makes this
+        // fixture's SIDE of the transition explicit and independent of the cutover reconstruction, and
+        // deliberately DIFFERS from the pre-2025 window `seed_removal_reorder` uses for wallet B below —
+        // exercising both pooling eras in one export.
         let wallet_a = WalletId::SelfCustody {
             label: "t10-a".into(),
         };

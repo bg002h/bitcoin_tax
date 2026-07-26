@@ -95,12 +95,22 @@ P-C-owned remains open.)*
 
 ## P-D / whole-branch (deferred at the P-C gate — non-blocking, but sweep before merge)
 
-- **[open] tax-M-3 — displacement-caveat hole for a correctly-sized cover.** `defensive/mod.rs:659-688`:
+- **[open — RE-OWNED to post-merge]** ★ **2026-07-26, whole-branch FINAL r2 fold.** The two displacement-caveat
+  holes below (the dashboard `[assess]` line and the declare-flow `t` readout — filed here as tax-M-3/tax-M-4,
+  and carried as **tax M-4 / M-5** in the r2 tax lens' own numbering) were owned by **P-D/whole-branch**, and
+  that phase CLOSES at this gate. They are NOT discharged, so per STANDARD_WORKFLOW ("an item whose owning
+  phase has already passed is overdue, not deferred") they are explicitly RE-OWNED to **post-merge / next
+  cycle** rather than left pointing at a closed phase. Both lenses ruled them non-blocking: neither changes a
+  filed number — each is caveat COPY beside an advisory figure that is already labelled a gain-Δ and "not a tax
+  saving". Owner from now on: **post-merge / next cycle.**
+- **[open] tax-M-3 — displacement-caveat hole for a correctly-sized cover.** (Owner: **post-merge / next
+  cycle** — re-owned above.) `defensive/mod.rs:659-688`:
   `WouldDisplaceIfPromoted` fires only when `covered_sat == 0`; when `covered_sat > 0 && t.sat == covered_sat`, neither it
   nor `OverCovered` fires — yet a HIFO reorder across multi-year disposals still shifts gain between years, so that row's
   per-year delta is a reorder artifact shown as an unqualified saving. Fix: fire on `!promoted && displaces_documented_basis(..)`,
   suppressing only where `OverCovered` already carries displacement copy.
-- **[open] tax-M-4 — the declare flow's on-demand tax-Δ carries no displacement caveat** (`declare_flow.rs:293-307` prints
+- **[open] tax-M-4 — the declare flow's on-demand tax-Δ carries no displacement caveat.** (Owner: **post-merge
+  / next cycle** — re-owned above.) (`declare_flow.rs:293-307` prints
   bare `$delta`/`gain-Δ`). `declare_preview_saving` already builds both folds, so the check is nearly free.
   ★ **PREMISE CORRECTED at the whole-branch fold:** this entry used to justify itself with "…while the dashboard row's
   equivalent number is caveated." That was FALSE (whole-branch tax-M-1) — at the time it was written the dashboard drew
@@ -250,6 +260,107 @@ All four blocking/near-blocking items below landed in the SAME commit; both bloc
 P-D/ship section above. ★ **RESOLVED 2026-07-26** — the owner ruled on all of it (ratified buckets + explicit pick +
 `Y2025Onward` + disclaimer stripped); the P-D/ship entries above carry the detail.
 
+## P-D / whole-branch FINAL review **round 2** (arch GREEN "ship it"; tax NOT GREEN 0C/2I — folded in one pass)
+
+Both r2 blockers were **doc-only** and both would have published at v0.10.0. No filed number changed in this
+fold: the blockers and tax-M-3 are pure documentation; tax-M-1 makes an export year-set strictly MORE complete
+(never less); tax-M-6 is render-only.
+
+- **[done] tax I-1 = arch M-1 (BLOCKING) — a FALSE pooling claim in the SPEC and in a published API doc.** The
+  sentence "`pool_key` puts a pre-2025 lot in the Universal pool and a 2025+ lot in its wallet's own pool, so a
+  pre-2025 tranche cannot cover a post-2025 disposal in the same wallet" is **FALSE** under Path A (the default,
+  i.e. no `SafeHarborAllocation`): `project/transition.rs:93-106` drains every Universal residue lot into
+  `PoolKey::Wallet(lot.wallet)` at the cutover and *explicitly preserves* `BasisSource::EstimatedConservative`
+  for exactly this case (D-8). It was refuted by a **green test already in the workspace** —
+  `kat_tranche.rs::tranche_tag_survives_2025_path_a_seed_and_reaches_a_2025_disposal_leg`, where a 2015-window
+  tranche in wallet `w` fully covers a 2025-06-01 sale in the SAME wallet. The claim holds only under Path B,
+  which is unreachable here (`guard_tranche_vs_allocation` / `guard_allocation_vs_tranche` make an in-force
+  allocation and a pre-2025 tranche mutually exclusive). The owner's ratified DECISION (add `Y2025Onward`) is
+  UNCHANGED and correct — only its stated reason was wrong. Replaced with the two SOUND justifications ((a) a
+  filer whose coins genuinely are 2025+ must be able to attest truthfully rather than nudging ~150 times; (b) a
+  pre-2025 declare permanently forfeits Rev. Proc. 2024-28 eligibility via `pre2025_tranche_exists` →
+  `guard_allocation_vs_tranche`) in **all four** places — whole-surface sweep, this repo's own lesson:
+  `crates/btctax-core/src/defensive/era.rs` (the docs.rs publish surface),
+  `crates/btctax-core/tests/defensive_era.rs`, `SPEC.md` DFW-D9, and the `main.rs` T10 fixture comment.
+  (Owner: **P-D/whole-branch** — DONE.)
+- **[done] tax I-2 (BLOCKING) — the README stated a safety guarantee the engine does not provide.** "the floor …
+  will never manufacture a loss, and **it will never exceed basis you can already document**". The first clause
+  is TRUE (`clamped_leg_basis`, `conservative_promote.rs:179-192`, bounds the estimate at `net − documented`).
+  The second was **UNBACKED**: nothing compares the computed floor to documented basis; `plan_promote` gates only
+  on provenance, a non-empty Part II, `Coverage::Full`, consent and the ack. Counter-example: a documented 2013
+  buy at ~$100/BTC + a declared 2021-01-01..2024-12-31 window → a floor of order $15,000/BTC, ~150× documented,
+  and nothing refuses it — which is precisely why `Advisory::WouldDisplaceIfPromoted`/`NowDisplacing` ship. The
+  false clause was deleted and replaced with what IS guaranteed (the estimate never absorbs proceeds the
+  documented component needs, so it can never manufacture a loss; and the promote is refused outright for every
+  provenance that already has a real basis in law), plus an explicit note that a wide window CAN exceed
+  documented basis and that the dashboard says so. (Owner: **P-D/whole-branch** — DONE.)
+- **[done] tax M-3 — the rest of the README accuracy cluster (same section).** (1) "the tax delta where it can be
+  computed": `journey_view` passes `profile: None`, so `SavingFlavor::ComputedTax` is structurally UNREACHABLE on
+  the dashboard — every `[assess]` line is the gain-Δ flavor, explicitly labelled "not a tax saving". Reworded,
+  and the real dollar-tax route (the declare flow's on-demand `t`, which sources the stored `TaxProfile`) named
+  separately. (2) "which years your **promotion** actually changed": after the declare-side fold the set also
+  covers years a `$0` DECLARE changed — the prose reproduced in words the very branch asymmetry the code fix
+  removed. (3) "writes one packet per year": `SUPPORTED_YEARS = [2017, 2024, 2025]`, so for the wizard's core
+  audience (a lost-records sale in 2018–2023) `x` writes NO packet and reports "no bundled IRS templates … amend
+  by hand" — a paragraph now says so. (4) the §6664(c) sentence no longer claims the record "matches the screen
+  you agreed to" (the open no-scrolling follow-up means a trailing term can be recorded as shown without being
+  rendered); it now claims only what is true — the consent text is recorded verbatim.
+  (Owner: **P-D/whole-branch** — DONE.)
+- **[done] tax M-1 — a still-in-force PROMOTED tranche could be dropped from the export union.**
+  `conservative.rs`'s `live_declare_ids` built liveness from the NAIVE `voided_decision_targets` ("some
+  `VoidDecisionEvent` names this id"), but `project/resolve.rs:627-638`'s BG-D9 deferred adjudication makes a
+  void of a `DeclareTranche` **INERT** when a live promote references it (the tranche stays in force; the void
+  raises a `DecisionConflict`). Fixed with `!voided.contains(&e.id) || state.promoted_origins.contains(&e.id)` —
+  `promoted_origins` IS the resolver's settled verdict — so the correction can only ADD years, never remove one.
+  KATs: the white-box, mutation-verified
+  `conservative::tests::live_declare_ids_keeps_a_tranche_whose_void_the_engine_held_inert`, plus the end-to-end
+  `promote_cli.rs::flagged_years_keeps_a_promoted_tranche_whose_declare_void_the_engine_made_inert`. ★ Noted in
+  both docs: the END-TO-END test is deliberately not the mutation-killer — on that shape the promote half of the
+  union coincides, because its own shadow fold removes the promote, which un-defers the very void and drops the
+  tranche anyway. That coincidence is a property of the CURRENT resolver, not a guarantee, hence the white-box
+  pin. (Owner: **P-D/whole-branch** — DONE.)
+- **[done] tax M-6 — the oldest era bucket rendered no holding date and no term.** `declare_flow.rs:411-444`
+  rendered the holding date + `({term} at the short op's date)` ONLY in the `Some(Ok(cf))` (`Coverage::Full`)
+  arm. The bundled price data starts **2010-07-17**, so `Y2009To2011` (from the 2009-01-03 genesis block) is
+  ALWAYS `Coverage::Partial` → the `Err` arm → no holding date, no term — on the oldest bucket, the one a
+  lost-records filer is most likely to pick and the one that most reliably makes the disposal LONG-term, while
+  the new prompt copy promises the pick "sets … whether the disposal it covers is SHORT- or LONG-term". The
+  line was hoisted out of the floor match and now renders whenever `window()` is `Some`. Render-only —
+  `window_end` IS the acquisition date either way. KAT (mutation-verified, covers Partial + NoCoverage + the
+  still-fail-closed no-pick case): `declare_flow::tests::the_holding_date_and_term_render_even_when_the_floor_is_not_computable`.
+  (Owner: **P-D/whole-branch** — DONE.)
+- **[done] arch M-2 — `era::next_preset` deleted** (see the residue section below for the full disposition).
+- **[done] arch Nit-N1 — `[T; N]` public constants narrowed to `&'static [T]` BEFORE the first publish.**
+  `era::ALL_PRESETS: [EraPreset; 6]` and `ProvenanceKind::ALL: [ProvenanceKind; 7]` baked the length into the
+  **public type**, so adding a variant would have been a breaking change — and the census drift guard
+  (`the_newest_era_preset_reaches_the_newest_filable_tax_year`) actively SCHEDULES the next length change for
+  whenever a new filing year is bundled. Both are now slices; call sites/KATs updated. (Owner:
+  **P-D/whole-branch** — DONE.)
+- **[done] arch N5 — `declare_flow_confirm`'s doc cited `flow.clearance`,** deleted in the previous wave.
+  Corrected to name the real gate (`btctax_cli::plan_declare`, re-run fresh at the confirm tail) and to record
+  why the probe went. (Owner: **P-D/whole-branch** — DONE.)
+- **[open] arch M-3 — two PUBLIC `render_consent` functions on btctax-cli's about-to-be-published API.**
+  `cmd/promote.rs:186` (`render_consent(terms, gift_only_years) -> String`) and `chokepoint/mod.rs:438`
+  (`render_consent(plan: &PromotePlan) -> String`). Same name, same crate, different signatures and different
+  scopes — a caller can reach the narrower one and miss the advisory/post-consent material the chokepoint copy
+  carries, which is exactly the "second consent surface" shape DFW-D1 exists to prevent. Not a defect today (the
+  wizard and the CLI both go through the chokepoint one). Rename or narrow one before/at the first publish.
+  (Owner: **post-merge / next cycle**, ideally BEFORE the v0.10.0 publish.)
+- **[open] arch M-5 — the DECLARE path can plan off a stale image, the same class the export fix closed by
+  construction.** `execute_defensive_export` now re-projects before planning (r1 arch I-1), but the declare and
+  promote flows still read `app.snapshot` for their `plan_*` inputs, and `main.rs` carries **26**
+  `"Saved but re-projection failed ({e}) — restart to refresh"` tails (grep the literal), each leaving
+  `app.snapshot` on the PRE-write image. Not a filing-correctness gate today — both confirm tails re-run their
+  own FRESH `plan_declare`/`plan_promote` against `session` at the Enter, so no filed number is derived from the
+  stale image — but the SHOWN readout (floor/coverage/tax-Δ, dashboard rows) can lag. Same remedy as the
+  standing class item: invalidate `app.snapshot` on a failed re-projection, or route every write through one
+  `after_write` helper that owns the invalidate (which also folds the open `after_defensive_write` half of
+  arch-M-1). Duplicate-safe: this is the same root cause as "Stale `app.snapshot` after a failed re-projection —
+  the CLASS" above; kept as a separate line only because r2 named the declare path specifically.
+  (Owner: **post-merge / next cycle.**)
+- **[open] ~22 remaining stale-snapshot tails.** Subsumed by the CLASS item above (26 literal sites today); no
+  separate work item — burn them down with the `after_write` helper. (Owner: **post-merge / next cycle.**)
+
 ## Copy pass / whole-branch review (ownerless residue — batch to the end)
 
 - **[open] T7-copy** — `defensive_dashboard.rs`: "[optional, SUPPRESSED] promote" reads as *disabled* though core does NOT
@@ -261,12 +372,13 @@ P-D/ship section above. ★ **RESOLVED 2026-07-26** — the owner ruled on all o
   renders: `render_declare_flow`/`render_promote_flow` add `{:?}` on shortfall/wallet/era-preset/tranche (e.g.
   "shortfall Decision { seq: 1 }", `wallet: SelfCustody { label: "..." }`, `era preset: Y2009To2011`, "tranche
   Decision { seq: 1 }").
-- **[open] `era::next_preset` is production-dead** — the owner's explicit-pick decision replaced the Declare flow's
-  Tab-cycling with a numbered picker, so nothing in production calls it any more (its own two KATs are the only
-  callers). Deliberately NOT deleted in that commit: it is pure, total, derived from `ALL_PRESETS` (so it cannot
-  drift), gates nothing, and is already published API — unlike `clearance()` (arch-M-2) it is not a second authority,
-  so this is a tidiness item, not a correctness one. Delete it (with its two KATs) at the next API-narrowing pass if
-  no picker needs it.
+- **[done] `era::next_preset` is production-dead — DELETED** (whole-branch FINAL r2 fold, arch M-2). The owner's
+  explicit-pick decision replaced the Declare flow's Tab-cycling with a numbered picker, so nothing in production
+  called it. It had been retained on the rationale "already-published API" — which was **FALSE**: `defensive::era`
+  is ABSENT from `main`, so it has never been published, and narrowing the surface before the first release is far
+  cheaper than after. Deleted with both of its KATs (`era.rs::next_preset_cycles_and_wraps_to_first`,
+  `defensive_era.rs::next_preset_cycles_oldest_to_newest_then_wraps`), matching exactly how `clearance()` was
+  handled. (Owner: **P-D/whole-branch** — DONE.)
 - **[open] tax Nit 2** — the Provenance screen states which answer passes the gate BEFORE the filer answers ("Only a
   PURCHASE can be promoted…" renders above the picker) — honest disclosure of the rule (same wording
   `refuse_non_purchase` uses), but mildly leading on a screen whose purpose is an unprompted filer answer. Consider

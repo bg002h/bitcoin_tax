@@ -415,15 +415,9 @@ pub fn render_declare_flow(state: &DeclareFlowState, prices: &dyn PriceProvider)
                 .to_string(),
         ),
         Some(Ok(cf)) => {
-            let term = if state.is_long_term_at_short_date() == Some(true) {
-                "long-term"
-            } else {
-                "short-term"
-            };
             lines.push(format!(
-                "floor (if later promoted): ${:.2}   coverage: {:?}   holding date: {} ({term} at the \
-                 short op's date)",
-                cf.filed_basis, cf.coverage, state.window_end
+                "floor (if later promoted): ${:.2}   coverage: {:?}",
+                cf.filed_basis, cf.coverage
             ));
         }
         Some(Err(PromoteRefusal::NoCoverage)) => {
@@ -441,6 +435,24 @@ pub fn render_declare_flow(state: &DeclareFlowState, prices: &dyn PriceProvider)
                 Coverage::Partial
             ));
         }
+    }
+
+    // ★ whole-branch r2 tax M-6: the holding date + its short/long-term character render whenever a
+    // window EXISTS — they were previously inside the `Some(Ok(..))` (i.e. `Coverage::Full`) arm only.
+    // The bundled daily-close dataset starts 2010-07-17, so the OLDEST bucket (`Y2009To2011`, from the
+    // 2009-01-03 genesis block) is ALWAYS `Coverage::Partial` → the `Err` arm → the filer saw NO holding
+    // date and NO term on the one bucket a lost-records filer is most likely to pick, and the one that
+    // most reliably makes the disposal LONG-term. Meanwhile the picker's own copy promises the pick "sets
+    // … whether the disposal it covers is SHORT- or LONG-term". Render-only: `window_end` IS the lot's
+    // acquisition date either way (`resolve.rs:~1310`) — no filed number moves, and an uncomputable floor
+    // still says so on its own line above.
+    if let (Some(acquired), Some(is_long)) =
+        (state.holding_date(), state.is_long_term_at_short_date())
+    {
+        let term = if is_long { "long-term" } else { "short-term" };
+        lines.push(format!(
+            "holding date: {acquired} ({term} at the short op's date)"
+        ));
     }
 
     // On-demand tax-Δ (DFW-D10 M-1) — never per-keystroke.
@@ -627,7 +639,7 @@ mod tests {
     fn picking_an_era_seeds_the_window_and_the_before_op_clamp_still_governs() {
         let sf = shortfall_on(date!(2020 - 06 - 15));
         let before_op = date!(2020 - 06 - 14);
-        for &p in &ALL_PRESETS {
+        for &p in ALL_PRESETS {
             let (start, end) = era_window(p);
             let mut state = DeclareFlowState::new(sf.clone(), wallet(), false);
             state.select_preset(p);
@@ -1005,6 +1017,70 @@ mod tests {
         assert_eq!(cf.coverage, Coverage::Full);
     }
 
+    /// ★ whole-branch r2 tax M-6: the HOLDING DATE + its short/long-term character must render whenever
+    /// a window exists — including on a bucket whose floor is NOT computable.
+    ///
+    /// This is not a corner case: the bundled daily-close dataset starts **2010-07-17**, so the OLDEST
+    /// bucket (`Y2009To2011`, from the 2009-01-03 genesis block) can only ever be `Coverage::Partial` in
+    /// the real binary. The readout used to render the holding date inside the `Some(Ok(..))` arm alone,
+    /// so precisely the bucket a lost-records filer is most likely to pick — and the one that most
+    /// reliably makes the covered disposal LONG-term — showed no acquisition date and no term at all,
+    /// while the picker's own copy promises the pick "sets … whether the disposal it covers is SHORT- or
+    /// LONG-term".
+    ///
+    /// Mutation: move the holding-date line back inside the `Some(Ok(cf))` arm → the Partial and
+    /// NoCoverage legs below red. Render-only — `window_end` IS the acquisition date either way
+    /// (`resolve.rs:~1310`); no filed number moves.
+    #[test]
+    fn the_holding_date_and_term_render_even_when_the_floor_is_not_computable() {
+        let sf = shortfall_on(date!(2020 - 01 - 10));
+        let state = opened_with_oldest_era(sf);
+        let (window_start, window_end) = state.window().unwrap();
+
+        // (i) PARTIAL coverage — the shipped shape for `Y2009To2011` against the real bundled dataset
+        // (two priced days inside a multi-year window; every other day missing).
+        let mut m = BTreeMap::new();
+        m.insert(window_start, rust_decimal_macros::dec!(10_000));
+        m.insert(window_end, rust_decimal_macros::dec!(10_000));
+        let gappy = StaticPrices(m);
+        assert_eq!(
+            state.floor_readout(&gappy),
+            Some(Err(PromoteRefusal::PartialCoverage)),
+            "fixture: this must be the NOT-computable arm, else the KAT proves nothing"
+        );
+        let rendered = render_declare_flow(&state, &gappy).join("\n");
+        assert!(
+            rendered.contains(&format!("holding date: {window_end}")),
+            "an uncomputable floor must NOT suppress the acquisition date the pick sets: {rendered}"
+        );
+        assert!(
+            rendered.contains("long-term at the short op's date"),
+            "…nor the short/long-term character the picker copy promises: {rendered}"
+        );
+
+        // (ii) NO coverage at all — same rule.
+        let empty = StaticPrices::default();
+        assert_eq!(
+            state.floor_readout(&empty),
+            Some(Err(PromoteRefusal::NoCoverage)),
+            "fixture: the no-price-data arm"
+        );
+        let rendered = render_declare_flow(&state, &empty).join("\n");
+        assert!(
+            rendered.contains(&format!("holding date: {window_end}"))
+                && rendered.contains("long-term at the short op's date"),
+            "a no-coverage window still HAS an acquisition date and a term: {rendered}"
+        );
+
+        // (iii) and with NO era picked there is still no holding date to show (fail-closed, unchanged).
+        let unpicked = DeclareFlowState::new(shortfall_on(date!(2020 - 01 - 10)), wallet(), false);
+        let lines = render_declare_flow(&unpicked, &empty);
+        assert!(
+            !lines.iter().any(|l| l.starts_with("holding date:")),
+            "nothing may render a holding date before the filer answers the era question: {lines:#?}"
+        );
+    }
+
     // ── (d) grep guard: this module never calls apply_declare directly (C-3) ─────────────────────────
 
     #[test]
@@ -1143,7 +1219,7 @@ mod tests {
     fn no_era_pick_can_ever_leave_an_inverted_window() {
         // A 2018 shortfall: every preset from Y2018To2020 on STARTS after the before-op clamp bites.
         let sf = shortfall_on(date!(2018 - 06 - 01));
-        for &p in &ALL_PRESETS {
+        for &p in ALL_PRESETS {
             let mut state = opened_with_oldest_era(sf.clone());
             state.select_preset(p);
             let (start, end) = state
@@ -1178,7 +1254,7 @@ mod tests {
     fn picking_an_era_that_cannot_apply_is_refused_never_collapsed_to_a_degenerate_day() {
         let sf = shortfall_on(date!(2018 - 06 - 01));
         let before_op = date!(2018 - 05 - 31);
-        for &p in &ALL_PRESETS {
+        for &p in ALL_PRESETS {
             let (preset_start, _) = era_window(p);
             if preset_start <= before_op {
                 continue;

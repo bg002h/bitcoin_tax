@@ -233,8 +233,22 @@ engine-invisible; forward-planning only). There is **no manual "I hold N BTC" da
   after the DFW-D5 before-op boundary) REFUSED with the reason rather than silently skipped or collapsed
   to a degenerate one-day window. The bucket table itself is owner-RATIFIED: deliberate claim-free round
   calendar spans (no historical/exchange/event claim to be wrong about), now including a **2025-onward**
-  bucket, since `pool_key` puts pre- and post-cutover lots in different pools and a pre-2025 tranche
-  therefore cannot cover a post-2025 disposal in the same wallet. The **preset-confirm copy MUST frame
+  bucket. ★ **CORRECTED (whole-branch r2 tax I-1):** the 2025-onward bucket was justified here by "`pool_key`
+  puts pre- and post-cutover lots in different pools, so a pre-2025 tranche cannot cover a post-2025 disposal
+  in the same wallet". **That claim is FALSE** under Path A — the default, i.e. no `SafeHarborAllocation` —
+  because `project::transition::seed_transition` drains every Universal residue lot into
+  `PoolKey::Wallet(lot.wallet)` at the cutover and *explicitly preserves* `BasisSource::EstimatedConservative`
+  for exactly this case (D-8); a green KAT already pins it
+  (`kat_tranche.rs::tranche_tag_survives_2025_path_a_seed_and_reaches_a_2025_disposal_leg`, a 2015-window
+  tranche fully covering a 2025-06-01 sale in the same wallet). The pools diverge only under Path B, which is
+  unreachable for this shape (`guard_tranche_vs_allocation` / `guard_allocation_vs_tranche` make an in-force
+  allocation and a pre-2025 tranche mutually exclusive). **The owner's decision to add the bucket is UNCHANGED
+  and correct; only the stated reason was wrong.** The two sound justifications are: (a) a filer whose coins
+  genuinely were acquired in 2025+ must be able to attest that truthfully rather than ±1-day-nudging ~150
+  times away from a pre-cutover preset; and (b) covering a post-2025 shortfall with a *pre-2025* declare
+  permanently forfeits Rev. Proc. 2024-28 safe-harbor eligibility (`pre2025_tranche_exists` →
+  `guard_allocation_vs_tranche` refuses any later allocation), so a 2025+ bucket is the only way to cover such
+  a shortfall without that cost. The **preset-confirm copy MUST frame
   the window as the filer's OWN knowledge of when they acquired the coins** — the attested window is the
   *substance* of the BG-D5 attestation and the Cohan/§6664(c) footing, and must never read as
   tool-sourced. **DFW-D5's

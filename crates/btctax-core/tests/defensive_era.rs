@@ -1,7 +1,7 @@
 //! KATs for the Defensive Filing Wizard's era-preset table (Task 8, DFW-D9): `era::era_window` maps
 //! EVERY preset to a concrete `[start, end]` window (KAT a). PRIVACY: no real data — pure date table.
 
-use btctax_core::defensive::era::{era_window, next_preset, EraPreset, ALL_PRESETS};
+use btctax_core::defensive::era::{era_window, EraPreset, ALL_PRESETS};
 use time::macros::date;
 
 #[test]
@@ -43,7 +43,7 @@ fn era_window_maps_every_preset_to_a_concrete_window() {
 fn era_window_is_a_pure_total_function_over_every_variant() {
     // A grep/enumeration guard: every ALL_PRESETS entry must produce SOME concrete window (era_window
     // is total — no variant panics or silently falls through).
-    for &p in &ALL_PRESETS {
+    for &p in ALL_PRESETS {
         let (s, e) = era_window(p);
         assert!(
             s <= e,
@@ -58,9 +58,17 @@ fn era_window_is_a_pure_total_function_over_every_variant() {
 }
 
 /// ★ REPLACES `all_presets_end_strictly_before_the_pre2025_pooling_cutover`, which asserted every
-/// preset ends `< TRANSITION_DATE`. The OWNER-ratified `Y2025Onward` bucket deliberately violates that
-/// — and it MUST, since a pre-2025 tranche cannot cover a post-2025 disposal in the same wallet
-/// (`pools::pool_key` puts them in different pools), which is the functional gap the bucket closes.
+/// preset ends `< TRANSITION_DATE`. The OWNER-ratified `Y2025Onward` bucket deliberately violates that.
+///
+/// ★ CORRECTED (whole-branch r2 tax I-1): this doc used to justify the bucket with "a pre-2025 tranche
+/// cannot cover a post-2025 disposal in the same wallet (`pools::pool_key` puts them in different
+/// pools)". That is FALSE under the default Path A — `project::transition::seed_transition` drains every
+/// Universal residue lot into `PoolKey::Wallet(lot.wallet)` at the cutover and explicitly preserves
+/// `BasisSource::EstimatedConservative` doing it, which
+/// `kat_tranche.rs::tranche_tag_survives_2025_path_a_seed_and_reaches_a_2025_disposal_leg` pins green.
+/// The bucket's real justifications (truthful 2025+ attestation without ~150 nudges; not forfeiting Rev.
+/// Proc. 2024-28 eligibility via `pre2025_tranche_exists`) are in `era::EraPreset::Y2025Onward`'s doc.
+/// Only the RATIONALE was wrong — the bucket, and this guard, are unchanged.
 ///
 /// The property the old guard was really protecting is preserved here in its correct, stronger form:
 /// no window may STRADDLE the cutover. Every bucket lies entirely before `TRANSITION_DATE` or entirely
@@ -69,7 +77,7 @@ fn era_window_is_a_pure_total_function_over_every_variant() {
 #[test]
 fn no_preset_window_straddles_the_pooling_cutover() {
     let cutover = btctax_core::conventions::TRANSITION_DATE;
-    for &p in &ALL_PRESETS {
+    for &p in ALL_PRESETS {
         let (s, e) = era_window(p);
         assert!(
             e < cutover || s >= cutover,
@@ -92,13 +100,6 @@ fn no_preset_window_straddles_the_pooling_cutover() {
     );
 }
 
-#[test]
-fn next_preset_cycles_oldest_to_newest_then_wraps() {
-    let mut p = ALL_PRESETS[0];
-    for &expected in &ALL_PRESETS[1..] {
-        p = next_preset(p);
-        assert_eq!(p, expected);
-    }
-    // Wraps back to the first after the last.
-    assert_eq!(next_preset(p), ALL_PRESETS[0]);
-}
+// ★ whole-branch arch M-2: `next_preset_cycles_oldest_to_newest_then_wraps` was DELETED here alongside
+// the `era::next_preset` accessor it was the only remaining caller of (with its unit-test twin in
+// `era.rs`). The picker takes an explicit numbered pick; nothing in production cycles.

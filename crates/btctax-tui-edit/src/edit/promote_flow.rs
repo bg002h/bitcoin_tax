@@ -471,7 +471,7 @@ mod tests {
     fn the_provenance_step_offers_the_whole_closed_enumeration_and_asserts_nothing_for_the_filer() {
         let state = PromoteFlowState::new(EventId::decision(1));
         let rendered = render_promote_flow(&state).join("\n");
-        for kind in btctax_cli::ProvenanceKind::ALL {
+        for &kind in btctax_cli::ProvenanceKind::ALL {
             assert!(
                 rendered.contains(kind.label()),
                 "the closed BG-D5 enumeration must be OFFERED in full — {:?} ({}) missing: {rendered}",
@@ -492,7 +492,7 @@ mod tests {
     #[test]
     fn the_provenance_restriction_prose_names_every_non_purchase_label() {
         let note = non_purchase_basis_note();
-        for kind in btctax_cli::ProvenanceKind::ALL {
+        for &kind in btctax_cli::ProvenanceKind::ALL {
             if kind == btctax_cli::ProvenanceKind::Purchase {
                 continue;
             }
@@ -532,7 +532,7 @@ mod tests {
         let (id, events) = tranche_events(date!(2020 - 01 - 01), date!(2020 - 01 - 10), 40_000_000);
         let prices = full_price_coverage(date!(2020 - 01 - 01), date!(2020 - 01 - 10));
 
-        for kind in btctax_cli::ProvenanceKind::ALL {
+        for &kind in btctax_cli::ProvenanceKind::ALL {
             if kind == btctax_cli::ProvenanceKind::Purchase {
                 continue;
             }

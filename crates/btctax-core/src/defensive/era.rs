@@ -42,10 +42,29 @@ pub enum EraPreset {
     /// 2025-01-01 (`conventions::TRANSITION_DATE`) onward — the post-cutover, wallet-partitioned
     /// pooling era.
     ///
-    /// **Why it exists:** `pools::pool_key` puts a pre-2025 lot in the Universal pool and a 2025+ lot in
-    /// its wallet's own pool, so **a pre-2025 tranche cannot cover a post-2025 disposal in the same
-    /// wallet**. Without this bucket a 2025-or-later shortfall was reachable only by ±1-day nudging away
-    /// from a pre-cutover preset.
+    /// **Why it exists — two independent reasons.** ★ Neither is a pooling-REACHABILITY claim, and an
+    /// earlier draft of this doc was wrong to make one: under the DEFAULT Path A (no
+    /// `SafeHarborAllocation`), a pre-2025 tranche CAN cover a post-2025 disposal in the same wallet.
+    /// `project::transition::seed_transition` drains every Universal residue lot into
+    /// `PoolKey::Wallet(lot.wallet)` at the cutover, keeping basis/`acquired_at` and EXPLICITLY preserving
+    /// `BasisSource::EstimatedConservative` for exactly this case (D-8) — pinned green by
+    /// `kat_tranche.rs::tranche_tag_survives_2025_path_a_seed_and_reaches_a_2025_disposal_leg`, where a
+    /// 2015-window tranche fully covers a 2025-06-01 sale in the same wallet. (The pools DO diverge under
+    /// Path B, but a vault can never hold both an in-force allocation and a pre-2025 tranche —
+    /// `guard_tranche_vs_allocation` / `guard_allocation_vs_tranche` make them mutually exclusive — so that
+    /// case is unreachable.) The real reasons are:
+    ///
+    /// 1. **A filer whose coins genuinely ARE 2025+ must be able to say so.** The window is the filer's OWN
+    ///    sworn answer to "when did you acquire these coins?" (`window_end` IS the lot's acquisition date,
+    ///    `resolve.rs:~1310`). Without a 2025-onward bucket the only route to a truthful 2025+ window was
+    ///    ±1-day nudging (~150 keypresses) away from a pre-cutover preset — friction that pushes an honest
+    ///    filer toward attesting a window they do not actually believe.
+    /// 2. **A pre-2025 declare permanently forfeits Rev. Proc. 2024-28 safe-harbor eligibility.** A
+    ///    non-voided `window_end < TRANSITION_DATE` tranche makes `tranche_guard::pre2025_tranche_exists`
+    ///    true, and `guard_allocation_vs_tranche` then REFUSES any later `SafeHarborAllocation` (v1 makes
+    ///    the two mutually exclusive). So covering a 2025-or-later shortfall from a pre-cutover window is
+    ///    not merely awkward — it costs the filer the safe harbour. A 2025+ bucket is the only way to cover
+    ///    such a shortfall without paying that price.
     ///
     /// **Why the concrete end is 2025-12-31:** `era_window` is pure and CLOCK-FREE, so "onward" needs a
     /// concrete upper bound. 2025-12-31 is the last day of the newest tax year this app can file
@@ -58,9 +77,15 @@ pub enum EraPreset {
     Y2025Onward,
 }
 
-/// Every preset, OLDEST first — the Declare flow's picker order (`1..=ALL_PRESETS.len()`), the
-/// `next_preset` cycle order, and KAT (a)'s enumeration.
-pub const ALL_PRESETS: [EraPreset; 6] = [
+/// Every preset, OLDEST first — the Declare flow's picker order (`1..=ALL_PRESETS.len()`) and KAT (a)'s
+/// enumeration.
+///
+/// ★ A **slice**, not a fixed-length array: baking the count into the public type would make ADDING a
+/// bucket a breaking change for every downstream matcher, and the census drift guard
+/// (`btctax-forms/tests/census.rs::the_newest_era_preset_reaches_the_newest_filable_tax_year`) actively
+/// schedules the next length change for whenever a new filing year is bundled. As a slice, that addition
+/// is purely additive.
+pub const ALL_PRESETS: &[EraPreset] = &[
     EraPreset::Y2009To2011,
     EraPreset::Y2012To2014,
     EraPreset::Y2015To2017,
@@ -82,17 +107,13 @@ pub fn era_window(preset: EraPreset) -> (TaxDate, TaxDate) {
     }
 }
 
-/// The next preset after `p` in `ALL_PRESETS`' order, wrapping to the first after the last.
-///
-/// ★ It has **no production caller** since the owner's explicit-pick decision replaced the Declare
-/// flow's Tab-cycling with a numbered picker (a "next" key would have made the first bucket a single
-/// keystroke away from being the de-facto default again). Retained as a pure, total, already-published
-/// accessor of the table's own ordering — it holds no state, gates nothing, and cannot drift from
-/// `ALL_PRESETS` because it is derived from it. Filed as a follow-up rather than deleted silently.
-pub fn next_preset(p: EraPreset) -> EraPreset {
-    let idx = ALL_PRESETS.iter().position(|&e| e == p).unwrap_or(0);
-    ALL_PRESETS[(idx + 1) % ALL_PRESETS.len()]
-}
+// ★ whole-branch arch M-2: `next_preset` was DELETED here, with its two KATs — the same disposition
+// `DeclareFlowState::clearance()` got. It lost its only production caller when the owner's explicit-pick
+// decision replaced the Declare flow's Tab-cycling with a numbered picker (a "next" key would have put
+// the first bucket one keystroke away from being the de-facto default again). It was briefly retained on
+// the rationale "already-published accessor" — which was FALSE: `defensive::era` does not exist on `main`,
+// so nothing here has ever been published, and narrowing the surface before the first release is far
+// cheaper than after. A picker that needs "the bucket after this one" indexes `ALL_PRESETS` directly.
 
 #[cfg(test)]
 mod tests {
@@ -100,7 +121,7 @@ mod tests {
 
     #[test]
     fn every_preset_window_is_non_empty_and_ordered() {
-        for &p in &ALL_PRESETS {
+        for &p in ALL_PRESETS {
             let (start, end) = era_window(p);
             assert!(start <= end, "{p:?}: start {start} must be <= end {end}");
         }
@@ -109,7 +130,7 @@ mod tests {
     #[test]
     fn presets_are_non_overlapping_and_increasing_in_all_presets_order() {
         let mut prev_end = None;
-        for &p in &ALL_PRESETS {
+        for &p in ALL_PRESETS {
             let (start, _end) = era_window(p);
             if let Some(pe) = prev_end {
                 assert!(
@@ -121,13 +142,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn next_preset_cycles_and_wraps_to_first() {
-        assert_eq!(next_preset(EraPreset::Y2009To2011), EraPreset::Y2012To2014);
-        assert_eq!(next_preset(EraPreset::Y2021To2024), EraPreset::Y2025Onward);
-        assert_eq!(next_preset(EraPreset::Y2025Onward), EraPreset::Y2009To2011);
-    }
-
     /// The property the REPLACED `all_presets_end_strictly_before_the_pre2025_pooling_cutover` guard
     /// was REALLY protecting, restated so it survives a post-cutover bucket: no window may STRADDLE
     /// `TRANSITION_DATE`, so a declared tranche's lot lands in exactly one pooling era. (The
@@ -135,7 +149,7 @@ mod tests {
     /// invariant from outside the crate; this unit copy keeps it adjacent to the table it constrains.)
     #[test]
     fn no_window_straddles_the_pooling_cutover() {
-        for &p in &ALL_PRESETS {
+        for &p in ALL_PRESETS {
             let (start, end) = era_window(p);
             let cutover = crate::conventions::TRANSITION_DATE;
             assert!(

@@ -952,17 +952,30 @@ fn voided_decision_targets(events: &[LedgerEvent]) -> BTreeSet<EventId> {
 /// DECLARE-side twin of [`live_promote_ids`], mirroring `journey_view`'s own live-tranche enumeration
 /// (`defensive/mod.rs`, the same `void_targets` filter over `DeclareTranche` payloads).
 ///
-/// Unlike a promote, a declare needs no `state`-side in-force check: a non-voided `DeclareTranche` IS in
-/// force by construction (it seeds a `$0`-basis lot; there is no `promoted_origins`-shaped resolver
-/// membership it could fail). A tranche with a live promote appears in BOTH id sets — deliberately: the
-/// promote diff isolates the `$0`→floor step, the declare diff isolates the whole tranche's existence,
-/// and [`flagged_years`] unions them.
-fn live_declare_ids(events: &[LedgerEvent]) -> Vec<EventId> {
+/// A tranche with a live promote appears in BOTH id sets — deliberately: the promote diff isolates the
+/// `$0`→floor step, the declare diff isolates the whole tranche's existence, and [`flagged_years`] unions
+/// them.
+///
+/// ★ whole-branch r2 tax M-1 — why the `promoted_origins` escape hatch. [`voided_decision_targets`] is
+/// the NAIVE "some `VoidDecisionEvent` names this id" membership, but the resolver does NOT always apply
+/// such a void: `project::resolve.rs`'s BG-D9 deferred adjudication makes a void of a `DeclareTranche`
+/// **INERT** (a `DecisionConflict` blocker, target left in force) whenever a LIVE `PromoteTranche` still
+/// references it — "void the promote to revert the tranche to $0, or void both to drop it". Filtering on
+/// the naive set alone therefore dropped a still-in-force, still-PROMOTED tranche from the DFW-D11 export
+/// union, silently shortening the year set on the exact shape the wizard exists to serve. `state`'s own
+/// `promoted_origins` is the resolver's settled verdict on that adjudication (`project/fold.rs`, keyed by
+/// the promote's TARGET), so `|| state.promoted_origins.contains(&e.id)` re-admits precisely the tranches
+/// whose void the engine refused. The correction can only ADD years, never remove one.
+fn live_declare_ids(events: &[LedgerEvent], state: &LedgerState) -> Vec<EventId> {
     let voided = voided_decision_targets(events);
     events
         .iter()
         .filter_map(|e| match &e.payload {
-            EventPayload::DeclareTranche(_) if !voided.contains(&e.id) => Some(e.id.clone()),
+            EventPayload::DeclareTranche(_)
+                if !voided.contains(&e.id) || state.promoted_origins.contains(&e.id) =>
+            {
+                Some(e.id.clone())
+            }
             _ => None,
         })
         .collect()
@@ -1092,7 +1105,7 @@ pub fn flagged_years(
             current,
         ));
     }
-    for declare_id in live_declare_ids(events) {
+    for declare_id in live_declare_ids(events, state) {
         years.extend(decision_changed_years(
             events,
             prices,
@@ -1102,4 +1115,78 @@ pub fn flagged_years(
         ));
     }
     years
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::{DeclareTranche, VoidDecisionEvent};
+    use time::macros::{date, datetime};
+    use time::UtcOffset;
+
+    fn dec_ev(seq: u64, payload: EventPayload) -> LedgerEvent {
+        LedgerEvent {
+            id: EventId::decision(seq),
+            utc_timestamp: datetime!(2026-01-01 0:00 UTC),
+            original_tz: UtcOffset::UTC,
+            wallet: None,
+            payload,
+        }
+    }
+
+    fn tranche_payload() -> EventPayload {
+        EventPayload::DeclareTranche(DeclareTranche {
+            sat: 40_000_000,
+            wallet: WalletId::SelfCustody { label: "w".into() },
+            window_start: date!(2016 - 01 - 01),
+            window_end: date!(2016 - 03 - 31),
+        })
+    }
+
+    /// ★ whole-branch r2 tax M-1 — the DIRECT (white-box) pin on [`live_declare_ids`]' liveness rule.
+    ///
+    /// [`voided_decision_targets`] is the NAIVE "some `VoidDecisionEvent` NAMES this id" membership, but
+    /// `project::resolve.rs`'s BG-D9 deferred adjudication does NOT apply such a void when a LIVE
+    /// `PromoteTranche` still references the target: the void is INERT (a `DecisionConflict`) and the
+    /// tranche stays IN FORCE. `state.promoted_origins` (`project/fold.rs`, keyed by the promote's TARGET)
+    /// IS that settled verdict, so it — not the naive set — decides membership.
+    ///
+    /// Pinned HERE rather than end-to-end because the two halves of [`flagged_years`]' union happen to
+    /// coincide on this shape: removing the promote in the promote-half's shadow fold un-defers the very
+    /// void, dropping the tranche anyway. That coincidence is a property of the CURRENT resolver, not a
+    /// guarantee — this test holds the declare half's own rule regardless.
+    /// (`promote_cli.rs::flagged_years_keeps_a_promoted_tranche_whose_declare_void_the_engine_made_inert`
+    /// pins the end-to-end year survival off a REAL vault, including that the engine really does hold such
+    /// a tranche in `promoted_origins`.)
+    ///
+    /// Mutation: drop the `|| state.promoted_origins.contains(&e.id)` clause → the first assertion reds.
+    #[test]
+    fn live_declare_ids_keeps_a_tranche_whose_void_the_engine_held_inert() {
+        let tranche = EventId::decision(1);
+        let events = vec![
+            dec_ev(1, tranche_payload()),
+            dec_ev(
+                3,
+                EventPayload::VoidDecisionEvent(VoidDecisionEvent {
+                    target_event_id: tranche.clone(),
+                }),
+            ),
+        ];
+
+        // The engine held the void INERT (a live promote references the tranche) → it is in force.
+        let mut in_force = LedgerState::default();
+        in_force.promoted_origins.insert(tranche.clone());
+        assert_eq!(
+            live_declare_ids(&events, &in_force),
+            vec![tranche.clone()],
+            "a tranche the resolver kept in force must stay in the DFW-D11 export union"
+        );
+
+        // The SAME events with no live promote: the void APPLIES, so the tranche is correctly excluded.
+        let dropped = LedgerState::default();
+        assert!(
+            live_declare_ids(&events, &dropped).is_empty(),
+            "an actually-applied void must still drop its tranche — the fix must not admit everything"
+        );
+    }
 }

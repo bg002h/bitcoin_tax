@@ -1728,6 +1728,119 @@ fn flagged_years_includes_the_prior_year_a_zero_dollar_declare_alone_fixed() {
     );
 }
 
+/// ★ whole-branch r2 tax M-1 — a promoted tranche whose declare-void the ENGINE made INERT must stay in
+/// the DFW-D11 export union. `project::resolve.rs`'s BG-D9 deferred adjudication holds a `DeclareTranche`
+/// IN FORCE (raising a `DecisionConflict` instead of applying the void) whenever a LIVE `PromoteTranche`
+/// still references it — "void the promote to revert the tranche to $0, or void both to drop it". But
+/// `conservative::live_declare_ids` filtered on the NAIVE `voided_decision_targets` membership ("some
+/// `VoidDecisionEvent` NAMES this id"), so it dropped exactly that still-in-force, still-PROMOTED tranche
+/// from the declare half of the union.
+///
+/// This is the END-TO-END half of the pin, off a REAL vault: it establishes that the engine genuinely
+/// DOES hold such a tranche in `state.promoted_origins` (the premise the fix reads), and that 2024
+/// survives into `flagged_years`. It is deliberately NOT the mutation-killer: on this shape the two
+/// halves of the union COINCIDE, because the promote-half's shadow fold removes the promote, which
+/// un-defers the very void and drops the tranche anyway — so reverting `live_declare_ids` to the naive
+/// filter leaves 2024 flagged by the promote half. That coincidence is a property of the CURRENT resolver,
+/// not a guarantee, which is exactly why the declare half's own rule is pinned directly by the white-box
+/// `btctax_core::conservative::tests::live_declare_ids_keeps_a_tranche_whose_void_the_engine_held_inert`
+/// (mutation-verified there).
+///
+/// The void is a hand-crafted raw event on purpose: `reconcile void` REFUSES this shape at record time
+/// (`reconcile.rs:~248`), so it is not product-reachable — the same "pinned anyway, as defense in depth"
+/// precedent as
+/// `declare_tranche_cli.rs::handcrafted_void_of_effective_alloc_then_tranche_admits_and_survives_via_path_a`.
+/// The net-zero disposal (gross $500, fee $500) keeps the fixture's filed numbers trivially stable:
+/// `conservative_promote::clamped_leg_basis` bounds the estimate at `net − documented = $0`, so the leg
+/// files $0 basis / $0 gain with or without the promote.
+#[test]
+fn flagged_years_keeps_a_promoted_tranche_whose_declare_void_the_engine_made_inert() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    // A 2024 sale whose fee consumes the whole gross → NET proceeds $0.
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        append_import_batch(
+            s.conn(),
+            &[imp(
+                "INERT-VOID-SELL",
+                datetime!(2024-06-01 0:00 UTC),
+                EventPayload::Dispose(Dispose {
+                    sat: 40_000_000,
+                    usd_proceeds: dec!(500),
+                    fee_usd: dec!(500),
+                    kind: DisposeKind::Sell,
+                }),
+            )],
+        )
+        .unwrap();
+        s.save().unwrap();
+    } // the VaultLock drops HERE — `declare_tranche` opens its OWN session.
+
+    let tranche_id = cmd::tranche::declare_tranche(
+        &vault,
+        &pp(),
+        40_000_000,
+        wallet(),
+        date!(2016 - 01 - 01),
+        date!(2016 - 03 - 31),
+        now(),
+    )
+    .unwrap();
+    cmd::promote::promote_tranche(
+        &vault,
+        &pp(),
+        &tranche_id.canonical(),
+        ProvenanceKind::Purchase,
+        "cash P2P purchase, no records; window bounded on-chain".into(),
+        Some(PROMOTE_ACK_PHRASE),
+        now(),
+    )
+    .unwrap();
+
+    // The hand-crafted void of the DECLARE (the CLI verb refuses this shape at record time).
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        append_decision(
+            s.conn(),
+            EventPayload::VoidDecisionEvent(btctax_core::event::VoidDecisionEvent {
+                target_event_id: tranche_id.clone(),
+            }),
+            now(),
+            UtcOffset::UTC,
+            None,
+        )
+        .unwrap();
+        s.save().unwrap();
+    }
+
+    let session = Session::open(&vault, &pp()).unwrap();
+    let (events, state, cfg) = session.load_events_and_project().unwrap();
+    let tables = btctax_adapters::BundledTaxTables::load();
+
+    // The ENGINE's verdict: the void is INERT — the promote is live, so the tranche stays in force.
+    assert!(
+        state.promoted_origins.contains(&tranche_id),
+        "fixture: the engine must hold the voided tranche IN FORCE via its live promote (an inert void), \
+         else this KAT is testing nothing"
+    );
+
+    let years = flagged_years(&events, &state, session.prices(), &tables, &cfg, 2026);
+    assert!(
+        years.contains(&2024),
+        "a tranche the ENGINE holds in force must stay in the export year-set union — a naive \
+         'some void names it' filter would silently shorten the packet set: {years:?}"
+    );
+    let years = flagged_years(&events, &state, session.prices(), &tables, &cfg, 2026);
+    assert!(
+        years.contains(&2024),
+        "a tranche the ENGINE holds in force must stay in the export year-set union — a naive \
+         'some void names it' filter would silently shorten the packet set: {years:?}"
+    );
+}
+
 /// `plan_export` refuses when the ledger is pseudo-active (DFW-D11) — this composed export step NEVER
 /// prompts for an attestation override, unlike the single-year `export-irs-pdf`/`export-snapshot` CLI
 /// path.
