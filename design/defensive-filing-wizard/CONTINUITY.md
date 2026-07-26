@@ -43,6 +43,26 @@ Point the reviewers at the FOLLOWUPS.md P-C items to confirm they're discharged.
   then per-phase-authorized merge to `main`. (RELEASE = a SEPARATE future user call after the whole feature is green+merged.)
 - Remaining ownerless residue (copy pass / whole-branch): FOLLOWUPS.md "Copy pass" section ({:?} debug rows, [x]/SUPPRESSED copy, plan-doc drift).
 
+## ★★ USER PRE-AUTHORIZATION (2026-07-26, durable — carries across sessions)
+**"You may push, merge, tag & release and do crates when ready."** So, WITHOUT re-asking, once the feature is
+green: push → **merge to `main`** → **bump + tag** → **GitHub release** → **`cargo publish --workspace`** (all 10 crates).
+- **"When ready" = the gates, unchanged:** P-C gate 0C/0I → Task 10 built + reviewed → P-D gate: full `make check`
+  + the CI-only jobs (fmt / msrv-1.88 / net-isolation / pii-scan / examples+man drift / forms-census) + `make docs`
+  + the **whole-branch two-lens (tax+arch, OPUS) review to 0C/0I**. The authorization removes the ASK, not the gates.
+- **Version:** v0.9.0 → **v0.10.0** (minor: new feature, pre-1.0). Bump the workspace + all 10 publishable crates; keep
+  `Cargo.lock` updated (do NOT pass `--locked` on the bump — that broke the v0.9.0 run).
+- **Publish lessons (from v0.7.0/0.9.0):** `cargo publish --workspace` can internal-error at the tail after 9/10 —
+  resume with `-p <crate>`; verify the index with `grep -c` (not `grep | head`); new crates need a publish-new token.
+- **★ CREDENTIAL DEPENDENCY:** publishing needs the crates.io token in `~/.cargo/credentials.toml`. The user was asked to
+  REVOKE the temp v0.9.0 token — if they did, `cargo publish` will 401 and the user must supply a fresh token. Do not
+  treat a 401 as a build failure; surface it and stop. **After a successful publish, remind them to revoke again.**
+
+## ★ Session/model note (2026-07-26)
+This run finished on **Opus 4.8 (1M)** — the session model. The user intends to start the NEXT session on **Opus 5**
+(no "opus 5" subagent selector is exposed to the controller; subagents take `model: opus` and follow the harness mapping,
+so switching the SESSION model is the way to get it). If a fresh Opus-5 session picks this up, a re-run of the
+whole-branch two-lens review on the new model is a cheap, high-value second opinion before merge.
+
 ## Model routing + user directives (STANDING — do not deviate)
 - **Sonnet 5 implementers** by default (plan is exhaustively specified). Escalate to Opus on BLOCKED.
 - **Opus reviews** for correctness/tax/write-path/byte-parity tasks + ALL phase gates + the whole-branch review; Sonnet 5 ok for
