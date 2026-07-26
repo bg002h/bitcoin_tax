@@ -3,6 +3,7 @@
 //! (spec §11). The library is I/O-explicit and deterministic; the binary (`main.rs`) is a thin clap
 //! dispatch. PRIVACY: tests use only temp vaults + synthetic fixtures; no real user file is ever read.
 pub mod bulk_estimated;
+pub mod chokepoint;
 pub mod cli;
 pub mod cmd;
 pub mod config;
@@ -28,6 +29,12 @@ pub use cmd::tranche::guard_allocation_vs_tranche;
 // Re-exported at the crate root mirroring `ATTEST_PHRASE` (below): a plain, distinct consent-phrase
 // constant, not a `cmd::`-scoped session/lock fn, so it belongs beside the other top-level phrase gates.
 pub use cmd::promote::PROMOTE_ACK_PHRASE;
+// Re-exported at the crate root (Defensive Filing Wizard Task 9) alongside `PROMOTE_ACK_PHRASE`: the
+// TUI Promote flow (`btctax-tui-edit`'s `edit/promote_flow.rs`) needs `ProvenanceKind::Purchase` to call
+// `plan_promote` WITHOUT the `cmd::` token its KAT-G1 source gate forbids in non-test code, and
+// `PROVENANCE_TEXT` to show the filer what BG-D5 attestation is being made on their behalf. Both are
+// plain data (a `Copy` enum; a `&'static str`) — no `Session`, no lock, no I/O.
+pub use cmd::promote::{ProvenanceKind, PROVENANCE_TEXT};
 // Re-exported at the crate root so the TUI export path (`btctax-tui::export::do_export`) can call the
 // BG-D8 completeness gate WITHOUT the `cmd::` token its KAT-E10 source gate forbids in non-test code
 // (Approach-B Task 17). Like `guard_allocation_vs_tranche` above, this is a PURE
@@ -35,6 +42,48 @@ pub use cmd::promote::PROMOTE_ACK_PHRASE;
 // the gate's intent (keep session-lifecycle `cmd::` fns out of the held-session viewer) is honored, not
 // evaded. Any FUTURE addition here must be equally pure (do NOT re-export a session-opening fn).
 pub use cmd::admin::promote_export_gate;
+// Re-exported at the crate root (Defensive Filing Wizard Task 3, ★ arch-n-1) so a future TUI export
+// surface (`btctax-tui-edit`'s `persist.rs`, Task 10) can name `IrsPdfReport` WITHOUT the `cmd::` token
+// its KAT-G1 source gate forbids in non-test code (mirrors `promote_export_gate` above). `IrsPdfReport`
+// is a plain data struct (no `Session`, no lock, no I/O) — the gate's intent is honored, not evaded.
+pub use cmd::admin::IrsPdfReport;
+// Re-exported at the crate root (Defensive Filing Wizard Task 8, ★ C-3) so the TUI Declare flow
+// (`btctax-tui-edit`'s `edit/declare_flow.rs` + `edit/persist.rs`) can drive the DECLARE chokepoint
+// WITHOUT the `cmd::` token its KAT-G1 source gate forbids in non-test code — mirrors
+// `promote_export_gate`/`IrsPdfReport` above. `plan_declare` is a pure `(events, prices, cfg, ...) ->
+// Result` planner (no `Session`, no lock, no I/O); `DeclarePlan`/`Refusal` are plain data types.
+// `apply_declare` DOES touch the mutation surface (`append_decision` + `session.save()`) — it is
+// re-exported here ONLY so `edit/persist.rs`'s `persist_declare_tranche` wrapper can reach it (KAT-G1's
+// `persist_only_tokens` confines the LITERAL `apply_declare(` call token to that one file crate-wide;
+// re-exporting the name itself does not weaken that confinement — the gate scans call sites, not
+// import lists). Any FUTURE addition here must be equally justified (do NOT re-export a second
+// session-opening or unconfined-write fn).
+pub use chokepoint::{apply_declare, plan_declare, DeclarePlan, Refusal};
+// Re-exported at the crate root (Defensive Filing Wizard Task 9, ★ C-3) so the TUI Promote flow
+// (`btctax-tui-edit`'s `edit/promote_flow.rs` + `edit/persist.rs`) can drive the PROMOTE chokepoint
+// WITHOUT the `cmd::` token its KAT-G1 source gate forbids in non-test code — mirrors the
+// `plan_declare`/`DeclarePlan`/`apply_declare` re-export directly above. `plan_promote`/`render_consent`
+// are pure `(events, ...) -> Result` / `(&PromotePlan) -> String` fns (no `Session`, no lock, no I/O);
+// `PromotePlan` is a plain data type; `Refusal` is ALREADY re-exported above (the SAME shared enum both
+// `plan_declare` and `plan_promote` return). `apply_promote` DOES touch the mutation surface — it is
+// re-exported here ONLY so `edit/persist.rs`'s `persist_promote_tranche` wrapper can reach it (KAT-G1's
+// `persist_only_tokens` confines the LITERAL `apply_promote(` call token to that one file crate-wide;
+// re-exporting the name itself does not weaken that confinement — the gate scans call sites, not import
+// lists). Any FUTURE addition here must be equally justified (do NOT re-export a second session-opening
+// or unconfined-write fn).
+pub use chokepoint::{apply_promote, plan_promote, render_consent, PromotePlan};
+// Re-exported at the crate root (Defensive Filing Wizard Task 10, ★ C-3) so the TUI's export step
+// (`btctax-tui-edit`'s `edit/persist.rs`, the ONLY module permitted to name `apply_export(` — its own
+// KAT-G1 mechanized gate confines the LITERAL call token there) can drive the EXPORT chokepoint WITHOUT
+// the `cmd::` token its source gate forbids in non-test code — mirrors the `plan_declare`/`apply_declare`
+// and `plan_promote`/`apply_promote` re-exports above. `plan_export` is a pure `(events, state, ...) ->
+// Result` planner (no `Session`, no lock, no I/O); `ExportPlan` is a plain data type. `apply_export` DOES
+// touch the export write surface (file writes via `export_irs_pdf_from_session`) — it is re-exported here
+// ONLY so `edit/persist.rs`'s `persist_defensive_export` wrapper can reach it; re-exporting the name
+// itself does not weaken KAT-G1's confinement (the gate scans call sites, not import lists). Any FUTURE
+// addition here must be equally justified (do NOT re-export a second session-opening or unconfined-write
+// fn).
+pub use chokepoint::{apply_export, plan_export, ExportOutcome, ExportOutcomes, ExportPlan};
 pub use config::CliConfig;
 pub use session::{
     BulkFilter, BulkIncomeFilter, BulkIncomePlan, BulkIncomeRow, BulkLinkPlan, BulkLinkRow,

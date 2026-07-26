@@ -314,3 +314,33 @@ fn every_census_form_demonstrated_in_j6() {
         "J6's full-return packet stems must be EXACTLY the 15 census keys — got {names:?}"
     );
 }
+
+/// ★ Drift guard (whole-branch review → the owner-ratified era decision): the Defensive Filing Wizard's
+/// NEWEST acquisition-era preset must reach the newest tax year btctax can actually FILE.
+///
+/// `defensive::era::era_window` is deliberately clock-free, so its upper bound is a **literal**
+/// (`Y2025Onward` ends 2025-12-31) chosen to match `SUPPORTED_YEARS`' newest year. Nothing in the type
+/// system couples the two: when a new filing year is bundled, that literal must move with it, or a filer
+/// whose shortfall sits in the new year has NO reachable preset and can only get a truthful window by
+/// nudging it a day at a time (~150+ keypresses). This test IS the coupling.
+///
+/// Lives here because `btctax-forms` is the crate that can see BOTH `SUPPORTED_YEARS` (its own) and
+/// `btctax_core::defensive::era` (its dependency) — core must not depend on forms.
+#[test]
+fn the_newest_era_preset_reaches_the_newest_filable_tax_year() {
+    let newest_filable = *btctax_forms::SUPPORTED_YEARS
+        .iter()
+        .max()
+        .expect("SUPPORTED_YEARS is non-empty");
+    let newest_preset_end = btctax_core::defensive::era::ALL_PRESETS
+        .iter()
+        .map(|p| btctax_core::defensive::era::era_window(*p).1)
+        .max()
+        .expect("ALL_PRESETS is non-empty");
+    assert!(
+        newest_preset_end.year() >= newest_filable,
+        "the newest era preset ends {newest_preset_end}, but btctax can file TY{newest_filable}: a filer \
+         with a TY{newest_filable} shortfall has no reachable acquisition-era preset. Extend the newest \
+         bucket in crates/btctax-core/src/defensive/era.rs (and update its defensive_era.rs KATs)."
+    );
+}

@@ -45,6 +45,11 @@ pub enum EditorScreen {
     Unlock,
     Locked,
     Browse,
+    /// The Defensive Filing Wizard dashboard (Task 7, Phase P-B): a READ-ONLY, derived render of
+    /// `btctax_core::defensive::journey_view` over the Browse screen's own snapshot. Entered via
+    /// `EditorApp::open_defensive_filing` (the DFW-D6 pseudo-active gate); its own per-screen state
+    /// lives in `EditorApp::defensive_dashboard`.
+    DefensiveFiling,
 }
 
 /// Top-level editor application state.
@@ -115,6 +120,24 @@ pub struct EditorApp {
     /// with the other flow gates (modals → flows → this → Browse), so `q`/Esc never fall through
     /// to a quit arm while it is blocking. At most one flow is `Some` at a time (the invariant).
     pub tax_inputs_form: Option<TaxInputsFormState>,
+    /// The Defensive Filing Wizard dashboard's own per-screen state (Task 7, Phase P-B). `Some` while
+    /// `screen == EditorScreen::DefensiveFiling` — set by `open_defensive_filing`, which computes the
+    /// ONE `journey_view` this state carries. READ-ONLY (C-3): nothing here is ever written to a
+    /// chokepoint; it is a derived read plus a pure UI cursor, exactly like every other screen's state.
+    pub defensive_dashboard: Option<crate::defensive_dashboard::DefensiveDashboardState>,
+    /// The Declare flow's own state (Task 8, Phase P-C). `Some` while the flow is open — opened by
+    /// `main.rs`'s `open_declare_flow` from a `DashboardIntent::Declare` on the dashboard. Dispatch
+    /// order: declare_flow (flow layer) → ... (mirrors every other `*_flow` field). C-3: this field is
+    /// mutated by the flow's own key handler ONLY — the WRITE it eventually triggers goes through
+    /// `edit::persist::persist_declare_tranche`, never a direct `chokepoint::apply_declare` call.
+    pub declare_flow: Option<crate::edit::declare_flow::DeclareFlowState>,
+    /// The Promote flow's own state (Task 9, Phase P-C). `Some` while the flow is open — opened by
+    /// `main.rs`'s `open_promote_flow` from a `DashboardIntent::Promote` on the dashboard. Dispatch
+    /// order: promote_flow (flow layer) → ... (mirrors every other `*_flow` field, incl. `declare_flow`
+    /// directly above). C-3: this field is mutated by the flow's own key handler ONLY — the WRITE it
+    /// eventually triggers goes through `edit::persist::persist_promote_tranche`, never a direct
+    /// `chokepoint::apply_promote` call.
+    pub promote_flow: Option<crate::edit::promote_flow::PromoteFlowState>,
     /// The per-mutation confirmation modal. `Some` while awaiting Enter/Esc.
     ///
     /// Modal dispatch precedes form and screen dispatch (the R0-M4 lesson —
@@ -308,6 +331,9 @@ impl EditorApp {
             forms_state: TableState::default(),
             profile_form: None,
             tax_inputs_form: None,
+            defensive_dashboard: None,
+            declare_flow: None,
+            promote_flow: None,
             mutation_modal: None,
             classify_inbound_flow: None,
             classify_inbound_modal: None,
@@ -391,6 +417,101 @@ impl EditorApp {
                 self.unlock.error = Some(msg);
             }
         }
+    }
+
+    /// M-4 (SPEC DFW-D2 "Plan→apply staleness"): count of `EditorApp`'s own `*_flow` `Option` fields
+    /// currently `Some` — the load-bearing quantity behind the "one-flow" invariant every flow field's
+    /// own doc comment already claims informally. `pub(crate)` so the Task 7 dashboard's own tests (in
+    /// the sibling `defensive_dashboard` module) can exercise the debug assertion below directly.
+    pub(crate) fn open_flow_count(&self) -> usize {
+        [
+            self.classify_inbound_flow.is_some(),
+            self.reclassify_outflow_flow.is_some(),
+            self.reclassify_income_flow.is_some(),
+            self.set_fmv_flow.is_some(),
+            self.void_flow.is_some(),
+            self.select_lots_flow.is_some(),
+            self.set_donation_details_flow.is_some(),
+            self.link_transfer_flow.is_some(),
+            self.classify_raw_flow.is_some(),
+            self.safe_harbor_attest_flow.is_some(),
+            self.resolve_conflict_flow.is_some(),
+            self.optimize_accept_flow.is_some(),
+            self.safe_harbor_allocate_flow.is_some(),
+            self.bulk_link_flow.is_some(),
+            self.bulk_sti_flow.is_some(),
+            self.bulk_income_flow.is_some(),
+            self.bulk_resolve_flow.is_some(),
+            self.bulk_void_flow.is_some(),
+            self.bulk_reclassify_outflow_flow.is_some(),
+            self.match_self_transfers_flow.is_some(),
+            self.method_election_flow.is_some(),
+            self.declare_flow.is_some(),
+            self.promote_flow.is_some(),
+        ]
+        .into_iter()
+        .filter(|open| *open)
+        .count()
+    }
+
+    /// DFW-D6 dashboard entry gate: refuse (with routing guidance, never a silent no-op) when the
+    /// projected state is pseudo-active — a defensive-filing journey over synthetic (pseudo-reconciled)
+    /// estimates is incoherent (a Phase-B `SelfTransferMine{$0}` default can silently clear a REAL
+    /// shortfall this feature exists to surface). Mirrors `journey_view`'s own
+    /// `debug_assert!(!state.pseudo_active())` precondition — THIS is the enforcement point that core
+    /// doc comment names. A missing snapshot (still on Unlock/Locked) is a silent no-op: there is
+    /// nothing yet to derive a view from, and this is unreachable via the real Browse-only entry path.
+    ///
+    /// On success: the M-4 one-flow debug assertion (no other `*_flow` may be mid-transaction when the
+    /// dashboard's own `journey_view` snapshot is taken — a later flow mutation would immediately stale
+    /// it), then computes `journey_view` ONCE from the current snapshot and transitions to
+    /// `EditorScreen::DefensiveFiling`.
+    pub fn open_defensive_filing(&mut self) {
+        // ★ arch-Minor2: the residue-latch guard ~26/35 sibling `open_*` fns check FIRST (mirrors
+        // `open_profile_form`/`open_void_flow` in main.rs) — while a failed save's residue is live, NO
+        // mutating opener may proceed (the dashboard itself is read-only, but it is the entry point to
+        // the Declare/Promote WRITE flows Tasks 8-9 build, so it must refuse here too).
+        if let Some(s) = self.residue_latch_status() {
+            self.status = Some(s);
+            return;
+        }
+        let Some(snap) = self.snapshot.as_ref() else {
+            return;
+        };
+        if snap.state.pseudo_active() {
+            self.status = Some(
+                "Defensive Filing is unavailable: pseudo-reconcile synthetic defaults are contributing \
+                 to this projection, which could silently mask a real shortfall this journey exists to \
+                 surface. Resolve or approve the pending defaults first ('P' to approve here, or turn \
+                 pseudo mode off via the CLI's reconcile command), then re-enter."
+                    .to_string(),
+            );
+            return;
+        }
+
+        // ★ whole-branch arch N-1: `== 0` — the dashboard opens no flow field of its own, so `<= 1`
+        // permitted an unrelated flow being mid-transaction while `journey_view`'s snapshot is taken
+        // (which a later flow mutation would immediately stale). Entry is Browse-only; nothing is open.
+        debug_assert_eq!(
+            self.open_flow_count(),
+            0,
+            "one-flow invariant violated entering DefensiveFiling: another flow is already open"
+        );
+
+        let cfg = snap.cli_config.to_projection();
+        let current = self.clock.now().year();
+        let view = btctax_core::defensive::journey_view(
+            &snap.events,
+            &snap.state,
+            &snap.prices,
+            &snap.tables,
+            &cfg,
+            current,
+        );
+        self.defensive_dashboard = Some(crate::defensive_dashboard::DefensiveDashboardState::new(
+            view,
+        ));
+        self.screen = EditorScreen::DefensiveFiling;
     }
 
     /// `BTCTAX_PASSPHRASE` fast-path: open directly when the env var is set.

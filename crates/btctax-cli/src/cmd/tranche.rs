@@ -10,13 +10,12 @@
 
 use crate::{CliError, Session};
 use btctax_core::conventions::TRANSITION_DATE;
-use btctax_core::event::DeclareTranche;
-use btctax_core::persistence::{append_decision, load_all};
+use btctax_core::persistence::load_all;
+use btctax_core::tranche_guard::{in_force_allocation_exists, pre2025_tranche_exists};
 use btctax_core::{EventId, EventPayload, LedgerEvent, Sat, TaxDate, WalletId};
 use btctax_store::Passphrase;
-use std::collections::BTreeSet;
 use std::path::Path;
-use time::{OffsetDateTime, UtcOffset};
+use time::OffsetDateTime;
 
 /// Tranche-side hedge (tax r2 N-3): the user is recording a tranche and is blocked by an allocation, so
 /// the finality caveat is about that ALLOCATION. A filed safe-harbor allocation cannot be silently unwound.
@@ -30,51 +29,6 @@ const ALLOCATION_IS_FINAL_HINT: &str = "revisit the in-app safe-harbor allocatio
 const TRANCHE_IS_FINAL_HINT: &str = "Void the tranche first (`reconcile void <decision-ref>`); if you \
     have already filed the tranche's basis ($0 or a promoted floor), unallocated pre-2025 units are a \
     facts-and-circumstances matter for a professional";
-
-/// The set of event ids targeted by any `VoidDecisionEvent` in the log — the record-time "voided" view.
-///
-/// Mirrors `resolve.rs` pass-1 step 1a and the attest site's own `voided` set: a decision is not-in-force
-/// once a `VoidDecisionEvent` names it. (A void of a `SafeHarborAllocation` is resolver-deferred to Task 12
-/// for its EFFECTIVE-vs-inert semantics, but for THIS friendly record-time layer the presence of the void
-/// is enough — the engine backstop is the guarantee behind it.)
-fn void_targets(events: &[LedgerEvent]) -> BTreeSet<EventId> {
-    events
-        .iter()
-        .filter_map(|e| match &e.payload {
-            EventPayload::VoidDecisionEvent(v) => Some(v.target_event_id.clone()),
-            _ => None,
-        })
-        .collect()
-}
-
-/// True iff an IN-FORCE (non-voided) `SafeHarborAllocation` exists — **effective OR inert** (arch r2
-/// New-3: an inert allocation can be flipped effective, so it too collides with a new pre-2025 tranche).
-/// Deliberately NOT scoped to effective allocations (that would let a pre-2025 tranche slip in beside an
-/// inert one and silently discard it once the allocation later goes effective).
-pub fn in_force_allocation_exists(events: &[LedgerEvent]) -> bool {
-    // In force = a NON-voided `SafeHarborAllocation` (present, effective OR inert — an inert one can be
-    // flipped effective, arch r2 New-3). A voided allocation is NOT in force here: the ENGINE resolves the
-    // void (T16 review r2 / I-1) — a void of an inert allocation retires it (§7.4 retirement pass), and a
-    // void of an effective allocation raises a Hard `DecisionConflict` there; either way the record-time
-    // predicate correctly ADMITS the tranche and the engine backstop is the guarantee. (This replaces the
-    // r1 blocker-absence "effective" mirror, which coupled badly with the backstop's blocker retraction.)
-    let voided = void_targets(events);
-    events.iter().any(|e| {
-        matches!(e.payload, EventPayload::SafeHarborAllocation(_)) && !voided.contains(&e.id)
-    })
-}
-
-/// True iff a non-voided PRE-2025 (`window_end < TRANSITION_DATE`) `DeclareTranche` exists — the only
-/// tranche that collides with the pre-2025 Universal residue a `SafeHarborAllocation` reconstructs
-/// (tax r1 I-2). A `window_end ≥ 2025` tranche folds into a post-transition per-wallet pool and never
-/// touches Rev-Proc-2024-28, so it does NOT block an allocation.
-pub fn pre2025_tranche_exists(events: &[LedgerEvent]) -> bool {
-    let voided = void_targets(events);
-    events.iter().any(|e| {
-        matches!(&e.payload, EventPayload::DeclareTranche(t) if t.window_end < TRANSITION_DATE)
-            && !voided.contains(&e.id)
-    })
-}
 
 /// P8 Nit: is `wallet` referenced by any prior event — an import's `wallet`, or a prior tranche
 /// declaration's target wallet? A `false` result means `--wallet` likely has a TYPO. This drives a WARN
@@ -104,7 +58,10 @@ pub fn guard_allocation_vs_tranche(events: &[LedgerEvent]) -> Result<(), CliErro
 /// TRANSITION-side guard for the tranche record path: refuse recording a PRE-2025 tranche while an
 /// in-force allocation exists. A `window_end ≥ 2025` tranche is NOT blocked (records cleanly beside an
 /// effective allocation — else P7's mandatory disclosure is foreclosed for the mixed-records filer).
-fn guard_tranche_vs_allocation(
+///
+/// `pub(crate)` (Defensive Filing Wizard Task 2): `crate::chokepoint::plan_declare` also calls this — the
+/// single source of the guard stays HERE (this module), not duplicated into the chokepoint.
+pub(crate) fn guard_tranche_vs_allocation(
     events: &[LedgerEvent],
     window_end: TaxDate,
 ) -> Result<(), CliError> {
@@ -122,6 +79,13 @@ fn guard_tranche_vs_allocation(
 /// `now` is the injected decision creation-time (deterministic in tests). The tranche folds via the
 /// shared `Op::Acquire` path to a lot homed at `window_end`, $0 basis, tagged `EstimatedConservative`.
 /// Record-time guard (D-8): a PRE-2025 tranche is refused while an in-force allocation exists.
+///
+/// Defensive Filing Wizard Task 2: the actual plan/apply PIPELINE now lives in `crate::chokepoint`
+/// (`plan_declare`/`apply_declare`) — a reusable chokepoint a future TUI can drive identically. This
+/// function is a THIN DRIVER over it: `Session::open` → `plan_declare` (passing
+/// `target_shortfall=None` — the CLI free-form path never runs the DFW-D5.2 clearance shadow, mapping a
+/// `Refusal` to a `CliError`) → the phantom-wallet stderr warning (tax-M-3: I/O, not gate logic, so it
+/// stays HERE rather than inside the pure `plan_declare`) → `apply_declare`.
 pub fn declare_tranche(
     vault_path: &Path,
     pp: &Passphrase,
@@ -131,30 +95,28 @@ pub fn declare_tranche(
     window_end: TaxDate,
     now: OffsetDateTime,
 ) -> Result<EventId, CliError> {
-    // Input validation (record-time refuse — no vault access needed).
-    if sat <= 0 {
-        // A `sat <= 0` tranche would bump `stats.sigma_in` by a non-positive amount (fold.rs),
-        // corrupting Σ-conservation; there is no such thing as declaring zero/negative undocumented BTC.
-        return Err(CliError::Usage(format!(
-            "tranche amount must be > 0 sat (got {sat})"
-        )));
-    }
-    if window_start > window_end {
-        return Err(CliError::Usage(format!(
-            "tranche window_start ({window_start}) must be <= window_end ({window_end})"
-        )));
-    }
-
     let mut session = Session::open(vault_path, pp)?;
     let events = load_all(session.conn())?;
-    // Guard FIRST (arch N-1), before the phantom-wallet warning, so a REFUSED declaration never emits the
-    // misleading "stranded lot" note. A pre-2025 tranche is refused while a NON-voided allocation is on
-    // file; a voided allocation is resolved by the engine (T16 review r2 / I-1), so no projection is needed
-    // here.
-    guard_tranche_vs_allocation(&events, window_end)?;
+    let cfg = session.config()?.to_projection();
+
+    let plan = crate::chokepoint::plan_declare(
+        &events,
+        session.prices(),
+        &cfg,
+        sat,
+        wallet.clone(),
+        window_start,
+        window_end,
+        None,
+        now,
+    )
+    .map_err(CliError::from)?;
+
     // The declaration WILL be recorded now — warn (never refuse) on a `--wallet` that no prior event
     // references (a likely typo that strands the tranche lot in a phantom wallet; it still files at its
-    // conservative basis).
+    // conservative basis). tax-M-3: this is I/O, not gate logic, so it stays in the driver, AFTER
+    // `plan_declare` succeeds — a REFUSED declaration never emits the misleading "stranded lot" note
+    // (arch N-1, preserved: the shipped verb warned only once the guard had already admitted).
     if !wallet_is_known(&events, &wallet) {
         eprintln!(
             "warning: --wallet {} has no prior events in this vault; if this is a typo the conservative \
@@ -163,13 +125,6 @@ pub fn declare_tranche(
             crate::render::wallet_label(&wallet)
         );
     }
-    let payload = EventPayload::DeclareTranche(DeclareTranche {
-        sat,
-        wallet,
-        window_start,
-        window_end,
-    });
-    let id = append_decision(session.conn(), payload, now, UtcOffset::UTC, None)?;
-    session.save()?;
-    Ok(id)
+
+    crate::chokepoint::apply_declare(&mut session, plan, now)
 }

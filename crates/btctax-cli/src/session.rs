@@ -711,7 +711,7 @@ impl Session {
         // flow entirely, mirroring the record-time allocation guard: the CLI allocate path already refuses
         // via `guard_allocation_vs_tranche` before reaching here, and the TUI opener surfaces this Err as
         // its pre-flight status rather than showing a misleading residue.
-        if crate::cmd::tranche::pre2025_tranche_exists(&all) {
+        if btctax_core::tranche_guard::pre2025_tranche_exists(&all) {
             return Err(CliError::Usage(
                 "cannot open the safe-harbor allocate flow: a pre-2025 conservative-filing tranche ($0 \
                  or a promoted floor, EstimatedConservative) is on file — v1 makes a tranche and a \

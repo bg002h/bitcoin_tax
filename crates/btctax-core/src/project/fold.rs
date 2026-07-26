@@ -11,7 +11,7 @@ use crate::project::resolve::{sort_canonical, Eff, ElectionRec, Op, Resolution};
 use crate::project::transition;
 use crate::state::{
     BlockerKind, Disposal, DisposalLeg, FoldStats, GiftZone, IncomeRecord, LedgerState, Lot,
-    PendingLeg, PendingTransfer, Removal, RemovalKind, RemovalLeg, Term,
+    PendingLeg, PendingTransfer, Removal, RemovalKind, RemovalLeg, ShortfallRecord, Term,
 };
 use crate::{FeeTreatment, LotMethod, ProjectionConfig};
 use std::collections::BTreeMap;
@@ -373,6 +373,7 @@ fn consume_fee(
     config: &ProjectionConfig,
     prices: &dyn PriceProvider,
     date: TaxDate,
+    wallet: &crate::identity::WalletId,
     stats: &mut FoldStats,
     st: &mut LedgerState,
     ev: &EventId,
@@ -389,6 +390,15 @@ fn consume_fee(
             Some(ev.clone()),
             format!("self-transfer/gift fee short by {shortfall} sat"),
         );
+        // Defensive Filing Wizard Task 5 (arch-m-new-2): the fee-side sat-carrying site — a PURE-fee
+        // short (principal fully covered) has fee_sat == short_sat once aggregated.
+        st.shortfalls.push(ShortfallRecord {
+            event: ev.clone(),
+            wallet: Some(wallet.clone()),
+            date,
+            principal_sat: 0,
+            fee_sat: shortfall,
+        });
     }
     stats.fee_sats_consumed += consumed.iter().map(|c| c.sat).sum::<Sat>(); // sole FR9 home
     match config.self_transfer_fee {
@@ -711,6 +721,14 @@ pub(crate) fn fold_event(
                     Some(eff.id.clone()),
                     format!("dispose short by {shortfall} sat"),
                 );
+                // Defensive Filing Wizard Task 5 (arch-m-new-2): the principal-side sat-carrying site.
+                st.shortfalls.push(ShortfallRecord {
+                    event: eff.id.clone(),
+                    wallet: Some(wallet.clone()),
+                    date,
+                    principal_sat: shortfall,
+                    fee_sat: 0,
+                });
             }
             if !consumed.is_empty() {
                 let net = round_cents(*proceeds - *fee_usd); // TP2: disposition fee reduces proceeds
@@ -728,6 +746,7 @@ pub(crate) fn fold_event(
                     ctx.config,
                     prices,
                     date,
+                    &wallet,
                     stats,
                     st,
                     &eff.id,
@@ -832,6 +851,16 @@ pub(crate) fn fold_event(
                     Some(eff.id.clone()),
                     format!("pending out short by {shortfall} sat"),
                 );
+                // Defensive Filing Wizard Task 5 (arch-m-new-2): PendingOut draws principal+fee in ONE
+                // combined FIFO need (`total_sat`) — the shortfall is recorded as principal_sat (there is
+                // no separate fee-only draw to attribute it to, unlike Dispose/SelfTransfer/GiftOut/Donate).
+                st.shortfalls.push(ShortfallRecord {
+                    event: eff.id.clone(),
+                    wallet: Some(wallet.clone()),
+                    date,
+                    principal_sat: shortfall,
+                    fee_sat: 0,
+                });
             }
             let legs: Vec<PendingLeg> = consumed
                 .iter()
@@ -877,6 +906,14 @@ pub(crate) fn fold_event(
                     Some(eff.id.clone()),
                     format!("self transfer short by {shortfall} sat"),
                 );
+                // Defensive Filing Wizard Task 5 (arch-m-new-2): the principal-side sat-carrying site.
+                st.shortfalls.push(ShortfallRecord {
+                    event: eff.id.clone(),
+                    wallet: Some(wallet.clone()),
+                    date,
+                    principal_sat: shortfall,
+                    fee_sat: 0,
+                });
             }
             // Relocate consumed fragments to the destination pool: carry basis, HP, donor_acquired_at.
             // Non-taxable (TP7): no Disposal or Removal records. basis_source = CarriedFromTransfer.
@@ -920,6 +957,7 @@ pub(crate) fn fold_event(
                 ctx.config,
                 prices,
                 date,
+                &wallet,
                 stats,
                 st,
                 &eff.id,
@@ -1197,6 +1235,14 @@ pub(crate) fn fold_event(
                     Some(eff.id.clone()),
                     format!("gift out short by {shortfall} sat"),
                 );
+                // Defensive Filing Wizard Task 5 (arch-m-new-2): the principal-side sat-carrying site.
+                st.shortfalls.push(ShortfallRecord {
+                    event: eff.id.clone(),
+                    wallet: Some(wallet.clone()),
+                    date,
+                    principal_sat: shortfall,
+                    fee_sat: 0,
+                });
             }
             if !consumed.is_empty() {
                 let (mut legs, donor_acquired_at) =
@@ -1211,6 +1257,7 @@ pub(crate) fn fold_event(
                     ctx.config,
                     prices,
                     date,
+                    &wallet,
                     stats,
                     st,
                     &eff.id,
@@ -1275,6 +1322,14 @@ pub(crate) fn fold_event(
                     Some(eff.id.clone()),
                     format!("donate short by {shortfall} sat"),
                 );
+                // Defensive Filing Wizard Task 5 (arch-m-new-2): the principal-side sat-carrying site.
+                st.shortfalls.push(ShortfallRecord {
+                    event: eff.id.clone(),
+                    wallet: Some(wallet.clone()),
+                    date,
+                    principal_sat: shortfall,
+                    fee_sat: 0,
+                });
             }
             if !consumed.is_empty() {
                 let (mut legs, donor_acquired_at) =
@@ -1289,6 +1344,7 @@ pub(crate) fn fold_event(
                     ctx.config,
                     prices,
                     date,
+                    &wallet,
                     stats,
                     st,
                     &eff.id,

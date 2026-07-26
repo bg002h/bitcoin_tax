@@ -81,21 +81,14 @@ pub fn promote_export_gate(
     year: Option<i32>,
 ) -> Result<(), CliError> {
     // The year(s) to check: the requested one, or — for the whole-range CSV/snapshot dump — every year in
-    // which a promoted disposal leg files.
+    // which a promoted disposal leg files. ★ Task 3 (arch-m-2/DFW-D11): the `None` arm's enumeration is
+    // single-sourced from `chokepoint::promoted_filing_years` — the SAME 8275-completeness set, never
+    // duplicated here (and NOT the fold-diff export set, which is strictly larger — see `flagged_years`).
     let years: Vec<i32> = match year {
         Some(y) => vec![y],
-        None => {
-            let mut ys = std::collections::BTreeSet::new();
-            for d in &state.disposals {
-                if d.legs
-                    .iter()
-                    .any(|l| state.promoted_origins.contains(&l.lot_id.origin_event_id))
-                {
-                    ys.insert(d.disposed_at.year());
-                }
-            }
-            ys.into_iter().collect()
-        }
+        None => crate::chokepoint::promoted_filing_years(state)
+            .into_iter()
+            .collect(),
     };
     for y in years {
         // `disclosure_8275` is `Some` iff a promoted DISPOSAL leg files in `y`; refuse when its Part II is
@@ -340,13 +333,10 @@ fn sd_part_active(p: &ScheduleDPart) -> bool {
 }
 
 /// `export-irs-pdf`: fill the OFFICIAL IRS PDFs for `tax_year` and write them (owner-only) to
-/// `out_dir`. The packet is Form 8949 + Schedule D (always applicable) plus — when applicable and
-/// selected — Schedule SE (SE income ≥ $400), Form 8283 (donations), and Form 1040 cap-gains
-/// (reportable digital-asset activity). The form data is REUSED from the projection
-/// (`form_8949`/`schedule_d`/`form_8283`/`compute_se_tax`) — nothing capital-gains is recomputed; the
-/// SE §1401 figure is computed here from the year's stored `TaxProfile`. Same pseudo-active
-/// attestation gate as `export-snapshot`: checked FIRST, so a refused export leaves `out_dir`
-/// untouched; a pseudo fill is additionally DRAFT-watermarked.
+/// `out_dir`. THIN OPENER (★ arch-C-1, Defensive Filing Wizard Task 3): opens its OWN `Session` and
+/// projects ONCE, then delegates everything else to [`export_irs_pdf_from_session`] — the `&Session`
+/// inner a future TUI (which already holds the vault's `VaultLock`) can call directly, without a SECOND
+/// `Session::open` (which would deadlock the editor, `session.rs:662`).
 pub fn export_irs_pdf(
     vault_path: &Path,
     pp: &Passphrase,
@@ -357,7 +347,31 @@ pub fn export_irs_pdf(
 ) -> Result<IrsPdfReport, CliError> {
     let session = Session::open(vault_path, pp)?;
     let (events, state, _cfg) = session.load_events_and_project()?;
+    export_irs_pdf_from_session(&session, &state, &events, out_dir, tax_year, forms, attest)
+}
 
+/// The `&Session` inner of `export_irs_pdf` (★ arch-C-1): fill the OFFICIAL IRS PDFs for `tax_year` over
+/// an ALREADY-OPEN `session` + an ALREADY-PROJECTED `state`/`events` — no `Session::open`, no re-project.
+/// The packet is Form 8949 + Schedule D (always applicable) plus — when applicable and selected —
+/// Schedule SE (SE income ≥ $400), Form 8283 (donations), and Form 1040 cap-gains (reportable
+/// digital-asset activity). The form data is REUSED from the projection
+/// (`form_8949`/`schedule_d`/`form_8283`/`compute_se_tax`) — nothing capital-gains is recomputed; the
+/// SE §1401 figure is computed here from the year's stored `TaxProfile`. Same pseudo-active attestation
+/// gate as `export-snapshot`: checked FIRST, so a refused export leaves `out_dir` untouched; a pseudo
+/// fill is additionally DRAFT-watermarked.
+///
+/// ★ arch-m-new-1/n-new-1: the full-vs-slice `return_inputs::exists` dispatch lives ONCE, HERE — both
+/// the thin `export_irs_pdf` opener AND the chokepoint's `apply_export` (`chokepoint/mod.rs`) route
+/// through this ONE fn, so the dispatch is never duplicated.
+pub(crate) fn export_irs_pdf_from_session(
+    session: &Session,
+    state: &btctax_core::state::LedgerState,
+    events: &[LedgerEvent],
+    out_dir: &Path,
+    tax_year: i32,
+    forms: &[FormArg],
+    attest: Option<&str>,
+) -> Result<IrsPdfReport, CliError> {
     // ★ THE DISPATCH (P6.5). Exactly one function decides which pipeline runs, and the two write
     // NON-OVERLAPPING filenames, so artifacts from two runs can never be collated into a chimera
     // return: the full packet writes `f1040.pdf`, `f1040s1.pdf`, … + a manifest; the crypto slice
@@ -372,7 +386,7 @@ pub fn export_irs_pdf(
     // in BOTH directions.
     if crate::return_inputs::exists(session.conn(), tax_year)? {
         // The full-return pipeline runs the BG-D8 gate itself (checked first there too).
-        let mut report = export_full_return(&session, &state, &events, out_dir, tax_year, attest)?;
+        let mut report = export_full_return(session, state, events, out_dir, tax_year, attest)?;
         // UX-P4-5: a --forms slice cannot be honored on a full-return year (the 14-form packet is
         // jointly computed; a slice of it is tax-unsound). The packet still writes in full; flag the
         // ignored slice so the caller warns.
@@ -382,7 +396,7 @@ pub fn export_irs_pdf(
 
     // BG-D8 completeness gate (crypto-slice path) — a promoted-basis leg without its complete Form 8275
     // is a HARD refusal, checked FIRST (before the pseudo watermark check and any byte written).
-    promote_export_gate(&state, &events, Some(tax_year))?;
+    promote_export_gate(state, events, Some(tax_year))?;
 
     // Attestation gate — no fictional tax form leaves the machine unguarded, and a refusal
     // writes no bytes. (A fully-real ledger ignores `attest`.)
@@ -392,13 +406,13 @@ pub fn export_irs_pdf(
     }
 
     // Reuse the projection's capital-gains data verbatim (no recompute).
-    let rows = btctax_core::form_8949(&state, tax_year);
-    let totals = btctax_core::schedule_d(&state, tax_year);
+    let rows = btctax_core::form_8949(state, tax_year);
+    let totals = btctax_core::schedule_d(state, tax_year);
 
     // Form 8275 (Disclosure Statement) — Task 16: `Some` iff a promoted-basis disposal leg files in
     // `tax_year` (the same `disclosure_8275` scoping `promote_export_gate` above already used to confirm
     // completeness).
-    let printed_8275 = btctax_core::tax::form8275::disclosure_8275(&events, &state, tax_year)
+    let printed_8275 = btctax_core::tax::form8275::disclosure_8275(events, state, tax_year)
         .map(|d| btctax_core::tax::printed::printed_8275(&d));
     // Task 16 / ADD-2 (mirrors `export_full_return`'s pre-check below): v1 does not paginate Form 8275 —
     // refuse HERE, before `mkdir_out`, so an overflowing year (> 6 promoted disposal legs) names the year
@@ -426,15 +440,29 @@ pub fn export_irs_pdf(
         })
     };
 
+    // ★ whole-branch tax M-2: refuse an UNSUPPORTED year HERE, before `mkdir_out` — mirroring the Form
+    // 8275 pre-check directly above (and `export_full_return`'s own pre-write table lookup). Without it,
+    // a year outside `btctax_forms::SUPPORTED_YEARS` created `out_dir/` and wrote
+    // `basis_methodology.txt` + `form_8275.txt` BEFORE `fill_form_8949` raised `UnsupportedYear`,
+    // leaving a HALF-POPULATED packet directory beside the reported failure — a filer could mail a
+    // directory holding a methodology disclosure with no forms behind it. The error is byte-identical to
+    // the one `fill_form_8949` used to raise (`CliError::FormFill(FormsError::UnsupportedYear(year))`),
+    // so the single-year CLI `export-irs-pdf` path is unchanged apart from writing ZERO bytes.
+    if !btctax_forms::SUPPORTED_YEARS.contains(&tax_year) {
+        return Err(CliError::FormFill(
+            btctax_forms::FormsError::UnsupportedYear(tax_year),
+        ));
+    }
+
     mkdir_out(out_dir)?;
 
     // I-3 (D-4): the MANDATORY conservative-filing methodology disclosure rides the PDF packet too, not
     // just the CSV paths — a filer mailing the flagship filing-ready artifact must get the i8949-required
     // basis explanation whenever a $0-basis tranche row is present. Writes nothing for a no-tranche year.
-    crate::render::write_basis_methodology_txt(out_dir, &state, tax_year)?;
+    crate::render::write_basis_methodology_txt(out_dir, state, tax_year)?;
     // BG-D8: the Form 8275 disclosure rides the packet by its OWN name. The gate above guaranteed a
     // promoted leg reaching here has a complete Part II. Writes nothing for a no-promoted-leg year.
-    crate::render::write_form_8275_txt(out_dir, &state, &events, tax_year)?;
+    crate::render::write_form_8275_txt(out_dir, state, events, tax_year)?;
 
     // ── Form 8949 + Schedule D (always applicable). ──
     let f8949_path = if wants(forms, FormArg::F8949) {
@@ -457,14 +485,14 @@ pub fn export_irs_pdf(
     // ── Schedule SE (self-employment tax). Compute the §1401 figure from the year's TaxProfile. ──
     let se_computed = {
         let tables = BundledTaxTables::load();
-        let profile = match session.resolve_screened(&state, tax_year, &tables)? {
+        let profile = match session.resolve_screened(state, tax_year, &tables)? {
             crate::resolve::ProfileOutcome::Ready { profile, .. } => profile,
             crate::resolve::ProfileOutcome::Uncomputable { .. } => None, // export proceeds; SE omitted
         };
         profile.and_then(|p| {
             tables.table_for(tax_year).and_then(|t| {
                 compute_se_tax(
-                    &state,
+                    state,
                     tax_year,
                     p.filing_status,
                     t,
@@ -479,7 +507,7 @@ pub fn export_irs_pdf(
     // Discriminator: SE income present but `compute_se_tax` returned None (no profile / no table) → a
     // NOTE, not a silent skip (mirrors the render layer; never a fabricated form).
     let se_income_without_profile =
-        se_computed.is_none() && !se_net_income(&state, tax_year).is_zero();
+        se_computed.is_none() && !se_net_income(state, tax_year).is_zero();
     let mut schedule_se_path = None;
     let mut se_below_floor = false;
     let mut se_addl_medicare = None;
@@ -506,7 +534,7 @@ pub fn export_irs_pdf(
     let mut form_8283_section_b = None;
     if wants(forms, FormArg::Form8283) {
         let details = session.donation_details()?;
-        let rows_8283 = btctax_core::form_8283(&state, tax_year, &details);
+        let rows_8283 = btctax_core::form_8283(state, tax_year, &details);
         if let Some(bytes) = btctax_forms::fill_form_8283(&rows_8283, tax_year)? {
             form_8283_needs_review = rows_8283.iter().any(|r| r.needs_review);
             form_8283_section_b = rows_8283

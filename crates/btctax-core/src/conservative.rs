@@ -912,3 +912,281 @@ pub fn promote_prior_year_advisory(
     }
     lines
 }
+
+/// ★ arch-m-6 mirror (BG-D1, Task 3/DFW-D11): the LIVE (non-voided) `PromoteTranche` decision `EventId`s
+/// whose target is actually in force. `state.promoted_origins` (`project/fold.rs:497`, the pass-2
+/// resolver's own membership) is the single PUBLIC surface for "which `DeclareTranche` targets are held
+/// by EXACTLY one non-voided promote" — this fn walks `events` to recover the PROMOTE decision's OWN id
+/// (the `promote_id` `promote_prior_year_advisory` keys on, never the target). A promote whose target is
+/// NOT in `promoted_origins` (absent/wrong-type/voided target, or a ≥2-promote conflict) is excluded — it
+/// holds no filed floor to fold-diff.
+fn live_promote_ids(events: &[LedgerEvent], state: &LedgerState) -> Vec<EventId> {
+    let voided = voided_decision_targets(events);
+    events
+        .iter()
+        .filter_map(|e| match &e.payload {
+            EventPayload::PromoteTranche(p)
+                if !voided.contains(&e.id) && state.promoted_origins.contains(&p.target) =>
+            {
+                Some(e.id.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Every `EventId` a `VoidDecisionEvent` names as its target — the shared "is this decision still live?"
+/// membership behind [`live_promote_ids`] and [`live_declare_ids`] (mirrors `tranche_guard::void_targets`,
+/// which is `pub(crate)` to a different module tree and so not reachable from here).
+fn voided_decision_targets(events: &[LedgerEvent]) -> BTreeSet<EventId> {
+    events
+        .iter()
+        .filter_map(|e| match &e.payload {
+            EventPayload::VoidDecisionEvent(v) => Some(v.target_event_id.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// ★ whole-branch tax I-1 (DFW-D11): the LIVE (non-voided) `DeclareTranche` decision `EventId`s — the
+/// DECLARE-side twin of [`live_promote_ids`], mirroring `journey_view`'s own live-tranche enumeration
+/// (`defensive/mod.rs`, the same `void_targets` filter over `DeclareTranche` payloads).
+///
+/// A tranche with a live promote appears in BOTH id sets — deliberately: the promote diff isolates the
+/// `$0`→floor step, the declare diff isolates the whole tranche's existence, and [`flagged_years`] unions
+/// them.
+///
+/// ★ whole-branch r2 tax M-1 — why the `promoted_origins` escape hatch. [`voided_decision_targets`] is
+/// the NAIVE "some `VoidDecisionEvent` names this id" membership, but the resolver does NOT always apply
+/// such a void: `project::resolve.rs`'s BG-D9 deferred adjudication makes a void of a `DeclareTranche`
+/// **INERT** (a `DecisionConflict` blocker, target left in force) whenever a LIVE `PromoteTranche` still
+/// references it — "void the promote to revert the tranche to $0, or void both to drop it". Filtering on
+/// the naive set alone therefore dropped a still-in-force, still-PROMOTED tranche from the DFW-D11 export
+/// union, silently shortening the year set on the exact shape the wizard exists to serve. `state`'s own
+/// `promoted_origins` is the resolver's settled verdict on that adjudication (`project/fold.rs`, keyed by
+/// the promote's TARGET), so `|| state.promoted_origins.contains(&e.id)` re-admits precisely the tranches
+/// whose void the engine refused. The correction can only ADD years, never remove one.
+fn live_declare_ids(events: &[LedgerEvent], state: &LedgerState) -> Vec<EventId> {
+    let voided = voided_decision_targets(events);
+    events
+        .iter()
+        .filter_map(|e| match &e.payload {
+            EventPayload::DeclareTranche(_)
+                if !voided.contains(&e.id) || state.promoted_origins.contains(&e.id) =>
+            {
+                Some(e.id.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The BG-D9 fold-diff YEAR SET for ONE tranche decision — a `PromoteTranche` **or** (★ whole-branch
+/// tax I-1) a `DeclareTranche` (disposal ∪ removal legs, retained `< current`) — mirrors
+/// `promote_prior_year_advisory`'s own candidate-year + change-detection logic (above, the `years`
+/// build-up + the `disp_changed`/`don_changed`/`gift_changed` predicate) exactly, but returns the
+/// structured years instead of rendered text (★ structured year-set, r1: `promote_prior_year_advisory`
+/// returns `Vec<String>` — unusable for a caller that needs to KNOW which years, not read about them).
+/// Deliberately duplicated rather than sharing code with `promote_prior_year_advisory`:  that fn
+/// additionally renders per-year prose (amend direction, the tax-Δ via `tables`) this fn has no use for —
+/// mirroring the existing `gift_only_flagged_years` (`chokepoint/mod.rs`) precedent of re-deriving a
+/// structured year set from the SAME with/without fold pair rather than parsing or refactoring the prose
+/// builder.
+///
+/// ★ DFW M-new-1 (both P-A gate-review lenses): **pseudo is forced OFF** on an own config copy, mirroring
+/// `would_conflict` (`project/mod.rs:119`) and every other shadow projection in this module — unlike a
+/// real decision, a Phase-B pseudo default (e.g. a synthetic `SelfTransferMine{$0}`) is NOT stable across
+/// this fold pair, so leaving the caller's `pseudo_reconcile` bit untouched here could make the flagged
+/// year SET depend on whether the caller's config happened to have pseudo mode on — silently dropping (or
+/// adding) a year from the DFW-D11 export set. `flagged_years` (below) inherits this fix for free.
+///
+/// ★ whole-branch tax I-1 — why the SAME fn serves a `DeclareTranche`: the criterion is
+/// decision-agnostic ("remove exactly this one decision; which prior years' disposal/removal LEG SETS
+/// move?"), so the declare side composes it verbatim rather than inventing a second year-set rule. The
+/// without-fold drops ONLY the named event — a `PromoteTranche` orphaned by removing its target is
+/// already inert by construction (`resolve.rs:~540` refuses a promote whose target is not a live
+/// `DeclareTranche` and keeps it out of `promoted_origins`; `resolve.rs:442` folds it as `Op::Skip`), so
+/// removing a promoted tranche's declare removes the tranche's WHOLE contribution without needing to
+/// hunt the promote too.
+fn decision_changed_years(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    decision_id: &EventId,
+    current: i32,
+) -> BTreeSet<i32> {
+    let mut config = *config;
+    config.pseudo_reconcile = false;
+    let config = &config;
+    let with_state = project(events, prices, config);
+    let without_events: Vec<LedgerEvent> = events
+        .iter()
+        .filter(|e| e.id != *decision_id)
+        .cloned()
+        .collect();
+    let without_state = project(&without_events, prices, config);
+
+    let mut years: BTreeSet<i32> = BTreeSet::new();
+    for st in [&with_state, &without_state] {
+        for d in &st.disposals {
+            years.insert(d.disposed_at.year());
+        }
+        for r in &st.removals {
+            years.insert(r.removed_at.year());
+        }
+    }
+    years.retain(|y| *y < current);
+
+    years
+        .into_iter()
+        .filter(|&y| {
+            let disp = |st: &LedgerState| -> Vec<Disposal> {
+                st.disposals
+                    .iter()
+                    .filter(|d| d.disposed_at.year() == y)
+                    .cloned()
+                    .collect()
+            };
+            let rem = |st: &LedgerState, k: RemovalKind| -> Vec<Removal> {
+                st.removals
+                    .iter()
+                    .filter(|r| r.removed_at.year() == y && r.kind == k)
+                    .cloned()
+                    .collect()
+            };
+            let disp_changed = disp(&with_state) != disp(&without_state);
+            let don_changed = rem(&with_state, RemovalKind::Donation)
+                != rem(&without_state, RemovalKind::Donation);
+            let gift_changed =
+                rem(&with_state, RemovalKind::Gift) != rem(&without_state, RemovalKind::Gift);
+            disp_changed || don_changed || gift_changed
+        })
+        .collect()
+}
+
+/// ★ tax-N-1/M-1 (Task 3, DFW-D11): the structured export year-set — the UNION, across every LIVE
+/// promote **AND every LIVE `$0` declare** (★ whole-branch tax I-1), of that decision's OWN BG-D9
+/// fold-diff years (disposal ∪ removal legs, `< current`) — NOT a
+/// single whole-state with-ALL-promotes-vs-without-ALL-promotes diff (where two promotes' per-year
+/// effects could cancel and silently drop a year neither fold alone would miss). `tables` is accepted for
+/// signature symmetry with `promote_prior_year_advisory` and its callers (a caller assembling
+/// `plan_export` already holds the SAME `events`/`state`/`prices`/`tables`/`cfg` bundle for the sibling
+/// advisory call) — the leg-set-equality criterion itself never needs a tax table, so it goes unused here.
+/// ★ DFW M-new-1: pseudo is forced off INSIDE `decision_changed_years` (below) on its own config copy, so
+/// this fn's year-set is stable regardless of whether the caller's `cfg` happens to carry
+/// `pseudo_reconcile = true` — a defensive-filing caller's config may be pseudo-active even though its
+/// OWN `state` is not (DFW-D6), and every shadow projection this feature touches must force pseudo off.
+///
+/// ★ **whole-branch tax I-1 — the DECLARE side is in the union too.** A `$0` `DeclareTranche` with NO
+/// promote changes a prior year's FILED forms just as materially as a promote does: `make_disposal_legs`
+/// (`project/fold.rs:~128`) splits the disposal's full `net` proceeds PRO-RATA across `consumed`, so
+/// adding the tranche re-splits those proceeds, gives the previously-uncovered share its OWN Form 8949
+/// row with `acquired_at = window_end` (moving the short-/long-term split on Schedule D), and clears the
+/// Hard `UncoveredDisposal` that made the year not-computable at all. Iterating `live_promote_ids` ALONE
+/// (the shipped r1 shape) returned the EMPTY set for a declare-only vault, so the wizard's `$0` branch
+/// exported `{current_year}` and silently omitted the ONE year the filer's journey actually fixed —
+/// while the same filer on the promote branch got it. Same per-decision (never whole-state) union
+/// discipline, same `< current` retain, same pseudo-off shadow.
+pub fn flagged_years(
+    events: &[LedgerEvent],
+    state: &LedgerState,
+    prices: &dyn PriceProvider,
+    _tables: &dyn TaxTables,
+    cfg: &ProjectionConfig,
+    current: i32,
+) -> BTreeSet<i32> {
+    let mut years: BTreeSet<i32> = BTreeSet::new();
+    for promote_id in live_promote_ids(events, state) {
+        years.extend(decision_changed_years(
+            events,
+            prices,
+            cfg,
+            &promote_id,
+            current,
+        ));
+    }
+    for declare_id in live_declare_ids(events, state) {
+        years.extend(decision_changed_years(
+            events,
+            prices,
+            cfg,
+            &declare_id,
+            current,
+        ));
+    }
+    years
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::{DeclareTranche, VoidDecisionEvent};
+    use time::macros::{date, datetime};
+    use time::UtcOffset;
+
+    fn dec_ev(seq: u64, payload: EventPayload) -> LedgerEvent {
+        LedgerEvent {
+            id: EventId::decision(seq),
+            utc_timestamp: datetime!(2026-01-01 0:00 UTC),
+            original_tz: UtcOffset::UTC,
+            wallet: None,
+            payload,
+        }
+    }
+
+    fn tranche_payload() -> EventPayload {
+        EventPayload::DeclareTranche(DeclareTranche {
+            sat: 40_000_000,
+            wallet: WalletId::SelfCustody { label: "w".into() },
+            window_start: date!(2016 - 01 - 01),
+            window_end: date!(2016 - 03 - 31),
+        })
+    }
+
+    /// ★ whole-branch r2 tax M-1 — the DIRECT (white-box) pin on [`live_declare_ids`]' liveness rule.
+    ///
+    /// [`voided_decision_targets`] is the NAIVE "some `VoidDecisionEvent` NAMES this id" membership, but
+    /// `project::resolve.rs`'s BG-D9 deferred adjudication does NOT apply such a void when a LIVE
+    /// `PromoteTranche` still references the target: the void is INERT (a `DecisionConflict`) and the
+    /// tranche stays IN FORCE. `state.promoted_origins` (`project/fold.rs`, keyed by the promote's TARGET)
+    /// IS that settled verdict, so it — not the naive set — decides membership.
+    ///
+    /// Pinned HERE rather than end-to-end because the two halves of [`flagged_years`]' union happen to
+    /// coincide on this shape: removing the promote in the promote-half's shadow fold un-defers the very
+    /// void, dropping the tranche anyway. That coincidence is a property of the CURRENT resolver, not a
+    /// guarantee — this test holds the declare half's own rule regardless.
+    /// (`promote_cli.rs::flagged_years_keeps_a_promoted_tranche_whose_declare_void_the_engine_made_inert`
+    /// pins the end-to-end year survival off a REAL vault, including that the engine really does hold such
+    /// a tranche in `promoted_origins`.)
+    ///
+    /// Mutation: drop the `|| state.promoted_origins.contains(&e.id)` clause → the first assertion reds.
+    #[test]
+    fn live_declare_ids_keeps_a_tranche_whose_void_the_engine_held_inert() {
+        let tranche = EventId::decision(1);
+        let events = vec![
+            dec_ev(1, tranche_payload()),
+            dec_ev(
+                3,
+                EventPayload::VoidDecisionEvent(VoidDecisionEvent {
+                    target_event_id: tranche.clone(),
+                }),
+            ),
+        ];
+
+        // The engine held the void INERT (a live promote references the tranche) → it is in force.
+        let mut in_force = LedgerState::default();
+        in_force.promoted_origins.insert(tranche.clone());
+        assert_eq!(
+            live_declare_ids(&events, &in_force),
+            vec![tranche.clone()],
+            "a tranche the resolver kept in force must stay in the DFW-D11 export union"
+        );
+
+        // The SAME events with no live promote: the void APPLIES, so the tranche is correctly excluded.
+        let dropped = LedgerState::default();
+        assert!(
+            live_declare_ids(&events, &dropped).is_empty(),
+            "an actually-applied void must still drop its tranche — the fix must not admit everything"
+        );
+    }
+}

@@ -3,6 +3,7 @@
 pub mod conservative;
 pub mod conservative_promote;
 pub mod conventions;
+pub mod defensive;
 pub mod donation;
 pub mod event;
 pub mod forms;
@@ -13,6 +14,7 @@ pub mod price;
 pub mod project;
 pub mod state;
 pub mod tax;
+pub mod tranche_guard;
 pub mod void;
 pub mod whatif;
 

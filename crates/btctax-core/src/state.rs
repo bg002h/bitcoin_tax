@@ -248,6 +248,21 @@ pub struct PendingTransfer {
     pub legs: Vec<PendingLeg>, // lots removed into pending (carry basis + acquired_at)
 }
 
+/// Defensive Filing Wizard Task 5 (arch-m-new-2/arch-I-2): a RAW per-emission shortfall record,
+/// populated in `fold.rs` at every sat-carrying `BlockerKind::UncoveredDisposal` site (the fold already
+/// has the sat amount at hand — this is NEVER derived from `Blocker.detail`). Multiple records can
+/// share the same `event` (e.g. a self-transfer short on BOTH principal and its on-chain fee);
+/// `defensive::discovery::shortfalls` aggregates them per event into a `Shortfall` (Σ principal+fee,
+/// Σ fee separately). Additive/derived — no filed-number change.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShortfallRecord {
+    pub event: EventId,
+    pub wallet: Option<WalletId>,
+    pub date: TaxDate,
+    pub principal_sat: Sat,
+    pub fee_sat: Sat,
+}
+
 /// Fold accumulators that are NOT directly reconstructable from the post-fold `LedgerState` vectors
 /// (FR9 `Σ in` / `Σ on-chain-fee-sats` / `Σ pending`). Carried as a FIELD on `LedgerState` (M3) —
 /// `project` always returns `LedgerState` (NO `(LedgerState, FoldStats)` tuple). Populated in `finalize`;
@@ -283,6 +298,10 @@ pub struct LedgerState {
     /// `>$0` estimate floor from a documented on-chain fee carry WITHOUT re-deriving the promote set —
     /// both are `EstimatedConservative` with `>$0` basis, indistinguishable from the leg alone.
     pub promoted_origins: BTreeSet<EventId>,
+    /// Defensive Filing Wizard Task 5: raw shortfall emissions (see `ShortfallRecord`), populated in
+    /// `fold.rs` at every sat-carrying `UncoveredDisposal` site. Aggregated by
+    /// `defensive::discovery::shortfalls`/`triage` — additive/derived, never a second source of truth.
+    pub shortfalls: Vec<ShortfallRecord>,
 }
 impl LedgerState {
     /// Pseudo-reconcile (sub-project 2): `true` when any synthetic default contributes to this

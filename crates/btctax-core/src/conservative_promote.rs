@@ -433,7 +433,11 @@ pub fn consent_terms(
 /// the T3 rewrite + BG-D4 clamp. The decision id is `max(existing Decision seq) + 1` (collision-free); the
 /// consent/attestation fields are placeholders (they never affect the projection — a `PromoteTranche`
 /// folds as `Op::Skip`, and `live_promotes` reads only `target`/`filed_basis`, order-independent).
-fn with_synthetic_promote(
+/// `pub(crate)` (widened from module-private, Defensive Filing Wizard Task 6): `defensive::mod`'s
+/// `journey_view` reuses this EXACT construction to probe per-year computability for the clamped
+/// promote-saving flavor (`SavingFlavor`), rather than re-deriving the synthetic-promote event shape a
+/// second time (which would risk the two copies drifting apart). Zero behavior change.
+pub(crate) fn with_synthetic_promote(
     events: &[LedgerEvent],
     tranche_id: &EventId,
     filed_basis: Usd,

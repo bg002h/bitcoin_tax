@@ -1,0 +1,858 @@
+//! Defensive Filing Wizard, sub-project-2 Phase P-A, Task 1 — the PROMOTE chokepoint: a reusable
+//! plan/confirm/apply pipeline extracted VERBATIM from the shipped CLI verb
+//! (`cmd::promote::promote_tranche`, Approach-B Task 10, `cmd/promote.rs:364-488`) so a future TUI can
+//! drive the EXACT SAME gated pipeline as the CLI. `cmd::promote::promote_tranche` is now a thin driver
+//! over this module: `Session::open` → build args → `plan_promote` (map `Refusal` → `CliError`) →
+//! `println!("{}", render_consent(&plan))` → prompt/collect ack → `apply_promote`.
+//!
+//! **Gate ordering (DFW-D2) MUST match `cmd/promote.rs:378-485` exactly:** resolve-live → BG-D5
+//! provenance → BG-D7 Part II → BG-D3 floor/coverage → BG-D6 `consent_terms` → synthetic-promote advisory
+//! → gift-only relabel → consent render (incl. `wide_window_note`) → **ack inside `apply_promote`,
+//! fail-closed** → `would_conflict` → append.
+//!
+//! ★ **I-1 (byte-parity):** the shipped verb prints, IN ORDER (`promote.rs:443-455`), the
+//! synthetic-promote ADVISORY (pre-consent) → `render_consent(&terms, &gift_only_years)` → the
+//! `wide_window_note` (post-consent). `PromotePlan` therefore carries THREE ordered pieces
+//! (`advisory_lines`, `gift_only_years`, `post_consent_note`) so this module's `render_consent(&plan)`
+//! reproduces `advisory → consent → note` byte-for-byte when printed via a single `println!` — a single
+//! flat `Vec` cannot place `terms` BETWEEN the pre-advisory and the note; do NOT collapse the three. The
+//! shipped `render_consent(terms, gift_only_years)` stays in `cmd::promote` (still `pub` — external KATs
+//! in `tests/promote_cli.rs` call it directly — and is invoked from here); `gift_only_flagged_years`/
+//! `wide_window_note` move HERE.
+//!
+//! ★ **DFW-D6 (the ONE intended behavior change — the sub-1 pseudo-off fix):** `plan_promote` forces
+//! `cfg.pseudo_reconcile = false` on its own COPY (`ProjectionConfig` is `Copy`) before `consent_terms` /
+//! `promote_prior_year_advisory` / `gift_only_flagged_years` — mirroring `would_conflict`
+//! (`project/mod.rs:118`). Without this, a pseudo-active vault's consent screen — and the RECORDED
+//! `Acknowledgment.shown_terms`, the §6664(c) good-faith artifact — could fold in a synthetic default that
+//! was never persisted, misstating what the filer actually acknowledged.
+//!
+//! ★ **arch-m-6/tax-N-1:** `Refusal::Target` covers the resolve-live gate — unknown/voided/wrong-type
+//! target only (`resolve_live_tranche`). Already-promoted (a DOUBLE promote) is NOT caught here; it
+//! surfaces as `would_conflict` at APPLY time (a `CliError`, never a plan `Refusal`) — mirroring
+//! `promote.rs:475-483`.
+//!
+//! ★ **arch-m-new-3:** `plan_promote` takes no `Session`/`state` — the shipped pipeline rebuilds
+//! everything from `events` (`promote.rs:364-488`) — so a caller (CLI or future TUI) supplies its own
+//! already-loaded `events`/`prices`/`cfg`.
+//!
+//! **Task 2 — the DECLARE chokepoint:** `plan_declare`/`apply_declare`, extracted from the shipped
+//! `cmd::tranche::declare_tranche` (`tranche.rs:120-175`). `plan_declare` gates on the shipped set
+//! (`sat>0`, `ws<=we`, `guard_tranche_vs_allocation` — the LAST one stays defined in `cmd::tranche`, not
+//! duplicated here) ALWAYS; **iff `target_shortfall = Some(id)`** it ALSO runs the DFW-D5.2 target-scoped
+//! clearance shadow: append the candidate `DeclareTranche` → re-project (pseudo FORCED off, mirroring
+//! `would_conflict`) → assert no `BlockerKind::UncoveredDisposal` remains on `id`; else `Refusal::Coverage`.
+//! `target_shortfall = None` (the CLI free-form path) is the shipped `declare_tranche` gate set,
+//! BYTE-FOR-BYTE (DFW-D8/SPEC §5) — no clearance shadow runs at all. `apply_declare` is a plain
+//! append+save (declaring is `$0`/revocable/no-Form-8275 — DFW-D8 — so unlike promote there is no
+//! acknowledgment gate and no `would_conflict` pre-check; the shipped verb never ran one either).
+//!
+//! ★ **Refusal-variant note:** the shared `Refusal` enum stays CLOSED at the four Task-1 variants (the
+//! plan review explicitly rejected adding a new `Conflict` variant for this task). The shipped-set gates
+//! (sat/window/allocation) have no promote-shaped variant of their own, so — like the new clearance
+//! failure the brief names explicitly — they map to `Refusal::Coverage`. Every variant collapses to the
+//! identical `CliError::Usage(msg)` via `From<Refusal>` (below), so this is a pure internal-taxonomy
+//! choice: the filer-facing message text is unchanged from the shipped verb either way.
+
+use crate::cli::FormArg;
+use crate::cmd::admin::IrsPdfReport;
+use crate::cmd::promote::{
+    render_consent as render_consent_terms, ProvenanceKind, PROMOTE_ACK_PHRASE, PROVENANCE_TEXT,
+    PROVENANCE_VERSION,
+};
+use crate::{CliError, Session};
+use btctax_core::conservative::{self, Direction};
+use btctax_core::conservative_promote::{self, PromoteRefusal};
+use btctax_core::conventions::tax_date;
+use btctax_core::event::{
+    Acknowledgment, ConsentTerm, DeclareTranche, EventPayload, FloorMethod, PromoteTranche,
+};
+use btctax_core::persistence::{append_decision, load_all};
+use btctax_core::price::PriceProvider;
+use btctax_core::project::ProjectionConfig;
+use btctax_core::state::BlockerKind;
+use btctax_core::{
+    project, EventId, LedgerEvent, LedgerState, RemovalKind, Sat, TaxDate, TaxTables, Usd, WalletId,
+};
+use std::collections::BTreeSet;
+use std::path::PathBuf;
+use time::{OffsetDateTime, UtcOffset};
+
+/// Everything computed BEFORE the filer types the acknowledgment phrase (the `PromoteTranche` decision
+/// id, `target`, is not yet known — it is assigned at `apply_promote`'s `append_decision`). ★ I-1: the
+/// three ordered fields (`advisory_lines`, `gift_only_years`, `post_consent_note`) let `render_consent`
+/// reproduce the shipped verb's `advisory → consent → note` byte order — do NOT collapse them into one
+/// `Vec` or pre-render `gift_only_years` into a string.
+#[derive(Debug, Clone)]
+pub struct PromotePlan {
+    /// The `DeclareTranche` decision this promotes (BG-D1) — the `PromoteTranche.target` field.
+    pub target: EventId,
+    /// BG-D6 `consent_terms` output — ALSO snapshotted verbatim onto `payload`'s
+    /// `Acknowledgment.shown_terms` (the §6664(c) good-faith artifact).
+    pub terms: Vec<ConsentTerm>,
+    /// The PRE-consent synthetic-promote advisory lines (`promote.rs:443`, `for line in &advisory`).
+    pub advisory_lines: Vec<String>,
+    /// T9 handoff: an INPUT to the shipped `render_consent(terms, gift_only_years)`
+    /// (`promote.rs:333`/`:453`) — NOT a pre-rendered string.
+    pub gift_only_years: BTreeSet<i32>,
+    /// `wide_window_note`, printed AFTER the consent screen (`promote.rs:454`).
+    pub post_consent_note: Option<String>,
+    /// The `PromoteTranche` payload `apply_promote` appends on a successful acknowledgment.
+    pub payload: EventPayload,
+}
+
+/// A `plan_promote` refusal — fail-closed, BEFORE any computation past the failing gate. Each variant
+/// carries the exact filer-facing message (byte-identical to the shipped verb's `CliError::Usage` text),
+/// so mapping to `CliError` (the thin CLI driver) or a distinct TUI error surface is trivial either way.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Refusal {
+    /// The resolve-live gate (`resolve_live_tranche`): `target` is absent, wrong-type, or voided.
+    Target(String),
+    /// BG-D5: a non-`Purchase` provenance.
+    Provenance(String),
+    /// BG-D3 (promote): `filed_basis_for` could not produce a trustworthy floor
+    /// (`NoCoverage`/`PartialCoverage`). ALSO (Task 2, declare): the shipped-set gates (`sat>0`, `ws<=we`,
+    /// `guard_tranche_vs_allocation`) AND the DFW-D5.2 target-scoped clearance shadow (a candidate tranche
+    /// that does not clear the named shortfall) — see the module doc's "Refusal-variant note".
+    Coverage(String),
+    /// BG-D7: an empty/whitespace Form 8275 Part II narrative.
+    PartII(String),
+}
+
+impl From<Refusal> for CliError {
+    fn from(r: Refusal) -> CliError {
+        let msg = match r {
+            Refusal::Target(m) => m,
+            Refusal::Provenance(m) => m,
+            Refusal::Coverage(m) => m,
+            Refusal::PartII(m) => m,
+        };
+        CliError::Usage(msg)
+    }
+}
+
+/// True iff a live (non-voided) `VoidDecisionEvent` names `id`. Moved verbatim from `cmd/promote.rs`.
+fn is_voided(events: &[LedgerEvent], id: &EventId) -> bool {
+    events.iter().any(
+        |e| matches!(&e.payload, EventPayload::VoidDecisionEvent(v) if v.target_event_id == *id),
+    )
+}
+
+/// Resolve `target_event_id` to a LIVE (present, non-voided) `DeclareTranche`, or `Refusal::Target`. A
+/// record-time convenience guard — the engine's own `DecisionConflict` adjudication is the backstop for
+/// any target this misses (moved verbatim from `cmd/promote.rs::resolve_live_tranche`, DFW-D2 gate 1).
+fn resolve_live_tranche(
+    events: &[LedgerEvent],
+    target_event_id: &EventId,
+) -> Result<DeclareTranche, Refusal> {
+    let not_live = || {
+        Refusal::Target(format!(
+            "{} is not a live DeclareTranche (absent, wrong type, or voided) — see `btctax events list` \
+             for event refs + decision status",
+            target_event_id.canonical()
+        ))
+    };
+    if is_voided(events, target_event_id) {
+        return Err(not_live());
+    }
+    events
+        .iter()
+        .find(|e| e.id == *target_event_id)
+        .and_then(|e| match &e.payload {
+            EventPayload::DeclareTranche(t) => Some(t.clone()),
+            _ => None,
+        })
+        .ok_or_else(not_live)
+}
+
+/// BG-D5: refuse a non-`Purchase` provenance — the closed enumeration, fail-closed, before any
+/// computation. Moved verbatim from `cmd/promote.rs::refuse_non_purchase`.
+fn refuse_non_purchase(provenance: ProvenanceKind) -> Refusal {
+    Refusal::Provenance(format!(
+        "promote-tranche requires purchase provenance: {PROVENANCE_TEXT}. This tranche was declared as \
+         acquired by {label} — a {label} recipient already has a documented, real basis (income \
+         FMV-at-receipt; a §1015 donor carryover for a gift; a §1014 date-of-death basis for an \
+         inheritance) — model the real acquisition instead (a documented \
+         Acquire/Income/gift-received event), not a conservative-filing tranche promote.",
+        label = provenance.label(),
+    ))
+}
+
+/// BG-D3: translate a `filed_basis_for` refusal into a record-time message. Moved verbatim from
+/// `cmd/promote.rs::refuse_no_floor`.
+fn refuse_no_floor(e: PromoteRefusal, window_start: TaxDate, window_end: TaxDate) -> Refusal {
+    let detail = match e {
+        PromoteRefusal::NoCoverage => {
+            "no bundled daily-close price exists anywhere in the window — never fabricate a floor over a \
+             total data gap"
+        }
+        PromoteRefusal::PartialCoverage => {
+            "the window has a gap in bundled daily-close data — the covered-part minimum is not provably \
+             the window's true minimum, so it cannot be filed as a trustworthy floor"
+        }
+    };
+    Refusal::Coverage(format!(
+        "cannot compute a promotion floor for the window [{window_start}, {window_end}]: {detail}. \
+         Narrow the window to a fully-covered range, or leave this tranche at its filed $0 basis."
+    ))
+}
+
+/// A filer-facing caution (SPEC §1, "two honest limits"): a wide acquisition window yields a LOW
+/// ("trivial") floor relative to a tight one. Purely informational, non-gating; conditioned on the
+/// window exceeding one year. Moved verbatim from `cmd/promote.rs::wide_window_note`.
+fn wide_window_note(window_start: TaxDate, window_end: TaxDate) -> Option<String> {
+    let days = (window_end - window_start).whole_days();
+    if days > 365 {
+        Some(format!(
+            "note: this tranche's declared window spans {days} days (over a year). A WIDE window tends \
+             to produce a LOW (\"trivial\") floor relative to a tight one — for some filers it may be \
+             simpler, and just as conservative, to leave this tranche at its filed $0 basis and skip the \
+             Form 8275 disclosure surface entirely."
+        ))
+    } else {
+        None
+    }
+}
+
+/// Thread ONE synthetic `PromoteTranche(tranche_id, filed_basis)` onto `events` (mirrors
+/// `conservative_promote::with_synthetic_promote`, private there). Moved verbatim from
+/// `cmd/promote.rs::with_synthetic_promote`.
+fn with_synthetic_promote(
+    events: &[LedgerEvent],
+    tranche_id: &EventId,
+    filed_basis: Usd,
+    now: OffsetDateTime,
+) -> Vec<LedgerEvent> {
+    let seq = events
+        .iter()
+        .filter_map(|e| match e.id {
+            EventId::Decision { seq } => Some(seq),
+            _ => None,
+        })
+        .max()
+        .map_or(1, |m| m + 1);
+    let mut out = events.to_vec();
+    out.push(LedgerEvent {
+        id: EventId::decision(seq),
+        utc_timestamp: now,
+        original_tz: UtcOffset::UTC,
+        wallet: None,
+        payload: EventPayload::PromoteTranche(PromoteTranche {
+            target: tranche_id.clone(),
+            method: FloorMethod::WindowLowClose,
+            filed_basis,
+            coverage: conservative::Coverage::Full,
+            provenance_attested: true,
+            acknowledgment: Acknowledgment {
+                phrase: String::new(),
+                shown_terms: Vec::new(),
+                provenance_text: String::new(),
+                provenance_version: String::new(),
+            },
+            part_ii_narrative: String::new(),
+        }),
+    });
+    out
+}
+
+/// T9 handoff (progress.md Task 9): `consent_terms`/`Uncomputable` sum the §170(e) charitable-deduction
+/// change and the §1015 gift-basis change into ONE `deduction_delta_usd` figure per year. This re-derives
+/// which flagged years are GIFT-only directly from the SAME with/without fold pair the T8 advisory
+/// already builds. Moved verbatim from `cmd/promote.rs::gift_only_flagged_years`.
+fn gift_only_flagged_years(
+    prices: &dyn PriceProvider,
+    config: &ProjectionConfig,
+    events: &[LedgerEvent],
+    with_events: &[LedgerEvent],
+) -> BTreeSet<i32> {
+    let without_state = project(events, prices, config);
+    let with_state = project(with_events, prices, config);
+
+    let mut years: BTreeSet<i32> = BTreeSet::new();
+    for st in [&with_state, &without_state] {
+        for r in &st.removals {
+            years.insert(r.removed_at.year());
+        }
+    }
+
+    let rem =
+        |st: &btctax_core::LedgerState, y: i32, k: RemovalKind| -> Vec<btctax_core::Removal> {
+            st.removals
+                .iter()
+                .filter(|r| r.removed_at.year() == y && r.kind == k)
+                .cloned()
+                .collect()
+        };
+
+    years
+        .into_iter()
+        .filter(|&y| {
+            let gift_changed =
+                rem(&with_state, y, RemovalKind::Gift) != rem(&without_state, y, RemovalKind::Gift);
+            let don_changed = rem(&with_state, y, RemovalKind::Donation)
+                != rem(&without_state, y, RemovalKind::Donation);
+            gift_changed && !don_changed
+        })
+        .collect()
+}
+
+/// The acknowledgment gate (BG-D6) — a PURE exact-compare, no I/O (mirrors `require_attestation`,
+/// `lib.rs:208`). Moved verbatim from `cmd/promote.rs::require_promote_ack`; now called from
+/// `apply_promote`, fail-closed, BEFORE `would_conflict`/append.
+fn require_promote_ack(acknowledge: Option<&str>) -> Result<(), CliError> {
+    match acknowledge.map(str::trim) {
+        Some(p) if p == PROMOTE_ACK_PHRASE => Ok(()),
+        Some(_) => Err(CliError::Usage(format!(
+            "the acknowledgment phrase did not match. Type it EXACTLY (trimmed, case-sensitive): {PROMOTE_ACK_PHRASE:?}."
+        ))),
+        None => Err(CliError::Usage(format!(
+            "promote-tranche requires acknowledging the estimated-basis risk shown above — pass \
+             --i-acknowledge {PROMOTE_ACK_PHRASE:?} (or type it at the interactive prompt)."
+        ))),
+    }
+}
+
+/// Plan a `PromoteTranche` decision — the DFW-D2 gate order, everything computable BEFORE the filer types
+/// the acknowledgment phrase: resolve-live → BG-D5 provenance → BG-D7 Part II → BG-D3 floor/coverage →
+/// BG-D6 `consent_terms` → synthetic-promote advisory → gift-only relabel. `events`/`prices`/`cfg` are the
+/// caller's own already-loaded state (arch-m-new-3: no `Session` here — the CLI's thin driver and a
+/// future TUI each supply their own).
+pub fn plan_promote(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    cfg: &ProjectionConfig,
+    target: &EventId,
+    provenance: ProvenanceKind,
+    part_ii: &str,
+    now: OffsetDateTime,
+) -> Result<PromotePlan, Refusal> {
+    // Resolve + assert live (BG-D1).
+    let tranche = resolve_live_tranche(events, target)?;
+
+    // BG-D5: purchase provenance only — fail-closed, before any computation.
+    if provenance != ProvenanceKind::Purchase {
+        return Err(refuse_non_purchase(provenance));
+    }
+
+    // BG-D7: an empty/whitespace Part II narrative is refused at record time (present-by-construction).
+    if part_ii.trim().is_empty() {
+        return Err(Refusal::PartII(
+            "promote-tranche requires a non-empty Form 8275 Part II narrative (filer facts, Reg. \
+             §1.6662-4(f) — 'in sufficient detail') — pass --part-ii-file pointing at a file with real \
+             acquisition/window facts, not an empty or blank file"
+                .into(),
+        ));
+    }
+
+    // BG-D3: the computed whole-tranche filed_basis floor — hard-refuse on Partial/No coverage.
+    let floor = conservative_promote::filed_basis_for(
+        prices,
+        tranche.sat,
+        tranche.window_start,
+        tranche.window_end,
+    )
+    .map_err(|e| refuse_no_floor(e, tranche.window_start, tranche.window_end))?;
+
+    // ★ DFW-D6 (the ONE intended behavior change): force pseudo OFF on an own COPY (ProjectionConfig is
+    // Copy) before consent_terms / promote_prior_year_advisory / gift_only_flagged_years — mirrors
+    // `would_conflict` (`project/mod.rs:118`). The recorded Acknowledgment.shown_terms must always
+    // reflect the HONEST (non-synthetic) figures, never a pseudo-active default folded in.
+    let mut honest_cfg = *cfg;
+    honest_cfg.pseudo_reconcile = false;
+
+    let tables = btctax_adapters::BundledTaxTables::load();
+    // A single stored TaxProfile cannot fit the multi-year span this consent/advisory ranges over, so
+    // `None` is passed throughout — mirrors the void-direction path (`cmd/reconcile.rs`
+    // `promote_void_advisory_lines`): the tax-Δ arm falls back to the gain/deduction-Δ sign, and the
+    // amend direction is still correct.
+    let terms = conservative_promote::consent_terms(
+        events,
+        prices,
+        &honest_cfg,
+        target,
+        floor.filed_basis,
+        None,
+        &tables,
+    );
+
+    // Thread ONE synthetic promote so the Direction::Promote advisory AND this layer's own
+    // gift-vs-donation year classification (T9 handoff) see the SAME post-promote fold.
+    let with_events = with_synthetic_promote(events, target, floor.filed_basis, now);
+    let synthetic_id = with_events
+        .last()
+        .expect("with_synthetic_promote always pushes exactly one event")
+        .id
+        .clone();
+
+    // T8 handoff (progress.md): `current` is the injected `now`'s tax year (the BTCTAX_NOW seam) — NEVER
+    // a wall clock. Years `< current` are presumed already filed; the year still being authored
+    // (>= current) is excluded, so it is never told it needs an amended return.
+    let current = tax_date(now, UtcOffset::UTC).year();
+    let advisory_lines = conservative::promote_prior_year_advisory(
+        &with_events,
+        prices,
+        &honest_cfg,
+        &synthetic_id,
+        Direction::Promote,
+        None,
+        &tables,
+        current,
+    );
+
+    // T9 handoff: which flagged years are GIFT-ONLY (no donation) — relabels that year's deduction/basis-Δ
+    // as a §1015 donee-basis change, never Schedule-A, in the consent screen below.
+    let gift_only_years = gift_only_flagged_years(prices, &honest_cfg, events, &with_events);
+
+    let payload = EventPayload::PromoteTranche(PromoteTranche {
+        target: target.clone(),
+        method: FloorMethod::WindowLowClose,
+        filed_basis: floor.filed_basis,
+        coverage: floor.coverage,
+        provenance_attested: true,
+        acknowledgment: Acknowledgment {
+            phrase: PROMOTE_ACK_PHRASE.to_string(),
+            shown_terms: terms.clone(),
+            provenance_text: PROVENANCE_TEXT.to_string(),
+            provenance_version: PROVENANCE_VERSION.to_string(),
+        },
+        part_ii_narrative: part_ii.to_string(),
+    });
+
+    Ok(PromotePlan {
+        target: target.clone(),
+        terms,
+        advisory_lines,
+        gift_only_years,
+        post_consent_note: wide_window_note(tranche.window_start, tranche.window_end),
+        payload,
+    })
+}
+
+/// Re-emit the shipped verb's ordered filer-visible text: `advisory_lines` → the shipped
+/// `render_consent(&plan.terms, &plan.gift_only_years)` (`cmd::promote`) → `post_consent_note` — ★ I-1:
+/// byte-identical to `promote.rs:443-455` when the RESULT is printed via a single
+/// `println!("{}", render_consent(&plan))` (the shipped verb instead used three separate `println!`
+/// calls; a single combined string reproduces the exact same stdout bytes because `println!` always adds
+/// exactly one trailing `\n`). Do NOT collapse this into `plan.terms`/`plan.gift_only_years` alone — the
+/// pre-advisory must land BEFORE the consent screen and the note AFTER it.
+pub fn render_consent(plan: &PromotePlan) -> String {
+    let mut out = String::new();
+    for line in &plan.advisory_lines {
+        out.push_str(line);
+        out.push('\n');
+    }
+    out.push_str(&render_consent_terms(&plan.terms, &plan.gift_only_years));
+    if let Some(note) = &plan.post_consent_note {
+        out.push('\n');
+        out.push_str(note);
+    }
+    out
+}
+
+/// Apply a planned promote: the acknowledgment gate (BG-D6, fail-closed, INSIDE apply) → `would_conflict`
+/// pre-check (BG-D9 — a second live promote on this target, or any other resolver-level conflict; refuses
+/// BEFORE appending, NOT last-wins) → append + save. Reloads `events`/`cfg` fresh from `session`
+/// (arch-m-new-3: `plan_promote` took no `Session`) — a single synchronous CLI/TUI invocation cannot
+/// append anything between `plan_promote` and `apply_promote`, so this is behavior-preserving.
+pub fn apply_promote(
+    session: &mut Session,
+    plan: PromotePlan,
+    acknowledge: Option<&str>,
+    now: OffsetDateTime,
+) -> Result<EventId, CliError> {
+    require_promote_ack(acknowledge)?;
+
+    let events = load_all(session.conn())?;
+    let cfg = session.config()?.to_projection();
+
+    // BG-D9: pre-check `would_conflict` (a second live promote on this target, or any other resolver-level
+    // conflict, e.g. UX-P4-3) — refuse BEFORE appending (fail-closed). NOT last-wins.
+    if let Some(detail) =
+        btctax_core::would_conflict(&events, session.prices(), &cfg, &plan.payload, now)
+    {
+        return Err(CliError::Usage(format!(
+            "cannot record this promote — a decision conflict: {detail}"
+        )));
+    }
+
+    let id = append_decision(session.conn(), plan.payload, now, UtcOffset::UTC, None)?;
+    session.save()?;
+    Ok(id)
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// Task 2 — the DECLARE chokepoint: `plan_declare`/`apply_declare` (module doc has the full contract).
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// Everything needed to append a `DeclareTranche` decision. Unlike `PromotePlan`, declaring has no
+/// acknowledgment gate or consent screen (DFW-D8 — a plain `$0`, revocable confirmation) — so there is
+/// nothing else to carry beside the payload itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeclarePlan {
+    /// The `EventPayload::DeclareTranche` `apply_declare` appends verbatim.
+    pub payload: EventPayload,
+}
+
+/// Plan a `DeclareTranche` decision. Gates on the shipped set ALWAYS — `sat>0`, `ws<=we`,
+/// `guard_tranche_vs_allocation` (`cmd::tranche`, the single source of that guard for all four allocation
+/// append sites — NOT duplicated here) — replicating `cmd/tranche.rs:134-154` exactly (arch-m-new-3: no
+/// `Session` — the caller supplies its own already-loaded `events`/`prices`/`cfg`, mirroring
+/// `plan_promote`).
+///
+/// **Iff `target_shortfall = Some(id)`**, ALSO runs the DFW-D5.2 target-scoped clearance shadow: append
+/// the candidate `DeclareTranche` → re-project (pseudo FORCED off on a config COPY, mirroring
+/// `would_conflict`, `project/mod.rs:118`) → assert no `BlockerKind::UncoveredDisposal` remains on `id`;
+/// else `Refusal::Coverage`. **Forcing pseudo off here is load-bearing (arch-I-5):** a synthetic
+/// `SelfTransferMine{$0}` pseudo default must never stand in for a real, documented cover — else a
+/// dashboard candidate could be reported as "clears the shortfall" when only a fictional, non-persisted
+/// default actually covered it.
+///
+/// `target_shortfall = None` (the CLI free-form `declare-tranche` path) never runs the clearance shadow —
+/// the shipped verb's gate set, byte-for-byte (DFW-D8/SPEC §5).
+#[allow(clippy::too_many_arguments)]
+pub fn plan_declare(
+    events: &[LedgerEvent],
+    prices: &dyn PriceProvider,
+    cfg: &ProjectionConfig,
+    sat: Sat,
+    wallet: WalletId,
+    window_start: TaxDate,
+    window_end: TaxDate,
+    target_shortfall: Option<EventId>,
+    now: OffsetDateTime,
+) -> Result<DeclarePlan, Refusal> {
+    // The shipped gate set (cmd/tranche.rs:134-154), byte-for-byte.
+    if sat <= 0 {
+        // A `sat <= 0` tranche would bump `stats.sigma_in` by a non-positive amount (fold.rs),
+        // corrupting Σ-conservation; there is no such thing as declaring zero/negative undocumented BTC.
+        return Err(Refusal::Coverage(format!(
+            "tranche amount must be > 0 sat (got {sat})"
+        )));
+    }
+    if window_start > window_end {
+        return Err(Refusal::Coverage(format!(
+            "tranche window_start ({window_start}) must be <= window_end ({window_end})"
+        )));
+    }
+    crate::cmd::tranche::guard_tranche_vs_allocation(events, window_end).map_err(|e| match e {
+        CliError::Usage(m) => Refusal::Coverage(m),
+        other => Refusal::Coverage(other.to_string()), // unreachable today (the guard only ever returns Usage)
+    })?;
+
+    let payload = EventPayload::DeclareTranche(DeclareTranche {
+        sat,
+        wallet,
+        window_start,
+        window_end,
+    });
+
+    // DFW-D5.2: the target-scoped clearance shadow — ONLY when the caller names a shortfall to cover.
+    if let Some(id) = target_shortfall {
+        // ★ arch-I-5: pseudo FORCED off on a COPY (ProjectionConfig is Copy) — mirrors `would_conflict`
+        // (project/mod.rs:118). Without this, a pseudo-active vault could report a candidate as clearing
+        // a shortfall that only a synthetic, non-persisted SelfTransferMine{$0} default actually covered.
+        let mut honest_cfg = *cfg;
+        honest_cfg.pseudo_reconcile = false;
+
+        // Append the candidate as the resolver would (the next decision seq — mirrors `would_conflict`
+        // and `with_synthetic_promote` above).
+        let next_seq = events
+            .iter()
+            .filter_map(|e| match e.id {
+                EventId::Decision { seq } => Some(seq),
+                _ => None,
+            })
+            .max()
+            .map_or(1, |m| m + 1);
+        let candidate = LedgerEvent {
+            id: EventId::decision(next_seq),
+            utc_timestamp: now,
+            original_tz: UtcOffset::UTC,
+            wallet: None,
+            payload: payload.clone(),
+        };
+        let mut with_candidate = events.to_vec();
+        with_candidate.push(candidate);
+
+        let state = project(&with_candidate, prices, &honest_cfg);
+        let still_uncovered = state
+            .blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::UncoveredDisposal && b.event.as_ref() == Some(&id));
+        if still_uncovered {
+            return Err(Refusal::Coverage(format!(
+                "this candidate tranche does not clear the shortfall on {} — after adding it, an \
+                 UncoveredDisposal blocker still remains on that event. A tranche's synthetic acquisition \
+                 lands at window_end and sorts AFTER a same-instant import, so window_end must be \
+                 STRICTLY BEFORE the short event's date (and the wallet/sat must actually cover it) to \
+                 clear it.",
+                id.canonical()
+            )));
+        }
+    }
+
+    Ok(DeclarePlan { payload })
+}
+
+/// Apply a planned declare: append + save. No acknowledgment gate and no `would_conflict` pre-check
+/// (DFW-D8 — declaring is a plain `$0`, revocable confirmation, unlike promote's typed-phrase tier; the
+/// shipped verb never ran a `would_conflict` check either — `cmd/tranche.rs:166-174` appends immediately
+/// once `guard_tranche_vs_allocation` passes).
+pub fn apply_declare(
+    session: &mut Session,
+    plan: DeclarePlan,
+    now: OffsetDateTime,
+) -> Result<EventId, CliError> {
+    let id = append_decision(session.conn(), plan.payload, now, UtcOffset::UTC, None)?;
+    session.save()?;
+    Ok(id)
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// Task 3 — the EXPORT chokepoint (degenerate trio): `plan_export`/`apply_export`, composed over the
+// ALREADY-SHIPPED `export_irs_pdf_from_session` (`cmd::admin`, ★ arch-C-1) so a future TUI can drive the
+// EXACT SAME gated IRS-PDF export pipeline the CLI does WITHOUT a second `Session::open` (a second open
+// under the TUI's held `VaultLock` deadlocks the editor, `session.rs:662`). Unlike promote/declare,
+// export APPENDS no decision — there is no acknowledgment gate, and `apply_export` takes `&Session`
+// (never `&mut`), mirroring `export_full_return`'s own `&Session` parameterization.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// BG-D8's 8275-completeness year enumeration ONLY — extracted verbatim from `promote_export_gate`'s
+/// `None` arm (`cmd/admin.rs`) so the gate and any other 8275-completeness caller single-source it (SPEC
+/// DFW-D11: "single-sourced ... but it is NOT the export set"). A year is included iff a PROMOTED
+/// disposal leg (`lot_id.origin_event_id ∈ state.promoted_origins`) files in it — DISPOSAL legs only; a
+/// promote's REMOVAL (donation/gift) reorder is invisible here by design — that is exactly what
+/// `flagged_years` (`btctax_core::conservative`), below, exists to also catch.
+///
+/// ★ whole-branch arch M-2: `pub(crate)`, not `pub`. Its only production caller is in-crate
+/// (`cmd/admin.rs`'s `promote_export_gate`); it was `pub` solely to serve one integration test, which
+/// would have put it on btctax-cli's v0.10.0 PUBLIC API for good. Public API is far cheaper to narrow
+/// before the first release than after. The disposal-legs-only contract is pinned by the in-crate unit
+/// test below instead.
+pub(crate) fn promoted_filing_years(state: &LedgerState) -> BTreeSet<i32> {
+    let mut years = BTreeSet::new();
+    for d in &state.disposals {
+        if d.legs
+            .iter()
+            .any(|l| state.promoted_origins.contains(&l.lot_id.origin_event_id))
+        {
+            years.insert(d.disposed_at.year());
+        }
+    }
+    years
+}
+
+/// A planned multi-year IRS-PDF export (DFW-D11): the year-set, the shared `--out` base directory, and
+/// the `--forms` slice (honored on a crypto-slice year, ignored on a full-return year —
+/// `IrsPdfReport::forms_ignored_full_return` says so per year). `apply_export` writes each year's packet
+/// into its OWN `out_dir/<year>` subdirectory (never the bare `out_dir` itself) — the crypto-slice
+/// pipeline writes BARE filenames (`f8949.pdf`, `schedule_d.pdf`, …) for exactly one tax year at a time,
+/// so a shared, un-suffixed directory across two exported years would let the second year silently
+/// clobber the first's packet (the same chimera-return hazard `export_full_return`'s sequence-prefixed
+/// names guard against).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExportPlan {
+    pub years: BTreeSet<i32>,
+    pub out_dir: PathBuf,
+    pub forms: Vec<FormArg>,
+    /// ★ whole-branch tax M-2: candidate years this build bundles NO IRS form templates for
+    /// (`btctax_forms::SUPPORTED_YEARS`) — held OUT of `years` (so `apply_export` never attempts, and
+    /// never half-writes, a packet that cannot be filled) and surfaced as an informational note rather
+    /// than a per-year FAILURE. Two distinct populations land here and both are honest, not defects:
+    /// the CURRENT year before its forms are bundled (in 2026 that is EVERY filer, whose `x` otherwise
+    /// read "0 of 1 year(s) written — 2026 failed: unsupported tax year 2026"), and a flagged PRIOR year
+    /// outside the bundle — which the filer must still amend, by hand.
+    pub unsupported_years: BTreeSet<i32>,
+}
+
+/// ★ T3-M2 (Task 10): ONE year's `apply_export` outcome — the planned tax year paired with either its
+/// written `IrsPdfReport` or the `CliError` that failed IT ALONE (per-year isolation: a failure here
+/// never aborts the other years' attempts). A named alias (clippy `type_complexity`) so
+/// `persist_defensive_export`/`render_export_status` (`btctax-tui-edit`) can name the SAME shape without
+/// repeating the nested `(i32, Result<..>)`.
+pub type ExportOutcome = (i32, Result<IrsPdfReport, CliError>);
+
+/// `apply_export`'s full per-year outcome set — one [`ExportOutcome`] per `plan.years`, in ascending
+/// order, NEVER an all-or-nothing abort on the first failing year.
+pub type ExportOutcomes = Vec<ExportOutcome>;
+
+/// Plan a multi-year IRS-PDF export (DFW-D11) — gates over already-projected `state` ONLY; NO
+/// consent/acknowledgment (export mutates no events; arch-m-new-3: no `Session` here either — the caller
+/// supplies its own already-loaded `events`/`state`/`prices`/`tables`/`cfg`, mirroring `plan_promote`).
+/// Refuses when `state.pseudo_active()`: unlike `export_irs_pdf`'s CLI/`export-snapshot` attest-phrase
+/// escape hatch, this composed export step NEVER prompts for one (the standing DRAFT-gate policy) — a
+/// pseudo-active vault must resolve/turn off pseudo mode (or approve + attest through the existing
+/// single-year CLI path) before this chokepoint will plan anything.
+///
+/// The CANDIDATE set is `{current_year} ∪ flagged_years(events, state, prices, tables, cfg,
+/// current_year)` — STRICTLY a superset of `promoted_filing_years(state)` (SPEC DFW-D11): the fold-diff
+/// set also catches a promote's HIFO reorder of a prior year's donation/gift with NO promoted disposal
+/// leg in that year at all, AND (★ whole-branch tax I-1) the prior year a `$0`-only `DeclareTranche`
+/// re-filed with no promote anywhere.
+///
+/// ★ whole-branch tax M-2: the candidate set is then PARTITIONED against
+/// `btctax_forms::SUPPORTED_YEARS` — a year with no bundled IRS form templates goes to
+/// `unsupported_years` instead of `years`, so `apply_export` never attempts (and
+/// `export_irs_pdf_from_session` never half-writes) a packet that cannot be filled, and the outcome
+/// reads as "no bundled IRS templates for <year> yet" rather than a per-year FAILURE.
+#[allow(clippy::too_many_arguments)]
+pub fn plan_export(
+    events: &[LedgerEvent],
+    state: &LedgerState,
+    prices: &dyn PriceProvider,
+    tables: &dyn TaxTables,
+    cfg: &ProjectionConfig,
+    current_year: i32,
+    out_dir: PathBuf,
+    forms: Vec<FormArg>,
+) -> Result<ExportPlan, Refusal> {
+    if state.pseudo_active() {
+        return Err(Refusal::Coverage(
+            "cannot export: the ledger is pseudo-reconciled (a synthetic, non-persisted default \
+             contributes to the projection) — this composed export step never prompts for an \
+             attestation override. Run `btctax reconcile pseudo off` (or approve + attest the \
+             defaults through the single-year `export-irs-pdf`/`export-snapshot` CLI path) before \
+             exporting."
+                .to_string(),
+        ));
+    }
+
+    let mut candidates =
+        conservative::flagged_years(events, state, prices, tables, cfg, current_year);
+    candidates.insert(current_year);
+
+    let (years, unsupported_years): (BTreeSet<i32>, BTreeSet<i32>) = candidates
+        .into_iter()
+        .partition(|y| btctax_forms::SUPPORTED_YEARS.contains(y));
+
+    Ok(ExportPlan {
+        years,
+        out_dir,
+        forms,
+        unsupported_years,
+    })
+}
+
+/// Apply a planned export: write ONE IRS-PDF packet per `plan.years`, each into its own `out_dir/<year>`
+/// subdirectory, via the ALREADY-SHIPPED `export_irs_pdf_from_session` (★ arch-C-1, `cmd::admin`) — the
+/// SAME `return_inputs::exists` full-vs-slice dispatch the CLI's `export_irs_pdf` runs, exercised ONCE
+/// per year, INSIDE that fn (never duplicated here — ★ m-new-1). Reloads `events`/`state` fresh from
+/// `session` (arch-m-new-3 pattern) — a single synchronous CLI/TUI invocation cannot append anything
+/// between `plan_export` and `apply_export`, so this is behavior-preserving. `attest: None` throughout:
+/// `plan_export` already refused a pseudo-active state, so the watermark/attestation branch inside
+/// `_from_session` is unreachable here. NO `Session::open` anywhere — `session` is already open and held
+/// by the caller (the CLI's thin driver, or a future TUI); a second open under a held `VaultLock`
+/// deadlocks (`session.rs:662`).
+///
+/// ★ T3-M2 (Task 10) — PER-YEAR ISOLATION: a failure writing ONE year's packet (e.g. a year whose Form
+/// 8275 Part I overflows this revision's 6 rows, or an I/O fault under `out_dir`) does NOT
+/// abort the batch. Every year in `plan.years` is attempted, in ascending order (`plan.years` is a
+/// `BTreeSet`), and its outcome is reported INDIVIDUALLY as `(year, Result<IrsPdfReport, CliError>)`.
+/// Years already written to disk before a LATER year's failure stay correct — nothing already written is
+/// rolled back (each year's packet is an independent, self-contained write; export performs no in-memory
+/// mutation to revert). No unattested/pseudo packet can ever escape a per-year failure: `plan_export`
+/// already refused a pseudo-active ledger up front, and `attest: None` is passed on every call regardless
+/// of outcome. The outer `Result` covers only the ONE failure mode common to every year — re-loading
+/// `events`/`state` from `session` — which, if it fails, means NOTHING could even be attempted.
+///
+/// `plan.unsupported_years` is NOT attempted here (★ whole-branch tax M-2 — `plan_export` already held
+/// those out): they carry no bundled IRS form templates, so an attempt could only ever fail, and the
+/// caller renders them as a "no bundled templates yet" note beside these outcomes.
+pub fn apply_export(session: &Session, plan: ExportPlan) -> Result<ExportOutcomes, CliError> {
+    let (events, state, _cfg) = session.load_events_and_project()?;
+    let mut reports = Vec::with_capacity(plan.years.len());
+    for year in &plan.years {
+        let year_dir = plan.out_dir.join(year.to_string());
+        let outcome = crate::cmd::admin::export_irs_pdf_from_session(
+            session,
+            &state,
+            &events,
+            &year_dir,
+            *year,
+            &plan.forms,
+            None,
+        );
+        reports.push((*year, outcome));
+    }
+    Ok(reports)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use btctax_core::state::{Disposal, DisposalLeg, Term};
+    use btctax_core::{BasisSource, DisposeKind, LotId};
+    use rust_decimal_macros::dec;
+    use time::macros::date;
+
+    fn wallet() -> WalletId {
+        WalletId::SelfCustody {
+            label: "pfy".into(),
+        }
+    }
+
+    fn leg(origin: EventId) -> DisposalLeg {
+        DisposalLeg {
+            lot_id: LotId {
+                origin_event_id: origin,
+                split_sequence: 0,
+            },
+            sat: 1_000_000,
+            proceeds: dec!(100),
+            basis: dec!(0),
+            gain: dec!(100),
+            term: Term::LongTerm,
+            basis_source: BasisSource::EstimatedConservative,
+            gift_zone: None,
+            acquired_at: date!(2016 - 03 - 31),
+            wallet: wallet(),
+            pseudo: false,
+        }
+    }
+
+    fn disposal(year: i32, origin: EventId) -> Disposal {
+        Disposal {
+            event: EventId::decision(90 + year as u64 % 10),
+            kind: DisposeKind::Sell,
+            disposed_at: time::Date::from_calendar_date(year, time::Month::June, 1).unwrap(),
+            legs: vec![leg(origin)],
+            fee_mini_disposition: false,
+        }
+    }
+
+    /// ★ whole-branch arch M-2 (replaces the cross-crate assertion that forced `promoted_filing_years`
+    /// onto btctax-cli's PUBLIC API): the BG-D8 8275-completeness enumeration is DISPOSAL-LEG-scoped and
+    /// PROMOTE-scoped — a year files here iff a disposal leg in it draws a lot whose origin is in
+    /// `state.promoted_origins`. A year whose only change is a REMOVAL (donation/gift) reorder, or whose
+    /// disposal legs draw an UNPROMOTED origin, is correctly absent — that is precisely the gap
+    /// `conservative::flagged_years` (the DFW-D11 export set) exists to cover, and why the gate's set is
+    /// explicitly NOT the export set.
+    ///
+    /// Mutation: drop the `promoted_origins` membership test (enumerate every disposal year) → 2024
+    /// appears → reds.
+    #[test]
+    fn promoted_filing_years_enumerates_promoted_disposal_legs_only() {
+        let promoted = EventId::decision(1);
+        let unpromoted = EventId::decision(2);
+
+        let state = LedgerState {
+            disposals: vec![
+                disposal(2024, unpromoted.clone()),
+                disposal(2025, promoted.clone()),
+            ],
+            promoted_origins: [promoted].into_iter().collect(),
+            ..Default::default()
+        };
+
+        let years = promoted_filing_years(&state);
+        assert_eq!(
+            years.iter().copied().collect::<Vec<_>>(),
+            vec![2025],
+            "only the year holding a PROMOTED disposal leg is enumerated: {years:?}"
+        );
+        assert!(
+            !years.contains(&2024),
+            "an unpromoted disposal leg's year must NOT enter the 8275-completeness set: {years:?}"
+        );
+    }
+}

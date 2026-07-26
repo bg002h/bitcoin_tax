@@ -416,6 +416,92 @@ pub fn persist_method_election(
     Ok(id)
 }
 
+/// ★ Task 8 (C-3/KAT-G1): the Declare flow's WRITE — and the ONLY call site of
+/// `btctax_cli::apply_declare` anywhere in this crate (mechanically enforced by
+/// `kat_g1_mechanized_source_gate`'s `persist_only_tokens`, below). The Declare flow
+/// (`edit/declare_flow.rs`) COLLECTS window/sat/wallet and reads `btctax_cli::plan_declare` for its
+/// live readout/clearance check (a pure planner — no mutation, so it is NOT confined here); it hands
+/// the resulting `DeclarePlan` to THIS wrapper to actually persist.
+///
+/// # Failed-save rollback [save-rollback]
+/// Unlike `persist_method_election` (a raw `append_decision` this module calls directly),
+/// `btctax_cli::apply_declare` bundles append+save INTERNALLY (`chokepoint::apply_declare`: `let id =
+/// append_decision(...)?; session.save()?;`) with no snapshot/rollback of its own — so THIS wrapper
+/// snapshots before calling it and, on ANY `Err`, reverts via `rollback` (mirrors `form_commit`'s
+/// documented split: a fn that does NOT do its own snapshot/restore around its `save()` gets one HERE).
+/// A `NoChange`/`RolledBack` distinction cannot be recovered from the bare `CliError` `apply_declare`
+/// returns (it could be either the append or the save that failed) — reverting on ANY error is safe
+/// either way: if nothing was appended yet, the revert is a no-op-equivalent; if the append succeeded
+/// before a save failure, the revert discards the in-memory residue, exactly the `RolledBack`
+/// guarantee every other persist fn here provides.
+pub fn persist_declare_tranche(
+    session: &mut btctax_cli::Session,
+    plan: btctax_cli::DeclarePlan,
+    now: time::OffsetDateTime,
+) -> Result<btctax_core::EventId, PersistError> {
+    let pre = session.snapshot()?;
+    match btctax_cli::apply_declare(session, plan, now) {
+        Ok(id) => Ok(id),
+        Err(e) => Err(rollback(session, &pre, e)),
+    }
+}
+
+/// ★ Task 9 (C-3/KAT-G1): the Promote flow's WRITE — and the ONLY call site of
+/// `btctax_cli::apply_promote` anywhere in this crate (mechanically enforced by
+/// `kat_g1_mechanized_source_gate`'s `persist_only_tokens`, below). The Promote flow
+/// (`edit/promote_flow.rs`) COLLECTS the Part II narrative + the typed ack phrase and reads
+/// `btctax_cli::plan_promote`/`render_consent` for its consent screen (pure planners — no mutation, so
+/// neither is confined here); it hands the resulting `PromotePlan` + the typed phrase to THIS wrapper to
+/// actually persist. Mirrors `persist_declare_tranche` exactly.
+///
+/// # Failed-save rollback [save-rollback]
+/// `btctax_cli::apply_promote` bundles the BG-D6 acknowledgment gate + the BG-D9 `would_conflict`
+/// pre-check + append+save INTERNALLY, with no snapshot/rollback of its own — so THIS wrapper snapshots
+/// before calling it and, on ANY `Err`, reverts via `rollback`. A wrong/missing ack phrase fails INSIDE
+/// `apply_promote` BEFORE any append (`require_promote_ack` runs first), so the revert is a no-op in
+/// that case; if the ack matched but a LATER step (`would_conflict`, append, save) failed, the revert
+/// discards any residue — the same "safe either way" reasoning `persist_declare_tranche`'s doc gives.
+pub fn persist_promote_tranche(
+    session: &mut btctax_cli::Session,
+    plan: btctax_cli::PromotePlan,
+    acknowledge: Option<&str>,
+    now: time::OffsetDateTime,
+) -> Result<btctax_core::EventId, PersistError> {
+    let pre = session.snapshot()?;
+    match btctax_cli::apply_promote(session, plan, acknowledge, now) {
+        Ok(id) => Ok(id),
+        Err(e) => Err(rollback(session, &pre, e)),
+    }
+}
+
+/// ★ Task 10 (C-3/KAT-G1): the export step's WRITE — the wizard's THIRD and FINAL write path, and the
+/// ONLY call site of `btctax_cli::apply_export` anywhere in this crate (mechanically enforced by
+/// `kat_g1_mechanized_source_gate`'s `persist_only_tokens`, below). `main.rs`'s `execute_defensive_export`
+/// reads `btctax_cli::plan_export` (a pure planner — no mutation, so it is NOT confined here, mirroring
+/// `plan_declare`/`plan_promote`) and hands the resulting `ExportPlan` to THIS wrapper to actually export.
+///
+/// # A thin pass-through, NOT a snapshot/rollback wrapper
+/// Unlike `persist_declare_tranche`/`persist_promote_tranche`, `btctax_cli::apply_export` takes `&Session`
+/// (never `&mut`) and appends no decision / calls no `session.save()` internally — export is a pure FILE
+/// write (one IRS-PDF packet per planned year, each into its own `out_dir/<year>/`), never a vault
+/// mutation, so there is nothing to snapshot before or roll back after (mirrors `apply_export`'s own doc:
+/// "export mutates no events"). `PersistError`'s snapshot/rollback machinery exists for the append+save
+/// mutation surface this fn never touches; using it here would be a false invariant, so this wrapper
+/// returns `apply_export`'s own `Result` verbatim instead.
+///
+/// # Per-year isolation flows through verbatim [T3-M2]
+/// `apply_export`'s `Ok` carries a `btctax_cli::ExportOutcomes` — one outcome PER planned year, never an
+/// all-or-nothing abort on the first failing year. This wrapper does not collapse or
+/// reinterpret that structure; the caller renders it via `defensive_dashboard::render_export_status`
+/// (★ T3-M1: the per-year `out_dir/<year>` paths are surfaced there, not just "done"). The outer `Err`
+/// covers only the one failure mode common to every year (re-loading `events`/`state` from `session`).
+pub fn persist_defensive_export(
+    session: &btctax_cli::Session,
+    plan: btctax_cli::ExportPlan,
+) -> Result<btctax_cli::ExportOutcomes, btctax_cli::CliError> {
+    btctax_cli::apply_export(session, plan)
+}
+
 /// Append a `VoidDecisionEvent` decision and atomically save the vault.
 ///
 /// `target_event_id` is the EventId of the revocable decision to void.
@@ -1952,6 +2038,20 @@ mod tests {
         // mutation-surface token confinable to edit/persist.rs. Note: this is NOT a false positive
         // for ratatui teardown (that is `restore_terminal` = `restore_`, not `restore(`), and
         // `snapshot(` is deliberately NOT gated (a pure read, and `build_snapshot(` contains it).
+        // ★ Task 8 (C-3): "apply_declare(" added — the Defensive Filing Wizard's DECLARE chokepoint
+        // write (`btctax_cli::apply_declare`, re-exported at the crate root). Confined to
+        // `persist_declare_tranche` in THIS file; the Declare flow (`edit/declare_flow.rs`) only reads
+        // `btctax_cli::plan_declare` (a pure planner — not gated, mirrors `plan_promote` staying
+        // ungated too).
+        // ★ Task 9 (C-3): "apply_promote(" added — the Defensive Filing Wizard's PROMOTE chokepoint
+        // write (`btctax_cli::apply_promote`, re-exported at the crate root). Confined to
+        // `persist_promote_tranche` in THIS file; the Promote flow (`edit/promote_flow.rs`) only reads
+        // `btctax_cli::plan_promote`/`render_consent` (pure planners — not gated).
+        // ★ Task 10 (C-3): "apply_export(" added — the Defensive Filing Wizard's EXPORT chokepoint write
+        // (`btctax_cli::apply_export`, re-exported at the crate root). Confined to
+        // `persist_defensive_export` in THIS file; `main.rs`'s `execute_defensive_export` (the `x`
+        // action's dispatch — export has no multi-step flow module of its own) only reads
+        // `btctax_cli::plan_export` (a pure planner — not gated).
         let persist_only_tokens: &[&str] = &[
             "conn(",
             "save(",
@@ -1960,6 +2060,9 @@ mod tests {
             "donation_details::set",
             "optimize_attest::set",
             "restore(",
+            "apply_declare(",
+            "apply_promote(",
+            "apply_export(",
         ];
 
         // Test-region forbidden everywhere (no viewer export surface in the editor):
@@ -2137,6 +2240,12 @@ mod tests {
             let tok_dd_set = format!("{}::{}", "donation_details", "set"); // "donation_details::set"
                                                                            // chunk4b: optimize_attest::set added to persist_only_tokens.
             let tok_oa_set = format!("{}::{}", "optimize_attest", "set"); // "optimize_attest::set"
+                                                                          // ★ Task 8 (C-3): apply_declare( added to persist_only_tokens.
+            let tok_apply_declare = format!("{}(", "apply_declare"); // "apply_declare("
+                                                                     // ★ Task 9 (C-3): apply_promote( added to persist_only_tokens.
+            let tok_apply_promote = format!("{}(", "apply_promote"); // "apply_promote("
+                                                                     // ★ Task 10 (C-3): apply_export( added to persist_only_tokens.
+            let tok_apply_export = format!("{}(", "apply_export"); // "apply_export("
 
             let content = format!(
                 "// planted self-check file\n\
@@ -2148,6 +2257,9 @@ mod tests {
                  \tlet _ = {tok_session_create}(&path, &pp);\n\
                  \tlet _ = {tok_dd_set}(conn, &id, &d);\n\
                  \tlet _ = {tok_oa_set}(conn, &id, &a, &at);\n\
+                 \tlet _ = {tok_apply_declare}session, plan, now);\n\
+                 \tlet _ = {tok_apply_promote}session, plan, ack, now);\n\
+                 \tlet _ = {tok_apply_export}session, plan);\n\
                  }}\n"
             );
             std::fs::write(&planted_path, &content).unwrap();
@@ -2177,6 +2289,18 @@ mod tests {
             assert!(
                 hits_persist.iter().any(|(t, _)| t == "optimize_attest::set"),
                 "self-check FAILED: scanner did not detect planted optimize_attest::set token [chunk4b] — gate is broken"
+            );
+            assert!(
+                hits_persist.iter().any(|(t, _)| t == "apply_declare("),
+                "self-check FAILED: scanner did not detect planted apply_declare( token [Task 8 / C-3] — gate is broken"
+            );
+            assert!(
+                hits_persist.iter().any(|(t, _)| t == "apply_promote("),
+                "self-check FAILED: scanner did not detect planted apply_promote( token [Task 9 / C-3] — gate is broken"
+            );
+            assert!(
+                hits_persist.iter().any(|(t, _)| t == "apply_export("),
+                "self-check FAILED: scanner did not detect planted apply_export( token [Task 10 / C-3] — gate is broken"
             );
 
             // Verify scanner catches the R0-I1 vault-creating constructor.
