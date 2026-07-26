@@ -260,9 +260,20 @@ All four blocking/near-blocking items below landed in the SAME commit; both bloc
   snapshot (dashboard rows, the declare/promote flows' `plan_*` inputs, `journey_view`). Fix the class, not the
   instance: either invalidate `app.snapshot` (`None`) on a failed re-projection so every reader fails loud instead of
   reading stale, or route all of them through one `after_write` helper that owns the invalidate — which also folds the
-  still-open `after_defensive_write` half of arch-M-1 above. **Not a filing-correctness gate today** (no writer
-  re-derives a filed number from `app.snapshot` without its own fresh `plan_*`), so this is post-merge-safe.
+  still-open `after_defensive_write` half of arch-M-1 above. ~~**Not a filing-correctness gate today** (no writer
+  re-derives a filed number from `app.snapshot` without its own fresh `plan_*`), so this is post-merge-safe.~~
   (Owner: **post-merge / next cycle.**)
+  ★ **THE NON-BLOCKING JUSTIFICATION ABOVE IS FALSE — struck 2026-07-26** (Cycle-1 design, tax lens r1 C-1,
+  independently verified). No confirm tail reads `session`: `promote_flow_confirm` (`main.rs:4466-4480`) does
+  not re-plan at all — it extracts the `PromotePlan` built at `promote_flow_review` (`:4367-4375`) from
+  `&snap.events`/`&snap.prices`, and `plan_promote` writes `Acknowledgment { shown_terms }` INTO the payload
+  (`chokepoint/mod.rs:406-419`) which `apply_promote` appends verbatim (`:478`). `declare_flow_confirm`
+  re-plans but also off `snap` (`main.rs:4178-4188`). The bulk paths freeze `fmv` from `snap` into the payload
+  (`:8612-8627`). So a stale snapshot can write a WRONG §6664(c) record, a wrong prior-year amend set, and
+  wrong Schedule-1/8949 basis numbers — permanently. Under the project severity rule this was **Critical**,
+  and it should have blocked the merge rather than becoming a post-merge item. Being fixed in Cycle 1
+  (`design/stale-snapshot-latch/`). **Lesson: a "not filing-correctness" claim must be traced to the payload
+  construction site, not assumed from the confirm-tail's re-plan.**
 
 **Explicitly NOT touched (USER decision, handled separately):** the era-preset table content and its default preset
 (`crates/btctax-core/src/defensive/era.rs`), including the PROVISIONAL language and the missing ≥2025 bucket — see the
@@ -368,9 +379,15 @@ fold: the blockers and tax-M-3 are pure documentation; tax-M-1 makes an export y
   construction.** `execute_defensive_export` now re-projects before planning (r1 arch I-1), but the declare and
   promote flows still read `app.snapshot` for their `plan_*` inputs, and `main.rs` carries **26**
   `"Saved but re-projection failed ({e}) — restart to refresh"` tails (grep the literal), each leaving
-  `app.snapshot` on the PRE-write image. Not a filing-correctness gate today — both confirm tails re-run their
+  `app.snapshot` on the PRE-write image. ~~Not a filing-correctness gate today — both confirm tails re-run their
   own FRESH `plan_declare`/`plan_promote` against `session` at the Enter, so no filed number is derived from the
-  stale image — but the SHOWN readout (floor/coverage/tax-Δ, dashboard rows) can lag. Same remedy as the
+  stale image~~ — but the SHOWN readout (floor/coverage/tax-Δ, dashboard rows) can lag.
+  ★ **FALSE — struck 2026-07-26; see the CLASS item above for the verified trace.** Neither confirm tail reads
+  `session`; both derive the filed payload from `app.snapshot`. Also **the tail count here is wrong**: "26" is a
+  grep that includes its own two doc comments (`main.rs:4601`, `:14321`), the literal matches 24, and the real
+  class — derived from `build_snapshot(` — is **27**, the extra three being `:1347` (tax-inputs commit),
+  `:1530` (tax-inputs park) and `:7032` (safe-harbor attest, the highest-stakes write in the editor), which
+  carry bespoke `Err` copy and so matched no grep for the literal. Same remedy as the
   standing class item: invalidate `app.snapshot` on a failed re-projection, or route every write through one
   `after_write` helper that owns the invalidate (which also folds the open `after_defensive_write` half of
   arch-M-1). Duplicate-safe: this is the same root cause as "Stale `app.snapshot` after a failed re-projection —
