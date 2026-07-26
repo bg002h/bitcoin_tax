@@ -221,9 +221,23 @@ engine-invisible; forward-planning only). There is **no manual "I hold N BTC" da
   the holdings model).
 
 - **DFW-D9 (era presets + safe-harbor — I-7, M-3; SPEC-r1 tax-M-3, arch-m-1).** Presets are confirm/edit
-  **starting points**, not authoritative windows. The **preset-confirm copy MUST frame the window as the
-  filer's OWN knowledge of when they acquired the coins** — the attested window is the *substance* of the
-  BG-D5 attestation and the Cohan/§6664(c) footing, and must never read as tool-sourced. **DFW-D5's
+  **starting points**, not authoritative windows. ★ **AMENDED (owner decision, 2026-07-26): NO preset is
+  pre-selected — the filer must ACTIVELY pick one, and the flow refuses to advance or confirm without a
+  pick (fail-closed, recording nothing).** On the `$0`-declare branch the window's only filing-substantive
+  effect is the HOLDING PERIOD (the basis is `$0` either way), because `window_end` IS the lot's
+  acquisition date — so pre-selecting the oldest bucket defaulted nearly every covered disposal to
+  long-term at preferential rates, i.e. the tool answering a filing question, in the taxpayer-favorable
+  direction, that the filer never answered (the answered-ness invariant). The picker mirrors DFW-D12's
+  BG-D5 provenance step: a numbered list of every bucket, an explicit "(none yet)" state, the pick held
+  outside `step` so it survives a bounce, and a preset that cannot apply to this shortfall (its start is
+  after the DFW-D5 before-op boundary) REFUSED with the reason rather than silently skipped or collapsed
+  to a degenerate one-day window. The bucket table itself is owner-RATIFIED: deliberate claim-free round
+  calendar spans (no historical/exchange/event claim to be wrong about), now including a **2025-onward**
+  bucket, since `pool_key` puts pre- and post-cutover lots in different pools and a pre-2025 tranche
+  therefore cannot cover a post-2025 disposal in the same wallet. The **preset-confirm copy MUST frame
+  the window as the filer's OWN knowledge of when they acquired the coins** — the attested window is the
+  *substance* of the BG-D5 attestation and the Cohan/§6664(c) footing, and must never read as
+  tool-sourced. **DFW-D5's
   before-the-short-op prefill governs over a preset's `window_end` where they conflict** (an era end
   after the short op would not cover — and `window_end` IS the lot's holding-period start,
   `resolve.rs:~1310`, so it also sets short/long-term). A **mandatory live readout** shows the resulting

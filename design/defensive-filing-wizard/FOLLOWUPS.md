@@ -52,7 +52,7 @@ P-C-owned remains open.)*
 
 ## P-D / ship (re-owned + newly filed at the P-C gate, 2026-07-26)
 
-- **[open] Era→window preset table — real product-authored content.** ★ RE-OWNED from P-C to **P-D/ship** (arch gate
+- **[done] Era→window preset table — real product-authored content.** ★ RE-OWNED from P-C to **P-D/ship** (arch gate
   adjudication): it is a **USER** decision the phase cannot discharge, so leaving it P-C-owned made the gate unclosable
   by construction. Both lenses ruled it non-blocking (presets are seeds; `plan_declare` re-validates the chosen window;
   the filed floor is `filed_basis_for` requiring `Coverage::Full`; `defensive_era.rs` KATs pin the structural properties).
@@ -62,12 +62,31 @@ P-C-owned remains open.)*
   holding-period character (see M-5 below); (b) cycling to a preset later than the short op must not leave an inverted
   window (fixed in code at `47225af`, but re-check against any new table); (c) there is no ≥2025 bucket, so a post-2024
   shortfall's window is reachable only by ±1-day nudges (see the free-text-entry item).
-- **[open] tax-M-5 — the default preset seeds a taxpayer-FAVORABLE holding date.** `window_end` IS the lot's acquisition
+  ★ **CLOSED — the OWNER decided (2026-07-26): the round calendar buckets are RATIFIED as intentional (they make no
+  historical/exchange/event claim, so nothing in them can be factually wrong), there is now NO default preset (an
+  explicit filer pick is REQUIRED — see M-5), and a `Y2025Onward` bucket was ADDED.** The `PROVISIONAL` /
+  "NOT a product-approved artifact" self-disclaimer was stripped from `era.rs` (it would have published to crates.io)
+  and replaced with an accurate, non-overclaiming note. Sub-decision (b) survives in its stronger form — an
+  inapplicable preset is now REFUSED with a reason rather than silently skipped. Sub-decision (c) is closed by the new
+  bucket. `defensive_era.rs`'s `all_presets_end_strictly_before_the_pre2025_pooling_cutover` was REPLACED (not deleted)
+  by `no_preset_window_straddles_the_pooling_cutover`, the invariant that actually preserves the property the old guard
+  protected. The `{:?}` label Nit stays open under the "Debug-format rows" residue item (the picker now renders each
+  bucket's concrete dates beside its name, which carries the substance).
+- **[done] tax-M-5 — the default preset seeds a taxpayer-FAVORABLE holding date.** `window_end` IS the lot's acquisition
   date (`resolve.rs:1310`), so defaulting to the oldest bucket (2009-01-03..2011-12-31) makes nearly every disposal
   **long-term** at the preferential rate — while the code justifies oldest-first purely on the basis axis. Not silent
   (window + "(long-term at the short op's date)" render on Edit and Confirm) and there is shipped precedent
   (`conventions::long_term_default_acquired`), but it is a TAX dimension of the era decision and should be chosen
   explicitly. (Owner: **P-D/ship**, rides the era-table decision.)
+  ★ **CLOSED — the OWNER required an EXPLICIT PICK (2026-07-26): there is no default preset at all.** On the
+  `$0`-declare branch the window's only filing-substantive effect IS the holding period (the basis is `$0` either way),
+  so pre-selecting the oldest bucket was the tool answering a filing question in the taxpayer-favorable direction —
+  the answered-ness invariant. `DeclareFlowState.preset`/`.window_start` are now `Option`, opening `None`; the flow
+  refuses to advance or confirm without a pick (fail-closed at BOTH `review()` and `declare_flow_confirm`); the picker
+  mirrors the BG-D5 provenance step (numbered list, "(none yet — press 1-6)", pick preserved across a bounce). The
+  DFW-D5 prefill is untouched and independent (`window_end` opens at the before-op day, `wallet` = the source pool).
+  KATs (a)-(d) in `declare_flow.rs` + the e2e fail-closed leg in `main.rs::declare_flow_end_to_end_...`; all
+  mutation-verified.
 - **[done] SPEC line for the provenance step.** The P-C gate added an explicit BG-D5 provenance-selection step to the
   promote flow (tax I-2). No design artifact named a provenance picker either way. CLOSED at the whole-branch fold:
   **SPEC DFW-D12** now carries the step explicitly — an unprompted filer answer (nothing preselects `Purchase`), the
@@ -212,10 +231,24 @@ All four blocking/near-blocking items below landed in the SAME commit; both bloc
   narrow before the first release than after); its only production caller is in-crate (`cmd/admin.rs`). The
   disposal-legs-only contract is now pinned by an in-crate unit test,
   `chokepoint::tests::promoted_filing_years_enumerates_promoted_disposal_legs_only`. (Owner: **P-D/whole-branch** — DONE.)
+- **[open] Stale `app.snapshot` after a failed re-projection — the CLASS, not just the instance.** The whole-branch fold
+  closed the one place where it could produce a WRONG FILED ARTIFACT: `execute_defensive_export` now re-projects BEFORE
+  planning and REFUSES outright if the ledger will not project (`main.rs:4618-4639`), so the exported year set and the
+  packet content always come from the same image — export is immune **by construction**, not by luck. But the class
+  remains: `main.rs` carries **26** `"Saved but re-projection failed ({e}) — restart to refresh"` tails (grep the
+  literal), each of which leaves `app.snapshot` holding the PRE-write image while the vault on disk has moved on. The
+  status tells the filer to restart, but nothing stops them ignoring it and driving another read off the stale
+  snapshot (dashboard rows, the declare/promote flows' `plan_*` inputs, `journey_view`). Fix the class, not the
+  instance: either invalidate `app.snapshot` (`None`) on a failed re-projection so every reader fails loud instead of
+  reading stale, or route all of them through one `after_write` helper that owns the invalidate — which also folds the
+  still-open `after_defensive_write` half of arch-M-1 above. **Not a filing-correctness gate today** (no writer
+  re-derives a filed number from `app.snapshot` without its own fresh `plan_*`), so this is post-merge-safe.
+  (Owner: **post-merge / next cycle.**)
 
 **Explicitly NOT touched (USER decision, handled separately):** the era-preset table content and its default preset
 (`crates/btctax-core/src/defensive/era.rs`), including the PROVISIONAL language and the missing ≥2025 bucket — see the
-P-D/ship section above.
+P-D/ship section above. ★ **RESOLVED 2026-07-26** — the owner ruled on all of it (ratified buckets + explicit pick +
+`Y2025Onward` + disclaimer stripped); the P-D/ship entries above carry the detail.
 
 ## Copy pass / whole-branch review (ownerless residue — batch to the end)
 
@@ -228,12 +261,19 @@ P-D/ship section above.
   renders: `render_declare_flow`/`render_promote_flow` add `{:?}` on shortfall/wallet/era-preset/tranche (e.g.
   "shortfall Decision { seq: 1 }", `wallet: SelfCustody { label: "..." }`, `era preset: Y2009To2011`, "tranche
   Decision { seq: 1 }").
+- **[open] `era::next_preset` is production-dead** — the owner's explicit-pick decision replaced the Declare flow's
+  Tab-cycling with a numbered picker, so nothing in production calls it any more (its own two KATs are the only
+  callers). Deliberately NOT deleted in that commit: it is pure, total, derived from `ALL_PRESETS` (so it cannot
+  drift), gates nothing, and is already published API — unlike `clearance()` (arch-M-2) it is not a second authority,
+  so this is a tidiness item, not a correctness one. Delete it (with its two KATs) at the next API-narrowing pass if
+  no picker needs it.
 - **[open] tax Nit 2** — the Provenance screen states which answer passes the gate BEFORE the filer answers ("Only a
   PURCHASE can be promoted…" renders above the picker) — honest disclosure of the rule (same wording
   `refuse_non_purchase` uses), but mildly leading on a screen whose purpose is an unprompted filer answer. Consider
   moving that sentence into the refusal path.
-- **[open] Free-text date/sat entry** (T8-review Nit) — the declare flow edits via nudge (±1d/±1000 sat) + preset-cycling
-  (a legitimate DFW-D9 "edit"); free-text entry, if wanted, is a contained `declare_flow.rs` follow-up.
+- **[open] Free-text date/sat entry** (T8-review Nit) — the declare flow edits via nudge (±1d/±1000 sat) on top of the
+  numbered era pick (`1-6` — the Tab-cycling this entry originally named was replaced by the owner's explicit-pick
+  decision); free-text entry, if wanted, is a contained `declare_flow.rs` follow-up.
 - **[open] Plan-doc drift** — `IMPLEMENTATION_PLAN.md:61` File-Map names `ShortfallCandidate`; the shipped type is `Shortfall`.
   Doc-only; code is internally consistent.
 

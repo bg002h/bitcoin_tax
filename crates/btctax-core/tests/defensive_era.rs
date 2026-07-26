@@ -26,6 +26,17 @@ fn era_window_maps_every_preset_to_a_concrete_window() {
         era_window(EraPreset::Y2021To2024),
         (date!(2021 - 01 - 01), date!(2024 - 12 - 31))
     );
+    // The OWNER-ratified post-cutover bucket: starts EXACTLY at the pooling cutover, ends at the last
+    // day of the newest tax year this app can file (a concrete bound — `era_window` is clock-free).
+    assert_eq!(
+        era_window(EraPreset::Y2025Onward),
+        (date!(2025 - 01 - 01), date!(2025 - 12 - 31))
+    );
+    assert_eq!(
+        era_window(EraPreset::Y2025Onward).0,
+        btctax_core::conventions::TRANSITION_DATE,
+        "the post-cutover bucket must START at TRANSITION_DATE itself, so nothing straddles it"
+    );
 }
 
 #[test]
@@ -39,21 +50,46 @@ fn era_window_is_a_pure_total_function_over_every_variant() {
             "{p:?} must produce a well-formed [start,end] window"
         );
     }
-    assert_eq!(ALL_PRESETS.len(), 5, "sanity: five provisional presets");
+    assert_eq!(
+        ALL_PRESETS.len(),
+        6,
+        "sanity: the six OWNER-ratified calendar buckets (2009-2011 .. 2025-onward)"
+    );
 }
 
+/// ★ REPLACES `all_presets_end_strictly_before_the_pre2025_pooling_cutover`, which asserted every
+/// preset ends `< TRANSITION_DATE`. The OWNER-ratified `Y2025Onward` bucket deliberately violates that
+/// — and it MUST, since a pre-2025 tranche cannot cover a post-2025 disposal in the same wallet
+/// (`pools::pool_key` puts them in different pools), which is the functional gap the bucket closes.
+///
+/// The property the old guard was really protecting is preserved here in its correct, stronger form:
+/// no window may STRADDLE the cutover. Every bucket lies entirely before `TRANSITION_DATE` or entirely
+/// on/after it, so a declared tranche's lot always lands in exactly ONE pooling era (Universal before,
+/// per-wallet from it on) rather than spanning the split.
 #[test]
-fn all_presets_end_strictly_before_the_pre2025_pooling_cutover() {
-    // Every preset is a PRE-2025 era window (the safe-harbor / universal-pool boundary the Declare
-    // flow's safe-harbor precheck cares about, DFW-D9) — none of the provisional buckets accidentally
-    // reaches into the post-transition per-wallet pooling era.
+fn no_preset_window_straddles_the_pooling_cutover() {
+    let cutover = btctax_core::conventions::TRANSITION_DATE;
     for &p in &ALL_PRESETS {
-        let (_s, e) = era_window(p);
+        let (s, e) = era_window(p);
         assert!(
-            e < btctax_core::conventions::TRANSITION_DATE,
-            "{p:?} must end before the 2025-01-01 pooling cutover"
+            e < cutover || s >= cutover,
+            "{p:?} ({s}..{e}) STRADDLES the {cutover} pooling cutover — its lot would span the \
+             Universal/per-wallet pool split"
         );
     }
+    // …and both sides of the split are actually reachable from the table (the invariant above is
+    // vacuously satisfiable by an all-pre-2025 table, which is exactly the gap the owner closed).
+    assert!(
+        ALL_PRESETS.iter().any(|&p| era_window(p).1 < cutover),
+        "at least one bucket must lie entirely BEFORE the cutover"
+    );
+    assert!(
+        ALL_PRESETS
+            .iter()
+            .any(|&p| era_window(p).0 >= cutover),
+        "at least one bucket must lie entirely ON/AFTER the cutover — otherwise a post-2025 shortfall \
+         has no applicable preset at all"
+    );
 }
 
 #[test]

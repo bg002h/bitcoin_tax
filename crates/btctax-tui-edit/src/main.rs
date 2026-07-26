@@ -4068,9 +4068,15 @@ fn handle_declare_flow_key(app: &mut EditorApp, key: KeyEvent) {
             KeyCode::Esc => {
                 app.declare_flow = None;
             }
-            KeyCode::Tab => {
+            // ★ OWNER DECISION (era table): the era is PICKED by number — nothing is pre-selected and
+            // there is no "next" key that would make one bucket a single keystroke away from being the
+            // de-facto default (mirrors the BG-D5 provenance picker's `1-7`).
+            KeyCode::Char(c @ '1'..='9') => {
                 if let Some(flow) = app.declare_flow.as_mut() {
-                    flow.cycle_preset();
+                    let idx = (c as usize) - ('1' as usize);
+                    if let Some(&preset) = btctax_core::defensive::era::ALL_PRESETS.get(idx) {
+                        flow.select_preset(preset);
+                    }
                 }
             }
             KeyCode::Char('h') | KeyCode::Left => {
@@ -4119,7 +4125,9 @@ fn handle_declare_flow_key(app: &mut EditorApp, key: KeyEvent) {
             }
             KeyCode::Enter => {
                 if let Some(flow) = app.declare_flow.as_mut() {
-                    flow.step = DeclareFlowStep::Confirm;
+                    // ★ OWNER DECISION: `review()` REFUSES to advance until the filer has picked an
+                    // era (fail-closed — it stays on Edit and surfaces the prompt).
+                    flow.review();
                 }
             }
             _ => {}
@@ -4143,13 +4151,20 @@ fn handle_declare_flow_key(app: &mut EditorApp, key: KeyEvent) {
 /// `edit::persist::persist_declare_tranche` — the ONLY caller of `apply_declare` in this crate (C-3).
 fn declare_flow_confirm(app: &mut EditorApp) {
     let (sat, wallet, window_start, window_end, target_event) = match app.declare_flow.as_ref() {
-        Some(f) => (
-            f.sat,
-            f.wallet.clone(),
-            f.window_start,
-            f.window_end,
-            f.shortfall.event.clone(),
-        ),
+        // ★ OWNER DECISION (era table): the window only exists once the FILER has picked an era.
+        // Unreachable through the step machine (`review()` refuses to leave Edit without a pick), but
+        // fail-closed here too: bounce back to Edit with the prompt, recording NOTHING, rather than
+        // substituting a window the filer never chose.
+        Some(f) => match f.window() {
+            Some((ws, we)) => (f.sat, f.wallet.clone(), ws, we, f.shortfall.event.clone()),
+            None => {
+                if let Some(flow) = app.declare_flow.as_mut() {
+                    flow.step = crate::edit::declare_flow::DeclareFlowStep::Edit;
+                    flow.review();
+                }
+                return;
+            }
+        },
         None => return,
     };
     let Some(snap) = app.snapshot.as_ref() else {
@@ -13453,14 +13468,56 @@ mod tests {
                 "DFW-D5 before-op clamp"
             );
             assert_eq!(flow.wallet, wallet, "DFW-D5 source-pool wallet");
+            // ★ OWNER DECISION (era table): NO era is pre-selected, so there is no window yet.
+            assert_eq!(flow.preset, None, "no era may be answered for the filer");
+            assert_eq!(flow.window(), None);
             true
         };
         assert!(flow_ok);
 
-        // Confirm — the WRITE goes through persist_declare_tranche (C-3).
+        // ★ KAT (b) at the e2e layer: forcing the Confirm step and pressing Enter with NO era picked
+        // must record NOTHING and bounce back to Edit (fail-closed) — not append a $0 tranche over a
+        // window the filer never chose.
         if let Some(flow) = app.declare_flow.as_mut() {
             flow.step = crate::edit::declare_flow::DeclareFlowStep::Confirm;
         }
+        declare_flow_confirm(&mut app);
+        assert!(
+            app.declare_flow.is_some(),
+            "an unanswered era must leave the flow OPEN, never persist"
+        );
+        assert_eq!(
+            app.declare_flow.as_ref().map(|f| f.step),
+            Some(crate::edit::declare_flow::DeclareFlowStep::Edit),
+            "the unanswered confirm must bounce back to the Edit step"
+        );
+        {
+            let events = &app.snapshot.as_ref().unwrap().events;
+            assert!(
+                !events.iter().any(|e| matches!(
+                    e.payload,
+                    btctax_core::event::EventPayload::DeclareTranche(_)
+                )),
+                "fail-closed: nothing may be recorded without an era pick"
+            );
+        }
+
+        // Now the filer ANSWERS: press [1] (the oldest bucket) through the real key handler, then
+        // Enter to review — `review()` only advances once an era exists.
+        handle_declare_flow_key(&mut app, press(KeyCode::Char('1')));
+        assert_eq!(
+            app.declare_flow.as_ref().and_then(|f| f.preset),
+            Some(btctax_core::defensive::era::ALL_PRESETS[0]),
+            "[1] must record the FILER's own era pick"
+        );
+        handle_declare_flow_key(&mut app, press(KeyCode::Enter));
+        assert_eq!(
+            app.declare_flow.as_ref().map(|f| f.step),
+            Some(crate::edit::declare_flow::DeclareFlowStep::Confirm),
+            "with an era answered, Enter advances to the DFW-D8 confirmation"
+        );
+
+        // Confirm — the WRITE goes through persist_declare_tranche (C-3).
         declare_flow_confirm(&mut app);
 
         assert!(
@@ -13498,11 +13555,14 @@ mod tests {
         })
         .unwrap();
         let events2 = btctax_core::persistence::load_all(session2.conn()).unwrap();
-        assert!(
+        assert_eq!(
             events2
                 .iter()
-                .any(|e| matches!(e.payload, EventPayload::DeclareTranche(_))),
-            "a DeclareTranche decision must be durably persisted to disk"
+                .filter(|e| matches!(e.payload, EventPayload::DeclareTranche(_)))
+                .count(),
+            1,
+            "EXACTLY one DeclareTranche must be durably persisted — the earlier unanswered-era confirm \
+             recorded nothing (fail-closed), and the answered one recorded once"
         );
     }
 

@@ -5,16 +5,38 @@
 //! it never calls `btctax_cli::apply_declare` directly; the WRITE goes through
 //! `edit::persist::persist_declare_tranche` (the ONLY caller of `apply_declare` in this crate,
 //! mechanically enforced by `persist::tests::kat_g1_mechanized_source_gate`).
+//!
+//! ★ **OWNER DECISION (era table, P-D/ship): the era preset is NOT pre-selected — the filer must
+//! ACTIVELY pick one.** On the `$0`-declare branch the window's only filing-substantive effect is the
+//! HOLDING PERIOD (the basis is `$0` either way), because `window_end` **is** the lot's acquisition date
+//! (`resolve.rs:~1310`). Pre-selecting the OLDEST bucket therefore defaulted nearly every covered
+//! disposal to LONG-term at preferential rates — the tool answering a filing question, in the
+//! taxpayer-favorable direction, that the filer never answered. That is precisely what this project's
+//! answered-ness invariant forbids. So `preset`/`window_start` are `Option` and start `None`, the flow
+//! REFUSES to advance or confirm without a pick (fail-closed — nothing is recorded), and the pick is
+//! preserved across a Confirm→Edit bounce. This mirrors the BG-D5 provenance step
+//! (`promote_flow.rs`) verbatim in shape. The DFW-D5 prefill is INDEPENDENT of the preset and is
+//! unchanged: `window_end` opens strictly before the short op's date and `wallet` is the short op's
+//! source pool, pick or no pick.
 
 use btctax_core::conservative::Coverage;
 use btctax_core::conservative_promote::{filed_basis_for, ComputedFloor, PromoteRefusal};
 use btctax_core::conventions::is_long_term;
 use btctax_core::defensive::discovery::Shortfall;
-use btctax_core::defensive::era::{era_window, next_preset, EraPreset, ALL_PRESETS};
+use btctax_core::defensive::era::{era_window, EraPreset, ALL_PRESETS};
 use btctax_core::defensive::{declare_preview_saving, SavingFlavor};
 use btctax_core::price::PriceProvider;
 use btctax_core::project::ProjectionConfig;
 use btctax_core::{LedgerEvent, TaxDate, TaxProfile, TaxTables, WalletId};
+
+/// The prompt shown when the filer presses Enter on the Edit step WITHOUT having picked an era. NOT a
+/// refusal text (no engine gate has run): it is the UI insisting the filer answer, which is the whole
+/// point of the step (the answered-ness invariant — the tool must never silently answer a filing
+/// question for the filer). Mirrors `promote_flow::PROVENANCE_UNANSWERED`.
+const ERA_UNANSWERED: &str =
+    "choose when you acquired these coins — press the number of an era above. This is YOUR attestation \
+     about YOUR coins; the tool will not answer it for you. It sets the acquisition date of the \
+     declared lot, and with it whether the disposal it covers is short- or long-term.";
 
 /// Which step of the flow is active.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,11 +56,21 @@ pub struct DeclareFlowState {
     pub shortfall: Shortfall,
     pub sat: i64,
     pub wallet: WalletId,
-    pub window_start: TaxDate,
+    /// ★ OWNER DECISION (explicit pick): `None` until the filer picks an era. The tool never supplies a
+    /// `window_start` the filer did not choose, so an unanswered window is unrepresentable rather than
+    /// merely undisplayed. A manual `nudge_window_start` moves it afterwards (a legitimate DFW-D9 edit).
+    pub window_start: Option<TaxDate>,
+    /// The DFW-D5 prefill — INDEPENDENT of the preset: strictly before the short op's date from the
+    /// moment the flow opens, clamped there forever after (a preset can only ever pull it EARLIER).
     pub window_end: TaxDate,
-    /// The era preset currently governing `window_start`/`window_end`'s STARTING point (DFW-D9) — a
-    /// manual nudge does not change `preset` (it remains the last-applied starting point).
-    pub preset: EraPreset,
+    /// The era preset the filer PICKED, which seeded `window_start`/`window_end`'s starting point
+    /// (DFW-D9) — `None` until they actively choose one, and a later manual nudge does not change it (it
+    /// remains the last-applied starting point). Lives OUTSIDE `step` (mirroring
+    /// `PromoteFlowState::provenance`) so a Confirm→Edit bounce shows the filer their previous pick.
+    pub preset: Option<EraPreset>,
+    /// The era step's inline message: either `ERA_UNANSWERED` (Enter with nothing picked) or the
+    /// "that era cannot apply to this shortfall" explanation. Cleared by a successful pick.
+    pub era_error: Option<String>,
     /// DFW-D9 M-3 / KAT(d): a first-class ENTRY state — is a safe-harbor allocation IN FORCE?
     ///
     /// ★ P-C gate tax I-3: this is the **DIRECTIONAL** predicate, `tranche_guard::
@@ -63,31 +95,82 @@ pub struct DeclareFlowState {
 impl DeclareFlowState {
     /// Open the flow for `shortfall` (DFW-D5 prefill): `window_end` strictly before the short op's date;
     /// `wallet` = the short op's source-pool wallet (the caller unwraps `shortfall.wallet` — a
-    /// `DeclareCandidate` always carries one, per `discovery::triage`'s own routing). `window_start`
-    /// seeds from the OLDEST (most conservative — DFW-D9's "wider window → lower floor" bias) era
-    /// preset; the before-op prefill clamps `window_end` immediately (DFW-D9: "the DFW-D5 before-op
-    /// prefill governs over a preset's window_end where they conflict").
+    /// `DeclareCandidate` always carries one, per `discovery::triage`'s own routing).
+    ///
+    /// ★ OWNER DECISION: **NO era preset is pre-selected**, so `preset`/`window_start` open `None` — the
+    /// tool does not answer "when did you acquire these coins?" for the filer (see the module doc). The
+    /// DFW-D5 prefill is independent of that and is fully applied here: `window_end` is the
+    /// before-the-short-op day from the moment the flow opens, and picking an era can only ever pull it
+    /// EARLIER ("the DFW-D5 before-op prefill governs over a preset's window_end where they conflict").
     pub fn new(shortfall: Shortfall, wallet: WalletId, allocation_in_force: bool) -> Self {
-        let preset = ALL_PRESETS[0];
-        let (preset_start, preset_end) = era_window(preset);
-        let before_op = before_op_date(&shortfall);
-        let window_end = if preset_end < before_op {
-            preset_end
-        } else {
-            before_op
-        };
+        let window_end = before_op_date(&shortfall);
         Self {
             step: DeclareFlowStep::Edit,
             sat: shortfall.short_sat,
             wallet,
-            window_start: preset_start.min(window_end),
+            window_start: None,
             window_end,
-            preset,
+            preset: None,
+            era_error: None,
             allocation_in_force,
             tax_delta: None,
             tax_delta_stale: false,
             shortfall,
         }
+    }
+
+    /// The window the filer has actually chosen — `None` until an era is picked. Every window consumer
+    /// (`floor_readout`, `holding_date`, `is_long_term_at_short_date`, `compute_tax_delta`, the render,
+    /// and `main.rs`'s confirm tail) goes through this, so none of them can read a window the filer
+    /// never answered.
+    pub fn window(&self) -> Option<(TaxDate, TaxDate)> {
+        Some((self.window_start?, self.window_end))
+    }
+
+    /// ★ OWNER DECISION / KAT (c): record the filer's ERA pick (the `1..=ALL_PRESETS.len()` picker) and
+    /// seed the window from it — `window_start` from the preset's own start, `window_end` clamped to the
+    /// DFW-D5 before-op day whenever the preset's own end would violate it (the before-op prefill
+    /// governs on conflict). Then `window_start` is floored at the (already-clamped) `window_end` so no
+    /// pick can leave an INVERTED window (★ tax M-1).
+    ///
+    /// ★ tax Minor 1 (P-C gate r2), preserved in its STRONGER form: a preset whose own `start` is AFTER
+    /// the DFW-D5 before-op boundary cannot apply to this shortfall at all — the M-1 clamp would make it
+    /// merely COHERENT by collapsing it to a degenerate ONE-DAY window pinned at the before-op day,
+    /// silently in the LEAST conservative direction (the highest floor the flow can produce, and a
+    /// SHORT-term holding date — the opposite of DFW-D9's "wider window → lower floor"). The old
+    /// Tab-cycling silently SKIPPED such presets; an explicit pick cannot silently skip, so it is
+    /// REFUSED instead, with the reason — and any previous pick is left untouched (fail-closed).
+    /// Invalidates the on-demand tax-Δ (M-1).
+    pub fn select_preset(&mut self, preset: EraPreset) {
+        let before_op = before_op_date(&self.shortfall);
+        let (start, end) = era_window(preset);
+        if start > before_op {
+            self.era_error = Some(format!(
+                "{preset:?} starts {start}, which is after {before_op} — a lot must exist BEFORE the \
+                 disposal it covers ({}), so that era cannot apply to this shortfall. Choose an \
+                 earlier one.",
+                self.shortfall.date
+            ));
+            return;
+        }
+        self.preset = Some(preset);
+        self.window_end = if end < before_op { end } else { before_op };
+        self.window_start = Some(start.min(self.window_end));
+        self.era_error = None;
+        self.invalidate_tax_delta();
+    }
+
+    /// The Edit step's Enter: advance to the DFW-D8 confirmation. ★ OWNER DECISION / KAT (b): REFUSED
+    /// while no era has been picked — fail-closed (the flow stays on Edit, nothing is recorded, and no
+    /// window is substituted), with the prompt insisting the filer answer. Mirrors
+    /// `PromoteFlowState::attest_provenance`'s unanswered arm.
+    pub fn review(&mut self) {
+        if self.preset.is_none() || self.window_start.is_none() {
+            self.era_error = Some(ERA_UNANSWERED.to_string());
+            return;
+        }
+        self.era_error = None;
+        self.step = DeclareFlowStep::Confirm;
     }
 
     /// Invalidate the cached on-demand tax-Δ after a window/sat edit (DFW-D10 M-1). Only marks it STALE
@@ -97,61 +180,31 @@ impl DeclareFlowState {
         self.tax_delta_stale |= self.tax_delta.take().is_some();
     }
 
-    /// Cycle to the NEXT era preset (DFW-D9 "confirm/edit starting point"): seeds `window_start` from
-    /// the preset's own start; clamps `window_end` to the DFW-D5 before-op day when the preset's own end
-    /// would not otherwise satisfy it (the before-op prefill governs on conflict). ★ tax M-1: the seeded
-    /// `window_start` is then floored at the (already-clamped) `window_end`, so cycling to a preset that
-    /// STARTS after the short op can never leave an INVERTED window — which `window_reference` reports as
-    /// "no price data covers this window at all", blaming missing data for an incoherent window (mirrors
-    /// the clamp `nudge_window_start` already carries).
-    ///
-    /// ★ tax Minor 1 (P-C gate r2): a preset whose own `start` is AFTER the DFW-D5 before-op boundary
-    /// cannot apply to this shortfall at all — M-1's clamp still makes it COHERENT (never inverted), but
-    /// collapses it to a degenerate ONE-DAY window pinned at the before-op day, silently in the LEAST
-    /// conservative direction (the highest floor the flow can produce, and a SHORT-term holding date —
-    /// the opposite of DFW-D9's "wider window → lower floor"). Presets are ordered OLDEST-first and
-    /// applicability (`start <= before_op`) is therefore monotonic, so such presets are skipped when
-    /// cycling rather than landing on and rendering one; the loop is bounded at `ALL_PRESETS.len()` steps
-    /// (the oldest preset, genesis, applies to every real BTC-era shortfall, so it always terminates).
-    /// Invalidates the on-demand tax-Δ (M-1).
-    pub fn cycle_preset(&mut self) {
-        let before_op = before_op_date(&self.shortfall);
-        let mut candidate = next_preset(self.preset);
-        for _ in 0..ALL_PRESETS.len() {
-            let (start, _) = era_window(candidate);
-            if start <= before_op {
-                break;
-            }
-            candidate = next_preset(candidate);
-        }
-        self.preset = candidate;
-        let (start, end) = era_window(self.preset);
-        self.window_end = if end < before_op { end } else { before_op };
-        self.window_start = start.min(self.window_end);
-        self.invalidate_tax_delta();
-    }
-
-    /// Nudge `window_start` by `days` (may move earlier or later than the current preset's own start —
+    /// Nudge `window_start` by `days` (may move earlier or later than the picked preset's own start —
     /// a manual DFW-D9 edit), CLAMPED so it can never move PAST `window_end` (`window_start <= window_end`
     /// is preserved here defensively — T8-review Minor-2: `plan_declare`/confirm-time already refuses a
     /// degenerate ordering, but leaving it unbounded here let a manual nudge surface a nonsensical
     /// inverted-window `NoCoverage` in the live readout for no reason) and never before the earliest
     /// sensible date — Bitcoin's genesis block, `era_window(ALL_PRESETS[0]).0` (2009-01-03), the SAME
-    /// floor already governing the oldest era preset (`DeclareFlowState::new`'s own seed) — no new date
-    /// invented here. Invalidates the on-demand tax-Δ (M-1).
+    /// floor already governing the oldest era preset — no new date invented here. Invalidates the
+    /// on-demand tax-Δ (M-1). **Inert before an era is picked** (there is no window to nudge yet, and
+    /// nudging one into existence would be the tool answering the era question by a side door).
     pub fn nudge_window_start(&mut self, days: i64) {
-        let candidate = shift_date(self.window_start, days);
+        let Some(current) = self.window_start else {
+            return;
+        };
+        let candidate = shift_date(current, days);
         let genesis = era_window(ALL_PRESETS[0]).0;
         let floored = if candidate < genesis {
             genesis
         } else {
             candidate
         };
-        self.window_start = if floored > self.window_end {
+        self.window_start = Some(if floored > self.window_end {
             self.window_end
         } else {
             floored
-        };
+        });
         self.invalidate_tax_delta();
     }
 
@@ -159,8 +212,12 @@ impl DeclareFlowState {
     /// invariant that makes the lot exist in time to cover the short op — never overridable by a manual
     /// edit) and — ★ tax M-1 — FLOORED at `window_start`, so a downward nudge can never invert the
     /// window (the sibling bound `nudge_window_start` already carries). Invalidates the on-demand
-    /// tax-Δ (M-1).
+    /// tax-Δ (M-1). **Inert before an era is picked**, for the same reason as its sibling: half a window
+    /// is not an edit, and the unpicked `window_end` must stay exactly on the DFW-D5 prefill.
     pub fn nudge_window_end(&mut self, days: i64) {
+        let Some(window_start) = self.window_start else {
+            return;
+        };
         let candidate = shift_date(self.window_end, days);
         let before_op = before_op_date(&self.shortfall);
         let capped = if candidate > before_op {
@@ -168,8 +225,8 @@ impl DeclareFlowState {
         } else {
             candidate
         };
-        self.window_end = if capped < self.window_start {
-            self.window_start
+        self.window_end = if capped < window_start {
+            window_start
         } else {
             capped
         };
@@ -195,24 +252,28 @@ impl DeclareFlowState {
 
     /// The cheap-trio live readout's floor/coverage piece (DFW-D9/D10): `Ok` = `Coverage::Full` +
     /// the computed whole-tranche floor; `Err` = the can-never-promote `NoCoverage`/`PartialCoverage`
-    /// state, surfaced LIVE (KAT c) rather than only discovered at a later promote attempt.
+    /// state, surfaced LIVE (KAT c) rather than only discovered at a later promote attempt. The OUTER
+    /// `None` is "no era picked yet" — there is no window to score, and none is invented.
     pub fn floor_readout(
         &self,
         prices: &dyn PriceProvider,
-    ) -> Result<ComputedFloor, PromoteRefusal> {
-        filed_basis_for(prices, self.sat, self.window_start, self.window_end)
+    ) -> Option<Result<ComputedFloor, PromoteRefusal>> {
+        let (start, end) = self.window()?;
+        Some(filed_basis_for(prices, self.sat, start, end))
     }
 
     /// The cheap-trio's holding-date piece: `window_end` IS the lot's holding-period start
-    /// (`resolve.rs:~1310`), so it also sets short/long-term (DFW-D9).
-    pub fn holding_date(&self) -> TaxDate {
-        self.window_end
+    /// (`resolve.rs:~1310`), so it also sets short/long-term (DFW-D9). `None` until an era is picked —
+    /// the acquisition date is the filer's answer, never the tool's.
+    pub fn holding_date(&self) -> Option<TaxDate> {
+        self.window().map(|(_start, end)| end)
     }
 
     /// Whether the resulting lot would be LONG-term if disposed at the short op's own date (a cheap,
-    /// already-shipped `is_long_term` read — no new tax logic).
-    pub fn is_long_term_at_short_date(&self) -> bool {
-        is_long_term(self.window_end, self.shortfall.date)
+    /// already-shipped `is_long_term` read — no new tax logic). `None` until an era is picked.
+    pub fn is_long_term_at_short_date(&self) -> Option<bool> {
+        self.holding_date()
+            .map(|acquired| is_long_term(acquired, self.shortfall.date))
     }
 
     // ★ whole-branch arch M-4: `DeclareFlowState::clearance()` was DELETED here. It had no production
@@ -235,6 +296,11 @@ impl DeclareFlowState {
         tables: &dyn TaxTables,
         profile: Option<&TaxProfile>,
     ) {
+        // No era picked ⇒ no window ⇒ nothing to preview (fail-closed; never previews a window the
+        // filer did not choose).
+        let Some((window_start, window_end)) = self.window() else {
+            return;
+        };
         let year = self.shortfall.date.year();
         let flavor = declare_preview_saving(
             events,
@@ -243,8 +309,8 @@ impl DeclareFlowState {
             tables,
             self.sat,
             self.wallet.clone(),
-            self.window_start,
-            self.window_end,
+            window_start,
+            window_end,
             year,
             profile,
         );
@@ -289,20 +355,67 @@ pub fn render_declare_flow(state: &DeclareFlowState, prices: &dyn PriceProvider)
         lines.push(String::new());
     }
 
-    lines.push(format!(
-        "sat: {}   wallet: {:?}   era preset: {:?}",
-        state.sat, state.wallet, state.preset
-    ));
-    lines.push(format!(
-        "window: {} .. {}  (attest this as YOUR OWN knowledge of when you acquired these coins — the \
-         window's substance is the filer's attestation, never tool-sourced)",
-        state.window_start, state.window_end
-    ));
+    lines.push(format!("sat: {}   wallet: {:?}", state.sat, state.wallet));
+
+    // ★ OWNER DECISION / KAT (a): the era picker — NOTHING pre-selected. Mirrors the BG-D5 provenance
+    // picker (`render_promote_flow`'s Provenance arm): a marked list, an explicit "(none yet — press
+    // 1-N)" line, and no value supplied by the tool.
+    lines.push(
+        "When did you acquire these coins? This is YOUR attestation about YOUR coins — the tool cannot \
+         and will not answer it for you. It sets the declared lot's acquisition date, and with it \
+         whether the disposal it covers is SHORT- or LONG-term."
+            .to_string(),
+    );
+    let before_op = before_op_date(&state.shortfall);
+    for (i, preset) in ALL_PRESETS.iter().enumerate() {
+        let (start, end) = era_window(*preset);
+        let marker = if state.preset == Some(*preset) {
+            '>'
+        } else {
+            ' '
+        };
+        // Presets that START after the DFW-D5 before-op boundary cannot apply to this shortfall at all
+        // (★ tax Minor 1) — say so on the picker rather than letting the filer pick a dead end.
+        let applies = if start <= before_op {
+            String::new()
+        } else {
+            format!("   — cannot apply: starts after {before_op}")
+        };
+        lines.push(format!(
+            "{marker} [{}] {start} .. {end}  ({preset:?}){applies}",
+            i + 1
+        ));
+    }
+    lines.push(match state.preset {
+        Some(p) => format!("era: {p:?}"),
+        None => format!("era: (none yet — press 1-{})", ALL_PRESETS.len()),
+    });
+    if let Some(e) = &state.era_error {
+        lines.push(e.clone());
+    }
+
+    match state.window() {
+        Some((start, end)) => lines.push(format!(
+            "window: {start} .. {end}  (attest this as YOUR OWN knowledge of when you acquired these \
+             coins — the window's substance is the filer's attestation, never tool-sourced)"
+        )),
+        None => lines.push(format!(
+            "window: (not chosen yet) .. {} — the latest day a lot could still cover this disposal \
+             (DFW-D5); the start comes from the era YOU pick above",
+            state.window_end
+        )),
+    }
 
     // The cheap trio (DFW-D9/D10): floor + Coverage (or its can-never-promote refusal) + holding-date.
+    // Nothing is scored until the filer has answered the era question.
     match state.floor_readout(prices) {
-        Ok(cf) => {
-            let term = if state.is_long_term_at_short_date() {
+        None => lines.push(
+            "floor / coverage / holding date: pick an era above — none of them exists until you say \
+             when you acquired these coins."
+                .to_string(),
+        ),
+        Some(Ok(cf)) => {
+            let term = if state.is_long_term_at_short_date() == Some(true) {
                 "long-term"
             } else {
                 "short-term"
@@ -313,14 +426,14 @@ pub fn render_declare_flow(state: &DeclareFlowState, prices: &dyn PriceProvider)
                 cf.filed_basis, cf.coverage, state.window_end
             ));
         }
-        Err(PromoteRefusal::NoCoverage) => {
+        Some(Err(PromoteRefusal::NoCoverage)) => {
             lines.push(
                 "floor: NOT COMPUTABLE — no price data covers this window at all. Declaring at $0 is \
                  still fine, but this tranche could never later be promoted from this window."
                     .to_string(),
             );
         }
-        Err(PromoteRefusal::PartialCoverage) => {
+        Some(Err(PromoteRefusal::PartialCoverage)) => {
             lines.push(format!(
                 "floor: NOT COMPUTABLE (Coverage::{:?}) — some days in this window have no price data, \
                  so the covered-part min is not provably the TRUE window min. Declaring at $0 is still \
@@ -354,11 +467,11 @@ pub fn render_declare_flow(state: &DeclareFlowState, prices: &dyn PriceProvider)
     lines.push(String::new());
     match state.step {
         DeclareFlowStep::Edit => {
-            lines.push(
-                "[Tab] cycle era preset  [h/l] window_start ∓1d  [j/k] window_end ∓1d  [+/-] sat ±1000  \
-                 [t] compute tax-Δ  [Enter] review & confirm  [Esc] cancel"
-                    .to_string(),
-            );
+            lines.push(format!(
+                "[1-{}] choose era  [h/l] window_start ∓1d  [j/k] window_end ∓1d  [+/-] sat ±1000  \
+                 [t] compute tax-Δ  [Enter] review & confirm  [Esc] cancel",
+                ALL_PRESETS.len()
+            ));
         }
         DeclareFlowStep::Confirm => {
             lines.push(
@@ -413,6 +526,158 @@ mod tests {
 
     fn cfg() -> ProjectionConfig {
         ProjectionConfig::default()
+    }
+
+    /// Drive the era step the way the filer now must: open the flow, then ACTIVELY pick the oldest
+    /// bucket. Every test that needs a window goes through this (there is no default any more).
+    fn opened_with_oldest_era(sf: Shortfall) -> DeclareFlowState {
+        let mut state = DeclareFlowState::new(sf, wallet(), false);
+        state.select_preset(ALL_PRESETS[0]);
+        assert_eq!(
+            state.preset,
+            Some(ALL_PRESETS[0]),
+            "fixture: the pick landed"
+        );
+        state
+    }
+
+    // ── ★ OWNER DECISION (era table): NOTHING is pre-selected; an explicit pick is required ──────────
+    //
+    // KAT (a) fresh flow has NO preset and renders as such · (b) advancing/confirming without a pick is
+    // refused, fail-closed · (c) after a pick the window seeds correctly AND the before-op clamp still
+    // governs · (d) the pick survives a bounce.
+
+    /// KAT (a). On the `$0`-declare branch the window's only filing-substantive effect is the HOLDING
+    /// PERIOD (`window_end` IS the lot's acquisition date, `resolve.rs:~1310`), so pre-selecting the
+    /// OLDEST bucket answered "when did you acquire these?" for the filer — in the taxpayer-favorable
+    /// (long-term) direction — which the answered-ness invariant forbids.
+    #[test]
+    fn a_fresh_declare_flow_has_no_era_selected_and_renders_as_such() {
+        let sf = shortfall_on(date!(2020 - 06 - 15));
+        let state = DeclareFlowState::new(sf, wallet(), false);
+        assert_eq!(state.preset, None, "★ no era may be pre-selected");
+        assert_eq!(
+            state.window_start, None,
+            "★ no window_start may exist before the filer picks an era"
+        );
+        assert_eq!(state.window(), None);
+        assert_eq!(state.holding_date(), None);
+        assert_eq!(state.is_long_term_at_short_date(), None);
+
+        let prices = StaticPrices::default();
+        let rendered = render_declare_flow(&state, &prices).join("\n");
+        assert!(
+            rendered.contains(&format!("(none yet — press 1-{})", ALL_PRESETS.len())),
+            "the unanswered era must render as explicitly unanswered: {rendered}"
+        );
+        assert!(
+            rendered.contains("(not chosen yet)"),
+            "no window may be implied before a pick: {rendered}"
+        );
+        // Every bucket is offered, numbered — the filer picks, the tool does not order-of-preference
+        // one of them into a de-facto default.
+        for (i, p) in ALL_PRESETS.iter().enumerate() {
+            assert!(
+                rendered.contains(&format!("[{}] ", i + 1)) && rendered.contains(&format!("{p:?}")),
+                "preset {p:?} must be offered as [{}]: {rendered}",
+                i + 1
+            );
+        }
+        assert!(
+            !rendered.contains("long-term at the short op") && !rendered.contains("short-term at"),
+            "no holding-period CHARACTER may be asserted before the filer answers: {rendered}"
+        );
+    }
+
+    /// KAT (b): fail-closed. `review()` (the Edit-step Enter) must not advance, and the flow must stay
+    /// exactly where it was — no window invented, nothing recorded.
+    #[test]
+    fn advancing_without_picking_an_era_is_refused_and_records_nothing() {
+        let sf = shortfall_on(date!(2020 - 06 - 15));
+        let mut state = DeclareFlowState::new(sf.clone(), wallet(), false);
+        let before = state.clone();
+
+        state.review();
+
+        assert_eq!(
+            state.step,
+            DeclareFlowStep::Edit,
+            "★ Enter with no era picked must NOT advance to Confirm"
+        );
+        assert_eq!(
+            state.preset, None,
+            "and must not answer the question itself"
+        );
+        assert_eq!(state.window_start, None);
+        assert_eq!(
+            state.window_end, before.window_end,
+            "the DFW-D5 prefill is untouched by a refused advance"
+        );
+        let prices = StaticPrices::default();
+        let rendered = render_declare_flow(&state, &prices).join("\n");
+        assert!(
+            rendered.contains("the tool will not answer it for you"),
+            "the refusal must insist the FILER answer: {rendered}"
+        );
+    }
+
+    /// KAT (c): after an explicit pick the window seeds from the preset AND the DFW-D5 before-op clamp
+    /// still governs `window_end` — for every bucket that can apply at all.
+    #[test]
+    fn picking_an_era_seeds_the_window_and_the_before_op_clamp_still_governs() {
+        let sf = shortfall_on(date!(2020 - 06 - 15));
+        let before_op = date!(2020 - 06 - 14);
+        for &p in &ALL_PRESETS {
+            let (start, end) = era_window(p);
+            let mut state = DeclareFlowState::new(sf.clone(), wallet(), false);
+            state.select_preset(p);
+            if start > before_op {
+                // Cannot apply — refused, not landed on (see the degenerate-window KAT below).
+                assert_eq!(state.preset, None, "{p:?} must be refused, not applied");
+                continue;
+            }
+            assert_eq!(state.preset, Some(p));
+            assert_eq!(
+                state.window_start,
+                Some(start),
+                "{p:?}: window_start seeds from the preset's own start"
+            );
+            assert_eq!(
+                state.window_end,
+                end.min(before_op),
+                "{p:?}: the DFW-D5 before-op clamp governs on conflict"
+            );
+            assert!(
+                state.window_end < sf.date,
+                "{p:?}: window_end must stay strictly before the short op's date"
+            );
+            assert!(state.window_start.unwrap() <= state.window_end);
+        }
+    }
+
+    /// KAT (d): the pick lives on the state (not inside `step`), so a Confirm→Edit bounce — an `Esc`,
+    /// or a `plan_declare` refusal at the confirm tail — shows the filer what they already answered
+    /// instead of silently re-asking (mirrors `PromoteFlowState::provenance`).
+    #[test]
+    fn the_era_pick_survives_a_confirm_to_edit_bounce() {
+        let sf = shortfall_on(date!(2020 - 06 - 15));
+        let mut state = opened_with_oldest_era(sf);
+        state.select_preset(EraPreset::Y2015To2017);
+        state.review();
+        assert_eq!(state.step, DeclareFlowStep::Confirm);
+
+        // The bounce (what `handle_declare_flow_key`'s Esc arm and `declare_flow_confirm`'s refusal
+        // arm both do).
+        state.step = DeclareFlowStep::Edit;
+
+        assert_eq!(state.preset, Some(EraPreset::Y2015To2017));
+        assert_eq!(state.window_start, Some(date!(2015 - 01 - 01)));
+        let prices = StaticPrices::default();
+        let rendered = render_declare_flow(&state, &prices).join("\n");
+        assert!(
+            rendered.contains("era: Y2015To2017") && rendered.contains("> [3]"),
+            "the surviving pick must render as selected: {rendered}"
+        );
     }
 
     // ── (d): the safe-harbor exclusion is a first-class ENTRY state ──────────────────────────────────
@@ -482,11 +747,13 @@ mod tests {
         );
 
         // What `open_declare_flow` now threads: the DIRECTIONAL predicate, not the symmetric flag.
-        let state = DeclareFlowState::new(
+        let mut state = DeclareFlowState::new(
             shortfall_on(date!(2020 - 06 - 15)),
             wallet(),
             in_force_allocation_exists(&events),
         );
+        state.select_preset(ALL_PRESETS[0]);
+        let (window_start, window_end) = state.window().expect("the fixture picked an era");
         let prices = StaticPrices::default();
         let rendered = render_declare_flow(&state, &prices).join("\n");
         assert!(
@@ -504,8 +771,8 @@ mod tests {
             &cfg(),
             state.sat,
             state.wallet.clone(),
-            state.window_start,
-            state.window_end,
+            window_start,
+            window_end,
             Some(state.shortfall.event.clone()),
             now,
         )
@@ -519,6 +786,9 @@ mod tests {
 
     // ── (b): declare-flow prefill puts window_end before the disposal + the source wallet ────────────
 
+    /// ★ The DFW-D5 prefill is INDEPENDENT of the era pick and survives the explicit-pick change: from
+    /// the moment the flow opens, `window_end` is strictly before the short op's date and `wallet` is
+    /// the short op's source pool — with NO era answered.
     #[test]
     fn prefill_puts_window_end_strictly_before_the_short_op_date_and_the_source_wallet() {
         let sf = shortfall_on(date!(2020 - 06 - 15));
@@ -530,10 +800,13 @@ mod tests {
             state.window_end,
             sf.date
         );
-        // The DEFAULT (oldest) preset's own end (2011-12-31) already satisfies "strictly before" a
-        // 2020 short op — no conflict, so the preset's own end governs (DFW-D9), NOT the before-op
-        // date itself (that only wins ON CONFLICT — see `preset_governs_starting_window_...` below).
-        assert_eq!(state.window_end, era_window(EraPreset::Y2009To2011).1);
+        assert_eq!(
+            state.window_end,
+            date!(2020 - 06 - 14),
+            "with no era picked the prefill IS the before-op day — not a preset's end, and not a \
+             window the filer never chose"
+        );
+        assert_eq!(state.preset, None, "★ and no era is answered for them");
         assert_eq!(
             state.wallet, w,
             "wallet must be the short op's source-pool wallet"
@@ -547,11 +820,12 @@ mod tests {
         // (2011-12-31) would violate DFW-D5 (it's AFTER the short op date), so the before-op clamp must
         // win.
         let sf = shortfall_on(date!(2010 - 06 - 01));
-        let state = DeclareFlowState::new(sf.clone(), wallet(), false);
+        let state = opened_with_oldest_era(sf.clone());
         let (preset_start, preset_end) = era_window(EraPreset::Y2009To2011);
         assert_eq!(
-            state.window_start, preset_start,
-            "window_start still seeds from the preset"
+            state.window_start,
+            Some(preset_start),
+            "window_start still seeds from the preset the filer picked"
         );
         assert!(
             state.window_end < preset_end,
@@ -562,17 +836,18 @@ mod tests {
     }
 
     #[test]
-    fn cycle_preset_reclamps_window_end_and_invalidates_the_stale_tax_delta() {
+    fn select_preset_reseeds_the_window_and_invalidates_the_stale_tax_delta() {
         let sf = shortfall_on(date!(2020 - 06 - 15));
-        let mut state = DeclareFlowState::new(sf, wallet(), false);
+        let mut state = opened_with_oldest_era(sf);
         state.tax_delta = Some(SavingFlavor::Named("stub".to_string()));
-        state.cycle_preset();
-        assert_eq!(state.preset, EraPreset::Y2012To2014);
-        let (start, _end) = era_window(EraPreset::Y2012To2014);
-        assert_eq!(state.window_start, start);
+        state.select_preset(EraPreset::Y2012To2014);
+        assert_eq!(state.preset, Some(EraPreset::Y2012To2014));
+        let (start, end) = era_window(EraPreset::Y2012To2014);
+        assert_eq!(state.window_start, Some(start));
+        assert_eq!(state.window_end, end);
         assert!(
             state.tax_delta.is_none(),
-            "cycling a preset must blank the stale tax-Δ"
+            "re-picking an era must blank the stale tax-Δ"
         );
     }
 
@@ -581,7 +856,7 @@ mod tests {
     #[test]
     fn nudging_window_start_blanks_the_on_demand_saving() {
         let sf = shortfall_on(date!(2020 - 06 - 15));
-        let mut state = DeclareFlowState::new(sf, wallet(), false);
+        let mut state = opened_with_oldest_era(sf);
         state.tax_delta = Some(SavingFlavor::ComputedTax {
             year: 2020,
             delta: rust_decimal_macros::dec!(100),
@@ -593,17 +868,35 @@ mod tests {
         );
     }
 
+    /// ★ OWNER DECISION corollary: a window nudge cannot bring a window into existence — that would be
+    /// the era question answered by a side door (a `window_start` the filer never chose).
+    #[test]
+    fn nudging_before_any_era_is_picked_is_inert() {
+        let sf = shortfall_on(date!(2020 - 06 - 15));
+        let mut state = DeclareFlowState::new(sf, wallet(), false);
+        let before = state.clone();
+        state.nudge_window_start(-1);
+        state.nudge_window_start(1);
+        state.nudge_window_end(-1);
+        state.nudge_window_end(1);
+        assert_eq!(
+            state, before,
+            "no window edit may materialize a window before the filer picks an era"
+        );
+    }
+
     // ── T8-review Minor-2: nudge_window_start is bounded (never past window_end, never before genesis) ─
 
     #[test]
     fn nudging_window_start_never_crosses_past_window_end_or_before_genesis() {
         let sf = shortfall_on(date!(2020 - 06 - 15));
-        let mut state = DeclareFlowState::new(sf, wallet(), false);
+        let mut state = opened_with_oldest_era(sf);
         // Pin window_end close to window_start so a large positive nudge would otherwise cross it.
         state.window_end = date!(2009 - 01 - 10);
         state.nudge_window_start(9_999);
         assert_eq!(
-            state.window_start, state.window_end,
+            state.window_start,
+            Some(state.window_end),
             "window_start must clamp AT window_end, never past it: {:?}",
             state.window_start
         );
@@ -612,7 +905,7 @@ mod tests {
         state.nudge_window_start(-3_650);
         assert_eq!(
             state.window_start,
-            date!(2009 - 01 - 03),
+            Some(date!(2009 - 01 - 03)),
             "window_start must clamp at Bitcoin's genesis block (2009-01-03), never before it"
         );
     }
@@ -620,7 +913,7 @@ mod tests {
     #[test]
     fn nudging_window_end_blanks_the_on_demand_saving_and_never_crosses_the_before_op_boundary() {
         let sf = shortfall_on(date!(2020 - 06 - 15));
-        let mut state = DeclareFlowState::new(sf, wallet(), false);
+        let mut state = opened_with_oldest_era(sf);
         state.tax_delta = Some(SavingFlavor::ComputedTax {
             year: 2020,
             delta: rust_decimal_macros::dec!(100),
@@ -635,7 +928,7 @@ mod tests {
     #[test]
     fn nudging_sat_blanks_the_on_demand_saving_and_floors_at_one() {
         let sf = shortfall_on(date!(2020 - 06 - 15));
-        let mut state = DeclareFlowState::new(sf, wallet(), false);
+        let mut state = opened_with_oldest_era(sf);
         state.tax_delta = Some(SavingFlavor::Named("stub".to_string()));
         state.nudge_sat(-100_000_000_000);
         assert!(state.tax_delta.is_none());
@@ -647,44 +940,68 @@ mod tests {
     #[test]
     fn no_price_coverage_at_all_surfaces_as_no_coverage_live() {
         let sf = shortfall_on(date!(2020 - 06 - 15));
-        let state = DeclareFlowState::new(sf, wallet(), false);
+        let state = opened_with_oldest_era(sf);
         let empty_prices = StaticPrices::default();
         assert_eq!(
             state.floor_readout(&empty_prices),
-            Err(PromoteRefusal::NoCoverage)
+            Some(Err(PromoteRefusal::NoCoverage))
+        );
+    }
+
+    /// ★ OWNER DECISION: no floor/coverage/holding-date is scored — or rendered — before the filer has
+    /// answered the era question. `None` is "unanswered", never a computed-looking readout.
+    #[test]
+    fn no_floor_is_scored_before_an_era_is_picked() {
+        let sf = shortfall_on(date!(2020 - 06 - 15));
+        let state = DeclareFlowState::new(sf, wallet(), false);
+        let prices = StaticPrices::default();
+        assert_eq!(state.floor_readout(&prices), None);
+        let rendered = render_declare_flow(&state, &prices).join("\n");
+        assert!(
+            rendered.contains("pick an era above"),
+            "the cheap trio must say WHY it is absent: {rendered}"
+        );
+        assert!(
+            !rendered.contains("floor (if later promoted)"),
+            "no floor may be quoted for a window the filer did not choose: {rendered}"
         );
     }
 
     #[test]
     fn a_gap_in_the_window_surfaces_as_partial_coverage_live() {
         let sf = shortfall_on(date!(2020 - 01 - 10));
-        let state = DeclareFlowState::new(sf, wallet(), false);
+        let state = opened_with_oldest_era(sf);
+        let (window_start, window_end) = state.window().unwrap();
         // Price data on window_start and window_end only — a gap in between.
         let mut m = BTreeMap::new();
-        m.insert(state.window_start, rust_decimal_macros::dec!(10_000));
-        m.insert(state.window_end, rust_decimal_macros::dec!(10_000));
+        m.insert(window_start, rust_decimal_macros::dec!(10_000));
+        m.insert(window_end, rust_decimal_macros::dec!(10_000));
         let gappy = StaticPrices(m);
         assert_eq!(
             state.floor_readout(&gappy),
-            Err(PromoteRefusal::PartialCoverage)
+            Some(Err(PromoteRefusal::PartialCoverage))
         );
     }
 
     #[test]
     fn full_price_coverage_surfaces_a_computed_floor_live() {
         let sf = shortfall_on(date!(2020 - 01 - 10));
-        let state = DeclareFlowState::new(sf, wallet(), false);
+        let state = opened_with_oldest_era(sf);
+        let (window_start, window_end) = state.window().unwrap();
         let mut m = BTreeMap::new();
-        let mut d = state.window_start;
+        let mut d = window_start;
         loop {
             m.insert(d, rust_decimal_macros::dec!(10_000));
-            if d == state.window_end {
+            if d == window_end {
                 break;
             }
             d = d.next_day().unwrap();
         }
         let full = StaticPrices(m);
-        let cf = state.floor_readout(&full).expect("full coverage computes");
+        let cf = state
+            .floor_readout(&full)
+            .expect("an era is picked")
+            .expect("full coverage computes");
         assert_eq!(cf.coverage, Coverage::Full);
     }
 
@@ -726,12 +1043,12 @@ mod tests {
             short_sat: 10_000_000,
             fee_sat: 0,
         };
-        let mut state = DeclareFlowState::new(sf, wallet(), false);
-        state.window_start = date!(2023 - 01 - 01);
+        let mut state = opened_with_oldest_era(sf);
+        state.window_start = Some(date!(2023 - 01 - 01));
         state.window_end = date!(2023 - 01 - 03);
 
         let mut m = BTreeMap::new();
-        let mut d = state.window_start;
+        let mut d = state.window_start.unwrap();
         loop {
             m.insert(d, rust_decimal_macros::dec!(10_000));
             if d == state.window_end {
@@ -798,7 +1115,7 @@ mod tests {
     #[test]
     fn compute_tax_delta_without_price_coverage_yields_named_never_a_bare_dollar() {
         let sf = shortfall_on(date!(2020 - 06 - 15));
-        let mut state = DeclareFlowState::new(sf, wallet(), false);
+        let mut state = opened_with_oldest_era(sf);
         let events: Vec<LedgerEvent> = vec![];
         let prices = StaticPrices::default();
         let tables: BTreeMap<i32, btctax_core::tax::TaxTable> = BTreeMap::new();
@@ -823,62 +1140,79 @@ mod tests {
     // the two remaining doors.
 
     #[test]
-    fn cycling_to_a_preset_that_starts_after_the_short_op_never_inverts_the_window() {
+    fn no_era_pick_can_ever_leave_an_inverted_window() {
         // A 2018 shortfall: every preset from Y2018To2020 on STARTS after the before-op clamp bites.
         let sf = shortfall_on(date!(2018 - 06 - 01));
-        let mut state = DeclareFlowState::new(sf, wallet(), false);
-        for _ in 0..(ALL_PRESETS.len() * 2) {
-            state.cycle_preset();
+        for &p in &ALL_PRESETS {
+            let mut state = opened_with_oldest_era(sf.clone());
+            state.select_preset(p);
+            let (start, end) = state
+                .window()
+                .expect("the oldest-era fixture leaves a window");
             assert!(
-                state.window_start <= state.window_end,
-                "preset {:?} left an INVERTED window: {} .. {}",
-                state.preset,
-                state.window_start,
-                state.window_end
+                start <= end,
+                "picking {p:?} left an INVERTED window: {start} .. {end}"
             );
             assert!(
-                state.window_end < state.shortfall.date,
-                "the DFW-D5 before-op clamp must still hold for {:?}",
-                state.preset
+                end < state.shortfall.date,
+                "the DFW-D5 before-op clamp must still hold after picking {p:?}"
             );
+            // And the readout never blames missing price data for an incoherent window.
+            let prices = StaticPrices::default();
+            let rendered = render_declare_flow(&state, &prices).join("\n");
+            assert!(!rendered.is_empty());
         }
-
-        // And the readout never blames missing price data for it.
-        let prices = StaticPrices::default();
-        let rendered = render_declare_flow(&state, &prices).join("\n");
-        assert!(
-            state.window_start <= state.window_end,
-            "post-cycle window must be coherent: {rendered}"
-        );
     }
 
-    /// ★ tax Minor 1 (P-C gate r2): before this fix, a 2018-06-01 shortfall (before-op = 2018-05-31)
-    /// cycling onto `Y2021To2024` (start 2021-01-01, strictly after the before-op boundary) collapsed
-    /// `window_start == window_end == 2018-05-31` — a ONE-DAY window, silently: `plan_declare` would
-    /// have REFUSED this before the M-1 clamp, but the clamp now makes it merely COHERENT rather than
-    /// meaningful. A one-day window is the HIGHEST floor the flow can produce (the LEAST conservative
-    /// direction — opposite DFW-D9's "wider window → lower floor") and forces a SHORT-term holding date.
-    /// `cycle_preset` must SKIP a preset that cannot apply to this shortfall rather than land on it.
+    /// ★ tax Minor 1 (P-C gate r2), preserved in its STRONGER form. For a 2018-06-01 shortfall
+    /// (before-op = 2018-05-31), `Y2021To2024`/`Y2025Onward` start strictly AFTER the before-op
+    /// boundary: applying one would collapse `window_start == window_end == 2018-05-31` — a ONE-DAY
+    /// window, the HIGHEST floor the flow can produce (the LEAST conservative direction, opposite
+    /// DFW-D9's "wider window → lower floor") forcing a SHORT-term holding date.
+    ///
+    /// The old Tab-cycling SKIPPED such presets silently. An explicit pick cannot silently skip — a
+    /// skip would apply a DIFFERENT era than the one the filer pressed, which is the same
+    /// answering-for-the-filer defect one layer down. So the pick is REFUSED, with the reason, and any
+    /// previous pick is left intact (fail-closed).
     #[test]
-    fn cycling_never_lands_on_a_preset_that_collapses_the_window_to_a_single_degenerate_day() {
+    fn picking_an_era_that_cannot_apply_is_refused_never_collapsed_to_a_degenerate_day() {
         let sf = shortfall_on(date!(2018 - 06 - 01));
         let before_op = date!(2018 - 05 - 31);
-        let mut state = DeclareFlowState::new(sf, wallet(), false);
-        for _ in 0..(ALL_PRESETS.len() * 3) {
-            state.cycle_preset();
-            let (preset_start, _) = era_window(state.preset);
-            assert!(
-                preset_start <= before_op,
-                "{:?} starts {preset_start}, strictly after this shortfall's before-op boundary \
-                 ({before_op}) — it cannot apply to this shortfall and must be SKIPPED when cycling, \
-                 not landed on",
-                state.preset
+        for &p in &ALL_PRESETS {
+            let (preset_start, _) = era_window(p);
+            if preset_start <= before_op {
+                continue;
+            }
+            // From a clean flow: refused, and NOTHING is answered on the filer's behalf.
+            let mut fresh = DeclareFlowState::new(sf.clone(), wallet(), false);
+            fresh.select_preset(p);
+            assert_eq!(
+                fresh.preset, None,
+                "{p:?} starts {preset_start}, after this shortfall's before-op boundary \
+                 ({before_op}) — it cannot apply and must be REFUSED, never applied"
             );
+            assert_eq!(fresh.window_start, None);
+            let prices = StaticPrices::default();
+            let rendered = render_declare_flow(&fresh, &prices).join("\n");
+            assert!(
+                rendered.contains("cannot apply to this shortfall"),
+                "the refusal must say WHY: {rendered}"
+            );
+
+            // From a flow that already has a pick: the previous, VALID answer survives untouched.
+            let mut picked = opened_with_oldest_era(sf.clone());
+            let before = picked.clone();
+            picked.select_preset(p);
+            assert_eq!(
+                picked.preset, before.preset,
+                "a refused pick must not disturb the filer's existing answer"
+            );
+            assert_eq!(picked.window_start, before.window_start);
+            assert_eq!(picked.window_end, before.window_end);
             assert_ne!(
-                state.window_start, state.window_end,
-                "{:?} collapsed the window to a single degenerate day ({}) — the highest floor / \
-                 shortest (short-term) holding date the flow can silently produce",
-                state.preset, state.window_start
+                picked.window_start,
+                Some(picked.window_end),
+                "{p:?} must never collapse the window to a single degenerate day"
             );
         }
     }
@@ -886,13 +1220,14 @@ mod tests {
     #[test]
     fn nudging_window_end_down_never_crosses_below_window_start() {
         let sf = shortfall_on(date!(2020 - 06 - 15));
-        let mut state = DeclareFlowState::new(sf, wallet(), false);
+        let mut state = opened_with_oldest_era(sf);
         state.nudge_window_end(-9_999);
         assert_eq!(
-            state.window_end, state.window_start,
+            Some(state.window_end),
+            state.window_start,
             "window_end must clamp AT window_start, never below it"
         );
-        assert!(state.window_start <= state.window_end);
+        assert!(state.window_start.unwrap() <= state.window_end);
     }
 
     // ── ★ tax M-2 (SPEC DFW-D8): the over-coverage confirm-note ──────────────────────────────────────
@@ -900,7 +1235,7 @@ mod tests {
     #[test]
     fn declaring_more_sat_than_the_shortfall_needs_carries_a_confirm_note() {
         let sf = shortfall_on(date!(2020 - 06 - 15));
-        let mut state = DeclareFlowState::new(sf, wallet(), false);
+        let mut state = opened_with_oldest_era(sf);
         let prices = StaticPrices::default();
 
         // Sized exactly at the shortfall: no excess, no note.
@@ -934,7 +1269,7 @@ mod tests {
     #[test]
     fn the_tax_delta_readout_says_not_computed_yet_on_first_open_and_stale_only_after_an_edit() {
         let sf = shortfall_on(date!(2020 - 06 - 15));
-        let mut state = DeclareFlowState::new(sf, wallet(), false);
+        let mut state = opened_with_oldest_era(sf);
         let prices = StaticPrices::default();
 
         let fresh = render_declare_flow(&state, &prices).join("\n");
@@ -964,14 +1299,14 @@ mod tests {
     #[test]
     fn holding_date_is_window_end_and_long_term_reflects_is_long_term() {
         let sf = shortfall_on(date!(2022 - 01 - 01));
-        let mut state = DeclareFlowState::new(sf, wallet(), false);
+        let mut state = opened_with_oldest_era(sf);
         // Force a window_end more than a year before the short op's date — long-term.
         state.window_end = date!(2020 - 06 - 01);
-        assert_eq!(state.holding_date(), date!(2020 - 06 - 01));
-        assert!(state.is_long_term_at_short_date());
+        assert_eq!(state.holding_date(), Some(date!(2020 - 06 - 01)));
+        assert_eq!(state.is_long_term_at_short_date(), Some(true));
 
         // A window_end just before the short op's date — short-term.
         state.window_end = date!(2021 - 12 - 31);
-        assert!(!state.is_long_term_at_short_date());
+        assert_eq!(state.is_long_term_at_short_date(), Some(false));
     }
 }
