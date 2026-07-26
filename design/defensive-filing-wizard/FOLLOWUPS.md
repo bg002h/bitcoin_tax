@@ -416,3 +416,35 @@ fold: the blockers and tax-M-3 are pure documentation; tax-M-1 makes an export y
 - **[done] P-B-tax-Minor** (→ Task 8): `Advisory::WouldDisplaceIfPromoted` caveats a displacement-driven gain-Δ; KAT'd.
 - **[done] arch-Minor2** (→ Task 8): `residue_latch_status()` guard at `open_defensive_filing`; mutation-verified.
 - **[done] arch-Minor1** (→ Task 8): visible cursor marker on the dashboard; KAT'd.
+
+## Post-merge / next cycle — filed at the whole-branch r3/r4 gate (2026-07-26)
+
+*(Both lenses GREEN at this gate. Everything below is doc/test precision — no filed number, no gate.)*
+
+- **[open] The straddle invariant's stated CONSEQUENCE is a non-sequitur** (tax r4 M-1). `era.rs:25` + the two
+  straddle-KAT assert messages (`era.rs:163-164`, `defensive_era.rs:83-85`) say a straddling window would make the
+  pool assignment "ambiguous". It would not: assignment is a total function of `window_end` alone (`resolve.rs:1310`
+  emits one `Eff` at `window_end.midnight()`; `pool_key` takes one date), so a straddling window is *determinate*.
+  The invariant is still worth pinning, for a **tax-relevant** reason instead: a straddling window would let the filer
+  attest a possible **pre-2025** acquisition while both `pool_key` and `tranche_guard::pre2025_tranche_exists` read
+  only `window_end` — so the tranche would stop blocking a `SafeHarborAllocation` that reconstructs exactly the
+  pre-2025 residue the mutual exclusion protects. (Owner: post-merge; `era.rs` is a docs.rs surface.)
+- **[open] Incomplete sweep of the arch-M-1 phrasing** (tax r4 M-2): `defensive_era.rs:74-76` and `era.rs:151-155`
+  test **doc comments** still say the lot "lands in exactly ONE pooling era … rather than spanning the split" — the
+  wording corrected everywhere else in the same fold, now contradicting the module doc's own new disclaimer ~130
+  lines above and the assert message three lines below. The fold changed the assert strings but not the attached doc
+  comments. This repo's recurring whole-surface-sweep miss. (Owner: post-merge.)
+- **[open] Wording precision** (tax r4 Nits): (a) `era.rs:62-63`/`SPEC.md:247-249` "~1,461 presses … alone" ignores
+  that `nudge_window_start` clamps at `window_end`, so `window_start` cannot reach 2025-01-01 until `window_end` is
+  nudged across first; (b) `README.md:441-442` "no figure computable for **that year**" — `SavingFlavor::Named` is
+  **tranche**-scoped, not year-scoped (`defensive/mod.rs:302-311`); (c) `README.md:448-449` "re-derived from your
+  ledger" can read as a reconstructability guarantee, but `advisory_lines` also depend on bundled prices/tables and
+  the injected `current` year — prefer "computed from your ledger at the moment they are shown"; (d) `SPEC.md:70` /
+  `DESIGN.md:46` "must equal what the filer saw, on either surface" restates the scope claim struck from the README —
+  it is a CLI↔TUI *parity* criterion, so prefer "must not differ between the two surfaces". (Owner: post-merge.)
+- **[open] arch M-3 — two public `render_consent` fns on `btctax-cli`** (`cmd/promote.rs:186`, `chokepoint/mod.rs:438`).
+  ★ **DELIBERATELY SHIPPED AS-IS at v0.10.0** (controller's call, CONFIRMED by the arch lens in r3 after it contested
+  its own finding): the narrow one shipped at v0.9.0 so *removing* it is the breaking change; the crate root has NO
+  collision (`btctax_cli::render_consent` resolves unambiguously to the correct advisory-carrying one); and it has NO
+  production caller — only four assertions in `promote_cli.rs`. Not reachable by any ergonomic path. Narrowing it
+  later is a breaking change on a crate with no dependents, i.e. ~free. (Owner: next cycle, if ever.)
