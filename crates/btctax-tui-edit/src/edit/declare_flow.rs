@@ -39,14 +39,25 @@ pub struct DeclareFlowState {
     /// The era preset currently governing `window_start`/`window_end`'s STARTING point (DFW-D9) — a
     /// manual nudge does not change `preset` (it remains the last-applied starting point).
     pub preset: EraPreset,
-    /// DFW-D9 M-3 / KAT(d): a first-class ENTRY state, copied from the dashboard's own
-    /// `journey_view.safe_harbor_blocked` (the CORE `tranche_guard` predicates) — never re-derived from
-    /// the cli-private `guard_tranche_vs_allocation` fn. Purely informational here: the actual gate is
+    /// DFW-D9 M-3 / KAT(d): a first-class ENTRY state — is a safe-harbor allocation IN FORCE?
+    ///
+    /// ★ P-C gate tax I-3: this is the **DIRECTIONAL** predicate, `tranche_guard::
+    /// in_force_allocation_exists`, NOT `journey_view.safe_harbor_blocked`. That flag is the SYMMETRIC
+    /// mutual-exclusion state (`in_force_allocation_exists || pre2025_tranche_exists`), so it also goes
+    /// true after the filer's own FIRST pre-2025 declare — and the declare-side gate
+    /// (`guard_tranche_vs_allocation`) refuses only in the `window_end < TRANSITION_DATE &&
+    /// in_force_allocation_exists` direction. Keying the note on the symmetric flag told every filer
+    /// covering their SECOND shortfall that a declare `plan_declare` accepts "will be refused" — the
+    /// wizard's own majority path. Still a CORE predicate (never the cli-private
+    /// `guard_tranche_vs_allocation`), and still purely informational: the actual gate is
     /// `plan_declare`'s own shipped-set check at confirm time (DFW-D1 — no second gating authority).
-    pub safe_harbor_blocked: bool,
-    /// DFW-D10 M-1: the on-demand tax-Δ preview. `None` = not-yet-computed OR STALE ("stale —
-    /// recompute") — invalidated on ANY window/sat edit.
+    pub allocation_in_force: bool,
+    /// DFW-D10 M-1: the on-demand tax-Δ preview. `None` + `tax_delta_stale` = STALE ("recompute");
+    /// `None` alone = not computed yet. Invalidated on ANY window/sat edit.
     pub tax_delta: Option<SavingFlavor>,
+    /// ★ tax N-2: distinguishes "invalidated by an edit" (stale) from "never computed" (first open), so
+    /// the readout does not tell a filer to *re*compute something they never computed.
+    pub tax_delta_stale: bool,
 }
 
 impl DeclareFlowState {
@@ -56,7 +67,7 @@ impl DeclareFlowState {
     /// seeds from the OLDEST (most conservative — DFW-D9's "wider window → lower floor" bias) era
     /// preset; the before-op prefill clamps `window_end` immediately (DFW-D9: "the DFW-D5 before-op
     /// prefill governs over a preset's window_end where they conflict").
-    pub fn new(shortfall: Shortfall, wallet: WalletId, safe_harbor_blocked: bool) -> Self {
+    pub fn new(shortfall: Shortfall, wallet: WalletId, allocation_in_force: bool) -> Self {
         let preset = ALL_PRESETS[0];
         let (preset_start, preset_end) = era_window(preset);
         let before_op = before_op_date(&shortfall);
@@ -69,26 +80,37 @@ impl DeclareFlowState {
             step: DeclareFlowStep::Edit,
             sat: shortfall.short_sat,
             wallet,
-            window_start: preset_start,
+            window_start: preset_start.min(window_end),
             window_end,
             preset,
-            safe_harbor_blocked,
+            allocation_in_force,
             tax_delta: None,
+            tax_delta_stale: false,
             shortfall,
         }
     }
 
+    /// Invalidate the cached on-demand tax-Δ after a window/sat edit (DFW-D10 M-1). Only marks it STALE
+    /// when there WAS a computed value to invalidate (★ tax N-2 — an edit before the first `t` leaves the
+    /// readout on "not computed yet", not "stale — recompute").
+    fn invalidate_tax_delta(&mut self) {
+        self.tax_delta_stale |= self.tax_delta.take().is_some();
+    }
+
     /// Cycle to the NEXT era preset (DFW-D9 "confirm/edit starting point"): seeds `window_start` from
     /// the preset's own start; clamps `window_end` to the DFW-D5 before-op day when the preset's own end
-    /// would not otherwise satisfy it (the before-op prefill governs on conflict). Invalidates the
-    /// on-demand tax-Δ (M-1).
+    /// would not otherwise satisfy it (the before-op prefill governs on conflict). ★ tax M-1: the seeded
+    /// `window_start` is then floored at the (already-clamped) `window_end`, so cycling to a preset that
+    /// STARTS after the short op can never leave an INVERTED window — which `window_reference` reports as
+    /// "no price data covers this window at all", blaming missing data for an incoherent window (mirrors
+    /// the clamp `nudge_window_start` already carries). Invalidates the on-demand tax-Δ (M-1).
     pub fn cycle_preset(&mut self) {
         self.preset = next_preset(self.preset);
         let (start, end) = era_window(self.preset);
         let before_op = before_op_date(&self.shortfall);
-        self.window_start = start;
         self.window_end = if end < before_op { end } else { before_op };
-        self.tax_delta = None;
+        self.window_start = start.min(self.window_end);
+        self.invalidate_tax_delta();
     }
 
     /// Nudge `window_start` by `days` (may move earlier or later than the current preset's own start —
@@ -112,21 +134,28 @@ impl DeclareFlowState {
         } else {
             floored
         };
-        self.tax_delta = None;
+        self.invalidate_tax_delta();
     }
 
     /// Nudge `window_end` by `days`, CLAMPED to never cross the DFW-D5 before-op boundary (the
     /// invariant that makes the lot exist in time to cover the short op — never overridable by a manual
-    /// edit). Invalidates the on-demand tax-Δ (M-1).
+    /// edit) and — ★ tax M-1 — FLOORED at `window_start`, so a downward nudge can never invert the
+    /// window (the sibling bound `nudge_window_start` already carries). Invalidates the on-demand
+    /// tax-Δ (M-1).
     pub fn nudge_window_end(&mut self, days: i64) {
         let candidate = shift_date(self.window_end, days);
         let before_op = before_op_date(&self.shortfall);
-        self.window_end = if candidate > before_op {
+        let capped = if candidate > before_op {
             before_op
         } else {
             candidate
         };
-        self.tax_delta = None;
+        self.window_end = if capped < self.window_start {
+            self.window_start
+        } else {
+            capped
+        };
+        self.invalidate_tax_delta();
     }
 
     /// Nudge `sat` by `delta` sat (DFW-D8/N-1: the filer MAY edit above the prefilled `short_sat` — the
@@ -135,7 +164,15 @@ impl DeclareFlowState {
     /// Invalidates the on-demand tax-Δ (M-1).
     pub fn nudge_sat(&mut self, delta: i64) {
         self.sat = (self.sat + delta).max(1);
-        self.tax_delta = None;
+        self.invalidate_tax_delta();
+    }
+
+    /// ★ tax M-2 (SPEC DFW-D8, verbatim: "the excess is the out-of-scope manual-holdings shape … a
+    /// confirm-note suffices"): how much MORE than the targeted shortfall actually needs is being
+    /// declared, if any. `None` when the declare is sized at or below the shortfall.
+    pub fn excess_sat(&self) -> Option<i64> {
+        let excess = self.sat - self.shortfall.short_sat;
+        (excess > 0).then_some(excess)
     }
 
     /// The cheap-trio live readout's floor/coverage piece (DFW-D9/D10): `Ok` = `Coverage::Full` +
@@ -161,9 +198,14 @@ impl DeclareFlowState {
     }
 
     /// The DFW-D5.2 target-scoped clearance check: does the CURRENT window/sat/wallet actually clear
-    /// the targeted shortfall? A pure READ — `plan_declare` never mutates. `Ok(plan)` is what
-    /// `persist_declare_tranche` (edit/persist.rs) is handed at confirm time; `Err(refusal)` is surfaced
-    /// live rather than discovered only at a final Enter (DFW-D5).
+    /// the targeted shortfall? A pure READ — `plan_declare` never mutates.
+    ///
+    /// ★ tax N-1 / arch M-2 (doc truth): this is **not** wired into the live readout — `render_declare_flow`
+    /// renders only the cheap trio (correct per DFW-D10: no per-keystroke re-projection). The REAL and
+    /// only declare gate is `declare_flow_confirm`'s own FRESH `plan_declare` at the Confirm-step Enter,
+    /// which surfaces any refusal with its reason (DFW-D5). This fn exists as the same-shaped pure probe
+    /// (its `Ok(plan)` is exactly what `persist_declare_tranche` is handed) and is exercised by this
+    /// module's own tests; wiring it into the readout is a filed follow-up, not shipped behavior.
     #[allow(clippy::too_many_arguments)]
     pub fn clearance(
         &self,
@@ -212,6 +254,7 @@ impl DeclareFlowState {
             profile,
         );
         self.tax_delta = Some(flavor);
+        self.tax_delta_stale = false;
     }
 }
 
@@ -238,11 +281,14 @@ pub fn render_declare_flow(state: &DeclareFlowState, prices: &dyn PriceProvider)
         String::new(),
     ];
 
-    if state.safe_harbor_blocked {
-        // DFW-D9 M-3 / KAT(d): a first-class entry state, not a final-Enter surprise.
+    if state.allocation_in_force {
+        // DFW-D9 M-3 / KAT(d): a first-class entry state, not a final-Enter surprise. ★ tax I-3: keyed
+        // on the DIRECTIONAL predicate (an in-force ALLOCATION), which is the only condition under which
+        // the declare gate actually refuses — an existing pre-2025 tranche of the filer's own does NOT
+        // block the next declare, and claiming otherwise made them abandon a correct, available action.
         lines.push(
-            "Note: an in-force safe-harbor allocation or a pre-2025 tranche is present — a pre-2025 \
-             declare here will be refused (the two are mutually exclusive)."
+            "Note: a safe-harbor allocation is in force — a declare whose window ends before 2025-01-01 \
+             will be refused (a safe-harbor allocation and a pre-2025 tranche are mutually exclusive)."
                 .to_string(),
         );
         lines.push(String::new());
@@ -291,7 +337,11 @@ pub fn render_declare_flow(state: &DeclareFlowState, prices: &dyn PriceProvider)
 
     // On-demand tax-Δ (DFW-D10 M-1) — never per-keystroke.
     match &state.tax_delta {
-        None => lines.push("tax-Δ if later promoted: stale — recompute (press 't')".to_string()),
+        // ★ tax N-2: nothing is "stale" until something was computed and then edited away.
+        None if state.tax_delta_stale => {
+            lines.push("tax-Δ if later promoted: stale — recompute (press 't')".to_string())
+        }
+        None => lines.push("tax-Δ if later promoted: not computed yet (press 't')".to_string()),
         Some(SavingFlavor::ComputedTax { year, delta }) => {
             lines.push(format!("tax-Δ if later promoted ({year}): ${delta:.2}"));
         }
@@ -322,6 +372,18 @@ pub fn render_declare_flow(state: &DeclareFlowState, prices: &dyn PriceProvider)
                  the vault's records."
                     .to_string(),
             );
+            // ★ tax M-2 (SPEC DFW-D8): declaring MORE than the shortfall needs is allowed and files
+            // nothing wrong at $0 — but the excess is a phantom $0-basis lot that, if later promoted,
+            // would file a >$0 floor on sat the shortfall never needed. A confirm-note suffices.
+            if let Some(excess) = state.excess_sat() {
+                lines.push(format!(
+                    "Note: this declares {excess} sat MORE than the shortfall needs ({} vs {} sat \
+                     short). The excess is a $0-basis lot in its own right — it files nothing wrong at \
+                     $0, but if you later PROMOTE this tranche the >$0 floor is filed on the excess \
+                     too. Declare only what you actually held.",
+                    state.sat, state.shortfall.short_sat
+                ));
+            }
             lines.push("[Enter] declare  [Esc] back to edit".to_string());
         }
     }
@@ -361,29 +423,89 @@ mod tests {
     // ── (d): the safe-harbor exclusion is a first-class ENTRY state ──────────────────────────────────
 
     #[test]
-    fn safe_harbor_blocked_renders_as_a_first_class_entry_note() {
+    fn an_in_force_allocation_renders_as_a_first_class_entry_note() {
         let sf = shortfall_on(date!(2020 - 06 - 15));
         let state = DeclareFlowState::new(sf, wallet(), true);
-        assert!(state.safe_harbor_blocked);
+        assert!(state.allocation_in_force);
         let prices = StaticPrices::default();
         let rendered = render_declare_flow(&state, &prices).join("\n");
         assert!(
             rendered.to_lowercase().contains("safe-harbor"),
-            "safe_harbor_blocked must render as a visible, FIRST-CLASS note (not only discovered at a \
-             final refusal): {rendered}"
+            "an in-force allocation must render as a visible, FIRST-CLASS note (not only discovered at \
+             a final refusal): {rendered}"
+        );
+        assert!(
+            rendered.to_lowercase().contains("will be refused"),
+            "with an allocation in force the refusal claim is TRUE and must be stated: {rendered}"
         );
     }
 
     #[test]
-    fn safe_harbor_not_blocked_renders_no_such_note() {
+    fn no_allocation_in_force_renders_no_such_note() {
         let sf = shortfall_on(date!(2020 - 06 - 15));
         let state = DeclareFlowState::new(sf, wallet(), false);
-        assert!(!state.safe_harbor_blocked);
+        assert!(!state.allocation_in_force);
         let prices = StaticPrices::default();
         let rendered = render_declare_flow(&state, &prices).join("\n");
         assert!(
             !rendered.to_lowercase().contains("safe-harbor"),
             "no safe-harbor note must render when there is no conflict: {rendered}"
+        );
+    }
+
+    /// ★ P-C gate tax I-3 — the wizard's own MAJORITY path: after the filer's first declare (the default
+    /// preset ends in 2011, so `pre2025_tranche_exists` is true), a vault with NO allocation at all must
+    /// NOT be told the next declare "will be refused". `plan_declare` accepts it; the old note keyed on
+    /// the SYMMETRIC `journey_view.safe_harbor_blocked` and claimed otherwise, so a filer abandoned a
+    /// correct, available action and left an `UncoveredDisposal` Hard blocker standing.
+    #[test]
+    fn a_pre2025_tranche_without_an_allocation_never_claims_a_declare_will_be_refused() {
+        use btctax_core::event::{DeclareTranche, EventPayload};
+        use btctax_core::tranche_guard::{in_force_allocation_exists, pre2025_tranche_exists};
+        use time::macros::datetime;
+
+        // A vault holding exactly what the filer's OWN first wizard declare leaves behind.
+        let events = vec![LedgerEvent {
+            id: EventId::decision(1),
+            utc_timestamp: datetime!(2026-01-01 0:00 UTC),
+            original_tz: time::UtcOffset::UTC,
+            wallet: None,
+            payload: EventPayload::DeclareTranche(DeclareTranche {
+                sat: 10_000_000,
+                wallet: wallet(),
+                window_start: date!(2009 - 01 - 03),
+                window_end: date!(2011 - 12 - 31),
+            }),
+        }];
+        assert!(
+            pre2025_tranche_exists(&events),
+            "fixture: the first declare leaves a pre-2025 tranche on record"
+        );
+        assert!(
+            !in_force_allocation_exists(&events),
+            "fixture: there is NO safe-harbor allocation — the declare gate does not refuse"
+        );
+
+        // What `open_declare_flow` now threads: the DIRECTIONAL predicate, not the symmetric flag.
+        let state = DeclareFlowState::new(
+            shortfall_on(date!(2020 - 06 - 15)),
+            wallet(),
+            in_force_allocation_exists(&events),
+        );
+        let prices = StaticPrices::default();
+        let rendered = render_declare_flow(&state, &prices).join("\n");
+        assert!(
+            !rendered.to_lowercase().contains("will be refused"),
+            "no refusal may be claimed for a declare plan_declare accepts: {rendered}"
+        );
+
+        // And the engine agrees: this declare is NOT refused by the allocation guard.
+        let now = datetime!(2026 - 01 - 01 0:00 UTC);
+        let refusal = state.clearance(&events, &prices, &cfg(), now).err();
+        let text = format!("{refusal:?}").to_lowercase();
+        assert!(
+            !text.contains("safe-harbor") && !text.contains("safe harbor"),
+            "plan_declare must not refuse this on safe-harbor grounds: {refusal:?}"
         );
     }
 
@@ -694,8 +816,15 @@ mod tests {
         let _ = BundledTaxTables::load();
     }
 
+    /// ★ arch M-4 (renamed, P-C gate): this fixture has NO price coverage, so `declare_preview_saving`
+    /// short-circuits to `SavingFlavor::Named` BEFORE `profile` is ever consulted — the old name
+    /// (`…without_a_profile_yields_uncomputable_never_a_bare_dollar`) claimed a property it never
+    /// exercised. The real no-profile property is covered at core level by
+    /// `btctax-core/tests/defensive_journey.rs::declare_preview_saving_is_uncomputable_without_a_profile`.
+    /// What this pins is the DFW-D10 invariant that matters here: an uncomputable preview is NEVER
+    /// rendered as a bare dollar figure.
     #[test]
-    fn compute_tax_delta_without_a_profile_yields_uncomputable_never_a_bare_dollar() {
+    fn compute_tax_delta_without_price_coverage_yields_named_never_a_bare_dollar() {
         let sf = shortfall_on(date!(2020 - 06 - 15));
         let mut state = DeclareFlowState::new(sf, wallet(), false);
         let events: Vec<LedgerEvent> = vec![];
@@ -706,6 +835,124 @@ mod tests {
             matches!(state.tax_delta, Some(SavingFlavor::Named(_))),
             "no price coverage at all must be Named: {:?}",
             state.tax_delta
+        );
+        let rendered = render_declare_flow(&state, &prices).join("\n");
+        assert!(
+            !rendered.contains("tax-Δ if later promoted (2020): $"),
+            "an uncomputable preview must never render as a bare dollar figure: {rendered}"
+        );
+    }
+
+    // ── ★ tax M-1 (P-C gate): an INVERTED window (window_start > window_end) is unreachable ──────────
+    //
+    // `window_reference` returns `None` for start > end, which the readout reports as "no price data
+    // covers this window at all" — blaming missing data for an incoherent window, right across the
+    // 2018-2023 audience years. `nudge_window_start` was already clamped (T8-review Minor-2); these pin
+    // the two remaining doors.
+
+    #[test]
+    fn cycling_to_a_preset_that_starts_after_the_short_op_never_inverts_the_window() {
+        // A 2018 shortfall: every preset from Y2018To2020 on STARTS after the before-op clamp bites.
+        let sf = shortfall_on(date!(2018 - 06 - 01));
+        let mut state = DeclareFlowState::new(sf, wallet(), false);
+        for _ in 0..(ALL_PRESETS.len() * 2) {
+            state.cycle_preset();
+            assert!(
+                state.window_start <= state.window_end,
+                "preset {:?} left an INVERTED window: {} .. {}",
+                state.preset,
+                state.window_start,
+                state.window_end
+            );
+            assert!(
+                state.window_end < state.shortfall.date,
+                "the DFW-D5 before-op clamp must still hold for {:?}",
+                state.preset
+            );
+        }
+
+        // And the readout never blames missing price data for it.
+        let prices = StaticPrices::default();
+        let rendered = render_declare_flow(&state, &prices).join("\n");
+        assert!(
+            state.window_start <= state.window_end,
+            "post-cycle window must be coherent: {rendered}"
+        );
+    }
+
+    #[test]
+    fn nudging_window_end_down_never_crosses_below_window_start() {
+        let sf = shortfall_on(date!(2020 - 06 - 15));
+        let mut state = DeclareFlowState::new(sf, wallet(), false);
+        state.nudge_window_end(-9_999);
+        assert_eq!(
+            state.window_end, state.window_start,
+            "window_end must clamp AT window_start, never below it"
+        );
+        assert!(state.window_start <= state.window_end);
+    }
+
+    // ── ★ tax M-2 (SPEC DFW-D8): the over-coverage confirm-note ──────────────────────────────────────
+
+    #[test]
+    fn declaring_more_sat_than_the_shortfall_needs_carries_a_confirm_note() {
+        let sf = shortfall_on(date!(2020 - 06 - 15));
+        let mut state = DeclareFlowState::new(sf, wallet(), false);
+        let prices = StaticPrices::default();
+
+        // Sized exactly at the shortfall: no excess, no note.
+        state.step = DeclareFlowStep::Confirm;
+        assert_eq!(state.excess_sat(), None);
+        let rendered = render_declare_flow(&state, &prices).join("\n");
+        assert!(
+            !rendered.contains("MORE than the shortfall"),
+            "no over-coverage note when the declare is correctly sized: {rendered}"
+        );
+
+        // Nudged above `short_sat`: the DFW-D8 confirm-note must name the excess.
+        state.step = DeclareFlowStep::Edit;
+        state.nudge_sat(30_000_000);
+        state.step = DeclareFlowStep::Confirm;
+        assert_eq!(state.excess_sat(), Some(30_000_000));
+        let rendered = render_declare_flow(&state, &prices).join("\n");
+        assert!(
+            rendered.contains("30000000 sat MORE than the shortfall"),
+            "SPEC DFW-D8: the excess must be surfaced as a confirm-note: {rendered}"
+        );
+        assert!(
+            rendered.to_uppercase().contains("PROMOTE"),
+            "the note must name the real consequence (a later promote files the floor on the excess \
+             too): {rendered}"
+        );
+    }
+
+    // ── ★ tax N-2: "stale — recompute" only after something WAS computed ─────────────────────────────
+
+    #[test]
+    fn the_tax_delta_readout_says_not_computed_yet_on_first_open_and_stale_only_after_an_edit() {
+        let sf = shortfall_on(date!(2020 - 06 - 15));
+        let mut state = DeclareFlowState::new(sf, wallet(), false);
+        let prices = StaticPrices::default();
+
+        let fresh = render_declare_flow(&state, &prices).join("\n");
+        assert!(
+            fresh.contains("not computed yet"),
+            "nothing is STALE on first open — the filer never computed anything: {fresh}"
+        );
+        assert!(!fresh.contains("stale"), "{fresh}");
+
+        // An edit BEFORE any compute still is not "stale".
+        state.nudge_sat(1_000);
+        let edited = render_declare_flow(&state, &prices).join("\n");
+        assert!(edited.contains("not computed yet"), "{edited}");
+
+        // Compute, then edit → NOW it is stale.
+        state.tax_delta = Some(SavingFlavor::Named("computed".to_string()));
+        state.nudge_window_start(-1);
+        let stale = render_declare_flow(&state, &prices).join("\n");
+        assert!(
+            stale.contains("stale — recompute"),
+            "an edit that invalidates a COMPUTED value is stale: {stale}"
         );
     }
 

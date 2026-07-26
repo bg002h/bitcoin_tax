@@ -37,8 +37,27 @@ pub enum ProvenanceKind {
 }
 
 impl ProvenanceKind {
-    /// `pub(crate)`: the chokepoint (`crate::chokepoint::refuse_non_purchase`) needs this label too.
-    pub(crate) fn label(self) -> &'static str {
+    /// The CLOSED enumeration, in `--provenance` declaration order — the SINGLE list a driver offers the
+    /// filer to choose from. Added for the TUI Promote flow's BG-D5 provenance step (P-C gate tax I-2):
+    /// the wizard must make the filer SELECT their acquisition provenance exactly as `--provenance` makes
+    /// the CLI filer select it, and `btctax-tui-edit` does not depend on `clap`, so it cannot reach
+    /// `ValueEnum::value_variants()`. Kept in lock-step with the enum by
+    /// `tests::provenance_all_covers_every_clap_value_variant`.
+    pub const ALL: [ProvenanceKind; 7] = [
+        ProvenanceKind::Purchase,
+        ProvenanceKind::Gift,
+        ProvenanceKind::Inheritance,
+        ProvenanceKind::Mining,
+        ProvenanceKind::Earned,
+        ProvenanceKind::Airdrop,
+        ProvenanceKind::Fork,
+    ];
+
+    /// The filer-facing label for one variant. `pub` (widened from `pub(crate)` for the TUI Promote
+    /// flow's BG-D5 step): the chokepoint (`crate::chokepoint::refuse_non_purchase`) builds its refusal
+    /// copy from this, so a driver offering the enumeration renders the SAME words the refusal names —
+    /// no second copy of the enumeration's wording.
+    pub fn label(self) -> &'static str {
         match self {
             ProvenanceKind::Purchase => "purchase",
             ProvenanceKind::Gift => "gift",
@@ -205,4 +224,48 @@ pub fn promote_tranche(
     println!("{}", crate::chokepoint::render_consent(&plan));
 
     crate::chokepoint::apply_promote(&mut session, plan, acknowledge, now)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::ValueEnum;
+
+    /// Drift guard for `ProvenanceKind::ALL` (added for the TUI's BG-D5 provenance step): the array a
+    /// driver offers the filer MUST stay the SAME closed enumeration `--provenance` accepts. Adding a
+    /// variant without extending `ALL` would silently make it un-offerable in the wizard while the CLI
+    /// still accepts it.
+    #[test]
+    fn provenance_all_covers_every_clap_value_variant() {
+        let variants = ProvenanceKind::value_variants();
+        assert_eq!(
+            ProvenanceKind::ALL.len(),
+            variants.len(),
+            "ProvenanceKind::ALL must list EVERY variant (the closed BG-D5 enumeration): {:?} vs {:?}",
+            ProvenanceKind::ALL,
+            variants
+        );
+        for v in variants {
+            assert!(
+                ProvenanceKind::ALL.contains(v),
+                "ProvenanceKind::ALL is missing {v:?} — a driver could never offer it to the filer"
+            );
+        }
+        assert_eq!(
+            ProvenanceKind::ALL[0],
+            ProvenanceKind::Purchase,
+            "Purchase (the only gate-passing value) stays first so a driver's own ordering is stable"
+        );
+    }
+
+    /// Every variant has a distinct, non-empty filer-facing label (the refusal copy names it).
+    #[test]
+    fn every_provenance_label_is_distinct_and_non_empty() {
+        let mut seen = std::collections::BTreeSet::new();
+        for k in ProvenanceKind::ALL {
+            let l = k.label();
+            assert!(!l.trim().is_empty(), "{k:?} has an empty label");
+            assert!(seen.insert(l), "duplicate provenance label: {l}");
+        }
+    }
 }

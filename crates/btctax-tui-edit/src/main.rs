@@ -412,6 +412,11 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
             // Clear status on any key press ([N5]: modal/form keys never reach here,
             // so the status set by modal Enter/Esc is not instantly cleared).
             app.status = None;
+            // KEYMAP-SYNC-BEGIN — ★ P-C gate arch I-3: every printable-char key arm between these two
+            // sentinels MUST appear in `draw_edit::help_overlay_lines()`. Mechanically enforced by
+            // `draw_edit::tests::kat_keymap_overlay_lists_every_browse_char_binding`, which scans THIS
+            // region of THIS file — the in-source "KEEP IN SYNC" comment alone did not hold (Browse `w`,
+            // the Defensive Filing Wizard's only entry point, shipped absent from the overlay).
             match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
                 KeyCode::Tab => app.tab = app.tab.next(),
@@ -475,6 +480,7 @@ pub fn handle_key(app: &mut EditorApp, key: KeyEvent) {
                 KeyCode::Char('?') => app.help_open = true,
                 _ => {}
             }
+            // KEYMAP-SYNC-END
         }
         // The Defensive Filing Wizard dashboard (Task 7, Phase P-B) — READ-ONLY + dispatch-scaffolding
         // (C-3). `Esc`/`q` return to Browse; every other key is handed to
@@ -4015,9 +4021,18 @@ fn open_declare_flow(app: &mut EditorApp, target: btctax_core::EventId) {
         );
         return;
     };
-    // ★ DFW-D9 M-3 / KAT(d): copy the ALREADY-CORE-PREDICATE-DERIVED flag straight from the dashboard's
-    // own journey_view — never re-derive it from the cli-private `guard_tranche_vs_allocation`.
-    let safe_harbor_blocked = dash.view.safe_harbor_blocked;
+    // ★ DFW-D9 M-3 / KAT(d) + P-C gate tax I-3: the DECLARE-side entry note must key on the
+    // DIRECTIONAL condition — is a safe-harbor allocation IN FORCE? — because that is the only side
+    // `guard_tranche_vs_allocation` refuses on (`window_end < TRANSITION_DATE && in_force_allocation
+    // _exists`). `dash.view.safe_harbor_blocked` is the SYMMETRIC mutual-exclusion flag
+    // (`… || pre2025_tranche_exists`), so it also goes true after the filer's OWN first pre-2025
+    // declare and would tell them their next (accepted) declare "will be refused". Still the CORE
+    // `tranche_guard` predicate — never the cli-private `guard_tranche_vs_allocation` fn.
+    let allocation_in_force = app
+        .snapshot
+        .as_ref()
+        .map(|snap| btctax_core::tranche_guard::in_force_allocation_exists(&snap.events))
+        .unwrap_or(false);
 
     debug_assert!(
         app.open_flow_count() <= 1,
@@ -4028,7 +4043,7 @@ fn open_declare_flow(app: &mut EditorApp, target: btctax_core::EventId) {
     app.declare_flow = Some(crate::edit::declare_flow::DeclareFlowState::new(
         shortfall,
         wallet,
-        safe_harbor_blocked,
+        allocation_in_force,
     ));
 }
 
@@ -4259,14 +4274,49 @@ fn open_promote_flow(app: &mut EditorApp, target: btctax_core::EventId) {
 fn handle_promote_flow_key(app: &mut EditorApp, key: KeyEvent) {
     use crate::edit::promote_flow::PromoteFlowStep;
 
-    let is_consent = matches!(
-        app.promote_flow.as_ref().map(|f| &f.step),
-        Some(PromoteFlowStep::Consent { .. })
-    );
-    if is_consent {
-        handle_promote_flow_consent_key(app, key);
-    } else {
-        handle_promote_flow_part_ii_key(app, key);
+    match app.promote_flow.as_ref().map(|f| &f.step) {
+        Some(PromoteFlowStep::Provenance { .. }) => handle_promote_flow_provenance_key(app, key),
+        Some(PromoteFlowStep::Consent { .. }) => handle_promote_flow_consent_key(app, key),
+        Some(PromoteFlowStep::PartII { .. }) => handle_promote_flow_part_ii_key(app, key),
+        None => {}
+    }
+}
+
+/// Handle a key press while the ★ BG-D5 provenance-attestation step is active (P-C gate tax I-2).
+///
+/// `1`-`7` select from the closed `btctax_cli::ProvenanceKind::ALL` enumeration — nothing is
+/// pre-selected, so the filer must ACT (the answered-ness invariant: the tool never answers a filing
+/// attestation for them). `Enter` confirms via `PromoteFlowState::attest_provenance`, which advances to
+/// Part II authoring on `Purchase` and otherwise drives the FILER'S OWN answer through the shipped
+/// `plan_promote` chokepoint so its `Refusal::Provenance` text is what they read (DFW-D1 — the gate stays
+/// engine-enforced; nothing is re-implemented here). `Esc` cancels the flow (nothing has been collected).
+fn handle_promote_flow_provenance_key(app: &mut EditorApp, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => {
+            app.promote_flow = None;
+        }
+        KeyCode::Char(c) => {
+            let Some(idx) = c.to_digit(10).and_then(|d| (d as usize).checked_sub(1)) else {
+                return;
+            };
+            let Some(kind) = btctax_cli::ProvenanceKind::ALL.get(idx).copied() else {
+                return;
+            };
+            if let Some(flow) = app.promote_flow.as_mut() {
+                flow.select_provenance(kind);
+            }
+        }
+        KeyCode::Enter => {
+            let Some(snap) = app.snapshot.as_ref() else {
+                return;
+            };
+            let cfg = snap.cli_config.to_projection();
+            let now = app.clock.now();
+            if let Some(flow) = app.promote_flow.as_mut() {
+                flow.attest_provenance(&snap.events, &snap.prices, &cfg, now);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -4320,10 +4370,16 @@ fn promote_flow_review(app: &mut EditorApp) {
 /// All printable chars are consumed by the ack buffer. `Backspace` removes the last char. `Enter`
 /// validates the typed phrase against `PROMOTE_ACK_PHRASE` (mirrors `handle_attest_typed_word_key`'s own
 /// exact-compare pre-check): a match calls `promote_flow_confirm`; a mismatch sets an inline error and
-/// PRESERVES the buffer (the filer corrects via Backspace) — the REAL fail-closed gate is
-/// `apply_promote`'s own `require_promote_ack`, reached via `persist_promote_tranche`; this pre-check is
-/// a UX nicety over the SAME shared `PROMOTE_ACK_PHRASE` constant, not a second gating authority. `Esc`
-/// steps back to Part II authoring (one step per press), preserving the narrative buffer.
+/// PRESERVES the buffer (the filer corrects via Backspace).
+///
+/// ★ BG-D6 ack residency (SPEC DFW-D2; P-C gate I-1, BOTH lenses): this pre-check is a **UX nicety
+/// only** — it lets the filer fix a typo inline instead of bouncing off a save error. The REAL, and the
+/// ONLY, gate is `apply_promote`'s own `require_promote_ack`, reached via `persist_promote_tranche`,
+/// which now receives **the filer's own typed buffer** (never `PROMOTE_ACK_PHRASE` itself — see
+/// `promote_flow_confirm`). Deleting this pre-check therefore cannot record anything with a wrong
+/// phrase; that mutation is pinned by
+/// `tests::promote_flow_confirm_hands_the_engine_the_typed_phrase_not_the_constant`.
+/// `Esc` steps back to Part II authoring (one step per press), preserving the narrative buffer.
 fn handle_promote_flow_consent_key(app: &mut EditorApp, key: KeyEvent) {
     use crate::edit::promote_flow::PromoteFlowStep;
 
@@ -4381,20 +4437,28 @@ fn handle_promote_flow_consent_key(app: &mut EditorApp, key: KeyEvent) {
     promote_flow_confirm(app);
 }
 
-/// The Promote flow's Consent-step Enter, once the typed ack matches: extracts the ALREADY-COMPUTED
-/// `PromotePlan` (computed once at `promote_flow_review`'s PartII→Consent transition — never recomputed
-/// here, mirroring the CLI thin driver's own single `plan_promote` call) and hands it, with the typed
-/// phrase, to `edit::persist::persist_promote_tranche` — the ONLY caller of `apply_promote` in this
-/// crate (C-3). On success, re-projects the snapshot and refreshes the dashboard's own `journey_view` off
-/// the NEW snapshot so the just-promoted row updates from "declared" to "promoted" without a manual
-/// re-enter (mirrors `declare_flow_confirm`'s own refresh).
+/// The Promote flow's Consent-step Enter: extracts the ALREADY-COMPUTED `PromotePlan` (computed once at
+/// `promote_flow_review`'s PartII→Consent transition — never recomputed here, mirroring the CLI thin
+/// driver's own single `plan_promote` call) **together with the phrase the filer actually typed**, and
+/// hands both to `edit::persist::persist_promote_tranche` — the ONLY caller of `apply_promote` in this
+/// crate (C-3).
+///
+/// ★ BG-D6 ack residency (SPEC DFW-D2; P-C gate I-1, BOTH lenses): the ack passed here is the filer's
+/// OWN buffer, NEVER `btctax_cli::PROMOTE_ACK_PHRASE`. Passing the constant made `require_promote_ack`
+/// (inside `apply_promote`) a tautology on this path and left the driver's own compare as the sole
+/// gating authority — exactly what DFW-D2 forbids ("drivers only COLLECT the phrase — they NEVER
+/// validate it"). `require_promote_ack` trims its argument, so the raw buffer is passed as typed.
+///
+/// On success, re-projects the snapshot and refreshes the dashboard's own `journey_view` off the NEW
+/// snapshot so the just-promoted row updates from "declared" to "promoted" without a manual re-enter
+/// (mirrors `declare_flow_confirm`'s own refresh).
 fn promote_flow_confirm(app: &mut EditorApp) {
     use crate::edit::promote_flow::PromoteFlowStep;
 
-    let plan = match app.promote_flow.as_mut() {
+    let (plan, typed_ack) = match app.promote_flow.as_mut() {
         Some(flow) => {
             match std::mem::replace(&mut flow.step, PromoteFlowStep::PartII { error: None }) {
-                PromoteFlowStep::Consent { plan, .. } => plan,
+                PromoteFlowStep::Consent { plan, ack, .. } => (plan, ack.as_str().to_string()),
                 other => {
                     // Not at Consent (shouldn't happen via the key dispatch above) — restore and bail.
                     flow.step = other;
@@ -4414,12 +4478,7 @@ fn promote_flow_confirm(app: &mut EditorApp) {
                 return;
             }
         };
-        crate::edit::persist::persist_promote_tranche(
-            session,
-            *plan,
-            Some(btctax_cli::PROMOTE_ACK_PHRASE),
-            now,
-        )
+        crate::edit::persist::persist_promote_tranche(session, *plan, Some(&typed_ack), now)
     };
 
     match save_result {
@@ -4462,9 +4521,37 @@ fn promote_flow_confirm(app: &mut EditorApp) {
                 }
             }
         }
+        // ★ arch M-3 (P-C gate): when NOTHING was persisted, do not throw away the filer's authored
+        // Form 8275 Part II narrative. `PersistError`'s own contract is that `NoChange` and `RolledBack`
+        // both mean "nothing persisted, safe to retry" (`edit/persist.rs`) — and on THIS path the
+        // realistic case is `RolledBack`: `persist_promote_tranche` funnels every `apply_promote` error
+        // (the BG-D6 ack gate, the BG-D9 `would_conflict` pre-check, the append, the save) through
+        // `rollback`, which yields `RolledBack`/`ResidueLive`, never `NoChange`. All of those fire AFTER
+        // the filer has authored a multi-paragraph narrative the CLI would have read from a file. So keep
+        // the flow OPEN and bounce to Part II authoring with the reason inline (the buffer lives outside
+        // `step` precisely for this); close ONLY on `ResidueLive`, the unrecoverable arm — which
+        // `on_persist_error`'s own `close_all_mutation_surfaces()` closes anyway. `on_persist_error`
+        // still runs in BOTH cases: it remains the SINGLE `PersistError` → editor-effect mapper [R0-I1]
+        // (and the only site that arms the residue latch).
         Err(e) => {
-            app.promote_flow = None;
+            use crate::edit::persist::PersistError;
+            let keep_open = match &e {
+                PersistError::NoChange(err) | PersistError::RolledBack(err) => {
+                    Some(err.to_string())
+                }
+                PersistError::ResidueLive(_) => None,
+            };
             app.on_persist_error(e);
+            match keep_open {
+                Some(reason) => {
+                    if let Some(flow) = app.promote_flow.as_mut() {
+                        flow.step = PromoteFlowStep::PartII {
+                            error: Some(reason),
+                        };
+                    }
+                }
+                None => app.promote_flow = None,
+            }
         }
     }
 }
@@ -13054,39 +13141,67 @@ mod tests {
         app
     }
 
-    // ── (d): open_declare_flow threads safe_harbor_blocked from the dashboard's own journey_view ─────
-    // (the CORE tranche_guard predicates — never re-derived from the cli-private guard) ──────────────
+    // ── (d): open_declare_flow threads the DIRECTIONAL allocation predicate (★ P-C gate tax I-3) ─────
+    // — the CORE `tranche_guard::in_force_allocation_exists`, never the SYMMETRIC
+    // `journey_view.safe_harbor_blocked` (which a filer's own pre-2025 tranche also sets) and never the
+    // cli-private `guard_tranche_vs_allocation`. ────────────────────────────────────────────────────
 
-    #[test]
-    fn open_declare_flow_threads_safe_harbor_blocked_from_the_dashboard_view() {
+    fn declare_candidate_view(
+        wallet: btctax_core::WalletId,
+        safe_harbor_blocked: bool,
+    ) -> btctax_core::defensive::DefensiveFilingView {
         use btctax_core::defensive::discovery::Shortfall;
         use btctax_core::defensive::DefensiveFilingView;
-        use btctax_core::{EventId, WalletId};
         use std::collections::BTreeSet;
         use time::macros::date;
+
+        DefensiveFilingView {
+            candidates: vec![Shortfall {
+                event: btctax_core::EventId::decision(1),
+                wallet: Some(wallet),
+                date: date!(2020 - 06 - 15),
+                short_sat: 10_000_000,
+                fee_sat: 0,
+            }],
+            resolve_first: vec![],
+            tranches: vec![],
+            still_short: vec![],
+            flagged_years: BTreeSet::new(),
+            safe_harbor_blocked,
+        }
+    }
+
+    #[test]
+    fn open_declare_flow_threads_the_directional_allocation_predicate_not_the_symmetric_flag() {
+        use btctax_core::event::{DeclareTranche, EventPayload};
+        use btctax_core::{EventId, LedgerEvent, WalletId};
+        use time::macros::{date, datetime};
 
         let wallet = WalletId::Exchange {
             provider: "cb".into(),
             account: "m".into(),
         };
-        let shortfall = Shortfall {
-            event: EventId::decision(1),
-            wallet: Some(wallet),
-            date: date!(2020 - 06 - 15),
-            short_sat: 10_000_000,
-            fee_sat: 0,
-        };
-        let view = DefensiveFilingView {
-            candidates: vec![shortfall],
-            resolve_first: vec![],
-            tranches: vec![],
-            still_short: vec![],
-            flagged_years: BTreeSet::new(),
-            safe_harbor_blocked: true, // as computed by journey_view's core-predicate check
-        };
-        let mut app = EditorApp::new(PathBuf::from("/test/vault.pgp"));
+
+        // A vault holding exactly what the filer's OWN first wizard declare leaves behind: a pre-2025
+        // tranche and NO allocation. `journey_view.safe_harbor_blocked` is TRUE here (it is symmetric),
+        // but the declare gate does NOT refuse — so the flow must NOT be told an allocation is in force.
+        let mut app = browse_app_with_empty_snapshot();
+        if let Some(snap) = app.snapshot.as_mut() {
+            snap.events = vec![LedgerEvent {
+                id: EventId::decision(1),
+                utc_timestamp: datetime!(2026-01-01 0:00 UTC),
+                original_tz: time::UtcOffset::UTC,
+                wallet: None,
+                payload: EventPayload::DeclareTranche(DeclareTranche {
+                    sat: 10_000_000,
+                    wallet: wallet.clone(),
+                    window_start: date!(2009 - 01 - 03),
+                    window_end: date!(2011 - 12 - 31),
+                }),
+            }];
+        }
         app.defensive_dashboard = Some(crate::defensive_dashboard::DefensiveDashboardState::new(
-            view,
+            declare_candidate_view(wallet, true),
         ));
 
         open_declare_flow(&mut app, EventId::decision(1));
@@ -13096,9 +13211,62 @@ mod tests {
             .as_ref()
             .expect("the flow must open for a real candidate");
         assert!(
-            flow.safe_harbor_blocked,
-            "safe_harbor_blocked must thread through from the dashboard's own journey_view, never \
-             re-derived"
+            !flow.allocation_in_force,
+            "★ tax I-3: a pre-2025 tranche with NO allocation must NOT read as allocation-in-force — \
+             plan_declare accepts the next declare, so the flow may not claim it will be refused"
+        );
+        let prices = &app.snapshot.as_ref().unwrap().prices;
+        let rendered = crate::edit::declare_flow::render_declare_flow(
+            app.declare_flow.as_ref().unwrap(),
+            prices,
+        )
+        .join("\n");
+        assert!(
+            !rendered.to_lowercase().contains("will be refused"),
+            "no refusal may be claimed on the wizard's own majority path: {rendered}"
+        );
+    }
+
+    #[test]
+    fn open_declare_flow_threads_a_real_in_force_allocation_through_to_the_flow() {
+        use btctax_core::event::{AllocMethod, EventPayload, SafeHarborAllocation};
+        use btctax_core::{EventId, LedgerEvent, WalletId};
+        use time::macros::{date, datetime};
+
+        let wallet = WalletId::Exchange {
+            provider: "cb".into(),
+            account: "m".into(),
+        };
+        let mut app = browse_app_with_empty_snapshot();
+        if let Some(snap) = app.snapshot.as_mut() {
+            snap.events = vec![LedgerEvent {
+                id: EventId::decision(1),
+                utc_timestamp: datetime!(2026-01-01 0:00 UTC),
+                original_tz: time::UtcOffset::UTC,
+                wallet: None,
+                payload: EventPayload::SafeHarborAllocation(SafeHarborAllocation {
+                    lots: vec![],
+                    as_of_date: date!(2025 - 01 - 01),
+                    method: AllocMethod::ProRata,
+                    timely_allocation_attested: true,
+                    pre2025_method: btctax_core::LotMethod::Fifo,
+                }),
+            }];
+        }
+        app.defensive_dashboard = Some(crate::defensive_dashboard::DefensiveDashboardState::new(
+            declare_candidate_view(wallet, true),
+        ));
+
+        open_declare_flow(&mut app, EventId::decision(1));
+
+        let flow = app
+            .declare_flow
+            .as_ref()
+            .expect("the flow must open for a real candidate");
+        assert!(
+            flow.allocation_in_force,
+            "a REAL in-force safe-harbor allocation must thread through — that is the direction the \
+             declare gate actually refuses on"
         );
     }
 
@@ -13281,6 +13449,46 @@ mod tests {
             "the Promote flow must open for a real DeclaredZero row"
         );
 
+        // ★ BG-D5 (P-C gate tax I-2): the flow opens on the PROVENANCE attestation — nothing is
+        // pre-selected, so Enter alone must not advance.
+        {
+            let flow = app.promote_flow.as_ref().unwrap();
+            assert!(
+                matches!(
+                    flow.step,
+                    crate::edit::promote_flow::PromoteFlowStep::Provenance { .. }
+                ),
+                "the flow must open at the BG-D5 provenance attestation: {:?}",
+                flow.step
+            );
+            assert_eq!(
+                flow.provenance, None,
+                "nothing may be answered FOR the filer"
+            );
+        }
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            matches!(
+                app.promote_flow.as_ref().unwrap().step,
+                crate::edit::promote_flow::PromoteFlowStep::Provenance { error: Some(_) }
+            ),
+            "an unanswered provenance must insist, never advance"
+        );
+        // The filer attests PURCHASE ([1] in the closed enumeration) and confirms.
+        handle_key(&mut app, press(KeyCode::Char('1')));
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert_eq!(
+            app.promote_flow.as_ref().unwrap().provenance,
+            Some(btctax_cli::ProvenanceKind::Purchase)
+        );
+        assert!(
+            matches!(
+                app.promote_flow.as_ref().unwrap().step,
+                crate::edit::promote_flow::PromoteFlowStep::PartII { .. }
+            ),
+            "an attested purchase advances to Part II authoring"
+        );
+
         // Author the Part II narrative through REAL keystrokes — proves the multiline path (an embedded
         // Enter inserts a newline, it does NOT submit) and the Tab-driven review wiring.
         for c in "cash P2P purchase, no records".chars() {
@@ -13398,6 +13606,270 @@ mod tests {
         assert!(
             !promoted.acknowledgment.shown_terms.is_empty(),
             "a fully-undisposed promote must record a non-empty shown_terms (the Unrealized term, d)"
+        );
+    }
+
+    // ── ★ P-C gate I-1 (BOTH lenses) — BG-D6 ack residency, SPEC DFW-D2 ──────────────────────────────
+    //
+    // SPEC §5 names the mutation verbatim: "a driver cannot append without a correct phrase reaching
+    // `apply`" / "driver-side ack validation that then calls `apply(None)` still refuses". This test IS
+    // that mutation: it calls `promote_flow_confirm` DIRECTLY with a wrong phrase in the ack buffer —
+    // exactly what deleting/loosening `handle_promote_flow_consent_key`'s pre-check produces — and
+    // demands that NOTHING is recorded. It reds the moment `promote_flow_confirm` hands the chokepoint
+    // `PROMOTE_ACK_PHRASE` (the constant) instead of the filer's own typed buffer, which is what shipped.
+
+    /// Build an unlocked app sitting on a live, unpromoted `DeclareTranche` over a fully-priced window,
+    /// with the Promote flow open at the Consent step and `ack_text` typed into the ack buffer.
+    fn app_at_promote_consent(
+        ack_text: &str,
+    ) -> (EditorApp, tempfile::TempDir, btctax_core::EventId) {
+        use btctax_core::event::{DeclareTranche, EventPayload};
+        use btctax_core::persistence::append_decision;
+        use btctax_core::WalletId;
+        use time::macros::date;
+        use time::UtcOffset;
+
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        let wallet = WalletId::SelfCustody {
+            label: "cold".into(),
+        };
+        let now = app.clock.now();
+        let target = {
+            let session = app.session.as_mut().unwrap();
+            let id = append_decision(
+                session.conn(),
+                EventPayload::DeclareTranche(DeclareTranche {
+                    sat: 40_000_000,
+                    wallet,
+                    window_start: date!(2020 - 01 - 01),
+                    window_end: date!(2020 - 01 - 10),
+                }),
+                now,
+                UtcOffset::UTC,
+                None,
+            )
+            .unwrap();
+            session.save().unwrap();
+            id
+        };
+        let refreshed = {
+            let session = app.session.as_ref().unwrap();
+            btctax_tui::unlock::build_snapshot(session).unwrap().0
+        };
+        app.snapshot = Some(refreshed);
+        app.open_defensive_filing();
+        open_promote_flow(&mut app, target.clone());
+
+        // Attest purchase ([1]), author the narrative, review → Consent, then type `ack_text`.
+        handle_key(&mut app, press(KeyCode::Char('1')));
+        handle_key(&mut app, press(KeyCode::Enter));
+        for c in "cash P2P purchase, no records".chars() {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+        handle_key(&mut app, press(KeyCode::Tab));
+        assert!(
+            matches!(
+                app.promote_flow.as_ref().unwrap().step,
+                crate::edit::promote_flow::PromoteFlowStep::Consent { .. }
+            ),
+            "fixture: the flow must be at Consent"
+        );
+        for c in ack_text.chars() {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+        (app, dir, target)
+    }
+
+    fn promote_count(vault: &std::path::Path) -> usize {
+        use btctax_core::event::EventPayload;
+        let s = btctax_cli::Session::open(
+            vault,
+            &btctax_store::Passphrase::new("empty-vault-pass".into()),
+        )
+        .unwrap();
+        btctax_core::persistence::load_all(s.conn())
+            .unwrap()
+            .iter()
+            .filter(|e| matches!(e.payload, EventPayload::PromoteTranche(_)))
+            .count()
+    }
+
+    #[test]
+    fn promote_flow_confirm_hands_the_engine_the_typed_phrase_not_the_constant() {
+        // The MUTATION: bypass `handle_promote_flow_consent_key`'s UX pre-check entirely (exactly as
+        // deleting it would) and drive the confirm with a WRONG phrase in the buffer.
+        let (mut app, dir, _target) = app_at_promote_consent("not the phrase");
+        promote_flow_confirm(&mut app);
+
+        let status = app.status.clone().unwrap_or_default();
+        assert!(
+            status
+                .to_lowercase()
+                .contains("acknowledgment phrase did not match")
+                || status.to_lowercase().contains("did not match"),
+            "the ENGINE's own `require_promote_ack` refusal must be what surfaces: {status:?}"
+        );
+        drop(app); // release the VaultLock before re-opening
+        assert_eq!(
+            promote_count(&dir.path().join("vault.pgp")),
+            0,
+            "★ BG-D6 ack residency: with the driver pre-check bypassed, a WRONG phrase must STILL \
+             record nothing — the only gate is `apply_promote`'s own `require_promote_ack`, which can \
+             only refuse if the driver passes the filer's TYPED buffer (not PROMOTE_ACK_PHRASE itself)"
+        );
+    }
+
+    #[test]
+    fn promote_flow_confirm_with_the_real_typed_phrase_still_records() {
+        // The other half of the same property: passing the buffer through must not break the happy path.
+        let (mut app, dir, _target) = app_at_promote_consent(btctax_cli::PROMOTE_ACK_PHRASE);
+        promote_flow_confirm(&mut app);
+        assert!(
+            app.promote_flow.is_none(),
+            "a successful promote closes the flow"
+        );
+        drop(app);
+        assert_eq!(promote_count(&dir.path().join("vault.pgp")), 1);
+    }
+
+    /// ★ arch M-3 (P-C gate): when NOTHING was persisted, the filer's authored Part II narrative must
+    /// survive. Induced with a REAL engine refusal — a second promote of the same target trips
+    /// `apply_promote`'s BG-D9 `would_conflict` pre-check, which `persist_promote_tranche` funnels
+    /// through `rollback` into `PersistError::RolledBack` ("nothing persisted, safe to retry").
+    #[test]
+    fn a_refused_promote_that_wrote_nothing_preserves_the_authored_part_ii_narrative() {
+        let (mut app, dir, target) = app_at_promote_consent(btctax_cli::PROMOTE_ACK_PHRASE);
+        let now = app.clock.now();
+
+        // Out-of-band: record a promote for the SAME target from a separately-planned write, so the
+        // flow's own already-computed plan now collides.
+        let rogue = {
+            let session = app.session.as_ref().unwrap();
+            let events = btctax_core::persistence::load_all(session.conn()).unwrap();
+            let cfg = session.config().unwrap().to_projection();
+            btctax_cli::plan_promote(
+                &events,
+                session.prices(),
+                &cfg,
+                &target,
+                btctax_cli::ProvenanceKind::Purchase,
+                "out-of-band narrative",
+                now,
+            )
+            .expect("the fixture tranche must be promotable")
+        };
+        crate::edit::persist::persist_promote_tranche(
+            app.session.as_mut().unwrap(),
+            rogue,
+            Some(btctax_cli::PROMOTE_ACK_PHRASE),
+            now,
+        )
+        .expect("the out-of-band promote must succeed");
+
+        promote_flow_confirm(&mut app);
+
+        let flow = app.promote_flow.as_ref().expect(
+            "a refusal that wrote NOTHING must not close the flow and discard the narrative",
+        );
+        assert_eq!(
+            flow.part_ii.as_str(),
+            "cash P2P purchase, no records",
+            "the authored Form 8275 Part II narrative must be preserved verbatim"
+        );
+        match &flow.step {
+            crate::edit::promote_flow::PromoteFlowStep::PartII { error } => {
+                let e = error.as_ref().expect("the reason must be surfaced inline");
+                assert!(
+                    e.to_lowercase().contains("conflict"),
+                    "the inline reason must be the ENGINE's own: {e}"
+                );
+            }
+            other => panic!("must bounce back to Part II authoring: {other:?}"),
+        }
+        drop(app);
+        assert_eq!(
+            promote_count(&dir.path().join("vault.pgp")),
+            1,
+            "the refused promote must have recorded nothing (only the out-of-band one exists)"
+        );
+    }
+
+    /// ★ P-C gate tax I-2 (BG-D5) end-to-end: a filer whose coins were MINED drives the wizard with real
+    /// keystrokes, reads the SHIPPED `Refusal::Provenance`, and records NOTHING.
+    #[test]
+    fn a_mining_provenance_answer_surfaces_the_shipped_refusal_and_records_nothing() {
+        use btctax_core::event::{DeclareTranche, EventPayload};
+        use btctax_core::persistence::append_decision;
+        use btctax_core::WalletId;
+        use time::macros::date;
+        use time::UtcOffset;
+
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        let now = app.clock.now();
+        let target = {
+            let session = app.session.as_mut().unwrap();
+            let id = append_decision(
+                session.conn(),
+                EventPayload::DeclareTranche(DeclareTranche {
+                    sat: 40_000_000,
+                    wallet: WalletId::SelfCustody {
+                        label: "cold".into(),
+                    },
+                    window_start: date!(2020 - 01 - 01),
+                    window_end: date!(2020 - 01 - 10),
+                }),
+                now,
+                UtcOffset::UTC,
+                None,
+            )
+            .unwrap();
+            session.save().unwrap();
+            id
+        };
+        let refreshed = {
+            let session = app.session.as_ref().unwrap();
+            btctax_tui::unlock::build_snapshot(session).unwrap().0
+        };
+        app.snapshot = Some(refreshed);
+        app.open_defensive_filing();
+        open_promote_flow(&mut app, target);
+
+        // `4` == ProvenanceKind::Mining in the closed enumeration (`ProvenanceKind::ALL`).
+        assert_eq!(
+            btctax_cli::ProvenanceKind::ALL[3],
+            btctax_cli::ProvenanceKind::Mining
+        );
+        handle_key(&mut app, press(KeyCode::Char('4')));
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        let flow = app.promote_flow.as_ref().expect("the flow stays open");
+        match &flow.step {
+            crate::edit::promote_flow::PromoteFlowStep::Provenance { error } => {
+                let e = error.as_ref().expect("a mining provenance must be REFUSED");
+                assert!(
+                    e.contains("mining") && e.contains(btctax_cli::PROVENANCE_TEXT),
+                    "the SHIPPED Refusal::Provenance text must be what the filer reads: {e}"
+                );
+            }
+            other => {
+                panic!("a mining provenance must never advance past the attestation: {other:?}")
+            }
+        }
+        // Nothing further is even reachable: no ack buffer exists to type into, and the write path is
+        // only called from the Consent step.
+        for c in btctax_cli::PROMOTE_ACK_PHRASE.chars() {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+        handle_key(&mut app, press(KeyCode::Enter));
+        let events =
+            btctax_core::persistence::load_all(app.session.as_ref().unwrap().conn()).unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| matches!(e.payload, EventPayload::PromoteTranche(_)))
+                .count(),
+            0,
+            "★ BG-D5: a non-purchase provenance must record NOTHING"
         );
     }
 

@@ -1,11 +1,13 @@
 //! The Promote flow (Task 9, Phase P-C): select a tranche row (DFW-D12 — one tranche at a time; no
-//! bulk-promote) → author the Form 8275 Part II narrative (an in-TUI **multiline** path, DFW-D12/M-2) →
-//! drive the shipped `btctax_cli::plan_promote` chokepoint for the two-sided informed-consent screen
-//! (`render_consent`) → a TypedWord acknowledgment gate (mirrors `PROMOTE_ACK_PHRASE`) → promote.
-//! **C-3:** this module COLLECTS the Part II narrative + the typed ack phrase and READS
-//! `btctax_cli::plan_promote`/`render_consent` — it never calls `btctax_cli::apply_promote` directly; the
-//! WRITE goes through `edit::persist::persist_promote_tranche` (the ONLY caller of `apply_promote` in
-//! this crate, mechanically enforced by `persist::tests::kat_g1_mechanized_source_gate`).
+//! bulk-promote) → **attest the BG-D5 acquisition provenance** (the filer SELECTS from the closed
+//! `btctax_cli::ProvenanceKind` enumeration; the tool never answers it for them) → author the Form 8275
+//! Part II narrative (an in-TUI **multiline** path, DFW-D12/M-2) → drive the shipped
+//! `btctax_cli::plan_promote` chokepoint for the two-sided informed-consent screen (`render_consent`) →
+//! a TypedWord acknowledgment gate (mirrors `PROMOTE_ACK_PHRASE`) → promote.
+//! **C-3:** this module COLLECTS the provenance answer, the Part II narrative and the typed ack phrase,
+//! and READS `btctax_cli::plan_promote`/`render_consent` — it never calls `btctax_cli::apply_promote`
+//! directly; the WRITE goes through `edit::persist::persist_promote_tranche` (the ONLY caller of
+//! `apply_promote` in this crate, mechanically enforced by `persist::tests::kat_g1_mechanized_source_gate`).
 
 use crate::edit::form::FieldBuffer;
 use btctax_core::price::PriceProvider;
@@ -17,7 +19,31 @@ use btctax_core::{EventId, LedgerEvent};
 /// acquisition narrative may run to several sentences/paragraphs across multiple lines.
 pub const PART_II_CAP: usize = 4096;
 
+/// The prompt shown when the filer presses Enter on the BG-D5 provenance step WITHOUT having selected
+/// anything. NOT a refusal text (no engine gate has run): it is the UI insisting the filer answer, which
+/// is the whole point of the step (the answered-ness invariant — the tool must never silently answer a
+/// filing attestation for the filer).
+const PROVENANCE_UNANSWERED: &str =
+    "select how you acquired these units (press 1-7) — this is YOUR \
+     attestation about YOUR coins; the tool will not answer it for you.";
+
+/// Defensive-only, provably unreachable: `plan_promote` refuses EVERY non-`Purchase` provenance (BG-D5)
+/// immediately after resolve-live, so the `Ok` arm of the non-purchase probe below cannot be taken. If it
+/// somehow were, fail CLOSED (stay on the step, discard the plan) rather than advance. This is an
+/// internal-invariant message, NOT a re-implementation of any gate's refusal copy.
+const PROVENANCE_ENGINE_DID_NOT_REFUSE: &str =
+    "internal error: the engine did not refuse a non-purchase provenance. Nothing was recorded; this \
+     promote is refused here. Please report this, and use the CLI's `btctax promote-tranche` if needed.";
+
 /// Which step of the flow is active.
+///
+/// `Provenance` is the FIRST step (★ P-C gate tax I-2 / BG-D5): the filer must ACTIVELY choose their
+/// acquisition provenance from the closed `btctax_cli::ProvenanceKind` enumeration, exactly as the CLI's
+/// `--provenance` makes them choose. "No acquisition record" is NOT "purchased" — mined/forked/airdropped
+/// coins carry a documented FMV-at-receipt or carryover basis (Notice 2014-21; Rev. Rul. 2019-24), which
+/// is why the enumeration is closed and every non-`Purchase` value is refused. The refusal is
+/// ENGINE-enforced (DFW-D1): a non-`Purchase` answer is driven through `btctax_cli::plan_promote`, whose
+/// shipped `Refusal::Provenance` text is what the filer reads — nothing is re-implemented here.
 ///
 /// `PartII` carries the LAST `plan_promote` refusal (if any), so a bounced-back filer sees WHY, not a
 /// silent re-entry (mirrors the Declare flow's own refusal-surfacing philosophy, DFW-D5).
@@ -31,6 +57,10 @@ pub const PART_II_CAP: usize = 4096;
 /// driver (`cmd::promote::promote_tranche`), which also computes the plan exactly once.
 #[derive(Debug)]
 pub enum PromoteFlowStep {
+    /// The BG-D5 acquisition-provenance attestation. The filer's pick lives on
+    /// `PromoteFlowState::provenance` (`None` until they choose); `error` carries either the
+    /// "you must answer" prompt or the SHIPPED `Refusal::Provenance` text after a non-purchase answer.
+    Provenance { error: Option<String> },
     /// Authoring the Part II narrative. `error` is `Some` after a bounced-back `review()` refusal.
     PartII { error: Option<String> },
     /// The consent screen + TypedWord ack gate.
@@ -60,6 +90,11 @@ pub enum PromoteFlowStep {
 pub struct PromoteFlowState {
     /// The `DeclareTranche` decision this flow promotes (the dashboard row's own `target`).
     pub target: EventId,
+    /// ★ BG-D5 (P-C gate tax I-2): the filer's OWN acquisition-provenance answer. `None` until they
+    /// actively select one on the `Provenance` step — the tool NEVER supplies a value here, so
+    /// `plan_promote` always receives what the FILER attested, exactly like the CLI's `--provenance`.
+    /// Lives OUTSIDE `step` so a later bounce back to `Provenance` shows their previous pick.
+    pub provenance: Option<btctax_cli::ProvenanceKind>,
     /// The in-TUI multiline Part II narrative buffer. Lives OUTSIDE `step` (not nested inside `PartII`)
     /// so a Consent→PartII bounce (Esc, or a refusal) PRESERVES the filer's authored text for further
     /// editing rather than discarding it.
@@ -68,24 +103,85 @@ pub struct PromoteFlowState {
 }
 
 impl PromoteFlowState {
-    /// Open the flow for `target`, at the PartII authoring step, with an empty narrative buffer.
+    /// Open the flow for `target`, at the BG-D5 `Provenance` step, with NO provenance answered and an
+    /// empty narrative buffer.
     pub fn new(target: EventId) -> Self {
         Self {
             target,
+            provenance: None,
             part_ii: FieldBuffer::with_cap(PART_II_CAP),
-            step: PromoteFlowStep::PartII { error: None },
+            step: PromoteFlowStep::Provenance { error: None },
         }
     }
 
+    /// Record the filer's provenance pick (a pure setter — it advances nothing and gates nothing; the
+    /// filer confirms with Enter, which runs `attest_provenance`). Clears any stale step error.
+    pub fn select_provenance(&mut self, kind: btctax_cli::ProvenanceKind) {
+        self.provenance = Some(kind);
+        self.step = PromoteFlowStep::Provenance { error: None };
+    }
+
+    /// Confirm the BG-D5 provenance answer (the `Provenance` step's Enter).
+    ///
+    /// - Nothing selected → the step insists (the answered-ness invariant: never answer for the filer).
+    /// - `Purchase` → advance to Part II authoring.
+    /// - Any other value → drive the FILER'S CHOSEN kind through the shipped `btctax_cli::plan_promote`
+    ///   chokepoint and surface its `Refusal::Provenance` verbatim (via the shipped `Refusal → CliError`
+    ///   mapping). DFW-D1: the gate stays ENGINE-enforced — this flow re-implements no refusal, and
+    ///   `plan_promote` is a pure read, so a refused answer records nothing by construction.
+    pub fn attest_provenance(
+        &mut self,
+        events: &[LedgerEvent],
+        prices: &dyn PriceProvider,
+        cfg: &ProjectionConfig,
+        now: time::OffsetDateTime,
+    ) {
+        let Some(kind) = self.provenance else {
+            self.step = PromoteFlowStep::Provenance {
+                error: Some(PROVENANCE_UNANSWERED.to_string()),
+            };
+            return;
+        };
+        if kind == btctax_cli::ProvenanceKind::Purchase {
+            self.step = PromoteFlowStep::PartII { error: None };
+            return;
+        }
+        // BG-D5 runs BEFORE the Part II gate inside `plan_promote`, so the (possibly still empty)
+        // narrative cannot mask the provenance refusal.
+        let part_ii_text = self.part_ii.as_str().to_string();
+        let error = match btctax_cli::plan_promote(
+            events,
+            prices,
+            cfg,
+            &self.target,
+            kind,
+            &part_ii_text,
+            now,
+        ) {
+            Err(refusal) => {
+                let err: btctax_cli::CliError = refusal.into();
+                err.to_string()
+            }
+            Ok(_plan) => {
+                debug_assert!(
+                    false,
+                    "plan_promote accepted a non-Purchase provenance ({kind:?}) — BG-D5 is broken"
+                );
+                PROVENANCE_ENGINE_DID_NOT_REFUSE.to_string()
+            }
+        };
+        self.step = PromoteFlowStep::Provenance { error: Some(error) };
+    }
+
     /// Attempt to move from Part II authoring to the consent screen: runs `btctax_cli::plan_promote`
-    /// FRESH over the caller's `events`/`prices`/`cfg` — provenance FIXED to `Purchase` (BG-D5 still
-    /// runs, unmodified, as defense-in-depth: this flow only ever targets a DFW-D8 "$0, no acquisition
-    /// record" declared tranche, which by construction has no OTHER real acquisition provenance to
-    /// attest to — the SPEC's own "Other resolutions" section (M-1/M-2) names no provenance picker for
-    /// this UX). `Ok` transitions to `Consent` (`render_consent(&plan)` + a fresh ack buffer); `Err`
-    /// surfaces the refusal INLINE on the PartII step (BG-D5/BG-D3/BG-D7/`Refusal::Target`) — the
-    /// filer's authored narrative is preserved on `self.part_ii`, never discarded, so they can revise and
-    /// retry (mirrors the Declare flow's own "a refusal with a reason, not a silent append").
+    /// FRESH over the caller's `events`/`prices`/`cfg`, passing the provenance THE FILER ATTESTED on the
+    /// `Provenance` step (★ BG-D5 — never a value this flow supplies). `Ok` transitions to `Consent`
+    /// (`render_consent(&plan)` + a fresh ack buffer); `Err` surfaces the refusal INLINE on the PartII
+    /// step (BG-D3/BG-D7/`Refusal::Target`) — the filer's authored narrative is preserved on
+    /// `self.part_ii`, never discarded, so they can revise and retry (mirrors the Declare flow's own
+    /// "a refusal with a reason, not a silent append"). With no provenance answered this bounces to the
+    /// `Provenance` step: unreachable through the step machine (PartII is only reachable via an attested
+    /// `Purchase`), and fail-closed rather than substituting an answer the filer never gave.
     pub fn review(
         &mut self,
         events: &[LedgerEvent],
@@ -93,13 +189,19 @@ impl PromoteFlowState {
         cfg: &ProjectionConfig,
         now: time::OffsetDateTime,
     ) {
+        let Some(provenance) = self.provenance else {
+            self.step = PromoteFlowStep::Provenance {
+                error: Some(PROVENANCE_UNANSWERED.to_string()),
+            };
+            return;
+        };
         let part_ii_text = self.part_ii.as_str().to_string();
         match btctax_cli::plan_promote(
             events,
             prices,
             cfg,
             &self.target,
-            btctax_cli::ProvenanceKind::Purchase,
+            provenance,
             &part_ii_text,
             now,
         ) {
@@ -133,6 +235,46 @@ pub fn render_promote_flow(state: &PromoteFlowState) -> Vec<String> {
     ];
 
     match &state.step {
+        PromoteFlowStep::Provenance { error } => {
+            lines.push(
+                "How did you ACQUIRE these units? This is YOUR attestation about YOUR coins — the tool \
+                 cannot and will not answer it for you."
+                    .to_string(),
+            );
+            lines.push(
+                "Only a PURCHASE can be promoted to a >$0 estimated-basis floor: units acquired by gift, \
+                 inheritance, mining, staking/earning, airdrop or fork already have a documented, real \
+                 basis (FMV at receipt, or donor/decedent carryover) — model that real acquisition \
+                 instead."
+                    .to_string(),
+            );
+            lines.push(String::new());
+            for (i, kind) in btctax_cli::ProvenanceKind::ALL.iter().enumerate() {
+                let marker = if state.provenance == Some(*kind) {
+                    '>'
+                } else {
+                    ' '
+                };
+                lines.push(format!("{marker} [{}] {}", i + 1, kind.label()));
+            }
+            lines.push(String::new());
+            lines.push(match state.provenance {
+                Some(k) => format!("selected: {}", k.label()),
+                None => "selected: (none yet — press 1-7)".to_string(),
+            });
+            if let Some(e) = error {
+                lines.push(String::new());
+                // The "you must answer" prompt is not a refusal (no engine gate ran); only the shipped
+                // `Refusal::Provenance` (or a `Refusal::Target`) earns the REFUSED banner.
+                if e == PROVENANCE_UNANSWERED {
+                    lines.push(e.clone());
+                } else {
+                    lines.push(format!("REFUSED: {e}"));
+                }
+            }
+            lines.push(String::new());
+            lines.push("[1-7] choose   [Enter] attest & continue   [Esc] cancel".to_string());
+        }
         PromoteFlowStep::PartII { error } => {
             lines.push(
                 "Author the Form 8275 Part II narrative below: real, specific facts about how and when \
@@ -256,26 +398,166 @@ mod tests {
         }
     }
 
+    /// Drive the BG-D5 provenance step the way the filer does: pick `Purchase`, confirm. Every test
+    /// below that needs to be AT the Part II step goes through this — there is no back door.
+    fn attest_purchase(
+        state: &mut PromoteFlowState,
+        events: &[LedgerEvent],
+        prices: &dyn PriceProvider,
+    ) {
+        state.select_provenance(btctax_cli::ProvenanceKind::Purchase);
+        state.attest_provenance(events, prices, &cfg(), now());
+    }
+
     // ── constructor / render sanity ────────────────────────────────────────────────────────────────
 
     #[test]
-    fn new_opens_at_part_ii_step_with_an_empty_buffer() {
+    fn new_opens_at_the_provenance_step_with_nothing_answered() {
         let state = PromoteFlowState::new(EventId::decision(1));
         assert!(matches!(
             state.step,
-            PromoteFlowStep::PartII { error: None }
+            PromoteFlowStep::Provenance { error: None }
         ));
+        assert_eq!(
+            state.provenance, None,
+            "★ BG-D5: the flow must open with NO provenance answered — the tool never answers a filing \
+             attestation for the filer"
+        );
         assert!(state.part_ii.is_empty());
     }
 
     #[test]
     fn part_ii_step_renders_the_provenance_attestation_and_key_hints() {
-        let state = PromoteFlowState::new(EventId::decision(1));
+        let (id, events) = tranche_events(date!(2020 - 01 - 01), date!(2020 - 01 - 10), 40_000_000);
+        let prices = full_price_coverage(date!(2020 - 01 - 01), date!(2020 - 01 - 10));
+        let mut state = PromoteFlowState::new(id);
+        attest_purchase(&mut state, &events, &prices);
         let rendered = render_promote_flow(&state).join("\n");
         assert!(rendered.contains(btctax_cli::PROVENANCE_TEXT));
         assert!(
             rendered.contains("Tab"),
             "must hint the review key: {rendered}"
+        );
+    }
+
+    // ── ★ P-C gate tax I-2 (BG-D5): the provenance question is ASKED, and engine-enforced ───────────
+
+    #[test]
+    fn the_provenance_step_offers_the_whole_closed_enumeration_and_asserts_nothing_for_the_filer() {
+        let state = PromoteFlowState::new(EventId::decision(1));
+        let rendered = render_promote_flow(&state).join("\n");
+        for kind in btctax_cli::ProvenanceKind::ALL {
+            assert!(
+                rendered.contains(kind.label()),
+                "the closed BG-D5 enumeration must be OFFERED in full — {:?} ({}) missing: {rendered}",
+                kind,
+                kind.label()
+            );
+        }
+        assert!(
+            rendered.contains("none yet"),
+            "nothing may be pre-selected FOR the filer: {rendered}"
+        );
+    }
+
+    #[test]
+    fn enter_without_answering_the_provenance_question_never_advances() {
+        let (id, events) = tranche_events(date!(2020 - 01 - 01), date!(2020 - 01 - 10), 40_000_000);
+        let prices = full_price_coverage(date!(2020 - 01 - 01), date!(2020 - 01 - 10));
+        let mut state = PromoteFlowState::new(id);
+        state.attest_provenance(&events, &prices, &cfg(), now());
+        match &state.step {
+            PromoteFlowStep::Provenance { error } => {
+                assert!(
+                    error.is_some(),
+                    "an unanswered attestation must insist, not advance"
+                );
+            }
+            other => panic!("must NOT advance without an answer: {other:?}"),
+        }
+        assert_eq!(state.provenance, None);
+    }
+
+    /// (a) A non-Purchase answer surfaces the SHIPPED `Refusal::Provenance` text (byte-compared against
+    /// the chokepoint's own mapping — nothing re-implemented in the TUI) and records NOTHING: the flow
+    /// never leaves the Provenance step, so `persist_promote_tranche` is never reachable.
+    #[test]
+    fn a_non_purchase_answer_surfaces_the_shipped_refusal_and_never_advances() {
+        let (id, events) = tranche_events(date!(2020 - 01 - 01), date!(2020 - 01 - 10), 40_000_000);
+        let prices = full_price_coverage(date!(2020 - 01 - 01), date!(2020 - 01 - 10));
+
+        for kind in btctax_cli::ProvenanceKind::ALL {
+            if kind == btctax_cli::ProvenanceKind::Purchase {
+                continue;
+            }
+            let mut state = PromoteFlowState::new(id.clone());
+            state.select_provenance(kind);
+            state.attest_provenance(&events, &prices, &cfg(), now());
+
+            // The SHIPPED text: exactly what `plan_promote` → `CliError` produces for this kind.
+            let shipped: String = match btctax_cli::plan_promote(
+                &events,
+                &prices,
+                &cfg(),
+                &id,
+                kind,
+                "cash P2P purchase, no records",
+                now(),
+            ) {
+                Err(refusal) => btctax_cli::CliError::from(refusal).to_string(),
+                Ok(_) => panic!("BG-D5 must refuse {kind:?}"),
+            };
+
+            match &state.step {
+                PromoteFlowStep::Provenance { error } => {
+                    let e = error.as_ref().expect("a non-purchase answer must refuse");
+                    assert_eq!(
+                        e, &shipped,
+                        "the filer must read the SHIPPED Refusal::Provenance text, never a TUI \
+                         re-implementation ({kind:?})"
+                    );
+                    assert!(
+                        e.contains(kind.label()),
+                        "the refusal must name the filer's own answer ({kind:?}): {e}"
+                    );
+                }
+                other => panic!("a non-purchase answer must NEVER advance ({kind:?}): {other:?}"),
+            }
+            let rendered = render_promote_flow(&state).join("\n");
+            assert!(
+                rendered.contains("REFUSED:"),
+                "the refusal must be VISIBLE on the step: {rendered}"
+            );
+        }
+    }
+
+    /// The value reaching `plan_promote` is the FILER'S, not a constant this flow supplies: with a
+    /// non-Purchase answer on the state, `review()` (the Part II → Consent transition) can never mint a
+    /// `Purchase` and sail through.
+    #[test]
+    fn review_never_substitutes_a_provenance_the_filer_did_not_give() {
+        let (id, events) = tranche_events(date!(2020 - 01 - 01), date!(2020 - 01 - 10), 40_000_000);
+        let prices = full_price_coverage(date!(2020 - 01 - 01), date!(2020 - 01 - 10));
+
+        // Unanswered: bounces back to the attestation, never to Consent.
+        let mut state = PromoteFlowState::new(id.clone());
+        type_str(&mut state.part_ii, "cash P2P purchase, no records");
+        state.review(&events, &prices, &cfg(), now());
+        assert!(
+            matches!(state.step, PromoteFlowStep::Provenance { error: Some(_) }),
+            "review() with no attested provenance must bounce to the Provenance step: {:?}",
+            state.step
+        );
+
+        // Answered non-Purchase: the engine refuses; still never Consent.
+        let mut state = PromoteFlowState::new(id);
+        state.provenance = Some(btctax_cli::ProvenanceKind::Mining);
+        type_str(&mut state.part_ii, "mined on a laptop in 2010");
+        state.review(&events, &prices, &cfg(), now());
+        assert!(
+            !matches!(state.step, PromoteFlowStep::Consent { .. }),
+            "a mining provenance must never reach the consent screen: {:?}",
+            state.step
         );
     }
 
@@ -286,6 +568,7 @@ mod tests {
         let (id, events) = tranche_events(date!(2020 - 01 - 01), date!(2020 - 01 - 10), 40_000_000);
         let prices = full_price_coverage(date!(2020 - 01 - 01), date!(2020 - 01 - 10));
         let mut state = PromoteFlowState::new(id);
+        attest_purchase(&mut state, &events, &prices);
         // Left empty — never advances.
         state.review(&events, &prices, &cfg(), now());
         match &state.step {
@@ -298,9 +581,7 @@ mod tests {
                     "the refusal must name the Part II gate: {e}"
                 );
             }
-            PromoteFlowStep::Consent { .. } => {
-                panic!("must NOT advance to Consent on an empty Part II narrative")
-            }
+            other => panic!("must NOT advance past Part II on an empty narrative: {other:?}"),
         }
     }
 
@@ -309,6 +590,7 @@ mod tests {
         let (id, events) = tranche_events(date!(2020 - 01 - 01), date!(2020 - 01 - 10), 40_000_000);
         let prices = full_price_coverage(date!(2020 - 01 - 01), date!(2020 - 01 - 10));
         let mut state = PromoteFlowState::new(id);
+        attest_purchase(&mut state, &events, &prices);
         type_str(&mut state.part_ii, "   \n   ");
         state.review(&events, &prices, &cfg(), now());
         match &state.step {
@@ -318,8 +600,8 @@ mod tests {
                     "a whitespace-only (incl. multiline whitespace) narrative must refuse (BG-D7)"
                 );
             }
-            PromoteFlowStep::Consent { .. } => {
-                panic!("must NOT advance to Consent on a whitespace-only Part II narrative")
+            other => {
+                panic!("must NOT advance past Part II on a whitespace-only narrative: {other:?}")
             }
         }
         // The filer's (whitespace) text is preserved, not discarded, on a bounce-back.
@@ -333,6 +615,7 @@ mod tests {
         let (id, events) = tranche_events(date!(2020 - 01 - 01), date!(2020 - 01 - 10), 40_000_000);
         let prices = full_price_coverage(date!(2020 - 01 - 01), date!(2020 - 01 - 10));
         let mut state = PromoteFlowState::new(id);
+        attest_purchase(&mut state, &events, &prices);
         type_str(
             &mut state.part_ii,
             "cash P2P purchase, no records; on-chain window bounded",
@@ -357,8 +640,10 @@ mod tests {
                     "the rendered consent screen must surface it too: {rendered}"
                 );
             }
-            PromoteFlowStep::PartII { error } => {
-                panic!("a valid narrative over a fully-covered window must advance to Consent: {error:?}")
+            other => {
+                panic!(
+                    "a valid narrative over a fully-covered window must reach Consent: {other:?}"
+                )
             }
         }
     }
@@ -370,6 +655,7 @@ mod tests {
         let (id, events) = tranche_events(date!(2020 - 01 - 01), date!(2020 - 01 - 10), 40_000_000);
         let prices = full_price_coverage(date!(2020 - 01 - 01), date!(2020 - 01 - 10));
         let mut state = PromoteFlowState::new(id);
+        attest_purchase(&mut state, &events, &prices);
         type_str(
             &mut state.part_ii,
             "cash P2P purchase, no records; on-chain window bounded",
@@ -472,13 +758,15 @@ mod tests {
         let events_b = load_all(session_b.conn()).unwrap();
         let cfg_b = session_b.config().unwrap().to_projection();
         let mut state = PromoteFlowState::new(target_b);
+        // ★ BG-D5: the TUI filer ATTESTS purchase on the Provenance step (the CLI side passes the same
+        // `--provenance purchase` above) — the recorded artifact must still be Eq-identical.
+        state.select_provenance(btctax_cli::ProvenanceKind::Purchase);
+        state.attest_provenance(&events_b, session_b.prices(), &cfg_b, now());
         type_str(&mut state.part_ii, part_ii_text);
         state.review(&events_b, session_b.prices(), &cfg_b, now());
         let (plan_b, rendered_b) = match state.step {
             PromoteFlowStep::Consent { plan, rendered, .. } => (plan, rendered),
-            PromoteFlowStep::PartII { error } => {
-                panic!("this fixture's review() must reach Consent: {error:?}")
-            }
+            other => panic!("this fixture's review() must reach Consent: {other:?}"),
         };
         crate::edit::persist::persist_promote_tranche(
             &mut session_b,
@@ -517,6 +805,7 @@ mod tests {
         let events: Vec<LedgerEvent> = vec![];
         let prices = StaticPrices::default();
         let mut state = PromoteFlowState::new(EventId::decision(999_999));
+        attest_purchase(&mut state, &events, &prices);
         type_str(&mut state.part_ii, "cash P2P purchase, no records");
         state.review(&events, &prices, &cfg(), now());
         match &state.step {
@@ -528,7 +817,7 @@ mod tests {
                     "the refusal should name the resolve-live gate: {e}"
                 );
             }
-            PromoteFlowStep::Consent { .. } => panic!("an unknown target must never reach Consent"),
+            other => panic!("an unknown target must never advance past Part II: {other:?}"),
         }
         assert_eq!(
             state.part_ii.as_str(),
@@ -562,13 +851,13 @@ mod tests {
         let events = load_all(session.conn()).unwrap();
         let cfg = session.config().unwrap().to_projection();
         let mut state = PromoteFlowState::new(target);
+        state.select_provenance(btctax_cli::ProvenanceKind::Purchase);
+        state.attest_provenance(&events, session.prices(), &cfg, now());
         type_str(&mut state.part_ii, "cash P2P purchase, no records");
         state.review(&events, session.prices(), &cfg, now());
         let plan = match state.step {
             PromoteFlowStep::Consent { plan, .. } => plan,
-            PromoteFlowStep::PartII { error } => {
-                panic!("this fixture's review() must reach Consent: {error:?}")
-            }
+            other => panic!("this fixture's review() must reach Consent: {other:?}"),
         };
 
         // A WRONG ack phrase (fail-closed — `apply_promote`'s own `require_promote_ack`, reached via

@@ -85,10 +85,17 @@ fn draw_locked(frame: &mut Frame) {
     frame.render_widget(msg, inner);
 }
 
-/// Render the Defensive Filing Wizard dashboard (Task 7, Phase P-B): a READ-ONLY, derived text render
-/// of `crate::defensive_dashboard::render_dashboard`. `app.defensive_dashboard` is `Some` whenever this
-/// screen is active (set by `EditorApp::open_defensive_filing`); the `None` arm is a defensive fallback,
-/// never reached via the real entry path.
+/// Render the Defensive Filing Wizard screen (Task 7, Phase P-B dashboard; Tasks 8/9 write flows): a
+/// derived text render of `crate::defensive_dashboard::render_dashboard` (or of whichever `*_flow` has
+/// taken over the content area), PLUS a NOTICE line fed from `app.status`.
+///
+/// ★ P-C gate arch I-2: this is a FULL-FRAME screen — it replaces the Browse footer, the only other
+/// place `app.status` is rendered — so without the NOTICE line every refusal/error/outcome this
+/// (P-C: WRITE) surface produces is invisible: `declare_flow_confirm`'s "declare refused: {err}"
+/// (DFW-D5's mandated "a refusal with a reason, not a silent append"), both openers' stale-target
+/// refusals, the success statuses, and — worst — `on_persist_error`'s CRITICAL unrevertable-residue
+/// notice (which `close_all_mutation_surfaces` leaves on THIS screen). Mirrors the reviewed precedent
+/// for full-frame overlays, `draw_tax_inputs_form`'s own ★ I-2 status threading.
 fn draw_defensive_filing(frame: &mut Frame, app: &EditorApp) {
     let area = frame.area();
     let block = Block::default()
@@ -97,52 +104,69 @@ fn draw_defensive_filing(frame: &mut Frame, app: &EditorApp) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    // Reserve the NOTICE rows only when there IS a status (an empty screen keeps its full height).
+    let status = app.status.as_deref();
+    let (content_area, notice_area) = match status {
+        Some(_) => {
+            let notice_h = DEFENSIVE_NOTICE_LINES.min(inner.height.saturating_sub(1));
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(0), Constraint::Length(notice_h)])
+                .split(inner);
+            (chunks[0], Some(chunks[1]))
+        }
+        None => (inner, None),
+    };
+
     // The Declare flow (Task 8), when open, takes over the content area — mirrors every other
     // `*_flow` overlay drawn atop its own screen. `app.declare_flow.is_some()` is only reachable via
     // `open_declare_flow`, which requires a live `snapshot` (it reads the dashboard's own already-
-    // computed view) — the `None` arm below is therefore unreached in practice, mirroring the
-    // dashboard's own defensive fallback just below.
-    if let Some(flow) = app.declare_flow.as_ref() {
-        let Some(snap) = app.snapshot.as_ref() else {
-            let msg = Paragraph::new("No snapshot — press Esc to cancel.");
-            frame.render_widget(msg, inner);
-            return;
-        };
-        let lines: Vec<Line> = crate::edit::declare_flow::render_declare_flow(flow, &snap.prices)
+    // computed view) — the no-snapshot arm is therefore unreached in practice, mirroring the
+    // dashboard's own defensive fallback below. The Promote flow (Task 9) likewise takes over next.
+    let lines: Vec<Line> = if let Some(flow) = app.declare_flow.as_ref() {
+        match app.snapshot.as_ref() {
+            Some(snap) => crate::edit::declare_flow::render_declare_flow(flow, &snap.prices)
+                .into_iter()
+                .map(Line::from)
+                .collect(),
+            None => vec![Line::from("No snapshot — press Esc to cancel.")],
+        }
+    } else if let Some(flow) = app.promote_flow.as_ref() {
+        crate::edit::promote_flow::render_promote_flow(flow)
             .into_iter()
             .map(Line::from)
-            .collect();
-        let para = Paragraph::new(lines).wrap(Wrap { trim: false });
-        frame.render_widget(para, inner);
-        return;
-    }
-
-    // The Promote flow (Task 9), when open, likewise takes over the content area. Reachable only via
-    // `open_promote_flow`, which requires a live `defensive_dashboard` (itself only present with a live
-    // `snapshot`) — no `None`-snapshot fallback is needed here.
-    if let Some(flow) = app.promote_flow.as_ref() {
-        let lines: Vec<Line> = crate::edit::promote_flow::render_promote_flow(flow)
+            .collect()
+    } else if let Some(dash) = app.defensive_dashboard.as_ref() {
+        crate::defensive_dashboard::render_dashboard(&dash.view, dash.cursor)
             .into_iter()
             .map(Line::from)
-            .collect();
-        let para = Paragraph::new(lines).wrap(Wrap { trim: false });
-        frame.render_widget(para, inner);
-        return;
-    }
-
-    let Some(dash) = app.defensive_dashboard.as_ref() else {
-        let msg = Paragraph::new("No dashboard state — press Esc to return to Browse.");
-        frame.render_widget(msg, inner);
-        return;
+            .collect()
+    } else {
+        vec![Line::from(
+            "No dashboard state — press Esc to return to Browse.",
+        )]
     };
-
-    let lines: Vec<Line> = crate::defensive_dashboard::render_dashboard(&dash.view, dash.cursor)
-        .into_iter()
-        .map(Line::from)
-        .collect();
     let para = Paragraph::new(lines).wrap(Wrap { trim: false });
-    frame.render_widget(para, inner);
+    frame.render_widget(para, content_area);
+
+    if let (Some(rect), Some(s)) = (notice_area, status) {
+        // The unrevertable-residue notice is the one status that must SHOUT (it tells the filer to quit
+        // NOW); every other refusal/outcome reads as an ordinary notice.
+        let style = if s.starts_with("CRITICAL") {
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Cyan)
+        };
+        let notice = Paragraph::new(Line::from(Span::styled(format!("  {s}"), style)))
+            .wrap(Wrap { trim: false });
+        frame.render_widget(notice, rect);
+    }
 }
+
+/// Rows reserved for `draw_defensive_filing`'s `app.status` NOTICE line — 3, so the longest shipped
+/// status (`on_persist_error`'s CRITICAL residue notice, ~230 chars) still renders in full on an 80-col
+/// terminal instead of clipping mid-sentence.
+const DEFENSIVE_NOTICE_LINES: u16 = 3;
 
 /// Render the browse screen: EDITOR-marked tab bar + viewer tab content + EDITOR footer.
 /// Form and modal overlays are drawn on top.
@@ -256,6 +280,12 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     let footer_text = if let Some(status) = app.status.as_deref() {
         status.to_string()
     } else {
+        // ★ P-C gate arch I-3 note: Browse `w` is listed in the KEYMAP overlay
+        // (`help_overlay_lines`), NOT here. This footer is the NAVIGATION hint and already overflows an
+        // 80/120-col terminal (its tail clips mid-line), so appending a feature key here would push
+        // "?: help" — the pointer to the overlay that lists EVERY feature key, `w` included — off the
+        // visible row, making discoverability strictly worse. Feature keys (c/o/r/f/v/S/d/L/u/m/i/z/e/
+        // a/A/b/B/C/V/I/O/P/T/w) live in the overlay by convention.
         "Tab/Shift-Tab: tab   ←/→ h/l: column   s: sort   [/]: year   ↑/↓ j/k: scroll   \
          g/G: top/bottom   p: profile   ?: help   q/Esc: quit   [EDITOR]"
             .to_string()
@@ -2688,7 +2718,13 @@ fn render_field_value(v: &FieldValue) -> String {
     }
 }
 
-fn draw_help_overlay(frame: &mut Frame, area: Rect) {
+/// The KEYMAP overlay's own lines. Extracted from `draw_help_overlay` so the sync guard
+/// (`tests::kat_keymap_overlay_lists_every_browse_char_binding`) can read the SAME text the filer sees —
+/// ★ P-C gate arch I-3: Browse `w` (the Defensive Filing Wizard's ONLY entry point) shipped without an
+/// overlay entry despite the "KEEP IN SYNC with KEYMAP overlay" contract in `main.rs`, making the whole
+/// feature undiscoverable in-product. Any NEW `KeyCode::Char(_)` arm in the Browse match must gain a
+/// line here, or that test reds.
+fn help_overlay_lines() -> Vec<Line<'static>> {
     let hdr = |s: &'static str| {
         Line::from(Span::styled(
             s,
@@ -2697,7 +2733,7 @@ fn draw_help_overlay(frame: &mut Frame, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ))
     };
-    let lines = vec![
+    vec![
         hdr("Navigation"),
         Line::from("  Tab/Shift-Tab switch tab    ←/→ or h/l column cursor    s sort column"),
         Line::from("  [ / ] change year    j/k or ↑/↓ scroll    PgUp/PgDn page    g/G top/bottom"),
@@ -2708,6 +2744,7 @@ fn draw_help_overlay(frame: &mut Frame, area: Rect) {
         Line::from("  L link-transfer   u classify-raw   m match-self-transfers"),
         Line::from("  i resolve-conflict   z optimize   e method-election"),
         Line::from("  a/A safe-harbor attest/allocate"),
+        Line::from("  w defensive-filing wizard (declare / promote a no-records tranche)"),
         Line::from("  Bulk:  b link   B self-transfer-in   C resolve-conflict"),
         Line::from("         V void   I income   O reclassify-outflow"),
         Line::from("  P approve pseudo-reconcile defaults (when the [PSEUDO] banner shows)"),
@@ -2719,7 +2756,11 @@ fn draw_help_overlay(frame: &mut Frame, area: Rect) {
             "  ? · Esc · q  to close",
             Style::default().fg(Color::DarkGray),
         )),
-    ];
+    ]
+}
+
+fn draw_help_overlay(frame: &mut Frame, area: Rect) {
+    let lines = help_overlay_lines();
     let width: u16 = 72;
     let height: u16 = lines.len() as u16 + 2;
     let rect = centered_rect(width, height, area);
@@ -6972,6 +7013,142 @@ mod tests {
         assert!(
             rendered.contains("EDITOR"),
             "Browse screen must contain [EDITOR] marker; rendered:\n{rendered}"
+        );
+    }
+
+    // ── ★ P-C gate arch I-2: `app.status` is VISIBLE on the Defensive Filing write surface ──────────
+    //
+    // The DefensiveFiling screen is full-frame: it replaces the Browse footer, the only other place
+    // `app.status` renders. In P-B that was cosmetic (read-only); P-C turns the screen into a WRITE
+    // surface, so a swallowed status hides every refusal reason — including `on_persist_error`'s
+    // CRITICAL unrevertable-residue notice, which `close_all_mutation_surfaces()` leaves on THIS screen
+    // and the next keypress destroys. Mutation: stop threading `app.status` into `draw_defensive_filing`
+    // and both tests below red.
+
+    fn render_defensive_filing_to_string(status: Option<&str>) -> String {
+        use btctax_core::defensive::DefensiveFilingView;
+        use std::collections::BTreeSet;
+
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = EditorApp::new(PathBuf::from("/test/vault.pgp"));
+        app.screen = EditorScreen::DefensiveFiling;
+        app.defensive_dashboard = Some(crate::defensive_dashboard::DefensiveDashboardState::new(
+            DefensiveFilingView {
+                candidates: vec![],
+                resolve_first: vec![],
+                tranches: vec![],
+                still_short: vec![],
+                flagged_years: BTreeSet::new(),
+                safe_harbor_blocked: false,
+            },
+        ));
+        app.status = status.map(|s| s.to_string());
+        terminal.draw(|f| draw(&mut *f, &mut app)).unwrap();
+        flatten(terminal.backend().buffer())
+    }
+
+    #[test]
+    fn defensive_filing_screen_renders_a_refusal_status_it_would_otherwise_swallow() {
+        let rendered = render_defensive_filing_to_string(Some("declare refused: no-price-window"));
+        assert!(
+            rendered.contains("declare refused: no-price-window"),
+            "★ arch I-2: every refusal/error/outcome routed to `app.status` must be VISIBLE on this \
+             (write) screen — the Browse footer that normally renders it is gone here: {rendered}"
+        );
+        // And with no status the screen is unchanged (no stray empty NOTICE row).
+        let clean = render_defensive_filing_to_string(None);
+        assert!(
+            clean.contains("Defensive Filing"),
+            "the screen still renders without a status: {clean}"
+        );
+    }
+
+    #[test]
+    fn defensive_filing_screen_renders_the_critical_unrevertable_residue_notice() {
+        // The exact shipped prefix of `on_persist_error`'s ResidueLive status — the one message the
+        // filer MUST see before the next keypress clears it.
+        let rendered = render_defensive_filing_to_string(Some(
+            "CRITICAL: a save failed and could not be reverted",
+        ));
+        assert!(
+            rendered.contains("CRITICAL: a save failed and could not be reverted"),
+            "the CRITICAL residue notice must reach the filer on this screen: {rendered}"
+        );
+    }
+
+    // ── ★ P-C gate arch I-3: the KEYMAP overlay stays in sync with the Browse key handler ───────────
+
+    /// The overlay's own filer-visible text (spans joined per line).
+    fn help_overlay_text() -> String {
+        help_overlay_lines()
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|sp| sp.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn kat_keymap_overlay_lists_every_browse_char_binding() {
+        // Scan the REAL Browse match arms between the KEYMAP-SYNC sentinels in `main.rs`. The in-source
+        // "KEEP IN SYNC with KEYMAP overlay" comment alone did not hold: Browse `w` — the Defensive
+        // Filing Wizard's ONLY entry point — shipped absent from the overlay, leaving the feature
+        // undiscoverable in-product. This test is the mechanical guard.
+        let src = include_str!("main.rs");
+        let begin = src
+            .find("KEYMAP-SYNC-BEGIN")
+            .expect("main.rs must carry the KEYMAP-SYNC-BEGIN sentinel");
+        let end = src
+            .find("KEYMAP-SYNC-END")
+            .expect("main.rs must carry the KEYMAP-SYNC-END sentinel");
+        assert!(begin < end, "the sentinels must bracket the Browse match");
+        let region = &src[begin..end];
+
+        // Collect every `KeyCode::Char('x')` bound in the region (skipping comment lines, so the
+        // sentinel's own prose cannot satisfy the check).
+        let needle = "KeyCode::Char('";
+        let mut bound: Vec<char> = Vec::new();
+        for line in region.lines() {
+            let code = line.trim_start();
+            if code.starts_with("//") {
+                continue;
+            }
+            let mut rest = code;
+            while let Some(i) = rest.find(needle) {
+                rest = &rest[i + needle.len()..];
+                if let Some(ch) = rest.chars().next() {
+                    if !bound.contains(&ch) {
+                        bound.push(ch);
+                    }
+                }
+            }
+        }
+        assert!(
+            bound.len() > 20,
+            "sanity: the Browse match binds many char keys, found {bound:?}"
+        );
+        assert!(
+            bound.contains(&'w'),
+            "sanity: Browse `w` (the wizard entry) must be inside the sentinels"
+        );
+
+        let text = help_overlay_text();
+        // A key is "listed" when it appears as its own token — `/`-separated groups like `a/A` and
+        // `q/Esc` count for both sides.
+        let listed = |ch: char| {
+            text.split(|c: char| c.is_whitespace() || c == '/')
+                .any(|t| t.chars().eq(std::iter::once(ch)))
+        };
+        let missing: Vec<char> = bound.into_iter().filter(|c| !listed(*c)).collect();
+        assert!(
+            missing.is_empty(),
+            "these Browse keys are bound in main.rs but absent from the KEYMAP overlay \
+             (draw_edit::help_overlay_lines) — add a line for each: {missing:?}\noverlay:\n{text}"
         );
     }
 
