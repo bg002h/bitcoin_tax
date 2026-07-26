@@ -171,7 +171,8 @@ fn refuse_non_purchase(provenance: ProvenanceKind) -> Refusal {
     Refusal::Provenance(format!(
         "promote-tranche requires purchase provenance: {PROVENANCE_TEXT}. This tranche was declared as \
          acquired by {label} — a {label} recipient already has a documented, real basis (income \
-         FMV-at-receipt, or donor/decedent carryover) — model the real acquisition instead (a documented \
+         FMV-at-receipt; a §1015 donor carryover for a gift; a §1014 date-of-death basis for an \
+         inheritance) — model the real acquisition instead (a documented \
          Acquire/Income/gift-received event), not a conservative-filing tranche promote.",
         label = provenance.label(),
     ))
