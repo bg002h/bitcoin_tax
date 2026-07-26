@@ -489,10 +489,13 @@ impl EditorApp {
             return;
         }
 
-        debug_assert!(
-            self.open_flow_count() <= 1,
-            "one-flow invariant violated entering DefensiveFiling: {} flows open simultaneously",
-            self.open_flow_count()
+        // ★ whole-branch arch N-1: `== 0` — the dashboard opens no flow field of its own, so `<= 1`
+        // permitted an unrelated flow being mid-transaction while `journey_view`'s snapshot is taken
+        // (which a later flow mutation would immediately stale). Entry is Browse-only; nothing is open.
+        debug_assert_eq!(
+            self.open_flow_count(),
+            0,
+            "one-flow invariant violated entering DefensiveFiling: another flow is already open"
         );
 
         let cfg = snap.cli_config.to_projection();

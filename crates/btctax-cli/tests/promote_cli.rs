@@ -1541,6 +1541,10 @@ fn seed_removal_reorder(vault: &Path, suffix: &str, donation_year: i32) -> Walle
 /// year with NO promoted disposal leg at all — `promoted_filing_years` (the disposal-legs-only 8275-gate
 /// enumeration) must NOT. Also pins the COMPOSED `plan_export.years` (mutation: define the export set as
 /// `promoted_filing_years` alone → 2025 drops → reds).
+///
+/// ★ whole-branch arch M-2: the complementary `promoted_filing_years` NEGATIVE assertion moved in-crate
+/// (`chokepoint::tests::promoted_filing_years_enumerates_promoted_disposal_legs_only`) — it was the ONLY
+/// caller forcing that fn onto btctax-cli's public API.
 #[test]
 fn flagged_years_includes_a_removal_reordered_prior_year_with_no_promoted_disposal() {
     let dir = tempfile::tempdir().unwrap();
@@ -1559,12 +1563,6 @@ fn flagged_years_includes_a_removal_reordered_prior_year_with_no_promoted_dispos
         "the removal-only reorder (no promoted disposal leg) must be flagged: {years:?}"
     );
 
-    let gated = chokepoint::promoted_filing_years(&state);
-    assert!(
-        !gated.contains(&2025),
-        "the 8275-gate enumeration (disposal legs only) must NOT catch a removal-only reorder: {gated:?}"
-    );
-
     let plan = chokepoint::plan_export(
         &events,
         &state,
@@ -1581,10 +1579,18 @@ fn flagged_years_includes_a_removal_reordered_prior_year_with_no_promoted_dispos
         "plan_export.years must include the removal-reordered prior year: {:?}",
         plan.years
     );
+    // ★ whole-branch tax M-2: `{current}` is ALWAYS a candidate, but 2026 carries no bundled IRS form
+    // templates — so it lands in `unsupported_years` (an informational note) instead of `years` (where
+    // it could only ever be attempted, fail, and half-write `out_dir/2026/`).
     assert!(
-        plan.years.contains(&current),
-        "plan_export.years always includes {{current}}: {:?}",
+        !plan.years.contains(&current),
+        "an unsupported current year must NOT be planned for a fill: {:?}",
         plan.years
+    );
+    assert!(
+        plan.unsupported_years.contains(&current),
+        "…it must instead be reported as a no-bundled-templates year: {:?}",
+        plan.unsupported_years
     );
 }
 
@@ -1626,6 +1632,98 @@ fn plan_export_years_includes_both_prior_years_from_two_live_promotes() {
         plan.years.contains(&2025),
         "the SECOND live promote's flagged year must ALSO be in the export set (per-promote union, not \
          last-wins): {:?}",
+        plan.years
+    );
+}
+
+/// ★ whole-branch tax I-1 — the DECLARE side of the DFW-D11 export set. A `$0` `DeclareTranche` with NO
+/// promote ANYWHERE still changes the shortfall year's FILED forms: `make_disposal_legs`
+/// (`project/fold.rs:~128`) splits the disposal's full net proceeds PRO-RATA across `consumed`, so adding
+/// the tranche re-splits them, gives the previously-uncovered share its OWN Form 8949 row (`acquired_at =
+/// window_end`, which also moves the Schedule D short-/long-term split), and clears the Hard
+/// `UncoveredDisposal` that made the year not-computable at all. So `flagged_years` — and therefore
+/// `plan_export.years` — MUST carry that prior year on the `$0` branch, exactly as it does on the promote
+/// branch.
+///
+/// Mutation: revert `flagged_years` to the promote-only union (iterate `live_promote_ids` alone) — this
+/// vault has NO live promote, so the set collapses to EMPTY, 2024 drops out of both assertions, and the
+/// filer's `x` would plan only the (unsupported, packet-less) current year → reds.
+#[test]
+fn flagged_years_includes_the_prior_year_a_zero_dollar_declare_alone_fixed() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    let w = WalletId::SelfCustody {
+        label: "t-declare-only".into(),
+    };
+    // A 2024 sale of coins with NO acquisition record anywhere → a Hard `UncoveredDisposal`: the exact
+    // "a 2024 sale with no records" journey the wizard's `$0` branch exists to close.
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        append_import_batch(
+            s.conn(),
+            &[LedgerEvent {
+                id: EventId::import(Source::Coinbase, SourceRef::new("DECLARE-ONLY-SELL")),
+                utc_timestamp: datetime!(2024-06-01 0:00 UTC),
+                original_tz: UtcOffset::UTC,
+                wallet: Some(w.clone()),
+                payload: EventPayload::Dispose(Dispose {
+                    sat: 40_000_000,
+                    usd_proceeds: dec!(20_000),
+                    fee_usd: dec!(0),
+                    kind: DisposeKind::Sell,
+                }),
+            }],
+        )
+        .unwrap();
+        s.save().unwrap();
+    } // the VaultLock drops HERE — `declare_tranche` opens its OWN session.
+
+    // The `$0` declare that covers it — and NOTHING else (no `promote_tranche` call at all).
+    cmd::tranche::declare_tranche(
+        &vault,
+        &pp(),
+        40_000_000,
+        w,
+        date!(2016 - 01 - 01),
+        date!(2016 - 03 - 31),
+        now(),
+    )
+    .unwrap();
+
+    let session = Session::open(&vault, &pp()).unwrap();
+    let (events, state, cfg) = session.load_events_and_project().unwrap();
+    let tables = btctax_adapters::BundledTaxTables::load();
+    let current = 2026;
+
+    assert!(
+        state.promoted_origins.is_empty(),
+        "fixture: this vault holds a $0 declare and NO promote — the promote-only union must be empty"
+    );
+
+    let years = flagged_years(&events, &state, session.prices(), &tables, &cfg, current);
+    assert!(
+        years.contains(&2024),
+        "the year the $0 declare re-filed (proceeds re-split + UncoveredDisposal cleared) must be \
+         flagged, exactly as a promote's reorder year is: {years:?}"
+    );
+
+    let plan = chokepoint::plan_export(
+        &events,
+        &state,
+        session.prices(),
+        &tables,
+        &cfg,
+        current,
+        dir.path().join("export_out"),
+        vec![],
+    )
+    .expect("a real (non-pseudo) ledger plans cleanly");
+    assert!(
+        plan.years.contains(&2024),
+        "the wizard's $0 branch must PLAN the amended-return year its journey changed — the conservative \
+         branch is not allowed to be less complete than the aggressive one: {:?}",
         plan.years
     );
 }
@@ -1756,13 +1854,18 @@ fn apply_export_writes_one_packet_per_year_into_its_own_subdirectory() {
     }
 }
 
-/// ★ T3-M2 (Task 10) — PER-YEAR ISOLATION: a mixed success/failure year set. `plan.years` spans an
+/// ★ T3-M2 (Task 10) — PER-YEAR ISOLATION: a mixed success/failure year set. The plan spans an
 /// UNSUPPORTED year (2016 — outside `btctax_forms::SUPPORTED_YEARS = [2017, 2024, 2025]`, processed
 /// FIRST since `plan.years` is a `BTreeSet` in ascending order) and a SUPPORTED year (2025). Asserts
 /// `apply_export` does NOT abort on the 2016 failure: it returns `Ok` with BOTH years reported
 /// individually, 2016 as `Err` and 2025 as `Ok`, and the 2025 packet is written to disk for real —
 /// pinning "already-written/still-attemptable years stay correct" even when an EARLIER year in
 /// iteration order fails (mutation: an early `?` on the per-year outcome reds this).
+///
+/// ★ whole-branch tax M-2: the plan is now built LITERALLY rather than via `plan_export`, which no longer
+/// PLANS an unsupported year at all (it partitions 2016 into `unsupported_years` — pinned separately by
+/// `plan_export_holds_an_unsupported_year_out_of_the_fill_set`). This test's subject is `apply_export`'s
+/// OWN per-year isolation contract, which must hold for ANY year set a caller hands it.
 #[test]
 fn apply_export_isolates_a_per_year_failure_and_still_writes_the_other_years() {
     let dir = tempfile::tempdir().unwrap();
@@ -1773,27 +1876,14 @@ fn apply_export_isolates_a_per_year_failure_and_still_writes_the_other_years() {
     seed_removal_reorder(&vault, "a", 2016);
 
     let session = Session::open(&vault, &pp()).unwrap();
-    let (events, state, cfg) = session.load_events_and_project().unwrap();
-    let tables = btctax_adapters::BundledTaxTables::load();
     let out_dir = dir.path().join("export_out");
-    let current = 2025; // bundled-form-supported, so the CURRENT-year packet succeeds regardless
 
-    let plan = chokepoint::plan_export(
-        &events,
-        &state,
-        session.prices(),
-        &tables,
-        &cfg,
-        current,
-        out_dir.clone(),
-        vec![],
-    )
-    .unwrap();
-    assert_eq!(
-        plan.years.iter().copied().collect::<Vec<_>>(),
-        vec![2016, 2025],
-        "sanity: an unsupported year (2016) ascending-BEFORE a supported one (2025)"
-    );
+    let plan = chokepoint::ExportPlan {
+        years: [2016, 2025].into_iter().collect(),
+        out_dir: out_dir.clone(),
+        forms: vec![],
+        unsupported_years: BTreeSet::new(),
+    };
 
     let reports = chokepoint::apply_export(&session, plan)
         .expect("the outer call must succeed even though one year's packet fails");
@@ -1828,5 +1918,59 @@ fn apply_export_isolates_a_per_year_failure_and_still_writes_the_other_years() {
     assert!(
         year_dir_2025.join("schedule_d.pdf").exists(),
         "2025's schedule_d.pdf must also be written: {year_dir_2025:?}"
+    );
+    // ★ whole-branch tax M-2: the FAILING year leaves NO half-written packet directory behind — the
+    // unsupported-year refusal now fires BEFORE `mkdir_out`/`basis_methodology.txt`/`form_8275.txt`.
+    assert!(
+        !out_dir.join("2016").exists(),
+        "a year that cannot be filled must leave no half-populated directory: {out_dir:?}"
+    );
+}
+
+/// ★ whole-branch tax M-2: `plan_export` holds an unsupported year OUT of the fill set. In 2026 EVERY
+/// filer's `x` used to read "0 of 1 year(s) written — 2026 failed: unsupported tax year 2026" (and left a
+/// half-populated `out_dir/2026/` behind it) because `{current_year}` was inserted unconditionally, while
+/// `btctax_forms::SUPPORTED_YEARS = [2017, 2024, 2025]`. Both the current year AND a flagged PRIOR year
+/// outside the bundle must partition into `unsupported_years`.
+///
+/// Mutation: drop the partition (insert every candidate straight into `years`) → 2016 and 2026 reappear
+/// in `plan.years` → reds.
+#[test]
+fn plan_export_holds_an_unsupported_year_out_of_the_fill_set() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    seed_removal_reorder(&vault, "a", 2016); // flagged, unsupported
+    seed_removal_reorder(&vault, "b", 2025); // flagged, supported
+
+    let session = Session::open(&vault, &pp()).unwrap();
+    let (events, state, cfg) = session.load_events_and_project().unwrap();
+    let tables = btctax_adapters::BundledTaxTables::load();
+    let current = 2026; // unsupported too — the universal "every filer in 2026" case
+
+    let plan = chokepoint::plan_export(
+        &events,
+        &state,
+        session.prices(),
+        &tables,
+        &cfg,
+        current,
+        dir.path().join("export_out"),
+        vec![],
+    )
+    .unwrap();
+
+    assert_eq!(
+        plan.years.iter().copied().collect::<Vec<_>>(),
+        vec![2025],
+        "only the bundled-template year may be planned for a fill: {:?}",
+        plan.years
+    );
+    assert_eq!(
+        plan.unsupported_years.iter().copied().collect::<Vec<_>>(),
+        vec![2016, 2026],
+        "both the flagged prior year and the current year must be reported as unsupported, not failed: \
+         {:?}",
+        plan.unsupported_years
     );
 }

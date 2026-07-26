@@ -4036,10 +4036,13 @@ fn open_declare_flow(app: &mut EditorApp, target: btctax_core::EventId) {
         .map(|snap| btctax_core::tranche_guard::in_force_allocation_exists(&snap.events))
         .unwrap_or(false);
 
-    debug_assert!(
-        app.open_flow_count() <= 1,
-        "one-flow invariant violated entering the Declare flow: {} flows open simultaneously",
-        app.open_flow_count()
+    // ★ whole-branch arch N-1: `== 0`, not `<= 1` — this runs BEFORE `app.declare_flow` is set, so
+    // `<= 1` silently permitted one OTHER flow being mid-transaction, which is exactly the state the
+    // one-flow invariant exists to forbid.
+    debug_assert_eq!(
+        app.open_flow_count(),
+        0,
+        "one-flow invariant violated entering the Declare flow: another flow is already open"
     );
 
     app.declare_flow = Some(crate::edit::declare_flow::DeclareFlowState::new(
@@ -4205,21 +4208,7 @@ fn declare_flow_confirm(app: &mut EditorApp) {
                     // Refresh the dashboard's own view off the NEW snapshot so the just-cleared
                     // candidate no longer shows (mirrors journey_view's own recompute — no cached
                     // second source of truth).
-                    if let Some(snap) = app.snapshot.as_ref() {
-                        let cfg = snap.cli_config.to_projection();
-                        let current = app.clock.now().year();
-                        let view = btctax_core::defensive::journey_view(
-                            &snap.events,
-                            &snap.state,
-                            &snap.prices,
-                            &snap.tables,
-                            &cfg,
-                            current,
-                        );
-                        app.defensive_dashboard = Some(
-                            crate::defensive_dashboard::DefensiveDashboardState::new(view),
-                        );
-                    }
+                    refresh_defensive_dashboard(app);
                 }
                 Err(e) => {
                     app.status = Some(format!(
@@ -4263,10 +4252,12 @@ fn open_promote_flow(app: &mut EditorApp, target: btctax_core::EventId) {
         return;
     }
 
-    debug_assert!(
-        app.open_flow_count() <= 1,
-        "one-flow invariant violated entering the Promote flow: {} flows open simultaneously",
-        app.open_flow_count()
+    // ★ whole-branch arch N-1: `== 0` — evaluated BEFORE `app.promote_flow` is set (see the Declare
+    // flow's twin above).
+    debug_assert_eq!(
+        app.open_flow_count(),
+        0,
+        "one-flow invariant violated entering the Promote flow: another flow is already open"
     );
 
     app.promote_flow = Some(crate::edit::promote_flow::PromoteFlowState::new(target));
@@ -4500,21 +4491,7 @@ fn promote_flow_confirm(app: &mut EditorApp) {
                     // Refresh the dashboard's own view off the NEW snapshot so the just-promoted row
                     // no longer offers 'p' (mirrors journey_view's own recompute — no cached second
                     // source of truth).
-                    if let Some(snap) = app.snapshot.as_ref() {
-                        let cfg = snap.cli_config.to_projection();
-                        let current = app.clock.now().year();
-                        let view = btctax_core::defensive::journey_view(
-                            &snap.events,
-                            &snap.state,
-                            &snap.prices,
-                            &snap.tables,
-                            &cfg,
-                            current,
-                        );
-                        app.defensive_dashboard = Some(
-                            crate::defensive_dashboard::DefensiveDashboardState::new(view),
-                        );
-                    }
+                    refresh_defensive_dashboard(app);
                 }
                 Err(e) => {
                     app.status = Some(format!(
@@ -4558,6 +4535,32 @@ fn promote_flow_confirm(app: &mut EditorApp) {
     }
 }
 
+/// Recompute the Defensive Filing dashboard's own `journey_view` off the CURRENT `app.snapshot` — the
+/// ONE post-write/post-reproject refresh both defensive tails and the export step share (partial burndown
+/// of the filed P-D arch-M-1 duplication item; `EditorApp::open_defensive_filing` keeps its own copy
+/// because it must run the DFW-D6 entry gate first and takes `&mut self`).
+///
+/// A no-op when no snapshot is loaded. Deliberately unconditional otherwise — it mirrors `journey_view`'s
+/// own recompute rather than caching a second source of truth (DFW-D1).
+fn refresh_defensive_dashboard(app: &mut EditorApp) {
+    let Some(snap) = app.snapshot.as_ref() else {
+        return;
+    };
+    let cfg = snap.cli_config.to_projection();
+    let current = app.clock.now().year();
+    let view = btctax_core::defensive::journey_view(
+        &snap.events,
+        &snap.state,
+        &snap.prices,
+        &snap.tables,
+        &cfg,
+        current,
+    );
+    app.defensive_dashboard = Some(crate::defensive_dashboard::DefensiveDashboardState::new(
+        view,
+    ));
+}
+
 // ── The Export step (Task 10, Phase P-D) ───────────────────────────────────────
 
 /// The `x` (export) action's dispatch (`DashboardIntent::Export`) — the wizard's THIRD and FINAL write
@@ -4573,12 +4576,59 @@ fn promote_flow_confirm(app: &mut EditorApp) {
 /// `app.status` (the DefensiveFiling screen's NOTICE rect, ★ P-C gate arch I-2) and the dashboard stays
 /// open regardless of the outcome (DFW-D3/M-5: `x` is never a "done" checkbox — nothing here disables it
 /// after any result, success or failure).
+/// ★ whole-branch arch I-1 (the STALE-SNAPSHOT hazard) and arch M-1 (a status on EVERY refusal path).
+///
+/// **The plan and the apply MUST read one ledger image.** `plan_export` derives the DFW-D11 YEAR SET
+/// from a `Snapshot`, while `chokepoint::apply_export` re-loads `events`/`state` FRESH from `session`.
+/// If `app.snapshot` is behind the vault (a write SAVED but its follow-up `build_snapshot` failed —
+/// both defensive tails leave exactly that state, as do the other ~22 "Saved but re-projection failed"
+/// tails a filer can reach via `RouteResolveFirst` or a Browse round-trip), the year set is stale while
+/// every planned year's PDF content is fresh: the batch then reports "N of N year(s) written" — FULL
+/// SUCCESS — with the amended-return year silently absent.
+///
+/// So this fn RE-PROJECTS first and plans off the result (the brief's option (ii)), rather than
+/// consulting a staleness latch (option (i)). The rebuild is correct by CONSTRUCTION for every way a
+/// snapshot can go stale — it needs no latch to be armed at ~24 sites and cleared at ~35 others, and it
+/// cannot produce the latch's own failure mode (a stuck flag refusing a perfectly valid export). The
+/// refreshed snapshot and dashboard are kept, mirroring the declare/promote tails' own post-write
+/// refresh — no cached second source of truth.
+///
+/// Every early return below sets `app.status`: this screen's handler blanks the status before dispatch,
+/// so a bare `return` is indistinguishable from a dead key (arch M-1).
 fn execute_defensive_export(app: &mut EditorApp) {
     if let Some(s) = app.residue_latch_status() {
         app.status = Some(s);
         return;
     }
+    // ★ arch I-1: re-project BEFORE planning, so the year set and the packet content come from the same
+    // image of the vault. Refuse (never export a possibly-short set) if the ledger will not project.
+    // `session`/`snapshot` are `Some` together (the `EditorApp` invariant), so the no-session case is
+    // unreachable in production and falls through to the refusal paths below rather than short-circuiting
+    // here — which keeps `plan_export`'s OWN refusals (e.g. DFW-D11 pseudo-active) reachable from an
+    // in-memory-only fixture.
+    let rebuilt = app.session.as_ref().map(btctax_tui::unlock::build_snapshot);
+    match rebuilt {
+        None => {}
+        Some(Ok((snap, _))) => {
+            app.snapshot = Some(snap);
+            refresh_defensive_dashboard(app);
+        }
+        Some(Err(e)) => {
+            app.status = Some(format!(
+                "export refused: the ledger could not be re-projected ({e}), so the set of years to \
+                 export cannot be computed from a current image — nothing was written. Restart to \
+                 refresh, then export."
+            ));
+            return;
+        }
+    }
+
     let Some(snap) = app.snapshot.as_ref() else {
+        app.status = Some(
+            "export unavailable: no projected ledger is loaded in this editor session (unlock the \
+             vault first)"
+                .to_string(),
+        );
         return;
     };
     let cfg = snap.cli_config.to_projection();
@@ -4603,13 +4653,22 @@ fn execute_defensive_export(app: &mut EditorApp) {
             return;
         }
     };
+    // Kept for the status render after `plan` is moved into `persist_defensive_export`.
+    let unsupported = plan.unsupported_years.clone();
 
     let Some(session) = app.session.as_ref() else {
+        app.status = Some(
+            "export unavailable: this editor holds no open vault session to export from (unlock the \
+             vault first)"
+                .to_string(),
+        );
         return;
     };
     app.status = Some(
         match crate::edit::persist::persist_defensive_export(session, plan) {
-            Ok(reports) => defensive_dashboard::render_export_status(&out_dir, &reports),
+            Ok(reports) => {
+                defensive_dashboard::render_export_status(&out_dir, &reports, &unsupported)
+            }
             Err(e) => format!("export failed: {e}"),
         },
     );
@@ -14148,6 +14207,115 @@ mod tests {
             out_dir.join("2025").join("form_8275.pdf").exists(),
             "★ KAT (c): the 2025 packet (the promoted DISPOSAL leg's own year) must include \
              form_8275.pdf: {out_dir:?}"
+        );
+    }
+
+    /// ★ whole-branch arch M-1: `x` NEVER silently does nothing. The DefensiveFiling key handler runs
+    /// `app.status = None;` before dispatch, so a bare `return` on a refusal path is indistinguishable
+    /// from a dead key — the filer presses `x`, the screen does not change, and nothing says why. Both
+    /// missing-precondition paths (`snapshot` / `session` absent) must set a status like every other
+    /// refusal in this fn. Mutation: restore either bare `return;` → reds.
+    #[test]
+    fn x_with_no_loaded_ledger_refuses_with_a_reason_never_a_silent_no_op() {
+        // No snapshot AND no session — the "still on Unlock" shape.
+        let mut app = EditorApp::new(PathBuf::from("/test/vault.pgp"));
+        app.screen = EditorScreen::DefensiveFiling;
+        app.status = None;
+        execute_defensive_export(&mut app);
+        let status = app
+            .status
+            .clone()
+            .expect("a missing snapshot must refuse with a reason, not a silent no-op");
+        assert!(
+            status.to_lowercase().contains("unavailable"),
+            "the refusal must read as a refusal: {status:?}"
+        );
+
+        // A snapshot but NO session — the second bare-return path.
+        let mut app = EditorApp::new(PathBuf::from("/test/vault.pgp"));
+        app.screen = EditorScreen::DefensiveFiling;
+        app.snapshot = Some(snapshot_with_pseudo_count(0));
+        app.status = None;
+        execute_defensive_export(&mut app);
+        let status = app
+            .status
+            .clone()
+            .expect("a missing session must refuse with a reason, not a silent no-op");
+        assert!(
+            status.to_lowercase().contains("unavailable")
+                || status.to_lowercase().contains("refused"),
+            "the refusal must read as a refusal: {status:?}"
+        );
+    }
+
+    /// ★ whole-branch arch I-1 — the STALE-SNAPSHOT export hazard.
+    ///
+    /// `plan_export` derives the DFW-D11 YEAR SET from a `Snapshot`, but `chokepoint::apply_export`
+    /// re-loads `events`/`state` FRESH from `session`. When `app.snapshot` is behind the vault (a write
+    /// SAVED but its follow-up `build_snapshot` failed — the shape ~24 "Saved but re-projection failed"
+    /// tails leave, including both defensive ones), the year set is stale while every planned year's PDF
+    /// content is fresh: the batch reports "N of N year(s) written" — FULL SUCCESS — with an
+    /// amended-return year silently missing. The "restart to refresh" STATUS cannot guard it either: the
+    /// DefensiveFiling key handler runs `app.status = None;` before dispatching the very `x` that would
+    /// act on it.
+    ///
+    /// This drives `execute_defensive_export` with a DELIBERATELY-EMPTIED `app.snapshot` beside a
+    /// session whose vault really does hold the promoted 2025 leg AND the 2024 removal reorder, and
+    /// asserts the export plans off a re-projected image: BOTH years are written, and `app.snapshot` is
+    /// left current.
+    ///
+    /// Mutation: delete the `build_snapshot` re-projection from `execute_defensive_export` (plan
+    /// straight off `app.snapshot`) → the plan sees an empty ledger → 2024 is never planned → reds.
+    #[test]
+    fn x_replans_off_a_fresh_projection_so_a_stale_snapshot_cannot_shorten_the_year_set() {
+        let (mut app, _dir) = vault_with_promoted_2025_leg_and_2024_reorder();
+        app.open_defensive_filing();
+        assert_eq!(app.screen, EditorScreen::DefensiveFiling);
+
+        // Make the in-memory image STALE exactly the way a failed `build_snapshot` leaves it: the
+        // SESSION (which `apply_export` re-reads) still holds everything; the SNAPSHOT no longer does.
+        app.snapshot.as_mut().unwrap().events = vec![];
+        app.snapshot.as_mut().unwrap().state = btctax_core::state::LedgerState::default();
+        assert!(
+            app.snapshot.as_ref().unwrap().state.disposals.is_empty(),
+            "fixture sanity: the snapshot really is empty before the export"
+        );
+
+        app.status = None;
+        execute_defensive_export(&mut app);
+
+        let status = app.status.clone().unwrap_or_default();
+        assert!(
+            status.contains("2 of 2"),
+            "the export must plan off a FRESH projection, not the emptied snapshot: {status:?}"
+        );
+        assert!(
+            status.contains("2024") && status.contains("2025"),
+            "both the removal-reordered 2024 and the promoted-disposal 2025 year must be exported \
+             despite the stale in-memory image: {status:?}"
+        );
+
+        let out_dir =
+            crate::defensive_dashboard::defensive_export_dir_for(&app.vault_path, app.clock.now());
+        assert!(
+            out_dir.join("2024").join("f8949.pdf").exists(),
+            "the amended-return year's packet must be written for real: {out_dir:?}"
+        );
+        assert!(
+            out_dir.join("2025").join("f8949.pdf").exists(),
+            "…alongside the promoted year's: {out_dir:?}"
+        );
+
+        // And the refresh is kept: the screen the filer looks at after `x` is no longer the stale one.
+        assert!(
+            !app.snapshot.as_ref().unwrap().state.disposals.is_empty(),
+            "the re-projection must be RETAINED, not thrown away — otherwise the dashboard keeps \
+             rendering a ledger that no longer exists"
+        );
+        assert_eq!(
+            app.screen,
+            EditorScreen::DefensiveFiling,
+            "DFW-D3/M-5: the dashboard stays open"
         );
     }
 

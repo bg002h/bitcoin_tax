@@ -623,7 +623,13 @@ pub fn apply_declare(
 /// disposal leg (`lot_id.origin_event_id ∈ state.promoted_origins`) files in it — DISPOSAL legs only; a
 /// promote's REMOVAL (donation/gift) reorder is invisible here by design — that is exactly what
 /// `flagged_years` (`btctax_core::conservative`), below, exists to also catch.
-pub fn promoted_filing_years(state: &LedgerState) -> BTreeSet<i32> {
+///
+/// ★ whole-branch arch M-2: `pub(crate)`, not `pub`. Its only production caller is in-crate
+/// (`cmd/admin.rs`'s `promote_export_gate`); it was `pub` solely to serve one integration test, which
+/// would have put it on btctax-cli's v0.10.0 PUBLIC API for good. Public API is far cheaper to narrow
+/// before the first release than after. The disposal-legs-only contract is pinned by the in-crate unit
+/// test below instead.
+pub(crate) fn promoted_filing_years(state: &LedgerState) -> BTreeSet<i32> {
     let mut years = BTreeSet::new();
     for d in &state.disposals {
         if d.legs
@@ -649,6 +655,14 @@ pub struct ExportPlan {
     pub years: BTreeSet<i32>,
     pub out_dir: PathBuf,
     pub forms: Vec<FormArg>,
+    /// ★ whole-branch tax M-2: candidate years this build bundles NO IRS form templates for
+    /// (`btctax_forms::SUPPORTED_YEARS`) — held OUT of `years` (so `apply_export` never attempts, and
+    /// never half-writes, a packet that cannot be filled) and surfaced as an informational note rather
+    /// than a per-year FAILURE. Two distinct populations land here and both are honest, not defects:
+    /// the CURRENT year before its forms are bundled (in 2026 that is EVERY filer, whose `x` otherwise
+    /// read "0 of 1 year(s) written — 2026 failed: unsupported tax year 2026"), and a flagged PRIOR year
+    /// outside the bundle — which the filer must still amend, by hand.
+    pub unsupported_years: BTreeSet<i32>,
 }
 
 /// ★ T3-M2 (Task 10): ONE year's `apply_export` outcome — the planned tax year paired with either its
@@ -670,10 +684,17 @@ pub type ExportOutcomes = Vec<ExportOutcome>;
 /// pseudo-active vault must resolve/turn off pseudo mode (or approve + attest through the existing
 /// single-year CLI path) before this chokepoint will plan anything.
 ///
-/// `years = {current_year} ∪ flagged_years(events, state, prices, tables, cfg, current_year)` — STRICTLY
-/// a superset of `promoted_filing_years(state)` (SPEC DFW-D11): the fold-diff set also catches a
-/// promote's HIFO reorder of a prior year's donation/gift with NO promoted disposal leg in that year at
-/// all.
+/// The CANDIDATE set is `{current_year} ∪ flagged_years(events, state, prices, tables, cfg,
+/// current_year)` — STRICTLY a superset of `promoted_filing_years(state)` (SPEC DFW-D11): the fold-diff
+/// set also catches a promote's HIFO reorder of a prior year's donation/gift with NO promoted disposal
+/// leg in that year at all, AND (★ whole-branch tax I-1) the prior year a `$0`-only `DeclareTranche`
+/// re-filed with no promote anywhere.
+///
+/// ★ whole-branch tax M-2: the candidate set is then PARTITIONED against
+/// `btctax_forms::SUPPORTED_YEARS` — a year with no bundled IRS form templates goes to
+/// `unsupported_years` instead of `years`, so `apply_export` never attempts (and
+/// `export_irs_pdf_from_session` never half-writes) a packet that cannot be filled, and the outcome
+/// reads as "no bundled IRS templates for <year> yet" rather than a per-year FAILURE.
 #[allow(clippy::too_many_arguments)]
 pub fn plan_export(
     events: &[LedgerEvent],
@@ -696,13 +717,19 @@ pub fn plan_export(
         ));
     }
 
-    let mut years = conservative::flagged_years(events, state, prices, tables, cfg, current_year);
-    years.insert(current_year);
+    let mut candidates =
+        conservative::flagged_years(events, state, prices, tables, cfg, current_year);
+    candidates.insert(current_year);
+
+    let (years, unsupported_years): (BTreeSet<i32>, BTreeSet<i32>) = candidates
+        .into_iter()
+        .partition(|y| btctax_forms::SUPPORTED_YEARS.contains(y));
 
     Ok(ExportPlan {
         years,
         out_dir,
         forms,
+        unsupported_years,
     })
 }
 
@@ -717,8 +744,8 @@ pub fn plan_export(
 /// by the caller (the CLI's thin driver, or a future TUI); a second open under a held `VaultLock`
 /// deadlocks (`session.rs:662`).
 ///
-/// ★ T3-M2 (Task 10) — PER-YEAR ISOLATION: a failure writing ONE year's packet (e.g. a flagged/current
-/// year that falls outside the bundled IRS-form-template set, `btctax_forms::SUPPORTED_YEARS`) does NOT
+/// ★ T3-M2 (Task 10) — PER-YEAR ISOLATION: a failure writing ONE year's packet (e.g. a year whose Form
+/// 8275 Part I overflows this revision's 6 rows, or an I/O fault under `out_dir`) does NOT
 /// abort the batch. Every year in `plan.years` is attempted, in ascending order (`plan.years` is a
 /// `BTreeSet`), and its outcome is reported INDIVIDUALLY as `(year, Result<IrsPdfReport, CliError>)`.
 /// Years already written to disk before a LATER year's failure stay correct — nothing already written is
@@ -727,6 +754,10 @@ pub fn plan_export(
 /// already refused a pseudo-active ledger up front, and `attest: None` is passed on every call regardless
 /// of outcome. The outer `Result` covers only the ONE failure mode common to every year — re-loading
 /// `events`/`state` from `session` — which, if it fails, means NOTHING could even be attempted.
+///
+/// `plan.unsupported_years` is NOT attempted here (★ whole-branch tax M-2 — `plan_export` already held
+/// those out): they carry no bundled IRS form templates, so an attempt could only ever fail, and the
+/// caller renders them as a "no bundled templates yet" note beside these outcomes.
 pub fn apply_export(session: &Session, plan: ExportPlan) -> Result<ExportOutcomes, CliError> {
     let (events, state, _cfg) = session.load_events_and_project()?;
     let mut reports = Vec::with_capacity(plan.years.len());
@@ -744,4 +775,84 @@ pub fn apply_export(session: &Session, plan: ExportPlan) -> Result<ExportOutcome
         reports.push((*year, outcome));
     }
     Ok(reports)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use btctax_core::state::{Disposal, DisposalLeg, Term};
+    use btctax_core::{BasisSource, DisposeKind, LotId};
+    use rust_decimal_macros::dec;
+    use time::macros::date;
+
+    fn wallet() -> WalletId {
+        WalletId::SelfCustody {
+            label: "pfy".into(),
+        }
+    }
+
+    fn leg(origin: EventId) -> DisposalLeg {
+        DisposalLeg {
+            lot_id: LotId {
+                origin_event_id: origin,
+                split_sequence: 0,
+            },
+            sat: 1_000_000,
+            proceeds: dec!(100),
+            basis: dec!(0),
+            gain: dec!(100),
+            term: Term::LongTerm,
+            basis_source: BasisSource::EstimatedConservative,
+            gift_zone: None,
+            acquired_at: date!(2016 - 03 - 31),
+            wallet: wallet(),
+            pseudo: false,
+        }
+    }
+
+    fn disposal(year: i32, origin: EventId) -> Disposal {
+        Disposal {
+            event: EventId::decision(90 + year as u64 % 10),
+            kind: DisposeKind::Sell,
+            disposed_at: time::Date::from_calendar_date(year, time::Month::June, 1).unwrap(),
+            legs: vec![leg(origin)],
+            fee_mini_disposition: false,
+        }
+    }
+
+    /// ★ whole-branch arch M-2 (replaces the cross-crate assertion that forced `promoted_filing_years`
+    /// onto btctax-cli's PUBLIC API): the BG-D8 8275-completeness enumeration is DISPOSAL-LEG-scoped and
+    /// PROMOTE-scoped — a year files here iff a disposal leg in it draws a lot whose origin is in
+    /// `state.promoted_origins`. A year whose only change is a REMOVAL (donation/gift) reorder, or whose
+    /// disposal legs draw an UNPROMOTED origin, is correctly absent — that is precisely the gap
+    /// `conservative::flagged_years` (the DFW-D11 export set) exists to cover, and why the gate's set is
+    /// explicitly NOT the export set.
+    ///
+    /// Mutation: drop the `promoted_origins` membership test (enumerate every disposal year) → 2024
+    /// appears → reds.
+    #[test]
+    fn promoted_filing_years_enumerates_promoted_disposal_legs_only() {
+        let promoted = EventId::decision(1);
+        let unpromoted = EventId::decision(2);
+
+        let state = LedgerState {
+            disposals: vec![
+                disposal(2024, unpromoted.clone()),
+                disposal(2025, promoted.clone()),
+            ],
+            promoted_origins: [promoted].into_iter().collect(),
+            ..Default::default()
+        };
+
+        let years = promoted_filing_years(&state);
+        assert_eq!(
+            years.iter().copied().collect::<Vec<_>>(),
+            vec![2025],
+            "only the year holding a PROMOTED disposal leg is enumerated: {years:?}"
+        );
+        assert!(
+            !years.contains(&2024),
+            "an unpromoted disposal leg's year must NOT enter the 8275-completeness set: {years:?}"
+        );
+    }
 }

@@ -1951,7 +1951,7 @@ fn flagged_years_pins_a_prior_gift_only_reorder() {
     );
 }
 
-/// ★ DFW M-new-1 (both P-A gate-review lenses, CONFIRMED at source): `promote_changed_years` — and thus
+/// ★ DFW M-new-1 (both P-A gate-review lenses, CONFIRMED at source): `decision_changed_years` — and thus
 /// `flagged_years` — now forces `pseudo_reconcile = false` on its OWN config copy, mirroring
 /// `would_conflict` (`project/mod.rs:119`), so the result is stable regardless of the CALLER's `cfg`.
 ///
@@ -1963,7 +1963,7 @@ fn flagged_years_pins_a_prior_gift_only_reorder() {
 /// PROMOTE's own dollar leg is what changes between with/without-promote (flags 2026); pseudo-ON, the
 /// $700/sat accept-first lot OUTRANKS the tranche EVEN WHEN PROMOTED ($400), so the identical lot is
 /// drawn with/without-promote (2026 is NOT flagged) — UNLESS pseudo is forced off internally, in which
-/// case both calls agree (mutation: remove the forced pseudo-off line inside `promote_changed_years` →
+/// case both calls agree (mutation: remove the forced pseudo-off line inside `decision_changed_years` →
 /// this KAT reds, since the pseudo-true call would then disagree with the pseudo-false call).
 #[test]
 fn flagged_years_forces_pseudo_off_regardless_of_caller_cfg() {

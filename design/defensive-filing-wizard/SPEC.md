@@ -251,10 +251,44 @@ engine-invisible; forward-planning only). There is **no manual "I hold N BTC" da
   DFW-D2 chokepoint plan at promote time (the staleness clause), never the dashboard cache.
 
 - **DFW-D11 (Forms/export — I-4, N-5; SPEC-r1 tax-I-1, arch-m-2).** Export is driven through the
-  chokepoint (parameterized over `&Session`/state), NOT a second `Session::open`. ★ The export set is
-  **{current year} ∪ {the BG-D9 fold-diff–flagged prior years across all live promotes, over disposal
-  AND removal legs}** — enumerated via the `promote_prior_year_advisory` fold-pair machinery, recomputed
-  from state at export time (derived, never a remembered advisory). It is **strictly larger** than the
+  chokepoint (parameterized over `&Session`/state), NOT a second `Session::open`. ★ The export
+  **candidate** set is the UNION of exactly three parts:
+
+  1. **`{current year}`**;
+  2. **per-LIVE-PROMOTE** BG-D9 fold-diff years (disposal ∪ removal legs);
+  3. ★ **per-LIVE-`$0`-DECLARE** fold-diff years — the SAME criterion, the SAME machinery, over each
+     live `DeclareTranche` (whole-branch tax-I-1).
+
+  All three are `< current`-filtered (part 1 excepted — the current year is included directly, not as a
+  fold-diff candidate), and the union is taken **per decision**, never as one whole-state
+  with-ALL/without-ALL diff (two decisions' per-year effects could cancel and silently drop a year
+  neither fold alone would miss). Enumerated via the `promote_prior_year_advisory` fold-pair machinery,
+  recomputed from state at export time (derived, never a remembered advisory).
+
+  **Part 3 is not optional and not a superset-for-safety flourish.** A `$0` declare with no promote
+  materially rewrites the shortfall year's FILED forms: `make_disposal_legs` splits the disposal's full
+  net proceeds **pro-rata across `consumed`**, so adding the tranche re-splits them, gives the
+  previously-uncovered share its own Form 8949 row with `acquired_at = window_end` (which also moves the
+  Schedule D short-/long-term split), and clears the Hard `UncoveredDisposal` that made the year
+  not-computable at all. Omitting part 3 makes the **conservative branch of the DFW-D3 fork strictly
+  less complete than the aggressive one** — the `$0` filer's own amended-return year would never be
+  planned while the promoting filer's is. Both branches are equal (DFW-D3); the export set must treat
+  them as equal.
+
+  ★ **Bundled-template partition (whole-branch tax-M-2).** The candidate set is then split against
+  `btctax_forms::SUPPORTED_YEARS`: a year this build bundles no IRS form templates for is held OUT of
+  the fill set and reported as **"no bundled IRS templates for `<year>` yet"** — informational, never a
+  per-year FAILURE, and never attempted (an attempted fill left a half-populated `out_dir/<year>/`
+  behind the error). This is the ordinary case for the current year until its forms ship. A **prior**
+  year landing in this bucket is still named, with the standing instruction that it must be amended by
+  hand.
+
+  ★ **One image (whole-branch arch-I-1).** The year set and the packet content MUST be derived from the
+  SAME projection. A driver that plans from a cached snapshot while the writer re-reads the session can
+  emit a silently SHORT packet set and report it as full success; the TUI driver therefore re-projects
+  immediately before planning.
+
+  The candidate set is **strictly larger** than the
   `promote_export_gate(None)` disposal-leg set: a promote's HIFO reorder can change a prior year's
   **donation / gift** (Schedule A deduction, Form 8283) or re-order documented lots with **no promoted
   disposal leg in that year at all** — those 1040-X packets MUST be in the export set (else a filed
@@ -269,6 +303,16 @@ engine-invisible; forward-planning only). There is **no manual "I hold N BTC" da
   consent figures, Part II narrative, and `Acknowledgment`. **No bulk-promote** (it would dilute BG-D6
   informed consent). Part II narrative authoring (M-2) is an in-TUI multiline path with the BG-D7
   non-empty/non-scaffold refusal enforced at the chokepoint.
+
+  ★ **The promote flow carries an explicit BG-D5 PROVENANCE-SELECTION step** (P-C gate tax-I-2; this
+  line closes the "SPEC line for the provenance step" follow-up — the step was review-anchored, not
+  spec-anchored). The filer picks the provenance of the coins BEFORE authoring Part II. It is an
+  **unprompted filer answer**, not a default: nothing preselects `Purchase`, and only `Purchase` passes
+  the shipped `refuse_non_purchase` gate — every other provenance is refused fail-closed, naming the
+  rule. The step exists because the attested provenance is *substance* of the BG-D5 attestation (the
+  §6664(c) good-faith footing), so it must be answered explicitly rather than inferred from the fact
+  that the filer reached the promote flow at all. Ordering within DFW-D2's gate sequence is unchanged:
+  resolve-live → **provenance** → Part II → floor/coverage → consent terms → ack.
 
 ---
 

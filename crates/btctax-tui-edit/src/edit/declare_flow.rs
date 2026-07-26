@@ -215,35 +215,12 @@ impl DeclareFlowState {
         is_long_term(self.window_end, self.shortfall.date)
     }
 
-    /// The DFW-D5.2 target-scoped clearance check: does the CURRENT window/sat/wallet actually clear
-    /// the targeted shortfall? A pure READ — `plan_declare` never mutates.
-    ///
-    /// ★ tax N-1 / arch M-2 (doc truth): this is **not** wired into the live readout — `render_declare_flow`
-    /// renders only the cheap trio (correct per DFW-D10: no per-keystroke re-projection). The REAL and
-    /// only declare gate is `declare_flow_confirm`'s own FRESH `plan_declare` at the Confirm-step Enter,
-    /// which surfaces any refusal with its reason (DFW-D5). This fn exists as the same-shaped pure probe
-    /// (its `Ok(plan)` is exactly what `persist_declare_tranche` is handed) and is exercised by this
-    /// module's own tests; wiring it into the readout is a filed follow-up, not shipped behavior.
-    #[allow(clippy::too_many_arguments)]
-    pub fn clearance(
-        &self,
-        events: &[LedgerEvent],
-        prices: &dyn PriceProvider,
-        cfg: &ProjectionConfig,
-        now: time::OffsetDateTime,
-    ) -> Result<btctax_cli::DeclarePlan, btctax_cli::Refusal> {
-        btctax_cli::plan_declare(
-            events,
-            prices,
-            cfg,
-            self.sat,
-            self.wallet.clone(),
-            self.window_start,
-            self.window_end,
-            Some(self.shortfall.event.clone()),
-            now,
-        )
-    }
+    // ★ whole-branch arch M-4: `DeclareFlowState::clearance()` was DELETED here. It had no production
+    // caller — only its own test — and its doc already conceded that the real (and only) declare gate is
+    // `declare_flow_confirm`'s FRESH `plan_declare` at the Confirm-step Enter, which surfaces the refusal
+    // with its reason (DFW-D5/DFW-D1 "no second gating authority"). Keeping a same-shaped pure probe
+    // alive alongside that gate was a standing invitation to grow a second, drifting authority; a test
+    // that needs the probe calls `btctax_cli::plan_declare` directly, exactly as the confirm tail does.
 
     /// The on-demand tax-Δ (DFW-D10 M-1 / ★ T6-Minor1): the profile-aware `declare_preview_saving` for
     /// the shortfall's own disposal year, sourcing the REAL stored/resolved `TaxProfile` the caller
@@ -517,9 +494,22 @@ mod tests {
             "no refusal may be claimed for a declare plan_declare accepts: {rendered}"
         );
 
-        // And the engine agrees: this declare is NOT refused by the allocation guard.
+        // And the engine agrees: this declare is NOT refused by the allocation guard. (★ whole-branch
+        // arch M-4: calls the REAL gate — `plan_declare`, the same one `declare_flow_confirm` runs —
+        // directly, now that the same-shaped `DeclareFlowState::clearance` probe is gone.)
         let now = datetime!(2026 - 01 - 01 0:00 UTC);
-        let refusal = state.clearance(&events, &prices, &cfg(), now).err();
+        let refusal = btctax_cli::plan_declare(
+            &events,
+            &prices,
+            &cfg(),
+            state.sat,
+            state.wallet.clone(),
+            state.window_start,
+            state.window_end,
+            Some(state.shortfall.event.clone()),
+            now,
+        )
+        .err();
         let text = format!("{refusal:?}").to_lowercase();
         assert!(
             !text.contains("safe-harbor") && !text.contains("safe harbor"),
@@ -713,48 +703,12 @@ mod tests {
         );
     }
 
-    // ── clearance (DFW-D5.2) — reads plan_declare, never writes ───────────────────────────────────────
-
-    #[test]
-    fn clearance_reflects_plan_declare_and_is_a_pure_read() {
-        use btctax_core::event::{Acquire, BasisSource, EventPayload};
-        use btctax_core::identity::{Source, SourceRef};
-        use time::macros::datetime;
-
-        let sf = shortfall_on(date!(2020 - 06 - 15));
-        let mut state = DeclareFlowState::new(sf.clone(), wallet(), false);
-        let empty_events: Vec<LedgerEvent> = vec![];
-        let prices = StaticPrices::default();
-        let now = datetime!(2026 - 01 - 01 0:00 UTC);
-
-        // Clears trivially: no shipped-set conflict, and the shadow re-projection finds no OTHER
-        // UncoveredDisposal on the target (there's no disposal event in `empty_events` at all — the
-        // target itself is absent, so the clearance shadow's "no UncoveredDisposal remains" check
-        // holds vacuously). This exercises "reads plan_declare, never mutates `empty_events`".
-        let result = state.clearance(&empty_events, &prices, &cfg(), now);
-        assert!(result.is_ok(), "a vacuous target must clear: {result:?}");
-        assert_eq!(
-            empty_events.len(),
-            0,
-            "clearance must never mutate the caller's events"
-        );
-
-        // A degenerate window (window_start > window_end) refuses via the shipped-set gate.
-        state.window_start = date!(2020 - 06 - 16);
-        state.window_end = date!(2020 - 06 - 14);
-        assert!(state
-            .clearance(&empty_events, &prices, &cfg(), now)
-            .is_err());
-
-        // Sanity: the acquire helper import stays used across future edits.
-        let _ = EventPayload::Acquire(Acquire {
-            sat: 1,
-            usd_cost: rust_decimal_macros::dec!(1),
-            fee_usd: rust_decimal_macros::dec!(0),
-            basis_source: BasisSource::ExchangeProvided,
-        });
-        let _ = EventId::import(Source::Coinbase, SourceRef::new("x"));
-    }
+    // ★ whole-branch arch M-4 / N-r2-4(a): `clearance_reflects_plan_declare_and_is_a_pure_read` was
+    // DELETED with the `DeclareFlowState::clearance` probe it was the sole caller of. Its two r1 Nits
+    // (the tautological `empty_events.len() == 0` assert over a shared `&[LedgerEvent]` the borrow
+    // checker already protects, and the two `let _ = ...` import-keepers that tested nothing) died with
+    // it. The behavior that MATTERS — the DFW-D5.2 clearance shadow itself — is pinned where it actually
+    // runs: `chokepoint::plan_declare`'s own KATs (`btctax-cli`) and the Confirm-step tail below.
 
     // ── T6-Minor1: the on-demand tax-Δ sources a REAL dollar figure from a real profile ───────────────
 

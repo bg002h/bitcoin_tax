@@ -18,7 +18,9 @@
 //! file's READ-ONLY + DISPATCH ONLY claim above stays literally true.
 
 use btctax_core::defensive::discovery::{Shortfall, Triage};
-use btctax_core::defensive::{Advisory, DefensiveFilingView, PoolShort, TrancheRow, TrancheStatus};
+use btctax_core::defensive::{
+    Advisory, DefensiveFilingView, PoolShort, SavingFlavor, TrancheRow, TrancheStatus,
+};
 use btctax_core::{BlockerKind, EventId};
 use crossterm::event::{KeyCode, KeyEvent};
 use std::path::{Path, PathBuf};
@@ -163,7 +165,17 @@ pub fn defensive_export_dir_for(vault_path: &Path, now: OffsetDateTime) -> PathB
 /// caller passes `plan.years`' own ascending `BTreeSet` order); a year with no bundled IRS-form template
 /// (or any other per-year failure) is named individually alongside its reason, WITHOUT hiding the years
 /// that DID export. Pure; no I/O.
-pub fn render_export_status(out_dir: &Path, reports: &[btctax_cli::ExportOutcome]) -> String {
+///
+/// ★ whole-branch tax M-2: `unsupported` (`ExportPlan::unsupported_years`) is rendered as its OWN
+/// informational clause, NEVER as a failure — those years were deliberately never attempted (this build
+/// bundles no IRS form templates for them). This is what stops every 2026 filer's `x` from reading
+/// "0 of 1 year(s) written — 2026 failed: unsupported tax year 2026". The clause still tells the filer
+/// the year is on the hook, because a flagged PRIOR year in this set must be amended by hand.
+pub fn render_export_status(
+    out_dir: &Path,
+    reports: &[btctax_cli::ExportOutcome],
+    unsupported: &std::collections::BTreeSet<i32>,
+) -> String {
     let total = reports.len();
     let ok_years: Vec<i32> = reports
         .iter()
@@ -189,6 +201,16 @@ pub fn render_export_status(out_dir: &Path, reports: &[btctax_cli::ExportOutcome
     }
     for (y, reason) in &failed {
         msg.push_str(&format!(" \u{2014} {y} failed: {reason}"));
+    }
+    if !unsupported.is_empty() {
+        let years: Vec<String> = unsupported.iter().map(|y| y.to_string()).collect();
+        msg.push_str(&format!(
+            " \u{2014} no bundled IRS templates for {} yet: not attempted (nothing was written for \
+             {}); if a year listed here is a PRIOR year, its filed forms changed and it still needs \
+             amending by hand",
+            years.join(", "),
+            if years.len() == 1 { "it" } else { "them" },
+        ));
     }
     msg
 }
@@ -242,10 +264,15 @@ fn render_advisory_line(a: &Advisory) -> String {
             .to_string(),
         // ★ Task 8 / P-B-tax-Minor: caveat a displacement-driven gain-Δ — never shown as an unqualified
         // "saving".
+        // ★ whole-branch tax M-1: this used to say the figure was "shown above" when NOTHING drew it —
+        // `TrancheRow.clamped_saving` was computed and never rendered. The `[assess]` line now exists
+        // (see `render_saving_line`), but it is ABSENT for a tranche with no disposed estimate legs,
+        // which is a common shape for this advisory (`covered_sat == 0`). So the copy is conditional:
+        // it caveats the figure WHERE ONE IS SHOWN and never presupposes one.
         Advisory::WouldDisplaceIfPromoted => "  [advisory] promoting this tranche would displace \
-             documented basis on a real disposal (a HIFO reorder) — any saving/gain-\u{394} shown above \
-             would UNDERSTATE the gain a documented lot would actually realize; treat it as a caveat, \
-             not a straightforward saving"
+             documented basis on a real disposal (a HIFO reorder) — so any saving/gain-\u{394} quoted \
+             for it on an [assess] line above UNDERSTATES the gain a documented lot would actually \
+             realize; treat that figure as a caveat, not a straightforward saving"
             .to_string(),
     }
 }
@@ -278,6 +305,34 @@ fn render_declared_zero_fork(row: &TrancheRow) -> Vec<String> {
     lines
 }
 
+/// ★ whole-branch tax M-1: `TrancheRow.clamped_saving` — DFW-D10's BG-D6 three-flavor discipline —
+/// rendered. It was computed by `journey_view` (two full projections per realized year per unpromoted
+/// tranche) and then DRAWN NOWHERE, which left both an expensive dead computation AND
+/// `Advisory::WouldDisplaceIfPromoted`'s caveat ("any saving/gain-Δ **shown above** would UNDERSTATE
+/// the gain…") pointing at a figure the filer could not see.
+///
+/// The three flavors keep their contract verbatim: a bare `$X (year Y)` is NEVER printed for a
+/// non-computing year. `ComputedTax` is the only dollar-tax flavor; `Uncomputable` prints the
+/// profile-free realized-gain delta, explicitly labelled as such and NOT as a tax saving (`journey_view`
+/// passes `profile: None`, so in practice every year it computes lands here); `Named` prints its note
+/// verbatim. Rendered BEFORE the advisories so `WouldDisplaceIfPromoted`'s "shown above" is literally
+/// true.
+fn render_saving_line(f: &SavingFlavor) -> String {
+    match f {
+        SavingFlavor::ComputedTax { year, delta } => format!(
+            "  [assess] promoting would lower {year}'s federal tax by ~${:.2} (clamped; never below $0)",
+            delta
+        ),
+        SavingFlavor::Uncomputable { year, gain_delta } => format!(
+            "  [assess] {year}: tax is not computable for this year (no bundled table, no stored tax \
+             profile, or a blocking issue) — promoting would change the REALIZED GAIN by ~${:.2}; this \
+             is a gain figure, not a tax saving",
+            gain_delta
+        ),
+        SavingFlavor::Named(msg) => format!("  [assess] {msg}"),
+    }
+}
+
 fn render_tranche_row(row: &TrancheRow) -> Vec<String> {
     let status_word = match row.status {
         TrancheStatus::DeclaredZero => "declared",
@@ -293,6 +348,10 @@ fn render_tranche_row(row: &TrancheRow) -> Vec<String> {
         TrancheStatus::Promoted => {
             lines.push("  [current] promoted — basis filed >$0 (no longer revocable)".to_string());
         }
+    }
+
+    for f in &row.clamped_saving {
+        lines.push(render_saving_line(f));
     }
 
     for a in &row.advisories {
@@ -412,6 +471,7 @@ mod tests {
     use btctax_tui::app::Snapshot;
     use crossterm::event::{KeyEventKind, KeyEventState, KeyModifiers};
     use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
     use std::path::PathBuf;
     use time::macros::date;
 
@@ -623,6 +683,84 @@ mod tests {
             "WouldDisplaceIfPromoted is a caveat, not a suppression — the promote branch stays offered: \
              {rendered}"
         );
+        // ★ whole-branch tax M-1: the copy must not claim a figure is "shown above" — this row carries
+        // NO `clamped_saving` at all, which is a normal shape for this advisory (it fires when
+        // `covered_sat == 0`, and a fully-undisposed tranche yields no saving years).
+        assert!(
+            !rendered.contains("shown above"),
+            "the caveat must not assert a figure is displayed when none is: {rendered}"
+        );
+    }
+
+    // ── ★ whole-branch tax M-1: `TrancheRow.clamped_saving` is RENDERED (it was computed and drawn
+    //    nowhere — two full projections per realized year per unpromoted tranche, dead) ────────────────
+
+    /// The BG-D6/DFW-D10 three-flavor discipline survives the render: `Uncomputable` prints the
+    /// profile-free realized-gain delta EXPLICITLY labelled as a gain, never as a tax saving, and a bare
+    /// `$X (year Y)` is never printed for a non-computing year. (`journey_view` passes `profile: None`,
+    /// so this is the flavor a filer actually sees.)
+    ///
+    /// Mutation: drop the `for f in &row.clamped_saving` loop from `render_tranche_row` → reds (and
+    /// `WouldDisplaceIfPromoted`'s caveat goes back to pointing at nothing).
+    #[test]
+    fn tranche_row_renders_the_clamped_saving_flavors_without_quoting_a_tax_figure_for_an_uncomputable_year(
+    ) {
+        let mut row = tranche_row(1, 40_000_000, TrancheStatus::DeclaredZero, vec![]);
+        row.clamped_saving = vec![
+            SavingFlavor::Uncomputable {
+                year: 2019,
+                gain_delta: rust_decimal_macros::dec!(1234.50),
+            },
+            SavingFlavor::Named("no clamped saving is computable for this tranche".to_string()),
+        ];
+        let rendered = render_tranche_row(&row).join("\n");
+
+        assert!(
+            rendered.contains("1234.50") && rendered.contains("2019"),
+            "the computed figure must actually reach the filer: {rendered}"
+        );
+        assert!(
+            rendered.contains("REALIZED GAIN") || rendered.contains("gain figure"),
+            "an Uncomputable year must be labelled a GAIN delta, never a tax saving (DFW-D10): \
+             {rendered}"
+        );
+        assert!(
+            rendered.contains("not a tax saving"),
+            "…and say so explicitly: {rendered}"
+        );
+        assert!(
+            rendered.contains("no clamped saving is computable for this tranche"),
+            "the Named flavor is surfaced verbatim: {rendered}"
+        );
+    }
+
+    /// The `[assess]` figure is rendered BEFORE the advisories, so `WouldDisplaceIfPromoted`'s caveat
+    /// ("…on an [assess] line above…") is literally true when a figure exists.
+    #[test]
+    fn the_assess_figure_is_rendered_above_the_advisory_that_caveats_it() {
+        let mut row = tranche_row(
+            1,
+            40_000_000,
+            TrancheStatus::DeclaredZero,
+            vec![Advisory::WouldDisplaceIfPromoted],
+        );
+        row.clamped_saving = vec![SavingFlavor::Uncomputable {
+            year: 2019,
+            gain_delta: rust_decimal_macros::dec!(900),
+        }];
+        let lines = render_tranche_row(&row);
+        let assess = lines
+            .iter()
+            .position(|l| l.contains("[assess]"))
+            .expect("the assess line must be rendered");
+        let advisory = lines
+            .iter()
+            .position(|l| l.contains("[advisory]"))
+            .expect("the advisory must be rendered");
+        assert!(
+            assess < advisory,
+            "the caveated figure must appear ABOVE the caveat: {lines:?}"
+        );
     }
 
     // ── ★ arch-Minor1: the dashboard cursor marker ─────────────────────────────────────────────────────
@@ -783,7 +921,7 @@ mod tests {
         };
         let reports: Vec<btctax_cli::ExportOutcome> =
             vec![(2024, Ok(ok_report(2024))), (2025, Ok(ok_report(2025)))];
-        let status = render_export_status(&out_dir, &reports);
+        let status = render_export_status(&out_dir, &reports, &BTreeSet::new());
         assert!(
             status.contains("2 of 2"),
             "must name the full success count: {status:?}"
@@ -840,7 +978,7 @@ mod tests {
             ),
             (2025, Ok(ok_2025)),
         ];
-        let status = render_export_status(&out_dir, &reports);
+        let status = render_export_status(&out_dir, &reports, &BTreeSet::new());
         assert!(
             status.contains("1 of 2"),
             "must name the partial-success count (T3-M2): {status:?}"
@@ -853,6 +991,40 @@ mod tests {
             status.contains(&out_dir.join("2025").display().to_string()),
             "the SUCCESSFUL year's own path must still be named, not swallowed by the failure (T3-M1): \
              {status:?}"
+        );
+    }
+
+    /// ★ whole-branch tax M-2: a year with NO bundled IRS templates is reported as a NOT-ATTEMPTED
+    /// informational clause — never as a per-year FAILURE. Before the `plan_export` partition, every
+    /// filer in 2026 pressed `x` and read "0 of 1 year(s) written — 2026 failed: unsupported tax year
+    /// 2026", with a half-populated `out_dir/2026/` on disk beside it.
+    ///
+    /// Mutation: render `unsupported` through the `failed` loop (or drop the clause) → the "failed"
+    /// assertion (or the naming assertion) reds.
+    #[test]
+    fn render_export_status_reports_an_unsupported_year_as_not_attempted_not_as_a_failure() {
+        let out_dir = PathBuf::from("/tmp/btctax-defensive-export-x");
+        // The universal 2026 shape: nothing fillable at all, one unsupported current year.
+        let status = render_export_status(
+            &out_dir,
+            &[],
+            &[2026].into_iter().collect::<BTreeSet<i32>>(),
+        );
+        assert!(
+            status.contains("2026"),
+            "the unsupported year must still be NAMED — silence would hide it: {status:?}"
+        );
+        assert!(
+            status.to_lowercase().contains("no bundled irs templates"),
+            "…with the real reason, in filer language: {status:?}"
+        );
+        assert!(
+            !status.to_lowercase().contains("failed"),
+            "a year this build simply has no templates for is NOT a failure: {status:?}"
+        );
+        assert!(
+            status.to_lowercase().contains("amend"),
+            "a PRIOR year landing here still needs amending by hand — say so: {status:?}"
         );
     }
 

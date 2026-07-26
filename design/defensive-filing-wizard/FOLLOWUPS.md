@@ -68,9 +68,11 @@ P-C-owned remains open.)*
   (window + "(long-term at the short op's date)" render on Edit and Confirm) and there is shipped precedent
   (`conventions::long_term_default_acquired`), but it is a TAX dimension of the era decision and should be chosen
   explicitly. (Owner: **P-D/ship**, rides the era-table decision.)
-- **[open] SPEC line for the provenance step.** The P-C gate added an explicit BG-D5 provenance-selection step to the
-  promote flow (tax I-2). No design artifact names a provenance picker either way — SPEC §3/DFW-D2 should gain a line so
-  the step is spec-anchored rather than review-anchored. (Owner: **P-D/ship**, doc-only.)
+- **[done] SPEC line for the provenance step.** The P-C gate added an explicit BG-D5 provenance-selection step to the
+  promote flow (tax I-2). No design artifact named a provenance picker either way. CLOSED at the whole-branch fold:
+  **SPEC DFW-D12** now carries the step explicitly — an unprompted filer answer (nothing preselects `Purchase`), the
+  fail-closed `refuse_non_purchase` gate, why it is BG-D5/§6664(c) substance rather than an inference, and its place in
+  DFW-D2's unchanged gate order. (Owner: **P-D/ship**, doc-only — DONE.)
 
 ## P-D / whole-branch (deferred at the P-C gate — non-blocking, but sweep before merge)
 
@@ -80,16 +82,29 @@ P-C-owned remains open.)*
   per-year delta is a reorder artifact shown as an unqualified saving. Fix: fire on `!promoted && displaces_documented_basis(..)`,
   suppressing only where `OverCovered` already carries displacement copy.
 - **[open] tax-M-4 — the declare flow's on-demand tax-Δ carries no displacement caveat** (`declare_flow.rs:293-307` prints
-  bare `$delta`/`gain-Δ`), while the dashboard row's equivalent number is caveated. `declare_preview_saving` already builds
-  both folds, so the check is nearly free.
-- **[open] arch-M-1 — ~35 lines of verbatim duplication between the two confirm tails** (`declare_flow_confirm` vs
-  `promote_flow_confirm`) + a third copy of the dashboard refresh in `open_defensive_filing`. Extract
-  `after_defensive_write(app, status)` + a shared `refresh_defensive_dashboard(app)`.
-- **[open] arch-M-2 — wire `DeclareFlowState::clearance()` into the readout** (it has no non-test caller; the doc was
-  corrected at `47225af` to say the clearance runs at confirm). Wiring it would also let the flow surface the REAL refusal
-  instead of predicting one.
-- **[open] arch-N-1 — `debug_assert!(open_flow_count() <= 1)` is evaluated before the flow field is set** (so it permits one
-  OTHER flow open); the invariant it names is `== 0`. One-line tightening at three sites.
+  bare `$delta`/`gain-Δ`). `declare_preview_saving` already builds both folds, so the check is nearly free.
+  ★ **PREMISE CORRECTED at the whole-branch fold:** this entry used to justify itself with "…while the dashboard row's
+  equivalent number is caveated." That was FALSE (whole-branch tax-M-1) — at the time it was written the dashboard drew
+  NO number at all: `TrancheRow.clamped_saving` was computed by `journey_view` and rendered nowhere, so there was no
+  caveated sibling to be inconsistent with. As of this fold the dashboard DOES render it (`render_saving_line`, with the
+  `WouldDisplaceIfPromoted` caveat above it), so the comparison the entry makes is true GOING FORWARD — but the item's
+  real basis is standalone: a bare gain-Δ shown to a filer without its displacement caveat can be read as an unqualified
+  saving, wherever it is printed.
+- **[done, partial] arch-M-1 — ~35 lines of verbatim duplication between the two confirm tails** (`declare_flow_confirm` vs
+  `promote_flow_confirm`) + a third copy of the dashboard refresh in `open_defensive_filing`. The
+  **`refresh_defensive_dashboard(app)`** half is DONE (whole-branch fold): extracted in `main.rs` and now the single
+  source for both confirm tails AND the export step's own post-re-projection refresh. `EditorApp::open_defensive_filing`
+  deliberately keeps its own copy (it takes `&mut self` and must run the DFW-D6 entry gate first). **Still open:** the
+  `after_defensive_write(app, status)` half (the save→re-project→status→close-flow tail itself).
+- **[done] arch-M-2 — `DeclareFlowState::clearance()` DELETED** (whole-branch fold). It had no non-test caller, and its
+  own doc already conceded the real (and only) declare gate is `declare_flow_confirm`'s FRESH `plan_declare` at the
+  Confirm-step Enter. Wiring it into the readout would have created a second, drifting gating authority (DFW-D1 forbids
+  exactly that) and re-projected per keystroke (DFW-D10 forbids that too), so it was removed rather than wired. Its sole
+  test went with it — which also closes **N-r2-4(a)** below. The one other test that called it now calls
+  `btctax_cli::plan_declare` directly, i.e. the REAL gate.
+- **[done] arch-N-1 — `debug_assert!(open_flow_count() <= 1)` is evaluated before the flow field is set** (so it permitted one
+  OTHER flow open); the invariant it names is `== 0`. Tightened to `debug_assert_eq!(.., 0)` at all three sites
+  (`main.rs` open_declare_flow / open_promote_flow, `editor.rs` open_defensive_filing) at the whole-branch fold.
 - **[open] Browse footer does not list `w`** (the overlay does, and `?` points at the overlay). Adding it pushed `?: help`
   off the 120-col footer and golden tests caught it; deliberately reverted with an in-source rationale. Revisit only if the
   footer is ever reflowed.
@@ -106,11 +121,11 @@ P-C-owned remains open.)*
   and "Quit the editor NOW" survives in the first ~120 chars, so this is cosmetic.
 - **[open] arch N-r2-3 — both I-2 render KATs (`draw_edit.rs:7068` + sibling) exercise the DASHBOARD surface only.**
   Add one case with `promote_flow` open (cheap insurance against a regression narrower than the dashboard).
-- **[open] N-r2-4 residue — three r1 Nits neither folded nor filed.** (a) tax N-3: the tautological
+- **[open] N-r2-4 residue — three r1 Nits neither folded nor filed.** (a) **[done]** tax N-3: the tautological
   `empty_events.len() == 0` assert plus two `let _ = ...` import-keepers in
-  `declare_flow::tests::clearance_reflects_plan_declare_and_is_a_pure_read` (`declare_flow.rs:736-756`) —
-  `empty_events` is a shared `&[LedgerEvent]`, so the borrow checker already guarantees no mutation; the assert and
-  the import-keepers test nothing. (b) tax N-4: the test name
+  `declare_flow::tests::clearance_reflects_plan_declare_and_is_a_pure_read` — closed at the whole-branch fold by
+  DELETING that test wholesale alongside the `clearance()` probe it was the sole caller of (see arch-M-2 above).
+  (b) tax N-4: the test name
   `defensive_journey.rs::declare_preview_saving_edits_the_window_and_changes_nothing_it_should_not` is misleading —
   the body makes a single call over a fixed window and never edits anything; rename or rewrite to actually exercise
   re-derivation across an edit. (c) the existing "Debug-format rows" item below is now widened to cover the two new
@@ -137,6 +152,70 @@ P-C-owned remains open.)*
   `render_export_status_reports_a_partial_success_and_names_the_failing_year_and_reason` (both `defensive_dashboard.rs`)
   + the `main.rs` end-to-end KAT `x_exports_both_a_promoted_2025_leg_and_a_2024_removal_reordered_year_including_form_8275`,
   which reads the real files back off disk under the computed `out_dir/<year>/`. (Owner: **Task 10**, display-only — DONE.)
+
+## P-D / whole-branch FINAL review (both lenses NOT GREEN — folded in one pass before merge)
+
+All four blocking/near-blocking items below landed in the SAME commit; both blockers were in the export step
+(Task 10, `0a6cf21`/`9cbd65e`) — the only code on the branch that never faced a two-lens phase gate.
+
+- **[done] tax I-1 (BLOCKING) — the export omitted the year a `$0`-only declare fixed.** `conservative::flagged_years`
+  iterated `live_promote_ids` ONLY, so a vault with `DeclareTranche` decisions and no `PromoteTranche` yielded the EMPTY
+  set and the wizard's `$0`-branch export planned just `{current_year}`. But a `$0` declare DOES rewrite the shortfall
+  year's filed forms (`make_disposal_legs` re-splits the disposal's net proceeds pro-rata across `consumed`, giving the
+  uncovered share its own 8949 row with `acquired_at = window_end`, moving the Schedule D short/long split, and clearing
+  the Hard `UncoveredDisposal`) — so the CONSERVATIVE branch of the DFW-D3 fork was strictly less complete than the
+  aggressive one. Fixed by composing the SHIPPED fold-diff machinery, no new tax logic: `promote_changed_years` was
+  generalized to `decision_changed_years` (the criterion is decision-agnostic) and `flagged_years` now unions the
+  per-LIVE-DECLARE diff alongside the per-live-promote one — same `< current` retain, same forced-pseudo-off shadow.
+  KAT: `promote_cli.rs::flagged_years_includes_the_prior_year_a_zero_dollar_declare_alone_fixed`
+  (mutation verified: reverting to the promote-only union yields `{}` → reds). SPEC DFW-D11 amended to state the
+  three-part union explicitly. (Owner: **P-D/whole-branch** — DONE.)
+- **[done] arch I-1 (BLOCKING) — the export planned from a possibly-STALE snapshot and reported a short packet set as
+  full success.** `execute_defensive_export` computed the plan (incl. the year set) from `app.snapshot` while
+  `chokepoint::apply_export` re-loads `events`/`state` FRESH from `session` — stale year set, fresh PDF content.
+  Reachable whenever a write SAVED but its `build_snapshot` failed (~24 "Saved but re-projection failed" tails, both
+  defensive ones included); the "restart to refresh" status could not guard it because the DefensiveFiling key handler
+  runs `app.status = None;` before dispatching the very `x` that would act on it. Fixed with the brief's **option (ii)**
+  — `execute_defensive_export` RE-PROJECTS immediately before planning, so plan and apply read one image by
+  construction; the refreshed snapshot + dashboard are retained. Option (i) (a `snapshot_stale` latch) was built first
+  and DISCARDED: the marker turned out to have 24 emitters, so the latch would have needed arming at ~24 sites and
+  clearing at ~35, and a stuck flag would refuse valid exports. KAT:
+  `main.rs::x_replans_off_a_fresh_projection_so_a_stale_snapshot_cannot_shorten_the_year_set` (mutation verified:
+  deleting the re-projection reproduces the exact defect — `"1 of 1 year(s) written"`, 2024 silently absent).
+  (Owner: **P-D/whole-branch** — DONE.)
+- **[done] tax M-2 — every 2026 filer's `x` reported a FAILURE and left a half-written directory.** `plan_export`
+  inserted `current_year` unconditionally while `btctax_forms::SUPPORTED_YEARS = [2017, 2024, 2025]`, so `x` read
+  "0 of 1 year(s) written — 2026 failed: unsupported tax year 2026" — and `export_irs_pdf_from_session` had already
+  `mkdir`'d the year dir and written `basis_methodology.txt`/`form_8275.txt` before `fill_form_8949` raised. Two fixes:
+  (a) `plan_export` partitions the candidate set against `SUPPORTED_YEARS` into `years` / a new
+  `ExportPlan::unsupported_years`, rendered as "no bundled IRS templates for `<year>` yet" (with the standing
+  amend-by-hand note for a prior year) instead of a failure; (b) `export_irs_pdf_from_session` refuses an unsupported
+  year BEFORE `mkdir_out` — mirroring the shipped Form 8275 overflow pre-check — with the byte-identical
+  `CliError::FormFill(FormsError::UnsupportedYear(y))`, so the single-year CLI path is unchanged except that it now
+  writes ZERO bytes. KATs: `plan_export_holds_an_unsupported_year_out_of_the_fill_set`,
+  `render_export_status_reports_an_unsupported_year_as_not_attempted_not_as_a_failure`, plus no-half-write assertions in
+  `export_irs_pdf.rs::unsupported_year_is_refused` and the per-year-isolation KAT. (Owner: **P-D/whole-branch** — DONE.)
+- **[done] tax M-1 — `TrancheRow.clamped_saving` was computed and drawn NOWHERE.** `journey_view` spent two full
+  projections per realized year per unpromoted tranche on it, and `render_tranche_row` never rendered it — so
+  `Advisory::WouldDisplaceIfPromoted`'s copy ("any saving/gain-Δ **shown above** would UNDERSTATE the gain…") pointed at
+  nothing. Fixed BOTH ways: the figure is now rendered (`render_saving_line`, above the advisories, keeping the BG-D6
+  three-flavor discipline — an `Uncomputable` year prints a REALIZED-GAIN delta explicitly labelled "not a tax saving",
+  never a bare `$X`), and the caveat copy no longer presupposes a figure ("…on an [assess] line above", since the
+  advisory legitimately fires on rows that have no saving years at all). KATs:
+  `tranche_row_renders_the_clamped_saving_flavors_without_quoting_a_tax_figure_for_an_uncomputable_year`,
+  `the_assess_figure_is_rendered_above_the_advisory_that_caveats_it`. (Owner: **P-D/whole-branch** — DONE.)
+- **[done] arch M-1 — `x` silently did nothing when `snapshot`/`session` was `None`.** Both bare `return`s set a status
+  now; the screen handler clears `app.status` before dispatch, so a bare return was indistinguishable from a dead key.
+  KAT: `x_with_no_loaded_ledger_refuses_with_a_reason_never_a_silent_no_op`. (Owner: **P-D/whole-branch** — DONE.)
+- **[done] arch M-2 — `chokepoint::promoted_filing_years` demoted to `pub(crate)`.** It was `pub` solely to serve one
+  integration-test assertion, which would have parked it on btctax-cli's v0.10.0 PUBLIC API permanently (much cheaper to
+  narrow before the first release than after); its only production caller is in-crate (`cmd/admin.rs`). The
+  disposal-legs-only contract is now pinned by an in-crate unit test,
+  `chokepoint::tests::promoted_filing_years_enumerates_promoted_disposal_legs_only`. (Owner: **P-D/whole-branch** — DONE.)
+
+**Explicitly NOT touched (USER decision, handled separately):** the era-preset table content and its default preset
+(`crates/btctax-core/src/defensive/era.rs`), including the PROVISIONAL language and the missing ≥2025 bucket — see the
+P-D/ship section above.
 
 ## Copy pass / whole-branch review (ownerless residue — batch to the end)
 

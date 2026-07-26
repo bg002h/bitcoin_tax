@@ -440,6 +440,20 @@ pub(crate) fn export_irs_pdf_from_session(
         })
     };
 
+    // ★ whole-branch tax M-2: refuse an UNSUPPORTED year HERE, before `mkdir_out` — mirroring the Form
+    // 8275 pre-check directly above (and `export_full_return`'s own pre-write table lookup). Without it,
+    // a year outside `btctax_forms::SUPPORTED_YEARS` created `out_dir/` and wrote
+    // `basis_methodology.txt` + `form_8275.txt` BEFORE `fill_form_8949` raised `UnsupportedYear`,
+    // leaving a HALF-POPULATED packet directory beside the reported failure — a filer could mail a
+    // directory holding a methodology disclosure with no forms behind it. The error is byte-identical to
+    // the one `fill_form_8949` used to raise (`CliError::FormFill(FormsError::UnsupportedYear(year))`),
+    // so the single-year CLI `export-irs-pdf` path is unchanged apart from writing ZERO bytes.
+    if !btctax_forms::SUPPORTED_YEARS.contains(&tax_year) {
+        return Err(CliError::FormFill(
+            btctax_forms::FormsError::UnsupportedYear(tax_year),
+        ));
+    }
+
     mkdir_out(out_dir)?;
 
     // I-3 (D-4): the MANDATORY conservative-filing methodology disclosure rides the PDF packet too, not
