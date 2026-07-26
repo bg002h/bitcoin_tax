@@ -21,9 +21,11 @@
 //! `conservative_promote::filed_basis_for`, which requires `Coverage::Full` over real price data.
 //!
 //! **No bucket STRADDLES the pooling cutover** (`conventions::TRANSITION_DATE`, 2025-01-01): every
-//! window lies entirely before it or entirely on/after it, so a declared tranche's lot always lands in
-//! exactly ONE pooling era (`project::pools::pool_key` — a single Universal pool before the cutover,
-//! per-wallet from it on). Pinned by
+//! window lies entirely before it or entirely on/after it, so a declared tranche's lot has an
+//! unambiguous **acquisition-time** pool assignment (`project::pools::pool_key` — a single Universal
+//! pool before the cutover, per-wallet from it on) — a pre-cutover lot is later drained into its
+//! wallet's pool by `seed_transition` under Path A; the invariant here is about the initial assignment,
+//! not lifetime residence. Pinned by
 //! `defensive_era.rs::no_preset_window_straddles_the_pooling_cutover`.
 
 use crate::conventions::{TaxDate, TRANSITION_DATE};
@@ -57,14 +59,18 @@ pub enum EraPreset {
     /// 1. **A filer whose coins genuinely ARE 2025+ must be able to say so.** The window is the filer's OWN
     ///    sworn answer to "when did you acquire these coins?" (`window_end` IS the lot's acquisition date,
     ///    `resolve.rs:~1310`). Without a 2025-onward bucket the only route to a truthful 2025+ window was
-    ///    ±1-day nudging (~150 keypresses) away from a pre-cutover preset — friction that pushes an honest
+    ///    ±1-day nudging away from a pre-cutover preset — moving just `window_start` off `Y2021To2024`'s
+    ///    2021-01-01 to 2025-01-01 alone is ~1,461 individual presses — friction that pushes an honest
     ///    filer toward attesting a window they do not actually believe.
-    /// 2. **A pre-2025 declare permanently forfeits Rev. Proc. 2024-28 safe-harbor eligibility.** A
-    ///    non-voided `window_end < TRANSITION_DATE` tranche makes `tranche_guard::pre2025_tranche_exists`
-    ///    true, and `guard_allocation_vs_tranche` then REFUSES any later `SafeHarborAllocation` (v1 makes
-    ///    the two mutually exclusive). So covering a 2025-or-later shortfall from a pre-cutover window is
-    ///    not merely awkward — it costs the filer the safe harbour. A 2025+ bucket is the only way to cover
-    ///    such a shortfall without paying that price.
+    /// 2. **A pre-2025 declare forfeits Rev. Proc. 2024-28 safe-harbor eligibility for as long as the
+    ///    tranche is on file.** A non-voided `window_end < TRANSITION_DATE` tranche makes
+    ///    `tranche_guard::pre2025_tranche_exists` true, and `guard_allocation_vs_tranche` then REFUSES any
+    ///    later `SafeHarborAllocation` (v1 makes the two mutually exclusive). Voiding the tranche restores
+    ///    eligibility (`pre2025_tranche_exists` filters `!voided`) — but a tranche whose basis you have
+    ///    already FILED is not freely unwound. So covering a 2025-or-later shortfall from a pre-cutover
+    ///    window is not merely awkward — it costs the filer the safe harbour for as long as that filing
+    ///    stands. A 2025+ bucket is the only **one-keystroke** way to cover such a shortfall without
+    ///    paying that price.
     ///
     /// **Why the concrete end is 2025-12-31:** `era_window` is pure and CLOCK-FREE, so "onward" needs a
     /// concrete upper bound. 2025-12-31 is the last day of the newest tax year this app can file
@@ -154,8 +160,8 @@ mod tests {
             let cutover = crate::conventions::TRANSITION_DATE;
             assert!(
                 end < cutover || start >= cutover,
-                "{p:?} straddles the {cutover} pooling cutover ({start}..{end}) — its lot would span \
-                 the Universal/per-wallet pool split"
+                "{p:?} straddles the {cutover} pooling cutover ({start}..{end}) — its lot's \
+                 acquisition-time pool assignment would be ambiguous (Universal vs per-wallet)"
             );
         }
     }

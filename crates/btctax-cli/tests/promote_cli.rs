@@ -1833,12 +1833,6 @@ fn flagged_years_keeps_a_promoted_tranche_whose_declare_void_the_engine_made_ine
         "a tranche the ENGINE holds in force must stay in the export year-set union — a naive \
          'some void names it' filter would silently shorten the packet set: {years:?}"
     );
-    let years = flagged_years(&events, &state, session.prices(), &tables, &cfg, 2026);
-    assert!(
-        years.contains(&2024),
-        "a tranche the ENGINE holds in force must stay in the export year-set union — a naive \
-         'some void names it' filter would silently shorten the packet set: {years:?}"
-    );
 }
 
 /// `plan_export` refuses when the ledger is pseudo-active (DFW-D11) — this composed export step NEVER

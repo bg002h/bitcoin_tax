@@ -244,12 +244,14 @@ engine-invisible; forward-planning only). There is **no manual "I hold N BTC" da
   unreachable for this shape (`guard_tranche_vs_allocation` / `guard_allocation_vs_tranche` make an in-force
   allocation and a pre-2025 tranche mutually exclusive). **The owner's decision to add the bucket is UNCHANGED
   and correct; only the stated reason was wrong.** The two sound justifications are: (a) a filer whose coins
-  genuinely were acquired in 2025+ must be able to attest that truthfully rather than ±1-day-nudging ~150
-  times away from a pre-cutover preset; and (b) covering a post-2025 shortfall with a *pre-2025* declare
-  permanently forfeits Rev. Proc. 2024-28 safe-harbor eligibility (`pre2025_tranche_exists` →
-  `guard_allocation_vs_tranche` refuses any later allocation), so a 2025+ bucket is the only way to cover such
-  a shortfall without that cost. The **preset-confirm copy MUST frame
-  the window as the filer's OWN knowledge of when they acquired the coins** — the attested window is the
+  genuinely were acquired in 2025+ must be able to attest that truthfully rather than ±1-day-nudging away
+  from a pre-cutover preset — moving just `window_start` off `Y2021To2024`'s 2021-01-01 to 2025-01-01 alone
+  is ~1,461 individual presses; and (b) covering a post-2025 shortfall with a *pre-2025* declare forfeits
+  Rev. Proc. 2024-28 safe-harbor eligibility for as long as that tranche is on file (`pre2025_tranche_exists`
+  → `guard_allocation_vs_tranche` refuses any later allocation; voiding the tranche restores eligibility, but
+  a tranche whose basis you have already filed is not freely unwound), so a 2025+ bucket is the only
+  **one-keystroke** way to cover such a shortfall without paying that cost. The **preset-confirm copy MUST
+  frame the window as the filer's OWN knowledge of when they acquired the coins** — the attested window is the
   *substance* of the BG-D5 attestation and the Cohan/§6664(c) footing, and must never read as
   tool-sourced. **DFW-D5's
   before-the-short-op prefill governs over a preset's `window_end` where they conflict** (an era end

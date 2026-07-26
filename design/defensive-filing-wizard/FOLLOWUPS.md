@@ -134,6 +134,15 @@ P-C-owned remains open.)*
 - **[done] arch-N-1 — `debug_assert!(open_flow_count() <= 1)` is evaluated before the flow field is set** (so it permitted one
   OTHER flow open); the invariant it names is `== 0`. Tightened to `debug_assert_eq!(.., 0)` at all three sites
   (`main.rs` open_declare_flow / open_promote_flow, `editor.rs` open_defensive_filing) at the whole-branch fold.
+- **[open — RE-OWNED to post-merge]** ★ **2026-07-26, whole-branch FINAL r3 fold.** The remaining `[open]` items
+  below in this section — Browse-footer `w`, tax Minor 2 (flow-render scrolling), arch N-r2-1, arch N-r2-2, arch
+  N-r2-3, and N-r2-4 residue (b) — were likewise owned by **P-D/whole-branch**, the same phase already re-owned
+  above for the tax-M-3/tax-M-4 pair; that phase CLOSES at this gate and none of these is discharged, so per
+  STANDARD_WORKFLOW ("an item whose owning phase has already passed is overdue, not deferred") they are
+  explicitly RE-OWNED to **post-merge / next cycle** rather than left pointing at a closed phase. Both r3 lenses
+  ruled all of them non-blocking (arch r3 GREEN; tax r3's sole 0C/1I finding is the unrelated §6664(c) record-
+  scope item, folded separately) and none changes a filed number. Owner from now on for every remaining `[open]`
+  item in this section: **post-merge / next cycle.**
 - **[open] Browse footer does not list `w`** (the overlay does, and `?` points at the overlay). Adding it pushed `?: help`
   off the 120-col footer and golden tests caught it; deliberately reverted with an in-source rationale. Revisit only if the
   footer is ever reflowed.
@@ -278,10 +287,14 @@ fold: the blockers and tax-M-3 are pure documentation; tax-M-1 makes an export y
   allocation and a pre-2025 tranche mutually exclusive). The owner's ratified DECISION (add `Y2025Onward`) is
   UNCHANGED and correct — only its stated reason was wrong. Replaced with the two SOUND justifications ((a) a
   filer whose coins genuinely are 2025+ must be able to attest truthfully rather than nudging ~150 times; (b) a
-  pre-2025 declare permanently forfeits Rev. Proc. 2024-28 eligibility via `pre2025_tranche_exists` →
-  `guard_allocation_vs_tranche`) in **all four** places — whole-surface sweep, this repo's own lesson:
-  `crates/btctax-core/src/defensive/era.rs` (the docs.rs publish surface),
+  pre-2025 declare forfeits Rev. Proc. 2024-28 eligibility for as long as the tranche is on file, via
+  `pre2025_tranche_exists` → `guard_allocation_vs_tranche`) in **all four** places — whole-surface sweep, this
+  repo's own lesson: `crates/btctax-core/src/defensive/era.rs` (the docs.rs publish surface),
   `crates/btctax-core/tests/defensive_era.rs`, `SPEC.md` DFW-D9, and the `main.rs` T10 fixture comment.
+  ★ **Further refined at the whole-branch FINAL r3 fold (tax r3 M-2 / arch r3 N-2):** "permanently" overstated
+  it — voiding the tranche restores eligibility (`pre2025_tranche_exists` filters `!voided`); the loss holds only
+  for as long as the tranche's basis is on file. "The only way" was also overstated — a forward `window_end`
+  nudge past the cutover clears the predicate too; the bucket is the only **one-keystroke** way.
   (Owner: **P-D/whole-branch** — DONE.)
 - **[done] tax I-2 (BLOCKING) — the README stated a safety guarantee the engine does not provide.** "the floor …
   will never manufacture a loss, and **it will never exceed basis you can already document**". The first clause
@@ -305,6 +318,11 @@ fold: the blockers and tax-M-3 are pure documentation; tax-M-1 makes an export y
   by hand" — a paragraph now says so. (4) the §6664(c) sentence no longer claims the record "matches the screen
   you agreed to" (the open no-scrolling follow-up means a trailing term can be recorded as shown without being
   rendered); it now claims only what is true — the consent text is recorded verbatim.
+  ★ **SUPERSEDED at the whole-branch FINAL r3 fold (tax r3 I-1, BLOCKING):** clause (4) above was ITSELF false —
+  `Acknowledgment.shown_terms` snapshots only the figure terms, not the `advisory_lines`/`post_consent_note` the
+  filer is also shown at consent (neither has a field on `PromoteTranche` to live in). The README now claims only
+  the narrower, true scope: the shown figures, the typed phrase, and the attested provenance statement are
+  recorded verbatim; the prior-year advisories and the wide-window note are shown but re-derived, not stored.
   (Owner: **P-D/whole-branch** — DONE.)
 - **[done] tax M-1 — a still-in-force PROMOTED tranche could be dropped from the export union.**
   `conservative.rs`'s `live_declare_ids` built liveness from the NAIVE `voided_decision_targets` ("some

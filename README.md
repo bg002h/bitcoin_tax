@@ -427,8 +427,8 @@ basis. btctax uses the **lowest closing price in your declared window**, which i
 that window can support. Two things are guaranteed: the estimate **never absorbs proceeds your documented basis
 needs**, so a promotion can never manufacture a loss; and a promotion is **refused outright for every
 acquisition provenance that already has a real basis in law**. A promoted floor is still an *estimate*, and on
-a wide window it can exceed what you could document for the same coins — the dashboard says so out loud when it
-would displace documented basis. A promotion requires, in order:
+a wide window it can exceed what you could document for the same coins — the dashboard flags the displacement
+it can detect. A promotion requires, in order:
 
 - an explicit **acquisition-provenance attestation** — you pick from a closed list, and only *purchase* can be
   promoted (gift, inheritance, mining, staking, airdrop and fork already have a real basis in law, so btctax
@@ -437,12 +437,16 @@ would displace documented basis. A promotion requires, in order:
   packet, not optional boilerplate; and
 - typing an **acknowledgment phrase** confirming you understand this is an estimate that carries §6662 exposure.
 
-The dashboard shows what the promotion would actually change — per affected year, the change in **realized
-gain**, labelled as a gain figure and explicitly *not* a tax saving — plus loud advisories when a tranche covers
-more than the shortfall needs, or when promoting would displace basis you already have documented. (A dollar
-*tax* figure needs a stored tax profile and a bundled rate table for that year; press **`t`** in the declare
-flow to compute one on demand where both exist.) The full consent text — every advisory and every term — is
-recorded **verbatim** with the decision, as the §6664(c) good-faith record of what the decision was based on.
+The dashboard shows what the promotion would actually change — per affected year, either the change in
+**realized gain** (labelled as a gain figure and explicitly *not* a tax saving) or, where no figure is
+computable for that year, a named note explaining why — plus loud advisories when a tranche covers more than
+the shortfall needs, or when the dashboard detects that promoting would displace basis you already have
+documented. (A dollar *tax* figure needs a stored tax profile and a bundled rate table for that year; press
+**`t`** in the declare flow to compute one on demand where both exist.) The figures you were shown are
+snapshotted **verbatim** into the recorded decision (`Acknowledgment.shown_terms`), alongside the exact phrase
+you typed and the provenance statement you attested — the §6664(c) good-faith record of what the decision was
+based on. (The prior-year amend advisories and the wide-window note are shown at consent and re-derived from
+your ledger; they are not stored with the decision.)
 
 ### Export
 

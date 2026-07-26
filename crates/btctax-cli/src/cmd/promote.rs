@@ -48,7 +48,7 @@ impl ProvenanceKind {
     /// publish): `[ProvenanceKind; 7]` bakes the variant COUNT into the public type, so adding a
     /// provenance kind would be a breaking change for every downstream matcher. As a slice that addition
     /// is purely additive.
-    pub const ALL: &'static [ProvenanceKind] = &[
+    pub const ALL: &[ProvenanceKind] = &[
         ProvenanceKind::Purchase,
         ProvenanceKind::Gift,
         ProvenanceKind::Inheritance,

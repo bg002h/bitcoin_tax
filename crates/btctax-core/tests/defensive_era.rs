@@ -81,8 +81,8 @@ fn no_preset_window_straddles_the_pooling_cutover() {
         let (s, e) = era_window(p);
         assert!(
             e < cutover || s >= cutover,
-            "{p:?} ({s}..{e}) STRADDLES the {cutover} pooling cutover — its lot would span the \
-             Universal/per-wallet pool split"
+            "{p:?} ({s}..{e}) STRADDLES the {cutover} pooling cutover — its lot's acquisition-time \
+             pool assignment would be ambiguous (Universal vs per-wallet)"
         );
     }
     // …and both sides of the split are actually reachable from the table (the invariant above is
