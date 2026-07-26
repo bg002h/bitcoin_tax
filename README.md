@@ -398,6 +398,58 @@ btctax --vault ./vault.pgp reconcile pseudo off   # reverts instantly; approved 
 > a CSV or form. The attestation is what lets a draft be exported on purpose while making an accidental filing
 > impossible.
 
+---
+
+## Defensive filing — when your sales imported but your purchases are gone
+
+The exchange you bought on shut down. The old wallet is a dead drive. Your **sales** are in the ledger, but the
+**acquisitions** behind them are not — so `verify` shows `UncoveredDisposal` blockers and the year won't compute.
+
+Open the editor and press **`w`** for the guided **Defensive filing** dashboard:
+
+```sh
+btctax-tui-edit --vault ./vault.pgp     # then press w  (press ? for the full keymap)
+```
+
+It reads your ledger and shows, per uncovered sale, what is actually missing — and it separates the two cases
+that look alike: a shortfall you should **cover** (the records are genuinely gone) versus one you should **fix
+first** (an unclassified inbound or an unlinked transfer is masquerading as a missing purchase). It never
+declares anything for you.
+
+### The fork: file $0, or knowingly claim a floor
+
+For a shortfall you choose to cover, you declare a **tranche** — an amount of BTC, a wallet, and the window of
+dates you believe you acquired it in. Declaring files a **$0 cost basis**: the most conservative possible
+answer, complete and defensible on its own, and freely revocable. **For many filers that is the end of it.**
+
+Optionally — never by default, never as a "next step" — you can **promote** that tranche to a `>$0` estimated
+basis. btctax uses the **lowest closing price in your declared window**, which is the most conservative estimate
+that window can support; it will never manufacture a loss, and it will never exceed basis you can already
+document. A promotion requires, in order:
+
+- an explicit **acquisition-provenance attestation** — you pick from a closed list, and only *purchase* can be
+  promoted (gift, inheritance, mining, staking, airdrop and fork already have a real basis in law, so btctax
+  refuses and points you at modelling the actual acquisition instead);
+- a **Form 8275** Part II narrative in your own words — the disclosure is mandatory and is exported with the
+  packet, not optional boilerplate; and
+- typing an **acknowledgment phrase** confirming you understand this is an estimate that carries §6662 exposure.
+
+The dashboard shows what the promotion would actually change — the tax delta where it can be computed, and
+loud advisories when a tranche covers more than the shortfall needs, or when promoting would displace basis you
+already have documented. Everything you were shown at consent is recorded verbatim with the decision, so the
+§6664(c) good-faith record matches the screen you agreed to.
+
+### Export
+
+Press **`x`** to export. btctax works out which years your promotion actually changed — not just the year you're
+filing — and writes one packet per year into `<out-dir>/<year>/`, each including the Form 8275 for any promoted
+basis it discloses.
+
+> Same philosophy as the rest of btctax: it will not answer a filing question for you. The window is your
+> knowledge, the provenance is your attestation, the narrative is your explanation — btctax computes the
+> conservative number those answers imply, shows its work, and makes the aggressive choice impossible to make
+> by accident.
+
 ## Getting help
 
 - **`btctax <command> --help`** — every command documents its arguments, including file formats with examples.
