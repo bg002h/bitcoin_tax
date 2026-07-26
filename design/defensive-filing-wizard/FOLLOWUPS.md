@@ -9,14 +9,10 @@ Legend: **[open]** not started · **[done]** burned down (kept for provenance) �
 
 ## P-C (must close before the P-C green gate)
 
-- **[open] Era→window preset table — real product-authored content.** (Owner: **P-C**, product/user decision.)
-  The plan/SPEC (DFW-D9) referenced a "reviewed era→window preset table" that was never authored anywhere in the
-  design corpus. Task 8 built the full mechanism (confirm/edit, prefill-precedence, live readout) using clearly-flagged
-  **PROVISIONAL** round calendar-year buckets (2009–2011, …, 2021–2024) — see `crates/btctax-core/src/defensive/era.rs`
-  module doc. **Filing-neutral** (presets are editable starting suggestions; `plan_declare(Some)` validates the chosen
-  window; the filed floor is `filed_basis_for` requiring `Coverage::Full`), so it does NOT gate correctness — but the
-  actual windows + labels are a product/copy + date-boundary decision the owner should make (or bless the calendar
-  buckets) before ship. *(Closes T8-review Minor-1 by existing: `era.rs` cites this file.)*
+*(The era→window preset-table item was RE-OWNED to **P-D/ship** at the P-C gate — see that section. It is a USER
+decision the phase cannot discharge, so leaving it here made the gate unclosable by construction. Nothing else
+P-C-owned remains open.)*
+
 - **[done] `declare_flow::nudge_window_start` has no lower bound** (T8-review Minor-2). Was able to move
   `window_start` past `window_end`/before genesis. Filing-safe (surfaced live as `NoCoverage`; `plan_declare` refuses
   at confirm), so this was a UX-robustness fix, not a correctness gate. Clamped `nudge_window_start` to
@@ -53,6 +49,50 @@ Legend: **[open]** not started · **[done]** burned down (kept for provenance) �
   `crates/btctax-cli/tests/chokepoint_parity.rs`: an unknown/voided/wrong-type target is refused byte-identically
   across the CLI verb and `chokepoint::plan_promote`, both mapping through the SAME `From<Refusal>`, and asserted to
   be the `Refusal::Target` variant specifically. (Owner: **P-C/Task 9** — DONE.)
+
+## P-D / ship (re-owned + newly filed at the P-C gate, 2026-07-26)
+
+- **[open] Era→window preset table — real product-authored content.** ★ RE-OWNED from P-C to **P-D/ship** (arch gate
+  adjudication): it is a **USER** decision the phase cannot discharge, so leaving it P-C-owned made the gate unclosable
+  by construction. Both lenses ruled it non-blocking (presets are seeds; `plan_declare` re-validates the chosen window;
+  the filed floor is `filed_basis_for` requiring `Coverage::Full`; `defensive_era.rs` KATs pin the structural properties).
+  **Blast radius when the owner decides:** `crates/btctax-core/src/defensive/era.rs` + `crates/btctax-core/tests/defensive_era.rs`
+  (pins all five windows verbatim + `ALL_PRESETS.len()`) + the filer-facing preset label (currently `{:?}` → `Y2009To2011`).
+  **Three tax-relevant sub-decisions ride with it** (tax gate): (a) which preset is the DEFAULT — that sets the default
+  holding-period character (see M-5 below); (b) cycling to a preset later than the short op must not leave an inverted
+  window (fixed in code at `47225af`, but re-check against any new table); (c) there is no ≥2025 bucket, so a post-2024
+  shortfall's window is reachable only by ±1-day nudges (see the free-text-entry item).
+- **[open] tax-M-5 — the default preset seeds a taxpayer-FAVORABLE holding date.** `window_end` IS the lot's acquisition
+  date (`resolve.rs:1310`), so defaulting to the oldest bucket (2009-01-03..2011-12-31) makes nearly every disposal
+  **long-term** at the preferential rate — while the code justifies oldest-first purely on the basis axis. Not silent
+  (window + "(long-term at the short op's date)" render on Edit and Confirm) and there is shipped precedent
+  (`conventions::long_term_default_acquired`), but it is a TAX dimension of the era decision and should be chosen
+  explicitly. (Owner: **P-D/ship**, rides the era-table decision.)
+- **[open] SPEC line for the provenance step.** The P-C gate added an explicit BG-D5 provenance-selection step to the
+  promote flow (tax I-2). No design artifact names a provenance picker either way — SPEC §3/DFW-D2 should gain a line so
+  the step is spec-anchored rather than review-anchored. (Owner: **P-D/ship**, doc-only.)
+
+## P-D / whole-branch (deferred at the P-C gate — non-blocking, but sweep before merge)
+
+- **[open] tax-M-3 — displacement-caveat hole for a correctly-sized cover.** `defensive/mod.rs:659-688`:
+  `WouldDisplaceIfPromoted` fires only when `covered_sat == 0`; when `covered_sat > 0 && t.sat == covered_sat`, neither it
+  nor `OverCovered` fires — yet a HIFO reorder across multi-year disposals still shifts gain between years, so that row's
+  per-year delta is a reorder artifact shown as an unqualified saving. Fix: fire on `!promoted && displaces_documented_basis(..)`,
+  suppressing only where `OverCovered` already carries displacement copy.
+- **[open] tax-M-4 — the declare flow's on-demand tax-Δ carries no displacement caveat** (`declare_flow.rs:293-307` prints
+  bare `$delta`/`gain-Δ`), while the dashboard row's equivalent number is caveated. `declare_preview_saving` already builds
+  both folds, so the check is nearly free.
+- **[open] arch-M-1 — ~35 lines of verbatim duplication between the two confirm tails** (`declare_flow_confirm` vs
+  `promote_flow_confirm`) + a third copy of the dashboard refresh in `open_defensive_filing`. Extract
+  `after_defensive_write(app, status)` + a shared `refresh_defensive_dashboard(app)`.
+- **[open] arch-M-2 — wire `DeclareFlowState::clearance()` into the readout** (it has no non-test caller; the doc was
+  corrected at `47225af` to say the clearance runs at confirm). Wiring it would also let the flow surface the REAL refusal
+  instead of predicting one.
+- **[open] arch-N-1 — `debug_assert!(open_flow_count() <= 1)` is evaluated before the flow field is set** (so it permits one
+  OTHER flow open); the invariant it names is `== 0`. One-line tightening at three sites.
+- **[open] Browse footer does not list `w`** (the overlay does, and `?` points at the overlay). Adding it pushed `?: help`
+  off the 120-col footer and golden tests caught it; deliberately reverted with an in-source rationale. Revisit only if the
+  footer is ever reflowed.
 
 ## Task 10 / P-D (the export step)
 
