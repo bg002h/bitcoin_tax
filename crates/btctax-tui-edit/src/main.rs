@@ -674,6 +674,16 @@ fn handle_form_key(app: &mut EditorApp, key: KeyEvent) {
 const STALE_FACT_1: &str = "the write reached disk, but whether it had the intended effect could not be \
      verified, because the ledger would not re-project";
 
+/// Fact 2 (DESIGN.md §2.5, fix round 1 Important 3): included in the arm status only when a pre-close
+/// survey (`any_mutation_surface_open`) shows a surface was actually live — COMPUTED, never assumed.
+/// Earlier design drafts assumed this fires at either 1 of 27 tails or 26 of 27; both were measured
+/// false. True at every site where it fires: `arm_stale` only ever runs after a persist that already
+/// returned `Ok`, so any surface still open at that point holds no more than what it just wrote to
+/// disk — there is nothing further to lose by closing it. See `any_mutation_surface_open`'s doc for
+/// why this is also what makes the park-tail carve-out fall out for free, with no special case here.
+const FACT_2_SCREEN_CLOSED: &str =
+    "The entry screen that was open has been closed; nothing beyond what it already wrote is lost.";
+
 impl EditorApp {
     /// The residue-latch status, if any mutating opener must refuse. `attest_save_failed` keeps its
     /// exact shipped wording (so `kat_e2e_attest_errlatch_chmod` stays green); `rollback_failed`
@@ -813,12 +823,23 @@ impl EditorApp {
     /// them). It just re-projects `self.session` and delegates to `apply_reprojection`, which does the
     /// actual latch/status/dashboard work and is the unit every KAT drives directly.
     ///
+    /// `arm_prefix` carries the three per-tail prefixes DESIGN.md §2.5 requires to survive now that
+    /// fact 1 no longer names what landed (`"committed {year} as {label}, but…"`,
+    /// `"parked the full return for {year}, but…"`, `"the safe-harbor attest write landed, but…"`); the
+    /// other 24 tails pass `None`. It is `Option<String>`, not `Option<&'static str>`: all three real
+    /// prefixes interpolate a runtime `{year}`/`{label}`, so a `'static` string could not carry them —
+    /// the prefix has to be built (`format!`) at each of those three call sites, not quoted here.
+    ///
     /// `#[allow(dead_code)]`: no call site exists yet (Task 4 wires the 27 tails onto this fn). Mirrors
     /// `stale_reason`'s Task-1 pattern; remove the attribute once Task 4 lands.
     #[allow(dead_code)]
-    fn after_write(&mut self, status: impl FnOnce(&btctax_tui::app::Snapshot) -> String) {
+    fn after_write(
+        &mut self,
+        arm_prefix: Option<String>,
+        status: impl FnOnce(&btctax_tui::app::Snapshot) -> String,
+    ) {
         let rebuilt = self.session.as_ref().map(btctax_tui::unlock::build_snapshot);
-        self.apply_reprojection(rebuilt, status)
+        self.apply_reprojection(arm_prefix, rebuilt, status)
     }
 
     /// The testable unit: `rebuilt` is a PARAMETER rather than something this fn computes itself, so
@@ -833,12 +854,15 @@ impl EditorApp {
     ///   reachable clear today is `execute_defensive_export`'s own inline rebuild. Then refresh the
     ///   Defensive Filing dashboard's `journey_view`, but ONLY if one is already open —
     ///   `refresh_defensive_dashboard` CREATES `DefensiveDashboardState` unconditionally, so an
-    ///   unguarded call would fabricate a wizard dashboard for a filer who never opened it.
-    /// - `Err` / `None`: arm the stale latch via the one `arm_stale` site. `None` (no session) is
-    ///   production-unreachable (`session` is `Some` iff `snapshot` is), but it must arm rather than
-    ///   panic, so a future refactor cannot turn a `let…else`/`.unwrap()` slip into a crash.
+    ///   unguarded call would fabricate a wizard dashboard for a filer who never opened it. `arm_prefix`
+    ///   is unused on this arm (it only ever decorates the ARM status).
+    /// - `Err` / `None`: arm the stale latch via the one `arm_stale` site, carrying `arm_prefix` along.
+    ///   `None` (no session) is production-unreachable (`session` is `Some` iff `snapshot` is), but it
+    ///   must arm rather than panic, so a future refactor cannot turn a `let…else`/`.unwrap()` slip into
+    ///   a crash.
     fn apply_reprojection(
         &mut self,
+        arm_prefix: Option<String>,
         rebuilt: Option<Result<(btctax_tui::app::Snapshot, i32), btctax_cli::CliError>>,
         status: impl FnOnce(&btctax_tui::app::Snapshot) -> String,
     ) {
@@ -852,21 +876,107 @@ impl EditorApp {
                     refresh_defensive_dashboard(self);
                 }
             }
-            Some(Err(e)) => self.arm_stale(e.to_string()),
-            None => self.arm_stale("no session".to_string()),
+            Some(Err(e)) => self.arm_stale(arm_prefix, e.to_string()),
+            None => self.arm_stale(arm_prefix, "no session".to_string()),
         }
     }
 
-    /// The ONE site that arms `stale_after_write`. Sets the reason, installs a status built from the
-    /// shared `STALE_FACT_1` (so this and `stale_reason` cannot drift), and closes every mutation
-    /// surface with `may_save = true`: the write already landed — memory == disk for everything this
-    /// closes — so a tax-inputs draft flush here is a fail-safe write of already-durable state, not an
-    /// active one. Contrast `on_persist_error`'s `ResidueLive` arm, which passes `false` because THAT
-    /// latch means unrevertable residue is live in memory and must never reach `Vault::save`.
-    fn arm_stale(&mut self, reason: String) {
+    /// A pre-close survey of whether `close_all_mutation_surfaces` is about to discard a live surface.
+    /// Mirrors that fn's field list exactly (keep both in sync) and MUST be read before it runs — it
+    /// nulls everything this looks at. Feeds `arm_stale`'s fact 2 (DESIGN.md §2.5): COMPUTED, never
+    /// assumed — earlier drafts assumed this was true at exactly 1 of 27 tails, then at 26 of 27; both
+    /// were measured false (review: ~22).
+    ///
+    /// `tax_inputs_form` is gated on its OWN `dirty` flag, not bare presence — this is what makes the
+    /// park-tail carve-out (DESIGN.md §2.5) fall out for free, with no per-call-site special case.
+    /// `confirm_park_to_profile` clears `dirty` on its own successful write, before any re-projection is
+    /// attempted, and (uniquely among the 27) keeps the form OPEN — "now editing the parked full
+    /// return" — rather than closing it. Closing a CLEAN form there loses nothing beyond what the write
+    /// already persisted (the parked draft is already on disk), so fact 2 must not claim otherwise —
+    /// DESIGN.md: "saying otherwise would send the filer to re-author a return that `park_to_profile`
+    /// then refuses." Every OTHER surface has no independent dirty concept: a single-shot flow/modal
+    /// still `Some` at this point IS the thing this write just persisted (`arm_stale` only ever runs
+    /// after a persist that already returned `Ok`), and the one-flow invariant means at most one of
+    /// them is ever live — so bare presence is the right (and only measurable) test for the rest.
+    fn any_mutation_surface_open(&self) -> bool {
+        let tax_inputs_dirty = self.tax_inputs_form.as_ref().is_some_and(|f| f.dirty);
+        tax_inputs_dirty
+            || self.profile_form.is_some()
+            || self.mutation_modal.is_some()
+            || self.classify_inbound_flow.is_some()
+            || self.classify_inbound_modal.is_some()
+            || self.reclassify_outflow_flow.is_some()
+            || self.reclassify_outflow_modal.is_some()
+            || self.reclassify_income_flow.is_some()
+            || self.reclassify_income_modal.is_some()
+            || self.set_fmv_flow.is_some()
+            || self.set_fmv_modal.is_some()
+            || self.void_flow.is_some()
+            || self.void_modal.is_some()
+            || self.select_lots_flow.is_some()
+            || self.select_lots_modal.is_some()
+            || self.set_donation_details_flow.is_some()
+            || self.set_donation_details_modal.is_some()
+            || self.link_transfer_flow.is_some()
+            || self.link_transfer_modal.is_some()
+            || self.classify_raw_flow.is_some()
+            || self.classify_raw_modal.is_some()
+            || self.safe_harbor_attest_flow.is_some()
+            || self.resolve_conflict_flow.is_some()
+            || self.resolve_conflict_modal.is_some()
+            || self.optimize_accept_flow.is_some()
+            || self.optimize_accept_modal.is_some()
+            || self.safe_harbor_allocate_flow.is_some()
+            || self.safe_harbor_allocate_modal.is_some()
+            || self.bulk_link_flow.is_some()
+            || self.bulk_link_modal.is_some()
+            || self.bulk_sti_flow.is_some()
+            || self.bulk_sti_modal.is_some()
+            || self.pseudo_approve_modal.is_some()
+            || self.bulk_resolve_flow.is_some()
+            || self.bulk_resolve_modal.is_some()
+            || self.bulk_void_flow.is_some()
+            || self.bulk_void_modal.is_some()
+            || self.bulk_reclassify_outflow_flow.is_some()
+            || self.bulk_reclassify_outflow_modal.is_some()
+            || self.match_self_transfers_flow.is_some()
+            || self.match_self_transfers_modal.is_some()
+            || self.method_election_flow.is_some()
+            || self.method_election_modal.is_some()
+            || self.declare_flow.is_some()
+            || self.promote_flow.is_some()
+            || self.bulk_income_flow.is_some()
+            || self.bulk_income_modal.is_some()
+    }
+
+    /// The ONE site that arms `stale_after_write`. Survey-then-close-then-status, in that ORDER, for
+    /// two independent reasons:
+    /// - fact 2 must be computed from `any_mutation_surface_open()` BEFORE `close_all_mutation_surfaces`
+    ///   nulls every field it surveys (DESIGN.md §2.5);
+    /// - **fix round 1 Important 2:** `close_all_mutation_surfaces(true)` can flush a dirty tax-inputs
+    ///   draft, and `flush_tax_inputs_draft`'s `Err` arm unconditionally overwrites `app.status` with a
+    ///   bare `CliError` string. If this fn's own status were assigned BEFORE that call, a failing
+    ///   fail-safe flush would clobber fact 1 with something that reads as "the write failed, retry" —
+    ///   the exact wrong remedy fact 1 exists to rule out (the write already landed). Assigning
+    ///   `self.status` LAST means this arm's status always wins, regardless of what the flush did.
+    ///
+    /// `may_save = true`: the write already landed — memory == disk for everything this closes — so a
+    /// tax-inputs draft flush here is a fail-safe write of already-durable state, not an active one.
+    /// Contrast `on_persist_error`'s `ResidueLive` arm, which passes `false` because THAT latch means
+    /// unrevertable residue is live in memory and must never reach `Vault::save`.
+    fn arm_stale(&mut self, prefix: Option<String>, reason: String) {
+        let closed_a_live_surface = self.any_mutation_surface_open();
         self.stale_after_write = Some(reason.clone());
-        self.status = Some(format!("{STALE_FACT_1} ({reason}). Quit and reopen the vault."));
+        let prefix = prefix.unwrap_or_default();
+        let fact2 = if closed_a_live_surface {
+            format!("{FACT_2_SCREEN_CLOSED} ")
+        } else {
+            String::new()
+        };
         self.close_all_mutation_surfaces(true);
+        self.status = Some(format!(
+            "{prefix}{STALE_FACT_1} ({reason}). {fact2}Quit and reopen the vault."
+        ));
     }
 }
 
@@ -11001,6 +11111,7 @@ mod tests {
         let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
         app.declare_flow = Some(declare_flow_fixture());
         app.apply_reprojection(
+            None,
             Some(Err(btctax_cli::CliError::Usage("projector said no".into()))),
             |_| unreachable!("the status closure must NOT run on the Err arm"),
         );
@@ -11026,7 +11137,7 @@ mod tests {
         app.stale_after_write = Some("earlier".to_string());
         app.defensive_dashboard = None;
         let rebuilt = btctax_tui::unlock::build_snapshot(app.session.as_ref().unwrap());
-        app.apply_reprojection(Some(rebuilt), |snap| format!("{} events", snap.events.len()));
+        app.apply_reprojection(None, Some(rebuilt), |snap| format!("{} events", snap.events.len()));
         assert!(app.status.clone().unwrap_or_default().ends_with("events"));
         assert!(app.stale_after_write.is_none(), "a successful re-projection clears the latch (D-4)");
         assert!(app.defensive_dashboard.is_none(), "must not fabricate a dashboard");
@@ -11037,8 +11148,222 @@ mod tests {
     #[test]
     fn apply_reprojection_with_no_session_arms_rather_than_panicking() {
         let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
-        app.apply_reprojection(None, |_| "unused".to_string());
+        app.apply_reprojection(None, None, |_| "unused".to_string());
         assert!(app.stale_after_write.is_some());
+    }
+
+    /// ★ Fix round 1, Important 1: an independent reviewer replaced `self.snapshot = Some(snap);` (the
+    /// Ok arm) with `drop(snap);` and the crate's OWN 451 tests still passed — the line this whole
+    /// design exists for had NO test. An empty-vault fixture cannot catch it: an empty `Vec` never
+    /// allocates (every empty `Vec<T>` shares the same dangling sentinel pointer for `T`), so a pointer
+    /// check on `events` is vacuously equal whether or not `self.snapshot` was ever reassigned. Seeding
+    /// ONE real event first forces a genuine heap allocation, so `events.as_ptr()` differs iff a
+    /// genuinely NEW `Snapshot` replaced the old one — which is exactly (and only) what
+    /// `self.snapshot = Some(snap)` does; two live allocations can never share an address.
+    ///
+    /// Mutation: replaced the Ok arm's `self.snapshot = Some(snap);` with `drop(snap);` — RED
+    /// (`before_ptr == after_ptr`: the pre-write image was silently retained while the status still
+    /// claimed the fresh one). Restored via a `cp` backup (never `git checkout --`) and re-ran — GREEN.
+    #[test]
+    fn apply_reprojection_ok_installs_the_rebuilt_snapshot_not_the_stale_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-install-snapshot-pass";
+        seed_transfer_in_vault(&vault, &key, pp_str);
+        let mut app = open_app(&vault, pp_str);
+        assert_eq!(
+            app.snapshot.as_ref().unwrap().events.len(),
+            1,
+            "fixture: one real (non-empty-Vec) event, so `events.as_ptr()` is a live heap pointer"
+        );
+        let before_ptr = app.snapshot.as_ref().unwrap().events.as_ptr();
+
+        let rebuilt = btctax_tui::unlock::build_snapshot(app.session.as_ref().unwrap());
+        app.apply_reprojection(None, Some(rebuilt), |snap| format!("{} events", snap.events.len()));
+
+        let after_ptr = app.snapshot.as_ref().unwrap().events.as_ptr();
+        assert_ne!(
+            before_ptr, after_ptr,
+            "the Ok arm must INSTALL the rebuilt snapshot — a subsequent read must not silently see \
+             the pre-write image"
+        );
+        assert_eq!(app.status.as_deref(), Some("1 events"));
+    }
+
+    /// ★ Fix round 1, Important 2: `arm_stale` calls `close_all_mutation_surfaces(true)`, which flushes
+    /// a dirty tax-inputs draft; `flush_tax_inputs_draft`'s `Err` arm (`:1088`-ish) unconditionally
+    /// overwrites `app.status`. If `arm_stale` assigned its own status BEFORE that call, a FAILING
+    /// fail-safe flush would clobber fact 1 with a bare `CliError` string that reads as "the write
+    /// failed, retry" — the exact wrong remedy fact 1 exists to rule out (the write already landed; do
+    /// NOT retry). Simulates the flush failure the same way `tax_inputs_q_keeps_flow_open_when_final_
+    /// flush_fails` does: remove the vault's directory out from under the still-open `Session`.
+    ///
+    /// Mutation: moved `arm_stale`'s `self.status = Some(...)` assignment back to BEFORE
+    /// `self.close_all_mutation_surfaces(true)` — RED (`app.status` became the bare io error, losing
+    /// "reached disk"/"could not be verified"). Restored via a `cp` backup (never `git checkout --`)
+    /// and re-ran — GREEN.
+    #[test]
+    fn arm_stale_status_survives_a_failing_draft_flush() {
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        handle_key(&mut app, press(KeyCode::Char('T')));
+        handle_key(&mut app, press(KeyCode::Char(' '))); // materializes + dirty
+        assert!(
+            app.tax_inputs_form.as_ref().is_some_and(|f| f.dirty),
+            "precondition: a dirty draft that close_all(true) will try to (fail-safe) flush"
+        );
+
+        // Pull the rug: remove the vault directory so the fail-safe flush inside arm_stale errors.
+        std::fs::remove_dir_all(dir.path()).unwrap();
+
+        app.apply_reprojection(
+            None,
+            Some(Err(btctax_cli::CliError::Usage("projector said no".into()))),
+            |_| unreachable!("the status closure must NOT run on the Err arm"),
+        );
+
+        let s = app.status.clone().unwrap_or_default();
+        assert!(
+            s.contains("reached disk") && s.contains("could not be verified"),
+            "the arm status must survive a failing fail-safe flush, not be clobbered by its own io \
+             error: {s}"
+        );
+        assert!(
+            app.tax_inputs_form.is_none(),
+            "the surface still closes despite the flush failing"
+        );
+    }
+
+    /// The ledger flagged "`may_save = true` is not mutation-covered" as a Task-6 follow-up — wrong:
+    /// `arm_stale` is `close_all_mutation_surfaces`'s first `true` caller, so it goes LIVE here, not at
+    /// Task 6. `residue_live_may_save_false_prevents_dirty_tax_inputs_draft_from_reaching_disk` proves
+    /// the NEGATIVE direction (`false` must not flush); this proves the POSITIVE one (`true` must): the
+    /// arm path's entire premise is that the write ALREADY landed, so flushing its own still-dirty
+    /// tax-inputs draft is fail-safe (memory == disk already for everything else this closes), and
+    /// D-4's remedy — "quit and reopen" — is only trustworthy if in-memory state is actually durable
+    /// first.
+    ///
+    /// Mutation: flipped `arm_stale`'s `self.close_all_mutation_surfaces(true)` to `(false)` — RED (no
+    /// `Draft` row for 2024 existed on disk after the arm ran). Restored via a `cp` backup (never
+    /// `git checkout --`) and re-ran — GREEN.
+    #[test]
+    fn arm_stale_may_save_true_flushes_a_dirty_tax_inputs_draft_to_disk() {
+        use btctax_core::tax::types::FilingStatus;
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        let vault = dir.path().join("vault.pgp");
+        let pp = Passphrase::new("empty-vault-pass".into());
+
+        handle_key(&mut app, press(KeyCode::Char('T')));
+        handle_key(&mut app, press(KeyCode::Char(' '))); // cycle FilingStatus → Single (materializes)
+        let form = app.tax_inputs_form.as_ref().unwrap();
+        assert!(form.dirty, "the fixture must start dirty for this KAT to mean anything");
+        assert_eq!(
+            form.working.as_ref().unwrap().filing_status,
+            FilingStatus::Single,
+            "a materialized, distinctive working copy"
+        );
+
+        app.apply_reprojection(
+            None,
+            Some(Err(btctax_cli::CliError::Usage("projector said no".into()))),
+            |_| unreachable!("the status closure must NOT run on the Err arm"),
+        );
+        assert!(app.stale_after_write.is_some(), "the latch must arm");
+        assert!(app.tax_inputs_form.is_none(), "the surface closes");
+
+        drop(app); // release the exclusive VaultLock before reopening a fresh Session to read back
+        let sess = btctax_cli::Session::open(&vault, &pp).unwrap();
+        assert!(
+            btctax_cli::input_form_store::draft_exists(sess.conn(), 2024).unwrap(),
+            "may_save=true must flush the still-dirty draft — the write that triggered this arm \
+             already landed, so this flush is fail-safe, and silently discarding the draft instead \
+             would contradict the 'quit and reopen' remedy fact 1 promises"
+        );
+    }
+
+    /// DESIGN.md §2.5: three of the 27 tails carry a per-tail prefix ahead of fact 1 (fact 1 no longer
+    /// names what landed). `arm_prefix` must be EXPRESSIBLE end to end — threaded from `apply_reprojection`
+    /// through to the composed status, ahead of fact 1's own text.
+    #[test]
+    fn apply_reprojection_err_prefix_precedes_fact_1() {
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        app.apply_reprojection(
+            Some("parked the full return for 2024, but ".to_string()),
+            Some(Err(btctax_cli::CliError::Usage("disk".into()))),
+            |_| unreachable!(),
+        );
+        let s = app.status.clone().unwrap_or_default();
+        assert!(
+            s.starts_with("parked the full return for 2024, but the write reached disk"),
+            "the prefix must precede fact 1 verbatim, not be dropped or reordered: {s}"
+        );
+    }
+
+    /// DESIGN.md §2.5: fact 2 is COMPUTED from a pre-close survey (`any_mutation_surface_open`), not
+    /// assumed — it must be PRESENT when a live surface (here, an open Declare flow) is about to be
+    /// discarded by `close_all_mutation_surfaces`.
+    #[test]
+    fn apply_reprojection_err_fact_2_present_when_a_surface_was_open() {
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        app.declare_flow = Some(declare_flow_fixture());
+        app.apply_reprojection(
+            None,
+            Some(Err(btctax_cli::CliError::Usage("disk".into()))),
+            |_| unreachable!(),
+        );
+        let s = app.status.clone().unwrap_or_default();
+        assert!(
+            s.contains("entry screen that was open has been closed"),
+            "fact 2 must fire when the survey finds a live surface: {s}"
+        );
+    }
+
+    /// The mirror of the above: with NOTHING open, fact 2 must be silent — its presence is computed,
+    /// not a fixed part of the template.
+    #[test]
+    fn apply_reprojection_err_fact_2_absent_when_nothing_was_open() {
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        app.apply_reprojection(
+            None,
+            Some(Err(btctax_cli::CliError::Usage("disk".into()))),
+            |_| unreachable!(),
+        );
+        let s = app.status.clone().unwrap_or_default();
+        assert!(
+            !s.contains("entry screen"),
+            "fact 2 must be silent when the survey found nothing open: {s}"
+        );
+    }
+
+    /// ★ The park-tail carve-out (DESIGN.md §2.5), proven generically: `confirm_park_to_profile` keeps
+    /// `tax_inputs_form` OPEN but clears `dirty` before any re-projection is attempted, because the
+    /// parked draft is already on disk — closing that CLEAN form loses nothing, so fact 2 must not fire
+    /// there. `any_mutation_surface_open` implements this by gating `tax_inputs_form` on its `dirty`
+    /// flag rather than bare presence, so the carve-out falls out of the survey with no per-call-site
+    /// special case — this KAT drives that directly, without needing the park tail itself wired (Task 4).
+    ///
+    /// Mutation: changed `any_mutation_surface_open`'s `self.tax_inputs_form.as_ref().is_some_and(|f|
+    /// f.dirty)` to bare `self.tax_inputs_form.is_some()` — RED (fact 2 fired over a clean, already-
+    /// persisted form). Restored via a `cp` backup (never `git checkout --`) and re-ran — GREEN.
+    #[test]
+    fn apply_reprojection_err_fact_2_silent_for_a_clean_tax_inputs_form_the_park_carve_out() {
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        handle_key(&mut app, press(KeyCode::Char('T')));
+        handle_key(&mut app, press(KeyCode::Char(' '))); // materializes + dirty
+        // Simulate `confirm_park_to_profile`'s own post-write state: the form stays OPEN, but `dirty`
+        // is cleared because the parked draft already reached disk.
+        app.tax_inputs_form.as_mut().unwrap().dirty = false;
+
+        app.apply_reprojection(
+            Some("parked the full return for 2024, but ".to_string()),
+            Some(Err(btctax_cli::CliError::Usage("disk".into()))),
+            |_| unreachable!(),
+        );
+        let s = app.status.clone().unwrap_or_default();
+        assert!(
+            !s.contains("entry screen"),
+            "the park carve-out: a CLEAN (already-persisted) open form must not read as discarded: {s}"
+        );
     }
 
     /// Opening the tax-inputs flow on a fresh (never-committed, no-draft) year yields a `None`
