@@ -90,7 +90,8 @@ nothing above limits the licence grant in `LICENSE` (MIT OR Unlicense), and
 nothing above forbids using this feature. It only tells you what the authors
 know about how proven it is, so the "YOU ARE THE PREPARER" section above
 means something concrete for this specific feature. The application also
-surfaces this notice at the point of use — on the command line, in the
-interactive terminal views, and as a standalone `EXPERIMENTAL.txt` file
-alongside anything this feature exports — deliberately never inside a filed
-form or disclosure itself.
+surfaces this notice at the point of use — on the command line (stderr) and
+in the interactive terminal views — but deliberately **never** writes it into
+anything this feature exports: the export directory is what you mail or hand
+to a preparer, and a copy of this notice riding along with it would be the
+same hazard as printing it on a filed form.

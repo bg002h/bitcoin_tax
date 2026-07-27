@@ -750,9 +750,9 @@ fn run() -> Result<ExitCode, CliError> {
                  no liability for the consequences. This is not tax advice. See `btctax limitations`."
             );
             // Approach-B experimental disclosure (`design/approach-b-experimental-notice`): a live
-            // (non-voided) DeclareTranche/PromoteTranche is on file — this export's packet also carries
-            // `EXPERIMENTAL.txt` (a separate sibling file, never inside a form). Covers BOTH the
-            // crypto-slice and the full-return dispatch (both return the same `IrsPdfReport`).
+            // (non-voided) DeclareTranche/PromoteTranche is on file — INTERFACE-only, stderr here,
+            // never written into the export directory. Covers BOTH the crypto-slice and the full-return
+            // dispatch (both return the same `IrsPdfReport`).
             if report.experimental_notice {
                 eprintln!("\n⚠ {}", btctax_core::experimental::NOTICE.plain_text());
             }

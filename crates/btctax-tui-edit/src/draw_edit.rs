@@ -423,7 +423,7 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     if let Some(idx) = experimental_idx {
         let banner = Paragraph::new(format!(
             " ⚠ {} — newer, AI-assisted, had shipped filing-affecting defects (now fixed). Verify \
-             every figure. See EXPERIMENTAL.txt on export. ",
+             every figure and every disclosure before you file. ",
             btctax_core::experimental::NOTICE.title
         ))
         .alignment(Alignment::Center)

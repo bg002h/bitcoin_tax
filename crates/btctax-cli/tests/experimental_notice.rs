@@ -1,13 +1,16 @@
 //! Approach-B experimental disclosure (`design/approach-b-experimental-notice`) — CLI wiring KATs.
 //!
-//! Three surfaces, all gated on `btctax_core::experimental::uses_approach_b`:
-//!   1. `declare-tranche` / `promote-tranche` / `export-irs-pdf` (crypto slice + full-return) print the
-//!      notice on STDERR (never stdout — stdout is parsed/piped) on a successful, Approach-B-touching run.
-//!   2. Every export directory this crate writes gets a sibling `EXPERIMENTAL.txt`, self-gated the same
-//!      way, alongside `basis_methodology.txt` / `form_8275.txt`.
-//!   3. ★ THE GUARD: the notice text appears in NO filed artifact — absent from the 8275 PDF's field
-//!      values, from `form_8275.txt`, and from `basis_methodology.txt` — even on a vault where a
-//!      promoted-basis disposal makes ALL THREE files non-empty at once (the actual risk scenario).
+//! The notice is INTERFACE-ONLY: it gates on `btctax_core::experimental::uses_approach_b`, and appears
+//! on stderr for `declare-tranche` / `promote-tranche` / `export-irs-pdf` (crypto slice + full-return) —
+//! never stdout (stdout is parsed/piped). It is deliberately **never** written to disk: no sibling file,
+//! no field, nothing — the export directory is what a filer mails or hands to a preparer, and a copy of
+//! this notice riding along with it would be the same hazard as printing it on the 8275 itself.
+//!
+//! ★ THE GUARD (the most important test in this file — the failure mode that matters is not a missing
+//! banner, it is the banner leaking into a filing package): for a vault where Approach-B is loudly in
+//! use AND a promoted disposal leg makes `form_8275.txt` / `basis_methodology.txt` / the 8275 PDF all
+//! non-empty at once, the notice text appears NOWHERE the export directory produces — walked file by
+//! file, plus a decoded AcroForm field-value check on the 8275 PDF specifically.
 //!
 //! PRIVACY: synthetic values in tempdirs; no user file is read.
 
@@ -18,7 +21,7 @@ use btctax_core::event::{
     FloorMethod, PromoteTranche,
 };
 use btctax_core::identity::{EventId, Source, SourceRef, WalletId};
-use btctax_core::persistence::{append_decision, append_import_batch, load_all};
+use btctax_core::persistence::{append_decision, append_import_batch};
 use btctax_core::LedgerEvent;
 use btctax_store::Passphrase;
 use rust_decimal_macros::dec;
@@ -146,15 +149,6 @@ fn build_plain_vault(dir: &Path) -> PathBuf {
     vault
 }
 
-fn count<P: Fn(&EventPayload) -> bool>(vault: &Path, pred: P) -> usize {
-    let s = Session::open(vault, &pp()).unwrap();
-    load_all(s.conn())
-        .unwrap()
-        .iter()
-        .filter(|e| pred(&e.payload))
-        .count()
-}
-
 // ════════════════════════════════════════════════════════════════════════════════════════════════
 // § 1 — CLI stderr (never stdout), real binary — eprintln! cannot be intercepted in-process
 // (mirrors declare_tranche_cli.rs's `run_declare` / promote_cli.rs's `run_promote` convention).
@@ -244,6 +238,52 @@ fn declare_tranche_notice_is_silent_on_a_refused_declare() {
     assert!(
         !stderr.contains(NOTICE_MARK),
         "a refused declare must never emit the notice: {stderr:?}"
+    );
+}
+
+/// A tranche VOIDED before export (and never promoted) leaves Approach-B unused — no stderr notice on
+/// `export-irs-pdf`. The load-bearing "don't show it to a filer who voided everything" case, at the CLI
+/// layer.
+#[test]
+fn voided_only_tranche_never_triggers_the_notice_on_export_irs_pdf() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    let tranche_id = {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        let id = append_decision(
+            s.conn(),
+            EventPayload::DeclareTranche(DeclareTranche {
+                sat: 10_000_000,
+                wallet: wallet(),
+                window_start: date!(2020 - 01 - 01),
+                window_end: date!(2020 - 12 - 31),
+            }),
+            now(),
+            UtcOffset::UTC,
+            None,
+        )
+        .unwrap();
+        s.save().unwrap();
+        id
+    };
+    cmd::reconcile::void(&vault, &pp(), &tranche_id.canonical(), now()).unwrap();
+
+    let out = dir.path().join("out");
+    let (code, _stdout, stderr) = run_btctax(
+        &vault,
+        &[
+            "export-irs-pdf",
+            "--out",
+            out.to_str().unwrap(),
+            "--tax-year",
+            "2024",
+        ],
+    );
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert!(
+        !stderr.contains(NOTICE_MARK),
+        "a voided-only tranche must not trigger the notice: {stderr:?}"
     );
 }
 
@@ -356,106 +396,14 @@ fn export_irs_pdf_notice_reaches_stderr_not_stdout_and_is_absent_without_approac
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════
-// § 2 — EXPERIMENTAL.txt: a sibling file in the export directory, self-gated the same way as the
-// mandatory `basis_methodology.txt` / `form_8275.txt` disclosures. In-process (library calls) — no
-// subprocess needed to observe a written file.
-// ════════════════════════════════════════════════════════════════════════════════════════════════
-
-/// `export-irs-pdf` writes `EXPERIMENTAL.txt` alongside the packet when Approach-B is in use, and its
-/// content carries the notice; a plain vault gets no such file.
-#[test]
-fn export_irs_pdf_writes_experimental_txt_iff_approach_b_is_in_use() {
-    let dir = tempfile::tempdir().unwrap();
-    let vault = build_promoted_vault(dir.path());
-    let out = dir.path().join("out");
-    cmd::admin::export_irs_pdf(&vault, &pp(), &out, 2024, &[], None).unwrap();
-
-    let path = out.join("EXPERIMENTAL.txt");
-    assert!(path.exists(), "EXPERIMENTAL.txt must be written: {out:?}");
-    let text = std::fs::read_to_string(&path).unwrap();
-    assert!(text.contains(NOTICE_MARK), "{text}");
-    assert!(text.contains(NOTICE_FACT), "{text}");
-
-    let dir2 = tempfile::tempdir().unwrap();
-    let vault2 = build_plain_vault(dir2.path());
-    let out2 = dir2.path().join("out");
-    cmd::admin::export_irs_pdf(&vault2, &pp(), &out2, 2025, &[], None).unwrap();
-    assert!(
-        !out2.join("EXPERIMENTAL.txt").exists(),
-        "a non-Approach-B export must NOT write EXPERIMENTAL.txt"
-    );
-}
-
-/// `export-snapshot` (the CSV/sqlite dump) also carries the sibling file — every export directory this
-/// crate writes gets it, matching `basis_methodology.txt`/`form_8275.txt`'s own call-site coverage.
-#[test]
-fn export_snapshot_writes_experimental_txt_iff_approach_b_is_in_use() {
-    let dir = tempfile::tempdir().unwrap();
-    let vault = build_promoted_vault(dir.path());
-    let out = dir.path().join("out");
-    cmd::admin::export_snapshot(&vault, &pp(), &out, Some(2024), None).unwrap();
-    assert!(
-        out.join("EXPERIMENTAL.txt").exists(),
-        "export-snapshot must also write EXPERIMENTAL.txt for an Approach-B vault: {out:?}"
-    );
-
-    let dir2 = tempfile::tempdir().unwrap();
-    let vault2 = build_plain_vault(dir2.path());
-    let out2 = dir2.path().join("out");
-    cmd::admin::export_snapshot(&vault2, &pp(), &out2, Some(2025), None).unwrap();
-    assert!(!out2.join("EXPERIMENTAL.txt").exists());
-}
-
-/// A tranche VOIDED before export (and never promoted) leaves Approach-B unused — no stderr notice, no
-/// `EXPERIMENTAL.txt`. The load-bearing "don't show it to a filer who voided everything" case, at the
-/// export-directory layer.
-#[test]
-fn voided_only_tranche_never_writes_experimental_txt() {
-    let dir = tempfile::tempdir().unwrap();
-    let vault = dir.path().join("vault.pgp");
-    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
-    let tranche_id = {
-        let mut s = Session::open(&vault, &pp()).unwrap();
-        let id = append_decision(
-            s.conn(),
-            EventPayload::DeclareTranche(DeclareTranche {
-                sat: 10_000_000,
-                wallet: wallet(),
-                window_start: date!(2020 - 01 - 01),
-                window_end: date!(2020 - 12 - 31),
-            }),
-            now(),
-            UtcOffset::UTC,
-            None,
-        )
-        .unwrap();
-        s.save().unwrap();
-        id
-    };
-    cmd::reconcile::void(&vault, &pp(), &tranche_id.canonical(), now()).unwrap();
-    assert_eq!(
-        count(&vault, |p| matches!(p, EventPayload::DeclareTranche(_))),
-        1,
-        "the tranche is still on file, just voided"
-    );
-
-    let out = dir.path().join("out");
-    cmd::admin::export_snapshot(&vault, &pp(), &out, None, None).unwrap();
-    assert!(
-        !out.join("EXPERIMENTAL.txt").exists(),
-        "a voided-only tranche must not trigger the notice: {out:?}"
-    );
-}
-
-// ════════════════════════════════════════════════════════════════════════════════════════════════
-// § 3 — ★ THE GUARD: the notice text reaches NO filed artifact, even on a vault where Approach-B is
-// live AND a promoted disposal leg makes `form_8275.txt` / `basis_methodology.txt` / the 8275 PDF all
-// non-empty at once — the exact co-occurrence the hard constraint exists for.
+// § 2 — ★ THE GUARD: the notice text reaches NOTHING the export directory produces, even on a vault
+// where Approach-B is LOUDLY in use (stderr fires) AND a promoted disposal leg makes
+// `form_8275.txt` / `basis_methodology.txt` / the 8275 PDF all non-empty at once — the exact
+// co-occurrence the interface-only constraint exists for.
 // ════════════════════════════════════════════════════════════════════════════════════════════════
 
 /// The full needle set: the notice's title plus each fact-bearing fragment. If ANY of these strings
-/// appear in a filed artifact, the notice has leaked into the document Reg §1.6662-4(f) exists to
-/// protect.
+/// appear anywhere in the export directory, the notice has leaked into the filing package.
 fn notice_needles() -> Vec<&'static str> {
     vec![
         NOTICE_MARK,
@@ -466,19 +414,46 @@ fn notice_needles() -> Vec<&'static str> {
     ]
 }
 
+/// Walk `dir` (non-recursive — every export this crate writes is a flat directory) and assert that NO
+/// file's raw byte content contains any needle, and that no file is literally named `EXPERIMENTAL.txt`.
+fn assert_directory_carries_no_notice(dir: &Path) {
+    let entries: Vec<_> = std::fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("read_dir {dir:?}: {e}"))
+        .collect();
+    assert!(
+        !entries.is_empty(),
+        "precondition: the export actually wrote files into {dir:?}"
+    );
+    for entry in entries {
+        let path = entry.unwrap().path();
+        assert_ne!(
+            path.file_name().and_then(|n| n.to_str()),
+            Some("EXPERIMENTAL.txt"),
+            "no EXPERIMENTAL.txt sibling file — the notice is interface-only, never exported"
+        );
+        let bytes = std::fs::read(&path).unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        for needle in notice_needles() {
+            assert!(
+                !text.contains(needle),
+                "{path:?} must never carry the experimental notice ({needle:?})"
+            );
+        }
+    }
+}
+
 #[test]
-fn notice_text_is_absent_from_every_filed_artifact() {
+fn notice_text_is_absent_from_every_file_in_the_export_directory() {
     let dir = tempfile::tempdir().unwrap();
     let vault = build_promoted_vault(dir.path());
     let out = dir.path().join("out");
-    cmd::admin::export_irs_pdf(&vault, &pp(), &out, 2024, &[], None).unwrap();
-
-    // Precondition: this export DOES carry Approach-B (EXPERIMENTAL.txt exists) AND a promoted leg (all
-    // three filed artifacts are non-empty) — otherwise this test would pass VACUOUSLY.
+    let report = cmd::admin::export_irs_pdf(&vault, &pp(), &out, 2024, &[], None).unwrap();
     assert!(
-        out.join("EXPERIMENTAL.txt").exists(),
-        "precondition: Approach-B is in use"
+        report.experimental_notice,
+        "precondition: this vault IS Approach-B (a live promoted tranche) — CLI stderr fires"
     );
+
+    // Preconditions: the co-occurrence this guard exists for — all three filed artifacts non-empty.
     let form_8275_txt = std::fs::read_to_string(out.join("form_8275.txt"))
         .expect("a promoted disposal leg files a non-empty form_8275.txt");
     assert!(
@@ -494,20 +469,12 @@ fn notice_text_is_absent_from_every_filed_artifact() {
     let f8275_pdf_bytes =
         std::fs::read(out.join("form_8275.pdf")).expect("the 8275 PDF is written");
 
-    for needle in notice_needles() {
-        assert!(
-            !form_8275_txt.contains(needle),
-            "form_8275.txt must never carry the experimental notice ({needle:?}):\n{form_8275_txt}"
-        );
-        assert!(
-            !basis_methodology_txt.contains(needle),
-            "basis_methodology.txt must never carry the experimental notice ({needle:?}):\n{basis_methodology_txt}"
-        );
-    }
+    // The blanket walk: every file in the export directory, raw bytes.
+    assert_directory_carries_no_notice(&out);
 
-    // The PDF's own AcroForm FIELD VALUES — not just a raw-byte scan (a PDF's byte stream can contain
-    // font/structure noise that a naive `contains` on raw bytes could false-positive OR false-negative
-    // through compression; field values are what a preparer/adjuster actually reads).
+    // The PDF's own AcroForm FIELD VALUES too — not just a raw-byte scan (a PDF's byte stream can
+    // encode text as UTF-16BE, so a naive `contains` on raw bytes could miss an encoded leak; field
+    // values are what a preparer/adjuster actually reads).
     let doc = btctax_forms::testonly::load(&f8275_pdf_bytes).expect("the 8275 PDF parses");
     let fields =
         btctax_forms::testonly::collect_fields(&doc).expect("the 8275 PDF has an AcroForm");
@@ -525,8 +492,8 @@ fn notice_text_is_absent_from_every_filed_artifact() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════
-// § 4 — the FULL-RETURN export dispatch (`export_full_return`, a SEPARATE function from the
-// crypto-slice path above): same stderr/EXPERIMENTAL.txt/guard coverage, driven through the SAME
+// § 3 — the FULL-RETURN export dispatch (`export_full_return`, a SEPARATE function from the
+// crypto-slice path above): same stderr + directory-wide guard coverage, driven through the SAME
 // public `export-irs-pdf` entry point once `return_inputs` exist for the year (the dispatch in
 // `export_irs_pdf_from_session`).
 // ════════════════════════════════════════════════════════════════════════════════════════════════
@@ -556,10 +523,9 @@ fn give_full_return_inputs(vault: &Path, year: i32) {
     s.save().unwrap();
 }
 
-/// The full-return dispatch emits the notice on stderr, never stdout, and writes `EXPERIMENTAL.txt`
-/// alongside the sequence-prefixed packet.
+/// The full-return dispatch emits the notice on stderr, never stdout.
 #[test]
-fn full_return_export_notice_reaches_stderr_not_stdout_and_writes_experimental_txt() {
+fn full_return_export_notice_reaches_stderr_not_stdout() {
     let dir = tempfile::tempdir().unwrap();
     let vault = build_promoted_vault(dir.path());
     give_full_return_inputs(&vault, 2024);
@@ -588,17 +554,14 @@ fn full_return_export_notice_reaches_stderr_not_stdout_and_writes_experimental_t
         !stdout.contains(NOTICE_MARK),
         "the notice must never reach stdout: {stdout:?}"
     );
-    assert!(
-        out.join("EXPERIMENTAL.txt").exists(),
-        "EXPERIMENTAL.txt must ride the full-return packet too: {out:?}"
-    );
 }
 
-/// The guard, restated for the full-return dispatch: the notice appears in no member of
-/// `full_return_paths` (byte scan — the full-return 8275's exact sequence prefix is a map/year detail
-/// this test does not need to know), nor in `form_8275.txt` / `basis_methodology.txt`.
+/// The guard, restated for the full-return dispatch: the notice appears in NOTHING the export
+/// directory produces — every `full_return_paths` PDF (byte scan; the exact sequence prefix is a
+/// map/year detail this test does not need to know), the manifest, `form_8275.txt`, and
+/// `basis_methodology.txt` — via the same whole-directory walk.
 #[test]
-fn full_return_export_notice_absent_from_every_filed_artifact() {
+fn full_return_export_notice_absent_from_every_file_in_the_export_directory() {
     let dir = tempfile::tempdir().unwrap();
     let vault = build_promoted_vault(dir.path());
     give_full_return_inputs(&vault, 2024);
@@ -610,27 +573,17 @@ fn full_return_export_notice_absent_from_every_filed_artifact() {
         "precondition: this is the full-return dispatch"
     );
     assert!(
-        out.join("EXPERIMENTAL.txt").exists(),
-        "precondition: Approach-B is in use"
+        rep.experimental_notice,
+        "precondition: this vault IS Approach-B (a live promoted tranche) — CLI stderr fires"
     );
 
-    let form_8275_txt = std::fs::read_to_string(out.join("form_8275.txt")).unwrap();
-    let basis_methodology_txt = std::fs::read_to_string(out.join("basis_methodology.txt")).unwrap();
-    for needle in notice_needles() {
-        assert!(
-            !form_8275_txt.contains(needle),
-            "{needle:?} leaked into form_8275.txt"
-        );
-        assert!(
-            !basis_methodology_txt.contains(needle),
-            "{needle:?} leaked into basis_methodology.txt"
-        );
-    }
+    assert_directory_carries_no_notice(&out);
+
+    // The AcroForm field-value check too, for every PDF in the packet.
     for path in &rep.full_return_paths {
         let bytes = std::fs::read(path).unwrap();
-        let doc = match btctax_forms::testonly::load(&bytes) {
-            Ok(d) => d,
-            Err(_) => continue, // the manifest isn't a member of full_return_paths, but be defensive
+        let Ok(doc) = btctax_forms::testonly::load(&bytes) else {
+            continue;
         };
         let Ok(fields) = btctax_forms::testonly::collect_fields(&doc) else {
             continue;

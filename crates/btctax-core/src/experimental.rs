@@ -3,13 +3,16 @@
 //! part of btctax is newer and less proven than the rest of the tool, was developed with heavy AI
 //! assistance, and has already shipped two defects that affected FILED output (both since fixed).
 //!
-//! ★ THE HARD CONSTRAINT: this notice is an INTERFACE-surface disclosure. It must **never** reach a
-//! filed artifact — not a Form 8275 field, not the Part II narrative, not `form_8275.txt`, not
-//! `basis_methodology.txt`, not any PDF. Printing "experimental, AI-developed" onto the document whose
-//! entire purpose is to make the filer's position defensible under §6662 would undermine the disclosure
-//! it rides on. It appears on: CLI stderr (never stdout — stdout is parsed/piped), TUI banner rows, and
-//! a SEPARATE `EXPERIMENTAL.txt` sibling file in the export directory — never inside a form. Nothing in
-//! `crates/btctax-forms/` (`Printed8275`/`Disclosure8275`) may ever reference this module.
+//! ★ THE HARD CONSTRAINT: this notice is an INTERFACE-ONLY disclosure. It must **never** reach anything
+//! the export machinery produces — not a Form 8275 field, not the Part II narrative, not
+//! `form_8275.txt`, not `basis_methodology.txt`, not any PDF, not even as a separate sibling file in an
+//! export directory. The export directory is what a filer mails or hands to a preparer; a file in it
+//! saying the feature is AI-developed and has shipped defects is the SAME hazard as printing it on the
+//! 8275 itself — it would undermine the very disclosure the packet exists to make credible. It appears
+//! on exactly three surfaces: CLI stderr (never stdout — stdout is parsed/piped), the TUI banner rows
+//! (`btctax-tui`, `btctax-tui-edit`), and the repo-root `NOTICE` (a project document, not a filed one).
+//! Nothing in `crates/btctax-forms/` (`Printed8275`/`Disclosure8275`) and no export/write path anywhere
+//! may ever reference this module's text.
 //!
 //! [`ExperimentalNotice`] is presentation-neutral and structured (title/summary/defects/action) so a
 //! future web front-end can render it in its own idiom without string-munging; [`ExperimentalNotice::plain_text`]
@@ -82,8 +85,7 @@ impl ExperimentalNotice {
 }
 
 /// True iff a live (non-voided) `DeclareTranche` or `PromoteTranche` decision exists in `events` — the
-/// gate every Approach-B experimental-notice surface (CLI stderr, TUI banner, `EXPERIMENTAL.txt`)
-/// consults.
+/// gate every Approach-B experimental-notice surface (CLI stderr, the TUI banner rows) consults.
 ///
 /// "Live" = the event's OWN id is not targeted by any `VoidDecisionEvent` — the same record-time scan
 /// `tranche_guard::pre2025_tranche_exists`/`in_force_allocation_exists` already use (deliberately NOT the

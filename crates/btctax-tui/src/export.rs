@@ -9,11 +9,15 @@
 //! `btctax_cli::render::write_form_csvs`) — the four named form CSVs plus, when a
 //! conservative-filing tranche is in the filed set, the mandatory `basis_methodology.txt`
 //! disclosure (P7 / D-4), plus — when a PROMOTED-basis disposal leg files in the year — the
-//! mandatory `form_8275.txt` disclosure (BG-D8 / Reg §1.6662-4(f)), plus — when a live
-//! DeclareTranche/PromoteTranche is on file — the Approach-B `EXPERIMENTAL.txt` sibling notice
-//! (`design/approach-b-experimental-notice`; NEVER inside a form).  No other write-class I/O
+//! mandatory `form_8275.txt` disclosure (BG-D8 / Reg §1.6662-4(f)).  No other write-class I/O
 //! occurs anywhere in `btctax-tui` source — the mechanized gate (KAT-E10) enforces this on every
 //! `cargo test`.
+//!
+//! ★ The Approach-B experimental notice (`design/approach-b-experimental-notice`,
+//! `btctax_core::experimental`) is deliberately NEVER written here: the export directory is what a
+//! filer mails or hands to a preparer, and a file in it saying the feature is AI-developed and has
+//! shipped defects is the same hazard as printing it on a filed form. The notice surfaces only on
+//! interface surfaces — the `draw_viewer` banner row (`draw.rs`) and, on the CLI, stderr.
 //!
 //! # BG-D8 completeness gate (Approach-B Task 17)
 //! Before any bytes are written, `do_export` calls `btctax_cli::promote_export_gate` (the SAME
@@ -206,11 +210,6 @@ pub fn do_export(
     // iff a promoted disposal leg files in `year`, nothing otherwise. The gate at the top of this fn
     // already guaranteed any promoted leg reaching here carries a complete Part II.
     btctax_cli::render::write_form_8275_txt(&state.out_dir, &snap.state, &snap.events, year)?;
-
-    // Approach-B experimental disclosure (`design/approach-b-experimental-notice`): a SEPARATE sibling
-    // file, alongside the packet — self-gates on `uses_approach_b`, writes nothing for a ledger with no
-    // live tranche/promote.
-    btctax_cli::render::write_experimental_notice_txt(&state.out_dir, &snap.events)?;
 
     Ok(state.out_dir.clone())
 }
@@ -958,17 +957,24 @@ mod tests {
         );
     }
 
-    /// Approach-B experimental disclosure (`design/approach-b-experimental-notice`): the TUI's own CSV
-    /// export ALSO writes `EXPERIMENTAL.txt` alongside the packet — self-gated on `uses_approach_b`, so
-    /// a promoted-tranche snapshot (Approach-B in use) gets it; a plain snapshot does not.
+    /// ★ THE GUARD (`design/approach-b-experimental-notice`): the Approach-B experimental notice is an
+    /// INTERFACE-only disclosure — a promoted-tranche TUI export (Approach-B loudly in use, per the
+    /// Browse banner) must write NO file, anywhere in `out_dir`, that carries the notice's distinctive
+    /// text. The export directory is what a filer mails or hands to a preparer; this guard is the one
+    /// that matters most — the failure mode is not a missing banner, it is the banner leaking into a
+    /// filing package.
     #[test]
-    fn experimental_notice_txt_rides_the_tui_csv_export_iff_approach_b_is_in_use() {
+    fn experimental_notice_never_appears_anywhere_in_the_tui_export_directory() {
         let dir = tempfile::tempdir().unwrap();
         let vault = dir.path().join("vault.pgp");
         let export_now = datetime!(2026-07-01 11:00:00 UTC);
         let out_dir = export_dir_for(&vault, export_now);
 
         let snap = promoted_snapshot("cash P2P purchase, no records; window bounded on-chain");
+        assert!(
+            btctax_core::experimental::uses_approach_b(&snap.events),
+            "precondition: this snapshot IS Approach-B (a live promoted tranche)"
+        );
         let modal = ExportConfirmState {
             year: 2026,
             out_dir: out_dir.clone(),
@@ -977,29 +983,33 @@ mod tests {
             attest: None,
         };
         do_export(&snap, &modal).expect("a clean promoted export must succeed");
-        assert!(
-            out_dir.join("EXPERIMENTAL.txt").exists(),
-            "EXPERIMENTAL.txt must ride the TUI's own export for an Approach-B snapshot"
-        );
-        let text = std::fs::read_to_string(out_dir.join("EXPERIMENTAL.txt")).unwrap();
-        assert!(text.contains("EXPERIMENTAL — DEFENSIVE FILING"));
 
-        // A plain (no tranche/promote) snapshot never gets the file.
-        let plain_snap = make_snapshot(LedgerState::default(), BTreeMap::new());
-        let export_now2 = datetime!(2026-07-01 12:00:00 UTC);
-        let out_dir2 = export_dir_for(&vault, export_now2);
-        let modal2 = ExportConfirmState {
-            year: 2026,
-            out_dir: out_dir2.clone(),
-            files: compute_files(&plain_snap, 2026),
-            export_now: export_now2,
-            attest: None,
-        };
-        do_export(&plain_snap, &modal2).expect("an unpromoted, no-tranche export must succeed");
+        let entries: Vec<_> = std::fs::read_dir(&out_dir).unwrap().collect();
         assert!(
-            !out_dir2.join("EXPERIMENTAL.txt").exists(),
-            "a non-Approach-B snapshot must not get EXPERIMENTAL.txt"
+            !entries.is_empty(),
+            "precondition: the export actually wrote files: {out_dir:?}"
         );
+        for entry in entries {
+            let path = entry.unwrap().path();
+            let bytes = std::fs::read(&path).unwrap();
+            let text = String::from_utf8_lossy(&bytes);
+            for needle in [
+                "EXPERIMENTAL — DEFENSIVE FILING",
+                "heavy AI assistance",
+                "137 characters",
+                "no in-editor action will save until you quit",
+            ] {
+                assert!(
+                    !text.contains(needle),
+                    "{path:?} must never carry the experimental notice ({needle:?})"
+                );
+            }
+            assert_ne!(
+                path.file_name().and_then(|n| n.to_str()),
+                Some("EXPERIMENTAL.txt"),
+                "no EXPERIMENTAL.txt sibling file — the notice is interface-only, never exported"
+            );
+        }
     }
 
     // ── KAT-E10 — Mechanized source gate ─────────────────────────────────────
