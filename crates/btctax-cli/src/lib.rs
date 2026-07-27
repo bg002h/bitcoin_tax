@@ -72,18 +72,13 @@ pub use chokepoint::{apply_declare, plan_declare, DeclarePlan, Refusal};
 // lists). Any FUTURE addition here must be equally justified (do NOT re-export a second session-opening
 // or unconfined-write fn).
 pub use chokepoint::{apply_promote, plan_promote, render_consent, PromotePlan};
-// Re-exported at the crate root (Defensive Filing Wizard Task 10, ★ C-3) so the TUI's export step
-// (`btctax-tui-edit`'s `edit/persist.rs`, the ONLY module permitted to name `apply_export(` — its own
-// KAT-G1 mechanized gate confines the LITERAL call token there) can drive the EXPORT chokepoint WITHOUT
-// the `cmd::` token its source gate forbids in non-test code — mirrors the `plan_declare`/`apply_declare`
-// and `plan_promote`/`apply_promote` re-exports above. `plan_export` is a pure `(events, state, ...) ->
-// Result` planner (no `Session`, no lock, no I/O); `ExportPlan` is a plain data type. `apply_export` DOES
-// touch the export write surface (file writes via `export_irs_pdf_from_session`) — it is re-exported here
-// ONLY so `edit/persist.rs`'s `persist_defensive_export` wrapper can reach it; re-exporting the name
-// itself does not weaken KAT-G1's confinement (the gate scans call sites, not import lists). Any FUTURE
-// addition here must be equally justified (do NOT re-export a second session-opening or unconfined-write
-// fn).
-pub use chokepoint::{apply_export, plan_export, ExportOutcome, ExportOutcomes, ExportPlan};
+// (The composed multi-year EXPORT chokepoint — `plan_export`/`apply_export`/`ExportPlan`/`ExportOutcome`
+// /`ExportOutcomes` — was re-exported here for the TUI wizard's export step. Both the wizard and the trio
+// were removed in 0.13.0: the owner ruled that amending several prior years at once is not a real
+// workflow, and after the wizard's deletion the trio had zero callers from any shipped surface. Single-year
+// export is unchanged and lives where it always did, in `cmd::admin`'s `export_irs_pdf`. Note that
+// `btctax_core::conservative::flagged_years` — which the trio composed over — is a SEPARATE, still-live
+// symbol: `btctax defensive status` reports its year set so a filer knows which years to re-export by hand.)
 pub use config::CliConfig;
 pub use session::{
     BulkFilter, BulkIncomeFilter, BulkIncomePlan, BulkIncomeRow, BulkLinkPlan, BulkLinkRow,

@@ -260,30 +260,32 @@ numbers in doc comments.** The drift entries above are the third recurrence; nam
 function/const instead where the citation is not load-bearing, or add a merge-time doc-lint that
 flags stale `` `:\d+` `` citations.
 
-### G-3 — OPEN, created by the merge: `main` diverges from the published 0.12.0 crates
+### G-3 — CLOSED at the 0.13.0 release (2026-07-27)
 
-The wizard cut landed on `main` with **no version bump, no tag, and no crates.io publish**. So:
+Filed when the wizard cut landed on `main` with no version bump, leaving `main` divergent from the
+published 0.12.0 crates. All three items discharged in the 0.13.0 release:
 
-- every manifest on `main` reads `0.12.0`, but the **published** 0.12.0 crates contain the TUI
-  wizard that `main` no longer has. Anyone installing `btctax` from crates.io today gets the wizard;
-  anyone building `main` does not. `btctax` has never had a user (`no-users-yet`), so the exposure is
-  nil — but the two must not stay divergent silently.
-- **the next release must bump before it publishes.** The cut removes a shipped interactive surface
-  and leaves `plan_export`/`apply_export` public-but-dead, so it is not a patch. Pre-1.0 cargo SemVer
-  makes a breaking change a **MINOR** bump: **0.13.0**.
-- **`NOTICE`'s "EXPERIMENTAL — DEFENSIVE FILING" section needs re-reading against the cut tree before
-  that release.** It tells filers to check things on screens that no longer exist, and its
-  "surfaces this notice at the point of use — on the command line (stderr) and in the interactive
-  terminal views" claim is now only half true. The disclosure itself stays; the performable-checks
-  list and the surface claim need to match what shipped.
-- **`plan_export`/`apply_export` should be deleted in that same release** per the owner ruling in
-  G-0 — zero callers from any shipped surface, and multi-year amendment is not a real workflow.
-  `conservative::flagged_years` is a *separate* symbol and must stay: `defensive status` consumes it
-  (`btctax-core/src/defensive/mod.rs:681`).
-
-Owning phase: **the next release cycle**, whenever one is opened. Not urgent — nothing is broken for
-anyone — but it is the one item the merge itself created, so it must not fall into the ownerless
-residue.
+- **[done] Version bump.** All 12 crates 0.12.0 → 0.13.0. Breaking (a shipped interactive surface
+  removed), and pre-1.0 cargo SemVer makes a breaking change MINOR.
+- **[done] `plan_export`/`apply_export` deleted** per the G-0 owner ruling — the composed multi-year
+  export trio (`ExportPlan`, `ExportOutcome`, `ExportOutcomes` and both fns), its crate-root
+  re-export, and its 5 dedicated tests. Two `flagged_years` tests that *also* asserted the composed
+  plan were trimmed rather than deleted, keeping their live half.
+  **Two things that deliberately survived the cut, both verified:** `conservative::flagged_years`
+  (a separate symbol — `btctax defensive status` reports its year set,
+  `btctax-core/src/defensive/mod.rs:681`), and `chokepoint::promoted_filing_years`, a live
+  `pub(crate)` helper for `cmd/admin.rs`'s `promote_export_gate` that merely *sat inside* the Task-3
+  region. The first cut removed it; its own surviving unit test caught that immediately.
+- **[no change needed — the filed claim was WRONG] `NOTICE`'s experimental section.** This item
+  asserted the section "tells filers to check things on screens that no longer exist" and that its
+  point-of-use claim was "now only half true". **Both were false, verified against the cut tree:**
+  all three of its performable checks are PDF/figure checks (Part II renders in full; Form 8949
+  column (e) equals the consented floor; tranche quantity and window match the 8275) — none names a
+  screen. And the notice is still surfaced in *both* places it claims: the TUI
+  (`btctax-tui/src/draw.rs:117,167`, `btctax-tui-edit/src/draw_edit.rs:93` — `uses_approach_b` stays
+  wired into Browse's banner) and the CLI's stderr (`cmd/defensive.rs`, `cmd/admin.rs:242`).
+  `NOTICE` was left untouched. Recorded because acting on the claim would have edited a filer-facing
+  disclosure to fix a defect it did not have.
 
 ---
 

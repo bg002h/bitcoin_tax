@@ -1064,8 +1064,8 @@ fn journey_view_flagged_years_matches_the_export_computation() {
         let export_set = flagged_years(&events, &state, &prices(), &tables, &cfg(), current);
         assert_eq!(
             view.flagged_years, export_set,
-            "journey_view.flagged_years must equal the SAME flagged_years(..., current) plan_export \
-             computes (current={current}) — no display-vs-export drift"
+            "journey_view.flagged_years must equal the SAME flagged_years(..., current) an export \
+             caller computes (current={current}) — no display-vs-export drift"
         );
     }
 
