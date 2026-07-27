@@ -14715,6 +14715,17 @@ mod tests {
             "★ KAT (c): the 2025 packet (the promoted DISPOSAL leg's own year) must include \
              form_8275.pdf: {out_dir:?}"
         );
+        // Approach-B experimental disclosure (`design/approach-b-experimental-notice`): the defensive
+        // dashboard's own export reuses `export_irs_pdf_from_session` per year (via `apply_export`), so
+        // it gets `EXPERIMENTAL.txt` "for free" — both years carry it, this vault has a live promote.
+        assert!(
+            out_dir.join("2024").join("EXPERIMENTAL.txt").exists(),
+            "the 2024 packet must also carry the Approach-B experimental notice: {out_dir:?}"
+        );
+        assert!(
+            out_dir.join("2025").join("EXPERIMENTAL.txt").exists(),
+            "the 2025 packet must also carry the Approach-B experimental notice: {out_dir:?}"
+        );
     }
 
     /// ★ whole-branch arch M-1: `x` NEVER silently does nothing. The DefensiveFiling key handler runs
