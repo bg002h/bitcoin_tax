@@ -1,7 +1,15 @@
 //! The Approach-B ("Defensive Filing" — declare/promote tranche, Form 8275, estimated basis)
 //! experimental notice: a single, presentation-neutral source of truth for telling a filer that this
 //! part of btctax is newer and less proven than the rest of the tool, was developed with heavy AI
-//! assistance, and has already shipped two defects that affected FILED output (both since fixed).
+//! assistance, and has shipped filing-affecting defects found only by later review (all known ones
+//! fixed).
+//!
+//! ★ `defects` is EXEMPLARY, not exhaustive — do not phrase `summary`/callers around a specific count.
+//! Three are listed at the time of writing (the Form 8275 truncation; the editor residue-latch bypass;
+//! a filed basis derivable from a stale in-editor snapshot, `design/stale-snapshot-latch/DESIGN.md`
+//! §0.1 — that one shipped in v0.10.0 too, and its own design doc records that the "both confirm tails
+//! re-run a fresh plan" justification for NOT treating it as filing-affecting was "**False**" — the
+//! exact predicate this notice exists to state as a standing fact, not a closed history).
 //!
 //! ★ THE HARD CONSTRAINT: this notice is an INTERFACE-ONLY disclosure. It must **never** reach anything
 //! the export machinery produces — not a Form 8275 field, not the Part II narrative, not
@@ -15,9 +23,14 @@
 //! may ever reference this module's text.
 //!
 //! [`ExperimentalNotice`] is presentation-neutral and structured (title/summary/defects/action) so a
-//! future web front-end can render it in its own idiom without string-munging; [`ExperimentalNotice::plain_text`]
-//! is the terminal rendering the CLI and TUI front-ends share. No ANSI escapes, no assumed line width,
-//! no terminal-specific formatting live in the data — only in each front-end's OWN rendering.
+//! future web front-end can render it in its own idiom without string-munging — no ANSI escapes, no
+//! assumed line width, no terminal-specific formatting live in the data, only in each front-end's OWN
+//! rendering (mechanically pinned by the `notice_fields_are_presentation_neutral` test below). Two
+//! renderings are shared so no front-end hand-copies/paraphrases the facts (the exact defect class the
+//! shipped `STALE_FACT_1`/`fact2_loss_sentence` precedent at `btctax-tui-edit/src/draw_edit.rs:7673`
+//! already fixed once, for a different independently-drifting pair of copies):
+//! [`ExperimentalNotice::plain_text`] (CLI stderr, multi-line) and [`ExperimentalNotice::one_line`] (a
+//! TUI `Constraint::Length(1)` banner row, single-line).
 //!
 //! [`uses_approach_b`] is the single gate every surface consults: true iff a live (non-voided)
 //! `DeclareTranche` or `PromoteTranche` decision is on file. It reuses [`crate::tranche_guard::void_targets`]
@@ -31,41 +44,58 @@ use crate::LedgerEvent;
 
 /// A presentation-neutral, structured disclosure. No ANSI escapes, no assumed line width, no
 /// terminal-specific formatting — CLI, TUI, and a future web UI all render this in their own idiom.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// `#[non_exhaustive]`: every field is `pub`, so adding one later (a link, a severity, a schema
+/// version — the stated consumer is a future web UI) would otherwise be a breaking change for any
+/// downstream crate that constructs or exhaustively destructures this type. `btctax-core` publishes to
+/// crates.io; this costs nothing today and avoids a forced major bump later. `Serialize` for the same
+/// reason: a web UI is the stated consumer, and it will want this as JSON, not re-parsed plain text.
+/// `Deserialize` is deliberately NOT derived — `&'static str` cannot be deserialized into without an
+/// arena, and there is exactly one instance of this type (`NOTICE`); nothing needs to build one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[non_exhaustive]
 pub struct ExperimentalNotice {
     /// One-line identification of the feature this notice is about.
     pub title: &'static str,
-    /// The maturity + provenance disclosure: newer/less-proven, heavy AI assistance, both shipped
-    /// defects fixed.
+    /// The maturity + provenance disclosure: newer/less-proven, heavy AI assistance, and that
+    /// filing-affecting defects have shipped and were found only by later review (all known ones fixed).
     pub summary: &'static str,
-    /// The two shipped defects that affected FILED output, each a standalone sentence fragment.
+    /// EXEMPLARY, not exhaustive (see module docs) — known defects that affected FILED output, each a
+    /// standalone sentence fragment. Do not treat this list's length as a count to cite elsewhere.
     pub defects: &'static [&'static str],
-    /// The filer-facing call to action.
+    /// The filer-facing call to action — concrete, PERFORMABLE checks against what this feature
+    /// actually produces (never "against your own records": the feature's whole premise is
+    /// undocumented BTC, so there are no records to check against).
     pub action: &'static str,
 }
 
 /// The single source of truth for the Approach-B experimental notice. Every fact in the design text is
-/// preserved: newer/less-proven, heavy AI assistance, the two shipped defects (the Form 8275 Part II
-/// narrative silently truncated to ~137 characters; the editor's residue-latch guarantee bypassable),
-/// both now fixed, and the "check every figure" action.
+/// preserved: newer/less-proven, heavy AI assistance, that filing-affecting defects have shipped and
+/// were found only by later review (all known ones fixed), three exemplary defects, and a performable
+/// action tied to what this feature actually produces.
 pub const NOTICE: ExperimentalNotice = ExperimentalNotice {
     title: "EXPERIMENTAL — DEFENSIVE FILING (declare/promote tranche, Form 8275, estimated basis)",
     summary: "This feature is newer and less proven than the rest of btctax, and it was developed with \
-        heavy AI assistance. Two defects that affect what gets FILED shipped and were found only by \
-        later review. Both are fixed.",
+        heavy AI assistance. Defects that affect what gets FILED have shipped and were found only by \
+        later review; all known ones are fixed.",
     defects: &[
         "the Form 8275 disclosure was silently truncated to its first ~137 characters",
-        "an editor guarantee (\"no in-editor action will save until you quit\") could be bypassed",
+        "a change the editor said had been rolled back could still be written to your vault, silently \
+            changing the figures on your forms",
+        "a filed basis figure could be derived from a stale in-editor ledger image after a failed \
+            re-projection",
     ],
-    action: "Their existence is the point: check every figure and every disclosure this feature \
-        produces against your own records before you file.",
+    action: "Check what this feature actually produced: open the Form 8275 PDF and confirm the Part II \
+        narrative renders whole, continuing onto Part IV on page 2, rather than stopping mid-sentence \
+        after about one line; confirm the basis in Form 8949 column (e) for each promoted lot equals \
+        the floor you consented to at promote time; and confirm the tranche quantity and acquisition \
+        window on the 8275 match what you declared.",
 };
 
 impl ExperimentalNotice {
-    /// Render as plain text for a terminal front-end (CLI stderr, the TUI export-directory file). No
-    /// ANSI, no line wrapping — callers wrap/style in their own idiom. Ends with a single trailing
-    /// newline (matches the shipped `Disclosure8275::render()` / `basis_methodology` convention of a
-    /// write-don't-writeln body).
+    /// Render as plain text for a terminal front-end (CLI stderr). No ANSI, no line wrapping — callers
+    /// wrap/style in their own idiom. Ends with a single trailing newline (matches the shipped
+    /// `Disclosure8275::render()` / `basis_methodology` convention of a write-don't-writeln body).
     pub fn plain_text(&self) -> String {
         let mut s = String::new();
         s.push_str(self.title);
@@ -81,6 +111,39 @@ impl ExperimentalNotice {
         s.push_str(self.action);
         s.push('\n');
         s
+    }
+
+    /// A single-line rendering — `title`, `summary`, and `action` concatenated, in that order — for a
+    /// fixed-height banner row (a TUI `Constraint::Length(1)`). Deliberately excludes `defects` (a
+    /// list, not a sentence; `summary` already states that defects have shipped and are fixed).
+    ///
+    /// Every front-end that shows a compact banner MUST call this rather than hand-paraphrasing
+    /// `summary`/`action` — two independent hand-copies of the same facts can be reworded differently
+    /// and then drift silently apart from each other AND from this struct, with nothing red (the exact
+    /// defect class already fixed once at `btctax-tui-edit/src/draw_edit.rs:7673`, for a different pair
+    /// of independently-drifting copies — see that comment). No wrapping is applied here; a narrow
+    /// terminal clips the tail visually, which is a rendering choice for the CALLER, not this fn.
+    pub fn one_line(&self) -> String {
+        format!("{} — {} {}", self.title, self.summary, self.action)
+    }
+}
+
+/// **Test scaffolding**, not `#[cfg(test)]`: the leak-guard tests that assert this notice never reaches
+/// a filed artifact or an export directory live in DOWNSTREAM crates (`btctax-cli`, `btctax-tui`,
+/// `btctax-tui-edit`), whose test binaries cannot see a `#[cfg(test)]` item of a dependency. Mirrors the
+/// established `crate::tax::testonly` / `btctax_forms::testonly` convention.
+#[doc(hidden)]
+pub mod testonly {
+    use super::NOTICE;
+
+    /// The distinctive phrases a leak-guard test scans for. Derived from [`NOTICE`] itself — never
+    /// hand-copied — so it can never drift out of sync with the actual text: three independent
+    /// hand-typed needle lists existed before this helper, and two of them were missing a phrase the
+    /// third had.
+    pub fn leak_guard_needles() -> Vec<&'static str> {
+        let mut v = vec![NOTICE.title, NOTICE.summary, NOTICE.action];
+        v.extend(NOTICE.defects.iter().copied());
+        v
     }
 }
 
@@ -259,27 +322,89 @@ mod tests {
         assert!(!uses_approach_b(&evs));
     }
 
-    /// `plain_text()` preserves every load-bearing fact: newer/less-proven, AI-assisted, BOTH shipped
-    /// defects (the 8275 truncation figure and the editor latch bypass), fixed, and the check-every-
-    /// figure action — and ends with a trailing newline (the `write!`-not-`writeln!` file-writer
-    /// convention).
+    /// `plain_text()` preserves every load-bearing fact: newer/less-proven, AI-assisted, that
+    /// filing-affecting defects have shipped and were found only by later review (all known ones
+    /// fixed), all three exemplary defects (the 8275 truncation, the editor latch bypass, and the
+    /// stale-snapshot basis), and the performable action — and ends with a trailing newline (the
+    /// `write!`-not-`writeln!` file-writer convention).
     #[test]
     fn plain_text_preserves_every_fact() {
         let t = NOTICE.plain_text();
         assert!(t.contains("newer"), "{t}");
         assert!(t.contains("less proven"), "{t}");
         assert!(t.contains("AI assistance"), "{t}");
+        assert!(t.contains("found only by later review"), "{t}");
         assert!(t.contains("137 characters"), "{t}");
         assert!(
-            t.contains("no in-editor action will save until you quit"),
+            t.contains("could still be written to your vault, silently changing the figures"),
             "{t}"
         );
-        assert!(t.contains("fixed"), "{t}");
-        assert!(t.contains("check every figure"), "{t}");
+        assert!(
+            t.contains("a stale in-editor ledger image after a failed re-projection"),
+            "{t}"
+        );
+        assert!(t.contains("all known ones are fixed"), "{t}");
+        assert!(t.contains("Form 8949 column (e)"), "{t}");
+        assert!(t.contains("Part IV on page 2"), "{t}");
         assert!(t.ends_with('\n'), "{t:?}");
         assert!(
             !t.contains('\u{1b}'),
             "plain_text must carry no ANSI escapes: {t:?}"
         );
+    }
+
+    /// `one_line()` is DERIVED — `title`, `summary`, `action`, in that order, joined with " — "/" " —
+    /// not an independent hand-typed sentence. Pins the exact formula so a future edit that hardcodes a
+    /// literal inside `one_line()` itself (rather than reading `self.title`/`self.summary`/`self.action`)
+    /// is caught here, even though this specific test cannot see how the TUI crates call it.
+    #[test]
+    fn one_line_is_derived_from_title_summary_and_action() {
+        assert_eq!(
+            NOTICE.one_line(),
+            format!("{} — {} {}", NOTICE.title, NOTICE.summary, NOTICE.action)
+        );
+        let l = NOTICE.one_line();
+        assert!(l.contains(NOTICE.title), "{l}");
+        assert!(l.contains(NOTICE.summary), "{l}");
+        assert!(l.contains(NOTICE.action), "{l}");
+    }
+
+    /// ★ THE PRESENTATION-NEUTRALITY CONTRACT (module docs): no ANSI, no assumed width, no terminal
+    /// formatting lives in the DATA — and it holds only because every literal uses `\`-continuations
+    /// rather than embedded newlines. Pins that mechanically over `title`, `summary`, `action`, and
+    /// every `defects` element: no `\n`, `\r`, ESC (`\u{1b}`), tab, or a run of two-or-more spaces (a
+    /// tell that someone hard-wrapped/indented the text for a specific terminal width, defeating a
+    /// front-end's own wrapping).
+    ///
+    /// Mutation: change one `\`-continuation in `NOTICE` to an embedded `\n` → this reds (verified,
+    /// reverted via `cp`; see `design/approach-b-experimental-notice/BUILD-REPORT.md`).
+    #[test]
+    fn notice_fields_are_presentation_neutral() {
+        let mut fields: Vec<&str> = vec![NOTICE.title, NOTICE.summary, NOTICE.action];
+        fields.extend(NOTICE.defects.iter().copied());
+        for f in fields {
+            assert!(!f.contains('\n'), "no embedded newline: {f:?}");
+            assert!(!f.contains('\r'), "no embedded CR: {f:?}");
+            assert!(!f.contains('\u{1b}'), "no ANSI escape: {f:?}");
+            assert!(!f.contains('\t'), "no tab: {f:?}");
+            assert!(
+                !f.contains("  "),
+                "no run of 2+ spaces (a hard-wrap/indent tell): {f:?}"
+            );
+        }
+    }
+
+    /// [`testonly::leak_guard_needles`] is genuinely derived — it must contain every field verbatim,
+    /// including every `defects` element, so a leak-guard test built on it can never silently omit a
+    /// phrase the way the three independent hand-typed needle lists it replaces once could.
+    #[test]
+    fn leak_guard_needles_covers_every_field() {
+        let needles = testonly::leak_guard_needles();
+        assert!(needles.contains(&NOTICE.title));
+        assert!(needles.contains(&NOTICE.summary));
+        assert!(needles.contains(&NOTICE.action));
+        for d in NOTICE.defects {
+            assert!(needles.contains(d), "missing defect: {d:?}");
+        }
     }
 }
