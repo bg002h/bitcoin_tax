@@ -131,13 +131,14 @@ pub fn declare_tranche(
     // Approach-B experimental disclosure (`design/approach-b-experimental-notice`): declaring a tranche
     // is exactly "acting on this feature" — warn on stderr (never stdout — stdout is parsed/piped),
     // mirroring the phantom-wallet warning's own shape and its "I/O, not gate logic, stays in the
-    // driver, AFTER the write succeeds" placement. Re-reads the just-written events rather than
-    // reasoning about the plan, so this stays correct even if a future caller composes `declare_tranche`
-    // differently.
-    let events_after = load_all(session.conn())?;
-    if btctax_core::experimental::uses_approach_b(&events_after) {
-        eprintln!("\n⚠ {}", btctax_core::experimental::NOTICE.plain_text());
-    }
+    // driver, AFTER the write succeeds" placement. UNCONDITIONAL, not re-derived from a re-read of the
+    // ledger: `apply_declare` just returned `Ok`, so a live (non-voided) `DeclareTranche` now exists BY
+    // CONSTRUCTION — `uses_approach_b` is trivially true here, nothing in this fn could have voided it.
+    // ★ fix round 1 Important: the original re-read used `load_all(session.conn())?`, so a transient I/O
+    // error on that PURELY DISCLOSURE-driving read turned an ALREADY-SUCCEEDED declare into a non-zero
+    // exit — a filer who sees that naturally re-runs the command, appending a DUPLICATE tranche. Never
+    // re-derive a disclosure from a re-read when the write it depends on already told you the answer.
+    eprint!("\n⚠ {}", btctax_core::experimental::NOTICE.plain_text());
 
     Ok(event_id)
 }

@@ -154,8 +154,10 @@ fn build_plain_vault(dir: &Path) -> PathBuf {
 // (mirrors declare_tranche_cli.rs's `run_declare` / promote_cli.rs's `run_promote` convention).
 // ════════════════════════════════════════════════════════════════════════════════════════════════
 
-const NOTICE_MARK: &str = "EXPERIMENTAL — DEFENSIVE FILING";
-const NOTICE_FACT: &str = "heavy AI assistance";
+// Derived from `NOTICE` itself (a `const` field projection, evaluated at compile time) — never a
+// hand-copied fragment, so these can never drift out of sync with the actual text.
+const NOTICE_MARK: &str = btctax_core::experimental::NOTICE.title;
+const NOTICE_FACT: &str = btctax_core::experimental::NOTICE.summary;
 
 /// Run `btctax --vault <vault> <args...>`; returns (exit, stdout, stderr).
 fn run_btctax(vault: &Path, args: &[&str]) -> (i32, String, String) {
@@ -395,6 +397,56 @@ fn export_irs_pdf_notice_reaches_stderr_not_stdout_and_is_absent_without_approac
     );
 }
 
+/// `export-snapshot` (fix round 1 Important #4) — the CSV/preparer-handoff path. It runs the SAME
+/// `promote_export_gate` and writes the SAME `form_8275.txt`/`basis_methodology.txt` disclosure files
+/// `export-irs-pdf` does, so it must ALSO emit the notice on stderr, never stdout; a plain vault emits
+/// nothing.
+#[test]
+fn export_snapshot_notice_reaches_stderr_not_stdout_and_is_absent_without_approach_b() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = build_promoted_vault(dir.path());
+    let out = dir.path().join("out");
+
+    let (code, stdout, stderr) = run_btctax(
+        &vault,
+        &[
+            "export-snapshot",
+            "--out",
+            out.to_str().unwrap(),
+            "--tax-year",
+            "2024",
+        ],
+    );
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert!(
+        stderr.contains(NOTICE_MARK),
+        "export-snapshot must ALSO emit the notice for an Approach-B vault: {stderr:?}"
+    );
+    assert!(
+        !stdout.contains(NOTICE_MARK),
+        "the notice must never reach stdout: {stdout:?}"
+    );
+
+    let dir2 = tempfile::tempdir().unwrap();
+    let vault2 = build_plain_vault(dir2.path());
+    let out2 = dir2.path().join("out");
+    let (code2, _stdout2, stderr2) = run_btctax(
+        &vault2,
+        &[
+            "export-snapshot",
+            "--out",
+            out2.to_str().unwrap(),
+            "--tax-year",
+            "2025",
+        ],
+    );
+    assert_eq!(code2, 0, "stderr: {stderr2}");
+    assert!(
+        !stderr2.contains(NOTICE_MARK),
+        "a non-Approach-B vault must never emit the notice: {stderr2:?}"
+    );
+}
+
 // ════════════════════════════════════════════════════════════════════════════════════════════════
 // § 2 — ★ THE GUARD: the notice text reaches NOTHING the export directory produces, even on a vault
 // where Approach-B is LOUDLY in use (stderr fires) AND a promoted disposal leg makes
@@ -402,16 +454,13 @@ fn export_irs_pdf_notice_reaches_stderr_not_stdout_and_is_absent_without_approac
 // co-occurrence the interface-only constraint exists for.
 // ════════════════════════════════════════════════════════════════════════════════════════════════
 
-/// The full needle set: the notice's title plus each fact-bearing fragment. If ANY of these strings
-/// appear anywhere in the export directory, the notice has leaked into the filing package.
+/// The full needle set: `title`/`summary`/`action`, plus every `defects` element. Shared with
+/// `btctax-tui`'s and `btctax-tui-edit`'s own leak-guard tests via
+/// `btctax_core::experimental::testonly::leak_guard_needles()` — three independent hand-typed needle
+/// lists existed before that helper, and two of them were missing a phrase the third had. If ANY of
+/// these strings appear anywhere in the export directory, the notice has leaked into the filing package.
 fn notice_needles() -> Vec<&'static str> {
-    vec![
-        NOTICE_MARK,
-        NOTICE_FACT,
-        "137 characters",
-        "no in-editor action will save until you quit",
-        "check every figure",
-    ]
+    btctax_core::experimental::testonly::leak_guard_needles()
 }
 
 /// Walk `dir` (non-recursive — every export this crate writes is a flat directory) and assert that NO
@@ -449,7 +498,7 @@ fn notice_text_is_absent_from_every_file_in_the_export_directory() {
     let out = dir.path().join("out");
     let report = cmd::admin::export_irs_pdf(&vault, &pp(), &out, 2024, &[], None).unwrap();
     assert!(
-        report.experimental_notice,
+        report.experimental_notice_active,
         "precondition: this vault IS Approach-B (a live promoted tranche) — CLI stderr fires"
     );
 
@@ -489,6 +538,36 @@ fn notice_text_is_absent_from_every_file_in_the_export_directory() {
             }
         }
     }
+}
+
+/// The fourth directory-wide guard (fix round 1 Important #4): `export-snapshot`'s own out_dir — the
+/// CSV/preparer-handoff path, no PDF (so no AcroForm check here, unlike the crypto-slice/full-return
+/// guards above), but the SAME `form_8275.txt`/`basis_methodology.txt` co-occurrence risk.
+#[test]
+fn export_snapshot_notice_absent_from_every_file_in_the_export_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = build_promoted_vault(dir.path());
+    let out = dir.path().join("out");
+    let report = cmd::admin::export_snapshot(&vault, &pp(), &out, Some(2024), None).unwrap();
+    assert!(
+        report.experimental_notice_active,
+        "precondition: this vault IS Approach-B (a live promoted tranche) — CLI stderr fires"
+    );
+
+    let form_8275_txt = std::fs::read_to_string(out.join("form_8275.txt"))
+        .expect("a promoted disposal leg files a non-empty form_8275.txt");
+    assert!(
+        !form_8275_txt.trim().is_empty(),
+        "precondition: form_8275.txt is non-empty"
+    );
+    let basis_methodology_txt = std::fs::read_to_string(out.join("basis_methodology.txt"))
+        .expect("a filed tranche writes a non-empty basis_methodology.txt");
+    assert!(
+        !basis_methodology_txt.trim().is_empty(),
+        "precondition: basis_methodology.txt is non-empty"
+    );
+
+    assert_directory_carries_no_notice(&out);
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════
@@ -573,7 +652,7 @@ fn full_return_export_notice_absent_from_every_file_in_the_export_directory() {
         "precondition: this is the full-return dispatch"
     );
     assert!(
-        rep.experimental_notice,
+        rep.experimental_notice_active,
         "precondition: this vault IS Approach-B (a live promoted tranche) — CLI stderr fires"
     );
 

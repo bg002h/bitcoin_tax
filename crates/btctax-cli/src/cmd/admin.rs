@@ -24,6 +24,13 @@ use std::path::{Path, PathBuf};
 pub struct ExportReport {
     pub path: PathBuf,
     pub unresolved_hard: usize,
+    /// Approach-B experimental disclosure (`design/approach-b-experimental-notice`, fix round 1
+    /// Important #4): `btctax_core::experimental::uses_approach_b(events)` on the projected events —
+    /// `true` iff a live (non-voided) DeclareTranche/PromoteTranche is on file. `export-snapshot` writes
+    /// the same `form_8275.txt`/`basis_methodology.txt` disclosure files `export-irs-pdf` does (this is
+    /// the CSV/preparer-handoff path), so it gets the SAME stderr notice (main.rs). Interface-only — the
+    /// notice is never written to `out_dir`.
+    pub experimental_notice_active: bool,
 }
 
 pub fn show_config(vault_path: &Path, pp: &Passphrase) -> Result<CliConfig, CliError> {
@@ -232,6 +239,7 @@ pub fn export_snapshot(
     Ok(ExportReport {
         path: sqlite,
         unresolved_hard,
+        experimental_notice_active: btctax_core::experimental::uses_approach_b(&events),
     })
 }
 
@@ -298,7 +306,7 @@ pub struct IrsPdfReport {
     /// `btctax_core::experimental::uses_approach_b(events)` on the projected events — `true` iff a live
     /// (non-voided) DeclareTranche/PromoteTranche is on file. Drives main.rs's stderr notice ONLY — the
     /// notice is interface-only and is never written to `out_dir`.
-    pub experimental_notice: bool,
+    pub experimental_notice_active: bool,
 }
 
 /// The **[I5]** broker-reporting advisory line, year-aware — or `None` when no disposition may have
@@ -487,7 +495,7 @@ pub(crate) fn export_irs_pdf_from_session(
     // Approach-B experimental disclosure (`design/approach-b-experimental-notice`): an INTERFACE-only
     // signal for main.rs's stderr notice — deliberately NEVER written to `out_dir` (the export directory
     // is what the filer mails/hands to a preparer; the notice belongs on stderr/TUI/NOTICE only).
-    let experimental_notice = btctax_core::experimental::uses_approach_b(events);
+    let experimental_notice_active = btctax_core::experimental::uses_approach_b(events);
 
     // ── Form 8949 + Schedule D (always applicable). ──
     let f8949_path = if wants(forms, FormArg::F8949) {
@@ -649,7 +657,7 @@ pub(crate) fn export_irs_pdf_from_session(
         form_1040_filled_7a,
         form_1040_loss,
         form_8275_path,
-        experimental_notice,
+        experimental_notice_active,
     })
 }
 
@@ -826,7 +834,7 @@ fn export_full_return(
     // Approach-B experimental disclosure (`design/approach-b-experimental-notice`): an INTERFACE-only
     // signal for main.rs's stderr notice — deliberately NEVER written to `out_dir` (the export directory
     // is what the filer mails/hands to a preparer; the notice belongs on stderr/TUI/NOTICE only).
-    let experimental_notice = btctax_core::experimental::uses_approach_b(events);
+    let experimental_notice_active = btctax_core::experimental::uses_approach_b(events);
     let mut manifest = String::from("# btctax full-return packet — staple in this order\n");
     let mut paths: Vec<PathBuf> = Vec::new();
     for form in &packet {
@@ -898,7 +906,7 @@ fn export_full_return(
         // The full-return path's 8275 (when present) is inside `full_return_paths` — sequence-prefixed
         // (`92_f8275.pdf`), not this crypto-slice-only bare-named field.
         form_8275_path: None,
-        experimental_notice,
+        experimental_notice_active,
     })
 }
 

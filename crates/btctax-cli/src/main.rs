@@ -673,6 +673,14 @@ fn run() -> Result<ExitCode, CliError> {
                     ),
                 }
             }
+            // Approach-B experimental disclosure (`design/approach-b-experimental-notice`, fix round 1
+            // Important #4): `export-snapshot` writes the SAME `form_8275.txt`/`basis_methodology.txt`
+            // disclosure files `export-irs-pdf` does — this is the CSV/preparer-handoff path — so it
+            // gets the same stderr notice, beside the existing blocker disclosure above. INTERFACE-only,
+            // never written to `out_dir`.
+            if report.experimental_notice_active {
+                eprint!("\n⚠ {}", btctax_core::experimental::NOTICE.plain_text());
+            }
         }
         Command::ExportIrsPdf {
             out,
@@ -753,8 +761,8 @@ fn run() -> Result<ExitCode, CliError> {
             // (non-voided) DeclareTranche/PromoteTranche is on file — INTERFACE-only, stderr here,
             // never written into the export directory. Covers BOTH the crypto-slice and the full-return
             // dispatch (both return the same `IrsPdfReport`).
-            if report.experimental_notice {
-                eprintln!("\n⚠ {}", btctax_core::experimental::NOTICE.plain_text());
+            if report.experimental_notice_active {
+                eprint!("\n⚠ {}", btctax_core::experimental::NOTICE.plain_text());
             }
             // UX-P4-5: a --forms slice cannot be honored on a full-return year — the 14-form packet is
             // jointly computed, so a slice of it is tax-unsound. The whole packet was written; say the

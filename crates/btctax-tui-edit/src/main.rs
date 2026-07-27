@@ -14734,12 +14734,11 @@ mod tests {
                 );
                 let bytes = std::fs::read(&path).unwrap();
                 let text = String::from_utf8_lossy(&bytes);
-                for needle in [
-                    "EXPERIMENTAL — DEFENSIVE FILING",
-                    "heavy AI assistance",
-                    "137 characters",
-                    "no in-editor action will save until you quit",
-                ] {
+                // Shared with btctax-cli's and btctax-tui's own leak-guard tests via
+                // `btctax_core::experimental::testonly::leak_guard_needles()` — three independent
+                // hand-typed needle lists existed before that helper, and two were missing a phrase the
+                // third had.
+                for needle in btctax_core::experimental::testonly::leak_guard_needles() {
                     assert!(
                         !text.contains(needle),
                         "{path:?} must never carry the experimental notice ({needle:?})"

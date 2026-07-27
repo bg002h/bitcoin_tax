@@ -1470,7 +1470,7 @@ fn characterization_crypto_slice_export_pins_the_shipped_file_set_and_report() {
         "the crypto-slice arm always honors --forms"
     );
     assert!(
-        report.experimental_notice,
+        report.experimental_notice_active,
         "this fixture's vault has a live promoted tranche — Approach-B is in use"
     );
 }
@@ -1547,7 +1547,7 @@ fn characterization_full_return_export_pins_the_shipped_file_set_and_report() {
     );
     assert_eq!(report.full_return_manifest, Some(out.join("manifest.txt")));
     assert!(
-        report.experimental_notice,
+        report.experimental_notice_active,
         "this fixture's vault has a live promoted tranche — Approach-B is in use"
     );
 }
