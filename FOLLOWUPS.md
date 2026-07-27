@@ -126,16 +126,28 @@ restated there.
 
 Approach B (declare a $0 tranche of undocumented BTC → promote it to a >$0 **floor** → mandatory
 Form 8275 disclosure) shipped its engine in v0.9.0 and a ratatui wizard in v0.10.0. The wizard's
-construction went badly enough to warrant a disclosure in `NOTICE`. Three branches now exist and
-**none is merged or discarded**:
+construction went badly enough to warrant a disclosure in `NOTICE`.
 
-| Branch | What it is |
+**★ RESOLVED 2026-07-27 — the owner chose the cut, and it is MERGED to `main`.**
+`arch/engine-keep-wizard-cut` was merged (no-ff) after the reconciliation below was written: the
+engine stays, the TUI wizard and the stale-snapshot latch are gone, `btctax defensive status`
+replaces the dashboard as a read-only surface. Merged result verified green — 2,407 tests pass,
+`cargo fmt --all -- --check` clean, `clippy -D warnings` clean. **No version bump, tag, or crates.io
+publish accompanied this merge**; `main` still reads v0.12.0 in every manifest while the shipped
+0.12.0 crates contain the wizard. That divergence is deliberate and must be closed by the next
+release — see G-3.
+
+| Branch | Status |
 |---|---|
-| `main` | v0.12.0 — engine **and** the full TUI wizard + the stale-snapshot latch subsystem |
-| `arch/engine-keep-wizard-cut` | engine kept, wizard chrome + latch deleted, `btctax defensive status` added; ≈ −8,835 lines, 2,407 tests green, **unpushed** |
-| `backout/pre-approach-b` | the v0.8.0 tree — before any of this existed |
+| `main` | **engine kept, wizard cut** (post-merge); manifests still say v0.12.0 |
+| `arch/engine-keep-wizard-cut` | merged to `main`; kept as a ref, never pushed |
+| `backout/pre-approach-b` | the v0.8.0 tree — before any of this existed; **pushed**, retained as the escape hatch |
 
-Analysis of record, both on `arch/engine-keep-wizard-cut`:
+The choice was made on the basis that the re-layering in G-0's paths must delete exactly what this
+branch deletes and reuse exactly what it keeps, so building anywhere else meant porting the latch
+subsystem through a crate split it does not survive, then deleting it anyway.
+
+Analysis of record, both now on `main`:
 `design/arch-engine-keep-wizard-cut/COMPARISON.md` (measured three-way comparison) and
 `design/arch-engine-keep-wizard-cut/UI_READD_SKETCH.md` (independent architect's sketch for
 re-adding a swappable UI). **Load-bearing finding, verified directly:** the wizard's state machines
@@ -247,6 +259,31 @@ One cross-cutting lesson is worth keeping out of that pile: **stop hand-citing s
 numbers in doc comments.** The drift entries above are the third recurrence; name the
 function/const instead where the citation is not load-bearing, or add a merge-time doc-lint that
 flags stale `` `:\d+` `` citations.
+
+### G-3 — OPEN, created by the merge: `main` diverges from the published 0.12.0 crates
+
+The wizard cut landed on `main` with **no version bump, no tag, and no crates.io publish**. So:
+
+- every manifest on `main` reads `0.12.0`, but the **published** 0.12.0 crates contain the TUI
+  wizard that `main` no longer has. Anyone installing `btctax` from crates.io today gets the wizard;
+  anyone building `main` does not. `btctax` has never had a user (`no-users-yet`), so the exposure is
+  nil — but the two must not stay divergent silently.
+- **the next release must bump before it publishes.** The cut removes a shipped interactive surface
+  and leaves `plan_export`/`apply_export` public-but-dead, so it is not a patch. Pre-1.0 cargo SemVer
+  makes a breaking change a **MINOR** bump: **0.13.0**.
+- **`NOTICE`'s "EXPERIMENTAL — DEFENSIVE FILING" section needs re-reading against the cut tree before
+  that release.** It tells filers to check things on screens that no longer exist, and its
+  "surfaces this notice at the point of use — on the command line (stderr) and in the interactive
+  terminal views" claim is now only half true. The disclosure itself stays; the performable-checks
+  list and the surface claim need to match what shipped.
+- **`plan_export`/`apply_export` should be deleted in that same release** per the owner ruling in
+  G-0 — zero callers from any shipped surface, and multi-year amendment is not a real workflow.
+  `conservative::flagged_years` is a *separate* symbol and must stay: `defensive status` consumes it
+  (`btctax-core/src/defensive/mod.rs:681`).
+
+Owning phase: **the next release cycle**, whenever one is opened. Not urgent — nothing is broken for
+anyone — but it is the one item the merge itself created, so it must not fall into the ownerless
+residue.
 
 ---
 
