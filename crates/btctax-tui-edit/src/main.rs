@@ -17037,9 +17037,10 @@ mod tests {
     /// the marker alone, sized for marker+status STACKED) actually manifested — a 120×40 frame has 30+
     /// spare content rows and would never expose it.
     #[cfg(unix)]
-    fn stale_armed_base_fixture(
+    fn stale_dashboard_fixture(
         view: btctax_core::defensive::DefensiveFilingView,
         uncomputable: Option<&'static str>,
+        armed: bool,
         status: Option<&str>,
     ) -> EditorApp {
         let mut app = EditorApp::new(std::path::PathBuf::from("/edit/vault.pgp"));
@@ -17049,7 +17050,7 @@ mod tests {
             cursor: 0,
             uncomputable,
         });
-        app.stale_after_write = Some("stale-golden-fixture".to_string());
+        app.stale_after_write = armed.then(|| "stale-golden-fixture".to_string());
         app.status = status.map(|s| s.to_string());
         app
     }
@@ -17070,7 +17071,7 @@ mod tests {
         use btctax_core::defensive::DefensiveFilingView;
         use std::collections::BTreeSet;
 
-        stale_armed_base_fixture(
+        stale_dashboard_fixture(
             DefensiveFilingView {
                 candidates: vec![],
                 resolve_first: vec![],
@@ -17080,34 +17081,81 @@ mod tests {
                 safe_harbor_blocked: true,
             },
             Some(crate::defensive_dashboard::PSEUDO_ACTIVE_DASHBOARD_NOTICE),
+            true,
             None,
         )
     }
 
-    /// The "with status" sub-state — the ONE frame where both the marker and the composed `app.status`
-    /// stack in the notice rect (today's/pre-Task-7 layout for the status alone). Deliberately does NOT
-    /// reuse the pseudo-active STUB above: `handle_defensive_dashboard_key`'s `uncomputable` guard (fix
-    /// round 1, I-1, `defensive_dashboard.rs`) refuses declare/promote — the only two write intents this
-    /// screen dispatches — BY CONSTRUCTION whenever `uncomputable.is_some()`, so a stub dashboard can
-    /// never be the dashboard a declare/promote write that then fails to reproject was issued FROM.
-    /// `execute_defensive_export`'s (`x`'s) own reprojection failure is a SEPARATE, verified-distinct
-    /// path that never touches `stale_after_write`/composes this status at all (`x_reprojection_
-    /// failure_refuses_without_touching_the_latch`). The one reachable path that stacks a freshly-armed
-    /// `app.status` under a STILL-LIVE dashboard view is: a REAL (non-stub) dashboard's declare/promote
-    /// write succeeds but reprojection fails — `apply_reprojection`'s `Err` arm never calls `refresh_
-    /// defensive_dashboard`, so whatever real content was showing before the write keeps showing. Uses
-    /// the existing `declare_candidate_view` fixture (one real candidate row) for exactly that shape —
-    /// non-trivial (unlike an empty dashboard) and, unlike the pseudo-stub, actually reachable here.
+    /// The DFW-D11 export refusal — `btctax_cli::plan_export`'s own pseudo-active refusal, formatted
+    /// EXACTLY the way `execute_defensive_export` formats it (`"export refused: {err}"`, `main.rs:4861`)
+    /// — derived by calling the REAL function, not hand-copied (the review chain's own recurring lesson:
+    /// a hand-typed literal drifts from production silently). `plan_export` refuses before touching
+    /// `events`/`prices`/`tables` at all once `state.pseudo_active()` is true, so an empty/default
+    /// fixture is sufficient to reach it.
     #[cfg(unix)]
-    fn stale_armed_with_status_fixture(status: &str) -> EditorApp {
-        let view = declare_candidate_view(
-            btctax_core::WalletId::Exchange {
-                provider: "coinbase".into(),
-                account: "main".into(),
+    fn dfw_d11_export_refused_status() -> String {
+        let state = btctax_core::state::LedgerState {
+            pseudo_synthetic_count: 1,
+            ..Default::default()
+        };
+        let cfg = btctax_cli::CliConfig::default().to_projection();
+        let err = btctax_cli::plan_export(
+            &[],
+            &state,
+            &btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
+            &btctax_adapters::BundledTaxTables::load(),
+            &cfg,
+            2024,
+            std::path::PathBuf::from("/tmp/unused"),
+            vec![],
+        )
+        .unwrap_err();
+        let cli_err: btctax_cli::CliError = err.into();
+        format!("export refused: {cli_err}")
+    }
+
+    /// The "with status" sub-state — the ONE frame where both the marker and the composed `app.status`
+    /// stack in the notice rect. **Not actually armed** (renamed from `stale_armed_with_status_fixture`
+    /// accordingly) — ★ fix round 2 (the round-1 report's "unreachable" argument for reusing the
+    /// pseudo-active stub here was NOT sustained): the reviewer traced a REAL, reachable end-to-end path
+    /// that stacks exactly this — `uncomputable = true` (the stub), `armed = false`, `status = Some(..)`
+    /// — through production:
+    /// 1. `w` opens the dashboard while armed (`EditorApp::open_defensive_filing`'s DFW-D6 gate is
+    ///    skipped while armed — D-7), landing on the pseudo-active STUB.
+    /// 2. `x` re-projects successfully (`execute_defensive_export`'s own re-projection is independent
+    ///    of the ARMED-ness that got the filer here) — `stale_after_write` clears (D-4's one reachable
+    ///    clear while armed) and `refresh_defensive_dashboard` REBUILDS the stub, since the ledger is
+    ///    STILL genuinely pseudo-active (nothing resolved it — only the UNRELATED write that triggered
+    ///    the original arm landed).
+    /// 3. THAT rebuild's own `plan_export` call refuses (DFW-D11, `main.rs:4861`), setting `app.status`
+    ///    to the refusal above — with the dashboard still showing the (rebuilt) stub.
+    ///
+    /// End state: `uncomputable = true`, `armed = false` (NOT armed — the latch cleared in step 2),
+    /// `status = Some(dfw_d11_export_refused_status())`. Production KAT:
+    /// `refresh_defensive_dashboard_does_not_crash_on_a_genuinely_pseudo_active_fresh_reprojection`
+    /// drives this exact sequence through a REAL vault/session and asserts on the resulting status.
+    /// `safe_harbor_blocked = true` here too (an independent, unsuppressed events-scan fact — see
+    /// `stale_armed_no_status_fixture` above) for the same pane-filling reason: the round-1 golden this
+    /// replaces had 8 content rows in a 14-row pane (6 rows of slack) and was BYTE-IDENTICAL under the
+    /// Critical's own mutation, proving nothing.
+    #[cfg(unix)]
+    fn pseudo_stub_export_refused_fixture() -> EditorApp {
+        use btctax_core::defensive::DefensiveFilingView;
+        use std::collections::BTreeSet;
+
+        stale_dashboard_fixture(
+            DefensiveFilingView {
+                candidates: vec![],
+                resolve_first: vec![],
+                tranches: vec![],
+                still_short: vec![],
+                flagged_years: BTreeSet::new(),
+                safe_harbor_blocked: true,
             },
-            false,
-        );
-        stale_armed_base_fixture(view, None, Some(status))
+            Some(crate::defensive_dashboard::PSEUDO_ACTIVE_DASHBOARD_NOTICE),
+            false, // NOT armed — the latch cleared at step 2 above.
+            Some(&dfw_d11_export_refused_status()),
+        )
     }
 
     /// `(stem, captured frame)` for btctax-tui-edit, each under a pinned clock:
@@ -17151,13 +17199,12 @@ mod tests {
             capture_edit_frame(&mut app)
         };
 
-        // Task 7 fix round 1: the two ARMED sub-states (see `stale_armed_with_status_fixture` /
-        // `stale_armed_no_status_fixture` above for exactly which is reachable how, and why each uses
-        // the dashboard content it does).
-        let stale_armed_with_status = {
-            let mut app = stale_armed_with_status_fixture(&format!(
-                "{STALE_FACT_1} (timeout). {FACT_2_SCREEN_CLOSED} {FACT_3_QUIT_AND_REOPEN}"
-            ));
+        // Task 7 fix round 1/2: two fixtures that fill an 80×24 pane, one armed (the D-7 steady state)
+        // and one not (the reachable pseudo-stub + DFW-D11-refusal end state — fix round 2; see
+        // `pseudo_stub_export_refused_fixture` / `stale_armed_no_status_fixture` above for exactly which
+        // is reachable how, and why each uses the dashboard content it does).
+        let pseudo_stub_export_refused = {
+            let mut app = pseudo_stub_export_refused_fixture();
             app.clock = pinned;
             capture_edit_frame_sized(&mut app, 80, 24)
         };
@@ -17171,8 +17218,8 @@ mod tests {
             ("edit-browse", browse),
             ("edit-classify-confirm-modal", classify_modal),
             (
-                "edit-defensive-filing-stale-armed-with-status",
-                stale_armed_with_status,
+                "edit-defensive-filing-pseudo-stub-export-refused",
+                pseudo_stub_export_refused,
             ),
             (
                 "edit-defensive-filing-stale-armed-no-status",
@@ -17203,14 +17250,16 @@ mod tests {
 
     /// A byte-diff against a committed golden is silent about WHY the fixture was chosen — DESIGN.md
     /// §3.9(10)'s review caveat is that a golden over a fixture which doesn't actually fill the pane
-    /// (e.g. the trivial "Nothing outstanding" dashboard) would pass even with the ★ Critical clipping
-    /// bug this fix round closed. This makes the INTENT an explicit, standalone assertion: the
-    /// always-available `[x] export` line must survive, in BOTH armed sub-states, at 80×24.
+    /// (e.g. the trivial "Nothing outstanding" dashboard) would pass even with the clipping bugs fix
+    /// rounds 1-2 closed. This makes the INTENT an explicit, standalone assertion that bounds the whole
+    /// CLASS, not just one instance of it: at 80×24, in the worst REACHABLE dashboard state, both WITH
+    /// and WITHOUT a status, `[x] export` must be present. (One of the two fixtures below is armed, the
+    /// other is not — fix round 2 found the class is not specific to the armed latch at all.)
     #[cfg(unix)]
     #[test]
-    fn stale_armed_goldens_never_clip_the_export_line() {
+    fn stale_dashboard_goldens_never_clip_the_export_line() {
         for (stem, captured) in btctax_tui_edit_goldens() {
-            if stem.starts_with("edit-defensive-filing-stale-armed") {
+            if stem.starts_with("edit-defensive-filing-") {
                 assert!(
                     captured.contains("[x] export"),
                     "{stem} must not clip the always-available export line off a non-scrolling, \

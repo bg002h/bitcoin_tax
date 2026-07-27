@@ -111,25 +111,47 @@ fn draw_defensive_filing(frame: &mut Frame, app: &EditorApp) {
     // full height, exactly as before.
     let status = app.status.as_deref();
     let armed = app.stale_after_write.is_some();
+
+    // The notice's actual content, built ONCE — used both to MEASURE how tall the reservation needs to
+    // be (below) and to draw it (at the bottom of this fn). Keeping these in lock-step BY CONSTRUCTION
+    // (one `Vec<Line>`, one wrap setting, shared between the measuring pass and the real render) is what
+    // makes the measured height provably match what is actually drawn.
+    let mut notice_lines: Vec<Line> = Vec::new();
+    if armed {
+        notice_lines.push(Line::from(Span::styled(
+            format!("  {STALE_MARKER_DEFENSIVE}"),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )));
+    }
+    if let Some(s) = status {
+        // The unrevertable-residue notice is the one status that must SHOUT (it tells the filer to quit
+        // NOW); every other refusal/outcome reads as an ordinary notice.
+        let style = if s.starts_with("CRITICAL") {
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Cyan)
+        };
+        notice_lines.push(Line::from(Span::styled(format!("  {s}"), style)));
+    }
+
     let (content_area, notice_area) = if status.is_some() || armed {
-        // ★ fix round 1 Critical: the reservation must match what is ACTUALLY drawn into it, not the
-        // worst case unconditionally. When `status` is `None` (armed, marker alone), only
-        // `STALE_MARKER_DEFENSIVE` renders — it wraps to `STALE_MARKER_ONLY_LINES` (2) rows, not 8 — so
-        // reserving the full `DEFENSIVE_NOTICE_LINES` (8) here wasted 6 rows off the content pane for
-        // NO reason: at 80×24 that shrank a 22-row dashboard pane to 14, and a real (armed,
-        // pseudo-active, `safe_harbor_blocked = true`) dashboard needs 15 — clipping the unconditional,
-        // always-last `[x] export` line clean off a non-scrolling `Paragraph` with no notice text to
-        // even hint `x` still works (DFW-D3/M-5). Reserve the full 8 only once a status is ALSO
-        // stacked under the marker.
+        // ★ fix round 2 Critical: a FLAT `DEFENSIVE_NOTICE_LINES` reservation whenever `status.is_some()`
+        // — regardless of that status's actual LENGTH — was itself the bug fix round 1 only half-fixed.
+        // It clipped `[x] export` with a 385-char status, a 36-char one, and even a ONE-CHARACTER one;
+        // worse, since `status.is_some()` is true on the ORDINARY (unarmed) mainline too — every
+        // declare/promote outcome message — raising `DEFENSIVE_NOTICE_LINES` 3→8 in the first commit
+        // silently regressed every unarmed filer's clipping cliff from ~9 candidates down to ~5. The
+        // reservation must be sized to what will ACTUALLY be drawn, not a worst-case constant reserved
+        // by mere PRESENCE. `content_sized_notice_height` measures it by rendering `notice_lines` into a
+        // throwaway buffer — the same wrap algorithm the real render below uses — capped at
+        // `DEFENSIVE_NOTICE_LINES` (the true worst case: the longest composed arm status stacked under
+        // the marker) so a pathologically long/unbounded status can't blow the reservation out further.
         //
         // Floor at 1: `.min(inner.height.saturating_sub(1))` yields 0 at a terminal height ≤ 3, which
         // would silently drop the marker instead of shrinking it.
-        let wanted = if status.is_some() {
-            DEFENSIVE_NOTICE_LINES
-        } else {
-            STALE_MARKER_ONLY_LINES
-        };
-        let notice_h = wanted.min(inner.height.saturating_sub(1)).max(1);
+        let notice_h = content_sized_notice_height(&notice_lines, inner.width)
+            .min(inner.height.saturating_sub(1))
+            .max(1);
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(0), Constraint::Length(notice_h)])
@@ -170,26 +192,10 @@ fn draw_defensive_filing(frame: &mut Frame, app: &EditorApp) {
     let para = Paragraph::new(lines).wrap(Wrap { trim: false });
     frame.render_widget(para, content_area);
 
+    // The fixed marker renders whenever armed, independent of `app.status` — DESIGN.md §2.4(a): "render,
+    // don't merely reserve". When a status is ALSO present, both appear, stacked. `notice_lines` was
+    // already built above (shared with the measuring pass).
     if let Some(rect) = notice_area {
-        // The fixed marker renders whenever armed, independent of `app.status` — DESIGN.md §2.4(a):
-        // "render, don't merely reserve". When a status is ALSO present, both appear, stacked.
-        let mut notice_lines: Vec<Line> = Vec::new();
-        if armed {
-            notice_lines.push(Line::from(Span::styled(
-                format!("  {STALE_MARKER_DEFENSIVE}"),
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            )));
-        }
-        if let Some(s) = status {
-            // The unrevertable-residue notice is the one status that must SHOUT (it tells the filer to
-            // quit NOW); every other refusal/outcome reads as an ordinary notice.
-            let style = if s.starts_with("CRITICAL") {
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::Cyan)
-            };
-            notice_lines.push(Line::from(Span::styled(format!("  {s}"), style)));
-        }
         let notice = Paragraph::new(notice_lines).wrap(Wrap { trim: false });
         frame.render_widget(notice, rect);
     }
@@ -211,37 +217,78 @@ const STALE_MARKER_CLAIM: &str =
 const STALE_MARKER_DEFENSIVE: &str =
     "STALE — figures below predate your last write. DO NOT FILE from them. Quit and reopen the vault.";
 
-/// Rows the `STALE_MARKER_DEFENSIVE` line alone needs, wrapped, at this screen's 78-col inner width (80
-/// cols − 2 for the block's own left/right border) — confirmed by an actual `TestBackend` render
-/// (`defensive_filing_marker_alone_reserves_only_2_rows_leaving_room_for_a_full_dashboard`), not
-/// arithmetic alone. Used when `status.is_none()` (armed, marker alone) — reserving the full
-/// `DEFENSIVE_NOTICE_LINES` (8) unconditionally wasted 6 rows off the content pane for nothing (★ fix
-/// round 1 Critical: this clipped `[x] export` off a real, non-trivial dashboard at 80×24).
-const STALE_MARKER_ONLY_LINES: u16 = 2;
-
-/// Rows reserved for `draw_defensive_filing`'s NOTICE rect when a `status` IS present. It then holds
-/// up to TWO stacked `Line`s — the armed marker (`STALE_MARKER_DEFENSIVE`, 96 chars) and the full
-/// composed `app.status` — sharing this ONE reservation (DESIGN.md §2.4(a2)), so this is sized for BOTH
-/// together, not the status alone. (When `status` is `None`, `STALE_MARKER_ONLY_LINES` is used instead
-/// — see the ★ fix round 1 Critical note there.)
+/// The CAP on the notice reservation both screens use — NOT a flat reservation size (★ fix round 2
+/// Critical: it was exactly that in fix round 1, and `status.is_some()` alone drove the flat 8 whether
+/// the status was 385 chars or 1, clipping `[x] export` at every length and regressing the ORDINARY
+/// unarmed mainline — every declare/promote outcome message — from a ~9-candidate clipping cliff to
+/// ~5). `content_sized_notice_height` below measures what will ACTUALLY be drawn and clamps it to this
+/// many rows, so a pathologically long/unbounded status can't blow the reservation out past the true
+/// worst case.
 ///
-/// **Measured, not estimated**, against the real production path: `EditorApp::apply_reprojection`'s
-/// `Err` arm → `arm_stale`, driven directly (see `main.rs::arm_stale_status_survives_a_failing_draft_
-/// flush`, temporarily instrumented to print the composed string during this sizing pass) with the
-/// longest of the three per-tail prefixes (`"the safe-harbor attest write landed — "`, 38 chars — longer
-/// than `"parked the full return for {year} — "` at 34 and `"committed {year} as {label} — "` at 28 for
-/// its `"(unset)"` filing-status fallback, the longest real label) and a representative io error
+/// **That worst case is measured, not estimated**, against the real production path:
+/// `EditorApp::apply_reprojection`'s `Err` arm → `arm_stale`, driven directly (see
+/// `main.rs::arm_stale_status_survives_a_failing_draft_flush`, temporarily instrumented to print the
+/// composed string during this sizing pass) with the longest of the three per-tail prefixes
+/// (`"the safe-harbor attest write landed — "`, 38 chars — longer than
+/// `"parked the full return for {year} — "` at 34 and `"committed {year} as {label} — "` at 28 for its
+/// `"(unset)"` filing-status fallback, the longest real label) and a representative io error
 /// (`"io: No such file or directory (os error 2)"`, 42 chars) standing in for BOTH the re-projection
 /// failure and a genuine fail-safe-flush failure (they share a root cause — disk/session I/O — per
 /// `arm_stale`'s own doc). That composes to a 385-char status: `prefix`, then `STALE_FACT_1`, then
 /// `({reason})`, then fact 2's LOSS variant (longer than the no-loss `FACT_2_SCREEN_CLOSED` sentence),
-/// then fact 3. Stacked under the 96-char marker line, this wraps to 8 rows at this screen's 78-col
-/// inner width — confirmed by an actual `TestBackend` render, not arithmetic alone
+/// then fact 3. Stacked under the 96-char `STALE_MARKER_DEFENSIVE` marker line, this wraps to 8 rows at
+/// this screen's 78-col inner width — confirmed by an actual render, not arithmetic alone
 /// (`the_full_arm_status_renders_unclipped_at_80_columns_on_both_screens`).
 ///
-/// Previously 3, sized only for the ~230-char CRITICAL residue notice — before this task nothing else
-/// ever shared this rect.
+/// Previously 3 (sized only for the ~230-char CRITICAL residue notice, the only thing that ever used
+/// this rect before this task), then a flat 8 (fix round 1), now a cap on a content-sized measurement
+/// (fix round 2).
 const DEFENSIVE_NOTICE_LINES: u16 = 8;
+
+/// The exact number of rows `lines`, wrapped at `width`, will need when actually drawn — MEASURED by
+/// rendering them into a throwaway buffer with ratatui's own wrapping algorithm (the same one the real
+/// render uses), not estimated and not re-implemented. Capped at `DEFENSIVE_NOTICE_LINES` and floored
+/// at 1: a status this measures against is `app.status`, an unbounded `String` (ultimately a `CliError`
+/// `Display`), so an absurdly long one must still be BOUNDED, never allowed to consume the whole screen.
+///
+/// `ratatui::widgets::Paragraph::line_count(width)` would compute this directly, but it is gated behind
+/// the `unstable-rendered-line-info` cargo feature — its own doc says "the design for text wrapping is
+/// not stable and might affect this API" — so this measures via a REAL render instead, keeping this
+/// crate's `ratatui` dependency feature-flag-free and immune to that instability.
+///
+/// ★ fix round 2 Critical: this is the actual fix. Fix round 1 reserved a FLAT `DEFENSIVE_NOTICE_LINES`
+/// whenever `status.is_some()`, regardless of that status's length — verified (by the round-2 reviewer)
+/// to clip `[x] export` with a 385-char status, a 36-char one, and even a ONE-CHARACTER one, and to
+/// regress the ordinary UNARMED mainline (every declare/promote outcome message sets `app.status`, no
+/// latch involved) from a ~9-candidate clipping cliff down to ~5, since raising the flat constant 3→8
+/// in the first commit applied unconditionally to every status, not just the armed one.
+///
+/// A side benefit noted (non-blocking) in the round-2 review: because this measures at the CALLER's
+/// actual `width` rather than assuming 80 columns, a narrower terminal automatically gets a taller
+/// reservation for the same text (verified: `narrow_terminal_still_reserves_enough_for_the_full_marker`
+/// below) — the old flat-2-at-80-columns constant this replaces would have clipped the marker's own
+/// remedy sentence at ≤50 columns; this no longer can, up to the `DEFENSIVE_NOTICE_LINES` cap.
+fn content_sized_notice_height(lines: &[Line], width: u16) -> u16 {
+    let w = width.max(1);
+    let max_rows = DEFENSIVE_NOTICE_LINES;
+    let backend = ratatui::backend::TestBackend::new(w, max_rows);
+    let mut terminal = ratatui::Terminal::new(backend).expect("in-memory backend never errors");
+    let probe_area = Rect::new(0, 0, w, max_rows);
+    terminal
+        .draw(|f| {
+            let p = Paragraph::new(lines.to_vec()).wrap(Wrap { trim: false });
+            f.render_widget(p, probe_area);
+        })
+        .expect("drawing into an in-memory backend never errors");
+    let buf = terminal.backend().buffer();
+    let mut used = 0u16;
+    for (i, row) in buf.content().chunks(w as usize).enumerate() {
+        if row.iter().any(|c| c.symbol() != " ") {
+            used = i as u16 + 1;
+        }
+    }
+    used.max(1)
+}
 
 /// Render the browse screen: EDITOR-marked tab bar + viewer tab content + EDITOR footer.
 /// Form and modal overlays are drawn on top.
@@ -271,7 +318,18 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
         constraints.push(Constraint::Length(1)); // STALE marker row
     }
     if show_stale_band {
-        constraints.push(Constraint::Length(DEFENSIVE_NOTICE_LINES)); // wrapped stale status band
+        // Content-sized (fix round 2 Critical, extended here for the same reason — see
+        // `content_sized_notice_height`'s doc): a flat `DEFENSIVE_NOTICE_LINES` would over-reserve for
+        // an ordinary short status exactly as it did in `draw_defensive_filing`. Browse's band shows
+        // ONLY the status (the marker has its own separate row above), so it measures just that line.
+        let band_h = content_sized_notice_height(
+            &[Line::from(format!(
+                "  {}",
+                app.status.as_deref().unwrap_or_default()
+            ))],
+            area.width,
+        );
+        constraints.push(Constraint::Length(band_h)); // wrapped stale status band
     }
     constraints.push(Constraint::Min(0)); // content pane
     constraints.push(Constraint::Length(1)); // footer keybindings
@@ -7555,19 +7613,23 @@ mod tests {
         );
     }
 
-    /// DESIGN.md §2.4(a): `DEFENSIVE_NOTICE_LINES.min(inner.height.saturating_sub(1))` yields 0 at a
-    /// terminal height of 3 (a `Borders::ALL` block's own top/bottom border leaves `inner.height == 1`,
-    /// so `saturating_sub(1) == 0`) — silently dropping the marker instead of shrinking it. `.max(1)`
-    /// floors it at one row.
+    /// DESIGN.md §2.4(a): `content_sized_notice_height(..).min(inner.height.saturating_sub(1))` yields 0
+    /// at a terminal height of 3 (a `Borders::ALL` block's own top/bottom border leaves
+    /// `inner.height == 1`, so `saturating_sub(1) == 0`, regardless of what the content-sized left
+    /// operand measures) — silently dropping the marker instead of shrinking it. `.max(1)` floors it at
+    /// one row.
     ///
     /// Mutation: dropped the trailing `.max(1)` — RED (`notice_h` became 0, `Layout::split` handed the
     /// notice rect zero rows, and the marker text rendered nowhere — the full-claim assertion below
     /// failed). Restored via a `cp` backup (never `git checkout --`) and re-ran — GREEN.
     ///
     /// ★ fix round 1 minor: asserts the FULL 69-char `STALE_MARKER_CLAIM`, not merely the word "STALE"
-    /// — at height 3 the reserved rect is exactly 1 row (`STALE_MARKER_ONLY_LINES.min(1).max(1) == 1`),
-    /// and the marker's first wrapped line at 78 columns is long enough to carry the whole claim before
-    /// wrapping into the remedy sentence, so this is not a weaker check than it looks.
+    /// — at height 3 the reserved rect is exactly
+    /// `content_sized_notice_height(marker_alone, 78).min(0).max(1) == 1` row (the middle `.min(0)`
+    /// against `inner.height.saturating_sub(1)`, NOT `.min(1)` — fix round 2 correction: an earlier
+    /// draft of this note misstated that middle operand as `1`), and the marker's first wrapped line at
+    /// 78 columns is long enough to carry the whole claim before wrapping into the remedy sentence, so
+    /// this is not a weaker check than it looks.
     #[test]
     fn defensive_filing_notice_floors_at_one_row_on_a_very_short_terminal() {
         let rendered = render_defensive_filing_to_string_armed_sized(None, 80, 3);
@@ -7578,23 +7640,26 @@ mod tests {
         );
     }
 
-    /// ★ fix round 1 Critical: the reservation must match what is ACTUALLY drawn, not the worst case
-    /// unconditionally. The armed+`status == None` case renders the marker ALONE, which wraps to
-    /// `STALE_MARKER_ONLY_LINES` (2) rows — not the full `DEFENSIVE_NOTICE_LINES` (8), which is sized
-    /// for marker+status STACKED together. Reserving 8 unconditionally shrank the content pane at 80×24
-    /// from 22 rows to 14, and a REAL (armed, pseudo-active) dashboard can need more than that: D-7's
-    /// own `safe_journey_view` stub sets `uncomputable = Some(PSEUDO_ACTIVE_DASHBOARD_NOTICE)` (a ~7-row
-    /// wrapped notice) and does NOT suppress `safe_harbor_blocked` (a pure events-scan fact, true for
-    /// any filer with an in-force safe-harbor allocation or a pre-2025 tranche — the wizard's core
-    /// audience), adding a further 2-row note. Title(2) + blank(1) + notice(7) + blank(1) +
-    /// safe-harbor-note(2) + blank(1) + the always-last `[x] export`(1) = 15 rows, against a 14-row pane
-    /// under the old unconditional-8 reservation — clipping `[x] export` off a non-scrolling `Paragraph`
-    /// with no notice text to even hint `x` still works (DFW-D3/M-5).
+    /// ★ fix round 1 Critical (superseded by fix round 2's `content_sized_notice_height`, but the
+    /// scenario this proves is unchanged): the reservation must match what is ACTUALLY drawn, not a
+    /// worst-case constant. The armed+`status == None` case renders the marker ALONE, which MEASURES to
+    /// ~2 rows — not the full `DEFENSIVE_NOTICE_LINES` (8) CAP, which only applies when marker+status
+    /// are STACKED together. Reserving 8 unconditionally (fix round 1's own bug, before content-sizing)
+    /// shrank the content pane at 80×24 from 22 rows to 14, and a REAL (armed, pseudo-active) dashboard
+    /// can need more than that: D-7's own `safe_journey_view` stub sets `uncomputable =
+    /// Some(PSEUDO_ACTIVE_DASHBOARD_NOTICE)` (a ~7-row wrapped notice) and does NOT suppress
+    /// `safe_harbor_blocked` (a pure events-scan fact, true for any filer with an in-force safe-harbor
+    /// allocation or a pre-2025 tranche — the wizard's core audience), adding a further 2-row note.
+    /// Title(2) + blank(1) + notice(7) + blank(1) + safe-harbor-note(2) + blank(1) + the always-last
+    /// `[x] export`(1) = 15 rows, against a 14-row pane under either an unconditional-8 reservation (fix
+    /// round 1) OR a flat reservation keyed on `status.is_some()` alone (fix round 1's ACTUAL shipped
+    /// bug, since `status` was `None` here so that half looked fine until fix round 2 found the OTHER
+    /// half) — clipping `[x] export` off a non-scrolling `Paragraph` with no notice text to even hint
+    /// `x` still works (DFW-D3/M-5).
     ///
-    /// Mutation: reverted the reservation to unconditional `DEFENSIVE_NOTICE_LINES` (dropped the
-    /// `if status.is_some() { .. } else { STALE_MARKER_ONLY_LINES }` split) — RED (`[x] export` absent
-    /// from the rendered buffer at 80×24). Restored via a `cp` backup (never `git checkout --`) and
-    /// re-ran — GREEN.
+    /// Mutation: reverted `content_sized_notice_height`'s call to the flat `DEFENSIVE_NOTICE_LINES`
+    /// (dropped the content-sizing entirely) — RED (`[x] export` absent from the rendered buffer at
+    /// 80×24). Restored via a `cp` backup (never `git checkout --`) and re-ran — GREEN.
     #[test]
     fn defensive_filing_marker_alone_reserves_only_2_rows_leaving_room_for_a_full_dashboard() {
         use btctax_core::defensive::DefensiveFilingView;
@@ -7624,6 +7689,104 @@ mod tests {
             rendered.contains("[x] export"),
             "the always-available export line must survive at 80x24 with only the marker (no status) \
              reserved: {rendered}"
+        );
+    }
+
+    /// Non-blocking note from the fix round 2 review, addressed here as a real KAT rather than left as
+    /// prose: `content_sized_notice_height` measures at the CALLER's own `width`, so a narrower terminal
+    /// automatically reserves MORE rows for the SAME marker text, instead of assuming 80 columns. The
+    /// constant this replaced (`STALE_MARKER_ONLY_LINES = 2`, fix round 1) was measured only at 80
+    /// columns and would have clipped the marker's own remedy sentence ("Quit and reopen the vault.") at
+    /// ≤50 columns, where the identical text wraps to MORE than 2 rows — with no reservation growth to
+    /// compensate.
+    ///
+    /// Mutation: hardcoded `content_sized_notice_height`'s `width` parameter to a fixed `78` inside the
+    /// function (ignoring the caller's actual, narrower `inner.width`) — RED at 50 columns (the
+    /// reservation was sized for 78-column wrapping, too short for the text's ACTUAL 50-column wrap, so
+    /// "Quit and reopen the vault." clipped off the bottom of the reserved rect). Restored via a `cp`
+    /// backup (never `git checkout --`) and re-ran — GREEN.
+    #[test]
+    fn narrow_terminal_still_reserves_enough_for_the_full_marker() {
+        let buf = draw_defensive_filing_armed_buffer(None, 50, 40);
+        assert!(
+            searchable(&buf).contains("Quit and reopen the vault."),
+            "the marker's own remedy sentence must survive at 50 columns, not just 80: {}",
+            flatten(&buf)
+        );
+    }
+
+    /// ★ fix round 2 Critical — the CORE regression, entirely independent of the armed latch: fix round
+    /// 1's flat `DEFENSIVE_NOTICE_LINES` (8) fired on mere `status.is_some()`, and `status` is `Some` on
+    /// the ORDINARY UNARMED mainline too — every declare/promote outcome message. Reserving a flat 8
+    /// rows for even a one-line outcome message shrank a REAL (unarmed) dashboard's clipping cliff from
+    /// ~9 candidates down to ~5 (measured by the round-2 reviewer). This drives the exact repro: 5 real
+    /// declare candidates, no latch involved at all, a short ordinary status.
+    ///
+    /// Mutation: reverted `content_sized_notice_height` to unconditionally return `DEFENSIVE_NOTICE_
+    /// LINES` (8) regardless of `lines`' actual content — RED (`[x] export` absent at 80×24 with only 5
+    /// candidates and a 25-char status). Restored via a `cp` backup (never `git checkout --`) and
+    /// re-ran — GREEN.
+    #[test]
+    fn ordinary_unarmed_declare_outcome_does_not_clip_export_with_five_candidates() {
+        use btctax_core::defensive::discovery::Shortfall;
+        use btctax_core::defensive::DefensiveFilingView;
+        use std::collections::BTreeSet;
+        use time::macros::date;
+
+        let candidates = (0..5)
+            .map(|i| Shortfall {
+                event: btctax_core::EventId::decision(i),
+                wallet: None,
+                date: date!(2020 - 06 - 15),
+                short_sat: 10_000_000,
+                fee_sat: 0,
+            })
+            .collect();
+        let view = DefensiveFilingView {
+            candidates,
+            resolve_first: vec![],
+            tranches: vec![],
+            still_short: vec![],
+            flagged_years: BTreeSet::new(),
+            safe_harbor_blocked: false,
+        };
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = EditorApp::new(PathBuf::from("/test/vault.pgp"));
+        app.screen = EditorScreen::DefensiveFiling;
+        app.defensive_dashboard = Some(crate::defensive_dashboard::DefensiveDashboardState::new(
+            view,
+        ));
+        app.stale_after_write = None; // UNARMED — no latch involved at all
+        app.status = Some("committed 2024 as Single".to_string()); // an ordinary, short outcome message
+        terminal.draw(|f| draw(&mut *f, &mut app)).unwrap();
+        let rendered = flatten(terminal.backend().buffer());
+        assert!(
+            rendered.contains("[x] export"),
+            "an ordinary UNARMED declare/promote outcome message must not clip export with only 5 \
+             real candidates: {rendered}"
+        );
+    }
+
+    /// Extended to Browse's own band for the same reason (fix round 2): a flat `DEFENSIVE_NOTICE_LINES`
+    /// would over-reserve for an ordinary short status here too. At a height where the difference is
+    /// visible (10 rows: tab bar 3 + marker 1 + footer 1 = 5 fixed, leaving only 5 for band+content), a
+    /// flat 8-row band would consume MORE than the entire remaining budget, starving the tab content
+    /// pane's `Min(0)` constraint down to 0 rows — "no holdings" (the empty-Holdings-tab text) would
+    /// never render at all.
+    ///
+    /// Mutation: reverted Browse's band constraint from the content-sized `band_h` back to the flat
+    /// `Constraint::Length(DEFENSIVE_NOTICE_LINES)` — RED ("no holdings" absent from the rendered
+    /// buffer at height 10). Restored via a `cp` backup (never `git checkout --`) and re-ran — GREEN.
+    #[test]
+    fn browse_band_is_content_sized_leaving_room_for_tab_content_at_a_short_terminal() {
+        let buf = draw_browse_armed_buffer(Some("x"), 80, 10, PathBuf::from("/test/vault.pgp"));
+        let rendered = flatten(&buf);
+        assert!(
+            rendered.contains("no holdings"),
+            "a 1-char status must not force a flat 8-row band that starves the tab content pane: \
+             {rendered}"
         );
     }
 
