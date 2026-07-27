@@ -304,3 +304,181 @@ fn unsupported_year_rejected_for_form_8275() {
         "got {err:?}"
     );
 }
+
+// ── T-f8275-part-ii-overflow — Part II narrative overflow ──────────────────────────────────────────
+//
+// `crates/btctax-forms/src/form8275.rs` used to write the filer's ENTIRE Part II narrative into the
+// ONE single-line 8pt `p1-t80[0]` field. That field has no `/MaxLen` (nothing at the PDF-data level
+// truncates an over-long `/V`), so the write always "succeeds" — but the widget is a fixed-width,
+// non-multiline, `DoNotScroll` box, so a viewer honoring its own geometry can only DISPLAY the portion
+// that fits (about the first 137 characters at 8pt Helvetica-Bold in this field's 518.4pt width). The
+// rest is silently invisible on the printed page: no error, no refusal, no truncation marker. This is
+// the §1.6662-4(f) adequate-disclosure text — a fifth of a disclosure is not a disclosure.
+//
+// `verify_flat` cannot see this: this field carries no `/MaxLen`, and free placements skip the
+// column/row geometry leg entirely (`crate::verify`'s doc comment). So the test below re-measures,
+// independently of anything `btctax-forms` itself computes, whether what actually landed on each
+// continuation field's own line would fit inside that field's own widget box at the SAME font the PDF
+// itself declares (`/DA` = `/HelveticaLTStd-Bold 8.00 Tf`, confirmed against the bundled asset by
+// `cargo test -p btctax-forms` — see BUILD-REPORT.md). This is deliberately NOT
+// `btctax_forms`'s own (eventual) wrap measurement — an independent second oracle, mirroring this
+// crate's whole `verify.rs` ethos ("the map is what we distrust; the PDF's geometry is the oracle").
+
+/// Helvetica-Bold glyph widths (Adobe Core-14 AFM metrics, 1000 units/em), ASCII printable range
+/// 0x20..=0x7E, `code - 0x20` indexed. The public-domain Helvetica-Bold.afm table every PDF toolchain
+/// ships for the standard-14 fonts (which carry no embedded glyph program of their own to measure).
+const ORACLE_HELV_BOLD_ASCII: [u16; 95] = [
+    278, 333, 474, 556, 556, 889, 722, 278, 333, 333, 389, 584, 278, 333, 278, 278, 556, 556, 556,
+    556, 556, 556, 556, 556, 556, 556, 333, 333, 584, 584, 584, 611, 975, 722, 722, 722, 722, 667,
+    611, 778, 722, 278, 556, 722, 611, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667,
+    667, 611, 333, 278, 333, 584, 556, 278, 556, 611, 556, 611, 556, 333, 611, 611, 278, 278, 556,
+    278, 889, 611, 611, 611, 611, 389, 556, 333, 611, 556, 778, 556, 556, 500, 389, 280, 389, 584,
+];
+
+/// Width, in PDF points, of `s` set 8pt Helvetica-Bold. Non-ASCII falls back to 1000/1000 em (this
+/// font's own widest glyphs — em dash, ellipsis — so an unmodeled character can only widen the
+/// estimate, never narrow it and hide a real overflow).
+fn oracle_helv_bold_8pt_width(s: &str) -> f32 {
+    let units: u32 = s
+        .chars()
+        .map(|c| {
+            let code = c as u32;
+            if c.is_ascii() && (0x20..=0x7E).contains(&code) {
+                ORACLE_HELV_BOLD_ASCII[(code - 0x20) as usize] as u32
+            } else {
+                1000
+            }
+        })
+        .sum();
+    units as f32 * 8.0 / 1000.0
+}
+
+/// The 6 Part II lines (`p1-t80[0]` = [`PART_II_LINE1`], then `p1-t81[0]`..`p1-t85[0]`) followed by
+/// the 27 page-2 Part IV lines (`p2-t1[0]`..`p2-t27[0]`) — 33 continuation fields total, in the
+/// bundled PDF's own printed top-to-bottom reading order (pinned directly against the asset's widget
+/// `/Rect` y-centers, independent of any map). Hardcoded here rather than sourced from
+/// `Form8275Map` deliberately: this test must compile and run (and RED) before the map carries these
+/// fields at all (T-f8275-part-ii-overflow Step 1).
+fn part_ii_and_part_iv_continuation_fields() -> Vec<String> {
+    let mut v = vec![PART_II_LINE1.to_string()];
+    for n in 81..=85 {
+        v.push(format!("topmostSubform[0].Page1[0].p1-t{n}[0]"));
+    }
+    for n in 1..=27 {
+        v.push(format!("topmostSubform[0].Page2[0].p2-t{n}[0]"));
+    }
+    v
+}
+
+/// A realistic long Part II narrative — a filer explaining lost records writes paragraphs, not a
+/// sentence. Well over 1500 characters (asserted below) and distinct from every other Part II fixture
+/// in this workspace (none of which exceeds ~200 characters — see the design note).
+fn long_part_ii_narrative() -> String {
+    "The taxpayer disposed of Bitcoin that was originally acquired over several transactions \
+        spanning approximately three years, during which the taxpayer used a combination of a hosted \
+        exchange account that has since ceased operations, a small number of in-person cash purchases \
+        from a now-unreachable counterparty, and at least one peer-to-peer transaction conducted \
+        through a messaging application whose records were not retained. The exchange that held the \
+        earliest lots suspended withdrawals and subsequently entered insolvency proceedings; repeated \
+        requests to its claims administrator for historical trade confirmations and cost-basis \
+        statements went unanswered, and the taxpayer has been unable to obtain contemporaneous \
+        documentation of the exact purchase prices paid for those lots despite good-faith efforts \
+        including searching personal email archives, bank and credit-card statements covering the \
+        relevant period, and any cached web pages of the exchange's now-defunct account dashboard. \
+        Because a substantial and unrecoverable portion of the original acquisition records is \
+        unavailable through no fault of the taxpayer, basis for the disposed lots was estimated using \
+        the daily low closing price over the taxpayer's best-documented estimate of the acquisition \
+        window, consistent with the Cohan doctrine, and the estimate was limited so as never to report \
+        a loss that a complete record might not support. The taxpayer maintains that this approach is \
+        a reasonable, conservative substitute for records that cannot be reconstructed, and discloses \
+        it here in the interest of full transparency with respect to the estimated basis reported on \
+        the attached Form 8949, so that the position is examined on its merits rather than treated as \
+        an undisclosed estimate."
+        .to_string()
+}
+
+/// ★ T-f8275-part-ii-overflow **Step 1 (test-first — RED before the fix)**.
+///
+/// Two invariants a real disclosure must satisfy, checked independently of `btctax-forms`'s own
+/// wrapping arithmetic:
+///
+///  1. **No field's content overflows its own physical box.** Every continuation field that carries
+///     non-empty text must measure `<=` its own widget width at 8pt Helvetica-Bold — the font/size the
+///     PDF's own `/DA` declares. This is what a viewer honoring the widget's geometry can actually show.
+///  2. **No character is lost.** Concatenating every non-empty continuation field's content (mod the
+///     whitespace normalization word-wrapping necessarily performs) must reproduce the ENTIRE original
+///     narrative, in order.
+///
+/// Pre-fix, `push_free` writes the WHOLE narrative unclipped into `p1-t80[0]`'s `/V` (there is no
+/// `/MaxLen` on this field, so nothing truncates the STORED string) — so invariant 2 alone cannot
+/// distinguish the defect (the data is all there). Invariant 1 is what catches it: a 1500+ character
+/// narrative is many thousands of points wide at 8pt, vastly over `p1-t80[0]`'s 518.4pt box, and every
+/// OTHER continuation field is untouched (empty) because nothing maps or writes them yet.
+///
+/// MUTATION (recorded per the build brief — see BUILD-REPORT.md for the actual run): once fixed,
+/// reverting the wrap so `part_ii` is again written whole to `PART_II_LINE1` must turn this test RED
+/// again.
+#[test]
+fn form_8275_part_ii_long_narrative_does_not_silently_clip() {
+    let narrative = long_part_ii_narrative();
+    assert!(
+        narrative.chars().count() > 1500,
+        "fixture premise: the narrative must exceed 1500 characters, got {}",
+        narrative.chars().count()
+    );
+
+    let printed = Printed8275 {
+        part_i: sample_printed().part_i,
+        part_ii: narrative.clone(),
+    };
+    let pdf = btctax_forms::fill_form_8275(&printed, &kitchen_sink_header(), 2024)
+        .unwrap()
+        .expect("non-empty part_i");
+    let (doc, fields) = fields_of(&pdf);
+
+    let mut reconstructed = String::new();
+    let mut any_nonempty = false;
+    for fqn in part_ii_and_part_iv_continuation_fields() {
+        let Some(value) = tv(&doc, &fields, &fqn) else {
+            continue;
+        };
+        if value.is_empty() {
+            continue;
+        }
+        any_nonempty = true;
+        let field = fields
+            .iter()
+            .find(|f| f.fqn == fqn)
+            .unwrap_or_else(|| panic!("{fqn} must be a real field in the bundled PDF"));
+        let rect = field
+            .rect
+            .unwrap_or_else(|| panic!("{fqn} must carry a /Rect"));
+        let box_width = rect[2] - rect[0];
+        let measured = oracle_helv_bold_8pt_width(&value);
+        assert!(
+            measured <= box_width + 0.5,
+            "{fqn}: its written content measures {measured:.1}pt wide at 8pt Helvetica-Bold but the \
+             field's own widget box is only {box_width:.1}pt wide — a PDF viewer honoring this \
+             widget's geometry (DoNotScroll, non-multiline) would silently clip roughly {:.1}pt of \
+             text (the field holds {} characters): {value:?}",
+            measured - box_width,
+            value.chars().count(),
+        );
+        if !reconstructed.is_empty() {
+            reconstructed.push(' ');
+        }
+        reconstructed.push_str(&value);
+    }
+    assert!(
+        any_nonempty,
+        "no continuation field carried any Part II content at all"
+    );
+
+    let norm = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert_eq!(
+        norm(&reconstructed),
+        norm(&narrative),
+        "the disclosure must carry EVERY word of the filer's Part II narrative, in order — a partial \
+         disclosure is not a disclosure"
+    );
+}
