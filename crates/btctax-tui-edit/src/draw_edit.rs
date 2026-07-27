@@ -104,6 +104,39 @@ fn draw_defensive_filing(frame: &mut Frame, app: &EditorApp) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    // Approach-B experimental disclosure (`design/approach-b-experimental-notice`, fix round 1
+    // Important #3): THIS screen — the declare flow, the promote flow, and the dashboard's own export —
+    // is the entire Approach-B journey, and `open_defensive_filing` is its only entry with nothing in
+    // any declare/promote/export tail routing back to Browse. Without a banner HERE, a filer could
+    // declare, promote, and export the whole journey and never see Browse's banner at all. Composes
+    // with the stale marker/status below it exactly the way Browse composes its PSEUDO + experimental
+    // banners: a state-conditional `Constraint::Length(1)` row. Expressed as a nested split (peeled off
+    // `inner` FIRST) rather than Browse's flat `next_idx` cursor, because this screen's other row is
+    // DYNAMICALLY measured (`content_sized_notice_height`), not another fixed `Length(1)` — peeling the
+    // banner off first makes every measurement/layout below it operate on the reduced area for free.
+    let show_experimental = app
+        .snapshot
+        .as_ref()
+        .map(|s| btctax_core::experimental::uses_approach_b(&s.events))
+        .unwrap_or(false);
+    let inner = if show_experimental {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(0)])
+            .split(inner);
+        let banner = Paragraph::new(experimental_banner_text())
+            .alignment(Alignment::Center)
+            .style(
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            );
+        frame.render_widget(banner, chunks[0]);
+        chunks[1]
+    } else {
+        inner
+    };
+
     // Reserve the NOTICE rows whenever there IS a status OR the stale latch is armed (D-7, DESIGN.md
     // §2.4(a)) — the marker renders independent of `app.status`, so gating the reservation on
     // `status.is_some()` alone leaves no rect for it to draw into from the SECOND keypress onward
@@ -298,6 +331,17 @@ fn content_sized_notice_height(lines: &[Line], width: u16) -> u16 {
     used.max(1)
 }
 
+/// The Approach-B experimental notice banner's text, shared by `draw_browse` and
+/// `draw_defensive_filing` (the ONLY two screens that ever render it in this crate) — a SINGLE call
+/// site for `NOTICE.one_line()`, so even within this one crate the two banners cannot independently
+/// hand-paraphrase and drift apart. ★ fix round 1 Important: MUST call `NOTICE.one_line()`, never a
+/// hand-typed literal — a hand-copy here is also byte-independent of `btctax-tui`'s own banner, so the
+/// two crates' banners could reword differently with nothing red (the exact defect class already fixed
+/// once at `draw_edit.rs:7673`'s `STALE_FACT_1` precedent, for a different pair of drifting copies).
+fn experimental_banner_text() -> String {
+    format!(" ⚠ {} ", btctax_core::experimental::NOTICE.one_line())
+}
+
 /// Render the browse screen: EDITOR-marked tab bar + viewer tab content + EDITOR footer.
 /// Form and modal overlays are drawn on top.
 fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
@@ -421,17 +465,13 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
 
     // ── Experimental notice banner (informational — never reversed/blocking, unlike PSEUDO above) ────
     if let Some(idx) = experimental_idx {
-        let banner = Paragraph::new(format!(
-            " ⚠ {} — newer, AI-assisted, had shipped filing-affecting defects (now fixed). Verify \
-             every figure and every disclosure before you file. ",
-            btctax_core::experimental::NOTICE.title
-        ))
-        .alignment(Alignment::Center)
-        .style(
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        );
+        let banner = Paragraph::new(experimental_banner_text())
+            .alignment(Alignment::Center)
+            .style(
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            );
         frame.render_widget(banner, chunks[idx]);
     }
 
@@ -7617,6 +7657,30 @@ mod tests {
         );
     }
 
+    /// ★ fix round 1 Important #2 — the banner must be DERIVED from `NOTICE` (via
+    /// `experimental_banner_text()` → `one_line()`), not a hand-typed paraphrase: renders at a WIDE
+    /// backend (so the whole line survives without clipping) and asserts the row carries the CURRENT
+    /// verbatim wording of both `NOTICE.summary` and `NOTICE.action`. Mutation: reword `NOTICE.summary`
+    /// (or hand-revert `draw_browse`'s banner to a paraphrase) → this reds (verified, reverted via
+    /// `cp`; see `design/approach-b-experimental-notice/BUILD-REPORT.md`) — the SAME mutation also reds
+    /// `btctax-tui`'s own drift test, proving the two crates' banners cannot independently drift.
+    #[test]
+    fn browse_experimental_banner_is_derived_from_notice_not_hand_copied() {
+        let buf = draw_browse_buffer(vec![declare_tranche_event_for_test(1)], 800, 40);
+        let row = searchable(&buf);
+        assert!(
+            row.contains("Defects that affect what gets FILED have shipped and were found only by \
+                 later review"),
+            "the banner must carry NOTICE.summary's CURRENT wording verbatim (via one_line()), not a \
+             hand-typed paraphrase: {row}"
+        );
+        assert!(
+            row.contains("confirm the basis in Form 8949 column (e) for each promoted lot equals the \
+                 floor you consented to at promote time"),
+            "the banner must carry NOTICE.action's CURRENT wording verbatim (via one_line()): {row}"
+        );
+    }
+
     /// Both banners together (pseudo-active AND a live tranche): the PSEUDO banner LEADS (row 3, the
     /// louder gating condition), the experimental banner follows (row 4), and content/footer shift down
     /// by TWO rows total — the two independent `Constraint::Length(1)` rows compose additively.
@@ -7660,6 +7724,82 @@ mod tests {
         assert_eq!(
             experimental_row, 4,
             "experimental follows directly below it"
+        );
+    }
+
+    /// ★ fix round 1 Important #3: `draw_defensive_filing` — the declare/promote/export screen itself,
+    /// whose only entry (`open_defensive_filing`) has nothing in any declare/promote/export tail
+    /// routing back to Browse — must ALSO carry the experimental banner. Without it, a filer could
+    /// declare, promote, and export the ENTIRE Approach-B journey and never see Browse's banner at all.
+    /// Extends the composition KAT (`browse_pseudo_and_experimental_banners_compose_pseudo_first`) to
+    /// this screen: armed (the D-7 stale marker) AND a live tranche (the experimental banner) both
+    /// render, banner first — peeled off the TOP of `inner` — with the marker composing BELOW it in the
+    /// reduced remaining area, exactly as Browse composes PSEUDO above experimental.
+    #[test]
+    fn defensive_filing_experimental_banner_composes_with_the_stale_marker() {
+        use btctax_adapters::BundledTaxTables;
+        use btctax_cli::CliConfig;
+        use btctax_core::defensive::DefensiveFilingView;
+        use btctax_tui::app::Snapshot;
+        use std::collections::{BTreeMap, BTreeSet};
+
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = EditorApp::new(PathBuf::from("/test/vault.pgp"));
+        app.screen = EditorScreen::DefensiveFiling;
+        app.defensive_dashboard = Some(crate::defensive_dashboard::DefensiveDashboardState::new(
+            DefensiveFilingView {
+                candidates: vec![],
+                resolve_first: vec![],
+                tranches: vec![],
+                still_short: vec![],
+                flagged_years: BTreeSet::new(),
+                safe_harbor_blocked: false,
+            },
+        ));
+        app.stale_after_write = Some("armed-for-test".to_string());
+        app.snapshot = Some(Snapshot {
+            events: vec![declare_tranche_event_for_test(1)],
+            state: btctax_core::state::LedgerState::default(),
+            cli_config: CliConfig::default(),
+            profiles: BTreeMap::new(),
+            refused: BTreeMap::new(),
+            tables: BundledTaxTables::load(),
+            donation_details: BTreeMap::new(),
+            bulk_estimated: BTreeMap::new(),
+            prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
+        });
+        terminal.draw(|f| draw(&mut *f, &mut app)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+
+        let banner_row = buffer_row_index_containing(&buf, "EXPERIMENTAL — DEFENSIVE FILING")
+            .expect("the experimental banner must render on the DefensiveFiling screen too");
+        let marker_row = buffer_row_index_containing(&buf, "STALE —")
+            .expect("the D-7 stale marker must still render, composing with the banner");
+        assert!(
+            banner_row < marker_row,
+            "the experimental banner renders ABOVE the stale marker (banner_row={banner_row}, \
+             marker_row={marker_row})"
+        );
+        assert_eq!(
+            banner_row, 1,
+            "the banner is the FIRST row inside the bordered block (row 0 is the block's own border)"
+        );
+    }
+
+    /// Without a live tranche, the DefensiveFiling screen's stale marker renders ALONE — no banner, and
+    /// the marker keeps its PRE-existing row (this screen's other content is unaffected when the banner
+    /// is absent).
+    #[test]
+    fn defensive_filing_experimental_banner_absent_without_approach_b() {
+        let buf = draw_defensive_filing_armed_buffer(None, 120, 40);
+        assert!(
+            buffer_row_index_containing(&buf, "EXPERIMENTAL — DEFENSIVE FILING").is_none(),
+            "no banner without a live tranche/promote on this screen either"
+        );
+        assert!(
+            buffer_row_index_containing(&buf, "STALE —").is_some(),
+            "the stale marker still renders on its own"
         );
     }
 
