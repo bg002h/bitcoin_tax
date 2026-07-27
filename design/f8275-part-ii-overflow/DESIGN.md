@@ -92,4 +92,8 @@ one bounded fix.
 
 ## 6. SemVer
 
-PATCH. `btctax-forms` internals; no public API change, no new asset.
+**MINOR** (corrected at the review gate — the original note said PATCH, which was true of the first
+build but not of the fix round). Additive public API on `btctax-forms`:
+`part_ii_capacity_check`, `PartIiCapacity`, `PartIiOverflow` (`lib.rs:49,56,297`) and
+`FlatPlacement::free_ordered` (`verify.rs:328`). Nothing removed or changed, no new asset — additive
+only, so MINOR under cargo SemVer. **Use MINOR for the version bump at ship time.**

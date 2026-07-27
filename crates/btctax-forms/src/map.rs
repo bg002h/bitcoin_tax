@@ -697,19 +697,25 @@ pub struct Form8275Map {
     pub identity: IdentityCells,
     /// Part I rows (6 on this revision) — the per-copy capacity `fill_form_8275` refuses beyond.
     pub rows: Vec<Form8275Row>,
-    /// Part II "Detailed Explanation" line 1 — the FIRST of the 6 Part II lines the filer's narrative
-    /// (`Printed8275::part_ii`) is wrapped across (`crate::wrap`) when it does not fit on this line
-    /// alone. Kept as its own field (rather than folded into `part_ii_continuation`) because it existed
-    /// before this map grew the continuation lines, and every existing caller names it directly.
+    /// Part II "Detailed Explanation" line 1 — the ONLY Part II line the filer's narrative
+    /// (`Printed8275::part_ii`) is written to. Overflow goes to `part_iv_continuation`, NOT to
+    /// `part_ii_continuation`: the bundled PDF's static page content prints the numerals "1 ".."6 "
+    /// beside `p1-t80`..`p1-t85`, and those numerals correspond to Part I's rows — so writing one
+    /// combined narrative across them would attribute sentence fragments to items they do not explain.
     pub part_ii_narrative: String,
     /// Part II "Detailed Explanation" lines 2–6 — `p1-t81[0]`..`p1-t85[0]` on the bundled Rev. 10-2024
-    /// PDF, in printed top-to-bottom order. **Unmapped before T-f8275-part-ii-overflow**: the narrative
-    /// used to be written whole to `part_ii_narrative` alone, silently clipping past its own line.
+    /// PDF, in printed top-to-bottom order.
+    ///
+    /// **Mapped but deliberately NOT written.** Retained so the map describes the form completely (and
+    /// so `verify_flat` authorizes them if a future per-item Part II numbering lands — see
+    /// `design/f8275-part-ii-overflow/FOLLOWUPS.md`), but the fill writes only line 1 and then spills to
+    /// Part IV, for the printed-numeral reason on `part_ii_narrative`.
     pub part_ii_continuation: Vec<String>,
     /// Page-2 **Part IV** "Explanations (continued from Parts I and/or II)" — `p2-t1[0]`..`p2-t27[0]`,
-    /// in printed top-to-bottom order. The SAME free-text narrative overflows into these once Part II's
-    /// own 6 lines (`part_ii_narrative` + `part_ii_continuation`) are exhausted. Also unmapped before
-    /// T-f8275-part-ii-overflow.
+    /// in printed top-to-bottom order. The narrative overflows into these once Part II **line 1** is
+    /// full. Per the IRS Rev. 10-2024 Specific Instructions ("Include the corresponding part and line
+    /// number from page 1"), the first line used carries a `Part II, line 1 (continued):` prefix, whose
+    /// width is budgeted before wrapping.
     pub part_iv_continuation: Vec<String>,
 }
 
@@ -757,10 +763,14 @@ impl Form8275Map {
         v
     }
 
-    /// The 33 continuation fields the Part II narrative wraps across, in printed top-to-bottom order:
+    /// Every free-text narrative field this map declares, in printed top-to-bottom order:
     /// `part_ii_narrative` (Part II line 1), then `part_ii_continuation` (Part II lines 2–6), then
-    /// `part_iv_continuation` (Part IV lines 1–27). One ordered sequence — `crate::wrap` doesn't need to
-    /// know Part II from Part IV, only "the next available line."
+    /// `part_iv_continuation` (Part IV lines 1–27).
+    ///
+    /// ★ This is the map's DECLARED shape, **not** the fill's write set: the fill writes Part II line 1
+    /// then spills straight to Part IV, skipping lines 2–6 (see `part_ii_continuation`). Production-dead
+    /// as of the Part II overflow fix — retained for tests and for a future per-item Part II numbering.
+    /// Do not use it as "the sequence the narrative wraps across".
     pub fn narrative_continuation_fields(&self) -> Vec<&str> {
         let mut v = vec![self.part_ii_narrative.as_str()];
         v.extend(self.part_ii_continuation.iter().map(String::as_str));

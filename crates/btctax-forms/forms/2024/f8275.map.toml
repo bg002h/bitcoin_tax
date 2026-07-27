@@ -8,8 +8,9 @@
 form = "f8275"
 year = 2024
 part_ii_narrative = "topmostSubform[0].Page1[0].p1-t80[0]"
-# Part II lines 2-6 (T-f8275-part-ii-overflow) — the narrative wraps onto these, in order, when it does
-# not fit on `part_ii_narrative` alone.
+# Part II lines 2-6 — MAPPED BUT DELIBERATELY NOT WRITTEN. The PDF's static page content prints the
+# numerals "1 ".."6 " beside p1-t80..p1-t85, and they correspond to Part I's rows, so a single combined
+# narrative must not be wrapped across them. Overflow goes to Part IV instead.
 part_ii_continuation = [
     "topmostSubform[0].Page1[0].p1-t81[0]",
     "topmostSubform[0].Page1[0].p1-t82[0]",
@@ -17,8 +18,9 @@ part_ii_continuation = [
     "topmostSubform[0].Page1[0].p1-t84[0]",
     "topmostSubform[0].Page1[0].p1-t85[0]",
 ]
-# Page-2 Part IV "Explanations (continued from Parts I and/or II)" — 27 further continuation lines the
-# SAME narrative overflows into once Part II's own 6 lines are exhausted (T-f8275-part-ii-overflow).
+# Page-2 Part IV "Explanations (continued from Parts I and/or II)" — the 27 continuation lines the
+# narrative overflows into once Part II LINE 1 is full. The first line used carries a
+# "Part II, line 1 (continued):" prefix, per the IRS Rev. 10-2024 Specific Instructions.
 part_iv_continuation = [
     "topmostSubform[0].Page2[0].p2-t1[0]",
     "topmostSubform[0].Page2[0].p2-t2[0]",
