@@ -657,7 +657,8 @@ fn handle_form_key(app: &mut EditorApp, key: KeyEvent) {
 /// `Quit and reopen the vault.` — fact 2 sits BETWEEN this fragment's `(reason).` and the closing
 /// "Quit and reopen" sentence, not after it. This fragment itself carries no trailing punctuation so
 /// every caller's own tail composes onto it cleanly.
-const STALE_FACT_1: &str = "the write reached disk, but whether it had the intended effect could not be \
+const STALE_FACT_1: &str =
+    "the write reached disk, but whether it had the intended effect could not be \
      verified, because the ledger would not re-project";
 
 /// Fact 2's NO-LOSS wording (DESIGN.md §2.5, fix round 1 Important 3): used when a pre-close survey
@@ -842,7 +843,10 @@ impl EditorApp {
         arm_prefix: Option<String>,
         status: impl FnOnce(&btctax_tui::app::Snapshot) -> String,
     ) {
-        let rebuilt = self.session.as_ref().map(btctax_tui::unlock::build_snapshot);
+        let rebuilt = self
+            .session
+            .as_ref()
+            .map(btctax_tui::unlock::build_snapshot);
         self.apply_reprojection(arm_prefix, rebuilt, status)
     }
 
@@ -1584,7 +1588,9 @@ fn commit_tax_inputs(app: &mut EditorApp) {
                                         // profile-save site). `build_snapshot` is a READ via the persist-seam pattern; a re-projection
                                         // failure is non-fatal (keep the old snapshot; tell the filer to restart).
             let prefix = format!("committed {year} as {label}, but ");
-            app.after_write(Some(prefix), move |_| format!("committed {year} as {label}"));
+            app.after_write(Some(prefix), move |_| {
+                format!("committed {year} as {label}")
+            });
         }
         Ok(CommitOutcome::Refused(refusal)) => {
             let mut msg = refusal.detail.clone();
@@ -2436,7 +2442,12 @@ fn handle_reclassify_outflow_modal_key(app: &mut EditorApp, key: KeyEvent) {
                 Ok(decision_id) => {
                     // D4 step-2: derive status from re-projected blockers [R0-I5].
                     app.after_write(None, |snap| {
-                        derive_reclassify_outflow_status(snap, &target_event, &decision_id, &kind_str)
+                        derive_reclassify_outflow_status(
+                            snap,
+                            &target_event,
+                            &decision_id,
+                            &kind_str,
+                        )
                     });
                     app.reclassify_outflow_modal = None;
                     app.reclassify_outflow_flow = None;
@@ -9485,9 +9496,7 @@ fn handle_bulk_reclassify_outflow_modal_key(app: &mut EditorApp, key: KeyEvent) 
 
             match save_result {
                 Ok(n) => {
-                    app.after_write(None, |snap| {
-                        derive_bulk_reclassify_outflow_status(snap, n)
-                    });
+                    app.after_write(None, |snap| derive_bulk_reclassify_outflow_status(snap, n));
                     app.bulk_reclassify_outflow_modal = None;
                     app.bulk_reclassify_outflow_flow = None;
                 }
@@ -10773,9 +10782,18 @@ mod tests {
         );
         let s = app.status.clone().unwrap_or_default();
         assert!(app.stale_after_write.is_some(), "the latch must arm");
-        assert!(s.contains("reached disk"), "fact 1 must say the write landed: {s}");
-        assert!(s.contains("could not be verified"), "fact 1 must NOT claim the effect: {s}");
-        assert!(!s.contains("is correct"), "fact 1 must never assert correctness: {s}");
+        assert!(
+            s.contains("reached disk"),
+            "fact 1 must say the write landed: {s}"
+        );
+        assert!(
+            s.contains("could not be verified"),
+            "fact 1 must NOT claim the effect: {s}"
+        );
+        assert!(
+            !s.contains("is correct"),
+            "fact 1 must never assert correctness: {s}"
+        );
         assert!(app.declare_flow.is_none(), "surfaces must be closed");
     }
 
@@ -10793,10 +10811,18 @@ mod tests {
         app.stale_after_write = Some("earlier".to_string());
         app.defensive_dashboard = None;
         let rebuilt = btctax_tui::unlock::build_snapshot(app.session.as_ref().unwrap());
-        app.apply_reprojection(None, Some(rebuilt), |snap| format!("{} events", snap.events.len()));
+        app.apply_reprojection(None, Some(rebuilt), |snap| {
+            format!("{} events", snap.events.len())
+        });
         assert!(app.status.clone().unwrap_or_default().ends_with("events"));
-        assert!(app.stale_after_write.is_none(), "a successful re-projection clears the latch (D-4)");
-        assert!(app.defensive_dashboard.is_none(), "must not fabricate a dashboard");
+        assert!(
+            app.stale_after_write.is_none(),
+            "a successful re-projection clears the latch (D-4)"
+        );
+        assert!(
+            app.defensive_dashboard.is_none(),
+            "must not fabricate a dashboard"
+        );
     }
 
     /// Fail-closed: no session is production-unreachable (`session` is `Some` iff `snapshot` is), but it
@@ -10836,7 +10862,9 @@ mod tests {
         let before_ptr = app.snapshot.as_ref().unwrap().events.as_ptr();
 
         let rebuilt = btctax_tui::unlock::build_snapshot(app.session.as_ref().unwrap());
-        app.apply_reprojection(None, Some(rebuilt), |snap| format!("{} events", snap.events.len()));
+        app.apply_reprojection(None, Some(rebuilt), |snap| {
+            format!("{} events", snap.events.len())
+        });
 
         let after_ptr = app.snapshot.as_ref().unwrap().events.as_ptr();
         assert_ne!(
@@ -10934,7 +10962,10 @@ mod tests {
         handle_key(&mut app, press(KeyCode::Char('T')));
         handle_key(&mut app, press(KeyCode::Char(' '))); // cycle FilingStatus → Single (materializes)
         let form = app.tax_inputs_form.as_ref().unwrap();
-        assert!(form.dirty, "the fixture must start dirty for this KAT to mean anything");
+        assert!(
+            form.dirty,
+            "the fixture must start dirty for this KAT to mean anything"
+        );
         assert_eq!(
             form.working.as_ref().unwrap().filing_status,
             FilingStatus::Single,
@@ -11040,8 +11071,8 @@ mod tests {
         let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
         handle_key(&mut app, press(KeyCode::Char('T')));
         handle_key(&mut app, press(KeyCode::Char(' '))); // materializes + dirty
-        // Simulate `confirm_park_to_profile`'s own post-write state: the form stays OPEN, but `dirty`
-        // is cleared because the parked draft already reached disk.
+                                                         // Simulate `confirm_park_to_profile`'s own post-write state: the form stays OPEN, but `dirty`
+                                                         // is cleared because the parked draft already reached disk.
         app.tax_inputs_form.as_mut().unwrap().dirty = false;
 
         app.apply_reprojection(
@@ -21780,7 +21811,10 @@ mod tests {
         handle_key(&mut app, press(KeyCode::Char('T'))); // open the tax-inputs flow
         handle_key(&mut app, press(KeyCode::Char(' '))); // cycle FilingStatus → Single (materializes)
         let form = app.tax_inputs_form.as_ref().unwrap();
-        assert!(form.dirty, "the fixture must start dirty for this KAT to mean anything");
+        assert!(
+            form.dirty,
+            "the fixture must start dirty for this KAT to mean anything"
+        );
         assert_eq!(
             form.working.as_ref().unwrap().filing_status,
             FilingStatus::Single,
@@ -29513,7 +29547,10 @@ mod tests {
         handle_key(&mut app3, press(KeyCode::Char('s'))); // open the commit modal
         commit_tax_inputs(&mut app3);
         assert!(
-            app3.status.clone().unwrap_or_default().contains("committed"),
+            app3.status
+                .clone()
+                .unwrap_or_default()
+                .contains("committed"),
             "the hoisted-status site must not be blanked by the migration"
         );
     }
