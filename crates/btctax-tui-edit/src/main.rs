@@ -704,8 +704,8 @@ impl EditorApp {
     /// sites need `&mut` on a flow field immediately afterwards, which a `&self`-borrowing accessor
     /// would forbid (E0502).
     ///
-    /// Added here per the plan's Task-1 file list; gains its first production caller in a later task.
-    #[allow(dead_code)]
+    /// Added here per the plan's Task-1 file list; gains its callers at Task 5's five payload-derived
+    /// sites (the last `#[allow(dead_code)]` in this file — every other seam already had one).
     fn stale_reason(&self) -> Option<String> {
         self.stale_after_write
             .as_ref()
@@ -4257,6 +4257,13 @@ fn handle_declare_flow_key(app: &mut EditorApp, key: KeyEvent) {
                 }
             }
             KeyCode::Char('t') => {
+                // ★ Task 5, site 1: this preview is display-only, but it READS `app.snapshot` — a stale
+                // image would show a tax-Δ the current ledger cannot back up. Owned `stale_reason()` so
+                // the borrow ends before the `&mut` on `app.declare_flow` below (E0502 otherwise).
+                if let Some(s) = app.stale_reason() {
+                    app.status = Some(s);
+                    return;
+                }
                 // ★ T6-Minor1: source the REAL events/prices/cfg/tables + the REAL stored/resolved
                 // TaxProfile for the shortfall's own year at the session/snapshot layer — never
                 // journey_view's structurally-Uncomputable `None`.
@@ -4299,6 +4306,15 @@ fn handle_declare_flow_key(app: &mut EditorApp, key: KeyEvent) {
 /// append"). On success, the WRITE goes through
 /// `edit::persist::persist_declare_tranche` — the ONLY caller of `apply_declare` in this crate (C-3).
 fn declare_flow_confirm(app: &mut EditorApp) {
+    // ★ Task 5, site 2 (GATING): `plan_declare` reads `app.snapshot` and `apply_declare` appends its
+    // `payload` verbatim with no re-check — this is the write, so it is the one site where a stale image
+    // could land a wrong number on disk. Owned `stale_reason()` so the borrow ends before the `&mut` on
+    // `app.declare_flow` taken below (E0502 otherwise). Refusing here leaves the flow's own
+    // window/sat/wallet untouched — nothing below this guard has run yet.
+    if let Some(s) = app.stale_reason() {
+        app.status = Some(s);
+        return;
+    }
     let (sat, wallet, window_start, window_end, target_event) = match app.declare_flow.as_ref() {
         // ★ OWNER DECISION (era table): the window only exists once the FILER has picked an era.
         // Unreachable through the step machine (`review()` refuses to leave Edit without a pick), but
@@ -4451,6 +4467,14 @@ fn handle_promote_flow_provenance_key(app: &mut EditorApp, key: KeyEvent) {
             }
         }
         KeyCode::Enter => {
+            // ★ Task 5, site 3 (GATING): a non-`Purchase` provenance drives `plan_promote` over
+            // `app.snapshot` to surface its `Refusal::Provenance` text — a stale image must not be read
+            // even for that. Owned `stale_reason()` so the borrow ends before the `&mut` on
+            // `app.promote_flow` below (E0502 otherwise).
+            if let Some(s) = app.stale_reason() {
+                app.status = Some(s);
+                return;
+            }
             let Some(snap) = app.snapshot.as_ref() else {
                 return;
             };
@@ -4499,6 +4523,15 @@ fn handle_promote_flow_part_ii_key(app: &mut EditorApp, key: KeyEvent) {
 /// cached plan — mirrors `declare_flow_confirm`'s own "re-run fresh" discipline, applied one step
 /// earlier here since Promote's consent screen itself needs a real, freshly-computed `PromotePlan`).
 fn promote_flow_review(app: &mut EditorApp) {
+    // ★ Task 5, site 4 (GATING): `flow.review` builds the `PromotePlan` — the `Acknowledgment{shown_terms}`
+    // §6664(c) record AND `filed_basis`, the 8949 col (e) number — from `app.snapshot`. Owned
+    // `stale_reason()` so the borrow ends before the `&mut` on `app.promote_flow` below (E0502
+    // otherwise). Refusing here leaves the authored Part II narrative (`flow.part_ii`, outside `step`)
+    // untouched — nothing below this guard has run yet.
+    if let Some(s) = app.stale_reason() {
+        app.status = Some(s);
+        return;
+    }
     let Some(snap) = app.snapshot.as_ref() else {
         return;
     };
@@ -8214,6 +8247,15 @@ fn open_pseudo_approve_flow(app: &mut EditorApp) {
 fn handle_pseudo_approve_modal_key(app: &mut EditorApp, key: KeyEvent) {
     match key.code {
         KeyCode::Enter => {
+            // ★ Task 5, site 5 (GATING): `pseudo_plan(&snap.events, …)` is "RE-derived here from the
+            // held snapshot" (see the doc above) — a stale image could hand `persist_bulk_decisions` a
+            // payload set the current ledger would refuse. Owned `stale_reason()` so the borrow ends
+            // before the `&mut` on `app.pseudo_approve_modal`/`app.session` taken below (E0502
+            // otherwise).
+            if let Some(s) = app.stale_reason() {
+                app.status = Some(s);
+                return;
+            }
             let now = app.clock.now();
             // Compute the decision payloads from the immutable snapshot (drops the borrow before persist).
             let payloads: Vec<btctax_core::EventPayload> =
@@ -29754,6 +29796,464 @@ mod tests {
             "fact 2 must stay silent: the ordering clears `dirty` BEFORE `after_write` runs, so the \
              pre-close survey must see a clean form even though this KAT forced `dirty = true` on \
              entry: {s}"
+        );
+    }
+
+    // ── Task 5: the five payload probes and their gating KATs ─────────────────────────────────────
+    //
+    // Five sites read `app.snapshot` to build (and, at two of them, write) a filed payload:
+    // `handle_declare_flow_key`'s `Char('t')` preview, `declare_flow_confirm` (writes), the Promote
+    // provenance step's `Enter` (`attest_provenance`), `promote_flow_review` (builds the
+    // `Acknowledgment`/`filed_basis` §6664(c) record), and `handle_pseudo_approve_modal_key`'s `Enter`
+    // (writes). Each gets `if let Some(s) = app.stale_reason() { app.status = Some(s); return; }` at the
+    // top, before any `&mut` field borrow — `stale_reason` returns an OWNED `String` precisely so that
+    // borrow ends before the `&mut` on the flow field a few lines later (a `&self`-borrowing accessor
+    // held across both is `E0502`).
+
+    /// One bare Dispose (no prior Acquire) ⇒ a real `UncoveredDisposal` shortfall with no records ⇒
+    /// exactly one declare candidate. Opens the Declare flow for it and leaves it at the `Edit` step
+    /// with no era picked (mirrors `declare_flow_end_to_end_persists_a_real_zero_basis_tranche`'s own
+    /// setup, stopped before the era pick).
+    fn vault_with_declare_flow_open() -> (EditorApp, tempfile::TempDir) {
+        use btctax_core::event::{Dispose, DisposeKind};
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::{LedgerEvent, WalletId};
+        use time::macros::datetime;
+
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        let wallet = WalletId::Exchange {
+            provider: "cb".into(),
+            account: "m".into(),
+        };
+        {
+            let session = app.session.as_mut().unwrap();
+            let batch = vec![LedgerEvent {
+                id: EventId::import(Source::Coinbase, SourceRef::new("SELL")),
+                utc_timestamp: datetime!(2024-06-15 00:00 UTC),
+                original_tz: time::UtcOffset::UTC,
+                wallet: Some(wallet.clone()),
+                payload: EventPayload::Dispose(Dispose {
+                    sat: 10_000_000,
+                    usd_proceeds: rust_decimal_macros::dec!(5_000),
+                    fee_usd: rust_decimal_macros::dec!(0),
+                    kind: DisposeKind::Sell,
+                }),
+            }];
+            btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+            session.save().unwrap();
+        }
+        let refreshed = {
+            let session = app.session.as_ref().unwrap();
+            btctax_tui::unlock::build_snapshot(session).unwrap().0
+        };
+        app.snapshot = Some(refreshed);
+
+        app.open_defensive_filing();
+        let target = {
+            let dash = app.defensive_dashboard.as_ref().unwrap();
+            assert_eq!(
+                dash.view.candidates.len(),
+                1,
+                "fixture: the bare Dispose must yield exactly one declare candidate"
+            );
+            dash.view.candidates[0].event.clone()
+        };
+        open_declare_flow(&mut app, target);
+        assert!(
+            app.declare_flow.is_some(),
+            "fixture: the Declare flow must open for a real candidate"
+        );
+        (app, dir)
+    }
+
+    /// `vault_with_declare_flow_open` + a real era pick + `Enter` ⇒ the flow sits at the DFW-D8
+    /// `Confirm` step, ready for `declare_flow_confirm` (site 2).
+    fn vault_at_declare_confirm() -> (EditorApp, tempfile::TempDir) {
+        let (mut app, dir) = vault_with_declare_flow_open();
+        handle_declare_flow_key(&mut app, press(KeyCode::Char('1')));
+        handle_declare_flow_key(&mut app, press(KeyCode::Enter));
+        assert_eq!(
+            app.declare_flow.as_ref().map(|f| f.step),
+            Some(crate::edit::declare_flow::DeclareFlowStep::Confirm),
+            "fixture: an era pick + Enter must reach the Confirm step"
+        );
+        (app, dir)
+    }
+
+    /// A live, unpromoted `DeclareTranche` over a fully-priced window (mirrors
+    /// `promote_flow_end_to_end_records_a_real_promote_via_persist_promote_tranche`'s own setup). Opens
+    /// the Promote flow for it and leaves it at the BG-D5 `Provenance` step, nothing yet answered.
+    fn vault_with_promote_flow_open() -> (EditorApp, tempfile::TempDir) {
+        use btctax_core::event::DeclareTranche;
+        use btctax_core::persistence::append_decision;
+        use btctax_core::WalletId;
+        use time::macros::date;
+        use time::UtcOffset;
+
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        let wallet = WalletId::SelfCustody {
+            label: "cold".into(),
+        };
+        let now = app.clock.now();
+        let target = {
+            let session = app.session.as_mut().unwrap();
+            let id = append_decision(
+                session.conn(),
+                EventPayload::DeclareTranche(DeclareTranche {
+                    sat: 40_000_000,
+                    wallet,
+                    window_start: date!(2020 - 01 - 01),
+                    window_end: date!(2020 - 01 - 10),
+                }),
+                now,
+                UtcOffset::UTC,
+                None,
+            )
+            .unwrap();
+            session.save().unwrap();
+            id
+        };
+        let refreshed = {
+            let session = app.session.as_ref().unwrap();
+            btctax_tui::unlock::build_snapshot(session).unwrap().0
+        };
+        app.snapshot = Some(refreshed);
+        app.open_defensive_filing();
+        open_promote_flow(&mut app, target);
+        assert!(
+            app.promote_flow.is_some(),
+            "fixture: the Promote flow must open for a real DeclaredZero row"
+        );
+        (app, dir)
+    }
+
+    /// `vault_with_promote_flow_open` + a `Purchase` attestation + an authored Part II narrative ⇒ the
+    /// flow sits at the `PartII` step, ready for `promote_flow_review` (site 4, `Tab`'s handler) to
+    /// (absent the latch) reach `Consent` with a real `PromotePlan`.
+    fn vault_at_promote_consent() -> (EditorApp, tempfile::TempDir) {
+        let (mut app, dir) = vault_with_promote_flow_open();
+        handle_key(&mut app, press(KeyCode::Char('1'))); // attest Purchase
+        handle_key(&mut app, press(KeyCode::Enter)); // attest_provenance -> PartII
+        assert!(
+            matches!(
+                app.promote_flow.as_ref().map(|f| &f.step),
+                Some(crate::edit::promote_flow::PromoteFlowStep::PartII { .. })
+            ),
+            "fixture: a Purchase attestation must advance to Part II authoring"
+        );
+        for c in "cash P2P purchase, no records".chars() {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+        (app, dir)
+    }
+
+    /// One unresolved `TransferIn` (no decision on it) ⇒ `pseudo_plan` yields a non-empty synthetic
+    /// default (a $0-basis self-transfer). The sanity assertion guards against the gating KAT below
+    /// passing vacuously (an empty plan would read `live_decision_count == 0` with or without the probe).
+    fn vault_with_pending_pseudo_defaults() -> (EditorApp, tempfile::TempDir) {
+        use btctax_core::event::TransferIn;
+        use btctax_core::identity::{Source, SourceRef};
+        use btctax_core::{LedgerEvent, WalletId};
+        use time::macros::datetime;
+
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        let wallet = WalletId::Exchange {
+            provider: "cb".into(),
+            account: "m".into(),
+        };
+        {
+            let session = app.session.as_mut().unwrap();
+            let batch = vec![LedgerEvent {
+                id: EventId::import(Source::Coinbase, SourceRef::new("IN-1")),
+                utc_timestamp: datetime!(2024-06-01 00:00 UTC),
+                original_tz: time::UtcOffset::UTC,
+                wallet: Some(wallet),
+                payload: EventPayload::TransferIn(TransferIn {
+                    sat: 1_000_000,
+                    src_addr: None,
+                    txid: None,
+                }),
+            }];
+            btctax_core::persistence::append_import_batch(session.conn(), &batch).unwrap();
+            session.save().unwrap();
+        }
+        let refreshed = {
+            let session = app.session.as_ref().unwrap();
+            btctax_tui::unlock::build_snapshot(session).unwrap().0
+        };
+        app.snapshot = Some(refreshed);
+
+        let plan = {
+            let session = app.session.as_ref().unwrap();
+            let snap = app.snapshot.as_ref().unwrap();
+            let cfg = snap.cli_config.to_projection();
+            btctax_core::pseudo_plan(&snap.events, session.prices(), &cfg)
+        };
+        assert!(
+            !plan.is_empty(),
+            "fixture: an unresolved TransferIn must yield a pending pseudo default"
+        );
+        (app, dir)
+    }
+
+    fn pseudo_approve_modal_fixture() -> PseudoApproveModalState {
+        PseudoApproveModalState { count: 1 }
+    }
+
+    /// Whether the Promote flow has reached the `Consent` step — i.e. whether a `PromotePlan` was
+    /// actually constructed by `flow.review(...)`.
+    fn promote_flow_reached_consent(app: &EditorApp) -> bool {
+        matches!(
+            app.promote_flow.as_ref().map(|f| &f.step),
+            Some(crate::edit::promote_flow::PromoteFlowStep::Consent { .. })
+        )
+    }
+
+    /// The count of `DeclareTranche` decisions actually landed in the CURRENT session's vault (not the
+    /// possibly-stale `app.snapshot`) — the "written artifact" the gating KAT must show stayed absent.
+    fn live_declare_count(app: &EditorApp) -> usize {
+        btctax_core::persistence::load_all(app.session.as_ref().unwrap().conn())
+            .unwrap()
+            .iter()
+            .filter(|e| matches!(e.payload, EventPayload::DeclareTranche(_)))
+            .count()
+    }
+
+    /// The count of `Decision`-identified events actually landed in the CURRENT session's vault — used
+    /// where the payload TYPE varies (pseudo defaults can be any decision-shaped default), so "any
+    /// decision landed at all" is the artifact-absence check the brief asks for.
+    fn live_decision_count(app: &EditorApp) -> usize {
+        btctax_core::persistence::load_all(app.session.as_ref().unwrap().conn())
+            .unwrap()
+            .iter()
+            .filter(|e| matches!(e.id, EventId::Decision { .. }))
+            .count()
+    }
+
+    /// ★ GATING (D-5). The filing-correctness property: with the latch armed, NO decision payload of any
+    /// kind is constructible. Three constructors, because all three read `app.snapshot`: `plan_promote`
+    /// (via `promote_flow_review` — builds `Acknowledgment{shown_terms}` AND `filed_basis`, which becomes
+    /// the promoted lot's basis in Form 8949 col (e)), `plan_declare` (via `declare_flow_confirm` —
+    /// appended verbatim by `apply_declare` with no `would_conflict` re-check), and `pseudo_plan` (via
+    /// `handle_pseudo_approve_modal_key` — its own doc says "RE-derived here from the held snapshot").
+    ///
+    /// These KATs, not the compiler, are the guarantee at these sites (a compiler-enforced privatization
+    /// was cut — it cannot be expressed where a `&mut` flow borrow is also needed at the same site).
+    /// Defence in depth: the primary line is `close_all_mutation_surfaces` + the opener guards (Task 4);
+    /// this is the second, independent line, and the dedicated tests below isolate each site further
+    /// (including the individual mutation record for each probe).
+    #[test]
+    fn no_decision_payload_is_constructible_while_the_stale_latch_is_armed() {
+        // promote
+        let (mut app, _d) = vault_at_promote_consent();
+        app.stale_after_write = Some("boom".into());
+        promote_flow_review(&mut app);
+        assert!(
+            !promote_flow_reached_consent(&app),
+            "no PromotePlan may be constructed while armed"
+        );
+
+        // declare
+        let (mut app2, _d2) = vault_at_declare_confirm();
+        app2.stale_after_write = Some("boom".into());
+        declare_flow_confirm(&mut app2);
+        assert_eq!(
+            live_declare_count(&app2),
+            0,
+            "no DeclarePlan may be written while armed"
+        );
+
+        // pseudo-approve
+        let (mut app3, _d3) = vault_with_pending_pseudo_defaults();
+        app3.pseudo_approve_modal = Some(pseudo_approve_modal_fixture());
+        app3.stale_after_write = Some("boom".into());
+        handle_pseudo_approve_modal_key(&mut app3, press(KeyCode::Enter));
+        assert_eq!(
+            live_decision_count(&app3),
+            0,
+            "no pseudo payload set may be built while armed"
+        );
+    }
+
+    /// Mutation record (site 2, `declare_flow_confirm`): deleted its `stale_reason` probe and re-ran
+    /// `cargo nextest run -p btctax-tui-edit no_decision_payload_is_constructible` — RED
+    /// (`live_declare_count(&app2)` was `1`, not `0`: the write went through). Restored the probe via a
+    /// `cp` backup (never `git checkout --`) and re-ran — GREEN.
+    ///
+    /// The must-keep-working half: refusing here must not destroy the filer's already-authored
+    /// window/sat/wallet, nor bounce the flow back to `Edit` or close it — the probe returns before
+    /// touching `app.declare_flow` at all, so every field must be byte-identical to the fixture's.
+    #[test]
+    fn declare_flow_confirm_refusal_while_stale_preserves_the_flows_window_sat_wallet() {
+        let (mut app, _dir) = vault_at_declare_confirm();
+        let (sat_before, wallet_before, window_before, step_before) = {
+            let flow = app.declare_flow.as_ref().unwrap();
+            (flow.sat, flow.wallet.clone(), flow.window(), flow.step)
+        };
+
+        app.stale_after_write = Some("boom".into());
+        declare_flow_confirm(&mut app);
+
+        let flow = app
+            .declare_flow
+            .as_ref()
+            .expect("a stale refusal must not close the flow");
+        assert_eq!(flow.sat, sat_before, "sat must survive the refusal");
+        assert_eq!(
+            flow.wallet, wallet_before,
+            "wallet must survive the refusal"
+        );
+        assert_eq!(
+            flow.window(),
+            window_before,
+            "window must survive the refusal"
+        );
+        assert_eq!(
+            flow.step, step_before,
+            "the flow must stay at Confirm, not bounce to Edit"
+        );
+
+        let s = app.status.clone().unwrap_or_default();
+        assert!(
+            s.contains("refused"),
+            "the stale refusal must be surfaced: {s}"
+        );
+        assert_eq!(
+            live_declare_count(&app),
+            0,
+            "nothing may have reached the vault"
+        );
+    }
+
+    /// Mutation record (site 4, `promote_flow_review`): deleted its `stale_reason` probe and re-ran
+    /// `cargo nextest run -p btctax-tui-edit no_decision_payload_is_constructible` — RED
+    /// (`promote_flow_reached_consent(&app)` was `true`: the fixture's window/provenance/narrative are
+    /// all valid, so `flow.review(...)` actually reached `Consent` with a real `PromotePlan`). Restored
+    /// the probe via a `cp` backup (never `git checkout --`) and re-ran — GREEN.
+    ///
+    /// The must-keep-working half: refusing here must preserve the authored Form 8275 Part II narrative
+    /// verbatim — it lives OUTSIDE `step` (`PromoteFlowState::part_ii`), and the probe returns before
+    /// touching `app.promote_flow` at all, so it survives by construction. Also proves the flow stays
+    /// open at `PartII`, never bounced or closed.
+    #[test]
+    fn promote_flow_review_refusal_while_stale_preserves_the_authored_part_ii_narrative() {
+        let (mut app, _dir) = vault_at_promote_consent();
+        let narrative_before = app
+            .promote_flow
+            .as_ref()
+            .unwrap()
+            .part_ii
+            .as_str()
+            .to_string();
+        assert_eq!(
+            narrative_before, "cash P2P purchase, no records",
+            "fixture sanity: the narrative must be the one the fixture authored"
+        );
+
+        app.stale_after_write = Some("boom".into());
+        promote_flow_review(&mut app);
+
+        let flow = app
+            .promote_flow
+            .as_ref()
+            .expect("a stale refusal must not close the flow");
+        assert_eq!(
+            flow.part_ii.as_str(),
+            narrative_before,
+            "the authored Part II narrative must survive the refusal verbatim"
+        );
+        assert!(
+            matches!(
+                flow.step,
+                crate::edit::promote_flow::PromoteFlowStep::PartII { .. }
+            ),
+            "the flow must stay at Part II, never advance to Consent while armed: {:?}",
+            flow.step
+        );
+
+        let s = app.status.clone().unwrap_or_default();
+        assert!(
+            s.contains("refused"),
+            "the stale refusal must be surfaced: {s}"
+        );
+    }
+
+    /// ★ Task 5, site 1 (`handle_declare_flow_key`'s `Char('t')` arm). Display-only — it never writes —
+    /// but it reads `app.snapshot` to compute the on-demand tax-Δ preview, so a stale image would show a
+    /// number the current ledger cannot back up. A positive control proves `None` afterward is the
+    /// refusal, not a fixture that never would have computed anything anyway: the identical keystroke
+    /// against an UNARMED build of the same fixture really does set `tax_delta`.
+    ///
+    /// Mutation: deleted the probe at the top of the `Char('t')` arm and re-ran
+    /// `cargo nextest run -p btctax-tui-edit declare_flow_char_t_preview_refuses` — RED (`tax_delta` was
+    /// `Some(..)` even with `stale_after_write` set). Restored via a `cp` backup (never `git checkout --`)
+    /// and re-ran — GREEN.
+    #[test]
+    fn declare_flow_char_t_preview_refuses_to_read_the_stale_snapshot() {
+        // Positive control: unarmed, the same fixture + keystrokes really compute a preview.
+        let (mut control, _cd) = vault_with_declare_flow_open();
+        handle_declare_flow_key(&mut control, press(KeyCode::Char('1'))); // pick an era
+        assert!(control.declare_flow.as_ref().unwrap().tax_delta.is_none());
+        handle_declare_flow_key(&mut control, press(KeyCode::Char('t')));
+        assert!(
+            control.declare_flow.as_ref().unwrap().tax_delta.is_some(),
+            "fixture sanity: an unarmed preview must actually compute"
+        );
+
+        // The refusal path.
+        let (mut app, _dir) = vault_with_declare_flow_open();
+        handle_declare_flow_key(&mut app, press(KeyCode::Char('1'))); // pick an era
+        app.stale_after_write = Some("boom".into());
+        handle_declare_flow_key(&mut app, press(KeyCode::Char('t')));
+        assert!(
+            app.declare_flow.as_ref().unwrap().tax_delta.is_none(),
+            "no tax-Delta preview may be computed off a stale snapshot"
+        );
+        let s = app.status.clone().unwrap_or_default();
+        assert!(
+            s.contains("refused"),
+            "the stale refusal must be surfaced: {s}"
+        );
+    }
+
+    /// ★ Task 5, site 3 (`handle_promote_flow_provenance_key`'s `Enter` arm, `attest_provenance`). A
+    /// `Purchase` selection is a pure setter with no engine call; `Enter` is what reads `app.snapshot`
+    /// (for a non-`Purchase` kind, to surface `plan_promote`'s `Refusal::Provenance` text — and, for
+    /// `Purchase`, to decide whether to advance at all). `vault_at_promote_consent` itself proves the
+    /// unarmed positive control (the same keystrokes there DO advance to `PartII`).
+    ///
+    /// Mutation: deleted the probe at the top of the `Enter` arm and re-ran
+    /// `cargo nextest run -p btctax-tui-edit handle_promote_flow_provenance_key_enter_refuses` — RED (the
+    /// step advanced to `PartII` even with `stale_after_write` set). Restored via a `cp` backup (never
+    /// `git checkout --`) and re-ran — GREEN.
+    #[test]
+    fn handle_promote_flow_provenance_key_enter_refuses_attest_provenance_while_stale() {
+        let (mut app, _dir) = vault_with_promote_flow_open();
+        handle_key(&mut app, press(KeyCode::Char('1'))); // select Purchase (a pure setter — no engine call)
+        assert_eq!(
+            app.promote_flow.as_ref().unwrap().provenance,
+            Some(btctax_cli::ProvenanceKind::Purchase)
+        );
+
+        app.stale_after_write = Some("boom".into());
+        handle_key(&mut app, press(KeyCode::Enter)); // would call attest_provenance
+
+        let flow = app
+            .promote_flow
+            .as_ref()
+            .expect("a stale refusal must not close the flow");
+        assert!(
+            matches!(
+                flow.step,
+                crate::edit::promote_flow::PromoteFlowStep::Provenance { .. }
+            ),
+            "must not advance to Part II while armed: {:?}",
+            flow.step
+        );
+        let s = app.status.clone().unwrap_or_default();
+        assert!(
+            s.contains("refused"),
+            "the stale refusal must be surfaced: {s}"
         );
     }
 }
