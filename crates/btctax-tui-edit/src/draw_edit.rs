@@ -211,7 +211,7 @@ fn draw_defensive_filing(frame: &mut Frame, app: &EditorApp) {
 /// keypress onward this is the only notice the filer sees on Browse (`main.rs:414`/`:494` clear
 /// `app.status` before every dispatch), so it names the CONSEQUENCE — "figures below predate your last
 /// write" — not the cause. Register precedent: the PSEUDO banner's own "FICTIONAL placeholders — DO NOT
-/// FILE" (`:387-391` below). Kept ≤ 78 cols (measured) so it never wraps inside Browse's own one-row
+/// FILE" (`:388-393` below). Kept ≤ 78 cols (measured) so it never wraps inside Browse's own one-row
 /// marker constraint.
 const STALE_MARKER_CLAIM: &str =
     "STALE — figures below predate your last write. DO NOT FILE from them.";
@@ -7265,6 +7265,17 @@ mod tests {
             clean.contains("Defensive Filing"),
             "the screen still renders without a status: {clean}"
         );
+        // This fixture is ALSO unarmed (`EditorApp::new` defaults `stale_after_write` to `None`) with an
+        // all-empty view and no `uncomputable` — so the all-clear must render. This pins the WIRING
+        // (`app.stale_after_write.is_some()` actually threaded into `render_dashboard`'s `stale_armed`
+        // argument, not just `render_dashboard` itself in isolation): a hardcoded literal `true` at that
+        // call site would suppress this and print the stale notice instead, with the suite otherwise
+        // green (the `false` direction is already covered by the armed fixtures above).
+        assert!(
+            clean.contains("Nothing outstanding right now."),
+            "an unarmed, empty, computable dashboard must show the all-clear THROUGH the real draw \
+             wiring: {clean}"
+        );
     }
 
     #[test]
@@ -7628,8 +7639,10 @@ mod tests {
     /// one row.
     ///
     /// Mutation: dropped the trailing `.max(1)` — RED (`notice_h` became 0, `Layout::split` handed the
-    /// notice rect zero rows, and the marker text rendered nowhere — the full-claim assertion below
-    /// failed). Restored via a `cp` backup (never `git checkout --`) and re-ran — GREEN.
+    /// notice rect zero rows, and the marker text rendered nowhere — the assertion below failed; that
+    /// assertion checked the FULL claim at the time this was first proven, and has since been narrowed to
+    /// just the first sentence, per the Step 7 rider below — re-checked against today's narrowed
+    /// assertion too: still RED). Restored via a `cp` backup (never `git checkout --`) and re-ran — GREEN.
     ///
     /// ★ fix round 1 minor: asserts the FIRST SENTENCE of `STALE_MARKER_DEFENSIVE` (the constant this
     /// screen actually renders — not `STALE_MARKER_CLAIM`, which is Browse's own), not merely the word
@@ -7639,7 +7652,7 @@ mod tests {
     /// draft of this note misstated that middle operand as `1`).
     ///
     /// ★ fix wave Step 7 (doc-precision rider): reworded the marker's claim from "figures below" to "the
-    /// figures on this screen" — the claim sentence alone is now 59 chars (was 45), which still fits the
+    /// figures on this screen" — the claim sentence alone is now 59 chars (was 46), which still fits the
     /// first wrapped line at 78 columns, but the remedy sentence ("DO NOT FILE from them.") no longer
     /// does (the FULL two-sentence claim is now 82 chars > 78, where the pre-reword 69-char claim used
     /// to fit whole). This assertion was narrowed from the full claim to just the first sentence to

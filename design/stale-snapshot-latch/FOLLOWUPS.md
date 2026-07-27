@@ -63,7 +63,7 @@ Legend: **[open]** not started · **[closed]** burned down (kept for provenance)
   function/const instead where the citation isn't load-bearing to a specific line), or add a doc-lint
   that flags `` `:\d+` `` citations for staleness at merge time.
 - **[open] Owner: next cycle.** `draw_edit.rs`'s Browse status band MEASURES `Line::from(String)`
-  (`:331`) but RENDERS `Paragraph::new(String)` (`:415`) — `Line::from` is newline-blind while
+  (`:334`) but RENDERS `Paragraph::new(String)` (`:418`) — `Line::from` is newline-blind while
   `Paragraph::new(String)` newline-splits into `Text`, so a `\n`-bearing status would measure 1 row but
   need 2+. Unreachable today (Task 7's reviewer checked all ~110 `status = Some(...)` sites; none embeds
   `\n`), so the failure mode if it ever became reachable would be a truncated band, never a clipped
@@ -113,6 +113,13 @@ Legend: **[open]** not started · **[closed]** burned down (kept for provenance)
   is ever `Some` while `app.session` is `None` — a combination the one-flow/one-session invariant rules
   out today but that nothing at this call site itself defends against structurally (the same
   "convention, not construction" class this repo's `answered-ness invariant` memory names).
+- **[open] Owner: next cycle.** Task-4 triage item (8) (`.superpowers/sdd/IMPLEMENTATION_PLAN/progress.md`),
+  never registered here: commit `9796013` had added a doc note warning that pre-existing tests mutate the
+  same process-global `BTCTAX_PRICE_CACHE` env var outside any lock (a cross-test-file race hazard);
+  `8f84326` deleted that note wholesale with no FOLLOWUPS entry to replace it. The hazard itself is still
+  live: 8 `std::env::set_var("BTCTAX_PRICE_CACHE", ...)` sites survive today at `main.rs:17969-18284`
+  (re-verified against current source — progress.md's own citation, `:16702-17021`, has already drifted),
+  none serialized against each other beyond whatever incidental ordering the test runner happens to give.
 
 ## Guard hardening (open, `next cycle` unless noted)
 

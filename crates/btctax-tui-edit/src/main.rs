@@ -23197,7 +23197,7 @@ mod tests {
     }
 
     /// fix wave BLOCKING 2: `may_save`'s OWN lethality, isolated from `flush_tax_inputs_draft`'s
-    /// redundant `attest_save_failed || rollback_failed` guard (Task 8, `:1253-1255`). The KAT above
+    /// redundant `attest_save_failed || rollback_failed` guard (Task 8, `:1265-1267`). The KAT above
     /// (`residue_live_may_save_false_prevents_dirty_tax_inputs_draft_from_reaching_disk`) drives
     /// `on_persist_error`'s `ResidueLive` arm, which sets `rollback_failed = true` BEFORE calling
     /// `close_all_mutation_surfaces(false)` — so `flush_tax_inputs_draft`'s own guard ALSO refuses by

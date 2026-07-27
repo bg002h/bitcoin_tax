@@ -999,9 +999,14 @@ mod tests {
     // Mutations, each independently proven:
     // (1) delete the `&& !stale_armed` conjunct on the all-clear guard → this test's `!contains("Nothing
     //     outstanding right now.")` assertion reds (confirmed: RED).
-    // (2) unarmed sibling (`stale_armed = false`) asserts the all-clear STILL renders — guards against
-    //     over-suppression (a `stale_armed` that defaulted to `true`, or a guard that dropped the
-    //     original four-empty-lists condition, would red this half instead).
+    // (2) unarmed empty sibling (`stale_armed = false`, all four lists empty) asserts the all-clear
+    //     STILL renders — guards against over-suppression from a `stale_armed` that defaulted to `true`
+    //     (confirmed: a `stale_armed` default flip alone reds this half; it does NOT catch a dropped
+    //     `is_empty()` conjunct, since every list here is already empty).
+    // (3) unarmed NON-empty sibling (`stale_armed = false`, one declare candidate present) asserts the
+    //     all-clear does NOT render — this is what catches a guard that dropped the original
+    //     four-empty-lists condition (confirmed: RED when the four `view.*.is_empty()` conjuncts are
+    //     deleted from the all-clear guard).
     #[test]
     fn stale_armed_suppresses_the_all_clear_even_with_uncomputable_none() {
         let rendered = render_dashboard(&empty_view(), 0, None, true).join("\n");
@@ -1023,6 +1028,24 @@ mod tests {
         assert!(
             rendered.contains("Nothing outstanding right now."),
             "an unarmed all-empty dashboard must still read as an all-clear: {rendered}"
+        );
+    }
+
+    #[test]
+    fn unarmed_non_empty_dashboard_never_renders_the_all_clear() {
+        // This is route #4 to a false "Nothing outstanding right now.": neither `uncomputable` nor
+        // `stale_armed` gates it — only the four `view.*.is_empty()` conjuncts on the all-clear guard
+        // do. A view with a real declare candidate present, unarmed and computable, must NEVER print
+        // the all-clear alongside it.
+        let view = DefensiveFilingView {
+            candidates: vec![shortfall(1, 10_000)],
+            ..empty_view()
+        };
+        let rendered = render_dashboard(&view, 0, None, false).join("\n");
+        assert!(
+            !rendered.contains("Nothing outstanding right now."),
+            "a dashboard with a live declare candidate must NEVER also claim nothing is outstanding: \
+             {rendered}"
         );
     }
 
