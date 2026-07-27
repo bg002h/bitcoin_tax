@@ -734,7 +734,7 @@ impl EditorApp {
     /// would forbid (E0502).
     ///
     /// Added here per the plan's Task-1 file list; gains its callers at Task 5's five payload-derived
-    /// sites (the last `#[allow(dead_code)]` in this file — every other seam already had one).
+    /// sites.
     fn stale_reason(&self) -> Option<String> {
         self.stale_after_write
             .as_ref()

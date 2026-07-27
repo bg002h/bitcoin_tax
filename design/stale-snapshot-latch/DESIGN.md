@@ -351,7 +351,7 @@ Every primitive TDD, every fix mutation-proven.
    `{execute_defensive_export :4616, open_defensive_filing editor.rs:474}`, and every other opener must call
    `stale_or_residue_latch_status()`. Assert **both directions**; mutation-prove by flipping
    `open_declare_flow`. **Domain is every assignment of an `EditorApp` surface field to `Some(..)` in
-   `main.rs` + `editor.rs`** — not `fn open_*`, which misses the **12** sites that open a surface from
+   `main.rs` + `editor.rs`** — not `fn open_*`, which misses the **15** sites that open a surface from
    inside a `handle_*_key` (`:610, :1862, :1994, :2111, :2433, :2809, :2976, :3116, :3282, :5072, :5426,
    :6093, :6438, :6564, :9976`); the exempt list must name each one's parent surface, a grep-checkable
    claim rather than a name pattern. This is the same failure mode that produced chain A, one level deeper.

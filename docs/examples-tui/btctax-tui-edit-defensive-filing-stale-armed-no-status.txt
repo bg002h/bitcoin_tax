@@ -20,9 +20,9 @@
  18││                                                                              │
  19││                                                                              │
  20││                                                                              │
- 21││  STALE — figures below predate your last write. DO NOT FILE from them. Quit  │
- 22││and reopen the vault.                                                         │
+ 21││  STALE — the figures on this screen predate your last write. DO NOT FILE from│
+ 22││them. Quit and reopen the vault.                                              │
  23│└──────────────────────────────────────────────────────────────────────────────┘
 ── styles (runs; terminal-default fg=Reset bg=Reset no-modifier omitted) ──
- 21│ 1..77 fg=Red mod=BOLD
- 22│ 1..22 fg=Red mod=BOLD
+ 21│ 1..79 fg=Red mod=BOLD
+ 22│ 1..33 fg=Red mod=BOLD

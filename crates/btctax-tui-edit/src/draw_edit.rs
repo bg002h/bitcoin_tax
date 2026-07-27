@@ -211,7 +211,7 @@ fn draw_defensive_filing(frame: &mut Frame, app: &EditorApp) {
 /// keypress onward this is the only notice the filer sees on Browse (`main.rs:414`/`:494` clear
 /// `app.status` before every dispatch), so it names the CONSEQUENCE — "figures below predate your last
 /// write" — not the cause. Register precedent: the PSEUDO banner's own "FICTIONAL placeholders — DO NOT
-/// FILE" (`:214-217` below). Kept ≤ 78 cols (measured) so it never wraps inside Browse's own one-row
+/// FILE" (`:387-391` below). Kept ≤ 78 cols (measured) so it never wraps inside Browse's own one-row
 /// marker constraint.
 const STALE_MARKER_CLAIM: &str =
     "STALE — figures below predate your last write. DO NOT FILE from them.";
@@ -220,7 +220,8 @@ const STALE_MARKER_CLAIM: &str =
 /// Browse, this screen has no separate footer or one-row slot of its own to carry the remedy, so it has
 /// to live in the marker text itself, not only in whatever `app.status` happens to hold at the moment.
 const STALE_MARKER_DEFENSIVE: &str =
-    "STALE — figures below predate your last write. DO NOT FILE from them. Quit and reopen the vault.";
+    "STALE — the figures on this screen predate your last write. DO NOT FILE from them. Quit and reopen \
+     the vault.";
 
 /// The CAP on the notice reservation both screens use — NOT a flat reservation size (★ fix round 2
 /// Critical: it was exactly that in fix round 1, and `status.is_some()` alone drove the flat 8 whether
@@ -241,7 +242,9 @@ const STALE_MARKER_DEFENSIVE: &str =
 /// failure and a genuine fail-safe-flush failure (they share a root cause — disk/session I/O — per
 /// `arm_stale`'s own doc). That composes to a 385-char status: `prefix`, then `STALE_FACT_1`, then
 /// `({reason})`, then fact 2's LOSS variant (longer than the no-loss `FACT_2_SCREEN_CLOSED` sentence),
-/// then fact 3. Stacked under the 96-char `STALE_MARKER_DEFENSIVE` marker line, this wraps to 8 rows at
+/// then fact 3. Stacked under the 109-char `STALE_MARKER_DEFENSIVE` marker line (fix wave Step 7
+/// reworded "figures below" → "the figures on this screen", +13 chars from the 96-char original — the
+/// 8-row cap was re-verified against the new length, not assumed to still hold), this wraps to 8 rows at
 /// this screen's 78-col inner width — confirmed by an actual render, not arithmetic alone
 /// (`the_full_arm_status_renders_unclipped_at_80_columns_on_both_screens`).
 ///
@@ -7628,19 +7631,28 @@ mod tests {
     /// notice rect zero rows, and the marker text rendered nowhere — the full-claim assertion below
     /// failed). Restored via a `cp` backup (never `git checkout --`) and re-ran — GREEN.
     ///
-    /// ★ fix round 1 minor: asserts the FULL 69-char `STALE_MARKER_CLAIM`, not merely the word "STALE"
-    /// — at height 3 the reserved rect is exactly
+    /// ★ fix round 1 minor: asserts the FIRST SENTENCE of `STALE_MARKER_DEFENSIVE` (the constant this
+    /// screen actually renders — not `STALE_MARKER_CLAIM`, which is Browse's own), not merely the word
+    /// "STALE" — at height 3 the reserved rect is exactly
     /// `content_sized_notice_height(marker_alone, 78).min(0).max(1) == 1` row (the middle `.min(0)`
     /// against `inner.height.saturating_sub(1)`, NOT `.min(1)` — fix round 2 correction: an earlier
-    /// draft of this note misstated that middle operand as `1`), and the marker's first wrapped line at
-    /// 78 columns is long enough to carry the whole claim before wrapping into the remedy sentence, so
-    /// this is not a weaker check than it looks.
+    /// draft of this note misstated that middle operand as `1`).
+    ///
+    /// ★ fix wave Step 7 (doc-precision rider): reworded the marker's claim from "figures below" to "the
+    /// figures on this screen" — the claim sentence alone is now 59 chars (was 45), which still fits the
+    /// first wrapped line at 78 columns, but the remedy sentence ("DO NOT FILE from them.") no longer
+    /// does (the FULL two-sentence claim is now 82 chars > 78, where the pre-reword 69-char claim used
+    /// to fit whole). This assertion was narrowed from the full claim to just the first sentence to
+    /// match: this test only needs "the marker got SOME non-empty rect", not "the whole claim survived
+    /// one row" — that stronger property isn't true post-reword and isn't this test's job to hold
+    /// (`the_full_arm_status_renders_unclipped_at_80_columns_on_both_screens` and
+    /// `stale_dashboard_goldens_never_clip_the_export_line` are the tests that verify nothing clips at
+    /// the REAL terminal sizes this branch cares about).
     #[test]
     fn defensive_filing_notice_floors_at_one_row_on_a_very_short_terminal() {
         let rendered = render_defensive_filing_to_string_armed_sized(None, 80, 3);
         assert!(
-            rendered
-                .contains("STALE — figures below predate your last write. DO NOT FILE from them."),
+            rendered.contains("STALE — the figures on this screen predate your last write."),
             "the marker must still get SOME rect at height 3, not vanish: {rendered}"
         );
     }
