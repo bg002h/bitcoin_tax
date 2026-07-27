@@ -32,12 +32,24 @@
 //! [`ExperimentalNotice::plain_text`] (CLI stderr, multi-line) and [`ExperimentalNotice::one_line`] (a
 //! TUI `Constraint::Length(1)` banner row, single-line).
 //!
-//! [`uses_approach_b`] is the single gate every surface consults: true iff a live (non-voided)
-//! `DeclareTranche` or `PromoteTranche` decision is on file. It reuses [`crate::tranche_guard::void_targets`]
-//! — the same shared "which decision ids are voided" scan `tranche_guard::pre2025_tranche_exists` /
-//! `in_force_allocation_exists` already use — rather than re-deriving liveness. A ledger where every
-//! `DeclareTranche`/`PromoteTranche` has been voided returns `false`: showing the notice to a filer who
-//! voided everything would be exactly the wrong answer.
+//! [`uses_approach_b`]: true iff a live (non-voided) `DeclareTranche` or `PromoteTranche` decision is on
+//! file. It reuses [`crate::tranche_guard::void_targets`] — the same shared "which decision ids are
+//! voided" scan `tranche_guard::pre2025_tranche_exists` / `in_force_allocation_exists` already use —
+//! rather than re-deriving liveness. A ledger where every `DeclareTranche`/`PromoteTranche` has been
+//! voided returns `false`: showing the notice to a filer who voided everything would be exactly the
+//! wrong answer.
+//!
+//! ★ THE TWO-CLASS RULE (`design/approach-b-experimental-notice/TRIGGER-FIX-REPORT.md`): this predicate
+//! answers "has a live tranche/promote ALREADY been recorded" — "has used", not "is using". It is the
+//! correct gate ONLY for surfaces that merely REFLECT Approach-B (the filer's RETURN depends on it, not
+//! their current action): `btctax-tui-edit`'s Browse, the `btctax-tui` viewer, and the export reports
+//! (`export-irs-pdf`, `export-snapshot`, the full-return export). Surfaces that ARE the feature — the
+//! `btctax-tui-edit` `DefensiveFiling` screen (the dashboard and the declare/promote flows it hosts) and
+//! the CLI `declare-tranche`/`promote-tranche` commands — warn UNCONDITIONALLY instead, never gated on
+//! this predicate: being on that screen, or running that command, is using the feature, before any
+//! tranche exists to make this predicate true. Gating those surfaces on `uses_approach_b` was exactly
+//! the bug that fix corrected — a filer who opened the (empty) Defensive Filing dashboard to DECIDE
+//! whether to use the feature saw no warning at all until after they had already committed to it.
 
 use crate::event::EventPayload;
 use crate::LedgerEvent;
@@ -148,7 +160,9 @@ pub mod testonly {
 }
 
 /// True iff a live (non-voided) `DeclareTranche` or `PromoteTranche` decision exists in `events` — the
-/// gate every Approach-B experimental-notice surface (CLI stderr, the TUI banner rows) consults.
+/// gate every REFLECTING Approach-B experimental-notice surface consults (Browse, the viewer, the export
+/// reports). The surfaces that ARE the feature (the `DefensiveFiling` screen, `declare-tranche`,
+/// `promote-tranche`) warn unconditionally and never call this — see the module docs' "TWO-CLASS RULE".
 ///
 /// "Live" = the event's OWN id is not targeted by any `VoidDecisionEvent` — the same record-time scan
 /// `tranche_guard::pre2025_tranche_exists`/`in_force_allocation_exists` already use (deliberately NOT the

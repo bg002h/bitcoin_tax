@@ -104,21 +104,26 @@ fn draw_defensive_filing(frame: &mut Frame, app: &EditorApp) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Approach-B experimental disclosure (`design/approach-b-experimental-notice`, fix round 1
-    // Important #3): THIS screen — the declare flow, the promote flow, and the dashboard's own export —
-    // is the entire Approach-B journey, and `open_defensive_filing` is its only entry with nothing in
-    // any declare/promote/export tail routing back to Browse. Without a banner HERE, a filer could
-    // declare, promote, and export the whole journey and never see Browse's banner at all. Composes
-    // with the stale marker/status below it exactly the way Browse composes its PSEUDO + experimental
-    // banners: a state-conditional `Constraint::Length(1)` row. Expressed as a nested split (peeled off
-    // `inner` FIRST) rather than Browse's flat `next_idx` cursor, because this screen's other row is
-    // DYNAMICALLY measured (`content_sized_notice_height`), not another fixed `Length(1)` — peeling the
-    // banner off first makes every measurement/layout below it operate on the reduced area for free.
-    let show_experimental = app
-        .snapshot
-        .as_ref()
-        .map(|s| btctax_core::experimental::uses_approach_b(&s.events))
-        .unwrap_or(false);
+    // Approach-B experimental disclosure (`design/approach-b-experimental-notice`, TRIGGER-FIX-REPORT):
+    // THIS screen — the dashboard, the declare flow, and the promote flow it hosts — **IS** Approach-B;
+    // being here at all is USING the feature, not merely reflecting a decision already on file. It is
+    // therefore UNCONDITIONAL, never gated on `uses_approach_b(&events)` — that predicate answers "has a
+    // live tranche/promote ALREADY been recorded", which is exactly the wrong question here: a filer who
+    // presses `w` and lands on an EMPTY dashboard (nothing declared yet) is at the exact moment of
+    // deciding whether to use the feature, and must see the warning then, not only after they have
+    // already declared. (Browse/the viewer/the export reports are the surfaces that only REFLECT
+    // Approach-B — those stay correctly gated on `uses_approach_b`.) Composes with the stale
+    // marker/status below it exactly the way Browse composes its PSEUDO + experimental banners: a
+    // `Constraint::Length(1)` row. Expressed as a nested split (peeled off `inner` FIRST) rather than
+    // Browse's flat `next_idx` cursor, because this screen's other row is DYNAMICALLY measured
+    // (`content_sized_notice_height`), not another fixed `Length(1)` — peeling the banner off first makes
+    // every measurement/layout below it operate on the reduced area for free.
+    //
+    // Kept as a named `bool` (not inlined at the `if` below) so the mutation record stays a one-line
+    // revert: swap this back to
+    // `app.snapshot.as_ref().map(|s| btctax_core::experimental::uses_approach_b(&s.events)).unwrap_or(false)`
+    // to reproduce the pre-fix mis-gating.
+    let show_experimental = true;
     let inner = if show_experimental {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -7787,19 +7792,182 @@ mod tests {
         );
     }
 
-    /// Without a live tranche, the DefensiveFiling screen's stale marker renders ALONE — no banner, and
-    /// the marker keeps its PRE-existing row (this screen's other content is unaffected when the banner
-    /// is absent).
+    /// ★ trigger-fix (`design/approach-b-experimental-notice/TRIGGER-FIX-REPORT.md`): this screen (the
+    /// dashboard AND the declare/promote flows it hosts) **IS** the Approach-B feature — being here at
+    /// all is using it, before any tranche exists. Gating the banner on `uses_approach_b(&events)`
+    /// answered "has a live tranche/promote ALREADY been recorded", not "is the filer using this feature
+    /// right now" — so a filer who pressed `w` and landed on an EMPTY dashboard (nothing declared yet)
+    /// saw NO warning at exactly the moment they were deciding whether to use an experimental feature.
+    /// The banner must be UNCONDITIONAL on this screen: present with an empty vault, present with a live
+    /// tranche, present on the declare/promote flows — never gated on ledger contents.
+    ///
+    /// This is the inverse of what this test used to assert (`defensive_filing_experimental_banner_
+    /// absent_without_approach_b`, pre-fix): that name/assertion encoded the very bug this fix corrects.
+    ///
+    /// Mutation: revert `draw_defensive_filing`'s `show_experimental` back to the
+    /// `app.snapshot.as_ref().map(|s| uses_approach_b(&s.events)).unwrap_or(false)` predicate — RED (this
+    /// fixture has no `DeclareTranche`/`PromoteTranche` event, so the predicate answers `false` and the
+    /// banner vanishes). Restored via a `cp` backup (never `git checkout --`) and re-ran — GREEN.
     #[test]
-    fn defensive_filing_experimental_banner_absent_without_approach_b() {
+    fn defensive_filing_experimental_banner_present_on_an_empty_vault() {
         let buf = draw_defensive_filing_armed_buffer(None, 120, 40);
         assert!(
-            buffer_row_index_containing(&buf, "EXPERIMENTAL — DEFENSIVE FILING").is_none(),
-            "no banner without a live tranche/promote on this screen either"
+            buffer_row_index_containing(&buf, "EXPERIMENTAL — DEFENSIVE FILING").is_some(),
+            "the banner must render on this screen EVEN WITH NO tranche/promote on file — being on the \
+             screen is using the feature, not having already declared: {}",
+            flatten(&buf)
         );
         assert!(
             buffer_row_index_containing(&buf, "STALE —").is_some(),
-            "the stale marker still renders on its own"
+            "the stale marker still renders too (composes below the banner)"
+        );
+    }
+
+    /// The Browse counterpart to the KAT above: Browse only REFLECTS Approach-B (the filer's RETURN
+    /// depends on it), so it stays correctly gated on `uses_approach_b` — an empty vault shows no banner
+    /// there. Restated here, beside the DefensiveFiling KAT, so the two surfaces' opposite behaviors are
+    /// visible together rather than only cross-referenced in prose (`browse_experimental_banner_appears_
+    /// for_a_live_tranche_and_shifts_content` already pins the same fact independently).
+    #[test]
+    fn browse_experimental_banner_absent_on_an_empty_vault() {
+        let buf = draw_browse_buffer(vec![], 120, 40);
+        assert!(
+            buffer_row_index_containing(&buf, "EXPERIMENTAL — DEFENSIVE FILING").is_none(),
+            "Browse only REFLECTS Approach-B (a live tranche/promote on file) — an empty vault shows \
+             nothing there, unlike the DefensiveFiling screen above"
+        );
+    }
+
+    /// A minimal `Snapshot` with a live `PriceProvider` — the declare/promote flow renderers both need
+    /// one (`render_declare_flow` reads prices; `render_promote_flow` doesn't but the fixture is shared).
+    /// No events: an empty vault, exactly the case the trigger-fix's banner rule is about.
+    fn empty_snapshot_for_test() -> btctax_tui::app::Snapshot {
+        use btctax_adapters::BundledTaxTables;
+        use btctax_cli::CliConfig;
+        use std::collections::BTreeMap;
+        btctax_tui::app::Snapshot {
+            events: vec![],
+            state: btctax_core::state::LedgerState::default(),
+            cli_config: CliConfig::default(),
+            profiles: BTreeMap::new(),
+            refused: BTreeMap::new(),
+            tables: BundledTaxTables::load(),
+            donation_details: BTreeMap::new(),
+            bulk_estimated: BTreeMap::new(),
+            prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
+        }
+    }
+
+    fn declare_flow_state_for_test() -> crate::edit::declare_flow::DeclareFlowState {
+        use btctax_core::defensive::discovery::Shortfall;
+        use btctax_core::WalletId;
+        use time::macros::date;
+        let wallet = WalletId::Exchange {
+            provider: "cb".into(),
+            account: "m".into(),
+        };
+        let shortfall = Shortfall {
+            event: btctax_core::EventId::decision(1),
+            wallet: Some(wallet.clone()),
+            date: date!(2024 - 06 - 01),
+            short_sat: 10_000_000,
+            fee_sat: 0,
+        };
+        crate::edit::declare_flow::DeclareFlowState::new(shortfall, wallet, false)
+    }
+
+    /// ★ trigger-fix: the Declare flow renders THROUGH `draw_defensive_filing` (it takes over the content
+    /// area — see the `app.declare_flow.as_ref()` arm), so it inherits the screen's banner peel for free.
+    /// Pins that directly, on a completely EMPTY vault (no snapshot events, no tranche) — the exact case
+    /// that was broken pre-fix — and that the flow's own content (the window/sat/wallet collection UI)
+    /// still renders below the banner, not clobbered by it.
+    #[test]
+    fn defensive_filing_declare_flow_shows_the_experimental_banner_on_an_empty_vault() {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = EditorApp::new(PathBuf::from("/test/vault.pgp"));
+        app.screen = EditorScreen::DefensiveFiling;
+        app.snapshot = Some(empty_snapshot_for_test());
+        app.declare_flow = Some(declare_flow_state_for_test());
+        terminal.draw(|f| draw(&mut *f, &mut app)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let banner_row = buffer_row_index_containing(&buf, "EXPERIMENTAL — DEFENSIVE FILING")
+            .expect("the banner must render on the Declare flow, even on an empty vault");
+        assert_eq!(
+            banner_row, 1,
+            "the banner is the FIRST row inside the bordered block (row 0 is the block's own border)"
+        );
+        let content_row = buffer_row_index_containing_from(&buf, "sat", 1)
+            .expect("the Declare flow's own content must still render, below the banner");
+        assert!(
+            content_row > banner_row,
+            "the flow's content renders below the banner, not clobbered by it"
+        );
+    }
+
+    /// The same KAT for the Promote flow (`app.promote_flow`'s content-area arm) — a distinct code path
+    /// from Declare, so the banner's presence there is a separate fact, not a corollary of the KAT above.
+    #[test]
+    fn defensive_filing_promote_flow_shows_the_experimental_banner_on_an_empty_vault() {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = EditorApp::new(PathBuf::from("/test/vault.pgp"));
+        app.screen = EditorScreen::DefensiveFiling;
+        app.snapshot = Some(empty_snapshot_for_test());
+        app.promote_flow = Some(crate::edit::promote_flow::PromoteFlowState::new(
+            btctax_core::EventId::decision(1),
+        ));
+        terminal.draw(|f| draw(&mut *f, &mut app)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let banner_row = buffer_row_index_containing(&buf, "EXPERIMENTAL — DEFENSIVE FILING")
+            .expect("the banner must render on the Promote flow, even on an empty vault");
+        assert_eq!(
+            banner_row, 1,
+            "the banner is the FIRST row inside the bordered block (row 0 is the block's own border)"
+        );
+        let content_row = buffer_row_index_containing_from(&buf, "Promote — tranche", 1)
+            .expect("the Promote flow's own content (the BG-D5 provenance step) must still render");
+        assert!(
+            content_row > banner_row,
+            "the flow's content renders below the banner, not clobbered by it"
+        );
+    }
+
+    /// Full composition on an EMPTY vault: banner (unconditional, new) + the Declare flow's own content +
+    /// the D-7 stale marker (armed), all at once — the exact combination the trigger-fix's brief calls
+    /// out to check ("composes correctly ... check the layout index arithmetic in every combination").
+    /// Mirrors `defensive_filing_experimental_banner_composes_with_the_stale_marker` (which uses a LIVE
+    /// tranche and the dashboard's own content) but swaps in an empty vault + the Declare flow, proving
+    /// the composition is independent of both what populated `show_experimental` and which `*_flow` (or
+    /// none) currently owns the content area.
+    #[test]
+    fn defensive_filing_declare_flow_banner_composes_with_the_stale_marker_on_an_empty_vault() {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = EditorApp::new(PathBuf::from("/test/vault.pgp"));
+        app.screen = EditorScreen::DefensiveFiling;
+        app.snapshot = Some(empty_snapshot_for_test());
+        app.declare_flow = Some(declare_flow_state_for_test());
+        app.stale_after_write = Some("armed-for-test".to_string());
+        terminal.draw(|f| draw(&mut *f, &mut app)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+
+        let banner_row = buffer_row_index_containing(&buf, "EXPERIMENTAL — DEFENSIVE FILING")
+            .expect("the banner must render");
+        let marker_row = buffer_row_index_containing(&buf, "STALE —")
+            .expect("the D-7 stale marker must still render, composing with the banner");
+        assert!(
+            banner_row < marker_row,
+            "the banner renders ABOVE the marker (banner_row={banner_row}, marker_row={marker_row})"
+        );
+        assert_eq!(banner_row, 1, "banner is the first row inside the block");
+        let content_row = buffer_row_index_containing_from(&buf, "sat", 1).expect(
+            "the Declare flow's content must still render between the banner and the marker",
+        );
+        assert!(
+            banner_row < content_row && content_row < marker_row,
+            "content sits between the banner and the marker (banner={banner_row}, content={content_row}, \
+             marker={marker_row})"
         );
     }
 
@@ -8038,12 +8206,49 @@ mod tests {
     /// (`the_full_arm_status_renders_unclipped_at_80_columns_on_both_screens` and
     /// `stale_dashboard_goldens_never_clip_the_export_line` are the tests that verify nothing clips at
     /// the REAL terminal sizes this branch cares about).
+    ///
+    /// ★ trigger-fix recalibration: this KAT used height 3 (a `Borders::ALL` block leaves `inner.height
+    /// == 1`) back when the experimental banner was gated on `uses_approach_b` and this fixture (no
+    /// snapshot) never showed it — the single available row went entirely to the marker. Now the banner
+    /// is UNCONDITIONAL on this screen and is peeled off `inner` FIRST (composition precedent: the
+    /// banner leads, see `defensive_filing_experimental_banner_composes_with_the_stale_marker`), so at
+    /// height 3 that one row goes to the banner instead — proven separately by
+    /// `defensive_filing_banner_wins_the_only_row_at_the_most_extreme_height` below, which also confirms
+    /// this does not corrupt the layout (no panic, no rect underflow). This KAT is recalibrated to height
+    /// 4 (`inner.height == 2`: one row for the mandatory banner, one left over for the marker), which is
+    /// the smallest height at which the ORIGINAL floor property it pins — "the marker still gets SOME
+    /// rect, not zero" — is observable at all now that the banner has first claim on the budget.
     #[test]
     fn defensive_filing_notice_floors_at_one_row_on_a_very_short_terminal() {
-        let rendered = render_defensive_filing_to_string_armed_sized(None, 80, 3);
+        let rendered = render_defensive_filing_to_string_armed_sized(None, 80, 4);
         assert!(
             rendered.contains("STALE — the figures on this screen predate your last write."),
-            "the marker must still get SOME rect at height 3, not vanish: {rendered}"
+            "the marker must still get SOME rect once the mandatory banner's own row is accounted for, \
+             not vanish: {rendered}"
+        );
+    }
+
+    /// The companion to the KAT above, at the truly pathological height (3 total rows ⇒ `inner.height ==
+    /// 1`, a single row for EVERYTHING inside the block): the mandatory experimental banner — now
+    /// unconditional and peeled off first — wins that one row, and the marker gets none. This is not a
+    /// silent corruption: nothing panics, the block border still renders, and it is the DIRECT,
+    /// documented consequence of two already-established, independently-reviewed facts composing —
+    /// (1) the banner is unconditional on this screen (this fix) and (2) the banner is peeled off `inner`
+    /// BEFORE the marker/notice reservation, i.e. it leads (pre-existing precedent, unchanged by this
+    /// fix). At any real terminal size (the smallest this branch actually cares about is 80×24, per
+    /// `defensive_filing_marker_alone_reserves_only_2_rows_leaving_room_for_a_full_dashboard`) both the
+    /// banner and the marker have room; only a terminal too short to show a single line of body text at
+    /// all loses the marker to the banner.
+    #[test]
+    fn defensive_filing_banner_wins_the_only_row_at_the_most_extreme_height() {
+        let rendered = render_defensive_filing_to_string_armed_sized(None, 80, 3);
+        assert!(
+            rendered.contains("EXPERIMENTAL — DEFENSIVE FILING"),
+            "the mandatory banner wins the single available row: {rendered}"
+        );
+        assert!(
+            !rendered.contains("STALE —"),
+            "documents (does not merely tolerate) that the marker loses this pathological race: {rendered}"
         );
     }
 
