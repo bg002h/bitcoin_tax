@@ -697,10 +697,20 @@ pub struct Form8275Map {
     pub identity: IdentityCells,
     /// Part I rows (6 on this revision) — the per-copy capacity `fill_form_8275` refuses beyond.
     pub rows: Vec<Form8275Row>,
-    /// Part II "Detailed Explanation" — the single free-text field the filer's combined narrative
-    /// (`Printed8275::part_ii`) is written to whole (no per-line splitting; mirrors how form8283 writes
-    /// a whole address into one wide identity cell).
+    /// Part II "Detailed Explanation" line 1 — the FIRST of the 6 Part II lines the filer's narrative
+    /// (`Printed8275::part_ii`) is wrapped across (`crate::wrap`) when it does not fit on this line
+    /// alone. Kept as its own field (rather than folded into `part_ii_continuation`) because it existed
+    /// before this map grew the continuation lines, and every existing caller names it directly.
     pub part_ii_narrative: String,
+    /// Part II "Detailed Explanation" lines 2–6 — `p1-t81[0]`..`p1-t85[0]` on the bundled Rev. 10-2024
+    /// PDF, in printed top-to-bottom order. **Unmapped before T-f8275-part-ii-overflow**: the narrative
+    /// used to be written whole to `part_ii_narrative` alone, silently clipping past its own line.
+    pub part_ii_continuation: Vec<String>,
+    /// Page-2 **Part IV** "Explanations (continued from Parts I and/or II)" — `p2-t1[0]`..`p2-t27[0]`,
+    /// in printed top-to-bottom order. The SAME free-text narrative overflows into these once Part II's
+    /// own 6 lines (`part_ii_narrative` + `part_ii_continuation`) are exhausted. Also unmapped before
+    /// T-f8275-part-ii-overflow.
+    pub part_iv_continuation: Vec<String>,
 }
 
 impl Form8275Map {
@@ -742,6 +752,19 @@ impl Form8275Map {
             ]);
         }
         v.push(self.part_ii_narrative.as_str());
+        v.extend(self.part_ii_continuation.iter().map(String::as_str));
+        v.extend(self.part_iv_continuation.iter().map(String::as_str));
+        v
+    }
+
+    /// The 33 continuation fields the Part II narrative wraps across, in printed top-to-bottom order:
+    /// `part_ii_narrative` (Part II line 1), then `part_ii_continuation` (Part II lines 2–6), then
+    /// `part_iv_continuation` (Part IV lines 1–27). One ordered sequence — `crate::wrap` doesn't need to
+    /// know Part II from Part IV, only "the next available line."
+    pub fn narrative_continuation_fields(&self) -> Vec<&str> {
+        let mut v = vec![self.part_ii_narrative.as_str()];
+        v.extend(self.part_ii_continuation.iter().map(String::as_str));
+        v.extend(self.part_iv_continuation.iter().map(String::as_str));
         v
     }
 }

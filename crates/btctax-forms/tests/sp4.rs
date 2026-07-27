@@ -278,6 +278,38 @@ fn form_8275_fills_for_every_supported_non_2024_year() {
     }
 }
 
+/// ★ T-f8275-part-ii-overflow Step 2: pins the exact shape of the newly-mapped continuation lines —
+/// 5 Part II lines (`p1-t81`..`p1-t85`) + 27 Part IV lines (`p2-t1`..`p2-t27`), 32 in total, plus the
+/// pre-existing `part_ii_narrative` = 33 continuation fields overall. A change to either count is a
+/// revision change to the bundled PDF and must be deliberate, not a silent drift.
+#[test]
+fn form_8275_map_carries_the_32_new_continuation_fields() {
+    let map = Form8275Map::ty2024();
+    assert_eq!(
+        map.part_ii_continuation.len(),
+        5,
+        "Part II has 6 lines total: part_ii_narrative (1) + part_ii_continuation (5)"
+    );
+    assert_eq!(
+        map.part_iv_continuation.len(),
+        27,
+        "Part IV (page 2) has 27 continuation lines"
+    );
+    assert_eq!(
+        map.narrative_continuation_fields().len(),
+        33,
+        "1 (part_ii_narrative) + 5 (part_ii_continuation) + 27 (part_iv_continuation) = 33"
+    );
+    // Exact identity + order — every field named in `part_ii_and_part_iv_continuation_fields()`
+    // (this test file's own independent oracle list, Step 1) must appear, in the SAME order.
+    let got: Vec<String> = map
+        .narrative_continuation_fields()
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    assert_eq!(got, part_ii_and_part_iv_continuation_fields());
+}
+
 #[test]
 fn map_year_matches_bundled_pdf_fieldset_for_every_supported_year() {
     // Form 8275 aliases the SAME bundled PDF to every SUPPORTED_YEAR, so this asserts the map's field

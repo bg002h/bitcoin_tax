@@ -8,6 +8,46 @@
 form = "f8275"
 year = 2024
 part_ii_narrative = "topmostSubform[0].Page1[0].p1-t80[0]"
+# Part II lines 2-6 (T-f8275-part-ii-overflow) — the narrative wraps onto these, in order, when it does
+# not fit on `part_ii_narrative` alone.
+part_ii_continuation = [
+    "topmostSubform[0].Page1[0].p1-t81[0]",
+    "topmostSubform[0].Page1[0].p1-t82[0]",
+    "topmostSubform[0].Page1[0].p1-t83[0]",
+    "topmostSubform[0].Page1[0].p1-t84[0]",
+    "topmostSubform[0].Page1[0].p1-t85[0]",
+]
+# Page-2 Part IV "Explanations (continued from Parts I and/or II)" — 27 further continuation lines the
+# SAME narrative overflows into once Part II's own 6 lines are exhausted (T-f8275-part-ii-overflow).
+part_iv_continuation = [
+    "topmostSubform[0].Page2[0].p2-t1[0]",
+    "topmostSubform[0].Page2[0].p2-t2[0]",
+    "topmostSubform[0].Page2[0].p2-t3[0]",
+    "topmostSubform[0].Page2[0].p2-t4[0]",
+    "topmostSubform[0].Page2[0].p2-t5[0]",
+    "topmostSubform[0].Page2[0].p2-t6[0]",
+    "topmostSubform[0].Page2[0].p2-t7[0]",
+    "topmostSubform[0].Page2[0].p2-t8[0]",
+    "topmostSubform[0].Page2[0].p2-t9[0]",
+    "topmostSubform[0].Page2[0].p2-t10[0]",
+    "topmostSubform[0].Page2[0].p2-t11[0]",
+    "topmostSubform[0].Page2[0].p2-t12[0]",
+    "topmostSubform[0].Page2[0].p2-t13[0]",
+    "topmostSubform[0].Page2[0].p2-t14[0]",
+    "topmostSubform[0].Page2[0].p2-t15[0]",
+    "topmostSubform[0].Page2[0].p2-t16[0]",
+    "topmostSubform[0].Page2[0].p2-t17[0]",
+    "topmostSubform[0].Page2[0].p2-t18[0]",
+    "topmostSubform[0].Page2[0].p2-t19[0]",
+    "topmostSubform[0].Page2[0].p2-t20[0]",
+    "topmostSubform[0].Page2[0].p2-t21[0]",
+    "topmostSubform[0].Page2[0].p2-t22[0]",
+    "topmostSubform[0].Page2[0].p2-t23[0]",
+    "topmostSubform[0].Page2[0].p2-t24[0]",
+    "topmostSubform[0].Page2[0].p2-t25[0]",
+    "topmostSubform[0].Page2[0].p2-t26[0]",
+    "topmostSubform[0].Page2[0].p2-t27[0]",
+]
 
 [identity]
 name = "topmostSubform[0].Page1[0].p1-t1[0]"
