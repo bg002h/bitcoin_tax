@@ -29572,10 +29572,51 @@ mod tests {
     // nextest's process-per-test model (same technique already used for the J8 walkthrough golden's
     // determinism pin, `j8_editor_frames`).
 
+    /// Serializes the 4 KATs below against EACH OTHER on the process-global `BTCTAX_PRICE_CACHE` env
+    /// var. `cargo nextest` gives each test its own OS process (safe), but plain `cargo test`'s
+    /// default harness runs `#[test]` fns as THREADS within ONE process — confirmed empirically:
+    /// without this lock, `cargo test -p btctax-tui-edit -- --test-threads=8 genuine_reprojection`
+    /// intermittently fails a SIBLING KAT's own vault unlock (which also loads prices) because it
+    /// observes another thread's corrupted cache mid-test. CI's MSRV job runs plain `cargo test
+    /// --workspace`, so this is a real gate, not a theoretical one.
+    ///
+    /// Does NOT protect against OTHER pre-existing tests in this file that mutate the same env var
+    /// outside this lock (`j8_editor_frames` and neighbors, `crates/btctax-tui/src/tabs/tests.rs`) —
+    /// that is a pre-existing risk class predating this task, out of this round's scope.
+    static PRICE_CACHE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// RAII guard combining [`PRICE_CACHE_ENV_LOCK`] with a restore-on-drop of whatever
+    /// `BTCTAX_PRICE_CACHE` held before the guard was created — so a KAT holding it can never forget
+    /// either half (mutual exclusion, and no leak to a later, non-participating test in the same
+    /// process). Acquire it BEFORE any vault/app setup, not just around `corrupt_price_cache`'s own
+    /// call: `unlocked_app_on_empty_vault`/`open_app` themselves call `build_snapshot` during unlock.
+    struct PriceCacheEnvGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        prior: Option<std::ffi::OsString>,
+    }
+    impl PriceCacheEnvGuard {
+        fn acquire() -> Self {
+            let lock = PRICE_CACHE_ENV_LOCK
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            let prior = std::env::var_os("BTCTAX_PRICE_CACHE");
+            PriceCacheEnvGuard { _lock: lock, prior }
+        }
+    }
+    impl Drop for PriceCacheEnvGuard {
+        fn drop(&mut self) {
+            match self.prior.take() {
+                Some(v) => std::env::set_var("BTCTAX_PRICE_CACHE", v),
+                None => std::env::remove_var("BTCTAX_PRICE_CACHE"),
+            }
+        }
+    }
+
     /// Point `BTCTAX_PRICE_CACHE` at a file that EXISTS with a line `from_csv_str` cannot parse (no
     /// comma), so the NEXT `build_snapshot` call fails with `AdapterError::PriceDataset` → `CliError`.
     /// Call this AFTER any setup that itself needs a working (or absent) cache, so only the write
-    /// tail under test sees the failure.
+    /// tail under test sees the failure. The caller MUST already hold a [`PriceCacheEnvGuard`] (this
+    /// fn does not acquire one itself — the guard has to cover the app-setup calls that precede it).
     fn corrupt_price_cache(dir: &std::path::Path) {
         let cache_path = dir.join("corrupt-price-cache.csv");
         std::fs::write(&cache_path, b"not a csv line at all\n").unwrap();
@@ -29587,6 +29628,7 @@ mod tests {
     /// moves where `"the write reached disk"` starts, which the exact-position assertion pins.
     #[test]
     fn commit_tax_inputs_prefix_survives_a_genuine_reprojection_failure() {
+        let _env_guard = PriceCacheEnvGuard::acquire();
         let (mut app, dir) = vault_with_return_inputs_draft();
         handle_key(&mut app, press(KeyCode::Char('s'))); // open the commit modal
         corrupt_price_cache(dir.path());
@@ -29611,6 +29653,7 @@ mod tests {
     #[test]
     fn confirm_park_to_profile_prefix_survives_a_genuine_reprojection_failure() {
         use btctax_core::tax::types::FilingStatus;
+        let _env_guard = PriceCacheEnvGuard::acquire();
         let (mut app, dir) = unlocked_app_on_empty_vault(2024);
         seed_committed_return_and_profile(&mut app, 2024, FilingStatus::Single);
 
@@ -29640,6 +29683,7 @@ mod tests {
     /// re-projection fails); nothing previously pinned that the reworded prefix is what actually ships.
     #[test]
     fn safe_harbor_attest_prefix_survives_a_genuine_reprojection_failure() {
+        let _env_guard = PriceCacheEnvGuard::acquire();
         let (mut app, dir) = vault_with_safe_harbor_allocation();
         handle_key(&mut app, press(KeyCode::Char('a')));
         handle_key(&mut app, press(KeyCode::Enter));
@@ -29678,6 +29722,7 @@ mod tests {
     #[test]
     fn confirm_park_to_profile_after_write_runs_after_dirty_is_cleared() {
         use btctax_core::tax::types::FilingStatus;
+        let _env_guard = PriceCacheEnvGuard::acquire();
         let (mut app, dir) = unlocked_app_on_empty_vault(2024);
         seed_committed_return_and_profile(&mut app, 2024, FilingStatus::Single);
 
