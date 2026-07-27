@@ -282,10 +282,21 @@ on disk, so nothing is discarded — saying otherwise would send the filer to re
 otherwise `close_all(may_save = true)` runs before `form.dirty = false` (`:1536`) and the flush stops being
 a no-op.
 
-**Per-tail prefixes survive**, since fact 1 no longer names what landed: `"committed {year} as {label},
-but…"` (`:1355`), `"parked the full return for {year}, but…"` (`:1547`), and — reworded, because "Attested"
-claims an *effect* `derive_attest_status` (`:7074-7078`) exists to deny — **"the safe-harbor attest write
-landed, but…"** (`:7042`).
+**Per-tail prefixes survive**, since fact 1 no longer names what landed. **AMENDED at the T4 gate
+(2026-07-26) — this section is the mandate; the shipped separator is an em-dash, not `", but "`:**
+
+- `"committed {year} as {label} — "`
+- `"parked the full return for {year} — "`
+- `"the safe-harbor attest write landed — "` — reworded from the shipped `"Attested but…"`, which claims an
+  *effect* `derive_attest_status` (`:7074-7078`) exists to deny.
+
+Each carries its own **trailing space**; fact 1 is appended directly after it.
+
+*Why amended:* the original `", but "` forms composed with fact 1 into `"committed 2024 as Single, but the
+write reached disk, but whether it had the intended effect could not be verified…"` — two `but`s and a
+restated outcome. Recorded here rather than only in a source comment, because a source comment superseding
+a reviewed spec section is this repo's named "don't defer a spec mandate with a false citation" failure —
+and T5-T8 read their wording from this section.
 
 **If the reopen also fails:** `open_session` (`btctax-tui/src/unlock.rs:129-136`) and the viewer's
 `attempt_open` (`:150-164`) both call `build_snapshot`, with deterministic arms (`:174-205`), so a restart

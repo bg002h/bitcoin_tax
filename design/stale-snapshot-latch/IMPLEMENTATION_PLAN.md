@@ -450,10 +450,12 @@ the current `build_snapshot` position which precedes it — otherwise `close_all
 `form.dirty = false` (`:1536`) and the flush stops being a no-op.
 
 Preserve the three bespoke prefixes, with the attest one reworded (it claimed an *effect*
-`derive_attest_status` exists to deny):
-- `:1355` → `"committed {year} as {label}, but …"`
-- `:1547` → `"parked the full return for {year}, but …"`
-- `:7042` → `"the safe-harbor attest write landed, but …"`
+`derive_attest_status` exists to deny). **AMENDED at the T4 gate (2026-07-26): the separator is an
+em-dash + trailing space, NOT `", but "` — see `DESIGN.md` §2.5, which is the mandate.** The original
+forms composed with fact 1 into "…as Single, **but** the write reached disk, **but** whether…".
+- `:1355` → `"committed {year} as {label} — "`
+- `:1547` → `"parked the full return for {year} — "`
+- `:7042` → `"the safe-harbor attest write landed — "`
 
 - [ ] **Step 4: Verify**
 

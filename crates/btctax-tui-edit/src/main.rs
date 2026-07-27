@@ -826,8 +826,9 @@ impl EditorApp {
     /// them). It just re-projects `self.session` and delegates to `apply_reprojection`, which does the
     /// actual latch/status/dashboard work and is the unit every KAT drives directly.
     ///
-    /// `arm_prefix` carries the three per-tail prefixes DESIGN.md §2.5 requires to survive now that
-    /// fact 1 no longer names what landed (`"committed {year} as {label} — "`,
+    /// `arm_prefix` carries the three per-tail prefixes DESIGN.md §2.5 — as amended at the T4 gate,
+    /// 2026-07-26, to mandate the em-dash forms below — requires to survive now that fact 1 no longer
+    /// names what landed (`"committed {year} as {label} — "`,
     /// `"parked the full return for {year} — "`, `"the safe-harbor attest write landed — "`); the
     /// other 24 tails pass `None`. It is `Option<String>`, not `Option<&'static str>`: all three real
     /// prefixes interpolate a runtime `{year}`/`{label}`, so a `'static` string could not carry them —
@@ -841,8 +842,10 @@ impl EditorApp {
     /// ★ Task 4 fix round 1 (Minor): DESIGN.md §2.5 originally mandated a `", but "` separator
     /// (`"committed {year} as {label}, but the write reached disk, but whether it had the intended
     /// effect could not be verified…"`). That reads as two `but`s plus a restated outcome once fact 1
-    /// itself starts with "the write reached disk, but…" — superseded here in favor of an em-dash,
-    /// which reads as one continuous sentence instead of a doubled hedge.
+    /// itself starts with "the write reached disk, but…" — the em-dash form above reads as one
+    /// continuous sentence instead of a doubled hedge, and DESIGN.md §2.5 was AMENDED at the T4 gate
+    /// (2026-07-26) to mandate it, so this is no longer a source comment silently overriding an
+    /// unamended spec.
     fn after_write(
         &mut self,
         arm_prefix: Option<String>,
@@ -29603,9 +29606,14 @@ mod tests {
             .unwrap();
     }
 
-    /// The commit-tail prefix (`:1590`), proven against a REAL re-projection failure. Mutation-kills
+    /// The commit-tail prefix (`:1598`), proven against a REAL re-projection failure. Mutation-kills
     /// both a stripped trailing space AND a `None` swapped in for `Some(prefix)`: either mutation
     /// moves where `"the write reached disk"` starts, which the exact-position assertion pins.
+    ///
+    /// ★ Mutation-proved 2026-07-26: swapping the prefix's `—` for `✦` (U+2726, the same 3 bytes as
+    /// the em-dash) at `:1598` went RED on the `starts_with(prefix)` assertion below — the positional
+    /// `find(..) == Some(prefix.len())` assertion alone stayed GREEN under that same mutation, since it
+    /// only pins byte LENGTH, not text. Restored via `cp` backup, never `git checkout --`.
     #[test]
     fn commit_tax_inputs_prefix_survives_a_genuine_reprojection_failure() {
         let (mut app, _dir) = vault_with_return_inputs_draft();
@@ -29619,6 +29627,10 @@ mod tests {
             app.stale_after_write.is_some(),
             "a genuine re-projection failure must arm the stale latch: {s}"
         );
+        assert!(
+            s.starts_with(prefix),
+            "the shipped prefix text must match exactly: {s}"
+        );
         assert_eq!(
             s.find("the write reached disk"),
             Some(prefix.len()),
@@ -29627,8 +29639,12 @@ mod tests {
         );
     }
 
-    /// The park-tail prefix (`:1777`), proven against a REAL re-projection failure — same shape as
+    /// The park-tail prefix (`:1780`), proven against a REAL re-projection failure — same shape as
     /// the commit KAT above, mutation-killing a stripped trailing space or a `None` swap.
+    ///
+    /// ★ Mutation-proved 2026-07-26: swapping the prefix's `—` for `✦` (same 3 bytes) at `:1780` went
+    /// RED on the `starts_with(prefix)` assertion below, same as the commit-tail KAT. Restored via
+    /// `cp` backup, never `git checkout --`.
     #[test]
     fn confirm_park_to_profile_prefix_survives_a_genuine_reprojection_failure() {
         use btctax_core::tax::types::FilingStatus;
@@ -29647,6 +29663,10 @@ mod tests {
             app.stale_after_write.is_some(),
             "a genuine re-projection failure must arm the stale latch: {s}"
         );
+        assert!(
+            s.starts_with(prefix),
+            "the shipped prefix text must match exactly: {s}"
+        );
         assert_eq!(
             s.find("the write reached disk"),
             Some(prefix.len()),
@@ -29655,10 +29675,20 @@ mod tests {
         );
     }
 
-    /// The safe-harbor-attest prefix (`:7085`), proven against a REAL re-projection failure — same
+    /// The safe-harbor-attest prefix (`:7088`), proven against a REAL re-projection failure — same
     /// shape again. This is also the ONE intended user-visible wording change in the whole task (the
     /// shipped "Attested but…" claimed an effect `derive_attest_status` exists to deny once
-    /// re-projection fails); nothing previously pinned that the reworded prefix is what actually ships.
+    /// re-projection fails). The `starts_with(prefix)` assertion below is what pins that the reworded
+    /// prefix is what actually ships, byte for byte — the positional `find(..) == Some(prefix.len())`
+    /// check alone only pins the prefix's byte LENGTH, so it passes for any same-length prefix (e.g. a
+    /// `✦` swapped in for the em-dash), reworded text included.
+    ///
+    /// ★ Mutation-proved 2026-07-26, two mutations at `:7088`: (1) swapping the prefix's `—` for `✦`
+    /// (same 3 bytes) went RED on `starts_with(prefix)` below — the positional assertion alone stayed
+    /// GREEN, proving it only pins byte LENGTH; this is the mutation that was silently green before
+    /// this fix, and it is the one intended user-visible change in the whole task. (2) `Some(...)` →
+    /// `None::<String>` went RED too (re-confirms a pre-existing kill). Both restored via `cp` backup,
+    /// never `git checkout --`.
     #[test]
     fn safe_harbor_attest_prefix_survives_a_genuine_reprojection_failure() {
         let (mut app, _dir) = vault_with_safe_harbor_allocation();
@@ -29677,6 +29707,10 @@ mod tests {
         assert!(
             !s.contains("Attested but"),
             "the superseded wording must not resurface: {s}"
+        );
+        assert!(
+            s.starts_with(prefix),
+            "the shipped prefix text must match exactly: {s}"
         );
         assert_eq!(
             s.find("the write reached disk"),
