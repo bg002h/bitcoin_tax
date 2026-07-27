@@ -137,7 +137,7 @@ After restoring the real fix, the full `sp4.rs` suite (11 tests) and the whole-c
 btctax-forms` suite are green again, and `make check` (nextest + clippy `-D warnings`, whole workspace)
 plus `cargo fmt --all -- --check` both pass clean.
 
-## Summary
+## Summary (round 1)
 
 | | |
 |---|---|
@@ -147,3 +147,208 @@ plus `cargo fmt --all -- --check` both pass clean.
 | Overflow behavior | `FormsError::Overflow { part: "Part II", rows, capacity: 33 }` — fails closed, never truncates |
 | Mutation | reverted wrap → 4 tests red (verified, not predicted) → restored via `cp`, suite green again |
 | Gate | `make check` (2484 tests, clippy `-D warnings`) + `cargo fmt --all -- --check` — both green |
+
+**Citation correction (flagged by the round-2 review):** the "running the full sp4.rs" mutation
+transcript above (line 113) cites `sp4.rs:525:9`; the committed tree at review time actually had that
+panic at `:529:9` — the transcript was captured against a slightly older working copy than what got
+committed. The substance (the mutation reds, verified not predicted) was independently re-verified as
+TRUE. Round 2 rewrote `sp4.rs` extensively (see below), so neither line number is current any more
+either — this is exactly this repo's own recorded `stale self-citations` lesson recurring, and it is
+why round 2's own citations below are deliberately sparse on exact line numbers where the content is
+going to keep moving.
+
+---
+
+# Round 2 — whole-branch two-lens review fix pass
+
+Seven findings (2 Critical, 4 Important, 1 Minor) came back from a parallel two-lens review of the
+round-1 commits. All seven were addressed (fixed, or — per the review's own instruction — filed as a
+follow-up and NOT built). Commits below round 1's `b63e31f`.
+
+## Findings → disposition
+
+1. **[Critical] Part IV spill had no cross-reference.** Fixed: the first Part IV line used now always
+   starts with `"Part II, line 1 (continued): "` (`wrap::PART_IV_CROSS_REFERENCE_PREFIX`), budgeted into
+   the wrap so it never itself causes an overflow. Verified against Rev. 10-2024's own Specific
+   Instructions text (quoted in the review) and against the bundled asset's own page-2 caption
+   ("Explanations (continued from Parts I **and/or** II)", confirmed via `pdftotext -layout`).
+
+2. **[Critical] The refusal fired after a half-populated packet was on disk.** Fixed: `btctax_forms::
+   part_ii_capacity_check(narrative, year)` runs the identical wrap the real fill does, WITHOUT filling
+   anything, and both `export_irs_pdf_from_session` (crypto-slice) and `export_full_return` now call it
+   BEFORE `mkdir_out`, returning a `CliError::Usage` naming the year, the capacity, an honest character
+   count of what would fit, and the real remedy (the narrative is immutable once recorded — the vault is
+   append-only — so the remedy is "void and re-record with a shorter `--part-ii-file`," not "just
+   shorten it," which the review's own framing anticipated). **Empirically re-verified the ORIGINAL
+   exposure** (see Mutation B below): with the pre-flight removed, `out_dir` ends up holding
+   `f8949.pdf`, `schedule_d.pdf`, `form_1040_capgains.pdf`, `form_8275.txt`, and `basis_methodology.txt`
+   — an estimated-basis Form 8949 with NO `form_8275.pdf` disclosure behind it, exactly the §6662(d)
+   exposure the review named.
+
+3. **[Important] The line budget ignored the renderer's text inset.** Fixed: `form8275.rs::
+   TEXT_INSET_PTS = 2.0` (per side), `usable_width()` subtracts `2 * TEXT_INSET_PTS` from every field's
+   raw `/Rect` width before the wrap ever sees it — `518.4pt → 514.4pt` usable for Part II, `540.0pt →
+   536.0pt` for Part IV. This reproduces the review's own pdf.js measurement (≈514.4pt usable on
+   Part II's line) almost exactly, and sits comfortably under poppler's more generous ~516.24pt too. The
+   test oracle (`sp4.rs::assert_fits_inset_box`) is independently re-declared (own `ORACLE_TEXT_INSET_PTS`
+   constant, not `use`d from `src/`) with a NEGATIVE allowance (`usable - 0.05`, not `+0.5`) per the
+   review's exact instruction.
+
+4. **[Important] Part II's numbered lines 2-6 must never be claimed by a combined narrative.**
+   Independently re-verified by decompressing the bundled PDF's own XFA `template` packet (`qpdf`
+   couldn't reach it — the array/stream indirection needed a small `lopdf`-based dump; see "XFA
+   verification" below): `Line1PartII`..`Line6PartII` draw elements print `"1 "`..`"6 "` beside
+   `p1-t80[0]`..`p1-t85[0]` respectively, confirming the review's claim exactly. Took the review's ruling
+   as specified: Part II writes ONLY its own line 1; everything past that goes to Part IV. Per-item
+   numbering is filed as a follow-up (`FOLLOWUPS.md`), not built.
+
+5. **[Important] Paragraph breaks were destroyed.** Fixed: `wrap::split_paragraphs` splits on blank-line
+   boundaries (mirroring `disclosure_8275`'s `"\n\n"` join of multiple tranches' narratives);
+   `wrap_paragraphs` treats a paragraph boundary as a HARD break (flushes the current line even when
+   there is room to share it). Exercised through the FULL fill (not just a `wrap.rs` unit test) by
+   `sp4.rs::form_8275_paragraph_breaks_are_hard_breaks_not_collapsed_to_a_space`.
+
+6. **[Important] Part IV's physical order was assumed, not enforced.** Fixed: `verify::FlatPlacement::
+   free_ordered` adds a descent-group entry for a free (non-column) placement; `form8275.rs::
+   push_free_ordered` uses it for every Part IV write (`PART_IV_GROUP`, ordinal = array index). A
+   fault-injected map that swaps `part_iv_continuation[0]` and `[2]` now fails closed with a `Geometry`
+   error naming the broken descent (`sp4.rs::fault_injected_8275_part_iv_reordered_fields_breaks_
+   descent_and_is_red`) — confirmed via Mutation C below that WITHOUT this wiring the same fault
+   injection silently "succeeds" (wrong ordering, no error at all).
+
+7. **[Minor, folded] Glyph width for `` ` `` (0x60) under-measured.** Fixed by going further than asked:
+   rather than hand-patch one entry, `wrap.rs`'s WHOLE ASCII width table was re-extracted directly from
+   the bundled PDF's own embedded font (`/DR/Font/HelveticaLTStd-Bold`, `/Type1`, `/WinAnsiEncoding`,
+   `/FirstChar 0`/`/LastChar 255`, full 256-entry `/Widths` — see "Authoritative font widths" below).
+   Confirmed exactly the review's two claims and nothing else differs: `0x27` (apostrophe) is 238 here
+   vs the generic AFM's 278 (safe, over-measuring direction); `0x60` (backtick) is 333 here vs the
+   generic AFM's 278 (was the dangerous, under-measuring direction — now fixed). All the "extra" smart-
+   punctuation widths already in the table (em/en dash, curly quotes, bullet, ellipsis, section sign)
+   were independently re-checked against the SAME authoritative source and all already matched exactly.
+
+**Follow-ups (not built, filed in `design/f8275-part-ii-overflow/FOLLOWUPS.md`):** per-item Part II
+numbering (the fuller shape of finding 4); a record-time narrative-length bound in `plan_promote`; the
+unbreakable-token overflow path's inflated (not exact) row count; a defensive Part II emptiness re-check
+at the fill layer; documenting the ~28-line ceiling in `cli.rs`/the man page; `Form8275Map::
+field_names()` delegating to `narrative_continuation_fields()`.
+
+## XFA verification (finding 4)
+
+`f8275.pdf`'s `/AcroForm/XFA` is a `[name, stream]*` array; the `template` packet (object stream,
+FlateDecode) was pulled directly via a one-off `lopdf`-based test (not `qpdf --qdf`, which left the
+stream still compressed even with `--stream-data=uncompress` for this particular array-of-streams
+shape) and searched for `Line\dPartII`:
+
+```
+2033:><draw name="Line1PartII" w="5.08mm" x="12.7mm" y="131.233mm" h="4.233mm"
+2034:><value><text>1 </text></value>
+...              <traversal><traverse ref="p1-t80[0]"/></traversal>
+2134:><draw name="Line2PartII" ...>2 </text>...<traverse ref="p1-t81[0]"/>
+2235:><draw name="Line3PartII" ...>3 </text>...<traverse ref="p1-t82[0]"/>
+2336:><draw name="Line4PartII" ...>4 </text>...<traverse ref="p1-t83[0]"/>
+2437:><draw name="Line5PartII" ...>5 </text>...<traverse ref="p1-t84[0]"/>
+2538:><draw name="Line6PartII" ...>6 </text>...<traverse ref="p1-t85[0]"/>
+```
+
+Exact match to the review's claim.
+
+## Authoritative font widths (findings 3/7)
+
+Dumped `/DR/Font/HelveticaLTStd-Bold` (object 28) from the bundled PDF directly:
+
+```
+BaseFont /HelveticaLTStd-Bold  Encoding /WinAnsiEncoding  FirstChar 0  LastChar 255
+Widths [500 500 ... 278 333 474 556 556 889 722 238 333 333 389 584 278 333 278 278 556 ...]
+                              ^^^ code 0x27 = 238        code 0x60 (backtick) = 333
+MAX WIDTH IN TABLE: 1000
+```
+
+`code 0x27 ('): width 238` and `code 0x60 (\`): width 333` — matching the review exactly. Every
+"extra" glyph (em dash 0x97=1000, en dash 0x96=556, quoteleft 0x91=278, quoteright 0x92=278,
+quotedblleft 0x93=500, quotedblright 0x94=500, bullet 0x95=350, ellipsis 0x85=1000, section 0xA7=556)
+was cross-checked against this same array and already matched `wrap.rs`'s existing table exactly — only
+the two ASCII entries needed correction.
+
+## New capacity (round 2)
+
+Part II now writes only 1 line; the wrap capacity is `1 + 27 = 28` (was 33 in round 1). At 8pt
+Helvetica-Bold with the inset applied: Part II's line 1 usable width is 514.4pt, Part IV's is 536.0pt
+(438.2pt on the FIRST Part IV line used, after reserving room for the 97.8pt cross-reference prefix).
+The round-1 >1500-char fixture (1762 chars) now needs 14 lines (1 Part II + 13 Part IV) — comfortably
+under 28. The dedicated overflow KAT (900 repeats of `"word "`) now needs 37 lines against the 28
+available (`FormsError::Overflow { part: "Part II", rows: 37, capacity: 28 }`) — was 38 vs 33 in round 1;
+the shift is consistent with the tighter, restructured capacity.
+
+## Mutation tests (round 2)
+
+All four applied via direct `Edit` (never `git checkout --`), each restored via `cp` from a backup taken
+before the mutation, each restore verified byte-identical via `diff` before the next mutation and before
+proceeding. All four claims below are **true as recorded** — actually run, not predicted.
+
+**Mutation A (re-verify the core fix survived the round-2 restructuring).** Reverted
+`fill_form_8275_inner`'s Part II section back to the shipped single `push_free(part_ii_narrative,
+printed.part_ii)` (the SAME mutation as round 1, re-applied to the new code). Result: **7 of 15** sp4.rs
+tests red (`form_8275_fills_part_i_part_ii_and_identity`, `form_8275_is_byte_deterministic`,
+`form_8275_paragraph_breaks_are_hard_breaks_not_collapsed_to_a_space`,
+`form_8275_part_ii_long_narrative_does_not_silently_clip`,
+`form_8275_part_ii_narrative_too_long_for_every_continuation_line_fails_closed`,
+`form_8275_part_iv_cross_reference_appears_only_on_the_first_used_part_iv_line`,
+`fault_injected_8275_part_iv_reordered_fields_breaks_descent_and_is_red`) — a stronger, broader red than
+round 1's 4, reflecting the larger surface round 2 added.
+
+**Mutation B (finding 2 — the CLI pre-flight).** Removed BOTH `admin.rs` pre-flight blocks (crypto-slice
+and full-return). Result: both new CLI tests red —
+`export_irs_pdf_with_an_overflowing_part_ii_narrative_refuses_before_bytes` and
+`export_full_return_with_an_overflowing_part_ii_narrative_refuses_with_a_named_remedy`, each failing on
+the message-content assertion:
+
+```
+must name the year, 'Part II', and the --part-ii-file remedy: IRS form fill: 37 rows exceed the 28-row capacity of a single Part II page
+```
+
+— i.e. exactly the generic, unhelpful `FormsError::Overflow` Display the review quoted. **Then went
+further and empirically confirmed the Critical byte-safety claim itself**, not just the message
+regression: with a probe print added temporarily to the test, `out_dir`'s contents after the refusal
+under this mutation were:
+
+```
+PROBE out_dir contents after refusal: ["form_1040_capgains.pdf", "schedule_d.pdf", "f8949.pdf", "form_8275.txt", "basis_methodology.txt"]
+```
+
+An estimated-basis `f8949.pdf` on disk with **no `form_8275.pdf`** behind it — the exact half-populated
+packet / §6662(d) exposure finding 2 described. The probe print was removed before restoring the real
+fix (it was never meant to be a permanent test — it existed only to make this one empirical check, and
+the final committed test asserts the directory is fully empty, which is the correct, general assertion
+once the fix is in place).
+
+**Mutation C (finding 6 — descent-order enforcement).** Reverted `push_free_ordered` calls for Part
+II/IV back to plain `push_free` (no descent group). Result:
+`fault_injected_8275_part_iv_reordered_fields_breaks_descent_and_is_red` reds with:
+
+```
+called `Result::unwrap_err()` on an `Ok` value: Some([...pdf bytes...])
+```
+
+— i.e. without descent tracking, the fault-injected reordered-map fill **silently succeeds** (produces
+a real, verify_flat-passing PDF with the wrapped lines landing in the WRONG physical order), confirming
+the geometric guard is load-bearing, not decorative.
+
+**Mutation D (finding 3 — text inset).** Set `TEXT_INSET_PTS = 0.0`. Result:
+`form_8275_part_ii_long_narrative_does_not_silently_clip` reds:
+
+```
+topmostSubform[0].Page2[0].p2-t6[0]: its written content measures 539.26pt wide at 8pt Helvetica-Bold
+but the field's INSET-adjusted usable width is only 536.00pt (540.00pt raw minus 2.0pt inset per side)
+```
+
+— a REAL line (not a contrived one) that the un-inset budget would have packed 3.26pt too wide,
+confirming the review's own concrete clipping example (its line 5, "…suspended withdrawals and
+subsequently entered", was the SAME class of failure against the round-1 fixture) is caught by the
+round-2 fix and would NOT be caught without it.
+
+## Final gate (round 2)
+
+After all four mutations restored (each verified byte-identical to its pre-mutation backup via `diff`):
+`make check` — **2497 tests run: 2497 passed, 11 skipped**, clippy `-D warnings` clean — and
+`cargo fmt --all -- --check` — clean. (2497 vs round 1's 2484: +2 CLI tests for finding 2, +4 sp4.rs
+tests for findings 4/1/5/6, +7 wrap.rs unit tests net of the round-1 ones they replaced.)
