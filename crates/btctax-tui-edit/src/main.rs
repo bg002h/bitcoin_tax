@@ -552,25 +552,7 @@ fn handle_modal_key(app: &mut EditorApp, key: KeyEvent) {
 
             match save_result {
                 Ok(()) => {
-                    // Re-project: borrows session immutably; block scope ends before
-                    // we mutate app.snapshot.
-                    let new_snap = {
-                        let session = app.session.as_ref().unwrap();
-                        btctax_tui::unlock::build_snapshot(session)
-                    };
-                    match new_snap {
-                        Ok((snap, _)) => {
-                            app.snapshot = Some(snap);
-                            app.status = Some(format!("Saved tax profile for {year}"));
-                        }
-                        Err(e) => {
-                            // Save succeeded but re-projection failed (near-impossible).
-                            // Keep old snapshot; inform user to restart.
-                            app.status = Some(format!(
-                                "Saved but re-projection failed ({e}) — restart to refresh"
-                            ));
-                        }
-                    }
+                    app.after_write(None, |_| format!("Saved tax profile for {year}"));
                     app.mutation_modal = None;
                     app.profile_form = None;
                 }
@@ -1917,29 +1899,10 @@ fn handle_classify_inbound_modal_key(app: &mut EditorApp, key: KeyEvent) {
 
             match save_result {
                 Ok(decision_id) => {
-                    // Re-project: borrows session immutably in its own block.
-                    let new_snap = {
-                        let session = app.session.as_ref().unwrap();
-                        btctax_tui::unlock::build_snapshot(session)
-                    };
-                    match new_snap {
-                        Ok((snap, _)) => {
-                            // D4 step-2: derive status from re-projected blockers [R0-I5].
-                            let status = derive_classify_inbound_status(
-                                &snap,
-                                &target_event,
-                                &decision_id,
-                                &as_,
-                            );
-                            app.snapshot = Some(snap);
-                            app.status = Some(status);
-                        }
-                        Err(e) => {
-                            app.status = Some(format!(
-                                "Saved but re-projection failed ({e}) — restart to refresh"
-                            ));
-                        }
-                    }
+                    // D4 step-2: derive status from re-projected blockers [R0-I5].
+                    app.after_write(None, |snap| {
+                        derive_classify_inbound_status(snap, &target_event, &decision_id, &as_)
+                    });
                     app.classify_inbound_modal = None;
                     app.classify_inbound_flow = None;
                 }
@@ -2497,29 +2460,10 @@ fn handle_reclassify_outflow_modal_key(app: &mut EditorApp, key: KeyEvent) {
 
             match save_result {
                 Ok(decision_id) => {
-                    // Re-project: borrows session immutably in its own block.
-                    let new_snap = {
-                        let session = app.session.as_ref().unwrap();
-                        btctax_tui::unlock::build_snapshot(session)
-                    };
-                    match new_snap {
-                        Ok((snap, _)) => {
-                            // D4 step-2: derive status from re-projected blockers [R0-I5].
-                            let status = derive_reclassify_outflow_status(
-                                &snap,
-                                &target_event,
-                                &decision_id,
-                                &kind_str,
-                            );
-                            app.snapshot = Some(snap);
-                            app.status = Some(status);
-                        }
-                        Err(e) => {
-                            app.status = Some(format!(
-                                "Saved but re-projection failed ({e}) — restart to refresh"
-                            ));
-                        }
-                    }
+                    // D4 step-2: derive status from re-projected blockers [R0-I5].
+                    app.after_write(None, |snap| {
+                        derive_reclassify_outflow_status(snap, &target_event, &decision_id, &kind_str)
+                    });
                     app.reclassify_outflow_modal = None;
                     app.reclassify_outflow_flow = None;
                 }
@@ -2845,28 +2789,15 @@ fn handle_reclassify_income_modal_key(app: &mut EditorApp, key: KeyEvent) {
 
             match save_result {
                 Ok(decision_id) => {
-                    let new_snap = {
-                        let session = app.session.as_ref().unwrap();
-                        btctax_tui::unlock::build_snapshot(session)
-                    };
-                    match new_snap {
-                        Ok((snap, _)) => {
-                            let status = derive_reclassify_income_status(
-                                &snap,
-                                &target_event,
-                                &decision_id,
-                                new_business,
-                                new_kind,
-                            );
-                            app.snapshot = Some(snap);
-                            app.status = Some(status);
-                        }
-                        Err(e) => {
-                            app.status = Some(format!(
-                                "Saved but re-projection failed ({e}) — restart to refresh"
-                            ));
-                        }
-                    }
+                    app.after_write(None, |snap| {
+                        derive_reclassify_income_status(
+                            snap,
+                            &target_event,
+                            &decision_id,
+                            new_business,
+                            new_kind,
+                        )
+                    });
                     app.reclassify_income_modal = None;
                     app.reclassify_income_flow = None;
                 }
@@ -2917,23 +2848,9 @@ fn handle_set_fmv_modal_key(app: &mut EditorApp, key: KeyEvent) {
 
             match save_result {
                 Ok(decision_id) => {
-                    let new_snap = {
-                        let session = app.session.as_ref().unwrap();
-                        btctax_tui::unlock::build_snapshot(session)
-                    };
-                    match new_snap {
-                        Ok((snap, _)) => {
-                            let status =
-                                derive_set_fmv_status(&snap, &target_event, &decision_id, usd_fmv);
-                            app.snapshot = Some(snap);
-                            app.status = Some(status);
-                        }
-                        Err(e) => {
-                            app.status = Some(format!(
-                                "Saved but re-projection failed ({e}) — restart to refresh"
-                            ));
-                        }
-                    }
+                    app.after_write(None, |snap| {
+                        derive_set_fmv_status(snap, &target_event, &decision_id, usd_fmv)
+                    });
                     app.set_fmv_modal = None;
                     app.set_fmv_flow = None;
                 }
@@ -3118,25 +3035,13 @@ fn handle_method_election_modal_key(app: &mut EditorApp, key: KeyEvent) {
 
             match save_result {
                 Ok(_decision_id) => {
-                    let new_snap = {
-                        let session = app.session.as_ref().unwrap();
-                        btctax_tui::unlock::build_snapshot(session)
-                    };
-                    match new_snap {
-                        Ok((snap, _)) => {
-                            app.snapshot = Some(snap);
-                            app.status = Some(format!(
-                                "Elected + attested {} for {} (per-account standing order)",
-                                lot_method_label(method),
-                                wallet_label(&wallet)
-                            ));
-                        }
-                        Err(e) => {
-                            app.status = Some(format!(
-                                "Saved but re-projection failed ({e}) — restart to refresh"
-                            ));
-                        }
-                    }
+                    app.after_write(None, |_| {
+                        format!(
+                            "Elected + attested {} for {} (per-account standing order)",
+                            lot_method_label(method),
+                            wallet_label(&wallet)
+                        )
+                    });
                     app.method_election_modal = None;
                     app.method_election_flow = None;
                 }
@@ -3454,29 +3359,16 @@ fn handle_void_modal_key(app: &mut EditorApp, key: KeyEvent) {
 
             match save_result {
                 Ok(void_decision_id) => {
-                    let new_snap = {
-                        let session = app.session.as_ref().unwrap();
-                        btctax_tui::unlock::build_snapshot(session)
-                    };
-                    match new_snap {
-                        Ok((snap, _)) => {
-                            let status = derive_void_status(
-                                &snap,
-                                &void_decision_id,
-                                &target_event_id,
-                                inner_target.as_ref(),
-                                payload_tag,
-                                seq,
-                            );
-                            app.snapshot = Some(snap);
-                            app.status = Some(status);
-                        }
-                        Err(e) => {
-                            app.status = Some(format!(
-                                "Saved but re-projection failed ({e}) — restart to refresh"
-                            ));
-                        }
-                    }
+                    app.after_write(None, |snap| {
+                        derive_void_status(
+                            snap,
+                            &void_decision_id,
+                            &target_event_id,
+                            inner_target.as_ref(),
+                            payload_tag,
+                            seq,
+                        )
+                    });
                     app.void_modal = None;
                     app.void_flow = None;
                 }
@@ -4474,27 +4366,14 @@ fn declare_flow_confirm(app: &mut EditorApp) {
 
     match save_result {
         Ok(_id) => {
-            let new_snap = {
-                let session = app.session.as_ref().unwrap();
-                btctax_tui::unlock::build_snapshot(session)
-            };
             app.declare_flow = None;
-            match new_snap {
-                Ok((snap, _)) => {
-                    app.snapshot = Some(snap);
-                    app.status =
-                        Some("declared a $0 tranche — revocable until promoted".to_string());
-                    // Refresh the dashboard's own view off the NEW snapshot so the just-cleared
-                    // candidate no longer shows (mirrors journey_view's own recompute — no cached
-                    // second source of truth).
-                    refresh_defensive_dashboard(app);
-                }
-                Err(e) => {
-                    app.status = Some(format!(
-                        "Saved but re-projection failed ({e}) — restart to refresh"
-                    ));
-                }
-            }
+            // `after_write`'s `Ok` arm refreshes the dashboard's own view off the NEW snapshot so the
+            // just-cleared candidate no longer shows (mirrors journey_view's own recompute — no cached
+            // second source of truth) — gated on `defensive_dashboard.is_some()`, which this flow's own
+            // reachability (dashboard-only) guarantees.
+            app.after_write(None, |_| {
+                "declared a $0 tranche — revocable until promoted".to_string()
+            });
         }
         Err(e) => {
             app.declare_flow = None;
@@ -4755,29 +4634,15 @@ fn promote_flow_confirm(app: &mut EditorApp) {
 
     match save_result {
         Ok(_id) => {
-            let new_snap = {
-                let session = app.session.as_ref().unwrap();
-                btctax_tui::unlock::build_snapshot(session)
-            };
             app.promote_flow = None;
-            match new_snap {
-                Ok((snap, _)) => {
-                    app.snapshot = Some(snap);
-                    app.status = Some(
-                        "promoted — filed the computed floor as documented basis (no longer revocable)"
-                            .to_string(),
-                    );
-                    // Refresh the dashboard's own view off the NEW snapshot so the just-promoted row
-                    // no longer offers 'p' (mirrors journey_view's own recompute — no cached second
-                    // source of truth).
-                    refresh_defensive_dashboard(app);
-                }
-                Err(e) => {
-                    app.status = Some(format!(
-                        "Saved but re-projection failed ({e}) — restart to refresh"
-                    ));
-                }
-            }
+            // `after_write`'s `Ok` arm refreshes the dashboard's own view off the NEW snapshot so the
+            // just-promoted row no longer offers 'p' (mirrors journey_view's own recompute — no cached
+            // second source of truth) — gated on `defensive_dashboard.is_some()`, which this flow's own
+            // reachability (dashboard-only) guarantees.
+            app.after_write(None, |_| {
+                "promoted — filed the computed floor as documented basis (no longer revocable)"
+                    .to_string()
+            });
         }
         // ★ arch M-3 (P-C gate): when NOTHING was persisted, do not throw away the filer's authored
         // Form 8275 Part II narrative. `PersistError`'s own contract is that `NoChange` and `RolledBack`
@@ -5066,29 +4931,16 @@ fn handle_select_lots_modal_key(app: &mut EditorApp, key: KeyEvent) {
 
             match save_result {
                 Ok(decision_id) => {
-                    let new_snap = {
-                        let session = app.session.as_ref().unwrap();
-                        btctax_tui::unlock::build_snapshot(session)
-                    };
-                    match new_snap {
-                        Ok((snap, _)) => {
-                            let status = derive_select_lots_status(
-                                &snap,
-                                &disposal_event,
-                                &decision_id,
-                                pick_count,
-                                total_sat,
-                                &unconservable_before,
-                            );
-                            app.snapshot = Some(snap);
-                            app.status = Some(status);
-                        }
-                        Err(e) => {
-                            app.status = Some(format!(
-                                "Saved but re-projection failed ({e}) — restart to refresh"
-                            ));
-                        }
-                    }
+                    app.after_write(None, |snap| {
+                        derive_select_lots_status(
+                            snap,
+                            &disposal_event,
+                            &decision_id,
+                            pick_count,
+                            total_sat,
+                            &unconservable_before,
+                        )
+                    });
                     app.select_lots_modal = None;
                     app.select_lots_flow = None;
                 }
@@ -5386,23 +5238,9 @@ fn handle_set_donation_details_modal_key(app: &mut EditorApp, key: KeyEvent) {
 
             match save_result {
                 Ok(()) => {
-                    // Re-project.
-                    let new_snap = {
-                        let session = app.session.as_ref().unwrap();
-                        btctax_tui::unlock::build_snapshot(session)
-                    };
-                    match new_snap {
-                        Ok((snap, _)) => {
-                            let status = derive_donation_details_status(&event_id, &details);
-                            app.snapshot = Some(snap);
-                            app.status = Some(status);
-                        }
-                        Err(e) => {
-                            app.status = Some(format!(
-                                "Saved but re-projection failed ({e}) — restart to refresh"
-                            ));
-                        }
-                    }
+                    app.after_write(None, |_| {
+                        derive_donation_details_status(&event_id, &details)
+                    });
                     app.set_donation_details_modal = None;
                     app.set_donation_details_flow = None;
                 }
@@ -6404,27 +6242,9 @@ fn handle_link_transfer_modal_key(app: &mut EditorApp, key: KeyEvent) {
 
             match save_result {
                 Ok(decision_id) => {
-                    let new_snap = {
-                        let session = app.session.as_ref().unwrap();
-                        btctax_tui::unlock::build_snapshot(session)
-                    };
-                    match new_snap {
-                        Ok((snap, _)) => {
-                            let status = derive_link_transfer_status(
-                                &snap,
-                                &out_event,
-                                &decision_id,
-                                &target_label,
-                            );
-                            app.snapshot = Some(snap);
-                            app.status = Some(status);
-                        }
-                        Err(e) => {
-                            app.status = Some(format!(
-                                "Saved but re-projection failed ({e}) — restart to refresh"
-                            ));
-                        }
-                    }
+                    app.after_write(None, |snap| {
+                        derive_link_transfer_status(snap, &out_event, &decision_id, &target_label)
+                    });
                     app.link_transfer_modal = None;
                     app.link_transfer_flow = None;
                 }
@@ -6973,27 +6793,9 @@ fn handle_classify_raw_modal_key(app: &mut EditorApp, key: KeyEvent) {
 
             match save_result {
                 Ok(decision_id) => {
-                    let new_snap = {
-                        let session = app.session.as_ref().unwrap();
-                        btctax_tui::unlock::build_snapshot(session)
-                    };
-                    match new_snap {
-                        Ok((snap, _)) => {
-                            let status = derive_classify_raw_status(
-                                &snap,
-                                &target,
-                                &decision_id,
-                                variant_label,
-                            );
-                            app.snapshot = Some(snap);
-                            app.status = Some(status);
-                        }
-                        Err(e) => {
-                            app.status = Some(format!(
-                                "Saved but re-projection failed ({e}) — restart to refresh"
-                            ));
-                        }
-                    }
+                    app.after_write(None, |snap| {
+                        derive_classify_raw_status(snap, &target, &decision_id, variant_label)
+                    });
                     app.classify_raw_modal = None;
                     app.classify_raw_flow = None;
                 }
@@ -7560,22 +7362,7 @@ fn handle_safe_harbor_allocate_modal_key(app: &mut EditorApp, key: KeyEvent) {
 
             match save_result {
                 Ok(new_id) => {
-                    let new_snap = {
-                        let session = app.session.as_ref().unwrap();
-                        btctax_tui::unlock::build_snapshot(session)
-                    };
-                    match new_snap {
-                        Ok((snap, _)) => {
-                            let status = derive_allocate_status(&snap, &new_id);
-                            app.snapshot = Some(snap);
-                            app.status = Some(status);
-                        }
-                        Err(e) => {
-                            app.status = Some(format!(
-                                "Saved but re-projection failed ({e}) — restart to refresh"
-                            ));
-                        }
-                    }
+                    app.after_write(None, |snap| derive_allocate_status(snap, &new_id));
                     app.safe_harbor_allocate_modal = None;
                     app.safe_harbor_allocate_flow = None;
                 }
@@ -8044,22 +7831,7 @@ fn handle_bulk_link_modal_key(app: &mut EditorApp, key: KeyEvent) {
 
             match save_result {
                 Ok(n) => {
-                    let new_snap = {
-                        let session = app.session.as_ref().unwrap();
-                        btctax_tui::unlock::build_snapshot(session)
-                    };
-                    match new_snap {
-                        Ok((snap, _)) => {
-                            let status = derive_bulk_link_status(&snap, n, &dest);
-                            app.snapshot = Some(snap);
-                            app.status = Some(status);
-                        }
-                        Err(e) => {
-                            app.status = Some(format!(
-                                "Saved but re-projection failed ({e}) — restart to refresh"
-                            ));
-                        }
-                    }
+                    app.after_write(None, |snap| derive_bulk_link_status(snap, n, &dest));
                     app.bulk_link_modal = None;
                     app.bulk_link_flow = None;
                 }
@@ -8410,22 +8182,7 @@ fn handle_bulk_sti_modal_key(app: &mut EditorApp, key: KeyEvent) {
 
             match save_result {
                 Ok(n) => {
-                    let new_snap = {
-                        let session = app.session.as_ref().unwrap();
-                        btctax_tui::unlock::build_snapshot(session)
-                    };
-                    match new_snap {
-                        Ok((snap, _)) => {
-                            let status = derive_bulk_sti_status(&snap, n);
-                            app.snapshot = Some(snap);
-                            app.status = Some(status);
-                        }
-                        Err(e) => {
-                            app.status = Some(format!(
-                                "Saved but re-projection failed ({e}) — restart to refresh"
-                            ));
-                        }
-                    }
+                    app.after_write(None, |snap| derive_bulk_sti_status(snap, n));
                     app.bulk_sti_modal = None;
                     app.bulk_sti_flow = None;
                 }
@@ -8518,26 +8275,14 @@ fn handle_pseudo_approve_modal_key(app: &mut EditorApp, key: KeyEvent) {
             };
             match save_result {
                 Ok(_) => {
-                    let new_snap = {
-                        let session = app.session.as_ref().unwrap();
-                        btctax_tui::unlock::build_snapshot(session)
-                    };
-                    match new_snap {
-                        Ok((snap, _)) => {
-                            let remaining = snap.state.pseudo_synthetic_count;
-                            app.snapshot = Some(snap);
-                            app.status = Some(format!(
-                                "Approved {n} pseudo default(s) as real decisions \
-                                 ({remaining} still pending). Turn the mode off with \
-                                 `reconcile pseudo off` when done."
-                            ));
-                        }
-                        Err(e) => {
-                            app.status = Some(format!(
-                                "Saved but re-projection failed ({e}) — restart to refresh"
-                            ));
-                        }
-                    }
+                    app.after_write(None, |snap| {
+                        let remaining = snap.state.pseudo_synthetic_count;
+                        format!(
+                            "Approved {n} pseudo default(s) as real decisions \
+                             ({remaining} still pending). Turn the mode off with \
+                             `reconcile pseudo off` when done."
+                        )
+                    });
                     app.pseudo_approve_modal = None;
                 }
                 Err(e) => {
@@ -8958,22 +8703,7 @@ fn handle_bulk_income_modal_key(app: &mut EditorApp, key: KeyEvent) {
 
             match save_result {
                 Ok(n) => {
-                    let new_snap = {
-                        let session = app.session.as_ref().unwrap();
-                        btctax_tui::unlock::build_snapshot(session)
-                    };
-                    match new_snap {
-                        Ok((snap, _)) => {
-                            let status = derive_bulk_income_status(&snap, n);
-                            app.snapshot = Some(snap);
-                            app.status = Some(status);
-                        }
-                        Err(e) => {
-                            app.status = Some(format!(
-                                "Saved but re-projection failed ({e}) — restart to refresh"
-                            ));
-                        }
-                    }
+                    app.after_write(None, |snap| derive_bulk_income_status(snap, n));
                     app.bulk_income_modal = None;
                     app.bulk_income_flow = None;
                 }
@@ -9247,22 +8977,7 @@ fn handle_bulk_resolve_modal_key(app: &mut EditorApp, key: KeyEvent) {
 
             match save_result {
                 Ok(n) => {
-                    let new_snap = {
-                        let session = app.session.as_ref().unwrap();
-                        btctax_tui::unlock::build_snapshot(session)
-                    };
-                    match new_snap {
-                        Ok((snap, _)) => {
-                            let status = derive_bulk_resolve_status(&snap, kind, n);
-                            app.snapshot = Some(snap);
-                            app.status = Some(status);
-                        }
-                        Err(e) => {
-                            app.status = Some(format!(
-                                "Saved but re-projection failed ({e}) — restart to refresh"
-                            ));
-                        }
-                    }
+                    app.after_write(None, |snap| derive_bulk_resolve_status(snap, kind, n));
                     app.bulk_resolve_modal = None;
                     app.bulk_resolve_flow = None;
                 }
@@ -9478,21 +9193,7 @@ fn handle_bulk_void_modal_key(app: &mut EditorApp, key: KeyEvent) {
 
             match save_result {
                 Ok(n) => {
-                    let new_snap = {
-                        let session = app.session.as_ref().unwrap();
-                        btctax_tui::unlock::build_snapshot(session)
-                    };
-                    match new_snap {
-                        Ok((snap, _)) => {
-                            app.snapshot = Some(snap);
-                            app.status = Some(derive_bulk_void_status(n, lot_selection_count));
-                        }
-                        Err(e) => {
-                            app.status = Some(format!(
-                                "Saved but re-projection failed ({e}) — restart to refresh"
-                            ));
-                        }
-                    }
+                    app.after_write(None, |_| derive_bulk_void_status(n, lot_selection_count));
                     app.bulk_void_modal = None;
                     app.bulk_void_flow = None;
                 }
@@ -9822,22 +9523,9 @@ fn handle_bulk_reclassify_outflow_modal_key(app: &mut EditorApp, key: KeyEvent) 
 
             match save_result {
                 Ok(n) => {
-                    let new_snap = {
-                        let session = app.session.as_ref().unwrap();
-                        btctax_tui::unlock::build_snapshot(session)
-                    };
-                    match new_snap {
-                        Ok((snap, _)) => {
-                            let status = derive_bulk_reclassify_outflow_status(&snap, n);
-                            app.snapshot = Some(snap);
-                            app.status = Some(status);
-                        }
-                        Err(e) => {
-                            app.status = Some(format!(
-                                "Saved but re-projection failed ({e}) — restart to refresh"
-                            ));
-                        }
-                    }
+                    app.after_write(None, |snap| {
+                        derive_bulk_reclassify_outflow_status(snap, n)
+                    });
                     app.bulk_reclassify_outflow_modal = None;
                     app.bulk_reclassify_outflow_flow = None;
                 }
@@ -10026,22 +9714,9 @@ fn handle_match_self_transfers_modal_key(app: &mut EditorApp, key: KeyEvent) {
 
             match save_result {
                 Ok(_) => {
-                    let new_snap = {
-                        let session = app.session.as_ref().unwrap();
-                        btctax_tui::unlock::build_snapshot(session)
-                    };
-                    match new_snap {
-                        Ok((snap, _)) => {
-                            let status = derive_match_self_transfers_status(&snap, action);
-                            app.snapshot = Some(snap);
-                            app.status = Some(status);
-                        }
-                        Err(e) => {
-                            app.status = Some(format!(
-                                "Saved but re-projection failed ({e}) — restart to refresh"
-                            ));
-                        }
-                    }
+                    app.after_write(None, |snap| {
+                        derive_match_self_transfers_status(snap, action)
+                    });
                     app.match_self_transfers_modal = None;
                     app.match_self_transfers_flow = None;
                 }
@@ -10310,23 +9985,9 @@ fn handle_resolve_conflict_modal_key(app: &mut EditorApp, key: KeyEvent) {
 
             match save_result {
                 Ok(_decision_id) => {
-                    let new_snap = {
-                        let session = app.session.as_ref().unwrap();
-                        btctax_tui::unlock::build_snapshot(session)
-                    };
-                    match new_snap {
-                        Ok((snap, _)) => {
-                            let status =
-                                derive_resolve_conflict_status(&snap, &conflict_event, kind);
-                            app.snapshot = Some(snap);
-                            app.status = Some(status);
-                        }
-                        Err(e) => {
-                            app.status = Some(format!(
-                                "Saved but re-projection failed ({e}) — restart to refresh"
-                            ));
-                        }
-                    }
+                    app.after_write(None, |snap| {
+                        derive_resolve_conflict_status(snap, &conflict_event, kind)
+                    });
                     app.resolve_conflict_modal = None;
                     app.resolve_conflict_flow = None;
                 }
@@ -10654,29 +10315,16 @@ fn handle_optimize_accept_modal_key(app: &mut EditorApp, key: KeyEvent) {
 
             match save_result {
                 Ok(decision_id) => {
-                    let new_snap = {
-                        let session = app.session.as_ref().unwrap();
-                        btctax_tui::unlock::build_snapshot(session)
-                    };
-                    match new_snap {
-                        Ok((snap, _)) => {
-                            let status = derive_optimize_accept_status(
-                                &snap,
-                                &disposal,
-                                &decision_id,
-                                pick_count,
-                                basis_label,
-                                attested,
-                            );
-                            app.snapshot = Some(snap);
-                            app.status = Some(status);
-                        }
-                        Err(e) => {
-                            app.status = Some(format!(
-                                "Saved but re-projection failed ({e}) — restart to refresh"
-                            ));
-                        }
-                    }
+                    app.after_write(None, |snap| {
+                        derive_optimize_accept_status(
+                            snap,
+                            &disposal,
+                            &decision_id,
+                            pick_count,
+                            basis_label,
+                            attested,
+                        )
+                    });
                     app.optimize_accept_modal = None;
                     app.optimize_accept_flow = None;
                 }
@@ -29818,6 +29466,93 @@ mod tests {
         assert!(
             modal.contains("WRITES THE VAULT") && modal.contains("attestation"),
             "attest modal must render; got:\n{modal}"
+        );
+    }
+
+    // ── Task 4 (after_write migration) — representative end-to-end coverage ───
+
+    /// Fixture for the snapshot-derived axis: a vault holding one TIMEBARRED `SafeHarborAllocation`,
+    /// unlocked and ready for the `a` key to open the safe-harbor-attest flow.
+    fn vault_with_safe_harbor_allocation() -> (EditorApp, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "t4-safe-harbor-attest";
+        seed_safe_harbor_vault(&vault, &key, pp_str);
+        let app = open_app(&vault, pp_str);
+        (app, dir)
+    }
+
+    /// Drive the safe-harbor-attest flow to completion: `a` → Info, `Enter` → TypedWord, type ATTEST,
+    /// `Enter` → persist + re-project (the `:7042`-prefix write tail).
+    fn confirm_safe_harbor_attest(app: &mut EditorApp) {
+        handle_key(app, press(KeyCode::Char('a')));
+        handle_key(app, press(KeyCode::Enter));
+        type_str(app, "ATTEST");
+        handle_key(app, press(KeyCode::Enter));
+    }
+
+    /// Fixture for the no-snapshot `derive_*` axis: a vault holding two voidable `ClassifyInbound`
+    /// decisions, unlocked and ready for the `V` key to open the bulk-void flow.
+    fn vault_with_voidable_decisions() -> (EditorApp, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "t4-bulk-void";
+        seed_two_classified_inbounds_vault(&vault, &key, pp_str);
+        let app = open_app(&vault, pp_str);
+        (app, dir)
+    }
+
+    /// Drive the bulk-void flow to completion: `V` → checklist, `Enter` → confirm modal, `Enter` →
+    /// APPLY (persist + re-project via `derive_bulk_void_status`, which takes no snapshot).
+    fn confirm_bulk_void(app: &mut EditorApp) {
+        handle_key(app, press(KeyCode::Char('V')));
+        handle_key(app, press(KeyCode::Enter));
+        handle_key(app, press(KeyCode::Enter));
+    }
+
+    /// Fixture for the hoisted-status axis: an empty vault with a dirty, fully-answered tax-inputs
+    /// draft loaded and ready for `commit_tax_inputs` to commit outright (`CommitOutcome::Committed`).
+    fn vault_with_return_inputs_draft() -> (EditorApp, tempfile::TempDir) {
+        use btctax_core::tax::return_inputs::ReturnInputs;
+        use btctax_core::tax::testonly::{answer_all_live_declarations, not_a_dependent};
+        use btctax_core::tax::types::FilingStatus;
+
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: not_a_dependent(),
+            ..Default::default()
+        };
+        answer_all_live_declarations(&mut ri);
+        btctax_cli::input_form_store::save_draft(app.session.as_mut().unwrap(), 2024, &ri).unwrap();
+        let mut form = crate::edit::form::TaxInputsFormState::fresh(2024);
+        form.working = Some(ri);
+        form.dirty = true;
+        app.tax_inputs_form = Some(form);
+        (app, dir)
+    }
+
+    /// Representative end-to-end coverage across all three axes — draft 3 picked only literal-status
+    /// sites, which would have left the hard case untested.
+    #[test]
+    fn representative_tails_keep_their_shipped_status_text_after_the_migration() {
+        // snapshot-derived: safe-harbor attest (:7032), the highest-stakes write in the editor.
+        let (mut app, _dir) = vault_with_safe_harbor_allocation();
+        confirm_safe_harbor_attest(&mut app);
+        assert!(app.status.clone().unwrap_or_default().contains("attest"));
+        // no-snapshot derive_*: bulk void (:9199).
+        let (mut app2, _d2) = vault_with_voidable_decisions();
+        confirm_bulk_void(&mut app2);
+        assert!(app2.status.is_some());
+        // hoisted: commit_tax_inputs (:1347) — the confirmation must still appear.
+        let (mut app3, _d3) = vault_with_return_inputs_draft();
+        handle_key(&mut app3, press(KeyCode::Char('s'))); // open the commit modal
+        commit_tax_inputs(&mut app3);
+        assert!(
+            app3.status.clone().unwrap_or_default().contains("committed"),
+            "the hoisted-status site must not be blanked by the migration"
         );
     }
 }
