@@ -77,14 +77,102 @@ specifically on the 8275 PDF.
 No `git checkout --` was used for any mutation; both used a `cp` backup
 taken immediately before the edit, verified byte-identical after restore.
 
-## Concerns
+## Concerns (as of the original build, superseded below)
 
 - None blocking. One judgment call worth flagging: the CLI stderr surface
   fires on `export-snapshot` (the raw CSV/sqlite dump) is intentionally
   **not** wired — only `declare-tranche`, `promote-tranche`,
   `export-irs-pdf`, and the full-return dispatch, per the task's explicit
   command list. `export-snapshot` never emits the notice.
+  → **Fixed in fix round 1** (item #4 below): `export-snapshot` writes the
+  same disclosure files `export-irs-pdf` does and now emits the notice too.
 - Commit `9e982ab`'s title still says "+ EXPERIMENTAL.txt" — an artifact of
   the pre-scope-correction commit sequence, corrected in `7a9d184`. Left
   as-is per the "never amend, never `git checkout --`" instructions; the
   code at `HEAD` is authoritative.
+
+## Fix round 1 (independent two-lens review, relayed by the coordinator)
+
+Verbatim review persisted at `reviews/r1.md` before folding. Six blocking
+Important items plus four pre-publish items plus three nits, all folded in
+one pass. Commits (on top of `2df251d`):
+
+- `df0ce2c` — persist the review verbatim.
+- `924162a` — `fix(core)`: #1 (dropped the "two defects" exhaustive count;
+  `defects` is now documented/used as exemplary; added the third,
+  worse defect — a filed Form 8949 column (e) basis derivable from a stale
+  in-editor snapshot, `design/stale-snapshot-latch/DESIGN.md` §0.1, shipped
+  in v0.10.0, whose own design doc records the deferral justification was
+  "False"); #5 (replaced the unperformable "against your own records"
+  action with three concrete checks against what the feature actually
+  produces; restated defect 2 by consequence); #2 core half (new
+  `ExperimentalNotice::one_line()`, a derived single-line rendering);
+  #6 (new `notice_fields_are_presentation_neutral` test); pre-publish
+  `#[non_exhaustive]` + `Serialize` + `testonly::leak_guard_needles()`.
+- `3cfd721` — `fix(tui)`: #2 (viewer banner now calls `one_line()`; new
+  drift test at an 800-col backend).
+- `a29a535` — `fix(tui-edit)`: #2 (editor banner now calls `one_line()`
+  via a shared `experimental_banner_text()` helper); #3 (new banner row on
+  `draw_defensive_filing` — the screen the whole declare/promote/export
+  journey runs on, which had no banner at all — composing above the D-7
+  stale marker via a nested split; extended the Browse composition KAT to
+  this screen).
+- `7441dc9` — `fix(cli)`: #4 (`export-snapshot` now computes
+  `uses_approach_b`, surfaces it on `ExportReport`, and `main.rs` emits the
+  notice beside the existing blocker disclosure; fourth directory-wide leak
+  guard for its out_dir); pre-publish (`cmd/tranche.rs`/`cmd/promote.rs`
+  post-write re-read no longer uses `?` on a disclosure-only step — it is
+  now unconditional, since the predicate is trivially true after a
+  successful write); nits (shared `leak_guard_needles()` needle list;
+  `experimental_notice` → `experimental_notice_active`; `eprintln!` →
+  `eprint!` at all four stderr call sites, since `plain_text()` already
+  ends in `\n`).
+- `0befac0` — `docs`: pre-publish (`LIMITATIONS.md` + `README.md` EXPERIMENTAL
+  sections); regenerated `docs/examples/examples.md` (stale after the
+  content rewrite).
+
+### Test summary (fix round 1)
+
+`make check`: 2529 passed, 11 skipped, 0 failed. `cargo fmt --all -- --check`:
+clean. Net +9 tests over the pre-round-1 baseline (2520): 3 in
+`btctax-core` (`one_line_is_derived_from_title_summary_and_action`,
+`notice_fields_are_presentation_neutral`,
+`leak_guard_needles_covers_every_field`), 2 in `btctax-cli`
+(`export_snapshot_notice_reaches_stderr_not_stdout_and_is_absent_without_approach_b`,
+`export_snapshot_notice_absent_from_every_file_in_the_export_directory`), 1
+in `btctax-tui`
+(`viewer_experimental_banner_is_derived_from_notice_not_hand_copied`), 3 in
+`btctax-tui-edit`
+(`browse_experimental_banner_is_derived_from_notice_not_hand_copied`,
+`defensive_filing_experimental_banner_composes_with_the_stale_marker`,
+`defensive_filing_experimental_banner_absent_without_approach_b`).
+
+### Mutations (fix round 1, TRUE — each actually run, observed red, then reverted via `cp`)
+
+1. `experimental.rs::NOTICE.summary`: replaced one `\`-continuation with an
+   embedded `\n`. Ran `notice_fields_are_presentation_neutral` → **FAILED**
+   (caught the embedded newline). Reverted via `cp`; re-ran green (11/11 in
+   `experimental::tests`).
+2. `experimental.rs::NOTICE.summary`: reworded ("Two defects…Both are
+   fixed." → "Bugs…every known one is now resolved."). Ran
+   `viewer_experimental_banner_is_derived_from_notice_not_hand_copied`
+   (`btctax-tui`) → **FAILED**. Reverted via `cp`; re-ran green.
+3. Same mutation. Ran
+   `browse_experimental_banner_is_derived_from_notice_not_hand_copied`
+   (`btctax-tui-edit`) → **FAILED**. Reverted via `cp`; re-ran green.
+4. `render.rs::write_form_8275_txt_named`: re-appended
+   `NOTICE.plain_text()` after the disclosure body (the export-snapshot
+   writer, not the crypto-slice/full-return one this function also
+   serves). Ran `export_snapshot_notice_absent_from_every_file_in_the_export_directory`
+   → **FAILED**, correctly naming `form_8275.txt`. Reverted via `cp`;
+   re-ran green (10/10 in `experimental_notice.rs`).
+
+No `git checkout --` was used for any mutation; every one used a `cp`
+backup taken immediately before the edit, verified byte-identical (`diff`)
+after restore.
+
+## Concerns (current, after fix round 1)
+
+None blocking. `make check` and `cargo fmt --all -- --check` are green at
+`HEAD`. The coordinator's instruction also said "then merge and a crates.io
+release" — see the final status message for how that was handled.
