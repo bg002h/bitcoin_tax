@@ -1,4 +1,3 @@
-use crate::conservative_promote::{clamped_leg_basis, estimate_share_of, PromoteSet};
 use crate::conventions::{
     is_long_term, long_term_default_acquired, round_cents, split_pro_rata, Sat, TaxDate, Usd,
     TRANSITION_DATE,
@@ -11,7 +10,7 @@ use crate::project::resolve::{sort_canonical, Eff, ElectionRec, Op, Resolution};
 use crate::project::transition;
 use crate::state::{
     BlockerKind, Disposal, DisposalLeg, FoldStats, GiftZone, IncomeRecord, LedgerState, Lot,
-    PendingLeg, PendingTransfer, Removal, RemovalKind, RemovalLeg, ShortfallRecord, Term,
+    PendingLeg, PendingTransfer, Removal, RemovalKind, RemovalLeg, Term,
 };
 use crate::{FeeTreatment, LotMethod, ProjectionConfig};
 use std::collections::BTreeMap;
@@ -23,11 +22,6 @@ pub(crate) struct FoldCtx<'a> {
     pub config: &'a ProjectionConfig,
     pub elections: &'a [ElectionRec],
     pub selections: &'a BTreeMap<EventId, Vec<crate::event::LotPick>>,
-    /// BG-D4: the live promotion set (`Resolution.promotes`), keyed by a promoted leg's
-    /// `lot_id.origin_event_id`. Threaded so `make_disposal_legs` (and, via `consume_fee`, the fee
-    /// mini-disposition) can clamp a promoted tranche leg's estimate basis. Carried at EVERY FoldCtx
-    /// site (incl. `universal_snapshot`) so no fold path silently sees an un-clamped basis.
-    pub promotes: PromoteSet,
 }
 
 /// The lot-identification method applicable to a disposal on `wallet` at `date`:
@@ -132,7 +126,6 @@ fn make_disposal_legs(
     st: &mut LedgerState,
     ev: &EventId,
     ev_pseudo: bool,
-    promotes: &PromoteSet,
 ) -> Vec<DisposalLeg> {
     let total_sat: i64 = consumed.iter().map(|c| c.sat).sum();
     let mut legs = Vec::new();
@@ -197,21 +190,7 @@ fn make_disposal_legs(
                 )
             }
         } else {
-            // BG-D4: a promoted tranche leg files the floor as basis but NEVER a loss off the estimate —
-            // clamp the estimate component against the proceeds remaining after the documented component.
-            // `promotes.get(..)` is `None` for a non-promoted lot ⇒ `clamped_leg_basis` returns
-            // `c.gain_basis` unchanged (byte-identical to the pre-BG-D4 path). `proceeds` is this leg's
-            // pro-rata share of `net` (the cent-remainder-takes-rest split above). A tranche lot never
-            // enters the dual arm (`rehome_onto_lot` never promotes `dual_loss_basis` None→Some), so this
-            // non-dual-arm placement is complete. The pool's `usd_basis` is still reduced by the FULL
-            // `gain_basis` on consume (pools.rs); the unclaimed floor evaporates — the §1015 NoGainNoLoss
-            // precedent (reported basis ≠ pool basis) makes this legal.
-            let basis = clamped_leg_basis(
-                promotes.get(&c.lot_id.origin_event_id),
-                c.sat,
-                c.gain_basis,
-                proceeds,
-            );
+            let basis = c.gain_basis;
             let t = term_for(c.gain_hp_start, disposed);
             (
                 basis,
@@ -250,7 +229,6 @@ fn make_removal_legs(
     st: &mut LedgerState,
     ev: &EventId,
     ev_pseudo: bool,
-    promotes: &PromoteSet,
 ) -> (Vec<RemovalLeg>, Option<TaxDate>) {
     let total_sat: i64 = consumed.iter().map(|c| c.sat).sum();
     let mut legs = Vec::new();
@@ -272,31 +250,10 @@ fn make_removal_legs(
             f
         };
         donor = donor.or(c.donor_acquired_at);
-        // BG-D11: a removal leg drawn from a PROMOTED lot carries its DOCUMENTED component ONLY — the
-        // ESTIMATE share EVAPORATES. A removal recognizes no gain (§170 for a donation, §1015 for a gift),
-        // so there is nothing to clamp the estimate INTO; the estimate must never fund a charitable
-        // deduction or an outbound §1015 carryover. Reuse the exact Task-4/5 clamp (`clamped_leg_basis`)
-        // with `net_proceeds_share = $0` — a removal's LITERAL proceeds: the estimate can be absorbed by
-        // nothing, so the clamp returns exactly the documented component (`gain_basis − estimate_share`),
-        // floored at $0 for any cent-scale rounding residue, while a GENUINE documented fee carry already
-        // baked into `c.gain_basis` (a prior self-transfer's `rehome_onto_lot`) is preserved unchanged.
-        // `promotes.get(..)` is `None` for a non-promoted lot ⇒ identity (returns `c.gain_basis`
-        // unchanged, byte-identical to the pre-BG-D11 path). This ONE site funds every downstream §170(e)
-        // consumer by construction — the fold's `claimed_deduction`, the full-return engine's
-        // `crypto_charitable_gifts` (Schedule A line 12), and Form 8283's `cost_basis` column — none is
-        // patched separately. The pool's `usd_basis` is still debited by the FULL `gain_basis` on consume
-        // (pools.rs `take_from`); the unclaimed floor evaporates — the §1015 NoGainNoLoss precedent
-        // (reported basis ≠ pool basis) makes this legal. A removal never enters the dual arm.
-        let basis = clamped_leg_basis(
-            promotes.get(&c.lot_id.origin_event_id),
-            c.sat,
-            c.gain_basis,
-            Usd::ZERO,
-        );
         legs.push(RemovalLeg {
             lot_id: c.lot_id.clone(),
             sat: c.sat,
-            basis,
+            basis: c.gain_basis,
             fmv_at_transfer: fmv,
             // acquired_at MUST be the SAME HP-start argument fed to `term_for` below so it can never
             // contradict `term`. Removals recognize no gain/loss → no loss-zone branching (unlike
@@ -311,11 +268,8 @@ fn make_removal_legs(
     (legs, donor)
 }
 
-/// Carried basis of the burned fee-sats, to be RE-HOMED onto a surviving destination lot / removal leg /
-/// disposal leg under TP8 (c) so the FULL basis carries (C1) — EXCEPT a promoted tranche's ESTIMATE
-/// component, which `consume_fee` withholds before it ever reaches this struct (BG-D4 fee-evaporation:
-/// only the DOCUMENTED remainder of a promoted fragment carries; C1 still holds for whatever `consume_fee`
-/// decided IS the fee-sat basis). Under (b) this is empty (basis rode the mini-disposition).
+/// Carried basis of the burned fee-sats, to be RE-HOMED onto a surviving destination lot / removal leg
+/// under TP8 (c) so the FULL basis carries (C1). Under (b) this is empty (basis rode the mini-disposition).
 #[derive(Default)]
 struct FeeCarry {
     gain_basis: Usd,
@@ -373,12 +327,10 @@ fn consume_fee(
     config: &ProjectionConfig,
     prices: &dyn PriceProvider,
     date: TaxDate,
-    wallet: &crate::identity::WalletId,
     stats: &mut FoldStats,
     st: &mut LedgerState,
     ev: &EventId,
     ev_pseudo: bool,
-    promotes: &PromoteSet,
 ) -> FeeCarry {
     if fee_sat <= 0 {
         return FeeCarry::default();
@@ -390,46 +342,12 @@ fn consume_fee(
             Some(ev.clone()),
             format!("self-transfer/gift fee short by {shortfall} sat"),
         );
-        // Defensive Filing Wizard Task 5 (arch-m-new-2): the fee-side sat-carrying site — a PURE-fee
-        // short (principal fully covered) has fee_sat == short_sat once aggregated.
-        st.shortfalls.push(ShortfallRecord {
-            event: ev.clone(),
-            wallet: Some(wallet.clone()),
-            date,
-            principal_sat: 0,
-            fee_sat: shortfall,
-        });
     }
     stats.fee_sats_consumed += consumed.iter().map(|c| c.sat).sum::<Sat>(); // sole FR9 home
     match config.self_transfer_fee {
         FeeTreatment::TreatmentC => {
-            // Non-taxable: return the fee-sat basis for re-homing onto the survivor (C1: full basis carries)
-            // — EXCEPT for a promoted-tranche fragment's ESTIMATE component (BG-D4 fee-evaporation): a
-            // promoted tranche is usually the OLDEST lot, so a FIFO fee draw hits it first; re-homing its
-            // raw (floor-inflated) `gain_basis` onto the survivor would let that estimate money leak onto
-            // a LATER disposal as reported basis — a below-floor sale could then file a loss that is 100%
-            // estimate money (the exact corner `tranche_fee_draw_evaporates_estimate_then_sale_files_zero_loss`
-            // pins). So for a fragment whose `lot_id.origin_event_id ∈ promotes`, withhold its estimate
-            // share (`round_cents(filed_basis × frag.sat / tranche_sat)`, the SAME decomposition
-            // `clamped_leg_basis` uses) before summing — only the DOCUMENTED remainder re-homes; the
-            // estimate EVAPORATES (never re-appears anywhere else — basis forfeiture is always
-            // conservative). `promotes.get(..)` is `None` for a non-promoted lot ⇒ the fragment's full
-            // `gain_basis` carries unchanged (byte-identical to the pre-BG-D4 path). Only `gain_basis` is
-            // adjusted: a promoted `Acquire` lot is never dual-basis (`dual_loss_basis` starts `None` and
-            // only ever gets a gift's dual basis), so a promoted fragment's `loss_basis` is always `None`
-            // and the summation below already excludes it via `filter_map`.
-            let gain_basis: Usd = consumed
-                .iter()
-                .map(|c| match promotes.get(&c.lot_id.origin_event_id) {
-                    // Withhold this fragment's estimate share (the SHARED `estimate_share_of` formula —
-                    // byte-identical to `clamped_leg_basis`, arch Minor-1) so only the DOCUMENTED remainder
-                    // re-homes. `.max($0)` (tax N2): a cent-scale rounding residue must never make a
-                    // fragment's re-homed remainder (`gain_basis − estimate_share`) negative — the
-                    // direction is already conservative, this just floors each re-homed fragment at $0.
-                    Some(entry) => (c.gain_basis - estimate_share_of(entry, c.sat)).max(Usd::ZERO),
-                    None => c.gain_basis,
-                })
-                .sum();
+            // Non-taxable: return the fee-sat basis for re-homing onto the survivor (C1: full basis carries).
+            let gain_basis: Usd = consumed.iter().map(|c| c.gain_basis).sum();
             let has_loss = consumed.iter().any(|c| c.loss_basis.is_some());
             let loss_basis = has_loss.then(|| consumed.iter().filter_map(|c| c.loss_basis).sum());
             FeeCarry {
@@ -441,10 +359,7 @@ fn consume_fee(
             // mini-disposition recognition record; proceeds = FMV(fee_sat); basis rides it (NOT re-homed).
             if !consumed.is_empty() {
                 let net = fmv_of(prices, date, fee_sat).unwrap_or(Usd::ZERO);
-                // NB (Opus r3 arch N-1): this call is INSIDE `consume_fee`, which takes `config`, not
-                // `ctx` — so it forwards `consume_fee`'s own `promotes` param, NOT `&ctx.promotes`. The
-                // TreatmentB fee mini-disposition thus clamps a promoted tranche's fee leg by construction.
-                let legs = make_disposal_legs(&consumed, net, date, st, ev, ev_pseudo, promotes);
+                let legs = make_disposal_legs(&consumed, net, date, st, ev, ev_pseudo);
                 st.disposals.push(Disposal {
                     event: ev.clone(),
                     kind: DisposeKind::Spend,
@@ -499,12 +414,7 @@ pub fn fold(
         config,
         elections: &res.elections,
         selections: &res.selections,
-        promotes: res.promotes.clone(), // BG-D4: real set at EVERY site (never PromoteSet::new())
     };
-    // Task 11 (BG-D3 tag-side census): record which tranche origins are promoted so the state-only
-    // advisories can distinguish a promoted `>$0` estimate floor from a documented fee carry (both are
-    // `EstimatedConservative`, `>$0`). Keys of the live promote set == the promoted `DeclareTranche` ids.
-    st.promoted_origins = ctx.promotes.keys().cloned().collect();
 
     for eff in &res.timeline {
         if !seeded && eff.date() >= TRANSITION_DATE {
@@ -554,7 +464,6 @@ pub fn pools_before(
         config,
         elections: &res.elections,
         selections: &res.selections,
-        promotes: res.promotes.clone(), // BG-D4: real set at EVERY site (never PromoteSet::new())
     };
     for eff in &res.timeline {
         // Fire the one-shot boundary seed the instant we cross into ≥2025 — BEFORE `target` is reached,
@@ -612,7 +521,6 @@ pub fn state_as_of(
         config,
         elections: &res.elections,
         selections: &res.selections,
-        promotes: res.promotes.clone(), // BG-D4: real set at EVERY site (never PromoteSet::new())
     };
     for eff in &res.timeline {
         // Fire the one-shot boundary seed the instant we cross into >= 2025, BEFORE folding any such
@@ -721,19 +629,10 @@ pub(crate) fn fold_event(
                     Some(eff.id.clone()),
                     format!("dispose short by {shortfall} sat"),
                 );
-                // Defensive Filing Wizard Task 5 (arch-m-new-2): the principal-side sat-carrying site.
-                st.shortfalls.push(ShortfallRecord {
-                    event: eff.id.clone(),
-                    wallet: Some(wallet.clone()),
-                    date,
-                    principal_sat: shortfall,
-                    fee_sat: 0,
-                });
             }
             if !consumed.is_empty() {
                 let net = round_cents(*proceeds - *fee_usd); // TP2: disposition fee reduces proceeds
-                let mut legs =
-                    make_disposal_legs(&consumed, net, date, st, &eff.id, ev_pseudo, &ctx.promotes);
+                let mut legs = make_disposal_legs(&consumed, net, date, st, &eff.id, ev_pseudo);
                 // I-1: Task 11 fee step — consume fee_sat FIFO from source pool AFTER principal.
                 // Mirrors the gift/SelfTransfer pattern; native Dispose passes fee_sat=None (no-op).
                 // (c) default: re-home carry onto last disposal leg; fee-sat basis rolls into the
@@ -746,12 +645,10 @@ pub(crate) fn fold_event(
                     ctx.config,
                     prices,
                     date,
-                    &wallet,
                     stats,
                     st,
                     &eff.id,
                     ev_pseudo,
-                    &ctx.promotes,
                 );
                 if let Some(last) = legs.last_mut() {
                     carry.rehome_onto_disposal_leg(last);
@@ -851,16 +748,6 @@ pub(crate) fn fold_event(
                     Some(eff.id.clone()),
                     format!("pending out short by {shortfall} sat"),
                 );
-                // Defensive Filing Wizard Task 5 (arch-m-new-2): PendingOut draws principal+fee in ONE
-                // combined FIFO need (`total_sat`) — the shortfall is recorded as principal_sat (there is
-                // no separate fee-only draw to attribute it to, unlike Dispose/SelfTransfer/GiftOut/Donate).
-                st.shortfalls.push(ShortfallRecord {
-                    event: eff.id.clone(),
-                    wallet: Some(wallet.clone()),
-                    date,
-                    principal_sat: shortfall,
-                    fee_sat: 0,
-                });
             }
             let legs: Vec<PendingLeg> = consumed
                 .iter()
@@ -906,14 +793,6 @@ pub(crate) fn fold_event(
                     Some(eff.id.clone()),
                     format!("self transfer short by {shortfall} sat"),
                 );
-                // Defensive Filing Wizard Task 5 (arch-m-new-2): the principal-side sat-carrying site.
-                st.shortfalls.push(ShortfallRecord {
-                    event: eff.id.clone(),
-                    wallet: Some(wallet.clone()),
-                    date,
-                    principal_sat: shortfall,
-                    fee_sat: 0,
-                });
             }
             // Relocate consumed fragments to the destination pool: carry basis, HP, donor_acquired_at.
             // Non-taxable (TP7): no Disposal or Removal records. basis_source = CarriedFromTransfer.
@@ -957,12 +836,10 @@ pub(crate) fn fold_event(
                 ctx.config,
                 prices,
                 date,
-                &wallet,
                 stats,
                 st,
                 &eff.id,
                 ev_pseudo,
-                &ctx.promotes,
             );
             if let Some(last) = relocated.last_mut() {
                 carry.rehome_onto_lot(last);
@@ -1235,18 +1112,10 @@ pub(crate) fn fold_event(
                     Some(eff.id.clone()),
                     format!("gift out short by {shortfall} sat"),
                 );
-                // Defensive Filing Wizard Task 5 (arch-m-new-2): the principal-side sat-carrying site.
-                st.shortfalls.push(ShortfallRecord {
-                    event: eff.id.clone(),
-                    wallet: Some(wallet.clone()),
-                    date,
-                    principal_sat: shortfall,
-                    fee_sat: 0,
-                });
             }
             if !consumed.is_empty() {
                 let (mut legs, donor_acquired_at) =
-                    make_removal_legs(&consumed, *fmv, date, st, &eff.id, ev_pseudo, &ctx.promotes);
+                    make_removal_legs(&consumed, *fmv, date, st, &eff.id, ev_pseudo);
                 // Task 11: fee step — consume fee_sat FIFO from source pool AFTER principal.
                 // (c) default: re-home carry onto last removal leg so donee carries FULL basis (C1).
                 // (b) config:  emits mini-disposition; empty carry; donee gets principal-only basis.
@@ -1257,12 +1126,10 @@ pub(crate) fn fold_event(
                     ctx.config,
                     prices,
                     date,
-                    &wallet,
                     stats,
                     st,
                     &eff.id,
                     ev_pseudo,
-                    &ctx.promotes,
                 );
                 if let Some(last) = legs.last_mut() {
                     carry.rehome_onto_removal_leg(last);
@@ -1322,18 +1189,10 @@ pub(crate) fn fold_event(
                     Some(eff.id.clone()),
                     format!("donate short by {shortfall} sat"),
                 );
-                // Defensive Filing Wizard Task 5 (arch-m-new-2): the principal-side sat-carrying site.
-                st.shortfalls.push(ShortfallRecord {
-                    event: eff.id.clone(),
-                    wallet: Some(wallet.clone()),
-                    date,
-                    principal_sat: shortfall,
-                    fee_sat: 0,
-                });
             }
             if !consumed.is_empty() {
                 let (mut legs, donor_acquired_at) =
-                    make_removal_legs(&consumed, *fmv, date, st, &eff.id, ev_pseudo, &ctx.promotes);
+                    make_removal_legs(&consumed, *fmv, date, st, &eff.id, ev_pseudo);
                 // Task 11: fee step — consume fee_sat FIFO from source pool AFTER principal.
                 // (c) default: re-home carry onto last removal leg so donee carries FULL basis (C1).
                 // (b) config:  emits mini-disposition; empty carry; donee gets principal-only basis.
@@ -1344,12 +1203,10 @@ pub(crate) fn fold_event(
                     ctx.config,
                     prices,
                     date,
-                    &wallet,
                     stats,
                     st,
                     &eff.id,
                     ev_pseudo,
-                    &ctx.promotes,
                 );
                 if let Some(last) = legs.last_mut() {
                     carry.rehome_onto_removal_leg(last);

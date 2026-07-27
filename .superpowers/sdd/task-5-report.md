@@ -1,101 +1,145 @@
-# Task 5 report — The five payload probes and their gating KATs
+# Task 5 report (oracle-sweep) — `golden_returns.rs` (compute level) onto the divergence-class machinery
 
-**Status: DONE / GREEN.** Branch `feat/stale-snapshot-latch`.
+**Status: DONE.** `golden_returns.rs` reworked off the hand-written `Divergence` / `DECLARED_DIVERGENCES`
+array onto `tax::oracle_diff`'s class machinery + the full line set. All 12 households green; `make check`
+green (1919 passed, 1 skipped; clippy `-D warnings` clean, EXIT=0).
 
-(Note: this file previously held a stale report from an unrelated task run — the Defensive Filing
-Wizard's C-2 `tranche_guard` predicate move, on a different branch. That content is gone; this is the
-`feat/stale-snapshot-latch` Task 5 report, per the orchestrator's instruction to write to this exact
-path.)
+Only `crates/btctax-core/tests/golden_returns.rs` changed (265 insertions, 313 deletions).
+`crates/btctax-core/src/tax/oracle_diff.rs` was mutated for the guard check and **restored from a `cp`
+backup** (verified `git diff` empty).
 
-## What was done
+---
 
-Added the `if let Some(s) = app.stale_reason() { app.status = Some(s); return; }` probe, before any `&mut`
-field borrow, at all five sites named in the brief (line numbers were stale as warned; located by symbol):
+## 1. Baseline green first (TDD / characterize-green — Step 1)
 
-1. `handle_declare_flow_key`'s `Char('t')` arm (the on-demand tax-Δ preview).
-2. `declare_flow_confirm` (function top) — builds + writes the `DeclarePlan`.
-3. `handle_promote_flow_provenance_key`'s `Enter` arm (`attest_provenance`).
-4. `promote_flow_review` (function top) — builds the `PromotePlan` (`Acknowledgment{shown_terms}` +
-   `filed_basis`).
-5. `handle_pseudo_approve_modal_key`'s `Enter` arm — builds + writes the pseudo-approve payload set.
+```
+$ cargo test -p btctax-core --test golden_returns
+test every_golden_household_matches_the_independent_oracles ... ok
+test result: ok. 1 passed; 0 failed
+```
 
-Removed `stale_reason`'s `#[allow(dead_code)]` (confirmed by grep it was the last one in the file).
+Backups taken before any edit: `scratchpad/gr.bak` (test) and `scratchpad/oracle_diff.bak` (machinery).
 
-## Tests added (all in `crates/btctax-tui-edit/src/main.rs`'s `mod tests`, end of file)
+## 2. The reworked comparison (Step 2)
 
-Fixtures: `vault_with_declare_flow_open`, `vault_at_declare_confirm`, `vault_with_promote_flow_open`,
-`vault_at_promote_consent`, `vault_with_pending_pseudo_defaults` (each backed by a REAL vault + session,
-not a bare in-memory snapshot), plus `pseudo_approve_modal_fixture`, `promote_flow_reached_consent`,
-`live_declare_count`, `live_decision_count` (the last two read the CURRENT session's on-disk state via
-`btctax_core::persistence::load_all`, not the possibly-stale `app.snapshot` — the "written artifact"
-check the brief asked for).
+The old per-household `Divergence` struct + `DECLARED_DIVERGENCES` array and the reconciliation guard
+(`:317-401`) are gone, replaced by the **two-level rule**:
 
-Five tests:
+- **Level 1 — the six cent-exact leaf totals** (QBI deduction, AGI, taxable income, SE tax, Additional
+  Medicare, NIIT) stay **exact-vs-BOTH-oracles**, verbatim in spirit to HEAD: `round_dollar` both sides,
+  `ours == round_leaf(OTS) && ours == round_leaf(taxcalc)`. No class escape (a mismatch is a hard fail).
+- **Level 2a — L16 (tax): the §6.2 two-part.**
+  - *Part 1 (structural, r2-I2 Table-semantics witness):* `assert_eq!(table_l16(reproduced_ops), ar.regular_tax)`
+    — the reproduction machinery must reproduce btctax's own compute-engine L16 exactly, before any oracle
+    is consulted.
+  - *Part 2 (class stacking):* if the figure does not agree with both oracles, `stacking_ok(l16_ours,
+    ots_l16, Some(taxcalc_l16), None, None, &reproduced_ops, None)` must absorb it, else it is btctax alone
+    → `diffs`. The taxcalc Tax-Table dissent is absorbed by `taxcalc_methodology_class`.
+- **Level 2b — L24 (TOTAL TAX): the phantom dissolves** (see §3).
+- **Deeper-line rows** (deduction taken L12, Sch D→L7, SALT L5e via a `[(…); 3]` array; 8995 L12
+  net-cap-gain OTS-single-witness) gate on `Option::Some` — no-ops now (all oracle leaves are `None` in the
+  baked JSON), wired so they light up at T11 without a rewrite.
 
-- `no_decision_payload_is_constructible_while_the_stale_latch_is_armed` — the brief's 3-in-1 gating KAT:
-  proves no `PromotePlan` is constructed (`promote_flow_reached_consent` stays false), no `DeclareTranche`
-  lands (`live_declare_count == 0`), and no pseudo decision lands (`live_decision_count == 0`), all with
-  the latch armed.
-- `declare_flow_confirm_refusal_while_stale_preserves_the_flows_window_sat_wallet` — the "must keep
-  working" property for site 2: sat/wallet/window and the Confirm step are byte-identical before/after
-  the refusal.
-- `promote_flow_review_refusal_while_stale_preserves_the_authored_part_ii_narrative` — same property for
-  site 4: the Part II narrative buffer (`part_ii`, which lives outside `step`) survives verbatim, and the
-  step stays at `PartII` (never reaches `Consent`).
-- `declare_flow_char_t_preview_refuses_to_read_the_stale_snapshot` (site 1) — includes a positive control
-  (the identical keystrokes, unarmed, really do compute `tax_delta`), so the armed `None` is provably the
-  refusal, not a fixture that never would have computed anything.
-- `handle_promote_flow_provenance_key_enter_refuses_attest_provenance_while_stale` (site 3) — a `Purchase`
-  selection (pure setter) followed by an armed `Enter` must not advance to `PartII`.
+### How the L16 methodology operands were sourced (the ★ critical, non-obvious part)
 
-`vault_with_pending_pseudo_defaults` asserts its own fixture sanity (`pseudo_plan` non-empty) before the
-gating test runs it, so that test cannot pass vacuously.
+`reproduced_ops: L16Operands` is built **entirely from btctax's own assembled return `ar`** — PRE-T11, no
+oracle `Option` leaves:
 
-## Mutation proof (one probe deleted at a time, via `Edit` + re-run + restore from a `cp` backup — never
-`git checkout --`)
+| `L16Operands` field | source | why |
+|---|---|---|
+| `status` | `ri.filing_status` | the return's filing status |
+| `ti` | `ar.taxable_income` | 1040 L15 |
+| `qd_l3a` | `ar.qualified_dividends` | 1040 L3a |
+| `net_ltcg_qd_excl` | `ar.net_ltcg` | §1(h) preferential net capital gain, **QD-EXCLUSIVE** |
 
-- **Site 2 probe deleted** (`declare_flow_confirm`): `no_decision_payload_is_constructible_…` and
-  `declare_flow_confirm_refusal_while_stale_…` both RED —
-  `live_declare_count(&app2)` was `1` (the write went through); the flow also closed, since the write
-  succeeded. Restored — GREEN.
-- **Site 4 probe deleted** (`promote_flow_review`): both gating tests RED —
-  `promote_flow_reached_consent(&app)` was `true`, with the panic output showing a fully-constructed
-  `PromotePlan` (`Acknowledgment{phrase: "I understand and accept this estimated-basis risk", ...}`,
-  `filed_basis: 2848.96`). Restored — GREEN.
-- **Site 5 probe deleted** (`handle_pseudo_approve_modal_key`): `no_decision_payload_is_constructible_…`
-  RED — `live_decision_count(&app3)` was `1`. Restored — GREEN.
-- **Site 1 probe deleted** (`Char('t')` arm): `declare_flow_char_t_preview_refuses_…` RED —
-  `tax_delta` was computed (`Some(..)`) even while armed. Restored — GREEN.
-- **Site 3 probe deleted** (provenance `Enter` arm): `handle_promote_flow_provenance_key_enter_refuses_…`
-  RED — the step advanced to `PartII { error: None }` even while armed. Restored — GREEN.
+These are exactly the three figures `assemble_absolute` passes to `qdcgt_line16` at
+`return_1040.rs:1216-1222` (`taxable_income`, `qualified_dividends`, `net_ltcg`). The `net_ltcg` field's
+doc (`return_1040.rs:897-899`) confirms it is "the §1(h) preferential net capital gain (QDCGT net-LTCG /
+Form 8995 net-capital-gain), ≥ 0" — the QD-exclusive term `qdcgt_line16` adds to `qual_div` to form its L4.
+So `taxcalc_methodology_class(reproduced_ops)` is **condition-only** (consults the Tax Table?) and fires
+PRE-T11. The PROVENANCE class needs the oracle's own `Option` leaves (`None` now) ⇒ `provenance_class_fires`
+returns `false` ⇒ provenance is correctly inert until T11 (`ots_ops`/`taxcalc_ops` passed as `None`).
 
-All five confirmed independently; each restore verified GREEN again before moving to the next.
+## 3. The L24 change and the anchor it dissolves
 
-## Gate results
+OTS's L24 side changed from `round_dollar(e.total_tax)` (roundΣ of the exact total) to
+`sum_round(&[e.income_tax_before_credits, e.se_tax, e.additional_medicare_tax, e.niit])` — Σround of OTS's
+own **component totals** (the pre-T11 fallback per plan lines 68-72; the leg form
+`sum_round([se_l10_oasdi, se_l11_medicare, f8959_l7, f8959_l13, …])` activates when the legs bake at T11).
+This equals btctax's printed cross-foot `printed.f1040.line24` on all 12, so the comparison passes and
+OTS's exact total is never consulted.
 
-- `cargo nextest run -p btctax-tui-edit` — 468 passed, 2 skipped (was 463 pre-task; +5 new tests).
-- `make check` (workspace) — **2444 passed, 11 skipped** (brief's stated baseline was 2439; +5 matches the
-  5 new tests, no other change to the suite size).
-- `cargo fmt --all -- --check` — exit 0 (ran `cargo fmt --all` once to settle one multi-line `assert_eq!`
-  wrapping introduced by a doc/test edit, then reconfirmed `--check` clean).
+**Diagnostic evidence (temporary test, since removed):**
 
-## Scope discipline
+```
+single_miner_qbi_limited_by_net_capital_gain  L24 ours=16833  sumround=16833  roundtotal=16832  match=true
+```
 
-Only `crates/btctax-tui-edit/src/main.rs` was touched, as instructed. `execute_defensive_export` and
-`open_defensive_filing` were not touched (Task 6's territory — they deliberately keep the original
-`residue_latch_status`/`stale_or_residue_latch_status` behavior so the export route stays reachable while
-stale). No other agent's work was disturbed; did not touch `.superpowers/sdd/task-2-report.md`, which
-already carried an unrelated pre-existing uncommitted diff at session start.
+`sumround` (16833) matches btctax's printed 16833; `roundtotal` (`round_leaf(e.total_tax)` = 16832) is the
+old phantom. The `single_miner_qbi_limited_by_net_capital_gain` divergence (old `agrees_with:"neither"`
+entry, `:157-191`) **dissolves**. All 12 households show `match=true` on L24 (no leg flips).
 
-## Concerns
+## 4. Disposition of the old `DECLARED_DIVERGENCES` (Step 3 verification)
 
-None blocking. Two things worth a reviewer's glance, both Minor:
+- The **6 taxcalc Table-L16 entries** (`:95-144` + `single_crypto_business_se` `:192-202`) are now absorbed
+  by `taxcalc_methodology_class`. The diagnostic confirms `record_fire` on exactly these 6 anchors — the
+  ones where taxcalc dissents on L16 (`tc_dissent=true, meth=true`):
+  `single_w2_only_standard, single_w2_plus_crypto_ltcg, single_qdcgt_both_slices,
+  single_short_term_crypto_gain, single_capital_loss_capped, single_crypto_business_se`.
+  ★ `single_qdcgt_both_slices` (TI = 112,400 ≥ $100k, ordinary remainder < ceiling) fires `meth=true` — the
+  case the old "TI < $100k" gloss wrongly excluded.
+  (Two further households — `mfj_itemized_salt_over_the_cap`, `single_miner_qbi` — also *consult* the Table
+  (`meth=true`) but taxcalc happens to agree on L16, so no dissent needs absorbing; they take the fast-path.)
+- The **7th entry** (`single_miner_qbi` L24) **dissolves** via the L24 `sum_round` change (§3).
 
-1. Sites 1 and 3 (the two non-writing, non-`PromotePlan`/`DeclarePlan`/pseudo-plan sites) aren't among the
-   brief's named "three gating KATs," but I added dedicated tests + mutation proof for them anyway (all
-   five sites are filing-relevant reads/writes per the brief's own enumeration), since leaving them
-   unverified felt like a gap given the brief's "not merely a status-only" bar.
-2. `live_decision_count` counts ANY `EventId::Decision`-identified event in the vault, not specifically a
-   pseudo-approve payload — correct for its one use (the pseudo fixture's vault starts with zero
-   decisions of any kind, so "count == 0" is an unambiguous artifact-absence check), but it would need
-   narrowing if reused against a vault that already has unrelated decisions on it.
+## 5. Mutation-check — the anti-world guard has teeth
+
+Added a synthetic both-oracle-disagree test `stacking_ok_guards_golden_returns_against_btctax_alone` (none
+of the 12 real households is a both-disagree, so the real loop never exercises the FAIL branch): btctax
+47,030 alone against OTS + taxcalc 47,031, above the ceiling (methodology cannot fire), no pin.
+
+Mutation (in `oracle_diff.rs`, backed up first): forced `stacking_ok` to `return true` at the top →
+
+```
+test stacking_ok_guards_golden_returns_against_btctax_alone ... FAILED
+  btctax alone against BOTH oracles ... must be REJECTED — the anti-world guard is the whole point ...
+```
+
+Restored `oracle_diff.rs` from `scratchpad/oracle_diff.bak` (NOT `git checkout`); `git diff` on it is empty;
+both tests pass again.
+
+## 6. Per-household green + gate
+
+```
+$ cargo test -p btctax-core --test golden_returns
+test stacking_ok_guards_golden_returns_against_btctax_alone ... ok
+test every_golden_household_matches_the_independent_oracles ... ok
+test result: ok. 2 passed; 0 failed
+
+$ make check   →  EXIT=0,  Summary: 1919 tests run: 1919 passed, 1 skipped  (clippy -D warnings clean)
+```
+
+## 7. Liveness posture (per the two-level rule)
+
+`LivenessLedger` registered; `record_fire("taxcalc_methodology")` on each absorbed L16 dissent. A plain
+positive check (`assert!(methodology_class_fired, …)`) proves the live class engaged this run. **No
+`LivenessLedger::dead()` assertion and no provenance-class liveness assertion** — both are commented as
+"enabled in T11 with the pinned cells". The anti-world guarantee is carried by `stacking_ok` (mutation-
+checked, §5).
+
+## 8. Self-review / concerns
+
+- **Structural witness is exact, not rounded:** `table_l16(reproduced_ops) == ar.regular_tax` (both whole
+  dollars via `qdcgt_line16`); it uses `ty2024_table()`, the same schedules `assemble_absolute` is given.
+  Passes on all 12.
+- **Deeper-line rows are genuine no-ops now** (oracle leaves `None`); they compile against real `ar` sources
+  (`ar.deduction`, `ar.capital_gain`, `ar.schedule_a…salt_5e`, `ar.printed_inputs.qbi_net_capital_gain`), so
+  they will *activate and be validated at T11*. If a compute-vs-oracle mapping is subtly off (e.g. the signed
+  L7 convention), T11 (with real baked data + review) is the designed catch point — that is the plan's
+  `Option::Some`-gating contract, not a gap here.
+- **`liveness` is written-only until T11** (only `record_fire`, read by the deferred `dead()` sweep). This is
+  intentional (the seam T11 extends) and clean under clippy `-D warnings`.
+- **No FROZEN files touched** (`types/compute/se.rs` untouched; `oracle_diff.rs` restored bit-for-bit).
+- No new caught bugs (all 12 stay green with no known-defect pin needed).
+
+**Files changed:** `crates/btctax-core/tests/golden_returns.rs`.

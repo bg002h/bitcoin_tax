@@ -1,7 +1,7 @@
 use crate::conventions::{Sat, TaxDate, Usd};
 use crate::event::{BasisSource, DisposeKind, IncomeKind};
 use crate::identity::{EventId, LotId, WalletId};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Term {
@@ -248,21 +248,6 @@ pub struct PendingTransfer {
     pub legs: Vec<PendingLeg>, // lots removed into pending (carry basis + acquired_at)
 }
 
-/// Defensive Filing Wizard Task 5 (arch-m-new-2/arch-I-2): a RAW per-emission shortfall record,
-/// populated in `fold.rs` at every sat-carrying `BlockerKind::UncoveredDisposal` site (the fold already
-/// has the sat amount at hand — this is NEVER derived from `Blocker.detail`). Multiple records can
-/// share the same `event` (e.g. a self-transfer short on BOTH principal and its on-chain fee);
-/// `defensive::discovery::shortfalls` aggregates them per event into a `Shortfall` (Σ principal+fee,
-/// Σ fee separately). Additive/derived — no filed-number change.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ShortfallRecord {
-    pub event: EventId,
-    pub wallet: Option<WalletId>,
-    pub date: TaxDate,
-    pub principal_sat: Sat,
-    pub fee_sat: Sat,
-}
-
 /// Fold accumulators that are NOT directly reconstructable from the post-fold `LedgerState` vectors
 /// (FR9 `Σ in` / `Σ on-chain-fee-sats` / `Σ pending`). Carried as a FIELD on `LedgerState` (M3) —
 /// `project` always returns `LedgerState` (NO `(LedgerState, FoldStats)` tuple). Populated in `finalize`;
@@ -290,18 +275,6 @@ pub struct LedgerState {
     /// interim export-refusal guard [R0-I3], and sub-3's typed-attest gate. `> 0` ⇔ a
     /// `PseudoReconcileActive` advisory blocker is present and every `[PSEUDO]`-flagged row is fictional.
     pub pseudo_synthetic_count: usize,
-    /// Task 11 (BG-D3 tag-side census): the set of `DeclareTranche` origin event ids whose tranche is
-    /// PROMOTED in this projection (a live `PromoteTranche` rewrote its `$0` basis to a filed `>$0`
-    /// floor). A disposal/removal leg or a lot is promoted iff `lot_id.origin_event_id ∈
-    /// promoted_origins`. Populated by `fold` from `Resolution.promotes`; empty when no promote is live.
-    /// Lets the state-only advisories (`basis_methodology`, the overpayment nudge) distinguish a promoted
-    /// `>$0` estimate floor from a documented on-chain fee carry WITHOUT re-deriving the promote set —
-    /// both are `EstimatedConservative` with `>$0` basis, indistinguishable from the leg alone.
-    pub promoted_origins: BTreeSet<EventId>,
-    /// Defensive Filing Wizard Task 5: raw shortfall emissions (see `ShortfallRecord`), populated in
-    /// `fold.rs` at every sat-carrying `UncoveredDisposal` site. Aggregated by
-    /// `defensive::discovery::shortfalls`/`triage` — additive/derived, never a second source of truth.
-    pub shortfalls: Vec<ShortfallRecord>,
 }
 impl LedgerState {
     /// Pseudo-reconcile (sub-project 2): `true` when any synthetic default contributes to this

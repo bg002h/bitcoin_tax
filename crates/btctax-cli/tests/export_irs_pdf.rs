@@ -294,18 +294,6 @@ fn unsupported_year_is_refused() {
         ),
         "only 2017/2024/2025 are bundled, got {err:?}"
     );
-    // ★ whole-branch tax M-2: the refusal writes ZERO bytes. Before the pre-`mkdir_out` year check, the
-    // slice pipeline had already created the directory and written `basis_methodology.txt` +
-    // `form_8275.txt` by the time `fill_form_8949` raised `UnsupportedYear` — a half-populated packet
-    // beside a reported failure. (Mutation: move the check back below `mkdir_out` → these red.)
-    assert!(
-        !out.path().join("basis_methodology.txt").exists(),
-        "an unsupported year must leave no half-written packet: basis_methodology.txt was written"
-    );
-    assert!(
-        !out.path().join("form_8275.txt").exists(),
-        "an unsupported year must leave no half-written packet: form_8275.txt was written"
-    );
 }
 
 /// A REAL short-term round-trip in 2024: buy 0.01 BTC @ $200, sell it @ $500 (gain $300).

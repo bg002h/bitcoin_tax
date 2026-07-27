@@ -10,11 +10,7 @@
 //!
 //! PRIVACY: synthetic Coinbase fixtures in tempdirs; no user file is read.
 use btctax_cli::{cmd, CliError, Session};
-use btctax_core::conservative::Coverage;
-use btctax_core::{
-    Acknowledgment, DeclareTranche, EventId, EventPayload, FloorMethod, LedgerEvent, LotMethod,
-    PromoteTranche, WalletId,
-};
+use btctax_core::{EventPayload, LotMethod, WalletId};
 use btctax_store::Passphrase;
 use std::path::Path;
 use time::macros::date;
@@ -312,75 +308,6 @@ fn safe_harbor_residue_refuses_when_a_pre2025_tranche_exists() {
     assert!(
         format!("{err}").contains("mutually exclusive"),
         "the refusal names the D-8 mutual exclusion: {err}"
-    );
-}
-
-// ── (g) a PROMOTED pre-2025 tranche still refuses the allocation guard (approach-B Task 3, BG-D1) ──
-//
-// NB placement: `guard_allocation_vs_tranche` lives HERE (btctax-cli) — it maps a refusal to a
-// `CliError`, a cli-only concern. `pre2025_tranche_exists` itself MOVED to
-// `btctax_core::tranche_guard` (Defensive Filing Wizard Task 5, C-2) so core callers can read it
-// without a cli→core dependency inversion; the guard calls the core predicate. This KAT still cannot
-// literally live beside the other four Task-3 by-construction KATs in
-// `crates/btctax-core/tests/kat_promote.rs` as the task brief's file listing suggested, since the
-// GUARD (the thing this KAT exercises) is still cli-only. Both functions are PURE over
-// `&[LedgerEvent]` (no vault needed).
-
-/// A PromoteTranche decision event promoting `target` to `filed_basis` (mirrors the equivalent
-/// `promote_ev` helper in `kat_promote.rs`; duplicated here since the two crates' test binaries can't
-/// share private fixture code).
-fn promote_ev(seq: u64, target: EventId, filed_basis: rust_decimal::Decimal) -> LedgerEvent {
-    LedgerEvent {
-        id: EventId::decision(seq),
-        utc_timestamp: now(),
-        original_tz: time::UtcOffset::UTC,
-        wallet: None,
-        payload: EventPayload::PromoteTranche(PromoteTranche {
-            target,
-            method: FloorMethod::WindowLowClose,
-            filed_basis,
-            coverage: Coverage::Full,
-            provenance_attested: true,
-            acknowledgment: Acknowledgment {
-                phrase: "I understand and accept the risk".into(),
-                shown_terms: vec![],
-                provenance_text: "acquired by purchase within the declared window".into(),
-                provenance_version: "v1".into(),
-            },
-            part_ii_narrative: "cash P2P purchase, no records; window bounded on-chain".into(),
-        }),
-    }
-}
-
-/// Task 3 (BG-D1 / arch r2 M-4, tax r2 — verified shared predicate): `pre2025_tranche_exists`
-/// (`btctax_core::tranche_guard`, moved from btctax-cli in Defensive Filing Wizard Task 5 / C-2) is
-/// keyed on the mere PRESENCE of a non-voided pre-2025 `DeclareTranche` — it never inspects the lot's
-/// basis or looks for a `PromoteTranche` decision at all. So a PROMOTED (>$0 filed) tranche still
-/// refuses a safe-harbor allocation at record time, exactly like an un-promoted ($0) one.
-/// `guard_allocation_vs_tranche` is the ONE chokepoint for all four allocation append sites (CLI
-/// `safe_harbor_allocate`/`safe_harbor_attest`, TUI `persist_safe_harbor_allocate`/
-/// `persist_safe_harbor_attest`) AND the TUI opener's pre-flight consult (`session.rs:692`, via the
-/// same core `pre2025_tranche_exists`) — exercising the shared predicate here covers all of them by
-/// construction.
-#[test]
-fn a_promoted_tranche_still_refuses_a_safe_harbor_allocation_at_record_time() {
-    let tranche = LedgerEvent {
-        id: EventId::decision(1),
-        utc_timestamp: now(),
-        original_tz: time::UtcOffset::UTC,
-        wallet: None,
-        payload: EventPayload::DeclareTranche(DeclareTranche {
-            sat: 50_000_000,
-            wallet: tranche_wallet(),
-            window_start: date!(2018 - 01 - 01),
-            window_end: date!(2018 - 12 - 31),
-        }),
-    };
-    let promote = promote_ev(2, EventId::decision(1), rust_decimal::Decimal::from(12_000));
-    let events = vec![tranche, promote];
-    assert!(
-        cmd::tranche::guard_allocation_vs_tranche(&events).is_err(),
-        "a promoted pre-2025 tranche still blocks a safe-harbor allocation (D-8, tag-keyed)"
     );
 }
 
@@ -813,92 +740,5 @@ fn void_inert_alloc_then_declare_pre2025_tranche_keeps_the_year_computable() {
             == btctax_core::BasisSource::EstimatedConservative
             && l.remaining_sat > 0),
         "the tranche lot survives via Path A (tag intact)"
-    );
-}
-
-// ════════════════════════════════════════════════════════════════════════════════════════════════
-// ★ T2-M2 follow-up (FOLLOWUPS.md, Task 9): the shipped phantom-wallet stderr warning
-// (`cmd/tranche.rs::declare_tranche`, `eprintln!` AFTER `plan_declare` succeeds) is preserved
-// byte-for-byte by the Defensive Filing Wizard's chokepoint extraction (Task 2), but no test pinned
-// its actual EMISSION. `eprintln!` cannot be intercepted in-process, so this spawns the REAL `btctax`
-// binary (mirrors `chokepoint_parity.rs`'s own subprocess convention) and captures its real stderr.
-// ════════════════════════════════════════════════════════════════════════════════════════════════
-
-/// Run `btctax --vault <vault> reconcile declare-tranche <args...>`; returns (exit, stderr).
-fn run_declare(vault: &Path, args: &[&str]) -> (i32, String) {
-    let bin = env!("CARGO_BIN_EXE_btctax");
-    let mut c = std::process::Command::new(bin);
-    c.arg("--vault")
-        .arg(vault.to_str().unwrap())
-        .arg("reconcile")
-        .arg("declare-tranche");
-    for a in args {
-        c.arg(a);
-    }
-    c.env("BTCTAX_PASSPHRASE", "pw");
-    let out = c.output().expect("btctax binary must execute");
-    (
-        out.status.code().expect("exits normally"),
-        String::from_utf8_lossy(&out.stderr).into_owned(),
-    )
-}
-
-/// (a) A never-before-referenced `--wallet` on an otherwise-valid declare EMITS the shipped
-/// phantom-wallet warning verbatim, on a SUCCESSFUL (exit 0) run.
-#[test]
-fn phantom_wallet_warning_is_emitted_verbatim_on_a_successful_declare() {
-    let dir = tempfile::tempdir().unwrap();
-    let vault = dir.path().join("vault.pgp");
-    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
-
-    let (code, stderr) = run_declare(
-        &vault,
-        &[
-            "--amount",
-            "0.5",
-            "--wallet",
-            "self:phantom",
-            "--window-start",
-            "2020-01-01",
-            "--window-end",
-            "2020-12-31",
-        ],
-    );
-    assert_eq!(code, 0, "stderr: {stderr}");
-    assert!(
-        stderr.contains("phantom wallet"),
-        "the shipped phantom-wallet warning must be emitted verbatim on success: {stderr:?}"
-    );
-    assert!(
-        stderr.contains("self:phantom"),
-        "the warning must name the offending --wallet: {stderr:?}"
-    );
-}
-
-/// (b) A REFUSED declare (a non-positive `--amount`) never reaches the wallet-check — it is SILENT
-/// (the `eprintln!` sits AFTER `plan_declare`'s own `?`, so a refused plan never runs it).
-#[test]
-fn phantom_wallet_warning_is_silent_on_a_refused_declare() {
-    let dir = tempfile::tempdir().unwrap();
-    let vault = dir.path().join("vault.pgp");
-    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
-
-    let (code, stderr) = run_declare(
-        &vault,
-        &[
-            "--amount",
-            "0",
-            "--wallet",
-            "self:phantom",
-            "--window-start",
-            "2020-01-01",
-            "--window-end",
-            "2020-12-31",
-        ],
-    );
-    assert_ne!(code, 0, "a non-positive amount must be refused");
-    assert!(
-        !stderr.contains("phantom wallet"),
-        "a refused declare must NEVER reach the phantom-wallet warning: {stderr:?}"
     );
 }

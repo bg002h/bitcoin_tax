@@ -2,7 +2,6 @@
 //! folding, no I/O. They are provenance-neutral (never assert "purchase"/"bought"; a tranche is
 //! undocumented BTC filed at its AS-FILED basis) and never instruct a tax-understating action.
 
-use crate::conservative_promote::{clamped_promote_year_saving, filed_basis_for};
 use crate::conventions::{round_cents, TaxDate, SATS_PER_BTC};
 use crate::event::{EventPayload, LedgerEvent};
 use crate::identity::EventId;
@@ -11,17 +10,16 @@ use crate::price::PriceProvider;
 use crate::project::fold::fold;
 use crate::project::resolve::{resolve, Op};
 use crate::project::{in_force_methods, project, ProjectionConfig};
-use crate::state::{Disposal, LedgerState, Removal, RemovalKind, Term};
-use crate::tax::{compute_tax_year, Carryforward, TaxOutcome, TaxProfile, TaxTables};
+use crate::state::{Disposal, LedgerState, Term};
+use crate::tax::{compute_tax_year, TaxOutcome, TaxProfile, TaxTables};
 use crate::{BasisSource, LotMethod, Usd, WalletId};
 use std::collections::BTreeSet;
 
 /// D-9 dip advisory: `Some` iff the disposal consumed at least one conservative-filing tranche leg
 /// (`EstimatedConservative`). One line per such leg, naming the estimated acquisition (`acquired_at` =
 /// the tranche's `window_end`), the basis **AS FILED** — `leg.basis` printed directly, so a `$0` filing
-/// says `$0`, a TP8(c) fee-sat carry that landed on the tranche leg says the documented fee basis, and a
-/// PROMOTED tranche says its filed floor (never `$0`; Task 11 tag-side census, tax r1 I-1) — and the
-/// resulting gain. Provenance-neutral: never "purchase"/"bought" (a tranche is
+/// says `$0` and a TP8(c) fee-sat carry that landed on the tranche leg says the documented fee basis
+/// (tax r1 I-1) — and the resulting gain. Provenance-neutral: never "purchase"/"bought" (a tranche is
 /// undocumented BTC, not a known buy), and it points to *substantiating* a higher basis (which only ever
 /// LOWERS the reported gain toward the documented amount — never understates below it).
 pub fn tranche_dip_advisory(disposal: &Disposal) -> Option<String> {
@@ -51,13 +49,11 @@ pub fn tranche_dip_advisory(disposal: &Disposal) -> Option<String> {
 }
 
 /// D-9 method-inversion advisory: `Some` iff the in-force `method` for `wallet` is NON-HIFO **and** the
-/// wallet still holds BOTH a conservative-filing tranche lot (`EstimatedConservative`, remaining — at its
-/// as-filed basis, `$0` or a promoted floor) and a documented lot (remaining). Under a non-HIFO method a
-/// future disposal can draw the low-basis conservative-filing lot before the documented higher-basis
-/// units — the gain-maximizing inversion of P2's emergent HIFO steering. The advisory recommends a HIFO
-/// election. HIFO itself never inverts (it sorts by per-sat cost), and with no documented lot present
-/// there is nothing to draw first, so both cases return `None`. Task 11: the copy is basis-as-filed (no
-/// longer asserts a `$0`-basis unit — a promoted tranche is `>$0`).
+/// wallet still holds BOTH a conservative-filing tranche lot ($0 `EstimatedConservative`, remaining) and
+/// a documented lot (remaining). Under a non-HIFO method a future disposal can draw the $0 tranche lot
+/// before the documented higher-basis units — the gain-maximizing inversion of P2's emergent HIFO
+/// steering. The advisory recommends a HIFO election. HIFO itself never inverts (it sorts $0 lots last),
+/// and with no documented lot present there is nothing to draw first, so both cases return `None`.
 pub fn method_inversion_advisory(
     state: &LedgerState,
     wallet: &WalletId,
@@ -79,25 +75,24 @@ pub fn method_inversion_advisory(
     if has_tranche && has_documented {
         Some(format!(
             "Method-inversion warning — the in-force lot method for this wallet is {method:?} (not HIFO). \
-             Under it a disposal can draw a conservative-filing unit (at its as-filed basis) before your \
-             documented higher-basis units, maximizing the reported gain. Electing HIFO would draw the \
-             highest-basis units first — set it forward with `btctax config --set-forward-method hifo` \
-             (which binds 2025+ disposals); a forward election cannot change a PRE-2025-dated disposal, so \
-             for those elect HIFO as the pre-2025 method instead."
+             Under it a disposal can draw a $0-basis conservative-filing unit before your documented \
+             higher-basis units, maximizing the reported gain. Electing HIFO would draw the documented \
+             units first — set it forward with `btctax config --set-forward-method hifo` (which binds \
+             2025+ disposals); a forward election cannot change a PRE-2025-dated disposal, so for those \
+             elect HIFO as the pre-2025 method instead."
         ))
     } else {
         None
     }
 }
 
-/// P8 self-custody nudge (advisory): `Some` iff a conservative-filing tranche lot (`EstimatedConservative`,
-/// remaining — at its as-filed basis, `$0` or a promoted floor) is held in an EXCHANGE (broker) wallet.
-/// Suggests holding the oldest / no-records units in self-custody — where own-books specific
-/// identification never expires (a broker's own-books identification is insufficient from 2027, the P4
-/// warning) — and recommends a HIFO election so a disposal draws the highest-basis documented units
-/// before the conservative-filing units (D-9). Absent when every tranche lot is already in self-custody
-/// (or none is held). Provenance-neutral; never instructs an understating action. Task 11: the copy is
-/// basis-as-filed (no longer asserts a `$0`-basis unit).
+/// P8 self-custody nudge (advisory): `Some` iff a conservative-filing tranche lot ($0
+/// `EstimatedConservative`, remaining) is held in an EXCHANGE (broker) wallet. Suggests holding the
+/// oldest / no-records units in self-custody — where own-books specific identification never expires (a
+/// broker's own-books identification is insufficient from 2027, the P4 warning) — and recommends a HIFO
+/// election so a disposal draws documented units before the $0 units (D-9). Absent when every tranche
+/// lot is already in self-custody (or none is held). Provenance-neutral; never instructs an
+/// understating action.
 pub fn self_custody_nudge(state: &LedgerState) -> Option<String> {
     let has_exchange_tranche = state.lots.iter().any(|l| {
         l.remaining_sat > 0
@@ -109,8 +104,8 @@ pub fn self_custody_nudge(state: &LedgerState) -> Option<String> {
             "Self-custody nudge — undocumented (conservative-filing) units are held at an exchange. \
              Holding your oldest / no-records units in self-custody keeps own-books specific \
              identification available indefinitely (a broker's own-books identification is insufficient \
-             from 2027). Also consider electing HIFO so a disposal draws your highest-basis documented \
-             units before the conservative-filing units: `btctax config --set-forward-method hifo`."
+             from 2027). Also consider electing HIFO so a disposal draws documented units before the \
+             $0-basis units: `btctax config --set-forward-method hifo`."
                 .to_string(),
         )
     } else {
@@ -122,21 +117,13 @@ pub fn self_custody_nudge(state: &LedgerState) -> Option<String> {
 /// whenever actual cost is NOT used. `Some` iff a conservative-filing tranche is in `year`'s filed set
 /// (a disposal leg tagged `EstimatedConservative`); it enumerates each such filed unit — its estimated
 /// acquisition (the tranche `window_end`, carried as the leg's `acquired_at`), the basis **AS FILED**
-/// (`leg.basis` printed directly — `$0`, the documented TP8(c) fee-sat basis when that carry landed on
-/// the tranche leg, or a PROMOTED estimate floor; NEVER unconditionally "$0", tax r1 I-1), and the
-/// holding period **as computed** (short/long — DERIVED from the leg's `term`, NEVER hard-coded
-/// "long-term", G-4). Provenance-neutral: a tranche is undocumented BTC, never asserted as a purchase
-/// (tax min-8c). `None` (no disclosure) when no tranche is filed for `year`.
-///
-/// Task 11 (BG-D3 tag-side census): once a tranche is PROMOTED, its `>$0` basis IS the estimate re-homed,
-/// so the old blanket "a `>$0` amount reflects documented fee basis, never the estimate" sentence is
-/// FALSE. A promoted leg (`lot_id.origin_event_id ∈ state.promoted_origins`) gets the estimate (Cohan)
-/// disclosure inline — plus the "limited so as not to report a loss" note when its basis was clamped to
-/// the proceeds (a below-floor sale). The documented-fee framing stays for a NON-promoted `>$0` fee leg;
-/// the `$0` framing stays for an unpromoted `$0` tranche.
+/// (`leg.basis` printed directly — `$0`, or the documented TP8(c) fee-sat basis when that carry landed
+/// on the tranche leg; NEVER unconditionally "$0", tax r1 I-1), and the holding period **as computed**
+/// (short/long — DERIVED from the leg's `term`, NEVER hard-coded "long-term", G-4). Provenance-neutral:
+/// a tranche is undocumented BTC, never asserted as a purchase (tax min-8c). `None` (no disclosure) when
+/// no tranche is filed for `year`. Informational/compliance text only — nothing `>$0` is ever filed.
 pub fn basis_methodology(state: &LedgerState, year: i32) -> Option<String> {
     let mut items: Vec<String> = Vec::new();
-    let mut any_promoted = false;
     for d in state
         .disposals
         .iter()
@@ -151,31 +138,10 @@ pub fn basis_methodology(state: &LedgerState, year: i32) -> Option<String> {
                 Term::LongTerm => "long-term",
                 Term::ShortTerm => "short-term",
             };
-            // Task 11: distinguish a PROMOTED leg (its `>$0` basis is the estimate re-homed) from a
-            // documented-fee `>$0` carry — both are `EstimatedConservative`, indistinguishable from the
-            // leg alone, so the promote set (recorded on the state at fold time) is the discriminator.
-            let disclosure = if state.promoted_origins.contains(&l.lot_id.origin_event_id) {
-                any_promoted = true;
-                // A clamped basis (a below-floor sale, gain <= 0, i.e. `basis >= proceeds`) was limited
-                // so as not to report a loss off the estimate (BG-D4). `>=` (not `==`) also catches the
-                // below-floor sale that carries a documented TP8(c) fee re-homed AFTER the clamp
-                // (`basis == proceeds + documented_fee`, a small documented loss) — whole-branch tax M1.
-                let clamp = if l.basis >= l.proceeds {
-                    ", limited so as not to report a loss"
-                } else {
-                    ""
-                };
-                format!(
-                    " \u{2014} basis estimated at the minimum daily closing price over the attested \
-                     acquisition window (Cohan){clamp}"
-                )
-            } else {
-                String::new()
-            };
             items.push(format!(
                 "  \u{2022} {sat} sat of undocumented BTC, estimated acquired by {acq} (the conservative \
                  window-end date), disposed on {date}, filed at ${basis:.2} basis ({term} holding \
-                 period){disclosure}.",
+                 period).",
                 sat = l.sat,
                 acq = l.acquired_at,
                 date = d.disposed_at,
@@ -186,25 +152,16 @@ pub fn basis_methodology(state: &LedgerState, year: i32) -> Option<String> {
     if items.is_empty() {
         return None;
     }
-    // The `>$0` explanation is now case-correct: a documented fee re-homed under §1011 is the default,
-    // AND — only when a promoted leg is present — the promoted estimate floor described on its own line
-    // (never the blanket "never the estimate" claim that a promote makes false).
-    let promoted_clause = if any_promoted {
-        ", or \u{2014} for a unit whose tranche has been promoted (noted on its line) \u{2014} the \
-         conservative estimated basis floor itself"
-    } else {
-        ""
-    };
     let mut out = format!(
         "Basis methodology disclosure (conservative filing) \u{2014} tax year {year}\n\n\
          For the units below, the actual cost basis could not be substantiated from available records, \
          so a conservative estimate was filed \u{2014} the basis filed for each unit is shown on its \
-         line (the IRS `$0` fallback for unprovable basis, which cannot understate gain). A `>$0` amount \
-         reflects a documented on-chain fee basis re-homed onto that unit under \u{00a7}1011{promoted_clause}. \
-         Each unit's holding period is derived from its estimated acquisition date and reported as \
-         computed, never assumed. If records are later reconstructed, a higher documented basis may be \
-         substantiated \u{2014} lowering the reported gain, never below the amount that can be \
-         documented.\n\n"
+         line (the IRS `$0` fallback for unprovable basis, which cannot understate gain; a `>$0` amount \
+         reflects documented on-chain fee basis re-homed onto that unit under \u{00a7}1011, never the \
+         estimate). Each unit's holding period is derived from its estimated acquisition date and \
+         reported as computed, never assumed. If records are later reconstructed, a higher documented \
+         basis may be substantiated \u{2014} lowering the reported gain, never below the amount that can \
+         be documented.\n\n"
     );
     out.push_str(&items.join("\n"));
     Some(out)
@@ -213,7 +170,7 @@ pub fn basis_methodology(state: &LedgerState, year: i32) -> Option<String> {
 /// P5 coverage caveat (arch M-6): whether `window_reference`'s `min` spans EVERY day in the queried
 /// window (`Full`) or only the subset with bundled data (`Partial`). A `Partial` covered-part min can
 /// EXCEED the true window min, so P6 MUST surface this in user-visible copy (tax r1 N-3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Coverage {
     Full,
     Partial,
@@ -400,17 +357,13 @@ pub fn overpayment_delta(
         .sum()
 }
 
-/// P6 nudge lines (the G-3 lever, surfaced by `tranche_report_advisory`): for each filed UNPROMOTED
-/// tranche whose `$0` basis cost federal tax in `year`, (a) the reconstruct-to-actual-records nudge (its
-/// window reference price, the UNCLAMPED what-if — a real reconstructed basis can legitimately file a
-/// loss), plus (b) Task 11's `promote-tranche` funnel line quoting the CLAMPED promote saving (never the
-/// unclamped over-quote, tax r1 I-3) when the window is fully covered (`filed_basis_for` succeeds); then
-/// the mandatory §1014 note and a trailing note if undisposed tranche units remain. A PROMOTED tranche
-/// (its basis is filed) gets a status line instead of a nudge (§3 item 3). Empty without a profile (⇒ no
-/// tax ⇒ no figure), an uncomputable year, or no tranche with a recoverable delta. Provenance-neutral:
-/// never asserts a purchase; nothing `>$0` is ever filed (D-7 — this is informational only).
-#[allow(clippy::too_many_arguments)]
-pub fn overpayment_nudge_lines(
+/// P6 nudge lines (the G-3 lever, surfaced by `tranche_report_advisory`): for each filed tranche whose
+/// `$0` basis cost federal tax in `year`, one line quantifying the saving from reconstructing it to its
+/// window reference price, then the mandatory §1014 note (unconditional + provenance-neutral) and a
+/// trailing note if undisposed tranche units remain. Empty without a profile (⇒ no tax ⇒ no figure), an
+/// uncomputable year, or no tranche with a recoverable delta. Provenance-neutral: never asserts a
+/// purchase; nothing `>$0` is ever filed (D-7 — this is informational only).
+fn overpayment_nudge_lines(
     events: &[LedgerEvent],
     state: &LedgerState,
     prices: &dyn PriceProvider,
@@ -446,71 +399,31 @@ pub fn overpayment_nudge_lines(
         let EventPayload::DeclareTranche(t) = &e.payload else {
             continue;
         };
-        // Task 11 (§3 item 3): a PROMOTED tranche's basis is FILED — neither the overpayment nudge nor the
-        // promote funnel apply. Emit a status line instead (never a `$0`-assuming nudge).
-        if state.promoted_origins.contains(&e.id) {
-            lines.push(format!(
-                "Promote status — the {ws}\u{2013}{we} tranche is already promoted to a filed basis \
-                 floor; its basis is filed, so the overpayment nudge and the promote funnel no longer \
-                 apply to it.",
-                ws = t.window_start,
-                we = t.window_end,
-            ));
-            continue;
-        }
         let Some(wr) = window_reference(prices, t.window_start, t.window_end) else {
             continue; // no reference price ⇒ nothing to quantify (D-7: never fabricate one)
         };
-        // (a) The reconstruct-to-actual-records nudge — the UNCLAMPED what-if (window reference price).
         let delta = overpayment_delta_one(
             events, prices, config, year, profile, tables, &e.id, wr.min, baseline,
         );
-        if delta > Usd::ZERO {
-            any = true;
-            let mut line = format!(
-                "Overpayment nudge — reconstructing this {ws}\u{2013}{we} tranche and importing the \
-                 records could save ~${saving} of federal tax this year, at the cost of a documented \
-                 basis an examiner can question.",
-                ws = t.window_start,
-                we = t.window_end,
-                saving = delta.round_dp(0),
-            );
-            if wr.coverage == Coverage::Partial {
-                line.push_str(
-                    " (Partial-window estimate: some days in the window had no price data, so the true \
-                     saving may differ.)",
-                );
-            }
-            lines.push(line);
+        if delta <= Usd::ZERO {
+            continue; // this tranche cost no reconstructable tax in `year`
         }
-        // (b) Task 11 — the `promote-tranche` funnel line: the CLAMPED promote saving (the T9 clamped
-        // path, NOT the unclamped `overpayment_delta_one` over-quote — tax r1 I-3). Only a fully-covered
-        // window is promotable (`filed_basis_for` hard-refuses a Partial/no-coverage window), so a Partial
-        // window gets the reconstruct nudge above but no promote funnel.
-        if let Ok(cf) = filed_basis_for(prices, t.sat, t.window_start, t.window_end) {
-            let clamped = clamped_promote_year_saving(
-                events,
-                prices,
-                config,
-                &e.id,
-                cf.filed_basis,
-                year,
-                profile,
-                tables,
+        any = true;
+        let mut line = format!(
+            "Overpayment nudge — reconstructing this {ws}\u{2013}{we} tranche and importing the records \
+             could save ~${saving} of federal tax this year, at the cost of a documented basis an \
+             examiner can question.",
+            ws = t.window_start,
+            we = t.window_end,
+            saving = delta.round_dp(0),
+        );
+        if wr.coverage == Coverage::Partial {
+            line.push_str(
+                " (Partial-window estimate: some days in the window had no price data, so the true \
+                 saving may differ.)",
             );
-            if clamped > Usd::ZERO {
-                lines.push(format!(
-                    "Promote-tranche funnel — promoting this {ws}\u{2013}{we} tranche to its filed \
-                     window-low floor (${floor:.2}) could save ~${saving} of federal tax this year, \
-                     quoted on the CLAMPED promoted gain (a sale below the floor files $0 gain, never a \
-                     loss the promote cannot file): `btctax reconcile promote-tranche`.",
-                    ws = t.window_start,
-                    we = t.window_end,
-                    floor = cf.filed_basis,
-                    saving = clamped.round_dp(0),
-                ));
-            }
         }
+        lines.push(line);
     }
     if any {
         // §1014 note — UNCONDITIONAL + provenance-neutral (a tranche carries no provenance field; adding
@@ -626,567 +539,5 @@ pub fn tranche_report_advisory(
         None
     } else {
         Some(lines.join("\n"))
-    }
-}
-
-/// BG-D9 / Task 8: the direction of the amendment the prior-year advisory describes. `Promote` = ADDING
-/// the promote (baseline `$0` → filed floor); `Void` = REMOVING a live one (floor → `$0`). `Direction`
-/// selects which of the two folds is the filed-AFTER ("new") state and which is the filed-BEFORE ("old");
-/// the refund-vs-pay COPY is then chosen PER YEAR by the SIGN of that year's Δ — never hard-coded by the
-/// direction (tax r2 M-1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Direction {
-    Promote,
-    Void,
-}
-
-/// The WITH-crypto §1212(b) `carryforward_out` for `year` under `state`, or `None` when the year is not
-/// computable (missing table/profile / a Hard blocker). Feeds the cascade clause's optional quote.
-fn carryforward_out_of(
-    events: &[LedgerEvent],
-    state: &LedgerState,
-    year: i32,
-    profile: Option<&TaxProfile>,
-    tables: &dyn TaxTables,
-) -> Option<Carryforward> {
-    match compute_tax_year(events, state, year, profile, tables) {
-        TaxOutcome::Computed(r) => Some(r.carryforward_out),
-        TaxOutcome::NotComputable(_) => None,
-    }
-}
-
-/// BG-D9 prior-year fold-diff advisory (Task 8). Promoting an UNDISPOSED tranche — or voiding a live
-/// promote — rewrites that tranche's filed basis, which can HIFO-REORDER a PRIOR filed year's disposals
-/// OR removals (donations/gifts draw by the SAME method-elected `consume_principal`), silently rewriting
-/// that year's Form 8949 / 8283 / charitable deduction / §1015 carryover. This PURE builder folds the
-/// ledger twice — the promote EVENT present vs excluded (the `PromoteTranche` event, NEVER its
-/// `DeclareTranche` target: excluding the target deletes the lot and diffs every tranche-touching year,
-/// tax r1 M-1) — and diffs the per-year disposal ∪ removal LEG SETS.
-///
-/// The trigger is the leg-set diff, NOT `tax_total` (which is `None` for the feature's own 2018–2023
-/// audience years — only 2017/2024/2025/2026 tables ship — so `None == None` would read "no change" and
-/// MISS the rewrite, tax r2 I-3) and NOT Σ-gain (blind to an equal-basis / different-date reorder that
-/// changes 8949 rows without moving the sum). Removals matter because a promote can reorder a prior
-/// DONATION-only year with ZERO disposal change — the tax-Δ arm alone is blind (engine B excludes crypto
-/// donations, tax r3 I-2).
-///
-/// Amend direction follows the SIGN of the year's tax Δ (tax r2 M-1 — never hard-coded by direction): a
-/// change that LOWERS a filed year's tax → amend-to-REFUND (names §6511's refund limitation); one that
-/// RAISES it → amend-to-PAY ("additional tax, plus interest"). When the year is not computable, the sign
-/// is inferred from the gain/deduction Δ (a gain INCREASE or a deduction DECREASE raises tax). A GIFT-only
-/// reorder changes NO line of the donor's 1040 → the §1015 donee-basis change is named with NO amended
-/// return. A both-Δs-zero flagged year names the changed 8949/8283 content, never a bare `$0`. When a
-/// flagged year's net capital gain/loss OR charitable deduction changed, the §1212(b) + §170(d) carryover
-/// cascade into later filed years is named (the `carryforward_out` diff quoted when computable, else
-/// named-unquantified). NOTHING is written; this is informational, non-gating (D-7).
-///
-/// `current` (Task 10 handoff, progress.md): candidate years are filtered to `< current` — a year `>=
-/// current` is presumed NOT YET FILED (still being authored), so it would be wrong to point it at a
-/// Form 1040-X. The caller supplies `current` from its OWN injected `now` (the BTCTAX_NOW seam), never a
-/// wall clock — this fn stays clock-free. Both directions are filtered identically: a void reverting a
-/// promote is just as premature to call "amended" for the year still being authored.
-#[allow(clippy::too_many_arguments)]
-pub fn promote_prior_year_advisory(
-    events: &[LedgerEvent],
-    prices: &dyn PriceProvider,
-    config: &ProjectionConfig,
-    promote_id: &EventId,
-    direction: Direction,
-    profile: Option<&TaxProfile>,
-    tables: &dyn TaxTables,
-    current: i32,
-) -> Vec<String> {
-    // The fold pair: `with` applies the promote (post-resolve); `without` EXCLUDES the promote event only —
-    // the DeclareTranche's $0 baseline lot survives, so the diff isolates the basis rewrite (tax r1 M-1).
-    let with_state = project(events, prices, config);
-    let without_events: Vec<LedgerEvent> = events
-        .iter()
-        .filter(|e| e.id != *promote_id)
-        .cloned()
-        .collect();
-    let without_state = project(&without_events, prices, config);
-
-    // `Direction` selects the filed-AFTER ("new") vs filed-BEFORE ("old") assignment. The refund/pay COPY
-    // is then per-year by the Δ SIGN (below), not by the direction.
-    let (new_state, old_state) = match direction {
-        Direction::Promote => (&with_state, &without_state),
-        Direction::Void => (&without_state, &with_state),
-    };
-
-    // Candidate years: every year appearing in EITHER fold's disposals or removals, filtered to `<
-    // current` — a year still being authored (>= current) is never told it needs a Form 1040-X (T10
-    // handoff). This is the advisory's OWN filter; the BG-D6 consent Σ (`consent_terms`) deliberately runs
-    // the fold-diff WITHOUT it, since the realized-saving total must include the current year.
-    let mut years: BTreeSet<i32> = BTreeSet::new();
-    for st in [&with_state, &without_state] {
-        for d in &st.disposals {
-            years.insert(d.disposed_at.year());
-        }
-        for r in &st.removals {
-            years.insert(r.removed_at.year());
-        }
-    }
-    years.retain(|y| *y < current);
-
-    let verb = match direction {
-        Direction::Promote => "Promoting this tranche",
-        Direction::Void => "Voiding this promotion",
-    };
-
-    let mut lines: Vec<String> = Vec::new();
-    for y in years {
-        // Per-year leg SETS (the whole Disposal/Removal — both derive `Eq`; a HIFO reorder changes the
-        // legs' contents, an equal-basis / different-date swap changes their `acquired_at`, so a Vec-eq
-        // catches BOTH while a Σ-gain compare would miss the latter — the BG-D9 corner).
-        let disp = |st: &LedgerState| -> Vec<Disposal> {
-            st.disposals
-                .iter()
-                .filter(|d| d.disposed_at.year() == y)
-                .cloned()
-                .collect()
-        };
-        let rem = |st: &LedgerState, k: RemovalKind| -> Vec<Removal> {
-            st.removals
-                .iter()
-                .filter(|r| r.removed_at.year() == y && r.kind == k)
-                .cloned()
-                .collect()
-        };
-        let disp_changed = disp(new_state) != disp(old_state);
-        let don_changed =
-            rem(new_state, RemovalKind::Donation) != rem(old_state, RemovalKind::Donation);
-        let gift_changed = rem(new_state, RemovalKind::Gift) != rem(old_state, RemovalKind::Gift);
-        if !(disp_changed || don_changed || gift_changed) {
-            continue;
-        }
-
-        // Per-year Δs (new − old): gain over disposal legs, §170(e) deduction over donation removals,
-        // §1015 carryover basis over gift removals.
-        let gain = |st: &LedgerState| -> Usd {
-            st.disposals
-                .iter()
-                .filter(|d| d.disposed_at.year() == y)
-                .flat_map(|d| &d.legs)
-                .map(|l| l.gain)
-                .sum()
-        };
-        let ded = |st: &LedgerState| -> Usd {
-            st.removals
-                .iter()
-                .filter(|r| r.removed_at.year() == y && r.kind == RemovalKind::Donation)
-                .filter_map(|r| r.claimed_deduction)
-                .sum()
-        };
-        let gift_basis = |st: &LedgerState| -> Usd {
-            st.removals
-                .iter()
-                .filter(|r| r.removed_at.year() == y && r.kind == RemovalKind::Gift)
-                .flat_map(|r| &r.legs)
-                .map(|l| l.basis)
-                .sum()
-        };
-        let dgain = gain(new_state) - gain(old_state);
-        let dded = ded(new_state) - ded(old_state);
-        let dgift = gift_basis(new_state) - gift_basis(old_state);
-
-        // Tax Δ (best-effort): computable only when BOTH folds compute `y` (a matching table + profile —
-        // absent for the 2018–2023 audience years, so this is usually `None` and the copy leans on the
-        // gain/deduction Δ sign instead).
-        let dtax = match (
-            tax_total(events, new_state, y, profile, tables),
-            tax_total(events, old_state, y, profile, tables),
-        ) {
-            (Some(a), Some(b)) => Some(a - b),
-            _ => None,
-        };
-
-        // Amend direction by the SIGN of the year's tax Δ; when uncomputable, infer from the gain/deduction
-        // pressure (a gain INCREASE or a deduction DECREASE raises tax). Gift is EXCLUDED — it changes no
-        // 1040 line.
-        let tax_sign = match dtax {
-            Some(d) => d.cmp(&Usd::ZERO),
-            None => (dgain - dded).cmp(&Usd::ZERO),
-        };
-
-        let mut frags: Vec<String> = Vec::new();
-
-        // Disposal fragment (a $0-gain-but-changed-legs reorder names the 8949 content, never a bare "$0").
-        if disp_changed {
-            if dgain != Usd::ZERO {
-                frags.push(format!(
-                    "{verb} changes year {y}'s reported capital gain/loss by ~${g} (a HIFO reorder of that \
-                     year's disposals).",
-                    g = dgain.abs().round_dp(0),
-                ));
-            } else {
-                frags.push(format!(
-                    "{verb} changes the Form 8949 acquisition date and holding-period detail of year {y}'s \
-                     disposals (the reported gain is unchanged)."
-                ));
-            }
-        }
-        // Donation fragment.
-        if don_changed {
-            if dded != Usd::ZERO {
-                frags.push(format!(
-                    "{verb} changes year {y}'s §170(e) charitable deduction by ~${d}.",
-                    d = dded.abs().round_dp(0),
-                ));
-            } else {
-                frags.push(format!(
-                    "{verb} changes the Form 8283 donee and acquisition date records of year {y}'s \
-                     donation(s) (the deduction amount is unchanged)."
-                ));
-            }
-        }
-        // Tax-Δ clause — only a real (non-$0) monetary change; else name the uncomputability (never "$0").
-        match dtax {
-            Some(d) if d != Usd::ZERO => frags.push(format!(
-                "Its computed federal tax for {y} changes by ~${}.",
-                d.abs().round_dp(0),
-            )),
-            None if (disp_changed && dgain != Usd::ZERO) || (don_changed && dded != Usd::ZERO) => frags
-                .push(format!(
-                    "Its federal tax for {y} is not separately computable here (no table/profile/blocked)."
-                )),
-            _ => {}
-        }
-        // Amend-direction + Form 1040-X clause — disposal/donation only (a gift never touches the donor's
-        // 1040). Refund names §6511; the raise names additional tax + interest; a content-only (tax
-        // unchanged) reorder points at the corrected form on an amended return.
-        if disp_changed || don_changed {
-            match tax_sign {
-                std::cmp::Ordering::Less => frags.push(format!(
-                    "This LOWERS year {y}'s tax; if {y} was already filed, claiming the reduction requires a \
-                     Form 1040-X for {y} (Form 8275 attached), and any refund is limited by the §6511 \
-                     statute of limitations (generally 3 years from filing / 2 years from payment)."
-                )),
-                std::cmp::Ordering::Greater => frags.push(format!(
-                    "This RAISES year {y}'s tax; if {y} was already filed, correcting it requires a Form \
-                     1040-X for {y} (Form 8275 attached) reporting additional tax, plus interest."
-                )),
-                std::cmp::Ordering::Equal => frags.push(format!(
-                    "If year {y} was already filed, the corrected Form 8949/8283 detail belongs on an \
-                     amended return for {y} (the tax itself is unchanged)."
-                )),
-            }
-        }
-        // Cascade clause (§1212(b) + §170(d)) — when net capital gain/loss OR the charitable deduction moved.
-        if (disp_changed && dgain != Usd::ZERO) || (don_changed && dded != Usd::ZERO) {
-            let cf_quote = match (
-                carryforward_out_of(events, new_state, y, profile, tables),
-                carryforward_out_of(events, old_state, y, profile, tables),
-            ) {
-                (Some(n), Some(o)) if n.short != o.short || n.long != o.long => format!(
-                    " (year {y}'s §1212(b) carryforward-out changes by short ~${s}, long ~${l})",
-                    s = (n.short - o.short).abs().round_dp(0),
-                    l = (n.long - o.long).abs().round_dp(0),
-                ),
-                _ => String::new(),
-            };
-            frags.push(format!(
-                "Because year {y}'s net capital gain/loss or charitable deduction changed, its §1212(b) \
-                 capital-loss carryforward and its §170(d) charitable carryover into later years may shift \
-                 too, so the carryover-linked lines of later filed years may also require amendment{cf_quote}."
-            ));
-        }
-        // Gift fragment (§1015 carryover; donee-basis documentation ONLY — never an amended return).
-        if gift_changed {
-            if dgift != Usd::ZERO {
-                frags.push(format!(
-                    "{verb} changes the §1015 carryover basis passed to the donee for year {y}'s gift(s) by \
-                     ~${g} — donee-basis documentation only; the donor's own Form 1040 for {y} is \
-                     unaffected, so no amended return is required.",
-                    g = dgift.abs().round_dp(0),
-                ));
-            } else {
-                frags.push(format!(
-                    "{verb} changes the Form 8283 donee and acquisition date records of year {y}'s gift(s) \
-                     (the §1015 carryover basis is unchanged) — donee-basis documentation only; the donor's \
-                     own Form 1040 for {y} is unaffected."
-                ));
-            }
-        }
-
-        lines.push(frags.join(" "));
-    }
-    lines
-}
-
-/// ★ arch-m-6 mirror (BG-D1, Task 3/DFW-D11): the LIVE (non-voided) `PromoteTranche` decision `EventId`s
-/// whose target is actually in force. `state.promoted_origins` (`project/fold.rs:497`, the pass-2
-/// resolver's own membership) is the single PUBLIC surface for "which `DeclareTranche` targets are held
-/// by EXACTLY one non-voided promote" — this fn walks `events` to recover the PROMOTE decision's OWN id
-/// (the `promote_id` `promote_prior_year_advisory` keys on, never the target). A promote whose target is
-/// NOT in `promoted_origins` (absent/wrong-type/voided target, or a ≥2-promote conflict) is excluded — it
-/// holds no filed floor to fold-diff.
-fn live_promote_ids(events: &[LedgerEvent], state: &LedgerState) -> Vec<EventId> {
-    let voided = voided_decision_targets(events);
-    events
-        .iter()
-        .filter_map(|e| match &e.payload {
-            EventPayload::PromoteTranche(p)
-                if !voided.contains(&e.id) && state.promoted_origins.contains(&p.target) =>
-            {
-                Some(e.id.clone())
-            }
-            _ => None,
-        })
-        .collect()
-}
-
-/// Every `EventId` a `VoidDecisionEvent` names as its target — the shared "is this decision still live?"
-/// membership behind [`live_promote_ids`] and [`live_declare_ids`] (mirrors `tranche_guard::void_targets`,
-/// which is `pub(crate)` to a different module tree and so not reachable from here).
-fn voided_decision_targets(events: &[LedgerEvent]) -> BTreeSet<EventId> {
-    events
-        .iter()
-        .filter_map(|e| match &e.payload {
-            EventPayload::VoidDecisionEvent(v) => Some(v.target_event_id.clone()),
-            _ => None,
-        })
-        .collect()
-}
-
-/// ★ whole-branch tax I-1 (DFW-D11): the LIVE (non-voided) `DeclareTranche` decision `EventId`s — the
-/// DECLARE-side twin of [`live_promote_ids`], mirroring `journey_view`'s own live-tranche enumeration
-/// (`defensive/mod.rs`, the same `void_targets` filter over `DeclareTranche` payloads).
-///
-/// A tranche with a live promote appears in BOTH id sets — deliberately: the promote diff isolates the
-/// `$0`→floor step, the declare diff isolates the whole tranche's existence, and [`flagged_years`] unions
-/// them.
-///
-/// ★ whole-branch r2 tax M-1 — why the `promoted_origins` escape hatch. [`voided_decision_targets`] is
-/// the NAIVE "some `VoidDecisionEvent` names this id" membership, but the resolver does NOT always apply
-/// such a void: `project::resolve.rs`'s BG-D9 deferred adjudication makes a void of a `DeclareTranche`
-/// **INERT** (a `DecisionConflict` blocker, target left in force) whenever a LIVE `PromoteTranche` still
-/// references it — "void the promote to revert the tranche to $0, or void both to drop it". Filtering on
-/// the naive set alone therefore dropped a still-in-force, still-PROMOTED tranche from the DFW-D11 export
-/// union, silently shortening the year set on the exact shape the wizard exists to serve. `state`'s own
-/// `promoted_origins` is the resolver's settled verdict on that adjudication (`project/fold.rs`, keyed by
-/// the promote's TARGET), so `|| state.promoted_origins.contains(&e.id)` re-admits precisely the tranches
-/// whose void the engine refused. The correction can only ADD years, never remove one.
-fn live_declare_ids(events: &[LedgerEvent], state: &LedgerState) -> Vec<EventId> {
-    let voided = voided_decision_targets(events);
-    events
-        .iter()
-        .filter_map(|e| match &e.payload {
-            EventPayload::DeclareTranche(_)
-                if !voided.contains(&e.id) || state.promoted_origins.contains(&e.id) =>
-            {
-                Some(e.id.clone())
-            }
-            _ => None,
-        })
-        .collect()
-}
-
-/// The BG-D9 fold-diff YEAR SET for ONE tranche decision — a `PromoteTranche` **or** (★ whole-branch
-/// tax I-1) a `DeclareTranche` (disposal ∪ removal legs, retained `< current`) — mirrors
-/// `promote_prior_year_advisory`'s own candidate-year + change-detection logic (above, the `years`
-/// build-up + the `disp_changed`/`don_changed`/`gift_changed` predicate) exactly, but returns the
-/// structured years instead of rendered text (★ structured year-set, r1: `promote_prior_year_advisory`
-/// returns `Vec<String>` — unusable for a caller that needs to KNOW which years, not read about them).
-/// Deliberately duplicated rather than sharing code with `promote_prior_year_advisory`:  that fn
-/// additionally renders per-year prose (amend direction, the tax-Δ via `tables`) this fn has no use for —
-/// mirroring the existing `gift_only_flagged_years` (`chokepoint/mod.rs`) precedent of re-deriving a
-/// structured year set from the SAME with/without fold pair rather than parsing or refactoring the prose
-/// builder.
-///
-/// ★ DFW M-new-1 (both P-A gate-review lenses): **pseudo is forced OFF** on an own config copy, mirroring
-/// `would_conflict` (`project/mod.rs:119`) and every other shadow projection in this module — unlike a
-/// real decision, a Phase-B pseudo default (e.g. a synthetic `SelfTransferMine{$0}`) is NOT stable across
-/// this fold pair, so leaving the caller's `pseudo_reconcile` bit untouched here could make the flagged
-/// year SET depend on whether the caller's config happened to have pseudo mode on — silently dropping (or
-/// adding) a year from the DFW-D11 export set. `flagged_years` (below) inherits this fix for free.
-///
-/// ★ whole-branch tax I-1 — why the SAME fn serves a `DeclareTranche`: the criterion is
-/// decision-agnostic ("remove exactly this one decision; which prior years' disposal/removal LEG SETS
-/// move?"), so the declare side composes it verbatim rather than inventing a second year-set rule. The
-/// without-fold drops ONLY the named event — a `PromoteTranche` orphaned by removing its target is
-/// already inert by construction (`resolve.rs:~540` refuses a promote whose target is not a live
-/// `DeclareTranche` and keeps it out of `promoted_origins`; `resolve.rs:442` folds it as `Op::Skip`), so
-/// removing a promoted tranche's declare removes the tranche's WHOLE contribution without needing to
-/// hunt the promote too.
-fn decision_changed_years(
-    events: &[LedgerEvent],
-    prices: &dyn PriceProvider,
-    config: &ProjectionConfig,
-    decision_id: &EventId,
-    current: i32,
-) -> BTreeSet<i32> {
-    let mut config = *config;
-    config.pseudo_reconcile = false;
-    let config = &config;
-    let with_state = project(events, prices, config);
-    let without_events: Vec<LedgerEvent> = events
-        .iter()
-        .filter(|e| e.id != *decision_id)
-        .cloned()
-        .collect();
-    let without_state = project(&without_events, prices, config);
-
-    let mut years: BTreeSet<i32> = BTreeSet::new();
-    for st in [&with_state, &without_state] {
-        for d in &st.disposals {
-            years.insert(d.disposed_at.year());
-        }
-        for r in &st.removals {
-            years.insert(r.removed_at.year());
-        }
-    }
-    years.retain(|y| *y < current);
-
-    years
-        .into_iter()
-        .filter(|&y| {
-            let disp = |st: &LedgerState| -> Vec<Disposal> {
-                st.disposals
-                    .iter()
-                    .filter(|d| d.disposed_at.year() == y)
-                    .cloned()
-                    .collect()
-            };
-            let rem = |st: &LedgerState, k: RemovalKind| -> Vec<Removal> {
-                st.removals
-                    .iter()
-                    .filter(|r| r.removed_at.year() == y && r.kind == k)
-                    .cloned()
-                    .collect()
-            };
-            let disp_changed = disp(&with_state) != disp(&without_state);
-            let don_changed = rem(&with_state, RemovalKind::Donation)
-                != rem(&without_state, RemovalKind::Donation);
-            let gift_changed =
-                rem(&with_state, RemovalKind::Gift) != rem(&without_state, RemovalKind::Gift);
-            disp_changed || don_changed || gift_changed
-        })
-        .collect()
-}
-
-/// ★ tax-N-1/M-1 (Task 3, DFW-D11): the structured export year-set — the UNION, across every LIVE
-/// promote **AND every LIVE `$0` declare** (★ whole-branch tax I-1), of that decision's OWN BG-D9
-/// fold-diff years (disposal ∪ removal legs, `< current`) — NOT a
-/// single whole-state with-ALL-promotes-vs-without-ALL-promotes diff (where two promotes' per-year
-/// effects could cancel and silently drop a year neither fold alone would miss). `tables` is accepted for
-/// signature symmetry with `promote_prior_year_advisory` and its callers (a caller assembling
-/// `plan_export` already holds the SAME `events`/`state`/`prices`/`tables`/`cfg` bundle for the sibling
-/// advisory call) — the leg-set-equality criterion itself never needs a tax table, so it goes unused here.
-/// ★ DFW M-new-1: pseudo is forced off INSIDE `decision_changed_years` (below) on its own config copy, so
-/// this fn's year-set is stable regardless of whether the caller's `cfg` happens to carry
-/// `pseudo_reconcile = true` — a defensive-filing caller's config may be pseudo-active even though its
-/// OWN `state` is not (DFW-D6), and every shadow projection this feature touches must force pseudo off.
-///
-/// ★ **whole-branch tax I-1 — the DECLARE side is in the union too.** A `$0` `DeclareTranche` with NO
-/// promote changes a prior year's FILED forms just as materially as a promote does: `make_disposal_legs`
-/// (`project/fold.rs:~128`) splits the disposal's full `net` proceeds PRO-RATA across `consumed`, so
-/// adding the tranche re-splits those proceeds, gives the previously-uncovered share its OWN Form 8949
-/// row with `acquired_at = window_end` (moving the short-/long-term split on Schedule D), and clears the
-/// Hard `UncoveredDisposal` that made the year not-computable at all. Iterating `live_promote_ids` ALONE
-/// (the shipped r1 shape) returned the EMPTY set for a declare-only vault, so the wizard's `$0` branch
-/// exported `{current_year}` and silently omitted the ONE year the filer's journey actually fixed —
-/// while the same filer on the promote branch got it. Same per-decision (never whole-state) union
-/// discipline, same `< current` retain, same pseudo-off shadow.
-pub fn flagged_years(
-    events: &[LedgerEvent],
-    state: &LedgerState,
-    prices: &dyn PriceProvider,
-    _tables: &dyn TaxTables,
-    cfg: &ProjectionConfig,
-    current: i32,
-) -> BTreeSet<i32> {
-    let mut years: BTreeSet<i32> = BTreeSet::new();
-    for promote_id in live_promote_ids(events, state) {
-        years.extend(decision_changed_years(
-            events,
-            prices,
-            cfg,
-            &promote_id,
-            current,
-        ));
-    }
-    for declare_id in live_declare_ids(events, state) {
-        years.extend(decision_changed_years(
-            events,
-            prices,
-            cfg,
-            &declare_id,
-            current,
-        ));
-    }
-    years
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::event::{DeclareTranche, VoidDecisionEvent};
-    use time::macros::{date, datetime};
-    use time::UtcOffset;
-
-    fn dec_ev(seq: u64, payload: EventPayload) -> LedgerEvent {
-        LedgerEvent {
-            id: EventId::decision(seq),
-            utc_timestamp: datetime!(2026-01-01 0:00 UTC),
-            original_tz: UtcOffset::UTC,
-            wallet: None,
-            payload,
-        }
-    }
-
-    fn tranche_payload() -> EventPayload {
-        EventPayload::DeclareTranche(DeclareTranche {
-            sat: 40_000_000,
-            wallet: WalletId::SelfCustody { label: "w".into() },
-            window_start: date!(2016 - 01 - 01),
-            window_end: date!(2016 - 03 - 31),
-        })
-    }
-
-    /// ★ whole-branch r2 tax M-1 — the DIRECT (white-box) pin on [`live_declare_ids`]' liveness rule.
-    ///
-    /// [`voided_decision_targets`] is the NAIVE "some `VoidDecisionEvent` NAMES this id" membership, but
-    /// `project::resolve.rs`'s BG-D9 deferred adjudication does NOT apply such a void when a LIVE
-    /// `PromoteTranche` still references the target: the void is INERT (a `DecisionConflict`) and the
-    /// tranche stays IN FORCE. `state.promoted_origins` (`project/fold.rs`, keyed by the promote's TARGET)
-    /// IS that settled verdict, so it — not the naive set — decides membership.
-    ///
-    /// Pinned HERE rather than end-to-end because the two halves of [`flagged_years`]' union happen to
-    /// coincide on this shape: removing the promote in the promote-half's shadow fold un-defers the very
-    /// void, dropping the tranche anyway. That coincidence is a property of the CURRENT resolver, not a
-    /// guarantee — this test holds the declare half's own rule regardless.
-    /// (`promote_cli.rs::flagged_years_keeps_a_promoted_tranche_whose_declare_void_the_engine_made_inert`
-    /// pins the end-to-end year survival off a REAL vault, including that the engine really does hold such
-    /// a tranche in `promoted_origins`.)
-    ///
-    /// Mutation: drop the `|| state.promoted_origins.contains(&e.id)` clause → the first assertion reds.
-    #[test]
-    fn live_declare_ids_keeps_a_tranche_whose_void_the_engine_held_inert() {
-        let tranche = EventId::decision(1);
-        let events = vec![
-            dec_ev(1, tranche_payload()),
-            dec_ev(
-                3,
-                EventPayload::VoidDecisionEvent(VoidDecisionEvent {
-                    target_event_id: tranche.clone(),
-                }),
-            ),
-        ];
-
-        // The engine held the void INERT (a live promote references the tranche) → it is in force.
-        let mut in_force = LedgerState::default();
-        in_force.promoted_origins.insert(tranche.clone());
-        assert_eq!(
-            live_declare_ids(&events, &in_force),
-            vec![tranche.clone()],
-            "a tranche the resolver kept in force must stay in the DFW-D11 export union"
-        );
-
-        // The SAME events with no live promote: the void APPLIES, so the tranche is correctly excluded.
-        let dropped = LedgerState::default();
-        assert!(
-            live_declare_ids(&events, &dropped).is_empty(),
-            "an actually-applied void must still drop its tranche — the fix must not admit everything"
-        );
     }
 }

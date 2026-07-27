@@ -595,11 +595,6 @@ pub struct VerifyReport {
     pub selection_count: usize,
     /// Task 8: per-disposal compliance (post-2025 only).
     pub compliance: Vec<DisposalCompliance>,
-    /// Task 11 (BG-D3): per-live-promote verify-drift advisory — the stored filed floor recomputed
-    /// against CURRENT price data (overstated → conditional void+re-promote; understated → surfaced).
-    /// Empty when no live promote drifts. Informational; never gates (the fold still uses the stored
-    /// number).
-    pub drift: Vec<String>,
 }
 
 impl VerifyReport {
@@ -660,12 +655,7 @@ fn safe_harbor_status(state: &LedgerState, _events: &[LedgerEvent]) -> String {
     }
 }
 
-pub fn build_verify(
-    state: &LedgerState,
-    events: &[LedgerEvent],
-    prices: &dyn btctax_core::price::PriceProvider,
-    cli: &CliConfig,
-) -> VerifyReport {
+pub fn build_verify(state: &LedgerState, events: &[LedgerEvent], cli: &CliConfig) -> VerifyReport {
     let conservation = conservation_report(state);
     let mut hard = Vec::new();
     let mut advisory = Vec::new();
@@ -699,10 +689,6 @@ pub fn build_verify(
     // Per-disposal compliance (§A.5): side-effect-free projection.
     let compliance = disposal_compliance(events, state);
 
-    // Task 11 (BG-D3): the per-live-promote verify-drift advisory — recompute each stored floor against
-    // CURRENT prices (overstated → conditional void+re-promote; understated → surfaced). Empty otherwise.
-    let drift = btctax_core::conservative_promote::promote_drift_advisory(events, prices);
-
     VerifyReport {
         conservation,
         hard,
@@ -715,7 +701,6 @@ pub fn build_verify(
         elections,
         selection_count,
         compliance,
-        drift,
     }
 }
 
@@ -926,52 +911,6 @@ pub fn write_form_csvs(
     write_basis_methodology_txt(out_dir, state, year)?; // P7 / D-4 (mandatory when a tranche is filed)
     if let Some(se) = se_result {
         write_schedule_se_csv(out_dir, se)?;
-    }
-    Ok(())
-}
-
-/// BG-D8 (Task 14): write the Form 8275 disclosure (`form_8275.txt`, 0o600) — by its OWN name — alongside
-/// the year's form artifacts whenever a promoted DISPOSAL leg files in `year`. Writes NOTHING for a year
-/// with no promoted disposal leg (`disclosure_8275` → `None`).
-///
-/// ★ Distinct from [`write_basis_methodology_txt`] in TWO ways the review loop pinned:
-/// - **Its own name.** The gate + the success KAT key on `form_8275.txt`, never a `form_8275.txt ||
-///   basis_methodology.txt` disjunction — `basis_methodology.txt` is written unconditionally for a
-///   promoted year, so the disjunction would be a vacuous assertion (tax r1 I-8).
-/// - **The gate ran first.** The completeness gate ([`crate::cmd::admin::promote_export_gate`]) refuses
-///   BEFORE any bytes when a promoted leg's Part II is empty/incomplete, so a promoted leg reaching HERE
-///   is guaranteed to carry a complete Part II — this always emits a filing-ready disclosure.
-///
-/// `pub` so the `export-snapshot` CSV / `export-irs-pdf` / full-return packet writers (`cmd/admin.rs`)
-/// AND the TUI export path (`btctax-tui::export::do_export`, Approach-B Task 17) emit it at their
-/// `write_basis_methodology_txt` call sites — the TUI reaches it via `btctax_cli::render::…` (no `cmd::`
-/// token, so its KAT-E10 source gate stays green).
-pub fn write_form_8275_txt(
-    out_dir: &Path,
-    state: &LedgerState,
-    events: &[LedgerEvent],
-    year: i32,
-) -> Result<(), crate::CliError> {
-    write_form_8275_txt_named(out_dir, state, events, year, "form_8275.txt")
-}
-
-/// The `write_form_8275_txt` write, under an explicit `filename`. Task 16 / M2: the all-years
-/// `export_snapshot` dump (`tax_year: None`) can have MULTIPLE promoted years in the exported range,
-/// and every one of them would otherwise collide on the same bare `form_8275.txt` — silently
-/// overwriting all but the last. The single-year call sites keep the bare name (`write_form_8275_txt`
-/// above); the all-years path names each file `form_8275_{year}.txt` instead.
-pub(crate) fn write_form_8275_txt_named(
-    out_dir: &Path,
-    state: &LedgerState,
-    events: &[LedgerEvent],
-    year: i32,
-    filename: &str,
-) -> Result<(), crate::CliError> {
-    use std::io::Write as _;
-    if let Some(disc) = btctax_core::tax::form8275::disclosure_8275(events, state, year) {
-        let mut file = fsperms::open_owner_only(&out_dir.join(filename))?;
-        // `render()` already terminates with a newline — write, don't writeln (no trailing blank line).
-        write!(file, "{}", disc.render())?;
     }
     Ok(())
 }
@@ -2560,12 +2499,6 @@ pub fn render_verify(r: &VerifyReport) -> String {
             c.date,
             compliance_status_tag(&c.status)
         );
-    }
-    // Task 11 (BG-D3): the per-live-promote verify-drift advisory (a stored floor that recomputes away
-    // from current price data). Informational — never gates.
-    let _ = writeln!(out, "Promote-basis drift advisories: {}", r.drift.len());
-    for d in &r.drift {
-        let _ = writeln!(out, "  {d}");
     }
     out
 }
