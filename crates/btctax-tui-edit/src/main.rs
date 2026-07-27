@@ -21405,7 +21405,9 @@ mod tests {
     /// `attest_save_failed` means the write did NOT land (retry via CLI), `stale_after_write` means it
     /// DID (do not retry) — so emitting the wrong one has a filing consequence.
     ///
-    /// Mutation: reorder the `stale_after_write` branch above `rollback_failed` → reds on case 3.
+    /// Mutation: swap the `or_else` operands in `stale_or_residue_latch_status` (i.e.
+    /// `self.stale_reason().or_else(|| self.residue_latch_status())`), hoisting stale above BOTH
+    /// attest and rollback → reds on case 3 (rollback outranks stale).
     #[test]
     fn stale_or_residue_latch_status_precedence_is_attest_then_rollback_then_stale() {
         let dir = tempfile::tempdir().unwrap();
@@ -21426,8 +21428,11 @@ mod tests {
             .stale_or_residue_latch_status()
             .expect("stale must refuse");
         assert!(
-            s.contains("could not be verified"),
-            "stale copy must not claim an effect: {s}"
+            s.contains(
+                "the write reached disk, but whether it had the intended effect could not be \
+                 verified, because the ledger would not re-project"
+            ),
+            "fact 1 must pin BOTH halves — the write LANDED, and its effect is unverified: {s}"
         );
         assert!(
             app.residue_latch_status().is_none(),
