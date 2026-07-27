@@ -431,6 +431,22 @@ pub(crate) fn export_irs_pdf_from_session(
         }
     }
 
+    // T-f8275-part-ii-overflow round 2 finding 2: refuse an OVERFLOWING Part II narrative HERE too,
+    // before `mkdir_out` — same reasoning as the Part I row check just above. Without this, the
+    // narrative's overflow was only discovered mid-write, deep inside `fill_form_8275_slice` (called
+    // AFTER `basis_methodology.txt`, `form_8275.txt`, and possibly `f8949.pdf`/`schedule_d.pdf` were
+    // already on disk) — leaving an estimated-basis 8949 filed with no 8275 PDF behind it, exactly the
+    // §6662(d) exposure this whole disclosure feature exists to close.
+    if let Some(p) = &printed_8275 {
+        if let btctax_forms::PartIiCapacity::Overflow(overflow) =
+            btctax_forms::part_ii_capacity_check(&p.part_ii, tax_year)?
+        {
+            return Err(CliError::Usage(part_ii_overflow_message(
+                tax_year, &overflow,
+            )));
+        }
+    }
+
     // A pseudo-active fill DRAFT-watermarks every page before it hits disk.
     let stamp = |bytes: Vec<u8>| -> Result<Vec<u8>, CliError> {
         Ok(if watermarked {
@@ -627,6 +643,26 @@ pub(crate) fn export_irs_pdf_from_session(
     })
 }
 
+/// The Form 8275 Part II narrative overflow refusal (T-f8275-part-ii-overflow round 2 finding 2) —
+/// shared by BOTH export paths (`export_irs_pdf_from_session` + `export_full_return`) so the wording
+/// never drifts between them. The narrative is FIXED once recorded (the vault is append-only —
+/// `plan_promote` refuses to re-promote an already-promoted tranche), so "shorten it and re-run
+/// promote-tranche" is not an available remedy at export time; the honest remedy is void-and-redo (a
+/// known follow-up: `design/f8275-part-ii-overflow/FOLLOWUPS.md`).
+fn part_ii_overflow_message(tax_year: i32, overflow: &btctax_forms::PartIiOverflow) -> String {
+    format!(
+        "cannot export {tax_year}: the Form 8275 Part II narrative needs about {rows} single-line \
+         fields but only {cap} are available (Part II's own line 1 + Part IV's continuation lines) at \
+         8pt \u{2014} roughly the first {chars} characters of it would fit. The narrative is fixed once \
+         recorded (the vault is append-only), so shortening it now means voiding the promote(s) whose \
+         narrative is too long and re-recording with a shorter --part-ii-file. File the 8275 manually \
+         for {tax_year} instead, or void and re-record, then re-export.",
+        rows = overflow.rows_needed,
+        cap = overflow.capacity,
+        chars = overflow.chars_fit,
+    )
+}
+
 /// Write `bytes` to `path` with owner-only (0o600) permissions, matching the CSV export path.
 fn write_bytes_owner_only(path: &Path, bytes: &[u8]) -> Result<(), CliError> {
     use std::io::Write;
@@ -748,6 +784,22 @@ fn export_full_return(
                  rows. File the 8275 manually for {tax_year}, or reduce the number of promoted disposal \
                  legs filed in {tax_year} (e.g. void one of the promotes) and re-export.",
                 n = f8275.part_i.len(),
+            )));
+        }
+    }
+
+    // T-f8275-part-ii-overflow round 2 finding 2: pre-flight for the SAME nicely-worded refusal as the
+    // crypto-slice path above ("do it uniformly"). This path was already BYTE-safe without it — the
+    // ALL-OR-NOTHING `fill_full_return` below runs before `mkdir_out`, so an overflowing narrative
+    // already refused with zero bytes written — but without this check it would surface as this
+    // crate's generic `FormsError::Overflow` Display via `CliError::FormFill`, not a message naming the
+    // year, the character budget, and a remedy.
+    if let Some(f8275) = &printed.forms.f8275 {
+        if let btctax_forms::PartIiCapacity::Overflow(overflow) =
+            btctax_forms::part_ii_capacity_check(&f8275.part_ii, tax_year)?
+        {
+            return Err(CliError::Usage(part_ii_overflow_message(
+                tax_year, &overflow,
             )));
         }
     }
