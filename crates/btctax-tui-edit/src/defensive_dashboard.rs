@@ -42,6 +42,43 @@ impl DefensiveDashboardState {
     }
 }
 
+/// Build the dashboard's view WITHOUT ever calling `journey_view` on a pseudo-active state —
+/// `journey_view` documents (and `debug_assert!`s) that precondition, because a Phase-B pseudo default
+/// can silently mask a real shortfall this journey exists to surface, so a pseudo-active projection has
+/// no trustworthy read-only view to compute at all.
+///
+/// Normally this can never fire: `EditorApp::open_defensive_filing`'s DFW-D6 gate refuses entry before
+/// ever building a view, so `state.pseudo_active()` is always false here — EXCEPT while the stale latch
+/// is armed, where D-7 (Task 6) SKIPS that gate so `w` → dashboard → `x` stays reachable even from the
+/// one arming tail (pseudo-approve) that leaves the STALE image still reporting `pseudo_active()`. In
+/// that one case, an unguarded `journey_view` call would hit its own precondition assert. Returning an
+/// EMPTY view instead is safe: `handle_defensive_dashboard_key`'s `x` check is recognized
+/// UNCONDITIONALLY, before `view` is ever read (`x` needs no row — DFW-D3/M-5), and every other
+/// dashboard action degrades to `DashboardIntent::None` over empty rows. This also protects
+/// `execute_defensive_export`'s own post-export `refresh_defensive_dashboard` call, which re-projects
+/// the vault's CURRENT (not necessarily stale) state and could otherwise hit the same assert if the
+/// ledger is genuinely — not just staleness-apparently — pseudo-active at that moment.
+pub fn safe_journey_view(
+    events: &[btctax_core::LedgerEvent],
+    state: &btctax_core::state::LedgerState,
+    prices: &dyn btctax_core::PriceProvider,
+    tables: &dyn btctax_core::TaxTables,
+    cfg: &btctax_core::ProjectionConfig,
+    current: i32,
+) -> DefensiveFilingView {
+    if state.pseudo_active() {
+        return DefensiveFilingView {
+            candidates: Vec::new(),
+            resolve_first: Vec::new(),
+            tranches: Vec::new(),
+            still_short: Vec::new(),
+            flagged_years: std::collections::BTreeSet::new(),
+            safe_harbor_blocked: false,
+        };
+    }
+    btctax_core::defensive::journey_view(events, state, prices, tables, cfg, current)
+}
+
 /// The row-address the cursor can occupy, in FIXED display order — MUST mirror [`render_dashboard`]'s
 /// own section order (resolve-first, candidates, tranches, still-short) so `d`/`p`/Enter act on the row
 /// the filer is actually looking at. `x` (export) needs no row — DFW-D3/M-5: always available.
