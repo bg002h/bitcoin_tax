@@ -822,22 +822,27 @@ impl EditorApp {
         flush_failed
     }
 
-    /// THE write tail: all 27 save-then-reproject sites will call this and nothing else (Task 4 routes
+    /// THE write tail: all 27 save-then-reproject sites call this and nothing else (Task 4 routed
     /// them). It just re-projects `self.session` and delegates to `apply_reprojection`, which does the
     /// actual latch/status/dashboard work and is the unit every KAT drives directly.
     ///
     /// `arm_prefix` carries the three per-tail prefixes DESIGN.md §2.5 requires to survive now that
-    /// fact 1 no longer names what landed (`"committed {year} as {label}, but…"`,
-    /// `"parked the full return for {year}, but…"`, `"the safe-harbor attest write landed, but…"`); the
+    /// fact 1 no longer names what landed (`"committed {year} as {label} — "`,
+    /// `"parked the full return for {year} — "`, `"the safe-harbor attest write landed — "`); the
     /// other 24 tails pass `None`. It is `Option<String>`, not `Option<&'static str>`: all three real
     /// prefixes interpolate a runtime `{year}`/`{label}`, so a `'static` string could not carry them —
     /// the prefix has to be built (`format!`) at each of those three call sites, not quoted here.
     ///
-    /// ★ CONVENTION (fix round 2 nit): a supplied prefix MUST carry its own trailing space —
-    /// `arm_stale` concatenates it directly onto fact 1 with none of its own. `Some("committed {year}
-    /// as {label}, but ".into())` is correct; a prefix without the trailing space composes as
-    /// `"…, butthe write reached disk"`.
+    /// ★ CONVENTION (fix round 2 nit; separator updated fix round 1 of Task 4's own review — see
+    /// below): a supplied prefix MUST carry its own trailing space — `arm_stale` concatenates it
+    /// directly onto fact 1 with none of its own. `Some("committed {year} as {label} — ".into())` is
+    /// correct; a prefix without the trailing space composes as `"…—the write reached disk"`.
     ///
+    /// ★ Task 4 fix round 1 (Minor): DESIGN.md §2.5 originally mandated a `", but "` separator
+    /// (`"committed {year} as {label}, but the write reached disk, but whether it had the intended
+    /// effect could not be verified…"`). That reads as two `but`s plus a restated outcome once fact 1
+    /// itself starts with "the write reached disk, but…" — superseded here in favor of an em-dash,
+    /// which reads as one continuous sentence instead of a doubled hedge.
     fn after_write(
         &mut self,
         arm_prefix: Option<String>,
@@ -1587,7 +1592,7 @@ fn commit_tax_inputs(app: &mut EditorApp) {
                                         // Tax/Forms tabs must show the newly-committed liability, not the pre-mutation one (mirrors the
                                         // profile-save site). `build_snapshot` is a READ via the persist-seam pattern; a re-projection
                                         // failure is non-fatal (keep the old snapshot; tell the filer to restart).
-            let prefix = format!("committed {year} as {label}, but ");
+            let prefix = format!("committed {year} as {label} — ");
             app.after_write(Some(prefix), move |_| {
                 format!("committed {year} as {label}")
             });
@@ -1769,7 +1774,7 @@ fn confirm_park_to_profile(app: &mut EditorApp) {
             // `close_all_mutation_surfaces`'s flush no-op and the stale-latch's fact-2 park carve-out both
             // depend on seeing a CLEAN form here.
             app.after_write(
-                Some(format!("parked the full return for {year}, but ")),
+                Some(format!("parked the full return for {year} — ")),
                 move |_| format!("parked the full return for {year}; now using the tax-profile"),
             );
         }
@@ -7077,7 +7082,7 @@ fn handle_attest_typed_word_key(app: &mut EditorApp, key: KeyEvent) {
     match save_result {
         Ok((_void_id, attest_id)) => {
             app.after_write(
-                Some("the safe-harbor attest write landed, but ".to_string()),
+                None,
                 |snap| derive_attest_status(snap, &attest_id),
             );
         }
@@ -11001,7 +11006,7 @@ mod tests {
     #[test]
     fn apply_reprojection_err_prefix_precedes_fact_1() {
         let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
-        let prefix = "parked the full return for 2024, but ";
+        let prefix = "parked the full return for 2024 — ";
         app.apply_reprojection(
             Some(prefix.to_string()),
             Some(Err(btctax_cli::CliError::Usage("disk".into()))),
@@ -11009,7 +11014,7 @@ mod tests {
         );
         let s = app.status.clone().unwrap_or_default();
         assert!(
-            s.starts_with("parked the full return for 2024, but the write reached disk"),
+            s.starts_with("parked the full return for 2024 — the write reached disk"),
             "the prefix must precede fact 1 verbatim, not be dropped or reordered: {s}"
         );
         assert_eq!(
@@ -11076,7 +11081,7 @@ mod tests {
         app.tax_inputs_form.as_mut().unwrap().dirty = false;
 
         app.apply_reprojection(
-            Some("parked the full return for 2024, but ".to_string()),
+            Some("parked the full return for 2024 — ".to_string()),
             Some(Err(btctax_cli::CliError::Usage("disk".into()))),
             |_| unreachable!(),
         );
@@ -29552,6 +29557,153 @@ mod tests {
                 .unwrap_or_default()
                 .contains("committed"),
             "the hoisted-status site must not be blanked by the migration"
+        );
+    }
+
+    // ── Task 4 fix round 1 — mutation-proving coverage for the 3 bespoke prefixes ──
+    //
+    // The 24 plain sites were proven byte-identical on the `Ok` path by literal diff (mechanical
+    // routing). The 3 prefix sites are NOT mechanical — each carries a hand-written `Some(prefix)`
+    // literal that nothing exercised end to end. These KATs force a GENUINE `build_snapshot` failure
+    // (not an injected `Err` into `apply_reprojection`, which only proves the shared primitive) by
+    // pointing `BTCTAX_PRICE_CACHE` at a file that EXISTS but is malformed —
+    // `LayeredPrices::load_with_cache` treats a present-but-malformed cache as a LOUD error
+    // (`crates/btctax-adapters/src/price.rs`), which `build_snapshot`'s `?` propagates. Safe under
+    // nextest's process-per-test model (same technique already used for the J8 walkthrough golden's
+    // determinism pin, `j8_editor_frames`).
+
+    /// Point `BTCTAX_PRICE_CACHE` at a file that EXISTS with a line `from_csv_str` cannot parse (no
+    /// comma), so the NEXT `build_snapshot` call fails with `AdapterError::PriceDataset` → `CliError`.
+    /// Call this AFTER any setup that itself needs a working (or absent) cache, so only the write
+    /// tail under test sees the failure.
+    #[cfg(unix)]
+    fn corrupt_price_cache(dir: &std::path::Path) {
+        let cache_path = dir.join("corrupt-price-cache.csv");
+        std::fs::write(&cache_path, b"not a csv line at all\n").unwrap();
+        std::env::set_var("BTCTAX_PRICE_CACHE", &cache_path);
+    }
+
+    /// The commit-tail prefix (`:1590`), proven against a REAL re-projection failure. Mutation-kills
+    /// both a stripped trailing space AND a `None` swapped in for `Some(prefix)`: either mutation
+    /// moves where `"the write reached disk"` starts, which the exact-position assertion pins.
+    #[cfg(unix)]
+    #[test]
+    fn commit_tax_inputs_prefix_survives_a_genuine_reprojection_failure() {
+        let (mut app, dir) = vault_with_return_inputs_draft();
+        handle_key(&mut app, press(KeyCode::Char('s'))); // open the commit modal
+        corrupt_price_cache(dir.path());
+        commit_tax_inputs(&mut app);
+
+        let s = app.status.clone().unwrap_or_default();
+        let prefix = "committed 2024 as Single — ";
+        assert!(
+            app.stale_after_write.is_some(),
+            "a genuine re-projection failure must arm the stale latch: {s}"
+        );
+        assert_eq!(
+            s.find("the write reached disk"),
+            Some(prefix.len()),
+            "fact 1 must start EXACTLY where the commit prefix ends (proves both the trailing space \
+             AND that `Some(prefix)` — not `None` — reaches `after_write`): {s}"
+        );
+    }
+
+    /// The park-tail prefix (`:1777`), proven against a REAL re-projection failure — same shape as
+    /// the commit KAT above, mutation-killing a stripped trailing space or a `None` swap.
+    #[cfg(unix)]
+    #[test]
+    fn confirm_park_to_profile_prefix_survives_a_genuine_reprojection_failure() {
+        use btctax_core::tax::types::FilingStatus;
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        seed_committed_return_and_profile(&mut app, 2024, FilingStatus::Single);
+
+        handle_key(&mut app, press(KeyCode::Char('T'))); // open on the committed full return
+        handle_key(&mut app, press(KeyCode::Char('t'))); // park confirm (dirty is false — the gate)
+        assert!(app.tax_inputs_form.as_ref().unwrap().modal.is_some());
+        corrupt_price_cache(dir.path());
+        handle_key(&mut app, press(KeyCode::Enter)); // run the park
+
+        let s = app.status.clone().unwrap_or_default();
+        let prefix = "parked the full return for 2024 — ";
+        assert!(
+            app.stale_after_write.is_some(),
+            "a genuine re-projection failure must arm the stale latch: {s}"
+        );
+        assert_eq!(
+            s.find("the write reached disk"),
+            Some(prefix.len()),
+            "fact 1 must start EXACTLY where the park prefix ends (proves both the trailing space AND \
+             that `Some(prefix)` — not `None` — reaches `after_write`): {s}"
+        );
+    }
+
+    /// The safe-harbor-attest prefix (`:7085`), proven against a REAL re-projection failure — same
+    /// shape again. This is also the ONE intended user-visible wording change in the whole task (the
+    /// shipped "Attested but…" claimed an effect `derive_attest_status` exists to deny once
+    /// re-projection fails); nothing previously pinned that the reworded prefix is what actually ships.
+    #[cfg(unix)]
+    #[test]
+    fn safe_harbor_attest_prefix_survives_a_genuine_reprojection_failure() {
+        let (mut app, dir) = vault_with_safe_harbor_allocation();
+        handle_key(&mut app, press(KeyCode::Char('a')));
+        handle_key(&mut app, press(KeyCode::Enter));
+        type_str(&mut app, "ATTEST");
+        corrupt_price_cache(dir.path());
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        let s = app.status.clone().unwrap_or_default();
+        let prefix = "the safe-harbor attest write landed — ";
+        assert!(
+            app.stale_after_write.is_some(),
+            "a genuine re-projection failure must arm the stale latch: {s}"
+        );
+        assert!(
+            !s.contains("Attested but"),
+            "the superseded wording must not resurface: {s}"
+        );
+        assert_eq!(
+            s.find("the write reached disk"),
+            Some(prefix.len()),
+            "fact 1 must start EXACTLY where the attest prefix ends (proves both the trailing space \
+             AND that `Some(prefix)` — not `None` — reaches `after_write`): {s}"
+        );
+    }
+
+    /// The park tail's `after_write` call sits AFTER the block that clears `form.dirty` (`:1758-1763`
+    /// precede `:1777`), not at the old `build_snapshot` position which preceded that block. This is
+    /// currently DEFENCE IN DEPTH, not reachable via the front door: `toggle_source` only opens the
+    /// `ParkToProfile` confirm when `!dirty` (the gate), so `dirty` is already `false` by the time
+    /// `confirm_park_to_profile` runs in every production path. This KAT forces `dirty = true` back
+    /// onto an already-open confirm modal — bypassing the front-door gate on purpose — purely to hold
+    /// the LOCAL ordering invariant to account, so a future edit cannot "simplify" the ordering back
+    /// to the pre-Task-4 shape thinking it is dead code. If hoisted, `any_mutation_surface_open`'s
+    /// pre-close survey (inside `arm_stale`, reached because `build_snapshot` genuinely fails here
+    /// too) would see the still-`true` `dirty` flag and fire fact 2 — this assertion would go RED.
+    #[cfg(unix)]
+    #[test]
+    fn confirm_park_to_profile_after_write_runs_after_dirty_is_cleared() {
+        use btctax_core::tax::types::FilingStatus;
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        seed_committed_return_and_profile(&mut app, 2024, FilingStatus::Single);
+
+        handle_key(&mut app, press(KeyCode::Char('T')));
+        handle_key(&mut app, press(KeyCode::Char('t'))); // park confirm opens (dirty is false here)
+        assert!(app.tax_inputs_form.as_ref().unwrap().modal.is_some());
+        // Bypass the front-door gate: force `dirty = true` back onto the already-open confirm modal.
+        app.tax_inputs_form.as_mut().unwrap().dirty = true;
+        corrupt_price_cache(dir.path());
+        handle_key(&mut app, press(KeyCode::Enter)); // run the park
+
+        let s = app.status.clone().unwrap_or_default();
+        assert!(
+            app.stale_after_write.is_some(),
+            "a genuine re-projection failure must arm the stale latch: {s}"
+        );
+        assert!(
+            !s.contains("entry screen"),
+            "fact 2 must stay silent: the ordering clears `dirty` BEFORE `after_write` runs, so the \
+             pre-close survey must see a clean form even though this KAT forced `dirty = true` on \
+             entry: {s}"
         );
     }
 }
