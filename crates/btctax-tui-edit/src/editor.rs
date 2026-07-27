@@ -297,6 +297,12 @@ pub struct EditorApp {
     /// failed, so unsaved residue is live. Like `attest_save_failed`, while `true` every mutating
     /// opener refuses (via `residue_latch_status`) until quit (which discards the residue).
     pub rollback_failed: bool,
+    /// Third latch [stale-snapshot]: set ONLY by `apply_reprojection` when a write LANDED on disk but
+    /// its follow-up `build_snapshot` failed, so `snapshot` holds the PRE-write image. Carries the
+    /// reason (a bare `bool` cannot — the `CliError` is gone by then). Unlike its two siblings the
+    /// write DID land, so the remedy is the opposite: do NOT retry. Cleared by a later SUCCESSFUL
+    /// re-projection (D-4) — in practice only `execute_defensive_export`'s inline rebuild.
+    pub stale_after_write: Option<String>,
     /// One-line status (saved / error), shown in the footer.
     /// Cleared on the next non-modal key press (mirrors the viewer's `export_status`
     /// semantics, app.rs:140 [R0-N5]).
@@ -379,6 +385,7 @@ impl EditorApp {
             method_election_modal: None,
             attest_save_failed: false,
             rollback_failed: false,
+            stale_after_write: None,
             status: None,
             clock: btctax_tui::clock::Clock::Wall,
         }

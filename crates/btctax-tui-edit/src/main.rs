@@ -689,6 +689,32 @@ impl EditorApp {
         }
     }
 
+    /// The stale-latch reason alone, as an owned `String` so the borrow ends at the call — the payload
+    /// sites need `&mut` on a flow field immediately afterwards, which a `&self`-borrowing accessor
+    /// would forbid (E0502).
+    ///
+    /// Added here per the plan's Task-1 file list; gains its first production caller in a later task.
+    #[allow(dead_code)]
+    fn stale_reason(&self) -> Option<String> {
+        self.stale_after_write.as_ref().map(|e| {
+            format!(
+                "refused: the write reached disk, but whether it had the intended effect could not be \
+                 verified, because the ledger would not re-project ({e}). Quit and reopen the vault."
+            )
+        })
+    }
+
+    /// Every mutating opener refuses through this. Precedence attest > rollback > stale: the first two
+    /// mean the write did NOT land (retry), the third means it DID (do not retry).
+    /// `residue_latch_status` is deliberately left alone — `execute_defensive_export` and
+    /// `open_defensive_filing` keep it so D-7's export route stays reachable while stale.
+    ///
+    /// Added here per the plan's Task-1 file list; gains its first production caller in a later task.
+    #[allow(dead_code)]
+    fn stale_or_residue_latch_status(&self) -> Option<String> {
+        self.residue_latch_status().or_else(|| self.stale_reason())
+    }
+
     /// The SINGLE site that maps a `PersistError` to its editor effect [R0-I1]. Every rollback-flow
     /// Enter arm delegates here (after closing its own modal). `NoChange`/`RolledBack` → benign
     /// keep-open status (nothing persisted; safe to retry). `ResidueLive` → arm the `rollback_failed`
@@ -21372,6 +21398,55 @@ mod tests {
                 .unwrap()
                 .contains("failed attest save"),
             "attest_save_failed must keep its verbatim wording (ERRLATCH regression guard)"
+        );
+    }
+
+    /// Precedence: attest > rollback > stale. The three latches carry OPPOSITE remedies —
+    /// `attest_save_failed` means the write did NOT land (retry via CLI), `stale_after_write` means it
+    /// DID (do not retry) — so emitting the wrong one has a filing consequence.
+    ///
+    /// Mutation: reorder the `stale_after_write` branch above `rollback_failed` → reds on case 3.
+    #[test]
+    fn stale_or_residue_latch_status_precedence_is_attest_then_rollback_then_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-stale-latch-pass";
+        seed_transfer_in_vault(&vault, &key, pp_str);
+        let mut app = open_app(&vault, pp_str);
+
+        assert_eq!(
+            app.stale_or_residue_latch_status(),
+            None,
+            "clean app must not refuse"
+        );
+
+        app.stale_after_write = Some("boom".to_string());
+        let s = app
+            .stale_or_residue_latch_status()
+            .expect("stale must refuse");
+        assert!(
+            s.contains("could not be verified"),
+            "stale copy must not claim an effect: {s}"
+        );
+        assert!(
+            app.residue_latch_status().is_none(),
+            "the ORIGINAL fn must ignore the stale latch"
+        );
+
+        app.rollback_failed = true;
+        let s = app
+            .stale_or_residue_latch_status()
+            .expect("rollback must refuse");
+        assert!(s.starts_with("CRITICAL"), "rollback outranks stale: {s}");
+
+        app.attest_save_failed = true;
+        let s = app
+            .stale_or_residue_latch_status()
+            .expect("attest must refuse");
+        assert!(
+            s.contains("btctax reconcile safe-harbor-attest"),
+            "attest outranks all: {s}"
         );
     }
 
