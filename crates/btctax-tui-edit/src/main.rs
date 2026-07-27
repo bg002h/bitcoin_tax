@@ -29565,62 +29565,42 @@ mod tests {
     // The 24 plain sites were proven byte-identical on the `Ok` path by literal diff (mechanical
     // routing). The 3 prefix sites are NOT mechanical — each carries a hand-written `Some(prefix)`
     // literal that nothing exercised end to end. These KATs force a GENUINE `build_snapshot` failure
-    // (not an injected `Err` into `apply_reprojection`, which only proves the shared primitive) by
-    // pointing `BTCTAX_PRICE_CACHE` at a file that EXISTS but is malformed —
-    // `LayeredPrices::load_with_cache` treats a present-but-malformed cache as a LOUD error
-    // (`crates/btctax-adapters/src/price.rs`), which `build_snapshot`'s `?` propagates. Safe under
-    // nextest's process-per-test model (same technique already used for the J8 walkthrough golden's
-    // determinism pin, `j8_editor_frames`).
+    // (not an injected `Err` into `apply_reprojection`, which only proves the shared primitive).
+    //
+    // ★ An earlier draft forced the failure by pointing `BTCTAX_PRICE_CACHE` at a malformed file.
+    // That is PROCESS-GLOBAL state: `cargo nextest` gives each test its own OS process (safe), but
+    // CI's cross-platform `test` job runs plain `cargo test --workspace` (`.github/workflows/ci.yml`
+    // — the `test` job, NOT `msrv`, which only `cargo check`s), whose default harness runs `#[test]`
+    // fns as THREADS within ONE process — confirmed empirically: `cargo test -p btctax-tui-edit`
+    // intermittently failed UNRELATED sibling tests (different tests each run) because they observed
+    // the corrupted cache from a different thread while genuinely unrelated to these KATs. A
+    // per-KAT mutex only serializes these 4 tests against EACH OTHER, not against the other ~455
+    // tests in this file that also call `build_snapshot` on other threads — there is no fix for a
+    // shared-process-global resource short of a lock EVERY such test participates in, so the
+    // technique itself had to change.
+    //
+    // Replaced with a SESSION-LOCAL corruption: `read_config` (`crates/btctax-cli/src/config.rs`)
+    // returns `CliError::BadConfigValue` for any `cli_config` row it cannot parse. Inserting one
+    // directly via `session.conn()` (an established pattern already used by this file's own
+    // `seed_committed_return_and_profile`) touches only THIS test's own vault — no process-global
+    // state at all, safe under both nextest and `cargo test`'s threaded harness. Verified: 20+
+    // consecutive `cargo test -p btctax-tui-edit --bin btctax-tui-edit` runs, all green.
 
-    /// Serializes the 4 KATs below against EACH OTHER on the process-global `BTCTAX_PRICE_CACHE` env
-    /// var. `cargo nextest` gives each test its own OS process (safe), but plain `cargo test`'s
-    /// default harness runs `#[test]` fns as THREADS within ONE process — confirmed empirically:
-    /// without this lock, `cargo test -p btctax-tui-edit -- --test-threads=8 genuine_reprojection`
-    /// intermittently fails a SIBLING KAT's own vault unlock (which also loads prices) because it
-    /// observes another thread's corrupted cache mid-test. CI's MSRV job runs plain `cargo test
-    /// --workspace`, so this is a real gate, not a theoretical one.
-    ///
-    /// Does NOT protect against OTHER pre-existing tests in this file that mutate the same env var
-    /// outside this lock (`j8_editor_frames` and neighbors, `crates/btctax-tui/src/tabs/tests.rs`) —
-    /// that is a pre-existing risk class predating this task, out of this round's scope.
-    static PRICE_CACHE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    /// RAII guard combining [`PRICE_CACHE_ENV_LOCK`] with a restore-on-drop of whatever
-    /// `BTCTAX_PRICE_CACHE` held before the guard was created — so a KAT holding it can never forget
-    /// either half (mutual exclusion, and no leak to a later, non-participating test in the same
-    /// process). Acquire it BEFORE any vault/app setup, not just around `corrupt_price_cache`'s own
-    /// call: `unlocked_app_on_empty_vault`/`open_app` themselves call `build_snapshot` during unlock.
-    struct PriceCacheEnvGuard {
-        _lock: std::sync::MutexGuard<'static, ()>,
-        prior: Option<std::ffi::OsString>,
-    }
-    impl PriceCacheEnvGuard {
-        fn acquire() -> Self {
-            let lock = PRICE_CACHE_ENV_LOCK
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            let prior = std::env::var_os("BTCTAX_PRICE_CACHE");
-            PriceCacheEnvGuard { _lock: lock, prior }
-        }
-    }
-    impl Drop for PriceCacheEnvGuard {
-        fn drop(&mut self) {
-            match self.prior.take() {
-                Some(v) => std::env::set_var("BTCTAX_PRICE_CACHE", v),
-                None => std::env::remove_var("BTCTAX_PRICE_CACHE"),
-            }
-        }
-    }
-
-    /// Point `BTCTAX_PRICE_CACHE` at a file that EXISTS with a line `from_csv_str` cannot parse (no
-    /// comma), so the NEXT `build_snapshot` call fails with `AdapterError::PriceDataset` → `CliError`.
-    /// Call this AFTER any setup that itself needs a working (or absent) cache, so only the write
-    /// tail under test sees the failure. The caller MUST already hold a [`PriceCacheEnvGuard`] (this
-    /// fn does not acquire one itself — the guard has to cover the app-setup calls that precede it).
-    fn corrupt_price_cache(dir: &std::path::Path) {
-        let cache_path = dir.join("corrupt-price-cache.csv");
-        std::fs::write(&cache_path, b"not a csv line at all\n").unwrap();
-        std::env::set_var("BTCTAX_PRICE_CACHE", &cache_path);
+    /// Force the NEXT `build_snapshot` call on `app`'s held session to fail — entirely local to this
+    /// test's own vault (see the module comment above for why this replaced an env-var technique).
+    /// `pseudo_reconcile` is the corrupted key because none of the three write paths under test
+    /// (full-return commit/park, safe-harbor attest) read it themselves, so the WRITE still succeeds
+    /// and only the subsequent `build_snapshot`'s own `session.config()` call fails.
+    fn corrupt_cli_config(app: &mut EditorApp) {
+        app.session
+            .as_ref()
+            .unwrap()
+            .conn()
+            .execute(
+                "INSERT INTO cli_config(key, value) VALUES ('pseudo_reconcile', 'not-a-bool')",
+                [],
+            )
+            .unwrap();
     }
 
     /// The commit-tail prefix (`:1590`), proven against a REAL re-projection failure. Mutation-kills
@@ -29628,10 +29608,9 @@ mod tests {
     /// moves where `"the write reached disk"` starts, which the exact-position assertion pins.
     #[test]
     fn commit_tax_inputs_prefix_survives_a_genuine_reprojection_failure() {
-        let _env_guard = PriceCacheEnvGuard::acquire();
-        let (mut app, dir) = vault_with_return_inputs_draft();
+        let (mut app, _dir) = vault_with_return_inputs_draft();
         handle_key(&mut app, press(KeyCode::Char('s'))); // open the commit modal
-        corrupt_price_cache(dir.path());
+        corrupt_cli_config(&mut app);
         commit_tax_inputs(&mut app);
 
         let s = app.status.clone().unwrap_or_default();
@@ -29653,14 +29632,13 @@ mod tests {
     #[test]
     fn confirm_park_to_profile_prefix_survives_a_genuine_reprojection_failure() {
         use btctax_core::tax::types::FilingStatus;
-        let _env_guard = PriceCacheEnvGuard::acquire();
-        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
         seed_committed_return_and_profile(&mut app, 2024, FilingStatus::Single);
 
         handle_key(&mut app, press(KeyCode::Char('T'))); // open on the committed full return
         handle_key(&mut app, press(KeyCode::Char('t'))); // park confirm (dirty is false — the gate)
         assert!(app.tax_inputs_form.as_ref().unwrap().modal.is_some());
-        corrupt_price_cache(dir.path());
+        corrupt_cli_config(&mut app);
         handle_key(&mut app, press(KeyCode::Enter)); // run the park
 
         let s = app.status.clone().unwrap_or_default();
@@ -29683,12 +29661,11 @@ mod tests {
     /// re-projection fails); nothing previously pinned that the reworded prefix is what actually ships.
     #[test]
     fn safe_harbor_attest_prefix_survives_a_genuine_reprojection_failure() {
-        let _env_guard = PriceCacheEnvGuard::acquire();
-        let (mut app, dir) = vault_with_safe_harbor_allocation();
+        let (mut app, _dir) = vault_with_safe_harbor_allocation();
         handle_key(&mut app, press(KeyCode::Char('a')));
         handle_key(&mut app, press(KeyCode::Enter));
         type_str(&mut app, "ATTEST");
-        corrupt_price_cache(dir.path());
+        corrupt_cli_config(&mut app);
         handle_key(&mut app, press(KeyCode::Enter));
 
         let s = app.status.clone().unwrap_or_default();
@@ -29722,8 +29699,7 @@ mod tests {
     #[test]
     fn confirm_park_to_profile_after_write_runs_after_dirty_is_cleared() {
         use btctax_core::tax::types::FilingStatus;
-        let _env_guard = PriceCacheEnvGuard::acquire();
-        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
         seed_committed_return_and_profile(&mut app, 2024, FilingStatus::Single);
 
         handle_key(&mut app, press(KeyCode::Char('T')));
@@ -29731,7 +29707,7 @@ mod tests {
         assert!(app.tax_inputs_form.as_ref().unwrap().modal.is_some());
         // Bypass the front-door gate: force `dirty = true` back onto the already-open confirm modal.
         app.tax_inputs_form.as_mut().unwrap().dirty = true;
-        corrupt_price_cache(dir.path());
+        corrupt_cli_config(&mut app);
         handle_key(&mut app, press(KeyCode::Enter)); // run the park
 
         let s = app.status.clone().unwrap_or_default();
