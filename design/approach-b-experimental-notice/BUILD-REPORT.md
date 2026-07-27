@@ -174,5 +174,46 @@ after restore.
 ## Concerns (current, after fix round 1)
 
 None blocking. `make check` and `cargo fmt --all -- --check` are green at
-`HEAD`. The coordinator's instruction also said "then merge and a crates.io
-release" — see the final status message for how that was handled.
+`HEAD`.
+
+## Merge + release
+
+Per the user's durable pre-authorization (`design/defensive-filing-wizard/CONTINUITY.md`,
+2026-07-26: "You may push, merge, tag & release and do crates when
+ready."), and the coordinator's "then merge and a crates.io release":
+
+1. Merged `feat/approach-b-experimental-notice` into `main` (`89561c5`,
+   `--no-ff`). `make check` (2529/2529) + `cargo fmt --all -- --check`
+   green post-merge.
+2. Bumped all 12 workspace crates 0.10.0 → 0.11.0 (minor: additive
+   feature, pre-1.0) in lockstep — each crate's own `version` field AND
+   every inter-crate `version =` requirement — `4455ba1`. Regenerated
+   `docs/man/btctax-update-prices.1` + `docs/examples/examples.md` (their
+   drift gates would otherwise catch the stale version string).
+3. Verified the full pre-authorized gate before publishing: `make check`,
+   `cargo fmt --all -- --check`, `cargo check/clippy --workspace --locked`,
+   `cargo run -p xtask -- check-isolation` (net-isolation), `bash
+   scripts/pii-scan-generic.sh` (pii-scan, clean), `cargo test -p
+   btctax-forms --test census --locked` (forms census), `make docs`, and
+   `make bundles` — all green. (MSRV against the pinned 1.88 toolchain was
+   NOT re-verified locally — only a newer toolchain was available — left
+   to CI, which runs on push.)
+4. Pushed `main` + tag `v0.11.0` to `origin` (`git@github.com:bg002h/bitcoin_tax.git`).
+5. Created the GitHub release
+   (https://github.com/bg002h/bitcoin_tax/releases/tag/v0.11.0).
+6. `cargo publish --workspace --dry-run` clean, then `cargo publish
+   --workspace` for real — all 10 publishable crates (`btctax`,
+   `btctax-core`, `btctax-store`, `btctax-adapters`, `btctax-forms`,
+   `btctax-input-form`, `btctax-cli`, `btctax-update-prices`,
+   `btctax-tui`, `btctax-tui-edit`) uploaded and confirmed available in
+   ONE run — no tail failure this time (contrast the v0.7.0/v0.9.0
+   "internal-errors after 9/10" precedent this branch's CONTINUITY.md
+   warned about). Verified live via the crates.io API (a bare `curl`
+   without a descriptive User-Agent gets a 403 from crates.io's API
+   policy; `-A "btctax-release-check (goss.brian@gmail.com)"` works) —
+   spot-checked `btctax-core`, `btctax`, `btctax-cli`, `btctax-tui-edit`
+   all report `newest_version: 0.11.0`.
+
+**★ Per the CONTINUITY.md note: the crates.io token in
+`~/.cargo/credentials.toml` was used for this publish and should be
+REVOKED now that it is done its job.**
