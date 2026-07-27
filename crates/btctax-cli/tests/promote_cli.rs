@@ -819,6 +819,101 @@ fn a_clean_promoted_export_writes_the_8275_by_name_no_watermark() {
     );
 }
 
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// T-f8275-part-ii-overflow round 2 finding 2 — the export-time Part II CAPACITY gate: an overflowing
+// narrative must refuse BEFORE any packet file (`basis_methodology.txt`, `form_8275.txt`, …) is
+// written, mirroring the BG-D8 completeness gate just above. Record time does NOT reject an overflowing
+// narrative (a follow-up, `design/f8275-part-ii-overflow/FOLLOWUPS.md` — the vault is append-only, so a
+// record-time bound cannot be relaxed later), so the REAL `promote-tranche` verb happily records one.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// A promoted 2024 disposal (same shape as [`vault_with_promoted_disposal_via_cli`]) whose Part II
+/// narrative needs far more single-line fields than Form 8275 has (900 repeats of `"word "` — the SAME
+/// adversarial fixture `btctax-forms`'s `sp4.rs` uses, needing 37 lines against the 28 available).
+fn vault_with_promoted_disposal_and_overflowing_part_ii(dir: &Path) -> PathBuf {
+    let vault = dir.join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.join("k.asc")).unwrap();
+    let tranche_id = cmd::tranche::declare_tranche(
+        &vault,
+        &pp(),
+        40_000_000,
+        wallet(),
+        date!(2024 - 01 - 01),
+        date!(2024 - 03 - 31),
+        now(),
+    )
+    .unwrap();
+    // Record time does not bound the narrative's length (follow-up) — the real verb records it as-is.
+    cmd::promote::promote_tranche(
+        &vault,
+        &pp(),
+        &tranche_id.canonical(),
+        ProvenanceKind::Purchase,
+        "word ".repeat(900),
+        Some(PROMOTE_ACK_PHRASE),
+        now(),
+    )
+    .unwrap();
+    let mut s = Session::open(&vault, &pp()).unwrap();
+    append_import_batch(s.conn(), &[t14_sell()]).unwrap();
+    s.save().unwrap();
+    vault
+}
+
+/// ★ round 2 finding 2: an overflowing Part II narrative is REFUSED before `mkdir_out` — the crypto-slice
+/// export path (`export_irs_pdf`). Before this fix, the overflow was only discovered mid-write inside
+/// `fill_form_8275_slice`, well after `basis_methodology.txt` / `form_8275.txt` (and possibly
+/// `f8949.pdf`) were already on disk — an estimated-basis 8949 filed with no 8275 PDF behind it.
+#[test]
+fn export_irs_pdf_with_an_overflowing_part_ii_narrative_refuses_before_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = vault_with_promoted_disposal_and_overflowing_part_ii(dir.path());
+    let out = dir.path().join("export_out"); // deliberately NOT pre-created
+
+    let err = cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None).unwrap_err();
+    assert!(
+        matches!(err, CliError::Usage(ref m)
+            if m.contains(&T14_YEAR.to_string())
+            && m.contains("Part II")
+            && m.contains("--part-ii-file")),
+        "must name the year, 'Part II', and the --part-ii-file remedy: {err}"
+    );
+    assert!(
+        std::fs::read_dir(&out)
+            .map(|mut d| d.next().is_none())
+            .unwrap_or(true),
+        "a refused export leaves out_dir untouched (zero bytes written) — NOT a half-populated packet"
+    );
+}
+
+/// ★ round 2 finding 2 ("do it uniformly"): the SAME refusal, on the full-return export path (reached
+/// via `plant_full_return_ri`, the SAME dispatch-forcing helper `export_full_return_refuses_before_bytes_
+/// on_incomplete_8275` below uses). This path was already byte-safe without the pre-flight
+/// (`fill_full_return` is all-or-nothing, called before `mkdir_out`) — this pins that the nicer,
+/// year/remedy-naming message applies here too, not just the generic `FormsError::Overflow` Display.
+#[test]
+fn export_full_return_with_an_overflowing_part_ii_narrative_refuses_with_a_named_remedy() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = vault_with_promoted_disposal_and_overflowing_part_ii(dir.path());
+    plant_full_return_ri(&vault, T14_YEAR);
+    let out = dir.path().join("export_out");
+
+    let err = cmd::admin::export_irs_pdf(&vault, &pp(), &out, T14_YEAR, &[], None).unwrap_err();
+    assert!(
+        matches!(err, CliError::Usage(ref m)
+            if m.contains(&T14_YEAR.to_string())
+            && m.contains("Part II")
+            && m.contains("--part-ii-file")),
+        "the full-return path must give the SAME named-remedy refusal: {err}"
+    );
+    assert!(
+        std::fs::read_dir(&out)
+            .map(|mut d| d.next().is_none())
+            .unwrap_or(true),
+        "a refused full-return export leaves out_dir untouched"
+    );
+}
+
 /// ★ Whole-branch tax M-1: the Form 8275 is the MANDATORY disclosure — it must travel WITH the promoted
 /// 8949 position, so it rides UNCONDITIONALLY even when `--forms f8949` narrows the slice to exclude it.
 /// Otherwise the estimate position would export without its official disclosure PDF (Reg §1.6662-4(f)
