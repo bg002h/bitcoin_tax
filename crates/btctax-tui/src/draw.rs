@@ -157,11 +157,14 @@ fn draw_viewer(frame: &mut Frame, app: &mut App) {
     frame.render_widget(tabs_widget, chunks[0]);
 
     // ── Experimental notice banner (informational — never reversed/blocking like PSEUDO-RECONCILE) ──
+    // ★ fix round 1 Important: MUST call `NOTICE.one_line()` — a hand-typed paraphrase here (as this
+    // used to be) is byte-independent of `btctax-tui-edit`'s own banner, so the two could reword
+    // differently and drift silently apart from each other AND from `NOTICE` itself, with nothing red
+    // (the exact defect class already fixed once at `draw_edit.rs:7673`'s `STALE_FACT_1` precedent).
     if let Some(idx) = experimental_idx {
         let banner = Paragraph::new(format!(
-            " ⚠ {} — newer, AI-assisted, had shipped filing-affecting defects (now fixed). Verify \
-             every figure and every disclosure before you file. ",
-            btctax_core::experimental::NOTICE.title
+            " ⚠ {} ",
+            btctax_core::experimental::NOTICE.one_line()
         ))
         .alignment(Alignment::Center)
         .style(

@@ -130,7 +130,13 @@ fn render_income(app: &mut App) -> ratatui::buffer::Buffer {
 
 /// Render the full viewer frame (tab bar + content + footer) using the top-level draw entry.
 fn render_viewer(app: &mut App) -> ratatui::buffer::Buffer {
-    let backend = TestBackend::new(120, 40);
+    render_viewer_sized(app, 120, 40)
+}
+
+/// Same as [`render_viewer`], with an injectable terminal size — the experimental-banner drift test
+/// needs a WIDE backend so `NOTICE.one_line()`'s full text is not clipped by the default 120 columns.
+fn render_viewer_sized(app: &mut App, cols: u16, rows: u16) -> ratatui::buffer::Buffer {
+    let backend = TestBackend::new(cols, rows);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|f| {
@@ -2545,5 +2551,41 @@ fn viewer_experimental_banner_absent_for_a_voided_only_tranche() {
     assert!(
         buffer_row_index_containing(&buf, "EXPERIMENTAL — DEFENSIVE FILING").is_none(),
         "a voided-only tranche must not trigger the banner"
+    );
+}
+
+/// ★ fix round 1 Important #2 — the banner must be DERIVED from `NOTICE` (via `one_line()`), not a
+/// hand-typed paraphrase: renders at a WIDE backend (so the whole line survives without clipping) and
+/// asserts the row carries the CURRENT verbatim wording of both `NOTICE.summary` and `NOTICE.action`.
+/// Mutation: reword `NOTICE.summary` (or hand-revert `draw_viewer`'s banner to a paraphrase instead of
+/// calling `one_line()`) → this reds, because the rendered row would no longer contain the pinned
+/// literal (verified, reverted via `cp`; see `design/approach-b-experimental-notice/BUILD-REPORT.md`).
+#[test]
+fn viewer_experimental_banner_is_derived_from_notice_not_hand_copied() {
+    let mut snap = make_snapshot(LedgerState::default());
+    snap.events = vec![declare_tranche_event()];
+    let mut app = App::new(PathBuf::new());
+    app.screen = Screen::Viewer;
+    app.snapshot = Some(snap);
+
+    // Wide enough that `NOTICE.one_line()`'s full text (title + summary + action, ~730 chars including
+    // the banner's own decoration) fits on one row without the terminal clipping it.
+    let buf = render_viewer_sized(&mut app, 800, 40);
+    let row = buffer_row_containing(&buf, "EXPERIMENTAL — DEFENSIVE FILING")
+        .expect("the banner must render for a live-tranche snapshot");
+    assert!(
+        row.contains(
+            "Defects that affect what gets FILED have shipped and were found only by later \
+             review"
+        ),
+        "the banner must carry NOTICE.summary's CURRENT wording verbatim (via one_line()), not a \
+         hand-typed paraphrase: {row}"
+    );
+    assert!(
+        row.contains(
+            "confirm the basis in Form 8949 column (e) for each promoted lot equals the \
+             floor you consented to at promote time"
+        ),
+        "the banner must carry NOTICE.action's CURRENT wording verbatim (via one_line()): {row}"
     );
 }
