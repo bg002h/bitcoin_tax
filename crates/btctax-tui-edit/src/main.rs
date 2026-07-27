@@ -14715,6 +14715,37 @@ mod tests {
             "★ KAT (c): the 2025 packet (the promoted DISPOSAL leg's own year) must include \
              form_8275.pdf: {out_dir:?}"
         );
+        // ★ THE GUARD (`design/approach-b-experimental-notice`): this vault has a LIVE promote (loudly
+        // Approach-B), yet neither year's packet may carry the experimental notice ANYWHERE — the notice
+        // is interface-only (CLI stderr, TUI banners, NOTICE); the export directory is what a filer
+        // mails or hands to a preparer, and must stay clean.
+        for year_dir in [out_dir.join("2024"), out_dir.join("2025")] {
+            let entries: Vec<_> = std::fs::read_dir(&year_dir).unwrap().collect();
+            assert!(
+                !entries.is_empty(),
+                "precondition: {year_dir:?} has written files"
+            );
+            for entry in entries {
+                let path = entry.unwrap().path();
+                assert_ne!(
+                    path.file_name().and_then(|n| n.to_str()),
+                    Some("EXPERIMENTAL.txt"),
+                    "no EXPERIMENTAL.txt sibling file — the notice is never exported"
+                );
+                let bytes = std::fs::read(&path).unwrap();
+                let text = String::from_utf8_lossy(&bytes);
+                // Shared with btctax-cli's and btctax-tui's own leak-guard tests via
+                // `btctax_core::experimental::testonly::leak_guard_needles()` — three independent
+                // hand-typed needle lists existed before that helper, and two were missing a phrase the
+                // third had.
+                for needle in btctax_core::experimental::testonly::leak_guard_needles() {
+                    assert!(
+                        !text.contains(needle),
+                        "{path:?} must never carry the experimental notice ({needle:?})"
+                    );
+                }
+            }
+        }
     }
 
     /// ★ whole-branch arch M-1: `x` NEVER silently does nothing. The DefensiveFiling key handler runs

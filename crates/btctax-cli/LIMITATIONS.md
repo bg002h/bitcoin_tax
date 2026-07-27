@@ -294,6 +294,23 @@ none of it is a substitute for a qualified professional. This software does not 
 not know your circumstances. It does arithmetic on what you tell it. If your situation is not simple, or if
 you are unsure, consult a professional.
 
+### Experimental — Defensive Filing
+
+The "Defensive Filing" feature (declare/promote a tranche of undocumented BTC, the Form 8275 disclosure,
+the estimated-basis floor) is newer and less proven than the rest of `btctax`, and it was developed with
+heavy AI assistance.
+
+Defects that affect what gets **filed** have shipped and were found only by later adversarial review; all
+known ones are fixed. Their existence is the point of saying so here: check what this feature actually
+produced — that the Form 8275 Part II narrative renders whole (not stopping mid-sentence), that the basis
+in Form 8949 column (e) for each promoted lot equals the floor you consented to at promote time, and that
+the tranche quantity and window on the 8275 match what you declared — before you file.
+
+`btctax` surfaces this notice at the point of use (the command line, the interactive terminal views) but
+deliberately never writes it into anything this feature exports: the export directory is what you mail or
+hand to a preparer, and a copy of this notice riding along with it would be the same hazard as printing it
+on a filed form.
+
 ### Licence
 
 Licensed permissively (**MIT OR Unlicense**) — unchanged and unrestricted. The clauses above are a NOTICE

@@ -67,3 +67,31 @@ professional. This software does not interpret your facts. It does not know your
 circumstances. It does arithmetic on what you tell it.
 
 If your situation is not simple, or if you are unsure, consult a professional.
+
+
+EXPERIMENTAL — DEFENSIVE FILING
+--------------------------------
+
+The "Defensive Filing" feature (declare/promote a tranche of undocumented BTC,
+the Form 8275 disclosure, the estimated-basis floor) is newer and less proven
+than the rest of btctax, and it was developed with heavy AI assistance.
+
+Two defects that affect what gets **filed** shipped and were found only by
+later adversarial review: the Form 8275 Part II disclosure was silently
+truncated to its first ~137 characters, and an editor guarantee ("no
+in-editor action will save until you quit") could be bypassed two ways. Both
+are fixed. Their existence is the point of saying so here: it is evidence
+that this feature can be wrong in ways that are not obvious from using it —
+check every figure and every disclosure it produces against your own records
+before you file.
+
+This is a disclosure, not a restriction: as with the rest of this software,
+nothing above limits the licence grant in `LICENSE` (MIT OR Unlicense), and
+nothing above forbids using this feature. It only tells you what the authors
+know about how proven it is, so the "YOU ARE THE PREPARER" section above
+means something concrete for this specific feature. The application also
+surfaces this notice at the point of use — on the command line (stderr) and
+in the interactive terminal views — but deliberately **never** writes it into
+anything this feature exports: the export directory is what you mail or hand
+to a preparer, and a copy of this notice riding along with it would be the
+same hazard as printing it on a filed form.

@@ -680,6 +680,15 @@ stderr:
 ```console
 
 ⚠ NOT AUTHORISED FOR FILING. btctax is a mechanical calculator. No right is granted and no authorisation is given to use it, or anything it produces, to prepare or file a tax return, and NO WARRANTY is given that any figure or form it produces is accurate, complete, or fit to file. If you file any of this, you do so entirely on your own responsibility: YOU are the preparer, you must check every figure against the forms and instructions before you sign, and the authors accept no liability for the consequences. This is not tax advice. See `btctax limitations`.
+
+⚠ EXPERIMENTAL — DEFENSIVE FILING (declare/promote tranche, Form 8275, estimated basis)
+
+This feature is newer and less proven than the rest of btctax, and it was developed with heavy AI assistance. Defects that affect what gets FILED have shipped and were found only by later review; all known ones are fixed.
+  - the Form 8275 disclosure was silently truncated to its first ~137 characters
+  - a change the editor said had been rolled back could still be written to your vault, silently changing the figures on your forms
+  - a filed basis figure could be derived from a stale in-editor ledger image after a failed re-projection
+
+Check what this feature actually produced: open the Form 8275 PDF and confirm the Part II narrative renders whole, continuing onto Part IV on page 2, rather than stopping mid-sentence after about one line; confirm the basis in Form 8949 column (e) for each promoted lot equals the floor you consented to at promote time; and confirm the tranche quantity and acquisition window on the 8275 match what you declared.
 ⚠ a Section B Form 8283 is NOT filing-ready without a signed Part IV (appraiser) and Part V (donee acknowledgement) — obtain both before filing.
 ```
 

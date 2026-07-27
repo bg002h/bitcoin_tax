@@ -13,6 +13,12 @@
 //! occurs anywhere in `btctax-tui` source — the mechanized gate (KAT-E10) enforces this on every
 //! `cargo test`.
 //!
+//! ★ The Approach-B experimental notice (`design/approach-b-experimental-notice`,
+//! `btctax_core::experimental`) is deliberately NEVER written here: the export directory is what a
+//! filer mails or hands to a preparer, and a file in it saying the feature is AI-developed and has
+//! shipped defects is the same hazard as printing it on a filed form. The notice surfaces only on
+//! interface surfaces — the `draw_viewer` banner row (`draw.rs`) and, on the CLI, stderr.
+//!
 //! # BG-D8 completeness gate (Approach-B Task 17)
 //! Before any bytes are written, `do_export` calls `btctax_cli::promote_export_gate` (the SAME
 //! refuse-before-bytes gate the CLI export paths run): a promoted-basis disposal leg filed without a
@@ -949,6 +955,60 @@ mod tests {
             out_dir.join("form8949.csv").exists(),
             "the form CSVs are written alongside form_8275.txt"
         );
+    }
+
+    /// ★ THE GUARD (`design/approach-b-experimental-notice`): the Approach-B experimental notice is an
+    /// INTERFACE-only disclosure — a promoted-tranche TUI export (Approach-B loudly in use, per the
+    /// Browse banner) must write NO file, anywhere in `out_dir`, that carries the notice's distinctive
+    /// text. The export directory is what a filer mails or hands to a preparer; this guard is the one
+    /// that matters most — the failure mode is not a missing banner, it is the banner leaking into a
+    /// filing package.
+    #[test]
+    fn experimental_notice_never_appears_anywhere_in_the_tui_export_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let export_now = datetime!(2026-07-01 11:00:00 UTC);
+        let out_dir = export_dir_for(&vault, export_now);
+
+        let snap = promoted_snapshot("cash P2P purchase, no records; window bounded on-chain");
+        assert!(
+            btctax_core::experimental::uses_approach_b(&snap.events),
+            "precondition: this snapshot IS Approach-B (a live promoted tranche)"
+        );
+        let modal = ExportConfirmState {
+            year: 2026,
+            out_dir: out_dir.clone(),
+            files: compute_files(&snap, 2026),
+            export_now,
+            attest: None,
+        };
+        do_export(&snap, &modal).expect("a clean promoted export must succeed");
+
+        let entries: Vec<_> = std::fs::read_dir(&out_dir).unwrap().collect();
+        assert!(
+            !entries.is_empty(),
+            "precondition: the export actually wrote files: {out_dir:?}"
+        );
+        for entry in entries {
+            let path = entry.unwrap().path();
+            let bytes = std::fs::read(&path).unwrap();
+            let text = String::from_utf8_lossy(&bytes);
+            // Shared with btctax-cli's and btctax-tui-edit's own leak-guard tests via
+            // `btctax_core::experimental::testonly::leak_guard_needles()` — three independent
+            // hand-typed needle lists existed before that helper, and two were missing a phrase the
+            // third had.
+            for needle in btctax_core::experimental::testonly::leak_guard_needles() {
+                assert!(
+                    !text.contains(needle),
+                    "{path:?} must never carry the experimental notice ({needle:?})"
+                );
+            }
+            assert_ne!(
+                path.file_name().and_then(|n| n.to_str()),
+                Some("EXPERIMENTAL.txt"),
+                "no EXPERIMENTAL.txt sibling file — the notice is interface-only, never exported"
+            );
+        }
     }
 
     // ── KAT-E10 — Mechanized source gate ─────────────────────────────────────

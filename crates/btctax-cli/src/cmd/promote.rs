@@ -228,7 +228,22 @@ pub fn promote_tranche(
 
     println!("{}", crate::chokepoint::render_consent(&plan));
 
-    crate::chokepoint::apply_promote(&mut session, plan, acknowledge, now)
+    let event_id = crate::chokepoint::apply_promote(&mut session, plan, acknowledge, now)?;
+
+    // Approach-B experimental disclosure (`design/approach-b-experimental-notice`): promoting a tranche
+    // is exactly "acting on this feature" — warn on stderr (never stdout — stdout is parsed/piped),
+    // mirroring `cmd::tranche::declare_tranche`'s own placement (I/O, not gate logic, AFTER the write
+    // succeeds — a refused/missing-acknowledgment attempt, which returns via the `?` above, never emits
+    // this). UNCONDITIONAL, not re-derived from a re-read: `apply_promote` just returned `Ok`, so a live
+    // (non-voided) `PromoteTranche` now exists BY CONSTRUCTION — `uses_approach_b` is trivially true
+    // here. ★ fix round 1 Important: the original re-read used `load_all(session.conn())?`, so a
+    // transient I/O error on that PURELY DISCLOSURE-driving read turned an ALREADY-SUCCEEDED promote
+    // into a non-zero exit — the natural response (re-run) is refused anyway (a tranche promotes once),
+    // but it still misreports success as failure. Never re-derive a disclosure from a re-read when the
+    // write it depends on already told you the answer.
+    eprint!("\n⚠ {}", btctax_core::experimental::NOTICE.plain_text());
+
+    Ok(event_id)
 }
 
 #[cfg(test)]

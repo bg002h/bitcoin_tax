@@ -464,6 +464,16 @@ planned year still exported.
 > conservative number those answers imply, shows its work, and makes the aggressive choice impossible to make
 > by accident.
 
+### Experimental
+
+Defensive filing is newer and less proven than the rest of btctax, and it was developed with heavy AI
+assistance. Defects that affect what gets *filed* have shipped and were found only by later adversarial
+review; all known ones are fixed. Their existence is the point of saying so: check what this feature
+actually produced — that the Form 8275 Part II narrative renders whole, that the basis in Form 8949
+column (e) for each promoted lot equals the floor you consented to, and that the tranche quantity and
+window on the 8275 match what you declared — before you file. btctax surfaces this notice at the point of
+use (the command line, the terminal views) but never writes it into anything this feature exports.
+
 ## Getting help
 
 - **`btctax <command> --help`** — every command documents its arguments, including file formats with examples.
