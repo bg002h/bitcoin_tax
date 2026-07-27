@@ -137,7 +137,7 @@ fn draw_defensive_filing(frame: &mut Frame, app: &EditorApp) {
             .map(Line::from)
             .collect()
     } else if let Some(dash) = app.defensive_dashboard.as_ref() {
-        crate::defensive_dashboard::render_dashboard(&dash.view, dash.cursor)
+        crate::defensive_dashboard::render_dashboard(&dash.view, dash.cursor, dash.uncomputable)
             .into_iter()
             .map(Line::from)
             .collect()

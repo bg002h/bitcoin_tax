@@ -4725,16 +4725,13 @@ fn refresh_defensive_dashboard(app: &mut EditorApp) {
     };
     let cfg = snap.cli_config.to_projection();
     let current = app.clock.now().year();
-    let view = crate::defensive_dashboard::safe_journey_view(
+    app.defensive_dashboard = Some(crate::defensive_dashboard::safe_journey_view(
         &snap.events,
         &snap.state,
         &snap.prices,
         &snap.tables,
         &cfg,
         current,
-    );
-    app.defensive_dashboard = Some(crate::defensive_dashboard::DefensiveDashboardState::new(
-        view,
     ));
 }
 
@@ -14998,6 +14995,66 @@ mod tests {
             s.to_lowercase().contains("pseudo") && s.to_lowercase().contains("refused"),
             "plan_export's OWN DFW-D11 refusal must fire gracefully on the genuinely pseudo-active \
              fresh image: {s:?}"
+        );
+    }
+
+    /// D-7 (fix round 1, I-2): `execute_defensive_export`'s OWN re-projection failure must refuse
+    /// WITHOUT touching `stale_after_write` AT ALL — "Err ⇒ refuse, latch unchanged". The doc at
+    /// `refresh_defensive_dashboard` already anticipates a future refactor that folds this inline
+    /// rebuild into `apply_reprojection` (filed as arch-M-1); if that ever happens,
+    /// `apply_reprojection`'s `Err` arm would ARM the latch and run
+    /// `close_all_mutation_surfaces(true)`, asserting "the write reached disk…" about a keypress that
+    /// wrote nothing — and every existing KAT would stay green, since the Task 6 `w`-then-`x` KAT only
+    /// exercises the SUCCESS path. Drives `x` against a corrupted `cli_config` (the same
+    /// genuine-reprojection-failure technique as `commit_tax_inputs_prefix_survives_a_genuine_
+    /// reprojection_failure` et al) from BOTH an unarmed and an already-armed starting state.
+    ///
+    /// Mutation: route `execute_defensive_export`'s re-projection through `apply_reprojection` (or
+    /// otherwise arm/clear the latch on this `Err` arm) → either case below reds.
+    #[test]
+    fn x_reprojection_failure_refuses_without_touching_the_latch() {
+        // Case 1: unarmed going in — must STAY unarmed (not get spuriously armed by a keypress that
+        // wrote nothing).
+        let (mut app, _dir) = vault_with_promoted_2025_leg_and_2024_reorder();
+        app.open_defensive_filing();
+        assert_eq!(app.screen, EditorScreen::DefensiveFiling);
+        assert!(app.stale_after_write.is_none(), "fixture: starts unarmed");
+        corrupt_cli_config(&mut app);
+        execute_defensive_export(&mut app);
+        let s = app.status.clone().unwrap_or_default();
+        assert!(
+            s.contains("export refused") && s.contains("could not be re-projected"),
+            "must read as a refusal naming the re-projection failure: {s:?}"
+        );
+        assert!(
+            app.stale_after_write.is_none(),
+            "D-7: Err must NOT arm the latch — the export wrote nothing: {s:?}"
+        );
+
+        // Case 2: already armed going in (from an unrelated earlier arm) — must stay armed, BYTE FOR
+        // BYTE unchanged, not re-armed with a different (misleading) reason naming a write that never
+        // happened.
+        let (mut app2, _dir2) = vault_with_promoted_2025_leg_and_2024_reorder();
+        app2.stale_after_write = Some("an earlier unrelated arm".to_string());
+        app2.screen = EditorScreen::Browse;
+        app2.open_defensive_filing();
+        assert_eq!(
+            app2.screen,
+            EditorScreen::DefensiveFiling,
+            "D-7: w opens while armed"
+        );
+        corrupt_cli_config(&mut app2);
+        execute_defensive_export(&mut app2);
+        let s2 = app2.status.clone().unwrap_or_default();
+        assert!(
+            s2.contains("export refused") && s2.contains("could not be re-projected"),
+            "must read as a refusal naming the re-projection failure: {s2:?}"
+        );
+        assert_eq!(
+            app2.stale_after_write.as_deref(),
+            Some("an earlier unrelated arm"),
+            "D-7: an ALREADY-armed latch must be left BYTE-FOR-BYTE unchanged by a failed export \
+             re-projection: {s2:?}"
         );
     }
 

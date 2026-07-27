@@ -520,16 +520,13 @@ impl EditorApp {
 
         let cfg = snap.cli_config.to_projection();
         let current = self.clock.now().year();
-        let view = crate::defensive_dashboard::safe_journey_view(
+        self.defensive_dashboard = Some(crate::defensive_dashboard::safe_journey_view(
             &snap.events,
             &snap.state,
             &snap.prices,
             &snap.tables,
             &cfg,
             current,
-        );
-        self.defensive_dashboard = Some(crate::defensive_dashboard::DefensiveDashboardState::new(
-            view,
         ));
         self.screen = EditorScreen::DefensiveFiling;
     }
