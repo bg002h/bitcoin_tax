@@ -669,18 +669,27 @@ fn handle_form_key(app: &mut EditorApp, key: KeyEvent) {
 /// review finding): the write LANDED, but whether it had the intended effect is unverified, because
 /// re-projection failed. Extracted to a `const` so a future wording fix cannot land in one caller and
 /// not the other — before this, the sentence was spelled out twice as independent string literals.
-/// Each caller appends its own `({reason}). Quit and reopen the vault.` after this fragment; the
-/// fragment itself carries no trailing punctuation so both callers' tails compose cleanly.
+/// `stale_reason` appends only `({e}). Quit and reopen the vault.` directly after this fragment.
+/// `arm_stale`'s composed status is longer: `{prefix}` + this fragment + `({reason}). ` +
+/// **fact 2** (`FACT_2_SCREEN_CLOSED` or a dynamic loss sentence — fix round 2, see `arm_stale`) +
+/// `Quit and reopen the vault.` — fact 2 sits BETWEEN this fragment's `(reason).` and the closing
+/// "Quit and reopen" sentence, not after it. This fragment itself carries no trailing punctuation so
+/// every caller's own tail composes onto it cleanly.
 const STALE_FACT_1: &str = "the write reached disk, but whether it had the intended effect could not be \
      verified, because the ledger would not re-project";
 
-/// Fact 2 (DESIGN.md §2.5, fix round 1 Important 3): included in the arm status only when a pre-close
-/// survey (`any_mutation_surface_open`) shows a surface was actually live — COMPUTED, never assumed.
-/// Earlier design drafts assumed this fires at either 1 of 27 tails or 26 of 27; both were measured
-/// false. True at every site where it fires: `arm_stale` only ever runs after a persist that already
-/// returned `Ok`, so any surface still open at that point holds no more than what it just wrote to
-/// disk — there is nothing further to lose by closing it. See `any_mutation_surface_open`'s doc for
-/// why this is also what makes the park-tail carve-out fall out for free, with no special case here.
+/// Fact 2's NO-LOSS wording (DESIGN.md §2.5, fix round 1 Important 3): used when a pre-close survey
+/// (`any_mutation_surface_open`) shows a surface was live AND `close_all_mutation_surfaces`'s
+/// fail-safe flush either didn't need to run or SUCCEEDED — COMPUTED, never assumed. Earlier design
+/// drafts assumed this fires at either 1 of 27 tails or 26 of 27; both were measured false.
+///
+/// **Fix round 2 (Important 1):** this is only ONE of fact 2's two possible outputs. If the flush
+/// itself FAILED (a real possibility — it shares a root cause, disk/session I/O, with the
+/// re-projection failure that armed the latch in the first place), THIS sentence is false — the
+/// screen's contents did NOT already reach disk — and `arm_stale` must emit a different, dynamically
+/// built loss sentence naming the year and the underlying error instead (see `arm_stale`). See
+/// `any_mutation_surface_open`'s doc for why the NO-LOSS case (this constant) is still correct
+/// whenever it fires, including at the park-tail carve-out.
 const FACT_2_SCREEN_CLOSED: &str =
     "The entry screen that was open has been closed; nothing beyond what it already wrote is lost.";
 
@@ -766,10 +775,20 @@ impl EditorApp {
     /// true` would be fail-safe, not an active flush: `handle_key:377`'s `tax_inputs_form` dispatch sits
     /// BEFORE the screen dispatch at `:389` that hosts every opener, so no other mutating surface can be
     /// opened while a tax-inputs form is live — a live dirty form can only ever be THIS caller's own.
-    fn close_all_mutation_surfaces(&mut self, may_save: bool) {
-        if may_save {
-            flush_tax_inputs_draft(self);
-        }
+    ///
+    /// **Returns** `Some((year, error))` when `may_save` was true, a flush was actually attempted (the
+    /// form was dirty with a materialized working copy), and it FAILED — `None` in every other case
+    /// (no flush attempted, nothing to flush, or a clean flush). Fix round 2 (Important 1): `arm_stale`
+    /// needs this to tell "the screen closed with nothing to lose" apart from "the screen closed AND
+    /// the draft it held never reached disk" — the latter cannot be spelled as the former, and
+    /// `close_all_mutation_surfaces` is the only place that still has the year once `tax_inputs_form`
+    /// is nulled below.
+    fn close_all_mutation_surfaces(&mut self, may_save: bool) -> Option<(i32, String)> {
+        let flush_failed = if may_save {
+            flush_tax_inputs_draft(self)
+        } else {
+            None
+        };
         self.profile_form = None;
         self.mutation_modal = None;
         self.classify_inbound_flow = None;
@@ -817,6 +836,7 @@ impl EditorApp {
         self.tax_inputs_form = None;
         self.bulk_income_flow = None;
         self.bulk_income_modal = None;
+        flush_failed
     }
 
     /// THE write tail: all 27 save-then-reproject sites will call this and nothing else (Task 4 routes
@@ -829,6 +849,11 @@ impl EditorApp {
     /// other 24 tails pass `None`. It is `Option<String>`, not `Option<&'static str>`: all three real
     /// prefixes interpolate a runtime `{year}`/`{label}`, so a `'static` string could not carry them —
     /// the prefix has to be built (`format!`) at each of those three call sites, not quoted here.
+    ///
+    /// ★ CONVENTION (fix round 2 nit): a supplied prefix MUST carry its own trailing space —
+    /// `arm_stale` concatenates it directly onto fact 1 with none of its own. `Some("committed {year}
+    /// as {label}, but ".into())` is correct; a prefix without the trailing space composes as
+    /// `"…, butthe write reached disk"`.
     ///
     /// `#[allow(dead_code)]`: no call site exists yet (Task 4 wires the 27 tails onto this fn). Mirrors
     /// `stale_reason`'s Task-1 pattern; remove the attribute once Task 4 lands.
@@ -960,20 +985,33 @@ impl EditorApp {
     ///   the exact wrong remedy fact 1 exists to rule out (the write already landed). Assigning
     ///   `self.status` LAST means this arm's status always wins, regardless of what the flush did.
     ///
+    /// **Fix round 2 (Important 1):** `close_all_mutation_surfaces`'s fail-safe flush can itself FAIL —
+    /// it shares a root cause (disk / session I/O) with the re-projection failure that got us here, so
+    /// this is a likely pairing, not an exotic one. `any_mutation_surface_open()`'s pre-close boolean
+    /// alone cannot distinguish "closed a surface that had already reached disk" from "closed a surface
+    /// whose flush just failed" — only `close_all_mutation_surfaces`'s own return value can, because it
+    /// is the only place that still has the year once `tax_inputs_form` is nulled. When the flush
+    /// failed, fact 2 must say so and NAME THE YEAR (mirroring DESIGN.md §2.3's requirement for the
+    /// sibling `ResidueLive` remedy) instead of claiming — falsely — that nothing was lost.
+    ///
     /// `may_save = true`: the write already landed — memory == disk for everything this closes — so a
-    /// tax-inputs draft flush here is a fail-safe write of already-durable state, not an active one.
-    /// Contrast `on_persist_error`'s `ResidueLive` arm, which passes `false` because THAT latch means
-    /// unrevertable residue is live in memory and must never reach `Vault::save`.
+    /// tax-inputs draft flush here is a fail-safe write of already-durable state, not an active one
+    /// (when it succeeds; see above for when it does not). Contrast `on_persist_error`'s `ResidueLive`
+    /// arm, which passes `false` because THAT latch means unrevertable residue is live in memory and
+    /// must never reach `Vault::save`.
     fn arm_stale(&mut self, prefix: Option<String>, reason: String) {
         let closed_a_live_surface = self.any_mutation_surface_open();
         self.stale_after_write = Some(reason.clone());
         let prefix = prefix.unwrap_or_default();
-        let fact2 = if closed_a_live_surface {
-            format!("{FACT_2_SCREEN_CLOSED} ")
-        } else {
-            String::new()
+        let flush_failed = self.close_all_mutation_surfaces(true);
+        let fact2 = match flush_failed {
+            Some((year, flush_err)) => format!(
+                "The {year} full-return draft could not be saved when this screen closed \
+                 ({flush_err}) — that in-progress entry is lost. "
+            ),
+            None if closed_a_live_surface => format!("{FACT_2_SCREEN_CLOSED} "),
+            None => String::new(),
         };
-        self.close_all_mutation_surfaces(true);
         self.status = Some(format!(
             "{prefix}{STALE_FACT_1} ({reason}). {fact2}Quit and reopen the vault."
         ));
@@ -1170,20 +1208,23 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
 /// [`btctax_cli::CliError`] (NOT a `PersistError` — review M1) to `app.status` and LEAVES `dirty` set so the
 /// next flush point retries.
 ///
+/// **Returns** `Some((year, error message))` on a failed attempted flush, `None` otherwise (no-op OR a
+/// clean flush) — fix round 2: `close_all_mutation_surfaces` needs this to tell `arm_stale` whether its
+/// fail-safe flush actually lost anything, while `app.status` is still set here too (unchanged) for this
+/// fn's other direct callers (the idle tick, `q`, a section change), none of which go through `close_all`.
+///
 /// ★ I-1 (disjoint-field session access): the working `ReturnInputs` is cloned OUT of `app.tax_inputs_form`
 /// under a short read borrow that ENDS before `app.session.as_mut()` is taken, so the two field borrows
 /// never alias (a whole-`self` accessor would not compile against the flow's live borrow).
-fn flush_tax_inputs_draft(app: &mut EditorApp) {
+fn flush_tax_inputs_draft(app: &mut EditorApp) -> Option<(i32, String)> {
     let (year, ri) = {
-        let Some(form) = app.tax_inputs_form.as_ref() else {
-            return;
-        };
+        // ★ clippy::question_mark: now that this fn returns `Option`, a `let…else { return None; }`
+        // over an `Option` is flagged — `?` is equivalent here and clippy-clean.
+        let form = app.tax_inputs_form.as_ref()?;
         if !form.dirty {
-            return; // debounce: nothing changed since the last flush
+            return None; // debounce: nothing changed since the last flush
         }
-        let Some(ri) = form.working.clone() else {
-            return; // NI-2: no return chosen yet — autosave nothing
-        };
+        let ri = form.working.clone()?; // NI-2: no return chosen yet — autosave nothing
         (form.year, ri)
     };
     match edit::persist::form_save_draft(app.session.as_mut().unwrap(), year, &ri) {
@@ -1192,10 +1233,15 @@ fn flush_tax_inputs_draft(app: &mut EditorApp) {
             if let Some(form) = app.tax_inputs_form.as_mut() {
                 form.dirty = false;
             }
+            None
         }
         // ★ M1: `form_save_draft` yields a `CliError`, NOT a `PersistError` — do NOT route it through
         // `on_persist_error`; surface it directly. `dirty` stays set so a later flush point retries.
-        Err(e) => app.status = Some(format!("{e}")),
+        Err(e) => {
+            let msg = e.to_string();
+            app.status = Some(msg.clone());
+            Some((year, msg))
+        }
     }
 }
 
@@ -11191,18 +11237,31 @@ mod tests {
         assert_eq!(app.status.as_deref(), Some("1 events"));
     }
 
-    /// ★ Fix round 1, Important 2: `arm_stale` calls `close_all_mutation_surfaces(true)`, which flushes
-    /// a dirty tax-inputs draft; `flush_tax_inputs_draft`'s `Err` arm (`:1088`-ish) unconditionally
-    /// overwrites `app.status`. If `arm_stale` assigned its own status BEFORE that call, a FAILING
-    /// fail-safe flush would clobber fact 1 with a bare `CliError` string that reads as "the write
-    /// failed, retry" — the exact wrong remedy fact 1 exists to rule out (the write already landed; do
-    /// NOT retry). Simulates the flush failure the same way `tax_inputs_q_keeps_flow_open_when_final_
-    /// flush_fails` does: remove the vault's directory out from under the still-open `Session`.
+    /// ★ Fix round 1, Important 2 (clobber) + fix round 2, Important 1 (false "nothing is lost" claim).
+    /// `arm_stale` calls `close_all_mutation_surfaces(true)`, which flushes a dirty tax-inputs draft;
+    /// `flush_tax_inputs_draft`'s `Err` arm unconditionally overwrites `app.status`. Two distinct bugs
+    /// live at this one seam:
+    /// (a) if `arm_stale` assigned its own status BEFORE that call, a FAILING fail-safe flush would
+    ///     clobber fact 1 with a bare `CliError` string that reads as "the write failed, retry" — the
+    ///     exact wrong remedy fact 1 exists to rule out (the write already landed; do NOT retry);
+    /// (b) even once (a) is fixed, unconditionally emitting `FACT_2_SCREEN_CLOSED` ("nothing beyond
+    ///     what it already wrote is lost") is ALSO wrong here — the draft genuinely did NOT reach disk,
+    ///     so the copy must say so and NAME THE YEAR (DESIGN.md §2.3's requirement for the sibling
+    ///     `ResidueLive` remedy), not claim the opposite. A re-projection failure and a `Vault::save`
+    ///     failure share a root cause (disk/session I/O), so this pairing is likely, not exotic.
     ///
-    /// Mutation: moved `arm_stale`'s `self.status = Some(...)` assignment back to BEFORE
+    /// Simulates the flush failure the same way `tax_inputs_q_keeps_flow_open_when_final_flush_fails`
+    /// does: remove the vault's directory out from under the still-open `Session`.
+    ///
+    /// Mutation 1 (round 1): moved `arm_stale`'s `self.status = Some(...)` assignment back to BEFORE
     /// `self.close_all_mutation_surfaces(true)` — RED (`app.status` became the bare io error, losing
     /// "reached disk"/"could not be verified"). Restored via a `cp` backup (never `git checkout --`)
     /// and re-ran — GREEN.
+    /// Mutation 2 (round 2): hardcoded `arm_stale`'s fact-2 `match` to always take the
+    /// `Some(...) | None if closed_a_live_surface` no-loss branch (i.e. ignored
+    /// `close_all_mutation_surfaces`'s returned flush failure) — RED (status claimed "nothing beyond
+    /// what it already wrote is lost" while the 2024 draft never reached disk). Restored via a `cp`
+    /// backup (never `git checkout --`) and re-ran — GREEN.
     #[test]
     fn arm_stale_status_survives_a_failing_draft_flush() {
         let (mut app, dir) = unlocked_app_on_empty_vault(2024);
@@ -11227,6 +11286,15 @@ mod tests {
             s.contains("reached disk") && s.contains("could not be verified"),
             "the arm status must survive a failing fail-safe flush, not be clobbered by its own io \
              error: {s}"
+        );
+        assert!(
+            s.contains("2024") && s.contains("could not be saved") && s.contains("is lost"),
+            "fact 2 must name the year and say the draft is LOST when the flush genuinely fails — it \
+             must never claim nothing was lost here: {s}"
+        );
+        assert!(
+            !s.contains("nothing beyond what it already wrote is lost"),
+            "the no-loss sentence must not fire when the flush actually failed: {s}"
         );
         assert!(
             app.tax_inputs_form.is_none(),
@@ -11284,11 +11352,17 @@ mod tests {
     /// DESIGN.md §2.5: three of the 27 tails carry a per-tail prefix ahead of fact 1 (fact 1 no longer
     /// names what landed). `arm_prefix` must be EXPRESSIBLE end to end — threaded from `apply_reprojection`
     /// through to the composed status, ahead of fact 1's own text.
+    ///
+    /// ★ Fix round 2 nit: also pins the trailing-space CONVENTION `after_write`'s doc states —
+    /// `arm_stale` does not insert a separator itself, so the prefix supplied here already ends in a
+    /// space, and fact 1 must start EXACTLY at the end of that literal (no missing space collapsing
+    /// "…butthe write…", no doubled space).
     #[test]
     fn apply_reprojection_err_prefix_precedes_fact_1() {
         let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        let prefix = "parked the full return for 2024, but ";
         app.apply_reprojection(
-            Some("parked the full return for 2024, but ".to_string()),
+            Some(prefix.to_string()),
             Some(Err(btctax_cli::CliError::Usage("disk".into()))),
             |_| unreachable!(),
         );
@@ -11296,6 +11370,12 @@ mod tests {
         assert!(
             s.starts_with("parked the full return for 2024, but the write reached disk"),
             "the prefix must precede fact 1 verbatim, not be dropped or reordered: {s}"
+        );
+        assert_eq!(
+            s.find("the write reached disk"),
+            Some(prefix.len()),
+            "fact 1 must start EXACTLY where the (space-terminated) prefix ends — arm_stale inserts \
+             no separator of its own, so the prefix owns its trailing space: {s}"
         );
     }
 
