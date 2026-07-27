@@ -1,0 +1,32 @@
+── glyphs ──
+  0│┌ btctax-tui-edit [EDITOR] — Defensive Filing ─────────────────────────────────┐
+  1││Defensive Filing — journey dashboard (derived; nothing here is filed until you│
+  2││act)                                                                          │
+  3││                                                                              │
+  4││Declare candidates:                                                           │
+  5││> declare candidate — Decision { seq: 1 }: short 10000000 sat on 2020-06-15 — │
+  6││no acquisition record covers this; press 'd' to declare a $0 tranche          │
+  7││                                                                              │
+  8││[x] export — plan the IRS-PDF packet (always available)                       │
+  9││                                                                              │
+ 10││                                                                              │
+ 11││                                                                              │
+ 12││                                                                              │
+ 13││                                                                              │
+ 14││                                                                              │
+ 15││  STALE — figures below predate your last write. DO NOT FILE from them. Quit  │
+ 16││and reopen the vault.                                                         │
+ 17││  the write reached disk, but whether it had the intended effect could not be │
+ 18││verified, because the ledger would not re-project (timeout). The entry screen │
+ 19││that was open has been closed; nothing beyond what it already wrote is lost.  │
+ 20││Quit and reopen the vault.                                                    │
+ 21││                                                                              │
+ 22││                                                                              │
+ 23│└──────────────────────────────────────────────────────────────────────────────┘
+── styles (runs; terminal-default fg=Reset bg=Reset no-modifier omitted) ──
+ 15│ 1..77 fg=Red mod=BOLD
+ 16│ 1..22 fg=Red mod=BOLD
+ 17│ 1..78 fg=Cyan
+ 18│ 1..78 fg=Cyan
+ 19│ 1..77 fg=Cyan
+ 20│ 1..27 fg=Cyan

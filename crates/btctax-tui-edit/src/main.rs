@@ -676,6 +676,35 @@ const STALE_FACT_1: &str =
 const FACT_2_SCREEN_CLOSED: &str =
     "The entry screen that was open has been closed; nothing beyond what it already wrote is lost.";
 
+/// Fact 2's LOSS wording (DESIGN.md §2.5, fix round 2 Important 1) — extracted to a FUNCTION, not a
+/// `format!`-fed `const`, because `format!`'s `{name}` capture syntax needs a literal template at each
+/// call site; a shared `const` template could not be threaded through it. This is the ONLY place this
+/// sentence is composed — `arm_stale` calls it, and so does `draw_edit.rs`'s own `longest_arm_status`
+/// test helper via `crate::fact2_loss_sentence` (Rust's privacy model makes a private crate-root item
+/// visible to every descendant module, `draw_edit` included, with no `pub(crate)` needed).
+///
+/// ★ fix round 1 of Task 7's OWN review (Important): before this extraction, `draw_edit.rs` hand-copied
+/// this sentence as a literal INSIDE its test module — this exact sentence had already been reworded
+/// TWICE on this branch (fix round 1 Important 3, then fix round 2 Important 1) with zero mechanism to
+/// catch a future rewording drifting the two copies apart; the test's own char-count pin only pinned
+/// its OWN literal, never `arm_stale`'s actual output. Calling this fn instead makes that drift
+/// structurally impossible.
+fn fact2_loss_sentence(year: i32, flush_err: &str) -> String {
+    format!(
+        "The {year} full-return draft could not be saved when this screen closed \
+         ({flush_err}) — that in-progress entry is lost. "
+    )
+}
+
+/// Fact 3: the remedy, shared verbatim by `arm_stale` and `stale_reason` — extracted for the same
+/// drift-proofing reason as `fact2_loss_sentence` above. `draw_edit.rs`'s FIXED `STALE_MARKER_DEFENSIVE`
+/// marker also happens to end in this same sentence (DESIGN.md §2.4(c): "the same claim plus the remedy
+/// sentence"), but that is a deliberately independent, `app.status`-agnostic copy — a KAT asserting on
+/// this constant must not accidentally match that unrelated marker text instead of the real composed
+/// status (fix round 1 Important: see `the_full_arm_status_renders_unclipped_at_80_columns_on_both_
+/// screens`, which now asserts a fragment unique to fact 2 + this constant together).
+const FACT_3_QUIT_AND_REOPEN: &str = "Quit and reopen the vault.";
+
 impl EditorApp {
     /// The residue-latch status, if any mutating opener must refuse. `attest_save_failed` keeps its
     /// exact shipped wording (so `kat_e2e_attest_errlatch_chmod` stays green); `rollback_failed`
@@ -709,7 +738,7 @@ impl EditorApp {
     fn stale_reason(&self) -> Option<String> {
         self.stale_after_write
             .as_ref()
-            .map(|e| format!("refused: {STALE_FACT_1} ({e}). Quit and reopen the vault."))
+            .map(|e| format!("refused: {STALE_FACT_1} ({e}). {FACT_3_QUIT_AND_REOPEN}"))
     }
 
     /// Every mutating opener refuses through this. Precedence attest > rollback > stale: the first two
@@ -996,15 +1025,12 @@ impl EditorApp {
         let prefix = prefix.unwrap_or_default();
         let flush_failed = self.close_all_mutation_surfaces(true);
         let fact2 = match flush_failed {
-            Some((year, flush_err)) => format!(
-                "The {year} full-return draft could not be saved when this screen closed \
-                 ({flush_err}) — that in-progress entry is lost. "
-            ),
+            Some((year, flush_err)) => fact2_loss_sentence(year, &flush_err),
             None if closed_a_live_surface => format!("{FACT_2_SCREEN_CLOSED} "),
             None => String::new(),
         };
         self.status = Some(format!(
-            "{prefix}{STALE_FACT_1} ({reason}). {fact2}Quit and reopen the vault."
+            "{prefix}{STALE_FACT_1} ({reason}). {fact2}{FACT_3_QUIT_AND_REOPEN}"
         ));
     }
 }
@@ -16989,14 +17015,99 @@ mod tests {
         ))
     }
 
-    /// Render `app` to a style-aware golden frame at 120x40.
+    /// Render `app` to a style-aware golden frame at an arbitrary size.
     #[cfg(unix)]
-    fn capture_edit_frame(app: &mut EditorApp) -> String {
+    fn capture_edit_frame_sized(app: &mut EditorApp, cols: u16, rows: u16) -> String {
         use ratatui::{backend::TestBackend, Terminal};
-        let backend = TestBackend::new(120, 40);
+        let backend = TestBackend::new(cols, rows);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|f| draw_edit::draw(f, app)).unwrap();
         btctax_tui::capture::to_golden(&terminal.backend().buffer().clone())
+    }
+
+    /// Render `app` to a style-aware golden frame at 120x40.
+    #[cfg(unix)]
+    fn capture_edit_frame(app: &mut EditorApp) -> String {
+        capture_edit_frame_sized(app, 120, 40)
+    }
+
+    /// The D-7 stale-latch marker's two ARMED sub-states (Task 7 fix round 1 — DESIGN.md §3.9(10): "New
+    /// goldens cover both armed sub-states"). Both captured at **80×24**, not the standard 120×40: 80×24
+    /// is the exact size at which the ★ Critical clipping bug (an unconditional 8-row reservation for
+    /// the marker alone, sized for marker+status STACKED) actually manifested — a 120×40 frame has 30+
+    /// spare content rows and would never expose it.
+    #[cfg(unix)]
+    fn stale_armed_base_fixture(
+        view: btctax_core::defensive::DefensiveFilingView,
+        uncomputable: Option<&'static str>,
+        status: Option<&str>,
+    ) -> EditorApp {
+        let mut app = EditorApp::new(std::path::PathBuf::from("/edit/vault.pgp"));
+        app.screen = EditorScreen::DefensiveFiling;
+        app.defensive_dashboard = Some(crate::defensive_dashboard::DefensiveDashboardState {
+            view,
+            cursor: 0,
+            uncomputable,
+        });
+        app.stale_after_write = Some("stale-golden-fixture".to_string());
+        app.status = status.map(|s| s.to_string());
+        app
+    }
+
+    /// The "steady, no-status" sub-state — the frame the filer actually LIVES in while navigating the
+    /// dashboard (the SECOND keypress onward clears `app.status`, `main.rs:494`). The dashboard fixture
+    /// is the D-7 pseudo-active STUB (`uncomputable = Some(PSEUDO_ACTIVE_DASHBOARD_NOTICE)`) with
+    /// `safe_harbor_blocked = true` — the worst REAL content this screen can show while armed, per the
+    /// fix-round-1 review: title(2) + blank(1) + the notice(7) + blank(1) + the safe-harbor note(2) +
+    /// blank(1) + the always-last `[x] export`(1) = 15 wrapped rows at this screen's 78-col inner width.
+    /// This IS reachable: arm via ANY of the 27 write tails, then separately navigate Browse → `w` →
+    /// dashboard while the underlying ledger genuinely has synthetic pseudo defaults AND an in-force
+    /// safe-harbor allocation or pre-2025 tranche. A golden over the trivial "Nothing outstanding"
+    /// fixture would have passed even WITH the clipping bug (12 rows fit a 14-row pane either way) — the
+    /// review's own caveat against a fixture that doesn't actually fill the pane.
+    #[cfg(unix)]
+    fn stale_armed_no_status_fixture() -> EditorApp {
+        use btctax_core::defensive::DefensiveFilingView;
+        use std::collections::BTreeSet;
+
+        stale_armed_base_fixture(
+            DefensiveFilingView {
+                candidates: vec![],
+                resolve_first: vec![],
+                tranches: vec![],
+                still_short: vec![],
+                flagged_years: BTreeSet::new(),
+                safe_harbor_blocked: true,
+            },
+            Some(crate::defensive_dashboard::PSEUDO_ACTIVE_DASHBOARD_NOTICE),
+            None,
+        )
+    }
+
+    /// The "with status" sub-state — the ONE frame where both the marker and the composed `app.status`
+    /// stack in the notice rect (today's/pre-Task-7 layout for the status alone). Deliberately does NOT
+    /// reuse the pseudo-active STUB above: `handle_defensive_dashboard_key`'s `uncomputable` guard (fix
+    /// round 1, I-1, `defensive_dashboard.rs`) refuses declare/promote — the only two write intents this
+    /// screen dispatches — BY CONSTRUCTION whenever `uncomputable.is_some()`, so a stub dashboard can
+    /// never be the dashboard a declare/promote write that then fails to reproject was issued FROM.
+    /// `execute_defensive_export`'s (`x`'s) own reprojection failure is a SEPARATE, verified-distinct
+    /// path that never touches `stale_after_write`/composes this status at all (`x_reprojection_
+    /// failure_refuses_without_touching_the_latch`). The one reachable path that stacks a freshly-armed
+    /// `app.status` under a STILL-LIVE dashboard view is: a REAL (non-stub) dashboard's declare/promote
+    /// write succeeds but reprojection fails — `apply_reprojection`'s `Err` arm never calls `refresh_
+    /// defensive_dashboard`, so whatever real content was showing before the write keeps showing. Uses
+    /// the existing `declare_candidate_view` fixture (one real candidate row) for exactly that shape —
+    /// non-trivial (unlike an empty dashboard) and, unlike the pseudo-stub, actually reachable here.
+    #[cfg(unix)]
+    fn stale_armed_with_status_fixture(status: &str) -> EditorApp {
+        let view = declare_candidate_view(
+            btctax_core::WalletId::Exchange {
+                provider: "coinbase".into(),
+                account: "main".into(),
+            },
+            false,
+        );
+        stale_armed_base_fixture(view, None, Some(status))
     }
 
     /// `(stem, captured frame)` for btctax-tui-edit, each under a pinned clock:
@@ -17040,9 +17151,33 @@ mod tests {
             capture_edit_frame(&mut app)
         };
 
+        // Task 7 fix round 1: the two ARMED sub-states (see `stale_armed_with_status_fixture` /
+        // `stale_armed_no_status_fixture` above for exactly which is reachable how, and why each uses
+        // the dashboard content it does).
+        let stale_armed_with_status = {
+            let mut app = stale_armed_with_status_fixture(&format!(
+                "{STALE_FACT_1} (timeout). {FACT_2_SCREEN_CLOSED} {FACT_3_QUIT_AND_REOPEN}"
+            ));
+            app.clock = pinned;
+            capture_edit_frame_sized(&mut app, 80, 24)
+        };
+        let stale_armed_no_status = {
+            let mut app = stale_armed_no_status_fixture();
+            app.clock = pinned;
+            capture_edit_frame_sized(&mut app, 80, 24)
+        };
+
         vec![
             ("edit-browse", browse),
             ("edit-classify-confirm-modal", classify_modal),
+            (
+                "edit-defensive-filing-stale-armed-with-status",
+                stale_armed_with_status,
+            ),
+            (
+                "edit-defensive-filing-stale-armed-no-status",
+                stale_armed_no_status,
+            ),
         ]
     }
 
@@ -17063,6 +17198,25 @@ mod tests {
                 "docs/examples-tui/btctax-tui-{stem}.txt is STALE; regenerate via the ignored \
                  emit_btctax_tui_edit_goldens test"
             );
+        }
+    }
+
+    /// A byte-diff against a committed golden is silent about WHY the fixture was chosen — DESIGN.md
+    /// §3.9(10)'s review caveat is that a golden over a fixture which doesn't actually fill the pane
+    /// (e.g. the trivial "Nothing outstanding" dashboard) would pass even with the ★ Critical clipping
+    /// bug this fix round closed. This makes the INTENT an explicit, standalone assertion: the
+    /// always-available `[x] export` line must survive, in BOTH armed sub-states, at 80×24.
+    #[cfg(unix)]
+    #[test]
+    fn stale_armed_goldens_never_clip_the_export_line() {
+        for (stem, captured) in btctax_tui_edit_goldens() {
+            if stem.starts_with("edit-defensive-filing-stale-armed") {
+                assert!(
+                    captured.contains("[x] export"),
+                    "{stem} must not clip the always-available export line off a non-scrolling, \
+                     80x24 pane: {captured}"
+                );
+            }
         }
     }
 
