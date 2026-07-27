@@ -1233,7 +1233,26 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
 /// ★ I-1 (disjoint-field session access): the working `ReturnInputs` is cloned OUT of `app.tax_inputs_form`
 /// under a short read borrow that ENDS before `app.session.as_mut()` is taken, so the two field borrows
 /// never alias (a whole-`self` accessor would not compile against the flow's live borrow).
+///
+/// ★ T8 (DESIGN.md §2.3 step 1, "write-side gating, not surface-side"): refuses under `attest_save_failed`
+/// / `rollback_failed` — the two SAVE-FORBIDDING latches — BEFORE looking at `tax_inputs_form` at all. This
+/// fn is called from the IDLE TICK (`run`'s event-poll-timeout arm) and from `q`/Esc/a-section-change
+/// inside `handle_tax_inputs_key`, so no `handle_key`-scoped dispatch guard (guard (a)) can ever stand
+/// between an armed residue latch and this `Session::save` — it is the ONE write path genuinely outside
+/// `handle_key`'s reach. Until this check existed, the only thing preventing a flush during either residue
+/// latch was that `tax_inputs_form` happens to always be `None` by then (the one-flow invariant plus
+/// `open_tax_inputs_form`'s own gate) — a fact about the REST of the app, not something this fn enforced
+/// itself, so a future change to either of those elsewhere could have silently reopened the save while
+/// looking, from here, like nothing changed. `stale_after_write` is DELIBERATELY excluded: Task 3's
+/// `close_all_mutation_surfaces(may_save = true)` (the fail-safe flush inside `arm_stale`) depends on this
+/// fn actually running while stale — the write that triggered the arm already landed, so memory == disk for
+/// everything it closes, and gating on `stale_after_write` here would silently discard that still-dirty
+/// draft instead (see `arm_stale_may_save_true_flushes_a_dirty_tax_inputs_draft_to_disk`, which must and
+/// does stay green against this change).
 fn flush_tax_inputs_draft(app: &mut EditorApp) -> Option<(i32, String)> {
+    if app.attest_save_failed || app.rollback_failed {
+        return None;
+    }
     let (year, ri) = {
         // ★ clippy::question_mark: now that this fn returns `Option`, a `let…else { return None; }`
         // over an `Option` is flagged — `?` is equivalent here and clippy-clean.
@@ -11079,6 +11098,75 @@ mod tests {
         );
     }
 
+    /// Guard (c) (DESIGN.md §2.3 step 1): `flush_tax_inputs_draft` is a real `Session::save` fired from
+    /// the IDLE TICK (`run`'s poll-timeout arm) and from `q`/Esc inside `handle_tax_inputs_key` — both
+    /// OUTSIDE the `handle_key`-scoped dispatch guard (a) protects, so a key-scoped check can never see
+    /// this write. Drives the fn DIRECTLY (not through `on_persist_error`/`arm_stale`, which would close
+    /// `tax_inputs_form` for an UNRELATED reason before this fn's own check ever ran) with a dirty,
+    /// materialized form so the flush is genuinely live if the new check is ever removed — same
+    /// session-backed-and-dirty rationale as
+    /// `residue_live_may_save_false_prevents_dirty_tax_inputs_draft_from_reaching_disk`, which this
+    /// mirrors for the OTHER path into the same write. Checks BOTH save-forbidding latches so a downgrade
+    /// that only covers one is caught; deliberately does NOT set `stale_after_write` — gating on it would
+    /// contradict `close_all_mutation_surfaces(may_save = true)`, whose own KAT
+    /// (`arm_stale_may_save_true_flushes_a_dirty_tax_inputs_draft_to_disk`, directly above) must and does
+    /// stay green against this change.
+    ///
+    /// Mutation: deleted `if app.attest_save_failed || app.rollback_failed { return None; }` from
+    /// `flush_tax_inputs_draft` — RED on the `[attest_save_failed]` case's `dirty`-preservation assert
+    /// (with no latch check the flush proceeds, `form_save_draft` succeeds, and `dirty` is cleared —
+    /// the disk-read assert below it would have failed too, naming a `Draft` row that should not
+    /// exist, but the `dirty` assert fires first). Restored via a `cp` backup (never `git checkout --`)
+    /// and re-ran — GREEN.
+    #[test]
+    fn flush_tax_inputs_draft_refuses_under_either_save_forbidding_latch() {
+        use btctax_core::tax::types::FilingStatus;
+
+        fn check(set_latch: impl FnOnce(&mut EditorApp), latch_name: &str) {
+            let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+            let vault = dir.path().join("vault.pgp");
+            let pp = Passphrase::new("empty-vault-pass".into());
+
+            handle_key(&mut app, press(KeyCode::Char('T')));
+            handle_key(&mut app, press(KeyCode::Char(' '))); // cycle FilingStatus → Single (materializes)
+            let form = app.tax_inputs_form.as_ref().unwrap();
+            assert!(
+                form.dirty,
+                "[{latch_name}] the fixture must start dirty for this KAT to mean anything"
+            );
+            assert_eq!(
+                form.working.as_ref().unwrap().filing_status,
+                FilingStatus::Single,
+                "[{latch_name}] a materialized, distinctive working copy — never a None NI-2 skip"
+            );
+
+            set_latch(&mut app);
+            let result = flush_tax_inputs_draft(&mut app);
+            assert!(
+                result.is_none(),
+                "[{latch_name}] a refusal reports `None`, same as the debounce/NI-2 no-op paths"
+            );
+            assert!(
+                app.tax_inputs_form.as_ref().unwrap().dirty,
+                "[{latch_name}] refusing must not clear `dirty` — nothing was attempted, so the next \
+                 flush point (idle tick, `q`, a section change) must retry"
+            );
+
+            // Release the exclusive VaultLock before reopening a fresh Session to read back durable state.
+            drop(app);
+            let sess = btctax_cli::Session::open(&vault, &pp).unwrap();
+            assert!(
+                !btctax_cli::input_form_store::draft_exists(sess.conn(), 2024).unwrap(),
+                "[{latch_name}] the latch must prevent Session::save from EVER running here, including \
+                 from the idle tick — a save now would persist a draft under a status promising no save \
+                 could occur"
+            );
+        }
+
+        check(|app| app.attest_save_failed = true, "attest_save_failed");
+        check(|app| app.rollback_failed = true, "rollback_failed");
+    }
+
     /// DESIGN.md §2.5: three of the 27 tails carry a per-tail prefix ahead of fact 1 (fact 1 no longer
     /// names what landed). `arm_prefix` must be EXPRESSIBLE end to end — threaded from `apply_reprojection`
     /// through to the composed status, ahead of fact 1's own text.
@@ -17002,6 +17090,486 @@ mod tests {
         );
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
+    // Task 8: the mechanized guards — the systemic protection that replaced the DROPPED type-level
+    // enforcement (a privatized-field design was proposed and cut: review proved the borrow checker
+    // cannot express the invariant at the sites that matter). Everything else on this branch is
+    // per-site and can be undone one site at a time without any test noticing; these four scans are
+    // what is NOT undoable one site at a time.
+    //
+    // All four follow the DE-STUCK `#[cfg(test)]` skip technique proven above at
+    // `production_now_utc_lines` (reset `in_test` on a dedented `}`, never stick past the module) — NOT
+    // the STICKY `in_test` at `edit/persist.rs`'s own `scan_non_test` (sets `in_test = true` on the
+    // first `#[cfg(test)]` and never resets, so everything after it is invisible). That precedent is
+    // also FILE-scope (an allowlist of filenames); guards (a), (b), and (d) below are FUNCTION-scope —
+    // they need to know not just THAT a line is production, but WHICH function contains it. Function
+    // boundaries are found the same DEDENTED-CLOSE way (a bare `}` back at the `fn`'s own indentation),
+    // never by brace-counting: `arm_stale`'s own status `format!` alone has more `{`/`}` in its string
+    // literal (`"{prefix}{STALE_FACT_1} ({reason}). {fact2}{FACT_3_QUIT_AND_REOPEN}"`) than the
+    // function has real braces, which is exactly the corruption `production_now_utc_lines`'s own doc
+    // comment warns brace-counting would cause.
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /// Lines of `text` that are NOT inside a `#[cfg(test)]` module, as (0-based line index, text) pairs
+    /// — the skip/resume logic is `production_now_utc_lines`'s, generalized to yield every kept line
+    /// rather than filtering for one literal (guards (b) and (d) both reason over arbitrary production
+    /// source, not a single substring). `editor.rs` has no `#[cfg(test)]` at all, so it comes back
+    /// unfiltered.
+    fn production_lines(text: &str) -> Vec<(usize, &str)> {
+        let lines: Vec<&str> = text.lines().collect();
+        let mut out = Vec::new();
+        let mut in_test = false;
+        for (i, line) in lines.iter().enumerate() {
+            if in_test {
+                if line.starts_with('}') {
+                    in_test = false;
+                }
+                continue;
+            }
+            if line.trim_start().starts_with("#[cfg(test)]") {
+                let next = lines.get(i + 1).map(|l| l.trim_start()).unwrap_or("");
+                let unbraced_decl = (next.starts_with("mod ")
+                    || next.starts_with("pub mod ")
+                    || next.starts_with("use ")
+                    || next.starts_with("pub use "))
+                    && next.trim_end().ends_with(';');
+                if !unbraced_decl {
+                    in_test = true;
+                }
+                continue;
+            }
+            out.push((i, *line));
+        }
+        out
+    }
+
+    /// A `fn`/method declaration: its 0-based line index, its indentation (rustfmt puts the MATCHING
+    /// close at the same indentation as the `fn` keyword), and its name. Computed over the WHOLE file,
+    /// unfiltered — finding the function enclosing an arbitrary line needs one global, gap-free
+    /// ordering, and every function these guards care about is production code anyway.
+    struct FnStart {
+        line: usize,
+        indent: usize,
+        name: String,
+    }
+
+    fn fn_starts(text: &str) -> Vec<FnStart> {
+        let mut out = Vec::new();
+        for (i, line) in text.lines().enumerate() {
+            let trimmed = line.trim_start();
+            let indent = line.len() - trimmed.len();
+            let rest = trimmed
+                .strip_prefix("pub(crate) ")
+                .or_else(|| trimmed.strip_prefix("pub "))
+                .unwrap_or(trimmed);
+            if let Some(after_fn) = rest.strip_prefix("fn ") {
+                let name: String = after_fn
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                if !name.is_empty() {
+                    out.push(FnStart {
+                        line: i,
+                        indent,
+                        name,
+                    });
+                }
+            }
+        }
+        out
+    }
+
+    /// The name of the innermost function whose `fn` line precedes (or is) `line`. Correct regardless
+    /// of brace content, because Rust functions never overlap: the nearest PRECEDING `fn` line is
+    /// always the one that contains `line`, whether or not this scan knows exactly where it closes.
+    fn enclosing_fn(starts: &[FnStart], line: usize) -> Option<&str> {
+        starts
+            .iter()
+            .rev()
+            .find(|f| f.line <= line)
+            .map(|f| f.name.as_str())
+    }
+
+    /// The named function's full source text, from its `fn` line to the first LATER line that is
+    /// exactly (that many spaces) + `}` — the dedented close at the function's OWN indentation. Safe
+    /// against brace-in-string corruption: a rustfmt-formatted nested block is always indented
+    /// STRICTLY deeper than its enclosing `fn` keyword, so a bare `}` at the `fn`'s own indentation can
+    /// only be that function's true close, never a stray brace from a `format!` literal.
+    fn fn_body(text: &str, starts: &[FnStart], name: &str) -> String {
+        let lines: Vec<&str> = text.lines().collect();
+        let start = starts
+            .iter()
+            .find(|f| f.name == name)
+            .unwrap_or_else(|| panic!("no `fn {name}` found — has it been renamed?"));
+        let close_line = format!("{}}}", " ".repeat(start.indent));
+        let end = lines[start.line + 1..]
+            .iter()
+            .position(|l| *l == close_line)
+            .map(|p| start.line + 1 + p)
+            .unwrap_or_else(|| panic!("`fn {name}` never dedent-closes at its own indentation"));
+        lines[start.line..=end].join("\n")
+    }
+
+    /// Every `<prefix><field><suffix>` occurrence in `body`'s CODE (line comments stripped), returning
+    /// the bare field names. `prefix` is `"app."`/`"self."`; `suffix` is `".is_some()"`/`" = None;"`.
+    /// Self-validating: a `suffix` match whose preceding text isn't a clean identifier is silently
+    /// skipped, so a coincidental LATER `suffix` on the same line can never be mis-paired with an
+    /// earlier, unrelated `prefix`.
+    fn extract_field_names(
+        body: &str,
+        prefix: &str,
+        suffix: &str,
+    ) -> std::collections::BTreeSet<String> {
+        let mut out = std::collections::BTreeSet::new();
+        for line in body.lines() {
+            let code = line.split("//").next().unwrap_or("");
+            for (idx, _) in code.match_indices(prefix) {
+                let after = &code[idx + prefix.len()..];
+                if let Some(end) = after.find(suffix) {
+                    let candidate = &after[..end];
+                    if !candidate.is_empty()
+                        && candidate.chars().all(|c| c.is_alphanumeric() || c == '_')
+                    {
+                        out.insert(candidate.to_string());
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Whether `word` occurs in `line` as a standalone identifier — bounded on both sides by a
+    /// non-identifier character (or start/end of line) — so `build_snapshot` does not false-positive
+    /// inside a longer identifier like `rebuild_snapshot_extra` (hypothetical, but the point of the
+    /// boundary check either way).
+    fn contains_word(line: &str, word: &str) -> bool {
+        fn is_ident(c: char) -> bool {
+            c.is_alphanumeric() || c == '_'
+        }
+        let bytes = line.as_bytes();
+        let mut start = 0;
+        while let Some(pos) = line[start..].find(word) {
+            let abs = start + pos;
+            let before_ok = abs == 0 || !is_ident(bytes[abs - 1] as char);
+            let after_idx = abs + word.len();
+            let after_ok = after_idx >= bytes.len() || !is_ident(bytes[after_idx] as char);
+            if before_ok && after_ok {
+                return true;
+            }
+            start = abs + 1;
+        }
+        false
+    }
+
+    /// `handle_key`'s dispatch set: every `app.<field>.is_some()` inside its body — the 47 mutation
+    /// surfaces it gates on (modal → flow → tax-inputs form → profile form) before falling through to
+    /// the Browse/DefensiveFiling screen match. Factored out so guard (b)'s domain can never silently
+    /// diverge from guard (a)'s own notion of "what counts as a surface".
+    fn dispatch_surface_fields(main_src: &str) -> std::collections::BTreeSet<String> {
+        let starts = fn_starts(main_src);
+        let body = fn_body(main_src, &starts, "handle_key");
+        extract_field_names(&body, "app.", ".is_some()")
+    }
+
+    /// Guard (a). `handle_key` dispatches on 47 mutation surfaces; `close_all_mutation_surfaces` clears
+    /// the same 47 fields to `None`; Task 3's `any_mutation_surface_open` (fact 2's "did closing lose a
+    /// live surface" computation) checks the SAME 47. The three lists are hand-maintained
+    /// INDEPENDENTLY, with nothing keeping them in sync — the shipped Critical (chain A, D-6) was
+    /// exactly a gap between the first two (`bulk_income_flow` dispatched but not cleared), and a THIRD
+    /// list drifting from either would silently make fact 2 wrong (understating what was lost) or
+    /// reopen the same bypass class. Asserts all THREE sets are pairwise IDENTICAL, not merely that one
+    /// is a subset of another.
+    ///
+    /// `defensive_dashboard` is correctly ABSENT from all three: it is dispatched via `.as_mut()` (not
+    /// `.is_some()`) inside the `DefensiveFiling` screen's own match arm, and every dashboard intent is
+    /// individually gated elsewhere — `Declare`/`Promote` take the combined latch at their own openers,
+    /// `Export` is exempt by design (D-7), and `RouteResolveFirst`/`None` are inert. It is NOT excluded
+    /// because nulling it would break the export route — `Esc`→`w` rebuilds it from the current
+    /// snapshot regardless, so that draft rationale was false; the real rationale is the per-intent
+    /// gating above.
+    ///
+    /// Nested surfaces (e.g. a flow's own confirmation modal, opened from inside a `handle_*_flow_key`
+    /// once the flow itself is already dispatched) are real `= Some(..)` sites, but every field they
+    /// touch is already one of the same 47 `handle_key` dispatches on — out of scope for a
+    /// `handle_key`-SCOPED scan by construction, not by omission. Guard (b) below covers exactly these
+    /// sites from the assignment side.
+    ///
+    /// Mutation: commented out `self.bulk_income_flow = None;` inside `close_all_mutation_surfaces` —
+    /// the shipped-Critical chain-A shape, reproduced here as a source mutation rather than a runtime
+    /// one. RED: `close`'s clear set drops to 46, breaking the three-way equality
+    /// (`clear_minus_dispatch` empty but `dispatch_minus_clear = {"bulk_income_flow"}`). Restored via a
+    /// `cp` backup (never `git checkout --`) and re-ran — GREEN.
+    #[test]
+    fn handle_key_dispatch_close_all_and_any_open_agree_on_the_surface_set() {
+        let src =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/main.rs")).unwrap();
+        let starts = fn_starts(&src);
+
+        let dispatch_set = dispatch_surface_fields(&src);
+
+        let close_body = fn_body(&src, &starts, "close_all_mutation_surfaces");
+        let clear_set = extract_field_names(&close_body, "self.", " = None;");
+
+        let open_body = fn_body(&src, &starts, "any_mutation_surface_open");
+        let mut open_set = extract_field_names(&open_body, "self.", ".is_some()");
+        // `tax_inputs_form` is gated on its own `dirty` flag, not bare presence (the park-tail
+        // carve-out) — spelled `self.tax_inputs_form.as_ref().is_some_and(|f| f.dirty)`, the one field
+        // whose "is this open" test is not a literal `.is_some()`. Special-cased so the domain still
+        // names it, rather than silently under-counting `any_mutation_surface_open`'s real field set.
+        if open_body.contains("self.tax_inputs_form.as_ref().is_some_and(") {
+            open_set.insert("tax_inputs_form".to_string());
+        }
+
+        assert!(
+            dispatch_set.len() > 40 && clear_set.len() > 40 && open_set.len() > 40,
+            "sanity: the extraction itself must find ~47 fields in each (an empty/tiny set means the \
+             scan broke — e.g. a renamed fn — not that the invariant holds): dispatch={}, clear={}, \
+             open={}",
+            dispatch_set.len(),
+            clear_set.len(),
+            open_set.len()
+        );
+
+        let dispatch_minus_clear: Vec<_> = dispatch_set.difference(&clear_set).collect();
+        let clear_minus_dispatch: Vec<_> = clear_set.difference(&dispatch_set).collect();
+        assert!(
+            dispatch_minus_clear.is_empty() && clear_minus_dispatch.is_empty(),
+            "handle_key's dispatch set and close_all_mutation_surfaces' clear set must be IDENTICAL — \
+             a surface in one but not the other is the shipped Critical's exact shape. Only in \
+             dispatch: {dispatch_minus_clear:?}; only in clear: {clear_minus_dispatch:?}"
+        );
+
+        let dispatch_minus_open: Vec<_> = dispatch_set.difference(&open_set).collect();
+        let open_minus_dispatch: Vec<_> = open_set.difference(&dispatch_set).collect();
+        assert!(
+            dispatch_minus_open.is_empty() && open_minus_dispatch.is_empty(),
+            "handle_key's dispatch set and any_mutation_surface_open's checked set must be IDENTICAL \
+             — a drift here makes fact 2 (\"a screen closed\") silently wrong, not merely stale. Only \
+             in dispatch: {dispatch_minus_open:?}; only in open-check: {open_minus_dispatch:?}"
+        );
+
+        assert!(
+            !dispatch_set.contains("defensive_dashboard"),
+            "defensive_dashboard must stay OUT of all three sets — see this test's doc comment for why"
+        );
+    }
+
+    /// The two openers that DELIBERATELY keep the ORIGINAL `residue_latch_status()` rather than the
+    /// combined `stale_or_residue_latch_status()` — D-7's export route stays reachable while stale
+    /// because these two do NOT additionally refuse on `stale_after_write`. Referenced by both
+    /// directions of guard (b).
+    const PLAIN_LATCH_OPENERS: [&str; 2] = ["execute_defensive_export", "open_defensive_filing"];
+
+    /// Assignment sites that are legitimately EXEMPT from calling `stale_or_residue_latch_status()`
+    /// THEMSELVES, because each is reachable ONLY from inside an ALREADY-gated parent surface — that
+    /// parent's own `open_*` fn already took the combined latch before the parent field went `Some`, so
+    /// by the time flow reaches one of these, staleness/residue was already checked one call up. The
+    /// one exception, `refresh_defensive_dashboard`, is justified differently (see its own entry). Each
+    /// entry names its parent surface (or reason) explicitly, so the exemption is grep-checkable rather
+    /// than a name pattern (e.g. matching every `handle_*_key` or `open_*_modal`).
+    const NESTED_EXEMPT_OPENERS: &[(&str, &str)] = &[
+        ("handle_form_key", "profile_form"),
+        ("handle_ci_income_form_key", "classify_inbound_flow"),
+        ("handle_ci_gift_form_key", "classify_inbound_flow"),
+        ("handle_ci_self_transfer_form_key", "classify_inbound_flow"),
+        ("handle_ro_field_form_key", "reclassify_outflow_flow"),
+        ("handle_me_choose_key", "method_election_flow"),
+        ("handle_ri_field_form_key", "reclassify_income_flow"),
+        ("handle_sfmv_field_form_key", "set_fmv_flow"),
+        ("handle_void_list_key", "void_flow"),
+        ("handle_sl_lots_form_key", "select_lots_flow"),
+        ("handle_dd_field_form_key", "set_donation_details_flow"),
+        ("handle_lt_target_pick_key", "link_transfer_flow"),
+        ("handle_cr_acquire_form_key", "classify_raw_flow"),
+        ("handle_cr_income_form_key", "classify_raw_flow"),
+        ("handle_rc_choose_key", "resolve_conflict_flow"),
+        ("open_safe_harbor_allocate_modal", "safe_harbor_allocate_flow"),
+        ("open_bulk_link_modal", "bulk_link_flow"),
+        ("open_bulk_sti_modal", "bulk_sti_flow"),
+        ("open_bulk_resolve_modal", "bulk_resolve_flow"),
+        ("open_bulk_void_modal", "bulk_void_flow"),
+        ("open_bulk_reclassify_outflow_modal", "bulk_reclassify_outflow_flow"),
+        ("open_match_self_transfers_modal", "match_self_transfers_flow"),
+        ("open_optimize_accept_modal", "optimize_accept_flow"),
+        (
+            "refresh_defensive_dashboard",
+            "REFRESH, not OPEN: called only (a) from apply_reprojection's Ok arm, itself guarded by \
+             `defensive_dashboard.is_some()` — i.e. only when the dashboard was ALREADY open, having \
+             passed its own combined-latch gate at open_defensive_filing — immediately after a fresh \
+             successful reprojection, or (b) from execute_defensive_export (one of the two \
+             PLAIN_LATCH_OPENERS), again immediately after ITS OWN fresh successful reprojection. \
+             Staleness cannot apply at either call site: the reprojection that triggers the refresh \
+             has just succeeded.",
+        ),
+    ];
+
+    /// Guard (b). With TWO latch functions, "contains a check" stopped being the property that matters
+    /// — a silent downgrade of any combined opener to the original `residue_latch_status()` would still
+    /// pass a mere presence test, and that downgrade is the path to a `DeclarePlan`/`PromotePlan` built
+    /// off a stale image. Asserts the exact PARTITION, both directions:
+    /// - the set of functions calling `residue_latch_status()` is EXACTLY `PLAIN_LATCH_OPENERS`;
+    /// - every OTHER assignment of an `EditorApp` surface field to `Some(..)` — across `main.rs` AND
+    ///   `editor.rs`, non-test — is in a function that either calls `stale_or_residue_latch_status()`
+    ///   itself, or is one of the two plain-latch exceptions, or is on the explicit, justified
+    ///   `NESTED_EXEMPT_OPENERS` allowlist.
+    ///
+    /// Domain is deliberately every `= Some(..)` SITE, not `fn open_*` — the latter misses every site
+    /// that opens a surface from INSIDE a `handle_*_key`/`open_*_modal` once its parent flow is already
+    /// dispatched (15 `handle_*_key` sites + 8 `open_*_modal` sites + the `refresh_defensive_dashboard`
+    /// special case = the 24-entry `NESTED_EXEMPT_OPENERS` above). Missing this domain correction is the
+    /// same failure mode that produced the shipped chain-A Critical, one level deeper.
+    ///
+    /// Mutation: flipped `open_declare_flow`'s `app.stale_or_residue_latch_status()` to
+    /// `app.residue_latch_status()` — RED on BOTH directions independently: direction 1's plain-caller
+    /// set gained `"open_declare_flow"` (≠ `PLAIN_LATCH_OPENERS`), and direction 2's `declare_flow`
+    /// assignment site's enclosing fn no longer called the combined latch and is on no exempt list.
+    /// Restored via a `cp` backup (never `git checkout --`) and re-ran — GREEN.
+    #[test]
+    fn exactly_two_openers_use_the_plain_latch_and_every_other_opener_uses_the_combined_one() {
+        let main_src =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/main.rs")).unwrap();
+        let editor_src =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/editor.rs")).unwrap();
+        let main_starts = fn_starts(&main_src);
+        let editor_starts = fn_starts(&editor_src);
+
+        // Direction 1: which functions call the PLAIN `residue_latch_status()` (not the combined one)?
+        // ".residue_latch_status()" (WITH the leading dot) never occurs as a substring of
+        // ".stale_or_residue_latch_status()" — the character immediately before "residue" there is "_"
+        // (from "…or_"), not ".", so the literal substring check already excludes the combined
+        // spelling with no further filtering needed. The two DEFINING functions are excluded by name:
+        // `stale_or_residue_latch_status` calls `self.residue_latch_status()` as its OWN
+        // implementation (`.or_else(|| self.stale_reason())`), which is not an "opener" bypass.
+        let mut plain_callers: std::collections::BTreeSet<String> =
+            std::collections::BTreeSet::new();
+        for (src, starts) in [(&main_src, &main_starts), (&editor_src, &editor_starts)] {
+            for (i, line) in production_lines(src) {
+                let code = line.split("//").next().unwrap_or("");
+                if code.contains(".residue_latch_status()") {
+                    if let Some(name) = enclosing_fn(starts, i) {
+                        if name != "residue_latch_status" && name != "stale_or_residue_latch_status"
+                        {
+                            plain_callers.insert(name.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        let expected_plain: std::collections::BTreeSet<String> =
+            PLAIN_LATCH_OPENERS.iter().map(|s| s.to_string()).collect();
+        assert_eq!(
+            plain_callers, expected_plain,
+            "the set of functions calling the ORIGINAL residue_latch_status() must be EXACTLY the two \
+             D-7 exceptions — anything else here is either a downgrade (a combined opener silently \
+             lost its stale coverage) or an upgrade of one of the two exceptions (which would silently \
+             break D-7's export route)"
+        );
+
+        // Direction 2: domain = every `(app|self).<surface field> = Some(..)` assignment, across BOTH
+        // files, non-test. `defensive_dashboard` joins the 47-field dispatch set (guard (a)'s own
+        // extraction) because it is exactly what the two PLAIN_LATCH_OPENERS gate.
+        let mut surface_fields = dispatch_surface_fields(&main_src);
+        surface_fields.insert("defensive_dashboard".to_string());
+
+        let mut violations = Vec::new();
+        for (src, starts, path) in [
+            (&main_src, &main_starts, "main.rs"),
+            (&editor_src, &editor_starts, "editor.rs"),
+        ] {
+            for (i, line) in production_lines(src) {
+                let code = line.split("//").next().unwrap_or("");
+                for field in &surface_fields {
+                    let opened = code.contains(&format!("app.{field} = Some("))
+                        || code.contains(&format!("self.{field} = Some("));
+                    if !opened {
+                        continue;
+                    }
+                    let Some(name) = enclosing_fn(starts, i) else {
+                        continue;
+                    };
+                    if expected_plain.contains(name) {
+                        continue; // recognized exception — verified independently by direction 1
+                    }
+                    if NESTED_EXEMPT_OPENERS.iter().any(|(n, _)| *n == name) {
+                        continue; // explicit, justified, grep-checkable exemption
+                    }
+                    let body = fn_body(src, starts, name);
+                    if !body.contains(".stale_or_residue_latch_status()") {
+                        violations.push(format!(
+                            "{path}:{} — `{name}` sets `{field}` to Some(..) without calling \
+                             stale_or_residue_latch_status() and is on no exempt list",
+                            i + 1
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "every opener outside the two named exceptions must call the COMBINED latch: \
+             {violations:#?}"
+        );
+    }
+
+    /// Tail-class guard (guard (d)). A grep for `build_snapshot(` is unsound: the export spells it
+    /// `.map(btctax_tui::unlock::build_snapshot)` — NO parens, since it is passed as a function VALUE to
+    /// `.map`, not called directly — the same escape by which three write tails once evaded an earlier
+    /// literal-string count (DESIGN.md §2.5's three bespoke prefixes). Tokens on the BARE identifier
+    /// `build_snapshot` (word-boundaried both sides via `contains_word`), over non-test,
+    /// comment-stripped lines of `main.rs` + `editor.rs`, with a two-entry allowlist: `after_write`'s
+    /// own rebuild and `execute_defensive_export`'s — the one production re-projection that can run
+    /// while the stale latch is armed (D-7). Controller-verified: these are currently the only two
+    /// production sites that name it.
+    ///
+    /// Mutation: added a THIRD bare reference,
+    /// `let _ = app.session.as_ref().map(btctax_tui::unlock::build_snapshot);`, inside
+    /// `refresh_defensive_dashboard` (a function NOT on the allowlist) — RED (`main.rs:… in
+    /// refresh_defensive_dashboard` appeared in the violations list). Restored via a `cp` backup (never
+    /// `git checkout --`) and re-ran — GREEN.
+    #[test]
+    fn build_snapshot_is_named_only_by_after_write_and_the_export() {
+        const ALLOWED: [&str; 2] = ["after_write", "execute_defensive_export"];
+
+        let main_src =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/main.rs")).unwrap();
+        let editor_src =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/editor.rs")).unwrap();
+
+        let mut found_in: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let mut violations = Vec::new();
+        for (src, path) in [(&main_src, "main.rs"), (&editor_src, "editor.rs")] {
+            let starts = fn_starts(src);
+            for (i, line) in production_lines(src) {
+                let code = line.split("//").next().unwrap_or("");
+                if contains_word(code, "build_snapshot") {
+                    match enclosing_fn(&starts, i) {
+                        Some(name) if ALLOWED.contains(&name) => {
+                            found_in.insert(name.to_string());
+                        }
+                        Some(name) => violations.push(format!("{path}:{} in {name}", i + 1)),
+                        None => {
+                            violations.push(format!("{path}:{} (no enclosing fn found)", i + 1))
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "build_snapshot must be named ONLY by after_write and execute_defensive_export: \
+             {violations:#?}"
+        );
+        assert_eq!(
+            found_in,
+            ALLOWED
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<std::collections::BTreeSet<_>>(),
+            "both allowlisted sites must actually still name build_snapshot — a silent removal from \
+             one narrows this guard's real coverage without anyone noticing"
+        );
+    }
+
     // ── P3 style-aware TUI golden (SPEC §8) — the editor's Browse screen ──────
     // `#[cfg(unix)]` (I4): the Browse title renders a joined vault path. Fixed path + synthetic snapshot
     // + a pinned clock ⇒ a pure function of (code, synthetic state). Complements the clock-seam guard
@@ -22305,8 +22873,28 @@ mod tests {
         );
     }
 
-    /// CONSUMER test: while `rollback_failed` is set, EVERY mutating opener (p/c/o/r/f/v/S/d/a)
-    /// refuses with the CRITICAL residue status and opens no flow. Mirrors the attest ERRLATCH loop.
+    /// The full 25-key Browse opener set (guard (b)'s `PLAIN_LATCH_OPENERS`/`NESTED_EXEMPT_OPENERS`
+    /// tables are keyed by FUNCTION name; this is the same set keyed by the BROWSE KEY that reaches
+    /// each one via `handle_key`'s screen dispatch — `w` included, since `open_defensive_filing` keeps
+    /// the plain `residue_latch_status()`, which STILL covers `rollback_failed`; only `stale_after_write`
+    /// is the one status `w` must ride through (D-7), which is why the STALE sibling KAT below excludes
+    /// it and this one does not). Shared so the two KATs cannot silently drift apart on membership.
+    const ALL_25_OPENER_KEYS: [char; 25] = [
+        'p', 'T', 'c', 'o', 'r', 'f', 'v', 'S', 'd', 'L', 'u', 'a', 'A', 'b', 'B', 'I', 'C', 'V',
+        'O', 'm', 'i', 'z', 'e', 'P', 'w',
+    ];
+
+    /// CONSUMER test: while `rollback_failed` is set, EVERY mutating opener refuses with the CRITICAL
+    /// residue status and opens no mutation surface. Mirrors the attest ERRLATCH loop.
+    ///
+    /// ★ T8: extended from the shipped 9 keys (`p/c/o/r/f/v/S/d/a`) to the full 25 — the shipped
+    /// Critical chain B (`pseudo_approve_opener_refuses_while_the_residue_latch_is_armed`, below) was
+    /// missed for exactly this reason: "The shipped opener KAT loops only 9 of 25 keys." Checks
+    /// `!app.any_mutation_surface_open()` (Task 3's own fact-2 predicate, guard (a)-verified to equal
+    /// `close_all_mutation_surfaces`' clear set) rather than a hand-picked field list, so a 48th surface
+    /// added later is covered here for free. `w` is included and must ALSO refuse (rollback_failed is
+    /// one of the two statuses `open_defensive_filing`'s plain `residue_latch_status()` reports) —
+    /// contrast the STALE sibling KAT directly below, where `w` is the one deliberate exclusion.
     #[test]
     fn kat_rollback_failed_latch_refuses_all_openers() {
         let dir = tempfile::tempdir().unwrap();
@@ -22317,20 +22905,17 @@ mod tests {
         let mut app = open_app(&vault, pp_str);
         app.rollback_failed = true;
 
-        for k in ['p', 'c', 'o', 'r', 'f', 'v', 'S', 'd', 'a'] {
+        for k in ALL_25_OPENER_KEYS {
             app.status = None;
             handle_key(&mut app, press(KeyCode::Char(k)));
             assert!(
-                app.profile_form.is_none()
-                    && app.classify_inbound_flow.is_none()
-                    && app.reclassify_outflow_flow.is_none()
-                    && app.reclassify_income_flow.is_none()
-                    && app.set_fmv_flow.is_none()
-                    && app.void_flow.is_none()
-                    && app.select_lots_flow.is_none()
-                    && app.set_donation_details_flow.is_none()
-                    && app.safe_harbor_attest_flow.is_none(),
-                "rollback latch: opener '{k}' must open no mutating flow"
+                !app.any_mutation_surface_open(),
+                "rollback latch: opener '{k}' must open no mutating surface"
+            );
+            assert!(
+                app.defensive_dashboard.is_none(),
+                "rollback latch: opener '{k}' must not enter the dashboard either (it gates the \
+                 Declare/Promote write intents reachable from it)"
             );
             assert!(
                 app.status
@@ -22341,6 +22926,63 @@ mod tests {
                 app.status
             );
         }
+    }
+
+    /// Guard (c)'s sibling on the READ side of the same difference: while `stale_after_write` is armed,
+    /// every mutating opener EXCEPT `w` refuses via `stale_or_residue_latch_status()` — `w` is D-7's
+    /// deliberate exception (`open_defensive_filing` keeps the plain `residue_latch_status()`, which
+    /// `stale_after_write` never trips), proven POSITIVELY reachable by
+    /// `w_then_x_still_exports_while_the_stale_latch_is_armed_from_a_browse_tail` elsewhere in this
+    /// file. DESIGN.md §3.5(c) mandates this as a SEPARATE loop from the rollback one above ("the two
+    /// latches need different key sets... 24 for the stale latch (minus `w`)") — folding them into one
+    /// loop would hide that `w` is excluded on purpose, not by omission.
+    ///
+    /// Mutation: reverted `open_bulk_classify_income_flow` (`I`) to the plain `residue_latch_status()`
+    /// — RED (`app.bulk_income_flow` was `Some(..)` after `handle_key(&mut app, press('I'))` while
+    /// armed — this is the exact tripwire named at `i_key_bulk_income_opener_refuses_while_the_stale_
+    /// latch_is_armed`, reproduced here across the FULL key set rather than one key in isolation).
+    /// Restored via a `cp` backup (never `git checkout --`) and re-ran — GREEN.
+    #[test]
+    fn kat_stale_latch_refuses_all_openers_except_w() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-stale-latch-pass";
+        seed_transfer_in_vault(&vault, &key, pp_str);
+        let mut app = open_app(&vault, pp_str);
+        app.stale_after_write = Some("boom".to_string());
+
+        for k in ALL_25_OPENER_KEYS {
+            if k == 'w' {
+                continue; // D-7: the one deliberate exception — must NOT be in this refusal loop
+            }
+            app.status = None;
+            handle_key(&mut app, press(KeyCode::Char(k)));
+            assert!(
+                !app.any_mutation_surface_open(),
+                "stale latch: opener '{k}' must open no mutating surface"
+            );
+            assert!(
+                app.status
+                    .as_deref()
+                    .map(|s| s.contains("refused"))
+                    .unwrap_or(false),
+                "stale latch: opener '{k}' must show the stale refusal status; got: {:?}",
+                app.status
+            );
+        }
+
+        // The positive half of the same fact: 'w' must remain reachable while armed. This is deliberately
+        // a LIGHT check (screen transition only) — the full export-still-works assertion belongs to
+        // `w_then_x_still_exports_while_the_stale_latch_is_armed_from_a_browse_tail`; duplicating its
+        // fixture/assertions here would just be two tests proving the same thing one way.
+        app.status = None;
+        handle_key(&mut app, press(KeyCode::Char('w')));
+        assert_eq!(
+            app.screen,
+            EditorScreen::DefensiveFiling,
+            "'w' must remain reachable while stale (D-7) — excluded from the loop above on purpose"
+        );
     }
 
     /// ★ SHIPPED CRITICAL, chain A. `close_all_mutation_surfaces` omitted `bulk_income_flow` (and
