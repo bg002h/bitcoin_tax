@@ -3,6 +3,10 @@
 use crate::config::CliConfig;
 use btctax_adapters::FileReport;
 use btctax_core::conventions::{tax_date, Sat, Usd, TRANSITION_DATE};
+use btctax_core::defensive::discovery::{Shortfall, Triage};
+use btctax_core::defensive::{
+    Advisory, DefensiveFilingView, PoolShort, SavingFlavor, TrancheRow, TrancheStatus,
+};
 use btctax_core::persistence::ImportReport;
 use btctax_core::DonationDetails;
 use btctax_core::{
@@ -4078,5 +4082,366 @@ mod decision_class_tests {
             }),
             "donate"
         );
+    }
+}
+
+// ── Defensive Filing status (Approach-B) — `btctax defensive status` ──────────────────────────────
+//
+// Plain-text render of `btctax_core::defensive::DefensiveFilingView` — the SAME pure read the
+// (now-retired) TUI wizard dashboard rendered. Every figure/advisory here is `journey_view`'s own
+// output; this function derives no tax logic, only text. Each section names the exact verb to run
+// next, so a filer can act without a second reference (mirrors `render_events_list`'s own convention
+// of a copy-pasteable `ref`).
+
+fn render_defensive_candidate(s: &Shortfall) -> String {
+    let wallet = s
+        .wallet
+        .as_ref()
+        .map(wallet_label)
+        .unwrap_or_else(|| "(no wallet on this shortfall)".to_string());
+    let mut out = format!(
+        "  {}  {wallet}  {}  short {} BTC (fee {} BTC)\n",
+        s.event.canonical(),
+        s.date,
+        fmt_btc(s.short_sat),
+        fmt_btc(s.fee_sat)
+    );
+    match &s.wallet {
+        Some(w) => {
+            let _ = writeln!(
+                out,
+                "    -> btctax declare-tranche --amount {} --wallet {} --window-start <earliest \
+                 plausible date> --window-end {}",
+                fmt_btc(s.short_sat),
+                wallet_label(w),
+                s.date
+            );
+        }
+        None => {
+            let _ = writeln!(
+                out,
+                "    -> btctax declare-tranche --amount {} --wallet <pick one — this shortfall \
+                 carries none> --window-start <earliest plausible date> --window-end {}",
+                fmt_btc(s.short_sat),
+                s.date
+            );
+        }
+    }
+    out
+}
+
+fn render_defensive_resolve_first(shortfall: &Shortfall, blocker: BlockerKind) -> String {
+    let wallet = shortfall
+        .wallet
+        .as_ref()
+        .map(wallet_label)
+        .unwrap_or_else(|| "(no wallet on this shortfall)".to_string());
+    format!(
+        "  {}  {wallet}  {}  short {} BTC — blocked by {blocker:?}\n    -> resolve the blocker \
+         first (see `btctax events list` / `btctax verify`), then re-run `btctax defensive status`\n",
+        shortfall.event.canonical(),
+        shortfall.date,
+        fmt_btc(shortfall.short_sat)
+    )
+}
+
+fn render_defensive_advisory(a: &Advisory) -> String {
+    match a {
+        Advisory::OverCovered { by_sat } => format!(
+            "      [advisory] this tranche is larger than the shortfall it covers by {} BTC — if a \
+             later import supplied those coins, promoting files an estimated basis on documented \
+             coins\n",
+            fmt_btc(*by_sat)
+        ),
+        Advisory::NowDisplacing => "      [advisory] this promoted floor now displaces documented \
+             basis on a real disposal\n"
+            .to_string(),
+        Advisory::MethodInversion(msg) => format!("      [advisory] {msg}\n"),
+        Advisory::TrancheDip(msg) => format!("      [advisory] {msg}\n"),
+        Advisory::FeeOnlyPromoteNoop => {
+            "      [advisory] the shortfall(s) this tranche covers are \
+             all fee-component — promoting would only ever substantiate fee-sat basis, never \
+             principal\n"
+                .to_string()
+        }
+        Advisory::WouldDisplaceIfPromoted => {
+            "      [advisory] promoting this tranche would displace \
+             documented basis on a real disposal\n"
+                .to_string()
+        }
+    }
+}
+
+fn render_defensive_saving(s: &SavingFlavor) -> String {
+    match s {
+        SavingFlavor::ComputedTax { year, delta } => format!(
+            "      [assess] promoting this tranche would save an estimated ${} in federal tax for \
+             {year} (clamped, never negative)\n",
+            fmt_money(*delta)
+        ),
+        SavingFlavor::Uncomputable { year, gain_delta } => format!(
+            "      [assess] {year} cannot price a tax dollar figure yet (no bundled table / no \
+             stored tax profile / a Hard blocker) — the realized-gain delta alone is ${}\n",
+            fmt_money(*gain_delta)
+        ),
+        SavingFlavor::Named(msg) => format!("      [assess] {msg}\n"),
+    }
+}
+
+fn render_defensive_tranche(row: &TrancheRow) -> String {
+    let mut out = format!(
+        "  {}  {} BTC  {}\n",
+        row.target.canonical(),
+        fmt_btc(row.sat),
+        match row.status {
+            TrancheStatus::DeclaredZero => "declared ($0, revocable)",
+            TrancheStatus::Promoted => "promoted (filed, not revocable)",
+        }
+    );
+    if row.status == TrancheStatus::DeclaredZero {
+        let _ = writeln!(
+            out,
+            "    -> btctax promote-tranche {} --provenance <kind> --part-ii-file <path> \
+             [--i-acknowledge <phrase>]",
+            row.target.canonical()
+        );
+    }
+    for s in &row.clamped_saving {
+        out.push_str(&render_defensive_saving(s));
+    }
+    for a in &row.advisories {
+        out.push_str(&render_defensive_advisory(a));
+    }
+    out
+}
+
+fn render_defensive_pool_short(ps: &PoolShort) -> String {
+    format!(
+        "  {:?}: short {} BTC ({} BTC live in tranche(s) here) — don't declare again; review the \
+         window/wallet on the existing tranche(s) instead\n",
+        ps.pool,
+        fmt_btc(ps.short_sat),
+        fmt_btc(ps.live_tranche_sat)
+    )
+}
+
+/// `btctax defensive status`: the SAME `btctax_core::defensive::journey_view` the (now-retired) TUI
+/// wizard dashboard rendered, as plain text. No new computation — every figure/advisory here is
+/// `view`'s own output; this function derives no tax logic. Each section names the exact verb to run
+/// next.
+pub fn render_defensive_status(view: &DefensiveFilingView) -> String {
+    let mut out = String::new();
+
+    let nothing_outstanding = view.candidates.is_empty()
+        && view.resolve_first.is_empty()
+        && view.tranches.is_empty()
+        && view.still_short.is_empty()
+        && view.flagged_years.is_empty();
+
+    if nothing_outstanding {
+        let _ = writeln!(
+            out,
+            "Nothing outstanding right now — no declare candidate, no blocked resolve-first \
+             shortfall, no live tranche, and no flagged export year."
+        );
+        return out;
+    }
+
+    if !view.candidates.is_empty() {
+        let _ = writeln!(
+            out,
+            "Declare candidates ({}) — shortfalls a new $0 tranche could cover now:",
+            view.candidates.len()
+        );
+        for s in &view.candidates {
+            out.push_str(&render_defensive_candidate(s));
+        }
+        out.push('\n');
+    }
+
+    if !view.resolve_first.is_empty() {
+        let _ = writeln!(
+            out,
+            "Resolve first ({}) — an open blocker on the same pool/timeframe must clear before \
+             these can be declared:",
+            view.resolve_first.len()
+        );
+        for t in &view.resolve_first {
+            if let Triage::ResolveFirst { shortfall, blocker } = t {
+                out.push_str(&render_defensive_resolve_first(shortfall, *blocker));
+            }
+        }
+        out.push('\n');
+    }
+
+    if !view.tranches.is_empty() {
+        let _ = writeln!(out, "Live tranches ({}):", view.tranches.len());
+        for row in &view.tranches {
+            out.push_str(&render_defensive_tranche(row));
+        }
+        out.push('\n');
+    }
+
+    if !view.still_short.is_empty() {
+        let _ = writeln!(out, "Pools still short ({}):", view.still_short.len());
+        for ps in &view.still_short {
+            out.push_str(&render_defensive_pool_short(ps));
+        }
+        out.push('\n');
+    }
+
+    if !view.flagged_years.is_empty() {
+        let years: Vec<String> = view.flagged_years.iter().map(|y| y.to_string()).collect();
+        let _ = writeln!(
+            out,
+            "Flagged years needing (re-)export attention ({}): {}",
+            years.len(),
+            years.join(", ")
+        );
+        let _ = writeln!(
+            out,
+            "    -> btctax export-irs-pdf --tax-year <year>  (or `btctax export-snapshot` for the \
+             CSV projection)"
+        );
+        out.push('\n');
+    }
+
+    if view.safe_harbor_blocked {
+        let _ = writeln!(
+            out,
+            "Safe-harbor allocation: BLOCKED — v1 keeps a pre-2025 conservative-filing tranche and \
+             a safe-harbor allocation mutually exclusive."
+        );
+    }
+
+    // Trim the single trailing blank line a section may have left.
+    if out.ends_with("\n\n") {
+        out.pop();
+    }
+    out
+}
+
+#[cfg(test)]
+mod defensive_status_tests {
+    use super::*;
+    use btctax_core::identity::EventId;
+    use std::collections::BTreeSet;
+    use time::macros::date;
+
+    fn empty_view() -> DefensiveFilingView {
+        DefensiveFilingView {
+            candidates: vec![],
+            resolve_first: vec![],
+            tranches: vec![],
+            still_short: vec![],
+            flagged_years: BTreeSet::new(),
+            safe_harbor_blocked: false,
+        }
+    }
+
+    #[test]
+    fn nothing_outstanding_is_a_single_line_all_clear() {
+        let out = render_defensive_status(&empty_view());
+        assert!(out.contains("Nothing outstanding right now"), "{out}");
+    }
+
+    #[test]
+    fn candidate_names_the_declare_tranche_verb_with_its_own_amount_wallet_and_window_end() {
+        let mut view = empty_view();
+        view.candidates.push(Shortfall {
+            event: EventId::decision(7),
+            wallet: Some(WalletId::Exchange {
+                provider: "coinbase".into(),
+                account: "default".into(),
+            }),
+            date: date!(2019 - 03 - 14),
+            short_sat: 5_000_000,
+            fee_sat: 0,
+        });
+        let out = render_defensive_status(&view);
+        assert!(out.contains("Declare candidates (1)"), "{out}");
+        assert!(out.contains("decision|7"), "{out}");
+        assert!(
+            out.contains(
+                "btctax declare-tranche --amount 0.05000000 \
+                 --wallet exchange:coinbase:default"
+            ),
+            "{out}"
+        );
+        assert!(out.contains("--window-end 2019-03-14"), "{out}");
+    }
+
+    #[test]
+    fn resolve_first_names_the_blocker_and_the_re_run_remedy_not_declare() {
+        let mut view = empty_view();
+        view.resolve_first.push(Triage::ResolveFirst {
+            shortfall: Shortfall {
+                event: EventId::decision(9),
+                wallet: Some(WalletId::SelfCustody {
+                    label: "cold".into(),
+                }),
+                date: date!(2020 - 01 - 01),
+                short_sat: 1_000_000,
+                fee_sat: 0,
+            },
+            blocker: BlockerKind::UnknownBasisInbound,
+        });
+        let out = render_defensive_status(&view);
+        assert!(out.contains("Resolve first (1)"), "{out}");
+        assert!(out.contains("blocked by UnknownBasisInbound"), "{out}");
+        assert!(
+            !out.contains("declare-tranche"),
+            "a resolve-first row must not offer the declare verb: {out}"
+        );
+    }
+
+    #[test]
+    fn declared_zero_tranche_offers_promote_promoted_tranche_does_not() {
+        let mut view = empty_view();
+        view.tranches.push(TrancheRow {
+            target: EventId::decision(3),
+            sat: 5_000_000,
+            status: TrancheStatus::DeclaredZero,
+            clamped_saving: vec![],
+            advisories: vec![],
+        });
+        view.tranches.push(TrancheRow {
+            target: EventId::decision(5),
+            sat: 2_000_000,
+            status: TrancheStatus::Promoted,
+            clamped_saving: vec![],
+            advisories: vec![],
+        });
+        let out = render_defensive_status(&view);
+        assert!(
+            out.contains("btctax promote-tranche decision|3"),
+            "declared ($0) row must offer promote-tranche: {out}"
+        );
+        assert!(
+            !out.contains("promote-tranche decision|5"),
+            "an already-promoted row must not offer promote-tranche again: {out}"
+        );
+        assert!(out.contains("declared ($0, revocable)"), "{out}");
+        assert!(out.contains("promoted (filed, not revocable)"), "{out}");
+    }
+
+    #[test]
+    fn flagged_years_name_the_export_verb() {
+        let mut view = empty_view();
+        view.flagged_years.insert(2024);
+        view.flagged_years.insert(2025);
+        let out = render_defensive_status(&view);
+        assert!(out.contains("2024, 2025"), "{out}");
+        assert!(out.contains("btctax export-irs-pdf --tax-year"), "{out}");
+    }
+
+    #[test]
+    fn safe_harbor_blocked_is_named() {
+        let mut view = empty_view();
+        view.safe_harbor_blocked = true;
+        // Needs a non-empty section too, else the all-clear branch short-circuits before this line.
+        view.flagged_years.insert(2024);
+        let out = render_defensive_status(&view);
+        assert!(out.contains("Safe-harbor allocation: BLOCKED"), "{out}");
     }
 }

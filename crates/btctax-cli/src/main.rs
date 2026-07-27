@@ -2,7 +2,7 @@
 //! non-interactive use; otherwise a secure prompt), calls one library command, renders, and sets the
 //! exit code (non-zero on FR9 hard blockers / on any CliError). NO business logic lives here.
 use btctax_cli::cli::{
-    Cli, Command, Events, FeeArg, IncomeCmd, MethodArg, Optimize, OutKindArg, Pseudo,
+    Cli, Command, Defensive, Events, FeeArg, IncomeCmd, MethodArg, Optimize, OutKindArg, Pseudo,
     PseudoKindArg, Reconcile, SelfTransferActionArg, WhatIf,
 };
 use btctax_cli::{cmd, eventref, render, CliError};
@@ -1040,6 +1040,18 @@ fn run() -> Result<ExitCode, CliError> {
                 };
                 cmd::tax::set_profile(vault, &pp, year, profile, force)?;
                 println!("Tax profile for {year} saved.");
+            }
+        }
+        Command::Defensive(Defensive::Status) => {
+            let report = cmd::defensive::status(vault, &passphrase(false)?, now)?;
+            print!("{}", render::render_defensive_status(&report.view));
+            // Approach-B experimental disclosure (`design/approach-b-experimental-notice`): this is a
+            // READ, not itself an act of filing, so it stays gated on `uses_approach_b` — the SAME
+            // predicate `report`/`export-*` gate their own stderr disclosure on — rather than the
+            // (now-retired) dashboard's "being here at all is using it" rule, which only ever applied
+            // to the interactive wizard surface this replaces.
+            if report.experimental_notice_active {
+                eprint!("\n⚠ {}", btctax_core::experimental::NOTICE.plain_text());
             }
         }
     }

@@ -1,8 +1,9 @@
 //! Approach-B experimental disclosure (`design/approach-b-experimental-notice`) — CLI wiring KATs.
 //!
 //! The notice is INTERFACE-ONLY: it gates on `btctax_core::experimental::uses_approach_b`, and appears
-//! on stderr for `declare-tranche` / `promote-tranche` / `export-irs-pdf` (crypto slice + full-return) —
-//! never stdout (stdout is parsed/piped). It is deliberately **never** written to disk: no sibling file,
+//! on stderr for `declare-tranche` / `promote-tranche` / `export-irs-pdf` (crypto slice + full-return) /
+//! `defensive status` (`defensive_status_cli.rs` — the read-only status command that replaced the
+//! retired TUI wizard dashboard) — never stdout (stdout is parsed/piped). It is deliberately **never** written to disk: no sibling file,
 //! no field, nothing — the export directory is what a filer mails or hands to a preparer, and a copy of
 //! this notice riding along with it would be the same hazard as printing it on the 8275 itself.
 //!
@@ -216,9 +217,9 @@ fn declare_tranche_notice_reaches_stderr_not_stdout() {
 /// A command with NO relationship to Approach-B at all (`report`, on a completely fresh, empty vault —
 /// no import, no tranche, nothing) never emits the notice on either stream. The notice's call sites are
 /// a closed, hand-enumerated set (`declare-tranche`, `promote-tranche`, `export-snapshot`,
-/// `export-irs-pdf`); `report` is not one of them, so this pins that the biconditional's "silent
-/// elsewhere" half actually holds for a real, unrelated command driven through the real binary — not
-/// merely "no test happens to call `NOTICE` here".
+/// `export-irs-pdf`, `defensive status`); `report` is not one of them, so this pins that the
+/// biconditional's "silent elsewhere" half actually holds for a real, unrelated command driven through
+/// the real binary — not merely "no test happens to call `NOTICE` here".
 #[test]
 fn an_unrelated_command_on_a_fresh_vault_never_emits_the_notice() {
     let dir = tempfile::tempdir().unwrap();
