@@ -104,18 +104,61 @@ fn draw_defensive_filing(frame: &mut Frame, app: &EditorApp) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Reserve the NOTICE rows only when there IS a status (an empty screen keeps its full height).
+    // Reserve the NOTICE rows whenever there IS a status OR the stale latch is armed (D-7, DESIGN.md
+    // §2.4(a)) — the marker renders independent of `app.status`, so gating the reservation on
+    // `status.is_some()` alone leaves no rect for it to draw into from the SECOND keypress onward
+    // (`main.rs:494` clears `app.status` before every dispatch). An empty, unarmed screen keeps its
+    // full height, exactly as before.
     let status = app.status.as_deref();
-    let (content_area, notice_area) = match status {
-        Some(_) => {
-            let notice_h = DEFENSIVE_NOTICE_LINES.min(inner.height.saturating_sub(1));
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Min(0), Constraint::Length(notice_h)])
-                .split(inner);
-            (chunks[0], Some(chunks[1]))
-        }
-        None => (inner, None),
+    let armed = app.stale_after_write.is_some();
+
+    // The notice's actual content, built ONCE — used both to MEASURE how tall the reservation needs to
+    // be (below) and to draw it (at the bottom of this fn). Keeping these in lock-step BY CONSTRUCTION
+    // (one `Vec<Line>`, one wrap setting, shared between the measuring pass and the real render) is what
+    // makes the measured height provably match what is actually drawn.
+    let mut notice_lines: Vec<Line> = Vec::new();
+    if armed {
+        notice_lines.push(Line::from(Span::styled(
+            format!("  {STALE_MARKER_DEFENSIVE}"),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )));
+    }
+    if let Some(s) = status {
+        // The unrevertable-residue notice is the one status that must SHOUT (it tells the filer to quit
+        // NOW); every other refusal/outcome reads as an ordinary notice.
+        let style = if s.starts_with("CRITICAL") {
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Cyan)
+        };
+        notice_lines.push(Line::from(Span::styled(format!("  {s}"), style)));
+    }
+
+    let (content_area, notice_area) = if status.is_some() || armed {
+        // ★ fix round 2 Critical: a FLAT `DEFENSIVE_NOTICE_LINES` reservation whenever `status.is_some()`
+        // — regardless of that status's actual LENGTH — was itself the bug fix round 1 only half-fixed.
+        // It clipped `[x] export` with a 385-char status, a 36-char one, and even a ONE-CHARACTER one;
+        // worse, since `status.is_some()` is true on the ORDINARY (unarmed) mainline too — every
+        // declare/promote outcome message — raising `DEFENSIVE_NOTICE_LINES` 3→8 in the first commit
+        // silently regressed every unarmed filer's clipping cliff from ~9 candidates down to ~5. The
+        // reservation must be sized to what will ACTUALLY be drawn, not a worst-case constant reserved
+        // by mere PRESENCE. `content_sized_notice_height` measures it by rendering `notice_lines` into a
+        // throwaway buffer — the same wrap algorithm the real render below uses — capped at
+        // `DEFENSIVE_NOTICE_LINES` (the true worst case: the longest composed arm status stacked under
+        // the marker) so a pathologically long/unbounded status can't blow the reservation out further.
+        //
+        // Floor at 1: `.min(inner.height.saturating_sub(1))` yields 0 at a terminal height ≤ 3, which
+        // would silently drop the marker instead of shrinking it.
+        let notice_h = content_sized_notice_height(&notice_lines, inner.width)
+            .min(inner.height.saturating_sub(1))
+            .max(1);
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0), Constraint::Length(notice_h)])
+            .split(inner);
+        (chunks[0], Some(chunks[1]))
+    } else {
+        (inner, None)
     };
 
     // The Declare flow (Task 8), when open, takes over the content area — mirrors every other
@@ -137,10 +180,15 @@ fn draw_defensive_filing(frame: &mut Frame, app: &EditorApp) {
             .map(Line::from)
             .collect()
     } else if let Some(dash) = app.defensive_dashboard.as_ref() {
-        crate::defensive_dashboard::render_dashboard(&dash.view, dash.cursor)
-            .into_iter()
-            .map(Line::from)
-            .collect()
+        crate::defensive_dashboard::render_dashboard(
+            &dash.view,
+            dash.cursor,
+            dash.uncomputable,
+            app.stale_after_write.is_some(),
+        )
+        .into_iter()
+        .map(Line::from)
+        .collect()
     } else {
         vec![Line::from(
             "No dashboard state — press Esc to return to Browse.",
@@ -149,24 +197,106 @@ fn draw_defensive_filing(frame: &mut Frame, app: &EditorApp) {
     let para = Paragraph::new(lines).wrap(Wrap { trim: false });
     frame.render_widget(para, content_area);
 
-    if let (Some(rect), Some(s)) = (notice_area, status) {
-        // The unrevertable-residue notice is the one status that must SHOUT (it tells the filer to quit
-        // NOW); every other refusal/outcome reads as an ordinary notice.
-        let style = if s.starts_with("CRITICAL") {
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::Cyan)
-        };
-        let notice = Paragraph::new(Line::from(Span::styled(format!("  {s}"), style)))
-            .wrap(Wrap { trim: false });
+    // The fixed marker renders whenever armed, independent of `app.status` — DESIGN.md §2.4(a): "render,
+    // don't merely reserve". When a status is ALSO present, both appear, stacked. `notice_lines` was
+    // already built above (shared with the measuring pass).
+    if let Some(rect) = notice_area {
+        let notice = Paragraph::new(notice_lines).wrap(Wrap { trim: false });
         frame.render_widget(notice, rect);
     }
 }
 
-/// Rows reserved for `draw_defensive_filing`'s `app.status` NOTICE line — 3, so the longest shipped
-/// status (`on_persist_error`'s CRITICAL residue notice, ~230 chars) still renders in full on an 80-col
-/// terminal instead of clipping mid-sentence.
-const DEFENSIVE_NOTICE_LINES: u16 = 3;
+/// The fixed, `app.status`-independent claim BOTH armed screens show (D-7 marker — the THIRD
+/// specification of this marker; the first two were unbuildable, DESIGN.md §2.4). From the second
+/// keypress onward this is the only notice the filer sees on Browse (`main.rs:414`/`:494` clear
+/// `app.status` before every dispatch), so it names the CONSEQUENCE — "figures below predate your last
+/// write" — not the cause. Register precedent: the PSEUDO banner's own "FICTIONAL placeholders — DO NOT
+/// FILE" (`:388-393` below). Kept ≤ 78 cols (measured) so it never wraps inside Browse's own one-row
+/// marker constraint.
+const STALE_MARKER_CLAIM: &str =
+    "STALE — figures below predate your last write. DO NOT FILE from them.";
+
+/// DefensiveFiling's own marker: the same claim, PLUS the remedy sentence (DESIGN.md §2.4(c)) — unlike
+/// Browse, this screen has no separate footer or one-row slot of its own to carry the remedy, so it has
+/// to live in the marker text itself, not only in whatever `app.status` happens to hold at the moment.
+const STALE_MARKER_DEFENSIVE: &str =
+    "STALE — the figures on this screen predate your last write. DO NOT FILE from them. Quit and reopen \
+     the vault.";
+
+/// The CAP on the notice reservation both screens use — NOT a flat reservation size (★ fix round 2
+/// Critical: it was exactly that in fix round 1, and `status.is_some()` alone drove the flat 8 whether
+/// the status was 385 chars or 1, clipping `[x] export` at every length and regressing the ORDINARY
+/// unarmed mainline — every declare/promote outcome message — from a ~9-candidate clipping cliff to
+/// ~5). `content_sized_notice_height` below measures what will ACTUALLY be drawn and clamps it to this
+/// many rows, so a pathologically long/unbounded status can't blow the reservation out past the true
+/// worst case.
+///
+/// **That worst case is measured, not estimated**, against the real production path:
+/// `EditorApp::apply_reprojection`'s `Err` arm → `arm_stale`, driven directly (see
+/// `main.rs::arm_stale_status_survives_a_failing_draft_flush`, temporarily instrumented to print the
+/// composed string during this sizing pass) with the longest of the three per-tail prefixes
+/// (`"the safe-harbor attest write landed — "`, 38 chars — longer than
+/// `"parked the full return for {year} — "` at 34 and `"committed {year} as {label} — "` at 28 for its
+/// `"(unset)"` filing-status fallback, the longest real label) and a representative io error
+/// (`"io: No such file or directory (os error 2)"`, 42 chars) standing in for BOTH the re-projection
+/// failure and a genuine fail-safe-flush failure (they share a root cause — disk/session I/O — per
+/// `arm_stale`'s own doc). That composes to a 385-char status: `prefix`, then `STALE_FACT_1`, then
+/// `({reason})`, then fact 2's LOSS variant (longer than the no-loss `FACT_2_SCREEN_CLOSED` sentence),
+/// then fact 3. Stacked under the 109-char `STALE_MARKER_DEFENSIVE` marker line (fix wave Step 7
+/// reworded "figures below" → "the figures on this screen", +13 chars from the 96-char original — the
+/// 8-row cap was re-verified against the new length, not assumed to still hold), this wraps to 8 rows at
+/// this screen's 78-col inner width — confirmed by an actual render, not arithmetic alone
+/// (`the_full_arm_status_renders_unclipped_at_80_columns_on_both_screens`).
+///
+/// Previously 3 (sized only for the ~230-char CRITICAL residue notice, the only thing that ever used
+/// this rect before this task), then a flat 8 (fix round 1), now a cap on a content-sized measurement
+/// (fix round 2).
+const DEFENSIVE_NOTICE_LINES: u16 = 8;
+
+/// The exact number of rows `lines`, wrapped at `width`, will need when actually drawn — MEASURED by
+/// rendering them into a throwaway buffer with ratatui's own wrapping algorithm (the same one the real
+/// render uses), not estimated and not re-implemented. Capped at `DEFENSIVE_NOTICE_LINES` and floored
+/// at 1: a status this measures against is `app.status`, an unbounded `String` (ultimately a `CliError`
+/// `Display`), so an absurdly long one must still be BOUNDED, never allowed to consume the whole screen.
+///
+/// `ratatui::widgets::Paragraph::line_count(width)` would compute this directly, but it is gated behind
+/// the `unstable-rendered-line-info` cargo feature — its own doc says "the design for text wrapping is
+/// not stable and might affect this API" — so this measures via a REAL render instead, keeping this
+/// crate's `ratatui` dependency feature-flag-free and immune to that instability.
+///
+/// ★ fix round 2 Critical: this is the actual fix. Fix round 1 reserved a FLAT `DEFENSIVE_NOTICE_LINES`
+/// whenever `status.is_some()`, regardless of that status's length — verified (by the round-2 reviewer)
+/// to clip `[x] export` with a 385-char status, a 36-char one, and even a ONE-CHARACTER one, and to
+/// regress the ordinary UNARMED mainline (every declare/promote outcome message sets `app.status`, no
+/// latch involved) from a ~9-candidate clipping cliff down to ~5, since raising the flat constant 3→8
+/// in the first commit applied unconditionally to every status, not just the armed one.
+///
+/// A side benefit noted (non-blocking) in the round-2 review: because this measures at the CALLER's
+/// actual `width` rather than assuming 80 columns, a narrower terminal automatically gets a taller
+/// reservation for the same text (verified: `narrow_terminal_still_reserves_enough_for_the_full_marker`
+/// below) — the old flat-2-at-80-columns constant this replaces would have clipped the marker's own
+/// remedy sentence at ≤50 columns; this no longer can, up to the `DEFENSIVE_NOTICE_LINES` cap.
+fn content_sized_notice_height(lines: &[Line], width: u16) -> u16 {
+    let w = width.max(1);
+    let max_rows = DEFENSIVE_NOTICE_LINES;
+    let backend = ratatui::backend::TestBackend::new(w, max_rows);
+    let mut terminal = ratatui::Terminal::new(backend).expect("in-memory backend never errors");
+    let probe_area = Rect::new(0, 0, w, max_rows);
+    terminal
+        .draw(|f| {
+            let p = Paragraph::new(lines.to_vec()).wrap(Wrap { trim: false });
+            f.render_widget(p, probe_area);
+        })
+        .expect("drawing into an in-memory backend never errors");
+    let buf = terminal.backend().buffer();
+    let mut used = 0u16;
+    for (i, row) in buf.content().chunks(w as usize).enumerate() {
+        if row.iter().any(|c| c.symbol() != " ") {
+            used = i as u16 + 1;
+        }
+    }
+    used.max(1)
+}
 
 /// Render the browse screen: EDITOR-marked tab bar + viewer tab content + EDITOR footer.
 /// Form and modal overlays are drawn on top.
@@ -180,9 +310,34 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
         .as_ref()
         .map(|s| (s.state.pseudo_active(), s.state.pseudo_synthetic_count))
         .unwrap_or((false, 0));
+    // D-7 stale-latch marker (DESIGN.md §2.4(b)): the notice machinery in `draw_defensive_filing` has no
+    // Browse counterpart, and Browse is the screen that renders Form 8949 / Schedule D figures straight
+    // off `snap` — the stale image — so it needs the marker most. Its footer below is a single
+    // UN-WRAPPED `Paragraph` that truncates, so the full three-fact composed status cannot live there:
+    // while armed, Browse gets a fixed one-row marker PLUS — only when a status is present — a separate
+    // wrapped multi-row band, inserted exactly as the PSEUDO banner already is.
+    let armed = app.stale_after_write.is_some();
+    let show_stale_band = armed && app.status.is_some();
     let mut constraints = vec![Constraint::Length(3)]; // tab bar
     if show_banner {
         constraints.push(Constraint::Length(1)); // pseudo banner
+    }
+    if armed {
+        constraints.push(Constraint::Length(1)); // STALE marker row
+    }
+    if show_stale_band {
+        // Content-sized (fix round 2 Critical, extended here for the same reason — see
+        // `content_sized_notice_height`'s doc): a flat `DEFENSIVE_NOTICE_LINES` would over-reserve for
+        // an ordinary short status exactly as it did in `draw_defensive_filing`. Browse's band shows
+        // ONLY the status (the marker has its own separate row above), so it measures just that line.
+        let band_h = content_sized_notice_height(
+            &[Line::from(format!(
+                "  {}",
+                app.status.as_deref().unwrap_or_default()
+            ))],
+            area.width,
+        );
+        constraints.push(Constraint::Length(band_h)); // wrapped stale status band
     }
     constraints.push(Constraint::Min(0)); // content pane
     constraints.push(Constraint::Length(1)); // footer keybindings
@@ -190,9 +345,30 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
         .direction(Direction::Vertical)
         .constraints(constraints)
         .split(area);
-    // Index bookkeeping: the banner (when present) shifts content/footer down by one.
-    let content_idx = if show_banner { 2 } else { 1 };
-    let footer_idx = if show_banner { 3 } else { 2 };
+    // Index bookkeeping: each conditional row above shifts every index after it down by one — extends
+    // the pre-existing banner-only scheme to the two new stale-latch rows.
+    let mut next_idx = 1usize;
+    let banner_idx = if show_banner {
+        next_idx += 1;
+        Some(next_idx - 1)
+    } else {
+        None
+    };
+    let marker_idx = if armed {
+        next_idx += 1;
+        Some(next_idx - 1)
+    } else {
+        None
+    };
+    let band_idx = if show_stale_band {
+        next_idx += 1;
+        Some(next_idx - 1)
+    } else {
+        None
+    };
+    let content_idx = next_idx;
+    next_idx += 1;
+    let footer_idx = next_idx;
 
     // ── Tab bar with [EDITOR] badge ───────────────────────────────────────────
     let tab_titles: Vec<&str> = Tab::ALL.iter().map(|t| t.title()).collect();
@@ -210,7 +386,7 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     frame.render_widget(tabs_widget, chunks[0]);
 
     // ── Pseudo-reconcile banner (loud red/reversed) ───────────────────────────
-    if show_banner {
+    if let Some(idx) = banner_idx {
         let banner = Paragraph::new(format!(
             " PSEUDO-RECONCILE MODE ACTIVE — {pseudo_count} synthetic default(s): [PSEUDO] rows are \
              FICTIONAL placeholders — DO NOT FILE. Export blocked. 'P' to approve, off via CLI. "
@@ -221,7 +397,28 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
                 .fg(Color::Red)
                 .add_modifier(Modifier::BOLD | Modifier::REVERSED),
         );
-        frame.render_widget(banner, chunks[1]);
+        frame.render_widget(banner, chunks[idx]);
+    }
+
+    // ── Stale-latch marker (D-7, loud red/reversed — precedent: the PSEUDO banner above) ─────────────
+    if let Some(idx) = marker_idx {
+        let marker = Paragraph::new(format!(" {STALE_MARKER_CLAIM} "))
+            .alignment(Alignment::Center)
+            .style(
+                Style::default()
+                    .fg(Color::Red)
+                    .add_modifier(Modifier::BOLD | Modifier::REVERSED),
+            );
+        frame.render_widget(marker, chunks[idx]);
+    }
+
+    // ── Stale-latch status band — a WRAPPED Paragraph, unlike the truncating footer below ────────────
+    if let Some(idx) = band_idx {
+        let s = app.status.as_deref().unwrap_or_default();
+        let band = Paragraph::new(format!("  {s}"))
+            .wrap(Wrap { trim: false })
+            .style(Style::default().fg(Color::Cyan));
+        frame.render_widget(band, chunks[idx]);
     }
 
     // ── Content pane — delegate to viewer's App-free tab renderers ────────────
@@ -277,18 +474,24 @@ fn draw_browse(frame: &mut Frame, app: &mut EditorApp) {
     }
 
     // ── Footer: status or keybindings ─────────────────────────────────────────
-    let footer_text = if let Some(status) = app.status.as_deref() {
+    // ★ P-C gate arch I-3 note: Browse `w` is listed in the KEYMAP overlay (`help_overlay_lines`), NOT
+    // here. This footer is the NAVIGATION hint and already overflows an 80/120-col terminal (its tail
+    // clips mid-line), so appending a feature key here would push "?: help" — the pointer to the overlay
+    // that lists EVERY feature key, `w` included — off the visible row, making discoverability strictly
+    // worse. Feature keys (c/o/r/f/v/S/d/L/u/m/i/z/e/a/A/b/B/C/V/I/O/P/T/w) live in the overlay by
+    // convention.
+    let keybindings_hint =
+        "Tab/Shift-Tab: tab   ←/→ h/l: column   s: sort   [/]: year   ↑/↓ j/k: scroll   \
+         g/G: top/bottom   p: profile   ?: help   q/Esc: quit   [EDITOR]";
+    let footer_text = if armed {
+        // D-7: while armed the footer ALWAYS shows the keybinding hint, never the raw status — the
+        // composed status now has its own wrapped band above (`band_idx`) when present, and this footer
+        // is a single UN-WRAPPED Paragraph that would truncate it (DESIGN.md §2.4(b)).
+        keybindings_hint.to_string()
+    } else if let Some(status) = app.status.as_deref() {
         status.to_string()
     } else {
-        // ★ P-C gate arch I-3 note: Browse `w` is listed in the KEYMAP overlay
-        // (`help_overlay_lines`), NOT here. This footer is the NAVIGATION hint and already overflows an
-        // 80/120-col terminal (its tail clips mid-line), so appending a feature key here would push
-        // "?: help" — the pointer to the overlay that lists EVERY feature key, `w` included — off the
-        // visible row, making discoverability strictly worse. Feature keys (c/o/r/f/v/S/d/L/u/m/i/z/e/
-        // a/A/b/B/C/V/I/O/P/T/w) live in the overlay by convention.
-        "Tab/Shift-Tab: tab   ←/→ h/l: column   s: sort   [/]: year   ↑/↓ j/k: scroll   \
-         g/G: top/bottom   p: profile   ?: help   q/Esc: quit   [EDITOR]"
-            .to_string()
+        keybindings_hint.to_string()
     };
     let footer = Paragraph::new(footer_text).alignment(Alignment::Center);
     frame.render_widget(footer, chunks[footer_idx]);
@@ -7062,6 +7265,17 @@ mod tests {
             clean.contains("Defensive Filing"),
             "the screen still renders without a status: {clean}"
         );
+        // This fixture is ALSO unarmed (`EditorApp::new` defaults `stale_after_write` to `None`) with an
+        // all-empty view and no `uncomputable` — so the all-clear must render. This pins the WIRING
+        // (`app.stale_after_write.is_some()` actually threaded into `render_dashboard`'s `stale_armed`
+        // argument, not just `render_dashboard` itself in isolation): a hardcoded literal `true` at that
+        // call site would suppress this and print the stale notice instead, with the suite otherwise
+        // green (the `false` direction is already covered by the armed fixtures above).
+        assert!(
+            clean.contains("Nothing outstanding right now."),
+            "an unarmed, empty, computable dashboard must show the all-clear THROUGH the real draw \
+             wiring: {clean}"
+        );
     }
 
     #[test]
@@ -7074,6 +7288,535 @@ mod tests {
         assert!(
             rendered.contains("CRITICAL: a save failed and could not be reverted"),
             "the CRITICAL residue notice must reach the filer on this screen: {rendered}"
+        );
+    }
+
+    // ── D-7: the stale-latch marker — third specification (DESIGN.md §2.4); the first two were
+    // unbuildable: a block-title marker (clipped — Browse's title carries a variable-length vault path,
+    // truncated without wrapping) and a Browse mechanism copied from a place (`draw_defensive_filing`)
+    // that has no Browse counterpart. From the SECOND keypress onward the marker is the ONLY notice the
+    // filer sees on either screen (`main.rs:414` Browse, `:494` DefensiveFiling clear `app.status`
+    // before every dispatch), so it must render with `status == None`, independent of `app.status`
+    // entirely, and it must name the CONSEQUENCE ("figures below predate your last write"), not the
+    // cause. Register precedent: the PSEUDO banner's own "FICTIONAL placeholders — DO NOT FILE".
+
+    /// A search-friendly rendering of a buffer for assertions that may span a WRAPPED row boundary.
+    /// `flatten` concatenates a buffer row-major with NO row separator, so a BORDERED widget's own
+    /// box-drawing edge glyphs (drawn down every interior row's left/right column) land literally
+    /// between two wrapped rows — e.g. `"...Quit││and reopen..."` — which plain whitespace-collapsing
+    /// alone does not fix, since `│` is not whitespace. This strips those glyphs per row, joins rows
+    /// with a single space, then collapses any remaining whitespace run to one space. Word order and
+    /// adjacency are still verified; only the wrap/border machinery's own incidental noise is
+    /// suppressed. (Browse's own marker/band rows have no such border, so this is a no-op there beyond
+    /// the whitespace collapse.)
+    fn searchable(buf: &ratatui::buffer::Buffer) -> String {
+        let width = (buf.area().width as usize).max(1);
+        let joined = buf
+            .content()
+            .chunks(width)
+            .map(|row| {
+                row.iter()
+                    .map(|c| c.symbol().chars().next().unwrap_or(' '))
+                    .filter(|c| !"│─┌┐└┘┬┴├┤┼".contains(*c))
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        joined.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// `render_defensive_filing_to_string`, plus arming the stale latch — a field independent of
+    /// `status` (`EditorApp::stale_after_write` vs. `app.status`; bridging that gap is exactly what the
+    /// marker exists for). `rows` lets the height-floor KAT drive a very short terminal without
+    /// duplicating the fixture. Returns the raw `Buffer` so callers pick `flatten` (exact) or
+    /// `searchable` (wrap/border-tolerant) as the assertion needs.
+    fn draw_defensive_filing_armed_buffer(
+        status: Option<&str>,
+        cols: u16,
+        rows: u16,
+    ) -> ratatui::buffer::Buffer {
+        use btctax_core::defensive::DefensiveFilingView;
+        use std::collections::BTreeSet;
+
+        let backend = TestBackend::new(cols, rows);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = EditorApp::new(PathBuf::from("/test/vault.pgp"));
+        app.screen = EditorScreen::DefensiveFiling;
+        app.defensive_dashboard = Some(crate::defensive_dashboard::DefensiveDashboardState::new(
+            DefensiveFilingView {
+                candidates: vec![],
+                resolve_first: vec![],
+                tranches: vec![],
+                still_short: vec![],
+                flagged_years: BTreeSet::new(),
+                safe_harbor_blocked: false,
+            },
+        ));
+        app.stale_after_write = Some("armed-for-test".to_string());
+        app.status = status.map(|s| s.to_string());
+        terminal.draw(|f| draw(&mut *f, &mut app)).unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn render_defensive_filing_to_string_armed_sized(
+        status: Option<&str>,
+        cols: u16,
+        rows: u16,
+    ) -> String {
+        flatten(&draw_defensive_filing_armed_buffer(status, cols, rows))
+    }
+
+    fn render_defensive_filing_to_string_armed(status: Option<&str>, cols: u16) -> String {
+        render_defensive_filing_to_string_armed_sized(status, cols, 40)
+    }
+
+    /// A Browse render, armed, with an injectable vault path and terminal height — the WITHDRAWN
+    /// (draft 2) block-title marker specification died exactly here: Browse's own title carries a
+    /// variable-length vault path, and ratatui truncates a title without wrapping. Returns the raw
+    /// `Buffer` for the same reason as `draw_defensive_filing_armed_buffer` above.
+    fn draw_browse_armed_buffer(
+        status: Option<&str>,
+        cols: u16,
+        rows: u16,
+        vault_path: PathBuf,
+    ) -> ratatui::buffer::Buffer {
+        use btctax_adapters::BundledTaxTables;
+        use btctax_cli::CliConfig;
+        use btctax_tui::app::Snapshot;
+        use std::collections::BTreeMap;
+
+        let backend = TestBackend::new(cols, rows);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        let snap = Snapshot {
+            events: vec![],
+            state: btctax_core::state::LedgerState::default(),
+            cli_config: CliConfig::default(),
+            profiles: BTreeMap::new(),
+            refused: std::collections::BTreeMap::new(),
+            tables: BundledTaxTables::load(),
+            donation_details: BTreeMap::new(),
+            bulk_estimated: BTreeMap::new(),
+            prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
+        };
+
+        let mut app = EditorApp::new(vault_path);
+        app.screen = EditorScreen::Browse;
+        app.snapshot = Some(snap);
+        app.selected_year = 2025;
+        app.stale_after_write = Some("armed-for-test".to_string());
+        app.status = status.map(|s| s.to_string());
+        terminal.draw(|f| draw(&mut *f, &mut app)).unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn render_browse_to_string_armed_with_vault_path(
+        status: Option<&str>,
+        cols: u16,
+        vault_path: PathBuf,
+    ) -> String {
+        flatten(&draw_browse_armed_buffer(status, cols, 40, vault_path))
+    }
+
+    fn render_browse_to_string_armed(status: Option<&str>, cols: u16) -> String {
+        render_browse_to_string_armed_with_vault_path(
+            status,
+            cols,
+            PathBuf::from("/test/vault.pgp"),
+        )
+    }
+
+    /// The measured LONGEST composed arm status (DESIGN.md §2.4(a2) — "measure it, do not estimate").
+    /// See `DEFENSIVE_NOTICE_LINES`'s own doc comment for exactly how the scenario (the longest of the
+    /// three per-tail prefixes plus a representative io-error reason/flush-err pair — they share a root
+    /// cause per `arm_stale`'s own doc, so using the same shape for both is not an arbitrary choice) was
+    /// chosen: a temporarily instrumented run of `main.rs::arm_stale_status_survives_a_failing_draft_
+    /// flush`, printing the REAL `EditorApp::apply_reprojection` → `arm_stale` output.
+    ///
+    /// ★ fix round 1 Important: earlier this built fact 2's LOSS sentence and fact 3 as HAND-COPIED
+    /// literals — only `STALE_FACT_1` was shared with production. That sentence had already been
+    /// reworded twice on this branch with no test able to catch a THIRD rewording drifting the two
+    /// copies apart (the char-count pin below only pins this fn's OWN literal). Fixed by calling the
+    /// same functions/consts `arm_stale` itself calls — `crate::fact2_loss_sentence` and
+    /// `crate::FACT_3_QUIT_AND_REOPEN`, alongside the already-shared `crate::STALE_FACT_1` — so only the
+    /// `prefix`/`reason`/`flush_err`/`year` SCENARIO CHOICES below are this test's own; the wording
+    /// itself cannot drift from what `arm_stale` actually composes.
+    fn longest_arm_status() -> String {
+        let prefix = "the safe-harbor attest write landed — ";
+        let reason = "io: No such file or directory (os error 2)";
+        let flush_err = "io: No such file or directory (os error 2)";
+        let year = 2024;
+        let fact2 = crate::fact2_loss_sentence(year, flush_err);
+        format!(
+            "{prefix}{fact1} ({reason}). {fact2}{fact3}",
+            fact1 = crate::STALE_FACT_1,
+            fact3 = crate::FACT_3_QUIT_AND_REOPEN,
+        )
+    }
+
+    /// Pins the measurement itself (385 chars) so a future edit to `longest_arm_status` — or to
+    /// `STALE_FACT_1`'s/`fact2_loss_sentence`'s/`FACT_3_QUIT_AND_REOPEN`'s PRODUCTION wording, in
+    /// `main.rs` — cannot silently drift the sizing basis `DEFENSIVE_NOTICE_LINES`'s doc comment cites
+    /// without this failing first.
+    ///
+    /// ★ fix round 1 Important: this is the mechanical proof that the round-1 fix (extracting fact 2's
+    /// loss sentence + fact 3 into `main.rs::fact2_loss_sentence`/`FACT_3_QUIT_AND_REOPEN`, shared by
+    /// `arm_stale` AND this test) actually closes the drift hole — before the fix, `longest_arm_status`
+    /// hand-copied fact 2's sentence as an independent literal, so a PRODUCTION wording change could not
+    /// have moved this pin at all.
+    ///
+    /// Mutation: reworded `main.rs::fact2_loss_sentence` (added "possibly, under any circumstances, "
+    /// mid-sentence — a purely production-side change, this file untouched) — RED (385 → 420). Restored
+    /// via a `cp` backup (never `git checkout --`) and re-ran — GREEN. Before the round-1 fix, this same
+    /// production edit would NOT have moved this test at all.
+    #[test]
+    fn longest_arm_status_is_the_measured_385_char_worst_case() {
+        assert_eq!(longest_arm_status().chars().count(), 385);
+    }
+
+    /// From the SECOND keypress onward the marker is the only notice the filer sees — `main.rs:414`
+    /// (Browse) and `:494` (DefensiveFiling) clear `app.status` before dispatch. So it must render with
+    /// `status == None`, and it must name the CONSEQUENCE, not the cause. Register precedent: the PSEUDO
+    /// banner's "FICTIONAL placeholders — DO NOT FILE".
+    ///
+    /// Mutation 1: reverted the `:109` reservation predicate from `status.is_some() || armed` back to
+    /// `status.is_some()` alone (the pre-Task-7 shape) — RED (`d.contains("predate your last write")`
+    /// failed: with `status == None` the DefensiveFiling notice rect was never reserved, so the render
+    /// guard — unchanged by this mutation — never ran). Restored via a `cp` backup (never
+    /// `git checkout --`) and re-ran — GREEN.
+    /// Mutation 2: kept the `:109` reservation fixed, but gated `:152-163`'s marker `Line` push on
+    /// `if false` instead of `if armed` (i.e. "reserve, but don't render into it" — the SECOND of the
+    /// three failed prior specifications this task's brief warns about) — RED, same assertion. Restored
+    /// via a `cp` backup (never `git checkout --`) and re-ran — GREEN.
+    /// Mutation 3: gated the Browse marker row's insertion (both the `constraints.push` and
+    /// `marker_idx`) on `armed && app.status.is_some()` instead of `armed` alone — RED on the Browse half
+    /// (`rendered.contains("STALE — figures below...")` failed: with `status == None` no marker row was
+    /// inserted at all). Restored via a `cp` backup (never `git checkout --`) and re-ran — GREEN.
+    #[test]
+    fn the_stale_marker_renders_on_both_screens_with_no_status_and_names_the_consequence() {
+        let rendered = render_browse_to_string_armed(None, 80);
+        assert!(
+            rendered.contains("STALE — figures below predate your last write. DO NOT FILE from them."),
+            "Browse renders 8949/Sch D figures off the stale snap; the marker must say so: {rendered}"
+        );
+        let d = render_defensive_filing_to_string_armed(None, 80);
+        assert!(d.contains("predate your last write"), "{d}");
+    }
+
+    /// The composed arm status is ~300-350 chars (measured: 385, see `longest_arm_status`);
+    /// `DEFENSIVE_NOTICE_LINES` was 3, giving ~228 usable at 80 columns, and the Browse footer is a
+    /// single UN-WRAPPED Paragraph that truncates. Without the resize (DefensiveFiling) and the wrapped
+    /// band (Browse), fact 3 (the remedy) is invisible at all 27 arming tails.
+    ///
+    /// `searchable` guards against an incidental artifact of buffer flattening: the DefensiveFiling
+    /// screen's own outer `Borders::ALL` block draws a `│` down every interior row's edges, and the
+    /// assertion phrase happens to straddle a wrap-row boundary at 80 columns for this measured string —
+    /// stripping those border glyphs (and collapsing whitespace) makes the check robust to that, without
+    /// weakening what it verifies (word order/adjacency).
+    ///
+    /// ★ fix round 1 Important: the assertion must target a fragment unique to the STATUS's own tail,
+    /// not `"Quit and reopen the vault."` alone — that phrase is ALSO the tail of `STALE_MARKER_
+    /// DEFENSIVE` (`:198-199`), which renders on every armed DefensiveFiling frame regardless of
+    /// `status`. A prior draft of this KAT asserted the bare phrase and stayed GREEN down to
+    /// `DEFENSIVE_NOTICE_LINES == 2` on the DefensiveFiling half (only the Browse half's roomier,
+    /// unbordered band geometry was actually exercising the 8-row sizing) — verified by re-running it
+    /// at 2 through 8 during this fix round. `"that in-progress entry is lost. Quit and reopen the
+    /// vault."` is unique to fact 2's LOSS sentence + fact 3 (the marker never says "in-progress entry")
+    /// and is verified lethal at `DEFENSIVE_NOTICE_LINES == 7` (RED) vs. `== 8` (GREEN).
+    ///
+    /// Mutation: reverted `DEFENSIVE_NOTICE_LINES` from 8 to 3 — RED on both screens (the Browse wrapped
+    /// band, sized off the same constant, clipped before fact 3; the DefensiveFiling notice rect was
+    /// too short to reach the status line's own tail at all). Restored via a `cp` backup (never
+    /// `git checkout --`) and re-ran — GREEN.
+    ///
+    /// (The Browse FOOTER's own bypass — never echoing `app.status` while armed — is proven separately
+    /// by `browse_footer_shows_keybindings_not_a_truncated_status_echo_while_armed` below: reverting it
+    /// does NOT turn *this* KAT red, since the wrapped band alone already satisfies "unclipped
+    /// somewhere on screen" — the footer bypass exists to stop a truncated, confusing SECOND copy from
+    /// also appearing, which is a distinct property this test does not probe.)
+    #[test]
+    fn the_full_arm_status_renders_unclipped_at_80_columns_on_both_screens() {
+        const STATUS_TAIL: &str = "that in-progress entry is lost. Quit and reopen the vault.";
+        let arm = longest_arm_status();
+        let d = draw_defensive_filing_armed_buffer(Some(&arm), 80, 40);
+        assert!(
+            searchable(&d).contains(STATUS_TAIL),
+            "fact 2's loss sentence + fact 3 must survive, unique from the fixed marker's own tail: {}",
+            flatten(&d)
+        );
+        let b = draw_browse_armed_buffer(Some(&arm), 80, 40, PathBuf::from("/test/vault.pgp"));
+        assert!(
+            searchable(&b).contains(STATUS_TAIL),
+            "fact 2's loss sentence + fact 3 must survive on Browse: {}",
+            flatten(&b)
+        );
+    }
+
+    /// The Browse footer is a single UN-WRAPPED `Paragraph` that TRUNCATES (DESIGN.md §2.4(b): "the
+    /// three facts cannot live there"). While armed, the full composed status already has its own
+    /// wrapped band (`band_idx`) above the content pane, so the footer must show the keybindings hint
+    /// instead of `app.status` — never a second, truncated echo that would read as an incomplete or
+    /// different message from the band above it.
+    ///
+    /// Mutation: dropped the `if armed { keybindings_hint } else { .. }` branch, restoring the
+    /// pre-Task-7 `if let Some(status) = app.status.as_deref() { status } else { hint }` shape — RED
+    /// (the footer row echoed the arm status' own opening words, truncated, instead of the keybindings
+    /// hint). Restored via a `cp` backup (never `git checkout --`) and re-ran — GREEN.
+    #[test]
+    fn browse_footer_shows_keybindings_not_a_truncated_status_echo_while_armed() {
+        let arm = longest_arm_status();
+        let buf = draw_browse_armed_buffer(Some(&arm), 80, 40, PathBuf::from("/test/vault.pgp"));
+        let width = (buf.area().width as usize).max(1);
+        let last_row: String = buf
+            .content()
+            .chunks(width)
+            .last()
+            .expect("a non-empty buffer has at least one row")
+            .iter()
+            .map(|c| c.symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(
+            last_row.contains("Tab/Shift-Tab: tab"),
+            "the footer must show the keybindings hint while armed, not app.status: {last_row:?}"
+        );
+        assert!(
+            !last_row.contains("safe-harbor"),
+            "the footer must NOT echo (even truncated) the arm status while armed: {last_row:?}"
+        );
+    }
+
+    // ★ fix round 1 minor, INVESTIGATED and left OPEN (not cheap): "Browse has no `.max(1)` floor
+    // counterpart, so at height 3 with banner + band its marker row vanishes entirely." True, but
+    // root-caused to be a DIFFERENT mechanism than DefensiveFiling's floor, and NOT fixable by adding an
+    // analogous clamp. DefensiveFiling's `.max(1)` exists because ITS OWN arithmetic
+    // (`DEFENSIVE_NOTICE_LINES.min(inner.height.saturating_sub(1))`) can compute a height of 0 even when
+    // ratatui's `Layout::split` had a spare row available (height 3 → `inner.height == 1`, genuinely
+    // enough room for 1 row) — the bug was OUR formula discarding real capacity, not ratatui.
+    //
+    // Browse's height-3 case is different: a standalone `Layout` probe (`ratatui::layout::Layout` at
+    // width 80, height 3, constraints `[Length(3) tabs, Length(1) banner, Length(1) marker, Length(1)
+    // band, Min(0) content, Length(1) footer]`) shows ratatui's OWN Cassowary solver already shrinks
+    // every oversized `Length` request as far as it can — but when the total genuinely exceeds the
+    // area (3+1+1+1+1 ≥ 3, tab bar ALONE already needs the entire terminal), the solver drops the
+    // "marker" row to height 0 and gives the LATER "band" row height 1 instead, with no dependence on
+    // whether the band's own requested constant is clamped first: adding a `.min(available).max(1)`
+    // clamp to the band constraint (tried during this fix round, then reverted) produced BYTE-IDENTICAL
+    // chunk heights to the un-clamped version at every height probed (3, 5, 6, 7, 8, 9, 10, 12, 14) —
+    // ratatui already performs equivalent clamping internally, so the "fix" was an inert no-op. The
+    // marker's actual survival at extreme scarcity is a function of ratatui's internal tie-breaking
+    // between competing `Length` constraints, not of anything under-clamped in this file. Guaranteeing
+    // the marker wins over the banner/band under absolute scarcity would require abandoning
+    // `Layout::split`'s automatic solving for a manually priority-ordered height computation (tab
+    // bar/marker/footer guaranteed first, banner/band get only what's left) — a real layout redesign,
+    // not a cheap fold. Left as an explicitly-flagged residual rather than papered over with dead code.
+
+    /// The WITHDRAWN (draft 2) block-title marker specification died exactly here: Browse's own title
+    /// (`" btctax-tui-edit [EDITOR] — {vault_path} "`) carries a variable-length vault path, and ratatui
+    /// truncates a title without wrapping — so embedding the marker in the title silently ate it behind
+    /// a long enough path. The marker is now its own dedicated `Constraint::Length(1)` row, independent
+    /// of the title, so it must survive regardless of how long the path is.
+    ///
+    /// Mutation: gated the Browse marker row's insertion on `armed && app.status.is_some()` (i.e. tied
+    /// it back to `app.status`, the very coupling this task removes) — RED (with `status == None` no
+    /// marker row was inserted at all, long path or short). Restored via a `cp` backup (never
+    /// `git checkout --`) and re-ran — GREEN.
+    #[test]
+    fn browse_stale_marker_survives_a_long_vault_path_at_80_columns() {
+        let long_path = PathBuf::from(
+            "/home/filer/vaults/very/deeply/nested/directory/structure/that/keeps/going/vault.pgp",
+        );
+        let rendered = render_browse_to_string_armed_with_vault_path(None, 80, long_path);
+        assert!(
+            rendered.contains("STALE — figures below predate your last write. DO NOT FILE from them."),
+            "the marker row must survive a long vault path truncating the title above it: {rendered}"
+        );
+    }
+
+    /// DESIGN.md §2.4(a): `content_sized_notice_height(..).min(inner.height.saturating_sub(1))` yields 0
+    /// at a terminal height of 3 (a `Borders::ALL` block's own top/bottom border leaves
+    /// `inner.height == 1`, so `saturating_sub(1) == 0`, regardless of what the content-sized left
+    /// operand measures) — silently dropping the marker instead of shrinking it. `.max(1)` floors it at
+    /// one row.
+    ///
+    /// Mutation: dropped the trailing `.max(1)` — RED (`notice_h` became 0, `Layout::split` handed the
+    /// notice rect zero rows, and the marker text rendered nowhere — the assertion below failed; that
+    /// assertion checked the FULL claim at the time this was first proven, and has since been narrowed to
+    /// just the first sentence, per the Step 7 rider below — re-checked against today's narrowed
+    /// assertion too: still RED). Restored via a `cp` backup (never `git checkout --`) and re-ran — GREEN.
+    ///
+    /// ★ fix round 1 minor: asserts the FIRST SENTENCE of `STALE_MARKER_DEFENSIVE` (the constant this
+    /// screen actually renders — not `STALE_MARKER_CLAIM`, which is Browse's own), not merely the word
+    /// "STALE" — at height 3 the reserved rect is exactly
+    /// `content_sized_notice_height(marker_alone, 78).min(0).max(1) == 1` row (the middle `.min(0)`
+    /// against `inner.height.saturating_sub(1)`, NOT `.min(1)` — fix round 2 correction: an earlier
+    /// draft of this note misstated that middle operand as `1`).
+    ///
+    /// ★ fix wave Step 7 (doc-precision rider): reworded the marker's claim from "figures below" to "the
+    /// figures on this screen" — the claim sentence alone is now 59 chars (was 46), which still fits the
+    /// first wrapped line at 78 columns, but the remedy sentence ("DO NOT FILE from them.") no longer
+    /// does (the FULL two-sentence claim is now 82 chars > 78, where the pre-reword 69-char claim used
+    /// to fit whole). This assertion was narrowed from the full claim to just the first sentence to
+    /// match: this test only needs "the marker got SOME non-empty rect", not "the whole claim survived
+    /// one row" — that stronger property isn't true post-reword and isn't this test's job to hold
+    /// (`the_full_arm_status_renders_unclipped_at_80_columns_on_both_screens` and
+    /// `stale_dashboard_goldens_never_clip_the_export_line` are the tests that verify nothing clips at
+    /// the REAL terminal sizes this branch cares about).
+    #[test]
+    fn defensive_filing_notice_floors_at_one_row_on_a_very_short_terminal() {
+        let rendered = render_defensive_filing_to_string_armed_sized(None, 80, 3);
+        assert!(
+            rendered.contains("STALE — the figures on this screen predate your last write."),
+            "the marker must still get SOME rect at height 3, not vanish: {rendered}"
+        );
+    }
+
+    /// ★ fix round 1 Critical (superseded by fix round 2's `content_sized_notice_height`, but the
+    /// scenario this proves is unchanged): the reservation must match what is ACTUALLY drawn, not a
+    /// worst-case constant. The armed+`status == None` case renders the marker ALONE, which MEASURES to
+    /// ~2 rows — not the full `DEFENSIVE_NOTICE_LINES` (8) CAP, which only applies when marker+status
+    /// are STACKED together. Reserving 8 unconditionally (fix round 1's own bug, before content-sizing)
+    /// shrank the content pane at 80×24 from 22 rows to 14, and a REAL (armed, pseudo-active) dashboard
+    /// can need more than that: D-7's own `safe_journey_view` stub sets `uncomputable =
+    /// Some(PSEUDO_ACTIVE_DASHBOARD_NOTICE)` (a ~7-row wrapped notice) and does NOT suppress
+    /// `safe_harbor_blocked` (a pure events-scan fact, true for any filer with an in-force safe-harbor
+    /// allocation or a pre-2025 tranche — the wizard's core audience), adding a further 2-row note.
+    /// Title(2) + blank(1) + notice(7) + blank(1) + safe-harbor-note(2) + blank(1) + the always-last
+    /// `[x] export`(1) = 15 rows, against a 14-row pane under either an unconditional-8 reservation (fix
+    /// round 1) OR a flat reservation keyed on `status.is_some()` alone (fix round 1's ACTUAL shipped
+    /// bug, since `status` was `None` here so that half looked fine until fix round 2 found the OTHER
+    /// half) — clipping `[x] export` off a non-scrolling `Paragraph` with no notice text to even hint
+    /// `x` still works (DFW-D3/M-5).
+    ///
+    /// Mutation: reverted `content_sized_notice_height`'s call to the flat `DEFENSIVE_NOTICE_LINES`
+    /// (dropped the content-sizing entirely) — RED (`[x] export` absent from the rendered buffer at
+    /// 80×24). Restored via a `cp` backup (never `git checkout --`) and re-ran — GREEN.
+    #[test]
+    fn defensive_filing_marker_alone_reserves_only_2_rows_leaving_room_for_a_full_dashboard() {
+        use btctax_core::defensive::DefensiveFilingView;
+        use std::collections::BTreeSet;
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = EditorApp::new(PathBuf::from("/test/vault.pgp"));
+        app.screen = EditorScreen::DefensiveFiling;
+        app.defensive_dashboard = Some(crate::defensive_dashboard::DefensiveDashboardState {
+            view: DefensiveFilingView {
+                candidates: vec![],
+                resolve_first: vec![],
+                tranches: vec![],
+                still_short: vec![],
+                flagged_years: BTreeSet::new(),
+                safe_harbor_blocked: true,
+            },
+            cursor: 0,
+            uncomputable: Some(crate::defensive_dashboard::PSEUDO_ACTIVE_DASHBOARD_NOTICE),
+        });
+        app.stale_after_write = Some("armed-for-test".to_string());
+        app.status = None;
+        terminal.draw(|f| draw(&mut *f, &mut app)).unwrap();
+        let rendered = flatten(terminal.backend().buffer());
+        assert!(
+            rendered.contains("[x] export"),
+            "the always-available export line must survive at 80x24 with only the marker (no status) \
+             reserved: {rendered}"
+        );
+    }
+
+    /// Non-blocking note from the fix round 2 review, addressed here as a real KAT rather than left as
+    /// prose: `content_sized_notice_height` measures at the CALLER's own `width`, so a narrower terminal
+    /// automatically reserves MORE rows for the SAME marker text, instead of assuming 80 columns. The
+    /// constant this replaced (`STALE_MARKER_ONLY_LINES = 2`, fix round 1) was measured only at 80
+    /// columns and would have clipped the marker's own remedy sentence ("Quit and reopen the vault.") at
+    /// ≤50 columns, where the identical text wraps to MORE than 2 rows — with no reservation growth to
+    /// compensate.
+    ///
+    /// Mutation: hardcoded `content_sized_notice_height`'s `width` parameter to a fixed `78` inside the
+    /// function (ignoring the caller's actual, narrower `inner.width`) — RED at 50 columns (the
+    /// reservation was sized for 78-column wrapping, too short for the text's ACTUAL 50-column wrap, so
+    /// "Quit and reopen the vault." clipped off the bottom of the reserved rect). Restored via a `cp`
+    /// backup (never `git checkout --`) and re-ran — GREEN.
+    #[test]
+    fn narrow_terminal_still_reserves_enough_for_the_full_marker() {
+        let buf = draw_defensive_filing_armed_buffer(None, 50, 40);
+        assert!(
+            searchable(&buf).contains("Quit and reopen the vault."),
+            "the marker's own remedy sentence must survive at 50 columns, not just 80: {}",
+            flatten(&buf)
+        );
+    }
+
+    /// ★ fix round 2 Critical — the CORE regression, entirely independent of the armed latch: fix round
+    /// 1's flat `DEFENSIVE_NOTICE_LINES` (8) fired on mere `status.is_some()`, and `status` is `Some` on
+    /// the ORDINARY UNARMED mainline too — every declare/promote outcome message. Reserving a flat 8
+    /// rows for even a one-line outcome message shrank a REAL (unarmed) dashboard's clipping cliff from
+    /// ~9 candidates down to ~5 (measured by the round-2 reviewer). This drives the exact repro: 5 real
+    /// declare candidates, no latch involved at all, a short ordinary status.
+    ///
+    /// Mutation: reverted `content_sized_notice_height` to unconditionally return `DEFENSIVE_NOTICE_
+    /// LINES` (8) regardless of `lines`' actual content — RED (`[x] export` absent at 80×24 with only 5
+    /// candidates and a 25-char status). Restored via a `cp` backup (never `git checkout --`) and
+    /// re-ran — GREEN.
+    #[test]
+    fn ordinary_unarmed_declare_outcome_does_not_clip_export_with_five_candidates() {
+        use btctax_core::defensive::discovery::Shortfall;
+        use btctax_core::defensive::DefensiveFilingView;
+        use std::collections::BTreeSet;
+        use time::macros::date;
+
+        let candidates = (0..5)
+            .map(|i| Shortfall {
+                event: btctax_core::EventId::decision(i),
+                wallet: None,
+                date: date!(2020 - 06 - 15),
+                short_sat: 10_000_000,
+                fee_sat: 0,
+            })
+            .collect();
+        let view = DefensiveFilingView {
+            candidates,
+            resolve_first: vec![],
+            tranches: vec![],
+            still_short: vec![],
+            flagged_years: BTreeSet::new(),
+            safe_harbor_blocked: false,
+        };
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = EditorApp::new(PathBuf::from("/test/vault.pgp"));
+        app.screen = EditorScreen::DefensiveFiling;
+        app.defensive_dashboard = Some(crate::defensive_dashboard::DefensiveDashboardState::new(
+            view,
+        ));
+        app.stale_after_write = None; // UNARMED — no latch involved at all
+        app.status = Some("committed 2024 as Single".to_string()); // an ordinary, short outcome message
+        terminal.draw(|f| draw(&mut *f, &mut app)).unwrap();
+        let rendered = flatten(terminal.backend().buffer());
+        assert!(
+            rendered.contains("[x] export"),
+            "an ordinary UNARMED declare/promote outcome message must not clip export with only 5 \
+             real candidates: {rendered}"
+        );
+    }
+
+    /// Extended to Browse's own band for the same reason (fix round 2): a flat `DEFENSIVE_NOTICE_LINES`
+    /// would over-reserve for an ordinary short status here too. At a height where the difference is
+    /// visible (10 rows: tab bar 3 + marker 1 + footer 1 = 5 fixed, leaving only 5 for band+content), a
+    /// flat 8-row band would consume MORE than the entire remaining budget, starving the tab content
+    /// pane's `Min(0)` constraint down to 0 rows — "no holdings" (the empty-Holdings-tab text) would
+    /// never render at all.
+    ///
+    /// Mutation: reverted Browse's band constraint from the content-sized `band_h` back to the flat
+    /// `Constraint::Length(DEFENSIVE_NOTICE_LINES)` — RED ("no holdings" absent from the rendered
+    /// buffer at height 10). Restored via a `cp` backup (never `git checkout --`) and re-ran — GREEN.
+    #[test]
+    fn browse_band_is_content_sized_leaving_room_for_tab_content_at_a_short_terminal() {
+        let buf = draw_browse_armed_buffer(Some("x"), 80, 10, PathBuf::from("/test/vault.pgp"));
+        let rendered = flatten(&buf);
+        assert!(
+            rendered.contains("no holdings"),
+            "a 1-char status must not force a flat 8-row band that starves the tab content pane: \
+             {rendered}"
         );
     }
 

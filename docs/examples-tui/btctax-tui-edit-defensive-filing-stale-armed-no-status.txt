@@ -1,0 +1,28 @@
+── glyphs ──
+  0│┌ btctax-tui-edit [EDITOR] — Defensive Filing ─────────────────────────────────┐
+  1││Defensive Filing — journey dashboard (derived; nothing here is filed until you│
+  2││act)                                                                          │
+  3││                                                                              │
+  4││UNCOMPUTABLE — this dashboard could NOT be computed: pseudo-reconcile         │
+  5││synthetic defaults are contributing to this projection. This is NOT a         │
+  6││statement that nothing is outstanding — an uncovered disposal may exist and   │
+  7││would be MISSING from Form 8949 until it is declared. Resolve or approve the  │
+  8││pending defaults ('P' from Browse), or turn pseudo mode off via the CLI's     │
+  9││reconcile command, then re-enter. 'x' (export) still re-projects fresh and may│
+ 10││itself refuse.                                                                │
+ 11││                                                                              │
+ 12││Note: an in-force safe-harbor allocation or a pre-2025 tranche is present —   │
+ 13││the two are mutually exclusive.                                               │
+ 14││                                                                              │
+ 15││[x] export — plan the IRS-PDF packet (always available)                       │
+ 16││                                                                              │
+ 17││                                                                              │
+ 18││                                                                              │
+ 19││                                                                              │
+ 20││                                                                              │
+ 21││  STALE — the figures on this screen predate your last write. DO NOT FILE from│
+ 22││them. Quit and reopen the vault.                                              │
+ 23│└──────────────────────────────────────────────────────────────────────────────┘
+── styles (runs; terminal-default fg=Reset bg=Reset no-modifier omitted) ──
+ 21│ 1..79 fg=Red mod=BOLD
+ 22│ 1..33 fg=Red mod=BOLD

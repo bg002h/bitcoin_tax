@@ -297,6 +297,12 @@ pub struct EditorApp {
     /// failed, so unsaved residue is live. Like `attest_save_failed`, while `true` every mutating
     /// opener refuses (via `residue_latch_status`) until quit (which discards the residue).
     pub rollback_failed: bool,
+    /// Third latch [stale-snapshot]: set ONLY by `apply_reprojection` when a write LANDED on disk but
+    /// its follow-up `build_snapshot` failed, so `snapshot` holds the PRE-write image. Carries the
+    /// reason (a bare `bool` cannot — the `CliError` is gone by then). Unlike its two siblings the
+    /// write DID land, so the remedy is the opposite: do NOT retry. Cleared by a later SUCCESSFUL
+    /// re-projection (D-4) — in practice only `execute_defensive_export`'s inline rebuild.
+    pub stale_after_write: Option<String>,
     /// One-line status (saved / error), shown in the footer.
     /// Cleared on the next non-modal key press (mirrors the viewer's `export_status`
     /// semantics, app.rs:140 [R0-N5]).
@@ -379,6 +385,7 @@ impl EditorApp {
             method_election_modal: None,
             attest_save_failed: false,
             rollback_failed: false,
+            stale_after_write: None,
             status: None,
             clock: btctax_tui::clock::Clock::Wall,
         }
@@ -478,7 +485,20 @@ impl EditorApp {
         let Some(snap) = self.snapshot.as_ref() else {
             return;
         };
-        if snap.state.pseudo_active() {
+        // ★ D-7 (Task 6): SKIP this refusal while the stale latch is armed. It reads
+        // `snap.state.pseudo_active()` off the STALE image, and the pseudo-approve tail is the one
+        // write that flips exactly that predicate — so a filer who approves every pseudo default and
+        // then hits a failed re-projection would be told to press 'P' (which now refuses under the
+        // combined latch, since `open_pseudo_approve_flow` takes `stale_or_residue_latch_status()`)
+        // and be locked out of D-7's export route entirely. Skipping is safe: the dashboard is
+        // read-only, both `Declare`/`Promote` write intents take the combined latch (below), and
+        // `execute_defensive_export`'s own `plan_export` re-derives pseudo-activity from ITS fresh
+        // rebuild and refuses there (DFW-D11) — so a genuinely pseudo-active CURRENT ledger still
+        // cannot be exported, only the (possibly stale) READ of it is no longer gated here. The view
+        // built below uses `safe_journey_view`, NOT `journey_view` directly — `journey_view` asserts
+        // this exact precondition, and skipping the STATUS refusal does not make the STALE image any
+        // less pseudo-active, so an unguarded call would trade a status message for a panic.
+        if self.stale_after_write.is_none() && snap.state.pseudo_active() {
             self.status = Some(
                 "Defensive Filing is unavailable: pseudo-reconcile synthetic defaults are contributing \
                  to this projection, which could silently mask a real shortfall this journey exists to \
@@ -500,16 +520,13 @@ impl EditorApp {
 
         let cfg = snap.cli_config.to_projection();
         let current = self.clock.now().year();
-        let view = btctax_core::defensive::journey_view(
+        self.defensive_dashboard = Some(crate::defensive_dashboard::safe_journey_view(
             &snap.events,
             &snap.state,
             &snap.prices,
             &snap.tables,
             &cfg,
             current,
-        );
-        self.defensive_dashboard = Some(crate::defensive_dashboard::DefensiveDashboardState::new(
-            view,
         ));
         self.screen = EditorScreen::DefensiveFiling;
     }

@@ -34,12 +34,89 @@ use time::OffsetDateTime;
 pub struct DefensiveDashboardState {
     pub view: DefensiveFilingView,
     pub cursor: usize,
+    /// `Some(reason)` when `view` is a STUB — [`safe_journey_view`] could not safely call
+    /// `journey_view` because the projection was pseudo-active, so every row list in `view` is an
+    /// empty PLACEHOLDER, NOT a validated "nothing outstanding" (fix round 1, C-1). `render_dashboard`
+    /// must render this explicitly instead of falling into its "Nothing outstanding" branch, which
+    /// would read as an affirmative all-clear over an UNCOMPUTED state — and
+    /// [`handle_defensive_dashboard_key`] must refuse every row-addressed action BY CONSTRUCTION while
+    /// this is `Some`, not merely because the row lists happen to be empty (fix round 1, I-1).
+    pub uncomputable: Option<&'static str>,
 }
 
 impl DefensiveDashboardState {
     pub fn new(view: DefensiveFilingView) -> Self {
-        Self { view, cursor: 0 }
+        Self {
+            view,
+            cursor: 0,
+            uncomputable: None,
+        }
     }
+}
+
+/// The dashboard's own "could not compute" notice (fix round 1, C-1). Rendered by `render_dashboard`
+/// INSTEAD of the "Nothing outstanding" fallback whenever [`DefensiveDashboardState::uncomputable`] is
+/// `Some`. Says ALL of: the dashboard could not be computed; pseudo-reconcile synthetic defaults are
+/// contributing; this is explicitly NOT a statement that nothing is outstanding; an uncovered disposal
+/// may exist and would be MISSING from Form 8949 until it is declared (a fully-uncovered disposal never
+/// reaches `state.disposals` — `fold.rs:733` — and `form_8949` iterates exactly that list,
+/// `forms.rs:127-131`); the remedy; and that `x` stays reachable but re-projects fresh and may itself
+/// refuse (DFW-D11) rather than acting on this stub.
+pub const PSEUDO_ACTIVE_DASHBOARD_NOTICE: &str =
+    "this dashboard could NOT be computed: pseudo-reconcile synthetic defaults are contributing to \
+     this projection. This is NOT a statement that nothing is outstanding — an uncovered disposal may \
+     exist and would be MISSING from Form 8949 until it is declared. Resolve or approve the pending \
+     defaults ('P' from Browse), or turn pseudo mode off via the CLI's reconcile command, then \
+     re-enter. 'x' (export) still re-projects fresh and may itself refuse.";
+
+/// Build the dashboard's STATE WITHOUT ever calling `journey_view` on a pseudo-active state —
+/// `journey_view` documents (and `debug_assert!`s) that precondition, because a Phase-B pseudo default
+/// can silently mask a real shortfall this journey exists to surface, so a pseudo-active projection has
+/// no trustworthy read-only view to compute at all.
+///
+/// Normally this can never fire: `EditorApp::open_defensive_filing`'s DFW-D6 gate refuses entry before
+/// ever building a view, so `state.pseudo_active()` is always false here — EXCEPT while the stale latch
+/// is armed, where D-7 (Task 6) SKIPS that gate so `w` → dashboard → `x` stays reachable even from the
+/// one arming tail (pseudo-approve) that leaves the STALE image still reporting `pseudo_active()`. In
+/// that one case, an unguarded `journey_view` call would hit its own precondition assert. Returning an
+/// EMPTY, EXPLICITLY-`uncomputable` state instead is safe: `handle_defensive_dashboard_key`'s `x` check
+/// is recognized UNCONDITIONALLY before `view` is ever read (`x` needs no row — DFW-D3/M-5), and its
+/// `uncomputable` guard (fix round 1, I-1) refuses every OTHER action by construction. This also
+/// protects `execute_defensive_export`'s own post-export `refresh_defensive_dashboard` call, which
+/// re-projects the vault's CURRENT (not necessarily stale) state and could otherwise hit the same
+/// assert if the ledger is genuinely — not just staleness-apparently — pseudo-active at that moment.
+///
+/// `safe_harbor_blocked` is NOT suppressed in the stub (fix round 1, C-1): unlike every other field of
+/// `DefensiveFilingView`, it is a pure EVENTS-only scan (`tranche_guard::{in_force_allocation_exists,
+/// pre2025_tranche_exists}` — neither takes `state`), so it is genuinely computable here and must not
+/// be hard-coded `false` under a notice that already reads as a false all-clear.
+pub fn safe_journey_view(
+    events: &[btctax_core::LedgerEvent],
+    state: &btctax_core::state::LedgerState,
+    prices: &dyn btctax_core::PriceProvider,
+    tables: &dyn btctax_core::TaxTables,
+    cfg: &btctax_core::ProjectionConfig,
+    current: i32,
+) -> DefensiveDashboardState {
+    if state.pseudo_active() {
+        let safe_harbor_blocked = btctax_core::tranche_guard::in_force_allocation_exists(events)
+            || btctax_core::tranche_guard::pre2025_tranche_exists(events);
+        return DefensiveDashboardState {
+            view: DefensiveFilingView {
+                candidates: Vec::new(),
+                resolve_first: Vec::new(),
+                tranches: Vec::new(),
+                still_short: Vec::new(),
+                flagged_years: std::collections::BTreeSet::new(),
+                safe_harbor_blocked,
+            },
+            cursor: 0,
+            uncomputable: Some(PSEUDO_ACTIVE_DASHBOARD_NOTICE),
+        };
+    }
+    DefensiveDashboardState::new(btctax_core::defensive::journey_view(
+        events, state, prices, tables, cfg, current,
+    ))
 }
 
 /// The row-address the cursor can occupy, in FIXED display order — MUST mirror [`render_dashboard`]'s
@@ -81,12 +158,22 @@ pub enum DashboardIntent {
 /// pointer into `state.view`, not a re-derived judgement). `x` is recognized unconditionally, from ANY
 /// cursor position or dashboard state (DFW-D3/M-5: export is never a "done" checkbox that could be
 /// missing or disabled).
+///
+/// ★ fix round 1, I-1: while `state.uncomputable` is `Some` (the view is a pseudo-active STUB, not a
+/// validated read — see [`safe_journey_view`]), every action OTHER than `x` returns `None` BY
+/// CONSTRUCTION, not merely because the stub's row lists happen to be empty. Before this guard, nothing
+/// stopped a future change that populated `view`'s rows while `uncomputable` stayed `Some` from handing
+/// out a real `Declare`/`Promote`/`RouteResolveFirst` target derived from a state `journey_view` itself
+/// asserts cannot exist.
 pub fn handle_defensive_dashboard_key(
     state: &mut DefensiveDashboardState,
     key: KeyEvent,
 ) -> DashboardIntent {
     if key.code == KeyCode::Char('x') {
         return DashboardIntent::Export;
+    }
+    if state.uncomputable.is_some() {
+        return DashboardIntent::None;
     }
 
     let rows = row_order(&state.view);
@@ -379,12 +466,34 @@ fn mark_row(idx: usize, cursor: usize, text: String) -> String {
 ///
 /// DFW-D3/M-5: the `[x] export` line is pushed UNCONDITIONALLY, last — always available, regardless of
 /// dashboard state, and never phrased as a "done" checkbox (exports write files, not events).
-pub fn render_dashboard(view: &DefensiveFilingView, cursor: usize) -> Vec<String> {
+///
+/// `uncomputable` (fix round 1, C-1) is `DefensiveDashboardState::uncomputable`: when `Some(reason)`,
+/// `reason` is rendered as an explicit notice near the top AND the "Nothing outstanding" fallback below
+/// is SUPPRESSED — an all-empty stub view must never read as an affirmative all-clear.
+///
+/// `stale_armed` (fix wave, BLOCKING 1) is `app.stale_after_write.is_some()`: while the latch is armed,
+/// `journey_view` still runs to completion over the STALE pre-write snapshot (`uncomputable` stays
+/// `None` — the projection did not fail, it merely ran over old data), so an all-empty result is NOT
+/// evidence of an all-clear either. This is the THIRD route to the same false-negative sentence on this
+/// branch (T6 closed the pseudo-active route via `uncomputable`; this closes the armed-but-not-pseudo
+/// route, which `uncomputable` alone cannot see).
+pub fn render_dashboard(
+    view: &DefensiveFilingView,
+    cursor: usize,
+    uncomputable: Option<&str>,
+    stale_armed: bool,
+) -> Vec<String> {
     let mut lines = vec![
         "Defensive Filing — journey dashboard (derived; nothing here is filed until you act)"
             .to_string(),
         String::new(),
     ];
+
+    if let Some(reason) = uncomputable {
+        lines.push(format!("UNCOMPUTABLE — {reason}"));
+        lines.push(String::new());
+    }
+
     let mut row_idx = 0usize;
 
     if !view.resolve_first.is_empty() {
@@ -442,12 +551,28 @@ pub fn render_dashboard(view: &DefensiveFilingView, cursor: usize) -> Vec<String
         lines.push(String::new());
     }
 
-    if view.resolve_first.is_empty()
+    if uncomputable.is_none()
+        && !stale_armed
+        && view.resolve_first.is_empty()
         && view.candidates.is_empty()
         && view.tranches.is_empty()
         && view.still_short.is_empty()
     {
         lines.push("Nothing outstanding right now.".to_string());
+        lines.push(String::new());
+    } else if stale_armed
+        && uncomputable.is_none()
+        && view.resolve_first.is_empty()
+        && view.candidates.is_empty()
+        && view.tranches.is_empty()
+        && view.still_short.is_empty()
+    {
+        lines.push(
+            "This is NOT a statement that nothing is outstanding — the figures on this screen were \
+             derived from an image of the ledger taken BEFORE the last write, which could not be \
+             re-projected."
+                .to_string(),
+        );
         lines.push(String::new());
     }
 
@@ -772,7 +897,7 @@ mod tests {
             ..empty_view()
         };
         // row_order addresses [Candidate(0), Candidate(1)] — cursor=1 is the SECOND candidate.
-        let rendered = render_dashboard(&view, 1);
+        let rendered = render_dashboard(&view, 1, None, false);
         let first_candidate = rendered
             .iter()
             .find(|l| l.contains("short 10000 sat"))
@@ -803,7 +928,7 @@ mod tests {
             ..empty_view()
         };
         // row_order addresses [Tranche(0)] — cursor=0 is the (only) tranche.
-        let rendered = render_dashboard(&view, 0);
+        let rendered = render_dashboard(&view, 0, None, false);
         let header = rendered
             .iter()
             .find(|l| l.contains("sat (declared):"))
@@ -828,7 +953,7 @@ mod tests {
     #[test]
     fn export_is_always_available_never_a_done_checkbox() {
         // Empty dashboard: nothing to declare, nothing tranched, nothing short.
-        let rendered_empty = render_dashboard(&empty_view(), 0).join("\n");
+        let rendered_empty = render_dashboard(&empty_view(), 0, None, false).join("\n");
         assert!(
             rendered_empty.contains("[x] export"),
             "export must be offered even with an EMPTY dashboard: {rendered_empty}"
@@ -852,7 +977,7 @@ mod tests {
             flagged_years: Default::default(),
             safe_harbor_blocked: false,
         };
-        let rendered_busy = render_dashboard(&busy, 0).join("\n");
+        let rendered_busy = render_dashboard(&busy, 0, None, false).join("\n");
         assert!(
             rendered_busy.contains("[x] export"),
             "export must ALSO be offered on a busy dashboard: {rendered_busy}"
@@ -860,6 +985,67 @@ mod tests {
         assert!(
             !rendered_busy.to_lowercase().contains("done"),
             "export must never read as 'done' even once other work exists: {rendered_busy}"
+        );
+    }
+
+    // ── fix wave BLOCKING 1: `stale_armed` suppresses the all-clear even when `uncomputable` is `None`
+    // ────────────────────────────────────────────────────────────────────────────────────────────────
+    //
+    // `uncomputable` alone cannot see this route: while the latch is armed, `journey_view` runs to
+    // completion (over the STALE pre-write snapshot) rather than failing, so `uncomputable` stays
+    // `None`. An all-empty result under that condition is not evidence of an all-clear — it may simply
+    // be that the write which WOULD have produced a disposal never got re-projected.
+    //
+    // Mutations, each independently proven:
+    // (1) delete the `&& !stale_armed` conjunct on the all-clear guard → this test's `!contains("Nothing
+    //     outstanding right now.")` assertion reds (confirmed: RED).
+    // (2) unarmed empty sibling (`stale_armed = false`, all four lists empty) asserts the all-clear
+    //     STILL renders — guards against over-suppression from a `stale_armed` that defaulted to `true`
+    //     (confirmed: a `stale_armed` default flip alone reds this half; it does NOT catch a dropped
+    //     `is_empty()` conjunct, since every list here is already empty).
+    // (3) unarmed NON-empty sibling (`stale_armed = false`, one declare candidate present) asserts the
+    //     all-clear does NOT render — this is what catches a guard that dropped the original
+    //     four-empty-lists condition (confirmed: RED when the four `view.*.is_empty()` conjuncts are
+    //     deleted from the all-clear guard).
+    #[test]
+    fn stale_armed_suppresses_the_all_clear_even_with_uncomputable_none() {
+        let rendered = render_dashboard(&empty_view(), 0, None, true).join("\n");
+        assert!(
+            !rendered.contains("Nothing outstanding right now."),
+            "an armed-but-not-pseudo stale latch must NOT let the all-clear render: {rendered}"
+        );
+        assert!(
+            rendered.contains("NOT a statement that nothing is outstanding"),
+            "the stale analogue of the pseudo notice must render instead: {rendered}"
+        );
+    }
+
+    #[test]
+    fn unarmed_empty_dashboard_still_renders_the_all_clear() {
+        // Guards against over-suppression: an unarmed, uncomputable=None, all-empty dashboard must
+        // STILL show the all-clear — `stale_armed` must gate ONLY the armed case.
+        let rendered = render_dashboard(&empty_view(), 0, None, false).join("\n");
+        assert!(
+            rendered.contains("Nothing outstanding right now."),
+            "an unarmed all-empty dashboard must still read as an all-clear: {rendered}"
+        );
+    }
+
+    #[test]
+    fn unarmed_non_empty_dashboard_never_renders_the_all_clear() {
+        // This is route #4 to a false "Nothing outstanding right now.": neither `uncomputable` nor
+        // `stale_armed` gates it — only the four `view.*.is_empty()` conjuncts on the all-clear guard
+        // do. A view with a real declare candidate present, unarmed and computable, must NEVER print
+        // the all-clear alongside it.
+        let view = DefensiveFilingView {
+            candidates: vec![shortfall(1, 10_000)],
+            ..empty_view()
+        };
+        let rendered = render_dashboard(&view, 0, None, false).join("\n");
+        assert!(
+            !rendered.contains("Nothing outstanding right now."),
+            "a dashboard with a live declare candidate must NEVER also claim nothing is outstanding: \
+             {rendered}"
         );
     }
 
@@ -1090,6 +1276,149 @@ mod tests {
         assert_eq!(
             handle_defensive_dashboard_key(&mut state, key(KeyCode::Enter)),
             DashboardIntent::RouteResolveFirst(EventId::decision(1))
+        );
+    }
+
+    // ── fix round 1 (I-1): `uncomputable` refuses every row-addressed action BY CONSTRUCTION ─────────
+
+    /// Mirrors `d_on_a_candidate_row_names_declare_intent` /
+    /// `p_on_a_declared_zero_tranche_names_promote_intent_but_not_on_a_promoted_one` /
+    /// `enter_on_a_resolve_first_row_names_route_intent` EXACTLY — same non-empty, cursor-addressable
+    /// rows each of those tests proves DOES yield a real intent — but with `uncomputable` set. Proves
+    /// the refusal is a CONSTRUCTED check on `uncomputable`, not an accident of the row lists happening
+    /// to be empty (the failure mode fix round 1 flagged: nothing but empty rows was stopping a
+    /// Declare/Promote/RouteResolveFirst target from being derived off a state `journey_view` itself
+    /// asserts cannot exist).
+    ///
+    /// Mutation: delete the `if state.uncomputable.is_some() { return DashboardIntent::None; }` guard
+    /// in `handle_defensive_dashboard_key` → the `d`/`p`/Enter assertions below fail (they instead
+    /// return the real `Declare`/`Promote`/`RouteResolveFirst` intent) → reds.
+    #[test]
+    fn uncomputable_state_refuses_every_row_addressed_action_by_construction() {
+        let mut d_state = DefensiveDashboardState::new(DefensiveFilingView {
+            candidates: vec![shortfall(1, 10_000)],
+            ..empty_view()
+        });
+        d_state.uncomputable = Some("test");
+        assert_eq!(
+            handle_defensive_dashboard_key(&mut d_state, key(KeyCode::Char('d'))),
+            DashboardIntent::None,
+            "d must refuse over a REAL candidate row while uncomputable"
+        );
+
+        let mut p_state = DefensiveDashboardState::new(DefensiveFilingView {
+            tranches: vec![tranche_row(1, 10_000, TrancheStatus::DeclaredZero, vec![])],
+            ..empty_view()
+        });
+        p_state.uncomputable = Some("test");
+        assert_eq!(
+            handle_defensive_dashboard_key(&mut p_state, key(KeyCode::Char('p'))),
+            DashboardIntent::None,
+            "p must refuse over a REAL DeclaredZero tranche row while uncomputable"
+        );
+
+        let mut enter_state = DefensiveDashboardState::new(DefensiveFilingView {
+            resolve_first: vec![Triage::ResolveFirst {
+                shortfall: shortfall(1, 10_000),
+                blocker: BlockerKind::Unclassified,
+            }],
+            ..empty_view()
+        });
+        enter_state.uncomputable = Some("test");
+        assert_eq!(
+            handle_defensive_dashboard_key(&mut enter_state, key(KeyCode::Enter)),
+            DashboardIntent::None,
+            "Enter must refuse over a REAL resolve-first row while uncomputable"
+        );
+
+        // x stays reachable regardless (D-7) — the ONE action `uncomputable` does not gate.
+        assert_eq!(
+            handle_defensive_dashboard_key(&mut d_state, key(KeyCode::Char('x'))),
+            DashboardIntent::Export
+        );
+    }
+
+    // ── fix round 1 (C-1): the uncomputable stub must NEVER render as an affirmative all-clear ───────
+
+    /// `safe_journey_view` on a genuinely pseudo-active state must mark the result `uncomputable` and
+    /// STILL genuinely compute `safe_harbor_blocked` (an events-only scan — no hard-coded `false`), and
+    /// `render_dashboard` must render an explicit notice INSTEAD of the "Nothing outstanding" fallback,
+    /// which would otherwise read as a false affirmative all-clear over an uncomputed state (a filer
+    /// could file omitting a real Form-8949 disposition with no marker at all once `x` clears the
+    /// latch — see the fix-round-1 report).
+    ///
+    /// Mutations, each independently proven (see the task report's mutation-proof table):
+    /// (1) `safe_journey_view`'s `if state.pseudo_active()` guard deleted → panics via `journey_view`'s
+    ///     own precondition assert (covered by the Task 6 KATs already).
+    /// (2) `render_dashboard`'s `uncomputable.is_none() &&` dropped from the "Nothing outstanding" guard
+    ///     → the false all-clear resurfaces alongside the notice → reds here.
+    /// (3) `safe_harbor_blocked` hard-coded back to `false` in `safe_journey_view`'s stub → reds here.
+    #[test]
+    fn safe_journey_view_on_a_pseudo_active_state_renders_an_explicit_notice_not_an_all_clear() {
+        use btctax_core::event::{AllocMethod, EventPayload, SafeHarborAllocation};
+        use btctax_core::{LedgerEvent, LotMethod};
+        use time::macros::datetime;
+
+        // A real in-force safe-harbor allocation, so `safe_harbor_blocked` has something genuine to
+        // compute (`tranche_guard::in_force_allocation_exists` is an events-only scan) — proving the
+        // stub does NOT hard-code it to `false`.
+        let events = vec![LedgerEvent {
+            id: EventId::decision(1),
+            utc_timestamp: datetime!(2025-01-01 0:00 UTC),
+            original_tz: time::UtcOffset::UTC,
+            wallet: None,
+            payload: EventPayload::SafeHarborAllocation(SafeHarborAllocation {
+                lots: vec![],
+                as_of_date: date!(2025 - 01 - 01),
+                method: AllocMethod::ProRata,
+                timely_allocation_attested: true,
+                pre2025_method: LotMethod::Fifo,
+            }),
+        }];
+        let state = LedgerState {
+            pseudo_synthetic_count: 3,
+            ..Default::default()
+        };
+        let prices = btctax_adapters::LayeredPrices::load_with_cache(None).unwrap();
+        let tables = BundledTaxTables::load();
+        let cfg = CliConfig::default().to_projection();
+
+        let dash = safe_journey_view(&events, &state, &prices, &tables, &cfg, 2025);
+        assert!(
+            dash.uncomputable.is_some(),
+            "a pseudo-active state must mark the dashboard uncomputable"
+        );
+        assert!(
+            dash.view.safe_harbor_blocked,
+            "safe_harbor_blocked is an EVENTS-only scan — it must be genuinely computed, not \
+             hard-coded false, even in the uncomputable stub"
+        );
+
+        let rendered =
+            render_dashboard(&dash.view, dash.cursor, dash.uncomputable, false).join("\n");
+        assert!(
+            rendered.contains("UNCOMPUTABLE"),
+            "the notice must render: {rendered}"
+        );
+        assert!(
+            rendered.to_lowercase().contains("pseudo"),
+            "the notice must name the pseudo-reconcile cause: {rendered}"
+        );
+        assert!(
+            rendered.to_lowercase().contains("not a statement"),
+            "the notice must explicitly deny being an all-clear: {rendered}"
+        );
+        assert!(
+            rendered.to_lowercase().contains("form 8949"),
+            "the notice must name the concrete filing consequence: {rendered}"
+        );
+        assert!(
+            !rendered.contains("Nothing outstanding"),
+            "the false all-clear must NOT render alongside the notice: {rendered}"
+        );
+        assert!(
+            rendered.contains("[x] export"),
+            "export must stay reachable per D-7: {rendered}"
         );
     }
 
