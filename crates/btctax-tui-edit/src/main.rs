@@ -8712,10 +8712,14 @@ fn handle_bulk_income_preview_key(app: &mut EditorApp, key: KeyEvent) {
 /// dispatch would then route back into `handle_bulk_income_flow_key` and Enter would re-open this modal
 /// with no latch check, letting the filer save again under a banner promising no save could occur. That
 /// surviving-flow half is fixed in `close_all_mutation_surfaces` — but this guard is NOT a redundant
-/// backstop for it: `close_all_mutation_surfaces` is called from exactly one place, `on_persist_error`'s
-/// `ResidueLive` arm (the `rollback_failed` latch). Nothing closes `bulk_income_flow` when
-/// `stale_after_write` is armed instead, so a flow already open before a stale arming survives with no
-/// other guard between it and a save — THIS check is that guard, load-bearing for the stale half.
+/// backstop for it: `close_all_mutation_surfaces` is called from **two** places (corrected, fix wave
+/// MF-5 — this comment previously, falsely, said "exactly one"): `on_persist_error`'s `ResidueLive` arm
+/// (`:775`, `may_save = false`) and `arm_stale` (`:1038`, `may_save = true`). `arm_stale` DOES clear
+/// `bulk_income_flow` (`:861`, one of the fields `close_all_mutation_surfaces` nulls), so it is false
+/// that "nothing closes `bulk_income_flow` when `stale_after_write` is armed instead" — it does. THIS
+/// check is a defence-in-depth backstop against a bulk-income surface opened AFTER the arm already ran
+/// (a future caller that stops routing through `arm_stale`, or a surface opened between the arm and the
+/// next key dispatch), not the sole barrier the guard body below still correctly enforces.
 fn open_bulk_income_modal(app: &mut EditorApp) {
     if let Some(s) = app.stale_or_residue_latch_status() {
         app.status = Some(s);
@@ -31472,7 +31476,10 @@ mod tests {
             "no DeclarePlan may be written while armed"
         );
 
-        // pseudo-approve
+        // pseudo-approve (site 5) — the ONLY one of the five payload sites with no dedicated single-site
+        // KAT of its own (sites 1-4 each have one above/below, each asserting `contains("refused")` on
+        // top of the artifact-absence check); fix wave MF-7 adds that same refusal-surfaced assertion
+        // here so site 5 is held to the same standard as its four siblings.
         let (mut app3, _d3) = vault_with_pending_pseudo_defaults();
         app3.pseudo_approve_modal = Some(pseudo_approve_modal_fixture());
         app3.stale_after_write = Some("boom".into());
@@ -31482,6 +31489,11 @@ mod tests {
             0,
             "no pseudo payload set may be built while armed"
         );
+        let s = app3
+            .status
+            .clone()
+            .expect("armed pseudo-approve must set a status");
+        assert!(s.contains("refused"), "{s}");
     }
 
     /// Mutation record (site 2, `declare_flow_confirm`): deleted its `stale_reason` probe and re-ran

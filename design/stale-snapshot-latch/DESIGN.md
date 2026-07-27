@@ -392,6 +392,8 @@ The other burndown cycles. Privatizing `EditorApp.snapshot` (cut at r3 — see t
 **New FOLLOWUP (tax r2 m-4), owning phase = this cycle's ship:** an existing vault may already hold a
 promote whose `Acknowledgment`/`filed_basis` was recorded off a stale image; nothing detects or surfaces it.
 No shipped user has a vault, so the exposure is theoretical — recorded rather than silent.
+**CLOSED at ship (whole-branch fix wave) — see `design/stale-snapshot-latch/FOLLOWUPS.md`, "Closed at
+ship".**
 
 ## 5. SemVer
 

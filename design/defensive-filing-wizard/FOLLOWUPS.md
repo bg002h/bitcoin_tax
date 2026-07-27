@@ -123,8 +123,20 @@ P-C-owned remains open.)*
   `promote_flow_confirm`) + a third copy of the dashboard refresh in `open_defensive_filing`. The
   **`refresh_defensive_dashboard(app)`** half is DONE (whole-branch fold): extracted in `main.rs` and now the single
   source for both confirm tails AND the export step's own post-re-projection refresh. `EditorApp::open_defensive_filing`
-  deliberately keeps its own copy (it takes `&mut self` and must run the DFW-D6 entry gate first). **Still open:** the
-  `after_defensive_write(app, status)` half (the save→re-project→status→close-flow tail itself).
+  deliberately keeps its own copy (it takes `&mut self` and must run the DFW-D6 entry gate first). ~~**Still open:** the
+  `after_defensive_write(app, status)` half (the save→re-project→status→close-flow tail itself).~~
+  ★ **AMENDED 2026-07-27 (Cycle 1, `feat/stale-snapshot-latch`): contraindicated, not deferred.** A generic
+  `after_defensive_write` consolidating the export's inline rebuild into the SAME helper the other 26 write
+  tails now share (`apply_reprojection`/`after_write`, `main.rs:890`) would arm the stale latch on a keypress
+  that wrote NOTHING — `execute_defensive_export`'s own re-projection runs on every `x`, including one whose
+  `plan_export` refuses before any write is attempted, and `apply_reprojection`'s `Err` arm arms unconditionally
+  (`arm_stale`, `main.rs:1034-1038`). Folding it in would turn a read-only refusal into a false "the write landed
+  but could not be verified" latch. See guard (d)
+  (`build_snapshot_is_named_only_by_after_write_and_the_export`, `main.rs:17603`), which pins the export's
+  re-projection as a SEPARATE, allow-listed call site precisely so it is never folded into the shared helper by
+  accident, and `x_reprojection_failure_refuses_without_touching_the_latch` (`main.rs:15202`), which asserts the
+  export's own "Err ⇒ refuse, latch unchanged" contract directly. This item is now CLOSED as contraindicated,
+  not left open as future work.
 - **[done] arch-M-2 — `DeclareFlowState::clearance()` DELETED** (whole-branch fold). It had no non-test caller, and its
   own doc already conceded the real (and only) declare gate is `declare_flow_confirm`'s FRESH `plan_declare` at the
   Confirm-step Enter. Wiring it into the readout would have created a second, drifting gating authority (DFW-D1 forbids
@@ -250,18 +262,19 @@ All four blocking/near-blocking items below landed in the SAME commit; both bloc
   narrow before the first release than after); its only production caller is in-crate (`cmd/admin.rs`). The
   disposal-legs-only contract is now pinned by an in-crate unit test,
   `chokepoint::tests::promoted_filing_years_enumerates_promoted_disposal_legs_only`. (Owner: **P-D/whole-branch** — DONE.)
-- **[open] Stale `app.snapshot` after a failed re-projection — the CLASS, not just the instance.** The whole-branch fold
-  closed the one place where it could produce a WRONG FILED ARTIFACT: `execute_defensive_export` now re-projects BEFORE
-  planning and REFUSES outright if the ledger will not project (`main.rs:4618-4639`), so the exported year set and the
-  packet content always come from the same image — export is immune **by construction**, not by luck. But the class
-  remains: `main.rs` carries **26** `"Saved but re-projection failed ({e}) — restart to refresh"` tails (grep the
-  literal), each of which leaves `app.snapshot` holding the PRE-write image while the vault on disk has moved on. The
-  status tells the filer to restart, but nothing stops them ignoring it and driving another read off the stale
-  snapshot (dashboard rows, the declare/promote flows' `plan_*` inputs, `journey_view`). Fix the class, not the
-  instance: either invalidate `app.snapshot` (`None`) on a failed re-projection so every reader fails loud instead of
-  reading stale, or route all of them through one `after_write` helper that owns the invalidate — which also folds the
-  still-open `after_defensive_write` half of arch-M-1 above. ~~**Not a filing-correctness gate today** (no writer
-  re-derives a filed number from `app.snapshot` without its own fresh `plan_*`), so this is post-merge-safe.~~
+- **[closed — Cycle 1, feat/stale-snapshot-latch] Stale `app.snapshot` after a failed re-projection — the CLASS, not
+  just the instance.** The whole-branch fold closed the one place where it could produce a WRONG FILED ARTIFACT:
+  `execute_defensive_export` now re-projects BEFORE planning and REFUSES outright if the ledger will not project
+  (`main.rs:4618-4639`), so the exported year set and the packet content always come from the same image — export is
+  immune **by construction**, not by luck. But the class remains: `main.rs` carries **26** `"Saved but re-projection
+  failed ({e}) — restart to refresh"` tails (grep the literal), each of which leaves `app.snapshot` holding the
+  PRE-write image while the vault on disk has moved on. The status tells the filer to restart, but nothing stops
+  them ignoring it and driving another read off the stale snapshot (dashboard rows, the declare/promote flows'
+  `plan_*` inputs, `journey_view`). Fix the class, not the instance: either invalidate `app.snapshot` (`None`) on a
+  failed re-projection so every reader fails loud instead of reading stale, or route all of them through one
+  `after_write` helper that owns the invalidate — which also folds the still-open `after_defensive_write` half of
+  arch-M-1 above. ~~**Not a filing-correctness gate today** (no writer re-derives a filed number from `app.snapshot`
+  without its own fresh `plan_*`), so this is post-merge-safe.~~
   (Owner: **post-merge / next cycle.**)
   ★ **THE NON-BLOCKING JUSTIFICATION ABOVE IS FALSE — struck 2026-07-26** (Cycle-1 design, tax lens r1 C-1,
   independently verified). No confirm tail reads `session`: `promote_flow_confirm` (`main.rs:4466-4480`) does
@@ -271,8 +284,19 @@ All four blocking/near-blocking items below landed in the SAME commit; both bloc
   re-plans but also off `snap` (`main.rs:4178-4188`). The bulk paths freeze `fmv` from `snap` into the payload
   (`:8612-8627`). So a stale snapshot can write a WRONG §6664(c) record, a wrong prior-year amend set, and
   wrong Schedule-1/8949 basis numbers — permanently. Under the project severity rule this was **Critical**,
-  and it should have blocked the merge rather than becoming a post-merge item. Being fixed in Cycle 1
-  (`design/stale-snapshot-latch/`). **Lesson: a "not filing-correctness" claim must be traced to the payload
+  and it should have blocked the merge rather than becoming a post-merge item.
+  ★★ **CLOSED 2026-07-27 (Cycle 1, `feat/stale-snapshot-latch`, merged as `d816d23` and this branch's later
+  commits).** The option that shipped is the SECOND of the two named above, not the `app.snapshot = None`
+  alternative: a single `after_write` helper (`main.rs:890`) now owns invalidate-on-failure for **all 27** write
+  tails (the 24 literal-string tails plus the three bespoke-copy ones the earlier "26" count missed — tax-inputs
+  commit, tax-inputs park, and the safe-harbor attest write), arming `stale_after_write` and closing every mutation
+  surface on a failed re-projection rather than leaving `app.snapshot` silently stale. A dedicated scanner (guard
+  (d), `build_snapshot_is_named_only_by_after_write_and_the_export`, `main.rs:17603`) pins that `build_snapshot` is
+  named ONLY by `after_write` and by `execute_defensive_export`'s own independent re-projection (the one production
+  re-projection that must still run while the latch is armed, D-7) — a two-site allowlist, not an open-ended grep.
+  See `design/stale-snapshot-latch/` (SPEC, IMPLEMENTATION_PLAN, DESIGN.md, and this branch's own
+  `FOLLOWUPS.md`) for the full design and the whole-branch fix wave that closed the two blocking-Important
+  findings on top of it. **Lesson: a "not filing-correctness" claim must be traced to the payload
   construction site, not assumed from the confirm-tail's re-plan.**
 
 **Explicitly NOT touched (USER decision, handled separately):** the era-preset table content and its default preset
@@ -375,13 +399,13 @@ fold: the blockers and tax-M-3 are pure documentation; tax-M-1 makes an export y
   carries, which is exactly the "second consent surface" shape DFW-D1 exists to prevent. Not a defect today (the
   wizard and the CLI both go through the chokepoint one). Rename or narrow one before/at the first publish.
   (Owner: **post-merge / next cycle**, ideally BEFORE the v0.10.0 publish.)
-- **[open] arch M-5 — the DECLARE path can plan off a stale image, the same class the export fix closed by
-  construction.** `execute_defensive_export` now re-projects before planning (r1 arch I-1), but the declare and
-  promote flows still read `app.snapshot` for their `plan_*` inputs, and `main.rs` carries **26**
-  `"Saved but re-projection failed ({e}) — restart to refresh"` tails (grep the literal), each leaving
-  `app.snapshot` on the PRE-write image. ~~Not a filing-correctness gate today — both confirm tails re-run their
-  own FRESH `plan_declare`/`plan_promote` against `session` at the Enter, so no filed number is derived from the
-  stale image~~ — but the SHOWN readout (floor/coverage/tax-Δ, dashboard rows) can lag.
+- **[closed — Cycle 1, feat/stale-snapshot-latch] arch M-5 — the DECLARE path can plan off a stale image, the
+  same class the export fix closed by construction.** `execute_defensive_export` now re-projects before planning
+  (r1 arch I-1), but the declare and promote flows still read `app.snapshot` for their `plan_*` inputs, and
+  `main.rs` carries **26** `"Saved but re-projection failed ({e}) — restart to refresh"` tails (grep the literal),
+  each leaving `app.snapshot` on the PRE-write image. ~~Not a filing-correctness gate today — both confirm tails
+  re-run their own FRESH `plan_declare`/`plan_promote` against `session` at the Enter, so no filed number is
+  derived from the stale image~~ — but the SHOWN readout (floor/coverage/tax-Δ, dashboard rows) can lag.
   ★ **FALSE — struck 2026-07-26; see the CLASS item above for the verified trace.** Neither confirm tail reads
   `session`; both derive the filed payload from `app.snapshot`. Also **the tail count here is wrong**: "26" is a
   grep that includes its own two doc comments (`main.rs:4601`, `:14321`), the literal matches 24, and the real
@@ -392,9 +416,19 @@ fold: the blockers and tax-M-3 are pure documentation; tax-M-1 makes an export y
   `after_write` helper that owns the invalidate (which also folds the open `after_defensive_write` half of
   arch-M-1). Duplicate-safe: this is the same root cause as "Stale `app.snapshot` after a failed re-projection —
   the CLASS" above; kept as a separate line only because r2 named the declare path specifically.
+  ★★ **CLOSED 2026-07-27 (Cycle 1, `feat/stale-snapshot-latch`)** — same fix, same commit as the CLASS item
+  above: the declare and promote confirm tails (`declare_flow_confirm`, `promote_flow_review`) now refuse via
+  `stale_reason()` before planning whenever the single `after_write` helper (`main.rs:890`) has armed the latch,
+  so neither can construct a payload off the PRE-write image (Task 5's five payload-site KATs, plus this branch's
+  own fix-wave MF-7 fold closing the one payload site — pseudo-approve — that had an artifact-absence assertion
+  but no "refusal surfaced" assertion). See the CLASS item's closing note for the shipped mechanism.
   (Owner: **post-merge / next cycle.**)
-- **[open] ~22 remaining stale-snapshot tails.** Subsumed by the CLASS item above (26 literal sites today); no
-  separate work item — burn them down with the `after_write` helper. (Owner: **post-merge / next cycle.**)
+- **[closed — Cycle 1, feat/stale-snapshot-latch] ~22 remaining stale-snapshot tails.** Subsumed by the CLASS
+  item above (26 literal sites counted at the time; the real count, once the three bespoke-copy tax-inputs/
+  safe-harbor-attest tails are included, was 27). Closed by the same `after_write` consolidation: all 27 tails
+  now route through it, and guard (d) (`build_snapshot_is_named_only_by_after_write_and_the_export`,
+  `main.rs:17603`) pins that no new write tail can name `build_snapshot` outside that one helper (plus the
+  export's own independent re-projection) without going red. (Owner: **post-merge / next cycle** — DONE.)
 
 ## Copy pass / whole-branch review (ownerless residue — batch to the end)
 
