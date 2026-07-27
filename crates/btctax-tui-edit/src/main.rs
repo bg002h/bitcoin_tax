@@ -709,8 +709,8 @@ impl EditorApp {
     /// `residue_latch_status` is deliberately left alone — `execute_defensive_export` and
     /// `open_defensive_filing` keep it so D-7's export route stays reachable while stale.
     ///
-    /// Added here per the plan's Task-1 file list; gains its first production caller in a later task.
-    #[allow(dead_code)]
+    /// First wired at `open_pseudo_approve_flow` and `open_bulk_income_modal` (D-6 chains A and B) — the
+    /// two shipped bypasses of the residue latch.
     fn stale_or_residue_latch_status(&self) -> Option<String> {
         self.residue_latch_status().or_else(|| self.stale_reason())
     }
@@ -735,14 +735,24 @@ impl EditorApp {
                      memory. Quit the editor NOW (the vault on disk is unchanged); no in-editor \
                      action will save until you quit, then re-run the operation via the CLI."
                 ));
-                self.close_all_mutation_surfaces();
+                self.close_all_mutation_surfaces(false);
             }
         }
     }
 
     /// Close every mutating flow/modal (at most one of each is ever open). Used by the `ResidueLive`
     /// arm so no open flow can trigger a further save while the residue latch is up.
-    fn close_all_mutation_surfaces(&mut self) {
+    ///
+    /// `may_save` gates the tax-inputs draft flush: the `ResidueLive` caller passes FALSE because that
+    /// latch means an un-revertable residue is live in memory, so ANY `Session::save` — including a
+    /// draft flush — would persist it under a status promising the vault is unchanged. A future stale-path
+    /// caller (D-7) can pass TRUE once memory == disk there (the persist already succeeded). `may_save =
+    /// true` would be fail-safe, not an active flush: `handle_key:377` dispatches `tax_inputs_form` first,
+    /// so no other tail can run with a live dirty form.
+    fn close_all_mutation_surfaces(&mut self, may_save: bool) {
+        if may_save {
+            flush_tax_inputs_draft(self);
+        }
         self.profile_form = None;
         self.mutation_modal = None;
         self.classify_inbound_flow = None;
@@ -787,6 +797,9 @@ impl EditorApp {
         self.method_election_modal = None;
         self.declare_flow = None;
         self.promote_flow = None;
+        self.tax_inputs_form = None;
+        self.bulk_income_flow = None;
+        self.bulk_income_modal = None;
     }
 }
 
@@ -4552,7 +4565,7 @@ fn promote_flow_confirm(app: &mut EditorApp) {
         // the filer has authored a multi-paragraph narrative the CLI would have read from a file. So keep
         // the flow OPEN and bounce to Part II authoring with the reason inline (the buffer lives outside
         // `step` precisely for this); close ONLY on `ResidueLive`, the unrecoverable arm — which
-        // `on_persist_error`'s own `close_all_mutation_surfaces()` closes anyway. `on_persist_error`
+        // `on_persist_error`'s own `close_all_mutation_surfaces(false)` closes anyway. `on_persist_error`
         // still runs in BOTH cases: it remains the SINGLE `PersistError` → editor-effect mapper [R0-I1]
         // (and the only site that arms the residue latch).
         Err(e) => {
@@ -8208,7 +8221,15 @@ fn handle_bulk_sti_modal_key(app: &mut EditorApp, key: KeyEvent) {
 
 /// Pseudo-reconcile (sub-project 2): open the approve confirmation modal, carrying the count of pending
 /// synthetic defaults. A no-op (status only) when nothing is contributing.
+///
+/// ★ D-6 chain B fix: refuses first if the stale/residue latch is armed — this opener had NO latch check
+/// at all, so `P` on Browse could open the modal (and its Enter calls `persist_bulk_decisions`, a save)
+/// while the residue latch was up, needing no surviving surface to exploit.
 fn open_pseudo_approve_flow(app: &mut EditorApp) {
+    if let Some(s) = app.stale_or_residue_latch_status() {
+        app.status = Some(s);
+        return;
+    }
     let count = app
         .snapshot
         .as_ref()
@@ -8624,7 +8645,18 @@ fn handle_bulk_income_preview_key(app: &mut EditorApp, key: KeyEvent) {
 /// `ClassifyInbound{Income{kind, Some(fmv), business}}` per checked row (the per-row auto-FMV comes from
 /// the plan; [#a] `fmv` is `Some(row.fmv)` so `Income{fmv:None}` is unrepresentable). Empty selection →
 /// refuse (stay on Preview with an error), never open the modal.
+///
+/// ★ D-6 chain A fix: refuses first if the stale/residue latch is armed. `close_all_mutation_surfaces`
+/// used to omit `bulk_income_flow`, so a `ResidueLive` from THIS modal left the flow alive; Browse's key
+/// dispatch would then route back into `handle_bulk_income_flow_key` and Enter would re-open this modal
+/// with no latch check, letting the filer save again under a banner promising no save could occur. The
+/// surviving-flow half of that bug is fixed in `close_all_mutation_surfaces`; this guard is the second,
+/// independent half — belt-and-suspenders against any other path that could reach this opener.
 fn open_bulk_income_modal(app: &mut EditorApp) {
+    if let Some(s) = app.stale_or_residue_latch_status() {
+        app.status = Some(s);
+        return;
+    }
     let modal = {
         let f = match app.bulk_income_flow.as_ref() {
             Some(f) => f,
@@ -21491,6 +21523,75 @@ mod tests {
                 app.status
             );
         }
+    }
+
+    /// ★ SHIPPED CRITICAL, chain A. `close_all_mutation_surfaces` omitted `bulk_income_flow` (and
+    /// `bulk_income_modal`/`tax_inputs_form`), so a `ResidueLive` from the bulk-income modal left the
+    /// FLOW alive; `handle_key:327` dispatches to it and `open_bulk_income_modal` re-opened the modal
+    /// with no latch check, letting the filer save again under a banner promising no save could occur.
+    ///
+    /// Mutation record: commented out `self.bulk_income_flow = None;` inside `close_all_mutation_surfaces`
+    /// (`main.rs`), leaving the `bulk_income_modal`/`tax_inputs_form` clears in place, then ran
+    /// `cargo nextest run -p btctax-tui-edit residue_latch_cannot_be_re_entered_through_the_surviving_bulk_income_flow`
+    /// — RED: `assert!(app.bulk_income_flow.is_none(), "chain A: the flow must not survive the latch")`
+    /// failed (the flow was still `Some`). Restored the line via a `cp` backup (never `git checkout --`)
+    /// and re-ran — GREEN.
+    #[test]
+    fn residue_latch_cannot_be_re_entered_through_the_surviving_bulk_income_flow() {
+        let mut app = EditorApp::new(std::path::PathBuf::from("/nonexistent"));
+        app.bulk_income_flow = Some(BulkIncomeFlowState {
+            step: BulkIncomeStep::Filter,
+            kind: IncomeKind::Mining,
+            business: false,
+            wallet_choices: vec![None],
+            wallet_idx: 0,
+            year_choices: vec![None],
+            year_idx: 0,
+            filter_focus: 0,
+            preview: TargetList::new(Vec::new()),
+            excluded_missing_price: 0,
+            error: None,
+        });
+        app.on_persist_error(edit::persist::PersistError::ResidueLive(
+            btctax_cli::CliError::Usage("disk".into()),
+        ));
+        assert!(app.rollback_failed, "the latch must arm");
+        assert!(
+            app.bulk_income_flow.is_none(),
+            "chain A: the flow must not survive the latch"
+        );
+        assert!(app.bulk_income_modal.is_none());
+        assert!(app.tax_inputs_form.is_none());
+    }
+
+    /// ★ SHIPPED CRITICAL, chain B. `open_pseudo_approve_flow` had NO latch check at all, so `P` on
+    /// Browse opened the modal and its Enter called `persist_bulk_decisions` — a save while the residue
+    /// latch was armed, needing no surviving surface. The shipped opener KAT
+    /// (`kat_rollback_failed_latch_refuses_all_openers`) loops only 9 of 25 keys, which is why it was
+    /// never caught.
+    ///
+    /// Mutation record: deleted the `if let Some(s) = app.stale_or_residue_latch_status() { app.status =
+    /// Some(s); return; }` guard at the top of `open_pseudo_approve_flow` (`main.rs`), then ran
+    /// `cargo nextest run -p btctax-tui-edit pseudo_approve_opener_refuses_while_the_residue_latch_is_armed`
+    /// — RED: `app.pseudo_approve_modal` was `Some(..)` (the modal opened), failing "chain B: P must not
+    /// open a save surface". Restored the guard via a `cp` backup (never `git checkout --`) and re-ran —
+    /// GREEN.
+    #[test]
+    fn pseudo_approve_opener_refuses_while_the_residue_latch_is_armed() {
+        let mut app = browse_app_with_empty_snapshot();
+        app.snapshot = Some(snapshot_with_pseudo_count(3));
+        app.rollback_failed = true;
+        app.status = None;
+        open_pseudo_approve_flow(&mut app);
+        assert!(
+            app.pseudo_approve_modal.is_none(),
+            "chain B: P must not open a save surface"
+        );
+        let s = app.status.clone().unwrap_or_default();
+        assert!(
+            s.starts_with("CRITICAL"),
+            "the refusal must name the reason: {s}"
+        );
     }
 
     // ── KAT-E2E-SL — end-to-end select-lots (discriminating seed) ─────────────
