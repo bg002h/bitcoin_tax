@@ -1425,6 +1425,7 @@ fn characterization_crypto_slice_export_pins_the_shipped_file_set_and_report() {
     assert_eq!(
         names,
         vec![
+            "EXPERIMENTAL.txt".to_string(),
             "basis_methodology.txt".to_string(),
             "f8949.pdf".to_string(),
             "form_1040_capgains.pdf".to_string(),
@@ -1432,7 +1433,8 @@ fn characterization_crypto_slice_export_pins_the_shipped_file_set_and_report() {
             "form_8275.txt".to_string(),
             "schedule_d.pdf".to_string(),
         ],
-        "the crypto-slice arm's emitted file set is pinned exactly"
+        "the crypto-slice arm's emitted file set is pinned exactly (now including the Approach-B \
+         `EXPERIMENTAL.txt` sibling notice — this fixture's vault has a live promoted tranche)"
     );
 
     assert_eq!(report.f8949_path, Some(out.join("f8949.pdf")));
@@ -1467,6 +1469,10 @@ fn characterization_crypto_slice_export_pins_the_shipped_file_set_and_report() {
         !report.forms_ignored_full_return,
         "the crypto-slice arm always honors --forms"
     );
+    assert!(
+        report.experimental_notice,
+        "this fixture's vault has a live promoted tranche — Approach-B is in use"
+    );
 }
 
 /// Arm (b) — ★ arch-m-new-1: the SAME underlying vault, but with a `return_inputs` row planted for
@@ -1496,11 +1502,13 @@ fn characterization_full_return_export_pins_the_shipped_file_set_and_report() {
             "12A_f8949.pdf".to_string(),
             "12_schedule_d.pdf".to_string(),
             "92_f8275.pdf".to_string(),
+            "EXPERIMENTAL.txt".to_string(),
             "basis_methodology.txt".to_string(),
             "form_8275.txt".to_string(),
             "manifest.txt".to_string(),
         ],
-        "the full-return arm's emitted file set is pinned exactly"
+        "the full-return arm's emitted file set is pinned exactly (now including the Approach-B \
+         `EXPERIMENTAL.txt` sibling notice — this fixture's vault has a live promoted tranche)"
     );
 
     // The crypto-slice-only fields are ALWAYS absent on the full-return arm — its 8275 rides inside
@@ -1538,6 +1546,10 @@ fn characterization_full_return_export_pins_the_shipped_file_set_and_report() {
         "the full-return packet's paths are pinned exactly, in this order"
     );
     assert_eq!(report.full_return_manifest, Some(out.join("manifest.txt")));
+    assert!(
+        report.experimental_notice,
+        "this fixture's vault has a live promoted tranche — Approach-B is in use"
+    );
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════

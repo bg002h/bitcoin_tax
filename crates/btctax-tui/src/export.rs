@@ -9,7 +9,9 @@
 //! `btctax_cli::render::write_form_csvs`) — the four named form CSVs plus, when a
 //! conservative-filing tranche is in the filed set, the mandatory `basis_methodology.txt`
 //! disclosure (P7 / D-4), plus — when a PROMOTED-basis disposal leg files in the year — the
-//! mandatory `form_8275.txt` disclosure (BG-D8 / Reg §1.6662-4(f)).  No other write-class I/O
+//! mandatory `form_8275.txt` disclosure (BG-D8 / Reg §1.6662-4(f)), plus — when a live
+//! DeclareTranche/PromoteTranche is on file — the Approach-B `EXPERIMENTAL.txt` sibling notice
+//! (`design/approach-b-experimental-notice`; NEVER inside a form).  No other write-class I/O
 //! occurs anywhere in `btctax-tui` source — the mechanized gate (KAT-E10) enforces this on every
 //! `cargo test`.
 //!
@@ -204,6 +206,11 @@ pub fn do_export(
     // iff a promoted disposal leg files in `year`, nothing otherwise. The gate at the top of this fn
     // already guaranteed any promoted leg reaching here carries a complete Part II.
     btctax_cli::render::write_form_8275_txt(&state.out_dir, &snap.state, &snap.events, year)?;
+
+    // Approach-B experimental disclosure (`design/approach-b-experimental-notice`): a SEPARATE sibling
+    // file, alongside the packet — self-gates on `uses_approach_b`, writes nothing for a ledger with no
+    // live tranche/promote.
+    btctax_cli::render::write_experimental_notice_txt(&state.out_dir, &snap.events)?;
 
     Ok(state.out_dir.clone())
 }

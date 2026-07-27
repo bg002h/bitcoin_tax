@@ -228,7 +228,19 @@ pub fn promote_tranche(
 
     println!("{}", crate::chokepoint::render_consent(&plan));
 
-    crate::chokepoint::apply_promote(&mut session, plan, acknowledge, now)
+    let event_id = crate::chokepoint::apply_promote(&mut session, plan, acknowledge, now)?;
+
+    // Approach-B experimental disclosure (`design/approach-b-experimental-notice`): promoting a tranche
+    // is exactly "acting on this feature" — warn on stderr (never stdout — stdout is parsed/piped),
+    // mirroring `cmd::tranche::declare_tranche`'s own placement (I/O, not gate logic, AFTER the write
+    // succeeds — a refused/missing-acknowledgment attempt, which returns via the `?` above, never emits
+    // this). Re-reads the just-written events rather than reasoning about the plan.
+    let events_after = btctax_core::persistence::load_all(session.conn())?;
+    if btctax_core::experimental::uses_approach_b(&events_after) {
+        eprintln!("\n⚠ {}", btctax_core::experimental::NOTICE.plain_text());
+    }
+
+    Ok(event_id)
 }
 
 #[cfg(test)]

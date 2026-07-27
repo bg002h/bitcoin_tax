@@ -1104,6 +1104,7 @@ mod tests {
             full_return_paths: vec![],
             full_return_manifest: None,
             forms_ignored_full_return: false,
+            experimental_notice: false,
         };
         let reports: Vec<btctax_cli::ExportOutcome> =
             vec![(2024, Ok(ok_report(2024))), (2025, Ok(ok_report(2025)))];
@@ -1152,6 +1153,7 @@ mod tests {
             full_return_paths: vec![],
             full_return_manifest: None,
             forms_ignored_full_return: false,
+            experimental_notice: false,
         };
         let reports: Vec<btctax_cli::ExportOutcome> = vec![
             (

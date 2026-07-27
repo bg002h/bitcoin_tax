@@ -749,6 +749,13 @@ fn run() -> Result<ExitCode, CliError> {
                  figure against the forms and instructions before you sign, and the authors accept \
                  no liability for the consequences. This is not tax advice. See `btctax limitations`."
             );
+            // Approach-B experimental disclosure (`design/approach-b-experimental-notice`): a live
+            // (non-voided) DeclareTranche/PromoteTranche is on file — this export's packet also carries
+            // `EXPERIMENTAL.txt` (a separate sibling file, never inside a form). Covers BOTH the
+            // crypto-slice and the full-return dispatch (both return the same `IrsPdfReport`).
+            if report.experimental_notice {
+                eprintln!("\n⚠ {}", btctax_core::experimental::NOTICE.plain_text());
+            }
             // UX-P4-5: a --forms slice cannot be honored on a full-return year — the 14-form packet is
             // jointly computed, so a slice of it is tax-unsound. The whole packet was written; say the
             // slice was ignored (on STDERR — the packet listing below is the result).

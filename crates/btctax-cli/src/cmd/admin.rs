@@ -221,6 +221,10 @@ pub fn export_snapshot(
             }
         }
     }
+    // Approach-B experimental disclosure: a SEPARATE sibling file, alongside the packet — self-gates on
+    // `uses_approach_b`, writes nothing for a ledger with no live tranche/promote.
+    crate::render::write_experimental_notice_txt(out_dir, &events)
+        .map_err(|e| crate::cli_io_with_path(e, out_dir, crate::EXPORT_OUT_HINT))?;
     // [R0-I1] Count UNRESOLVED Hard blockers only. Any Hard blocker gates every year, so the count
     // alone (no per-year `compute_tax_year` call, no profile/tables dependency) drives the main.rs
     // stderr "INFORMATIONAL, not final" disclosure. Advisory blockers never count.
@@ -294,6 +298,11 @@ pub struct IrsPdfReport {
     /// (the whole jointly-computed packet writes; honoring a slice of it is tax-unsound). The caller
     /// warns on stderr. Always `false` on the crypto-slice path (there `--forms` is honored).
     pub forms_ignored_full_return: bool,
+    /// Approach-B experimental disclosure (`design/approach-b-experimental-notice`):
+    /// `btctax_core::experimental::uses_approach_b(events)` on the projected events — `true` iff a live
+    /// (non-voided) DeclareTranche/PromoteTranche is on file. Drives main.rs's stderr notice; the same
+    /// predicate already gated the `EXPERIMENTAL.txt` sibling file this fn wrote into `out_dir`.
+    pub experimental_notice: bool,
 }
 
 /// The **[I5]** broker-reporting advisory line, year-aware — or `None` when no disposition may have
@@ -479,6 +488,9 @@ pub(crate) fn export_irs_pdf_from_session(
     // BG-D8: the Form 8275 disclosure rides the packet by its OWN name. The gate above guaranteed a
     // promoted leg reaching here has a complete Part II. Writes nothing for a no-promoted-leg year.
     crate::render::write_form_8275_txt(out_dir, state, events, tax_year)?;
+    // Approach-B experimental disclosure: a SEPARATE sibling file, alongside the packet.
+    crate::render::write_experimental_notice_txt(out_dir, events)?;
+    let experimental_notice = btctax_core::experimental::uses_approach_b(events);
 
     // ── Form 8949 + Schedule D (always applicable). ──
     let f8949_path = if wants(forms, FormArg::F8949) {
@@ -640,6 +652,7 @@ pub(crate) fn export_irs_pdf_from_session(
         form_1040_filled_7a,
         form_1040_loss,
         form_8275_path,
+        experimental_notice,
     })
 }
 
@@ -813,6 +826,9 @@ fn export_full_return(
     // BG-D8: the Form 8275 disclosure rides the full-return packet by its OWN name (gate above guaranteed
     // a complete Part II). Writes nothing for a no-promoted-leg year.
     crate::render::write_form_8275_txt(out_dir, state, events, tax_year)?;
+    // Approach-B experimental disclosure: a SEPARATE sibling file, alongside the packet.
+    crate::render::write_experimental_notice_txt(out_dir, events)?;
+    let experimental_notice = btctax_core::experimental::uses_approach_b(events);
     let mut manifest = String::from("# btctax full-return packet — staple in this order\n");
     let mut paths: Vec<PathBuf> = Vec::new();
     for form in &packet {
@@ -884,6 +900,7 @@ fn export_full_return(
         // The full-return path's 8275 (when present) is inside `full_return_paths` — sequence-prefixed
         // (`92_f8275.pdf`), not this crypto-slice-only bare-named field.
         form_8275_path: None,
+        experimental_notice,
     })
 }
 

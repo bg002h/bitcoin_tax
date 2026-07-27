@@ -126,5 +126,18 @@ pub fn declare_tranche(
         );
     }
 
-    crate::chokepoint::apply_declare(&mut session, plan, now)
+    let event_id = crate::chokepoint::apply_declare(&mut session, plan, now)?;
+
+    // Approach-B experimental disclosure (`design/approach-b-experimental-notice`): declaring a tranche
+    // is exactly "acting on this feature" — warn on stderr (never stdout — stdout is parsed/piped),
+    // mirroring the phantom-wallet warning's own shape and its "I/O, not gate logic, stays in the
+    // driver, AFTER the write succeeds" placement. Re-reads the just-written events rather than
+    // reasoning about the plan, so this stays correct even if a future caller composes `declare_tranche`
+    // differently.
+    let events_after = load_all(session.conn())?;
+    if btctax_core::experimental::uses_approach_b(&events_after) {
+        eprintln!("\n⚠ {}", btctax_core::experimental::NOTICE.plain_text());
+    }
+
+    Ok(event_id)
 }

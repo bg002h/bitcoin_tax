@@ -993,6 +993,28 @@ pub(crate) fn write_basis_methodology_txt(
     Ok(())
 }
 
+/// Approach-B experimental disclosure (`design/approach-b-experimental-notice`): write `EXPERIMENTAL.txt`
+/// (0o600) alongside the export packet whenever `btctax_core::experimental::uses_approach_b(events)` is
+/// true — a live (non-voided) DeclareTranche/PromoteTranche is on file. Writes NOTHING otherwise. This is
+/// the one place the notice travels WITH the output: a sibling file, never inside a form — never call
+/// this from anywhere that touches `Printed8275`/`Disclosure8275` or any other filed-artifact writer.
+///
+/// Mirrors [`write_basis_methodology_txt`] / [`write_form_8275_txt`]'s call-site shape (a separate write,
+/// right alongside them) at every export directory this crate creates: `export-snapshot`'s
+/// `write_csv_exports`/`write_form_csvs` call sites (`cmd/admin.rs`, `btctax-tui::export::do_export`), and
+/// `export-irs-pdf` / the full-return packet (`cmd/admin.rs`).
+pub fn write_experimental_notice_txt(
+    out_dir: &Path,
+    events: &[LedgerEvent],
+) -> Result<(), crate::CliError> {
+    use std::io::Write as _;
+    if btctax_core::experimental::uses_approach_b(events) {
+        let mut file = fsperms::open_owner_only(&out_dir.join("EXPERIMENTAL.txt"))?;
+        write!(file, "{}", btctax_core::experimental::NOTICE.plain_text())?;
+    }
+    Ok(())
+}
+
 /// P2-D Task 2: write `schedule_se.csv` — the standalone §1401 SE-tax components for the tax year.
 /// One data row. Stable snake_case columns; exact `Decimal` string values (NFR5). 0o600 via
 /// `open_owner_only`. Written only when a `SeTaxResult` exists (business SE income present + table).
