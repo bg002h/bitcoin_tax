@@ -46,12 +46,14 @@ mod wrap;
 
 pub use error::FormsError;
 pub use form1040::{Form1040Fill, Form1040Inputs};
+pub use form8275::PartIiCapacity;
 pub use map::{
     Form1040Map, Form8275Map, Form8283Map, Form8949Map, Form8959Map, Form8960Map, Form8995Map,
     Schedule1Map, Schedule2Map, Schedule3Map, ScheduleAMap, ScheduleBMap, ScheduleCMap,
     ScheduleDMap, ScheduleSeMap,
 };
 pub use schedule_se::SE_FLOOR;
+pub use wrap::PartIiOverflow;
 
 use btctax_core::conventions::{TaxDate, Usd};
 use btctax_core::{Form8949Row, ScheduleDTotals};
@@ -290,6 +292,14 @@ pub fn fill_form_8275_slice(
     year: i32,
 ) -> Result<Option<Vec<u8>>, FormsError> {
     form8275::fill_form_8275_slice(printed, year)
+}
+
+/// Whether a Form 8275 Part II `narrative` fits `year`'s bundled revision, WITHOUT filling anything —
+/// runs the identical wrap the real fill does, so a caller can pre-flight BEFORE writing any packet
+/// file (T-f8275-part-ii-overflow round 2 finding 2). See [`form8275::part_ii_capacity_check`]'s doc
+/// comment for the full rationale.
+pub fn part_ii_capacity_check(narrative: &str, year: i32) -> Result<PartIiCapacity, FormsError> {
+    form8275::part_ii_capacity_check(narrative, year)
 }
 
 /// Fill the **full-return Form 8283** for `year` — whole-dollar rows plus the FILER's identity block

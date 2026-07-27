@@ -22,14 +22,51 @@
 //! PDF-data level stops an over-long `/V`), but a viewer honoring the widget's own box could only
 //! DISPLAY the first ~137 characters at 8pt — a fifth of a disclosure is not a disclosure, and neither
 //! `/MaxLen` (not declared on this field) nor `verify_flat`'s geometry leg (skipped for free
-//! placements) could see it. `crate::wrap` measures at the SAME Helvetica-Bold 8pt the PDF's own `/DA`
-//! declares and greedily wraps the narrative across `Form8275Map::narrative_continuation_fields()` (33
-//! lines: Part II's own 6 + page-2 Part IV's 27); if it still will not fit, the fill fails closed with
-//! [`FormsError::Overflow`] (mirroring the Part I >6-row refusal below) rather than clip.
+//! placements) could see it.
+//!
+//! **★ Only Part II's OWN line 1 (`part_ii_narrative`, `p1-t80[0]`) is ever written — round 2.** The
+//! bundled PDF's XFA template draws printed numerals `"1 "`..`"6 "` beside `p1-t80[0]`..`p1-t85[0]`
+//! (`Line1PartII`..`Line6PartII`, confirmed by decompressing the asset's own `template` XFA packet),
+//! numbered to match Part I's 6 rows — Part II line *n* is meant to explain Part I row *n*. Spreading
+//! one COMBINED narrative (multiple promoted tranches' accounts, joined by
+//! `btctax-core/src/tax/form8275.rs`) across those numbered lines would attribute sentence fragments to
+//! Part I items they do not explain — an early build of this fix did exactly that and its own golden
+//! showed line 2's text sitting beside Part I's SECOND row while actually continuing line 1's sentence.
+//! Per-item numbering (one explanation per numbered line, matched to its own Part I row) is the more
+//! faithful long-term shape, but it is a bigger change (needs `Part1Item`-to-narrative correlation this
+//! crate does not have today) — filed as a follow-up, not built here
+//! (`design/f8275-part-ii-overflow/FOLLOWUPS.md`). For now: everything past Part II's line 1 spills to
+//! Part IV instead, which has no per-line numbering to misclaim.
+//!
+//! **★ Part IV carries the IRS-required cross-reference.** Rev. 10-2024's Specific Instructions for
+//! Part IV: *"Use Part IV on page 2 if you need more space for Parts I and/or II. Include the
+//! corresponding part and line number from page 1."* Page 2 is captioned "Explanations (continued
+//! from Parts I **and/or** II)" — an examiner reading it cold cannot tell which without the label. The
+//! FIRST Part IV line used therefore always starts with
+//! [`crate::wrap::PART_IV_CROSS_REFERENCE_PREFIX`] ("Part II, line 1 (continued): "), budgeted into the
+//! wrap so it never itself causes an overflow.
+//!
+//! **★ The wrap budgets the renderer's text inset, not the raw widget box.** AcroForm variable text is
+//! inset from its `/Rect` edges by (at minimum) border width + 1 (PDF 32000-1 §12.7.4.3); measured
+//! against this asset, poppler starts ~2.16pt in from the left edge and pdf.js is more conservative
+//! still (≈4pt total) — budgeting the RAW rect width let 3 lines of the fix's own >1500-char KAT
+//! fixture measure over their box once inset was accounted for (see
+//! `design/f8275-part-ii-overflow/BUILD-REPORT.md`). [`usable_width`] subtracts
+//! `2 * TEXT_INSET_PTS` before `crate::wrap` ever sees a width.
+//!
+//! `crate::wrap` measures at the SAME Helvetica-Bold 8pt the PDF's own `/DA` declares (using the
+//! bundled asset's OWN embedded font `/Widths`, not a generic AFM table — see `wrap.rs`'s doc comment)
+//! and wraps the narrative, respecting paragraph breaks as hard breaks (`wrap::split_paragraphs`) so
+//! two promoted tranches' independent accounts never blend into one filed sentence. If it still will
+//! not fit across Part II's line 1 + all of Part IV, the fill fails closed with [`FormsError::Overflow`]
+//! (mirroring the Part I >6-row refusal below) rather than clip. [`part_ii_capacity_check`] runs the
+//! SAME wrap without filling anything, so `btctax-cli`'s export paths can refuse before writing any
+//! packet file at all.
 
 use crate::error::FormsError;
 use crate::map::Form8275Map;
 use crate::verify::{verify_flat, FlatPlacement};
+use crate::wrap::{wrap_part_ii, PartIiOverflow};
 use crate::{fmt_money, pdf};
 use btctax_core::tax::packet::ReturnHeader;
 use btctax_core::tax::printed::Printed8275;
@@ -39,6 +76,42 @@ use btctax_core::tax::printed::Printed8275;
 /// (`/HelveticaLTStd-Bold 8.00 Tf`, verified against the bundled Rev. 10-2024 asset) — the size
 /// `crate::wrap` measures the narrative at.
 const PART_II_FONT_SIZE_PT: f32 = 8.0;
+
+/// Minimum text inset (PDF points) a `/Rect`'s raw width is reduced by, PER SIDE, before it is treated
+/// as usable — see the module doc's "the wrap budgets the renderer's text inset" note. `2.0` matches
+/// pdf.js's observed ≈4pt total inset on this asset (the more conservative of the renderers measured),
+/// while still comfortably covering poppler's smaller ~2.16pt.
+const TEXT_INSET_PTS: f32 = 2.0;
+
+/// The usable text width of field `fqn` (its `/Rect` width minus `2 * TEXT_INSET_PTS`) — the SAME
+/// figure both the real fill and [`part_ii_capacity_check`] budget the wrap against, so the two can
+/// never disagree about what fits.
+fn usable_width(fields: &[pdf::Field], fqn: &str) -> Result<f32, FormsError> {
+    let field = fields
+        .iter()
+        .find(|f| f.fqn == fqn)
+        .ok_or_else(|| FormsError::MapFieldMissing(fqn.to_string()))?;
+    let rect = field
+        .rect
+        .ok_or_else(|| FormsError::Structure(format!("{fqn}: field has no /Rect")))?;
+    Ok((rect[2] - rect[0]) - 2.0 * TEXT_INSET_PTS)
+}
+
+/// Part II's own line-1 usable width + a Part IV line's usable width, for `map`'s bundled asset —
+/// shared by the real fill and [`part_ii_capacity_check`].
+fn part_ii_iv_widths(
+    blank_fields: &[pdf::Field],
+    map: &Form8275Map,
+) -> Result<(f32, f32), FormsError> {
+    let part_ii_width = usable_width(blank_fields, &map.part_ii_narrative)?;
+    let part_iv_width = match map.part_iv_continuation.first() {
+        Some(fqn) => usable_width(blank_fields, fqn)?,
+        // No Part IV lines mapped at all — degrade to Part II's own (proven-safe) width; unreachable on
+        // the bundled asset (27 lines mapped), defensive only.
+        None => part_ii_width,
+    };
+    Ok((part_ii_width, part_iv_width))
+}
 
 /// A free-text cell (geometry-exempt, page-derived): written + authorized only when non-empty. Mirrors
 /// `form8283.rs::push_free` exactly — Form 8275 has no money-grid columns, so every cell here uses it.
@@ -55,6 +128,30 @@ fn push_free(
     p.push(FlatPlacement::free(
         fqn.to_string(),
         crate::cells::page_of(fqn),
+    ));
+}
+
+/// Like [`push_free`], but the placement also joins a per-group strictly-descending-y ordinal sequence
+/// (`FlatPlacement::free_ordered`) — used for Part IV's continuation lines, which (unlike every other
+/// free-text write in this form) really are a physically ORDERED sequence the fill assumes is
+/// top-to-bottom (round 2 finding 6).
+fn push_free_ordered(
+    w: &mut Vec<(String, pdf::FieldValue)>,
+    p: &mut Vec<FlatPlacement>,
+    fqn: &str,
+    value: &str,
+    group: u32,
+    ordinal: u32,
+) {
+    if value.is_empty() {
+        return;
+    }
+    w.push((fqn.to_string(), pdf::FieldValue::Text(value.to_string())));
+    p.push(FlatPlacement::free_ordered(
+        fqn.to_string(),
+        crate::cells::page_of(fqn),
+        group,
+        ordinal,
     ));
 }
 
@@ -142,40 +239,42 @@ fn fill_form_8275_inner(
         // (f) Amount.
         push_free(&mut w, &mut p, &row_map.amount, &fmt_money(item.amount));
     }
-    // Part II — the filer's combined narrative, WRAPPED (never truncated) across the 6 Part II lines
-    // (`part_ii_narrative` + `part_ii_continuation`) then the 27 page-2 Part IV lines
-    // (`part_iv_continuation`), in that printed order — 33 single-line 8pt fields total. Measured at
-    // Helvetica-Bold 8pt (the SAME font/size these fields' own `/DA` declares) against the NARROWEST
-    // of their own widget widths, applied uniformly, so a line that fits physically fits on whichever
-    // field it lands on (Part IV's fields are wider still). Fails closed ([`FormsError::Overflow`],
-    // mirroring the Part I row refusal above) rather than silently clipping past the field boundary —
-    // the shipped defect this fix exists to end.
-    let continuation_fields = map.narrative_continuation_fields();
-    let line_width_pts = continuation_fields
-        .iter()
-        .try_fold(f32::INFINITY, |narrowest, fqn| {
-            let field = blank_fields
-                .iter()
-                .find(|f| &f.fqn == fqn)
-                .ok_or_else(|| FormsError::MapFieldMissing((*fqn).to_string()))?;
-            let rect = field
-                .rect
-                .ok_or_else(|| FormsError::Structure(format!("{fqn}: field has no /Rect")))?;
-            Ok::<f32, FormsError>(narrowest.min(rect[2] - rect[0]))
-        })?;
-    let part_ii_lines = crate::wrap::wrap_to_capacity(
+    // Part II — the filer's combined narrative, WRAPPED (never truncated) onto Part II's own line 1
+    // (`part_ii_narrative`) then, if it does not fit there alone, Part IV's continuation lines
+    // (`part_iv_continuation`, with the IRS-required cross-reference on the first one used) — see the
+    // module doc for why Part II's numbered lines 2-6 are deliberately left unclaimed. Fails closed
+    // ([`FormsError::Overflow`], mirroring the Part I row refusal above) rather than silently clipping
+    // past a field boundary — the shipped defect this fix exists to end.
+    let (part_ii_width, part_iv_width) = part_ii_iv_widths(&blank_fields, map)?;
+    let wrapped = wrap_part_ii(
         &printed.part_ii,
-        continuation_fields.len(),
-        line_width_pts,
+        part_ii_width,
+        part_iv_width,
+        map.part_iv_continuation.len(),
         PART_II_FONT_SIZE_PT,
     )
-    .map_err(|rows| FormsError::Overflow {
+    .map_err(|overflow: PartIiOverflow| FormsError::Overflow {
         part: "Part II",
-        rows,
-        capacity: continuation_fields.len(),
+        rows: overflow.rows_needed,
+        capacity: overflow.capacity,
     })?;
-    for (fqn, line) in continuation_fields.iter().zip(part_ii_lines.iter()) {
-        push_free(&mut w, &mut p, fqn, line);
+    const PART_II_GROUP: u32 = 0;
+    const PART_IV_GROUP: u32 = 1;
+    push_free_ordered(
+        &mut w,
+        &mut p,
+        &map.part_ii_narrative,
+        &wrapped.part_ii_line1,
+        PART_II_GROUP,
+        0,
+    );
+    for (i, (fqn, line)) in map
+        .part_iv_continuation
+        .iter()
+        .zip(wrapped.part_iv_lines.iter())
+        .enumerate()
+    {
+        push_free_ordered(&mut w, &mut p, fqn, line, PART_IV_GROUP, i as u32);
     }
 
     // The FILER's identity — "Name(s) shown on return" + identifying number. `None` on the crypto-slice
@@ -206,4 +305,42 @@ fn fill_form_8275_inner(
     let fields = pdf::collect_fields(&check)?;
     verify_flat(&check, &fields, &placements, &[])?;
     Ok(Some(bytes))
+}
+
+/// Whether `narrative` fits, WITHOUT filling anything — the SAME wrap the real fill runs (via
+/// [`part_ii_iv_widths`]/[`wrap_part_ii`], so the two can never disagree). `Ok(PartIiCapacity::Fits)`
+/// covers an empty narrative too. Overflow is `Ok(PartIiCapacity::Overflow(_))`, not `Err` — it is an
+/// expected, real outcome the caller builds ITS OWN refusal message from (naming the year, a remedy,
+/// `--part-ii-file`); `Err` is reserved for an actual engine failure (an unsupported year, a bundled
+/// map/PDF that fails to parse) the caller must still surface as such.
+///
+/// Exists so `btctax-cli`'s export paths (`crates/btctax-cli/src/cmd/admin.rs`,
+/// `export_irs_pdf_from_session` + `export_full_return`) can refuse BEFORE `mkdir_out`/writing any
+/// packet file — round 2 finding 2: without this, the crypto-slice path left an estimated-basis 8949
+/// on disk with no 8275 PDF behind it when the narrative overflowed, because the overflow was only
+/// discovered mid-write, inside `fill_form_8275_slice`, well after `basis_methodology.txt` and
+/// `form_8275.txt` were already written.
+pub fn part_ii_capacity_check(narrative: &str, year: i32) -> Result<PartIiCapacity, FormsError> {
+    let map = Form8275Map::for_year(year)?;
+    let blank_fields = pdf::collect_fields(&pdf::load(pdf::f8275_pdf(map.year)?)?)?;
+    let (part_ii_width, part_iv_width) = part_ii_iv_widths(&blank_fields, &map)?;
+    match wrap_part_ii(
+        narrative,
+        part_ii_width,
+        part_iv_width,
+        map.part_iv_continuation.len(),
+        PART_II_FONT_SIZE_PT,
+    ) {
+        Ok(_) => Ok(PartIiCapacity::Fits),
+        Err(overflow) => Ok(PartIiCapacity::Overflow(overflow)),
+    }
+}
+
+/// The verdict [`part_ii_capacity_check`] returns.
+#[derive(Debug, Clone, Copy)]
+pub enum PartIiCapacity {
+    /// The narrative fits (including an empty one).
+    Fits,
+    /// The narrative does not fit — detail for building a refusal message.
+    Overflow(PartIiOverflow),
 }

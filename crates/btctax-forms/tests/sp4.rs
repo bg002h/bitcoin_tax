@@ -85,7 +85,17 @@ const ROW2_DESC: &str = "topmostSubform[0].Page1[0].Table_Part1[0].Line2[0].#sub
 const ROW2_FORM_SCHEDULE: &str = "topmostSubform[0].Page1[0].Table_Part1[0].Line2[0].p1-t14[0]";
 const ROW2_AMOUNT: &str = "topmostSubform[0].Page1[0].Table_Part1[0].Line2[0].p1-t16[0]";
 const PART_II_LINE1: &str = "topmostSubform[0].Page1[0].p1-t80[0]";
-const PART_II_LINE2: &str = "topmostSubform[0].Page1[0].p1-t81[0]";
+/// Part II's numbered lines 2-6 — round 2 finding 4: NEVER written (the bundled PDF's XFA numbers
+/// these beside Part I's rows 1-6; see `form8275.rs`'s module doc). Used only by the negative tests
+/// below that pin they stay blank.
+const PART_II_LINES_2_THROUGH_6: [&str; 5] = [
+    "topmostSubform[0].Page1[0].p1-t81[0]",
+    "topmostSubform[0].Page1[0].p1-t82[0]",
+    "topmostSubform[0].Page1[0].p1-t83[0]",
+    "topmostSubform[0].Page1[0].p1-t84[0]",
+    "topmostSubform[0].Page1[0].p1-t85[0]",
+];
+const PART_IV_LINE1: &str = "topmostSubform[0].Page2[0].p2-t1[0]";
 const IDENTITY_NAME: &str = "topmostSubform[0].Page1[0].p1-t1[0]";
 const IDENTITY_SSN: &str = "topmostSubform[0].Page1[0].p1-t2[0]";
 
@@ -120,25 +130,44 @@ fn form_8275_fills_part_i_part_ii_and_identity() {
     );
     assert_eq!(tv(&doc, &fields, ROW2_AMOUNT).as_deref(), Some("6789"));
 
-    // Part II narrative (201 characters, 782.5pt at 8pt Helvetica-Bold) is WRAPPED across its own line
-    // (518.4pt wide) plus one continuation line — it no longer fits `PART_II_LINE1` alone (T-f8275-
-    // part-ii-overflow). The exact split is a known-answer pin of `crate::wrap`'s greedy word-wrap.
+    // Part II narrative (201 characters, 782.5pt at 8pt Helvetica-Bold) does not fit Part II's own
+    // line 1 (514.4pt usable, inset-adjusted) alone — it WRAPS, spilling to Part IV's line 1
+    // (`PART_IV_LINE1`, NOT Part II's own line 2: round 2 finding 4 — Part II's numbered lines 2-6 are
+    // never written, since the XFA numbers them beside Part I's rows). The Part IV line carries the
+    // IRS-required cross-reference prefix. The exact split is a known-answer pin of `crate::wrap`'s
+    // greedy word-wrap (T-f8275-part-ii-overflow).
     assert_eq!(
         tv(&doc, &fields, PART_II_LINE1).as_deref(),
         Some(
             "The taxpayer disposed of BTC acquired via an unverified peer-to-peer purchase; basis \
-             was estimated using the daily low close over the"
+             was estimated using the daily low close over"
         )
     );
     assert_eq!(
-        tv(&doc, &fields, PART_II_LINE2).as_deref(),
-        Some("attested acquisition window, consistent with Cohan v. Commissioner.")
+        tv(&doc, &fields, PART_IV_LINE1).as_deref(),
+        Some(
+            "Part II, line 1 (continued): the attested acquisition window, consistent with Cohan v. \
+             Commissioner."
+        )
     );
-    // No character lost: rejoining both lines reproduces the full narrative.
+    // Part II's numbered lines 2-6 stay BLANK — the narrative never lands there.
+    for fqn in PART_II_LINES_2_THROUGH_6 {
+        assert_eq!(
+            tv(&doc, &fields, fqn),
+            None,
+            "{fqn}: Part II's numbered continuation lines must never be written (finding 4)"
+        );
+    }
+    // No character lost: rejoining Part II line 1 + Part IV line 1 (cross-reference prefix stripped)
+    // reproduces the full narrative.
+    let part_iv_1 = tv(&doc, &fields, PART_IV_LINE1).unwrap();
+    let part_iv_1_text = part_iv_1
+        .strip_prefix("Part II, line 1 (continued): ")
+        .expect("the first Part IV line used must carry the cross-reference prefix");
     let rejoined = format!(
         "{} {}",
         tv(&doc, &fields, PART_II_LINE1).unwrap(),
-        tv(&doc, &fields, PART_II_LINE2).unwrap()
+        part_iv_1_text
     );
     assert_eq!(rejoined, printed.part_ii);
 
@@ -238,10 +267,12 @@ fn fault_injected_8275_desc_mapped_to_maxlen3_line_no_cell_is_red() {
     );
 }
 
-/// ★ T-f8275-part-ii-overflow Step 3: a Part II narrative too long to wrap across all 33 continuation
-/// lines (Part II's own 6 + page-2 Part IV's 27) FAILS CLOSED with a named [`FormsError::Overflow`] —
-/// mirroring the shipped Part I >6-row refusal — rather than clipping past the last line. 900 repeats
-/// of "word " need 38 lines at 8pt Helvetica-Bold in this field's width; 33 are available.
+/// ★ T-f8275-part-ii-overflow Step 3 (round 2 capacity: Part II's own line 1 + Part IV's 27 lines =
+/// 28, not the round-1 33 — Part II's numbered lines 2-6 are no longer part of the wrap capacity, see
+/// finding 4): a Part II narrative too long to wrap across all 28 available lines FAILS CLOSED with a
+/// named [`FormsError::Overflow`] — mirroring the shipped Part I >6-row refusal — rather than clipping
+/// past the last line. 900 repeats of "word " need 37 lines at 8pt Helvetica-Bold in these fields'
+/// (inset-adjusted) widths; 28 are available.
 #[test]
 fn form_8275_part_ii_narrative_too_long_for_every_continuation_line_fails_closed() {
     let printed = Printed8275 {
@@ -251,8 +282,8 @@ fn form_8275_part_ii_narrative_too_long_for_every_continuation_line_fails_closed
     let err = btctax_forms::fill_form_8275(&printed, &kitchen_sink_header(), 2024).unwrap_err();
     assert!(
         matches!(&err, FormsError::Overflow { part, rows, capacity }
-            if *part == "Part II" && *capacity == 33 && *rows > 33),
-        "expected a Part II Overflow with capacity 33 and rows > 33, got {err:?}"
+            if *part == "Part II" && *capacity == 28 && *rows > 28),
+        "expected a Part II Overflow with capacity 28 and rows > 28, got {err:?}"
     );
 }
 
@@ -271,7 +302,7 @@ fn form_8275_is_byte_deterministic() {
         "8275 fill changed — if intentional, update GOLDEN_8275_SHA256"
     );
 }
-const GOLDEN_8275_SHA256: &str = "b6dfc234413b7eededa68695c7419caa7bfba99d8a415e2f2a9b07ace10dca10";
+const GOLDEN_8275_SHA256: &str = "c0b6fe3c12ed1aef74a9f5ee8c4f205a3546d508962b5900722d936135dae4c7";
 
 #[test]
 fn form_8275_fills_for_every_supported_non_2024_year() {
@@ -335,14 +366,16 @@ fn form_8275_map_carries_the_32_new_continuation_fields() {
         33,
         "1 (part_ii_narrative) + 5 (part_ii_continuation) + 27 (part_iv_continuation) = 33"
     );
-    // Exact identity + order — every field named in `part_ii_and_part_iv_continuation_fields()`
-    // (this test file's own independent oracle list, Step 1) must appear, in the SAME order.
+    // Exact identity + order — every field named in `all_33_declared_continuation_fields()` (this test
+    // file's own independent oracle list, Step 1) must appear, in the SAME order. This is the map's
+    // DECLARED shape (all 33 continuation fields the bundled PDF carries) — NOT what the fill actually
+    // WRITES today (only 28 of them; see `written_continuation_fields_in_order()` / finding 4).
     let got: Vec<String> = map
         .narrative_continuation_fields()
         .into_iter()
         .map(str::to_string)
         .collect();
-    assert_eq!(got, part_ii_and_part_iv_continuation_fields());
+    assert_eq!(got, all_33_declared_continuation_fields());
 }
 
 #[test]
@@ -386,19 +419,28 @@ fn unsupported_year_rejected_for_form_8275() {
 // column/row geometry leg entirely (`crate::verify`'s doc comment). So the test below re-measures,
 // independently of anything `btctax-forms` itself computes, whether what actually landed on each
 // continuation field's own line would fit inside that field's own widget box at the SAME font the PDF
-// itself declares (`/DA` = `/HelveticaLTStd-Bold 8.00 Tf`, confirmed against the bundled asset by
-// `cargo test -p btctax-forms` — see BUILD-REPORT.md). This is deliberately NOT
-// `btctax_forms`'s own (eventual) wrap measurement — an independent second oracle, mirroring this
-// crate's whole `verify.rs` ethos ("the map is what we distrust; the PDF's geometry is the oracle").
+// itself declares (`/DA` = `/HelveticaLTStd-Bold 8.00 Tf`, confirmed against the bundled asset — see
+// BUILD-REPORT.md). This is deliberately NOT `btctax_forms::wrap`'s own measurement — an independent
+// second oracle, mirroring this crate's whole `verify.rs` ethos ("the map is what we distrust; the
+// PDF's geometry is the oracle").
+//
+// ★ Round 2 (whole-branch two-lens review): Part II now writes ONLY its own line 1 — everything past
+// that spills to Part IV with an IRS-required cross-reference prefix (finding 4/1) — and the width
+// budget accounts for the renderer's text inset with a TIGHTENED, negative-allowance check (finding 3).
 
-/// Helvetica-Bold glyph widths (Adobe Core-14 AFM metrics, 1000 units/em), ASCII printable range
-/// 0x20..=0x7E, `code - 0x20` indexed. The public-domain Helvetica-Bold.afm table every PDF toolchain
-/// ships for the standard-14 fonts (which carry no embedded glyph program of their own to measure).
+/// Helvetica-Bold glyph widths, ASCII printable range 0x20..=0x7E (`code - 0x20` indexed) —
+/// independently re-extracted from the bundled `f8275.pdf`'s own embedded font
+/// (`/DR/Font/HelveticaLTStd-Bold`, `/WinAnsiEncoding`, `/FirstChar 0`/`/LastChar 255`, full 256-entry
+/// `/Widths`), the SAME authoritative source `crate::wrap`'s production table uses — see that module's
+/// doc comment and `design/f8275-part-ii-overflow/BUILD-REPORT.md` for the extraction. This table is a
+/// SEPARATE Rust array (not `use`d from `wrap.rs`) so a bug in the WRAPPING algorithm — off-by-one line
+/// accounting, a dropped `EPS`, wrong budget math — has an independent check to fail against; the
+/// numeric source (the asset's own font) is a published fact neither implementation can "cheat".
 const ORACLE_HELV_BOLD_ASCII: [u16; 95] = [
-    278, 333, 474, 556, 556, 889, 722, 278, 333, 333, 389, 584, 278, 333, 278, 278, 556, 556, 556,
+    278, 333, 474, 556, 556, 889, 722, 238, 333, 333, 389, 584, 278, 333, 278, 278, 556, 556, 556,
     556, 556, 556, 556, 556, 556, 556, 333, 333, 584, 584, 584, 611, 975, 722, 722, 722, 722, 667,
     611, 778, 722, 278, 556, 722, 611, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667,
-    667, 611, 333, 278, 333, 584, 556, 278, 556, 611, 556, 611, 556, 333, 611, 611, 278, 278, 556,
+    667, 611, 333, 278, 333, 584, 556, 333, 556, 611, 556, 611, 556, 333, 611, 611, 278, 278, 556,
     278, 889, 611, 611, 611, 611, 389, 556, 333, 611, 556, 778, 556, 556, 500, 389, 280, 389, 584,
 ];
 
@@ -420,17 +462,53 @@ fn oracle_helv_bold_8pt_width(s: &str) -> f32 {
     units as f32 * 8.0 / 1000.0
 }
 
+/// Independently-declared text inset (PDF points, PER SIDE) — mirrors `form8275.rs::TEXT_INSET_PTS`
+/// (round 2 finding 3) but is its OWN constant, not `use`d from `src/`, for the same "independent
+/// oracle" reason as the width table above.
+const ORACLE_TEXT_INSET_PTS: f32 = 2.0;
+
+/// Assert that `value`'s rendered width at 8pt Helvetica-Bold fits INSIDE `fqn`'s inset-adjusted usable
+/// box — a NEGATIVE allowance (subtracting, not adding, a hair of slop) so this check is STRICTER than
+/// exact equality: a value that lands EXACTLY on the inset boundary still fails, guarding against float
+/// rounding making the test pass right at the edge while a real renderer clips by a hair (round 2
+/// finding 3's "tighten it to the inset budget with a negative allowance").
+fn assert_fits_inset_box(fqn: &str, value: &str, raw_box_width: f32) {
+    let usable = raw_box_width - 2.0 * ORACLE_TEXT_INSET_PTS;
+    let measured = oracle_helv_bold_8pt_width(value);
+    assert!(
+        measured <= usable - 0.05,
+        "{fqn}: its written content measures {measured:.2}pt wide at 8pt Helvetica-Bold but the \
+         field's INSET-adjusted usable width is only {usable:.2}pt ({raw_box_width:.2}pt raw minus \
+         {:.1}pt inset per side) — a PDF viewer honoring text inset (PDF 32000-1 §12.7.4.3) would \
+         silently clip roughly {:.2}pt of text (the field holds {} characters): {value:?}",
+        ORACLE_TEXT_INSET_PTS,
+        measured - usable,
+        value.chars().count(),
+    );
+}
+
 /// The 6 Part II lines (`p1-t80[0]` = [`PART_II_LINE1`], then `p1-t81[0]`..`p1-t85[0]`) followed by
 /// the 27 page-2 Part IV lines (`p2-t1[0]`..`p2-t27[0]`) — 33 continuation fields total, in the
-/// bundled PDF's own printed top-to-bottom reading order (pinned directly against the asset's widget
-/// `/Rect` y-centers, independent of any map). Hardcoded here rather than sourced from
-/// `Form8275Map` deliberately: this test must compile and run (and RED) before the map carries these
-/// fields at all (T-f8275-part-ii-overflow Step 1).
-fn part_ii_and_part_iv_continuation_fields() -> Vec<String> {
+/// bundled PDF's own printed top-to-bottom reading order. This is the map's full DECLARED shape (see
+/// `form_8275_map_carries_the_32_new_continuation_fields`) — not what the fill actually writes today;
+/// for that, see [`written_continuation_fields_in_order`].
+fn all_33_declared_continuation_fields() -> Vec<String> {
     let mut v = vec![PART_II_LINE1.to_string()];
     for n in 81..=85 {
         v.push(format!("topmostSubform[0].Page1[0].p1-t{n}[0]"));
     }
+    for n in 1..=27 {
+        v.push(format!("topmostSubform[0].Page2[0].p2-t{n}[0]"));
+    }
+    v
+}
+
+/// The 28 fields the fill can ACTUALLY write, in printed order: Part II's own line 1
+/// (`PART_II_LINE1`) then the 27 page-2 Part IV lines (`p2-t1[0]`..`p2-t27[0]`) — round 2 finding 4:
+/// Part II's numbered lines 2-6 are permanently excluded (the bundled PDF's XFA numbers them beside
+/// Part I's rows 1-6; see `form8275.rs`'s module doc).
+fn written_continuation_fields_in_order() -> Vec<String> {
+    let mut v = vec![PART_II_LINE1.to_string()];
     for n in 1..=27 {
         v.push(format!("topmostSubform[0].Page2[0].p2-t{n}[0]"));
     }
@@ -464,31 +542,32 @@ fn long_part_ii_narrative() -> String {
         .to_string()
 }
 
-/// ★ T-f8275-part-ii-overflow **Step 1 (test-first — RED before the fix)**.
+/// ★ T-f8275-part-ii-overflow **Step 1 (test-first — RED before the fix)**, tightened round 2.
 ///
 /// Two invariants a real disclosure must satisfy, checked independently of `btctax-forms`'s own
 /// wrapping arithmetic:
 ///
-///  1. **No field's content overflows its own physical box.** Every continuation field that carries
-///     non-empty text must measure `<=` its own widget width at 8pt Helvetica-Bold — the font/size the
-///     PDF's own `/DA` declares. This is what a viewer honoring the widget's geometry can actually show.
-///  2. **No character is lost.** Concatenating every non-empty continuation field's content (mod the
-///     whitespace normalization word-wrapping necessarily performs) must reproduce the ENTIRE original
-///     narrative, in order.
+///  1. **No field's content overflows its own INSET-adjusted physical box.** Every WRITTEN field
+///     (`written_continuation_fields_in_order()` — Part II line 1 + Part IV, NOT Part II's numbered
+///     lines 2-6, which are never written; see finding 4) must measure `<=` its own inset-adjusted
+///     usable width at 8pt Helvetica-Bold ([`assert_fits_inset_box`], negative allowance — round 2
+///     finding 3). This is what a viewer honoring the widget's geometry AND its text inset can actually
+///     show.
+///  2. **No character is lost.** Concatenating Part II line 1 + every non-empty Part IV line (with the
+///     cross-reference prefix stripped from the first) must reproduce the ENTIRE original narrative, in
+///     order.
 ///
-/// Pre-fix, `push_free` writes the WHOLE narrative unclipped into `p1-t80[0]`'s `/V` (there is no
-/// `/MaxLen` on this field, so nothing truncates the STORED string) — so invariant 2 alone cannot
+/// Pre-fix (round 1), `push_free` writes the WHOLE narrative unclipped into `p1-t80[0]`'s `/V` (there
+/// is no `/MaxLen` on this field, so nothing truncates the STORED string) — so invariant 2 alone cannot
 /// distinguish the defect (the data is all there). Invariant 1 is what catches it: a 1500+ character
-/// narrative is many thousands of points wide at 8pt, vastly over `p1-t80[0]`'s 518.4pt box, and every
-/// OTHER continuation field is untouched (empty) because nothing maps or writes them yet.
+/// narrative is many thousands of points wide at 8pt, vastly over `p1-t80[0]`'s inset-adjusted box, and
+/// every OTHER continuation field is untouched (empty) because nothing maps or writes them yet.
 ///
 /// MUTATION (verified true — full transcript in BUILD-REPORT.md): with the fix in place, reverting
 /// `fill_form_8275_inner`'s Part II section to the shipped single `push_free(part_ii_narrative,
-/// printed.part_ii)` (no wrap) turns THIS test RED again — same failure as pre-fix, `p1-t80[0]`
-/// measuring ~6786pt against its 518.4pt box. The mutation also reds 3 other sp4.rs tests
-/// (`form_8275_fills_part_i_part_ii_and_identity`, `form_8275_is_byte_deterministic`,
-/// `form_8275_part_ii_narrative_too_long_for_every_continuation_line_fails_closed`), confirming the
-/// fix is load-bearing across the suite, not just here.
+/// printed.part_ii)` (no wrap) turns THIS test RED again. See BUILD-REPORT.md for the round-2 re-run
+/// (line numbers here drift with every edit — the report cites the mutation's OWN output, not this
+/// doc comment).
 #[test]
 fn form_8275_part_ii_long_narrative_does_not_silently_clip() {
     let narrative = long_part_ii_narrative();
@@ -509,8 +588,9 @@ fn form_8275_part_ii_long_narrative_does_not_silently_clip() {
 
     let mut reconstructed = String::new();
     let mut any_nonempty = false;
-    for fqn in part_ii_and_part_iv_continuation_fields() {
-        let Some(value) = tv(&doc, &fields, &fqn) else {
+    let mut seen_any_part_iv = false;
+    for fqn in written_continuation_fields_in_order() {
+        let Some(mut value) = tv(&doc, &fields, &fqn) else {
             continue;
         };
         if value.is_empty() {
@@ -524,17 +604,19 @@ fn form_8275_part_ii_long_narrative_does_not_silently_clip() {
         let rect = field
             .rect
             .unwrap_or_else(|| panic!("{fqn} must carry a /Rect"));
-        let box_width = rect[2] - rect[0];
-        let measured = oracle_helv_bold_8pt_width(&value);
-        assert!(
-            measured <= box_width + 0.5,
-            "{fqn}: its written content measures {measured:.1}pt wide at 8pt Helvetica-Bold but the \
-             field's own widget box is only {box_width:.1}pt wide — a PDF viewer honoring this \
-             widget's geometry (DoNotScroll, non-multiline) would silently clip roughly {:.1}pt of \
-             text (the field holds {} characters): {value:?}",
-            measured - box_width,
-            value.chars().count(),
-        );
+        assert_fits_inset_box(&fqn, &value, rect[2] - rect[0]);
+
+        // The FIRST Part IV line carries the cross-reference prefix — strip it before folding into the
+        // reconstruction, which describes the ORIGINAL narrative's words, not this crate's own label.
+        if fqn != PART_II_LINE1 && !seen_any_part_iv {
+            seen_any_part_iv = true;
+            value = value
+                .strip_prefix("Part II, line 1 (continued): ")
+                .unwrap_or_else(|| {
+                    panic!("the first Part IV line used must carry the cross-reference prefix: {value:?}")
+                })
+                .to_string();
+        }
         if !reconstructed.is_empty() {
             reconstructed.push(' ');
         }
@@ -544,6 +626,10 @@ fn form_8275_part_ii_long_narrative_does_not_silently_clip() {
         any_nonempty,
         "no continuation field carried any Part II content at all"
     );
+    assert!(
+        seen_any_part_iv,
+        "fixture premise: this narrative must be long enough to spill into Part IV"
+    );
 
     let norm = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
     assert_eq!(
@@ -551,5 +637,127 @@ fn form_8275_part_ii_long_narrative_does_not_silently_clip() {
         norm(&narrative),
         "the disclosure must carry EVERY word of the filer's Part II narrative, in order — a partial \
          disclosure is not a disclosure"
+    );
+}
+
+/// ★ Round 2 finding 4: Part II's numbered lines 2-6 (`p1-t81[0]`..`p1-t85[0]`) must NEVER be written,
+/// even for a long narrative that would, under the round-1 shape, have spread across several of them.
+/// The bundled PDF's XFA numbers these beside Part I's rows 1-6 (`Line2PartII`..`Line6PartII`,
+/// confirmed by decompressing the asset's `template` XFA packet — see BUILD-REPORT.md); claiming them
+/// for an unrelated combined narrative would misattribute sentence fragments to Part I items they do
+/// not explain.
+#[test]
+fn form_8275_never_writes_part_ii_numbered_lines_2_through_6() {
+    let printed = Printed8275 {
+        part_i: sample_printed().part_i,
+        part_ii: long_part_ii_narrative(),
+    };
+    let pdf = btctax_forms::fill_form_8275(&printed, &kitchen_sink_header(), 2024)
+        .unwrap()
+        .expect("non-empty part_i");
+    let (doc, fields) = fields_of(&pdf);
+    for fqn in PART_II_LINES_2_THROUGH_6 {
+        assert_eq!(
+            tv(&doc, &fields, fqn),
+            None,
+            "{fqn}: Part II's numbered continuation lines must never be written"
+        );
+    }
+}
+
+/// ★ Round 2 finding 1: whenever the narrative spills to Part IV, the FIRST Part IV line used carries
+/// the IRS-required cross-reference (Rev. 10-2024 Specific Instructions: "Include the corresponding
+/// part and line number from page 1") and NO OTHER Part IV line does — an examiner reading page 2 cold
+/// (captioned "Explanations (continued from Parts I **and/or** II)") can tell which without it, but
+/// only the first line needs to say so.
+#[test]
+fn form_8275_part_iv_cross_reference_appears_only_on_the_first_used_part_iv_line() {
+    let printed = Printed8275 {
+        part_i: sample_printed().part_i,
+        part_ii: long_part_ii_narrative(),
+    };
+    let pdf = btctax_forms::fill_form_8275(&printed, &kitchen_sink_header(), 2024)
+        .unwrap()
+        .expect("non-empty part_i");
+    let (doc, fields) = fields_of(&pdf);
+
+    let part_iv_fields: Vec<String> = (1..=27)
+        .map(|n| format!("topmostSubform[0].Page2[0].p2-t{n}[0]"))
+        .collect();
+    let mut seen_first = false;
+    for fqn in &part_iv_fields {
+        let Some(value) = tv(&doc, &fields, fqn) else {
+            continue;
+        };
+        if value.is_empty() {
+            continue;
+        }
+        if !seen_first {
+            assert!(
+                value.starts_with("Part II, line 1 (continued): "),
+                "{fqn}: the FIRST used Part IV line must carry the cross-reference prefix: {value:?}"
+            );
+            seen_first = true;
+        } else {
+            assert!(
+                !value.starts_with("Part II, line 1 (continued): "),
+                "{fqn}: only the FIRST Part IV line may carry the cross-reference prefix: {value:?}"
+            );
+        }
+    }
+    assert!(seen_first, "fixture premise: must spill into Part IV");
+}
+
+/// ★ Round 2 finding 5: a blank line between two promoted tranches' narratives (how
+/// `disclosure_8275` joins them — `btctax-core/src/tax/form8275.rs`, `.join("\n\n")`) is a HARD break
+/// on the filed form, not just whitespace that collapses to a single space — two independent factual
+/// accounts must never run together into one sentence. Exercised through the FULL fill (not just
+/// `wrap.rs`'s own unit test) so the field-selection + width-computation plumbing is covered too.
+#[test]
+fn form_8275_paragraph_breaks_are_hard_breaks_not_collapsed_to_a_space() {
+    let printed = Printed8275 {
+        part_i: sample_printed().part_i,
+        part_ii: "Tranche A: cash P2P purchase, no records.\n\n\
+                   Tranche B: peer-to-peer trade, receipt lost."
+            .to_string(),
+    };
+    let pdf = btctax_forms::fill_form_8275(&printed, &kitchen_sink_header(), 2024)
+        .unwrap()
+        .expect("non-empty part_i");
+    let (doc, fields) = fields_of(&pdf);
+
+    // Both paragraphs are short enough to EASILY share Part II's line 1 by character count alone —
+    // the hard-break rule is the only thing stopping that.
+    assert_eq!(
+        tv(&doc, &fields, PART_II_LINE1).as_deref(),
+        Some("Tranche A: cash P2P purchase, no records."),
+        "the first paragraph must NOT be joined with the second on Part II's line 1"
+    );
+    assert_eq!(
+        tv(&doc, &fields, PART_IV_LINE1).as_deref(),
+        Some("Part II, line 1 (continued): Tranche B: peer-to-peer trade, receipt lost."),
+        "the second paragraph must start its OWN line (Part IV's first), not continue the first"
+    );
+}
+
+/// ★ Round 2 finding 6: Part IV's continuation lines are a physically ORDERED sequence the fill
+/// assumes is top-to-bottom (`map.part_iv_continuation`'s array order) — `push_free_ordered` puts them
+/// in a `FlatPlacement` descent group so `verify_flat` enforces that assumption. Fault-inject a map
+/// whose `part_iv_continuation` SWAPS two entries (index 0 `p2-t1` topmost, with index 2 `p2-t3`
+/// further down the page) — the fill would then write the FIRST wrapped line into a LOWER field and a
+/// LATER line into a HIGHER one, breaking the top-to-bottom ordinal-y descent the geometric oracle
+/// checks, and must fail closed.
+#[test]
+fn fault_injected_8275_part_iv_reordered_fields_breaks_descent_and_is_red() {
+    let mut map = Form8275Map::ty2024();
+    map.part_iv_continuation.swap(0, 2);
+    let printed = Printed8275 {
+        part_i: sample_printed().part_i,
+        part_ii: long_part_ii_narrative(), // needs several Part IV lines, so the swap is exercised
+    };
+    let err = fill_8275_with_map(&printed, &kitchen_sink_header(), &map).unwrap_err();
+    assert!(
+        matches!(&err, FormsError::Geometry(msg) if msg.contains("descent")),
+        "expected a Geometry error naming the broken descent, got {err:?}"
     );
 }

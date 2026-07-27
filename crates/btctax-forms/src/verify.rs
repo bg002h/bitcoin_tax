@@ -319,6 +319,21 @@ impl FlatPlacement {
             check: false,
         }
     }
+    /// A geometry-exempt write that ALSO participates in a per-group strictly-descending-y ordinal
+    /// sequence — for a free-text field SEQUENCE with no column geometry to check but a real physical
+    /// top-to-bottom order the fill assumes (e.g. Form 8275's Part IV continuation lines, written in
+    /// `part_iv_continuation` array order): a map that reordered the array, or a bundled asset whose
+    /// lines were not actually laid out top-to-bottom in that order, fails closed here instead of
+    /// silently landing text out of sequence.
+    pub fn free_ordered(fqn: impl Into<String>, page: usize, grp: u32, ord: u32) -> Self {
+        Self {
+            fqn: fqn.into(),
+            page,
+            col: None,
+            descent: Some((grp, ord)),
+            check: false,
+        }
+    }
     /// A checkbox: no-unmapped only (+ any same-y-pair predicate the caller runs).
     pub fn check(fqn: impl Into<String>, page: usize) -> Self {
         Self {
