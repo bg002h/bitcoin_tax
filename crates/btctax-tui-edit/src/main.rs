@@ -665,6 +665,15 @@ fn handle_form_key(app: &mut EditorApp, key: KeyEvent) {
     }
 }
 
+/// Fact 1 of the stale-snapshot status, shared VERBATIM by `stale_reason` and `arm_stale` (Task 1
+/// review finding): the write LANDED, but whether it had the intended effect is unverified, because
+/// re-projection failed. Extracted to a `const` so a future wording fix cannot land in one caller and
+/// not the other — before this, the sentence was spelled out twice as independent string literals.
+/// Each caller appends its own `({reason}). Quit and reopen the vault.` after this fragment; the
+/// fragment itself carries no trailing punctuation so both callers' tails compose cleanly.
+const STALE_FACT_1: &str = "the write reached disk, but whether it had the intended effect could not be \
+     verified, because the ledger would not re-project";
+
 impl EditorApp {
     /// The residue-latch status, if any mutating opener must refuse. `attest_save_failed` keeps its
     /// exact shipped wording (so `kat_e2e_attest_errlatch_chmod` stays green); `rollback_failed`
@@ -696,12 +705,9 @@ impl EditorApp {
     /// Added here per the plan's Task-1 file list; gains its first production caller in a later task.
     #[allow(dead_code)]
     fn stale_reason(&self) -> Option<String> {
-        self.stale_after_write.as_ref().map(|e| {
-            format!(
-                "refused: the write reached disk, but whether it had the intended effect could not be \
-                 verified, because the ledger would not re-project ({e}). Quit and reopen the vault."
-            )
-        })
+        self.stale_after_write
+            .as_ref()
+            .map(|e| format!("refused: {STALE_FACT_1} ({e}). Quit and reopen the vault."))
     }
 
     /// Every mutating opener refuses through this. Precedence attest > rollback > stale: the first two
@@ -801,6 +807,66 @@ impl EditorApp {
         self.tax_inputs_form = None;
         self.bulk_income_flow = None;
         self.bulk_income_modal = None;
+    }
+
+    /// THE write tail: all 27 save-then-reproject sites will call this and nothing else (Task 4 routes
+    /// them). It just re-projects `self.session` and delegates to `apply_reprojection`, which does the
+    /// actual latch/status/dashboard work and is the unit every KAT drives directly.
+    ///
+    /// `#[allow(dead_code)]`: no call site exists yet (Task 4 wires the 27 tails onto this fn). Mirrors
+    /// `stale_reason`'s Task-1 pattern; remove the attribute once Task 4 lands.
+    #[allow(dead_code)]
+    fn after_write(&mut self, status: impl FnOnce(&btctax_tui::app::Snapshot) -> String) {
+        let rebuilt = self.session.as_ref().map(btctax_tui::unlock::build_snapshot);
+        self.apply_reprojection(rebuilt, status)
+    }
+
+    /// The testable unit: `rebuilt` is a PARAMETER rather than something this fn computes itself, so
+    /// every KAT can drive the `Err`/`None` arms directly — no corrupt-vault fixture, no `cfg(test)`
+    /// hatch. Before this fn existed, zero tests exercised the failure arm of any of the 27 write
+    /// tails. `status` is a CLOSURE (not `impl Into<String>`) because 19 of the 27 tails derive their
+    /// success text from the freshly rebuilt snapshot.
+    ///
+    /// - `Ok`: derive the status from the rebuilt snapshot, install the new snapshot + status, and
+    ///   (D-4) clear the stale latch — fail-safe only, since no write tail can run while the latch is
+    ///   armed (every one sits behind a closed mutation surface plus a refusing opener); the one
+    ///   reachable clear today is `execute_defensive_export`'s own inline rebuild. Then refresh the
+    ///   Defensive Filing dashboard's `journey_view`, but ONLY if one is already open —
+    ///   `refresh_defensive_dashboard` CREATES `DefensiveDashboardState` unconditionally, so an
+    ///   unguarded call would fabricate a wizard dashboard for a filer who never opened it.
+    /// - `Err` / `None`: arm the stale latch via the one `arm_stale` site. `None` (no session) is
+    ///   production-unreachable (`session` is `Some` iff `snapshot` is), but it must arm rather than
+    ///   panic, so a future refactor cannot turn a `let…else`/`.unwrap()` slip into a crash.
+    fn apply_reprojection(
+        &mut self,
+        rebuilt: Option<Result<(btctax_tui::app::Snapshot, i32), btctax_cli::CliError>>,
+        status: impl FnOnce(&btctax_tui::app::Snapshot) -> String,
+    ) {
+        match rebuilt {
+            Some(Ok((snap, _))) => {
+                let s = status(&snap);
+                self.snapshot = Some(snap);
+                self.status = Some(s);
+                self.stale_after_write = None;
+                if self.defensive_dashboard.is_some() {
+                    refresh_defensive_dashboard(self);
+                }
+            }
+            Some(Err(e)) => self.arm_stale(e.to_string()),
+            None => self.arm_stale("no session".to_string()),
+        }
+    }
+
+    /// The ONE site that arms `stale_after_write`. Sets the reason, installs a status built from the
+    /// shared `STALE_FACT_1` (so this and `stale_reason` cannot drift), and closes every mutation
+    /// surface with `may_save = true`: the write already landed — memory == disk for everything this
+    /// closes — so a tax-inputs draft flush here is a fail-safe write of already-durable state, not an
+    /// active one. Contrast `on_persist_error`'s `ResidueLive` arm, which passes `false` because THAT
+    /// latch means unrevertable residue is live in memory and must never reach `Vault::save`.
+    fn arm_stale(&mut self, reason: String) {
+        self.stale_after_write = Some(reason.clone());
+        self.status = Some(format!("{STALE_FACT_1} ({reason}). Quit and reopen the vault."));
+        self.close_all_mutation_surfaces(true);
     }
 }
 
@@ -10899,6 +10965,80 @@ mod tests {
         );
         app.selected_year = year; // ★ M9: override the 2025 default
         (app, dir)
+    }
+
+    /// A representative OPEN flow, for the `apply_reprojection` Err-arm KAT below to prove
+    /// `close_all_mutation_surfaces` actually ran — any one of the 27 flow fields would do; Declare is
+    /// used because its `Shortfall` fixture is the least machinery of the bunch.
+    fn declare_flow_fixture() -> crate::edit::declare_flow::DeclareFlowState {
+        use time::macros::date;
+        let shortfall = btctax_core::defensive::discovery::Shortfall {
+            event: EventId::decision(1),
+            wallet: Some(btctax_core::WalletId::Exchange {
+                provider: "cb".into(),
+                account: "m".into(),
+            }),
+            date: date!(2024 - 06 - 01),
+            short_sat: 10_000_000,
+            fee_sat: 0,
+        };
+        let wallet = btctax_core::WalletId::Exchange {
+            provider: "cb".into(),
+            account: "m".into(),
+        };
+        crate::edit::declare_flow::DeclareFlowState::new(shortfall, wallet, false)
+    }
+
+    /// The seam that makes the arm path testable at all: the failure is an ARGUMENT, so no corrupt-vault
+    /// fixture and no `cfg(test)` hatch is needed. Before this, zero tests exercised the `Err` arm of any
+    /// of the 27 write tails.
+    ///
+    /// Mutation: dropped the `self.close_all_mutation_surfaces(true)` line from `arm_stale` — the flow
+    /// SURVIVED (`app.declare_flow` was still `Some`) — RED. Restored via a `cp` backup (never
+    /// `git checkout --`) and re-ran — GREEN.
+    #[test]
+    fn apply_reprojection_err_arms_the_latch_closes_surfaces_and_never_claims_an_effect() {
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        app.declare_flow = Some(declare_flow_fixture());
+        app.apply_reprojection(
+            Some(Err(btctax_cli::CliError::Usage("projector said no".into()))),
+            |_| unreachable!("the status closure must NOT run on the Err arm"),
+        );
+        let s = app.status.clone().unwrap_or_default();
+        assert!(app.stale_after_write.is_some(), "the latch must arm");
+        assert!(s.contains("reached disk"), "fact 1 must say the write landed: {s}");
+        assert!(s.contains("could not be verified"), "fact 1 must NOT claim the effect: {s}");
+        assert!(!s.contains("is correct"), "fact 1 must never assert correctness: {s}");
+        assert!(app.declare_flow.is_none(), "surfaces must be closed");
+    }
+
+    /// The Ok arm computes the status FROM the rebuilt snapshot (19 of the 27 tails need it), clears the
+    /// latch (D-4), and refreshes the defensive dashboard ONLY if one is already open —
+    /// `refresh_defensive_dashboard` CREATES state unconditionally, so an unguarded call would fabricate
+    /// a wizard dashboard for a filer who never opened it.
+    ///
+    /// Mutation: dropped the `if self.defensive_dashboard.is_some()` guard so
+    /// `refresh_defensive_dashboard(self)` ran unconditionally — a dashboard MATERIALISED for an app that
+    /// started with `None` — RED. Restored via a `cp` backup (never `git checkout --`) and re-ran — GREEN.
+    #[test]
+    fn apply_reprojection_ok_derives_the_status_and_does_not_fabricate_a_dashboard() {
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        app.stale_after_write = Some("earlier".to_string());
+        app.defensive_dashboard = None;
+        let rebuilt = btctax_tui::unlock::build_snapshot(app.session.as_ref().unwrap());
+        app.apply_reprojection(Some(rebuilt), |snap| format!("{} events", snap.events.len()));
+        assert!(app.status.clone().unwrap_or_default().ends_with("events"));
+        assert!(app.stale_after_write.is_none(), "a successful re-projection clears the latch (D-4)");
+        assert!(app.defensive_dashboard.is_none(), "must not fabricate a dashboard");
+    }
+
+    /// Fail-closed: no session is production-unreachable (`session` is `Some` iff `snapshot` is), but it
+    /// must arm rather than panic, so a future refactor cannot turn it into an `.unwrap()`.
+    #[test]
+    fn apply_reprojection_with_no_session_arms_rather_than_panicking() {
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        app.apply_reprojection(None, |_| "unused".to_string());
+        assert!(app.stale_after_write.is_some());
     }
 
     /// Opening the tax-inputs flow on a fresh (never-committed, no-draft) year yields a `None`
