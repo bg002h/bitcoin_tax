@@ -1,0 +1,13 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-defensive-status 1  btctax "btctax manual"
+.SH NAME
+status \- Print the current defensive\-filing picture: shortfalls a `declare\-tranche` could cover now, shortfalls that need another blocker resolved FIRST, every live `DeclareTranche`/`PromoteTranche` and its state, and the tax years a prior declare/promote flags for re\-export attention — each with the exact verb to run next. Pure read over the SAME `btctax_core::defensive::journey_view` the (now\-retired) TUI dashboard rendered; no new computation, and it writes nothing. Refuses (like `export\-snapshot`/`export\-irs\-pdf`\*(Aqs own composed\-export gate) while the ledger is pseudo\-reconciled — a defensive\-filing read over synthetic estimates could mask a real shortfall
+.SH SYNOPSIS
+\fBstatus\fR [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Print the current defensive\-filing picture: shortfalls a `declare\-tranche` could cover now, shortfalls that need another blocker resolved FIRST, every live `DeclareTranche`/`PromoteTranche` and its state, and the tax years a prior declare/promote flags for re\-export attention — each with the exact verb to run next. Pure read over the SAME `btctax_core::defensive::journey_view` the (now\-retired) TUI dashboard rendered; no new computation, and it writes nothing. Refuses (like `export\-snapshot`/`export\-irs\-pdf`\*(Aqs own composed\-export gate) while the ledger is pseudo\-reconciled — a defensive\-filing read over synthetic estimates could mask a real shortfall
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help

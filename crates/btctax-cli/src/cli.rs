@@ -309,6 +309,24 @@ pub enum Command {
         #[arg(long, default_value_t = false)]
         force: bool,
     },
+    /// Approach-B: read-only defensive-filing status.
+    #[command(subcommand)]
+    Defensive(Defensive),
+}
+
+/// `defensive <action>` — read-only Approach-B status reporting (Approach-B, EXPERIMENTAL — see
+/// `btctax limitations`). A sibling of `reconcile declare-tranche`/`reconcile promote-tranche`, not
+/// nested under `reconcile`: this is a plain read, never a decision event.
+#[derive(Subcommand)]
+pub enum Defensive {
+    /// Print the current defensive-filing picture: shortfalls a `declare-tranche` could cover now,
+    /// shortfalls that need another blocker resolved FIRST, every live `DeclareTranche`/`PromoteTranche`
+    /// and its state, and the tax years a prior declare/promote flags for re-export attention — each
+    /// with the exact verb to run next. Pure read over the SAME `btctax_core::defensive::journey_view`
+    /// the (now-retired) TUI dashboard rendered; no new computation, and it writes nothing. Refuses
+    /// (like `export-snapshot`/`export-irs-pdf`'s own composed-export gate) while the ledger is
+    /// pseudo-reconciled — a defensive-filing read over synthetic estimates could mask a real shortfall.
+    Status,
 }
 
 /// `optimize` subcommand tree.  Task 9 adds `Run`; Task 10 adds `Accept`; Task 11 adds `Consult`.

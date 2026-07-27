@@ -45,11 +45,6 @@ pub enum EditorScreen {
     Unlock,
     Locked,
     Browse,
-    /// The Defensive Filing Wizard dashboard (Task 7, Phase P-B): a READ-ONLY, derived render of
-    /// `btctax_core::defensive::journey_view` over the Browse screen's own snapshot. Entered via
-    /// `EditorApp::open_defensive_filing` (the DFW-D6 pseudo-active gate); its own per-screen state
-    /// lives in `EditorApp::defensive_dashboard`.
-    DefensiveFiling,
 }
 
 /// Top-level editor application state.
@@ -120,24 +115,6 @@ pub struct EditorApp {
     /// with the other flow gates (modals → flows → this → Browse), so `q`/Esc never fall through
     /// to a quit arm while it is blocking. At most one flow is `Some` at a time (the invariant).
     pub tax_inputs_form: Option<TaxInputsFormState>,
-    /// The Defensive Filing Wizard dashboard's own per-screen state (Task 7, Phase P-B). `Some` while
-    /// `screen == EditorScreen::DefensiveFiling` — set by `open_defensive_filing`, which computes the
-    /// ONE `journey_view` this state carries. READ-ONLY (C-3): nothing here is ever written to a
-    /// chokepoint; it is a derived read plus a pure UI cursor, exactly like every other screen's state.
-    pub defensive_dashboard: Option<crate::defensive_dashboard::DefensiveDashboardState>,
-    /// The Declare flow's own state (Task 8, Phase P-C). `Some` while the flow is open — opened by
-    /// `main.rs`'s `open_declare_flow` from a `DashboardIntent::Declare` on the dashboard. Dispatch
-    /// order: declare_flow (flow layer) → ... (mirrors every other `*_flow` field). C-3: this field is
-    /// mutated by the flow's own key handler ONLY — the WRITE it eventually triggers goes through
-    /// `edit::persist::persist_declare_tranche`, never a direct `chokepoint::apply_declare` call.
-    pub declare_flow: Option<crate::edit::declare_flow::DeclareFlowState>,
-    /// The Promote flow's own state (Task 9, Phase P-C). `Some` while the flow is open — opened by
-    /// `main.rs`'s `open_promote_flow` from a `DashboardIntent::Promote` on the dashboard. Dispatch
-    /// order: promote_flow (flow layer) → ... (mirrors every other `*_flow` field, incl. `declare_flow`
-    /// directly above). C-3: this field is mutated by the flow's own key handler ONLY — the WRITE it
-    /// eventually triggers goes through `edit::persist::persist_promote_tranche`, never a direct
-    /// `chokepoint::apply_promote` call.
-    pub promote_flow: Option<crate::edit::promote_flow::PromoteFlowState>,
     /// The per-mutation confirmation modal. `Some` while awaiting Enter/Esc.
     ///
     /// Modal dispatch precedes form and screen dispatch (the R0-M4 lesson —
@@ -297,12 +274,6 @@ pub struct EditorApp {
     /// failed, so unsaved residue is live. Like `attest_save_failed`, while `true` every mutating
     /// opener refuses (via `residue_latch_status`) until quit (which discards the residue).
     pub rollback_failed: bool,
-    /// Third latch [stale-snapshot]: set ONLY by `apply_reprojection` when a write LANDED on disk but
-    /// its follow-up `build_snapshot` failed, so `snapshot` holds the PRE-write image. Carries the
-    /// reason (a bare `bool` cannot — the `CliError` is gone by then). Unlike its two siblings the
-    /// write DID land, so the remedy is the opposite: do NOT retry. Cleared by a later SUCCESSFUL
-    /// re-projection (D-4) — in practice only `execute_defensive_export`'s inline rebuild.
-    pub stale_after_write: Option<String>,
     /// One-line status (saved / error), shown in the footer.
     /// Cleared on the next non-modal key press (mirrors the viewer's `export_status`
     /// semantics, app.rs:140 [R0-N5]).
@@ -337,9 +308,6 @@ impl EditorApp {
             forms_state: TableState::default(),
             profile_form: None,
             tax_inputs_form: None,
-            defensive_dashboard: None,
-            declare_flow: None,
-            promote_flow: None,
             mutation_modal: None,
             classify_inbound_flow: None,
             classify_inbound_modal: None,
@@ -385,7 +353,6 @@ impl EditorApp {
             method_election_modal: None,
             attest_save_failed: false,
             rollback_failed: false,
-            stale_after_write: None,
             status: None,
             clock: btctax_tui::clock::Clock::Wall,
         }
@@ -424,111 +391,6 @@ impl EditorApp {
                 self.unlock.error = Some(msg);
             }
         }
-    }
-
-    /// M-4 (SPEC DFW-D2 "Plan→apply staleness"): count of `EditorApp`'s own `*_flow` `Option` fields
-    /// currently `Some` — the load-bearing quantity behind the "one-flow" invariant every flow field's
-    /// own doc comment already claims informally. `pub(crate)` so the Task 7 dashboard's own tests (in
-    /// the sibling `defensive_dashboard` module) can exercise the debug assertion below directly.
-    pub(crate) fn open_flow_count(&self) -> usize {
-        [
-            self.classify_inbound_flow.is_some(),
-            self.reclassify_outflow_flow.is_some(),
-            self.reclassify_income_flow.is_some(),
-            self.set_fmv_flow.is_some(),
-            self.void_flow.is_some(),
-            self.select_lots_flow.is_some(),
-            self.set_donation_details_flow.is_some(),
-            self.link_transfer_flow.is_some(),
-            self.classify_raw_flow.is_some(),
-            self.safe_harbor_attest_flow.is_some(),
-            self.resolve_conflict_flow.is_some(),
-            self.optimize_accept_flow.is_some(),
-            self.safe_harbor_allocate_flow.is_some(),
-            self.bulk_link_flow.is_some(),
-            self.bulk_sti_flow.is_some(),
-            self.bulk_income_flow.is_some(),
-            self.bulk_resolve_flow.is_some(),
-            self.bulk_void_flow.is_some(),
-            self.bulk_reclassify_outflow_flow.is_some(),
-            self.match_self_transfers_flow.is_some(),
-            self.method_election_flow.is_some(),
-            self.declare_flow.is_some(),
-            self.promote_flow.is_some(),
-        ]
-        .into_iter()
-        .filter(|open| *open)
-        .count()
-    }
-
-    /// DFW-D6 dashboard entry gate: refuse (with routing guidance, never a silent no-op) when the
-    /// projected state is pseudo-active — a defensive-filing journey over synthetic (pseudo-reconciled)
-    /// estimates is incoherent (a Phase-B `SelfTransferMine{$0}` default can silently clear a REAL
-    /// shortfall this feature exists to surface). Mirrors `journey_view`'s own
-    /// `debug_assert!(!state.pseudo_active())` precondition — THIS is the enforcement point that core
-    /// doc comment names. A missing snapshot (still on Unlock/Locked) is a silent no-op: there is
-    /// nothing yet to derive a view from, and this is unreachable via the real Browse-only entry path.
-    ///
-    /// On success: the M-4 one-flow debug assertion (no other `*_flow` may be mid-transaction when the
-    /// dashboard's own `journey_view` snapshot is taken — a later flow mutation would immediately stale
-    /// it), then computes `journey_view` ONCE from the current snapshot and transitions to
-    /// `EditorScreen::DefensiveFiling`.
-    pub fn open_defensive_filing(&mut self) {
-        // ★ arch-Minor2: the residue-latch guard ~26/35 sibling `open_*` fns check FIRST (mirrors
-        // `open_profile_form`/`open_void_flow` in main.rs) — while a failed save's residue is live, NO
-        // mutating opener may proceed (the dashboard itself is read-only, but it is the entry point to
-        // the Declare/Promote WRITE flows Tasks 8-9 build, so it must refuse here too).
-        if let Some(s) = self.residue_latch_status() {
-            self.status = Some(s);
-            return;
-        }
-        let Some(snap) = self.snapshot.as_ref() else {
-            return;
-        };
-        // ★ D-7 (Task 6): SKIP this refusal while the stale latch is armed. It reads
-        // `snap.state.pseudo_active()` off the STALE image, and the pseudo-approve tail is the one
-        // write that flips exactly that predicate — so a filer who approves every pseudo default and
-        // then hits a failed re-projection would be told to press 'P' (which now refuses under the
-        // combined latch, since `open_pseudo_approve_flow` takes `stale_or_residue_latch_status()`)
-        // and be locked out of D-7's export route entirely. Skipping is safe: the dashboard is
-        // read-only, both `Declare`/`Promote` write intents take the combined latch (below), and
-        // `execute_defensive_export`'s own `plan_export` re-derives pseudo-activity from ITS fresh
-        // rebuild and refuses there (DFW-D11) — so a genuinely pseudo-active CURRENT ledger still
-        // cannot be exported, only the (possibly stale) READ of it is no longer gated here. The view
-        // built below uses `safe_journey_view`, NOT `journey_view` directly — `journey_view` asserts
-        // this exact precondition, and skipping the STATUS refusal does not make the STALE image any
-        // less pseudo-active, so an unguarded call would trade a status message for a panic.
-        if self.stale_after_write.is_none() && snap.state.pseudo_active() {
-            self.status = Some(
-                "Defensive Filing is unavailable: pseudo-reconcile synthetic defaults are contributing \
-                 to this projection, which could silently mask a real shortfall this journey exists to \
-                 surface. Resolve or approve the pending defaults first ('P' to approve here, or turn \
-                 pseudo mode off via the CLI's reconcile command), then re-enter."
-                    .to_string(),
-            );
-            return;
-        }
-
-        // ★ whole-branch arch N-1: `== 0` — the dashboard opens no flow field of its own, so `<= 1`
-        // permitted an unrelated flow being mid-transaction while `journey_view`'s snapshot is taken
-        // (which a later flow mutation would immediately stale). Entry is Browse-only; nothing is open.
-        debug_assert_eq!(
-            self.open_flow_count(),
-            0,
-            "one-flow invariant violated entering DefensiveFiling: another flow is already open"
-        );
-
-        let cfg = snap.cli_config.to_projection();
-        let current = self.clock.now().year();
-        self.defensive_dashboard = Some(crate::defensive_dashboard::safe_journey_view(
-            &snap.events,
-            &snap.state,
-            &snap.prices,
-            &snap.tables,
-            &cfg,
-            current,
-        ));
-        self.screen = EditorScreen::DefensiveFiling;
     }
 
     /// `BTCTAX_PASSPHRASE` fast-path: open directly when the env var is set.

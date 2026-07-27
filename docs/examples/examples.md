@@ -47,6 +47,7 @@ Commands:
   what-if          Read-only what-if tax planning (task #43): posit a HYPOTHETICAL, NON-persisted transaction and see its MARGINAL federal-tax effect on the current-year position. Routes through the same audited tax engine as `report --tax-year`; invents no tax authority. Writes NOTHING — no event, no side-table row, no vault mutation. Tax decision-support (consequences), not buy/sell/hold advice
   income           Full-return (v1) input surface: import, show, or clear the per-year full-return inputs (W-2s, 1099s, deductions, household). Offline; stored in the encrypted vault
   tax-profile      Set or show the per-tax-year tax profile (filing status, income, MAGI, etc.)
+  defensive        Approach-B: read-only defensive-filing status
   help             Print this message or the help of the given subcommand(s)
 
 Options:
