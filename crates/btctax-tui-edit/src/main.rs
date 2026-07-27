@@ -788,6 +788,18 @@ impl EditorApp {
     /// BEFORE the screen dispatch at `:389` that hosts every opener, so no other mutating surface can be
     /// opened while a tax-inputs form is live — a live dirty form can only ever be THIS caller's own.
     ///
+    /// **`may_save` is NOT the only guard on this write** (fix wave, BLOCKING 2). `flush_tax_inputs_
+    /// draft` (Task 8) carries its own `attest_save_failed || rollback_failed` refusal — guard (c),
+    /// DESIGN.md §2.3 step 1 — added because the idle tick and `handle_tax_inputs_key`'s `q`/Esc call it
+    /// directly, outside any `handle_key`-scoped dispatch guard. On the `ResidueLive` call site, that
+    /// means `may_save = false` here and guard (c) are REDUNDANT-by-construction: `rollback_failed` is
+    /// set before this fn is ever called, so guard (c) alone already refuses. `may_save`'s own,
+    /// independent lethality — what happens with NEITHER latch armed — is pinned separately by
+    /// `close_all_mutation_surfaces_may_save_false_never_flushes_even_with_no_latch_armed`. Do not treat
+    /// a green suite here as proof that `may_save = false` is dead weight: narrow guard (c)'s latch set
+    /// (plausible — the two latches have opposite remedies) and this call site's `false` becomes load-
+    /// bearing again, with nothing else standing behind it.
+    ///
     /// **Returns** `Some((year, error))` when `may_save` was true, a flush was actually attempted (the
     /// form was dirty with a materialized working copy), and it FAILED — `None` in every other case
     /// (no flush attempted, nothing to flush, or a clean flush). Fix round 2 (Important 1): `arm_stale`
@@ -14873,6 +14885,63 @@ mod tests {
         );
     }
 
+    /// fix wave BLOCKING 1, mutation (ii): the wiring at `draw_edit.rs`'s `render_dashboard` call site,
+    /// which threads `app.stale_after_write.is_some()` into the new `stale_armed` parameter. Unlike the
+    /// `defensive_dashboard.rs` KATs (which call `render_dashboard` directly), this drives the REAL
+    /// production path end-to-end: a fresh empty vault (no disposal ⇒ all four `journey_view` lists
+    /// empty), a write whose re-projection fails (`apply_reprojection`'s `Err` arm ⇒ `arm_stale`, the
+    /// ONE site that arms the latch), then `open_defensive_filing` (D-7 skips its own pseudo-active gate
+    /// while armed) — reaching the dashboard render with `stale_armed = true` over an all-empty,
+    /// NON-pseudo-active view. This is the exact filing-consequence fixture Step 1's brief describes: a
+    /// filer presses `o`/`u`, re-projection fails, presses `w`, and must NOT read "Nothing outstanding
+    /// right now." `uncomputable` alone cannot see this route (asserted below) — that is what makes it
+    /// distinct from `safe_journey_view_on_a_pseudo_active_state_renders_an_explicit_notice_not_an_all_clear`.
+    ///
+    /// Mutation: replaced the wired `app.stale_after_write.is_some()` at `draw_edit.rs`'s
+    /// `render_dashboard` call with a literal `false` — confirmed every OTHER test in this crate
+    /// (494/494) stayed GREEN under that mutation; this KAT is the only guard on the wiring itself, and
+    /// it RED as expected. Restored via a `cp` backup (never `git checkout --`).
+    #[test]
+    fn open_defensive_filing_while_armed_over_an_empty_view_never_renders_the_all_clear() {
+        let (mut app, _dir) = unlocked_app_on_empty_vault(2024);
+        app.apply_reprojection(
+            None,
+            Some(Err(btctax_cli::CliError::Usage("projector said no".into()))),
+            |_| unreachable!("the status closure must NOT run on the Err arm"),
+        );
+        assert!(
+            app.stale_after_write.is_some(),
+            "fixture: the re-projection must genuinely have failed"
+        );
+        assert!(
+            !app.snapshot.as_ref().unwrap().state.pseudo_active(),
+            "fixture sanity: this is the ARMED-BUT-NOT-PSEUDO route, distinct from the pseudo-active \
+             route already covered by \
+             `w_opens_while_armed_even_though_the_stale_image_still_says_pseudo_active`"
+        );
+        app.open_defensive_filing();
+        assert_eq!(app.screen, EditorScreen::DefensiveFiling);
+        assert!(
+            app.defensive_dashboard
+                .as_ref()
+                .unwrap()
+                .uncomputable
+                .is_none(),
+            "fixture sanity: an empty, non-pseudo-active ledger takes `safe_journey_view`'s REAL \
+             `journey_view` branch, not the uncomputable stub — `uncomputable` alone cannot see this \
+             route, which is exactly why `stale_armed` had to be threaded through separately"
+        );
+        let rendered = render_editor(&mut app);
+        assert!(
+            !rendered.contains("Nothing outstanding right now."),
+            "an armed-but-not-pseudo stale latch must NOT let the all-clear render: {rendered}"
+        );
+        assert!(
+            rendered.contains("NOT a statement"),
+            "the stale analogue of the pseudo notice must render instead: {rendered}"
+        );
+    }
+
     /// D-7 (Task 6, "also in scope" #1): entering the READ-ONLY dashboard is allowed while armed (the
     /// two KATs above), but `DashboardIntent::Declare`/`Promote` — the dashboard's own WRITE intents,
     /// dispatched straight to `open_declare_flow`/`open_promote_flow` (`EditorScreen::DefensiveFiling`'s
@@ -23054,10 +23123,10 @@ mod tests {
         );
     }
 
-    /// [Fix round 1/5, Important 1] `close_all_mutation_surfaces(may_save)`'s `false` at the
-    /// `on_persist_error` `ResidueLive` call site (`main.rs:738`) is the single most safety-critical bit
-    /// this task adds: it is what stops a debounced tax-inputs draft flush from reaching `Vault::save`
-    /// while an un-revertable residue is live in memory. Neither
+    /// [Fix round 1/5, Important 1; record corrected in the fix wave — see below] `close_all_mutation_
+    /// surfaces(may_save)`'s `false` at the `on_persist_error` `ResidueLive` call site is a
+    /// safety-critical bit: on its OWN, it is what would stop a debounced tax-inputs draft flush from
+    /// reaching `Vault::save` while an un-revertable residue is live in memory. Neither
     /// `kat_on_persist_error_residue_live_arms_latch` nor
     /// `residue_latch_cannot_be_re_entered_through_the_surviving_bulk_income_flow` covers the flip —
     /// both build `EditorApp::new(PathBuf::from("/nonexistent"))`, so `tax_inputs_form` is always `None`
@@ -23065,12 +23134,24 @@ mod tests {
     /// is session-backed with a DIRTY, materialized `tax_inputs_form` so the flush is live if `may_save`
     /// is ever mis-threaded to `true`.
     ///
-    /// Mutation: changed `main.rs:738` from `self.close_all_mutation_surfaces(false)` to
-    /// `self.close_all_mutation_surfaces(true)` and re-ran
-    /// `cargo nextest run -p btctax-tui-edit residue_live_may_save_false_prevents_dirty_tax_inputs_draft_from_reaching_disk`
-    /// — RED: a `Draft` row for 2024 existed on disk after `on_persist_error`, when it must not (the
-    /// residue latch means NOTHING may reach `Vault::save`, including a debounced draft flush). Restored
-    /// the line via a `cp` backup (never `git checkout --`) and re-ran — GREEN.
+    /// **Corrected mutation record (fix wave, BLOCKING 2):** the previous version of this comment
+    /// claimed that changing `on_persist_error`'s `self.close_all_mutation_surfaces(false)` call to
+    /// `self.close_all_mutation_surfaces(true)` turns this KAT RED. That claim was FALSE — re-run today:
+    /// the flip is GREEN. `on_persist_error`'s `ResidueLive` arm sets `self.rollback_failed = true`
+    /// BEFORE calling `close_all_mutation_surfaces`, and Task 8 later added `flush_tax_inputs_draft`'s
+    /// own `attest_save_failed || rollback_failed` refusal (guard (c), DESIGN.md §2.3 step 1,
+    /// `flush_tax_inputs_draft_refuses_under_either_save_forbidding_latch` above) — so by the time
+    /// `may_save` is even consulted on THIS path, the flush already refuses independently of it. The two
+    /// guards are redundant-by-construction on this one call site, not because `may_save` stopped
+    /// mattering: `may_save`'s own lethality — isolated from guard (c) by arming NEITHER latch — is now
+    /// pinned by `close_all_mutation_surfaces_may_save_false_never_flushes_even_with_no_latch_armed`
+    /// (below), which DOES red under the corresponding mutation (an unconditional flush inside
+    /// `close_all_mutation_surfaces` itself). ⚠ If a future edit narrows guard (c)'s latch set to
+    /// `attest_save_failed` only — plausible, since the two latches have opposite remedies and this
+    /// branch argued that distinction three times — this KAT (still gated only by `rollback_failed`
+    /// upstream) would stop covering that narrower guard, and `main.rs`'s `:775` `false` would become
+    /// the SOLE guard on this call site again. Don't let a green run here be read as "guard (c) is
+    /// still redundant" without re-checking that guard's own latch set.
     #[test]
     fn residue_live_may_save_false_prevents_dirty_tax_inputs_draft_from_reaching_disk() {
         use btctax_core::tax::types::FilingStatus;
@@ -23108,6 +23189,65 @@ mod tests {
             "may_save=false must prevent the dirty draft from reaching disk while the residue latch \
              is armed — a save here would persist unrevertable residue under a status reading \
              \"the vault on disk is unchanged\""
+        );
+    }
+
+    /// fix wave BLOCKING 2: `may_save`'s OWN lethality, isolated from `flush_tax_inputs_draft`'s
+    /// redundant `attest_save_failed || rollback_failed` guard (Task 8, `:1253-1255`). The KAT above
+    /// (`residue_live_may_save_false_prevents_dirty_tax_inputs_draft_from_reaching_disk`) drives
+    /// `on_persist_error`'s `ResidueLive` arm, which sets `rollback_failed = true` BEFORE calling
+    /// `close_all_mutation_surfaces(false)` — so `flush_tax_inputs_draft`'s own guard ALSO refuses by
+    /// the time `may_save` is even consulted, and that KAT stays GREEN whether `on_persist_error`'s
+    /// `close_all_mutation_surfaces` call passes `false` or `true` (see the corrected mutation record
+    /// on that KAT — the flip is GREEN today, not RED as it previously, falsely, claimed). This KAT
+    /// arms NEITHER latch and calls `close_all_mutation_surfaces(false)` directly, so
+    /// `flush_tax_inputs_draft`'s own guard is a no-op here and `may_save` is the ONLY thing standing
+    /// between a dirty draft and `Vault::save`.
+    ///
+    /// Mutation: changed `let flush_failed = if may_save { flush_tax_inputs_draft(self) } else { None
+    /// };` inside `close_all_mutation_surfaces` to call `flush_tax_inputs_draft(self)`
+    /// unconditionally — RED here (a `Draft` row for 2024 reached disk with no latch armed), while
+    /// `arm_stale_may_save_true_flushes_a_dirty_tax_inputs_draft_to_disk` stayed GREEN — proving both
+    /// directions of `may_save` are now separately pinned, each by its own KAT. Restored via a `cp`
+    /// backup (never `git checkout --`) and re-ran — GREEN.
+    #[test]
+    fn close_all_mutation_surfaces_may_save_false_never_flushes_even_with_no_latch_armed() {
+        use btctax_core::tax::types::FilingStatus;
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        let vault = dir.path().join("vault.pgp");
+        let pp = Passphrase::new("empty-vault-pass".into());
+
+        handle_key(&mut app, press(KeyCode::Char('T'))); // open the tax-inputs flow
+        handle_key(&mut app, press(KeyCode::Char(' '))); // cycle FilingStatus → Single (materializes)
+        let form = app.tax_inputs_form.as_ref().unwrap();
+        assert!(
+            form.dirty,
+            "the fixture must start dirty for this KAT to mean anything"
+        );
+        assert_eq!(
+            form.working.as_ref().unwrap().filing_status,
+            FilingStatus::Single,
+            "a materialized, distinctive working copy — never a None NI-2 skip"
+        );
+
+        assert!(
+            !app.attest_save_failed && !app.rollback_failed,
+            "fixture: NEITHER save-forbidding latch may be armed — this isolates `may_save` from \
+             `flush_tax_inputs_draft`'s own redundant guard"
+        );
+        app.close_all_mutation_surfaces(false);
+        assert!(
+            app.tax_inputs_form.is_none(),
+            "close_all_mutation_surfaces always closes the form, latch or no latch"
+        );
+
+        // Drop the app (releases the exclusive VaultLock) BEFORE reopening a fresh Session to read back.
+        drop(app);
+        let sess = btctax_cli::Session::open(&vault, &pp).unwrap();
+        assert!(
+            !btctax_cli::input_form_store::draft_exists(sess.conn(), 2024).unwrap(),
+            "may_save=false must prevent the dirty draft from reaching disk even with NO latch armed \
+             — this is the one guard the flush's own redundant check cannot substitute for"
         );
     }
 

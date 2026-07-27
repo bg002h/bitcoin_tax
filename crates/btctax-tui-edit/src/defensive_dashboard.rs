@@ -470,10 +470,18 @@ fn mark_row(idx: usize, cursor: usize, text: String) -> String {
 /// `uncomputable` (fix round 1, C-1) is `DefensiveDashboardState::uncomputable`: when `Some(reason)`,
 /// `reason` is rendered as an explicit notice near the top AND the "Nothing outstanding" fallback below
 /// is SUPPRESSED — an all-empty stub view must never read as an affirmative all-clear.
+///
+/// `stale_armed` (fix wave, BLOCKING 1) is `app.stale_after_write.is_some()`: while the latch is armed,
+/// `journey_view` still runs to completion over the STALE pre-write snapshot (`uncomputable` stays
+/// `None` — the projection did not fail, it merely ran over old data), so an all-empty result is NOT
+/// evidence of an all-clear either. This is the THIRD route to the same false-negative sentence on this
+/// branch (T6 closed the pseudo-active route via `uncomputable`; this closes the armed-but-not-pseudo
+/// route, which `uncomputable` alone cannot see).
 pub fn render_dashboard(
     view: &DefensiveFilingView,
     cursor: usize,
     uncomputable: Option<&str>,
+    stale_armed: bool,
 ) -> Vec<String> {
     let mut lines = vec![
         "Defensive Filing — journey dashboard (derived; nothing here is filed until you act)"
@@ -544,12 +552,27 @@ pub fn render_dashboard(
     }
 
     if uncomputable.is_none()
+        && !stale_armed
         && view.resolve_first.is_empty()
         && view.candidates.is_empty()
         && view.tranches.is_empty()
         && view.still_short.is_empty()
     {
         lines.push("Nothing outstanding right now.".to_string());
+        lines.push(String::new());
+    } else if stale_armed
+        && uncomputable.is_none()
+        && view.resolve_first.is_empty()
+        && view.candidates.is_empty()
+        && view.tranches.is_empty()
+        && view.still_short.is_empty()
+    {
+        lines.push(
+            "This is NOT a statement that nothing is outstanding — the figures on this screen were \
+             derived from an image of the ledger taken BEFORE the last write, which could not be \
+             re-projected."
+                .to_string(),
+        );
         lines.push(String::new());
     }
 
@@ -874,7 +897,7 @@ mod tests {
             ..empty_view()
         };
         // row_order addresses [Candidate(0), Candidate(1)] — cursor=1 is the SECOND candidate.
-        let rendered = render_dashboard(&view, 1, None);
+        let rendered = render_dashboard(&view, 1, None, false);
         let first_candidate = rendered
             .iter()
             .find(|l| l.contains("short 10000 sat"))
@@ -905,7 +928,7 @@ mod tests {
             ..empty_view()
         };
         // row_order addresses [Tranche(0)] — cursor=0 is the (only) tranche.
-        let rendered = render_dashboard(&view, 0, None);
+        let rendered = render_dashboard(&view, 0, None, false);
         let header = rendered
             .iter()
             .find(|l| l.contains("sat (declared):"))
@@ -930,7 +953,7 @@ mod tests {
     #[test]
     fn export_is_always_available_never_a_done_checkbox() {
         // Empty dashboard: nothing to declare, nothing tranched, nothing short.
-        let rendered_empty = render_dashboard(&empty_view(), 0, None).join("\n");
+        let rendered_empty = render_dashboard(&empty_view(), 0, None, false).join("\n");
         assert!(
             rendered_empty.contains("[x] export"),
             "export must be offered even with an EMPTY dashboard: {rendered_empty}"
@@ -954,7 +977,7 @@ mod tests {
             flagged_years: Default::default(),
             safe_harbor_blocked: false,
         };
-        let rendered_busy = render_dashboard(&busy, 0, None).join("\n");
+        let rendered_busy = render_dashboard(&busy, 0, None, false).join("\n");
         assert!(
             rendered_busy.contains("[x] export"),
             "export must ALSO be offered on a busy dashboard: {rendered_busy}"
@@ -962,6 +985,44 @@ mod tests {
         assert!(
             !rendered_busy.to_lowercase().contains("done"),
             "export must never read as 'done' even once other work exists: {rendered_busy}"
+        );
+    }
+
+    // ── fix wave BLOCKING 1: `stale_armed` suppresses the all-clear even when `uncomputable` is `None`
+    // ────────────────────────────────────────────────────────────────────────────────────────────────
+    //
+    // `uncomputable` alone cannot see this route: while the latch is armed, `journey_view` runs to
+    // completion (over the STALE pre-write snapshot) rather than failing, so `uncomputable` stays
+    // `None`. An all-empty result under that condition is not evidence of an all-clear — it may simply
+    // be that the write which WOULD have produced a disposal never got re-projected.
+    //
+    // Mutations, each independently proven:
+    // (1) delete the `&& !stale_armed` conjunct on the all-clear guard → this test's `!contains("Nothing
+    //     outstanding right now.")` assertion reds (confirmed: RED).
+    // (2) unarmed sibling (`stale_armed = false`) asserts the all-clear STILL renders — guards against
+    //     over-suppression (a `stale_armed` that defaulted to `true`, or a guard that dropped the
+    //     original four-empty-lists condition, would red this half instead).
+    #[test]
+    fn stale_armed_suppresses_the_all_clear_even_with_uncomputable_none() {
+        let rendered = render_dashboard(&empty_view(), 0, None, true).join("\n");
+        assert!(
+            !rendered.contains("Nothing outstanding right now."),
+            "an armed-but-not-pseudo stale latch must NOT let the all-clear render: {rendered}"
+        );
+        assert!(
+            rendered.contains("NOT a statement that nothing is outstanding"),
+            "the stale analogue of the pseudo notice must render instead: {rendered}"
+        );
+    }
+
+    #[test]
+    fn unarmed_empty_dashboard_still_renders_the_all_clear() {
+        // Guards against over-suppression: an unarmed, uncomputable=None, all-empty dashboard must
+        // STILL show the all-clear — `stale_armed` must gate ONLY the armed case.
+        let rendered = render_dashboard(&empty_view(), 0, None, false).join("\n");
+        assert!(
+            rendered.contains("Nothing outstanding right now."),
+            "an unarmed all-empty dashboard must still read as an all-clear: {rendered}"
         );
     }
 
@@ -1310,7 +1371,8 @@ mod tests {
              hard-coded false, even in the uncomputable stub"
         );
 
-        let rendered = render_dashboard(&dash.view, dash.cursor, dash.uncomputable).join("\n");
+        let rendered =
+            render_dashboard(&dash.view, dash.cursor, dash.uncomputable, false).join("\n");
         assert!(
             rendered.contains("UNCOMPUTABLE"),
             "the notice must render: {rendered}"

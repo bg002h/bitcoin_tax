@@ -180,10 +180,15 @@ fn draw_defensive_filing(frame: &mut Frame, app: &EditorApp) {
             .map(Line::from)
             .collect()
     } else if let Some(dash) = app.defensive_dashboard.as_ref() {
-        crate::defensive_dashboard::render_dashboard(&dash.view, dash.cursor, dash.uncomputable)
-            .into_iter()
-            .map(Line::from)
-            .collect()
+        crate::defensive_dashboard::render_dashboard(
+            &dash.view,
+            dash.cursor,
+            dash.uncomputable,
+            app.stale_after_write.is_some(),
+        )
+        .into_iter()
+        .map(Line::from)
+        .collect()
     } else {
         vec![Line::from(
             "No dashboard state — press Esc to return to Browse.",
