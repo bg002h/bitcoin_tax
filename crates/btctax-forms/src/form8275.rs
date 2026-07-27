@@ -14,6 +14,18 @@
 //! disposal filed in any supported year gets a real fillable disclosure — this is what keeps T16's
 //! re-pointed BG-D8 gate from PERMANENTLY refusing a promoted 2025 (or 2017) export, the dominant
 //! current-year flow.
+//!
+//! **★ Part II is WRAPPED, never truncated (T-f8275-part-ii-overflow).** The filer's Part II narrative
+//! is the §1.6662-4(f) adequate-disclosure text — the whole of Approach B's estimated-basis defense
+//! rests on it. It used to be written whole to the ONE `part_ii_narrative` field, which is a
+//! single-line, `DoNotScroll`, no-`/MaxLen` widget: the write always "succeeded" (nothing at the
+//! PDF-data level stops an over-long `/V`), but a viewer honoring the widget's own box could only
+//! DISPLAY the first ~137 characters at 8pt — a fifth of a disclosure is not a disclosure, and neither
+//! `/MaxLen` (not declared on this field) nor `verify_flat`'s geometry leg (skipped for free
+//! placements) could see it. `crate::wrap` measures at the SAME Helvetica-Bold 8pt the PDF's own `/DA`
+//! declares and greedily wraps the narrative across `Form8275Map::narrative_continuation_fields()` (33
+//! lines: Part II's own 6 + page-2 Part IV's 27); if it still will not fit, the fill fails closed with
+//! [`FormsError::Overflow`] (mirroring the Part I >6-row refusal below) rather than clip.
 
 use crate::error::FormsError;
 use crate::map::Form8275Map;
@@ -21,6 +33,12 @@ use crate::verify::{verify_flat, FlatPlacement};
 use crate::{fmt_money, pdf};
 use btctax_core::tax::packet::ReturnHeader;
 use btctax_core::tax::printed::Printed8275;
+
+/// The font size Form 8275's Part II ("Detailed Explanation") and Part IV ("Explanations (continued
+/// from Parts I and/or II)") continuation lines declare in their own `/DA`
+/// (`/HelveticaLTStd-Bold 8.00 Tf`, verified against the bundled Rev. 10-2024 asset) — the size
+/// `crate::wrap` measures the narrative at.
+const PART_II_FONT_SIZE_PT: f32 = 8.0;
 
 /// A free-text cell (geometry-exempt, page-derived): written + authorized only when non-empty. Mirrors
 /// `form8283.rs::push_free` exactly — Form 8275 has no money-grid columns, so every cell here uses it.
@@ -100,6 +118,12 @@ fn fill_form_8275_inner(
         });
     }
 
+    // The BLANK PDF's own field set — needed for (a) each Part II/IV continuation line's `/Rect` width
+    // (the wrap measurement below) and (b) the identity SSN cell's `/MaxLen` when `filer` is `Some`.
+    // One load covers both; loaded unconditionally because the wrap needs it even on the crypto-slice
+    // path (Task 16), which has no identity to write.
+    let blank_fields = pdf::collect_fields(&pdf::load(pdf::f8275_pdf(map.year)?)?)?;
+
     let mut w: Vec<(String, pdf::FieldValue)> = Vec::new();
     let mut p: Vec<FlatPlacement> = Vec::new();
 
@@ -118,22 +142,52 @@ fn fill_form_8275_inner(
         // (f) Amount.
         push_free(&mut w, &mut p, &row_map.amount, &fmt_money(item.amount));
     }
-    // Part II — the filer's combined narrative, written whole to the one free-text field (no per-line
-    // splitting; mirrors form8283's whole-address identity writes).
-    push_free(&mut w, &mut p, &map.part_ii_narrative, &printed.part_ii);
+    // Part II — the filer's combined narrative, WRAPPED (never truncated) across the 6 Part II lines
+    // (`part_ii_narrative` + `part_ii_continuation`) then the 27 page-2 Part IV lines
+    // (`part_iv_continuation`), in that printed order — 33 single-line 8pt fields total. Measured at
+    // Helvetica-Bold 8pt (the SAME font/size these fields' own `/DA` declares) against the NARROWEST
+    // of their own widget widths, applied uniformly, so a line that fits physically fits on whichever
+    // field it lands on (Part IV's fields are wider still). Fails closed ([`FormsError::Overflow`],
+    // mirroring the Part I row refusal above) rather than silently clipping past the field boundary —
+    // the shipped defect this fix exists to end.
+    let continuation_fields = map.narrative_continuation_fields();
+    let line_width_pts = continuation_fields
+        .iter()
+        .try_fold(f32::INFINITY, |narrowest, fqn| {
+            let field = blank_fields
+                .iter()
+                .find(|f| &f.fqn == fqn)
+                .ok_or_else(|| FormsError::MapFieldMissing((*fqn).to_string()))?;
+            let rect = field
+                .rect
+                .ok_or_else(|| FormsError::Structure(format!("{fqn}: field has no /Rect")))?;
+            Ok::<f32, FormsError>(narrowest.min(rect[2] - rect[0]))
+        })?;
+    let part_ii_lines = crate::wrap::wrap_to_capacity(
+        &printed.part_ii,
+        continuation_fields.len(),
+        line_width_pts,
+        PART_II_FONT_SIZE_PT,
+    )
+    .map_err(|rows| FormsError::Overflow {
+        part: "Part II",
+        rows,
+        capacity: continuation_fields.len(),
+    })?;
+    for (fqn, line) in continuation_fields.iter().zip(part_ii_lines.iter()) {
+        push_free(&mut w, &mut p, fqn, line);
+    }
 
     // The FILER's identity — "Name(s) shown on return" + identifying number. `None` on the crypto-slice
     // path (Task 16): the disclosure still rides the export even with no `ReturnInputs` on file.
     if let Some(header) = filer {
-        // The blank's fields are needed for the identity cells' /MaxLen.
-        let blank_for_identity = pdf::collect_fields(&pdf::load(pdf::f8275_pdf(map.year)?)?)?;
         crate::cells::push_identity(
             &mut w,
             &mut p,
             &map.identity,
             &header.name_line,
             &header.taxpayer.ssn,
-            &blank_for_identity,
+            &blank_fields,
         )?;
     }
 

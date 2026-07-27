@@ -85,6 +85,7 @@ const ROW2_DESC: &str = "topmostSubform[0].Page1[0].Table_Part1[0].Line2[0].#sub
 const ROW2_FORM_SCHEDULE: &str = "topmostSubform[0].Page1[0].Table_Part1[0].Line2[0].p1-t14[0]";
 const ROW2_AMOUNT: &str = "topmostSubform[0].Page1[0].Table_Part1[0].Line2[0].p1-t16[0]";
 const PART_II_LINE1: &str = "topmostSubform[0].Page1[0].p1-t80[0]";
+const PART_II_LINE2: &str = "topmostSubform[0].Page1[0].p1-t81[0]";
 const IDENTITY_NAME: &str = "topmostSubform[0].Page1[0].p1-t1[0]";
 const IDENTITY_SSN: &str = "topmostSubform[0].Page1[0].p1-t2[0]";
 
@@ -119,11 +120,27 @@ fn form_8275_fills_part_i_part_ii_and_identity() {
     );
     assert_eq!(tv(&doc, &fields, ROW2_AMOUNT).as_deref(), Some("6789"));
 
-    // Part II narrative — written whole to the single free-text field.
+    // Part II narrative (201 characters, 782.5pt at 8pt Helvetica-Bold) is WRAPPED across its own line
+    // (518.4pt wide) plus one continuation line — it no longer fits `PART_II_LINE1` alone (T-f8275-
+    // part-ii-overflow). The exact split is a known-answer pin of `crate::wrap`'s greedy word-wrap.
     assert_eq!(
         tv(&doc, &fields, PART_II_LINE1).as_deref(),
-        Some(printed.part_ii.as_str())
+        Some(
+            "The taxpayer disposed of BTC acquired via an unverified peer-to-peer purchase; basis \
+             was estimated using the daily low close over the"
+        )
     );
+    assert_eq!(
+        tv(&doc, &fields, PART_II_LINE2).as_deref(),
+        Some("attested acquisition window, consistent with Cohan v. Commissioner.")
+    );
+    // No character lost: rejoining both lines reproduces the full narrative.
+    let rejoined = format!(
+        "{} {}",
+        tv(&doc, &fields, PART_II_LINE1).unwrap(),
+        tv(&doc, &fields, PART_II_LINE2).unwrap()
+    );
+    assert_eq!(rejoined, printed.part_ii);
 
     // Filer identity.
     assert_eq!(
@@ -221,6 +238,24 @@ fn fault_injected_8275_desc_mapped_to_maxlen3_line_no_cell_is_red() {
     );
 }
 
+/// ★ T-f8275-part-ii-overflow Step 3: a Part II narrative too long to wrap across all 33 continuation
+/// lines (Part II's own 6 + page-2 Part IV's 27) FAILS CLOSED with a named [`FormsError::Overflow`] —
+/// mirroring the shipped Part I >6-row refusal — rather than clipping past the last line. 900 repeats
+/// of "word " need 38 lines at 8pt Helvetica-Bold in this field's width; 33 are available.
+#[test]
+fn form_8275_part_ii_narrative_too_long_for_every_continuation_line_fails_closed() {
+    let printed = Printed8275 {
+        part_i: sample_printed().part_i,
+        part_ii: "word ".repeat(900),
+    };
+    let err = btctax_forms::fill_form_8275(&printed, &kitchen_sink_header(), 2024).unwrap_err();
+    assert!(
+        matches!(&err, FormsError::Overflow { part, rows, capacity }
+            if *part == "Part II" && *capacity == 33 && *rows > 33),
+        "expected a Part II Overflow with capacity 33 and rows > 33, got {err:?}"
+    );
+}
+
 #[test]
 fn form_8275_is_byte_deterministic() {
     let a = btctax_forms::fill_form_8275(&sample_printed(), &kitchen_sink_header(), 2024)
@@ -236,7 +271,7 @@ fn form_8275_is_byte_deterministic() {
         "8275 fill changed — if intentional, update GOLDEN_8275_SHA256"
     );
 }
-const GOLDEN_8275_SHA256: &str = "aa70a5c55901586ec04e5659ff70038c06d8bef38d034ff47987b381893d5032";
+const GOLDEN_8275_SHA256: &str = "b6dfc234413b7eededa68695c7419caa7bfba99d8a415e2f2a9b07ace10dca10";
 
 #[test]
 fn form_8275_fills_for_every_supported_non_2024_year() {
@@ -447,9 +482,13 @@ fn long_part_ii_narrative() -> String {
 /// narrative is many thousands of points wide at 8pt, vastly over `p1-t80[0]`'s 518.4pt box, and every
 /// OTHER continuation field is untouched (empty) because nothing maps or writes them yet.
 ///
-/// MUTATION (recorded per the build brief — see BUILD-REPORT.md for the actual run): once fixed,
-/// reverting the wrap so `part_ii` is again written whole to `PART_II_LINE1` must turn this test RED
-/// again.
+/// MUTATION (verified true — full transcript in BUILD-REPORT.md): with the fix in place, reverting
+/// `fill_form_8275_inner`'s Part II section to the shipped single `push_free(part_ii_narrative,
+/// printed.part_ii)` (no wrap) turns THIS test RED again — same failure as pre-fix, `p1-t80[0]`
+/// measuring ~6786pt against its 518.4pt box. The mutation also reds 3 other sp4.rs tests
+/// (`form_8275_fills_part_i_part_ii_and_identity`, `form_8275_is_byte_deterministic`,
+/// `form_8275_part_ii_narrative_too_long_for_every_continuation_line_fails_closed`), confirming the
+/// fix is load-bearing across the suite, not just here.
 #[test]
 fn form_8275_part_ii_long_narrative_does_not_silently_clip() {
     let narrative = long_part_ii_narrative();

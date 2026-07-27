@@ -42,6 +42,7 @@ mod schedule_se_full;
 mod transcribe;
 mod verify;
 mod watermark;
+mod wrap;
 
 pub use error::FormsError;
 pub use form1040::{Form1040Fill, Form1040Inputs};
