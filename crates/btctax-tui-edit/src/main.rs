@@ -837,9 +837,6 @@ impl EditorApp {
     /// as {label}, but ".into())` is correct; a prefix without the trailing space composes as
     /// `"…, butthe write reached disk"`.
     ///
-    /// `#[allow(dead_code)]`: no call site exists yet (Task 4 wires the 27 tails onto this fn). Mirrors
-    /// `stale_reason`'s Task-1 pattern; remove the attribute once Task 4 lands.
-    #[allow(dead_code)]
     fn after_write(
         &mut self,
         arm_prefix: Option<String>,
@@ -1573,7 +1570,7 @@ fn commit_tax_inputs(app: &mut EditorApp) {
     let outcome =
         edit::persist::form_commit(app.session.as_mut().unwrap(), year, &ri, table, params);
 
-    let status: Option<String> = match outcome {
+    match outcome {
         Ok(CommitOutcome::Committed) => {
             let label = app
                 .tax_inputs_form
@@ -1586,19 +1583,8 @@ fn commit_tax_inputs(app: &mut EditorApp) {
                                         // Tax/Forms tabs must show the newly-committed liability, not the pre-mutation one (mirrors the
                                         // profile-save site). `build_snapshot` is a READ via the persist-seam pattern; a re-projection
                                         // failure is non-fatal (keep the old snapshot; tell the filer to restart).
-            let new_snap = {
-                let session = app.session.as_ref().unwrap();
-                btctax_tui::unlock::build_snapshot(session)
-            };
-            match new_snap {
-                Ok((snap, _)) => {
-                    app.snapshot = Some(snap);
-                    Some(format!("committed {year} as {label}"))
-                }
-                Err(e) => Some(format!(
-                    "committed {year} as {label}, but re-projection failed ({e}) — restart to refresh"
-                )),
-            }
+            let prefix = format!("committed {year} as {label}, but ");
+            app.after_write(Some(prefix), move |_| format!("committed {year} as {label}"));
         }
         Ok(CommitOutcome::Refused(refusal)) => {
             let mut msg = refusal.detail.clone();
@@ -1612,7 +1598,7 @@ fn commit_tax_inputs(app: &mut EditorApp) {
                 form.error = Some(refusal.detail.clone());
                 form.modal = None; // close the confirm; keep the flow open to fix
             }
-            Some(msg)
+            app.status = Some(msg);
         }
         Ok(CommitOutcome::NoTables) => {
             // UX-P4-12(i): finalizing a full return needs the year's tables (v1: TY2024) — but the year
@@ -1633,7 +1619,7 @@ fn commit_tax_inputs(app: &mut EditorApp) {
             }
             // Kept ≤ ~104 chars so the whole line — including the "finalize" clause — is visible on the
             // no-wrap NOTICE line at the flow's design width (r1-M1).
-            Some(if saved {
+            app.status = Some(if saved {
                 format!(
                     "{year} has no full-return tables yet (v1: TY2024) — inputs SAVED as a draft; \
                      finalize when tables publish."
@@ -1643,16 +1629,15 @@ fn commit_tax_inputs(app: &mut EditorApp) {
                     "{year} has no full-return tables yet (v1: TY2024); DRAFT SAVE FAILED — retry to \
                      keep your inputs."
                 )
-            })
+            });
         }
         Err(e) => {
             if let Some(form) = app.tax_inputs_form.as_mut() {
                 form.modal = None;
             }
-            Some(format!("{e}"))
+            app.status = Some(format!("{e}"));
         }
-    };
-    app.status = status;
+    }
 }
 
 /// ★ Task 8: the `t` source toggle. Reads `active_source(conn, year)` through the persist seam (the
@@ -1766,32 +1751,21 @@ fn confirm_park_to_profile(app: &mut EditorApp) {
             let label = edit::persist::form_active_source(app.session.as_ref().unwrap(), year)
                 .map(|a| crate::edit::form::active_source_label(&a))
                 .unwrap_or("(none)");
-            // ★ I-1: re-project the Browse snapshot — parking changes the year's resolve outcome (it now
-            // resolves through the tax-profile, not the committed full return), so the Tax/Forms tabs must
-            // reflect the profile-derived liability. A re-projection failure is non-fatal (restart to refresh).
-            let new_snap = {
-                let session = app.session.as_ref().unwrap();
-                btctax_tui::unlock::build_snapshot(session)
-            };
             if let Some(form) = app.tax_inputs_form.as_mut() {
                 form.modal = None;
                 form.active_source_label = label;
                 form.parked = true; // the working copy is now the sole parked draft (re-commit via `s`)
                 form.dirty = false;
             }
-            match new_snap {
-                Ok((snap, _)) => {
-                    app.snapshot = Some(snap);
-                    app.status = Some(format!(
-                        "parked the full return for {year}; now using the tax-profile"
-                    ));
-                }
-                Err(e) => {
-                    app.status = Some(format!(
-                        "parked the full return for {year}, but re-projection failed ({e}) — restart to refresh"
-                    ));
-                }
-            }
+            // ★ I-1: re-project the Browse snapshot — parking changes the year's resolve outcome (it now
+            // resolves through the tax-profile, not the committed full return), so the Tax/Forms tabs must
+            // reflect the profile-derived liability. Run AFTER the form block above clears `dirty` —
+            // `close_all_mutation_surfaces`'s flush no-op and the stale-latch's fact-2 park carve-out both
+            // depend on seeing a CLEAN form here.
+            app.after_write(
+                Some(format!("parked the full return for {year}, but ")),
+                move |_| format!("parked the full return for {year}; now using the tax-profile"),
+            );
         }
         Err(e) => {
             if let Some(form) = app.tax_inputs_form.as_mut() {
@@ -7091,22 +7065,10 @@ fn handle_attest_typed_word_key(app: &mut EditorApp, key: KeyEvent) {
 
     match save_result {
         Ok((_void_id, attest_id)) => {
-            let new_snap = {
-                let session = app.session.as_ref().unwrap();
-                btctax_tui::unlock::build_snapshot(session)
-            };
-            match new_snap {
-                Ok((snap, _)) => {
-                    let status = derive_attest_status(&snap, &attest_id);
-                    app.snapshot = Some(snap);
-                    app.status = Some(status);
-                }
-                Err(e) => {
-                    app.status = Some(format!(
-                        "Attested but re-projection failed ({e}) — restart to refresh"
-                    ));
-                }
-            }
+            app.after_write(
+                Some("the safe-harbor attest write landed, but ".to_string()),
+                |snap| derive_attest_status(snap, &attest_id),
+            );
         }
         Err(e) => {
             app.attest_save_failed = true;
