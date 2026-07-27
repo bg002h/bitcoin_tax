@@ -6,6 +6,21 @@ yet for this cycle beyond "ship" — these are ownerless residue until a future 
 
 Legend: **[open]** not started · **[closed]** burned down.
 
+> ## ✅ NOT PRUNED — all seven items below remain LIVE (noted 2026-07-27)
+>
+> Recorded here because the two sibling Approach-B registries
+> (`design/defensive-filing-wizard/`, `design/stale-snapshot-latch/`) *were* pruned on this date and
+> marked historical. **This one was not.** Every item below is `btctax-forms` / `btctax-cli` — the
+> Form 8275 fill layer and the promote chokepoint — which is kept intact under **all three** branch
+> outcomes and both paths of the open architecture decision. Nothing here depends on the UI.
+>
+> Indexed from the live root registry: **`FOLLOWUPS.md` §"APPROACH-B ARCHITECTURE DECISION +
+> POST-WIZARD RECONCILIATION"** → G-1. Burn these down from this file as normal.
+>
+> (Note: this cycle *displaced* Approach-B sub-project 3 — VARIOUS multi-date 8949 rows — which is
+> separately CLOSED as unnecessary with recorded reopen criteria in `DESIGN.md` §4. That closure is
+> unaffected by the architecture decision.)
+
 ## Round 2 follow-ups (not built in this pass)
 
 - **[open] Per-item Part II numbering (finding 4's "more faithful long-term shape").** The bundled

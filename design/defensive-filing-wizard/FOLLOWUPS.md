@@ -7,6 +7,22 @@ state lives in the (gitignored) SDD ledger `.superpowers/sdd/progress.md`.
 
 Legend: **[open]** not started · **[done]** burned down (kept for provenance) · owning phase in **bold**.
 
+> ## ⚠ SUPERSEDED 2026-07-27 — this registry is HISTORICAL
+>
+> The live registry for Approach B is now **`FOLLOWUPS.md` §"APPROACH-B ARCHITECTURE DECISION +
+> POST-WIZARD RECONCILIATION"** (repo root). Read it first; do not burn items down from this file.
+>
+> Why: the wizard's UI layer is under an open architecture decision (keep `main` / take
+> `arch/engine-keep-wizard-cut` / re-layer behind a UI-free seam). Roughly **11 wizard-TUI-chrome
+> items below are pruned** as superseded — their surface is deleted on the cut branch and rewritten
+> under either re-layer path. They are kept here for provenance, not as live work.
+>
+> **What did NOT get pruned, and was promoted to the root registry:** `tax-M-3` (a `btctax-core`
+> defect — and now *worse* than when filed, since the cut branch's new `render_defensive_saving`
+> inherits the same uncaveated saving), `tax-M-4` generalized to any surface printing a bare gain-Δ,
+> `arch M-3` (two public `render_consent` fns on `btctax-cli`'s published API), and the `era.rs` /
+> `defensive_era.rs` doc-precision items. Those are engine items and survive every branch outcome.
+
 ## P-C (must close before the P-C green gate)
 
 *(The era→window preset-table item was RE-OWNED to **P-D/ship** at the P-C gate — see that section. It is a USER
@@ -95,7 +111,8 @@ P-C-owned remains open.)*
 
 ## P-D / whole-branch (deferred at the P-C gate — non-blocking, but sweep before merge)
 
-- **[open — RE-OWNED to post-merge]** ★ **2026-07-26, whole-branch FINAL r2 fold.** The two displacement-caveat
+- **[superseded — both items it re-owns are individually retagged as PROMOTED below; see root FOLLOWUPS.md G-1]**
+  ★ **2026-07-26, whole-branch FINAL r2 fold.** The two displacement-caveat
   holes below (the dashboard `[assess]` line and the declare-flow `t` readout — filed here as tax-M-3/tax-M-4,
   and carried as **tax M-4 / M-5** in the r2 tax lens' own numbering) were owned by **P-D/whole-branch**, and
   that phase CLOSES at this gate. They are NOT discharged, so per STANDARD_WORKFLOW ("an item whose owning
@@ -103,13 +120,13 @@ P-C-owned remains open.)*
   cycle** rather than left pointing at a closed phase. Both lenses ruled them non-blocking: neither changes a
   filed number — each is caveat COPY beside an advisory figure that is already labelled a gain-Δ and "not a tax
   saving". Owner from now on: **post-merge / next cycle.**
-- **[open] tax-M-3 — displacement-caveat hole for a correctly-sized cover.** (Owner: **post-merge / next
+- **[promoted — LIVE in root FOLLOWUPS.md G-1] tax-M-3 — displacement-caveat hole for a correctly-sized cover.** (Owner: **post-merge / next
   cycle** — re-owned above.) `defensive/mod.rs:659-688`:
   `WouldDisplaceIfPromoted` fires only when `covered_sat == 0`; when `covered_sat > 0 && t.sat == covered_sat`, neither it
   nor `OverCovered` fires — yet a HIFO reorder across multi-year disposals still shifts gain between years, so that row's
   per-year delta is a reorder artifact shown as an unqualified saving. Fix: fire on `!promoted && displaces_documented_basis(..)`,
   suppressing only where `OverCovered` already carries displacement copy.
-- **[open] tax-M-4 — the declare flow's on-demand tax-Δ carries no displacement caveat.** (Owner: **post-merge
+- **[promoted — LIVE in root FOLLOWUPS.md G-1] tax-M-4 — the declare flow's on-demand tax-Δ carries no displacement caveat.** (Owner: **post-merge
   / next cycle** — re-owned above.) (`declare_flow.rs:293-307` prints
   bare `$delta`/`gain-Δ`). `declare_preview_saving` already builds both folds, so the check is nearly free.
   ★ **PREMISE CORRECTED at the whole-branch fold:** this entry used to justify itself with "…while the dashboard row's
@@ -146,32 +163,35 @@ P-C-owned remains open.)*
 - **[done] arch-N-1 — `debug_assert!(open_flow_count() <= 1)` is evaluated before the flow field is set** (so it permitted one
   OTHER flow open); the invariant it names is `== 0`. Tightened to `debug_assert_eq!(.., 0)` at all three sites
   (`main.rs` open_declare_flow / open_promote_flow, `editor.rs` open_defensive_filing) at the whole-branch fold.
-- **[open — RE-OWNED to post-merge]** ★ **2026-07-26, whole-branch FINAL r3 fold.** The remaining `[open]` items
+- **[superseded — the items it re-owns are individually retagged below]** ★ **2026-07-26, whole-branch FINAL r3 fold.** The remaining `[open]` items
   below in this section — Browse-footer `w`, tax Minor 2 (flow-render scrolling), arch N-r2-1, arch N-r2-2, arch
   N-r2-3, and N-r2-4 residue (b) — were likewise owned by **P-D/whole-branch**, the same phase already re-owned
   above for the tax-M-3/tax-M-4 pair; that phase CLOSES at this gate and none of these is discharged, so per
   STANDARD_WORKFLOW ("an item whose owning phase has already passed is overdue, not deferred") they are
   explicitly RE-OWNED to **post-merge / next cycle** rather than left pointing at a closed phase. Both r3 lenses
   ruled all of them non-blocking (arch r3 GREEN; tax r3's sole 0C/1I finding is the unrelated §6664(c) record-
-  scope item, folded separately) and none changes a filed number. Owner from now on for every remaining `[open]`
-  item in this section: **post-merge / next cycle.**
-- **[open] Browse footer does not list `w`** (the overlay does, and `?` points at the overlay). Adding it pushed `?: help`
+  scope item, folded separately) and none changes a filed number. ~~Owner from now on for every remaining item
+  in this section: **post-merge / next cycle.**~~ ★ **SUPERSEDED 2026-07-27:** every item this note re-owned is
+  now individually retagged below as either **pruned** (wizard TUI chrome, superseded by the open architecture
+  decision) or **promoted** (engine items, live in root `FOLLOWUPS.md` G-1). There is no longer a
+  "post-merge / next cycle" owner for this section — the root registry owns what survives.
+- **[pruned — superseded 2026-07-27, see root FOLLOWUPS.md G-2] Browse footer does not list `w`** (the overlay does, and `?` points at the overlay). Adding it pushed `?: help`
   off the 120-col footer and golden tests caught it; deliberately reverted with an in-source rationale. Revisit only if the
   footer is ever reflowed.
-- **[open] tax Minor 2 — flow renders have no scrolling; the NOTICE rect makes the promote Consent surface 3 rows
+- **[pruned — superseded 2026-07-27, see root FOLLOWUPS.md G-2] tax Minor 2 — flow renders have no scrolling; the NOTICE rect makes the promote Consent surface 3 rows
   shorter.** `draw_edit.rs:162-174` + `DEFENSIVE_NOTICE_LINES = 3`: one `Paragraph` with `Wrap`, no `.scroll(...)`, so
   content beyond the rect is not drawn — pre-existing, but the P-C gate r2 fix wave makes it 3 rows worse on the narrow
   path (a `RolledBack` sets a status, the flow bounces to `PartII`, the filer Tabs back). Tax stake:
   `Acknowledgment.shown_terms` records terms as SHOWN; on a short terminal a trailing term can be recorded as shown
   without being rendered. Fix: scroll support or an "N more lines" indicator.
-- **[open] arch N-r2-1 — `Esc` at the promote flow's PartII step cancels the WHOLE flow rather than stepping back to
+- **[pruned — superseded 2026-07-27, see root FOLLOWUPS.md G-2] arch N-r2-1 — `Esc` at the promote flow's PartII step cancels the WHOLE flow rather than stepping back to
   Provenance** (`handle_promote_flow_part_ii_key`), while `Esc` at Consent steps back one. Harmless (PartII is only
   reachable via an attested `Purchase`) — worth a doc line only.
-- **[open] arch N-r2-2 — the NOTICE's ~230-char CRITICAL status clips below ~77 columns.** Graceful (never a panic),
+- **[pruned — superseded 2026-07-27, see root FOLLOWUPS.md G-2] arch N-r2-2 — the NOTICE's ~230-char CRITICAL status clips below ~77 columns.** Graceful (never a panic),
   and "Quit the editor NOW" survives in the first ~120 chars, so this is cosmetic.
-- **[open] arch N-r2-3 — both I-2 render KATs (`draw_edit.rs:7068` + sibling) exercise the DASHBOARD surface only.**
+- **[pruned — superseded 2026-07-27, see root FOLLOWUPS.md G-2] arch N-r2-3 — both I-2 render KATs (`draw_edit.rs:7068` + sibling) exercise the DASHBOARD surface only.**
   Add one case with `promote_flow` open (cheap insurance against a regression narrower than the dashboard).
-- **[open] N-r2-4 residue — three r1 Nits neither folded nor filed.** (a) **[done]** tax N-3: the tautological
+- **[pruned — superseded 2026-07-27, see root FOLLOWUPS.md G-2] N-r2-4 residue — three r1 Nits neither folded nor filed.** (a) **[done]** tax N-3: the tautological
   `empty_events.len() == 0` assert plus two `let _ = ...` import-keepers in
   `declare_flow::tests::clearance_reflects_plan_declare_and_is_a_pure_read` — closed at the whole-branch fold by
   DELETING that test wholesale alongside the `clearance()` probe it was the sole caller of (see arch-M-2 above).
@@ -392,7 +412,7 @@ fold: the blockers and tax-M-3 are pure documentation; tax-M-1 makes an export y
 - **[done] arch N5 — `declare_flow_confirm`'s doc cited `flow.clearance`,** deleted in the previous wave.
   Corrected to name the real gate (`btctax_cli::plan_declare`, re-run fresh at the confirm tail) and to record
   why the probe went. (Owner: **P-D/whole-branch** — DONE.)
-- **[open] arch M-3 — two PUBLIC `render_consent` functions on btctax-cli's about-to-be-published API.**
+- **[promoted — LIVE in root FOLLOWUPS.md G-1] arch M-3 — two PUBLIC `render_consent` functions on btctax-cli's about-to-be-published API.**
   `cmd/promote.rs:186` (`render_consent(terms, gift_only_years) -> String`) and `chokepoint/mod.rs:438`
   (`render_consent(plan: &PromotePlan) -> String`). Same name, same crate, different signatures and different
   scopes — a caller can reach the narrower one and miss the advisory/post-consent material the chokepoint copy
@@ -432,10 +452,10 @@ fold: the blockers and tax-M-3 are pure documentation; tax-M-1 makes an export y
 
 ## Copy pass / whole-branch review (ownerless residue — batch to the end)
 
-- **[open] T7-copy** — `defensive_dashboard.rs`: "[optional, SUPPRESSED] promote" reads as *disabled* though core does NOT
+- **[pruned — superseded 2026-07-27, see root FOLLOWUPS.md G-2] T7-copy** — `defensive_dashboard.rs`: "[optional, SUPPRESSED] promote" reads as *disabled* though core does NOT
   refuse a fee-only promote (DFW-D1 no-second-gate); `[x] export` bracket notation inconsistent with the `'d'`/`'p'`
   quoted-key style.
-- **[open] Debug-format rows** (P-B arch N1; widened at the P-C gate r2 / N-r2-4(c)) —
+- **[pruned — superseded 2026-07-27, see root FOLLOWUPS.md G-2] Debug-format rows** (P-B arch N1; widened at the P-C gate r2 / N-r2-4(c)) —
   `render_candidate/tranche/pool_short/resolve_first_row` emit `{:?}` on `EventId`/`PoolKey`/`BlockerKind` (e.g.
   `Decision { seq: 1 }`) — ugly for a filer; give them filer-facing formatting. Same class in the two P-C flow
   renders: `render_declare_flow`/`render_promote_flow` add `{:?}` on shortfall/wallet/era-preset/tranche (e.g.
@@ -448,14 +468,14 @@ fold: the blockers and tax-M-3 are pure documentation; tax-M-1 makes an export y
   cheaper than after. Deleted with both of its KATs (`era.rs::next_preset_cycles_and_wraps_to_first`,
   `defensive_era.rs::next_preset_cycles_oldest_to_newest_then_wraps`), matching exactly how `clearance()` was
   handled. (Owner: **P-D/whole-branch** — DONE.)
-- **[open] tax Nit 2** — the Provenance screen states which answer passes the gate BEFORE the filer answers ("Only a
+- **[pruned — superseded 2026-07-27, see root FOLLOWUPS.md G-2] tax Nit 2** — the Provenance screen states which answer passes the gate BEFORE the filer answers ("Only a
   PURCHASE can be promoted…" renders above the picker) — honest disclosure of the rule (same wording
   `refuse_non_purchase` uses), but mildly leading on a screen whose purpose is an unprompted filer answer. Consider
   moving that sentence into the refusal path.
-- **[open] Free-text date/sat entry** (T8-review Nit) — the declare flow edits via nudge (±1d/±1000 sat) on top of the
+- **[pruned — superseded 2026-07-27, see root FOLLOWUPS.md G-2] Free-text date/sat entry** (T8-review Nit) — the declare flow edits via nudge (±1d/±1000 sat) on top of the
   numbered era pick (`1-6` — the Tab-cycling this entry originally named was replaced by the owner's explicit-pick
   decision); free-text entry, if wanted, is a contained `declare_flow.rs` follow-up.
-- **[open] Plan-doc drift** — `IMPLEMENTATION_PLAN.md:61` File-Map names `ShortfallCandidate`; the shipped type is `Shortfall`.
+- **[pruned — superseded 2026-07-27, see root FOLLOWUPS.md G-2] Plan-doc drift** — `IMPLEMENTATION_PLAN.md:61` File-Map names `ShortfallCandidate`; the shipped type is `Shortfall`.
   Doc-only; code is internally consistent.
 
 ## Done (burned down in their owning phase — provenance)
@@ -472,7 +492,7 @@ fold: the blockers and tax-M-3 are pure documentation; tax-M-1 makes an export y
 
 *(Both lenses GREEN at this gate. Everything below is doc/test precision — no filed number, no gate.)*
 
-- **[open] The straddle invariant's stated CONSEQUENCE is a non-sequitur** (tax r4 M-1). `era.rs:25` + the two
+- **[promoted — LIVE in root FOLLOWUPS.md G-1] The straddle invariant's stated CONSEQUENCE is a non-sequitur** (tax r4 M-1). `era.rs:25` + the two
   straddle-KAT assert messages (`era.rs:163-164`, `defensive_era.rs:83-85`) say a straddling window would make the
   pool assignment "ambiguous". It would not: assignment is a total function of `window_end` alone (`resolve.rs:1310`
   emits one `Eff` at `window_end.midnight()`; `pool_key` takes one date), so a straddling window is *determinate*.
@@ -480,12 +500,12 @@ fold: the blockers and tax-M-3 are pure documentation; tax-M-1 makes an export y
   attest a possible **pre-2025** acquisition while both `pool_key` and `tranche_guard::pre2025_tranche_exists` read
   only `window_end` — so the tranche would stop blocking a `SafeHarborAllocation` that reconstructs exactly the
   pre-2025 residue the mutual exclusion protects. (Owner: post-merge; `era.rs` is a docs.rs surface.)
-- **[open] Incomplete sweep of the arch-M-1 phrasing** (tax r4 M-2): `defensive_era.rs:74-76` and `era.rs:151-155`
+- **[promoted — LIVE in root FOLLOWUPS.md G-1] Incomplete sweep of the arch-M-1 phrasing** (tax r4 M-2): `defensive_era.rs:74-76` and `era.rs:151-155`
   test **doc comments** still say the lot "lands in exactly ONE pooling era … rather than spanning the split" — the
   wording corrected everywhere else in the same fold, now contradicting the module doc's own new disclaimer ~130
   lines above and the assert message three lines below. The fold changed the assert strings but not the attached doc
   comments. This repo's recurring whole-surface-sweep miss. (Owner: post-merge.)
-- **[open] Wording precision** (tax r4 Nits): (a) `era.rs:62-63`/`SPEC.md:247-249` "~1,461 presses … alone" ignores
+- **[promoted — LIVE in root FOLLOWUPS.md G-1] Wording precision** (tax r4 Nits): (a) `era.rs:62-63`/`SPEC.md:247-249` "~1,461 presses … alone" ignores
   that `nudge_window_start` clamps at `window_end`, so `window_start` cannot reach 2025-01-01 until `window_end` is
   nudged across first; (b) `README.md:441-442` "no figure computable for **that year**" — `SavingFlavor::Named` is
   **tranche**-scoped, not year-scoped (`defensive/mod.rs:302-311`); (c) `README.md:448-449` "re-derived from your
@@ -493,7 +513,7 @@ fold: the blockers and tax-M-3 are pure documentation; tax-M-1 makes an export y
   the injected `current` year — prefer "computed from your ledger at the moment they are shown"; (d) `SPEC.md:70` /
   `DESIGN.md:46` "must equal what the filer saw, on either surface" restates the scope claim struck from the README —
   it is a CLI↔TUI *parity* criterion, so prefer "must not differ between the two surfaces". (Owner: post-merge.)
-- **[open] arch M-3 — two public `render_consent` fns on `btctax-cli`** (`cmd/promote.rs:186`, `chokepoint/mod.rs:438`).
+- **[promoted — LIVE in root FOLLOWUPS.md G-1] arch M-3 — two public `render_consent` fns on `btctax-cli`** (`cmd/promote.rs:186`, `chokepoint/mod.rs:438`).
   ★ **DELIBERATELY SHIPPED AS-IS at v0.10.0** (controller's call, CONFIRMED by the arch lens in r3 after it contested
   its own finding): the narrow one shipped at v0.9.0 so *removing* it is the breaking change; the crate root has NO
   collision (`btctax_cli::render_consent` resolves unambiguously to the correct advisory-carrying one); and it has NO

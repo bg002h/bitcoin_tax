@@ -15,6 +15,28 @@ which is exactly that lesson recurring on this branch).
 
 Legend: **[open]** not started · **[closed]** burned down (kept for provenance) · owning phase in **bold**.
 
+> ## ⚠ SUPERSEDED 2026-07-27 — this registry is HISTORICAL
+>
+> The live registry is now **`FOLLOWUPS.md` §"APPROACH-B ARCHITECTURE DECISION + POST-WIZARD
+> RECONCILIATION"** (repo root). Read it first; do not burn items down from this file.
+>
+> Why: **the latch subsystem this registry documents is superseded by `SnapshotGen`** — a typed
+> generation pinned to every plan, refusing commit across a generation bump — under both paths of the
+> open architecture decision, and it is already deleted on `arch/engine-keep-wizard-cut`. So the 10
+> guard/latch items below (guard (b)'s function-scope presence test, `NESTED_EXEMPT_OPENERS`'s
+> unasserted parent tuple, the column-anchored `#[cfg(test)]` detection, the unconfined
+> `stale_after_write` clear sites, `ALL_25_OPENER_KEYS`/`KEYMAP-SYNC` desync, the write-tail-prefix
+> citation drifts, the park-ordering substring assertion, and the T7 armed-dashboard clipping
+> residual) are **pruned as superseded**, not deferred.
+>
+> **What did NOT get pruned, and was promoted to the root registry** — all of it general-editor code
+> that predates Approach B and survives every branch outcome: `flush_tax_inputs_draft`'s silent
+> residue refusal, `handle_tax_inputs_key`'s `session.as_mut().unwrap()` panic path, the
+> pseudo-approve shared fixture's missing write assertion, the **`BTCTAX_PRICE_CACHE` cross-test
+> race** (8 unsynchronized sites), `corrupt_cli_config`'s wrong doc + bare-`INSERT` panic hazard, and
+> the Browse status band's measure/render newline mismatch. The cross-cutting lesson — stop
+> hand-citing self-referential line numbers in doc comments — was promoted too.
+
 ## Closed at ship
 
 - **[closed] DESIGN.md §4 / tax-r2-m-4 — pre-existing stale-derived `Acknowledgment`s.** Filed at the
@@ -28,7 +50,7 @@ Legend: **[open]** not started · **[closed]** burned down (kept for provenance)
 
 ## T7 residual (open)
 
-- **[open] Owner: next cycle.** An armed dashboard with ≥~6 declare candidates plus the real composed arm
+- **[pruned — superseded 2026-07-27, see root FOLLOWUPS.md G-2] Owner: next cycle.** An armed dashboard with ≥~6 declare candidates plus the real composed arm
   status still clips `[x] export` off the non-scrolling `Paragraph` at 80×24 (18 rows needed + 6-row
   notice > 22 available) — inherent CONTENT OVERFLOW, not the presence-driven over-reservation Task 7
   closed, so content-sizing alone cannot reach it; needs a pinned or scrolling export row. Pre-existing
@@ -50,7 +72,7 @@ Legend: **[open]** not started · **[closed]** burned down (kept for provenance)
   the banner is actually further down (drifted across Task 7's two fix rounds). Corrected to point at the
   banner's current location.
 - **[closed — fix wave Step 7]** `DESIGN.md:353` said "the 12 sites" where its own enumeration lists 15.
-- **[open] Owner: next cycle.** Three more self-citation drifts in the same class, NOT touched by Step 7
+- **[pruned — superseded 2026-07-27, see root FOLLOWUPS.md G-2] Owner: next cycle.** Three more self-citation drifts in the same class, NOT touched by Step 7
   (verified against HEAD `d816d23`): the three write-tail-prefix KATs' doc comments cite the wrong line
   for their own production prefix — `commit_tax_inputs`'s prefix is actually at `main.rs:1655` (comments
   say `:1598`), `confirm_park_to_profile`'s prefix is at `:1837` (comments say `:1780`), the
@@ -62,7 +84,7 @@ Legend: **[open]** not started · **[closed]** burned down (kept for provenance)
   hand-citing self-referential line numbers in doc comments for values that can drift (name the
   function/const instead where the citation isn't load-bearing to a specific line), or add a doc-lint
   that flags `` `:\d+` `` citations for staleness at merge time.
-- **[open] Owner: next cycle.** `draw_edit.rs`'s Browse status band MEASURES `Line::from(String)`
+- **[promoted — LIVE in root FOLLOWUPS.md G-1] Owner: next cycle.** `draw_edit.rs`'s Browse status band MEASURES `Line::from(String)`
   (`:334`) but RENDERS `Paragraph::new(String)` (`:418`) — `Line::from` is newline-blind while
   `Paragraph::new(String)` newline-splits into `Text`, so a `\n`-bearing status would measure 1 row but
   need 2+. Unreachable today (Task 7's reviewer checked all ~110 `status = Some(...)` sites; none embeds
@@ -70,7 +92,7 @@ Legend: **[open]** not started · **[closed]** burned down (kept for provenance)
   export line (that class is Task 7's own residual above). Fix by sharing one `Vec<Line>` between the
   measuring and rendering pass, mirroring how `draw_defensive_filing`'s own notice already does it
   (`draw_edit.rs:119-135` builds `notice_lines` once, used by both the measure and the render below it).
-- **[open] Owner: next cycle.** `flush_tax_inputs_draft`'s residue refusal (`main.rs:1264-1278`, guard at
+- **[promoted — LIVE in root FOLLOWUPS.md G-1] Owner: next cycle.** `flush_tax_inputs_draft`'s residue refusal (`main.rs:1264-1278`, guard at
   `:1265-1267`) returns `None` with no status set and without clearing `dirty`, so
   `handle_tax_inputs_key`'s `q`/`Esc` arms (`:1407-1434`) could swallow the keystroke forever under a
   latch whose OWN status message says "Quit the editor NOW" — the flow would stay open, showing no error,
@@ -78,12 +100,12 @@ Legend: **[open]** not started · **[closed]** burned down (kept for provenance)
   coexist with either save-forbidding latch in production — see guard (c)'s own doc) — which is exactly
   what the check exists to survive if that invariant is ever weakened. Also update the "Returns" contract
   doc (`main.rs:1240-1243`) to name this silent-refusal case explicitly.
-- **[open] Owner: next cycle.** `PSEUDO_ACTIVE_DASHBOARD_NOTICE`'s first remedy, "'P' from Browse"
+- **[pruned — superseded 2026-07-27, see root FOLLOWUPS.md G-2] Owner: next cycle.** `PSEUDO_ACTIVE_DASHBOARD_NOTICE`'s first remedy, "'P' from Browse"
   (`defensive_dashboard.rs:65-70`), dead-ends in the ARMED instance that is its primary producer — while
   armed, `open_pseudo_approve_flow`'s own combined-latch check (`main.rs:8293-8296`) refuses `P` outright.
   The chain still leads out (the stale refusal is itself actionable: quit and reopen), so this is a
   wording gap, not a dead end in practice, but the notice text should say so.
-- **[open] Owner: next cycle.** `corrupt_cli_config`'s doc (`main.rs:30998-31002`) is wrong on two
+- **[promoted — LIVE in root FOLLOWUPS.md G-1] Owner: next cycle.** `corrupt_cli_config`'s doc (`main.rs:30998-31002`) is wrong on two
   counts: (1) it implies the corrupted key (`pseudo_reconcile`) matters because the three write paths
   under test don't read it — but `read_config` rejects ANY recognized key with an unparseable value, so
   the key choice buys nothing; (2) it says the subsequent failure is in `session.config()`, but the
@@ -95,25 +117,25 @@ Legend: **[open]** not started · **[closed]** burned down (kept for provenance)
 
 ## Test-surface gaps (open)
 
-- **[open] Owner: next cycle.** Six success strings are asserted by no test anywhere in the suite; they
+- **[pruned — superseded 2026-07-27, see root FOLLOWUPS.md G-2] Owner: next cycle.** Six success strings are asserted by no test anywhere in the suite; they
   are provably byte-identical to what shipped (confirmed by literal diff during Task 4's review), but by
   diff, not by the suite — a future edit could silently change one with nothing going red.
-- **[open] Owner: next cycle.** The park-ordering guard's `!contains("entry screen")` assertion
+- **[pruned — superseded 2026-07-27, see root FOLLOWUPS.md G-2] Owner: next cycle.** The park-ordering guard's `!contains("entry screen")` assertion
   (`main.rs:31159`, inside `confirm_park_to_profile_after_write_runs_after_dirty_is_cleared`) is lethal
   only for TODAY's fixture/wording; it pins the absence of one substring rather than the composed status
   as a whole, so a future fact-2 reword could reintroduce the defect this KAT exists to catch while the
   substring-absence check keeps passing on the new wording.
-- **[open] Owner: next cycle.** `approve_all_pseudo_defaults_then_fail_reprojection` (`main.rs:31384`) is
+- **[promoted — LIVE in root FOLLOWUPS.md G-1] Owner: next cycle.** `approve_all_pseudo_defaults_then_fail_reprojection` (`main.rs:31384`) is
   a shared TEST FIXTURE (used by multiple KATs to reach "approved, then re-projection failed"), not
   itself a write-regression guard — nothing asserts, on its own, that the approval write actually landed
   before the induced failure. Each caller currently re-derives that assertion for its own purposes; worth
   a single shared assertion inside the fixture so a future caller can't skip it.
-- **[open] Owner: next cycle.** `handle_tax_inputs_key`'s dispatch can still panic via
+- **[promoted — LIVE in root FOLLOWUPS.md G-1] Owner: next cycle.** `handle_tax_inputs_key`'s dispatch can still panic via
   `session.as_mut().unwrap()` (`main.rs:1278`, inside `flush_tax_inputs_draft`) if `app.tax_inputs_form`
   is ever `Some` while `app.session` is `None` — a combination the one-flow/one-session invariant rules
   out today but that nothing at this call site itself defends against structurally (the same
   "convention, not construction" class this repo's `answered-ness invariant` memory names).
-- **[open] Owner: next cycle.** Task-4 triage item (8) (`.superpowers/sdd/IMPLEMENTATION_PLAN/progress.md`),
+- **[promoted — LIVE in root FOLLOWUPS.md G-1] Owner: next cycle.** Task-4 triage item (8) (`.superpowers/sdd/IMPLEMENTATION_PLAN/progress.md`),
   never registered here: commit `9796013` had added a doc note warning that pre-existing tests mutate the
   same process-global `BTCTAX_PRICE_CACHE` env var outside any lock (a cross-test-file race hazard);
   `8f84326` deleted that note wholesale with no FOLLOWUPS entry to replace it. The hazard itself is still
@@ -123,26 +145,26 @@ Legend: **[open]** not started · **[closed]** burned down (kept for provenance)
 
 ## Guard hardening (open, `next cycle` unless noted)
 
-- **[open]** Guard (b) direction 2 (the scanner that checks every opener calls the combined latch check)
+- **[pruned — superseded 2026-07-27, see root FOLLOWUPS.md G-2]** Guard (b) direction 2 (the scanner that checks every opener calls the combined latch check)
   is a FUNCTION-SCOPE presence test: `let _ = app.stale_or_residue_latch_status();` sitting anywhere in
   an opener's body would satisfy the scanner without the return value ever gating anything. The scanner
   (`main.rs`, the region building `main_src`/`editor_src` around `:17505-17613`) greps for the call
   syntax, not for control flow consuming its result.
-- **[open]** `NESTED_EXEMPT_OPENERS`'s (`main.rs:17443`) parent-surface tuple element (the second `&str`
+- **[pruned — superseded 2026-07-27, see root FOLLOWUPS.md G-2]** `NESTED_EXEMPT_OPENERS`'s (`main.rs:17443`) parent-surface tuple element (the second `&str`
   in each `(&str, &str)` pair) is never asserted anywhere — only the first element (the opener name) is
   matched (`main.rs:17566`). If the parent-surface names drift from the real nesting, nothing catches it.
-- **[open]** Both scanners (guard (a)'s dispatch-subset check and guard (b)'s latch-call check) cover
+- **[pruned — superseded 2026-07-27, see root FOLLOWUPS.md G-2]** Both scanners (guard (a)'s dispatch-subset check and guard (b)'s latch-call check) cover
   only `main.rs` + `editor.rs` (`main.rs:17505-17613`). A production `#[cfg(test)]` block that is
   INDENTED (rather than starting at column 0) would silently widen what `production_lines` (`main.rs:17191`)
   treats as production code, since the scanner's test-region detection is column-anchored.
-- **[open]** `stale_after_write` has exactly two `= None` assignment sites (`main.rs:931` inside
+- **[pruned — superseded 2026-07-27, see root FOLLOWUPS.md G-2]** `stale_after_write` has exactly two `= None` assignment sites (`main.rs:931` inside
   `apply_reprojection`'s `Ok` arm, `main.rs:4853` inside `execute_defensive_export`'s post-rebuild path)
   with nothing structurally confining the count to two — a third clear site added elsewhere (bypassing
   D-4's documented single-clear-per-path discipline) would not be flagged by any scanner.
   `ALL_25_OPENER_KEYS` (`main.rs:22955`) is similarly hand-maintained with no tie to the `KEYMAP-SYNC`
   region (`main.rs:415-483`) it is supposed to mirror — a future keymap change would silently desync the
   two.
-- **[open]** Note for whoever next touches guard (a): it fails **closed** on the `.as_mut()` dispatch
+- **[pruned — superseded 2026-07-27, see root FOLLOWUPS.md G-2]** Note for whoever next touches guard (a): it fails **closed** on the `.as_mut()` dispatch
   variant (i.e., an unhandled dispatch shape reds the guard rather than silently passing) — this is
   intentional and load-bearing; do not "simplify" `close_all_mutation_surfaces`'s scan or the guard's own
   matcher to make that red go away without checking why it's red first.

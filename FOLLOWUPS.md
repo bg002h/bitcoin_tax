@@ -112,6 +112,142 @@ TY2027 tables (IRS/SSA, fall 2026) · FmvMissing beyond the bundled price range 
 no real return entered yet) · Swan `Transaction ID` stability / `Total`-USD cost semantics · Coinbase
 internal-move default · store Windows world-readable CI assertion.
 
+**G — Approach-B (defensive filing): pending architecture decision + the surviving items.**
+See the dedicated section below — it supersedes the three per-cycle registries
+(`design/defensive-filing-wizard/`, `design/stale-snapshot-latch/`,
+`design/f8275-part-ii-overflow/FOLLOWUPS.md`), which are now historical except for the items
+restated there.
+
+---
+
+## ★ APPROACH-B ARCHITECTURE DECISION + POST-WIZARD RECONCILIATION (2026-07-27)
+
+### G-0 — THE OPEN DECISION (owner's call; nothing is being built until it is made)
+
+Approach B (declare a $0 tranche of undocumented BTC → promote it to a >$0 **floor** → mandatory
+Form 8275 disclosure) shipped its engine in v0.9.0 and a ratatui wizard in v0.10.0. The wizard's
+construction went badly enough to warrant a disclosure in `NOTICE`. Three branches now exist and
+**none is merged or discarded**:
+
+| Branch | What it is |
+|---|---|
+| `main` | v0.12.0 — engine **and** the full TUI wizard + the stale-snapshot latch subsystem |
+| `arch/engine-keep-wizard-cut` | engine kept, wizard chrome + latch deleted, `btctax defensive status` added; ≈ −8,835 lines, 2,407 tests green, **unpushed** |
+| `backout/pre-approach-b` | the v0.8.0 tree — before any of this existed |
+
+Analysis of record, both on `arch/engine-keep-wizard-cut`:
+`design/arch-engine-keep-wizard-cut/COMPARISON.md` (measured three-way comparison) and
+`design/arch-engine-keep-wizard-cut/UI_READD_SKETCH.md` (independent architect's sketch for
+re-adding a swappable UI). **Load-bearing finding, verified directly:** the wizard's state machines
+were *already* UI-agnostic — `declare_flow.rs` and `promote_flow.rs` contain zero ratatui/crossterm
+code (their only grep hits are comments saying so), and `defensive_dashboard.rs` has exactly one
+crossterm import. The 3,901 lines restore near-verbatim from git history. What was actually bad was
+the ~1,200 lines of wizard key dispatch in `main.rs` and the latch subsystem built to compensate.
+
+**The decision to make — two costed paths, both building on `arch/engine-keep-wizard-cut`:**
+
+- **(i) FULL SEAM** — carve a UI-free `btctax-edit` crate that generalizes `btctax-input-form`'s
+  proven pattern to the whole editor (`ActionId` where it has `FieldId`, a serde `Cmd` where it has
+  `Edit`, a `ViewModel` where it has `Pane`, with `btctax_input_form::Edit` embedded verbatim as one
+  `Cmd` variant so there is never a second field wire); add the missing read-only
+  `availability(ActionId) -> Ready{candidates} | Empty{note} | Refused{reason}` query; restore the
+  wizard behind it; prove it with a headless JSON driver that links no ratatui.
+  **≈ 8,000–12,200 new production lines + 6–10k test lines; 18–30 review-gated tasks; 2–5 weeks.**
+  Spread driven mainly by the `handle_*_key` → `FlowCmd` compression ratio (the softest number) and
+  whether `draw_edit.rs` re-points cheaply.
+- **(ii) STAGED (P1 + P2 + gen-protocol)** — do only the crate split, the availability query, and
+  the `SnapshotGen` commit protocol; restore the wizard's UI-free flow files behind that thinner
+  seam; **defer** the `Cmd`/`ViewModel` envelope until a second front end is actually committed.
+  **≈ 8–12 tasks.** Banks the three assets any web project certainly reuses. Cost: general-editor
+  flow *transitions* stay keypress-shaped, so the editor is swappable-for-defensive-filing but not
+  wholesale.
+
+**The question that picks between them:** is a web UI committed within roughly a year? If yes, (i);
+if it stays speculative, (ii) — the envelope built without a real second consumer risks being shaped
+wrong either way. The sketch's phase order is arranged so stopping after (ii) is a coherent landing
+point, not an abandonment.
+
+**Common to both, and the reason either is worth doing:** `SnapshotGen` pins every plan to the
+projection generation it was computed from and refuses to commit across a generation bump. That
+makes the v0.10.0 Critical — *a confirm tail computing a filed number from a projection older than
+the confirming keystroke* — **unrepresentable by type**, replacing the entire stale-snapshot latch
+subsystem and its four mechanized source-scanning guards with one comparison.
+
+**Owner ruling already recorded (2026-07-27):** amending several prior years at once is **not a real
+workflow**, so the composed multi-year export (`plan_export`/`apply_export`) is not to be designed
+for. It is dead code on `arch/engine-keep-wizard-cut` (zero callers from any shipped surface) and
+wizard-only on `main`; delete it on whichever branch survives.
+
+### G-1 — SURVIVING items (live on every branch; NOT pruned)
+
+These are in code that outlives all three outcomes — `btctax-core`, `btctax-forms`, `btctax-cli`
+(including its published API), and the general ledger editor. Restated here because the per-cycle
+registries they came from are now historical.
+
+**Engine / filing-adjacent:**
+- **tax-M-3 — displacement-caveat hole, and it is now WORSE than when filed.**
+  `btctax-core/src/defensive/mod.rs:659-688`: `WouldDisplaceIfPromoted` fires only when
+  `covered_sat == 0`; when `covered_sat > 0 && t.sat == covered_sat` neither it nor `OverCovered`
+  fires, yet a HIFO reorder across multi-year disposals still shifts gain between years — so that
+  row's per-year delta is a reorder artifact shown as an unqualified saving. **Escalation:** this was
+  filed as a wizard-dashboard item, but `arch/engine-keep-wizard-cut` added
+  `render_defensive_saving` (`btctax-cli/src/render.rs:4175`), which prints "would save an estimated
+  $X in federal tax" off the *same* `journey_view` advisories — so the new CLI surface inherits the
+  identical hole. Fix at the core: fire on `!promoted && displaces_documented_basis(..)`, suppressing
+  only where `OverCovered` already carries displacement copy.
+- **tax-M-4 (generalized) — a bare gain-Δ must never be printed without its displacement caveat,
+  *wherever* it is printed.** Originally scoped to `declare_flow.rs:293-307`; the standalone basis is
+  surface-independent and now binds `render_defensive_saving` too.
+- **arch M-3 — two public `render_consent` functions on `btctax-cli`'s published API**
+  (`cmd/promote.rs:186`, `chokepoint/mod.rs:438`). Published surface, unaffected by the UI decision.
+- **Era/straddle doc precision** (`btctax-core`): the straddle invariant's stated consequence is a
+  non-sequitur (`era.rs:25`); the arch-M-1 phrasing sweep is incomplete (`defensive_era.rs:74-76`,
+  `era.rs:151-155`); "~1,461 presses … alone" overstates (`era.rs:62-63`, `SPEC.md:247-249`).
+- **All seven `design/f8275-part-ii-overflow/FOLLOWUPS.md` items stay live** — they are entirely
+  `btctax-forms`/`btctax-cli` (per-item Part II numbering, a record-time length bound in
+  `plan_promote`, the inflated unbreakable-token row count, a fill-layer emptiness re-check, the
+  ~28-line/~3,700-char ceiling wanting documentation, `field_names()` delegation). No UI dependency.
+
+**General ledger editor (predates Approach B, serves every flow):**
+- `flush_tax_inputs_draft`'s residue refusal returns `None` with no status and without clearing
+  `dirty` (`main.rs:1264-1278`), so `q`/`Esc` can look like a dead key under a latch whose own
+  message says "Quit the editor NOW"; also update its "Returns" contract doc.
+- `handle_tax_inputs_key` can panic via `session.as_mut().unwrap()` (`main.rs:1278`) if
+  `tax_inputs_form` is `Some` while `session` is `None` — the "convention, not construction" class.
+- `approve_all_pseudo_defaults_then_fail_reprojection` (`main.rs:31384`) is a shared fixture that
+  never asserts, on its own, that the approval write landed before the induced failure.
+- **`BTCTAX_PRICE_CACHE` cross-test race** — 8 unsynchronized `std::env::set_var` sites
+  (`main.rs:17969-18284`); a warning note about this was deleted in `8f84326` with no replacement entry.
+- `corrupt_cli_config` (`main.rs:30998-31009`): doc wrong on two counts, and its bare `INSERT` will
+  panic if a future fixture pre-sets the key — needs `ON CONFLICT` or the sibling's `UPDATE` pattern.
+- Browse status band **measures** `Line::from(String)` (`draw_edit.rs:334`) but **renders**
+  `Paragraph::new(String)` (`:418`) — newline-blind vs newline-splitting. Unreachable today (no
+  status embeds `\n`); fix by sharing one `Vec<Line>` between the measure and render passes.
+
+### G-2 — PRUNED as superseded by the G-0 decision (~20 items, not lost — see the cycle registries)
+
+Two whole classes are struck because their surface is deleted on `arch/engine-keep-wizard-cut` **and**
+rewritten under either path in G-0. They are not defects being ignored; they are polish on code that
+is not going to survive in its current form:
+
+- **The stale-snapshot latch subsystem and its four mechanized guards** (~9 items in
+  `design/stale-snapshot-latch/FOLLOWUPS.md`): guard (b)'s function-scope presence test,
+  `NESTED_EXEMPT_OPENERS`'s unasserted parent tuple, the column-anchored `#[cfg(test)]` detection,
+  the unconfined `stale_after_write` clear sites, `ALL_25_OPENER_KEYS`/`KEYMAP-SYNC` desync, the
+  write-tail-prefix citation drifts, the park-ordering substring assertion, and the T7 armed-dashboard
+  clipping residual. **Superseded by `SnapshotGen`**, which removes the subsystem outright.
+- **Wizard TUI chrome** (~11 items in `design/defensive-filing-wizard/FOLLOWUPS.md`): Browse footer
+  `w`, flow-render scrolling, `Esc` at the PartII step, the ~230-char NOTICE clipping below 77
+  columns, dashboard-only render KATs, the "[optional, SUPPRESSED]" copy, Debug-format rows, the
+  Provenance screen's answer-before-asking wording, free-text date/sat entry, and plan-doc drift.
+  **Superseded by** the `Cmd`/`ViewModel` rewrite (path i) or the thin-seam restore (path ii); the
+  flow files come back from git history and get re-reviewed as new either way.
+
+One cross-cutting lesson is worth keeping out of that pile: **stop hand-citing self-referential line
+numbers in doc comments.** The drift entries above are the third recurrence; name the
+function/const instead where the citation is not load-bearing, or add a merge-time doc-lint that
+flags stale `` `:\d+` `` citations.
+
 ---
 
 ## ⚠★ SHIPPED BUG — Form 8949 uses pre-2025 boxes (C/F) for TY2025 digital assets (found 2026-07-20)
