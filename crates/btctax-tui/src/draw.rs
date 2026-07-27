@@ -106,14 +106,39 @@ fn draw_locked(frame: &mut Frame) {
 
 fn draw_viewer(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
+    // Approach-B experimental disclosure (`design/approach-b-experimental-notice`): a banner row
+    // whenever a live (non-voided) DeclareTranche/PromoteTranche is on file — mirrors EXACTLY the
+    // mechanism `btctax-tui-edit::draw_edit::draw_browse` uses for its PSEUDO-RECONCILE banner: a
+    // state-conditional `Constraint::Length(1)` row, with the content/footer index bookkeeping extended
+    // to account for it.
+    let show_experimental = app
+        .snapshot
+        .as_ref()
+        .map(|s| btctax_core::experimental::uses_approach_b(&s.events))
+        .unwrap_or(false);
+    let mut constraints = vec![Constraint::Length(3)]; // tab bar
+    if show_experimental {
+        constraints.push(Constraint::Length(1)); // experimental notice banner
+    }
+    constraints.push(Constraint::Min(0)); // content pane
+    constraints.push(Constraint::Length(1)); // footer keybindings
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3), // tab bar
-            Constraint::Min(0),    // content pane
-            Constraint::Length(1), // footer keybindings
-        ])
+        .constraints(constraints)
         .split(area);
+
+    // Index bookkeeping (mirrors `draw_browse`'s own scheme): the banner row, when present, shifts
+    // every index after it down by one.
+    let mut next_idx = 1usize;
+    let experimental_idx = if show_experimental {
+        next_idx += 1;
+        Some(next_idx - 1)
+    } else {
+        None
+    };
+    let content_idx = next_idx;
+    next_idx += 1;
+    let footer_idx = next_idx;
 
     // ── Tab bar ──────────────────────────────────────────────────────────────
     let tab_titles: Vec<&str> = Tab::ALL.iter().map(|t| t.title()).collect();
@@ -131,8 +156,24 @@ fn draw_viewer(frame: &mut Frame, app: &mut App) {
         );
     frame.render_widget(tabs_widget, chunks[0]);
 
+    // ── Experimental notice banner (informational — never reversed/blocking like PSEUDO-RECONCILE) ──
+    if let Some(idx) = experimental_idx {
+        let banner = Paragraph::new(format!(
+            " ⚠ {} — newer, AI-assisted, had shipped filing-affecting defects (now fixed). Verify \
+             every figure. See EXPERIMENTAL.txt on export. ",
+            btctax_core::experimental::NOTICE.title
+        ))
+        .alignment(Alignment::Center)
+        .style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        );
+        frame.render_widget(banner, chunks[idx]);
+    }
+
     // ── Content pane ─────────────────────────────────────────────────────────
-    let content_area = chunks[1];
+    let content_area = chunks[content_idx];
     match app.tab {
         Tab::Holdings => holdings::draw(frame, content_area, app),
         Tab::Disposals => disposals::draw(frame, content_area, app),
@@ -152,7 +193,7 @@ fn draw_viewer(frame: &mut Frame, app: &mut App) {
             .to_string()
     };
     let footer = Paragraph::new(footer_text).alignment(Alignment::Center);
-    frame.render_widget(footer, chunks[2]);
+    frame.render_widget(footer, chunks[footer_idx]);
 
     // ── Export confirmation modal overlay ─────────────────────────────────────
     if let Some(modal) = app.export_modal.as_ref() {

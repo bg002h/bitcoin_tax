@@ -958,6 +958,50 @@ mod tests {
         );
     }
 
+    /// Approach-B experimental disclosure (`design/approach-b-experimental-notice`): the TUI's own CSV
+    /// export ALSO writes `EXPERIMENTAL.txt` alongside the packet — self-gated on `uses_approach_b`, so
+    /// a promoted-tranche snapshot (Approach-B in use) gets it; a plain snapshot does not.
+    #[test]
+    fn experimental_notice_txt_rides_the_tui_csv_export_iff_approach_b_is_in_use() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let export_now = datetime!(2026-07-01 11:00:00 UTC);
+        let out_dir = export_dir_for(&vault, export_now);
+
+        let snap = promoted_snapshot("cash P2P purchase, no records; window bounded on-chain");
+        let modal = ExportConfirmState {
+            year: 2026,
+            out_dir: out_dir.clone(),
+            files: compute_files(&snap, 2026),
+            export_now,
+            attest: None,
+        };
+        do_export(&snap, &modal).expect("a clean promoted export must succeed");
+        assert!(
+            out_dir.join("EXPERIMENTAL.txt").exists(),
+            "EXPERIMENTAL.txt must ride the TUI's own export for an Approach-B snapshot"
+        );
+        let text = std::fs::read_to_string(out_dir.join("EXPERIMENTAL.txt")).unwrap();
+        assert!(text.contains("EXPERIMENTAL — DEFENSIVE FILING"));
+
+        // A plain (no tranche/promote) snapshot never gets the file.
+        let plain_snap = make_snapshot(LedgerState::default(), BTreeMap::new());
+        let export_now2 = datetime!(2026-07-01 12:00:00 UTC);
+        let out_dir2 = export_dir_for(&vault, export_now2);
+        let modal2 = ExportConfirmState {
+            year: 2026,
+            out_dir: out_dir2.clone(),
+            files: compute_files(&plain_snap, 2026),
+            export_now: export_now2,
+            attest: None,
+        };
+        do_export(&plain_snap, &modal2).expect("an unpromoted, no-tranche export must succeed");
+        assert!(
+            !out_dir2.join("EXPERIMENTAL.txt").exists(),
+            "a non-Approach-B snapshot must not get EXPERIMENTAL.txt"
+        );
+    }
+
     // ── KAT-E10 — Mechanized source gate ─────────────────────────────────────
 
     /// KAT-E10: mechanized source gate for the D5 forbidden-token table.

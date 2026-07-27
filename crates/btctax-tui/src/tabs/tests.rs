@@ -2387,3 +2387,163 @@ fn sorting_does_not_mutate_events_or_state() {
         "sorting must NOT mutate snapshot.state (display-only)"
     );
 }
+
+// ── Approach-B experimental notice banner (`design/approach-b-experimental-notice`) ────────────
+
+/// The first row index whose text contains `needle`, or `None` — lets a test assert ORDERING (the
+/// banner sits above the content, the footer sits at the bottom), not just presence.
+fn buffer_row_index_containing(buf: &ratatui::buffer::Buffer, needle: &str) -> Option<u16> {
+    let area = buf.area();
+    for y in 0..area.height {
+        let row: String = (0..area.width)
+            .map(|x| buf.cell((x, y)).map_or(" ", |c| c.symbol()))
+            .collect();
+        if row.contains(needle) {
+            return Some(y);
+        }
+    }
+    None
+}
+
+fn declare_tranche_event() -> btctax_core::LedgerEvent {
+    btctax_core::LedgerEvent {
+        id: EventId::decision(1),
+        utc_timestamp: time::macros::datetime!(2026-01-01 00:00 UTC),
+        original_tz: time::UtcOffset::UTC,
+        wallet: None,
+        payload: btctax_core::EventPayload::DeclareTranche(btctax_core::event::DeclareTranche {
+            sat: 1_000_000,
+            wallet: make_wallet(),
+            window_start: make_date(2018, 1, 1),
+            window_end: make_date(2018, 12, 31),
+        }),
+    }
+}
+
+/// A live (non-voided) DeclareTranche in `snap.events` ⇒ the viewer inserts the experimental notice
+/// banner row directly below the tab bar, and both the content pane and the footer still render BELOW
+/// it — the `draw_browse`-mirroring `Constraint::Length(1)` + index-bookkeeping mechanism actually
+/// shifts the layout, not just adds dead text.
+#[test]
+fn viewer_experimental_banner_appears_for_a_live_tranche_and_shifts_content_and_footer() {
+    let mut state = LedgerState::default();
+    state.lots.push(Lot {
+        lot_id: make_lot_id("l1"),
+        wallet: make_wallet(),
+        acquired_at: make_date(2024, 3, 1),
+        original_sat: 300,
+        remaining_sat: 300,
+        usd_basis: Decimal::from(900),
+        basis_source: BasisSource::ExchangeProvided,
+        dual_loss_basis: None,
+        donor_acquired_at: None,
+        basis_pending: false,
+        pseudo: false,
+    });
+    let mut snap = make_snapshot(state.clone());
+    snap.events = vec![declare_tranche_event()];
+    let mut app = App::new(PathBuf::new());
+    app.screen = Screen::Viewer;
+    app.tab = crate::app::Tab::Holdings;
+    app.snapshot = Some(snap);
+
+    let buf = render_viewer(&mut app);
+    let banner_row = buffer_row_index_containing(&buf, "EXPERIMENTAL — DEFENSIVE FILING")
+        .expect("the banner must render for a live-tranche snapshot");
+    assert_eq!(
+        banner_row, 3,
+        "the banner sits directly below the 3-row tab bar (row 0..=2)"
+    );
+
+    let content_row_with_banner = buffer_row_index_containing(&buf, "Wallet")
+        .expect("the Holdings content pane must still render below the banner");
+    assert!(
+        content_row_with_banner > banner_row,
+        "content (row {content_row_with_banner}) must render BELOW the banner (row {banner_row})"
+    );
+
+    // Footer needle: the FRONT of the keybindings hint — the full string is 133 chars, wider than this
+    // 120-col TestBackend, so its tail (e.g. "q/Esc: quit") is truncated; the front always survives.
+    let footer_row = buffer_row_index_containing(&buf, "Tab/Shift-Tab: tab")
+        .expect("the footer keybindings must still render");
+    assert_eq!(
+        footer_row,
+        buf.area().height - 1,
+        "the footer stays pinned to the LAST row even with the banner present"
+    );
+
+    // Relative shift: the SAME snapshot, minus the tranche event, must render its content ONE row
+    // higher — proving the banner row actually shifts the layout, not merely draws extra dead text.
+    let mut app_without = make_app(state, 2024);
+    app_without.tab = crate::app::Tab::Holdings;
+    let buf_without = render_viewer(&mut app_without);
+    let content_row_without_banner = buffer_row_index_containing(&buf_without, "Wallet")
+        .expect("Holdings content must render without the banner too");
+    assert_eq!(
+        content_row_with_banner,
+        content_row_without_banner + 1,
+        "the banner row shifts the content pane down by EXACTLY one row"
+    );
+}
+
+/// A snapshot with NO tranche/promote activity at all never shows the banner.
+#[test]
+fn viewer_experimental_banner_absent_without_approach_b() {
+    let mut state = LedgerState::default();
+    state.lots.push(Lot {
+        lot_id: make_lot_id("l1"),
+        wallet: make_wallet(),
+        acquired_at: make_date(2024, 3, 1),
+        original_sat: 300,
+        remaining_sat: 300,
+        usd_basis: Decimal::from(900),
+        basis_source: BasisSource::ExchangeProvided,
+        dual_loss_basis: None,
+        donor_acquired_at: None,
+        basis_pending: false,
+        pseudo: false,
+    });
+    let mut app = make_app(state, 2024);
+    app.tab = crate::app::Tab::Holdings;
+
+    let buf = render_viewer(&mut app);
+    assert!(
+        buffer_row_index_containing(&buf, "EXPERIMENTAL — DEFENSIVE FILING").is_none(),
+        "no banner without a live tranche/promote"
+    );
+    assert!(
+        buffer_row_index_containing(&buf, "Wallet").is_some(),
+        "Holdings content must still render"
+    );
+}
+
+/// A VOIDED-only tranche (never promoted) is not Approach-B in use — no banner. The load-bearing
+/// "don't show it to someone who voided everything" case, at the TUI layer.
+#[test]
+fn viewer_experimental_banner_absent_for_a_voided_only_tranche() {
+    let mut snap = make_snapshot(LedgerState::default());
+    let tranche_id = declare_tranche_event().id;
+    snap.events = vec![
+        declare_tranche_event(),
+        btctax_core::LedgerEvent {
+            id: EventId::decision(2),
+            utc_timestamp: time::macros::datetime!(2026-01-02 00:00 UTC),
+            original_tz: time::UtcOffset::UTC,
+            wallet: None,
+            payload: btctax_core::EventPayload::VoidDecisionEvent(
+                btctax_core::event::VoidDecisionEvent {
+                    target_event_id: tranche_id,
+                },
+            ),
+        },
+    ];
+    let mut app = App::new(PathBuf::new());
+    app.screen = Screen::Viewer;
+    app.snapshot = Some(snap);
+
+    let buf = render_viewer(&mut app);
+    assert!(
+        buffer_row_index_containing(&buf, "EXPERIMENTAL — DEFENSIVE FILING").is_none(),
+        "a voided-only tranche must not trigger the banner"
+    );
+}
