@@ -747,8 +747,9 @@ impl EditorApp {
     /// latch means an un-revertable residue is live in memory, so ANY `Session::save` — including a
     /// draft flush — would persist it under a status promising the vault is unchanged. A future stale-path
     /// caller (D-7) can pass TRUE once memory == disk there (the persist already succeeded). `may_save =
-    /// true` would be fail-safe, not an active flush: `handle_key:377` dispatches `tax_inputs_form` first,
-    /// so no other tail can run with a live dirty form.
+    /// true` would be fail-safe, not an active flush: `handle_key:377`'s `tax_inputs_form` dispatch sits
+    /// BEFORE the screen dispatch at `:389` that hosts every opener, so no other mutating surface can be
+    /// opened while a tax-inputs form is live — a live dirty form can only ever be THIS caller's own.
     fn close_all_mutation_surfaces(&mut self, may_save: bool) {
         if may_save {
             flush_tax_inputs_draft(self);
@@ -8649,9 +8650,12 @@ fn handle_bulk_income_preview_key(app: &mut EditorApp, key: KeyEvent) {
 /// ★ D-6 chain A fix: refuses first if the stale/residue latch is armed. `close_all_mutation_surfaces`
 /// used to omit `bulk_income_flow`, so a `ResidueLive` from THIS modal left the flow alive; Browse's key
 /// dispatch would then route back into `handle_bulk_income_flow_key` and Enter would re-open this modal
-/// with no latch check, letting the filer save again under a banner promising no save could occur. The
-/// surviving-flow half of that bug is fixed in `close_all_mutation_surfaces`; this guard is the second,
-/// independent half — belt-and-suspenders against any other path that could reach this opener.
+/// with no latch check, letting the filer save again under a banner promising no save could occur. That
+/// surviving-flow half is fixed in `close_all_mutation_surfaces` — but this guard is NOT a redundant
+/// backstop for it: `close_all_mutation_surfaces` is called from exactly one place, `on_persist_error`'s
+/// `ResidueLive` arm (the `rollback_failed` latch). Nothing closes `bulk_income_flow` when
+/// `stale_after_write` is armed instead, so a flow already open before a stale arming survives with no
+/// other guard between it and a save — THIS check is that guard, load-bearing for the stale half.
 fn open_bulk_income_modal(app: &mut EditorApp) {
     if let Some(s) = app.stale_or_residue_latch_status() {
         app.status = Some(s);
@@ -21591,6 +21595,60 @@ mod tests {
         assert!(
             s.starts_with("CRITICAL"),
             "the refusal must name the reason: {s}"
+        );
+    }
+
+    /// [Fix round 1/5, Important 1] `close_all_mutation_surfaces(may_save)`'s `false` at the
+    /// `on_persist_error` `ResidueLive` call site (`main.rs:738`) is the single most safety-critical bit
+    /// this task adds: it is what stops a debounced tax-inputs draft flush from reaching `Vault::save`
+    /// while an un-revertable residue is live in memory. Neither
+    /// `kat_on_persist_error_residue_live_arms_latch` nor
+    /// `residue_latch_cannot_be_re_entered_through_the_surviving_bulk_income_flow` covers the flip —
+    /// both build `EditorApp::new(PathBuf::from("/nonexistent"))`, so `tax_inputs_form` is always `None`
+    /// and `flush_tax_inputs_draft`'s first `let…else` early-returns regardless of `may_save`. This KAT
+    /// is session-backed with a DIRTY, materialized `tax_inputs_form` so the flush is live if `may_save`
+    /// is ever mis-threaded to `true`.
+    ///
+    /// Mutation: changed `main.rs:738` from `self.close_all_mutation_surfaces(false)` to
+    /// `self.close_all_mutation_surfaces(true)` and re-ran
+    /// `cargo nextest run -p btctax-tui-edit residue_live_may_save_false_prevents_dirty_tax_inputs_draft_from_reaching_disk`
+    /// — RED: a `Draft` row for 2024 existed on disk after `on_persist_error`, when it must not (the
+    /// residue latch means NOTHING may reach `Vault::save`, including a debounced draft flush). Restored
+    /// the line via a `cp` backup (never `git checkout --`) and re-ran — GREEN.
+    #[test]
+    fn residue_live_may_save_false_prevents_dirty_tax_inputs_draft_from_reaching_disk() {
+        use btctax_core::tax::types::FilingStatus;
+        let (mut app, dir) = unlocked_app_on_empty_vault(2024);
+        let vault = dir.path().join("vault.pgp");
+        let pp = Passphrase::new("empty-vault-pass".into());
+
+        handle_key(&mut app, press(KeyCode::Char('T'))); // open the tax-inputs flow
+        handle_key(&mut app, press(KeyCode::Char(' '))); // cycle FilingStatus → Single (materializes)
+        let form = app.tax_inputs_form.as_ref().unwrap();
+        assert!(form.dirty, "the fixture must start dirty for this KAT to mean anything");
+        assert_eq!(
+            form.working.as_ref().unwrap().filing_status,
+            FilingStatus::Single,
+            "a materialized, distinctive working copy — never a None NI-2 skip"
+        );
+
+        app.on_persist_error(edit::persist::PersistError::ResidueLive(
+            btctax_cli::CliError::Usage("disk".into()),
+        ));
+        assert!(app.rollback_failed, "the latch must arm");
+        assert!(
+            app.tax_inputs_form.is_none(),
+            "chain A: the flow must not survive the latch"
+        );
+
+        // Drop the app (releases the exclusive VaultLock) BEFORE reopening a fresh Session to read back.
+        drop(app);
+        let sess = btctax_cli::Session::open(&vault, &pp).unwrap();
+        assert!(
+            !btctax_cli::input_form_store::draft_exists(sess.conn(), 2024).unwrap(),
+            "may_save=false must prevent the dirty draft from reaching disk while the residue latch \
+             is armed — a save here would persist unrevertable residue under a status reading \
+             \"the vault on disk is unchanged\""
         );
     }
 
