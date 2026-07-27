@@ -7082,7 +7082,7 @@ fn handle_attest_typed_word_key(app: &mut EditorApp, key: KeyEvent) {
     match save_result {
         Ok((_void_id, attest_id)) => {
             app.after_write(
-                None,
+                Some("the safe-harbor attest write landed — ".to_string()),
                 |snap| derive_attest_status(snap, &attest_id),
             );
         }
@@ -29576,7 +29576,6 @@ mod tests {
     /// comma), so the NEXT `build_snapshot` call fails with `AdapterError::PriceDataset` → `CliError`.
     /// Call this AFTER any setup that itself needs a working (or absent) cache, so only the write
     /// tail under test sees the failure.
-    #[cfg(unix)]
     fn corrupt_price_cache(dir: &std::path::Path) {
         let cache_path = dir.join("corrupt-price-cache.csv");
         std::fs::write(&cache_path, b"not a csv line at all\n").unwrap();
@@ -29586,7 +29585,6 @@ mod tests {
     /// The commit-tail prefix (`:1590`), proven against a REAL re-projection failure. Mutation-kills
     /// both a stripped trailing space AND a `None` swapped in for `Some(prefix)`: either mutation
     /// moves where `"the write reached disk"` starts, which the exact-position assertion pins.
-    #[cfg(unix)]
     #[test]
     fn commit_tax_inputs_prefix_survives_a_genuine_reprojection_failure() {
         let (mut app, dir) = vault_with_return_inputs_draft();
@@ -29610,7 +29608,6 @@ mod tests {
 
     /// The park-tail prefix (`:1777`), proven against a REAL re-projection failure — same shape as
     /// the commit KAT above, mutation-killing a stripped trailing space or a `None` swap.
-    #[cfg(unix)]
     #[test]
     fn confirm_park_to_profile_prefix_survives_a_genuine_reprojection_failure() {
         use btctax_core::tax::types::FilingStatus;
@@ -29641,7 +29638,6 @@ mod tests {
     /// shape again. This is also the ONE intended user-visible wording change in the whole task (the
     /// shipped "Attested but…" claimed an effect `derive_attest_status` exists to deny once
     /// re-projection fails); nothing previously pinned that the reworded prefix is what actually ships.
-    #[cfg(unix)]
     #[test]
     fn safe_harbor_attest_prefix_survives_a_genuine_reprojection_failure() {
         let (mut app, dir) = vault_with_safe_harbor_allocation();
@@ -29679,7 +29675,6 @@ mod tests {
     /// to the pre-Task-4 shape thinking it is dead code. If hoisted, `any_mutation_surface_open`'s
     /// pre-close survey (inside `arm_stale`, reached because `build_snapshot` genuinely fails here
     /// too) would see the still-`true` `dirty` flag and fire fact 2 — this assertion would go RED.
-    #[cfg(unix)]
     #[test]
     fn confirm_park_to_profile_after_write_runs_after_dirty_is_cleared() {
         use btctax_core::tax::types::FilingStatus;
