@@ -213,6 +213,30 @@ fn declare_tranche_notice_reaches_stderr_not_stdout() {
     );
 }
 
+/// A command with NO relationship to Approach-B at all (`report`, on a completely fresh, empty vault —
+/// no import, no tranche, nothing) never emits the notice on either stream. The notice's call sites are
+/// a closed, hand-enumerated set (`declare-tranche`, `promote-tranche`, `export-snapshot`,
+/// `export-irs-pdf`); `report` is not one of them, so this pins that the biconditional's "silent
+/// elsewhere" half actually holds for a real, unrelated command driven through the real binary — not
+/// merely "no test happens to call `NOTICE` here".
+#[test]
+fn an_unrelated_command_on_a_fresh_vault_never_emits_the_notice() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+
+    let (code, stdout, stderr) = run_btctax(&vault, &["report"]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert!(
+        !stderr.contains(NOTICE_MARK),
+        "an unrelated command must never emit the notice on stderr: {stderr:?}"
+    );
+    assert!(
+        !stdout.contains(NOTICE_MARK),
+        "an unrelated command must never emit the notice on stdout: {stdout:?}"
+    );
+}
+
 /// A REFUSED declare (non-positive amount) never emits the notice — the eprintln sits after the write
 /// succeeds, mirroring the phantom-wallet warning's own "silent on refusal" contract.
 #[test]
