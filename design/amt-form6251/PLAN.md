@@ -180,8 +180,15 @@ away a section instead of transcribing it.*
 
 **Tier 1 — the form**
 `btctax-core/src/tax/form6251.rs` (new; §2) · `tax/amt.rs` (screen kept as a fast path; **gains the MFS
-kicker**) · `tax/tables.rs` (`AmtParams` += MFS kicker start/max; += the 26%/28% **rates**, since §6's
-no-literal-constant rule otherwise reds against `amt.rs:111,123`) · `tax/return_1040.rs`
+kicker**) · `tax/tables.rs` (`AmtParams` += MFS kicker start/max; += the **25% §55(d)(3) phase-out rate**
+and the 26%/28% §55(b)(1) rates — ★ final pass: `amt.rs:111` is the **0.25**, `:123` the 0.26, and 28%
+arrives only with `form6251.rs`; the earlier text mis-cited both as 26/28 and would have left
+`dec!(0.25)` outside `AmtParams` against §6) · **★ `btctax-adapters/src/tax_tables.rs:141` — THE SOLE
+PRODUCTION `AmtParams` LITERAL**, where the real TY2024 MFS-kicker dollars ($875,950 / $1,142,550) are
+typed under its `// §55(d) AMT amounts (Rev. Proc. 2023-34 §2.11)` convention. Adding fields **E0063s all
+nine literals** (this one plus `btctax-core`'s `testonly.rs:74`, `advisories.rs:430`, `qbi.rs:326`,
+`amt.rs:134`, `return_refuse.rs:835`, `return_1040.rs:1575`, `tables.rs`×2) — eight are fixtures where
+any value compiles green; **only `tax_tables.rs` reaches a filed return** · `tax/return_1040.rs`
 (**`assemble_absolute` computes and stores `ar.amt`; `screen_absolute` only reads it** — it takes `ar`
 immutably, r2 Minor).
 
@@ -278,6 +285,11 @@ building it.
 
 ### T1 — transcribe the form (BLOCKING)
 
+- [ ] ★ final pass — **sources and the failure branch.**
+      `https://www.irs.gov/pub/irs-prior/f6251--2024.pdf` and `i6251--2024.pdf` (the repo's established
+      `irs-prior` convention). Stash the blank at `crates/btctax-forms/forms/2024/f6251.pdf` for T6.
+      **If either cannot be fetched, STOP and escalate — do not transcribe from memory.** §0 forbids
+      exactly that, and nothing else in this plan told the builder to stop rather than paraphrase.
 - [ ] From `f6251--2024.pdf` + `i6251--2024.pdf`, write `PART_III.md`: **every** line 1–40, its verbatim
       instruction text, and for Part III whether each input is AMT-side or regular-side. Quote lines
       20/27 *"(as figured for the regular tax)"* against line 13 *"(as refigured for the AMT)"*.
@@ -311,6 +323,9 @@ building it.
       ★ narrow re-check: **guard (ii) moves to T3** (it must live in `coverage.rs`, see §6) and the
       **rounding-order KAT moves to T7** (§2 re-scoped it to the printed layer, and nothing prints a
       6251 in Tier 1).
+- [ ] ★ final pass — **extend the bundled-figure KAT at `tax_tables.rs:754-761`** with both MFS-kicker
+      boundaries. The `amt.rs`/`form6251.rs` KATs pin a **test fixture**; this one pins the number that
+      actually reaches a filed return. Without it the two new statutory figures ship **unpinned**.
 - [ ] **Mutations:** delete the line-2b subtraction ⇒ the V7 KAT reds. Delete the MFS kicker ⇒ the V8 KAT
       reds.
 
@@ -324,6 +339,14 @@ building it.
       refuse** branch.
 - [ ] Register each in `classifier.rs`; **mutation: drop the registration ⇒ the unanswered-⇒-refuse KAT
       must red.** Update `spec/mod.rs`'s `decl_count`, `coverage.rs`, `testonly.rs`, `attribute.rs`.
+- [ ] ★ final pass — **§6 guard (ii), its own bullet** (caught "gestured at" by r3 I-3 in T2, and again
+      here after the fold moved the ownership language to T3 but left the actionable bullet behind): in
+      `btctax-input-form/src/spec/coverage.rs`, beside
+      `every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt` (`:154`), a KAT asserting no
+      `leaf_map(&maximal_fixture())` key matches the blocklist of Part I lines 2c–2t and 3 — **excluding
+      2g** (guard (i), T2) **and 2k and 3** (§3's declarations). Absent-`Option`/empty-`Vec` caveat in its
+      doc comment. **Not** the `coverage.rs` edit in the registration bullet above; both touch the file
+      for different reasons.
 - [ ] **★ `smoke.rs` (r3 I-4 — the earlier "retarget" instruction is impossible).** No retarget target
       can exist *by construction*: `gen_goldens.py:259`'s `if amt or credits` rejects any household with
       `c09600 != 0` and its comment says the substance check "applies to EVERYONE (anchors included)";
@@ -420,7 +443,7 @@ of $307,200 = $300,000 W-2 box 2 + $7,200 mandatory Additional-Medicare withhold
 | Risk | Early warning | Mitigation |
 |---|---|---|
 | a line silently absent | transcription gate | §6's primary gate: every line present, doc text matches |
-| MFS kicker omitted ⇒ **understates** | V8 KAT absent | T2 pins both boundaries in `amt.rs` **and** `form6251.rs` |
+| MFS kicker omitted ⇒ **understates** | V8 KAT absent | T2 pins both boundaries in `amt.rs` and `form6251.rs` **and — ★ final pass — in `tax_tables.rs:754-761`, the only one pinning what gets FILED**; the other two pin fixtures |
 | an adverse declaration answer computes | V-adverse KATs absent | §3's ternary; T3 KAT per declaration |
 | attach test loosened to `AMT > 0` | — | T3's V9 mutation |
 | line 2b dropped | — | T2's V7 mutation |
