@@ -63,3 +63,26 @@ equivalence comments that were simply wrong.
   with no logic.
 
 An audit of the whole constellation against this rule is open: `FOLLOWUPS.md` §G-5.
+
+## Tests for conformance, reviews for judgment
+
+**Do not review a document to check whether it faithfully describes a form. Write the test.** The form
+is a specification you can execute against — encode it, and let the compiler and the suite find the
+gaps permanently, on every future change. Prose review finds a defect once; a test finds it forever.
+
+- **Conformance ⇒ test.** "Is every form line present?" "Does each doc comment match the instruction
+  text?" "Does line 10 subtract Schedule 3 line 1?" are assertions, not opinions.
+- **Let the compiler review.** Adding a field to a struct with N literals `E0063`s all N; adding a
+  `RefuseReason` variant reds an exhaustive cross-crate match. That blast radius is free and exact.
+  Prefer designs in which an omission does not compile.
+- **A guarantee without a test that reds when it is removed does not exist.** Mutation-verify.
+- **Judgment ⇒ review, kept scarce.** Worth paying for: adjudicating an ambiguous instruction against
+  the primary source; a design decision with an adverse branch that a *passing* test would hide; a
+  domain fact that would make a green test meaningless. One round, sharp brief, primary sources, build.
+- **Stop reviewing a document once findings become "section X disagrees with section Y."** That is the
+  signal the artifact has stopped being where the risk lives. Go execute it.
+
+This does **not** relax `STANDARD_WORKFLOW.md`'s gate — it says match the instrument to the question.
+Evidence (the 2026-07-27/28 AMT plan): five review rounds went 5C/12I → 2C/8I → 0C/4I → 0C/4I → 0C/2I,
+rounds 3–5 finding mostly "edited §X, forgot §Y" — while the single highest-severity defect, a deleted
+Form 6251 line-10 definition, was found in seconds by opening the PDF that all five rounds discussed.
