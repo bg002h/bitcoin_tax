@@ -1,20 +1,36 @@
 //! Full-return v1 **AMT screen** (Phase 4 / SPEC §4.11): the 2024 "Worksheet To See if You Should Fill
 //! in Form 6251 — Schedule 2, Line 2", implemented as a **refuse-trigger**. v1 does not compute Form 6251;
 //! when the worksheet concludes the taxpayer must fill it in, the return is REFUSED (fail-closed). When the
-//! worksheet clears the taxpayer, Schedule 2 line 2 (AMT) is $0 — a sound conclusion, because the worksheet
-//! deliberately OVER-estimates AMTI (it adds back every itemized deduction), so clearing it means no AMT.
+//! worksheet clears the taxpayer, Schedule 2 line 2 (AMT) is $0 — see the soundness argument below.
 //!
-//! **The worksheet reduces to a closed form.** Line 3 = AGI − QBI in BOTH the itemize and the standard
-//! branch: itemizing, line 3 = taxable income (L15) + Schedule A line 7 (= L12) = (AGI − L12 − L13) + L12 =
-//! AGI − L13; not itemizing, line 3 = AGI − L13 directly. So no std-vs-itemized branch is needed here.
+//! **Worksheet line 2 is the two §56(b)(1) add-backs, and nothing else.** It reads: *"Enter the amount from
+//! Schedule A (Form 1040), line 7, or your standard deduction from Form 1040 or 1040-SR, line 12."*
+//! Schedule A **line 7** is `5e + 6` — the SALT total after the §164(b)(6) cap, plus other taxes — i.e.
+//! **taxes paid**, disallowed for AMT by §56(b)(1)(A)(ii). It is NOT the itemized total (that is Schedule A
+//! **line 17**, which is what flows to 1040 L12). The standard-deduction branch adds back the standard
+//! deduction because §56(b)(1)(E) disallows it outright. Every other Schedule-A line — mortgage interest,
+//! charitable, medical — is AMT-**allowed** and is never added back.
 //!
-//! **Caveat (Fable r1 M2): the closed form is exact except when L15 is floored to $0 for a Schedule-A
-//! filer** (itemized + QBI > AGI — huge mortgage/medical). There the verbatim worksheet line 3 =
-//! `0 + Schedule A line 7` > `AGI − QBI`, so the worksheet would refuse a hair sooner than this closed
-//! form. That is harmless: this closed form is still **conservative against the true Form 6251** (AGI − QBI
-//! ≥ true AMTI for every in-scope input, since the non-SALT Schedule-A lines — mortgage/charitable/medical
-//! — are all AMT-*allowed*, so adding them back over-states AMTI), so no AMT understatement is reachable in
-//! the floored case; only the (already very rare) refuse boundary shifts by the eaten-into-zero slice.
+//! **★ 2026-07-27 FIX (`fix/amt-screen-line2`).** This module previously reduced the worksheet to the
+//! closed form `line 3 = AGI − QBI` in BOTH branches, on the stated premise that "Schedule A line 7 (= L12)".
+//! That premise conflated Schedule A line 7 with line 17. The closed form is correct for a STANDARD-deduction
+//! filer (`L15 + std = AGI − QBI`) but wrong for an ITEMIZER, where it silently added back mortgage interest,
+//! charitable gifts and medical expenses on top of taxes — inflating worksheet line 3 by the filer's entire
+//! non-tax itemized deduction. It never understated tax (the error is fail-closed: too MANY refusals), but it
+//! manufactured false refusals for ordinary itemizers. Reachable example, now pinned as a KAT below: MFJ, AGI
+//! $300,000, $80,000 itemized of which $10,000 SALT → the true worksheet clears (26% × $96,700 = $25,142 ≤
+//! $38,885 regular tax) while the closed form refused (26% × $166,700 = $43,342 > $38,885). The verbatim
+//! lines 1-3 are now evaluated instead; `line1` is 1040 L15, so its floor-at-$0 is inherited for free and the
+//! old "L15 floored to $0" caveat is gone with the closed form that needed it.
+//!
+//! **Soundness of a CLEAR (why Schedule 2 line 2 = $0 is safe).** Within v1's accepted inputs, worksheet
+//! line 3 is not an over-estimate of AMTI — it is AMTI **exactly**: every Form 6251 adjustment other than
+//! the taxes/standard-deduction add-back is either refused upstream (PAB interest) or is an input v1 never
+//! captures (ISO, §1202, §4952, depreciation, NOL, Form 8801, K-1 adjustments) — see "the worksheet's
+//! Exception" below — and the §199A deduction is allowed for AMT by §199A(f)(2), so subtracting it is right.
+//! The line-12 test is then a valid sufficient condition: in that branch `line11 ≤` the 26/28 breakpoint, so
+//! `26% × line11` IS the tentative minimum tax before §55(b)(3), and preserving the §1(h) rate on any net
+//! capital gain can only LOWER it. So `26% × line11 ≤ regular tax` ⇒ `TMT ≤ regular tax` ⇒ no AMT.
 //!
 //! **The worksheet's "Exception"** (2024 i1040gi p.97 — items that force Form 6251 directly: §4952
 //! investment interest, accelerated depreciation, PAB tax-exempt interest, ISO stock, §1202 exclusion,
@@ -34,26 +50,51 @@ use crate::tax::tables::AmtParams;
 use crate::tax::types::FilingStatus;
 use rust_decimal_macros::dec;
 
+/// Worksheet **line 2** — *"Enter the amount from Schedule A (Form 1040), line 7, or your standard deduction
+/// from Form 1040 or 1040-SR, line 12."* The two §56(b)(1) add-backs and nothing else.
+///
+/// - `schedule_a_line7` is Schedule A `5e + 6` — the CAPPED SALT total plus other taxes (v1 does not model
+///   line 6, so callers pass `salt_5e`). **Never pass the itemized total** (Schedule A line 17): mortgage
+///   interest, charitable gifts and medical expenses are AMT-allowed and must not be added back. Passing
+///   line 17 here is the exact defect this helper exists to prevent — see the module header.
+/// - When the standard deduction was taken, §56(b)(1)(E) disallows it entirely, so the whole of it is the
+///   add-back.
+pub fn amt_worksheet_line2(
+    deduction_is_itemized: bool,
+    standard_deduction: Usd,
+    schedule_a_line7: Usd,
+) -> Usd {
+    if deduction_is_itemized {
+        schedule_a_line7
+    } else {
+        standard_deduction
+    }
+}
+
 /// Run the 2024 AMT worksheet (SPEC §4.11). Returns `true` when the worksheet says **fill in Form 6251**
 /// (→ refuse in v1), `false` when it clears the taxpayer (Schedule 2 line 2 = 0). All comparisons are the
 /// worksheet's strict "more than" (`>`).
 ///
-/// - `agi` = 1040 L11; `qbi_deduction` = 1040 L13 (worksheet line 3 = AGI − QBI, both branches).
+/// - `taxable_income_l15` = worksheet line 1 = 1040 L15 (already floored at $0 by the 1040 itself, which is
+///   exactly what the worksheet's "If zero or less, enter -0-" asks for).
+/// - `deduction_add_back_l2` = worksheet line 2 — build it with [`amt_worksheet_line2`], NEVER by passing
+///   the itemized total. See this module's header: it is Schedule A line **7** (taxes), not line **17**.
 /// - `state_refund_and_8z` = Schedule 1 lines 1 + 8z (worksheet line 4, subtracted — a state refund is not
 ///   AMT income). v1 has no Sch 1 L8z input, so this is just the taxable state refund.
 /// - `regular_tax_l16` = 1040 L16; `sch2_l1z` = Schedule 2 line 1z (worksheet line 13 = L16 + L1z; L1z is
 ///   the excess-APTC total, 0 in v1 — no input).
 pub fn amt_should_file_6251(
     status: FilingStatus,
-    agi: Usd,
-    qbi_deduction: Usd,
+    taxable_income_l15: Usd,
+    deduction_add_back_l2: Usd,
     state_refund_and_8z: Usd,
     regular_tax_l16: Usd,
     sch2_l1z: Usd,
     amt: &AmtParams,
 ) -> bool {
-    // Lines 3 & 5 — AGI − QBI, then less any state refund (worksheet line 4).
-    let line5 = agi - qbi_deduction - state_refund_and_8z;
+    // Lines 1-3 — taxable income plus the §56(b)(1) add-back; then line 5 = less any state refund (line 4).
+    let line3 = taxable_income_l15 + deduction_add_back_l2;
+    let line5 = line3 - state_refund_and_8z;
 
     // Line 6/7 — the §55(d)(1) exemption. Line 5 at/below it ⇒ STOP, no AMT.
     let exemption = amt.exemption(status);
@@ -99,6 +140,82 @@ mod tests {
             breakpoint_28pct: dec!(232600),
             breakpoint_28pct_mfs: dec!(116300),
         }
+    }
+
+    // NOTE on the cases below that pass a bare figure as arg 2 with `Usd::ZERO` as arg 3: since the
+    // 2026-07-27 fix those arguments are (worksheet line 1 = 1040 L15) and (worksheet line 2 = the
+    // §56(b)(1) add-back), not (AGI, QBI). Passing the whole figure as line 1 with a zero add-back yields
+    // the SAME worksheet line 3, so each case still exercises exactly the line-5 value its comment names.
+
+    /// ★ THE REGRESSION KAT for the 2026-07-27 line-7-vs-line-17 fix. An ordinary MFJ itemizer whom the
+    /// real worksheet CLEARS, and whom the old closed form (`line 3 = AGI − QBI`) falsely refused.
+    ///
+    /// MFJ, AGI $300,000, $80,000 itemized of which only $10,000 is SALT (the §164(b)(6) cap) — the other
+    /// $70,000 is mortgage interest and charitable gifts, both AMT-**allowed**. Taxable income $220,000;
+    /// regular tax $38,885.
+    ///   CORRECT: line 1 = 220,000 + line 2 = 10,000 → line 3 = 230,000; line 7 = 96,700; below the
+    ///   phase-out so line 11 = 96,700 ≤ 232,600; line 12 = 26% × 96,700 = 25,142 ≤ 38,885 → CLEARED.
+    ///   OLD BUG: line 5 = AGI 300,000 → line 7 = 166,700 → line 12 = 43,342 > 38,885 → REFUSED.
+    ///
+    /// MUTATION: pass `dec!(300000)` as line 1 (i.e. restore `AGI − QBI`) and this assertion reds.
+    #[test]
+    fn itemizer_addback_is_schedule_a_line7_not_the_itemized_total() {
+        let line2 = amt_worksheet_line2(true, dec!(29200), dec!(10000));
+        assert_eq!(
+            line2,
+            dec!(10000),
+            "an itemizer adds back ONLY Schedule A line 7 (capped SALT)"
+        );
+        assert!(
+            !amt_should_file_6251(
+                FilingStatus::Mfj,
+                dec!(220000), // 1040 L15
+                line2,
+                Usd::ZERO,
+                dec!(38885), // 1040 L16
+                Usd::ZERO,
+                &amt()
+            ),
+            "the real worksheet clears this filer (26% x 96,700 = 25,142 <= 38,885); adding back the \
+             non-SALT itemized deductions manufactures a false refusal"
+        );
+        // The counterfactual the bug computed, pinned so the two are visibly different decisions.
+        assert!(
+            amt_should_file_6251(
+                FilingStatus::Mfj,
+                dec!(300000), // the buggy line 3 (= AGI, i.e. every itemized deduction added back)
+                Usd::ZERO,
+                Usd::ZERO,
+                dec!(38885),
+                Usd::ZERO,
+                &amt()
+            ),
+            "sanity: the OLD closed form really did refuse this filer — the KAT above is a live fix, \
+             not a tautology"
+        );
+    }
+
+    /// The standard-deduction branch is unchanged by the fix: §56(b)(1)(E) disallows the standard deduction
+    /// outright, so the whole of it is the add-back and `L15 + std == AGI - QBI` still holds.
+    #[test]
+    fn standard_deduction_branch_adds_back_the_whole_standard_deduction() {
+        assert_eq!(
+            amt_worksheet_line2(false, dec!(29200), dec!(10000)),
+            dec!(29200),
+            "a standard-deduction filer adds back the standard deduction, never Schedule A line 7"
+        );
+        // MFJ, AGI 300,000, standard 29,200, no QBI → L15 = 270,800; line 3 = 270,800 + 29,200 = 300,000,
+        // which is exactly the old closed form's AGI − QBI. Equivalence pinned.
+        let line2 = amt_worksheet_line2(false, dec!(29200), Usd::ZERO);
+        assert!(!amt_should_file_6251(
+            FilingStatus::Mfj,
+            dec!(270800),
+            line2,
+            Usd::ZERO,
+            dec!(60000),
+            Usd::ZERO,
+            &amt()
+        ));
     }
 
     /// Below the exemption (worksheet line 7 "No") ⇒ no AMT, don't fill Form 6251.

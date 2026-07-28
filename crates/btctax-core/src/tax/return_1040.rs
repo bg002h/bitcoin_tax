@@ -16,7 +16,7 @@
 use crate::conventions::{round_dollar, Usd};
 use crate::forms::schedule_d;
 use crate::state::{LedgerState, RemovalKind, Term};
-use crate::tax::amt::amt_should_file_6251;
+use crate::tax::amt::{amt_should_file_6251, amt_worksheet_line2};
 use crate::tax::charitable::apply_170b;
 use crate::tax::compute::{net_1222, CapNet};
 use crate::tax::method::qdcgt_line16;
@@ -1416,10 +1416,14 @@ pub fn screen_absolute(
 
     // (b) AMT screen — the 2024 "Should I fill in Form 6251?" worksheet (§4.11). Sch 2 L1z = 0 (no
     // excess-APTC input in v1); worksheet line 4 = Schedule 1 L1 taxable refund (no L8z input).
+    // ★ Worksheet line 2 is Schedule A line 7 (CAPPED SALT — `salt_5e`; v1 does not model line 6's other
+    // taxes) for an itemizer, or the whole standard deduction otherwise. It is NOT the itemized total:
+    // mortgage/charitable/medical are AMT-allowed. `amt_worksheet_line2` owns that choice — see `amt.rs`.
+    let sch_a_line7 = ar.schedule_a.as_ref().map_or(Usd::ZERO, |p| p.salt_5e);
     if amt_should_file_6251(
         ri.filing_status,
-        ar.agi,
-        ar.qbi_deduction,
+        ar.taxable_income,
+        amt_worksheet_line2(ar.deduction_is_itemized, ar.standard_deduction, sch_a_line7),
         ri.sch1.state_refund_taxable,
         ar.regular_tax,
         Usd::ZERO, // Schedule 2 line 1z (excess-APTC total) — unrepresentable in v1
@@ -3201,6 +3205,70 @@ mod tests {
         let common = wages_single(dec!(150000));
         let ar_common = assemble_absolute(&common, &empty_ledger(), &p, &table, 2024);
         assert_eq!(screen_absolute(&common, &ar_common, &p), None);
+    }
+
+    /// ★ REGRESSION (2026-07-27, `fix/amt-screen-line2`) — **an ITEMIZER must not have their non-SALT
+    /// itemized deductions added back on worksheet line 2.**
+    ///
+    /// Worksheet line 2 is Schedule A line **7** (capped SALT), not line **17** (the itemized total).
+    /// Mortgage interest, charitable gifts and medical are AMT-*allowed* under §56(b). The screen used to
+    /// reduce the worksheet to `line 3 = AGI − QBI`, which silently added back ALL of them and refused
+    /// ordinary itemizers.
+    ///
+    /// MFJ, $300,000 wages; $80,000 itemized = $10,000 real-estate tax (the whole §164(b)(6) cap) +
+    /// $40,000 mortgage interest + $30,000 cash charity. Taxable income $220,000; regular tax $38,885.
+    ///   CORRECT: line 3 = 220,000 + 10,000 = 230,000 → line 11 = 96,700 → 26% × it = 25,142 ≤ 38,885
+    ///            → CLEARED, the return computes.
+    ///   OLD BUG: line 3 = AGI 300,000 → line 11 = 166,700 → 26% × it = 43,342 > 38,885 → REFUSED.
+    ///
+    /// ★ MUTATION THIS KILLS: restore the closed form at the `screen_absolute` call site (pass
+    /// `ar.agi - ar.qbi_deduction` as line 1 with a zero add-back) and this assertion reds. The two
+    /// pre-existing cases above cannot catch it — both take the STANDARD deduction, the one branch where
+    /// `L15 + std == AGI − QBI` makes the closed form accidentally correct.
+    #[test]
+    fn amt_screen_does_not_add_back_an_itemizers_mortgage_and_charity() {
+        let p = ty2024_params();
+        let table = real_2024_table();
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Mfj,
+            header: crate::tax::testonly::not_a_dependent(),
+            w2s: vec![w2(
+                Owner::Taxpayer,
+                dec!(300000),
+                dec!(168600),
+                dec!(300000),
+            )],
+            schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
+                salt_real_estate: dec!(10000), // Sch A 5b → 5e capped at 10,000 → line 7
+                mortgage_interest_1098: dec!(40000), // AMT-ALLOWED, must NOT be added back
+                mortgage_all_used_to_buy_build_improve: Some(true),
+                charitable: vec![crate::tax::return_inputs::CharitableGift {
+                    class: crate::tax::return_inputs::CharitableClass::Cash60,
+                    amount: dec!(30000), // AMT-ALLOWED, must NOT be added back
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
+        assert!(
+            ar.deduction_is_itemized,
+            "fixture must actually itemize ($80,000 > the $29,200 MFJ standard) or it exercises the \
+             wrong branch"
+        );
+        assert_eq!(ar.taxable_income, dec!(220000), "fixture: 1040 L15");
+        assert_eq!(
+            ar.schedule_a.as_ref().map(|s| s.salt_5e),
+            Some(dec!(10000)),
+            "fixture: Schedule A line 7 is the CAPPED SALT, and it is only an eighth of the itemized total"
+        );
+        assert_eq!(
+            screen_absolute(&ri, &ar, &p),
+            None,
+            "an ordinary MFJ itemizer with $300k of wages owes no AMT and the worksheet clears them; \
+             adding back the AMT-allowed mortgage/charitable deductions manufactures a false refusal"
+        );
     }
 
     // ── Credits + total tax L24 (Phase 4 task 2/6/7) ─────────────────────────────────────────────
