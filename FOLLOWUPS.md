@@ -287,6 +287,49 @@ published 0.12.0 crates. All three items discharged in the 0.13.0 release:
   `NOTICE` was left untouched. Recorded because acting on the claim would have edited a filer-facing
   disclosure to fix a defect it did not have.
 
+### G-4 — findings from the 2026-07-27 return simulation (a $1M-wage / $500k-LTCG MFJ TY2024 return)
+
+A four-lens adversarial review hand-computed a complete return against btctax's output and checked every
+figure. **btctax's tax arithmetic was correct throughout** — the $100,000 §1(h) LTCG tax, the $19,000
+§1411 NIIT, and the $119,000 crypto-attributable total all reproduce exactly under independent
+with/without recomputation, and it correctly did **not** net the charitable gift against net investment
+income (a common preparer error that would have understated NIIT by $3,230). Form 8949 Box F, four rows,
+the $25,000-per-half-BTC basis split, and the all-long-term classification are all right. What follows is
+the residue.
+
+- **[done] AMT screen worksheet line 2** — fixed in `fix/amt-screen-line2` (`731228c`). See that commit;
+  the defect was reading Schedule A line 7 as the itemized total.
+- **[open] Compute Form 6251 instead of refusing.** *The* headline finding. The simulated taxpayer owes
+  **$0 AMT** — tentative minimum tax $327,965 against regular tax $364,675.50, a **$36,710.50** margin
+  that survives zeroing the entire exemption — yet btctax refused the whole return and wrote no forms at
+  all. Structurally, AMT is unreachable for a filer like this: §55(b)(3) taxes the capital gain at 20% in
+  both systems, so AMT can only bite on the ordinary side, where a 37% marginal regular rate already
+  beats the AMT's 28% ceiling. Swept across charitable gifts from $0 to $1,000,000, the margin never
+  closes (narrowest **$13,349** at a $600,000 gift). Meanwhile the refusal threshold is low: worksheet
+  line 11 > $232,600, i.e. (MFJ, no QBI) whenever AGI less non-SALT itemized exceeds about **$365,900**.
+  Scope: across btctax's entire in-scope input set every 6251 adjustment except line 2a is either refused
+  upstream or never captured, so AMTI = taxable income + the line-2 add-back, and Part III is the §1(h)
+  stack already computed. Roughly fifteen lines of arithmetic over values already in `AbsoluteReturn`.
+  Owning phase: whenever the full-return feature is next opened.
+- **[open] Schedule D lines 17 and 20 are determinable, not "out of scope".** The crypto-slice export
+  leaves them blank and tells the filer to complete them by hand, but both are Yes/No routing boxes fully
+  determined by data already in the packet: L17 = Yes (both L15 and L16 are gains), L20 = Yes → use the
+  Qualified Dividends & Capital Gain Tax Worksheet. L20 is the single determination that picks which of
+  two worksheets computes the tax. btctax's own full-return engine already derives exactly this
+  (`printed.rs`, `ScheduleDRouting`); the crypto-slice path never reaches it. L18/L19 (28%-rate,
+  unrecaptured §1250) genuinely are out of scope and correctly blank.
+- **[open] `report --tax-year` prints a misleading LTCG marginal rate.** It reports "LTCG 0.20" when the
+  all-in marginal rate on the next dollar of long-term crypto gain is **23.8%** (§1(h) 20% + §1411 3.8%)
+  — which is the very $119,000 ÷ $500,000 it prints two lines earlier. A filer sizing a sale off the
+  20% figure under-reserves by 3.8 points.
+- **[open] The crypto-slice `form_1040_capgains.pdf` should be watermarked as a partial worksheet.** It
+  renders as "Form 1040" showing $500,000 on line 7 and a blank line 1a — for a taxpayer with $1,500,000
+  of income. The stderr note says only two fields were filled, but the artifact outlives the note. A
+  document that looks filable and understates income by $1,000,000 if mistaken for one.
+- **[open] Full-return computation is TY2024-only.** `report --tax-year 2025` refuses with "full-return
+  computation is not supported for 2025 in this version (v1 supports TY2024)" even though `SUPPORTED_YEARS`
+  bundles 2025 forms and the crypto-slice path fills them. Worth a roadmap decision, not just a refusal.
+
 ---
 
 ## ⚠★ SHIPPED BUG — Form 8949 uses pre-2025 boxes (C/F) for TY2025 digital assets (found 2026-07-20)
