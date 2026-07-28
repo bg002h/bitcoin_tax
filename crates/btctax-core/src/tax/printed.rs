@@ -1268,6 +1268,7 @@ mod tests {
         use crate::tax::other_taxes::{Form8959, Form8960};
         let z = Usd::ZERO;
         AbsoluteReturn {
+            amt: Default::default(),
             wages: z,
             taxable_interest: z,
             ordinary_dividends: z,

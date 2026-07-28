@@ -882,6 +882,10 @@ pub struct AbsoluteReturn {
     /// The P6 printed chain (`printed::schedule_a_lines`) rounds these at the line and re-adds the
     /// ROUNDED lines, so the filed form cross-foots (SPEC §3.1).
     pub schedule_a: Option<ScheduleAParts>,
+    /// The filled **Form 6251** (§4.11). Computed here because `assemble_absolute` holds the
+    /// `TaxTable` (for the §1(h) breakpoints Part III reads) while `screen_absolute` takes `ar`
+    /// immutably. `screen_absolute` only READS this — see `must_attach()`.
+    pub amt: crate::tax::form6251::Form6251,
     /// 1040 **L12** — the deduction taken = `choose_deduction(standard, itemized)` (max, or `ForceItemize`
     /// / MFS-coupled §63(c)(6)).
     pub deduction: Usd,
@@ -1284,7 +1288,29 @@ pub fn assemble_absolute(
     let overpayment_refund = (total_payments - total_tax).max(Usd::ZERO);
     let amount_owed = (total_tax - total_payments).max(Usd::ZERO);
 
+    let amt = crate::tax::form6251::compute_6251(
+        form6251_inputs_from_parts(
+            ri,
+            agi,
+            taxable_income,
+            deduction,
+            qbi.deduction,
+            deduction_is_itemized,
+            schedule_a.as_ref(),
+            qualified_dividends,
+            net_ltcg,
+            regular_tax,
+            foreign_tax_credit,
+        ),
+        &params.amt,
+        table
+            .ltcg
+            .get(&status)
+            .expect("bundled year has LTCG breakpoints for every status"),
+    );
+
     AbsoluteReturn {
+        amt,
         wages,
         taxable_interest,
         ordinary_dividends,
@@ -1392,6 +1418,44 @@ fn digital_asset_activity(state: &LedgerState, year: i32) -> bool {
 /// (§4.11); (c) taxable income ≤ 0 WITH a capital-loss carryforward-in (the G22 §1211/§1212 Capital Loss
 /// Carryover Worksheet edge). A refund-only TI≤0 filer with NO carryforward is NOT refused (tax = 0,
 /// withholding refunded — the r5-narrowed rule).
+/// Build [`crate::tax::form6251::Form6251Inputs`] from the pieces `assemble_absolute` holds before it
+/// has an `AbsoluteReturn` to hand.
+///
+/// ★ Lines 2a and 1 cite DIFFERENT 1040 lines — 12 and 14 — so both are passed. `qdcgt_line5_regular`
+/// is the QDCGT Worksheet's line 5 **as figured for the regular tax** (Form 6251 lines 20 and 27).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn form6251_inputs_from_parts(
+    ri: &ReturnInputs,
+    agi: Usd,
+    taxable_income: Usd,
+    deduction: Usd,
+    qbi_deduction: Usd,
+    itemized: bool,
+    schedule_a: Option<&ScheduleAParts>,
+    qualified_dividends: Usd,
+    net_ltcg: Usd,
+    regular_tax: Usd,
+    foreign_tax_credit: Usd,
+) -> crate::tax::form6251::Form6251Inputs {
+    let pref = (qualified_dividends + net_ltcg).max(Usd::ZERO);
+    crate::tax::form6251::Form6251Inputs {
+        status: ri.filing_status,
+        taxable_income_l15: taxable_income,
+        agi_l11: agi,
+        deduction_l12: deduction,
+        deduction_l14: deduction + qbi_deduction,
+        schedule_a_line7: schedule_a.map_or(Usd::ZERO, |p| p.salt_5e),
+        itemized,
+        state_refund_sch1_l1: ri.sch1.state_refund_taxable,
+        net_capital_gain: net_ltcg,
+        qualified_dividends,
+        qdcgt_line5_regular: (taxable_income - pref.min(taxable_income)).max(Usd::ZERO),
+        regular_tax_l16: regular_tax,
+        schedule_2_line1z: Usd::ZERO,
+        schedule_3_line1: foreign_tax_credit,
+    }
+}
+
 pub fn screen_absolute(
     ri: &ReturnInputs,
     ar: &AbsoluteReturn,
@@ -1429,11 +1493,49 @@ pub fn screen_absolute(
         Usd::ZERO, // Schedule 2 line 1z (excess-APTC total) — unrepresentable in v1
         &params.amt,
     ) {
-        return refusal(
-            RefuseReason::AmtScreenTriggered,
-            "the Form 6251 screening worksheet indicates you may owe alternative minimum tax — v1 does not \
-             compute Form 6251, so the return is refused rather than understate the tax",
-        );
+        // ★ The screen only says "fill in Form 6251". So fill it in. The screen stays as a cheap fast
+        // path: clearing it proves AMT is $0 (the worksheet over-estimates AMTI by construction), and
+        // only a filer it flags pays for the full computation.
+        let f = &ar.amt;
+        // Lines 2k and 3 are $0 in `compute_6251`, which is only sound when we KNOW they are zero.
+        // Until the two §3 declarations exist, a 1098 or a capital-loss carryforward means we do not
+        // know — so refuse rather than understate. (Fail-closed; the declarations replace this.)
+        let mortgage = ri
+            .schedule_a
+            .as_ref()
+            .map_or(Usd::ZERO, |a| a.mortgage_interest_1098);
+        let cf = ri.capital_loss_carryforward_in;
+        if mortgage > Usd::ZERO {
+            return refusal(
+                RefuseReason::AmtScreenTriggered,
+                "Form 6251 line 3 adds back home-mortgage interest deducted for a dwelling that is not a \
+                 principal residence or an AMT-qualified dwelling (i6251: a house, apartment, condominium \
+                 or mobile home not used on a transient basis — never a houseboat or RV). btctax cannot \
+                 tell which dwelling your Form 1098 interest relates to, and guessing would understate \
+                 the tax, so the return is refused",
+            );
+        }
+        if cf.short > Usd::ZERO || cf.long > Usd::ZERO {
+            return refusal(
+                RefuseReason::AmtScreenTriggered,
+                "Form 6251 line 2k adds back the difference when your capital-loss carryover for the AMT \
+                 differs from the regular-tax one. btctax carries only the regular-tax carryforward and \
+                 cannot tell whether an AMT twin diverges, so the return is refused rather than \
+                 understate the tax",
+            );
+        }
+        // Who Must File condition 1 (i6251 p.1): "Form 6251, line 7, is greater than line 10."
+        // NOT `amt > 0` — when line 7 exceeds line 10 the AMTFTC is figured, so line 9 can still land
+        // at or below line 10 and the AMT be $0 while the form is still required.
+        if f.must_attach() {
+            return refusal(
+                RefuseReason::AmtScreenTriggered,
+                "Form 6251 line 7 exceeds line 10, so Form 6251 must be attached to this return \
+                 (i6251, Who Must File, condition 1) — v1 computes the form but cannot yet FILE it, so \
+                 the return is refused rather than filed incomplete",
+            );
+        }
+        // Cleared: line 7 ≤ line 10 ⇒ Schedule 2 line 2 is $0 and no attachment is required.
     }
 
     // (c) Taxable income ≤ 0 with a capital-loss carryforward-in (the §1211/§1212 carryover-worksheet edge).
@@ -3201,12 +3303,43 @@ mod tests {
     fn amt_screen_refuses_high_income_clears_common() {
         let p = ty2024_params();
         let table = real_2024_table();
-        // $900k wages → worksheet line 11 ≈ 887k > 232,600 → fill 6251 → refuse.
+        // ★ BEHAVIOUR CHANGE (Tier 1). $900k wages trips the SCREEN (worksheet line 11 ≈ 887k >
+        // 232,600) — but the screen only says "fill in Form 6251", so we fill it in. Line 7 lands
+        // BELOW line 10, so no attachment is required (i6251 Who Must File, condition 1) and the
+        // return COMPUTES. Before this task it was refused outright and no forms were written.
         let high = wages_single(dec!(900000));
         let ar_high = assemble_absolute(&high, &empty_ledger(), &p, &table, 2024);
+        assert!(
+            amt_should_file_6251(
+                high.filing_status,
+                ar_high.taxable_income,
+                amt_worksheet_line2(
+                    ar_high.deduction_is_itemized,
+                    ar_high.standard_deduction,
+                    Usd::ZERO
+                ),
+                Usd::ZERO,
+                ar_high.regular_tax,
+                Usd::ZERO,
+                &p.amt,
+            ),
+            "fixture must still TRIP the cheap screen — otherwise it tests nothing"
+        );
+        assert!(
+            ar_high.amt.line7 <= ar_high.amt.line10,
+            "line 7 {} must not exceed line 10 {}",
+            ar_high.amt.line7,
+            ar_high.amt.line10
+        );
+        assert_eq!(ar_high.amt.amt(), Usd::ZERO, "no AMT is owed");
+        assert!(
+            !ar_high.amt.must_attach(),
+            "no Form 6251 attachment required"
+        );
         assert_eq!(
-            screen_absolute(&high, &ar_high, &p).map(|r| r.reason),
-            Some(RefuseReason::AmtScreenTriggered)
+            screen_absolute(&high, &ar_high, &p),
+            None,
+            "a screen-tripping, zero-AMT filer must now COMPUTE, not refuse"
         );
         // $150k wages → line 11 = 64,300 ≤ 232,600 and 26% × it < regular tax → cleared (no refuse).
         let common = wages_single(dec!(150000));

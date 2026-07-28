@@ -90,26 +90,38 @@ fn floor_case_reads_back_the_baked_ots_agi_off_the_paper() {
     );
 }
 
-/// btctax's conservative Form 6251 screening worksheet (`screen_absolute`) flags this high-income anchor
-/// as "may owe AMT" and refuses it — even though BOTH oracles compute zero actual AMT and T6's paper
-/// test fills it anyway (bypassing the screen). btctax's real export path refuses it too, so the harness
-/// is right to report it out-of-domain: you cannot sweep on-paper values btctax will not produce. This
-/// is exactly the D-2 refusal signal T10 rejects candidates on.
-const EXPECTED_REFUSED: &[&str] = &["mfj_high_income_niit_and_addl_medicare"];
+/// ★ **EMPTY BY DESIGN, and its emptiness is the proof.** This used to hold
+/// `mfj_high_income_niit_and_addl_medicare`: btctax's Form 6251 *screening worksheet* flagged that
+/// high-income anchor as "may owe AMT" and refused the whole return, even though BOTH oracles computed
+/// zero actual AMT — so the harness reported it out-of-domain and the sweep could never reach it.
+///
+/// btctax now **computes Form 6251** rather than refusing on the screen. The worksheet only ever said
+/// "fill in Form 6251"; filling it in shows line 7 ≤ line 10, so no attachment is required
+/// (i6251, Who Must File, condition 1) and the return is produced. The anchor is admitted and swept.
+///
+/// A name reappearing here means a household now genuinely owes AMT (or must attach the form) — that is
+/// a deliberate change to adjudicate, not something to paper over.
+const EXPECTED_REFUSED: &[&str] = &[];
 
+/// The inverse of the test this replaces: the former AMT-screen anchor now **proceeds**.
+///
+/// This is the end-to-end proof that the screen-tripping, zero-AMT population was un-refused — worth
+/// strictly more than the refusal assertion it replaces, because it exercises the whole path rather
+/// than the fact that it stopped early.
 #[test]
-fn the_amt_screen_anchor_is_reported_refused_in_default_mode() {
-    let name = EXPECTED_REFUSED[0];
+fn the_former_amt_screen_anchor_now_proceeds_in_default_mode() {
+    let name = "mfj_high_income_niit_and_addl_medicare";
     let inputs = raw_household(name)["inputs"].clone();
     let out = run(&[], &serde_json::to_string(&inputs).unwrap());
     assert_eq!(
         out["refused"],
-        serde_json::json!(true),
-        "{name} trips btctax's Form 6251 AMT screen — the harness must report the D-2 refusal"
+        serde_json::json!(false),
+        "{name} trips the cheap AMT SCREEN, but Form 6251 computes line 7 <= line 10, so the return \
+         must now be produced rather than refused"
     );
     assert!(
-        out.get("lines").is_none(),
-        "a refused scenario carries no lines"
+        out.get("lines").is_some(),
+        "an admitted scenario carries its filled lines"
     );
 }
 
@@ -151,8 +163,9 @@ fn sweep_check_reconciliation(households: &[serde_json::Value]) {
     );
     assert_eq!(
         refused, EXPECTED_REFUSED,
-        "exactly the known AMT-screen anchor should be refused; a change here means the AMT screen's \
-         behavior moved — update EXPECTED_REFUSED deliberately, don't paper over it"
+        "NOTHING should be refused: btctax now computes Form 6251 instead of refusing on the screen. A \
+         name here means that household genuinely owes AMT or must attach the form — adjudicate it \
+         deliberately, don't paper over it"
     );
 }
 

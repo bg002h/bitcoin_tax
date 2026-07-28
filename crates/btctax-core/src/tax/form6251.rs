@@ -32,7 +32,7 @@ use rust_decimal::Decimal;
 /// Lines skipped by a routing instruction (line 6's "enter -0- here and on lines 7, 9, and 11", line
 /// 32's "skip lines 33 through 37", line 34's "skip lines 35 through 37") hold `0`, which is what the
 /// form directs be entered.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub struct Form6251 {
     // ── Part I — Alternative Minimum Taxable Income ──────────────────────────────────────────────
@@ -42,6 +42,9 @@ pub struct Form6251 {
     pub line1: Usd,
     /// L2a — "If filing Schedule A (Form 1040), enter the taxes from Schedule A, line 7; otherwise,
     /// enter the amount from Form 1040 or 1040-SR, line 12."
+    ///
+    /// ★ Line **12**, not line 14 — line 1's fallback cites line 14. They differ by the §199A QBI
+    /// deduction, so a filer with QBI > 0 distinguishes them.
     ///
     /// i6251 p.2 adds: "except any generation-skipping transfer taxes on income distributions" — v1
     /// has no GST input, so nothing is excluded.
@@ -208,7 +211,11 @@ pub struct Form6251Inputs {
     pub taxable_income_l15: Usd,
     /// 1040 line 11.
     pub agi_l11: Usd,
-    /// 1040 line 14 (deduction + QBI).
+    /// 1040 line **12** — the deduction taken (standard or itemized), WITHOUT the QBI deduction.
+    /// Line 2a's else-branch reads this one.
+    pub deduction_l12: Usd,
+    /// 1040 line **14** — line 12 + the §199A QBI deduction. Line 1's zero-taxable-income branch
+    /// reads this one. ★ Lines 2a and 1 cite DIFFERENT 1040 lines; they coincide only when QBI is 0.
     pub deduction_l14: Usd,
     /// Schedule A line 7 (capped SALT + other taxes); ignored unless `itemized`.
     pub schedule_a_line7: Usd,
@@ -244,7 +251,7 @@ pub fn compute_6251(i: Form6251Inputs, amt: &AmtParams, bp: &LtcgBreakpoints) ->
     let line2a = if i.itemized {
         i.schedule_a_line7
     } else {
-        i.deduction_l14
+        i.deduction_l12 // 1040 line 12 — NOT line 14; they differ by the QBI deduction
     };
     let line2b = -i.state_refund_sch1_l1;
     let line3 = z;
@@ -477,6 +484,7 @@ mod tests {
                     status,
                     taxable_income_l15: ti,
                     agi_l11: d(&der["agi_1040_L11"]),
+                    deduction_l12: d(&der["deduction_1040_L14"]),
                     deduction_l14: d(&der["deduction_1040_L14"]),
                     schedule_a_line7: Usd::ZERO,
                     itemized: der["itemized"].as_bool().unwrap(),
@@ -535,6 +543,7 @@ mod tests {
                 status: FilingStatus::Mfs,
                 taxable_income_l15: dec!(881350),
                 agi_l11: dec!(895950),
+                deduction_l12: dec!(14600),
                 deduction_l14: dec!(14600),
                 schedule_a_line7: Usd::ZERO,
                 itemized: false,
@@ -557,6 +566,7 @@ mod tests {
                     status: FilingStatus::Mfs,
                     taxable_income_l15: l4_pre - dec!(14600),
                     agi_l11: l4_pre,
+                    deduction_l12: dec!(14600),
                     deduction_l14: dec!(14600),
                     schedule_a_line7: Usd::ZERO,
                     itemized: false,
@@ -659,6 +669,47 @@ mod tests {
         );
     }
 
+    /// ★ Line 2a cites 1040 line **12**; line 1's fallback cites line **14**. They differ by exactly
+    /// the §199A QBI deduction, so only a filer with QBI > 0 tells them apart — and no fixture vector
+    /// has QBI, which is why this needs its own KAT. Reading line 14 into line 2a inflates AMTI by the
+    /// QBI deduction and over-refuses.
+    #[test]
+    fn line2a_reads_1040_line12_not_line14_which_qbi_distinguishes() {
+        let mk = |l12: Usd, l14: Usd| {
+            compute_6251(
+                Form6251Inputs {
+                    status: FilingStatus::Mfj,
+                    taxable_income_l15: dec!(400000),
+                    agi_l11: dec!(450000),
+                    deduction_l12: l12,
+                    deduction_l14: l14,
+                    schedule_a_line7: Usd::ZERO,
+                    itemized: false,
+                    state_refund_sch1_l1: Usd::ZERO,
+                    net_capital_gain: Usd::ZERO,
+                    qualified_dividends: Usd::ZERO,
+                    qdcgt_line5_regular: dec!(400000),
+                    regular_tax_l16: dec!(80000),
+                    schedule_2_line1z: Usd::ZERO,
+                    schedule_3_line1: Usd::ZERO,
+                },
+                &params(),
+                &bps(FilingStatus::Mfj),
+            )
+        };
+        // L12 = 29,200 standard deduction; L14 = 50,000 because a $20,800 QBI deduction sits on L13.
+        let f = mk(dec!(29200), dec!(50000));
+        assert_eq!(f.line2a, dec!(29200), "line 2a is 1040 L12");
+        assert_eq!(f.line4, dec!(429200), "AMTI = 400,000 + 29,200");
+        // Reading L14 instead would add the QBI deduction back into AMTI.
+        let wrong = mk(dec!(50000), dec!(50000));
+        assert_eq!(wrong.line4, dec!(450000));
+        assert_ne!(
+            f.line4, wrong.line4,
+            "the two 1040 lines must not be interchangeable"
+        );
+    }
+
     /// Line 6's routing: "If zero or less, enter -0- here and on lines 7, 9, and 11, and go to line 10."
     #[test]
     fn line6_zero_or_less_zeroes_lines_7_9_and_11_but_still_fills_line_10() {
@@ -667,6 +718,7 @@ mod tests {
                 status: FilingStatus::Mfj,
                 taxable_income_l15: dec!(50000),
                 agi_l11: dec!(79200),
+                deduction_l12: dec!(29200),
                 deduction_l14: dec!(29200),
                 schedule_a_line7: Usd::ZERO,
                 itemized: false,
