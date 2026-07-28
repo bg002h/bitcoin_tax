@@ -8,6 +8,7 @@ pub mod classifier;
 pub mod compute;
 /// Form 8275 (Disclosure Statement) content — Part I (auto, promoted 8949 disposal legs) + Part II
 /// (the filer's stored narrative) + the BG-D10 penalty-risk copy. See module doc.
+pub mod form6251;
 pub mod form8275;
 pub mod frozen_guard;
 pub mod method;

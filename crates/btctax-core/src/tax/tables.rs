@@ -251,6 +251,23 @@ pub struct AmtParams {
     pub breakpoint_28pct: Usd,
     /// §55(b)(1) 26%/28% breakpoint — MFS.
     pub breakpoint_28pct_mfs: Usd,
+    /// **Form 6251 line 4 / i6251 p.9** — the MFS AMTI add-back threshold: *"If your filing status is
+    /// married filing separately and line 4 is more than $875,950, you must include an additional
+    /// amount on line 4."* §55(d)(3).
+    pub mfs_kicker_start: Usd,
+    /// **i6251 p.9** — the MFS add-back cap: *"If line 4 is $1,142,550 or more, include an additional
+    /// $66,650. Otherwise, include 25% of the excess of the amount on line 4 over $875,950."*
+    pub mfs_kicker_max: Usd,
+    /// §55(d)(3) exemption phase-out rate (Exemption Worksheet line 5: *"Multiply line 4 by 25% (0.25)"*).
+    pub phaseout_rate: Usd,
+    /// §55(b)(1)(A) lower AMT rate (Form 6251 lines 7/18/39: *"multiply … by 26% (0.26)"*).
+    pub rate_26: Usd,
+    /// §55(b)(1)(B) upper AMT rate (Form 6251 lines 7/18/39: *"multiply … by 28% (0.28)"*).
+    pub rate_28: Usd,
+    /// The §55(b)(1) 28%-bracket subtrahend — general (Form 6251 lines 7/18/39: *"subtract $4,652"*).
+    pub rate_28_subtrahend: Usd,
+    /// The 28%-bracket subtrahend — MFS (*"$2,326 if married filing separately"*).
+    pub rate_28_subtrahend_mfs: Usd,
 }
 
 impl AmtParams {

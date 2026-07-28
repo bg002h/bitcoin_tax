@@ -435,6 +435,13 @@ mod tests {
                 phaseout_start_mfj_qss: dec!(1218700),
                 breakpoint_28pct: dec!(232600),
                 breakpoint_28pct_mfs: dec!(116300),
+                mfs_kicker_start: dec!(875950),
+                mfs_kicker_max: dec!(66650),
+                phaseout_rate: dec!(0.25),
+                rate_26: dec!(0.26),
+                rate_28: dec!(0.28),
+                rate_28_subtrahend: dec!(4652),
+                rate_28_subtrahend_mfs: dec!(2326),
             },
         }
     }
