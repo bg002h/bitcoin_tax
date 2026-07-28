@@ -139,3 +139,119 @@ Who Must File's four conditions verbatim · line 4's MFS-kicker text · line 8's
 §904(j) elector · the Part I line-3 dwelling instruction · Part III's "None of the statements apply ⇒ use
 the regular tax amounts for lines 13, 14, and 15". **Fetch `i6251--2024.pdf` next; if it cannot be
 fetched, STOP — do not transcribe from memory.**
+
+---
+
+# Addendum — from `i6251--2024.pdf` (Nov 13, 2024, Cat. 64277P)
+
+Fetched and transcribed 2026-07-28; archived at `design/amt-form6251/i6251--2024.pdf`. This closes the
+five items PART_III.md listed as "still owed". **Nothing below was written from memory.**
+
+## Who Must File (p.1) — verbatim
+
+> Attach Form 6251 to your return if any of the following statements are true.
+> 1. Form 6251, line 7, is greater than line 10.
+> 2. You claim any general business credit, and either line 6 (in Part I) of Form 3800 or line 25 of Form 3800 is more than zero.
+> 3. You claim the qualified electric vehicle credit (Form 8834), the personal-use part of the alternative fuel vehicle refueling property credit (Form 8911), or the credit for prior year minimum tax (Form 8801).
+> 4. The total of Form 6251, lines 2c through 3, is negative and line 7 would be greater than line 10 if you didn't take into account lines 2c through 3.
+
+**Condition 1 is the Tier-1/Tier-2 boundary**, as the plan says. Conditions 2 and 3 are credits v1 has no
+input for. **Condition 4 is reachable in principle** — it keys on lines 2c**–3**, which *includes* line
+2k and line 3, i.e. §3's two declarations. Under §3's ternary both refuse unless answered AMT-neutral
+(⇒ 0), so the total can never be negative and condition 4 stays unreachable. **That is now a stated
+consequence of the ternary, not a coincidence — record it in the §5 discharge KAT.**
+
+## Line 2a (p.2) — verbatim
+
+> Enter the amount of all taxes from Schedule A (Form 1040), line 7, **except any generation-skipping
+> transfer taxes on income distributions**. If you aren't filing Schedule A (Form 1040), then enter the
+> standard deduction amount that you reported on Form 1040 or 1040-SR, line 12.
+
+Confirms the fix at the root of this whole sequence: **Schedule A line 7**, not line 17. The GST carve-out
+is new to us — v1 has no GST input, so it is structurally 0, but `amt_worksheet_line2` should say so.
+
+## Line 2b (p.2) — verbatim
+
+> Include any refund from Schedule 1 (Form 1040), line 1, that is attributable to state or local income
+> taxes. Also include any refunds received in 2024 and included in income on Schedule 1 (Form 1040), line
+> 8z, that are attributable to state or local personal property taxes or general sales taxes; foreign
+> income taxes; or state, local, or foreign real property taxes. **Enter the total as a negative amount.**
+
+btctax's `state_refund_taxable` *is* Schedule 1 line 1 ("taxable refunds … of state and local income
+taxes"), so it maps exactly. The 8z limb has no v1 input ⇒ 0.
+
+## Line 3 — Mortgage Interest (p.8) — verbatim. **This is §3's declaration, in the IRS's own words.**
+
+> If you deducted home mortgage interest on Schedule A for a dwelling that isn't a principal residence
+> (within the meaning of section 121) or qualified dwelling for AMT, include that deducted interest on
+> line 3. A qualified dwelling for AMT is a house, apartment, condominium, or mobile home not used on a
+> transient basis. A qualified dwelling for AMT doesn't include house boats and recreational vehicles.
+
+Phrase the question so the AMT-neutral answer is `true`: *"Is the dwelling a principal residence or a
+house/apartment/condominium/mobile home not used on a transient basis?"* — with houseboats and RVs
+called out, since the instruction names them.
+
+## Line 3 — Charitable Contributions of Certain Property (p.8) — ★ CORRECTS THE PLAN
+
+> If you make a charitable contribution of property to which section 170(e) applies and you had a
+> different basis for AMT purposes, you may have to make an adjustment. See section 170(e) for details.
+
+The plan (and r1) asserted charitable **can never** diverge, citing the post-1992 repeal of §57(a)(6).
+That is right about the *appreciation* preference but **overstated**: a §170(e) gift of property with a
+different **AMT basis** is a line-3 adjustment. It stays 0 for btctax only because donated crypto has no
+AMT/regular basis divergence (no depreciation, no ISO, no §56(a)(6) event ever touches it) — a *derived*
+conclusion, not the blanket one. Restate it that way, and note btctax **does** emit §170(e) crypto
+donations (Form 8283), so this is live surface, not hypothetical.
+
+## Line 4 (p.9) — the MFS kicker, verbatim, **with the IRS's own worked example**
+
+> If your filing status is married filing separately and line 4 is more than $875,950, you must include
+> an additional amount on line 4. If line 4 is $1,142,550 or more, include an additional $66,650.
+> Otherwise, include 25% of the excess of the amount on line 4 over $875,950. **For example, if the
+> amount on line 4 is $895,950, enter $900,950 instead—the additional $5,000 is 25% of $20,000 ($895,950
+> minus $875,950).**
+
+★ **V8's KAT is written for us:** MFS, line 4 = $895,950 ⇒ line 4 becomes **$900,950**. Plus the two
+boundaries: $875,950 (nothing added) and $1,142,550 (flat +$66,650).
+
+## Exemption Worksheet — Line 5 (p.9) — the zero-exemption note
+
+> **Note.** If Form 6251, line 4, is equal to or more than **$952,150** if single or head of household,
+> **$1,751,900** if married filing jointly or qualifying surviving spouse, or **$875,950** if married
+> filing separately, your exemption is zero. Don't complete this worksheet; instead, enter the amount
+> from Form 6251, line 4, on line 6 and go to line 7.
+
+Confirms the plan's $1,751,900 MFJ full-phaseout. **Note the collision: MFS's zero-exemption threshold
+and the MFS kicker start are the same $875,950** — so an MFS filer crossing it gets the kicker *and*
+loses the exemption at the same point. Worth its own KAT.
+
+The worksheet itself is the arithmetic already in `amt.rs`: exemption − 25% × (AMTI − phase-out start),
+floored at 0.
+
+## Line 8 — AMTFTC (p.10) — verbatim, and it settles the ordering
+
+> **Do I need to fill out line 8?** Before figuring your AMTFTC, figure your foreign tax credit for the
+> regular tax and complete Schedule 3 (Form 1040), line 1. Next, fill in Form 6251, line 10, as
+> instructed. If the amount on line 10 is greater than or equal to the amount on line 7, do the
+> following: • Leave line 8 blank and enter -0- on line 11. • See Who Must File, earlier, to find out if
+> you must attach Form 6251 to your return. …
+> If the amount on line 10 is less than the amount on line 7, figure your AMTFTC and enter it on line 8.
+
+> **Figuring the AMTFTC.** If you made an election to claim the foreign tax credit on your 2024 tax
+> return without filing Form 1116, your AMTFTC is the same as the foreign tax credit on Schedule 3
+> (Form 1040), line 1.
+
+★ **Line 10 is computed BEFORE line 8**, and line 8 is left blank when line 10 ≥ line 7. So the
+implementation order is 7 → 10 → (8, 9, 11), not the printed order. The second paragraph confirms the
+§904(j)-elector equality the plan relies on — and btctax's ≤$300/$600 screen *is* the no-Form-1116
+election, so `line8 = Schedule 3 line 1` exactly.
+
+## TIP (p.2) — a planning fact worth surfacing
+
+> If you owe AMT, you may be able to lower your total tax (regular tax plus AMT) by claiming itemized
+> deductions on Form 1040 or 1040-SR, even if your total itemized deductions are less than the standard
+> deduction. This is because the standard deduction isn't allowed for the AMT and, if you claim the
+> standard deduction on Form 1040 or 1040-SR, you can't claim itemized deductions for the AMT.
+
+btctax already has `ItemizeElection::ForceItemize` (§63(e)). When AMT is owed, force-itemizing can lower
+total tax — a real advisory the engine is positioned to give and currently does not.
