@@ -36,6 +36,13 @@ amount from", "enter the smaller of", "if X, skip to Y".
 numbered line, named for the line, in the form's own numbering, carrying the official instruction text
 verbatim as its doc comment.
 
+**Transcribe from the TEXT LAYER (`pdftotext -layout`), never from the rendered page.** A rendered `12`
+and `22` differ by a few pixels. Transcribing Form 6251 line 33 from the image produced "Subtract line 32
+from line 12" where the form says **line 22** — which taxed the ordinary slice twice and inflated the
+tentative minimum tax by $200,000 on one vector. No review would have caught it; running the
+transcription against seven independently-verified vectors caught it in seconds (1/7 → 7/7 after the
+one-character fix). **Then re-verify every cross-reference against the extracted text.**
+
 ```rust
 /// L20 — "Enter the amount from line 5 of the Qualified Dividends and Capital Gain Tax
 ///        Worksheet ... (as figured for the regular tax)."

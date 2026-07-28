@@ -98,7 +98,7 @@ Worksheet in the instructions."*
 | 30 | Enter the smaller of line 24 or line 29 | — | ✓ |
 | 31 | Multiply line 30 by **15% (0.15)** | — | ✓ |
 | 32 | Add lines 23 and 30.<br>**If lines 32 and 12 are the same, skip lines 33 through 37 and go to line 38. Otherwise, go to line 33.** | — | ✓ **← the skip** |
-| 33 | Subtract line 32 from line 12 | — | ✓ |
+| 33 | Subtract line 32 from **line 22** | — | ✓ |
 | 34 | Multiply line 33 by **20% (0.20)**.<br>**If line 14 is zero or blank, skip lines 35 through 37 and go to line 38. Otherwise, go to line 35.** | — | ✓ |
 | 35 | Add lines 17, 32, and 33 | — | 0 (L14 = 0) |
 | 36 | Subtract line 35 from line 12 | — | 0 |
@@ -125,6 +125,18 @@ draft conflated them:
 $75,812.50 ignored the caps; $55,897.50 mispositioned the bands. The correct figure for the disputed
 vector is **$70,005.00** — and the excess-under-gain case needs no special code, because lines 16/17/22
 and the line-32 skip handle it structurally. It does need a KAT: **V2b**.
+
+## ★ Transcription errata — read the TEXT LAYER, not the rendered page
+
+**Line 33 was first transcribed as "Subtract line 32 from line **12**". The form says **line 22**.**
+Found not by review but by running the transcription against the seven verified vectors: 1/7 passed.
+The single wrong digit taxed the ordinary slice twice — 26/28% at line 18 and again 20% at line 34 —
+inflating TMT by $200,000 on V3 and manufacturing AMT on four returns that owe none. With line 33
+corrected: **7/7**.
+
+Root cause: I read the rendered page image, where `12` and `22` differ by a few pixels.
+**`pdftotext -layout` is the authority, not the picture.** After the fix, every cross-reference in
+lines 12–40 was re-verified against the extracted text layer; line 33 was the only error.
 
 ## Every constant is on the form
 
