@@ -1,13 +1,16 @@
 # Form 6251 (AMT) — implementation plan
 
-**Status:** r3-FOLDED. Awaiting one NARROW re-check scoped to §2 (rounding layer), §6 (guard ii),
-§11 (SemVer) and T3's `smoke.rs` bullet ONLY — per r3 §5. Everything else is settled; do not re-audit.
+**Status:** NARROW-RE-CHECK FOLDED. **0 Critical across all four rounds' final state.** The re-check
+confirmed §2 and T3's `smoke.rs` bullet FIXED and found four propagation defects (edits made in §2/§6/§11
+that were never carried into T2/T7/T3) plus five Minors — all folded here. **Owner's call whether this is
+build-ready or wants one more pass**; the residue is bookkeeping, not decisions.
 
 **Goal:** stop refusing returns over the AMT screen, by **implementing Form 6251**.
 
 **Base:** `main` after `fix/amt-screen-line2`. **Lineage:** `FOLLOWUPS.md` §G-4.
 **Reviews:** `design/amt-form6251/reviews/` — r1 (Fable, primary-source tax) 5C/12I; r2 (Opus, fold +
-mechanism) 2C/8I; r3 (Sonnet checklist + Opus fresh-eyes) **0C/4I** — the restructure closed all seven
+mechanism) 2C/8I; r3 (Sonnet checklist + Opus fresh-eyes) 0C/4I; narrow re-check (Sonnet + Opus,
+four sections only) 0C/4I — all propagation, no new decisions — the restructure closed all seven
 prior Criticals; the four Importants were defects the fold itself introduced. All folded here.
 
 ---
@@ -212,8 +215,22 @@ building it.
     `:67-75`), so a concept never given a field never appears and there is nothing to observe. The
     EXEMPT-list workaround is foreclosed too — `:262-279` panics on a "stale exemption" that matches no
     real leaf. **Mechanism instead:** a KAT reusing `leaf_map` on the maximal fixture asserting no key
-    matches a literal blocklist of those lines' field-name patterns. Own it as its **own T2 sub-bullet**,
-    named, not gestured at.
+    matches a literal blocklist of those lines' field-name patterns.
+  - **★ SCOPE (narrow re-check) — (ii) EXCLUDES 2g and the two §3 lines.** As first written it said
+    "every Part I line 2c–2t and line 3", which **contradicts §3**: 2k and line 3 are exactly the lines
+    §3 gives leaves to (`capital_loss_carryforward_in`; `mortgage_interest_1098`, which
+    `maximal_fixture` primes at `dec!(1)`, `coverage.rs:110`). Correct scope: *every Part I line 2c–2t
+    and line 3 **except 2g** (guard (i)) **and except 2k and 3** (§3's declarations)*. For those two the
+    guarantee is §3's ternary plus T3's per-declaration refuse KATs — if a leaf assertion is wanted
+    there, blocklist only an AMT-twin name pattern (`*_amt*`), never the regular-side field.
+  - **★ LOCATION (narrow re-check) — this KAT lives in `coverage.rs` and is owned by T3, not T2.**
+    `leaf_map` is a **private** fn (`coverage.rs:68`) inside `#[cfg(test)] mod coverage;`
+    (`spec/mod.rs:8`) — invisible outside that file and non-existent when the crate builds as a
+    dependency. Put the KAT beside `every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt`
+    (`:154`), where `leaf_map` and `maximal_fixture` are in scope. T3 already edits `coverage.rs` (§4).
+  - **Residual, worth one sentence in the KAT's doc:** leaves nested inside an absent `Option` or an
+    empty Vec never appear in `leaf_map`'s output, so the blocklist only bites on leaves the maximal
+    fixture realizes.
 
 ---
 
@@ -249,8 +266,11 @@ building it.
 - [ ] MFS kicker in **both** `form6251.rs` and `amt.rs` — in the screen it goes on `line5`, after the
       state-refund subtraction and before the exemption test, so it also feeds the phase-out (r2 Minor).
 - [ ] KATs: every §8 vector; phase-out boundaries; the 26/28 breakpoint; MFS kicker boundaries
-      ($875,950 / $1,142,550); line 6 ≤ 0; line 1's negative branch; the §5 adjustment-set KAT; the two
-      §6 exhaustiveness guards; the rounding-order KAT.
+      ($875,950 / $1,142,550); line 6 ≤ 0; line 1's negative branch; the §5 adjustment-set KAT; and
+      **§6 guard (i) only** — the §57(a)(5) PAB-refusal KAT.
+      ★ narrow re-check: **guard (ii) moves to T3** (it must live in `coverage.rs`, see §6) and the
+      **rounding-order KAT moves to T7** (§2 re-scoped it to the printed layer, and nothing prints a
+      6251 in Tier 1).
 - [ ] **Mutations:** delete the line-2b subtraction ⇒ the V7 KAT reds. Delete the MFS kicker ⇒ the V8 KAT
       reds.
 
@@ -276,6 +296,13 @@ building it.
       target population, and is worth strictly more than the test it replaces. `sweep_check_reconciliation`
       then asserts emptiness; `admitted >= 10` moves by one. r2's "do not delete" attaches to the **test
       function**, not the constant.
+      ★ narrow re-check — **the inversion needs `--check` mode.** `all_reconciled` / `reproduction_ok`
+      exist only there (`main.rs:466-473`); DEFAULT mode returns `{"refused", "lines"}` only
+      (`:156-163`). So switch the call to `run(&["--check"], raw_household(name))` — the **whole**
+      household, not `["inputs"]` — rename off `_in_default_mode`, and assert `refused == false &&
+      all_reconciled && reproduction_ok`. Also **rewrite `EXPECTED_REFUSED`'s doc comment**
+      (`smoke.rs:91-97`), whose stated rationale T3 falsifies: record that the constant is empty **by
+      design** and that its emptiness is the proof T3 un-refused the screen-tripping zero-AMT population.
 - [ ] **Mutations:** revert to the blanket refusal ⇒ the V1 KAT reds. Replace `line7 > line10` with
       `amt > 0` ⇒ the **V9** KAT reds.
 
@@ -335,7 +362,9 @@ of $307,200 = $300,000 W-2 box 2 + $7,200 mandatory Additional-Medicare withhold
 
 - **T6** — bundle `f6251.pdf` (2024) + `f6251.map.toml`; every mapped field verified present.
 - **T7** — the emitter: a **field→AcroForm mapping** from the T2 struct, including lines 8/9/10. Read-back
-  via `verify_flat`; byte-reproducible golden for V5.
+  via `verify_flat`; byte-reproducible golden for V5. ★ narrow re-check — **also the rounding-order
+  KAT** (moved from T2): the printed 6251 cross-foots over **already-rounded** lines (Reading A), not
+  `round_dollar(exact_total)`.
 - **T8** — line 11 → Sch 2 L2 → L3 → 1040 L17 → L18 → L24 → amount owed. **KAT asserts BOTH the absolute
   chain (`AbsoluteReturn.amount_owed`) and the printed L24**, so a one-sided fix reds (r2 I-8).
 - **T9** — attach iff line 7 > line 10, with a **skip KAT + mutation** (r2 I-10: "no 6251 in the packet"
@@ -380,12 +409,19 @@ chose "mark all three `#[non_exhaustive]`, cheap because `no-users-yet`". It is 
 
 `no-users-yet` makes the major bump free, which is exactly why it is the right side to spend. If a
 `#[non_exhaustive]` is still wanted later, restrict it to **`AbsoluteReturn`** — every literal is
-in-crate (`return_1040.rs:1287,3760`; `printed.rs:1270,2132,2358`). **Tier 2 MINOR.**
+in-crate (`return_1040.rs:1287,3760`; `printed.rs:1270,2132,2358`).
+
+**★ Tier 2 is MAJOR too (narrow re-check).** The label was not updated when this decision flipped: with
+`Schedule2Lines` staying a plain struct, §4's Tier-2 addition of `line2`/`line3` **E0063s** the
+cross-crate literal at `btctax-forms/tests/full_return_forms.rs:430`, which is breaking. Free under
+`no-users-yet`.
+
+**★ `Form6251` may carry `#[non_exhaustive]`** (§2's sketch) — *not* a contradiction with the above,
+because §11's case rests entirely on **pre-existing downstream sites** and a brand-new type has none.
+Consequence to honour: **T7's V5 golden must obtain its `Form6251` from core** (the computed vector or a
+`testonly` builder), never a struct literal.
 
 **Behaviour changes to disclose:** previously-refused returns now compute; and stored returns carrying a
 1098 or a capital-loss carryforward now **refuse until the new declarations are answered — or, if
 answered adversely, refuse permanently** (§3's ternary; r3 Minor: the earlier wording said only "until
 answered", which is false for the adverse branch).
-
-**Second behaviour change to disclose:** stored returns carrying a 1098 or a capital-loss carryforward
-now **refuse** until the new declarations are answered.
