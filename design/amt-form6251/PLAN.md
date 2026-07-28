@@ -136,6 +136,46 @@ carryover the same as your regular one?", "is this a principal or qualified seco
 
 ---
 
+## 3.5 — ★ Lines 7–11 and the attach test (RESTORED 2026-07-28)
+
+**This section existed before the transcription restructure and the restructure silently deleted it,
+while leaving eight references to "line 7 > line 10" elsewhere in the plan.** Three review rounds missed
+it — including one lens explicitly tasked with finding what the rewrite lost. It is Critical by this
+plan's own rule: a builder is told to compare line 7 against line 10 and never told what line 10 is, and
+the obvious guess (1040 **L24**, "total tax") overstates AMT by NIIT + Additional Medicare — **$25,750 on
+V1 alone** (r2 I-1). Verbatim text is T1's job; this fixes the structure and the scope calls.
+
+- **Line 7** — two branches, and the routing matters: complete **Part III** (and enter its line 40 here)
+  when there are capital-gain distributions on 1040 L7, qualified dividends on 1040 L3a, **or** a gain on
+  **both** Schedule D lines 15 and 16 *as refigured for the AMT*. Every btctax filer with a net LTCG takes
+  that branch. **All others** take the flat 26%/28% on line 6 with the $4,652 ($2,326 MFS) subtrahend —
+  transcribe both; do not assume Part III always runs.
+- **Line 8** — the AMT foreign tax credit. For the ≤$300/$600 §904(j) elector this equals Schedule 3
+  line 1, which is why net AMT is FTC-invariant — but lines 8/9/10 each print differently, so it must be
+  computed, not cancelled (r2 I-1).
+- **Line 9** — tentative minimum tax = line 7 − line 8. **This, not line 7, is the form's "Tentative
+  minimum tax"** — hence §2's naming rule.
+- **Line 10** — ★ the definition that vanished. It is **1040 L16 minus any Form 4972 tax, plus Schedule 2
+  L1z, minus Schedule 3 L1, minus any negative Form 8978 line-14 amount (as a positive)**, floored at 0,
+  and with L16 **refigured without Schedule J** if Schedule J was used. **Not 1040 L24.**
+  Scope: Form 4972 (lump-sum distributions), Form 8978 (partner audit adjustments) and Schedule J
+  (farm/fishing averaging) are inputs **v1 has no surface for**, so each term is structurally 0 — but T1
+  transcribes all four and records that classification under §6's guard, rather than letting this plan's
+  shorthand become the implementation.
+- **Line 11** — AMT = line 9 − line 10, floored at 0 ("if zero or less, enter -0-"), → **Schedule 2
+  line 2**. The `max(0, …)` is the form's own instruction, now cited rather than invented.
+
+**The attach test is Who Must File condition 1 — line 7 > line 10** (i6251, r1-verified), *not* line 9 vs
+line 10 and *not* `AMT > 0`. Note it compares **line 7**, before the FTC subtraction, which is precisely
+why the window exists where AMT is $0 and the form must still be attached, and why V9 needs its own
+line 7 / line 10 columns (§8). Per §2, that comparison uses the **exact** values.
+
+*How this was found: by opening the PDF to start T1. The rule catches its own author — §0 forbids the
+plan from quoting line texts from memory, and this section is what happens when a restructure paraphrases
+away a section instead of transcribing it.*
+
+---
+
 ## 4. Files
 
 **Tier 1 — the form**
