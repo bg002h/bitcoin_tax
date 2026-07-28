@@ -299,18 +299,50 @@ the residue.
 
 - **[done] AMT screen worksheet line 2** — fixed in `fix/amt-screen-line2` (`731228c`). See that commit;
   the defect was reading Schedule A line 7 as the itemized total.
-- **[open] Compute Form 6251 instead of refusing.** *The* headline finding. The simulated taxpayer owes
-  **$0 AMT** — tentative minimum tax $327,965 against regular tax $364,675.50, a **$36,710.50** margin
-  that survives zeroing the entire exemption — yet btctax refused the whole return and wrote no forms at
-  all. Structurally, AMT is unreachable for a filer like this: §55(b)(3) taxes the capital gain at 20% in
-  both systems, so AMT can only bite on the ordinary side, where a 37% marginal regular rate already
-  beats the AMT's 28% ceiling. Swept across charitable gifts from $0 to $1,000,000, the margin never
-  closes (narrowest **$13,349** at a $600,000 gift). Meanwhile the refusal threshold is low: worksheet
-  line 11 > $232,600, i.e. (MFJ, no QBI) whenever AGI less non-SALT itemized exceeds about **$365,900**.
-  Scope: across btctax's entire in-scope input set every 6251 adjustment except line 2a is either refused
-  upstream or never captured, so AMTI = taxable income + the line-2 add-back, and Part III is the §1(h)
-  stack already computed. Roughly fifteen lines of arithmetic over values already in `AbsoluteReturn`.
-  Owning phase: whenever the full-return feature is next opened.
+- **[open] Compute Form 6251 instead of refusing — TWO TIERS, see `design/amt-form6251/PLAN.md`.**
+  *The* headline finding, and it grew after further analysis on 2026-07-27.
+
+  **Tier 1 — the zero-AMT case.** The originally-simulated taxpayer ($1M wages / $500k LTCG / MFJ) owes
+  **$0 AMT** — TMT $327,965 against regular tax $364,675.50, a **$36,710.50** margin — yet btctax refused
+  the whole return and wrote no forms at all. The refusal threshold is low: worksheet line 11 > $232,600,
+  i.e. (MFJ, no QBI) whenever AGI less non-SALT itemized exceeds about **$365,900**. Because Form 6251
+  need not be *attached* when AMT is $0 ("Who Must File" is not met) and Schedule 2 L2 → L3 → 1040 L17 are
+  all already $0 in v1, **the printed forms for a zero-AMT filer are byte-identical to today's** — the
+  whole change is to stop refusing. No PDF asset, no map, no emitter.
+
+  **★ Tier 2 — AMT is genuinely owed by a large slice of the target audience.** Do NOT ship Tier 1
+  believing it closes this. Mapping the (wages × gain × donation) space produced a clean rule:
+
+  > AMT is owed when the exemption is FULLY phased out (AMTI ≥ **$1,751,900** MFJ) **and** ordinary
+  > taxable income is below **$769,139**.
+
+  The gain phases out the exemption; the wages decide the outcome. Below the crossover the graduated
+  regular brackets are cheaper than AMT's flat 26/28%, so TMT wins. Worked grid (MFJ, standard deduction,
+  no donation) — AMT owed, in dollars:
+
+  | wages ＼ gain | $1M | $2M | $5M | $10M | $25M |
+  |---|---:|---:|---:|---:|---:|
+  | $100,000 | — | 22,916 | 22,916 | 22,916 | 22,916 |
+  | $300,000 | — | 29,731 | 29,731 | 29,731 | 29,731 |
+  | $500,000 | 9,997 | 30,779 | 30,779 | 30,779 | 30,779 |
+  | $700,000 | 12,186 | 15,818 | 15,818 | 15,818 | 15,818 |
+  | $900,000+ | — | — | — | — | — |
+
+  **This is btctax's archetypal user**: a salaried engineer who sells a large Bitcoin position. At
+  $250,000 of wages and a $2M gain the AMT is about **$28,000** — mandatory, and Tier 1 alone would still
+  refuse them. Exposure is bounded (it plateaus once the exemption is gone, because §55(b)(3) taxes the
+  gain at 20% in both systems so further gain cancels) and peaks near **$24,615** at ~$384,000 of ordinary
+  taxable income, but it must be filed. Tier 2 therefore needs the real thing: PDF asset, AcroForm map,
+  emitter, and Schedule 2 L2 wired through to 1040 L17.
+
+  **Donations are non-monotonic** and defeat any rule of thumb: at $1M wages / $10M gain a gift above
+  ~$230,861 *creates* an AMT liability (each charitable dollar cuts regular tax 37¢ but TMT only 28¢, so
+  9¢ is clawed back), while in the low-wage/high-gain cells a large enough gift *removes* AMT by shrinking
+  AMTI enough to restore part of the exemption.
+
+  **Retracted:** an earlier note in this entry claimed AMT was "structurally unreachable" and that the
+  margin "never closes". That was true only for the $1.5M-AGI scenario it was derived from. It does not
+  generalize, and the grid above is the counterexample. Superseded by the rule stated here.
 - **[open] Schedule D lines 17 and 20 are determinable, not "out of scope".** The crypto-slice export
   leaves them blank and tells the filer to complete them by hand, but both are Yes/No routing boxes fully
   determined by data already in the packet: L17 = Yes (both L15 and L16 are gains), L20 = Yes → use the
