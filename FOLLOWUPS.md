@@ -358,6 +358,52 @@ the residue.
   renders as "Form 1040" showing $500,000 on line 7 and a blank line 1a — for a taxpayer with $1,500,000
   of income. The stderr note says only two fields were filled, but the artifact outlives the note. A
   document that looks filable and understates income by $1,000,000 if mistaken for one.
+### G-5 — ★★★ CONSTELLATION AUDIT: transcribe IRS forms, never paraphrase them (2026-07-27)
+
+**The rule is now normative in `CLAUDE.md`.** One field per numbered line, in the form's own numbering,
+with the official instruction text verbatim as the doc comment. A derived/closed form is allowed only
+with a written equivalence proof naming the branch where it breaks **and** a KAT pinning that branch.
+
+**Why this is a whole-codebase concern, not an AMT concern.** Every defect in the 2026-07-27 AMT
+sequence — one shipped in v0.9.0–v0.13.0, five more caught in review — was a line never typed in, never
+a hard tax question: the screening worksheet compressed to `AGI − QBI` (and Schedule A line **7**
+conflated with line **17**); Form 6251 line 2b dropped; the MFS line-4 kicker dropped; three review
+rounds spent on a Part III question line 20 answers in one sentence; "attach when AMT > 0" instead of
+Who Must File condition 1. **Compression always looks like good engineering.** It is where the bugs
+live, because the dropped term is invisible once the lines are gone — and two of these compressions
+carried confident equivalence comments that were simply wrong.
+
+**Audit method.** For every module implementing an IRS form, schedule, or **worksheet**, classify:
+`TRANSCRIBED` (line-per-line, instruction text present) · `COMPRESSED-PROVEN` (closed form + written
+equivalence proof + a KAT on the breaking branch) · `COMPRESSED-UNPROVEN` (**a finding**). Worksheets
+count — the AMT screen and the QDCGT worksheet are both worksheets and both were compressed.
+
+**Prime suspects, from a first pass (line-reference density vs. compression language):**
+
+- **`tax/se.rs` — strongest signal, verified.** Implements Schedule SE with **zero** line references,
+  written entirely in statute terms (§1402(a), §1401, the 92.35% factor). May well be arithmetically
+  right; it is **unauditable against the form**, which is the risk. Highest priority.
+- **`tax/method.rs::qdcgt_line16`** — the Qualified Dividends & Capital Gain Tax Worksheet as a closed
+  form (`l23 = worksheet_tax(bottom) + split.tax  // L22 + (L18 + L21)`), whose own doc admits "two
+  locked subtleties". This worksheet is *also* what Form 6251 Part III lines 20/27 read from, so an
+  error here propagates into AMT.
+- **`tax/amt.rs`** — the known case. Partially fixed in `fix/amt-screen-line2`; the screening worksheet
+  is still evaluated as a reduction rather than transcribed, and still lacks the MFS line-4 kicker.
+- **`tax/compute.rs::preferential_tax`** — the §1(h) band primitive shared by the regular return and
+  (soon) 6251 Part III. Rounds once to cents where the forms round per line.
+- **`tax/qbi.rs`** — first pass flagged it, spot-check **cleared** it: the "simplif" hits are Form 8995's
+  own name ("the simplified §199A deduction"), not compression language.
+- **`tax/other_taxes.rs`** (Forms 8959/8960), **`tax/charitable.rs`** (§170 limits + carryover
+  worksheets), **`tax/return_1040.rs`** — check.
+
+**The exemplar to follow:** `tax/printed.rs` — 184 line references, zero compression language. The
+printed chain already does exactly what this rule asks; the *computation* chain is where the
+paraphrasing lives.
+
+**Owning phase:** its own cycle, after the Form 6251 work (`design/amt-form6251/PLAN.md`) lands — that
+build is the rule's first application and will establish the pattern. Do not batch this into another
+feature; a wrong finding here is a wrong filed number.
+
 - **[open] Full-return computation is TY2024-only.** `report --tax-year 2025` refuses with "full-return
   computation is not supported for 2025 in this version (v1 supports TY2024)" even though `SUPPORTED_YEARS`
   bundles 2025 forms and the crypto-slice path fills them. Worth a roadmap decision, not just a refusal.

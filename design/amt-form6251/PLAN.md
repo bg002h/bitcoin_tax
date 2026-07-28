@@ -1,125 +1,188 @@
 # Form 6251 (AMT) — staged implementation plan
 
-**Status:** DRAFT, pre-review. Not build-ready until it passes the §2 independent review loop to
+**Status:** r1-FOLDED, awaiting re-review. Not build-ready until the §2 review loop reaches
 0 Critical / 0 Important, per `STANDARD_WORKFLOW.md`.
 
 **Goal (one sentence):** stop refusing returns over the AMT screen — first by computing Form 6251
-internally and proceeding when AMT is $0 (**Tier 1**), then by filling and attaching the real form when
-AMT is genuinely owed (**Tier 2**).
+internally and proceeding when no attachment is required (**Tier 1**), then by filling and attaching the
+real form when it is (**Tier 2**).
 
-**Base:** `main` after `fix/amt-screen-line2` merges. **Lineage:** `FOLLOWUPS.md` §G-4.
+**Base:** `main` after `fix/amt-screen-line2`. **Lineage:** `FOLLOWUPS.md` §G-4.
+**Review history:** r1 = Fable × 4 tax lenses + Opus × 1 plan lens, adjudicated by Fable, against the
+fetched 2024 `f6251`/`i6251`/`i1040gi` PDFs → **5 Critical, 12 Important**, all folded here. Reviews are
+persisted verbatim in `design/amt-form6251/reviews/`.
 
 ---
 
 ## 1. Why, and why two tiers
 
-btctax v1 does not compute AMT. It runs the official 2024 *"Worksheet To See if You Should Fill in Form
+btctax v1 does not compute AMT. It runs the official *"Worksheet To See if You Should Fill in Form
 6251"* and, when that worksheet says a 6251 is required, **refuses the entire return and writes no forms
-at all**. The worksheet answers *"must you fill in Form 6251?"*, never *"do you owe AMT?"* — so every
-filer above a low threshold is turned away regardless of whether any AMT exists.
+at all**. The worksheet answers *"must you fill in Form 6251?"*, never *"do you owe AMT?"*
 
-Two distinct populations sit behind that one refusal, and they need different work:
+| | Who | What they need |
+|---|---|---|
+| **Tier 1** | Form 6251 line 7 ≤ line 10 ⇒ **no attachment required** | Stop refusing |
+| **Tier 2** | Line 7 > line 10 ⇒ **Form 6251 must be attached** | A filled, attached form |
 
-| | Who | What they need | Printed output |
-|---|---|---|---|
-| **Tier 1** | AMT computes to **$0** | Stop refusing | **Byte-identical to today** — Sch 2 L2→L3→1040 L17 are already $0 |
-| **Tier 2** | AMT is genuinely **owed** | A filled, attached Form 6251 | New form in the packet; Sch 2 L2 → L3 → 1040 L17 |
+Tier 1 is cheap because when no attachment is required, Schedule 2 L2 → L3 → 1040 L17 are all $0 and the
+printed packet is what a correct engine would already emit. **This is asserted in T4 against a
+hand-built expected packet, not by comparing to today's output — today writes no packet at all.**
 
-**Tier 1 is cheap precisely because Form 6251 need not be attached when AMT is $0** — the "Who Must
-File" test is not met. No PDF asset, no AcroForm map, no emitter. The change is a computation plus a
-refusal-condition edit.
-
-**Tier 2 is not optional, and Tier 1 must not be mistaken for closing G-4.** Mapping the
-(wages × gain × donation) space produced this rule:
+**★ Tier 2 is not optional, and Tier 1 must not be read as closing G-4.** The trigger rule:
 
 > AMT is owed when the exemption is **fully phased out** (AMTI ≥ $1,751,900 MFJ) **and** ordinary
-> taxable income is below **$769,139**.
+> taxable income is below the crossover.
 
-The gain phases out the exemption; the wages decide the outcome. Below the crossover the graduated
-regular brackets are cheaper than AMT's flat 26/28%, so TMT wins. **A salaried engineer who sells a large
-Bitcoin position is squarely inside that region** — at $250,000 of wages and a $2M gain the AMT is about
-$28,000. That is btctax's archetypal user, and Tier 1 alone still refuses them.
+**The crossover is add-back dependent** (r1 I-3 — an earlier draft quoted one figure as if universal):
+≈ **$769,139** with a zero add-back, ≈ **$800,250** for a SALT-capped itemizer, ≈ **$859,983** for a
+standard-deduction filer. Below it the graduated brackets are cheaper than AMT's flat 26/28%; above it
+the 37% bracket wins. **Exposure peaks are also add-back dependent**: $24,619 at ordinary TI $383,900
+with a zero add-back, rising by 0.28 × add-back to **$32,795** for a standard-deduction filer.
 
-Exposure is bounded: once the exemption is gone, further gain cancels (§55(b)(3) taxes it at 20% in both
-systems), so AMT plateaus and peaks near **$24,615** at ~$384,000 of ordinary taxable income.
+A salaried engineer selling a large Bitcoin position sits squarely inside that region — at $250,000 of
+wages and a $2M gain the AMT is **$26,271.00** (r1 C-2: an earlier draft said "≈$28,000", which is within
+rounding of $27,731 — the figure the *wrong* Part III reading produces. Never approximate a vector).
 
 ---
 
 ## 2. Scope boundary
 
-**In scope:** Form 6251 Parts I–III for the inputs v1 already accepts; the refusal split; Schedule 2
-line 2 plumbing (Tier 2); the PDF asset, map and emitter (Tier 2).
+**In scope:** Form 6251 Parts I–III including lines 8–10, for the inputs v1 accepts; the refusal split;
+Schedule 2 line 2 (Tier 2); the PDF asset, map and emitter (Tier 2).
 
-**Explicitly OUT of scope** — each is either refused upstream today or an input v1 never captures, and
-each must **stay** refused/absent so the AMTI derivation in §3.1 remains exhaustive:
-§57(a)(5) private-activity-bond interest (refused via 1099-INT box 9 / 1099-DIV box 13) · §56(b)(3) ISO
-exercise · §57(a)(7) §1202 exclusion · §163(d)/§4952 investment interest · §56(a)(1) post-1986
-depreciation · NOL/ATNOL · estate & trust K-1 adjustments · §56(a)(6) disposition basis differences ·
-§57(a)(1) depletion · §57(a)(2) IDC · §56(a)(3) long-term contracts · pre-1987 installment sales.
+**Out of scope — refused upstream or uncapturable, and each must STAY so** for §3.1 to be exhaustive:
+§57(a)(5) PAB interest · §56(b)(3) ISO · §57(a)(7) §1202 · §163(d)/§4952 investment interest ·
+§56(a)(1) depreciation · NOL/ATNOL · estate & trust K-1 · §56(a)(6) dispositions · §57(a)(1) depletion ·
+§57(a)(2) IDC · §56(a)(3) long-term contracts · pre-1987 installment sales.
 
-**Form 8801 (prior-year minimum tax credit) is out of scope, and §3.4 argues no obligation to it
-arises.** That argument is load-bearing and the review must confirm it.
+**★ Two items are NOT covered by that dichotomy and need their own handling** (r1 I-5, I-6):
+
+- **Line 2k — an AMT-divergent capital-loss carryover.** `capital_loss_carryforward_in` is a declared,
+  externally-originated input: neither refused nor uncapturable. btctax cannot know whether the filer's
+  AMT carryforward differs. Requires an explicit **declaration** (equal-for-AMT? unknown ⇒ refuse),
+  mirroring the existing unanswered-question pattern. Direction if ignored: **understates**.
+- **Line 3 — mortgage interest on a non-qualified dwelling.** §56(b)(1)(C) adds back interest on a
+  dwelling that is not a principal or qualified second residence (houseboat, RV, transient use). The
+  `mortgage_interest_1098` input carries no dwelling question. Requires a **declaration** (None ⇒
+  refuse), mirroring `mortgage_all_used_to_buy_build_improve`. Direction if ignored: **understates**.
+
+**Form 8801 is out of scope and §3.5 argues no NEW obligation arises.** (A pre-btctax 8801 carryforward
+is a separate, already-unsupported input.)
 
 ---
 
 ## 3. The computation
 
-### 3.1 AMTI — already exact
-
-After `fix/amt-screen-line2`, worksheet line 3 **is** AMTI for every input v1 accepts:
+### 3.1 AMTI (Form 6251 lines 1–4)
 
 ```
-AMTI = taxable_income_L15 + amt_worksheet_line2(itemized?, standard_deduction, schedule_a_line7)
+line1 = taxable_income_L15                                  // "if zero or less, enter -0-"
+line2a = amt_worksheet_line2(itemized?, standard_deduction, schedule_a_line7)   // §56(b)(1)(A)(ii)/(E)
+line2b = − state_refund_taxable                             // ★ r1 C-3: NEGATIVE. i6251 p.5.
+AMTI  = line1 + line2a + line2b  ( + the MFS kicker, §3.2 )
 ```
 
-`amt_worksheet_line2` (`tax/amt.rs`) returns Schedule A **line 7** (capped SALT, §56(b)(1)(A)(ii)) for an
-itemizer, or the whole standard deduction (§56(b)(1)(E)) otherwise. Those are the only two §56(b)(1)
-add-backs reachable in v1; §2's exclusion list is why. The §199A deduction is **allowed** for AMT
-(§199A(f)(2)), so it stays subtracted.
+**★ r1 C-3.** An earlier draft wrote `AMTI = taxable_income + add-back` and dropped line 2b — it
+reproduced screening-worksheet lines 1–3 and lost lines 4–5. The input is live:
+`ri.sch1.state_refund_taxable` (`return_inputs.rs:317`), used at `return_1040.rs:668, 736, 1112`, and the
+existing screen already subtracts it. Omitting it **overstates** AMTI ⇒ over-refuses in Tier 1 and files
+an overstated Schedule 2 L2 in Tier 2. Note line 2b sits **outside** Who-Must-File condition 4's "lines
+2c through 3", so it never by itself forces an attachment.
 
-### 3.2 Exemption and taxable excess
+`amt_worksheet_line2` (`tax/amt.rs`) is reused verbatim. §199A stays subtracted (§199A(f)(2); line 1
+starts net of QBI and there is no add-back line) — r1 CONFIRMED.
 
-`AmtParams` (`tax/tables.rs`) already carries, per year and per status, `exemption_*`, `phaseout_start_*`
-and `breakpoint_28pct*`. The phaseout arithmetic already exists in `amt_should_file_6251` and moves to the
-new module:
+### 3.2 Exemption and taxable excess (lines 4–6)
 
 ```
-exemption      = max(0, base_exemption − 0.25 × max(0, AMTI − phaseout_start))
-taxable_excess = AMTI − exemption                                   // Form 6251 line 6
+// ★ r1 C-4 — the MFS line-4 kicker. i6251 p.9, verbatim:
+//   "If your filing status is married filing separately and line 4 is more than $875,950, you must
+//    include an additional amount on line 4. If line 4 is $1,142,550 or more, include an additional
+//    $66,650. Otherwise, include 25% of the excess of the amount on line 4 over $875,950."  (§55(d)(3))
+if status == Mfs && line4 > mfs_kicker_start {
+    line4 += min(0.25 * (line4 − mfs_kicker_start), mfs_kicker_max)
+}
+exemption      = max(0, base − 0.25 * max(0, line4 − phaseout_start))
+taxable_excess = max(0, line4 − exemption)          // line 6; ≤ 0 ⇒ enter 0 on 7, 9 and 11
 ```
 
-### 3.3 Part III — ★ THE ONE GENUINELY UNRESOLVED PIECE
+MFS is a live status (`types.rs:13`). Omitting the kicker understates AMTI by up to $66,650 ⇒ TMT by up
+to ~$18,662 ⇒ **understated filed tax** — the only finding in this plan whose error direction is
+understatement. `mfs_kicker_start` ($875,950) and `mfs_kicker_max` ($66,650) join `AmtParams`.
+**The existing screen lacks the kicker too and is fixed in the same task.**
 
-Part III taxes the capital gain at §1(h) rates and the remainder at 26/28%. The unresolved question is
-**where the gain's rate bands are positioned**.
+### 3.3 Part III — SETTLED (r1 C-1)
 
-During the analysis that produced this plan I computed two different answers for the same taxpayer
-($1M wages / $10M gain / $1M donation): **$75,812.50** stacking the gain at its *regular-return* ordinary
-position, and **$55,897.50** stacking it on the *AMT* ordinary slice. That is a $19,915 spread on one
-return. Reading the 2024 form, Part III line 20 pulls **"the amount from line 5 of the Qualified Dividends
-and Capital Gain Tax Worksheet"** — a figure from the **regular** computation — which indicates the bands
-are positioned by the regular bottom, making $75,812.50 the correct one. **This is stated from a reading
-of the form layout, not from a verified implementation, and Task 1 must settle it against the actual
-2024 Form 6251 and its instructions before any other task proceeds.**
+An earlier draft posed this as "$75,812.50 vs $55,897.50". **That was a false dichotomy — both are
+wrong.** The form does two independent things:
 
-Consequence if we get it wrong: TMT is misstated by up to five figures, which flips the AMT decision for
-anyone near the crossover — and §1's rule says a large population sits near it.
+**(a) Bands are positioned by the REGULAR return.** Line 20: *"Enter the amount from line 5 of the
+Qualified Dividends and Capital Gain Tax Worksheet … **(as figured for the regular tax)**."* Line 27
+repeats it for the 20% band. Contrast line 13's *"(as refigured for the AMT, if necessary)"* — the gain's
+**amount** is AMT-side; its band **positions** are regular-side.
 
-An earlier idea of using the regular-position stack as a cheap *upper bound* (clear the bound ⇒ AMT is
-certainly $0, skip exact Part III) **must not be adopted**: the bound is only valid while the add-back is
-smaller than the exemption, and it fails exactly where the margin is thinnest — at $1M wages / $10M gain
-the exemption is $0 while the add-back is $29,200. Compute Part III exactly.
+**(b) The preferential slice is CAPPED at the taxable excess.** Line 16: *"Enter the **smaller** of line
+12 or line 15."* Line 22: *"Enter the **smaller** of line 12 or line 13."* Line 17 = L12 − L16 floors the
+26/28% slice at 0. And when line 32 = line 12: *"skip lines 33 through 37"* — the 20% tranche never
+engages. Line 40 takes *"the **smaller** of line 38 or line 39."*
 
-The §1(h) primitive already exists: `compute.rs:57 preferential_tax(bp, bottom, pref) -> PrefSplit`.
+```
+excess      = line6
+pref        = min(excess, net_capital_gain + qual_div)        // L13/L15/L16, L22
+ord_slice   = max(0, excess − pref)                           // L17
+line38      = tax26_28(ord_slice) + preferential_tax(REGULAR bottoms, pref)
+line39      = tax26_28(excess)
+TMT         = min(line38, line39)                             // L40
+```
 
-### 3.4 Why no Form 8801 obligation arises
+`preferential_tax(bp, bottom, pref)` already exists (`compute.rs:57`). The excess-<-gain case needs **no
+special code** — L16/L17/L22 and the L32 skip handle it structurally — but it **must** gain a KAT (V2b).
 
-Paying AMT normally creates a §53 minimum tax credit carryforward. It does **not** here: §53(d)(1)(B)
-excludes AMT attributable to **exclusion** preferences from the credit, and v1's only AMT adjustment — the
-§56(b)(1) taxes / standard-deduction add-back — is an exclusion item. Deferral items (ISO, depreciation,
-§56(a)(6)) are all in §2's out-of-scope list. So AMT computed by btctax generates a **$0** credit and no
-Form 8801 is ever required. **Review must confirm this**; if it is wrong, Tier 2 silently creates a
-next-year obligation btctax cannot discharge, and Tier 2 must then refuse instead of filing.
+**The upper-bound shortcut stays rejected, for a corrected reason (r1 I-2).** The regular-position stack
+on the *full* gain IS an unconditional upper bound on line 40 (positions are regular-side; preferential
+tax is monotone in the amount and L16/L22 only shrink it; L40's min only lowers further). The earlier
+draft's rationale — "only valid while the add-back is smaller than the exemption" — is **false**, and
+that misconception is exactly what produced $75,812.50. Reject it instead because Tier 2 must fill lines
+12–40 exactly anyway, T3's refusal message names an exact dollar, and a second approximate path adds
+risk for nothing.
+
+### 3.4 Lines 8–10 and the attach test (r1 I-1)
+
+**The Tier 1 / Tier 2 boundary is Who-Must-File condition 1, not `AMT > 0`.** i6251 p.1: *"Attach Form
+6251 to your return if any of the following statements are true. 1. Form 6251, line 7, is greater than
+line 10."* Only condition 1 is reachable in v1.
+
+```
+line7  = TMT (from §3.3)
+line8  = AMT foreign tax credit; for the §904(j) elector this EQUALS Schedule 3 line 1  (i6251 p.10)
+line9  = line7 − line8
+line10 = 1040 L16 + Schedule 2 L1z − Schedule 3 L1     // ★ NOT 1040 L24
+line11 = max(0, line9 − line10)  → Schedule 2 line 2
+```
+
+Three consequences the earlier draft missed:
+1. **`regular_tax` was undefined.** It is line 10. Passing 1040 L24 would overstate AMT by NIIT +
+   Additional Medicare — $25,750 on V1 alone.
+2. Net AMT is invariant to the FTC (line 8 and line 10's Sch-3-L1 subtraction cancel), but **printed
+   lines 8/9/10 are each wrong by the FTC** if line 11 is filled as `max(0, TMT − regular)`.
+3. There is a window — `1040 L16 − FTC < line7 ≤ 1040 L16` — where **AMT is $0 yet the form must still be
+   attached**. "Proceed with no form" (T3) and "skip when $0" (T9) are both wrong there.
+
+Also per i6251 p.10: *"If the amount on line 10 is greater than or equal to the amount on line 7 … Leave
+line 8 blank and enter -0- on line 11."*
+
+### 3.5 Why no NEW Form 8801 obligation arises — r1 CONFIRMED IN FULL
+
+§53(d)(1)(B)(ii)(I) specifies **all** of §56(b)(1) — the taxes add-back and the standard-deduction
+add-back — as **exclusion** items, which are excluded from the minimum tax credit. Form 8801 Part I line
+15 = the entire AMT; lines 18 and 21 = $0; per i8801 *Who Should File* the filer is not even directed to
+complete the form. The §904(j) FTC cancels symmetrically (i8801 Line 12). Every **deferral** item is in
+§2's out-of-scope list.
+
+**Conditional on** §2's two new declarations (I-5, I-6) and §5's exhaustiveness guard. Carry a
+`debug_assert` that every AMT adjustment applied is a §56(b)(1) exclusion item, plus an 8801-recompute
+KAT asserting $0.
 
 ---
 
@@ -127,132 +190,147 @@ next-year obligation btctax cannot discharge, and Tier 2 must then refuse instea
 
 | File | Tier | Change |
 |---|---|---|
-| `crates/btctax-core/src/tax/form6251.rs` | 1 | **new** — the computation (§3) |
-| `crates/btctax-core/src/tax/amt.rs` | 1 | keep the screen as a cheap pre-filter; `amt_worksheet_line2` is reused verbatim |
-| `crates/btctax-core/src/tax/return_refuse.rs` | 1 | split `AmtScreenTriggered` → `AmtOwed` |
-| `crates/btctax-core/src/tax/return_1040.rs` | 1 | `screen_absolute` calls the computation; `AbsoluteReturn` gains `amt: Amt6251` |
-| `crates/btctax-core/src/tax/printed.rs` | 2 | `Schedule2Lines.line2`, `line3`; `Form6251Lines` |
-| `crates/btctax-forms/forms/2024/f6251.pdf` + `.map.toml` | 2 | **new** asset + AcroForm map |
-| `crates/btctax-forms/src/form6251.rs` | 2 | **new** emitter |
-| `crates/btctax-cli/src/cmd/admin.rs`, `cli.rs` | 2 | packet includes `form_6251.pdf`; `--forms form6251` |
-| `crates/btctax-oracle-harness/src/main.rs` | 1 | stop returning `None` on AMT (`main.rs:705`) — expands the sweep domain |
-| `docs/man/*`, `docs/examples/examples.md` | 2 | regenerate |
+| `btctax-core/src/tax/form6251.rs` | 1 | **new** — §3.1–3.4; emits the full **line vector**, not five scalars (r1 I-8) |
+| `btctax-core/src/tax/amt.rs` | 1 | keep as cheap pre-filter; **add the MFS kicker here too**; reuse `amt_worksheet_line2` |
+| `btctax-core/src/tax/tables.rs` | 1 | `AmtParams` += `mfs_kicker_start`, `mfs_kicker_max` |
+| `btctax-core/src/tax/return_refuse.rs` | 1 | `AmtOwed` (**kept in Tier 2**, trigger narrowed — r1 I-9) + the two §2 declarations |
+| `btctax-core/src/tax/return_1040.rs` | 1 | `screen_absolute` calls the computation; `AbsoluteReturn.amt` |
+| `btctax-input-form/src/attribute.rs` | 1 | ★ r1 I-11 — exhaustively anchors every `RefuseReason` (hand-enumerated test at `:348`) |
+| `btctax-core/src/tax/printed.rs` | 2 | `Schedule2Lines.line2/line3`; `Form6251Lines` |
+| `btctax-forms/forms/2024/f6251.pdf` + `.map.toml` | 2 | **new** asset + map (6251 is **tax-year**-versioned, unlike 8275) |
+| `btctax-forms/src/form6251.rs` | 2 | **new** emitter |
+| `btctax-cli/src/cmd/admin.rs`, `cli.rs` | 2 | packet member; `--forms form6251` |
+| `btctax-cli/src/cmd/…` (report) | 1 | print AMTI / exemption / TMT / AMT so the filer sees the number that un-refused them |
+| `oracle-harness/src/main.rs:704` | 1 | ★ **narrow** to the AMT reason only — it is a combined check over three refusal classes |
+| `scripts/oracle/gen_goldens.py:257`, `scripts/oracle/corpus.py` | 1 | ★ the **binding** AMT exclusions (`c09600 != 0`) + domain caps |
+| `docs/man/*`, `docs/examples/examples.md`, `btctax limitations` | 2 | regenerate; retire the "AMT screen trips" bullet |
 
 ---
 
 ## 5. Global constraints
 
-- **Gate:** `make check` **and** `cargo fmt --all -- --check`, both, from the first commit. Green =
-  suite passes **and** 0 Critical / 0 Important.
-- **Fail-closed is preserved at every step.** No task may make a return computable that was previously
-  refused *unless* the AMT for it is proven $0 or filed. When in doubt, refuse.
-- **Never understate.** If Part III is uncertain for an input, refuse rather than guess low.
-- Whole-dollar rounding per SPEC §3.1; the printed chain rounds at the line and re-adds rounded lines.
-- No new external dependency. No network.
-- Per-year figures come from `AmtParams`; **no literal AMT constant may appear outside the tax tables.**
+- **Gate:** `make check` **and** `cargo fmt --all -- --check`, from the first commit. Green = suite passes
+  **and** 0C/0I.
+- **Fail-closed at every commit.** No task may make a previously-refused return computable unless its
+  Form 6251 line 7 ≤ line 10 is proven, or the form is filed.
+- **Never understate.** C-4 (MFS) and §2's two declarations are the understatement risks; each refuses
+  when unknown.
+- **Every guarantee ships with a test that reds when the guarantee is removed** (T3-style mutation). This
+  project's recorded failure: a correct fix landed and a caller-level revert passed the entire suite.
+- Whole-dollar rounding per SPEC §3.1, per line.
+- **No literal AMT constant outside `AmtParams`** — enforced by a source-scan test in T2 (r1 I-12).
+- **§3.1's exhaustiveness is guarded executably** by a source-scan test asserting §2's out-of-scope list
+  is still refused (r1 I-12).
 
 ---
 
 ## 6. Tier 1 — tasks
 
-### T1 — Part III, settled against the form (BLOCKING; do this first)
+### T1 — pin the oracle BEFORE writing code (BLOCKING)
 
-- [ ] Read the 2024 Form 6251 and i6251 Part III lines 12–40. Write `design/amt-form6251/PART_III.md`
-      recording, line by line, which figures come from the **regular** QDCG/Schedule-D worksheet and which
-      from the AMT base. Resolve the $75,812.50 vs $55,897.50 question in §3.3 with a citation.
-- [ ] Encode the resolution as three KATs against the worked vectors in §8 before writing any code, and
-      watch them fail.
+★ r1 C-5: the earlier gate could not detect a wrong Part III. V1/V3/V4/V6 all have regular ordinary
+bottoms above $583,750, so both readings give identical TMTs — they are **mathematically insensitive**
+and cannot be the canary. And §9's "oracle can't validate AMT" was **false**:
+`scripts/oracle/gen_goldens.py:215` already runs Tax-Calculator and reads `c09600` — an independent Form
+6251 including Part III — which line 257 then discards.
 
-**Deliverable:** the ambiguity is closed in writing, with a failing test per band.
+- [ ] Write `design/amt-form6251/PART_III.md`: lines 12–40 line by line, each tagged AMT-side or
+      regular-side, quoting lines 20/27 *"(as figured for the regular tax)"* against line 13
+      *"(as refigured for the AMT)"*, plus the L16/L22 caps and the L32 skip.
+- [ ] **Derive every §8 vector's TMT from `c09600`**, not by hand, and record them *before* any code
+      exists. Hand figures are the cross-check, not the source.
+- [ ] KATs asserting `tentative_minimum_tax` (**not** `amt` — V2's AMT is $0 under both readings, only
+      its TMT discriminates) on V2, V2b and V5.
+- [ ] Watch them fail.
 
-### T2 — `form6251.rs`: the computation
+### T2 — `form6251.rs`
 
-- [ ] `pub struct Amt6251 { amti, exemption, taxable_excess, tentative_minimum_tax, amt: Usd }`.
-- [ ] `pub fn compute_6251(status, taxable_income, line2_addback, net_ltcg, qual_div, regular_tax,
-      params) -> Amt6251`, composing §3.1–3.3 and reusing `preferential_tax`.
-- [ ] `amt = max(0, TMT − regular_tax)`.
-- [ ] KATs: the §8 vectors, plus the exemption-phaseout boundary ($1,218,700 and $1,751,900 MFJ) and the
-      26/28 breakpoint ($232,600).
+- [ ] The full line vector for Parts I–III (r1 I-8: Part III alone is ~30 printed boxes, and §5 requires
+      per-line rounding). Mark `#[non_exhaustive]` so Tier 2 is not a breaking change.
+- [ ] §3.1 incl. the negative line 2b; §3.2 incl. the MFS kicker; §3.3; §3.4 lines 8–11.
+- [ ] `AmtParams` += the two MFS constants; **fix the existing screen's missing kicker in this task**.
+- [ ] KATs: every §8 vector; the phase-out boundaries ($1,218,700 / $1,751,900); the 26/28 breakpoint
+      ($232,600); the MFS kicker boundaries ($875,950 / $1,142,550); line 6 ≤ 0; line 1 ≤ 0.
+- [ ] The two source-scan guards from §5.
 
-### T3 — refusal split
+### T3 — the refusal split
 
-- [ ] `RefuseReason::AmtOwed` alongside the existing screen reason; message names the computed dollar
-      amount and says v1 cannot yet fill Form 6251.
-- [ ] `screen_absolute`: cheap screen clears ⇒ AMT $0 (unchanged). Screen trips ⇒ compute; `amt == 0` ⇒
-      **proceed**; `amt > 0` ⇒ refuse with `AmtOwed`.
-- [ ] KAT: the §8 zero-AMT vector now **computes** where it previously refused; the §8 AMT-owed vector
-      refuses with `AmtOwed`, not the old reason.
-- [ ] ★ Mutation: revert `screen_absolute` to the blanket refusal — the first KAT must red. (The
-      `fix/amt-screen-line2` experience: two pre-existing AMT tests both used the standard deduction and
-      a caller-level revert passed the whole suite.)
+- [ ] Keep `RefuseReason::AmtOwed`; narrow its trigger to **line 7 > line 10** (r1 I-1, I-9). Message
+      names the exact dollar and says v1 cannot yet fill the form.
+- [ ] Add the §2 declarations (AMT capital-loss twin; qualified dwelling) as unanswered ⇒ refuse.
+- [ ] Screen clears ⇒ AMT $0. Screen trips ⇒ compute; line 7 ≤ line 10 ⇒ **proceed**; else refuse.
+- [ ] ★ r1 I-11 — enumerate every surface un-gated by clearing this Hard blocker (report / harvest /
+      what-if / conservative-promote / TUI) and update `attribute.rs` + their goldens.
+- [ ] ★ Mutation: revert to the blanket refusal — the V1 KAT must red.
 
-### T4 — printed-output invariance
+### T4 — printed-output correctness
 
-- [ ] Assert that for a zero-AMT return the printed 1040/Schedule 2 are **identical** to a
-      hand-constructed expected packet — L17 = 0, Sch 2 L3 = 0, no Form 6251 in the packet.
-- [ ] Regenerate `docs/examples/examples.md` and the TUI goldens; a zero-AMT journey must show no diff
-      beyond the newly-computable return itself.
+- [ ] Assert a no-attachment return's printed 1040/Schedule 2 against a **hand-built expected packet**
+      (r1 non-blocking: "byte-identical to today" is uncheckable — today writes nothing). L17 = 0,
+      Sch 2 L3 = 0, no Form 6251.
+- [ ] ★ r1 I-10 — add a **screen-tripping, no-attachment** journey to the bundled examples. Every current
+      journey is deliberately sized under the screen (`testonly.rs:48–51, 58–59`), so regeneration alone
+      proves nothing.
 
 ### T5 — oracle domain
 
-- [ ] Remove the `return None` at `oracle-harness/src/main.rs:705` for the AMT case; let AMT-screened
-      returns into the differential sweep.
-- [ ] Confirm the sweep still reconciles; record how many previously-skipped households it now covers.
+- [ ] Narrow `main.rs:704` to the **AMT reason only** (r1 I-7 — it currently covers three refusal classes;
+      a blanket delete would admit QBI-over-threshold and TI≤0 returns).
+- [ ] Lift `gen_goldens.py:257`'s `c09600 != 0` rejection and widen `corpus.py`'s caps — these are the
+      binding exclusions.
+- [ ] Assert a **numeric floor** on newly-covered households (r1 non-blocking: "record how many" is not
+      an assertion).
 
-**Tier 1 gate:** full suite green, 0C/0I, and a zero-AMT return exports a complete packet.
+**Tier 1 gate:** suite green, 0C/0I, a no-attachment return exports a complete packet, and §8 reconciles
+against `c09600`.
 
 ---
 
 ## 7. Tier 2 — tasks
 
-### T6 — the asset and its map
+### T6 — asset and map
+- [ ] Bundle official `f6251.pdf` (2024) + `f6251.map.toml`; every mapped field verified present.
 
-- [ ] Bundle the official IRS `f6251.pdf` (2024 revision) and write `f6251.map.toml`, following the
-      `f8275`/`f8949` precedent. Verify every mapped field exists in the AcroForm (the census test).
-- [ ] `Form6251Map::for_year` — note 6251 is **tax-year**-versioned, unlike 8275.
+### T7 — emitter
+- [ ] `btctax-forms/src/form6251.rs` filling Parts I–III from the T2 line vector, **including lines
+      8/9/10** (r1 I-1). Read-back via `verify_flat`; byte-reproducible golden for V5.
 
-### T7 — the emitter
-
-- [ ] `btctax-forms/src/form6251.rs`, filling Parts I–III from `Amt6251` + `ScheduleAParts`.
-- [ ] Read-back verification via `verify_flat`, per the existing forms convention.
-- [ ] Golden-packet KAT: byte-reproducible fill for the §8 AMT-owed vector.
-
-### T8 — Schedule 2 and the 1040
-
-- [ ] `Schedule2Lines.line2` = AMT, `line3` = Part I total → 1040 **L17**; L18 = L16 + L17.
-- [ ] KAT: 1040 L24 total tax now includes AMT; the §8 AMT-owed vector's balance due matches §8.
+### T8 — Schedule 2 and 1040 — r1 CONFIRMED CORRECT
+- [ ] 6251 L11 → *"Enter here and on Schedule 2 (Form 1040), line 2"*; Sch 2 L3 = L1z + L2 → 1040 **L17**.
+- [ ] KAT: V5's balance due with AMT included.
 
 ### T9 — packet and CLI
-
-- [ ] `export-irs-pdf` emits `form_6251.pdf` when `amt > 0`; `--forms form6251` accepted; the form is
-      **skipped** when AMT is $0 (Who Must File).
-- [ ] Remove `RefuseReason::AmtOwed`. Regenerate man pages and examples.
-- [ ] Update `btctax limitations` — the "AMT screen trips" bullet is retired.
-
-**Tier 2 gate:** full suite green, 0C/0I, the §8 AMT-owed vector exports a packet whose Form 6251 and
-1040 L17 agree to the dollar.
+- [ ] Attach iff **line 7 > line 10** (not `AMT > 0`). ★ Tier-2 **skip** KAT with mutation discipline
+      (r1 I-10: "no 6251 in the packet" is vacuous before the emitter exists).
+- [ ] Keep `AmtOwed` for the still-unreachable Who-Must-File conditions; do not delete the variant
+      (r1 I-9 — and deleting a public variant contradicts §10's MINOR).
+- [ ] Regenerate docs; retire the `limitations` bullet.
 
 ---
 
-## 8. Worked vectors (derived during the G-4 analysis; MFJ, TY2024)
+## 8. Worked vectors — MFJ, TY2024
 
-Use verbatim as KATs. Each was computed independently of btctax.
+**★ r1 C-5: T1 derives every TMT from `c09600` before code exists. The figures below are the
+cross-check.** Those marked ✅ were independently recomputed and confirmed in r1.
 
-| # | Wages | LTCG | Donation | Deduction | Taxable income | Regular tax | TMT | **AMT** |
-|---|---:|---:|---:|---|---:|---:|---:|---:|
-| V1 | 1,000,000 | 500,000 | 85,000 | itemized | 1,415,000 | 364,675.50 | 327,965.00 | **0** |
-| V2 | 1,000,000 | 500,000 | 750,000 | itemized | 750,000 | 129,397.50 | see T1 | **0** |
-| V3 | 1,000,000 | 10,000,000 | 0 | standard | 10,970,800 | 2,285,321.50 | 2,275,348.00 | **0** (margin 9,973.50) |
-| V4 | 700,000 | 10,000,000 | 0 | standard | 10,670,800 | — | — | **15,818.50** |
-| V5 | 250,000 | 2,000,000 | 0 | standard | 2,220,800 | — | — | **≈28,000** |
-| V6 | 1,000,000 | 10,000,000 | 250,000 | itemized | 10,750,000 | 2,203,625.50 | 2,205,348.00 | **1,722.50** |
+| # | Wages | LTCG | Gift | Ded | Taxable income | Regular tax | TMT | AMT | Why it exists |
+|---|---:|---:|---:|---|---:|---:|---:|---:|---|
+| V1 ✅ | 1,000,000 | 500,000 | 85,000 | item | 1,415,000 | 364,675.50 | 327,965.00 | 0 | the baseline |
+| V2 ✅ | 1,000,000 | 500,000 | 750,000 | item | 750,000 | 129,397.50 | **113,654.50** | 0 | TMT discriminates the readings |
+| **V2b** ✅ | 1,000,000 | 500,000 | 1,000,000→900,000 | item | 600,000 | 87,918.50 | **70,005.00** | 0 | ★ **excess < gain**: L16 caps, L17 = 0, L32 skip |
+| V3 ✅ | 1,000,000 | 10,000,000 | 0 | std | 10,970,800 | 2,285,321.50 | 2,275,348.00 | 0 | 0.44% margin — but **insensitive** to Part III |
+| V4 ✅ | 700,000 | 10,000,000 | 0 | std | 10,670,800 | 2,175,529.50 | 2,191,348.00 | **15,818.50** | AMT owed, no donation |
+| V5 ✅ | 250,000 | 2,000,000 | 0 | std | 2,220,800 | 420,929.50 | 447,200.50 | **26,271.00** | the archetypal user |
+| V6 ✅ | 1,000,000 | 10,000,000 | 250,000 | item | 10,750,000 | 2,203,625.50 | 2,205,348.00 | **1,722.50** | a donation *creates* AMT |
+| **V7** | — | — | — | — | — | — | — | — | ★ **state refund > 0** (line 2b) — derive in T1 |
+| **V8** | — | — | — | — | — | — | — | — | ★ **MFS** at $875,950 and $1,142,550 — derive in T1 |
+| **V9** | — | — | — | — | — | — | — | — | ★ **FTC > 0**, incl. the attach-with-$0-AMT window — derive in T1 |
+| **V10** | — | — | — | — | — | — | — | — | ★ regular ordinary < $94,050 so the **0% band** engages — derive in T1 |
 
-V3 is the sensitivity canary — a 0.44% margin. V6 is the donation-triggers-AMT case. V1 also pins the
-non-AMT figures the same return must still produce: NIIT $19,000, Additional Medicare $6,750, balance
-due $83,225.50.
-
-**V2's TMT is deliberately left blank**: it is the vector whose value depends on the §3.3 resolution
-($75,812.50 vs $55,897.50). T1 fills it in. Do not guess it.
+V1's non-AMT figures the same return must still produce: NIIT $19,000; Additional Medicare $6,750;
+**balance due $83,225.50 against payments of $307,200 = $300,000 W-2 box 2 + $7,200 mandatory
+Additional-Medicare withholding** (Form 8959 line 24 → 1040 line 25c) — r1 I-4: the figure is ambiguous
+by exactly $7,200 without that composition.
 
 ---
 
@@ -260,16 +338,18 @@ due $83,225.50.
 
 | Risk | Early warning | Mitigation |
 |---|---|---|
-| Part III positioned wrong (§3.3) | V2/V3 KATs disagree with a hand-check | T1 blocks everything; V3's 0.44% margin is the canary |
-| An out-of-scope preference stops being refused, silently breaking §3.1's exhaustiveness | a new 1099/W-2 input lands without an AMT review | a source-scan guard asserting §2's list is still refused |
-| §3.4 is wrong ⇒ Tier 2 creates a Form 8801 obligation | review disputes the exclusion-item argument | Tier 2 refuses instead of filing until 8801 exists |
-| Tier 1 read as closing G-4 | Tier 2 slips indefinitely | this plan; G-4 states both tiers; §1's grid is the evidence |
-| Oracle can't validate AMT | T5 finds the sweep has no AMT coverage | treat §8 as the oracle for Tier 1; extend the harness in Tier 2 |
+| Part III encoded wrong | V2/V2b/V5 disagree with `c09600` | T1 blocks; **V2b** is the discriminating canary (V3 is insensitive) |
+| MFS kicker omitted ⇒ **understated tax** | MFS boundary KATs absent | T2 pins $875,950 / $1,142,550 in both the screen and the computation |
+| An out-of-scope preference stops being refused | a new input lands without an AMT review | §5's source-scan guard (T2) |
+| §2's two declarations skipped ⇒ understatement | a 1098 or carryforward vector with no declaration | T3 refuses when unanswered |
+| §3.5 wrong ⇒ a Form 8801 obligation | review disputes the exclusion-item argument | r1 confirmed it; `debug_assert` + 8801-recompute KAT |
+| Tier 1 read as closing G-4 | Tier 2 slips | §1's grid; G-4 states both tiers |
+| KATs certify a misreading | four of six vectors are insensitive | T1 derives from `c09600` first; V2b/V5/V7–V10 added |
 
 ---
 
 ## 10. SemVer
 
-**Tier 1: MINOR** — new public `Amt6251` / `compute_6251` on `btctax-core`, new `RefuseReason` variant,
-and a behaviour change (returns that refused now compute). **Tier 2: MINOR** — new public emitter, new
-bundled asset, new packet member. Ship each tier as its own release; do not batch.
+**Tier 1: MINOR** — new public `form6251` API (`#[non_exhaustive]` so Tier 2 is additive), new
+`RefuseReason` variants, and a behaviour change (previously-refused returns now compute).
+**Tier 2: MINOR** — new emitter, bundled asset, packet member. Ship each tier separately.

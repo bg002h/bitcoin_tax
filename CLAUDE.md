@@ -25,3 +25,41 @@ Operating reminders (full detail in `STANDARD_WORKFLOW.md`):
   directory, and `FOLLOWUPS.md`. Verify citations against current source at write
   time.
 - **Green** = the full validation suite passes **and** 0 Critical / 0 Important.
+
+## Transcribe IRS forms — never paraphrase them
+
+**Tax forms are designed to be filled out by ordinary people following instructions. If implementing one
+feels hard, you are doing it wrong.** A form never asks you to *derive* anything: it says "enter the
+amount from", "enter the smaller of", "if X, skip to Y".
+
+**The rule.** When implementing or reviewing an IRS form, schedule, **or worksheet**: one field per
+numbered line, named for the line, in the form's own numbering, carrying the official instruction text
+verbatim as its doc comment.
+
+```rust
+/// L20 — "Enter the amount from line 5 of the Qualified Dividends and Capital Gain Tax
+///        Worksheet ... (as figured for the regular tax)."
+pub line20: Usd,
+```
+
+A **derived or closed form is allowed only** with (a) a written equivalence proof that names the branch
+where it breaks, and (b) a KAT pinning that branch. Absent both, transcribe.
+
+**Why this is a standing rule and not a style note.** Every defect in the 2026-07-27 AMT sequence — the
+one shipped in v0.9.0–v0.13.0 and five more found in review — was a line that was never typed in, not a
+hard tax question. The shipped bug reduced the AMT screening worksheet to `AGI − QBI` and conflated
+Schedule A **line 7** (taxes) with **line 17** (itemized total). Later drafts dropped Form 6251 line 2b
+and the MFS line-4 kicker, and spent three review rounds on a Part III question that line 20 answers in
+one sentence. Compression always looks like good engineering; it is where the bugs live, because the
+dropped term becomes invisible once the lines are gone. Two of these compressions carried confident
+equivalence comments that were simply wrong.
+
+**Corollaries.**
+- **If the form asks something our input surface cannot answer, collect it.** That is following
+  instructions, not scope creep.
+- The review gate becomes mechanical: *is every line present, and does each doc comment match the
+  official instruction text?*
+- The PDF emitter becomes trivial — if the struct is the form, filling it is a field→AcroForm mapping
+  with no logic.
+
+An audit of the whole constellation against this rule is open: `FOLLOWUPS.md` §G-5.
