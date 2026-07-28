@@ -1,12 +1,14 @@
 # Form 6251 (AMT) — implementation plan
 
-**Status:** r2-FOLDED and RESTRUCTURED. Awaiting r3 (scoped to the fold only).
+**Status:** r3-FOLDED. Awaiting one NARROW re-check scoped to §2 (rounding layer), §6 (guard ii),
+§11 (SemVer) and T3's `smoke.rs` bullet ONLY — per r3 §5. Everything else is settled; do not re-audit.
 
 **Goal:** stop refusing returns over the AMT screen, by **implementing Form 6251**.
 
 **Base:** `main` after `fix/amt-screen-line2`. **Lineage:** `FOLLOWUPS.md` §G-4.
 **Reviews:** `design/amt-form6251/reviews/` — r1 (Fable, primary-source tax) 5C/12I; r2 (Opus, fold +
-mechanism) 2C/8I. Both folded here.
+mechanism) 2C/8I; r3 (Sonnet checklist + Opus fresh-eyes) **0C/4I** — the restructure closed all seven
+prior Criticals; the four Importants were defects the fold itself introduced. All folded here.
 
 ---
 
@@ -24,7 +26,7 @@ Every defect in this plan's two review rounds was a line that was never typed in
 | the shipped v0.9.0–v0.13.0 bug | screening worksheet reduced to `AGI − QBI`; Sch A line **7** conflated with line **17** |
 | r1 C-3 | line 2b dropped by writing AMTI as a formula |
 | r1 C-4 | MFS kicker dropped — it **is** line 4's instruction text |
-| r1 C-1 | two rounds on a Part III question **line 20 answers in one sentence** |
+| r1 C-1 | two rounds on a Part III question **line 20 answers in one sentence** — and the half that was actually wrong is lines 16/17/22's "smaller of" plus the line-32 skip (r3 Minor: line 20 settles only *positioning*) |
 | r1 I-1 | "attach when AMT > 0" instead of Who Must File condition 1 |
 | r2 C-A | an oracle gate built on `c09600` (the *AMT*) to validate a *TMT* |
 
@@ -73,9 +75,22 @@ Three consequences, and they are the reason for the restructure:
 - **Tier 2 is nearly free.** If the struct *is* the form, the emitter is a field→AcroForm mapping with
   no logic in it. "Compute it" and "file it" stop being separate hard problems.
 
-**Rounding:** whole dollars **per line**, because they are lines (SPEC §3.1). `preferential_tax`
-(`compute.rs:57`) rounds once to cents, so it is reused **only for the band split** (`at_0/at_15/at_20`);
-each band's tax is rounded at its own line. KAT on a vector where the two orders differ by $1 (r2 Minor).
+**★ Rounding — which LAYER `Form6251` is (r3 I-1).** An earlier draft said "whole dollars per line,"
+which contradicted §8's cent-precise vectors and §4's exact `AbsoluteReturn` chain, and would have moved
+§1's own headline exemplar by a dollar (`round_dollar` is half-up, `conventions.rs:37`; V5's L31 =
+54,442.50 rounds to make AMT $26,270 **or** $26,271). The repo already settled this and the plan simply
+failed to cite it — `printed.rs:1-14` + `design/full-return/ROUNDING_AUTHORITY.md` Reading A:
+
+- **`Form6251` carries EXACT cents** and lives in the absolute chain beside `AbsoluteReturn`. §8's
+  figures are that layer; T2's KATs pin them to the cent.
+- **The PRINTED form rounds per line** and cross-foots over already-rounded lines, per `printed.rs`'s
+  existing discipline. T7's byte-reproducible V5 golden pins it. The "two orders differ by $1" KAT
+  belongs to **that** layer.
+- **The Who-Must-File line-7-vs-line-10 comparison uses the EXACT values**, so an attachment can never
+  flip on a rounding tie. This also fixes V9, whose acceptance window is ≤$600 wide.
+
+`preferential_tax` (`compute.rs:57`) rounds once to cents, so it is reused only for the band split
+(`at_0/at_15/at_20`).
 
 ---
 
@@ -99,13 +114,22 @@ surface does not carry — this is **not** scope creep:
 
 r2 caught that the earlier draft specified only the unanswered branch, so an adverse answer would have
 computed with no add-back and **understated** tax. It also caught that the exemplar I told the builder to
-mirror does the opposite: `return_refuse.rs:1006` asserts `reason == None` for `Some(false)`, commented
-*"No brick: the screen does not refuse a truthfully-answered mixed-use return."* **We mirror it only on
-the unanswered half and deliberately diverge on the adverse half** — a zeroed line 8a is conservative; a
-missing AMT add-back is not.
+mirror does the opposite: `return_refuse.rs:1004-1005` asserts `reason == None` for `Some(false)`,
+commented *"No brick: the screen does not refuse a truthfully-answered mixed-use return."* **We mirror it
+only on the unanswered half and deliberately diverge on the adverse half** — a zeroed line 8a is
+conservative; a missing AMT add-back is not.
 
 Liveness predicates: `schedule_a.mortgage_interest_1098 > 0`; `capital_loss_carryforward_in.short > 0 ∨
 .long > 0`.
+
+**★ Mechanism (r3 Minor) — the two branches refuse by different routes:**
+- *unanswered* ⇒ the **registry loop** (`return_refuse.rs:543`), like every other declaration.
+- *adverse* ⇒ a **value-refusal**, following the `ForeignTrust` pattern (`return_refuse.rs:552-568`) —
+  **not** the registry loop, which only sees `None`.
+Each therefore needs its own `RefuseReason` variant **and** its own `attribute()` arm (the match is
+exhaustive; see §11). State each question's **polarity** explicitly, because `testonly.rs` prescribes
+`true` for both: phrase them so `true` is the AMT-**neutral** answer ("is your AMT capital-loss
+carryover the same as your regular one?", "is this a principal or qualified second residence?").
 
 ---
 
@@ -126,7 +150,11 @@ field destructured but not registered reads as *answered* — this repo's one ar
 `tax/return_refuse.rs` (`:161` `AmtScreenTriggered` — **the variant is kept and its trigger narrowed**;
 there is no `AmtOwed`, r2 Minor — plus the registry loop at `:543`) · `tax/advisories.rs` · `tax/packet.rs`
 · `btctax-cli/src/cmd/answer.rs` · `btctax-input-form/src/{seam.rs, spec/sections.rs, spec/coverage.rs:460,
-apply.rs}` · **`btctax-input-form/src/spec/mod.rs:110`** (hard-codes `decl_count == 7` — a guaranteed red)
+apply.rs}` · **`btctax-input-form/src/spec/mod.rs:110`** (hard-codes `decl_count == 7` — a guaranteed red; the
+adjacent `decls.fields.len() == 8` assert at `:114-119` moves too) · **`spec/registries.rs`** (r3 Minor —
+the actual site of both total maps, `field_to_question` `:235` and `question_to_field` `:251`, plus the
+index-literal delegating fields). **Decide per new leaf:** its own `Decl*` field, or a Schedule-A dedup
+like the mortgage one
 · `tax/testonly.rs:33-39` (`answer_all_live_declarations` auto-answers `false` for every id but the
 mortgage one, across `build_golden_return` and the whole baked corpus — answer **`true`** for both new
 ids, matching the mortgage precedent) · `btctax-input-form/src/attribute.rs:144,:348` (exhaustively
@@ -155,9 +183,11 @@ excluded from the minimum tax credit. Form 8801 Part I line 15 = the whole AMT; 
 i8801 *Who Should File* the filer is not directed to complete it. The §904(j) FTC cancels symmetrically.
 Every deferral item is out of scope (§1).
 
-**Discharge (r2 I-5 — these were unowned, and the original was unbuildable):** T2 carries a KAT asserting
-that for every vector the set of applied AMT adjustments is exactly {line 2a, line 2b, MFS kicker} and
-each is a §56(b)(1) exclusion item. **Not** an "8801 recompute" — there is no 8801 code and §1 excludes
+**Discharge (r2 I-5 — these were unowned, and the original was unbuildable):** T2 carries a KAT
+asserting, for every vector, that the set of applied **§56(b)(1) adjustments** is exactly
+{line 2a, line 2b} and each is an exclusion item. ★ r3 Minor: the MFS line-4 kicker is asserted
+**separately** — it is the §55(d)(3) exemption phase-out, not a §56(b)(1) adjustment, and the property
+the no-8801 argument needs from it is that it introduces **no deferral item**. **Not** an "8801 recompute" — there is no 8801 code and §1 excludes
 building it.
 
 ---
@@ -170,9 +200,20 @@ building it.
 - **Never understate.** The MFS kicker and §3's two adverse branches are the understatement risks.
 - **Every guarantee ships with a test that reds when the guarantee is removed.**
 - **No literal AMT dollar amount or rate outside `AmtParams`** (`#[cfg(test)]` exempt for boundary KATs).
-- **Exhaustiveness is guarded in two shapes, not one** (r2 I-6 — a source scan cannot assert a refusal):
-  (i) behavioural — §57(a)(5) PAB interest still refuses; (ii) input-surface — the eleven uncapturable
-  items still have no `ReturnInputs` leaf, via `spec/coverage.rs`'s existing mutate-and-diff mechanism.
+- **★ Exhaustiveness is guarded in two shapes, keyed to the FORM'S numbering (r3 I-3).** State it as:
+  *every Part I line 2c–2t and line 3 either refuses upstream or has no `ReturnInputs` leaf* —
+  enumerated from `PART_III.md`, not from a prose list. (The earlier draft said "the eleven uncapturable
+  items"; §1's prose omits 2m, 2n, 2o, 2q and 2r, and under §0's own thesis an exhaustiveness guard is
+  the last place a prose list should stand in for numbered lines.)
+  - **(i) behavioural** — §57(a)(5) PAB interest still refuses. A normal KAT.
+  - **(ii) input-surface** — the remaining lines still have **no** `ReturnInputs` leaf. ★ The earlier
+    draft cited `spec/coverage.rs`'s mutate-and-diff mechanism, which **structurally cannot do this**:
+    it serializes a maximally-populated `ReturnInputs` and walks every **existing** leaf (`leaf_map`,
+    `:67-75`), so a concept never given a field never appears and there is nothing to observe. The
+    EXEMPT-list workaround is foreclosed too — `:262-279` panics on a "stale exemption" that matches no
+    real leaf. **Mechanism instead:** a KAT reusing `leaf_map` on the maximal fixture asserting no key
+    matches a literal blocklist of those lines' field-name patterns. Own it as its **own T2 sub-bullet**,
+    named, not gestured at.
 
 ---
 
@@ -193,6 +234,11 @@ building it.
       Reaching it at all needs `_taxcalc_row` (`gen_goldens.py:104-129`) extended with cash charitable
       (`e19800`), `MARS = 3`, state refund and FTC — **that plumbing is part of T1**, not T5.
 - [ ] **The form is the authority.** A taxcalc disagreement is adjudicated against the PDF, never encoded.
+- [ ] ★ r3 Minor — **bind the fixture to the tests**: name its path, its schema, and the crate that
+      deserializes it, and state that **T2's vector KATs read it** rather than retyping the figures
+      (otherwise a builder satisfies every bullet with hand-copied numbers). The `PART_III.md` + fixture
+      commit lands **before** the `_taxcalc_row` plumbing commit, or the git-history independence
+      argument is weakened by this plan's own ordering.
 - [ ] **Construct V7–V10** — inputs, not just purpose (r2 I-3). V9 needs a search: line 7 strictly inside
       `(1040 L16 − FTC, 1040 L16]` with the FTC at its §904(j) ceiling ($300, ×2 MFJ).
 
@@ -218,7 +264,18 @@ building it.
       refuse** branch.
 - [ ] Register each in `classifier.rs`; **mutation: drop the registration ⇒ the unanswered-⇒-refuse KAT
       must red.** Update `spec/mod.rs`'s `decl_count`, `coverage.rs`, `testonly.rs`, `attribute.rs`.
-- [ ] Retarget `smoke.rs`'s `EXPECTED_REFUSED` and its two assertions — retarget, do not delete (r2 I-7).
+- [ ] **★ `smoke.rs` (r3 I-4 — the earlier "retarget" instruction is impossible).** No retarget target
+      can exist *by construction*: `gen_goldens.py:259`'s `if amt or credits` rejects any household with
+      `c09600 != 0` and its comment says the substance check "applies to EVERYONE (anchors included)";
+      with FTC = 0, line 7 ≤ line 10 ⟺ AMT = 0, and **no corpus household can carry an FTC** (no
+      `foreign`/`e07300` field in `gen_goldens.py` or `corpus.py`). So every bakeable household proceeds
+      after T3. Nor can the constant merely be emptied: `smoke.rs:101` indexes `EXPECTED_REFUSED[0]` and
+      would panic. **Do this instead:** set `EXPECTED_REFUSED = &[]`, and **invert**
+      `the_amt_screen_anchor_is_reported_refused_in_default_mode` so it asserts the anchor now *proceeds*
+      and reconciles on every compared line — that inversion is the end-to-end proof T3 un-refused the
+      target population, and is worth strictly more than the test it replaces. `sweep_check_reconciliation`
+      then asserts emptiness; `admitted >= 10` moves by one. r2's "do not delete" attaches to the **test
+      function**, not the constant.
 - [ ] **Mutations:** revert to the blanket refusal ⇒ the V1 KAT reds. Replace `line7 > line10` with
       `amt > 0` ⇒ the **V9** KAT reds.
 
@@ -226,7 +283,11 @@ building it.
 - [ ] A no-attachment return's printed 1040/Sch 2 against a **hand-built expected packet** (L17 = 0,
       Sch 2 L3 = 0, no 6251).
 - [ ] Add a **screen-tripping, no-attachment** journey — every bundled journey is deliberately sized
-      under the screen (`testonly.rs:48-51,58-59`), so regeneration alone proves nothing (r2 I-10).
+      under the screen, so regeneration alone proves nothing (r2 I-10). ★ r3 Minor: the warnings are at
+      those lines in **`btctax-cli/src/testonly.rs`**, not `tax/testonly.rs` (which is `ty2024_params()`'s
+      std-deduction table). **Also sweep every doc comment whose stated rationale is "the AMT screen
+      refuses this"** — both J6 warnings and `btctax-forms/tests/full_return_forms.rs:425-429`, the
+      justification for `schedule_2_fills_part_ii_and_leaves_part_i_blank`.
 - [ ] `report` prints AMTI / exemption / line 7 / line 10 / AMT, with a golden. (It lives in
       `cmd/tax.rs` + `render.rs`; there is no `cmd/report.rs` — r2 Minor.)
 
@@ -245,6 +306,11 @@ no-attachment return exports a complete packet, and V4/V5/V6 reconcile against `
 ---
 
 ## 8. Vectors — MFJ, TY2024. ✅ = independently recomputed and confirmed in r1.
+
+**★ r3 Minor — V9 needs `line 7` and `line 10` columns of its own.** On V1–V6 they coincide with
+line 9 and regular tax, but V9 is *defined* by FTC > 0, which is exactly where both identities break —
+so V9's discriminating figure and T3's mutation operand currently have no cell. Add both columns when
+T1 constructs V7–V10.
 
 | # | Wages | LTCG | Gift | Ded | Taxable income | Regular tax | line 9 (TMT) | AMT | Why |
 |---|---:|---:|---:|---|---:|---:|---:|---:|---|
@@ -290,16 +356,36 @@ of $307,200 = $300,000 W-2 box 2 + $7,200 mandatory Additional-Medicare withhold
 | attach test loosened to `AMT > 0` | — | T3's V9 mutation |
 | line 2b dropped | — | T2's V7 mutation |
 | the oracle certifies a misreading | V2/V2b insensitive to `c09600` | T1 commits hand figures as data; `c09600` cross-checks only V4/V5/V6 |
+| **the L16/L22 caps dropped** (r1's own "most likely wrong filed number": V2b 75,812.50 vs 70,005.00) | V2b KAT | ★ r3 Minor — **T2 mutation: remove the `min(excess, gain)` cap ⇒ the V2b KAT must red** |
 | Tier 1 read as closing G-4 | Tier 2 slips | §1's trigger rule and $26,271 exemplar |
 
 ---
 
 ## 11. SemVer
 
-`RefuseReason` (`return_refuse.rs:33`), `AbsoluteReturn` (`return_1040.rs:836`) and `Schedule2Lines`
-(`printed.rs:293`) are **plain derives, not `#[non_exhaustive]`** — adding variants/fields is breaking
-(r2 Minor). Mark all three `#[non_exhaustive]` in the Tier-1 commit (cheap; `no-users-yet`), making
-**Tier 1 MINOR**; otherwise Tier 1 is MAJOR for `btctax-core`. **Tier 2 MINOR.**
+**★ Tier 1 is MAJOR for `btctax-core`. All three types stay plain derives (r3 I-2).** An earlier draft
+chose "mark all three `#[non_exhaustive]`, cheap because `no-users-yet`". It is neither cheap nor safe:
+
+- **`Schedule2Lines`** is built by **struct literal in another crate** —
+  `btctax-forms/tests/full_return_forms.rs:430`. `#[non_exhaustive]` makes that **E0639, a hard compile
+  error**, against §6's green-from-first-commit rule.
+- **`RefuseReason`** is matched **exhaustively from another crate** at
+  `btctax-input-form/src/attribute.rs:22-26`, whose own doc states the guarantee: *"An EXHAUSTIVE
+  `match` — no `_` arm — so a new `RefuseReason` fails to compile until it is placed."*
+  `#[non_exhaustive]` forces a wildcard there, converting the compile-time totality that §4 cites as its
+  reason for putting `attribute.rs` in the blast radius into a silent catch-all — leaving only the
+  hand-written list at `:348`, which by construction cannot notice a new variant. **That trades a
+  structural guarantee for a SemVer label, in the one repo whose named architectural fault line is
+  "held by convention, not construction."**
+
+`no-users-yet` makes the major bump free, which is exactly why it is the right side to spend. If a
+`#[non_exhaustive]` is still wanted later, restrict it to **`AbsoluteReturn`** — every literal is
+in-crate (`return_1040.rs:1287,3760`; `printed.rs:1270,2132,2358`). **Tier 2 MINOR.**
+
+**Behaviour changes to disclose:** previously-refused returns now compute; and stored returns carrying a
+1098 or a capital-loss carryforward now **refuse until the new declarations are answered — or, if
+answered adversely, refuse permanently** (§3's ternary; r3 Minor: the earlier wording said only "until
+answered", which is false for the adverse branch).
 
 **Second behaviour change to disclose:** stored returns carrying a 1098 or a capital-loss carryforward
 now **refuse** until the new declarations are answered.
