@@ -4,7 +4,8 @@
     .venv/bin/python scripts/oracle/verify_f6251.py
 
 Not part of `make check` (that is the Rust suite); this is the independent-engine probe the AMT plan
-called for. It reads `design/amt-form6251/vectors.json` — emitted by the line-by-line transcription in
+called for. It reads `crates/btctax-core/src/tax/fixtures/form6251_vectors.json` — emitted by the
+line-by-line transcription in
 `f6251_reference.py` — and compares line 11 against Tax-Calculator's `c09600`.
 
 ⚠ THIS IS A ONE-ORACLE PROBE. This repo's standard is TWO oracles, and the second cannot arbitrate
@@ -38,7 +39,9 @@ KNOWN_DIVERGENT = {"V4", "V5"}  # standard-deduction + AMT owed; see the module 
 
 
 def main() -> int:
-    vectors = json.loads((ROOT / "design/amt-form6251/vectors.json").read_text())["vectors"]
+    vectors = json.loads(
+        (ROOT / "crates/btctax-core/src/tax/fixtures/form6251_vectors.json").read_text()
+    )["vectors"]
     rows = []
     for n, v in enumerate(vectors):
         i = v["inputs"]

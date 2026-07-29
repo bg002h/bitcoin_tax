@@ -348,8 +348,9 @@ in a parenthesized box — **zero bytes** are returned.
 Field maps are *data*: adding a tax year is a `forms/<year>/` directory (PDF plus
 per-form TOML maps), never a code change. The full-return **packet** fills every form
 all-or-nothing and orders them by IRS Attachment Sequence Number, so the filer gets
-their stapling order for free. Form 6251 (AMT) is deliberately *not* filled — the AMT
-is a refuse-screen in core, so Schedule 2 line 2 is $0 by construction. The DRAFT
+their stapling order for free. Form 6251 (AMT) is computed in full but deliberately *not*
+filled — a return reaching the PDF stage has Form 6251 line 7 at or below line 10, so line 11
+and Schedule 2 line 2 are $0 by construction; a return that must ATTACH the form is refused. The DRAFT
 watermark and attestation gate are keyed to *pseudo-reconciliation* (fictional
 figures), not to the full return, which exports clean per user policy; pseudo figures
 are watermarked regardless and that gate dominates.
@@ -489,7 +490,7 @@ into a colorized PDF.
   goldens. The only sources of nondeterminism — the wall clock and the network — are
   fenced behind the two seams above.
 - **Fail-closed posture.** Hard blockers gate the year; unmodelled full-return inputs
-  refuse; the AMT worksheet is a refuse-trigger; a form never prints unless its geometry
+  refuse; a return that must attach Form 6251 refuses; a form never prints unless its geometry
   verifies. The engine would rather emit nothing than emit a wrong number that looks
   authoritative.
 

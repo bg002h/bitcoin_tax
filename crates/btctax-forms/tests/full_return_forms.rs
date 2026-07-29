@@ -421,7 +421,7 @@ fn full_return_forms_refuse_unsupported_years() {
 // ────────────────────────────── Schedule 2 / Schedule 3 ───────────────────────────────────────
 
 /// Schedule 2 carries the three taxes v1 computes, and **Part I stays blank** — line 1a (excess
-/// APTC) has no input and would refuse if it did, and line 2 (AMT) is $0 because line 7 ≤ line 10 ⇒ Form 6251 line 11 is $0, and a return where line 7 EXCEEDS line 10 is refused (Who Must File condition 1 — v1 computes the form but cannot file it). A 0 printed there would be a lie. (Reason RESTATED in v0.13.0:
+/// APTC) has no input and would refuse if it did, and line 2 (AMT) is $0 because line 7 ≤ line 10 ⇒ Form 6251 line 11 is $0, and a return where line 7 EXCEEDS line 10 is refused (Who Must File condition 1 — v1 computes the form but cannot file it). A 0 printed there would be a lie. (Reason RESTATED in v0.14.0:
 /// the old "refused if the screen trips" mechanism no longer exists — btctax computes Form 6251 for
 /// every return and gates on the form itself.)
 ///

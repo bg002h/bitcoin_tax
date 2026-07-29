@@ -26,7 +26,7 @@ Every defect in this plan's two review rounds was a line that was never typed in
 
 | defect | what it was |
 |---|---|
-| the shipped v0.9.0–v0.13.0 bug | screening worksheet reduced to `AGI − QBI`; Sch A line **7** conflated with line **17** |
+| the shipped v0.6.0–v0.13.0 bug | screening worksheet reduced to `AGI − QBI`; Sch A line **7** conflated with line **17** |
 | r1 C-3 | line 2b dropped by writing AMTI as a formula |
 | r1 C-4 | MFS kicker dropped — it **is** line 4's instruction text |
 | r1 C-1 | two rounds on a Part III question **line 20 answers in one sentence** — and the half that was actually wrong is lines 16/17/22's "smaller of" plus the line-32 skip (r3 Minor: line 20 settles only *positioning*) |

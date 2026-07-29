@@ -364,10 +364,10 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         unanswered_detail:
             "this return carries Schedule C expenses, and btctax accepts that as a FLAT TOTAL — it never \
              sees Part II line 13 ('Depreciation and section 179 expense deduction'), so it cannot tell \
-             whether a Form 6251 line 2l adjustment is hiding inside it. Most filers answer yes, but the \
-             question is asked so a divergent AMT amount — which is an ADD-BACK — is never guessed \
-             away. The prompt lists the conditions that permit a yes; if none clearly applies, answer \
-             NO. Guessing yes would understate the tax — run `btctax income answer`",
+             whether a Form 6251 line 2l adjustment is hiding inside it. A divergent AMT amount is an \
+             ADD-BACK, so it is never guessed away: the prompt lists the conditions that permit a yes, \
+             and if none clearly applies the answer is NO. Guessing yes would understate the tax — run \
+             `btctax income answer`",
         live: amt_depreciation_question_live,
         get: |ri| ri.amt_depreciation_same_as_regular,
         set: |ri, v| ri.amt_depreciation_same_as_regular = Some(v),

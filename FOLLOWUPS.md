@@ -427,7 +427,7 @@ with the official instruction text verbatim as the doc comment. A derived/closed
 with a written equivalence proof naming the branch where it breaks **and** a KAT pinning that branch.
 
 **Why this is a whole-codebase concern, not an AMT concern.** Every defect in the 2026-07-27 AMT
-sequence — one shipped in v0.9.0–v0.13.0, five more caught in review — was a line never typed in, never
+sequence — one shipped in v0.6.0–v0.13.0, five more caught in review — was a line never typed in, never
 a hard tax question: the screening worksheet compressed to `AGI − QBI` (and Schedule A line **7**
 conflated with line **17**); Form 6251 line 2b dropped; the MFS line-4 kicker dropped; three review
 rounds spent on a Part III question line 20 answers in one sentence; "attach when AMT > 0" instead of

@@ -1,7 +1,17 @@
-//! Full-return v1 **AMT screen** (Phase 4 / SPEC §4.11): the 2024 "Worksheet To See if You Should Fill
-//! in Form 6251 — Schedule 2, Line 2", implemented as a **refuse-trigger**. v1 does not compute Form 6251;
-//! when the worksheet concludes the taxpayer must fill it in, the return is REFUSED (fail-closed). When the
-//! worksheet clears the taxpayer, Schedule 2 line 2 (AMT) is $0 — see the soundness argument below.
+//! The 2024 **"Worksheet To See if You Should Fill in Form 6251 — Schedule 2, Line 2"** (SPEC §4.11).
+//!
+//! ★ **As of v0.14.0 this worksheet is a CROSS-CHECK, not a gate.** btctax computes the real
+//! [`Form6251`] for every return ([`crate::tax::form6251`]) and refuses on the form's own test —
+//! i6251, *Who Must File*, condition 1: **line 7 greater than line 10**. The worksheet appears on no
+//! production path. It survives here because its clearing branch is a valid *sufficient* condition for
+//! "no AMT" — the soundness argument below — and that implication is swept by
+//! `return_1040`'s `a_cleared_screen_never_hides_a_must_attach_return`.
+//!
+//! Before v0.14.0 this was a refuse-trigger and v1 did not compute Form 6251 at all. Do not restore
+//! that shape: gating the safety check on a proxy meant that making the proxy *more correct* made it
+//! skip the check more often.
+//!
+//! [`Form6251`]: crate::tax::form6251::Form6251
 //!
 //! **Worksheet line 2 is the two §56(b)(1) add-backs, and nothing else.** It reads: *"Enter the amount from
 //! Schedule A (Form 1040), line 7, or your standard deduction from Form 1040 or 1040-SR, line 12."*

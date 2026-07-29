@@ -19,7 +19,7 @@
 //!
 //! **Why this shape.** The predecessor AMT code compressed the *screening worksheet* into
 //! `AGI − QBI` and conflated Schedule A line **7** (taxes) with line **17** (itemized total) — a bug
-//! that shipped in v0.9.0–v0.13.0. Later drafts of this module's plan dropped line 2b and the line-4
+//! that shipped in v0.6.0–v0.13.0. Later drafts of this module's plan dropped line 2b and the line-4
 //! MFS kicker for the same reason: they were terms in a formula rather than lines on a form. As
 //! fields, they cannot be dropped.
 //!
@@ -422,11 +422,17 @@ mod tests {
     use rust_decimal_macros::dec;
     use std::str::FromStr;
 
-    /// The T1 fixture: `design/amt-form6251/vectors.json`, emitted by the line-by-line transcription
+    /// The T1 fixture: `fixtures/form6251_vectors.json`, emitted by the line-by-line transcription
     /// in `design/amt-form6251/f6251_reference.py` and committed BEFORE this module existed. V1–V6
     /// were derived independently in plan review r1, before any code — so a match here is a real
     /// cross-check, not a tautology.
-    const VECTORS: &str = include_str!("../../../../design/amt-form6251/vectors.json");
+    // ★ IN-CRATE, deliberately. An `include_str!` reaching outside the crate root is invisible to
+    //   `cargo publish`: the verification build compiles lib+bins only, so a `#[cfg(test)]` include
+    //   never resolves and the publish SUCCEEDS while shipping a tarball whose tests cannot compile.
+    //   `cargo package --list` carried zero files under `design/`. Caught pre-release; the vector KATs
+    //   are the whole subject of this release, so they would have gone dark for anyone building from
+    //   the published crate.
+    const VECTORS: &str = include_str!("fixtures/form6251_vectors.json");
 
     fn params() -> AmtParams {
         AmtParams {

@@ -1606,8 +1606,9 @@ fn journey_j10(md: &mut String, bin: &Path) {
          2021 Bitcoin lot in 2024 for a $200,000 long-term gain, putting their AGI at $600,000 — enough\n\
          to trip the IRS's *Worksheet To See if You Should Fill in Form 6251* (its line 11 reaches\n\
          $466,700, over the $232,600 breakpoint).\n\n\
-         That worksheet only ever says **fill in Form 6251** — never *you owe AMT*. So btctax fills it\n\
-         in. Their tentative minimum tax lands below their regular tax, so no Form 6251 need be attached\n\
+         That worksheet only ever says **fill in Form 6251** — never *you owe AMT*. So btctax\n\
+         **computes** it. Their tentative minimum tax lands below their regular tax, so no Form 6251\n\
+         need be attached\n\
          (i6251, *Who Must File*, condition 1) and the return is produced in full:\n\n",
     );
     let dir = tempfile::tempdir().expect("tempdir");

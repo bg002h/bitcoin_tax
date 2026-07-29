@@ -53,7 +53,7 @@ A **derived or closed form is allowed only** with (a) a written equivalence proo
 where it breaks, and (b) a KAT pinning that branch. Absent both, transcribe.
 
 **Why this is a standing rule and not a style note.** Every defect in the 2026-07-27 AMT sequence — the
-one shipped in v0.9.0–v0.13.0 and five more found in review — was a line that was never typed in, not a
+one shipped in v0.6.0–v0.13.0 and five more found in review — was a line that was never typed in, not a
 hard tax question. The shipped bug reduced the AMT screening worksheet to `AGI − QBI` and conflated
 Schedule A **line 7** (taxes) with **line 17** (itemized total). Later drafts dropped Form 6251 line 2b
 and the MFS line-4 kicker, and spent three review rounds on a Part III question that line 20 answers in

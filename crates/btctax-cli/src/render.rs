@@ -1513,7 +1513,7 @@ pub fn render_dual_report(
     // SEE the comparison that cleared them (line 7 vs line 10), not just be told there is no AMT.
     //
     // NOT gated on the screening worksheet: that worksheet has been off every production path since
-    // v0.13.0, and this block's own condition is the honest description of who sees it. It is a wider
+    // v0.14.0, and this block's own condition is the honest description of who sees it. It is a wider
     // audience than the screen would flag — roughly MFJ above ~$133k of AMTI, Single above ~$85k —
     // which is deliberate: a cleared comparison is reassuring, not noisy, and the block is three
     // lines. (Whole-branch review flagged the old comment as describing a gate that was never here.)

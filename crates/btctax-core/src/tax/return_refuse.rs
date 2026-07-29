@@ -179,9 +179,17 @@ pub enum RefuseReason {
     /// the §199A(e)(2) threshold — the simplified Form 8995 no longer applies and the 8995-A phase-in is
     /// unmodeled in v1 (SPEC §4.5). Compute-dependent (needs L12 → TI-before-QBI).
     QbiAboveThreshold,
-    /// The 2024 "Worksheet To See if You Should Fill in Form 6251" concludes the taxpayer must file Form
-    /// 6251 — v1 does not compute the AMT, so it refuses rather than under-state (SPEC §4.11). Compute-
-    /// dependent (needs AGI, QBI, and L16). A cleared worksheet leaves Schedule 2 line 2 = 0 (no refuse).
+    /// **Form 6251 must be ATTACHED** — i6251, *Who Must File*, condition 1: line 7 is greater than
+    /// line 10. btctax COMPUTES the form for every return (v0.14.0+) but cannot yet file it, so such a
+    /// return is refused rather than filed incomplete. Compute-dependent (needs the assembled return).
+    ///
+    /// NOT `amt > 0`: when line 7 exceeds line 10 the AMT foreign tax credit is figured, so line 11 can
+    /// still land at $0 while the form is required. A return that clears the test has line 11 = $0, so
+    /// Schedule 2 line 2 is $0 and nothing is attached.
+    ///
+    /// ★ The NAME is a historical misnomer — before v0.14.0 the trigger was the 1040 screening
+    /// worksheet, which now gates nothing. Renaming it reopens a cross-crate exhaustive-match blast
+    /// radius, so it is deferred to the Tier-2 bump (already breaking). See FOLLOWUPS G-7.
     AmtScreenTriggered,
     /// Taxable income ≤ 0 **with a capital-loss carryforward-in** — the §1211/§1212 Capital Loss Carryover
     /// Worksheet (G22 edge) decides how much loss survives when it can't reduce an already-zero tax; v1
@@ -581,7 +589,7 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
         );
     }
 
-    // ── Form 6251's two ADVERSE answers. VALUE-refusals (`Some(false)` — these two questions are
+    // ── Form 6251's three ADVERSE answers. VALUE-refusals (`Some(false)` — all three are
     //    neutral at TRUE, see `FormQuestion::neutral`), disjoint from the unanswered loop above.
     //    ★ We mirror the mixed-use-mortgage exemplar only on the UNANSWERED half and deliberately
     //    DIVERGE here: a zeroed Schedule A line 8a is conservative, but a missing AMT add-back is not.

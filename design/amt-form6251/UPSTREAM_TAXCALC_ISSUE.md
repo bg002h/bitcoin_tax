@@ -1,6 +1,6 @@
 # Draft issue for `PSLmodels/Tax-Calculator` — for review before filing
 
-**Status:** DRAFT. Not filed. Repo confirmed from the installed package's own metadata
+**Status:** ★ **FILED 2026-07-28 as [PSLmodels/Tax-Calculator#3108](https://github.com/PSLmodels/Tax-Calculator/issues/3108)** — open at the time of the v0.14.0 tag. This file is retained as the drafting record and the evidence table; the issue text below is what was posted. Repo confirmed from the installed package's own metadata
 (`taxcalc` 6.7.2, Home-page `https://github.com/PSLmodels/Tax-Calculator`, CC0-1.0 — so quoting their
 source carries no licence friction).
 

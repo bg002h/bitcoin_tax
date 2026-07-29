@@ -233,7 +233,7 @@ pub fn loss_limit(status: FilingStatus) -> Usd {
 /// smallest blast radius. This does NOT rely on any frozen-file constraint (`se.rs` only *calls* the
 /// unfrozen `synthetic_table`, so `TaxTable` could technically gain a field).
 /// §55(d)/§55(b)(1) AMT amounts for the 2024 "Worksheet To See if You Should Fill in Form 6251"
-/// (SPEC §4.11 refuse-trigger). All INDEXED (§55(d)(4) inflation adjustment). Grouped by the worksheet's
+/// (SPEC §4.11). All INDEXED (§55(d)(4) inflation adjustment). Grouped by the worksheet's
 /// (differing) filing-status bucketings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AmtParams {
@@ -328,7 +328,7 @@ pub struct FullReturnParams {
     pub student_loan_phaseout_unmarried: (Usd, Usd),
     /// §221(b)(2) phase-out `(start, end)` — MFJ/QSS. MFS gets **no** deduction (§221(e)(2)), so no range.
     pub student_loan_phaseout_married: (Usd, Usd),
-    /// §55(d)/§55(b)(1) AMT amounts for the Form 6251 refuse-screen (SPEC §4.11).
+    /// §55(d)/§55(b)(1) AMT amounts for Form 6251 and its screening worksheet (SPEC §4.11).
     pub amt: AmtParams,
 }
 

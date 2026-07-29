@@ -48,7 +48,7 @@ opt-sell,2025-06-01 12:00:00 UTC,Sell,BTC,1.00000000,USD,50000.00,50000.00,50000
 /// J6 River corpus: one small 2024 business mining-income deposit (FMV from the bundled dataset).
 /// Kept modest deliberately: a corpus editor who enlarges the sale, income, or donation must keep the
 /// household on the computable side of **Form 6251 line 7 <= line 10** (Who Must File condition 1), which
-/// is what refuses a return now — NOT the screening worksheet, which since v0.13.0 gates nothing.
+/// is what refuses a return now — NOT the screening worksheet, which since v0.14.0 gates nothing.
 pub const J6_RIVER_CSV: &str =
     "Date,Sent Amount,Sent Currency,Received Amount,Received Currency,Fee Amount,Tag\r\n\
 2024-03-15 12:00:00 UTC,,,0.05000000,BTC,,income\r\n";
