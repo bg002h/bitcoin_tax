@@ -908,27 +908,52 @@ mod tests {
     /// - **line 39 on the 26% side** — line 12 at or under the §55(b)(1) breakpoint
     /// - **no exemption phase-out** — line 5 still at the full §55(d)(1) amount
     ///
-    /// The root fact is the third: **in btctax's input class, AMT is owed only once the §55(d)(3)
-    /// phase-out has begun.** The exemption is simply worth more than the flat 26/28% rate's excess
-    /// over the graduated schedule, everywhere the exemption survives intact. The other two follow,
-    /// because the phase-out starts at $609,350 (MFJ $1,218,700), so an AMT-owing return's line 12
-    /// clears the $232,600 breakpoint (MFS $116,300) with room to spare — killing the 26% side of
-    /// line 39 — and its line 12 exceeds the §1(h) 15%-band top, so a 20% tranche always survives
-    /// lines 32/33 and the skip never fires.
+    /// The root fact is the third: **in btctax's input class, an attachable Form 6251 exists only
+    /// once the §55(d)(3) phase-out has begun.** The exemption is simply worth more than the flat
+    /// 26/28% rate's excess over the graduated schedule, everywhere the exemption survives intact.
+    /// Measured at the widest point of the intact region — largest §63(f) deduction, largest §904(j)
+    /// FTC — the best `line 7 − line 10` is still negative on every status: Single −$6,377,
+    /// MFJ −$2,193, MFS −$1,098.50, HoH −$2,785.
+    ///
+    /// Given that, once the phase-out has begun line 12 is at least the phase-out start minus the
+    /// full exemption — $523,650 for Single/HoH, $542,700 MFS, $1,085,400 MFJ.
+    ///
+    /// - **(b) follows outright.** All four floors clear the §55(b)(1) breakpoint ($232,600; MFS
+    ///   $116,300) with room to spare, so line 39 can never take the 26% side.
+    /// - **(a) follows for three of the four.** Lines 23/30 are bounded by their own bands:
+    ///   `line32 = line23 + line30 ≤ line21 + (line25 − line21 − line27) = line25 − line27 ≤
+    ///   line25`. So `line12 > line25` forecloses the skip — true for Single ($523,650 > $518,900,
+    ///   though by only $4,750), MFS and MFJ.
+    ///   ★ **NOT true for HoH**, whose line-25 top is $551,350 — *above* the $523,650 floor. In that
+    ///   $27,700 window the inequality says nothing, and the skip additionally needs
+    ///   `line27 ≤ line25 − line12`, i.e. an ordinary bottom under $27,700. **HoH's (a) is carried
+    ///   by the sweep below, not by this argument** — stated explicitly because a confident
+    ///   equivalence comment that turns out to be wrong is this project's most expensive recurring
+    ///   defect, and this one was wrong until review r2 caught it.
     ///
     /// ★ WHY A SWEEP AND NOT A COMMENT. If btctax's input surface widens — an ISO exercise at line
     /// 2i, a §1202 exclusion at 2h, §1250 gain reaching line 14 — a preference item can push AMTI
-    /// up without moving the regular tax, and AMT becomes reachable with the exemption intact. At
-    /// that moment three routings go live with **no vector and no oracle behind them**, and the
+    /// up without moving the regular tax, and the form becomes attachable with the exemption intact.
+    /// At that moment three routings go live with **no vector and no oracle behind them**, and the
     /// only thing that would notice is this test. It is the same tripwire, for the same reason, as
     /// `line40_min_is_a_proved_no_op_for_this_input_class`.
     ///
-    /// ★ WHAT THIS IS NOT. A stride sweep is a tripwire, not a proof. The fine-grained evidence is
-    /// a separate ~450M-point scan over (wages, gain, gift, refund, FTC) at $500/$1,000 resolution
-    /// run while building the E2 population; it found the same three cells empty across all four
-    /// filing statuses and both deduction modes. This test carries the claim forward — and does it
-    /// against the PRODUCTION regular tax (`qdcgt_line16`, Tax-Table quantization and all), which
-    /// that scan approximated with the exact schedule.
+    /// ★ ITS SENSITIVITY IS MEASURED, NOT ASSUMED: **~$4,400**. Injecting a flat preference into
+    /// line 4 and bisecting, $4,200 leaves this green and $4,400 reds it (on MFS, standard deduction
+    /// at the §63(f) maximum, FTC at the §904(j) ceiling). That floor is arithmetic, not slack — a
+    /// ΔAMTI moves the tentative minimum tax by only 26–28% of itself, so closing MFS's $1,098.50
+    /// margin needs ~$4,000. A smaller preference than that would go unnoticed here, which is why
+    /// E6 (lines 2c–2t as real fields) is a *design* obligation and not something this test replaces.
+    /// Before r2 the floor was far worse: the sweep pinned the BASE standard deduction and a zero
+    /// FTC, and stayed green at $5,000.
+    ///
+    /// ★ WHAT THIS IS NOT. A stride sweep is a tripwire, not a proof. Two finer scans back it: a
+    /// ~450M-point scan over (wages, gain, gift, refund, FTC) at $500/$1,000 resolution run while
+    /// building the E2 population, and review r2's exhaustive $100-grid scan of the entire
+    /// intact-exemption region at the maximum deduction and FTC. Both found the same three cells
+    /// empty on all four statuses. This test carries the claim forward — and does it against the
+    /// PRODUCTION regular tax (`qdcgt_line16`, Tax-Table quantization and all), which the first
+    /// scan approximated with the exact schedule.
     #[test]
     fn amt_is_owed_only_once_the_exemption_phaseout_has_begun() {
         let p = params();
@@ -938,13 +963,54 @@ mod tests {
             FilingStatus::Mfs,
             FilingStatus::HoH,
         ] {
-            for itemized in [true, false] {
-                phaseout_precondition_sweep_for(&p, status, itemized);
+            // ★ BOTH the base standard deduction and the §63(f) MAXIMUM. Line 2a adds the whole
+            //   standard deduction back, so a bigger one lifts AMTI at a FIXED regular tax — the one
+            //   direction that can break the claim, and the only axis of the real input surface that
+            //   does. Pinning the base amount left the tripwire blind to a widening of up to
+            //   ~$6,200: with a $5,000 preference injected, the base-only sweep stayed green while an
+            //   MFS filer at the §63(f) maximum owed AMT with the exemption intact at 7,895 points.
+            for deduction in [
+                std_deduction(status),
+                std_deduction(status) + max_aged_blind_addition(status),
+            ] {
+                for itemized in [true, false] {
+                    // ★ FTC at the §904(j) de-minimis ceiling as well as zero — see the guard below.
+                    for ftc in [Usd::ZERO, ftc_ceiling(status)] {
+                        phaseout_precondition_sweep_for(&p, status, itemized, deduction, ftc);
+                    }
+                }
             }
         }
     }
 
-    fn phaseout_precondition_sweep_for(p: &AmtParams, status: FilingStatus, itemized: bool) {
+    /// The largest §63(f) aged/blind addition btctax can grant: $1,550 per box married / $1,950
+    /// unmarried (Rev. Proc. 2023-34 §3.15(3)), times the boxes `AgedBlindBoxes::count()` can reach.
+    /// Spouse boxes exist only on a joint return, and `standard_deduction` conservatively declines to
+    /// count the rare no-income-spouse box on MFS — so MFS gets the taxpayer's two, not four.
+    fn max_aged_blind_addition(status: FilingStatus) -> Usd {
+        match status {
+            FilingStatus::Mfj | FilingStatus::Qss => dec!(1550) * dec!(4),
+            FilingStatus::Mfs => dec!(1550) * dec!(2),
+            FilingStatus::Single | FilingStatus::HoH => dec!(1950) * dec!(2),
+        }
+    }
+
+    /// The §904(j) no-Form-1116 ceiling — the largest Schedule 3 line 1 that can reach Form 6251
+    /// without refusing upstream as `ForeignTaxOverCeiling`.
+    fn ftc_ceiling(status: FilingStatus) -> Usd {
+        match status {
+            FilingStatus::Mfj | FilingStatus::Qss => dec!(600),
+            _ => dec!(300),
+        }
+    }
+
+    fn phaseout_precondition_sweep_for(
+        p: &AmtParams,
+        status: FilingStatus,
+        itemized: bool,
+        std_deduction_amount: Usd,
+        ftc: Usd,
+    ) {
         let sched = schedule(status);
         let bp = bps(status);
         let full_exemption = p.exemption(status);
@@ -952,9 +1018,9 @@ mod tests {
         // Itemizers here deduct a cash gift only, so Schedule A line 7 (taxes) is zero and line 2a
         // adds nothing back; non-itemizers add the standard deduction back at line 2a.
         let deduction = if itemized {
-            std_deduction(status) + dec!(10000) // any itemized total; only `itemized` routes line 2a
+            std_deduction_amount + dec!(10000) // any itemized total; only `itemized` routes line 2a
         } else {
-            std_deduction(status)
+            std_deduction_amount
         };
         let mut checked = 0u32;
         let mut bottom = 0i64;
@@ -988,33 +1054,43 @@ mod tests {
                             gain,
                         ),
                         schedule_2_line1z: Usd::ZERO,
-                        schedule_3_line1: Usd::ZERO,
+                        schedule_3_line1: ftc,
                     },
                     p,
                     &bps(status),
                 );
-                if f.amt() > Usd::ZERO {
+                // ★ GUARDED ON `must_attach()`, NOT `amt() > 0` — Who Must File condition 1, which is
+                //   what Tier 2 will actually attach on. The two coincide only when line 8 is zero
+                //   (V9 is the standing counterexample: attach required, AMT $0, FTC $600), so a
+                //   sweep that pinned the FTC to zero was guarding a strictly narrower population
+                //   than the one that gets filed. `must_attach()` is the superset, so every
+                //   assertion below is now stronger than it was.
+                let ctx = || {
+                    format!("{status:?} itemized={itemized} deduction={deduction} ftc={ftc} (ordinary {ordinary}, gain {gain})")
+                };
+                if f.must_attach() {
                     assert!(
                         f.line5 < full_exemption,
-                        "{status:?} itemized={itemized}: AMT {} owed with the exemption INTACT at \
-                         {} (ordinary {ordinary}, gain {gain}). The input class has widened — three \
-                         Part III routings just went live with no vector behind them.",
-                        f.amt(),
+                        "{}: Form 6251 must be ATTACHED (line 7 {} > line 10 {}) with the exemption \
+                         INTACT at {}. The input class has widened — three Part III routings just \
+                         went live with no vector behind them.",
+                        ctx(),
+                        f.line7,
+                        f.line10,
                         f.line5
                     );
                     assert!(
                         f.line32 != f.line12,
-                        "{status:?} itemized={itemized}: AMT {} owed while line 32 equals line 12, \
-                         i.e. the line-32 skip fired (ordinary {ordinary}, gain {gain}). The \
-                         fixture has no vector for that routing.",
-                        f.amt()
+                        "{}: attachable while line 32 equals line 12, i.e. the line-32 skip fired. \
+                         The fixture has no vector for that routing.",
+                        ctx()
                     );
                     assert!(
                         f.line12 > bp28,
-                        "{status:?} itemized={itemized}: AMT {} owed with line 12 ({}) at or under \
-                         the §55(b)(1) breakpoint {bp28}, i.e. line 39 on the 26% side (ordinary \
-                         {ordinary}, gain {gain}). The fixture has no vector for that routing.",
-                        f.amt(),
+                        "{}: attachable with line 12 ({}) at or under the §55(b)(1) breakpoint \
+                         {bp28}, i.e. line 39 on the 26% side. The fixture has no vector for that \
+                         routing.",
+                        ctx(),
                         f.line12
                     );
                     checked += 1;
