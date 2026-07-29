@@ -558,6 +558,34 @@ phase: **Tier 2**, and *not before* checking the latest release and re-running b
 #3108 lesson. Two witnesses already exist (the form's line-4 parenthetical with i6251 p.9's worked
 example, and OTS implementing the add-back), so this clears the one-oracle bar that #3108 did not.
 
+**→ NEW: G-6e — ★★ THE PIVOT: TY2025 comes before E4, and TY2026 fails closed (decided 2026-07-29).**
+The MFS kicker region is unwitnessed in TY2024 *because of a stale-constant bug in one year's
+solver*, not because the rule is unwitnessable. **OpenTaxSolver 2025 implements §55(d)(3) correctly**
+— installed at `~/OpenTaxSolver2025_23.06_linux64`, verified against the IRS **final** 2025 form, and
+smoke-tested on an MFS household above the kicker start: line 4 = 943,662.50 = 935,000 + 25% ×
+(935,000 − 900,350), exemption 0, AMT 13,571.50. So building the same vectors at TY2025 witnesses the
+rule, while the TY2024 constants stay anchored on the 2024 form. Adding TY2025 is also product work
+we owe regardless — btctax computes only TY2024 in mid-2026.
+
+**TY2026 does NOT follow**, for three independent reasons, each sufficient: (1) the 2026 instructions
+are unpublished, so the phase-out rate, zero-exemption thresholds and kicker rate/cap are unknown —
+inferable (500,000 + 2 × 70,100 = 640,200 implies 50%) but inference is what we forbid encoding;
+(2) the form restructured Part I into 1a/1b around a new **Schedule 1-A**, so it needs
+re-transcription, not new constants; (3) **no OTS 2026 exists**, leaving only taxcalc, which we know
+is wrong on AMT. Held by `ty2026_full_return_must_stay_fail_closed`
+(`btctax-adapters/src/tax_tables.rs`), mutation-verified — **adding TY2025 deletes the `2025`
+assertion beside it, and 2026 must survive that.** Primary sources archived under
+`design/amt-form6251/`: `f6251--2025.pdf`, `i6251--2025.pdf`, `f6251--2026-DRAFT.pdf`.
+Full detail: `design/amt-form6251/CONTINUITY_TY2025.md`.
+
+**→ NEW: G-6f — `AmtParams.phaseout_rate` does double duty for two distinct statutory rates**: the
+§55(d)(3) exemption phase-out (`form6251.rs:285`) and the MFS line-4 kicker (`:279`). Both are 25% in
+2024 *and* 2025, so the conflation is invisible and green. The 2026 draft implies the phase-out moves
+to 50% with nothing saying the kicker follows — at which point we print a wrong number on a **signed**
+form with nothing reding. Split into `exemption_phaseout_rate` + `mfs_kicker_rate`, both 0.25 today
+(a no-op). Owning phase: **before TY2025**, which would otherwise duplicate the conflation into a
+second `AmtParams` literal.
+
 **→ NEW: G-6d — no fixture vector has Schedule A line 7 > 0.** Every itemizing vector deducts a cash
 gift only, so the fixture drives line 2a's *itemizer* limb at zero throughout. The limb is not
 untested — the original shipped bug's regression KAT

@@ -768,6 +768,39 @@ mod tests {
         assert_eq!(p.amt.breakpoint_28pct(FilingStatus::Mfs), dec!(116300));
         assert!(t.full_return_for(2025).is_none()); // v1 = TY2024 only → fail closed elsewhere
         assert!(t.full_return_for(2017).is_none());
+        ty2026_full_return_must_stay_fail_closed(&t);
+    }
+
+    /// ★ TY2026 FAILS CLOSED BY DECISION, and this is the decision — not an oversight, and not a
+    /// line to delete on the way to adding a year.
+    ///
+    /// TY2025 support is planned and will remove the `2025` assertion above. **2026 must survive
+    /// that change**, for three independent reasons established from primary sources (2026-07-29):
+    ///
+    /// 1. **The 2026 instructions are not published.** The draft Form 6251's line 4 says "more than
+    ///    $640,200, **see instructions**", and `irs.gov/pub/irs-dft/i6251--dft.pdf` is still the
+    ///    *2025* instructions. So the §55(d)(3) phase-out RATE, the zero-exemption thresholds, and
+    ///    the MFS kicker's rate and cap are all unknown. They can be *inferred* from the published
+    ///    thresholds — 500,000 + 2 × 70,100 = 640,200 implies a 50% phase-out, up from 25% — but an
+    ///    inferred constant is exactly what `CLAUDE.md` forbids encoding without a written
+    ///    equivalence proof and a KAT.
+    /// 2. **The form was restructured, not re-parameterized.** 2026 splits line 1 into `1a`/`1b`,
+    ///    where 1a subtracts **Schedule 1-A line 43** — a new OBBBA schedule btctax has no surface
+    ///    for — and line 4 reads "Combine lines **1b** through 3". `Form6251` transcribes the 2024
+    ///    layout; 2026 needs a re-transcription, not new numbers.
+    /// 3. **No oracle exists.** OpenTaxSolver's newest release is OTS_2025; there is no OTS 2026.
+    ///    Tax-Calculator reaches 2036 but carries both known AMT defects (the line-2a
+    ///    standard-deduction add-back, and the §55(d)(3) MFS AMTI add-back it does not model at
+    ///    all), so a 2026 AMT figure would rest on one engine we already know is wrong there.
+    ///
+    /// Adding 2026 means answering all three, in writing, before this assertion comes out.
+    fn ty2026_full_return_must_stay_fail_closed(t: &BundledFullReturnTables) {
+        assert!(
+            t.full_return_for(2026).is_none(),
+            "TY2026 full-return params appeared. The 2026 Form 6251 instructions were unpublished \
+             as of 2026-07-29, the form restructured Part I around a new Schedule 1-A, and no \
+             oracle covers 2026 — see this function's doc comment before removing it."
+        );
     }
 
     #[test]
