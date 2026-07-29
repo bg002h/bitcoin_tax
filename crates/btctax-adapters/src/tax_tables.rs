@@ -148,7 +148,8 @@ fn ty2024_full_return() -> FullReturnParams {
             breakpoint_28pct_mfs: dec!(116300),
             mfs_kicker_start: dec!(875950),
             mfs_kicker_max: dec!(66650),
-            phaseout_rate: dec!(0.25),
+            exemption_phaseout_rate: dec!(0.25),
+            mfs_kicker_rate: dec!(0.25),
             rate_26: dec!(0.26),
             rate_28: dec!(0.28),
             rate_28_subtrahend: dec!(4652),
@@ -769,6 +770,65 @@ mod tests {
         assert!(t.full_return_for(2025).is_none()); // v1 = TY2024 only → fail closed elsewhere
         assert!(t.full_return_for(2017).is_none());
         ty2026_full_return_must_stay_fail_closed(&t);
+    }
+
+    /// ★ §55(d)(3) states two IDENTITIES among the MFS AMT constants. Asserting them turns five
+    /// separately-typed numbers into a system that catches its own transcription slips — which is
+    /// the whole reason this exists now, with TY2025 about to be typed in.
+    ///
+    /// The statute's flush sentence increases MFS alternative minimum taxable income by
+    /// *"the lesser of (i) 25 percent of the excess of alternative minimum taxable income … over
+    /// **the minimum amount of such income for which the exemption amount under paragraph (1)(C) is
+    /// zero**, or (ii) **such exemption amount**."* So:
+    ///
+    /// 1. **the add-back cap IS the MFS exemption** — clause (ii); and
+    /// 2. **the add-back threshold IS the zero-exemption point** — clause (i), which is
+    ///    `phase-out start + exemption / phase-out rate`.
+    ///
+    /// Both are definitional, so they hold whatever the constants are. Verified across three
+    /// regimes: TY2024 (609,350 + 66,650/0.25 = 875,950 ✓, cap 66,650 ✓), TY2025 (626,350 +
+    /// 68,500/0.25 = 900,350 ✓, cap 68,500 ✓), and even the TY2026 draft at its implied 50% rate
+    /// (500,000 + 70,100/0.5 = 640,200 ✓). **Identity 2 is also why the MFS region has no TY2024
+    /// oracle**: "exemption gone" and "kicker live" are the same condition, and that is exactly
+    /// where OTS 2024 carries stale constants and taxcalc models nothing.
+    ///
+    /// ★ Looped over every bundled year rather than written per-year, so a year added later is
+    /// covered without anyone remembering to extend this.
+    #[test]
+    fn mfs_kicker_constants_satisfy_the_two_section_55d3_identities() {
+        let t = BundledFullReturnTables::load();
+        let mut checked = 0;
+        for year in 2015..=2035 {
+            let Some(p) = t.full_return_for(year) else {
+                continue;
+            };
+            let amt = &p.amt;
+            let exemption_mfs = amt.exemption(FilingStatus::Mfs);
+            assert_eq!(
+                amt.mfs_kicker_max, exemption_mfs,
+                "TY{year}: §55(d)(3)(ii) caps the MFS add-back at the MFS exemption, but \
+                 mfs_kicker_max={} and the exemption is {exemption_mfs}",
+                amt.mfs_kicker_max
+            );
+            assert!(
+                amt.exemption_phaseout_rate > Usd::ZERO,
+                "TY{year}: a zero phase-out rate makes the exemption never reach zero"
+            );
+            let zero_exemption_point =
+                amt.phaseout_start(FilingStatus::Mfs) + exemption_mfs / amt.exemption_phaseout_rate;
+            assert_eq!(
+                amt.mfs_kicker_start,
+                zero_exemption_point,
+                "TY{year}: §55(d)(3)(i) starts the MFS add-back at the point the MFS exemption \
+                 reaches zero — {} + {exemption_mfs}/{} = {zero_exemption_point} — but \
+                 mfs_kicker_start={}",
+                amt.phaseout_start(FilingStatus::Mfs),
+                amt.exemption_phaseout_rate,
+                amt.mfs_kicker_start
+            );
+            checked += 1;
+        }
+        assert!(checked > 0, "no bundled year carried full-return params");
     }
 
     /// ★ TY2026 FAILS CLOSED BY DECISION, and this is the decision — not an oversight, and not a

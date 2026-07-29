@@ -276,13 +276,13 @@ pub fn compute_6251(i: Form6251Inputs, amt: &AmtParams, bp: &LtcgBreakpoints) ->
     // i6251 p.9, line 4 — the MFS kicker.
     if st == FilingStatus::Mfs && line4 > amt.mfs_kicker_start {
         let excess = line4 - amt.mfs_kicker_start;
-        line4 += (amt.phaseout_rate * excess).min(amt.mfs_kicker_max);
+        line4 += (amt.mfs_kicker_rate * excess).min(amt.mfs_kicker_max);
     }
 
     // ── Part II, lines 5-6 ──
     let exemption = amt.exemption(st);
     let phase_start = amt.phaseout_start(st);
-    let line5 = (exemption - amt.phaseout_rate * (line4 - phase_start).max(z)).max(z);
+    let line5 = (exemption - amt.exemption_phaseout_rate * (line4 - phase_start).max(z)).max(z);
     let line6 = (line4 - line5).max(z);
 
     let bp28 = amt.breakpoint_28pct(st);
@@ -446,7 +446,8 @@ mod tests {
             breakpoint_28pct_mfs: dec!(116300),
             mfs_kicker_start: dec!(875950),
             mfs_kicker_max: dec!(66650),
-            phaseout_rate: dec!(0.25),
+            exemption_phaseout_rate: dec!(0.25),
+            mfs_kicker_rate: dec!(0.25),
             rate_26: dec!(0.26),
             rate_28: dec!(0.28),
             rate_28_subtrahend: dec!(4652),
@@ -632,6 +633,68 @@ mod tests {
                 "{id}: Who Must File condition 1 (line 7 > line 10)"
             );
         }
+    }
+
+    /// ★ THE TWO §55(d)(3) RATES ARE INDEPENDENT — and this is the only test that says so.
+    ///
+    /// `exemption_phaseout_rate` and `mfs_kicker_rate` were ONE field until 2026-07-29. They are
+    /// both 25% in TY2024 and TY2025, so nothing in the fixture, the sweeps, or the oracles can tell
+    /// the split apart: swapping the two at their use sites leaves the entire suite green (verified).
+    /// A split whose only evidence is a comment is not a split, so this test gives them **different**
+    /// values — the shape the TY2026 draft implies, a 50% exemption phase-out with the kicker's own
+    /// rate unchanged — and checks that each form rule picked up its own.
+    ///
+    /// The two are exercised on different statuses because they cannot both be live at once: for
+    /// MFS the kicker starts exactly where the exemption reaches zero (§55(d)(3)'s flush sentence
+    /// defines it that way), so any return with a kicker has no exemption left to phase out.
+    #[test]
+    fn the_exemption_phaseout_and_the_mfs_kicker_use_their_own_rates() {
+        let mut p = params();
+        p.exemption_phaseout_rate = dec!(0.50); // hypothetical: only the SPLIT is under test here
+        p.mfs_kicker_rate = dec!(0.25); // unchanged
+        let at = |status: FilingStatus, ti: Usd| {
+            compute_6251(
+                Form6251Inputs {
+                    status,
+                    taxable_income_l15: ti,
+                    agi_l11: ti,
+                    deduction_l12: Usd::ZERO,
+                    deduction_l14: Usd::ZERO,
+                    schedule_a_line7: Usd::ZERO,
+                    itemized: true, // line 2a = Schedule A line 7 = 0, so line 4 = line 1 = TI
+                    state_refund_sch1_l1: Usd::ZERO,
+                    net_capital_gain: Usd::ZERO, // no Part III; line 7 takes the flat rate
+                    qualified_dividends: Usd::ZERO,
+                    qdcgt_line5_regular: ti,
+                    regular_tax_l16: dec!(1),
+                    schedule_2_line1z: Usd::ZERO,
+                    schedule_3_line1: Usd::ZERO,
+                },
+                &p,
+                &bps(status),
+            )
+        };
+
+        // ── the KICKER keeps 25%, even though the phase-out is now 50% ──
+        // i6251's own example: pre-kicker line 4 of $895,950 is $20,000 over the $875,950 start.
+        let f = at(FilingStatus::Mfs, dec!(895950));
+        assert_eq!(
+            f.line4,
+            dec!(900950),
+            "the MFS add-back must use mfs_kicker_rate (25% of 20,000 = 5,000). Reading \
+             exemption_phaseout_rate here would give 50% = 10,000 and a line 4 of 905,950 — which \
+             is exactly the silent wrong number the split exists to prevent."
+        );
+
+        // ── the EXEMPTION phase-out uses the 50%, on a status with no kicker ──
+        // Single: $709,350 is $100,000 past the $609,350 start; 85,700 − 50% × 100,000 = 35,700.
+        let f = at(FilingStatus::Single, dec!(709350));
+        assert_eq!(
+            f.line5,
+            dec!(35700),
+            "the exemption worksheet must use exemption_phaseout_rate (50%). At the kicker's 25% \
+             it would be 60,700."
+        );
     }
 
     /// i6251 p.9's OWN worked example: "if the amount on line 4 is $895,950, enter $900,950

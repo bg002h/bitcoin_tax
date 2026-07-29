@@ -258,8 +258,22 @@ pub struct AmtParams {
     /// **i6251 p.9** — the MFS add-back cap: *"If line 4 is $1,142,550 or more, include an additional
     /// $66,650. Otherwise, include 25% of the excess of the amount on line 4 over $875,950."*
     pub mfs_kicker_max: Usd,
-    /// §55(d)(3) exemption phase-out rate (Exemption Worksheet line 5: *"Multiply line 4 by 25% (0.25)"*).
-    pub phaseout_rate: Usd,
+    /// §55(d)(3) **exemption phase-out** rate (Exemption Worksheet line 5: *"Multiply line 4 by 25%
+    /// (0.25)"*).
+    ///
+    /// ★ SPLIT FROM `mfs_kicker_rate`, which was the same field until 2026-07-29. These are two
+    /// different rules that happen to share a rate: the Exemption Worksheet reduces the exemption,
+    /// and Form 6251 line 4 *increases AMTI*. Both are 25% in TY2024 and TY2025, so one field was
+    /// invisible and green — and the TY2026 draft form's own arithmetic implies this one moves to
+    /// **50%** (500,000 + 2 × 70,100 = 640,200, the published MFS kicker start) while nothing says
+    /// the kicker's rate follows. One field standing for two form rules is the compression
+    /// `CLAUDE.md` forbids; here it would have printed a wrong number on a **signed** form with
+    /// nothing reding.
+    pub exemption_phaseout_rate: Usd,
+    /// **i6251 p.9** — the rate in the MFS AMTI add-back: *"include **25% of the excess** of the
+    /// amount on line 4 over $875,950."* §55(d)(3)'s flush sentence. Distinct from
+    /// [`Self::exemption_phaseout_rate`]; see the note there.
+    pub mfs_kicker_rate: Usd,
     /// §55(b)(1)(A) lower AMT rate (Form 6251 lines 7/18/39: *"multiply … by 26% (0.26)"*).
     pub rate_26: Usd,
     /// §55(b)(1)(B) upper AMT rate (Form 6251 lines 7/18/39: *"multiply … by 28% (0.28)"*).

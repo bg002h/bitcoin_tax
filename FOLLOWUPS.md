@@ -578,13 +578,25 @@ assertion beside it, and 2026 must survive that.** Primary sources archived unde
 `design/amt-form6251/`: `f6251--2025.pdf`, `i6251--2025.pdf`, `f6251--2026-DRAFT.pdf`.
 Full detail: `design/amt-form6251/CONTINUITY_TY2025.md`.
 
-**→ NEW: G-6f — `AmtParams.phaseout_rate` does double duty for two distinct statutory rates**: the
-§55(d)(3) exemption phase-out (`form6251.rs:285`) and the MFS line-4 kicker (`:279`). Both are 25% in
-2024 *and* 2025, so the conflation is invisible and green. The 2026 draft implies the phase-out moves
-to 50% with nothing saying the kicker follows — at which point we print a wrong number on a **signed**
-form with nothing reding. Split into `exemption_phaseout_rate` + `mfs_kicker_rate`, both 0.25 today
-(a no-op). Owning phase: **before TY2025**, which would otherwise duplicate the conflation into a
-second `AmtParams` literal.
+**→ G-6f — DONE 2026-07-29. `AmtParams.phaseout_rate` did double duty for two distinct statutory
+rates**: the §55(d)(3) exemption phase-out (`form6251.rs:285`) and the MFS line-4 kicker (`:279`).
+Both are 25% in 2024 *and* 2025, so the conflation was invisible and green; the 2026 draft implies the
+phase-out moves to 50% with nothing saying the kicker follows, at which point we would print a wrong
+number on a **signed** form with nothing reding. Now `exemption_phaseout_rate` + `mfs_kicker_rate`.
+
+★ **The split needed a test, and finding that out took a mutation.** Swapping the two at their use
+sites left the ENTIRE suite green — they are numerically equal today, so no fixture vector, sweep or
+oracle can distinguish them. A split whose only evidence is a comment is not a split.
+`the_exemption_phaseout_and_the_mfs_kicker_use_their_own_rates` gives them *different* values and
+checks each rule took its own; both swap directions now red.
+
+★ **Two §55(d)(3) IDENTITIES are now asserted too**, over every bundled year (so a year added later
+is covered without anyone remembering): the add-back **cap is the MFS exemption** (clause (ii)) and
+the add-back **threshold is the zero-exemption point** = `phase-out start + exemption / phase-out
+rate` (clause (i)). Both are definitional and verified across three regimes — TY2024, TY2025, and the
+TY2026 draft at its implied 50%. They turn five separately-typed MFS constants into a system that
+catches its own transcription slips, which is what makes typing TY2025 in safe. Identity (i) is also
+*why* the MFS region has no TY2024 oracle: "exemption gone" and "kicker live" are one condition.
 
 **→ NEW: G-6d — no fixture vector has Schedule A line 7 > 0.** Every itemizing vector deducts a cash
 gift only, so the fixture drives line 2a's *itemizer* limb at zero throughout. The limb is not
