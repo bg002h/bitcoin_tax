@@ -120,8 +120,10 @@ beside it; 2026 must survive that.** Three independent reasons, each sufficient:
    inferred constant is precisely what `CLAUDE.md` forbids encoding.
 2. **The form was restructured, not re-parameterized.** 2026 splits line 1 into `1a`/`1b`, where 1a
    subtracts **Schedule 1-A (Form 1040), line 43** — a new OBBBA schedule btctax has no surface for —
-   and line 4 reads "Combine lines **1b** through 3". `Form6251` transcribes the 2024 layout. 2026
-   needs a re-transcription.
+   and line 4 reads "Combine lines **1b** through 3". `Form6251` transcribes the 2024 layout.
+   ★ **This is NOT a 2026-only reason — see §6a. TY2025 is restructured too.** It is listed here
+   because it compounds with (1) and (3): for 2026 we would be re-transcribing a form whose
+   instructions do not exist, against no oracle.
 3. **No oracle covers 2026.** OpenTaxSolver's newest release is `OTS_2025`; there is no OTS 2026.
    Tax-Calculator reaches 2036 but carries both AMT defects, so a 2026 figure would rest on one
    engine we already know is wrong there.
@@ -129,6 +131,60 @@ beside it; 2026 must survive that.** Three independent reasons, each sufficient:
 Archived as **`f6251--2026-DRAFT.pdf`** (sha256 `a547fc9d…b5ac`) — drafts get replaced silently, and
 this one is the evidence for the decision. **It is a draft: "NOT FOR FILING". Do not transcribe
 constants from it into `AmtParams`.**
+
+---
+
+## 6a. ★★ TY2025 IS ALSO A RE-TRANSCRIPTION — OBBBA restructured the 2025 return
+
+**Correction to an earlier draft of this document, which implied TY2025 was constants-plus-plumbing.
+It is not.** Established 2026-07-29 from the archived IRS finals:
+
+**The 2025 Form 1040 changed shape.** Line **11b** is the AGI line taxable income is measured from,
+line **12e** is the deduction line, and line **13b** is *"Additional deductions from Schedule 1-A,
+line 38"* — a new OBBBA schedule.
+
+**The 2025 Form 6251 Part I changed with it**, exactly as the 2026 draft does:
+
+| | 2024 (what `Form6251` transcribes) | 2025 |
+|---|---|---|
+| line 1 | "…from Form 1040 line **15**…" | **1a** "Subtract Schedule 1-A line **37** from Form 1040 line **14**" |
+| | | **1b** "Subtract line 1a from Form 1040 line **11b**" |
+| line 2a | "…otherwise, the amount from line **12**" | "…otherwise, the amount from line **12e**" |
+
+★ **Read line 1a carefully — it subtracts Schedule 1-A line 37, which is the *senior* deduction
+alone (Part V, "Enhanced Deduction for Seniors"), not line 38, the total.** So for the AMT, the
+enhanced senior deduction is **added back** and the tips / overtime / car-loan deductions are
+**allowed**. That is a substantive tax fact, and it is the kind of thing that must be transcribed
+rather than inferred.
+
+**Schedule 1-A (2025) has five parts**, each with its own cap and phase-out:
+
+| part | deduction | cap | phase-out |
+|---|---|---|---|
+| II | No Tax on Tips | 25,000 | $100 per $1,000 of MAGI over 150,000 / 300,000 |
+| III | No Tax on Overtime | 12,500 / 25,000 | $100 per $1,000 over 150,000 / 300,000 |
+| IV | No Tax on Car Loan Interest | 10,000 | $200 per $1,000 over 100,000 / 200,000 (needs VINs) |
+| V | Enhanced Deduction for Seniors | 6,000 per person | 6% of MAGI over 75,000 / 150,000 |
+
+**This is the central open question for the TY2025 spec**, and it is an answered-ness question, not a
+computation one: btctax cannot see tips, overtime or car-loan interest, so it cannot know Schedule 1-A
+is zero — it can only *assume* it, which is the defect class this project keeps paying for. Three
+options, to be settled in the spec:
+
+- **(a) implement Schedule 1-A in full** — five parts, four phase-outs, VIN collection. Disproportionate.
+- **(b) existence questions, any "yes" refuses** — cheapest, fail-closed, in character. ★ Note the
+  senior deduction is *different*: btctax already collects `date_of_birth` for the §63(f) aged/blind
+  boxes, so a 65+ filer is identifiable and their deduction is computable from data already held.
+  Refusing every 65+ filer would be a large and avoidable population.
+- **(c) collect Schedule 1-A lines 37 and 38 as `ReturnInputs` fields** — the filer computes the
+  schedule elsewhere, mirroring how btctax already takes other non-crypto schedule totals.
+
+**Recommendation: (b) for tips/overtime/car-loan + compute Part V**, with (c) as a later widening.
+
+★ **None of this blocks the pivot's purpose.** The AMT-witnessing vectors are wages + LTCG + a cash
+gift, so Schedule 1-A is genuinely zero on them: line 1a = line 14, line 1b = taxable income, and
+Part I reduces to the 2024 shape. The MFS kicker can be witnessed against OTS 2025 regardless of how
+Schedule 1-A is resolved.
 
 ---
 
@@ -154,9 +210,17 @@ is small, and TY2025 adds a second `AmtParams` literal that would otherwise dupl
 
 Roughly, and to be specced properly per `STANDARD_WORKFLOW.md` before any code:
 
+0. **Settle the Schedule 1-A question (§6a) first** — it decides whether TY2025 is a tax year or a
+   feature. Everything below assumes Schedule 1-A is resolved one way or another.
 1. **`FullReturnParams` for 2025**, including `AmtParams` — transcribed from the archived 2025 form
-   and instructions plus Rev. Proc. 2024-40. Every non-AMT field too (std deduction, SALT cap, QBI
-   thresholds, kiddie threshold, elective deferral, FTC ceiling…).
+   and instructions plus Rev. Proc. 2024-40. Every field: `std_deduction` (4 statuses),
+   `std_aged_blind_married`/`_unmarried`, `dependent_std_floor`/`_earned_addon`, `salt_cap`
+   (★ OBBBA raised this — read it, do not assume 10,000), `kiddie_unearned_threshold`,
+   `elective_deferral_limit`, `ftc_ceiling`, `qbi_ti_threshold_unmarried`/`_married`,
+   `student_loan_phaseout_unmarried`/`_married`, and `amt`.
+1b. **Re-transcribe Form 6251 Part I for 2025** — lines 1a/1b replacing line 1, and line 2a's
+   citation moving from 1040 line 12 to line 12e (§6a). `Form6251`'s `line1` field is a 2024 shape.
+   Whether that means a per-year struct, a versioned Part I, or a widened field is a spec decision.
 2. **A year seam in the OTS driver.** `ots_direct._bin` hardcodes `taxsolve_{form}_2024` (line 76)
    and `_template` looks for `{name}_2024_template.txt` (line 84). Both need the year threaded
    through, and `OTS_DIR` becomes per-year (two installs now coexist).
