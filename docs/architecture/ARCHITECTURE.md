@@ -232,7 +232,8 @@ The crate holds two engines, deliberately separated:
 - **The absolute full-return engine** (additive-only; never edits the frozen engine)
   assembles a complete Form 1040 from `ReturnInputs` plus the ledger: Schedules 1/2/3
   /A/B/C/D/SE, Forms 8959/8960/8995, standard-vs-itemized, charitable ceilings with
-  five-year carryover, the AMT screen, and Line 16 via the IRS Tax Table / worksheet.
+  five-year carryover, Form 6251 (computed in full; the return refuses when line 7 exceeds line 10,
+  because v1 cannot yet ATTACH the form), and Line 16 via the IRS Tax Table / worksheet.
   It derives the delta engine's tax profile from *non-crypto lines only*, so it is
   structurally incapable of double-counting crypto.
 

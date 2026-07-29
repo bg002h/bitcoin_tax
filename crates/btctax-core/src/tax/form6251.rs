@@ -3,7 +3,7 @@
 //! Every field below is one numbered line of the form, named for that line, carrying the official
 //! printed instruction **verbatim** as its doc comment (`CLAUDE.md`, "Transcribe IRS forms").
 //!
-//! ★ **The converse does NOT yet hold, and that is Tier 1's boundary.** Lines **2c–2t** (17 numbered
+//! ★ **The converse does NOT yet hold, and that is Tier 1's boundary.** Lines **2c–2t** (18 numbered
 //! adjustment lines: ISO exercise, §1202, §4952 investment interest, depreciation, NOL, passive and
 //! loss-limitation items, …) have **no fields here**, and `line4 = line1 + line2a + line2b + line3`
 //! treats them all as $0. Each is closed at the input surface instead — most because v1 captures no

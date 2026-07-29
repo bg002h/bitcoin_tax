@@ -84,6 +84,22 @@ impl QuestionId {
     ];
 }
 
+/// Is `id`'s question LIVE on this return? The single accessor for a liveness predicate outside the
+/// registry loop.
+///
+/// ★ Exists so a VALUE-refusal (`Some(false)` ⇒ refuse) can share the exact predicate its UNANSWERED
+/// half uses, instead of re-deriving it. An ungated value-refusal is an exit-less brick: a stale
+/// adverse answer left over from a Schedule A that no longer carries mortgage interest, or a Schedule C
+/// whose expenses dropped to $0, would refuse a return whose add-back is structurally $0 — with no way
+/// for the filer to clear it, because the question is no longer asked. Re-deriving the predicate at the
+/// refusal site is exactly the duplication `FormQuestion::live` was introduced to end (§3.1).
+pub fn question_is_live(id: QuestionId, ri: &ReturnInputs) -> bool {
+    FORM_QUESTIONS
+        .iter()
+        .find(|q| q.id == id)
+        .is_some_and(|q| (q.live)(ri))
+}
+
 /// Whether an AMT capital-loss-carryover twin could exist — Form 6251 line 2k's liveness.
 fn amt_carryover_question_live(ri: &ReturnInputs) -> bool {
     let cf = ri.capital_loss_carryforward_in;
@@ -99,6 +115,16 @@ fn amt_carryover_question_live(ri: &ReturnInputs) -> bool {
 /// Schedule C Part II line 13 ("Depreciation and section 179 expense deduction") is $0 or $200,000. Any
 /// filer with business expenses at all must therefore affirm. See [`RefuseReason::
 /// AmtDepreciationDeclarationUnanswered`] for why the alternative — assuming $0 — is unsound.
+///
+/// ★ The EXPECTED answer is yes, and the prompt says so. i6251 (2024) p.4-5 exempts from line 2l:
+/// property eligible for a special depreciation allowance (its AMT and regular bases are identical);
+/// property placed in service **after 2015** even where bonus was ELECTED OUT ("It isn't subject to an
+/// AMT adjustment for depreciation if it was placed in service after 2015"); §179 property; ADS-elected
+/// property; and straight-line property. Passive, at-risk, partnership-basis and farm-shelter
+/// depreciation route to lines 2m/2n/3 instead. What survives for a TY2024 return is a narrow tail —
+/// chiefly 200%-DB MACRS property placed in service before 2016 whose recovery period is long enough to
+/// still be running (10-year property from 2015 runs through 2025). The question exists to catch that
+/// tail, NOT to refuse every filer who owns equipment.
 ///
 /// [`ScheduleCInputs::expenses`]: crate::tax::return_inputs::ScheduleCInputs::expenses
 /// [`RefuseReason::AmtDepreciationDeclarationUnanswered`]:
@@ -288,16 +314,21 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
     FormQuestion {
         id: QuestionId::AmtDepreciationSameAsRegular,
         prompt: "Is the depreciation included in your Schedule C expenses the SAME for the alternative \
-                 minimum tax as for the regular tax? (Form 6251 line 2l — answer no if you claimed the \
-                 200% declining-balance method on property placed in service after 1998, or any other \
-                 accelerated depreciation whose AMT amount differs. Answer yes if you claimed no \
-                 depreciation at all.)",
+                 minimum tax as for the regular tax? (Form 6251 line 2l. For almost everyone this is \
+                 YES: no AMT adjustment applies to property placed in service after 2015, nor to \
+                 property you claimed bonus depreciation or a section 179 deduction on, nor to anything \
+                 depreciated straight-line or under ADS. Answer NO only if you are still depreciating \
+                 property placed in service BEFORE 2016 under the 200% declining-balance MACRS method \
+                 without the special depreciation allowance. Answer yes if you claimed no depreciation \
+                 at all.)",
         unanswered: RefuseReason::AmtDepreciationDeclarationUnanswered,
         unanswered_detail:
             "this return carries Schedule C expenses, and btctax accepts that as a FLAT TOTAL — it never \
              sees Part II line 13 ('Depreciation and section 179 expense deduction'), so it cannot tell \
-             whether a Form 6251 line 2l adjustment is hiding inside it. A divergent AMT depreciation \
-             amount is an ADD-BACK. Guessing would understate the tax — run `btctax income answer`",
+             whether a Form 6251 line 2l adjustment is hiding inside it. Most filers answer yes (i6251 \
+             exempts property placed in service after 2015, bonus and section 179 property, and \
+             straight-line/ADS); but a divergent AMT amount is an ADD-BACK, and guessing would \
+             understate the tax — run `btctax income answer`",
         live: amt_depreciation_question_live,
         get: |ri| ri.amt_depreciation_same_as_regular,
         set: |ri, v| ri.amt_depreciation_same_as_regular = Some(v),

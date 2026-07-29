@@ -585,13 +585,19 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
     //    neutral at TRUE, see `FormQuestion::neutral`), disjoint from the unanswered loop above.
     //    ★ We mirror the mixed-use-mortgage exemplar only on the UNANSWERED half and deliberately
     //    DIVERGE here: a zeroed Schedule A line 8a is conservative, but a missing AMT add-back is not.
-    // ★ Gated by the SAME liveness as its unanswered half (`mortgage_question_live`: a Schedule A
-    //   carrying mortgage interest). Ungated, a stale `Some(false)` bricked a filer with a structurally
-    //   $0 add-back and no exit — e.g. a houseboat owner who later dropped the mortgage, or one whose
-    //   standard deduction wins. i6251 line 3 is conditioned on having **deducted** the interest.
-    if ri.schedule_a.as_ref().is_some_and(|a| {
-        a.mortgage_interest_1098 > Usd::ZERO && a.mortgage_dwelling_is_amt_qualified == Some(false)
-    }) {
+    // ★ All three are gated by the SAME liveness predicate their UNANSWERED half uses, read from the
+    //   registry via `question_is_live` rather than re-derived here. Ungated, a stale `Some(false)` is
+    //   an exit-less brick on a return whose add-back is structurally $0 — the filer cannot clear an
+    //   answer to a question that is no longer asked. (i6251 line 3 is itself conditioned on having
+    //   **deducted** the interest, so the gate is faithful to the form, not just kind.)
+    if crate::tax::questions::question_is_live(
+        crate::tax::questions::QuestionId::AmtQualifiedDwelling,
+        ri,
+    ) && ri
+        .schedule_a
+        .as_ref()
+        .is_some_and(|a| a.mortgage_dwelling_is_amt_qualified == Some(false))
+    {
         return refuse(
             RefuseReason::AmtNonQualifiedDwelling,
             "you declared that the mortgaged dwelling is NOT an AMT-qualified dwelling, so Form 6251 \
@@ -600,7 +606,11 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
              without it would UNDERSTATE your tax",
         );
     }
-    if ri.amt_carryover_same_as_regular == Some(false) {
+    if crate::tax::questions::question_is_live(
+        crate::tax::questions::QuestionId::AmtCarryoverSameAsRegular,
+        ri,
+    ) && ri.amt_carryover_same_as_regular == Some(false)
+    {
         return refuse(
             RefuseReason::AmtCarryoverDiverges,
             "you declared that your AMT capital-loss carryover differs from the regular-tax one, so Form \
@@ -608,7 +618,11 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
              no divergence, so computing would UNDERSTATE your tax",
         );
     }
-    if ri.amt_depreciation_same_as_regular == Some(false) {
+    if crate::tax::questions::question_is_live(
+        crate::tax::questions::QuestionId::AmtDepreciationSameAsRegular,
+        ri,
+    ) && ri.amt_depreciation_same_as_regular == Some(false)
+    {
         return refuse(
             RefuseReason::AmtDepreciationDiverges,
             "you declared that the depreciation inside your Schedule C expenses differs for the AMT, so \
@@ -1741,6 +1755,59 @@ mod tests {
         }
     }
 
+    /// ★ ALL THREE Form 6251 VALUE-refusals must respect the liveness of their unanswered half.
+    ///
+    /// A `Some(false)` left over from a trigger that has since gone away — the mortgage paid off, the
+    /// carryforward used up, the Schedule C wound down — describes an add-back that is structurally $0.
+    /// Refusing on it is an EXIT-LESS brick: the question is no longer asked, so the filer has no way to
+    /// change the answer. Each gate reads the registry via `question_is_live`, so this holds by
+    /// construction rather than by three hand-copied predicates.
+    ///
+    /// Mutation: drop any one `question_is_live(..) &&` conjunct in `screen_inputs` and its arm reds.
+    #[test]
+    fn an_adverse_answer_on_a_no_longer_live_question_does_not_brick_the_return() {
+        use crate::tax::return_inputs::{ScheduleAInputs, ScheduleCInputs};
+
+        // line 3 — adverse, but no mortgage interest was deducted.
+        let mut r = ri();
+        r.schedule_a = Some(ScheduleAInputs {
+            mortgage_interest_1098: Usd::ZERO,
+            mortgage_dwelling_is_amt_qualified: Some(false),
+            salt_real_estate: dec!(4000),
+            ..Default::default()
+        });
+        assert_ne!(
+            reason(&r),
+            Some(RefuseReason::AmtNonQualifiedDwelling),
+            "line 3: a $0 add-back must not brick the return"
+        );
+
+        // line 2k — adverse, but no capital-loss carryforward survives.
+        let mut r = ri();
+        r.capital_loss_carryforward_in = crate::tax::types::Carryforward::default();
+        r.amt_carryover_same_as_regular = Some(false);
+        assert_ne!(
+            reason(&r),
+            Some(RefuseReason::AmtCarryoverDiverges),
+            "line 2k: no carryforward means no divergence to add back"
+        );
+
+        // line 2l — adverse, but the Schedule C claims no expenses.
+        let mut r = ri();
+        r.schedule_c = Some(ScheduleCInputs {
+            business_description: "Bitcoin mining".to_string(),
+            naics_code: "518210".to_string(),
+            expenses: Usd::ZERO,
+            ..Default::default()
+        });
+        r.amt_depreciation_same_as_regular = Some(false);
+        assert_ne!(
+            reason(&r),
+            Some(RefuseReason::AmtDepreciationDiverges),
+            "line 2l: $0 of expenses cannot contain depreciation"
+        );
+    }
+
     /// ★ REGRESSION — the line-3 VALUE-refusal must respect the SAME liveness as its unanswered half.
     ///
     /// A Schedule A with an adverse `Some(false)` but **no mortgage interest** has a structurally $0
@@ -1775,10 +1842,10 @@ mod tests {
         );
     }
 
-    /// ★ THE TERNARY for Form 6251's two declarations: unanswered ⇒ refuse, ADVERSE ⇒ refuse,
+    /// ★ THE TERNARY for Form 6251's THREE declarations: unanswered ⇒ refuse, ADVERSE ⇒ refuse,
     /// neutral ⇒ compute. The adverse branch is the one a passing test would hide — computing with a
-    /// missing line-3 / line-2k add-back UNDERSTATES the tax, which is the one direction this project
-    /// never permits.
+    /// missing line-3 / line-2k / line-2l add-back UNDERSTATES the tax, which is the one direction this
+    /// project never permits.
     ///
     /// Mutation: delete either value-refusal in `screen_inputs` and the matching `Some(false)`
     /// assertion below reds.
@@ -1831,14 +1898,43 @@ mod tests {
         );
         assert_eq!(carryover(Some(true)), None, "neutral ⇒ compute");
 
-        // Neither question is live when its trigger is absent — no gratuitous questions.
+        // ── line 2l — the AMT depreciation declaration ──
+        // ★ Added after the fold's own re-review found this arm MISSING: deleting the value-refusal at
+        //   `screen_inputs` left all 2,417 tests green, so the C-2 guard was unheld — a correct fix with
+        //   no test behind it is the failure mode this project keeps hitting. Mutation-verify by
+        //   `if false &&`-ing the `amt_depreciation_same_as_regular == Some(false)` block.
+        let deprec = |ans: Option<bool>| {
+            let mut r = ri();
+            r.schedule_c = Some(crate::tax::return_inputs::ScheduleCInputs {
+                business_description: "Bitcoin mining".to_string(),
+                naics_code: "518210".to_string(),
+                expenses: dec!(5000),
+                ..Default::default()
+            });
+            r.amt_depreciation_same_as_regular = ans;
+            reason(&r)
+        };
+        assert_eq!(
+            deprec(None),
+            Some(RefuseReason::AmtDepreciationDeclarationUnanswered),
+            "unanswered ⇒ refuse"
+        );
+        assert_eq!(
+            deprec(Some(false)),
+            Some(RefuseReason::AmtDepreciationDiverges),
+            "ADVERSE ⇒ refuse: a divergent AMT depreciation amount is an add-back v1 does not model"
+        );
+        assert_eq!(deprec(Some(true)), None, "neutral ⇒ compute");
+
+        // No question is live when its trigger is absent — no gratuitous questions.
         let mut bare = ri();
         bare.schedule_a = None;
+        bare.schedule_c = None;
         bare.capital_loss_carryforward_in = crate::tax::types::Carryforward::default();
         assert_eq!(
             reason(&bare),
             None,
-            "no 1098 and no carryforward ⇒ neither asked"
+            "no 1098, no carryforward and no Schedule C ⇒ none asked"
         );
     }
 

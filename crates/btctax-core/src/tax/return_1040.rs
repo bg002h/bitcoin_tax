@@ -825,8 +825,9 @@ const SE_6017_FLOOR: Usd = dec!(400);
 /// other-taxes forms (Sch 2 L4 SE, Form 8959, absolute Form 8960), the §904(j) FTC + conservative-omission
 /// CTC (L19 = 0), **1040 total tax L24**, and **payments → refund/owed** (§6413(c) excess-SS, withholding
 /// L25, total payments L33, refund L35a / owed L37). The remaining P4 increment is the §6 dual report. The
-/// §4.10 compute-dependent refuses that need L12/L15/L16 (QBI-above-threshold, AMT screen, TI≤0-with-
-/// carryforward) are screened by [`screen_absolute`] after this (infallible) assembly.
+/// §4.10 compute-dependent refuses that need L12/L15/L16 (QBI-above-threshold, **Form 6251 Who Must
+/// File condition 1**, TI≤0-with-carryforward) are screened by [`screen_absolute`] after this
+/// (infallible) assembly.
 ///
 /// Unlike the derivation, this reads the crypto ledger `state` directly (`capital_gain_line7`,
 /// `crypto_income`, `compute_se_tax`) and produces the with-crypto AGI (L11) — the §6 / Form 8960-MAGI /
@@ -1255,7 +1256,8 @@ pub fn assemble_absolute(
     // CTC/ODC — conservative omission (§3.4): L19 = 0 (loud advisory surfaced at render, P5).
     let ctc_odc_credit = Usd::ZERO;
     // Sch 2 Part I: L1z (excess-APTC) = 0 (no input); L2 (AMT) = 0 for a computed return (a triggered AMT
-    // screen refuses via `screen_absolute`). So 1040 L17 = 0 and L18 = L16.
+    // return refuses via `screen_absolute` when Form 6251 line 7 exceeds line 10). So 1040 L17 = 0
+    // and L18 = L16.
     let l18 = regular_tax; // L16 + Sch 2 L3 (= 0)
     let nonrefundable_credits = ctc_odc_credit + foreign_tax_credit; // L21 = L19 + L20 (v1: FTC only)
     let tax_after_credits = (l18 - nonrefundable_credits).max(Usd::ZERO); // L22
@@ -3438,9 +3440,12 @@ mod tests {
     ///   1. **The worksheet fix.** `amt_worksheet_line2` returns Schedule A line **7** for an itemizer,
     ///      not the itemized total and not the standard deduction they did not take. **Verified
     ///      mutation:** make the `deduction_is_itemized` branch return `standard_deduction` and the
-    ///      `dec!(10000)` assertion below reds. This test is the ONLY killer of that mutation — the two
-    ///      cases above both take the STANDARD deduction, the one branch where `L15 + std == AGI − QBI`
-    ///      makes the old closed form accidentally correct. That is why this test exists.
+    ///      `dec!(10000)` assertion below reds — here and in `amt::tests::
+    ///      itemizer_addback_is_schedule_a_line7_not_the_itemized_total`, the only two killers. (An
+    ///      earlier draft of this docstring claimed to be the ONLY one; re-review measured two. Stated
+    ///      as measured.) This is the only END-TO-END killer: the two `screen_absolute` cases above both
+    ///      take the STANDARD deduction, the one branch where `L15 + std == AGI − QBI` makes the old
+    ///      closed form accidentally correct. That is why this test exists.
     ///   2. **The user-visible guarantee** — this filer is not refused. Now delivered by
     ///      `ar.amt.must_attach()`, not by the worksheet. The `>` boundary in `must_attach` is held
     ///      broadly rather than here: **verified mutation** `line7 >= line10` reds 13 tests across the

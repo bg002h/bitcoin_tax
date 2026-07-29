@@ -483,12 +483,19 @@ in-file, were folded before merge. What follows is the residue, each with an **o
   by construction contains Schedule C Part II line 13. `amt.rs` listed depreciation among "inputs v1 never
   captures", which was **factually wrong** and was the sole cover for a live understatement channel.
   Closed with a third class-(A) declaration (`AmtDepreciationSameAsRegular`) on the line-2k pattern.
+  **Scope note (verified against i6251 p.4-5 after the fold):** the reviewer's worked example — a miner
+  who elected out of §168(k) bonus on 5-year rigs — does NOT itself carry a line-2l adjustment if the
+  rigs were placed in service after 2015 ("It isn't subject to an AMT adjustment for depreciation if it
+  was placed in service after 2015"). The channel is real but narrower than the example: chiefly
+  200%-DB MACRS property placed in service before 2016 with a recovery period long enough to still be
+  running in 2024. The declaration stays; its PROMPT was corrected, because as first written it would
+  have steered every modern miner to answer "no" and be refused for a $0 adjustment.
 - **I-1** the Who-Must-File gate was nested inside the screening worksheet, so the branch's own line-2 fix
   was a net *safety reduction*, and its headline KAT was a **false pass**. Gate hoisted; the worksheet is
   now off every production path and survives as a swept cross-check.
 
 **Open residue:**
-- **[open → Tier 2]** `Form6251` has no fields for lines **2c–2t** (17 numbered adjustment lines), so the
+- **[open → Tier 2]** `Form6251` has no fields for lines **2c–2t** (18 numbered adjustment lines), so the
   module's "every field is one numbered line" invariant holds in one direction only and `must_attach`'s
   condition-4 argument is prose resting on an input-surface audit. Tier 2 files the form and must give
   them real fields. Recorded in the module doc.
@@ -507,6 +514,10 @@ in-file, were folded before merge. What follows is the residue, each with an **o
   *fixture's* self-consistency; the real coverage is the vector loop), and
   `line40_min_is_a_proved_no_op_for_this_input_class` sweeps only the general 26/28% schedule, never the
   MFS one this branch added.
+- **[open → ownerless residue]** `oracle_diff.rs:60-67` raw-indexes `table.ordinary` / `table.ltcg`
+  instead of the `_for` accessors, so it panics for `Qss`/`HoH`/`Mfs` — the same shape as C-1, but
+  pre-existing and confined to the oracle harness and golden tests (never a filing path). Fix it before
+  any four-status corpus reaches `table_l16`.
 - **[open → ownerless residue]** `a_cleared_screen_never_hides_a_must_attach_return` sweeps **Single and
   Mfj only**, because `return_1040.rs`'s test-local `real_2024_table()` carries schedules for exactly
   those two statuses (the test asserts that, so widening the table is a loud reminder). MFS/HoH rest on
