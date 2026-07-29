@@ -484,16 +484,23 @@ before the tag (see `chore(release): v0.14.0`). What remains:
   deliberately — renaming a public enum variant reopens the cross-crate exhaustive-match blast radius
   that four review rounds closed, and Tier 2 is already breaking, so the rename is free there.
   `return_refuse.rs`; call sites `return_1040.rs`, `btctax-input-form/src/attribute.rs`.
-- **[open → ownerless residue] Add a lockstep guard for the version bump.** A test asserting every
+- **[DONE 2026-07-29]** Lockstep guard added —
+  `repo_hygiene::every_intra_workspace_dependency_pins_the_current_version`. ★ The rationale NARROWED
+  on contact: cargo itself rejects a *lowered* exact pin, so the guard's real value is catching a LOOSE
+  requirement (`>=0.13`), which resolves locally and publishes wrong. Original text: A test asserting every
   inter-crate dependency `version` equals `CARGO_PKG_VERSION`. **A missed pin does NOT fail the
   publish** — crates.io would accept `btctax-cli 0.14.0 → btctax-core 0.13.0`, silently re-shipping the
   bug the release fixes. This release's bump was verified by hand (36 literals, all btctax).
-- **[open → ownerless residue] Add `cargo package` to the release gate.** Nothing in CI or the Makefile
+- **[PARTLY DONE 2026-07-29]** The specific class is guarded by
+  `repo_hygiene::no_published_crate_includes_a_file_outside_its_own_root`. The general form (unpack each
+  `.crate` and `cargo test --no-run`) remains OPEN. Original text: Nothing in CI or the Makefile
   runs it, which is exactly why the escaping-`include_str!` reached a release candidate. The permanent
   guard added this release (`repo_hygiene::no_published_crate_includes_a_file_outside_its_own_root`)
   catches that specific class; unpacking each `.crate` and running `cargo test --no-run` would catch
   the general one.
-- **[open → ownerless residue] `docs/pdf/` has no generator for the architecture/constellation PDFs.**
+- **[DONE 2026-07-29]** `make architecture` added; `bundles` now depends on `docs architecture
+  examples`, so a stale PDF cannot reach a release. Verified by deleting all three and rebuilding.
+  Original text:
   They are gitignored, built ad-hoc, and `make bundles` concatenates whatever is on disk — so v0.14.0's
   first bundle silently baked in a 10-day-old architecture PDF carrying text the release had just
   fixed. Give them a Makefile target so `make bundles` cannot ship stale content.
@@ -557,12 +564,17 @@ in-file, were folded before merge. What follows is the residue, each with an **o
   26/28% moved into `AmtParams`, and `amt.rs`'s screen still hardcodes `0.25`/`0.26` that `compute_6251`
   reads from params — two sources for the same statutory rates. `PART_III.md`'s claim that "the only
   production literal is `tax_tables.rs:141`" is false as written.
-- **[open → ownerless residue]** Two vector tests assert less than their names suggest:
+- **[DONE 2026-07-29]** Both fixed and mutation-verified: `v9_must_attach_while_the_amt_is_zero` now
+  calls `compute_6251`/`must_attach()` via a new `compute_vector` helper instead of reading the fixture
+  back, and `line40_min_is_a_proved_no_op_for_this_input_class` sweeps the MFS §55(b)(1) schedule as
+  well as the general one. Original text: Two vector tests assert less than their names suggest:
   `v9_must_attach_while_the_amt_is_zero` never calls `compute_6251`/`must_attach` (it checks the
   *fixture's* self-consistency; the real coverage is the vector loop), and
   `line40_min_is_a_proved_no_op_for_this_input_class` sweeps only the general 26/28% schedule, never the
   MFS one this branch added.
-- **[open → ownerless residue]** `oracle_diff.rs:60-67` raw-indexes `table.ordinary` / `table.ltcg`
+- **[DONE 2026-07-29]** `oracle_diff::table_l16` now uses `ordinary_for`/`ltcg_for` with a Qss
+  regression test; no raw index remains in the workspace. Original text: `oracle_diff.rs:60-67`
+  raw-indexes `table.ordinary` / `table.ltcg`
   instead of the `_for` accessors, so it panics for `Qss`/`HoH`/`Mfs` — the same shape as C-1, but
   pre-existing and confined to the oracle harness and golden tests (never a filing path). Fix it before
   any four-status corpus reaches `table_l16`.
