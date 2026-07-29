@@ -24,7 +24,7 @@ It subtracts the standard deduction and never adds it back. Its itemizer branch 
 Schedule A line 7 (`+ c18300`), which is why every itemizing vector agrees. But Form 6251 line 2a says:
 "If filing Schedule A (Form 1040), enter the taxes from Schedule A, line 7; **otherwise, enter the
 amount from Form 1040 or 1040-SR, line 12**" — i.e. add the standard deduction back. i6251 p.2 repeats
-it, §56(b)(1)(E) mandates it, and i6251's own TIP turns on it ("the standard deduction isn't allowed
+it, §56(b)(1)(D) mandates it, and i6251's own TIP turns on it ("the standard deduction isn't allowed
 for the AMT"). The form is the authority; a taxcalc disagreement is adjudicated against the PDF and
 never encoded. Direction: taxcalc UNDERSTATES AMT for standard-deduction filers.
 """

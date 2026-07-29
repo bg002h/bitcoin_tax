@@ -379,7 +379,7 @@ Its **itemizer** branch correctly adds Schedule A line 7 back (`+ c18300`) — w
 itemizing vector agrees to the cent. Its **standard-deduction** branch stops at Form 6251 line 1 and
 never applies line 2a's else-clause: *"If filing Schedule A (Form 1040), enter the taxes from Schedule
 A, line 7; **otherwise, enter the amount from Form 1040 or 1040-SR, line 12**."* i6251 p.2 repeats it,
-§56(b)(1)(E) mandates it, and i6251's own TIP depends on it (*"the standard deduction isn't allowed for
+§56(b)(1)(D) mandates it, and i6251's own TIP depends on it (*"the standard deduction isn't allowed for
 the AMT"*). Measured: every standard-deduction vector shows ΔAMTI = exactly the standard deduction,
 every itemizer 0, and V8's Δ19,600 = $14,600 MFS standard + the $5,000 MFS kicker taxcalc also omits.
 **Direction: Tax-Calculator UNDERSTATES AMT for standard-deduction filers.**
@@ -411,7 +411,7 @@ state plainly that AMT-bearing returns are validated by the form and hand-derive
 issue #278 / PR #279). Minimal repro to confirm against a second engine first: MFJ, $250,000 wages +
 $2,000,000 long-term gain, standard deduction → taxcalc `c09600` = $18,331; the form gives **$26,271**.
 Current evidence, all consistent but all one-sided: the form's own line 2a text, i6251 p.2 and its TIP,
-§56(b)(1)(E), taxcalc's own source, and r1's independent hand-derivation (which pre-dates the code and
+§56(b)(1)(D), taxcalc's own source, and r1's independent hand-derivation (which pre-dates the code and
 matches btctax).
 
 **[open] Widen the corpus.** `scripts/oracle/corpus.py` caps W-2 at $270,000 and LTCG at $20,000, so

@@ -8,7 +8,7 @@
 //! Schedule A **line 7** is `5e + 6` — the SALT total after the §164(b)(6) cap, plus other taxes — i.e.
 //! **taxes paid**, disallowed for AMT by §56(b)(1)(A)(ii). It is NOT the itemized total (that is Schedule A
 //! **line 17**, which is what flows to 1040 L12). The standard-deduction branch adds back the standard
-//! deduction because §56(b)(1)(E) disallows it outright. Every other Schedule-A line — mortgage interest,
+//! deduction because §56(b)(1)(D) disallows it outright. Every other Schedule-A line — mortgage interest,
 //! charitable, medical — is AMT-**allowed** and is never added back.
 //!
 //! **★ 2026-07-27 FIX (`fix/amt-screen-line2`).** This module previously reduced the worksheet to the
@@ -57,7 +57,7 @@ use rust_decimal_macros::dec;
 ///   line 6, so callers pass `salt_5e`). **Never pass the itemized total** (Schedule A line 17): mortgage
 ///   interest, charitable gifts and medical expenses are AMT-allowed and must not be added back. Passing
 ///   line 17 here is the exact defect this helper exists to prevent — see the module header.
-/// - When the standard deduction was taken, §56(b)(1)(E) disallows it entirely, so the whole of it is the
+/// - When the standard deduction was taken, §56(b)(1)(D) disallows it entirely, so the whole of it is the
 ///   add-back.
 pub fn amt_worksheet_line2(
     deduction_is_itemized: bool,
@@ -202,7 +202,7 @@ mod tests {
         );
     }
 
-    /// The standard-deduction branch is unchanged by the fix: §56(b)(1)(E) disallows the standard deduction
+    /// The standard-deduction branch is unchanged by the fix: §56(b)(1)(D) disallows the standard deduction
     /// outright, so the whole of it is the add-back and `L15 + std == AGI - QBI` still holds.
     #[test]
     fn standard_deduction_branch_adds_back_the_whole_standard_deduction() {
