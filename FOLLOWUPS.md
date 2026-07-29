@@ -458,14 +458,17 @@ OPEN. What follows is its ruling, and it corrects our framing in three places.
 
 **Entry criteria, each falsifiable:**
 - **[DONE 2026-07-29 — E1]** Compare every non-echo line OTS prints. 247 comparisons, 0 unexpected.
-- **[open → Tier 2 · E2] A POPULATION of two-oracle AMT-owing agreement, not a point.** Today exactly
-  **one** vector (V6) has AMT > 0 witnessed by BOTH oracles. Add itemizing AMT-owing vectors covering
-  each live Part III routing — line 23 > 0 vs = 0, line-32 skip taken vs not, 26% vs 28% side,
-  phase-out active vs not, line 8 live with line 7 > line 10 — per filing status.
-- **[open → Tier 2 · E3] The fixture has NO Single or HoH vector at all.** `f6251_reference.py` carries
-  only mfj/mfs tables, so the Single/HoH exemption ($85,700), phase-out start ($609,350) and HoH
-  breakpoints are exercised by ZERO vectors. Tier 2 may not attach for a status with no AMT-owing
-  vector: extend the reference, or restrict the shipped claim.
+- **[DONE 2026-07-29 — E2] A POPULATION of two-oracle AMT-owing agreement, not a point.** Was one
+  vector (V6); now **22 AMT-owing vectors of 30**, and every filing status clears the attach gate with
+  two oracles agreeing to the cent: single 6, hoh 4, mfj 5, mfs 1. Emitted by
+  `design/amt-form6251/gen_e2_vectors.py`, which asserts each vector's intended routing at generation
+  time. **Three of the five listed routings turned out to be UNREACHABLE with AMT owed**, and that is
+  a result, not a gap — see E2's findings below.
+- **[DONE 2026-07-29 — E3] Single and HoH.** Reference tables landed in `761dbf4` (E3a); the vectors
+  are V11–V18 and V27/V29 (E3b). Both harnesses were silently mapping every non-MFS status onto MFJ —
+  `form6251.rs`'s `bps()` (`Mfs => …, _ => …`) and `compute_vector` (`_ => Mfj`), and
+  `verify_f6251.py`'s `MARS: 3 if mfs else 2`. Three wildcards, one defect class, all found by adding
+  the first Single vector.
 - **[open → Tier 2 · E4] Read the FILLED f6251.pdf back field-by-field** against the struct, plus the
   Σround/roundΣ residual rules on the 6251 → Sch 2 → L17 chain. A perfect computation still files a
   wrong number through a transposed AcroForm field. The sweep already reads other forms off the PDF.
@@ -497,6 +500,62 @@ already refused), any "yes" refusing, plus a test asserting every 2c–2t field 
 declaration into attach mode; encode an oracle defect as truth; patch OTS locally (the form's own worked
 example anchors the MFS kicker better than a modified oracle, and the observe-only posture stands); let
 the fixture ossify into the permanent instrument; or close G-6 on this merge.
+
+---
+
+#### E2's findings (2026-07-29) — three routings are DEAD, one region has NO oracle
+
+**★ Three of the five routings E2 asked for cannot own AMT at all**, and they are one fact, not three.
+A ~450M-point scan over (wages, gain, gift, refund, FTC) at $500/$1,000 resolution, across all four
+filing statuses and both deduction modes, found **zero** AMT-owing returns with:
+
+- the **line-32 skip** taken, · **line 39 on the 26% side**, · the exemption **not yet phased out**.
+
+The root is the third: *in btctax's input class, AMT is owed only once the §55(d)(3) phase-out has
+begun* — the exemption is worth more than the flat 26/28% rate's excess over the graduated schedule
+everywhere it survives intact. The other two follow: the phase-out starts at $609,350 (MFJ
+$1,218,700), so an AMT-owing line 12 clears the $232,600 breakpoint (MFS $116,300) outright and also
+clears the §1(h) 15%-band top, leaving a 20% tranche that keeps line 32 ≠ line 12.
+
+That claim is **executable**, not prose: `amt_is_owed_only_once_the_exemption_phaseout_has_begun`
+sweeps all four statuses against the PRODUCTION regular tax (`qdcgt_line16`, Tax-Table quantization
+included) and asserts all three. It reds the moment the input surface widens — an ISO exercise at
+line 2i, §1202 at 2h, §1250 gain reaching line 14 — because a preference item can then lift AMTI
+without moving the regular tax, and **three routings would go live with no vector and no oracle**.
+
+**★★ ONE REGION HAS NO ORACLE AT ALL — worse than the consult's "doubly-dark" framing, and narrower.**
+The consult put the dark region at "standard-deduction MFS-kicker filers". Measured, it is **every**
+MFS return with the exemption phased to zero, standard or itemized — because §55(d)(3) puts the MFS
+zero-exemption threshold and the Form 6251 line-4 kicker start at the *identical* $875,950
+(609,350 + 4 × 66,650). A search found zero MFS returns with a zeroed exemption below the kicker
+start: for MFS the two conditions are one. And the kicker is exactly where both engines fail —
+
+| engine | what it does with the §55(d)(3) MFS rule |
+|---|---|
+| OTS 2024 | implements the line-4 add-back, with the **stale 2023** constants (831,150/1,084,150/63,250) |
+| Tax-Calculator 6.7.2 | implements the **exemption cliff** (`AMT_em_pe`, `calcfunctions.py:2590`) and **not** the line-4 AMTI add-back — its `c62100` block has no MFS branch at all |
+
+So V23/V24/V25 owe AMT and **nothing witnesses them**. `verify_f6251.py` now prints a witness census
+that says so every run, because two sections each printing "OK" concealed it. V22 — the phase-out
+ramp, below the kicker start — is the two-oracle MFS vector the gate actually requires, and it exists.
+
+★ **State that taxcalc claim precisely, because we have been imprecise here before.** Our upstream
+comment on #3108 said §55(d)(3) "appears not to be modelled" and was corrected — `AMT_em_pe` does
+model it. The accurate, grep-surviving claim is narrower: **the exemption cliff is modelled, the AMTI
+add-back is not.** Verified by reading `calcfunctions.py` in the pinned 6.7.2, not from memory.
+
+**→ NEW: G-6c** — report the missing §55(d)(3) MFS AMTI add-back upstream to Tax-Calculator. Owning
+phase: **Tier 2**, and *not before* checking the latest release and re-running both oracles — the
+#3108 lesson. Two witnesses already exist (the form's line-4 parenthetical with i6251 p.9's worked
+example, and OTS implementing the add-back), so this clears the one-oracle bar that #3108 did not.
+
+**→ NEW: G-6d — no fixture vector has Schedule A line 7 > 0.** Every itemizing vector deducts a cash
+gift only, so the fixture drives line 2a's *itemizer* limb at zero throughout. The limb is not
+untested — the original shipped bug's regression KAT
+(`amt::tests::itemizer_addback_is_schedule_a_line7_not_the_itemized_total`) exercises it with a
+nonzero SALT, and `return_1040.rs:1439` wires `salt_5e` in — but nothing carries a line-7-live
+household end to end through both oracles. Adding one means a SALT input in the vector surface plus
+`A5a/A5b` (OTS) and `e18400/e18500` (taxcalc). Owning phase: **Tier 2 · E4**.
 
 ### G-6a — TWO OTS DEFECTS, both ADJUDICATED 2026-07-29, neither a btctax defect
 

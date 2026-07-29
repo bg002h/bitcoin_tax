@@ -86,9 +86,23 @@ unavailable.
 **A disagreement is adjudicated against the FORM, never encoded.** The IRS PDF is the authority; an
 oracle is a witness. Precedent: tenforty issue #278 / PR #279 — OTS was never wrong, the wrapper was.
 
-**Known blind spot (2026-07-28): neither oracle is asked for AMT.** `ots_direct.py` reads only L16 and
-L24+NIIT, never the 1040's line 17 where AMT lands; and Tax-Calculator's own AMTI omits Form 6251 line
-2a's standard-deduction add-back. See `FOLLOWUPS.md` §G-6 — it is a Tier-2 blocker.
+**Both oracles ARE asked for AMT (since 2026-07-29).** `scripts/oracle/verify_f6251.py` diffs every
+Form 6251 line both engines print, over 30 vectors spanning all four filing statuses. See
+`FOLLOWUPS.md` §G-6 — still OPEN as the Tier-2 blocker (E4/E5/E6 remain), and
+`design/amt-form6251/CONTINUITY_E4.md` is the resume point.
+
+**★ An excuse list keyed by VECTOR NAME is a liability in that harness.** Both of the ones it had went
+stale on the first batch of new vectors: OTS's `{V8, V2b}` missed three MFS vectors it is equally
+blind to, and the Tax-Table methodology list `{("V10","line10")}` missed six lines. Both are now
+COMPUTED from the defect's own mechanism, and taxcalc's names each omission's exact **size** — so a
+divergence of the wrong shape is unexpected even on a vector expected to diverge. Same rule as the
+form: state the mechanism, let it decide, never enumerate the outcomes you happened to see.
+
+**★ Two disqualified oracles can align.** For MFS, §55(d)(3) puts the zero-exemption threshold and
+the Form 6251 line-4 kicker start at the identical $875,950 — and that is precisely where OTS carries
+stale constants AND taxcalc omits the add-back. Three vectors owe AMT with *no* witness. Two oracle
+sections each printing "OK" hid it; a **witness census** that counts independent witnesses per vector
+now surfaces it, and fails the run if any filing status loses its last two-oracle AMT-owing vector.
 
 ## Tests for conformance, reviews for judgment
 

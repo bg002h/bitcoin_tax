@@ -420,6 +420,7 @@ mod tests {
     use super::*;
     use crate::tax::tables::LtcgBreakpoints;
     use rust_decimal_macros::dec;
+    use std::collections::BTreeSet;
     use std::str::FromStr;
 
     /// The T1 fixture: `fixtures/form6251_vectors.json`, emitted by the line-by-line transcription
@@ -452,15 +453,32 @@ mod tests {
             rate_28_subtrahend_mfs: dec!(2326),
         }
     }
+    /// §1(h) breakpoints, per status — these ARE Form 6251 lines 19 and 25, which print all four
+    /// sets ("$94,050 if married filing jointly …, $47,025 if single or married filing separately,
+    /// or $63,000 if head of household").
+    ///
+    /// ★ EXHAUSTIVE, deliberately. This was `Mfs => …, _ => …`, i.e. every non-MFS status silently
+    ///   got the MFJ bands. That was invisible while every vector was MFJ or MFS, and it broke the
+    ///   moment the E2 population added Single and HoH: V11 came out with MFJ's $133,300 exemption
+    ///   and no phase-out. A wildcard arm in a per-status table is the same defect class as a
+    ///   compressed form line — it makes an omission compile.
     fn bps(status: FilingStatus) -> LtcgBreakpoints {
         match status {
+            FilingStatus::Single => LtcgBreakpoints {
+                max_zero: dec!(47025),
+                max_fifteen: dec!(518900),
+            },
+            FilingStatus::Mfj | FilingStatus::Qss => LtcgBreakpoints {
+                max_zero: dec!(94050),
+                max_fifteen: dec!(583750),
+            },
             FilingStatus::Mfs => LtcgBreakpoints {
                 max_zero: dec!(47025),
                 max_fifteen: dec!(291850),
             },
-            _ => LtcgBreakpoints {
-                max_zero: dec!(94050),
-                max_fifteen: dec!(583750),
+            FilingStatus::HoH => LtcgBreakpoints {
+                max_zero: dec!(63000),
+                max_fifteen: dec!(551350),
             },
         }
     }
@@ -474,9 +492,18 @@ mod tests {
     fn compute_vector(v: &serde_json::Value, p: &AmtParams) -> Form6251 {
         let inp = &v["inputs"];
         let der = &v["derived"];
+        // ★ PANICS on an unknown token rather than falling back. The `_ => Mfj` this replaced
+        //   turned every Single and HoH vector into an MFJ one — the fixture said `single`, the
+        //   computation said MFJ, and the KAT still passed because the expected figures were MFJ
+        //   figures too. A fixture that silently answers for the filer is the answered-ness defect
+        //   in test clothing.
         let status = match inp["filing_status"].as_str().unwrap() {
+            "single" => FilingStatus::Single,
+            "mfj" => FilingStatus::Mfj,
             "mfs" => FilingStatus::Mfs,
-            _ => FilingStatus::Mfj,
+            "hoh" => FilingStatus::HoH,
+            "qss" => FilingStatus::Qss,
+            other => panic!("fixture filing_status {other:?} is not a FilingStatus"),
         };
         let ti = d(&der["taxable_income_1040_L15"]);
         let pref = d(&inp["net_ltcg"]);
@@ -505,19 +532,27 @@ mod tests {
         )
     }
 
-    /// ★ THE conformance KAT: every fixture vector, every line, exact cents.
+    /// ★ THE conformance KAT: every fixture vector, **every line the fixture carries**, exact cents.
     ///
     /// Mutations this kills (each verified by making the edit and watching this red):
     /// - line 33 `f.line22 - f.line32` → `f.line12 - f.line32` (the transcription bug) ⇒ V3/V4/V5/V6
-    /// - drop the line-2b subtraction ⇒ V7
-    /// - drop the MFS kicker ⇒ V8
+    /// - drop the line-2b subtraction ⇒ V7, and now V29, where it moves the AMT itself
+    /// - drop the MFS kicker ⇒ V8, V23–V25
     /// - line 16/22's `.min(...)` caps removed ⇒ V2b
+    /// - any per-status constant (exemption, phase-out start, 26/28% breakpoint, lines 19/25)
+    ///   collapsed onto one status ⇒ the E2 population, which spans all four
+    ///
+    /// ★ The line list is CLOSED at both ends. Enumerating the lines catches a field that stops
+    ///   being computed; the `checked == fixture keys` assertion at the bottom catches the reverse —
+    ///   a line present in the fixture that this test forgot to look at. Without it, adding a line
+    ///   to the fixture and not to the list is a silent hole, which is how a 41-line form ends up
+    ///   with 20 lines under test.
     #[test]
     fn every_vector_reproduces_the_form_line_by_line() {
         let json: serde_json::Value = serde_json::from_str(VECTORS).expect("fixture parses");
         let vectors = json["vectors"].as_array().expect("vectors array");
         assert!(
-            vectors.len() >= 11,
+            vectors.len() >= 30,
             "fixture shrank: {} vectors",
             vectors.len()
         );
@@ -528,29 +563,69 @@ mod tests {
             let got = compute_vector(v, &p);
             // ★ INDEXED, not `get()`: a fixture key that is renamed or dropped must PANIC, not be
             // silently skipped — a skipped key is a vector that quietly stops checking a line.
-            let check = |n: &str, actual: Usd| {
+            // Enumerated as DATA, not asserted in a closure: the same list then serves
+            // as the `checked` set below, so the two can never drift apart.
+            let lines: [(&str, Usd); 41] = [
+                // Part I
+                ("line1", got.line1),
+                ("line2a", got.line2a),
+                ("line2b", got.line2b),
+                ("line3", got.line3),
+                ("line4", got.line4),
+                // Part II
+                ("line5", got.line5),
+                ("line6", got.line6),
+                ("line7", got.line7),
+                ("line8", got.line8),
+                ("line9", got.line9),
+                ("line10", got.line10),
+                ("line11", got.line11),
+                // Part III
+                ("line12", got.line12),
+                ("line13", got.line13),
+                ("line14", got.line14),
+                ("line15", got.line15),
+                ("line16", got.line16),
+                ("line17", got.line17),
+                ("line18", got.line18),
+                ("line19", got.line19),
+                ("line20", got.line20),
+                ("line21", got.line21),
+                ("line22", got.line22),
+                ("line23", got.line23),
+                ("line24", got.line24),
+                ("line25", got.line25),
+                ("line26", got.line26),
+                ("line27", got.line27),
+                ("line28", got.line28),
+                ("line29", got.line29),
+                ("line30", got.line30),
+                ("line31", got.line31),
+                ("line32", got.line32),
+                ("line33", got.line33),
+                ("line34", got.line34),
+                ("line35", got.line35),
+                ("line36", got.line36),
+                ("line37", got.line37),
+                ("line38", got.line38),
+                ("line39", got.line39),
+                ("line40", got.line40),
+            ];
+            for (n, actual) in lines {
                 assert_eq!(actual, d(&want[n]), "{id}: Form 6251 {n}");
-            };
-            check("line1", got.line1);
-            check("line2a", got.line2a);
-            check("line2b", got.line2b);
-            check("line4", got.line4);
-            check("line5", got.line5);
-            check("line6", got.line6);
-            check("line7", got.line7);
-            check("line8", got.line8);
-            check("line9", got.line9);
-            check("line10", got.line10);
-            check("line11", got.line11);
-            check("line16", got.line16);
-            check("line17", got.line17);
-            check("line22", got.line22);
-            check("line23", got.line23);
-            check("line31", got.line31);
-            check("line32", got.line32);
-            check("line33", got.line33);
-            check("line38", got.line38);
-            check("line40", got.line40);
+            }
+            let checked: BTreeSet<&str> = lines.iter().map(|&(n, _)| n).collect();
+
+            let carried: BTreeSet<&str> = want
+                .as_object()
+                .expect("form6251 is an object")
+                .keys()
+                .map(String::as_str)
+                .collect();
+            assert_eq!(
+                carried, checked,
+                "{id}: the fixture and this test disagree about which lines exist"
+            );
             assert_eq!(
                 got.must_attach(),
                 v["attach_required_who_must_file_cond1"].as_bool().unwrap(),
@@ -762,6 +837,196 @@ mod tests {
         assert_ne!(
             f.line4, wrong.line4,
             "the two 1040 lines must not be interchangeable"
+        );
+    }
+
+    /// TY2024 ordinary schedules (Rev. Proc. 2023-34 §2.01), inline so this needs no adapter crate —
+    /// the same construction `method.rs`'s own tests use.
+    fn schedule(status: FilingStatus) -> crate::tax::tables::OrdinarySchedule {
+        use crate::tax::tables::{OrdinaryBracket, OrdinarySchedule};
+        let edges: &[(Decimal, Decimal)] = match status {
+            FilingStatus::Single => &[
+                (dec!(0), dec!(0.10)),
+                (dec!(11600), dec!(0.12)),
+                (dec!(47150), dec!(0.22)),
+                (dec!(100525), dec!(0.24)),
+                (dec!(191950), dec!(0.32)),
+                (dec!(243725), dec!(0.35)),
+                (dec!(609350), dec!(0.37)),
+            ],
+            FilingStatus::Mfj | FilingStatus::Qss => &[
+                (dec!(0), dec!(0.10)),
+                (dec!(23200), dec!(0.12)),
+                (dec!(94300), dec!(0.22)),
+                (dec!(201050), dec!(0.24)),
+                (dec!(383900), dec!(0.32)),
+                (dec!(487450), dec!(0.35)),
+                (dec!(731200), dec!(0.37)),
+            ],
+            FilingStatus::Mfs => &[
+                (dec!(0), dec!(0.10)),
+                (dec!(11600), dec!(0.12)),
+                (dec!(47150), dec!(0.22)),
+                (dec!(100525), dec!(0.24)),
+                (dec!(191950), dec!(0.32)),
+                (dec!(243725), dec!(0.35)),
+                (dec!(365600), dec!(0.37)),
+            ],
+            FilingStatus::HoH => &[
+                (dec!(0), dec!(0.10)),
+                (dec!(16550), dec!(0.12)),
+                (dec!(63100), dec!(0.22)),
+                (dec!(100500), dec!(0.24)),
+                (dec!(191950), dec!(0.32)),
+                (dec!(243700), dec!(0.35)),
+                (dec!(609350), dec!(0.37)),
+            ],
+        };
+        OrdinarySchedule {
+            brackets: edges
+                .iter()
+                .map(|&(lower, rate)| OrdinaryBracket { lower, rate })
+                .collect(),
+        }
+    }
+
+    fn std_deduction(status: FilingStatus) -> Usd {
+        match status {
+            FilingStatus::Mfj | FilingStatus::Qss => dec!(29200),
+            FilingStatus::HoH => dec!(21900),
+            FilingStatus::Single | FilingStatus::Mfs => dec!(14600),
+        }
+    }
+
+    /// ★ THREE PART III ROUTINGS ARE UNREACHABLE WITH AMT OWED, and they are all one fact.
+    ///
+    /// E2 (`FOLLOWUPS §G-6b`) asked for an AMT-owing vector per live Part III routing. Three cells
+    /// came back empty, and this test is why the fixture has no vector for them and why that is a
+    /// result rather than a gap:
+    ///
+    /// - **the line-32 skip** ("If lines 32 and 12 are the same, skip lines 33 through 37")
+    /// - **line 39 on the 26% side** — line 12 at or under the §55(b)(1) breakpoint
+    /// - **no exemption phase-out** — line 5 still at the full §55(d)(1) amount
+    ///
+    /// The root fact is the third: **in btctax's input class, AMT is owed only once the §55(d)(3)
+    /// phase-out has begun.** The exemption is simply worth more than the flat 26/28% rate's excess
+    /// over the graduated schedule, everywhere the exemption survives intact. The other two follow,
+    /// because the phase-out starts at $609,350 (MFJ $1,218,700), so an AMT-owing return's line 12
+    /// clears the $232,600 breakpoint (MFS $116,300) with room to spare — killing the 26% side of
+    /// line 39 — and its line 12 exceeds the §1(h) 15%-band top, so a 20% tranche always survives
+    /// lines 32/33 and the skip never fires.
+    ///
+    /// ★ WHY A SWEEP AND NOT A COMMENT. If btctax's input surface widens — an ISO exercise at line
+    /// 2i, a §1202 exclusion at 2h, §1250 gain reaching line 14 — a preference item can push AMTI
+    /// up without moving the regular tax, and AMT becomes reachable with the exemption intact. At
+    /// that moment three routings go live with **no vector and no oracle behind them**, and the
+    /// only thing that would notice is this test. It is the same tripwire, for the same reason, as
+    /// `line40_min_is_a_proved_no_op_for_this_input_class`.
+    ///
+    /// ★ WHAT THIS IS NOT. A stride sweep is a tripwire, not a proof. The fine-grained evidence is
+    /// a separate ~450M-point scan over (wages, gain, gift, refund, FTC) at $500/$1,000 resolution
+    /// run while building the E2 population; it found the same three cells empty across all four
+    /// filing statuses and both deduction modes. This test carries the claim forward — and does it
+    /// against the PRODUCTION regular tax (`qdcgt_line16`, Tax-Table quantization and all), which
+    /// that scan approximated with the exact schedule.
+    #[test]
+    fn amt_is_owed_only_once_the_exemption_phaseout_has_begun() {
+        let p = params();
+        for status in [
+            FilingStatus::Single,
+            FilingStatus::Mfj,
+            FilingStatus::Mfs,
+            FilingStatus::HoH,
+        ] {
+            for itemized in [true, false] {
+                phaseout_precondition_sweep_for(&p, status, itemized);
+            }
+        }
+    }
+
+    fn phaseout_precondition_sweep_for(p: &AmtParams, status: FilingStatus, itemized: bool) {
+        let sched = schedule(status);
+        let bp = bps(status);
+        let full_exemption = p.exemption(status);
+        let bp28 = p.breakpoint_28pct(status);
+        // Itemizers here deduct a cash gift only, so Schedule A line 7 (taxes) is zero and line 2a
+        // adds nothing back; non-itemizers add the standard deduction back at line 2a.
+        let deduction = if itemized {
+            std_deduction(status) + dec!(10000) // any itemized total; only `itemized` routes line 2a
+        } else {
+            std_deduction(status)
+        };
+        let mut checked = 0u32;
+        let mut bottom = 0i64;
+        while bottom < 1_300_000 {
+            let ordinary = Usd::from(bottom);
+            let mut g = 0i64;
+            while g < 4_000_000 {
+                let gain = Usd::from(g);
+                let ti = ordinary + gain;
+                let f = compute_6251(
+                    Form6251Inputs {
+                        status,
+                        taxable_income_l15: ti,
+                        agi_l11: ti + deduction,
+                        deduction_l12: deduction,
+                        deduction_l14: deduction,
+                        schedule_a_line7: Usd::ZERO,
+                        itemized,
+                        state_refund_sch1_l1: Usd::ZERO,
+                        net_capital_gain: gain,
+                        qualified_dividends: Usd::ZERO,
+                        qdcgt_line5_regular: ordinary,
+                        // ★ the PRODUCTION regular tax for this very household. Feeding an
+                        //   arbitrary line 16 would make the whole sweep vacuous: AMT is a
+                        //   COMPARISON, and half of it would be fiction.
+                        regular_tax_l16: crate::tax::method::qdcgt_line16(
+                            &sched,
+                            &bp,
+                            ti,
+                            Usd::ZERO,
+                            gain,
+                        ),
+                        schedule_2_line1z: Usd::ZERO,
+                        schedule_3_line1: Usd::ZERO,
+                    },
+                    p,
+                    &bps(status),
+                );
+                if f.amt() > Usd::ZERO {
+                    assert!(
+                        f.line5 < full_exemption,
+                        "{status:?} itemized={itemized}: AMT {} owed with the exemption INTACT at \
+                         {} (ordinary {ordinary}, gain {gain}). The input class has widened — three \
+                         Part III routings just went live with no vector behind them.",
+                        f.amt(),
+                        f.line5
+                    );
+                    assert!(
+                        f.line32 != f.line12,
+                        "{status:?} itemized={itemized}: AMT {} owed while line 32 equals line 12, \
+                         i.e. the line-32 skip fired (ordinary {ordinary}, gain {gain}). The \
+                         fixture has no vector for that routing.",
+                        f.amt()
+                    );
+                    assert!(
+                        f.line12 > bp28,
+                        "{status:?} itemized={itemized}: AMT {} owed with line 12 ({}) at or under \
+                         the §55(b)(1) breakpoint {bp28}, i.e. line 39 on the 26% side (ordinary \
+                         {ordinary}, gain {gain}). The fixture has no vector for that routing.",
+                        f.amt(),
+                        f.line12
+                    );
+                    checked += 1;
+                }
+                g += 19_997; // prime-ish strides, to land off the round breakpoints
+            }
+            bottom += 9_973;
+        }
+        // The sweep has to actually FIND AMT, or it proves nothing about AMT-owing returns.
+        assert!(
+            checked > 500,
+            "{status:?} itemized={itemized}: only {checked} AMT-owing points swept"
         );
     }
 
