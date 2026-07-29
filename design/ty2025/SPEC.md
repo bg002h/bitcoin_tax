@@ -109,8 +109,10 @@ in outline. Both do — OTS 2025 `sched_1A()` (`taxsolve_US_1040_2025.c:1783`); 
 `TipIncomeDed_*`, `OvertimeIncomeDed_*`, `AutoLoanInterestDed_*`, `SeniorDed_*` in a live
 `@iterate_jit` `MiscDed()`. **But OTS 2025's Part IV is defective three ways (D-8), taxcalc is wrong
 for QSS in Part IV (D-8), and neither oracle uses MAGI where the law requires it (D-6).** So Schedule
-1-A is *two-oracle-backed in Parts II, III and V; one-oracle in Part IV outside the phase-out region;
-and **ZERO-oracle for QSS Part IV inside it***. That is survivable only because it is stated and
+1-A is *provisionally two-oracle-backed in Parts II, III and V — **provisional because R-3 records
+OTS's Parts II/III/V as UNREAD, and an unread oracle is not a claimed one*** — two-oracle in Part IV
+below the phase-out threshold (where OTS is exact, D-8), one-oracle inside the band for non-QSS, and
+**ZERO-oracle for QSS Part IV inside it**. That is survivable only because it is stated and
 censused — asserting it were cleaner is what r1 and r2 each caught.
 
 **D-2. TY2026 stays FAIL-CLOSED.** Held by `ty2026_full_return_must_stay_fail_closed`
@@ -217,8 +219,8 @@ $4,000.
 
 ★ **The disqualification is narrowed to those three CELLS, not all of Part IV (r2-1).** All three live
 **downstream of line 27**, so whenever MAGI ≤ the threshold, line 27 = 0 ⇒ line 29 = 0 and OTS's line
-30 is **exact**. A blanket bar is not "computed from the defect's own mechanism" as §6.2 requires — and
-it would discard the only correct witness precisely where taxcalc is wrong:
+30 is **exact** — except for MFS, where D-7's blanket bar applies instead. A blanket bar is not "computed from the defect's own mechanism" as §6.2 requires — and
+a blanket bar would also discard OTS where it is exact:
 
 ★★ **AND TAXCALC IS WRONG FOR QSS IN PART IV.** `AutoLoanInterestDed_ps` = `[100000, 200000, 100000,
 100000, 200000]` — it doubles the threshold for QSS, where Schedule 1-A line 26 says "$100,000
@@ -274,17 +276,30 @@ archived, and it is transcribed line by line in its own numbering:**
 | 5 | "Enter $500,000 ($250,000 if married filing separately)" |
 | 6 | "Is the amount on line 4 more than the amount on line 5?" — No ⇒ skip 7–8, use line 1 |
 | 7 | "**Multiply line 6 by 30% (0.30)**" |
+| 8 | "Subtract line 7 from line 1" |
+| 9 | "Enter the **larger** of the amount on line 8 or **$10,000**" |
+| 10 | "State and local tax deduction. Enter the **smaller** of the amount on line 9 (**half** the amount on line 9 if married filing separately) or the amount from Schedule A, line 5d here and on Schedule A, line 5e" |
 
-★ **Every parameter is now transcribed, not corroborated.** Cap **$40,000 ($20,000 MFS)** — Schedule A
-line 5e verbatim. Threshold **$500,000 ($250,000 MFS)** — worksheet line 5. Rate **30%** — worksheet
-line 7. Floor **$10,000 ($5,000 MFS)** — instructions, "will not be reduced below". taxcalc agrees
-(`ID_AllTaxes_c` = `[40000, 40000, 20000, 40000, 40000]`) and is now a witness rather than the source.
+★★ **THE WORKSHEET DECIDES MFS, AND IT IS A FINAL HALVING — NOT PER-STATUS CONSTANTS.** The r2 fold
+adopted the worksheet as the instrument but transcribed it only through line 7, leaving the
+taxcalc-shaped quadruple standing as the only MFS rule two sentences after forbidding it. Lines 8–10
+settle it: **line 1's $40,000 cap and line 9's $10,000 floor are NOT halved** — only line 10 halves,
+and it then takes the smaller of that and the SALT actually paid.
 
-★ **Note the worksheet's own short-circuit at line 1**: a filer with ≤ $10,000 of SALT is never
-limited at all, so the phase-down and the floor are both unreachable for them. A derived
-`max(cap − rate × excess, floor)` reproduces that by accident; the worksheet states it. **Let the
-worksheet decide the MFS treatment** (per-status amounts vs. halving at the end) — do not encode
-taxcalc's shape.
+The two shapes give different answers, so this is not cosmetic. **MFS at MAGI $300,000: the worksheet
+gives $12,500** (line 6 = 50,000 → line 7 = 15,000 → line 8 = 25,000 → line 9 = 25,000 → halved =
+12,500); **the quadruple gives $5,000** — and $300,000 is the point of *maximum* divergence between
+them. **The MFS floor therefore begins at MAGI $350,000**, not $300,000.
+
+★ **Every parameter is transcribed to a worksheet LINE**, not to prose: cap $40,000 (line 1),
+threshold $500,000 / $250,000 MFS (line 5, the one genuinely per-status value), rate 30% (line 7),
+floor $10,000 (line 9), MFS halving (line 10). taxcalc's `ID_AllTaxes_c` = `[40000, 40000, 20000,
+40000, 40000]` folds the halving into the cap; it is a witness, not the source, and it does not agree
+with the worksheet for MFS.
+
+★ **Note the short-circuit at line 1**: a filer with ≤ $10,000 of SALT is never limited at all, so the
+phase-down and floor are unreachable for them. A derived `max(cap − rate × excess, floor)` reproduces
+that by accident; the worksheet states it.
 
 Remaining fields, each to be sourced: `std_aged_blind_married`/`_unmarried` ·
 `dependent_std_floor`/`_earned_addon` · `kiddie_unearned_threshold` · `elective_deferral_limit` ·
@@ -341,8 +356,8 @@ January 2, 1961".
 
 ★ **Every "see instructions" branch is transcribed or refuses (r1-8).** At minimum: line 4a's
 "$176,100" branch, 4c multi-employer/occupation, 5 multi-trade-or-business, 22 ">two VINs", 36a
-valid-SSN. Occupation eligibility defers to **IRS.gov/TippedOccupations, which is not a document** — a
-doc comment reading "see the instructions" satisfies a conformance test and answers nothing.
+valid-SSN. ★ **Occupation eligibility is IN the instructions** — a list keyed by numeric **Treasury Tipped
+Occupation Code** (see §2's r1-8 note, which retracted the earlier "not a document at all" claim).
 
 ### 5.3 Year seams
 
@@ -404,8 +419,11 @@ V23/V24/V25, which have no witness at all in TY2024.
    incidental one.
 5. **The SALT worksheet reconciles PER FILING STATUS, with a household in each region** (r1-1, r2-5,
    r2-6): unlimited (≤ $10,000 of SALT), capped-not-phased, phasing, and **at the floor**
-   (MAGI ≥ $600,000; ≥ $300,000 MFS). One household above the threshold witnesses one point of a
-   four-parameter × five-status rule. ★ **Pin each household's filing status explicitly** — OTS 2025's
+   (MAGI ≥ $600,000; **≥ $350,000 MFS** — the floor is reached where worksheet line 8 falls to $10,000,
+   i.e. MAGI ≥ 250,000 + 30,000/0.30; the earlier "$300,000 MFS" was computed from the rejected
+   quadruple and is the point of *maximum* divergence from the worksheet, so it is worth its own
+   household too). One household above the threshold witnesses one point of a five-line × five-status
+   rule. ★ **Pin each household's filing status explicitly** — OTS 2025's
    SALT worksheet is itself MFS-defective, so an unpinned "some household" can land on a cell with no
    sound witness.
 6. **A TY2025 analogue of `ty2024_full_return_params_bundled` asserting EVERY `FullReturnParams` and
@@ -413,9 +431,16 @@ V23/V24/V25, which have no witness at all in TY2024.
    about twenty**; the §55(d)(3) identities constrain only the five MFS constants; §5.5 scopes the
    TY2025 vectors to MFS; and the corpus has 0/104 AMT-owing households. Nothing else would notice a
    mistyped non-MFS exemption or breakpoint.
-7. **Conformance is a test, not a review** — "is every Schedule 1-A line present?", "does each doc
+7. ★ **EVERY ZERO-ORACLE CELL HAS A KAT AGAINST THE INSTRUCTIONS** (D-6, D-10). §6 previously
+   contained no KAT requirement at all, while D-6 declares the MAGI add-back leg zero-oracle and
+   "held by a KAT against the worksheet, never by reconciliation", and D-10 makes cite-then-KAT the
+   standing answer to a split oracle. The known set today: the MAGI add-back leg, QSS Part IV inside
+   the phase-out band, and the SALT MFS halving. ★ **§6.2's escape rule extends to Schedule A / SALT,
+   not only Schedule 1-A and Form 6251**, and its census line reads *zero*-oracle as well as
+   one-oracle — D-8 and D-10 now ship cells with no witness at all.
+8. **Conformance is a test, not a review** — "is every Schedule 1-A line present?", "does each doc
    comment match the printed text?" are assertions.
-8. **Mutation-verified guards.** Precedent from this session: the `phaseout_rate` split passed every
+9. **Mutation-verified guards.** Precedent from this session: the `phaseout_rate` split passed every
    existing test until a mutation showed the whole suite was blind to it.
 
 ---
@@ -468,6 +493,6 @@ Schedule 1-A Parts II, III and V, and its SALT worksheet's non-MFS legs.** Read 
 ## 9. Cross-references
 
 - `design/amt-form6251/CONTINUITY_TY2025.md` — the recon, the pivot, the environment notes.
-- `design/ty2025/reviews/` — r1 verbatim.
+- `design/ty2025/reviews/` — r1, r2 and the r3 sanity check, verbatim.
 - `FOLLOWUPS.md` §G-6b (Tier-2 entry criteria), §G-6e (this pivot), §G-6f (the rate split, done).
 - `STANDARD_WORKFLOW.md` — the review loop this must pass before a plan is written.
