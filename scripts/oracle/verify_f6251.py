@@ -7,7 +7,13 @@ Not part of `make check` (that is the Rust suite); this is the independent-engin
 called for. It reads `design/amt-form6251/vectors.json` — emitted by the line-by-line transcription in
 `f6251_reference.py` — and compares line 11 against Tax-Calculator's `c09600`.
 
-★ TWO KNOWN, ADJUDICATED DIVERGENCES. V4 and V5 are the only STANDARD-DEDUCTION vectors that owe AMT,
+⚠ THIS IS A ONE-ORACLE PROBE. This repo's standard is TWO oracles, and the second cannot arbitrate
+AMT: OpenTaxSolver is not installed here, and even when it is, `ots_direct.py` extracts only L16 and
+L24+NIIT — it never reads the 1040's **line 17**, where AMT lands (its one `L17` is Form 8960's). So
+nothing below is confirmed to this repo's usual standard. Treat the divergence as PROVISIONAL and do
+not file it upstream until a second engine has been asked.
+
+★ TWO KNOWN DIVERGENCES, adjudicated against the FORM (not against a second oracle). V4 and V5 are the only STANDARD-DEDUCTION vectors that owe AMT,
 and on both, taxcalc's AMTI is lower than ours by EXACTLY the $29,200 standard deduction. That is a
 Tax-Calculator defect, not ours (`taxcalc/calcfunctions.py`, the AMTI block):
 

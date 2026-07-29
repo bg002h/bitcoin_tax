@@ -390,9 +390,29 @@ one on exactly the two vectors that owe AMT. This is the concrete instance of
 `CLAUDE.md`'s rule that a domain fact can make a green test meaningless: the form is the authority, and
 a taxcalc disagreement is adjudicated against the PDF, never encoded.
 
-**[open] Report it upstream** (this project has form: tenforty issue #278 / PR #279). Minimal repro:
-MFJ, $250,000 wages + $2,000,000 long-term gain, standard deduction → taxcalc `c09600` = $18,331; the
-form gives **$26,271**.
+**⚠ RETRACTED: do not file upstream yet — this is a ONE-oracle result.** An earlier version of this
+entry said to report it. That skips this repo's own standard, which is **two** oracles. Corrected
+below, and the reason it could not be met is itself the more important finding.
+
+**[open] ★ THE TWO-ORACLE MODEL HAS A STRUCTURAL BLIND SPOT AT AMT.** Oracle 1 (OpenTaxSolver) cannot
+arbitrate this, for two independent reasons: (a) no OTS tree is installed here (`OTS_DIR` unset), and
+(b) **even when it is, the harness never asks it** — `scripts/oracle/ots_direct.py` extracts
+`income_tax_before_credits = L16` and `total_tax = L24 + niit`, and never reads the 1040's **line 17**,
+which is exactly where AMT lands (its only `L17` is Form 8960's NIIT). So the differential sweep has no
+second opinion on AMT and never has.
+
+**This is a Tier-2 blocker, not a nicety.** Tier 2 exists to serve filers who genuinely OWE AMT. For
+that population the model degrades from two oracles to one — and that one is the engine we now suspect
+of understating. Widening the corpus (below) does not fix it; it produces households only one oracle
+can score. **Before Tier 2 ships, either teach `ots_direct.py` to read the 1040 L17 and install OTS, or
+state plainly that AMT-bearing returns are validated by the form and hand-derived vectors alone.**
+
+**[open] Then, and only then, report the taxcalc defect upstream** (this project has form: tenforty
+issue #278 / PR #279). Minimal repro to confirm against a second engine first: MFJ, $250,000 wages +
+$2,000,000 long-term gain, standard deduction → taxcalc `c09600` = $18,331; the form gives **$26,271**.
+Current evidence, all consistent but all one-sided: the form's own line 2a text, i6251 p.2 and its TIP,
+§56(b)(1)(E), taxcalc's own source, and r1's independent hand-derivation (which pre-dates the code and
+matches btctax).
 
 **[open] Widen the corpus.** `scripts/oracle/corpus.py` caps W-2 at $270,000 and LTCG at $20,000, so
 the richest household reaches ~$410,000 of AMTI — it trips the screen but sits four times below the
