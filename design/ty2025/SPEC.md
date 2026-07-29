@@ -67,14 +67,30 @@ Two things drive it:
 | `f6251--2026-DRAFT.pdf` | `a547fc9d` | **DRAFT — evidence only, never transcribe** |
 | `f1040sa--2025.pdf` | `c14acf34` | IRS **final** — Schedule A |
 | `i1040sca--2025.pdf` | `b0999b12` | IRS **final** — Schedule A instructions, carries the SALT worksheet |
+| `i1040gi--2025.pdf` | `482e9c48` | IRS **final** — the 1040 instructions, **which carry the Schedule 1-A instructions** |
 | `crates/btctax-forms/forms/2024/f6251.pdf` | `7fea4e42` | the TY2024 form, already in-repo |
 
-**STILL TO FETCH AND ARCHIVE before implementation** (r1-8):
+★ **r1-8 IS CLOSED, AND IT WAS PARTLY WRONG AS STATED.** It claimed the form "defers to instructions
+in at least five places that change the number" and that occupation eligibility "defers to
+IRS.gov/TippedOccupations, which is not a document at all". The Schedule 1-A instructions live inside
+`i1040gi--2025.pdf`, now archived, and they answer every one of those branches outright:
 
-- **Schedule 1-A instructions** — the form defers to them in at least five places that change the
-  number (line 4a's "$176,100" branch, 4c multi-employer, 5 multi-trade-or-business, 22 ">two VINs",
-  36a "valid social security number").
-- **Form 1040 instructions (2025)**, **Rev. Proc. 2024-40**, and the **OBBBA (Pub. L. 119-21)** text.
+| branch | what we are told to do |
+|---|---|
+| line 22, >2 VINs | *"attach a statement to your return showing the information required on line 22"* |
+| line 36a, valid SSN | stated as a plain eligibility condition, per person, incl. the MFJ case |
+| tips cap | *"can't deduct more than $25,000 of qualified tips, regardless of your filing status"* |
+| occupation eligibility | **the list IS in the instructions**, each occupation carrying a numeric **Treasury Tipped Occupation Code** |
+
+★ **And reading them caught a rule the spec had MISSED entirely** — a *Net income limitation* on Part
+II line 5: trade-or-business tips "can't be more than the gross income from the trade or business …
+minus the total of all deductions allocable to that trade or business, including the deductible part
+of self-employment tax; … SEP, SIMPLE, and qualified plans; and the self-employed health insurance
+deduction, but not including the deduction for qualified tips." That is a second cap on line 5 that no
+amount of reviewing the *form* would have surfaced.
+
+**Still to fetch:** **Rev. Proc. 2024-40** and the **OBBBA (Pub. L. 119-21)** text (for the per-field
+source rule below).
 
 ★ **Per-field source rule (r1-2).** For every constant, **the later of Rev. Proc. 2024-40 and OBBBA
 controls.** The Rev. Proc. is *not* the blanket source for TY2025. Each field in §5.1 carries its own
@@ -122,6 +138,41 @@ taxable-income-before-QBI by the whole Schedule 1-A total — overstating the §
 `qbi_over_threshold` **too EARLY — a false refusal** (r2-8: the r2 draft said "too late", backwards;
 omitting a deduction *overstates* taxable income, so the threshold is crossed sooner). **The QBI ordering for 2025 is `11b − 12e − 13b`.**
 "One struct, a year field, branches inside" is **rejected**; the mechanism is the plan's to choose.
+
+**D-9. COLLECT EVERY NUMBERED LINE — including ones that will almost always be zero.** Owner decision,
+2026-07-29. The input surface **is the form**. Excluded Puerto Rico income, Form 2555 lines 45 and 50,
+and Form 4563 line 15 get collected like any other line, even though they are zero for nearly every
+filer.
+
+★ **This is not thoroughness for its own sake — it retires a category of defect.** "btctax cannot see
+it" was the premise of D-6's MAGI hole, of r1-3, and of half the answered-ness arguments in this
+document. If every line the form asks for is collected, that premise is gone: there is no value btctax
+can *silently answer for the filer*, because there is no value it fails to ask about. It is a direct
+step against this codebase's one standing architectural defect — answered-ness held by convention
+rather than construction.
+
+**D-10. WHEN THE ORACLES CANNOT AGREE, CITE THE IRS INSTRUCTIONS.** Owner decision, 2026-07-29. An
+absent or split oracle is not a blocker and not a reason to refuse. **We are literally told what to
+do, on the form or in its instruction document** — so the number is anchored there, pinned by a KAT,
+and the suspected engine defect goes on an upstream register.
+
+Three tiers of citation, because not all of them are load-bearing:
+
+1. **A worked example in the instructions** → a KAT with exact numbers. Strongest available evidence,
+   stronger than two oracles agreeing. (Precedent: i6251's MFS kicker example, already a KAT.)
+2. **An explicit rule with constants** → transcribed verbatim; conformance test compares the doc
+   comment to the printed text.
+3. ~~*"See instructions" is not citable*~~ — **struck.** "See instructions" is a pointer to a document
+   that exists; go read it. The r2 draft treated it as a dead end and was wrong (see §2's r1-8 note),
+   which is exactly the inversion this decision corrects: the instructions are the authority, and the
+   oracles exist to catch **our** transcription slips, not the reverse.
+
+★ **The census still prints "no oracle here" every run** — so a cell resting on transcription alone
+stays visible, and if an engine later fixes its defect we notice and reclaim the witness.
+
+★ **The upstream register carries a filing bar** (`FOLLOWUPS.md`): before filing, grep their source,
+confirm against the second oracle **or** the form's worked example, and check the latest release.
+#3108 was filed on one oracle against our own rule and contained a claim that was wrong.
 
 **D-5. Answered-ness.** Every Schedule 1-A input is `Option`; `None` **refuses**. Zero is a filer's
 answer, never btctax's assumption. This explicitly covers the **MAGI add-backs (D-6)** and the
@@ -269,6 +320,12 @@ constants reds the day they are typed.
 | V | 31–37 | Seniors | 6,000 per person | 6% of MAGI over 75,000 / 150,000 | **barred** |
 | VI | 38 | Total Additional Deductions | — | — | — |
 
+★ **Part II line 5 carries a SECOND cap the form does not state** — the instructions' *Net income
+limitation*: trade-or-business tips cannot exceed that business's gross income minus all deductions
+allocable to it (including the deductible part of SE tax, SEP/SIMPLE/qualified-plan contributions and
+self-employed health insurance, but **not** the tips deduction itself). Found by reading the
+instructions; no amount of reviewing the *form* would have surfaced it.
+
 Line 38 = "Add lines 13, 21, 30, and 37" → 1040 line 13b. Line 37 → Form 6251 line 1a (D-3).
 
 ★ **Rounding direction differs per part and is quoted verbatim** — line 11: *"Divide line 10 by
@@ -396,11 +453,9 @@ Schedule 1-A Parts II, III and V, and its SALT worksheet's non-MFS legs.** Read 
 2. **Does the golden corpus extend to TY2025 in this project, or after Tier-2 E5?** ★ §6.5 now
    *requires* TY2025 SALT households in four regions × five statuses, so "no corpus" is no longer a
    free answer — and `corpus.py`'s SALT axis needs raising regardless (§5.3).
-5. **How is a zero-oracle cell shipped?** D-6's MAGI add-back leg and D-8's QSS Part IV both have no
-   valid witness. The AMT precedent is: compute it, KAT it against the form's worked example, and have
-   the census print it as unwitnessed every run. Is that sufficient here, or should btctax **refuse** a
-   Form 2555/4563/Puerto-Rico filer and a QSS car-loan filer outright? ★ This is the one open question
-   that changes what a filer can do, so it is the owner's.
+5. ~~How is a zero-oracle cell shipped?~~ — **ANSWERED by D-9 and D-10.** Cite the IRS instructions,
+   KAT it, census it, and register the suspected oracle defect upstream. Nobody is refused for an
+   oracle's shortcoming, and nobody is refused for a line we can simply collect.
 3. ~~Part IV VIN storage vs. the PII scanner~~ — **answered:** `scripts/pii-scan-generic.sh:3` matches
    only SSN (`\d{3}-\d{2}-\d{4}`) and EIN (`\d{2}-\d{7}`) shapes; a 17-character VIN is not covered.
    Decide: extend `SHAPES`, or record why a VIN is out of scope.
