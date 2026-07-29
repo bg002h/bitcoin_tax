@@ -56,15 +56,15 @@ pub fn table_l16(
     qd_l3a: Usd,
     net_ltcg_qd_excl: Usd,
 ) -> Usd {
+    // ★ `ordinary_for` / `ltcg_for`, NOT a raw map index. No bundled table carries a `Qss` key — the
+    //   accessors exist precisely to normalize `Qss → Mfj` (`tables.rs`), and `tax_tables.rs` has a live
+    //   test asserting `!tt.ltcg.contains_key(&FilingStatus::Qss)`. A raw `.get(&status).expect(..)` here
+    //   aborted the process for every Qualifying-Surviving-Spouse call. This is the same defect that
+    //   shipped as a Critical in the v0.14.0 branch at `return_1040.rs`; this site was pre-existing and
+    //   off every filing path (oracle harness + goldens only), so it was filed rather than hot-fixed.
     let table = ty2024_table();
-    let schedule = table
-        .ordinary
-        .get(&status)
-        .expect("TY2024 ordinary schedule for this filing status");
-    let bp = table
-        .ltcg
-        .get(&status)
-        .expect("TY2024 §1(h) breakpoints for this filing status");
+    let schedule = table.ordinary_for(status);
+    let bp = table.ltcg_for(status);
     qdcgt_line16(schedule, bp, ti, qd_l3a, net_ltcg_qd_excl)
 }
 
@@ -505,6 +505,31 @@ mod tests {
                 "taxcalc_provenance"
             ]),
             vec!["taxcalc_provenance"]
+        );
+    }
+
+    /// ★ REGRESSION — `table_l16` must not abort for a Qualifying Surviving Spouse.
+    ///
+    /// It raw-indexed `table.ordinary` and `table.ltcg`, but no bundled table carries a `Qss` key:
+    /// `TaxTable::ordinary_for` / `ltcg_for` exist precisely to normalize `Qss -> Mfj`, and
+    /// `tax_tables.rs` asserts the key's absence. Every `Qss` call panicked. Off the filing path (this
+    /// module serves the oracle harness and goldens), which is why it survived; the identical defect on
+    /// the filing path shipped as a Critical in the v0.14.0 branch.
+    ///
+    /// Mutation: restore `table.ordinary.get(&status).expect(..)` and this panics rather than fails.
+    #[test]
+    fn table_l16_computes_for_a_qualifying_surviving_spouse() {
+        use crate::tax::FilingStatus;
+        // Preferential income present, so the LTCG breakpoints are actually read (else the `ltcg_for`
+        // half would be untested even though the call site is exercised).
+        let qss = table_l16(FilingStatus::Qss, dec!(200000), dec!(20000), dec!(30000));
+        assert!(qss > Usd::ZERO, "Qss must produce a line 16, not abort");
+        // Qss shares the MFJ schedules and breakpoints (Form 6251 prints them as one row, and
+        // `TaxTable::key` maps the status), so the two must agree to the cent.
+        let mfj = table_l16(FilingStatus::Mfj, dec!(200000), dec!(20000), dec!(30000));
+        assert_eq!(
+            qss, mfj,
+            "Qss must resolve to the MFJ schedule and breakpoints"
         );
     }
 }

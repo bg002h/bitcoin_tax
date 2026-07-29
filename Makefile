@@ -1,6 +1,6 @@
 # btctax — developer convenience targets.
 
-.PHONY: check test lint docs docs-man examples examples-tui tui-walkthrough regen-walkthrough bundles help
+.PHONY: check test lint docs docs-man architecture examples examples-tui tui-walkthrough regen-walkthrough bundles help
 
 ## check: the validation gate — the full test suite AND clippy, run CONCURRENTLY (~6s warm)
 ##
@@ -41,9 +41,28 @@ lint:
 docs:
 	cargo run -p xtask -- docs --pdf
 
+## architecture: render docs/architecture/*.md to PDFs via pandoc.
+##
+## ★ These had NO generator until v0.14.0. They are gitignored, were built ad-hoc, and `bundles`
+## concatenates whatever happens to sit in docs/pdf/ — so the first v0.14.0 bundle silently baked in a
+## 10-day-old architecture PDF still carrying text that release had just corrected. `bundles` now
+## depends on this target, so a stale architecture PDF cannot reach a release again.
+architecture:
+	@command -v pandoc >/dev/null || { echo "architecture: pandoc not installed"; exit 1; }
+	@mkdir -p docs/pdf
+	@for src in docs/architecture/*.md; do \
+	  base=$$(basename $$src .md); \
+	  out=docs/pdf/btctax-$$(echo $$base | tr 'A-Z' 'a-z').pdf; \
+	  pandoc $$src -o $$out --pdf-engine=xelatex -V geometry:margin=1in 2>/dev/null \
+	    || pandoc $$src -o $$out; \
+	  head -c4 $$out | grep -q '%PDF' \
+	    && echo "wrote $$out" \
+	    || { echo "architecture: pandoc did not emit a PDF for $$src"; exit 1; }; \
+	done
+
 ## bundles: one combined PDF per binary — btctax-manual.pdf (CLI: root + every subcommand)
 ## plus the per-page btctax-tui.pdf / btctax-tui-edit.pdf (the TUI manuals). Needs `gs`. Runs `docs` first.
-bundles: docs
+bundles: docs architecture examples
 	{ echo docs/pdf/btctax.pdf; ls docs/pdf/btctax-*.pdf | grep -vE 'btctax-tui|btctax-manual' | sort; } \
 	  | xargs gs -q -dNOPAUSE -dBATCH -sDEVICE=pdfwrite -sOutputFile=docs/pdf/btctax-manual.pdf
 	@echo "wrote docs/pdf/btctax-manual.pdf (+ docs/pdf/btctax-tui{,-edit}.pdf are the TUI manuals)"

@@ -468,6 +468,43 @@ mod tests {
         Usd::from_str(v.as_str().expect("fixture value is a decimal string")).expect("parses")
     }
 
+    /// Build a vector's [`Form6251Inputs`] and run [`compute_6251`] on it — the ONE place the fixture is
+    /// turned into a computation, so a test that wants to exercise real behaviour cannot accidentally
+    /// settle for reading the fixture back instead.
+    fn compute_vector(v: &serde_json::Value, p: &AmtParams) -> Form6251 {
+        let inp = &v["inputs"];
+        let der = &v["derived"];
+        let status = match inp["filing_status"].as_str().unwrap() {
+            "mfs" => FilingStatus::Mfs,
+            _ => FilingStatus::Mfj,
+        };
+        let ti = d(&der["taxable_income_1040_L15"]);
+        let pref = d(&inp["net_ltcg"]);
+        // QDCGT worksheet line 5 = taxable income − preferential (capped at TI), as figured for
+        // the regular tax. Lines 20 and 27 read this.
+        let qdcgt_l5 = (ti - pref.min(ti)).max(Usd::ZERO);
+        compute_6251(
+            Form6251Inputs {
+                status,
+                taxable_income_l15: ti,
+                agi_l11: d(&der["agi_1040_L11"]),
+                deduction_l12: d(&der["deduction_1040_L14"]),
+                deduction_l14: d(&der["deduction_1040_L14"]),
+                schedule_a_line7: Usd::ZERO,
+                itemized: der["itemized"].as_bool().unwrap(),
+                state_refund_sch1_l1: d(&inp["state_refund"]),
+                net_capital_gain: pref,
+                qualified_dividends: Usd::ZERO,
+                qdcgt_line5_regular: qdcgt_l5,
+                regular_tax_l16: d(&der["regular_tax_1040_L16"]),
+                schedule_2_line1z: Usd::ZERO,
+                schedule_3_line1: d(&inp["sch3_line1_ftc"]),
+            },
+            p,
+            &bps(status),
+        )
+    }
+
     /// ★ THE conformance KAT: every fixture vector, every line, exact cents.
     ///
     /// Mutations this kills (each verified by making the edit and watching this red):
@@ -487,38 +524,8 @@ mod tests {
         let p = params();
         for v in vectors {
             let id = v["id"].as_str().unwrap();
-            let inp = &v["inputs"];
-            let der = &v["derived"];
             let want = &v["form6251"];
-            let status = match inp["filing_status"].as_str().unwrap() {
-                "mfs" => FilingStatus::Mfs,
-                _ => FilingStatus::Mfj,
-            };
-            let ti = d(&der["taxable_income_1040_L15"]);
-            let pref = d(&inp["net_ltcg"]);
-            // QDCGT worksheet line 5 = taxable income − preferential (capped at TI), as figured for
-            // the regular tax. Lines 20 and 27 read this.
-            let qdcgt_l5 = (ti - pref.min(ti)).max(Usd::ZERO);
-            let got = compute_6251(
-                Form6251Inputs {
-                    status,
-                    taxable_income_l15: ti,
-                    agi_l11: d(&der["agi_1040_L11"]),
-                    deduction_l12: d(&der["deduction_1040_L14"]),
-                    deduction_l14: d(&der["deduction_1040_L14"]),
-                    schedule_a_line7: Usd::ZERO,
-                    itemized: der["itemized"].as_bool().unwrap(),
-                    state_refund_sch1_l1: d(&inp["state_refund"]),
-                    net_capital_gain: pref,
-                    qualified_dividends: Usd::ZERO,
-                    qdcgt_line5_regular: qdcgt_l5,
-                    regular_tax_l16: d(&der["regular_tax_1040_L16"]),
-                    schedule_2_line1z: Usd::ZERO,
-                    schedule_3_line1: d(&inp["sch3_line1_ftc"]),
-                },
-                &p,
-                &bps(status),
-            );
+            let got = compute_vector(v, &p);
             // ★ INDEXED, not `get()`: a fixture key that is renamed or dropped must PANIC, not be
             // silently skipped — a skipped key is a vector that quietly stops checking a line.
             let check = |n: &str, actual: Usd| {
@@ -627,16 +634,28 @@ mod tests {
             .iter()
             .find(|v| v["id"] == "V9")
             .expect("V9 present");
-        let f = &v9["form6251"];
-        let (l7, l10, l11) = (d(&f["line7"]), d(&f["line10"]), d(&f["line11"]));
+
+        // ★ COMPUTED, not read back. This test previously loaded `v9["form6251"]` and asserted the
+        //   FIXTURE was self-consistent — it never called `compute_6251` or `must_attach()`, so
+        //   breaking either left it green. It is the one test named for the property that
+        //   `attach iff amt > 0` is WRONG, and it was not holding it.
+        let got = compute_vector(v9, &params());
+
         assert!(
-            l7 > l10,
-            "V9: line 7 must exceed line 10 (attachment required)"
+            got.must_attach(),
+            "V9: line 7 ({}) must exceed line 10 ({}) — attachment required",
+            got.line7,
+            got.line10
         );
-        assert_eq!(l11, Usd::ZERO, "V9: yet the AMT itself is zero");
+        assert_eq!(got.amt(), Usd::ZERO, "V9: yet the AMT itself is zero");
+        assert!(
+            got.line7 > got.line10 && got.amt() == Usd::ZERO,
+            "V9 exists precisely to prove `attach iff amt > 0` is WRONG"
+        );
+        // The fixture must agree with the computation, or the vector has drifted from its own label.
         assert!(
             v9["attach_required_who_must_file_cond1"].as_bool().unwrap(),
-            "V9 exists precisely to prove `attach iff amt > 0` is WRONG"
+            "V9's fixture label disagrees with the computed form"
         );
     }
 
@@ -656,12 +675,28 @@ mod tests {
     #[test]
     fn line40_min_is_a_proved_no_op_for_this_input_class() {
         let p = params();
-        let bp28 = p.breakpoint_28pct;
+        // ★ BOTH §55(b)(1) schedules. This swept only the general one — never the MFS schedule the
+        //   v0.14.0 branch added, whose breakpoint ($116,300) and subtrahend ($2,326) are both HALVED.
+        //   The proof has to hold on the schedule a filer is actually put on, not just the common one.
+        for status in [FilingStatus::Mfj, FilingStatus::Mfs] {
+            line40_min_sweep_for(&p, status);
+        }
+    }
+
+    /// One §55(b)(1) schedule's worth of the line-40 sweep. Split out so both the general and the MFS
+    /// schedule are exercised with the SAME proof rather than the general one twice.
+    fn line40_min_sweep_for(p: &AmtParams, status: FilingStatus) {
+        let bp28 = p.breakpoint_28pct(status);
+        let subtrahend = if status == FilingStatus::Mfs {
+            p.rate_28_subtrahend_mfs
+        } else {
+            p.rate_28_subtrahend
+        };
         let flat = |x: Usd| {
             if x <= bp28 {
                 p.rate_26 * x
             } else {
-                p.rate_28 * x - p.rate_28_subtrahend
+                p.rate_28 * x - subtrahend
             }
         };
         let mut checked = 0u32;
@@ -676,7 +711,7 @@ mod tests {
                 let line39 = flat(l17 + gain);
                 assert!(
                     line38 <= line39,
-                    "line 40's min WOULD bind at line17={l17}, gain={gain}: 38={line38} > 39={line39}.                      The input class has widened — re-examine the min, do not delete it."
+                    "line 40's min WOULD bind for {status:?} at line17={l17}, gain={gain}: 38={line38} > 39={line39}. The input class has widened — re-examine the min, do not delete it."
                 );
                 checked += 1;
                 g += 9_973; // a prime-ish stride, to land off the round breakpoints too

@@ -128,3 +128,85 @@ fn no_published_crate_includes_a_file_outside_its_own_root() {
         offenders.join("\n")
     );
 }
+
+/// ★ Every intra-workspace dependency must carry an EXACT `version` equal to the workspace's own.
+///
+/// **What this actually catches — measured, not assumed.** The obvious hazard ("a bump misses a pin, so
+/// the publish ships a stale dependency") turns out NOT to be one for an exact requirement: lowering
+/// `btctax-core` to `version = "0.13.0"` while the path crate is `0.14.0` makes **cargo itself** refuse
+/// to resolve the workspace — *"failed to select a version for the requirement `btctax-core = ^0.13.0`;
+/// candidate versions found which didn't match: 0.14.0"*. Any build catches that. This test is
+/// redundant there, and the first draft of this comment claimed otherwise.
+///
+/// The two cases it does catch, both verified by mutation:
+///  1. **A LOOSE requirement** — `version = ">=0.13"` resolves happily against the local path crate, so
+///     the workspace builds green and the publish succeeds, but the *published* manifest lets a consumer
+///     resolve `btctax-cli 0.14.0` against `btctax-core 0.13.0`. On this release that means re-shipping
+///     the AMT false-refusal bug v0.14.0 fixed. Silent at every stage. This is the real reason to have
+///     the test.
+///  2. **A `path` dep with no `version` at all** — unpublishable; `cargo publish` fails, but late, after
+///     earlier crates in the dependency order are already permanently on crates.io.
+///
+/// Also asserts each package's own version matches, so the whole workspace moves in lockstep.
+#[test]
+fn every_intra_workspace_dependency_pins_the_current_version() {
+    let crates_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("crates/ dir");
+    let want = env!("CARGO_PKG_VERSION"); // every crate in this workspace shares one version
+
+    let mut manifests: Vec<_> = std::fs::read_dir(crates_dir)
+        .expect("read crates/")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path().join("Cargo.toml"))
+        .filter(|p| p.is_file())
+        .collect();
+    manifests.sort();
+    assert!(
+        manifests.len() >= 10,
+        "expected the whole workspace; found {} manifests",
+        manifests.len()
+    );
+
+    let mut problems = Vec::new();
+    for m in &manifests {
+        let text = std::fs::read_to_string(m).expect("read manifest");
+        let name = m.display().to_string();
+
+        // The crate's own `version = "..."`, which must also be the shared one.
+        if let Some(own) = text
+            .lines()
+            .find(|l| l.trim_start().starts_with("version = \""))
+            .and_then(|l| l.split('"').nth(1))
+        {
+            if own != want {
+                problems.push(format!("{name}: package version {own} != {want}"));
+            }
+        }
+
+        // Every `btctax-* = { path = ..., version = "..." }` line.
+        for (i, line) in text.lines().enumerate() {
+            let trimmed = line.trim_start();
+            if !trimmed.starts_with("btctax") || !trimmed.contains("path =") {
+                continue;
+            }
+            match trimmed.split("version = \"").nth(1).and_then(|r| r.split('"').next()) {
+                // A path dep with NO version cannot be published at all.
+                None => problems.push(format!(
+                    "{name}:{}: intra-workspace dep has `path` but no `version` — unpublishable: {trimmed}",
+                    i + 1
+                )),
+                Some(v) if v != want => problems.push(format!(
+                    "{name}:{}: pins {v}, workspace is {want} — a publish would ship a STALE dependency: {trimmed}",
+                    i + 1
+                )),
+                Some(_) => {}
+            }
+        }
+    }
+    assert!(
+        problems.is_empty(),
+        "intra-workspace version pins are out of lockstep with {want}:\n{}",
+        problems.join("\n")
+    );
+}
