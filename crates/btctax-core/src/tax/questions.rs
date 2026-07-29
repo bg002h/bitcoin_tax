@@ -116,34 +116,42 @@ fn amt_carryover_question_live(ri: &ReturnInputs) -> bool {
 /// filer with business expenses at all must therefore affirm. See [`RefuseReason::
 /// AmtDepreciationDeclarationUnanswered`] for why the alternative — assuming $0 — is unsound.
 ///
-/// ★ The EXPECTED answer is yes, and the prompt says so — but the exemptions are NARROWER than they
-/// first look, and the prompt is worded to fail CLOSED where they run out. From i6251 (2024) p.4-5:
+/// ★ **The prompt enumerates a narrow YES-list and defaults to NO — deliberately, structurally.**
 ///
-/// **Not refigured** — every bullet in "What Depreciation Isn't Refigured for the AMT?" is qualified by
-/// **placed in service after 1998**: residential rental; nonresidential real property with a class life
-/// ≥ 27.5 years depreciated straight-line; other §1250 property depreciated straight-line; non-§1250
-/// property depreciated 150%-DB or straight-line. Also exempt regardless of date: property eligible for
-/// a special depreciation allowance (its AMT and regular bases are identical), §179 property, and
-/// ADS-elected property. And where bonus was ELECTED OUT: "It isn't subject to an AMT adjustment for
-/// depreciation if it was placed in service after 2015."
+/// This wording took THREE tries, and the first two failed in opposite directions. That history is the
+/// design rationale, so it is recorded rather than tidied away:
+///   1. v1 listed the 200%-DB trigger broadly and would have refused every filer who owns equipment.
+///      Fail-closed, so merely bricking.
+///   2. v2 "fixed" that by granting exemptions — and asserted an UNCONDITIONAL straight-line exemption.
+///      i6251 qualifies every "isn't refigured" bullet with **placed in service after 1998**, and its
+///      must-refigure list carries "Tangible property placed in service after 1986 and before 1999"
+///      with no method qualifier. A filer with a 1990s building would have answered yes truthfully and
+///      omitted a required add-back — an UNDERSTATEMENT.
+///   3. v3 narrowed the pre-1999 hole but still said "no adjustment applies to post-1998 property
+///      depreciated ... 150% declining balance", dropping the instructions' parenthetical **"(other
+///      than section 1250 property)"**. Post-1998 §1250 property not depreciated straight-line — 15-
+///      and 20-year land improvements: paving, fencing, site utilities — is on the MUST-refigure list.
+///      Another understatement, and note the qualifier was present in THIS doc comment and lost on the
+///      way into the prompt: a paraphrase of a paraphrase.
 ///
-/// **Still refigured, and this is the trap:** "**Tangible property placed in service after 1986 and
-/// before 1999**" — listed with NO method qualifier, so a pre-1999 asset refigures even if it is
-/// depreciated straight-line (over its AMT class life, generally longer). A draft of this prompt
-/// claimed an unconditional straight-line exemption; that was wrong, and wrong in the UNDERSTATING
-/// direction, which is the one direction this project never permits. A filer with a 39-year
-/// nonresidential building placed in service in the 1990s — mandatorily straight-line, still inside its
-/// recovery period in 2024 — would have answered "yes" truthfully and omitted a required add-back.
+/// **So the structure, not the wording, is the fix.** Enumerating NO-triggers with a broad "otherwise
+/// yes" fallback makes every omission an understatement. Enumerating YES-conditions with a "otherwise
+/// no" fallback makes every omission an over-refusal, which is fail-closed and recoverable. The prompt
+/// now does the latter and says "if you are unsure, answer NO" outright. Adding a missing exemption
+/// later is a safe edit; widening the fallback is not.
 ///
-/// So the live triggers for a TY2024 return are: (a) ANY tangible property placed in service before
-/// 1999 still within its recovery period, and (b) 200%-DB MACRS property from 1999-2015 without bonus
-/// (10-year property from 2015 runs through 2025). Passive, at-risk, partnership-basis and farm-shelter
-/// depreciation route to lines 2m/2n/3 instead. The question exists to catch that tail, NOT to refuse
-/// every filer who owns equipment.
+/// Each permitted YES is individually grounded in i6251 (2024) p.5:
+///   - no depreciation claimed ⇒ line 2l is $0 by arithmetic;
+///   - "Any part of the cost of any property for which you elected to take a section 179 expense
+///     deduction" (a fully-§179'd asset leaves no remaining basis to refigure);
+///   - "Qualified property that is or was eligible for a special depreciation allowance …" plus "It
+///     isn't subject to an AMT adjustment for depreciation if it was placed in service after 2015";
+///   - the four straight-line bullets, which between them cover post-1998 §1250 and non-§1250 property;
+///   - "Property for which you elected to use the alternative depreciation system (ADS) of section
+///     168(g) for the regular tax" (no date limit).
 ///
-/// [`ScheduleCInputs::expenses`]: crate::tax::return_inputs::ScheduleCInputs::expenses
-/// [`RefuseReason::AmtDepreciationDeclarationUnanswered`]:
-///     crate::tax::return_refuse::RefuseReason::AmtDepreciationDeclarationUnanswered
+/// Passive, at-risk, partnership-basis and farm-shelter depreciation route to lines 2m/2n/3 instead, so
+/// the prompt's silence on them is correct.
 fn amt_depreciation_question_live(ri: &ReturnInputs) -> bool {
     ri.schedule_c
         .as_ref()
@@ -329,24 +337,24 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
     FormQuestion {
         id: QuestionId::AmtDepreciationSameAsRegular,
         prompt: "Is the depreciation included in your Schedule C expenses the SAME for the alternative \
-                 minimum tax as for the regular tax? (Form 6251 line 2l. Answer NO if you are still \
-                 depreciating EITHER (a) any tangible property placed in service BEFORE 1999 — the AMT \
-                 refigures that over a different life whatever method you used — OR (b) property placed \
-                 in service from 1999 through 2015 under the 200% declining-balance MACRS method \
-                 without claiming bonus depreciation. Otherwise answer YES, which covers almost \
-                 everyone: no adjustment applies to property placed in service after 2015, to property \
-                 you claimed bonus depreciation or a section 179 deduction on, or to post-1998 property \
-                 depreciated straight-line, 150% declining balance, or under ADS. Answer yes if you \
-                 claimed no depreciation at all.)",
+                 minimum tax as for the regular tax? (Form 6251 line 2l.) Answer YES only if one of \
+                 these is true of EVERY depreciable asset in that total: you claimed no depreciation at \
+                 all; or you deducted its whole cost under section 179; or it was placed in service \
+                 after 2015 and qualified for bonus depreciation (most equipment bought since 2016); or \
+                 it is depreciated straight-line and was placed in service after 1998; or you elected \
+                 ADS for it. Answer NO if any asset falls outside that list — in particular anything \
+                 placed in service before 1999, 200% declining-balance property from 1999-2015, and \
+                 land improvements or other section 1250 property depreciated 150% declining balance. \
+                 If you are unsure, answer NO: that refuses the return rather than risking an \
+                 understated tax.",
         unanswered: RefuseReason::AmtDepreciationDeclarationUnanswered,
         unanswered_detail:
             "this return carries Schedule C expenses, and btctax accepts that as a FLAT TOTAL — it never \
              sees Part II line 13 ('Depreciation and section 179 expense deduction'), so it cannot tell \
-             whether a Form 6251 line 2l adjustment is hiding inside it. Most filers answer yes (i6251 \
-             exempts property placed in service after 2015, bonus and section 179 property, and \
-             POST-1998 straight-line/150%-DB/ADS property); but anything placed in service before 1999, \
-             or 200%-DB property from 1999-2015, still refigures — and a divergent AMT amount is an \
-             ADD-BACK, so guessing would understate the tax — run `btctax income answer`",
+             whether a Form 6251 line 2l adjustment is hiding inside it. Most filers answer yes, but the \
+             question is asked so a divergent AMT amount — which is an ADD-BACK — is never guessed \
+             away. The prompt lists the conditions that permit a yes; if none clearly applies, answer \
+             NO. Guessing yes would understate the tax — run `btctax income answer`",
         live: amt_depreciation_question_live,
         get: |ri| ri.amt_depreciation_same_as_regular,
         set: |ri, v| ri.amt_depreciation_same_as_regular = Some(v),
