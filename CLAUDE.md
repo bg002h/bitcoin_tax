@@ -71,6 +71,25 @@ equivalence comments that were simply wrong.
 
 An audit of the whole constellation against this rule is open: `FOLLOWUPS.md` §G-5.
 
+## Two oracles, and the `.venv`
+
+Tax figures are validated against **two independent engines**, never one: **OpenTaxSolver** (oracle 1,
+`scripts/oracle/ots_direct.py`, GPL-2.0 and observe-only, needs `OTS_DIR`) and **Tax-Calculator**
+(oracle 2, `scripts/oracle/gen_goldens.py`). The sweep asserts every admitted household reconciles on
+every compared line against **both**. A single oracle disagreeing is ambiguous; two splitting is
+diagnostic. **Never file an upstream defect, or call a figure validated, on one oracle.**
+
+**The Python stack lives in the repo's `.venv`** — `.venv/bin/python` has taxcalc and pandas; bare
+`python3` has neither and always will not. Try `.venv/bin/python` before concluding a Python tool is
+unavailable.
+
+**A disagreement is adjudicated against the FORM, never encoded.** The IRS PDF is the authority; an
+oracle is a witness. Precedent: tenforty issue #278 / PR #279 — OTS was never wrong, the wrapper was.
+
+**Known blind spot (2026-07-28): neither oracle is asked for AMT.** `ots_direct.py` reads only L16 and
+L24+NIIT, never the 1040's line 17 where AMT lands; and Tax-Calculator's own AMTI omits Form 6251 line
+2a's standard-deduction add-back. See `FOLLOWUPS.md` §G-6 — it is a Tier-2 blocker.
+
 ## Tests for conformance, reviews for judgment
 
 **Do not review a document to check whether it faithfully describes a form. Write the test.** The form
