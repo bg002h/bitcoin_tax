@@ -1,16 +1,35 @@
 """Form 6251 (2024), transcribed line by line from PART_III.md. Variable names ARE line numbers."""
 from decimal import Decimal as D
 
-BR = {  # 2024 ordinary brackets
+BR = {  # 2024 ordinary brackets — §1(j)(2), Rev. Proc. 2023-34. (upper_bound, rate); None = no ceiling.
+ #
+ # ★ PROVENANCE, stated because it bounds what this file can witness. The AMT-specific constants below
+ # (EXM/PHASE/BP28/SUB/L19/L25/KICK_*) are transcribed from the Form 6251 PDF and i6251 — primary
+ # sources. These ORDINARY brackets and STD are not printed on Form 6251, and are cross-checked against
+ # `btctax-adapters/src/tax_tables.rs` (itself encoded verbatim from the Rev. Procs.) — i.e. against
+ # OUR OWN table, so they are NOT independent. They feed form line 10 (the regular tax), which
+ # OpenTaxSolver witnesses independently in `verify_f6251.py`; that is what actually guards them.
  'mfj':[(D(23200),D('.10')),(D(94300),D('.12')),(D(201050),D('.22')),(D(383900),D('.24')),(D(487450),D('.32')),(D(731200),D('.35')),(None,D('.37'))],
- 'mfs':[(D(11600),D('.10')),(D(47150),D('.12')),(D(100525),D('.22')),(D(191950),D('.24')),(D(243725),D('.32')),(D(365600),D('.35')),(None,D('.37'))]}
-STD   = {'mfj':D(29200),'mfs':D(14600)}
-EXM   = {'mfj':D(133300),'mfs':D(66650)}          # form line 5
-PHASE = {'mfj':D(1218700),'mfs':D(609350)}        # form line 5
-BP28  = {'mfj':D(232600),'mfs':D(116300)}         # form lines 18/39
-SUB   = {'mfj':D(4652),'mfs':D(2326)}             # form lines 18/39
-L19   = {'mfj':D(94050),'mfs':D(47025)}           # form line 19 (0% top)
-L25   = {'mfj':D(583750),'mfs':D(291850)}         # form line 25 (15% top)
+ 'mfs':[(D(11600),D('.10')),(D(47150),D('.12')),(D(100525),D('.22')),(D(191950),D('.24')),(D(243725),D('.32')),(D(365600),D('.35')),(None,D('.37'))],
+ 'single':[(D(11600),D('.10')),(D(47150),D('.12')),(D(100525),D('.22')),(D(191950),D('.24')),(D(243725),D('.32')),(D(609350),D('.35')),(None,D('.37'))],
+ 'hoh':[(D(16550),D('.10')),(D(63100),D('.12')),(D(100500),D('.22')),(D(191950),D('.24')),(D(243700),D('.32')),(D(609350),D('.35')),(None,D('.37'))]}
+STD   = {'mfj':D(29200),'mfs':D(14600),'single':D(14600),'hoh':D(21900)}
+# ── Everything below is transcribed from the PRIMARY source, quoted where it is not obvious. ──
+# i6251 p.1: "The exemption amount on Form 6251, line 5, has increased to $85,700 ($133,300 if married
+# filing jointly or qualifying surviving spouse; $66,650 if married filing separately)."
+EXM   = {'mfj':D(133300),'mfs':D(66650),'single':D(85700),'hoh':D(85700)}    # form line 5
+# i6251 p.1: "the amount used to determine the phaseout of your exemption has increased to $609,350
+# ($1,218,700 if married filing jointly or qualifying surviving spouse)."
+PHASE = {'mfj':D(1218700),'mfs':D(609350),'single':D(609350),'hoh':D(609350)}  # form line 5
+# Form 6251 lines 18/39: "$232,600 or less ($116,300 or less if married filing separately)".
+BP28  = {'mfj':D(232600),'mfs':D(116300),'single':D(232600),'hoh':D(232600)}
+SUB   = {'mfj':D(4652),'mfs':D(2326),'single':D(4652),'hoh':D(4652)}
+# Form 6251 line 19 (0% band top): "$94,050 if married filing jointly or qualifying surviving spouse,
+# $47,025 if single or married filing separately, or $63,000 if head of household."
+L19   = {'mfj':D(94050),'mfs':D(47025),'single':D(47025),'hoh':D(63000)}
+# Form 6251 line 25 (15% band top): "$518,900 if single, $291,850 if married filing separately,
+# $583,750 if married filing jointly or qualifying surviving spouse, or $551,350 if head of household."
+L25   = {'mfj':D(583750),'mfs':D(291850),'single':D(518900),'hoh':D(551350)}
 KICK_START, KICK_MAX = D(875950), D(66650)        # i6251 p.9, line 4
 
 def ord_tax(ti, st):
