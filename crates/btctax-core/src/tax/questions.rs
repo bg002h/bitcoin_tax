@@ -116,15 +116,30 @@ fn amt_carryover_question_live(ri: &ReturnInputs) -> bool {
 /// filer with business expenses at all must therefore affirm. See [`RefuseReason::
 /// AmtDepreciationDeclarationUnanswered`] for why the alternative — assuming $0 — is unsound.
 ///
-/// ★ The EXPECTED answer is yes, and the prompt says so. i6251 (2024) p.4-5 exempts from line 2l:
-/// property eligible for a special depreciation allowance (its AMT and regular bases are identical);
-/// property placed in service **after 2015** even where bonus was ELECTED OUT ("It isn't subject to an
-/// AMT adjustment for depreciation if it was placed in service after 2015"); §179 property; ADS-elected
-/// property; and straight-line property. Passive, at-risk, partnership-basis and farm-shelter
-/// depreciation route to lines 2m/2n/3 instead. What survives for a TY2024 return is a narrow tail —
-/// chiefly 200%-DB MACRS property placed in service before 2016 whose recovery period is long enough to
-/// still be running (10-year property from 2015 runs through 2025). The question exists to catch that
-/// tail, NOT to refuse every filer who owns equipment.
+/// ★ The EXPECTED answer is yes, and the prompt says so — but the exemptions are NARROWER than they
+/// first look, and the prompt is worded to fail CLOSED where they run out. From i6251 (2024) p.4-5:
+///
+/// **Not refigured** — every bullet in "What Depreciation Isn't Refigured for the AMT?" is qualified by
+/// **placed in service after 1998**: residential rental; nonresidential real property with a class life
+/// ≥ 27.5 years depreciated straight-line; other §1250 property depreciated straight-line; non-§1250
+/// property depreciated 150%-DB or straight-line. Also exempt regardless of date: property eligible for
+/// a special depreciation allowance (its AMT and regular bases are identical), §179 property, and
+/// ADS-elected property. And where bonus was ELECTED OUT: "It isn't subject to an AMT adjustment for
+/// depreciation if it was placed in service after 2015."
+///
+/// **Still refigured, and this is the trap:** "**Tangible property placed in service after 1986 and
+/// before 1999**" — listed with NO method qualifier, so a pre-1999 asset refigures even if it is
+/// depreciated straight-line (over its AMT class life, generally longer). A draft of this prompt
+/// claimed an unconditional straight-line exemption; that was wrong, and wrong in the UNDERSTATING
+/// direction, which is the one direction this project never permits. A filer with a 39-year
+/// nonresidential building placed in service in the 1990s — mandatorily straight-line, still inside its
+/// recovery period in 2024 — would have answered "yes" truthfully and omitted a required add-back.
+///
+/// So the live triggers for a TY2024 return are: (a) ANY tangible property placed in service before
+/// 1999 still within its recovery period, and (b) 200%-DB MACRS property from 1999-2015 without bonus
+/// (10-year property from 2015 runs through 2025). Passive, at-risk, partnership-basis and farm-shelter
+/// depreciation route to lines 2m/2n/3 instead. The question exists to catch that tail, NOT to refuse
+/// every filer who owns equipment.
 ///
 /// [`ScheduleCInputs::expenses`]: crate::tax::return_inputs::ScheduleCInputs::expenses
 /// [`RefuseReason::AmtDepreciationDeclarationUnanswered`]:
@@ -314,21 +329,24 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
     FormQuestion {
         id: QuestionId::AmtDepreciationSameAsRegular,
         prompt: "Is the depreciation included in your Schedule C expenses the SAME for the alternative \
-                 minimum tax as for the regular tax? (Form 6251 line 2l. For almost everyone this is \
-                 YES: no AMT adjustment applies to property placed in service after 2015, nor to \
-                 property you claimed bonus depreciation or a section 179 deduction on, nor to anything \
-                 depreciated straight-line or under ADS. Answer NO only if you are still depreciating \
-                 property placed in service BEFORE 2016 under the 200% declining-balance MACRS method \
-                 without the special depreciation allowance. Answer yes if you claimed no depreciation \
-                 at all.)",
+                 minimum tax as for the regular tax? (Form 6251 line 2l. Answer NO if you are still \
+                 depreciating EITHER (a) any tangible property placed in service BEFORE 1999 — the AMT \
+                 refigures that over a different life whatever method you used — OR (b) property placed \
+                 in service from 1999 through 2015 under the 200% declining-balance MACRS method \
+                 without claiming bonus depreciation. Otherwise answer YES, which covers almost \
+                 everyone: no adjustment applies to property placed in service after 2015, to property \
+                 you claimed bonus depreciation or a section 179 deduction on, or to post-1998 property \
+                 depreciated straight-line, 150% declining balance, or under ADS. Answer yes if you \
+                 claimed no depreciation at all.)",
         unanswered: RefuseReason::AmtDepreciationDeclarationUnanswered,
         unanswered_detail:
             "this return carries Schedule C expenses, and btctax accepts that as a FLAT TOTAL — it never \
              sees Part II line 13 ('Depreciation and section 179 expense deduction'), so it cannot tell \
              whether a Form 6251 line 2l adjustment is hiding inside it. Most filers answer yes (i6251 \
              exempts property placed in service after 2015, bonus and section 179 property, and \
-             straight-line/ADS); but a divergent AMT amount is an ADD-BACK, and guessing would \
-             understate the tax — run `btctax income answer`",
+             POST-1998 straight-line/150%-DB/ADS property); but anything placed in service before 1999, \
+             or 200%-DB property from 1999-2015, still refigures — and a divergent AMT amount is an \
+             ADD-BACK, so guessing would understate the tax — run `btctax income answer`",
         live: amt_depreciation_question_live,
         get: |ri| ri.amt_depreciation_same_as_regular,
         set: |ri, v| ri.amt_depreciation_same_as_regular = Some(v),

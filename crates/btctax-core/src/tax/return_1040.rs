@@ -3275,10 +3275,15 @@ mod tests {
         assert_eq!(ar.additional_medicare.part1_wages, dec!(450.00));
     }
 
-    /// The AMT screen (§4.11) wired through `screen_absolute`: a very-high-income filer (worksheet line-12
-    /// STOP, AMTI − exemption > $232,600) is REFUSED; a common household clears (Sch 2 line 2 = 0).
+    /// Form 6251 wired through `screen_absolute`: a very-high-income filer whose AMTI clears the
+    /// exemption by more than $232,600 still COMPUTES (line 7 lands at or below line 10), and so does a
+    /// common household (Sch 2 line 2 = 0 for both).
+    ///
+    /// ★ Name and docstring both corrected here: they said "is REFUSED", describing the pre-Tier-1
+    /// behaviour, while the body below had already been updated to assert the opposite. The screening
+    /// worksheet is no longer what refuses anything.
     #[test]
-    fn amt_screen_refuses_high_income_clears_common() {
+    fn a_high_income_filer_and_a_common_household_both_compute_with_zero_amt() {
         let p = ty2024_params();
         let table = real_2024_table();
         // ★ BEHAVIOUR CHANGE (Tier 1). $900k wages trips the SCREEN (worksheet line 11 ≈ 887k >

@@ -487,9 +487,16 @@ in-file, were folded before merge. What follows is the residue, each with an **o
   who elected out of §168(k) bonus on 5-year rigs — does NOT itself carry a line-2l adjustment if the
   rigs were placed in service after 2015 ("It isn't subject to an AMT adjustment for depreciation if it
   was placed in service after 2015"). The channel is real but narrower than the example: chiefly
-  200%-DB MACRS property placed in service before 2016 with a recovery period long enough to still be
-  running in 2024. The declaration stays; its PROMPT was corrected, because as first written it would
-  have steered every modern miner to answer "no" and be refused for a $0 adjustment.
+  200%-DB MACRS property placed in service from 1999-2015 with a recovery period long enough to still be
+  running in 2024, **plus any tangible property placed in service before 1999** — i6251's must-refigure
+  list carries "Tangible property placed in service after 1986 and before 1999" with NO method
+  qualifier, so a pre-1999 asset refigures even when depreciated straight-line. The declaration stays;
+  its PROMPT took two corrections, and the second matters more than the first: as first written it would
+  have steered every modern miner to answer "no" and be refused for a $0 adjustment (fail-closed, merely
+  annoying); the first correction then over-shot by claiming an UNCONDITIONAL straight-line exemption,
+  which would have let a filer with a 1990s building truthfully answer "yes" and omit a required
+  add-back (an understatement — the direction never permitted). Both are fixed; the doc comment on
+  `amt_depreciation_question_live` records the trap.
 - **I-1** the Who-Must-File gate was nested inside the screening worksheet, so the branch's own line-2 fix
   was a net *safety reduction*, and its headline KAT was a **false pass**. Gate hoisted; the worksheet is
   now off every production path and survives as a swept cross-check.
