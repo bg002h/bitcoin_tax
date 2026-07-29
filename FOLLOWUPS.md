@@ -299,8 +299,12 @@ the residue.
 
 - **[done] AMT screen worksheet line 2** — fixed in `fix/amt-screen-line2` (`731228c`). See that commit;
   the defect was reading Schedule A line 7 as the itemized total.
-- **[open] Compute Form 6251 instead of refusing — TWO TIERS, see `design/amt-form6251/PLAN.md`.**
-  *The* headline finding, and it grew after further analysis on 2026-07-27.
+- **[TIER 1 DONE — shipped v0.14.0, 2026-07-29 / TIER 2 open] Compute Form 6251 instead of refusing —
+  TWO TIERS, see `design/amt-form6251/PLAN.md`.** *The* headline finding, and it grew after further
+  analysis on 2026-07-27. **Tier 1 shipped**: the form is transcribed line by line, computed for every
+  return, and the gate is now i6251 *Who Must File* condition 1 (line 7 > line 10) rather than the
+  screening worksheet. **Tier 2 — filling and ATTACHING the form when AMT is owed — remains open and is
+  blocked on G-6** (no oracle can validate an AMT figure).
 
   **Tier 1 — the zero-AMT case.** The originally-simulated taxpayer ($1M wages / $500k LTCG / MFJ) owes
   **$0 AMT** — TMT $327,965 against regular tax $364,675.50, a **$36,710.50** margin — yet btctax refused
@@ -497,9 +501,8 @@ before the tag (see `chore(release): v0.14.0`). What remains:
   0.9.8` is yanked upstream, so `cargo package` warns and `cargo install --locked` resolves a yanked
   transitive dep. Deliberately NOT done during release prep — perturbing the dependency graph the green
   suite was measured against is not a release-day edit.
-- **[open → USER] Revoke the temporary crates.io token** in `~/.cargo/credentials.toml`. Outstanding
-  since v0.7.0; requires the crates.io web UI (Account Settings → API Tokens), so it cannot be done
-  from here.
+- **[CLOSED — owner ruling 2026-07-29] The crates.io token stays.** The owner declined revocation: the
+  token is time-limited and expires on its own. Do NOT re-file this or raise it at the next release.
 
 ### G-7 — Tier-1 whole-branch review residue (2026-07-29, branch `fix/amt-screen-line2`)
 
