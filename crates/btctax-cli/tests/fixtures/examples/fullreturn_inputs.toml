@@ -5,6 +5,7 @@
 #   cargo test -p btctax-cli --test fullreturn_oracle -- --ignored emit_fullreturn_fixture
 # (keys sort alphabetically — that is the `toml::Value` table order, not a meaningful layout).
 
+amt_depreciation_same_as_regular = true
 charitable_carryover_in = []
 dual_status_alien = false
 filing_status = "Mfj"

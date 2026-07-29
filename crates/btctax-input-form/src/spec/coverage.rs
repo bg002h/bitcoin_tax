@@ -116,6 +116,12 @@ fn maximal_fixture() -> ReturnInputs {
         short: dec!(1),
         long: dec!(0),
     };
+    // Liveness primer for `DeclAmtDepreciationSame` (Form 6251 line 2l) — a Schedule C with a nonzero
+    // FLAT expense total, which is all btctax ever sees of Part II.
+    ri.schedule_c = Some(btctax_core::tax::return_inputs::ScheduleCInputs {
+        expenses: dec!(1),
+        ..Default::default()
+    });
     ri
 }
 
@@ -327,16 +333,16 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         );
     }
 
-    // Count tripwires — pin the 62-leaf / 62-Field identity so a silent drop is loud even if some other
+    // Count tripwires — pin the 65-leaf / 65-Field identity so a silent drop is loud even if some other
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(
-        field_count, 64,
-        "expected 64 Fields (one per §5.8 in-scope leaf)"
+        field_count, 65,
+        "expected 65 Fields (one per §5.8 in-scope leaf)"
     );
     assert_eq!(
         covered.len(),
-        64,
+        65,
         "expected 64 distinctly-covered in-scope leaves"
     );
 
@@ -490,6 +496,10 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
     (
         FieldId::DeclAmtCarryoverSame,
         "amt_carryover_same_as_regular",
+    ),
+    (
+        FieldId::DeclAmtDepreciationSame,
+        "amt_depreciation_same_as_regular",
     ),
     (FieldId::ForeignCountryNames, "foreign_country_names"),
     (FieldId::BlindTaxpayer, "header.taxpayer.blind"),

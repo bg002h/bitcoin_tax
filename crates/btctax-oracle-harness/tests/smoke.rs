@@ -126,7 +126,8 @@ fn the_former_amt_screen_anchor_now_proceeds_in_default_mode() {
 }
 
 /// Drive `--check` over `households` and assert every ADMITTED one reconciles on every compared line
-/// (the golden matrix is green by construction), and that exactly the AMT-screen anchor is refused.
+/// (the golden matrix is green by construction). Since T3 the former AMT-screen anchor is ADMITTED, so
+/// the assertion is on the reconciliation of every admitted household, not on a refusal roster.
 /// Each call SPAWNS the harness subprocess per household, so this is inherently serial.
 fn sweep_check_reconciliation(households: &[serde_json::Value]) {
     let mut refused: Vec<String> = Vec::new();

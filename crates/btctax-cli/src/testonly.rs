@@ -46,9 +46,9 @@ opt-buy-st,2025-01-02 12:00:00 UTC,Buy,BTC,1.00000000,USD,80000.00,80000.00,8000
 opt-sell,2025-06-01 12:00:00 UTC,Sell,BTC,1.00000000,USD,50000.00,50000.00,50000.00,0.00,,,\r\n";
 
 /// J6 River corpus: one small 2024 business mining-income deposit (FMV from the bundled dataset).
-/// Kept modest deliberately: the kitchen-sink household clears the 2024 Form-6251 AMT-screen worksheet by
-/// only a thin margin — a corpus editor who enlarges the sale, income, or donation must keep the household
-/// on the computable side of that screen.
+/// Kept modest deliberately: a corpus editor who enlarges the sale, income, or donation must keep the
+/// household on the computable side of **Form 6251 line 7 <= line 10** (Who Must File condition 1), which
+/// is what refuses a return now — NOT the screening worksheet, which since v0.13.0 gates nothing.
 pub const J6_RIVER_CSV: &str =
     "Date,Sent Amount,Sent Currency,Received Amount,Received Currency,Fee Amount,Tag\r\n\
 2024-03-15 12:00:00 UTC,,,0.05000000,BTC,,income\r\n";
@@ -56,7 +56,7 @@ pub const J6_RIVER_CSV: &str =
 /// J6 Coinbase corpus: a cheap 2020 long-term lot, a small 2024 sale, and a 2024 charitable Send of 0.1
 /// BTC (§170(e) donation ⇒ Form 8283). NOTE: HIFO reconstruction draws the 2024 sale from the higher-basis
 /// 2024 mining lot (not this 2020 lot) ⇒ it is SHORT-term (Schedule D Part I). Amounts kept small so the
-/// return stays under the AMT screen.
+/// return stays clear of Form 6251's Who-Must-File test (line 7 <= line 10).
 pub const J6_COINBASE_CSV: &str = "\r\nTransactions\r\nUser,00000000-0000-0000-0000-000000000000\r\n\
 ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
 cb-buy,2020-01-01 12:00:00 UTC,Buy,BTC,0.30000000,USD,30000.00,9000.00,9000.00,0.00,,,\r\n\

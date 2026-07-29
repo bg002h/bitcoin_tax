@@ -17,8 +17,12 @@
 # UNMAPPED ON PURPOSE — PART I IS ENTIRELY BLANK, and that is load-bearing:
 #   line 1a  excess advance premium tax credit — no input exists, and it would REFUSE if it did
 #            (repaying excess APTC INCREASES tax, so omitting it would understate the return)
-#   line 2   AMT — $0 by construction: the return is REFUSED outright if the official 2024
-#            "Worksheet To See if You Should Fill in Form 6251" trips, so there is no AMT to print
+#   line 2   AMT — $0 by construction, for a REASON THAT CHANGED in v0.13.0: btctax now computes
+#            Form 6251 for every return. A return reaching the PDF stage has line 7 <= line 10, so
+#            Form 6251 line 11 (the AMT) is $0 and there is nothing to print. A return with line 7
+#            GREATER than line 10 is refused instead (i6251, Who Must File, condition 1) — the form
+#            would have to be ATTACHED, which v1 cannot do. The old rationale ("refused if the
+#            screening worksheet trips") no longer describes any code path.
 #   lines 1b-1f, 1y, 1z, 3 — nothing to carry ⇒ 1040 line 17 is zero
 # Part II: lines 5-10, 13-16, 17a-17z, 18, 19, 20 are all unmodeled/unrepresentable in v1.
 form = "f1040s2"

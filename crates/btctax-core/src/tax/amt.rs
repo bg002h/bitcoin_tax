@@ -25,8 +25,9 @@
 //!
 //! **Soundness of a CLEAR (why Schedule 2 line 2 = $0 is safe).** Within v1's accepted inputs, worksheet
 //! line 3 is not an over-estimate of AMTI — it is AMTI **exactly**: every Form 6251 adjustment other than
-//! the taxes/standard-deduction add-back is either refused upstream (PAB interest) or is an input v1 never
-//! captures (ISO, §1202, §4952, depreciation, NOL, Form 8801, K-1 adjustments) — see "the worksheet's
+//! the taxes/standard-deduction add-back is either refused upstream (PAB interest; a divergent AMT
+//! capital-loss carryover, line 2k; a divergent Schedule C depreciation amount, line 2l) or is an input v1
+//! never captures (ISO, §1202, §4952, NOL, Form 8801, K-1 adjustments) — see "the worksheet's
 //! Exception" below — and the §199A deduction is allowed for AMT by §199A(f)(2), so subtracting it is right.
 //! The line-12 test is then a valid sufficient condition: in that branch `line11 ≤` the 26/28 breakpoint, so
 //! `26% × line11` IS the tentative minimum tax before §55(b)(3), and preserving the §1(h) rate on any net
@@ -35,8 +36,15 @@
 //! **The worksheet's "Exception"** (2024 i1040gi p.97 — items that force Form 6251 directly: §4952
 //! investment interest, accelerated depreciation, PAB tax-exempt interest, ISO stock, §1202 exclusion,
 //! NOL, the **foreign tax credit**, the Form 8801 prior-year-minimum-tax credit, …). Coverage:
-//! - PAB interest is already refused (INT box 9 / DIV box 13, `screen_inputs`); ISO/§1202/§4952/deprec./
-//!   NOL/8801 are all out-of-scope inputs v1 never captures.
+//! - PAB interest is already refused (INT box 9 / DIV box 13, `screen_inputs`); ISO/§1202/§4952/NOL/8801
+//!   are all out-of-scope inputs v1 never captures.
+//! - **Accelerated depreciation is NOT absent — it is uncapturable in aggregate**, and so is refused by
+//!   DECLARATION rather than by scope. `ScheduleCInputs::expenses` is a flat filer-supplied total, and
+//!   Schedule C Part II line 13 is "Depreciation and section 179 expense deduction" — so a §56(a)(1)
+//!   adjustment rides inside an accepted input, invisible. `QuestionId::AmtDepreciationSameAsRegular`
+//!   makes the filer affirm it away, exactly as line 2k does for the carryover twin. (An earlier draft of
+//!   this module listed depreciation among the "inputs v1 never captures". That was factually wrong, and
+//!   it was the sole cover for the one open understatement channel — whole-branch review C-2.)
 //! - The **§904(j) foreign tax credit** (Sch 3 L1) IS a live v1 input, but it does not require a separate
 //!   refuse: the Exception exists because in general the AMT foreign tax credit (§59(a)) differs from the
 //!   regular FTC, but for the **≤ $300/$600 passive-1099 §904(j) credit** this crate screens for, the AMT

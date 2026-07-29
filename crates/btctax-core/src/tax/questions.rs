@@ -36,8 +36,8 @@ pub struct FormQuestion {
     /// ★ The answer that requires **no adjustment and forgoes no benefit** — the "nothing to see here"
     /// reply. Most declarations are neutral at `false` ("no, I have no foreign trust"), but not all:
     /// the mortgage box is neutral at `true` (all of the loan bought/built/improved the home, so
-    /// Schedule A line 8a stays full), and both Form 6251 declarations are neutral at `true` (the
-    /// dwelling IS AMT-qualified; the AMT carryover IS the same).
+    /// Schedule A line 8a stays full), and all three Form 6251 declarations are neutral at `true` (the
+    /// dwelling IS AMT-qualified; the AMT carryover IS the same; the AMT depreciation IS the same).
     ///
     /// Declared per question rather than inferred, because polarity used to live as a hard-coded
     /// `matches!` in `testonly.rs` — knowledge a new question could silently get wrong.
@@ -63,6 +63,9 @@ pub enum QuestionId {
     AmtQualifiedDwelling,
     /// **Form 6251 line 2k** — does the AMT capital-loss carryover equal the regular one?
     AmtCarryoverSameAsRegular,
+    /// **Form 6251 line 2l** — is the depreciation inside the Schedule C expense total the same for the
+    /// AMT as for the regular tax?
+    AmtDepreciationSameAsRegular,
 }
 
 impl QuestionId {
@@ -77,6 +80,7 @@ impl QuestionId {
         QuestionId::MortgageAllUsedToBuyBuildImprove,
         QuestionId::AmtQualifiedDwelling,
         QuestionId::AmtCarryoverSameAsRegular,
+        QuestionId::AmtDepreciationSameAsRegular,
     ];
 }
 
@@ -84,6 +88,25 @@ impl QuestionId {
 fn amt_carryover_question_live(ri: &ReturnInputs) -> bool {
     let cf = ri.capital_loss_carryforward_in;
     cf.short > Usd::ZERO || cf.long > Usd::ZERO
+}
+
+/// Whether a Form 6251 line 2l depreciation adjustment could be hiding inside the Schedule C expense
+/// total — line 2l's liveness.
+///
+/// ★ An INPUT predicate, like [`amt_carryover_question_live`] and unlike anything compute-dependent:
+/// `schedule_c` present with a nonzero expense total. We cannot ask a narrower question, and that is
+/// precisely the point — [`ScheduleCInputs::expenses`] is a flat total, so btctax can never see whether
+/// Schedule C Part II line 13 ("Depreciation and section 179 expense deduction") is $0 or $200,000. Any
+/// filer with business expenses at all must therefore affirm. See [`RefuseReason::
+/// AmtDepreciationDeclarationUnanswered`] for why the alternative — assuming $0 — is unsound.
+///
+/// [`ScheduleCInputs::expenses`]: crate::tax::return_inputs::ScheduleCInputs::expenses
+/// [`RefuseReason::AmtDepreciationDeclarationUnanswered`]:
+///     crate::tax::return_refuse::RefuseReason::AmtDepreciationDeclarationUnanswered
+fn amt_depreciation_question_live(ri: &ReturnInputs) -> bool {
+    ri.schedule_c
+        .as_ref()
+        .is_some_and(|c| c.expenses > Usd::ZERO)
 }
 
 /// Whether Schedule A carries mortgage interest — the mixed-use question's liveness. Deliberately an
@@ -95,7 +118,7 @@ fn mortgage_question_live(ri: &ReturnInputs) -> bool {
         .is_some_and(|a| a.mortgage_interest_1098 > Usd::ZERO)
 }
 
-/// ★ THE REGISTRY. Eight declarations; the liveness lifted from the shipped refusals EXCEPT the two P9
+/// ★ THE REGISTRY. Eleven declarations; the liveness lifted from the shipped refusals EXCEPT the two P9
 /// corrections — `DependentSpouse` widened to `Mfj || spouse.is_some()` (= P8a I1) and the two foreign
 /// questions made live ALWAYS (= §2.9, the circular-liveness bug in shipped code).
 pub const FORM_QUESTIONS: &[FormQuestion] = &[
@@ -262,6 +285,24 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         set: |ri, v| ri.amt_carryover_same_as_regular = Some(v),
         neutral: true, // "yes, the same" ⇒ Form 6251 line 2k adds nothing back
     },
+    FormQuestion {
+        id: QuestionId::AmtDepreciationSameAsRegular,
+        prompt: "Is the depreciation included in your Schedule C expenses the SAME for the alternative \
+                 minimum tax as for the regular tax? (Form 6251 line 2l — answer no if you claimed the \
+                 200% declining-balance method on property placed in service after 1998, or any other \
+                 accelerated depreciation whose AMT amount differs. Answer yes if you claimed no \
+                 depreciation at all.)",
+        unanswered: RefuseReason::AmtDepreciationDeclarationUnanswered,
+        unanswered_detail:
+            "this return carries Schedule C expenses, and btctax accepts that as a FLAT TOTAL — it never \
+             sees Part II line 13 ('Depreciation and section 179 expense deduction'), so it cannot tell \
+             whether a Form 6251 line 2l adjustment is hiding inside it. A divergent AMT depreciation \
+             amount is an ADD-BACK. Guessing would understate the tax — run `btctax income answer`",
+        live: amt_depreciation_question_live,
+        get: |ri| ri.amt_depreciation_same_as_regular,
+        set: |ri, v| ri.amt_depreciation_same_as_regular = Some(v),
+        neutral: true, // "yes, the same" ⇒ Form 6251 line 2l adds nothing back
+    },
 ];
 
 /// The identity of each SKIPPABLE prompt (§2, class B) — the questions where silence is LAWFUL: a bare
@@ -422,6 +463,7 @@ mod tests {
                 QuestionId::MortgageAllUsedToBuyBuildImprove => 7,
                 QuestionId::AmtQualifiedDwelling => 8,
                 QuestionId::AmtCarryoverSameAsRegular => 9,
+                QuestionId::AmtDepreciationSameAsRegular => 10,
             };
             assert_eq!(idx, i, "QuestionId::ALL is out of order / missing {id:?}");
             assert_eq!(
@@ -430,8 +472,8 @@ mod tests {
                 "exactly one FORM_QUESTIONS entry for {id:?}"
             );
         }
-        assert_eq!(QuestionId::ALL.len(), 10, "there are 10 declarations");
-        assert_eq!(FORM_QUESTIONS.len(), 10, "one entry per declaration");
+        assert_eq!(QuestionId::ALL.len(), 11, "there are 11 declarations");
+        assert_eq!(FORM_QUESTIONS.len(), 11, "one entry per declaration");
     }
 
     #[test]

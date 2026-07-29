@@ -16,7 +16,6 @@
 use crate::conventions::{round_dollar, Usd};
 use crate::forms::schedule_d;
 use crate::state::{LedgerState, RemovalKind, Term};
-use crate::tax::amt::{amt_should_file_6251, amt_worksheet_line2};
 use crate::tax::charitable::apply_170b;
 use crate::tax::compute::{net_1222, CapNet};
 use crate::tax::method::qdcgt_line16;
@@ -1303,10 +1302,11 @@ pub fn assemble_absolute(
             foreign_tax_credit,
         ),
         &params.amt,
-        table
-            .ltcg
-            .get(&status)
-            .expect("bundled year has LTCG breakpoints for every status"),
+        // ★ `ltcg_for`, NOT a raw `ltcg.get(&status)`: the map carries no `Qss` key (the adapters note
+        // "QSS is not inserted explicitly; `TaxTable::key` maps `Qss → Mfj` at lookup time"), so the raw
+        // lookup aborts the process for every Qualifying-Surviving-Spouse return. Same accessor the
+        // regular-tax call uses above.
+        table.ltcg_for(status),
     );
 
     AbsoluteReturn {
@@ -1408,16 +1408,6 @@ fn digital_asset_activity(state: &LedgerState, year: i32) -> bool {
         || state.removals.iter().any(|r| r.removed_at.year() == year)
 }
 
-/// Screen the **assembled-return** refuse rows (SPEC §4.10) — those that need the computed deduction /
-/// taxable income, so they run AFTER [`assemble_absolute`] (which is infallible). Complements
-/// [`crate::tax::return_refuse::screen_inputs`] (input-screenable) and [`screen_compute_dependent`]
-/// (income/ledger-dependent). Returns the FIRST [`Refusal`], or `None`.
-///
-/// Rows: (a) QBI present with taxable-income-before-QBI above the §199A(e)(2) threshold (the 8995-A
-/// phase-in is unmodeled, §4.5); (b) the 2024 AMT screening worksheet says Form 6251 must be filed
-/// (§4.11); (c) taxable income ≤ 0 WITH a capital-loss carryforward-in (the G22 §1211/§1212 Capital Loss
-/// Carryover Worksheet edge). A refund-only TI≤0 filer with NO carryforward is NOT refused (tax = 0,
-/// withholding refunded — the r5-narrowed rule).
 /// Build [`crate::tax::form6251::Form6251Inputs`] from the pieces `assemble_absolute` holds before it
 /// has an `AbsoluteReturn` to hand.
 ///
@@ -1456,6 +1446,17 @@ pub(crate) fn form6251_inputs_from_parts(
     }
 }
 
+/// Screen the **assembled-return** refuse rows (SPEC §4.10) — those that need the computed deduction /
+/// taxable income, so they run AFTER [`assemble_absolute`] (which is infallible). Complements
+/// [`crate::tax::return_refuse::screen_inputs`] (input-screenable) and [`screen_compute_dependent`]
+/// (income/ledger-dependent). Returns the FIRST [`Refusal`], or `None`.
+///
+/// Rows: (a) QBI present with taxable-income-before-QBI above the §199A(e)(2) threshold (the 8995-A
+/// phase-in is unmodeled, §4.5); (b) **Form 6251 Who Must File condition 1** — the computed `ar.amt` has
+/// line 7 > line 10, so the form must be attached and v1 cannot yet file it (§4.11); (c) taxable income
+/// ≤ 0 WITH a capital-loss carryforward-in (the G22 §1211/§1212 Capital Loss Carryover Worksheet edge).
+/// A refund-only TI≤0 filer with NO carryforward is NOT refused (tax = 0, withholding refunded — the
+/// r5-narrowed rule).
 pub fn screen_absolute(
     ri: &ReturnInputs,
     ar: &AbsoluteReturn,
@@ -1478,41 +1479,35 @@ pub fn screen_absolute(
         );
     }
 
-    // (b) AMT screen — the 2024 "Should I fill in Form 6251?" worksheet (§4.11). Sch 2 L1z = 0 (no
-    // excess-APTC input in v1); worksheet line 4 = Schedule 1 L1 taxable refund (no L8z input).
-    // ★ Worksheet line 2 is Schedule A line 7 (CAPPED SALT — `salt_5e`; v1 does not model line 6's other
-    // taxes) for an itemizer, or the whole standard deduction otherwise. It is NOT the itemized total:
-    // mortgage/charitable/medical are AMT-allowed. `amt_worksheet_line2` owns that choice — see `amt.rs`.
-    let sch_a_line7 = ar.schedule_a.as_ref().map_or(Usd::ZERO, |p| p.salt_5e);
-    if amt_should_file_6251(
-        ri.filing_status,
-        ar.taxable_income,
-        amt_worksheet_line2(ar.deduction_is_itemized, ar.standard_deduction, sch_a_line7),
-        ri.sch1.state_refund_taxable,
-        ar.regular_tax,
-        Usd::ZERO, // Schedule 2 line 1z (excess-APTC total) — unrepresentable in v1
-        &params.amt,
-    ) {
-        // ★ The screen only says "fill in Form 6251". So fill it in. The screen stays as a cheap fast
-        // path: clearing it proves AMT is $0 (the worksheet over-estimates AMTI by construction), and
-        // only a filer it flags pays for the full computation.
-        let f = &ar.amt;
-        // Lines 2k and 3 are $0 in `compute_6251`, which is sound because the two §3 declarations
-        // guarantee it: each refuses when UNANSWERED (the registry loop in `screen_inputs`) and when
-        // answered ADVERSELY (the value-refusals there), so a return that reaches here has declared
-        // both add-backs inapplicable.
-        // Who Must File condition 1 (i6251 p.1): "Form 6251, line 7, is greater than line 10."
-        // NOT `amt > 0` — when line 7 exceeds line 10 the AMTFTC is figured, so line 9 can still land
-        // at or below line 10 and the AMT be $0 while the form is still required.
-        if f.must_attach() {
-            return refusal(
-                RefuseReason::AmtScreenTriggered,
-                "Form 6251 line 7 exceeds line 10, so Form 6251 must be attached to this return \
-                 (i6251, Who Must File, condition 1) — v1 computes the form but cannot yet FILE it, so \
-                 the return is refused rather than filed incomplete",
-            );
-        }
-        // Cleared: line 7 ≤ line 10 ⇒ Schedule 2 line 2 is $0 and no attachment is required.
+    // (b) Form 6251 Who Must File, condition 1 (§4.11).
+    //
+    // ★ UNCONDITIONAL — read the real form, not the screening worksheet (whole-branch review I-1).
+    // `compute_6251` already ran for every return at the top of `assemble_absolute`, so `ar.amt` is the
+    // actual Form 6251. Testing it directly is both cheaper and stronger than testing a proxy:
+    //   - The 1040 worksheet only ever concludes "fill in Form 6251" — it is not, and never was, an
+    //     authority on whether the form must be ATTACHED. i6251 p.1 is.
+    //   - Nesting this gate inside the screen made the branch's own line-2 fix a net SAFETY REDUCTION:
+    //     a more-correct screen clears more returns, and clearing meant skipping this check. The gate's
+    //     correctness must not depend on a proxy's.
+    // The screen survives as a cross-checked soundness claim, not as control flow —
+    // `amt_should_file_6251` is now held by `a_cleared_screen_never_hides_a_must_attach_return` below,
+    // which asserts the implication `screen clears ⇒ !must_attach` the `amt.rs` module doc argues.
+    //
+    // Lines 2k, 2l and 3 are $0 in `compute_6251`, which is sound because the three §3 declarations
+    // guarantee it: each refuses when UNANSWERED (the registry loop in `screen_inputs`) and when
+    // answered ADVERSELY (the value-refusals there), so a return that reaches here has declared all
+    // three add-backs inapplicable.
+    //
+    // Condition 1 (i6251 p.1): "Form 6251, line 7, is greater than line 10." NOT `amt > 0` — when
+    // line 7 exceeds line 10 the AMTFTC is figured, so line 9 can still land at or below line 10 and
+    // the AMT be $0 while the form is still required.
+    if ar.amt.must_attach() {
+        return refusal(
+            RefuseReason::AmtScreenTriggered,
+            "Form 6251 line 7 exceeds line 10, so Form 6251 must be attached to this return \
+             (i6251, Who Must File, condition 1) — v1 computes the form but cannot yet FILE it, so \
+             the return is refused rather than filed incomplete",
+        );
     }
 
     // (c) Taxable income ≤ 0 with a capital-loss carryforward-in (the §1211/§1212 carryover-worksheet edge).
@@ -1600,6 +1595,10 @@ mod tests {
     // `Person` is a TEST-only import now: the §63(f) box count moved to `packet::AgedBlindBoxes`, which
     // is the single source L12 consumes (`p6-aged-blind-checkboxes-missing`).
     use crate::tax::return_inputs::Person;
+    // ★ TEST-only since whole-branch review I-1: the AMT screening worksheet no longer appears in any
+    // production path — `screen_absolute` reads the real `ar.amt.must_attach()`. The two helpers survive
+    // only as the cross-check that `a_cleared_screen_never_hides_a_must_attach_return` exercises.
+    use crate::tax::amt::{amt_should_file_6251, amt_worksheet_line2};
 
     /// A CharitableResult with nothing allowed — for Schedule A tests that isolate the medical/SALT/
     /// mortgage lines. (Schedule A now takes the whole result, since its `allowed_cash`/`_noncash`/
@@ -3324,6 +3323,60 @@ mod tests {
         assert_eq!(screen_absolute(&common, &ar_common, &p), None);
     }
 
+    /// ★ REGRESSION (whole-branch review, Critical) — a **Qualifying Surviving Spouse** full return must
+    /// COMPUTE, not panic.
+    ///
+    /// `TaxTable::ltcg` is never populated with a `Qss` key — the adapters say so outright ("QSS is not
+    /// inserted explicitly; `TaxTable::key` maps `Qss → Mfj` at lookup time"), which is why
+    /// [`TaxTable::ltcg_for`] exists and why the regular-tax call site uses it. Feeding Part III's
+    /// §1(h) breakpoints via a raw `ltcg.get(&status).expect(..)` therefore aborts the process for every
+    /// QSS filer — a status that is user-selectable in the CLI, the input form and the TUI, is refused
+    /// nowhere, and computed fine before Form 6251 was wired in.
+    ///
+    /// Form 6251 lines 19 and 25 read "$94,050 if married filing jointly **or qualifying surviving
+    /// spouse**" and "$583,750 if married filing jointly **or qualifying surviving spouse**", so the
+    /// correct values were always available; only the lookup was wrong.
+    #[test]
+    fn a_qualifying_surviving_spouse_full_return_computes_rather_than_panicking() {
+        let p = ty2024_params();
+        let table = real_2024_table();
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Qss,
+            header: crate::tax::testonly::not_a_dependent(),
+            w2s: vec![w2(
+                Owner::Taxpayer,
+                dec!(400000),
+                dec!(168600),
+                dec!(400000),
+            )],
+            // Preferential income, so line 7 routes into Part III and lines 19/25 are actually read.
+            // Qualified dividends come straight from `ReturnInputs`, so no ledger is needed.
+            div_1099: vec![crate::tax::return_inputs::Form1099Div {
+                payer: "Broker".into(),
+                box1a_ordinary: dec!(300000),
+                box1b_qualified: dec!(300000),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
+        assert!(
+            ar.amt.line12 > Usd::ZERO,
+            "fixture must reach Part III, else lines 19/25 are never read and this tests nothing"
+        );
+        assert_eq!(
+            ar.amt.line19,
+            dec!(94050),
+            "QSS shares the MFJ 0%-band top (Form 6251 line 19)"
+        );
+        assert_eq!(
+            ar.amt.line25,
+            dec!(583750),
+            "QSS shares the MFJ 15%-band top (Form 6251 line 25)"
+        );
+        assert_eq!(ar.amt.amt(), Usd::ZERO, "no AMT on these facts");
+    }
+
     /// ★ T4 — a screen-tripping, NO-ATTACHMENT return produces a packet whose AMT lines are all $0.
     ///
     /// This is the assertion the plan wanted made against a hand-built expectation rather than by
@@ -3379,10 +3432,21 @@ mod tests {
     ///            → CLEARED, the return computes.
     ///   OLD BUG: line 3 = AGI 300,000 → line 11 = 166,700 → 26% × it = 43,342 > 38,885 → REFUSED.
     ///
-    /// ★ MUTATION THIS KILLS: restore the closed form at the `screen_absolute` call site (pass
-    /// `ar.agi - ar.qbi_deduction` as line 1 with a zero add-back) and this assertion reds. The two
-    /// pre-existing cases above cannot catch it — both take the STANDARD deduction, the one branch where
-    /// `L15 + std == AGI − QBI` makes the closed form accidentally correct.
+    /// ★ WHAT THIS HOLDS — **measured, not asserted in prose** (whole-branch review I-1 found the original
+    /// claim here to be a FALSE PASS: the mutation it named did not red it, because `screen_absolute`'s
+    /// outcome no longer depends on the worksheet at all). Two parts, each with its verified killer:
+    ///   1. **The worksheet fix.** `amt_worksheet_line2` returns Schedule A line **7** for an itemizer,
+    ///      not the itemized total and not the standard deduction they did not take. **Verified
+    ///      mutation:** make the `deduction_is_itemized` branch return `standard_deduction` and the
+    ///      `dec!(10000)` assertion below reds. This test is the ONLY killer of that mutation — the two
+    ///      cases above both take the STANDARD deduction, the one branch where `L15 + std == AGI − QBI`
+    ///      makes the old closed form accidentally correct. That is why this test exists.
+    ///   2. **The user-visible guarantee** — this filer is not refused. Now delivered by
+    ///      `ar.amt.must_attach()`, not by the worksheet. The `>` boundary in `must_attach` is held
+    ///      broadly rather than here: **verified mutation** `line7 >= line10` reds 13 tests across the
+    ///      workspace, including `a_cleared_screen_never_hides_a_must_attach_return` and the full-return
+    ///      export suite. This fixture clears with margin, so it pins the OUTCOME, not the boundary —
+    ///      stated explicitly so no future reader mistakes it for a boundary test.
     #[test]
     fn amt_screen_does_not_add_back_an_itemizers_mortgage_and_charity() {
         let p = ty2024_params();
@@ -3421,11 +3485,125 @@ mod tests {
             Some(dec!(10000)),
             "fixture: Schedule A line 7 is the CAPPED SALT, and it is only an eighth of the itemized total"
         );
+        // (1) The guarantee: no false refusal. This is the assertion a filer would feel.
         assert_eq!(
             screen_absolute(&ri, &ar, &p),
             None,
-            "an ordinary MFJ itemizer with $300k of wages owes no AMT and the worksheet clears them; \
-             adding back the AMT-allowed mortgage/charitable deductions manufactures a false refusal"
+            "an ordinary MFJ itemizer with $300k of wages owes no AMT and Form 6251 line 7 lands below \
+             line 10; adding back the AMT-allowed mortgage/charitable deductions manufactures a false \
+             refusal"
+        );
+        // …and it is the WHO-MUST-FILE test that delivers it, on the real form.
+        assert!(
+            ar.amt.line7 <= ar.amt.line10,
+            "Who Must File condition 1 must clear on the real Form 6251"
+        );
+
+        // (2) The worksheet fix, asserted where it actually lives. $10,000 is Schedule A line 7 (the
+        // whole §164(b)(6) cap); the itemized total is $80,000. Returning the latter is the bug.
+        assert_eq!(
+            amt_worksheet_line2(ar.deduction_is_itemized, ar.standard_deduction, dec!(10000)),
+            dec!(10000),
+            "worksheet line 2 for an itemizer is Schedule A line 7 — NOT the $80,000 itemized total, and \
+             NOT the $29,200 standard deduction they did not take"
+        );
+        // The old closed form's line 3 (AGI − QBI = $300,000) against the correct one ($230,000): a
+        // $70,000 gap, entirely AMT-allowed deductions.
+        assert_eq!(
+            ar.taxable_income + dec!(10000),
+            dec!(230000),
+            "correct worksheet line 3; the closed form said $300,000 and refused"
+        );
+    }
+
+    /// ★ I-1 CROSS-CHECK — the `amt.rs` soundness claim, as a sweep: **a return the screening worksheet
+    /// CLEARS never turns out to require Form 6251.**
+    ///
+    /// The screen is no longer control flow (`screen_absolute` reads the real form). It survives as a
+    /// claim: the 1040 worksheet's line-12 test is a valid *sufficient* condition for "no AMT", because
+    /// worksheet line 3 is AMTI exactly within v1's accepted inputs. If that were ever false, a future
+    /// author restoring the screen as a fast path would silently skip attachable returns. This pins the
+    /// implication `¬screen ⇒ ¬must_attach` across the grid rather than leaving it as prose.
+    #[test]
+    fn a_cleared_screen_never_hides_a_must_attach_return() {
+        let p = ty2024_params();
+        let table = real_2024_table();
+        let mut checked = 0_u32;
+        let mut cleared = 0_u32;
+        // ★ Single and Mfj only — this module's `real_2024_table()` carries schedules for exactly those
+        // two statuses (asserted below, so a widened table is a loud reminder to widen the grid). MFS and
+        // HoH are covered against hand-derived figures by the `form6251.rs` vector suite, including the
+        // §55(d)(3) MFS line-4 kicker.
+        assert_eq!(table.ordinary.len(), 2, "grid must track the fixture table");
+        for status in [FilingStatus::Single, FilingStatus::Mfj] {
+            for wages in [
+                dec!(0),
+                dec!(50000),
+                dec!(120000),
+                dec!(200000),
+                dec!(400000),
+                dec!(900000),
+                dec!(2000000),
+            ] {
+                // Both deduction branches: the standard one, and an itemizer whose Schedule A line 7 is a
+                // small fraction of their itemized total (the branch the line-2 fix exists for).
+                for itemized in [false, true] {
+                    let mut ri = ReturnInputs {
+                        filing_status: status,
+                        ..wages_single(wages)
+                    };
+                    if itemized {
+                        ri.schedule_a = Some(crate::tax::return_inputs::ScheduleAInputs {
+                            salt_real_estate: dec!(10000),
+                            mortgage_interest_1098: dec!(40000),
+                            mortgage_all_used_to_buy_build_improve: Some(true),
+                            mortgage_dwelling_is_amt_qualified: Some(true),
+                            charitable: vec![crate::tax::return_inputs::CharitableGift {
+                                class: crate::tax::return_inputs::CharitableClass::Cash60,
+                                amount: dec!(30000),
+                            }],
+                            ..Default::default()
+                        });
+                    }
+                    let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
+                    let sch_a_line7 = ar.schedule_a.as_ref().map_or(Usd::ZERO, |x| x.salt_5e);
+                    let screen_says_file = amt_should_file_6251(
+                        ri.filing_status,
+                        ar.taxable_income,
+                        amt_worksheet_line2(
+                            ar.deduction_is_itemized,
+                            ar.standard_deduction,
+                            sch_a_line7,
+                        ),
+                        ri.sch1.state_refund_taxable,
+                        ar.regular_tax,
+                        Usd::ZERO,
+                        &p.amt,
+                    );
+                    checked += 1;
+                    if !screen_says_file {
+                        cleared += 1;
+                        assert!(
+                            !ar.amt.must_attach(),
+                            "the worksheet CLEARED {status:?} @ {wages} wages (itemized={itemized}), \
+                             but the real Form 6251 has line 7 ({}) > line 10 ({}) — the soundness \
+                             claim in `amt.rs` is broken",
+                            ar.amt.line7,
+                            ar.amt.line10
+                        );
+                    }
+                }
+            }
+        }
+        // Both branches must be exercised, or the sweep is vacuous in one direction: 17 of the 28 grid
+        // points clear the screen (the branch carrying the implication under test) and 11 trip it (the
+        // branch proving the screen is not trivially always-clear).
+        assert_eq!(checked, 28, "grid size");
+        assert_eq!(cleared, 17, "cleared branch: the implication under test");
+        assert_eq!(
+            checked - cleared,
+            11,
+            "tripped branch: the screen is not vacuously clear"
         );
     }
 

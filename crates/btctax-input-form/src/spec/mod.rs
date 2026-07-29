@@ -64,12 +64,13 @@ mod tests {
     use btctax_core::tax::types::FilingStatus;
     use time::macros::date;
 
-    /// ★ Step 1 (declarations, adjusted per the two-corrections brief). The `Declarations` section holds the
-    /// **7** `Decl*` declarations (the 8th — the mortgage box — is deduped to its Schedule-A leaf) plus the
-    /// `foreign_country_names` Text field, each delegating to its `FORM_QUESTIONS` entry; and the
-    /// `FieldId ↔ QuestionId` map stays TOTAL over all 8 questions (the mortgage one → `SaMortgageAllUsed`).
+    /// ★ Step 1 (declarations, adjusted per the two-corrections brief). The `Declarations` section holds
+    /// **10** `Decl*` declarations (the 11th — the mortgage box — is deduped to its Schedule-A leaf) plus
+    /// the `foreign_country_names` Text field, each delegating to its `FORM_QUESTIONS` entry; and the
+    /// `FieldId ↔ QuestionId` map stays TOTAL over all 11 questions (the mortgage one →
+    /// `SaMortgageAllUsed`). Named without a number so the name cannot go stale again.
     #[test]
-    fn declarations_section_delegates_seven_decls_and_the_question_map_is_total() {
+    fn declarations_section_delegates_every_decl_and_the_question_map_is_total() {
         let decls = section(SectionId::Declarations);
 
         // The mortgage declaration is a Schedule-A Field (Task 5), NOT a Declarations Field.
@@ -107,22 +108,22 @@ mod tests {
             );
         }
         assert_eq!(
-            decl_count, 9,
-            "9 declarations are Decl* fields (the 10th is the mortgage dedup)"
+            decl_count, 10,
+            "10 declarations are Decl* fields (the 11th is the mortgage dedup)"
         );
 
-        // 9 delegating Decl* fields + the foreign_country_names Text field.
+        // 10 delegating Decl* fields + the foreign_country_names Text field.
         assert_eq!(
             decls.fields.len(),
-            10,
-            "9 declarations + foreign_country_names"
+            11,
+            "10 declarations + foreign_country_names"
         );
         assert!(decls
             .fields
             .iter()
             .any(|f| f.id == FieldId::ForeignCountryNames));
 
-        // TOTAL, both directions, over all 8 QuestionIds — the mortgage one resolves to SaMortgageAllUsed.
+        // TOTAL, both directions, over all 11 QuestionIds — the mortgage one resolves to SaMortgageAllUsed.
         for q in QuestionId::ALL {
             assert_eq!(
                 field_to_question(question_to_field(*q)),
@@ -179,8 +180,9 @@ mod tests {
                     ..Default::default()
                 };
                 ri.header.spouse = Some(Person::default());
-                // Form 6251's two declarations need their own liveness primers: line 3's needs Schedule
-                // A mortgage interest, line 2k's needs a capital-loss carryforward.
+                // Form 6251's three declarations need their own liveness primers: line 3's needs
+                // Schedule A mortgage interest, line 2k's a capital-loss carryforward, line 2l's a
+                // Schedule C with a nonzero flat expense total.
                 ri.schedule_a = Some(btctax_core::tax::return_inputs::ScheduleAInputs {
                     mortgage_interest_1098: rust_decimal_macros::dec!(1),
                     ..Default::default()
@@ -189,6 +191,10 @@ mod tests {
                     short: rust_decimal_macros::dec!(1),
                     long: rust_decimal_macros::dec!(0),
                 };
+                ri.schedule_c = Some(btctax_core::tax::return_inputs::ScheduleCInputs {
+                    expenses: rust_decimal_macros::dec!(1),
+                    ..Default::default()
+                });
                 ri
             };
             assert!(

@@ -494,6 +494,13 @@ in-crate (`return_1040.rs:1287,3760`; `printed.rs:1270,2132,2358`).
 cross-crate literal at `btctax-forms/tests/full_return_forms.rs:430`, which is breaking. Free under
 `no-users-yet`.
 
+**★ Tier 1 is MAJOR for `btctax-input-form` as well** (whole-branch review Minor). §11's verdict named
+only `btctax-core`, but `btctax_input_form::seam::FieldId` is a **plain-derive `pub enum`** with no
+`#[non_exhaustive]`, and Tier 1 adds `DeclAmtQualifiedDwelling`, `DeclAmtCarryoverSame` and
+`DeclAmtDepreciationSame` to it. It is matched in four `btctax-tui-edit` modules. Adding a variant to a
+public non-`non_exhaustive` enum is breaking for any downstream exhaustive `match`, so the crate takes a
+MAJOR bump too. Free under `no-users-yet`; recorded so the release does not under-bump it.
+
 **★ `Form6251` may carry `#[non_exhaustive]`** (§2's sketch) — *not* a contradiction with the above,
 because §11's case rests entirely on **pre-existing downstream sites** and a brand-new type has none.
 Consequence to honour: **T7's V5 golden must obtain its `Form6251` from core** (the computed vector or a

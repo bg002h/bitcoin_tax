@@ -353,6 +353,12 @@ mod tests {
                     long: dec!(0),
                 };
             }
+            QuestionId::AmtDepreciationSameAsRegular => {
+                r.schedule_c = Some(btctax_core::tax::return_inputs::ScheduleCInputs {
+                    expenses: dec!(5000),
+                    ..Default::default()
+                });
+            }
             _ => {}
         }
         r

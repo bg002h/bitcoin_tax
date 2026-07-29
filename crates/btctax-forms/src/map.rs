@@ -1150,8 +1150,10 @@ impl Form8995Map {
 /// The Schedule 2 (Additional Taxes) field map for one tax year.
 ///
 /// Part I is entirely absent: line 1a (excess APTC) has no input and would refuse if it did, and
-/// line 2 (AMT) is $0 by construction (the return is refused if the Form 6251 screen trips). Only
-/// the three Part II taxes v1 computes are mapped. **Line 21 is on PAGE 2.**
+/// line 2 (AMT) is $0 by construction — line 7 ≤ line 10 ⇒ Form 6251 line 11 is $0, and a return where line 7 EXCEEDS line 10 is refused (Who Must File condition 1 — v1 computes the form but cannot file it). (The
+/// pre-v0.13.0 rationale, "refused if the Form 6251 SCREEN trips", is obsolete: the screening
+/// worksheet is no longer on any production path.) Only the three Part II taxes v1 computes are
+/// mapped. **Line 21 is on PAGE 2.**
 #[derive(Debug, Clone, Deserialize)]
 pub struct Schedule2Map {
     /// `"f1040s2"`.

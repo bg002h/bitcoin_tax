@@ -1508,9 +1508,15 @@ pub fn render_dual_report(
             fmt_money(printed.f8960.map_or(Usd::ZERO, |f| f.line17))
         );
     }
-    // ★ Form 6251. Shown only when the cheap screen flagged the return — i.e. exactly when the filer
-    // would otherwise wonder why a high-income return went through. The point is that they can SEE the
-    // comparison that cleared them (line 7 vs line 10), not just be told there is no AMT.
+    // ★ Form 6251. Shown whenever AMTI EXCEEDS THE EXEMPTION (line 6 > 0) — i.e. exactly when the
+    // filer would otherwise wonder why a high-income return went through. The point is that they can
+    // SEE the comparison that cleared them (line 7 vs line 10), not just be told there is no AMT.
+    //
+    // NOT gated on the screening worksheet: that worksheet has been off every production path since
+    // v0.13.0, and this block's own condition is the honest description of who sees it. It is a wider
+    // audience than the screen would flag — roughly MFJ above ~$133k of AMTI, Single above ~$85k —
+    // which is deliberate: a cleared comparison is reassuring, not noisy, and the block is three
+    // lines. (Whole-branch review flagged the old comment as describing a gate that was never here.)
     //
     // ★ Coverage note. J10's golden pins this block, and dropping it reds `examples_golden_matches_
     // committed`. It CANNOT discriminate line 9 from line 7, because every bundled journey has no

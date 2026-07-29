@@ -470,6 +470,49 @@ feature; a wrong finding here is a wrong filed number.
   computation is not supported for 2025 in this version (v1 supports TY2024)" even though `SUPPORTED_YEARS`
   bundles 2025 forms and the crypto-slice path fills them. Worth a roadmap decision, not just a refusal.
 
+### G-7 — Tier-1 whole-branch review residue (2026-07-29, branch `fix/amt-screen-line2`)
+
+The whole-branch review ruled **2 Critical / 1 Important**; all three, plus every Minor that was cheap
+in-file, were folded before merge. What follows is the residue, each with an **owning phase**.
+
+**Folded, recorded here only so the reasoning is greppable:**
+- **C-1** every Qualifying-Surviving-Spouse full return panicked (`table.ltcg.get(&status).expect(…)`
+  bypassed `ltcg_for`, which exists solely to map `Qss → Mfj`; the map has no `Qss` key and a live test
+  elsewhere asserts it does not). Regression I introduced on this branch. Fixed + KAT + mutation-verified.
+- **C-2** Form 6251 **line 2l (depreciation)** rode inside `ScheduleCInputs::expenses`, a flat total that
+  by construction contains Schedule C Part II line 13. `amt.rs` listed depreciation among "inputs v1 never
+  captures", which was **factually wrong** and was the sole cover for a live understatement channel.
+  Closed with a third class-(A) declaration (`AmtDepreciationSameAsRegular`) on the line-2k pattern.
+- **I-1** the Who-Must-File gate was nested inside the screening worksheet, so the branch's own line-2 fix
+  was a net *safety reduction*, and its headline KAT was a **false pass**. Gate hoisted; the worksheet is
+  now off every production path and survives as a swept cross-check.
+
+**Open residue:**
+- **[open → Tier 2]** `Form6251` has no fields for lines **2c–2t** (17 numbered adjustment lines), so the
+  module's "every field is one numbered line" invariant holds in one direction only and `must_attach`'s
+  condition-4 argument is prose resting on an input-surface audit. Tier 2 files the form and must give
+  them real fields. Recorded in the module doc.
+- **[open → Tier 2]** `AmtParams`'s seven Tier-1 fields are hand-copied literals in **8 local test
+  constructors**; none routes through `ty2024_full_return()`, so adapter drift between the bundled table
+  and the test fixtures is untested. A single shared fixture would close it.
+- **[open → Tier 2]** `f6251.pdf` is the only bundled form with no `.map.toml`, no `include_bytes!` and no
+  consumer — ~101 KiB shipped in a published crate for a form Tier 1 cannot file. Either wire it in Tier 2
+  or move it under `design/` until then.
+- **[open → ownerless residue]** The §1(h) 15/20/25% rates are inline literals in `form6251.rs` while
+  26/28% moved into `AmtParams`, and `amt.rs`'s screen still hardcodes `0.25`/`0.26` that `compute_6251`
+  reads from params — two sources for the same statutory rates. `PART_III.md`'s claim that "the only
+  production literal is `tax_tables.rs:141`" is false as written.
+- **[open → ownerless residue]** Two vector tests assert less than their names suggest:
+  `v9_must_attach_while_the_amt_is_zero` never calls `compute_6251`/`must_attach` (it checks the
+  *fixture's* self-consistency; the real coverage is the vector loop), and
+  `line40_min_is_a_proved_no_op_for_this_input_class` sweeps only the general 26/28% schedule, never the
+  MFS one this branch added.
+- **[open → ownerless residue]** `a_cleared_screen_never_hides_a_must_attach_return` sweeps **Single and
+  Mfj only**, because `return_1040.rs`'s test-local `real_2024_table()` carries schedules for exactly
+  those two statuses (the test asserts that, so widening the table is a loud reminder). MFS/HoH rest on
+  the `form6251.rs` vector KATs. A four-status fixture would let the sweep cover the §55(d)(3) MFS kicker
+  end-to-end.
+
 ---
 
 ## ⚠★ SHIPPED BUG — Form 8949 uses pre-2025 boxes (C/F) for TY2025 digital assets (found 2026-07-20)

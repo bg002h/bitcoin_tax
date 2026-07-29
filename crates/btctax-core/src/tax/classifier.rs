@@ -85,6 +85,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         payments,
         capital_loss_carryforward_in,
         amt_carryover_same_as_regular,
+        amt_depreciation_same_as_regular,
         charitable_carryover_in,
         qbi,
         foreign_accounts,
@@ -105,6 +106,10 @@ pub fn classify(ri: &ReturnInputs) -> Census {
     c.declaration(
         amt_carryover_same_as_regular,
         QuestionId::AmtCarryoverSameAsRegular,
+    );
+    c.declaration(
+        amt_depreciation_same_as_regular,
+        QuestionId::AmtDepreciationSameAsRegular,
     );
     c.exempt(
         itemize_election,

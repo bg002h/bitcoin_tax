@@ -95,6 +95,20 @@ pub enum RefuseReason {
     /// Form 6251 line 2k — answered ADVERSELY ("my AMT carryover differs"). v1 models no divergence,
     /// so computing would UNDERSTATE the tax.
     AmtCarryoverDiverges,
+    /// Form 6251 line 2l — the AMT depreciation question is live but unanswered.
+    ///
+    /// ★ Why this exists (whole-branch review C-2). [`ScheduleCInputs::expenses`] is a **flat filer-
+    /// supplied total** — Part II's individual lines are not itemized — and Schedule C Part II **line 13
+    /// is "Depreciation and section 179 expense deduction."** So the §56(a)(1) 200%-DB-vs-150%-DB
+    /// adjustment rides INSIDE an accepted input, unseparated and invisible. That is structurally the
+    /// same channel as the line-2k carryover: an accepted input with an uncapturable AMT twin. It gets
+    /// the same remedy.
+    AmtDepreciationDeclarationUnanswered,
+    /// Form 6251 line 2l — answered ADVERSELY ("my AMT depreciation differs"). [`Form6251`] has no
+    /// `line2l` field, so computing would UNDERSTATE the tax.
+    ///
+    /// [`Form6251`]: crate::tax::form6251::Form6251
+    AmtDepreciationDiverges,
     /// A charitable gift/carryover to a **non-50%-organization** (Cash30/OrdinaryProp30/CapGainProp20 —
     /// private foundations etc.) needs the Pub. 526 "special 30% limit" ordering v1 doesn't implement;
     /// refuse rather than mis-limit and understate tax (review C1). Never produced by the crypto ledger.
@@ -252,6 +266,7 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         payments,
         capital_loss_carryforward_in,
         amt_carryover_same_as_regular: _, // a declaration, not money
+        amt_depreciation_same_as_regular: _, // a declaration, not money
         charitable_carryover_in,
         qbi,
         foreign_accounts: _,
@@ -570,11 +585,13 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
     //    neutral at TRUE, see `FormQuestion::neutral`), disjoint from the unanswered loop above.
     //    ★ We mirror the mixed-use-mortgage exemplar only on the UNANSWERED half and deliberately
     //    DIVERGE here: a zeroed Schedule A line 8a is conservative, but a missing AMT add-back is not.
-    if ri
-        .schedule_a
-        .as_ref()
-        .is_some_and(|a| a.mortgage_dwelling_is_amt_qualified == Some(false))
-    {
+    // ★ Gated by the SAME liveness as its unanswered half (`mortgage_question_live`: a Schedule A
+    //   carrying mortgage interest). Ungated, a stale `Some(false)` bricked a filer with a structurally
+    //   $0 add-back and no exit — e.g. a houseboat owner who later dropped the mortgage, or one whose
+    //   standard deduction wins. i6251 line 3 is conditioned on having **deducted** the interest.
+    if ri.schedule_a.as_ref().is_some_and(|a| {
+        a.mortgage_interest_1098 > Usd::ZERO && a.mortgage_dwelling_is_amt_qualified == Some(false)
+    }) {
         return refuse(
             RefuseReason::AmtNonQualifiedDwelling,
             "you declared that the mortgaged dwelling is NOT an AMT-qualified dwelling, so Form 6251 \
@@ -589,6 +606,15 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
             "you declared that your AMT capital-loss carryover differs from the regular-tax one, so Form \
              6251 line 2k must add the difference back. btctax tracks only the regular figure and models \
              no divergence, so computing would UNDERSTATE your tax",
+        );
+    }
+    if ri.amt_depreciation_same_as_regular == Some(false) {
+        return refuse(
+            RefuseReason::AmtDepreciationDiverges,
+            "you declared that the depreciation inside your Schedule C expenses differs for the AMT, so \
+             Form 6251 line 2l must add the difference back. btctax accepts Schedule C expenses only as a \
+             flat total — it never sees the depreciation line, let alone its AMT twin — so computing \
+             would UNDERSTATE your tax",
         );
     }
 
@@ -976,6 +1002,14 @@ mod tests {
                     short: dec!(1000),
                     long: Usd::ZERO,
                 };
+            }
+            QuestionId::AmtDepreciationSameAsRegular => {
+                // A nonzero FLAT expense total is the whole liveness condition — btctax cannot see
+                // whether Part II line 13 inside it is $0 or $200,000. See `amt_depreciation_question_live`.
+                r.schedule_c = Some(crate::tax::return_inputs::ScheduleCInputs {
+                    expenses: dec!(5000),
+                    ..Default::default()
+                });
             }
             _ => {}
         }
@@ -1637,6 +1671,108 @@ mod tests {
         let mut b = ri();
         b.sch1.ira_deduction_claimed = dec!(6000);
         assert_eq!(reason(&b), Some(RefuseReason::IraDeductionClaimed));
+    }
+
+    /// ★ `FormQuestion::neutral` must be the answer that CLEARS — a property, not a comment.
+    ///
+    /// The field was introduced declared-but-unchecked: nothing asserted that a question's `neutral`
+    /// value is actually the one requiring no adjustment. A wrong polarity is silent and severe — the
+    /// registry loop and `income answer` both write `neutral` as the "nothing to see here" reply, so an
+    /// inverted flag would auto-answer a filer INTO an unmodeled add-back. Held here for every entry.
+    ///
+    /// Mutation: flip `neutral` on any `FORM_QUESTIONS` entry and this reds.
+    #[test]
+    fn answering_every_live_question_neutral_leaves_no_declaration_refusal() {
+        for q in FORM_QUESTIONS {
+            let mut r = scenario_for(q.id);
+            for other in FORM_QUESTIONS {
+                if (other.live)(&r) {
+                    (other.set)(&mut r, other.neutral);
+                }
+            }
+            assert!((q.live)(&r), "{:?} must be live in its own scenario", q.id);
+            assert_eq!(
+                (q.get)(&r),
+                Some(q.neutral),
+                "{:?} must hold its neutral answer",
+                q.id
+            );
+            // Every declaration answered neutrally ⇒ no declaration-attributable refusal survives.
+            let got = reason(&r);
+            for other in FORM_QUESTIONS {
+                assert_ne!(
+                    got.as_ref(),
+                    Some(&other.unanswered),
+                    "{:?}: answering everything neutral still refused as {:?} unanswered",
+                    q.id,
+                    other.id
+                );
+            }
+            assert_ne!(
+                got,
+                Some(RefuseReason::AmtNonQualifiedDwelling),
+                "{:?}: neutral polarity is inverted for the line-3 dwelling declaration",
+                q.id
+            );
+            assert_ne!(
+                got,
+                Some(RefuseReason::AmtCarryoverDiverges),
+                "{:?}: neutral polarity is inverted for the line-2k carryover declaration",
+                q.id
+            );
+            assert_ne!(
+                got,
+                Some(RefuseReason::AmtDepreciationDiverges),
+                "{:?}: neutral polarity is inverted for the line-2l depreciation declaration",
+                q.id
+            );
+            assert_ne!(
+                got,
+                Some(RefuseReason::ForeignTrust),
+                "{:?}: neutral polarity is inverted for the foreign-trust declaration",
+                q.id
+            );
+            assert_ne!(
+                got,
+                Some(RefuseReason::DualStatusAlienUnsupported),
+                "{:?}: neutral polarity is inverted for the dual-status declaration",
+                q.id
+            );
+        }
+    }
+
+    /// ★ REGRESSION — the line-3 VALUE-refusal must respect the SAME liveness as its unanswered half.
+    ///
+    /// A Schedule A with an adverse `Some(false)` but **no mortgage interest** has a structurally $0
+    /// line-3 add-back (i6251 line 3 is conditioned on having *deducted* home mortgage interest), so
+    /// refusing it is a permanent, exit-less brick for no tax reason. Reachable two ways: the filer
+    /// paid off or sold the boat and the stale answer persisted in the vault, or they answered the
+    /// mixed-use question `Some(false)`, zeroing line 8a.
+    ///
+    /// Mutation: drop the `mortgage_interest_1098 > 0` conjunct from the `AmtNonQualifiedDwelling`
+    /// value-refusal and this reds.
+    #[test]
+    fn an_adverse_dwelling_answer_without_deducted_mortgage_interest_does_not_brick_the_return() {
+        use crate::tax::return_inputs::ScheduleAInputs;
+        let mut r = ri();
+        r.schedule_a = Some(ScheduleAInputs {
+            mortgage_interest_1098: Usd::ZERO, // nothing deducted ⇒ line 3 adds back nothing
+            mortgage_dwelling_is_amt_qualified: Some(false), // …yet answered adversely
+            salt_real_estate: dec!(4000),
+            ..Default::default()
+        });
+        assert_ne!(
+            reason(&r),
+            Some(RefuseReason::AmtNonQualifiedDwelling),
+            "a $0 line-3 add-back must not produce an exit-less refusal"
+        );
+        // And the question is not merely silently dropped — it is NOT LIVE, so no unanswered refusal
+        // fires for it either. (Both halves must agree, which is the point of sharing the predicate.)
+        assert_ne!(
+            reason(&r),
+            Some(RefuseReason::AmtQualifiedDwellingUnanswered),
+            "the question is not live, so its unanswered refusal must not fire"
+        );
     }
 
     /// ★ THE TERNARY for Form 6251's two declarations: unanswered ⇒ refuse, ADVERSE ⇒ refuse,

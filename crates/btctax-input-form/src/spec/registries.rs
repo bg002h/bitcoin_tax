@@ -147,8 +147,10 @@ const FOREIGN_COUNTRY_NAMES: Field = Field {
     clear: None,
 };
 
-/// The 7 delegating declarations (indices 0–6 of `FORM_QUESTIONS`, in `QuestionId::ALL` order; index 7, the
-/// mortgage box, is deduped to `SaMortgageAllUsed`) plus the country Text leaf.
+/// The 10 delegating declarations (indices 0–6 and 8–10 of `FORM_QUESTIONS`, in `QuestionId::ALL` order;
+/// index 7, the mortgage box, is deduped to `SaMortgageAllUsed`) plus the country Text leaf. Counts are
+/// ASSERTED in `spec::tests::declarations_section_delegates_every_decl_and_the_question_map_is_total` —
+/// this comment is a reader's aid, not the guard.
 const DECL_FIELDS: &[Field] = &[
     decl_tristate!(0, FieldId::DeclDependentTaxpayer, |ri| {
         ri.header.can_be_claimed_as_dependent_taxpayer = None;
@@ -178,7 +180,7 @@ const DECL_FIELDS: &[Field] = &[
         ri.dual_status_alien = None;
         Ok(())
     }),
-    // ★ Registry-driven — DELEGATE to `FORM_QUESTIONS` indices 8 and 9 (Form 6251 lines 3 and 2k).
+    // ★ Registry-driven — DELEGATE to `FORM_QUESTIONS` indices 8, 9 and 10 (Form 6251 lines 3, 2k, 2l).
     decl_tristate!(8, FieldId::DeclAmtQualifiedDwelling, |ri| {
         if let Some(a) = ri.schedule_a.as_mut() {
             a.mortgage_dwelling_is_amt_qualified = None;
@@ -189,6 +191,10 @@ const DECL_FIELDS: &[Field] = &[
     }),
     decl_tristate!(9, FieldId::DeclAmtCarryoverSame, |ri| {
         ri.amt_carryover_same_as_regular = None;
+        Ok(())
+    }),
+    decl_tristate!(10, FieldId::DeclAmtDepreciationSame, |ri| {
+        ri.amt_depreciation_same_as_regular = None;
         Ok(())
     }),
     FOREIGN_COUNTRY_NAMES,
@@ -257,6 +263,7 @@ pub fn field_to_question(id: FieldId) -> Option<QuestionId> {
         FieldId::SaMortgageAllUsed => QuestionId::MortgageAllUsedToBuyBuildImprove,
         FieldId::DeclAmtQualifiedDwelling => QuestionId::AmtQualifiedDwelling,
         FieldId::DeclAmtCarryoverSame => QuestionId::AmtCarryoverSameAsRegular,
+        FieldId::DeclAmtDepreciationSame => QuestionId::AmtDepreciationSameAsRegular,
         _ => return None,
     })
 }
@@ -273,10 +280,11 @@ pub fn question_to_field(id: QuestionId) -> FieldId {
         QuestionId::HsaActivity => FieldId::DeclHsaActivity,
         QuestionId::DualStatusAlien => FieldId::DeclDualStatusAlien,
         QuestionId::MortgageAllUsedToBuyBuildImprove => FieldId::SaMortgageAllUsed,
-        // Pure declarations: they carry Form 6251 lines 3 and 2k and print on no Schedule-A line, so
+        // Pure declarations: they carry Form 6251 lines 3, 2k and 2l and print on no Schedule-A line, so
         // they get their own Decl leaves rather than deduping to a Schedule-A field.
         QuestionId::AmtQualifiedDwelling => FieldId::DeclAmtQualifiedDwelling,
         QuestionId::AmtCarryoverSameAsRegular => FieldId::DeclAmtCarryoverSame,
+        QuestionId::AmtDepreciationSameAsRegular => FieldId::DeclAmtDepreciationSame,
     }
 }
 

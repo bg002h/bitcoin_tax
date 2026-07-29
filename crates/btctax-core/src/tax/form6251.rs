@@ -1,7 +1,18 @@
 //! **Form 6251 (2024) — Alternative Minimum Tax—Individuals**, transcribed line by line.
 //!
 //! Every field below is one numbered line of the form, named for that line, carrying the official
-//! printed instruction **verbatim** as its doc comment (`CLAUDE.md`, "Transcribe IRS forms"). Nothing
+//! printed instruction **verbatim** as its doc comment (`CLAUDE.md`, "Transcribe IRS forms").
+//!
+//! ★ **The converse does NOT yet hold, and that is Tier 1's boundary.** Lines **2c–2t** (17 numbered
+//! adjustment lines: ISO exercise, §1202, §4952 investment interest, depreciation, NOL, passive and
+//! loss-limitation items, …) have **no fields here**, and `line4 = line1 + line2a + line2b + line3`
+//! treats them all as $0. Each is closed at the input surface instead — most because v1 captures no
+//! such input at all, and three (lines 3, 2k, 2l) because a `FORM_QUESTIONS` declaration refuses
+//! unless the filer affirms the adjustment away. The `must_attach` condition-4 argument therefore
+//! rests on that input-surface audit (`amt.rs`'s module doc), **not** on this struct's shape. Tier 2,
+//! which files the form rather than only computing it, must give 2c–2t real fields.
+//!
+//! Nothing
 //! here is derived: the form never asks anyone to derive anything, it says "enter the amount from",
 //! "enter the smaller of", "if X, skip to Y". The full transcription with per-line provenance is
 //! `design/amt-form6251/PART_III.md`; the blank form is `btctax-forms/forms/2024/f6251.pdf`.
@@ -22,7 +33,6 @@
 //! cross-foots the rounded lines; that is the forms crate's job, not this module's.
 
 use crate::conventions::Usd;
-use crate::tax::compute::preferential_tax;
 use crate::tax::tables::{AmtParams, LtcgBreakpoints};
 use crate::tax::types::FilingStatus;
 use rust_decimal::Decimal;
@@ -55,8 +65,15 @@ pub struct Form6251 {
     /// L3 — "Other adjustments, including income-based related adjustments."
     ///
     /// Reaches mortgage interest on a non-qualified dwelling (§56(b)(1)(C)) and a §170(e) gift of
-    /// property with a different AMT basis. Both are gated by declarations that refuse unless
-    /// answered AMT-neutral, so this is `0` on every computable return.
+    /// property with a different AMT basis. They are closed by DIFFERENT mechanisms, and only the first
+    /// is a declaration:
+    ///   - the dwelling half is gated by `QuestionId::AmtQualifiedDwelling`, which refuses unless
+    ///     answered AMT-neutral;
+    ///   - the §170(e) half has **no declaration**, and needs none: btctax's only donatable property is
+    ///     bitcoin, whose AMT basis is identically its regular basis (no §56 adjustment applies to a
+    ///     capital asset's cost). The channel is empty rather than guarded.
+    ///
+    /// Either way this is `0` on every computable return.
     pub line3: Usd,
     /// L4 — "**Alternative minimum taxable income.** Combine lines 1 through 3. (If married filing
     /// separately and line 4 is more than $875,950, see instructions.)"
@@ -341,7 +358,14 @@ pub fn compute_6251(i: Form6251Inputs, amt: &AmtParams, bp: &LtcgBreakpoints) ->
         f.line12 = line6;
         f.line13 = preferential;
         f.line14 = z; // Schedule D line 19; no §1250 property in btctax
-        f.line15 = f.line13 + f.line14;
+                      // L15's FIRST branch is the applicable one: "If you did not complete a Schedule D Tax Worksheet
+                      // for the regular tax or the AMT, enter the amount from line 13." btctax figures preferential
+                      // income through the QDCGT Worksheet and never completes a Schedule D Tax Worksheet, so the
+                      // "Otherwise, add lines 13 and 14, and enter the smaller of that result or [SDTW line 10]"
+                      // branch — with its cap we could not evaluate — is unreachable here. (Numerically identical
+                      // today because `line14 ≡ 0`; taking the right branch is a transcription-fidelity fix, and it
+                      // removes a cap that a Tier-2 author adding Schedule D would otherwise inherit silently.)
+        f.line15 = f.line13;
         f.line16 = f.line12.min(f.line15);
         f.line17 = f.line12 - f.line16;
         f.line18 = flat_26_28(f.line17);
@@ -389,16 +413,6 @@ pub fn compute_6251(i: Form6251Inputs, amt: &AmtParams, bp: &LtcgBreakpoints) ->
     f.line9 = f.line7 - f.line8;
     f.line11 = (f.line9 - f.line10).max(z);
     f
-}
-
-/// The §1(h) split used by Part III, exposed so callers can reuse the one primitive rather than
-/// re-deriving the band arithmetic. Present for parity with the regular-tax chain.
-pub fn part_iii_band_split(
-    bp: &LtcgBreakpoints,
-    bottom: Usd,
-    pref: Usd,
-) -> crate::tax::compute::PrefSplit {
-    preferential_tax(bp, bottom, pref)
 }
 
 #[cfg(test)]
@@ -499,10 +513,10 @@ mod tests {
                 &p,
                 &bps(status),
             );
+            // ★ INDEXED, not `get()`: a fixture key that is renamed or dropped must PANIC, not be
+            // silently skipped — a skipped key is a vector that quietly stops checking a line.
             let check = |n: &str, actual: Usd| {
-                if let Some(e) = want.get(n) {
-                    assert_eq!(actual, d(e), "{id}: Form 6251 {n}");
-                }
+                assert_eq!(actual, d(&want[n]), "{id}: Form 6251 {n}");
             };
             check("line1", got.line1);
             check("line2a", got.line2a);

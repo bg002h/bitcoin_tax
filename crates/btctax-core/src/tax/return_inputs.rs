@@ -420,6 +420,14 @@ pub struct ReturnInputs {
     /// used by `TaxProfile`; the declaration is a property of the RETURN, not of the amount.
     #[serde(default)]
     pub amt_carryover_same_as_regular: Option<bool>,
+
+    /// Form 6251 **line 2l** — "is the depreciation inside my Schedule C expenses the same for the AMT?"
+    ///
+    /// Lives on `ReturnInputs` rather than on [`ScheduleCInputs`] to match its line-2k sibling above: the
+    /// declaration is a property of the RETURN, not of the business. (It is also why the liveness
+    /// predicate, not the field's location, is what ties it to Schedule C.)
+    #[serde(default)]
+    pub amt_depreciation_same_as_regular: Option<bool>,
     #[serde(default)]
     pub charitable_carryover_in: Vec<CharitableCarryItem>,
     #[serde(default)]
@@ -457,6 +465,7 @@ impl Default for ReturnInputs {
             payments: Payments::default(),
             capital_loss_carryforward_in: Carryforward::default(),
             amt_carryover_same_as_regular: None,
+            amt_depreciation_same_as_regular: None,
             charitable_carryover_in: Vec::new(),
             qbi: QbiInputs::default(),
             foreign_accounts: None,

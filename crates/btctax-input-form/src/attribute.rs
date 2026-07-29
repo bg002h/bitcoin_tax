@@ -34,6 +34,9 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::MixedUseMortgageUnanswered => vec![decl(QuestionId::MortgageAllUsedToBuyBuildImprove)],
         R::AmtQualifiedDwellingUnanswered => vec![decl(QuestionId::AmtQualifiedDwelling)],
         R::AmtCarryoverDeclarationUnanswered => vec![decl(QuestionId::AmtCarryoverSameAsRegular)],
+        R::AmtDepreciationDeclarationUnanswered => {
+            vec![decl(QuestionId::AmtDepreciationSameAsRegular)]
+        }
 
         // ── The `Some(true)` value-refusals → the same Declaration field as their unanswered twin (§7 510). ──
         R::ForeignTrust => vec![decl(QuestionId::ForeignTrust)],
@@ -44,6 +47,7 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         // field its unanswered twin anchors.
         R::AmtNonQualifiedDwelling => vec![decl(QuestionId::AmtQualifiedDwelling)],
         R::AmtCarryoverDiverges => vec![decl(QuestionId::AmtCarryoverSameAsRegular)],
+        R::AmtDepreciationDiverges => vec![decl(QuestionId::AmtDepreciationSameAsRegular)],
 
         // ── Schedule B Part III is carried by BOTH foreign declarations (I-5) — anchor both; a renderer
         //    focuses the first live-unanswered one (§7 line 509). ──

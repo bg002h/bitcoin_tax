@@ -100,6 +100,8 @@ pub enum FieldId {
     DeclAmtQualifiedDwelling,
     /// Form 6251 line 2k — does the AMT capital-loss carryover equal the regular one?
     DeclAmtCarryoverSame,
+    /// Form 6251 line 2l — is the depreciation inside the Schedule C expense total the same for the AMT?
+    DeclAmtDepreciationSame,
     ForeignCountryNames,
     // Skippables (from SKIPPABLE_QUESTIONS); SALT election = SaSaltUseSalesTax in Schedule A above
     BlindTaxpayer,
