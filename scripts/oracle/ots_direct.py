@@ -171,6 +171,25 @@ def _parse(out_text: str) -> dict[str, float]:
     return found
 
 
+def _form6251_lines(parsed: dict[str, float]) -> dict[str, float]:
+    """Pull OTS's printed Form 6251 lines out of a parsed 1040 output.
+
+    OTS emits them as `AMT_Form_6251_L<n>` (e.g. `AMT_Form_6251_L2a = 29200.00`). Returning them
+    keyed by the FORM's own line label — `line1`, `line2a`, `line11`, … — lets the harness diff
+    btctax's `Form6251` struct field-for-field against an independent engine instead of comparing
+    only the bottom line. That is a STRONGER gate than the one FOLLOWUPS G-6 asked for.
+
+    Absent when the filer owes no AMT and OTS skips the routine: returns `{}`, which callers must
+    treat as "not witnessed", never as zeros.
+    """
+    out: dict[str, float] = {}
+    for k, v in parsed.items():
+        if not k.startswith("AMT_Form_6251_L"):
+            continue
+        out["line" + k[len("AMT_Form_6251_L") :]] = v
+    return out
+
+
 def run_form(
     form: str,
     subdir: str,
@@ -411,6 +430,18 @@ def evaluate(h: dict) -> dict[str, float | None]:
             "se_l11_medicare": se_l11_medicare,               # Sch SE L11 (Medicare leg)
             "f8959_l7": f8959_l7,                             # 8959 L7 (Part I leg)
             "f8959_l13": f8959_l13,                           # 8959 L13 (Part II SE leg)
+            # ── G-6: the AMT. Oracle 1 computes the WHOLE of Form 6251 and always did; this harness
+            #    simply never read it. `taxsolve_US_1040_2024.c:222` is
+            #    `form6251_AlternativeMinimumTax(int itemized)`, and it prints every line as
+            #    `AMT_Form_6251_L*` before assigning `L[17] = Sched2[3]`.
+            #
+            #    ★ Line 2a is the branch that matters: OTS codes it
+            #    `if (itemized) amtws2a = SchedA[7]; else amtws2a = L[12];` — the standard deduction
+            #    added back for a non-itemizer. That is btctax's branch and the form's, and it is the
+            #    one PSL Tax-Calculator omits (issue #3108). So on AMT the two oracles SPLIT, which is
+            #    diagnostic rather than ambiguous, and OTS is the one that agrees with the IRS PDF.
+            "amt": final.get("L17", 0.0),                     # 1040 L17 = Sch 2 L3 ⊇ Form 6251 L11
+            "form6251": _form6251_lines(final),               # every printed 6251 line, by number
         }
     finally:
         shutil.rmtree(work, ignore_errors=True)
