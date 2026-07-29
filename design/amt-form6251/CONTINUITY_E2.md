@@ -15,6 +15,18 @@ v1 computes the form but cannot attach it.
 **Tier 2 removes that refusal**: fill and attach Form 6251 for filers who actually owe AMT.
 It is **NOT started**, and must not start until the entry criteria below are met.
 
+### ★ Why the gate is real, in one concrete sentence
+
+Right now the fixture has **exactly one** vector with AMT > 0 witnessed by both oracles (V6), and
+**no Single or HoH vector at all**. Tier 2's whole job is to produce a Form 6251 the filer **signs
+under §6065 penalties of perjury**. So starting Tier 2 before E2/E3b means attaching a signed form for
+a filing status with **zero** AMT-owing test coverage. That is the gate — not process ceremony.
+
+**The rule, stated so it can be checked:** *btctax may not ATTACH a Form 6251 for any filing status
+that has no AMT-owing vector agreed by two oracles (or by one oracle plus a named disqualification).*
+If a status cannot reach that bar, restrict the shipped claim for that status rather than attaching
+anyway.
+
 ---
 
 ## 2. The gate: `FOLLOWUPS.md` §G-6b
