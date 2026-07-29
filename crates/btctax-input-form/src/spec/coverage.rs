@@ -107,9 +107,15 @@ fn maximal_fixture() -> ReturnInputs {
             class: CharitableClass::Cash60,
             amount: dec!(0),
         }],
-        mortgage_interest_1098: dec!(1), // liveness primer for SaMortgageAllUsed (see doc above)
+        mortgage_interest_1098: dec!(1), // liveness primer for SaMortgageAllUsed + DeclAmtQualifiedDwelling
         ..Default::default()
     });
+    // Liveness primer for `DeclAmtCarryoverSame` (Form 6251 line 2k). The VALUE leaves stay exempt via
+    // EXEMPT_PREFIXES; this only makes the declaration that guards them live.
+    ri.capital_loss_carryforward_in = btctax_core::tax::types::Carryforward {
+        short: dec!(1),
+        long: dec!(0),
+    };
     ri
 }
 
@@ -325,13 +331,13 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(
-        field_count, 62,
-        "expected 62 Fields (one per §5.8 in-scope leaf)"
+        field_count, 64,
+        "expected 64 Fields (one per §5.8 in-scope leaf)"
     );
     assert_eq!(
         covered.len(),
-        62,
-        "expected 62 distinctly-covered in-scope leaves"
+        64,
+        "expected 64 distinctly-covered in-scope leaves"
     );
 
     // ── 5. ★ I-6: PIN the observed FieldId → leaf-path map against a literal (kills TRANSPOSITION). ──
@@ -477,6 +483,14 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
     (FieldId::DeclForeignTrust, "foreign_trust"),
     (FieldId::DeclHsaActivity, "sch1.hsa_activity"),
     (FieldId::DeclDualStatusAlien, "dual_status_alien"),
+    (
+        FieldId::DeclAmtQualifiedDwelling,
+        "schedule_a.mortgage_dwelling_is_amt_qualified",
+    ),
+    (
+        FieldId::DeclAmtCarryoverSame,
+        "amt_carryover_same_as_regular",
+    ),
     (FieldId::ForeignCountryNames, "foreign_country_names"),
     (FieldId::BlindTaxpayer, "header.taxpayer.blind"),
     (FieldId::BlindSpouse, "header.spouse.blind"),

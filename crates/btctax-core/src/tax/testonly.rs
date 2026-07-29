@@ -11,7 +11,7 @@ use crate::conventions::Usd;
 use crate::event::{BasisSource, DisposeKind, IncomeKind};
 use crate::identity::{EventId, LotId, WalletId};
 use crate::state::{Disposal, DisposalLeg, IncomeRecord, LedgerState, Term};
-use crate::tax::questions::{QuestionId, FORM_QUESTIONS};
+use crate::tax::questions::FORM_QUESTIONS;
 use crate::tax::return_inputs::{
     CharitableClass, CharitableGift, Dependent, Form1099Div, Form1099G, Form1099Int,
     HouseholdHeader, Owner, Payments, Person, ReturnInputs, ScheduleAInputs, ScheduleCInputs, W2,
@@ -33,8 +33,7 @@ use rust_decimal_macros::dec;
 pub fn answer_all_live_declarations(ri: &mut ReturnInputs) {
     for q in FORM_QUESTIONS {
         if (q.live)(ri) && (q.get)(ri).is_none() {
-            let ans = matches!(q.id, QuestionId::MortgageAllUsedToBuyBuildImprove);
-            (q.set)(ri, ans);
+            (q.set)(ri, q.neutral); // ★ declared per question — see FormQuestion::neutral
         }
     }
 }

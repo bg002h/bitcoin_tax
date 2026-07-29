@@ -341,11 +341,17 @@ mod tests {
         match id {
             QuestionId::DependentSpouse => r.filing_status = FilingStatus::Mfj,
             QuestionId::MfsSpouseItemizes => r.filing_status = FilingStatus::Mfs,
-            QuestionId::MortgageAllUsedToBuyBuildImprove => {
+            QuestionId::MortgageAllUsedToBuyBuildImprove | QuestionId::AmtQualifiedDwelling => {
                 r.schedule_a = Some(ScheduleAInputs {
                     mortgage_interest_1098: dec!(9000),
                     ..Default::default()
                 });
+            }
+            QuestionId::AmtCarryoverSameAsRegular => {
+                r.capital_loss_carryforward_in = btctax_core::tax::types::Carryforward {
+                    short: dec!(1000),
+                    long: dec!(0),
+                };
             }
             _ => {}
         }

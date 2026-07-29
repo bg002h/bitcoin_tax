@@ -178,6 +178,19 @@ const DECL_FIELDS: &[Field] = &[
         ri.dual_status_alien = None;
         Ok(())
     }),
+    // ★ Registry-driven — DELEGATE to `FORM_QUESTIONS` indices 8 and 9 (Form 6251 lines 3 and 2k).
+    decl_tristate!(8, FieldId::DeclAmtQualifiedDwelling, |ri| {
+        if let Some(a) = ri.schedule_a.as_mut() {
+            a.mortgage_dwelling_is_amt_qualified = None;
+            Ok(())
+        } else {
+            Err(SetError::NoSuchRow)
+        }
+    }),
+    decl_tristate!(9, FieldId::DeclAmtCarryoverSame, |ri| {
+        ri.amt_carryover_same_as_regular = None;
+        Ok(())
+    }),
     FOREIGN_COUNTRY_NAMES,
 ];
 
@@ -242,6 +255,8 @@ pub fn field_to_question(id: FieldId) -> Option<QuestionId> {
         FieldId::DeclHsaActivity => QuestionId::HsaActivity,
         FieldId::DeclDualStatusAlien => QuestionId::DualStatusAlien,
         FieldId::SaMortgageAllUsed => QuestionId::MortgageAllUsedToBuyBuildImprove,
+        FieldId::DeclAmtQualifiedDwelling => QuestionId::AmtQualifiedDwelling,
+        FieldId::DeclAmtCarryoverSame => QuestionId::AmtCarryoverSameAsRegular,
         _ => return None,
     })
 }
@@ -258,6 +273,10 @@ pub fn question_to_field(id: QuestionId) -> FieldId {
         QuestionId::HsaActivity => FieldId::DeclHsaActivity,
         QuestionId::DualStatusAlien => FieldId::DeclDualStatusAlien,
         QuestionId::MortgageAllUsedToBuyBuildImprove => FieldId::SaMortgageAllUsed,
+        // Pure declarations: they carry Form 6251 lines 3 and 2k and print on no Schedule-A line, so
+        // they get their own Decl leaves rather than deduping to a Schedule-A field.
+        QuestionId::AmtQualifiedDwelling => FieldId::DeclAmtQualifiedDwelling,
+        QuestionId::AmtCarryoverSameAsRegular => FieldId::DeclAmtCarryoverSame,
     }
 }
 

@@ -32,12 +32,18 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::HsaActivityUnanswered => vec![decl(QuestionId::HsaActivity)],
         R::DualStatusAlienUnanswered => vec![decl(QuestionId::DualStatusAlien)],
         R::MixedUseMortgageUnanswered => vec![decl(QuestionId::MortgageAllUsedToBuyBuildImprove)],
+        R::AmtQualifiedDwellingUnanswered => vec![decl(QuestionId::AmtQualifiedDwelling)],
+        R::AmtCarryoverDeclarationUnanswered => vec![decl(QuestionId::AmtCarryoverSameAsRegular)],
 
         // ── The `Some(true)` value-refusals → the same Declaration field as their unanswered twin (§7 510). ──
         R::ForeignTrust => vec![decl(QuestionId::ForeignTrust)],
         R::HsaActivityUnsupported => vec![decl(QuestionId::HsaActivity)],
         R::DualStatusAlienUnsupported => vec![decl(QuestionId::DualStatusAlien)],
         R::DependentSpouseUnsupported => vec![decl(QuestionId::DependentSpouse)],
+        // Form 6251's two ADVERSE answers: v1 models neither add-back, so each refuses at the same
+        // field its unanswered twin anchors.
+        R::AmtNonQualifiedDwelling => vec![decl(QuestionId::AmtQualifiedDwelling)],
+        R::AmtCarryoverDiverges => vec![decl(QuestionId::AmtCarryoverSameAsRegular)],
 
         // ── Schedule B Part III is carried by BOTH foreign declarations (I-5) — anchor both; a renderer
         //    focuses the first live-unanswered one (§7 line 509). ──

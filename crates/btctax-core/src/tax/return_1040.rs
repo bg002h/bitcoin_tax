@@ -1497,33 +1497,10 @@ pub fn screen_absolute(
         // path: clearing it proves AMT is $0 (the worksheet over-estimates AMTI by construction), and
         // only a filer it flags pays for the full computation.
         let f = &ar.amt;
-        // Lines 2k and 3 are $0 in `compute_6251`, which is only sound when we KNOW they are zero.
-        // Until the two §3 declarations exist, a 1098 or a capital-loss carryforward means we do not
-        // know — so refuse rather than understate. (Fail-closed; the declarations replace this.)
-        let mortgage = ri
-            .schedule_a
-            .as_ref()
-            .map_or(Usd::ZERO, |a| a.mortgage_interest_1098);
-        let cf = ri.capital_loss_carryforward_in;
-        if mortgage > Usd::ZERO {
-            return refusal(
-                RefuseReason::AmtScreenTriggered,
-                "Form 6251 line 3 adds back home-mortgage interest deducted for a dwelling that is not a \
-                 principal residence or an AMT-qualified dwelling (i6251: a house, apartment, condominium \
-                 or mobile home not used on a transient basis — never a houseboat or RV). btctax cannot \
-                 tell which dwelling your Form 1098 interest relates to, and guessing would understate \
-                 the tax, so the return is refused",
-            );
-        }
-        if cf.short > Usd::ZERO || cf.long > Usd::ZERO {
-            return refusal(
-                RefuseReason::AmtScreenTriggered,
-                "Form 6251 line 2k adds back the difference when your capital-loss carryover for the AMT \
-                 differs from the regular-tax one. btctax carries only the regular-tax carryforward and \
-                 cannot tell whether an AMT twin diverges, so the return is refused rather than \
-                 understate the tax",
-            );
-        }
+        // Lines 2k and 3 are $0 in `compute_6251`, which is sound because the two §3 declarations
+        // guarantee it: each refuses when UNANSWERED (the registry loop in `screen_inputs`) and when
+        // answered ADVERSELY (the value-refusals there), so a return that reaches here has declared
+        // both add-backs inapplicable.
         // Who Must File condition 1 (i6251 p.1): "Form 6251, line 7, is greater than line 10."
         // NOT `amt > 0` — when line 7 exceeds line 10 the AMTFTC is figured, so line 9 can still land
         // at or below line 10 and the AMT be $0 while the form is still required.

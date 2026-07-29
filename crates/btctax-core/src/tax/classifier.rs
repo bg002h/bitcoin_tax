@@ -84,6 +84,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         sch1,
         payments,
         capital_loss_carryforward_in,
+        amt_carryover_same_as_regular,
         charitable_carryover_in,
         qbi,
         foreign_accounts,
@@ -101,6 +102,10 @@ pub fn classify(ri: &ReturnInputs) -> Census {
     c.declaration(foreign_accounts, QuestionId::ForeignAccounts);
     c.declaration(foreign_trust, QuestionId::ForeignTrust);
     c.declaration(dual_status_alien, QuestionId::DualStatusAlien);
+    c.declaration(
+        amt_carryover_same_as_regular,
+        QuestionId::AmtCarryoverSameAsRegular,
+    );
     c.exempt(
         itemize_election,
         Class::NoTaxDirection,
@@ -310,6 +315,7 @@ fn classify_schedule_a(c: &mut Census, a: &ScheduleAInputs) {
         salt_personal_property: _,
         mortgage_interest_1098: _,
         mortgage_all_used_to_buy_build_improve,
+        mortgage_dwelling_is_amt_qualified,
         charitable,
     } = a;
     c.exempt(
@@ -321,6 +327,10 @@ fn classify_schedule_a(c: &mut Census, a: &ScheduleAInputs) {
     c.declaration(
         mortgage_all_used_to_buy_build_improve,
         QuestionId::MortgageAllUsedToBuyBuildImprove,
+    );
+    c.declaration(
+        mortgage_dwelling_is_amt_qualified,
+        QuestionId::AmtQualifiedDwelling,
     );
     for g in charitable {
         classify_charitable_gift(c, g);

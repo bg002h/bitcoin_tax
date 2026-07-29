@@ -107,15 +107,15 @@ mod tests {
             );
         }
         assert_eq!(
-            decl_count, 7,
-            "7 declarations are Decl* fields (the 8th is the mortgage dedup)"
+            decl_count, 9,
+            "9 declarations are Decl* fields (the 10th is the mortgage dedup)"
         );
 
-        // 7 delegating Decl* fields + the foreign_country_names Text field.
+        // 9 delegating Decl* fields + the foreign_country_names Text field.
         assert_eq!(
             decls.fields.len(),
-            8,
-            "7 declarations + foreign_country_names"
+            10,
+            "9 declarations + foreign_country_names"
         );
         assert!(decls
             .fields
@@ -179,6 +179,16 @@ mod tests {
                     ..Default::default()
                 };
                 ri.header.spouse = Some(Person::default());
+                // Form 6251's two declarations need their own liveness primers: line 3's needs Schedule
+                // A mortgage interest, line 2k's needs a capital-loss carryforward.
+                ri.schedule_a = Some(btctax_core::tax::return_inputs::ScheduleAInputs {
+                    mortgage_interest_1098: rust_decimal_macros::dec!(1),
+                    ..Default::default()
+                });
+                ri.capital_loss_carryforward_in = btctax_core::tax::types::Carryforward {
+                    short: rust_decimal_macros::dec!(1),
+                    long: rust_decimal_macros::dec!(0),
+                };
                 ri
             };
             assert!(

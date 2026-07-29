@@ -92,6 +92,7 @@ student_loan_interest_paid = "0"
 [schedule_a]
 medical = "2000"
 mortgage_all_used_to_buy_build_improve = true
+mortgage_dwelling_is_amt_qualified = true
 mortgage_interest_1098 = "22000"
 salt_personal_property = "0"
 salt_prior_year_balance_paid = "0"

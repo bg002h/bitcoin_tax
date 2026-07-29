@@ -615,6 +615,7 @@ $ btctax --vault v.pgp income show --year 2024
     "salt_personal_property": "0",
     "mortgage_interest_1098": "22000",
     "mortgage_all_used_to_buy_build_improve": true,
+    "mortgage_dwelling_is_amt_qualified": true,
     "charitable": [
       {
         "class": "cash60",
@@ -639,6 +640,7 @@ $ btctax --vault v.pgp income show --year 2024
     "short": "0",
     "long": "0"
   },
+  "amt_carryover_same_as_regular": null,
   "charitable_carryover_in": [],
   "qbi": {
     "reit_ptp_carryforward_in": "0",

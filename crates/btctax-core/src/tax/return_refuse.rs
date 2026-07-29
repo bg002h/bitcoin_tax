@@ -85,6 +85,16 @@ pub enum RefuseReason {
     /// P9 §2.7 — the §163(h)(3)(F) mixed-use-mortgage DECLARATION is `None`, on a Schedule A carrying
     /// mortgage interest. Fail loud rather than print line 8a with the box in an unaffirmed state.
     MixedUseMortgageUnanswered,
+    /// Form 6251 line 3 — the AMT qualified-dwelling question is live but unanswered.
+    AmtQualifiedDwellingUnanswered,
+    /// Form 6251 line 3 — answered ADVERSELY ("not an AMT-qualified dwelling"). v1 does not model the
+    /// §56(b)(1)(C) add-back, so computing would UNDERSTATE the tax.
+    AmtNonQualifiedDwelling,
+    /// Form 6251 line 2k — the AMT capital-loss-carryover question is live but unanswered.
+    AmtCarryoverDeclarationUnanswered,
+    /// Form 6251 line 2k — answered ADVERSELY ("my AMT carryover differs"). v1 models no divergence,
+    /// so computing would UNDERSTATE the tax.
+    AmtCarryoverDiverges,
     /// A charitable gift/carryover to a **non-50%-organization** (Cash30/OrdinaryProp30/CapGainProp20 —
     /// private foundations etc.) needs the Pub. 526 "special 30% limit" ordering v1 doesn't implement;
     /// refuse rather than mis-limit and understate tax (review C1). Never produced by the crypto ledger.
@@ -241,6 +251,7 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         sch1,
         payments,
         capital_loss_carryforward_in,
+        amt_carryover_same_as_regular: _, // a declaration, not money
         charitable_carryover_in,
         qbi,
         foreign_accounts: _,
@@ -424,6 +435,7 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             salt_personal_property,
             mortgage_interest_1098,
             mortgage_all_used_to_buy_build_improve: _,
+            mortgage_dwelling_is_amt_qualified: _, // a declaration, not money
             charitable,
         } = a;
         if neg(*medical) {
@@ -551,6 +563,32 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
         return refuse(
             RefuseReason::ForeignTrust,
             "a foreign trust requires Form 3520, which is out of scope for v1",
+        );
+    }
+
+    // ── Form 6251's two ADVERSE answers. VALUE-refusals (`Some(false)` — these two questions are
+    //    neutral at TRUE, see `FormQuestion::neutral`), disjoint from the unanswered loop above.
+    //    ★ We mirror the mixed-use-mortgage exemplar only on the UNANSWERED half and deliberately
+    //    DIVERGE here: a zeroed Schedule A line 8a is conservative, but a missing AMT add-back is not.
+    if ri
+        .schedule_a
+        .as_ref()
+        .is_some_and(|a| a.mortgage_dwelling_is_amt_qualified == Some(false))
+    {
+        return refuse(
+            RefuseReason::AmtNonQualifiedDwelling,
+            "you declared that the mortgaged dwelling is NOT an AMT-qualified dwelling, so Form 6251 \
+             line 3 must add that deducted interest back (i6251, Line 3 — a houseboat or recreational \
+             vehicle is never AMT-qualified). v1 does not model the §56(b)(1)(C) add-back, and computing \
+             without it would UNDERSTATE your tax",
+        );
+    }
+    if ri.amt_carryover_same_as_regular == Some(false) {
+        return refuse(
+            RefuseReason::AmtCarryoverDiverges,
+            "you declared that your AMT capital-loss carryover differs from the regular-tax one, so Form \
+             6251 line 2k must add the difference back. btctax tracks only the regular figure and models \
+             no divergence, so computing would UNDERSTATE your tax",
         );
     }
 
@@ -927,11 +965,17 @@ mod tests {
         match id {
             QuestionId::DependentSpouse => r.filing_status = FilingStatus::Mfj, // live with no spouse Person (P8a I1)
             QuestionId::MfsSpouseItemizes => r.filing_status = FilingStatus::Mfs,
-            QuestionId::MortgageAllUsedToBuyBuildImprove => {
+            QuestionId::MortgageAllUsedToBuyBuildImprove | QuestionId::AmtQualifiedDwelling => {
                 r.schedule_a = Some(ScheduleAInputs {
                     mortgage_interest_1098: dec!(9000),
                     ..Default::default()
                 });
+            }
+            QuestionId::AmtCarryoverSameAsRegular => {
+                r.capital_loss_carryforward_in = crate::tax::types::Carryforward {
+                    short: dec!(1000),
+                    long: Usd::ZERO,
+                };
             }
             _ => {}
         }
@@ -949,7 +993,7 @@ mod tests {
                                             // Answer every OTHER live question, leaving q blank (None, from Default).
             for other in FORM_QUESTIONS {
                 if other.id != q.id && (other.live)(&r) {
-                    (other.set)(&mut r, false);
+                    (other.set)(&mut r, other.neutral);
                 }
             }
             assert!((q.live)(&r), "{:?} must be live in its own scenario", q.id);
@@ -998,6 +1042,10 @@ mod tests {
             salt_real_estate: dec!(5000), // itemized ≈ $5,000 (< $14,600 std) once the mixed-use 8a is zeroed
             mortgage_interest_1098: dec!(12000),
             mortgage_all_used_to_buy_build_improve: Some(false),
+            // Reporting 1098 interest also makes Form 6251 line 3's AMT-qualified-dwelling question
+            // live (i6251 p.8). Answered AMT-neutral here so this test keeps testing the MIXED-USE
+            // question rather than tripping on the new one.
+            mortgage_dwelling_is_amt_qualified: Some(true),
             ..Default::default()
         });
 
@@ -1589,6 +1637,73 @@ mod tests {
         let mut b = ri();
         b.sch1.ira_deduction_claimed = dec!(6000);
         assert_eq!(reason(&b), Some(RefuseReason::IraDeductionClaimed));
+    }
+
+    /// ★ THE TERNARY for Form 6251's two declarations: unanswered ⇒ refuse, ADVERSE ⇒ refuse,
+    /// neutral ⇒ compute. The adverse branch is the one a passing test would hide — computing with a
+    /// missing line-3 / line-2k add-back UNDERSTATES the tax, which is the one direction this project
+    /// never permits.
+    ///
+    /// Mutation: delete either value-refusal in `screen_inputs` and the matching `Some(false)`
+    /// assertion below reds.
+    #[test]
+    fn form6251_declarations_refuse_unanswered_and_adverse_but_compute_when_neutral() {
+        use crate::tax::return_inputs::ScheduleAInputs;
+
+        // ── line 3 — the AMT qualified-dwelling declaration ──
+        let dwelling = |ans: Option<bool>| {
+            let mut r = ri();
+            r.schedule_a = Some(ScheduleAInputs {
+                mortgage_interest_1098: dec!(9000),
+                mortgage_all_used_to_buy_build_improve: Some(true),
+                mortgage_dwelling_is_amt_qualified: ans,
+                ..Default::default()
+            });
+            reason(&r)
+        };
+        assert_eq!(
+            dwelling(None),
+            Some(RefuseReason::AmtQualifiedDwellingUnanswered),
+            "unanswered ⇒ refuse: btctax cannot guess which dwelling the 1098 relates to"
+        );
+        assert_eq!(
+            dwelling(Some(false)),
+            Some(RefuseReason::AmtNonQualifiedDwelling),
+            "ADVERSE ⇒ refuse: the §56(b)(1)(C) add-back is unmodelled, so computing would UNDERSTATE"
+        );
+        assert_eq!(dwelling(Some(true)), None, "neutral ⇒ compute");
+
+        // ── line 2k — the AMT capital-loss-carryover declaration ──
+        let carryover = |ans: Option<bool>| {
+            let mut r = ri();
+            r.capital_loss_carryforward_in = crate::tax::types::Carryforward {
+                short: dec!(1000),
+                long: Usd::ZERO,
+            };
+            r.amt_carryover_same_as_regular = ans;
+            reason(&r)
+        };
+        assert_eq!(
+            carryover(None),
+            Some(RefuseReason::AmtCarryoverDeclarationUnanswered),
+            "unanswered ⇒ refuse"
+        );
+        assert_eq!(
+            carryover(Some(false)),
+            Some(RefuseReason::AmtCarryoverDiverges),
+            "ADVERSE ⇒ refuse: a divergent AMT twin is an add-back v1 does not model"
+        );
+        assert_eq!(carryover(Some(true)), None, "neutral ⇒ compute");
+
+        // Neither question is live when its trigger is absent — no gratuitous questions.
+        let mut bare = ri();
+        bare.schedule_a = None;
+        bare.capital_loss_carryforward_in = crate::tax::types::Carryforward::default();
+        assert_eq!(
+            reason(&bare),
+            None,
+            "no 1098 and no carryforward ⇒ neither asked"
+        );
     }
 
     #[test]

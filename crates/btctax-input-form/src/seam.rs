@@ -96,6 +96,10 @@ pub enum FieldId {
     DeclForeignTrust,
     DeclHsaActivity,
     DeclDualStatusAlien,
+    /// Form 6251 line 3 — is the mortgaged dwelling AMT-qualified? (i6251 p.8.)
+    DeclAmtQualifiedDwelling,
+    /// Form 6251 line 2k — does the AMT capital-loss carryover equal the regular one?
+    DeclAmtCarryoverSame,
     ForeignCountryNames,
     // Skippables (from SKIPPABLE_QUESTIONS); SALT election = SaSaltUseSalesTax in Schedule A above
     BlindTaxpayer,

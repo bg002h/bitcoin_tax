@@ -33,6 +33,15 @@ pub struct FormQuestion {
     /// Write an answer. Called only on a LIVE question (so, e.g., the mortgage setter may assume a
     /// `schedule_a` exists — its liveness requires one).
     pub set: fn(&mut ReturnInputs, bool),
+    /// ★ The answer that requires **no adjustment and forgoes no benefit** — the "nothing to see here"
+    /// reply. Most declarations are neutral at `false` ("no, I have no foreign trust"), but not all:
+    /// the mortgage box is neutral at `true` (all of the loan bought/built/improved the home, so
+    /// Schedule A line 8a stays full), and both Form 6251 declarations are neutral at `true` (the
+    /// dwelling IS AMT-qualified; the AMT carryover IS the same).
+    ///
+    /// Declared per question rather than inferred, because polarity used to live as a hard-coded
+    /// `matches!` in `testonly.rs` — knowledge a new question could silently get wrong.
+    pub neutral: bool,
 }
 
 /// The identity of each registry question. `ALL` is the anchor the completeness test iterates; a new
@@ -50,6 +59,10 @@ pub enum QuestionId {
     DualStatusAlien,
     /// §2.7 — the Schedule A line-8 mixed-use-mortgage box.
     MortgageAllUsedToBuyBuildImprove,
+    /// **Form 6251 line 3** — is the mortgaged dwelling AMT-qualified? (i6251 p.8.)
+    AmtQualifiedDwelling,
+    /// **Form 6251 line 2k** — does the AMT capital-loss carryover equal the regular one?
+    AmtCarryoverSameAsRegular,
 }
 
 impl QuestionId {
@@ -62,7 +75,15 @@ impl QuestionId {
         QuestionId::HsaActivity,
         QuestionId::DualStatusAlien,
         QuestionId::MortgageAllUsedToBuyBuildImprove,
+        QuestionId::AmtQualifiedDwelling,
+        QuestionId::AmtCarryoverSameAsRegular,
     ];
+}
+
+/// Whether an AMT capital-loss-carryover twin could exist — Form 6251 line 2k's liveness.
+fn amt_carryover_question_live(ri: &ReturnInputs) -> bool {
+    let cf = ri.capital_loss_carryforward_in;
+    cf.short > Usd::ZERO || cf.long > Usd::ZERO
 }
 
 /// Whether Schedule A carries mortgage interest — the mixed-use question's liveness. Deliberately an
@@ -88,6 +109,7 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         live: |_ri| true,
         get: |ri| ri.header.can_be_claimed_as_dependent_taxpayer,
         set: |ri, v| ri.header.can_be_claimed_as_dependent_taxpayer = Some(v),
+        neutral: false,
     },
     FormQuestion {
         id: QuestionId::DependentSpouse,
@@ -101,6 +123,7 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         live: |ri| ri.filing_status == FilingStatus::Mfj || ri.header.spouse.is_some(),
         get: |ri| ri.header.can_be_claimed_as_dependent_spouse,
         set: |ri, v| ri.header.can_be_claimed_as_dependent_spouse = Some(v),
+        neutral: false,
     },
     FormQuestion {
         id: QuestionId::MfsSpouseItemizes,
@@ -113,6 +136,7 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         live: |ri| ri.filing_status == FilingStatus::Mfs,
         get: |ri| ri.mfs_spouse_itemizes,
         set: |ri, v| ri.mfs_spouse_itemizes = Some(v),
+        neutral: false,
     },
     FormQuestion {
         id: QuestionId::ForeignAccounts,
@@ -128,6 +152,7 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         live: |_ri| true,
         get: |ri| ri.foreign_accounts,
         set: |ri, v| ri.foreign_accounts = Some(v),
+        neutral: false,
     },
     FormQuestion {
         id: QuestionId::ForeignTrust,
@@ -141,6 +166,7 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         live: |_ri| true,
         get: |ri| ri.foreign_trust,
         set: |ri, v| ri.foreign_trust = Some(v),
+        neutral: false,
     },
     FormQuestion {
         id: QuestionId::HsaActivity,
@@ -157,6 +183,7 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         live: |_ri| true,
         get: |ri| ri.sch1.hsa_activity,
         set: |ri, v| ri.sch1.hsa_activity = Some(v),
+        neutral: false,
     },
     FormQuestion {
         id: QuestionId::DualStatusAlien,
@@ -169,6 +196,7 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         live: |_ri| true,
         get: |ri| ri.dual_status_alien,
         set: |ri, v| ri.dual_status_alien = Some(v),
+        neutral: false,
     },
     FormQuestion {
         id: QuestionId::MortgageAllUsedToBuyBuildImprove,
@@ -192,6 +220,47 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
                 a.mortgage_all_used_to_buy_build_improve = Some(v);
             }
         },
+        neutral: true, // §2.7: "yes, all of it" keeps Schedule A line 8a full
+    },
+    FormQuestion {
+        id: QuestionId::AmtQualifiedDwelling,
+        prompt: "Is the home your Form 1098 mortgage interest relates to a principal residence, or a \
+                 house, apartment, condominium or mobile home NOT used on a transient basis? (Form 6251 \
+                 line 3 — a houseboat or recreational vehicle is NOT an AMT-qualified dwelling.)",
+        unanswered: RefuseReason::AmtQualifiedDwellingUnanswered,
+        unanswered_detail:
+            "this Schedule A reports mortgage interest, so Form 6251 line 3 must know whether the dwelling \
+             is AMT-qualified — interest on a dwelling that is not a principal residence or an \
+             AMT-qualified dwelling is ADDED BACK for the alternative minimum tax (i6251, Line 3). \
+             Guessing would understate the tax — run `btctax income answer`",
+        live: mortgage_question_live,
+        get: |ri| {
+            ri.schedule_a
+                .as_ref()
+                .and_then(|a| a.mortgage_dwelling_is_amt_qualified)
+        },
+        set: |ri, v| {
+            if let Some(a) = ri.schedule_a.as_mut() {
+                a.mortgage_dwelling_is_amt_qualified = Some(v);
+            }
+        },
+        neutral: true, // "yes, AMT-qualified" ⇒ Form 6251 line 3 adds nothing back
+    },
+    FormQuestion {
+        id: QuestionId::AmtCarryoverSameAsRegular,
+        prompt: "Is your capital-loss carryover for the alternative minimum tax the SAME as your \
+                 regular-tax carryover? (Form 6251 line 2k — answer no if you have ever tracked a \
+                 separate AMT basis or AMT capital-loss carryforward.)",
+        unanswered: RefuseReason::AmtCarryoverDeclarationUnanswered,
+        unanswered_detail:
+            "this return carries a capital-loss carryforward, so Form 6251 line 2k must know whether the \
+             AMT carryover differs from the regular-tax one — btctax tracks only the regular figure, and \
+             a divergent AMT twin is an ADD-BACK. Guessing would understate the tax — run \
+             `btctax income answer`",
+        live: amt_carryover_question_live,
+        get: |ri| ri.amt_carryover_same_as_regular,
+        set: |ri, v| ri.amt_carryover_same_as_regular = Some(v),
+        neutral: true, // "yes, the same" ⇒ Form 6251 line 2k adds nothing back
     },
 ];
 
@@ -351,6 +420,8 @@ mod tests {
                 QuestionId::HsaActivity => 5,
                 QuestionId::DualStatusAlien => 6,
                 QuestionId::MortgageAllUsedToBuyBuildImprove => 7,
+                QuestionId::AmtQualifiedDwelling => 8,
+                QuestionId::AmtCarryoverSameAsRegular => 9,
             };
             assert_eq!(idx, i, "QuestionId::ALL is out of order / missing {id:?}");
             assert_eq!(
@@ -359,8 +430,8 @@ mod tests {
                 "exactly one FORM_QUESTIONS entry for {id:?}"
             );
         }
-        assert_eq!(QuestionId::ALL.len(), 8, "there are 8 declarations");
-        assert_eq!(FORM_QUESTIONS.len(), 8, "one entry per declaration");
+        assert_eq!(QuestionId::ALL.len(), 10, "there are 10 declarations");
+        assert_eq!(FORM_QUESTIONS.len(), 10, "one entry per declaration");
     }
 
     #[test]

@@ -303,6 +303,18 @@ pub struct ScheduleAInputs {
     /// `Some(true)` ⇒ full 8a, box unchecked.
     #[serde(default)]
     pub mortgage_all_used_to_buy_build_improve: Option<bool>,
+    /// **Form 6251 line 3 — the AMT qualified-dwelling declaration.** i6251 p.8: "If you deducted home
+    /// mortgage interest on Schedule A for a dwelling that isn't a principal residence (within the
+    /// meaning of section 121) or qualified dwelling for AMT, include that deducted interest on line 3.
+    /// A qualified dwelling for AMT is a house, apartment, condominium, or mobile home not used on a
+    /// transient basis. A qualified dwelling for AMT doesn't include house boats and recreational
+    /// vehicles."
+    ///
+    /// A class-(A) DECLARATION, phrased so `true` is the AMT-neutral answer. `None` = never asked ⇒
+    /// refuse. `Some(false)` = "not an AMT-qualified dwelling" ⇒ ALSO refuse: v1 does not model the
+    /// line-3 add-back, and computing without it would UNDERSTATE the tax.
+    #[serde(default)]
+    pub mortgage_dwelling_is_amt_qualified: Option<bool>,
     #[serde(default)]
     pub charitable: Vec<CharitableGift>, // non-crypto; crypto flows from the ledger
 }
@@ -395,6 +407,19 @@ pub struct ReturnInputs {
     pub payments: Payments,
     #[serde(default)]
     pub capital_loss_carryforward_in: Carryforward,
+    /// **Form 6251 line 2k — the AMT capital-loss-carryover declaration.** Line 2k is "Disposition of
+    /// property (difference between AMT and regular tax gain or loss)", and i6251 directs any Form
+    /// 8949 / Schedule D / 4684 / 4797 adjustment for the activity there rather than to line 3.
+    /// btctax carries only the REGULAR-tax carryforward and cannot know whether an AMT twin diverges.
+    ///
+    /// A class-(A) DECLARATION, phrased so `true` is the AMT-neutral answer. `None` ⇒ refuse (never
+    /// asked); `Some(false)` — "my AMT carryover differs" — ⇒ ALSO refuse, because v1 models no
+    /// divergence and proceeding would UNDERSTATE the tax.
+    ///
+    /// Lives on `ReturnInputs`, not inside [`Carryforward`], because that type is a shared value also
+    /// used by `TaxProfile`; the declaration is a property of the RETURN, not of the amount.
+    #[serde(default)]
+    pub amt_carryover_same_as_regular: Option<bool>,
     #[serde(default)]
     pub charitable_carryover_in: Vec<CharitableCarryItem>,
     #[serde(default)]
@@ -431,6 +456,7 @@ impl Default for ReturnInputs {
             sch1: Schedule1Inputs::default(),
             payments: Payments::default(),
             capital_loss_carryforward_in: Carryforward::default(),
+            amt_carryover_same_as_regular: None,
             charitable_carryover_in: Vec::new(),
             qbi: QbiInputs::default(),
             foreign_accounts: None,
