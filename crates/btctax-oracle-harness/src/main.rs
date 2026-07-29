@@ -647,8 +647,6 @@ fn verdict_l16(
     )
 }
 
-/// A line witnessed by OTS alone (a cross-foot or a WEAK/NIIT leaf; taxcalc exposes no comparable
-/// figure). `target` is the already-reproduced OTS figure (a `Usd`). Reconciled iff the paper matches.
 /// The AMT verdict — both witnesses optional, and their absence is MEANINGFUL.
 ///
 /// `class` distinguishes who spoke, so a sweep can tell "both agree" from "only one could look":
@@ -679,6 +677,8 @@ fn verdict_amt(
     verdict(line, label, on_paper, internal, o, tc, reconciled, class)
 }
 
+/// A line witnessed by OTS alone (a cross-foot or a WEAK/NIIT leaf; taxcalc exposes no comparable
+/// figure). `target` is the already-reproduced OTS figure (a `Usd`). Reconciled iff the paper matches.
 fn verdict_ots(
     line: &str,
     label: &str,

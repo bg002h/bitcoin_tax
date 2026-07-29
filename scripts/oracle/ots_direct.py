@@ -216,9 +216,12 @@ def _form6251_lines(parsed: dict[str, float]) -> dict[str, float]:
     """Pull OTS's printed Form 6251 lines out of a parsed 1040 output.
 
     OTS emits them as `AMT_Form_6251_L<n>` (e.g. `AMT_Form_6251_L2a = 29200.00`). Returning them
-    keyed by the FORM's own line label — `line1`, `line2a`, `line11`, … — lets the harness diff
-    btctax's `Form6251` struct field-for-field against an independent engine instead of comparing
-    only the bottom line. That is a STRONGER gate than the one FOLLOWUPS G-6 asked for.
+    keyed by the FORM's own line label — `line1`, `line2a`, `line11`, … — lets a caller diff btctax's
+    `Form6251` against an independent engine line by line rather than only at the bottom line.
+    **Which** lines get compared is the caller's business: `verify_f6251.py` compares every line both
+    engines produce, minus the AMT foreign tax credit (line 8), which our driver feeds to OTS and so
+    would be comparing an input to itself. Note OTS does NOT print lines 2c-2t — it stubs them like we
+    do — so this cannot witness that region and no caller should imply it does.
 
     Absent when the filer owes no AMT and OTS skips the routine: returns `{}`, which callers must
     treat as "not witnessed", never as zeros.

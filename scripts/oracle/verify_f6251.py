@@ -63,8 +63,31 @@ OTS_METHODOLOGY_DIFF = {
     ("V10", "line10"): "Tax-Table vs exact schedule on the $20,800 ordinary slice (under the $100k ceiling)",
 }
 
-# The lines worth comparing: Part I in full, plus the Part II figures that decide Who Must File.
-OTS_COMPARED_LINES = ["line1", "line2a", "line2b", "line4", "line5", "line6", "line7", "line10", "line11"]
+# ★ EVERY line OTS prints, minus the echoes — not a hand-picked subset.
+#
+# An earlier draft compared 9 lines (Part I/II only) while its own docstring claimed a "field-for-field"
+# diff. That was the confident-comment-covering-the-gap pattern this project keeps getting burned by,
+# and worse, it discarded the one region that most needs an outside witness: **Part III's interior is
+# checked against `f6251_reference.py`, a same-team twin derived from the same reading of
+# `PART_III.md`** — so a shared mis-reading passes both. The historical line-33 bug (`line22 - line32`
+# mis-transcribed as `line12 - line32`, worth $200,000 on one vector) is exactly that class.
+#
+# OTS prints Part III too, and always did: on V4 it emits lines 12, 13, 15-20, 22, 24, 25, 27, 28, 33,
+# 34, 38, 39, 40 — and its line 33 independently confirms the line-22 subtraction. The witness was in
+# output we were already parsing and throwing away.
+#
+# EXCLUDED, and only these: line 8 is the AMT foreign tax credit, which our driver FEEDS to OTS as
+# `AMTws8`. Comparing it would be comparing our input to itself — an echo, not a witness.
+OTS_ECHOED_LINES = {"line8"}
+
+
+def _ots_lines_to_compare(got: dict, want: dict) -> list[str]:
+    """Every line BOTH engines produced, minus the echoes. Order is the form's, for readable output."""
+    def key(name: str):
+        body = name[len("line"):]
+        num = int("".join(c for c in body if c.isdigit()) or 0)
+        return (num, body)
+    return sorted((set(got) & set(want)) - OTS_ECHOED_LINES, key=key)
 
 
 def main() -> int:
@@ -111,7 +134,9 @@ def main() -> int:
 
 
 def _ots_pass(vectors) -> int:
-    """Compare EVERY witnessed Form 6251 line against OpenTaxSolver. Returns the unexpected-diff count.
+    """Compare every line BOTH engines produce (minus echoes) against OpenTaxSolver.
+
+    Returns the unexpected-diff count.
 
     Absent `OTS_DIR` this prints a loud SKIP and returns 0 — a missing oracle is a gap in coverage, not
     a pass, and saying so is the whole point of the two-oracle standard.
@@ -158,9 +183,7 @@ def _ots_pass(vectors) -> int:
         if not got:
             print(f"  {vid:5} {'—':8} {'no 6251 printed':>14} {'':>14}   not witnessed")
             continue
-        for ln in OTS_COMPARED_LINES:
-            if ln not in got or ln not in want:
-                continue
+        for ln in _ots_lines_to_compare(got, want):
             a, b = round(float(got[ln])), round(float(want[ln]))
             compared += 1
             if abs(a - b) <= 1:
