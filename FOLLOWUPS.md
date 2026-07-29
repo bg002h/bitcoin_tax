@@ -439,6 +439,65 @@ Current evidence, all consistent but all one-sided: the form's own line 2a text,
 §56(b)(1)(D), taxcalc's own source, and r1's independent hand-derivation (which pre-dates the code and
 matches btctax).
 
+### G-6b — ★★★ TIER-2 ENTRY CRITERIA (Fable consult, 2026-07-29). Tier 2 does NOT ship until these are green.
+
+The consult was called once, before merging `feat/amt-oracle-comparison`. **Merge: YES**; G-6 stays
+OPEN. What follows is its ruling, and it corrects our framing in three places.
+
+**★ Our framing was wrong in three ways — recorded so the despair version does not get re-adopted:**
+1. *"Both oracles are blind or defective in exactly the region Tier 2 operates in"* — **overstated.**
+   taxcalc is defective only for **standard-deduction** AMT filers (#3108); for **itemizing** AMT
+   filers it is a fully valid second oracle (V6 agrees exactly). OTS is disqualified on two named
+   shapes. The doubly-dark region is roughly standard-deduction MFS-kicker filers — narrow. The
+   two-oracle standard is ACHIEVABLE for the itemizing slice. Despair framing invites accepting weaker
+   evidence than is actually available.
+2. *"The corpus structurally cannot contain an AMT filer"* — **true today, contingent tomorrow.** Both
+   rejection legs are OURS: one IS the Tier-2 change, and D-2 is a predicate we wrote. Corpus admission
+   is a Tier-2 exit criterion, not an impossibility.
+3. *"65 lines compared, 0 unexpected"* — both under- and over-sold. Fixed in `04ead65` (now 247).
+
+**Entry criteria, each falsifiable:**
+- **[DONE 2026-07-29 — E1]** Compare every non-echo line OTS prints. 247 comparisons, 0 unexpected.
+- **[open → Tier 2 · E2] A POPULATION of two-oracle AMT-owing agreement, not a point.** Today exactly
+  **one** vector (V6) has AMT > 0 witnessed by BOTH oracles. Add itemizing AMT-owing vectors covering
+  each live Part III routing — line 23 > 0 vs = 0, line-32 skip taken vs not, 26% vs 28% side,
+  phase-out active vs not, line 8 live with line 7 > line 10 — per filing status.
+- **[open → Tier 2 · E3] The fixture has NO Single or HoH vector at all.** `f6251_reference.py` carries
+  only mfj/mfs tables, so the Single/HoH exemption ($85,700), phase-out start ($609,350) and HoH
+  breakpoints are exercised by ZERO vectors. Tier 2 may not attach for a status with no AMT-owing
+  vector: extend the reference, or restrict the shipped claim.
+- **[open → Tier 2 · E4] Read the FILLED f6251.pdf back field-by-field** against the struct, plus the
+  Σround/roundΣ residual rules on the 6251 → Sch 2 → L17 chain. A perfect computation still files a
+  wrong number through a transposed AcroForm field. The sweep already reads other forms off the PDF.
+- **[open → Tier 2 · E5] Lift D-2 for itemizing AMT households** once the refusal is gone; carry
+  taxcalc as a known-defect class for standard-deduction ones (the existing L16 `KnownDefect` machinery
+  is the pattern) with OTS live. The fixture is the bridge; the corpus is the ongoing guarantee.
+- **[open → Tier 2 · E6] Lines 2c–2t become REAL FIELDS carrying provenance** — computed /
+  declared-absent(QuestionId) / unreachable-with-proof — and attach requires no silent line. Adding the
+  fields makes the compiler enforce totality at every constructor.
+
+**★★ EQUIVALENCE QUESTIONS DO NOT SURVIVE INTO ATTACH MODE.** Refusal-by-declaration is sound only when
+the question is a FACT THE FILER CAN VERIFY (an item's *existence*). `AmtDepreciationSameAsRegular` — the
+declaration built this very session — asks the filer to affirm an AMT-technical *equivalence* most
+filers cannot evaluate. They will guess "yes", and btctax will print a signed 0 resting on the guess.
+For attach mode it must be re-phrased to existence: *"does your Schedule C include any depreciation or
+§179 deduction?"* → yes ⇒ refuse. Same for any sibling. Owning phase: **Tier 2, before attach.**
+
+**★★ THE MOST LIKELY WRONG FILED NUMBER: an ISO exercise (line 2m) printed as 0 on a signed form.**
+It is invisible to the ENTIRE validation apparatus — no oracle can witness an input btctax never
+collects, no vector can encode it, no transcription test reds — and post-TCJA it is the dominant
+real-world reason an individual owes AMT, in exactly the high-income equity-comp population Tier 2 is
+enriched for. "Unreachable at the input surface" conflates *btctax cannot see it* with *the filer does
+not have it*; for a refusing v1 that was survivable, on an attached form it is the answered-ness defect
+reappearing on 18 lines at once. Cheapest catch: the existence-question interview over i6251's
+Who-Must-File Exception items (ISO, §1202, §4952, NOL, Form 8801, accelerated depreciation — PAB is
+already refused), any "yes" refusing, plus a test asserting every 2c–2t field is non-silent before emit.
+
+**Explicitly NOT to be done:** ship Tier 2 on the 11-vector fixture as-is; let any equivalence-phrased
+declaration into attach mode; encode an oracle defect as truth; patch OTS locally (the form's own worked
+example anchors the MFS kicker better than a modified oracle, and the observe-only posture stands); let
+the fixture ossify into the permanent instrument; or close G-6 on this merge.
+
 ### G-6a — TWO OTS DEFECTS, both ADJUDICATED 2026-07-29, neither a btctax defect
 
 Found by the new line-by-line Form 6251 comparison. Recorded with the method used, because the two
