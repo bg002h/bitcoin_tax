@@ -1,6 +1,20 @@
 # Draft issue for `PSLmodels/Tax-Calculator` — for review before filing
 
-**Status:** ★ **FILED 2026-07-28 as [PSLmodels/Tax-Calculator#3108](https://github.com/PSLmodels/Tax-Calculator/issues/3108)** — open at the time of the v0.14.0 tag. This file is retained as the drafting record and the evidence table; the issue text below is what was posted. Repo confirmed from the installed package's own metadata
+**★ FOLLOW-UP COMMENT POSTED 2026-07-29** —
+[#3108 comment 5119300474](https://github.com/PSLmodels/Tax-Calculator/issues/3108#issuecomment-5119300474).
+Adds OpenTaxSolver as a genuinely independent second witness on line 2a (OTS: AMTI 2,250,000 / AMT
+26,271, matching the form), and **corrects an error in our own filed issue**: we wrote that §55(d)(3)
+"also appears not to be modelled." Too broad. taxcalc DOES model it — `AMT_em_pe = 875,950` for 2024
+and the `MARS == 3` guard at `calcfunctions.py:2590`, docstring citing the subsection at `:2429`. What
+is genuinely missing is the *addition to line 4*; and the implemented cliff is inert, because the
+ordinary phaseout already reaches zero at 609,350 + 66,650/0.25 = 875,950, the same number.
+**We should have grepped for `AMT_em_pe` before filing.**
+
+Also disclosed against ourselves in that comment: OTS is NOT a witness on the MFS point — its 2024
+solver carries the 2023 thresholds and returns a third number (912,150) — so the MFS half rests on the
+instructions alone.
+
+**Status:** ★ **FILED 2026-07-29 (05:12Z) as [PSLmodels/Tax-Calculator#3108](https://github.com/PSLmodels/Tax-Calculator/issues/3108)** — open at the time of the v0.14.0 tag. This file is retained as the drafting record and the evidence table; the issue text below is what was posted. Repo confirmed from the installed package's own metadata
 (`taxcalc` 6.7.2, Home-page `https://github.com/PSLmodels/Tax-Calculator`, CC0-1.0 — so quoting their
 source carries no licence friction).
 
