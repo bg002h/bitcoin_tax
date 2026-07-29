@@ -911,25 +911,35 @@ mod tests {
     /// The root fact is the third: **in btctax's input class, an attachable Form 6251 exists only
     /// once the §55(d)(3) phase-out has begun.** The exemption is simply worth more than the flat
     /// 26/28% rate's excess over the graduated schedule, everywhere the exemption survives intact.
-    /// Measured at the widest point of the intact region — largest §63(f) deduction, largest §904(j)
-    /// FTC — the best `line 7 − line 10` is still negative on every status: Single −$6,377,
-    /// MFJ −$2,193, MFS −$1,098.50, HoH −$2,785.
+    /// Measured over the intact region at its widest — largest §63(f) deduction, largest §904(j)
+    /// FTC — `line 7 − line 10` is **never positive**, and at most −$1,098.50 wherever line 7 > 0:
+    /// Single −$6,377, MFJ −$2,193, MFS −$1,098.50, HoH −$2,785. (Its unrestricted maximum is
+    /// exactly $0, at the degenerate corner where line 7 = line 10 = 0; `must_attach` is a strict
+    /// `>`, so $0 does not attach.)
     ///
     /// Given that, once the phase-out has begun line 12 is at least the phase-out start minus the
     /// full exemption — $523,650 for Single/HoH, $542,700 MFS, $1,085,400 MFJ.
     ///
     /// - **(b) follows outright.** All four floors clear the §55(b)(1) breakpoint ($232,600; MFS
     ///   $116,300) with room to spare, so line 39 can never take the 26% side.
-    /// - **(a) follows for three of the four.** Lines 23/30 are bounded by their own bands:
-    ///   `line32 = line23 + line30 ≤ line21 + (line25 − line21 − line27) = line25 − line27 ≤
-    ///   line25`. So `line12 > line25` forecloses the skip — true for Single ($523,650 > $518,900,
-    ///   though by only $4,750), MFS and MFJ.
+    /// - **(a) follows for three of the four.** Lines 23/30 are each bounded by their own band, and
+    ///   line 29 is CLAMPED at zero (`line29 = max(0, line25 − line28)`), so:
+    ///   `line32 = line23 + line30 ≤ line21 + max(0, line25 − line21 − line27)
+    ///    = max(line21, line25 − line27) ≤ line25`, the last step because `line21 ≤ line19 < line25`
+    ///   on every status and `line27 ≥ 0`. So `line12 > line25` forecloses the skip — true for
+    ///   Single ($523,650 > $518,900, though by only $4,750), MFS and MFJ.
     ///   ★ **NOT true for HoH**, whose line-25 top is $551,350 — *above* the $523,650 floor. In that
     ///   $27,700 window the inequality says nothing, and the skip additionally needs
     ///   `line27 ≤ line25 − line12`, i.e. an ordinary bottom under $27,700. **HoH's (a) is carried
-    ///   by the sweep below, not by this argument** — stated explicitly because a confident
-    ///   equivalence comment that turns out to be wrong is this project's most expensive recurring
-    ///   defect, and this one was wrong until review r2 caught it.
+    ///   by the sweep below, not by this argument.**
+    ///
+    /// ★ THAT CHAIN IS WRITTEN OUT IN FULL BECAUSE IT WAS WRONG TWICE. The original claimed line 12
+    /// always exceeds the 15%-band top — false for HoH. The r2 fold replaced it with
+    /// `… ≤ line25 − line27 ≤ line25`, which drops line 29's clamp and is falsified by seven of this
+    /// module's own fixture vectors (V1: line 27 = $915,000 > line 25 = $583,750, so line 32 = 0
+    /// while the claimed bound is −$331,250). Same conclusion, wrong reason, twice — which is exactly
+    /// the failure mode `CLAUDE.md` names as this project's most expensive recurring defect. The
+    /// `max(0, …)` is the whole content of the fix.
     ///
     /// ★ WHY A SWEEP AND NOT A COMMENT. If btctax's input surface widens — an ISO exercise at line
     /// 2i, a §1202 exclusion at 2h, §1250 gain reaching line 14 — a preference item can push AMTI
@@ -1068,6 +1078,28 @@ mod tests {
                 let ctx = || {
                     format!("{status:?} itemized={itemized} deduction={deduction} ftc={ftc} (ordinary {ordinary}, gain {gain})")
                 };
+                // ★ The bound (a)'s argument rests on, ASSERTED rather than argued — it was written
+                //   wrongly twice, both times surviving a review of the prose. Holds on EVERY point,
+                //   attachable or not: line 23 ≤ line 21 and line 30 ≤ line 29 = max(0, line25 −
+                //   line28), so line 32 ≤ max(line21, line25 − line27) ≤ line 25. The `max(0, …)` is
+                //   the term the second wrong version dropped; without it the bound goes negative
+                //   whenever the regular-side ordinary bottom clears the 15%-band top.
+                assert!(
+                    f.line32 <= f.line21.max(f.line25 - f.line27),
+                    "{}: line 32 ({}) exceeds max(line21 {}, line25 − line27 {}) — the Part III \
+                     band bound is broken",
+                    ctx(),
+                    f.line32,
+                    f.line21,
+                    f.line25 - f.line27
+                );
+                assert!(
+                    f.line32 <= f.line25,
+                    "{}: line 32 ({}) exceeds line 25 ({})",
+                    ctx(),
+                    f.line32,
+                    f.line25
+                );
                 if f.must_attach() {
                     assert!(
                         f.line5 < full_exemption,

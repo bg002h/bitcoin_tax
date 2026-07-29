@@ -29,3 +29,46 @@ With FTC = 0, `line10 = R` and `line11 > 0 ⟺ line7 > line10`, so the sweep can
 
 **3. Minor — the HoH leg of the (c) ⇒ (a) derivation is a false universal.**
 The doc comment says "its line 12 exceeds the §1(h) 15%-band top, so a 20% tranche always survives lines 32/33 and the skip never fires." For HoH the phase-out-begun floor on line 12 is $609,350 − $85,700 = $523,650, which is **below** HoH's line-25 top of $551,350 — a $27,700 window the argument does not cover. The conclusion still holds (fine scan of that window: best `line7 − line10` = −$9,436, and the skip additionally needs ordinary ≤ $27,700, far from the margin's peak at ~$191,900), so this is a wrong *reason*, not a wrong result — but it is the "confident equivalence comment that was simply wrong" pattern `CLAUDE.md` codifies. Either name HoH as carried by the sweep rather than the argument, or state the correct bound (`line32 ≤ line25`, plus the ordinary-income constraint for HoH).
+
+---
+
+# E2 review r3 — narrow re-check of the r2 fold (commit `5a09b2d`)
+
+**Same reviewer, resumed with its r2 context.** Brief: three questions only — (A) is each r2 finding
+actually closed, (B) does the rewritten corollary paragraph state anything still false, (C) did the
+fold introduce a new way for the test to pass vacuously. No fresh audit, no file modification.
+
+**Persisted VERBATIM before folding.**
+
+---
+
+`git diff HEAD` is empty; all probing was done read-only plus a Python replication in /tmp.
+
+**A: CLOSED — all three.**
+- #1: the `deduction` loop is present and the amounts are right — $6,200 MFJ/QSS, $3,100 MFS, $3,900 Single/HoH — matching `std_aged_blind_married/unmarried` (`tax_tables.rs:124-125`), `AgedBlindBoxes::count()`'s 0–4 range, and `standard_deduction`'s MFS-declines-the-spouse-box rule.
+- #2: guard is `f.must_attach()` and `schedule_3_line1` now loops `[0, ftc_ceiling]`; the ceilings ($600 MFJ/QSS, $300 otherwise) match `return_refuse.rs:241`. I re-derived the sweep grid independently in Python and reproduce the Rust `checked` counts exactly at ftc=0 (Single 7,175 / MFJ 13,136 / MFS 11,283 / HoH 8,181), so the replication is faithful.
+- #3: HoH is now named as carried by the sweep, and both the $27,700 window and the `line27 ≤ line25 − line12` side condition are correct — but the replacement inequality introduces a new false statement (see B).
+
+**B: UNSOUND — the new chain drops the `max(0, …)` clamp on line 29, and 7 of the fixture's own 30 vectors falsify it.** The four per-status numbers, both sets, are correct: floors $523,650 / $542,700 / $1,085,400 (all clearing $232,600 / $116,300, so (b) is sound); Single's $4,750; HoH's $27,700; and the margins −$6,377 / −$2,193 / −$1,098.50 / −$2,785 are my measured values. The ~$4,400 sensitivity also independently reproduces on my own replication of the grid — green at $4,200, red at $4,400 (20 intact-and-attachable points) on MFS, deduction $17,700, FTC $300 — and the 26–28% arithmetic checks ($1,098.50 / 0.28 = $3,923). The defect is only in the middle term.
+
+**C: NO NEW VACUITY.** `amt() = max(0, line7 − line8 − line10)` with `line8 ≥ 0`, so `amt() > 0 ⇒ line7 > line10 = must_attach()` for every FTC value — the new guard is a superset by construction, not by parametrization, and a nonzero FTC only lowers line 10, which can only add points. Measured per cell, the guarded population rises monotonically along both new axes and never falls (Single 7,175→7,591, MFJ 13,136→13,627, MFS 11,283→11,701, HoH 8,181→8,613), all far above the 500 floor, and the ftc=0 arm is retained so nothing is dropped. I also checked the one way the widening could have *falsely* fired: a `must_attach` point with preferential income = 0, where `line12 = line32 = 0` would make `line32 != line12` a spurious red — zero such points across all 16 (status, deduction, ftc) cells.
+
+---
+
+**1. Minor — `line32 = line23 + line30 ≤ line21 + (line25 − line21 − line27) = line25 − line27 ≤ line25` is false whenever line 29 clamps.** Production clamps it: `f.line29 = (f.line25 - f.line28).max(z)`. When the regular-side ordinary bottom exceeds the 15%-band top (`line27 > line25`), line29 = 0, line21 = 0, so line32 = 0 while `line25 − line27` is negative — the stated bound is violated. V1, V3, V4, V6, V7, V8 and V9 are all in that state (V1: line27 = $915,000, line25 = $583,750, line32 = 0, bound = −$331,250). The conclusion `line32 ≤ line25` survives, and so does the HoH side condition, but via the clamped form: `line32 ≤ line21 + max(0, line25 − line21 − line27) = max(line21, line25 − line27) ≤ line25`, using `line21 ≤ line19 < line25` on all four statuses. Substituting that one expression restores the paragraph — and it still gives `line12 > line19` ⇒ the skip needs `line27 ≤ line25 − line12`, so nothing downstream changes.
+
+**2. Nit — "the best `line 7 − line 10` is still negative on every status" is 0, not negative.** The unrestricted maximum over the intact region is exactly $0, at the degenerate corner where line 7 = line 10 = 0 (line 6 ≤ 0, regular tax ≤ FTC). The four quoted figures are the maxima over points with **line 7 > 0**, which is the meaningful set. Since `must_attach` is a strict `>`, $0 still fails to attach and the conclusion is untouched; "never positive, and at most −$1,098.50 wherever line 7 > 0" would be exact.
+
+---
+
+## Fold of r3 (this session)
+
+Both accepted. The chain now carries line 29's clamp — `line32 ≤ line21 + max(0, line25 − line21 −
+line27) = max(line21, line25 − line27) ≤ line25` — and the margin sentence says "never positive, and
+at most −$1,098.50 wherever line 7 > 0", with the $0 degenerate corner named.
+
+**And the bound stopped being prose.** Having been written wrongly twice, it is now two assertions
+inside the sweep, evaluated at every point rather than only the attachable ones. Mutation-verified:
+removing `max(z)` from `f.line29` reds four tests. That is the r2/r3 lesson applied rather than
+merely recorded — a claim that survives two prose reviews and dies instantly to one assertion did not
+need a third reviewer, it needed a test.
