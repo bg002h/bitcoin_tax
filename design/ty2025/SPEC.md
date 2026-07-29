@@ -89,8 +89,11 @@ of self-employment tax; … SEP, SIMPLE, and qualified plans; and the self-emplo
 deduction, but not including the deduction for qualified tips." That is a second cap on line 5 that no
 amount of reviewing the *form* would have surfaced.
 
-**Still to fetch:** **Rev. Proc. 2024-40** and the **OBBBA (Pub. L. 119-21)** text (for the per-field
-source rule below).
+**Still to fetch — but nothing is blocked on them.** Rev. Proc. 2024-40 and the OBBBA text would give
+some §5.1 fields a *second* citation; every field already has one from an archived IRS document. ★ The
+lesson worth keeping: three of §5.1's four "still a lookup" fields, plus the QSS threshold, plus the
+Schedule 1-A occupation list, were all printed in `i1040gi--2025.pdf` — **a document already sitting in
+this directory while the spec listed them as outstanding.** Grep the archive before deferring.
 
 ## 2a. ★★ SOURCING OF RECORD — READ THIS BEFORE DERIVING ANYTHING
 
@@ -253,6 +256,10 @@ a blanket bar would also discard OTS where it is exact:
 `OvertimeIncomeDed_ps` and `SeniorDed_ps` all leave QSS at the unmarried figure. OTS gets it right
 (`if (status == MARRIED_FILING_JOINTLY) 200000 else 100000`, `:1885-1888`).
 
+★ **The instructions settle it beyond the form's parenthetical**: `i1040gi--2025.pdf` states the
+threshold as "• Married filing jointly—**$200,000**. • **All other filing statuses—$100,000**." QSS is
+an "other filing status", so taxcalc is definitively wrong rather than arguably so.
+
 **So: QSS Part IV inside the phase-out region has ZERO valid oracles** — taxcalc has the wrong
 threshold, OTS has the wrong rate and rounding. At QSS / MAGI $110,000 / $10,000 interest the form
 gives $8,000, OTS $7,000, taxcalc $10,000. **That cell ships zero-oracle and the §6.2 census must say
@@ -360,11 +367,17 @@ write time):
 | `qbi_ti_threshold_married` | **394,600** | recon 03, §199A(e)(2) / Rev. Proc. 2024-40 |
 | `ftc_ceiling` | **300 / 600 MFJ, unchanged** | §904(j) is statutory and **not** indexed |
 
-**Still a lookup, with the document named** — these are fetches, not open questions:
-`kiddie_unearned_threshold` (§1(g)(4), Rev. Proc. 2024-40) · `student_loan_phaseout_unmarried`/`_married`
-(§221(b)(2), Rev. Proc. 2024-40) · `elective_deferral_limit` (★ **NOT a Rev. Proc.** — §402(g)/§415(d)
-COLA notice; TY2024's carries `// §402(g)(1), Notice 2023-75`, so TY2025's is the 2025 COLA notice, a
-document class §2 must name).
+★ **AND THE LAST FOUR ARE CLOSED TOO — they were never fetches.** They are all printed in
+`i1040gi--2025.pdf`, which §2 already archives. Read, not deferred:
+
+| field | TY2025 | quoted from `i1040gi--2025.pdf` |
+|---|---|---|
+| `kiddie_unearned_threshold` | **2,700** | "You had more than **$2,700** of unearned income" |
+| `elective_deferral_limit` | **23,500** | "…deferred for under all plans was more than **$23,500** (excluding catch-up contributions)" — §402(g)(1) |
+| `student_loan_phaseout_unmarried` | **(85,000, 100,000)** | start "…surviving spouse—**$85,000**"; "Divide line 6 by **$15,000**" |
+| `student_loan_phaseout_married` | **(170,000, 200,000)** | start "Married filing jointly—**$170,000**"; "…(**$30,000** if married filing jointly)" |
+
+**Every `FullReturnParams` field now has a value and a citation. Nothing in §5.1 is outstanding.**
 
 `AmtParams` for 2025 — **all cells verified against `f6251--2025.pdf` in review r1**:
 
