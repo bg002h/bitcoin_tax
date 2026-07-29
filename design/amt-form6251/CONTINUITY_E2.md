@@ -1,7 +1,8 @@
 # CONTINUITY — AMT / Form 6251, resuming at E2
 
 **Written 2026-07-29.** Read this first; it is written for a reader with **no prior context**.
-`main` is green and pushed at `761dbf4`. Nothing is in flight. No branch is open.
+`main` is green and pushed; this document is itself the most recent commit on it. Nothing is in
+flight and no branch is open — confirm with `git log --oneline -3` and `git status`.
 
 ---
 
