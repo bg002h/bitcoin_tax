@@ -158,7 +158,12 @@ and 36b"; line 38 = "Add lines 13, 21, 30, and 37 … enter on Form 1040 line 13
 existing field would omit 13b entirely **and** leave Form 8995 line 11 overstating
 taxable-income-before-QBI by the whole Schedule 1-A total — overstating the §199A deduction and firing
 `qbi_over_threshold` **too EARLY — a false refusal** (r2-8: the r2 draft said "too late", backwards;
-omitting a deduction *overstates* taxable income, so the threshold is crossed sooner). **The QBI ordering for 2025 is `11b − 12e − 13b`.**
+omitting a deduction *overstates* taxable income, so the threshold is crossed sooner). **The QBI ordering for 2025 is AGI − 12e − 13b.** ★ Cite it as the form does, not as we prefer:
+Form 8995 line 11 prints only "Taxable income before qualified business income deduction (see
+instructions)", so the 1040-line reference lives in i8995 and the doc comment quotes i8995 verbatim.
+There is no ambiguity in the *value* — the 2025 1040 defines line 11a as "Subtract line 10 from line 9.
+This is your adjusted gross income" and line 11b as "**Amount from line 11a** (adjusted gross income)",
+a page-2 carry-forward, so 11a and 11b are the same number.
 "One struct, a year field, branches inside" is **rejected**; the mechanism is the plan's to choose.
 
 **D-9. COLLECT EVERY NUMBERED LINE — including ones that will almost always be zero.** Owner decision,
@@ -282,6 +287,11 @@ computed with Form 6251 line 1 in 2024 numbering, `AbsoluteReturn.line14` as "L1
 deleted only in the final work item.** That single addition is also what makes this shippable
 incrementally instead of whole-or-nothing.
 
+★ **§5 IS A DEPENDENCY ORDER, and the shared MAGI surface comes FIRST.** §5.1's SALT worksheet reads
+its line 4 from lines 3a–3d, which are the same inputs as Schedule 1-A Part I lines 2a–2d (D-6). There
+is no computational cycle — Schedule 1-A itself reads only AGI — but the MAGI *input surface* must
+exist before either consumer. Build order: MAGI surface → SALT worksheet → Schedule 1-A parts.
+
 ### 5.1 Constants: `FullReturnParams` for 2025
 
 Each field carries its own citation under the §2 per-field rule. **Two are OBBBA, not the Rev. Proc.:**
@@ -337,10 +347,24 @@ with the worksheet for MFS.
 phase-down and floor are unreachable for them. A derived `max(cap − rate × excess, floor)` reproduces
 that by accident; the worksheet states it.
 
-Remaining fields, each to be sourced: `std_aged_blind_married`/`_unmarried` ·
-`dependent_std_floor`/`_earned_addon` · `kiddie_unearned_threshold` · `elective_deferral_limit` ·
-`ftc_ceiling` · `qbi_ti_threshold_unmarried`/`_married` ·
-`student_loan_phaseout_unmarried`/`_married` · `amt`.
+**Remaining fields — 7 of 11 now have a value or a definitive answer** (from §2a's recon, re-verify at
+write time):
+
+| field | TY2025 | source |
+|---|---|---|
+| `std_aged_blind_married` | **1,600** | recon 01, §63(f) |
+| `std_aged_blind_unmarried` | **2,000** | recon 01, §63(f) |
+| `dependent_std_floor` | **1,350** | recon 01, §63(c)(5) |
+| `dependent_std_earned_addon` | **450** | recon 01, §63(c)(5) |
+| `qbi_ti_threshold_unmarried` | **197,300** | recon 03, §199A(e)(2) / Rev. Proc. 2024-40 |
+| `qbi_ti_threshold_married` | **394,600** | recon 03, §199A(e)(2) / Rev. Proc. 2024-40 |
+| `ftc_ceiling` | **300 / 600 MFJ, unchanged** | §904(j) is statutory and **not** indexed |
+
+**Still a lookup, with the document named** — these are fetches, not open questions:
+`kiddie_unearned_threshold` (§1(g)(4), Rev. Proc. 2024-40) · `student_loan_phaseout_unmarried`/`_married`
+(§221(b)(2), Rev. Proc. 2024-40) · `elective_deferral_limit` (★ **NOT a Rev. Proc.** — §402(g)/§415(d)
+COLA notice; TY2024's carries `// §402(g)(1), Notice 2023-75`, so TY2025's is the 2025 COLA notice, a
+document class §2 must name).
 
 `AmtParams` for 2025 — **all cells verified against `f6251--2025.pdf` in review r1**:
 
@@ -427,6 +451,11 @@ Occupation Code** (see §2's r1-8 note, which retracted the earlier "not a docum
 - ★ **`scripts/oracle/corpus.py` is a year seam too (r2-5).** Its SALT axis tops out at
   `$8,000 + $9,000 = $17,000` — built for a $10,000 cap, and therefore a **no-op against TY2025's
   $40,000 cap**. The axis that exists to test the cap stops testing anything.
+- ★ **The fixture's LINE SET is per-year, not just a `year` tag.** The Rust KAT is
+  `let lines: [(&str, Usd); 41]` — closed at both ends and **indexed**, so a renamed key panics by
+  design — and `verify_f6251.py` sums `("line1","line2a","line2b","line3")` and holds a hardcoded
+  `STANDARD_DEDUCTION_2024`. TY2025 replaces `line1` with `line1a`/`line1b`, so the array forks to
+  **42** entries and the gap sizing becomes per-year. That 41-entry array is the thing that forks.
 - `form6251_vectors.json` is implicitly TY2024 — add `year`; make `params()`/`bps()` and
   `verify_f6251.py` select per year; the witness census asserts the gate **per year**.
 
@@ -443,6 +472,11 @@ each needing a PDF and an AcroForm `.map.toml`. Without them TY2025 *computes* b
 TY2025 MFS vectors above the 900,350 kicker start, witnessed by OTS 2025 — the analogues of
 V23/V24/V25, which have no witness at all in TY2024.
 
+★ **Plus at least one TY2025 MFS AMT-owing vector BELOW the kicker start.** `_taxcalc_expected_gaps`
+disqualifies taxcalc on every vector whose line 4 exceeds lines 1+2a+2b+3 — i.e. on exactly the
+above-kicker vectors — so a TY2025 fixture containing only those makes MFS a one-oracle status and
+**reds §6.3's own census**. TY2024's V22 is precisely this vector; TY2025 needs its analogue.
+
 ---
 
 ## 6. Test / green definition
@@ -456,7 +490,9 @@ V23/V24/V25, which have no witness at all in TY2024.
    well as Form 6251 (r1-5)**, so OTS's Part IV defects are a stated escape rather than an improvised
    one. Any part shipping on one oracle must say so, in the same census that says it for AMT.
 3. **The witness census passes per year** — every filing status in each year's fixture has ≥1
-   AMT-owing vector agreed by two oracles.
+   AMT-owing vector agreed by two oracles, **or a D-10 citation**: an IRS worked example pinned as a
+   KAT satisfies this in place of a second oracle, since D-10 ranks it the stronger evidence. Without
+   that clause §6.3 and D-10 disagree about what counts.
 4. **Schedule 1-A reconciles part by part**, including **each phase-out's knee and its cap**, and
    **across all five filing statuses** (r1-4) — the MFS bar on II/III/V is a required case, not an
    incidental one.
@@ -483,7 +519,9 @@ V23/V24/V25, which have no witness at all in TY2024.
    one-oracle — D-8 and D-10 now ship cells with no witness at all.
 8. **Conformance is a test, not a review** — "is every Schedule 1-A line present?", "does each doc
    comment match the printed text?" are assertions.
-9. **Mutation-verified guards.** Precedent from this session: the `phaseout_rate` split passed every
+9. **The TY2025 form assets exist and read back** (§5.4, §8a B4) — 12 new PDFs with AcroForm maps plus
+   the two partial 2025 maps rebuilt. §4 does not exclude them, so §6 asserts them.
+10. **Mutation-verified guards.** Precedent from this session: the `phaseout_rate` split passed every
    existing test until a mutation showed the whole suite was blind to it.
 
 ---
@@ -518,15 +556,18 @@ Schedule 1-A Parts II, III and V, and its SALT worksheet's non-MFS legs.** Read 
 
 1. **The per-year form-shape mechanism** (D-4) — per-year structs, versioned parts, or an enum? The
    plan decides; the spec forbids branching inside one struct.
-2. **Does the golden corpus extend to TY2025 in this project, or after Tier-2 E5?** ★ §6.5 now
-   *requires* TY2025 SALT households in four regions × five statuses, so "no corpus" is no longer a
-   free answer — and `corpus.py`'s SALT axis needs raising regardless (§5.3).
+2. ~~Does the golden corpus extend to TY2025?~~ — **CLOSED: yes, it must.** §6.5 requires TY2025 SALT
+   households across four regions × five statuses, which only the corpus can supply, and `corpus.py`'s
+   SALT axis needs raising regardless (§5.3). Scheduled to **§8a B4**.
 5. ~~How is a zero-oracle cell shipped?~~ — **ANSWERED by D-9 and D-10.** Cite the IRS instructions,
    KAT it, census it, and register the suspected oracle defect upstream. Nobody is refused for an
    oracle's shortcoming, and nobody is refused for a line we can simply collect.
-3. ~~Part IV VIN storage vs. the PII scanner~~ — **answered:** `scripts/pii-scan-generic.sh:3` matches
-   only SSN (`\d{3}-\d{2}-\d{4}`) and EIN (`\d{2}-\d{7}`) shapes; a 17-character VIN is not covered.
-   Decide: extend `SHAPES`, or record why a VIN is out of scope.
+3. ~~Part IV VIN storage vs. the PII scanner~~ — **CLOSED: out of scope for the generic scanner, and
+   here is why.** `pii-scan-generic.sh` matches only SSN and EIN shapes and scans **HEAD** — its job is
+   catching PII accidentally committed to *source*. A VIN reaches btctax through runtime input, never a
+   source file, and a 17-character alphanumeric pattern would false-positive on hashes and short SHAs.
+   **Instead:** the Schedule 1-A emitter's tests assert no VIN-shaped literal appears in any committed
+   fixture. Recorded rather than left as a decision, since D-9 makes VIN collection mandatory.
 4. ~~Does OTS 2025 apply the §170(b) cash ceiling?~~ — **answered: yes**, `taxsolve_US_1040_2025.c:2424`
    caps `charityCC` at 60% of AGI. That leg of the disqualification predicate must therefore be
    year-scoped (§5.3), not merely re-used.
