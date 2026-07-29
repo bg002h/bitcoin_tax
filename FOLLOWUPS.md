@@ -398,9 +398,29 @@ a taxcalc disagreement is adjudicated against the PDF, never encoded.
 entry said to report it. That skips this repo's own standard, which is **two** oracles. Corrected
 below, and the reason it could not be met is itself the more important finding.
 
-**[open] ★ THE TWO-ORACLE MODEL HAS A STRUCTURAL BLIND SPOT AT AMT.** Oracle 1 (OpenTaxSolver) cannot
-arbitrate this, for two independent reasons: (a) no OTS tree is installed here (`OTS_DIR` unset), and
-(b) **even when it is, the harness never asks it** — `scripts/oracle/ots_direct.py` extracts
+**★★★ CORRECTED 2026-07-29 — THE BLIND SPOT WAS (b) ONLY, AND OTS ARBITRATES AMT DECISIVELY.**
+
+I claimed, here and in the shipped v0.14.0 release notes, that *"OpenTaxSolver computes no Form 6251 at
+all."* **That is false.** `taxsolve_US_1040_2024.c:222` defines
+`form6251_AlternativeMinimumTax(int itemized)`, "Updated for 2024", and the solver prints the WHOLE form
+line by line (`AMT_Form_6251_L1` … `L40`) into its 1040 output, then `L[17] = Sched2[3]`. I asserted the
+absence without ever installing the tree or reading the source — the same error as claiming taxcalc was
+uninstalled after checking the wrong Python.
+
+**Installed and RUN 2026-07-29** (`~/OpenTaxSolver2024_22.07_linux64`, v22.07). On our upstream repro —
+MFJ, $250,000 wages + $2,000,000 LTCG, standard deduction — OTS gives:
+
+| line | OTS | btctax | Tax-Calculator |
+|---|---:|---:|---:|
+| 6251 L2a (std-deduction add-back) | **29,200** | 29,200 | *omitted* |
+| 6251 L11 = 1040 L17 (the AMT) | **26,271** | 26,271 | 18,331 |
+
+Critically, `taxsolve_US_1040_2024.c` codes line 2a as `if (itemized) amtws2a = SchedA[7]; else
+amtws2a = L[12];` — byte-for-byte the branch btctax implements and the one Tax-Calculator gets wrong.
+**So PSLmodels/Tax-Calculator#3108 is now corroborated by a genuinely independent second oracle**, which
+is what this project's two-oracle standard demands and what we filed without.
+
+**[open] What actually remains:** the harness never asks OTS for it — `scripts/oracle/ots_direct.py` extracts
 `income_tax_before_credits = L16` and `total_tax = L24 + niit`, and never reads the 1040's **line 17**,
 which is exactly where AMT lands (its only `L17` is Form 8960's NIIT). So the differential sweep has no
 second opinion on AMT and never has.
@@ -411,8 +431,9 @@ of understating. Widening the corpus (below) does not fix it; it produces househ
 can score. **Before Tier 2 ships, either teach `ots_direct.py` to read the 1040 L17 and install OTS, or
 state plainly that AMT-bearing returns are validated by the form and hand-derived vectors alone.**
 
-**[open] Then, and only then, report the taxcalc defect upstream** (this project has form: tenforty
-issue #278 / PR #279). Minimal repro to confirm against a second engine first: MFJ, $250,000 wages +
+**[DONE 2026-07-28/29] Reported upstream as PSLmodels/Tax-Calculator#3108** (open), and as of
+2026-07-29 **corroborated by OTS** per the correction above — so the two-oracle bar is now met
+retroactively. Original text (this project has form: tenforty issue #278 / PR #279). Minimal repro to confirm against a second engine first: MFJ, $250,000 wages +
 $2,000,000 long-term gain, standard deduction → taxcalc `c09600` = $18,331; the form gives **$26,271**.
 Current evidence, all consistent but all one-sided: the form's own line 2a text, i6251 p.2 and its TIP,
 §56(b)(1)(D), taxcalc's own source, and r1's independent hand-derivation (which pre-dates the code and
