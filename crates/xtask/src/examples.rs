@@ -14,8 +14,8 @@ use std::process::Command;
 // The synthetic corpora now live in `btctax_cli::testonly` (one source of truth, shared with the TUI
 // screen-walkthrough emit tests). These bytes are unchanged by the move — the golden gate proves it.
 use btctax_cli::testonly::{
-    J1_CSV, J2_CSV, J3_CSV, J4_CSV, J5_CSV, J6_COINBASE_CSV, J6_FULLRETURN_TOML, J6_RIVER_CSV,
-    J7_CSV, J8_COINBASE_CSV, J8_RIVER_CSV, J9_CSV,
+    J10_CSV, J10_FULLRETURN_TOML, J1_CSV, J2_CSV, J3_CSV, J4_CSV, J5_CSV, J6_COINBASE_CSV,
+    J6_FULLRETURN_TOML, J6_RIVER_CSV, J7_CSV, J8_COINBASE_CSV, J8_RIVER_CSV, J9_CSV,
 };
 
 /// SPEC §3.3 pinned environment (minus `BTCTAX_NOW`/`HOME`, which are set per invocation).
@@ -241,6 +241,7 @@ pub fn generate(bin: &Path) -> String {
     journey_j7(&mut md, bin);
     journey_j8(&mut md, bin);
     journey_j9(&mut md, bin);
+    journey_j10(&mut md, bin);
 
     md
 }
@@ -1596,6 +1597,65 @@ fn generate_j6_walkthrough_console(bin: &Path) -> String {
 /// holdings, the default method picks the lots for you; `select-lots` lets you identify EXACTLY
 /// which ones — the picks (`<origin>#<split>:<sat>`) come from the disposal's `lot` column in
 /// export-snapshot, and their sats must sum to the disposal's size.
+/// J10 — a return the AMT **screen** flags, that owes no AMT. The screening worksheet only ever says
+/// "fill in Form 6251"; btctax now fills it in and reports the comparison, instead of refusing.
+fn journey_j10(md: &mut String, bin: &Path) {
+    md.push_str(
+        "\n## J10 — high income, the AMT screen, and no alternative minimum tax\n\n\
+         Nina and Tomas file jointly on $400,000 of wages and take the standard deduction. Nina sold a\n\
+         2021 Bitcoin lot in 2024 for a $200,000 long-term gain, putting their AGI at $600,000 — enough\n\
+         to trip the IRS's *Worksheet To See if You Should Fill in Form 6251* (its line 11 reaches\n\
+         $466,700, over the $232,600 breakpoint).\n\n\
+         That worksheet only ever says **fill in Form 6251** — never *you owe AMT*. So btctax fills it\n\
+         in. Their tentative minimum tax lands below their regular tax, so no Form 6251 need be attached\n\
+         (i6251, *Who Must File*, condition 1) and the return is produced in full:\n\n",
+    );
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cwd = dir.path();
+    write_corpus(cwd, "coinbase.csv", J10_CSV);
+    write_corpus(cwd, "fullreturn.toml", J10_FULLRETURN_TOML);
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "init", "--key-backup", "key-backup.asc"]),
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "import", "coinbase.csv"]),
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&[
+            "--vault",
+            "v.pgp",
+            "income",
+            "import",
+            "--year",
+            "2024",
+            "--file",
+            "fullreturn.toml",
+        ]),
+    );
+    emit(
+        md,
+        bin,
+        cwd,
+        &plain(&["--vault", "v.pgp", "report", "--tax-year", "2024"]),
+    );
+    md.push_str(
+        "\nThe **Alternative Minimum Tax** block above is the point: it shows the comparison that\n\
+         cleared them — AMTI, the exemption, the tentative minimum tax, and the regular tax it is\n\
+         measured against — rather than silently proceeding. A filer who trips the screen can see WHY\n\
+         they owe nothing. Had line 7 exceeded line 10, btctax would have refused rather than file an\n\
+         incomplete return.\n\n",
+    );
+}
+
 fn journey_j9(md: &mut String, bin: &Path) {
     md.push_str(
         "\n## J9 — identifying specific lots for a disposal (`select-lots`)\n\n\

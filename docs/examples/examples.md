@@ -903,3 +903,90 @@ Per-disposal compliance (post-2025): 1
   import|coinbase|trade|sale @ 2025-06-01 :: contemporaneous
 Promote-basis drift advisories: 0
 ```
+
+## J10 — high income, the AMT screen, and no alternative minimum tax
+
+Nina and Tomas file jointly on $400,000 of wages and take the standard deduction. Nina sold a
+2021 Bitcoin lot in 2024 for a $200,000 long-term gain, putting their AGI at $600,000 — enough
+to trip the IRS's *Worksheet To See if You Should Fill in Form 6251* (its line 11 reaches
+$466,700, over the $232,600 breakpoint).
+
+That worksheet only ever says **fill in Form 6251** — never *you owe AMT*. So btctax fills it
+in. Their tentative minimum tax lands below their regular tax, so no Form 6251 need be attached
+(i6251, *Who Must File*, condition 1) and the return is produced in full:
+
+```console
+$ btctax --vault v.pgp init --key-backup key-backup.asc
+Initialized vault v.pgp (key backed up to key-backup.asc)
+```
+```console
+$ btctax --vault v.pgp import coinbase.csv
+Import:
+  coinbase [coinbase.csv]: parsed 2 rows -> 2 BTC events (0 dropped no-BTC, 0 unclassified)
+  appended 2 | duplicates 0 | NEW import-conflicts 0
+```
+```console
+$ btctax --vault v.pgp income import --year 2024 --file fullreturn.toml
+Imported full-return inputs for tax year 2024.
+```
+```console
+$ btctax --vault v.pgp report --tax-year 2024
+Federal tax attributable to crypto — tax year 2024
+  net short-term: 0.00   net long-term: 200000.00
+  crypto ordinary income (level): 0.00
+  ordinary-rate tax (attributable): 0.00
+  LTCG tax (attributable): 30000.00   NIIT (attributable): 7600.00
+  TOTAL federal tax attributable to crypto (delta): 37600.00   (= ordinary-rate + LTCG + NIIT attributable)
+  §1211 loss deduction (level): 0.00   carryforward out: short 0.00 / long 0.00
+  marginal rates: ordinary 0.24 / LTCG 0.15 / NIIT increased by crypto: yes
+  (incremental ceteris-paribus delta on the minimal profile; excludes AGI-driven SS/IRMAA/AMT/QBI/phaseout effects — I5. §1411 NIIT reduces NII by the §1211(b)-allowed net capital loss (≤ $3,000 / $1,500 MFS — Form 8960 line 5a / §1.1411-4(d)) and is floored at $0; crypto ordinary income (mining/staking/airdrops/rewards) is correctly excluded from NII; crypto-lending interest income (§1411(c)(1)(A)(i)) is INCLUDED in NII; mining/staking/airdrops/rewards remain excluded (SE income per §1411(c)(6) or non-NII other income).)
+Schedule D (raw pre-netting part totals) — tax year 2024
+  Part I  (short-term): proceeds 0.00   cost basis 0.00   gain 0.00
+  Part II (long-term):  proceeds 250000.00   cost basis 50000.00   gain 200000.00
+  Note: §1222/§1211/§1212 netting + carryforward are applied in the tax computation (report --tax-year); these are the raw pre-netting Form 8949/Schedule D part totals.
+
+═══ Absolute filed return (Form 1040) — tax year 2024 ═══
+  Profile source: ReturnInputs (derived from line items)
+  Total income (1040 L9):   600000.00
+  Adjustments (L10):        0.00
+  AGI (L11):                600000.00
+  Deduction (L12, standard): 29200.00
+  Taxable income (L15):     570800.00
+  Tax (L16):                105077.00
+  Additional Medicare (Form 8959 → Sch 2 L11): 1350.00
+  Net Investment Income Tax (Form 8960 → Sch 2 L12): 7600.00
+  Alternative Minimum Tax (Form 6251 → Sch 2 L2): 0.00
+    AMTI (L4) 600000.00 · exemption (L5) 133300.00 · tentative minimum tax (L9) 100024.00 · regular tax (L10) 105077.00
+    Line 7 does not exceed line 10 → no Form 6251 attachment is required.
+  TOTAL TAX (L24):          114027.00
+  Total payments (L33):     97350.00
+  → AMOUNT OWED (L37):      16677.00
+
+  ── Two DIFFERENT questions — NOT reconciled (SPEC §6) ──
+  • Absolute TOTAL TAX (this filed return, WITH crypto): 114027.00
+  • Crypto-attributable tax (DELTA, shown above):        37600.00
+  The delta's implied deduction is fixed at derivation time (non-crypto AGI), so it is APPROXIMATE where a
+  deduction is AGI-sensitive (e.g. the 7.5% medical floor); the two do NOT reconcile to the dollar.
+
+  ── ADVISORIES (3) ──
+  • OTHER CREDITS NOT COMPUTED — v1 does not compute the education (Form 8863),
+    dependent-care (Form 2441), retirement-savings/saver's (Form 8880), residential-energy
+    (Form 5695) or adoption (Form 8839) credits: Schedule 3 Part I is $0 apart from the
+    foreign tax credit. If you qualify for any of them your tax is OVERSTATED — claim them
+    yourself.
+  • DATE OF BIRTH NOT ON FILE — the §63(f) additional standard deduction for age 65+ ($1,550
+    per box) was NOT granted, because v1 never assumes a birthdate. If you (or your spouse)
+    are 65 or older, enter the date of birth and re-run: your tax is currently OVERSTATED.
+  • BLINDNESS NOT DECLARED — the §63(f) additional standard deduction for blindness ($1,550
+    per box) was NOT granted for 2 person(s) whose blindness was never stated (v1 never
+    assumes it). It STACKS with the age-65+ box. If you (or your spouse) are legally blind,
+    run `btctax income answer`: your tax is currently OVERSTATED.
+  (Advisories never change a number and never fail the command. See `btctax limitations`.)
+```
+
+The **Alternative Minimum Tax** block above is the point: it shows the comparison that
+cleared them — AMTI, the exemption, the tentative minimum tax, and the regular tax it is
+measured against — rather than silently proceeding. A filer who trips the screen can see WHY
+they owe nothing. Had line 7 exceeded line 10, btctax would have refused rather than file an
+incomplete return.
+

@@ -1511,6 +1511,14 @@ pub fn render_dual_report(
     // ★ Form 6251. Shown only when the cheap screen flagged the return — i.e. exactly when the filer
     // would otherwise wonder why a high-income return went through. The point is that they can SEE the
     // comparison that cleared them (line 7 vs line 10), not just be told there is no AMT.
+    //
+    // ★ Coverage note. J10's golden pins this block, and dropping it reds `examples_golden_matches_
+    // committed`. It CANNOT discriminate line 9 from line 7, because every bundled journey has no
+    // foreign tax credit, and line 9 = line 7 − line 8 collapses to line 7 when line 8 is zero
+    // (verified: swapping `line9` for `line7` here leaves the golden green). That distinction is held
+    // instead by the vector KAT — fixture V9 carries a $600 §904(j) credit, where line 7 = 2,244,338
+    // and line 9 = 2,243,738 diverge, and `every_vector_reproduces_the_form_line_by_line` asserts each
+    // line separately. Do not "simplify" this to line 7 on the strength of a green golden.
     if ar.amt.line6 > Usd::ZERO {
         let _ = writeln!(
             s,

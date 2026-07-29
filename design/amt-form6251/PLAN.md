@@ -390,8 +390,23 @@ building it.
       for free by T3). Also decide the `:266-276` anchor-exemption branch: retarget or remove.
 - [ ] Assert a **numeric floor** on newly-covered households.
 
-**Tier 1 gate:** suite green, 0C/0I, every line of the form present with matching doc text, a
-no-attachment return exports a complete packet, and V4/V5/V6 reconcile against `c09600`.
+**Tier 1 gate:** suite green, 0C/0I, every line of the form present with matching doc text, and a
+no-attachment return exports a complete packet.
+
+**★ The `c09600` clause is RETIRED (2026-07-28).** It read "V4/V5/V6 reconcile against `c09600`" — a
+gate that can never pass, for a reason discovered by running it. `scripts/oracle/verify_f6251.py`
+reports **9 of 11 vectors agreeing** with Tax-Calculator; the two that do not are **V4 and V5, the only
+standard-deduction vectors that owe AMT**, and the discrepancy is a defect in *Tax-Calculator*:
+`calcfunctions.py`'s `if standard > 0.0` branch subtracts the standard deduction and never applies Form
+6251 line 2a's add-back. Filed upstream as PSLmodels/Tax-Calculator#3108. The gate is therefore **"0
+unexpected divergences from `verify_f6251.py`"**, with V4/V5 adjudicated against the form — per
+`CLAUDE.md`, an oracle is a witness and the IRS PDF is the authority.
+
+**And the two-oracle standard cannot be met here at all** (`FOLLOWUPS.md` §G-6): OpenTaxSolver computes
+no Form 6251 — its 1040 solver is *fed* Schedule 2 rather than deriving it — so there is no second
+engine to ask. What stands in its place: the form's own text, i6251, §56(b)(1)(D), a second IRS
+worksheet reaching the same base by a different route, and two blind hand-derivations that never saw
+this code. That is a **Tier-2 blocker**, not a Tier-1 one — Tier 1 ships only zero-AMT returns.
 
 ---
 

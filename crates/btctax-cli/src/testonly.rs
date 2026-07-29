@@ -96,6 +96,85 @@ lot-a,2023-01-01 12:00:00 UTC,Buy,BTC,0.60000000,USD,25000.00,15000.00,15000.00,
 lot-b,2024-01-02 12:00:00 UTC,Buy,BTC,0.40000000,USD,60000.00,24000.00,24000.00,0.00,,,\r\n\
 sale,2025-06-01 12:00:00 UTC,Sell,BTC,0.50000000,USD,47500.00,47500.00,47500.00,0.00,,,\r\n";
 
+/// J10 corpus — a household the AMT SCREEN flags but that owes no alternative minimum tax. One 2021 lot
+/// sold in 2024 for a $200,000 long-term gain; paired with `J10_FULLRETURN_TOML`'s $400,000 of wages it
+/// reaches $600,000 of AGI, which trips the Form 6251 screening worksheet (its line 11 = $466,700, over
+/// the $232,600 breakpoint). Before Form 6251 was computed, btctax REFUSED this return outright and
+/// wrote no forms at all.
+pub const J10_CSV: &str = "\r\nTransactions\r\nUser,00000000-0000-0000-0000-000000000000\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
+j10-buy,2021-03-15 12:00:00 UTC,Buy,BTC,2.00000000,USD,25000.00,50000.00,50000.00,0.00,,,\r\n\
+j10-sell,2024-09-10 12:00:00 UTC,Sell,BTC,2.00000000,USD,125000.00,250000.00,250000.00,0.00,,,\r\n";
+
+/// J10's non-crypto side: MFJ, $400,000 of wages, the standard deduction, no Schedule A. Deliberately
+/// carries NO mortgage interest and NO capital-loss carryforward, so neither Form 6251 declaration
+/// (lines 3 and 2k) is live — the journey demonstrates the AMT computation, not the questions.
+pub const J10_FULLRETURN_TOML: &str = r#"filing_status = "Mfj"
+foreign_accounts = false
+foreign_trust = false
+foreign_country_names = ""
+dual_status_alien = false
+itemize_election = "auto"
+charitable_carryover_in = []
+
+[capital_loss_carryforward_in]
+long = "0"
+short = "0"
+
+[header]
+address_street = "88 Larkspur Way"
+address_city = "Boulder"
+address_state = "CO"
+address_zip = "80301"
+can_be_claimed_as_dependent_taxpayer = false
+can_be_claimed_as_dependent_spouse = false
+presidential_fund_taxpayer = false
+presidential_fund_spouse = false
+
+[header.taxpayer]
+first_name = "Nina"
+last_name = "Okafor"
+occupation = "Anesthesiologist"
+ssn = "400-11-2222"
+
+[header.spouse]
+first_name = "Tomas"
+last_name = "Okafor"
+occupation = "Structural Engineer"
+ssn = "400-33-4444"
+
+[payments]
+estimated_tax_payments = "0"
+extension_payment = "0"
+other_withholding = "0"
+
+[qbi]
+reit_ptp_carryforward_in = "0"
+reit_ptp_carryforward_in_provenance = "user"
+
+[sch1]
+hsa_activity = false
+ira_deduction_claimed = "0"
+state_refund_taxable = "0"
+student_loan_interest_paid = "0"
+
+[[w2s]]
+owner = "taxpayer"
+employer = "Front Range Health"
+box1_wages = "400000"
+box2_fed_withheld = "96000"
+box3_ss_wages = "168600"
+box4_ss_withheld = "10453.20"
+box5_medicare_wages = "400000"
+box6_medicare_withheld = "7150"
+box7_ss_tips = "0"
+box8_allocated_tips = "0"
+box10_dependent_care = "0"
+box12 = []
+box17_state_tax_withheld = "0"
+box19_local_tax = "0"
+"#;
+
 // ── Per-journey fixtures ───────────────────────────────────────────────────────────────────────────
 
 /// One journey's synthetic input: the named corpus files a driver writes to a tempdir before `import`.
