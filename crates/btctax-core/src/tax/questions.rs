@@ -141,7 +141,10 @@ fn amt_carryover_question_live(ri: &ReturnInputs) -> bool {
 /// later is a safe edit; widening the fallback is not.
 ///
 /// Each permitted YES is individually grounded in i6251 (2024) p.5:
-///   - no depreciation claimed ⇒ line 2l is $0 by arithmetic;
+///   - no depreciation claimed AND none capitalized ⇒ line 2l is $0 by arithmetic. The capitalization
+///     rider is not pedantry: i6251 says "you must refigure depreciation for the AMT, **including
+///     depreciation allocable to inventory costs**", and a filer who capitalized rather than deducted
+///     would otherwise read "claimed no depreciation" as true;
 ///   - "Any part of the cost of any property for which you elected to take a section 179 expense
 ///     deduction" (a fully-§179'd asset leaves no remaining basis to refigure);
 ///   - "Qualified property that is or was eligible for a special depreciation allowance …" plus "It
@@ -339,7 +342,8 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         prompt: "Is the depreciation included in your Schedule C expenses the SAME for the alternative \
                  minimum tax as for the regular tax? (Form 6251 line 2l.) Answer YES only if one of \
                  these is true of EVERY depreciable asset in that total: you claimed no depreciation at \
-                 all; or you deducted its whole cost under section 179; or it was placed in service \
+                 all, and none was capitalized into inventory; or you deducted its whole cost under \
+                 section 179; or it was placed in service \
                  after 2015 and qualified for bonus depreciation (most equipment bought since 2016); or \
                  it is depreciated straight-line and was placed in service after 1998; or you elected \
                  ADS for it. Answer NO if any asset falls outside that list — in particular anything \
