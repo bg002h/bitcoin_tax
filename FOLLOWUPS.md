@@ -470,6 +470,37 @@ feature; a wrong finding here is a wrong filed number.
   computation is not supported for 2025 in this version (v1 supports TY2024)" even though `SUPPORTED_YEARS`
   bundles 2025 forms and the crypto-slice path fills them. Worth a roadmap decision, not just a refusal.
 
+### G-8 — v0.14.0 release residue (2026-07-29, shipped)
+
+Filed from the pre-release verification, which returned **NO-GO on five blocking items** — all folded
+before the tag (see `chore(release): v0.14.0`). What remains:
+
+- **[open → Tier 2] Rename `RefuseReason::AmtScreenTriggered`** (e.g. `AmtFormMustBeAttached`). The name
+  is now a misnomer: the trigger is Form 6251 line 7 > line 10, not the screening worksheet. Deferred
+  deliberately — renaming a public enum variant reopens the cross-crate exhaustive-match blast radius
+  that four review rounds closed, and Tier 2 is already breaking, so the rename is free there.
+  `return_refuse.rs`; call sites `return_1040.rs`, `btctax-input-form/src/attribute.rs`.
+- **[open → ownerless residue] Add a lockstep guard for the version bump.** A test asserting every
+  inter-crate dependency `version` equals `CARGO_PKG_VERSION`. **A missed pin does NOT fail the
+  publish** — crates.io would accept `btctax-cli 0.14.0 → btctax-core 0.13.0`, silently re-shipping the
+  bug the release fixes. This release's bump was verified by hand (36 literals, all btctax).
+- **[open → ownerless residue] Add `cargo package` to the release gate.** Nothing in CI or the Makefile
+  runs it, which is exactly why the escaping-`include_str!` reached a release candidate. The permanent
+  guard added this release (`repo_hygiene::no_published_crate_includes_a_file_outside_its_own_root`)
+  catches that specific class; unpacking each `.crate` and running `cargo test --no-run` would catch
+  the general one.
+- **[open → ownerless residue] `docs/pdf/` has no generator for the architecture/constellation PDFs.**
+  They are gitignored, built ad-hoc, and `make bundles` concatenates whatever is on disk — so v0.14.0's
+  first bundle silently baked in a 10-day-old architecture PDF carrying text the release had just
+  fixed. Give them a Makefile target so `make bundles` cannot ship stale content.
+- **[open → ownerless residue] `cargo update -p spin`** off the release path, then re-green. `spin
+  0.9.8` is yanked upstream, so `cargo package` warns and `cargo install --locked` resolves a yanked
+  transitive dep. Deliberately NOT done during release prep — perturbing the dependency graph the green
+  suite was measured against is not a release-day edit.
+- **[open → USER] Revoke the temporary crates.io token** in `~/.cargo/credentials.toml`. Outstanding
+  since v0.7.0; requires the crates.io web UI (Account Settings → API Tokens), so it cannot be done
+  from here.
+
 ### G-7 — Tier-1 whole-branch review residue (2026-07-29, branch `fix/amt-screen-line2`)
 
 The whole-branch review ruled **2 Critical / 1 Important**; all three, plus every Minor that was cheap
