@@ -120,8 +120,10 @@ forms.rs`** — pure year-scoped Form 8949 / Schedule D / 8283 row projections o
 **`src/tax/{se,other_taxes,charitable,qbi,amt,method,tables,return_inputs,return_refuse}.rs`** —
 the schedules & satellites: `se.rs` (§1401 SE tax, standalone), `other_taxes.rs`
 (8959/8960 + the Additional-Medicare unbundle), `charitable.rs` (§170(b) ceilings +
-5-year carryover), `qbi.rs` (Form 8995), `amt.rs` (the refuse-**screen**
-`amt_should_file_6251` — 6251 is never *filled*, Sch 2 L2 is $0 by construction),
+5-year carryover), `qbi.rs` (Form 8995), `form6251.rs` (**Form 6251 transcribed line by
+line**) with `amt.rs` now holding only the 1040 screening worksheet as a swept cross-check —
+the return refuses when Form 6251 line 7 exceeds line 10 (i6251, *Who Must File*, condition 1),
+so 6251 is computed but never *filled* and Sch 2 L2 is $0 by construction,
 `method.rs` (L16 Tax Table / worksheet), `tables.rs` (indexed vs statutory constants),
 `return_inputs.rs` (the non-crypto 1040 inputs), `return_refuse.rs` (typed `Refusal`s for
 unmodelled inputs). **`src/tax/frozen_guard.rs`** — SHA-256 content pins on the frozen
