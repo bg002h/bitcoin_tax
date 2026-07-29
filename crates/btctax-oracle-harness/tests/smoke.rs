@@ -157,9 +157,12 @@ fn sweep_check_reconciliation(households: &[serde_json::Value]) {
             "{name}: table_l16(btctax operands) must reproduce btctax's own regular tax"
         );
     }
+    // ★ T5 — a NUMERIC FLOOR, not a vibe. T3 un-refused the screen-tripping zero-AMT population, so
+    // the previously-excluded anchor now joins the sweep: the floor rises from 10 to 11. If a future
+    // change re-refuses a household this reds, instead of the count quietly sagging.
     assert!(
-        admitted >= 10,
-        "most anchors are admitted and swept, got {admitted}"
+        admitted >= 11,
+        "T3 admitted the former AMT-screen anchor, so at least 11 households sweep; got {admitted}"
     );
     assert_eq!(
         refused, EXPECTED_REFUSED,

@@ -702,7 +702,13 @@ fn assemble(inputs: &GoldenInputs) -> Option<Ready> {
     }
     let ar = assemble_absolute(&ri, &state, &params, &table, YEAR);
     if screen_absolute(&ri, &ar, &params).is_some() {
-        return None; // e.g. the Form 6251 AMT screen — out of the sweep's domain
+        // ★ T5 (r2 I-7): this stays a COMBINED check, deliberately. The plan once said to narrow it to
+        // the AMT reason; that was wrong twice over. (a) Deleting or narrowing it would admit
+        // QBI-over-threshold and taxable-income≤0 returns the corpus excludes for unrelated reasons.
+        // (b) After T3 it is already a no-op for the zero-AMT population — those returns now COMPUTE
+        // and are swept. What it still excludes is a household that genuinely owes AMT or must attach
+        // Form 6251, which belongs out of domain until Tier 2 can FILE the form.
+        return None;
     }
     let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, &table, YEAR, &[]).ok()?; // identity would not print (D-2)
     let forms = fill_full_return(&pr, YEAR).ok()?; // a member filler refused (overflow etc.)

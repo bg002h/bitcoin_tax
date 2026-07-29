@@ -1508,6 +1508,28 @@ pub fn render_dual_report(
             fmt_money(printed.f8960.map_or(Usd::ZERO, |f| f.line17))
         );
     }
+    // ★ Form 6251. Shown only when the cheap screen flagged the return — i.e. exactly when the filer
+    // would otherwise wonder why a high-income return went through. The point is that they can SEE the
+    // comparison that cleared them (line 7 vs line 10), not just be told there is no AMT.
+    if ar.amt.line6 > Usd::ZERO {
+        let _ = writeln!(
+            s,
+            "  Alternative Minimum Tax (Form 6251 → Sch 2 L2): {}\n    \
+             AMTI (L4) {} · exemption (L5) {} · tentative minimum tax (L9) {} · regular tax (L10) {}\n    \
+             {}",
+            fmt_money(ar.amt.line11),
+            fmt_money(ar.amt.line4),
+            fmt_money(ar.amt.line5),
+            fmt_money(ar.amt.line9),
+            fmt_money(ar.amt.line10),
+            if ar.amt.must_attach() {
+                "Form 6251 line 7 exceeds line 10 → the form MUST be attached (i6251, Who Must File, \
+                 condition 1)."
+            } else {
+                "Line 7 does not exceed line 10 → no Form 6251 attachment is required."
+            }
+        );
+    }
     let _ = writeln!(
         s,
         "  TOTAL TAX (L24):          {}{}",

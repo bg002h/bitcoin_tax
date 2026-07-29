@@ -3324,6 +3324,47 @@ mod tests {
         assert_eq!(screen_absolute(&common, &ar_common, &p), None);
     }
 
+    /// ★ T4 — a screen-tripping, NO-ATTACHMENT return produces a packet whose AMT lines are all $0.
+    ///
+    /// This is the assertion the plan wanted made against a hand-built expectation rather than by
+    /// diffing against "what we produce today" — today produced nothing at all, so a self-comparison
+    /// would have been vacuous. It pins the whole Tier-1 contract in one place: the cheap screen
+    /// TRIPS, Form 6251 fills, line 7 lands at or below line 10, and therefore Schedule 2 line 2
+    /// (→ 1040 L17) is $0 and no Form 6251 is attached.
+    #[test]
+    fn a_screen_tripping_no_attachment_return_reports_zero_amt_everywhere() {
+        let p = ty2024_params();
+        let table = real_2024_table();
+        let ri = wages_single(dec!(900000));
+        let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
+
+        // 1. The cheap screen must actually trip, or this fixture proves nothing.
+        assert!(
+            amt_should_file_6251(
+                ri.filing_status,
+                ar.taxable_income,
+                amt_worksheet_line2(ar.deduction_is_itemized, ar.standard_deduction, Usd::ZERO),
+                Usd::ZERO,
+                ar.regular_tax,
+                Usd::ZERO,
+                &p.amt,
+            ),
+            "fixture must trip the screen"
+        );
+        // 2. Form 6251 fills, and the Who-Must-File comparison clears.
+        assert!(ar.amt.line6 > Usd::ZERO, "AMTI exceeds the exemption");
+        assert!(
+            ar.amt.line7 <= ar.amt.line10,
+            "line 7 must not exceed line 10"
+        );
+        assert!(!ar.amt.must_attach(), "no attachment required");
+        // 3. Therefore every AMT-carrying line is zero.
+        assert_eq!(ar.amt.line11, Usd::ZERO, "Form 6251 line 11");
+        assert_eq!(ar.amt.amt(), Usd::ZERO, "→ Schedule 2 line 2");
+        // 4. And the return computes rather than refusing.
+        assert_eq!(screen_absolute(&ri, &ar, &p), None);
+    }
+
     /// ★ REGRESSION (2026-07-27, `fix/amt-screen-line2`) — **an ITEMIZER must not have their non-SALT
     /// itemized deductions added back on worksheet line 2.**
     ///

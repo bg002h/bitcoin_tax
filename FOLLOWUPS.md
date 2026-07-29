@@ -358,6 +358,29 @@ the residue.
   renders as "Form 1040" showing $500,000 on line 7 and a blank line 1a — for a taxpayer with $1,500,000
   of income. The stderr note says only two fields were filled, but the artifact outlives the note. A
   document that looks filable and understates income by $1,000,000 if mistaken for one.
+### G-6 — Tier-1 residue: widen the oracle corpus into AMT territory (2026-07-28)
+
+**[open]** T5's remaining half needs a Python stack this environment does not have (`taxcalc`,
+`pandas` are both absent), so it could not be done with the rest of Tier 1.
+
+**What was done:** the sweep's numeric floor rose 10 → 11 (T3 admitted the former AMT-screen anchor,
+which now reconciles against BOTH oracles), and `oracle-harness/src/main.rs`'s `screen_absolute` check
+is documented as **deliberately combined** — the plan once said to narrow it to the AMT reason, which
+was wrong twice: narrowing would admit QBI-over-threshold and TI≤0 returns, and after T3 it is already
+a no-op for the zero-AMT population.
+
+**What remains:** `scripts/oracle/corpus.py` caps W-2 at $270,000 and LTCG at $20,000, so the richest
+household reaches ~$410,000 of AMTI — it trips the screen (worksheet line 11 ≈ $276,700 > $232,600) but
+sits **four times below** the $1,218,700 exemption phase-out, where AMT actually starts to bite. So the
+differential sweep has never exercised a return that OWES AMT. Widening the corpus and regenerating the
+golden matrix (`scripts/oracle/gen_goldens.py`, which runs Tax-Calculator and reads `c09600`) is the
+work; it also needs `gen_goldens.py:259`'s `if amt or credits` gate relaxed on its `c09600` half — but
+only in **Tier 2**, paired with the `1040.line17 != 0` gate at `:280-283`, since an AMT-owing household
+is not L24-comparable until btctax can file the form.
+
+Owning phase: **Tier 2**, alongside T9. Not a Tier-1 blocker — Tier 1's own KATs and the 11-vector
+fixture cover the zero-AMT path, and an AMT-owing return still refuses.
+
 ### G-5 — ★★★ CONSTELLATION AUDIT: transcribe IRS forms, never paraphrase them (2026-07-27)
 
 **The rule is now normative in `CLAUDE.md`.** One field per numbered line, in the form's own numbering,
