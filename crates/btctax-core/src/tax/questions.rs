@@ -148,8 +148,17 @@ fn amt_carryover_question_live(ri: &ReturnInputs) -> bool {
 ///   - "Any part of the cost of any property for which you elected to take a section 179 expense
 ///     deduction" (a fully-§179'd asset leaves no remaining basis to refigure);
 ///   - "Qualified property that is or was eligible for a special depreciation allowance …" plus "It
-///     isn't subject to an AMT adjustment for depreciation if it was placed in service after 2015";
-///   - the four straight-line bullets, which between them cover post-1998 §1250 and non-§1250 property;
+///     isn't subject to an AMT adjustment for depreciation if it was placed in service after 2015".
+///     ★ A gloss reading "(most equipment bought since 2016)" was REMOVED from this condition: it is
+///     not sourced to i6251, and bonus-INELIGIBLE 200%-DB equipment exists (used property acquired
+///     before 9/28/2017; related-party and carryover-basis acquisitions), which the MUST list catches.
+///     The operative words "qualified for bonus depreciation" already exclude it — but reassuring
+///     prose next to a gate is what produced all three earlier defects, so the reassurance goes;
+///   - the four straight-line bullets, which between them cover post-1998 §1250 and non-§1250 property.
+///     ★ "for the regular tax" is load-bearing and is stated in the prompt: i6251 always writes
+///     "depreciated **for the regular tax** using the straight line method", because post-1998 §1250
+///     property is straight-line *for the AMT* while possibly 150%-DB for the regular tax. Dropping
+///     those three words would re-admit the land improvements that v3 got wrong;
 ///   - "Property for which you elected to use the alternative depreciation system (ADS) of section
 ///     168(g) for the regular tax" (no date limit).
 ///
@@ -343,9 +352,9 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
                  minimum tax as for the regular tax? (Form 6251 line 2l.) Answer YES only if one of \
                  these is true of EVERY depreciable asset in that total: you claimed no depreciation at \
                  all, and none was capitalized into inventory; or you deducted its whole cost under \
-                 section 179; or it was placed in service \
-                 after 2015 and qualified for bonus depreciation (most equipment bought since 2016); or \
-                 it is depreciated straight-line and was placed in service after 1998; or you elected \
+                 section 179; or it was placed in service after 2015 AND qualified for bonus \
+                 depreciation; or it is depreciated STRAIGHT-LINE FOR THE REGULAR TAX and was placed in \
+                 service after 1998; or you elected \
                  ADS for it. Answer NO if any asset falls outside that list — in particular anything \
                  placed in service before 1999, 200% declining-balance property from 1999-2015, and \
                  land improvements or other section 1250 property depreciated 150% declining balance. \
