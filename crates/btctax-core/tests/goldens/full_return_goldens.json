@@ -5,7 +5,7 @@
     "oracle_2": "PSL Tax-Calculator (CC0) \u2014 a SECOND independent implementation of a completely different lineage. Two oracles are worth far more than one: a single oracle can only tell you that you DISAGREE, never which of you is wrong.",
     "oracle_2_version": "6.7.2",
     "tax_year": 2024,
-    "generated": "2026-07-16",
+    "generated": "2026-07-29",
     "generator": "scripts/oracle/gen_goldens.py",
     "corpus": "SPEC \u00a75.1 variable-strength constrained COVERING ARRAY (scripts/oracle/corpus.py): the 12 hand-written anchors (verbatim) + 2 bake-time-steered pinned liveness cells + a generated array \u2014 full cartesian on the named triples {SE,LTCG,qual-div} and {itemized,SALT-over-cap,high-income} (t=3 by construction), pairwise (t=2) elsewhere, under the D-1/D-2/D-3 constraints. Every candidate is ADMITTED refusal-free and AMT/credit-free through the \u00a79 oracle_harness binary before it is baked, so a scenario btctax would refuse never enters this file.",
     "regeneration": "\u2605 ENGINE-VERSION-GATED (SPEC \u00a711). These figures are computed by the EXTERNAL engines pinned in oracle_1_version / oracle_2_version. Re-run the generator \u2014 and re-review \u2014 whenever EITHER version changes: a bump can shift a figure by a cent and move a $50 Tax-Table bin edge or a half-dollar rounding boundary, and the two \u00a75.1 pinned liveness cells sit deliberately on exactly such edges. Recipe: `export OTS_DIR=\u2026; .venv/bin/python scripts/oracle/gen_goldens.py > crates/btctax-core/tests/goldens/full_return_goldens.json` (requires the T7 harness binary built: `cargo build -p btctax-oracle-harness`).",
@@ -40,7 +40,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 47400.0,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 62000.0,
+          "line5": 85700.0,
+          "line10": 5487.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 62000.0,
@@ -54,6 +65,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 5481.0,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -84,7 +96,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 67400.0,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 82000.0,
+          "line5": 85700.0,
+          "line10": 8487.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 82000.0,
@@ -98,6 +121,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 8481.0,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -131,7 +155,41 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 112400.0,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 127000.0,
+          "line5": 85700.0,
+          "line6": 41300.0,
+          "line7": 7108.0,
+          "line9": 7108.0,
+          "line10": 17477.0,
+          "line11": 0.0,
+          "line12": 41300.0,
+          "line13": 33000.0,
+          "line15": 33000.0,
+          "line16": 33000.0,
+          "line17": 8300.0,
+          "line18": 2158.0,
+          "line19": 47025.0,
+          "line20": 79400.0,
+          "line22": 33000.0,
+          "line24": 33000.0,
+          "line25": 518900.0,
+          "line27": 79400.0,
+          "line28": 79400.0,
+          "line29": 439500.0,
+          "line30": 33000.0,
+          "line31": 4950.0,
+          "line32": 33000.0,
+          "line38": 7108.0,
+          "line39": 10738.0,
+          "line40": 7108.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 127000.0,
@@ -145,6 +203,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 25000.0,
         "total_tax": 17471.0,
+        "amt": 0.0,
         "qual_div_l3a": 8000.0,
         "net_ltcg_qd_exclusive": 25000.0
       }
@@ -175,7 +234,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 52400.0,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 67000.0,
+          "line5": 85700.0,
+          "line10": 6587.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 67000.0,
@@ -189,6 +259,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 12000.0,
         "total_tax": 6581.0,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -219,7 +290,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 52400.0,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 67000.0,
+          "line5": 85700.0,
+          "line10": 6587.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 67000.0,
@@ -233,6 +315,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": -3000.0,
         "total_tax": 6581.0,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -263,7 +346,21 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 157000.0,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 186200.0,
+          "line5": 133300.0,
+          "line6": 52900.0,
+          "line7": 13754.0,
+          "line9": 13754.0,
+          "line10": 24646.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 186200.0,
@@ -277,6 +374,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 24646.0,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -311,7 +409,39 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 235000.0,
+          "line4": 235000.0,
+          "line5": 133300.0,
+          "line6": 101700.0,
+          "line7": 22592.0,
+          "line9": 22592.0,
+          "line10": 39356.0,
+          "line11": 0.0,
+          "line12": 101700.0,
+          "line13": 35000.0,
+          "line15": 35000.0,
+          "line16": 35000.0,
+          "line17": 66700.0,
+          "line18": 17342.0,
+          "line19": 94050.0,
+          "line20": 200000.0,
+          "line22": 35000.0,
+          "line24": 35000.0,
+          "line25": 583750.0,
+          "line27": 200000.0,
+          "line28": 200000.0,
+          "line29": 383750.0,
+          "line30": 35000.0,
+          "line31": 5250.0,
+          "line32": 35000.0,
+          "line38": 22592.0,
+          "line39": 26442.0,
+          "line40": 22592.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 276000.0,
@@ -325,6 +455,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 30000.0,
         "total_tax": 40344.0,
+        "amt": 0.0,
         "qual_div_l3a": 5000.0,
         "net_ltcg_qd_exclusive": 30000.0
       }
@@ -358,7 +489,41 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 450.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 347800.0,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 377000.0,
+          "line5": 133300.0,
+          "line6": 243700.0,
+          "line7": 55772.0,
+          "line9": 55772.0,
+          "line10": 63347.0,
+          "line11": 0.0,
+          "line12": 243700.0,
+          "line13": 69000.0,
+          "line15": 69000.0,
+          "line16": 69000.0,
+          "line17": 174700.0,
+          "line18": 45422.0,
+          "line19": 94050.0,
+          "line20": 278800.0,
+          "line22": 69000.0,
+          "line24": 69000.0,
+          "line25": 583750.0,
+          "line27": 278800.0,
+          "line28": 278800.0,
+          "line29": 304950.0,
+          "line30": 69000.0,
+          "line31": 10350.0,
+          "line32": 69000.0,
+          "line38": 55772.0,
+          "line39": 63584.0,
+          "line40": 55772.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 377000.0,
@@ -372,6 +537,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 60000.0,
         "total_tax": 66723.0,
+        "amt": 0.0,
         "qual_div_l3a": 9000.0,
         "net_ltcg_qd_exclusive": 60000.0
       }
@@ -405,7 +571,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 3730.0,
+          "line2a": 10000.0,
+          "line2": 10000.0,
+          "line4": 13730.0,
+          "line5": 133300.0,
+          "line10": 373.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 38730.0,
@@ -419,6 +596,7 @@
         "salt_capped": 10000.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 373.0,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -449,7 +627,18 @@
         "se_l10_oasdi": 6870.84,
         "se_l11_medicare": 1606.89,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 70008.94,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 84608.94,
+          "line5": 85700.0,
+          "line10": 10459.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 95761.135,
@@ -463,6 +652,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 18932.689759999997,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -495,7 +685,35 @@
         "se_l10_oasdi": 6870.84,
         "se_l11_medicare": 1606.89,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 77928.91,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 92528.91,
+          "line5": 85700.0,
+          "line6": 6828.91,
+          "line10": 8354.59,
+          "line11": 0.0,
+          "line12": 6828.91,
+          "line13": 45000.0,
+          "line15": 45000.0,
+          "line16": 6828.91,
+          "line19": 47025.0,
+          "line20": 32928.91,
+          "line21": 14096.09,
+          "line22": 6828.91,
+          "line23": 6828.91,
+          "line25": 518900.0,
+          "line26": 14096.09,
+          "line27": 32928.91,
+          "line28": 47025.0,
+          "line29": 471875.0,
+          "line32": 6828.91,
+          "line39": 1775.52
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 100761.135,
@@ -509,6 +727,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 40000.0,
         "total_tax": 16832.78516,
+        "amt": 0.0,
         "qual_div_l3a": 5000.0,
         "net_ltcg_qd_exclusive": 40000.0
       }
@@ -539,7 +758,21 @@
         "se_l10_oasdi": 0.0,
         "se_l11_medicare": 2142.52,
         "f8959_l7": 0.0,
-        "f8959_l13": 394.92
+        "f8959_l13": 394.92,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 253942.94,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 283142.94,
+          "line5": 133300.0,
+          "line6": 149842.94,
+          "line7": 38959.16,
+          "line9": 38959.16,
+          "line10": 47031.31,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 298928.74,
@@ -553,6 +786,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 49568.75808,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -582,7 +816,18 @@
         "se_l10_oasdi": 6874.05,
         "se_l11_medicare": 1607.64,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 32949.73,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 47549.73,
+          "line5": 85700.0,
+          "line10": 3719.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 55787.156863,
@@ -596,6 +841,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 12203.653332848,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -626,7 +872,21 @@
         "se_l10_oasdi": 0.0,
         "se_l11_medicare": 2142.55,
         "f8959_l7": 0.0,
-        "f8959_l13": 394.93
+        "f8959_l13": 394.93,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 253943.73,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 283143.73,
+          "line5": 133300.0,
+          "line6": 149843.73,
+          "line7": 38959.37,
+          "line9": 38959.37,
+          "line10": 47031.5,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 298929.72660925,
@@ -640,6 +900,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 49568.982601976,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -669,7 +930,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 27400.0,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 42000.0,
+          "line5": 85700.0,
+          "line10": 3059.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 42000.0,
@@ -683,6 +955,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 3056.0,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -714,7 +987,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 33400.0,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 48000.0,
+          "line5": 85700.0,
+          "line10": 3299.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 48000.0,
@@ -728,6 +1012,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 3296.0,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -758,7 +1043,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 47400.0,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 62000.0,
+          "line5": 85700.0,
+          "line10": 3115.25,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 62000.0,
@@ -772,6 +1068,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 3112.25,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -804,7 +1101,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 53400.0,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 68000.0,
+          "line5": 85700.0,
+          "line10": 4255.25,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 68000.0,
@@ -818,6 +1126,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 4252.25,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -848,7 +1157,18 @@
         "se_l10_oasdi": 6298.27,
         "se_l11_medicare": 1472.98,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 68291.57,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 82891.57,
+          "line5": 85700.0,
+          "line10": 10074.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 93114.37375,
@@ -862,6 +1182,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 17848.382279999998,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -894,7 +1215,39 @@
         "se_l10_oasdi": 6298.27,
         "se_l11_medicare": 1472.98,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 74291.57,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 88891.57,
+          "line5": 85700.0,
+          "line6": 3191.57,
+          "line7": 478.74,
+          "line9": 478.74,
+          "line10": 11114.0,
+          "line11": 0.0,
+          "line12": 3191.57,
+          "line13": 4000.0,
+          "line15": 4000.0,
+          "line16": 3191.57,
+          "line19": 47025.0,
+          "line20": 70291.57,
+          "line22": 3191.57,
+          "line24": 3191.57,
+          "line25": 518900.0,
+          "line27": 70291.57,
+          "line28": 70291.57,
+          "line29": 448608.43,
+          "line30": 3191.57,
+          "line31": 478.74,
+          "line32": 3191.57,
+          "line38": 478.74,
+          "line39": 829.81,
+          "line40": 478.74
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 99114.37375,
@@ -908,6 +1261,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 18888.382279999998,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -939,7 +1293,39 @@
         "se_l10_oasdi": 6298.27,
         "se_l11_medicare": 1472.98,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 88291.57,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 102891.57,
+          "line5": 85700.0,
+          "line6": 17191.57,
+          "line7": 2578.74,
+          "line9": 2578.74,
+          "line10": 13074.0,
+          "line11": 0.0,
+          "line12": 17191.57,
+          "line13": 20000.0,
+          "line15": 20000.0,
+          "line16": 17191.57,
+          "line19": 47025.0,
+          "line20": 68291.57,
+          "line22": 17191.57,
+          "line24": 17191.57,
+          "line25": 518900.0,
+          "line27": 68291.57,
+          "line28": 68291.57,
+          "line29": 450608.43,
+          "line30": 17191.57,
+          "line31": 2578.74,
+          "line32": 17191.57,
+          "line38": 2578.74,
+          "line39": 4469.81,
+          "line40": 2578.74
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 113114.37375,
@@ -953,6 +1339,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 20848.382279999998,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -986,7 +1373,39 @@
         "se_l10_oasdi": 6298.27,
         "se_l11_medicare": 1472.98,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 94291.57,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 108891.57,
+          "line5": 85700.0,
+          "line6": 23191.57,
+          "line7": 3478.74,
+          "line9": 3478.74,
+          "line10": 14114.0,
+          "line11": 0.0,
+          "line12": 23191.57,
+          "line13": 24000.0,
+          "line15": 24000.0,
+          "line16": 23191.57,
+          "line19": 47025.0,
+          "line20": 70291.57,
+          "line22": 23191.57,
+          "line24": 23191.57,
+          "line25": 518900.0,
+          "line27": 70291.57,
+          "line28": 70291.57,
+          "line29": 448608.43,
+          "line30": 23191.57,
+          "line31": 3478.74,
+          "line32": 23191.57,
+          "line38": 3478.74,
+          "line39": 6029.81,
+          "line40": 3478.74
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 119114.37375,
@@ -1000,6 +1419,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 21888.382279999998,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -1030,7 +1450,21 @@
         "se_l10_oasdi": 13741.68,
         "se_l11_medicare": 3213.78,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 116617.87,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 131217.87,
+          "line5": 85700.0,
+          "line6": 45517.87,
+          "line7": 11834.65,
+          "line9": 11834.65,
+          "line10": 21030.79,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 153522.27,
@@ -1044,6 +1478,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 37986.235839999994,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -1076,7 +1511,41 @@
         "se_l10_oasdi": 13741.68,
         "se_l11_medicare": 3213.78,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 122617.87,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 137217.87,
+          "line5": 85700.0,
+          "line6": 51517.87,
+          "line7": 12954.65,
+          "line9": 12954.65,
+          "line10": 22110.79,
+          "line11": 0.0,
+          "line12": 51517.87,
+          "line13": 4000.0,
+          "line15": 4000.0,
+          "line16": 4000.0,
+          "line17": 47517.87,
+          "line18": 12354.65,
+          "line19": 47025.0,
+          "line20": 118617.87,
+          "line22": 4000.0,
+          "line24": 4000.0,
+          "line25": 518900.0,
+          "line27": 118617.87,
+          "line28": 118617.87,
+          "line29": 400282.13,
+          "line30": 4000.0,
+          "line31": 600.0,
+          "line32": 4000.0,
+          "line38": 12954.65,
+          "line39": 13394.65,
+          "line40": 12954.65
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 159522.27,
@@ -1090,6 +1559,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 39066.235839999994,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -1121,7 +1591,41 @@
         "se_l10_oasdi": 13741.68,
         "se_l11_medicare": 3213.78,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 136617.87,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 151217.87,
+          "line5": 85700.0,
+          "line6": 65517.87,
+          "line7": 14834.65,
+          "line9": 14834.65,
+          "line10": 24030.79,
+          "line11": 0.0,
+          "line12": 65517.87,
+          "line13": 20000.0,
+          "line15": 20000.0,
+          "line16": 20000.0,
+          "line17": 45517.87,
+          "line18": 11834.65,
+          "line19": 47025.0,
+          "line20": 116617.87,
+          "line22": 20000.0,
+          "line24": 20000.0,
+          "line25": 518900.0,
+          "line27": 116617.87,
+          "line28": 116617.87,
+          "line29": 402282.13,
+          "line30": 20000.0,
+          "line31": 3000.0,
+          "line32": 20000.0,
+          "line38": 14834.65,
+          "line39": 17034.65,
+          "line40": 14834.65
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 173522.27,
@@ -1135,6 +1639,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 40986.235839999994,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -1168,7 +1673,41 @@
         "se_l10_oasdi": 13741.68,
         "se_l11_medicare": 3213.78,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 142617.87,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 157217.87,
+          "line5": 85700.0,
+          "line6": 71517.87,
+          "line7": 15954.65,
+          "line9": 15954.65,
+          "line10": 25110.79,
+          "line11": 0.0,
+          "line12": 71517.87,
+          "line13": 24000.0,
+          "line15": 24000.0,
+          "line16": 24000.0,
+          "line17": 47517.87,
+          "line18": 12354.65,
+          "line19": 47025.0,
+          "line20": 118617.87,
+          "line22": 24000.0,
+          "line24": 24000.0,
+          "line25": 518900.0,
+          "line27": 118617.87,
+          "line28": 118617.87,
+          "line29": 400282.13,
+          "line30": 24000.0,
+          "line31": 3600.0,
+          "line32": 24000.0,
+          "line38": 15954.65,
+          "line39": 18594.65,
+          "line40": 15954.65
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 179522.27,
@@ -1182,6 +1721,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 42066.235839999994,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -1212,7 +1752,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 29400.0,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 44000.0,
+          "line5": 85700.0,
+          "line10": 3299.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 44000.0,
@@ -1226,6 +1777,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 3296.0,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -1258,7 +1810,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 35400.0,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 50000.0,
+          "line5": 85700.0,
+          "line10": 3539.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 50000.0,
@@ -1272,6 +1835,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 3536.0,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -1303,7 +1867,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 49400.0,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 64000.0,
+          "line5": 85700.0,
+          "line10": 3655.25,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 64000.0,
@@ -1317,6 +1892,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 3652.25,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -1350,7 +1926,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 55400.0,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 70000.0,
+          "line5": 85700.0,
+          "line10": 4795.25,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 70000.0,
@@ -1364,6 +1951,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 4792.25,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -1395,7 +1983,18 @@
         "se_l10_oasdi": 6298.27,
         "se_l11_medicare": 1472.98,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 70291.57,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 84891.57,
+          "line5": 85700.0,
+          "line10": 10514.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 95114.37375,
@@ -1409,6 +2008,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 18288.382279999998,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -1442,7 +2042,41 @@
         "se_l10_oasdi": 6298.27,
         "se_l11_medicare": 1472.98,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 76291.57,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 90891.57,
+          "line5": 85700.0,
+          "line6": 5191.57,
+          "line7": 909.81,
+          "line9": 909.81,
+          "line10": 11554.0,
+          "line11": 0.0,
+          "line12": 5191.57,
+          "line13": 4000.0,
+          "line15": 4000.0,
+          "line16": 4000.0,
+          "line17": 1191.57,
+          "line18": 309.81,
+          "line19": 47025.0,
+          "line20": 72291.57,
+          "line22": 4000.0,
+          "line24": 4000.0,
+          "line25": 518900.0,
+          "line27": 72291.57,
+          "line28": 72291.57,
+          "line29": 446608.43,
+          "line30": 4000.0,
+          "line31": 600.0,
+          "line32": 4000.0,
+          "line38": 909.81,
+          "line39": 1349.81,
+          "line40": 909.81
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 101114.37375,
@@ -1456,6 +2090,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 19328.382279999998,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -1488,7 +2123,39 @@
         "se_l10_oasdi": 6298.27,
         "se_l11_medicare": 1472.98,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 90291.57,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 104891.57,
+          "line5": 85700.0,
+          "line6": 19191.57,
+          "line7": 2878.74,
+          "line9": 2878.74,
+          "line10": 13514.0,
+          "line11": 0.0,
+          "line12": 19191.57,
+          "line13": 20000.0,
+          "line15": 20000.0,
+          "line16": 19191.57,
+          "line19": 47025.0,
+          "line20": 70291.57,
+          "line22": 19191.57,
+          "line24": 19191.57,
+          "line25": 518900.0,
+          "line27": 70291.57,
+          "line28": 70291.57,
+          "line29": 448608.43,
+          "line30": 19191.57,
+          "line31": 2878.74,
+          "line32": 19191.57,
+          "line38": 2878.74,
+          "line39": 4989.81,
+          "line40": 2878.74
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 115114.37375,
@@ -1502,6 +2169,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 21288.382279999998,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -1536,7 +2204,41 @@
         "se_l10_oasdi": 6298.27,
         "se_l11_medicare": 1472.98,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 96291.57,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 110891.57,
+          "line5": 85700.0,
+          "line6": 25191.57,
+          "line7": 3909.81,
+          "line9": 3909.81,
+          "line10": 14554.0,
+          "line11": 0.0,
+          "line12": 25191.57,
+          "line13": 24000.0,
+          "line15": 24000.0,
+          "line16": 24000.0,
+          "line17": 1191.57,
+          "line18": 309.81,
+          "line19": 47025.0,
+          "line20": 72291.57,
+          "line22": 24000.0,
+          "line24": 24000.0,
+          "line25": 518900.0,
+          "line27": 72291.57,
+          "line28": 72291.57,
+          "line29": 446608.43,
+          "line30": 24000.0,
+          "line31": 3600.0,
+          "line32": 24000.0,
+          "line38": 3909.81,
+          "line39": 6549.81,
+          "line40": 3909.81
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 121114.37375,
@@ -1550,6 +2252,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 22328.382279999998,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -1581,7 +2284,21 @@
         "se_l10_oasdi": 13741.68,
         "se_l11_medicare": 3213.78,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 118617.87,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 133217.87,
+          "line5": 85700.0,
+          "line6": 47517.87,
+          "line7": 12354.65,
+          "line9": 12354.65,
+          "line10": 21510.79,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 155522.27,
@@ -1595,6 +2312,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 38466.235839999994,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -1628,7 +2346,41 @@
         "se_l10_oasdi": 13741.68,
         "se_l11_medicare": 3213.78,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 124617.87,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 139217.87,
+          "line5": 85700.0,
+          "line6": 53517.87,
+          "line7": 13474.65,
+          "line9": 13474.65,
+          "line10": 22590.79,
+          "line11": 0.0,
+          "line12": 53517.87,
+          "line13": 4000.0,
+          "line15": 4000.0,
+          "line16": 4000.0,
+          "line17": 49517.87,
+          "line18": 12874.65,
+          "line19": 47025.0,
+          "line20": 120617.87,
+          "line22": 4000.0,
+          "line24": 4000.0,
+          "line25": 518900.0,
+          "line27": 120617.87,
+          "line28": 120617.87,
+          "line29": 398282.13,
+          "line30": 4000.0,
+          "line31": 600.0,
+          "line32": 4000.0,
+          "line38": 13474.65,
+          "line39": 13914.65,
+          "line40": 13474.65
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 161522.27,
@@ -1642,6 +2394,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 39546.235839999994,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -1674,7 +2427,41 @@
         "se_l10_oasdi": 13741.68,
         "se_l11_medicare": 3213.78,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 138617.87,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 153217.87,
+          "line5": 85700.0,
+          "line6": 67517.87,
+          "line7": 15354.65,
+          "line9": 15354.65,
+          "line10": 24510.79,
+          "line11": 0.0,
+          "line12": 67517.87,
+          "line13": 20000.0,
+          "line15": 20000.0,
+          "line16": 20000.0,
+          "line17": 47517.87,
+          "line18": 12354.65,
+          "line19": 47025.0,
+          "line20": 118617.87,
+          "line22": 20000.0,
+          "line24": 20000.0,
+          "line25": 518900.0,
+          "line27": 118617.87,
+          "line28": 118617.87,
+          "line29": 400282.13,
+          "line30": 20000.0,
+          "line31": 3000.0,
+          "line32": 20000.0,
+          "line38": 15354.65,
+          "line39": 17554.65,
+          "line40": 15354.65
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 175522.27,
@@ -1688,6 +2475,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 41466.235839999994,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -1722,7 +2510,41 @@
         "se_l10_oasdi": 13741.68,
         "se_l11_medicare": 3213.78,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 144617.87,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 159217.87,
+          "line5": 85700.0,
+          "line6": 73517.87,
+          "line7": 16474.65,
+          "line9": 16474.65,
+          "line10": 25590.79,
+          "line11": 0.0,
+          "line12": 73517.87,
+          "line13": 24000.0,
+          "line15": 24000.0,
+          "line16": 24000.0,
+          "line17": 49517.87,
+          "line18": 12874.65,
+          "line19": 47025.0,
+          "line20": 120617.87,
+          "line22": 24000.0,
+          "line24": 24000.0,
+          "line25": 518900.0,
+          "line27": 120617.87,
+          "line28": 120617.87,
+          "line29": 398282.13,
+          "line30": 24000.0,
+          "line31": 3600.0,
+          "line32": 24000.0,
+          "line38": 16474.65,
+          "line39": 19114.65,
+          "line40": 16474.65
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 181522.27,
@@ -1736,6 +2558,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 42546.235839999994,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -1765,7 +2588,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 12800.0,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 42000.0,
+          "line5": 133300.0,
+          "line10": 1283.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 42000.0,
@@ -1779,6 +2613,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 1280.0,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -1810,7 +2645,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 18800.0,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 48000.0,
+          "line5": 133300.0,
+          "line10": 1483.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 48000.0,
@@ -1824,6 +2670,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 1480.0,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -1854,7 +2701,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 32800.0,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 62000.0,
+          "line5": 133300.0,
+          "line10": 1283.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 62000.0,
@@ -1868,6 +2726,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 1280.0,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -1900,7 +2759,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 38800.0,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 68000.0,
+          "line5": 133300.0,
+          "line10": 1483.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 68000.0,
@@ -1914,6 +2784,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 1480.0,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -1944,7 +2815,18 @@
         "se_l10_oasdi": 6298.27,
         "se_l11_medicare": 1472.98,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 53691.57,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 82891.57,
+          "line5": 133300.0,
+          "line10": 5977.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 93114.37375,
@@ -1958,6 +2840,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 13750.232379999998,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -1990,7 +2873,18 @@
         "se_l10_oasdi": 6298.27,
         "se_l11_medicare": 1472.98,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 59691.57,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 88891.57,
+          "line5": 133300.0,
+          "line10": 6217.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 99114.37375,
@@ -2004,6 +2898,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 13990.232379999998,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -2035,7 +2930,18 @@
         "se_l10_oasdi": 6298.27,
         "se_l11_medicare": 1472.98,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 73691.57,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 102891.57,
+          "line5": 133300.0,
+          "line10": 5977.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 113114.37375,
@@ -2049,6 +2955,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 13750.232379999998,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -2082,7 +2989,18 @@
         "se_l10_oasdi": 6298.27,
         "se_l11_medicare": 1472.98,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 79691.57,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 108891.57,
+          "line5": 133300.0,
+          "line10": 6217.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 119114.37375,
@@ -2096,6 +3014,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 13990.232379999998,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -2126,7 +3045,18 @@
         "se_l10_oasdi": 13741.68,
         "se_l11_medicare": 3213.78,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 102017.87,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 131217.87,
+          "line5": 133300.0,
+          "line10": 12549.93,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 153522.27,
@@ -2140,6 +3070,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 29505.379519999995,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -2172,7 +3103,39 @@
         "se_l10_oasdi": 13741.68,
         "se_l11_medicare": 3213.78,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 108017.87,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 137217.87,
+          "line5": 133300.0,
+          "line6": 3917.87,
+          "line7": 587.68,
+          "line9": 587.68,
+          "line10": 13589.93,
+          "line11": 0.0,
+          "line12": 3917.87,
+          "line13": 4000.0,
+          "line15": 4000.0,
+          "line16": 3917.87,
+          "line19": 94050.0,
+          "line20": 104017.87,
+          "line22": 3917.87,
+          "line24": 3917.87,
+          "line25": 583750.0,
+          "line27": 104017.87,
+          "line28": 104017.87,
+          "line29": 479732.13,
+          "line30": 3917.87,
+          "line31": 587.68,
+          "line32": 3917.87,
+          "line38": 587.68,
+          "line39": 1018.65,
+          "line40": 587.68
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 159522.27,
@@ -2186,6 +3149,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 30545.379519999995,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -2217,7 +3181,39 @@
         "se_l10_oasdi": 13741.68,
         "se_l11_medicare": 3213.78,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 122017.87,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 151217.87,
+          "line5": 133300.0,
+          "line6": 17917.87,
+          "line7": 2687.68,
+          "line9": 2687.68,
+          "line10": 15549.93,
+          "line11": 0.0,
+          "line12": 17917.87,
+          "line13": 20000.0,
+          "line15": 20000.0,
+          "line16": 17917.87,
+          "line19": 94050.0,
+          "line20": 102017.87,
+          "line22": 17917.87,
+          "line24": 17917.87,
+          "line25": 583750.0,
+          "line27": 102017.87,
+          "line28": 102017.87,
+          "line29": 481732.13,
+          "line30": 17917.87,
+          "line31": 2687.68,
+          "line32": 17917.87,
+          "line38": 2687.68,
+          "line39": 4658.65,
+          "line40": 2687.68
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 173522.27,
@@ -2231,6 +3227,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 32505.379519999995,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -2264,7 +3261,39 @@
         "se_l10_oasdi": 13741.68,
         "se_l11_medicare": 3213.78,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 128017.87,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 157217.87,
+          "line5": 133300.0,
+          "line6": 23917.87,
+          "line7": 3587.68,
+          "line9": 3587.68,
+          "line10": 16589.93,
+          "line11": 0.0,
+          "line12": 23917.87,
+          "line13": 24000.0,
+          "line15": 24000.0,
+          "line16": 23917.87,
+          "line19": 94050.0,
+          "line20": 104017.87,
+          "line22": 23917.87,
+          "line24": 23917.87,
+          "line25": 583750.0,
+          "line27": 104017.87,
+          "line28": 104017.87,
+          "line29": 479732.13,
+          "line30": 23917.87,
+          "line31": 3587.68,
+          "line32": 23917.87,
+          "line38": 3587.68,
+          "line39": 6218.65,
+          "line40": 3587.68
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 179522.27,
@@ -2278,6 +3307,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 33545.379519999995,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -2308,7 +3338,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 14800.0,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 44000.0,
+          "line5": 133300.0,
+          "line10": 1483.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 44000.0,
@@ -2322,6 +3363,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 1480.0,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -2354,7 +3396,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 20800.0,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 50000.0,
+          "line5": 133300.0,
+          "line10": 1683.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 50000.0,
@@ -2368,6 +3421,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 1680.0,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -2399,7 +3453,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 34800.0,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 64000.0,
+          "line5": 133300.0,
+          "line10": 1483.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 64000.0,
@@ -2413,6 +3478,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 1480.0,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -2446,7 +3512,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 40800.0,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 70000.0,
+          "line5": 133300.0,
+          "line10": 1683.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 70000.0,
@@ -2460,6 +3537,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 1680.0,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -2491,7 +3569,18 @@
         "se_l10_oasdi": 6298.27,
         "se_l11_medicare": 1472.98,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 55691.57,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 84891.57,
+          "line5": 133300.0,
+          "line10": 6217.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 95114.37375,
@@ -2505,6 +3594,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 13990.232379999998,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -2538,7 +3628,18 @@
         "se_l10_oasdi": 6298.27,
         "se_l11_medicare": 1472.98,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 61691.57,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 90891.57,
+          "line5": 133300.0,
+          "line10": 6457.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 101114.37375,
@@ -2552,6 +3653,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 14230.232379999998,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -2584,7 +3686,18 @@
         "se_l10_oasdi": 6298.27,
         "se_l11_medicare": 1472.98,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 75691.57,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 104891.57,
+          "line5": 133300.0,
+          "line10": 6217.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 115114.37375,
@@ -2598,6 +3711,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 13990.232379999998,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -2632,7 +3746,18 @@
         "se_l10_oasdi": 6298.27,
         "se_l11_medicare": 1472.98,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 81691.57,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 110891.57,
+          "line5": 133300.0,
+          "line10": 6457.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 121114.37375,
@@ -2646,6 +3771,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 14230.232379999998,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -2677,7 +3803,18 @@
         "se_l10_oasdi": 13741.68,
         "se_l11_medicare": 3213.78,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 104017.87,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 133217.87,
+          "line5": 133300.0,
+          "line10": 12989.93,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 155522.27,
@@ -2691,6 +3828,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 29945.379519999995,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -2724,7 +3862,41 @@
         "se_l10_oasdi": 13741.68,
         "se_l11_medicare": 3213.78,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 110017.87,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 139217.87,
+          "line5": 133300.0,
+          "line6": 5917.87,
+          "line7": 1098.65,
+          "line9": 1098.65,
+          "line10": 14029.93,
+          "line11": 0.0,
+          "line12": 5917.87,
+          "line13": 4000.0,
+          "line15": 4000.0,
+          "line16": 4000.0,
+          "line17": 1917.87,
+          "line18": 498.65,
+          "line19": 94050.0,
+          "line20": 106017.87,
+          "line22": 4000.0,
+          "line24": 4000.0,
+          "line25": 583750.0,
+          "line27": 106017.87,
+          "line28": 106017.87,
+          "line29": 477732.13,
+          "line30": 4000.0,
+          "line31": 600.0,
+          "line32": 4000.0,
+          "line38": 1098.65,
+          "line39": 1538.65,
+          "line40": 1098.65
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 161522.27,
@@ -2738,6 +3910,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 30985.379519999995,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -2770,7 +3943,39 @@
         "se_l10_oasdi": 13741.68,
         "se_l11_medicare": 3213.78,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 124017.87,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 153217.87,
+          "line5": 133300.0,
+          "line6": 19917.87,
+          "line7": 2987.68,
+          "line9": 2987.68,
+          "line10": 15989.93,
+          "line11": 0.0,
+          "line12": 19917.87,
+          "line13": 20000.0,
+          "line15": 20000.0,
+          "line16": 19917.87,
+          "line19": 94050.0,
+          "line20": 104017.87,
+          "line22": 19917.87,
+          "line24": 19917.87,
+          "line25": 583750.0,
+          "line27": 104017.87,
+          "line28": 104017.87,
+          "line29": 479732.13,
+          "line30": 19917.87,
+          "line31": 2987.68,
+          "line32": 19917.87,
+          "line38": 2987.68,
+          "line39": 5178.65,
+          "line40": 2987.68
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 175522.27,
@@ -2784,6 +3989,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 32945.379519999995,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -2818,7 +4024,41 @@
         "se_l10_oasdi": 13741.68,
         "se_l11_medicare": 3213.78,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 130017.87,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 159217.87,
+          "line5": 133300.0,
+          "line6": 25917.87,
+          "line7": 4098.65,
+          "line9": 4098.65,
+          "line10": 17029.93,
+          "line11": 0.0,
+          "line12": 25917.87,
+          "line13": 24000.0,
+          "line15": 24000.0,
+          "line16": 24000.0,
+          "line17": 1917.87,
+          "line18": 498.65,
+          "line19": 94050.0,
+          "line20": 106017.87,
+          "line22": 24000.0,
+          "line24": 24000.0,
+          "line25": 583750.0,
+          "line27": 106017.87,
+          "line28": 106017.87,
+          "line29": 477732.13,
+          "line30": 24000.0,
+          "line31": 3600.0,
+          "line32": 24000.0,
+          "line38": 4098.65,
+          "line39": 6738.65,
+          "line40": 4098.65
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 181522.27,
@@ -2832,6 +4072,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 33985.379519999995,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -2861,7 +4102,21 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 90400.0,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 105000.0,
+          "line5": 85700.0,
+          "line6": 19300.0,
+          "line7": 5018.0,
+          "line9": 5018.0,
+          "line10": 14947.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 105000.0,
@@ -2875,6 +4130,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 14941.0,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -2904,7 +4160,21 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 630.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 255400.0,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 270000.0,
+          "line5": 85700.0,
+          "line6": 184300.0,
+          "line7": 47918.0,
+          "line9": 47918.0,
+          "line10": 59764.75,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 270000.0,
@@ -2918,6 +4188,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 60394.75,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -2951,7 +4222,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 73000.0,
+          "line2a": 7000.0,
+          "line2": 7000.0,
+          "line4": 80000.0,
+          "line5": 85700.0,
+          "line10": 11119.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 105000.0,
@@ -2965,6 +4247,7 @@
         "salt_capped": 7000.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 11113.0,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -2998,7 +4281,21 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 630.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 238000.0,
+          "line2a": 7000.0,
+          "line2": 7000.0,
+          "line4": 245000.0,
+          "line5": 85700.0,
+          "line6": 159300.0,
+          "line7": 41418.0,
+          "line9": 41418.0,
+          "line10": 53846.5,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 270000.0,
@@ -3012,6 +4309,7 @@
         "salt_capped": 7000.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 54476.5,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -3045,7 +4343,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 70000.0,
+          "line2a": 10000.0,
+          "line2": 10000.0,
+          "line4": 80000.0,
+          "line5": 85700.0,
+          "line10": 10459.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 105000.0,
@@ -3059,6 +4368,7 @@
         "salt_capped": 10000.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 10453.0,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -3092,7 +4402,21 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 630.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 235000.0,
+          "line2a": 10000.0,
+          "line2": 10000.0,
+          "line4": 245000.0,
+          "line5": 85700.0,
+          "line6": 159300.0,
+          "line7": 41418.0,
+          "line9": 41418.0,
+          "line10": 52886.5,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 270000.0,
@@ -3106,6 +4430,7 @@
         "salt_capped": 10000.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 53516.5,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -3137,7 +4462,41 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 96400.0,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 111000.0,
+          "line5": 85700.0,
+          "line6": 25300.0,
+          "line7": 6138.0,
+          "line9": 6138.0,
+          "line10": 15987.0,
+          "line11": 0.0,
+          "line12": 25300.0,
+          "line13": 4000.0,
+          "line15": 4000.0,
+          "line16": 4000.0,
+          "line17": 21300.0,
+          "line18": 5538.0,
+          "line19": 47025.0,
+          "line20": 92400.0,
+          "line22": 4000.0,
+          "line24": 4000.0,
+          "line25": 518900.0,
+          "line27": 92400.0,
+          "line28": 92400.0,
+          "line29": 426500.0,
+          "line30": 4000.0,
+          "line31": 600.0,
+          "line32": 4000.0,
+          "line38": 6138.0,
+          "line39": 6578.0,
+          "line40": 6138.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 111000.0,
@@ -3151,6 +4510,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 15981.0,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -3182,7 +4542,41 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 630.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 261400.0,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 276000.0,
+          "line5": 85700.0,
+          "line6": 190300.0,
+          "line7": 49038.0,
+          "line9": 49038.0,
+          "line10": 61064.75,
+          "line11": 0.0,
+          "line12": 190300.0,
+          "line13": 4000.0,
+          "line15": 4000.0,
+          "line16": 4000.0,
+          "line17": 186300.0,
+          "line18": 48438.0,
+          "line19": 47025.0,
+          "line20": 257400.0,
+          "line22": 4000.0,
+          "line24": 4000.0,
+          "line25": 518900.0,
+          "line27": 257400.0,
+          "line28": 257400.0,
+          "line29": 261500.0,
+          "line30": 4000.0,
+          "line31": 600.0,
+          "line32": 4000.0,
+          "line38": 49038.0,
+          "line39": 49478.0,
+          "line40": 49038.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 276000.0,
@@ -3196,6 +4590,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 61922.75,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -3231,7 +4626,39 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 79000.0,
+          "line2a": 7000.0,
+          "line2": 7000.0,
+          "line4": 86000.0,
+          "line5": 85700.0,
+          "line6": 300.0,
+          "line7": 45.0,
+          "line9": 45.0,
+          "line10": 12159.0,
+          "line11": 0.0,
+          "line12": 300.0,
+          "line13": 4000.0,
+          "line15": 4000.0,
+          "line16": 300.0,
+          "line19": 47025.0,
+          "line20": 75000.0,
+          "line22": 300.0,
+          "line24": 300.0,
+          "line25": 518900.0,
+          "line27": 75000.0,
+          "line28": 75000.0,
+          "line29": 443900.0,
+          "line30": 300.0,
+          "line31": 45.0,
+          "line32": 300.0,
+          "line38": 45.0,
+          "line39": 78.0,
+          "line40": 45.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 111000.0,
@@ -3245,6 +4672,7 @@
         "salt_capped": 7000.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 12153.0,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -3280,7 +4708,41 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 630.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 244000.0,
+          "line2a": 7000.0,
+          "line2": 7000.0,
+          "line4": 251000.0,
+          "line5": 85700.0,
+          "line6": 165300.0,
+          "line7": 42538.0,
+          "line9": 42538.0,
+          "line10": 55086.5,
+          "line11": 0.0,
+          "line12": 165300.0,
+          "line13": 4000.0,
+          "line15": 4000.0,
+          "line16": 4000.0,
+          "line17": 161300.0,
+          "line18": 41938.0,
+          "line19": 47025.0,
+          "line20": 240000.0,
+          "line22": 4000.0,
+          "line24": 4000.0,
+          "line25": 518900.0,
+          "line27": 240000.0,
+          "line28": 240000.0,
+          "line29": 278900.0,
+          "line30": 4000.0,
+          "line31": 600.0,
+          "line32": 4000.0,
+          "line38": 42538.0,
+          "line39": 42978.0,
+          "line40": 42538.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 276000.0,
@@ -3294,6 +4756,7 @@
         "salt_capped": 7000.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 55944.5,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -3329,7 +4792,39 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 76000.0,
+          "line2a": 10000.0,
+          "line2": 10000.0,
+          "line4": 86000.0,
+          "line5": 85700.0,
+          "line6": 300.0,
+          "line7": 45.0,
+          "line9": 45.0,
+          "line10": 11499.0,
+          "line11": 0.0,
+          "line12": 300.0,
+          "line13": 4000.0,
+          "line15": 4000.0,
+          "line16": 300.0,
+          "line19": 47025.0,
+          "line20": 72000.0,
+          "line22": 300.0,
+          "line24": 300.0,
+          "line25": 518900.0,
+          "line27": 72000.0,
+          "line28": 72000.0,
+          "line29": 446900.0,
+          "line30": 300.0,
+          "line31": 45.0,
+          "line32": 300.0,
+          "line38": 45.0,
+          "line39": 78.0,
+          "line40": 45.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 111000.0,
@@ -3343,6 +4838,7 @@
         "salt_capped": 10000.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 11493.0,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -3378,7 +4874,41 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 630.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 241000.0,
+          "line2a": 10000.0,
+          "line2": 10000.0,
+          "line4": 251000.0,
+          "line5": 85700.0,
+          "line6": 165300.0,
+          "line7": 42538.0,
+          "line9": 42538.0,
+          "line10": 54126.5,
+          "line11": 0.0,
+          "line12": 165300.0,
+          "line13": 4000.0,
+          "line15": 4000.0,
+          "line16": 4000.0,
+          "line17": 161300.0,
+          "line18": 41938.0,
+          "line19": 47025.0,
+          "line20": 237000.0,
+          "line22": 4000.0,
+          "line24": 4000.0,
+          "line25": 518900.0,
+          "line27": 237000.0,
+          "line28": 237000.0,
+          "line29": 281900.0,
+          "line30": 4000.0,
+          "line31": 600.0,
+          "line32": 4000.0,
+          "line38": 42538.0,
+          "line39": 42978.0,
+          "line40": 42538.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 276000.0,
@@ -3392,6 +4922,7 @@
         "salt_capped": 10000.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 54984.5,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -3421,7 +4952,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 75800.0,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 105000.0,
+          "line5": 133300.0,
+          "line10": 8635.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 105000.0,
@@ -3435,6 +4977,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 8632.0,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -3464,7 +5007,21 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 180.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 240800.0,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 270000.0,
+          "line5": 133300.0,
+          "line6": 136700.0,
+          "line7": 35542.0,
+          "line9": 35542.0,
+          "line10": 43877.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 270000.0,
@@ -3478,6 +5035,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 44057.0,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -3511,7 +5069,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 73000.0,
+          "line2a": 7000.0,
+          "line2": 7000.0,
+          "line4": 80000.0,
+          "line5": 133300.0,
+          "line10": 8299.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 105000.0,
@@ -3525,6 +5094,7 @@
         "salt_capped": 7000.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 8296.0,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -3558,7 +5128,21 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 180.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 238000.0,
+          "line2a": 7000.0,
+          "line2": 7000.0,
+          "line4": 245000.0,
+          "line5": 133300.0,
+          "line6": 111700.0,
+          "line7": 29042.0,
+          "line9": 29042.0,
+          "line10": 43205.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 270000.0,
@@ -3572,6 +5156,7 @@
         "salt_capped": 7000.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 43385.0,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -3605,7 +5190,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 70000.0,
+          "line2a": 10000.0,
+          "line2": 10000.0,
+          "line4": 80000.0,
+          "line5": 133300.0,
+          "line10": 7939.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 105000.0,
@@ -3619,6 +5215,7 @@
         "salt_capped": 10000.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 7936.0,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -3652,7 +5249,21 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 180.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 235000.0,
+          "line2a": 10000.0,
+          "line2": 10000.0,
+          "line4": 245000.0,
+          "line5": 133300.0,
+          "line6": 111700.0,
+          "line7": 29042.0,
+          "line9": 29042.0,
+          "line10": 42485.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 270000.0,
@@ -3666,6 +5277,7 @@
         "salt_capped": 10000.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 42665.0,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -3697,7 +5309,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 81800.0,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 111000.0,
+          "line5": 133300.0,
+          "line10": 8875.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 111000.0,
@@ -3711,6 +5334,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 8872.0,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -3742,7 +5366,41 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 180.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 246800.0,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 276000.0,
+          "line5": 133300.0,
+          "line6": 142700.0,
+          "line7": 36662.0,
+          "line9": 36662.0,
+          "line10": 44957.0,
+          "line11": 0.0,
+          "line12": 142700.0,
+          "line13": 4000.0,
+          "line15": 4000.0,
+          "line16": 4000.0,
+          "line17": 138700.0,
+          "line18": 36062.0,
+          "line19": 94050.0,
+          "line20": 242800.0,
+          "line22": 4000.0,
+          "line24": 4000.0,
+          "line25": 583750.0,
+          "line27": 242800.0,
+          "line28": 242800.0,
+          "line29": 340950.0,
+          "line30": 4000.0,
+          "line31": 600.0,
+          "line32": 4000.0,
+          "line38": 36662.0,
+          "line39": 37102.0,
+          "line40": 36662.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 276000.0,
@@ -3756,6 +5414,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 45365.0,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -3791,7 +5450,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 79000.0,
+          "line2a": 7000.0,
+          "line2": 7000.0,
+          "line4": 86000.0,
+          "line5": 133300.0,
+          "line10": 8539.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 111000.0,
@@ -3805,6 +5475,7 @@
         "salt_capped": 7000.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 8536.0,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -3840,7 +5511,41 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 180.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 244000.0,
+          "line2a": 7000.0,
+          "line2": 7000.0,
+          "line4": 251000.0,
+          "line5": 133300.0,
+          "line6": 117700.0,
+          "line7": 30162.0,
+          "line9": 30162.0,
+          "line10": 44285.0,
+          "line11": 0.0,
+          "line12": 117700.0,
+          "line13": 4000.0,
+          "line15": 4000.0,
+          "line16": 4000.0,
+          "line17": 113700.0,
+          "line18": 29562.0,
+          "line19": 94050.0,
+          "line20": 240000.0,
+          "line22": 4000.0,
+          "line24": 4000.0,
+          "line25": 583750.0,
+          "line27": 240000.0,
+          "line28": 240000.0,
+          "line29": 343750.0,
+          "line30": 4000.0,
+          "line31": 600.0,
+          "line32": 4000.0,
+          "line38": 30162.0,
+          "line39": 30602.0,
+          "line40": 30162.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 276000.0,
@@ -3854,6 +5559,7 @@
         "salt_capped": 7000.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 44693.0,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -3889,7 +5595,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 76000.0,
+          "line2a": 10000.0,
+          "line2": 10000.0,
+          "line4": 86000.0,
+          "line5": 133300.0,
+          "line10": 8179.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 111000.0,
@@ -3903,6 +5620,7 @@
         "salt_capped": 10000.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 8176.0,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -3938,7 +5656,41 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 180.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 241000.0,
+          "line2a": 10000.0,
+          "line2": 10000.0,
+          "line4": 251000.0,
+          "line5": 133300.0,
+          "line6": 117700.0,
+          "line7": 30162.0,
+          "line9": 30162.0,
+          "line10": 43565.0,
+          "line11": 0.0,
+          "line12": 117700.0,
+          "line13": 4000.0,
+          "line15": 4000.0,
+          "line16": 4000.0,
+          "line17": 113700.0,
+          "line18": 29562.0,
+          "line19": 94050.0,
+          "line20": 237000.0,
+          "line22": 4000.0,
+          "line24": 4000.0,
+          "line25": 583750.0,
+          "line27": 237000.0,
+          "line28": 237000.0,
+          "line29": 346750.0,
+          "line30": 4000.0,
+          "line31": 600.0,
+          "line32": 4000.0,
+          "line38": 30162.0,
+          "line39": 30602.0,
+          "line40": 30162.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 276000.0,
@@ -3952,6 +5704,7 @@
         "salt_capped": 10000.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 43973.0,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -3986,7 +5739,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 27000.0,
+          "line2a": 10000.0,
+          "line2": 10000.0,
+          "line4": 37000.0,
+          "line5": 85700.0,
+          "line10": 703.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 62000.0,
@@ -4000,6 +5764,7 @@
         "salt_capped": 10000.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 700.0,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -4037,7 +5802,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 100200.0,
+          "line2a": 7000.0,
+          "line2": 7000.0,
+          "line4": 107200.0,
+          "line5": 133300.0,
+          "line10": 9605.5,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 132200.0,
@@ -4051,6 +5827,7 @@
         "salt_capped": 7000.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 9602.5,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -4084,7 +5861,18 @@
         "se_l10_oasdi": 6298.27,
         "se_l11_medicare": 1472.98,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 56411.5,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 71011.5,
+          "line5": 85700.0,
+          "line10": 5066.98,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 79114.37375,
@@ -4098,6 +5886,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 12836.607229999998,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -4129,7 +5918,41 @@
         "se_l10_oasdi": 13741.68,
         "se_l11_medicare": 3213.78,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 98497.82,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 113097.82,
+          "line5": 85700.0,
+          "line6": 27397.82,
+          "line7": 4923.43,
+          "line9": 4923.43,
+          "line10": 15318.0,
+          "line11": 0.0,
+          "line12": 27397.82,
+          "line13": 20000.0,
+          "line15": 20000.0,
+          "line16": 20000.0,
+          "line17": 7397.82,
+          "line18": 1923.43,
+          "line19": 47025.0,
+          "line20": 78497.82,
+          "line22": 20000.0,
+          "line24": 20000.0,
+          "line25": 518900.0,
+          "line27": 78497.82,
+          "line28": 78497.82,
+          "line29": 440402.18,
+          "line30": 20000.0,
+          "line31": 3000.0,
+          "line32": 20000.0,
+          "line38": 4923.43,
+          "line39": 7123.43,
+          "line40": 4923.43
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 132722.27,
@@ -4143,6 +5966,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 32277.979519999997,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -4178,7 +6002,33 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 180.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 249000.0,
+          "line2a": 10000.0,
+          "line2": 10000.0,
+          "line4": 259000.0,
+          "line5": 133300.0,
+          "line6": 125700.0,
+          "line7": 32682.0,
+          "line9": 32682.0,
+          "line10": 45845.0,
+          "line11": 0.0,
+          "line12": 125700.0,
+          "line17": 125700.0,
+          "line18": 32682.0,
+          "line19": 94050.0,
+          "line20": 249000.0,
+          "line25": 583750.0,
+          "line27": 249000.0,
+          "line28": 249000.0,
+          "line29": 334750.0,
+          "line38": 32682.0,
+          "line39": 32682.0,
+          "line40": 32682.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 284000.0,
@@ -4192,6 +6042,7 @@
         "salt_capped": 10000.0,
         "sch_d_to_l7": 12000.0,
         "total_tax": 46557.0,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -4229,7 +6080,41 @@
         "se_l10_oasdi": 13741.68,
         "se_l11_medicare": 3213.78,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 117217.87,
+          "line2a": 7000.0,
+          "line2": 7000.0,
+          "line4": 124217.87,
+          "line5": 85700.0,
+          "line6": 38517.87,
+          "line7": 9574.65,
+          "line9": 9574.65,
+          "line10": 20814.79,
+          "line11": 0.0,
+          "line12": 38517.87,
+          "line13": 4000.0,
+          "line15": 4000.0,
+          "line16": 4000.0,
+          "line17": 34517.87,
+          "line18": 8974.65,
+          "line19": 47025.0,
+          "line20": 113217.87,
+          "line22": 4000.0,
+          "line24": 4000.0,
+          "line25": 518900.0,
+          "line27": 113217.87,
+          "line28": 113217.87,
+          "line29": 405682.13,
+          "line30": 4000.0,
+          "line31": 600.0,
+          "line32": 4000.0,
+          "line38": 9574.65,
+          "line39": 10014.65,
+          "line40": 9574.65
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 171522.27,
@@ -4243,6 +6128,7 @@
         "salt_capped": 7000.0,
         "sch_d_to_l7": 12000.0,
         "total_tax": 37770.235839999994,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -4273,7 +6159,18 @@
         "se_l10_oasdi": 6298.27,
         "se_l11_medicare": 1472.98,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 27131.5,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 56331.5,
+          "line5": 133300.0,
+          "line10": 2791.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 63114.37375,
@@ -4287,6 +6184,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 12000.0,
         "total_tax": 10563.03238,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -4321,7 +6219,18 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 67000.0,
+          "line2a": 10000.0,
+          "line2": 10000.0,
+          "line4": 77000.0,
+          "line5": 85700.0,
+          "line10": 9799.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 102000.0,
@@ -4335,6 +6244,7 @@
         "salt_capped": 10000.0,
         "sch_d_to_l7": -3000.0,
         "total_tax": 9793.0,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -4371,7 +6281,18 @@
         "se_l10_oasdi": 6298.27,
         "se_l11_medicare": 1472.98,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 49891.57,
+          "line2a": 7000.0,
+          "line2": 7000.0,
+          "line4": 56891.57,
+          "line5": 133300.0,
+          "line10": 5521.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 92114.37375,
@@ -4385,6 +6306,7 @@
         "salt_capped": 7000.0,
         "sch_d_to_l7": -3000.0,
         "total_tax": 13294.232379999998,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -4418,7 +6340,41 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 630.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 259600.0,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 274200.0,
+          "line5": 85700.0,
+          "line6": 188500.0,
+          "line7": 48570.0,
+          "line9": 48570.0,
+          "line10": 60434.75,
+          "line11": 0.0,
+          "line12": 188500.0,
+          "line13": 4000.0,
+          "line15": 4000.0,
+          "line16": 4000.0,
+          "line17": 184500.0,
+          "line18": 47970.0,
+          "line19": 47025.0,
+          "line20": 255600.0,
+          "line22": 4000.0,
+          "line24": 4000.0,
+          "line25": 518900.0,
+          "line27": 255600.0,
+          "line28": 255600.0,
+          "line29": 263300.0,
+          "line30": 4000.0,
+          "line31": 600.0,
+          "line32": 4000.0,
+          "line38": 48570.0,
+          "line39": 49010.0,
+          "line40": 48570.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 274200.0,
@@ -4432,6 +6388,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": -3000.0,
         "total_tax": 61224.35,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -4463,7 +6420,18 @@
         "se_l10_oasdi": 13741.68,
         "se_l11_medicare": 3213.78,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 65057.82,
+          "line2a": 29200.0,
+          "line2": 29200.0,
+          "line4": 94257.82,
+          "line5": 133300.0,
+          "line10": 7345.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 110522.27,
@@ -4477,6 +6445,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": -3000.0,
         "total_tax": 24298.39792,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -4514,7 +6483,18 @@
         "se_l10_oasdi": 6298.27,
         "se_l11_medicare": 1472.98,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 55091.57,
+          "line2a": 10000.0,
+          "line2": 10000.0,
+          "line4": 65091.57,
+          "line5": 85700.0,
+          "line10": 6890.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 100314.37375,
@@ -4528,6 +6508,7 @@
         "salt_capped": 10000.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 14664.382279999998,
+        "amt": 0.0,
         "qual_div_l3a": 4000.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -4558,7 +6539,21 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 92400.0,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 107000.0,
+          "line5": 85700.0,
+          "line6": 21300.0,
+          "line7": 5538.0,
+          "line9": 5538.0,
+          "line10": 15387.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 107000.0,
@@ -4572,6 +6567,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 15381.0,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -4601,7 +6597,21 @@
         "se_l10_oasdi": 13741.68,
         "se_l11_medicare": 3213.78,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 77537.82,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 92137.82,
+          "line5": 85700.0,
+          "line6": 6437.82,
+          "line7": 1673.83,
+          "line9": 1673.83,
+          "line10": 12109.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 111522.27,
@@ -4615,6 +6625,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 29066.77952,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -4646,7 +6657,33 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 103600.0,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 118200.0,
+          "line5": 85700.0,
+          "line6": 32500.0,
+          "line7": 8450.0,
+          "line9": 8450.0,
+          "line10": 17906.5,
+          "line11": 0.0,
+          "line12": 32500.0,
+          "line17": 32500.0,
+          "line18": 8450.0,
+          "line19": 47025.0,
+          "line20": 103600.0,
+          "line25": 518900.0,
+          "line27": 103600.0,
+          "line28": 103600.0,
+          "line29": 415300.0,
+          "line38": 8450.0,
+          "line39": 8450.0,
+          "line40": 8450.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 118200.0,
@@ -4660,6 +6697,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 12000.0,
         "total_tax": 17906.5,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -4694,7 +6732,21 @@
         "se_l10_oasdi": 13741.68,
         "se_l11_medicare": 3213.78,
         "f8959_l7": 0.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 96217.87,
+          "line2a": 10000.0,
+          "line2": 10000.0,
+          "line4": 106217.87,
+          "line5": 85700.0,
+          "line6": 20517.87,
+          "line7": 5334.65,
+          "line9": 5334.65,
+          "line10": 16223.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 153522.27,
@@ -4708,6 +6760,7 @@
         "salt_capped": 10000.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 33176.379519999995,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
@@ -4738,7 +6791,41 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": 630.0,
-        "f8959_l13": 0.0
+        "f8959_l13": 0.0,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": 275400.0,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 290000.0,
+          "line5": 85700.0,
+          "line6": 204300.0,
+          "line7": 50918.0,
+          "line9": 50918.0,
+          "line10": 62764.75,
+          "line11": 0.0,
+          "line12": 204300.0,
+          "line13": 20000.0,
+          "line15": 20000.0,
+          "line16": 20000.0,
+          "line17": 184300.0,
+          "line18": 47918.0,
+          "line19": 47025.0,
+          "line20": 255400.0,
+          "line22": 20000.0,
+          "line24": 20000.0,
+          "line25": 518900.0,
+          "line27": 255400.0,
+          "line28": 255400.0,
+          "line29": 263500.0,
+          "line30": 20000.0,
+          "line31": 3000.0,
+          "line32": 20000.0,
+          "line38": 50918.0,
+          "line39": 53118.0,
+          "line40": 50918.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 290000.0,
@@ -4752,6 +6839,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 20000.0,
         "total_tax": 64154.75,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 20000.0
       }
@@ -4781,7 +6869,17 @@
         "se_l10_oasdi": null,
         "se_l11_medicare": null,
         "f8959_l7": null,
-        "f8959_l13": null
+        "f8959_l13": null,
+        "amt": 0.0,
+        "amt_not_witnessed_because": null,
+        "form6251": {
+          "line1": -13400.0,
+          "line2a": 14600.0,
+          "line2": 14600.0,
+          "line4": 1200.0,
+          "line5": 85700.0,
+          "line11": 0.0
+        }
       },
       "expected_taxcalc": {
         "adjusted_gross_income": 1200.0,
@@ -4795,6 +6893,7 @@
         "salt_capped": 0.0,
         "sch_d_to_l7": 0.0,
         "total_tax": 0.0,
+        "amt": 0.0,
         "qual_div_l3a": 0.0,
         "net_ltcg_qd_exclusive": 0.0
       }
