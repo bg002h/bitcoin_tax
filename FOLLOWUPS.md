@@ -439,6 +439,33 @@ Current evidence, all consistent but all one-sided: the form's own line 2a text,
 §56(b)(1)(D), taxcalc's own source, and r1's independent hand-derivation (which pre-dates the code and
 matches btctax).
 
+### G-6a — TWO OTS DEFECTS, both ADJUDICATED 2026-07-29, neither a btctax defect
+
+Found by the new line-by-line Form 6251 comparison. Recorded with the method used, because the two
+needed *different* methods and that is the reusable part.
+
+**1. OTS's 2024 solver carries the 2023 §55(d)(3) MFS constants. ADJUDICATED AGAINST THE FORM.**
+`taxsolve_US_1040_2024.c:270-275` uses `831150.0` / `1084150.0` / `63250.0`; i6251 (2024) p.9 gives
+`875,950` / `1,142,550` / `66,650`. No second oracle was needed or possible — **the authority answers
+our exact input directly**: *"if the amount on line 4 is $895,950, enter $900,950 instead — the
+additional $5,000 is 25% of $20,000."* That is vector V8 verbatim. btctax returns 900,950; OTS returns
+912,150. Both engines agree on line 1 (881,350) and line 2a (14,600), so the base is identical and only
+the kicker differs — ruling out our driver. Internally corroborated by OTS's own file: the *same
+function* uses correct 2024 values for every exemption constant (`609350`, `952150`, `1218700`,
+`1751900`, `232600`), so one block was updated for 2024 and the adjacent one was not.
+Tax-Calculator cannot arbitrate this — it does not model the MFS kicker at all.
+
+**2. OTS does not apply the §170(b)(1)(G) 60%-of-AGI ceiling on cash gifts. ADJUDICATED BY THE SECOND
+ORACLE.** V2b: MFJ, $1,500,000 AGI, $1,000,000 cash gift to a public charity. btctax allows $900,000
+(60% × AGI); OTS allows the full $1,000,000. Here a second oracle IS available and was used —
+Tax-Calculator returns `c19700 = 900,000` and `c04800 = 600,000`, matching btctax to the dollar. So
+btctax + taxcalc + the statute against OTS alone. This is a Schedule A defect, not an AMT one; it
+reaches Form 6251 only through line 1.
+
+**Before either is reported upstream:** re-check against the latest OTS release (we tested v22.07), and
+search their tracker for prior art. Precedent for how to do it: tenforty #278 / PR #279, and
+PSLmodels/Tax-Calculator#3108.
+
 **[open] Widen the corpus.** `scripts/oracle/corpus.py` caps W-2 at $270,000 and LTCG at $20,000, so
 the richest household reaches ~$410,000 of AMTI — it trips the screen but sits four times below the
 $1,218,700 phase-out where AMT bites, so the differential sweep has never exercised a return that OWES
