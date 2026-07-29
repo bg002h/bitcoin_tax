@@ -92,6 +92,25 @@ amount of reviewing the *form* would have surfaced.
 **Still to fetch:** **Rev. Proc. 2024-40** and the **OBBBA (Pub. L. 119-21)** text (for the per-field
 source rule below).
 
+## 2a. ★★ SOURCING OF RECORD — READ THIS BEFORE DERIVING ANYTHING
+
+**`design/full-return/recon/fable/` (2026-07-11) already contains most of what this spec defers**, and
+the r3 sanity check found it only because it went looking in the repo. It was written against the
+enacted Pub. L. 119-21 and the TY2025 finals:
+
+| file | what it already holds |
+|---|---|
+| `01-ty2025-finals-obbba.md` | the **full 10-line SALT worksheet** with the halve-last rule, §63(f) and dependent-standard amounts, every Schedule 1-A cap/threshold/rounding direction with statutory cites |
+| `03-followon-math-sch1a-qbi-ctc.md` | per-part worked examples; TY2025 QBI thresholds **$197,300 / $394,600** |
+| `05-ty2025-field-maps.md` | **462 lines of verbatim AcroForm field names** extracted from the six final TY2025 PDFs — the §5.4 work item |
+
+★ **This session re-derived the SALT rule from scratch and got the MFS shape wrong twice** (r2 adopted
+taxcalc's quadruple; the r2 fold half-corrected it), when `01`'s line 13 already names that exact
+error — *"not the 30%-slope/$350k … the opus 'halve both constants'"* — and carries the MFS
+$300,000 → **$12,500** worked example as a directive. **Re-derivation regressed a correct result that
+was already recorded.** Consult these three files first; re-verify against the archived finals at write
+time, since they are our own notes and not primary sources.
+
 ★ **Per-field source rule (r1-2).** For every constant, **the later of Rev. Proc. 2024-40 and OBBBA
 controls.** The Rev. Proc. is *not* the blanket source for TY2025. Each field in §5.1 carries its own
 citation, and a field without one does not ship.
@@ -125,6 +144,7 @@ beside it; 2026 must survive that.** Reasons: `CONTINUITY_TY2025.md` §5.
 |---|---|---|
 | line 1 | "…Form 1040 line **15**…" | **1a** = 1040 L14 − Sch 1-A L37 · **1b** = 1040 L11b − 1a |
 | line 2a | "…otherwise, line **12**" | "…otherwise, line **12e**" |
+| line 4 | "Combine lines **1** through 3" | "Combine lines **1b** through 3" |
 
 ★ **Line 1a subtracts Schedule 1-A line 37 — the *senior* deduction subtotal, not line 38, the
 total.** So the enhanced senior deduction is **added back for AMT** while tips, overtime and car-loan
@@ -246,6 +266,22 @@ so**, exactly as it does for the AMT's MFS region.
 
 ## 5. Scope
 
+### 5.0 ★★ ORDERING IS A SAFETY PROPERTY — TY2025 MUST FAIL CLOSED UNTIL IT IS WHOLE
+
+`full_return_for(year) → Some` is the **only** year gate on the full-return path
+(`btctax-cli/src/cmd/tax.rs:499`, `session.rs:517`/`560`, `resolve.rs:264`), and the one consistency
+guard (`input_form_store.rs:312`, `if table.year != year || params.year != year`) starts **passing**
+the moment a `FullReturnParams { year: 2025, .. }` is bundled.
+
+So bundling §5.1 alone does not produce a refusal — it produces **plausible wrong numbers**: TY2025
+computed with Form 6251 line 1 in 2024 numbering, `AbsoluteReturn.line14` as "L12 + L13", a scalar
+`salt_cap`, and no Schedule 1-A. D-2 gives TY2026 a mutation-verified fail-closed test; nothing gives
+*partially built* TY2025 one.
+
+★ **Requirement: a `ty2025_full_return_must_stay_fail_closed_until_complete` test, mutation-verified,
+deleted only in the final work item.** That single addition is also what makes this shippable
+incrementally instead of whole-or-nothing.
+
 ### 5.1 Constants: `FullReturnParams` for 2025
 
 Each field carries its own citation under the §2 per-field rule. **Two are OBBBA, not the Rev. Proc.:**
@@ -314,8 +350,13 @@ Remaining fields, each to be sourced: `std_aged_blind_married`/`_unmarried` ·
 | phase-out start | 626,350 | 1,252,700 | 626,350 |
 | 26/28% breakpoint | 239,100 | 239,100 | 119,550 |
 | 28% subtrahend | 4,782 | 4,782 | 2,391 |
-| line 19 | 48,350 (hoh 64,750) | 96,700 | 48,350 |
-| line 25 | 533,400 (hoh 566,700) | 600,050 | 300,000 |
+| line 19 † | 48,350 (hoh 64,750) | 96,700 | 48,350 |
+| line 25 † | 533,400 (hoh 566,700) | 600,050 | 300,000 |
+
+† **Not `AmtParams` cells** — these are `LtcgBreakpoints.max_zero`/`max_fifteen`, read from `bp` at
+`form6251.rs:372`/`378`, and **already bundled for TY2025** with exactly these values in `ty2025()` and
+already asserted by `ty2025_ltcg_breakpoints_all_statuses`. §6.6 must not have an implementer adding
+duplicate fields to `AmtParams`, which deliberately does not carry them.
 
 `mfs_kicker_start` 900,350 · `mfs_kicker_max` 68,500 · `exemption_phaseout_rate` 0.25 ·
 `mfs_kicker_rate` 0.25.
@@ -335,8 +376,10 @@ constants reds the day they are typed.
 | V | 31–37 | Seniors | 6,000 per person | 6% of MAGI over 75,000 / 150,000 | **barred** |
 | VI | 38 | Total Additional Deductions | — | — | — |
 
-★ **Part II line 5 carries a SECOND cap the form does not state** — the instructions' *Net income
-limitation*: trade-or-business tips cannot exceed that business's gross income minus all deductions
+★ **Part II line 5's printed net-profit cap is DEFINED by the instructions** — the form prints "Do not
+enter more than the net profit from the trade or business", and the instructions' *Net income
+limitation* says what that net profit means. **One cap, elaborated — not two** (an earlier draft said
+the form did not state it, which was wrong): trade-or-business tips cannot exceed that business's gross income minus all deductions
 allocable to it (including the deductible part of SE tax, SEP/SIMPLE/qualified-plan contributions and
 self-employed health insurance, but **not** the tips deduction itself). Found by reading the
 instructions; no amount of reviewing the *form* would have surfaced it.
@@ -490,8 +533,32 @@ Schedule 1-A Parts II, III and V, and its SALT worksheet's non-MFS legs.** Read 
 
 ---
 
+## 8a. ★ SCALE — four branches, not one
+
+The r3 buildability check sized this against the codebase. **Cut points, in dependency order:**
+
+| | branch | why it cuts here |
+|---|---|---|
+| **B1** | harness year seams (§5.3) | changes no signed output; prerequisite for validating everything after it |
+| **B2** | TY2025 numbers + form shapes (§5.1, D-3, D-4, the SALT worksheet) | the `salt_cap` type change alone `E0063`s six literals — `tax_tables.rs:128`, `qbi.rs:318`, `return_refuse.rs:913`, `advisories.rs:422`, `testonly.rs:65`, `return_1040.rs:1647` |
+| **B3** | Schedule 1-A end to end (§5.2, D-9) | 38 lines, 6 parts, ~25 collected inputs across `return_inputs.rs`, `classifier.rs`, `questions.rs`, the input-form spec, the TUI, CLI, docs — **its own spec-sized feature** |
+| **B4** | filing assets + corpus (§5.4, §6.5) | 12 new PDFs/maps **plus rebuilding two existing ones** — `2025/f1040.map.toml` is 10 lines vs 2024's 168, and `2025/schedule_d.map.toml` 11 vs 55; both are pseudo-slice maps, not full-return ones |
+
+★ **§5.0's fail-closed test is what makes this incremental rather than whole-or-nothing.** Without it,
+any partial landing opens TY2025 with wrong numbers. With it, B1–B4 can ship in sequence and the gate
+comes out in B4.
+
+★ **B3 should get its own SPEC.** D-1 ("all SIX parts") and D-9 ("every numbered line") make Schedule
+1-A larger than the rest of TY2025 combined, and this document does not size its input-registration
+surface — the r3 check found that `classifier.rs` **permits** `_` on money leaves by its own stated
+rule, so "`None` refuses" for ~25 `Option<Usd>` fields would be held by convention, which is the exact
+defect class D-5 exists to prevent.
+
+---
+
 ## 9. Cross-references
 
+- ★ `design/full-return/recon/fable/` — **sourcing of record, read before deriving** (§2a).
 - `design/amt-form6251/CONTINUITY_TY2025.md` — the recon, the pivot, the environment notes.
 - `design/ty2025/reviews/` — r1, r2 and the r3 sanity check, verbatim.
 - `FOLLOWUPS.md` §G-6b (Tier-2 entry criteria), §G-6e (this pivot), §G-6f (the rate split, done).
