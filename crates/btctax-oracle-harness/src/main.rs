@@ -286,6 +286,24 @@ fn run_check(stdin: &str, known_defect: Option<&KnownDefect>) -> Value {
         known_defect,
     ));
 
+    // ── AMT L17 (G-6). btctax's figure is Form 6251 line 11; 1040 L17 ⊇ it (v1 has no other Sch 2
+    //    Part I item). Both witnesses are OPTIONAL and for DIFFERENT reasons, so the class records
+    //    which of them actually spoke:
+    //      · OTS reports `None` when its own TY2024 defects reach the household (stale 2023 MFS
+    //        §55(d)(3) constants; no §170(b) cash ceiling) — `ots_direct.py` gates and explains it.
+    //      · taxcalc reports `None` on goldens predating this comparison, and is separately
+    //        KNOWN-SUSPECT for standard-deduction filers (PSLmodels#3108: its AMTI omits Form 6251
+    //        line 2a's standard-deduction add-back).
+    //    A `None` is "not witnessed", NEVER $0 — coercing it would manufacture agreement.
+    verdicts.push(verdict_amt(
+        "1040.line17",
+        "alternative minimum tax (L17)",
+        paper("1040.line17"),
+        round_dollar(ar.amt.amt()),
+        e.amt,
+        t.amt,
+    ));
+
     // ── The C1 cross-foot reproductions, hoisted so L24 INHERITS them (pre-T11 the legs are `None`, so
     //    each falls back to `round_leaf` of the baked per-line total). ─────────────────────────────────
     let se_l12_ots = match (e.se_l10_oasdi, e.se_l11_medicare) {
@@ -631,6 +649,36 @@ fn verdict_l16(
 
 /// A line witnessed by OTS alone (a cross-foot or a WEAK/NIIT leaf; taxcalc exposes no comparable
 /// figure). `target` is the already-reproduced OTS figure (a `Usd`). Reconciled iff the paper matches.
+/// The AMT verdict — both witnesses optional, and their absence is MEANINGFUL.
+///
+/// `class` distinguishes who spoke, so a sweep can tell "both agree" from "only one could look":
+/// `agree-both` · `agree-ots` · `agree-taxcalc` · `unwitnessed` · `diverge`. A missing witness never
+/// counts toward agreement — that is the whole point of gating OTS on its own known defects rather
+/// than letting it vote with a number we know to be wrong.
+fn verdict_amt(
+    line: &str,
+    label: &str,
+    on_paper: Option<i64>,
+    internal: Usd,
+    ots: Option<f64>,
+    taxcalc: Option<f64>,
+) -> Value {
+    let o = ots.map(round_leaf);
+    let tc = taxcalc.map(round_leaf);
+    let p = on_paper.map(Usd::from).unwrap_or(internal);
+    let ots_ok = o.map(|v| v == p);
+    let tc_ok = tc.map(|v| v == p);
+    let class = match (ots_ok, tc_ok) {
+        (Some(true), Some(true)) => "agree-both",
+        (Some(true), None) => "agree-ots",
+        (None, Some(true)) => "agree-taxcalc",
+        (None, None) => "unwitnessed",
+        _ => "diverge",
+    };
+    let reconciled = matches!(class, "agree-both" | "agree-ots" | "agree-taxcalc");
+    verdict(line, label, on_paper, internal, o, tc, reconciled, class)
+}
+
 fn verdict_ots(
     line: &str,
     label: &str,

@@ -171,6 +171,47 @@ def _parse(out_text: str) -> dict[str, float]:
     return found
 
 
+# ── OTS TY2024 known defects (confirmed in source; both fixed in OTS 2025 v23.06) ────────────────
+#
+# 1. `taxsolve_US_1040_2024.c:270-275` carries the **2023** §55(d)(3) MFS constants — 831,150 /
+#    1,084,150 / 63,250 — where i6251 (2024) p.9 gives 875,950 / 1,142,550 / 66,650. The same
+#    function uses correct 2024 values for every exemption constant, so one block was updated and its
+#    neighbour was not. On our V8 vector OTS returns Form 6251 line 4 = 912,150 against the form's
+#    900,950 — and i6251 works that exact case ("$895,950 → enter $900,950").
+#
+# 2. The 2024 Schedule A applies **no §170(b)(1)(G) 60%-of-AGI ceiling** on cash gifts
+#    (`SchedA[11] = charityCC;`), so an over-ceiling gift deflates taxable income and therefore
+#    Form 6251 line 1. The 2025 solver caps it. btctax and Tax-Calculator agree against OTS here.
+OTS_2024_MFS_KICKER_STALE_THRESHOLD = 831_150.0
+OTS_2024_CASH_CEILING_FRACTION = 0.60
+
+
+def _ots_amt_disqualified(
+    status: str, h: dict, final: dict[str, float], ots6251: dict[str, float]
+) -> str | None:
+    """Return why OTS cannot witness this household's AMT, or `None` if it can.
+
+    Fail-CLOSED: an unrecognised shape returns a reason rather than silently witnessing.
+    """
+    if not ots6251:
+        return "OTS printed no Form 6251 for this household"
+    line4 = ots6251.get("line4")
+    if status == "Married/Sep" and line4 is not None and line4 > OTS_2024_MFS_KICKER_STALE_THRESHOLD:
+        return (
+            f"OTS 2024 §55(d)(3) MFS constants are the 2023 triple (line 4 = {line4:,.0f} is above "
+            f"the stale {OTS_2024_MFS_KICKER_STALE_THRESHOLD:,.0f} threshold) — "
+            "taxsolve_US_1040_2024.c:270-275"
+        )
+    cash_gift = float(h.get("charitable_cash", 0) or 0)
+    agi = final.get("L11", 0.0)
+    if cash_gift > OTS_2024_CASH_CEILING_FRACTION * agi:
+        return (
+            f"OTS 2024 applies no §170(b) 60%-of-AGI cash ceiling (gift {cash_gift:,.0f} exceeds "
+            f"60% of AGI {agi:,.0f}), which deflates Form 6251 line 1"
+        )
+    return None
+
+
 def _form6251_lines(parsed: dict[str, float]) -> dict[str, float]:
     """Pull OTS's printed Form 6251 lines out of a parsed 1040 output.
 
@@ -395,6 +436,15 @@ def evaluate(h: dict) -> dict[str, float | None]:
             )
             niit = f8960.get("L17", 0.0)
 
+        # ── OTS's TY2024 AMT is only a witness where its two known defects cannot reach. Both were
+        #    confirmed by reading its source and both are FIXED in OTS's 2025 release, so they are
+        #    not upstream-reportable — but the 2024 line is closed, so we must gate rather than wait.
+        #    Reporting `None` (not witnessed) uses the same Option semantics the codebase already
+        #    applies to weak witnesses (`qbi_cap_l12`), instead of inventing a defect-pinning path.
+        ots6251 = _form6251_lines(final)
+        amt_disqualified = _ots_amt_disqualified(status, h, final, ots6251)
+        amt_witnessed = None if amt_disqualified else final.get("L17", 0.0)
+
         salt_capped = None
         if h.get("standard_or_itemized") == "Itemized":
             # OTS's US_1040 solver runs Schedule A internally and PRINTS the §164(b)(5)-capped
@@ -440,8 +490,9 @@ def evaluate(h: dict) -> dict[str, float | None]:
             #    added back for a non-itemizer. That is btctax's branch and the form's, and it is the
             #    one PSL Tax-Calculator omits (issue #3108). So on AMT the two oracles SPLIT, which is
             #    diagnostic rather than ambiguous, and OTS is the one that agrees with the IRS PDF.
-            "amt": final.get("L17", 0.0),                     # 1040 L17 = Sch 2 L3 ⊇ Form 6251 L11
-            "form6251": _form6251_lines(final),               # every printed 6251 line, by number
+            "amt": amt_witnessed,                            # 1040 L17; None when OTS is DISQUALIFIED
+            "amt_not_witnessed_because": amt_disqualified,    # the reason, or None
+            "form6251": ots6251,                              # every printed 6251 line, by number
         }
     finally:
         shutil.rmtree(work, ignore_errors=True)

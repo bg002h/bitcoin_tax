@@ -175,6 +175,13 @@ def taxcalc_run(households):
             "salt_capped": float(calc.array("c18300")[n]),  # Sch A L5e = min(5d, $10k cap)
             "sch_d_to_l7": float(calc.array("c01000")[n]),  # Sch D L21 → 1040 L7 (§1211-limited)
             "total_tax": float(calc.array("c09200")[n]),    # 1040 L24 equiv (see docstring)
+            # ── G-6 · the AMT. 1040 L17 ⊇ Form 6251 line 11; v1 has no other Schedule 2 Part I item.
+            #    ★ KNOWN-SUSPECT for STANDARD-DEDUCTION filers: taxcalc's AMTI omits Form 6251 line 2a's
+            #    standard-deduction add-back, so `c09600` UNDERSTATES their AMT by the tax on the
+            #    deduction (PSLmodels/Tax-Calculator#3108, open; corroborated against OpenTaxSolver and
+            #    the IRS PDF). Emitted anyway — a witness we can characterise beats a silent gap, and the
+            #    harness records WHICH oracle agreed rather than collapsing them into one verdict.
+            "amt": float(calc.array("c09600")[n]),
             # provenance leaves
             "qual_div_l3a": float(calc.array("e00650")[n]),  # 1040 L3a qualified dividends
             "net_ltcg_qd_exclusive": max(  # §1(h) subterm max(0, min(LTCG, LTCG+STCG)) — QD-EXCLUSIVE (r5-N2)

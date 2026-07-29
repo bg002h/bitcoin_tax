@@ -419,6 +419,12 @@ pub struct ExpectedOts {
     pub sch_d_to_l7: Option<f64>, // 1040 L7 (signed)
     #[serde(default)]
     pub qbi_cap_l12: Option<f64>, // 8995 L12 — OTS single-witness/WEAK (I1): driver-hand-fed, NOT an independent check; §14.2 closure = follow-up
+    /// **1040 L17 — the AMT** (⊇ Form 6251 line 11). `None` means OTS is DISQUALIFIED as a witness on
+    /// this household, not that the AMT is $0 — its TY2024 solver carries the 2023 §55(d)(3) MFS
+    /// constants and applies no §170(b) cash ceiling (both fixed in OTS 2025). `ots_direct.py` gates
+    /// it and records the reason. Never coerce this to 0.0.
+    #[serde(default)]
+    pub amt: Option<f64>,
     // provenance leaves for the §6.2(b) predicate (Table_btctax inputs):
     #[serde(default)]
     pub qual_div_l3a: Option<f64>, // 1040 L3a
@@ -455,6 +461,12 @@ pub struct ExpectedTaxcalc {
     pub sch_d_to_l7: Option<f64>, // 1040 L7 (signed)
     #[serde(default)]
     pub qbi_cap_l12: Option<f64>, // 8995 L12 — OTS single-witness/WEAK (I1): driver-hand-fed, NOT an independent check; §14.2 closure = follow-up
+    /// **Tax-Calculator `c09600` — the AMT.** `None` when the goldens predate the AMT comparison.
+    /// ★ Known-suspect for STANDARD-DEDUCTION filers: taxcalc's AMTI omits Form 6251 line 2a's
+    /// standard-deduction add-back (PSLmodels/Tax-Calculator#3108, open). Treat a divergence here on
+    /// a non-itemizing household as the ORACLE's, pending that issue.
+    #[serde(default)]
+    pub amt: Option<f64>,
     // provenance leaves for the §6.2(b) predicate (Table_btctax inputs):
     #[serde(default)]
     pub qual_div_l3a: Option<f64>, // 1040 L3a
