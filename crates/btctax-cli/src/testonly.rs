@@ -135,13 +135,13 @@ presidential_fund_spouse = false
 first_name = "Nina"
 last_name = "Okafor"
 occupation = "Anesthesiologist"
-ssn = "400-11-2222"
+ssn = "123-45-6789"
 
 [header.spouse]
 first_name = "Tomas"
 last_name = "Okafor"
 occupation = "Structural Engineer"
-ssn = "400-33-4444"
+ssn = "987-65-4321"
 
 [payments]
 estimated_tax_payments = "0"
