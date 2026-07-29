@@ -358,28 +358,47 @@ the residue.
   renders as "Form 1040" showing $500,000 on line 7 and a blank line 1a — for a taxpayer with $1,500,000
   of income. The stderr note says only two fields were filled, but the artifact outlives the note. A
   document that looks filable and understates income by $1,000,000 if mistaken for one.
-### G-6 — Tier-1 residue: widen the oracle corpus into AMT territory (2026-07-28)
+### G-6 — the oracle cross-check RAN, and it found a Tax-Calculator defect (2026-07-28)
 
-**[open]** T5's remaining half needs a Python stack this environment does not have (`taxcalc`,
-`pandas` are both absent), so it could not be done with the rest of Tier 1.
+**★ CORRECTION.** An earlier version of this entry said `taxcalc`/`pandas` were "not installed" and
+filed the cross-check as blocked. **That was wrong** — I checked bare `python3` instead of the repo's
+`.venv`, which carries **taxcalc 6.7.2 / pandas 3.0.3**. The probe ran.
 
-**What was done:** the sweep's numeric floor rose 10 → 11 (T3 admitted the former AMT-screen anchor,
-which now reconciles against BOTH oracles), and `oracle-harness/src/main.rs`'s `screen_absolute` check
-is documented as **deliberately combined** — the plan once said to narrow it to the AMT reason, which
-was wrong twice: narrowing would admit QBI-over-threshold and TI≤0 returns, and after T3 it is already
-a no-op for the zero-AMT population.
+**Result: 9 of 11 vectors agree with an independent engine**, and the two that differ are a defect in
+**Tax-Calculator**, not in btctax. Run it with
+`.venv/bin/python scripts/oracle/verify_f6251.py` (0 unexpected divergences).
 
-**What remains:** `scripts/oracle/corpus.py` caps W-2 at $270,000 and LTCG at $20,000, so the richest
-household reaches ~$410,000 of AMTI — it trips the screen (worksheet line 11 ≈ $276,700 > $232,600) but
-sits **four times below** the $1,218,700 exemption phase-out, where AMT actually starts to bite. So the
-differential sweep has never exercised a return that OWES AMT. Widening the corpus and regenerating the
-golden matrix (`scripts/oracle/gen_goldens.py`, which runs Tax-Calculator and reads `c09600`) is the
-work; it also needs `gen_goldens.py:259`'s `if amt or credits` gate relaxed on its `c09600` half — but
-only in **Tier 2**, paired with the `1040.line17 != 0` gate at `:280-283`, since an AMT-owing household
-is not L24-comparable until btctax can file the form.
+**The defect.** `taxcalc/calcfunctions.py`, the AMTI block:
 
-Owning phase: **Tier 2**, alongside T9. Not a Tier-1 blocker — Tier 1's own KATs and the 11-vector
-fixture cover the zero-AMT path, and an AMT-owing return still refuses.
+```python
+if standard > 0.0:
+    c62100 = c00100 - e00700 - qbided - standard     # subtracts it, never adds it back
+```
+
+Its **itemizer** branch correctly adds Schedule A line 7 back (`+ c18300`) — which is why every
+itemizing vector agrees to the cent. Its **standard-deduction** branch stops at Form 6251 line 1 and
+never applies line 2a's else-clause: *"If filing Schedule A (Form 1040), enter the taxes from Schedule
+A, line 7; **otherwise, enter the amount from Form 1040 or 1040-SR, line 12**."* i6251 p.2 repeats it,
+§56(b)(1)(E) mandates it, and i6251's own TIP depends on it (*"the standard deduction isn't allowed for
+the AMT"*). Measured: every standard-deduction vector shows ΔAMTI = exactly the standard deduction,
+every itemizer 0, and V8's Δ19,600 = $14,600 MFS standard + the $5,000 MFS kicker taxcalc also omits.
+**Direction: Tax-Calculator UNDERSTATES AMT for standard-deduction filers.**
+
+**★ Why this matters beyond AMT.** Had the plan's original instruction been followed — *"derive every
+vector's TMT from `c09600`"* — the oracle would have "corrected" a faithful transcription into a wrong
+one on exactly the two vectors that owe AMT. This is the concrete instance of
+`CLAUDE.md`'s rule that a domain fact can make a green test meaningless: the form is the authority, and
+a taxcalc disagreement is adjudicated against the PDF, never encoded.
+
+**[open] Report it upstream** (this project has form: tenforty issue #278 / PR #279). Minimal repro:
+MFJ, $250,000 wages + $2,000,000 long-term gain, standard deduction → taxcalc `c09600` = $18,331; the
+form gives **$26,271**.
+
+**[open] Widen the corpus.** `scripts/oracle/corpus.py` caps W-2 at $270,000 and LTCG at $20,000, so
+the richest household reaches ~$410,000 of AMTI — it trips the screen but sits four times below the
+$1,218,700 phase-out where AMT bites, so the differential sweep has never exercised a return that OWES
+AMT. Owning phase: **Tier 2** with T9, paired with relaxing `gen_goldens.py:259`'s `c09600` half — and
+now with the knowledge that the AMT half of that gate cannot be trusted for standard-deduction filers.
 
 ### G-5 — ★★★ CONSTELLATION AUDIT: transcribe IRS forms, never paraphrase them (2026-07-27)
 
