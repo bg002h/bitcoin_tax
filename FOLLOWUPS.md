@@ -462,9 +462,24 @@ Tax-Calculator returns `c19700 = 900,000` and `c04800 = 600,000`, matching btcta
 btctax + taxcalc + the statute against OTS alone. This is a Schedule A defect, not an AMT one; it
 reaches Form 6251 only through line 1.
 
-**Before either is reported upstream:** re-check against the latest OTS release (we tested v22.07), and
-search their tracker for prior art. Precedent for how to do it: tenforty #278 / PR #279, and
-PSLmodels/Tax-Calculator#3108.
+**★ CHECKED AGAINST THE LATEST RELEASE — DO NOT REPORT EITHER. Both are already fixed upstream.**
+Downloaded `OpenTaxSolver2025_23.06` (the current release) and read the same two sites in
+`taxsolve_US_1040_2025.c`:
+
+| defect | 2024 solver (v22.07, final for TY2024) | 2025 solver (v23.06, current) |
+|---|---|---|
+| §55(d)(3) MFS kicker | `831150 / 1084150 / 63250` — the **2023** triple | `900350 / 1174350 / 68500` — correct, inflation-adjusted |
+| §170(b) 60% cash ceiling | `SchedA[11] = charityCC;` — **no ceiling at all** | `if (charityCC > 0.60*L[11]) {warn} charityCC = 0.60*L[11];` |
+
+So both were real, both are fixed, and **filing them would waste a maintainer's time on a release line
+that is closed** (v22.07 is the last TY2024 build). This is exactly the check that PSLmodels#3108 taught
+us to run BEFORE filing rather than after.
+
+**What it means for us instead:** btctax is corroborated on both points by OTS's own later release, and
+our TY2024 oracle has two KNOWN DEFECT CLASSES. Any sweep that compares against OTS on TY2024 must pin
+them as known-defect (the harness already has that concept — `known_defect` in `verdict_l16`) rather
+than treat an OTS disagreement there as a btctax failure. Owning phase: **Tier 2**, with the corpus
+widening below.
 
 **[open] Widen the corpus.** `scripts/oracle/corpus.py` caps W-2 at $270,000 and LTCG at $20,000, so
 the richest household reaches ~$410,000 of AMTI — it trips the screen but sits four times below the
