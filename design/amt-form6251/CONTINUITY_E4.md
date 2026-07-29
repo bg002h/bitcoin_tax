@@ -55,10 +55,15 @@ AMT-owing vector. Current state — all four clear it:
 
 **Three of the five routings E2 asked for cannot own AMT at all.** A ~450M-point scan found zero
 AMT-owing returns taking the line-32 skip, or with line 39 on the 26% side, or with the exemption
-un-phased-out. They are one fact: *AMT is owed only once the §55(d)(3) phase-out has begun.* It is
-pinned by `amt_is_owed_only_once_the_exemption_phaseout_has_begun`, which sweeps all four statuses
-against the production regular tax and reds if the input surface widens. **Full detail in
-`FOLLOWUPS.md` §G-6b → "E2's findings".**
+un-phased-out. They are one fact: *an attachable Form 6251 exists only once the §55(d)(3) phase-out
+has begun.* It is pinned by `amt_is_owed_only_once_the_exemption_phaseout_has_begun`, which sweeps
+all four statuses, both deduction extremes and both FTC extremes against the production regular tax.
+
+★ **Its sensitivity is ~$4,400 of AMTI, measured by bisection — not "any widening".** A ΔAMTI moves
+the tentative minimum tax by only 26–28% of itself, so closing the tightest margin (MFS, $1,098.50)
+takes about $4,000. **A smaller preference would go unnoticed by this test**, which is exactly why E6
+is a design obligation the tripwire does not discharge. **Full detail in `FOLLOWUPS.md` §G-6b →
+"E2's findings".**
 
 **One region has NO oracle.** For MFS, §55(d)(3) puts the zero-exemption threshold and the line-4
 kicker start at the same $875,950, so "exemption gone" and "kicker live" are one condition — and both

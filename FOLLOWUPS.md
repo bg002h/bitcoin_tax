@@ -518,10 +518,19 @@ $1,218,700), so an AMT-owing line 12 clears the $232,600 breakpoint (MFS $116,30
 clears the §1(h) 15%-band top, leaving a 20% tranche that keeps line 32 ≠ line 12.
 
 That claim is **executable**, not prose: `amt_is_owed_only_once_the_exemption_phaseout_has_begun`
-sweeps all four statuses against the PRODUCTION regular tax (`qdcgt_line16`, Tax-Table quantization
-included) and asserts all three. It reds the moment the input surface widens — an ISO exercise at
-line 2i, §1202 at 2h, §1250 gain reaching line 14 — because a preference item can then lift AMTI
-without moving the regular tax, and **three routings would go live with no vector and no oracle**.
+sweeps all four statuses — both deduction extremes (base and the §63(f) aged/blind maximum) and both
+FTC extremes (zero and the §904(j) ceiling) — against the PRODUCTION regular tax (`qdcgt_line16`,
+Tax-Table quantization included), guarded on `must_attach()` because that is what Tier 2 files on.
+It reds when the input surface widens — an ISO exercise at line 2i, §1202 at 2h, §1250 gain reaching
+line 14 — because a preference item then lifts AMTI without moving the regular tax, and **three
+routings would go live with no vector and no oracle**.
+
+★ **Its sensitivity is $4,400 of AMTI, measured by bisection ($4,200 green, $4,400 red) — not "any
+widening".** That floor is arithmetic: a ΔAMTI moves the tentative minimum tax by only 26–28% of
+itself, so closing the tightest margin (MFS, $1,098.50) needs ~$4,000. **A smaller preference goes
+unnoticed**, so this tripwire narrows E6 but does not discharge it. Review r2 found the floor had
+been far worse — the sweep pinned the BASE standard deduction and a zero FTC, and stayed green at
+$5,000 while an MFS filer at the §63(f) maximum was already attachable with the exemption intact.
 
 **★★ ONE REGION HAS NO ORACLE AT ALL — worse than the consult's "doubly-dark" framing, and narrower.**
 The consult put the dark region at "standard-deduction MFS-kicker filers". Measured, it is **every**
