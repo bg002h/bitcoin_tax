@@ -623,7 +623,7 @@ The r3 buildability check sized this against the codebase. **Cut points, in depe
 any partial landing opens TY2025 with wrong numbers. With it, B1–B4 can ship in sequence and the gate
 comes out in B4.
 
-★ **B3 should get its own SPEC.** D-1 ("all SIX parts") and D-9 ("every numbered line") make Schedule
+★ **B3 HAS its own SPEC: `design/ty2025/SPEC_schedule_1a.md`** (DRAFT r1, 2026-07-29). D-1 ("all SIX parts") and D-9 ("every numbered line") make Schedule
 1-A larger than the rest of TY2025 combined, and this document does not size its input-registration
 surface — the r3 check found that `classifier.rs` **permits** `_` on money leaves by its own stated
 rule, so "`None` refuses" for ~25 `Option<Usd>` fields would be held by convention, which is the exact
@@ -635,6 +635,7 @@ defect class D-5 exists to prevent.
 
 - ★ `design/full-return/recon/fable/` — **sourcing of record, read before deriving** (§2a).
 - `design/amt-form6251/CONTINUITY_TY2025.md` — the recon, the pivot, the environment notes.
+- `design/ty2025/SPEC_schedule_1a.md` — B3, spun out; the rounding asymmetry is its S-1.
 - `design/ty2025/reviews/` — r1, r2 and the r3 sanity check, verbatim.
 - `FOLLOWUPS.md` §G-6b (Tier-2 entry criteria), §G-6e (this pivot), §G-6f (the rate split, done).
 - `STANDARD_WORKFLOW.md` — the review loop this must pass before a plan is written.
