@@ -483,16 +483,32 @@ was never emitted?** Same blank, different provenance — the exact distinction 
 draw, now spanning two forms. The ⑥ taxonomy is per-field *within* a form and has no vocabulary for
 this.
 
-### ❌ Gap 3 — a form ABSENT from the return floods the census
+### ⚠️ Gap 3 (CORRECTED) — the form-SET gate already exists; only the RESOLUTION gate is missing
 
 If `sch_c` is `None`, Schedule C's **105 fields** are not "unaccounted" — they are not-applicable *at
 the return level*. Consult r1 placed *not-applicable* as "per-return liveness **of a rule**", i.e.
 field-level; **form-level liveness is not in the design at all.**
 
-★★ This is the one that breaks at scale: **1158 fields across 15 forms, but a typical return emits
-perhaps 5.** Without a form-level gate above the field-level one, the per-return resolution would
-demand provenance for ~800 fields belonging to forms that are not in the return — noise that would
-bury the handful of real findings.
+★★ **CORRECTION, same day — the repo already had half of this, and I filed it without looking.**
+`btctax-forms/tests/census.rs` is a HARD gate asserting `fill_full_return` emits **exactly 15** form
+keys, and it already codifies the very trap this gap restated:
+
+> *"SPEC §6.2 forbids reading a **household's** packet as the authority — kitchen_sink emits 13/15
+> (no `f8283`, no promoted `f8275`), which would silently under-gate"*
+
+so its fixture injects the missing arms explicitly. **The static census must therefore key on all 15
+forms** — the full decision surface — and must never be derived from what a household happens to
+emit. That principle is settled and tested.
+
+★ What remains genuinely missing is only the **per-return RESOLUTION gate**: `Option::is_some` asked
+*before* the field question. 1158 fields across 15 forms with a typical return emitting ~5 means
+~800 fields would otherwise be reported unresolved — noise that buries the real findings. Smaller
+than filed, and it is a resolution-layer concern, not a census-shape one.
+
+★ **This is the third time today a gap was filed that the repo already partly held** (after the
+archive reconciliation and the answered-ness registry). The pattern is F1's, and the lesson is the
+same: grep the tests, not just the source — `census.rs` is a *test*, which is where this project puts
+its invariants.
 
 **⇒ The resolution needs two levels:** *is this form in the return?* (from `PrintedForms`) and only
 then *is this field accounted for?* The static census stays per-(form, year) and is unaffected.

@@ -733,10 +733,17 @@ from `PrintedForms`, never a hand-list.
 2. **Cross-form provenance is inexpressible.** Schedule 1-A line 38 → 1040 line 13b; 8949 → Sch D →
    1040. **Is Schedule D line 16 blank because there were no gains, or because 8949 was never
    emitted?** Same blank, different provenance — spanning two forms, with no vocabulary for it.
-3. **★★ An absent form floods the census.** `sch_c: None` ⇒ Schedule C's 105 fields are
-   not-applicable *at the return level*. r1's *not-applicable* is field-level; **form-level liveness
-   is absent from the design**. At 1158 fields across 15 forms with a typical return emitting ~5,
-   this would demand provenance for ~800 fields that are not in the return.
+3. **★ An absent form floods the RESOLUTION** (mis-framed on filing; corrected same day). `sch_c:
+   None` ⇒ Schedule C's 105 fields are not-applicable *at the return level*, and r1's
+   *not-applicable* is field-level.
+   ★★ **CORRECTION: the form-set half already exists.** `btctax-forms/tests/census.rs` is a HARD gate
+   asserting `fill_full_return` emits **exactly 15** keys, and it already records the trap this gap
+   half-restated: *"SPEC §6.2 forbids reading a household's packet as the authority — kitchen_sink
+   emits 13/15 … which would silently under-gate"*, so its fixture injects the missing arms.
+   **The static census must therefore key on all 15 forms** — the full decision surface, never what a
+   household happens to emit. What is genuinely missing is only the **per-return RESOLUTION gate**
+   (`Option::is_some` before asking about a field), without which ~800 fields from absent forms
+   would be reported unresolved.
 
 **⇒ The per-return resolution needs TWO levels:** is this form in the return, and only then is this
 field accounted for. The static census is unaffected.
