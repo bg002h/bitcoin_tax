@@ -459,6 +459,31 @@ pub fn proof(stem: &str, out_path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// `cargo run -p xtask -- label-boxes <stem>` — emit `FQN<TAB>label<TAB>page` for every AcroForm box.
+///
+/// ★ This is the **address map**: the field census keys on the FQN (exhaustive, authoritative, needs
+/// no parsing), and the label is what makes a 244-row census readable by a person. `22a` means
+/// something; `Line22b[0].f2_06[0]` does not.
+///
+/// A box no label claims emits `?` — that is BOX-WITH-NO-LABEL, and it is a hard finding, not a
+/// blank cell.
+pub fn boxes_tsv(stem: &str) -> Result<(), String> {
+    let g = crate::form_geometry::load(&crate::form_geometry::repo_root(), stem)?;
+    let labels = witness_text(&g)?;
+    let boxes = witness_boxes(&g);
+    for (bp, top, bottom, name) in &boxes {
+        let centre = (top + bottom) / 2.0;
+        let label = labels
+            .iter()
+            .filter(|(_, lp, ly)| lp == bp && *ly <= centre + 2.0)
+            .max_by(|(_, _, a), (_, _, b)| a.total_cmp(b))
+            .map(|(l, _, _)| l.as_str())
+            .unwrap_or("?");
+        println!("{name}\t{label}\t{bp}");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

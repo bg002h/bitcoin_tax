@@ -166,6 +166,35 @@ caution: the first pass counted only the **TY2025** maps (deliberately incomplet
 inflated 197 unaccounted for f1040), and the second missed `f8283`'s `Form8283[0]` FQN prefix and
 reported **0 mapped** for a form with 59. Both were found by re-running, not by anything structural.
 
+## 6a. ★★ THE CLASSIFICATION — what the 496 actually are (f1040 TY2024, 54 of them)
+
+Joined field→label with `xtask label-boxes` (the address map: FQN → the line it sits on). Three
+regions fall out, and they are **not** three equal thirds:
+
+| region | n | what it is | likely provenance |
+|---|---|---|---|
+| **header** (above line 1) | 8 | **foreign country / province / postal code**, presidential-campaign checkbox, `f1_01`–`f1_03` | *not applicable* for most filers — but the foreign-address gap is real: **a filer abroad cannot have their address printed**, and today that is invisible |
+| **trailer** (below the last numbered line) | 16 | third-party designee (name, phone, PIN, yes/no), signature block (IP PINs, phone, email), preparer block (name, PTIN, firm, EIN, address, self-employed) | almost entirely **not ours** — the filer signs by hand, the preparer block is another party's |
+| **body** | 30 | checkboxes and sub-boxes on lines we *partly* map — line 16's 8814/4972/other, line 26, sub-lines 1b–1h, 5b, 6b, and 35a's bank routing/account | **the interesting residue** — a mix of "needs a question", "not applicable", and possibly category 6 |
+
+★ So roughly **45% is header/trailer** and disposed of by a handful of blanket decisions, and
+**~55% is per-line body** — the part that needs real classification. If that ratio holds across the
+15 forms, the genuine work is ≈270 fields, not 496.
+
+★★ **The practice already exists in prose.** `f1040.map.toml` carries, as a comment: *"the spouse's
+IP PIN cell exists (f2_36) but ReturnInputs does not capture one, so it is left BLANK, never
+guessed."* That is precisely a §3 provenance record — **written by hand, in a comment, unenforced,
+and invisible to any check.** §G-13 is about making that structural and total, not inventing it.
+
+### ★ A defect this surfaced in the label reader (increment 1)
+
+**Boxes below the last numbered line are all attributed to it** — the 16 trailer fields came back
+labelled `37`. The "last label at or above the box's centre" rule has **no upper bound**, so an
+entire region with no line numbers collapses onto the final label. The join needs a **region**
+concept — *header* (before the first label), *body* (between labels), *trailer* (after the last) —
+and the trailer must be its own category rather than a mis-attribution. Filed here rather than fixed,
+because it changes what a "label" is and that is the ⑥ consult's subject.
+
 ## 7. Open questions for the ⑥ consult
 
 1. Is the §3 taxonomy right, and is "Declined + question pointer" the correct shape for a lawful
