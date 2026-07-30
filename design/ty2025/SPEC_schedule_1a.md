@@ -1,6 +1,6 @@
 # Schedule 1-A (TY2025) — SPEC
 
-**Status: DRAFT r1**, written 2026-07-29. Spun out of `design/ty2025/SPEC.md` §8a **B3**, which sized it
+**Status: DRAFT r2** (r1 folded 2026-07-29 — 1 Critical, 2 Important, 2 Minor; 6 findings refuted). Spun out of `design/ty2025/SPEC.md` §8a **B3**, which sized it
 as "its own spec-sized feature, not a section of one": 38 lines, six parts, four phase-outs, a filed
 VIN, and ~25 collected inputs across five crates.
 
@@ -67,13 +67,45 @@ IV carries no such caution ⇒ **allowed for MFS**, adjudicated against the form
 all four. Parts II/III/V additionally require a **valid SSN** per person.
 
 **S-6. EVERY NUMBERED LINE IS COLLECTED** (parent D-9), and each "see instructions" branch is
-transcribed or refuses (parent §2's r1-8 note). The branches, all answered in `i1040gi--2025.pdf`:
-line 4a's W-2-box-5-over-$176,100 case, 4c's multi-employer worksheet, line 5's multi-business
-net-income limitation, line 22's ">two VINs ⇒ attach a statement", and 36a's valid-SSN condition.
+transcribed or refuses (parent §2's r1-8 note).
+
+★ **The branch list below is illustrative, NOT exhaustive** — the r1 draft called it "all", which r1
+falsified: the instructions carry four "Keep for Your Records" worksheets and several branches the
+list omitted. **The enumeration of record is the instructions themselves; the build walks them.** Known
+so far: line 4's more-than-one-occupation case; line 4a's W-2-box-5-over-$176,100 case; the *Qualified
+Tips From More Than One Employer* worksheet; the *Multiple Trades or Businesses* worksheet (line 5);
+line 14a's amounts not in W-2 box 1; line 22's ">two VINs ⇒ attach a statement"; 36a's valid-SSN
+condition; and S-8's death carve-out.
 
 **S-7. THE PER-YEAR TABLE COVERS 2025–2028 AND NOTHING IS INDEXED.** All four provisions expire after
 TY2028. Caps and thresholds are fixed dollar amounts in the statute, so a "next year's Rev. Proc."
 lookup is not merely unnecessary — it is wrong. **TY2029+ must fail closed**, like TY2026 does today.
+
+**S-8. THE DEATH CARVE-OUT IS A RULE, NOT AN OPEN QUESTION — AND IT IS ALREADY A LIVE DEFECT.**
+r1's Critical. The r1 draft filed this as OQ-1 ("does btctax collect a date of death?") when the
+archived instructions state it flatly, with the IRS's own boundary pair:
+
+> **Death of a taxpayer in 2025.** If a taxpayer was born before January 2, 1961, but died in 2025
+> before reaching age 65, then the taxpayer **doesn't qualify** for the enhanced deduction for seniors.
+> A person is considered to reach age 65 on the day before the person's 65th birthday.
+
+and, in the Part V narrative: born **1960-02-14**, died **2025-02-13** ⇒ qualifies; died **2025-02-12**
+⇒ **does not**. Under parent D-10 tier 1 a worked example in the instructions is the *strongest*
+evidence class in this project — so deferring it as a question inverted D-10's own ranking, and §1's
+"grep the archive before deferring" applied exactly.
+
+★★ **Checking it exposed a LIVE DEFECT in shipped code**, filed as `FOLLOWUPS.md` §G-9: the identical
+rule governs the §63(f) **spouse aged box** on 1040 line 12a, which btctax files today from
+`is_aged(dob, year)` — date of birth alone, no death branch, no date of death collected. A spouse who
+died in-year before reaching 65 gets +$1,550 of standard deduction (TY2024), **understating tax**, and
+neither oracle can catch it (OTS takes a filer-answered Y/N; taxcalc has only `age_spouse`), so every
+gate stays green. **G-9 is a prerequisite for Part V, not a consequence of it** — Part V multiplies the
+same predicate's stake to $6,000 per person.
+
+**Therefore:** a per-person date of death is collected (D-5 semantics — the tri-state gate plus a date,
+exactly like `has_income_exclusion`: "did they die during the tax year?" → yes requires the date,
+unanswered refuses), `is_aged` grows the death branch, and **both sides of the Feb-13/Feb-12 pair are
+KATs**, mutation-verified.
 
 ---
 
@@ -97,10 +129,18 @@ trade-or-business tips **plus** each business's net-profit ceiling. Part III: `L
 column (ii)'s portion already deducted on Schedule C/E/F. Part V: derived from `date_of_birth`
 (already collected for §63(f)) **plus** the valid-SSN predicate per person.
 
-★ **Two definitional traps in the input surface**, both from the recon: *qualified overtime* is only
-the **premium half** of FLSA time-and-a-half (not double-time's second half, not holiday premiums);
-and tips from an **SSTB** employer or SSTB self-employment are **not qualified** (§224(d)(3)). Both are
-prompt wording, not arithmetic, and neither is visible on any W-2.
+★ **Definitional traps in the input surface — FOUR, not two.** The r1 draft summarised the recon and
+dropped half of §225(d)'s exclusions; all of these are prompt wording rather than arithmetic, and
+**none is visible on any W-2**:
+
+1. *Qualified overtime* is only the **premium ("half") portion** of FLSA §7 time-and-a-half — not
+   double-time's second half, not holiday or weekend premiums absent >40 hours.
+2. ★ **It excludes any amount received as a qualified tip** — no double-dip between Parts II and III.
+   The green suite offers the same dollars to both parts and the surface must refuse to count them
+   twice.
+3. ★ **State-law-only overtime for FLSA-ineligible employees does not qualify** — the entitlement must
+   arise under FLSA §7.
+4. Tips from an **SSTB** employer, or SSTB self-employment tips, are **not qualified** (§224(d)(3)).
 
 ### 4.2 Computation
 Six parts, transcribed line by line in the form's own numbering with the printed text as doc comments.
@@ -128,6 +168,12 @@ VIN's per-character comb boxes — `recon/fable/05-ty2025-field-maps.md` has the
 5. **A two-senior MFJ case** proving the 12¢-per-$1 aggregate slope (recon example (d): MAGI $200,000
    ⇒ L37 = $6,000, $3,000 each).
 6. **`L38 > 0` gates filing**, and `L37` (not `L38`) reaches Form 6251 line 1a.
+6b. ★ **A Schedule 1-A deduction moves 1040 L15 and Form 8995 line 11 — and NOTHING ELSE.** These
+   deductions sit **below** the AGI line, so every AGI-keyed quantity must be byte-identical with and
+   without them: Form 8960's NIIT MAGI, Schedule A's 7.5% medical floor, the §164(b) SALT phase-down
+   MAGI, and the IRA/student-loan phase-outs. Assert that directly — it is the cheapest possible guard
+   against wiring a below-the-line deduction into an above-the-line consumer. (And all four parts are
+   available whether the filer itemizes or takes the standard deduction.)
 7. **TY2029 fails closed**, mutation-verified, like `ty2026_full_return_must_stay_fail_closed`.
 8. **Mutation-verified guards**, and — the parent's hardest-won lesson — **a test whose mutation
    survives is not a test**. Two of this session's guards were vacuous until a mutation said so.
@@ -156,9 +202,10 @@ deduction that does not exist.
 
 ## 7. Open questions
 
-1. **Does Part V's death rule reach us?** The 2026-02-27 errata: a person who died in 2025 *before*
-   reaching 65 is not qualified even if born before 1/2/1961. btctax collects `date_of_birth`; does it
-   collect a date of death?
+1. ~~Does Part V's death rule reach us?~~ — **CLOSED, and it was never a question.** The archived
+   instructions state it flatly with a worked boundary pair; see **S-8**. Checking it found a live
+   defect in shipped code (`FOLLOWUPS.md` §G-9). btctax collects no date of death — that is the fix,
+   not the question.
 2. **Per-business or aggregate for line 5's net-income limitation?** The recon reads it per trade or
    business, with a net-loss business contributing $0. Confirm against the instructions before coding.
 3. **Notice 2025-69 transition relief** for 2025 tips reporting — does it change what we may accept as

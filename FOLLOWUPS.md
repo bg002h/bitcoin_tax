@@ -606,6 +606,56 @@ nonzero SALT, and `return_1040.rs:1439` wires `salt_5e` in — but nothing carri
 household end to end through both oracles. Adding one means a SALT input in the vector surface plus
 `A5a/A5b` (OTS) and `e18400/e18500` (taxcalc). Owning phase: **Tier 2 · E4**.
 
+### G-9 — ★★★ LIVE DEFECT IN SHIPPED CODE: the §63(f) spouse aged box ignores the death carve-out
+
+**Found 2026-07-29** by the Schedule 1-A spec review, which raised it about TY2025's Part V; checking
+the TY2024 instructions showed the same rule governs a box **btctax already files**.
+
+**The rule, verbatim from `i1040gi--2024.pdf` (Standard Deduction, line 12a):**
+
+> **Death of spouse in 2024.** If your spouse was born before January 2, 1960, but died in 2024 before
+> reaching age 65, **don't check the box** that says "Spouse was born before January 2, 1960."
+>
+> A person is considered to reach age 65 on the day before the person's 65th birthday.
+
+The TY2025 instructions carry it identically, and Part V of Schedule 1-A repeats it with the IRS's own
+boundary pair: *"born on February 14, 1960, and died on February 13, 2025"* qualifies; **February 12
+does not**.
+
+**What btctax does.** `is_aged` (`return_1040.rs:42`) decides the box from the date of birth alone:
+
+```rust
+pub(crate) fn is_aged(dob: Option<Date>, year: i32) -> bool {
+    let Some(d) = dob else { return false };
+    Date::from_calendar_date(year - 64, Month::January, 1).is_ok_and(|cutoff| d <= cutoff)
+}
+```
+
+It is scrupulous about an *absent* DOB — `None` fails closed, deliberately, "never grant an
+unsubstantiated deduction". It has **no death branch at all**, and `grep date_of_death crates/` is
+empty: btctax does not collect one, so it cannot know.
+
+**Consequence.** A spouse born before the cutoff who died in-year before reaching 65 gets a §63(f) box
+they are not entitled to: **+$1,550 of standard deduction (TY2024 married rate), understating tax.**
+That is the dangerous direction on a signed return. It is the answered-ness invariant again — btctax
+silently answers *"was your spouse 65 when they died?"* for the filer.
+
+**★ Neither oracle can catch it, so the two-oracle sweep reconciles on the wrong figure.** OTS takes a
+filer-answered boolean (`taxsolve_US_1040_2025.c:2044`, `"You_65+Over?"`) and models no death date;
+taxcalc has only `age_head`/`age_spouse`. Both are fed the same wrong premise, and every gate stays
+green — which is why this survived to v0.14.0.
+
+**Scope, stated precisely.** Confirmed for the **spouse** aged box. The taxpayer's own box is a
+final-return question with its own rules and is NOT part of this finding. The blind boxes are
+unexamined. TY2025 multiplies the stake: the same predicate gates Schedule 1-A Part V at **$6,000 per
+person**, four times the §63(f) amount.
+
+**Fix.** Collect a per-person date of death and branch `is_aged` on it — the honest shape is the
+tri-state gate plus a date, exactly like `has_income_exclusion` (see the TY2025 MAGI work): "did your
+spouse die during the tax year?" → yes requires the date, unanswered refuses. Pin the instructions'
+own Feb-13/Feb-12 pair as a KAT, mutation-verified. Owning phase: **before TY2025 Part V**, and it
+should be considered for a TY2024 patch release on its own merits.
+
 ### G-6a — TWO OTS DEFECTS, both ADJUDICATED 2026-07-29, neither a btctax defect
 
 Found by the new line-by-line Form 6251 comparison. Recorded with the method used, because the two
