@@ -447,6 +447,23 @@ pub fn run() -> Result<(), String> {
         ));
     }
     println!("cite-check: OK — {checked} quotations, all verbatim.");
+
+    // ★ Report AUTHORITY COVERAGE every run, not only in a test. btctax emits ~16 forms and had the
+    // defining PDF archived for 4 — a gap that was completely invisible because nothing ever counted it.
+    // Every form follows the same pattern and every one has an identically-numbered IRS instructions
+    // document, so an unarchived form is a form whose transcription NOTHING can check.
+    let archived: Vec<&str> = FORMS
+        .iter()
+        .filter(|f| !f.extract_stem.is_empty())
+        .map(|f| f.form)
+        .collect();
+    println!(
+        "cite-check: authority archived + extracted for {}/{} emitted forms ({}); {} awaiting archive",
+        archived.len(),
+        EMITTED_FORMS.len(),
+        archived.join(", "),
+        AUTHORITY_NOT_YET_ARCHIVED.len()
+    );
     Ok(())
 }
 
@@ -459,26 +476,52 @@ pub fn run() -> Result<(), String> {
 /// how an extract silently stops containing the sentences you are checking against.
 pub fn extract() -> Result<(), String> {
     let root = repo_root();
-    let jobs: [(&str, &str, Vec<&str>, &str); 2] = [
-        (
-            "design/amt-form6251/f1040s1a--2025.pdf",
-            "crates/btctax-core/src/tax/fixtures/schedule_1a_2025_form.txt",
-            vec!["-layout"],
+    // ★ Driven by the FORMS registry, not a hardcoded pair: every form follows the same pattern, so
+    // adding one is a table entry. The two `pdftotext` invocations differ and the difference matters —
+    // `-layout` keeps a FORM's amount boxes on their own line, but interleaves 3-column INSTRUCTION pages
+    // into text that is neither readable nor matchable.
+    let mut jobs: Vec<(String, String, Vec<String>, &str)> = Vec::new();
+    for f in FORMS {
+        if f.extract_stem.is_empty() {
+            continue;
+        }
+        jobs.push((
+            format!("design/amt-form6251/{}--{}.pdf", f.form, f.year),
+            format!(
+                "crates/btctax-core/src/tax/fixtures/{}_form.txt",
+                f.extract_stem
+            ),
+            vec!["-layout".to_string()],
             "THE MANUAL, as a checkable fixture",
-        ),
-        (
-            "design/amt-form6251/i1040gi--2025.pdf",
-            "crates/btctax-core/src/tax/fixtures/schedule_1a_2025_instructions.txt",
-            vec!["-f", "101", "-l", "110"],
+        ));
+        if f.instructions.is_empty() {
+            continue;
+        }
+        let mut flags: Vec<String> = Vec::new();
+        if let Some((first, last)) = f.instr_pages {
+            flags.extend([
+                "-f".to_string(),
+                first.to_string(),
+                "-l".to_string(),
+                last.to_string(),
+            ]);
+        }
+        jobs.push((
+            format!("design/amt-form6251/{}--{}.pdf", f.instructions, f.year),
+            format!(
+                "crates/btctax-core/src/tax/fixtures/{}_instructions.txt",
+                f.extract_stem
+            ),
+            flags,
             "THE INSTRUCTIONS, as a checkable fixture",
-        ),
-    ];
-    for (pdf, out, flags, title) in jobs {
+        ));
+    }
+    for (pdf, out, flags, title) in &jobs {
         let pdf_path = root.join(pdf);
         let bytes = fs::read(&pdf_path).map_err(|e| format!("cannot read {pdf}: {e}"))?;
         let hash = sha256_prefix(&bytes);
         let mut cmd = std::process::Command::new("pdftotext");
-        cmd.args(&flags).arg(&pdf_path).arg("-");
+        cmd.args(flags.iter()).arg(&pdf_path).arg("-");
         let got = cmd
             .output()
             .map_err(|e| format!("pdftotext failed (is poppler-utils installed?): {e}"))?;
@@ -577,9 +620,72 @@ fn sha256_prefix(bytes: &[u8]) -> String {
     format!("{:08x}", h[0])
 }
 
+// ── The form registry: every form we support follows the SAME pattern ─────────────────────────────
+
+/// **Every IRS form btctax emits, paired with the authority that defines it.**
+///
+/// ★★ The generalisation that makes this file worth having (user, 2026-07-29): *"Every form we ever
+/// support will follow this exact pattern. And all have simple instructions in the form or the
+/// identically numbered instructions document available from the IRS."*
+///
+/// The IRS naming is **mechanical**: form `fNNNN` has instructions `iNNNN` (`f6251`→`i6251`,
+/// `f1040sa`→`i1040sca`), with the 1040 family's general instructions `i1040gi` carrying the schedules
+/// that have no standalone booklet. So adding a form is a **table entry plus a transcription**, never a
+/// bespoke project: archive the pair, extract the text layer, enumerate the label set *from the extract*,
+/// one field per label with the instruction text verbatim as its doc comment, derive each decision
+/// (direction, constant, cross-reference) from the line's own words, and classify each label's provenance.
+///
+/// `instr_pages` is `None` when the instructions are a standalone booklet (extract all of it) and
+/// `Some((first, last))` when they are a section of a larger one, as Schedule 1-A is of `i1040gi`.
+pub struct FormAuthority {
+    /// IRS form basename, e.g. `"f1040s1a"` — also the `design/` filename stem.
+    pub form: &'static str,
+    pub year: i32,
+    /// IRS instructions basename. `""` for the handful of forms the IRS publishes with the instructions
+    /// printed ON the form itself (Form 8275 is one) — those are self-authorising.
+    pub instructions: &'static str,
+    pub instr_pages: Option<(u32, u32)>,
+    /// Committed text-layer extract stem under `crates/btctax-core/src/tax/fixtures/`, or `""` if not
+    /// yet extracted.
+    pub extract_stem: &'static str,
+}
+
+/// ★ Registry state as of 2026-07-29. Deliberately honest: only Schedule 1-A is fully wired, and the
+/// `authority_coverage_may_only_improve` test below makes that visible instead of implicit.
+pub const FORMS: &[FormAuthority] = &[FormAuthority {
+    form: "f1040s1a",
+    year: 2025,
+    instructions: "i1040gi",
+    instr_pages: Some((101, 110)),
+    extract_stem: "schedule_1a_2025",
+}];
+
+/// Every form btctax **emits**, by IRS basename — derived from `btctax-forms`' modules.
+///
+/// ★ This is the left-hand side of the coverage question the registry answers: we emit these, so we owe
+/// an archived authority for each.
+pub const EMITTED_FORMS: &[&str] = &[
+    "f1040", "f1040s1a", "f1040sa", "f1040sb", "f1040sc", "f1040sd", "f1040sse", "f1040s2",
+    "f1040s3", "f6251", "f8949", "f8275", "f8283", "f8959", "f8960", "f8995",
+];
+
+/// ★★ **THE RATCHET.** btctax emits 16 forms and has the authority archived for a handful. That gap is
+/// real and is not closed by this commit — but it must never GROW, and it must never be invisible.
+///
+/// Every form listed here is one we emit while holding no archived, extracted primary source, so its
+/// transcription is unverifiable by `cite-check` and by the derive-the-decision-from-the-line tests. The
+/// list may only SHRINK. Adding a form to `EMITTED_FORMS` without either archiving its authority or
+/// consciously extending this list is a compile-free, silent regression — so the test below makes it a
+/// test failure instead.
+pub const AUTHORITY_NOT_YET_ARCHIVED: &[&str] = &[
+    "f1040", "f1040sa", "f1040sb", "f1040sc", "f1040sd", "f1040sse", "f1040s2", "f1040s3", "f6251",
+    "f8949", "f8275", "f8283", "f8959", "f8960", "f8995",
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     /// ★★ **THE POINT OF THIS FILE.** Every quotation in the Schedule 1-A spec and plan is verbatim
     /// from the archived form or instructions. This is the mechanical answer to the "§X disagrees with
@@ -624,6 +730,57 @@ mod tests {
             checked >= 20,
             "only {checked} quotations found — the span extractor has probably broken, which would \
              make this test pass by finding nothing"
+        );
+    }
+
+    /// ★★ **THE AUTHORITY RATCHET.** Every form btctax emits either has an archived, extracted primary
+    /// source in [`FORMS`] or is explicitly listed in [`AUTHORITY_NOT_YET_ARCHIVED`]. The list may only
+    /// shrink.
+    ///
+    /// Without this, adding a form emitter is a silent regression: nothing compels anyone to archive the
+    /// PDF that defines it, so the transcription becomes unverifiable and every downstream conformance
+    /// test — the `cite-check` quotations, the derive-the-direction-from-the-line assertions, the label
+    /// census — simply has nothing to check against and passes by finding nothing.
+    #[test]
+    fn authority_coverage_may_only_improve() {
+        let archived: BTreeSet<&str> = FORMS
+            .iter()
+            .filter(|f| !f.extract_stem.is_empty())
+            .map(|f| f.form)
+            .collect();
+        let excused: BTreeSet<&str> = AUTHORITY_NOT_YET_ARCHIVED.iter().copied().collect();
+
+        // 1. Nothing may be BOTH archived and excused — that is a stale excuse, and a stale excuse list
+        //    is how a closed gap silently reopens for the next form.
+        let both: Vec<&&str> = archived.intersection(&excused).collect();
+        assert!(
+            both.is_empty(),
+            "{both:?} now HAS an archived authority — remove it from AUTHORITY_NOT_YET_ARCHIVED so the \
+             ratchet actually tightens"
+        );
+
+        // 2. Every emitted form is accounted for: archived, or consciously excused.
+        let unaccounted: Vec<&&str> = EMITTED_FORMS
+            .iter()
+            .filter(|f| !archived.contains(**f) && !excused.contains(**f))
+            .collect();
+        assert!(
+            unaccounted.is_empty(),
+            "btctax emits {unaccounted:?} with no archived primary source and no explicit excuse. Every \
+             form we support follows one pattern and every one has an identically-numbered IRS \
+             instructions document — archive the pair and extract it (`xtask extract-schedule-1a` is the \
+             model), or add it to AUTHORITY_NOT_YET_ARCHIVED with intent. Silence here means a form whose \
+             transcription NOTHING can check."
+        );
+
+        // 3. Every excuse names a form we actually emit — otherwise the list rots into a wishlist.
+        let phantom: Vec<&&str> = AUTHORITY_NOT_YET_ARCHIVED
+            .iter()
+            .filter(|f| !EMITTED_FORMS.contains(f))
+            .collect();
+        assert!(
+            phantom.is_empty(),
+            "{phantom:?} are excused but not emitted"
         );
     }
 
