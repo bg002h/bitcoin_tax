@@ -846,3 +846,434 @@ mod tests {
         );
     }
 }
+
+// ── Schedule 1-A (TY2025-2028) — the four OBBBA additional deductions ─────────────────────────
+
+/// Which way a Schedule 1-A phase-out rounds its **step count** — an **explicit parameter, never
+/// baked into a shared helper**, because this one form rounds *both* ways and the two are one word
+/// apart on the page.
+///
+/// | part | line | printed instruction | direction |
+/// |---|---|---|---|
+/// | II tips | 11 | "decrease the result to the next **lower** whole number" | [`Self::Floor`] |
+/// | III overtime | 19 | "decrease the result to the next **lower** whole number" | [`Self::Floor`] |
+/// | IV car loan | 28 | "increase the result to the next **higher** whole number" | [`Self::Ceil`] |
+///
+/// ★ Part IV ceils because §163(h)(4)(B)(iii) says "for each $1,000 **or portion thereof**", where
+/// §224(b)(2) and §225(b)(2) say only "for each $1,000". So this is **statutory**, not an IRS
+/// formatting quirk, and a `phase_out()` helper with one baked-in direction is silently wrong on one
+/// side — by exactly $100 for Parts II/III and $200 for Part IV. (Schedule 8812 line 10 ceils for the
+/// same "or fraction thereof" reason.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StepRounding {
+    /// "decrease the result to the next lower whole number. (For example, decrease 1.5 to 1, and
+    /// decrease 0.05 to 0.)"
+    Floor,
+    /// "increase the result to the next higher whole number. (For example, increase 1.5 to 2, and
+    /// increase 0.05 to 1.)"
+    Ceil,
+}
+
+/// One Schedule 1-A stair-step phase-out: the three lines that read *divide, round, multiply*
+/// (10-12, 18-20, 27-29). The **smooth** Part V reduction is deliberately NOT modelled here — it has
+/// no step at all (§151(d)(5)(C) is a flat 6%), and giving it a fake step is how a smooth phase-out
+/// acquires a stair.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StairStepPhaseOut {
+    /// Lines 9 / 17 / 26 — the threshold for every status **except** MFJ.
+    pub threshold: Usd,
+    /// Lines 9 / 17 / 26 — the MFJ figure the line prints in parentheses. A separate field rather
+    /// than `threshold * 2` because the form prints both and a future year could break the relation.
+    pub threshold_mfj: Usd,
+    /// Lines 11 / 19 / 28 — the divisor. $1,000 on every part.
+    pub step: Usd,
+    /// Lines 12 / 20 / 29 — the multiplier. $100 (Parts II/III) or $200 (Part IV).
+    pub per_step: Usd,
+    /// Lines 11 / 19 / 28 — see [`StepRounding`]. The field that must never be shared.
+    pub rounding: StepRounding,
+}
+
+impl StairStepPhaseOut {
+    /// Lines 9 / 17 / 26. MFJ takes the parenthesised figure; **every other status takes the base**,
+    /// which the Part IV instructions state in exactly those words: "Married filing jointly—$200,000.
+    /// All other filing statuses—$100,000."
+    pub fn threshold_for(&self, status: FilingStatus) -> Usd {
+        match status {
+            FilingStatus::Mfj => self.threshold_mfj,
+            FilingStatus::Single | FilingStatus::HoH | FilingStatus::Mfs | FilingStatus::Qss => {
+                self.threshold
+            }
+        }
+    }
+
+    /// Lines 11-12 / 19-20 / 28-29 as one quantity: the amount subtracted from the capped deduction.
+    /// `excess` is line 10 / 18 / 27 (already known positive — a zero-or-less line 10 **skips** the
+    /// phase-out entirely rather than passing zero here, which is the form's own routing).
+    pub fn reduction(&self, excess: Usd) -> Usd {
+        let steps = excess / self.step;
+        let steps = match self.rounding {
+            StepRounding::Floor => steps.floor(),
+            StepRounding::Ceil => steps.ceil(),
+        };
+        steps * self.per_step
+    }
+
+    /// The excess at which this phase-out first reaches **zero deduction**, given `cap`.
+    ///
+    /// ★★ **This is per-direction, and that is the whole point of the function.** A flooring part
+    /// exhausts exactly at `(cap / per_step) × step`; a **ceiling** part exhausts one dollar PAST the
+    /// last full step, because any portion of a step counts as a whole one. For Part IV with the full
+    /// $10,000 cap that is **$49,001**, not $50,000: at an excess of $49,000 line 28 is 49, line 29 is
+    /// $9,800 and line 30 still stands at **$200**.
+    ///
+    /// Used only by the tests, as the closed form that ties threshold, rate and cap together instead
+    /// of pinning three independent literals.
+    pub fn exhaustion_excess(&self, cap: Usd) -> Usd {
+        let full_steps = (cap / self.per_step).floor();
+        match self.rounding {
+            StepRounding::Floor => full_steps * self.step,
+            StepRounding::Ceil => (full_steps - Decimal::ONE) * self.step + Decimal::ONE,
+        }
+    }
+}
+
+/// **Schedule 1-A (Form 1040) — the four OBBBA "additional deductions", TY2025-2028.**
+///
+/// ★ **Nothing here is indexed and everything here EXPIRES.** All four provisions (§§224, 225,
+/// 163(h)(4), 151(d)(5)) sunset after TY2028 and the statute fixes the caps and thresholds as plain
+/// dollar amounts — so a "next year's Rev. Proc." lookup is not merely unnecessary, it is **wrong**,
+/// and **TY2029+ must fail closed** exactly as TY2026 does today. That is why this is a
+/// `statutory`-section type keyed by year rather than a `TaxTable` field.
+///
+/// ★ Three distinct threshold pairs and three distinct caps live on one form; none is shared. See
+/// [`StairStepPhaseOut::rounding`] for the fourth thing that must not be shared.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Schedule1aParams {
+    pub year: i32,
+    /// Line 7 — "Enter the smaller of the amount on line 6 or $25,000." §224(b)(1).
+    ///
+    /// ★ **Per RETURN, not per spouse, and it does not vary by status**: the line prints no MFJ
+    /// figure, and the instructions say so twice — "You can't deduct more than $25,000 of qualified
+    /// tips, **regardless of your filing status**" and "the $25,000 maximum amount of deduction limit
+    /// applies to your **combined** qualified tip income. **It is not a per spouse limit.**"
+    pub tips_cap: Usd,
+    /// Lines 8-12 — the §224(b)(2) phase-out. **Floors.**
+    pub tips_phase_out: StairStepPhaseOut,
+    /// Line 15 — "Enter the smaller of the amount on line 14c or $12,500 ($25,000 if married filing
+    /// jointly)." §225(b)(1). Unlike the tips cap, this one DOES double for MFJ.
+    pub overtime_cap: Usd,
+    /// Line 15's parenthesised MFJ figure.
+    pub overtime_cap_mfj: Usd,
+    /// Lines 16-20 — the §225(b)(2) phase-out. **Floors.**
+    pub overtime_phase_out: StairStepPhaseOut,
+    /// Line 24 — "Enter the smaller of the amount on line 23 or $10,000." §163(h)(4)(B)(ii).
+    pub qpvli_cap: Usd,
+    /// Lines 25-29 — the §163(h)(4)(B)(iii) phase-out. **CEILS** — the one ceiling on the form.
+    pub qpvli_phase_out: StairStepPhaseOut,
+    /// Line 33's constant and line 35's minuend — "$6,000". §151(d)(5)(A). **Per qualifying
+    /// individual**: line 35 is computed once and lines 36a/36b each enter it, so an MFJ couple with
+    /// two seniors loses **12¢ per $1** of MAGI in the band while each of them loses 6¢.
+    pub senior_per_person: Usd,
+    /// Line 32 — "Enter $75,000 ($150,000 if married filing jointly)."
+    pub senior_threshold: Usd,
+    /// Line 32's parenthesised MFJ figure.
+    pub senior_threshold_mfj: Usd,
+    /// Line 34 — "Multiply line 33 by 6% (0.06)." §151(d)(5)(C). **Smooth, no stair-step at all.**
+    ///
+    /// ★ Line 34 is its own printed dollar line with no rounding instruction of its own, so the
+    /// general IRS whole-dollar convention governs it and **line 35 subtracts the PRINTED line 34**.
+    /// `6,000 − round(0.06 × L33)` and `round(6,000 − 0.06 × L33)` differ by $1 whenever `0.06 × L33`
+    /// lands on a half-dollar (excess ≡ 25 mod 50), doubled on a two-senior return — and the
+    /// round-the-difference form is the one that understates tax.
+    pub senior_rate: Decimal,
+}
+
+impl Schedule1aParams {
+    /// Line 32 / line 9 / line 17 style: MFJ takes the parenthesised figure, every other status the base.
+    pub fn senior_threshold_for(&self, status: FilingStatus) -> Usd {
+        match status {
+            FilingStatus::Mfj => self.senior_threshold_mfj,
+            FilingStatus::Single | FilingStatus::HoH | FilingStatus::Mfs | FilingStatus::Qss => {
+                self.senior_threshold
+            }
+        }
+    }
+
+    /// Line 15: "$12,500 ($25,000 if married filing jointly)".
+    pub fn overtime_cap_for(&self, status: FilingStatus) -> Usd {
+        match status {
+            FilingStatus::Mfj => self.overtime_cap_mfj,
+            FilingStatus::Single | FilingStatus::HoH | FilingStatus::Mfs | FilingStatus::Qss => {
+                self.overtime_cap
+            }
+        }
+    }
+}
+
+/// Schedule 1-A parameters for `year`, or `None` where the form does not exist.
+///
+/// ★★ **`None` for TY2029+ is the load-bearing behaviour, not an omission.** The four provisions
+/// expire after TY2028 (§224(f), §225(f), §163(h)(4)(F), §151(d)(5)(D)); a table that quietly extends
+/// them files a deduction that does not exist. `None` for 2024-and-earlier is likewise correct — the
+/// form was created by Pub. L. 119-21 and there is no 2024 Schedule 1-A.
+///
+/// Values are identical across 2025-2028 because **nothing here is indexed**; they are written once
+/// and returned for each year in range rather than duplicated per year, so no year can drift.
+pub fn schedule_1a_params(year: i32) -> Option<Schedule1aParams> {
+    if !(2025..=2028).contains(&year) {
+        return None;
+    }
+    Some(Schedule1aParams {
+        year,
+        tips_cap: dec!(25000),
+        tips_phase_out: StairStepPhaseOut {
+            threshold: dec!(150000),
+            threshold_mfj: dec!(300000),
+            step: dec!(1000),
+            per_step: dec!(100),
+            rounding: StepRounding::Floor,
+        },
+        overtime_cap: dec!(12500),
+        overtime_cap_mfj: dec!(25000),
+        overtime_phase_out: StairStepPhaseOut {
+            threshold: dec!(150000),
+            threshold_mfj: dec!(300000),
+            step: dec!(1000),
+            per_step: dec!(100),
+            rounding: StepRounding::Floor,
+        },
+        qpvli_cap: dec!(10000),
+        qpvli_phase_out: StairStepPhaseOut {
+            threshold: dec!(100000),
+            threshold_mfj: dec!(200000),
+            step: dec!(1000),
+            per_step: dec!(200),
+            rounding: StepRounding::Ceil,
+        },
+        senior_per_person: dec!(6000),
+        senior_threshold: dec!(75000),
+        senior_threshold_mfj: dec!(150000),
+        senior_rate: dec!(0.06),
+    })
+}
+
+#[cfg(test)]
+mod schedule_1a_tests {
+    use super::*;
+    use crate::conventions::round_dollar;
+
+    fn p() -> Schedule1aParams {
+        schedule_1a_params(2025).expect("TY2025 has a Schedule 1-A")
+    }
+
+    /// ★★ **TY2029+ MUST FAIL CLOSED, and TY2024 has no Schedule 1-A at all.** The four provisions
+    /// expire after TY2028, so a table that quietly extends them files a deduction that does not
+    /// exist — the same class of defect as `ty2026_full_return_must_stay_fail_closed`.
+    #[test]
+    fn schedule_1a_exists_only_for_2025_through_2028() {
+        for year in [2017, 2023, 2024, 2029, 2030, 2035] {
+            assert!(
+                schedule_1a_params(year).is_none(),
+                "TY{year} must have NO Schedule 1-A — the form was created by Pub. L. 119-21 and \
+                 §§224(f)/225(f)/163(h)(4)(F)/151(d)(5)(D) expire it after 2028"
+            );
+        }
+        for year in 2025..=2028 {
+            let got = schedule_1a_params(year).unwrap_or_else(|| panic!("TY{year} needs params"));
+            assert_eq!(got.year, year);
+            // Nothing here is indexed, so every in-range year is the SAME instrument.
+            assert_eq!(
+                Schedule1aParams {
+                    year: 2025,
+                    ..got.clone()
+                },
+                p(),
+                "TY{year} drifted from TY2025 — none of these amounts is indexed"
+            );
+        }
+    }
+
+    /// Every constant against the printed line it comes from.
+    #[test]
+    fn every_constant_matches_its_printed_line() {
+        let p = p();
+        // L7 "Enter the smaller of the amount on line 6 or $25,000" — no MFJ figure printed.
+        assert_eq!(p.tips_cap, dec!(25000));
+        // L9 / L17 "Enter $150,000 ($300,000 if married filing jointly)".
+        for po in [&p.tips_phase_out, &p.overtime_phase_out] {
+            assert_eq!(po.threshold, dec!(150000));
+            assert_eq!(po.threshold_mfj, dec!(300000));
+            assert_eq!(po.per_step, dec!(100)); // L12 / L20 "Multiply line 11 by $100"
+            assert_eq!(po.step, dec!(1000));
+        }
+        // L15 "$12,500 ($25,000 if married filing jointly)" — this cap DOES double.
+        assert_eq!(p.overtime_cap, dec!(12500));
+        assert_eq!(p.overtime_cap_mfj, dec!(25000));
+        // L24 "$10,000"; L26 "$100,000 ($200,000 if married filing jointly)"; L29 "by $200".
+        assert_eq!(p.qpvli_cap, dec!(10000));
+        assert_eq!(p.qpvli_phase_out.threshold, dec!(100000));
+        assert_eq!(p.qpvli_phase_out.threshold_mfj, dec!(200000));
+        assert_eq!(p.qpvli_phase_out.per_step, dec!(200));
+        // L32 "$75,000 ($150,000 if married filing jointly)"; L34 "6% (0.06)"; L35 "from $6,000".
+        assert_eq!(p.senior_threshold, dec!(75000));
+        assert_eq!(p.senior_threshold_mfj, dec!(150000));
+        assert_eq!(p.senior_rate, dec!(0.06));
+        assert_eq!(p.senior_per_person, dec!(6000));
+    }
+
+    /// ★★ **THE ROUNDING DIRECTION IS PER PART.** Parts II/III floor (lines 11, 19); Part IV ceils
+    /// (line 28). This asserts the direction where they DIFFER — at a fractional step — because that
+    /// is the only place the two are distinguishable. The form's own examples are the fixtures:
+    /// "decrease 1.5 to 1, and decrease 0.05 to 0" vs "increase 1.5 to 2, and increase 0.05 to 1".
+    #[test]
+    fn parts_two_and_three_floor_the_step_count_while_part_four_ceils() {
+        let p = p();
+        // 1.5 steps.
+        assert_eq!(p.tips_phase_out.reduction(dec!(1500)), dec!(100)); // floor(1.5)=1 × $100
+        assert_eq!(p.overtime_phase_out.reduction(dec!(1500)), dec!(100));
+        assert_eq!(p.qpvli_phase_out.reduction(dec!(1500)), dec!(400)); // ceil(1.5)=2 × $200
+                                                                        // 0.05 steps — the form's own second example, and the case a truncating `as i64` gets right
+                                                                        // by accident on the floor side and wrong on the ceil side.
+        assert_eq!(p.tips_phase_out.reduction(dec!(50)), Usd::ZERO); // floor(0.05)=0
+        assert_eq!(p.qpvli_phase_out.reduction(dec!(50)), dec!(200)); // ceil(0.05)=1 × $200
+                                                                      // A WHOLE number of steps is where the two agree — so a test using only $1,000 multiples
+                                                                      // would pass under either direction and prove nothing. Recorded, not relied on.
+        assert_eq!(p.tips_phase_out.reduction(dec!(3000)), dec!(300));
+        assert_eq!(p.qpvli_phase_out.reduction(dec!(3000)), dec!(600));
+    }
+
+    /// ★★ **THE PAIRED KNEE ASSERTION** — "at the knee, $0" AND "one step below, still > $0". A
+    /// knee-only test passes under both rounding directions, which is exactly the S-1 failure mode.
+    ///
+    /// ★ And the knee is **per direction**: a flooring part exhausts at `(cap/per_step) × step`, but a
+    /// **ceiling** part exhausts one dollar PAST the last full step. Part IV with the full $10,000 cap
+    /// exhausts at an excess of **$49,001**, not $50,000 — at $49,000 line 28 is 49, line 29 is $9,800
+    /// and line 30 still stands at $200. Asserting `+$50,000` there would force Part IV to floor.
+    #[test]
+    fn each_phase_out_exhausts_at_its_own_knee_and_not_one_step_earlier() {
+        let p = p();
+        let cases: [(&str, &StairStepPhaseOut, Usd, Usd); 3] = [
+            ("II tips", &p.tips_phase_out, p.tips_cap, dec!(250000)),
+            (
+                "III overtime",
+                &p.overtime_phase_out,
+                p.overtime_cap,
+                dec!(125000),
+            ),
+            ("IV car loan", &p.qpvli_phase_out, p.qpvli_cap, dec!(49001)),
+        ];
+        for (name, po, cap, expected_knee) in cases {
+            let knee = po.exhaustion_excess(cap);
+            assert_eq!(knee, expected_knee, "{name}: wrong exhaustion excess");
+            // AT the knee: the reduction has consumed the whole cap.
+            assert!(
+                po.reduction(knee) >= cap,
+                "{name}: at the knee ({knee}) the reduction must reach the cap {cap}"
+            );
+            // ONE STEP BELOW the knee: a deduction must still stand. This is the half that dies if
+            // the direction is flipped.
+            let below = knee - po.step;
+            assert!(
+                po.reduction(below) < cap,
+                "{name}: one step below the knee ({below}) a deduction must still stand"
+            );
+        }
+        // ★ The $200 that proves Part IV ceils rather than floors, spelled out.
+        assert_eq!(p.qpvli_phase_out.reduction(dec!(49000)), dec!(9800));
+        assert_eq!(
+            p.qpvli_cap - p.qpvli_phase_out.reduction(dec!(49000)),
+            dec!(200)
+        );
+        // A floor would give ceil→floor(49.5)=49 here and leave $200 standing where the form gives $0.
+        assert!(p.qpvli_phase_out.reduction(dec!(49500)) >= p.qpvli_cap);
+    }
+
+    /// Part V is **smooth** — 6% of the excess, no step at all — and everyone reaches $0 at
+    /// `threshold + $100,000`. This is the closed form tying threshold, rate and cap together
+    /// (`per_person / rate = 6,000 / 0.06 = 100,000`) rather than pinning a fourth literal.
+    #[test]
+    fn part_five_is_smooth_and_exhausts_one_hundred_thousand_above_its_threshold() {
+        let p = p();
+        assert_eq!(p.senior_per_person / p.senior_rate, dec!(100000));
+        // 6¢ per $1 per person; an MFJ couple with two seniors loses 12¢ per $1 (S-4).
+        let l34 = |excess: Usd| round_dollar(excess * p.senior_rate);
+        assert_eq!(l34(dec!(1000)), dec!(60));
+        assert_eq!(p.senior_per_person - l34(dec!(100000)), Usd::ZERO);
+        assert!(p.senior_per_person - l34(dec!(99000)) > Usd::ZERO);
+    }
+
+    /// ★ **Line 34 is rounded as its own PRINTED line, then line 35 subtracts it** — the project's
+    /// standing rule that every line takes that schedule's printed figure. The two orders differ by
+    /// $1 exactly when `0.06 × L33` lands on a half-dollar (excess ≡ 25 mod 50), and the
+    /// round-the-difference order gives the LARGER deduction, i.e. understates tax.
+    #[test]
+    fn line_34_rounds_before_line_35_subtracts() {
+        let p = p();
+        let excess = dec!(50025); // 0.06 × 50,025 = 3,001.50 — exactly on the half-dollar
+        let raw = excess * p.senior_rate;
+        assert_eq!(
+            raw,
+            dec!(3001.50),
+            "the fixture must actually straddle a half-dollar"
+        );
+        let round_the_line = p.senior_per_person - round_dollar(raw); // 6,000 − 3,002 = 2,998
+        let round_the_difference = round_dollar(p.senior_per_person - raw); // round(2,998.50) = 2,999
+        assert_eq!(round_the_line, dec!(2998));
+        assert_eq!(round_the_difference, dec!(2999));
+        assert!(
+            round_the_difference > round_the_line,
+            "the wrong order is the one that inflates the deduction — so it must not be chosen \
+             by accident"
+        );
+    }
+
+    /// Thresholds: MFJ takes the parenthesised figure, **every other status the base** — which the
+    /// Part IV instructions state in those words: "Married filing jointly—$200,000. All other filing
+    /// statuses—$100,000." ★ Notably MFS takes the BASE, not half of it: unlike §164(b)'s SALT
+    /// worksheet, no Schedule 1-A line halves anything for MFS.
+    #[test]
+    fn only_mfj_takes_the_parenthesised_threshold_and_mfs_takes_the_base() {
+        let p = p();
+        for status in [
+            FilingStatus::Single,
+            FilingStatus::HoH,
+            FilingStatus::Mfs,
+            FilingStatus::Qss,
+        ] {
+            assert_eq!(p.qpvli_phase_out.threshold_for(status), dec!(100000));
+            assert_eq!(p.tips_phase_out.threshold_for(status), dec!(150000));
+            assert_eq!(p.senior_threshold_for(status), dec!(75000));
+            assert_eq!(p.overtime_cap_for(status), dec!(12500));
+        }
+        assert_eq!(
+            p.qpvli_phase_out.threshold_for(FilingStatus::Mfj),
+            dec!(200000)
+        );
+        assert_eq!(
+            p.tips_phase_out.threshold_for(FilingStatus::Mfj),
+            dec!(300000)
+        );
+        assert_eq!(p.senior_threshold_for(FilingStatus::Mfj), dec!(150000));
+        assert_eq!(p.overtime_cap_for(FilingStatus::Mfj), dec!(25000));
+        // ★ The tips cap is the ONE that does not vary at all — "regardless of your filing status",
+        // "It is not a per spouse limit". There is deliberately no `tips_cap_for(status)`.
+        assert_eq!(p.tips_cap, dec!(25000));
+    }
+
+    /// ★ The recon's worked examples (b) and (c) — the two figures that DIFFER under the wrong
+    /// rounding, which is why the spec names them as the minimum bar (§5.2).
+    #[test]
+    fn the_two_worked_examples_that_distinguish_floor_from_ceil() {
+        let p = p();
+        // (b) Single, MAGI $157,350, tips $3,000 ⇒ $2,300. A ceil would give $2,200.
+        let excess_b = dec!(157350) - p.tips_phase_out.threshold_for(FilingStatus::Single);
+        assert_eq!(excess_b, dec!(7350));
+        let cap_b = dec!(3000).min(p.tips_cap);
+        assert_eq!(cap_b - p.tips_phase_out.reduction(excess_b), dec!(2300));
+        // (c) Single, MAGI $104,050, QPVLI $6,000 ⇒ $5,000. A floor would give $5,200.
+        let excess_c = dec!(104050) - p.qpvli_phase_out.threshold_for(FilingStatus::Single);
+        assert_eq!(excess_c, dec!(4050));
+        let cap_c = dec!(6000).min(p.qpvli_cap);
+        assert_eq!(cap_c - p.qpvli_phase_out.reduction(excess_c), dec!(5000));
+    }
+}
