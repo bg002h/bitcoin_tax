@@ -3,6 +3,12 @@
 **Written 2026-07-30**, after a session in which doctrine was written down and then violated *the same
 day*. The user's diagnosis: *"not doing what you are supposed to lowers your value considerably."*
 
+**Revised 2026-07-30 (r2)** after an independent Fable consult — verdict `needs-changes`, persisted
+verbatim at [`reviews/harness-design-fable-r1.md`](../reviews/harness-design-fable-r1.md). The r1 draft
+enumerated **five** mechanisms against **five** symptoms. That was the excuse-list mistake this document
+itself warns against: an enumeration of the outcomes one session happened to produce. This revision is
+organised around the **two classes** the five failures actually belong to.
+
 ## The diagnosis, in this project's own vocabulary
 
 The process has the exact defect the code spent this session removing: **held by convention, not
@@ -22,75 +28,228 @@ someone happened to see.
 
 | # | what happened | class |
 |---|---|---|
-| **F1** | Built `design/forms/` as a primary-source archive **without checking whether one existed**. `legal/primary-sources/` already held 16 × 26 USC, 6 × 26 CFR, 11 guidance docs — including forms that overlap directly. | *concluded from not having looked* |
-| **F2** | Enumerated from a **range or hand-list instead of the source**, three times: a `BTreeSet` from `1..=38` when the label set is 48; a rounding check keyed to a hand-list of 3 parts (deleting a part red nothing); a citation check keyed to 22 hand-picked quotes. | *false completeness* |
-| **F3** | **Committed with `make check` RED** — ran the gate and committed in the same command without reading the output. | *gate skipped* |
-| **F4** | Claimed a checker was working when it was **blind to the case that mattered** — `cite-check` only read `*"…"*` spans, so the rounding-direction table it was meant to protect was never checked. Found only by mutating the document. | *unverified guard* |
-| **F5** | Truncated a payload between workflow agents, then **reported the artifact as a finding** ("10 of 12 labels omitted"). | *harness artifact as signal* |
+| **F1** | Built `design/forms/` as a primary-source archive **without checking whether one existed**. `legal/primary-sources/` already held 16 × 26 USC, 6 × 26 CFR, 11 guidance docs — including forms that overlap directly. | **α** |
+| **F2** | Enumerated from a **range or hand-list instead of the source**, three times: a `BTreeSet` from `1..=38` when the label set is 48; a rounding check keyed to a hand-list of 3 parts (deleting a part red nothing); a citation check keyed to 22 hand-picked quotes. | **β** |
+| **F3** | **Committed with `make check` RED** — ran the gate and committed in the same command without reading the output. | **α** |
+| **F4** | Claimed a checker was working when it was **blind to the case that mattered** — `cite-check` only read `*"…"*` spans, so the rounding-direction table it was meant to protect was never checked. Found only by mutating the document. | **β** |
+| **F5** | Truncated a payload between workflow agents, then **reported the artifact as a finding** ("10 of 12 labels omitted"). | **β** |
 
 ★ Every one is mechanically detectable. That is what makes a harness possible at all.
 
-## The harness
+## ★★ The two classes — this is the load-bearing structure
 
-Ordered by **(value × certainty) ÷ cost**. Each must itself be mutation-verified — a hook that does not
-fire is decoration, and shipping decoration is F4 again.
+Five symptoms, two mechanisms. Building against the symptoms produces a harness that is exactly as long
+as one session's bad luck; building against the classes produces one that can fire on a failure nobody
+has seen yet.
 
-### H1 — `pre-commit` git hook running the gates ★ build first
+| | class | failures | what actually went wrong | the cure's shape |
+|---|---|---|---|---|
+| **α** | **Acted without observing an available fact** | F1, F3 | The fact was present, cheap, and unread. F1 was never *considered and refused* — it was never considered. | **Couple the act to the fact** at the decision point, so proceeding requires the observation rather than recommending it. |
+| **β** | **Shipped an instrument never seen discriminating** | F2, F4, F5 | A measuring device was trusted without once being watched to distinguish a true case from a false one. | **Require the kill.** No instrument counts as existing until it has been observed red on a planted defect. |
 
-Catches **F3** completely and costs almost nothing. `make check` + `cargo fmt --all --check`; refuse the
-commit on failure. The remaining three gates (msrv, isolation, pii-scan) are slower — run those in
-`pre-push`, which is the right granularity anyway since pii-scan reads HEAD.
+★ F5 belongs to **β**, which is not obvious: a harness whose truncation manufactures findings is an
+*instrument defect*, not a communication slip. The reviewer read the instrument, not the world.
 
-★ It must NOT be bypassable by habit. `--no-verify` should be reserved for a stated reason, and the hook
-should print what it is protecting rather than just failing.
+★★ **β is the project's own mutation doctrine turned on its own instruments.** *"A guarantee without a
+test that reds when it is removed does not exist"* — applied to checkers, censuses, and review harnesses
+rather than to features. And it cannot be satisfied performatively: an honest kill-test for a blind
+checker **cannot be written without discovering the blindness**. That is literally how F4 was found.
 
-### H2 — a test that forbids TWO primary-source archives
+## ★★ Scope bound — this harness is btctax-ONLY
 
-Catches **F1** as a standing invariant rather than a memory. Assert that exactly one directory tree is the
-declared authority for IRS primary sources, and that anything under another path is either a runtime asset
-(`crates/btctax-forms/forms/` — the fillable AcroForm templates the emitter needs) or listed in a shrinking
-excuse list with a reason. **Reds today**, which is correct: the reconciliation is real work and is
-recorded in `CONTINUITY.md`.
+**User constraint, 2026-07-30.** Claude is used across many projects; this harness is tuned to *this*
+repo's observed failures and would be wrong-to-actively-harmful elsewhere (A3 knows about IRS form
+stems; A2 assumes `make check`; the seen-red-once rule is calibrated to a codebase with 2450 tests and
+mutation-verification). **A harness grown from one project's failure data must not leak into projects
+whose failure data nobody has looked at** — that would be F2, false completeness, at the largest
+possible scale.
 
-### H3 — `PreToolUse` hook on `Write` for new top-level paths
+So every artifact lands **inside this repository**, and the check is *mechanical*, not a resolution:
 
-The only mechanism that fires **at the decision point**, which is where F1 actually happened. When a
-`Write` creates a file under a top-level directory that does not yet exist, interrupt with: *"new
-top-level path — has a search for an existing one been run this session?"* It cannot verify the search
-happened; it can force the question at the moment it is answerable. ★ Deliberately narrow: firing on
-every write would be noise, and a noisy hook gets disabled, which is worse than no hook.
+| mechanism | lands in | why that is repo-scoped |
+|---|---|---|
+| A1, A3 test half | `crates/xtask/` | ordinary workspace code; runs only via this repo's suite |
+| A2 hooks, A3/A4 hook scripts | `scripts/` + **repo-local** `git config core.hooksPath` | git config written without `--global`, so it lives in this repo's `.git/config` |
+| A3/A4 `PreToolUse` wiring | **`.claude/settings.json` in this repo** | project-scoped by construction — Claude Code loads it only when working in this directory |
+| B1, B2 standing rules | **`/scratch/code/bitcoin_tax/CLAUDE.md`** | the project file |
 
-### H4 — a lint for enumeration-from-a-literal
+★★ **Three files are explicitly OFF LIMITS for anything in this document**, because each one would
+apply the harness to unrelated projects:
 
-Catches **F2**, the highest-value class and the hardest to mechanise. Heuristic, so it must be advisory,
-not blocking: flag a literal array or `N..=M` range within a few lines of `expected`, `all_`, `_count`, or
-`assert_eq!(…len()`, and ask whether the set is derived from the source. ★ An advisory that fires often
-will be ignored — tune it against the three real instances above before shipping it, and if it cannot be
-made precise, **prefer H2's shape instead**: encode the specific invariant per case.
+- **`~/.claude/settings.json`** — global hooks; would fire in every repo on this machine.
+- **`~/.claude/CLAUDE.md`** — global doctrine.
+- **`/scratch/code/CLAUDE.md`** — the *cross-project* standard-workflow file covering every project
+  under that directory. Its generality is the point; harness specifics do not belong there.
 
-### H5 — a workflow-script lint
+★ If a mechanism here later proves itself general, promoting it is a **separate, deliberate decision**
+with its own evidence — never a side effect of building it for btctax.
 
-Catches **F5**. Flag `.slice(` / `.substring(` applied to anything passed into an `agent()` prompt.
-Truncating a payload silently converts "not sent" into "not found", and a reviewer will faithfully report
-the artifact as a defect.
+## The mechanisms
+
+Ordered by **(value × certainty) ÷ cost**, and by dependency — **A1 comes first because without it every
+other mechanism here is decoration.**
+
+### Class α — couple the act to the fact
+
+#### A1 — the harness-is-installed gate ★ build first
+
+An `xtask` check inside `make check` that **reds while the hooks are not wired**: `core.hooksPath` unset,
+hook file missing, or hook file non-executable.
+
+★★ **This is not hypothetical, and it is why it is first.** `scripts/pre-push` is a reviewed, hardened
+PII gate, executable, in this repo since 2026-07-02. `core.hooksPath` is unset; `.git/hooks/` contains
+nothing but `*.sample`. **It has never run.** Worse, the install command is written in its own header —
+
+    # Install:  ln -s ../../scripts/pre-push .git/hooks/pre-push
+    #       or: git config core.hooksPath scripts
+
+— so this repo already contains a *written-down instruction that was not followed*, which is the very
+failure mode the harness exists to answer. Shipping A2 without A1 is F4 on day one: an instrument that
+was never seen to fire.
+
+It also genuinely fires on its own: every fresh clone and every mis-configured worktree reds immediately.
+**Mutation-verified by unsetting `core.hooksPath` and observing red.**
+
+★ A1 must also cover `scripts/pre-push` itself — the corpse gets buried as part of this work, not left
+as an exhibit.
+
+#### A2 — `pre-commit` hook running the gates
+
+Catches **F3** completely and costs almost nothing. `make check` (~6s warm: nextest + clippy in parallel)
+plus `cargo fmt --all --check`; refuse the commit on failure. The slower gates (msrv, isolation,
+pii-scan) belong in `pre-push`, which is the right granularity anyway since pii-scan reads HEAD.
+
+Git's exit-status coupling is what makes this a real fire rather than a reminder: the commit *cannot*
+happen while the gate is red, so "ran it and didn't read the output" stops being expressible.
+
+★ **The route-around is closed with a fact-gate, not an instruction.** A narrow `PreToolUse` deny on
+`Bash` matching `git commit --no-verify`. Telling oneself to reserve `--no-verify` for a stated reason is
+exactly the passive doctrine that fails; a deny is not. The hook prints what it is protecting rather than
+just failing.
+
+#### A3 — the primary-source shape detector (one implementation, two call sites)
+
+Catches **F1**, as a standing invariant rather than a memory. Exactly one directory tree is the declared
+authority for IRS primary sources; anything else is either a runtime asset
+(`crates/btctax-forms/forms/` — the fillable AcroForm templates the emitter needs) or sits in a
+shrink-only excuse ratchet with a reason.
+
+★★ **Classify by SHAPE over a whole-tree walk — never by a hand-list of known directory paths.** IRS
+stems (`fNNNN`, `iNNNN`, `pNNNN`), USC and CFR signatures. A path-list version is **F2 committed inside
+the harness**: it passes a third archive at a new location, which is precisely the case it exists to
+catch. In-repo model for the ratchet: `AUTHORITY_NOT_YET_ARCHIVED` and
+`authority_coverage_may_only_improve` (`crates/xtask/src/cite_check.rs:685`, `:750`).
+
+Two call sites, one detector:
+
+| call site | when | effect |
+|---|---|---|
+| **test** | `make check` | reds on a second archive anywhere in the tree |
+| **`PreToolUse` deny on `Write`** | at the decision point | refuses a primary-source-shaped file written outside the declared tree |
+
+★★★ **It paid for itself on its first run — 2026-07-30.** `CONTINUITY.md` recorded **two** archives.
+The walk found **four**: `design/amt-form6251/` (18 files, byte-identical duplicates of
+`design/forms/2025/`) and `legal/text/` (25 files, a text-extract layer of `legal/primary-sources/`
+with 100% overlap and zero unique documents) had **never been named anywhere**. A hand-list of known
+archive paths would have found neither — it would have listed the two that were already remembered,
+which is the whole reason the rule is *shape, not path*.
+
+★ And the recorded "two" was itself **F2**: a count written from memory rather than from a walk, inside
+the note warning against exactly that. The number is now measured and pinned, so step ③'s progress is a
+test result rather than a claim.
+
+**The r1 draft said this test should simply RED today.** It does not, and the change is deliberate:
+with A2 wired, a permanently-red suite would block *every commit* until the reconciliation landed, and
+a gate that stands red forever is not a gate — it is noise that gets muted, which is the failure this
+document is written against. Instead the four trees sit in a **shrink-only ratchet** with a reason
+each (`AUTHORITY_NOT_YET_ARCHIVED` is the in-repo model): a **fifth** archive reds immediately, and
+retiring one reds the stale entry so the list must tighten. The reconciliation stays real work, is
+still recorded as ③ in `CONTINUITY.md` §0, and is now *tickled* rather than remembered.
+
+★ The r1 draft had the hook fire on **new top-level paths**. That **provably would not have caught F1**:
+`design/forms/` is depth-2 under a `design/` dating to 2026-06-28. The trigger sees no new top-level path
+and walks straight past the incident it was designed for.
+
+#### A4 — the new-directory ask
+
+The only mechanism that merely *asks*, and the narrowest. Fires on any new **directory** creation at
+**any depth** — rare enough not to become noise, and a noisy hook gets muted, which is worse than no hook.
+
+Two things make this more than passive context repeated at a louder volume. First, a `PreToolUse` exit-2
+block **feeds its stderr back into the model's loop** at the moment the decision is being made — for a
+failure of *inattention* (F1 was never considered and refused) that is materially different from a rule
+read 40 tool calls earlier. Second, **the message quotes the trigger-relevant memory line verbatim**
+rather than saying "be careful".
+
+★ This is the answer to the consult's scope-question (c): **keep memory as principles**, but wire the two
+or three trigger-shaped ones into hook messages, so doctrine surfaces at the moment it is answerable.
+The memory system is not mis-shaped; it is merely mis-*delivered*.
+
+### Class β — require the kill
+
+#### B1 — seen-red-once, as a standing rule
+
+**No checker counts as existing until it has been observed red on a planted defect.** Every new census,
+conformance check, citation check, or review harness lands **paired** with a negative test that plants
+the exact defect it exists to catch and asserts red.
+
+In-repo model: `a_paraphrase_is_rejected_and_the_real_sentence_is_accepted`
+(`crates/xtask/src/cite_check.rs:796`).
+
+★★ **This replaces the r1 draft's H4 lint, which is dropped.** A lint for "enumeration from a literal"
+would only look like rigour: Rust test code is legitimately full of literal arrays and ranges, so an
+advisory firing on those is ignored within a week — and an ignored advisory is decoration that also
+teaches that harness output is ignorable. B1 covers F2 **and** F4 as one class, cannot be satisfied
+performatively, and produces real future failures rather than the appearance of them.
+
+★ Where a specific enumeration invariant *can* be stated exactly — *"enumerate from the extract, never
+from a range"* — encode it as its own invariant in A3's shape, which is what the label-reader design
+already specifies. The general lint is the thing that does not work; the specific invariant does.
+
+#### B2 — pass-by-path payloads
+
+**Inter-agent payloads move as file paths the receiver reads — never as inlined content.** Truncation
+then has no operator to apply: there is nothing to `.slice()` because the payload is a path.
+
+★★ **This replaces the r1 draft's H5 lint, which is dropped as having no target.** Verified: `.slice(`
+and `.substring(` occur in exactly two committed places in this repo — `CONTINUITY.md:67` and this
+document's own r1 text — i.e. only in the *description of the proposed lint*. Zero occurrences in code.
+The truncating code was **ephemeral orchestration**, which a lint over committed files can never see.
+B2 removes the class instead of shadowing one symptom of it, and it belongs in the standing workflow
+briefs (`CONTINUITY.md`-style), where the orchestration is actually authored.
 
 ## What this deliberately does NOT attempt
 
 - **No "be more careful" instructions.** They are what already failed; adding more of them is the null
   action wearing a costume.
-- **No blocking gate on judgement calls.** H1-H2 gate *facts*; H3 only *asks*. Anything that tries to
+- **No blocking gate on judgement calls.** A1-A3 gate *facts*; A4 only *asks*. Anything that tries to
   gate a judgement will be routed around, and routing around a gate teaches that gates are routable.
 - **No self-verification scaffolding.** Global `CLAUDE.md` forbids it, and rightly: it produces
-  over-verification with no quality gain. These are all *inline mechanical* checks, not "review your work"
-  prompts.
+  over-verification with no quality gain. These are all *inline mechanical* checks, not "review your
+  work" prompts.
+- **No session-shaping — no checkpoint cadence, no new required opening action.** The consult's answer to
+  scope-question (d) is **no**: the required opening already exists (`CONTINUITY.md` §0, and the consult
+  that produced this revision is evidence it is followed), and a checkpoint cadence *is* the forbidden
+  self-verification scaffolding. The only session-shaping worth having is the decision-point hooks in A3
+  and A4.
 
 ## Honest limits
 
-H1, H2 and H5 are near-certain. H3 depends on hook support and on staying narrow enough not to be muted.
-**H4 is the one that matters most and the one least likely to work** — F2 is a reasoning failure with a
-syntactic shadow, and the shadow is faint. If H4 cannot be made precise, the fallback is not a better
-lint: it is to encode each instance as its own invariant, which is what H2 does and what the label-reader
-design already specifies (*enumerate from the extract, never from a range*).
+**A1 and A2 are near-certain.** A3's test half is certain; its hook half depends on `PreToolUse`
+behaving as documented and on the shape detector being precise enough not to fire on ordinary writes.
+A4 is the one that could still be muted, and it is deliberately the only one whose loss costs nothing
+structural.
 
-★★ The measure of this harness is not that it exists. It is whether a future session **fails a gate it
-would otherwise have walked past.** Until that happens at least once, treat it as unproven.
+**The class-β rules are process, not code**, and that is their weakness: B1 and B2 have no compiler.
+B1's saving grace is that it is checkable at review time by a single question with a factual answer —
+*"which test reds when this checker is removed?"* — and B2's is that a path-passing brief makes the
+violating form awkward rather than merely discouraged.
+
+★★ **The measure of this harness is not that it exists.** It is whether a future session **fails a gate
+it would otherwise have walked past.** Until that happens at least once, treat it as unproven.
+
+★★ **And the assumption everything here rests on**, named by the consult so it can be checked rather than
+forgotten: *all of this assumes the failures recur in mechanically recognisable form.* If the next
+session's violations are new **classes** rather than new instances of α and β, every gate here holds
+green while the new failure walks past. The only defence is the rule above — treat the harness as
+unproven, and **grow it only from observed failures, never from anticipated ones.**

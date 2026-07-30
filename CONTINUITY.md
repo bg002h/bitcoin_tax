@@ -9,9 +9,9 @@ _(Supersedes the 2026-06-28 edition, whose deep-research workflow completed long
 > **One line:** on branch `feat/amt-e2-vector-population` (**44 commits, NOT merged**, all five gates
 > green throughout). Two tracks open — **(A)** Schedule 1-A for TY2025: spec + plan green, task T1 built;
 > **(B)** a form-authority pipeline: steps 1-2 of 3 done for all 16 forms.
-> **THE ORDER OF WORK IS FIXED — see §0.** ① Fable consult on the **harness** (§0a) → ② build the
-> harness, H1 then H2 (`design/HARNESS.md`) → ③ reconcile the two primary-source archives (§4) →
-> ④ Fable consult on the **parsing strategy** (§5a) → ⑤ the label reader (§5).
+> **THE ORDER OF WORK IS FIXED — see §0.** ~~① Fable consult on the **harness**~~ (**✅ done**, §0a) →
+> ② build the harness — **A1 → A2 → A3, then B1/B2** (`design/HARNESS.md` **r2**) → ③ reconcile the two
+> primary-source archives (§4) → ④ Fable consult on the **parsing strategy** (§5a) → ⑤ the label reader (§5).
 > **The largest ARCHITECTURAL open item is §G-11 (§4a)** — the emitter cannot express "no testimony",
 > so it constrains what B3 may emit. It does *not* block any of the above.
 
@@ -21,8 +21,8 @@ _(Supersedes the 2026-06-28 edition, whose deep-research workflow completed long
 
 | # | do this | why here |
 |---|---|---|
-| **①** | **Fable consult on the HARNESS** — §0a below | it may change what we build; it is cheap and it comes before we pay for the build |
-| **②** | **Build the harness: H1, then H2** — `design/HARNESS.md` | H1 (pre-commit gate) catches a failure that happened *today*; H2 makes the archive duplication an invariant instead of a note |
+| **①** | ~~Fable consult on the HARNESS~~ — **✅ DONE 2026-07-30** | verdict `needs-changes`; it *did* change what we build. Verbatim: `reviews/harness-design-fable-r1.md`. See §0a. |
+| **②** | **Build the harness: A1 → A2 → A3, then B1/B2** — `design/HARNESS.md` (r2) | **A1 first**: without the installed-gate every other mechanism is decoration, and this repo already proves it — `scripts/pre-push` has sat uninstalled since 2026-07-02 |
 | **③** | **Reconcile the two primary-source archives** — see the ★★ note at the end of §4 | H2 reds until this is done, which is correct; and it may change the §5a brief, which currently reads as though rungs 3-4 must be found when they are already in the repo |
 | **④** | **Fable consult on the PARSING STRATEGY** — §5a | before paying ~32 hand-read label lists |
 | **⑤** | **The label reader** — §5 | |
@@ -32,7 +32,31 @@ it after would be the same mistake in a new costume.
 
 ---
 
-## 0a. ★★ FABLE CONSULT #1 — the harness (DO THIS FIRST)
+## 0a. ✅ FABLE CONSULT #1 — the harness — **DONE 2026-07-30**
+
+**Verdict `needs-changes`.** Verbatim output: [`reviews/harness-design-fable-r1.md`](reviews/harness-design-fable-r1.md),
+folded into `design/HARNESS.md` **r2**. Three load-bearing claims were independently verified against the
+tree before folding (table at the end of that file). What it changed:
+
+- **F1–F5 are TWO classes, not five** — **(α)** acted without observing an available fact (F1, F3);
+  **(β)** shipped an instrument never seen discriminating (F2, F4, **F5**). The r1 five-mechanism list was
+  the excuse-list mistake the document itself warns against. r2 is organised around the classes.
+- **★★ A new top item: the harness-is-installed gate (A1).** `scripts/pre-push` is a reviewed, hardened
+  hook, executable, in-repo since 2026-07-02 — `core.hooksPath` is **unset** and `.git/hooks/` holds only
+  `*.sample`, so **it has never run**, and its install command is written in its own header. Without A1,
+  H1/H3 repeat F4 on day one.
+- **H3 as drafted provably would NOT have caught F1** — `design/forms/` is depth-2 under a `design/`
+  dating to 2026-06-28, so a "new top-level path" trigger walks past. Split into a *deny* (shape-detector
+  at `Write` time, now folded into A3) and an *ask* (any new directory at any depth, A4).
+- **H4's lint DROPPED** → **B1 "seen-red-once"**: no checker exists until observed red on a planted
+  defect. Covers F2+F4 as one class; cannot be satisfied performatively.
+- **H5's lint DROPPED as having no target** (verified: `.slice(`/`.substring(` appear only in the two
+  places *describing the lint*, zero in code) → **B2 pass-by-path payloads**.
+- **Scope answers:** (c) keep memory as principles, wire trigger-shaped ones into hook messages; (d) **no**
+  session-shaping — a checkpoint cadence is the forbidden self-verification scaffolding.
+
+<details>
+<summary>The original dispatch brief (kept for provenance)</summary>
 
 ★ **Ask the user's approval before dispatching.** Fable is escalation, never autonomous.
 
@@ -102,6 +126,8 @@ it after would be the same mistake in a new costume.
 ★ **The measure of the harness is not that it exists.** It is whether a future session **fails a gate it
 would otherwise have walked past.** Ask the reviewer to say which of its recommendations would actually
 produce that, and which would merely look like rigour.
+
+</details>
 
 ---
 
@@ -215,7 +241,24 @@ From the user; it now governs the work. Detail in `CLAUDE.md` and in memory
    (`tables.rs::schedule_1a_conformance`). This is how the Form 6251 line-33 class — "Subtract line 32
    from line **22**", once transcribed as line 12 and worth $200,000 on one vector — becomes a test.
 
-★★ **RECONCILE THE TWO ARCHIVES BEFORE THE LABEL-READER WORK.** Found at the very end of the session,
+★★★ **CORRECTION 2026-07-30 — THERE ARE FOUR ARCHIVES, NOT TWO.** Everything below this box was
+written from memory; `cargo run -p xtask -- archive-check` (harness A3) walked the tree on its first
+run and found two more that had never been named anywhere:
+
+| tree | files | state |
+|---|---|---|
+| `design/forms/` | 174 | URL-note + sha256 + committed text layer; machine-checked by `xtask` |
+| **`design/amt-form6251/`** | **18** | **byte-identical duplicate** of `design/forms/2025/` — md5 matched on f6251, f1040, i1040gi, f1040s1a. Cheapest to retire. |
+| `legal/primary-sources/` | 47 | committed binaries, no manifest. **Holds the rungs `design/forms` lacks** — 16 × 26 USC (rung 4, THE LAW) + 6 × 26 CFR. Cannot simply be deleted. |
+| **`legal/text/`** | **25** | **text extracts of `legal/primary-sources/`** — 100% overlap, ZERO unique documents. |
+
+★ **That "two" was itself F2** — a count written from recollection instead of a walk, inside the very
+note warning against enumerating from a hand-list. The number is now **measured and pinned**:
+`archive_check::the_archive_count_may_only_shrink` reds if a fifth appears, and
+`every_accounted_for_tree_still_exists` reds when one is retired, so step ③'s progress is a test result
+rather than a claim.
+
+★★ **RECONCILE THE ARCHIVES BEFORE THE LABEL-READER WORK.** Found at the very end of the session,
 after `design/forms/` had already been built: **`legal/primary-sources/` already exists** and holds
 
     statute-irc/        16 × 26 USC sections (HTML)      ← rung 4, THE LAW
