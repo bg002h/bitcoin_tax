@@ -92,6 +92,15 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         foreign_trust,
         foreign_country_names: _, // String — scalar
         dual_status_alien,
+        // §164(b)(7)(B)(iv) / Schedule 1-A Part I MAGI add-backs. `Option<Usd>` scalar leaves, so the
+        // `_` rule permits binding them here — but they are NOT class-(B) forgone benefits like
+        // `medical`: an unasked add-back understates MAGI and RAISES two deductions. Their `None` is
+        // refused at the point of need (`SaltLimitation::line_5e`), not defaulted to zero.
+        has_income_exclusion,
+        excluded_puerto_rico_income: _,
+        form_2555_line45: _,
+        form_2555_line50: _,
+        form_4563_line15: _,
     } = ri;
     c.exempt(
         filing_status,
@@ -103,6 +112,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
     c.declaration(foreign_accounts, QuestionId::ForeignAccounts);
     c.declaration(foreign_trust, QuestionId::ForeignTrust);
     c.declaration(dual_status_alien, QuestionId::DualStatusAlien);
+    c.declaration(has_income_exclusion, QuestionId::HasIncomeExclusion);
     c.declaration(
         amt_carryover_same_as_regular,
         QuestionId::AmtCarryoverSameAsRegular,

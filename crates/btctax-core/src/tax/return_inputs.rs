@@ -446,11 +446,80 @@ pub struct ReturnInputs {
     /// is zero), `Some(false)` ⇒ proceed.
     #[serde(default)]
     pub dual_status_alien: Option<bool>,
+
+    // ── §164(b)(7)(B)(iv) / Schedule 1-A Part I — the MAGI add-backs ──────────────────────────────
+    //
+    // ★ The SAME four amounts serve two forms. The §164(b) SALT worksheet adds them at its lines
+    //   3a–3d, and Schedule 1-A Part I adds them at its lines 2a–2d, because both use the statute's
+    //   modified AGI: "adjusted gross income increased by any amount excluded from gross income under
+    //   section 911, 931, or 933." One quantity, five phase-outs (SALT plus Schedule 1-A's four).
+    //
+    // ★ `Option<Usd>`, NOT defaulted `Usd`, and the distinction is the whole point. A plain `Usd`
+    //   defaulting to 0 cannot tell "zero because the filer has none" from "zero because nobody
+    //   asked" — and those differ in direction: an unasked add-back UNDERSTATES MAGI, which RAISES
+    //   the SALT and Schedule 1-A deductions. That is a default in the filer's favour that
+    //   understates tax, so it is not the class-(B) forgone-benefit case `medical` is.
+    //   `None` refuses, but only where a form actually needs the number — see `SaltLimitation`.
+    /// **§164(b)(7)(B)(iv) / Schedule 1-A Part I — the exclusion GATE.** A class-(A) DECLARATION:
+    /// *"Did you exclude any income from gross income under §911 (foreign earned income / housing),
+    /// §931 (American Samoa) or §933 (Puerto Rico)?"*
+    ///
+    /// ★ The gate carries the answered-ness, not the amounts, and that is deliberate. `Option<bool>`
+    /// is a leaf the classifier **forbids** `_` on, so it cannot be added without a human classifying
+    /// it — whereas `Option<Usd>` is a scalar the `_` rule permits, which would make this convention
+    /// again. `None` = never asked ⇒ refused where a form needs MAGI. `Some(false)` ⇒ all four
+    /// amounts are zero. `Some(true)` ⇒ the amounts below are the filer's answers.
+    #[serde(default)]
+    pub has_income_exclusion: Option<bool>,
+    /// **Schedule 1-A line 2a / SALT worksheet line 3a** — "Enter any income from Puerto Rico that
+    /// you excluded." (§933.) Meaningful iff [`Self::has_income_exclusion`] is `Some(true)`.
+    #[serde(default)]
+    pub excluded_puerto_rico_income: Usd,
+    /// **Schedule 1-A line 2b / SALT worksheet line 3b** — "Enter the amount from Form 2555, line
+    /// 45." (§911 foreign earned income exclusion.)
+    #[serde(default)]
+    pub form_2555_line45: Usd,
+    /// **Schedule 1-A line 2c / SALT worksheet line 3c** — "Enter the amount from Form 2555, line
+    /// 50." (§911 housing exclusion.)
+    #[serde(default)]
+    pub form_2555_line50: Usd,
+    /// **Schedule 1-A line 2d / SALT worksheet line 3d** — "Enter the amount from Form 4563, line
+    /// 15." (§931 American Samoa exclusion.)
+    #[serde(default)]
+    pub form_4563_line15: Usd,
+}
+
+impl ReturnInputs {
+    /// §164(b)(7)(B)(iv) **modified** adjusted gross income — AGI plus the §911/931/933 exclusions.
+    /// The same quantity Schedule 1-A Part I line 3 computes.
+    ///
+    /// `None` when any add-back was never asked, so a caller that genuinely needs MAGI refuses rather
+    /// than silently treating an unasked exclusion as zero. Callers that never need it (TY2024's flat
+    /// SALT cap) never call this.
+    pub fn modified_agi(&self, agi: Usd) -> Option<Usd> {
+        match self.has_income_exclusion {
+            None => None, // never asked — a caller that needs MAGI must refuse, not assume zero
+            Some(false) => Some(agi),
+            Some(true) => Some(
+                agi + self.excluded_puerto_rico_income
+                    + self.form_2555_line45
+                    + self.form_2555_line50
+                    + self.form_4563_line15,
+            ),
+        }
+    }
 }
 
 impl Default for ReturnInputs {
     fn default() -> Self {
         Self {
+            // §911/931/933 add-backs: `None` = never asked. Default() is a TEST convenience, so
+            // it must not fabricate an answer — see the field docs.
+            has_income_exclusion: None,
+            excluded_puerto_rico_income: Usd::ZERO,
+            form_2555_line45: Usd::ZERO,
+            form_2555_line50: Usd::ZERO,
+            form_4563_line15: Usd::ZERO,
             filing_status: FilingStatus::Single,
             header: HouseholdHeader::default(),
             w2s: Vec::new(),

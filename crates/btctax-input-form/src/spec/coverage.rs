@@ -15,7 +15,7 @@
 //! `w2s`/`dependents`/`charitable`/`box12` empty, `ip_pin` `None` — so those leaf paths NEVER appear in the
 //! serialized `Value`, and a KAT built on `default()` would give FALSE drift-protection for every W-2 /
 //! spouse / Schedule-A / dependent field. This fixture forces every optional present and ≥1 element in every
-//! in-scope Vec, so all 62 in-scope leaves are realized.
+//! in-scope Vec, so all 66 in-scope leaves are realized.
 //!
 //! ★ `serde_json::Value` walking is permitted HERE ONLY — the §4 veto is on get/set/production paths, not a
 //! test. No accessor in this crate walks `Value`.
@@ -337,13 +337,13 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(
-        field_count, 65,
-        "expected 65 Fields (one per §5.8 in-scope leaf)"
+        field_count, 70,
+        "expected 70 Fields (one per §5.8 in-scope leaf)"
     );
     assert_eq!(
         covered.len(),
-        65,
-        "expected 64 distinctly-covered in-scope leaves"
+        70,
+        "expected 69 distinctly-covered in-scope leaves"
     );
 
     // ── 5. ★ I-6: PIN the observed FieldId → leaf-path map against a literal (kills TRANSPOSITION). ──
@@ -489,6 +489,13 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
     (FieldId::DeclForeignTrust, "foreign_trust"),
     (FieldId::DeclHsaActivity, "sch1.hsa_activity"),
     (FieldId::DeclDualStatusAlien, "dual_status_alien"),
+    // §911/931/933 exclusion gate + the four MAGI add-backs it gates (Schedule 1-A Part I lines
+    // 2a-2d / the SALT worksheet's lines 3a-3d — one quantity, five phase-outs).
+    (FieldId::DeclHasIncomeExclusion, "has_income_exclusion"),
+    (FieldId::ExclPuertoRico, "excluded_puerto_rico_income"),
+    (FieldId::Excl2555L45, "form_2555_line45"),
+    (FieldId::Excl2555L50, "form_2555_line50"),
+    (FieldId::Excl4563L15, "form_4563_line15"),
     (
         FieldId::DeclAmtQualifiedDwelling,
         "schedule_a.mortgage_dwelling_is_amt_qualified",

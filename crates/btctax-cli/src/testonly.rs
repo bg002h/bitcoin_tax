@@ -114,6 +114,7 @@ foreign_accounts = false
 foreign_trust = false
 foreign_country_names = ""
 dual_status_alien = false
+has_income_exclusion = false
 itemize_election = "auto"
 charitable_carryover_in = []
 

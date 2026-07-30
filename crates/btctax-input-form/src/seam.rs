@@ -23,6 +23,7 @@ pub enum SectionId {
     ScheduleACharitable,
     Payments,
     Declarations,
+    IncomeExclusions,
     Skippables,
 }
 
@@ -98,6 +99,11 @@ pub enum FieldId {
     DeclDualStatusAlien,
     /// Form 6251 line 3 — is the mortgaged dwelling AMT-qualified? (i6251 p.8.)
     DeclAmtQualifiedDwelling,
+    DeclHasIncomeExclusion,
+    ExclPuertoRico,
+    Excl2555L45,
+    Excl2555L50,
+    Excl4563L15,
     /// Form 6251 line 2k — does the AMT capital-loss carryover equal the regular one?
     DeclAmtCarryoverSame,
     /// Form 6251 line 2l — is the depreciation inside the Schedule C expense total the same for the AMT?

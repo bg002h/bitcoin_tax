@@ -87,6 +87,10 @@ pub enum RefuseReason {
     MixedUseMortgageUnanswered,
     /// Form 6251 line 3 — the AMT qualified-dwelling question is live but unanswered.
     AmtQualifiedDwellingUnanswered,
+    /// **§164(b)(7)(B)(iv) / Schedule 1-A Part I** — the §911/931/933 exclusion gate is unanswered on
+    /// a return whose form needs modified AGI. Only reachable from TY2025 onward; TY2024's flat SALT
+    /// cap never reads MAGI (D-11).
+    IncomeExclusionUnanswered,
     /// Form 6251 line 3 — answered ADVERSELY ("not an AMT-qualified dwelling"). v1 does not model the
     /// §56(b)(1)(C) add-back, so computing would UNDERSTATE the tax.
     AmtNonQualifiedDwelling,
@@ -281,6 +285,12 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         foreign_trust: _,
         foreign_country_names: _,
         dual_status_alien: _,
+        // MAGI add-backs — refused at the worksheet's point of need, not here (D-11).
+        has_income_exclusion: _, // refused at the worksheet's point of need (D-11), not here
+        excluded_puerto_rico_income: _,
+        form_2555_line45: _,
+        form_2555_line50: _,
+        form_4563_line15: _,
     } = ri;
 
     for w in w2s {
@@ -958,6 +968,7 @@ mod tests {
         ri.foreign_trust = Some(false);
         ri.sch1.hsa_activity = Some(false);
         ri.dual_status_alien = Some(false);
+        ri.has_income_exclusion = Some(false);
         ri
     }
     fn reason(ri: &ReturnInputs) -> Option<RefuseReason> {
@@ -1494,6 +1505,7 @@ mod tests {
             r.header.can_be_claimed_as_dependent_taxpayer = Some(false);
             r.sch1.hsa_activity = Some(false);
             r.dual_status_alien = Some(false);
+            r.has_income_exclusion = Some(false);
             r
         };
         // I4: box 1b (qualified) > box 1a (ordinary) on a form ⇒ refuse (phantom preferential income).

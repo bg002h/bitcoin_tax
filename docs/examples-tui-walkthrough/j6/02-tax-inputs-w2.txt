@@ -9,8 +9,8 @@
   7││  … Schedule A (itemized deducti││  Box 4 — Social Security tax withheld  [$10453.20]                                 │
   8││  … Payments                    ││  Box 5 — Medicare wages  [$200000]                                                 │
   9││  ✓ Declarations                ││  Box 6 — Medicare tax withheld  [$2900]                                            │
- 10││  … Skippables                  ││  Box 7 — Social Security tips  [$0]                                                │
- 11││                                ││  Box 17 — state income tax  [$9000]                                                │
+ 10││  … Income exclusions (§911/931/││  Box 7 — Social Security tips  [$0]                                                │
+ 11││  … Skippables                  ││  Box 17 — state income tax  [$9000]                                                │
  12││                                ││  Box 19 — local income tax  [$0]                                                   │
  13││                                ││  Box 8 — allocated tips  [$0]                                                      │
  14││                                ││  Box 10 — dependent-care benefits  [$0]                                            │

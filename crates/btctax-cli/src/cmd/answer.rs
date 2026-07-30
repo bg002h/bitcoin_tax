@@ -264,6 +264,9 @@ mod tests {
                 QuestionId::ForeignTrust,
                 QuestionId::HsaActivity,
                 QuestionId::DualStatusAlien,
+                // §911/931/933 exclusion gate — always live, like DualStatusAlien: one yes/no every
+                // filer can answer, and TY2025's SALT worksheet and Schedule 1-A both need it.
+                QuestionId::HasIncomeExclusion,
             ]
         );
         assert!(!has_spouse_dob(&single()), "no spouse ⇒ no spouse DOB");

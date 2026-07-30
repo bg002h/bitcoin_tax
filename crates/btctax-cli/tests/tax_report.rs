@@ -670,7 +670,7 @@ fn report_tax_year_derives_and_computes_from_ty2024_return_inputs() {
     let toml = _dir.path().join("inputs.toml");
     std::fs::write(
         &toml,
-        "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\n\n[sch1]\nhsa_activity = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"90000\"\nbox2_fed_withheld = \"12000\"\nbox5_medicare_wages = \"90000\"\n",
+        "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\n\n[sch1]\nhsa_activity = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"90000\"\nbox2_fed_withheld = \"12000\"\nbox5_medicare_wages = \"90000\"\n",
     )
     .unwrap();
     // The CSV disposal is in 2025, but v1 full-return tables are TY2024-only; import for 2024 to exercise
@@ -721,7 +721,7 @@ fn report_tax_year_refuses_business_income_without_schedule_c() {
 
     // Full-return inputs for 2024 with NO Schedule C.
     let toml = _dir.path().join("inputs.toml");
-    std::fs::write(&toml, "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\n\n[sch1]\nhsa_activity = false\n").unwrap();
+    std::fs::write(&toml, "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\n\n[sch1]\nhsa_activity = false\n").unwrap();
     cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml).unwrap();
 
     let err = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap_err();
@@ -1862,11 +1862,12 @@ fn a_pre_d8_vault_refuses_until_answered_and_income_answer_is_the_way_out() {
     // (c) The user no longer has the TOML — they deleted it, as the plaintext-hygiene guidance says to.
     std::fs::remove_file(&toml).unwrap();
 
-    // (d) `income answer` is the way out. `income answer` now asks FIVE mandatory declarations in
-    // registry order (dependent-taxpayer, foreign-accounts, foreign-trust, HSA-activity, dual-status) —
+    // (d) `income answer` is the way out. `income answer` now asks SIX mandatory declarations in
+    // registry order (dependent-taxpayer, foreign-accounts, foreign-trust, HSA-activity, dual-status,
+    // §911/931/933 income-exclusion gate) —
     // "n" to each — then Enter to skip the two always-live skippables (§63(f) blindness, then date of birth,
     // in SKIPPABLE_QUESTIONS registry order — both bare-Enter skips, so their relative order is immaterial here).
-    let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\n\n\n";
+    let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\nn\n\n\n";
     let mut screen: Vec<u8> = Vec::new();
     cmd::answer::answer_return_inputs(&vault, &pp(), 2024, &mut keystrokes, &mut screen).unwrap();
     let screen = String::from_utf8(screen).unwrap();
@@ -1936,7 +1937,7 @@ fn answered_toml(dir: &Path) -> PathBuf {
     std::fs::write(
         &toml,
         "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\n\
-         dual_status_alien = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\n\n\
+         dual_status_alien = false\nhas_income_exclusion = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\n\n\
          [sch1]\nhsa_activity = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\n\
          box1_wages = \"50000\"\nbox2_fed_withheld = \"6000\"\nbox5_medicare_wages = \"50000\"\n",
     )

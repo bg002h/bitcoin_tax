@@ -10282,8 +10282,9 @@ mod tests {
         }
         assert_eq!(
             app.tax_inputs_form.as_ref().unwrap().section_idx,
-            8,
-            "section cursor clamps at the last live section (9 on Single: Spouse hidden, box12/charitable nested)"
+            9,
+            "section cursor clamps at the last live section (10 on Single: Spouse hidden, \
+             box12/charitable nested; the §911/931/933 income-exclusion section is the new last one)"
         );
         // Left past the start clamps at 0.
         for _ in 0..50 {

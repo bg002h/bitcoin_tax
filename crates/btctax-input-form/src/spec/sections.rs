@@ -95,6 +95,65 @@ macro_rules! scha_money {
     };
 }
 
+/// A `Money` leaf directly on `ReturnInputs` (no optional parent, no row).
+macro_rules! ret_money {
+    ($id:expr, $label:literal, $help:literal, $field:ident) => {
+        Field {
+            id: $id,
+            clear: None,
+            label: $label,
+            help: $help,
+            kind: FieldKind::Money,
+            live: |_| true,
+            get: |ri, _| Some(FieldValue::Money(ri.$field)),
+            set: |ri, _, v| {
+                let FieldValue::Money(m) = v else {
+                    return Err(SetError::WrongKind);
+                };
+                ri.$field = m;
+                Ok(())
+            },
+        }
+    };
+}
+
+// ── §911/931/933 exclusions — the MAGI add-backs ─────────────────────────────────────────────────
+//
+// ★ ONE quantity, FIVE phase-outs. §164(b)(7)(B)(iv) defines modified AGI as "adjusted gross income
+// increased by any amount excluded from gross income under section 911, 931, or 933", and the same
+// four amounts appear at the SALT worksheet's lines 3a-3d and Schedule 1-A Part I's lines 2a-2d. They
+// live on `ReturnInputs` rather than `ScheduleAInputs` precisely because a standard-deduction filer
+// with qualified tips needs them too.
+//
+// The yes/no that carries answered-ness is `QuestionId::HasIncomeExclusion`, in the Declarations
+// section; these are the amounts it gates.
+pub(crate) const INCOME_EXCLUSION_FIELDS: &[Field] = &[
+    ret_money!(
+        FieldId::ExclPuertoRico,
+        "Excluded Puerto Rico income",
+        "Schedule 1-A line 2a / SALT worksheet line 3a - income from Puerto Rico you excluded (\u{a7}933).",
+        excluded_puerto_rico_income
+    ),
+    ret_money!(
+        FieldId::Excl2555L45,
+        "Form 2555 line 45",
+        "Schedule 1-A line 2b / SALT worksheet line 3b - foreign earned income exclusion (\u{a7}911).",
+        form_2555_line45
+    ),
+    ret_money!(
+        FieldId::Excl2555L50,
+        "Form 2555 line 50",
+        "Schedule 1-A line 2c / SALT worksheet line 3c - foreign housing exclusion (\u{a7}911).",
+        form_2555_line50
+    ),
+    ret_money!(
+        FieldId::Excl4563L15,
+        "Form 4563 line 15",
+        "Schedule 1-A line 2d / SALT worksheet line 3d - American Samoa exclusion (\u{a7}931).",
+        form_4563_line15
+    ),
+];
+
 // ── 1. ReturnOptions (Singleton) — the filing-status/itemize-election header ────────────────────────────────
 
 const RETURN_OPTIONS_FIELDS: &[Field] = &[

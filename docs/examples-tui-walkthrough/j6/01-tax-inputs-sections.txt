@@ -9,8 +9,8 @@
   7││  … Schedule A (itemized deducti││                                                                                    │
   8││  … Payments                    ││                                                                                    │
   9││  ✓ Declarations                ││                                                                                    │
- 10││  … Skippables                  ││                                                                                    │
- 11││                                ││                                                                                    │
+ 10││  … Income exclusions (§911/931/││                                                                                    │
+ 11││  … Skippables                  ││                                                                                    │
  12││                                ││                                                                                    │
  13││                                ││                                                                                    │
  14││                                ││                                                                                    │

@@ -66,6 +66,8 @@ pub enum QuestionId {
     /// **Form 6251 line 2l** — is the depreciation inside the Schedule C expense total the same for the
     /// AMT as for the regular tax?
     AmtDepreciationSameAsRegular,
+    /// **§164(b)(7)(B)(iv) / Schedule 1-A Part I** — did the filer exclude income under §911/931/933?
+    HasIncomeExclusion,
 }
 
 impl QuestionId {
@@ -81,6 +83,7 @@ impl QuestionId {
         QuestionId::AmtQualifiedDwelling,
         QuestionId::AmtCarryoverSameAsRegular,
         QuestionId::AmtDepreciationSameAsRegular,
+        QuestionId::HasIncomeExclusion,
     ];
 }
 
@@ -373,6 +376,35 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         set: |ri, v| ri.amt_depreciation_same_as_regular = Some(v),
         neutral: true, // "yes, the same" ⇒ Form 6251 line 2l adds nothing back
     },
+    FormQuestion {
+        id: QuestionId::HasIncomeExclusion,
+        prompt: "Did you exclude any income from gross income under section 911 (foreign earned \
+                 income or housing), section 931 (American Samoa) or section 933 (Puerto Rico)? \
+                 (Schedule 1-A Part I / the Schedule A state-and-local-tax worksheet — these \
+                 exclusions are ADDED BACK to figure modified AGI.)",
+        unanswered: RefuseReason::IncomeExclusionUnanswered,
+        unanswered_detail:
+            "modified AGI is adjusted gross income increased by any §911/931/933 exclusion, and it \
+             drives the §164(b) SALT phase-down and all four Schedule 1-A deductions. Treating an \
+             unasked exclusion as zero UNDERSTATES modified AGI, which RAISES those deductions and \
+             understates the tax — run `btctax income answer`",
+        // ★ ALWAYS LIVE, like `DualStatusAlien` — one yes/no every filer can answer, asked once.
+        //
+        // `live` receives only `&ReturnInputs`, which carries no tax year, so it CANNOT be scoped to
+        // "years that compute modified AGI". The alternatives were both worse: a year-agnostic proxy
+        // (a Schedule A over $10,000 of SALT) would refuse TY2024 returns that compute correctly
+        // today, and a never-live question violates the Declarations invariant that every declaration
+        // is live on a populated fixture — a question nobody can be asked is not a declaration.
+        //
+        // Answering it costs nothing and understates nothing: `Some(false)` ⇒ modified AGI = AGI,
+        // which is exactly what TY2024's `FlatCap` assumes and never reads. So no TY2024 figure can
+        // move. What it buys is that TY2025's worksheet finds the answer already on file instead of
+        // discovering it needs one.
+        live: |_ri| true,
+        get: |ri| ri.has_income_exclusion,
+        set: |ri, v| ri.has_income_exclusion = Some(v),
+        neutral: false, // "no exclusions" is the AMT/MAGI-neutral answer, but it is still an ANSWER
+    },
 ];
 
 /// The identity of each SKIPPABLE prompt (§2, class B) — the questions where silence is LAWFUL: a bare
@@ -534,6 +566,7 @@ mod tests {
                 QuestionId::AmtQualifiedDwelling => 8,
                 QuestionId::AmtCarryoverSameAsRegular => 9,
                 QuestionId::AmtDepreciationSameAsRegular => 10,
+                QuestionId::HasIncomeExclusion => 11,
             };
             assert_eq!(idx, i, "QuestionId::ALL is out of order / missing {id:?}");
             assert_eq!(
@@ -542,8 +575,8 @@ mod tests {
                 "exactly one FORM_QUESTIONS entry for {id:?}"
             );
         }
-        assert_eq!(QuestionId::ALL.len(), 11, "there are 11 declarations");
-        assert_eq!(FORM_QUESTIONS.len(), 11, "one entry per declaration");
+        assert_eq!(QuestionId::ALL.len(), 12, "there are 12 declarations");
+        assert_eq!(FORM_QUESTIONS.len(), 12, "one entry per declaration");
     }
 
     #[test]

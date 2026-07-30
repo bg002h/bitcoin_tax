@@ -8,6 +8,7 @@
 amt_depreciation_same_as_regular = true
 charitable_carryover_in = []
 dual_status_alien = false
+has_income_exclusion = false
 filing_status = "Mfj"
 foreign_accounts = false
 foreign_country_names = ""

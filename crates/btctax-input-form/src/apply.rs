@@ -138,6 +138,7 @@ fn row_depth(id: SectionId) -> usize {
         | SectionId::ScheduleA
         | SectionId::Payments
         | SectionId::Declarations
+        | SectionId::IncomeExclusions
         | SectionId::Skippables => 0,
     }
 }

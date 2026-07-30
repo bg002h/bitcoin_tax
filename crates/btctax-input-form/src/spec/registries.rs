@@ -197,6 +197,13 @@ const DECL_FIELDS: &[Field] = &[
         ri.amt_depreciation_same_as_regular = None;
         Ok(())
     }),
+    // Index 11 — the §911/931/933 exclusion gate. Appended at the END of `FORM_QUESTIONS` on purpose:
+    // `decl_tristate!` couples to the ARRAY INDEX, so inserting a question mid-array silently repoints
+    // every later entry. (Placing it before `AmtQualifiedDwelling` did exactly that in draft.)
+    decl_tristate!(11, FieldId::DeclHasIncomeExclusion, |ri| {
+        ri.has_income_exclusion = None;
+        Ok(())
+    }),
     FOREIGN_COUNTRY_NAMES,
 ];
 
@@ -205,6 +212,13 @@ pub(crate) const DECLARATIONS: Section = Section {
     title: "Declarations",
     kind: SectionKind::Singleton,
     fields: DECL_FIELDS,
+};
+
+pub(crate) const INCOME_EXCLUSIONS: Section = Section {
+    id: SectionId::IncomeExclusions,
+    title: "Income exclusions (\u{a7}911/931/933)",
+    kind: SectionKind::Singleton,
+    fields: super::sections::INCOME_EXCLUSION_FIELDS,
 };
 
 // ── The Skippables section ────────────────────────────────────────────────────────────────────────────────
@@ -264,6 +278,7 @@ pub fn field_to_question(id: FieldId) -> Option<QuestionId> {
         FieldId::DeclAmtQualifiedDwelling => QuestionId::AmtQualifiedDwelling,
         FieldId::DeclAmtCarryoverSame => QuestionId::AmtCarryoverSameAsRegular,
         FieldId::DeclAmtDepreciationSame => QuestionId::AmtDepreciationSameAsRegular,
+        FieldId::DeclHasIncomeExclusion => QuestionId::HasIncomeExclusion,
         _ => return None,
     })
 }
@@ -285,6 +300,7 @@ pub fn question_to_field(id: QuestionId) -> FieldId {
         QuestionId::AmtQualifiedDwelling => FieldId::DeclAmtQualifiedDwelling,
         QuestionId::AmtCarryoverSameAsRegular => FieldId::DeclAmtCarryoverSame,
         QuestionId::AmtDepreciationSameAsRegular => FieldId::DeclAmtDepreciationSame,
+        QuestionId::HasIncomeExclusion => FieldId::DeclHasIncomeExclusion,
     }
 }
 

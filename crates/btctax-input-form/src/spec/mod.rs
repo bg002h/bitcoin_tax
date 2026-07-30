@@ -29,6 +29,7 @@ pub fn form_spec() -> &'static [Section] {
         sections::SCHEDULE_A_CHARITABLE,
         sections::PAYMENTS,
         registries::DECLARATIONS,
+        registries::INCOME_EXCLUSIONS,
         registries::SKIPPABLES,
     ];
     SECTIONS
@@ -108,15 +109,15 @@ mod tests {
             );
         }
         assert_eq!(
-            decl_count, 10,
-            "10 declarations are Decl* fields (the 11th is the mortgage dedup)"
+            decl_count, 11,
+            "11 declarations are Decl* fields (the 12th is the mortgage dedup)"
         );
 
-        // 10 delegating Decl* fields + the foreign_country_names Text field.
+        // 11 delegating Decl* fields + the foreign_country_names Text field.
         assert_eq!(
             decls.fields.len(),
-            11,
-            "10 declarations + foreign_country_names"
+            12,
+            "11 declarations + foreign_country_names"
         );
         assert!(decls
             .fields

@@ -33,6 +33,7 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::DualStatusAlienUnanswered => vec![decl(QuestionId::DualStatusAlien)],
         R::MixedUseMortgageUnanswered => vec![decl(QuestionId::MortgageAllUsedToBuyBuildImprove)],
         R::AmtQualifiedDwellingUnanswered => vec![decl(QuestionId::AmtQualifiedDwelling)],
+        R::IncomeExclusionUnanswered => vec![decl(QuestionId::HasIncomeExclusion)],
         R::AmtCarryoverDeclarationUnanswered => vec![decl(QuestionId::AmtCarryoverSameAsRegular)],
         R::AmtDepreciationDeclarationUnanswered => {
             vec![decl(QuestionId::AmtDepreciationSameAsRegular)]
