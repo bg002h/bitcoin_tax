@@ -56,3 +56,9 @@ __pycache__/
 
 # Offline oracle toolchain venv (taxcalc + the Python drivers) — build artifact, NEVER commit.
 .venv/
+
+# IRS primary-source PDFs — publicly available, fetched on demand, never committed.
+# Each has a "<name>.pdf.txt" note beside it with its irs.gov URL and sha256, and its
+# committed TEXT LAYER lives in design/forms/extract/ (which IS what the tests read).
+design/forms/**/*.pdf
+design/amt-form6251/*.pdf

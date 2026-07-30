@@ -1,0 +1,6 @@
+https://www.irs.gov/pub/irs-prior/f6251--2025.pdf
+
+# Fetch:  curl -sL -o f6251--2025.pdf https://www.irs.gov/pub/irs-prior/f6251--2025.pdf
+# sha256  6995bfd29c6fe1b80fdc396c9c4796c7cef58a966070db0346721eae815fea3f
+# bytes   104434
+# IRS primary source, NOT committed (publicly available).

@@ -1,0 +1,14 @@
+https://www.irs.gov/pub/irs-prior/f1040sa--2025.pdf
+
+# f1040sa--2025.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  c14acf3478f4c33f27ac6e8ecd9f94b6fb25b16745b341728bd27847d2ef56bb
+# bytes   79008
+#
+# Fetch:    curl -sL -o f1040sa--2025.pdf https://www.irs.gov/pub/irs-prior/f1040sa--2025.pdf
+# Verify:   sha256sum f1040sa--2025.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# The committed text layer is design/forms/extract/f1040sa--2025.txt — that is what the
+# conformance tests read, so they run with no PDF and no network.

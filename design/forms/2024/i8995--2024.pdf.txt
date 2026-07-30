@@ -1,0 +1,14 @@
+https://www.irs.gov/pub/irs-prior/i8995--2024.pdf
+
+# i8995--2024.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  fb99c8d2a74b4fcbd7cd6fd085e4733dcb40dfaa167121c5f7a6e69a1a16eb95
+# bytes   227556
+#
+# Fetch:    curl -sL -o i8995--2024.pdf https://www.irs.gov/pub/irs-prior/i8995--2024.pdf
+# Verify:   sha256sum i8995--2024.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# The committed text layer is design/forms/extract/i8995--2024.txt — that is what the
+# conformance tests read, so they run with no PDF and no network.

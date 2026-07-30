@@ -1,0 +1,6 @@
+https://www.irs.gov/pub/irs-prior/f1040s1a--2025.pdf
+
+# Fetch:  curl -sL -o f1040s1a--2025.pdf https://www.irs.gov/pub/irs-prior/f1040s1a--2025.pdf
+# sha256  64f97b38ff4218e2f188fd55a8aab7043556687487c82bbefe0b6dd1a956ecd4
+# bytes   94224
+# IRS primary source, NOT committed (publicly available).

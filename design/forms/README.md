@@ -26,21 +26,32 @@ standalone booklet (Schedule 1-A, Schedules 2 and 3).
 ★ A missing year is sometimes the *correct* answer and must not be treated as a fetch failure:
 **`f1040s1a--2024.pdf` does not exist because Schedule 1-A was created by Pub. L. 119-21 for TY2025.**
 
-## Layout
+## ★ The PDFs are NOT committed — the notes and the text layer are
 
-    design/forms/MANIFEST.json     every archived PDF with its source URL, sha256 and size
-    design/forms/2024/             TY2024 editions (what btctax ships today)
-    design/forms/2025/             TY2025 editions (the B3 target)
-    design/forms/periodic/         non-annual revisions
+IRS forms are public documents, so committing 18 MB of them buys nothing and roughly doubled the repo.
+Instead, beside where each PDF belongs sits a **`<name>.pdf.txt` note** carrying its irs.gov URL, sha256
+and size, and the **committed text layer** lives in `design/forms/extract/`.
 
-`MANIFEST.json` is the provenance record: re-fetching a URL and getting a different sha256 means the IRS
-revised the document, which is a change to the authority and must be reviewed, never silently absorbed.
+That is what makes it work: **the conformance tests read the extract, so they need no PDF and no
+network.** The PDF is only needed to *re-extract*, and the note is sufficient to reproduce it —
+verified by round-trip (fetch `f8995--2025.pdf`, hash it, compare to the note: match).
+
+    design/forms/MANIFEST.json     every document: source URL, sha256, size  (the provenance record)
+    design/forms/2024/*.pdf.txt    TY2024 notes — what btctax ships today
+    design/forms/2025/*.pdf.txt    TY2025 notes — the B3 target
+    design/forms/periodic/*.pdf.txt  non-annual revisions
+    design/forms/extract/*.txt     ★ THE COMMITTED TEXT LAYER — what everything actually reads
+
+★★ **A different hash is not a corrupt download — it means the IRS REVISED the document.** That is a
+change to the *authority*: review it, never silently absorb it. This is the one thing the manifest exists
+to make impossible to miss.
 
 ## What is NOT done yet
 
 Archived ≠ extracted ≠ conformance-tested. These PDFs are step 1 of three:
 
-1. **archived** — done here, 57 documents.
+1. **archived** — done: 66 documents recorded (57 here + the 9 in the older `design/amt-form6251/`),
+   each as a URL note plus its extracted text.
 2. **extracted** — text layer committed as an in-crate fixture (`xtask extract-schedule-1a` is the model;
    `-layout` for a form, plain `pdftotext -f N -l M` for 3-column instruction pages). Done for
    Schedule 1-A only.

@@ -1,0 +1,14 @@
+https://www.irs.gov/pub/irs-pdf/f8283.pdf
+
+# f8283.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  389ab1b7c01b542724092f82a55dd43ab00792770b5254a87c4cd4082d8d4c69
+# bytes   124569
+#
+# Fetch:    curl -sL -o f8283.pdf https://www.irs.gov/pub/irs-pdf/f8283.pdf
+# Verify:   sha256sum f8283.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# The committed text layer is design/forms/extract/f8283.txt — that is what the
+# conformance tests read, so they run with no PDF and no network.

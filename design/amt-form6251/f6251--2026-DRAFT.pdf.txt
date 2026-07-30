@@ -1,0 +1,8 @@
+https://www.irs.gov/pub/irs-dft/f6251--dft.pdf
+
+# ★ DRAFT, and drafts are REPLACED in place then withdrawn when the form is
+# finalised — this exact document may no longer be retrievable. Treat the sha256 as the
+# identity of what we reviewed, not as something a fetch is guaranteed to reproduce.
+# sha256  a547fc9d629e1f04bdc30e088214c716667b88cb1b45447c580c0ae33095b5cc
+# bytes   295209
+# IRS primary source, NOT committed (publicly available).
