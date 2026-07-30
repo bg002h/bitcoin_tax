@@ -242,3 +242,51 @@ fn overflow_copies_rename_fields_so_an_emitted_census_must_normalise() {
         }
     }
 }
+
+/// ★★★ §G-17 gap 2 — **does a return with no capital transactions omit Schedule D?**
+///
+/// If it does, Form 1040 line 7 is blank AND its "if not required, check here" box (`c1_23`, which
+/// the map does not name) is blank — and on the printed page those two blanks are indistinguishable
+/// from "we forgot Schedule D". The IRS supplied the provenance marker; this measures whether the
+/// case that needs it actually arises.
+#[test]
+fn a_w2_only_return_shows_whether_the_schedule_d_case_arises() {
+    let (ri, state) = btctax_core::tax::testonly::w2_only_household();
+    let table = ty2024_table();
+    let ar = assemble_absolute(&ri, &state, &ty2024_params(), &table, 2024);
+    let details: BTreeMap<_, _> = BTreeMap::new();
+    let pr = assemble_printed_return(&ri, &state, &details, &ar, &table, 2024, &[])
+        .expect("w2_only assembles");
+    // ★★ `sch_d` is NOT an Option — Schedule D is ALWAYS in the packet. `f8949` IS optional.
+    println!(
+        "  w2_only: schedule_d always present (not Option); f8949 emitted = {}",
+        pr.forms.f8949.is_some()
+    );
+    let forms = fill_full_return(&pr, 2024).expect("fills");
+    println!(
+        "  w2_only emits {} forms: {:?}",
+        forms.len(),
+        forms.iter().map(|f| f.name.as_str()).collect::<Vec<_>>()
+    );
+
+    // ★★★ THE GAP-2 INSTANCE. No Schedule D is attached, so Form 1040 line 7 is blank — and the
+    // form's OWN provenance marker for that case ("If not required, check here", `c1_23`) is
+    // unmapped, so it is blank too. Two blanks that mean different things, rendered identically.
+    let f1040 = forms
+        .iter()
+        .find(|f| f.name == "f1040")
+        .expect("the 1040 is always emitted");
+    let doc = load(&f1040.bytes).expect("parses");
+    let fields = collect_fields(&doc).expect("fields");
+    let line7 = fields.iter().find(|f| f.fqn.ends_with("f1_52[0]"));
+    let notreq = fields.iter().find(|f| f.fqn.ends_with("c1_23[0]"));
+    println!(
+        "  line 7 amount value = {:?}",
+        line7.and_then(|f| btctax_forms::testonly::text_value(&doc, f.id))
+    );
+    println!(
+        "  line 7 'not required' checkbox present in PDF = {}, CHECKED = {:?}",
+        notreq.is_some(),
+        notreq.and_then(|f| btctax_forms::testonly::checkbox_on(&doc, f.id))
+    );
+}

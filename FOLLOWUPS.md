@@ -715,6 +715,37 @@ users), stated so nobody assumes otherwise.
 leaves no bytes behind — that now holds, so §G-14 no longer has to carry the `VACUUM`/`secure_delete`
 requirement itself.
 
+### G-18 — ★★★ Form 1040 line 7: btctax neither attaches Schedule D nor checks "not required"
+
+**Verified on an emitted return, 2026-07-30** (`btctax-forms/tests/field_census_slice.rs`). Found
+while measuring §G-17 gap 2.
+
+The form's own instruction, verbatim from the extract:
+
+> **7  Capital gain or (loss). Attach Schedule D if required. If not required, check here** ☐
+
+For `w2_only_household` — the simplest filer, no capital transactions — the emitted packet is
+**one form (`f1040`)**, and:
+
+| | measured |
+|---|---|
+| Schedule D attached | **no** |
+| line 7 amount | **`"0"`** — a printed zero, not a blank |
+| "if not required" checkbox (`c1_23`) | **present in the PDF, UNCHECKED** |
+| `c1_23` in the map | **absent** (0 occurrences) |
+
+**The form offers two lawful states — attach, or check the box — and the emitted return is in
+neither.** The IRS supplied exactly the provenance marker §G-13 wants for "blank because not
+applicable", and btctax does not use it.
+
+★ Interacts with **§G-11**: line 7 printing `0` is defensible as a *computed* zero (no transactions ⇒
+no gain), but the unchecked box is the form's instruction unfollowed, and together they render a
+return whose Schedule D status is unstated.
+
+★ **Practitioner judgement flagged:** whether an unchecked box on a return with no Schedule D is a
+filing defect or a cosmetic omission is a preparer's call. What is not in doubt is that the form
+states an instruction we do not follow.
+
 ### G-17 — ★★ MULTI-FORM: the census needs form-level liveness, FQN normalisation, and cross-form provenance
 
 **Owner question, 2026-07-30.** Detail: `design/forms/FIELD_PROVENANCE.md` §6g. Binds **§G-13**.

@@ -576,6 +576,41 @@ provoke is the case you do not measure.**
 - **396 is the number to plan against**, and ~45% of it (header/trailer, per §6a) goes with a handful
   of blanket decisions.
 
+## 6i. ★★★ GAP 2 MEASURED — cross-form provenance is ~26 edges, and the FORMS state it themselves
+
+Measured from the committed extracts (the forms' own words), not inferred from code.
+
+**~26 directed sibling edges among 13 forms** — f1040→{8995, Sch 1/2/3/A/D}, f1040s2→{6251, 8959,
+8960, Sch A/SE}, f6251→{Sch 1/2/3/A/D}, f1040sse→{Sch 1/2/C}, f1040sd→{8949}, f8949→{Sch D},
+f1040sc→{Sch 1/SE}, f8959→{Sch 2/SE}, f1040sa→{8283}. Enumerable and small — **a per-field
+`depends_on` annotation, not a new census dimension.**
+
+★ A further ~77 references point at forms btctax does NOT emit (2441, 4255, Schedule F, 4137,
+1040-NR). Those are consult r1's `unmodeled(advisory)`, not gap 2.
+
+### ★★ The forms state their own cross-form BLANK conditions
+
+- `f1040sd` line 32: *"on Form 8949, **leave this line blank** and go to line 1b"*
+- `f1040` line 7: *"Capital gain or (loss). Attach Schedule D if required. **If not required, check
+  here**"* ← **the IRS's own provenance marker for "blank because not applicable"**
+
+**⇒ Gap 2 does not need a new vocabulary — it needs transcription.** The dependency and its blank
+condition are both printed on the form, which is this project's entire doctrine arriving again.
+
+### ★★★ And it found a live defect — §G-18
+
+`w2_only_household` emits **ONE form**. Schedule D is not attached, line 7 prints **`"0"`**, and the
+"if not required" checkbox (`c1_23`) is **present in the PDF, unmapped, and unchecked.** The form
+offers two lawful states and the return is in neither. Filed as **§G-18**.
+
+### ★ CORRECTION to §6h — I over-corrected the flood
+
+§6h measured `kitchen_sink` at **13 of 15 forms** and concluded gap 3's "~800 field flood" was 4×
+too high. `w2_only` emits **1 of 15**. The true range is **1–13**, so the flood is real for simple
+returns and small for rich ones — the per-form resolution gate matters more than §6h claimed, and my
+first estimate was closer than my correction to it. **Two wrong numbers in a row on the same
+question, both from generalising a single fixture.**
+
 ## 7. Open questions for the ⑥ consult
 
 1. Is the §3 taxonomy right, and is "Declined + question pointer" the correct shape for a lawful
