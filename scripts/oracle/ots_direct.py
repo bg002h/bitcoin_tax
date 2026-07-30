@@ -72,16 +72,28 @@ from pathlib import Path
 
 OTS_DIR = Path(os.environ.get("OTS_DIR", "")).expanduser()
 
-def _bin(form: str) -> Path:
-    p = OTS_DIR / "bin" / f"taxsolve_{form}_2024"
+# ★ The solver YEAR, separate from OTS_DIR. Two installs coexist here
+# (`OpenTaxSolver2024_22.07_linux64` and `OpenTaxSolver2025_23.06_linux64`), and pointing OTS_DIR at
+# the 2025 tree while this stayed 2024 failed with a confusing "solver not found" — the tree and the
+# year are two facts, so they are two settings.
+OTS_YEAR = int(os.environ.get("OTS_YEAR", "2024"))
+
+
+def _bin(form: str, year: int | None = None) -> Path:
+    year = OTS_YEAR if year is None else year
+    p = OTS_DIR / "bin" / f"taxsolve_{form}_{year}"
     if not p.exists():
-        raise FileNotFoundError(f"OTS solver not found: {p}. Set OTS_DIR.")
+        raise FileNotFoundError(
+            f"OTS solver not found: {p}. Set OTS_DIR to an OpenTaxSolver{year} tree, "
+            f"or set OTS_YEAR to match the tree OTS_DIR points at."
+        )
     return p
 
 
-def _template(subdir: str, name: str) -> str:
+def _template(subdir: str, name: str, year: int | None = None) -> str:
+    year = OTS_YEAR if year is None else year
     d = OTS_DIR / "tax_form_files" / subdir
-    for cand in (f"{name}_2024_template.txt", f"{name}_template.txt"):
+    for cand in (f"{name}_{year}_template.txt", f"{name}_template.txt"):
         p = d / cand
         if p.exists():
             return p.read_text()
@@ -185,31 +197,94 @@ def _parse(out_text: str) -> dict[str, float]:
 OTS_2024_MFS_KICKER_STALE_THRESHOLD = 831_150.0
 OTS_2024_CASH_CEILING_FRACTION = 0.60
 
+# ★★ BOTH DEFECTS ARE 2024-ONLY, AND SCOPING THEM IS WHAT MAKES THE TY2025 PIVOT WORK.
+#
+# Verified in `taxsolve_US_1040_2025.c`: the MFS §55(d)(3) block carries the correct TY2025 triple
+# (900,350 / 1,174,350 / 68,500 — `:271-275`, and 900,350 is also the TY2025 zero-exemption point on
+# the archived f6251--2025.pdf), and Schedule A now caps cash gifts at 60% of AGI (`:2424-2429`).
+#
+# Left year-blind, this predicate would disqualify TY2025's MFS-kicker vectors against a solver that
+# handles them CORRECTLY — the entire purpose of moving to TY2025 — while every run printed OK and the
+# witness census reported them "not witnessed". The bug would have been invisible and total.
+OTS_YEARS_WITH_STALE_MFS_KICKER = frozenset({2024})
+OTS_YEARS_WITHOUT_CASH_CEILING = frozenset({2024})
+
 
 def _ots_amt_disqualified(
-    status: str, h: dict, final: dict[str, float], ots6251: dict[str, float]
+    status: str,
+    h: dict,
+    final: dict[str, float],
+    ots6251: dict[str, float],
+    year: int | None = None,
 ) -> str | None:
     """Return why OTS cannot witness this household's AMT, or `None` if it can.
 
-    Fail-CLOSED: an unrecognised shape returns a reason rather than silently witnessing.
+    Fail-CLOSED: an unrecognised shape returns a reason rather than silently witnessing. Each
+    disqualification is scoped to the solver years that actually carry the defect — a defect fixed
+    upstream must stop gating, or the fix buys us nothing.
     """
+    year = OTS_YEAR if year is None else year
     if not ots6251:
         return "OTS printed no Form 6251 for this household"
     line4 = ots6251.get("line4")
-    if status == "Married/Sep" and line4 is not None and line4 > OTS_2024_MFS_KICKER_STALE_THRESHOLD:
+    if (
+        year in OTS_YEARS_WITH_STALE_MFS_KICKER
+        and status == "Married/Sep"
+        and line4 is not None
+        and line4 > OTS_2024_MFS_KICKER_STALE_THRESHOLD
+    ):
         return (
-            f"OTS 2024 §55(d)(3) MFS constants are the 2023 triple (line 4 = {line4:,.0f} is above "
+            f"OTS {year} §55(d)(3) MFS constants are the 2023 triple (line 4 = {line4:,.0f} is above "
             f"the stale {OTS_2024_MFS_KICKER_STALE_THRESHOLD:,.0f} threshold) — "
             "taxsolve_US_1040_2024.c:270-275"
         )
     cash_gift = float(h.get("charitable_cash", 0) or 0)
     agi = final.get("L11", 0.0)
-    if cash_gift > OTS_2024_CASH_CEILING_FRACTION * agi:
+    if (
+        year in OTS_YEARS_WITHOUT_CASH_CEILING
+        and cash_gift > OTS_2024_CASH_CEILING_FRACTION * agi
+    ):
         return (
-            f"OTS 2024 applies no §170(b) 60%-of-AGI cash ceiling (gift {cash_gift:,.0f} exceeds "
+            f"OTS {year} applies no §170(b) 60%-of-AGI cash ceiling (gift {cash_gift:,.0f} exceeds "
             f"60% of AGI {agi:,.0f}), which deflates Form 6251 line 1"
         )
     return None
+
+
+def selftest_defect_years() -> None:
+    """Assert each OTS defect gates the years that carry it — and ONLY those. Pure; no OTS needed.
+
+    ★ This exists because the year-blind version of `_ots_amt_disqualified` would have silently
+    defeated the whole reason for moving to TY2025. It hardcoded OTS 2024's stale 831,150 threshold
+    and applied the cash-ceiling leg unconditionally, so a TY2025 MFS-kicker household — handled
+    CORRECTLY by `taxsolve_US_1040_2025.c` — would have been reported "not witnessed" while every run
+    printed OK. A wrong exclusion is as damaging as a wrong inclusion and far quieter.
+
+    Called from `verify_f6251.py` before any solver runs, so it cannot be skipped.
+    """
+    mfs_above = {"line4": 943_662.50, "line11": 13_571.50}
+    gated = _ots_amt_disqualified("Married/Sep", {}, {"L11": 960_000.0}, mfs_above, year=2024)
+    assert gated and "55(d)(3)" in gated, "OTS 2024 MUST be gated on an MFS line 4 above 831,150"
+    assert (
+        _ots_amt_disqualified("Married/Sep", {}, {"L11": 960_000.0}, mfs_above, year=2025) is None
+    ), (
+        "OTS 2025 carries the correct §55(d)(3) triple (900,350 / 1,174,350 / 68,500) and must NOT be "
+        "gated — gating it here is exactly the failure that makes the TY2025 pivot pointless"
+    )
+
+    over_ceiling = {"charitable_cash": 1_000_000.0}
+    final = {"L11": 1_500_000.0}
+    six = {"line4": 600_000.0, "line11": 0.0}
+    assert _ots_amt_disqualified("Married/Joint", over_ceiling, final, six, year=2024), (
+        "OTS 2024 applies no §170(b) 60%-of-AGI cash ceiling and MUST be gated"
+    )
+    assert _ots_amt_disqualified("Married/Joint", over_ceiling, final, six, year=2025) is None, (
+        "OTS 2025 caps cash gifts at 60% of AGI (taxsolve_US_1040_2025.c:2424) and must NOT be gated"
+    )
+
+    # Fail-closed is not year-scoped: no printed form is never a witness, in any year.
+    for y in (2024, 2025):
+        assert _ots_amt_disqualified("Single", {}, {}, {}, year=y), f"empty 6251 must not witness ({y})"
 
 
 def _form6251_lines(parsed: dict[str, float]) -> dict[str, float]:
@@ -509,3 +584,8 @@ def version() -> str:
             if m:
                 return f"OpenTaxSolver 2024 v{m.group(1)}"
     return f"OpenTaxSolver 2024 ({OTS_DIR.name})"
+
+
+if __name__ == "__main__":  # offline self-check; needs no OTS install
+    selftest_defect_years()
+    print("ots_direct: defect-year scoping OK")

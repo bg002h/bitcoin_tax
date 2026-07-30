@@ -322,6 +322,11 @@ def _ots_pass(vectors) -> tuple[int, dict[str, str], bool]:
     sys.path.insert(0, str(ROOT / "scripts" / "oracle"))
     import ots_direct as o  # noqa: E402 — deliberately late; needs OTS_DIR at import time
 
+    # ★ Runs BEFORE any solver: each OTS defect must gate the years that carry it and only those.
+    #   A year-blind predicate would report TY2025's MFS-kicker vectors "not witnessed" against a
+    #   solver that handles them correctly, and this run would still print OK.
+    o.selftest_defect_years()
+
     # OTS's own status vocabulary, matched by `strncasecmp` in taxsolve_US_1040_2024.c:1874-1878.
     # ★ A token OTS does not recognise yields ALL ZEROS rather than an error, which reads exactly
     #   like a broken install — hence a dict that KeyErrors on an unknown status rather than a
