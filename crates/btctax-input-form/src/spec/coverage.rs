@@ -279,6 +279,11 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         "qbi",
     ];
     const EXEMPT_LEAVES: &[&str] = &[
+        // ★★ §G-15 — `tax_year` is the SCOPE the form is filled in, not a value the filer types into
+        // it. It is set by the command (`--year`) and stamped from the storage row key, so an input
+        // field for it would invite the filer to contradict the year their return is filed under.
+        // Exempt DELIBERATELY, which is what this census exists to force someone to decide.
+        "tax_year",
         "sch1.state_refund_taxable",
         "sch1.student_loan_interest_paid",
         "sch1.ira_deduction_claimed",

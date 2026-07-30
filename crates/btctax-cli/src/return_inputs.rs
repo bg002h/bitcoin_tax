@@ -63,10 +63,17 @@ fn row_to_inputs(year: i32, json: &str, version: i64) -> Result<ReturnInputs, Cl
             expected: SCHEMA_VERSION,
         });
     }
-    serde_json::from_str(json).map_err(|e| CliError::BadConfigValue {
-        key: format!("return_inputs[{year}]"),
-        value: format!("invalid JSON: {e}"),
-    })
+    let mut ri: ReturnInputs =
+        serde_json::from_str(json).map_err(|e| CliError::BadConfigValue {
+            key: format!("return_inputs[{year}]"),
+            value: format!("invalid JSON: {e}"),
+        })?;
+    // ★★ §G-15 — THE ROW KEY IS AUTHORITATIVE. Stamping here (the ONE read boundary) means an
+    // in-memory `tax_year` can never disagree with the row it came from, and a row written before the
+    // field existed loads with the right year instead of `0`. Every year-scoped liveness predicate
+    // therefore reads a value that is true by construction rather than by discipline.
+    ri.tax_year = year;
+    Ok(ri)
 }
 
 /// Return the stored [`ReturnInputs`] for `year`, or `None` if none has been set.
@@ -89,7 +96,26 @@ pub fn get(conn: &Connection, year: i32) -> Result<Option<ReturnInputs>, CliErro
 /// Persist `ri` as the [`ReturnInputs`] for `year` (upsert — replaces any prior value).
 pub fn set(conn: &Connection, year: i32, ri: &ReturnInputs) -> Result<(), CliError> {
     init_table(conn)?;
-    let j = serde_json::to_string(ri).map_err(|e| CliError::BadConfigValue {
+    // ★★ §G-15 — refuse a DISAGREEMENT rather than silently preferring one side. `0` is "not
+    // stated" and is stamped from the key; any other mismatch means the caller believes this is a
+    // different year's return, and writing it under `year` would file one year's answers as
+    // another's.
+    if ri.tax_year != 0 && ri.tax_year != year {
+        return Err(CliError::BadConfigValue {
+            key: format!("return_inputs[{year}].tax_year"),
+            value: format!(
+                "these inputs are for tax year {} but are being stored under {year} — refusing, \
+                 because storing one year's answers as another's would misattribute the filer's \
+                 testimony",
+                ri.tax_year
+            ),
+        });
+    }
+    let stamped = ReturnInputs {
+        tax_year: year,
+        ..ri.clone()
+    };
+    let j = serde_json::to_string(&stamped).map_err(|e| CliError::BadConfigValue {
         key: format!("return_inputs[{year}]"),
         value: e.to_string(),
     })?;
@@ -170,6 +196,9 @@ mod tests {
 
     fn inputs() -> ReturnInputs {
         ReturnInputs {
+            // ★ §G-15 — a real return always HAS a year, so the shared fixture states one. The two
+            // guard tests below override it deliberately (`0` = not stated, and a disagreeing year).
+            tax_year: 2024,
             filing_status: FilingStatus::Mfj,
             w2s: vec![W2 {
                 owner: Owner::Taxpayer,
@@ -180,6 +209,68 @@ mod tests {
             }],
             ..Default::default()
         }
+    }
+
+    /// ★★★ **§G-15 — the row key is authoritative on READ.**
+    ///
+    /// A row written before `tax_year` existed deserializes to `0`. Stamping at the one read boundary
+    /// means every year-scoped liveness predicate sees a true year by construction, not by whoever
+    /// remembered to set it. Without this, `HasIncomeExclusion`'s year gate would read `0` on every
+    /// legacy row and silently go not-live for a return that should be asked.
+    #[test]
+    fn the_row_key_stamps_the_tax_year_on_read() {
+        let c = mem();
+        // Simulate a row written before the field existed: JSON with no `tax_year` at all.
+        let mut ri = inputs();
+        ri.tax_year = 0;
+        let j = serde_json::to_string(&ri).unwrap();
+        let j = j.replace("\"tax_year\":0,", "");
+        assert!(
+            !j.contains("tax_year"),
+            "the fixture must genuinely lack the field"
+        );
+        c.execute(
+            "INSERT INTO return_inputs(year,inputs_json,schema_version) VALUES(?1,?2,?3)",
+            rusqlite::params![2024, j, SCHEMA_VERSION],
+        )
+        .unwrap();
+
+        let got = get(&c, 2024).unwrap().expect("row exists");
+        assert_eq!(
+            got.tax_year, 2024,
+            "the read boundary must stamp the year from the ROW KEY — a legacy row otherwise loads \
+             as year 0 and every year-scoped question silently mis-scopes"
+        );
+    }
+
+    /// ★★★ **§G-15 — a year DISAGREEMENT is refused, not silently resolved.**
+    ///
+    /// Storing one year's answers under another year would misattribute the filer's testimony: the
+    /// same `Some(false)` means "no foreign accounts in 2024" or "…in 2025", and they are different
+    /// statements. `0` is "not stated" and is stamped; anything else that disagrees refuses.
+    #[test]
+    fn storing_one_years_inputs_under_another_year_refuses() {
+        let c = mem();
+        let mut ri = inputs();
+        ri.tax_year = 2025;
+
+        let err = set(&c, 2024, &ri).expect_err("a 2025 return stored under 2024 must refuse");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("2025") && msg.contains("2024"),
+            "the refusal must name BOTH years so the caller can see which is wrong: {msg}"
+        );
+
+        // The neutral case still works, and the stored JSON is stamped self-describing.
+        let mut unset = inputs();
+        unset.tax_year = 0;
+        set(&c, 2024, &unset).expect("an unstated year is stamped from the key");
+        assert_eq!(get(&c, 2024).unwrap().unwrap().tax_year, 2024);
+
+        // And an agreeing year is accepted.
+        let mut agree = inputs();
+        agree.tax_year = 2024;
+        set(&c, 2024, &agree).expect("an agreeing year stores");
     }
 
     #[test]
@@ -218,8 +309,14 @@ mod tests {
     #[test]
     fn all_returns_sorted_by_year() {
         let c = mem();
-        set(&c, 2025, &inputs()).unwrap();
-        set(&c, 2024, &inputs()).unwrap();
+        // ★ §G-15 — each year's inputs must STATE that year; storing one year's answers under
+        // another now refuses, which is the point. `for_year` makes the intent explicit.
+        let for_year = |y| ReturnInputs {
+            tax_year: y,
+            ..inputs()
+        };
+        set(&c, 2025, &for_year(2025)).unwrap();
+        set(&c, 2024, &for_year(2024)).unwrap();
         assert_eq!(
             all(&c).unwrap().keys().copied().collect::<Vec<_>>(),
             vec![2024, 2025]

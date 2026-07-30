@@ -493,6 +493,7 @@ Imported full-return inputs for tax year 2024.
 ```console
 $ btctax --vault v.pgp income show --year 2024
 {
+  "tax_year": 2024,
   "filing_status": "Mfj",
   "header": {
     "taxpayer": {

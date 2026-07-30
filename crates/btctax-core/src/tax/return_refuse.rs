@@ -268,6 +268,8 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
     let neg = |v: Usd| v < Usd::ZERO;
     // Top level — a new `ReturnInputs` field breaks this destructure until it is classified.
     let ReturnInputs {
+        // ★ §G-15 — the scope questions are asked in, not a money field: nothing here to screen.
+        tax_year: _,
         filing_status: _,
         // PII only — no money today. This `_` is the ONE header waiver; its exhaustiveness (a future field
         // in HouseholdHeader/Person/Dependent) is now compiler-forced by the P9 §3.3 CLASSIFIER, which

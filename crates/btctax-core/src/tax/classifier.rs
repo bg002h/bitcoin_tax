@@ -71,6 +71,10 @@ impl Census {
 pub fn classify(ri: &ReturnInputs) -> Census {
     let mut c = Census::default();
     let ReturnInputs {
+        // ★ §G-15 — the tax year is not a DECLARATION or a benefit claim; it is the scope those are
+        // asked in. It carries no answered-ness of its own, so the classifier ignores it (naming it
+        // explicitly rather than `..`, so the next field added is still a compile error).
+        tax_year: _,
         filing_status,
         header,
         w2s,

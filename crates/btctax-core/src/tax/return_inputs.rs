@@ -410,6 +410,25 @@ pub enum ItemizeElection {
 /// a defaulted `ReturnInputs` is Single with all-empty line items.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReturnInputs {
+    /// ★★★ **§G-15 — the tax year these inputs are FOR.**
+    ///
+    /// Added because the question registry could not scope a question to a year: `questions.rs`
+    /// documented it verbatim — *"`live` receives only `&ReturnInputs`, which carries no tax year, so
+    /// it CANNOT be scoped"* — which forced `HasIncomeExclusion` (a TY2025 MAGI question) to ship
+    /// ALWAYS LIVE, asking TY2024 filers a TY2025 question. That workaround needed a bespoke
+    /// neutrality proof, and **Schedule 1-A Part IV has none**: asking a TY2024 filer about a
+    /// deduction that did not exist in 2024 is answering a question with no TY2024 legal meaning.
+    ///
+    /// ★ `live` deliberately KEEPS its one-argument signature and reads this field, rather than
+    /// becoming `live(year, &ri)` — a year passed alongside invites a caller to pass one that
+    /// disagrees with the row's own origin, which is a second copy of the truth in flight.
+    ///
+    /// ★★ **`0` means NOT STATED**, and it is not a usable year: the storage boundary stamps this
+    /// from the row key on read and refuses a disagreement on write, so an in-memory value and the
+    /// row it came from can never diverge. `Default` yields `0` because a defaulted `ReturnInputs` is
+    /// a test convenience that must not fabricate a year any more than it fabricates an answer.
+    #[serde(default)]
+    pub tax_year: i32,
     pub filing_status: FilingStatus,
     #[serde(default)]
     pub header: HouseholdHeader,
@@ -542,6 +561,9 @@ impl ReturnInputs {
 impl Default for ReturnInputs {
     fn default() -> Self {
         Self {
+            // ★ §G-15: `0` = NOT STATED. Default() is a test convenience and must not fabricate a
+            // tax year any more than it fabricates an answer.
+            tax_year: 0,
             // §911/931/933 add-backs: `None` = never asked. Default() is a TEST convenience, so
             // it must not fabricate an answer — see the field docs.
             has_income_exclusion: None,
