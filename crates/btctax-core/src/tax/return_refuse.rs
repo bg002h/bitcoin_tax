@@ -1036,6 +1036,11 @@ mod tests {
     fn scenario_for(id: QuestionId) -> ReturnInputs {
         use crate::tax::return_inputs::ScheduleAInputs;
         let mut r = ReturnInputs {
+            // ★★ §G-15 — a POPULATED fixture must state its year. `Default` gives `0` ("not
+            // stated"), and a year-scoped question is correctly NOT live without one — so a
+            // yearless scenario could never exercise `HasIncomeExclusion` and this invariant would
+            // silently stop covering it. 2025 is the year in which every registry question is live.
+            tax_year: 2025,
             filing_status: FilingStatus::Single,
             ..Default::default()
         };

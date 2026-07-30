@@ -398,19 +398,22 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
              drives the §164(b) SALT phase-down and all four Schedule 1-A deductions. Treating an \
              unasked exclusion as zero UNDERSTATES modified AGI, which RAISES those deductions and \
              understates the tax — run `btctax income answer`",
-        // ★ ALWAYS LIVE, like `DualStatusAlien` — one yes/no every filer can answer, asked once.
+        // ★★ §G-15 — YEAR-SCOPED at last. This shipped ALWAYS LIVE because `live` received only
+        // `&ReturnInputs`, which carried no tax year, so it could not be scoped to "years that
+        // compute modified AGI" — and TY2024 filers were therefore asked a TY2025 question. That was
+        // defensible only because a bespoke neutrality proof existed for it: `Some(false)` ⇒
+        // modified AGI = AGI, exactly what TY2024's `FlatCap` assumes and never reads, so no TY2024
+        // figure could move.
         //
-        // `live` receives only `&ReturnInputs`, which carries no tax year, so it CANNOT be scoped to
-        // "years that compute modified AGI". The alternatives were both worse: a year-agnostic proxy
-        // (a Schedule A over $10,000 of SALT) would refuse TY2024 returns that compute correctly
-        // today, and a never-live question violates the Declarations invariant that every declaration
-        // is live on a populated fixture — a question nobody can be asked is not a declaration.
+        // ★ The proof does NOT generalise, which is why the workaround had to go rather than be
+        // repeated: Schedule 1-A Part IV asks about a deduction that did not exist in TY2024, so a
+        // "no" there answers a question with no TY2024 legal meaning — testimony about nothing.
         //
-        // Answering it costs nothing and understates nothing: `Some(false)` ⇒ modified AGI = AGI,
-        // which is exactly what TY2024's `FlatCap` assumes and never reads. So no TY2024 figure can
-        // move. What it buys is that TY2025's worksheet finds the answer already on file instead of
-        // discovering it needs one.
-        live: |_ri| true,
+        // ★ `ReturnInputs::tax_year` is stamped from the storage row key on read, so this predicate
+        // reads a year that is true by construction. A year-0 (never stored, never stated) fixture
+        // is NOT ≥ 2025, so it is not live — which is the fail-closed direction: an unstated year
+        // must not conjure a TY2025 question.
+        live: |ri| ri.tax_year >= 2025,
         get: |ri| ri.has_income_exclusion,
         set: |ri, v| ri.has_income_exclusion = Some(v),
         neutral: false, // "no exclusions" is the AMT/MAGI-neutral answer, but it is still an ANSWER
@@ -706,5 +709,45 @@ mod tests {
                 "a skippable must not also be a mandatory FORM_QUESTIONS declaration"
             );
         }
+    }
+
+    /// ★★★ **§G-15 — the year gate, and the reason the always-live workaround had to go.**
+    ///
+    /// `HasIncomeExclusion` computes modified AGI, which only TY2025+ reads (TY2024's SALT cap is a
+    /// `FlatCap` that ignores `magi` entirely). It shipped ALWAYS LIVE because `live` had no year to
+    /// consult, so TY2024 filers were asked a TY2025 question — defensible ONLY because a bespoke
+    /// neutrality proof existed for that one question.
+    ///
+    /// ★★ The proof does not generalise, and this test exists so the next year-scoped question is
+    /// written as a gate rather than as another workaround: Schedule 1-A Part IV asks about a
+    /// deduction that **did not exist in TY2024**, so a "no" there is testimony about nothing.
+    #[test]
+    fn the_income_exclusion_question_is_live_only_from_ty2025() {
+        let q = FORM_QUESTIONS
+            .iter()
+            .find(|q| q.id == QuestionId::HasIncomeExclusion)
+            .expect("the question is in the registry");
+
+        let at = |y: i32| ReturnInputs {
+            tax_year: y,
+            ..Default::default()
+        };
+
+        assert!(
+            !(q.live)(&at(2024)),
+            "TY2024 must NOT be asked a TY2025 MAGI question — that was the §G-15 defect"
+        );
+        assert!(
+            (q.live)(&at(2025)),
+            "TY2025 computes modified AGI, so it must be asked"
+        );
+        assert!((q.live)(&at(2026)), "and every later year");
+
+        // ★ Fail-closed on an unstated year: a fixture that never went through storage has
+        // `tax_year: 0`, and 0 must not conjure a TY2025 question out of nothing.
+        assert!(
+            !(q.live)(&at(0)),
+            "an UNSTATED year must not be treated as 2025 — the gate fails closed"
+        );
     }
 }

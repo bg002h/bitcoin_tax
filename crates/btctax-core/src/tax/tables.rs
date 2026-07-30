@@ -339,8 +339,9 @@ impl SaltLimitation {
     ///
     /// ★ **`magi: None` means "the filer was never asked", and it FAILS CLOSED.** `assemble_absolute`
     /// is infallible by design — btctax computes the whole return even for one it will not file — so
-    /// this cannot refuse here. `screen_inputs` refuses first (`QuestionId::HasIncomeExclusion` is
-    /// always live), and this arm is the belt to that brace. Its DIRECTION is what matters: an absent
+    /// this cannot refuse here. `screen_inputs` refuses first (`QuestionId::HasIncomeExclusion` is live
+    /// from TY2025 — §G-15 year-scoped it; TY2024's `FlatCap` ignores `magi` entirely, so the
+    /// narrower gate cannot move a TY2024 figure), and this arm is the belt to that brace. Its DIRECTION is what matters: an absent
     /// MAGI is treated as *fully phased down*, giving the floor — the SMALLEST deduction, which can
     /// only overstate tax. The §63(f) rule, applied: an unknown must fail in the direction that
     /// cannot understate. Note `FlatCap` ignores `magi` entirely, so TY2024 is untouched either way.
@@ -697,8 +698,8 @@ mod tests {
     /// ★ An UNASKED modified AGI fails closed — to the floor, never to the cap.
     ///
     /// `assemble_absolute` is infallible by design, so the worksheet cannot refuse mid-computation;
-    /// `screen_inputs` refuses first because `QuestionId::HasIncomeExclusion` is always live. This is
-    /// the belt to that brace, and its DIRECTION is the whole content: an absent MAGI is treated as
+    /// `screen_inputs` refuses first because `QuestionId::HasIncomeExclusion` is live from TY2025
+    /// (§G-15 year-scoped it; TY2024's `FlatCap` never reads `magi`). This is the belt to that brace, and its DIRECTION is the whole content: an absent MAGI is treated as
     /// fully phased down, so the filer gets the SMALLEST deduction the worksheet can produce. That
     /// can only overstate tax — the §63(f) rule that an unknown must fail in the direction which
     /// cannot understate. The opposite default (assume MAGI is under the threshold, keep the $40,000

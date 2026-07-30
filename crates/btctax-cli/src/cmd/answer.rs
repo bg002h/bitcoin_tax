@@ -224,6 +224,12 @@ mod tests {
 
     fn single() -> ReturnInputs {
         ReturnInputs {
+            // ★★ §G-15 — a fixture must state its year. `Default` gives `0` ("not stated"), under
+            // which a year-scoped question is correctly NOT live — so a yearless fixture would
+            // silently stop exercising `HasIncomeExclusion`. 2025 is the year every registry
+            // question is live in; `a_ty2024_single_filer_is_not_asked_the_ty2025_magi_question`
+            // below pins the other side of the gate.
+            tax_year: 2025,
             filing_status: FilingStatus::Single,
             ..Default::default()
         }
@@ -251,8 +257,31 @@ mod tests {
             .any(|a| matches!(a, Ask::Skippable(s) if s.id == SkippableId::DobSpouse))
     }
 
-    /// A Single filer is asked the FIVE always-live declarations (dependent-taxpayer, both foreign
-    /// questions, HSA activity, dual-status) and — skippably — a DOB. Nothing about a spouse who does not
+    /// ★★★ **§G-15 — the other side of the year gate, at the CLI.**
+    ///
+    /// The registry test proves `HasIncomeExclusion.live` is year-scoped; this proves the ANSWER LOOP
+    /// honours it, which is what the filer actually experiences. Before §G-15 a TY2024 filer was
+    /// asked a TY2025 modified-AGI question — harmless only because a bespoke neutrality proof
+    /// existed for that one question, and Schedule 1-A Part IV has none.
+    #[test]
+    fn a_ty2024_single_filer_is_not_asked_the_ty2025_magi_question() {
+        let ty2024 = ReturnInputs {
+            tax_year: 2024,
+            ..single()
+        };
+        let asked = declaration_ids(&ty2024);
+        assert!(
+            !asked.contains(&QuestionId::HasIncomeExclusion),
+            "a TY2024 filer must not be asked a question whose subject TY2024 never reads; got {asked:?}"
+        );
+        // …and the year-agnostic declarations are still asked, so the gate narrowed exactly one thing.
+        assert!(asked.contains(&QuestionId::ForeignAccounts));
+        assert!(asked.contains(&QuestionId::DualStatusAlien));
+    }
+
+    /// A Single filer is asked the five unconditional declarations (dependent-taxpayer, both foreign
+    /// questions, HSA activity, dual-status), the TY2025 MAGI question (§G-15 year-scoped it, and this
+    /// fixture is TY2025), and — skippably — a DOB. Nothing about a spouse who does not
     /// exist, and (post-§2.9) the foreign questions appear even with no Schedule B.
     #[test]
     fn a_single_filer_is_asked_the_always_live_declarations_and_no_spouse_question() {

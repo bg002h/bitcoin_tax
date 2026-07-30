@@ -175,6 +175,11 @@ fn person(first: &str, last: &str, ssn: &str, occupation: &str) -> Person {
 /// obvious — a fixture that silently stops tripping a threshold is a KAT that silently stops testing.
 pub fn kitchen_sink_household() -> (ReturnInputs, LedgerState) {
     let mut ri = ReturnInputs {
+        // ★★ §G-15 — this fixture is a TY2024 household (it is paired with `ty2024_table` /
+        // `ty2024_params` throughout), so it states 2024. A year-scoped question is therefore
+        // correctly NOT live on it: `HasIncomeExclusion` computes modified AGI, which TY2024's
+        // `FlatCap` never reads, so a TY2024 return legitimately carries no answer to it.
+        tax_year: 2024,
         filing_status: FilingStatus::Mfj,
         header: HouseholdHeader {
             taxpayer: person("John", "Doe", "123-45-6789", "Engineer"),

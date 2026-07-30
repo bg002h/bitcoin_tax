@@ -87,6 +87,10 @@ fn leaf_map(ri: &ReturnInputs) -> BTreeMap<String, Value> {
 /// but still differ from their own field's sentinel, so their diff stays exact.
 fn maximal_fixture() -> ReturnInputs {
     let mut ri = ReturnInputs {
+        // ★★ §G-15 — a MAXIMALLY-POPULATED fixture must state its year, or every year-scoped
+        // question is not live and its leaves silently drop out of the coverage census. 2025 is the
+        // year in which every registry question is live.
+        tax_year: 2025,
         filing_status: FilingStatus::Mfs,
         ..Default::default()
     };

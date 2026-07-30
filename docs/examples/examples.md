@@ -656,7 +656,7 @@ $ btctax --vault v.pgp income show --year 2024
   "foreign_trust": false,
   "foreign_country_names": "",
   "dual_status_alien": false,
-  "has_income_exclusion": false,
+  "has_income_exclusion": null,
   "excluded_puerto_rico_income": "0",
   "form_2555_line45": "0",
   "form_2555_line50": "0",

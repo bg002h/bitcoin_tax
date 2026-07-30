@@ -16,8 +16,8 @@ foreign_trust = false
 form_2555_line45 = "0"
 form_2555_line50 = "0"
 form_4563_line15 = "0"
-has_income_exclusion = false
 itemize_election = "auto"
+tax_year = 2024
 
 [capital_loss_carryforward_in]
 long = "0"

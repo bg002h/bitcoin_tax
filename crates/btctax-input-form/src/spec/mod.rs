@@ -177,6 +177,11 @@ mod tests {
             // live (Mfs makes `MfsSpouseItemizes` live; a spouse `Person` makes `DependentSpouse` live).
             let live_ri = || {
                 let mut ri = ReturnInputs {
+                    // ★★ §G-15 — "every Decl* is live" now includes the YEAR-SCOPED ones, so the
+                    // seed must state a year. 2025 is the year every registry question is live in;
+                    // `Default`'s `0` would silently drop `DeclHasIncomeExclusion` from this
+                    // totality check.
+                    tax_year: 2025,
                     filing_status: FilingStatus::Mfs,
                     ..Default::default()
                 };
