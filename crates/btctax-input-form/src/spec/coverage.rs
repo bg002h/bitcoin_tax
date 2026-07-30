@@ -149,6 +149,25 @@ fn sentinel(f: &Field) -> FieldValue {
     }
 }
 
+/// A per-`FieldId` fixture VARIANT for a field whose liveness gate the maximal fixture cannot satisfy at
+/// the same time as covering the gate itself.
+///
+/// ★ The §G-9 dates of death are the only case, and it is structural, not incidental: `DodTaxpayer` is live
+/// only while `died_during_year == Some(true)`, but `DeclTaxpayerDiedDuringYear`'s own coverage needs the
+/// fixture to hold something OTHER than the `TriState(Some(true))` sentinel — so one fixture cannot serve
+/// both. Priming here (and using the primed return as this field's own diff BASELINE) keeps each field's
+/// diff exact. Scaffolding, exactly like [`addr_for`]: a wrong tweak makes `set` return `Err` or leaves the
+/// leaf uncovered, so it can never yield a false PASS.
+fn fixture_for(field: &Field, base: &ReturnInputs) -> ReturnInputs {
+    let mut ri = base.clone();
+    match field.id {
+        FieldId::DodTaxpayer => ri.header.taxpayer_died_during_year = Some(true),
+        FieldId::DodSpouse => ri.header.spouse_died_during_year = Some(true),
+        _ => {}
+    }
+    ri
+}
+
 /// The `RowAddr` at which a section's `set` addresses row 0 (nested sections need a deeper path). A wrong
 /// addr makes `set` return `Err`, or panics on an out-of-bounds index — it can NEVER yield a false PASS, so
 /// this scaffolding map is not part of the coverage source of truth (the fixture already has row 0 present).
@@ -184,7 +203,9 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
             });
 
             let s = sentinel(field);
-            let mut ri = fixture.clone();
+            let base = fixture_for(field, &fixture);
+            let before = leaf_map(&base); // shadows the outer baseline — see `fixture_for`
+            let mut ri = base.clone();
             (field.set)(&mut ri, &addr, s.clone()).unwrap_or_else(|e| {
                 panic!("set failed for {:?} in {:?}: {e:?}", field.id, section.id)
             });
@@ -337,13 +358,13 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(
-        field_count, 70,
-        "expected 70 Fields (one per §5.8 in-scope leaf)"
+        field_count, 74,
+        "expected 74 Fields (one per §5.8 in-scope leaf)"
     );
     assert_eq!(
         covered.len(),
-        70,
-        "expected 69 distinctly-covered in-scope leaves"
+        74,
+        "expected 74 distinctly-covered in-scope leaves"
     );
 
     // ── 5. ★ I-6: PIN the observed FieldId → leaf-path map against a literal (kills TRANSPOSITION). ──
@@ -492,6 +513,14 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
     // §911/931/933 exclusion gate + the four MAGI add-backs it gates (Schedule 1-A Part I lines
     // 2a-2d / the SALT worksheet's lines 3a-3d — one quantity, five phase-outs).
     (FieldId::DeclHasIncomeExclusion, "has_income_exclusion"),
+    (
+        FieldId::DeclTaxpayerDiedDuringYear,
+        "header.taxpayer_died_during_year",
+    ),
+    (
+        FieldId::DeclSpouseDiedDuringYear,
+        "header.spouse_died_during_year",
+    ),
     (FieldId::ExclPuertoRico, "excluded_puerto_rico_income"),
     (FieldId::Excl2555L45, "form_2555_line45"),
     (FieldId::Excl2555L50, "form_2555_line50"),
@@ -513,4 +542,6 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
     (FieldId::BlindSpouse, "header.spouse.blind"),
     (FieldId::DobTaxpayer, "header.taxpayer.date_of_birth"),
     (FieldId::DobSpouse, "header.spouse.date_of_birth"),
+    (FieldId::DodTaxpayer, "header.taxpayer.date_of_death"),
+    (FieldId::DodSpouse, "header.spouse.date_of_death"),
 ];

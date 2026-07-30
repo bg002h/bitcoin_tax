@@ -500,6 +500,7 @@ $ btctax --vault v.pgp income show --year 2024
       "last_name": "Doe",
       "ssn": "***-**-6789",
       "date_of_birth": null,
+      "date_of_death": null,
       "blind": null,
       "occupation": "Engineer"
     },
@@ -508,6 +509,7 @@ $ btctax --vault v.pgp income show --year 2024
       "last_name": "Doe",
       "ssn": "***-**-4321",
       "date_of_birth": null,
+      "date_of_death": null,
       "blind": null,
       "occupation": "Architect"
     },
@@ -527,6 +529,8 @@ $ btctax --vault v.pgp income show --year 2024
     "can_be_claimed_as_dependent_spouse": false,
     "presidential_fund_taxpayer": false,
     "presidential_fund_spouse": false,
+    "taxpayer_died_during_year": false,
+    "spouse_died_during_year": false,
     "ip_pin": null
   },
   "w2s": [

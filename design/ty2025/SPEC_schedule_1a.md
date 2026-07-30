@@ -99,7 +99,7 @@ rule governs the §63(f) **spouse aged box** on 1040 line 12a, which btctax file
 `is_aged(dob, year)` — date of birth alone, no death branch, no date of death collected. A spouse who
 died in-year before reaching 65 gets +$1,550 of standard deduction (TY2024), **understating tax**, and
 neither oracle can catch it (OTS takes a filer-answered Y/N; taxcalc has only `age_spouse`), so every
-gate stays green. **G-9 is a prerequisite for Part V, not a consequence of it** — Part V multiplies the
+gate stays green. **G-9 was a prerequisite for Part V, not a consequence of it** — and it is now **CLOSED** (fixed 2026-07-29; `is_aged` takes the death gate and date, KATs mutation-verified). Part V inherits the machinery: `HouseholdHeader::{taxpayer,spouse}_died_during_year` plus `Person::date_of_death`, with the day-before-the-65th-birthday convention in `reaches_65_on` — Part V multiplies the
 same predicate's stake to $6,000 per person.
 
 **Therefore:** a per-person date of death is collected (D-5 semantics — the tri-state gate plus a date,

@@ -606,7 +606,7 @@ nonzero SALT, and `return_1040.rs:1439` wires `salt_5e` in — but nothing carri
 household end to end through both oracles. Adding one means a SALT input in the vector surface plus
 `A5a/A5b` (OTS) and `e18400/e18500` (taxcalc). Owning phase: **Tier 2 · E4**.
 
-### G-9 — ★★★ LIVE DEFECT IN SHIPPED CODE: the §63(f) spouse aged box ignores the death carve-out
+### G-9 — ★★★ ~~LIVE DEFECT IN SHIPPED CODE~~ **FIXED 2026-07-29**: the §63(f) aged box ignored the death carve-out
 
 **Found 2026-07-29** by the Schedule 1-A spec review, which raised it about TY2025's Part V; checking
 the TY2024 instructions showed the same rule governs a box **btctax already files**.
@@ -650,11 +650,48 @@ final-return question with its own rules and is NOT part of this finding. The bl
 unexamined. TY2025 multiplies the stake: the same predicate gates Schedule 1-A Part V at **$6,000 per
 person**, four times the §63(f) amount.
 
-**Fix.** Collect a per-person date of death and branch `is_aged` on it — the honest shape is the
-tri-state gate plus a date, exactly like `has_income_exclusion` (see the TY2025 MAGI work): "did your
-spouse die during the tax year?" → yes requires the date, unanswered refuses. Pin the instructions'
-own Feb-13/Feb-12 pair as a KAT, mutation-verified. Owning phase: **before TY2025 Part V**, and it
-should be considered for a TY2024 patch release on its own merits.
+**Fix — LANDED 2026-07-29** on `feat/amt-e2-vector-population`, whole input stack, 2432 tests green.
+
+- `is_aged(dob, died_during_year, date_of_death, year)` now applies the carve-out, with the
+  day-before-the-65th-birthday convention in its own `reaches_65_on` — which also handles the **Feb 29**
+  birth that has no 65th birthday (attained Mar 1 ⇒ reaches 65 on Feb 28). Without that fallback such a
+  filer could never qualify at all.
+- **Two gates, not one.** The scope note above was too narrow: the TY2025 instructions state the rule
+  twice — *"Death of a **taxpayer** in 2025 … the taxpayer doesn't qualify"* as well as *"Death of
+  spouse"* — so `HouseholdHeader::{taxpayer,spouse}_died_during_year` are separate declarations
+  (`QuestionId::{Taxpayer,Spouse}DiedDuringYear`, `RefuseReason::{Taxpayer,Spouse}DeathUnanswered`).
+  The taxpayer gate is always live; the spouse gate is live iff a spouse `Person` is on the return.
+- **The gates sit on `HouseholdHeader`, the dates on `Person`.** Not a style call: `Person`'s name and
+  SSN are serde-REQUIRED, so a gate on `Person` forces a complete `[header.taxpayer]` table into every
+  inputs TOML that wants to answer it (five fixtures failed to parse before the move). The header is
+  also where the other per-person declarations already live (`can_be_claimed_as_dependent_*`,
+  `presidential_fund_*`). `Person::date_of_death` sits next to `date_of_birth`, where dates belong.
+- **The date is class (B), the gate is class (A).** `SkippableId::Dod{Taxpayer,Spouse}` — skipping the
+  date leaves the person unable to be *shown* to have reached 65, so the addition is FORGONE, never
+  granted. Only the gate refuses. Both fail-closed arms are pinned, including the unreachable
+  `(None, None)` one, so a future caller that bypasses `screen_inputs` cannot leak the defect back.
+- **KATs, all mutation-verified** (`return_1040.rs`): the IRS's boundary pair for TY2024 (born
+  1959-02-14, died 2024-02-13 qualifies / 02-12 does not) asserted both as a predicate and in dollars
+  through the production `standard_deduction` ($16,550 vs $14,600 — *"this used to be 16,550"*); the two
+  fail-closed arms; the leap-day case. Five mutations killed: reverting to the pre-fix DOB-only
+  behaviour (6 tests red), `>=`→`>` on the boundary (4), granting on a dateless death (2), granting on
+  an unanswered gate (2), dropping the leap-day fallback (2).
+- **TY2024 figures provably unmoved:** every fixture answers "did not die", the golden matrix is
+  byte-identical, and the only golden diffs are the four new keys appearing.
+
+**Residue.** The **blind** boxes remain unexamined for a death interaction, and a TY2024 patch release
+carrying this fix is still worth considering on its own merits (owner's call). Filed as G-9a below.
+
+### G-9a — do the §63(f) BLIND boxes have a death interaction?
+
+**Owning phase: before TY2025 Part V** (the same gate G-9 was owned by). G-9 examined and fixed the
+**aged** boxes. i1040gi's blind instruction reads *"blind at the end of 2024"* — which on its face a
+person who died mid-year cannot satisfy, yet `Person::blind` is a plain tri-state with no death branch.
+Adjudicate against the instruction text, not by analogy to G-9: the aged carve-out is stated
+explicitly, and the absence of a matching sentence for blindness may itself be the answer (a decedent's
+final return is generally filed as though the year ended at death). The machinery G-9 built —
+`{taxpayer,spouse}_died_during_year` and `Person::date_of_death` — is already in place, so if the rule
+does bite, the fix is a predicate change with no new input collection.
 
 ### G-6a — TWO OTS DEFECTS, both ADJUDICATED 2026-07-29, neither a btctax defect
 

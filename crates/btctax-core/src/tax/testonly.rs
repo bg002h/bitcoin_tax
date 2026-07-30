@@ -526,6 +526,9 @@ pub fn golden_usd(v: f64) -> Usd {
 pub fn not_a_dependent() -> HouseholdHeader {
     HouseholdHeader {
         can_be_claimed_as_dependent_taxpayer: Some(false),
+        // §G-9: an ordinary filer has ALSO answered that they did not die during the tax year — the
+        // answer that reproduces the pre-§G-9 §63(f) behaviour, so no aged-box figure moves.
+        taxpayer_died_during_year: Some(false),
         ..Default::default()
     }
 }

@@ -131,6 +131,8 @@ can_be_claimed_as_dependent_taxpayer = false
 can_be_claimed_as_dependent_spouse = false
 presidential_fund_taxpayer = false
 presidential_fund_spouse = false
+taxpayer_died_during_year = false
+spouse_died_during_year = false
 
 [header.taxpayer]
 first_name = "Nina"

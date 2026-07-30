@@ -124,6 +124,20 @@ pub struct Person {
     pub last_name: String,
     pub ssn: String,
     pub date_of_birth: Option<Date>,
+    /// **1040 line 12a / Schedule 1-A Part V — the §63(f) and §151(d)(5) death carve-out.**
+    ///
+    /// i1040gi (2024, Standard Deduction): *"If your spouse was born before January 2, 1960, but died
+    /// in 2024 before reaching age 65, **don't check the box** that says 'Spouse was born before
+    /// January 2, 1960.' A person is considered to reach age 65 on the day before the person's 65th
+    /// birthday."* The 2025 instructions repeat it for Schedule 1-A Part V with the IRS's own boundary
+    /// pair: born 1960-02-14, died 2025-02-13 qualifies; died 2025-02-12 does not.
+    ///
+    /// ★ `None` means "no death recorded", which `is_aged` treats as *did not die* — so on its own it
+    /// would grant a box the filer may not be entitled to. That is why
+    /// [`HouseholdHeader::taxpayer_died_during_year`] exists: the GATE carries the answered-ness, this
+    /// field carries the date. See `FOLLOWUPS.md` §G-9 — a live defect through v0.14.0.
+    #[serde(default)]
+    pub date_of_death: Option<Date>,
     /// §63(f) additional standard deduction for blindness — a class-(B) TRI-STATE (P9 §2.2). `None` = never
     /// asked; the advisory fires on `None` (never on `Some(false)`), so a filer who told us they are sighted
     /// is not nagged. A bare `bool` here was the D-8 shape: never-asked indistinguishable from answered-No.
@@ -182,6 +196,21 @@ pub struct HouseholdHeader {
     pub presidential_fund_taxpayer: bool,
     #[serde(default)]
     pub presidential_fund_spouse: bool,
+    /// **The §G-9 gate (taxpayer): "did the taxpayer die during the tax year?"** A class-(A)
+    /// DECLARATION, because an unanswered death **grants** a deduction — the opposite direction from
+    /// [`Person::blind`], a class-(B) benefit claim whose `None` merely forgoes one. `None` refuses.
+    ///
+    /// It sits HERE rather than on [`Person`], alongside the other per-person declarations
+    /// (`can_be_claimed_as_dependent_*`, `presidential_fund_*`), for a mechanical reason as well as a
+    /// stylistic one: `Person`'s name and SSN are serde-REQUIRED, so a gate on `Person` would force a
+    /// complete `[header.taxpayer]` table into every inputs TOML that wants to answer it.
+    ///
+    /// The DATE is [`Person::date_of_death`] — next to `date_of_birth`, where dates belong.
+    #[serde(default)]
+    pub taxpayer_died_during_year: Option<bool>,
+    /// **The §G-9 gate (spouse)** — same rule, live only on a return that carries a spouse `Person`.
+    #[serde(default)]
+    pub spouse_died_during_year: Option<bool>,
     #[serde(default)]
     pub ip_pin: Option<String>,
 }

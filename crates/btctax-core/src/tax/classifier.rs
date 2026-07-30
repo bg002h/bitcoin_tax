@@ -169,6 +169,8 @@ fn classify_header(c: &mut Census, h: &HouseholdHeader) {
         can_be_claimed_as_dependent_spouse,
         presidential_fund_taxpayer,
         presidential_fund_spouse,
+        taxpayer_died_during_year,
+        spouse_died_during_year,
         ip_pin: _, // Option<String> — scalar
     } = h;
     c.declaration(
@@ -189,6 +191,13 @@ fn classify_header(c: &mut Census, h: &HouseholdHeader) {
         Class::NoTaxDirection,
         "§2.1: 1040 presidential-fund box (spouse) — §6096, no tax direction",
     );
+    // §G-9: the §63(f) death carve-out. i1040gi states it twice — "Death of a taxpayer" and "Death of
+    // spouse" — so each is its own declaration.
+    c.declaration(
+        taxpayer_died_during_year,
+        QuestionId::TaxpayerDiedDuringYear,
+    );
+    c.declaration(spouse_died_during_year, QuestionId::SpouseDiedDuringYear);
     classify_person(c, taxpayer);
     if let Some(sp) = spouse {
         classify_person(c, sp);
@@ -204,6 +213,9 @@ fn classify_person(c: &mut Census, p: &Person) {
         last_name: _,
         ssn: _,
         date_of_birth: _, // Option<Date> — scalar
+        // Option<Date> — scalar. Its answered-ness is carried by the HEADER gates
+        // `taxpayer_died_during_year` / `spouse_died_during_year`, declared in `classify_header`.
+        date_of_death: _,
         blind,
         occupation: _,
     } = p;

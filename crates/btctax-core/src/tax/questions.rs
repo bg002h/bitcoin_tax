@@ -68,6 +68,14 @@ pub enum QuestionId {
     AmtDepreciationSameAsRegular,
     /// **§164(b)(7)(B)(iv) / Schedule 1-A Part I** — did the filer exclude income under §911/931/933?
     HasIncomeExclusion,
+    /// **1040 line 12a / §63(f) — the death carve-out (`FOLLOWUPS.md` §G-9), taxpayer.** i1040gi:
+    /// *"Death of a taxpayer … If a taxpayer was born before January 2, 1961, but died in 2025 before
+    /// reaching age 65, then the taxpayer doesn't qualify."*
+    TaxpayerDiedDuringYear,
+    /// **1040 line 12a / §63(f) — the death carve-out (`FOLLOWUPS.md` §G-9), spouse.** i1040gi:
+    /// *"If your spouse was born before January 2, 1960, but died in 2024 before reaching age 65,
+    /// don't check the box that says 'Spouse was born before January 2, 1960.'"*
+    SpouseDiedDuringYear,
 }
 
 impl QuestionId {
@@ -84,6 +92,8 @@ impl QuestionId {
         QuestionId::AmtCarryoverSameAsRegular,
         QuestionId::AmtDepreciationSameAsRegular,
         QuestionId::HasIncomeExclusion,
+        QuestionId::TaxpayerDiedDuringYear,
+        QuestionId::SpouseDiedDuringYear,
     ];
 }
 
@@ -405,6 +415,54 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         set: |ri, v| ri.has_income_exclusion = Some(v),
         neutral: false, // "no exclusions" is the AMT/MAGI-neutral answer, but it is still an ANSWER
     },
+    // ── §G-9: the §63(f) death carve-out. Two entries, because i1040gi states the rule twice — once
+    // under "Death of a taxpayer" and once under "Death of spouse" — and each is a separate fact.
+    //
+    // ★ WHY A GATE PLUS A DATE, rather than asking "did they die before reaching 65?" directly: the
+    // day-before-the-birthday convention is exactly the sort of arithmetic a filer gets wrong at the
+    // boundary, and we can do it exactly. So the gate carries answered-ness and `date_of_death`
+    // carries the fact; `is_aged` applies the convention. The date itself is a class-(B) SKIPPABLE
+    // (`SkippableId::DodTaxpayer`/`DodSpouse`) — skipping it forgoes the addition rather than
+    // granting it, which is the only safe direction.
+    FormQuestion {
+        id: QuestionId::TaxpayerDiedDuringYear,
+        prompt: "Did YOU (the taxpayer named on this return) die during the tax year? (A final return \
+                 is filed by a personal representative or surviving spouse. 1040 line 12a: a taxpayer \
+                 who died before reaching age 65 does not get the age-65 addition to the standard \
+                 deduction, however early in the year they were born.)",
+        unanswered: RefuseReason::TaxpayerDeathUnanswered,
+        unanswered_detail:
+            "the age-65 addition to the standard deduction is decided from the date of birth, and \
+             i1040gi carves out a taxpayer who died during the year before reaching 65. Treating an \
+             unasked death as \"did not die\" GRANTS an addition of up to $1,950 that may not be \
+             allowable, understating the tax — run `btctax income answer`",
+        // ★ ALWAYS LIVE. It cannot be scoped to "returns with a date of birth old enough to matter",
+        // because `live` receives no tax year (the same constraint documented on `HasIncomeExclusion`),
+        // and scoping it to "a DOB is on file" would make the answer disappear when the filer later
+        // adds one — the classic never-asked-then-silently-relevant shape §G-9 exists to kill.
+        live: |_ri| true,
+        get: |ri| ri.header.taxpayer_died_during_year,
+        set: |ri, v| ri.header.taxpayer_died_during_year = Some(v),
+        neutral: false, // "no" is the common answer, but it is still an ANSWER, and it GRANTS the box
+    },
+    FormQuestion {
+        id: QuestionId::SpouseDiedDuringYear,
+        prompt: "Did YOUR SPOUSE die during the tax year? (You may still file jointly for the year of \
+                 death. 1040 line 12a: a spouse who died before reaching age 65 does not get the \
+                 age-65 addition to the standard deduction, however early in the year they were born.)",
+        unanswered: RefuseReason::SpouseDeathUnanswered,
+        unanswered_detail:
+            "i1040gi: \"If your spouse was born before January 2, 1960, but died in 2024 before \
+             reaching age 65, don't check the box that says 'Spouse was born before January 2, \
+             1960.'\" Treating an unasked death as \"did not die\" GRANTS an addition of up to $1,550 \
+             that may not be allowable, understating the tax — run `btctax income answer`",
+        // Live only with a spouse `Person` — there is nowhere to record the answer otherwise, and the
+        // box itself only exists on a joint return.
+        live: |ri| ri.header.spouse.is_some(),
+        get: |ri| ri.header.spouse_died_during_year,
+        set: |ri, v| ri.header.spouse_died_during_year = Some(v),
+        neutral: false,
+    },
 ];
 
 /// The identity of each SKIPPABLE prompt (§2, class B) — the questions where silence is LAWFUL: a bare
@@ -428,6 +486,12 @@ pub enum SkippableId {
     DobTaxpayer,
     /// §63(f) aged addition (spouse) — live only with a spouse `Person` (its `set_date` twin gate).
     DobSpouse,
+    /// §G-9: the DATE OF DEATH (taxpayer). Class (B) — skipping it leaves `is_aged` unable to show the
+    /// taxpayer reached 65, so the addition is FORGONE, never granted. Live only once
+    /// `QuestionId::TaxpayerDiedDuringYear` is answered `Some(true)`: nobody else has a date to give.
+    DodTaxpayer,
+    /// §G-9: the DATE OF DEATH (spouse). Live only once `QuestionId::SpouseDiedDuringYear` is `Some(true)`.
+    DodSpouse,
 }
 
 /// The value shape of a [`SkippableQuestion`] — a yes/no answer, or a calendar date.
@@ -462,7 +526,7 @@ pub struct SkippableQuestion {
     pub set_date: fn(&mut ReturnInputs, Date),
 }
 
-/// ★ THE SKIPPABLE REGISTRY. Five class-(B) prompts — SEPARATE from [`FORM_QUESTIONS`] (spec §5.3). The
+/// ★ THE SKIPPABLE REGISTRY. Seven class-(B) prompts — SEPARATE from [`FORM_QUESTIONS`] (spec §5.3). The
 /// liveness gates and prompts are lifted verbatim from the old `answer.rs::Skippable`; the `income answer`
 /// flow and the form engine both DERIVE their skippable prompts from this one list.
 pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
@@ -538,6 +602,38 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
             }
         },
     },
+    SkippableQuestion {
+        id: SkippableId::DodTaxpayer,
+        prompt: "YOUR date of death",
+        help: "§63(f) / §G-9: a taxpayer who died during the year before reaching age 65 does not get \
+               the age-65 addition. The date decides it — a person reaches 65 on the DAY BEFORE their \
+               65th birthday. Skipping leaves the addition unclaimed (it is never granted on an \
+               unknown date).",
+        kind: SkippableKind::Date,
+        live: |ri| ri.header.taxpayer_died_during_year == Some(true),
+        get_bool: |_ri| None,
+        set_bool: |_ri, _v| {},
+        get_date: |ri| ri.header.taxpayer.date_of_death,
+        set_date: |ri, v| ri.header.taxpayer.date_of_death = Some(v),
+    },
+    SkippableQuestion {
+        id: SkippableId::DodSpouse,
+        prompt: "YOUR SPOUSE's date of death",
+        help: "§63(f) / §G-9: a spouse who died during the year before reaching age 65 does not get the \
+               age-65 addition. A person reaches 65 on the DAY BEFORE their 65th birthday. Skipping \
+               leaves the addition unclaimed.",
+        kind: SkippableKind::Date,
+        // Both conditions: a spouse `Person` to write the date onto, AND the gate saying they died.
+        live: |ri| ri.header.spouse.is_some() && ri.header.spouse_died_during_year == Some(true),
+        get_bool: |_ri| None,
+        set_bool: |_ri, _v| {},
+        get_date: |ri| ri.header.spouse.as_ref().and_then(|s| s.date_of_death),
+        set_date: |ri, v| {
+            if let Some(sp) = ri.header.spouse.as_mut() {
+                sp.date_of_death = Some(v);
+            }
+        },
+    },
 ];
 
 #[cfg(test)]
@@ -567,6 +663,8 @@ mod tests {
                 QuestionId::AmtCarryoverSameAsRegular => 9,
                 QuestionId::AmtDepreciationSameAsRegular => 10,
                 QuestionId::HasIncomeExclusion => 11,
+                QuestionId::TaxpayerDiedDuringYear => 12,
+                QuestionId::SpouseDiedDuringYear => 13,
             };
             assert_eq!(idx, i, "QuestionId::ALL is out of order / missing {id:?}");
             assert_eq!(
@@ -575,14 +673,18 @@ mod tests {
                 "exactly one FORM_QUESTIONS entry for {id:?}"
             );
         }
-        assert_eq!(QuestionId::ALL.len(), 12, "there are 12 declarations");
-        assert_eq!(FORM_QUESTIONS.len(), 12, "one entry per declaration");
+        assert_eq!(QuestionId::ALL.len(), 14, "there are 14 declarations");
+        assert_eq!(FORM_QUESTIONS.len(), 14, "one entry per declaration");
     }
 
     #[test]
     fn skippable_registry_is_separate_and_has_five_entries_with_correct_liveness() {
         use crate::tax::types::FilingStatus;
-        assert_eq!(SKIPPABLE_QUESTIONS.len(), 5, "blind ×2, SALT, DOB ×2");
+        assert_eq!(
+            SKIPPABLE_QUESTIONS.len(),
+            7,
+            "blind ×2, SALT, DOB ×2, DOD ×2"
+        );
         // SALT is live iff a schedule_a exists; spouse-blind iff a spouse Person exists.
         let salt = SKIPPABLE_QUESTIONS
             .iter()

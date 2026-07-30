@@ -91,6 +91,13 @@ pub enum RefuseReason {
     /// a return whose form needs modified AGI. Only reachable from TY2025 onward; TY2024's flat SALT
     /// cap never reads MAGI (D-11).
     IncomeExclusionUnanswered,
+    /// **1040 line 12a / §63(f) — `FOLLOWUPS.md` §G-9.** "Did the taxpayer die during the tax year?"
+    /// is unanswered. i1040gi carves a taxpayer who died before reaching age 65 out of the age-65
+    /// addition; an unasked death silently GRANTS it, understating the tax.
+    TaxpayerDeathUnanswered,
+    /// **1040 line 12a / §63(f) — `FOLLOWUPS.md` §G-9**, the same rule for the spouse. Live only on a
+    /// return that carries a spouse `Person`.
+    SpouseDeathUnanswered,
     /// Form 6251 line 3 — answered ADVERSELY ("not an AMT-qualified dwelling"). v1 does not model the
     /// §56(b)(1)(C) add-back, so computing would UNDERSTATE the tax.
     AmtNonQualifiedDwelling,
@@ -961,7 +968,7 @@ mod tests {
         };
         // ★ ANSWERED, not defaulted. Every fixture must state these — that is the whole point of D-8/P9, and
         // if `Default` supplied them these tests would be re-asserting the very guess we just removed. All
-        // FIVE always-live declarations are answered here so a computing fixture is not tripped by the
+        // SEVEN always-live declarations are answered here so a computing fixture is not tripped by the
         // registry loop (§3.1 churn note); a test that wants one UNANSWERED re-blanks it explicitly.
         ri.header.can_be_claimed_as_dependent_taxpayer = Some(false);
         ri.foreign_accounts = Some(false);
@@ -969,6 +976,10 @@ mod tests {
         ri.sch1.hsa_activity = Some(false);
         ri.dual_status_alien = Some(false);
         ri.has_income_exclusion = Some(false);
+        // §G-9: "did not die during the tax year" — the answer that reproduces the pre-§G-9 behaviour,
+        // so no existing figure moves. (The spouse gate is live only with a spouse `Person`, and every
+        // spouse-bearing fixture below sets it through `answer_every_live_question`.)
+        ri.header.taxpayer_died_during_year = Some(false);
         ri
     }
     fn reason(ri: &ReturnInputs) -> Option<RefuseReason> {
@@ -1048,6 +1059,11 @@ mod tests {
                     expenses: dec!(5000),
                     ..Default::default()
                 });
+            }
+            // §G-9: the spouse death gate is live exactly when a spouse `Person` is on the return.
+            QuestionId::SpouseDiedDuringYear => {
+                r.filing_status = FilingStatus::Mfj;
+                r.header.spouse = Some(crate::tax::return_inputs::Person::default());
             }
             _ => {}
         }
@@ -1506,6 +1522,7 @@ mod tests {
             r.sch1.hsa_activity = Some(false);
             r.dual_status_alien = Some(false);
             r.has_income_exclusion = Some(false);
+            r.header.taxpayer_died_during_year = Some(false); // §G-9
             r
         };
         // I4: box 1b (qualified) > box 1a (ordinary) on a form ⇒ refuse (phantom preferential income).

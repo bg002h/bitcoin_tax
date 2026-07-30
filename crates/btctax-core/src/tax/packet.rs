@@ -254,9 +254,21 @@ impl AgedBlindBoxes {
             .as_ref()
             .filter(|_| ri.filing_status == FilingStatus::Mfj);
         Self {
-            taxpayer_aged: is_aged(t.date_of_birth, year),
+            taxpayer_aged: is_aged(
+                t.date_of_birth,
+                ri.header.taxpayer_died_during_year,
+                t.date_of_death,
+                year,
+            ),
             taxpayer_blind: t.blind == Some(true),
-            spouse_aged: joint_spouse.is_some_and(|s| is_aged(s.date_of_birth, year)),
+            spouse_aged: joint_spouse.is_some_and(|s| {
+                is_aged(
+                    s.date_of_birth,
+                    ri.header.spouse_died_during_year,
+                    s.date_of_death,
+                    year,
+                )
+            }),
             spouse_blind: joint_spouse.is_some_and(|s| s.blind == Some(true)),
         }
     }
@@ -730,7 +742,12 @@ mod tests {
             ..person("Jane", "Doe", "987654321")
         });
 
-        let h = ReturnHeader::build(&crate::tax::testonly::answered(ri.clone()), 2024).unwrap();
+        // ★ ONE `ri` for both halves. It used to answer the declarations for `ReturnHeader::build` and
+        // pass the RAW inputs to `assemble_absolute`, which the §G-9 death gate exposed: the header saw
+        // an answered "did not die" and granted the aged box while the raw inputs did not, so the two
+        // halves of this very equality were computed from different returns.
+        let ri = crate::tax::testonly::answered(ri);
+        let h = ReturnHeader::build(&ri, 2024).unwrap();
         assert!(h.aged_blind.taxpayer_aged);
         assert!(h.aged_blind.taxpayer_blind);
         assert!(!h.aged_blind.spouse_aged);

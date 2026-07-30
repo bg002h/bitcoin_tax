@@ -100,6 +100,8 @@ pub enum FieldId {
     /// Form 6251 line 3 — is the mortgaged dwelling AMT-qualified? (i6251 p.8.)
     DeclAmtQualifiedDwelling,
     DeclHasIncomeExclusion,
+    DeclTaxpayerDiedDuringYear,
+    DeclSpouseDiedDuringYear,
     ExclPuertoRico,
     Excl2555L45,
     Excl2555L50,
@@ -114,6 +116,8 @@ pub enum FieldId {
     BlindSpouse,
     DobTaxpayer,
     DobSpouse,
+    DodTaxpayer,
+    DodSpouse,
 }
 
 /// The value shape of a field.

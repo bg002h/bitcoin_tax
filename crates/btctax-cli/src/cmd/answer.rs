@@ -267,6 +267,9 @@ mod tests {
                 // §911/931/933 exclusion gate — always live, like DualStatusAlien: one yes/no every
                 // filer can answer, and TY2025's SALT worksheet and Schedule 1-A both need it.
                 QuestionId::HasIncomeExclusion,
+                // §G-9 — the §63(f) death carve-out. The TAXPAYER gate is always live; the SPOUSE one is
+                // absent here, which is the point of this test.
+                QuestionId::TaxpayerDiedDuringYear,
             ]
         );
         assert!(!has_spouse_dob(&single()), "no spouse ⇒ no spouse DOB");
@@ -361,6 +364,11 @@ mod tests {
                     expenses: dec!(5000),
                     ..Default::default()
                 });
+            }
+            // §G-9: live exactly when a spouse `Person` is on the return.
+            QuestionId::SpouseDiedDuringYear => {
+                r.filing_status = btctax_core::tax::types::FilingStatus::Mfj;
+                r.header.spouse = Some(btctax_core::tax::return_inputs::Person::default());
             }
             _ => {}
         }

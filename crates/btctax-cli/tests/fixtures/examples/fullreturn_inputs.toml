@@ -8,11 +8,15 @@
 amt_depreciation_same_as_regular = true
 charitable_carryover_in = []
 dual_status_alien = false
-has_income_exclusion = false
+excluded_puerto_rico_income = "0"
 filing_status = "Mfj"
 foreign_accounts = false
 foreign_country_names = ""
 foreign_trust = false
+form_2555_line45 = "0"
+form_2555_line50 = "0"
+form_4563_line15 = "0"
+has_income_exclusion = false
 itemize_election = "auto"
 
 [capital_loss_carryforward_in]
@@ -47,6 +51,8 @@ can_be_claimed_as_dependent_spouse = false
 can_be_claimed_as_dependent_taxpayer = false
 presidential_fund_spouse = false
 presidential_fund_taxpayer = false
+spouse_died_during_year = false
+taxpayer_died_during_year = false
 
 [[header.dependents]]
 date_of_birth = [2012, 106]

@@ -109,15 +109,15 @@ mod tests {
             );
         }
         assert_eq!(
-            decl_count, 11,
-            "11 declarations are Decl* fields (the 12th is the mortgage dedup)"
+            decl_count, 13,
+            "13 declarations are Decl* fields (the 14th is the mortgage dedup)"
         );
 
-        // 11 delegating Decl* fields + the foreign_country_names Text field.
+        // 13 delegating Decl* fields + the foreign_country_names Text field.
         assert_eq!(
             decls.fields.len(),
-            12,
-            "11 declarations + foreign_country_names"
+            14,
+            "13 declarations + foreign_country_names"
         );
         assert!(decls
             .fields
@@ -254,7 +254,7 @@ mod tests {
     /// entry; the `FieldId ↔ SkippableId` map stays TOTAL over all 5 skippables (SALT → `SaSaltUseSalesTax`);
     /// and the spouse-gated liveness edge holds.
     #[test]
-    fn skippables_section_delegates_four_skippables_and_the_map_is_total() {
+    fn skippables_section_delegates_six_skippables_and_the_map_is_total() {
         let skips = section(SectionId::Skippables);
 
         // SALT election is a Schedule-A Field (Task 5), NOT a Skippables Field.
@@ -266,14 +266,16 @@ mod tests {
             "the SALT election is Schedule-A-owned, not a Skippables Field"
         );
 
-        // Exactly the four non-SALT skippables.
+        // Exactly the six non-SALT skippables.
         let ids: Vec<FieldId> = skips.fields.iter().map(|f| f.id).collect();
-        assert_eq!(ids.len(), 4, "blind ×2 + DOB ×2");
+        assert_eq!(ids.len(), 6, "blind ×2 + DOB ×2 + DOD ×2 (§G-9)");
         for expected in [
             FieldId::BlindTaxpayer,
             FieldId::BlindSpouse,
             FieldId::DobTaxpayer,
             FieldId::DobSpouse,
+            FieldId::DodTaxpayer,
+            FieldId::DodSpouse,
         ] {
             assert!(
                 ids.contains(&expected),
@@ -281,7 +283,7 @@ mod tests {
             );
         }
 
-        // TOTAL, both directions, over all 5 SkippableIds — SALT resolves to SaSaltUseSalesTax.
+        // TOTAL, both directions, over all 7 SkippableIds — SALT resolves to SaSaltUseSalesTax.
         for s in SKIPPABLE_QUESTIONS {
             assert_eq!(
                 field_to_skippable(skippable_to_field(s.id)),
@@ -299,10 +301,14 @@ mod tests {
         for f in skips.fields.iter() {
             let s = field_to_skippable(f.id).unwrap();
             let entry = SKIPPABLE_QUESTIONS.iter().find(|e| e.id == s).unwrap();
-            // A spouse-gated skippable needs a spouse present for its setter to stick.
+            // A spouse-gated skippable needs a spouse present for its setter to stick; the §G-9 dates
+            // of death additionally need their gate to say the person died (`SkippableId::Dod*` is live
+            // only then). Both primers are harmless to the other five entries' liveness.
             let seed = |ri: &mut ReturnInputs| {
                 if !(entry.live)(ri) {
                     ri.header.spouse = Some(Person::default());
+                    ri.header.taxpayer_died_during_year = Some(true);
+                    ri.header.spouse_died_during_year = Some(true);
                 }
             };
             match entry.kind {

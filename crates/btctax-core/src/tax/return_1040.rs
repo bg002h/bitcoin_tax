@@ -39,11 +39,55 @@ use time::{Date, Month};
 /// year-end test). A `None` DOB is "not established" → NOT counted as aged: the conservative, fail-closed
 /// direction — never grant an unsubstantiated deduction, and never silently assume a birthdate
 /// (burns down the `dob-option-pin` follow-up; §4.2 / review r1-M3).
-pub(crate) fn is_aged(dob: Option<Date>, year: i32) -> bool {
+///
+/// ★★ **AND the death carve-out (`FOLLOWUPS.md` §G-9 — a live defect through v0.14.0).** i1040gi:
+/// *"If your spouse was born before January 2, 1960, but died in 2024 before reaching age 65, don't
+/// check the box … A person is considered to reach age 65 on the day before the person's 65th
+/// birthday."* This function decided the box from the date of BIRTH alone, so a spouse who died
+/// in-year before turning 65 was granted a $1,550 addition they were not entitled to — understating
+/// tax, and invisible to both oracles (OTS takes a filer-answered Y/N; taxcalc has only `age_spouse`).
+pub(crate) fn is_aged(
+    dob: Option<Date>,
+    died_during_year: Option<bool>,
+    date_of_death: Option<Date>,
+    year: i32,
+) -> bool {
     let Some(d) = dob else {
         return false;
     };
-    Date::from_calendar_date(year - 64, Month::January, 1).is_ok_and(|cutoff| d <= cutoff)
+    let born_early_enough =
+        Date::from_calendar_date(year - 64, Month::January, 1).is_ok_and(|cutoff| d <= cutoff);
+    if !born_early_enough {
+        return false;
+    }
+    match (died_during_year, date_of_death) {
+        // Answered "did not die during the tax year" — the date-of-birth test is the whole test, which
+        // is what this function did unconditionally before §G-9.
+        (Some(false), _) => true,
+        // Died in-year with the date on file: reached 65 on or before that day?
+        (_, Some(dod)) => reaches_65_on(d).is_some_and(|reached| dod >= reached),
+        // Died in-year, date SKIPPED. Class (B): the burden to claim the addition is the filer's (New
+        // Colonial Ice), so silence is lawful and forgoes it. Never granted on an unknown date.
+        (Some(true), None) => false,
+        // Unanswered. `screen_inputs` refuses first (`RefuseReason::{Taxpayer,Spouse}DeathUnanswered`),
+        // so this arm is unreachable on any emitting path — it is here so that no future caller which
+        // bypasses the screen can leak the pre-§G-9 behaviour back in.
+        (None, None) => false,
+    }
+}
+
+/// The day a person born on `dob` **reaches 65** — the day *before* the 65th birthday, per the IRS's
+/// own sentence. `None` only if the date arithmetic is impossible.
+///
+/// ★ The leap-day case is why this is its own function: someone born **February 29** has no 65th
+/// birthday, and the convention is that they attain the age on **March 1**, so they reach 65 on
+/// February 28. Computing `birthday − 1 day` without handling that panics or silently shifts a year.
+fn reaches_65_on(dob: Date) -> Option<Date> {
+    let sixty_fifth = dob.replace_year(dob.year() + 65).ok().or_else(|| {
+        // Feb 29 → the 65th "birthday" is taken as Mar 1 of that year.
+        Date::from_calendar_date(dob.year() + 65, Month::March, 1).ok()
+    })?;
+    sixty_fifth.previous_day()
 }
 
 /// §63(f) additional-standard-deduction rate is the **married** amount for MFJ/MFS/QSS (a "surviving
@@ -2238,7 +2282,101 @@ mod tests {
         let mut mfj = filer(FilingStatus::Mfj);
         mfj.header.taxpayer.date_of_birth = Some(date!(1955 - 06 - 01));
         mfj.header.spouse = Some(person(Some(date!(1955 - 06 - 01)), false));
+        mfj.header.spouse_died_during_year = Some(false); // §G-9 — answered, not defaulted
         assert_eq!(standard_deduction(&mfj, &p, 2024, Usd::ZERO), dec!(32300));
+    }
+
+    /// ★★ §G-9 — THE IRS's OWN BOUNDARY PAIR, verbatim from i1040gi (2024, *Standard Deduction*):
+    /// *"If your spouse was born before January 2, 1960, but died in 2024 before reaching age 65, don't
+    /// check the box that says 'Spouse was born before January 2, 1960.' **A person is considered to
+    /// reach age 65 on the day before the person's 65th birthday.**"*
+    ///
+    /// So for TY2024 a person born 1959-02-14 reaches 65 on **2024-02-13**: dying that day qualifies,
+    /// dying the day before does not. The pre-§G-9 code decided the box from the date of BIRTH alone and
+    /// granted it on both sides — understating the tax by the value of a $1,950 (unmarried) or $1,550
+    /// (married) addition. Neither oracle can catch it: OTS takes a filer-answered `"You_65+Over?"`
+    /// boolean and Tax-Calculator has only an `age_spouse` integer.
+    #[test]
+    fn the_irs_death_boundary_pair_decides_the_aged_box() {
+        let dob = Some(date!(1959 - 02 - 14));
+        // Born early enough for TY2024 on its own (≤ Jan 1 1960) — this is the fact §G-9 used ALONE.
+        assert!(
+            is_aged(dob, Some(false), None, 2024),
+            "no death ⇒ the DOB test is the whole test"
+        );
+
+        // Reached 65 on 2024-02-13, the day BEFORE the 65th birthday.
+        assert!(
+            is_aged(dob, Some(true), Some(date!(2024 - 02 - 13)), 2024),
+            "died ON the day they reached 65 ⇒ qualifies"
+        );
+        assert!(
+            !is_aged(dob, Some(true), Some(date!(2024 - 02 - 12)), 2024),
+            "died the day BEFORE reaching 65 ⇒ does NOT qualify (i1040gi)"
+        );
+
+        // …and the dollars, through the production standard deduction. $14,600 + $1,950 vs $14,600.
+        let p = ty2024_params();
+        let mk = |dod| {
+            let mut r = filer(FilingStatus::Single);
+            r.header.taxpayer.date_of_birth = dob;
+            r.header.taxpayer_died_during_year = Some(true);
+            r.header.taxpayer.date_of_death = Some(dod);
+            r
+        };
+        assert_eq!(
+            standard_deduction(&mk(date!(2024 - 02 - 13)), &p, 2024, Usd::ZERO),
+            dec!(16550)
+        );
+        assert_eq!(
+            standard_deduction(&mk(date!(2024 - 02 - 12)), &p, 2024, Usd::ZERO),
+            dec!(14600),
+            "the §G-9 defect: this used to be 16,550"
+        );
+    }
+
+    /// ★ §G-9, the two fail-closed arms. A death whose DATE was skipped, and an UNANSWERED death gate,
+    /// must both FORGO the addition — never grant it. The skip is lawful (class B: the burden to claim
+    /// is the filer's); the unanswered gate is refused by `screen_inputs` before it can reach here, and
+    /// this pins the belt-and-braces so no future caller bypassing the screen leaks the defect back in.
+    #[test]
+    fn a_dateless_or_unanswered_death_forgoes_the_aged_box() {
+        let dob = Some(date!(1950 - 01 - 01)); // comfortably over 65, so only the death logic can deny
+        assert!(is_aged(dob, Some(false), None, 2024));
+        assert!(
+            !is_aged(dob, Some(true), None, 2024),
+            "died, date skipped ⇒ cannot be shown to have reached 65 ⇒ forgone"
+        );
+        assert!(
+            !is_aged(dob, None, None, 2024),
+            "death gate UNANSWERED ⇒ never granted"
+        );
+    }
+
+    /// ★ §G-9 leap day. Someone born **February 29** has no 65th birthday, so `Date::replace_year`
+    /// fails; the convention is that they attain the age on March 1, hence reach 65 on February 28.
+    /// Without the fallback in `reaches_65_on` this filer could never qualify at all.
+    #[test]
+    fn a_leap_day_birth_reaches_65_on_february_28() {
+        let dob = date!(1960 - 02 - 29);
+        assert_eq!(reaches_65_on(dob), Some(date!(2025 - 02 - 28)));
+        assert!(is_aged(
+            Some(dob),
+            Some(true),
+            Some(date!(2025 - 02 - 28)),
+            2025
+        ));
+        assert!(!is_aged(
+            Some(dob),
+            Some(true),
+            Some(date!(2025 - 02 - 27)),
+            2025
+        ));
+        // A non-leap birth one day later is the ordinary path: 65th birthday 2025-03-01, reached 02-28.
+        assert_eq!(
+            reaches_65_on(date!(1960 - 03 - 01)),
+            Some(date!(2025 - 02 - 28))
+        );
     }
 
     /// The §63(f) age-65 boundary (born on/before Jan 1 of year−64) and the fail-closed `None` DOB.
