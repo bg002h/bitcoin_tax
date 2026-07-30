@@ -767,9 +767,45 @@ mod tests {
         assert_eq!(p.amt.phaseout_start(FilingStatus::Mfj), dec!(1218700));
         assert_eq!(p.amt.breakpoint_28pct(FilingStatus::Single), dec!(232600));
         assert_eq!(p.amt.breakpoint_28pct(FilingStatus::Mfs), dec!(116300));
-        assert!(t.full_return_for(2025).is_none()); // v1 = TY2024 only → fail closed elsewhere
         assert!(t.full_return_for(2017).is_none());
+        ty2025_full_return_must_stay_fail_closed_until_complete(&t);
         ty2026_full_return_must_stay_fail_closed(&t);
+    }
+
+    /// ★★ TY2025 FAILS CLOSED UNTIL IT IS **COMPLETE** — and this is the gate that makes adding it
+    /// safe to do in stages. It is scheduled to be deleted; it is not scheduled to be deleted *early*.
+    ///
+    /// **Why a partial TY2025 is worse than no TY2025.** `full_return_for(year) → Some` is the ONLY
+    /// year gate on the full-return path (`btctax-cli/src/cmd/tax.rs:499`, `session.rs:517`/`560`,
+    /// `resolve.rs:264`), and the one consistency guard — `input_form_store.rs:312`,
+    /// `if table.year != year || params.year != year` — starts **passing** the moment a
+    /// `FullReturnParams { year: 2025, .. }` is bundled. So bundling the constants alone does not
+    /// produce a refusal. It produces *plausible wrong numbers*: TY2025 computed with Form 6251 line 1
+    /// in 2024 numbering (2025 splits it into 1a/1b), `AbsoluteReturn.line14` as "L12 + L13" when the
+    /// 2025 form says "Add lines 12e, 13a, and 13b", a scalar `salt_cap` against a §164(b) phase-down,
+    /// and Schedule 1-A absent entirely.
+    ///
+    /// **Before this assertion comes out, ALL of the following must be true** (SPEC `design/ty2025/`):
+    ///
+    /// 1. `AmtParams` and every other `FullReturnParams` field carry TY2025 values, each with its own
+    ///    citation — and note the controlling source is **per field**: `std_deduction` and `salt_cap`
+    ///    are OBBBA, *not* Rev. Proc. 2024-40.
+    /// 2. `salt_cap` is the §164(b) **worksheet**, not a scalar — cap, 30% phase-down, $10,000 floor,
+    ///    and the MFS halving that happens at worksheet **line 10 only**.
+    /// 3. Form 6251 Part I is re-transcribed for 2025 (lines 1a/1b, line 2a citing 1040 line 12e, and
+    ///    line 4 combining **1b** through 3), and the 1040's own 11a/11b/12e/13a/13b shape is modelled.
+    /// 4. Schedule 1-A exists — all six parts — with every numbered line collected.
+    ///
+    /// A partial landing that deletes this early is not a smaller version of TY2025 support. It is a
+    /// silently wrong return, which is the one outcome this project refuses.
+    fn ty2025_full_return_must_stay_fail_closed_until_complete(t: &BundledFullReturnTables) {
+        assert!(
+            t.full_return_for(2025).is_none(),
+            "TY2025 full-return params appeared. If TY2025 is genuinely complete, delete this \
+             function — but read its doc comment first: bundling params is the ONLY year gate, so a \
+             partial TY2025 computes with 2024-shaped forms and emits wrong numbers instead of \
+             refusing."
+        );
     }
 
     /// ★ §55(d)(3) states two IDENTITIES among the MFS AMT constants. Asserting them turns five
