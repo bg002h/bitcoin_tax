@@ -4,8 +4,11 @@
 //! `cargo run -p xtask -- docs --pdf` additionally renders `docs/pdf/*.pdf` (requires `groff`).
 //! `cargo run -p xtask -- check-isolation` asserts no HTTP client in the tax crates (#41 Part C).
 //! `cargo run -p xtask -- dump-fields <pdf>` lists a PDF's AcroForm field names (map authoring).
+//! `cargo run -p xtask -- cite-check` verifies every quotation in the Schedule 1-A design docs against
+//! the committed IRS text-layer extracts. `… -- extract-schedule-1a` regenerates those extracts.
 
 mod check_isolation;
+mod cite_check;
 mod docs;
 mod dump_fields;
 mod examples;
@@ -31,6 +34,18 @@ fn main() {
         Some("subcommand-coverage") => {
             examples::run_coverage();
         }
+        Some("cite-check") => {
+            if let Err(e) = cite_check::run() {
+                eprintln!("xtask cite-check: {e}");
+                std::process::exit(1);
+            }
+        }
+        Some("extract-schedule-1a") => {
+            if let Err(e) = cite_check::extract() {
+                eprintln!("xtask extract-schedule-1a: {e}");
+                std::process::exit(1);
+            }
+        }
         Some("check-isolation") => {
             if let Err(e) = check_isolation::run() {
                 eprintln!("xtask check-isolation: {e}");
@@ -50,7 +65,7 @@ fn main() {
         _ => {
             eprintln!(
                 "usage: cargo run -p xtask -- <docs [--pdf] | examples | subcommand-coverage | \
-                 check-isolation | dump-fields <pdf>>"
+                 check-isolation | cite-check | extract-schedule-1a | dump-fields <pdf>>"
             );
             std::process::exit(2);
         }

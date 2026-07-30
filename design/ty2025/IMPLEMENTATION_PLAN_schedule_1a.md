@@ -241,8 +241,11 @@ day-before-the-65th-birthday convention in `reaches_65_on`. Part V reuses them a
 
 **The skip branches are the risk, not the arithmetic** (spec F-5):
 
-- Lines **10, 18, 27**: *"If zero or less, enter the amount from line 7 [15, 24] on line 13 [21, 30]"* —
-  a jump **past** the phase-out, not a zero.
+- Lines **10, 18, 27** are the same routing three times, and each is quoted here as the form prints it
+  rather than as one bracketed composite (a synthesized quotation is not a citation — `xtask cite-check`
+  rejects it, which is how this one was caught): line 10 *"If zero or less, enter the amount from line 7
+  on line 13"*, line 18 *"If zero or less, enter the amount from line 15 on line 21"*, line 27 *"If zero
+  or less, enter the amount from line 24 on line 30"*. A jump **past** the phase-out, not a zero.
 - Line **33**: *"If zero or less, **enter $6,000 on line 35**"* — a jump that writes a **nonzero
   constant** into a later line. Transcribing this as `-0-` yields **$0 instead of $6,000**: the whole
   senior deduction lost for every filer under the threshold, which is most of them. It happens to agree

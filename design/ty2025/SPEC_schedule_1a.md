@@ -247,18 +247,26 @@ tax). So `L4a` is a **collected declaration with its own worksheet**, never a pr
 One **Employer***  (1039) and *… From More Than One **Payor*** (1056) — note the last two are DISTINCT
 worksheets, W-2 side and 1099 side, which the r1 branch list collapsed into one.
 
-**F-3. "Valid SSN" has a definition, and it is a date test.** *"A valid SSN … is one that is valid for
-employment and that is issued by the Social Security Administration (SSA) before the due date of [the
-return]."* So Parts II/III/V's SSN bar is not "an SSN is present" — btctax cannot see validity-for-
-employment or issue date, so it is a **declaration**, per person.
+**F-3. "Valid SSN" has a definition, and it is a date test.** *"A valid SSN for purposes of the deduction
+for qualified tips is one that is valid for employment and that is issued by the Social Security
+Administration (SSA) before the due date of your 2025 return (including extensions)."* ★ The parenthetical
+matters and an earlier draft of this line paraphrased it away: the deadline is the **extended** due date,
+so an SSN issued in, say, September 2026 still qualifies. So Parts II/III/V's SSN bar is not "an SSN is
+present" — btctax can see neither validity-for-employment nor issue date, so it is a **declaration**, per
+person. (The same sentence is repeated verbatim for overtime and for seniors, each naming its own
+deduction.)
 
 **F-4. Part IV's threshold differs from every other part.** Line 26 is **$100,000 ($200,000 MFJ)**,
 against $150,000/$300,000 for Parts II–III (lines 9, 17) and $75,000/$150,000 for Part V (line 32).
 Three distinct threshold pairs on one form — a shared `threshold_for(status)` is wrong the way S-1's
 shared rounding helper is wrong.
 
-**F-5. Two lines SKIP rather than zero.** Lines 10, 18 and 27 read *"If zero or less, enter the amount
-from line 7 [15, 24] on line 13 [21, 30]"* — a jump PAST the phase-out, not a zero. Line 33 reads *"If
+**F-5. Three lines SKIP rather than zero, and one writes a nonzero constant.** Lines 10, 18 and 27 carry
+the same routing, quoted here as the form prints each of them rather than as one bracketed composite — a
+synthesized quotation is not a citation, and `cargo run -p xtask -- cite-check` rejects it: line 10 *"If
+zero or less, enter the amount from line 7 on line 13"*, line 18 *"If zero or less, enter the amount from
+line 15 on line 21"*, line 27 *"If zero or less, enter the amount from line 24 on line 30"*. A jump PAST
+the phase-out, not a zero. Line 33 reads *"If
 zero or less, **enter $6,000 on line 35**"* — a jump that writes a NONZERO constant into a later line.
 Transcribing 33 as `max(0, …)` and letting 34–35 run gives the same answer only because 6% × 0 = 0;
 transcribing it as `-0-` gives **$0 instead of $6,000**. Pin the branch.

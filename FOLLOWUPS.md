@@ -682,6 +682,28 @@ person**, four times the §63(f) amount.
 **Residue.** The **blind** boxes remain unexamined for a death interaction, and a TY2024 patch release
 carrying this fix is still worth considering on its own merits (owner's call). Filed as G-9a below.
 
+### G-10 — `xtask cite-check` verifies a quotation EXISTS in the manual, not that it is at the cited line
+
+**Owning phase: B3 T2** (the conformance KAT is being written there anyway, against the same extracts).
+Filed 2026-07-29 with the tool itself.
+
+`cargo run -p xtask -- cite-check` checks every quoted span in the Schedule 1-A spec and plan verbatim
+against the committed IRS text-layer extracts (34/34 today). ★ **Its residual gap was found by mutation,
+not by reasoning:** changing S-1's line-11 quotation from *"decrease … to the next lower whole number"* to
+*"increase … to the next higher whole number"* — inverting the rounding direction, the most dangerous
+single fact in this form — **survives**, because line 28 genuinely says that. The checker asks "is this
+the form's words?", never "are these THIS line's words?".
+
+**Fix.** Parse the attribution already required for a plain quotation (`"line 11:"`, `"Line 22."`) and
+require the span to appear within that line's own region of the extract rather than anywhere in it. The
+form extract is line-delimited (`  4a   Enter qualified tips included on Form W-2, box 7`), so the region
+is findable by scanning for the next label; the instruction extract has explicit `Line N.` headings.
+
+★ **Not a reason to distrust the tool** — the misattribution class is covered from the other side by
+executable KATs (`parts_two_and_three_floor_the_step_count_while_part_four_ceils` asserts the *behaviour*
+at a fractional step and dies to exactly that mutation). Prose citation checking and KATs cover different
+halves. **Record which half each one holds; do not let either imply the other.**
+
 ### G-9a — do the §63(f) BLIND boxes have a death interaction?
 
 **Owning phase: before TY2025 Part V** (the same gate G-9 was owned by). G-9 examined and fixed the
