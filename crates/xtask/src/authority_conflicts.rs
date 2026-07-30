@@ -167,10 +167,29 @@ pub fn run() -> Result<(), String> {
         late.len()
     );
     for c in &conflicts {
-        println!(
-            "  {} [{:?}] review-by {} — {}",
-            c.id, c.posture, c.review_by, c.summary
-        );
+        // ★ Print the WHOLE entry, not just an id. Someone running this is deciding whether to do the
+        // duty, and the two facts that decide it are the DIRECTION (a reg that UNDERSTATES tax is the
+        // dangerous one — complying is both the cheap path and the one that risks an understatement on a
+        // signed return) and the WHY (usually: challenging costs more than it is worth, which is a
+        // legitimate answer whose cost/benefit moves over time).
+        let overdue_mark = if c.review_by.as_str() < now.as_str() {
+            "   ★ OVERDUE"
+        } else {
+            ""
+        };
+        let decided = c
+            .decided
+            .as_deref()
+            .map(|d| format!(" (decided {d})"))
+            .unwrap_or_default();
+        println!("\n  {} — {}", c.id, c.summary);
+        println!("    statute      {}", c.statute);
+        println!("    regulation   {}", c.regulation);
+        println!("    disagreement {}", c.disagreement);
+        println!("    direction    {}", c.direction);
+        println!("    posture      {:?}{decided}", c.posture);
+        println!("    review-by    {}{overdue_mark}", c.review_by);
+        println!("    why          {}", c.why);
     }
     if late.is_empty() {
         return Ok(());
