@@ -9,8 +9,9 @@ _(Supersedes the 2026-06-28 edition, whose deep-research workflow completed long
 > **One line:** on branch `feat/amt-e2-vector-population` (**44 commits, NOT merged**, all five gates
 > green throughout). Two tracks open — **(A)** Schedule 1-A for TY2025: spec + plan green, task T1 built;
 > **(B)** a form-authority pipeline: steps 1-2 of 3 done for all 16 forms.
-> **The next action is the label reader (track B step 3)** — characterised and deliberately NOT built.
-> See §5.
+> **The next action is the label reader (track B step 3)** — characterised and deliberately NOT built;
+> see §5. **The largest ARCHITECTURAL open item is §G-11 (§4a)** — the emitter cannot express "no
+> testimony", so it constrains what B3 may emit. It does *not* block the label reader.
 
 ---
 
@@ -126,6 +127,38 @@ From the user; it now governs the work. Detail in `CLAUDE.md` and in memory
 
 ---
 
+## 4a. ★★ §G-11 — the largest architectural open item, and what it does and does not block
+
+**`FOLLOWUPS.md` §G-11.** `btctax-forms/src/lib.rs` — `fn fmt_money(d: Usd) -> String { d.to_string() }`
+is the **entire** money path. Every money field on every emitted form is `Usd`, never `Option<Usd>`, so
+**no line can express blank**; `Usd::ZERO` prints `"0"`. Zero-suppression exists only ad hoc and only for
+whole *rows* (`schedule_d.rs`, `fill8949.rs`).
+
+Under §4.4 that is not a formatting gap: writing `0` on a line the filer was never asked about
+**fabricates sworn testimony under their signature**. It is invisible to every value-checking test and to
+both oracles, because `0` is the correct *value* in the overwhelming majority of cases — **the defect is
+in the act, not the arithmetic.**
+
+**What it blocks — state this precisely, it was overstated once already:**
+
+| | |
+|---|---|
+| **Constrains** | B3's emission choices. It is *why* T3a has lines 5 and 14b **refuse** rather than print `0` — refusing is the only lawful move left when the emitter cannot stay silent. |
+| **Does NOT block** | the label reader (§5), the conformance census, or archiving/extraction. Those are independent. |
+| **Blocks eventually** | any honest emission of a form with unasked lines — i.e. the whole surface, on a long enough horizon. |
+
+**It needs its own spec, not a patch.** Sketch only: the emitter's money type grows a "not stated" state
+that survives to the AcroForm write; computations may not manufacture a *stated* zero from *unstated*
+inputs; and each line records which of the three lawful moves (collect / refuse / genuinely blank) it
+takes, and why. The per-line decision then becomes a reviewable fact instead of an accident of
+`Decimal::default()`.
+
+★ **Scope bound, from §4.4 and easy to overshoot in both directions:** do not build a heuristic that flags
+an omission as suspicious either. Intent is not software's domain, and *both* directions — assuming
+silence, and policing it — are software deciding intent.
+
+---
+
 ## 5. ★ THE NEXT ACTION — the label reader (track B, step 3)
 
 **Read `design/forms/LABEL_READER.md` first.** Characterised and deliberately unbuilt: the obvious regex
@@ -227,7 +260,7 @@ names anyway to fill the form (B4), so the work would serve two purposes instead
 
 | id | what |
 |---|---|
-| **§G-11** | ★★ the emitter cannot express "no testimony" — whole-surface, needs its own spec |
+| **§G-11** | ★★ the emitter cannot express "no testimony" — **see §4a**; largest architectural item, needs its own spec |
 | **§G-9a** | do the §63(f) **blind** boxes have a death interaction? |
 | **§G-10** | residue: coverage — a checker that cannot tell "encodes no decision" from "we forgot this line" |
 | §G-6c / §G-6d, E4-E6 | AMT Tier-2 items, parked behind the TY2025 pivot |
