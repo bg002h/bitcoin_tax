@@ -204,6 +204,27 @@ stays visible, and if an engine later fixes its defect we notice and reclaim the
 confirm against the second oracle **or** the form's worked example, and check the latest release.
 #3108 was filed on one oracle against our own rule and contained a claim that was wrong.
 
+**D-11. THE MAGI REFUSAL LIVES AT THE WORKSHEET'S POINT OF NEED, not in a question's liveness
+predicate.** Established while building B2.
+
+`ReturnInputs` carries no tax year, so a `FormQuestion`'s `live` predicate cannot scope a MAGI gate to
+TY2025 — and an always-live gate would refuse TY2024 returns that compute correctly today, which is a
+regression dressed as rigour.
+
+The instrument already scopes it exactly right, though: **TY2024's `FlatCap` never reads MAGI at all**,
+and TY2025's worksheet needs it **only past line 1's trigger** ("Is 5d more than $10,000? No ⇒ your
+deduction isn't limited"). So a filer with ≤ $10,000 of SALT never needs the add-backs even in 2025.
+
+**Therefore:** `SaltLimitation::line_5e` takes MAGI as an **absent-able** value and the refusal fires
+where the form actually asks — one refusal, as narrow as the worksheet's own need, and no question that
+has to guess which year it is. The four amounts are still collected per D-9; what changes is that their
+absence is only an error where a number is genuinely required.
+
+★ This also answers why they cannot be `#[serde(default)]` money like `medical`. Omitting `medical`
+forgoes a benefit — lawful under class (B), the burden to claim is the filer's. **Omitting a MAGI
+add-back understates MAGI, which RAISES the SALT and Schedule 1-A deductions**: a default in the
+filer's favour that understates tax. Opposite direction, different class, different mechanism.
+
 **D-5. Answered-ness.** Every Schedule 1-A input is `Option`; `None` **refuses**. Zero is a filer's
 answer, never btctax's assumption. This explicitly covers the **MAGI add-backs (D-6)** and the
 **valid-SSN predicate (D-7)**, which the r1 draft omitted.
