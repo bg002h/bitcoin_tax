@@ -898,7 +898,16 @@ pub struct AbsoluteReturn {
     pub deduction_is_itemized: bool,
     /// 1040 **L13** — the Form 8995 QBI deduction (REIT §199A dividends; 0 when there is no QBI).
     pub qbi_deduction: Usd,
-    /// 1040 **L14** = L12 + L13 (deduction + QBI).
+    /// 1040 **L13b** — "Additional deductions from Schedule 1-A, line 38" (tips, overtime, vehicle
+    /// loan interest, the enhanced senior deduction).
+    ///
+    /// ★ **Structurally zero for TY2024 because the line does not EXIST on that form** — this is not a
+    /// stub for something unmodelled. The 2024 form's L14 is "Add lines 12 and 13"; the 2025 form's is
+    /// "Add lines 12e, 13a, and 13b". A three-term sum with a genuinely-absent third term is the same
+    /// number in 2024 and the right number in 2025. Schedule 1-A itself is `design/ty2025` B3.
+    pub schedule_1a_additional: Usd,
+    /// 1040 **L14** — "Add lines 12e, 13a, and 13b" (2025) / "Add lines 12 and 13" (2024):
+    /// `deduction + qbi_deduction + schedule_1a_additional`.
     pub total_deductions: Usd,
     /// 1040 **L15** — taxable income = `max(0, AGI − L14)` (with-crypto).
     pub taxable_income: Usd,
@@ -1211,7 +1220,11 @@ pub fn assemble_absolute(
         agi - deduction, // Form 8995 line 11 = TI before the QBI deduction
         net_capital_gain,
     );
-    let total_deductions = deduction + qbi.deduction; // L14
+    // 1040 L13b — "Additional deductions from Schedule 1-A, line 38". Zero until Schedule 1-A lands
+    // (design/ty2025 B3); the 2024 form has no such line, so zero is the RIGHT value there, not a stub.
+    let schedule_1a_additional = Usd::ZERO;
+    // L14 — "Add lines 12e, 13a, and 13b" (2025) / "Add lines 12 and 13" (2024).
+    let total_deductions = deduction + qbi.deduction + schedule_1a_additional;
     let taxable_income = (agi - total_deductions).max(Usd::ZERO); // L15
 
     // ── L16 regular tax (SPEC §5 stage 4 / §7.2 Schedule-D routing) ──────────────────────────────────
@@ -1316,6 +1329,7 @@ pub fn assemble_absolute(
     );
 
     AbsoluteReturn {
+        schedule_1a_additional,
         amt,
         wages,
         taxable_interest,
@@ -1366,7 +1380,12 @@ pub fn assemble_absolute(
             business_qbi,
             reit_dividends,
             reit_ptp_carryforward_in: ri.qbi.reit_ptp_carryforward_in,
-            ti_before_qbi: agi - deduction,
+            // Form 8995 line 11, "Taxable income before qualified business income deduction" — the
+            // 2025 i8995 figures it from 1040 line 11a MINUS lines 12e and 13b. Note it excludes
+            // 13a, which IS the QBI deduction being computed. Omitting 13b would OVERSTATE this,
+            // inflating the §199A deduction and firing `qbi_over_threshold` too EARLY: a false
+            // refusal. Zero today because Schedule 1-A is B3.
+            ti_before_qbi: agi - deduction - schedule_1a_additional,
             qbi_net_capital_gain: net_capital_gain,
             schedule_c_header: ri
                 .schedule_c
@@ -2287,6 +2306,62 @@ mod tests {
                 &ty2024_params()
             ),
             None
+        );
+    }
+
+    /// ★ 1040 L14 is a THREE-term sum from 2025, and Form 8995 line 11 excludes only two of them.
+    ///
+    /// The 2025 form reads L14 = "Add lines 12e, 13a, and **13b**", where 13b is Schedule 1-A's total.
+    /// And i8995 figures line 11 — taxable income *before* the QBI deduction — as 1040 line 11a minus
+    /// lines **12e and 13b**, deliberately NOT minus 13a, because 13a is the deduction being computed.
+    ///
+    /// So the two consumers differ, and getting `ti_before_qbi` wrong is directional: omitting 13b
+    /// OVERSTATES it, which inflates the §199A deduction and fires `qbi_over_threshold` too EARLY — a
+    /// false refusal.
+    ///
+    /// ★ **This test is DELIBERATELY WEAK, and saying so is the point.** `assemble_absolute` hardcodes
+    /// a zero 13b until Schedule 1-A lands (B3), so both assertions below are trivial identities and
+    /// every mutation of the composition survives them — verified: dropping the 13b term from
+    /// `total_deductions`, and subtracting 13a from `ti_before_qbi`, both leave this green. It records
+    /// the SHAPE so B3 has something to make real. The load-bearing version is
+    /// `printed::tests::printed_1040_line14_needs_all_three_terms`, which drives the printed path with
+    /// a nonzero 13b and does die to that mutation.
+    #[test]
+    fn form_1040_line14_sums_12e_13a_and_13b_while_form_8995_line11_excludes_only_12e_and_13b() {
+        let ri = crate::tax::testonly::answered(ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![W2 {
+                owner: Owner::Taxpayer,
+                box1_wages: dec!(120000),
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        let ar = assemble_absolute(
+            &ri,
+            &empty_ledger(),
+            &ty2024_params(),
+            &real_2024_table(),
+            2024,
+        );
+        assert_eq!(
+            ar.total_deductions,
+            ar.deduction + ar.qbi_deduction + ar.schedule_1a_additional,
+            "L14 = 12e + 13a + 13b"
+        );
+        // Form 8995 line 11 lives on `PrintedInputs`, carried on the assembled return.
+        let pi = &ar.printed_inputs;
+        assert_eq!(
+            pi.ti_before_qbi,
+            ar.agi - ar.deduction - ar.schedule_1a_additional,
+            "Form 8995 line 11 = 1040 11a − 12e − 13b; it must NOT subtract 13a (the QBI deduction \
+             it is computing) and it must NOT skip 13b (which would overstate it and refuse early)"
+        );
+
+        assert_eq!(
+            ar.schedule_1a_additional,
+            Usd::ZERO,
+            "TY2024's form has no line 13b, so zero is the correct value — not a stub"
         );
     }
 

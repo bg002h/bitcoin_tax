@@ -630,7 +630,9 @@ pub fn form_1040_lines(
         None => round_dollar(ar.deduction),
     };
     let line13 = f8995.map_or(Usd::ZERO, |q| q.line15);
-    let line14 = line12 + line13;
+    // L14 — "Add lines 12e, 13a, and 13b" (2025) / "Add lines 12 and 13" (2024). The third term is
+    // Schedule 1-A's total, which does not exist on the 2024 form.
+    let line14 = line12 + line13 + round_dollar(ar.schedule_1a_additional);
     let line15 = (line11 - line14).max(Usd::ZERO);
 
     // ── Tax → total tax ─────────────────────────────────────────────────────────────────────────
@@ -1259,6 +1261,58 @@ mod tests {
         }
     }
 
+    /// ★ The printed 1040's L14 is a THREE-term sum, and each term is load-bearing.
+    ///
+    /// 2025: "Add lines 12e, 13a, and **13b**". Schedule 1-A is `design/ty2025` B3, so
+    /// `assemble_absolute` still hands over a zero 13b — which means a test driven through
+    /// `assemble_absolute` asserts a trivial identity and every mutation survives it. (It did:
+    /// dropping the 13b term left the suite green.) So this drives the printed path DIRECTLY with a
+    /// nonzero 13b and a nonzero QBI, where each term's absence changes the number.
+    #[test]
+    fn printed_1040_line14_needs_all_three_terms() {
+        let mut ar = ar_with(None, Usd::ZERO, Usd::ZERO);
+        ar.agi = dec!(200000);
+        ar.deduction = dec!(15000); // L12e
+                                    // L13a comes from the Form 8995 result (passed None here); the existing QBI tests cover it.
+                                    // What is NEW and untested is 13b, so that is what this pins.
+        ar.schedule_1a_additional = dec!(9000); // L13b — tips/overtime/vehicle/senior
+        ar.taxable_income = ar.agi - (ar.deduction + ar.schedule_1a_additional);
+
+        let sd = schedule_d_lines(&ar, None);
+        let f8959 = form_8959_lines(FilingStatus::Single, Usd::ZERO, Usd::ZERO, None);
+        let income = form_1040_income_lines(&ar, None, None, &sd);
+        let l = form_1040_lines(
+            &ar,
+            &income,
+            None,
+            None,
+            None,
+            &f8959,
+            None,
+            &tt(),
+            FilingStatus::Single,
+            Usd::ZERO,
+            Usd::ZERO,
+            false,
+        );
+        assert_eq!(l.line12, dec!(15000), "L12e");
+        assert_eq!(l.line13, Usd::ZERO, "L13a — no Form 8995 in this fixture");
+        assert_eq!(
+            l.line14,
+            dec!(24000),
+            "L14 = 12e + 13a + 13b = 15,000 + 0 + 9,000. Dropping the 13b term gives 15,000, so this \
+             is the assertion that makes 13b load-bearing rather than decorative"
+        );
+        // L15 = max(0, L11b − L14). Asserted as a RELATIONSHIP because this fixture's printed L11b
+        // comes from the income lines (zero here), not from `ar.agi` — but the propagation is the
+        // point: any error in L14 lands in taxable income.
+        assert_eq!(
+            l.line15,
+            (l.line11 - l.line14).max(Usd::ZERO),
+            "L15 = L11b − L14, so a wrong L14 propagates straight into taxable income"
+        );
+    }
+
     /// An `AbsoluteReturn` carrying only what the Schedule 2/3 chains read; everything else zero.
     ///
     /// Spelled out in full rather than `..Default::default()` on purpose — `AbsoluteReturn`
@@ -1268,6 +1322,7 @@ mod tests {
         use crate::tax::other_taxes::{Form8959, Form8960};
         let z = Usd::ZERO;
         AbsoluteReturn {
+            schedule_1a_additional: Usd::ZERO,
             amt: Default::default(),
             wages: z,
             taxable_interest: z,
