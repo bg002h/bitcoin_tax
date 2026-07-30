@@ -1,6 +1,6 @@
 # Schedule 1-A (TY2025) — SPEC
 
-**Status: DRAFT r2** (r1 folded 2026-07-29 — 1 Critical, 2 Important, 2 Minor; 6 findings refuted). Spun out of `design/ty2025/SPEC.md` §8a **B3**, which sized it
+**Status: DRAFT r3** (r1 folded 2026-07-29 — 1 Critical, 2 Important, 2 Minor; 6 findings refuted. r2→r3: §7's two remaining open questions CLOSED against the archived instructions, and §7a folds in five facts the extraction surfaced — see F-1 … F-5). Spun out of `design/ty2025/SPEC.md` §8a **B3**, which sized it
 as "its own spec-sized feature, not a section of one": 38 lines, six parts, four phase-outs, a filed
 VIN, and ~25 collected inputs across five crates.
 
@@ -206,10 +206,62 @@ deduction that does not exist.
    instructions state it flatly with a worked boundary pair; see **S-8**. Checking it found a live
    defect in shipped code (`FOLLOWUPS.md` §G-9). btctax collects no date of death — that is the fix,
    not the question.
-2. **Per-business or aggregate for line 5's net-income limitation?** The recon reads it per trade or
-   business, with a net-loss business contributing $0. Confirm against the instructions before coding.
-3. **Notice 2025-69 transition relief** for 2025 tips reporting — does it change what we may accept as
-   `L4a`, or only what employers must report?
+2. ~~Per-business or aggregate for line 5's net-income limitation?~~ — **CLOSED against
+   `i1040gi--2025.pdf` p.101-110** (*Instructions for Schedule 1-A*, **Net income limitation**). Per
+   business, stated flatly: *"The net income limitation applies to each separate trade or business in
+   which you [received qualified tips]."* The recon's reading was right — **and the instructions are
+   stricter than it recorded.** The limitation is NOT simply net profit:
+
+   > Qualified tips from a trade or business can't be more than the gross income from the trade or
+   > business in which the qualified tips were received minus the total of all deductions allocable to
+   > that trade or business, **including the deductible part of self-employment tax; the deduction for
+   > contributions to self-employed SEP, SIMPLE, and qualified plans; and the self-employed health
+   > insurance deduction, but not including the deduction for qualified tips.** … reduce the net profit
+   > (Schedule C, line 31; the total of Schedule E, line 28(g) through 28(k); or Schedule F, line 34) by
+   > the amount of these deductions. **Do not reduce it below zero.**
+
+   So the ceiling is a **derived** per-business quantity, not a leaf: three named deductions come off
+   the net profit, floored at zero, and the tips deduction itself is expressly excluded from the
+   subtraction (no circularity). ★ Under the transcription rule this ceiling is its own transcribed
+   worksheet — the *Multiple Trades or Businesses Worksheet* — not a `min()` in the emitter.
+3. ~~Notice 2025-69 transition relief~~ — **CLOSED: it governs the SSTB determination, not what we
+   accept as `L4a`.** Verbatim: *"Until the issuance of final regulations determining whether a trade or
+   business is an SSTB for purposes of this deduction … the IRS will treat employees and self-employed
+   individuals as having received tips in the course of a trade or business that is **not** an SSTB if
+   the employee is in an occupation that customarily and regularly received tips on or before December
+   31, 2024."* It **relaxes** §4.1 trap 4, and changes no line's arithmetic. The prompt for the SSTB
+   question must carry the relief, or it will refuse filers the statute allows.
+
+### 7a. Facts the extraction added, folded here rather than left implicit
+
+**F-1. ★ W-2 box 7 is NOT the qualified-tips figure — it is only the starting point.** Verbatim: *"For
+tax year 2025, Form W-2, Form 1099-NEC, Form 1099-MISC, and Form 1099-K **were not updated to
+separately identify tips that may qualify for this deduction**."* §4.1 describes `L4a` as "W-2 box 7",
+which is how the form's own line reads, but the amount is a filer-determined SUBSET of it and the line
+carries two branches off it (box 5 over $176,100; tips not subject to social security and Medicare
+tax). So `L4a` is a **collected declaration with its own worksheet**, never a projection of a W-2 leaf
+— exactly the answered-ness class. This is the single largest input-surface consequence in the form.
+
+**F-2. Four "Keep for Your Records" worksheets, located.** *Qualified Tips From More Than One Employer*
+(instr. p.417), *Multiple Trades or Businesses* (546), *Qualified Overtime Compensation From More Than
+One **Employer***  (1039) and *… From More Than One **Payor*** (1056) — note the last two are DISTINCT
+worksheets, W-2 side and 1099 side, which the r1 branch list collapsed into one.
+
+**F-3. "Valid SSN" has a definition, and it is a date test.** *"A valid SSN … is one that is valid for
+employment and that is issued by the Social Security Administration (SSA) before the due date of [the
+return]."* So Parts II/III/V's SSN bar is not "an SSN is present" — btctax cannot see validity-for-
+employment or issue date, so it is a **declaration**, per person.
+
+**F-4. Part IV's threshold differs from every other part.** Line 26 is **$100,000 ($200,000 MFJ)**,
+against $150,000/$300,000 for Parts II–III (lines 9, 17) and $75,000/$150,000 for Part V (line 32).
+Three distinct threshold pairs on one form — a shared `threshold_for(status)` is wrong the way S-1's
+shared rounding helper is wrong.
+
+**F-5. Two lines SKIP rather than zero.** Lines 10, 18 and 27 read *"If zero or less, enter the amount
+from line 7 [15, 24] on line 13 [21, 30]"* — a jump PAST the phase-out, not a zero. Line 33 reads *"If
+zero or less, **enter $6,000 on line 35**"* — a jump that writes a NONZERO constant into a later line.
+Transcribing 33 as `max(0, …)` and letting 34–35 run gives the same answer only because 6% × 0 = 0;
+transcribing it as `-0-` gives **$0 instead of $6,000**. Pin the branch.
 
 ---
 
