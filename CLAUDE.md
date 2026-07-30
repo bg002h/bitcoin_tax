@@ -153,3 +153,42 @@ This does **not** relax `STANDARD_WORKFLOW.md`'s gate — it says match the inst
 Evidence (the 2026-07-27/28 AMT plan): five review rounds went 5C/12I → 2C/8I → 0C/4I → 0C/4I → 0C/2I,
 rounds 3–5 finding mostly "edited §X, forgot §Y" — while the single highest-severity defect, a deleted
 Form 6251 line-10 definition, was found in seconds by opening the PDF that all five rounds discussed.
+
+## The harness — B1 and B2 (btctax-only)
+
+`design/HARNESS.md` (r2) answers a failure mode this file cannot: **doctrine written down and violated
+the same day.** Its class-α mechanisms are code and hooks and need no rule here. Its class-β mechanisms
+are **process**, so they live here — and β is *"shipped an instrument never seen discriminating."*
+
+★ **Scope: btctax only.** The harness is grown from this repo's observed failures. It must not be
+promoted to `~/.claude/CLAUDE.md` or to the cross-project `/scratch/code/CLAUDE.md` without its own
+evidence — that would be false completeness at the largest possible scale.
+
+### B1 — seen-red-once. No checker exists until it has been observed RED on a planted defect.
+
+Every new census, conformance check, citation check, lint, or review harness lands **paired** with a
+negative test that plants the exact defect it exists to catch and asserts red. Model in-repo:
+`cite_check.rs::a_paraphrase_is_rejected_and_the_real_sentence_is_accepted`.
+
+**Why it is a rule and not a preference.** F2 and F4 are the same failure — an instrument trusted
+without ever being watched to distinguish a true case from a false one. `cite-check` read only `*"…"*`
+spans, so the rounding-direction table it existed to protect was never checked, and it reported success
+the whole time. It was found by *mutating the document*, i.e. by finally writing the kill.
+
+★★ **It cannot be satisfied performatively**, which is the entire point: an honest kill-test for a blind
+checker **cannot be written without discovering the blindness**. The reviewable question is one sentence
+with a factual answer — *"which test reds when this checker is removed?"*
+
+★ Corollary: this applies to the harness's own instruments. A1, A2, A3 and A4 each shipped with a
+planted-defect test, and A1 was deliberately built **before** the hooks it checks so it could be watched
+going red → green.
+
+### B2 — inter-agent payloads move as FILE PATHS the receiver reads, never as inlined content.
+
+Truncation then has no operator to apply: there is nothing to `.slice()` because the payload is a path.
+
+**Why.** F5: a payload was truncated between workflow agents and the reviewer faithfully reported the
+artifact as a finding ("10 of 12 labels omitted" — they were merely unsent). A lint was considered and
+**rejected** as having no target: `.slice(`/`.substring(` do not appear in any committed file, because
+the truncating code is *ephemeral orchestration* that a lint over files can never see. Removing the
+class beats shadowing one symptom of it.

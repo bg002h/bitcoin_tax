@@ -7,12 +7,14 @@
 //! `cargo run -p xtask -- cite-check` verifies every quotation in the Schedule 1-A design docs against
 //! the committed IRS text-layer extracts. `… -- extract-schedule-1a` regenerates those extracts.
 
+mod archive_check;
 mod authority_conflicts;
 mod check_isolation;
 mod cite_check;
 mod docs;
 mod dump_fields;
 mod examples;
+mod harness_check;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -53,6 +55,28 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some("archive-check") => {
+            if let Err(e) = archive_check::run() {
+                eprintln!("xtask archive-check: {e}");
+                std::process::exit(1);
+            }
+        }
+        Some("classify-path") => {
+            let Some(path) = args.get(1) else {
+                eprintln!("usage: cargo run -p xtask -- classify-path <path>");
+                std::process::exit(2);
+            };
+            if let Err(e) = archive_check::classify_path(path) {
+                eprintln!("xtask classify-path: {e}");
+                std::process::exit(1);
+            }
+        }
+        Some("harness-check") => {
+            if let Err(e) = harness_check::run() {
+                eprintln!("xtask harness-check: {e}");
+                std::process::exit(1);
+            }
+        }
         Some("check-isolation") => {
             if let Err(e) = check_isolation::run() {
                 eprintln!("xtask check-isolation: {e}");
@@ -72,7 +96,9 @@ fn main() {
         _ => {
             eprintln!(
                 "usage: cargo run -p xtask -- <docs [--pdf] | examples | subcommand-coverage | \
-                 check-isolation | cite-check | authority-conflicts | extract-schedule-1a | dump-fields <pdf>>"
+                 check-isolation | cite-check | authority-conflicts | harness-check | archive-check | \
+                 classify-path <path> | \
+                 extract-schedule-1a | dump-fields <pdf>>"
             );
             std::process::exit(2);
         }

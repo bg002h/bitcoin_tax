@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# btctax-harness-hook: pre-commit — A2 of design/HARNESS.md (class α: couple the act to the fact).
+#
+# Closes F3, observed 2026-07-30: `make check` was run and the commit made in the SAME command, so a
+# red gate scrolled past unread and the commit landed anyway. Git's exit-status coupling is the fix —
+# with this wired, "ran the gate and never read the output" stops being expressible, because the
+# commit does not happen while the gate is red.
+#
+# Install (either route; `xtask harness-check` honours both and reds until one is done):
+#     git config core.hooksPath scripts                      # repo-local — NEVER --global
+# or: ln -s ../../scripts/pre-commit .git/hooks/pre-commit
+#
+# ★ SCOPE: this hook is btctax-only by construction. It is installed through this repository's
+#   .git/config, so it cannot fire in any other project.
+#
+# ★ HONEST LIMIT — it checks the WORKING TREE, not the staged snapshot. Stashing to isolate the index
+#   is the usual trick and it is rejected here: a failed stash-pop during a hook can lose uncommitted
+#   work, which is a worse outcome than the imprecision. In practice the two differ only when
+#   committing a subset of a dirty tree, and there the working-tree answer is the more useful one.
+#
+# Bypass is `--no-verify`, which is separately denied at the tool layer (scripts/hooks/deny-bypass.sh)
+# so that bypassing is a deliberate act rather than a reflex.
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+echo "pre-commit: running the gates (make check + cargo fmt --all --check) …" >&2
+
+FAILED=0
+
+# ── The fast validation gate: nextest + clippy in parallel (~6s warm) ────────
+if ! make check >&2; then
+  echo "" >&2
+  echo "pre-commit: BLOCKED — \`make check\` is RED." >&2
+  FAILED=1
+fi
+
+# ── Formatting: cheap, and a separate CI job, so catch it here too ───────────
+if ! cargo fmt --all --check >&2; then
+  echo "" >&2
+  echo "pre-commit: BLOCKED — \`cargo fmt --all --check\` is RED. Run \`cargo fmt --all\`." >&2
+  FAILED=1
+fi
+
+if [ "$FAILED" -ne 0 ]; then
+  cat >&2 <<'EOF'
+
+  ────────────────────────────────────────────────────────────────────────────
+  What this is protecting: btctax emits a US federal 1040 that a human signs
+  under 26 USC §6065 penalties of perjury. A wrong number is the worst outcome,
+  and an understatement of tax is worse than an overstatement.
+
+  This gate exists because on 2026-07-30 a commit landed with `make check` red —
+  the gate had been RUN, and its output never READ.
+
+  The remaining gates run at push time (msrv, isolation, PII) or in CI.
+  ────────────────────────────────────────────────────────────────────────────
+EOF
+  exit 1
+fi
+
+echo "pre-commit: gates green." >&2
+exit 0

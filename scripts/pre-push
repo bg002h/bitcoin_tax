@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
-# pre-push hook — PII gate (owner-specific + generic shape) over the PUSHED RANGE.
-# Install:  ln -s ../../scripts/pre-push .git/hooks/pre-push
-#       or: git config core.hooksPath scripts
+# btctax-harness-hook: pre-push — PII gate (owner-specific + generic shape) over the PUSHED RANGE.
+#
+# ★★ This hook was committed 2026-07-02, reviewed and executable, and never ran ONCE — `core.hooksPath`
+#    was unset and `.git/hooks/` held only `*.sample`. Writing a hook and WIRING a hook are two acts and
+#    only the first was done. That is the precedent that motivated A1 in `design/HARNESS.md`, and
+#    `cargo run -p xtask -- harness-check` now reds until this is actually installed.
+#
+# Install:  git config core.hooksPath scripts            # repo-local — NEVER --global
+#       or: ln -s ../../scripts/pre-push .git/hooks/pre-push
 # Patterns: scripts/.pii-patterns (local, untracked, NEVER commit).
 # See scripts/README-pii-setup.md for format and setup instructions.
 set -euo pipefail
