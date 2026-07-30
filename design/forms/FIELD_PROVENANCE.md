@@ -513,6 +513,69 @@ its invariants.
 **⇒ The resolution needs two levels:** *is this form in the return?* (from `PrintedForms`) and only
 then *is this field accounted for?* The static census stays per-(form, year) and is unaffected.
 
+## 6h. ★★★ THE VERTICAL SLICE — measured, and three of my own estimates were wrong
+
+`crates/btctax-forms/tests/field_census_slice.rs`. One real household (`kitchen_sink`, TY2024) through
+`fill_full_return`, then every emitted AcroForm field compared with the committed map.
+
+```
+  ┌─ ONE REAL RETURN (kitchen_sink, TY2024) ──────────────────
+  │ forms emitted: 13 of 15      NOT emitted: [f8283, f8275]
+  │ form          fields  mapped unmapped   renamed
+  │ f1040            141      87       54         0
+  │ f1040s1           69      12       57         0
+  │ f1040s2           60       6       54         0
+  │ f1040s3           39       7       32         0
+  │ f1040sa           37      23       14         0
+  │ f1040sb           72      68        4         0
+  │ f1040sc          105      13       92         0
+  │ schedule_d        55      27       28         0
+  │ f8949            244     238        6         0
+  │ schedule_se       27      14       13         0
+  │ f8995             33      20       13         0
+  │ f8959             26      19        7         0
+  │ f8960             38      16       22         0
+  │ TOTAL            946     550      396         0
+  └────────────────────────────────────────────────────────────
+```
+
+### ★★ Corrections to §6g — I over-estimated the flood by 4×
+
+| I claimed | measured |
+|---|---|
+| "a typical return emits perhaps **5**" forms | **13 of 15** |
+| absent forms flood with "**~800**" fields | **212** (1158 static − 946 emitted) |
+| unaccounted on a real return ≈ the static 496 | **396** — most of the static surface really is present |
+
+★ So **gap 3 is real but small**: the resolution gate is still needed (212 fields from 2 absent
+forms), but it is a tidiness fix, not the thing that would bury the findings. **The 396 unaccounted on
+a return you actually file is the real work**, and it is barely smaller than the static 496 — there is
+no hiding place in "most forms aren't emitted."
+
+### ★★★ Gap 1 is REAL and large — measured
+
+```
+  8949 single copy  rows=10  fields=244  exact-match=238  renamed-copy=0
+  8949 overflowed   rows=40  fields=732  exact-match=238  renamed-copy=476
+```
+
+Forty rows → three copies → **732 fields, of which only 238 match the map and 476 are renamed
+copies.** An emitted-document census without copy normalisation would report **65% of an overflowing
+Form 8949 as unaccounted** — a screenful of phantom defects on an ordinary return with 40
+dispositions, which is exactly how a checker earns being muted.
+
+★ Note it did **not** fire on the real household (its 8949 fits one copy). A slice that only ran the
+household would have concluded the renaming was theoretical — the overflow case had to be forced
+deliberately, which is the same lesson as the label reader's anchor form: **the case you do not
+provoke is the case you do not measure.**
+
+### What this settles for §G-13's build
+
+- Key the static census on the **template**; normalise the copy prefix in any emitted-document check.
+- The resolution gate (`Option::is_some` per form) is worth having but is **not** the scaling risk.
+- **396 is the number to plan against**, and ~45% of it (header/trailer, per §6a) goes with a handful
+  of blanket decisions.
+
 ## 7. Open questions for the ⑥ consult
 
 1. Is the §3 taxonomy right, and is "Declined + question pointer" the correct shape for a lawful
