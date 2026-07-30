@@ -195,6 +195,124 @@ concept — *header* (before the first label), *body* (between labels), *trailer
 and the trailer must be its own category rather than a mis-attribution. Filed here rather than fixed,
 because it changes what a "label" is and that is the ⑥ consult's subject.
 
+## 6b. ★★★ THE DECLINE RECORD MUST BE CRYPTOGRAPHICALLY DELETABLE (owner, 2026-07-30)
+
+The ⑥ consult was asked whether recording "the filer was asked and said no" is a **liability**
+(a discoverable record of what was asked and declined) or a **protection** (evidence of diligence).
+**The owner supplied a third answer, and it is better than either:** make the record
+**cryptographically deletable**, so its lifetime is the *filer's* decision — kept while it is useful,
+destroyed after filing by discarding the key.
+
+### What already exists — privacy is DONE
+
+- The whole vault is **one encrypted SQLite image**: `vault.rs::save()` serialises the DB, wraps it
+  in a versioned blob, and encrypts under a passphrase-protected OpenPGP cert (`crypto.rs`,
+  sequoia). The `.tmp`/`.bak` that `atomic_write` touches are **ciphertext**.
+- `SecretBuf` **mlocks and scrubs** every plaintext copy on the save path (`zeroize`).
+- So interview answers held in the vault are **already private at rest**. The honest bound is
+  documented in-place: while the vault is OPEN, the live SQLite connection keeps plaintext in its own
+  heap for the session (accepted, stated, not hidden).
+
+### ★★ What does NOT exist — and why "destroy the passphrase" is not enough
+
+**There is exactly ONE cert per vault.** No envelope encryption, no per-item data keys, no shredding
+path. So "destroy the passphrase after filing" destroys **the entire vault**, and that is not a
+lawful-outcome-preserving move:
+
+★★★ **BASIS CARRIES FORWARD ACROSS TAX YEARS.** A filer who shreds the vault after filing loses the
+cost basis of every unsold lot. The next year's return then cannot be computed — or worse, is
+computed from a reconstructed basis nobody can substantiate. **Whole-vault shredding trades a privacy
+win for a permanent tax disaster.**
+
+### So the requirement is PER-ITEM crypto-shredding
+
+The interview answers need their own data key, wrapped by the vault key; destroying the wrapped key
+renders the answers unrecoverable **while the lot ledger survives intact**. That is envelope
+encryption, and none of it exists today.
+
+★ Design questions this raises, which the ⑥ consult should now absorb (they replace scope-question
+(a), which the owner has answered):
+
+1. **Granularity of shredding.** Per answer? Per tax year's interview? Per question? Too fine is key
+   sprawl; too coarse and the filer cannot keep the answers that still matter (a §1031 or carryover
+   answer may be relevant for years).
+2. **What survives a shred, and does the FIELD CENSUS still pass afterwards?** If the "declined"
+   provenance pointed at a destroyed answer, the field's provenance becomes *unknown* — which under
+   §3 is category 6, the defect. **A shred must not turn a lawfully-blank field into an unaccounted
+   one.** Possibly the census must record the DECISION's existence separately from its CONTENT: "this
+   was declined on 2026-04-15, detail shredded" is still a determinate provenance.
+3. **Does an emitted return remain reproducible after a shred?** If not, say so plainly — a filer who
+   cannot regenerate their own filed PDF has lost something real.
+4. **Retention default.** Never auto-shred: destroying evidence of diligence must be an explicit,
+   informed act by the filer, never a background job or a default.
+
+## 6c. ✅ ⑥ CONSULT ANSWERED — `hybrid`, and it restructures §3
+
+Verbatim: [`reviews/field-provenance-fable-r1.md`](../../reviews/field-provenance-fable-r1.md); four
+load-bearing claims re-verified before folding, all held.
+
+★★★ **The flat six-way in §3 is WRONG IN SHAPE — it conflates two layers.** `filled` / `declined` /
+`refused` are **per-return outcomes**; `not-ours` / `artifact` / `never-decided` are **per-field
+facts**. Written flat, *"declined" goes into a static file where it is false for the next filer who
+answers yes.* Correct structure: a **static per-(form,year) census** recording the RULE for every
+FQN, plus a **per-return resolution derived from it.**
+
+**The static census — every FQN resolves to exactly one:**
+
+| | rule | note |
+|---|---|---|
+| 1 | `computed(rule)` | we derive and write it |
+| 2 | `collected(input)` | filer-supplied, written verbatim — **split from computed on purpose**: testimony vs arithmetic, which §G-11's "no stated zero from unstated inputs" needs |
+| 3 | `asked(QuestionId)` | gated by an interview answer. ★ **"Declined" is the no-branch AT EMIT TIME, not a category anyone writes down** |
+| 4a | `not-ours: filer-by-hand` | signature/date — carries a **"must be completed before filing" duty to surface**; an unsigned return is not a return (§6061) |
+| 4b | `not-ours: third-party` | preparer block, 8283 donee/appraiser. ★ The **designee is neither** — it is an askable class-(B) election and belongs under `asked()` |
+| 5 | `unmodeled(advisory)` | ★ **MISSING from §3 entirely** — a benefit outside btctax's scope, forgone by using it, and it must name its advisory (EIC 27–30, direct-deposit 35b–d) |
+| 6 | `artifact` | 1-pt spacer / preprinted-constant cells — **`verify.rs:269` already knows these**; no decision is encodable |
+
+*Not-applicable* is per-return **liveness** of a rule, not a static entry. *Refused* is whole-return
+(`screen_inputs`), so it folds into `asked()`. ★★ **"Nothing ever decided" is an FQN ABSENT from the
+census — the completeness test's red, never an entry.**
+
+**Record-the-decline: protection on net, and mostly a non-event** — the durable record **already
+exists** (`ReturnInputs` persists `foreign_accounts: Some(false)`, and must). The census adds
+structure, not new testimonial content; *refusing* to hold it would be the active choice, and would
+protect only a filer who answered falsely. Preparer practice retains exactly this (§6107 workpapers,
+Form 8867, Circular 230) and an honest record supports §6664(c) reasonable cause. Consequences:
+**keep the census DERIVED** (never a second store that can drift), and **the pointer references the
+QUESTION ONLY, dereferenced at emit** — copying the answer is a stale-answer hazard.
+
+**Two stores, one link, cross-checked.** Registry = year-stable tax semantics in core; census =
+per-(form,year) PDF fact, belonging **inside the `.map.toml`** so `no_unmapped_filled` and the new
+completeness check read the same universe. Two tests close it: `(map ∪ census) == the AcroForm FQN
+set` exactly, and every referenced `QuestionId` resolves against `QuestionId::ALL`.
+
+★★ **Granularity: the question's granularity is the FORM's own gating granularity.** Transcribe its
+skip-instruction ("didn't pay vehicle-loan interest → skip 22–30"); never invent a coarser compound.
+One question retires many FIELDS but only one PREDICATE *the form itself states*. Too-coarse's failure
+mode: **a compound "no" spanning distinct legal predicates fabricates precision the filer never swore
+to.** Per-field questions are never needed — provenance is per-field, questions are per-gate, the link
+is many-to-one. Generalise it to **one DECISION → N fields** (filing status: five checkboxes, one
+computed selection, four blank-because-sibling-filled).
+
+★ **The §6a trailer mis-attribution is fixed for free**: region (header/body/trailer) becomes
+derivable from the census's `not-ours` entries, rather than needing a geometry patch.
+
+### ✅ SEQUENCING — census FIRST, and §6's claim was overdrawn
+
+**This note said "§G-11 blocks the honest version." That was wrong by one level, and the correction is
+accepted.** The 496 unaccounted are **unmapped**, so the emitter already leaves them genuinely blank —
+classifying them changes no rendering. What §G-11 gates is honest rendering of the **mapped 662**, and
+**the census audit of those 662 IS §G-11's worklist.** So: census lands now → §G-11's spec consumes
+its mapped-field audit → any remapping follows.
+
+### ★★★ OPEN — the shred requirement lands on the consult's own breaking assumption
+
+§6b arrived after dispatch. A **derived** census resolves `asked()` by dereferencing the answer; **shred
+the answer and the provenance becomes unresolvable — a lawfully-blank field silently becomes an
+unaccounted one**, the exact defect the census exists to catch. The consult's `WHAT WOULD MAKE THIS
+WRONG` names this: the "no second store" rule must bend far enough to persist *the decision's
+existence, separate from its content*. **Unresolved. First question for any round 2.**
+
 ## 7. Open questions for the ⑥ consult
 
 1. Is the §3 taxonomy right, and is "Declined + question pointer" the correct shape for a lawful

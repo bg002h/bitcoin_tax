@@ -682,6 +682,30 @@ person**, four times the §63(f) amount.
 **Residue.** The **blind** boxes remain unexamined for a death interaction, and a TY2024 patch release
 carrying this fix is still worth considering on its own merits (owner's call). Filed as G-9a below.
 
+### G-14 — ★★★ CRYPTO-SHREDDABLE interview answers: one vault cert is too blunt
+
+**Owner requirement, 2026-07-30.** Interview answers ("were you asked about foreign accounts? said
+no") must be **vault-encrypted** (they are) **and cryptographically deletable after filing** (they are
+not, usefully). Detail: `design/forms/FIELD_PROVENANCE.md` §6b. Interlocks with **§G-13**.
+
+**Already true:** the whole vault is one encrypted SQLite image under a passphrase-protected OpenPGP
+cert; `SecretBuf` mlocks + scrubs plaintext on the save path. Privacy at rest is DONE.
+
+**The gap:** there is exactly **ONE cert per vault** — no envelope encryption, no per-item data keys.
+"Destroy the passphrase" therefore destroys everything, and **basis carries forward across tax
+years**: shredding the vault after filing loses the cost basis of every unsold lot. That trades a
+privacy win for a permanent tax disaster, so it is not a usable post-filing action.
+
+**What is needed:** per-item envelope encryption — answers under their own data key, wrapped by the
+vault key; destroy the wrapped key ⇒ answers unrecoverable, **lot ledger intact**.
+
+★ **A shred must not turn a lawfully-blank field into an UNACCOUNTED one** (§G-13 category 6). The
+census likely has to record the decision's EXISTENCE separately from its CONTENT — *"declined
+2026-04-15, detail shredded"* is still a determinate provenance.
+
+★ **Never auto-shred.** Destroying evidence of diligence must be an explicit, informed act by the
+filer — never a default or a background job.
+
 ### G-13 — ★★★ FIELD PROVENANCE: 496 of 1158 AcroForm fields have no recorded decision
 
 **Owning phase: NOT B3.** Whole-surface, and it interlocks with **§G-11** (which blocks its honest
