@@ -682,6 +682,34 @@ person**, four times the §63(f) amount.
 **Residue.** The **blind** boxes remain unexamined for a death interaction, and a TY2024 patch release
 carrying this fix is still worth considering on its own merits (owner's call). Filed as G-9a below.
 
+### G-12 — btctax emits Form 8275 but NOT Form 8275-R, so it cannot disclose a position contrary to a REGULATION
+
+**Owning phase: unassigned** — a product decision before it is a build. Filed 2026-07-30.
+
+**The distinction, and it is not cosmetic.** Only **26 USC** is law. A Treasury regulation is the
+executive's *interpretation* of the statute: binding in practice, and **capable of being wrong** — regs
+are regularly held invalid for exceeding or contradicting the statute, the more so since *Loper Bright*
+ended deference. **If the statute disagrees with a regulation, the filer has a duty to push back**, and
+the system supplies the instrument for it:
+
+| form | discloses a position contrary to | btctax |
+|---|---|---|
+| **8275** | rules **other than** regulations | ✅ emitted (`form8275.rs`) |
+| **8275-R** | a **regulation** | ❌ **not modelled** (`f8275r.pdf` exists at the IRS) |
+
+**Consequence.** btctax can take positions that agree with the regulations, or take a contrary position
+**undisclosed** — which is the one outcome with penalty exposure. It has no way to take a statute-based
+position *properly disclosed*. So the duty is not merely neglected; it is **unrepresentable**.
+
+★ **This is not a call to become adversarial.** The honest observation is that the duty is routinely
+neglected because challenging is expensive, and that is a legitimate choice a filer makes — but it must
+be *a choice*, not an absence in the software. Cf. §G-11: the theme is identical, that btctax should not
+silently decide something on the filer's behalf.
+
+**What this is NOT:** an invitation to have btctax *identify* statute/reg conflicts on its own. That is
+legal judgement and is out of scope in the same way intent is (§G-11's scope bound). The narrow question
+is whether the filer, having taken such a position, can file it correctly.
+
 ### G-11 — ★★★ ARCHITECTURAL: the emitter cannot express "no testimony" — `Usd::ZERO` prints `0`
 
 **Owning phase: NOT B3.** This is a whole-surface finding, larger than Schedule 1-A, and it must not be

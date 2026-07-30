@@ -225,19 +225,27 @@ before paying is far cheaper than discovering it is wrong on form 12.
   forms**, and the answers are written down for us in a four-rung ladder we may climb whenever a rung is
   silent:
 
-  | rung | source | note |
+  | rung | source | standing |
   |---|---|---|
-  | 1 | **the form's own embedded instructions** — captions, cautions, "enter the smaller of", skip routing | on the page itself; often sufficient |
-  | 2 | **the numbered instructions document** `iNNNN` (`i1040gi` for the 1040-family schedules) | archived and extracted for every form we emit |
-  | 3 | **the regulations** — 26 CFR | ★ **law**, unlike rungs 1-2 |
-  | 4 | **the statute** — 26 USC | ★ **law**, and final |
+  | 1 | **the form's own embedded instructions** — captions, cautions, "enter the smaller of", skip routing | guidance |
+  | 2 | **the numbered instructions document** `iNNNN` (`i1040gi` for the 1040-family schedules) | guidance |
+  | 3 | **the regulations** — 26 CFR | the agency's **interpretation** — binding in practice, **capable of being wrong** |
+  | 4 | **the statute** — 26 USC | ★★ **the only rung that is LAW** |
 
-  ★★ Rungs 1-2 are *guidance*, not law; rungs 3-4 **are** law (see the `tax-authority-hierarchy` memory).
-  So a strategy that can only ever read rungs 1-2 has a ceiling, and the consult should say whether that
-  ceiling matters in practice or is a distinction without a difference for label *enumeration*
-  specifically. **We are never without an authority** — only ever without having gone and read it. Judge
-  the strategy on how directly it gets us from "this line exists" to "this is what the form tells the
-  filer to do", not on parsing elegance.
+  ★★ **Only rung 4 is law.** A Treasury regulation is the executive's reading of the statute; it is
+  routinely held invalid for exceeding or contradicting it, the more so since *Loper Bright* ended
+  deference. **If we believe the statute disagrees with a regulation, it is our duty to push back** — the
+  tax system even supplies the instrument, **Form 8275-R** (Regulation Disclosure Statement), as distinct
+  from Form 8275 for positions contrary to everything else.
+
+  ★ **And the honest part: that duty is routinely neglected because challenging is expensive.** Say so
+  rather than pretending otherwise — but do not let it silently become "the reg settles it". btctax
+  emits Form 8275 and **not** 8275-R (`FOLLOWUPS.md` §G-12), so today it cannot *do* the duty at all: it
+  can only agree with the regs, or take a contrary position undisclosed.
+
+  **We are never without an authority** — only ever without having gone and read it. Judge the strategy on
+  how directly it gets us from "this line exists" to "this is what the form tells the filer to do", not on
+  parsing elegance.
 - **SETTLED — do not re-derive.** The measured layout data (leading-number works for 6 forms;
   `f1040sa`/`f1040` use a second column and return **0**; `f8949` is a grid); the three sub-problems
   (whitespace, parentless sub-letters, headings-with-no-amount-box); Schedule 1-A's truth is **48**; the
