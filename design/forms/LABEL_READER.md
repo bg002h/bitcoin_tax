@@ -23,15 +23,35 @@
 > been visible on a form whose truth we had not established by hand — which is the argument for the
 > anchor form, made concrete.
 >
-> **The 50-vs-48 delta is an OPEN ADJUDICATION, deliberately not closed by tuning.** `14`+`a` and
-> `36`+`a` share a y-row and merge mechanically to `14a`/`36a` (measured, `|dy| < 3.0`). The residue
-> is the two *standalone* heading rows `4` and `22`. Doctrine says a heading is a label that encodes
-> no decision and must be recorded **with a reason** (⇒ 50); the hand count plainly counted
-> entry-taking lines only (⇒ 48). **The reader was NOT adjusted to reach 48** — tuning an instrument
-> until it agrees with an expectation is how false confidence is manufactured.
+> ### ★★★ 50 vs 48 — RESOLVED by opening the PDF. Both counts were right.
 >
-> **The census also flags a third row needing adjudication: `4a` reports no amount box.** Unexpected,
-> since `4a`–`4c` are sub-rows. Left flagged rather than guessed at — this is the design working.
+> | | |
+> |---|---|
+> | **50** | printed line labels — what the text witness enumerates |
+> | **48** | of those, the ones that TAKE AN ENTRY — **the hand-established figure, reproduced exactly** |
+> | **2** | headings with no box of their own: **4** (heads 4a–4c) and **22** (heads the VIN table; its columns are (i)/(ii)/(iii) and line 23 adds rows 22a/22b) |
+>
+> `14`+`a` and `36`+`a` share a y-row and merge mechanically to `14a`/`36a` (measured, `|dy| < 3.0`).
+>
+> ★★ **Nothing was tuned to make the numbers agree.** The witnesses were corrected against the FORM,
+> and 48 fell out. Had the reader been nudged to emit 48 *labels*, the two headings would have
+> vanished from the census entirely — which is exactly the "we forgot this line" defect it exists to
+> catch.
+>
+> ### ★★ Three box-assignment models, two refuted by the rendered page
+>
+> | model | refuted by |
+> |---|---|
+> | `y ± 12pt` fixed tolerance | **4a reported box-less.** Its label sits at the top of a three-line paragraph, its box ~36pt below at the foot — beyond any fixed window. |
+> | span label→next, testing the box's **top** | **22 reported as HAVING a box.** Boxes are vertically centred on their row, so 22a's VIN box top (159.0) sits a hair above label `a` (161) and bleeds upward. |
+> | nearest label to the box centre | **11, 19, 28 reported box-less.** On a two-line paragraph the box is nearer the NEXT label, which steals it. |
+>
+> **What works: the last label at or above the box's CENTRE.** The centre kills the bleed (a centre
+> is unambiguously inside its own row); "at or above" kills the theft (a box can never be claimed by
+> a label printed below it).
+>
+> ★ Every one of these produced a *plausible* wrong answer, and each fix would have masked the
+> others. None was visible from the text layer, the field names, or the extract — only from the page.
 >
 > **NOT yet built (increment 2):** the committed per-form **ledger**, and the typed disagreement
 > rules (BOX-WITH-NO-LABEL = hard fail, LABEL-WITH-NO-BOX = must carry a kind, SEQUENCE GAP = hard

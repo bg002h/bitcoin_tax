@@ -263,30 +263,70 @@ pub fn witness_boxes(g: &Geometry) -> Vec<(u32, f64, f64, String)> {
     v
 }
 
-/// Does any box sit on the same printed row as a label at top-down `y`?
+/// Does the row belonging to a label carry an amount box?
 ///
-/// ★ The tolerance is a ROW, not a point: a label's baseline and its box's rect differ by a few
-/// points, and the amount box for line *n* is vertically centred on line *n*'s text.
-pub fn row_has_box(boxes: &[(u32, f64, f64, String)], page: u32, y: f64) -> bool {
-    boxes
-        .iter()
-        .any(|(p, top, bottom, _)| *p == page && y + 12.0 >= *top && y <= *bottom + 12.0)
+/// ★★★ **A ROW IS A SPAN, NOT A POINT — and a fixed tolerance is wrong.** The first version used
+/// `y ± 12pt` and reported that Schedule 1-A **line 4a has no amount box**. Opening the PDF showed it
+/// plainly does. The label `a` sits at the TOP of a three-line instruction paragraph while its box
+/// aligns with the LAST line, ~36pt below, so the tolerance could never reach it.
+///
+/// ★ Note the failure mode: it produced a *plausible* answer (4a joined the two real headings 4 and
+/// 22 in the "no box" list) that only looking at the page could refute. Two more lines of tolerance
+/// would have hidden it again on some other form.
+///
+/// The correct model: a label owns the vertical span from its own `y` down to the next label's `y`
+/// on the same page. Any box in that span is its box. That is exactly how the form reads.
+/// ★★★ **A box belongs to the LAST label at or above its CENTRE.** Three models were tried; the
+/// first two were refuted by the rendered page, and each fix would have hidden the other:
+///
+/// | model | what it got wrong |
+/// |---|---|
+/// | `y ± 12pt` fixed tolerance | reported **4a as box-less**. Its label sits at the top of a three-line paragraph, its box ~36pt below at the foot — out of reach of any fixed window. |
+/// | span from label to next label, testing the box's **top** | reported **22 as HAVING a box**. Boxes are vertically centred on their row, so the 22a VIN box's top edge (159.0) sits a fraction above label `a` (161) and bleeds into line 22's span. |
+/// | nearest label to the box centre | reported **11, 19, 28 as box-less**. On a two-line paragraph the box sits nearer the NEXT label than its own, so the next label steals it. |
+///
+/// ★ Using the box's **centre** fixes the bleed (a centre is unambiguously inside its own row), and
+/// "last label at or above" fixes the theft (a box can never be claimed by a label printed below
+/// it). Both failures were only visible because the form was opened and read.
+pub fn assign_boxes(
+    labels: &[(String, u32, f64)],
+    boxes: &[(u32, f64, f64, String)],
+) -> Vec<usize> {
+    let mut counts = vec![0usize; labels.len()];
+    for (bp, top, bottom, _) in boxes {
+        let centre = (top + bottom) / 2.0;
+        // The last label on this page whose y is at or above the box's centre. The small epsilon
+        // covers a box centred a hair above its own label's text baseline.
+        let owner = labels
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, lp, ly))| lp == bp && *ly <= centre + 2.0)
+            .max_by(|(_, (_, _, a)), (_, (_, _, b))| a.total_cmp(b))
+            .map(|(i, _)| i);
+        if let Some(i) = owner {
+            counts[i] += 1;
+        }
+    }
+    counts
 }
 
 /// `cargo run -p xtask -- label-census <stem>` — run both witnesses and print the adjudicated rows.
 ///
 /// ★ This is the human's view of the two witnesses side by side: every label the form prints, and
-/// whether the AcroForm says it carries an amount box. Rows the witnesses disagree about are exactly
-/// the ones a person must adjudicate against the rendered page.
+/// whether the AcroForm says its row carries an amount box. Rows the witnesses disagree about are
+/// exactly the ones a person must adjudicate against the rendered page — which is how line 4a's
+/// missing box was caught and how lines 4 and 22 were confirmed as genuine headings.
 pub fn run(stem: &str) -> Result<(), String> {
     let g = crate::form_geometry::load(&crate::form_geometry::repo_root(), stem)?;
     let labels = witness_text(&g)?;
     let boxes = witness_boxes(&g);
+    let counts = assign_boxes(&labels, &boxes);
 
     let rows: Vec<Row> = labels
         .iter()
-        .map(|(label, page, y)| {
-            let has_box = row_has_box(&boxes, *page, *y);
+        .enumerate()
+        .map(|(i, (label, page, _y))| {
+            let has_box = counts[i] > 0;
             Row {
                 label: label.clone(),
                 page: *page,
@@ -294,7 +334,7 @@ pub fn run(stem: &str) -> Result<(), String> {
                 note: if has_box {
                     String::new()
                 } else {
-                    "no AcroForm box on this row — heading, or a non-money entry".to_string()
+                    "no AcroForm box in this row's span — heading, or a non-money entry".to_string()
                 },
             }
         })
@@ -367,56 +407,58 @@ mod tests {
         }
     }
 
-    /// ★★★ **THE COUNT — and the ONE open adjudication, left open on purpose.**
+    /// ★★★ **THE COUNT — and the 50-vs-48 question, RESOLVED against the rendered page.**
     ///
-    /// The witness yields **50**. The hand-established figure in `LABEL_READER.md` is **48**. The
-    /// delta is exactly the two STANDALONE HEADING rows, `4` and `22`:
+    /// Both numbers were right; they were counting different things.
     ///
-    /// - `14`+`a` and `36`+`a` share a y-row, so they merge to `14a`/`36a` — mechanical, measured
-    ///   (`|dy| < 3.0`), and it accounts for 2 of the original 4 over-counts.
-    /// - `4` and `22` sit on rows of their OWN, carry no amount box, and head their lettered
-    ///   sub-rows. Whether they are labels is a question about the FORM, not about the reader.
+    /// | | |
+    /// |---|---|
+    /// | **50** | printed line labels — what the text witness enumerates |
+    /// | **48** | of those, the ones that TAKE AN ENTRY — the hand-established figure |
+    /// | **2** | headings with no box of their own: line **4** (heads 4a–4c) and line **22** (heads the VIN table, whose columns are (i)/(ii)/(iii) and whose rows 22a/22b line 23 then adds) |
     ///
-    /// ★★ **The reader is NOT tuned to reach 48**, and that restraint is the point. Adjusting an
-    /// instrument until it agrees with an expectation is how false confidence is manufactured — the
-    /// exact failure this census exists to prevent. Under the project's own doctrine a heading *is*
-    /// a label that "encodes no decision" and must be recorded **with a reason**, which argues for
-    /// 50; the hand count plainly counted entry-taking lines only, which argues for 48. That is an
-    /// adjudication against the rendered page, and it is what the ledger is for.
-    ///
-    /// This test therefore pins the MECHANICAL result and names the disagreement, so the number
-    /// cannot drift while the question is open.
+    /// ★★ Nothing was tuned to make these agree. The witnesses were fixed against **the form**
+    /// — three box-assignment models were tried and the first two were refuted by opening the PDF —
+    /// and 48 fell out. That is the difference between an instrument that agrees with an expectation
+    /// and one that is right: had the reader been nudged to 48 labels, the two headings would have
+    /// vanished from the census entirely, which is precisely the "we forgot this line" defect it
+    /// exists to catch.
     #[test]
-    fn the_text_witness_yields_the_mechanical_label_set() {
+    fn the_witnesses_resolve_the_50_vs_48_question() {
         let g = sch1a();
-        let labels: Vec<String> = witness_text(&g)
-            .expect("witness")
-            .into_iter()
-            .map(|(l, _, _)| l)
+        let labels = witness_text(&g).expect("witness");
+        let boxes = witness_boxes(&g);
+        let counts = assign_boxes(&labels, &boxes);
+
+        assert_eq!(labels.len(), 50, "printed label count changed: {labels:?}");
+
+        let entry: Vec<&str> = labels
+            .iter()
+            .zip(&counts)
+            .filter(|(_, c)| **c > 0)
+            .map(|((l, _, _), _)| l.as_str())
             .collect();
+        let headings: Vec<&str> = labels
+            .iter()
+            .zip(&counts)
+            .filter(|(_, c)| **c == 0)
+            .map(|((l, _, _), _)| l.as_str())
+            .collect();
+
         assert_eq!(
-            labels.len(),
-            50,
-            "mechanical label set changed. Hand-established figure is 48; the known, OPEN delta is \
-             the two standalone headings `4` and `22`. Got {}: {:?}",
-            labels.len(),
-            labels
+            entry.len(),
+            48,
+            "the hand-established figure is 48 ENTRY lines; got {}: {entry:?}",
+            entry.len()
         );
-        // The merge must have consumed the bare parents, or the count is right by luck.
-        assert!(
-            !labels.contains(&"14".to_string()),
-            "`14` shares its row with `a` and must merge"
+        assert_eq!(
+            headings,
+            vec!["4", "22"],
+            "exactly lines 4 and 22 head their sub-rows and take no entry of their own"
         );
-        assert!(
-            !labels.contains(&"36".to_string()),
-            "`36` shares its row with `a` and must merge"
-        );
-        assert!(labels.contains(&"14a".to_string()) && labels.contains(&"36a".to_string()));
-        // ...and the standalone headings must survive, since they are the open question.
-        assert!(labels.contains(&"4".to_string()) && labels.contains(&"22".to_string()));
     }
 
-    /// ★★ **Zero labels is ALWAYS a hard failure** — `LABEL_READER.md`'s rule, and the reason a
+    /// ★★ **Zero labels is ALWAYS a hard failure**    /// ★★ **Zero labels is ALWAYS a hard failure** — `LABEL_READER.md`'s rule, and the reason a
     /// permissive reader is worse than none: a census with nothing to check reports conformance.
     #[test]
     fn a_form_with_no_label_column_is_a_hard_error_not_an_empty_list() {
@@ -505,17 +547,37 @@ mod tests {
         );
 
         let labels = witness_text(&g).expect("witness");
-        let at = |name: &str| labels.iter().find(|(l, _, _)| l == name).cloned();
+        let counts = assign_boxes(&labels, &boxes);
+        let has = |name: &str| {
+            let i = labels
+                .iter()
+                .position(|(l, _, _)| l == name)
+                .expect("label present");
+            counts[i] > 0
+        };
 
-        let (_, hp, hy) = at("4").expect("line 4 present");
+        // ★ ADJUDICATED AGAINST THE RENDERED PAGE 2026-07-30. Lines 4 and 22 are instruction
+        // paragraphs heading their lettered sub-rows and carry no box of their own; 22 heads the VIN
+        // table whose columns are (i)/(ii)/(iii). Everything else here takes an entry.
         assert!(
-            !row_has_box(&boxes, hp, hy),
+            !has("4"),
             "line 4 is a HEADING and must carry no amount box"
         );
-        let (_, ap, ay) = at("1").expect("line 1 present");
         assert!(
-            row_has_box(&boxes, ap, ay),
+            !has("22"),
+            "line 22 heads the VIN table and must carry no amount box"
+        );
+        assert!(
+            has("1"),
             "line 1 is an entry line and must carry an amount box"
         );
+        // ★★ The regression this span model exists for: 4a's box sits ~36pt below its label, at the
+        // foot of a three-line paragraph. A fixed tolerance reported it box-less, which the PDF
+        // refutes at a glance.
+        assert!(
+            has("4a"),
+            "line 4a HAS an amount box — the row span must reach it"
+        );
+        assert!(has("22a") && has("22b"), "the VIN grid rows carry boxes");
     }
 }
