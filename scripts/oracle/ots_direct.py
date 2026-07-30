@@ -206,6 +206,34 @@ OTS_2024_CASH_CEILING_FRACTION = 0.60
 # Left year-blind, this predicate would disqualify TY2025's MFS-kicker vectors against a solver that
 # handles them CORRECTLY — the entire purpose of moving to TY2025 — while every run printed OK and the
 # witness census reported them "not witnessed". The bug would have been invisible and total.
+# ── Schedule 1-A: present from TY2025, and SILENTLY SKIPPABLE ─────────────────────────────────────
+#
+# ★ `taxsolve_US_1040_2025.c:2375-2391` reads either `S1A_2a` **or** `A1`:
+#
+#       get_parameter( infile, 'l', word, "S1A_2a or A1" );   /* Fix next year. */
+#       if (strcmp( word, "S1A_2a" ) == 0) { ... sched_1A( sched1A_L2a ); }
+#       if (strcmp( word, "A1" ) == 0)     { ...  }           /* sched_1A NEVER called */
+#
+# On the `A1` path Schedule 1-A does not run and `L13b` stays 0 — **no error, no warning**. Since
+# `_fill` rewrites the solver's own template in place, the `S1A_*` lines are normally carried through
+# blank (= 0), which is right for a household with no tips/overtime/vehicle interest. But "normally"
+# is not a guarantee: a template revision or a hand-built input file would drop the block and every
+# such household would reconcile perfectly against a Schedule 1-A that never executed.
+#
+# `run_form` therefore ASSERTS the block is present for TY2025+. Fail loudly, not quietly.
+OTS_FIRST_YEAR_WITH_SCHEDULE_1A = 2025
+OTS_SCHEDULE_1A_SENTINEL = "S1A_2a"
+
+# Every `S1A_*` input the TY2025 template exposes, so a caller can drive Schedule 1-A rather than
+# only zero it. Names are OTS's own; values are ours.
+OTS_SCHEDULE_1A_KEYS = (
+    "S1A_2a", "S1A_2b", "S1A_2c", "S1A_2d",          # Part I MAGI add-backs (PR, 2555 L45/L50, 4563 L15)
+    "S1A_4a", "S1A_4b", "S1A_5",                     # Part II qualified tips
+    "S1A_14a", "S1A_14b",                            # Part III qualified overtime
+    "S1A_22a", "S1A_22aii", "S1A_22aiii",            # Part IV vehicle 1: VIN + interest
+    "S1A_22b", "S1A_22bii", "S1A_22biii",            # Part IV vehicle 2
+)
+
 OTS_YEARS_WITH_STALE_MFS_KICKER = frozenset({2024})
 OTS_YEARS_WITHOUT_CASH_CEILING = frozenset({2024})
 
@@ -316,9 +344,10 @@ def run_form(
     values: dict[str, object],
     work: Path,
     capgains: list[str] | None = None,
+    year: int | None = None,
 ) -> tuple[dict[str, float], Path]:
     """Run one OTS solver; return its parsed lines and the path of its output file."""
-    template = _template(subdir, tname)
+    template = _template(subdir, tname, year)
     # OTS reads a blank `YourName:` as consuming the NEXT line as its value, which then
     # derails the whole strict-order parse. Every identity field must carry something.
     identity = {"YourName:": "Golden Household", "YourSocSec#:": "000-00-0000"}
@@ -327,9 +356,21 @@ def run_form(
         **values,
     }
     src = work / f"{form}.txt"
-    src.write_text(_fill(template, values, capgains))
+    filled = _fill(template, values, capgains)
+    # ★ Schedule 1-A is skippable in silence (see OTS_SCHEDULE_1A_SENTINEL) — refuse to run without it.
+    if (
+        form == "US_1040"
+        and (OTS_YEAR if year is None else year) >= OTS_FIRST_YEAR_WITH_SCHEDULE_1A
+        and not re.search(rf"^\s*{OTS_SCHEDULE_1A_SENTINEL}\b", filled, re.M)
+    ):
+        raise RuntimeError(
+            f"generated OTS input has no {OTS_SCHEDULE_1A_SENTINEL} line, so OTS would take its 'A1' "
+            f"branch and never run sched_1A() — Schedule 1-A would be silently 0 with no error. "
+            f"Template: {form}"
+        )
+    src.write_text(filled)
     proc = subprocess.run(
-        [str(_bin(form)), src.name], cwd=work, capture_output=True, text=True
+        [str(_bin(form, year)), src.name], cwd=work, capture_output=True, text=True
     )
     out_path = work / f"{form}_out.txt"
     if not out_path.exists():

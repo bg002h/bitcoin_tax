@@ -48,11 +48,40 @@ warnings.filterwarnings("ignore")
 import pandas as pd, taxcalc as tc  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-# 2024 standard deduction, keyed by the fixture's own filing-status tokens (Rev. Proc. 2023-34
-# §2.15). Used to CHECK that the taxcalc divergence has the shape we claim — never to compute.
-STANDARD_DEDUCTION_2024 = {
-    "single": 14_600.0, "mfj": 29_200.0, "mfs": 14_600.0, "hoh": 21_900.0, "qss": 29_200.0,
+# Standard deduction by YEAR, keyed by the fixture's own filing-status tokens. Used to CHECK that the
+# taxcalc divergence has the shape we claim — never to compute.
+#
+# ★ TY2025 is OBBBA, NOT the Rev. Proc. `f1040--2025.pdf`'s own margin prints 15,750 / 31,500 / 23,625,
+# where Rev. Proc. 2024-40 gives 15,000 / 30,000 / 22,500. Both oracles agree with the form (OTS
+# `S_STD_DEDUC = 15750.0`; taxcalc `STD` 2025 = [15750, 31500, 15750, 23625, 31500]). Using the Rev.
+# Proc. figures here would mis-size the #3108 gap and report a real divergence as expected.
+STANDARD_DEDUCTION = {
+    2024: {  # Rev. Proc. 2023-34 §2.15
+        "single": 14_600.0, "mfj": 29_200.0, "mfs": 14_600.0, "hoh": 21_900.0, "qss": 29_200.0,
+    },
+    2025: {  # OBBBA, Pub. L. 119-21 — verified against f1040--2025.pdf
+        "single": 15_750.0, "mfj": 31_500.0, "mfs": 15_750.0, "hoh": 23_625.0, "qss": 31_500.0,
+    },
 }
+
+# A vector without an explicit `year` is TY2024, which is what every committed vector is today.
+DEFAULT_FIXTURE_YEAR = 2024
+
+
+def _year_of(v) -> int:
+    """The tax year a vector belongs to. Absent = TY2024, the year the fixture was authored in."""
+    return int(v.get("year", DEFAULT_FIXTURE_YEAR))
+
+
+def _standard_deduction(v) -> float:
+    year, st = _year_of(v), v["inputs"]["filing_status"]
+    try:
+        return STANDARD_DEDUCTION[year][st]
+    except KeyError:
+        raise KeyError(
+            f"no standard deduction for TY{year}/{st}; add it with that year's controlling source "
+            f"(for TY2025+ that is OBBBA, not the Rev. Proc.)"
+        ) from None
 
 # ★ OTS's disqualifications are COMPUTED, never listed by vector name.
 # `ots_direct._ots_amt_disqualified` is the fail-closed predicate — an unrecognised shape returns a
@@ -167,8 +196,8 @@ def _taxcalc_expected_gaps(v) -> list[tuple[float, str]]:
     f, st = v["form6251"], v["inputs"]["filing_status"]
     gaps: list[tuple[float, str]] = []
     if not v["derived"]["itemized"]:
-        gaps.append((STANDARD_DEDUCTION_2024[st],
-                     f"line 2a's {STANDARD_DEDUCTION_2024[st]:,.0f} standard-deduction add-back (#3108)"))
+        std = _standard_deduction(v)
+        gaps.append((std, f"line 2a's {std:,.0f} standard-deduction add-back (#3108)"))
     pre_kicker = sum(float(f[k]) for k in ("line1", "line2a", "line2b", "line3"))
     kicker = float(f["line4"]) - pre_kicker
     if abs(kicker) > 0.005:
@@ -272,6 +301,8 @@ def _witness_census(vectors, taxcalc_disqualified, ots_disqualified, ots_ran) ->
     two-oracle AMT-owing vector fails this run.
     """
     print("\n── witness census · the Tier-2 gate (FOLLOWUPS §G-6b) ──")
+    years = sorted({_year_of(v) for v in vectors})
+    print(f"  fixture years present: {', '.join('TY' + str(y) for y in years)}")
     if not ots_ran:
         print("  INCONCLUSIVE — OTS did not run, so no vector can have two witnesses this run.")
         return 0
@@ -305,6 +336,11 @@ def _witness_census(vectors, taxcalc_disqualified, ots_disqualified, ots_ran) ->
     return 0
 
 
+def o_year_label() -> str:
+    """The solver year this run will use, so a mismatched OTS_DIR/OTS_YEAR is visible in the output."""
+    return str(os.environ.get("OTS_YEAR", "2024"))
+
+
 def _ots_pass(vectors) -> tuple[int, dict[str, str], bool]:
     """Compare every line BOTH engines produce (minus echoes) against OpenTaxSolver.
 
@@ -313,7 +349,7 @@ def _ots_pass(vectors) -> tuple[int, dict[str, str], bool]:
     Absent `OTS_DIR` this prints a loud SKIP and returns 0 — a missing oracle is a gap in coverage, not
     a pass, and saying so is the whole point of the two-oracle standard.
     """
-    print("\n── oracle 1 · OpenTaxSolver, every printed Form 6251 line ──")
+    print(f"\n── oracle 1 · OpenTaxSolver {o_year_label()}, every printed Form 6251 line ──")
     if not os.environ.get("OTS_DIR"):
         print("  SKIPPED — OTS_DIR is unset, so AMT rests on ONE oracle for this run.")
         print("  Install: https://sourceforge.net/projects/opentaxsolver/files/OTS_2024/")
@@ -356,15 +392,19 @@ def _ots_pass(vectors) -> tuple[int, dict[str, str], bool]:
                 # handling of the gift. The vectors' only itemized component is the cash gift.
                 vals |= {"A5a": 0, "A5b": 0, "A8a": 0, "A11": float(i["cash_gift"])}
             parsed, _ = o.run_form("US_1040", "US_1040", "US_1040", vals, work,
-                                   capgains=o._capgains_rows(0.0, float(i["net_ltcg"])))
+                                   capgains=o._capgains_rows(0.0, float(i["net_ltcg"])),
+                                   year=_year_of(v))
             got = o._form6251_lines(parsed)
         finally:
             shutil.rmtree(work, ignore_errors=True)
         # ★ COMPUTED, fail-closed. `_ots_amt_disqualified` also returns a reason when OTS printed no
         #   Form 6251 at all, so the "not witnessed" case and the "witnessed by a solver with a known
         #   defect in this region" case go through one predicate instead of a dict of vector names.
+        # ★ Year-scoped: OTS 2024's stale MFS constants and missing cash ceiling are BOTH fixed in the
+        #   2025 solver, so a TY2025 vector must not inherit TY2024's disqualifications.
         why_not = o._ots_amt_disqualified(
-            vals["Status"], {"charitable_cash": float(i["cash_gift"])}, parsed, got
+            vals["Status"], {"charitable_cash": float(i["cash_gift"])}, parsed, got,
+            year=_year_of(v),
         )
         if why_not:
             disqualified[vid] = why_not
