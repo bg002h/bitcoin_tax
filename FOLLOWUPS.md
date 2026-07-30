@@ -682,6 +682,32 @@ person**, four times the §63(f) amount.
 **Residue.** The **blind** boxes remain unexamined for a death interaction, and a TY2024 patch release
 carrying this fix is still worth considering on its own merits (owner's call). Filed as G-9a below.
 
+### G-16 — ★★★ LIVE: `delete_draft` is not a deletion — discarded SSNs/DOBs ride in SQLite free pages forever
+
+**Verified end-to-end 2026-07-30** (Opus architect consult, `reviews/resumability-vs-discovery-opus-r1.md`).
+Not a design question — a defect in shipped behaviour.
+
+**The chain, every link confirmed:**
+
+1. `input_form_store::delete_draft` = plain `DELETE FROM return_inputs_draft WHERE year=?1`. SQLite
+   marks the row's pages free; it does **not** overwrite the bytes.
+2. **`VACUUM` / `secure_delete` appear ZERO times in the entire tree.**
+3. `sqlite_io::db_to_bytes` = `conn.serialize(DatabaseName::Main)` — the **whole image**, free pages
+   included.
+4. `vault.rs::save()` encrypts that image and writes it.
+
+**⇒ Every superseded draft — SSNs, DOBs, income figures the filer typed and discarded — is encrypted
+into every subsequent vault generation, indefinitely.** The draft's real retention is **unbounded and
+invisible**, strictly worse than `.bak`'s bounded single generation, and `delete_draft` reads as a
+deletion while not being one.
+
+★ **Same fix as §G-14's shred** (`VACUUM` or `secure_delete=ON` before serialize) — §G-16 makes it
+urgent rather than prospective. **Mutation test:** plant a draft, delete it, serialize, and grep the
+image for the discarded content; it must not appear.
+
+★ Not a *disclosure* defect — the vault is encrypted at rest. It is a **deletion** defect: the code
+claims a removal it does not perform, which is the "instrument that cannot do what it says" class.
+
 ### G-15 — ★★★ The question registry has NO YEAR DIMENSION — **BUILD THIS FIRST** (⑦ consult)
 
 **⑦ verdict:** `reviews/shred-and-year-fable-r2.md`. **G-15 leads the whole sequence** — it is a small

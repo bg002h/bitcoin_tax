@@ -385,6 +385,65 @@ the testimony's content dies.
 
 **Build order (settled across both consults): G-15 → G-13 → G-11 → G-14.**
 
+## 6f. ✅ ARCHITECT CONSULT — resumability vs. discovery
+
+Verbatim: [`reviews/resumability-vs-discovery-opus-r1.md`](../../reviews/resumability-vs-discovery-opus-r1.md).
+
+**"Persist answers only, derive the rest" is RIGHT — but incomplete in one load-bearing way:** today's
+answer type cannot represent a complete answer, and persisting progress is the **symptom**, not the
+cure. On disk, per `(tax_year, QuestionId)`: **the answer, when it was given, and which words were
+asked** (prompt hash). Nothing else about the interview.
+
+★★ The answer needs a state it lacks — `Given(v) | Declined | Shredded{..} | absent`. **Verified: a
+class-(B) skip and a never-asked question are both `None`**, so the record cannot tell *declined* from
+*never asked*. That is `blank-is-the-normal-case` one layer up, at the question rather than the form —
+and once `Declined` exists, deriving the rest costs **zero**, because `live_questions` is already a
+pure function over static registries.
+
+**Must NEVER be persisted:** progress, position, an ordered "what remains", a superseded answer value,
+a half-typed token, or any full-blob shadow of `ReturnInputs`. ★ *"What remains"* is forbidden on
+**correctness** grounds before discovery ones — it is a second copy of the liveness predicate, the
+exact invariant consult r2 protected.
+
+**Drafts: a draft is an EDIT TRANSACTION, not a save file.** Legitimate only to protect a *prior
+committed return* from a half-finished edit; it must not exist for fresh authoring, where it is pure
+residue — a second copy of SSNs and DOBs holding values the filer never adopted. ★ Its root cause is
+**precedence, not durability**: a near-empty `ReturnInputs` row outranks `tax_profile` at `resolve`,
+so the store screens at write time even though `resolve`/`packet` already screen fail-closed at use
+time.
+
+**`.bak`: keep, unscoped.** One generation, ages automatically, and it is the corrupt-ciphertext net
+for a single whole-image vault. ★ Counter-intuitively, **committing per answer improves it** — `.bak`
+then holds "one answer ago" instead of the entire pre-interview state. Pin that the generation count
+is exactly **1**: a later "safer" `.bak.1` rotation would silently falsify §G-14's shred with nothing
+going red.
+
+**The CLI's save-at-end IS a defect, on correctness grounds:** re-answering is **re-testifying**, and a
+filer redoing 20 answers from memory at speed answers worse the second time — **understatement risk
+goes up**. CLI and TUI should share semantics: **commit per atomic decision**.
+
+### ★★★ THE PER-ARTIFACT TEST — keep it only if it passes 1 and 2 and fails 3
+
+1. Is it a decision the filer **adopted**, or a state they **passed through**? (passed through ⇒ don't persist)
+2. Does it answer a question a reviewer would ask **anyway** ("did you inquire?"), or does it **create** one ("why did this change?")? Protective artifacts *shrink* the question space; harmful ones expand it.
+3. Is it **reconstructible** from what you must keep regardless? (yes ⇒ derive it — persisting adds risk at zero information gain)
+
+| artifact | | |
+|---|---|---|
+| committed answer + date + prompt-hash | ✓✓✗ | **keep** |
+| shred tombstone | ✓✓✗ | **keep** |
+| "what remains" | fails 3 | derive |
+| WIP draft blob | fails 1 **and** 2 | don't create |
+
+★ **Sequencing consequence:** `answered_on` **cannot be back-filled**. The date and prompt-hash must
+land in **§G-15's** schema bump (already first, free while there are no users), or every pre-existing
+answer's §G-14 tombstone carries an absent or fabricated date — *"a diligence record that lies is
+worse than none."*
+
+★ **Practitioner judgement, genuinely:** how long to retain answers post-filing, and whether an
+"offered, declined" record helps or hurts in a given examination posture, are a preparer's calls. The
+architecture should make retention **the filer's decision**, not pick a window.
+
 ## 7. Open questions for the ⑥ consult
 
 1. Is the §3 taxonomy right, and is "Declined + question pointer" the correct shape for a lawful
