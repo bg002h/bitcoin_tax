@@ -156,7 +156,7 @@ fetched, STOP — do not transcribe from memory.**
 
 # Addendum — from `i6251--2024.pdf` (Nov 13, 2024, Cat. 64277P)
 
-Fetched and transcribed 2026-07-28; archived at `design/amt-form6251/i6251--2024.pdf`. This closes the
+Fetched and transcribed 2026-07-28; archived at `design/forms/2024/i6251--2024.pdf`. This closes the
 five items PART_III.md listed as "still owed". **Nothing below was written from memory.**
 
 ## Who Must File (p.1) — verbatim

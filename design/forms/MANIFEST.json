@@ -1,86 +1,5 @@
 [
   {
-    "path": "design/amt-form6251/f1040--2025.pdf",
-    "kind": "form",
-    "storage": "note",
-    "sha256": "3d31c226df0d189ced80e039d01cf0f8820c1019681a0f0ca6264de277b7e982",
-    "bytes": 220237,
-    "url": "https://www.irs.gov/pub/irs-prior/f1040--2025.pdf",
-    "extract": "design/forms/extract/f1040--2025.txt"
-  },
-  {
-    "path": "design/amt-form6251/f1040s1a--2025.pdf",
-    "kind": "form",
-    "storage": "note",
-    "sha256": "64f97b38ff4218e2f188fd55a8aab7043556687487c82bbefe0b6dd1a956ecd4",
-    "bytes": 94224,
-    "url": "https://www.irs.gov/pub/irs-prior/f1040s1a--2025.pdf",
-    "extract": "design/forms/extract/f1040s1a--2025.txt"
-  },
-  {
-    "path": "design/amt-form6251/f1040sa--2025.pdf",
-    "kind": "form",
-    "storage": "note",
-    "sha256": "c14acf3478f4c33f27ac6e8ecd9f94b6fb25b16745b341728bd27847d2ef56bb",
-    "bytes": 79008,
-    "url": "https://www.irs.gov/pub/irs-prior/f1040sa--2025.pdf",
-    "extract": "design/forms/extract/f1040sa--2025.txt"
-  },
-  {
-    "path": "design/amt-form6251/f6251--2025.pdf",
-    "kind": "form",
-    "storage": "note",
-    "sha256": "6995bfd29c6fe1b80fdc396c9c4796c7cef58a966070db0346721eae815fea3f",
-    "bytes": 104434,
-    "url": "https://www.irs.gov/pub/irs-prior/f6251--2025.pdf",
-    "extract": "design/forms/extract/f6251--2025.txt"
-  },
-  {
-    "path": "design/amt-form6251/f6251--2026-DRAFT.pdf",
-    "kind": "form",
-    "storage": "note",
-    "sha256": "a547fc9d629e1f04bdc30e088214c716667b88cb1b45447c580c0ae33095b5cc",
-    "bytes": 295209,
-    "url": "https://www.irs.gov/pub/irs-dft/f6251--dft.pdf",
-    "extract": ""
-  },
-  {
-    "path": "design/amt-form6251/i1040gi--2025.pdf",
-    "kind": "instructions",
-    "storage": "note",
-    "sha256": "482e9c487c608f1bbeaceef35bc3c0933e8b35443cfff447e4279d590468364a",
-    "bytes": 4434643,
-    "url": "https://www.irs.gov/pub/irs-prior/i1040gi--2025.pdf",
-    "extract": "design/forms/extract/i1040gi--2025.txt"
-  },
-  {
-    "path": "design/amt-form6251/i1040sca--2025.pdf",
-    "kind": "instructions",
-    "storage": "note",
-    "sha256": "b0999b12d9dc4b13868501a9c1879011c00d2fc035f13a1391251d355a6242c8",
-    "bytes": 594250,
-    "url": "https://www.irs.gov/pub/irs-prior/i1040sca--2025.pdf",
-    "extract": "design/forms/extract/i1040sca--2025.txt"
-  },
-  {
-    "path": "design/amt-form6251/i6251--2024.pdf",
-    "kind": "instructions",
-    "storage": "note",
-    "sha256": "5dc1083ef813964fb00ed49fefada2b562b95feaacf9807a91164090a2327ea8",
-    "bytes": 253587,
-    "url": "https://www.irs.gov/pub/irs-prior/i6251--2024.pdf",
-    "extract": "design/forms/extract/i6251--2024.txt"
-  },
-  {
-    "path": "design/amt-form6251/i6251--2025.pdf",
-    "kind": "instructions",
-    "storage": "note",
-    "sha256": "b130e87362006177794ac29affd2637652cc4c8c03e54227891e2d1b9c976753",
-    "bytes": 254231,
-    "url": "https://www.irs.gov/pub/irs-prior/i6251--2025.pdf",
-    "extract": "design/forms/extract/i6251--2025.txt"
-  },
-  {
     "path": "design/forms/2024/f1040--2024.pdf",
     "kind": "form",
     "storage": "note",
@@ -565,6 +484,15 @@
     "bytes": 216021,
     "url": "https://www.irs.gov/pub/irs-prior/i8995--2025.pdf",
     "extract": "design/forms/extract/i8995--2025.txt"
+  },
+  {
+    "path": "design/forms/2026/f6251--2026-DRAFT.pdf",
+    "kind": "form",
+    "storage": "note",
+    "sha256": "a547fc9d629e1f04bdc30e088214c716667b88cb1b45447c580c0ae33095b5cc",
+    "bytes": 295209,
+    "url": "https://www.irs.gov/pub/irs-dft/f6251--dft.pdf",
+    "extract": ""
   },
   {
     "path": "design/forms/periodic/f8275.pdf",

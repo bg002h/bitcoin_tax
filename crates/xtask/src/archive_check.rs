@@ -124,10 +124,10 @@ pub fn classify(name: &str) -> Option<&'static str> {
 
 /// ★★ **THE RATCHET — it may only SHRINK.**
 ///
-/// Every tree here holds primary-source-shaped files. **That there are FOUR is the open defect**, not
-/// a design — four trees, three different provenance conventions, and two of them pure duplication.
-/// That is the *"which one is authoritative?"* ambiguity `CONTINUITY.md` §4 records as step ③, at
-/// twice the size it was recorded at.
+/// Every tree here holds primary-source-shaped files. **Down from FOUR to THREE on 2026-07-30**:
+/// `design/amt-form6251/` was retired as an archive — its 8 duplicate form-notes were deleted, its 2
+/// unique files moved to `design/forms/2026/`, and it is now purely a design directory. What remains
+/// is the (A)/(B) split the hybrid decision deliberately keeps, plus (B)'s text layer.
 ///
 /// ★ **This list deliberately does NOT decide which tree wins.** That is the reconciliation, and it is
 /// the owner's call. What the list DOES do is make a **fifth** archive impossible to add silently —
@@ -147,15 +147,6 @@ pub const KNOWN_ARCHIVES: &[(&str, &str)] = &[
         "design/forms",
         "URL-note + sha256 + committed text layer; machine-checked by `xtask cite-check`. The most \
          complete convention, and the likeliest survivor of the reconciliation.",
-    ),
-    (
-        "design/amt-form6251",
-        "A DESIGN directory (PLAN.md, PART_III.md, reviews/, the vector generator) that also \
-         accumulated form URL-notes before design/forms existed. NOT a pure duplicate — corrected \
-         2026-07-30 after a full walk: 8 notes name documents design/forms also holds, but 2 are \
-         UNIQUE (f6251--2026-DRAFT) and the rest differ only by note template. Retire the notes, \
-         keep the design work; repoint the provenance line in \
-         btctax-core/src/tax/fixtures/schedule_1a_2025_form.txt.",
     ),
     (
         "legal/primary-sources",
@@ -506,9 +497,9 @@ mod tests {
     #[test]
     fn the_archive_count_may_only_shrink() {
         assert!(
-            KNOWN_ARCHIVES.len() <= 4,
+            KNOWN_ARCHIVES.len() <= 3,
             "KNOWN_ARCHIVES has grown to {} — a NEW archive is exactly what A3 exists to prevent. \
-             Four is already the open defect recorded as CONTINUITY.md §0 step ③; the only legitimate \
+             Three is the post-reconciliation state (A + B + B's text layer); the only legitimate \
              direction for this number is DOWN.",
             KNOWN_ARCHIVES.len()
         );

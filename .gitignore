@@ -61,4 +61,3 @@ __pycache__/
 # Each has a "<name>.pdf.txt" note beside it with its irs.gov URL and sha256, and its
 # committed TEXT LAYER lives in design/forms/extract/ (which IS what the tests read).
 design/forms/**/*.pdf
-design/amt-form6251/*.pdf

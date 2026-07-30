@@ -1,6 +1,6 @@
 # GENERATED — do not hand-edit. THE MANUAL, as a checkable fixture.
 #
-# Source: design/amt-form6251/f1040s1a--2025.pdf  sha256:64f97b38…
+# Source: design/forms/2025/f1040s1a--2025.pdf  sha256:64f97b38…
 # Command: pdftotext -layout <pdf> -
 #
 # ★ Extracted from the TEXT LAYER, never a rendered page: a rendered 12 and 22 differ by a

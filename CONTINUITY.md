@@ -289,15 +289,33 @@ single checker.
   ★ **Verification is the point, not ceremony:** a URL that merely *looks* right asserts a provenance
   we have not established — the same sin as a paraphrase presented as a quotation.
 
-**Residue — a countdown, not a note:** **15 documents are archived twice** (`design/amt-form6251/`
-notes shadowing `design/forms/2025/`), detected on **content hash** because the trees name the same
-document differently. `DUPLICATE_SOURCE_GROUPS` pins the number; the test reds if it rises *or* if it
-falls without the constant coming down. Retiring them is mechanical: delete the stray notes, keep
-`design/amt-form6251/`'s real design work (`PLAN.md`, `PART_III.md`, `reviews/`, the vector
-generator), and repoint the provenance line in
-`crates/btctax-core/src/tax/fixtures/schedule_1a_2025_form.txt`.
+### Countdown: **15 → 7** duplicate groups, and **4 → 3** archives (2026-07-30)
 
-★ `design/amt-form6251/` is a **design directory**, not an archive: retire its form-notes, keep
+★ **A correction first.** "All 15 are `design/amt-form6251/` strays" was wrong — generalised from the
+4 groups that happened to be sampled. **F2 again**, in the note describing the F2 detector. A full
+walk showed only **8** were strays.
+
+**DONE — the 8 are retired.** `design/amt-form6251/` is now **purely a design directory**
+(`PLAN.md`, `PART_III.md`, `reviews/`, the vector generator) and is **off the archive list**.
+
+- ★★ **`crates/xtask/src/cite_check.rs` read `design/amt-form6251/{form}--{year}.pdf` in LIVE CODE** —
+  deleting first would have broken the fixture regenerator. Repointed to `design/forms/{year}/`, and
+  the proof is that re-extraction reproduced both fixtures with **only the `# Source:` line changed**
+  (same sha256, same text). That also repaired the two provenance lines without hand-editing either.
+- The 2 unique files (`f6251--2026-DRAFT`) moved to `design/forms/2026/`.
+
+**Remaining 7 — two different things, neither a stray, both DECISIONS rather than cleanup:**
+
+| # | groups | what it is |
+|---|---|---|
+| **3** | `design/forms/{year}/{f8275,i8275,f8283}` == `design/forms/periodic/*` | **By design.** These forms are "Rev. Month Year" with no tax-year edition, so the year-named path is an alias. Retiring means deciding whether year-indexed lookup may resolve through `periodic/`. |
+| **4** | `design/forms/2025/*` == `legal/primary-sources/irs-forms/*` | The genuine **(A)/(B) overlap** — Form 8949, Schedule D + their instructions, under both conventions. Under the hybrid rule *forms* belong in (A) as note+hash, so (B)'s copies are the redundant ones — but they are **committed binaries with extracts in `legal/text/`**, so this is a deletion decision, not a tidy-up. |
+
+`DUPLICATE_SOURCE_GROUPS = 7` pins it; the test reds if it rises **or** if it falls without the
+constant coming down. **Neither remainder blocks ④.**
+
+★ ~~`design/amt-form6251/` is a **design directory**, not an archive~~ — **done, see the countdown
+above.** Original note: retire its form-notes, keep
 `PLAN.md` / `PART_III.md` / `reviews/` / the vector generator, and repoint the provenance line in
 `crates/btctax-core/src/tax/fixtures/schedule_1a_2025_form.txt`.
 

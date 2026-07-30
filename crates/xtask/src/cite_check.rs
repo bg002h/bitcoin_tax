@@ -491,7 +491,7 @@ pub fn extract() -> Result<(), String> {
             continue;
         }
         jobs.push((
-            format!("design/amt-form6251/{}--{}.pdf", f.form, f.year),
+            format!("design/forms/{}/{}--{}.pdf", f.year, f.form, f.year),
             format!(
                 "crates/btctax-core/src/tax/fixtures/{}_form.txt",
                 f.extract_stem
@@ -512,7 +512,7 @@ pub fn extract() -> Result<(), String> {
             ]);
         }
         jobs.push((
-            format!("design/amt-form6251/{}--{}.pdf", f.instructions, f.year),
+            format!("design/forms/{}/{}--{}.pdf", f.year, f.instructions, f.year),
             format!(
                 "crates/btctax-core/src/tax/fixtures/{}_instructions.txt",
                 f.extract_stem

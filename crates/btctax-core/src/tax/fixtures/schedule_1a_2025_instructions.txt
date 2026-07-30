@@ -1,6 +1,6 @@
 # GENERATED — do not hand-edit. THE INSTRUCTIONS, as a checkable fixture.
 #
-# Source: design/amt-form6251/i1040gi--2025.pdf  sha256:482e9c48…
+# Source: design/forms/2025/i1040gi--2025.pdf  sha256:482e9c48…
 # Command: pdftotext -f 101 -l 110 <pdf> -
 #
 # ★ Extracted from the TEXT LAYER, never a rendered page: a rendered 12 and 22 differ by a

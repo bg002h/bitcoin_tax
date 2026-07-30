@@ -120,21 +120,23 @@ pub const URL_NOT_RECOVERABLE: &[&str] = &[
     // paraphrase presented as a quotation.
 ];
 
-/// ★★★ **The residual duplication, as a NUMBER that may only go down.**
+/// ★★★ **The residual duplication, as a NUMBER that may only go down. 15 → 7 on 2026-07-30.**
 ///
-/// Each group is one document archived under two paths — byte-identical, same sha256. Every one is a
-/// `design/amt-form6251/` note shadowing the `design/forms/2025/` entry for the same form, left from
-/// before `design/forms/` existed.
+/// ★ **CORRECTION.** The first version of this comment said "every one is a `design/amt-form6251/`
+/// note shadowing `design/forms/2025/`". That was wrong, and wrong the same way F2 is always wrong —
+/// it generalised from the four groups that happened to be looked at. A full walk showed only 8 of
+/// the 15 were strays. Those 8 are now retired; the remaining 7 are two different things, and
+/// neither is a stray:
 ///
-/// This is what remains of step ③ after the hybrid decision: the *conventions* are now unified (one
-/// manifest, one checker, provenance identical across both trees), but the stray copies are still
-/// there. Retiring them is mechanical — delete the note, keep `design/amt-form6251/`'s actual design
-/// work — and repoint the provenance line in
-/// `crates/btctax-core/src/tax/fixtures/schedule_1a_2025_form.txt`.
+/// | # | groups | what it is |
+/// |---|---|---|
+/// | 3 | `design/forms/{year}/f8275,i8275,f8283` == `design/forms/periodic/*` | **BY DESIGN.** Forms 8275/8283 are "Rev. Month Year" with no tax-year edition, so the year-named path is an alias of the periodic one. Retiring these means deciding whether year-indexed lookup may resolve through `periodic/`. |
+/// | 4 | `design/forms/2025/*` == `legal/primary-sources/irs-forms/*` | **The genuine (A)/(B) overlap** — Form 8949, Schedule D and their instructions, archived under both conventions. Under the hybrid rule *forms* belong in (A) as note+hash, so (B)'s copies are the redundant ones — but they are COMMITTED binaries with extracts in `legal/text/`, so retiring them is a deletion decision, not a cleanup. |
 ///
-/// ★ Pinned rather than merely reported, because "we know about it" is precisely the state that
-/// produced four archives. The count is measured by `duplicates()`; lowering it is the deliverable.
-pub const DUPLICATE_SOURCE_GROUPS: usize = 15;
+/// ★ Neither remainder is a defect that a test can resolve on its own; both are decisions. What the
+/// pin guarantees is that they stay *visible* and can only shrink — which is the whole difference
+/// between a known issue and a forgotten one.
+pub const DUPLICATE_SOURCE_GROUPS: usize = 7;
 
 /// The committed **text layers** — the extracted-text counterpart each tree keeps beside its
 /// sources. These are derived artifacts, never authorities, so they are neither manifest entries nor
