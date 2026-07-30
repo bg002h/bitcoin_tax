@@ -680,7 +680,7 @@
     "storage": "committed",
     "sha256": "42b763510df2b25efa91c6d12c386ca194c32bc730ef0cf606c401aacc34f040",
     "bytes": 123648,
-    "url": "",
+    "url": "https://www.irs.gov/pub/irs-wd/202302012.pdf",
     "extract": "legal/text/irs-guidance/CCA_202302012.txt"
   },
   {
@@ -986,7 +986,7 @@
     "storage": "committed",
     "sha256": "6612a42ba24ead96d401fd3320e148adb8013a4792d2bac1acff6e4f0e21e806",
     "bytes": 25806,
-    "url": "",
+    "url": "https://www.govinfo.gov/content/pkg/USCODE-2024-title26/html/USCODE-2024-title26-subtitleA-chap1-subchapP-partIII-sec1223.htm",
     "extract": ""
   },
   {
@@ -1013,7 +1013,7 @@
     "storage": "committed",
     "sha256": "cacb490fcdcc1bc7a0679d236431a9af9ebc40da8c40f933e282c2153ee47686",
     "bytes": 22981,
-    "url": "",
+    "url": "https://www.govinfo.gov/content/pkg/USCODE-2024-title26/html/USCODE-2024-title26-subtitleA-chap1-subchapB-partI-sec61.htm",
     "extract": ""
   }
 ]

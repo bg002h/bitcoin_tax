@@ -25,6 +25,7 @@ echo "# --- Track B remainder fetched $(date -u +%Y-%m-%dT%H:%M:%SZ) ---" >> "$L
 GB="https://www.govinfo.gov/content/pkg/USCODE-2024-title26/html/USCODE-2024-title26"
 declare -A P=(
  [1]="subtitleA-chap1-subchapA-partI-sec1"
+ [61]="subtitleA-chap1-subchapB-partI-sec61"
  [170]="subtitleA-chap1-subchapB-partVI-sec170"
  [1001]="subtitleA-chap1-subchapO-partI-sec1001"
  [1011]="subtitleA-chap1-subchapO-partII-sec1011"
@@ -37,9 +38,14 @@ declare -A P=(
  [1212]="subtitleA-chap1-subchapP-partII-sec1212"
  [1221]="subtitleA-chap1-subchapP-partIII-sec1221"
  [1222]="subtitleA-chap1-subchapP-partIII-sec1222"
+ [1223]="subtitleA-chap1-subchapP-partIII-sec1223"
  [1411]="subtitleA-chap2A-sec1411"
 )
-for s in 1 170 1001 1011 1012 1015 1016 1031 1091 1211 1212 1221 1222 1411; do
+# ★ 61 and 1223 added 2026-07-30: both were archived but their URLs were recorded NOWHERE, so
+#   `xtask authority-manifest` reported them as provenance gaps. Each candidate URL was VERIFIED by
+#   sha256 against the committed file before being written here — the fetched bytes are byte-identical,
+#   so this is a recovered record, not a plausible-looking guess.
+for s in 1 61 170 1001 1011 1012 1015 1016 1031 1091 1211 1212 1221 1222 1223 1411; do
   dl "${GB}-${P[$s]}.htm" "statute-irc/26USC_s${s}.html"
 done
 
@@ -59,6 +65,8 @@ dl "https://www.govinfo.gov/content/pkg/FR-2024-07-09/pdf/2024-14004.pdf" \
 # ---- Two late-surfaced IRS guidance docs ----
 dl "https://www.irs.gov/pub/irs-drop/n-26-20.pdf"   "irs-guidance/Notice_2026-20.pdf"
 dl "https://www.irs.gov/pub/irs-wd/202124008.pdf"   "irs-guidance/CCA_202124008.pdf"
+# ★ Added 2026-07-30, same recovery: sha256-verified byte-identical to the committed copy.
+dl "https://www.irs.gov/pub/irs-wd/202302012.pdf"   "irs-guidance/CCA_202302012.pdf"
 
 echo "=== verify file types ==="
 for f in statute-irc/26USC_s1012.html regulations-cfr/26CFR_1.1012-1_basis.xml \

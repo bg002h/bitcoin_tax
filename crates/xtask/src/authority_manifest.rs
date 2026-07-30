@@ -113,14 +113,11 @@ pub struct Entry {
 /// This is a *recorded gap*, not an excuse: an authority we cannot re-fetch is one we cannot prove
 /// current, and that is worth being able to grep for.
 pub const URL_NOT_RECOVERABLE: &[&str] = &[
-    // Fetched outside `legal/_scripts/` — no `dl` line records where it came from.
-    "legal/primary-sources/irs-guidance/CCA_202302012.pdf",
-    // §61 and §1223 are absent from the statute loop's section list (which covers §1, §170, §1001,
-    // §1011, §1012, §1015, §1016, §1031, §1091, §1211, §1212, §1221, §1222, §1411). Both are
-    // re-derivable by hand from the govinfo granule pattern, but nothing in the repo RECORDS that,
-    // and inventing the URL here would be asserting provenance we do not have.
-    "legal/primary-sources/statute-irc/26USC_s61.html",
-    "legal/primary-sources/statute-irc/26USC_s1223.html",
+    // ★★ EMPTIED 2026-07-30. All three former entries — CCA 202302012 and 26 USC §61 / §1223 — were
+    // recovered by search and then **verified by sha256 against the committed bytes** before being
+    // written into `legal/_scripts/fetch_remainder.sh`. Verification is the point: a URL that merely
+    // looks right asserts a provenance we have not established, which is the same sin as a
+    // paraphrase presented as a quotation.
 ];
 
 /// ★★★ **The residual duplication, as a NUMBER that may only go down.**

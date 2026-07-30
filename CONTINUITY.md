@@ -281,9 +281,13 @@ single checker.
   pointed inward, catching "archived but never recorded".
 - ★★★ **`MANIFEST.json` already existed with 66 entries and NOTHING read it.** A manifest nobody
   checks is F4 in its purest form. It has a reader now.
-- **110 of 113 URLs recovered** — including all 16 statutes, which required parsing the fetch scripts'
-  `declare -A` map and `for` loop. A naive parse got 87 and silently dropped **every rung that is
-  law**. The 3 genuine gaps are in `URL_NOT_RECOVERABLE`, shrink-only, each with a reason.
+- **113 of 113 URLs recorded — `URL_NOT_RECOVERABLE` is EMPTY.** Getting to 110 required parsing what
+  the fetch scripts actually use (`declare -A` map + `for` loop); a naive parse got 87 and silently
+  dropped **every rung that is law**. The last 3 — CCA 202302012 and 26 USC **§61** / **§1223** — were
+  found by web search and then **verified by sha256 against the committed bytes** (all three
+  byte-identical) before being written into `legal/_scripts/fetch_remainder.sh`.
+  ★ **Verification is the point, not ceremony:** a URL that merely *looks* right asserts a provenance
+  we have not established — the same sin as a paraphrase presented as a quotation.
 
 **Residue — a countdown, not a note:** **15 documents are archived twice** (`design/amt-form6251/`
 notes shadowing `design/forms/2025/`), detected on **content hash** because the trees name the same
