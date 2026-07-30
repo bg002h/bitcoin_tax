@@ -243,6 +243,12 @@ before paying is far cheaper than discovering it is wrong on form 12.
   emits Form 8275 and **not** 8275-R (`FOLLOWUPS.md` §G-12), so today it cannot *do* the duty at all: it
   can only agree with the regs, or take a contrary position undisclosed.
 
+  ★★ **A believed statute/reg disagreement is now RECORDED AND TICKLED, not remembered.**
+  `AUTHORITY_CONFLICTS.md` is the register; `cargo run -p xtask -- authority-conflicts` is the check, and
+  an entry past its `review-by` **fails the test suite**. Neglecting the duty stays a legitimate choice
+  (cost) — but it must be *a choice*, dated, with a review date, revisited. It can never again be an
+  omission nobody decided. Mutation-verified: an overdue entry reds the suite.
+
   **We are never without an authority** — only ever without having gone and read it. Judge the strategy on
   how directly it gets us from "this line exists" to "this is what the form tells the filer to do", not on
   parsing elegance.
@@ -300,4 +306,6 @@ names anyway to fill the form (B4), so the work would serve two purposes instead
 | §G-6c / §G-6d, E4-E6 | AMT Tier-2 items, parked behind the TY2025 pivot |
 | B3 T2-T7, B4 | Schedule 1-A build; filing assets + corpus |
 | — | **1 of 16 forms** has reached conformance (step 3) |
+| **§G-12** | btctax emits Form 8275 but **not 8275-R**, so a position contrary to a REGULATION cannot be disclosed — the duty is unrepresentable |
+| — | `AUTHORITY_CONFLICTS.md` is empty: we believe no reg governing our forms disagrees with the statute. **A statement about what we examined, not a guarantee.** |
 | — | **crates.io temp token still needs revoking** (from the v0.14.0 publish) |

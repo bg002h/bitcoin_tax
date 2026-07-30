@@ -7,6 +7,7 @@
 //! `cargo run -p xtask -- cite-check` verifies every quotation in the Schedule 1-A design docs against
 //! the committed IRS text-layer extracts. `… -- extract-schedule-1a` regenerates those extracts.
 
+mod authority_conflicts;
 mod check_isolation;
 mod cite_check;
 mod docs;
@@ -33,6 +34,12 @@ fn main() {
         }
         Some("subcommand-coverage") => {
             examples::run_coverage();
+        }
+        Some("authority-conflicts") => {
+            if let Err(e) = authority_conflicts::run() {
+                eprintln!("xtask authority-conflicts: {e}");
+                std::process::exit(1);
+            }
         }
         Some("cite-check") => {
             if let Err(e) = cite_check::run() {
@@ -65,7 +72,7 @@ fn main() {
         _ => {
             eprintln!(
                 "usage: cargo run -p xtask -- <docs [--pdf] | examples | subcommand-coverage | \
-                 check-isolation | cite-check | extract-schedule-1a | dump-fields <pdf>>"
+                 check-isolation | cite-check | authority-conflicts | extract-schedule-1a | dump-fields <pdf>>"
             );
             std::process::exit(2);
         }
