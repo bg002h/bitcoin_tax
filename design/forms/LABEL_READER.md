@@ -53,6 +53,40 @@
 > ★ Every one of these produced a *plausible* wrong answer, and each fix would have masked the
 > others. None was visible from the text layer, the field names, or the extract — only from the page.
 >
+> ### ★★★ OWNER CORRECTION 2026-07-30 — a LINE is not a CELL, and the grid forms need cells
+>
+> Lines 22a/22b are not single entries. The form prints **three columns** and the AcroForm carries
+> **six fields** for the two rows:
+>
+> | cell | field | note |
+> |---|---|---|
+> | 22a(i) | `Line22a.VIN-1_Comb` | **`maxlen=17`** — ONE field, drawn as 17 per-character cells |
+> | 22a(ii), 22a(iii) | `Line22a.f2_02`, `f2_03` | single boxes |
+> | 22b(i) | `Line22b.VIN-2_Comb` | `maxlen=17` |
+> | 22b(ii), 22b(iii) | `Line22b.f2_05`, `f2_06` | single boxes |
+>
+> ★ The VIN is **one entry** in the data model, rendered as a comb of character cells. Both readings
+> are true at different layers, and `maxlen` is load-bearing: this crate already learned that a comb
+> takes BARE characters, because a `/MaxLen 9` SSN comb silently truncates a hyphenated value.
+>
+> ★★ **The FORM addresses cells by column.** Line 23: *"Add lines 22a and 22b, **column (iii)**"*.
+> The Caution: *"Column (iii) is the total QPVLI paid in 2025 less the amounts reported in **column
+> (ii)**."* Column is part of the address, stated by the authority itself.
+>
+> **Both counts survive, at different granularities:**
+>
+> | | |
+> |---|---|
+> | **48** | entry-taking **LINES** — what the census currently reports, and the hand-established figure |
+> | **52** | entry **CELLS** — 48 lines, with 22a and 22b each holding 3 |
+>
+> ★★★ **Why this is not a line-22 quirk.** A census at LINE granularity reports `22a` as covered when
+> column (iii) was never mapped — "we forgot this line", one level down, invisible. And **`f8949` is
+> a grid with 190 fields**, so at line granularity the biggest form in the set would get the weakest
+> check. **Increment 2's ledger must therefore key on CELL ADDRESS (row + column), not on the line
+> label.** Recorded here because it changes the ledger's shape before it is built, which is the
+> cheapest moment to learn it.
+>
 > **NOT yet built (increment 2):** the committed per-form **ledger**, and the typed disagreement
 > rules (BOX-WITH-NO-LABEL = hard fail, LABEL-WITH-NO-BOX = must carry a kind, SEQUENCE GAP = hard
 > fail). Until those land, this is two witnesses and a viewer, not yet a gate.
