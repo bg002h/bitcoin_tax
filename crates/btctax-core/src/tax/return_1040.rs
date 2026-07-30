@@ -319,12 +319,15 @@ pub fn schedule_a_parts(
     // Lines 5a-5e — SALT, §164(b)(5) either/or, capped at $10,000 ($5,000 MFS).
     let salt_5a = salt_line_5a(ri, a);
     let salt_5d = salt_5a + a.salt_real_estate + a.salt_personal_property;
-    let salt_cap = if ri.filing_status == FilingStatus::Mfs {
-        params.salt_cap / dec!(2)
-    } else {
-        params.salt_cap
-    };
-    let salt_5e = salt_5d.min(salt_cap);
+    // ★ ONE call, and the printed form reads the RESULT (`ScheduleAParts::salt_cap`), so `printed.rs`
+    //   never learns which year's instrument ran. §164(b)(7)(B)(iv) MAGI is AGI plus any §911/931/933
+    //   exclusion; btctax has no such input yet, so MAGI == AGI here and the TY2024 arm ignores it
+    //   entirely. When the exclusion inputs land, this is the single place that changes.
+    let salt_magi = agi;
+    let salt_5e = params.salt.line_5e(salt_5d, salt_magi, ri.filing_status);
+    // The APPLIED limit carried to the printed form. `printed.rs` recomputes `min(5d, salt_cap)`,
+    // which is idempotent once this holds the worksheet's own line 10 (5e ≤ 5d always).
+    let salt_cap = salt_5e;
 
     // Line 8a — home-mortgage interest (points/8b are refuse-or-advise). ★ §2.7: a MIXED-USE mortgage
     // (`Some(false)`) zeroes 8a and checks the line-8 box — v1 cannot do the Pub. 936 split, so it deducts
@@ -1594,6 +1597,7 @@ pub fn schedule_b_files(ri: &ReturnInputs) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tax::tables::SaltLimitation;
     // `Person` is a TEST-only import now: the §63(f) box count moved to `packet::AgedBlindBoxes`, which
     // is the single source L12 consumes (`p6-aged-blind-checkboxes-missing`).
     use crate::tax::return_inputs::Person;
@@ -1644,7 +1648,10 @@ mod tests {
             std_aged_blind_unmarried: dec!(1950),
             dependent_std_floor: dec!(1300),
             dependent_std_earned_addon: dec!(450),
-            salt_cap: dec!(10000),
+            salt: SaltLimitation::FlatCap {
+                cap: dec!(10000),
+                cap_mfs: dec!(5000),
+            },
             kiddie_unearned_threshold: dec!(2600),
             elective_deferral_limit: dec!(23000),
             ftc_ceiling: dec!(300),

@@ -10,6 +10,7 @@
 //! Federal only (app charter / spec intro).  No float (NFR5).
 use crate::conventions::Usd;
 use crate::tax::types::FilingStatus;
+use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use std::collections::BTreeMap;
 
@@ -284,6 +285,105 @@ pub struct AmtParams {
     pub rate_28_subtrahend_mfs: Usd,
 }
 
+/// §164(b) SALT limitation, transcribed per year because the two years are different instruments.
+///
+/// ★ **Why an enum and not four numbers.** TY2024's Schedule A line 5e is a bare cap. OBBBA turned
+/// TY2025's into a **10-line worksheet** with a phase-down, a floor, and — the part a parameterisation
+/// gets wrong — an MFS halving that happens at *line 10 only*, after the floor rather than on the
+/// constants. Encoding the 2025 rule as "halve the cap and halve the floor" gives a different answer:
+/// at MFS / MAGI $300,000 the worksheet pays **$12,500** and the halved-constants shape pays $5,000.
+/// This project has already made that exact mistake twice in the spec; the enum makes it unrepresentable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SaltLimitation {
+    /// **TY2024 Schedule A line 5e, verbatim:** "Enter the smaller of line 5d or $10,000 ($5,000 if
+    /// married filing separately)." No worksheet exists for this year — the form asks one question.
+    FlatCap {
+        /// $10,000 — the general cap.
+        cap: Usd,
+        /// $5,000 — MFS. A separate field rather than `cap / 2`, because the form prints both numbers
+        /// and a future year could break the relationship.
+        cap_mfs: Usd,
+    },
+    /// **TY2025: the "State and Local Tax Deduction Worksheet"** in the Schedule A instructions,
+    /// line by line. Field names are the worksheet's own line numbers.
+    Worksheet2025 {
+        /// Worksheet line 1 — "…**Yes.** Enter $40,000". ★ NOT halved for MFS; see `line_10_mfs_halves`.
+        line1_cap: Usd,
+        /// Worksheet line 5 — "Enter $500,000 ($250,000 if married filing separately)". The one
+        /// genuinely per-status constant in the worksheet.
+        line5_threshold: Usd,
+        /// Worksheet line 5, MFS — $250,000.
+        line5_threshold_mfs: Usd,
+        /// Worksheet line 7 — "Multiply line 6 by 30% (0.30)".
+        line7_rate: Usd,
+        /// Worksheet line 9 — "Enter the **larger** of the amount on line 8 or $10,000". ★ NOT halved.
+        line9_floor: Usd,
+        /// Worksheet line 1's short-circuit — "Is the amount on Schedule A, line 5d more than $10,000
+        /// ($5,000 if married filing separately)? **No.** Your deduction isn't limited."
+        line1_trigger: Usd,
+        /// Worksheet line 1's short-circuit, MFS — $5,000.
+        line1_trigger_mfs: Usd,
+        /// Worksheet line 10 — "…the smaller of the amount on line 9 (**half** the amount on line 9 if
+        /// married filing separately) or the amount from Schedule A, line 5d". `true` records that the
+        /// halving lives HERE and nowhere else.
+        line_10_mfs_halves: bool,
+    },
+}
+
+impl SaltLimitation {
+    /// Schedule A **line 5e** — the deductible SALT.
+    ///
+    /// `line_5d` is the SALT actually paid; `magi` is the §164(b)(7)(B)(iv) modified AGI (AGI plus any
+    /// §911/931/933 exclusion), which is the *same* quantity Schedule 1-A Part I line 3 computes.
+    pub fn line_5e(&self, line_5d: Usd, magi: Usd, status: FilingStatus) -> Usd {
+        let mfs = status == FilingStatus::Mfs;
+        match self {
+            Self::FlatCap { cap, cap_mfs } => line_5d.min(if mfs { *cap_mfs } else { *cap }),
+            Self::Worksheet2025 {
+                line1_cap,
+                line5_threshold,
+                line5_threshold_mfs,
+                line7_rate,
+                line9_floor,
+                line1_trigger,
+                line1_trigger_mfs,
+                line_10_mfs_halves,
+            } => {
+                // Line 1 — "Is 5d more than $10,000 ($5,000 MFS)? No ⇒ STOP, not limited."
+                let trigger = if mfs {
+                    *line1_trigger_mfs
+                } else {
+                    *line1_trigger
+                };
+                if line_5d <= trigger {
+                    return line_5d;
+                }
+                let line1 = *line1_cap;
+                // Lines 4/5/6 — MAGI against the threshold.
+                let line5 = if mfs {
+                    *line5_threshold_mfs
+                } else {
+                    *line5_threshold
+                };
+                let line6 = (magi - line5).max(Usd::ZERO);
+                // Line 7, then line 8 = line 1 − line 7.
+                let line7 = *line7_rate * line6;
+                let line8 = line1 - line7;
+                // Line 9 — "the LARGER of line 8 or $10,000" (unhalved).
+                let line9 = line8.max(*line9_floor);
+                // Line 10 — half of line 9 for MFS, then the smaller of that and 5d.
+                let line9_for_status = if mfs && *line_10_mfs_halves {
+                    line9 / Decimal::from(2)
+                } else {
+                    line9
+                };
+                line9_for_status.min(line_5d)
+            }
+        }
+    }
+}
+
 impl AmtParams {
     /// §55(d)(1) AMT exemption for `status` (worksheet line 6).
     pub fn exemption(&self, status: FilingStatus) -> Usd {
@@ -322,8 +422,10 @@ pub struct FullReturnParams {
     pub dependent_std_floor: Usd,
     /// §63(c)(5) dependent earned-income add-on ($450).
     pub dependent_std_earned_addon: Usd,
-    /// §164(b)(6) SALT deduction cap (general; MFS = half at the use site).
-    pub salt_cap: Usd,
+    /// §164(b) state-and-local-tax limitation. **Per-year INSTRUMENT, not a per-year constant** — the
+    /// 2024 and 2025 Schedule A ask different questions, so [`SaltLimitation`] is an enum and the
+    /// compiler forces every consumer to handle both.
+    pub salt: SaltLimitation,
     /// §1(g)(4) kiddie-tax unearned-income threshold (Form 8615 refuse trigger, spec C1).
     pub kiddie_unearned_threshold: Usd,
     /// §402(g)(1) elective-deferral limit (excess-deferral refuse trigger, spec F3).
@@ -447,6 +549,159 @@ pub(crate) fn synthetic_table(year: i32) -> TaxTable {
 mod tests {
     use super::*;
     use rust_decimal_macros::dec;
+
+    /// The TY2025 §164(b) worksheet, as its own instrument — cap $40,000, 30% phase-down over
+    /// $500,000 ($250,000 MFS), $10,000 floor, MFS halving at **line 10 only**.
+    fn salt_2025() -> SaltLimitation {
+        SaltLimitation::Worksheet2025 {
+            line1_cap: dec!(40000),
+            line5_threshold: dec!(500000),
+            line5_threshold_mfs: dec!(250000),
+            line7_rate: dec!(0.30),
+            line9_floor: dec!(10000),
+            line1_trigger: dec!(10000),
+            line1_trigger_mfs: dec!(5000),
+            line_10_mfs_halves: true,
+        }
+    }
+
+    /// ★ THE MFS CASE IS THE WHOLE POINT, and it is why this is a worksheet and not four constants.
+    ///
+    /// The TY2025 worksheet halves at **line 10** — after the floor — not on the cap and floor
+    /// themselves. Parameterising it as "halve every constant" (cap $20,000, floor $5,000) is what
+    /// Tax-Calculator does (`ID_AllTaxes_c[mseparate] = 20000`), and it gives a DIFFERENT answer:
+    ///
+    /// | MFS, 5d $30,000 | worksheet | halved-constants |
+    /// |---|---|---|
+    /// | MAGI $300,000 | **$12,500** | $5,000 |
+    ///
+    /// $300,000 is the point of maximum divergence between the two shapes, and the halved-constants
+    /// version also puts the floor at MAGI $300,000 when the worksheet reaches it at **$350,000**.
+    /// This project encoded the wrong shape twice in the TY2025 spec before a review caught it; the
+    /// numbers below come from the archived `i1040sca--2025.pdf` worksheet, computed line by line.
+    #[test]
+    fn ty2025_salt_worksheet_halves_at_line_10_not_on_the_constants() {
+        let w = salt_2025();
+        let mfs = FilingStatus::Mfs;
+
+        // L6=50,000 → L7=15,000 → L8=25,000 → L9=25,000 → halved 12,500 → min(12,500, 30,000)
+        assert_eq!(
+            w.line_5e(dec!(30000), dec!(300000), mfs),
+            dec!(12500),
+            "the worksheet halves line 9, so MFS at MAGI 300,000 deducts 12,500 — not the 5,000 a \
+             halved-cap/halved-floor parameterisation gives"
+        );
+        // The MFS floor is reached where L8 falls to the UNHALVED 10,000: MAGI = 250,000 + 30,000/0.30
+        assert_eq!(
+            w.line_5e(dec!(30000), dec!(350000), mfs),
+            dec!(5000),
+            "MFS floor: L8 = 40,000 − 0.30×100,000 = 10,000, L9 = 10,000, halved = 5,000"
+        );
+        assert!(
+            w.line_5e(dec!(30000), dec!(349999), mfs) > dec!(5000),
+            "just below MAGI 350,000 the MFS floor must NOT yet bind"
+        );
+    }
+
+    /// Every region of the TY2025 worksheet, single filer, from the archived instructions.
+    #[test]
+    fn ty2025_salt_worksheet_covers_every_region() {
+        let w = salt_2025();
+        let s = FilingStatus::Single;
+        // Line 1's own short-circuit: "Is 5d more than $10,000? No ⇒ your deduction isn't limited."
+        assert_eq!(w.line_5e(dec!(7000), dec!(450000), s), dec!(7000));
+        // Under the cap, under the threshold ⇒ all of it.
+        assert_eq!(w.line_5e(dec!(30000), dec!(450000), s), dec!(30000));
+        // Over the cap, under the threshold ⇒ the $40,000 cap.
+        assert_eq!(w.line_5e(dec!(60000), dec!(450000), s), dec!(40000));
+        // Phasing: L6=100,000 → L7=30,000 → L8=10,000.
+        assert_eq!(w.line_5e(dec!(60000), dec!(600000), s), dec!(10000));
+        // Past the floor: L8 goes NEGATIVE (−20,000) and line 9's `larger of` holds it at 10,000.
+        assert_eq!(w.line_5e(dec!(60000), dec!(700000), s), dec!(10000));
+    }
+
+    /// ★ Line 1's short-circuit is a **proved no-op** at TY2025's constants — and this is what makes
+    /// that a checked fact rather than an assumption.
+    ///
+    /// Removing the branch survived mutation testing, which is the correct outcome: line 9 floors at
+    /// $10,000, identically line 1's trigger, and line 10 takes `min(line 9, 5d)`. So for any
+    /// `5d ≤ trigger`, `line9 ≥ floor = trigger ≥ 5d` and the min already returns 5d. MFS halves both
+    /// sides consistently ($10,000/2 = $5,000 = the MFS trigger).
+    ///
+    /// **It stays in the code because it is on the form**, and this sweep guards the proof: if a
+    /// future year's floor drops below its trigger — or the MFS halving stops applying to both — the
+    /// branch becomes load-bearing and this reds instead of silently mattering.
+    #[test]
+    fn ty2025_salt_line_1_short_circuit_is_a_proved_no_op() {
+        let w = salt_2025();
+        let SaltLimitation::Worksheet2025 {
+            line9_floor,
+            line1_trigger,
+            line1_trigger_mfs,
+            ..
+        } = &w
+        else {
+            panic!("salt_2025() must be the worksheet variant")
+        };
+        assert!(
+            line9_floor >= line1_trigger && *line9_floor / Decimal::from(2) >= *line1_trigger_mfs,
+            "the no-op proof needs floor ≥ trigger on both sides: floor {line9_floor}, trigger \
+             {line1_trigger}, MFS trigger {line1_trigger_mfs}"
+        );
+        let mut checked = 0u32;
+        for status in [
+            FilingStatus::Single,
+            FilingStatus::Mfj,
+            FilingStatus::Mfs,
+            FilingStatus::HoH,
+        ] {
+            let trigger = if status == FilingStatus::Mfs {
+                *line1_trigger_mfs
+            } else {
+                *line1_trigger
+            };
+            let mut d = 0i64;
+            while Decimal::from(d) <= trigger {
+                let l5d = Decimal::from(d);
+                let mut m = 0i64;
+                while m < 1_400_000 {
+                    // Below the trigger the answer must be 5d itself, at every MAGI.
+                    assert_eq!(
+                        w.line_5e(l5d, Decimal::from(m), status),
+                        l5d,
+                        "{status:?}: 5d {l5d} at MAGI {m} must be unlimited"
+                    );
+                    checked += 1;
+                    m += 6_997;
+                }
+                d += 331;
+            }
+        }
+        assert!(checked > 5_000, "the sweep must cover ground: {checked}");
+    }
+
+    /// TY2024 is a different instrument: one question, no worksheet, and the halving is on the cap.
+    #[test]
+    fn ty2024_salt_is_a_flat_cap_and_ignores_magi() {
+        let flat = SaltLimitation::FlatCap {
+            cap: dec!(10000),
+            cap_mfs: dec!(5000),
+        };
+        for magi in [dec!(50000), dec!(600000), dec!(5000000)] {
+            assert_eq!(
+                flat.line_5e(dec!(30000), magi, FilingStatus::Single),
+                dec!(10000)
+            );
+            assert_eq!(
+                flat.line_5e(dec!(30000), magi, FilingStatus::Mfs),
+                dec!(5000)
+            );
+            assert_eq!(
+                flat.line_5e(dec!(3000), magi, FilingStatus::Single),
+                dec!(3000)
+            );
+        }
+    }
 
     /// STATUTORY values are constant across years while indexed values move (I4 KAT).
     /// Asserts: niit_threshold returns the correct statutory amounts for every filing status;

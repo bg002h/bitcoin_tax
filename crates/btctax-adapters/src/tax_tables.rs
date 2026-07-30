@@ -49,7 +49,7 @@
 //! which the compute layer converts to `TaxOutcome::NotComputable(TaxTableMissing)` (B.4/I6).
 use btctax_core::tax::tables::{
     AmtParams, FullReturnParams, FullReturnTables, LtcgBreakpoints, OrdinaryBracket,
-    OrdinarySchedule, TaxTable, TaxTables,
+    OrdinarySchedule, SaltLimitation, TaxTable, TaxTables,
 };
 use btctax_core::{FilingStatus, Usd};
 use rust_decimal_macros::dec;
@@ -125,10 +125,15 @@ fn ty2024_full_return() -> FullReturnParams {
         std_aged_blind_unmarried: dec!(1950),
         dependent_std_floor: dec!(1300), // §63(c)(5), Rev. Proc. 2023-34 §3.15(2)
         dependent_std_earned_addon: dec!(450),
-        salt_cap: dec!(10000), // §164(b)(6) (MFS = $5,000 at the use site)
+        // §164(b) TY2024: Schedule A line 5e is a bare cap — "Enter the smaller of line 5d or
+        // $10,000 ($5,000 if married filing separately)." No worksheet exists for this year.
+        salt: SaltLimitation::FlatCap {
+            cap: dec!(10000),
+            cap_mfs: dec!(5000),
+        },
         kiddie_unearned_threshold: dec!(2600), // §1(g)(4)
-        elective_deferral_limit: dec!(23000), // §402(g)(1), Notice 2023-75
-        ftc_ceiling: dec!(300), // §904(j) (MFJ = $600 at the use site)
+        elective_deferral_limit: dec!(23000),  // §402(g)(1), Notice 2023-75
+        ftc_ceiling: dec!(300),                // §904(j) (MFJ = $600 at the use site)
         // §199A(e)(2) QBI TI-before-QBI threshold (Rev. Proc. 2023-34 §2.10): $191,950 base / $383,900 MFJ.
         qbi_ti_threshold_unmarried: dec!(191950),
         qbi_ti_threshold_married: dec!(383900),
@@ -752,7 +757,13 @@ mod tests {
         assert_eq!(p.std_aged_blind_unmarried, dec!(1950));
         assert_eq!(p.dependent_std_floor, dec!(1300));
         assert_eq!(p.dependent_std_earned_addon, dec!(450));
-        assert_eq!(p.salt_cap, dec!(10000));
+        assert_eq!(
+            p.salt,
+            SaltLimitation::FlatCap {
+                cap: dec!(10000),
+                cap_mfs: dec!(5000)
+            }
+        );
         assert_eq!(p.kiddie_unearned_threshold, dec!(2600));
         assert_eq!(p.elective_deferral_limit, dec!(23000));
         assert_eq!(p.ftc_ceiling, dec!(300));

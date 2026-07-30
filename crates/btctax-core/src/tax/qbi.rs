@@ -242,6 +242,7 @@ pub fn form_8995_lines(
 
 #[cfg(test)]
 mod tests {
+    use crate::tax::tables::SaltLimitation;
 
     /// ★ **§199A on Schedule C — the deduction the P7 oracle proved we were giving away.**
     ///
@@ -315,7 +316,10 @@ mod tests {
             std_aged_blind_unmarried: dec!(1950),
             dependent_std_floor: dec!(1300),
             dependent_std_earned_addon: dec!(450),
-            salt_cap: dec!(10000),
+            salt: SaltLimitation::FlatCap {
+                cap: dec!(10000),
+                cap_mfs: dec!(5000),
+            },
             kiddie_unearned_threshold: dec!(2600),
             elective_deferral_limit: dec!(23000),
             ftc_ceiling: dec!(300),
