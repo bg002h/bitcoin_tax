@@ -25,7 +25,8 @@ _(Supersedes the 2026-06-28 edition, whose deep-research workflow completed long
 | **②** | **Build the harness: A1 → A2 → A3, then B1/B2** — `design/HARNESS.md` (r2) | **A1 first**: without the installed-gate every other mechanism is decoration, and this repo already proves it — `scripts/pre-push` has sat uninstalled since 2026-07-02 |
 | **③** | **Reconcile the archives** — **DECIDED + LARGELY DONE 2026-07-30**; residue is a countdown, see §4 | owner chose **hybrid**: storage differs by document kind, provenance does not differ at all. One manifest + one checker now span BOTH trees (`xtask authority-manifest`, 113 entries). Remaining: **15** duplicate documents, pinned and shrink-only. |
 | **④** | **Fable consult on the PARSING STRATEGY** — §5a | before paying ~32 hand-read label lists |
-| **⑤** | **The label reader** — §5 | |
+| **⑤** | **The label reader** — §5 — **increment 1 BUILT**; increment 2 REDIRECTED, see below | |
+| **⑥** | **Fable consult on FIELD PROVENANCE** — `design/forms/FIELD_PROVENANCE.md` §7, after the §6 classification | the design shapes provenance for every box on every form and interlocks with §G-11; measure the 496 first so granularity is a number, not a guess |
 
 ★ ① and ② come first because the harness exists to catch the class of failure that produced ③. Building
 it after would be the same mistake in a new costume.

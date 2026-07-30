@@ -682,6 +682,37 @@ person**, four times the §63(f) amount.
 **Residue.** The **blind** boxes remain unexamined for a death interaction, and a TY2024 patch release
 carrying this fix is still worth considering on its own merits (owner's call). Filed as G-9a below.
 
+### G-13 — ★★★ FIELD PROVENANCE: 496 of 1158 AcroForm fields have no recorded decision
+
+**Owning phase: NOT B3.** Whole-surface, and it interlocks with **§G-11** (which blocks its honest
+form). Filed 2026-07-30. **Full design note: [`design/forms/FIELD_PROVENANCE.md`](design/forms/FIELD_PROVENANCE.md)** — read that first; this entry is the register hook.
+
+**The finding.** `verify.rs::no_unmapped_filled` asserts every field carrying a value is authorised —
+it stops us writing where we should not. **Nothing asserts the other direction:** that every field is
+either mapped, or deliberately not ours. One direction stops stray writes; the missing one stops
+silent omissions, and omission is the direction that costs a filer money.
+
+**Measured (TY2024, the year whose maps are complete): 1158 AcroForm fields, 662 mapped, 496 with no
+recorded decision.** Not 496 defects — 496 boxes where nobody wrote down whether we fill them, the
+filer does, or they do not apply.
+
+**The owner's taxonomy** — every field must resolve to exactly one, and only the last is a bug:
+filled · **declined (asked, said no)** · not applicable · not ours · refused · **nothing ever
+decided**.
+
+★★ **A recorded "no" is provenance for US, not testimony on the return.** The line stays blank and we
+must never print `0` to show the filer answered. That is why §G-11 gates the honest version.
+
+★★ **Invert it and the forms derive the interview:** an unaccounted field is either a missing question
+or a missing map entry. One y/n question can account for many lines (car-loan interest → Schedule 1-A
+lines 22–30, nine lines, all lawfully blank). Much of P9's registry
+(`btctax-core/src/tax/questions.rs`) already exists and must be built on, not duplicated — including
+both doctrine classes and an `Option<bool>` answer that already distinguishes *unanswered* from *no*.
+
+**Sub-item G-13a — question state is not visible at scale.** `screen_inputs` returns
+`Option<Refusal>`, i.e. the FIRST unanswered live declaration only. N unanswered ⇒ N round-trips, and
+the filer never sees how much is left. `live_questions` already enumerates; nothing aggregates.
+
 ### G-12 — btctax emits Form 8275 but NOT Form 8275-R, so it cannot disclose a position contrary to a REGULATION
 
 **Owning phase: unassigned** — a product decision before it is a build. Filed 2026-07-30.
