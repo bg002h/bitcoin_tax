@@ -682,7 +682,33 @@ person**, four times the §63(f) amount.
 **Residue.** The **blind** boxes remain unexamined for a death interaction, and a TY2024 patch release
 carrying this fix is still worth considering on its own merits (owner's call). Filed as G-9a below.
 
-### G-15 — ★★★ The question registry has NO YEAR DIMENSION, and the workaround has already been spent
+### G-15 — ★★★ The question registry has NO YEAR DIMENSION — **BUILD THIS FIRST** (⑦ consult)
+
+**⑦ verdict:** `reviews/shred-and-year-fable-r2.md`. **G-15 leads the whole sequence** — it is a small
+compiler-driven change, every TY2025 census `asked()` entry needs year-correct liveness, and it must
+land **before a third always-live workaround ships**.
+
+**Shape:** put `tax_year` **on `ReturnInputs`** as the authoritative copy — `set` keys the row from
+`ri.tax_year`, `get(year)` refuses on mismatch, **no `Default`** (constructor-required, so the
+compiler drives every fixture edit), schema bump under the existing refuse-and-reimport policy (free:
+no users). ★★ **`live` KEEPS its one-argument signature** and reads `ri.tax_year` internally — P9's
+"only one copy of each predicate" invariant survives exactly, whereas `live(year, &ri)` *"invites
+every caller to pass a year that disagrees with the row's origin — a second copy in flight."*
+Year gates transcribe the statute (`(2025..=2028).contains(&ri.tax_year)`); `HasIncomeExclusion`'s
+always-live workaround retires to `ri.tax_year >= 2025`.
+
+**Durability:** per-entry `PerYear | Durable`, **defaulting to `PerYear`** (fail toward re-asking).
+★ `PerYear` yes/no re-asks **BLANK — never shows the prior**: for a one-keystroke answer the prior
+*"buys nothing but anchoring."* `Durable` facts (DOB) **do** show the prior but require the same
+explicit keystroke — never Enter-to-accept, never pre-filled — because a forced retype invites typos,
+and for a DOB that is the worse failure. Either way it is a NEW answer bearing this year's date.
+
+**Cost of doing nothing:** every future TY2025+ question ships always-live with a bespoke neutrality
+proof — and **Schedule 1-A Part IV has none**; a "no" would swear to a predicate with no TY2024 legal
+existence, the census would then cite fabricated testimony as provenance, and the interview bloats
+O(years × questions).
+
+
 
 **Owner question, 2026-07-30.** Detail: `design/forms/FIELD_PROVENANCE.md` §6d. Interlocks with
 **§G-13** (the ⑥ consult assumed a *"year-stable"* registry — it is not) and **§G-14**.
@@ -706,7 +732,37 @@ wasteful for date of birth. ★ A prior-year answer must NEVER silently satisfy 
 (the answered-ness invariant across a year boundary); the lawful shape is a **confirmation** — *"Last
 year you said no. Still true for 2025?"* — which is a NEW answer with this year's date, not a carry.
 
-### G-14 — ★★★ CRYPTO-SHREDDABLE interview answers: one vault cert is too blunt
+### G-14 — ★★★ SHRED = tombstoned DELETE, **not** envelope encryption (⑦ consult: DO NOT BUILD IT)
+
+**⑦ verdict, verbatim:** `reviews/shred-and-year-fable-r2.md`. **Envelope encryption is REJECTED** —
+*"it cannot deliver what its name promises inside this vault, and a false crypto guarantee is worse
+than none."*
+
+★★ **Verified fact that decides it:** `atomic.rs:18-22` copies the pre-write ciphertext to `.bak`
+before renaming. So a wrapped per-item key would sit in the **same plaintext DB as the answers it
+protects**, one generation back, under the same never-rotated cert. Per-item keys protect nothing a
+plain `DELETE` does not. (`export_snapshot` also writes **plaintext** `snapshot.sqlite`.)
+
+**Build instead — tombstoned deletion, no new cryptography:**
+`Answered(bool)` / `Shredded { answered_on, shredded_on, prompt_hash }` / `None`; rewrite the row with
+content destroyed; **`VACUUM` or `secure_delete=ON` before serialize** (else rows survive in free
+pages — *the most mutation-testable part: plant, serialize, grep the image*); **save TWICE** so `.bak`
+also ages past the shred. Granularity per-(year, question) — free, no keys to sprawl.
+
+★★ **A shredded answer must NEVER collapse to `None`.** `Shredded` is a determinate `asked()`
+resolution — "answered, content destroyed on date D" — so a lawfully-blank field stays ACCOUNTED. It
+is not the second store round 1 forbade: that forbade a *duplicate that can drift*; this is the
+primary record, redacted.
+
+**Gate + honest bounds:** offer shred only once the return is emitted + archived and carryover
+propagated. ★ **An emitted return is NOT reproducible after a shred** (answers feed computation) — the
+confirmation must say so. ★ **Never auto-shred**: a retention timer is software destroying the filer's
+records on its own initiative, the same defect class as a manufactured `0`. ★ State the bound:
+backups, `snapshot.sqlite` exports and filesystem snapshots are beyond btctax's reach.
+
+★ Correction to the consult: it says "schema v3"; `SCHEMA_VERSION` is **1** today, so the next is v2.
+
+
 
 **Owner requirement, 2026-07-30.** Interview answers ("were you asked about foreign accounts? said
 no") must be **vault-encrypted** (they are) **and cryptographically deletable after filing** (they are

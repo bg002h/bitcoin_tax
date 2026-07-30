@@ -367,6 +367,24 @@ So each question needs to declare its **durability**: `PerYear` (re-ask blank) v
 nothing to confirm against and must fall back to asking blank — which is correct behaviour, but it
 means shredding has a *usability* cost the filer should be told about before they do it, not after.
 
+## 6e. ✅ ⑦ CONSULT ANSWERED — shred is a DELETE, year-scoping leads, and durability loses
+
+Verbatim: [`reviews/shred-and-year-fable-r2.md`](../../reviews/shred-and-year-fable-r2.md).
+
+**§6b's premise was wrong.** Envelope encryption is **rejected** — verified reason: `atomic.rs:18-22`
+retains the prior ciphertext as `.bak`, so a wrapped per-item key would sit in the same plaintext DB
+as the answers it protects, one generation back, under the same never-rotated cert. **Tombstoned
+deletion** (`Shredded { answered_on, shredded_on, prompt_hash }` + `VACUUM` + save twice) delivers the
+identical real guarantee with no key management — and the tombstone keeps the field ACCOUNTED, which
+was §6b's open worry.
+
+**§6d's tension resolves: durability loses, by design.** Shred gates on the year's forward-flowing
+outputs being extracted (return emitted + archived, carryover propagated, ledger untouched); after
+that, prior answers serve only ergonomics. The answer's *consequences* survive as ordinary data; only
+the testimony's content dies.
+
+**Build order (settled across both consults): G-15 → G-13 → G-11 → G-14.**
+
 ## 7. Open questions for the ⑥ consult
 
 1. Is the §3 taxonomy right, and is "Declined + question pointer" the correct shape for a lawful
