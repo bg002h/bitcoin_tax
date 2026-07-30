@@ -748,13 +748,26 @@ from `PrintedForms`, never a hand-list.
 **⇒ The per-return resolution needs TWO levels:** is this form in the return, and only then is this
 field accounted for. The static census is unaffected.
 
-### G-15 — ★★★ The question registry has NO YEAR DIMENSION — **BUILD THIS FIRST** (⑦ consult)
+### G-15 — ~~The question registry has NO YEAR DIMENSION~~ — **SUBSTANCE DONE 2026-07-30**
 
 **⑦ verdict:** `reviews/shred-and-year-fable-r2.md`. **G-15 leads the whole sequence** — it is a small
 compiler-driven change, every TY2025 census `asked()` entry needs year-correct liveness, and it must
 land **before a third always-live workaround ships**.
 
-**Shape:** put `tax_year` **on `ReturnInputs`** as the authoritative copy — `set` keys the row from
+**✅ BUILT.** `ReturnInputs.tax_year` (`0` = not stated); the row key stamps it at the ONE read
+boundary and `set` refuses a disagreement, so the in-memory year and its row can never diverge.
+`HasIncomeExclusion` retired from always-live to `ri.tax_year >= 2025` — **the workaround is gone**,
+and an unstated year fails closed (not ≥ 2025 ⇒ not live). Six fixtures had to state their year, which
+is the Declarations invariant working. `Durability::{PerYear, Durable}` added per entry, compiler-
+forced on all 21; exactly the two DOBs are `Durable`, and **no declaration may ever be** (each asserts
+about a tax year). All mutation-verified.
+
+★ **Residual (not a gate):** the *confirmation UX* — showing a `Durable` prior and requiring an
+explicit keystroke — has no consumer yet. The architect called it "ergonomics, never a gate"; it
+lands with whatever surface first re-asks across a year boundary. And `answered_on` + prompt-hash
+still want a home before answers exist in the wild (they cannot be back-filled).
+
+**Original shape:** put `tax_year` **on `ReturnInputs`** as the authoritative copy — `set` keys the row from
 `ri.tax_year`, `get(year)` refuses on mismatch, **no `Default`** (constructor-required, so the
 compiler drives every fixture edit), schema bump under the existing refuse-and-reimport policy (free:
 no users). ★★ **`live` KEEPS its one-argument signature** and reads `ri.tax_year` internally — P9's

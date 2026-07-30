@@ -11,6 +11,30 @@ use crate::tax::return_refuse::RefuseReason;
 use crate::tax::types::FilingStatus;
 use time::Date;
 
+/// ★★★ **§G-15 — does this answer survive into the NEXT tax year?**
+///
+/// Answers are stored per tax year and **nothing carries forward silently** — correct, because a
+/// prior year's "no" is not testimony for this year. But re-asking *everything* every year is waste
+/// where the subject cannot change, and at the question counts the field census implies that waste
+/// compounds annually.
+///
+/// ★★ **A prior-year answer must NEVER silently satisfy this year's provenance.** That is the
+/// answered-ness invariant crossing a year boundary — software answering for the filer, one year
+/// removed. The lawful shape is a **confirmation**, not a carry: *"Last year you said no. Still true
+/// for 2025?"* is a NEW answer, given this year, bearing this year's date.
+///
+/// ★ **Defaults toward [`Durability::PerYear`]** — the fail-closed direction is to re-ask.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Durability {
+    /// The subject can differ year to year (foreign accounts, blindness, an election). Re-ask
+    /// **blank**: for a one-keystroke answer, showing the prior buys nothing but anchoring.
+    PerYear,
+    /// The subject cannot change once known — a birth date. The prior MAY be displayed, but it still
+    /// requires the same explicit keystroke as a fresh ask: never Enter-to-accept, never pre-filled.
+    /// (Here a forced retype invites typos, and for a DOB a typo is the worse failure.)
+    Durable,
+}
+
 /// A DECLARATION (§2, class A) — the filer ASSERTS it under §6065's jurat, so there is NO lawful default
 /// and an unanswered one must REFUSE.
 ///
@@ -33,6 +57,8 @@ pub struct FormQuestion {
     /// Write an answer. Called only on a LIVE question (so, e.g., the mortgage setter may assume a
     /// `schedule_a` exists — its liveness requires one).
     pub set: fn(&mut ReturnInputs, bool),
+    /// ★ §G-15 — whether this answer survives into the next tax year. See [`Durability`].
+    pub durability: Durability,
     /// ★ The answer that requires **no adjustment and forgoes no benefit** — the "nothing to see here"
     /// reply. Most declarations are neutral at `false` ("no, I have no foreign trust"), but not all:
     /// the mortgage box is neutral at `true` (all of the loan bought/built/improved the home, so
@@ -206,6 +232,9 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         live: |_ri| true,
         get: |ri| ri.header.can_be_claimed_as_dependent_taxpayer,
         set: |ri, v| ri.header.can_be_claimed_as_dependent_taxpayer = Some(v),
+        // ★ §G-15 — every class-(A) DECLARATION asserts about a TAX YEAR ("in this tax year, did…"),
+        // so none is durable: last year's answer is not testimony for this one.
+        durability: Durability::PerYear,
         neutral: false,
     },
     FormQuestion {
@@ -220,6 +249,9 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         live: |ri| ri.filing_status == FilingStatus::Mfj || ri.header.spouse.is_some(),
         get: |ri| ri.header.can_be_claimed_as_dependent_spouse,
         set: |ri, v| ri.header.can_be_claimed_as_dependent_spouse = Some(v),
+        // ★ §G-15 — every class-(A) DECLARATION asserts about a TAX YEAR ("in this tax year, did…"),
+        // so none is durable: last year's answer is not testimony for this one.
+        durability: Durability::PerYear,
         neutral: false,
     },
     FormQuestion {
@@ -233,6 +265,9 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         live: |ri| ri.filing_status == FilingStatus::Mfs,
         get: |ri| ri.mfs_spouse_itemizes,
         set: |ri, v| ri.mfs_spouse_itemizes = Some(v),
+        // ★ §G-15 — every class-(A) DECLARATION asserts about a TAX YEAR ("in this tax year, did…"),
+        // so none is durable: last year's answer is not testimony for this one.
+        durability: Durability::PerYear,
         neutral: false,
     },
     FormQuestion {
@@ -249,6 +284,9 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         live: |_ri| true,
         get: |ri| ri.foreign_accounts,
         set: |ri, v| ri.foreign_accounts = Some(v),
+        // ★ §G-15 — every class-(A) DECLARATION asserts about a TAX YEAR ("in this tax year, did…"),
+        // so none is durable: last year's answer is not testimony for this one.
+        durability: Durability::PerYear,
         neutral: false,
     },
     FormQuestion {
@@ -263,6 +301,9 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         live: |_ri| true,
         get: |ri| ri.foreign_trust,
         set: |ri, v| ri.foreign_trust = Some(v),
+        // ★ §G-15 — every class-(A) DECLARATION asserts about a TAX YEAR ("in this tax year, did…"),
+        // so none is durable: last year's answer is not testimony for this one.
+        durability: Durability::PerYear,
         neutral: false,
     },
     FormQuestion {
@@ -280,6 +321,9 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         live: |_ri| true,
         get: |ri| ri.sch1.hsa_activity,
         set: |ri, v| ri.sch1.hsa_activity = Some(v),
+        // ★ §G-15 — every class-(A) DECLARATION asserts about a TAX YEAR ("in this tax year, did…"),
+        // so none is durable: last year's answer is not testimony for this one.
+        durability: Durability::PerYear,
         neutral: false,
     },
     FormQuestion {
@@ -293,6 +337,9 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         live: |_ri| true,
         get: |ri| ri.dual_status_alien,
         set: |ri, v| ri.dual_status_alien = Some(v),
+        // ★ §G-15 — every class-(A) DECLARATION asserts about a TAX YEAR ("in this tax year, did…"),
+        // so none is durable: last year's answer is not testimony for this one.
+        durability: Durability::PerYear,
         neutral: false,
     },
     FormQuestion {
@@ -317,6 +364,9 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
                 a.mortgage_all_used_to_buy_build_improve = Some(v);
             }
         },
+        // ★ §G-15 — every class-(A) DECLARATION asserts about a TAX YEAR ("in this tax year, did…"),
+        // so none is durable: last year's answer is not testimony for this one.
+        durability: Durability::PerYear,
         neutral: true, // §2.7: "yes, all of it" keeps Schedule A line 8a full
     },
     FormQuestion {
@@ -341,6 +391,9 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
                 a.mortgage_dwelling_is_amt_qualified = Some(v);
             }
         },
+        // ★ §G-15 — every class-(A) DECLARATION asserts about a TAX YEAR ("in this tax year, did…"),
+        // so none is durable: last year's answer is not testimony for this one.
+        durability: Durability::PerYear,
         neutral: true, // "yes, AMT-qualified" ⇒ Form 6251 line 3 adds nothing back
     },
     FormQuestion {
@@ -357,6 +410,9 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         live: amt_carryover_question_live,
         get: |ri| ri.amt_carryover_same_as_regular,
         set: |ri, v| ri.amt_carryover_same_as_regular = Some(v),
+        // ★ §G-15 — every class-(A) DECLARATION asserts about a TAX YEAR ("in this tax year, did…"),
+        // so none is durable: last year's answer is not testimony for this one.
+        durability: Durability::PerYear,
         neutral: true, // "yes, the same" ⇒ Form 6251 line 2k adds nothing back
     },
     FormQuestion {
@@ -384,6 +440,9 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         live: amt_depreciation_question_live,
         get: |ri| ri.amt_depreciation_same_as_regular,
         set: |ri, v| ri.amt_depreciation_same_as_regular = Some(v),
+        // ★ §G-15 — every class-(A) DECLARATION asserts about a TAX YEAR ("in this tax year, did…"),
+        // so none is durable: last year's answer is not testimony for this one.
+        durability: Durability::PerYear,
         neutral: true, // "yes, the same" ⇒ Form 6251 line 2l adds nothing back
     },
     FormQuestion {
@@ -416,6 +475,9 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         live: |ri| ri.tax_year >= 2025,
         get: |ri| ri.has_income_exclusion,
         set: |ri, v| ri.has_income_exclusion = Some(v),
+        // ★ §G-15 — every class-(A) DECLARATION asserts about a TAX YEAR ("in this tax year, did…"),
+        // so none is durable: last year's answer is not testimony for this one.
+        durability: Durability::PerYear,
         neutral: false, // "no exclusions" is the AMT/MAGI-neutral answer, but it is still an ANSWER
     },
     // ── §G-9: the §63(f) death carve-out. Two entries, because i1040gi states the rule twice — once
@@ -446,6 +508,9 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         live: |_ri| true,
         get: |ri| ri.header.taxpayer_died_during_year,
         set: |ri, v| ri.header.taxpayer_died_during_year = Some(v),
+        // ★ §G-15 — every class-(A) DECLARATION asserts about a TAX YEAR ("in this tax year, did…"),
+        // so none is durable: last year's answer is not testimony for this one.
+        durability: Durability::PerYear,
         neutral: false, // "no" is the common answer, but it is still an ANSWER, and it GRANTS the box
     },
     FormQuestion {
@@ -464,6 +529,9 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         live: |ri| ri.header.spouse.is_some(),
         get: |ri| ri.header.spouse_died_during_year,
         set: |ri, v| ri.header.spouse_died_during_year = Some(v),
+        // ★ §G-15 — every class-(A) DECLARATION asserts about a TAX YEAR ("in this tax year, did…"),
+        // so none is durable: last year's answer is not testimony for this one.
+        durability: Durability::PerYear,
         neutral: false,
     },
 ];
@@ -510,6 +578,12 @@ pub enum SkippableKind {
 /// from the old `answer.rs::Skippable`). Each `set` is also a no-op when its target row is absent — which
 /// is exactly why `live` gates the spouse/Schedule-A prompts, so the prompt scope tracks the WRITE scope.
 pub struct SkippableQuestion {
+    /// ★ §G-15 — whether this answer survives into the next tax year. See [`Durability`].
+    ///
+    /// ★★ This is where `Durable` actually occurs: a **date of birth cannot change**. Everything
+    /// else here can — blindness, a §164(b)(5) election, and a date of DEATH (gated on
+    /// `…DiedDuringYear`, itself a per-year declaration).
+    pub durability: Durability,
     pub id: SkippableId,
     /// The prompt, phrased as the FORM phrases it (the words the filer can check against their paperwork).
     pub prompt: &'static str,
@@ -535,6 +609,8 @@ pub struct SkippableQuestion {
 pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     SkippableQuestion {
         id: SkippableId::BlindTaxpayer,
+        // ★ §G-15 — PER-YEAR: this subject can differ between years, so re-ask blank.
+        durability: Durability::PerYear,
         prompt: "Are YOU legally blind? (§63(f) additional deduction)",
         help: "§63(f): legal blindness adds an extra standard-deduction amount. Skipping leaves it \
                unclaimed — lawful, since the burden to claim is yours — and the forgone-benefit advisory fires.",
@@ -547,6 +623,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     },
     SkippableQuestion {
         id: SkippableId::BlindSpouse,
+        // ★ §G-15 — PER-YEAR: this subject can differ between years, so re-ask blank.
+        durability: Durability::PerYear,
         prompt: "Is YOUR SPOUSE legally blind? (§63(f) additional deduction)",
         help: "§63(f): the spouse's legal blindness adds an extra standard-deduction amount. Skipping \
                leaves it unclaimed and the forgone-benefit advisory fires.",
@@ -563,6 +641,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     },
     SkippableQuestion {
         id: SkippableId::SalesTaxElection,
+        // ★ §G-15 — PER-YEAR: this subject can differ between years, so re-ask blank.
+        durability: Durability::PerYear,
         prompt: "Deduct general SALES taxes instead of state/local income taxes? (§164(b)(5))",
         help: "§164(b)(5): elect to deduct general sales taxes instead of state and local income taxes. \
                Skipping keeps income taxes on the return; the election is advised when a Schedule A exists.",
@@ -579,6 +659,10 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     },
     SkippableQuestion {
         id: SkippableId::DobTaxpayer,
+        // ★★ §G-15 — DURABLE: a date of birth cannot change. The prior MAY be shown, but it still
+        // takes the same explicit keystroke as a fresh ask — a forced retype invites a typo, and
+        // for a DOB a typo is the worse failure.
+        durability: Durability::Durable,
         prompt: "YOUR date of birth",
         help: "§63(f): your date of birth establishes the age-65 additional standard deduction. Skipping \
                leaves it unclaimed — a mandatory prompt would force you to invent a birthday, so silence stays reachable.",
@@ -591,6 +675,10 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     },
     SkippableQuestion {
         id: SkippableId::DobSpouse,
+        // ★★ §G-15 — DURABLE: a date of birth cannot change. The prior MAY be shown, but it still
+        // takes the same explicit keystroke as a fresh ask — a forced retype invites a typo, and
+        // for a DOB a typo is the worse failure.
+        durability: Durability::Durable,
         prompt: "YOUR SPOUSE's date of birth",
         help: "§63(f): the spouse's date of birth establishes the age-65 additional standard deduction. \
                Skipping leaves it unclaimed.",
@@ -607,6 +695,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     },
     SkippableQuestion {
         id: SkippableId::DodTaxpayer,
+        // ★ §G-15 — PER-YEAR: this subject can differ between years, so re-ask blank.
+        durability: Durability::PerYear,
         prompt: "YOUR date of death",
         help: "§63(f) / §G-9: a taxpayer who died during the year before reaching age 65 does not get \
                the age-65 addition. The date decides it — a person reaches 65 on the DAY BEFORE their \
@@ -621,6 +711,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     },
     SkippableQuestion {
         id: SkippableId::DodSpouse,
+        // ★ §G-15 — PER-YEAR: this subject can differ between years, so re-ask blank.
+        durability: Durability::PerYear,
         prompt: "YOUR SPOUSE's date of death",
         help: "§63(f) / §G-9: a spouse who died during the year before reaching age 65 does not get the \
                age-65 addition. A person reaches 65 on the DAY BEFORE their 65th birthday. Skipping \
@@ -748,6 +840,67 @@ mod tests {
         assert!(
             !(q.live)(&at(0)),
             "an UNSTATED year must not be treated as 2025 — the gate fails closed"
+        );
+    }
+
+    /// ★★★ **§G-15 — durability, and the rule that decides it.**
+    ///
+    /// **A question is `Durable` only if its subject cannot change once known.** Two consequences,
+    /// and the first is structural rather than a hand-list:
+    ///
+    /// 1. **No class-(A) DECLARATION may ever be `Durable`.** Every one asserts about a *tax year*
+    ///    ("in this tax year, did…"), so last year's answer is not testimony for this one. Marking
+    ///    one durable would let a prior year's answer satisfy this year's provenance — the
+    ///    answered-ness invariant breached across a year boundary, which is software answering for
+    ///    the filer, one year removed.
+    /// 2. Among the class-(B) skippables, exactly the **dates of birth** qualify. Blindness can
+    ///    change; a §164(b)(5) election is made per year; and a date of DEATH is gated on
+    ///    `…DiedDuringYear`, itself a per-year declaration.
+    #[test]
+    fn only_facts_that_cannot_change_are_durable() {
+        let durable_decls: Vec<_> = FORM_QUESTIONS
+            .iter()
+            .filter(|q| q.durability == Durability::Durable)
+            .map(|q| q.id)
+            .collect();
+        assert!(
+            durable_decls.is_empty(),
+            "no DECLARATION may be Durable — each asserts about a tax year, so a prior year's answer \
+             is not testimony for this one. Offending: {durable_decls:?}"
+        );
+
+        let durable_skips: Vec<_> = SKIPPABLE_QUESTIONS
+            .iter()
+            .filter(|s| s.durability == Durability::Durable)
+            .map(|s| s.id)
+            .collect();
+        assert_eq!(
+            durable_skips,
+            vec![SkippableId::DobTaxpayer, SkippableId::DobSpouse],
+            "exactly the dates of BIRTH are durable. Blindness changes, the sales-tax election is \
+             per-year, and a date of DEATH is gated on a per-year declaration — so adding anything \
+             here needs an argument that its subject genuinely cannot change"
+        );
+    }
+
+    /// ★ **The default direction is to RE-ASK.** Anything not deliberately marked durable must be
+    /// `PerYear`, so a new registry entry fails toward asking the filer rather than toward reusing
+    /// an answer they did not give this year.
+    #[test]
+    fn everything_not_explicitly_durable_is_per_year() {
+        let total = FORM_QUESTIONS.len() + SKIPPABLE_QUESTIONS.len();
+        let accounted = FORM_QUESTIONS
+            .iter()
+            .filter(|q| matches!(q.durability, Durability::PerYear | Durability::Durable))
+            .count()
+            + SKIPPABLE_QUESTIONS
+                .iter()
+                .filter(|s| matches!(s.durability, Durability::PerYear | Durability::Durable))
+                .count();
+        assert_eq!(
+            accounted, total,
+            "every registry entry must state a durability — the field is not optional, so this can \
+             only fail if a variant is added without deciding what it means for carry-forward"
         );
     }
 }
