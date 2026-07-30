@@ -72,7 +72,86 @@ for k, t in enumerate(toks):
             sys.exit(0)
 ' || true)"
 
-[ -z "$VERDICT" ] && exit 0
+# ── A4 (Bash half) — the new-directory ask, for directories made OUTSIDE the Write tool ────────
+#
+# ★★ ADDED 2026-07-30 FROM AN OBSERVED FAILURE, not an anticipated one. A4 was built watching only
+#    Write/Edit. Within the hour its own author created `design/forms/2026/` with `mkdir -p` in Bash
+#    and the ask never fired — `.git/btctax-harness/acked-dirs` was still absent, which is how the
+#    hole was found. design/HARNESS.md had predicted this exact route-around in writing and the
+#    prediction changed nothing, because a documented hole is still a hole.
+#
+# ★ Deliberately narrow, since a noisy hook gets muted: only `mkdir`, only paths INSIDE the repo,
+#   only directories that do not already exist, and never anything git ignores (target/, .venv/, …).
+#   It shares on-write.sh's ack file, so a directory is asked about ONCE across both routes.
+if [ -z "$VERDICT" ]; then
+  ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "")"
+  if [ -n "$ROOT" ]; then
+    NEWDIRS="$(printf '%s' "$COMMAND" | python3 -c '
+import shlex, sys
+cmd = sys.stdin.read()
+try:
+    toks = shlex.split(cmd)
+except ValueError:
+    sys.exit(0)
+SEPS = {"&&", "||", ";", "|", "&"}
+out, i = [], 0
+while i < len(toks):
+    if toks[i] != "mkdir":
+        i += 1
+        continue
+    j = i + 1
+    while j < len(toks) and toks[j] not in SEPS:
+        t = toks[j]
+        if not t.startswith("-"):
+            out.append(t)
+        j += 1
+    i = j
+print("\n".join(out))
+' 2>/dev/null || true)"
+    ASK=""
+    while IFS= read -r d; do
+      [ -z "$d" ] && continue
+      case "$d" in /*) ABS="$d" ;; *) ABS="$ROOT/$d" ;; esac
+      case "$ABS" in "$ROOT"/*) ;; *) continue ;; esac      # outside the repo — not our business
+      [ -d "$ABS" ] && continue                              # already exists — nothing to ask
+      REL="${ABS#"$ROOT"/}"
+      git -C "$ROOT" check-ignore -q "$REL" 2>/dev/null && continue   # build dirs, .venv, etc.
+      ASK="$REL"
+      break
+    done <<< "$NEWDIRS"
+
+    if [ -n "$ASK" ]; then
+      # ★ Overridable so tests get an isolated, empty ack dir: the ask is ONE-SHOT, so a
+      #   persistent file would make "does it ask?" pass once and fail forever after, and two
+      #   tests sharing it would race.
+      STATE="${BTCTAX_HARNESS_STATE:-$ROOT/.git/btctax-harness}"; mkdir -p "$STATE"
+      ACKED="$STATE/acked-dirs"; touch "$ACKED"
+      if ! grep -qxF "$ASK" "$ACKED" 2>/dev/null; then
+        printf '%s\n' "$ASK" >> "$ACKED"
+        cat >&2 <<EOF
+PAUSE — this command creates a NEW DIRECTORY in the repo: $ASK/
+
+  Before creating it, the question that F1 failed to ask:
+
+    "before deriving or building, grep for what already exists —
+     I conclude from not having looked"
+
+  On 2026-07-30 that memory was written, and hours later \`design/forms/\` was built from scratch as
+  a primary-source archive while \`legal/primary-sources/\` already held the same material. A walk of
+  the tree later found FOUR overlapping archives. The rule was known. It was not applied.
+
+  So: has a search for an existing home been run this session?
+    - Yes, and nothing exists  → retry the command; it will proceed.
+    - No                       → search first.
+
+  ★ Asked ONCE per directory, shared with the Write hook. This is not a wall — retrying proceeds.
+EOF
+        exit 2
+      fi
+    fi
+  fi
+  exit 0
+fi
 
 VERB="${VERDICT%%:*}"
 FLAG="${VERDICT#*:}"

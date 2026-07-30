@@ -74,7 +74,10 @@ fi
 DIR="$(dirname "$ABS")"
 [ -d "$DIR" ] && exit 0                       # existing directory — nothing to ask
 
-STATE="$ROOT/.git/btctax-harness"
+# ★ Overridable so tests get an isolated, empty ack dir: the ask is ONE-SHOT, so a persistent file
+#   would make "does it ask?" pass once and fail forever after, and two tests sharing it would race.
+#   Shared with deny-bypass.sh, so a directory is asked about ONCE across both routes.
+STATE="${BTCTAX_HARNESS_STATE:-$ROOT/.git/btctax-harness}"
 mkdir -p "$STATE"
 ACKED="$STATE/acked-dirs"
 touch "$ACKED"

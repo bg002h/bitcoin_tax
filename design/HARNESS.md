@@ -185,6 +185,36 @@ rather than saying "be careful".
 or three trigger-shaped ones into hook messages, so doctrine surfaces at the moment it is answerable.
 The memory system is not mis-shaped; it is merely mis-*delivered*.
 
+#### ★★★ A4's first observed failure was A4's own — 2026-07-30
+
+A4 shipped watching `Write`/`Edit` only. **Within the hour, its own author created
+`design/forms/2026/` with `mkdir -p` in Bash, and the ask never fired.** It surfaced during an audit
+of *"is every element actually in effect?"*: `.git/btctax-harness/acked-dirs` was **absent**, so the
+ask had never once run in anger.
+
+★★ The damning part is that **this document predicted that exact route-around, in writing**, three
+paragraphs up — *"a wall would just be routed around with `mkdir -p`"* — and the prediction changed
+nothing. **A documented hole is still a hole.** That is the same shape as the failure the whole
+harness answers: doctrine written down, then not applied, by the person who wrote it.
+
+**Closed** by extending the Bash hook (`scripts/hooks/deny-bypass.sh`) with the same one-shot ask,
+sharing `on-write.sh`'s ack file so a directory is asked about once across both routes. Narrow on
+purpose — `mkdir` only, inside the repo only, non-existent directories only, never anything git
+ignores — because a noisy hook gets muted. The ALLOW cases are pinned in the kill test as the
+*specification of that narrowness*, and the detector is mutation-verified.
+
+★ **This is the harness's own rule working:** grow it from **observed** failures, never anticipated
+ones. The anticipation was already in this file and was worth nothing; the observation was worth a
+mechanism. Note also what the audit did *not* find — A1, A2, A3 had all fired for real. The measure
+is whether a session fails a gate it would otherwise walk past, and here the harness failed its
+author twice: once by blocking `git config --unset core.hooksPath`, once by exposing this gap.
+
+★ **Known residual limits, stated rather than implied.** A3's and A4's *hook* halves see the Write
+tool and `mkdir`; a file `cp`'d or redirected into a new tree from Bash still evades them. The
+backstop is that A3 has a **test** half that walks the whole tree on every `make check`, so a
+Bash-created archive is caught late rather than never. **A4 has no test counterpart** — for A4, "late"
+does not exist, which is precisely why its coverage had to be widened rather than merely documented.
+
 ### Class β — require the kill
 
 #### B1 — seen-red-once, as a standing rule

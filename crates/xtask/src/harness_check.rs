@@ -535,6 +535,9 @@ mod tests {
 
         let script = repo_root().join("scripts/hooks/on-write.sh");
         assert!(script.exists(), "{} missing", script.display());
+        // ★ Isolated ack dir — see the mkdir test: a shared one-shot file makes these tests pass
+        // once and fail forever after, and race each other.
+        let state = tempfile::tempdir().expect("tempdir");
 
         let fire = |path: &str| -> Option<i32> {
             let payload = format!(
@@ -543,6 +546,7 @@ mod tests {
             );
             let mut child = Command::new(&script)
                 .current_dir(repo_root())
+                .env("BTCTAX_HARNESS_STATE", state.path())
                 .stdin(Stdio::piped())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
@@ -580,25 +584,7 @@ mod tests {
         }
 
         // A4 — first write into a new directory asks; the retry proceeds.
-        let acked = repo_root().join(".git/btctax-harness/acked-dirs");
-        let restore = fs::read_to_string(&acked).ok();
         let probe = "zz-harness-selftest-dir/notes.md";
-        if let Some(t) = restore.as_deref() {
-            // Remove any prior ack for the probe so the assertion is meaningful.
-            let kept: String = t
-                .lines()
-                .filter(|l| !l.starts_with("zz-harness-selftest-dir"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            let _ = fs::write(
-                &acked,
-                if kept.is_empty() {
-                    String::new()
-                } else {
-                    kept + "\n"
-                },
-            );
-        }
         assert_eq!(
             fire(probe),
             Some(2),
@@ -607,14 +593,83 @@ mod tests {
         assert_eq!(
             fire(probe),
             Some(0),
-            "A4 must PROCEED on the retry — it is a speed bump, not a wall"
+            "A4 must PROCEED on the retry — a speed bump, not a wall"
+        );
+    }
+
+    /// ★★★ **THE KILL for A4's Bash half — the hole its own author walked through.**
+    ///
+    /// A4 was built watching `Write`/`Edit` only. Within the hour, `design/forms/2026/` was created
+    /// with `mkdir -p` in Bash and the ask never fired — `.git/btctax-harness/acked-dirs` was still
+    /// absent, which is how the hole was found. `design/HARNESS.md` had **predicted this exact
+    /// route-around in writing**, and the prediction changed nothing: a documented hole is a hole.
+    ///
+    /// Narrow by design, because a noisy hook gets muted — the ALLOW cases below are the specification
+    /// of that narrowness, not padding.
+    #[cfg(unix)]
+    #[test]
+    fn the_mkdir_ask_fires_for_new_repo_directories_only() {
+        use std::io::Write;
+        use std::process::Stdio;
+
+        let script = repo_root().join("scripts/hooks/deny-bypass.sh");
+        // ★ An isolated state dir: the ask is one-shot, so sharing the repo's ack file would make
+        // this pass once and fail forever after, and race the Write-hook test besides.
+        let state = tempfile::tempdir().expect("tempdir");
+
+        let fire = |cmd: &str| -> Option<i32> {
+            let payload = format!(
+                r#"{{"tool_name":"Bash","tool_input":{{"command":{}}}}}"#,
+                serde_json_string(cmd)
+            );
+            let mut child = Command::new(&script)
+                .current_dir(repo_root())
+                .env("BTCTAX_HARNESS_STATE", state.path())
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("spawn deny-bypass.sh");
+            child
+                .stdin
+                .as_mut()
+                .expect("stdin")
+                .write_all(payload.as_bytes())
+                .expect("write");
+            child.wait().expect("wait").code()
+        };
+
+        // Asks once, then proceeds — a speed bump, not a wall.
+        assert_eq!(
+            fire("mkdir -p zz-probe-alpha"),
+            Some(2),
+            "a new repo directory must ASK"
+        );
+        assert_eq!(
+            fire("mkdir -p zz-probe-alpha"),
+            Some(0),
+            "the retry must PROCEED"
+        );
+        assert_eq!(
+            fire("mkdir zz-probe-beta/nested"),
+            Some(2),
+            "nested new dirs count too"
         );
 
-        if let Some(t) = restore {
-            let _ = fs::write(&acked, t);
-        } else {
-            let _ = fs::remove_file(&acked);
+        // The narrowness, spelled out. Each of these firing would make the hook noise.
+        for cmd in [
+            "mkdir -p /tmp/anything", // outside the repo — another project's business
+            "mkdir -p target/foo",    // gitignored build output
+            "mkdir -p crates",        // already exists
+            "ls -la",
+            "git status",
+        ] {
+            assert_eq!(fire(cmd), Some(0), "`{cmd}` must NOT ask");
         }
+
+        // ★ And the addition must not have broken the deny it shares a script with.
+        assert_eq!(fire("git commit --no-verify -m x"), Some(2));
+        assert_eq!(fire(r#"git commit -m "mentions --no-verify""#), Some(0));
     }
 
     /// ★★ **A1's principle, extended to the Claude-side hooks.** A2's bypass deny and A3/A4's Write
