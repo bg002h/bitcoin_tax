@@ -444,6 +444,59 @@ worse than none."*
 "offered, declined" record helps or hurts in a given examination posture, are a preparer's calls. The
 architecture should make retention **the filer's decision**, not pick a window.
 
+## 6g. ★★★ MULTI-FORM — does the census generalize? Yes in shape, NO in three specifics
+
+**Owner question, 2026-07-30: "there will be multiple forms per return."** The census is already keyed
+per-(form, year), so the *shape* generalizes. Three things do not, and the third would make it noisy
+enough to get muted.
+
+### ✅ What already works
+
+`btctax_core::tax::packet::PrintedForms` carries **one `Option` per form**, and
+`packet.rs::fill_full_return` destructures it **with no `..`** — its comment: *"adding a member to
+`PrintedForms` without filling it here is a compile error."* So *which forms exist* is already a
+compiler-enforced set, and *whether a form is in THIS return* is already `Option::is_some`.
+
+★★ **The census's form list must DERIVE from `PrintedForms`**, never a hand-written list of 15 —
+that would be F2 in the census itself, and the compiler is already doing the work.
+
+### ❌ Gap 1 — overflow RENAMES fields, so emitted FQNs ≠ template FQNs
+
+`overflow.rs::merge_copies` renames the root `/T` on copies 1.., *"uniquifying every field's
+fully-qualified name"* (the ISO 32000 same-name trap: copies must not share a `/V`). Form 8949
+paginates at 11 rows/part, so a real return routinely emits 2+ copies.
+
+**The census should still key on the TEMPLATE** — the template is the decision surface, and copy 2's
+`f2_01` is the same *logical* cell a second time, not a new decision. But **any check that walks an
+EMITTED document must normalise the copy prefix back to the template FQN.** Without that, every
+overflowing 8949 reds with ~200 phantom "unaccounted" fields — and a checker that cries wolf on a
+normal return is one that gets muted, which is the failure mode this whole design is written against.
+
+### ❌ Gap 2 — cross-form provenance is not expressible
+
+The forms reference each other: Schedule 1-A line 38 is *"Enter here and on Form 1040, line 13b"*;
+Form 8949 → Schedule D → 1040. So a field's `computed(rule)` can depend on **another form's** field,
+and a form's absence changes the provenance of fields on *other* forms.
+
+★ Concretely: **is Schedule D line 16 blank because there were no capital gains, or because Form 8949
+was never emitted?** Same blank, different provenance — the exact distinction the census exists to
+draw, now spanning two forms. The ⑥ taxonomy is per-field *within* a form and has no vocabulary for
+this.
+
+### ❌ Gap 3 — a form ABSENT from the return floods the census
+
+If `sch_c` is `None`, Schedule C's **105 fields** are not "unaccounted" — they are not-applicable *at
+the return level*. Consult r1 placed *not-applicable* as "per-return liveness **of a rule**", i.e.
+field-level; **form-level liveness is not in the design at all.**
+
+★★ This is the one that breaks at scale: **1158 fields across 15 forms, but a typical return emits
+perhaps 5.** Without a form-level gate above the field-level one, the per-return resolution would
+demand provenance for ~800 fields belonging to forms that are not in the return — noise that would
+bury the handful of real findings.
+
+**⇒ The resolution needs two levels:** *is this form in the return?* (from `PrintedForms`) and only
+then *is this field accounted for?* The static census stays per-(form, year) and is unaffected.
+
 ## 7. Open questions for the ⑥ consult
 
 1. Is the §3 taxonomy right, and is "Declined + question pointer" the correct shape for a lawful

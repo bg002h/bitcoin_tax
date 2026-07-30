@@ -715,6 +715,32 @@ users), stated so nobody assumes otherwise.
 leaves no bytes behind — that now holds, so §G-14 no longer has to carry the `VACUUM`/`secure_delete`
 requirement itself.
 
+### G-17 — ★★ MULTI-FORM: the census needs form-level liveness, FQN normalisation, and cross-form provenance
+
+**Owner question, 2026-07-30.** Detail: `design/forms/FIELD_PROVENANCE.md` §6g. Binds **§G-13**.
+
+The census is keyed per-(form, year), so it generalises in shape. Already solid: `PrintedForms` holds
+one `Option` per form and `fill_full_return` destructures it with **no `..`**, so the form set is
+compiler-enforced and per-return inclusion is `Option::is_some`. ★ The census's form list must DERIVE
+from `PrintedForms`, never a hand-list.
+
+**Three gaps:**
+
+1. **Overflow renames FQNs.** `overflow::merge_copies` uniquifies every field name on copies 1.. (the
+   ISO 32000 same-name trap). Form 8949 paginates at 11 rows/part, so 2+ copies is routine. Key the
+   census on the TEMPLATE, but **normalise the copy prefix in any emitted-document check** — else
+   every overflowing 8949 reds with ~200 phantom unaccounted fields and the checker gets muted.
+2. **Cross-form provenance is inexpressible.** Schedule 1-A line 38 → 1040 line 13b; 8949 → Sch D →
+   1040. **Is Schedule D line 16 blank because there were no gains, or because 8949 was never
+   emitted?** Same blank, different provenance — spanning two forms, with no vocabulary for it.
+3. **★★ An absent form floods the census.** `sch_c: None` ⇒ Schedule C's 105 fields are
+   not-applicable *at the return level*. r1's *not-applicable* is field-level; **form-level liveness
+   is absent from the design**. At 1158 fields across 15 forms with a typical return emitting ~5,
+   this would demand provenance for ~800 fields that are not in the return.
+
+**⇒ The per-return resolution needs TWO levels:** is this form in the return, and only then is this
+field accounted for. The static census is unaffected.
+
 ### G-15 — ★★★ The question registry has NO YEAR DIMENSION — **BUILD THIS FIRST** (⑦ consult)
 
 **⑦ verdict:** `reviews/shred-and-year-fable-r2.md`. **G-15 leads the whole sequence** — it is a small
