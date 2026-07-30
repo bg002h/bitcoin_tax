@@ -313,6 +313,60 @@ unaccounted one**, the exact defect the census exists to catch. The consult's `W
 WRONG` names this: the "no second store" rule must bend far enough to persist *the decision's
 existence, separate from its content*. **Unresolved. First question for any round 2.**
 
+## 6d. ★★★ YEAR-SCOPING — the ⑥ consult's "year-stable registry" is not true, and it is already known
+
+**Owner question, 2026-07-30, after the consult: "some questions will have different answers for
+future tax years — does this design account for that?"** Three parts, and only the first is handled.
+
+### 1. Per-year ANSWERS — ✅ handled
+
+Storage is keyed by tax year: `return_inputs::get(conn, tax_year)` / `set(conn, year, &ri)`. TY2024
+and TY2025 answers are separate records and **nothing carries forward silently**, which is correct —
+a prior year's "no" is not testimony for this year.
+
+### 2. Per-year QUESTION SETS — ❌ NOT handled, and documented as a structural limit
+
+The ⑥ consult calls the registry *"year-stable tax semantics"*. **That is true only by accident of
+what is in it today.** `questions.rs:403`, verbatim:
+
+> `live` receives only `&ReturnInputs`, which **carries no tax year**, so it **CANNOT** be scoped to
+> "years that compute modified AGI".
+
+★★ **It has already bitten once.** `HasIncomeExclusion` is a TY2025 MAGI question. Unable to scope by
+year, it was made **always live** — TY2024 filers are asked a TY2025 question — with the trade
+recorded in place: a year-agnostic proxy (Schedule A over $10,000 SALT) *"would refuse TY2024 returns
+that compute correctly today"*, a never-live question *"violates the Declarations invariant"*, and
+`Some(false)` ⇒ MAGI = AGI, which TY2024's `FlatCap` assumes and never reads, so no TY2024 figure can
+move.
+
+★★★ **The workaround does not generalise, and Schedule 1-A is where it breaks.** Asking a TY2024
+filer *"did you pay qualified passenger vehicle loan interest?"* asks about a **deduction that did not
+exist in 2024**. A "no" is not neutral there — it is an answer to a question with no TY2024 meaning,
+and by the consult's own granularity rule that **fabricates precision the filer never swore to**.
+
+**So the registry needs a year dimension** — either a tax year on `ReturnInputs`, or `live` taking
+`(year, &ReturnInputs)`. This is a change to P9's central invariant (*the liveness predicate is the
+only copy*) and must not be smuggled in as a patch.
+
+### 3. DURABILITY — a missing axis, and the one that costs the filer time
+
+Because storage is per-year and nothing carries forward, **every question is re-asked every year**.
+That is right for facts that change (foreign accounts, car-loan interest, blindness) and wasteful for
+facts that do not (**date of birth**). At the question counts §4 implies, re-asking everything
+annually is the §5 round-trip problem in a new costume.
+
+★★ **But a prior-year answer must NEVER silently satisfy this year's provenance** — that is the
+answered-ness invariant crossing a year boundary, and it is exactly the *"software answered for the
+filer"* defect. The lawful shape is a **confirmation**, not a carry: *"Last year you said no. Still
+true for 2025?"* — which is a new answer, given this year, with this year's date.
+
+So each question needs to declare its **durability**: `PerYear` (re-ask blank) vs `Durable`
+(offer last year's answer for confirmation, never assume it). Neither exists today.
+
+★ **And it interacts with §6b's shred:** if last year's answers are shredded, a `Durable` question has
+nothing to confirm against and must fall back to asking blank — which is correct behaviour, but it
+means shredding has a *usability* cost the filer should be told about before they do it, not after.
+
 ## 7. Open questions for the ⑥ consult
 
 1. Is the §3 taxonomy right, and is "Declined + question pointer" the correct shape for a lawful

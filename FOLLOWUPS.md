@@ -682,6 +682,30 @@ person**, four times the §63(f) amount.
 **Residue.** The **blind** boxes remain unexamined for a death interaction, and a TY2024 patch release
 carrying this fix is still worth considering on its own merits (owner's call). Filed as G-9a below.
 
+### G-15 — ★★★ The question registry has NO YEAR DIMENSION, and the workaround has already been spent
+
+**Owner question, 2026-07-30.** Detail: `design/forms/FIELD_PROVENANCE.md` §6d. Interlocks with
+**§G-13** (the ⑥ consult assumed a *"year-stable"* registry — it is not) and **§G-14**.
+
+**Handled:** per-year ANSWERS. `return_inputs::get/set(conn, tax_year)` keys by year; nothing carries
+forward silently.
+
+**NOT handled:** per-year QUESTION SETS. `questions.rs:403`, verbatim — *"`live` receives only
+`&ReturnInputs`, which carries no tax year, so it CANNOT be scoped"*. `HasIncomeExclusion` (a TY2025
+MAGI question) was therefore made **always live**, asking TY2024 filers a TY2025 question, justified
+because `Some(false)` is provably neutral for TY2024.
+
+★★★ **That justification does not generalise.** Schedule 1-A Part IV asks about a deduction that **did
+not exist in TY2024**; a "no" there is not neutral, it answers a question with no TY2024 meaning.
+The registry needs a year dimension — a tax year on `ReturnInputs`, or `live(year, &ri)` — and that
+touches P9's central invariant (the liveness predicate is the only copy), so it is a spec item, not a
+patch.
+
+**Also missing — DURABILITY.** Every question is re-asked every year. Right for facts that change,
+wasteful for date of birth. ★ A prior-year answer must NEVER silently satisfy this year's provenance
+(the answered-ness invariant across a year boundary); the lawful shape is a **confirmation** — *"Last
+year you said no. Still true for 2025?"* — which is a NEW answer with this year's date, not a carry.
+
 ### G-14 — ★★★ CRYPTO-SHREDDABLE interview answers: one vault cert is too blunt
 
 **Owner requirement, 2026-07-30.** Interview answers ("were you asked about foreign accounts? said
