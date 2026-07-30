@@ -1,0 +1,85 @@
+# GENERATED — do not hand-edit. Text layer of design/forms/periodic/f8275.pdf
+# sha256:9b4b82e3d0dd4ece…  |  pdftotext -layout
+# Regenerate: cargo run -p xtask -- forms extract
+#
+Form    8275                                              Disclosure Statement
+                                     Don’t use this form to disclose items or positions that are contrary to Treasury
+                                                                                                                                    OMB No. 1545-0889
+
+                                       regulations. Instead, use Form 8275-R, Regulation Disclosure Statement.
+(Rev. October 2024)                                                                                                              Attachment
+                                                             Attach to your tax return.                                          Sequence No. 92
+Department of the Treasury
+Internal Revenue Service                Go to www.irs.gov/Form8275 for instructions and the latest information.
+Name(s) shown on return                                                                                             Identifying number shown on return
+
+
+If Form 8275 relates to an information return for a foreign entity (for example, Form 5471), enter:
+Name of foreign entity
+Employer identification number, if any
+Reference ID number (see instructions)
+ Part I           General Information (see instructions)
+                                           (b)                                   (c)                                (d)       (e)
+                   (a)                                                                                                                      (f)
+                                     Item or Group                      Detailed Description                      Form or    Line
+       Rev. Rul., Rev. Proc., etc.                                                                                                        Amount
+                                        of Items                              of Items                           Schedule    No.
+
+   1
+
+   2
+
+   3
+
+   4
+
+   5
+
+   6
+
+ Part II          Detailed Explanation (see instructions)
+   1
+
+
+
+   2
+
+
+
+   3
+
+
+
+   4
+
+
+   5
+
+
+
+   6
+
+
+Part III          Information About Pass-Through Entity. To be completed by partners, shareholders, beneficiaries, or
+                  residual interest holders.
+Complete this part only if you are making adequate disclosure for a pass-through item.
+
+Note: A pass-through entity is a partnership, S corporation, estate, trust, regulated investment company (RIC), real estate investment
+      trust (REIT), or real estate mortgage investment conduit (REMIC).
+   1 Name, address, and ZIP code of pass-through entity                 2 Identifying number of pass-through entity
+
+                                                                        3 Tax year of pass-through entity
+                                                                                     /      /             to             /         /
+                                                                        4 Internal Revenue Service Center where the pass-through entity filed
+                                                                          its return
+
+For Paperwork Reduction Act Notice, see separate instructions.                             Cat. No. 61935M                  Form 8275 (Rev. 10-2024)
+
+Form 8275 (Rev. 10-2024)                                                         Page 2
+Part IV       Explanations (continued from Parts I and/or II)
+
+
+
+
+                                                                Form 8275 (Rev. 10-2024)
+

@@ -1,0 +1,460 @@
+# GENERATED — do not hand-edit. Text layer of design/forms/2024/i8275--2024.pdf
+# sha256:a7b4d8b93922ad83…  |  pdftotext (no flags)
+# Regenerate: cargo run -p xtask -- forms extract
+#
+Instructions for Form 8275
+
+Department of the Treasury
+Internal Revenue Service
+
+(Rev. October 2024)
+Disclosure Statement
+
+Section references are to the Internal Revenue Code
+unless otherwise noted.
+
+Form 8275-R, Regulation Disclosure Statement, instead
+of Form 8275.
+
+Future Developments
+
+For items attributable to a pass-through entity,
+disclosure should be made on the tax return of the entity. If
+the entity doesn’t make the disclosure, the partner (or
+shareholder, etc.) can make adequate disclosure of these
+items.
+
+For the latest information about developments related to
+Form 8275 and its instructions, such as legislation
+enacted after they were published, go to IRS.gov/
+Form8275.
+
+General Instructions
+Purpose of Form
+
+Form 8275 is used by taxpayers and tax return preparers
+to disclose items or positions, except those taken contrary
+to a regulation, that are not otherwise adequately
+disclosed on a tax return to avoid certain penalties. The
+form is filed to avoid the portions of the accuracy-related
+penalty due to disregard of rules or to a substantial
+understatement of income tax for non-tax shelter items if
+the return position has a reasonable basis. It can also be
+used for disclosures relating to the economic substance
+penalty and the preparer penalties for tax
+understatements due to unreasonable positions or
+disregard of rules.
+The portion of the accuracy-related penalty
+attributable to the following types of misconduct
+CAUTION cannot be avoided by disclosure on Form 8275.
+
+!
+
+• Negligence.
+• Disregard of regulations.
+• Any substantial understatement of income tax on a tax
+
+shelter item.
+• Any substantial or gross valuation misstatement
+(including misstatements attributable to non-arm's length
+prices) under chapter 1.
+• Any substantial overstatement of pension liabilities.
+• Any substantial estate or gift tax valuation
+understatements.
+• Any claim of tax benefits from a transaction lacking
+economic substance (within the meaning of section
+7701(o)) or failing to meet the requirements of any similar
+rule of law.
+• Any otherwise undisclosed foreign financial asset
+understatement.
+• Any inconsistent estate basis.
+• Any overstatement of the deduction provided in section
+170(p).
+• Any disallowance of a deduction because of section
+170(h)(7).
+
+Who Should File
+
+Form 8275 is filed by individuals, corporations,
+pass-through entities, and tax return preparers. If you are
+disclosing a position taken contrary to a regulation, use
+
+Oct 24, 2024
+
+Exception to filing Form 8275. Guidance is published
+annually in a revenue procedure in the Internal Revenue
+Bulletin that identifies circumstances when an item
+reported on a return is considered adequate disclosure for
+purposes of the substantial understatement aspect of the
+accuracy-related penalty and for avoiding the preparer's
+penalty relating to understatements due to unreasonable
+positions. See the Example below. You don’t have to file
+Form 8275 for items that meet the requirements listed in
+this revenue procedure. This revenue procedure is
+available at IRS.gov.
+Example. Generally, you will have met the
+requirements for adequate disclosure of a charitable
+contribution deduction if you complete the Gifts to Charity
+section of Schedule A (Form 1040), Itemized Deductions,
+supply all required information, and attach all related
+forms required pursuant to statutes or regulations.
+
+How To File
+
+File Form 8275 with your original tax return. Keep a copy
+for your records. You may be able to file Form 8275 with
+an amended return. See Regulations sections 1.6662-4(f)
+(1) and 1.6664-2(c)(3) for more information.
+To adequately disclose items reported by a
+pass-though entity, you must complete and file a separate
+Form 8275 for items reported by each entity.
+To adequately disclose a position or positions related to
+more than one foreign entity, you must complete and file a
+separate Form 8275 for each foreign entity.
+Carryovers, carrybacks, and recurring items.
+Carryover items must be disclosed for the tax year in
+which they originated. You don’t have to file another Form
+8275 for those items for the tax years in which the
+carryover is taken into account.
+Carryback items must be disclosed for the tax year in
+which they originated. You don’t have to file another Form
+8275 for those items for the tax years in which the
+carryback is taken into account.
+However, if you disclose items of a recurring nature
+(such as depreciation expense), you must file Form 8275
+for each tax year in which the item occurs.
+If you are disclosing a position that is contrary to a rule,
+and the position relates to a reportable transaction as
+defined in Regulations section 1.6011-4(b), you must also
+make the disclosure as indicated in Regulations section
+1.6011-4(d). See Form 8886, Reportable Transaction
+
+Cat. No. 62063F
+
+
+Disclosure Statement, and its instructions; Notice 2006-6,
+2006-5 I.R.B. 385, available at IRS.gov/irb/2006-05_IRB/
+ar10.html; and Notice 2010-62, 2010-40 I.R.B. 411,
+available at IRS.gov/irb/2010-40_IRB/ar09.html.
+
+Accuracy-Related Penalty
+
+Generally, the accuracy-related penalty is 20% of any
+portion of a tax underpayment attributable to:
+1. Negligence or disregard of rules or regulations;
+2. Any substantial understatement of income tax;
+3. Any substantial valuation misstatement under
+chapter 1 of the Internal Revenue Code;
+4. Any substantial overstatement of pension liabilities;
+5. Any substantial estate or gift tax valuation
+understatement;
+6. Any claim of tax benefits from a transaction lacking
+economic substance, as defined by section 7701(o), or
+failing to meet the requirements of any similar rule of law;
+7. Any undisclosed foreign financial asset
+understatement;
+8. Any inconsistent estate basis;
+9. Any overstatement of the deduction provided in
+section 170(p); or
+10. Any disallowance of a deduction because of section
+170(h)(7).
+The penalty is 40% of any portion of a tax
+underpayment attributable to one or more gross valuation
+misstatements in (3), (4), (5), or (10) above if the
+applicable dollar limitation under section 6662(h)(2) is
+met. The penalty also increases to 40% for failing to
+adequately disclose a transaction that lacks economic
+substance in (6) above. See Economic substance below.
+The penalty is 40% of any portion of an underpayment
+that is attributable to any undisclosed foreign financial
+asset understatement in (7) above. The penalty is 50% of
+any portion of an underpayment attributable to one or
+more overstatements of the deduction provided in section
+170(p) in (9) above.
+Economic substance. To satisfy the disclosure
+requirements under section 6662(i), you may adequately
+disclose with a timely filed original return (determined with
+regard to extensions) or a qualified amended return (as
+defined under Regulations section 1.6664-2(c)(3)) the
+relevant facts affecting the tax treatment of the
+transaction.
+Note. If you filed a Schedule UTP (Form 1120), Uncertain
+Tax Position Statement, you may not need to file Form
+8275 to satisfy the disclosure requirements of section
+6662(i). For more information, see the Instructions for
+Schedule UTP (Form 1120), Uncertain Tax Position
+Statement.
+Reasonable cause exception. Generally, no
+accuracy-related penalty will be imposed on any portion of
+an underpayment if you show that there was reasonable
+cause for that portion and that you acted in good faith with
+respect to that portion.
+
+2
+
+The reasonable cause and good faith exception
+doesn’t apply to any portion of an underpayment
+CAUTION attributable to a transaction that lacks economic
+substance under section 7701(o).
+
+!
+
+Adequate disclosure. Generally, you can avoid the
+disregard of rules and substantial understatement
+portions of the accuracy-related penalty if the position is
+adequately disclosed and the position has at least a
+reasonable basis. To avoid the disregard of regulations
+portion of the accuracy-related penalty, the position taken
+must also represent a good-faith challenge to the validity
+of the regulation. See Regulations section 1.6662-3(c)(1).
+Reasonable basis. Reasonable basis is a relatively
+high standard of tax reporting that is significantly higher
+than not frivolous or not patently improper. The
+reasonable basis standard isn’t satisfied by a return
+position that is merely arguable.
+If the return position is reasonably based on one of the
+authorities set forth in Regulations section 1.6662-4(d)(3)
+(iii) (taking into account the relevance and persuasiveness
+of the authorities, and subsequent developments), the
+return position will generally satisfy the reasonable basis
+standard even though it may not satisfy the substantial
+authority standard as defined in Regulations section
+1.6662-4(d)(2). For details, see Regulations sections
+1.6662-4(d) and 1.6662-3(b)(3).
+If you failed to keep proper books and records or failed
+to properly substantiate the items, you cannot avoid the
+penalty by disclosure.
+
+Substantial Understatement
+
+An understatement is the excess of:
+1. The amount of tax required to be shown on the
+return for the tax year, over
+2. The amount of tax imposed which is shown on the
+return for the tax year, reduced by any rebates.
+There is a substantial understatement of income tax if
+the amount of the understatement for any tax year
+exceeds the greater of:
+1. 10% of the tax required to be shown on the return
+for the tax year, or
+2. $5,000.
+An understatement of a corporation (other than an S
+corporation or a personal holding company, as defined in
+section 542) is substantial if it exceeds in any year the
+lesser of:
+1. 10% of the tax required to be shown on the return
+for the tax year (or, if greater, $10,000), or
+2. $10 million.
+
+Reduction of understatement. The amount of the
+understatement will be reduced by the part that is
+attributable to the following items.
+• An item (other than a tax shelter item) for which there
+was substantial authority for the treatment claimed at the
+time the return was filed or on the last day of the tax year
+to which the return relates.
+• An item (other than a tax shelter item) that is adequately
+disclosed on this form if there is a reasonable basis for the
+Instructions for Form 8275 (Rev. 10-2024)
+
+
+tax treatment of the item. (In no event will a corporation be
+treated as having a reasonable basis for its tax treatment
+of an item attributable to a multi-party financing
+transaction entered into after August 5, 1997, if the
+treatment doesn’t clearly reflect the income of the
+corporation.)
+For corporate tax shelter transactions (and for tax
+shelter items of other taxpayers for tax years ending after
+October 22, 2004), the only exception to the substantial
+understatement portion of the accuracy-related penalty is
+the reasonable cause exception. For more details, see
+Reasonable cause exception, earlier; section 6662(d);
+and Regulations section 1.6664-4.
+Tax shelter items. A tax shelter, for purposes of the
+substantial understatement portion of the
+accuracy-related penalty, is a partnership or other entity,
+plan, or arrangement, with a significant purpose to avoid
+or evade federal income tax. For transactions on or before
+August 5, 1997, a tax shelter is a partnership or other
+entity, plan, or arrangement, whose principal purpose is to
+avoid or evade federal income tax.
+A tax shelter item is any item of income, gain, loss,
+deduction, or credit that is directly or indirectly attributable
+to the principal or significant purpose of the tax shelter to
+avoid or evade federal income tax.
+
+Tax Return Preparer Penalties
+
+A preparer who files a return or claim for refund is subject
+to a penalty in an amount equal to the greater of $1,000 or
+50% of the income derived (or to be derived) by the tax
+return preparer, with respect to the return or claim, for
+taking a position which the preparer knew or reasonably
+should have known would understate any part of the
+liability if:
+• There is or was no substantial authority for the position;
+• The position is a tax shelter (as defined in section
+6662(d)(2)(C)(ii)) or a reportable transaction to which
+section 6662A applies and it wasn’t reasonable to believe
+that the position would more likely than not be sustained
+on its merits; or
+• The position disclosed as provided in section 6662(d)
+(2)(B)(ii) isn’t a tax shelter or a reportable transaction to
+which section 6662A applies, and there was no
+reasonable basis for the position.
+The penalty won’t apply if it can be shown that there
+was reasonable cause for the understatement and that the
+preparer acted in good faith.
+In cases where any part of the understatement of the
+liability is due to a willful attempt by the return preparer to
+understate the liability, or if the understatement is due to
+reckless or intentional disregard of rules or regulations by
+the preparer, the preparer is subject to a penalty equal to
+the greater of $5,000 or 75% of the income derived (or to
+be derived) by the tax return preparer with respect to the
+return or claim. This penalty shall be reduced by the
+amount of the penalty paid by such person for taking an
+unreasonable position, or a position with no reasonable
+basis, as described immediately above.
+A preparer isn’t considered to have recklessly or
+intentionally disregarded a rule if a position is adequately
+disclosed and has a reasonable basis.
+Instructions for Form 8275 (Rev. 10-2024)
+
+Note. For more information about the accuracy-related
+penalty and preparer penalties, and the means of avoiding
+these penalties, see the regulations under sections 6662,
+6664, and 6694.
+
+Specific Instructions
+Be sure to provide all of the information requested in Parts
+I, II, and III (if applicable). Your disclosure will be
+considered adequate if you file Form 8275 and provide the
+required information in detail.
+Use Part IV on page 2 if you need more space for Parts
+I and/or II. Include the corresponding part and line number
+from page 1. You can use a continuation sheet(s) if you
+need additional space. Be sure to put your name and
+identifying number on each sheet.
+Reference ID number. If you are filing Form 8275 to
+disclose a position related to a foreign entity for which an
+information return (such as Form 5471, Information Return
+of U.S. Persons With Respect to Certain Foreign
+Corporations) is filed, enter on Form 8275 the same
+reference ID number for the foreign entity that is entered
+on the information return.
+If you are filing Form 8275 to report a position or
+positions related to multiple foreign entities, file a separate
+Form 8275 for each foreign entity.
+
+Part I
+Column (a). If you are disclosing a position contrary to a
+rule (such as a statutory provision or IRS revenue ruling),
+you must identify the rule in column (a).
+Column (b). Identify the item by name.
+If any item you disclose is from a pass-through entity,
+you must identify the item as such. If you disclose items
+from more than one pass-through entity, you must
+complete a separate Form 8275 for each entity. Also, see
+How To File, earlier.
+Column (c). Enter a complete description of the item(s)
+you are disclosing.
+Example. If you are reporting entertainment expenses
+in column (b), then you must list the items for
+entertainment expenses in column (c), such as “theater
+tickets, catering expenses, and banquet hall rentals.”
+If you claim the same tax treatment for a group of
+similar items in the same tax year, enter a description
+identifying the group of items you are disclosing rather
+than a separate description of each item within the group.
+Columns (d) through (f). Enter the location of the
+item(s) by identifying the form number or schedule in
+column (d), the line number in column (e), and the amount
+of the item(s) in column (f).
+
+Part II
+
+Your disclosure statement must include a description of
+the relevant facts affecting the tax treatment of the item. To
+satisfy this requirement, you must include information that
+can reasonably be expected to apprise the IRS of the
+identity of the item, its amount, and the nature of the
+controversy or potential controversy. Information
+3
+
+
+concerning the nature of the controversy can include a
+description of the legal issues presented by the facts.
+
+with these laws and to allow us to figure and collect the
+right amount of tax.
+
+Unless provided otherwise in the General
+Instructions, earlier, your disclosure won’t be
+CAUTION considered accurate unless the information
+described above is provided using Form 8275. For
+example, your disclosure won’t be considered adequate if
+you attach a copy of an acquisition agreement to your tax
+return to disclose the issues involved in determining the
+basis of certain acquired assets. If Form 8275 isn’t
+completed and attached to the return, the disclosure won’t
+be considered valid even if the information described
+above is provided using another method, such as a
+different form or an attached letter.
+
+You are not required to provide the information
+requested on a form that is subject to the Paperwork
+Reduction Act unless the form displays a valid OMB
+control number. Books or records relating to a form or its
+instructions must be retained as long as their contents
+may become material in the administration of any Internal
+Revenue law. Generally, tax returns and return information
+are confidential, as required by section 6103.
+
+!
+
+Part III
+Line 4. Contact your pass-through entity if you don’t
+know where its return was filed. However, for partners and
+S corporation shareholders, information for line 4 can be
+found on the Schedule K-1 that you received from the
+partnership or S corporation.
+If the pass-through entity filed its return electronically
+using e-file, enter “e-file” on line 4.
+Paperwork Reduction Act Notice. We ask for the
+information on this form to carry out the Internal Revenue
+laws of the United States. You are required to give us the
+information if you wish to use this form to make adequate
+disclosure to avoid the portion of the accuracy-related
+penalty due to a substantial understatement of income tax
+or disregard of rules, or to avoid certain preparer
+penalties. We need it to ensure that you are complying
+
+4
+
+The time needed to complete and file this form will vary
+depending on individual circumstances. The estimated
+burden for individual taxpayers filing this form is approved
+under OMB control number 1545-0074 and is included in
+the estimates shown in the instructions for their individual
+income tax return. The estimated burden for all other
+taxpayers who file this form is shown below.
+Recordkeeping . . . . . . . . . . . . . . . . . .
+Learning about the law
+or the form . . . . . . . . . . . . . . . . . . .
+Preparing and sending
+the form to the IRS . . . . . . . . . . . . .
+
+3 hr., 35 min.
+1 hr.
+1 hr., 6 min.
+
+If you have comments concerning the accuracy of
+these time estimates or suggestions for making this form
+simpler, we would be happy to hear from you. See the
+instructions for the tax return with which this form is filed.
+
+Instructions for Form 8275 (Rev. 10-2024)
+
+
