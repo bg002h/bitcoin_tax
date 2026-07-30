@@ -66,6 +66,33 @@ equivalence comments that were simply wrong.
   instructions, not scope creep.
 - The review gate becomes mechanical: *is every line present, and does each doc comment match the
   official instruction text?*
+- **★★ But "present" is not "populated" — most fields on a tax return are blank, intentionally.** A
+  filer with no tips, no overtime, no car loan and no senior leaves most of Schedule 1-A empty and that
+  is the *correct* return. So the gate is never "does every line carry a value"; a conformance test that
+  demanded population would push toward inventing entries, which is worse than the gap it closes.
+
+  The real invariant is that **every line has a determinate PROVENANCE** — collected from the filer,
+  computed from named lines, a constant the form prints, or a refusal — because two blanks look
+  identical on the printed page and are not the same thing:
+
+  | blank because | verdict |
+  |---|---|
+  | the inputs say so (no tips ⇒ line 4a empty) | **correct**, and the common case |
+  | nothing ever populated it — never collected, never asked, never modelled | **the defect** |
+
+  Only the second is a bug, and it is invisible in the emitted PDF, invisible to both oracles, and
+  invisible to any test that checks the *value*. It is the [answered-ness invariant](#) again: a
+  hardcoded zero and a computed zero are indistinguishable on the page but not in the type system, which
+  is why answered-ness must be **structural**. The standing example is an **ISO exercise printed as $0**
+  on Form 6251 line 2i — the dominant real AMT trigger post-TCJA, laundered as a blank.
+
+  So a conformance KAT must (a) enumerate the expected line set **from the form's extracted text**, never
+  from a range or a hand-written list, and (b) require every line to be *accounted for* — mapped to a
+  field or decision, or explicitly recorded as carrying none **with a reason**. A checker that cannot
+  distinguish *"this line encodes no decision"* from *"we forgot this line"* is not a conformance check.
+  ★ Both halves have been got wrong here in one sitting: a `BTreeSet` built from `1..=38` (the label set
+  is 48), and a direction check keyed to a hand-list of three parts that reds on nothing when a part is
+  dropped.
 - The PDF emitter becomes trivial — if the struct is the form, filling it is a field→AcroForm mapping
   with no logic.
 
