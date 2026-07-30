@@ -1277,3 +1277,147 @@ mod schedule_1a_tests {
         assert_eq!(cap_c - p.qpvli_phase_out.reduction(excess_c), dec!(5000));
     }
 }
+
+/// The Schedule 1-A form, as `pdftotext -layout` extracts it. **IN-CRATE deliberately** — an
+/// `include_str!` reaching outside the crate ships a broken tarball with exit 0 (see the crate-publishing
+/// note on `GOLDEN_RETURNS_JSON`). Regenerate with `cargo run -p xtask -- extract-schedule-1a`.
+#[cfg(test)]
+const SCHEDULE_1A_FORM_TEXT: &str = include_str!("fixtures/schedule_1a_2025_form.txt");
+
+#[cfg(test)]
+mod schedule_1a_conformance {
+    use super::*;
+
+    /// The printed text of numbered line `label`: the line that begins with it, plus every continuation
+    /// line up to the next numbered label. Returns `None` if the label is absent — which is itself a
+    /// finding, so callers `expect` it rather than defaulting.
+    fn printed_line(label: &str) -> Option<String> {
+        let mut lines = SCHEDULE_1A_FORM_TEXT.lines();
+        let first_word = |l: &str| l.split_whitespace().next().map(str::to_string);
+        let starts_a_label = |l: &str| {
+            first_word(l).is_some_and(|w| w.chars().next().is_some_and(|c| c.is_ascii_digit()))
+        };
+        let first = lines
+            .by_ref()
+            .find(|l| first_word(l).is_some_and(|w| w == label))?;
+        let mut out = first.trim().to_string();
+        for l in lines {
+            if starts_a_label(l) || l.trim().is_empty() {
+                break;
+            }
+            out.push(' ');
+            out.push_str(l.trim());
+        }
+        Some(out)
+    }
+
+    /// ★★ **THE ROUNDING DIRECTION IS READ OFF THE FORM, NOT HAND-ASSIGNED.**
+    ///
+    /// This closes the gap `FOLLOWUPS.md` §G-10 records against `xtask cite-check`: that tool proves a
+    /// quotation is the *form's* words but not that they are *that line's* words, so moving line 28's
+    /// "increase … to the next higher" onto line 11 survives it — and that swap inverts the rounding for
+    /// Parts II/III, the most dangerous single fact in this form.
+    ///
+    /// The fix is not more citation checking. Floor-vs-ceiling is a **decision the code makes**, so it
+    /// can be *derived* from the printed instruction and compared to what `schedule_1a_params` assigned.
+    /// Neither side can then drift alone: editing the params reds this, and so does editing the extract.
+    #[test]
+    fn each_phase_out_rounds_the_way_its_own_printed_line_says_to() {
+        /// The direction the printed text states, refusing to guess.
+        fn direction_from(text: &str) -> StepRounding {
+            let lower = text.to_lowercase();
+            let says_down = lower.contains("decrease the result to the next")
+                && lower.contains("lower whole number");
+            let says_up = lower.contains("increase the result to the next")
+                && lower.contains("higher whole number");
+            match (says_down, says_up) {
+                (true, false) => StepRounding::Floor,
+                (false, true) => StepRounding::Ceil,
+                // Both or neither: the extract changed shape. Fail loudly — a default here would make
+                // this whole test pass by assuming the answer it exists to read.
+                _ => panic!(
+                    "cannot read a rounding direction from the printed line: {text:?}\n\
+                     (down={says_down}, up={says_up} — regenerate the extract with \
+                     `cargo run -p xtask -- extract-schedule-1a`)"
+                ),
+            }
+        }
+        let p = schedule_1a_params(2025).expect("TY2025 has a Schedule 1-A");
+        // (printed line, the excess line it divides, the params field it governs)
+        let cases: [(&str, &str, &StairStepPhaseOut); 3] = [
+            ("11", "10", &p.tips_phase_out),
+            ("19", "18", &p.overtime_phase_out),
+            ("28", "27", &p.qpvli_phase_out),
+        ];
+        for (label, divides, po) in cases {
+            let text = printed_line(label)
+                .unwrap_or_else(|| panic!("line {label} is not in the form extract"));
+            assert_eq!(
+                direction_from(&text),
+                po.rounding,
+                "line {label} of the form says one thing and `schedule_1a_params` says another"
+            );
+            // ★ And the CROSS-REFERENCE, read off the same line. This is the Form 6251 line-33 defect
+            // class — "Subtract line 32 from line 12" where the form said line 22 — caught mechanically
+            // instead of by a reviewer noticing two adjacent digits.
+            assert!(
+                text.contains(&format!("Divide line {divides} by $1,000")),
+                "line {label} must divide line {divides}; printed text is {text:?}"
+            );
+            // The divisor and multiplier are on the same page as the direction, so check them here too.
+            assert_eq!(po.step, dec!(1000));
+        }
+    }
+
+    /// The same treatment for the two lines that state a **dollar amount** the code carries: line 7's
+    /// $25,000 tips cap (which prints NO filing-status variant — the S-3 per-return reading) and line 24's
+    /// $10,000 QPVLI cap.
+    #[test]
+    fn the_caps_that_do_not_vary_by_status_print_no_variant() {
+        let p = schedule_1a_params(2025).expect("TY2025 has a Schedule 1-A");
+        let l7 = printed_line("7").expect("line 7");
+        assert!(
+            l7.contains("Enter the smaller of the amount on line 6 or $25,000"),
+            "line 7 text drifted: {l7:?}"
+        );
+        assert!(
+            !l7.contains("married filing jointly"),
+            "★ line 7 prints NO MFJ figure — that absence IS the evidence for S-3's per-return cap, so \
+             if the form ever adds one this reading must be revisited: {l7:?}"
+        );
+        assert_eq!(p.tips_cap, dec!(25000));
+
+        // By contrast line 15 DOES print a variant, which is why `overtime_cap_for` exists and
+        // `tips_cap_for` deliberately does not.
+        let l15 = printed_line("15").expect("line 15");
+        assert!(
+            l15.contains("$12,500 ($25,000 if married filing jointly)"),
+            "line 15 text drifted: {l15:?}"
+        );
+        let l24 = printed_line("24").expect("line 24");
+        assert!(
+            l24.contains("Enter the smaller of the amount on line 23 or $10,000"),
+            "line 24 text drifted: {l24:?}"
+        );
+        assert_eq!(p.qpvli_cap, dec!(10000));
+    }
+
+    /// ★ Guard the reader itself. `printed_line` returning an empty or truncated string would make every
+    /// assertion above pass vacuously, so pin its behaviour on a line whose shape is known.
+    #[test]
+    fn the_printed_line_reader_captures_continuations_and_stops_at_the_next_label() {
+        let l28 = printed_line("28").expect("line 28");
+        // Continuation captured: the direction word is on the FIRST line, the example on the SECOND.
+        assert!(l28.contains("increase the result to the next"));
+        assert!(l28.contains("increase 1.5 to 2, and increase 0.05 to 1"));
+        // Stopped at the next label: line 29's text must NOT have been swallowed.
+        assert!(
+            !l28.contains("Multiply line 28 by $200"),
+            "the reader ran past line 28 into line 29: {l28:?}"
+        );
+        assert!(
+            printed_line("999").is_none(),
+            "a missing label must be None, not a default"
+        );
+    }
+}
