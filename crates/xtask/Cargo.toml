@@ -22,3 +22,9 @@ clap_mangen = "0.2"   # roff man-page generator (clap 4.x-compatible); generator
 # `xtask examples` builds synthetic vaults in a tempdir and runs the real `btctax` binary to capture
 # verbatim I/O into a committed golden. dev-only tooling (publish = false), so no shipped-crate impact.
 tempfile = "3"
+# Authority manifest (A3/step-③): one manifest + one checker over BOTH primary-source trees.
+# Already in the workspace lockfile via btctax-core/btctax-forms — no new third-party surface, and
+# xtask is `publish = false` so this never reaches a shipped crate.
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"

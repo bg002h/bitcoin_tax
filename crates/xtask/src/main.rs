@@ -9,6 +9,7 @@
 
 mod archive_check;
 mod authority_conflicts;
+mod authority_manifest;
 mod check_isolation;
 mod cite_check;
 mod docs;
@@ -71,6 +72,25 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some("authority-manifest") => {
+            if args.iter().any(|a| a == "--regen") {
+                match authority_manifest::regen(
+                    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .parent()
+                        .and_then(std::path::Path::parent)
+                        .expect("workspace root"),
+                ) {
+                    Ok(n) => println!("authority-manifest: regenerated {n} entries"),
+                    Err(e) => {
+                        eprintln!("xtask authority-manifest --regen: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            } else if let Err(e) = authority_manifest::run() {
+                eprintln!("xtask authority-manifest: {e}");
+                std::process::exit(1);
+            }
+        }
         Some("harness-check") => {
             if let Err(e) = harness_check::run() {
                 eprintln!("xtask harness-check: {e}");
@@ -96,7 +116,7 @@ fn main() {
         _ => {
             eprintln!(
                 "usage: cargo run -p xtask -- <docs [--pdf] | examples | subcommand-coverage | \
-                 check-isolation | cite-check | authority-conflicts | harness-check | archive-check | \
+                 check-isolation | cite-check | authority-conflicts | harness-check | archive-check | authority-manifest [--regen] | \
                  classify-path <path> | \
                  extract-schedule-1a | dump-fields <pdf>>"
             );

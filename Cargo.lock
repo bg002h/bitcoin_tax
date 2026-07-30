@@ -3766,6 +3766,9 @@ dependencies = [
  "btctax-update-prices",
  "clap",
  "clap_mangen",
+ "serde",
+ "serde_json",
+ "sha2",
  "tempfile",
 ]
 

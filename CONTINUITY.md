@@ -23,7 +23,7 @@ _(Supersedes the 2026-06-28 edition, whose deep-research workflow completed long
 |---|---|---|
 | **①** | ~~Fable consult on the HARNESS~~ — **✅ DONE 2026-07-30** | verdict `needs-changes`; it *did* change what we build. Verbatim: `reviews/harness-design-fable-r1.md`. See §0a. |
 | **②** | **Build the harness: A1 → A2 → A3, then B1/B2** — `design/HARNESS.md` (r2) | **A1 first**: without the installed-gate every other mechanism is decoration, and this repo already proves it — `scripts/pre-push` has sat uninstalled since 2026-07-02 |
-| **③** | **Reconcile the two primary-source archives** — see the ★★ note at the end of §4 | H2 reds until this is done, which is correct; and it may change the §5a brief, which currently reads as though rungs 3-4 must be found when they are already in the repo |
+| **③** | **Reconcile the archives** — **DECIDED + LARGELY DONE 2026-07-30**; residue is a countdown, see §4 | owner chose **hybrid**: storage differs by document kind, provenance does not differ at all. One manifest + one checker now span BOTH trees (`xtask authority-manifest`, 113 entries). Remaining: **15** duplicate documents, pinned and shrink-only. |
 | **④** | **Fable consult on the PARSING STRATEGY** — §5a | before paying ~32 hand-read label lists |
 | **⑤** | **The label reader** — §5 | |
 
@@ -245,12 +245,57 @@ From the user; it now governs the work. Detail in `CLAUDE.md` and in memory
 written from memory; `cargo run -p xtask -- archive-check` (harness A3) walked the tree on its first
 run and found two more that had never been named anywhere:
 
-| tree | files | state |
-|---|---|---|
-| `design/forms/` | 174 | URL-note + sha256 + committed text layer; machine-checked by `xtask` |
-| **`design/amt-form6251/`** | **18** | **byte-identical duplicate** of `design/forms/2025/` — md5 matched on f6251, f1040, i1040gi, f1040s1a. Cheapest to retire. |
-| `legal/primary-sources/` | 47 | committed binaries, no manifest. **Holds the rungs `design/forms` lacks** — 16 × 26 USC (rung 4, THE LAW) + 6 × 26 CFR. Cannot simply be deleted. |
-| **`legal/text/`** | **25** | **text extracts of `legal/primary-sources/`** — 100% overlap, ZERO unique documents. |
+★ **Refined after a full walk (the first pass sampled 4 PDFs and generalised — F2, again).** They are
+not four peer archives. They are **TWO CONVENTIONS, each with two layers**, plus one directory of
+legacy strays:
+
+| | binaries | text layer | provenance |
+|---|---|---|---|
+| **(A) `design/forms/`** | PDFs **gitignored**; each has a `.pdf.txt` URL + sha256 note | `design/forms/extract/` — **57 committed** extracts (what tests read) | hashes + `MANIFEST.json`, machine-checked by `xtask cite-check`; a changed hash means the IRS REVISED it |
+| **(B) `legal/primary-sources/`** | **47 binaries COMMITTED** | `legal/text/` — **25 committed** extracts | `legal/_scripts/fetch_*.sh`; **no hashes, no manifest, no revision detection** |
+| strays | `design/amt-form6251/` — 8 duplicate notes, **2 unique** (`f6251--2026-DRAFT`) | — | older, terser note template |
+
+★★ **The `.pdf.txt` files were never extracts** — they are provenance notes. They "diverged" only
+because (A)'s template is richer (737 B vs 289 B). The real text layers are `design/forms/extract/`
+and `legal/text/`.
+
+★★ **So the reconciliation was ONE question, not four:** *commit the binary, or commit only its hash +
+extract?* (A) keeps the repo small, makes an IRS revision detectable, and needs the network to
+re-obtain. (B) is self-contained and offline, with no revision detection at all. **(B) holds material
+(A) lacks — the statute and the regs — so neither tree can simply be deleted.**
+
+### ✅ DECIDED 2026-07-30 — **hybrid**: storage differs by kind, provenance does not differ at all
+
+Forms are re-fetchable from `irs.gov/pub/irs-prior` forever and are **revised annually**, so a hash is
+exactly the alarm you want ⇒ note + sha256, binary gitignored. The statute and the regs are **law
+as-of-a-date**, should be frozen in the repo, and their non-IRS URLs are less stable ⇒ committed. What
+is now *identical* across both trees is the thing that was actually broken: a single manifest and a
+single checker.
+
+- **`cargo run -p xtask -- authority-manifest`** — **113 entries** (47 committed + 66 note-only;
+  16 statute, 6 regulation, 33 instructions, 40 form, 12 guidance, 6 publication), each with kind,
+  storage, sha256, URL and extract. `--regen` **derives** it from the trees — never hand-listed.
+- **Two directions, because one is not enough.** *verify*: every entry resolves and every committed
+  file still hashes true (a changed hash means the source was **REVISED** — review, never absorb).
+  *census*: every primary source in an accounted tree **is in the manifest** — the shape detector
+  pointed inward, catching "archived but never recorded".
+- ★★★ **`MANIFEST.json` already existed with 66 entries and NOTHING read it.** A manifest nobody
+  checks is F4 in its purest form. It has a reader now.
+- **110 of 113 URLs recovered** — including all 16 statutes, which required parsing the fetch scripts'
+  `declare -A` map and `for` loop. A naive parse got 87 and silently dropped **every rung that is
+  law**. The 3 genuine gaps are in `URL_NOT_RECOVERABLE`, shrink-only, each with a reason.
+
+**Residue — a countdown, not a note:** **15 documents are archived twice** (`design/amt-form6251/`
+notes shadowing `design/forms/2025/`), detected on **content hash** because the trees name the same
+document differently. `DUPLICATE_SOURCE_GROUPS` pins the number; the test reds if it rises *or* if it
+falls without the constant coming down. Retiring them is mechanical: delete the stray notes, keep
+`design/amt-form6251/`'s real design work (`PLAN.md`, `PART_III.md`, `reviews/`, the vector
+generator), and repoint the provenance line in
+`crates/btctax-core/src/tax/fixtures/schedule_1a_2025_form.txt`.
+
+★ `design/amt-form6251/` is a **design directory**, not an archive: retire its form-notes, keep
+`PLAN.md` / `PART_III.md` / `reviews/` / the vector generator, and repoint the provenance line in
+`crates/btctax-core/src/tax/fixtures/schedule_1a_2025_form.txt`.
 
 ★ **That "two" was itself F2** — a count written from recollection instead of a walk, inside the very
 note warning against enumerating from a hand-list. The number is now **measured and pinned**:

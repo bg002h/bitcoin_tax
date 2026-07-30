@@ -150,20 +150,24 @@ pub const KNOWN_ARCHIVES: &[(&str, &str)] = &[
     ),
     (
         "design/amt-form6251",
-        "18 files: TY2025 form PDFs + .pdf.txt extracts, staged for the AMT work. VERIFIED \
-         BYTE-IDENTICAL to design/forms/2025/ (md5 matched on f6251, f1040, i1040gi, f1040s1a) — a \
-         pure duplicate, and the cheapest of the four to retire.",
+        "A DESIGN directory (PLAN.md, PART_III.md, reviews/, the vector generator) that also \
+         accumulated form URL-notes before design/forms existed. NOT a pure duplicate — corrected \
+         2026-07-30 after a full walk: 8 notes name documents design/forms also holds, but 2 are \
+         UNIQUE (f6251--2026-DRAFT) and the rest differ only by note template. Retire the notes, \
+         keep the design work; repoint the provenance line in \
+         btctax-core/src/tax/fixtures/schedule_1a_2025_form.txt.",
     ),
     (
         "legal/primary-sources",
-        "47 committed binaries, no manifest, no hashes. Holds the rungs design/forms lacks — 16 × 26 \
-         USC (rung 4, THE LAW) and 6 × 26 CFR (rung 3) — so it CANNOT simply be deleted. Overlaps \
-         design/forms on Form 8949, Schedule D, Form 8283 and their instructions.",
+        "Convention (B): 47 binaries COMMITTED (not gitignored), no manifest, no hashes, fetched by \
+         legal/_scripts/. Holds the rungs design/forms lacks — 16 × 26 USC (rung 4, THE LAW) and \
+         6 × 26 CFR (rung 3) — so it CANNOT simply be deleted.",
     ),
     (
         "legal/text",
-        "25 text extracts of legal/primary-sources — 100% overlap, ZERO unique documents. The same \
-         extract layer design/forms keeps beside its PDFs, split into a parallel tree instead.",
+        "The TEXT LAYER of legal/primary-sources — 25 real extracts (pdftotext output, ~10 KB each), \
+         100% overlap, zero unique documents. Not a separate archive: it is (B)'s equivalent of \
+         design/forms/extract/, kept in a parallel tree instead of beside its sources.",
     ),
 ];
 
