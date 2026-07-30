@@ -10,13 +10,24 @@ reader with **no prior context**. Confirm the tree with `git log --oneline -5` a
 > ## ★ PROGRESS SINCE THE PIVOT (read this before starting anything)
 >
 > Branch `feat/amt-e2-vector-population`, all five gates green, TY2024 provably unchanged throughout
-> (2429 tests, golden-matrix md5 unmoved, both oracles exit 0 on every commit).
+> (2435 tests, golden-matrix md5 `c4e1853ed82d113ca5cd97ffd8abbf47` unmoved, both oracles exit 0 on every
+> commit — the sweep at seed 7 / 40 households reports 0 undeclared divergences).
+>
+> ★★ **A LIVE DEFECT WAS FOUND AND FIXED MID-BRANCH: `FOLLOWUPS.md` §G-9** (HEAD `dd3d42f`). The
+> §63(f) age-65 box on 1040 line 12a was decided from the date of BIRTH alone, but i1040gi carves out a
+> person who died in-year before reaching 65 — so a spouse who died at 64 was granted a $1,550 addition
+> they were not entitled to, **understating tax**, in shipped v0.14.0. **Neither oracle can catch it**
+> (OTS takes a filer-answered `"You_65+Over?"`; taxcalc has only `age_spouse`), so every gate stayed
+> green. Fixed as two class-(A) gates on `HouseholdHeader` plus two class-(B) dates on `Person`, five
+> mutations killed. **How it was found is the transferable part:** it came out of a SPEC review of
+> TY2025 Part V, and checking whether the same rule touched TY2024 took one `grep` of an already-
+> archived PDF. Residue filed as **§G-9a** (the blind boxes, same owning phase).
 >
 > | branch | state |
 > |---|---|
 > | **B1** harness year seams | **DONE** — 7 seams. `OTS_YEAR` split from `OTS_DIR`; `_ots_amt_disqualified` year-scoped (★ the one that mattered: left year-blind it would have gated TY2025's MFS vectors against a solver that handles them CORRECTLY, killing the pivot silently); `gen_goldens` MARS map made total; `exact=1` TY2025-only; `corpus.py`'s SALT axis year-keyed with a straddle guard; the OTS `S1A_2a` skip guard; per-year standard deduction. **4 of the 7 would have failed silently with everything green.** |
 > | **B2** numbers + form shapes | **DONE** except TY2025 `FullReturnParams` itself. The TY2025 fail-closed gate landed FIRST (§5.0). `salt_cap: Usd` → `salt: SaltLimitation` enum (`FlatCap` / `Worksheet2025`). MAGI add-backs collected through the whole input stack. Form 6251 Part I is a per-year TYPE (`Form6251Line1::Y2024/Y2025`). 1040 `L13b` threaded into L14 and Form 8995 line 11. |
-> | **B3** Schedule 1-A | **SPEC'd, not built** — `design/ty2025/SPEC_schedule_1a.md`, DRAFT r1, in review. |
+> | **B3** Schedule 1-A | **SPEC r3 GREEN + PLAN r1 written, NOT built** — `SPEC_schedule_1a.md` (0C/0I; §7's last two open questions CLOSED against the instructions, §7a folds five extracted facts F-1…F-5) and `IMPLEMENTATION_PLAN_schedule_1a.md` (7 tasks, T1-T2 chokepoints). Plan is in its independent review round. |
 > | **B4** filing assets + corpus | not started. 12 PDFs/maps + 2 partial 2025 maps rebuilt. |
 >
 > ★ **TY2025 `FullReturnParams` MUST NOT land until B3 is built.** The gate
