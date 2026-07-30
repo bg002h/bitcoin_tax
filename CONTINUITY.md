@@ -125,6 +125,26 @@ From the user; it now governs the work. Detail in `CLAUDE.md` and in memory
    (`tables.rs::schedule_1a_conformance`). This is how the Form 6251 line-33 class — "Subtract line 32
    from line **22**", once transcribed as line 12 and worth $200,000 on one vector — becomes a test.
 
+★★ **RECONCILE THE TWO ARCHIVES BEFORE THE LABEL-READER WORK.** Found at the very end of the session,
+after `design/forms/` had already been built: **`legal/primary-sources/` already exists** and holds
+
+    statute-irc/        16 × 26 USC sections (HTML)      ← rung 4, THE LAW
+    regulations-cfr/     6 × 26 CFR regs (XML)           ← rung 3
+    irs-guidance/       11 × Notices, CCAs
+    irs-publications/    6 × Pubs
+    irs-forms/           7 × forms + instructions        ← OVERLAPS design/forms/
+    federal-register/    1 × TD 10000 (broker regs)
+
+So the four-rung ladder in §5a is **already archived in this repo**, and I wrote that brief as though we
+would have to go and find rungs 3-4. ★ This is the exact failure the `the-answer-is-in-the-manual` memory
+describes — *concluding from not having looked* — committed on the same day I wrote it down.
+
+**Two archives with different provenance conventions is the "which one is authoritative?" ambiguity this
+session was spent eliminating.** Reconcile before building the label reader, since both would feed it:
+`design/forms/` is URL-note + hash + extracted text, machine-checked by `xtask`; `legal/primary-sources/`
+is committed binaries with no manifest. Decide one convention, and note that `irs-forms/` overlaps
+`design/forms/` directly (Form 8949, Schedule D, Form 8283 and their instructions).
+
 ---
 
 ## 4a. ★★ §G-11 — the largest architectural open item, and what it does and does not block
