@@ -335,8 +335,16 @@ impl SaltLimitation {
     /// Schedule A **line 5e** — the deductible SALT.
     ///
     /// `line_5d` is the SALT actually paid; `magi` is the §164(b)(7)(B)(iv) modified AGI (AGI plus any
-    /// §911/931/933 exclusion), which is the *same* quantity Schedule 1-A Part I line 3 computes.
-    pub fn line_5e(&self, line_5d: Usd, magi: Usd, status: FilingStatus) -> Usd {
+    /// §911/931/933 exclusion), the *same* quantity Schedule 1-A Part I line 3 computes.
+    ///
+    /// ★ **`magi: None` means "the filer was never asked", and it FAILS CLOSED.** `assemble_absolute`
+    /// is infallible by design — btctax computes the whole return even for one it will not file — so
+    /// this cannot refuse here. `screen_inputs` refuses first (`QuestionId::HasIncomeExclusion` is
+    /// always live), and this arm is the belt to that brace. Its DIRECTION is what matters: an absent
+    /// MAGI is treated as *fully phased down*, giving the floor — the SMALLEST deduction, which can
+    /// only overstate tax. The §63(f) rule, applied: an unknown must fail in the direction that
+    /// cannot understate. Note `FlatCap` ignores `magi` entirely, so TY2024 is untouched either way.
+    pub fn line_5e(&self, line_5d: Usd, magi: Option<Usd>, status: FilingStatus) -> Usd {
         let mfs = status == FilingStatus::Mfs;
         match self {
             Self::FlatCap { cap, cap_mfs } => line_5d.min(if mfs { *cap_mfs } else { *cap }),
@@ -360,18 +368,24 @@ impl SaltLimitation {
                     return line_5d;
                 }
                 let line1 = *line1_cap;
-                // Lines 4/5/6 — MAGI against the threshold.
-                let line5 = if mfs {
-                    *line5_threshold_mfs
-                } else {
-                    *line5_threshold
+                // Lines 4/5/6 — MAGI against the threshold. An UNASKED MAGI collapses to the
+                // floor: the smallest deduction, which cannot understate tax (see the doc comment).
+                let line9 = match magi {
+                    None => *line9_floor,
+                    Some(magi) => {
+                        let line5 = if mfs {
+                            *line5_threshold_mfs
+                        } else {
+                            *line5_threshold
+                        };
+                        let line6 = (magi - line5).max(Usd::ZERO);
+                        // Line 7, then line 8 = line 1 − line 7.
+                        let line7 = *line7_rate * line6;
+                        let line8 = line1 - line7;
+                        // Line 9 — "the LARGER of line 8 or $10,000" (unhalved).
+                        line8.max(*line9_floor)
+                    }
                 };
-                let line6 = (magi - line5).max(Usd::ZERO);
-                // Line 7, then line 8 = line 1 − line 7.
-                let line7 = *line7_rate * line6;
-                let line8 = line1 - line7;
-                // Line 9 — "the LARGER of line 8 or $10,000" (unhalved).
-                let line9 = line8.max(*line9_floor);
                 // Line 10 — half of line 9 for MFS, then the smaller of that and 5d.
                 let line9_for_status = if mfs && *line_10_mfs_halves {
                     line9 / Decimal::from(2)
@@ -586,19 +600,19 @@ mod tests {
 
         // L6=50,000 → L7=15,000 → L8=25,000 → L9=25,000 → halved 12,500 → min(12,500, 30,000)
         assert_eq!(
-            w.line_5e(dec!(30000), dec!(300000), mfs),
+            w.line_5e(dec!(30000), Some(dec!(300000)), mfs),
             dec!(12500),
             "the worksheet halves line 9, so MFS at MAGI 300,000 deducts 12,500 — not the 5,000 a \
              halved-cap/halved-floor parameterisation gives"
         );
         // The MFS floor is reached where L8 falls to the UNHALVED 10,000: MAGI = 250,000 + 30,000/0.30
         assert_eq!(
-            w.line_5e(dec!(30000), dec!(350000), mfs),
+            w.line_5e(dec!(30000), Some(dec!(350000)), mfs),
             dec!(5000),
             "MFS floor: L8 = 40,000 − 0.30×100,000 = 10,000, L9 = 10,000, halved = 5,000"
         );
         assert!(
-            w.line_5e(dec!(30000), dec!(349999), mfs) > dec!(5000),
+            w.line_5e(dec!(30000), Some(dec!(349999)), mfs) > dec!(5000),
             "just below MAGI 350,000 the MFS floor must NOT yet bind"
         );
     }
@@ -609,15 +623,15 @@ mod tests {
         let w = salt_2025();
         let s = FilingStatus::Single;
         // Line 1's own short-circuit: "Is 5d more than $10,000? No ⇒ your deduction isn't limited."
-        assert_eq!(w.line_5e(dec!(7000), dec!(450000), s), dec!(7000));
+        assert_eq!(w.line_5e(dec!(7000), Some(dec!(450000)), s), dec!(7000));
         // Under the cap, under the threshold ⇒ all of it.
-        assert_eq!(w.line_5e(dec!(30000), dec!(450000), s), dec!(30000));
+        assert_eq!(w.line_5e(dec!(30000), Some(dec!(450000)), s), dec!(30000));
         // Over the cap, under the threshold ⇒ the $40,000 cap.
-        assert_eq!(w.line_5e(dec!(60000), dec!(450000), s), dec!(40000));
+        assert_eq!(w.line_5e(dec!(60000), Some(dec!(450000)), s), dec!(40000));
         // Phasing: L6=100,000 → L7=30,000 → L8=10,000.
-        assert_eq!(w.line_5e(dec!(60000), dec!(600000), s), dec!(10000));
+        assert_eq!(w.line_5e(dec!(60000), Some(dec!(600000)), s), dec!(10000));
         // Past the floor: L8 goes NEGATIVE (−20,000) and line 9's `larger of` holds it at 10,000.
-        assert_eq!(w.line_5e(dec!(60000), dec!(700000), s), dec!(10000));
+        assert_eq!(w.line_5e(dec!(60000), Some(dec!(700000)), s), dec!(10000));
     }
 
     /// ★ Line 1's short-circuit is a **proved no-op** at TY2025's constants — and this is what makes
@@ -667,7 +681,7 @@ mod tests {
                 while m < 1_400_000 {
                     // Below the trigger the answer must be 5d itself, at every MAGI.
                     assert_eq!(
-                        w.line_5e(l5d, Decimal::from(m), status),
+                        w.line_5e(l5d, Some(Decimal::from(m)), status),
                         l5d,
                         "{status:?}: 5d {l5d} at MAGI {m} must be unlimited"
                     );
@@ -680,6 +694,58 @@ mod tests {
         assert!(checked > 5_000, "the sweep must cover ground: {checked}");
     }
 
+    /// ★ An UNASKED modified AGI fails closed — to the floor, never to the cap.
+    ///
+    /// `assemble_absolute` is infallible by design, so the worksheet cannot refuse mid-computation;
+    /// `screen_inputs` refuses first because `QuestionId::HasIncomeExclusion` is always live. This is
+    /// the belt to that brace, and its DIRECTION is the whole content: an absent MAGI is treated as
+    /// fully phased down, so the filer gets the SMALLEST deduction the worksheet can produce. That
+    /// can only overstate tax — the §63(f) rule that an unknown must fail in the direction which
+    /// cannot understate. The opposite default (assume MAGI is under the threshold, keep the $40,000
+    /// cap) would hand an unasked filer the LARGEST deduction, understating tax on a signed return.
+    #[test]
+    fn an_unasked_modified_agi_fails_closed_to_the_floor() {
+        let w = salt_2025();
+        for status in [FilingStatus::Single, FilingStatus::Mfj, FilingStatus::HoH] {
+            // 5d well past the cap, so line 1's short-circuit cannot mask the choice.
+            let unknown = w.line_5e(dec!(60000), None, status);
+            assert_eq!(
+                unknown,
+                dec!(10000),
+                "{status:?}: absent MAGI must give line 9's floor"
+            );
+            // Bracketed by the two extremes: never more than the best case, never less than the worst.
+            let best = w.line_5e(dec!(60000), Some(dec!(0)), status);
+            let worst = w.line_5e(dec!(60000), Some(dec!(9000000)), status);
+            assert_eq!(
+                best,
+                dec!(40000),
+                "{status:?}: MAGI under the threshold gives the cap"
+            );
+            assert_eq!(
+                unknown, worst,
+                "{status:?}: absent must equal the WORST case, not the best"
+            );
+            assert!(unknown < best, "{status:?}: absent must not be generous");
+        }
+        // MFS halves the floor at line 10, so its fail-closed value is 5,000.
+        assert_eq!(
+            w.line_5e(dec!(60000), None, FilingStatus::Mfs),
+            dec!(5000),
+            "MFS: the floor is halved at line 10 like every other line-9 value"
+        );
+        // TY2024 ignores MAGI entirely, so `None` changes nothing there.
+        let flat = SaltLimitation::FlatCap {
+            cap: dec!(10000),
+            cap_mfs: dec!(5000),
+        };
+        assert_eq!(
+            flat.line_5e(dec!(30000), None, FilingStatus::Single),
+            flat.line_5e(dec!(30000), Some(dec!(600000)), FilingStatus::Single),
+            "FlatCap never reads MAGI, so TY2024 is unaffected by an unasked gate"
+        );
+    }
+
     /// TY2024 is a different instrument: one question, no worksheet, and the halving is on the cap.
     #[test]
     fn ty2024_salt_is_a_flat_cap_and_ignores_magi() {
@@ -689,15 +755,15 @@ mod tests {
         };
         for magi in [dec!(50000), dec!(600000), dec!(5000000)] {
             assert_eq!(
-                flat.line_5e(dec!(30000), magi, FilingStatus::Single),
+                flat.line_5e(dec!(30000), Some(magi), FilingStatus::Single),
                 dec!(10000)
             );
             assert_eq!(
-                flat.line_5e(dec!(30000), magi, FilingStatus::Mfs),
+                flat.line_5e(dec!(30000), Some(magi), FilingStatus::Mfs),
                 dec!(5000)
             );
             assert_eq!(
-                flat.line_5e(dec!(3000), magi, FilingStatus::Single),
+                flat.line_5e(dec!(3000), Some(magi), FilingStatus::Single),
                 dec!(3000)
             );
         }

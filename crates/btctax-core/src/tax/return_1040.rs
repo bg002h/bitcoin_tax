@@ -320,11 +320,12 @@ pub fn schedule_a_parts(
     let salt_5a = salt_line_5a(ri, a);
     let salt_5d = salt_5a + a.salt_real_estate + a.salt_personal_property;
     // ★ ONE call, and the printed form reads the RESULT (`ScheduleAParts::salt_cap`), so `printed.rs`
-    //   never learns which year's instrument ran. §164(b)(7)(B)(iv) MAGI is AGI plus any §911/931/933
-    //   exclusion; btctax has no such input yet, so MAGI == AGI here and the TY2024 arm ignores it
-    //   entirely. When the exclusion inputs land, this is the single place that changes.
-    let salt_magi = agi;
-    let salt_5e = params.salt.line_5e(salt_5d, salt_magi, ri.filing_status);
+    //   never learns which year's instrument ran. §164(b)(7)(B)(iv) modified AGI is AGI plus the
+    //   §911/931/933 exclusions the filer declared; `None` means the exclusion gate was never
+    //   answered, which `screen_inputs` refuses and `line_5e` fails closed on.
+    let salt_5e = params
+        .salt
+        .line_5e(salt_5d, ri.modified_agi(agi), ri.filing_status);
     // The APPLIED limit carried to the printed form. `printed.rs` recomputes `min(5d, salt_cap)`,
     // which is idempotent once this holds the worksheet's own line 10 (5e ≤ 5d always).
     let salt_cap = salt_5e;
