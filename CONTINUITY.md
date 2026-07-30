@@ -211,9 +211,33 @@ before paying is far cheaper than discovering it is wrong on form 12.
 **The brief the dispatched agent must carry** (sharp brief matters more than the tier):
 
 - **THE ONE QUESTION.** Is the design in `design/forms/LABEL_READER.md` the best available strategy for
-  enumerating a form's labels from its text layer, given that the *purpose* is to distinguish
-  *"this line encodes no decision"* from *"we forgot this line"*? If a materially better strategy exists,
-  name it and say what it costs.
+  enumerating a form's labels, given that the *purpose* is to distinguish *"this line encodes no
+  decision"* from *"we forgot this line"*? If a materially better strategy exists, name it and say what
+  it costs.
+
+- **★★ A VERDICT OF "START OVER" IS EXPLICITLY WELCOME, AND THIS IS THE MOMENT FOR IT.** Say so plainly
+  if the whole approach is wrong. We have paid for the archive and the extracts; we have NOT paid for the
+  ~32 hand-read label lists or for 15 forms of transcription. **If we should begin again differently, the
+  cheapest possible time to learn that is now** — do not soften it into "consider also…". A recommendation
+  to discard `LABEL_READER.md` entirely counts as a successful consult, not a failed one.
+
+- **★ WHAT WE ARE ACTUALLY DOING, so the strategy is judged against the real goal.** We are **filling out
+  forms**, and the answers are written down for us in a four-rung ladder we may climb whenever a rung is
+  silent:
+
+  | rung | source | note |
+  |---|---|---|
+  | 1 | **the form's own embedded instructions** — captions, cautions, "enter the smaller of", skip routing | on the page itself; often sufficient |
+  | 2 | **the numbered instructions document** `iNNNN` (`i1040gi` for the 1040-family schedules) | archived and extracted for every form we emit |
+  | 3 | **the regulations** — 26 CFR | ★ **law**, unlike rungs 1-2 |
+  | 4 | **the statute** — 26 USC | ★ **law**, and final |
+
+  ★★ Rungs 1-2 are *guidance*, not law; rungs 3-4 **are** law (see the `tax-authority-hierarchy` memory).
+  So a strategy that can only ever read rungs 1-2 has a ceiling, and the consult should say whether that
+  ceiling matters in practice or is a distinction without a difference for label *enumeration*
+  specifically. **We are never without an authority** — only ever without having gone and read it. Judge
+  the strategy on how directly it gets us from "this line exists" to "this is what the form tells the
+  filer to do", not on parsing elegance.
 - **SETTLED — do not re-derive.** The measured layout data (leading-number works for 6 forms;
   `f1040sa`/`f1040` use a second column and return **0**; `f8949` is a grid); the three sub-problems
   (whitespace, parentless sub-letters, headings-with-no-amount-box); Schedule 1-A's truth is **48**; the
@@ -227,9 +251,11 @@ before paying is far cheaper than discovering it is wrong on form 12.
   *primary* artifact with the reader used only as a change-detector.
 - **FORBIDDEN.** Re-auditing the spec or plan; restating the transcription doctrine back to us; style,
   naming, prose. Do not propose "add more tests" without naming the specific defect it catches.
-- **OUTPUT FORMAT.** `RECOMMENDATION: <keep | replace-with-X | hybrid>`, then at most five bullets of
-  justification, then `COST DELTA:` versus the ~32 hand-read lists, then
-  `WHAT WOULD MAKE THIS WRONG:` — one sentence naming the assumption its advice depends on.
+- **OUTPUT FORMAT.** `RECOMMENDATION: <keep | replace-with-X | hybrid | START-OVER-with-X>`, then at most
+  five bullets of justification, then `COST DELTA:` versus the ~32 hand-read lists, then
+  `WHAT WOULD MAKE THIS WRONG:` — one sentence naming the assumption its advice depends on. If the verdict
+  is `START-OVER`, add `WHAT WE KEEP:` — the archive and extracts are paid for and should not be discarded
+  by reflex.
 
 ★ **`dump-fields` is the lead most likely to change the answer.** If the fillable PDFs carry usable
 AcroForm names, label enumeration may be a *lookup* rather than a parse — and the emitter needs those
