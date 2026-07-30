@@ -682,6 +682,63 @@ person**, four times the §63(f) amount.
 **Residue.** The **blind** boxes remain unexamined for a death interaction, and a TY2024 patch release
 carrying this fix is still worth considering on its own merits (owner's call). Filed as G-9a below.
 
+### G-11 — ★★★ ARCHITECTURAL: the emitter cannot express "no testimony" — `Usd::ZERO` prints `0`
+
+**Owning phase: NOT B3.** This is a whole-surface finding, larger than Schedule 1-A, and it must not be
+smuggled into a task that cannot discharge it. B3 must (a) not make it worse, and (b) carry the
+distinction in its own types so it is ready when this is fixed. Filed 2026-07-29.
+
+**The framing that produced it** (user, and it is the sharpest statement of this project's core hazard
+yet): *"Every entry on a line is effectively testimony from the filer against the filer in a court of law.
+A blank line means no testimony provided and could be lawful and appropriate or an outright financial
+crime; the distinction is intent and that's not the domain of tax software."*
+
+**So a blank and a printed `0` are not two renderings of one value. They are different speech acts:**
+
+| output | what it says under §6065 |
+|---|---|
+| blank | **nothing.** No testimony on this line. |
+| `0` | **an affirmative sworn statement** that the amount IS zero. |
+
+When btctax writes `0` on a line the filer was never asked about, it does not merely guess a number — it
+**fabricates testimony and files it under someone else's signature.** That is a different and worse
+failure than a wrong figure, and it is the [answered-ness invariant] at the emission layer.
+
+**The defect, verified 2026-07-29.** `btctax-forms/src/lib.rs:77` is the whole money path:
+
+```rust
+pub(crate) fn fmt_money(d: Usd) -> String { d.to_string() }   // Usd::ZERO -> "0"
+```
+
+Every money field on every emitted form is `Usd`, never `Option<Usd>`. **There is no representation for
+"no testimony", so no line can choose it.** Zero-suppression exists only ad hoc and only for whole ROWS
+(`schedule_d.rs:26`, `fill8949.rs:44`), never for line-level blank-vs-zero. Invisible to every test and
+both oracles, because `0` is the correct *value* in the overwhelming majority of cases — the defect is in
+the *act*, not the arithmetic.
+
+**★ Why this also EXPLAINS the class (A)/(B) split, and gives a sharper test than "fail closed".**
+
+| class | silence | therefore |
+|---|---|---|
+| (A) declaration | would **ASSERT** something | must be answered, or the return REFUSES |
+| (B) benefit claim | **FORGOES** something (New Colonial Ice: the burden to claim is the filer's) | silence is lawful |
+
+So the test for any unknown is **"does the silence assert, or forgo?"** — which is why §G-9's fix is
+legitimate (a dateless death forgoing the §63(f) box declines a benefit; it swears to nothing) and why a
+printed `0` on an unasked line is categorically different.
+
+**Bounds on the fix — from the same sentence, and easy to overshoot.** Intent is not ours to adjudicate,
+so btctax has exactly three lawful moves: **collect** the testimony, **refuse** to produce the return, or
+leave **genuinely blank**. It must never silently choose silence and present it as the filer's choice.
+★ And it must equally never build the opposite thing — a heuristic that flags an omission as suspicious,
+or any feature that opines on whether a blank is lawful. **Both directions are software deciding intent.**
+This is a hard scope boundary, not a preference.
+
+**Sketch, not a plan** (a real one needs its own spec): the emitter's money type grows a "not stated"
+state that survives to the AcroForm write, computations may not manufacture a stated zero from unstated
+inputs, and each line records which of the three lawful moves it takes and why. The per-line decision is
+then a reviewable fact instead of an accident of `Decimal::default()`.
+
 ### G-10 — ~~`xtask cite-check` verifies a quotation EXISTS in the manual, not that it is at the cited line~~ **LARGELY CLOSED same day**
 
 **Owning phase: B3 T2** (the conformance KAT is being written there anyway, against the same extracts).
