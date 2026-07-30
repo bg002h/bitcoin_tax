@@ -472,6 +472,14 @@ before paying is far cheaper than discovering it is wrong on form 12.
   **We are never without an authority** — only ever without having gone and read it. Judge the strategy on
   how directly it gets us from "this line exists" to "this is what the form tells the filer to do", not on
   parsing elegance.
+
+  ★★ **CORRECTED 2026-07-30 — all four rungs are ALREADY ARCHIVED. Do not treat finding them as work.**
+  The brief above was written as though rungs 3-4 had to be sourced. They are in the repo and now
+  machine-verified: `cargo run -p xtask -- authority-manifest` lists **105 entries** — 16 × 26 USC
+  (rung 4), 6 × 26 CFR (rung 3), 29 instructions (rung 2), 40 forms (rung 1), plus guidance and pubs —
+  each with kind, storage, sha256, URL and extract, and **every URL recorded** (`URL_NOT_RECOVERABLE`
+  is empty). The reviewer should assume the ladder is *available*, and judge only how directly a
+  strategy climbs it.
 - **SETTLED — do not re-derive.** The measured layout data (leading-number works for 6 forms;
   `f1040sa`/`f1040` use a second column and return **0**; `f8949` is a grid); the three sub-problems
   (whitespace, parentless sub-letters, headings-with-no-amount-box); Schedule 1-A's truth is **48**; the
@@ -491,9 +499,24 @@ before paying is far cheaper than discovering it is wrong on form 12.
   is `START-OVER`, add `WHAT WE KEEP:` — the archive and extracts are paid for and should not be discarded
   by reflex.
 
-★ **`dump-fields` is the lead most likely to change the answer.** If the fillable PDFs carry usable
-AcroForm names, label enumeration may be a *lookup* rather than a parse — and the emitter needs those
-names anyway to fill the form (B4), so the work would serve two purposes instead of one.
+★★★ **`dump-fields` WAS the lead most likely to change the answer — so it was MEASURED, not left as a
+question.** Full data in `design/forms/LABEL_READER.md` §"MEASURED 2026-07-30". Summary for the brief:
+
+- **The naive hope is FALSE.** Field names are sequential (`f1_01`…`f1_31`), and semantic naming is
+  wildly inconsistent: Schedule 1-A names its line-22 table, f1040sa names 4 lines, f1040 names **1**,
+  and **f6251 names ZERO**. A names-based strategy works on one form and collapses on the next.
+- **But the GEOMETRY is universal and answers the question the text layer cannot.** An amount box is a
+  field with coordinates; `pdftotext -bbox` gives every word coordinates; the two origins differ by a
+  mechanical flip (~792 page height). Join on y and each row yields *its printed line number* **and**
+  *whether it has an amount box* — which is sub-problem #3 (heading vs label) solved by construction.
+  It also names 22a/22b outright, the case the regex misses entirely.
+- **It is evidence, not an oracle:** the AcroForm enumerates **boxes**, the census asks about **lines**.
+  Headings have no box but are still labels; one line can own several boxes. 54 fields ≠ 48 labels on
+  the one form whose answer we know.
+
+**So the live question is no longer "is there a better source?" but "what is the right ARBITER between
+three imperfect signals — text layer, AcroForm geometry, and a hand-read list?"** That is what the
+consult should answer.
 
 ---
 

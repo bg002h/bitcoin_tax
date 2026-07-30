@@ -51,6 +51,55 @@ finds **45**, and each shortfall is a distinct problem, not a tuning issue:
 is legitimate (it reds when the form changes). Pinning the *reader's own output* would be circular — it
 would assert only that the reader still does what it did.
 
+## ★★★ MEASURED 2026-07-30 — the AcroForm lead, and what it actually gives
+
+`CONTINUITY.md` §5a called `xtask dump-fields` *"the lead most likely to change the answer"* and
+speculated that a fillable form's field list **is** an enumeration of its boxes. That was worth
+**measuring rather than asking a reviewer to guess about**, so it was measured.
+
+**The naive hope is FALSE.** Field names are overwhelmingly sequential, not semantic:
+
+```
+form1[0].Page1[0].f1_01[0]   form1[0].Page1[0].f1_02[0]   …   f1_31[0]
+```
+
+and semantic naming is **wildly inconsistent across forms**:
+
+| form | fields | lines named semantically |
+|---|---|---|
+| f1040s1a | 54 | `Table_Line22`, `Line22a`, `Line22b`, `VIN-1_Comb` |
+| f1040sa | 30 | 4 (`Line2`, `Line8`, `Line8b`, `Line18`) |
+| f1040 | 126 | **1** (`Line28`) |
+| f8949 | 190 | `Table_Line1_Part1`, `Table_Line1_Part2` |
+| **f6251** | 62 | **ZERO** |
+
+So **AcroForm names cannot enumerate labels.** A strategy resting on them would work on Schedule 1-A
+and collapse on Form 6251.
+
+**But the field GEOMETRY is universal, and it answers the exact question the text layer cannot.**
+§"three sub-problems" #3 says distinguishing a heading from a label *"means knowing whether the line
+has an amount box, which the text layer does not directly say."* The AcroForm says it precisely — an
+amount box is a field, with coordinates. And `pdftotext -bbox` gives every word's coordinates too:
+
+```
+<word xMin="45.396" yMin="120.649" …>1</word>      ← the printed line number, left margin
+p1  504.0, 396.0- 576.0, 408.0  text  …f1_12[0]    ← an amount box, right column
+```
+
+Two coordinate systems (bbox is top-down, AcroForm bottom-up, page height ~792), which is a
+**mechanical flip, not a heuristic**. Join on the flipped y and you get, per row: *the line number
+printed on it* and *whether it carries an amount box*. That is sub-problem #3 solved by construction
+rather than by tuning — and sub-problem #2 (parentless sub-letters) largely too, since a bare `b` on
+its own row still has a y and still sits under its parent's y.
+
+★ It also names the hardest case outright: lines **22a/22b**, which the regex *"misses entirely"*, are
+`Table_Line22[0].Line22a[0]` in the AcroForm.
+
+★★ **What this does NOT settle**, and why the consult is still worth having: the AcroForm enumerates
+**boxes**, and the census question is about **lines**. A heading line (4, 14, 22) has no box and must
+still appear in the label set; a single line can own several boxes (22a's VIN + two amounts). So the
+join is evidence, not an oracle — and 54 fields ≠ 48 labels on the one form whose answer we know.
+
 ## Cost, honestly
 
 Sixteen forms × two years, each needing its label list read off the form once. That is real work and it is
