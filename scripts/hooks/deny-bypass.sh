@@ -89,11 +89,42 @@ if [ -z "$VERDICT" ]; then
     NEWDIRS="$(printf '%s' "$COMMAND" | python3 -c '
 import shlex, sys
 cmd = sys.stdin.read()
+
+# ★★★ TWO FALSE POSITIVES IN TWO REAL USES taught this parser its limits, and both were the same
+#     lesson: statically parsing arbitrary shell to predict filesystem effects is the wrong
+#     instrument. It is kept only for the PRE-hoc ask (the decision point, which no after-the-fact
+#     hook can provide) and is now deliberately timid. post-tree-watch.sh is the robust half: it
+#     observes the resulting TREE and needs no parsing at all.
+#
+#       1. `mkdir -p $S`   -> shlex does not expand variables, so the literal "$S" was read as a
+#          repo-relative path and asked about a directory actually in /tmp.
+#       2. `... "$S"; run() { ... }` -> shlex.split leaves ";" ATTACHED to the preceding word, so
+#          the separator was never seen, the scan ran on, and `run()` from a shell function
+#          definition was read as a directory name.
+#
+#     Hence: punctuation_chars so separators really are separators, and a strict path filter. An
+#     unresolvable or implausible target fails OPEN. A hook that cries wolf gets muted, and a muted
+#     hook protects nothing.
+lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+lex.whitespace_split = True
 try:
-    toks = shlex.split(cmd)
+    toks = list(lex)
 except ValueError:
     sys.exit(0)
-SEPS = {"&&", "||", ";", "|", "&"}
+
+SEPS = {"&&", "||", ";", "|", "&", "(", ")", "{", "}", ";;", "|&"}
+
+def plausible_path(t: str) -> bool:
+    if not t or t.startswith("-") or t.startswith("~"):
+        return False
+    # Unexpanded variables/substitutions: we cannot know where they point.
+    if any(c in t for c in "$`*?[]<>=!"):
+        return False
+    # Shell syntax that is not a path (function definitions, groupings, redirections).
+    if any(c in t for c in "(){}\";|&"):
+        return False
+    return True
+
 out, i = [], 0
 while i < len(toks):
     if toks[i] != "mkdir":
@@ -102,10 +133,14 @@ while i < len(toks):
     j = i + 1
     while j < len(toks) and toks[j] not in SEPS:
         t = toks[j]
-        if not t.startswith("-"):
-            out.append(t)
+        if t.startswith("-"):
+            j += 1
+            continue
+        if not plausible_path(t):
+            break          # ★ stop at the first thing that is not clearly a path -- do not guess
+        out.append(t)
         j += 1
-    i = j
+    i = j if j > i else i + 1
 print("\n".join(out))
 ' 2>/dev/null || true)"
     ASK=""

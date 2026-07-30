@@ -215,6 +215,51 @@ backstop is that A3 has a **test** half that walks the whole tree on every `make
 Bash-created archive is caught late rather than never. **A4 has no test counterpart** — for A4, "late"
 does not exist, which is precisely why its coverage had to be widened rather than merely documented.
 
+#### A5 — the tree watcher (`PostToolUse`), and why it beats both hook halves
+
+**Owner's suggestion, 2026-07-30, and it is a better idea than what it supplements.** A3's hook half
+watches the `Write` tool; A4's Bash half watches `mkdir`. Both **enumerate ways a file can appear** —
+`cp`, `mv`, `tar -x`, `curl -o`, `>` redirection, `unzip`, `rsync`, a script three levels down. That
+list is unbounded, and every entry on it is one somebody happened to think of. **It is the excuse-list
+mistake, committed inside the harness that warns about it.**
+
+`scripts/hooks/post-tree-watch.sh` watches the **tree** instead of the **command**: a sorted listing
+after every Bash call, diffed against the previous one, with the shape detector run over whatever is
+new. It cannot be routed around by choosing a different tool, because it does not care which tool ran
+— only what is now on disk. Same rule the oracle excuse lists follow: *state the mechanism, let it
+decide, never enumerate the outcomes you happened to see.*
+
+| | |
+|---|---|
+| **Cost** | ~8-21 ms (1833 files, build dirs pruned). Measured, because a slow `PostToolUse` hook is one that gets disabled. |
+| **Why a walk, not `git status`** | `git status` is 3 ms but **blind to a new file matching a gitignore rule**, and a detector whose correctness depends on `.gitignore` is not a detector. |
+| **What it cannot do** | Undo. It runs *after* the tool. But it turns "caught at the next `make check`" into "caught within one tool call". |
+| **Deliberately not reported** | New *directories*. After-the-fact directory reports are noise, and noise gets a hook muted. |
+
+★★ **This closes the `cp` limit recorded above.** A3's coverage is now mechanism-independent, and the
+Write/`mkdir` hooks are demoted to what they are uniquely good for: firing *before* the act, at the
+decision point, which no `PostToolUse` hook can do.
+
+#### ★★★ Two false positives in two real uses — the verdict on shell parsing
+
+The `mkdir` ask (A4's Bash half) cried wolf **twice, on its first two real invocations**, both while
+building A5:
+
+1. `mkdir -p $S` — `shlex` does not expand variables, so the literal `$S` was read as a repo-relative
+   path and the hook asked about a directory that actually lives in `/tmp`.
+2. `... "$S"; run() { … }` — `shlex.split` leaves `;` **attached** to the preceding word, so the
+   separator was never seen, the scan ran past it, and `run()` from a shell function definition was
+   read as a directory name.
+
+★★ **The lesson is not "fix the regex".** It is that *statically parsing arbitrary shell to predict
+filesystem effects is the wrong instrument* — which is precisely why A5 exists. A4's parser is kept
+only for the one thing A5 structurally cannot provide (the **pre**-hoc ask) and is now deliberately
+timid: `punctuation_chars` so separators really separate, a strict path filter, and **an unresolvable
+target fails OPEN**. Failing open is safe *because* A5 observes the resulting tree regardless.
+
+★ A hook that cries wolf gets muted, and a muted hook protects nothing — so the ALLOW cases are pinned
+in the kill test as **the specification of that narrowness**, not as padding.
+
 ### Class β — require the kill
 
 #### B1 — seen-red-once, as a standing rule

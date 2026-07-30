@@ -1,6 +1,6 @@
 {
   "$comment": [
-    "btctax harness — design/HARNESS.md. PROJECT-SCOPED BY CONSTRUCTION: Claude Code loads this file",
+    "btctax harness \u2014 design/HARNESS.md. PROJECT-SCOPED BY CONSTRUCTION: Claude Code loads this file",
     "only when working in this repository, so nothing here can fire in another project. The harness is",
     "grown from THIS repo's observed failures and must never be promoted to ~/.claude/settings.json or",
     "to the cross-project /scratch/code/CLAUDE.md without its own evidence.",
@@ -25,6 +25,17 @@
           {
             "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/scripts/hooks/on-write.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/scripts/hooks/post-tree-watch.sh"
           }
         ]
       }

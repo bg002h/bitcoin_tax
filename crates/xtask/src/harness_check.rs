@@ -672,6 +672,87 @@ mod tests {
         assert_eq!(fire(r#"git commit -m "mentions --no-verify""#), Some(0));
     }
 
+    /// ★★★ **THE KILL for the tree watcher — A3's coverage made mechanism-independent.**
+    ///
+    /// `on-write.sh` watches the `Write` tool and `deny-bypass.sh` watches `mkdir`. Both enumerate
+    /// *ways a file can appear*, which is unbounded: `cp`, `mv`, `tar -x`, `curl -o`, `>`, `unzip`,
+    /// a script three levels down. `post-tree-watch.sh` watches the **tree** instead, so it cannot be
+    /// routed around by choosing a different tool — it does not care which tool ran, only what is now
+    /// on disk.
+    ///
+    /// ★ Run against a THROWAWAY repo. Creating a stray primary source in the real tree would race
+    /// `archive_check::this_repo_has_no_unaccounted_primary_source`, and a test that can red an
+    /// unrelated test is not a test.
+    #[cfg(unix)]
+    #[test]
+    fn the_tree_watcher_catches_a_primary_source_however_it_arrives() {
+        let script = repo_root().join("scripts/hooks/post-tree-watch.sh");
+        assert!(script.exists(), "{} missing", script.display());
+        let xtask = repo_root().join("target/debug/xtask");
+        if !xtask.is_file() {
+            return; // no debug binary in this profile; the live gate still covers the repo
+        }
+
+        let repo = tempfile::tempdir().expect("tempdir");
+        let state = tempfile::tempdir().expect("tempdir");
+        let r = repo.path();
+        assert!(
+            Command::new("git")
+                .args(["init", "--quiet"])
+                .current_dir(r)
+                .status()
+                .is_ok_and(|s| s.success()),
+            "git init"
+        );
+
+        let watch = || -> Option<i32> {
+            Command::new(&script)
+                .current_dir(r)
+                .env("BTCTAX_HARNESS_STATE", state.path())
+                .env("BTCTAX_XTASK", &xtask)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .ok()?
+                .code()
+        };
+
+        assert_eq!(watch(), Some(0), "cold start seeds the cache silently");
+        assert_eq!(watch(), Some(0), "no change is silent");
+
+        // ★ THE CASE THE WRITE HOOK CANNOT SEE: a file that simply appears on disk.
+        fs::create_dir_all(r.join("zz-stray")).expect("mkdir");
+        fs::write(r.join("zz-stray/f6251--2025.pdf"), "x").expect("write");
+        assert_eq!(
+            watch(),
+            Some(2),
+            "a form PDF appearing in a new tree must be CAUGHT"
+        );
+        assert_eq!(
+            watch(),
+            Some(0),
+            "reported ONCE, not on every subsequent call"
+        );
+
+        // The statute too — the rung that is law.
+        fs::write(r.join("zz-stray/26USC_s61.html"), "x").expect("write");
+        assert_eq!(
+            watch(),
+            Some(2),
+            "a statute appearing in a new tree must be CAUGHT"
+        );
+
+        // Must stay silent on ordinary files, or it becomes noise and gets muted.
+        fs::write(r.join("zz-stray/notes.md"), "x").expect("write");
+        fs::write(r.join("zz-stray/Cargo.toml"), "x").expect("write");
+        assert_eq!(watch(), Some(0), "ordinary files must not fire");
+
+        // And silent when the file lands in an accounted-for tree.
+        fs::create_dir_all(r.join("design/forms/2026")).expect("mkdir");
+        fs::write(r.join("design/forms/2026/f6251--2026.pdf"), "x").expect("write");
+        assert_eq!(watch(), Some(0), "an accounted-for tree must not fire");
+    }
+
     /// ★★ **A1's principle, extended to the Claude-side hooks.** A2's bypass deny and A3/A4's Write
     /// hook are only real if `.claude/settings.json` actually references them and they are
     /// executable — otherwise they are `scripts/pre-push` all over again: reviewed, committed, never
@@ -686,7 +767,11 @@ mod tests {
                 settings_path.display()
             )
         });
-        for script in ["scripts/hooks/deny-bypass.sh", "scripts/hooks/on-write.sh"] {
+        for script in [
+            "scripts/hooks/deny-bypass.sh",
+            "scripts/hooks/on-write.sh",
+            "scripts/hooks/post-tree-watch.sh",
+        ] {
             assert!(
                 settings.contains(script),
                 ".claude/settings.json does not reference `{script}` — the hook exists but nothing \
