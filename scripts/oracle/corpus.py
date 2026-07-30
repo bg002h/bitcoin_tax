@@ -99,6 +99,46 @@ SALT = {
     "over": {"state_income_tax": 8_000, "real_estate_tax": 9_000},   # 5d = 17,000 → capped to $10k
 }
 
+# ── §164(b) cap by year, and a SALT axis that cannot silently go inert ────────────────────────────
+#
+# ★ The `over` cell above is $17,000, chosen to clear TY2024's $10,000 cap. OBBBA raised the TY2025 cap
+# to **$40,000**, so at TY2025 constants that same cell is UNDER the cap — the axis whose whole purpose
+# is exercising the cap would have stopped exercising anything, silently, while every household still
+# reconciled. A no-op test cell is worse than a missing one: it reports coverage it does not provide.
+SALT_CAP_BY_YEAR = {2024: 10_000, 2025: 40_000}
+
+SALT_BY_YEAR = {
+    2024: SALT,
+    # TY2025: 5d = 45,000 clears the $40,000 cap. The four-region × five-status matrix SPEC §6.5
+    # requires (unlimited / capped-not-phased / phasing / at-the-floor) also needs MAGI positions, so
+    # it is scheduled to SPEC §8a B4; this cell only keeps the CAP axis live.
+    2025: {
+        "under": {"state_income_tax": 3_000, "real_estate_tax": 4_000},   # 5d = 7,000 → worksheet line 1 short-circuits
+        "over": {"state_income_tax": 25_000, "real_estate_tax": 20_000},  # 5d = 45,000 > $40,000 cap
+    },
+}
+
+
+def salt_for(year: int) -> dict:
+    """The SALT axis for `year`, asserted to actually straddle that year's §164(b) cap."""
+    try:
+        axis, cap = SALT_BY_YEAR[year], SALT_CAP_BY_YEAR[year]
+    except KeyError:
+        raise KeyError(f"no SALT axis for TY{year}; add it with that year's §164(b) cap") from None
+    under = sum(axis["under"].values())
+    over = sum(axis["over"].values())
+    assert under < cap < over, (
+        f"TY{year}: the SALT axis must STRADDLE the ${cap:,} cap, but under={under:,} and "
+        f"over={over:,}. A cell on the wrong side of the cap is a no-op that still reports coverage."
+    )
+    return axis
+
+
+def selftest_salt_axis() -> None:
+    """Every bundled year's SALT axis straddles its own cap. Offline; no oracles."""
+    for y in SALT_BY_YEAR:
+        salt_for(y)
+
 
 def _build(status, w2, interest, div, cap, se, dedsalt):
     """Assemble one household's `inputs` dict from axis-value LABELS. `dedsalt` is the combined
@@ -600,6 +640,7 @@ def assert_pairwise_t2_coverage(admitted):
 
 
 if __name__ == "__main__":  # a quick offline sanity dump (no oracles)
+    selftest_salt_axis()
     hs = households()
     print(f"candidates: {len(hs)} (anchors {len(ANCHORS)} + pinned {len(PINNED_CELLS)} + generated {len(hs) - len(ANCHORS) - len(PINNED_CELLS)})")
     print(f"  block A {len(block_a())}, block B {len(block_b())}, block P {len(block_p())}")

@@ -101,13 +101,60 @@ HARNESS_BIN = Path(__file__).resolve().parents[2] / "target" / "debug" / "btctax
 # (D-2) through the §9 harness before baking.
 
 
-def _taxcalc_row(n, i):
+# ── The tax YEAR, and Tax-Calculator's own filing-status encoding ─────────────────────────────────
+#
+# ★ `MARS` was `2 if filing_status == "Married/Joint" else 1`. That is CORRECT for today's corpus,
+# which emits only {Single, Married/Joint} (`corpus.py:67`, MFS deferred) — so this is a latent trap
+# rather than a live defect. But it collapses **HoH, MFS and QSS onto Single**, and TY2025 needs all
+# five: Schedule 1-A doubles its caps and thresholds for MFJ, bars Parts II/III/V for MFS entirely,
+# and taxcalc's own `AutoLoanInterestDed_ps` treats QSS differently from every sibling parameter. A
+# widened corpus against the old map would have scored three statuses as Single and reconciled
+# cleanly, which is the quietest possible way to be wrong.
+#
+# Total and explicit, so adding a status to the corpus cannot silently mis-score it.
+TAXCALC_MARS = {
+    "Single": 1,
+    "Married/Joint": 2,
+    "Married/Sep": 3,
+    "Head_of_House": 4,
+    "Widow(er)": 5,
+}
+
+
+def _mars(filing_status: str) -> int:
+    """Tax-Calculator's `MARS` for one of `corpus.py`'s OTS-style status tokens. KeyErrors on an
+    unknown token rather than defaulting — a default here is what silently scored HoH as Single."""
+    try:
+        return TAXCALC_MARS[filing_status]
+    except KeyError:
+        raise KeyError(
+            f"unknown filing_status {filing_status!r}; add it to TAXCALC_MARS with taxcalc's own "
+            f"MARS code (1 single, 2 joint, 3 separate, 4 household head, 5 widow(er))"
+        ) from None
+
+
+# ★ `exact` is TY2025-ONLY, and deliberately not a shared default.
+#
+# Tax-Calculator applies a STEPPED phase-out only when `exact == 1`; otherwise it smooths the step
+# linearly. TY2025's Schedule 1-A reduces by a flat amount per whole $1,000 of MAGI ($100 in Parts
+# II/III, $200 in Part IV), so without `exact` we diverge by up to $100/$200 at every MAGI that is not
+# a $1,000 multiple — and the cheap fix would be a hand-written excuse that then also masks a genuine
+# btctax rounding error.
+#
+# It must NOT be set for TY2024: `exact` co-governs `ChildDepTaxCredit`, `EducationTaxCredit`, `F2441`
+# and `CTC_new`, so switching it on retroactively could move already-baked TY2024 goldens. This is the
+# one genuine TY2024-contamination path in the year seam — a shared Records column, not a constant.
+TAXCALC_EXACT_YEARS = frozenset({2025})
+
+
+def _taxcalc_row(n, i, year: int = 2024):
     """One Tax-Calculator input record from a household's `inputs` dict (the variable mapping the old
     inline builder used — factored out so the D-2 AMT/credit admission probe reuses it verbatim)."""
     return {
         "RECID": n + 1,
-        "FLPDYR": 2024,
-        "MARS": 2 if i.get("filing_status") == "Married/Joint" else 1,
+        "FLPDYR": year,
+        **({"exact": 1} if year in TAXCALC_EXACT_YEARS else {}),
+        "MARS": _mars(i.get("filing_status", "Single")),
         "e00200": i.get("w2_income", 0),
         "e00200p": i.get("w2_income", 0),
         "e00200s": 0,
@@ -129,7 +176,7 @@ def _taxcalc_row(n, i):
     }
 
 
-def taxcalc_run(households):
+def taxcalc_run(households, year: int = 2024):
     """★ Oracle #2 — PSL Tax-Calculator (CC0), a lineage completely separate from OTS.
 
     Variables are Tax-Calculator's own (`e00200p` wages, `e00900p` Schedule C net profit, …).
@@ -148,12 +195,12 @@ def taxcalc_run(households):
     paper-level cross-foot legs (Sch SE L12, 8959 L18) and the 8995 L12 cap are left ABSENT
     here; those lines are OTS-single-witness (SPEC §6.4 `Option` rule).
     """
-    rows = [_taxcalc_row(n, i) for n, i in enumerate(households)]
+    rows = [_taxcalc_row(n, i, year) for n, i in enumerate(households)]
     recs = tc.Records(
-        data=pd.DataFrame(rows), start_year=2024, gfactors=None, weights=None, adjust_ratios=None
+        data=pd.DataFrame(rows), start_year=year, gfactors=None, weights=None, adjust_ratios=None
     )
     calc = tc.Calculator(policy=tc.Policy(), records=recs)
-    calc.advance_to_year(2024)
+    calc.advance_to_year(year)
     calc.calc_all()
     return [
         {
@@ -218,13 +265,13 @@ def _harness_default(inputs):
     return json.loads(proc.stdout)
 
 
-def _taxcalc_amt_credits(inputs_list):
+def _taxcalc_amt_credits(inputs_list, year: int = 2024):
     """One vectorized Tax-Calculator pass over ALL candidates → [(AMT c09600, credits c07100), …].
     The D-2 admission predicate reads these as oracle-2's 1040 L17 (AMT) and L21 (credits)."""
-    df = pd.DataFrame([_taxcalc_row(n, i) for n, i in enumerate(inputs_list)])
-    recs = tc.Records(data=df, start_year=2024, gfactors=None, weights=None, adjust_ratios=None)
+    df = pd.DataFrame([_taxcalc_row(n, i, year) for n, i in enumerate(inputs_list)])
+    recs = tc.Records(data=df, start_year=year, gfactors=None, weights=None, adjust_ratios=None)
     calc = tc.Calculator(policy=tc.Policy(), records=recs)
-    calc.advance_to_year(2024)
+    calc.advance_to_year(year)
     calc.calc_all()
     return [
         (float(calc.array("c09600")[n]), float(calc.array("c07100")[n]))
