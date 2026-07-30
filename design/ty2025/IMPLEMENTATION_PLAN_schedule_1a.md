@@ -1,6 +1,6 @@
 # Schedule 1-A (TY2025) — IMPLEMENTATION PLAN
 
-**Status: r2** (r1 folded 2026-07-29 — **2 Critical, 4 Important, 2 Minor, 1 Nit**, all confirmed against the text layer before folding; reviewer output persisted verbatim at `design/ty2025/reviews/PLAN_schedule_1a-opus-r1.md`, with my re-verification notes appended there rather than mixed into it). The two Criticals were both **missing eligibility**, not wrong arithmetic — the defect class this project keeps rediscovering. Implements `design/ty2025/SPEC_schedule_1a.md` **r3** (0 Critical / 0 Important),
+**Status: r3** (r2→r3: the 13-agent provenance census folded — see `reviews/PROVENANCE_CENSUS_schedule_1a.md`. It found a MISSING INPUT SURFACE and a hole in T2's own conformance approach; C-1 grew. Earlier: (r1 folded 2026-07-29 — **2 Critical, 4 Important, 2 Minor, 1 Nit**, all confirmed against the text layer before folding; reviewer output persisted verbatim at `design/ty2025/reviews/PLAN_schedule_1a-opus-r1.md`, with my re-verification notes appended there rather than mixed into it). The two Criticals were both **missing eligibility**, not wrong arithmetic — the defect class this project keeps rediscovering. Implements `design/ty2025/SPEC_schedule_1a.md` **r3** (0 Critical / 0 Important),
 which is branch **B3** of `design/ty2025/SPEC.md` §8a. Parent decisions D-1 … D-11 bind.
 
 **Branch:** `feat/amt-e2-vector-population` (current; B1 + B2 already on it).
@@ -149,6 +149,12 @@ declared chokepoint, so this cannot be discovered in B4: decide now between a fi
 choice with a KAT. Capping silently at two drops a third vehicle's interest (overstates tax); summing
 three into two rows yields a correct line 23 while omitting a VIN the deduction is conditioned on.
 
+★★ **THE EXPECTED SET COMES FROM BOTH EXTRACTS, NOT THE FORM ALONE** (census **F-4** — a hole in this
+task's own approach, found by measurement). `grep -c "Keep for Your Records"` on the **form** extract is
+**0**: the four worksheets exist only in the *instructions* extract. So a label census driven off the form
+fixture — which is what r2 specified — **could never red on a worksheet omission.** It would have passed by
+finding nothing, which is the exact false-completeness this plan warns about everywhere else.
+
 **The conformance KAT** — the mechanical gate, executed:
 
 - ★ **all 48 line LABELS are fields** (r1 I-1). 38 is the highest line *number*, not the count. The
@@ -237,6 +243,43 @@ Death of a taxpayer/spouse needs **no new collection**: §G-9 landed
 `HouseholdHeader::{taxpayer,spouse}_died_during_year` and `Person::date_of_death`, with the
 day-before-the-65th-birthday convention in `reaches_65_on`. Part V reuses them at $6,000 per person.
 
+### T3a — ★★ TWO LINES HAVE NO INPUT PATH AT ALL, AND MUST NOT PRINT ZERO
+
+Census **F-1**, confirmed against source. `ReturnInputs` carries `w2s`, `int_1099`, `div_1099`, `g_1099`
+and **nothing else** (`return_inputs.rs:417-423`). But the form reads:
+
+- **line 5** — *"Qualified tip amount included in Form 1099-NEC, box 1; Form 1099-MISC, box 3; or Form
+  1099-K, box 1a."*
+- **line 14b** — *"Qualified overtime compensation included in Form 1099-NEC, box 1, or Form 1099-MISC,
+  box 3."*
+
+**There is no 1099-NEC, 1099-MISC or 1099-K struct anywhere in the input model.** So both lines would be
+blank *because nothing can populate them* — permanently, and indistinguishably on the page from a filer who
+truly had no such income. Under `FOLLOWUPS.md` **§G-11** that is not a gap but **fabricated testimony**: a
+printed `0` is an affirmative sworn statement that the amount IS zero.
+
+★ **btctax has exactly three lawful moves here — collect, refuse, or genuinely blank — and "silently zero"
+is none of them.** For B3, choose per line and record the reason:
+
+| line | move | why |
+|---|---|---|
+| 5 | **REFUSE** when a Schedule C is present | a filer with self-employment income may well have 1099-reported tips, and we cannot ask. Refusing is the only move that does not swear for them. |
+| 14b | **REFUSE** when a Schedule C is present, else genuinely blank | same rule; with no Schedule C there is no payor relationship to report. |
+
+**Collecting the 1099 surface is the right long-term answer** (CLAUDE.md: *if the form asks something our
+input surface cannot answer, collect it* — that is following instructions, not scope creep). It is out of
+scope for B3 only because it is a new multi-form input surface with its own spec; file it, do not fake it.
+
+★ **F-2 makes the line-5 ceiling un-implementable as specified, so it refuses rather than computing.**
+Plan r2 folded "net profit − Schedule 1 line 15". The instructions require more: *"including the
+deductible part of self-employment tax; the deduction for contributions to self-employed SEP, SIMPLE, and
+qualified plans; and the self-employed health insurance deduction, but not including the deduction for
+qualified tips."* Printed Schedule 1 Part II carries lines **15/18/21 only** (`printed.rs:384-387`) — no
+SEP/SIMPLE field, no self-employed-health-insurance field, and (**F-3**) no Schedule E or Schedule F input
+at all, which worksheet column (b) also reads. A ceiling built from what we have is structurally **too
+high** ⇒ line 5 too large ⇒ **understates tax**. Computing it anyway would be the compression this
+project's standing rule exists to forbid.
+
 ### T4 — compute, transcribed line by line
 
 **The skip branches are the risk, not the arithmetic** (spec F-5):
@@ -262,6 +305,13 @@ authority).
 `L38 → 1040 L13b` (the `AbsoluteReturn::schedule_1a_additional` seam B2 already threaded);
 `L37 → Form 6251 line 1a` — the **senior subtotal**, not the total (parent D-3). File Schedule 1-A only
 when `L38 > 0`.
+
+★ **First, delete a comment that expires** (census **F-6**). `return_1040.rs:1269` is
+`let schedule_1a_additional = Usd::ZERO;` under a comment reading *"the 2024 form has no such line, so zero is the RIGHT
+value there, not a stub."* That is true for TY2024 and **false the moment TY2025 lands** — and a comment
+cannot red. It is §G-11's shape in miniature: a correct blank and a laundered one sharing one code path.
+T5 replaces it with the real line 38 and a per-year assertion that TY2024 still yields zero *because the
+form has no such line*, not because a literal says so.
 
 ★★ **Spec §5.6b is the cheapest high-value guard in the whole branch, and it has TWO halves — r1 stated
 only one** (r1 I-4). As written it listed the quantities that must **not** move and omitted the ones that

@@ -330,7 +330,12 @@ const MIN_WORDS: usize = 6;
 
 /// A source named on the same line that is **not** the IRS form, so the span is a quotation of something
 /// else and this extract cannot authorise it.
-const FOREIGN_SOURCES: [&str; 9] = [
+const FOREIGN_SOURCES: [&str; 12] = [
+    "comment",
+    // ★ A quotation attributed to a SOURCE FILE is our own code or comment, not the IRS. Caught by the
+    // checker itself: quoting return_1040.rs's doc comment tripped the "the form" attribution marker.
+    ".rs:",
+    ".rs`",
     "CLAUDE.md",
     "STANDARD_WORKFLOW",
     "FOLLOWUPS",
