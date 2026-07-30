@@ -357,6 +357,108 @@ pub fn run(stem: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// `cargo run -p xtask -- label-proof <stem>` — **the human-readable proof of the label→box join.**
+///
+/// ★★★ **Owner's idea, 2026-07-30, and it closes the residual risk the ④ consult named:** *"a
+/// trailing sub-letter heading with no box and no sequence signature would evade both witnesses."*
+/// Two mechanical witnesses can agree with each other and still both be wrong; a person looking at
+/// the printed page cannot be fooled the same way.
+///
+/// Every AcroForm box on a BLANK form is filled with **the label this census assigned it** — not
+/// `1, 2, 3…`. That distinction is the whole value:
+///
+/// - line 22a's boxes print `22a`. If the join is wrong you see `23` sitting in 22a's box, and the
+///   error is obvious at a glance instead of buried in coordinates.
+/// - a box no label claimed prints **`?`** — that is BOX-WITH-NO-LABEL, a dropped line, made visible.
+/// - a line whose box stays blank is a heading (4, 22) or a missed box.
+///
+/// ★ It fills through the SHIPPED writer (`btctax_forms::apply_writes`), so the render also exercises
+/// the path the real emitter uses, rather than a second implementation that could differ from it.
+///
+/// ★★ This is DIAGNOSTIC output, never a filed artifact: it writes to a scratch path and prints
+/// where. Nothing here goes near a return.
+pub fn proof(stem: &str, out_path: &str) -> Result<(), String> {
+    use btctax_forms::testonly as bf;
+
+    let root = crate::form_geometry::repo_root();
+    let g = crate::form_geometry::load(&root, stem)?;
+    let labels = witness_text(&g)?;
+    let boxes = witness_boxes(&g);
+
+    // Which label owns each box — the SAME assignment the census uses, so the render cannot flatter
+    // the checker by computing the join a second, kinder way.
+    let mut owner_of: Vec<Option<usize>> = Vec::with_capacity(boxes.len());
+    for (bp, top, bottom, _) in &boxes {
+        let centre = (top + bottom) / 2.0;
+        owner_of.push(
+            labels
+                .iter()
+                .enumerate()
+                .filter(|(_, (_, lp, ly))| lp == bp && *ly <= centre + 2.0)
+                .max_by(|(_, (_, _, a)), (_, (_, _, b))| a.total_cmp(b))
+                .map(|(i, _)| i),
+        );
+    }
+
+    let year = stem.rsplit("--").next().unwrap_or("2025");
+    let pdf = root.join(format!("design/forms/{year}/{stem}.pdf"));
+    let bytes = std::fs::read(&pdf).map_err(|e| {
+        format!(
+            "{} not present (gitignored; re-fetch from its .pdf.txt note): {e}",
+            pdf.display()
+        )
+    })?;
+    let mut doc = bf::load(&bytes).map_err(|e| format!("parse {}: {e}", pdf.display()))?;
+    bf::drop_xfa_and_set_needappearances(&mut doc)
+        .map_err(|e| format!("preparing appearances: {e}"))?;
+    let fields = bf::collect_fields(&doc).map_err(|e| format!("collect fields: {e}"))?;
+    let idx = bf::index(&fields);
+
+    let mut writes = Vec::new();
+    let mut unclaimed = 0usize;
+    for (b, owner) in boxes.iter().zip(&owner_of) {
+        let text = match owner {
+            Some(i) => labels[*i].0.clone(),
+            None => {
+                unclaimed += 1;
+                "?".to_string()
+            }
+        };
+        if idx.contains_key(&b.3) {
+            writes.push((b.3.clone(), bf::FieldValue::Text(text)));
+        }
+    }
+    bf::apply_writes(&mut doc, &idx, &writes).map_err(|e| format!("writing values: {e}"))?;
+    bf::strip_nondeterminism(&mut doc);
+    let out = bf::save(&mut doc).map_err(|e| format!("saving: {e}"))?;
+    std::fs::write(out_path, &out).map_err(|e| format!("write {out_path}: {e}"))?;
+
+    let claimed: std::collections::BTreeSet<&str> = owner_of
+        .iter()
+        .flatten()
+        .map(|i| labels[*i].0.as_str())
+        .collect();
+    let boxless: Vec<&str> = labels
+        .iter()
+        .map(|(l, _, _)| l.as_str())
+        .filter(|l| !claimed.contains(l))
+        .collect();
+
+    println!("label-proof: wrote {out_path}");
+    println!(
+        "  {} boxes filled with their assigned label; {unclaimed} printed `?` (BOX-WITH-NO-LABEL)",
+        writes.len()
+    );
+    println!("  {} label(s) with no box: {boxless:?}", boxless.len());
+    println!(
+        "  ★ Open it. Every box should show the line it belongs to. A `?`, a blank that should"
+    );
+    println!(
+        "    have a value, or a label in the wrong box is a defect the machines could not see."
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

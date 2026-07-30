@@ -115,6 +115,20 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some("label-proof") => {
+            let Some(stem) = args.get(1) else {
+                eprintln!("usage: cargo run -p xtask -- label-proof <stem> [out.pdf]");
+                std::process::exit(2);
+            };
+            let out = args
+                .get(2)
+                .cloned()
+                .unwrap_or_else(|| format!("/tmp/{stem}-label-proof.pdf"));
+            if let Err(e) = label_reader::proof(stem, &out) {
+                eprintln!("xtask label-proof: {e}");
+                std::process::exit(1);
+            }
+        }
         Some("harness-check") => {
             if let Err(e) = harness_check::run() {
                 eprintln!("xtask harness-check: {e}");
@@ -140,7 +154,7 @@ fn main() {
         _ => {
             eprintln!(
                 "usage: cargo run -p xtask -- <docs [--pdf] | examples | subcommand-coverage | \
-                 check-isolation | cite-check | authority-conflicts | harness-check | archive-check | authority-manifest [--regen] | extract-geometry <stem> | label-census <stem> | \
+                 check-isolation | cite-check | authority-conflicts | harness-check | archive-check | authority-manifest [--regen] | extract-geometry <stem> | label-census <stem> | label-proof <stem> | \
                  classify-path <path> | \
                  extract-schedule-1a | dump-fields <pdf>>"
             );

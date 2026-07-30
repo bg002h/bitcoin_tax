@@ -406,6 +406,10 @@ pub fn rows_possibly_broker_reported(rows: &[Form8949Row]) -> usize {
 pub use packet::{fill_full_return, NamedForm};
 
 pub mod testonly {
+    // ★ The raw AcroForm write path, for `xtask label-proof`: it fills EVERY box on a blank form
+    // with the label the census assigned it, so a human can see the label→box join on the printed
+    // page. Exported here rather than reimplemented in xtask, because a second writer would be a
+    // second truth — and the point of the proof render is that it exercises the SHIPPED path.
     pub use crate::cells::fmt_money_pair;
     pub use crate::fill8949::{fill_8949_parts, part_data, pdf_has_xfa, split_parts, PartData};
     pub use crate::fill8949_full::fill_8949_full_with_map;
@@ -416,6 +420,9 @@ pub mod testonly {
     pub use crate::form8959::fill_form_8959_with_map;
     pub use crate::form8960::fill_form_8960_with_map;
     pub use crate::form8995::fill_form_8995_with_map;
+    pub use crate::pdf::{
+        apply_writes, drop_xfa_and_set_needappearances, save, strip_nondeterminism, FieldValue,
+    };
     // The committed map TOML, for the line-keyed inverse transcriber (`extract_lines`). Downstream
     // read-back tests need the map itself, not just its parsed struct.
     pub use crate::map::{
