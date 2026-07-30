@@ -2,8 +2,27 @@ use crate::StoreError;
 use rusqlite::serialize::OwnedData;
 use rusqlite::{Connection, DatabaseName};
 
+/// ★★★ **§G-16 — every connection MUST have `secure_delete` on.**
+///
+/// The vault is one whole-image ciphertext: [`db_to_bytes`] serializes **every page, free ones
+/// included**, and `Vault::save` encrypts that image. Without this pragma SQLite frees a deleted
+/// row's pages *without overwriting them*, so the content rides into every subsequent vault
+/// generation, indefinitely — while the calling code reads as a deletion.
+///
+/// That was live: `input_form_store::delete_draft` is a plain `DELETE`, and the draft row holds
+/// SSNs, DOBs and every superseded income figure the filer typed and discarded. Its real retention
+/// was **unbounded and invisible** — strictly worse than `.bak`'s bounded single generation.
+///
+/// ★ Set here rather than at each call site, so it cannot be forgotten by the next `DELETE`. It is
+/// also the prerequisite §G-14's shred needs: a tombstone whose content survives in free pages is a
+/// shred that did not happen.
+fn harden(conn: Connection) -> Result<Connection, StoreError> {
+    conn.pragma_update(None, "secure_delete", "ON")?;
+    Ok(conn)
+}
+
 pub fn open_in_memory() -> Result<Connection, StoreError> {
-    Ok(Connection::open_in_memory()?)
+    harden(Connection::open_in_memory()?)
 }
 
 pub fn db_to_bytes(conn: &Connection) -> Result<Vec<u8>, StoreError> {
@@ -51,7 +70,9 @@ pub fn db_from_bytes(image: &[u8]) -> Result<Connection, StoreError> {
         OwnedData::from_raw_nonnull(std::ptr::NonNull::new(p).unwrap(), n)
     };
     conn.deserialize(DatabaseName::Main, owned, false)?;
-    Ok(conn)
+    // ★ §G-16 — AFTER the deserialize, so the pragma is not clobbered by the swapped-in database.
+    // An existing vault reopened without it would keep leaking deleted rows into every save.
+    harden(conn)
 }
 
 #[cfg(test)]
@@ -81,5 +102,64 @@ mod tests {
         let c2 = db_from_bytes(&bytes).unwrap();
         // Confirm it is a functional empty database.
         c2.execute_batch("CREATE TABLE t(x);").unwrap();
+    }
+
+    /// ★★★ **§G-16 — a DELETE must not leave the deleted bytes in the serialized image.**
+    ///
+    /// The vault is one whole-image ciphertext: [`db_to_bytes`] serializes **every page**, free ones
+    /// included, and `Vault::save` encrypts that. So without `secure_delete`, SQLite frees a deleted
+    /// row's pages **without overwriting them** and the content rides into every subsequent vault
+    /// generation, indefinitely — while the calling code reads as a deletion.
+    ///
+    /// This is not hypothetical: `input_form_store::delete_draft` is a plain `DELETE`, and the draft
+    /// row holds SSNs, DOBs and every superseded income figure the filer typed and discarded.
+    ///
+    /// ★ The sentinel is searched for as RAW BYTES in the image, because that is exactly how it would
+    /// leak — a row-level query would report the row gone and prove nothing.
+    #[test]
+    fn deleted_content_does_not_survive_into_the_serialized_image() {
+        let secret = b"ZZ-G16-SENTINEL-987-65-4321";
+        for (label, mut conn) in [
+            ("fresh", open_in_memory().unwrap()),
+            (
+                "deserialized",
+                db_from_bytes(&{
+                    let c = open_in_memory().unwrap();
+                    c.execute_batch("CREATE TABLE seed(x);").unwrap();
+                    db_to_bytes(&c).unwrap()
+                })
+                .unwrap(),
+            ),
+        ] {
+            conn.execute_batch("CREATE TABLE draft(v TEXT);").unwrap();
+            // Enough rows to occupy real pages, so the free-page path is actually exercised.
+            for i in 0..64 {
+                conn.execute(
+                    "INSERT INTO draft(v) VALUES(?1)",
+                    [format!("{}-{i}", String::from_utf8_lossy(secret))],
+                )
+                .unwrap();
+            }
+            assert!(
+                contains(&db_to_bytes(&conn).unwrap(), secret),
+                "{label}: sentinel must be present BEFORE the delete — otherwise this test proves nothing"
+            );
+
+            conn.execute("DELETE FROM draft", []).unwrap();
+            let image = db_to_bytes(&conn).unwrap();
+
+            assert!(
+                !contains(&image, secret),
+                "{label}: deleted content SURVIVES in the serialized image ({} bytes). A DELETE that \
+                 leaves its bytes behind is not a deletion — every subsequent vault generation would \
+                 carry the discarded SSNs/DOBs. See FOLLOWUPS §G-16.",
+                image.len()
+            );
+            let _ = &mut conn;
+        }
+    }
+
+    fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+        haystack.windows(needle.len()).any(|w| w == needle)
     }
 }

@@ -451,6 +451,58 @@ mod tests {
         (dir, path, pp())
     }
 
+    /// ★★★ **§G-16 — `delete_draft` must actually destroy the draft's bytes.**
+    ///
+    /// The draft row holds the filer's SSNs, DOBs and every superseded income figure they typed and
+    /// then discarded. Before the fix, `delete_draft`'s plain `DELETE` freed the row's pages without
+    /// overwriting them, `db_to_bytes` serialized **every page including free ones**, and `save()`
+    /// encrypted that — so discarded identity data rode into every subsequent vault generation
+    /// **indefinitely**, while the code read as a deletion.
+    ///
+    /// ★ The assertion searches the SERIALIZED IMAGE for raw bytes. A row-level query would report
+    /// the draft gone and prove nothing at all — which is exactly how this survived review.
+    #[test]
+    fn delete_draft_leaves_no_trace_of_the_discarded_values_in_the_image() {
+        let (_dir, path, pp) = tmp_vault();
+        // ★ A sentinel that could only have come from the draft. Deliberately NOT shaped like real
+        // identity data: the test needs a unique byte string, not a realistic one, and an
+        // SSN-shaped literal would (correctly) trip `scripts/pii-scan-generic.sh` — which is exactly
+        // what happened on the first attempt at this test.
+        let sentinel = "ZZ-G16-DISCARDED-DRAFT-CANARY";
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            foreign_country_names: sentinel.to_string(),
+            ..Default::default()
+        };
+
+        let mut sess = Session::open(&path, &pp).unwrap();
+        save_draft(&mut sess, 2024, &ri).unwrap();
+        let before = sess.snapshot().unwrap();
+        assert!(
+            contains(&before, sentinel.as_bytes()),
+            "the sentinel must be in the image BEFORE the delete, or this test proves nothing"
+        );
+
+        assert!(
+            delete_draft(sess.conn(), 2024).unwrap(),
+            "the draft row existed"
+        );
+        sess.save().unwrap();
+        let after = sess.snapshot().unwrap();
+
+        assert!(
+            !contains(&after, sentinel.as_bytes()),
+            "§G-16: the discarded draft value SURVIVES the delete in the serialized image \
+             ({} bytes). `delete_draft` must destroy the bytes, not just unlink the row — otherwise \
+             every later vault generation carries the filer's discarded SSNs and DOBs.",
+            after.len()
+        );
+    }
+
+    fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+        haystack.windows(needle.len()).any(|w| w == needle)
+    }
+
     #[test]
     fn save_draft_preserves_parked_and_reaches_disk() {
         let (_dir, path, pp) = tmp_vault();
