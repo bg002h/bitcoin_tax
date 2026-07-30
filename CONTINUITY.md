@@ -9,9 +9,99 @@ _(Supersedes the 2026-06-28 edition, whose deep-research workflow completed long
 > **One line:** on branch `feat/amt-e2-vector-population` (**44 commits, NOT merged**, all five gates
 > green throughout). Two tracks open — **(A)** Schedule 1-A for TY2025: spec + plan green, task T1 built;
 > **(B)** a form-authority pipeline: steps 1-2 of 3 done for all 16 forms.
-> **The next action is the label reader (track B step 3)** — characterised and deliberately NOT built;
-> see §5. **The largest ARCHITECTURAL open item is §G-11 (§4a)** — the emitter cannot express "no
-> testimony", so it constrains what B3 may emit. It does *not* block the label reader.
+> **THE ORDER OF WORK IS FIXED — see §0.** ① Fable consult on the **harness** (§0a) → ② build the
+> harness, H1 then H2 (`design/HARNESS.md`) → ③ reconcile the two primary-source archives (§4) →
+> ④ Fable consult on the **parsing strategy** (§5a) → ⑤ the label reader (§5).
+> **The largest ARCHITECTURAL open item is §G-11 (§4a)** — the emitter cannot express "no testimony",
+> so it constrains what B3 may emit. It does *not* block any of the above.
+
+---
+
+## 0. ★★ THE ORDER OF WORK — do these in sequence
+
+| # | do this | why here |
+|---|---|---|
+| **①** | **Fable consult on the HARNESS** — §0a below | it may change what we build; it is cheap and it comes before we pay for the build |
+| **②** | **Build the harness: H1, then H2** — `design/HARNESS.md` | H1 (pre-commit gate) catches a failure that happened *today*; H2 makes the archive duplication an invariant instead of a note |
+| **③** | **Reconcile the two primary-source archives** — see the ★★ note at the end of §4 | H2 reds until this is done, which is correct; and it may change the §5a brief, which currently reads as though rungs 3-4 must be found when they are already in the repo |
+| **④** | **Fable consult on the PARSING STRATEGY** — §5a | before paying ~32 hand-read label lists |
+| **⑤** | **The label reader** — §5 | |
+
+★ ① and ② come first because the harness exists to catch the class of failure that produced ③. Building
+it after would be the same mistake in a new costume.
+
+---
+
+## 0a. ★★ FABLE CONSULT #1 — the harness (DO THIS FIRST)
+
+★ **Ask the user's approval before dispatching.** Fable is escalation, never autonomous.
+
+**Paste this to kick it off:**
+
+> Consult Fable on `design/HARNESS.md` — the harness meant to stop me violating doctrine I have written
+> down. Give it the full context from CONTINUITY.md §0a, one question only, and let it say the design is
+> the wrong shape.
+
+**The brief the dispatched agent must carry:**
+
+- **THE CONTEXT — state all of it, it is what makes the question answerable.**
+  - **The project.** `btctax` emits a complete US federal 1040 that a human signs under **26 USC §6065
+    penalties of perjury**. A wrong number is the worst outcome; an **understatement** of tax is worse
+    than an overstatement. The codebase is Rust, ~2450 tests, five validation gates, heavy use of
+    mutation-verification ("a guarantee without a test that reds when it is removed does not exist").
+  - **The problem.** The *assistant* (me) reliably writes down correct doctrine — in `CLAUDE.md` and in a
+    persistent memory directory — and then violates it, sometimes **the same day**. The precipitating
+    example: a memory was written saying *"before deriving or building, grep for what already exists — I
+    conclude from not having looked"*, and hours later a primary-source archive was built from scratch
+    without checking that `legal/primary-sources/` already held the same material.
+  - **The diagnosis so far.** `CLAUDE.md` and memory are **passive context** — read at session start,
+    violated 40 tool calls later while executing rather than reflecting. This is the same defect the
+    codebase itself has been fixing all session: **held by convention, not construction.**
+  - **The five OBSERVED failures**, from one session, all mechanically detectable — F1 built-without-
+    checking; F2 enumerated from a range or hand-list instead of the source (**three separate times**);
+    F3 committed with the gate red (ran it, never read the output); F4 claimed a checker worked while it
+    was blind to the exact case it existed to protect; F5 truncated a payload between sub-agents and then
+    reported the artifact as a finding. Details in `design/HARNESS.md`.
+  - **The proposal.** H1 pre-commit hook running the gates · H2 a test forbidding two primary-source
+    archives · H3 a `PreToolUse` hook on `Write` for new top-level paths (fires at the decision point) ·
+    H4 a lint for enumeration-from-a-literal · H5 a workflow-script lint on `.slice()` into agent prompts.
+  - **The available surface.** Claude Code hooks (`PreToolUse`/`PostToolUse`, currently unused in this
+    repo), git hooks (none installed), the Rust test suite, `xtask` dev tooling, and `CLAUDE.md` itself.
+
+- **THE ONE QUESTION.** Is `design/HARNESS.md` the right shape for making an assistant actually follow
+  doctrine it has already written down — and what would make it materially better? Concretely: **which of
+  H1-H5 will actually fire, which will be muted or routed around, and what is missing entirely?**
+
+- **★★ SAYING "THIS IS THE WRONG SHAPE" IS A SUCCESSFUL CONSULT.** Nothing is built yet. If the whole
+  approach is misconceived — if the failure is not addressable by mechanism at all, or if there is a
+  categorically better lever (different memory structure, different session shape, different division of
+  labour between assistant and tests) — **say so plainly now**, while it costs nothing. Do not soften it
+  into "consider also…".
+
+- **EXPLICITLY IN SCOPE — what we suspect but have not evaluated.**
+  (a) **H4 is the highest-value and least likely to work** — F2 is a reasoning failure with only a faint
+  syntactic shadow. Is there a better lever for "enumerated from the wrong source"? (b) Do hooks that
+  merely *ask* (H3) change behaviour, or do they become noise that gets muted — and is there evidence
+  either way? (c) Is the **memory system itself** mis-shaped for this: should doctrine be phrased as
+  triggers ("when creating a new top-level directory, …") rather than principles? (d) Should any of this
+  be **session-shaped** instead — a required opening action, a checkpoint cadence — rather than
+  tool-shaped? (e) What does the **failure data** suggest that we have not noticed: are F1-F5 five
+  problems or one?
+
+- **FORBIDDEN.** Proposing more "be careful" instructions — that is exactly what already failed, and
+  adding more is the null action in a costume. Proposing self-verification scaffolding ("add a final
+  verification step") — the user's global config forbids it and it over-verifies with no quality gain.
+  Proposing gates on *judgement* rather than on facts — they get routed around, which teaches that gates
+  are routable. Re-auditing the tax logic, the spec, or the plan.
+
+- **OUTPUT FORMAT.** `VERDICT: <sound | needs-changes | wrong-shape>`, then **per-item** `H1..H5:
+  <keep | drop | change-to-X>` with one line of reasoning each, then `MISSING:` (up to three mechanisms
+  we did not think of, most valuable first), then `WHAT WOULD MAKE THIS WRONG:` — one sentence naming the
+  assumption the advice depends on.
+
+★ **The measure of the harness is not that it exists.** It is whether a future session **fails a gate it
+would otherwise have walked past.** Ask the reviewer to say which of its recommendations would actually
+produce that, and which would merely look like rigour.
 
 ---
 
@@ -179,7 +269,7 @@ silence, and policing it — are software deciding intent.
 
 ---
 
-## 5. ★ THE NEXT ACTION — the label reader (track B, step 3)
+## 5. The label reader (track B, step 3) — ⑤ in the §0 order, AFTER the harness and the reconcile
 
 **Read `design/forms/LABEL_READER.md` first.** Characterised and deliberately unbuilt: the obvious regex
 gives **45** where Schedule 1-A's answer is **48**, and shipping a reader wrong on the one form whose
@@ -210,7 +300,7 @@ same act as transcribing the form, done once and then held by a test forever.
 
 ---
 
-## 5a. ★ CONSULT FABLE ON THE PARSING STRATEGY — do this BEFORE paying the 32-list cost
+## 5a. ★ FABLE CONSULT #2 — the parsing strategy (④ in the §0 order). Do it BEFORE paying the 32-list cost
 
 **Why here and why Fable.** House rule (global `CLAUDE.md`): Fable is never the default and is reserved
 for **a single review immediately before a first irreversible or costly action**. This qualifies on both
