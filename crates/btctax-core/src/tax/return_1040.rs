@@ -1435,6 +1435,9 @@ pub(crate) fn form6251_inputs_from_parts(
 ) -> crate::tax::form6251::Form6251Inputs {
     let pref = (qualified_dividends + net_ltcg).max(Usd::ZERO);
     crate::tax::form6251::Form6251Inputs {
+        // TY2024's Part I. TY2025 passes `Y2025 { .. }` here; the year lives at THIS call site,
+        // which is the one place that knows it (D-4).
+        line1_rule: crate::tax::form6251::Form6251Line1Rule::Y2024,
         status: ri.filing_status,
         taxable_income_l15: taxable_income,
         agi_l11: agi,

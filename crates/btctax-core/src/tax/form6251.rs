@@ -37,6 +37,48 @@ use crate::tax::tables::{AmtParams, LtcgBreakpoints};
 use crate::tax::types::FilingStatus;
 use rust_decimal::Decimal;
 
+/// Form 6251 Part I's **line-1 region**, which is a different shape in each year — so it is a
+/// per-year TYPE rather than one field with a year flag beside it (SPEC `design/ty2025` D-4).
+///
+/// ★ This is the ONLY part of Form 6251 that OBBBA restructured. Parts II and III are line-for-line
+/// identical between 2024 and 2025 (only their constants move), so nothing else forks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Form6251Line1 {
+    /// **TY2024 line 1, verbatim:** "Enter the amount from Form 1040 or 1040-SR, line 15, if more than
+    /// zero. If Form 1040 or 1040-SR, line 15, is zero, subtract line 14 of Form 1040 or 1040-SR from
+    /// line 11 of Form 1040 or 1040-SR and enter the result here. (If less than zero, enter as a
+    /// negative amount.)"
+    Y2024 { line1: Usd },
+    /// **TY2025, verbatim:** "**1a** Subtract Schedule 1-A (Form 1040), line 37, from Form 1040,
+    /// 1040-SR, or 1040-NR, line 14." · "**b** Subtract line 1a from Form 1040, 1040-SR, or 1040-NR,
+    /// line 11b (if less than zero, enter as a negative amount)."
+    ///
+    /// ★ Line 1a subtracts Schedule 1-A line **37** — the *senior* deduction subtotal, not line 38's
+    /// total — so the enhanced senior deduction is ADDED BACK for the AMT while the tips, overtime and
+    /// car-loan deductions are allowed.
+    Y2025 { line1a: Usd, line1b: Usd },
+}
+
+impl Default for Form6251Line1 {
+    /// TY2024's shape, matching `Form6251::default()` and every committed fixture vector.
+    fn default() -> Self {
+        Self::Y2024 { line1: Usd::ZERO }
+    }
+}
+
+impl Form6251Line1 {
+    /// The amount **line 4 combines**: line 1 in 2024, line **1b** in 2025 ("Combine lines 1b
+    /// through 3"). Reading 1a here would put the *deduction* into AMTI instead of the income — the
+    /// line-33 defect class, one line up.
+    pub fn amount_entering_line4(&self) -> Usd {
+        match self {
+            Self::Y2024 { line1 } => *line1,
+            Self::Y2025 { line1b, .. } => *line1b,
+        }
+    }
+}
+
 /// One filled Form 6251. Field names are the form's line numbers.
 ///
 /// Lines skipped by a routing instruction (line 6's "enter -0- here and on lines 7, 9, and 11", line
@@ -46,10 +88,8 @@ use rust_decimal::Decimal;
 #[non_exhaustive]
 pub struct Form6251 {
     // ── Part I — Alternative Minimum Taxable Income ──────────────────────────────────────────────
-    /// L1 — "Enter the amount from Form 1040 or 1040-SR, line 15, if more than zero. If Form 1040 or
-    /// 1040-SR, line 15, is zero, subtract line 14 of Form 1040 or 1040-SR from line 11 of Form 1040
-    /// or 1040-SR and enter the result here. (If less than zero, enter as a negative amount.)"
-    pub line1: Usd,
+    /// Part I's line-1 region — **per-year (D-4)**, because 2025 split it. See [`Form6251Line1`].
+    pub line1: Form6251Line1,
     /// L2a — "If filing Schedule A (Form 1040), enter the taxes from Schedule A, line 7; otherwise,
     /// enter the amount from Form 1040 or 1040-SR, line 12."
     ///
@@ -222,12 +262,28 @@ impl Form6251 {
 
 /// Everything Form 6251 reads off the rest of the return.
 #[derive(Debug, Clone, Copy)]
+pub enum Form6251Line1Rule {
+    /// TY2024 — line 1 reads 1040 line 15, falling back to line 11 − line 14 when line 15 is zero.
+    Y2024,
+    /// TY2025 — 1a = 1040 line 14 − Schedule 1-A line 37; 1b = 1040 line 11b − 1a.
+    Y2025 {
+        /// 1040 line 11b ("Amount from line 11a (adjusted gross income)").
+        form_1040_l11b: Usd,
+        /// 1040 line 14 ("Add lines 12e, 13a, and 13b").
+        form_1040_l14: Usd,
+        /// Schedule 1-A line 37 — the enhanced senior deduction subtotal.
+        schedule_1a_l37: Usd,
+    },
+}
+
 pub struct Form6251Inputs {
     pub status: FilingStatus,
-    /// 1040 line 15.
+    /// 1040 line 15 (TY2024) — still needed by Part III's lines 20/27 in every year.
     pub taxable_income_l15: Usd,
     /// 1040 line 11.
     pub agi_l11: Usd,
+    /// Which year's Part I line-1 rule to apply. **Per-year TYPE, not a flag** (D-4).
+    pub line1_rule: Form6251Line1Rule,
     /// 1040 line **12** — the deduction taken (standard or itemized), WITHOUT the QBI deduction.
     /// Line 2a's else-branch reads this one.
     pub deduction_l12: Usd,
@@ -260,10 +316,25 @@ pub fn compute_6251(i: Form6251Inputs, amt: &AmtParams, bp: &LtcgBreakpoints) ->
     let st = i.status;
 
     // ── Part I ──
-    let line1 = if i.taxable_income_l15 > z {
-        i.taxable_income_l15
-    } else {
-        i.agi_l11 - i.deduction_l14 // may be negative; the form says "enter as a negative amount"
+    let line1 = match i.line1_rule {
+        Form6251Line1Rule::Y2024 => Form6251Line1::Y2024 {
+            line1: if i.taxable_income_l15 > z {
+                i.taxable_income_l15
+            } else {
+                i.agi_l11 - i.deduction_l14 // may be negative; the form says so explicitly
+            },
+        },
+        Form6251Line1Rule::Y2025 {
+            form_1040_l11b,
+            form_1040_l14,
+            schedule_1a_l37,
+        } => {
+            let line1a = form_1040_l14 - schedule_1a_l37;
+            Form6251Line1::Y2025 {
+                line1a,
+                line1b: form_1040_l11b - line1a, // may be negative; the form says so explicitly
+            }
+        }
     };
     let line2a = if i.itemized {
         i.schedule_a_line7
@@ -272,7 +343,7 @@ pub fn compute_6251(i: Form6251Inputs, amt: &AmtParams, bp: &LtcgBreakpoints) ->
     };
     let line2b = -i.state_refund_sch1_l1;
     let line3 = z;
-    let mut line4 = line1 + line2a + line2b + line3;
+    let mut line4 = line1.amount_entering_line4() + line2a + line2b + line3;
     // i6251 p.9, line 4 — the MFS kicker.
     if st == FilingStatus::Mfs && line4 > amt.mfs_kicker_start {
         let excess = line4 - amt.mfs_kicker_start;
@@ -513,6 +584,7 @@ mod tests {
         let qdcgt_l5 = (ti - pref.min(ti)).max(Usd::ZERO);
         compute_6251(
             Form6251Inputs {
+                line1_rule: Form6251Line1Rule::Y2024,
                 status,
                 taxable_income_l15: ti,
                 agi_l11: d(&der["agi_1040_L11"]),
@@ -568,7 +640,18 @@ mod tests {
             // as the `checked` set below, so the two can never drift apart.
             let lines: [(&str, Usd); 41] = [
                 // Part I
-                ("line1", got.line1),
+                // TY2024 vectors carry a scalar `line1`; destructure the per-year variant so a
+                // TY2025 vector added later cannot silently compare the wrong line.
+                (
+                    "line1",
+                    match &got.line1 {
+                        Form6251Line1::Y2024 { line1 } => *line1,
+                        Form6251Line1::Y2025 { .. } => panic!(
+                            "{id}: fixture has no `year`, so it is TY2024 — but compute produced the \
+                             TY2025 Part I shape"
+                        ),
+                    },
+                ),
                 ("line2a", got.line2a),
                 ("line2b", got.line2b),
                 ("line3", got.line3),
@@ -655,6 +738,7 @@ mod tests {
         let at = |status: FilingStatus, ti: Usd| {
             compute_6251(
                 Form6251Inputs {
+                    line1_rule: Form6251Line1Rule::Y2024,
                     status,
                     taxable_income_l15: ti,
                     agi_l11: ti,
@@ -697,6 +781,61 @@ mod tests {
         );
     }
 
+    /// ★ TY2025's Part I, and the trap inside it: **line 4 combines line 1b, not 1a.**
+    ///
+    /// The 2025 form reads "Combine lines **1b** through 3", where 1a = 1040 L14 − Sch 1-A L37 is a
+    /// DEDUCTION and 1b = 1040 L11b − 1a is the income. Reusing 2024's aggregation — or wiring line 4
+    /// to 1a — puts the deduction into AMTI instead of the income. That is the line-33 defect class
+    /// exactly, one line up: a single wrong cross-reference, arithmetically plausible, catastrophic.
+    ///
+    /// Worked from the form: AGI 500,000, total deductions 40,000 of which 6,000 is the enhanced
+    /// senior deduction. 1a = 40,000 − 6,000 = 34,000. 1b = 500,000 − 34,000 = 466,000 — i.e. taxable
+    /// income (460,000) with the senior deduction added back, which is what the AMT wants.
+    #[test]
+    fn ty2025_part_i_combines_line_1b_and_adds_the_senior_deduction_back() {
+        let f = compute_6251(
+            Form6251Inputs {
+                line1_rule: Form6251Line1Rule::Y2025 {
+                    form_1040_l11b: dec!(500000),
+                    form_1040_l14: dec!(40000),
+                    schedule_1a_l37: dec!(6000),
+                },
+                status: FilingStatus::Single,
+                taxable_income_l15: dec!(460000),
+                agi_l11: dec!(500000),
+                deduction_l12: dec!(34000),
+                deduction_l14: dec!(40000),
+                schedule_a_line7: Usd::ZERO,
+                itemized: true,
+                state_refund_sch1_l1: Usd::ZERO,
+                net_capital_gain: Usd::ZERO,
+                qualified_dividends: Usd::ZERO,
+                qdcgt_line5_regular: dec!(460000),
+                regular_tax_l16: dec!(1),
+                schedule_2_line1z: Usd::ZERO,
+                schedule_3_line1: Usd::ZERO,
+            },
+            &params(),
+            &bps(FilingStatus::Single),
+        );
+        let Form6251Line1::Y2025 { line1a, line1b } = f.line1 else {
+            panic!("the Y2025 rule must produce the Y2025 shape")
+        };
+        assert_eq!(line1a, dec!(34000), "1a = 1040 L14 − Sch 1-A L37");
+        assert_eq!(line1b, dec!(466000), "1b = 1040 L11b − 1a");
+        assert_eq!(
+            f.line4,
+            dec!(466000),
+            "line 4 combines 1b through 3 — wiring it to 1a would put the DEDUCTION (34,000) into \
+             AMTI instead of the income"
+        );
+        assert_eq!(
+            line1b - dec!(460000),
+            dec!(6000),
+            "1b exceeds taxable income by exactly the senior deduction — the add-back the AMT wants"
+        );
+    }
+
     /// i6251 p.9's OWN worked example: "if the amount on line 4 is $895,950, enter $900,950
     /// instead—the additional $5,000 is 25% of $20,000 ($895,950 minus $875,950)."
     #[test]
@@ -705,6 +844,7 @@ mod tests {
         // Pre-kicker line 4 = line1 + line2a = 881,350 + 14,600 = 895,950.
         let f = compute_6251(
             Form6251Inputs {
+                line1_rule: Form6251Line1Rule::Y2024,
                 status: FilingStatus::Mfs,
                 taxable_income_l15: dec!(881350),
                 agi_l11: dec!(895950),
@@ -728,6 +868,7 @@ mod tests {
         let at = |l4_pre: Usd| {
             let f = compute_6251(
                 Form6251Inputs {
+                    line1_rule: Form6251Line1Rule::Y2024,
                     status: FilingStatus::Mfs,
                     taxable_income_l15: l4_pre - dec!(14600),
                     agi_l11: l4_pre,
@@ -871,6 +1012,7 @@ mod tests {
         let mk = |l12: Usd, l14: Usd| {
             compute_6251(
                 Form6251Inputs {
+                    line1_rule: Form6251Line1Rule::Y2024,
                     status: FilingStatus::Mfj,
                     taxable_income_l15: dec!(400000),
                     agi_l11: dec!(450000),
@@ -1105,6 +1247,7 @@ mod tests {
                 let ti = ordinary + gain;
                 let f = compute_6251(
                     Form6251Inputs {
+                        line1_rule: Form6251Line1Rule::Y2024,
                         status,
                         taxable_income_l15: ti,
                         agi_l11: ti + deduction,
@@ -1206,6 +1349,7 @@ mod tests {
     fn line6_zero_or_less_zeroes_lines_7_9_and_11_but_still_fills_line_10() {
         let f = compute_6251(
             Form6251Inputs {
+                line1_rule: Form6251Line1Rule::Y2024,
                 status: FilingStatus::Mfj,
                 taxable_income_l15: dec!(50000),
                 agi_l11: dec!(79200),
