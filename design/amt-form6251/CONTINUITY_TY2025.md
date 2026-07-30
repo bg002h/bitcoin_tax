@@ -4,9 +4,28 @@
 reader with **no prior context**. Confirm the tree with `git log --oneline -5` and `git status`.
 
 > **The one-line version.** Tier 2 (attach Form 6251) is gated on E4/E5/E6. We are **not** doing E4
-> next. We are adding **TY2025** first, because that is what makes the last unwitnessed region of
-> the AMT computation witnessable at all — and because btctax computing only TY2024 in mid-2026 is a
-> product limitation regardless. **TY2026 fails closed, by decision, with a test holding it.**
+> next. We are adding **TY2025** first, because that is what makes the last unwitnessed region of the
+> AMT computation witnessable at all. **TY2026 fails closed, by decision, with a test holding it.**
+>
+> ## ★ PROGRESS SINCE THE PIVOT (read this before starting anything)
+>
+> Branch `feat/amt-e2-vector-population`, all five gates green, TY2024 provably unchanged throughout
+> (2429 tests, golden-matrix md5 unmoved, both oracles exit 0 on every commit).
+>
+> | branch | state |
+> |---|---|
+> | **B1** harness year seams | **DONE** — 7 seams. `OTS_YEAR` split from `OTS_DIR`; `_ots_amt_disqualified` year-scoped (★ the one that mattered: left year-blind it would have gated TY2025's MFS vectors against a solver that handles them CORRECTLY, killing the pivot silently); `gen_goldens` MARS map made total; `exact=1` TY2025-only; `corpus.py`'s SALT axis year-keyed with a straddle guard; the OTS `S1A_2a` skip guard; per-year standard deduction. **4 of the 7 would have failed silently with everything green.** |
+> | **B2** numbers + form shapes | **DONE** except TY2025 `FullReturnParams` itself. The TY2025 fail-closed gate landed FIRST (§5.0). `salt_cap: Usd` → `salt: SaltLimitation` enum (`FlatCap` / `Worksheet2025`). MAGI add-backs collected through the whole input stack. Form 6251 Part I is a per-year TYPE (`Form6251Line1::Y2024/Y2025`). 1040 `L13b` threaded into L14 and Form 8995 line 11. |
+> | **B3** Schedule 1-A | **SPEC'd, not built** — `design/ty2025/SPEC_schedule_1a.md`, DRAFT r1, in review. |
+> | **B4** filing assets + corpus | not started. 12 PDFs/maps + 2 partial 2025 maps rebuilt. |
+>
+> ★ **TY2025 `FullReturnParams` MUST NOT land until B3 is built.** The gate
+> `ty2025_full_return_must_stay_fail_closed_until_complete` names four conditions and Schedule 1-A is
+> one of them; bundling params early does not refuse, it emits plausible wrong numbers.
+>
+> ★ **Every constant TY2025 needs already has a value and a citation** (parent SPEC §5.1). Nothing is
+> outstanding there — three of the four fields once listed as "still a lookup" were printed in
+> `i1040gi--2025.pdf`, a document already committed to this repo. **Grep the archive before deferring.**
 
 ---
 
