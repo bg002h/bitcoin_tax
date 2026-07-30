@@ -15,7 +15,9 @@ mod cite_check;
 mod docs;
 mod dump_fields;
 mod examples;
+mod form_geometry;
 mod harness_check;
+mod label_reader;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -91,6 +93,28 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some("extract-geometry") => {
+            let Some(stem) = args.get(1) else {
+                eprintln!(
+                    "usage: cargo run -p xtask -- extract-geometry <stem>   e.g. f1040s1a--2025"
+                );
+                std::process::exit(2);
+            };
+            if let Err(e) = form_geometry::extract(stem) {
+                eprintln!("xtask extract-geometry: {e}");
+                std::process::exit(1);
+            }
+        }
+        Some("label-census") => {
+            let Some(stem) = args.get(1) else {
+                eprintln!("usage: cargo run -p xtask -- label-census <stem>   e.g. f1040s1a--2025");
+                std::process::exit(2);
+            };
+            if let Err(e) = label_reader::run(stem) {
+                eprintln!("xtask label-census: {e}");
+                std::process::exit(1);
+            }
+        }
         Some("harness-check") => {
             if let Err(e) = harness_check::run() {
                 eprintln!("xtask harness-check: {e}");
@@ -116,7 +140,7 @@ fn main() {
         _ => {
             eprintln!(
                 "usage: cargo run -p xtask -- <docs [--pdf] | examples | subcommand-coverage | \
-                 check-isolation | cite-check | authority-conflicts | harness-check | archive-check | authority-manifest [--regen] | \
+                 check-isolation | cite-check | authority-conflicts | harness-check | archive-check | authority-manifest [--regen] | extract-geometry <stem> | label-census <stem> | \
                  classify-path <path> | \
                  extract-schedule-1a | dump-fields <pdf>>"
             );

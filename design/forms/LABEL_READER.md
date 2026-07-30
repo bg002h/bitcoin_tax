@@ -1,6 +1,43 @@
 # Enumerating a form's labels from its text layer — findings, and why this is not a regex
 
-**Status: characterised, NOT built.** Deliberately. A reader that is wrong on the one form whose answer we
+> ## ⑤ STATUS 2026-07-30 — witnesses BUILT (increment 1 of 2)
+>
+> Built on the ④ consult's `hybrid` verdict (`reviews/label-reader-strategy-fable-r1.md`):
+> `crates/xtask/src/form_geometry.rs` (committed raw observation) and
+> `crates/xtask/src/label_reader.rs` (both witnesses). `xtask extract-geometry <stem>` regenerates
+> the fixture from a local PDF; `xtask label-census <stem>` runs the witnesses.
+>
+> **On Schedule 1-A the text witness yields 50 labels, up from the regex's 45**, and recovers every
+> class the regex dropped — lines 1/3, the bare sub-letters `2b`–`2e`, and `22a`/`22b`.
+>
+> ★★ **Two layout facts were discovered by building it, and both would have silently dropped lines:**
+>
+> 1. **The margin column is RIGHT-ALIGNED.** Single digits start at x≈45.4, double digits at x≈40.4 —
+>    two left-edge clusters for one column. Clustering on `xMin` yielded labels 10..38 and silently
+>    dropped 1..9 while still returning a long, plausible list. Their right edges coincide at x2≈50.4.
+> 2. **A letter suffix hangs PAST that right edge** (`1` ends at 50.4, `2a` at ~55), so matching on
+>    `x2 ≈ right` dropped `2a`, and the bare sub-letters then inherited `1` as parent and came out as
+>    `1b`..`1e`. Parents are matched by *spanning* the column edge instead.
+>
+> ★ Both were caught only because the ONE form with a known answer was the test. Neither would have
+> been visible on a form whose truth we had not established by hand — which is the argument for the
+> anchor form, made concrete.
+>
+> **The 50-vs-48 delta is an OPEN ADJUDICATION, deliberately not closed by tuning.** `14`+`a` and
+> `36`+`a` share a y-row and merge mechanically to `14a`/`36a` (measured, `|dy| < 3.0`). The residue
+> is the two *standalone* heading rows `4` and `22`. Doctrine says a heading is a label that encodes
+> no decision and must be recorded **with a reason** (⇒ 50); the hand count plainly counted
+> entry-taking lines only (⇒ 48). **The reader was NOT adjusted to reach 48** — tuning an instrument
+> until it agrees with an expectation is how false confidence is manufactured.
+>
+> **The census also flags a third row needing adjudication: `4a` reports no amount box.** Unexpected,
+> since `4a`–`4c` are sub-rows. Left flagged rather than guessed at — this is the design working.
+>
+> **NOT yet built (increment 2):** the committed per-form **ledger**, and the typed disagreement
+> rules (BOX-WITH-NO-LABEL = hard fail, LABEL-WITH-NO-BOX = must carry a kind, SEQUENCE GAP = hard
+> fail). Until those land, this is two witnesses and a viewer, not yet a gate.
+
+**Status of the original characterisation below: superseded in part.** Deliberately. A reader that is wrong on the one form whose answer we
 know would manufacture exactly the false confidence this project keeps getting burned by — and the whole
 purpose of the label census is to distinguish *"this line encodes no decision"* from *"we forgot this
 line."* A reader that quietly finds 45 of 48 cannot do that.
