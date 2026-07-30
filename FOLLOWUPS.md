@@ -716,12 +716,34 @@ moving line 28's sentence onto line 11 (2 red), setting the tips params to `Ceil
 silently returning empty so everything would pass vacuously (6), and line 28 divide-referencing line 25
 (2).
 
-**What genuinely remains** — narrower than the original entry, and no longer on the critical path:
-a line whose text encodes **no decision the code makes** can still be quoted under the wrong label in a
-design document (e.g. swapping two Caution paragraphs). The lesson generalises instead:
-★ **for any line whose text encodes a decision — a direction, a constant, a cross-reference — do not check
-prose about it; DERIVE the decision from the line and compare.** Apply that in T2's conformance KAT rather
-than extending `cite-check`. Owning phase: **B3 T2** (unchanged).
+**★★ WHAT REMAINS IS BIGGER THAN THIS ENTRY FIRST SAID, AND IT IS ON THE CRITICAL PATH.** I closed the
+misattribution class and then wrote that the residue was "narrow and off the critical path: a line whose
+text encodes no decision the code makes … nothing computes from it, so it can't produce a wrong number."
+**That is wrong three ways**, and the user caught it:
+
+1. **"No decision the code makes" is time-indexed.** T2-T4 do not exist yet, so *most* of the form
+   currently encodes no decision — including the Part II occupation Caution and the Part IV loan
+   conditions. The claim is true only because the code is absent, and decays as the code grows.
+2. ★★ **"Encodes no decision the code makes" is the SIGNATURE OF AN OMITTED REQUIREMENT.** Both r1
+   Criticals were exactly that: Part IV's eligibility conditions encoded no decision in the plan, and
+   *that was the bug*. CLAUDE.md states the same thing historically — every defect in the AMT sequence
+   was a line that was never typed in. The category I called harmless is where the defects live.
+3. **The design document is an INPUT to the code, so "nothing computes from it" is false.** A Caution
+   misquoted in a spec becomes a wrong prompt in T3, a wrong eligibility gate, a wrong number — and
+   SPEC §R-2 says a wrong prompt is a wrong return that *every test passes*, because the filer's answer
+   is taken as truth. See the answered-ness invariant.
+
+**And a measured hole in the fix itself.** `each_phase_out_rounds_the_way_its_own_printed_line_says_to`
+iterates a **hand-written** list of three parts, so removing Part III from that list reds **nothing**, and
+only **6 of the form's 48 labels** are examined by any conformance test. Same failure shape as an
+oracle excuse list keyed by vector name: state the mechanism, let it enumerate, never hand-list the cases
+you happened to think of.
+
+**Therefore the real requirement, and it belongs to T2's KAT:** enumerate all 48 labels **from the
+extract** and require every one to be ACCOUNTED FOR — either mapped to a field/decision, or explicitly
+recorded as carrying no decision **with a reason**. Unaccounted-for must fail. A reader that cannot
+distinguish *"this line encodes no decision"* from *"we forgot this line"* is not a conformance check.
+Owning phase: **B3 T2** (unchanged).
 
 ### G-9a — do the §63(f) BLIND boxes have a death interaction?
 
