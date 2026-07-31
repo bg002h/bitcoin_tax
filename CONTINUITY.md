@@ -109,14 +109,21 @@ PDF with the unreduced deduction already exists when the warning prints.
    the FBAR was their only live case. They were kept, with the comment rewritten to say so: the next
    question whose liveness depends on another question's *non-neutral* answer would hit the same wall
    silently.
-2. **Downgrade the death pair** — the biggest UX win: `TaxpayerDiedDuringYear`/`SpouseDiedDuringYear`
-   are `live: |_| true`, so they block **every** return. `is_aged` (`return_1040.rs:49-77`)
-   short-circuits on `dob == None` and its `(None, None)` arm returns `false`, so silence already
-   FORGOES the addition — the block is redundant with a fail-safe the compute layer already has. Also
-   tighten the spouse question's `live` to require `Mfj` (`AgedBlindBoxes::for_return` already filters
-   the spouse to MFJ before calling `is_aged`).
-3. **`SsnMalformed`** — delete from `screen_inputs` (`return_refuse.rs:588`); KEEP `HeaderError::Ssn` in
-   `ReturnHeader::build`. No numeric path reads an SSN; today a typo blocks report/optimize/what-if/TUI.
+2. ~~**Downgrade the death pair**~~ — ✅ **DONE 2026-07-30** (`b3c9829`). Both are now
+   `SkippableId::{Taxpayer,Spouse}DiedDuringYear`. The premise held on inspection: `is_aged`'s
+   `(None, None)` arm returns `false`, so silence already forgoes the addition and the refusal was
+   redundant with a fail-safe beneath it. The spouse gate is now **MFJ-only** (and so is `DodSpouse`)
+   — on MFS its answer could never move a figure, yet it refused there.
+   ★ New `Advisory::AgedBoxForfeitedDeathUnanswered`, firing **iff a DOB on file would have
+   qualified** — not merely on the unanswered gate, which would put it on nearly every return.
+   ★★ **Three fixtures broke, all the same honest way**: they got the aged box free from
+   `answer_all_live_declarations`. Fixed by STATING the claim, never by weakening the assertion. The
+   killer mutation — `(None, None) => true`, the shipped v0.14.0 understatement — reds by name.
+   ★★ TY2024 golden matrix **byte-unchanged** (md5 `c4e1853…`).
+3. ~~**`SsnMalformed`**~~ — ✅ **DONE 2026-07-30** (`443d4a0`). Deleted from `screen_inputs`; the
+   packet boundary is untouched and was **verified to cover all three shapes** (`Missing`,
+   `NotDigits`, `WrongLength`) — "build rejects missing" would not have been enough. The replacement
+   test asserts BOTH sides for 3 shapes × 3 subjects.
 4. **THEN Form 8995 line 3** — the top actual BUILD. Prior-year QBI loss carryforward, SUBTRACTED at
    line 4, so omitting it INFLATES the deduction and UNDERSTATES tax. `qbi.rs:63` waves it off with a
    NON-SEQUITUR (the `ScheduleCLoss` refusal is about the CURRENT year; the same fn consumes
