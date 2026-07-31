@@ -48,3 +48,157 @@ rows = [
 [identity]
 name = "Form8283[0].Page1[0].f1_01[0]"
 ssn  = "Form8283[0].Page1[0].f1_02[0]"
+
+# ── §G-13 FIELD-PROVENANCE CENSUS ────────────────────────────────────────────────────────────────
+# Every AcroForm field on this PDF the map above does not fill, with the decision that leaves it blank.
+# `unmodeled` = btctax models no input that could reach the cell; `artifact` = not an entry the FILER
+# makes; `gap` = the cell IS reachable and nothing populates it (a defect).
+#
+# ★ THE BUNDLED ASSET IS Rev. December 2023. `design/forms/periodic/f8283.pdf` is Rev. December 2025
+#   and its sha256 does NOT match this crate's copy, so `design/forms/extract/f8283--periodic.txt` is
+#   the wrong revision to transcribe from. The text behind this census was extracted from the bundled
+#   PDF itself (`crates/btctax-forms/forms/2024/f8283.pdf`), which is the file the gate reads.
+#
+# ★★ TWO DEFECTS FOUND WHILE WRITING THIS SECTION — recorded as `gap`, 8 fields:
+#      (1) Section B Part II lines 5a/5b/5c (6 fields) — three Yes/No declarations about restrictions
+#          on the gift that btctax never asks. UNDERSTATEMENT direction.
+#      (2) The page-2 identity header (2 fields) — btctax HAS the name and TIN and fills page 1's, but
+#          the map declares no page-2 cells, so a filed page 2 carries no identifying header.
+[census]
+
+# ── Header: the pass-through-entity block ────────────────────────────────────────────────────────
+# "Enter the entity name and identifying number from the tax return where the noncash charitable
+# contribution was originally reported, if different from above." btctax reports the contribution on
+# THIS return and models no pass-through entity — the same boundary censused on Schedule D lines 5/12,
+# Schedule 3 line 6l and Form 8275 Part III.
+"Form8283[0].Page1[0].f1_03[0]" = { line = "header entity name", rule = "unmodeled", reason = "Name of the entity whose return originally reported the contribution — btctax reports it on this return; no pass-through entity is modelled." }
+"Form8283[0].Page1[0].f1_04[0]" = { line = "header entity TIN",  rule = "unmodeled", reason = "That entity's identifying number — same." }
+"Form8283[0].Page1[0].c1_1[0]"  = { line = "header family PTE",  rule = "unmodeled", reason = "\"Check this box if a family pass-through entity made the noncash charitable contribution\" — no pass-through entity is modelled, so the box can never be checked." }
+
+# ── Section A column (b) — the vehicle checkbox and its VIN comb, rows A-D ───────────────────────
+# "If donated property is a vehicle, check the box. Also enter the vehicle identification number
+# (unless Form 1098-C is attached)." btctax donates BTC; a vehicle donation is not expressible in the
+# event model at all. The text cells are /MaxLen 17 — a VIN is exactly 17 characters.
+"Form8283[0].Page1[0].Table_Line1_ColsA-C[0].Row1A[0].ColB[0].c1_2[0]" = { line = "A.A(b) vehicle", rule = "unmodeled", reason = "Section A row A vehicle checkbox — btctax donates BTC; no vehicle donation is expressible." }
+"Form8283[0].Page1[0].Table_Line1_ColsA-C[0].Row1A[0].ColB[0].f1_06[0]" = { line = "A.A(b) VIN", rule = "unmodeled", reason = "Vehicle identification number (/MaxLen 17) — same." }
+"Form8283[0].Page1[0].Table_Line1_ColsA-C[0].Row1B[0].ColB[0].c1_3[0]" = { line = "A.B(b) vehicle", rule = "unmodeled", reason = "Same — row B." }
+"Form8283[0].Page1[0].Table_Line1_ColsA-C[0].Row1B[0].ColB[0].f1_09[0]" = { line = "A.B(b) VIN", rule = "unmodeled", reason = "Same — row B." }
+"Form8283[0].Page1[0].Table_Line1_ColsA-C[0].Row1C[0].ColB[0].c1_4[0]" = { line = "A.C(b) vehicle", rule = "unmodeled", reason = "Same — row C." }
+"Form8283[0].Page1[0].Table_Line1_ColsA-C[0].Row1C[0].ColB[0].f1_12[0]" = { line = "A.C(b) VIN", rule = "unmodeled", reason = "Same — row C." }
+"Form8283[0].Page1[0].Table_Line1_ColsA-C[0].Row1D[0].ColB[0].c1_5[0]" = { line = "A.D(b) vehicle", rule = "unmodeled", reason = "Same — row D." }
+"Form8283[0].Page1[0].Table_Line1_ColsA-C[0].Row1D[0].ColB[0].f1_15[0]" = { line = "A.D(b) VIN", rule = "unmodeled", reason = "Same — row D." }
+
+# ── Section B line 2 — the property-type menu ────────────────────────────────────────────────────
+# btctax checks exactly ONE box, 2k "Digital assets" (mapped above, on-state "11"). Every other type
+# is a property class it cannot donate. The three columns are separate AcroForm groups whose on-states
+# run 1-3 / 4-8 / 9-12 down the printed rows; 2b(1) is its own field (c1_7) because it is a sub-item.
+"Form8283[0].Page1[0].Lines2a-c[0].c1_6[0]" = { line = "2a", rule = "unmodeled", reason = "Art (contribution of $20,000 or more) — btctax donates only BTC." }
+"Form8283[0].Page1[0].Lines2a-c[0].c1_6[1]" = { line = "2b", rule = "unmodeled", reason = "Qualified conservation contribution — not modelled; this is why column (h) below is dead." }
+"Form8283[0].Page1[0].Lines2a-c[0].c1_7[0]" = { line = "2b(1)", rule = "unmodeled", reason = "Certified historic structure — a sub-item of 2b, which is never checked." }
+"Form8283[0].Page1[0].Lines2a-c[0].f1_41[0]" = { line = "2b(1) NPS #", rule = "unmodeled", reason = "National Park Service number for the certified historic structure — same." }
+"Form8283[0].Page1[0].Lines2a-c[0].c1_6[2]" = { line = "2c", rule = "unmodeled", reason = "Art (contribution of less than $20,000) — not modelled." }
+"Form8283[0].Page1[0].Lines2d-h[0].c1_6[0]" = { line = "2d", rule = "unmodeled", reason = "Other real estate — not modelled." }
+"Form8283[0].Page1[0].Lines2d-h[0].c1_6[1]" = { line = "2e", rule = "unmodeled", reason = "Equipment — not modelled." }
+"Form8283[0].Page1[0].Lines2d-h[0].c1_6[2]" = { line = "2f", rule = "unmodeled", reason = "Securities — btctax donates BTC, which the 2023 revision classifies as a digital asset (2k), not a security." }
+"Form8283[0].Page1[0].Lines2d-h[0].c1_6[3]" = { line = "2g", rule = "unmodeled", reason = "Collectibles — not modelled." }
+"Form8283[0].Page1[0].Lines2d-h[0].c1_6[4]" = { line = "2h", rule = "unmodeled", reason = "Intellectual property — not modelled." }
+"Form8283[0].Page1[0].Lines2i-l[0].c1_6[0]" = { line = "2i", rule = "unmodeled", reason = "Vehicles — not modelled (see Section A column (b))." }
+"Form8283[0].Page1[0].Lines2i-l[0].c1_6[1]" = { line = "2j", rule = "unmodeled", reason = "Clothing and household items — not modelled." }
+"Form8283[0].Page1[0].Lines2i-l[0].c1_6[3]" = { line = "2l", rule = "unmodeled", reason = "Other — btctax's donated property is always 2k, so the catch-all is never needed." }
+
+# ── Section B line 3 columns (b), (g) and (h) — rows A-C ─────────────────────────────────────────
+# (b) is conditioned by the form itself: "If any TANGIBLE PERSONAL PROPERTY OR REAL PROPERTY was
+#     donated, give a brief summary of the overall physical condition." BTC is neither.
+# (g) bargain sales: btctax's donation event transfers BTC with NO consideration received — a bargain
+#     sale is not expressible in the model, so there is no amount to report. ★ Direction noted
+#     honestly: if a filer DID receive consideration, the deduction would have to be reduced, so this
+#     is a scope boundary in the understatement direction — but the input to express it does not
+#     exist, which is different from having it and not writing it.
+# (h) qualified conservation relevant basis: dead, because 2b is never checked.
+"Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Row3A[0].f1_43[0]"  = { line = "3.A(b)", rule = "unmodeled", reason = "Physical condition summary — required only for tangible personal property or real property; BTC is neither." }
+"Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Line3B[0].f1_46[0]" = { line = "3.B(b)", rule = "unmodeled", reason = "Same — row B." }
+"Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Line3C[0].f1_49[0]" = { line = "3.C(b)", rule = "unmodeled", reason = "Same — row C." }
+"Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3A[0].f1_54[0]"  = { line = "3.A(g)", rule = "unmodeled", reason = "For bargain sales, amount received — btctax's donation event transfers BTC with no consideration; a bargain sale is not expressible." }
+"Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3A[0].f1_55[0]"  = { line = "3.A(h)", rule = "unmodeled", reason = "Qualified conservation contribution relevant basis — dead, since line 2b is never checked." }
+"Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_60[0]"  = { line = "3.B(g)", rule = "unmodeled", reason = "Same — row B." }
+"Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_61[0]"  = { line = "3.B(h)", rule = "unmodeled", reason = "Same — row B." }
+"Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_66[0]"  = { line = "3.C(g)", rule = "unmodeled", reason = "Same — row C." }
+"Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_67[0]"  = { line = "3.C(h)", rule = "unmodeled", reason = "Same — row C." }
+
+# ── ★ GAP — the page-2 identity header ───────────────────────────────────────────────────────────
+# The form reprints "Name(s) shown on your income tax return | Identifying number" at the top of page
+# 2, because a filed page 2 can be separated from page 1. btctax HAS both values and writes them to
+# page 1 (the `[identity]` table above), and it DOES fill page 2 (the appraiser and donee blocks are
+# mapped) — but the map declares no page-2 identity cells, so they can never be written by any fill
+# path. This is not "we model no input": the datum exists and nothing connects it to the field, which
+# is exactly the omission this census was built to surface.
+#
+# ★ Direction is administrative, not arithmetic — no figure changes. It is still a gap: the ratchet
+#   counts fields with no honest account, and "we have it and never write it" is not one.
+"Form8283[0].Page2[0].f2_01[0]" = { line = "p2 name", rule = "gap", reason = "Page-2 \"Name(s) shown on your income tax return\" — btctax holds the name and writes it to page 1, but the map declares no page-2 cell, so a filed page 2 carries no identifying header. Close by adding the page-2 identity cells to the map." }
+"Form8283[0].Page2[0].f2_02[0]" = { line = "p2 TIN",  rule = "gap", reason = "Page-2 \"Identifying number\" (/MaxLen 11, hyphenated) — same defect, same fix." }
+
+# ── Section B Part II lines 4a-4e — partial interests ────────────────────────────────────────────
+# "Complete lines 4a through 4e if you gave less than an entire interest in a property listed in
+# Section B, Part I." btctax's donation event transfers a QUANTITY of BTC outright; a partial or
+# remainder interest is not expressible in the event model, so an entire interest is structural.
+# ★ Contrast this with lines 5a-5c below: a partial interest CANNOT arise here, whereas a restriction
+#   can and is simply never asked. That difference is why one is `unmodeled` and the other a `gap`.
+"Form8283[0].Page2[0].f2_03[0]" = { line = "4a", rule = "unmodeled", reason = "Letter from Section B Part I identifying the property given as less than an entire interest (/MaxLen 1) — btctax transfers BTC outright; a partial interest is not expressible." }
+"Form8283[0].Page2[0].f2_04[0]" = { line = "4b(1)", rule = "unmodeled", reason = "Total deduction claimed for the partial-interest property, this tax year — dead with no partial interest." }
+"Form8283[0].Page2[0].f2_05[0]" = { line = "4b(2)", rule = "unmodeled", reason = "Same, for any prior tax years — dead." }
+"Form8283[0].Page2[0].f2_06[0]" = { line = "4c donee name", rule = "unmodeled", reason = "Name of each organization receiving such a contribution in a prior year — dead with no partial interest." }
+"Form8283[0].Page2[0].f2_07[0]" = { line = "4c address", rule = "unmodeled", reason = "Its street address — dead." }
+"Form8283[0].Page2[0].f2_08[0]" = { line = "4c city/state/ZIP", rule = "unmodeled", reason = "Its city, state and ZIP — dead." }
+"Form8283[0].Page2[0].f2_09[0]" = { line = "4d", rule = "unmodeled", reason = "\"For tangible property, enter the place where the property is located or kept\" — BTC is not tangible property, and line 4 is dead regardless." }
+"Form8283[0].Page2[0].f2_10[0]" = { line = "4e", rule = "unmodeled", reason = "Name of any person other than the donee having actual possession of the property — dead." }
+"Form8283[0].Page2[0].f2_11[0]" = { line = "4e (cont.)", rule = "unmodeled", reason = "The full-width row beneath 4e — its continuation line, read off the geometry (it sits between 4e and the Yes/No column header). Dead either way." }
+
+# ── ★★ GAP — Section B Part II lines 5a/5b/5c, the restricted-use declarations ───────────────────
+# "Complete lines 5a through 5c if conditions were placed on a contribution listed in Section B, Part
+# I; also attach the required statement."
+#
+# `DonationDetails` (btctax-core/src/donation.rs) collects donee name/EIN/address, appraiser
+# name/TIN/PTIN/qualifications and the appraisal date. It has NO field for a restriction or a retained
+# right, and nothing in the TUI or CLI asks. So three Yes/No declarations print blank, and a blank
+# here reads as "No conditions were placed" — testimony btctax makes on the filer's behalf without
+# ever asking. This is the answered-ness invariant exactly.
+#
+# ★★ DIRECTION — UNDERSTATEMENT. Answering Yes requires attaching a statement and can reduce or
+#    disallow the deduction under §170. Printing blank claims the full deduction. And Section B is
+#    reached only when the year-aggregate exceeds $5,000, which is precisely the size at which
+#    restricted and donor-advised giving is negotiated — 5c ("limiting the donated property for a
+#    particular use") is ordinary in real charitable practice, not an exotic case.
+#
+# ★ Counted per FIELD (6), consistent with the FBAR pair: each Yes/No is two widgets, one question.
+#   Close by adding a restriction question to `DonationDetails` and mapping these cells.
+"Form8283[0].Page2[0].c2_1[0]" = { line = "5a Yes", rule = "gap", reason = "\"Is there a restriction, either temporary or permanent, on the donee's right to use or dispose of the donated property?\" — never asked; DonationDetails has no restriction field." }
+"Form8283[0].Page2[0].c2_1[1]" = { line = "5a No",  rule = "gap", reason = "The No half of the same unasked question." }
+"Form8283[0].Page2[0].c2_2[0]" = { line = "5b Yes", rule = "gap", reason = "\"Did you give to anyone … the right to the income from the donated property or to the possession of the property … or to designate the person having such income, possession, or right to acquire?\" — never asked." }
+"Form8283[0].Page2[0].c2_2[1]" = { line = "5b No",  rule = "gap", reason = "The No half of the same unasked question." }
+"Form8283[0].Page2[0].c2_3[0]" = { line = "5c Yes", rule = "gap", reason = "\"Is there a restriction limiting the donated property for a particular use?\" — never asked, and the most ordinary of the three in real giving." }
+"Form8283[0].Page2[0].c2_3[1]" = { line = "5c No",  rule = "gap", reason = "The No half of the same unasked question." }
+
+# ── Part III — Taxpayer (Donor) Statement ────────────────────────────────────────────────────────
+"Form8283[0].Page2[0].f2_12[0]" = { line = "III", rule = "unmodeled", reason = "\"List each item included in Section B, Part I above that the appraisal identifies as having a value of $500 or less.\" btctax carries no per-item appraised values below the group level, so it cannot identify such an item. ★ Direction is safe: this is a RELIEF provision (it reduces substantiation for cheap items), so forgoing it is conservative. The taxpayer signature and date beside it are wet-signature lines with no AcroForm cell." }
+
+# ── Part IV — Declaration of Appraiser: the cells btctax does not source ─────────────────────────
+# btctax fills appraiser name, business address and identifying number. Two cells remain.
+# ★ `DonationDetails::appraiser_address` is ONE free-text string (e.g. "456 Appraiser Ave"), written
+#   whole into the street cell. There is no separate city/state/ZIP datum to write — the model holds
+#   one address, not a structured one. Same shape as the donee address below.
+"Form8283[0].Page2[0].f2_14[0]" = { line = "IV title", rule = "unmodeled", reason = "Appraiser's Title — DonationDetails collects appraiser name, TIN/PTIN, qualifications and appraisal date, but no title." }
+"Form8283[0].Page2[0].f2_17[0]" = { line = "IV city/state/ZIP", rule = "unmodeled", reason = "Appraiser's city, state and ZIP — `appraiser_address` is a single free-text string written whole to the street cell; no separate city/state/ZIP datum exists." }
+
+# ── Part V — Donee Acknowledgment: the charity's own testimony ───────────────────────────────────
+# ★★ These are `artifact` in the strictest sense of the rule — NOT AN ENTRY THE FILER MAKES. Part V is
+#    signed by the charitable organization, which acknowledges receipt under §170(c) and undertakes to
+#    file Form 8282 if it disposes of the property within 3 years. btctax pre-fills the donee's
+#    IDENTIFICATION (name, EIN, street address — mapped above) so the charity need only sign, but the
+#    acknowledgment CONTENT is the donee's declaration. Software writing it would forge a third
+#    party's sworn statement, which is a different and worse failure than leaving a line blank.
+"Form8283[0].Page2[0].f2_18[0]" = { line = "V date received", rule = "artifact", reason = "The date the organization received the property — the DONEE's acknowledgment, not the filer's entry. btctax must not assert it." }
+"Form8283[0].Page2[0].c2_4[0]"  = { line = "V unrelated use Yes", rule = "artifact", reason = "\"Does the organization intend to use the property for an unrelated use?\" — a statement of the DONEE's intent, which only the donee can make." }
+"Form8283[0].Page2[0].c2_4[1]"  = { line = "V unrelated use No",  rule = "artifact", reason = "The No half of the donee's own question." }
+"Form8283[0].Page2[0].f2_22[0]" = { line = "V city/state/ZIP",    rule = "unmodeled", reason = "Donee's city, state and ZIP — `donee_address` is a single free-text string written whole to the street cell; no separate city/state/ZIP datum exists." }
+"Form8283[0].Page2[0].f2_23[0]" = { line = "V title",             rule = "artifact", reason = "Title of the donee's authorized signatory, on the signature row — the donee's own entry. The signature and date beside it have no AcroForm cell at all." }

@@ -38,9 +38,10 @@ const CENSUSED: &[&str] = &[
     "f1040s3",
     "f8275",
     "f1040s2",
+    "f8283",
 ];
 
-const CENSUS_NOT_YET_WRITTEN: &[&str] = &["f1040", "f1040s1", "f1040sc", "f8283"];
+const CENSUS_NOT_YET_WRITTEN: &[&str] = &["f1040", "f1040s1", "f1040sc"];
 
 /// Every FQN-shaped string in a map file, split into the mapped set and the `[census]` set.
 ///
@@ -150,7 +151,7 @@ fn recorded_gaps_may_only_shrink() {
     // one radio) for ONE logical question. Fields is the mechanical unit — a question-level count
     // would need someone to decide what "one question" means, which is exactly the judgement this
     // ratchet is meant to avoid depending on.
-    const GAPS: usize = 4;
+    const GAPS: usize = 12;
 
     let mut found = Vec::new();
     for stem in CENSUSED {
