@@ -431,6 +431,53 @@ fn schedule_d_line17_is_derived_on_every_revision() {
     }
 }
 
+/// ★★★ B1 (`design/HARNESS.md`) — THE PLANTED DEFECT, and the reason `apply_writes` now checks the
+/// widget's own `/AP` `/N` keys.
+///
+/// A checkbox renders from its appearance dictionary. Write an `/AS` with no matching key and the box
+/// draws **NOTHING** — blank on every filed copy — while `/V` and `/AS` read back as exactly the value
+/// you asked for. It is the second row of CLAUDE.md's provenance table (*"nothing ever populated it"*)
+/// wearing the costume of the first (*"the inputs say so"*): invisible on the page, invisible to both
+/// oracles, and invisible to any test that reads the field value back.
+///
+/// It is reachable from ONE transposition — a map whose `yes`/`no` FIELD names are swapped while the
+/// on-states stay put. That is finding G-19b of the 2026-07-30 review, which reached it by mutating
+/// the 2025 map and watching `schedule_d_line17_is_derived_on_every_revision` stay GREEN.
+///
+/// This test plants that exact mutation and asserts the fill now FAILS CLOSED. It is the answer to
+/// B1's one reviewable question — *which test reds when this checker is removed?* — this one.
+#[test]
+fn a_swapped_yes_no_map_fails_closed_instead_of_rendering_a_blank_box() {
+    let totals = totals_for(&mixed_rows()); // both gains ⇒ line 17 is answered
+    for year in [2017, 2024, 2025] {
+        let mut map = ScheduleDMap::for_year(year).unwrap();
+        let pair = map.line17.as_mut().unwrap();
+        // Swap ONLY the field names. Each on-state stays with its original index, so "Yes" is now
+        // written to the widget that can only render "No" — and vice versa.
+        std::mem::swap(&mut pair.yes.field, &mut pair.no.field);
+        // `expect_err` would print the whole PDF on failure; name the outcome instead.
+        let msg = match fill_schedule_d_totals(&totals, &map) {
+            Ok(_) => panic!(
+                "{year}: a swapped Yes/No map FILLED. It writes an on-state the widget cannot \
+                 render, so line 17 comes out BLANK on the filed form while reading back as checked."
+            ),
+            Err(e) => format!("{e}"),
+        };
+        assert!(
+            msg.contains("is not one this widget declares"),
+            "{year}: the refusal must name the on-state mismatch, got: {msg}"
+        );
+    }
+
+    // ★ The other half of the guarantee: the UNSWAPPED map still fills. A guard that rejected
+    // everything would also pass the assertions above.
+    for year in [2017, 2024, 2025] {
+        let map = ScheduleDMap::for_year(year).unwrap();
+        fill_schedule_d_totals(&totals, &map)
+            .unwrap_or_else(|e| panic!("{year}: the correct map must still fill — {e}"));
+    }
+}
+
 /// The crypto slice answers line 17 and **stops**: lines 18-22 stay blank on every revision, because
 /// each needs a fact it never collects (18/19 were never asked, 20 also asks about Form 4952, 21
 /// needs the §1211 ceiling by filing status, 22 needs Form 1040 line 3a).

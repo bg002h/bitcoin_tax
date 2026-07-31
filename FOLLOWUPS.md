@@ -1237,8 +1237,16 @@ Failing safe (always include §1411 once MAGI clears the threshold) over-states 
 common crypto **loss** year with high income; a third display state is accurate but wordier. Either
 edit touches `tax/types.rs` + `tax/compute.rs`, so it costs a second `frozen_guard` pin exception.
 
-**(G-19b) ★★ Schedule D line 17's Yes/No pair has NO map-independent oracle — a swapped map is
-invisible. Owning phase: next forms-map change.** Every assertion reads the widget through
+**(G-19b) ✅ FIXED 2026-07-30 — the class is gone, not just this instance.** `pdf::apply_writes` now
+rejects any checkbox `on` value absent from that widget's own `/AP` `/N` keys, so the defect below
+fails closed at the ONE chokepoint every checkbox on every form passes through — Schedule D line 17,
+the QOF question, the 1040 digital-asset pair, Schedule B Part III, Schedule C's I/J, all of it.
+Paired with the B1 planted-defect test `a_swapped_yes_no_map_fails_closed_instead_of_rendering_a_
+blank_box` (kats.rs), which swaps the field names on all three revisions and asserts the refusal —
+and asserts the UNSWAPPED map still fills, since a guard that rejects everything would pass the first
+half. Observed RED with the checker disabled before landing. Original finding, kept for the record:
+
+**★★ Schedule D line 17's Yes/No pair had NO map-independent oracle — a swapped map was invisible.** Every assertion reads the widget through
 `pair.yes.field` / `pair.no.field`, so the map is both the thing under test and the test's own index.
 Swap only the two `field =` values in `forms/2025/schedule_d.map.toml` `[line17]` and every filed 2025
 Schedule D renders line 17 **blank** — `apply_writes` sets `/AS = /1` on a widget whose only on-state
