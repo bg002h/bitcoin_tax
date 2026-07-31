@@ -169,7 +169,7 @@ fn fixture_for(field: &Field, base: &ReturnInputs) -> ReturnInputs {
         FieldId::DodSpouse => ri.header.spouse_died_during_year = Some(true),
         // ★ The FBAR sub-question is live only under a Schedule B 7a "Yes"; a set on a non-live
         //   question correctly refuses with `NoSuchRow`, so the fixture must make it live.
-        FieldId::DeclFbarFilingRequired => ri.foreign_accounts = Some(true),
+        FieldId::FbarFilingRequired => ri.foreign_accounts = Some(true),
         _ => {}
     }
     ri
@@ -533,7 +533,7 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
         FieldId::DeclSpouseDiedDuringYear,
         "header.spouse_died_during_year",
     ),
-    (FieldId::DeclFbarFilingRequired, "fbar_filing_required"),
+    (FieldId::FbarFilingRequired, "fbar_filing_required"),
     (FieldId::ExclPuertoRico, "excluded_puerto_rico_income"),
     (FieldId::Excl2555L45, "form_2555_line45"),
     (FieldId::Excl2555L50, "form_2555_line50"),

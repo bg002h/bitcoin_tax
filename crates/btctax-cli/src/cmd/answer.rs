@@ -375,11 +375,6 @@ mod tests {
         let mut r = single();
         match id {
             QuestionId::DependentSpouse => r.filing_status = FilingStatus::Mfj,
-            // ★ Live only under a 7a "Yes" — the form conditions it on 7a.
-            QuestionId::FbarFilingRequired => {
-                r.foreign_accounts = Some(true);
-                r.foreign_country_names = "Portugal".to_string();
-            }
             QuestionId::MfsSpouseItemizes => r.filing_status = FilingStatus::Mfs,
             QuestionId::MortgageAllUsedToBuyBuildImprove | QuestionId::AmtQualifiedDwelling => {
                 r.schedule_a = Some(ScheduleAInputs {

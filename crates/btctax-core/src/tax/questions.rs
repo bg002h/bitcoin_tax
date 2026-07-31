@@ -102,10 +102,6 @@ pub enum QuestionId {
     /// *"If your spouse was born before January 2, 1960, but died in 2024 before reaching age 65,
     /// don't check the box that says 'Spouse was born before January 2, 1960.'"*
     SpouseDiedDuringYear,
-    /// **Schedule B line 7a's unnumbered sub-question** — *"If 'Yes,' are you required to file FinCEN
-    /// Form 114, Report of Foreign Bank and Financial Accounts (FBAR), to report that financial interest
-    /// or signature authority?"* Live only when 7a is answered "Yes".
-    FbarFilingRequired,
 }
 
 impl QuestionId {
@@ -124,7 +120,6 @@ impl QuestionId {
         QuestionId::HasIncomeExclusion,
         QuestionId::TaxpayerDiedDuringYear,
         QuestionId::SpouseDiedDuringYear,
-        QuestionId::FbarFilingRequired,
     ];
 }
 
@@ -539,30 +534,6 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         durability: Durability::PerYear,
         neutral: false,
     },
-    FormQuestion {
-        id: QuestionId::FbarFilingRequired,
-        prompt: "Schedule B line 7a (sub-question): you said you had a foreign financial account — are \
-                 you REQUIRED to file FinCEN Form 114 (the FBAR) to report that financial interest or \
-                 signature authority?",
-        unanswered: RefuseReason::FbarFilingRequirementUnanswered,
-        unanswered_detail:
-            "Schedule B line 7a was answered Yes, so its FBAR sub-question must be answered too — the \
-             form's own Caution reads \"If required, failure to file FinCEN Form 114 may result in \
-             substantial penalties\", so btctax will not file a return that leaves it blank — run \
-             `btctax income answer`",
-        // ★ The FORM conditions this on 7a — "If 'Yes,' are you required to file…" — so it is live only
-        //   when 7a is Some(true). Narrowest liveness in the registry, deliberately: a filer with no
-        //   foreign account is never asked, and the fixture blast radius is exactly the 7a-Yes returns.
-        live: |ri| ri.foreign_accounts == Some(true),
-        get: |ri| ri.fbar_filing_required,
-        set: |ri, v| ri.fbar_filing_required = Some(v),
-        durability: Durability::PerYear,
-        // ★ `false` is the answer that adds no obligation, but btctax takes NO position on whether it is
-        //   correct: FinCEN Notice 2020-2 leaves accounts holding ONLY virtual currency outside the FBAR
-        //   requirement for now, that is under active reconsideration, and an account holding crypto PLUS
-        //   fiat or securities may well be reportable. The filer decides; we only refuse to decide for them.
-        neutral: false,
-    },
 ];
 
 /// The identity of each SKIPPABLE prompt (§2, class B) — the questions where silence is LAWFUL: a bare
@@ -592,6 +563,26 @@ pub enum SkippableId {
     DodTaxpayer,
     /// §G-9: the DATE OF DEATH (spouse). Live only once `QuestionId::SpouseDiedDuringYear` is `Some(true)`.
     DodSpouse,
+    /// ★★ **Schedule B line 7a's unnumbered FBAR sub-question** — *"If 'Yes,' are you required to file
+    /// FinCEN Form 114 … ?"* Live only when 7a is answered **Yes**: the form itself conditions it on 7a
+    /// ("If 'Yes,'"), so a filer with no foreign account is never asked.
+    ///
+    /// ★★★ **It was briefly a class-(A) refusal, and that was WRONG.** Refusal is justified only when
+    /// proceeding without the answer would produce a wrong number, put fabricated testimony on a signed
+    /// return, or silently expose the filer to a penalty or a lost right. This box fails all three:
+    /// **no figure on the return reads it** (grep `fbar_filing_required` — the printed chain writes the
+    /// checkbox and nothing else), a blank is *no testimony* rather than false testimony, and the
+    /// penalty the form's Caution warns of attaches to **not filing FinCEN Form 114** — a FinCEN
+    /// obligation that exists whatever this box says — not to leaving the box blank. That exposure is
+    /// already put in front of the filer by [`super::advisories::Advisory::FbarFinCen`], which fires on
+    /// 7a = Yes alone.
+    ///
+    /// So silence is lawful and prints a genuine blank; [`super::advisories::Advisory::FbarSubQuestionNotAnswered`]
+    /// quotes the form's Caution **verbatim** when it is skipped. btctax takes no position on the
+    /// answer: FinCEN Notice 2020-2 leaves accounts holding ONLY virtual currency outside the FBAR
+    /// requirement for now, that is under active reconsideration, and an account holding crypto PLUS
+    /// fiat or securities may well be reportable.
+    FbarFilingRequired,
 }
 
 /// The value shape of a [`SkippableQuestion`] — a yes/no answer, or a calendar date.
@@ -632,9 +623,14 @@ pub struct SkippableQuestion {
     pub set_date: fn(&mut ReturnInputs, Date),
 }
 
-/// ★ THE SKIPPABLE REGISTRY. Seven class-(B) prompts — SEPARATE from [`FORM_QUESTIONS`] (spec §5.3). The
+/// ★ THE SKIPPABLE REGISTRY. Eight class-(B) prompts — SEPARATE from [`FORM_QUESTIONS`] (spec §5.3). The
 /// liveness gates and prompts are lifted verbatim from the old `answer.rs::Skippable`; the `income answer`
 /// flow and the form engine both DERIVE their skippable prompts from this one list.
+///
+/// ★ Seven of the eight are BENEFIT CLAIMS (*New Colonial Ice*: the burden to claim is the filer's, so
+/// forgoing is lawful). The eighth, [`SkippableId::FbarFilingRequired`], is here for a different
+/// reason — **no figure on the return reads it at all**, so its silence neither asserts nor forgoes.
+/// Class (B) is the set of questions whose silence is lawful, not only the set that costs money.
 pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     SkippableQuestion {
         id: SkippableId::BlindTaxpayer,
@@ -758,6 +754,29 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
             }
         },
     },
+    SkippableQuestion {
+        id: SkippableId::FbarFilingRequired,
+        // ★ §G-15 — PER-YEAR: whether an FBAR is required turns on the year's account balances.
+        durability: Durability::PerYear,
+        prompt: "Schedule B line 7a (sub-question): you said you had a foreign financial account \u{2014} \
+                 are you REQUIRED to file FinCEN Form 114 (the FBAR) to report that financial interest or \
+                 signature authority?",
+        help: "Schedule B's own Caution: \"If required, failure to file FinCEN Form 114 may result in \
+               substantial penalties. Additionally, you may be required to file Form 8938, Statement of \
+               Specified Foreign Financial Assets.\" That penalty attaches to NOT FILING FinCEN Form 114 \
+               \u{2014} an obligation independent of this box \u{2014} not to leaving the box blank, so \
+               skipping is lawful and prints a true blank. btctax takes no position on the answer: FinCEN \
+               Notice 2020-2 leaves crypto-only accounts outside the requirement for now, that is under \
+               active reconsideration, and an account holding crypto PLUS fiat or securities may well be \
+               reportable.",
+        kind: SkippableKind::YesNo,
+        // ★ The FORM conditions this on 7a \u{2014} "If 'Yes,' are you required to file\u{2026}".
+        live: |ri| ri.foreign_accounts == Some(true),
+        get_bool: |ri| ri.fbar_filing_required,
+        set_bool: |ri, v| ri.fbar_filing_required = Some(v),
+        get_date: |_ri| None,
+        set_date: |_ri, _v| {},
+    },
 ];
 
 #[cfg(test)]
@@ -789,7 +808,6 @@ mod tests {
                 QuestionId::HasIncomeExclusion => 11,
                 QuestionId::TaxpayerDiedDuringYear => 12,
                 QuestionId::SpouseDiedDuringYear => 13,
-                QuestionId::FbarFilingRequired => 14,
             };
             assert_eq!(idx, i, "QuestionId::ALL is out of order / missing {id:?}");
             assert_eq!(
@@ -798,8 +816,8 @@ mod tests {
                 "exactly one FORM_QUESTIONS entry for {id:?}"
             );
         }
-        assert_eq!(QuestionId::ALL.len(), 15, "there are 15 declarations");
-        assert_eq!(FORM_QUESTIONS.len(), 15, "one entry per declaration");
+        assert_eq!(QuestionId::ALL.len(), 14, "there are 14 declarations");
+        assert_eq!(FORM_QUESTIONS.len(), 14, "one entry per declaration");
     }
 
     #[test]
@@ -807,8 +825,8 @@ mod tests {
         use crate::tax::types::FilingStatus;
         assert_eq!(
             SKIPPABLE_QUESTIONS.len(),
-            7,
-            "blind ×2, SALT, DOB ×2, DOD ×2"
+            8,
+            "blind ×2, SALT, DOB ×2, DOD ×2, the Schedule B 7a FBAR sub-question"
         );
         // SALT is live iff a schedule_a exists; spouse-blind iff a spouse Person exists.
         let salt = SKIPPABLE_QUESTIONS

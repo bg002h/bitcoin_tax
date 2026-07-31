@@ -109,15 +109,15 @@ mod tests {
             );
         }
         assert_eq!(
-            decl_count, 14,
-            "14 declarations are Decl* fields (the 15th is the mortgage dedup)"
+            decl_count, 13,
+            "13 declarations are Decl* fields (the 14th is the mortgage dedup)"
         );
 
-        // 14 delegating Decl* fields + the foreign_country_names Text field.
+        // 13 delegating Decl* fields + the foreign_country_names Text field.
         assert_eq!(
             decls.fields.len(),
-            15,
-            "14 declarations + foreign_country_names"
+            14,
+            "13 declarations + foreign_country_names"
         );
         assert!(decls
             .fields
@@ -193,8 +193,6 @@ mod tests {
                     mortgage_interest_1098: rust_decimal_macros::dec!(1),
                     ..Default::default()
                 });
-                // Schedule B 7a "Yes" is what makes the FBAR sub-question live.
-                ri.foreign_accounts = Some(true);
                 ri.capital_loss_carryforward_in = btctax_core::tax::types::Carryforward {
                     short: rust_decimal_macros::dec!(1),
                     long: rust_decimal_macros::dec!(0),
@@ -261,7 +259,7 @@ mod tests {
     /// entry; the `FieldId ↔ SkippableId` map stays TOTAL over all 5 skippables (SALT → `SaSaltUseSalesTax`);
     /// and the spouse-gated liveness edge holds.
     #[test]
-    fn skippables_section_delegates_six_skippables_and_the_map_is_total() {
+    fn skippables_section_delegates_seven_skippables_and_the_map_is_total() {
         let skips = section(SectionId::Skippables);
 
         // SALT election is a Schedule-A Field (Task 5), NOT a Skippables Field.
@@ -273,9 +271,13 @@ mod tests {
             "the SALT election is Schedule-A-owned, not a Skippables Field"
         );
 
-        // Exactly the six non-SALT skippables.
+        // Exactly the seven non-SALT skippables.
         let ids: Vec<FieldId> = skips.fields.iter().map(|f| f.id).collect();
-        assert_eq!(ids.len(), 6, "blind ×2 + DOB ×2 + DOD ×2 (§G-9)");
+        assert_eq!(
+            ids.len(),
+            7,
+            "blind ×2 + DOB ×2 + DOD ×2 (§G-9) + the Schedule B 7a FBAR sub-question"
+        );
         for expected in [
             FieldId::BlindTaxpayer,
             FieldId::BlindSpouse,
@@ -283,6 +285,7 @@ mod tests {
             FieldId::DobSpouse,
             FieldId::DodTaxpayer,
             FieldId::DodSpouse,
+            FieldId::FbarFilingRequired,
         ] {
             assert!(
                 ids.contains(&expected),
@@ -310,12 +313,14 @@ mod tests {
             let entry = SKIPPABLE_QUESTIONS.iter().find(|e| e.id == s).unwrap();
             // A spouse-gated skippable needs a spouse present for its setter to stick; the §G-9 dates
             // of death additionally need their gate to say the person died (`SkippableId::Dod*` is live
-            // only then). Both primers are harmless to the other five entries' liveness.
+            // only then); the Schedule B 7a FBAR sub-question needs 7a = Yes (the form's own "If
+            // 'Yes,'"). Every primer is harmless to the other entries' liveness.
             let seed = |ri: &mut ReturnInputs| {
                 if !(entry.live)(ri) {
                     ri.header.spouse = Some(Person::default());
                     ri.header.taxpayer_died_during_year = Some(true);
                     ri.header.spouse_died_during_year = Some(true);
+                    ri.foreign_accounts = Some(true);
                 }
             };
             match entry.kind {

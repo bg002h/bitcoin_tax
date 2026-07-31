@@ -8,10 +8,10 @@
 //! ★ **Dedup (the two-corrections interface, mirroring spec §5.8).** The two registry-driven tri-state leaves
 //! are Schedule-A-owned (built in Task 5), NOT members of these synthetic sections:
 //! `QuestionId::MortgageAllUsedToBuyBuildImprove ↔ FieldId::SaMortgageAllUsed` and
-//! `SkippableId::SalesTaxElection ↔ FieldId::SaSaltUseSalesTax`. So `Declarations` has 7 delegating fields
-//! (+ the country Text field) and `Skippables` has 4 — but the maps below stay **TOTAL** over all 8
-//! questions / all 5 skippables (the two deduped ids resolve to their Schedule-A `FieldId`), so Task 9's
-//! attribution resolves every one.
+//! `SkippableId::SalesTaxElection ↔ FieldId::SaSaltUseSalesTax`. So `Declarations` drops the mortgage box
+//! and `Skippables` drops the SALT election — but the maps below stay **TOTAL** over every question and
+//! every skippable (the two deduped ids resolve to their Schedule-A `FieldId`), so Task 9's attribution
+//! resolves every one.
 
 use crate::seam::{
     Field, FieldId, FieldKind, FieldValue, Section, SectionId, SectionKind, SetError,
@@ -213,11 +213,6 @@ const DECL_FIELDS: &[Field] = &[
         ri.header.spouse_died_during_year = None;
         Ok(())
     }),
-    // Index 14 — Schedule B 7a's FBAR sub-question, likewise APPENDED (see the note above).
-    decl_tristate!(14, FieldId::DeclFbarFilingRequired, |ri| {
-        ri.fbar_filing_required = None;
-        Ok(())
-    }),
     FOREIGN_COUNTRY_NAMES,
 ];
 
@@ -237,9 +232,10 @@ pub(crate) const INCOME_EXCLUSIONS: Section = Section {
 
 // ── The Skippables section ────────────────────────────────────────────────────────────────────────────────
 
-/// The 4 delegating skippables — indices 0, 1, 3, 4 of `SKIPPABLE_QUESTIONS` (index 2, the SALT election, is
-/// deduped to `SaSaltUseSalesTax`). Equivalent to `SKIPPABLE_QUESTIONS.filter(|s| s.id != SalesTaxElection)`,
-/// enumerated by index because `Field` accessors must be `const`/`&'static`, not built by a runtime loop.
+/// The delegating skippables — indices 0, 1, 3, 4, 5, 6, 7 of `SKIPPABLE_QUESTIONS` (index 2, the SALT
+/// election, is deduped to `SaSaltUseSalesTax`). Equivalent to
+/// `SKIPPABLE_QUESTIONS.filter(|s| s.id != SalesTaxElection)`, enumerated by index because `Field`
+/// accessors must be `const`/`&'static`, not built by a runtime loop.
 const SKIPPABLE_FIELDS: &[Field] = &[
     skippable_tristate!(0, FieldId::BlindTaxpayer, |ri| {
         ri.header.taxpayer.blind = None;
@@ -279,6 +275,12 @@ const SKIPPABLE_FIELDS: &[Field] = &[
             Err(SetError::NoSuchRow)
         }
     }),
+    // ★ Index 7 — Schedule B 7a's FBAR sub-question. Parent-gated on 7a = Yes (the form's own "If
+    // 'Yes,'"), so a set/clear while 7a is not Yes is `NoSuchRow` via the macro's liveness check.
+    skippable_tristate!(7, FieldId::FbarFilingRequired, |ri| {
+        ri.fbar_filing_required = None;
+        Ok(())
+    }),
 ];
 
 pub(crate) const SKIPPABLES: Section = Section {
@@ -308,7 +310,6 @@ pub fn field_to_question(id: FieldId) -> Option<QuestionId> {
         FieldId::DeclHasIncomeExclusion => QuestionId::HasIncomeExclusion,
         FieldId::DeclTaxpayerDiedDuringYear => QuestionId::TaxpayerDiedDuringYear,
         FieldId::DeclSpouseDiedDuringYear => QuestionId::SpouseDiedDuringYear,
-        FieldId::DeclFbarFilingRequired => QuestionId::FbarFilingRequired,
         _ => return None,
     })
 }
@@ -333,7 +334,6 @@ pub fn question_to_field(id: QuestionId) -> FieldId {
         QuestionId::HasIncomeExclusion => FieldId::DeclHasIncomeExclusion,
         QuestionId::TaxpayerDiedDuringYear => FieldId::DeclTaxpayerDiedDuringYear,
         QuestionId::SpouseDiedDuringYear => FieldId::DeclSpouseDiedDuringYear,
-        QuestionId::FbarFilingRequired => FieldId::DeclFbarFilingRequired,
     }
 }
 
@@ -347,6 +347,7 @@ pub fn field_to_skippable(id: FieldId) -> Option<SkippableId> {
         FieldId::DodTaxpayer => SkippableId::DodTaxpayer,
         FieldId::DodSpouse => SkippableId::DodSpouse,
         FieldId::SaSaltUseSalesTax => SkippableId::SalesTaxElection,
+        FieldId::FbarFilingRequired => SkippableId::FbarFilingRequired,
         _ => return None,
     })
 }
@@ -362,5 +363,6 @@ pub fn skippable_to_field(id: SkippableId) -> FieldId {
         SkippableId::DobSpouse => FieldId::DobSpouse,
         SkippableId::DodTaxpayer => FieldId::DodTaxpayer,
         SkippableId::DodSpouse => FieldId::DodSpouse,
+        SkippableId::FbarFilingRequired => FieldId::FbarFilingRequired,
     }
 }

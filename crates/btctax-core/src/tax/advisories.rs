@@ -53,6 +53,11 @@ pub enum Advisory {
     /// FinCEN Notice 2020-2 disclosure — the filer declared a foreign financial account. v1 never
     /// auto-answers Schedule B Part III.
     FbarFinCen,
+    /// ★ Schedule B line 7a is **Yes** but its unnumbered FBAR sub-question was SKIPPED, so the box
+    /// prints blank. Lawful — no figure reads it, and a blank is no testimony — but the form carries a
+    /// Caution about substantial penalties, so skipping it may not be silent. Quotes the Caution
+    /// verbatim. Fires ONLY on the skip (`None`); an answered box, either way, needs no advisory.
+    FbarSubQuestionNotAnswered,
     /// The ledger classified crypto donations assuming a **public charity (50%-org)** donee. A private
     /// foundation is the 20%-ceiling / basis class (which v1 refuses), so the donee must be verified.
     CharitableDoneeAssumedPublicCharity { donations: usize },
@@ -145,6 +150,16 @@ impl Advisory {
                  account holding ONLY virtual currency is (for now) outside the FBAR requirement, but that \
                  is under active reconsideration, and an account holding crypto PLUS fiat or securities may \
                  well be reportable. btctax never answers Schedule B Part III for you — decide it yourself."
+                    .to_string(),
+            Advisory::FbarSubQuestionNotAnswered =>
+                "FBAR SUB-QUESTION LEFT BLANK — you answered Schedule B line 7a \"Yes\" but did not answer \
+                 its sub-question (\"are you required to file FinCEN Form 114?\"), so that box prints \
+                 BLANK. That is lawful: no figure on your return reads it, and btctax will never answer \
+                 it for you. But read Schedule B's own Caution first — \"If required, failure to file \
+                 FinCEN Form 114 may result in substantial penalties. Additionally, you may be required \
+                 to file Form 8938, Statement of Specified Foreign Financial Assets.\" That penalty is \
+                 for not FILING the FBAR, an obligation this box does not create or remove. Answer it \
+                 with `btctax income answer` if you want the box completed."
                     .to_string(),
             Advisory::CharitableDoneeAssumedPublicCharity { donations } => format!(
                 "CHARITABLE DONEE ASSUMED — your {donations} crypto donation(s) were valued assuming a \
@@ -348,6 +363,11 @@ pub fn advisories(
     // FinCEN Notice 2020-2 — a declared foreign account.
     if ri.foreign_accounts == Some(true) {
         out.push(Advisory::FbarFinCen);
+        // ★ …and its unnumbered sub-question skipped. Silence is lawful (nothing reads the box), but
+        // the form prints a Caution beside it, so the skip is said out loud rather than passed over.
+        if ri.fbar_filing_required.is_none() {
+            out.push(Advisory::FbarSubQuestionNotAnswered);
+        }
     }
 
     // The ledger's crypto donations assumed a public-charity donee.
@@ -586,6 +606,68 @@ mod tests {
         assert!(got.contains(&Advisory::AgedBoxForfeitedNoDob {
             per_box: dec!(1550) // married rate
         }));
+    }
+
+    /// ★★ Schedule B 7a's FBAR SUB-QUESTION is class (B): skipping it is lawful, so it must not
+    /// refuse — but it must not be silent either. The advisory fires **exactly** on the skip.
+    ///
+    /// The three cases are the whole contract, and the middle one is why the advisory is conditioned
+    /// on `is_none()` rather than on 7a: a filer who ANSWERED (either way) has already made the
+    /// decision, and re-nagging them would train the advisory list to be ignored.
+    #[test]
+    fn the_fbar_sub_question_advises_only_when_it_was_skipped() {
+        let run = |fbar: Option<bool>| {
+            let ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                foreign_accounts: Some(true),
+                fbar_filing_required: fbar,
+                ..Default::default()
+            };
+            advisories(
+                &ri,
+                &LedgerState::default(),
+                dec!(200000),
+                dec!(200000),
+                Usd::ZERO,
+                &params(),
+                2024,
+                false,
+            )
+        };
+        assert!(
+            run(None).contains(&Advisory::FbarSubQuestionNotAnswered),
+            "skipped ⇒ the box prints blank, so say so"
+        );
+        for answered in [Some(true), Some(false)] {
+            assert!(
+                !run(answered).contains(&Advisory::FbarSubQuestionNotAnswered),
+                "answered {answered:?} ⇒ the box is filled; no advisory"
+            );
+        }
+        // Never fires without a 7a "Yes" — the FORM does not ask the sub-question then.
+        for seven_a in [None, Some(false)] {
+            let ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                foreign_accounts: seven_a,
+                ..Default::default()
+            };
+            assert!(!advisories(
+                &ri,
+                &LedgerState::default(),
+                dec!(200000),
+                dec!(200000),
+                Usd::ZERO,
+                &params(),
+                2024,
+                false,
+            )
+            .contains(&Advisory::FbarSubQuestionNotAnswered));
+        }
+        // ★ The message quotes Schedule B's own Caution VERBATIM — the words the filer can find on
+        // their paperwork, not a paraphrase of them.
+        assert!(Advisory::FbarSubQuestionNotAnswered.message().contains(
+            "If required, failure to file FinCEN Form 114 may result in substantial penalties."
+        ));
     }
 
     /// ★ **P5-I3 regression — the exact household the reviewer reproduced.** MFJ, 3 dependents,

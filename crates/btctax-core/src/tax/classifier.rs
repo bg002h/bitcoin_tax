@@ -116,7 +116,18 @@ pub fn classify(ri: &ReturnInputs) -> Census {
     c.declaration(mfs_spouse_itemizes, QuestionId::MfsSpouseItemizes);
     c.declaration(foreign_accounts, QuestionId::ForeignAccounts);
     c.declaration(foreign_trust, QuestionId::ForeignTrust);
-    c.declaration(fbar_filing_required, QuestionId::FbarFilingRequired);
+    // ★ Schedule B 7a's unnumbered FBAR sub-question. NOT a declaration: no figure on the return
+    // reads it (the printed chain writes the checkbox and nothing else), so its silence neither
+    // asserts nor forgoes — class (C). Asked as `SkippableId::FbarFilingRequired`, and skipping it
+    // fires `Advisory::FbarSubQuestionNotAnswered` quoting the form's Caution verbatim.
+    c.exempt(
+        fbar_filing_required,
+        Class::NoTaxDirection,
+        "Schedule B line 7a's FBAR sub-question — no figure on the return reads it, and the penalty \
+         the form's Caution names attaches to NOT FILING FinCEN Form 114 (a FinCEN obligation \
+         independent of this box), not to leaving the box blank. Silence is lawful and prints a true \
+         blank; `Advisory::FbarSubQuestionNotAnswered` fires (§2.1)",
+    );
     c.declaration(dual_status_alien, QuestionId::DualStatusAlien);
     c.declaration(has_income_exclusion, QuestionId::HasIncomeExclusion);
     c.declaration(
