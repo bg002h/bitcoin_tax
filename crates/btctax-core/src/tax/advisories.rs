@@ -98,6 +98,19 @@ pub enum Advisory {
     /// (`SkippableId::BlindSpouse` is live on `spouse.is_some()`, not on MFJ) and then discards the
     /// answer. `boxes` counts what was forgone — aged, blind, or both.
     Mfs63fSpouseBoxesForgone { per_box: Usd, boxes: usize },
+    /// ★★ §G-20a — a prior-year **benefit** carryover btctax was never told about: the §1212(b)
+    /// capital-loss carryover and/or the §170(d)(1) charitable carryover.
+    ///
+    /// **Opposite direction from [`Self::QbiCarryforwardNotStated`], and the message must say so.**
+    /// These two REDUCE the filer's tax, so omitting one costs THEM, not the Treasury — a conservative
+    /// omission §3.4 permits, **but only if they are told**. The QBI pair goes the other way.
+    ///
+    /// ★ Gated on `CarryProvenance::User` on an empty/zero value, exactly like the QBI advisory: a zero
+    /// btctax computed from a prior year it saw is knowledge; a zero that is the struct default is not.
+    BenefitCarryoversNotStated {
+        capital_loss: bool,
+        charitable: bool,
+    },
     /// The ledger classified crypto donations assuming a **public charity (50%-org)** donee. A private
     /// foundation is the 20%-ceiling / basis class (which v1 refuses), so the donee must be verified.
     CharitableDoneeAssumedPublicCharity { donations: usize },
@@ -228,6 +241,34 @@ impl Advisory {
                 they = if *boxes > 1 { "they are" } else { "it is" },
                 amt = fmt_usd(*per_box),
                 total = fmt_usd(*per_box * Usd::from(*boxes as u64))
+            ),
+            Advisory::BenefitCarryoversNotStated {
+                capital_loss,
+                charitable,
+            } => format!(
+                "PRIOR-YEAR CARRYOVER{p} NOT STATED — btctax has no {which} on file, and it did not \
+                 compute your prior year, so it cannot tell \"you have none\" from \"nobody asked\". \
+                 {p2} REDUCE your tax, so leaving {one} out costs YOU, not the Treasury — btctax will \
+                 not invent {one}, and your tax may be OVERSTATED. Check last year's return and enter \
+                 {one} with `btctax income import` if you have {one}.",
+                p = if *capital_loss && *charitable { "S" } else { "" },
+                which = match (capital_loss, charitable) {
+                    (true, true) =>
+                        "capital-loss carryover (§1212(b), Schedule D lines 6/14) or charitable \
+                         carryover (§170(d)(1))",
+                    (true, false) => "capital-loss carryover (§1212(b), Schedule D lines 6/14)",
+                    _ => "charitable carryover (§170(d)(1))",
+                },
+                p2 = if *capital_loss && *charitable {
+                    "Both"
+                } else {
+                    "It would"
+                },
+                one = if *capital_loss && *charitable {
+                    "them"
+                } else {
+                    "it"
+                }
             ),
             Advisory::FbarFinCen =>
                 "FBAR / FinCEN — you declared a foreign financial account. Under FinCEN Notice 2020-2 an \
@@ -548,6 +589,20 @@ pub fn advisories(
         }
     }
 
+    // ★★ §G-20a — the two BENEFIT carryovers, gated on provenance exactly like the QBI pair. Opposite
+    // direction: omitting one costs the FILER, so §3.4 permits the omission — but only if they are told.
+    let user = crate::tax::return_inputs::CarryProvenance::User;
+    let cl = ri.capital_loss_carryforward_in.short == Usd::ZERO
+        && ri.capital_loss_carryforward_in.long == Usd::ZERO
+        && ri.capital_loss_carryforward_in_provenance == user;
+    let ch = ri.charitable_carryover_in.is_empty() && ri.charitable_carryover_in_provenance == user;
+    if cl || ch {
+        out.push(Advisory::BenefitCarryoversNotStated {
+            capital_loss: cl,
+            charitable: ch,
+        });
+    }
+
     // FinCEN Notice 2020-2 — a declared foreign account.
     if ri.foreign_accounts == Some(true) {
         out.push(Advisory::FbarFinCen);
@@ -660,14 +715,26 @@ mod tests {
     }
 
     /// A high-income Single filer WITH a DOB, no dependents, no foreign account, no donations gets
-    /// exactly ONE advisory — the unconditional other-credits omission — and no spurious ones.
+    /// exactly the UNCONDITIONAL advisories — and no spurious ones.
     ///
     /// [★ P5-I2] This used to assert NO advisories. That was wrong, not merely untested: the
     /// residential-energy credit has no income limit at all, and the adoption credit reaches into the
     /// $250k band, so "v1 did not compute these" applies to every return ever produced. The test's
     /// real intent — the common case must not be NOISY — is preserved by pinning the exact set.
+    ///
+    /// ★★ **2026-07-31 (§G-20a): the unconditional set grew from ONE to TWO**, and the pinned list is
+    /// the only thing that makes that visible. `BenefitCarryoversNotStated` fires on any return whose
+    /// prior year btctax did not compute, which is every FIRST return — and that is correct rather
+    /// than noisy: a carryover comes from a prior year, so no property of THIS year could narrow it,
+    /// and gating on this year's activity would go silent exactly when it matters most (a filer with a
+    /// large prior loss and no activity now). It goes quiet permanently once btctax computes a year.
+    ///
+    /// ★ **But two unconditional members is a UX budget worth watching** — the failure mode this
+    /// codebase keeps citing is an advisory list that teaches itself to be scrolled past. Recorded in
+    /// `FOLLOWUPS.md` §G-20a; if a third arrives, that is the moment to reconsider the surface rather
+    /// than the individual advisory.
     #[test]
-    fn a_clean_high_income_return_has_only_the_unconditional_omission() {
+    fn a_clean_high_income_return_has_only_the_unconditional_omissions() {
         let mut ri = ReturnInputs {
             filing_status: FilingStatus::Single,
             ..Default::default()
@@ -684,7 +751,19 @@ mod tests {
             2024,
             false,
         );
-        assert_eq!(got, vec![Advisory::OtherCreditsOmitted], "{got:?}");
+        assert_eq!(
+            got,
+            vec![
+                Advisory::OtherCreditsOmitted,
+                // ★ §G-20a — the SECOND unconditional member; see this test's docs for why broad
+                // firing is correct here and what would make it worth reconsidering.
+                Advisory::BenefitCarryoversNotStated {
+                    capital_loss: true,
+                    charitable: true,
+                },
+            ],
+            "{got:?}"
+        );
     }
 
     /// Dependents fire the CTC omission; a missing DOB fires the §63(f) aged-box forfeit; low AGI with
@@ -717,6 +796,10 @@ mod tests {
                 Advisory::OtherCreditsOmitted,
                 Advisory::AgedBoxForfeitedNoDob {
                     per_box: dec!(1950)
+                },
+                Advisory::BenefitCarryoversNotStated {
+                    capital_loss: true,
+                    charitable: true,
                 },
             ]
         );
@@ -794,6 +877,90 @@ mod tests {
         assert!(got.contains(&Advisory::AgedBoxForfeitedNoDob {
             per_box: dec!(1550) // married rate
         }));
+    }
+
+    /// ★★ §G-20a — the BENEFIT carryovers, and the opposite direction from the QBI pair.
+    ///
+    /// Omitting these costs the FILER (they reduce tax), so §3.4 permits the omission — but only if
+    /// they are told. Gated on `CarryProvenance` for the same reason as the QBI advisory: without it, a
+    /// zero btctax COMPUTED last year is indistinguishable from one nobody ever stated, and the note
+    /// nags a filer whose prior year btctax itself produced.
+    #[test]
+    fn the_benefit_carryover_advisory_needs_provenance_to_be_honest() {
+        use crate::tax::return_inputs::CarryProvenance;
+        let run = |cl: Usd, cl_p: CarryProvenance, ch_empty: bool, ch_p: CarryProvenance| {
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                ..Default::default()
+            };
+            ri.capital_loss_carryforward_in.long = cl;
+            ri.capital_loss_carryforward_in_provenance = cl_p;
+            if !ch_empty {
+                ri.charitable_carryover_in = vec![crate::tax::return_inputs::CharitableCarryItem {
+                    class: crate::tax::return_inputs::CharitableClass::Cash60,
+                    amount: dec!(1000),
+                    origin_year: 2023,
+                    provenance: CarryProvenance::User,
+                }];
+            }
+            ri.charitable_carryover_in_provenance = ch_p;
+            advisories(
+                &ri,
+                &LedgerState::default(),
+                dec!(90000),
+                dec!(90000),
+                Usd::ZERO,
+                &params(),
+                2024,
+                false,
+            )
+            .into_iter()
+            .find_map(|a| match a {
+                Advisory::BenefitCarryoversNotStated {
+                    capital_loss,
+                    charitable,
+                } => Some((capital_loss, charitable)),
+                _ => None,
+            })
+        };
+        let u = CarryProvenance::User;
+        let c = CarryProvenance::Computed;
+
+        assert_eq!(
+            run(Usd::ZERO, u, true, u),
+            Some((true, true)),
+            "both unknown ⇒ name both"
+        );
+        assert_eq!(
+            run(Usd::ZERO, c, true, c),
+            None,
+            "★ btctax COMPUTED both zeros last year — that is knowledge, not an unknown"
+        );
+        assert_eq!(
+            run(dec!(3000), u, true, u),
+            Some((false, true)),
+            "a stated capital-loss carryover says nothing about the charitable one"
+        );
+        assert_eq!(
+            run(Usd::ZERO, u, false, u),
+            Some((true, false)),
+            "…and vice versa — an EMPTY list is the ambiguous case, a populated one is not"
+        );
+
+        // ★ The DIRECTION must be named, and it is the opposite of the QBI pair's.
+        let m = Advisory::BenefitCarryoversNotStated {
+            capital_loss: true,
+            charitable: false,
+        }
+        .message();
+        assert!(m.contains("costs YOU, not the Treasury"), "{m}");
+        assert!(m.contains("OVERSTATED"), "{m}");
+        assert!(
+            Advisory::QbiCarryforwardNotStated
+                .message()
+                .contains("UNDERSTATED"),
+            "the sibling goes the other way — if both ever say the same thing, one is wrong"
+        );
     }
 
     /// ★★ §G-20 — an MFS return forgoes the spouse's §63(f) boxes, and until now said nothing.

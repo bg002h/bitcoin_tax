@@ -316,6 +316,13 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         // ★ §G-22 — `qbi` is no longer a WHOLESALE exemption: both loss carryforwards are now in
         //   scope (they UNDERSTATE tax when omitted, unlike every other carryforward family). Only
         //   the two provenance leaves stay exempt — they are ours, not the filer's.
+        // ★ §G-20a — the two BENEFIT-carryover provenance leaves. Exempt for the same reason as the
+        //   QBI ones: provenance is OURS, not the filer's — they never type it, btctax stamps it.
+        //   ★ The census caught these the moment they were added, because the wholesale prefixes
+        //   `capital_loss_carryforward_in` / `charitable_carryover_in` do NOT match the `_provenance`
+        //   siblings. That is the census working, not a nuisance.
+        "capital_loss_carryforward_in_provenance",
+        "charitable_carryover_in_provenance",
         "qbi.reit_ptp_carryforward_in_provenance",
         "qbi.qbi_carryforward_in_provenance",
         "schedule_c.owner",

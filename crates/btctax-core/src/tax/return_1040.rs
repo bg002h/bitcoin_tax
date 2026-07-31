@@ -1693,6 +1693,11 @@ pub fn apply_carryover_writeback(
     next_year.qbi.reit_ptp_carryforward_in_provenance = CarryProvenance::Computed;
     next_year.qbi.qbi_carryforward_in = ar.qbi_carryforward_out;
     next_year.qbi.qbi_carryforward_in_provenance = CarryProvenance::Computed;
+    // ★ §G-20a — the two BENEFIT carryovers get their provenance stamped too. Without this a computed
+    // ZERO stays indistinguishable from an unasked one, and next year's advisory nags a filer whose
+    // prior year btctax itself computed.
+    next_year.capital_loss_carryforward_in_provenance = CarryProvenance::Computed;
+    next_year.charitable_carryover_in_provenance = CarryProvenance::Computed;
     Ok(next_year)
 }
 

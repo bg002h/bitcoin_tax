@@ -88,6 +88,8 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         sch1,
         payments,
         capital_loss_carryforward_in,
+        capital_loss_carryforward_in_provenance,
+        charitable_carryover_in_provenance,
         amt_carryover_same_as_regular,
         amt_depreciation_same_as_regular,
         charitable_carryover_in,
@@ -116,6 +118,19 @@ pub fn classify(ri: &ReturnInputs) -> Census {
     c.declaration(mfs_spouse_itemizes, QuestionId::MfsSpouseItemizes);
     c.declaration(foreign_accounts, QuestionId::ForeignAccounts);
     c.declaration(foreign_trust, QuestionId::ForeignTrust);
+    // ★ §G-20a — provenance for the two benefit carryovers. Class (C): no print, no tax direction.
+    // They exist so a ZERO can be told apart from an UNASKED, which is what makes an honest advisory
+    // possible; the per-item provenance on `CharitableCarryItem` cannot speak for an EMPTY list.
+    c.exempt(
+        capital_loss_carryforward_in_provenance,
+        Class::NoTaxDirection,
+        "§2.8: CarryProvenance (§1212(b) capital-loss carryover, §G-20a) — no print, no tax direction",
+    );
+    c.exempt(
+        charitable_carryover_in_provenance,
+        Class::NoTaxDirection,
+        "§2.8: CarryProvenance (§170(d)(1) charitable carryover LIST, §G-20a) — no print, no tax direction",
+    );
     // ★ Schedule B 7a's unnumbered FBAR sub-question. NOT a declaration: no figure on the return
     // reads it (the printed chain writes the checkbox and nothing else), so its silence neither
     // asserts nor forgoes — class (C). Asked as `SkippableId::FbarFilingRequired`, and skipping it

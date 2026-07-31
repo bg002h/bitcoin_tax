@@ -649,9 +649,11 @@ $ btctax --vault v.pgp income show --year 2024
     "short": "0",
     "long": "0"
   },
+  "capital_loss_carryforward_in_provenance": "user",
   "amt_carryover_same_as_regular": null,
   "amt_depreciation_same_as_regular": true,
   "charitable_carryover_in": [],
+  "charitable_carryover_in_provenance": "user",
   "qbi": {
     "reit_ptp_carryforward_in": "0",
     "reit_ptp_carryforward_in_provenance": "user",
@@ -712,7 +714,7 @@ This feature is newer and less proven than the rest of btctax, and it was develo
 Check what this feature actually produced: open the Form 8275 PDF and confirm the Part II narrative renders whole, continuing onto Part IV on page 2, rather than stopping mid-sentence after about one line; confirm the basis in Form 8949 column (e) for each promoted lot equals the floor you consented to at promote time; and confirm the tranche quantity and acquisition window on the 8275 match what you declared.
 ⚠ a Section B Form 8283 is NOT filing-ready without a signed Part IV (appraiser) and Part V (donee acknowledgement) — obtain both before filing.
 
-  ── ADVISORIES (9) ──
+  ── ADVISORIES (10) ──
   • CTC/ODC NOT COMPUTED — you captured 1 dependent(s), but v1 does not compute the Child
     Tax Credit or the Credit for Other Dependents (1040 line 19 is $0). Your tax is
     OVERSTATED by up to $2,000 per qualifying child / $500 per other dependent. File
@@ -753,6 +755,12 @@ Check what this feature actually produced: open the Form 8275 PDF and confirm th
     Form 8995: if either is non-zero, enter it here as a POSITIVE amount. If you had no
     §199A activity last year, or last year's lines 16 and 17 were zero, there is nothing to
     do and this note is expected.
+  • PRIOR-YEAR CARRYOVERS NOT STATED — btctax has no capital-loss carryover (§1212(b),
+    Schedule D lines 6/14) or charitable carryover (§170(d)(1)) on file, and it did not
+    compute your prior year, so it cannot tell "you have none" from "nobody asked". Both
+    REDUCE your tax, so leaving them out costs YOU, not the Treasury — btctax will not
+    invent them, and your tax may be OVERSTATED. Check last year's return and enter them
+    with `btctax income import` if you have them.
   • CHARITABLE DONEE ASSUMED — your 1 crypto donation(s) were valued assuming a PUBLIC
     CHARITY (50%-organization) donee: long-term gifts at fair market value under the
     30%-of-AGI ceiling. If the donee is a PRIVATE FOUNDATION, the correct treatment is the
@@ -1036,7 +1044,7 @@ Schedule D (raw pre-netting part totals) — tax year 2024
   The delta's implied deduction is fixed at derivation time (non-crypto AGI), so it is APPROXIMATE where a
   deduction is AGI-sensitive (e.g. the 7.5% medical floor); the two do NOT reconcile to the dollar.
 
-  ── ADVISORIES (3) ──
+  ── ADVISORIES (4) ──
   • OTHER CREDITS NOT COMPUTED — v1 does not compute the education (Form 8863),
     dependent-care (Form 2441), retirement-savings/saver's (Form 8880), residential-energy
     (Form 5695) or adoption (Form 8839) credits: Schedule 3 Part I is $0 apart from the
@@ -1049,6 +1057,12 @@ Schedule D (raw pre-netting part totals) — tax year 2024
     per box) was NOT granted for 2 person(s) whose blindness was never stated (v1 never
     assumes it). It STACKS with the age-65+ box. If you (or your spouse) are legally blind,
     run `btctax income answer`: your tax is currently OVERSTATED.
+  • PRIOR-YEAR CARRYOVERS NOT STATED — btctax has no capital-loss carryover (§1212(b),
+    Schedule D lines 6/14) or charitable carryover (§170(d)(1)) on file, and it did not
+    compute your prior year, so it cannot tell "you have none" from "nobody asked". Both
+    REDUCE your tax, so leaving them out costs YOU, not the Treasury — btctax will not
+    invent them, and your tax may be OVERSTATED. Check last year's return and enter them
+    with `btctax income import` if you have them.
   (Advisories never change a number and never fail the command. See `btctax limitations`.)
 ```
 

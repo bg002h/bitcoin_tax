@@ -243,6 +243,8 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         sch1,
         payments,
         capital_loss_carryforward_in,
+        capital_loss_carryforward_in_provenance: _, // CarryProvenance, not an amount
+        charitable_carryover_in_provenance: _,
         amt_carryover_same_as_regular: _, // a declaration, not money
         amt_depreciation_same_as_regular: _, // a declaration, not money
         charitable_carryover_in,

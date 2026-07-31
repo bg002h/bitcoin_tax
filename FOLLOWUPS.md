@@ -1429,7 +1429,46 @@ whether they file, whether they are claimable), and it stays coupled to the deat
 `SkippableId::SpouseDiedDuringYear` and `DodSpouse` were tightened to MFJ-only citing this same
 derivation, and would have to widen with it. **Do not fix one without the other.**
 
-### G-20a — ★★ the OTHER unadvised omissions cannot be advised yet: `CarryProvenance` is missing
+### G-20a — ~~the OTHER unadvised omissions cannot be advised yet~~ **FIXED 2026-07-31**
+
+**Both benefit carryovers now carry provenance and are advised.** `ReturnInputs` gained
+`capital_loss_carryforward_in_provenance` and `charitable_carryover_in_provenance` as **sibling
+scalars**, stamped `Computed` by the write-back; `Advisory::BenefitCarryoversNotStated` fires on an
+empty/zero value with `User` provenance, naming which one and the direction.
+
+★ **Sibling scalars, not fields inside the types**, because `Carryforward` lives in the **frozen**
+`tax/types.rs` — a third `frozen_guard` pin exception for a field the delta engine never reads would be
+a poor trade, and provenance is a fact about this year's INPUT rather than about the value type.
+
+★★ **The message is deliberately the MIRROR of `QbiCarryforwardNotStated`, and a test pins that they
+never converge:** these two REDUCE the filer's tax, so omitting one costs *them* (OVERSTATED); the QBI
+pair inflates a deduction, so omitting one costs the Treasury (UNDERSTATED). If both ever say the same
+thing, one of them is wrong.
+
+★ **The census caught the new leaves immediately** — the wholesale prefixes
+`capital_loss_carryforward_in` / `charitable_carryover_in` do NOT match the `_provenance` siblings, so
+`every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt` reported them as uncovered on the first
+compile. That is the census working.
+
+### ⚠ G-20b — the advisory list now has TWO unconditional members. Watch the budget.
+
+**Owning phase: before the next advisory is added — i.e. this is a gate, not a task.**
+
+`BenefitCarryoversNotStated` fires on **every first return**, because a carryover comes from a prior
+year and no property of THIS year can narrow it (gating on this year's activity would go silent exactly
+when it matters — a filer with a large prior loss and no current activity). It goes quiet permanently
+once btctax computes a year, so it is correct rather than noisy. But it joins `OtherCreditsOmitted`,
+which is unconditional by design.
+
+★★ **Two is defensible; three is the point at which the SURFACE is the problem, not the advisory.** The
+failure mode this codebase keeps citing — *an advisory list that teaches itself to be scrolled past* —
+is the reason every advisory added on 2026-07-30/31 got a precision test. If a third unconditional
+member is proposed, reconsider the presentation (tiering, a "first return" block, collapsing the
+always-on ones) rather than the individual advisory. `a_clean_high_income_return_has_only_the_
+unconditional_omissions` pins the exact set, so the count cannot grow unnoticed.
+
+<details><summary>The finding as originally filed — kept because its diagnosis was right and is the
+reason the fix was possible at all.</summary>
 
 **Owning phase: with §G-22's residue.** Found while closing §G-20. There are two more conservative
 omissions with no advisory — the **capital-loss** (§1212(b)) and **charitable** (§170(d)(1))
@@ -1483,6 +1522,8 @@ Corrected in place 2026-07-30. Two things remain:
 `DodSpouse` were tightened to MFJ-only, citing this same derivation. That tightening is **consistent
 with current behaviour** (the MFS spouse box is never counted, so the gate is inert there) but would
 have to widen with it if this is ever fixed. Do not fix one without the other.
+
+</details>
 
 ### G-19 — the crypto-slice-trio review residue (2026-07-30). Four Minors, two lenses, 0C/0I.
 

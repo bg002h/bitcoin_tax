@@ -492,6 +492,18 @@ pub struct ReturnInputs {
     pub payments: Payments,
     #[serde(default)]
     pub capital_loss_carryforward_in: Carryforward,
+    /// ★★ §G-20a — provenance for [`Self::capital_loss_carryforward_in`], as a SIBLING scalar.
+    ///
+    /// It is not inside `Carryforward` because that type lives in the **frozen** `tax/types.rs` (the
+    /// crypto-delta engine), and a third `frozen_guard` pin exception for a field the delta path never
+    /// reads would be a poor trade. Semantically it belongs here anyway: the provenance is a fact about
+    /// this YEAR'S INPUT, not about the value type.
+    ///
+    /// **Why it exists at all:** without it a zero is uninterpretable — *"the filer has no carryover"*
+    /// and *"nobody ever asked"* are the same bytes. `Computed` means btctax derived it from a prior
+    /// year it actually computed; `User` (the default) means it is the filer's or nobody's.
+    #[serde(default)]
+    pub capital_loss_carryforward_in_provenance: CarryProvenance,
     /// **Form 6251 line 2k — the AMT capital-loss-carryover declaration.** Line 2k is "Disposition of
     /// property (difference between AMT and regular tax gain or loss)", and i6251 directs any Form
     /// 8949 / Schedule D / 4684 / 4797 adjustment for the activity there rather than to line 3.
@@ -515,6 +527,13 @@ pub struct ReturnInputs {
     pub amt_depreciation_same_as_regular: Option<bool>,
     #[serde(default)]
     pub charitable_carryover_in: Vec<CharitableCarryItem>,
+    /// ★★ §G-20a — provenance for the charitable carryover **LIST AS A WHOLE**.
+    ///
+    /// `CharitableCarryItem` already carries a per-item provenance, which is useless for the case that
+    /// matters: an **EMPTY vec has no items**, so an empty list carries no provenance at all — and an
+    /// empty list is exactly the state that is ambiguous between "no carryover" and "never asked".
+    #[serde(default)]
+    pub charitable_carryover_in_provenance: CarryProvenance,
     #[serde(default)]
     pub qbi: QbiInputs,
     /// Schedule B Part III — required when Sch B files; `None` ⇒ fail-loud (I7).
@@ -634,9 +653,11 @@ impl Default for ReturnInputs {
             sch1: Schedule1Inputs::default(),
             payments: Payments::default(),
             capital_loss_carryforward_in: Carryforward::default(),
+            capital_loss_carryforward_in_provenance: CarryProvenance::default(),
             amt_carryover_same_as_regular: None,
             amt_depreciation_same_as_regular: None,
             charitable_carryover_in: Vec::new(),
+            charitable_carryover_in_provenance: CarryProvenance::default(),
             qbi: QbiInputs::default(),
             foreign_accounts: None,
             foreign_trust: None,
