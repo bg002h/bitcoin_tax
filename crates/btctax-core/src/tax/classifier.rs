@@ -209,12 +209,25 @@ fn classify_header(c: &mut Census, h: &HouseholdHeader) {
         "§2.1: 1040 presidential-fund box (spouse) — §6096, no tax direction",
     );
     // §G-9: the §63(f) death carve-out. i1040gi states it twice — "Death of a taxpayer" and "Death of
-    // spouse" — so each is its own declaration.
-    c.declaration(
+    // spouse" — so each is its own leaf. ★ BENEFIT CLAIMS, not declarations: silence FORGOES the
+    // age-65 addition (`is_aged`'s `(None, None)` arm returns `false`), so by the sharp test it is
+    // class (B), asked as `SkippableId::{Taxpayer,Spouse}DiedDuringYear`. They were briefly class-(A)
+    // refusals, and the taxpayer one was `live: |_| true` — it blocked every return for a fail-safe
+    // the compute layer already had.
+    c.exempt(
         taxpayer_died_during_year,
-        QuestionId::TaxpayerDiedDuringYear,
+        Class::BenefitClaim,
+        "§63(f)/§G-9 death carve-out (taxpayer) — New Colonial Ice: silence forgoes the age-65 \
+         addition rather than granting it on an unresolved carve-out, so `false`/absent is lawful; \
+         `Advisory::AgedBoxForfeitedDeathUnanswered` fires when a qualifying DOB makes the skip cost \
+         money (§2.2)",
     );
-    c.declaration(spouse_died_during_year, QuestionId::SpouseDiedDuringYear);
+    c.exempt(
+        spouse_died_during_year,
+        Class::BenefitClaim,
+        "§63(f)/§G-9 death carve-out (spouse) — same reasoning; the box is counted on MFJ only, which \
+         is why the prompt is MFJ-gated too (§2.2)",
+    );
     classify_person(c, taxpayer);
     if let Some(sp) = spouse {
         classify_person(c, sp);

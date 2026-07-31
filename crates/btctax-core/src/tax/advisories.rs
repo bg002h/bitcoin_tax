@@ -50,6 +50,12 @@ pub enum Advisory {
     /// §63(f): a person's date of birth is not on file, so the aged (65+) additional standard deduction is
     /// NOT granted (never granted on an unsubstantiated birthdate). Overstates tax if they are 65+.
     AgedBoxForfeitedNoDob { per_box: Usd },
+    /// ★ §63(f) / §G-9: a person's date of birth IS on file and DOES qualify them for the aged box, but
+    /// the "died during the year?" question was skipped — so `is_aged` forgoes the addition rather than
+    /// grant it on an unresolved death carve-out. Overstates tax, and unlike
+    /// [`Self::AgedBoxForfeitedNoDob`] the filer has given us everything except one yes/no, so this is
+    /// the cheapest advisory on the list to act on. `persons` counts taxpayer + (on MFJ) spouse.
+    AgedBoxForfeitedDeathUnanswered { per_box: Usd, persons: usize },
     /// FinCEN Notice 2020-2 disclosure — the filer declared a foreign financial account. v1 never
     /// auto-answers Schedule B Part III.
     FbarFinCen,
@@ -144,6 +150,20 @@ impl Advisory {
                  spouse) are 65 or older, enter the date of birth and re-run: your tax is currently \
                  OVERSTATED.",
                 fmt_usd(*per_box)
+            ),
+            Advisory::AgedBoxForfeitedDeathUnanswered { per_box, persons } => format!(
+                "AGE-65 BOX FORGONE — a date of birth on file qualifies {n} for the §63(f) additional \
+                 standard deduction ({amt} per box), but the \"died during the tax year?\" question was \
+                 not answered, so it was NOT granted. i1040gi carves out someone who died in-year \
+                 before reaching 65, and v1 will not resolve that carve-out by assuming they lived. \
+                 Answering it with `btctax income answer` is one keystroke and worth {amt}: your tax is \
+                 currently OVERSTATED.",
+                n = if *persons > 1 {
+                    "you and your spouse"
+                } else {
+                    "someone on this return"
+                },
+                amt = fmt_usd(*per_box)
             ),
             Advisory::FbarFinCen =>
                 "FBAR / FinCEN — you declared a foreign financial account. Under FinCEN Notice 2020-2 an \
@@ -320,6 +340,36 @@ pub fn advisories(
     let spouse_no_dob = ri.filing_status == FilingStatus::Mfj && !spouse_dob_on_file;
     if taxpayer_no_dob || spouse_no_dob {
         out.push(Advisory::AgedBoxForfeitedNoDob { per_box });
+    }
+
+    // ★ §G-9: the OTHER way to forfeit the aged box — a qualifying DOB is on file but the death
+    // question was skipped, so `is_aged` forgoes rather than resolve the carve-out by assuming the
+    // person lived. Counted per person, spouse only on MFJ (mirrors `AgedBlindBoxes::for_return`,
+    // which is the derivation that actually decides the deduction).
+    let forgone = |p: &crate::tax::return_inputs::Person, died: Option<bool>| {
+        crate::tax::return_1040::aged_box_forgone_for_unanswered_death(
+            p.date_of_birth,
+            died,
+            p.date_of_death,
+            year,
+        )
+    };
+    let death_forgone_persons = usize::from(forgone(
+        &ri.header.taxpayer,
+        ri.header.taxpayer_died_during_year,
+    )) + usize::from(
+        ri.filing_status == FilingStatus::Mfj
+            && ri
+                .header
+                .spouse
+                .as_ref()
+                .is_some_and(|s| forgone(s, ri.header.spouse_died_during_year)),
+    );
+    if death_forgone_persons > 0 {
+        out.push(Advisory::AgedBoxForfeitedDeathUnanswered {
+            per_box,
+            persons: death_forgone_persons,
+        });
     }
 
     // ★ §63(f) BLINDNESS forgone (P9 §2.2) — same statute, rate and worksheet line as the aged box, and it
@@ -668,6 +718,59 @@ mod tests {
         assert!(Advisory::FbarSubQuestionNotAnswered.message().contains(
             "If required, failure to file FinCEN Form 114 may result in substantial penalties."
         ));
+    }
+
+    /// ★★ The §G-9 death gate became SKIPPABLE, so the age-65 box can now be forgone by silence — and
+    /// the filer must be told, but ONLY when the silence actually costs them something.
+    ///
+    /// The precision is the point. Firing whenever the gate is unanswered would put this advisory on
+    /// nearly every return (it is always live and most filers skip it), which trains the whole advisory
+    /// list to be scrolled past. It fires iff a date of birth on file WOULD have qualified them.
+    #[test]
+    fn the_forgone_aged_box_advises_only_when_the_skip_actually_costs_something() {
+        let run = |dob: Option<time::Date>, died: Option<bool>| {
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                ..Default::default()
+            };
+            ri.header.taxpayer.date_of_birth = dob;
+            ri.header.taxpayer_died_during_year = died;
+            advisories(
+                &ri,
+                &LedgerState::default(),
+                dec!(90000),
+                dec!(90000),
+                Usd::ZERO,
+                &params(),
+                2024,
+                false,
+            )
+            .iter()
+            .any(|a| matches!(a, Advisory::AgedBoxForfeitedDeathUnanswered { .. }))
+        };
+        let qualifying = Some(time::macros::date!(1955 - 03 - 02)); // 65+ in 2024
+        let too_young = Some(time::macros::date!(1990 - 01 - 01));
+
+        assert!(
+            run(qualifying, None),
+            "a qualifying DOB + an unanswered gate ⇒ the box is forgone; say so"
+        );
+        assert!(
+            !run(qualifying, Some(false)),
+            "answered ⇒ the box is CLAIMED, nothing forgone"
+        );
+        assert!(
+            !run(qualifying, Some(true)),
+            "answered \"died\" ⇒ the DATE skippable governs, not this advisory"
+        );
+        assert!(
+            !run(too_young, None),
+            "★ too young ⇒ the skip costs NOTHING; an advisory here would be noise on nearly every return"
+        );
+        assert!(
+            !run(None, None),
+            "no DOB ⇒ `AgedBoxForfeitedNoDob` already covers it; two advisories for one forfeit is worse than one"
+        );
     }
 
     /// ★ **P5-I3 regression — the exact household the reviewer reproduced.** MFJ, 3 dependents,

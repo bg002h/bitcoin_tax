@@ -109,15 +109,15 @@ mod tests {
             );
         }
         assert_eq!(
-            decl_count, 13,
-            "13 declarations are Decl* fields (the 14th is the mortgage dedup)"
+            decl_count, 11,
+            "11 declarations are Decl* fields (the 12th is the mortgage dedup)"
         );
 
-        // 13 delegating Decl* fields + the foreign_country_names Text field.
+        // 11 delegating Decl* fields + the foreign_country_names Text field.
         assert_eq!(
             decls.fields.len(),
-            14,
-            "13 declarations + foreign_country_names"
+            12,
+            "11 declarations + foreign_country_names"
         );
         assert!(decls
             .fields
@@ -259,7 +259,7 @@ mod tests {
     /// entry; the `FieldId ↔ SkippableId` map stays TOTAL over all 5 skippables (SALT → `SaSaltUseSalesTax`);
     /// and the spouse-gated liveness edge holds.
     #[test]
-    fn skippables_section_delegates_seven_skippables_and_the_map_is_total() {
+    fn skippables_section_delegates_nine_skippables_and_the_map_is_total() {
         let skips = section(SectionId::Skippables);
 
         // SALT election is a Schedule-A Field (Task 5), NOT a Skippables Field.
@@ -271,12 +271,12 @@ mod tests {
             "the SALT election is Schedule-A-owned, not a Skippables Field"
         );
 
-        // Exactly the seven non-SALT skippables.
+        // Exactly the nine non-SALT skippables.
         let ids: Vec<FieldId> = skips.fields.iter().map(|f| f.id).collect();
         assert_eq!(
             ids.len(),
-            7,
-            "blind ×2 + DOB ×2 + DOD ×2 (§G-9) + the Schedule B 7a FBAR sub-question"
+            9,
+            "blind ×2 + DOB ×2 + DOD ×2 + the FBAR sub-question + the §G-9 DEATH GATES ×2"
         );
         for expected in [
             FieldId::BlindTaxpayer,
@@ -286,6 +286,8 @@ mod tests {
             FieldId::DodTaxpayer,
             FieldId::DodSpouse,
             FieldId::FbarFilingRequired,
+            FieldId::TaxpayerDiedDuringYear,
+            FieldId::SpouseDiedDuringYear,
         ] {
             assert!(
                 ids.contains(&expected),
@@ -317,6 +319,10 @@ mod tests {
             // 'Yes,'"). Every primer is harmless to the other entries' liveness.
             let seed = |ri: &mut ReturnInputs| {
                 if !(entry.live)(ri) {
+                    // ★ MFJ first: `SpouseDiedDuringYear` and `DodSpouse` are MFJ-gated (the only
+                    // status whose spouse §63(f) box is counted), so a spouse `Person` alone is no
+                    // longer enough to make them live.
+                    ri.filing_status = FilingStatus::Mfj;
                     ri.header.spouse = Some(Person::default());
                     ri.header.taxpayer_died_during_year = Some(true);
                     ri.header.spouse_died_during_year = Some(true);

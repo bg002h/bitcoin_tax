@@ -204,15 +204,6 @@ const DECL_FIELDS: &[Field] = &[
         ri.has_income_exclusion = None;
         Ok(())
     }),
-    // Indices 12–13 — the §G-9 death gates, likewise APPENDED (see the note above).
-    decl_tristate!(12, FieldId::DeclTaxpayerDiedDuringYear, |ri| {
-        ri.header.taxpayer_died_during_year = None;
-        Ok(())
-    }),
-    decl_tristate!(13, FieldId::DeclSpouseDiedDuringYear, |ri| {
-        ri.header.spouse_died_during_year = None;
-        Ok(())
-    }),
     FOREIGN_COUNTRY_NAMES,
 ];
 
@@ -232,7 +223,7 @@ pub(crate) const INCOME_EXCLUSIONS: Section = Section {
 
 // ── The Skippables section ────────────────────────────────────────────────────────────────────────────────
 
-/// The delegating skippables — indices 0, 1, 3, 4, 5, 6, 7 of `SKIPPABLE_QUESTIONS` (index 2, the SALT
+/// The delegating skippables — indices 0, 1, 3, 4, 5, 6, 7, 8, 9 of `SKIPPABLE_QUESTIONS` (index 2, the SALT
 /// election, is deduped to `SaSaltUseSalesTax`). Equivalent to
 /// `SKIPPABLE_QUESTIONS.filter(|s| s.id != SalesTaxElection)`, enumerated by index because `Field`
 /// accessors must be `const`/`&'static`, not built by a runtime loop.
@@ -281,6 +272,16 @@ const SKIPPABLE_FIELDS: &[Field] = &[
         ri.fbar_filing_required = None;
         Ok(())
     }),
+    // ★ Indices 8–9 — the §G-9 death gates, MOVED here from `DECL_FIELDS` when they stopped refusing.
+    // The taxpayer one is `live: |_| true`, which as a declaration meant it blocked every return.
+    skippable_tristate!(8, FieldId::TaxpayerDiedDuringYear, |ri| {
+        ri.header.taxpayer_died_during_year = None;
+        Ok(())
+    }),
+    skippable_tristate!(9, FieldId::SpouseDiedDuringYear, |ri| {
+        ri.header.spouse_died_during_year = None;
+        Ok(())
+    }),
 ];
 
 pub(crate) const SKIPPABLES: Section = Section {
@@ -308,8 +309,6 @@ pub fn field_to_question(id: FieldId) -> Option<QuestionId> {
         FieldId::DeclAmtCarryoverSame => QuestionId::AmtCarryoverSameAsRegular,
         FieldId::DeclAmtDepreciationSame => QuestionId::AmtDepreciationSameAsRegular,
         FieldId::DeclHasIncomeExclusion => QuestionId::HasIncomeExclusion,
-        FieldId::DeclTaxpayerDiedDuringYear => QuestionId::TaxpayerDiedDuringYear,
-        FieldId::DeclSpouseDiedDuringYear => QuestionId::SpouseDiedDuringYear,
         _ => return None,
     })
 }
@@ -332,8 +331,6 @@ pub fn question_to_field(id: QuestionId) -> FieldId {
         QuestionId::AmtCarryoverSameAsRegular => FieldId::DeclAmtCarryoverSame,
         QuestionId::AmtDepreciationSameAsRegular => FieldId::DeclAmtDepreciationSame,
         QuestionId::HasIncomeExclusion => FieldId::DeclHasIncomeExclusion,
-        QuestionId::TaxpayerDiedDuringYear => FieldId::DeclTaxpayerDiedDuringYear,
-        QuestionId::SpouseDiedDuringYear => FieldId::DeclSpouseDiedDuringYear,
     }
 }
 
@@ -348,6 +345,8 @@ pub fn field_to_skippable(id: FieldId) -> Option<SkippableId> {
         FieldId::DodSpouse => SkippableId::DodSpouse,
         FieldId::SaSaltUseSalesTax => SkippableId::SalesTaxElection,
         FieldId::FbarFilingRequired => SkippableId::FbarFilingRequired,
+        FieldId::TaxpayerDiedDuringYear => SkippableId::TaxpayerDiedDuringYear,
+        FieldId::SpouseDiedDuringYear => SkippableId::SpouseDiedDuringYear,
         _ => return None,
     })
 }
@@ -364,5 +363,7 @@ pub fn skippable_to_field(id: SkippableId) -> FieldId {
         SkippableId::DodTaxpayer => FieldId::DodTaxpayer,
         SkippableId::DodSpouse => FieldId::DodSpouse,
         SkippableId::FbarFilingRequired => FieldId::FbarFilingRequired,
+        SkippableId::TaxpayerDiedDuringYear => FieldId::TaxpayerDiedDuringYear,
+        SkippableId::SpouseDiedDuringYear => FieldId::SpouseDiedDuringYear,
     }
 }

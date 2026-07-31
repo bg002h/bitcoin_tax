@@ -1656,6 +1656,10 @@ fn the_1040_prints_the_aged_blind_boxes_its_line_12_depends_on() {
         blind: Some(true),
         ..Default::default()
     });
+    // ★ The age-65 box is CLAIMED, not defaulted: the §G-9 death gates are class-(B) skippables, so
+    // `is_aged` forgoes the addition while "did you die during the year?" is unanswered. A fixture
+    // that wants the box must state it, exactly as it states `blind` and the date of birth.
+    ri.header.taxpayer_died_during_year = Some(false);
     btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
     let h = ReturnHeader::build(&ri, 2024).unwrap();
     assert_eq!(h.aged_blind.count(), 3, "the fixture claims three boxes");

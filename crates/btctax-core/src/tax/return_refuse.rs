@@ -81,13 +81,6 @@ pub enum RefuseReason {
     /// a return whose form needs modified AGI. Only reachable from TY2025 onward; TY2024's flat SALT
     /// cap never reads MAGI (D-11).
     IncomeExclusionUnanswered,
-    /// **1040 line 12a / §63(f) — `FOLLOWUPS.md` §G-9.** "Did the taxpayer die during the tax year?"
-    /// is unanswered. i1040gi carves a taxpayer who died before reaching age 65 out of the age-65
-    /// addition; an unasked death silently GRANTS it, understating the tax.
-    TaxpayerDeathUnanswered,
-    /// **1040 line 12a / §63(f) — `FOLLOWUPS.md` §G-9**, the same rule for the spouse. Live only on a
-    /// return that carries a spouse `Person`.
-    SpouseDeathUnanswered,
     /// Form 6251 line 3 — answered ADVERSELY ("not an AMT-qualified dwelling"). v1 does not model the
     /// §56(b)(1)(C) add-back, so computing would UNDERSTATE the tax.
     AmtNonQualifiedDwelling,
@@ -940,9 +933,9 @@ mod tests {
         ri.sch1.hsa_activity = Some(false);
         ri.dual_status_alien = Some(false);
         ri.has_income_exclusion = Some(false);
-        // §G-9: "did not die during the tax year" — the answer that reproduces the pre-§G-9 behaviour,
-        // so no existing figure moves. (The spouse gate is live only with a spouse `Person`, and every
-        // spouse-bearing fixture below sets it through `answer_every_live_question`.)
+        // §G-9: "did not die during the tax year". No longer REQUIRED (the death gates are class-(B)
+        // skippables now — see `the_death_gates_do_not_block_a_return`), but kept so that every fixture
+        // below claims the age-65 box the way a real filer would, and no existing figure moves.
         ri.header.taxpayer_died_during_year = Some(false);
         ri
     }
@@ -1028,11 +1021,6 @@ mod tests {
                     expenses: dec!(5000),
                     ..Default::default()
                 });
-            }
-            // §G-9: the spouse death gate is live exactly when a spouse `Person` is on the return.
-            QuestionId::SpouseDiedDuringYear => {
-                r.filing_status = FilingStatus::Mfj;
-                r.header.spouse = Some(crate::tax::return_inputs::Person::default());
             }
             _ => {}
         }
@@ -1749,6 +1737,80 @@ mod tests {
             btctax_skippables().any(|s| format!("{s:?}").contains("Fbar")),
             "…and it IS in the skippable registry, so it is still ASKED"
         );
+    }
+
+    /// ★★★ THE §G-9 DEATH GATES DO NOT BLOCK A RETURN. `TaxpayerDiedDuringYear` was a class-(A)
+    /// declaration with `live: |_| true`, so an unanswered one refused **every return btctax could
+    /// compute** — the single largest usability cost in the registry.
+    ///
+    /// It bought nothing. `is_aged`'s `(None, None)` arm already returns `false`, so silence FORGOES
+    /// the §63(f) age-65 addition rather than granting it on an unresolved carve-out: the refusal was
+    /// redundant with a fail-safe sitting directly beneath it, and the direction of the residual error
+    /// is OVERSTATEMENT, which §3.4 permits and advises on. This test is the whole claim: a return
+    /// that answers nothing about death computes, and the box it would have claimed is NOT granted.
+    #[test]
+    fn the_death_gates_do_not_block_a_return() {
+        use crate::tax::packet::ReturnHeader;
+        let mut r = ri();
+        r.header.taxpayer_died_during_year = None; // re-blank what the fixture answers
+        r.w2s.push(W2 {
+            box1_wages: dec!(80000),
+            ..Default::default()
+        });
+        assert_eq!(
+            reason(&r),
+            None,
+            "an unanswered death gate must NOT refuse — silence is lawful here"
+        );
+
+        // …and a filer old enough to qualify does NOT get the box while it is unanswered.
+        r.header.taxpayer.date_of_birth = Some(time::macros::date!(1955 - 03 - 02)); // 65+ in 2024
+        r.header.taxpayer.ssn = "123456789".into();
+        r.header.taxpayer.first_name = "John".into();
+        r.header.taxpayer.last_name = "Doe".into();
+        assert_eq!(reason(&r), None, "still computes with a DOB on file");
+        let h = ReturnHeader::build(&r, 2024).unwrap();
+        assert!(
+            !h.aged_blind.taxpayer_aged,
+            "★ the age-65 box is FORGONE while the death carve-out is unresolved — never granted. \
+             Flipping this to `true` restores the understatement §G-9 fixed."
+        );
+
+        // Answering it "no" claims the box, which is what makes the forfeit above a real cost.
+        r.header.taxpayer_died_during_year = Some(false);
+        assert!(
+            ReturnHeader::build(&r, 2024)
+                .unwrap()
+                .aged_blind
+                .taxpayer_aged,
+            "answered ⇒ the box is claimed"
+        );
+    }
+
+    /// ★ The SPOUSE death gate is MFJ-only. `AgedBlindBoxes::for_return` counts a spouse §63(f) box on
+    /// no other status, so on MFS the question was asked — and, before this, REFUSED — on a return
+    /// where its answer could never move a figure. The prompt scope must track the CONSUMER's scope.
+    #[test]
+    fn the_spouse_death_gate_is_asked_only_on_mfj() {
+        use crate::tax::questions::{SkippableId, SKIPPABLE_QUESTIONS};
+        let q = SKIPPABLE_QUESTIONS
+            .iter()
+            .find(|s| s.id == SkippableId::SpouseDiedDuringYear)
+            .expect("the spouse death gate is a skippable");
+        let with_spouse = |fs: FilingStatus| {
+            let mut r = ri();
+            r.filing_status = fs;
+            r.header.spouse = Some(crate::tax::return_inputs::Person::default());
+            r
+        };
+        assert!((q.live)(&with_spouse(FilingStatus::Mfj)), "MFJ: asked");
+        assert!(
+            !(q.live)(&with_spouse(FilingStatus::Mfs)),
+            "MFS: the spouse box is not the taxpayer's checkbox, so the question is inert"
+        );
+        let mut single = ri();
+        single.filing_status = FilingStatus::Single;
+        assert!(!(q.live)(&single), "no spouse: nowhere to record it");
     }
 
     /// The skippable registry ids, as strings — a tiny helper so the test above can assert membership

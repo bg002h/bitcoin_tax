@@ -100,8 +100,6 @@ pub enum FieldId {
     /// Form 6251 line 3 — is the mortgaged dwelling AMT-qualified? (i6251 p.8.)
     DeclAmtQualifiedDwelling,
     DeclHasIncomeExclusion,
-    DeclTaxpayerDiedDuringYear,
-    DeclSpouseDiedDuringYear,
     ExclPuertoRico,
     Excl2555L45,
     Excl2555L50,
@@ -121,6 +119,9 @@ pub enum FieldId {
     /// Schedule B line 7a's unnumbered FBAR sub-question (FinCEN Form 114) — class (B): nothing on the
     /// return reads it, so silence is lawful.
     FbarFilingRequired,
+    /// §G-9 death gates — class (B): silence FORGOES the §63(f) age-65 addition, never grants it.
+    TaxpayerDiedDuringYear,
+    SpouseDiedDuringYear,
 }
 
 /// The value shape of a field.

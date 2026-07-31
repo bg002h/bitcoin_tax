@@ -55,9 +55,7 @@ pub(crate) fn is_aged(
     let Some(d) = dob else {
         return false;
     };
-    let born_early_enough =
-        Date::from_calendar_date(year - 64, Month::January, 1).is_ok_and(|cutoff| d <= cutoff);
-    if !born_early_enough {
+    if !born_early_enough(d, year) {
         return false;
     }
     match (died_during_year, date_of_death) {
@@ -69,11 +67,40 @@ pub(crate) fn is_aged(
         // Died in-year, date SKIPPED. Class (B): the burden to claim the addition is the filer's (New
         // Colonial Ice), so silence is lawful and forgoes it. Never granted on an unknown date.
         (Some(true), None) => false,
-        // Unanswered. `screen_inputs` refuses first (`RefuseReason::{Taxpayer,Spouse}DeathUnanswered`),
-        // so this arm is unreachable on any emitting path — it is here so that no future caller which
-        // bypasses the screen can leak the pre-§G-9 behaviour back in.
+        // ★★ UNANSWERED — and since the death questions became SKIPPABLE this arm is REACHABLE on an
+        // ordinary emitting path, not a defensive backstop. It used to be unreachable because
+        // `screen_inputs` refused first; that refusal is gone, precisely BECAUSE this arm already
+        // fails in the safe direction. Silence forgoes the addition (tax OVERSTATED), never grants it
+        // on an unverified birthdate — which is the whole of §G-9's fix. `Advisory::
+        // AgedBoxForfeitedDeathUnanswered` is what tells the filer it cost them something.
+        // **Do not "simplify" this to `true`.** That is the shipped v0.14.0 defect, restored.
         (None, None) => false,
     }
+}
+
+/// Born on or before January 1 of `year − 64` — i.e. aged 65 or over by the §63(f) test, ignoring the
+/// death carve-out. Shared by [`is_aged`] and the forfeited-box advisory so the cutoff has ONE
+/// definition: an advisory that fired on a different cutoff than the deduction would be worse than no
+/// advisory, because it would name a benefit the return was never going to grant.
+pub(crate) fn born_early_enough(dob: Date, year: i32) -> bool {
+    Date::from_calendar_date(year - 64, Month::January, 1).is_ok_and(|cutoff| dob <= cutoff)
+}
+
+/// Would this person's §63(f) aged box have been checked, but for their death question being
+/// UNANSWERED? True exactly when the skip costs the filer the addition: a qualifying date of birth is
+/// on file, no date of death is on file, and the gate is `None`.
+///
+/// Drives [`crate::tax::advisories::Advisory::AgedBoxForfeitedDeathUnanswered`]. Deliberately narrow —
+/// an advisory that fires when nothing was forgone trains the filer to ignore the advisory list.
+pub(crate) fn aged_box_forgone_for_unanswered_death(
+    dob: Option<Date>,
+    died_during_year: Option<bool>,
+    date_of_death: Option<Date>,
+    year: i32,
+) -> bool {
+    dob.is_some_and(|d| born_early_enough(d, year))
+        && died_during_year.is_none()
+        && date_of_death.is_none()
 }
 
 /// The day a person born on `dob` **reaches 65** — the day *before* the 65th birthday, per the IRS's

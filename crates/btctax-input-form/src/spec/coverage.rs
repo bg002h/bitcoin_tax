@@ -166,7 +166,16 @@ fn fixture_for(field: &Field, base: &ReturnInputs) -> ReturnInputs {
     let mut ri = base.clone();
     match field.id {
         FieldId::DodTaxpayer => ri.header.taxpayer_died_during_year = Some(true),
-        FieldId::DodSpouse => ri.header.spouse_died_during_year = Some(true),
+        // ★ MFJ too: `DodSpouse` is MFJ-gated (the only status whose spouse §63(f) box is counted),
+        //   so a spouse `Person` plus the death gate is no longer enough to make it live.
+        FieldId::DodSpouse => {
+            ri.filing_status = btctax_core::tax::types::FilingStatus::Mfj;
+            ri.header.spouse_died_during_year = Some(true);
+        }
+        // Likewise the spouse death GATE itself.
+        FieldId::SpouseDiedDuringYear => {
+            ri.filing_status = btctax_core::tax::types::FilingStatus::Mfj;
+        }
         // ★ The FBAR sub-question is live only under a Schedule B 7a "Yes"; a set on a non-live
         //   question correctly refuses with `NoSuchRow`, so the fixture must make it live.
         FieldId::FbarFilingRequired => ri.foreign_accounts = Some(true),
@@ -525,15 +534,15 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
     // §911/931/933 exclusion gate + the four MAGI add-backs it gates (Schedule 1-A Part I lines
     // 2a-2d / the SALT worksheet's lines 3a-3d — one quantity, five phase-outs).
     (FieldId::DeclHasIncomeExclusion, "has_income_exclusion"),
+    (FieldId::FbarFilingRequired, "fbar_filing_required"),
     (
-        FieldId::DeclTaxpayerDiedDuringYear,
+        FieldId::TaxpayerDiedDuringYear,
         "header.taxpayer_died_during_year",
     ),
     (
-        FieldId::DeclSpouseDiedDuringYear,
+        FieldId::SpouseDiedDuringYear,
         "header.spouse_died_during_year",
     ),
-    (FieldId::FbarFilingRequired, "fbar_filing_required"),
     (FieldId::ExclPuertoRico, "excluded_puerto_rico_income"),
     (FieldId::Excl2555L45, "form_2555_line45"),
     (FieldId::Excl2555L50, "form_2555_line50"),

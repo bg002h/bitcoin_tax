@@ -51,8 +51,6 @@ can_be_claimed_as_dependent_spouse = false
 can_be_claimed_as_dependent_taxpayer = false
 presidential_fund_spouse = false
 presidential_fund_taxpayer = false
-spouse_died_during_year = false
-taxpayer_died_during_year = false
 
 [[header.dependents]]
 date_of_birth = [2012, 106]

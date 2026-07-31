@@ -737,6 +737,10 @@ mod tests {
             blind: Some(true),
             ..person("John", "Doe", "123456789")
         };
+        // ★ The age-65 box is now CLAIMED, not defaulted: since the §G-9 death gates became class-(B)
+        // skippables, `is_aged` forgoes the addition while "did you die during the year?" is unanswered.
+        // A fixture that wants the box must say so, exactly as it must state `blind` and the DOB.
+        ri.header.taxpayer_died_during_year = Some(false);
         ri.header.spouse = Some(Person {
             blind: Some(true),
             ..person("Jane", "Doe", "987654321")
