@@ -41,9 +41,10 @@ const CENSUSED: &[&str] = &[
     "f8283",
     "f1040",
     "f1040s1",
+    "f1040sc",
 ];
 
-const CENSUS_NOT_YET_WRITTEN: &[&str] = &["f1040sc"];
+const CENSUS_NOT_YET_WRITTEN: &[&str] = &[];
 
 /// Every FQN-shaped string in a map file, split into the mapped set and the `[census]` set.
 ///
@@ -153,7 +154,7 @@ fn recorded_gaps_may_only_shrink() {
     // one radio) for ONE logical question. Fields is the mechanical unit — a question-level count
     // would need someone to decide what "one question" means, which is exactly the judgement this
     // ratchet is meant to avoid depending on.
-    const GAPS: usize = 12;
+    const GAPS: usize = 18;
 
     let mut found = Vec::new();
     for stem in CENSUSED {
@@ -228,11 +229,16 @@ fn the_two_lists_partition_every_form() {
 /// ★★ **The ratchet may only shrink.**
 #[test]
 fn the_uncensused_list_may_only_shrink() {
+    // ★★ THE RATCHET IS CLOSED (2026-07-30). It ran 15 → 0: every form `fill_full_return` can emit
+    // now has a `[census]` section, so the bound is EMPTINESS, not a slack allowance. A 16th form
+    // cannot slip in uncensused — `the_two_lists_partition_every_form` forces it onto one of the two
+    // lists, this assertion rejects the uncensused one, and `census_accounts_for_every_field` rejects
+    // the other unless its fields are actually accounted for. Both routes fail closed.
     assert!(
-        CENSUS_NOT_YET_WRITTEN.len() <= 8,
-        "the uncensused list has GROWN to {} — a new form must arrive with its census, or the \
-         count of unaccounted fields silently rises",
-        CENSUS_NOT_YET_WRITTEN.len()
+        CENSUS_NOT_YET_WRITTEN.is_empty(),
+        "the uncensused list is no longer empty ({:?}) — every form must arrive WITH its census, or \
+         the count of unaccounted fields silently rises again",
+        CENSUS_NOT_YET_WRITTEN
     );
 
     // ★ Nothing may be both censused and listed as uncensused — a stale excuse is how a closed gap

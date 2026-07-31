@@ -60,3 +60,190 @@ line31 = "topmostSubform[0].Page1[0].f1_46[0]"   # "Net profit or (loss)…" →
 [identity]
 name = "topmostSubform[0].Page1[0].f1_1[0]"
 ssn  = "topmostSubform[0].Page1[0].f1_2[0]"
+
+# ── §G-13 FIELD-PROVENANCE CENSUS ────────────────────────────────────────────────────────────────
+# Every AcroForm field on this PDF the map above does not fill, with the decision that leaves it blank.
+# `unmodeled` = btctax models no input that could reach the line; `artifact` = not an entry the filer
+# makes; `gap` = the line IS reachable and nothing populates it (a defect).
+#
+# ★★★ THE AGGREGATE-EXPENSE PROBLEM — read this before the entries. `ScheduleCInputs` carries a single
+#     `expenses: Usd` with NO category breakdown. So btctax writes line 28 ("Total expenses… Add lines
+#     8 through 27b") while every one of lines 8 through 27b is blank: the filed form shows a total
+#     whose addends are all empty, which is the one place on this return where a mapped line and its
+#     censused inputs do not cross-foot. Contrast Schedule 3 line 7 and Schedule 2 line 18, which are
+#     blank BECAUSE their addends are.
+#
+#     Two consequences follow mechanically and are not otherwise visible:
+#       - Line 9 (car and truck expenses) stays blank even when the aggregate includes them, so
+#         Part IV — which the form gates on "claiming car or truck expenses on line 9" — is never
+#         triggered, and lines 43-47b go unasked.
+#       - Line 24b (deductible meals) is §274(n)-limited to 50%. A single aggregate offers the filer
+#         no place to apply that limit and no prompt that it exists.
+#     Each individual cell below is honestly accounted for ("no category breakdown is collected"),
+#     which is why they are `unmodeled` and not `gap` — but the design weakness is recorded here
+#     rather than left implicit across twenty near-identical reasons.
+#
+# ★★ THREE GAPS on this form (6 fields) — lines G, I and J, all Yes/No declarations asked of EVERY
+#    Schedule C filer that btctax never asks. Line G's is the one with a tax effect; see below.
+[census]
+
+# ── Header lines C, D, E, F(3) ───────────────────────────────────────────────────────────────────
+# btctax maps line A (principal business), line B (NAICS) and line F's Cash/Accrual pair. The rest is
+# optional identification a sole proprietor may leave blank: the form itself says of line C "If no
+# separate business name, leave blank."
+"topmostSubform[0].Page1[0].f1_5[0]"          = { line = "C", rule = "unmodeled", reason = "Business name — ScheduleCInputs carries a business_description (line A) but no separate trade name. The form directs a filer with no separate business name to leave this blank." }
+"topmostSubform[0].Page1[0].DComb[0].f1_6[0]" = { line = "D", rule = "unmodeled", reason = "Employer ID number (/MaxLen 9, a comb) — btctax collects no EIN for the proprietorship; a sole proprietor without employees files under their SSN." }
+"topmostSubform[0].Page1[0].f1_7[0]"          = { line = "E street", rule = "unmodeled", reason = "Business address — not collected; ScheduleCInputs carries owner, description, NAICS, accounting method and expenses only." }
+"topmostSubform[0].Page1[0].f1_8[0]"          = { line = "E city",   rule = "unmodeled", reason = "Business city, state and ZIP — same." }
+"topmostSubform[0].Page1[0].c1_1[2]"          = { line = "F(3)",     rule = "unmodeled", reason = "Accounting method \"Other (specify)\" — AccountingMethod is a two-variant enum (Cash/Accrual), both mapped above, so the third box is unreachable by construction." }
+"topmostSubform[0].Page1[0].f1_9[0]"          = { line = "F(3) text", rule = "unmodeled", reason = "The write-in naming that other method — same." }
+
+# ── ★★★ GAP — line G, material participation ────────────────────────────────────────────────────
+# "Did you 'materially participate' in the operation of this business during 2024? If 'No,' see
+# instructions for limit on losses."
+#
+# btctax never asks, and the answer changes the TAX — not only the loss limit the line's own caption
+# mentions. Adjudicated against the primary sources rather than inferred:
+#
+#   - Form 8960 (2024) line 4a reads "Rental real estate, royalties, partnerships, S corporations,
+#     trusts, TRADES OR BUSINESSES, etc."
+#   - i8960, What's New, verbatim: "Trade or business income subject to net investment income tax
+#     (NIIT). Line 4a of Form 8960 was amended to bring attention to certain income reported on
+#     Schedule C (Form 1040) and Schedule E (Form 1040) that is subject to NIIT. This change was made
+#     … to better reflect section 1411(c)(2)."
+#   - i8960, Passive activities: "A passive activity includes any trade or business in which you don't
+#     materially participate."
+#
+# So a sole proprietor who does NOT materially participate has passive business income that IS §1411
+# net investment income. btctax's NII is `taxable_interest + ordinary_dividends + net_capital_gain +
+# crypto_lending_interest` (other_taxes.rs:232) — Schedule C income never enters it, and Form 8960
+# line 4a is left blank. That is correct ONLY under the answer btctax never obtained.
+#
+# ★★ DIRECTION: UNDERSTATEMENT. The NIIT on that income is simply not computed. Close by adding a
+#    material-participation QuestionId and routing a "No" into Form 8960 line 4a.
+"topmostSubform[0].Page1[0].c1_2[0]" = { line = "G Yes", rule = "gap", reason = "\"Did you materially participate in the operation of this business during 2024?\" — never asked. A No makes the business passive under §469, so its income is §1411 NII (i8960: line 4a was amended to bring attention to Schedule C income subject to NIIT). btctax excludes Schedule C income from NII unconditionally, understating the NIIT." }
+"topmostSubform[0].Page1[0].c1_2[1]" = { line = "G No",  rule = "gap", reason = "The No half of the same unasked question — and the half that would change the tax." }
+
+# ── Line H ──────────────────────────────────────────────────────────────────────────────────────
+"topmostSubform[0].Page1[0].c1_3[0]" = { line = "H", rule = "unmodeled", reason = "\"If you started or acquired this business during 2024, check here\" — btctax collects no business start date. Informational: it flags a first-year business for the IRS and changes no figure on the return." }
+
+# ── ★★ GAP — lines I and J, the Form 1099 filing declarations ────────────────────────────────────
+# "I  Did you make any payments in 2024 that would require you to file Form(s) 1099?"
+# "J  If 'Yes,' did you or will you file required Form(s) 1099?"
+#
+# Asked of EVERY Schedule C filer, never asked by btctax, so both print blank and read as "No". This
+# is the same class as the Schedule B 7a FBAR pair already recorded as a gap: no figure on THIS return
+# changes, but the declaration carries its own exposure — §6721/§6722 penalties for failing to file
+# and furnish information returns. A business that paid $600+ to a contractor answers Yes to both.
+#
+# ★ Note the interaction with the aggregate-expense problem above: line 11 (contract labor) is exactly
+#   the expense that triggers a 1099-NEC, and it is one of the twenty category lines btctax cannot
+#   populate — so nothing in the return even hints the question applies.
+"topmostSubform[0].Page1[0].c1_4[0]" = { line = "I Yes", rule = "gap", reason = "\"Did you make any payments in 2024 that would require you to file Form(s) 1099?\" — never asked; a compliance declaration with §6721/§6722 exposure, the same class as the Schedule B FBAR pair." }
+"topmostSubform[0].Page1[0].c1_4[1]" = { line = "I No",  rule = "gap", reason = "The No half of the same unasked question." }
+"topmostSubform[0].Page1[0].c1_5[0]" = { line = "J Yes", rule = "gap", reason = "\"If 'Yes,' did you or will you file required Form(s) 1099?\" — never asked; the follow-on declaration, unanswerable while I is unanswered." }
+"topmostSubform[0].Page1[0].c1_5[1]" = { line = "J No",  rule = "gap", reason = "The No half of the same unasked question." }
+
+# ── Part I lines 1 (checkbox), 2, 4, 6 ──────────────────────────────────────────────────────────
+"topmostSubform[0].Page1[0].c1_6[0]" = { line = "1 stat emp", rule = "unmodeled", reason = "\"Check the box if this income was reported to you on Form W-2 and the 'Statutory employee' box on that form was checked.\" btctax collects W-2s and Schedule C separately and never links them. ★ Direction is safe: a statutory employee's income already had FICA withheld and is NOT subject to SE tax, so failing to check the box makes btctax compute SE tax that is not owed — an overstatement." }
+"topmostSubform[0].Page1[0].f1_11[0]" = { line = "2", rule = "unmodeled", reason = "Returns and allowances — not collected; line 3 (mapped) therefore equals line 1." }
+"topmostSubform[0].Page1[0].f1_13[0]" = { line = "4", rule = "unmodeled", reason = "Cost of goods sold (from line 42) — btctax models no inventory, so all of Part III is dead and line 5 (mapped) equals line 3." }
+"topmostSubform[0].Page1[0].f1_15[0]" = { line = "6", rule = "unmodeled", reason = "Other income, including federal and state gasoline or fuel tax credit or refund — not collected (matching Schedule 3 line 12, Form 4136); line 7 (mapped) equals line 5." }
+
+# ── Part II lines 8-17 (left column) — see the aggregate-expense note above ─────────────────────
+"topmostSubform[0].Page1[0].Lines8-17[0].f1_17[0]" = { line = "8",   rule = "unmodeled", reason = "Advertising — no expense-category breakdown is collected; the aggregate appears on line 28." }
+"topmostSubform[0].Page1[0].Lines8-17[0].f1_18[0]" = { line = "9",   rule = "unmodeled", reason = "Car and truck expenses — same. ★ Because this stays blank, Part IV (which the form gates on claiming line 9) is never triggered." }
+"topmostSubform[0].Page1[0].Lines8-17[0].f1_19[0]" = { line = "10",  rule = "unmodeled", reason = "Commissions and fees — same." }
+"topmostSubform[0].Page1[0].Lines8-17[0].f1_20[0]" = { line = "11",  rule = "unmodeled", reason = "Contract labor — same. ★ This is the expense that triggers the Form 1099-NEC obligation lines I and J ask about." }
+"topmostSubform[0].Page1[0].Lines8-17[0].f1_21[0]" = { line = "12",  rule = "unmodeled", reason = "Depletion — same." }
+"topmostSubform[0].Page1[0].Lines8-17[0].f1_22[0]" = { line = "13",  rule = "unmodeled", reason = "Depreciation and §179 expense deduction — same; btctax emits no Form 4562 and models no depreciable property." }
+"topmostSubform[0].Page1[0].Lines8-17[0].f1_23[0]" = { line = "14",  rule = "unmodeled", reason = "Employee benefit programs (other than on line 19) — same." }
+"topmostSubform[0].Page1[0].Lines8-17[0].f1_24[0]" = { line = "15",  rule = "unmodeled", reason = "Insurance (other than health) — same." }
+"topmostSubform[0].Page1[0].Lines8-17[0].f1_25[0]" = { line = "16a", rule = "unmodeled", reason = "Mortgage interest paid to banks etc. — same." }
+"topmostSubform[0].Page1[0].Lines8-17[0].f1_26[0]" = { line = "16b", rule = "unmodeled", reason = "Other interest — same." }
+"topmostSubform[0].Page1[0].Lines8-17[0].f1_27[0]" = { line = "17",  rule = "unmodeled", reason = "Legal and professional services — same." }
+
+# ── Part II lines 18-27b (right column) ─────────────────────────────────────────────────────────
+"topmostSubform[0].Page1[0].Lines18-27[0].f1_28[0]" = { line = "18",  rule = "unmodeled", reason = "Office expense — no expense-category breakdown is collected." }
+"topmostSubform[0].Page1[0].Lines18-27[0].f1_29[0]" = { line = "19",  rule = "unmodeled", reason = "Pension and profit-sharing plans — same (its above-the-line twin, Schedule 1 line 16, is likewise uncollected)." }
+"topmostSubform[0].Page1[0].Lines18-27[0].f1_30[0]" = { line = "20a", rule = "unmodeled", reason = "Rent or lease of vehicles, machinery and equipment — same." }
+"topmostSubform[0].Page1[0].Lines18-27[0].f1_31[0]" = { line = "20b", rule = "unmodeled", reason = "Rent or lease of other business property — same." }
+"topmostSubform[0].Page1[0].Lines18-27[0].f1_32[0]" = { line = "21",  rule = "unmodeled", reason = "Repairs and maintenance — same." }
+"topmostSubform[0].Page1[0].Lines18-27[0].f1_33[0]" = { line = "22",  rule = "unmodeled", reason = "Supplies (not included in Part III) — same." }
+"topmostSubform[0].Page1[0].Lines18-27[0].f1_34[0]" = { line = "23",  rule = "unmodeled", reason = "Taxes and licenses — same." }
+"topmostSubform[0].Page1[0].Lines18-27[0].f1_35[0]" = { line = "24a", rule = "unmodeled", reason = "Travel — same." }
+"topmostSubform[0].Page1[0].Lines18-27[0].f1_36[0]" = { line = "24b", rule = "unmodeled", reason = "Deductible meals — same. ★ This line is §274(n)-limited to 50%; a single aggregate expense figure gives the filer no place to apply that limit and no prompt that it exists." }
+"topmostSubform[0].Page1[0].Lines18-27[0].f1_37[0]" = { line = "25",  rule = "unmodeled", reason = "Utilities — same." }
+"topmostSubform[0].Page1[0].Lines18-27[0].f1_38[0]" = { line = "26",  rule = "unmodeled", reason = "Wages (less employment credits) — same." }
+"topmostSubform[0].Page1[0].Lines18-27[0].f1_39[0]" = { line = "27a", rule = "unmodeled", reason = "Other expenses (from line 48) — same; Part V, which would itemise them, is likewise unpopulated." }
+"topmostSubform[0].Page1[0].Lines18-27[0].f1_40[0]" = { line = "27b", rule = "unmodeled", reason = "Energy efficient commercial buildings deduction (Form 7205) — not modelled." }
+
+# ── Line 30 (business use of home) and line 32 (at-risk) ────────────────────────────────────────
+"topmostSubform[0].Page1[0].Line30_ReadOrder[0].f1_43[0]" = { line = "30(a)", rule = "unmodeled", reason = "Simplified-method filers: total square footage of your home — btctax models no home-office deduction and emits no Form 8829." }
+"topmostSubform[0].Page1[0].Line30_ReadOrder[0].f1_44[0]" = { line = "30(b)", rule = "unmodeled", reason = "The part of your home used for business — same." }
+"topmostSubform[0].Page1[0].f1_45[0]"                     = { line = "30",    rule = "unmodeled", reason = "Expenses for business use of your home — same; line 31 (mapped) therefore equals line 29." }
+"topmostSubform[0].Page1[0].c1_7[0]" = { line = "32a", rule = "unmodeled", reason = "\"All investment is at risk\" — line 32 is completed only if line 31 is a LOSS, and a Schedule C net loss refuses the return outright (RefuseReason::ScheduleCLoss). Structurally unreachable, not merely unmodelled." }
+"topmostSubform[0].Page1[0].c1_7[1]" = { line = "32b", rule = "unmodeled", reason = "\"Some investment is not at risk\" — same; and this branch would additionally require Form 6198." }
+
+# ── Part III — Cost of Goods Sold (lines 33-42) ─────────────────────────────────────────────────
+# Dead by construction: btctax models no inventory, so line 4 is blank and Part III has nothing to
+# compute. Line 34's Yes/No is conditional on having opening and closing inventory, so it is not an
+# unasked declaration in the sense lines G/I/J are — there is no inventory for it to describe.
+"topmostSubform[0].Page2[0].c2_1[0]" = { line = "33a", rule = "unmodeled", reason = "Closing-inventory valuation method: Cost — btctax models no inventory (all of Part III is dead)." }
+"topmostSubform[0].Page2[0].c2_2[0]" = { line = "33b", rule = "unmodeled", reason = "Lower of cost or market — same." }
+"topmostSubform[0].Page2[0].c2_3[0]" = { line = "33c", rule = "unmodeled", reason = "Other (attach explanation) — same." }
+"topmostSubform[0].Page2[0].c2_4[0]" = { line = "34 Yes", rule = "unmodeled", reason = "\"Was there any change in determining quantities, costs, or valuations between opening and closing inventory?\" — conditional on having inventory, which btctax never models; there is nothing for it to describe." }
+"topmostSubform[0].Page2[0].c2_4[1]" = { line = "34 No",  rule = "unmodeled", reason = "The No half of the same inapplicable question." }
+"topmostSubform[0].Page2[0].f2_1[0]" = { line = "35", rule = "unmodeled", reason = "Inventory at beginning of year — no inventory modelled." }
+"topmostSubform[0].Page2[0].f2_2[0]" = { line = "36", rule = "unmodeled", reason = "Purchases less cost of items withdrawn for personal use — same." }
+"topmostSubform[0].Page2[0].f2_3[0]" = { line = "37", rule = "unmodeled", reason = "Cost of labor — same." }
+"topmostSubform[0].Page2[0].f2_4[0]" = { line = "38", rule = "unmodeled", reason = "Materials and supplies — same." }
+"topmostSubform[0].Page2[0].f2_5[0]" = { line = "39", rule = "unmodeled", reason = "Other costs — same." }
+"topmostSubform[0].Page2[0].f2_6[0]" = { line = "40", rule = "unmodeled", reason = "Add lines 35 through 39 — dead with all addends blank." }
+"topmostSubform[0].Page2[0].f2_7[0]" = { line = "41", rule = "unmodeled", reason = "Inventory at end of year — same." }
+"topmostSubform[0].Page2[0].f2_8[0]" = { line = "42", rule = "unmodeled", reason = "Cost of goods sold — dead; this is the source for line 4, which is itself blank." }
+
+# ── Part IV — Information on Your Vehicle (lines 43-47b) ────────────────────────────────────────
+# The form gates this part: "Complete this part only if you are claiming car or truck expenses on line
+# 9 and are not required to file Form 4562." Line 9 is blank (no category breakdown), so the gate never
+# opens. ★ That is a consequence of the aggregate-expense design, not an independent decision — see
+# the note at the top of this section.
+"topmostSubform[0].Page2[0].f2_9[0]"  = { line = "43 MM", rule = "unmodeled", reason = "Month the vehicle was placed in service (/MaxLen 2) — Part IV is gated on line 9, which is blank." }
+"topmostSubform[0].Page2[0].f2_10[0]" = { line = "43 DD", rule = "unmodeled", reason = "Day (/MaxLen 2) — same." }
+"topmostSubform[0].Page2[0].f2_11[0]" = { line = "43 YYYY", rule = "unmodeled", reason = "Year (/MaxLen 4) — same." }
+"topmostSubform[0].Page2[0].f2_12[0]" = { line = "44a", rule = "unmodeled", reason = "Business miles — same; btctax collects no mileage." }
+"topmostSubform[0].Page2[0].f2_13[0]" = { line = "44b", rule = "unmodeled", reason = "Commuting miles — same." }
+"topmostSubform[0].Page2[0].f2_14[0]" = { line = "44c", rule = "unmodeled", reason = "Other miles — same." }
+"topmostSubform[0].Page2[0].c2_5[0]" = { line = "45 Yes", rule = "unmodeled", reason = "\"Was your vehicle available for personal use during off-duty hours?\" — Part IV is gated on line 9, which is blank; no vehicle is modelled." }
+"topmostSubform[0].Page2[0].c2_5[1]" = { line = "45 No",  rule = "unmodeled", reason = "The No half — same." }
+"topmostSubform[0].Page2[0].c2_6[0]" = { line = "46 Yes", rule = "unmodeled", reason = "\"Do you (or your spouse) have another vehicle available for personal use?\" — same gate." }
+"topmostSubform[0].Page2[0].c2_6[1]" = { line = "46 No",  rule = "unmodeled", reason = "The No half — same." }
+"topmostSubform[0].Page2[0].c2_7[0]" = { line = "47a Yes", rule = "unmodeled", reason = "\"Do you have evidence to support your deduction?\" — same gate; it substantiates the line 9 vehicle deduction, which is not claimed." }
+"topmostSubform[0].Page2[0].c2_7[1]" = { line = "47a No",  rule = "unmodeled", reason = "The No half — same." }
+"topmostSubform[0].Page2[0].c2_8[0]" = { line = "47b Yes", rule = "unmodeled", reason = "\"If 'Yes,' is the evidence written?\" — same gate, and dead while 47a is unanswered." }
+"topmostSubform[0].Page2[0].c2_8[1]" = { line = "47b No",  rule = "unmodeled", reason = "The No half — same." }
+
+# ── Part V — Other Expenses (the 9 write-in rows and line 48) ───────────────────────────────────
+# "List below business expenses not included on lines 8-26, line 27b, or line 30." btctax has no
+# expense-category breakdown to list and asserts no free-text expense, the same posture it takes on
+# every other write-in line across the return (Schedule 1 8z/24z, Schedule 2 1y/17z, Schedule 3
+# 6z/13z). Line 48 feeds line 27a, which is itself blank.
+"topmostSubform[0].Page2[0].PartVTable[0].Item1[0].f2_15[0]" = { line = "V.1 desc",  rule = "unmodeled", reason = "Other-expense description — no expense-category breakdown is collected and btctax asserts no free-text expense." }
+"topmostSubform[0].Page2[0].PartVTable[0].Item1[0].f2_16[0]" = { line = "V.1 amt",   rule = "unmodeled", reason = "Its amount — same." }
+"topmostSubform[0].Page2[0].PartVTable[0].Item2[0].f2_17[0]" = { line = "V.2 desc",  rule = "unmodeled", reason = "Same — row 2." }
+"topmostSubform[0].Page2[0].PartVTable[0].Item2[0].f2_18[0]" = { line = "V.2 amt",   rule = "unmodeled", reason = "Same — row 2." }
+"topmostSubform[0].Page2[0].PartVTable[0].Item3[0].f2_19[0]" = { line = "V.3 desc",  rule = "unmodeled", reason = "Same — row 3." }
+"topmostSubform[0].Page2[0].PartVTable[0].Item3[0].f2_20[0]" = { line = "V.3 amt",   rule = "unmodeled", reason = "Same — row 3." }
+"topmostSubform[0].Page2[0].PartVTable[0].Item4[0].f2_21[0]" = { line = "V.4 desc",  rule = "unmodeled", reason = "Same — row 4." }
+"topmostSubform[0].Page2[0].PartVTable[0].Item4[0].f2_22[0]" = { line = "V.4 amt",   rule = "unmodeled", reason = "Same — row 4." }
+"topmostSubform[0].Page2[0].PartVTable[0].Item5[0].f2_23[0]" = { line = "V.5 desc",  rule = "unmodeled", reason = "Same — row 5." }
+"topmostSubform[0].Page2[0].PartVTable[0].Item5[0].f2_24[0]" = { line = "V.5 amt",   rule = "unmodeled", reason = "Same — row 5." }
+"topmostSubform[0].Page2[0].PartVTable[0].Item6[0].f2_25[0]" = { line = "V.6 desc",  rule = "unmodeled", reason = "Same — row 6." }
+"topmostSubform[0].Page2[0].PartVTable[0].Item6[0].f2_26[0]" = { line = "V.6 amt",   rule = "unmodeled", reason = "Same — row 6." }
+"topmostSubform[0].Page2[0].PartVTable[0].Item7[0].f2_27[0]" = { line = "V.7 desc",  rule = "unmodeled", reason = "Same — row 7." }
+"topmostSubform[0].Page2[0].PartVTable[0].Item7[0].f2_28[0]" = { line = "V.7 amt",   rule = "unmodeled", reason = "Same — row 7." }
+"topmostSubform[0].Page2[0].PartVTable[0].Item8[0].f2_29[0]" = { line = "V.8 desc",  rule = "unmodeled", reason = "Same — row 8." }
+"topmostSubform[0].Page2[0].PartVTable[0].Item8[0].f2_30[0]" = { line = "V.8 amt",   rule = "unmodeled", reason = "Same — row 8." }
+"topmostSubform[0].Page2[0].PartVTable[0].Item9[0].f2_31[0]" = { line = "V.9 desc",  rule = "unmodeled", reason = "Same — row 9." }
+"topmostSubform[0].Page2[0].PartVTable[0].Item9[0].f2_32[0]" = { line = "V.9 amt",   rule = "unmodeled", reason = "Same — row 9." }
+"topmostSubform[0].Page2[0].f2_33[0]"                        = { line = "48", rule = "unmodeled", reason = "\"Total other expenses. Enter here and on line 27a\" — dead with every Part V row blank." }
