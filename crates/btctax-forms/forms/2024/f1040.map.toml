@@ -166,3 +166,128 @@ ssn          = "topmostSubform[0].Page1[0].Table_Dependents[0].Row4[0].f1_30[0]"
 relationship = "topmostSubform[0].Page1[0].Table_Dependents[0].Row4[0].f1_31[0]"
 ctc          = { field = "topmostSubform[0].Page1[0].Table_Dependents[0].Row4[0].c1_20[0]", on = "1" }
 odc          = { field = "topmostSubform[0].Page1[0].Table_Dependents[0].Row4[0].c1_21[0]", on = "1" }
+
+# ── §G-13 FIELD-PROVENANCE CENSUS ────────────────────────────────────────────────────────────────
+# Every AcroForm field on this PDF the map above does not fill, with the decision that leaves it blank.
+# `unmodeled` = btctax models no input that could reach the line; `artifact` = not an entry the filer
+# makes; `gap` = the line IS reachable and nothing populates it (a defect).
+#
+# ★ This form is where the census's own module doc points for its motivating example — the comment at
+#   line 122 above, recording in PROSE that the spouse's IP PIN cell "exists (f2_36) but ReturnInputs
+#   does not capture one, so it is left BLANK, never guessed". Censusing it makes that record checkable.
+#
+# ★★ DIRECTION — lines 1b through 1h are INCOME. Unlike Schedule 3's credits, a wrongly-blank income
+#    line UNDERSTATES. None of these income streams is modelled at all, so no value could have been
+#    carried; that is a product scope boundary (btctax emits a BTC return), recorded plainly rather
+#    than described as conservative. The two adjacent to modelled behaviour, 1c and 1g, are called out
+#    individually below.
+[census]
+
+# ── Header: the fiscal-year row ──────────────────────────────────────────────────────────────────
+# "For the year Jan. 1–Dec. 31, 2024, or other tax year beginning ___, 2024, ending ___, 20__".
+# btctax is calendar-year throughout: `tax_year` is a single i32 and every table, bracket and
+# threshold is keyed to it. A fiscal-year filer is not expressible, so the printed default stands.
+"topmostSubform[0].Page1[0].f1_01[0]" = { line = "FY begin", rule = "unmodeled", reason = "Fiscal-year beginning date — btctax models calendar-year returns only (tax_year is a single i32)." }
+"topmostSubform[0].Page1[0].f1_02[0]" = { line = "FY end",   rule = "unmodeled", reason = "Fiscal-year ending date — same." }
+"topmostSubform[0].Page1[0].f1_03[0]" = { line = "FY end yr", rule = "unmodeled", reason = "The two-digit year of the fiscal-year end (/MaxLen 2) — same." }
+
+# ── Header: the foreign-address row ──────────────────────────────────────────────────────────────
+"topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_15[0]" = { line = "foreign country",  rule = "unmodeled", reason = "Foreign country name — btctax models a domestic filer address (street/city/state/ZIP are mapped above)." }
+"topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_16[0]" = { line = "foreign province", rule = "unmodeled", reason = "Foreign province/state/county — same." }
+"topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_17[0]" = { line = "foreign postcode", rule = "unmodeled", reason = "Foreign postal code — same." }
+
+# ── Filing status: the nonresident-alien-spouse election ─────────────────────────────────────────
+# "If treating a nonresident alien or dual-status alien spouse as a U.S. resident for the entire tax
+# year, check the box and enter their name." This is the §6013(g)/(h) election — the SAME election
+# censused as unmodeled on Form 8960 (its Part I checkboxes). btctax offers no such election, so the
+# box stays unchecked and the name cell empty. (f1_18 at y=534, the MFS/HOH/QSS name, IS mapped.)
+"topmostSubform[0].Page1[0].c1_4[0]"  = { line = "NRA spouse box",  rule = "unmodeled", reason = "§6013(g)/(h) election to treat a nonresident-alien spouse as a U.S. resident — btctax offers no such election (consistent with the Form 8960 Part I census)." }
+"topmostSubform[0].Page1[0].f1_19[0]" = { line = "NRA spouse name", rule = "unmodeled", reason = "The name of that spouse — same election, never made." }
+
+# ── Lines 1b-1i: earned income btctax cannot see ─────────────────────────────────────────────────
+"topmostSubform[0].Page1[0].f1_33[0]" = { line = "1b", rule = "unmodeled", reason = "Household employee wages not reported on Form(s) W-2 — btctax models no household employment (matching Schedule 2 line 9, Schedule H)." }
+"topmostSubform[0].Page1[0].f1_34[0]" = { line = "1c", rule = "unmodeled", reason = "Tip income not reported on line 1a. ★ This is the line Schedule 2 line 5's census flags forward: btctax collects W-2 box 7 (tips already reported to the employer) and refuses on box 8 (allocated tips), but never asks whether the filer received tips withheld from the employer. Such tips are absent from the W-2 by definition, so no import can supply them — the income is outside what btctax can see, in the understatement direction." }
+"topmostSubform[0].Page1[0].f1_35[0]" = { line = "1d", rule = "unmodeled", reason = "Medicaid waiver payments not reported on Form(s) W-2 (Notice 2014-7) — not modelled." }
+"topmostSubform[0].Page1[0].f1_36[0]" = { line = "1e", rule = "unmodeled", reason = "Taxable dependent care benefits from Form 2441 line 26 — W-2 box 10 dependent-care benefits REFUSE the return outright (RefuseReason::DependentCareBenefit), so this line is fail-closed rather than silently blank." }
+"topmostSubform[0].Page1[0].f1_37[0]" = { line = "1f", rule = "unmodeled", reason = "Employer-provided adoption benefits from Form 8839 line 29 — not modelled (and would arrive as W-2 box 12 code T, which the INERT_BOX12_CODES allowlist refuses)." }
+"topmostSubform[0].Page1[0].f1_38[0]" = { line = "1g", rule = "unmodeled", reason = "Wages from Form 8919 line 6 — the worker-misclassification case. ★ Same reasoning as Schedule 2 line 6: such income reaches btctax as self-employment income and pays both halves via Schedule SE, so not filing Form 8919 overstates rather than understates." }
+"topmostSubform[0].Page1[0].f1_39[0]" = { line = "1h", rule = "unmodeled", reason = "Other earned income — a catch-all with no structured source; btctax asserts no unnamed income." }
+"topmostSubform[0].Page1[0].f1_40[0]" = { line = "1i", rule = "unmodeled", reason = "Nontaxable combat pay election — btctax models no combat pay and offers no election. ★ Note this cell sits in the MID column, not the amount column: line 1i feeds the EIC/IRA computations rather than the line 1z sum." }
+
+# ── Lines 4a-6c: retirement and Social Security income ───────────────────────────────────────────
+"topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_46[0]" = { line = "4a", rule = "unmodeled", reason = "IRA distributions (gross) — btctax models no IRA, matching Schedule 2 line 8 (Form 5329)." }
+"topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_47[0]" = { line = "4b", rule = "unmodeled", reason = "IRA distributions, taxable amount — same." }
+"topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_48[0]" = { line = "5a", rule = "unmodeled", reason = "Pensions and annuities (gross) — not modelled (matching Form 8960 line 3)." }
+"topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_49[0]" = { line = "5b", rule = "unmodeled", reason = "Pensions and annuities, taxable amount — same." }
+"topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_50[0]" = { line = "6a", rule = "unmodeled", reason = "Social security benefits (gross) — btctax collects no SSA-1099 and runs no §86 provisional-income worksheet." }
+"topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_51[0]" = { line = "6b", rule = "unmodeled", reason = "Social security benefits, taxable amount — same." }
+"topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].c1_22[0]" = { line = "6c", rule = "unmodeled", reason = "The §86(e) lump-sum election checkbox — dead with lines 6a/6b blank." }
+
+# ── Line 7's \"if not required\" checkbox ──────────────────────────────────────────────────────────
+"topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].c1_23[0]" = { line = "7 no-Sch-D box", rule = "unmodeled", reason = "\"Attach Schedule D if required. If not required, check here.\" btctax's returns report BTC dispositions on Form 8949, which Schedule D always summarises, so Schedule D is always required and this box is never checked. Leaving it blank is the correct positive statement, not an omission." }
+
+# ── Page 2, line 16: the alternative-tax-computation checkboxes ──────────────────────────────────
+"topmostSubform[0].Page2[0].c2_1[0]" = { line = "16 box 1", rule = "unmodeled", reason = "Form 8814 (parent's election to report a child's interest and dividends) — btctax models no child's income." }
+"topmostSubform[0].Page2[0].c2_2[0]" = { line = "16 box 2", rule = "unmodeled", reason = "Form 4972 (tax on lump-sum distributions) — no qualified plan distributions modelled." }
+"topmostSubform[0].Page2[0].c2_3[0]" = { line = "16 box 3", rule = "unmodeled", reason = "The write-in third box — btctax's line 16 comes from the ordinary tax computation with no alternative form." }
+"topmostSubform[0].Page2[0].f2_01[0]" = { line = "16 box 3 form", rule = "unmodeled", reason = "The form number for that write-in — same." }
+
+# ── Page 2, lines 27-30: refundable credits ──────────────────────────────────────────────────────
+"topmostSubform[0].Page2[0].f2_16[0]" = { line = "27", rule = "unmodeled", reason = "Earned income credit (EIC) — btctax computes no EIC; a forgone refundable credit can only overstate the tax." }
+"topmostSubform[0].Page2[0].f2_17[0]" = { line = "28", rule = "unmodeled", reason = "Additional child tax credit from Schedule 8812 — btctax emits no Schedule 8812 (line 19 above is likewise unmapped-by-absence of that schedule)." }
+"topmostSubform[0].Page2[0].f2_18[0]" = { line = "29", rule = "unmodeled", reason = "American opportunity credit from Form 8863 line 8 — no education expenses collected (matching Schedule 3 line 3)." }
+"topmostSubform[0].Page2[0].f2_19[0]" = { line = "30", rule = "artifact", reason = "\"Reserved for future use.\" A printed cell that takes no entry from anyone — the second such on the return after Schedule 3 line 6e." }
+
+# ── Page 2, lines 35a-36: how the refund is delivered ────────────────────────────────────────────
+# ★ btctax fills the refund AMOUNT (line 35a, f2_24) and deliberately declares no direct-deposit
+#   cells. Routing and account numbers are high-value financial PII that the return does not need in
+#   order to be correct — a filer who wants direct deposit writes them on the printed form. This is a
+#   positive privacy decision consistent with the vault posture, not an unfinished feature.
+"topmostSubform[0].Page2[0].c2_4[0]"                  = { line = "35a Form 8888", rule = "unmodeled", reason = "\"If Form 8888 is attached, check here\" — btctax splits no refund across accounts and emits no Form 8888." }
+"topmostSubform[0].Page2[0].RoutingNo[0].f2_25[0]"    = { line = "35b", rule = "unmodeled", reason = "Direct-deposit routing number (/MaxLen 9) — btctax collects no bank details; the refund amount is printed and the filer supplies deposit instructions themselves." }
+"topmostSubform[0].Page2[0].c2_5[0]"                  = { line = "35c checking", rule = "unmodeled", reason = "Account type: Checking — same decision." }
+"topmostSubform[0].Page2[0].c2_5[1]"                  = { line = "35c savings",  rule = "unmodeled", reason = "Account type: Savings — same decision." }
+"topmostSubform[0].Page2[0].AccountNo[0].f2_26[0]"    = { line = "35d", rule = "unmodeled", reason = "Direct-deposit account number (/MaxLen 17) — same decision." }
+"topmostSubform[0].Page2[0].f2_27[0]"                 = { line = "36", rule = "unmodeled", reason = "Amount of the overpayment applied to next year's estimated tax — btctax offers no such election; the whole overpayment is shown as refundable on line 35a." }
+
+# ── Page 2, line 38: the estimated-tax penalty ───────────────────────────────────────────────────
+"topmostSubform[0].Page2[0].f2_29[0]" = { line = "38", rule = "unmodeled", reason = "Estimated tax penalty — btctax emits no Form 2210 and computes no §6654 underpayment penalty. ★ Direction: this line increases what is owed, but the i1040 instructions make it optional (the IRS figures and bills the penalty if the filer leaves it blank), so a blank is the instructions' own default rather than a silent omission." }
+
+# ── Page 2: the Third Party Designee block ───────────────────────────────────────────────────────
+# ★★ These are an AUTHORISATION, not a computation: checking Yes grants a named person the right to
+#    discuss the return with the IRS. btctax has no one to name and must never grant that authority on
+#    a filer's behalf. Leaving the pair blank is the only honest state — the same principle as Form
+#    8283 Part V, where writing a third party's declaration would forge it.
+"topmostSubform[0].Page2[0].c2_6[0]" = { line = "designee Yes", rule = "unmodeled", reason = "\"Do you want to allow another person to discuss this return with the IRS?\" — btctax grants no third-party authorisation and collects no designee." }
+"topmostSubform[0].Page2[0].c2_6[1]" = { line = "designee No",  rule = "unmodeled", reason = "The No half of the same authorisation — btctax does not answer for the filer either way." }
+"topmostSubform[0].Page2[0].f2_30[0]" = { line = "designee name",  rule = "unmodeled", reason = "Designee's name — no designee is collected." }
+"topmostSubform[0].Page2[0].f2_31[0]" = { line = "designee phone", rule = "unmodeled", reason = "Designee's phone number — same." }
+"topmostSubform[0].Page2[0].f2_32[0]" = { line = "designee PIN",   rule = "unmodeled", reason = "Designee's personal identification number (/MaxLen 5) — same." }
+
+# ── Page 2: the Sign Here block ──────────────────────────────────────────────────────────────────
+# ★★ THE SPOUSE'S IP PIN — the census's own motivating example, now enforceable. The map (line 122)
+#    already recorded in prose that this cell "exists (f2_36) but ReturnInputs does not capture one,
+#    so it is left BLANK, never guessed". That is a correct decision and it stays.
+#
+#    ★ But the asymmetry is worth naming: the TAXPAYER's IP PIN *is* captured and written (f2_34).
+#      One member of a joint return is asked and the other is not. If the IRS issued the spouse an
+#      Identity Protection PIN, a return omitting it is REJECTED — no tax figure changes, but the
+#      filing fails. Closing it is one optional field on ReturnInputs. Recorded `unmodeled` because no
+#      input exists to write (which is the criterion), not because the gap is uninteresting.
+"topmostSubform[0].Page2[0].f2_36[0]" = { line = "spouse IP PIN", rule = "unmodeled", reason = "Spouse's Identity Protection PIN (/MaxLen 6) — ReturnInputs captures the taxpayer's (f2_34, mapped) but not the spouse's, so there is nothing to write and it is never guessed. ★ Asymmetric with the taxpayer's; a return omitting an issued spouse IP PIN is rejected." }
+"topmostSubform[0].Page2[0].f2_37[0]" = { line = "phone",  rule = "unmodeled", reason = "Filer's phone number — optional contact detail; ReturnInputs collects no phone number." }
+"topmostSubform[0].Page2[0].f2_38[0]" = { line = "email",  rule = "unmodeled", reason = "Filer's email address — same; and collecting one would add PII the return does not need." }
+
+# ── Page 2: Paid Preparer Use Only ───────────────────────────────────────────────────────────────
+# ★★ `artifact` in the strict sense — NOT AN ENTRY THE FILER MAKES. This block is completed and signed
+#    by a paid preparer, who attests under §6695 to their own PTIN and firm. btctax is software the
+#    filer runs themselves; it is not a paid preparer, has no PTIN, and writing into this block would
+#    assert a preparer relationship that does not exist. The whole block is correctly empty on a
+#    self-prepared return — the i1040 says so.
+"topmostSubform[0].Page2[0].f2_39[0]" = { line = "preparer name",    rule = "artifact", reason = "Preparer's name — btctax is not a paid preparer; a self-prepared return leaves this block blank." }
+"topmostSubform[0].Page2[0].f2_40[0]" = { line = "PTIN",             rule = "artifact", reason = "Preparer Tax Identification Number (/MaxLen 11) — btctax holds no PTIN and must not assert one." }
+"topmostSubform[0].Page2[0].c2_7[0]"  = { line = "preparer self-emp", rule = "artifact", reason = "\"Check if: Self-employed\" — a statement about the PREPARER's employment, not the filer's." }
+"topmostSubform[0].Page2[0].f2_41[0]" = { line = "firm name",        rule = "artifact", reason = "Preparer's firm name — no firm." }
+"topmostSubform[0].Page2[0].f2_42[0]" = { line = "firm phone",       rule = "artifact", reason = "Preparer's firm phone — no firm." }
+"topmostSubform[0].Page2[0].f2_43[0]" = { line = "firm address",     rule = "artifact", reason = "Preparer's firm address — no firm." }
+"topmostSubform[0].Page2[0].f2_44[0]" = { line = "firm EIN",         rule = "artifact", reason = "Preparer's firm EIN (/MaxLen 10) — no firm." }
