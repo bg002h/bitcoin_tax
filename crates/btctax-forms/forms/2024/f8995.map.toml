@@ -37,13 +37,13 @@ row1_qbi      = "topmostSubform[0].Page1[0].Table[0].Ln1A_Row1[0].f1_5[0]"  # (c
 #   line 1 rows ii-v (Ln1{B..E}_Row{2..5}) — v1 has exactly ONE trade or business (the crypto Schedule
 #     C), so only row 1i can ever be filled. A second business would need a second Schedule C, which the
 #     input model does not have.
-#   line 3 (f1_19) — a prior-year trade/business QBI loss carryforward. No v1 input exists: a Schedule C
-#     LOSS refuses upstream, so v1 never carries one forward.
 form = "f8995"
 year = 2024
 
 # ── Part I — Trade, Business, or Aggregation Information (table blank in v1) ─────────────────────
 line2  = "topmostSubform[0].Page1[0].ReadOrderSubForm[0].f1_18[0]"  # "Total qualified business income or (loss). Combine lines 1i through 1v, column (c)"
+# ★ PAREN box (x=[414.4,478.4], the MID-paren inset — same band as line 7). Positive MAGNITUDE only.
+line3  = "topmostSubform[0].Page1[0].f1_19[0]"   # "Qualified business net (loss) carryforward from the prior year"
 line4  = "topmostSubform[0].Page1[0].f1_20[0]"   # "Total qualified business income. Combine lines 2 and 3. If zero or less, enter -0-"
 line5  = "topmostSubform[0].Page1[0].f1_21[0]"   # "Qualified business income component. Multiply line 4 by 20% (0.20)"
 
@@ -102,4 +102,3 @@ ssn  = "topmostSubform[0].Page1[0].f1_2[0]"
 # `qbi.rs:64` already records the choice in prose — "no QBI loss carryforward in v1 (Form 8995
 # lines 3 and 16 stay blank)" — but a filer WITH a prior-year QBI loss is never asked, so nothing
 # stops the overstated deduction. Closes by collecting the carryforward.
-"topmostSubform[0].Page1[0].f1_19[0]" = { line = "3", rule = "gap", reason = "Qualified business net (loss) carryforward from the prior year — SUBTRACTED at line 4. btctax neither models nor asks for it, so a filer with a prior-year QBI loss gets an INFLATED deduction and UNDERSTATED tax. Closes by collecting it." }

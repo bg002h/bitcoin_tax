@@ -451,11 +451,18 @@ fn classify_qbi(c: &mut Census, q: &QbiInputs) {
     let QbiInputs {
         reit_ptp_carryforward_in: _,
         reit_ptp_carryforward_in_provenance,
+        qbi_carryforward_in: _,
+        qbi_carryforward_in_provenance,
     } = q;
     c.exempt(
         reit_ptp_carryforward_in_provenance,
         Class::NoTaxDirection,
         "§2.8: CarryProvenance — no print, no tax direction",
+    );
+    c.exempt(
+        qbi_carryforward_in_provenance,
+        Class::NoTaxDirection,
+        "§2.8: CarryProvenance (Form 8995 line 3) — no print, no tax direction",
     );
 }
 

@@ -1079,6 +1079,9 @@ pub struct Form8995Map {
     pub row1_qbi: MoneyCell,
     /// L2 — total QBI: "Combine lines 1i through 1v, column (c)". MID column.
     pub line2: MoneyCell,
+    /// ★ L3 — prior-year qualified business net (loss) carryforward, MID column (the paren inset,
+    /// x=[414.4,478.4], same band as line 7). ★ positive magnitude (paren box).
+    pub line3: MoneyCell,
     /// L4 — combine 2 and 3, MID column.
     pub line4: MoneyCell,
     /// L5 — QBI component (20% × 4), AMOUNT column.
@@ -1126,9 +1129,10 @@ impl Form8995Map {
         }
     }
     /// The 15 filled cells in printed reading order (strictly descending y on page 1).
-    pub fn lines(&self) -> [&MoneyCell; 15] {
+    pub fn lines(&self) -> [&MoneyCell; 16] {
         [
             &self.line2,
+            &self.line3,
             &self.line4,
             &self.line5,
             &self.line6,

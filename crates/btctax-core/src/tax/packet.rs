@@ -569,6 +569,7 @@ pub fn assemble_printed_forms(
         pi.business_qbi,
         pi.reit_dividends,
         pi.reit_ptp_carryforward_in,
+        pi.qbi_carryforward_in,
         pi.ti_before_qbi,
         pi.qbi_net_capital_gain,
     );

@@ -154,7 +154,12 @@ fn recorded_gaps_may_only_shrink() {
     // one radio) for ONE logical question. Fields is the mechanical unit — a question-level count
     // would need someone to decide what "one question" means, which is exactly the judgement this
     // ratchet is meant to avoid depending on.
-    const GAPS: usize = 13;
+    // 2026-07-30: 13 → 12. Form 8995 line 3 (`f1_19`) was a gap — the prior-year QBI loss
+    // carryforward, SUBTRACTED at line 4, that btctax neither modelled nor asked for, so a filer who
+    // had one got an INFLATED deduction and UNDERSTATED tax. Closed the way the message below
+    // demands: the field is now MAPPED and the input collected, and its census entry deleted because
+    // it is no longer unaccounted-for — not because the record was inconvenient.
+    const GAPS: usize = 12;
 
     let mut found = Vec::new();
     for stem in CENSUSED {

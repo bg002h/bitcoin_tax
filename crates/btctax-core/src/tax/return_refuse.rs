@@ -509,9 +509,16 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
     let QbiInputs {
         reit_ptp_carryforward_in,
         reit_ptp_carryforward_in_provenance: _,
+        qbi_carryforward_in,
+        qbi_carryforward_in_provenance: _,
     } = qbi;
     if neg(*reit_ptp_carryforward_in) {
         return Some("QBI REIT/PTP carryforward");
+    }
+    // ★ Form 8995 line 3 is a PARENTHESIZED box, so the input is a positive MAGNITUDE. A negative here
+    // would flip the sign twice and INCREASE the deduction — the understating direction.
+    if neg(*qbi_carryforward_in) {
+        return Some("QBI business-loss carryforward");
     }
     let Carryforward { short, long } = capital_loss_carryforward_in;
     if neg(*short) {

@@ -390,6 +390,22 @@ pub struct QbiInputs {
     pub reit_ptp_carryforward_in: Usd,
     #[serde(default)]
     pub reit_ptp_carryforward_in_provenance: CarryProvenance,
+    /// ★★ **Form 8995 line 3** — the prior-year qualified-business net **(loss)** carryforward, as a
+    /// POSITIVE MAGNITUDE (the form pre-prints the parentheses). Line 4 combines it with line 2, so it
+    /// REDUCES this year's QBI, and omitting it INFLATES the deduction and UNDERSTATES the tax.
+    ///
+    /// ★ It was left out on the reasoning that *"a Schedule C loss refuses upstream, so v1 never
+    /// carries one"* — a non-sequitur: `ScheduleCLoss` is about the CURRENT year, while line 3 is a
+    /// PRIOR-year figure the filer brings in from a return btctax did not compute. Exactly like
+    /// [`Self::reit_ptp_carryforward_in`] eight lines up, which the same function has always consumed.
+    ///
+    /// ★★ **NEITHER ORACLE VALIDATES THIS** (`two-oracle-model` §G-9's limit): OTS takes it as a
+    /// hand-fed input and Tax-Calculator has no channel for it at all, so oracle agreement here proves
+    /// nothing. It is held by hand-computed KATs against i8995 lines 3/4/16 instead.
+    #[serde(default)]
+    pub qbi_carryforward_in: Usd,
+    #[serde(default)]
+    pub qbi_carryforward_in_provenance: CarryProvenance,
 }
 
 /// Standard-vs-itemized election (§63(e)).

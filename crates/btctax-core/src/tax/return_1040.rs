@@ -990,6 +990,9 @@ pub struct AbsoluteReturn {
     pub charitable_carryover_out: Vec<CharitableCarryItem>,
     /// Form 8995 **line 17** — the REIT/PTP loss carryforward to next year (magnitude). For the write-back.
     pub qbi_reit_ptp_carryforward_out: Usd,
+    /// ★ Form 8995 **line 16** — the qualified business (loss) carryforward to next year (magnitude).
+    /// For the write-back. Zero unless a prior-year QBI loss exceeded this year's business income.
+    pub qbi_carryforward_out: Usd,
     /// 1040 **L16** — the regular tax on taxable income (whole dollars): the Qualified Dividends & Capital
     /// Gain Tax Worksheet ([`qdcgt_line16`]) on the WITH-crypto L15 / L3a / preferential net LTCG. It
     /// reduces to the plain Tax Table / TCW when there is no preferential income, so it is correct across
@@ -1085,6 +1088,8 @@ pub struct PrintedInputs {
     pub reit_dividends: Usd,
     /// Form 8995 line 7 — the REIT/PTP loss carryforward IN.
     pub reit_ptp_carryforward_in: Usd,
+    /// ★ Form 8995 line 3 — the prior-year qualified business net (loss) carryforward IN (magnitude).
+    pub qbi_carryforward_in: Usd,
     /// Form 8995 line 11 — taxable income BEFORE the QBI deduction (AGI − L12).
     pub ti_before_qbi: Usd,
     /// Form 8995 line 12 — net capital gain (qualified dividends + §1(h) preferential net LTCG).
@@ -1288,7 +1293,8 @@ pub fn assemble_absolute(
         business_qbi,
         reit_dividends,
         ri.qbi.reit_ptp_carryforward_in,
-        agi - deduction, // Form 8995 line 11 = TI before the QBI deduction
+        ri.qbi.qbi_carryforward_in, // Form 8995 line 3 (magnitude; line 4 subtracts it)
+        agi - deduction,            // Form 8995 line 11 = TI before the QBI deduction
         net_capital_gain,
     );
     // 1040 L13b — "Additional deductions from Schedule 1-A, line 38". Zero until Schedule 1-A lands
@@ -1427,6 +1433,7 @@ pub fn assemble_absolute(
         net_ltcg,
         charitable_carryover_out: charitable.carryover_out,
         qbi_reit_ptp_carryforward_out: qbi.reit_ptp_carryforward_out,
+        qbi_carryforward_out: qbi.qbi_carryforward_out,
         regular_tax,
         se_tax_sch2_l4,
         additional_medicare,
@@ -1451,6 +1458,7 @@ pub fn assemble_absolute(
             business_qbi,
             reit_dividends,
             reit_ptp_carryforward_in: ri.qbi.reit_ptp_carryforward_in,
+            qbi_carryforward_in: ri.qbi.qbi_carryforward_in,
             // Form 8995 line 11, "Taxable income before qualified business income deduction" — the
             // 2025 i8995 figures it from 1040 line 11a MINUS lines 12e and 13b. Note it excludes
             // 13a, which IS the QBI deduction being computed. Omitting 13b would OVERSTATE this,
@@ -1567,6 +1575,7 @@ pub fn screen_absolute(
         ar.printed_inputs.business_qbi, // the Schedule C trade or business now earns §199A too
         reit_dividends,
         ri.qbi.reit_ptp_carryforward_in,
+        ri.qbi.qbi_carryforward_in,
         ar.agi - ar.deduction, // TI before QBI (Form 8995 line 11)
         ri.filing_status,
         params,
@@ -1653,6 +1662,17 @@ pub fn apply_carryover_writeback(
                     .to_string(),
             );
         }
+        // ★ Form 8995 line 16, the same guard: a user-entered business-loss carryforward is the
+        // filer's own figure and must not be silently overwritten by ours.
+        if next_year.qbi.qbi_carryforward_in > Usd::ZERO
+            && next_year.qbi.qbi_carryforward_in_provenance == CarryProvenance::User
+        {
+            return Err(
+                "next year's QBI business-loss carryforward was user-entered — pass `--force` to \
+                 overwrite"
+                    .to_string(),
+            );
+        }
     }
     next_year.charitable_carryover_in = ar
         .charitable_carryover_out
@@ -1664,6 +1684,8 @@ pub fn apply_carryover_writeback(
         .collect();
     next_year.qbi.reit_ptp_carryforward_in = ar.qbi_reit_ptp_carryforward_out;
     next_year.qbi.reit_ptp_carryforward_in_provenance = CarryProvenance::Computed;
+    next_year.qbi.qbi_carryforward_in = ar.qbi_carryforward_out;
+    next_year.qbi.qbi_carryforward_in_provenance = CarryProvenance::Computed;
     Ok(next_year)
 }
 
@@ -4370,6 +4392,8 @@ mod tests {
                 ..Default::default()
             }],
             qbi: QbiInputs {
+                qbi_carryforward_in: Usd::ZERO,
+                qbi_carryforward_in_provenance: CarryProvenance::User,
                 reit_ptp_carryforward_in: dec!(10000),
                 ..Default::default()
             },
@@ -4383,6 +4407,73 @@ mod tests {
         assert!(!ar.charitable_carryover_out.is_empty()); // there IS a charitable carryover
         assert_eq!(ar.qbi_reit_ptp_carryforward_out, dec!(6000)); // 10,000 prior − 4,000 REIT
         ar
+    }
+
+    /// ★★★ Form 8995 **line 16** must reach next year's line 3, or the loss is EXTINGUISHED.
+    ///
+    /// This test exists because dropping the write-back line was found to be INVISIBLE: the whole
+    /// suite stayed green with `next_year.qbi.qbi_carryforward_in = ar.qbi_carryforward_out;` deleted.
+    /// A lost carryforward is not a one-year error — it silently hands the filer a larger deduction in
+    /// every later year than they are entitled to, and no single year's return looks wrong.
+    ///
+    /// $10,000 of QBI against a $30,000 prior-year loss: line 4 floors at -0-, and line 16 carries the
+    /// unabsorbed $20,000 forward, stamped `Computed` so a later report may overwrite it silently.
+    #[test]
+    fn form_8995_line16_carries_into_next_years_line3() {
+        let mut ri = crate::tax::testonly::answered(ReturnInputs {
+            tax_year: 2024,
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        });
+        ri.header.taxpayer = crate::tax::return_inputs::Person {
+            first_name: "John".into(),
+            last_name: "Doe".into(),
+            ssn: "123456789".into(),
+            ..Default::default()
+        };
+        ri.w2s.push(W2 {
+            box1_wages: dec!(80000),
+            ..Default::default()
+        });
+        ri.qbi.qbi_carryforward_in = dec!(30000);
+        ri.schedule_c = Some(crate::tax::return_inputs::ScheduleCInputs {
+            business_description: "Bitcoin mining".into(),
+            ..Default::default()
+        });
+
+        let ar = assemble_absolute(
+            &ri,
+            &Default::default(),
+            &ty2024_params(),
+            &real_2024_table(),
+            2024,
+        );
+        assert!(
+            ar.qbi_carryforward_out > Usd::ZERO,
+            "an unabsorbed prior-year QBI loss must carry OUT (Form 8995 line 16), got {}",
+            ar.qbi_carryforward_out
+        );
+
+        let next = apply_carryover_writeback(&ar, ReturnInputs::default(), false).unwrap();
+        assert_eq!(
+            next.qbi.qbi_carryforward_in, ar.qbi_carryforward_out,
+            "★ line 16 must land on NEXT year's line 3 — dropping this silently extinguishes the loss"
+        );
+        assert_eq!(
+            next.qbi.qbi_carryforward_in_provenance,
+            CarryProvenance::Computed,
+            "stamped Computed, so a later report may overwrite it without --force"
+        );
+
+        // …and a USER-entered carryforward is not silently overwritten, exactly like its REIT sibling.
+        let mut user = ReturnInputs::default();
+        user.qbi.qbi_carryforward_in = dec!(999);
+        user.qbi.qbi_carryforward_in_provenance = CarryProvenance::User;
+        assert!(
+            apply_carryover_writeback(&ar, user.clone(), false).is_err(),
+            "a user-entered business-loss carryforward needs --force to overwrite"
+        );
+        assert!(apply_carryover_writeback(&ar, user, true).is_ok());
     }
 
     /// Write-back into a FRESH next year: the computed carryovers become next year's carryover-in, stamped
@@ -4422,6 +4513,8 @@ mod tests {
                 provenance: CarryProvenance::Computed,
             }],
             qbi: QbiInputs {
+                qbi_carryforward_in: Usd::ZERO,
+                qbi_carryforward_in_provenance: CarryProvenance::User,
                 reit_ptp_carryforward_in: dec!(999),
                 reit_ptp_carryforward_in_provenance: CarryProvenance::Computed,
             },
@@ -4455,6 +4548,8 @@ mod tests {
                                                                                 // User QBI carryforward present → refuse without force (atomic: charitable not half-written).
         let user_qbi = ReturnInputs {
             qbi: QbiInputs {
+                qbi_carryforward_in: Usd::ZERO,
+                qbi_carryforward_in_provenance: CarryProvenance::User,
                 reit_ptp_carryforward_in: dec!(3000),
                 reit_ptp_carryforward_in_provenance: CarryProvenance::User,
             },

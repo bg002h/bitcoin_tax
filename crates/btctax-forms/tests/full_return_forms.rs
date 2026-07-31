@@ -214,6 +214,7 @@ fn f8995_fills_the_printed_chain_and_reads_back() {
         Usd::ZERO,
         dec!(10000),
         Usd::ZERO,
+        btctax_core::Usd::ZERO,
         dec!(100000),
         dec!(20000),
     )
@@ -267,6 +268,7 @@ fn f8995_loss_carryforward_prints_positive_magnitudes() {
         Usd::ZERO,
         dec!(10000),
         dec!(15000),
+        btctax_core::Usd::ZERO,
         dec!(100000),
         Usd::ZERO,
     )
@@ -302,6 +304,7 @@ fn f8995_refuses_a_negative_in_a_parenthesized_cell() {
         Usd::ZERO,
         dec!(10000),
         dec!(15000),
+        btctax_core::Usd::ZERO,
         dec!(100000),
         Usd::ZERO,
     )
@@ -373,6 +376,7 @@ fn full_return_form_fills_are_byte_deterministic() {
         Usd::ZERO,
         dec!(10000),
         Usd::ZERO,
+        btctax_core::Usd::ZERO,
         dec!(100000),
         dec!(20000),
     )
@@ -406,6 +410,7 @@ fn full_return_forms_refuse_unsupported_years() {
         Usd::ZERO,
         dec!(10000),
         Usd::ZERO,
+        btctax_core::Usd::ZERO,
         dec!(100000),
         dec!(20000),
     )
@@ -2404,4 +2409,50 @@ fn the_full_return_schedule_d_answers_the_qof_question() {
         box_on(&pdf, "topmostSubform[0].Page1[0].c1_1[1]"),
         "the QOF question is answered NO, as the slice answers it"
     );
+}
+
+/// ★★★ B1 — the planted defect for `form8995::assert_paren_magnitudes`, whose list is HAND-MAINTAINED.
+///
+/// Lines 3, 7, 16 and 17 are PARENTHESIZED boxes: the form pre-prints the minus sign, so the value
+/// written must be a positive MAGNITUDE. A negative renders as a POSITIVE number on the filed page —
+/// silently turning a loss carryforward into income. No geometric check can see it; the only guard is
+/// that array, and **nothing forces a newly-transcribed paren line into it**. Line 3 was added to it in
+/// the same commit that began printing line 3; this is what holds that pairing.
+#[test]
+fn a_negative_line3_is_rejected_like_its_paren_siblings() {
+    let lines = form_8995_lines(
+        "Bitcoin mining",
+        btctax_core::Usd::ZERO,
+        btctax_core::Usd::ZERO,
+        btctax_core::Usd::ZERO,
+        rust_decimal_macros::dec!(30000),
+        rust_decimal_macros::dec!(200000),
+        btctax_core::Usd::ZERO,
+    )
+    .unwrap();
+    // Each paren line in turn: a negative must FAIL CLOSED, naming the line.
+    for line in ["3", "7", "16", "17"] {
+        let mut l = lines.clone();
+        match line {
+            "3" => l.line3 = rust_decimal_macros::dec!(-1),
+            "7" => l.line7 = rust_decimal_macros::dec!(-1),
+            "16" => l.line16 = rust_decimal_macros::dec!(-1),
+            _ => l.line17 = rust_decimal_macros::dec!(-1),
+        }
+        let err = match btctax_forms::fill_form_8995(&l, &kitchen_sink_header(), 2024) {
+            Ok(_) => panic!(
+                "line {line} is a PARENTHESIZED box and a negative FILLED. It renders as a POSITIVE \
+                 number on the filed form — a loss carryforward turned into income."
+            ),
+            Err(e) => format!("{e}"),
+        };
+        assert!(
+            err.contains(&format!("line {line}")),
+            "the refusal must name line {line}, got: {err}"
+        );
+    }
+    // The control: the unmutated chain still fills, so the assertions above are about the SIGN and
+    // not about the fixture failing some other way.
+    btctax_forms::fill_form_8995(&lines, &kitchen_sink_header(), 2024)
+        .expect("a well-formed chain must still fill");
 }

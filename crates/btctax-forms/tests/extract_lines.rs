@@ -275,6 +275,7 @@ fn form_8995_row_1i_carries_the_proprietors_tin_not_the_taxpayers() {
         dec!(55761), // business QBI
         Usd::ZERO,
         Usd::ZERO,
+        btctax_core::Usd::ZERO,
         dec!(81161), // TI before QBI
         Usd::ZERO,
     )
@@ -308,6 +309,7 @@ fn form_8995_refuses_to_file_a_qbi_total_for_an_unnamed_business() {
         dec!(55761),
         Usd::ZERO,
         Usd::ZERO,
+        btctax_core::Usd::ZERO,
         dec!(81161),
         Usd::ZERO,
     )
@@ -338,6 +340,7 @@ fn form_8995_with_only_reit_dividends_leaves_part_i_blank() {
         Usd::ZERO,   // …and no business QBI
         dec!(10000), // just REIT dividends
         Usd::ZERO,
+        btctax_core::Usd::ZERO,
         dec!(100000),
         dec!(20000),
     )

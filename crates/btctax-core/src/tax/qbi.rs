@@ -25,13 +25,28 @@ pub struct Qbi8995 {
     /// Form 8995 **line 17** — the qualified REIT-dividend / PTP-income LOSS carryforward to next year
     /// (a magnitude ≥ 0: the unused prior-year loss carryforward net of this year's REIT income).
     pub reit_ptp_carryforward_out: Usd,
+    /// ★ Form 8995 **line 16** — the total qualified business **(loss)** carryforward to next year
+    /// (a magnitude ≥ 0: the prior-year QBI loss not absorbed by this year's business income).
+    pub qbi_carryforward_out: Usd,
 }
 
 /// Whether the return has ANY qualified business income: a crypto **Schedule C trade or business**, §199A
 /// REIT dividends, or a prior-year REIT/PTP loss carryforward. When false there is no Form 8995 — no
 /// deduction, and no above-threshold refuse.
-pub fn has_qbi(business_qbi: Usd, reit_dividends: Usd, reit_ptp_carryforward_in: Usd) -> bool {
-    business_qbi > Usd::ZERO || reit_dividends > Usd::ZERO || reit_ptp_carryforward_in > Usd::ZERO
+pub fn has_qbi(
+    business_qbi: Usd,
+    reit_dividends: Usd,
+    reit_ptp_carryforward_in: Usd,
+    qbi_carryforward_in: Usd,
+) -> bool {
+    business_qbi > Usd::ZERO
+        || reit_dividends > Usd::ZERO
+        || reit_ptp_carryforward_in > Usd::ZERO
+        // ★ A prior-year QBI loss carryforward ALONE requires the form: with no business this year it
+        // absorbs nothing, so line 16 carries the whole of it to next year. Dropping the form here
+        // would silently EXTINGUISH the carryforward, handing the filer a deduction in some later year
+        // they are not entitled to.
+        || qbi_carryforward_in > Usd::ZERO
 }
 
 /// Compute the simplified **Form 8995** QBI deduction (→ 1040 L13) — REIT/PTP path.
@@ -48,6 +63,7 @@ pub fn compute_8995(
     business_qbi: Usd,
     reit_dividends: Usd,
     reit_ptp_carryforward_in: Usd,
+    qbi_carryforward_in: Usd,
     ti_before_qbi: Usd,
     net_capital_gain: Usd,
 ) -> Qbi8995 {
@@ -60,9 +76,18 @@ pub fn compute_8995(
     // SSTB), so its owner is entitled to this deduction, and omitting it OVERSTATED their tax by ~20% of
     // their business income. Found by the P7 independent-oracle cross-check.
     //
-    // A Schedule C LOSS cannot reach here: it refuses upstream (`ScheduleCLoss`), so there is no negative
-    // QBI and no QBI loss carryforward in v1 (Form 8995 lines 3 and 16 stay blank).
-    let line5 = round_dollar(QBI_RATE * business_qbi.max(Usd::ZERO));
+    // A Schedule C LOSS cannot reach here: it refuses upstream (`ScheduleCLoss`), so THIS YEAR's QBI is
+    // never negative.
+    //
+    // ★★ That says nothing about **line 3**, and the two used to be conflated. Line 3 is the PRIOR
+    // year's qualified business net (loss) carryforward — a figure the filer brings in from a return
+    // btctax did not compute, exactly like `reit_ptp_carryforward_in` below. Line 4 combines 2 and 3,
+    // so omitting it INFLATED the deduction and UNDERSTATED the tax.
+    //
+    // Line 4 — "Combine lines 2 and 3. If zero or less, enter -0-". `qbi_carryforward_in` is a
+    // positive MAGNITUDE (the form pre-prints line 3's parentheses), so combining means SUBTRACTING.
+    let line4 = (business_qbi.max(Usd::ZERO) - qbi_carryforward_in).max(Usd::ZERO);
+    let line5 = round_dollar(QBI_RATE * line4);
 
     // Line 8 — total qualified REIT dividends + PTP income (line 6 + line-7 loss, not below zero).
     let line8 = (reit_dividends - reit_ptp_carryforward_in).max(Usd::ZERO);
@@ -78,19 +103,25 @@ pub fn compute_8995(
     let deduction = component.min(income_limit);
     // Line 17 — the prior-year loss carryforward unused against this year's REIT income (magnitude).
     let reit_ptp_carryforward_out = (reit_ptp_carryforward_in - reit_dividends).max(Usd::ZERO);
+    // Line 16 — "Combine lines 2 and 3. If greater than zero, enter -0-": the part of the prior-year
+    // QBI loss this year's business income did NOT absorb, as a magnitude. Same shape as line 17.
+    let qbi_carryforward_out = (qbi_carryforward_in - business_qbi.max(Usd::ZERO)).max(Usd::ZERO);
     Qbi8995 {
         deduction,
         reit_ptp_carryforward_out,
+        qbi_carryforward_out,
     }
 }
 
 /// Whether QBI must be **refused**: there IS QBI (REIT dividends or a carryforward) AND the taxable
 /// income before the QBI deduction exceeds the §199A(e)(2) threshold (at/below the threshold the
 /// simplified Form 8995 applies; above it the 8995-A phase-in is required — unmodeled in v1, SPEC §4.5).
+#[allow(clippy::too_many_arguments)]
 pub fn qbi_over_threshold(
     business_qbi: Usd,
     reit_dividends: Usd,
     reit_ptp_carryforward_in: Usd,
+    qbi_carryforward_in: Usd,
     ti_before_qbi: Usd,
     status: FilingStatus,
     params: &FullReturnParams,
@@ -99,8 +130,12 @@ pub fn qbi_over_threshold(
     // §199A(e)(2) threshold: above it the simplified Form 8995 no longer applies (the W-2-wage / UBIA
     // limitations and the SSTB phase-in take over, which is Form 8995-A), and v1 REFUSES rather than
     // compute a deduction it cannot bound.
-    has_qbi(business_qbi, reit_dividends, reit_ptp_carryforward_in)
-        && ti_before_qbi > params.qbi_ti_threshold(status)
+    has_qbi(
+        business_qbi,
+        reit_dividends,
+        reit_ptp_carryforward_in,
+        qbi_carryforward_in,
+    ) && ti_before_qbi > params.qbi_ti_threshold(status)
 }
 
 /// The printable **Form 8995 line chain** — whole dollars, cross-footing (SPEC §3.1). See
@@ -134,6 +169,13 @@ pub struct Form8995Lines {
     /// L2 — total QBI from lines 1i–1v column (c) = the Schedule C profit net of the §164(f) half-SE
     /// deduction. Zero when there is no trade or business.
     pub line2: Usd,
+    /// ★★ L3 — *"Qualified business net (loss) carryforward from the prior year"*. **Positive
+    /// magnitude** (parenthesized box), so line 4 SUBTRACTS it.
+    ///
+    /// This field did not exist. The line was never transcribed, on the reasoning that a Schedule C
+    /// loss refuses upstream — which is about the CURRENT year and says nothing about a carryforward
+    /// the filer brings in. Its absence INFLATED the deduction and UNDERSTATED the tax.
+    pub line3: Usd,
     /// L4 — combine 2 and 3; if zero or less, `-0-`.
     pub line4: Usd,
     /// L5 — QBI component = 20% × line 4.
@@ -158,8 +200,8 @@ pub struct Form8995Lines {
     pub line14: Usd,
     /// L15 — the QBI deduction = the smaller of line 10 or line 14 → 1040 **L13**.
     pub line15: Usd,
-    /// L16 — total qualified business (loss) carryforward = combine 2 and 3; if > 0, `-0-`. Always 0
-    /// in v1. **Positive magnitude** (parenthesized box).
+    /// L16 — total qualified business (loss) carryforward = combine 2 and 3; if > 0, `-0-`. Carries to
+    /// next year, exactly like [`Self::line17`]. **Positive magnitude** (parenthesized box).
     pub line16: Usd,
     /// L17 — total REIT/PTP (loss) carryforward = combine 6 and 7; if > 0, `-0-`. Carries to next
     /// year. **Positive magnitude** (parenthesized box).
@@ -178,22 +220,31 @@ pub struct Form8995Lines {
 /// line — so it can differ by a dollar from `compute_8995`'s `deduction`, which rounds only the 20%
 /// products. That is the SPEC §3.1 round-all-amounts election, not a defect: the printed form
 /// cross-foots against itself, which is what gets filed.
+#[allow(clippy::too_many_arguments)]
 pub fn form_8995_lines(
     business_name: &str,
     business_qbi: Usd,
     reit_dividends: Usd,
     reit_ptp_carryforward_in: Usd,
+    qbi_carryforward_in: Usd,
     ti_before_qbi: Usd,
     net_capital_gain: Usd,
 ) -> Option<Form8995Lines> {
-    if !has_qbi(business_qbi, reit_dividends, reit_ptp_carryforward_in) {
+    if !has_qbi(
+        business_qbi,
+        reit_dividends,
+        reit_ptp_carryforward_in,
+        qbi_carryforward_in,
+    ) {
         return None;
     }
     // Part I — the trade-or-business QBI (the crypto Schedule C), net of the §164(f) half-SE deduction.
-    // Line 3 (prior-year QBI loss carryforward) stays BLANK: a Schedule C loss refuses upstream, so v1
-    // never carries one.
+    // ★ Line 3 is the PRIOR-year QBI loss carryforward, a positive magnitude the form's parentheses
+    // negate — so line 4 SUBTRACTS it. The whole chain is over the PRINTED cells, so the filed form
+    // cross-foots against itself.
     let line2 = round_dollar(business_qbi.max(Usd::ZERO));
-    let line4 = line2;
+    let line3 = round_dollar(qbi_carryforward_in);
+    let line4 = (line2 - line3).max(Usd::ZERO);
     let line5 = round_dollar(QBI_RATE * line4);
 
     // Part I (cont.) — the REIT/PTP component. Line 7 is a positive magnitude that REDUCES line 6.
@@ -211,7 +262,9 @@ pub fn form_8995_lines(
     let line15 = line10.min(line14);
 
     // Carryforwards out. Both are magnitudes: the form's parentheses supply the sign.
-    let line16 = Usd::ZERO; // combine 2 and 3 (= 0); "if greater than zero, enter -0-"
+    // ★ Line 16 — "Combine lines 2 and 3. If greater than zero, enter -0-": the prior-year QBI loss
+    // this year's business income did not absorb. Over the PRINTED lines, like line 17 beside it.
+    let line16 = (line3 - line2).max(Usd::ZERO);
     let line17 = (line7 - line6).max(Usd::ZERO); // the prior-year loss unused against this year's REIT
 
     Some(Form8995Lines {
@@ -223,6 +276,7 @@ pub fn form_8995_lines(
             String::new()
         },
         line2,
+        line3,
         line4,
         line5,
         line6,
@@ -244,6 +298,132 @@ pub fn form_8995_lines(
 mod tests {
     use crate::tax::tables::SaltLimitation;
 
+    // ══════════════ Form 8995 LINE 3 — the prior-year QBI loss carryforward ══════════════
+    //
+    // ★★★ NEITHER ORACLE VALIDATES ANY OF THIS. OTS takes the carryforward as a hand-fed input and
+    // Tax-Calculator has no channel for it at all, so their agreement proves nothing here — the §G-9
+    // limit ("a value the oracles take as INPUT is never validated by their agreement"). These are
+    // HAND-COMPUTED against i8995's own line text, which is the only authority available:
+    //
+    //   L3 "Qualified business net (loss) carryforward from the prior year"   [paren ⇒ magnitude]
+    //   L4 "Total qualified business income. Combine lines 2 and 3. If zero or less, enter -0-"
+    //   L5 "Qualified business income component. Multiply line 4 by 20% (0.20)"
+    //   L16 "Total qualified business (loss) carryforward. Combine lines 2 and 3. If greater than
+    //        zero, enter -0-"                                                 [paren ⇒ magnitude]
+
+    /// The carryforward REDUCES this year's QBI, and the deduction falls with it.
+    /// $50,000 QBI − $20,000 carried loss ⇒ L4 = $30,000 ⇒ L5 = $6,000. Income limit is slack
+    /// (20% × $200,000), so L15 = $6,000 — versus $10,000 with no carryforward. **That $4,000
+    /// difference is the understatement this line existed to prevent.**
+    #[test]
+    fn qbi_line3_carryforward_reduces_the_deduction() {
+        let without = compute_8995(
+            dec!(50000),
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(200000),
+            Usd::ZERO,
+        );
+        assert_eq!(without.deduction, dec!(10000), "20% of 50,000");
+        let with = compute_8995(
+            dec!(50000),
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(20000), // L3 magnitude
+            dec!(200000),
+            Usd::ZERO,
+        );
+        assert_eq!(with.deduction, dec!(6000), "20% of (50,000 − 20,000)");
+        assert_eq!(
+            with.qbi_carryforward_out,
+            Usd::ZERO,
+            "the loss was fully absorbed, so nothing carries on"
+        );
+    }
+
+    /// ★★ CARRY-IN GREATER THAN THIS YEAR'S QBI — the case CONTINUITY named as the one that must give
+    /// a NONZERO line 16. $10,000 QBI − $30,000 carried loss ⇒ L4 is "zero or less, enter -0-" ⇒ no
+    /// QBI component at all, and L16 carries the unabsorbed $20,000 to next year.
+    ///
+    /// Getting L16 wrong is not a one-year error: it either extinguishes a loss the filer is entitled
+    /// to carry (overstating tax for years) or duplicates it (understating).
+    #[test]
+    fn qbi_line3_carry_in_over_current_qbi_zeroes_line4_and_carries_the_remainder() {
+        let r = compute_8995(
+            dec!(10000),
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(30000),
+            dec!(200000),
+            Usd::ZERO,
+        );
+        assert_eq!(r.deduction, Usd::ZERO, "L4 floored at -0- ⇒ L5 = 0");
+        assert_eq!(
+            r.qbi_carryforward_out,
+            dec!(20000),
+            "★ 30,000 carried − 10,000 absorbed = 20,000 to next year (L16)"
+        );
+    }
+
+    /// A carryforward with NO business this year still requires the form — otherwise the carryforward
+    /// is silently EXTINGUISHED, handing the filer a deduction in some later year they never earned.
+    #[test]
+    fn qbi_line3_alone_still_files_the_form_and_carries_the_whole_loss() {
+        assert!(
+            has_qbi(Usd::ZERO, Usd::ZERO, Usd::ZERO, dec!(30000)),
+            "a prior-year QBI loss alone requires Form 8995"
+        );
+        let l = form_8995_lines(
+            "",
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(30000),
+            dec!(200000),
+            Usd::ZERO,
+        )
+        .expect("the form must be produced");
+        assert_eq!(l.line2, Usd::ZERO);
+        assert_eq!(l.line3, dec!(30000), "printed as a positive MAGNITUDE");
+        assert_eq!(l.line4, Usd::ZERO, "combine 2 and 3 ⇒ -0-");
+        assert_eq!(l.line5, Usd::ZERO);
+        assert_eq!(l.line16, dec!(30000), "the whole loss carries on");
+        assert_eq!(
+            l.business_name, "",
+            "no trade or business ⇒ row 1i stays blank"
+        );
+    }
+
+    /// The printed chain cross-foots with a carryforward in play, and line 16 is a magnitude.
+    /// $40,000 QBI, $15,000 carried ⇒ L4 = 25,000, L5 = 5,000, L16 = 0 (fully absorbed).
+    #[test]
+    fn qbi_line3_printed_chain_cross_foots() {
+        let l = form_8995_lines(
+            "Bitcoin mining",
+            dec!(40000),
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(15000),
+            dec!(200000),
+            Usd::ZERO,
+        )
+        .unwrap();
+        assert_eq!(l.line2, dec!(40000));
+        assert_eq!(l.line3, dec!(15000));
+        assert_eq!(
+            l.line4,
+            l.line2 - l.line3,
+            "the form's own 'combine 2 and 3'"
+        );
+        assert_eq!(l.line4, dec!(25000));
+        assert_eq!(l.line5, dec!(5000));
+        assert_eq!(l.line10, l.line5 + l.line9);
+        assert_eq!(l.line15, l.line10.min(l.line14));
+        assert_eq!(l.line16, Usd::ZERO, "absorbed ⇒ nothing carries on");
+        assert!(l.line3 >= Usd::ZERO && l.line16 >= Usd::ZERO, "paren boxes");
+    }
+
     /// ★ **§199A on Schedule C — the deduction the P7 oracle proved we were giving away.**
     ///
     /// A crypto MINING trade or business is a qualified trade or business (not an SSTB), so its owner is
@@ -260,7 +440,7 @@ mod tests {
     fn schedule_c_business_income_earns_the_199a_deduction_net_of_the_half_se_deduction() {
         // The deep/02 Ex.2 shape: $60k of mining, $40k of wages.
         let qbi = dec!(60000) - dec!(4239); // Sch C net − the §164(f) half-SE deduction
-        let r = compute_8995(qbi, Usd::ZERO, Usd::ZERO, dec!(95761), Usd::ZERO);
+        let r = compute_8995(qbi, Usd::ZERO, Usd::ZERO, Usd::ZERO, dec!(95761), Usd::ZERO);
 
         assert_eq!(
             r.deduction,
@@ -275,7 +455,14 @@ mod tests {
     #[test]
     fn the_199a_deduction_is_capped_by_the_income_limitation() {
         // $50,000 of QBI (⇒ a $10,000 component), but only $12,000 of ordinary taxable income.
-        let r = compute_8995(dec!(50000), Usd::ZERO, Usd::ZERO, dec!(60000), dec!(48000));
+        let r = compute_8995(
+            dec!(50000),
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(60000),
+            dec!(48000),
+        );
 
         // Line 13 = 60,000 − 48,000 = 12,000 ⇒ line 14 = 20% × 12,000 = 2,400 < the 10,000 component.
         assert_eq!(
@@ -289,7 +476,14 @@ mod tests {
     /// 10 = line 5 + line 9).
     #[test]
     fn the_business_and_reit_components_add() {
-        let r = compute_8995(dec!(50000), dec!(10000), Usd::ZERO, dec!(200000), Usd::ZERO);
+        let r = compute_8995(
+            dec!(50000),
+            dec!(10000),
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(200000),
+            Usd::ZERO,
+        );
         assert_eq!(
             r.deduction,
             dec!(12000),
@@ -355,6 +549,7 @@ mod tests {
             Usd::ZERO, /* no business QBI */
             dec!(10000),
             Usd::ZERO,
+            Usd::ZERO,
             dec!(100000),
             dec!(5000),
         );
@@ -369,6 +564,7 @@ mod tests {
         let r = compute_8995(
             Usd::ZERO, /* no business QBI */
             dec!(10000),
+            Usd::ZERO,
             Usd::ZERO,
             dec!(6000),
             Usd::ZERO,
@@ -385,6 +581,7 @@ mod tests {
             Usd::ZERO, /* no business QBI */
             dec!(10000),
             Usd::ZERO,
+            Usd::ZERO,
             dec!(50000),
             dec!(50000),
         );
@@ -400,6 +597,7 @@ mod tests {
             Usd::ZERO, /* no business QBI */
             dec!(4000),
             dec!(10000),
+            Usd::ZERO,
             dec!(100000),
             Usd::ZERO,
         );
@@ -410,9 +608,10 @@ mod tests {
     /// No REIT dividends and no carryforward ⇒ no QBI at all: no deduction, no carryforward, not "over".
     #[test]
     fn no_qbi_when_no_reit() {
-        assert!(!has_qbi(Usd::ZERO, Usd::ZERO, Usd::ZERO));
+        assert!(!has_qbi(Usd::ZERO, Usd::ZERO, Usd::ZERO, Usd::ZERO));
         let r = compute_8995(
             Usd::ZERO, /* no business QBI */
+            Usd::ZERO,
             Usd::ZERO,
             Usd::ZERO,
             dec!(500000),
@@ -422,6 +621,7 @@ mod tests {
         assert_eq!(r.reit_ptp_carryforward_out, Usd::ZERO);
         // Even far above the threshold, no QBI ⇒ no refuse.
         assert!(!qbi_over_threshold(
+            Usd::ZERO,
             Usd::ZERO,
             Usd::ZERO,
             Usd::ZERO,
@@ -441,6 +641,7 @@ mod tests {
             Usd::ZERO,
             dec!(1000),
             Usd::ZERO,
+            Usd::ZERO,
             dec!(191951),
             FilingStatus::Single,
             &p
@@ -448,6 +649,7 @@ mod tests {
         assert!(!qbi_over_threshold(
             Usd::ZERO,
             dec!(1000),
+            Usd::ZERO,
             Usd::ZERO,
             dec!(191950),
             FilingStatus::Single,
@@ -458,6 +660,7 @@ mod tests {
             Usd::ZERO,
             dec!(1000),
             Usd::ZERO,
+            Usd::ZERO,
             dec!(300000),
             FilingStatus::Mfj,
             &p
@@ -465,6 +668,7 @@ mod tests {
         assert!(qbi_over_threshold(
             Usd::ZERO,
             dec!(1000),
+            Usd::ZERO,
             Usd::ZERO,
             dec!(400000),
             FilingStatus::Mfj,
@@ -475,6 +679,7 @@ mod tests {
             Usd::ZERO,
             dec!(1000),
             Usd::ZERO,
+            Usd::ZERO,
             dec!(300000),
             FilingStatus::Qss,
             &p
@@ -484,6 +689,7 @@ mod tests {
             Usd::ZERO,
             Usd::ZERO,
             dec!(5000),
+            Usd::ZERO,
             dec!(200000),
             FilingStatus::Single,
             &p
@@ -497,6 +703,7 @@ mod tests {
         let r = compute_8995(
             Usd::ZERO, /* no business QBI */
             dec!(2502.50),
+            Usd::ZERO,
             Usd::ZERO,
             dec!(100000),
             Usd::ZERO,
@@ -515,6 +722,7 @@ mod tests {
             "",
             Usd::ZERO,
             dec!(10000),
+            Usd::ZERO,
             Usd::ZERO,
             dec!(100000),
             dec!(20000),
@@ -546,6 +754,7 @@ mod tests {
             Usd::ZERO,
             dec!(10000),
             Usd::ZERO,
+            Usd::ZERO,
             dec!(12000),
             dec!(12000),
         )
@@ -569,6 +778,7 @@ mod tests {
             Usd::ZERO,
             dec!(10000),
             dec!(15000),
+            Usd::ZERO,
             dec!(100000),
             Usd::ZERO,
         )
@@ -592,9 +802,16 @@ mod tests {
     /// No REIT dividends and no carryforward ⇒ no Form 8995 at all.
     #[test]
     fn form_8995_absent_when_there_is_no_qbi() {
-        assert!(
-            form_8995_lines("", Usd::ZERO, Usd::ZERO, Usd::ZERO, dec!(100000), Usd::ZERO).is_none()
-        );
+        assert!(form_8995_lines(
+            "",
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(100000),
+            Usd::ZERO
+        )
+        .is_none());
         // …but a bare carryforward, with no REIT income this year, DOES produce the form (it must
         // carry the loss forward on line 17, or the carryforward is silently lost).
         let l = form_8995_lines(
@@ -602,6 +819,7 @@ mod tests {
             Usd::ZERO,
             Usd::ZERO,
             dec!(5000),
+            Usd::ZERO,
             dec!(100000),
             Usd::ZERO,
         )
@@ -618,7 +836,7 @@ mod tests {
             (dec!(2502.50), Usd::ZERO, dec!(80000.49), dec!(0.50)), // cents in, dollars out
             (dec!(10000), Usd::ZERO, dec!(12000), dec!(12000)),     // income limit binds
         ] {
-            let l = form_8995_lines("", Usd::ZERO, reit, cf_in, ti, ncg).unwrap();
+            let l = form_8995_lines("", Usd::ZERO, reit, cf_in, Usd::ZERO, ti, ncg).unwrap();
             assert_eq!(l.line4, l.line2, "L4 = 2 + 3 (3 blank)");
             assert_eq!(l.line5, round_dollar(QBI_RATE * l.line4), "L5 = 20% × 4");
             assert_eq!(
