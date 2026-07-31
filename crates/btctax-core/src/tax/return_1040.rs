@@ -1057,6 +1057,11 @@ pub struct ScheduleCHeader {
     pub naics_code: String,
     /// Line F — `true` = accrual, `false` = cash.
     pub accrual: bool,
+    /// ★ Line **I** — the filer's own answer, carried as `Option` so the writer can tell "never asked"
+    /// from "answered no". See `ScheduleCLines::line_i_1099_required`.
+    pub payments_requiring_1099: Option<bool>,
+    /// Line **J** — answered only when line I is `Some(true)` (the form's own "If 'Yes,'").
+    pub will_file_required_1099: Option<bool>,
 }
 
 /// The Form 8959 / 8960 / 8995 inputs, captured at derivation.
@@ -1477,6 +1482,8 @@ pub fn assemble_absolute(
                     naics_code: c.naics_code.clone(),
                     accrual: c.accounting_method
                         == crate::tax::return_inputs::AccountingMethod::Accrual,
+                    payments_requiring_1099: c.payments_requiring_1099,
+                    will_file_required_1099: c.will_file_required_1099,
                 }),
             tax_exempt_interest: ri
                 .int_1099

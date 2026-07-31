@@ -122,6 +122,10 @@ pub enum FieldId {
     /// §G-9 death gates — class (B): silence FORGOES the §63(f) age-65 addition, never grants it.
     TaxpayerDiedDuringYear,
     SpouseDiedDuringYear,
+    /// Schedule C lines I / J — the Form-1099 compliance pair. Class (B): no figure reads them and the
+    /// form prints no Caution, but §6721/§6722 exposure is real, so the skip advises.
+    ScheduleC1099Required,
+    ScheduleC1099Filed,
 }
 
 /// The value shape of a field.

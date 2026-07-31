@@ -237,9 +237,15 @@ each one fits you:
   Science practitioner who has filed Form 4361 or Form 4029 cannot be served by btctax: Schedule SE
   line A's exemption declaration is never asked, there is no Form 4361/4029 input, and there is no way
   to print the required "Exempt—Form 4361" notation. Use a preparer.
-- **Schedule C lines G, H, I, J** — left blank (deferred to your pen): material participation, whether you
-  started/acquired the business this year, whether you made payments requiring Form 1099, and whether you
-  filed them. Fill them in yourself.
+- **Schedule C lines I and J** (Form 1099 payments) are **asked** — `btctax income answer` — and printed
+  from your own answer. Skipping is lawful: no figure on your return reads them and the form prints no
+  Caution beside them, so they go out blank and an advisory names **§6721/§6722**, which penalise failing
+  to file a required information return and failing to furnish the payee's copy. That exposure attaches to
+  the PAYMENTS, not to the box.
+- **Schedule C lines G and H** are deliberately **not asked**. Line G (material participation) moves no
+  figure — §1411(c)(6) shelters the Schedule C income from NIIT either way, because btctax derives it as
+  the self-employment base. Line H is a check-if-true box with **no "No" widget**, so an explicit "no" and
+  a never-asked blank are the identical mark on the page; there is nothing an answer could add.
 
 ---
 

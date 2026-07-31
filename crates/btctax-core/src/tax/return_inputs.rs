@@ -238,6 +238,25 @@ pub struct ScheduleCInputs {
     pub accounting_method: AccountingMethod, // line F
     #[serde(default)]
     pub expenses: Usd,
+    /// ★★ Line **I** — *"Did you make any payments in 2024 that would require you to file Form(s)
+    /// 1099?"* A compliance DECLARATION about the filer's own information-reporting, with real
+    /// §6721/§6722 exposure — but no figure on the return reads it, and the form prints no Caution
+    /// beside it, so it is class (B): asked, and lawfully skippable
+    /// ([`super::questions::SkippableId::ScheduleC1099Required`]).
+    ///
+    /// `Option`, and the `Option` is load-bearing to the PDF writer: `None` (never asked) and
+    /// `Some(false)` (asked, answered no) are DIFFERENT marks on the page — an unwritten pair versus
+    /// a checked No box. A printed "No" the filer never gave is fabricated testimony.
+    #[serde(default)]
+    pub payments_requiring_1099: Option<bool>,
+    /// Line **J** — *"If 'Yes,' did you or will you file required Form(s) 1099?"* The form conditions
+    /// it on line I, so it is live only when [`Self::payments_requiring_1099`] is `Some(true)`.
+    ///
+    /// ★ This is the question whose liveness depends on another question's NON-NEUTRAL answer — the
+    /// shape that silently broke the registry's own property harness once (see the `is_none()` guards
+    /// in `return_refuse.rs`). It is now the live exerciser of those guards.
+    #[serde(default)]
+    pub will_file_required_1099: Option<bool>,
 }
 fn default_naics() -> String {
     "999999".to_string()
@@ -251,6 +270,8 @@ impl Default for ScheduleCInputs {
             naics_code: default_naics(),
             accounting_method: AccountingMethod::Cash,
             expenses: Usd::ZERO,
+            payments_requiring_1099: None,
+            will_file_required_1099: None,
         }
     }
 }

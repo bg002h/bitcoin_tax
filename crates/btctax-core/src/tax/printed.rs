@@ -1045,6 +1045,16 @@ pub struct ScheduleCLines {
     pub line_b_naics: String,
     /// Line **F** — the accounting method (a checkbox: Cash or Accrual).
     pub line_f_accrual: bool,
+    /// ★★ Line **I** — *"Did you make any payments … that would require you to file Form(s) 1099?"*
+    ///
+    /// `Option`, and the `Option` is load-bearing ALL THE WAY TO THE PDF WRITER: `None` (never asked)
+    /// and `Some(false)` (asked, answered no) are DIFFERENT marks on the page — an unwritten pair
+    /// versus a checked No box. Collapsing it to `bool` prints a "No" the filer never gave, which is
+    /// the exact defect `3b22ca1` fixed on Schedule B Part III.
+    pub line_i_1099_required: Option<bool>,
+    /// Line **J** — *"If 'Yes,' did you or will you file required Form(s) 1099?"* Answered only when
+    /// line I is `Some(true)`; the form itself asks it conditionally.
+    pub line_j_1099_filed: Option<bool>,
     /// L1 — gross receipts or sales.
     pub line1: Usd,
     /// L3 — subtract line 2 (returns/allowances, blank) from line 1 ⇒ `= line1`.
@@ -1079,6 +1089,16 @@ pub fn schedule_c_lines(ar: &AbsoluteReturn) -> Option<ScheduleCLines> {
         line_a_business: h.business_description.clone(),
         line_b_naics: h.naics_code.clone(),
         line_f_accrual: h.accrual,
+        // ★ Carried across VERBATIM as `Option` — no `unwrap_or`. A `None` here must reach the writer
+        // as a `None`, so an unasked question prints an unwritten pair rather than a checked "No".
+        line_i_1099_required: h.payments_requiring_1099,
+        // The form asks J only "If 'Yes,'" on I, so an answer to J without a Yes on I is not a mark the
+        // form has a place for. The registry's liveness already prevents it; belt-and-braces here so a
+        // TOML import cannot produce a J-without-I page.
+        line_j_1099_filed: h
+            .payments_requiring_1099
+            .and_then(|i| i.then_some(h.will_file_required_1099))
+            .flatten(),
         line1,
         line3,
         line5,
@@ -1700,6 +1720,8 @@ mod tests {
             line_a_business: String::new(),
             line_b_naics: String::new(),
             line_f_accrual: false,
+            line_i_1099_required: None,
+            line_j_1099_filed: None,
             line1: Usd::ZERO,
             line3: Usd::ZERO,
             line5: Usd::ZERO,

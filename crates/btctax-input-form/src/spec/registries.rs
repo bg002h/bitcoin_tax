@@ -223,7 +223,7 @@ pub(crate) const INCOME_EXCLUSIONS: Section = Section {
 
 // ── The Skippables section ────────────────────────────────────────────────────────────────────────────────
 
-/// The delegating skippables — indices 0, 1, 3, 4, 5, 6, 7, 8, 9 of `SKIPPABLE_QUESTIONS` (index 2, the SALT
+/// The delegating skippables — indices 0, 1, 3..11 of `SKIPPABLE_QUESTIONS` (index 2, the SALT
 /// election, is deduped to `SaSaltUseSalesTax`). Equivalent to
 /// `SKIPPABLE_QUESTIONS.filter(|s| s.id != SalesTaxElection)`, enumerated by index because `Field`
 /// accessors must be `const`/`&'static`, not built by a runtime loop.
@@ -281,6 +281,24 @@ const SKIPPABLE_FIELDS: &[Field] = &[
     skippable_tristate!(9, FieldId::SpouseDiedDuringYear, |ri| {
         ri.header.spouse_died_during_year = None;
         Ok(())
+    }),
+    // ★ Indices 10–11 — Schedule C's Form-1099 pair. Parent-gated on a `schedule_c` (and, for line J,
+    // on line I being answered YES), so a clear while the parent is absent is `NoSuchRow`.
+    skippable_tristate!(10, FieldId::ScheduleC1099Required, |ri| {
+        if let Some(c) = ri.schedule_c.as_mut() {
+            c.payments_requiring_1099 = None;
+            Ok(())
+        } else {
+            Err(SetError::NoSuchRow)
+        }
+    }),
+    skippable_tristate!(11, FieldId::ScheduleC1099Filed, |ri| {
+        if let Some(c) = ri.schedule_c.as_mut() {
+            c.will_file_required_1099 = None;
+            Ok(())
+        } else {
+            Err(SetError::NoSuchRow)
+        }
     }),
 ];
 
@@ -347,6 +365,8 @@ pub fn field_to_skippable(id: FieldId) -> Option<SkippableId> {
         FieldId::FbarFilingRequired => SkippableId::FbarFilingRequired,
         FieldId::TaxpayerDiedDuringYear => SkippableId::TaxpayerDiedDuringYear,
         FieldId::SpouseDiedDuringYear => SkippableId::SpouseDiedDuringYear,
+        FieldId::ScheduleC1099Required => SkippableId::ScheduleC1099Required,
+        FieldId::ScheduleC1099Filed => SkippableId::ScheduleC1099Filed,
         _ => return None,
     })
 }
@@ -365,5 +385,7 @@ pub fn skippable_to_field(id: SkippableId) -> FieldId {
         SkippableId::FbarFilingRequired => FieldId::FbarFilingRequired,
         SkippableId::TaxpayerDiedDuringYear => FieldId::TaxpayerDiedDuringYear,
         SkippableId::SpouseDiedDuringYear => FieldId::SpouseDiedDuringYear,
+        SkippableId::ScheduleC1099Required => FieldId::ScheduleC1099Required,
+        SkippableId::ScheduleC1099Filed => FieldId::ScheduleC1099Filed,
     }
 }

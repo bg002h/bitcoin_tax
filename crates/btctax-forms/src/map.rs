@@ -1468,6 +1468,17 @@ pub struct ScheduleCMap {
     /// checked (v1 captures only the two).
     pub method_cash: CheckChoice,
     pub method_accrual: CheckChoice,
+    /// ★ Line **I** — "Did you make any payments … that would require you to file Form(s) 1099?"
+    ///
+    /// ★★ ON-STATES: Schedule C's Yes/No pairs are **`"Yes"`/`"No"`**, NOT the `"1"`/`"2"` that
+    /// Schedule B and Schedule D use. Dumped with `xtask dump-fields`; three separate design passes
+    /// asserted 1/2 by analogy and all three were wrong. `Option` because only the full-return
+    /// revision carries these cells.
+    #[serde(default)]
+    pub line_i: Option<YesNoPair>,
+    /// Line **J** — "If 'Yes,' did you or will you file required Form(s) 1099?"
+    #[serde(default)]
+    pub line_j: Option<YesNoPair>,
     /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
     /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
     pub identity: IdentityCells,

@@ -64,6 +64,13 @@ pub enum Advisory {
     /// Caution about substantial penalties, so skipping it may not be silent. Quotes the Caution
     /// verbatim. Fires ONLY on the skip (`None`); an answered box, either way, needs no advisory.
     FbarSubQuestionNotAnswered,
+    /// ★ Schedule C line **I** (and, when reached, line **J**) — the Form-1099 compliance pair — was
+    /// SKIPPED, so the box(es) print blank. Lawful: no figure on the return reads them, and unlike
+    /// Schedule B's FBAR sub-question the form prints no Caution beside them. But the §6721/§6722
+    /// exposure is real and independent of the box, so the skip is said out loud. `line_j_too` is
+    /// `true` when line I was answered **Yes** and line J was then skipped — a strictly worse place to
+    /// stop, since the filer has already declared the payments exist.
+    ScheduleC1099NotAnswered { line_j_too: bool },
     /// The ledger classified crypto donations assuming a **public charity (50%-org)** donee. A private
     /// foundation is the 20%-ceiling / basis class (which v1 refuses), so the donee must be verified.
     CharitableDoneeAssumedPublicCharity { donations: usize },
@@ -171,6 +178,24 @@ impl Advisory {
                  is under active reconsideration, and an account holding crypto PLUS fiat or securities may \
                  well be reportable. btctax never answers Schedule B Part III for you — decide it yourself."
                     .to_string(),
+            Advisory::ScheduleC1099NotAnswered { line_j_too } => format!(
+                "SCHEDULE C FORM-1099 QUESTION{} LEFT BLANK — {}. That is lawful: no figure on your \
+                 return reads {}, and btctax will never answer for you. But §6721 (failure to file a \
+                 required information return) and §6722 (failure to furnish the payee's copy) apply to \
+                 the PAYMENTS, not to this box — leaving it blank neither creates nor removes that \
+                 exposure. If you paid $600 or more to a contractor or service provider for your \
+                 business, check the Schedule C instructions and answer with `btctax income answer`.",
+                if *line_j_too { "S" } else { "" },
+                if *line_j_too {
+                    "you answered line I \"Yes\" but did not answer line J (\"did you or will you \
+                     file required Form(s) 1099?\"), so BOTH go out blank — and you have already \
+                     declared the payments exist"
+                } else {
+                    "line I (\"did you make any payments that would require you to file Form(s) \
+                     1099?\") was not answered, so the box goes out blank"
+                },
+                if *line_j_too { "them" } else { "it" }
+            ),
             Advisory::FbarSubQuestionNotAnswered =>
                 "FBAR SUB-QUESTION LEFT BLANK — you answered Schedule B line 7a \"Yes\" but did not answer \
                  its sub-question (\"are you required to file FinCEN Form 114?\"), so that box prints \
@@ -408,6 +433,21 @@ pub fn advisories(
         out.push(Advisory::SalesTaxElectionNotAsked {
             itemized: deduction_is_itemized,
         });
+    }
+
+    // ★ Schedule C's Form-1099 pair. Fires on the SKIP only, and only where the form actually asks:
+    // line I whenever there is a Schedule C, line J only once I is answered "Yes" (the form's own
+    // "If 'Yes,'"). An answered box needs no advisory — re-nagging a filer who already decided is how
+    // an advisory list teaches itself to be scrolled past.
+    if let Some(c) = ri.schedule_c.as_ref() {
+        let i_skipped = c.payments_requiring_1099.is_none();
+        let j_skipped =
+            c.payments_requiring_1099 == Some(true) && c.will_file_required_1099.is_none();
+        if i_skipped || j_skipped {
+            out.push(Advisory::ScheduleC1099NotAnswered {
+                line_j_too: j_skipped,
+            });
+        }
     }
 
     // FinCEN Notice 2020-2 — a declared foreign account.
@@ -656,6 +696,79 @@ mod tests {
         assert!(got.contains(&Advisory::AgedBoxForfeitedNoDob {
             per_box: dec!(1550) // married rate
         }));
+    }
+
+    /// ★★ Schedule C's Form-1099 pair advises on the SKIP only, and distinguishes the two places a
+    /// filer can stop. Stopping after a **Yes** on line I is strictly worse — they have already
+    /// declared the payments exist — so the message says so and the flag carries it.
+    ///
+    /// ★ It deliberately does NOT fire when there is no Schedule C: the form does not ask, so there is
+    /// nothing skipped. An advisory that fires where the question was never posed is noise, and noise
+    /// is how an advisory list teaches itself to be scrolled past.
+    #[test]
+    fn the_schedule_c_1099_pair_advises_only_on_the_skip() {
+        let run = |sc: Option<(Option<bool>, Option<bool>)>| {
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                ..Default::default()
+            };
+            ri.schedule_c = sc.map(|(i, j)| crate::tax::return_inputs::ScheduleCInputs {
+                business_description: "Bitcoin mining".into(),
+                payments_requiring_1099: i,
+                will_file_required_1099: j,
+                ..Default::default()
+            });
+            advisories(
+                &ri,
+                &LedgerState::default(),
+                dec!(90000),
+                dec!(90000),
+                Usd::ZERO,
+                &params(),
+                2024,
+                false,
+            )
+            .into_iter()
+            .find_map(|a| match a {
+                Advisory::ScheduleC1099NotAnswered { line_j_too } => Some(line_j_too),
+                _ => None,
+            })
+        };
+
+        assert_eq!(
+            run(None),
+            None,
+            "no Schedule C ⇒ the form never asks ⇒ silence"
+        );
+        assert_eq!(
+            run(Some((None, None))),
+            Some(false),
+            "line I skipped ⇒ advise, and line J was never reached"
+        );
+        assert_eq!(
+            run(Some((Some(true), None))),
+            Some(true),
+            "★ answered I=Yes then stopped ⇒ the WORSE skip: the payments are already declared"
+        );
+        assert_eq!(
+            run(Some((Some(true), Some(true)))),
+            None,
+            "both answered ⇒ nothing forgone, nothing to say"
+        );
+        assert_eq!(
+            run(Some((Some(true), Some(false)))),
+            None,
+            "answered I=Yes, J=No — an ANSWER, not a skip. btctax does not editorialise on it."
+        );
+        assert_eq!(
+            run(Some((Some(false), None))),
+            None,
+            "I=No ⇒ the form does not ask J, so nothing is skipped"
+        );
+
+        // ★ The message names BOTH sections — the exposure is the point of the advisory.
+        let m = Advisory::ScheduleC1099NotAnswered { line_j_too: false }.message();
+        assert!(m.contains("§6721") && m.contains("§6722"), "{m}");
     }
 
     /// ★★ Schedule B 7a's FBAR SUB-QUESTION is class (B): skipping it is lawful, so it must not

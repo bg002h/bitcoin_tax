@@ -38,6 +38,20 @@ fn tv(pdf: &[u8], fqn: &str) -> Option<String> {
 }
 
 /// Is a checkbox ON in a filled PDF, by fully-qualified field name?
+/// The checkbox's actual `/AS` ON-STATE, not merely whether something was written. ★ Needed because
+/// the on-state STRING is the fact under test wherever a revision differs from its siblings: Schedule
+/// C's pairs are "Yes"/"No" while Schedule B's and Schedule D's are "1"/"2". `box_on`'s bool cannot
+/// tell a correct on-state from one copied by analogy — and an analogy-copied value writes a box that
+/// renders BLANK while reading back as set.
+fn box_on_state(pdf: &[u8], fqn: &str) -> Option<String> {
+    let doc = load(pdf).unwrap();
+    let fields = collect_fields(&doc).unwrap();
+    fields
+        .iter()
+        .find(|f| f.fqn == fqn)
+        .and_then(|f| checkbox_on(&doc, f.id))
+}
+
 fn box_on(pdf: &[u8], fqn: &str) -> bool {
     let doc = load(pdf).unwrap();
     let fields = collect_fields(&doc).unwrap();
@@ -723,6 +737,8 @@ fn schedule_1_fills_both_parts_across_two_pages() {
 fn schedule_c_fills_the_printed_chain_and_reads_back() {
     // $60,000 of crypto mining gross, $8,000 of expenses ⇒ $52,000 net profit.
     let lines = ScheduleCLines {
+        line_i_1099_required: None,
+        line_j_1099_filed: None,
         line_a_business: "Bitcoin mining".into(),
         line_b_naics: "518210".into(),
         line_f_accrual: false,
@@ -798,6 +814,8 @@ fn schedule_c_fills_the_printed_chain_and_reads_back() {
 #[test]
 fn schedule_c_same_column_swap_fails_closed() {
     let lines = ScheduleCLines {
+        line_i_1099_required: None,
+        line_j_1099_filed: None,
         line_a_business: "Bitcoin mining".into(),
         line_b_naics: "518210".into(),
         line_f_accrual: false,
@@ -1890,6 +1908,8 @@ fn schedule_a_prints_the_mixed_use_mortgage_box() {
 #[test]
 fn schedule_c_prints_its_business_naics_and_accounting_method() {
     let lines = ScheduleCLines {
+        line_i_1099_required: None,
+        line_j_1099_filed: None,
         line_a_business: "Bitcoin mining".into(),
         line_b_naics: "518210".into(),
         line_f_accrual: false, // Cash
@@ -2520,4 +2540,84 @@ fn a_negative_line3_is_rejected_like_its_paren_siblings() {
     // not about the fixture failing some other way.
     btctax_forms::fill_form_8995(&lines, &kitchen_sink_header(), 2024)
         .expect("a well-formed chain must still fill");
+}
+
+/// ★★★ Schedule C lines I / J — **`None` (never asked) and `Some(false)` (asked, answered no) are
+/// DIFFERENT MARKS ON THE PAGE.** An unwritten pair versus a checked No box.
+///
+/// This is the `3b22ca1` defect class, pre-empted: an `unwrap_or(false)` in the writer would print a
+/// "No" the filer never gave, on a form they sign under §6065. The `if let Some(..)` in `schedule_c.rs`
+/// is what makes "not asked ⇒ blank" STRUCTURAL rather than conventional, and this test is what holds
+/// it — the third case below is the one that reds if it is ever collapsed to a `bool`.
+///
+/// ★★ ON-STATES: Schedule C's pairs are **"Yes"/"No"**, NOT the "1"/"2" that Schedule B and Schedule D
+/// use. Asserted literally, so an analogy-copied on-state (which writes an OFF box — a line that LOOKS
+/// answered and is not) reds here.
+#[test]
+fn schedule_c_lines_i_and_j_print_the_filers_own_answer_and_nothing_when_unasked() {
+    use btctax_core::tax::printed::ScheduleCLines;
+    let base = ScheduleCLines {
+        line_a_business: "Bitcoin mining".into(),
+        line_b_naics: "518210".into(),
+        line_f_accrual: false,
+        line_i_1099_required: None,
+        line_j_1099_filed: None,
+        line1: dec!(50000),
+        line3: dec!(50000),
+        line5: dec!(50000),
+        line7: dec!(50000),
+        line28: dec!(1000),
+        line29: dec!(49000),
+        line31: dec!(49000),
+    };
+    let i_yes = "topmostSubform[0].Page1[0].c1_4[0]";
+    let i_no = "topmostSubform[0].Page1[0].c1_4[1]";
+    let j_yes = "topmostSubform[0].Page1[0].c1_5[0]";
+    let j_no = "topmostSubform[0].Page1[0].c1_5[1]";
+    let fill = |l: &ScheduleCLines| {
+        btctax_forms::fill_schedule_c(l, &kitchen_sink_header(), 2024).unwrap()
+    };
+    let on = |pdf: &[u8], fqn: &str| box_on_state(pdf, fqn);
+
+    // (1) I = Yes, J = Yes — both boxes checked, with THIS form's own on-states.
+    let pdf = fill(&ScheduleCLines {
+        line_i_1099_required: Some(true),
+        line_j_1099_filed: Some(true),
+        ..base.clone()
+    });
+    assert_eq!(on(&pdf, i_yes).as_deref(), Some("Yes"), "line I = Yes");
+    assert_eq!(on(&pdf, i_no), None);
+    assert_eq!(on(&pdf, j_yes).as_deref(), Some("Yes"), "line J = Yes");
+    assert_eq!(on(&pdf, j_no), None);
+
+    // (2) I = Yes, J = No — the filer said they will NOT file. Their answer, printed.
+    let pdf = fill(&ScheduleCLines {
+        line_i_1099_required: Some(true),
+        line_j_1099_filed: Some(false),
+        ..base.clone()
+    });
+    assert_eq!(on(&pdf, i_yes).as_deref(), Some("Yes"));
+    assert_eq!(on(&pdf, j_no).as_deref(), Some("No"), "line J = No");
+    assert_eq!(on(&pdf, j_yes), None);
+
+    // (3) ★ NEITHER ASKED — all four halves stay unwritten. A printed "No" here would be testimony
+    //     the filer never gave. This is the case an `unwrap_or(false)` breaks.
+    let pdf = fill(&base);
+    for f in [i_yes, i_no, j_yes, j_no] {
+        assert_eq!(
+            on(&pdf, f),
+            None,
+            "{f}: unasked ⇒ UNWRITTEN. A checked box here is an answer the filer never gave."
+        );
+    }
+
+    // (4) I = No ⇒ the form never asks J, so J stays blank even though I was answered.
+    let pdf = fill(&ScheduleCLines {
+        line_i_1099_required: Some(false),
+        line_j_1099_filed: None,
+        ..base
+    });
+    assert_eq!(on(&pdf, i_no).as_deref(), Some("No"));
+    assert_eq!(on(&pdf, j_yes), None);
+    assert_eq!(on(&pdf, j_no), None, "the form does not ask J after a No");
 }

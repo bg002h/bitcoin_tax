@@ -176,6 +176,17 @@ fn fixture_for(field: &Field, base: &ReturnInputs) -> ReturnInputs {
         FieldId::SpouseDiedDuringYear => {
             ri.filing_status = btctax_core::tax::types::FilingStatus::Mfj;
         }
+        // ★ Schedule C lines I/J need a `schedule_c` to write onto; line J additionally needs line I
+        //   answered YES (the form's own "If 'Yes,'"), or it is not live and `set` is `NoSuchRow`.
+        FieldId::ScheduleC1099Required => {
+            ri.schedule_c = Some(Default::default());
+        }
+        FieldId::ScheduleC1099Filed => {
+            ri.schedule_c = Some(btctax_core::tax::return_inputs::ScheduleCInputs {
+                payments_requiring_1099: Some(true),
+                ..Default::default()
+            });
+        }
         // ★ The FBAR sub-question is live only under a Schedule B 7a "Yes"; a set on a non-live
         //   question correctly refuses with `NoSuchRow`, so the fixture must make it live.
         FieldId::FbarFilingRequired => ri.foreign_accounts = Some(true),
@@ -289,7 +300,6 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         "int_1099",
         "div_1099",
         "g_1099",
-        "schedule_c",
         "capital_loss_carryforward_in",
         "charitable_carryover_in",
         "qbi",
@@ -300,6 +310,15 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         // field for it would invite the filer to contradict the year their return is filed under.
         // Exempt DELIBERATELY, which is what this census exists to force someone to decide.
         "tax_year",
+        // ★ `schedule_c` is no longer a WHOLESALE exemption: lines I and J are in scope (class-(B)
+        //   skippables), so the struct is exempted LEAF BY LEAF, exactly as `sch1` is for the same
+        //   reason. A blanket prefix here would have silently re-exempted the two the moment they
+        //   became covered — which is precisely the contradiction this census caught.
+        "schedule_c.owner",
+        "schedule_c.business_description",
+        "schedule_c.naics_code",
+        "schedule_c.accounting_method",
+        "schedule_c.expenses",
         "sch1.state_refund_taxable",
         "sch1.student_loan_interest_paid",
         "sch1.ira_deduction_claimed",
@@ -379,13 +398,13 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(
-        field_count, 75,
-        "expected 75 Fields (one per §5.8 in-scope leaf)"
+        field_count, 77,
+        "expected 77 Fields (one per §5.8 in-scope leaf)"
     );
     assert_eq!(
         covered.len(),
-        75,
-        "expected 75 distinctly-covered in-scope leaves"
+        77,
+        "expected 77 distinctly-covered in-scope leaves"
     );
 
     // ── 5. ★ I-6: PIN the observed FieldId → leaf-path map against a literal (kills TRANSPOSITION). ──
@@ -542,6 +561,14 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
     (
         FieldId::SpouseDiedDuringYear,
         "header.spouse_died_during_year",
+    ),
+    (
+        FieldId::ScheduleC1099Required,
+        "schedule_c.payments_requiring_1099",
+    ),
+    (
+        FieldId::ScheduleC1099Filed,
+        "schedule_c.will_file_required_1099",
     ),
     (FieldId::ExclPuertoRico, "excluded_puerto_rico_income"),
     (FieldId::Excl2555L45, "form_2555_line45"),

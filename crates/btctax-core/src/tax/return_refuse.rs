@@ -419,6 +419,8 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             naics_code: _,
             accounting_method: _,
             expenses,
+            payments_requiring_1099: _, // Option<bool>, not an amount
+            will_file_required_1099: _,
         } = c;
         if neg(*expenses) {
             return Some("Schedule C expenses");

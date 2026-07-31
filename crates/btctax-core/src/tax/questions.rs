@@ -544,6 +544,24 @@ pub enum SkippableId {
     /// requirement for now, that is under active reconsideration, and an account holding crypto PLUS
     /// fiat or securities may well be reportable.
     FbarFilingRequired,
+    /// ★★ **Schedule C line I** — *"Did you make any payments in 2024 that would require you to file
+    /// Form(s) 1099?"* A compliance declaration about the filer's own information-reporting.
+    ///
+    /// Class (B), not a refusal, by the refusal review's criterion applied honestly: no figure on the
+    /// return reads it, a blank is no testimony, and — **unlike Schedule B's FBAR sub-question** —
+    /// the form prints NO Caution beside it. That difference is what decided it. The §6721/§6722
+    /// exposure IS real, so the skip is not silent:
+    /// [`super::advisories::Advisory::ScheduleC1099NotAnswered`] names both sections.
+    ScheduleC1099Required,
+    /// **Schedule C line J** — *"If 'Yes,' did you or will you file required Form(s) 1099?"*
+    ///
+    /// ★★ Live only when line I is answered **Yes** — the form says *"If 'Yes,'"* — which makes this
+    /// the registry's live example of a question whose liveness depends on another question's
+    /// **NON-NEUTRAL** answer. That shape silently broke the registry's own property harness once: a
+    /// loop answering every other live question at its neutral switched this class of question OFF, so
+    /// it could never be exercised. The `is_none()` guards in `return_refuse.rs` were written for it
+    /// and, until now, had no live case.
+    ScheduleC1099Filed,
 }
 
 /// The value shape of a [`SkippableQuestion`] — a yes/no answer, or a calendar date.
@@ -584,7 +602,7 @@ pub struct SkippableQuestion {
     pub set_date: fn(&mut ReturnInputs, Date),
 }
 
-/// ★ THE SKIPPABLE REGISTRY. Ten class-(B) prompts — SEPARATE from [`FORM_QUESTIONS`] (spec §5.3). The
+/// ★ THE SKIPPABLE REGISTRY. Twelve class-(B) prompts — SEPARATE from [`FORM_QUESTIONS`] (spec §5.3). The
 /// liveness gates and prompts are lifted verbatim from the old `answer.rs::Skippable`; the `income answer`
 /// flow and the form engine both DERIVE their skippable prompts from this one list.
 ///
@@ -796,6 +814,54 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
         get_date: |_ri| None,
         set_date: |_ri, _v| {},
     },
+
+    // ★★ SCHEDULE C's Form-1099 COMPLIANCE PAIR (lines I and J). Class (B) by the refusal review's
+    // criterion: no figure reads them, a blank is no testimony, and the form prints NO Caution beside
+    // them — unlike Schedule B's FBAR sub-question, which is the distinction that decided this. The
+    // §6721/§6722 exposure is real, so the skip fires an advisory naming both sections.
+    SkippableQuestion {
+        id: SkippableId::ScheduleC1099Required,
+        durability: Durability::PerYear,
+        prompt: "Schedule C line I: did you make any payments this year that would require you to file \
+                 Form(s) 1099? (For example, $600 or more to a contractor or service provider for your \
+                 business. See the Schedule C instructions.)",
+        help: "§6721/§6722 penalise failing to file a required information return and failing to \
+               furnish the payee's copy. Skipping is lawful — no figure on your return reads this box, \
+               and btctax will never answer it for you — but the box goes out BLANK and the exposure \
+               is yours either way.",
+        kind: SkippableKind::YesNo,
+        live: |ri| ri.schedule_c.is_some(),
+        get_bool: |ri| ri.schedule_c.as_ref().and_then(|c| c.payments_requiring_1099),
+        set_bool: |ri, v| {
+            if let Some(c) = ri.schedule_c.as_mut() {
+                c.payments_requiring_1099 = Some(v);
+            }
+        },
+        get_date: |_ri| None,
+        set_date: |_ri, _v| {},
+    },
+    SkippableQuestion {
+        id: SkippableId::ScheduleC1099Filed,
+        durability: Durability::PerYear,
+        prompt: "Schedule C line J: did you, or will you, file those required Form(s) 1099?",
+        help: "Asked only because you answered line I \"Yes\" — the form itself says \"If 'Yes,'\". \
+               Skipping leaves the box blank; §6721/§6722 still apply.",
+        kind: SkippableKind::YesNo,
+        // ★ THE FORM CONDITIONS IT ON LINE I — "If 'Yes,'". A Schedule C AND a Yes on I.
+        live: |ri| {
+            ri.schedule_c
+                .as_ref()
+                .is_some_and(|c| c.payments_requiring_1099 == Some(true))
+        },
+        get_bool: |ri| ri.schedule_c.as_ref().and_then(|c| c.will_file_required_1099),
+        set_bool: |ri, v| {
+            if let Some(c) = ri.schedule_c.as_mut() {
+                c.will_file_required_1099 = Some(v);
+            }
+        },
+        get_date: |_ri| None,
+        set_date: |_ri, _v| {},
+    },
 ];
 
 #[cfg(test)]
@@ -842,8 +908,8 @@ mod tests {
         use crate::tax::types::FilingStatus;
         assert_eq!(
             SKIPPABLE_QUESTIONS.len(),
-            10,
-            "blind ×2, SALT, DOB ×2, DOD ×2, the FBAR sub-question, the §G-9 death pair"
+            12,
+            "blind ×2, SALT, DOB ×2, DOD ×2, FBAR, the §G-9 death pair, Schedule C I/J"
         );
         // SALT is live iff a schedule_a exists; spouse-blind iff a spouse Person exists.
         let salt = SKIPPABLE_QUESTIONS

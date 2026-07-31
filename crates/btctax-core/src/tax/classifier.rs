@@ -347,6 +347,8 @@ fn classify_schedule_c(c: &mut Census, sc: &ScheduleCInputs) {
         naics_code: _,
         accounting_method,
         expenses: _,
+        payments_requiring_1099: _,
+        will_file_required_1099: _,
     } = sc;
     c.exempt(
         owner,
@@ -359,6 +361,12 @@ fn classify_schedule_c(c: &mut Census, sc: &ScheduleCInputs) {
         "§2.8: Cash default; `accrual` is accepted, unmodeled and UNREFUSED and flips the printed Sch C \
          line F — a known open Important, filed → P8",
     );
+    // ★ Schedule C lines I and J — the Form-1099 compliance pair. Class (B): asked as
+    // `SkippableId::ScheduleC1099{Required,Filed}`, silence lawful. Not `declaration(..)` because no
+    // figure on the return reads them and the form prints no Caution — but NOT plain "no tax
+    // direction" either, because §6721/§6722 exposure is real, which is what the skip advisory names.
+    // The leaves themselves are `Option<bool>` and are classified through the registry, so they are
+    // named here only so the no-`..` destructure keeps its compile-time bite.
 }
 
 fn classify_schedule_a(c: &mut Census, a: &ScheduleAInputs) {

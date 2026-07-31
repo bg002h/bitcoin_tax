@@ -163,7 +163,11 @@ fn recorded_gaps_may_only_shrink() {
     // "we have the datum and nothing connects it to the field" species — btctax held the name and TIN
     // and wrote them to page 1, while a filed page 2 went out unidentified. Closed by MAPPING the
     // cells (`[identity_page2]`), not by re-describing the omission.
-    const GAPS: usize = 10;
+    // 2026-07-31: 10 → 6. Schedule C lines I and J (4 fields) — the Form-1099 compliance pair — are
+    // now ASKED as class-(B) skippables and PRINTED from the filer's own answer, with a §6721/§6722
+    // advisory on the skip. Closed by collecting the input, which is the only way the message below
+    // permits.
+    const GAPS: usize = 6;
 
     let mut found = Vec::new();
     for stem in CENSUSED {

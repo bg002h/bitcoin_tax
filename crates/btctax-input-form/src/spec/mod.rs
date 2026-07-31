@@ -259,7 +259,7 @@ mod tests {
     /// entry; the `FieldId ↔ SkippableId` map stays TOTAL over all 5 skippables (SALT → `SaSaltUseSalesTax`);
     /// and the spouse-gated liveness edge holds.
     #[test]
-    fn skippables_section_delegates_nine_skippables_and_the_map_is_total() {
+    fn skippables_section_delegates_eleven_skippables_and_the_map_is_total() {
         let skips = section(SectionId::Skippables);
 
         // SALT election is a Schedule-A Field (Task 5), NOT a Skippables Field.
@@ -271,12 +271,12 @@ mod tests {
             "the SALT election is Schedule-A-owned, not a Skippables Field"
         );
 
-        // Exactly the nine non-SALT skippables.
+        // Exactly the eleven non-SALT skippables.
         let ids: Vec<FieldId> = skips.fields.iter().map(|f| f.id).collect();
         assert_eq!(
             ids.len(),
-            9,
-            "blind ×2 + DOB ×2 + DOD ×2 + the FBAR sub-question + the §G-9 DEATH GATES ×2"
+            11,
+            "blind ×2 + DOB ×2 + DOD ×2 + FBAR + the §G-9 death gates ×2 + Schedule C I/J"
         );
         for expected in [
             FieldId::BlindTaxpayer,
@@ -288,6 +288,8 @@ mod tests {
             FieldId::FbarFilingRequired,
             FieldId::TaxpayerDiedDuringYear,
             FieldId::SpouseDiedDuringYear,
+            FieldId::ScheduleC1099Required,
+            FieldId::ScheduleC1099Filed,
         ] {
             assert!(
                 ids.contains(&expected),
@@ -327,6 +329,12 @@ mod tests {
                     ri.header.taxpayer_died_during_year = Some(true);
                     ri.header.spouse_died_during_year = Some(true);
                     ri.foreign_accounts = Some(true);
+                    // ★ Schedule C lines I/J: a `schedule_c` to write onto, and — for line J — line I
+                    // answered YES, since the form asks J only "If 'Yes,'".
+                    ri.schedule_c = Some(btctax_core::tax::return_inputs::ScheduleCInputs {
+                        payments_requiring_1099: Some(true),
+                        ..Default::default()
+                    });
                 }
             };
             match entry.kind {
