@@ -290,3 +290,66 @@ fn a_w2_only_return_shows_whether_the_schedule_d_case_arises() {
         notreq.and_then(|f| btctax_forms::testonly::checkbox_on(&doc, f.id))
     );
 }
+
+/// ★ A DEMONSTRATION of Schedule 1-A Part IV's VIN comb — not an emitter. Schedule 1-A is not
+/// emitted yet (B3 T2–T7 unstarted, no `.map.toml`), so this fills the AcroForm directly to answer
+/// one measurable question: **does a 17-character VIN land one character per cell, and what does
+/// `maxlen=17` do at the boundary?**
+///
+/// Run: `cargo test -p btctax-forms --test field_census_slice -- --ignored vin_demo --nocapture`
+#[test]
+#[ignore = "writes a demo PDF; run explicitly"]
+fn vin_demo() {
+    use btctax_forms::testonly as bf;
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("workspace root");
+    let pdf = root.join("design/forms/2025/f1040s1a--2025.pdf");
+    let bytes = std::fs::read(&pdf).expect("the TY2025 Schedule 1-A (gitignored; re-fetchable)");
+    let mut doc = bf::load(&bytes).expect("parses");
+    bf::drop_xfa_and_set_needappearances(&mut doc).expect("appearances");
+    let fields = bf::collect_fields(&doc).expect("fields");
+    let idx = bf::index(&fields);
+
+    // ★ Obviously-synthetic VINs: 17 chars, and VINs never contain I, O or Q.
+    let vin_a = "ZZ9TESTVEHZZ00001"; // exactly 17
+    let vin_b = "ZZ9TESTVEHZZ00002";
+    assert_eq!(
+        vin_a.len(),
+        17,
+        "a VIN is 17 characters — the comb's /MaxLen"
+    );
+
+    let w = |fqn: &str, v: &str| (fqn.to_string(), bf::FieldValue::Text(v.to_string()));
+    let writes = vec![
+        w(
+            "form1[0].Page2[0].Table_Line22[0].Line22a[0].VIN-1_Comb[0].f2_01[0]",
+            vin_a,
+        ),
+        w("form1[0].Page2[0].Table_Line22[0].Line22a[0].f2_02[0]", "0"),
+        w(
+            "form1[0].Page2[0].Table_Line22[0].Line22a[0].f2_03[0]",
+            "2,400",
+        ),
+        w(
+            "form1[0].Page2[0].Table_Line22[0].Line22b[0].VIN-2_Comb[0].f2_04[0]",
+            vin_b,
+        ),
+        w("form1[0].Page2[0].Table_Line22[0].Line22b[0].f2_05[0]", "0"),
+        w(
+            "form1[0].Page2[0].Table_Line22[0].Line22b[0].f2_06[0]",
+            "1,100",
+        ),
+        w("form1[0].Page2[0].f2_07[0]", "3,500"), // line 23 — "Add lines 22a and 22b, column (iii)"
+    ];
+    for (fqn, _) in &writes {
+        assert!(idx.contains_key(fqn), "field missing from the PDF: {fqn}");
+    }
+    bf::apply_writes(&mut doc, &idx, &writes).expect("writes");
+    bf::strip_nondeterminism(&mut doc);
+    let out = bf::save(&mut doc).expect("save");
+    let dest = std::env::var("VIN_DEMO_OUT").unwrap_or_else(|_| "/tmp/sch1a-vin-demo.pdf".into());
+    std::fs::write(&dest, &out).expect("write");
+    println!("  wrote {dest} — VIN a = {vin_a} ({} chars)", vin_a.len());
+}
