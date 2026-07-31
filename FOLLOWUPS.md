@@ -896,7 +896,7 @@ census likely has to record the decision's EXISTENCE separately from its CONTENT
 ★ **Never auto-shred.** Destroying evidence of diligence must be an explicit, informed act by the
 filer — never a default or a background job.
 
-### G-13 — ★★★ FIELD PROVENANCE — **5 of 15 forms censused (2026-07-30); 4 GAPS, one UNDERSTATING**
+### G-13 — ★★★ FIELD PROVENANCE — **COMPLETE: 15 of 15 forms censused (2026-07-30); 18 GAP fields**
 
 **Owning phase: NOT B3.** Whole-surface, and it interlocks with **§G-11** (which blocks its honest
 form). Filed 2026-07-30. **Full design note: [`design/forms/FIELD_PROVENANCE.md`](design/forms/FIELD_PROVENANCE.md)** — read that first; this entry is the register hook.
@@ -924,14 +924,68 @@ filer WITH a prior-year QBI loss is never asked, so nothing stops the overstatem
 ★ This is exactly why `unmodeled` and `gap` must stay distinct: `unmodeled` is a benefit the filer
 FORGOES (safe — it can only overstate tax); a missing REDUCTION is the reverse.
 
-**Current gap count: 4 fields / 3 questions** — the Form 4361 minister box, and the FBAR pair (two
-radio halves of one question). Counted per FIELD because that is the mechanical unit.
+**Current gap count: 18 fields / 9 items**, pinned by `recorded_gaps_may_only_shrink` (`GAPS = 18`).
+Counted per FIELD because that is the mechanical unit — a Yes/No is two widgets for one question.
 
-**✅ The gate exists.** `btctax-forms/tests/field_census.rs` asserts `(map ∪ [census]) == the PDF's
-AcroForm field set`, exactly. **f8959 is fully censused** — 19 mapped + 7 `unmodeled` = 26 — and
-`CENSUS_NOT_YET_WRITTEN` is a shrink-only ratchet holding the other 14 forms. Mutation-verified in
-both directions: dropping a census entry reds with *"in NEITHER the map nor the [census]"*, and
-censusing an already-mapped field reds as a contradiction.
+| # | form | line | what is never asked | direction |
+|---|---|---|---|---|
+| 1 | Schedule SE | A | Form 4361 minister declaration | incomplete return |
+| 2 | Schedule B | 7a-FBAR | *"are you required to file FinCEN Form 114?"* (2 fields) | penalties |
+| 3 | Form 8995 | 3 | prior-year QBI loss carryforward | **UNDERSTATES** |
+| 4 | Form 8283 | 5a | restriction on the donee's right to use or dispose (2 fields) | **UNDERSTATES** |
+| 5 | Form 8283 | 5b | retained right to income/possession/voting (2 fields) | **UNDERSTATES** |
+| 6 | Form 8283 | 5c | restriction limiting the property to a particular use (2 fields) | **UNDERSTATES** |
+| 7 | Form 8283 | p2 header | name + TIN btctax HOLDS and never writes (2 fields) | administrative |
+| 8 | Schedule C | G | material participation (2 fields) | **UNDERSTATES** |
+| 9 | Schedule C | I / J | Form 1099 filing declarations (4 fields) | penalties |
+
+★★★ **Item 8 is the one that changes the tax, and it was adjudicated against primary sources rather
+than inferred.** Form 8960 (2024) line 4a reads *"…trusts, **trades or businesses**, etc."*; i8960's
+What's New says line 4a *"was amended to bring attention to certain income reported on Schedule C …
+that is subject to NIIT … to better reflect section 1411(c)(2)"*; and i8960 defines a passive activity
+as *"any trade or business in which you don't materially participate."* btctax's NII is
+`taxable_interest + ordinary_dividends + net_capital_gain + crypto_lending_interest`
+(`other_taxes.rs:232`) — Schedule C income never enters it and Form 8960 line 4a stays blank, which is
+correct **only under the answer btctax never obtained**. ★ Finding it also corrected an entry written
+earlier in the same burndown: the f8960 line 4a census reason had said "none modelled", which is wrong
+on the 2024 revision.
+
+★★ **Item 7 is a different species from the rest and is why `gap` is not simply "unmodelled".** Every
+other gap is a question never asked; that one is a datum btctax **has** (it writes the name and TIN to
+page 1) with no map cell on page 2 to write it to. "We have it and never write it" is not an honest
+account, so it is a gap even though no figure changes.
+
+★★★ **Recorded but deliberately NOT counted — the Schedule C aggregate-expense problem.**
+`ScheduleCInputs` carries one `expenses: Usd` with no category breakdown, so btctax writes line 28
+(*"Add lines 8 through 27b"*) while all of lines 8–27b are blank: **a total whose addends are empty**,
+the only place on the return where a mapped line and its censused inputs do not cross-foot. Two
+consequences follow mechanically — line 9 stays blank so Part IV's own gate (*"only if you are
+claiming car or truck expenses on line 9"*) never opens, and line 24b has no place to apply the
+§274(n) 50% meals limit. Each cell IS honestly accountable individually ("no breakdown is collected"),
+which is why they stay `unmodeled`; the weakness is recorded once rather than smeared across twenty
+reasons. **Owning phase: not B3.**
+
+★ **Two near-misses worth keeping visible, both `unmodeled` by the criterion and both one field from
+being closed:** Form 1040's **spouse IP PIN** (the taxpayer's *is* captured — a joint return omitting
+an issued spouse PIN is rejected), and Schedule 3 **line 6b**, the Form 8801 prior-year minimum-tax
+credit, which becomes a gap the moment a prior-year AMT input is collected.
+
+**✅ The gate exists AND the ratchet is CLOSED.** `btctax-forms/tests/field_census.rs` asserts
+`(map ∪ [census]) == the PDF's AcroForm field set`, exactly, for **all 15 forms**.
+`CENSUS_NOT_YET_WRITTEN` ran 15 → 0 and its bound is now `is_empty()`, not a slack allowance — a 16th
+form cannot arrive uncensused, because `the_two_lists_partition_every_form` forces it onto one of the
+two lists, the emptiness assertion rejects the uncensused one, and `census_accounts_for_every_field`
+rejects the other unless its fields are genuinely accounted for. Both routes fail closed.
+Mutation-verified in both directions: dropping a census entry reds with *"in NEITHER the map nor the
+[census]"*, censusing an already-mapped field reds as a contradiction, and restoring a form to
+`CENSUS_NOT_YET_WRITTEN` reds two independent tests.
+
+**Three `artifact` classifications recur and are worth naming**, because they are the cases where a
+blank is not merely permitted but *required*: IRS **"Reserved for future use"** cells (Schedule 3
+line 6e, Form 1040 line 30, Schedule 1 line 22); the **Paid Preparer** block on Form 1040 (7 fields —
+a preparer attests under §6695 to their own PTIN and firm, and btctax is not one); and **Form 8283
+Part V**, the donee acknowledgment, where writing the charity's own sworn statement would forge a
+third party's testimony. Leaving these blank is the correct positive act.
 
 ★★ **The prototype's real lesson: this is knowledge made ENFORCEABLE, not new knowledge.**
 `Form8959Map`'s doc comment already said it in prose — *"Lines 2/3 (Form 4137 / Form 8919) and all of
