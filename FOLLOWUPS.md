@@ -1400,9 +1400,54 @@ got.
 
 </details>
 
-### G-21 — ★★★ Form 8283 5a/5b/5c: the question registry is RETURN-shaped, these are PER-DONATION
+### G-21 — ✅ **CLOSED 2026-07-31** — Form 8283 5a/5b/5c, asked ONCE for the whole return
 
-**Owning phase: whenever 8283 Section B is next touched. This is the last of the §G-13 gaps (6 of 6).**
+**Owning phase: was "whenever 8283 Section B is next touched". This was the last of the §G-13 gaps
+(6 of 6); the census `GAPS` ratchet is now `0`.**
+
+★★★ **The obstacle below was real and the OWNER dissolved it in one sentence** — *"ask the user if any
+of their donations had strings attached, and require them to answer no."* Every analysis under it
+assumed the question had to be **per-donation** because the underlying FACT is per-donation. It does
+not follow. A **return-level universal** — *did ANY donation carry a restriction?* — is a strictly
+stronger statement than the three per-gift answers, it is the one the ordinary filer can answer
+truthfully in one word, and it fits the existing `ReturnInputs`-shaped registry with no new machinery.
+The three boxes are then written from it because a universal "no" entails each particular "no".
+
+★★ **The lesson is not about 8283.** A per-row fact does not imply a per-row QUESTION. When the honest
+answer to "was there any X?" is almost always "no", the universal costs one prompt and carries the same
+signature weight — and asking it that way turned a blocked structural redesign into a skippable and a
+refusal. Look for this shape before building a per-row collection surface.
+
+**As built:**
+
+| piece | where |
+|---|---|
+| `ReturnInputs.donations_had_restrictions: Option<bool>` | `return_inputs.rs:604` |
+| `SkippableId::DonationsHadRestrictions`, `live: |_ri| true` | `questions.rs:927` |
+| the MANDATORY half — refuses unless `Some(false)` | `return_1040.rs`, top of `screen_compute_dependent` |
+| `RefuseReason::DonationRestrictionsUnresolved` | `return_refuse.rs:44` |
+| the three "No" boxes | `form8283.rs`, inside the page-2 identity block |
+
+**Why the question is offered UNCONDITIONALLY but enforced NARROWLY.** Liveness is `fn(&ReturnInputs)`
+and the donations live in the **`LedgerState`**, which it cannot see — the same blindness that puts the
+non-crypto-noncash guard in `screen_compute_dependent` rather than `screen_inputs`. So the skippable is
+always *offered* (a filer who donated nothing is never blocked by it) and the gate that actually
+**binds** is keyed on `year_donation_deduction(state, year) > QUALIFIED_APPRAISAL_THRESHOLD`, i.e. on a
+year that genuinely files a Section B. A gift *at* $5,000 is Section A and is never asked.
+
+**Both refusal directions are enforced, and they refuse for opposite reasons.** Unanswered refuses
+because btctax must not answer for the filer; `Some(true)` refuses because the answer is known and it
+says the full-FMV deduction btctax computed is **too large** (Reg §1.170A-7) — and btctax cannot tell
+which gift, so it declines the year rather than file an overstated number.
+
+★ **B1 discharged with five observed kills.** Refusal side: dropping the `None` arm, dropping the
+`Some(true)` arm, dropping the threshold scope, and widening `>` to `>=` (which reds on exactly $5,000)
+each red by name. Emitter side: writing "No" on an unanswered return reds, and so does not writing it —
+the `3b22ca1` class in both directions. A sixth, copying Schedule C's `"Yes"/"No"` on-state by analogy,
+is caught **twice**: by the test and independently by the §G-19b on-state guard.
+
+<details><summary>Original filing (2026-07-31) — the structural obstacle, kept because the reasoning is
+what the owner's proposal overturned</summary>
 
 The decision table already rules on the tax question — *"BUILD AS REFUSAL-ON-YES (ask; 'No' proceeds,
 'Yes' refuses). The ONLY limb-(a) item of the six"* — and that stands. Attempting the build on
@@ -1438,6 +1483,8 @@ Schedule C uses. Yes is the LEFT widget (x 538) and No the right (x 559), matchi
 ★ These questions exist only in **Section B** (gifts over $5,000, the appraisal path), so liveness is
 "this donation has a Section B row" — narrower than "there is a Schedule A", and narrower still than
 "there is a donation".
+
+</details>
 
 ### G-20 — the MFS spouse's §63(f) boxes: **now ADVISED (2026-07-31)**; widening still open
 

@@ -181,6 +181,11 @@ pub fn kitchen_sink_household() -> (ReturnInputs, LedgerState) {
         // `FlatCap` never reads, so a TY2024 return legitimately carries no answer to it.
         tax_year: 2024,
         filing_status: FilingStatus::Mfj,
+        // ★★ §G-21 — Form 8283 Section B lines 5a/5b/5c, asked ONCE for the whole return. This
+        // household donates over $5,000, so a Section B files and the answer is MANDATORY: unanswered
+        // or `Some(true)` REFUSES the year, because a restricted gift's §170 deduction is smaller than
+        // the full fair market value btctax computes. "No strings" is the ordinary case.
+        donations_had_restrictions: Some(false),
         header: HouseholdHeader {
             taxpayer: person("John", "Doe", "123-45-6789", "Engineer"),
             spouse: Some(person("Jane", "Doe", "987-65-4321", "Architect")),

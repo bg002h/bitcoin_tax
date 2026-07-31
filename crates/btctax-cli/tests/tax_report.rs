@@ -1862,13 +1862,20 @@ fn a_pre_d8_vault_refuses_until_answered_and_income_answer_is_the_way_out() {
     // (c) The user no longer has the TOML — they deleted it, as the plaintext-hygiene guidance says to.
     std::fs::remove_file(&toml).unwrap();
 
-    // (d) `income answer` is the way out. `income answer` now asks SEVEN mandatory declarations in
-    // registry order (dependent-taxpayer, foreign-accounts, foreign-trust, HSA-activity, dual-status,
-    // §911/931/933 income-exclusion gate, §G-9 taxpayer-death gate) — "n" to each — then Enter to skip
-    // the two always-live skippables (§63(f) blindness, then date of birth, in SKIPPABLE_QUESTIONS
-    // registry order — both bare-Enter skips, so their relative order is immaterial here). The §G-9
-    // DATE of death is not among them: it is live only once its gate is answered "y".
-    let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\nn\nn\n\n\n";
+    // (d) `income answer` is the way out. It asks SIX mandatory declarations in registry order
+    // (dependent-taxpayer, foreign-accounts, foreign-trust, HSA-activity, dual-status, §911/931/933
+    // income-exclusion gate) — "n" to each — then bare Enter to skip the always-live SKIPPABLES:
+    // §63(f) blindness, the date of birth, the §G-9 taxpayer-death gate (2026-07-31: downgraded from a
+    // mandatory declaration, since silence already forgoes the addition), and the §G-21
+    // donation-restrictions universal (2026-07-31: offered always, because the donations are in the
+    // LEDGER and liveness cannot see them; it becomes MANDATORY only on a Section-B year, which this
+    // household is not). The §G-9 DATE of death is not among them: it is live only once its gate
+    // is answered "y".
+    //
+    // ★ Six "n" then bare Enters — the exact count is deliberate. A script that runs out fails with
+    // "input ended before every question was answered", which is how this test noticed the interview
+    // had grown at all.
+    let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\nn\n\n\n\n\n\n";
     let mut screen: Vec<u8> = Vec::new();
     cmd::answer::answer_return_inputs(&vault, &pp(), 2024, &mut keystrokes, &mut screen).unwrap();
     let screen = String::from_utf8(screen).unwrap();

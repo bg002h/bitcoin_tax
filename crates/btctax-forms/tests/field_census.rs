@@ -172,7 +172,14 @@ fn recorded_gaps_may_only_shrink() {
     // that "Schedule D is always required", which is FALSE (`ScheduleDLines::must_file` exists
     // precisely because it is not). §G-18: the census REASON was wrong, not the count. The field is
     // now mapped and written; see the map's own note.
-    const GAPS: usize = 6;
+    // ★★★ 2026-07-31: 6 → 0. THE CENSUS'S GAP SURFACE IS CLOSED. The last six were Form 8283
+    // Section B lines 5a/5b/5c, asked as ONE return-level universal ("did any donation have strings
+    // attached?") and printed as three Nos from the filer's own answer; a YES refuses the year.
+    //
+    // ★ Zero is not the end of the census — it is the ratchet at rest. `<` is still the only legal
+    // direction, and the two lists must still partition every field, so a NEW gap can be added (that
+    // is what the register is for) but not silently.
+    const GAPS: usize = 0;
 
     let mut found = Vec::new();
     for stem in CENSUSED {

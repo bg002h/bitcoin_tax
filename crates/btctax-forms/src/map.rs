@@ -600,6 +600,14 @@ pub struct Form8283Map {
     /// all — the crypto-slice maps carry no `[identity]` block either.
     #[serde(default)]
     pub identity_page2: Option<IdentityCells>,
+    /// ★ Section B lines **5a / 5b / 5c** — the restriction questions. `Option`: only the full-return
+    /// revision carries them (the crypto slice writes no Section B declarations).
+    #[serde(default)]
+    pub line5a: Option<YesNoPair>,
+    #[serde(default)]
+    pub line5b: Option<YesNoPair>,
+    #[serde(default)]
+    pub line5c: Option<YesNoPair>,
     /// Section A (≤ $5,000).
     pub section_a: Section8283A,
     /// Section B (> $5,000).

@@ -6,7 +6,10 @@
 # (keys sort alphabetically — that is the `toml::Value` table order, not a meaningful layout).
 
 amt_depreciation_same_as_regular = true
+capital_loss_carryforward_in_provenance = "user"
 charitable_carryover_in = []
+charitable_carryover_in_provenance = "user"
+donations_had_restrictions = false
 dual_status_alien = false
 excluded_puerto_rico_income = "0"
 filing_status = "Mfj"
@@ -86,6 +89,8 @@ extension_payment = "500"
 other_withholding = "0"
 
 [qbi]
+qbi_carryforward_in = "0"
+qbi_carryforward_in_provenance = "user"
 reit_ptp_carryforward_in = "0"
 reit_ptp_carryforward_in_provenance = "user"
 

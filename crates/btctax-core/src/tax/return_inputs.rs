@@ -582,6 +582,26 @@ pub struct ReturnInputs {
     /// box asserting a fact whose unchecked state we print today from the MFS coupling alone; `None` ⇒ refuse
     /// (`DualStatusAlienUnanswered`), `Some(true)` ⇒ refuse unsupported (§63(c)(6)(B): NRA standard deduction
     /// is zero), `Some(false)` ⇒ proceed.
+    /// ★★★ **Form 8283 Section B lines 5a / 5b / 5c** — the three restriction questions, asked ONCE
+    /// for the whole return: *"did any of your donations have strings attached?"*
+    ///
+    /// The form asks three things about each donated property, and a **Yes** to any of them shrinks or
+    /// kills the §170 deduction (Reg §1.170A-7 — a gift with retained rights is not a gift of the whole
+    /// thing). btctax deducts at full fair market value, so a Yes means the number on the return is
+    /// **WRONG**, and it refuses rather than compute it.
+    ///
+    /// ★★ **ONE return-level question, three per-donation boxes — sound, not a shortcut.** The filer
+    /// states a UNIVERSAL ("none of my donations had any of these"), from which each box's answer
+    /// follows for every donation. That is why the prompt ENUMERATES all three limbs in the form's own
+    /// words: a "No" to something vaguer would be laundered into three specific answers the filer never
+    /// gave. Enumerate the YES-conditions, default to refusing, so an omission fails closed.
+    ///
+    /// ★ It also dissolves §G-21's blocker. The registry is RETURN-shaped and these looked
+    /// per-donation; asking the universal makes them return-shaped too, so no per-row machinery is
+    /// needed. A **Yes** refuses rather than asking which donation — btctax cannot reduce the right
+    /// gift's deduction, so the honest move is to send that year's 8283 to be completed by hand.
+    #[serde(default)]
+    pub donations_had_restrictions: Option<bool>,
     #[serde(default)]
     pub dual_status_alien: Option<bool>,
 
@@ -684,6 +704,7 @@ impl Default for ReturnInputs {
             foreign_trust: None,
             foreign_country_names: String::new(),
             fbar_filing_required: None,
+            donations_had_restrictions: None,
             dual_status_alien: None,
         }
     }

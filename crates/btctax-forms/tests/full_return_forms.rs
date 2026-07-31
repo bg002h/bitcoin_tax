@@ -2104,6 +2104,86 @@ fn schedule_d_line3_cell_text_equals_the_8949s_printed_column_total() {
     );
 }
 
+/// ★★★ **B1 kill for §G-21, the EMITTER half.** Form 8283 Section B lines 5a/5b/5c each print a Yes/No
+/// pair. `Some(false)` — "no strings attached" — checks all three **No** boxes, because the filer said
+/// so. `None` must check **nothing**: an unanswered question is a blank, and a blank and a "No" are
+/// indistinguishable on the printed page but are not the same thing under §6065. This is exactly the
+/// class of defect fixed in `3b22ca1` (an unanswered Schedule B Part III question printed a "No"
+/// nobody gave), and the reason the parameter is `Option<bool>` rather than `bool`.
+///
+/// A `Some(true)` case is deliberately absent: it is unreachable by construction, because
+/// `screen_compute_dependent` refuses the year before a packet exists — held by
+/// `a_section_b_year_refuses_until_the_restriction_questions_are_answered_no`.
+///
+/// Mutation-verified: making the writer unconditional (write "No" on `None` too) reds the blank half;
+/// deleting the write reds the answered half.
+#[test]
+fn the_8283_restriction_boxes_are_written_only_when_the_filer_answered_no() {
+    use btctax_core::forms::{Form8283HowAcquired, Form8283Row, Form8283Section};
+    use btctax_core::tax::printed::form_8283_printed;
+
+    // A SECTION B row — over $5,000 — because 5a/5b/5c live on page 2 and only Section B prints them.
+    let row = Form8283Row {
+        section: Some(Form8283Section::B),
+        description: "1.00000000 BTC".into(),
+        how_acquired: Form8283HowAcquired::Purchased,
+        date_acquired: time::macros::date!(2021 - 03 - 01),
+        date_contributed: time::macros::date!(2024 - 07 - 04),
+        cost_basis: dec!(1200),
+        fmv: dec!(60000),
+        claimed_deduction: Some(dec!(60000)),
+        fmv_method: "qualified appraisal".into(),
+        donee: "Habitat".into(),
+        appraiser: "A. Praiser".into(),
+        needs_review: false,
+        details: None,
+    };
+    let boxes = [
+        ("Form8283[0].Page2[0].c2_1[1]", "5a"),
+        ("Form8283[0].Page2[0].c2_2[1]", "5b"),
+        ("Form8283[0].Page2[0].c2_3[1]", "5c"),
+    ];
+    let yes_boxes = [
+        "Form8283[0].Page2[0].c2_1[0]",
+        "Form8283[0].Page2[0].c2_2[0]",
+        "Form8283[0].Page2[0].c2_3[0]",
+    ];
+
+    // (1) ANSWERED NO ⇒ all three No boxes carry their dumped on-state "2".
+    let printed =
+        form_8283_printed(std::slice::from_ref(&row), Some(false)).expect("there is a donation");
+    let pdf = btctax_forms::fill_form_8283_full(&printed, &kitchen_sink_header(), 2024)
+        .unwrap()
+        .expect("a donation ⇒ an 8283");
+    for (fqn, line) in boxes {
+        assert_eq!(
+            box_on_state(&pdf, fqn).as_deref(),
+            Some("2"),
+            "line {line}'s No box is checked — the filer answered No"
+        );
+    }
+    for fqn in yes_boxes {
+        assert_eq!(
+            box_on_state(&pdf, fqn),
+            None,
+            "…and no Yes box is ever marked"
+        );
+    }
+
+    // (2) UNANSWERED ⇒ six blank widgets. btctax does not testify for the filer.
+    let printed = form_8283_printed(&[row], None).expect("there is a donation");
+    let pdf = btctax_forms::fill_form_8283_full(&printed, &kitchen_sink_header(), 2024)
+        .unwrap()
+        .expect("a donation ⇒ an 8283");
+    for fqn in boxes.iter().map(|(f, _)| *f).chain(yes_boxes) {
+        assert_eq!(
+            box_on_state(&pdf, fqn),
+            None,
+            "{fqn} is BLANK when unanswered — a blank is no testimony, a \"No\" is testimony"
+        );
+    }
+}
+
 /// The full-return Form 8283 carries the FILER's identity ("Name(s) shown on your income tax return")
 /// and whole-dollar money columns. The crypto slice writes neither — its 8283 rides beside a return
 /// btctax did not produce — and that difference is exactly why the two paths stay separate.
@@ -2127,7 +2207,7 @@ fn the_full_return_8283_names_the_filer_and_prints_whole_dollars() {
         needs_review: false,
         details: None,
     };
-    let printed = form_8283_printed(&[row]).expect("there is a donation");
+    let printed = form_8283_printed(&[row], Some(false)).expect("there is a donation");
     let pdf = btctax_forms::fill_form_8283_full(&printed, &kitchen_sink_header(), 2024)
         .unwrap()
         .expect("a donation ⇒ an 8283");
@@ -2195,7 +2275,7 @@ fn a_full_return_8283_map_without_page2_identity_fails_closed() {
         needs_review: false,
         details: None,
     };
-    let printed = form_8283_printed(&[row]).expect("there is a donation");
+    let printed = form_8283_printed(&[row], Some(false)).expect("there is a donation");
 
     let mut map = Form8283Map::for_year(2024).unwrap();
     map.identity_page2 = None; // the exact omission

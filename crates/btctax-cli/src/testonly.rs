@@ -114,6 +114,9 @@ foreign_accounts = false
 foreign_trust = false
 foreign_country_names = ""
 dual_status_alien = false
+# ★ §G-21 — Form 8283 5a/5b/5c, asked once for the whole return. Harmless here (no donations); it is
+# MANDATORY only on a year that files a Section B, i.e. donations over $5,000.
+donations_had_restrictions = false
 has_income_exclusion = false
 itemize_election = "auto"
 charitable_carryover_in = []

@@ -113,7 +113,7 @@ fn all_arms_return() -> PrintedReturn {
         "premise: kitchen_sink has no promoted disposal leg (no f8275) — if this fires the fixture \
          assumption changed"
     );
-    pr.forms.f8283 = form_8283_printed(&[injected_8283_row()]);
+    pr.forms.f8283 = form_8283_printed(&[injected_8283_row()], Some(false));
     pr.forms.f8275 = Some(injected_8275());
     assert!(
         pr.forms.f8283.is_some(),

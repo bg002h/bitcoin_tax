@@ -661,6 +661,46 @@ pub fn screen_compute_dependent(
     year: i32,
     params: &FullReturnParams,
 ) -> Option<Refusal> {
+    // ★★★ §G-21 — Form 8283 Section B lines 5a/5b/5c, the restriction questions.
+    //
+    // THIS is the mandatory half. The question is OFFERED unconditionally (a skippable, so a filer who
+    // donated nothing is never blocked), but on a year that actually files a **Section B** 8283 it must
+    // be answered, and answered NO. A "Yes" to any limb means at least one gift carried a restriction
+    // or a retained right, which reduces or denies the §170 deduction (Reg §1.170A-7) — and btctax
+    // deducts at full FMV and cannot tell WHICH gift, so it refuses rather than file a number it knows
+    // is too large.
+    //
+    // ★ It screens HERE, not in `screen_inputs`, for the same reason the non-crypto-noncash guard
+    // above does: the donations live in the LEDGER, which `FormQuestion::live` cannot see.
+    if crate::forms::year_donation_deduction(state, year)
+        > crate::tax::tables::QUALIFIED_APPRAISAL_THRESHOLD
+    {
+        match ri.donations_had_restrictions {
+            Some(false) => {}
+            Some(true) => {
+                return refusal(
+                    RefuseReason::DonationRestrictionsUnresolved,
+                    "you declared that at least one donated property had a restriction or a retained \
+                     right (Form 8283 line 5a, 5b or 5c). Under Reg §1.170A-7 that REDUCES or DENIES \
+                     the §170 deduction, and btctax values every donation at full fair market value — \
+                     so the deduction it would compute is too large. It cannot tell which gift is \
+                     affected, so it will not file the year: complete Form 8283 for the restricted \
+                     donation by hand, with the reduced amount",
+                );
+            }
+            None => {
+                return refusal(
+                    RefuseReason::DonationRestrictionsUnresolved,
+                    "this year files a Form 8283 SECTION B (donations over $5,000), whose lines 5a, 5b \
+                     and 5c ask whether any donated property carried a restriction or a retained right. \
+                     A \"Yes\" to any of them reduces or denies the §170 deduction (Reg §1.170A-7), and \
+                     btctax deducts at full fair market value — so it cannot file this return without \
+                     the answer. Run `btctax income answer`",
+                );
+            }
+        }
+    }
+
     // ★ Non-crypto NONCASH gifts, keyed on the TOTAL noncash the return claims (Fable P6 r1 I6). The
     // $500 trigger printed on Schedule A line 12 — and Form 8283's own "…if you claimed a total deduction
     // of over $500 for ALL contributed property" — is an AGGREGATE over every noncash gift. Keying the
@@ -1844,6 +1884,108 @@ mod tests {
     }
     fn screened(ri: &ReturnInputs, st: &LedgerState) -> Option<RefuseReason> {
         screen_compute_dependent(ri, st, 2024, &ty2024_params()).map(|r| r.reason)
+    }
+
+    // ── §G-21 — Form 8283 Section B lines 5a/5b/5c, the restriction questions ────────────────────
+
+    /// A Section-B donation, i.e. one whose claimed deduction is over the $5,000 appraisal threshold.
+    fn section_b_state(claimed: Usd) -> LedgerState {
+        use crate::state::{Removal, RemovalKind, RemovalLeg};
+        LedgerState {
+            removals: vec![Removal {
+                event: EventId::decision(21),
+                kind: RemovalKind::Donation,
+                removed_at: date!(2024 - 09 - 09),
+                legs: Vec::<RemovalLeg>::new(),
+                appraisal_required: true,
+                donor_acquired_at: None,
+                claimed_deduction: Some(claimed),
+                donee: Some("Habitat".into()),
+            }],
+            ..Default::default()
+        }
+    }
+
+    /// ★★★ **B1 kill for §G-21, the MANDATORY half.** Form 8283 Section B asks three questions the
+    /// filer alone can answer — 5a (a restriction on the donee's use or disposition), 5b (a retained
+    /// right to the income or possession), 5c (a restriction limiting the donee's right to use). A
+    /// "Yes" to any of them reduces or denies the §170 deduction under Reg §1.170A-7, and btctax
+    /// deducts at **full fair market value**. So on a Section-B year the answer is not optional:
+    /// unanswered refuses, and "Yes" refuses. Only an explicit **No** files.
+    ///
+    /// Mutation-verified: deleting the `None` arm reds the first assert; deleting the `Some(true)` arm
+    /// reds the second; deleting the whole block reds both.
+    #[test]
+    fn a_section_b_year_refuses_until_the_restriction_questions_are_answered_no() {
+        let st = section_b_state(dec!(9000));
+        let base = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+
+        // (1) Never asked ⇒ the year is not computable. `0` here would be FABRICATED testimony:
+        //     three "No" boxes nobody said.
+        let unanswered = ReturnInputs {
+            donations_had_restrictions: None,
+            ..base.clone()
+        };
+        assert_eq!(
+            screened(&unanswered, &st),
+            Some(RefuseReason::DonationRestrictionsUnresolved),
+            "a Section B 8283 prints 5a/5b/5c; btctax must not answer them for the filer"
+        );
+
+        // (2) Answered YES ⇒ still refuses, and for the OPPOSITE reason: the answer is known and it
+        //     says the FMV deduction btctax computes is too large. btctax cannot tell which gift.
+        let restricted = ReturnInputs {
+            donations_had_restrictions: Some(true),
+            ..base.clone()
+        };
+        assert_eq!(
+            screened(&restricted, &st),
+            Some(RefuseReason::DonationRestrictionsUnresolved),
+            "a restricted gift's §170 deduction is smaller than FMV — refuse, never overstate it"
+        );
+
+        // (3) Answered NO ⇒ the ordinary case, and it files.
+        let clean = ReturnInputs {
+            donations_had_restrictions: Some(false),
+            ..base.clone()
+        };
+        assert_eq!(
+            screened(&clean, &st),
+            None,
+            "\"no strings attached\" is the common case and must not be blocked"
+        );
+    }
+
+    /// ★ The gate is SCOPED to Section B. A donation at or below $5,000 files a Section **A**, which
+    /// carries no 5a/5b/5c — so an unanswered filer there must sail through. Getting this wrong would
+    /// block every small donor on a question their form never prints.
+    ///
+    /// Mutation-verified twice, and the boundary is the point: dropping the threshold comparison
+    /// (gate every donor) reds, AND widening `>` to `>=` reds on exactly `$5,000` — the form's own
+    /// split is "**more than** $5,000" for Section B, so a gift *at* the threshold is Section A.
+    #[test]
+    fn a_section_a_year_never_asks_the_restriction_questions() {
+        let unanswered = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            donations_had_restrictions: None,
+            ..Default::default()
+        };
+        for claimed in [dec!(500), dec!(4999), dec!(5000)] {
+            assert_ne!(
+                screened(&unanswered, &section_b_state(claimed)),
+                Some(RefuseReason::DonationRestrictionsUnresolved),
+                "${claimed} files a Section A, which does not print 5a/5b/5c"
+            );
+        }
+        // …and one dollar over, it does.
+        assert_eq!(
+            screened(&unanswered, &section_b_state(dec!(5001))),
+            Some(RefuseReason::DonationRestrictionsUnresolved),
+            "over $5,000 is Section B"
+        );
     }
 
     /// ★ **Fable P6 r1 I6.** The Form 8283 trigger is an AGGREGATE — Schedule A line 12's "over $500" and

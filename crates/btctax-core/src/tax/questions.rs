@@ -493,6 +493,7 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
     // ── §G-9: the §63(f) death carve-out. Two entries, because i1040gi states the rule twice — once
     // under "Death of a taxpayer" and once under "Death of spouse" — and each is a separate fact.
     //
+
 ];
 
 /// The identity of each SKIPPABLE prompt (§2, class B) — the questions where silence is LAWFUL: a bare
@@ -582,6 +583,19 @@ pub enum SkippableId {
     /// it could never be exercised. The `is_none()` guards in `return_refuse.rs` were written for it
     /// and, until now, had no live case.
     ScheduleC1099Filed,
+    /// ★★★ **Form 8283 Section B lines 5a / 5b / 5c**, asked as ONE return-level universal: *"did any
+    /// of your donations have strings attached?"* A **Yes** to any of the three limbs shrinks or kills
+    /// the §170 deduction (Reg §1.170A-7), and btctax deducts at full FMV — so a Yes means the number
+    /// is WRONG. Asked here so silence never auto-refuses a filer who donated NOTHING; the refusal is scoped by
+    /// `screen_compute_dependent`, which has the LEDGER that liveness cannot see, and is MANDATORY there:
+    /// on a Section-B year, unanswered refuses and `Some(true)` refuses — only `Some(false)` proceeds.
+    ///
+    /// ★★ **This is what dissolved §G-21.** The three boxes are per-donation and the registry is
+    /// return-shaped, which looked like it needed new per-row machinery. Asking the UNIVERSAL makes
+    /// them return-shaped too: from *"none of my donations had any of these"* each box's answer follows
+    /// for every donation. The prompt therefore enumerates all three limbs in the form's own words — a
+    /// "No" to something vaguer would be laundered into three answers the filer never gave.
+    DonationsHadRestrictions,
 }
 
 /// The value shape of a [`SkippableQuestion`] — a yes/no answer, or a calendar date.
@@ -622,7 +636,7 @@ pub struct SkippableQuestion {
     pub set_date: fn(&mut ReturnInputs, Date),
 }
 
-/// ★ THE SKIPPABLE REGISTRY. Twelve class-(B) prompts — SEPARATE from [`FORM_QUESTIONS`] (spec §5.3). The
+/// ★ THE SKIPPABLE REGISTRY. Thirteen prompts — SEPARATE from [`FORM_QUESTIONS`] (spec §5.3). The
 /// liveness gates and prompts are lifted verbatim from the old `answer.rs::Skippable`; the `income answer`
 /// flow and the form engine both DERIVE their skippable prompts from this one list.
 ///
@@ -886,6 +900,35 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
         get_date: |_ri| None,
         set_date: |_ri, _v| {},
     },
+
+    // ★★★ Form 8283 Section B lines 5a/5b/5c, asked as ONE return-level universal (§G-21).
+    SkippableQuestion {
+        id: SkippableId::DonationsHadRestrictions,
+        durability: Durability::PerYear,
+        // ★★ THE PROMPT ENUMERATES ALL THREE LIMBS, in the form's own words. A "No" to something
+        // vaguer ("any strings?") would be laundered into three specific answers the filer never gave
+        // — the widening-an-exemption failure. Enumerate the YES-conditions; anything not listed is
+        // then something the filer has NOT denied, so every omission fails closed.
+        prompt: "Did ANY property you donated this year have strings attached? Answer YES if any of \
+                 these is true of ANY donation: (a) there is a restriction, temporary or permanent, on \
+                 the charity's right to USE or DISPOSE of it; (b) you gave anyone other than the \
+                 charity a right to its INCOME, to POSSESS it, to VOTE it, or to ACQUIRE it; or (c) \
+                 there is a restriction limiting it to a PARTICULAR USE. (Form 8283 lines 5a/5b/5c.)",
+        help: "Skipping is harmless if you donated nothing, or nothing over $5,000 — Form 8283 asks \
+               these only in Section B. On a year that DOES file a Section B, it is MANDATORY: a \
+               \"Yes\" to any limb reduces or denies the §170 deduction (Reg §1.170A-7 — a gift with \
+               retained rights is not a gift of the whole thing), and btctax deducts at full fair \
+               market value, so it refuses rather than file a number it knows is too large.",
+        kind: SkippableKind::YesNo,
+        // ★ ALWAYS OFFERED: `live` receives only `ReturnInputs`, and the donations are in the LEDGER.
+        //   Silence is lawful HERE so a filer who donated nothing is never blocked; the mandatory half
+        //   lives in `screen_compute_dependent`, which has the ledger and can tell.
+        live: |_ri| true,
+        get_bool: |ri| ri.donations_had_restrictions,
+        set_bool: |ri, v| ri.donations_had_restrictions = Some(v),
+        get_date: |_ri| None,
+        set_date: |_ri, _v| {},
+    },
 ];
 
 #[cfg(test)]
@@ -932,8 +975,8 @@ mod tests {
         use crate::tax::types::FilingStatus;
         assert_eq!(
             SKIPPABLE_QUESTIONS.len(),
-            12,
-            "blind ×2, SALT, DOB ×2, DOD ×2, FBAR, the §G-9 death pair, Schedule C I/J"
+            13,
+            "blind ×2, SALT, DOB ×2, DOD ×2, FBAR, the §G-9 death pair, Schedule C I/J, 8283 5a/5b/5c"
         );
         // SALT is live iff a schedule_a exists; spouse-blind iff a spouse Person exists.
         let salt = SKIPPABLE_QUESTIONS

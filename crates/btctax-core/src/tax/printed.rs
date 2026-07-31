@@ -132,12 +132,27 @@ pub fn form_8949_printed(rows: &[crate::forms::Form8949Row]) -> Option<Printed89
 /// §170(b) ceilings legitimately make L12 *smaller* than the sum of the 8283's per-donation amounts (the
 /// excess becomes carryover). Forcing them equal would be wrong.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Printed8283Rows(Vec<crate::forms::Form8283Row>);
+pub struct Printed8283Rows {
+    rows: Vec<crate::forms::Form8283Row>,
+    /// ★★★ §G-21 — the filer's answer to Form 8283 Section B lines **5a / 5b / 5c**, asked as one
+    /// return-level universal. `Some(false)` = "no donation had strings attached" ⇒ all three boxes
+    /// print **No**. `None` = never answered ⇒ all three stay BLANK.
+    ///
+    /// ★ `Some(true)` never reaches here: `screen_compute_dependent` REFUSES the year on a Yes, since
+    /// the §170 deduction btctax computed at full FMV is then too large. The field is `Option<bool>`
+    /// rather than `bool` so "not asked" and "answered no" stay different marks on the page — the
+    /// distinction `3b22ca1` had to fix on Schedule B the hard way.
+    no_donation_restrictions: Option<bool>,
+}
 
 impl Printed8283Rows {
     /// The rows, whole-dollar.
     pub fn rows(&self) -> &[crate::forms::Form8283Row] {
-        &self.0
+        &self.rows
+    }
+    /// The filer's own answer to lines 5a/5b/5c — `Some(false)` ⇒ print all three as **No**.
+    pub fn restrictions_answer(&self) -> Option<bool> {
+        self.no_donation_restrictions
     }
 }
 
@@ -145,12 +160,19 @@ impl Printed8283Rows {
 ///
 /// The PRESENCE rule (does an 8283 get attached at all?) is the packet's, not this function's: the form
 /// is required when the return itemizes AND the printed Schedule A line 12 exceeds $500.
-pub fn form_8283_printed(rows: &[crate::forms::Form8283Row]) -> Option<Printed8283Rows> {
+pub fn form_8283_printed(
+    rows: &[crate::forms::Form8283Row],
+    // ★ §G-21 — the filer's own answer to lines 5a/5b/5c. `Some(false)` prints all three as No; `None`
+    // leaves them blank. `Some(true)` cannot arrive: the year refuses upstream.
+    no_donation_restrictions: Option<bool>,
+) -> Option<Printed8283Rows> {
     if rows.is_empty() {
         return None;
     }
-    Some(Printed8283Rows(
-        rows.iter()
+    Some(Printed8283Rows {
+        no_donation_restrictions,
+        rows: rows
+            .iter()
             .map(|r| crate::forms::Form8283Row {
                 cost_basis: round_dollar(r.cost_basis),
                 fmv: round_dollar(r.fmv),
@@ -158,7 +180,7 @@ pub fn form_8283_printed(rows: &[crate::forms::Form8283Row]) -> Option<Printed82
                 ..r.clone()
             })
             .collect(),
-    ))
+    })
 }
 
 /// Form 8283 is REQUIRED when the return itemizes and its printed noncash gifts exceed $500 — the

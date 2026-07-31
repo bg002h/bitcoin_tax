@@ -98,6 +98,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         foreign_trust,
         fbar_filing_required,
         foreign_country_names: _, // String — scalar
+        donations_had_restrictions,
         dual_status_alien,
         // §164(b)(7)(B)(iv) / Schedule 1-A Part I MAGI add-backs. `Option<Usd>` scalar leaves, so the
         // `_` rule permits binding them here — but they are NOT class-(B) forgone benefits like
@@ -142,6 +143,16 @@ pub fn classify(ri: &ReturnInputs) -> Census {
          the form's Caution names attaches to NOT FILING FinCEN Form 114 (a FinCEN obligation \
          independent of this box), not to leaving the box blank. Silence is lawful and prints a true \
          blank; `Advisory::FbarSubQuestionNotAnswered` fires (§2.1)",
+    );
+    // ★★ Form 8283 5a/5b/5c, asked as ONE return-level universal (§G-21). Class (B) HERE — offered
+    // always, silence lawful — because the donations are in the LEDGER and liveness cannot see them.
+    // The MANDATORY half lives in `screen_compute_dependent`, which can: on a Section-B year an
+    // unanswered or `Some(true)` answer REFUSES.
+    c.exempt(
+        donations_had_restrictions,
+        Class::BenefitClaim,
+        "Form 8283 5a/5b/5c (§G-21) — offered as a skippable so a filer who donated nothing is never \
+         blocked; on a Section-B year `screen_compute_dependent` makes it mandatory (§2.2)",
     );
     c.declaration(dual_status_alien, QuestionId::DualStatusAlien);
     c.declaration(has_income_exclusion, QuestionId::HasIncomeExclusion);

@@ -19,6 +19,14 @@ fn decl(q: QuestionId) -> Anchor {
     Anchor::Field(question_to_field(q))
 }
 
+/// ★ A SKIPPABLE's anchor. Needed because §G-21's restriction question is offered as a skippable (the
+/// donations are in the ledger, which liveness cannot see) while its REFUSAL is raised by
+/// `screen_compute_dependent` — so a screen refusal points at a skippable field, which no other arm
+/// does.
+fn skip(s: btctax_core::tax::questions::SkippableId) -> Anchor {
+    Anchor::Field(crate::spec::skippable_to_field(s))
+}
+
 /// Where a screen-refusal points in the input form (spec §7). An EXHAUSTIVE `match` — no `_` arm — so a new
 /// `RefuseReason` fails to compile until it is placed. Returns the §7 attribution row's anchor list.
 pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
@@ -81,6 +89,9 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
                        deferred (non-v1-form) section entered via TOML import (§7 M-3)",
             },
         ],
+        R::DonationRestrictionsUnresolved => {
+            vec![skip(btctax_core::tax::questions::SkippableId::DonationsHadRestrictions)]
+        }
         R::NonCryptoNoncashGift => vec![Anchor::Section(SectionId::ScheduleACharitable)],
 
         // ── W-2 sections (§7 lines 515-517). `SingleEmployerExcessSs` is an in-form field, so W2s (I-4). ──

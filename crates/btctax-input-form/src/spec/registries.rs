@@ -300,6 +300,13 @@ const SKIPPABLE_FIELDS: &[Field] = &[
             Err(SetError::NoSuchRow)
         }
     }),
+    // ★ Index 12 — Form 8283 5a/5b/5c as one return-level universal (§G-21). No parent gate: the
+    // donations are in the LEDGER, so it is offered always and made mandatory by
+    // `screen_compute_dependent` on a Section-B year.
+    skippable_tristate!(12, FieldId::DonationsHadRestrictions, |ri| {
+        ri.donations_had_restrictions = None;
+        Ok(())
+    }),
 ];
 
 pub(crate) const SKIPPABLES: Section = Section {
@@ -367,6 +374,7 @@ pub fn field_to_skippable(id: FieldId) -> Option<SkippableId> {
         FieldId::SpouseDiedDuringYear => SkippableId::SpouseDiedDuringYear,
         FieldId::ScheduleC1099Required => SkippableId::ScheduleC1099Required,
         FieldId::ScheduleC1099Filed => SkippableId::ScheduleC1099Filed,
+        FieldId::DonationsHadRestrictions => SkippableId::DonationsHadRestrictions,
         _ => return None,
     })
 }
@@ -387,5 +395,6 @@ pub fn skippable_to_field(id: SkippableId) -> FieldId {
         SkippableId::SpouseDiedDuringYear => FieldId::SpouseDiedDuringYear,
         SkippableId::ScheduleC1099Required => FieldId::ScheduleC1099Required,
         SkippableId::ScheduleC1099Filed => FieldId::ScheduleC1099Filed,
+        SkippableId::DonationsHadRestrictions => FieldId::DonationsHadRestrictions,
     }
 }

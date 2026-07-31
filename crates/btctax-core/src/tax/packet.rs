@@ -608,7 +608,14 @@ pub fn assemble_printed_forms(
     let f8283 = sch_a
         .as_ref()
         .filter(|a| a.line12 > FORM_8283_THRESHOLD)
-        .and_then(|_| form_8283_printed(&crate::forms::form_8283(state, year, donation_details)));
+        .and_then(|_| {
+            form_8283_printed(
+                &crate::forms::form_8283(state, year, donation_details),
+                // ★ §G-21 — the filer's answer to lines 5a/5b/5c, carried straight through. A
+                // `Some(true)` never gets here: `screen_compute_dependent` refuses the year.
+                ri.donations_had_restrictions,
+            )
+        });
 
     // Form 8275 (Task 16) — `Some` iff a promoted-basis DISPOSAL leg files in `year`; the printed
     // (whole-dollar-rounded Part I) content of `crate::tax::form8275::disclosure_8275`, whose own

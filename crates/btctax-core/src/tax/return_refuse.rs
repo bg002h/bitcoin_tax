@@ -35,6 +35,13 @@ pub enum RefuseReason {
     /// are produced by the computation, never the input. A negative value is a corrupt import that could
     /// otherwise *offset* an accumulated refusal threshold (e.g. §402(g), §904(j)) into passing (R2-I1).
     NegativeAmount(String),
+    /// ★★★ Form 8283 Section B lines 5a/5b/5c — the restriction questions — are unresolved: either
+    /// unanswered, or answered **Yes**. A Yes means at least one donated property carried a restriction
+    /// or a retained right, which REDUCES or DENIES the §170 deduction (Reg §1.170A-7). btctax deducts
+    /// at full FMV and cannot tell WHICH gift, so it refuses rather than file a number it knows is too
+    /// large. Raised only for a year that actually files a **Section B** 8283 — see
+    /// `screen_compute_dependent`, which has the ledger the registry's liveness cannot see.
+    DonationRestrictionsUnresolved,
     /// A **non-crypto NONCASH** charitable gift whose total exceeds the $500 Form 8283 threshold. Those
     /// amounts reach Schedule A line 12, but btctax holds no property details for them (no description,
     /// no acquisition date, no appraiser), so it can produce no 8283 rows — the packet would attach a
@@ -253,6 +260,7 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         foreign_trust: _,
         fbar_filing_required: _,
         foreign_country_names: _,
+        donations_had_restrictions: _, // Option<bool>, not an amount
         dual_status_alien: _,
         // MAGI add-backs — refused at the worksheet's point of need, not here (D-11).
         has_income_exclusion: _, // refused at the worksheet's point of need (D-11), not here
