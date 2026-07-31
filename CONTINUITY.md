@@ -21,10 +21,38 @@ _(Supersedes the 2026-06-28 edition, whose deep-research workflow completed long
 
 ---
 
-## ★★★ ACTIVE WORK — branch `feat/no-pen-deferrals` (READ THIS FIRST, 2026-07-30)
+## ★★★ ACTIVE WORK — branch `feat/no-pen-deferrals` (READ THIS FIRST, updated 2026-07-31)
 
-**3 commits ahead of `main`, tree clean, 2500 tests green.** `main` itself is 8 commits ahead of its
-last push (the §G-13 census work) — nothing is pushed; see §7 for why.
+**28 commits ahead of `main`, tree clean, 2527 tests green, all five gates.** `main` itself is 99
+commits ahead of `origin/main` — **nothing has been pushed in a long time**; see §7 and the BLOCKED
+box below.
+
+### ⛔ BLOCKED ON THE OWNER — read before planning any ship
+
+| blocker | why | who |
+|---|---|---|
+| **push** | `scripts/.pii-patterns` does not exist ⇒ `scripts/pre-push` is fail-closed, every `git push` exits 1. The file is owner-specific and untracked; **the assistant must not author it** — a wrong guess turns the gate green while scanning for nothing. Repo is PUBLIC; 123 commits have never had the owner-specific scan. Escape: `BTCTAX_PII_BYPASS=1 git push`. | owner |
+| **publish** | Blocked by the same thing, and MORE so: `cargo publish` uploads a source tarball to a **public, immutable** registry. Also needs a version bump (0.14.0 is already live) — scoped by the owner to **prepare 0.15.0, do NOT publish**. | owner |
+| **crates.io temp token** | Still unrevoked since the v0.14.0 publish (2026-07-29). Deal with it BEFORE another publish, not after. | owner |
+
+### ★★★ THREE REVIEW ROUNDS RAN, AND THE THIRD FOUND WHAT THE FIRST TWO STRUCTURALLY COULD NOT
+
+| round | scope | model(s) | verdict |
+|---|---|---|---|
+| r1 | `7bde148..65270db` | Opus + Sonnet | 0C/0I; 6 Minors (§G-19a is the one that mattered) |
+| r2 | `afa0ffe..HEAD` | Opus + Sonnet | 0C/0I; 2 Minors + 1 Nit; **20/20 mutations killed** |
+| **pre-publish** | **`main..HEAD` (whole branch)** | **Fable** | **`publish-after-fixing-X`** — one **Important** |
+
+Verbatim outputs in `reviews/`: `crypto-slice-trio-{tax-lens-opus,instrument-lens-sonnet}-r1.md`,
+`branch-r2-{tax-lens-opus,instrument-lens-sonnet}.md`, `branch-prepublish-fable.md`.
+
+★★★ **The Important lived in `b94508d` — the EARLIEST commit — which precedes both earlier review
+ranges.** Schedule B's FBAR pair printed ungated, so a 7a Yes→No correction put a checked FinCEN-114
+box beside a checked "No" under §6065. **The fix already existed in the branch** (Schedule C line J,
+nine commits later, reasoning included) and nobody carried it back, because no reviewer ever held both
+commits at once. Fixed in `3bcf3a0`, and the lesson is now **harness B3** (`design/HARNESS.md` +
+`CLAUDE.md`): *a per-range review is not a branch review; the final pass takes `main..HEAD` and is
+pointed at INTERACTION.*
 
 ### The owner's direction, and the correction that reshaped it
 
@@ -201,6 +229,26 @@ full-return `f1040.pdf` is never stamped — asserted in the same breath, becaus
 ★★ **The trio's transferable lesson:** the recon item was 3-for-3 on *where* the value was and 2-for-3
 on *what to do*. **A backlog entry is a lead, not a spec** — line 20's disqualifying conjunct is
 visible in one line of the form's own extracted text.
+
+### ⬜ WHAT IS OPEN NOW (2026-07-31) — everything else on this page is history
+
+**Nothing below is auto-start. Each names why it is not just "more work".**
+
+| # | item | blocked on |
+|---|---|---|
+| 1 | **§G-19a** — the all-in §1411 display prints `§1411 0` off the model's PARTIAL NII, so a filer with rental income and a crypto loss year is under-reserved by 3.8 points. Fail-safe vs. a third "can't tell" state; costs a second `frozen_guard` pin exception either way | **owner judgment** |
+| 2 | **§G-21** — Form 8283 5a/5b/5c, the LAST §G-13 gap (6 of 6). Tax ruling settled; the obstacle is structural — the question registry is `ReturnInputs`-shaped and these are the first **per-donation** declarations. Recommended shape, pre-write refusal window and dumped on-states are all in the entry | **owner: where per-row answers live** |
+| 3 | **§G-20a** — capital-loss and charitable carryovers are silent conservative omissions and CANNOT be advised precisely: neither has a readable `CarryProvenance`, so a zero is uninterpretable. Needs a provenance handle on two more input types + a write-back interaction | ready, but a design change |
+| 4 | **§G-20 remainder** — actually CLAIMING the MFS spouse boxes needs the three i1040gi conditions collected, and is **coupled** to the death-gate MFJ liveness. Do not fix one without the other | ready |
+| 5 | **archive review-by `2026-08-13`** — reds the WHOLE suite when it passes. The mechanical half is done (`1fc9867`); the DATE is a conscious decision and resetting it silently is what the gate exists to prevent | **owner** |
+| 6 | **§G-11** — the emitter cannot express "no testimony". Largest architectural item; needs its own spec | needs a spec |
+| 7 | **§G-12** — no Form 8275-R, so a position contrary to a REGULATION is unrepresentable | — |
+| 8 | **B3 T2 / Schedule 1-A** — and its plan r3 was never independently reviewed (`design/ty2025/reviews/` holds only r1) | **owner: is B3 the track?** |
+
+★★ **A pattern worth carrying, observed twice in two days and now written into §G-18:** *filling a
+blank is not automatically an improvement.* Both §G-19a's `§1411 0` and the 1040 line-7 box replaced a
+lawful SILENCE with an affirmative statement btctax cannot support. Ask first: **can btctax establish
+the proposition the mark asserts, or only that it has no evidence against it?**
 
 ★★ **The recon's explicit DO-NOT-DO, kept because it is the most appealing wrong turn:** do NOT resume
 the **Tier-2 AMT** thread (E4/E5/E6). It looks like the obvious next step — 13 registered items, the
