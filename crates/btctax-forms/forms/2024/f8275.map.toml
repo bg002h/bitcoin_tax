@@ -90,3 +90,98 @@ item = "topmostSubform[0].Page1[0].Table_Part1[0].Line6[0].p1-t39[0]"
 desc = "topmostSubform[0].Page1[0].Table_Part1[0].Line6[0].#subform[0].p1-t40[0]"
 form_schedule = "topmostSubform[0].Page1[0].Table_Part1[0].Line6[0].p1-t42[0]"
 amount = "topmostSubform[0].Page1[0].Table_Part1[0].Line6[0].p1-t44[0]"
+
+# ── §G-13 FIELD-PROVENANCE CENSUS ────────────────────────────────────────────────────────────────
+# Every AcroForm field on this PDF the map above does not fill, with the decision that leaves it blank.
+# `unmodeled` = btctax models no input that could reach the cell; `artifact` = not a distinct entry the
+# filer makes; `gap` = the cell IS reachable and nothing populates it (a defect).
+#
+# ★ Form 8275 is the one form here whose blanks are ARGUMENTS, not omissions. It exists to make a
+#   position adequately disclosed under §1.6662-4(f); a cell filled with something merely plausible
+#   would weaken the disclosure rather than strengthen it. Every decision below was already reasoned
+#   and written down in `btctax-forms/src/map.rs` (`Form8275Row`) and `src/form8275.rs`'s module doc —
+#   this section makes those prose records mechanically checkable, it does not invent them.
+#
+# ★ 95 fields, 27 of them on page 2 (Part IV continuation) and all of those already mapped.
+[census]
+
+# ── Foreign-entity header — "If Form 8275 relates to an information return for a foreign entity" ──
+# btctax's only 8275 use is the Approach-B estimated-basis disclosure on a domestic Form 8949. It
+# files no Form 5471 and models no foreign entity, so the blank asserts exactly what is true: this
+# disclosure does not relate to a foreign-entity information return.
+"topmostSubform[0].Page1[0].p1-t300[0]" = { line = "foreign entity name",   rule = "unmodeled", reason = "Name of foreign entity — btctax models no foreign entity and files no Form 5471." }
+"topmostSubform[0].Page1[0].p1-t301[0]" = { line = "foreign entity EIN",    rule = "unmodeled", reason = "EIN of the foreign entity (/MaxLen 10, the hyphenated form) — same." }
+"topmostSubform[0].Page1[0].p1-t302[0]" = { line = "foreign entity ref ID", rule = "unmodeled", reason = "Reference ID number — same." }
+
+# ── Part I column (a) "Rev. Rul., Rev. Proc., etc." — rows 1-6 ───────────────────────────────────
+# Verbatim from `Form8275Row`'s doc comment: deliberately absent because "there is no citation to
+# disclose". btctax's disclosed position is a Cohan estimated-basis account, not a position taken
+# contrary to or in reliance on a published ruling. Naming a ruling that the position does not
+# actually rest on would misdescribe the disclosure.
+"topmostSubform[0].Page1[0].Table_Part1[0].Line1[0].p1-t3[0]"  = { line = "I.1(a)", rule = "unmodeled", reason = "Rev. Rul./Rev. Proc. citation — the disclosed position rests on no published ruling; nothing correct could be written." }
+"topmostSubform[0].Page1[0].Table_Part1[0].Line2[0].p1-t10[0]" = { line = "I.2(a)", rule = "unmodeled", reason = "Same — row 2." }
+"topmostSubform[0].Page1[0].Table_Part1[0].Line3[0].p1-t17[0]" = { line = "I.3(a)", rule = "unmodeled", reason = "Same — row 3." }
+"topmostSubform[0].Page1[0].Table_Part1[0].Line4[0].p1-t24[0]" = { line = "I.4(a)", rule = "unmodeled", reason = "Same — row 4." }
+"topmostSubform[0].Page1[0].Table_Part1[0].Line5[0].p1-t31[0]" = { line = "I.5(a)", rule = "unmodeled", reason = "Same — row 5." }
+"topmostSubform[0].Page1[0].Table_Part1[0].Line6[0].p1-t38[0]" = { line = "I.6(a)", rule = "unmodeled", reason = "Same — row 6." }
+
+# ── Part I column (e) "Line No." — rows 1-6, each a /MaxLen 3 comb ──────────────────────────────
+# ★ VERIFIED, not assumed: `Part1Item.form` has exactly ONE construction site and it is the literal
+#   "8949" (btctax-core/src/tax/form8275.rs:144). Form 8949 has no discrete numbered line — it is a
+#   per-transaction, lettered-COLUMN schedule — so there is no line number to give. Column (b) carries
+#   the location descriptor instead (e.g. "Part I — column (e)"), which is why a 3-character comb
+#   could not hold it even if a number existed.
+#
+# ★ This is the one place on the form where a blank could be mistaken for a weaker disclosure, so it
+#   is worth stating the direction plainly: the item IS identified, by form in (d) and by descriptor
+#   in (b). Inventing a line number for a schedule that has none would make the disclosure wrong, not
+#   more adequate. If a future disclosure ever targets Schedule D (which DOES have numbered lines),
+#   this becomes a gap and must be reclassified.
+"topmostSubform[0].Page1[0].Table_Part1[0].Line1[0].p1-t8[0]"  = { line = "I.1(e)", rule = "unmodeled", reason = "Line No. — Form 8949 has no numbered lines (lettered columns, per transaction); the location is given in column (b). /MaxLen 3." }
+"topmostSubform[0].Page1[0].Table_Part1[0].Line2[0].p1-t15[0]" = { line = "I.2(e)", rule = "unmodeled", reason = "Same — row 2." }
+"topmostSubform[0].Page1[0].Table_Part1[0].Line3[0].p1-t22[0]" = { line = "I.3(e)", rule = "unmodeled", reason = "Same — row 3." }
+"topmostSubform[0].Page1[0].Table_Part1[0].Line4[0].p1-t29[0]" = { line = "I.4(e)", rule = "unmodeled", reason = "Same — row 4." }
+"topmostSubform[0].Page1[0].Table_Part1[0].Line5[0].p1-t36[0]" = { line = "I.5(e)", rule = "unmodeled", reason = "Same — row 5." }
+"topmostSubform[0].Page1[0].Table_Part1[0].Line6[0].p1-t43[0]" = { line = "I.6(e)", rule = "unmodeled", reason = "Same — row 6." }
+
+# ── Part II — the second and third physical text lines inside each numbered explanation block ────
+# Each numbered Part II block occupies three 12pt rows: the numbered line (p1-t80..p1-t85, MAPPED —
+# t81..t85 mapped-but-deliberately-unwritten) and two unnumbered wrap rows beneath it, censused here.
+#
+# The fill writes Part II line 1 only and spills the remainder to Part IV on page 2, carrying the
+# cross-reference Rev. 10-2024's Specific Instructions require ("Include the corresponding part and
+# line number from page 1"). See src/form8275.rs's module doc: spreading one combined narrative across
+# the NUMBERED lines would attribute sentence fragments to Part I rows they do not explain.
+#
+# ★ Classified `artifact` because these rows carry no distinct question — they are continuation space
+#   within one explanation, and the narrative they would have held is present in full on Part IV. The
+#   per-item Part II numbering that would use them is already filed as a follow-up
+#   (design/f8275-part-ii-overflow/FOLLOWUPS.md). Their being unnumbered is read off the geometry
+#   (they sit between consecutive numbered rows), not off the XFA template.
+"topmostSubform[0].Page1[0].p1-t46[0]" = { line = "II.1 wrap a", rule = "artifact", reason = "Unnumbered continuation row inside Part II block 1; the narrative spills to Part IV instead, with the IRS-required cross-reference." }
+"topmostSubform[0].Page1[0].p1-t47[0]" = { line = "II.1 wrap b", rule = "artifact", reason = "Same — block 1, second wrap row." }
+"topmostSubform[0].Page1[0].p1-t49[0]" = { line = "II.2 wrap a", rule = "artifact", reason = "Same — block 2." }
+"topmostSubform[0].Page1[0].p1-t50[0]" = { line = "II.2 wrap b", rule = "artifact", reason = "Same — block 2." }
+"topmostSubform[0].Page1[0].p1-t52[0]" = { line = "II.3 wrap a", rule = "artifact", reason = "Same — block 3." }
+"topmostSubform[0].Page1[0].p1-t53[0]" = { line = "II.3 wrap b", rule = "artifact", reason = "Same — block 3." }
+"topmostSubform[0].Page1[0].p1-t55[0]" = { line = "II.4 wrap a", rule = "artifact", reason = "Same — block 4." }
+"topmostSubform[0].Page1[0].p1-t56[0]" = { line = "II.4 wrap b", rule = "artifact", reason = "Same — block 4." }
+"topmostSubform[0].Page1[0].p1-t58[0]" = { line = "II.5 wrap a", rule = "artifact", reason = "Same — block 5." }
+"topmostSubform[0].Page1[0].p1-t59[0]" = { line = "II.5 wrap b", rule = "artifact", reason = "Same — block 5." }
+"topmostSubform[0].Page1[0].p1-t61[0]" = { line = "II.6 wrap a", rule = "artifact", reason = "Same — block 6." }
+"topmostSubform[0].Page1[0].p1-t62[0]" = { line = "II.6 wrap b", rule = "artifact", reason = "Same — block 6." }
+
+# ── Part III — Information About Pass-Through Entity ─────────────────────────────────────────────
+# The form itself gates this part: "Complete this part only if you are making adequate disclosure for
+# a pass-through item." btctax models no partnership, S corporation, estate, trust, RIC, REIT or
+# REMIC — the same boundary censused on Schedule D lines 5/12 and Schedule 3 line 6l. The blank is
+# the form's own instruction being followed.
+"topmostSubform[0].Page1[0].p1-t63[0]" = { line = "III.1",         rule = "unmodeled", reason = "Name, address and ZIP of pass-through entity — btctax models no pass-through entity; the form says complete Part III only for a pass-through item." }
+"topmostSubform[0].Page1[0].p1-t64[0]" = { line = "III.2",         rule = "unmodeled", reason = "Identifying number of the pass-through entity — same." }
+"topmostSubform[0].Page1[0].p1-t65[0]" = { line = "III.3 from MM", rule = "unmodeled", reason = "Pass-through entity tax year, start month (/MaxLen 2) — same." }
+"topmostSubform[0].Page1[0].p1-t66[0]" = { line = "III.3 from DD", rule = "unmodeled", reason = "Start day (/MaxLen 2) — same." }
+"topmostSubform[0].Page1[0].p1-t67[0]" = { line = "III.3 from YYYY", rule = "unmodeled", reason = "Start year (/MaxLen 4) — same." }
+"topmostSubform[0].Page1[0].p1-t68[0]" = { line = "III.3 to MM",   rule = "unmodeled", reason = "End month (/MaxLen 2) — same." }
+"topmostSubform[0].Page1[0].p1-t69[0]" = { line = "III.3 to DD",   rule = "unmodeled", reason = "End day (/MaxLen 2) — same." }
+"topmostSubform[0].Page1[0].p1-t70[0]" = { line = "III.3 to YYYY", rule = "unmodeled", reason = "End year (/MaxLen 4) — same." }
+"topmostSubform[0].Page1[0].p1-t71[0]" = { line = "III.4",         rule = "unmodeled", reason = "IRS Service Center where the pass-through entity filed its return — same." }
