@@ -124,15 +124,22 @@ PDF with the unreduced deduction already exists when the warning prints.
    packet boundary is untouched and was **verified to cover all three shapes** (`Missing`,
    `NotDigits`, `WrongLength`) — "build rejects missing" would not have been enough. The replacement
    test asserts BOTH sides for 3 shapes × 3 subjects.
-4. **THEN Form 8995 line 3** — the top actual BUILD. Prior-year QBI loss carryforward, SUBTRACTED at
-   line 4, so omitting it INFLATES the deduction and UNDERSTATES tax. `qbi.rs:63` waves it off with a
-   NON-SEQUITUR (the `ScheduleCLoss` refusal is about the CURRENT year; the same fn consumes
-   `reit_ptp_carryforward_in` eight lines later). Mirror the REIT/PTP pair + `CarryProvenance`.
-   ★★ **NEITHER ORACLE can model it** — OTS would take it as a hand-fed input, taxcalc has no channel
-   at all — so oracle agreement validates NOTHING here (the §G-9 limit). Validate by hand-computed KAT
-   against i8995 lines 3/4/16, including carry-in > current QBI (must give a NONZERO line 16).
-   ★ `form8995.rs::assert_paren_magnitudes` is a HAND-MAINTAINED array — add `("3", lines.line3)`.
-   Nothing forces that edit; pair it with a planted-defect test.
+4. ~~**THEN Form 8995 line 3**~~ — ✅ **DONE 2026-07-30** (`3d09552`). Built as the mirror of the
+   REIT/PTP pair, end to end (inputs + provenance, `has_qbi`, `compute_8995`, `qbi_over_threshold`,
+   printed lines 3/4/16, `PrintedInputs`, `AbsoluteReturn`, the negative screen, classifier, map,
+   emitter, write-back, TOML template, LIMITATIONS).
+   ★★ **The line had never been transcribed AT ALL** — `Form8995Lines` went line2 → line4, with no
+   `line3` field. Adding it `E0063`'d every literal and call site, which is how the plumbing was found
+   rather than guessed.
+   ★★ **LINE 3 PRINTS ONLY WHEN THERE IS A CARRYFORWARD.** A pre-existing test said *"L3 must be
+   blank"* and it was right: line 3 is the one line on this form that is neither derived nor computed
+   — it is TESTIMONY — so a printed `0` swears the filer had no prior-year QBI loss. Every other line
+   is btctax's own arithmetic and prints its zero legitimately.
+   ★★★ **THE WRITE-BACK MUTATION SURVIVED THE WHOLE SUITE.** Deleting
+   `next_year.qbi.qbi_carryforward_in = ar.qbi_carryforward_out` left 2519 tests green. A silently
+   extinguished carryforward is not a one-year error — it enlarges the deduction in every later year
+   and no single return looks wrong. Closed by `form_8995_line16_carries_into_next_years_line3`.
+   ★ GAPS ratchet **13 → 12**; TY2024 golden matrix byte-unchanged.
 
 ### ★★ THE RANKED BACKLOG — from the 2026-07-30 "what next" recon (8 agents, adversarially checked)
 
@@ -143,10 +150,10 @@ ready outranks blocked-on-a-decision; cheap hazard-removal outranks large projec
 | # | item | effort | status |
 |---|---|---|---|
 | ~~1~~ | ~~Schedule C line G → Form 8960 line 4a~~ | — | ❌ **DEAD — REFUTED.** Would have DOUBLE-TAXED SE income. §1411(c)(6) shelters it. See the ACTIVE WORK correction above. |
-| **2** | **Form 8995 line 3** — prior-year QBI loss carryforward, subtracted at line 4; omitting it INFLATES the deduction and UNDERSTATES tax | days | ⬜ **the top BUILD** — item 4 of the remaining list above |
+| ~~2~~ | ~~**Form 8995 line 3**~~ | days | ✅ **DONE 2026-07-30** (`3d09552`) — see remaining-list item 4 above. |
 | ~~3~~ | ~~**Crypto-slice export trio**~~ | hours | ✅ **DONE 2026-07-30** — see the box below. **(b) shipped line 17 ONLY; line 20 was REFUSED on inspection.** |
 | **4** | `ARCHIVE_RECONCILIATION_REVIEW_BY = "2026-08-13"` (`archive_check.rs:174`) — re-decide the residual archive duplication or consciously reset the date with a written reason. While in the file: give `the_archive_count_may_only_shrink`'s one-sided `<=3` an `assert_eq!` companion (both its siblings have one) and fix the stale doc comment narrating four archives | hours | ⬜ **DATED — reds the WHOLE SUITE once passed**, blocking everything else. Owner decision. |
-| **5** | **§G-9a** — does the §63(f) **BLIND** box have the death-mid-year interaction the AGED box turned out to have? Adjudicate against i1040gi's "blind at the end of 2024"; the absence of an explicit death carve-out (which the aged instruction HAS) may itself be the answer | hours | ⬜ Moves a figure. May close as "no change needed" — a legitimate cheap outcome. |
+| ~~5~~ | ~~**§G-9a** — the §63(f) BLIND box~~ | hours | ✅ **CLOSED 2026-07-30 as "no change needed"** (`1fa75a1`), the outcome this row predicted. i1040gi names ONE box in the carve-out, and the mechanism says why: age is a DURATION test the year can straddle, blindness a POINT-IN-TIME test whose anchor a decedent's short year satisfies. Pinned by a test on i1040gi's own worked example. ★ Surfaced **§G-20** in the same passage: the MFS spouse's aged/blind boxes are forgone, and the code recorded that as THE RULE when it is a conservative omission. |
 | **6** | **Schedule 1-A plan r3 was NEVER independently reviewed** — the doc reads "Status: r3" but `design/ty2025/reviews/` holds only `…-opus-r1.md`; r2→r3 folded a 13-agent census (`c92cb9b`) that added T3a wholesale. Not green under this repo's own re-review-after-every-fold rule. Then build B3 T2 | hours + days | ⬜ Only if B3 is the chosen track. Owner decision. |
 | ~~7~~ | ~~Batch the remaining §G-13 declarations~~ | — | ⚠️ **SUPERSEDED by the refusal review.** Its premise (ask them all) is what the owner corrected. Use the decision table above instead: SE line A and Sch C G/H are DON'T-ASK and done; FBAR is built and pending REVERSAL; only Sch C I/J (skippable) and 8283 5a/5b/5c (refusal-on-Yes) remain. |
 | **8** | **Push the backlog.** `core.hooksPath=scripts`, `scripts/.pii-patterns` does NOT exist, `scripts/pre-push:27-35` is fail-closed ⇒ every plain `git push` exits 1. Format documented at `scripts/README-pii-setup.md:25-52`. Sanctioned escape: `BTCTAX_PII_BYPASS=1 git push` | minutes | ⬜ **OWNER-ONLY** — the patterns file is owner-specific and untracked; the assistant must not author it. Repo is PUBLIC. Generic scan is clean across all commits. |

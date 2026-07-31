@@ -48,8 +48,9 @@ penalty** from 1099-INT box 2 (line 18).
 **Other income (Schedule 1 Part I):** a **taxable state or local income-tax refund** (line 1, §111 tax-benefit
 rule) · crypto ordinary income with no other home (line 8v).
 
-**QBI:** the simplified **Form 8995** path for §199A REIT dividends (1099-DIV box 5), with the REIT/PTP loss
-carryforward.
+**QBI:** the simplified **Form 8995** path for §199A REIT dividends (1099-DIV box 5) and your Schedule C
+trade or business, with **both** prior-year loss carryforwards — the qualified-business one (line 3) and the
+REIT/PTP one (line 7).
 
 **Credits:** §904(j) **foreign tax credit** (≤ $300 / $600 MFJ, passive, 1099-reported — no Form 1116) ·
 **excess Social Security** credit (multi-employer, per person).
@@ -104,9 +105,13 @@ wage-and-property limits that take over (that is Form 8995-A, which it does not 
 - **A HoH/QSS qualifying person who is not one of your listed dependents** is not captured; that cell is left
   blank for you to complete.
 
-**Carryovers:** charitable (per class + vintage) and the QBI REIT/PTP loss carryforward are computed and can
-be written forward to next year with `btctax report --tax-year Y --write-carryover`. A carryover you typed in
-yourself is never silently overwritten (pass `--force` if you mean to).
+**Carryovers:** charitable (per class + vintage) and **both** QBI loss carryforwards — qualified business
+(Form 8995 line 16) and REIT/PTP (line 17) — are computed and can be written forward to next year with
+`btctax report --tax-year Y --write-carryover`. A carryover you typed in yourself is never silently
+overwritten (pass `--force` if you mean to).
+★ If you are carrying a prior-year qualified-business **loss**, enter it as a POSITIVE number under `[qbi]`
+as `qbi_carryforward_in` — it is subtracted at line 4, so leaving it out would overstate your deduction and
+**understate your tax**. btctax has no way to know about a year it did not compute.
 
 ---
 

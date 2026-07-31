@@ -154,6 +154,8 @@ other_withholding = "0"
 [qbi]
 reit_ptp_carryforward_in = "0"
 reit_ptp_carryforward_in_provenance = "user"
+qbi_carryforward_in = "0"
+qbi_carryforward_in_provenance = "user"
 
 [sch1]
 hsa_activity = false
