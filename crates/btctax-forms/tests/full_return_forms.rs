@@ -2122,6 +2122,25 @@ fn the_full_return_8283_names_the_filer_and_prints_whole_dollars() {
         Some("123-45-6789"),
         "…and their identifying number (this cell is /MaxLen 11 ⇒ hyphenated)"
     );
+    // ★★ §G-13 — PAGE 2 CARRIES THE HEADER TOO. The form repeats "Name(s) shown on your income tax
+    // return" + "Identifying number" on page 2 so a detached Section B page can still be tied to its
+    // return. btctax held both all along and wrote them only to page 1, so a filed page 2 went out
+    // unidentified — the "we have the datum and nothing connects it to the field" gap, which no
+    // golden covered because no golden household donates.
+    //
+    // ★ The FQNs were DUMPED per revision, not inferred: TY2024 is f2_01/f2_02, TY2025 is f2_1/f2_2,
+    // and Rev. 12-2014 is p2-t1/p2-t2 at /MaxLen 12. An analogy would have written a nonexistent cell.
+    assert_eq!(
+        tv(&pdf, "Form8283[0].Page2[0].f2_01[0]").as_deref(),
+        Some("John Doe & Jane Doe"),
+        "page 2's own name header"
+    );
+    assert_eq!(
+        tv(&pdf, "Form8283[0].Page2[0].f2_02[0]").as_deref(),
+        Some("123-45-6789"),
+        "page 2's own identifying number (/MaxLen 11 ⇒ hyphenated, same as page 1)"
+    );
+
     // The money columns are whole dollars — no cents anywhere on the filed page.
     assert_eq!(printed.rows()[0].cost_basis, dec!(1200));
     assert_eq!(
@@ -2129,6 +2148,52 @@ fn the_full_return_8283_names_the_filer_and_prints_whole_dollars() {
         dec!(30001),
         "30,000.50 rounds at the cell"
     );
+}
+
+/// ★ B1 — a map with no `[identity_page2]` FAILS CLOSED on the full-return path, exactly as a map with
+/// no `[identity]` does. Without this, dropping the block from the TOML would silently restore the gap:
+/// the fill would succeed and page 2 would go out unnamed again, which is invisible in every
+/// value-checking test because the cell simply stays empty.
+#[test]
+fn a_full_return_8283_map_without_page2_identity_fails_closed() {
+    use btctax_core::forms::{Form8283HowAcquired, Form8283Row, Form8283Section};
+    use btctax_core::tax::printed::form_8283_printed;
+    use btctax_forms::testonly::*;
+
+    let row = Form8283Row {
+        section: Some(Form8283Section::A),
+        description: "0.50000000 BTC".into(),
+        how_acquired: Form8283HowAcquired::Purchased,
+        date_acquired: time::macros::date!(2021 - 03 - 01),
+        date_contributed: time::macros::date!(2024 - 07 - 04),
+        cost_basis: dec!(1200),
+        fmv: dec!(30000),
+        claimed_deduction: Some(dec!(30000)),
+        fmv_method: String::new(),
+        donee: "Habitat".into(),
+        appraiser: String::new(),
+        needs_review: false,
+        details: None,
+    };
+    let printed = form_8283_printed(&[row]).expect("there is a donation");
+
+    let mut map = Form8283Map::for_year(2024).unwrap();
+    map.identity_page2 = None; // the exact omission
+    let err = match fill_8283_full_with_map(&printed, &kitchen_sink_header(), &map) {
+        Ok(_) => panic!(
+            "a map with no [identity_page2] FILLED — page 2 goes out with no identifying header, so a              detached Section B page cannot be tied to its return"
+        ),
+        Err(e) => format!("{e}"),
+    };
+    assert!(
+        err.contains("identity_page2"),
+        "the refusal must name the missing block, got: {err}"
+    );
+
+    // The control: the real map still fills.
+    let map = Form8283Map::for_year(2024).unwrap();
+    fill_8283_full_with_map(&printed, &kitchen_sink_header(), &map)
+        .expect("the committed map must still fill");
 }
 
 // ── fill_full_return — the assembled packet (P6.3b) ─────────────────────────────────────────────

@@ -159,7 +159,11 @@ fn recorded_gaps_may_only_shrink() {
     // had one got an INFLATED deduction and UNDERSTATED tax. Closed the way the message below
     // demands: the field is now MAPPED and the input collected, and its census entry deleted because
     // it is no longer unaccounted-for — not because the record was inconvenient.
-    const GAPS: usize = 12;
+    // 2026-07-31: 12 → 10. Form 8283's PAGE-2 identity header (`f2_01`/`f2_02`) was a gap of the
+    // "we have the datum and nothing connects it to the field" species — btctax held the name and TIN
+    // and wrote them to page 1, while a filed page 2 went out unidentified. Closed by MAPPING the
+    // cells (`[identity_page2]`), not by re-describing the omission.
+    const GAPS: usize = 10;
 
     let mut found = Vec::new();
     for stem in CENSUSED {

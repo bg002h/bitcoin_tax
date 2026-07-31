@@ -587,6 +587,19 @@ pub struct Form8283Map {
     /// and the 2017/2025 maps have no verified FQNs; the FULL-return filler refuses on `None`.
     #[serde(default)]
     pub identity: Option<IdentityCells>,
+    /// ★ **PAGE 2's** own "Name(s) shown on your income tax return" + "Identifying number" header.
+    ///
+    /// The form repeats the identity block on page 2 so a detached Section B page can still be tied to
+    /// its return. btctax HELD the name and TIN and wrote them to page 1, but the map declared no
+    /// page-2 cells, so a filed page 2 went out with no identifying header — §G-13's clearest "we have
+    /// the datum and nothing connects it to the field" gap.
+    ///
+    /// ★★ **The FQNs differ per revision and were DUMPED, not inferred**: TY2024 is `f2_01`/`f2_02`,
+    /// TY2025 is `f2_1`/`f2_2`, and the Rev. 12-2014 (TY2017) form uses `p2-t1`/`p2-t2` with a
+    /// **/MaxLen of 12**, not 11. `Option` because only the full-return revision writes an identity at
+    /// all — the crypto-slice maps carry no `[identity]` block either.
+    #[serde(default)]
+    pub identity_page2: Option<IdentityCells>,
     /// Section A (≤ $5,000).
     pub section_a: Section8283A,
     /// Section B (> $5,000).

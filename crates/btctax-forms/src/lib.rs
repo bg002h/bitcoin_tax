@@ -432,6 +432,7 @@ pub mod testonly {
     pub use crate::form1040_full::fill_form_1040_full_with_map;
     pub use crate::form8275::fill_form_8275_with_map as fill_8275_with_map;
     pub use crate::form8283::fill_form_8283 as fill_8283_with_map;
+    pub use crate::form8283::fill_form_8283_full as fill_8283_full_with_map;
     pub use crate::form8959::fill_form_8959_with_map;
     pub use crate::form8960::fill_form_8960_with_map;
     pub use crate::form8995::fill_form_8995_with_map;

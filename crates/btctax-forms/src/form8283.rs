@@ -464,6 +464,24 @@ fn fill_one(
             &header.taxpayer.ssn,
             blank,
         )?;
+        // ★ …and PAGE 2's own header (§G-13). The form repeats it so a detached Section B page can
+        // still be tied to its return, and btctax held the name and TIN all along — it simply had no
+        // cells to write them into. Required in the same breath as page 1's, and for the same reason:
+        // a full return may not attach an unnamed page of a substantiation form.
+        let identity_page2 = map.identity_page2.as_ref().ok_or_else(|| {
+            FormsError::Geometry(format!(
+                "the {} Form 8283 map has no [identity_page2] block — page 2 would go out with no                  identifying header, so a detached Section B page could not be tied to its return",
+                map.year
+            ))
+        })?;
+        crate::cells::push_identity(
+            &mut w,
+            &mut p,
+            identity_page2,
+            &header.name_line,
+            &header.taxpayer.ssn,
+            blank,
+        )?;
     }
 
     let clusters = sec_clusters(map.year, section);
