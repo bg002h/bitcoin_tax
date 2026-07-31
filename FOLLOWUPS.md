@@ -1254,6 +1254,43 @@ aged box is carved out while the blind box is not, plus the one-day-later contro
 `legal/primary-sources/` — and neither is **26 USC §63**. This rests on rung 2 plus the mechanism, not
 on rung 3 or 4. Recorded as such rather than as settled; archiving either would upgrade it.
 
+### G-22 — ★★ Form 8995 line 3 is COLLECTABLE but never ASKED — the understatement path is still open
+
+**Owning phase: whenever the QBI input surface is next touched. Found by the r2 tax-lens review, and
+it is a correction to my own 2026-07-30 claim that the gap was "closed by collecting the input".**
+
+The field is mapped, the chain computes it, the write-back carries it — but **nothing asks the filer
+for it.** `qbi` is a WHOLESALE prefix exemption in `spec/coverage.rs::EXEMPT_PREFIXES`, so no `Field`
+exists and neither `income answer` nor the TUI ever poses the question; `advisories.rs` mentions no
+carryforward at all. The only way in is hand-editing `[qbi] qbi_carryforward_in` in the import TOML,
+which `LIMITATIONS.md` now documents — and a filer who does not read it gets the old behaviour.
+
+**The reviewer's worked case:** Single TY2024, W-2 $110,000, Schedule C mining net $50,000, TI before
+QBI $150,000 (below the threshold, so no refusal). A $20,000 §199A qualified-business-loss carried
+from a TY2023 return prepared elsewhere. Line 3 prints blank, line 4 = $50,000 instead of $30,000,
+line 15 = $10,000 instead of $6,000 ⇒ **taxable income understated $4,000, tax by ≈$880.**
+
+★★ **I deleted the census entry whose own reason said *"Closes by collecting it"* having only made it
+collect-ABLE.** The register thereby lost its only record of a live understatement path. That is the
+error worth remembering: **a `gap` closes when the FILER can answer, not when the STRUCT can hold the
+answer.**
+
+★ **Why it could not stay in the §G-13 census:** that census is field-provenance, and the field is now
+genuinely mapped and filled. This is an INPUT-COLLECTION gap — a different species, with no ratchet of
+its own. Worth considering whether it needs one, since this is the second time the two have been
+confused (the first was Schedule C line G).
+
+★ **Direction and precedent.** The sibling `reit_ptp_carryforward_in` (line 7) has the identical shape
+— import-only, unadvised — and has been accepted for as long. So this is not a regression in any
+figure; it is a regression in the safety net. Fixing one should fix both.
+
+**Sketch:** drop `"qbi"` from `EXEMPT_PREFIXES` and give both carryforwards real `Field`s (they are
+`Usd`, not tri-states, so they belong with the money fields rather than the question registry), plus an
+advisory that fires when there IS QBI and the carryforward is `0` with `CarryProvenance::User` — i.e.
+btctax did not compute the prior year, so it cannot know. ★ Precision matters: that condition is true
+for most first-time users, which is arguably correct but needs the same care the death-gate advisory
+got.
+
 ### G-21 — ★★★ Form 8283 5a/5b/5c: the question registry is RETURN-shaped, these are PER-DONATION
 
 **Owning phase: whenever 8283 Section B is next touched. This is the last of the §G-13 gaps (6 of 6).**

@@ -163,14 +163,19 @@ impl Advisory {
                  standard deduction ({amt} per box), but the \"died during the tax year?\" question was \
                  not answered, so it was NOT granted. i1040gi carves out someone who died in-year \
                  before reaching 65, and v1 will not resolve that carve-out by assuming they lived. \
-                 Answering it with `btctax income answer` is one keystroke and worth {amt}: your tax is \
-                 currently OVERSTATED.",
+                 Answering it with `btctax income answer` is one keystroke and worth {total}: your tax \
+                 is currently OVERSTATED.",
                 n = if *persons > 1 {
                     "you and your spouse"
                 } else {
                     "someone on this return"
                 },
-                amt = fmt_usd(*per_box)
+                amt = fmt_usd(*per_box),
+                // ★ The VALUE of answering is the whole forfeit, not one box. `persons` already
+                // selects the pronoun; quoting the per-box figure beside "you and your spouse" told an
+                // MFJ couple $1,550 when $3,100 was at stake. A wrong number in the text that exists
+                // to make the number vivid is worse than no number.
+                total = fmt_usd(*per_box * Usd::from(*persons as u64))
             ),
             Advisory::FbarFinCen =>
                 "FBAR / FinCEN — you declared a foreign financial account. Under FinCEN Notice 2020-2 an \
@@ -883,6 +888,28 @@ mod tests {
         assert!(
             !run(None, None),
             "no DOB ⇒ `AgedBoxForfeitedNoDob` already covers it; two advisories for one forfeit is worse than one"
+        );
+        // ★ The message must quote the WHOLE forfeit, not one box. An MFJ couple with two boxes
+        // forgone was told $1,550 when $3,100 was at stake — a wrong number inside the sentence whose
+        // job is to make the number vivid. `persons` was computed and used for the pronoun only.
+        let one = Advisory::AgedBoxForfeitedDeathUnanswered {
+            per_box: dec!(1550),
+            persons: 1,
+        }
+        .message();
+        assert!(one.contains("worth $1,550"), "{one}");
+        let two = Advisory::AgedBoxForfeitedDeathUnanswered {
+            per_box: dec!(1550),
+            persons: 2,
+        }
+        .message();
+        assert!(
+            two.contains("worth $3,100"),
+            "two boxes forgone ⇒ the value of answering is 2 × per-box: {two}"
+        );
+        assert!(
+            two.contains("($1,550 per box)"),
+            "…and per-box stays per-box: {two}"
         );
     }
 
