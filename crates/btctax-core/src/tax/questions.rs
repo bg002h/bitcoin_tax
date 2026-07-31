@@ -102,6 +102,10 @@ pub enum QuestionId {
     /// *"If your spouse was born before January 2, 1960, but died in 2024 before reaching age 65,
     /// don't check the box that says 'Spouse was born before January 2, 1960.'"*
     SpouseDiedDuringYear,
+    /// **Schedule B line 7a's unnumbered sub-question** — *"If 'Yes,' are you required to file FinCEN
+    /// Form 114, Report of Foreign Bank and Financial Accounts (FBAR), to report that financial interest
+    /// or signature authority?"* Live only when 7a is answered "Yes".
+    FbarFilingRequired,
 }
 
 impl QuestionId {
@@ -120,6 +124,7 @@ impl QuestionId {
         QuestionId::HasIncomeExclusion,
         QuestionId::TaxpayerDiedDuringYear,
         QuestionId::SpouseDiedDuringYear,
+        QuestionId::FbarFilingRequired,
     ];
 }
 
@@ -534,6 +539,30 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         durability: Durability::PerYear,
         neutral: false,
     },
+    FormQuestion {
+        id: QuestionId::FbarFilingRequired,
+        prompt: "Schedule B line 7a (sub-question): you said you had a foreign financial account — are \
+                 you REQUIRED to file FinCEN Form 114 (the FBAR) to report that financial interest or \
+                 signature authority?",
+        unanswered: RefuseReason::FbarFilingRequirementUnanswered,
+        unanswered_detail:
+            "Schedule B line 7a was answered Yes, so its FBAR sub-question must be answered too — the \
+             form's own Caution reads \"If required, failure to file FinCEN Form 114 may result in \
+             substantial penalties\", so btctax will not file a return that leaves it blank — run \
+             `btctax income answer`",
+        // ★ The FORM conditions this on 7a — "If 'Yes,' are you required to file…" — so it is live only
+        //   when 7a is Some(true). Narrowest liveness in the registry, deliberately: a filer with no
+        //   foreign account is never asked, and the fixture blast radius is exactly the 7a-Yes returns.
+        live: |ri| ri.foreign_accounts == Some(true),
+        get: |ri| ri.fbar_filing_required,
+        set: |ri, v| ri.fbar_filing_required = Some(v),
+        durability: Durability::PerYear,
+        // ★ `false` is the answer that adds no obligation, but btctax takes NO position on whether it is
+        //   correct: FinCEN Notice 2020-2 leaves accounts holding ONLY virtual currency outside the FBAR
+        //   requirement for now, that is under active reconsideration, and an account holding crypto PLUS
+        //   fiat or securities may well be reportable. The filer decides; we only refuse to decide for them.
+        neutral: false,
+    },
 ];
 
 /// The identity of each SKIPPABLE prompt (§2, class B) — the questions where silence is LAWFUL: a bare
@@ -760,6 +789,7 @@ mod tests {
                 QuestionId::HasIncomeExclusion => 11,
                 QuestionId::TaxpayerDiedDuringYear => 12,
                 QuestionId::SpouseDiedDuringYear => 13,
+                QuestionId::FbarFilingRequired => 14,
             };
             assert_eq!(idx, i, "QuestionId::ALL is out of order / missing {id:?}");
             assert_eq!(
@@ -768,8 +798,8 @@ mod tests {
                 "exactly one FORM_QUESTIONS entry for {id:?}"
             );
         }
-        assert_eq!(QuestionId::ALL.len(), 14, "there are 14 declarations");
-        assert_eq!(FORM_QUESTIONS.len(), 14, "one entry per declaration");
+        assert_eq!(QuestionId::ALL.len(), 15, "there are 15 declarations");
+        assert_eq!(FORM_QUESTIONS.len(), 15, "one entry per declaration");
     }
 
     #[test]

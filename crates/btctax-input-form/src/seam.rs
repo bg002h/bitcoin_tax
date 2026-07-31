@@ -102,6 +102,8 @@ pub enum FieldId {
     DeclHasIncomeExclusion,
     DeclTaxpayerDiedDuringYear,
     DeclSpouseDiedDuringYear,
+    /// Schedule B line 7a's FBAR sub-question (FinCEN Form 114).
+    DeclFbarFilingRequired,
     ExclPuertoRico,
     Excl2555L45,
     Excl2555L50,

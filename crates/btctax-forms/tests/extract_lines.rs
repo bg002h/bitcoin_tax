@@ -219,6 +219,7 @@ fn sch_b(part1: Vec<ScheduleBRow>, part2: Vec<ScheduleBRow>, fa: bool, ft: bool)
     let line2: Usd = part1.iter().map(|r| r.amount).sum();
     let line6: Usd = part2.iter().map(|r| r.amount).sum();
     ScheduleBLines {
+        fbar_filing_required: None,
         line7b_countries: String::new(),
         part1_rows: part1,
         line2,

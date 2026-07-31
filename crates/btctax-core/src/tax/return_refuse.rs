@@ -61,6 +61,10 @@ pub enum RefuseReason {
     /// Schedule B files but Part III line 7a (foreign accounts) or 8 (foreign trust) is unanswered
     /// (`None`) — fail-loud rather than guess a disclosure answer (SPEC §7.1 / I7 / P2-I1).
     ScheduleBPart3Unanswered,
+    /// Schedule B line 7a answered "Yes", but its FBAR sub-question — *"are you required to file FinCEN
+    /// Form 114…?"* — is unanswered. The form warns that failure to file may carry substantial penalties,
+    /// so a blank here is not a lawful silence: it is an unanswered declaration on a filed return.
+    FbarFilingRequirementUnanswered,
     /// A Schedule A `salt_sales_tax_amount` is set but the §164(b)(5) sales-tax election is OFF — a silent
     /// drop of the amount would hide an input error, so fail loud (SPEC §4.6 / R3-M9).
     SaltSalesTaxWithoutElection,
@@ -292,6 +296,7 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         qbi,
         foreign_accounts: _,
         foreign_trust: _,
+        fbar_filing_required: _,
         foreign_country_names: _,
         dual_status_alien: _,
         // MAGI add-backs — refused at the worksheet's point of need, not here (D-11).
@@ -1046,6 +1051,13 @@ mod tests {
         };
         match id {
             QuestionId::DependentSpouse => r.filing_status = FilingStatus::Mfj, // live with no spouse Person (P8a I1)
+            // ★ The FBAR sub-question is live ONLY under a 7a "Yes" — the form conditions it on 7a.
+            //   7b must be non-empty too, or `ScheduleBForeignCountryMissing` (:679) fires on a
+            //   different axis and masks what this scenario is meant to exercise.
+            QuestionId::FbarFilingRequired => {
+                r.foreign_accounts = Some(true);
+                r.foreign_country_names = "Portugal".to_string();
+            }
             QuestionId::MfsSpouseItemizes => r.filing_status = FilingStatus::Mfs,
             QuestionId::MortgageAllUsedToBuyBuildImprove | QuestionId::AmtQualifiedDwelling => {
                 r.schedule_a = Some(ScheduleAInputs {
@@ -1086,8 +1098,12 @@ mod tests {
         for q in FORM_QUESTIONS {
             let mut r = scenario_for(q.id); // nothing answered yet
                                             // Answer every OTHER live question, leaving q blank (None, from Default).
+                                            // ★ `is_none()` is load-bearing, not tidiness: a question whose LIVENESS depends on another
+                                            //   question's non-neutral answer (FbarFilingRequired needs 7a = Yes, and 7a's neutral is
+                                            //   `false`) would otherwise be switched off by this very loop, and its scenario could never
+                                            //   be exercised. Only fill in what the scenario left blank.
             for other in FORM_QUESTIONS {
-                if other.id != q.id && (other.live)(&r) {
+                if other.id != q.id && (other.live)(&r) && (other.get)(&r).is_none() {
                     (other.set)(&mut r, other.neutral);
                 }
             }
@@ -1748,8 +1764,10 @@ mod tests {
     fn answering_every_live_question_neutral_leaves_no_declaration_refusal() {
         for q in FORM_QUESTIONS {
             let mut r = scenario_for(q.id);
+            // ★ Same `is_none()` rule as the sibling property test above: never overwrite an answer the
+            //   scenario pinned to make `q` live in the first place.
             for other in FORM_QUESTIONS {
-                if (other.live)(&r) {
+                if (other.live)(&r) && (other.get)(&r).is_none() {
                     (other.set)(&mut r, other.neutral);
                 }
             }
@@ -2085,6 +2103,9 @@ mod tests {
     fn schedule_b_foreign_country_missing_refuses_and_names_import() {
         let mut r = ri();
         r.foreign_accounts = Some(true); // 7a Yes
+                                         // ★ 7a "Yes" now makes the FBAR sub-question LIVE, and the registry loop screens unanswered
+                                         //   declarations BEFORE this value check — so answer it, or that refusal masks this one.
+        r.fbar_filing_required = Some(false);
         r.foreign_country_names = String::new(); // 7b blank
         let refusal = screen_inputs(&r, &tbl(), &params()).expect("must refuse");
         assert_eq!(refusal.reason, RefuseReason::ScheduleBForeignCountryMissing);

@@ -895,9 +895,9 @@ pub struct ScheduleBRow {
 /// .foreign_country_names`), and the claim that "v1 has no input for it" was simply FALSE: the input
 /// existed, was screened, and was then dropped on the floor (ARCH-P6.3a Q7 item 7). It now prints.
 ///
-/// Only the unnumbered FBAR sub-question under 7a is left BLANK — for that one there genuinely is no
-/// input, and the `FbarFinCen` advisory tells the filer in terms that they must decide it themselves.
-/// An incomplete Part III is the honest output there; a guessed one would not be.
+/// ★ The unnumbered FBAR sub-question under 7a is now ASKED and PRINTED too (`QuestionId::FbarFilingRequired`,
+/// live only when 7a is "Yes"), so Part III no longer goes out incomplete. It is still never GUESSED:
+/// unanswered refuses, and when 7a is "No" the pair is left unwritten because the form does not ask it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduleBLines {
     /// L1 — the listed interest payers (Part I).
@@ -917,6 +917,13 @@ pub struct ScheduleBLines {
     pub foreign_trust_8: bool,
     /// L7b — the foreign-country list. The filer's own words, printed verbatim when 7a is "Yes".
     pub line7b_countries: String,
+    /// **L7a's unnumbered FBAR sub-question** — *"If 'Yes,' are you required to file FinCEN Form 114…?"*
+    ///
+    /// ★ Deliberately `Option`, not `bool`, all the way to the PDF writer. `None` (7a was "No", so the
+    /// sub-question is not live and the form does not ask it) and `Some(false)` (it IS live and the
+    /// filer answered "No") are DIFFERENT printed outputs: an unwritten pair versus a checked "No" box.
+    /// Collapsing this to `bool` with `unwrap_or(false)` would print a "No" the filer never gave.
+    pub fbar_filing_required: Option<bool>,
 }
 
 /// Derive the printed Schedule B chain from the filer's 1099s. Returns `None` when Schedule B is not
@@ -967,6 +974,7 @@ pub fn schedule_b_lines(ri: &crate::tax::return_inputs::ReturnInputs) -> Option<
         part2_rows,
         line6,
         foreign_accounts_7a: ri.foreign_accounts.unwrap_or(false),
+        fbar_filing_required: ri.fbar_filing_required,
         // Printed only when 7a is "Yes" — a country list beside a "No" would contradict the answer.
         line7b_countries: if ri.foreign_accounts == Some(true) {
             ri.foreign_country_names.clone()

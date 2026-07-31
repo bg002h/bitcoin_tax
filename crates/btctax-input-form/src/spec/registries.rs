@@ -213,6 +213,11 @@ const DECL_FIELDS: &[Field] = &[
         ri.header.spouse_died_during_year = None;
         Ok(())
     }),
+    // Index 14 — Schedule B 7a's FBAR sub-question, likewise APPENDED (see the note above).
+    decl_tristate!(14, FieldId::DeclFbarFilingRequired, |ri| {
+        ri.fbar_filing_required = None;
+        Ok(())
+    }),
     FOREIGN_COUNTRY_NAMES,
 ];
 
@@ -303,6 +308,7 @@ pub fn field_to_question(id: FieldId) -> Option<QuestionId> {
         FieldId::DeclHasIncomeExclusion => QuestionId::HasIncomeExclusion,
         FieldId::DeclTaxpayerDiedDuringYear => QuestionId::TaxpayerDiedDuringYear,
         FieldId::DeclSpouseDiedDuringYear => QuestionId::SpouseDiedDuringYear,
+        FieldId::DeclFbarFilingRequired => QuestionId::FbarFilingRequired,
         _ => return None,
     })
 }
@@ -327,6 +333,7 @@ pub fn question_to_field(id: QuestionId) -> FieldId {
         QuestionId::HasIncomeExclusion => FieldId::DeclHasIncomeExclusion,
         QuestionId::TaxpayerDiedDuringYear => FieldId::DeclTaxpayerDiedDuringYear,
         QuestionId::SpouseDiedDuringYear => FieldId::DeclSpouseDiedDuringYear,
+        QuestionId::FbarFilingRequired => FieldId::DeclFbarFilingRequired,
     }
 }
 

@@ -167,6 +167,9 @@ fn fixture_for(field: &Field, base: &ReturnInputs) -> ReturnInputs {
     match field.id {
         FieldId::DodTaxpayer => ri.header.taxpayer_died_during_year = Some(true),
         FieldId::DodSpouse => ri.header.spouse_died_during_year = Some(true),
+        // ★ The FBAR sub-question is live only under a Schedule B 7a "Yes"; a set on a non-live
+        //   question correctly refuses with `NoSuchRow`, so the fixture must make it live.
+        FieldId::DeclFbarFilingRequired => ri.foreign_accounts = Some(true),
         _ => {}
     }
     ri
@@ -367,13 +370,13 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(
-        field_count, 74,
-        "expected 74 Fields (one per §5.8 in-scope leaf)"
+        field_count, 75,
+        "expected 75 Fields (one per §5.8 in-scope leaf)"
     );
     assert_eq!(
         covered.len(),
-        74,
-        "expected 74 distinctly-covered in-scope leaves"
+        75,
+        "expected 75 distinctly-covered in-scope leaves"
     );
 
     // ── 5. ★ I-6: PIN the observed FieldId → leaf-path map against a literal (kills TRANSPOSITION). ──
@@ -530,6 +533,7 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
         FieldId::DeclSpouseDiedDuringYear,
         "header.spouse_died_during_year",
     ),
+    (FieldId::DeclFbarFilingRequired, "fbar_filing_required"),
     (FieldId::ExclPuertoRico, "excluded_puerto_rico_income"),
     (FieldId::Excl2555L45, "form_2555_line45"),
     (FieldId::Excl2555L50, "form_2555_line50"),

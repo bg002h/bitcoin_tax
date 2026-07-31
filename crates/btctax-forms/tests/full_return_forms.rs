@@ -824,6 +824,7 @@ fn sch_b(part1: Vec<ScheduleBRow>, part2: Vec<ScheduleBRow>, fa: bool, ft: bool)
     let line2: Usd = part1.iter().map(|r| r.amount).sum();
     let line6: Usd = part2.iter().map(|r| r.amount).sum();
     ScheduleBLines {
+        fbar_filing_required: None,
         line7b_countries: String::new(),
         part1_rows: part1,
         line2,
@@ -910,62 +911,69 @@ fn schedule_b_lists_payers_and_totals_the_printed_rows() {
 }
 
 /// ★ Part III is TRANSCRIBED, never decided. Lines 7a and 8 carry the filer's OWN answers (the return
-/// is refused upstream if they were left unanswered). The unnumbered FBAR sub-question under 7a
-/// (`c1_2`) and line 7b's country list are left BLANK: v1 has no input for them, and the FbarFinCen
-/// advisory tells the filer in terms that they must decide it themselves. An incomplete Part III is
-/// the honest output; a guessed one would not be.
+/// is refused upstream if they were left unanswered), and since the pen-deferral reversal so does 7a's
+/// unnumbered FBAR sub-question (`c1_2`, `QuestionId::FbarFilingRequired`).
+///
+/// ★★ THE POINT OF THIS TEST is the `None` vs `Some(false)` distinction. The form asks the FBAR
+/// sub-question ONLY under a 7a "Yes". So:
+///   - 7a = Yes, FBAR = Some(true)  ⇒ the YES box is checked
+///   - 7a = Yes, FBAR = Some(false) ⇒ the NO box is checked  (the filer said no)
+///   - 7a = No,  FBAR = None        ⇒ NEITHER box is written (the form never asked)
+///
+/// The last case is what makes "not asked ⇒ blank" structural. Mutation: replace the `if let Some(..)`
+/// in `schedule_b.rs` with `unwrap_or(false)` and the third case reds — a "No" the filer never gave.
 #[test]
-fn schedule_b_part3_transcribes_the_filers_own_answers_and_never_guesses_the_fbar() {
-    let yes = btctax_forms::fill_schedule_b(
-        &sch_b(vec![], vec![], true, false),
-        &kitchen_sink_header(),
-        2024,
-    )
-    .unwrap();
-    let doc = load(&yes).unwrap();
-    let idx = index(&collect_fields(&doc).unwrap());
+fn schedule_b_part3_transcribes_the_filers_own_answers_including_the_fbar_subquestion() {
+    let fbar_lines = |fa: bool, ft: bool, fbar: Option<bool>| {
+        let mut l = sch_b(vec![], vec![], fa, ft);
+        l.fbar_filing_required = fbar;
+        l
+    };
+    let check = |lines: &btctax_core::tax::printed::ScheduleBLines| {
+        let pdf = btctax_forms::fill_schedule_b(lines, &kitchen_sink_header(), 2024).unwrap();
+        let doc = load(&pdf).unwrap();
+        let idx = index(&collect_fields(&doc).unwrap());
+        let on = |fqn: &str| {
+            checkbox_on(
+                &doc,
+                idx[format!("topmostSubform[0].Page1[0].{fqn}").as_str()].id,
+            )
+        };
+        (
+            on("c1_1[0]"),
+            on("c1_1[1]"),
+            on("c1_2[0]"),
+            on("c1_2[1]"),
+            on("c1_3[0]"),
+            on("c1_3[1]"),
+        )
+    };
 
-    // 7a = YES (c1_1[0], on-state "1"); 8 = NO (c1_3[1], on-state "2").
-    assert_eq!(
-        checkbox_on(&doc, idx["topmostSubform[0].Page1[0].c1_1[0]"].id).as_deref(),
-        Some("1"),
-        "7a answered YES"
-    );
-    assert_eq!(
-        checkbox_on(&doc, idx["topmostSubform[0].Page1[0].c1_3[1]"].id).as_deref(),
-        Some("2"),
-        "8 answered NO"
-    );
-    // ★ The FBAR sub-question is NEVER answered — neither box is set.
-    for fbar in ["c1_2[0]", "c1_2[1]"] {
-        let fqn = format!("topmostSubform[0].Page1[0].{fbar}");
-        assert_eq!(
-            checkbox_on(&doc, idx[fqn.as_str()].id),
-            None,
-            "{fqn}: v1 never answers the FBAR sub-question"
-        );
-    }
-    // …nor line 7b's country list (free text, NOT a Yes/No pair).
-    assert_eq!(tv(&yes, "topmostSubform[0].Page1[0].f1_65[0]"), None);
+    // ── 7a YES, FBAR YES ──
+    let (y7a, _, fy, fno, _, n8) = check(&fbar_lines(true, false, Some(true)));
+    assert_eq!(y7a.as_deref(), Some("1"), "7a answered YES");
+    assert_eq!(n8.as_deref(), Some("2"), "8 answered NO");
+    assert_eq!(fy.as_deref(), Some("1"), "FBAR answered YES");
+    assert_eq!(fno, None, "the FBAR NO half stays unwritten");
 
-    // The opposite answers flip the boxes — the filer's declaration is what lands on the form.
-    let no = btctax_forms::fill_schedule_b(
-        &sch_b(vec![], vec![], false, true),
-        &kitchen_sink_header(),
-        2024,
-    )
-    .unwrap();
-    let doc2 = load(&no).unwrap();
-    let idx2 = index(&collect_fields(&doc2).unwrap());
+    // ── 7a YES, FBAR NO — an ANSWER, not a silence ──
+    let (_, _, fy, fno, _, _) = check(&fbar_lines(true, false, Some(false)));
+    assert_eq!(fy, None);
     assert_eq!(
-        checkbox_on(&doc2, idx2["topmostSubform[0].Page1[0].c1_1[1]"].id).as_deref(),
+        fno.as_deref(),
         Some("2"),
-        "7a answered NO"
+        "the filer answered the FBAR question NO; that is testimony and it prints"
     );
+
+    // ── 7a NO ⇒ the form never asks the sub-question ⇒ NEITHER half is written ──
+    let (_, n7a, fy, fno, y8, _) = check(&fbar_lines(false, true, None));
+    assert_eq!(n7a.as_deref(), Some("2"), "7a answered NO");
+    assert_eq!(y8.as_deref(), Some("1"), "8 answered YES");
     assert_eq!(
-        checkbox_on(&doc2, idx2["topmostSubform[0].Page1[0].c1_3[0]"].id).as_deref(),
-        Some("1"),
-        "8 answered YES"
+        (fy, fno),
+        (None, None),
+        "7a is NO, so the FBAR sub-question is not asked and NEITHER box may be written — a printed \
+         \"No\" here would be testimony the filer never gave"
     );
 }
 

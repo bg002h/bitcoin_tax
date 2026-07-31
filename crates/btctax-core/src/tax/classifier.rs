@@ -94,6 +94,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         qbi,
         foreign_accounts,
         foreign_trust,
+        fbar_filing_required,
         foreign_country_names: _, // String — scalar
         dual_status_alien,
         // §164(b)(7)(B)(iv) / Schedule 1-A Part I MAGI add-backs. `Option<Usd>` scalar leaves, so the
@@ -115,6 +116,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
     c.declaration(mfs_spouse_itemizes, QuestionId::MfsSpouseItemizes);
     c.declaration(foreign_accounts, QuestionId::ForeignAccounts);
     c.declaration(foreign_trust, QuestionId::ForeignTrust);
+    c.declaration(fbar_filing_required, QuestionId::FbarFilingRequired);
     c.declaration(dual_status_alien, QuestionId::DualStatusAlien);
     c.declaration(has_income_exclusion, QuestionId::HasIncomeExclusion);
     c.declaration(

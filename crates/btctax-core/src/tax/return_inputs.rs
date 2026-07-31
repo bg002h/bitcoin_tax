@@ -488,6 +488,19 @@ pub struct ReturnInputs {
     pub foreign_trust: Option<bool>,
     #[serde(default)]
     pub foreign_country_names: String,
+    /// **Schedule B line 7a's UNNUMBERED sub-question** — *"If 'Yes,' are you required to file FinCEN
+    /// Form 114, Report of Foreign Bank and Financial Accounts (FBAR), to report that financial interest
+    /// or signature authority?"*
+    ///
+    /// ★ A class-(A) DECLARATION, live only when [`Self::foreign_accounts`] is `Some(true)` — the form
+    /// itself conditions it on 7a being "Yes". Stays `Option` all the way to the PDF writer: `None`
+    /// (7a was "No", so the question is not live) and `Some(false)` (it IS live and the filer answered
+    /// "No") must print differently — an unwritten pair versus a checked "No" box.
+    ///
+    /// The form's own Caution is why this is not optional: *"If required, failure to file FinCEN Form
+    /// 114 may result in substantial penalties."*
+    #[serde(default)]
+    pub fbar_filing_required: Option<bool>,
     /// 1040 header "you were a dual-status alien" — a class-(A) DECLARATION (P9 §2.5), live always. A single
     /// box asserting a fact whose unchecked state we print today from the MFS coupling alone; `None` ⇒ refuse
     /// (`DualStatusAlienUnanswered`), `Some(true)` ⇒ refuse unsupported (§63(c)(6)(B): NRA standard deduction
@@ -591,6 +604,7 @@ impl Default for ReturnInputs {
             foreign_accounts: None,
             foreign_trust: None,
             foreign_country_names: String::new(),
+            fbar_filing_required: None,
             dual_status_alien: None,
         }
     }

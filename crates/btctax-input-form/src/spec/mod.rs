@@ -109,15 +109,15 @@ mod tests {
             );
         }
         assert_eq!(
-            decl_count, 13,
-            "13 declarations are Decl* fields (the 14th is the mortgage dedup)"
+            decl_count, 14,
+            "14 declarations are Decl* fields (the 15th is the mortgage dedup)"
         );
 
-        // 13 delegating Decl* fields + the foreign_country_names Text field.
+        // 14 delegating Decl* fields + the foreign_country_names Text field.
         assert_eq!(
             decls.fields.len(),
-            14,
-            "13 declarations + foreign_country_names"
+            15,
+            "14 declarations + foreign_country_names"
         );
         assert!(decls
             .fields
@@ -193,6 +193,8 @@ mod tests {
                     mortgage_interest_1098: rust_decimal_macros::dec!(1),
                     ..Default::default()
                 });
+                // Schedule B 7a "Yes" is what makes the FBAR sub-question live.
+                ri.foreign_accounts = Some(true);
                 ri.capital_loss_carryforward_in = btctax_core::tax::types::Carryforward {
                     short: rust_decimal_macros::dec!(1),
                     long: rust_decimal_macros::dec!(0),

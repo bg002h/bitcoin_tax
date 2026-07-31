@@ -1552,6 +1552,9 @@ pub struct ScheduleBMap {
     pub line6: MoneyCell,
     /// L7a — the foreign-account Yes/No pair.
     pub line7a: YesNoPair,
+    /// L7a's unnumbered FBAR sub-question Yes/No pair. Written ONLY when the answer is `Some` — the
+    /// form asks it only under a 7a "Yes".
+    pub line7a_fbar: YesNoPair,
     /// L8 — the foreign-trust Yes/No pair.
     pub line8: YesNoPair,
 }

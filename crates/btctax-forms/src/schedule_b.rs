@@ -145,10 +145,18 @@ pub fn fill_schedule_b_with_map(
     );
 
     // ── Part III — the filer's OWN answers, transcribed. ────────────────────────────────────────
-    for (pair, answer) in [
+    // ★ The FBAR sub-question is written ONLY when the filer answered it — `Some(_)`. When 7a is "No"
+    //   the form does not ask it, so BOTH halves stay unwritten. That `if let` is the mechanism making
+    //   "not asked ⇒ blank" structural rather than conventional; collapsing it to `unwrap_or(false)`
+    //   would print a "No" nobody gave.
+    let mut pairs = vec![
         (&map.line7a, lines.foreign_accounts_7a),
         (&map.line8, lines.foreign_trust_8),
-    ] {
+    ];
+    if let Some(fbar) = lines.fbar_filing_required {
+        pairs.push((&map.line7a_fbar, fbar));
+    }
+    for (pair, answer) in pairs {
         let choice = if answer { &pair.yes } else { &pair.no };
         writes.push((
             choice.field.clone(),
