@@ -48,3 +48,24 @@ line24 = "topmostSubform[0].Page1[0].f1_26[0]"  # "Total ... Add lines 22 and 23
 [identity]
 name = "topmostSubform[0].Page1[0].f1_1[0]"
 ssn  = "topmostSubform[0].Page1[0].f1_2[0]"
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# ★★★ THE FIELD CENSUS (§G-13 prototype). Every AcroForm field this form has must be accounted for
+# EXACTLY ONCE: either it is mapped above (we fill it), or it is named here with the rule that says
+# why we do not. `census_accounts_for_every_field` asserts (map ∪ census) == the PDF's field set, so
+# a field in neither is a hard failure — that is the "we forgot this line" defect made visible.
+#
+# ★ This section is not new knowledge. `Form8959Map`'s doc comment already said it in prose —
+# "Lines 2/3 (Form 4137 / Form 8919) and all of Part III plus line 23 (RRTA) are unmodeled and are
+# deliberately absent" — where nothing could check it. This makes the same statement enforceable.
+#
+# rule = "unmodeled"  a benefit or situation outside btctax's scope. Using btctax FORGOES it, so the
+#                     reason must name what is given up (consult r1's `unmodeled(advisory)`).
+[census]
+"topmostSubform[0].Page1[0].f1_4[0]"  = { line = "2",  rule = "unmodeled", reason = "Unreported tips from Form 4137, line 6 — btctax does not model Form 4137 tip income, so this stays blank and the line-4 sum is line 1 alone." }
+"topmostSubform[0].Page1[0].f1_5[0]"  = { line = "3",  rule = "unmodeled", reason = "Wages from Form 8919, line 6 — btctax does not model Form 8919 (uncollected SS/Medicare on wages), so this stays blank." }
+"topmostSubform[0].Page1[0].f1_16[0]" = { line = "14", rule = "unmodeled", reason = "Railroad retirement (RRTA) compensation from W-2 box 14 — btctax models no RRTA, so all of Part III stays blank." }
+"topmostSubform[0].Page1[0].f1_17[0]" = { line = "15", rule = "unmodeled", reason = "RRTA filing-status threshold — dead with line 14 blank." }
+"topmostSubform[0].Page1[0].f1_18[0]" = { line = "16", rule = "unmodeled", reason = "RRTA excess (line 14 − line 15) — dead with line 14 blank." }
+"topmostSubform[0].Page1[0].f1_19[0]" = { line = "17", rule = "unmodeled", reason = "Additional Medicare Tax on RRTA (line 16 × 0.9%) — dead with line 14 blank, which is why line 18 = line 7 + line 13." }
+"topmostSubform[0].Page1[0].f1_25[0]" = { line = "23", rule = "unmodeled", reason = "Additional Medicare Tax withholding on RRTA from W-2 box 14 — dead with no RRTA, which is why line 24 = line 22." }

@@ -896,12 +896,29 @@ census likely has to record the decision's EXISTENCE separately from its CONTENT
 ★ **Never auto-shred.** Destroying evidence of diligence must be an explicit, informed act by the
 filer — never a default or a background job.
 
-### G-13 — ★★★ FIELD PROVENANCE: 496 of 1158 AcroForm fields have no recorded decision
+### G-13 — ★★★ FIELD PROVENANCE — **PROTOTYPE LANDED 2026-07-30 (1 of 15 forms censused)**
 
 **Owning phase: NOT B3.** Whole-surface, and it interlocks with **§G-11** (which blocks its honest
 form). Filed 2026-07-30. **Full design note: [`design/forms/FIELD_PROVENANCE.md`](design/forms/FIELD_PROVENANCE.md)** — read that first; this entry is the register hook.
 
-**The finding.** `verify.rs::no_unmapped_filled` asserts every field carrying a value is authorised —
+**✅ The gate exists.** `btctax-forms/tests/field_census.rs` asserts `(map ∪ [census]) == the PDF's
+AcroForm field set`, exactly. **f8959 is fully censused** — 19 mapped + 7 `unmodeled` = 26 — and
+`CENSUS_NOT_YET_WRITTEN` is a shrink-only ratchet holding the other 14 forms. Mutation-verified in
+both directions: dropping a census entry reds with *"in NEITHER the map nor the [census]"*, and
+censusing an already-mapped field reds as a contradiction.
+
+★★ **The prototype's real lesson: this is knowledge made ENFORCEABLE, not new knowledge.**
+`Form8959Map`'s doc comment already said it in prose — *"Lines 2/3 (Form 4137 / Form 8919) and all of
+Part III plus line 23 (RRTA) are unmodeled and are deliberately absent"* — and `f1040.map.toml` says
+the same of the spouse's IP PIN. The facts were already written down where nothing could check them.
+That is the fourth time in one session the repo already held what was about to be built.
+
+★ Format settled by the prototype: the `[census]` section lives **inside the `.map.toml`**, so the
+map and the census are one edit and `no_unmapped_filled` reads the same universe (consult r1's
+recommendation, now exercised). Each entry carries `line`, `rule`, and a `reason` that must name what
+is forgone.
+
+**The original finding.** `verify.rs::no_unmapped_filled` asserts every field carrying a value is authorised —
 it stops us writing where we should not. **Nothing asserts the other direction:** that every field is
 either mapped, or deliberately not ours. One direction stops stray writes; the missing one stops
 silent omissions, and omission is the direction that costs a filer money.
