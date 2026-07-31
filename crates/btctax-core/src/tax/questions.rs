@@ -606,10 +606,18 @@ pub struct SkippableQuestion {
 /// liveness gates and prompts are lifted verbatim from the old `answer.rs::Skippable`; the `income answer`
 /// flow and the form engine both DERIVE their skippable prompts from this one list.
 ///
-/// ★ Seven of the eight are BENEFIT CLAIMS (*New Colonial Ice*: the burden to claim is the filer's, so
-/// forgoing is lawful). The eighth, [`SkippableId::FbarFilingRequired`], is here for a different
-/// reason — **no figure on the return reads it at all**, so its silence neither asserts nor forgoes.
-/// Class (B) is the set of questions whose silence is lawful, not only the set that costs money.
+/// ★★ **Two species, and the second is why class (B) is not simply "forgone benefit".**
+///
+/// - **Benefit claims** (*New Colonial Ice*: the burden to claim is the filer's, so forgoing is
+///   lawful) — blindness ×2, the SALT election, the DOBs, the dates of death, and the §G-9 death
+///   gates, whose silence forgoes the §63(f) age-65 addition.
+/// - **Compliance boxes NO FIGURE READS** — [`SkippableId::FbarFilingRequired`] and the Schedule C
+///   pair [`SkippableId::ScheduleC1099Required`] / [`SkippableId::ScheduleC1099Filed`]. Their silence
+///   neither asserts nor forgoes, because nothing on the return depends on them. They are class (B)
+///   for a different reason from everything else here, and each has an advisory naming the exposure
+///   the blank does NOT remove (FinCEN 114; §6721/§6722).
+///
+/// **Class (B) is the set of questions whose silence is LAWFUL, not only the set that costs money.**
 pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     SkippableQuestion {
         id: SkippableId::BlindTaxpayer,

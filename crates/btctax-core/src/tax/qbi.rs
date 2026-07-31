@@ -150,8 +150,16 @@ pub fn qbi_over_threshold(
 /// no EIN input), (c) its QBI, which for one business IS line 2. [`Form8995Lines::business_name`] is
 /// empty exactly when there is no Schedule C, and then the row stays blank and line 2 is zero.
 ///
-/// Line 3 (a prior-year trade/business QBI loss carryforward) has no v1 input and stays blank: a
-/// Schedule C LOSS refuses upstream, so v1 never carries one forward.
+/// ★★ Line 3 (the prior-year trade/business QBI loss carryforward) **IS an input and IS printed** —
+/// see [`Form8995Lines::line3`]. This paragraph used to say it had none, on the non-sequitur that "a
+/// Schedule C LOSS refuses upstream": that is about the CURRENT year, while line 3 is a PRIOR-year
+/// figure the filer brings in from a return btctax did not compute. Its absence inflated the deduction
+/// and UNDERSTATED the tax.
+///
+/// ★ Left corrected rather than deleted because this is the one line on the form that **neither
+/// oracle can validate** (OTS takes it as a hand-fed input; Tax-Calculator has no channel), so it is
+/// held only by hand-computed KATs — and a struct doc calling it dead plumbing is exactly how a future
+/// audit concludes the field is vestigial. ★ It is asked of nobody yet: `FOLLOWUPS.md` §G-22.
 ///
 /// **★ Lines 3, 7, 16 and 17 are PARENTHESIZED boxes on the printed form: the parentheses supply the
 /// minus sign, so the value written must be a POSITIVE MAGNITUDE.** Writing `-1234` renders as

@@ -1011,7 +1011,17 @@ pub fn schedule_b_lines(ri: &crate::tax::return_inputs::ReturnInputs) -> Option<
         part2_rows,
         line6,
         foreign_accounts_7a: ri.foreign_accounts,
-        fbar_filing_required: ri.fbar_filing_required,
+        // ★★ GATED ON 7a, exactly like `line7b_countries` below and Schedule C's line J. The form asks
+        // this only "If 'Yes,'", so a stored answer orphaned by a 7a correction (answer Yes, answer the
+        // sub-question, then correct 7a to No — at which point the sub-question is no longer live, is
+        // never re-asked, and is UN-CLEARABLE through the registry) must not reach the page. A hand-
+        // edited import TOML reaches the same state directly. Ungated, it printed a checked FinCEN-114
+        // box beside a checked "No" — a mark the form has no place for, under §6065.
+        fbar_filing_required: if ri.foreign_accounts == Some(true) {
+            ri.fbar_filing_required
+        } else {
+            None
+        },
         // Printed only when 7a is "Yes" — a country list beside a "No" would contradict the answer.
         line7b_countries: if ri.foreign_accounts == Some(true) {
             ri.foreign_country_names.clone()
@@ -2862,6 +2872,56 @@ mod tests {
 mod part3_answeredness_tests {
     use super::*;
     use crate::tax::return_inputs::{Form1099Int, ReturnInputs};
+
+    /// ★★★ THE ORPHANED FBAR ANSWER — a mark in a box the form never asked, contradicting the answer
+    /// directly above it. Found by the pre-publish Fable pass; **`b94508d`, which built this pair, fell
+    /// between both earlier review ranges and had never been read by anyone.**
+    ///
+    /// The form conditions the sub-question on 7a: *"**If "Yes,"** are you required to file FinCEN
+    /// Form 114…?"* So a checked sub-box beside a checked 7a **No** is a mark the form has no place
+    /// for, on a page signed under §6065.
+    ///
+    /// It is reachable, and not only in theory:
+    /// - `income answer` re-asks every LIVE declaration in one pass, so a filer who answers 7a=Yes +
+    ///   sub-question=Yes and later corrects 7a to **No** leaves the stored `Some(true)` behind — the
+    ///   sub-question is no longer live, so it is never re-asked, and the registry's own liveness gate
+    ///   makes it **un-clearable** (`NoSuchRow`).
+    /// - A hand-edited `income import` TOML reaches the same state directly — and `LIMITATIONS.md` now
+    ///   actively directs filers to hand-edit TOML for `qbi_carryforward_in`.
+    ///
+    /// ★★ **The branch's own later commit found the right pattern and nobody carried it back.** Nine
+    /// commits after the FBAR pair, Schedule C line J got exactly this gate, with the reason written
+    /// out: *"an answer to J without a Yes on I is not a mark the form has a place for … belt-and-
+    /// braces here so a TOML import cannot produce a J-without-I page."* The fix mirrors it, and
+    /// mirrors `line7b_countries` sitting one line below in the same constructor.
+    #[test]
+    fn an_fbar_answer_orphaned_by_a_7a_correction_is_not_printed() {
+        let mut ri = ReturnInputs {
+            tax_year: 2024,
+            ..Default::default()
+        };
+        ri.int_1099 = vec![Form1099Int {
+            payer: "Ally Bank".to_string(),
+            box1_interest: rust_decimal_macros::dec!(2000), // > $1,500 ⇒ Schedule B still files
+            ..Default::default()
+        }];
+        // The orphan: 7a corrected to No, the sub-question's stale Yes left behind.
+        ri.foreign_accounts = Some(false);
+        ri.foreign_trust = Some(false);
+        ri.fbar_filing_required = Some(true);
+
+        let sb = schedule_b_lines(&ri).expect("Schedule B files on $2,000 of interest");
+        assert_eq!(sb.foreign_accounts_7a, Some(false), "7a says No");
+        assert_eq!(
+            sb.fbar_filing_required, None,
+            "★ the sub-question box must be UNWRITTEN. The form asks it only \"If 'Yes,'\", so a \
+             checked box here contradicts the No directly above it — a mark the form has no place \
+             for, on a page signed under §6065."
+        );
+        // …and the country list beside it was already gated this way, which is the point: the two
+        // sat one line apart in the same constructor and only one of them was guarded.
+        assert_eq!(sb.line7b_countries, "");
+    }
 
     /// ★★ THE FABRICATED-TESTIMONY GUARD, at the CONSTRUCTOR. `schedule_b_lines` used to do
     /// `ri.foreign_accounts.unwrap_or(false)`, turning an UNANSWERED Schedule B Part III question into a
