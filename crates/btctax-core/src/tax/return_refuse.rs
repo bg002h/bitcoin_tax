@@ -12,7 +12,6 @@
 //! across the reconcile system) — additive, per SPEC §2. A `Refusal` maps to
 //! `TaxOutcome::NotComputable(..)` at the report boundary (Phase 4).
 use crate::conventions::Usd;
-use crate::tax::packet::{Ssn, SsnError};
 use crate::tax::return_inputs::{
     Box12Entry, CharitableCarryItem, CharitableClass, CharitableGift, Form1099Div, Form1099G,
     Form1099Int, Owner, Payments, QbiInputs, ReturnInputs, Schedule1Inputs, ScheduleAInputs,
@@ -36,15 +35,6 @@ pub enum RefuseReason {
     /// are produced by the computation, never the input. A negative value is a corrupt import that could
     /// otherwise *offset* an accumulated refusal threshold (e.g. §402(g), §904(j)) into passing (R2-I1).
     NegativeAmount(String),
-    /// A captured SSN is not nine digits. Every IRS form prints the SSN in a fixed-width comb cell, so a
-    /// value that cannot be canonicalized cannot be printed — and §3.4 makes an unprintable identity an
-    /// uncomputable line, not a best-effort cell. Carries WHO ("taxpayer" / "spouse" / a dependent's
-    /// name), **never the digits**: an SSN in an error string is a PII leak.
-    ///
-    /// An *uncaptured* (empty) SSN is deliberately NOT this: the tax math never reads an SSN, so a
-    /// household that has entered no PII still gets a report. The filable packet is what refuses it
-    /// (`ReturnHeader::build` → `SsnError::Missing`).
-    SsnMalformed(String),
     /// A **non-crypto NONCASH** charitable gift whose total exceeds the $500 Form 8283 threshold. Those
     /// amounts reach Schedule A line 12, but btctax holds no property details for them (no description,
     /// no acquisition date, no appraiser), so it can produce no 8283 rows — the packet would attach a
@@ -214,32 +204,6 @@ pub enum RefuseReason {
 pub struct Refusal {
     pub reason: RefuseReason,
     pub detail: String,
-}
-
-/// The first household SSN that was CAPTURED but cannot be canonicalized, as `(who, why)`. An empty SSN
-/// is skipped — "not entered" is a packet-time refusal, not a compute-time one.
-fn first_malformed_ssn(ri: &ReturnInputs) -> Option<(String, SsnError)> {
-    let dependents = ri
-        .header
-        .dependents
-        .iter()
-        .map(|d| (format!("dependent {}'s", d.name), d.ssn.as_str()));
-    let people = [
-        ("taxpayer".to_string(), ri.header.taxpayer.ssn.as_str()),
-        (
-            "spouse".to_string(),
-            ri.header.spouse.as_ref().map_or("", |s| s.ssn.as_str()),
-        ),
-    ]
-    .into_iter()
-    .chain(dependents);
-
-    people.into_iter().find_map(|(who, raw)| {
-        if raw.trim().is_empty() {
-            return None; // uncaptured — the packet refuses this, not the report
-        }
-        Ssn::canonical(raw).err().map(|e| (who, e))
-    })
 }
 
 fn refuse(reason: RefuseReason, detail: impl Into<String>) -> Option<Refusal> {
@@ -578,15 +542,12 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
         );
     }
 
-    // Identity integrity: a CAPTURED SSN that is not nine digits can never reach a form cell, so it
-    // fails here rather than at the export boundary (`p1-ssn-normalization`). An EMPTY SSN is "not
-    // entered yet" and does not block the report — only the packet.
-    if let Some((who, err)) = first_malformed_ssn(ri) {
-        return refuse(
-            RefuseReason::SsnMalformed(who.clone()),
-            format!("the {who} SSN {err} — fix it before the return can be computed"),
-        );
-    }
+    // ★★ NO SSN GATE HERE, DELIBERATELY. A malformed SSN used to refuse the whole computation, which
+    // meant one typo in an identity field blocked `report`, `optimize`, `what-if` and the TUI — none of
+    // which read an SSN. That was strictly WORSE than an EMPTY SSN, which has always been allowed
+    // through to the report. The identity boundary is the FILABLE PACKET, and it is already closed:
+    // `ReturnHeader::build` returns `HeaderError::Ssn(SsnError::{Missing,NotDigits,WrongLength})`, so a
+    // typo still cannot reach a printed comb cell. Screening it twice only cost the filer their numbers.
 
     // ★ P9 §3.2 — THE REGISTRY LOOP. Placed after the integrity gates (negative money, malformed SSN) and
     // before every value-dependent rule (r1 M-2). This is the ONLY unanswered-declaration screen: every
@@ -1339,34 +1300,77 @@ mod tests {
         assert_eq!(reason(&ok), None, "a NAMED business must file");
     }
 
-    /// A captured SSN that is not nine digits can never be printed on a form, so it fails HERE — at
-    /// compute time, before any PDF is attempted (§3.4: an unprintable SSN is an uncomputable line).
-    /// The refusal names WHO, never the digits: an SSN in an error string is a PII leak.
+    /// ★★ A MALFORMED SSN DOES NOT BLOCK THE COMPUTATION — and the boundary that does refuse it is
+    /// asserted in the same breath, because deleting a gate is only safe if you can name the one behind it.
+    ///
+    /// It used to refuse at compute time. That made a single typo in an identity field block `report`,
+    /// `optimize`, `what-if` and the whole TUI — **none of which read an SSN** — and it was strictly
+    /// harsher than an EMPTY SSN, which has always been let through (see the sibling test). There is no
+    /// number on the return an unparseable SSN can make wrong.
+    ///
+    /// The identity boundary is the FILABLE PACKET, and it is unchanged: `ReturnHeader::build` returns
+    /// `HeaderError::Ssn(..)` for `Missing`, `NotDigits` AND `WrongLength`, so a typo still cannot reach a
+    /// printed comb cell. Each of the three malformed shapes is exercised on both sides.
     #[test]
-    fn a_malformed_ssn_refuses_at_compute_time() {
-        let mut r = ri();
-        r.header.taxpayer.ssn = "12345".into(); // five digits — not an SSN
-        assert!(matches!(reason(&r), Some(RefuseReason::SsnMalformed(who)) if who == "taxpayer"));
+    fn a_malformed_ssn_computes_but_the_packet_still_refuses_it() {
+        use crate::tax::packet::{ReturnHeader, SsnError};
+        // (label, the malformed SSN, the SsnError the packet boundary must raise)
+        let shapes = [
+            ("five digits", "12345", SsnError::WrongLength(5)),
+            ("a non-digit", "123-45-678X", SsnError::NotDigits('X')),
+            ("ten digits", "1234567890", SsnError::WrongLength(10)),
+        ];
+        for (label, ssn, expected) in shapes {
+            // ── the taxpayer's own SSN ──
+            let mut r = ri();
+            r.header.taxpayer.ssn = ssn.into();
+            assert_eq!(
+                reason(&r),
+                None,
+                "{label}: a typo must NOT block the report — nothing reads an SSN"
+            );
+            assert_eq!(
+                ReturnHeader::build(&r, 2024).unwrap_err(),
+                crate::tax::packet::HeaderError::Ssn(expected),
+                "{label}: …but the FILABLE PACKET must still refuse it"
+            );
 
-        let mut r = ri();
-        r.filing_status = FilingStatus::Mfj;
-        r.header.spouse = Some(crate::tax::return_inputs::Person {
-            ssn: "123-45-678X".into(),
-            ..Default::default()
-        });
-        assert!(matches!(reason(&r), Some(RefuseReason::SsnMalformed(who)) if who == "spouse"));
-
-        let mut r = ri();
-        r.header
-            .dependents
-            .push(crate::tax::return_inputs::Dependent {
-                name: "Sam Doe".into(),
-                ssn: "1234567890".into(), // ten digits
+            // ── a spouse's, on a joint return ──
+            let mut r = ri();
+            r.filing_status = FilingStatus::Mfj;
+            r.header.can_be_claimed_as_dependent_spouse = Some(false);
+            r.header.spouse = Some(crate::tax::return_inputs::Person {
+                ssn: ssn.into(),
                 ..Default::default()
             });
-        assert!(
-            matches!(reason(&r), Some(RefuseReason::SsnMalformed(who)) if who.contains("Sam Doe"))
-        );
+            r.header.spouse_died_during_year = Some(false);
+            assert_eq!(reason(&r), None, "{label}: spouse — report computes");
+            assert!(
+                matches!(
+                    ReturnHeader::build(&r, 2024),
+                    Err(crate::tax::packet::HeaderError::Ssn(_))
+                ),
+                "{label}: spouse — packet refuses"
+            );
+
+            // ── a dependent's ──
+            let mut r = ri();
+            r.header
+                .dependents
+                .push(crate::tax::return_inputs::Dependent {
+                    name: "Sam Doe".into(),
+                    ssn: ssn.into(),
+                    ..Default::default()
+                });
+            assert_eq!(reason(&r), None, "{label}: dependent — report computes");
+            assert!(
+                matches!(
+                    ReturnHeader::build(&r, 2024),
+                    Err(crate::tax::packet::HeaderError::Ssn(_))
+                ),
+                "{label}: dependent — packet refuses"
+            );
+        }
     }
 
     /// ★ An **uncaptured** SSN is not the same as a malformed one. The tax math does not read an SSN, so

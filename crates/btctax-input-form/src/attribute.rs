@@ -108,10 +108,6 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
             note: "defensive only — a negative amount is unreachable from the form: tier-1 parse rejects it \
                    before it enters the working copy, and its label is display prose, not a field identity (§7)",
         }],
-        R::SsnMalformed(_) => vec![Anchor::NotInForm {
-            note: "defensive only — a malformed SSN is unreachable from the form: tier-1 parse rejects it \
-                   before it enters the working copy, and its label names WHO, not a field identity (§7)",
-        }],
 
         // ── Everything else (§7 line 521): a deferred section (Schedule C, QBI, 1099 boxes, carryforwards)
         //    or a compute/absolute screen — no v1 form field to point at. Entered via TOML import or computed
@@ -361,7 +357,6 @@ mod tests {
             RefuseReason::AmtScreenTriggered,
             RefuseReason::TaxableIncomeNonPositiveWithCarryforward,
             RefuseReason::NegativeAmount("W-2 box 1 wages".into()),
-            RefuseReason::SsnMalformed("taxpayer".into()),
         ] {
             let anchors = attribute(&r);
             assert_eq!(anchors.len(), 1, "{r:?} → exactly one anchor: {anchors:?}");
