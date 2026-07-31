@@ -172,8 +172,9 @@ pub enum Command {
     /// Every written value is read back GEOMETRICALLY against the blank PDF's own field coordinates and
     /// the fill FAILS CLOSED on any mis-placement — a wrong tax form is never written. The engine drops
     /// the forms' XFA layer (else Acrobat opens them blank) and sets NeedAppearances so a viewer
-    /// regenerates the visible values. Schedule D lines 17-22 (28%-rate / unrecaptured-§1250 / QDI
-    /// worksheet, incl. the line-21 loss limit) are OUT OF SCOPE. Rows on an exchange that MAY carry
+    /// regenerates the visible values. Schedule D line 17 is answered from the printed lines 15 and 16;
+    /// lines 18-22 (28%-rate / unrecaptured-§1250 / Form 4952 / the line-21 loss limit / qualified
+    /// dividends) are OUT OF SCOPE. Rows on an exchange that MAY carry
     /// broker reporting (a 1099-DA from TY2025; a 1099-B before) are flagged on stderr — btctax files
     /// every row under the year's not-reported box (I/L from TY2025, C/F before) and says so.
     ///

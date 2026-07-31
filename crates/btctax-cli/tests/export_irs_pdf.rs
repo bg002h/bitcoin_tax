@@ -503,6 +503,51 @@ fn export_dispatches_a_full_return_year_to_the_full_packet() {
         "the slice's 1040 must never appear beside the full packet"
     );
     assert!(rep.form_1040_path.is_none());
+
+    // ★ The FULL-return 1040 is a complete return and must NOT carry the partial-worksheet
+    // watermark. Half of the guarantee in `crypto_slice_1040_is_watermarked_as_a_worksheet`: a
+    // watermark applied to every 1040 would be as wrong as one applied to none.
+    let f1040 = std::fs::read(out.path().join("00_f1040.pdf")).unwrap();
+    assert!(
+        !contains_bytes(&f1040, b"NOT A COMPLETE FORM 1040"),
+        "the full-return 1040 IS complete — stamping it a worksheet would be a false disclosure"
+    );
+}
+
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack.windows(needle.len()).any(|w| w == needle)
+}
+
+/// ★★ `form_1040_capgains.pdf` renders as a Form 1040 — masthead, a populated line 7a, a BLANK line
+/// 1a — while btctax vouches for exactly two cells on it. Its only caveat used to be a note on
+/// stderr, and **the document outlives the terminal**: a filer who opens this file a month later sees
+/// a Form 1040. The disclosure must therefore be ON the page.
+#[test]
+fn crypto_slice_1040_is_watermarked_as_a_worksheet() {
+    let (_dir, vault) = make_vault(&real_events());
+    let out = tempfile::tempdir().unwrap();
+    let report = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2025, &[], None).unwrap();
+    assert!(report.form_1040_path.is_some(), "1040 written");
+
+    let f1040 = std::fs::read(out.path().join("form_1040_capgains.pdf")).unwrap();
+    assert!(
+        contains_bytes(&f1040, b"NOT A COMPLETE FORM 1040"),
+        "the crypto-slice 1040 must carry the partial-worksheet watermark on the page itself"
+    );
+    // A REAL (non-pseudo) ledger: the worksheet stamp is present, the DRAFT stamp is not — they are
+    // independent disclosures about different things.
+    assert!(
+        !contains_bytes(&f1040, b"ESTIMATE, NOT FOR FILING"),
+        "a real-ledger export is not a DRAFT estimate"
+    );
+    // The forms btctax DOES vouch for in full are not worksheets and must stay unstamped.
+    for name in ["f8949.pdf", "schedule_d.pdf"] {
+        let bytes = std::fs::read(out.path().join(name)).unwrap();
+        assert!(
+            !contains_bytes(&bytes, b"NOT A COMPLETE FORM 1040"),
+            "{name} is a complete crypto-slice form — it must not be stamped a worksheet"
+        );
+    }
 }
 
 /// UX-P4-8 (fold I2): the FULL-RETURN export path (`export_full_return`, dispatched for a

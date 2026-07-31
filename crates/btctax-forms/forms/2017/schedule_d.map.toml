@@ -18,3 +18,13 @@ line10 = { proceeds_d = "topmostSubform[0].Page1[0].TablePartII[0].Line10[0].f1_
 line15_h = "topmostSubform[0].Page1[0].f1_035[0]"
 # Line 16 — total (line 7 + line 15), page 2.
 line16_h = "topmostSubform[0].Page2[0].f2_001[0]"
+
+# Part III line 17 — "Are lines 15 and 16 both gains?" (identical wording on the 2017 revision). The
+# crypto slice answers THIS ONE; 18-22 stay blank — see `schedule_d.rs`'s module docs.
+# ★★ ON-STATES DUMPED, NOT ASSUMED (`xtask dump-fields`): the 2017 pairs are **"Yes"/"No"**, NOT the
+#    "1"/"2" that 2024 and 2025 use. Assuming by analogy from the sibling maps would have written an
+#    off-state and silently produced an UNANSWERED line 17.
+#    Yes is the UPPER widget (y 578-586) and No the lower (566-574), matching the printed order.
+[line17]
+yes = { field = "topmostSubform[0].Page2[0].c2_01_0_[0]", on = "Yes" }
+no  = { field = "topmostSubform[0].Page2[0].c2_01_0_[1]", on = "No" }

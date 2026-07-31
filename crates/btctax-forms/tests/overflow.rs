@@ -132,6 +132,34 @@ fn pseudo_fill_is_watermarked() {
     );
 }
 
+/// The two stamps are independent and compose: a pseudo-reconciled crypto-slice 1040 carries BOTH,
+/// on opposite diagonals. Each says a different thing — "these numbers are fictional" and "this form
+/// is two cells of a return" — so neither may swallow the other.
+#[test]
+fn the_two_watermarks_compose_without_swallowing_each_other() {
+    let clean = btctax_forms::fill_form_8949(&mixed_rows(), 2025).unwrap();
+    let both = btctax_forms::stamp_draft_watermark(
+        &btctax_forms::stamp_partial_worksheet_watermark(&clean).unwrap(),
+    )
+    .unwrap();
+    assert!(contains(&both, b"ESTIMATE, NOT FOR FILING"));
+    assert!(contains(&both, b"NOT A COMPLETE FORM 1040"));
+    // Order-independent: the reverse composition carries both too.
+    let reversed = btctax_forms::stamp_partial_worksheet_watermark(
+        &btctax_forms::stamp_draft_watermark(&clean).unwrap(),
+    )
+    .unwrap();
+    assert!(contains(&reversed, b"ESTIMATE, NOT FOR FILING"));
+    assert!(contains(&reversed, b"NOT A COMPLETE FORM 1040"));
+    // Still a valid, XFA-free PDF with the same page count.
+    let doc = load(&both).unwrap();
+    assert!(!pdf_has_xfa(&doc).unwrap());
+    assert_eq!(
+        doc.get_pages().len(),
+        load(&clean).unwrap().get_pages().len()
+    );
+}
+
 #[test]
 fn real_fill_is_clean() {
     let clean = btctax_forms::fill_form_8949(&mixed_rows(), 2025).unwrap();

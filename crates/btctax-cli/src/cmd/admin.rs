@@ -603,7 +603,14 @@ pub(crate) fn export_irs_pdf_from_session(
         if let Some(fill) = btctax_forms::fill_form_1040_capgains(&inputs, tax_year)? {
             form_1040_filled_7a = fill.filled_7a;
             form_1040_loss = fill.loss;
-            let bytes = stamp(fill.pdf)?;
+            // ★ This form is a WORKSHEET, not a return. btctax vouches for exactly two cells on it
+            // (the digital-asset question and line 7a) and leaves wages, every deduction and every
+            // tax line blank — yet it renders as a Form 1040 with a large line 7a. The stderr note
+            // saying so is transient; the PDF is not. Stamp the disclosure onto the page itself, so a
+            // filer who finds this file a month later cannot mistake it for their return. The
+            // full-return `f1040.pdf` is complete and is NEVER stamped this way.
+            let bytes = btctax_forms::stamp_partial_worksheet_watermark(&fill.pdf)?;
+            let bytes = stamp(bytes)?;
             let path = out_dir.join("form_1040_capgains.pdf");
             write_bytes_owner_only(&path, &bytes)?;
             form_1040_path = Some(path);

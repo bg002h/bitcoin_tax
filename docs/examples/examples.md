@@ -102,7 +102,8 @@ Federal tax attributable to crypto — tax year 2025
   LTCG tax (attributable): 0.00   NIIT (attributable): 0.00
   TOTAL federal tax attributable to crypto (delta): -77.00   (= ordinary-rate + LTCG + NIIT attributable)
   §1211 loss deduction (level): 350.00   carryforward out: short 0.00 / long 0.00
-  marginal rates: ordinary 0.22 / LTCG 0.15 / NIIT increased by crypto: no
+  marginal rates: ordinary 0.22 / LTCG 0.15 all-in (§1(h) 0.15 + §1411 0)
+                  NIIT increased by crypto: no
   (incremental ceteris-paribus delta on the minimal profile; excludes AGI-driven SS/IRMAA/AMT/QBI/phaseout effects — I5. §1411 NIIT reduces NII by the §1211(b)-allowed net capital loss (≤ $3,000 / $1,500 MFS — Form 8960 line 5a / §1.1411-4(d)) and is floored at $0; crypto ordinary income (mining/staking/airdrops/rewards) is correctly excluded from NII; crypto-lending interest income (§1411(c)(1)(A)(i)) is INCLUDED in NII; mining/staking/airdrops/rewards remain excluded (SE income per §1411(c)(6) or non-NII other income).)
 Schedule D (raw pre-netting part totals) — tax year 2025
   Part I  (short-term): proceeds 1340.00   cost basis 1690.00   gain -350.00
@@ -127,7 +128,7 @@ stderr:
 ```console
 
 ⚠ NOT AUTHORISED FOR FILING. btctax is a mechanical calculator. No right is granted and no authorisation is given to use it, or anything it produces, to prepare or file a tax return, and NO WARRANTY is given that any figure or form it produces is accurate, complete, or fit to file. If you file any of this, you do so entirely on your own responsibility: YOU are the preparer, you must check every figure against the forms and instructions before you sign, and the authors accept no liability for the consequences. This is not tax advice. See `btctax limitations`.
-note: Schedule D lines 17-22 (28%-rate / unrecaptured-§1250 / QDI worksheet, incl. the line-21 loss limit) are OUT OF SCOPE and left blank — complete them by hand if they apply.
+note: Schedule D line 17 was answered from the printed lines 15 and 16. Lines 18-22 are OUT OF SCOPE and left blank — complete them by hand if they apply: 18 (28%-rate gain) and 19 (unrecaptured §1250) are blank because btctax never asked, not because they are zero; 20 also asks whether you are filing Form 4952; 21 is the §1211 loss limit; 22 needs Form 1040 line 3a (qualified dividends).
 ⚠ [I5] 1 disposition(s) occurred on an exchange that MAY have issued 1099-DA broker basis reporting — those would belong on a SEPARATE Form 8949 under Box G/H/J/K. This export files EVERY Bitcoin row under Box I/L (not-reported default) and says so; reclassify by hand if you received a 1099-DA.
 ```
 
@@ -195,7 +196,7 @@ stderr:
 ```console
 
 ⚠ NOT AUTHORISED FOR FILING. btctax is a mechanical calculator. No right is granted and no authorisation is given to use it, or anything it produces, to prepare or file a tax return, and NO WARRANTY is given that any figure or form it produces is accurate, complete, or fit to file. If you file any of this, you do so entirely on your own responsibility: YOU are the preparer, you must check every figure against the forms and instructions before you sign, and the authors accept no liability for the consequences. This is not tax advice. See `btctax limitations`.
-note: Schedule D lines 17-22 (28%-rate / unrecaptured-§1250 / QDI worksheet, incl. the line-21 loss limit) are OUT OF SCOPE and left blank — complete them by hand if they apply.
+note: Schedule D line 17 was answered from the printed lines 15 and 16. Lines 18-22 are OUT OF SCOPE and left blank — complete them by hand if they apply: 18 (28%-rate gain) and 19 (unrecaptured §1250) are blank because btctax never asked, not because they are zero; 20 also asks whether you are filing Form 4952; 21 is the §1211 loss limit; 22 needs Form 1040 line 3a (qualified dividends).
 note: Form 8283 — btctax filled the donee/appraiser IDENTITY + per-donation property rows (Section B, with the "k Digital assets" box checked). Every other-party declaration is left BLANK: the Part III taxpayer signature, the Part IV appraiser signature/date, and the Part V donee acknowledgment are NOT btctax's to fill.
 ⚠ a Section B Form 8283 is NOT filing-ready without a signed Part IV (qualified-appraiser declaration) and Part V (donee acknowledgment).
 ⚠ at least one Form 8283 row needs REVIEW — complete any missing donee/appraiser detail with `btctax reconcile set-donation-details …`; a gift spanning MULTIPLE lots also flags its extra property row(s), which are completed on the paper form. NOT filing-ready as written.
@@ -297,7 +298,8 @@ Federal tax attributable to crypto — tax year 2025
   LTCG tax (attributable): 0.00   NIIT (attributable): 0.00
   TOTAL federal tax attributable to crypto (delta): 1721.16   (= ordinary-rate + LTCG + NIIT attributable)
   §1211 loss deduction (level): 0.00   carryforward out: short 0.00 / long 0.00
-  marginal rates: ordinary 0.24 / LTCG 0.15 / NIIT increased by crypto: no
+  marginal rates: ordinary 0.24 / LTCG 0.15 all-in (§1(h) 0.15 + §1411 0)
+                  NIIT increased by crypto: no
   (incremental ceteris-paribus delta on the minimal profile; excludes AGI-driven SS/IRMAA/AMT/QBI/phaseout effects — I5. §1411 NIIT reduces NII by the §1211(b)-allowed net capital loss (≤ $3,000 / $1,500 MFS — Form 8960 line 5a / §1.1411-4(d)) and is floored at $0; crypto ordinary income (mining/staking/airdrops/rewards) is correctly excluded from NII; crypto-lending interest income (§1411(c)(1)(A)(i)) is INCLUDED in NII; mining/staking/airdrops/rewards remain excluded (SE income per §1411(c)(6) or non-NII other income).)
 Schedule D (raw pre-netting part totals) — tax year 2025
   Part I  (short-term): proceeds 0.00   cost basis 0.00   gain 0.00
@@ -779,7 +781,8 @@ Federal tax attributable to crypto — tax year 2024
   LTCG tax (attributable): 0.00   NIIT (attributable): 0.00
   TOTAL federal tax attributable to crypto (delta): 726.00   (= ordinary-rate + LTCG + NIIT attributable)
   §1211 loss deduction (level): 0.00   carryforward out: short 0.00 / long 0.00
-  marginal rates: ordinary 0.22 / LTCG 0.15 / NIIT increased by crypto: no
+  marginal rates: ordinary 0.22 / LTCG 0.15 all-in (§1(h) 0.15 + §1411 0)
+                  NIIT increased by crypto: no
   (incremental ceteris-paribus delta on the minimal profile; excludes AGI-driven SS/IRMAA/AMT/QBI/phaseout effects — I5. §1411 NIIT reduces NII by the §1211(b)-allowed net capital loss (≤ $3,000 / $1,500 MFS — Form 8960 line 5a / §1.1411-4(d)) and is floored at $0; crypto ordinary income (mining/staking/airdrops/rewards) is correctly excluded from NII; crypto-lending interest income (§1411(c)(1)(A)(i)) is INCLUDED in NII; mining/staking/airdrops/rewards remain excluded (SE income per §1411(c)(6) or non-NII other income).)
 Schedule D (raw pre-netting part totals) — tax year 2024
   Part I  (short-term): proceeds 0.00   cost basis 0.00   gain 0.00
@@ -951,7 +954,8 @@ Federal tax attributable to crypto — tax year 2024
   LTCG tax (attributable): 30000.00   NIIT (attributable): 7600.00
   TOTAL federal tax attributable to crypto (delta): 37600.00   (= ordinary-rate + LTCG + NIIT attributable)
   §1211 loss deduction (level): 0.00   carryforward out: short 0.00 / long 0.00
-  marginal rates: ordinary 0.24 / LTCG 0.15 / NIIT increased by crypto: yes
+  marginal rates: ordinary 0.24 / LTCG 0.188 all-in (§1(h) 0.15 + §1411 0.038)
+                  NIIT increased by crypto: yes
   (incremental ceteris-paribus delta on the minimal profile; excludes AGI-driven SS/IRMAA/AMT/QBI/phaseout effects — I5. §1411 NIIT reduces NII by the §1211(b)-allowed net capital loss (≤ $3,000 / $1,500 MFS — Form 8960 line 5a / §1.1411-4(d)) and is floored at $0; crypto ordinary income (mining/staking/airdrops/rewards) is correctly excluded from NII; crypto-lending interest income (§1411(c)(1)(A)(i)) is INCLUDED in NII; mining/staking/airdrops/rewards remain excluded (SE income per §1411(c)(6) or non-NII other income).)
 Schedule D (raw pre-netting part totals) — tax year 2024
   Part I  (short-term): proceeds 0.00   cost basis 0.00   gain 0.00

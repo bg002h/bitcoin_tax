@@ -724,8 +724,11 @@ fn ty2017_forms_are_byte_deterministic() {
 }
 
 const GOLDEN_2017_F8949: &str = "00e9d511e6a8225e5710884feb6c531570b424858a1de2c7891d02e532860f03";
+// ★ Moved 2026-07-30 when the crypto slice began ANSWERING Part III line 17. The 2017 revision's
+// on-states are "Yes"/"No" (NOT the 2024/2025 "1"/"2"), so this hash is also what would move if the
+// on-state were ever copied by analogy. A move for any OTHER reason is a refusal — investigate.
 const GOLDEN_2017_SCHED_D: &str =
-    "ed25f3866fc34f4d5eaa593b78cb45f446454324f68176c1443832653341637b";
+    "f1f98f2cdd2df468819be38c0be6847bff4437671f0b15ff5aadd45a11c87766";
 const GOLDEN_2017_SE: &str = "9203f018e8f351d28629b16f8406e0da88f0f6e40aa453915d72761511068a88";
 const GOLDEN_2017_8283: &str = "274a4984683283ae4fbfb568b26c05c4caf9c1fe54912136729374122f0e6055";
 const GOLDEN_2017_1040: &str = "56db10fa8e8dbe5cef1b4ba2a7de35088a74cd1e7c0fb0884ccb259cd1a2120a";
@@ -763,5 +766,11 @@ fn schedule_d_2017_field_names() -> Vec<String> {
     names.push(m.line7_h.clone());
     names.push(m.line15_h.clone());
     names.push(m.line16_h.clone());
+    // Part III line 17's Yes/No pair — read OFF THE MAP, never hand-listed, so a revision that gains
+    // (or loses) the pair moves this list with it.
+    if let Some(p) = &m.line17 {
+        names.push(p.yes.field.clone());
+        names.push(p.no.field.clone());
+    }
     names
 }

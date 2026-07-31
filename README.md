@@ -218,15 +218,24 @@ This writes a whole packet, each form only when it applies, populated from btcta
   question** (**Yes** iff you had any disposal, income, gift, or donation — never a "No"). The **2017
   form has no Digital-Asset question**, so an income-only 2017 year produces no 1040. The 7b checkboxes
   are left untouched, and a partial-scope notice lists exactly what was filled.
+  **★ It is a worksheet, not a return, and says so on the page:** every page is stamped
+  `WORKSHEET — NOT A COMPLETE FORM 1040`. btctax vouches for two cells on this form and leaves wages,
+  every deduction and every tax line blank — so it renders as a Form 1040 with a populated line 7a and
+  a blank line 1a. A terminal notice scrolls away; the PDF does not.
 - **Verified placement.** Every written value is read back _geometrically_ against the blank form's
   own field coordinates; a mis-placed cell fails closed, so a wrong tax form is never written.
 - **XFA dropped.** The engine removes the forms' XFA layer (otherwise Acrobat opens them blank) and
   sets `NeedAppearances`.
 - **Estimates are watermarked.** A pseudo-reconciled ledger requires the same attestation as
   `export-snapshot` **and** stamps a diagonal `DRAFT — ESTIMATE, NOT FOR FILING` on every page.
-- **Scope.** Schedule D lines **17–22** (28%-rate / unrecaptured-§1250 / QDI worksheet, incl. the
-  line-21 loss limit) are out of scope and left blank — a notice is printed. Rows on an exchange
-  that may carry broker reporting (a 1099-DA from TY2025; a 1099-B before) are flagged on stderr.
+- **Scope.** Schedule D line **17** ("Are lines 15 and 16 both gains?") is **answered** — it reads two
+  lines printed above it and introduces no fact the form does not already assert — and is left blank in
+  exactly the two cases the form's own routing skips it (line 16 a loss, or zero). Lines **18–22** are
+  out of scope and left blank, each because it needs a fact the crypto slice never collects: 18/19
+  (28%-rate gain, unrecaptured §1250) are blank because nothing **asked**, not because they are zero;
+  20 also asks whether you are filing **Form 4952**; 21 is the §1211 loss limit; 22 needs Form 1040
+  line 3a. A notice names them. Rows on an exchange that may carry broker reporting (a 1099-DA from
+  TY2025; a 1099-B before) are flagged on stderr.
 
 > ⚠️ **These files contain your unencrypted tax data and are _not_ git-ignored.** Write `--out` to a
 > directory **outside** any git repository.

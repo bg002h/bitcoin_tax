@@ -809,6 +809,28 @@ impl ScheduleDLines {
     }
 }
 
+/// Schedule D **line 17** — *"Are lines 15 and 16 both gains?"* — read off the two PRINTED lines and
+/// nothing else. `None` means the form's own routing SKIPS line 17, so it must be left blank.
+///
+/// The form states the routing in terms, under line 16:
+/// - *"If line 16 is a gain … Then, go to line 17 below."* → line 17 is answered.
+/// - *"If line 16 is a loss, skip lines 17 through 20 below."* → blank.
+/// - *"If line 16 is zero, skip lines 17 through 21 below."* → blank.
+///
+/// **★ This is the ONLY definition of the line-17 answer.** Both the full-return chain (through
+/// [`ScheduleDRouting`]) and the crypto-slice fill (`btctax_forms::fill_schedule_d_totals`) read it,
+/// so the answer cannot differ between a filer's slice and their full return.
+///
+/// **★ Why line 17 and not line 20.** Line 17 asks only about lines 15 and 16, both of which are
+/// PRINTED on the page — answering it introduces no fact the form does not already assert. Line 20
+/// asks *"Are lines 18 and 19 both zero or blank **and you are not filing Form 4952**?"*, and that
+/// last conjunct is a fact about the filer that no btctax input surface carries. The crypto slice
+/// therefore leaves 18–22 blank; only the full return, which composes the whole tax picture, answers
+/// line 20.
+pub fn schedule_d_line17(line15: Usd, line16: Usd) -> Option<bool> {
+    (line16 > Usd::ZERO).then_some(line15 > Usd::ZERO)
+}
+
 /// Derive the printed Schedule D chain, including SPEC §7.2's exhaustive Part III routing.
 pub fn schedule_d_lines(ar: &AbsoluteReturn, f8949: Option<&Printed8949>) -> ScheduleDLines {
     let p = &ar.schedule_d;
@@ -840,21 +862,20 @@ pub fn schedule_d_lines(ar: &AbsoluteReturn, f8949: Option<&Printed8949>) -> Sch
     let line16 = line7 + line15; // ★ combines the PRINTED lines
     let has_qd = round_dollar(p.qualified_dividends) > Usd::ZERO;
 
-    // ★ SPEC §7.2 — exhaustive, and the four branches are mutually exclusive by construction.
-    let routing = if line16 > Usd::ZERO && line15 > Usd::ZERO {
-        ScheduleDRouting::BothGains
-    } else if line16 > Usd::ZERO {
-        // …and line 15 ≤ 0: a short-term gain against a long-term loss.
-        ScheduleDRouting::ShortGainLongLoss { line22_yes: has_qd }
-    } else if line16 < Usd::ZERO {
-        ScheduleDRouting::NetLoss {
+    // ★ SPEC §7.2 — exhaustive, and the four branches are mutually exclusive by construction. Line
+    // 17's own answer comes from `schedule_d_line17`, the SINGLE definition the crypto-slice fill
+    // also reads — the two paths cannot drift.
+    let routing = match schedule_d_line17(line15, line16) {
+        Some(true) => ScheduleDRouting::BothGains,
+        // …line 16 a gain and line 15 ≤ 0: a short-term gain against a long-term loss.
+        Some(false) => ScheduleDRouting::ShortGainLongLoss { line22_yes: has_qd },
+        None if line16 < Usd::ZERO => ScheduleDRouting::NetLoss {
             // §1211(b): the smaller of the loss and the ceiling — on the PRINTED line 16 (magnitude,
             // paren box), so the filed form's own "smaller of" holds.
             line21: line16.abs().min(ar.printed_inputs.capital_loss_limit),
             line22_yes: has_qd,
-        }
-    } else {
-        ScheduleDRouting::Zero { line22_yes: has_qd }
+        },
+        None => ScheduleDRouting::Zero { line22_yes: has_qd },
     };
 
     ScheduleDLines {
