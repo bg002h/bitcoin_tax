@@ -123,6 +123,32 @@ PDF with the unreduced deduction already exists when the warning prints.
    ★ `form8995.rs::assert_paren_magnitudes` is a HAND-MAINTAINED array — add `("3", lines.line3)`.
    Nothing forces that edit; pair it with a planted-defect test.
 
+### ★★ THE RANKED BACKLOG — from the 2026-07-30 "what next" recon (8 agents, adversarially checked)
+
+Recovered and pinned here because the workflow output lived in `/tmp`. Status is as of this pause.
+Ranking principles used: a wrong tax figure outranks everything; fails-SILENTLY outranks fails-CLOSED;
+ready outranks blocked-on-a-decision; cheap hazard-removal outranks large projects.
+
+| # | item | effort | status |
+|---|---|---|---|
+| ~~1~~ | ~~Schedule C line G → Form 8960 line 4a~~ | — | ❌ **DEAD — REFUTED.** Would have DOUBLE-TAXED SE income. §1411(c)(6) shelters it. See the ACTIVE WORK correction above. |
+| **2** | **Form 8995 line 3** — prior-year QBI loss carryforward, subtracted at line 4; omitting it INFLATES the deduction and UNDERSTATES tax | days | ⬜ **the top BUILD** — item 4 of the remaining list above |
+| **3** | **Crypto-slice export trio**, one PR on the primary shipped `report --tax-year` path: **(a)** print the all-in LTCG marginal rate **23.8%** (§1(h) 20% + §1411 3.8%), not `0.20` — `MarginalRates.ltcg` doc'd "0 / 0.15 / 0.20" at `types.rs:76`; a filer sizing a sale under-reserves by 3.8 points. **(b)** DERIVE Schedule D lines 17 and 20 instead of telling the filer to complete them by hand — the full-return engine's `printed.rs`/`ScheduleDRouting` already does exactly this. **(c)** watermark `form_1040_capgains.pdf` as a partial worksheet: it renders as "Form 1040" with a large line 7 and a BLANK line 1a, and its only caveat is a transient stderr note the document outlives. | **hours** | ⬜ **NOT STARTED — highest value-per-hour on the list.** All three READY, no owner decision. |
+| **4** | `ARCHIVE_RECONCILIATION_REVIEW_BY = "2026-08-13"` (`archive_check.rs:174`) — re-decide the residual archive duplication or consciously reset the date with a written reason. While in the file: give `the_archive_count_may_only_shrink`'s one-sided `<=3` an `assert_eq!` companion (both its siblings have one) and fix the stale doc comment narrating four archives | hours | ⬜ **DATED — reds the WHOLE SUITE once passed**, blocking everything else. Owner decision. |
+| **5** | **§G-9a** — does the §63(f) **BLIND** box have the death-mid-year interaction the AGED box turned out to have? Adjudicate against i1040gi's "blind at the end of 2024"; the absence of an explicit death carve-out (which the aged instruction HAS) may itself be the answer | hours | ⬜ Moves a figure. May close as "no change needed" — a legitimate cheap outcome. |
+| **6** | **Schedule 1-A plan r3 was NEVER independently reviewed** — the doc reads "Status: r3" but `design/ty2025/reviews/` holds only `…-opus-r1.md`; r2→r3 folded a 13-agent census (`c92cb9b`) that added T3a wholesale. Not green under this repo's own re-review-after-every-fold rule. Then build B3 T2 | hours + days | ⬜ Only if B3 is the chosen track. Owner decision. |
+| ~~7~~ | ~~Batch the remaining §G-13 declarations~~ | — | ⚠️ **SUPERSEDED by the refusal review.** Its premise (ask them all) is what the owner corrected. Use the decision table above instead: SE line A and Sch C G/H are DON'T-ASK and done; FBAR is built and pending REVERSAL; only Sch C I/J (skippable) and 8283 5a/5b/5c (refusal-on-Yes) remain. |
+| **8** | **Push the backlog.** `core.hooksPath=scripts`, `scripts/.pii-patterns` does NOT exist, `scripts/pre-push:27-35` is fail-closed ⇒ every plain `git push` exits 1. Format documented at `scripts/README-pii-setup.md:25-52`. Sanctioned escape: `BTCTAX_PII_BYPASS=1 git push` | minutes | ⬜ **OWNER-ONLY** — the patterns file is owner-specific and untracked; the assistant must not author it. Repo is PUBLIC. Generic scan is clean across all commits. |
+| — | **Revoke the crates.io temp token** from the v0.14.0 publish | minutes | ⬜ owner-only, long-standing |
+
+★★ **The recon's explicit DO-NOT-DO, kept because it is the most appealing wrong turn:** do NOT resume
+the **Tier-2 AMT** thread (E4/E5/E6). It looks like the obvious next step — 13 registered items, the
+freshest thread, Tier 1 just shipped — but **Tier 1 ships a REFUSAL for exactly the population Tier 2
+serves**, so nobody is receiving a wrong AMT number today; it fails CLOSED, which ranks it behind the
+silent understatements. E6 alone (18 adjustment lines + a new existence-question interview) is weeks.
+★ And its most ready-looking sub-item — *"teach `ots_direct.py` to read 1040 line 17 so AMT has a
+second witness"* — is **ALREADY DONE and the register is stale.**
+
 ### Two traps that cost time this session
 
 - **`cargo fmt` reflows a shrinking array onto one line and silently breaks a later string replace.**
