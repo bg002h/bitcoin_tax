@@ -614,6 +614,8 @@ pub fn assemble_printed_forms(
         ri.payments.other_withholding,
         ri.payments.estimated_tax_payments,
         pi.digital_asset_activity,
+        // ★ §G-18 — ONE decision drives both the packet's form list and the 1040's line-7 box.
+        sch_d.must_file(),
     );
 
     PrintedForms {
@@ -1160,6 +1162,46 @@ mod tests {
         assert!(
             !pr.forms.f8959.must_file(),
             "no Additional Medicare Tax, none withheld"
+        );
+
+        // ★★ §G-18 — and the 1040 SAYS SO on line 7. The form's own text: "Capital gain or (loss).
+        // Attach Schedule D if required. If not required, check here ☐". Two lawful states, and this
+        // return used to be in NEITHER: a printed `0` on line 7, no Schedule D, and an unchecked box.
+        assert!(
+            !pr.forms.sch_d.must_file(),
+            "a W-2-only filer has no Schedule D to attach"
+        );
+        assert!(
+            pr.forms.f1040.line7_schedule_d_not_required,
+            "★ …so line 7's \"if not required, check here\" box MUST be checked. Leaving it unchecked \
+             leaves the return's Schedule D status unstated — the form offers no third state."
+        );
+    }
+
+    /// The other half: a return that DOES attach Schedule D must NOT check the box. A box that is
+    /// always checked would contradict the return's own contents, and would pass the sibling assertion
+    /// above just as happily — which is why both directions are pinned from one derivation.
+    #[test]
+    fn a_return_that_attaches_schedule_d_does_not_check_the_line7_box() {
+        let (ri, state) = kitchen_sink_household();
+        let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
+        let pr = assemble_printed_return(
+            &ri,
+            &state,
+            &BTreeMap::new(),
+            &ar,
+            &ty2024_table(),
+            2024,
+            &[],
+        )
+        .unwrap();
+        assert!(
+            pr.forms.sch_d.must_file(),
+            "the kitchen sink has capital activity"
+        );
+        assert!(
+            !pr.forms.f1040.line7_schedule_d_not_required,
+            "Schedule D IS attached, so the box must stay clear"
         );
     }
 

@@ -313,6 +313,11 @@ pub struct Form1040Map {
     /// The capital-gain amount cell (line 7a for 2025, line 7 for 2024, **line 13 for 2017**). A
     /// single field on 2024/2025; a dollars+cents [`MoneyPair`] on the 2017 form.
     pub line7a: MoneyCell,
+    /// ★ §G-18 — line 7's *"If not required, check here"* box. `Option`: only the full-return
+    /// revision carries it in the map (the crypto-slice 1040 fills two cells and vouches for nothing
+    /// about Schedule D's filing status).
+    #[serde(default)]
+    pub line7_no_schedule_d: Option<CheckChoice>,
     /// Whether this year's 1040 carries the Digital-Asset question — **per-year scaffolding**. When
     /// `true` (2024/2025) the fill answers it "Yes" and runs the map-independent adjacency guard;
     /// **2017 sets it `false`** (no DA question — the map omits `da_yes`/`da_no` and the fill produces

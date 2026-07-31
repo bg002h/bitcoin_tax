@@ -715,7 +715,24 @@ users), stated so nobody assumes otherwise.
 leaves no bytes behind — that now holds, so §G-14 no longer has to carry the `VACUUM`/`secure_delete`
 requirement itself.
 
-### G-18 — ★★★ Form 1040 line 7: btctax neither attaches Schedule D nor checks "not required"
+### G-18 — ~~Form 1040 line 7: btctax neither attaches Schedule D nor checks "not required"~~ **FIXED 2026-07-31**
+
+**The box is now checked exactly when `ScheduleDLines::must_file()` is false**, threaded through the
+printed chain so the box and the packet's form list are ONE decision — a checked box beside an
+attached Schedule D would contradict the return's own contents. Both directions pinned and
+mutation-verified (`the_packet_omits_every_form_that_is_not_required` /
+`a_return_that_attaches_schedule_d_does_not_check_the_line7_box`).
+
+★★ **The census REASON was wrong, not the count.** `c1_23` was recorded `unmodeled` because *"btctax's
+returns … report BTC dispositions on Form 8949, which Schedule D always summarises, so Schedule D is
+always required"*. That is FALSE — `must_file` exists precisely because it is not — and it is the same
+species as the Schedule C line-G entry §G-13 already flags: **a census entry can be confidently wrong,
+and a wrong `unmodeled` hides a defect exactly as well as a missing entry would.** GAPS stayed at 6;
+what changed is that a field is no longer excused by a false premise.
+
+Original finding, kept for the record:
+
+### ~~G-18 (original)~~ — Form 1040 line 7: btctax neither attaches Schedule D nor checks "not required"
 
 **Verified on an emitted return, 2026-07-30** (`btctax-forms/tests/field_census_slice.rs`). Found
 while measuring §G-17 gap 2.

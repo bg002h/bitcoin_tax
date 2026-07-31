@@ -167,6 +167,11 @@ fn recorded_gaps_may_only_shrink() {
     // now ASKED as class-(B) skippables and PRINTED from the filer's own answer, with a §6721/§6722
     // advisory on the skip. Closed by collecting the input, which is the only way the message below
     // permits.
+    // 2026-07-31: unchanged at 6 (all six are Form 8283 lines 5a/5b/5c). ★ Form 1040 line 7's
+    // "if not required, check here" box was NOT a gap — it was recorded `unmodeled` on the reasoning
+    // that "Schedule D is always required", which is FALSE (`ScheduleDLines::must_file` exists
+    // precisely because it is not). §G-18: the census REASON was wrong, not the count. The field is
+    // now mapped and written; see the map's own note.
     const GAPS: usize = 6;
 
     let mut found = Vec::new();

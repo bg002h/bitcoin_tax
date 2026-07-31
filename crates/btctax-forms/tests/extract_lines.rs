@@ -168,6 +168,7 @@ fn extract_lines_ignores_map_metadata() {
 }
 fn f1040() -> Form1040Lines {
     Form1040Lines {
+        line7_schedule_d_not_required: false,
         line1a: dec!(120000),
         line2a: dec!(1234),
         line1z: dec!(120000),

@@ -443,6 +443,20 @@ pub struct Form1040Lines {
     /// L7 — capital gain or (loss): **Schedule D's printed line 16**, or on a net-loss year the
     /// §1211(b)-limited `−(Schedule D line 21)`. Signed with a **leading minus**.
     pub line7: Usd,
+    /// ★★ L7's **"If not required, check here"** box (`FOLLOWUPS.md` §G-18). The form's own text:
+    ///
+    /// > **7  Capital gain or (loss). Attach Schedule D if required. If not required, check here** ☐
+    ///
+    /// The form offers exactly TWO lawful states — attach the schedule, or check the box — and btctax
+    /// used to emit neither: a W-2-only filer got a printed `0` on line 7, no Schedule D, and an
+    /// unchecked box, so the return's Schedule D status was simply unstated. The IRS supplied the very
+    /// provenance marker §G-13 asks for ("blank because not applicable"), and it went unused.
+    ///
+    /// ★ `true` exactly when [`ScheduleDLines::must_file`] is false. The census recorded this box as
+    /// `unmodeled` on the reasoning that *"Schedule D is always required"* — which is FALSE, and
+    /// `must_file` exists precisely because it is: a return with no disposals, no capital-gain
+    /// distributions and no carryover has no Schedule D to attach.
+    pub line7_schedule_d_not_required: bool,
     /// L8 — **Schedule 1's printed line 10** (additional income).
     pub line8: Usd,
     /// L9 — total income = add **printed** 1z, 2b, 3b, 7 and 8.
@@ -607,6 +621,10 @@ pub fn form_1040_lines(
     other_withholding: Usd,
     estimated_payments: Usd,
     digital_asset_yes: bool,
+    // ★ §G-18 — whether Schedule D is actually attached. The CALLER supplies it from
+    // `ScheduleDLines::must_file()`, so the box and the packet's form list are ONE decision: a checked
+    // box beside an attached Schedule D would contradict the return's own contents.
+    schedule_d_filed: bool,
 ) -> Form1040Lines {
     // ── Income — from the printed block (Schedule A already composed on its L11). ───────────────
     let Form1040Income {
@@ -682,6 +700,8 @@ pub fn form_1040_lines(
         line3a,
         line3b,
         line7,
+        // ★ §G-18 — the form's two lawful states: attach, or check the box. Never neither.
+        line7_schedule_d_not_required: !schedule_d_filed,
         line8,
         line9,
         line10,
@@ -1359,6 +1379,7 @@ mod tests {
             Usd::ZERO,
             Usd::ZERO,
             false,
+            true,
         );
         assert_eq!(l.line12, dec!(15000), "L12e");
         assert_eq!(l.line13, Usd::ZERO, "L13a — no Form 8995 in this fixture");
@@ -1541,6 +1562,7 @@ mod tests {
             Usd::ZERO,
             Usd::ZERO,
             false,
+            true,
         );
         assert_eq!(
             l.line2a,
@@ -1776,6 +1798,7 @@ mod tests {
             Usd::ZERO,
             Usd::ZERO,
             false,
+            true,
         );
 
         assert_eq!(l.line15, dec!(47150), "the PRINTED L15 (61,750 − 14,600)");
@@ -1890,6 +1913,7 @@ mod tests {
             Usd::ZERO,
             Usd::ZERO,
             false,
+            true,
         );
         assert_eq!(
             l.line15,
@@ -2695,6 +2719,7 @@ mod tests {
                 Usd::ZERO,
                 Usd::ZERO,
                 false,
+                true,
             )
         };
         assert_eq!(l.line23, s2.line21, "1040 L23 = Schedule 2's PRINTED L21");
@@ -2738,6 +2763,7 @@ mod tests {
                 FilingStatus::Single,
                 Usd::ZERO,
                 dec!(500),
+                true,
                 true,
             )
         };
@@ -2843,6 +2869,7 @@ mod tests {
                 FilingStatus::Single,
                 Usd::ZERO,
                 Usd::ZERO,
+                true,
                 true,
             )
         };

@@ -1372,6 +1372,7 @@ fn schedule_d_full_refuses_a_negative_in_a_parenthesized_cell() {
 
 fn f1040() -> Form1040Lines {
     Form1040Lines {
+        line7_schedule_d_not_required: false,
         line1a: dec!(120000),
         line2a: dec!(1234),
         line1z: dec!(120000),

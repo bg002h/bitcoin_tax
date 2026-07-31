@@ -229,6 +229,25 @@ pub fn fill_form_1040_full_with_map(
         placements.push(FlatPlacement::check(da.field.clone(), 0));
     }
 
+    // ★★ §G-18 — line 7's "If not required, check here" box. The form's own text offers exactly TWO
+    // lawful states, and btctax used to emit NEITHER: a W-2-only filer got a printed `0` on line 7, no
+    // Schedule D attached, and this box unchecked — a return whose Schedule D status is simply
+    // unstated. The IRS supplied precisely the "not applicable" provenance marker §G-13 asks for.
+    //
+    // ★ The decision is CORE's (`ScheduleDLines::must_file`), threaded through the printed chain, so
+    // the box and the packet's form list cannot disagree — a checked box beside an attached Schedule D
+    // would contradict the return's own contents.
+    if lines.line7_schedule_d_not_required {
+        let cb = map.line7_no_schedule_d.as_ref().ok_or_else(|| {
+            FormsError::Geometry(format!("the TY{y} 1040 map has no `line7_no_schedule_d`"))
+        })?;
+        writes.push((
+            cb.field.clone(),
+            pdf::FieldValue::Check { on: cb.on.clone() },
+        ));
+        placements.push(FlatPlacement::check(cb.field.clone(), 0));
+    }
+
     let mut doc = pdf::load(pdf::f1040_pdf(y)?)?;
     let index = pdf::index(&pdf::collect_fields(&doc)?);
     pdf::drop_xfa_and_set_needappearances(&mut doc)?;

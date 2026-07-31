@@ -11,6 +11,10 @@ year = 2024
 # The capital-gain amount cell (line 7 for 2024). The struct field is named `line7a` for cross-year
 # uniformity; the value here is 2024's line-7 field.
 line7a = "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_52[0]"
+# ★ §G-18 — line 7's "If not required, check here" box. The form offers TWO lawful states, attach the
+#   schedule or check the box; btctax used to emit NEITHER. Checked exactly when
+#   `ScheduleDLines::must_file()` is false. ON-STATE DUMPED: "1".
+line7_no_schedule_d = { field = "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].c1_23[0]", on = "1" }
 # da_present = true → this year HAS the Digital-Asset question (the adjacency guard runs). A future
 # no-DA year (2017) sets da_present = false and makes da_yes/da_no optional.
 da_present = true
@@ -224,7 +228,6 @@ odc          = { field = "topmostSubform[0].Page1[0].Table_Dependents[0].Row4[0]
 "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].c1_22[0]" = { line = "6c", rule = "unmodeled", reason = "The §86(e) lump-sum election checkbox — dead with lines 6a/6b blank." }
 
 # ── Line 7's \"if not required\" checkbox ──────────────────────────────────────────────────────────
-"topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].c1_23[0]" = { line = "7 no-Sch-D box", rule = "unmodeled", reason = "\"Attach Schedule D if required. If not required, check here.\" btctax's returns report BTC dispositions on Form 8949, which Schedule D always summarises, so Schedule D is always required and this box is never checked. Leaving it blank is the correct positive statement, not an omission." }
 
 # ── Page 2, line 16: the alternative-tax-computation checkboxes ──────────────────────────────────
 "topmostSubform[0].Page2[0].c2_1[0]" = { line = "16 box 1", rule = "unmodeled", reason = "Form 8814 (parent's election to report a child's interest and dividends) — btctax models no child's income." }
