@@ -73,3 +73,33 @@ line17 = "topmostSubform[0].Page1[0].f1_34[0]"   # "Add the amounts in the far r
 [identity]
 name = "topmostSubform[0].Page1[0].f1_1[0]"
 ssn  = "topmostSubform[0].Page1[0].f1_2[0]"
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# ★★★ THE FIELD CENSUS (§G-13). See f8959.map.toml for the rule vocabulary.
+#
+# btctax itemizes MEDICAL (line 1), SALT (5a–5e), MORTGAGE INTEREST reported on Form 1098 (8a) and
+# CHARITABLE gifts (11–14). Everything below is a deduction the filer FORGOES by using btctax — the
+# safe direction: omitting a deduction can only OVERSTATE tax, never understate it.
+[census]
+
+# ── Line 6: other taxes (write-in) ───────────────────────────────────────────────────────────────
+"topmostSubform[0].Page1[0].f1_12[0]" = { line = "6", rule = "unmodeled", reason = "\"Other taxes. List type and amount\" — write-in description. btctax collects only the enumerated SALT categories (5a–5c)." }
+"topmostSubform[0].Page1[0].f1_13[0]" = { line = "6", rule = "unmodeled", reason = "Second write-in description line for line 6 — same reason." }
+"topmostSubform[0].Page1[0].f1_14[0]" = { line = "6", rule = "unmodeled", reason = "Line 6 amount — same reason; line 7 therefore equals line 5e." }
+
+# ── Lines 8b/8c: mortgage interest and points NOT on a Form 1098 ─────────────────────────────────
+"topmostSubform[0].Page1[0].f1_17[0]" = { line = "8b", rule = "unmodeled", reason = "\"Home mortgage interest not reported to you on Form 1098\" — description. btctax collects `mortgage_interest_1098` only, i.e. interest that IS on a 1098." }
+"topmostSubform[0].Page1[0].f1_19[0]" = { line = "8b", rule = "unmodeled", reason = "Line 8b amount — same reason." }
+"topmostSubform[0].Page1[0].f1_18[0]" = { line = "8c", rule = "unmodeled", reason = "\"Points not reported to you on Form 1098\" — description. Not collected." }
+"topmostSubform[0].Page1[0].f1_20[0]" = { line = "8c", rule = "unmodeled", reason = "Line 8c amount — same reason." }
+
+# ── Line 8d: the FORM reserves it ────────────────────────────────────────────────────────────────
+"topmostSubform[0].Page1[0].f1_21[0]" = { line = "8d", rule = "artifact", reason = "The form's own text is \"Reserved for future use\" — the IRS ships a fillable box for a line it has explicitly reserved. No decision is encodable, by the form's own statement." }
+
+# ── Lines 9, 15, 16: deductions requiring forms btctax does not model ────────────────────────────
+"topmostSubform[0].Page1[0].f1_23[0]" = { line = "9",  rule = "unmodeled", reason = "\"Investment interest. Attach Form 4952 if required\" — btctax models no Form 4952, so line 10 equals line 8e." }
+"topmostSubform[0].Page1[0].f1_29[0]" = { line = "15", rule = "unmodeled", reason = "\"Casualty and theft loss(es) from a federally declared disaster … Attach Form 4684\" — btctax models no Form 4684." }
+"topmostSubform[0].Page1[0].f1_30[0]" = { line = "16", rule = "unmodeled", reason = "\"Other—from list in instructions. List type and amount\" — write-in description. btctax offers no write-in itemized deduction." }
+"topmostSubform[0].Page1[0].f1_31[0]" = { line = "16", rule = "unmodeled", reason = "Second write-in description line for line 16 — same reason." }
+"topmostSubform[0].Page1[0].f1_32[0]" = { line = "16", rule = "unmodeled", reason = "Third write-in description line for line 16 — same reason." }
+"topmostSubform[0].Page1[0].f1_33[0]" = { line = "16", rule = "unmodeled", reason = "Line 16 amount — same reason." }

@@ -51,3 +51,43 @@ line17 = "topmostSubform[0].Page1[0].f1_27[0]"   # "Multiply line 16 by 3.8% (0.
 [identity]
 name = "topmostSubform[0].Page1[0].f1_1[0]"
 ssn  = "topmostSubform[0].Page1[0].f1_2[0]"
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# ★★★ THE FIELD CENSUS (§G-13). See f8959.map.toml for the rule vocabulary.
+#
+# btctax computes NIIT for an INDIVIDUAL from interest (1), dividends (2), and gain on disposition
+# (5a/5d), then lines 7–17. Everything below is income, a deduction, or an election it does not model
+# — each one FORGONE, which for income lines means the tax can only be OVERSTATED, never understated.
+[census]
+
+# ── Part I elections btctax does not offer ───────────────────────────────────────────────────────
+"topmostSubform[0].Page1[0].PartI[0].c1_1[0]" = { line = "6013(g)", rule = "unmodeled", reason = "Section 6013(g) election (nonresident-alien spouse treated as a resident) — btctax offers no such election." }
+"topmostSubform[0].Page1[0].PartI[0].c1_2[0]" = { line = "6013(h)", rule = "unmodeled", reason = "Section 6013(h) election — same; not offered." }
+"topmostSubform[0].Page1[0].PartI[0].c1_3[0]" = { line = "1.1411-10(g)", rule = "unmodeled", reason = "Regulations section 1.1411-10(g) election (CFC/PFIC) — btctax models no CFCs or PFICs." }
+
+# ── Investment income btctax does not model ──────────────────────────────────────────────────────
+"topmostSubform[0].Page1[0].f1_5[0]"  = { line = "3",  rule = "unmodeled", reason = "Annuities — not modelled; omitting income can only overstate the tax." }
+"topmostSubform[0].Page1[0].f1_6[0]"  = { line = "4a", rule = "unmodeled", reason = "Rental real estate, royalties, partnerships, S corporations, trusts — none modelled." }
+"topmostSubform[0].Page1[0].f1_7[0]"  = { line = "4b", rule = "unmodeled", reason = "Adjustment for net income/loss from a non-section-1411 trade or business — dead with line 4a blank." }
+"topmostSubform[0].Page1[0].f1_8[0]"  = { line = "4c", rule = "unmodeled", reason = "Combine 4a and 4b — dead with both blank." }
+"topmostSubform[0].Page1[0].f1_10[0]" = { line = "5b", rule = "unmodeled", reason = "Net gain/loss from disposition of property NOT subject to NIIT — btctax's dispositions are all §1411 property, so there is nothing to back out." }
+"topmostSubform[0].Page1[0].f1_11[0]" = { line = "5c", rule = "unmodeled", reason = "Adjustment from disposition of a partnership interest or S-corp stock — not modelled." }
+"topmostSubform[0].Page1[0].f1_13[0]" = { line = "6",  rule = "unmodeled", reason = "Adjustments to investment income for certain CFCs and PFICs — not modelled." }
+
+# ── Part II deductions btctax does not model ─────────────────────────────────────────────────────
+"topmostSubform[0].Page1[0].f1_16[0]" = { line = "9a", rule = "unmodeled", reason = "Investment interest expenses — a DEDUCTION against NII; forgoing it can only overstate the tax." }
+"topmostSubform[0].Page1[0].f1_17[0]" = { line = "9b", rule = "unmodeled", reason = "State/local/foreign income tax allocable to NII — not modelled." }
+"topmostSubform[0].Page1[0].f1_18[0]" = { line = "9c", rule = "unmodeled", reason = "Miscellaneous investment expenses — not modelled." }
+"topmostSubform[0].Page1[0].f1_20[0]" = { line = "10", rule = "unmodeled", reason = "Additional modifications — not modelled; line 11 therefore equals line 9d." }
+
+# ── Part III: ESTATES AND TRUSTS — a filer type btctax never serves ──────────────────────────────
+# btctax emits a Form 1040 (individual). It has no 1041 path at all, so every line of Part III is
+# structurally unreachable, not merely unmodelled.
+"topmostSubform[0].Page1[0].f1_28[0]" = { line = "18a", rule = "unmodeled", reason = "Estates and Trusts: net investment income. btctax emits an individual Form 1040 and has no Form 1041 path — all of Part III is unreachable." }
+"topmostSubform[0].Page1[0].f1_29[0]" = { line = "18b", rule = "unmodeled", reason = "Estates/trusts: deductions for distributions of NII — Part III, unreachable." }
+"topmostSubform[0].Page1[0].f1_30[0]" = { line = "18c", rule = "unmodeled", reason = "Estates/trusts: undistributed NII — Part III, unreachable." }
+"topmostSubform[0].Page1[0].f1_31[0]" = { line = "19a", rule = "unmodeled", reason = "Estates/trusts: adjusted gross income — Part III, unreachable." }
+"topmostSubform[0].Page1[0].f1_32[0]" = { line = "19b", rule = "unmodeled", reason = "Estates/trusts: highest tax-bracket threshold — Part III, unreachable." }
+"topmostSubform[0].Page1[0].f1_33[0]" = { line = "19c", rule = "unmodeled", reason = "Estates/trusts: subtract 19b from 19a — Part III, unreachable." }
+"topmostSubform[0].Page1[0].f1_34[0]" = { line = "20",  rule = "unmodeled", reason = "Estates/trusts: smaller of 18c or 19c — Part III, unreachable." }
+"topmostSubform[0].Page1[0].f1_35[0]" = { line = "21",  rule = "unmodeled", reason = "Estates/trusts: NIIT, line 20 × 3.8% — Part III, unreachable." }
