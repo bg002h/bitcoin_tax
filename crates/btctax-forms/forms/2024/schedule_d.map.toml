@@ -53,3 +53,68 @@ no  = { field = "topmostSubform[0].Page2[0].c2_3[1]", on = "2" }
 [identity]
 name = "topmostSubform[0].Page1[0].f1_01[0]"
 ssn  = "topmostSubform[0].Page1[0].f1_02[0]"
+
+# ── §G-13 FIELD-PROVENANCE CENSUS ────────────────────────────────────────────────────────────────
+# Every AcroForm field on this PDF that the map above does not fill, with the decision that leaves it
+# blank. `unmodeled` = btctax models no input that could reach the line; `artifact` = the field is not
+# an entry the filer makes; `gap` = the line IS reachable and nothing populates it (a defect).
+#
+# ★ Schedule D's whole unmapped surface is TWO decisions, both already load-bearing elsewhere in the
+#   codebase — the 8949 box choice and the absence of any non-BTC capital-gain source.
+[census]
+
+# ── Lines 1a/1b/2 and 8a/8b/9 — the 8949 Box A/B/D/E aggregate rows ──────────────────────────────
+# btctax NEVER emits the 1099-reported boxes. `btctax-core/src/forms.rs` (the `Form8949Box` enum, D4):
+# the model carries no 1099-B / 1099-DA signal, so asserting "a broker form was issued and basis was
+# reported" would fabricate unsubstantiated testimony. Every disposition is routed to the conservative
+# not-reported box — C/F pre-TY2025, I/L from TY2025 — which lands on line 3 (ST) and line 10 (LT),
+# both mapped above. `Form8949Row::box_needs_review` flags exchange dispositions for reclassification
+# by the filer on the actual return.
+#
+# ★ DIRECTION: this cannot change the tax. Line 7 combines lines 1a THROUGH 6 in column (h) and line 15
+#   combines 8a through 14, so the amount reaches the same total from any row. Choosing the wrong row
+#   is an IRS document-matching concern, not an arithmetic one — which is exactly why the conservative
+#   box is a safe default and the review flag is the right actuator.
+#
+# Line 1a is additionally the only row that reports transactions NOT listed on Form 8949 at all (the
+# "basis reported, no adjustments" shortcut). btctax always lists every disposition, so 1a is unused
+# by construction, not merely unpopulated.
+"topmostSubform[0].Page1[0].Table_PartI[0].Row1a[0].f1_03[0]"    = { line = "1a(d)", rule = "unmodeled", reason = "Box A aggregate, proceeds. btctax never emits Box A (no 1099-B signal — forms.rs D4); ST dispositions go to line 3." }
+"topmostSubform[0].Page1[0].Table_PartI[0].Row1a[0].f1_04[0]"    = { line = "1a(e)", rule = "unmodeled", reason = "Box A aggregate, cost basis — same." }
+"topmostSubform[0].Page1[0].Table_PartI[0].Row1a[0].f1_05_RO[0]" = { line = "1a(g)", rule = "unmodeled", reason = "Box A aggregate, adjustments — same. btctax emits no 8949 adjustment codes at all (column (f)/(g) are always empty)." }
+"topmostSubform[0].Page1[0].Table_PartI[0].Row1a[0].f1_06[0]"    = { line = "1a(h)", rule = "unmodeled", reason = "Box A aggregate, gain/loss — same." }
+"topmostSubform[0].Page1[0].Table_PartI[0].Row1b[0].f1_07[0]"    = { line = "1b(d)", rule = "unmodeled", reason = "Box A (reported on 8949) aggregate, proceeds — btctax never assigns Box A." }
+"topmostSubform[0].Page1[0].Table_PartI[0].Row1b[0].f1_08[0]"    = { line = "1b(e)", rule = "unmodeled", reason = "Box A aggregate, cost basis — same." }
+"topmostSubform[0].Page1[0].Table_PartI[0].Row1b[0].f1_09[0]"    = { line = "1b(g)", rule = "unmodeled", reason = "Box A aggregate, adjustments — same." }
+"topmostSubform[0].Page1[0].Table_PartI[0].Row1b[0].f1_10[0]"    = { line = "1b(h)", rule = "unmodeled", reason = "Box A aggregate, gain/loss — same." }
+"topmostSubform[0].Page1[0].Table_PartI[0].Row2[0].f1_11[0]"     = { line = "2(d)",  rule = "unmodeled", reason = "Box B (1099-B issued, basis NOT reported) aggregate, proceeds — btctax never assigns Box B." }
+"topmostSubform[0].Page1[0].Table_PartI[0].Row2[0].f1_12[0]"     = { line = "2(e)",  rule = "unmodeled", reason = "Box B aggregate, cost basis — same." }
+"topmostSubform[0].Page1[0].Table_PartI[0].Row2[0].f1_13[0]"     = { line = "2(g)",  rule = "unmodeled", reason = "Box B aggregate, adjustments — same." }
+"topmostSubform[0].Page1[0].Table_PartI[0].Row2[0].f1_14[0]"     = { line = "2(h)",  rule = "unmodeled", reason = "Box B aggregate, gain/loss — same." }
+"topmostSubform[0].Page1[0].Table_PartII[0].Row8a[0].f1_23[0]"    = { line = "8a(d)", rule = "unmodeled", reason = "Box D aggregate, proceeds. LT dispositions go to line 10; btctax never assigns Box D." }
+"topmostSubform[0].Page1[0].Table_PartII[0].Row8a[0].f1_24[0]"    = { line = "8a(e)", rule = "unmodeled", reason = "Box D aggregate, cost basis — same." }
+"topmostSubform[0].Page1[0].Table_PartII[0].Row8a[0].f1_25_RO[0]" = { line = "8a(g)", rule = "unmodeled", reason = "Box D aggregate, adjustments — same; no 8949 adjustment codes are ever emitted." }
+"topmostSubform[0].Page1[0].Table_PartII[0].Row8a[0].f1_26[0]"    = { line = "8a(h)", rule = "unmodeled", reason = "Box D aggregate, gain/loss — same." }
+"topmostSubform[0].Page1[0].Table_PartII[0].Row8b[0].f1_27[0]"    = { line = "8b(d)", rule = "unmodeled", reason = "Box D (reported on 8949) aggregate, proceeds — same." }
+"topmostSubform[0].Page1[0].Table_PartII[0].Row8b[0].f1_28[0]"    = { line = "8b(e)", rule = "unmodeled", reason = "Box D aggregate, cost basis — same." }
+"topmostSubform[0].Page1[0].Table_PartII[0].Row8b[0].f1_29[0]"    = { line = "8b(g)", rule = "unmodeled", reason = "Box D aggregate, adjustments — same." }
+"topmostSubform[0].Page1[0].Table_PartII[0].Row8b[0].f1_30[0]"    = { line = "8b(h)", rule = "unmodeled", reason = "Box D aggregate, gain/loss — same." }
+"topmostSubform[0].Page1[0].Table_PartII[0].Row9[0].f1_31[0]"     = { line = "9(d)",  rule = "unmodeled", reason = "Box E (1099-B issued, basis NOT reported) aggregate, proceeds — btctax never assigns Box E." }
+"topmostSubform[0].Page1[0].Table_PartII[0].Row9[0].f1_32[0]"     = { line = "9(e)",  rule = "unmodeled", reason = "Box E aggregate, cost basis — same." }
+"topmostSubform[0].Page1[0].Table_PartII[0].Row9[0].f1_33[0]"     = { line = "9(g)",  rule = "unmodeled", reason = "Box E aggregate, adjustments — same." }
+"topmostSubform[0].Page1[0].Table_PartII[0].Row9[0].f1_34[0]"     = { line = "9(h)",  rule = "unmodeled", reason = "Box E aggregate, gain/loss — same." }
+
+# ── Lines 4/5 and 11/12 — capital gains from other forms and pass-through entities ───────────────
+# btctax's only disposition source is the BTC ledger. It models no installment sales (6252), casualties
+# (4684), §1256 contracts (6781), like-kind exchanges (8824), §1231 property (4797), undistributed
+# capital gains (2439), or K-1s from partnerships / S corporations / estates / trusts. Nothing in the
+# input surface can reach these lines, so a blank here is what the inputs say.
+#
+# ★ These carry gains OR losses, so this omission is NOT direction-safe in the way an omitted deduction
+#   is: a filer who actually has one of these forms has capital-gain sources btctax cannot see, and the
+#   return is incomplete rather than merely conservative. That is a scope boundary of the product, not a
+#   defect in this map — btctax emits a BTC return.
+"topmostSubform[0].Page1[0].f1_19[0]" = { line = "4",  rule = "unmodeled", reason = "Short-term gain from Form 6252 and ST gain/(loss) from Forms 4684, 6781, 8824 — none of those forms are modelled." }
+"topmostSubform[0].Page1[0].f1_20[0]" = { line = "5",  rule = "unmodeled", reason = "Net short-term gain/(loss) from partnerships, S corporations, estates and trusts (Schedule K-1) — btctax models no pass-through entities." }
+"topmostSubform[0].Page1[0].f1_39[0]" = { line = "11", rule = "unmodeled", reason = "Gain from Form 4797 Part I; LT gain from Forms 2439 and 6252; LT gain/(loss) from Forms 4684, 6781, 8824 — none modelled." }
+"topmostSubform[0].Page1[0].f1_40[0]" = { line = "12", rule = "unmodeled", reason = "Net long-term gain/(loss) from partnerships, S corporations, estates and trusts (Schedule K-1) — not modelled." }
