@@ -244,8 +244,38 @@ pub struct AgedBlindBoxes {
 }
 
 impl AgedBlindBoxes {
-    /// The §63(f) boxes for a return. The spouse's boxes count **only on a joint return** — on MFS the
-    /// spouse's blindness is not the taxpayer's checkbox, and no other status has a spouse at all.
+    /// The §63(f) boxes for a return.
+    ///
+    /// ★★★ **§G-9a ADJUDICATED 2026-07-30 — the BLINDNESS box has NO death interaction, and the
+    /// asymmetry with the aged box is deliberate.** i1040gi (2024) states the carve-out for exactly one
+    /// box, naming it by its printed label:
+    ///
+    /// > *"**Death of spouse in 2024.** If your spouse was born before January 2, 1960, but died in
+    /// > 2024 before reaching age 65, don't check the box that says **'Spouse was born before January
+    /// > 2, 1960.'**"*
+    ///
+    /// There is no matching sentence for blindness, and the MECHANISM says why there could not be. The
+    /// age test is a DURATION test with a gap the year can straddle: a person "is considered to reach
+    /// age 65 on the day before the person's 65th birthday", so a birthday falling after their death
+    /// is an event that never happened — which is precisely what the carve-out resolves. Blindness is a
+    /// POINT-IN-TIME status test, anchored in its own words: *"blind at the end of 2024"* / *"totally
+    /// blind as of December 31, 2024"*. A decedent's tax year ends at death, so someone blind when
+    /// they died was blind at the end of their year. **There is nothing to carve out.**
+    /// The test `the_blind_box_has_no_death_carve_out_but_the_aged_box_does` pins the asymmetry, so a
+    /// future "harmonisation" of the two boxes reds.
+    ///
+    /// ★ **Honest limit on that adjudication:** i1040gi routes a decedent's preparer to **Pub. 501**,
+    /// which is NOT in `legal/primary-sources/` — and neither is **26 USC §63**. So this rests on
+    /// rung 2 plus the mechanism, not on rung 3 or 4. It is recorded that way rather than as settled.
+    ///
+    /// ★★ **The spouse's boxes count only on MFJ HERE, and that is NARROWER THAN THE LAW.** i1040gi:
+    /// *"If your filing status is married filing separately and your spouse was born before January 2,
+    /// 1960, or was blind at the end of 2024, you can check the appropriate box(es) … if your spouse
+    /// had no income, isn't filing a return, and can't be claimed as a dependent on another person's
+    /// return."* btctax captures none of those three conditions, so it forgoes the boxes on MFS —
+    /// which OVERSTATES tax (the safe direction) but is a conservative omission, **not the rule**. The
+    /// previous wording here asserted it as the rule and was simply wrong. Filed as `FOLLOWUPS.md`
+    /// §G-20; the forfeit is currently UNADVISED, which §3.4 does not permit.
     pub fn for_return(ri: &ReturnInputs, year: i32) -> Self {
         let t = &ri.header.taxpayer;
         let joint_spouse = ri
@@ -720,6 +750,51 @@ mod tests {
     /// COUNTING the checked boxes. So the header's box count must equal the count core actually used to
     /// build L12 — if the two can drift, a filed return claims an amount its own checkboxes do not
     /// support, which is exactly the defect this KAT exists to make impossible.
+    /// ★★★ §G-9a — **the blindness box has NO death interaction; the aged box does.** One person,
+    /// one date of death, both conditions true: the aged box is carved out and the blind box is not.
+    ///
+    /// This is the executable form of the adjudication written on [`AgedBlindBoxes::for_return`]. The
+    /// asymmetry looks like an oversight — the same statute, the same dollars, the same worksheet line
+    /// — so it is exactly the kind of thing a later reader "tidies up". i1040gi states the carve-out
+    /// for one box by its printed label and gives blindness its own date anchor (*"blind at the end of
+    /// 2024"*); a decedent's tax year ends at death, so someone blind when they died was blind at the
+    /// end of it. Harmonising the two boxes forfeits a deduction the filer is entitled to, and this
+    /// test is what stops it happening quietly.
+    #[test]
+    fn the_blind_box_has_no_death_carve_out_but_the_aged_box_does() {
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        // Born 1959-02-14 ⇒ reaches 65 on 1960-02-13… i.e. on 2024-02-13. Died 2024-02-12: ONE DAY
+        // short, the i1040gi worked example. Blind at death.
+        ri.header.taxpayer = Person {
+            date_of_birth: Some(date!(1959 - 02 - 14)),
+            date_of_death: Some(date!(2024 - 02 - 12)),
+            blind: Some(true),
+            ..person("John", "Doe", "123456789")
+        };
+        ri.header.taxpayer_died_during_year = Some(true);
+        let b = AgedBlindBoxes::for_return(&ri, 2024);
+        assert!(
+            !b.taxpayer_aged,
+            "died one day before reaching 65 ⇒ the AGE box is carved out (i1040gi's own example)"
+        );
+        assert!(
+            b.taxpayer_blind,
+            "★ …and the BLINDNESS box is NOT. Blindness is tested at the end of the tax year, and a \
+             decedent's year ends at death. Harmonising these two forfeits a real deduction."
+        );
+        assert_eq!(b.count(), 1);
+
+        // The control: one day later, and the age box is checked too (so the assertion above is
+        // about the CARVE-OUT, not about the fixture failing some other way).
+        ri.header.taxpayer.date_of_death = Some(date!(2024 - 02 - 13));
+        let b = AgedBlindBoxes::for_return(&ri, 2024);
+        assert!(b.taxpayer_aged && b.taxpayer_blind);
+        assert_eq!(b.count(), 2);
+    }
+
     #[test]
     fn aged_blind_box_count_matches_the_standard_deduction_core_actually_computed() {
         let p = ty2024_params();

@@ -1199,16 +1199,57 @@ recorded as carrying no decision **with a reason**. Unaccounted-for must fail. A
 distinguish *"this line encodes no decision"* from *"we forgot this line"* is not a conformance check.
 Owning phase: **B3 T2** (unchanged).
 
-### G-9a — do the §63(f) BLIND boxes have a death interaction?
+### G-9a — ~~do the §63(f) BLIND boxes have a death interaction?~~ **ADJUDICATED 2026-07-30: NO.**
 
-**Owning phase: before TY2025 Part V** (the same gate G-9 was owned by). G-9 examined and fixed the
-**aged** boxes. i1040gi's blind instruction reads *"blind at the end of 2024"* — which on its face a
-person who died mid-year cannot satisfy, yet `Person::blind` is a plain tri-state with no death branch.
-Adjudicate against the instruction text, not by analogy to G-9: the aged carve-out is stated
-explicitly, and the absence of a matching sentence for blindness may itself be the answer (a decedent's
-final return is generally filed as though the year ended at death). The machinery G-9 built —
-`{taxpayer,spouse}_died_during_year` and `Person::date_of_death` — is already in place, so if the rule
-does bite, the fix is a predicate change with no new input collection.
+**Closed as "no change needed" — a legitimate outcome, and the one the entry itself anticipated.**
+i1040gi (2024) states the carve-out for exactly ONE box, naming it by its printed label: *"**Death of
+spouse in 2024.** If your spouse was born before January 2, 1960, but died in 2024 before reaching age
+65, don't check the box that says **'Spouse was born before January 2, 1960.'**"* There is no matching
+sentence for blindness.
+
+★★ **And the MECHANISM says there could not be one.** The age test is a DURATION test with a gap the
+year can straddle — a person *"is considered to reach age 65 on the day before the person's 65th
+birthday"*, so a birthday falling after their death is an event that never happened, which is exactly
+what the carve-out resolves. Blindness is a POINT-IN-TIME status test carrying its own anchor:
+*"blind at the end of 2024"* / *"totally blind as of December 31, 2024"*. A decedent's tax year ends at
+death, so someone blind when they died was blind at the end of their year. **Nothing to carve out.**
+
+Pinned executably, not in prose: `packet.rs::the_blind_box_has_no_death_carve_out_but_the_aged_box_does`
+runs i1040gi's own worked example (born 1959-02-14, died 2024-02-12 — one day short) and asserts the
+aged box is carved out while the blind box is not, plus the one-day-later control. Mutation-verified:
+"harmonising" the two boxes reds it. The asymmetry is the kind of thing a later reader tidies away.
+
+★ **HONEST LIMIT.** i1040gi routes a decedent's preparer to **Pub. 501**, which is NOT in
+`legal/primary-sources/` — and neither is **26 USC §63**. This rests on rung 2 plus the mechanism, not
+on rung 3 or 4. Recorded as such rather than as settled; archiving either would upgrade it.
+
+### G-20 — ★★ the MFS spouse's §63(f) boxes are forgone, and that is NARROWER THAN THE LAW
+
+**Owning phase: whenever MFS support is next touched.** Found while adjudicating G-9a, in the same
+i1040gi passage. The instruction reads:
+
+> *"If your filing status is married filing separately and your spouse was born before January 2, 1960,
+> or was blind at the end of 2024, you can check the appropriate box(es) on the line labeled
+> 'Age/Blindness' **if your spouse had no income, isn't filing a return, and can't be claimed as a
+> dependent on another person's return**."*
+
+`AgedBlindBoxes::for_return` counts a spouse box on MFJ only, so an MFS filer whose spouse meets all
+three conditions forfeits up to two boxes ($1,550 each for TY2024). Direction is **OVERSTATEMENT** —
+safe — which is why this is not Critical.
+
+★★ **But it was recorded as THE RULE, not as a conservative omission.** The doc comment read *"on MFS
+the spouse's blindness is not the taxpayer's checkbox"*, which is a statement of law and is wrong.
+Corrected in place 2026-07-30. Two things remain:
+1. **The forfeit is UNADVISED.** §3.4 permits a conservative omission only if the filer is TOLD;
+   otherwise the overstatement is silent. There is no advisory for this one.
+2. **btctax captures none of the three conditions** (spouse's income, whether they file, whether they
+   are claimable), so honouring the rule means collecting them — the *"if the form asks something our
+   input surface cannot answer, collect it"* corollary.
+
+★ It also bears on the 2026-07-30 death-gate work: `SkippableId::SpouseDiedDuringYear` and
+`DodSpouse` were tightened to MFJ-only, citing this same derivation. That tightening is **consistent
+with current behaviour** (the MFS spouse box is never counted, so the gate is inert there) but would
+have to widen with it if this is ever fixed. Do not fix one without the other.
 
 ### G-19 — the crypto-slice-trio review residue (2026-07-30). Four Minors, two lenses, 0C/0I.
 
