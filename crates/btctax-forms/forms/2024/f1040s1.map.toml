@@ -48,3 +48,96 @@ line26 = "form1[0].Page2[0].f2_31[0]"   # "Add lines 11 through 23 and 25…" �
 [identity]
 name = "form1[0].Page1[0].f1_01[0]"
 ssn  = "form1[0].Page1[0].f1_02[0]"
+
+# ── §G-13 FIELD-PROVENANCE CENSUS ────────────────────────────────────────────────────────────────
+# Every AcroForm field on this PDF the map above does not fill, with the decision that leaves it blank.
+# `unmodeled` = btctax models no input that could reach the line; `artifact` = not an entry the filer
+# makes; `gap` = the line IS reachable and nothing populates it (a defect).
+#
+# ★★ DIRECTION — this form has BOTH halves, so the split matters more here than anywhere else:
+#      Part I (lines 1-10) is ADDITIONAL INCOME — a wrongly-blank line UNDERSTATES.
+#      Part II (lines 11-26) is ADJUSTMENTS — a blank only ever OVERSTATES (a forgone deduction).
+#    Every Part I line below is income btctax cannot see at all; the two whose absence is enforced
+#    rather than merely unmodelled (8a and 8p) are named where they occur.
+#
+# ★ Line 8v, "Digital assets received as ordinary income not reported elsewhere", is btctax's OWN
+#   line and is mapped above. This census covers the 21 siblings it does not fill.
+#
+# ★ Parenthesized (NEGATIVE-magnitude) lines print in an inset, narrower cell — 8a, 8d and 8s sit at
+#   x=[414.4,478.4] where the rest of the line-8 column is x=[410.4,481.6]. Same signature as
+#   Schedule D lines 6/14 and line 21.
+[census]
+
+# ── The unnumbered 1099-K reconciliation line, above Part I ──────────────────────────────────────
+# "For 2024, enter the amount reported to you on Form(s) 1099-K that was included in error or for
+# personal items sold at a loss." ★ Adjacent to btctax's domain — digital-asset exchanges do issue
+# 1099-Ks — but it is a RECONCILIATION line that feeds no sum, and it reports amounts to be BACKED
+# OUT, so leaving it blank can only overstate income. btctax collects no 1099-K.
+"form1[0].Page1[0].f1_03[0]" = { line = "1099-K", rule = "unmodeled", reason = "Amount from Form(s) 1099-K included in error or for personal items sold at a loss — btctax collects no 1099-K. Informational: it feeds no sum, and it reduces rather than adds." }
+
+# ── Part I lines 2a-6: additional income from schedules btctax does not emit ─────────────────────
+"form1[0].Page1[0].f1_05[0]" = { line = "2a", rule = "unmodeled", reason = "Alimony received — btctax models no alimony." }
+"form1[0].Page1[0].f1_06[0]" = { line = "2b", rule = "unmodeled", reason = "Date of the original divorce or separation agreement — dead with line 2a blank (the date only matters to decide pre/post-TCJA treatment of an amount)." }
+"form1[0].Page1[0].f1_08[0]" = { line = "4",  rule = "unmodeled", reason = "Other gains or (losses), Form 4797 — no §1231 property modelled (matching Schedule D line 11)." }
+"form1[0].Page1[0].f1_09[0]" = { line = "5",  rule = "unmodeled", reason = "Rental real estate, royalties, partnerships, S corporations, trusts (Schedule E) — btctax models no pass-through entities or rental property (matching Form 8960 line 4a)." }
+"form1[0].Page1[0].f1_10[0]" = { line = "6",  rule = "unmodeled", reason = "Farm income or (loss), Schedule F — not modelled." }
+
+# ── Part I line 8: the other-income menu ─────────────────────────────────────────────────────────
+"form1[0].Page1[0].Line8a_ReadOrder[0].f1_12[0]" = { line = "8a", rule = "unmodeled", reason = "Net operating loss ★ PAREN — btctax models no NOL (already recorded as uncaptured at btctax-core/src/tax/amt.rs:40). A negative line, so forgoing it overstates." }
+"form1[0].Page1[0].f1_13[0]" = { line = "8b", rule = "unmodeled", reason = "Gambling income — not modelled (broken out onto its own line for 2024; previously an 8z write-in)." }
+"form1[0].Page1[0].f1_14[0]" = { line = "8c", rule = "unmodeled", reason = "Cancellation of debt — btctax collects no Form 1099-C. Income, so the understatement direction; there is no input that could reach it." }
+"form1[0].Page1[0].f1_15[0]" = { line = "8d", rule = "unmodeled", reason = "Foreign earned income exclusion from Form 2555 ★ PAREN — btctax models a domestic filer and emits no Form 2555 (see also line 24j)." }
+"form1[0].Page1[0].f1_16[0]" = { line = "8e", rule = "unmodeled", reason = "Income from Form 8853 (Archer MSA / long-term care) — no MSA modelled." }
+"form1[0].Page1[0].f1_17[0]" = { line = "8f", rule = "unmodeled", reason = "Income from Form 8889 (HSA) — no HSA modelled (matching Schedule 2 lines 17c/17d)." }
+"form1[0].Page1[0].f1_18[0]" = { line = "8g", rule = "unmodeled", reason = "Alaska Permanent Fund dividends — not modelled." }
+"form1[0].Page1[0].f1_19[0]" = { line = "8h", rule = "unmodeled", reason = "Jury duty pay — not modelled (its offsetting adjustment is line 24a)." }
+"form1[0].Page1[0].f1_20[0]" = { line = "8i", rule = "unmodeled", reason = "Prizes and awards — not modelled." }
+"form1[0].Page1[0].f1_21[0]" = { line = "8j", rule = "unmodeled", reason = "Activity not engaged in for profit income (§183 hobby income) — btctax's only business path is Schedule C, which is by definition for-profit." }
+"form1[0].Page1[0].f1_22[0]" = { line = "8k", rule = "unmodeled", reason = "Stock options — not modelled. ★ Note this is the ORDINARY-income side of a nonqualified option; the AMT side (an ISO exercise, Form 6251 line 2i) is a separate known exposure tracked in the AMT work." }
+"form1[0].Page1[0].f1_23[0]" = { line = "8l", rule = "unmodeled", reason = "Income from the rental of personal property engaged in for profit but not as a business — not modelled (its adjustment is line 24b)." }
+"form1[0].Page1[0].f1_24[0]" = { line = "8m", rule = "unmodeled", reason = "Olympic and Paralympic medals and USOC prize money — not modelled (its adjustment is line 24c)." }
+"form1[0].Page1[0].f1_25[0]" = { line = "8n", rule = "unmodeled", reason = "Section 951(a) inclusion (subpart F) — btctax models no CFC, matching Form 8960's §1.1411-10(g) election census entry." }
+"form1[0].Page1[0].f1_26[0]" = { line = "8o", rule = "unmodeled", reason = "Section 951A(a) inclusion (GILTI) — same." }
+"form1[0].Page1[0].f1_27[0]" = { line = "8p", rule = "unmodeled", reason = "Section 461(l) excess business loss adjustment. ★ FAIL-CLOSED, not merely unmodelled: a Schedule C net loss REFUSES the return (RefuseReason::ScheduleCLoss, noted at qbi.rs:63), so btctax can never produce the business loss whose excess this line adds back. An add-back is the understatement direction, which is why the refusal matters." }
+"form1[0].Page1[0].f1_28[0]" = { line = "8q", rule = "unmodeled", reason = "Taxable distributions from an ABLE account — not modelled." }
+"form1[0].Page1[0].f1_29[0]" = { line = "8r", rule = "unmodeled", reason = "Scholarship and fellowship grants not reported on Form W-2 — not modelled." }
+"form1[0].Page1[0].f1_30[0]" = { line = "8s", rule = "unmodeled", reason = "Nontaxable Medicaid waiver payments included on Form 1040 line 1a or 1d ★ PAREN — the pairing for 1040 line 1d, which is likewise unmodelled; a negative line, so forgoing it overstates." }
+"form1[0].Page1[0].f1_31[0]" = { line = "8t", rule = "unmodeled", reason = "Pension or annuity from a nonqualified deferred compensation plan or a nongovernmental §457 plan — not modelled (matching Schedule 2 lines 17h/17i)." }
+"form1[0].Page1[0].f1_32[0]" = { line = "8u", rule = "unmodeled", reason = "Wages earned while incarcerated — not modelled." }
+"form1[0].Page1[0].Line8z_ReadOrder[0].f1_34[0]" = { line = "8z type",   rule = "unmodeled", reason = "\"Other income. List type and amount\" free-text — btctax asserts no unnamed income, the same posture as Schedule 3's 6z/13z and Schedule 2's 1y/17z." }
+"form1[0].Page1[0].Line8z_ReadOrder[0].f1_35[0]" = { line = "8z type",   rule = "unmodeled", reason = "Second (wider) description cell for the same 8z write-in — same." }
+"form1[0].Page1[0].f1_36[0]"                     = { line = "8z amount", rule = "unmodeled", reason = "Amount for the 8z write-in — same." }
+
+# ── Part II lines 11-23: adjustments btctax does not model ───────────────────────────────────────
+# ★ Everything below is a DEDUCTION: each blank forgoes a benefit and can only overstate the tax.
+"form1[0].Page2[0].f2_01[0]" = { line = "11", rule = "unmodeled", reason = "Educator expenses — not modelled." }
+"form1[0].Page2[0].f2_02[0]" = { line = "12", rule = "unmodeled", reason = "Certain business expenses of reservists, performing artists and fee-basis government officials (Form 2106) — not modelled." }
+"form1[0].Page2[0].f2_03[0]" = { line = "13", rule = "unmodeled", reason = "Health savings account deduction (Form 8889) — no HSA modelled." }
+"form1[0].Page2[0].f2_04[0]" = { line = "14", rule = "unmodeled", reason = "Moving expenses for members of the Armed Forces (Form 3903) — not modelled." }
+"form1[0].Page2[0].f2_06[0]" = { line = "16", rule = "unmodeled", reason = "Self-employed SEP, SIMPLE and qualified plans. ★ Adjacent to modelled behaviour — btctax computes Schedule C and Schedule SE — but it collects no retirement-plan contributions. A forgone deduction; it can only overstate the tax." }
+"form1[0].Page2[0].f2_07[0]" = { line = "17", rule = "unmodeled", reason = "Self-employed health insurance deduction — same adjacency, same direction: Schedule C exists, health-insurance premiums are not collected." }
+"form1[0].Page2[0].f2_09[0]" = { line = "19a", rule = "unmodeled", reason = "Alimony paid — btctax models no alimony (the receiving side is line 2a)." }
+"form1[0].Page2[0].Line19b_CombField[0].f2_10[0]" = { line = "19b", rule = "unmodeled", reason = "Recipient's SSN (/MaxLen 9, a comb) — dead with line 19a blank, and btctax collects no third party's SSN." }
+"form1[0].Page2[0].f2_11[0]" = { line = "19c", rule = "unmodeled", reason = "Date of the original divorce or separation agreement — dead with 19a blank." }
+"form1[0].Page2[0].f2_12[0]" = { line = "20", rule = "unmodeled", reason = "IRA deduction — btctax models no IRA (matching 1040 lines 4a/4b and Schedule 2 line 8)." }
+"form1[0].Page2[0].f2_14[0]" = { line = "22", rule = "artifact",  reason = "\"Reserved for future use.\" A printed cell that takes no entry from anyone — the third such across the return, after Schedule 3 line 6e and Form 1040 line 30." }
+"form1[0].Page2[0].f2_15[0]" = { line = "23", rule = "unmodeled", reason = "Archer MSA deduction — no MSA modelled." }
+
+# ── Part II line 24: the other-adjustments menu ──────────────────────────────────────────────────
+# Several of these exist only to offset a line-8 income item btctax never reports, so they are dead by
+# construction rather than merely unmodelled: 24a offsets 8h, 24b offsets 8l, 24c offsets 8m.
+"form1[0].Page2[0].Line24a_ReadOrder[0].f2_16[0]" = { line = "24a", rule = "unmodeled", reason = "Jury duty pay repaid to an employer — dead by construction: it offsets line 8h, which is blank." }
+"form1[0].Page2[0].f2_17[0]" = { line = "24b", rule = "unmodeled", reason = "Deductible expenses related to line 8l personal-property rental income — dead by construction: 8l is blank." }
+"form1[0].Page2[0].f2_18[0]" = { line = "24c", rule = "unmodeled", reason = "Nontaxable value of Olympic and Paralympic medals and USOC prize money reported on line 8m — dead by construction: 8m is blank." }
+"form1[0].Page2[0].f2_19[0]" = { line = "24d", rule = "unmodeled", reason = "Reforestation amortization and expenses — not modelled." }
+"form1[0].Page2[0].f2_20[0]" = { line = "24e", rule = "unmodeled", reason = "Repayment of supplemental unemployment benefits under the Trade Act of 1974 — not modelled." }
+"form1[0].Page2[0].f2_21[0]" = { line = "24f", rule = "unmodeled", reason = "Contributions to §501(c)(18)(D) pension plans — not modelled." }
+"form1[0].Page2[0].f2_22[0]" = { line = "24g", rule = "unmodeled", reason = "Contributions by certain chaplains to §403(b) plans — not modelled. ★ The second minister-specific line met in this census, after Schedule SE line A (the Form 4361 declaration, a recorded gap); this one is a deduction, so its direction is safe." }
+"form1[0].Page2[0].f2_23[0]" = { line = "24h", rule = "unmodeled", reason = "Attorney fees and court costs for actions involving certain unlawful discrimination claims — not modelled." }
+"form1[0].Page2[0].f2_24[0]" = { line = "24i", rule = "unmodeled", reason = "Attorney fees and court costs paid in connection with an IRS whistleblower award — not modelled." }
+"form1[0].Page2[0].f2_25[0]" = { line = "24j", rule = "unmodeled", reason = "Housing deduction from Form 2555 — btctax models a domestic filer and emits no Form 2555 (pairs with line 8d)." }
+"form1[0].Page2[0].f2_26[0]" = { line = "24k", rule = "unmodeled", reason = "Excess deductions of §67(e) expenses from Schedule K-1 (Form 1041) — btctax models no estates or trusts." }
+"form1[0].Page2[0].Line24z_ReadOrder[0].f2_27[0]" = { line = "24z type",   rule = "unmodeled", reason = "\"Other adjustments. List type and amount\" free-text — btctax claims no unnamed adjustment." }
+"form1[0].Page2[0].Line24z_ReadOrder[0].f2_28[0]" = { line = "24z type",   rule = "unmodeled", reason = "Second (wider) description cell for the same 24z write-in — same." }
+"form1[0].Page2[0].f2_29[0]"                      = { line = "24z amount", rule = "unmodeled", reason = "Amount for the 24z write-in — same." }
+"form1[0].Page2[0].f2_30[0]"                      = { line = "25", rule = "unmodeled", reason = "\"Total other adjustments. Add lines 24a through 24z\" — dead with all of line 24 blank. Line 26 (mapped) adds lines 11 through 23 and 25, so a blank line 25 contributes nothing." }

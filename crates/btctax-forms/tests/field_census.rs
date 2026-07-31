@@ -40,9 +40,10 @@ const CENSUSED: &[&str] = &[
     "f1040s2",
     "f8283",
     "f1040",
+    "f1040s1",
 ];
 
-const CENSUS_NOT_YET_WRITTEN: &[&str] = &["f1040s1", "f1040sc"];
+const CENSUS_NOT_YET_WRITTEN: &[&str] = &["f1040sc"];
 
 /// Every FQN-shaped string in a map file, split into the mapped set and the `[census]` set.
 ///
