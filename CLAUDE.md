@@ -154,7 +154,7 @@ Evidence (the 2026-07-27/28 AMT plan): five review rounds went 5C/12I → 2C/8I 
 rounds 3–5 finding mostly "edited §X, forgot §Y" — while the single highest-severity defect, a deleted
 Form 6251 line-10 definition, was found in seconds by opening the PDF that all five rounds discussed.
 
-## The harness — B1 and B2 (btctax-only)
+## The harness — B1, B2 and B3 (btctax-only)
 
 `design/HARNESS.md` (r2) answers a failure mode this file cannot: **doctrine written down and violated
 the same day.** Its class-α mechanisms are code and hooks and need no rule here. Its class-β mechanisms
@@ -192,3 +192,21 @@ artifact as a finding ("10 of 12 labels omitted" — they were merely unsent). A
 **rejected** as having no target: `.slice(`/`.substring(` do not appear in any committed file, because
 the truncating code is *ephemeral orchestration* that a lint over files can never see. Removing the
 class beats shadowing one symptom of it.
+
+### B3 — a per-range review is not a branch review.
+
+**The LAST review before an irreversible action is scoped to `main..HEAD` and pointed at INTERACTION**,
+not correctness-per-commit. A stack of range-scoped reviews does not add up to a branch review.
+
+**Why (2026-07-31).** Three independent reviews ran on one branch — r1 on `7bde148..65270db`, r2 on
+`afa0ffe..HEAD`, both 0C/0I. The pre-publish pass, the first scoped to the whole branch, found an
+**Important** in `b94508d` — **the earliest commit, preceding both earlier ranges.** Every round was
+thorough inside its window; the defect lived outside every window.
+
+★★ **And the fix already existed in the branch**: nine commits later the identical gate was written for
+Schedule C line J, reasoning included. Nobody carried it back, because no reviewer ever held both
+commits at once. The failure mode is a field of view, not ignorance.
+
+★ Tell the final pass what the earlier rounds covered, so it spends its budget on the seams. And the
+measure is the same as everywhere else here: not that a final pass happened, but that it was scoped to
+something the earlier passes **could not have seen**.

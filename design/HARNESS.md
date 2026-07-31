@@ -293,6 +293,39 @@ The truncating code was **ephemeral orchestration**, which a lint over committed
 B2 removes the class instead of shadowing one symptom of it, and it belongs in the standing workflow
 briefs (`CONTINUITY.md`-style), where the orchestration is actually authored.
 
+#### B3 — a per-range review is not a branch review
+
+**The LAST review before an irreversible action must be scoped to the WHOLE branch and pointed at
+INTERACTION — not at correctness-per-commit.** A stack of range-scoped reviews does not add up to a
+branch review, however diligent each one was.
+
+★★★ **Observed 2026-07-31, and it is the only class-β mechanism here with a defect to its name rather
+than a near-miss.** Three independent reviews ran on `feat/no-pen-deferrals`. r1 covered
+`7bde148..65270db`; r2 covered `afa0ffe..HEAD`. Both returned 0 Critical / 0 Important. The pre-publish
+Fable pass — the first scoped to `main..HEAD` — found an **Important**: Schedule B's FBAR sub-question
+pair printed ungated, so a stored answer orphaned by a 7a Yes→No correction put a checked FinCEN-114
+box beside a checked "No", under §6065.
+
+It lived in `b94508d`, **the earliest commit on the branch, which precedes BOTH earlier review ranges.**
+Every round was thorough inside its window and the defect lived outside every window.
+
+★★ **And the fix already existed in the branch.** Nine commits later, Schedule C line J received exactly
+the missing gate, with the reasoning written out in its own comment — *"an answer to J without a Yes on
+I is not a mark the form has a place for."* Nobody carried it back, because **no reviewer ever held both
+commits at once.** That is the failure mode: not ignorance, but a field of view.
+
+**The rule.** When a branch spans more than one sitting:
+- each round may be range-scoped (it is cheaper and the briefs stay sharp);
+- **but the final pass takes `main..HEAD`**, and its brief must say so and must name interaction as the
+  target — advisories that now fire together, questions whose class changed across commits, one
+  concrete filer walked end to end.
+- ★ Tell it explicitly what the earlier rounds covered, so it spends its budget on the seams rather
+  than re-deriving their findings.
+
+★ **The measure, as for every mechanism here:** it is not that a final pass happens. It is whether it is
+scoped to something the earlier passes could not see. A `main..HEAD` review that merely re-reads the
+last commit is the same blind spot with a wider `git diff`.
+
 ## What this deliberately does NOT attempt
 
 - **No "be more careful" instructions.** They are what already failed; adding more of them is the null

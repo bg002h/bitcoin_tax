@@ -488,12 +488,20 @@ mod tests {
 
     /// ★★ **The duplication is RECORDED, not forgotten — and the recorded number is MEASURED.**
     ///
-    /// Four archives is the open defect (`CONTINUITY.md` §0 step ③). If someone resolves it by
-    /// retiring a tree, `every_accounted_for_tree_still_exists` reds and the list shrinks — that is
-    /// the ratchet working. This test pins the ceiling so the list can only go the other way.
+    /// **THREE** archives is the post-reconciliation state (A `design/forms/` + B
+    /// `legal/primary-sources/` + B's text layer `legal/text/`). It was FOUR before step ③; the
+    /// stray `design/amt-form6251/` notes were retired, and the doc here still narrated four long
+    /// after the tree stopped having four — corrected 2026-07-31.
     ///
-    /// ★ The bound is `4` because a walk of the tree found four, not because four was the plan. When
-    /// step ③ lands, lower it — the number is a measurement, and lowering it is the deliverable.
+    /// ★ The number is a MEASUREMENT (a walk of the tree found it), never a plan. Lowering it is the
+    /// deliverable; raising it is what A3 exists to prevent.
+    ///
+    /// ★★ **TWO-SIDED, and the second side is the point.** The old assertion was `<= 3` alone, which
+    /// catches a new archive but is SILENT when one is retired — exactly the direction this ratchet
+    /// exists to reward. A retired tree would leave a stale `3` here reading as "still three to go",
+    /// and `every_accounted_for_tree_still_exists` would red on the *path* while this said nothing
+    /// about the *count*. `assert_eq!` makes the constant come down with the tree, which is what its
+    /// two siblings (`the_two_lists_partition_every_form`, the duplicate-group pin) already do.
     #[test]
     fn the_archive_count_may_only_shrink() {
         assert!(
@@ -501,6 +509,14 @@ mod tests {
             "KNOWN_ARCHIVES has grown to {} — a NEW archive is exactly what A3 exists to prevent. \
              Three is the post-reconciliation state (A + B + B's text layer); the only legitimate \
              direction for this number is DOWN.",
+            KNOWN_ARCHIVES.len()
+        );
+        assert_eq!(
+            KNOWN_ARCHIVES.len(),
+            3,
+            "KNOWN_ARCHIVES is {} — if an archive was RETIRED, lower this constant in the same commit. \
+             A shrink that leaves the pin at 3 is progress the ratchet cannot see, and the next reader \
+             is told there are still three trees to reconcile when there are not.",
             KNOWN_ARCHIVES.len()
         );
     }
