@@ -321,6 +321,12 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         //   ★ The census caught these the moment they were added, because the wholesale prefixes
         //   `capital_loss_carryforward_in` / `charitable_carryover_in` do NOT match the `_provenance`
         //   siblings. That is the census working, not a nuisance.
+        // ★★ §G-20 — i1040gi's two MFS conditions. Exempt DELIBERATELY for now: they are class-(B)
+        //   benefit claims whose silence forgoes, and the form surface for them is the next increment.
+        //   `Advisory::Mfs63fSpouseBoxesForgone` already names the cost, so a filer is not left
+        //   guessing — but this exemption is the reason it still fires for anyone who wants the boxes.
+        "header.spouse_had_no_income",
+        "header.spouse_not_filing_a_return",
         "capital_loss_carryforward_in_provenance",
         "charitable_carryover_in_provenance",
         "qbi.reit_ptp_carryforward_in_provenance",

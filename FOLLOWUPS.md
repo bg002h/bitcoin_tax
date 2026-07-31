@@ -1424,10 +1424,27 @@ answer stored, and nothing reads it. The advisory fires exactly when the filer t
 would have counted — never on an MFS return with no spouse data, and never on MFJ, where a claim that
 the boxes were forgone would be flatly false. Both gates mutation-verified.
 
-**STILL OPEN — actually claiming them.** That needs the three conditions COLLECTED (spouse's income,
-whether they file, whether they are claimable), and it stays coupled to the death-gate liveness:
-`SkippableId::SpouseDiedDuringYear` and `DodSpouse` were tightened to MFJ-only citing this same
-derivation, and would have to widen with it. **Do not fix one without the other.**
+**✅ CLOSED 2026-07-31 — the boxes are now CLAIMABLE on MFS.** `HouseholdHeader` gained
+`spouse_had_no_income` and `spouse_not_filing_a_return` (class (B) benefit claims — silence forgoes);
+the third condition, `can_be_claimed_as_dependent_spouse`, was already captured.
+
+★★★ **It FAILS CLOSED, and that is the whole design.** All three must be affirmatively answered in the
+claiming direction; **any** unanswered or adverse one forgoes. This is the only change on the branch
+where an answer can ONLY reduce tax, so the negative cases matter more than the positive: forgoing
+costs the filer a deduction they can recover by answering, while granting one they are not entitled to
+understates a signed return, which they cannot. Seven distinct forgo cases are pinned, and relaxing a
+single condition to `!= Some(false)` reds the test by name.
+
+★★ **The coupling is resolved by making it ONE predicate**, not by keeping two in step:
+`questions::spouse_63f_boxes_count` is shared by `AgedBlindBoxes::for_return` (which decides the
+deduction) and by the liveness of `SpouseDiedDuringYear` / `DodSpouse` (which decide whether the
+questions are even asked). A test asserts they agree for every input. Two copies would have drifted
+into the worst shape available here — counting a spouse's aged box on a return where the §G-9 death
+carve-out was never posed.
+
+★ **The two new conditions are exempt from the input form for now** (deliberately, recorded in
+`coverage.rs`): they are collectable by `income import`, and `Advisory::Mfs63fSpouseBoxesForgone`
+already names the cost, so nobody is left guessing. A form surface for them is the next increment.
 
 ### G-20a — ~~the OTHER unadvised omissions cannot be advised yet~~ **FIXED 2026-07-31**
 

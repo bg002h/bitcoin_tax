@@ -278,11 +278,26 @@ impl AgedBlindBoxes {
     /// §G-20; the forfeit is currently UNADVISED, which §3.4 does not permit.
     pub fn for_return(ri: &ReturnInputs, year: i32) -> Self {
         let t = &ri.header.taxpayer;
+        // ★★★ §G-20 — a spouse's boxes count on MFJ, **or on MFS when all THREE of i1040gi's
+        // conditions are affirmatively true**. This is the only place on the branch where an answer
+        // can only ever REDUCE tax, so it is written to fail closed: every condition must be an
+        // explicit answer in the claiming direction, and ANY unanswered one forgoes.
+        //
+        // > *"…married filing separately … you can check the appropriate box(es) … if your spouse had
+        // > no income, isn't filing a return, and can't be claimed as a dependent on another person's
+        // > return."*
+        //
+        // Forgoing costs the filer a deduction, which they can recover by answering. Granting one they
+        // are not entitled to understates a signed return, which they cannot. The asymmetry decides
+        // the default.
+        // ★ ONE definition, in `questions::spouse_63f_boxes_count` — shared with the liveness of
+        // `SpouseDiedDuringYear` / `DodSpouse`, so a box can never be counted for a spouse whose death
+        // carve-out was never even asked.
         let joint_spouse = ri
             .header
             .spouse
             .as_ref()
-            .filter(|_| ri.filing_status == FilingStatus::Mfj);
+            .filter(|_| crate::tax::questions::spouse_63f_boxes_count(ri));
         Self {
             taxpayer_aged: is_aged(
                 t.date_of_birth,
@@ -751,6 +766,106 @@ mod tests {
     /// COUNTING the checked boxes. So the header's box count must equal the count core actually used to
     /// build L12 — if the two can drift, a filed return claims an amount its own checkboxes do not
     /// support, which is exactly the defect this KAT exists to make impossible.
+    /// ★★★ §G-20 — the MFS spouse's §63(f) boxes are claimable, and the gate FAILS CLOSED.
+    ///
+    /// i1040gi: *"…married filing separately … you can check the appropriate box(es) … **if your spouse
+    /// had no income, isn't filing a return, and can't be claimed as a dependent on another person's
+    /// return**."* All three must be affirmatively answered in the claiming direction.
+    ///
+    /// ★★ **This is the only change on the branch where an answer can ONLY reduce tax**, so every
+    /// negative case matters more than the positive one. Forgoing costs the filer a deduction they can
+    /// recover by answering; granting one they are not entitled to understates a signed return, which
+    /// they cannot recover. The asymmetry is why *any* unanswered condition forgoes.
+    #[test]
+    fn the_mfs_spouse_63f_boxes_need_all_three_conditions_and_fail_closed() {
+        let build = |no_income: Option<bool>, not_filing: Option<bool>, claimable: Option<bool>| {
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Mfs,
+                ..Default::default()
+            };
+            ri.header.taxpayer = person("John", "Doe", "123456789");
+            ri.header.spouse = Some(Person {
+                date_of_birth: Some(date!(1955 - 03 - 02)), // 65+
+                blind: Some(true),                          // both boxes would qualify
+                ..person("Jane", "Doe", "987654321")
+            });
+            ri.header.spouse_died_during_year = Some(false);
+            ri.header.spouse_had_no_income = no_income;
+            ri.header.spouse_not_filing_a_return = not_filing;
+            ri.header.can_be_claimed_as_dependent_spouse = claimable;
+            AgedBlindBoxes::for_return(&ri, 2024)
+        };
+
+        // ★ ALL THREE in the claiming direction ⇒ both boxes count.
+        let b = build(Some(true), Some(true), Some(false));
+        assert!(
+            b.spouse_aged && b.spouse_blind,
+            "all three answered ⇒ claimed"
+        );
+        assert_eq!(b.count(), 2);
+
+        // ★★ Every other combination forgoes. Each row is a DIFFERENT way to be un-entitled or
+        //    unanswered, and any one of them must be enough on its own.
+        for (label, a, b_, c) in [
+            ("no-income unanswered", None, Some(true), Some(false)),
+            ("no-income denied", Some(false), Some(true), Some(false)),
+            ("not-filing unanswered", Some(true), None, Some(false)),
+            ("not-filing denied", Some(true), Some(false), Some(false)),
+            ("dependent-flag unanswered", Some(true), Some(true), None),
+            (
+                "spouse IS claimable elsewhere",
+                Some(true),
+                Some(true),
+                Some(true),
+            ),
+            ("nothing answered", None, None, None),
+        ] {
+            let boxes = build(a, b_, c);
+            assert_eq!(
+                boxes.count(),
+                0,
+                "★ {label}: the spouse's boxes must be FORGONE. Granting one here understates a \
+                 signed return; forgoing merely costs a deduction the filer can recover by answering."
+            );
+        }
+    }
+
+    /// ★★ The gate and the QUESTIONS it enables are one predicate — `questions::spouse_63f_boxes_count`.
+    ///
+    /// Two copies would drift into the worst shape available here: counting a spouse's aged box on a
+    /// return where `SpouseDiedDuringYear` was never asked, so the §G-9 death carve-out — the whole
+    /// point of that gate — could not have been applied.
+    #[test]
+    fn the_mfs_spouse_death_gate_is_asked_exactly_when_the_boxes_count() {
+        use crate::tax::questions::{spouse_63f_boxes_count, SkippableId, SKIPPABLE_QUESTIONS};
+        let gate = SKIPPABLE_QUESTIONS
+            .iter()
+            .find(|s| s.id == SkippableId::SpouseDiedDuringYear)
+            .unwrap();
+        let mk = |claimable: bool| {
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Mfs,
+                ..Default::default()
+            };
+            ri.header.spouse = Some(Person::default());
+            if claimable {
+                ri.header.spouse_had_no_income = Some(true);
+                ri.header.spouse_not_filing_a_return = Some(true);
+                ri.header.can_be_claimed_as_dependent_spouse = Some(false);
+            }
+            ri
+        };
+        for claimable in [true, false] {
+            let ri = mk(claimable);
+            assert_eq!(
+                (gate.live)(&ri),
+                spouse_63f_boxes_count(&ri),
+                "the death gate must be asked exactly when the boxes can count (claimable={claimable})"
+            );
+            assert_eq!((gate.live)(&ri), claimable);
+        }
+    }
+
     /// ★★★ §G-9a — **the blindness box has NO death interaction; the aged box does.** One person,
     /// one date of death, both conditions true: the aged box is carved out and the blind box is not.
     ///

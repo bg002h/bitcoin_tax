@@ -530,6 +530,8 @@ $ btctax --vault v.pgp income show --year 2024
     ],
     "can_be_claimed_as_dependent_taxpayer": false,
     "can_be_claimed_as_dependent_spouse": false,
+    "spouse_had_no_income": null,
+    "spouse_not_filing_a_return": null,
     "presidential_fund_taxpayer": false,
     "presidential_fund_spouse": false,
     "taxpayer_died_during_year": null,

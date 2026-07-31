@@ -192,6 +192,27 @@ pub struct HouseholdHeader {
     /// only when a spouse is actually on this return; `Some(true)` refuses (`DependentSpouseUnsupported`).
     #[serde(default)]
     pub can_be_claimed_as_dependent_spouse: Option<bool>,
+    /// ★★ §G-20 — i1040gi's remaining two conditions for claiming a spouse's §63(f) aged/blind boxes on
+    /// **married filing separately**:
+    ///
+    /// > *"If your filing status is married filing separately and your spouse was born before January 2,
+    /// > 1960, or was blind at the end of 2024, you can check the appropriate box(es) … **if your spouse
+    /// > had no income, isn't filing a return, and can't be claimed as a dependent on another person's
+    /// > return**."*
+    ///
+    /// The third condition is [`Self::can_be_claimed_as_dependent_spouse`], already captured. These two
+    /// are class (B) — BENEFIT CLAIMS, so silence FORGOES the boxes and never grants them.
+    ///
+    /// ★★★ **Both must be `Some(true)` (and the dependent flag `Some(false)`) before a single box is
+    /// counted.** Every other combination — including any unanswered — forgoes. This is the one place
+    /// on the branch where an answer can only ever REDUCE tax, so it fails closed by construction: an
+    /// omission here costs the filer a deduction, which is recoverable; a wrong grant understates a
+    /// signed return, which is not.
+    #[serde(default)]
+    pub spouse_had_no_income: Option<bool>,
+    /// See [`Self::spouse_had_no_income`] — the second of i1040gi's two uncaptured MFS conditions.
+    #[serde(default)]
+    pub spouse_not_filing_a_return: Option<bool>,
     #[serde(default)]
     pub presidential_fund_taxpayer: bool,
     #[serde(default)]

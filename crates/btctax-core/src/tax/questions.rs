@@ -113,6 +113,26 @@ impl QuestionId {
     ];
 }
 
+/// ★★ §G-20 — do this return's SPOUSE §63(f) boxes count at all? MFJ always; **MFS only when all
+/// three of i1040gi's conditions are affirmatively answered in the claiming direction.**
+///
+/// The ONE definition, shared by `AgedBlindBoxes::for_return` (which decides the deduction) and by the
+/// liveness of `SpouseDiedDuringYear` / `DodSpouse` (which decide whether the questions are even
+/// asked). Two copies would drift into asking a question whose answer nothing reads, or — worse —
+/// counting a box whose carve-out was never posed.
+pub fn spouse_63f_boxes_count(ri: &ReturnInputs) -> bool {
+    ri.header.spouse.is_some()
+        && match ri.filing_status {
+            FilingStatus::Mfj => true,
+            FilingStatus::Mfs => {
+                ri.header.spouse_had_no_income == Some(true)
+                    && ri.header.spouse_not_filing_a_return == Some(true)
+                    && ri.header.can_be_claimed_as_dependent_spouse == Some(false)
+            }
+            _ => false,
+        }
+}
+
 /// Is `id`'s question LIVE on this return? The single accessor for a liveness predicate outside the
 /// registry loop.
 ///
@@ -734,11 +754,7 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
         // a spouse `Person` to write the date onto, AND the gate saying they died. The MFJ term matches
         // `SkippableId::SpouseDiedDuringYear`'s own liveness — a date whose gate is never asked would be
         // unreachable, and asking for a date that cannot move a figure is the waste this pass removed.
-        live: |ri| {
-            ri.filing_status == FilingStatus::Mfj
-                && ri.header.spouse.is_some()
-                && ri.header.spouse_died_during_year == Some(true)
-        },
+        live: |ri| spouse_63f_boxes_count(ri) && ri.header.spouse_died_during_year == Some(true),
         get_bool: |_ri| None,
         set_bool: |_ri, _v| {},
         get_date: |ri| ri.header.spouse.as_ref().and_then(|s| s.date_of_death),
@@ -816,7 +832,7 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
         // ★ MFJ ONLY — `AgedBlindBoxes::for_return` counts a spouse box on no other status, so on MFS
         // this answer is inert. Previously `spouse.is_some()`, which asked (and refused) on MFS returns
         // where nothing could read the reply.
-        live: |ri| ri.filing_status == FilingStatus::Mfj && ri.header.spouse.is_some(),
+        live: spouse_63f_boxes_count,
         get_bool: |ri| ri.header.spouse_died_during_year,
         set_bool: |ri, v| ri.header.spouse_died_during_year = Some(v),
         get_date: |_ri| None,

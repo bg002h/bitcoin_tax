@@ -199,6 +199,8 @@ fn classify_header(c: &mut Census, h: &HouseholdHeader) {
         dependents,
         can_be_claimed_as_dependent_taxpayer,
         can_be_claimed_as_dependent_spouse,
+        spouse_had_no_income,
+        spouse_not_filing_a_return,
         presidential_fund_taxpayer,
         presidential_fund_spouse,
         taxpayer_died_during_year,
@@ -222,6 +224,20 @@ fn classify_header(c: &mut Census, h: &HouseholdHeader) {
         presidential_fund_spouse,
         Class::NoTaxDirection,
         "§2.1: 1040 presidential-fund box (spouse) — §6096, no tax direction",
+    );
+    // ★★ §G-20 — i1040gi's two uncaptured MFS conditions for the spouse's §63(f) boxes. BENEFIT
+    // CLAIMS (New Colonial Ice): silence FORGOES the boxes and never grants them, so `false`/absent is
+    // lawful and the forgone benefit fires `Mfs63fSpouseBoxesForgone`.
+    c.exempt(
+        spouse_had_no_income,
+        Class::BenefitClaim,
+        "§63(f)/i1040gi MFS condition (spouse had no income) — silence forgoes the spouse's aged/blind \
+         boxes rather than granting them; `Advisory::Mfs63fSpouseBoxesForgone` names the cost (§2.2)",
+    );
+    c.exempt(
+        spouse_not_filing_a_return,
+        Class::BenefitClaim,
+        "§63(f)/i1040gi MFS condition (spouse isn't filing a return) — same reasoning (§2.2)",
     );
     // §G-9: the §63(f) death carve-out. i1040gi states it twice — "Death of a taxpayer" and "Death of
     // spouse" — so each is its own leaf. ★ BENEFIT CLAIMS, not declarations: silence FORGOES the
