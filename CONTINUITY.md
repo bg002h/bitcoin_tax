@@ -6,30 +6,54 @@ _(Supersedes the 2026-06-28 edition, whose deep-research workflow completed long
 **Written for a reader with NO prior context.** Confirm the tree first:
 `git log --oneline -5`, `git status`, `git branch --show-current`.
 
-> **One line:** on branch `feat/amt-e2-vector-population` (**44 commits, NOT merged**, all five gates
-> green throughout). Two tracks open — **(A)** Schedule 1-A for TY2025: spec + plan green, task T1 built;
-> **(B)** a form-authority pipeline: steps 1-2 of 3 done for all 16 forms.
-> **THE ORDER OF WORK IS FIXED — see §0.** ~~① Fable consult on the **harness**~~ (**✅ done**, §0a) →
-> ② build the harness — **A1 → A2 → A3, then B1/B2** (`design/HARNESS.md` **r2**) → ③ reconcile the two
-> primary-source archives (§4) → ④ Fable consult on the **parsing strategy** (§5a) → ⑤ the label reader (§5).
-> **The largest ARCHITECTURAL open item is §G-11 (§4a)** — the emitter cannot express "no testimony",
-> so it constrains what B3 may emit. It does *not* block any of the above.
+> **One line:** on **`main`** — the `feat/amt-e2-vector-population` work is **MERGED** (all five gates
+> green throughout; the branch's §0 order ①–⑥ is **complete**). **The §G-13 FIELD-PROVENANCE CENSUS is
+> DONE: 15 of 15 forms, 1158 AcroForm fields = 668 mapped + 490 censused, ZERO unaccounted**, and the
+> `CENSUS_NOT_YET_WRITTEN` ratchet is closed to `is_empty()`. It surfaced **18 gap fields / 9 unasked
+> items** — the register table is `FOLLOWUPS.md` §G-13. Two tracks remain open — **(A)** Schedule 1-A for
+> TY2025 (spec + plan green, task **T1 built**, T2–T7 untouched); **(B)** the form-authority pipeline
+> (steps 1–2 of 3 done for all 16 forms; the label reader, §5, is increment 1 built).
+> **The largest ARCHITECTURAL open item is §G-11 (§4a)** — the emitter cannot express "no testimony".
+> **Next work is USER-DIRECTED**; nothing below is auto-start.
 
 ---
 
-## 0. ★★ THE ORDER OF WORK — do these in sequence
+## 0. ★★ THE ORDER OF WORK — **ALL SIX COMPLETE (2026-07-30)**
 
-| # | do this | why here |
+This section drove the merged branch. It is kept as the record of what was done and why, **not as a
+queue** — there is nothing here left to start.
+
+| # | do this | outcome |
 |---|---|---|
-| **①** | ~~Fable consult on the HARNESS~~ — **✅ DONE 2026-07-30** | verdict `needs-changes`; it *did* change what we build. Verbatim: `reviews/harness-design-fable-r1.md`. See §0a. |
-| **②** | **Build the harness: A1 → A2 → A3, then B1/B2** — `design/HARNESS.md` (r2) | **A1 first**: without the installed-gate every other mechanism is decoration, and this repo already proves it — `scripts/pre-push` has sat uninstalled since 2026-07-02 |
-| **③** | **Reconcile the archives** — **DECIDED + LARGELY DONE 2026-07-30**; residue is a countdown, see §4 | owner chose **hybrid**: storage differs by document kind, provenance does not differ at all. One manifest + one checker now span BOTH trees (`xtask authority-manifest`, 113 entries). Remaining: **15** duplicate documents, pinned and shrink-only. |
-| **④** | **Fable consult on the PARSING STRATEGY** — §5a | before paying ~32 hand-read label lists |
-| **⑤** | **The label reader** — §5 — **increment 1 BUILT**; increment 2 REDIRECTED, see below | |
-| **⑥** | **Fable consult on FIELD PROVENANCE** — `design/forms/FIELD_PROVENANCE.md` §7, after the §6 classification | the design shapes provenance for every box on every form and interlocks with §G-11; measure the 496 first so granularity is a number, not a guess |
+| **①** | ~~Fable consult on the HARNESS~~ | **✅ DONE** — verdict `needs-changes`; it *did* change what we built. Verbatim: `reviews/harness-design-fable-r1.md`. See §0a. |
+| **②** | ~~Build the harness: A1 → A2 → A3, then B1/B2~~ | **✅ DONE** — `design/HARNESS.md` r2. ★ It fired on its own author twice: it blocked a `core.hooksPath --unset`, and it exposed that A4 had **never run** because `mkdir -p` in Bash bypassed the Write-tool hook. Both holes are closed (`scripts/hooks/`). |
+| **③** | ~~Reconcile the archives~~ | **✅ DONE** — owner chose **hybrid**: storage differs by document kind, provenance does not. One manifest spans both trees (`xtask authority-manifest`). Residue: duplicate documents, pinned and shrink-only, with a review-by date that **reds the suite when it passes** (`ARCHIVE_RECONCILIATION_REVIEW_BY`). |
+| **④** | ~~Fable consult on the PARSING STRATEGY~~ | **✅ DONE** — `reviews/label-reader-strategy-fable-r1.md`. ★ One cited measurement was **fabricated** (a phantom `f1_02` name gap); verified false, the *conclusion* kept on principle, the *evidence* discarded. |
+| **⑤** | ~~The label reader~~ | **increment 1 BUILT** (`form_geometry.rs`, `label_reader.rs`); increment 2 redirected into the census. See §5. |
+| **⑥** | ~~Fable consult on FIELD PROVENANCE~~ | **✅ DONE** — `reviews/field-provenance-fable-r1.md`, plus `shred-and-year-fable-r2.md` and `resumability-vs-discovery-opus-r1.md`. Built out into the §G-13 census, now complete. |
 
-★ ① and ② come first because the harness exists to catch the class of failure that produced ③. Building
-it after would be the same mistake in a new costume.
+### ✅ What ⑥ became: the field-provenance census, COMPLETE
+
+`crates/btctax-forms/tests/field_census.rs` asserts, for **all 15 forms** `fill_full_return` can emit,
+that `(map FQNs ∪ [census] FQNs) == the PDF's AcroForm field set`, **exactly**. Every one of the 1158
+fields now carries a determinate provenance: filled, or recorded as `unmodeled` / `artifact` / `gap`
+**with a reason**. `CENSUS_NOT_YET_WRITTEN` ran 15 → 0 and its bound is now emptiness, so a 16th form
+cannot arrive uncensused — mutation-verified in both directions.
+
+**It found 18 gap fields / 9 unasked items — the table is in `FOLLOWUPS.md` §G-13.** The one that
+changes the tax is **Schedule C line G** (material participation): a non-materially-participating sole
+proprietor's income is passive and therefore §1411 NII, but btctax's NII omits Schedule C income
+unconditionally, so the NIIT is understated. Adjudicated against Form 8960 line 4a and i8960's own
+What's New, not inferred — and finding it corrected an f8960 census entry written earlier in the same
+burndown.
+
+★ **The method that worked, for the next form:** run the field probe, read each line's meaning from the
+form's **extracted text** (never from position alone), verify every claim about btctax's behaviour in
+**source** before recording it as a reason, and let the test — not the author — count the gaps.
+★ **Two traps hit repeatedly:** `cargo fmt` reflows a shrinking list and silently breaks a string
+replace (caught only by `the_two_lists_partition_every_form` and a fixed-size `[&str; 15]`), and
+Form 8283's bundled asset is **Rev. 12-2023** while the archive holds **Rev. 12-2025** — different
+sha256, so the archived extract is the *wrong revision* to transcribe from.
 
 ---
 
@@ -549,7 +573,9 @@ consult should answer.
 | **§G-10** | residue: coverage — a checker that cannot tell "encodes no decision" from "we forgot this line" |
 | §G-6c / §G-6d, E4-E6 | AMT Tier-2 items, parked behind the TY2025 pivot |
 | B3 T2-T7, B4 | Schedule 1-A build; filing assets + corpus |
-| — | **1 of 16 forms** has reached conformance (step 3) |
+| — | **1 of 16 forms** has reached conformance (step 3 of the *form-authority* pipeline — distinct from the field census, which is complete) |
+| **§G-13 gaps** | ★★ **18 gap fields / 9 unasked items** from the completed census — table in `FOLLOWUPS.md` §G-13. Schedule C line G (material participation → NIIT) is the one that changes the tax |
+| — | Schedule C carries ONE aggregate `expenses: Usd`, so line 28 prints a total whose addends (lines 8–27b) are all blank — recorded, deliberately not counted as a gap |
 | **§G-12** | btctax emits Form 8275 but **not 8275-R**, so a position contrary to a REGULATION cannot be disclosed — the duty is unrepresentable |
 | — | `AUTHORITY_CONFLICTS.md` is empty: we believe no reg governing our forms disagrees with the statute. **A statement about what we examined, not a guarantee.** |
 | — | **crates.io temp token still needs revoking** (from the v0.14.0 publish) |
