@@ -26,7 +26,7 @@ use std::collections::BTreeSet;
 /// have no recorded decision, and this list is how that number is burned down one form at a time.
 /// Forms whose `[census]` section IS written. This list and [`CENSUS_NOT_YET_WRITTEN`] must together
 /// partition the 15 census keys — so a form can never be dropped from both and silently escape.
-const CENSUSED: &[&str] = &["f8959"];
+const CENSUSED: &[&str] = &["f8959", "schedule_se"];
 
 const CENSUS_NOT_YET_WRITTEN: &[&str] = &[
     "f1040",
@@ -42,7 +42,6 @@ const CENSUS_NOT_YET_WRITTEN: &[&str] = &[
     "f8960",
     "f8995",
     "schedule_d",
-    "schedule_se",
 ];
 
 /// Every FQN-shaped string in a map file, split into the mapped set and the `[census]` set.
@@ -135,6 +134,50 @@ fn census_accounts_for_every_field() {
     );
 }
 
+/// ★★★ **`rule = "gap"` is a countable DEFECT, not an exemption — and it may only shrink.**
+///
+/// A `gap` is a field btctax **cannot honestly account for**: a required declaration it never asks.
+/// Censusing `schedule_se` found the first one — line A, the Form 4361 minister declaration. A
+/// minister with $400+ of other self-employment earnings would file an incomplete Schedule SE and
+/// nothing would say so.
+///
+/// ★ Without this test, `gap` would be exactly the escape hatch the census exists to remove: a way to
+/// mark a field "accounted for" while accounting for nothing. Pinning the count means a new gap
+/// cannot be added quietly, and closing one (by adding a `QuestionId`) must lower the number.
+#[test]
+fn recorded_gaps_may_only_shrink() {
+    /// Every `rule = "gap"` in the censused forms. Closing one means deleting its census entry and
+    /// mapping the field to a real question — at which point this comes down.
+    const GAPS: usize = 1;
+
+    let mut found = Vec::new();
+    for stem in CENSUSED {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("forms")
+            .join("2024")
+            .join(format!("{stem}.map.toml"));
+        let text = std::fs::read_to_string(&path).expect("map file");
+        for line in text.lines() {
+            // ★ Skip comments — the section's own legend explains `rule = "gap"`, and counting that
+            // line made this test report 2 gaps where the form has 1. A census that miscounts its
+            // own defects is worse than none.
+            if line.trim_start().starts_with('#') {
+                continue;
+            }
+            if line.contains(r#"rule = "gap""#) {
+                found.push(format!("{stem}: {}", line.split('"').nth(1).unwrap_or("?")));
+            }
+        }
+    }
+    assert_eq!(
+        found.len(),
+        GAPS,
+        "recorded gaps changed (pinned {GAPS}). A gap is a field btctax CANNOT honestly account for \
+         — a required declaration it never asks — so the count must only go DOWN, and it goes down \
+         by adding a QuestionId, never by deleting the record. Found: {found:#?}"
+    );
+}
+
 /// ★★ **The ratchet may only shrink.** A form leaves `CENSUS_NOT_YET_WRITTEN` by gaining a `[census]`
 /// section — never by being quietly dropped from the list.
 #[test]
@@ -178,7 +221,7 @@ fn the_two_lists_partition_every_form() {
 #[test]
 fn the_uncensused_list_may_only_shrink() {
     assert!(
-        CENSUS_NOT_YET_WRITTEN.len() <= 14,
+        CENSUS_NOT_YET_WRITTEN.len() <= 13,
         "the uncensused list has GROWN to {} — a new form must arrive with its census, or the \
          count of unaccounted fields silently rises",
         CENSUS_NOT_YET_WRITTEN.len()

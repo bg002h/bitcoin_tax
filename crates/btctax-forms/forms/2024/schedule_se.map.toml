@@ -26,3 +26,49 @@ line13 = "topmostSubform[0].Page1[0].f1_22[0]"
 [identity]
 name = "topmostSubform[0].Page1[0].f1_1[0]"
 ssn  = "topmostSubform[0].Page1[0].f1_2[0]"
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# ★★★ THE FIELD CENSUS (§G-13). Every AcroForm field must be accounted for EXACTLY ONCE: mapped
+# above (we fill it), or named here with the rule that says why we do not.
+#
+# rule = "unmodeled"  a situation outside btctax's scope. Using btctax FORGOES it; the reason names
+#                     what is given up.
+# rule = "artifact"   the form PRINTS this value itself (a preprinted constant, often over a
+#                     degenerate 1-pt field). Filling it would double-print. No decision is encodable.
+# rule = "gap"        ★★ a field btctax CANNOT honestly account for — a declaration it never asks.
+#                     NOT an excuse: a recorded, countable defect, shrink-only. See the note below.
+[census]
+
+# ── Farm income — btctax models no Schedule F / farm partnership income ──────────────────────────
+"topmostSubform[0].Page1[0].f1_3[0]"  = { line = "1a", rule = "unmodeled", reason = "Net farm profit or (loss) from Schedule F, line 34, and farm partnerships K-1 box 14 code A — btctax models no farm income." }
+"topmostSubform[0].Page1[0].f1_4[0]"  = { line = "1b", rule = "unmodeled", reason = "Conservation Reserve Program payments (Schedule F line 4b / K-1 box 20 code AQ) — dead with no farm income." }
+
+# ── Church employee income — not modelled ───────────────────────────────────────────────────────
+"topmostSubform[0].Page1[0].Line5a_ReadOrder[0].f1_10[0]" = { line = "5a", rule = "unmodeled", reason = "Church employee income from Form W-2 — btctax models none, so the line-5 chain stays blank." }
+"topmostSubform[0].Page1[0].f1_11[0]" = { line = "5b", rule = "unmodeled", reason = "Line 5a × 92.35% — dead with line 5a blank." }
+
+# ── Other-form inflows — the same pair f8959 declines ────────────────────────────────────────────
+"topmostSubform[0].Page1[0].f1_15[0]" = { line = "8b", rule = "unmodeled", reason = "Unreported tips subject to social security tax from Form 4137, line 10 — btctax models no Form 4137." }
+"topmostSubform[0].Page1[0].f1_16[0]" = { line = "8c", rule = "unmodeled", reason = "Wages subject to social security tax from Form 8919, line 10 — btctax models no Form 8919." }
+
+# ── Part II optional methods — an ELECTION btctax does not offer ─────────────────────────────────
+"topmostSubform[0].Page1[0].f1_8[0]"  = { line = "4b", rule = "unmodeled", reason = "Inflow from the Part II optional methods (line 15/17) — btctax does not offer the farm or nonfarm optional method, so this stays blank." }
+"topmostSubform[0].Page2[0].f2_2[0]"  = { line = "15", rule = "unmodeled", reason = "Farm optional method: smaller of 2/3 gross farm income or $6,920 — method not offered." }
+"topmostSubform[0].Page2[0].f2_3[0]"  = { line = "16", rule = "unmodeled", reason = "Line 14 − line 15 — dead with the farm optional method unused." }
+"topmostSubform[0].Page2[0].f2_4[0]"  = { line = "17", rule = "unmodeled", reason = "Nonfarm optional method: smaller of 2/3 gross nonfarm income or the line-16 amount — method not offered." }
+
+# ── Preprinted constants the FORM supplies ───────────────────────────────────────────────────────
+"topmostSubform[0].Page1[0].f1_13[0]" = { line = "7",  rule = "artifact", reason = "The form PRINTS the social security wage base (168,600 for 2024) on this line; filling the field would double-print it." }
+"topmostSubform[0].Page2[0].f2_1[0]"  = { line = "14", rule = "artifact", reason = "The form PRINTS 6,920 (maximum income for optional methods). The field is 1 POINT wide (575.0-576.0) — verify.rs's own criterion: '1-pt preprinted-constant spacer fields are never map targets'." }
+
+# ── ★★★ A GAP, not an exemption ──────────────────────────────────────────────────────────────────
+# Found by censusing this form, and it is the first field the §G-13 taxonomy could not cleanly hold.
+# Line A is a class-(A) DECLARATION the filer makes — and btctax never asks it. It is not a forgone
+# BENEFIT (so not `unmodeled`); it is a statement a minister who filed Form 4361 is required to make.
+# A minister with $400+ of other self-employment earnings would file an incomplete Schedule SE and
+# nothing would say so.
+#
+# Recording it as `gap` makes it COUNTABLE and shrink-only rather than invisible. It closes by adding
+# a question to the P9 registry (`QuestionId`), at which point this entry is deleted and the field
+# becomes `asked(...)`.
+"topmostSubform[0].Page1[0].c1_1[0]"  = { line = "A", rule = "gap", reason = "Form 4361 minister / religious order / Christian Science practitioner declaration with $400+ other SE earnings. btctax asks no such question, so the box can never be checked — a REQUIRED declaration we cannot make. Closes by adding a QuestionId." }

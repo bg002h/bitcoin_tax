@@ -896,10 +896,18 @@ census likely has to record the decision's EXISTENCE separately from its CONTENT
 ★ **Never auto-shred.** Destroying evidence of diligence must be an explicit, informed act by the
 filer — never a default or a background job.
 
-### G-13 — ★★★ FIELD PROVENANCE — **PROTOTYPE LANDED 2026-07-30 (1 of 15 forms censused)**
+### G-13 — ★★★ FIELD PROVENANCE — **2 of 15 forms censused (2026-07-30)**
 
 **Owning phase: NOT B3.** Whole-surface, and it interlocks with **§G-11** (which blocks its honest
 form). Filed 2026-07-30. **Full design note: [`design/forms/FIELD_PROVENANCE.md`](design/forms/FIELD_PROVENANCE.md)** — read that first; this entry is the register hook.
+
+★★★ **Censusing form 2 found what form 1 could not: a field the taxonomy cannot hold.** Schedule SE
+line **A** is the Form 4361 minister declaration — a class-(A) statement the filer is *required* to
+make, which btctax **never asks**. It is not a forgone benefit (`unmodeled`); a minister with $400+
+of other self-employment earnings would file an **incomplete Schedule SE** and nothing would say so.
+Recorded as **`rule = "gap"`** — a countable, shrink-only DEFECT, pinned by
+`recorded_gaps_may_only_shrink` so it cannot be added quietly or reclassified away. It closes by
+adding a `QuestionId`, never by deleting the record. **Current gap count: 1.**
 
 **✅ The gate exists.** `btctax-forms/tests/field_census.rs` asserts `(map ∪ [census]) == the PDF's
 AcroForm field set`, exactly. **f8959 is fully censused** — 19 mapped + 7 `unmodeled` = 26 — and
