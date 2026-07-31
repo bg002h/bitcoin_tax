@@ -1210,6 +1210,68 @@ final return is generally filed as though the year ended at death). The machiner
 `{taxpayer,spouse}_died_during_year` and `Person::date_of_death` — is already in place, so if the rule
 does bite, the fix is a predicate change with no new input collection.
 
+### G-19 — the crypto-slice-trio review residue (2026-07-30). Four Minors, two lenses, 0C/0I.
+
+Two independent reviewers (tax-correctness + instrument-integrity) over commits `1a757f0..65270db`.
+Verdict **0 Critical / 0 Important**; every one of 13 planted defects was killed by a test. Two Minors
+were fixed inline (a stale `ScheduleBLines` doc comment that still promised "unanswered refuses" for a
+box whose refusal this branch deleted; and the §1411 threshold boundary, documented but unpinned —
+flipping `>` to `>=` had left the whole suite green). The four below are filed, not fixed.
+
+**(G-19a) ★★ `niit_at_margin` reads the model's PARTIAL NII, and the false answer is the
+UNDER-RESERVE one. Owning phase: whenever `TaxProfile` next gains an NII field — or sooner, on the
+owner's call.** `compute.rs`'s `nii_with = qd + ST + LT − loss_deduction + crypto interest` omits
+rents, royalties, taxable interest and non-qualified dividends, while `magi_excluding_crypto` **is**
+the filer's complete non-crypto MAGI (its own doc says so). So modelled NII is a **lower bound**:
+`nii_with >= 0` soundly implies real NII ≥ 0, but `nii_with < 0` does **not** imply real NII < 0.
+Concrete miss: Single, OTI 250,000, MAGI 300,000 including $60,000 of rental income, net short-term
+crypto loss $80,000 ⇒ modelled NII = −3,000 ⇒ `niit_at_margin = false` ⇒ the report prints
+`§1411 0` when the filer's next long-term dollar really does owe 3.8%.
+★ The pre-existing display made no forward §1411 claim at all; the new one prints an affirmative zero,
+so this is a NEW affirmative statement, not an inherited silence. Display-only — no tax figure moves
+(verified: the only readers of `MarginalRates` are `render.rs` and the TUI Tax tab; `optimize.rs`
+carries the struct without reading it, `whatif.rs` computes its own NIIT delta).
+★★ **The fix is a product judgment, not a bug fix, which is why it is filed and not applied.** The
+narrow case is "MAGI over the threshold AND modelled NII < 0", where the honest answer is *unknown*.
+Failing safe (always include §1411 once MAGI clears the threshold) over-states by 3.8 points on the
+common crypto **loss** year with high income; a third display state is accurate but wordier. Either
+edit touches `tax/types.rs` + `tax/compute.rs`, so it costs a second `frozen_guard` pin exception.
+
+**(G-19b) ★★ Schedule D line 17's Yes/No pair has NO map-independent oracle — a swapped map is
+invisible. Owning phase: next forms-map change.** Every assertion reads the widget through
+`pair.yes.field` / `pair.no.field`, so the map is both the thing under test and the test's own index.
+Swap only the two `field =` values in `forms/2025/schedule_d.map.toml` `[line17]` and every filed 2025
+Schedule D renders line 17 **blank** — `apply_writes` sets `/AS = /1` on a widget whose only on-state
+is `/2`, so there is no `/AP /N /1` to draw — while `checkbox_on` reads the raw `/AS` back as
+`Some("1")` and the KAT stays green. That is CLAUDE.md's second provenance row (*"nothing ever
+populated it"*) laundered as a blank. ★ **The current maps are verified CORRECT** (`xtask dump-fields`:
+2025 `c2_1[0]` on `"1"` at y 578–586 above `c2_1[1]` on `"2"` at 566–574; 2017 `"Yes"`/`"No"` likewise),
+so this is a latent instrument gap, not a live defect. **The repo already solved exactly this for the
+1040's digital-asset question** — `verify.rs::topmost_yes_no_pair`, *"derived from the blank PDF's
+widget geometry + appearance states, never the map."* Schedule D line 17 wants the same, and the map
+comment already records the geometry (*"Yes is the UPPER widget"*) that would supply it.
+★ A cheaper partial: have `apply_writes` reject an `on` value absent from the widget's own
+`button_on_states`. That kills the whole class, not just this instance.
+
+**(G-19c) the crypto slice's line 17 inherits its missing lines 6/13/14. Owning phase: ownerless
+residue — it is a scope boundary, not a defect.** The slice's lines 15/16 omit capital-loss carryovers
+(6/14) and 1099-DIV capital-gain distributions (13), which the man page discloses. A filer with a
+$20,000 long-term carryover and $5,000 of long-term BTC gain now gets line 17 = **Yes**, where their
+real return has line 15 = −15,000 ⇒ line 16 a loss ⇒ *"skip lines 17 through 20."* Minor because the
+slice's line 15/16 amounts and 1040 line 7a were already wrong for that filer — line 17 adds a cell
+that inherits the error, not a new class of it — and because a filer with a carryover is outside the
+slice's stated "crypto-only year" premise. Fixing it properly means the slice collecting the
+carryover, i.e. becoming the full return.
+
+**(G-19d) the FBAR skip advisory only reaches `report --tax-year`. Owning phase: ownerless residue.**
+`advisories_for` has exactly one production caller (`cmd/tax.rs`), so `export-irs-pdf` writes
+`schedule_b.pdf` with 7a = Yes and the FBAR pair blank while printing no FBAR notice on that
+invocation. ★ The three load-bearing legs of the class-(B) reversal are all independently verified true
+(no figure reads the box; a blank is no testimony; the Caution's penalty attaches to not filing FinCEN
+114), so the non-refusal itself is justified — only the disclosure's REACH is narrower than
+`LIMITATIONS.md` implies. The pre-existing `Advisory::FbarFinCen` has exactly the same reach, so this
+is a whole-advisory-surface question, not an FBAR one.
+
 ### G-6a — TWO OTS DEFECTS, both ADJUDICATED 2026-07-29, neither a btctax defect
 
 Found by the new line-by-line Form 6251 comparison. Recorded with the method used, because the two

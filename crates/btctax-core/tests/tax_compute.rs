@@ -503,6 +503,40 @@ fn niit_at_margin_is_false_when_nii_has_slack_below_zero() {
     assert_eq!(r.marginal_rates.ltcg_all_in(), dec!(0.15));
 }
 
+/// ★ The §1411 threshold BOUNDARY, pinned. `niit_at_margin` uses a strict `magi_with > thr`, so a
+/// filer sitting EXACTLY on the $200,000 Single threshold reports the lower answer — the same
+/// convention as `ltcg` (`top <= max_zero` ⇒ 0%) and `marginal_ordinary_rate` (`taxable > lower`).
+///
+/// **This test exists because the convention was documented and unpinned**: flipping `>` to `>=`
+/// left the entire suite green, so a prose claim stood in for a guarantee. One dollar either side of
+/// the threshold now fixes the answer in both directions.
+///
+/// Single, threshold $200,000. No crypto disposals, no crypto income, so `crypto_agi == 0` and
+/// `magi_with == magi_excluding_crypto` exactly. QD 20,000 keeps NII ≥ 0 so the other conjunct holds.
+#[test]
+fn niit_at_margin_reports_the_lower_answer_exactly_at_the_threshold() {
+    let at = |magi: Usd| {
+        let out = compute_tax_year(
+            &[],
+            &state_with(vec![], vec![]),
+            2025,
+            Some(&profile(dec!(100000), magi, dec!(20000))),
+            &synth(2025),
+        );
+        let TaxOutcome::Computed(r) = out else {
+            panic!("computable")
+        };
+        r.marginal_rates.niit_at_margin
+    };
+    assert!(!at(dec!(199999)), "a dollar below the threshold: no §1411");
+    assert!(
+        !at(dec!(200000)),
+        "EXACTLY at the threshold reports the LOWER answer (strict `>`), matching `ltcg`'s \
+         `top <= max_zero` and `marginal_ordinary_rate`'s `taxable > lower`"
+    );
+    assert!(at(dec!(200001)), "a dollar above: §1411 reaches the margin");
+}
+
 /// [B-M1 HEADLINE] Loss-year §1411: a net capital loss reduces NII by ONLY the §1211(b)-allowed amount
 /// (≤ $3,000), NOT by preserving other-category gains in NII (Form 8960 line 5a / §1.1411-4(d) Example 1).
 ///

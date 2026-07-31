@@ -916,9 +916,17 @@ pub struct ScheduleBRow {
 /// .foreign_country_names`), and the claim that "v1 has no input for it" was simply FALSE: the input
 /// existed, was screened, and was then dropped on the floor (ARCH-P6.3a Q7 item 7). It now prints.
 ///
-/// ★ The unnumbered FBAR sub-question under 7a is now ASKED and PRINTED too (`QuestionId::FbarFilingRequired`,
-/// live only when 7a is "Yes"), so Part III no longer goes out incomplete. It is still never GUESSED:
-/// unanswered refuses, and when 7a is "No" the pair is left unwritten because the form does not ask it.
+/// ★★ The unnumbered FBAR sub-question under 7a is ASKED and PRINTED too — but as
+/// [`SkippableId::FbarFilingRequired`](crate::tax::questions::SkippableId), live only when 7a is
+/// "Yes", and **skipping it is LAWFUL**: no figure on the return reads that box, so its silence
+/// neither asserts nor forgoes. It was briefly a refusing declaration; that was reversed.
+///
+/// ★★★ **SO `fbar_filing_required == None` IS REACHABLE ON A FILED SCHEDULE B, AND THE `Option`
+/// BELOW IS THE ONLY THING THAT KEEPS IT BLANK.** No refusal stands behind it any more. Do NOT
+/// collapse it to `bool` or `unwrap_or(false)`: that would print a "No" the filer never gave, on a
+/// page they sign under §6065. `Advisory::FbarSubQuestionNotAnswered` is what tells them the box went
+/// out blank; the printed page tells nobody anything, which is exactly right for a blank.
+/// When 7a is "No" the pair is likewise left unwritten, because the form does not ask it then.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduleBLines {
     /// L1 — the listed interest payers (Part I).
@@ -961,9 +969,11 @@ pub struct ScheduleBLines {
 /// no reason.
 ///
 /// # Panics
-/// Never. Part III's answers are `Option<bool>` on the inputs, but `screen_inputs` refuses the return
-/// when either is unanswered, so by the time a return is assembled they are both known; `unwrap_or`
-/// defaults defensively to `false` rather than panicking on a caller that skipped the screen.
+/// Never. Part III's answers stay `Option<bool>` **all the way to the PDF writer** — this function
+/// carries them across verbatim and defaults nothing. Lines 7a and 8 are class-(A) declarations that
+/// `screen_inputs` refuses while unanswered, so in practice they arrive known; 7a's unnumbered FBAR
+/// sub-question is class (B) and **genuinely arrives `None` on a filed return**, which is why the
+/// `Option` — not the screen — is what keeps the box blank.
 pub fn schedule_b_lines(ri: &crate::tax::return_inputs::ReturnInputs) -> Option<ScheduleBLines> {
     if !crate::tax::return_1040::schedule_b_files(ri) {
         return None;
