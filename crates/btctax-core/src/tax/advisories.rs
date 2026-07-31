@@ -85,18 +85,21 @@ pub enum Advisory {
     /// `CarryProvenance` is exactly that distinction, so the advisory goes quiet the moment btctax has
     /// computed a prior year, or the filer states a figure of their own.
     QbiCarryforwardNotStated,
-    /// ★★ §G-20 — an **MFS** return whose spouse would qualify for a §63(f) aged and/or blind box, which
-    /// btctax forgoes because it counts spouse boxes on MFJ only.
+    /// ★★ §G-20 — an **MFS** return whose spouse would qualify for a §63(f) aged and/or blind box, and
+    /// the box is forgone because one of i1040gi's three conditions is UNANSWERED.
     ///
     /// i1040gi permits them on MFS *"if your spouse had no income, isn't filing a return, and can't be
-    /// claimed as a dependent on another person's return"* — three conditions btctax captures none of,
-    /// so it cannot establish entitlement and does not claim the boxes. That is a lawful conservative
-    /// omission (it OVERSTATES tax), **but §3.4 permits it only if the filer is TOLD**, and until now
-    /// nothing said a word.
+    /// claimed as a dependent on another person's return"*. btctax captures all three and CLAIMS the
+    /// boxes when all three are affirmatively met (`questions::spouse_63f_status_permits`); the gate
+    /// fails closed, so silence forgoes. That is lawful (it OVERSTATES tax) **but §3.4 permits it only
+    /// if the filer is TOLD** — hence this advisory.
     ///
-    /// ★★ Sharper than "a box is forgone": btctax **ASKS** the MFS filer whether their spouse is blind
-    /// (`SkippableId::BlindSpouse` is live on `spouse.is_some()`, not on MFJ) and then discards the
-    /// answer. `boxes` counts what was forgone — aged, blind, or both.
+    /// ★★★ PRE-MERGE finding 1 — IT FIRES ONLY WHEN ANSWERING COULD STILL RECOVER THE BOX. If the
+    /// filer answered a condition ADVERSELY (the spouse had income, or files their own return), the
+    /// boxes are correctly declined, nothing is recoverable, and advising a hand-claim would invite an
+    /// UNDERSTATEMENT on a §6065 return. The doc and message here previously asserted the pre-`fd9c15f`
+    /// world — "counts spouse boxes on MFJ only", "three conditions btctax captures none of" — for a
+    /// full branch after both became false. `boxes` counts what was forgone: aged, blind, or both.
     Mfs63fSpouseBoxesForgone { per_box: Usd, boxes: usize },
     /// ★★ §G-20a — a prior-year **benefit** carryover btctax was never told about: the §1212(b)
     /// capital-loss carryover and/or the §170(d)(1) charitable carryover.
@@ -136,7 +139,8 @@ pub enum Advisory {
     },
     /// ★ §63(f) (P9 §2.2 / §3.4): a person's blindness was never declared, so the additional standard
     /// deduction for blindness was NOT granted. Fires on `blind.is_none()` (never asked) — never on
-    /// `Some(false)`. `persons` counts the taxpayer's box plus, ON MFJ ONLY, the spouse's (an absent MFJ
+    /// `Some(false)`. `persons` counts the taxpayer's box plus, WHEN A SPOUSE BOX COULD COUNT
+    /// (`questions::spouse_63f_status_permits` — MFJ, or a qualifying MFS), the spouse's (an absent
     /// spouse forfeits too; MFS never counts the spouse). Same statute, dollars and worksheet line as the
     /// aged box (`AgedBoxForfeitedNoDob`), and the two STACK. Overstates tax if anyone is blind.
     BlindBoxForfeitedNotDeclared { per_box: Usd, persons: usize },
@@ -228,17 +232,20 @@ impl Advisory {
                  zero, there is nothing to do and this note is expected."
                     .to_string(),
             Advisory::Mfs63fSpouseBoxesForgone { per_box, boxes } => format!(
-                "SPOUSE'S §63(f) BOX{p} FORGONE ON A SEPARATE RETURN — you told btctax something that \
-                 would qualify your spouse for {n} additional standard-deduction box{p} ({amt} each, \
-                 {total} in total), but btctax counts a spouse's aged/blind boxes only on a JOINT \
-                 return, so {they} not claimed. The instructions allow them on married-filing-separately \
+                "SPOUSE'S §63(f) BOX{p} NOT CLAIMED ON A SEPARATE RETURN — you told btctax something \
+                 that would qualify your spouse for {n} additional standard-deduction box{p} ({amt} \
+                 each, {total} in total). On married-filing-separately the instructions allow them \
                  \"if your spouse had no income, isn't filing a return, and can't be claimed as a \
-                 dependent on another person's return\" — three things btctax does not ask and cannot \
-                 verify, so it does not claim them for you. If all three are true of your spouse, your \
-                 tax is OVERSTATED by {total} and the boxes are yours to check by hand.",
+                 dependent on another person's return\" — and btctax has not been told all three, so \
+                 it does not claim them. Your tax is OVERSTATED by {total} if all three are true. \
+                 ★ ANSWER THEM RATHER THAN CHECKING THE BOX{p} BY HAND: set `spouse_had_no_income` and \
+                 `spouse_not_filing_a_return` (via `btctax income import`, or `btctax income answer` \
+                 for the dependent question) and btctax will check the box{p} AND raise the standard \
+                 deduction together. Checking {they} by hand moves the box count without moving line \
+                 12, and the two must agree.",
                 n = boxes,
                 p = if *boxes > 1 { "ES" } else { "" },
-                they = if *boxes > 1 { "they are" } else { "it is" },
+                they = if *boxes > 1 { "them" } else { "it" },
                 amt = fmt_usd(*per_box),
                 total = fmt_usd(*per_box * Usd::from(*boxes as u64))
             ),
@@ -585,7 +592,20 @@ pub fn advisories(
     // telling a filer whose boxes btctax had ALREADY claimed that "the boxes are yours to check by
     // hand". Acting on it double-counts them — an UNDERSTATEMENT on a return signed under §6065.
     // The guard is now the same predicate the deduction asks.
-    if ri.filing_status == FilingStatus::Mfs && !crate::tax::questions::spouse_63f_boxes_count(ri) {
+    //
+    // ★★★ PRE-MERGE finding 1 — AND ONLY WHEN ANSWERING COULD STILL RECOVER THE BOX. An adversely
+    // ANSWERED condition disqualifies the spouse outright: btctax correctly declined the boxes, there
+    // is nothing to recover, and telling the filer their tax is overstated invites them to claim a
+    // deduction they are not entitled to. `spouse_not_filing_a_return == Some(false)` is the ORDINARY
+    // MFS case — the spouse files their own return — so without this guard the advisory would be
+    // wrong on the single commonest shape it can meet.
+    let no_condition_is_adverse = ri.header.spouse_had_no_income != Some(false)
+        && ri.header.spouse_not_filing_a_return != Some(false)
+        && ri.header.can_be_claimed_as_dependent_spouse != Some(true);
+    if ri.filing_status == FilingStatus::Mfs
+        && !crate::tax::questions::spouse_63f_boxes_count(ri)
+        && no_condition_is_adverse
+    {
         if let Some(sp) = ri.header.spouse.as_ref() {
             let aged = sp
                 .date_of_birth
@@ -971,6 +991,102 @@ mod tests {
             "the sibling goes the other way — if both ever say the same thing, one is wrong"
         );
     }
+    /// ★★★ **PRE-MERGE finding 1 — r3 fixed the FIRING CONDITION and never touched the SENTENCE.**
+    ///
+    /// Three independent lenses found this and six skeptics failed to kill it. The message still said
+    /// btctax *"counts a spouse's aged/blind boxes only on a JOINT return"* and called the three
+    /// i1040gi conditions *"three things btctax does not ask and cannot verify"*. Both were falsified
+    /// by `fd9c15f`: btctax asks all three, verifies all three, and claims the boxes when they are met.
+    ///
+    /// Two reachable shapes, and the second is the dangerous one:
+    ///   (a) UNANSWERED — the default, because the input form deliberately exempts two of the three
+    ///       conditions. Something IS recoverable, but the message named the wrong remedy: it told the
+    ///       filer to check the boxes BY HAND, which drifts the §63(f) box count away from the line-12
+    ///       amount `AgedBlindBoxes::count()` is the single source for. The remedy that works is to
+    ///       ANSWER, whereupon the deduction and the boxes move together.
+    ///   (b) ANSWERED ADVERSELY — the filer told btctax the spouse HAD income, btctax correctly
+    ///       declined the boxes, and the advisory still offered a hand-claim on a §6065 return. That
+    ///       is r3's own I-1 mechanism inverted, and it is fixed by NOT FIRING: nothing was forgone
+    ///       that answering could recover.
+    ///
+    /// Mutation-verified: dropping the adverse-answer guard reds shape (b); reinstating either false
+    /// sentence reds the prose row.
+    #[test]
+    fn the_mfs_63f_advisory_is_silent_when_a_condition_was_answered_adversely() {
+        use crate::tax::return_inputs::Person;
+        let old = time::macros::date!(1955 - 03 - 02);
+        let run = |shape: &dyn Fn(&mut ReturnInputs)| {
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Mfs,
+                ..Default::default()
+            };
+            ri.header.spouse = Some(Person {
+                date_of_birth: Some(old),
+                blind: Some(true),
+                ..Default::default()
+            });
+            shape(&mut ri);
+            advisories(
+                &ri,
+                &LedgerState::default(),
+                dec!(90000),
+                dec!(90000),
+                Usd::ZERO,
+                &params(),
+                2024,
+                false,
+            )
+            .into_iter()
+            .find(|a| matches!(a, Advisory::Mfs63fSpouseBoxesForgone { .. }))
+        };
+
+        // (a) NOTHING answered ⇒ the boxes are recoverable, so the filer must be told.
+        let fired = run(&|_ri| {}).expect("an unanswered condition forgoes a recoverable box");
+
+        // ★ …and the message must not carry either falsified sentence, nor send them to do it by hand.
+        let msg = fired.message();
+        for lie in [
+            "only on a JOINT return",
+            "does not ask and cannot verify",
+            "yours to check by hand",
+        ] {
+            assert!(
+                !msg.contains(lie),
+                "the message still says {lie:?} — btctax asks, verifies, and claims these boxes now"
+            );
+        }
+        assert!(
+            msg.contains("income answer") || msg.contains("income import"),
+            "it must name the action that actually works: {msg}"
+        );
+
+        // (b) ★ ANSWERED ADVERSELY ⇒ the spouse is disqualified, btctax correctly declined the boxes,
+        //     and there is nothing to recover. Advising a hand-claim here invites an UNDERSTATEMENT.
+        assert!(
+            run(&|ri| ri.header.spouse_had_no_income = Some(false)).is_none(),
+            "the filer said the spouse HAD income — the boxes are correctly declined, say nothing"
+        );
+        assert!(
+            run(&|ri| ri.header.spouse_not_filing_a_return = Some(false)).is_none(),
+            "the spouse files their own return — the ORDINARY MFS case, and it disqualifies them"
+        );
+        assert!(
+            run(&|ri| ri.header.can_be_claimed_as_dependent_spouse = Some(true)).is_none(),
+            "claimable as someone's dependent — disqualified (this also refuses upstream)"
+        );
+
+        // (c) A partially-answered set still fires: one adverse answer disqualifies, but two claiming
+        //     answers plus one SILENCE is still recoverable.
+        assert!(
+            run(&|ri| {
+                ri.header.spouse_had_no_income = Some(true);
+                ri.header.spouse_not_filing_a_return = Some(true);
+            })
+            .is_some(),
+            "two of three answered in the claiming direction — the third is still worth asking for"
+        );
+    }
+
     /// ★★★ **r3 I-1 — the review's top finding, and an UNDERSTATEMENT path.** `fd9c15f` made the MFS
     /// spouse's §63(f) boxes CLAIMABLE when all three i1040gi conditions are affirmatively met, and
     /// routed the deduction through `questions::spouse_63f_boxes_count`. The four §63(f) advisories,

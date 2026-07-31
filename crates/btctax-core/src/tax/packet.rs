@@ -615,7 +615,7 @@ pub fn assemble_printed_forms(
             form_8283_printed(
                 &crate::forms::form_8283(state, year, donation_details),
                 // ★ §G-21 — the filer's answer to lines 5a/5b/5c, carried straight through. A
-                // `Some(true)` never gets here: `screen_compute_dependent` refuses the year.
+                // `Some(true)` never gets here: `screen_absolute` refuses the year.
                 ri.donations_had_restrictions,
             )
         });

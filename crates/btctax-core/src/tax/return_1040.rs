@@ -135,8 +135,10 @@ fn uses_married_aged_blind_rate(status: FilingStatus) -> bool {
 /// NON-crypto earned income (wages); the absolute return passes with-crypto earned (wages + Sch C net −
 /// ½-SE) — a documented delta-vs-absolute divergence (§6) only in the rare dependent-filer case.
 ///
-/// §63(f) boxes: the taxpayer always, plus the spouse **on a joint (MFJ) return**. (On MFS the rare
-/// no-income-spouse box is conservatively not counted — never over-granting.)
+/// §63(f) boxes: the taxpayer always, plus the spouse whenever `questions::spouse_63f_boxes_count`
+/// says so — MFJ always, and MFS when i1040gi's three conditions (*"no income, isn't filing a return,
+/// can't be claimed as a dependent"*) are ALL affirmatively answered. The gate fails closed: any
+/// unanswered or adverse condition forgoes the box, never over-granting.
 pub fn standard_deduction(
     ri: &ReturnInputs,
     params: &FullReturnParams,
@@ -1698,9 +1700,62 @@ pub fn screen_absolute(
 /// half-applied charitable write). A computed (or empty) existing carryover-in is overwritten silently.
 pub fn apply_carryover_writeback(
     ar: &AbsoluteReturn,
+    ri: &ReturnInputs,
+    state: &LedgerState,
+    year: i32,
     mut next_year: ReturnInputs,
     force: bool,
 ) -> Result<ReturnInputs, String> {
+    // ★★★ PRE-MERGE I-2 — DO NOT PERSIST A CARRYOVER BTCTAX CANNOT VOUCH FOR.
+    //
+    // This is the laundering class the two gates in `write_back_carryover` already guard against
+    // ("NEVER persist a carryover derived from a pseudo-tainted OR hard-blocked ledger into year+1's
+    // stored inputs"), arriving by a third route — and it was OPENED by r3's own I-3 fix.
+    //
+    // r3 correctly stopped refusing a STANDARD-DEDUCTION year with a declared donation restriction:
+    // that return claims no §170 deduction and attaches no 8283, so the restriction moves no figure
+    // **on it**. But `apply_170b` runs unconditionally even then, deliberately, so the carryover ages
+    // (Reg §1.170A-10(a)(2)) — and the carryover it rolls out is computed at FULL FAIR MARKET VALUE,
+    // the number the filer has just told us is too large (Reg §1.170A-7). Persisting that as next
+    // year's `Computed` input puts it beyond every gate: `donations_had_restrictions` is `PerYear`
+    // so it is `None` on that row, and the §G-21 screen reads `year_donation_deduction(state, Y+1)`,
+    // which is $0 because the gift was made in Y.
+    //
+    // ★ It lives HERE rather than in the CLI so that a future write-back path cannot omit it — the
+    // signature makes the omission fail to compile.
+    //
+    // ★★ `force` does NOT open this. That flag exists to overwrite a figure the USER entered; it is
+    // not a licence to write one btctax knows is wrong.
+    if !ar.charitable_carryover_out.is_empty() {
+        let donated = crate::forms::year_donation_deduction(state, year);
+        if ri.donations_had_restrictions == Some(true) {
+            return Err(format!(
+                "carryover write-back REFUSED for {year}: you declared that a donated property carried \
+                 a restriction or a retained right (Form 8283 line 5a/5b/5c), which REDUCES or DENIES \
+                 the §170 deduction (Reg §1.170A-7) — but btctax values every donation at full fair \
+                 market value, so the ${:.2} carryover it computed is too large. Writing it into \
+                 {next}'s inputs would put an inflated figure beyond every check, because next year \
+                 has no way to know the gift was restricted. Work the carryover out by hand.",
+                ar.charitable_carryover_out
+                    .iter()
+                    .map(|c| c.amount)
+                    .sum::<Usd>(),
+                next = year + 1
+            ));
+        }
+        if ri.donations_had_restrictions.is_none()
+            && donated > crate::tax::tables::QUALIFIED_APPRAISAL_THRESHOLD
+        {
+            return Err(format!(
+                "carryover write-back REFUSED for {year}: this year's donations file a Form 8283 \
+                 SECTION B, whose lines 5a, 5b and 5c ask whether any donated property carried a \
+                 restriction — and the answer is not on file. The carryover btctax computed assumes \
+                 full fair market value, so it cannot be persisted as {next}'s input without it. \
+                 Run `btctax income answer`, then re-run this.",
+                next = year + 1
+            ));
+        }
+    }
     if !force {
         if next_year
             .charitable_carryover_in
@@ -4589,6 +4644,18 @@ mod tests {
 
     /// A fixture whose absolute return has BOTH a nonzero charitable carryover-out (crypto donation over
     /// the 30% ceiling) AND a QBI REIT/PTP loss carryforward-out (prior loss > this year's REIT income).
+    /// A current-year `ReturnInputs` with the §G-21 restriction question ANSWERED NO, so the
+    /// write-back tests below exercise the guard they were each written for rather than tripping the
+    /// vouch-for gate. The gate itself is pinned by
+    /// `a_carryover_btctax_cannot_vouch_for_is_never_written_into_next_year`.
+    fn plain_ri() -> ReturnInputs {
+        ReturnInputs {
+            filing_status: FilingStatus::Single,
+            donations_had_restrictions: Some(false),
+            ..Default::default()
+        }
+    }
+
     fn ar_with_carryovers() -> AbsoluteReturn {
         let ri = ReturnInputs {
             filing_status: FilingStatus::Single,
@@ -4666,7 +4733,15 @@ mod tests {
             ar.qbi_carryforward_out
         );
 
-        let next = apply_carryover_writeback(&ar, ReturnInputs::default(), false).unwrap();
+        let next = apply_carryover_writeback(
+            &ar,
+            &plain_ri(),
+            &empty_ledger(),
+            2024,
+            ReturnInputs::default(),
+            false,
+        )
+        .unwrap();
         assert_eq!(
             next.qbi.qbi_carryforward_in, ar.qbi_carryforward_out,
             "★ line 16 must land on NEXT year's line 3 — dropping this silently extinguishes the loss"
@@ -4682,10 +4757,146 @@ mod tests {
         user.qbi.qbi_carryforward_in = dec!(999);
         user.qbi.qbi_carryforward_in_provenance = CarryProvenance::User;
         assert!(
-            apply_carryover_writeback(&ar, user.clone(), false).is_err(),
+            apply_carryover_writeback(&ar, &plain_ri(), &empty_ledger(), 2024, user.clone(), false)
+                .is_err(),
             "a user-entered business-loss carryforward needs --force to overwrite"
         );
-        assert!(apply_carryover_writeback(&ar, user, true).is_ok());
+        assert!(
+            apply_carryover_writeback(&ar, &plain_ri(), &empty_ledger(), 2024, user, true).is_ok()
+        );
+    }
+
+    /// ★★★ **PRE-MERGE I-2 — a REGRESSION the r3 fold itself introduced, and a laundering path.**
+    ///
+    /// r3's I-3 fix correctly stopped refusing a STANDARD-DEDUCTION year that has a declared donation
+    /// restriction: such a return claims no §170 deduction and attaches no Form 8283, so the
+    /// restriction moves no figure on it. True — **of that year**.
+    ///
+    /// But `apply_170b` runs UNCONDITIONALLY even in a standard-deduction year, deliberately, so the
+    /// carryover ages (Reg §1.170A-10(a)(2)). So the year still produces a `charitable_carryover_out`
+    /// computed at **full fair market value** — the very number the filer has just told us is too
+    /// large — and the write-back persisted it into next year's inputs stamped `Computed`, past every
+    /// anti-laundering gate. Next year it deducts with NO gate anywhere: `donations_had_restrictions`
+    /// is `PerYear` so it is `None` on that row, and the §G-21 screen reads
+    /// `year_donation_deduction(state, Y+1)`, which is `$0` because the gift was made in Y.
+    ///
+    /// ★ The pre-r3 gate DID refuse this year. The fold closed a false-block and opened a laundering
+    /// path one clause over — which is exactly why a fix gets reviewed like any other change.
+    ///
+    /// The invariant, stated once: **do not persist a charitable carryover whose amount btctax cannot
+    /// vouch for.** It cannot when a restriction is declared, and it cannot when the restriction
+    /// question was DUE (a Section B year) and unanswered.
+    ///
+    /// Mutation-verified: deleting either arm reds its own row by name.
+    #[test]
+    fn a_carryover_btctax_cannot_vouch_for_is_never_written_into_next_year() {
+        let p = ty2024_params();
+        let table = real_2024_table();
+        // AGI $30,000 against a $50,000 long-term gift: §170(b)'s 30% ceiling allows $9,000, which
+        // LOSES to the $14,600 standard deduction — so nothing is itemized and the year files clean,
+        // while $41,000 of full-FMV carryover rolls out.
+        let build_wages = |answer: Option<bool>, claimed: Usd, wages: Usd| {
+            let ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                donations_had_restrictions: answer,
+                w2s: vec![w2(Owner::Taxpayer, wages, wages, wages)],
+                ..Default::default()
+            };
+            let st = state_removals(vec![donation(
+                date!(2024 - 06 - 01),
+                vec![donation_leg(Term::LongTerm, dec!(5000), claimed)],
+            )]);
+            let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+            (ri, st, ar)
+        };
+        let build = |answer: Option<bool>, claimed: Usd| build_wages(answer, claimed, dec!(30000));
+
+        // The fixture must be the shape the finding describes, or the test proves nothing.
+        let (ri, st, ar) = build(Some(true), dec!(50000));
+        assert!(
+            !ar.deduction_is_itemized,
+            "fixture must take the STANDARD deduction"
+        );
+        assert!(
+            !ar.charitable_carryover_out.is_empty(),
+            "…and must still roll a carryover OUT (apply_170b runs unconditionally)"
+        );
+        assert_eq!(
+            screen_absolute(&ri, &ar, &p, &st, 2024),
+            None,
+            "…and the YEAR itself is correctly computable — r3's I-3 fix stands"
+        );
+
+        // (1) DECLARED restriction ⇒ the carryover is known-inflated. Refuse to persist it.
+        assert!(
+            apply_carryover_writeback(&ar, &ri, &st, 2024, ReturnInputs::default(), false).is_err(),
+            "★ a full-FMV carryover from a gift the filer said was restricted must not become next \
+             year's input — next year has no gate that could catch it"
+        );
+
+        // (2) DUE-BUT-UNANSWERED on a Section B year ⇒ btctax cannot vouch for the amount either.
+        let (ri, st, ar) = build(None, dec!(50000));
+        assert!(
+            apply_carryover_writeback(&ar, &ri, &st, 2024, ReturnInputs::default(), false).is_err(),
+            "the form would have asked 5a/5b/5c; an unanswered Section B year cannot vouch for the \
+             carryover's amount"
+        );
+
+        // (3) ANSWERED NO ⇒ the ordinary case, and it writes.
+        let (ri, st, ar) = build(Some(false), dec!(50000));
+        assert!(
+            apply_carryover_writeback(&ar, &ri, &st, 2024, ReturnInputs::default(), false).is_ok(),
+            "\"no strings\" is the common case and must not be blocked"
+        );
+
+        // (4) SECTION A + unanswered ⇒ the form never poses the question, so silence forgoes nothing.
+        //     $4,000 is under the $5,000 split, and $10,000 of wages puts the 30% ceiling at $3,000
+        //     so a carryover still rolls out — otherwise this row would prove nothing.
+        let (ri, st, ar) = build_wages(None, dec!(4000), dec!(10000));
+        assert!(
+            !ar.charitable_carryover_out.is_empty(),
+            "fixture must still carry over"
+        );
+        assert!(
+            apply_carryover_writeback(&ar, &ri, &st, 2024, ReturnInputs::default(), false).is_ok(),
+            "a Section A year never prints 5a/5b/5c — do not block a small donor's carryover"
+        );
+
+        // (5) ★ NO charitable carryover ⇒ nothing inflated to persist, so a declared restriction must
+        //     NOT block the write-back — the QBI/REIT carryovers still need writing. Without this the
+        //     `!is_empty()` term would be an untested clause, which is how r3's I-3 false block got in.
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            donations_had_restrictions: Some(true),
+            w2s: vec![w2(
+                Owner::Taxpayer,
+                dec!(100000),
+                dec!(100000),
+                dec!(100000),
+            )],
+            qbi: QbiInputs {
+                reit_ptp_carryforward_in: dec!(10000),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let st = LedgerState::default(); // no donations at all
+        let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+        assert!(
+            ar.charitable_carryover_out.is_empty() && ar.qbi_reit_ptp_carryforward_out > Usd::ZERO,
+            "fixture: no charitable carryover, but a REIT one that still must be written"
+        );
+        assert!(
+            apply_carryover_writeback(&ar, &ri, &st, 2024, ReturnInputs::default(), false).is_ok(),
+            "a restriction declaration with no charitable carryover blocks nothing"
+        );
+
+        // ★ `--force` must NOT open this. It exists to overwrite a USER figure, not to launder one.
+        let (ri, st, ar) = build(Some(true), dec!(50000));
+        assert!(
+            apply_carryover_writeback(&ar, &ri, &st, 2024, ReturnInputs::default(), true).is_err(),
+            "--force overrides the user-provenance guard, never the vouch-for guard"
+        );
     }
 
     /// ★★★ **r3 I-4 — a provenance stamp is a CLAIM OF KNOWLEDGE, and this one was unfounded.**
@@ -4702,7 +4913,15 @@ mod tests {
     #[test]
     fn the_writeback_does_not_claim_to_have_computed_a_capital_loss_carryover() {
         let ar = ar_with_carryovers();
-        let next = apply_carryover_writeback(&ar, ReturnInputs::default(), false).unwrap();
+        let next = apply_carryover_writeback(
+            &ar,
+            &plain_ri(),
+            &empty_ledger(),
+            2024,
+            ReturnInputs::default(),
+            false,
+        )
+        .unwrap();
 
         assert_eq!(
             next.capital_loss_carryforward_in,
@@ -4731,7 +4950,15 @@ mod tests {
     #[test]
     fn writeback_into_fresh_next_year() {
         let ar = ar_with_carryovers();
-        let next = apply_carryover_writeback(&ar, ReturnInputs::default(), false).unwrap();
+        let next = apply_carryover_writeback(
+            &ar,
+            &plain_ri(),
+            &empty_ledger(),
+            2024,
+            ReturnInputs::default(),
+            false,
+        )
+        .unwrap();
         assert_eq!(
             next.charitable_carryover_in.len(),
             ar.charitable_carryover_out.len()
@@ -4770,7 +4997,8 @@ mod tests {
             },
             ..Default::default()
         };
-        let next = apply_carryover_writeback(&ar, prior, false).unwrap();
+        let next = apply_carryover_writeback(&ar, &plain_ri(), &empty_ledger(), 2024, prior, false)
+            .unwrap();
         assert_eq!(
             next.charitable_carryover_in[0].amount,
             ar.charitable_carryover_out[0].amount
@@ -4793,9 +5021,25 @@ mod tests {
             }],
             ..Default::default()
         };
-        assert!(apply_carryover_writeback(&ar, user_charitable.clone(), false).is_err());
-        assert!(apply_carryover_writeback(&ar, user_charitable, true).is_ok()); // --force overwrites
-                                                                                // User QBI carryforward present → refuse without force (atomic: charitable not half-written).
+        assert!(apply_carryover_writeback(
+            &ar,
+            &plain_ri(),
+            &empty_ledger(),
+            2024,
+            user_charitable.clone(),
+            false
+        )
+        .is_err());
+        assert!(apply_carryover_writeback(
+            &ar,
+            &plain_ri(),
+            &empty_ledger(),
+            2024,
+            user_charitable,
+            true
+        )
+        .is_ok()); // --force overwrites
+                   // User QBI carryforward present → refuse without force (atomic: charitable not half-written).
         let user_qbi = ReturnInputs {
             qbi: QbiInputs {
                 qbi_carryforward_in: Usd::ZERO,
@@ -4805,8 +5049,19 @@ mod tests {
             },
             ..Default::default()
         };
-        assert!(apply_carryover_writeback(&ar, user_qbi.clone(), false).is_err());
-        assert!(apply_carryover_writeback(&ar, user_qbi, true).is_ok());
+        assert!(apply_carryover_writeback(
+            &ar,
+            &plain_ri(),
+            &empty_ledger(),
+            2024,
+            user_qbi.clone(),
+            false
+        )
+        .is_err());
+        assert!(
+            apply_carryover_writeback(&ar, &plain_ri(), &empty_ledger(), 2024, user_qbi, true)
+                .is_ok()
+        );
     }
 
     /// M3 (Fable P4.9 r1): serde back-compat — a LEGACY blob with no `provenance` key loads as `User`, so a
@@ -4827,7 +5082,17 @@ mod tests {
         );
         // …and is therefore protected: the write-back refuses without --force.
         let ar = ar_with_carryovers();
-        assert!(apply_carryover_writeback(&ar, ri.clone(), false).is_err());
-        assert!(apply_carryover_writeback(&ar, ri, true).is_ok());
+        assert!(apply_carryover_writeback(
+            &ar,
+            &plain_ri(),
+            &empty_ledger(),
+            2024,
+            ri.clone(),
+            false
+        )
+        .is_err());
+        assert!(
+            apply_carryover_writeback(&ar, &plain_ri(), &empty_ledger(), 2024, ri, true).is_ok()
+        );
     }
 }

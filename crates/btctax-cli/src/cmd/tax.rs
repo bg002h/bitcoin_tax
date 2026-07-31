@@ -577,8 +577,8 @@ pub fn write_back_carryover(
             next = year + 1
         ))
     })?;
-    let updated =
-        btctax_core::apply_carryover_writeback(&ar, next, force).map_err(CliError::Usage)?;
+    let updated = btctax_core::apply_carryover_writeback(&ar, &ri, &state, year, next, force)
+        .map_err(CliError::Usage)?;
     crate::return_inputs::set(s.conn(), year + 1, &updated)?;
     s.save()?;
     Ok(format!(

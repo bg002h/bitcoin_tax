@@ -603,7 +603,7 @@ pub enum SkippableId {
     /// of your donations have strings attached?"* A **Yes** to any of the three limbs shrinks or kills
     /// the §170 deduction (Reg §1.170A-7), and btctax deducts at full FMV — so a Yes means the number
     /// is WRONG. Asked here so silence never auto-refuses a filer who donated NOTHING; the refusal is scoped by
-    /// `screen_compute_dependent`, which has the LEDGER that liveness cannot see, and is MANDATORY there:
+    /// `screen_absolute`, which has the computed §63(e) ELECTION that liveness cannot see, and is MANDATORY there:
     /// on a Section-B year, unanswered refuses and `Some(true)` refuses — only `Some(false)` proceeds.
     ///
     /// ★★ **This is what dissolved §G-21.** The three boxes are per-donation and the registry is
@@ -938,7 +938,7 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
         kind: SkippableKind::YesNo,
         // ★ ALWAYS OFFERED: `live` receives only `ReturnInputs`, and the donations are in the LEDGER.
         //   Silence is lawful HERE so a filer who donated nothing is never blocked; the mandatory half
-        //   lives in `screen_compute_dependent`, which has the ledger and can tell.
+        //   lives in `screen_absolute`, which has the ledger AND the itemize election, and can tell.
         live: |_ri| true,
         get_bool: |ri| ri.donations_had_restrictions,
         set_bool: |ri, v| ri.donations_had_restrictions = Some(v),

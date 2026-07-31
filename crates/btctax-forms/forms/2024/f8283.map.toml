@@ -54,7 +54,7 @@ ssn  = "Form8283[0].Page1[0].f1_02[0]"
 #   Rev. 12-2014 form is p2-t1/p2-t2 with /MaxLen 12. Three revisions, three shapes.
 # ★★★ Section B lines 5a/5b/5c — the RESTRICTION questions (§G-21). Written only when the filer
 #   answered the return-level universal "did any donation have strings attached?" with NO; a YES
-#   REFUSES the year upstream (`screen_compute_dependent`), so a "Yes" mark is unreachable by design.
+#   REFUSES the year upstream (`screen_absolute`), so a "Yes" mark is unreachable by design.
 #   ON-STATES DUMPED: "1"/"2" here — NOT the "Yes"/"No" that Schedule C uses. Yes is the LEFT widget
 #   (x 538), No the right (x 559), matching the printed "Yes No" column header.
 [line5a]

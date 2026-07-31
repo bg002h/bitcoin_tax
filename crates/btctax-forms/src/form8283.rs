@@ -513,7 +513,7 @@ fn fill_one(
         // `Some(false)` — "no donation had strings attached" — is a UNIVERSAL, so each box's answer
         // follows for every donation on the form. `None` writes NOTHING: not asked and answered-no are
         // different marks on the page, and a printed "No" the filer never gave is fabricated testimony
-        // (the `3b22ca1` defect class). `Some(true)` cannot arrive — `screen_compute_dependent` refuses
+        // (the `3b22ca1` defect class). `Some(true)` cannot arrive — `screen_absolute` refuses
         // the year, because the §170 deduction btctax computed at full FMV would then be too large.
         // ★★ r3 M-1 — SECTION B ONLY. Lines 5a/5b/5c live in Section B Part II and the form scopes
         // them explicitly: "Complete lines 5a through 5c if conditions were placed on a contribution

@@ -21,7 +21,7 @@ fn decl(q: QuestionId) -> Anchor {
 
 /// ★ A SKIPPABLE's anchor. Needed because §G-21's restriction question is offered as a skippable (the
 /// donations are in the ledger, which liveness cannot see) while its REFUSAL is raised by
-/// `screen_compute_dependent` — so a screen refusal points at a skippable field, which no other arm
+/// `screen_absolute` — so a screen refusal points at a skippable field, which no other arm
 /// does.
 fn skip(s: btctax_core::tax::questions::SkippableId) -> Anchor {
     Anchor::Field(crate::spec::skippable_to_field(s))

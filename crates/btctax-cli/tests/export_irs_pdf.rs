@@ -942,3 +942,149 @@ fn export_irs_pdf_writes_basis_methodology_when_a_tranche_is_filed() {
         "the disclosure content is present"
     );
 }
+
+// ── PRE-MERGE finding 3 — the filed-PDF path's three fail-closed screens ─────────────────────────
+//
+// ★★★ These three screens could ALL be deleted and the entire 2536-test suite stayed green. The
+// export path is the one that puts INK ON PAPER: a return that refuses in `report` but exports a
+// signed-ready PDF is the worst failure this codebase has, and nothing held it.
+//
+// ★★ It was found because `5ab1258` MOVED the §G-21 refusal into `screen_absolute` and changed its
+// signature, touching this exact call site — and the fold's stated assurance was "the compiler
+// enumerated every call site". The compiler enumerates a signature CHANGE. It does not enumerate a
+// call that is DELETED. Only a test can do that, and there was none.
+//
+// Each test below asserts BOTH halves: the refusal fires, AND no bytes are written. The comment at
+// admin.rs:772 says "A refusal writes NO bytes" — that is the guarantee, so that is the assertion.
+
+/// Every file the exporter could write, so "no bytes" is checked against the directory itself rather
+/// than against a hand-list that would rot.
+fn wrote_nothing(dir: &std::path::Path) -> bool {
+    std::fs::read_dir(dir)
+        .map(|rd| rd.filter_map(Result::ok).count() == 0)
+        .unwrap_or(true)
+}
+
+/// Build a TY2024 full-return vault, letting the caller shape the inputs and the ledger.
+fn full_return_vault(
+    evs: &[LedgerEvent],
+    shape: impl FnOnce(&mut btctax_core::tax::return_inputs::ReturnInputs),
+) -> (tempfile::TempDir, PathBuf, tempfile::TempDir) {
+    use btctax_cli::return_inputs;
+    use btctax_core::tax::return_inputs::ReturnInputs;
+    use btctax_core::tax::types::FilingStatus;
+
+    let (dir, vault) = make_vault(evs);
+    let out = tempfile::tempdir().unwrap();
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
+            ..Default::default()
+        };
+        ri.header.taxpayer = btctax_core::tax::return_inputs::Person {
+            first_name: "Pat".into(),
+            last_name: "Roe".into(),
+            ssn: "222-33-4444".into(),
+            ..Default::default()
+        };
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        shape(&mut ri);
+        return_inputs::set(s.conn(), 2024, &ri).unwrap();
+        s.save().unwrap();
+    }
+    (dir, vault, out)
+}
+
+/// ★ SCREEN 1 — `screen_inputs`. An unanswered mandatory declaration must stop the export.
+/// Mutation-verified: deleting the `screen_inputs` block reds this by writing PDFs.
+#[test]
+fn the_export_path_refuses_on_an_input_screen_and_writes_no_bytes() {
+    let (_d, vault, out) = full_return_vault(&real_events_2024(), |ri| {
+        // Un-answer a mandatory class-(A) declaration that `answer_all_live_declarations` had set.
+        ri.header.can_be_claimed_as_dependent_taxpayer = None;
+    });
+    let err = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None).expect_err(
+        "an unanswered mandatory declaration must refuse the EXPORT, not just the report",
+    );
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("not computable") && msg.contains("no forms were written"),
+        "the refusal must name itself and promise no bytes: {msg}"
+    );
+    assert!(
+        wrote_nothing(out.path()),
+        "★ and it must KEEP that promise — a signed-ready PDF from a return that refuses is the \
+         worst outcome in this codebase"
+    );
+}
+
+/// ★ SCREEN 2 — `screen_compute_dependent`, the ledger-dependent one. A non-crypto NONCASH gift
+/// pushes total noncash over $500, requiring an 8283 listing property btctax holds no details for.
+/// Mutation-verified: deleting the `screen_compute_dependent` block reds this.
+#[test]
+fn the_export_path_refuses_on_the_compute_screen_and_writes_no_bytes() {
+    use btctax_core::tax::return_inputs::{CharitableClass, CharitableGift, ScheduleAInputs};
+    let (_d, vault, out) = full_return_vault(&real_events_2024(), |ri| {
+        ri.schedule_a = Some(ScheduleAInputs {
+            charitable: vec![CharitableGift {
+                class: CharitableClass::CapGainProp30, // NON-crypto noncash — btctax has no rows for it
+                amount: dec!(600),                     // over the $500 Schedule A line 12 trigger
+            }],
+            ..Default::default()
+        });
+    });
+    let err = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
+        .expect_err("an incomplete required Form 8283 must refuse the export");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("not computable") && msg.contains("no forms were written"),
+        "{msg}"
+    );
+    assert!(
+        wrote_nothing(out.path()),
+        "no bytes on a compute-screen refusal"
+    );
+}
+
+/// ★ SCREEN 3 — `screen_absolute`, which needs the COMPUTED return. This is the screen `5ab1258`
+/// moved the §G-21 refusal into, and the one whose deletion the skeptic executed: with it gone the
+/// exporter wrote `00_f1040.pdf` plus the SIMPLIFIED Form 8995 — precisely the wrong form once the
+/// §199A(e)(2) phase-in applies.
+/// Mutation-verified: deleting the `screen_absolute` block reds this.
+#[test]
+fn the_export_path_refuses_on_the_absolute_screen_and_writes_no_bytes() {
+    use btctax_core::tax::return_inputs::Owner;
+    use btctax_core::tax::return_inputs::{Form1099Div, W2};
+    let (_d, vault, out) = full_return_vault(&real_events_2024(), |ri| {
+        // Taxable income before QBI above the TY2024 §199A(e)(2) threshold, WITH REIT dividends ⇒
+        // the Form 8995-A phase-in applies and v1 does not model it.
+        ri.w2s = vec![W2 {
+            owner: Owner::Taxpayer,
+            employer: "ACME".into(),
+            box1_wages: dec!(250000),
+            box2_fed_withheld: dec!(50000),
+            box3_ss_wages: dec!(168600),
+            box5_medicare_wages: dec!(250000),
+            ..Default::default()
+        }];
+        ri.div_1099 = vec![Form1099Div {
+            box1a_ordinary: dec!(1000),
+            box5_section_199a: dec!(1000),
+            ..Default::default()
+        }];
+    });
+    let err = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
+        .expect_err("QBI above the §199A(e)(2) threshold needs Form 8995-A, which v1 cannot file");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("QbiAboveThreshold") && msg.contains("no forms were written"),
+        "{msg}"
+    );
+    assert!(
+        wrote_nothing(out.path()),
+        "★ the skeptic observed 00_f1040.pdf + the SIMPLIFIED 55_f8995.pdf land here with the screen \
+         removed — the wrong form, on disk, ready to sign"
+    );
+}

@@ -146,13 +146,14 @@ pub fn classify(ri: &ReturnInputs) -> Census {
     );
     // ★★ Form 8283 5a/5b/5c, asked as ONE return-level universal (§G-21). Class (B) HERE — offered
     // always, silence lawful — because the donations are in the LEDGER and liveness cannot see them.
-    // The MANDATORY half lives in `screen_compute_dependent`, which can: on a Section-B year an
+    // The MANDATORY half lives in `screen_absolute`, which can: on an ITEMIZING year an
     // unanswered or `Some(true)` answer REFUSES.
     c.exempt(
         donations_had_restrictions,
         Class::BenefitClaim,
         "Form 8283 5a/5b/5c (§G-21) — offered as a skippable so a filer who donated nothing is never \
-         blocked; on a Section-B year `screen_compute_dependent` makes it mandatory (§2.2)",
+         blocked; on an itemizing year that claims the §170 deduction `screen_absolute` makes it \
+          mandatory (§2.2)",
     );
     c.declaration(dual_status_alien, QuestionId::DualStatusAlien);
     c.declaration(has_income_exclusion, QuestionId::HasIncomeExclusion);
@@ -267,8 +268,9 @@ fn classify_header(c: &mut Census, h: &HouseholdHeader) {
     c.exempt(
         spouse_died_during_year,
         Class::BenefitClaim,
-        "§63(f)/§G-9 death carve-out (spouse) — same reasoning; the box is counted on MFJ only, which \
-         is why the prompt is MFJ-gated too (§2.2)",
+        "§63(f)/§G-9 death carve-out (spouse) — same reasoning; the box is counted exactly when \
+         `spouse_63f_boxes_count` says so (MFJ, or a qualifying MFS), which is the same predicate \
+         that gates the prompt (§2.2)",
     );
     classify_person(c, taxpayer);
     if let Some(sp) = spouse {
@@ -389,8 +391,8 @@ fn classify_schedule_c(c: &mut Census, sc: &ScheduleCInputs) {
         naics_code: _,
         accounting_method,
         expenses: _,
-        payments_requiring_1099: _,
-        will_file_required_1099: _,
+        payments_requiring_1099,
+        will_file_required_1099,
     } = sc;
     c.exempt(
         owner,
@@ -407,8 +409,24 @@ fn classify_schedule_c(c: &mut Census, sc: &ScheduleCInputs) {
     // `SkippableId::ScheduleC1099{Required,Filed}`, silence lawful. Not `declaration(..)` because no
     // figure on the return reads them and the form prints no Caution — but NOT plain "no tax
     // direction" either, because §6721/§6722 exposure is real, which is what the skip advisory names.
-    // The leaves themselves are `Option<bool>` and are classified through the registry, so they are
-    // named here only so the no-`..` destructure keeps its compile-time bite.
+    //
+    // ★★ PRE-MERGE M8 — these are RECORDED, not bound with `_`. This module's own r2 M-6 rule is that
+    // an `Option<bool>` leaf never gets a bare `_`: the whole point of the census is to distinguish
+    // "this encodes no decision" from "we forgot it", and `_` erases exactly that distinction. Both
+    // were silently under-reported as answered-ness decisions and nothing redded. The four other
+    // class-(B) leaves this branch added were all recorded via `exempt`; these two were missed.
+    c.exempt(
+        payments_requiring_1099,
+        Class::BenefitClaim,
+        "Schedule C line I — asked as `SkippableId::ScheduleC1099Required`; silence forgoes nothing on \
+         the return itself, and the §6721/§6722 exposure is named by the skip advisory (§2.2)",
+    );
+    c.exempt(
+        will_file_required_1099,
+        Class::BenefitClaim,
+        "Schedule C line J — asked as `SkippableId::ScheduleC1099Filed`, and gated on line I being \
+         Yes; an answer to J without a Yes on I is not a mark the form has a place for (§2.2)",
+    );
 }
 
 fn classify_schedule_a(c: &mut Census, a: &ScheduleAInputs) {

@@ -138,7 +138,7 @@ pub struct Printed8283Rows {
     /// return-level universal. `Some(false)` = "no donation had strings attached" ⇒ all three boxes
     /// print **No**. `None` = never answered ⇒ all three stay BLANK.
     ///
-    /// ★ `Some(true)` never reaches here: `screen_compute_dependent` REFUSES the year on a Yes, since
+    /// ★ `Some(true)` never reaches here: `screen_absolute` REFUSES the year on a Yes, since
     /// the §170 deduction btctax computed at full FMV is then too large. The field is `Option<bool>`
     /// rather than `bool` so "not asked" and "answered no" stay different marks on the page — the
     /// distinction `3b22ca1` had to fix on Schedule B the hard way.

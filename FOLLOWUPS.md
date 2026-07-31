@@ -1442,13 +1442,13 @@ refusal. Look for this shape before building a per-row collection surface.
 |---|---|
 | `ReturnInputs.donations_had_restrictions: Option<bool>` | `return_inputs.rs:604` |
 | `SkippableId::DonationsHadRestrictions`, `live: |_ri| true` | `questions.rs:927` |
-| the MANDATORY half — refuses unless `Some(false)` | `return_1040.rs`, top of `screen_compute_dependent` |
+| the MANDATORY half — refuses unless `Some(false)` | `return_1040.rs`, top of `screen_absolute` (moved there by the pre-merge review; see below) |
 | `RefuseReason::DonationRestrictionsUnresolved` | `return_refuse.rs:44` |
 | the three "No" boxes | `form8283.rs`, inside the page-2 identity block |
 
 **Why the question is offered UNCONDITIONALLY but enforced NARROWLY.** Liveness is `fn(&ReturnInputs)`
 and the donations live in the **`LedgerState`**, which it cannot see — the same blindness that puts the
-non-crypto-noncash guard in `screen_compute_dependent` rather than `screen_inputs`. So the skippable is
+non-crypto-noncash guard sits in a screen rather than in `screen_inputs`. So the skippable is
 always *offered* (a filer who donated nothing is never blocked by it) and the gate that actually
 **binds** is keyed on `year_donation_deduction(state, year) > QUALIFIED_APPRAISAL_THRESHOLD`, i.e. on a
 year that genuinely files a Section B. A gift *at* $5,000 is Section A and is never asked.
@@ -1463,6 +1463,27 @@ which gift, so it declines the year rather than file an overstated number.
 each red by name. Emitter side: writing "No" on an unanswered return reds, and so does not writing it —
 the `3b22ca1` class in both directions. A sixth, copying Schedule C's `"Yes"/"No"` on-state by analogy,
 is caught **twice**: by the test and independently by the §G-19b on-state guard.
+
+★★★ **AMENDED TWICE THE SAME DAY, both times by review.** The gate as first built was keyed on
+`year_donation_deduction > $5,000` — the Form 8283 SECTION split — and that was wrong in both
+directions (r3 I-2/I-3): §170(f)(11)(C)'s $5,000 picks which *section* you file, while Reg §1.170A-7
+reduces a restricted gift's deduction at *every* dollar; and reading the LEDGER rather than the
+RETURN refused standard-deduction filers who claim no §170 deduction at all. It now lives in
+`screen_absolute` keyed on `ar.deduction_is_itemized`, the real §63(e) election.
+
+★★★ **Then the fix itself leaked (pre-merge finding 2), and this is the durable lesson.** Not
+refusing the standard-deduction year is right *for that year* — but `apply_170b` runs unconditionally
+so the carryover ages, and the carryover rolls out at **full FMV**, the number the filer just said is
+too large. The write-back persisted it into next year stamped `Computed`, where nothing can catch it:
+`donations_had_restrictions` is `PerYear`, and next year's screen reads
+`year_donation_deduction(state, Y+1)` = $0 because the gift was made in Y. `apply_carryover_writeback`
+now refuses to persist a carryover btctax cannot vouch for, and the guard lives in **core** so the
+signature makes an omission fail to compile. `--force` does not open it: that flag overwrites a
+figure the USER entered, it is not a licence to write one btctax knows is wrong.
+
+★ **The shape to remember: narrowing a refusal can leak through a DIFFERENT persistence path.** The
+year stopped being wrong and the *carryover* became wrong instead. When you narrow a gate, ask what
+else consumed the value the gate used to protect.
 
 <details><summary>Original filing (2026-07-31) — the structural obstacle, kept because the reasoning is
 what the owner's proposal overturned</summary>

@@ -2112,8 +2112,8 @@ fn schedule_d_line3_cell_text_equals_the_8949s_printed_column_total() {
 /// nobody gave), and the reason the parameter is `Option<bool>` rather than `bool`.
 ///
 /// A `Some(true)` case is deliberately absent: it is unreachable by construction, because
-/// `screen_compute_dependent` refuses the year before a packet exists — held by
-/// `a_section_b_year_refuses_until_the_restriction_questions_are_answered_no`.
+/// `screen_absolute` refuses the year before a packet exists — held by
+/// `a_declared_restriction_refuses_at_any_amount_not_just_over_5000`.
 ///
 /// Mutation-verified: making the writer unconditional (write "No" on `None` too) reds the blank half;
 /// deleting the write reds the answered half.

@@ -40,7 +40,7 @@ pub enum RefuseReason {
     /// or a retained right, which REDUCES or DENIES the §170 deduction (Reg §1.170A-7). btctax deducts
     /// at full FMV and cannot tell WHICH gift, so it refuses rather than file a number it knows is too
     /// large. Raised only for a year that actually files a **Section B** 8283 — see
-    /// `screen_compute_dependent`, which has the ledger the registry's liveness cannot see.
+    /// `screen_absolute`, which has the ledger AND the computed itemize election.
     DonationRestrictionsUnresolved,
     /// A **non-crypto NONCASH** charitable gift whose total exceeds the $500 Form 8283 threshold. Those
     /// amounts reach Schedule A line 12, but btctax holds no property details for them (no description,

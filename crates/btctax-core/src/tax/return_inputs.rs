@@ -569,8 +569,13 @@ pub struct ReturnInputs {
     /// Form 114, Report of Foreign Bank and Financial Accounts (FBAR), to report that financial interest
     /// or signature authority?"*
     ///
-    /// ★ A class-(A) DECLARATION, live only when [`Self::foreign_accounts`] is `Some(true)` — the form
-    /// itself conditions it on 7a being "Yes". Stays `Option` all the way to the PDF writer: `None`
+    /// ★ A class-**(B)** SKIPPABLE, live only when [`Self::foreign_accounts`] is `Some(true)` — the
+    /// form itself conditions it on 7a being "Yes". It was class (A) for two commits; `cbe651d`
+    /// reversed that, because an unanswered sub-question is a lawful blank and refusing the whole
+    /// return over it is the wrong instrument (the skip advisory names the FinCEN exposure instead).
+    /// ★ PRE-MERGE M9 — this doc still said "class-(A) DECLARATION", which instructs a maintainer to
+    /// restore exactly the refusal that reversal deliberately removed. Stays `Option` all the way to
+    /// the PDF writer: `None`
     /// (7a was "No", so the question is not live) and `Some(false)` (it IS live and the filer answered
     /// "No") must print differently — an unwritten pair versus a checked "No" box.
     ///
