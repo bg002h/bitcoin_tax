@@ -831,8 +831,8 @@ fn sch_b(part1: Vec<ScheduleBRow>, part2: Vec<ScheduleBRow>, fa: bool, ft: bool)
         line4: line2,
         part2_rows: part2,
         line6,
-        foreign_accounts_7a: fa,
-        foreign_trust_8: ft,
+        foreign_accounts_7a: Some(fa),
+        foreign_trust_8: Some(ft),
     }
 }
 
@@ -963,6 +963,23 @@ fn schedule_b_part3_transcribes_the_filers_own_answers_including_the_fbar_subque
         fno.as_deref(),
         Some("2"),
         "the filer answered the FBAR question NO; that is testimony and it prints"
+    );
+
+    // ── ★ AN UNANSWERED 7a OR 8 WRITES NOTHING — the fabricated-testimony guard. ──
+    // These printed a "No" the filer never gave until `unwrap_or(false)` was removed from
+    // printed.rs. Latent then (an unanswered 7a refused upstream) and live the moment that
+    // refusal relaxes, which is exactly what makes it worth pinning here rather than trusting
+    // the refusal to stay put. Mutation: restore `unwrap_or(false)` and this reds.
+    let mut unanswered = sch_b(vec![], vec![], true, false);
+    unanswered.foreign_accounts_7a = None;
+    unanswered.foreign_trust_8 = None;
+    unanswered.fbar_filing_required = None;
+    let (y7a, n7a, fy, fno, y8, n8) = check(&unanswered);
+    assert_eq!(
+        (y7a, n7a, fy, fno, y8, n8),
+        (None, None, None, None, None, None),
+        "an UNANSWERED Part III declaration writes NEITHER box — a printed \"No\" would be sworn \
+         testimony the filer never gave"
     );
 
     // ── 7a NO ⇒ the form never asks the sub-question ⇒ NEITHER half is written ──

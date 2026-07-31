@@ -226,8 +226,8 @@ fn sch_b(part1: Vec<ScheduleBRow>, part2: Vec<ScheduleBRow>, fa: bool, ft: bool)
         line4: line2,
         part2_rows: part2,
         line6,
-        foreign_accounts_7a: fa,
-        foreign_trust_8: ft,
+        foreign_accounts_7a: Some(fa),
+        foreign_trust_8: Some(ft),
     }
 }
 

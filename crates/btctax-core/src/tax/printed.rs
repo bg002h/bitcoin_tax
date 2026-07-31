@@ -912,9 +912,15 @@ pub struct ScheduleBLines {
     /// L6 — add the amounts on **printed** line 5 → 1040 **L3b**.
     pub line6: Usd,
     /// L7a — "did you have a financial interest in… a foreign country?" — the filer's own answer.
-    pub foreign_accounts_7a: bool,
+    ///
+    /// ★ `Option`, not `bool`. `unwrap_or(false)` here printed a **"No" the filer never gave** — the
+    /// exact fabricated testimony the sibling `fbar_filing_required` doc comment forbids, sitting five
+    /// lines away. It was latent only because an unanswered 7a refuses upstream; it would have gone
+    /// live the moment that refusal was relaxed. A declaration is written iff it was answered.
+    pub foreign_accounts_7a: Option<bool>,
     /// L8 — "did you receive a distribution from… a foreign trust?" — the filer's own answer.
-    pub foreign_trust_8: bool,
+    /// `Option` for the same reason as 7a.
+    pub foreign_trust_8: Option<bool>,
     /// L7b — the foreign-country list. The filer's own words, printed verbatim when 7a is "Yes".
     pub line7b_countries: String,
     /// **L7a's unnumbered FBAR sub-question** — *"If 'Yes,' are you required to file FinCEN Form 114…?"*
@@ -973,7 +979,7 @@ pub fn schedule_b_lines(ri: &crate::tax::return_inputs::ReturnInputs) -> Option<
         line4,
         part2_rows,
         line6,
-        foreign_accounts_7a: ri.foreign_accounts.unwrap_or(false),
+        foreign_accounts_7a: ri.foreign_accounts,
         fbar_filing_required: ri.fbar_filing_required,
         // Printed only when 7a is "Yes" — a country list beside a "No" would contradict the answer.
         line7b_countries: if ri.foreign_accounts == Some(true) {
@@ -981,7 +987,7 @@ pub fn schedule_b_lines(ri: &crate::tax::return_inputs::ReturnInputs) -> Option<
         } else {
             String::new()
         },
-        foreign_trust_8: ri.foreign_trust.unwrap_or(false),
+        foreign_trust_8: ri.foreign_trust,
     })
 }
 
@@ -2794,5 +2800,55 @@ mod tests {
             l.line7 < Usd::ZERO,
             "a leading minus — 1040 L7 is not a paren box"
         );
+    }
+}
+
+#[cfg(test)]
+mod part3_answeredness_tests {
+    use super::*;
+    use crate::tax::return_inputs::{Form1099Int, ReturnInputs};
+
+    /// ★★ THE FABRICATED-TESTIMONY GUARD, at the CONSTRUCTOR. `schedule_b_lines` used to do
+    /// `ri.foreign_accounts.unwrap_or(false)`, turning an UNANSWERED Schedule B Part III question into a
+    /// printed "No" the filer never gave — five lines below the doc comment forbidding exactly that for
+    /// the FBAR sibling.
+    ///
+    /// ★ This test exists because the sibling KAT in `btctax-forms` does NOT cover it: that one builds
+    /// `ScheduleBLines` directly, so it pins the WRITER and is blind to the CONSTRUCTOR. Restoring
+    /// `unwrap_or(false)` left it green. Mutation-verified here instead.
+    #[test]
+    fn an_unanswered_part_iii_question_stays_none_and_is_never_defaulted_to_no() {
+        let mut ri = ReturnInputs {
+            tax_year: 2024,
+            ..Default::default()
+        };
+        // Schedule B files on interest over $1,500, so the lines exist to be inspected.
+        ri.int_1099 = vec![Form1099Int {
+            payer: "Ally Bank".to_string(),
+            box1_interest: rust_decimal_macros::dec!(2000),
+            ..Default::default()
+        }];
+        ri.foreign_accounts = None;
+        ri.foreign_trust = None;
+        ri.fbar_filing_required = None;
+
+        let lines = schedule_b_lines(&ri).expect("Schedule B files on $2,000 of interest");
+        assert_eq!(
+            (
+                lines.foreign_accounts_7a,
+                lines.foreign_trust_8,
+                lines.fbar_filing_required
+            ),
+            (None, None, None),
+            "an unanswered Part III declaration must stay None all the way to the writer — a `false` \
+             here becomes a checked \"No\" box, i.e. sworn testimony the filer never gave"
+        );
+
+        // And a real answer survives unchanged, so the guard is not just \"always None\".
+        ri.foreign_accounts = Some(true);
+        ri.foreign_trust = Some(false);
+        let answered = schedule_b_lines(&ri).expect("still files");
+        assert_eq!(answered.foreign_accounts_7a, Some(true));
+        assert_eq!(answered.foreign_trust_8, Some(false));
     }
 }
