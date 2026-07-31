@@ -13,7 +13,7 @@ pub use registries::{
 
 use crate::seam::Section;
 
-/// The v1 `FormSpec`: the twelve sections a renderer walks, in spec §9A render order — the ten
+/// The v1 `FormSpec`: the thirteen sections a renderer walks, in spec §9A render order — the ten
 /// header/W-2/Schedule-A/... sections (the `sections` module), then the two synthetic registry-driven
 /// sections (`Declarations` + `Skippables`), so the tail is `… Payments → Declarations → Skippables`.
 pub fn form_spec() -> &'static [Section] {
@@ -28,6 +28,7 @@ pub fn form_spec() -> &'static [Section] {
         sections::SCHEDULE_A,
         sections::SCHEDULE_A_CHARITABLE,
         sections::PAYMENTS,
+        sections::CARRYFORWARDS,
         registries::DECLARATIONS,
         registries::INCOME_EXCLUSIONS,
         registries::SKIPPABLES,

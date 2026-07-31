@@ -302,7 +302,6 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         "g_1099",
         "capital_loss_carryforward_in",
         "charitable_carryover_in",
-        "qbi",
     ];
     const EXEMPT_LEAVES: &[&str] = &[
         // ★★ §G-15 — `tax_year` is the SCOPE the form is filled in, not a value the filer types into
@@ -314,6 +313,11 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         //   skippables), so the struct is exempted LEAF BY LEAF, exactly as `sch1` is for the same
         //   reason. A blanket prefix here would have silently re-exempted the two the moment they
         //   became covered — which is precisely the contradiction this census caught.
+        // ★ §G-22 — `qbi` is no longer a WHOLESALE exemption: both loss carryforwards are now in
+        //   scope (they UNDERSTATE tax when omitted, unlike every other carryforward family). Only
+        //   the two provenance leaves stay exempt — they are ours, not the filer's.
+        "qbi.reit_ptp_carryforward_in_provenance",
+        "qbi.qbi_carryforward_in_provenance",
         "schedule_c.owner",
         "schedule_c.business_description",
         "schedule_c.naics_code",
@@ -398,13 +402,13 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(
-        field_count, 77,
-        "expected 77 Fields (one per §5.8 in-scope leaf)"
+        field_count, 79,
+        "expected 79 Fields (one per §5.8 in-scope leaf)"
     );
     assert_eq!(
         covered.len(),
-        77,
-        "expected 77 distinctly-covered in-scope leaves"
+        79,
+        "expected 79 distinctly-covered in-scope leaves"
     );
 
     // ── 5. ★ I-6: PIN the observed FieldId → leaf-path map against a literal (kills TRANSPOSITION). ──
@@ -570,6 +574,11 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
         FieldId::ScheduleC1099Filed,
         "schedule_c.will_file_required_1099",
     ),
+    (
+        FieldId::QbiReitPtpCarryforwardIn,
+        "qbi.reit_ptp_carryforward_in",
+    ),
+    (FieldId::QbiCarryforwardIn, "qbi.qbi_carryforward_in"),
     (FieldId::ExclPuertoRico, "excluded_puerto_rico_income"),
     (FieldId::Excl2555L45, "form_2555_line45"),
     (FieldId::Excl2555L50, "form_2555_line50"),

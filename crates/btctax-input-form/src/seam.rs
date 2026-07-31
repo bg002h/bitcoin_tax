@@ -22,6 +22,9 @@ pub enum SectionId {
     ScheduleA,
     ScheduleACharitable,
     Payments,
+    /// ★ §G-22 — the QBI loss carryforwards. The ONLY carryforward family in the understatement
+    /// direction, and the only one collectable through the form.
+    Carryforwards,
     Declarations,
     IncomeExclusions,
     Skippables,
@@ -126,6 +129,10 @@ pub enum FieldId {
     /// form prints no Caution, but §6721/§6722 exposure is real, so the skip advises.
     ScheduleC1099Required,
     ScheduleC1099Filed,
+    // Carryforwards (§G-22) — Form 8995 lines 7 and 3. Both are prior-year LOSSES that REDUCE a
+    // deduction, so omitting either UNDERSTATES tax. They were import-only until 2026-07-31.
+    QbiReitPtpCarryforwardIn,
+    QbiCarryforwardIn,
 }
 
 /// The value shape of a field.

@@ -10276,15 +10276,16 @@ mod tests {
         handle_key(&mut app, press(KeyCode::Left));
         assert_eq!(app.tax_inputs_form.as_ref().unwrap().section_idx, 1);
 
-        // Right past the end clamps at the last live section (Single → 9 sections, max idx 8).
+        // Right past the end clamps at the last live section.
         for _ in 0..50 {
             handle_key(&mut app, press(KeyCode::Right));
         }
         assert_eq!(
             app.tax_inputs_form.as_ref().unwrap().section_idx,
-            9,
-            "section cursor clamps at the last live section (10 on Single: Spouse hidden, \
-             box12/charitable nested; the §911/931/933 income-exclusion section is the new last one)"
+            10,
+            "section cursor clamps at the last live section (11 on Single: Spouse hidden, \
+             box12/charitable nested). ★ +1 for the §G-22 Carryforwards section — the two QBI loss \
+             carryforwards were import-only, and omitting them UNDERSTATES tax."
         );
         // Left past the start clamps at 0.
         for _ in 0..50 {

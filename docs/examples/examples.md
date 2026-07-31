@@ -712,7 +712,7 @@ This feature is newer and less proven than the rest of btctax, and it was develo
 Check what this feature actually produced: open the Form 8275 PDF and confirm the Part II narrative renders whole, continuing onto Part IV on page 2, rather than stopping mid-sentence after about one line; confirm the basis in Form 8949 column (e) for each promoted lot equals the floor you consented to at promote time; and confirm the tranche quantity and acquisition window on the 8275 match what you declared.
 ⚠ a Section B Form 8283 is NOT filing-ready without a signed Part IV (appraiser) and Part V (donee acknowledgement) — obtain both before filing.
 
-  ── ADVISORIES (8) ──
+  ── ADVISORIES (9) ──
   • CTC/ODC NOT COMPUTED — you captured 1 dependent(s), but v1 does not compute the Child
     Tax Credit or the Credit for Other Dependents (1040 line 19 is $0). Your tax is
     OVERSTATED by up to $2,000 per qualifying child / $500 per other dependent. File
@@ -745,6 +745,14 @@ Check what this feature actually produced: open the Form 8275 PDF and confirm th
     nor removes that exposure. If you paid $600 or more to a contractor or service provider
     for your business, check the Schedule C instructions and answer with `btctax income
     answer`.
+  • PRIOR-YEAR QBI LOSS CARRYFORWARD NOT STATED — this return claims a §199A qualified
+    business income deduction, and btctax has no prior-year loss carryforward on file for it
+    (Form 8995 lines 7 and 3). Those lines carry LOSSES that REDUCE the deduction, so if you
+    had one and it is not entered, your deduction is too large and your tax is UNDERSTATED —
+    the one direction btctax will not fail in silently. Check lines 16 and 17 of LAST year's
+    Form 8995: if either is non-zero, enter it here as a POSITIVE amount. If you had no
+    §199A activity last year, or last year's lines 16 and 17 were zero, there is nothing to
+    do and this note is expected.
   • CHARITABLE DONEE ASSUMED — your 1 crypto donation(s) were valued assuming a PUBLIC
     CHARITY (50%-organization) donee: long-term gifts at fair market value under the
     30%-of-AGI ceiling. If the donee is a PRIVATE FOUNDATION, the correct treatment is the

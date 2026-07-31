@@ -71,6 +71,20 @@ pub enum Advisory {
     /// `true` when line I was answered **Yes** and line J was then skipped — a strictly worse place to
     /// stop, since the filer has already declared the payments exist.
     ScheduleC1099NotAnswered { line_j_too: bool },
+    /// ★★ §G-22 — the return claims a §199A deduction, and btctax holds **no** prior-year QBI loss
+    /// carryforward AND did not compute the prior year itself (`CarryProvenance::User` on a zero).
+    ///
+    /// Both carryforwards (Form 8995 lines **7** and **3**) are prior-year LOSSES that REDUCE the
+    /// deduction, so a zero btctax merely *assumed* inflates it and **UNDERSTATES the tax** — the one
+    /// direction §3.4 never permits silently. Unlike the capital-loss and charitable carryovers, whose
+    /// absence only forgoes a benefit, these two cost the Treasury rather than the filer.
+    ///
+    /// ★ **Deliberately fires for most first-time users, and that is correct.** btctax cannot
+    /// distinguish "no carryforward" from "a carryforward it was never told about" — a zero it wrote
+    /// itself after computing last year is knowledge; a zero that is merely the struct default is not.
+    /// `CarryProvenance` is exactly that distinction, so the advisory goes quiet the moment btctax has
+    /// computed a prior year, or the filer states a figure of their own.
+    QbiCarryforwardNotStated,
     /// The ledger classified crypto donations assuming a **public charity (50%-org)** donee. A private
     /// foundation is the 20%-ceiling / basis class (which v1 refuses), so the donee must be verified.
     CharitableDoneeAssumedPublicCharity { donations: usize },
@@ -177,6 +191,16 @@ impl Advisory {
                 // to make the number vivid is worse than no number.
                 total = fmt_usd(*per_box * Usd::from(*persons as u64))
             ),
+            Advisory::QbiCarryforwardNotStated =>
+                "PRIOR-YEAR QBI LOSS CARRYFORWARD NOT STATED — this return claims a §199A qualified \
+                 business income deduction, and btctax has no prior-year loss carryforward on file for \
+                 it (Form 8995 lines 7 and 3). Those lines carry LOSSES that REDUCE the deduction, so \
+                 if you had one and it is not entered, your deduction is too large and your tax is \
+                 UNDERSTATED — the one direction btctax will not fail in silently. Check lines 16 and \
+                 17 of LAST year's Form 8995: if either is non-zero, enter it here as a POSITIVE \
+                 amount. If you had no §199A activity last year, or last year's lines 16 and 17 were \
+                 zero, there is nothing to do and this note is expected."
+                    .to_string(),
             Advisory::FbarFinCen =>
                 "FBAR / FinCEN — you declared a foreign financial account. Under FinCEN Notice 2020-2 an \
                  account holding ONLY virtual currency is (for now) outside the FBAR requirement, but that \
@@ -455,6 +479,30 @@ pub fn advisories(
         }
     }
 
+    // ★★ §G-22 — a §199A deduction claimed with no carryforward btctax can vouch for. Gated on
+    // PROVENANCE, not merely on the value: a zero btctax wrote after computing last year is knowledge
+    // and needs no note; a zero that is only the struct default is an unknown. Fires only when the
+    // return actually claims the deduction, so a filer with no QBI never sees it.
+    // ★ Gated on the INPUTS that mean "this return has §199A activity", not on the computed
+    // deduction: the income limitation can zero the deduction while the carryforward is still wrong,
+    // and a filer whose deduction was limited this year still carries the loss forward.
+    let has_199a_activity =
+        ri.schedule_c.is_some() || ri.div_1099.iter().any(|d| d.box5_section_199a > Usd::ZERO);
+    if has_199a_activity {
+        let unknown = |v: Usd, p: crate::tax::return_inputs::CarryProvenance| {
+            v == Usd::ZERO && p == crate::tax::return_inputs::CarryProvenance::User
+        };
+        if unknown(
+            ri.qbi.reit_ptp_carryforward_in,
+            ri.qbi.reit_ptp_carryforward_in_provenance,
+        ) || unknown(
+            ri.qbi.qbi_carryforward_in,
+            ri.qbi.qbi_carryforward_in_provenance,
+        ) {
+            out.push(Advisory::QbiCarryforwardNotStated);
+        }
+    }
+
     // FinCEN Notice 2020-2 — a declared foreign account.
     if ri.foreign_accounts == Some(true) {
         out.push(Advisory::FbarFinCen);
@@ -701,6 +749,106 @@ mod tests {
         assert!(got.contains(&Advisory::AgedBoxForfeitedNoDob {
             per_box: dec!(1550) // married rate
         }));
+    }
+
+    /// ★★★ §G-22 — the two QBI loss carryforwards were IMPORT-ONLY, and they are the only carryforward
+    /// family whose omission UNDERSTATES tax.
+    ///
+    /// Gated on PROVENANCE, not on the value. That is the whole design: a zero btctax wrote itself
+    /// after computing last year is KNOWLEDGE (`Computed`) and needs no note; a zero that is merely the
+    /// struct default is an UNKNOWN (`User`) and does. Without that distinction the advisory would
+    /// either nag forever or go silent exactly when it matters.
+    #[test]
+    fn the_qbi_carryforward_advisory_distinguishes_a_known_zero_from_an_unknown_one() {
+        use crate::tax::return_inputs::CarryProvenance;
+        let run = |sched_c: bool, reit: Usd, prov: CarryProvenance| {
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                ..Default::default()
+            };
+            if sched_c {
+                ri.schedule_c = Some(crate::tax::return_inputs::ScheduleCInputs {
+                    business_description: "Bitcoin mining".into(),
+                    ..Default::default()
+                });
+            }
+            // ★ BOTH leaves, not one. Each carryforward is independently unknown, so a fixture that
+            // states only the REIT one leaves the business one an unknown zero — and the advisory
+            // correctly still fires. That is the behaviour, and stating only one hid it.
+            ri.qbi.reit_ptp_carryforward_in = reit;
+            ri.qbi.qbi_carryforward_in = reit;
+            ri.qbi.reit_ptp_carryforward_in_provenance = prov;
+            ri.qbi.qbi_carryforward_in_provenance = prov;
+            advisories(
+                &ri,
+                &LedgerState::default(),
+                dec!(90000),
+                dec!(90000),
+                Usd::ZERO,
+                &params(),
+                2024,
+                false,
+            )
+            .contains(&Advisory::QbiCarryforwardNotStated)
+        };
+
+        assert!(
+            run(true, Usd::ZERO, CarryProvenance::User),
+            "★ §199A activity + a zero btctax was never told about ⇒ say so. Omitting a prior-year \
+             QBI loss INFLATES the deduction and UNDERSTATES the tax."
+        );
+        assert!(
+            !run(true, Usd::ZERO, CarryProvenance::Computed),
+            "★ a zero btctax COMPUTED last year is knowledge, not an unknown — silence is right"
+        );
+        assert!(
+            !run(true, dec!(20000), CarryProvenance::User),
+            "the filer stated a figure ⇒ nothing unknown"
+        );
+        // ★ EITHER unknown is enough — they are independent lines (8995 line 7 and line 3), and a
+        // filer who states one has said nothing about the other.
+        {
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                ..Default::default()
+            };
+            ri.schedule_c = Some(crate::tax::return_inputs::ScheduleCInputs {
+                business_description: "Bitcoin mining".into(),
+                ..Default::default()
+            });
+            ri.qbi.reit_ptp_carryforward_in = dec!(20000); // stated
+            ri.qbi.reit_ptp_carryforward_in_provenance = CarryProvenance::User;
+            ri.qbi.qbi_carryforward_in = Usd::ZERO; // NOT stated
+            ri.qbi.qbi_carryforward_in_provenance = CarryProvenance::User;
+            assert!(
+                advisories(
+                    &ri,
+                    &LedgerState::default(),
+                    dec!(90000),
+                    dec!(90000),
+                    Usd::ZERO,
+                    &params(),
+                    2024,
+                    false,
+                )
+                .contains(&Advisory::QbiCarryforwardNotStated),
+                "one carryforward stated says nothing about the other"
+            );
+        }
+        assert!(
+            !run(false, Usd::ZERO, CarryProvenance::User),
+            "★ NO §199A activity ⇒ the deduction does not arise, so there is nothing to get wrong"
+        );
+
+        let m = Advisory::QbiCarryforwardNotStated.message();
+        assert!(
+            m.contains("UNDERSTATED"),
+            "the direction must be named: {m}"
+        );
+        assert!(
+            m.contains("lines 16 and 17"),
+            "…and where to find the figure: {m}"
+        );
     }
 
     /// ★★ Schedule C's Form-1099 pair advises on the SKIP only, and distinguishes the two places a

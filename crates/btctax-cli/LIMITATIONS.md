@@ -109,9 +109,14 @@ wage-and-property limits that take over (that is Form 8995-A, which it does not 
 (Form 8995 line 16) and REIT/PTP (line 17) — are computed and can be written forward to next year with
 `btctax report --tax-year Y --write-carryover`. A carryover you typed in yourself is never silently
 overwritten (pass `--force` if you mean to).
-★ If you are carrying a prior-year qualified-business **loss**, enter it as a POSITIVE number under `[qbi]`
-as `qbi_carryforward_in` — it is subtracted at line 4, so leaving it out would overstate your deduction and
-**understate your tax**. btctax has no way to know about a year it did not compute.
+★★ **Both QBI loss carryforwards are now ASKED**, in the TUI's "Carryforwards from last year" section —
+Form 8995 line **7** (REIT/PTP) and line **3** (qualified business). Enter each as a POSITIVE number, from
+lines 17 and 16 of *last* year's Form 8995. They REDUCE the deduction, so leaving one out overstates your
+deduction and **understates your tax** — the one direction btctax will not fail in silently. If btctax did
+not compute your prior year it cannot know, so it asks, and an advisory fires until you answer or it has a
+computed figure of its own. (You can still set them under `[qbi]` in the import TOML.)
+★ The capital-loss and charitable carryovers are still import-only. Those go the other way — leaving one
+out costs *you*, not the Treasury — so they are not gated, but check them if you have any.
 
 ---
 

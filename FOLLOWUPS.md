@@ -1293,7 +1293,46 @@ aged box is carved out while the blind box is not, plus the one-day-later contro
 `legal/primary-sources/` — and neither is **26 USC §63**. This rests on rung 2 plus the mechanism, not
 on rung 3 or 4. Recorded as such rather than as settled; archiving either would upgrade it.
 
-### G-22 — ★★ Form 8995 line 3 is COLLECTABLE but never ASKED — the understatement path is still open
+### G-22 — ~~Form 8995 line 3 is COLLECTABLE but never ASKED~~ **FIXED 2026-07-31 — and it was BIGGER and partly SHIPPED**
+
+**★★★ The filed entry understated the problem. Building the fix found the real shape.**
+
+Not a line-3 oversight: **every carryforward family was import-only**, reachable solely by
+hand-editing the TOML — capital loss (§1212(b)), charitable (§170(d)(1)), and BOTH QBI ones. And the
+four split cleanly by DIRECTION:
+
+| carryforward | omitting it | verdict |
+|---|---|---|
+| capital loss, charitable | forgoes a benefit ⇒ **OVERSTATES** tax | conservative omission; §3.4 permits it |
+| **8995 line 7** (REIT/PTP loss) | reduces line 8 ⇒ inflates the deduction ⇒ **UNDERSTATES** tax | ★ **SHIPPED in v0.14.0** |
+| **8995 line 3** (business loss) | subtracted at line 4 ⇒ **UNDERSTATES** tax | created and closed in the same branch |
+
+★★ **The two in the unsafe direction are exactly the two nobody was asked for, and line 7's hole is
+LIVE IN PUBLISHED CODE.** `"qbi"` has been a wholesale exemption in the input-form coverage census
+since before this branch — so line 7 has never been collectable through the interview either. Found
+only because §G-22 sent me to look at *why* line 3 was unreachable.
+
+**FIXED:** a new `Carryforwards` section in the FormSpec carries both (they are `Usd`, so they belong
+with the money fields — `income answer` handles only yes/no and dates), each stamping
+`CarryProvenance::User` so the write-back refuses to overwrite a filer's own figure without `--force`.
+`"qbi"` is no longer a blanket exemption; only the two provenance leaves remain exempt, since those are
+ours rather than the filer's.
+
+**Plus `Advisory::QbiCarryforwardNotStated`, gated on PROVENANCE rather than value** — the design point:
+a zero btctax wrote after computing last year is KNOWLEDGE (`Computed`) and needs no note; a zero that
+is merely the struct default is an UNKNOWN (`User`) and does. Without that distinction it would either
+nag forever or go quiet exactly when it matters. Both halves mutation-verified, plus the independence
+case (stating one carryforward says nothing about the other).
+
+**STILL OPEN — the other two families.** Capital-loss and charitable carryovers remain import-only.
+Direction is overstatement, so §3.4 permits the omission — **but only if the filer is TOLD**, and there
+is no advisory for either. Owning phase: whenever the input surface is next widened. They are a
+strictly smaller problem than the pair fixed here and were left rather than swept in, so the fix stayed
+scoped to the unsafe direction.
+
+<details><summary>The finding as originally filed (2026-07-31, from the r2 tax lens) — kept because it
+under-described the problem, which is itself the lesson: it named line 3 alone when the cause was a
+whole-family exemption, and missed that the sibling was already shipped.</summary>
 
 **Owning phase: whenever the QBI input surface is next touched. Found by the r2 tax-lens review, and
 it is a correction to my own 2026-07-30 claim that the gap was "closed by collecting the input".**
@@ -1329,6 +1368,8 @@ advisory that fires when there IS QBI and the carryforward is `0` with `CarryPro
 btctax did not compute the prior year, so it cannot know. ★ Precision matters: that condition is true
 for most first-time users, which is arguably correct but needs the same care the death-gate advisory
 got.
+
+</details>
 
 ### G-21 — ★★★ Form 8283 5a/5b/5c: the question registry is RETURN-shaped, these are PER-DONATION
 

@@ -137,6 +137,7 @@ fn row_depth(id: SectionId) -> usize {
         | SectionId::Address
         | SectionId::ScheduleA
         | SectionId::Payments
+        | SectionId::Carryforwards
         | SectionId::Declarations
         | SectionId::IncomeExclusions
         | SectionId::Skippables => 0,

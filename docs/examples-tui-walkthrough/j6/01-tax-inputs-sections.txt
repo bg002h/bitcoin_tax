@@ -8,10 +8,10 @@
   6││  ✓ W-2s                        ││                                                                                    │
   7││  … Schedule A (itemized deducti││                                                                                    │
   8││  … Payments                    ││                                                                                    │
-  9││  ✓ Declarations                ││                                                                                    │
- 10││  … Income exclusions (§911/931/││                                                                                    │
- 11││  … Skippables                  ││                                                                                    │
- 12││                                ││                                                                                    │
+  9││  … Carryforwards from last year││                                                                                    │
+ 10││  ✓ Declarations                ││                                                                                    │
+ 11││  … Income exclusions (§911/931/││                                                                                    │
+ 12││  … Skippables                  ││                                                                                    │
  13││                                ││                                                                                    │
  14││                                ││                                                                                    │
  15││                                ││                                                                                    │
