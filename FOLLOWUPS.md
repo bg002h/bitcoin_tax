@@ -1254,6 +1254,45 @@ aged box is carved out while the blind box is not, plus the one-day-later contro
 `legal/primary-sources/` — and neither is **26 USC §63**. This rests on rung 2 plus the mechanism, not
 on rung 3 or 4. Recorded as such rather than as settled; archiving either would upgrade it.
 
+### G-21 — ★★★ Form 8283 5a/5b/5c: the question registry is RETURN-shaped, these are PER-DONATION
+
+**Owning phase: whenever 8283 Section B is next touched. This is the last of the §G-13 gaps (6 of 6).**
+
+The decision table already rules on the tax question — *"BUILD AS REFUSAL-ON-YES (ask; 'No' proceeds,
+'Yes' refuses). The ONLY limb-(a) item of the six"* — and that stands. Attempting the build on
+2026-07-31 surfaced a STRUCTURAL obstacle the table did not anticipate, which is why this is filed
+rather than half-built.
+
+**The obstacle.** `FORM_QUESTIONS` and `SKIPPABLE_QUESTIONS` are `ReturnInputs`-shaped: every accessor
+is `fn(&ReturnInputs)`. Lines 5a/5b/5c are facts about **one gift** — a restriction attaches to the
+donated property, not to the return — and their siblings (donee, appraiser, appraisal date) already
+live on `DonationDetails`, a per-donation VAULT SIDE-TABLE that `ReturnInputs` never sees. So these
+would be the registry's first **per-donation** declarations, and it cannot hold them as it stands.
+
+**Recommended shape** (my read; the owner's call, since it decides where a whole class of future
+per-row questions lives):
+
+1. Three `Option<bool>` on **`DonationDetails`** — semantically right, and beside the Section B facts
+   already collected there. Collected by `btctax reconcile set-donation-details`, not `income answer`.
+2. The refusal in the **pre-write window** that already exists: `admin.rs` loads `details` at :789 and
+   `mkdir_out` runs at :835, so a check between them writes ZERO bytes.
+   ★★ It must go there and nowhere later. `needs_review` is NOT a substitute: its only consumers are
+   `eprintln!`s emitted **after** `full_return_paths` are on disk — the PDF carrying the unreduced
+   deduction already exists when the warning prints.
+3. **Unanswered should refuse too, not just a Yes** — the conservative reading. A restriction reduces
+   or denies the §170 deduction (Reg §1.170A-7), so proceeding on an unanswered question risks an
+   OVERSTATED deduction ⇒ UNDERSTATED tax. That is the direction §3.4 never permits. The common
+   answer is "No", so the cost is one prompt per Section B donation.
+
+★ **ON-STATES ALREADY DUMPED, so the next person need not re-do it:** `Form8283[0].Page2[0].c2_1[0]`
+/`c2_2[0]`/`c2_3[0]` are Yes, `[1]` are No, on-states **`"1"`/`"2"`** — NOT the `"Yes"`/`"No"` that
+Schedule C uses. Yes is the LEFT widget (x 538) and No the right (x 559), matching the printed
+"Yes No" column header.
+
+★ These questions exist only in **Section B** (gifts over $5,000, the appraisal path), so liveness is
+"this donation has a Section B row" — narrower than "there is a Schedule A", and narrower still than
+"there is a donation".
+
 ### G-20 — ★★ the MFS spouse's §63(f) boxes are forgone, and that is NARROWER THAN THE LAW
 
 **Owning phase: whenever MFS support is next touched.** Found while adjudicating G-9a, in the same

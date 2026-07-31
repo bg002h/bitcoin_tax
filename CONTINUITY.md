@@ -85,9 +85,10 @@ correctness comment names it.**
 | Schedule C **G** (material participation) | **DON'T ASK** — answer moves no figure (§1411(c)(6) shelters the SE-base Sch C income either way) | ✅ already `unmodeled` |
 | Schedule C **H** (started/acquired) | **DON'T ASK** — a check-if-true box with NO "No" widget, so an explicit No and a never-asked blank are the IDENTICAL mark on the page | ✅ already `unmodeled` |
 | Schedule SE **line A** (Form 4361) | **DON'T ASK** — no figure moves, and btctax models no clergy concept anywhere | ✅ done, `7ee5afd` |
-| Schedule C **I / J** (Forms 1099) | **BUILD AS SKIPPABLE**, not a refusal. §6721/§6722 exposure is real (limb c) but there is no in-form Caution; advisory on skip must name §6721/§6722 | ⬜ not started |
-| Form 8283 **5a/5b/5c** (restrictions) | **BUILD AS REFUSAL-ON-YES** (ask; "No" proceeds, "Yes" refuses). The ONLY limb-(a) item of the six | ⬜ not started |
-| Form 8283 **page-2 identity** | **NO QUESTION** — pure map fix (`f8283.map.toml`), btctax already holds name + TIN | ⬜ not started |
+| Schedule C **I / J** (Forms 1099) | **BUILD AS SKIPPABLE**, not a refusal. §6721/§6722 exposure is real (limb c) but there is no in-form Caution; advisory on skip must name §6721/§6722 | ✅ **DONE 2026-07-31** (`de8ffd8`) |
+| Form 8283 **5a/5b/5c** (restrictions) | **BUILD AS REFUSAL-ON-YES** (ask; "No" proceeds, "Yes" refuses). The ONLY limb-(a) item of the six | ⬜ **the LAST §G-13 gap (6 of 6).** ★★ Attempted 2026-07-31 and FILED as **§G-21** instead: the question registry is `ReturnInputs`-shaped and these are the first **per-DONATION** declarations (their siblings live on `DonationDetails`, a vault side-table). The tax ruling above stands; where the answers LIVE is a new decision. Recommended shape + the pre-write refusal window + the dumped on-states are all in §G-21. |
+| Form 8283 **page-2 identity** | **NO QUESTION** — pure map fix (`f8283.map.toml`), btctax already holds name + TIN | ✅ **DONE 2026-07-31** (`fb33ac6`) |
+| Schedule C **I / J** | (see the row above) | ✅ **DONE 2026-07-31** (`de8ffd8`) — skippable + §6721/§6722 advisory |
 
 ★ **The Form 8283 `needs_review` path can NOT substitute for a refusal**: its only consumers
 (`main.rs:792`, `:883`) are `eprintln!`s emitted AFTER `full_return_paths` are written to disk — the
