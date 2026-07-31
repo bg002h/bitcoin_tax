@@ -17,11 +17,22 @@
 //! work.
 
 /// SHA-256 of `tax/types.rs` (frozen). Update only via the documented exception process.
+///
+/// ★ **EXCEPTION 1, 2026-07-30 — the all-in LTCG marginal rate.** `MarginalRates` gained
+/// `niit_at_margin` and the `ltcg_all_in()` accessor, so `report --tax-year` can headline the rate a
+/// filer sizing a sale must actually reserve against (§1(h) 20% + §1411 3.8% = **23.8%**, not 0.20).
+/// **Strictly additive and display-only**: no existing field changed, no arithmetic moved, and the
+/// TY2024 golden matrix is byte-unchanged (`golden_returns.rs`). Recorded here rather than folded
+/// silently, per the module's exception process.
 pub const FROZEN_TYPES_SHA256: &str =
-    "0d51da823e5efcd23ef500a35c50009540c0f0c22ca20871d254bdf243c86b9c";
+    "51b912cce4b7cd3606e85de133430d6bb2361885b0e27d8f77caad0f2c148f57";
 /// SHA-256 of `tax/compute.rs` (frozen).
+///
+/// ★ **EXCEPTION 1, 2026-07-30** — the same change: `compute_tax_year` populates the new
+/// `niit_at_margin` flag (`magi_with > thr && nii_with >= 0`). It is read by nothing but the
+/// renderers; every tax figure the function returns is bit-identical.
 pub const FROZEN_COMPUTE_SHA256: &str =
-    "38e87b7d7954988c312d0dbdac103b52ad206aa014aad791594cb4f72ae1e62e";
+    "97b5cd914de53365b2394488c29f377a0373f9c4abfd1a1c16c648766f89f9c2";
 /// SHA-256 of `tax/se.rs` (frozen).
 pub const FROZEN_SE_SHA256: &str =
     "3aba83c20bee7816d6d7ec716867bcfb5fef8f360f1cc5c4aa00559f51795889";

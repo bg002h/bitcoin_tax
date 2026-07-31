@@ -1341,11 +1341,24 @@ pub fn render_tax_outcome(
                 fmt_money(r.carryforward_out.short),
                 fmt_money(r.carryforward_out.long)
             );
+            // ★ The LTCG headline is the ALL-IN rate (§1(h) + §1411), not the §1(h) rate alone: a
+            // filer sizing a sale off `0.20` under-reserves by 3.8 points whenever MAGI is over the
+            // §1411 threshold. The two components are printed beside it so the number is checkable.
             let _ = writeln!(
                 s,
-                "  marginal rates: ordinary {} / LTCG {} / NIIT increased by crypto: {}",
+                "  marginal rates: ordinary {} / LTCG {} all-in (§1(h) {} + §1411 {})",
                 r.marginal_rates.ordinary,
+                r.marginal_rates.ltcg_all_in(),
                 r.marginal_rates.ltcg,
+                if r.marginal_rates.niit_at_margin {
+                    btctax_core::tax::tables::NIIT_RATE
+                } else {
+                    btctax_core::Usd::ZERO
+                }
+            );
+            let _ = writeln!(
+                s,
+                "                  NIIT increased by crypto: {}",
                 if r.marginal_rates.niit_applies {
                     "yes"
                 } else {

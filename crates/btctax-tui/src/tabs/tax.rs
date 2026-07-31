@@ -114,11 +114,23 @@ pub(crate) fn render_tax_content(snap: &Snapshot, year: i32) -> String {
                 "  §1211 loss deduction: {:.2}   Carryforward out: short {:.2} / long {:.2}",
                 r.loss_deduction, r.carryforward_out.short, r.carryforward_out.long
             );
+            // ★ Headline the ALL-IN LTCG rate (§1(h) + §1411), never §1(h) alone — a filer sizing a
+            // sale off `0.20` under-reserves by 3.8 points. Mirrors `render::render_tax_outcome`.
             let _ = writeln!(
                 s,
-                "  Marginal rates: ordinary {}  LTCG {}  NIIT increased by crypto: {}",
+                "  Marginal rates: ordinary {}  LTCG {} all-in (§1(h) {} + §1411 {})",
                 r.marginal_rates.ordinary,
+                r.marginal_rates.ltcg_all_in(),
                 r.marginal_rates.ltcg,
+                if r.marginal_rates.niit_at_margin {
+                    btctax_core::tax::tables::NIIT_RATE
+                } else {
+                    btctax_core::Usd::ZERO
+                }
+            );
+            let _ = writeln!(
+                s,
+                "                  NIIT increased by crypto: {}",
                 if r.marginal_rates.niit_applies {
                     "yes"
                 } else {
