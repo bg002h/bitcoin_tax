@@ -85,6 +85,19 @@ pub enum Advisory {
     /// `CarryProvenance` is exactly that distinction, so the advisory goes quiet the moment btctax has
     /// computed a prior year, or the filer states a figure of their own.
     QbiCarryforwardNotStated,
+    /// ★★ §G-20 — an **MFS** return whose spouse would qualify for a §63(f) aged and/or blind box, which
+    /// btctax forgoes because it counts spouse boxes on MFJ only.
+    ///
+    /// i1040gi permits them on MFS *"if your spouse had no income, isn't filing a return, and can't be
+    /// claimed as a dependent on another person's return"* — three conditions btctax captures none of,
+    /// so it cannot establish entitlement and does not claim the boxes. That is a lawful conservative
+    /// omission (it OVERSTATES tax), **but §3.4 permits it only if the filer is TOLD**, and until now
+    /// nothing said a word.
+    ///
+    /// ★★ Sharper than "a box is forgone": btctax **ASKS** the MFS filer whether their spouse is blind
+    /// (`SkippableId::BlindSpouse` is live on `spouse.is_some()`, not on MFJ) and then discards the
+    /// answer. `boxes` counts what was forgone — aged, blind, or both.
+    Mfs63fSpouseBoxesForgone { per_box: Usd, boxes: usize },
     /// The ledger classified crypto donations assuming a **public charity (50%-org)** donee. A private
     /// foundation is the 20%-ceiling / basis class (which v1 refuses), so the donee must be verified.
     CharitableDoneeAssumedPublicCharity { donations: usize },
@@ -201,6 +214,21 @@ impl Advisory {
                  amount. If you had no §199A activity last year, or last year's lines 16 and 17 were \
                  zero, there is nothing to do and this note is expected."
                     .to_string(),
+            Advisory::Mfs63fSpouseBoxesForgone { per_box, boxes } => format!(
+                "SPOUSE'S §63(f) BOX{p} FORGONE ON A SEPARATE RETURN — you told btctax something that \
+                 would qualify your spouse for {n} additional standard-deduction box{p} ({amt} each, \
+                 {total} in total), but btctax counts a spouse's aged/blind boxes only on a JOINT \
+                 return, so {they} not claimed. The instructions allow them on married-filing-separately \
+                 \"if your spouse had no income, isn't filing a return, and can't be claimed as a \
+                 dependent on another person's return\" — three things btctax does not ask and cannot \
+                 verify, so it does not claim them for you. If all three are true of your spouse, your \
+                 tax is OVERSTATED by {total} and the boxes are yours to check by hand.",
+                n = boxes,
+                p = if *boxes > 1 { "ES" } else { "" },
+                they = if *boxes > 1 { "they are" } else { "it is" },
+                amt = fmt_usd(*per_box),
+                total = fmt_usd(*per_box * Usd::from(*boxes as u64))
+            ),
             Advisory::FbarFinCen =>
                 "FBAR / FinCEN — you declared a foreign financial account. Under FinCEN Notice 2020-2 an \
                  account holding ONLY virtual currency is (for now) outside the FBAR requirement, but that \
@@ -503,6 +531,23 @@ pub fn advisories(
         }
     }
 
+    // ★★ §G-20 — the MFS spouse's §63(f) boxes. Fires only when the filer has actually TOLD us
+    // something that would have qualified the spouse, so it never appears on an MFS return with no
+    // spouse data. btctax asks about the spouse's blindness on MFS and then discards the answer; the
+    // least it can do is say so.
+    if ri.filing_status == FilingStatus::Mfs {
+        if let Some(sp) = ri.header.spouse.as_ref() {
+            let aged = sp
+                .date_of_birth
+                .is_some_and(|d| crate::tax::return_1040::born_early_enough(d, year));
+            let blind = sp.blind == Some(true);
+            let boxes = usize::from(aged) + usize::from(blind);
+            if boxes > 0 {
+                out.push(Advisory::Mfs63fSpouseBoxesForgone { per_box, boxes });
+            }
+        }
+    }
+
     // FinCEN Notice 2020-2 — a declared foreign account.
     if ri.foreign_accounts == Some(true) {
         out.push(Advisory::FbarFinCen);
@@ -749,6 +794,82 @@ mod tests {
         assert!(got.contains(&Advisory::AgedBoxForfeitedNoDob {
             per_box: dec!(1550) // married rate
         }));
+    }
+
+    /// ★★ §G-20 — an MFS return forgoes the spouse's §63(f) boxes, and until now said nothing.
+    ///
+    /// The forfeit is lawful (it OVERSTATES tax; btctax cannot verify the three conditions i1040gi
+    /// requires) but §3.4 permits a conservative omission **only if the filer is told**.
+    ///
+    /// ★ The sharp part: btctax **asks** an MFS filer whether their spouse is blind — `BlindSpouse` is
+    /// live on `spouse.is_some()`, not on MFJ — and then discards the answer. So it fires exactly when
+    /// the filer has told us something that would have counted.
+    #[test]
+    fn the_mfs_spouse_63f_advisory_fires_only_when_a_box_was_actually_forgone() {
+        let run = |status: FilingStatus, dob: Option<time::Date>, blind: Option<bool>| {
+            let mut ri = ReturnInputs {
+                filing_status: status,
+                ..Default::default()
+            };
+            ri.header.spouse = Some(crate::tax::return_inputs::Person {
+                date_of_birth: dob,
+                blind,
+                ..Default::default()
+            });
+            advisories(
+                &ri,
+                &LedgerState::default(),
+                dec!(90000),
+                dec!(90000),
+                Usd::ZERO,
+                &params(),
+                2024,
+                false,
+            )
+            .into_iter()
+            .find_map(|a| match a {
+                Advisory::Mfs63fSpouseBoxesForgone { boxes, .. } => Some(boxes),
+                _ => None,
+            })
+        };
+        let old = Some(time::macros::date!(1955 - 03 - 02)); // 65+ in 2024
+        let young = Some(time::macros::date!(1990 - 01 - 01));
+
+        assert_eq!(
+            run(FilingStatus::Mfs, old, Some(true)),
+            Some(2),
+            "★ aged AND blind ⇒ two boxes forgone"
+        );
+        assert_eq!(run(FilingStatus::Mfs, old, None), Some(1), "aged only");
+        assert_eq!(
+            run(FilingStatus::Mfs, young, Some(true)),
+            Some(1),
+            "blind only — and btctax ASKED for this on MFS, then discarded it"
+        );
+        assert_eq!(
+            run(FilingStatus::Mfs, young, Some(false)),
+            None,
+            "nothing qualifies ⇒ nothing forgone ⇒ silence"
+        );
+        assert_eq!(
+            run(FilingStatus::Mfs, None, None),
+            None,
+            "★ no spouse data ⇒ nothing was told to us, so there is nothing to have discarded"
+        );
+        assert_eq!(
+            run(FilingStatus::Mfj, old, Some(true)),
+            None,
+            "★★ MFJ COUNTS the boxes — an advisory there would be flatly false"
+        );
+
+        // The message must name the whole forfeit, not one box.
+        let m = Advisory::Mfs63fSpouseBoxesForgone {
+            per_box: dec!(1550),
+            boxes: 2,
+        }
+        .message();
+        assert!(m.contains("$3,100 in total"), "{m}");
+        assert!(m.contains("OVERSTATED"), "the direction must be named: {m}");
     }
 
     /// ★★★ §G-22 — the two QBI loss carryforwards were IMPORT-ONLY, and they are the only carryforward

@@ -1410,7 +1410,53 @@ Schedule C uses. Yes is the LEFT widget (x 538) and No the right (x 559), matchi
 "this donation has a Section B row" — narrower than "there is a Schedule A", and narrower still than
 "there is a donation".
 
-### G-20 — ★★ the MFS spouse's §63(f) boxes are forgone, and that is NARROWER THAN THE LAW
+### G-20 — the MFS spouse's §63(f) boxes: **now ADVISED (2026-07-31)**; widening still open
+
+**★★ Half closed, and it was the half §3.4 actually required.** The forfeit itself is lawful — btctax
+cannot verify i1040gi's three conditions, so it does not claim the boxes, which OVERSTATES tax. But
+§3.4 permits a conservative omission **only if the filer is TOLD**, and nothing said a word.
+`Advisory::Mfs63fSpouseBoxesForgone` now does, naming the amount and the three conditions.
+
+★★★ **It is sharper than "a box is forgone": btctax ASKS an MFS filer whether their spouse is blind and
+then DISCARDS the answer.** `SkippableId::BlindSpouse` is live on `spouse.is_some()`, not on MFJ, while
+`AgedBlindBoxes::for_return` filters the spouse to MFJ before counting. So the question is posed, the
+answer stored, and nothing reads it. The advisory fires exactly when the filer told us something that
+would have counted — never on an MFS return with no spouse data, and never on MFJ, where a claim that
+the boxes were forgone would be flatly false. Both gates mutation-verified.
+
+**STILL OPEN — actually claiming them.** That needs the three conditions COLLECTED (spouse's income,
+whether they file, whether they are claimable), and it stays coupled to the death-gate liveness:
+`SkippableId::SpouseDiedDuringYear` and `DodSpouse` were tightened to MFJ-only citing this same
+derivation, and would have to widen with it. **Do not fix one without the other.**
+
+### G-20a — ★★ the OTHER unadvised omissions cannot be advised yet: `CarryProvenance` is missing
+
+**Owning phase: with §G-22's residue.** Found while closing §G-20. There are two more conservative
+omissions with no advisory — the **capital-loss** (§1212(b)) and **charitable** (§170(d)(1))
+carryovers, both still import-only after §G-22. Both overstate tax, so both are lawful; both are
+silent, so both breach the same §3.4 rule §G-20 just fixed.
+
+★★ **They cannot be advised precisely, and the reason is structural rather than an oversight.** The QBI
+pair was fixable only because each carries a scalar `CarryProvenance`, which is what distinguishes *"a
+zero btctax computed"* from *"a zero nobody ever stated"*. The other two have no such handle:
+
+| leaf | provenance | why the advisory cannot be precise |
+|---|---|---|
+| `capital_loss_carryforward_in` | **none at all** | `Carryforward { short, long }` is two bare `Usd` — a zero is uninterpretable |
+| `charitable_carryover_in` | per-ITEM, on `CharitableCarryItem` | an **empty vec has no items**, so an empty list carries no provenance |
+
+An advisory without that distinction fires on essentially every return and teaches the list to be
+scrolled past — the precision trap the death-gate and QBI advisories were both designed around.
+
+**The fix is to give both a provenance handle first** (a sibling scalar on the carryforward struct; a
+`Option<CarryProvenance>` beside the charitable vec for "the list as a whole"), then advise. Filed
+rather than half-built, because adding provenance to two more input types is a design change with a
+write-back interaction, not a one-line advisory.
+
+★ **The transferable observation:** `CarryProvenance` is the mechanism that makes *"we do not know"*
+expressible for a money field, and only one of the three carryforward families has it where it can be
+read. That is the same answered-ness problem the question registry solved for booleans (§G-11's
+neighbourhood), unsolved for amounts.
 
 **Owning phase: whenever MFS support is next touched.** Found while adjudicating G-9a, in the same
 i1040gi passage. The instruction reads:
