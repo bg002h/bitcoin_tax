@@ -228,6 +228,10 @@ each one fits you:
 - **Form 8949 Box I (short-term) / Box L (long-term)** — checked on every Form 8949 with rows. These mean
   "transactions NOT reported to you on Form 1099-B." btctax has no 1099-B / 1099-DA input at all, so every
   ledger disposition is un-reported by construction. Never Box C/F.
+- **Clergy self-employment is OUT OF SCOPE.** A minister, member of a religious order, or Christian
+  Science practitioner who has filed Form 4361 or Form 4029 cannot be served by btctax: Schedule SE
+  line A's exemption declaration is never asked, there is no Form 4361/4029 input, and there is no way
+  to print the required "Exempt—Form 4361" notation. Use a preparer.
 - **Schedule C lines G, H, I, J** — left blank (deferred to your pen): material participation, whether you
   started/acquired the business this year, whether you made payments requiring Form 1099, and whether you
   filed them. Fill them in yourself.

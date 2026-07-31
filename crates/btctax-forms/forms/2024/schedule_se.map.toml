@@ -71,4 +71,15 @@ ssn  = "topmostSubform[0].Page1[0].f1_2[0]"
 # Recording it as `gap` makes it COUNTABLE and shrink-only rather than invisible. It closes by adding
 # a question to the P9 registry (`QuestionId`), at which point this entry is deleted and the field
 # becomes `asked(...)`.
-"topmostSubform[0].Page1[0].c1_1[0]"  = { line = "A", rule = "gap", reason = "Form 4361 minister / religious order / Christian Science practitioner declaration with $400+ other SE earnings. btctax asks no such question, so the box can never be checked — a REQUIRED declaration we cannot make. Closes by adding a QuestionId." }
+# ★★ RECLASSIFIED gap → unmodeled, 2026-07-30, under the refusal review. The earlier entry said this
+#    "closes by adding a QuestionId". It does not: asking it would be the WRONG fix.
+#
+#    Checking line A does not move a figure btctax computes — and btctax models no clergy concept
+#    ANYWHERE else. There is no Form 4361 field, no Form 4029, and no path to print the required
+#    "Exempt—Form 4361" notation on the return. A lone checkbox would advertise support for a filer
+#    archetype the product cannot serve, which is worse than declining to serve them: a minister who
+#    saw the box answered would reasonably infer the rest of their return was handled.
+#
+#    The honest account is that clergy self-employment is OUT OF SCOPE, now recorded as such in
+#    `btctax limitations` rather than implied by a blank box.
+"topmostSubform[0].Page1[0].c1_1[0]"  = { line = "A", rule = "unmodeled", reason = "Form 4361 / 4029 minister, religious-order and Christian Science practitioner exemption declaration. btctax models no clergy concept at all — no Form 4361 input, no way to print the \"Exempt—Form 4361\" notation — so this filer archetype is out of scope and is documented as such in LIMITATIONS.md. Checking the box moves no figure; asking the question would imply support that does not exist." }
