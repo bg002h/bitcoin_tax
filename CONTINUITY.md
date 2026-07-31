@@ -95,16 +95,20 @@ PDF with the unreduced deduction already exists when the warning prints.
 
 ### ⬜ REMAINING, in order
 
-1. **Reverse the FBAR question** (owner-approved). Move `FbarFilingRequired` from `FORM_QUESTIONS`
-   (class A, refuses) to `SKIPPABLE_QUESTIONS` (class B, lawful silence + advisory quoting the form's
-   Caution verbatim). It drives no figure, and the substantive FBAR advisory already fires off 7a alone.
-   **The printing side needs NO change** — already `Option`-shaped, so a skip prints a true blank.
-   Touches: `questions.rs` (enum, `ALL`, `FORM_QUESTIONS`, the idx match + counts 15→14),
-   `return_refuse.rs` (drop `FbarFilingRequirementUnanswered` + its `scenario_for` arm),
-   `attribute.rs`, `seam.rs` (`FieldId`), `spec/registries.rs` (`DECL_FIELDS` idx 14 + both map
-   directions), `spec/coverage.rs` (`fixture_for` arm + counts), `spec/mod.rs` (decl counts 14→13,
-   `decls.fields.len()` 15→14), `cmd/answer.rs` (`scenario_for` arm), `LIMITATIONS.md`.
-   ★ All of these were touched by `b94508d` — read that commit's diff and largely invert it.
+1. ~~**Reverse the FBAR question**~~ — ✅ **DONE 2026-07-30.** `FbarFilingRequired` moved from
+   `FORM_QUESTIONS` (class A, refuses) to `SKIPPABLE_QUESTIONS` (class B, lawful silence). It is now
+   `SkippableId::FbarFilingRequired` at index 7, still live iff `foreign_accounts == Some(true)`, and
+   skipping it fires the NEW `Advisory::FbarSubQuestionNotAnswered`, which quotes Schedule B's Caution
+   verbatim. `RefuseReason::FbarFilingRequirementUnanswered` is gone; the classifier records the leaf
+   as a `Class::NoTaxDirection` exemption. **The printing side needed NO change**, as predicted — the
+   `Option` was already load-bearing to the writer, so a skip prints a true blank.
+   ★ The prediction that survived contact: *nothing on the return reads this box.* That is what makes
+   it class (B) — the penalty the Caution names attaches to **not filing FinCEN Form 114**, an
+   obligation the box neither creates nor removes.
+   ★★ **The two `is_none()` guards in `return_refuse.rs`'s property harnesses are now UNEXERCISED** —
+   the FBAR was their only live case. They were kept, with the comment rewritten to say so: the next
+   question whose liveness depends on another question's *non-neutral* answer would hit the same wall
+   silently.
 2. **Downgrade the death pair** — the biggest UX win: `TaxpayerDiedDuringYear`/`SpouseDiedDuringYear`
    are `live: |_| true`, so they block **every** return. `is_aged` (`return_1040.rs:49-77`)
    short-circuits on `dob == None` and its `(None, None)` arm returns `false`, so silence already
@@ -133,13 +137,55 @@ ready outranks blocked-on-a-decision; cheap hazard-removal outranks large projec
 |---|---|---|---|
 | ~~1~~ | ~~Schedule C line G → Form 8960 line 4a~~ | — | ❌ **DEAD — REFUTED.** Would have DOUBLE-TAXED SE income. §1411(c)(6) shelters it. See the ACTIVE WORK correction above. |
 | **2** | **Form 8995 line 3** — prior-year QBI loss carryforward, subtracted at line 4; omitting it INFLATES the deduction and UNDERSTATES tax | days | ⬜ **the top BUILD** — item 4 of the remaining list above |
-| **3** | **Crypto-slice export trio**, one PR on the primary shipped `report --tax-year` path: **(a)** print the all-in LTCG marginal rate **23.8%** (§1(h) 20% + §1411 3.8%), not `0.20` — `MarginalRates.ltcg` doc'd "0 / 0.15 / 0.20" at `types.rs:76`; a filer sizing a sale under-reserves by 3.8 points. **(b)** DERIVE Schedule D lines 17 and 20 instead of telling the filer to complete them by hand — the full-return engine's `printed.rs`/`ScheduleDRouting` already does exactly this. **(c)** watermark `form_1040_capgains.pdf` as a partial worksheet: it renders as "Form 1040" with a large line 7 and a BLANK line 1a, and its only caveat is a transient stderr note the document outlives. | **hours** | ⬜ **NOT STARTED — highest value-per-hour on the list.** All three READY, no owner decision. |
+| ~~3~~ | ~~**Crypto-slice export trio**~~ | hours | ✅ **DONE 2026-07-30** — see the box below. **(b) shipped line 17 ONLY; line 20 was REFUSED on inspection.** |
 | **4** | `ARCHIVE_RECONCILIATION_REVIEW_BY = "2026-08-13"` (`archive_check.rs:174`) — re-decide the residual archive duplication or consciously reset the date with a written reason. While in the file: give `the_archive_count_may_only_shrink`'s one-sided `<=3` an `assert_eq!` companion (both its siblings have one) and fix the stale doc comment narrating four archives | hours | ⬜ **DATED — reds the WHOLE SUITE once passed**, blocking everything else. Owner decision. |
 | **5** | **§G-9a** — does the §63(f) **BLIND** box have the death-mid-year interaction the AGED box turned out to have? Adjudicate against i1040gi's "blind at the end of 2024"; the absence of an explicit death carve-out (which the aged instruction HAS) may itself be the answer | hours | ⬜ Moves a figure. May close as "no change needed" — a legitimate cheap outcome. |
 | **6** | **Schedule 1-A plan r3 was NEVER independently reviewed** — the doc reads "Status: r3" but `design/ty2025/reviews/` holds only `…-opus-r1.md`; r2→r3 folded a 13-agent census (`c92cb9b`) that added T3a wholesale. Not green under this repo's own re-review-after-every-fold rule. Then build B3 T2 | hours + days | ⬜ Only if B3 is the chosen track. Owner decision. |
 | ~~7~~ | ~~Batch the remaining §G-13 declarations~~ | — | ⚠️ **SUPERSEDED by the refusal review.** Its premise (ask them all) is what the owner corrected. Use the decision table above instead: SE line A and Sch C G/H are DON'T-ASK and done; FBAR is built and pending REVERSAL; only Sch C I/J (skippable) and 8283 5a/5b/5c (refusal-on-Yes) remain. |
 | **8** | **Push the backlog.** `core.hooksPath=scripts`, `scripts/.pii-patterns` does NOT exist, `scripts/pre-push:27-35` is fail-closed ⇒ every plain `git push` exits 1. Format documented at `scripts/README-pii-setup.md:25-52`. Sanctioned escape: `BTCTAX_PII_BYPASS=1 git push` | minutes | ⬜ **OWNER-ONLY** — the patterns file is owner-specific and untracked; the assistant must not author it. Repo is PUBLIC. Generic scan is clean across all commits. |
 | — | **Revoke the crates.io temp token** from the v0.14.0 publish | minutes | ⬜ owner-only, long-standing |
+
+### ✅ Backlog #3 — the crypto-slice export trio, as SHIPPED (2026-07-30)
+
+**(a) The all-in LTCG marginal rate.** `MarginalRates` gained `niit_at_margin` + `ltcg_all_in()`;
+`report --tax-year` and the TUI Tax tab now headline `LTCG 0.238 all-in (§1(h) 0.20 + §1411 0.038)`.
+
+- ★★ **`niit_applies` is NOT the predicate, and mistaking it for one is the bug.** It is the
+  crypto-vs-no-crypto DELTA, so it is **false** for a filer already over the §1411 threshold whose
+  crypto did not *raise* NIIT — and that filer's next sold sat still costs 3.8 points. The new flag is
+  `magi_with > thr && nii_with >= 0` (the next dollar's right-derivative, boundary-resolved downward
+  like `ltcg`'s `top <= max_zero`). `niit_at_margin_is_not_the_niit_applies_delta` is the KAT that
+  separates them; a second KAT pins the `nii >= 0` conjunct (MAGI over the threshold but NII negative
+  ⇒ still no NIIT at the margin). Both mutations killed.
+- ★★★ **It tripped `frozen_guard` — `tax/types.rs` and `tax/compute.rs` are CONTENT-PINNED.** The pin
+  bump is recorded in that module as "EXCEPTION 1" with the reasoning, per its own documented
+  exception process, and rides in its OWN commit. `golden_returns.rs` re-verified byte-unchanged: the
+  edit is strictly additive and display-only.
+
+**(b) Schedule D Part III — line 17 ONLY. ★★ The backlog said "17 and 20"; 20 was WRONG.** Line 20 reads
+*"Are lines 18 and 19 both zero or blank **and you are not filing Form 4952**?"* — that last conjunct is
+a fact about the filer that **no btctax input surface carries** (`f1040sa.map.toml` records Schedule A
+line 9 as `unmodeled` for exactly this reason), and lines 18/19 are blank on the slice because nothing
+ever *asked*, not because they are zero. A "Yes" there is testimony the filer never gave, and it routes
+them to the QDCGT worksheet when the Schedule D Tax Worksheet is required — an understatement path.
+Line 17 has no such conjunct: it reads lines 15 and 16, **both printed on the same page**.
+
+- The single definition is `printed::schedule_d_line17`, which the full-return `ScheduleDRouting`
+  derivation now also calls, so slice and full return cannot drift.
+- ★ **The 2017 revision's Yes/No on-states are `"Yes"`/`"No"`, NOT the `"1"`/`"2"` that 2024/2025 use** —
+  dumped, not assumed. The KAT asserts the literal per-year on-state, so an analogy-copied on-state
+  (which writes an OFF box ⇒ a line 17 that *looks* filled) reds. Mutation-verified in both directions,
+  plus a planted line-20 answer to prove the "18–22 stay blank" guard bites.
+- Both Schedule D golden hashes moved; each carries an inline note saying what moved them.
+
+**(c) `form_1040_capgains.pdf` is stamped `WORKSHEET — NOT A COMPLETE FORM 1040`** on every page, on the
+opposite diagonal from the DRAFT stamp so a pseudo-reconciled slice carries both legibly. The
+full-return `f1040.pdf` is never stamped — asserted in the same breath, because a watermark on every
+1040 would be as wrong as one on none.
+
+★★ **The trio's transferable lesson:** the recon item was 3-for-3 on *where* the value was and 2-for-3
+on *what to do*. **A backlog entry is a lead, not a spec** — line 20's disqualifying conjunct is
+visible in one line of the form's own extracted text.
 
 ★★ **The recon's explicit DO-NOT-DO, kept because it is the most appealing wrong turn:** do NOT resume
 the **Tier-2 AMT** thread (E4/E5/E6). It looks like the obvious next step — 13 registered items, the
