@@ -711,6 +711,45 @@ This feature is newer and less proven than the rest of btctax, and it was develo
 
 Check what this feature actually produced: open the Form 8275 PDF and confirm the Part II narrative renders whole, continuing onto Part IV on page 2, rather than stopping mid-sentence after about one line; confirm the basis in Form 8949 column (e) for each promoted lot equals the floor you consented to at promote time; and confirm the tranche quantity and acquisition window on the 8275 match what you declared.
 ⚠ a Section B Form 8283 is NOT filing-ready without a signed Part IV (appraiser) and Part V (donee acknowledgement) — obtain both before filing.
+
+  ── ADVISORIES (8) ──
+  • CTC/ODC NOT COMPUTED — you captured 1 dependent(s), but v1 does not compute the Child
+    Tax Credit or the Credit for Other Dependents (1040 line 19 is $0). Your tax is
+    OVERSTATED by up to $2,000 per qualifying child / $500 per other dependent. File
+    Schedule 8812 yourself to claim it.
+  • OTHER CREDITS NOT COMPUTED — v1 does not compute the education (Form 8863),
+    dependent-care (Form 2441), retirement-savings/saver's (Form 8880), residential-energy
+    (Form 5695) or adoption (Form 8839) credits: Schedule 3 Part I is $0 apart from the
+    foreign tax credit. If you qualify for any of them your tax is OVERSTATED — claim them
+    yourself.
+  • REFUND BY PAPER CHECK — your return is due a refund of $8,954.20, but v1 never fills the
+    direct-deposit block (1040 lines 35b–35d). As filed, the IRS will mail a check. Add your
+    routing and account numbers by hand if you want it deposited.
+  • DATE OF BIRTH NOT ON FILE — the §63(f) additional standard deduction for age 65+ ($1,550
+    per box) was NOT granted, because v1 never assumes a birthdate. If you (or your spouse)
+    are 65 or older, enter the date of birth and re-run: your tax is currently OVERSTATED.
+  • BLINDNESS NOT DECLARED — the §63(f) additional standard deduction for blindness ($1,550
+    per box) was NOT granted for 2 person(s) whose blindness was never stated (v1 never
+    assumes it). It STACKS with the age-65+ box. If you (or your spouse) are legally blind,
+    run `btctax income answer`: your tax is currently OVERSTATED.
+  • SALES-TAX ELECTION NOT ASKED — your Schedule A used state and local INCOME taxes, but
+    you were never asked whether to deduct general SALES taxes instead (§164(b)(5)). In a
+    no-income-tax state or a big-purchase year the sales-tax figure can be larger. If so,
+    your SALT deduction is too small and your tax is OVERSTATED. Run `btctax income answer`
+    to choose.
+  • SCHEDULE C FORM-1099 QUESTION LEFT BLANK — line I ("did you make any payments that would
+    require you to file Form(s) 1099?") was not answered, so the box goes out blank. That is
+    lawful: no figure on your return reads it, and btctax will never answer for you. But
+    §6721 (failure to file a required information return) and §6722 (failure to furnish the
+    payee's copy) apply to the PAYMENTS, not to this box — leaving it blank neither creates
+    nor removes that exposure. If you paid $600 or more to a contractor or service provider
+    for your business, check the Schedule C instructions and answer with `btctax income
+    answer`.
+  • CHARITABLE DONEE ASSUMED — your 1 crypto donation(s) were valued assuming a PUBLIC
+    CHARITY (50%-organization) donee: long-term gifts at fair market value under the
+    30%-of-AGI ceiling. If the donee is a PRIVATE FOUNDATION, the correct treatment is the
+    20% ceiling at BASIS (which v1 refuses). Verify who you gave to.
+  (Advisories never change a number and never fail the command. See `btctax limitations`.)
 ```
 
 ## J7 — income received off-exchange, valued by hand (`--fmv`)

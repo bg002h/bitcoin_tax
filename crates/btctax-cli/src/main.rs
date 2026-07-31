@@ -803,6 +803,15 @@ fn run() -> Result<ExitCode, CliError> {
                          (appraiser) and Part V (donee acknowledgement) — obtain both before filing."
                     );
                 }
+                // ★ §G-19d — the full return's ADVISORIES, on the path that hands the filer a PDF to
+                // sign. `advisories_for` used to have exactly one caller (`report --tax-year`), so a
+                // filer who only ever ran `export-irs-pdf` saw none of them: not the forgone §63(f)
+                // boxes, not a blank FBAR sub-question, not the Schedule C 1099 pair. Every one of
+                // them names something the return OMITS, which is precisely what a filer about to sign
+                // needs told. Same `advisories_for` derivation as the report — never a second list.
+                if !report.advisories.is_empty() {
+                    eprint!("{}", render::render_advisories(&report.advisories));
+                }
             } else {
                 // The crypto slice only: Schedule D Part III is answered as far as the printed page
                 // allows. Line 17 reads lines 15 and 16, both printed above it, so btctax answers it;

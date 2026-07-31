@@ -307,6 +307,14 @@ pub struct IrsPdfReport {
     /// (non-voided) DeclareTranche/PromoteTranche is on file. Drives main.rs's stderr notice ONLY — the
     /// notice is interface-only and is never written to `out_dir`.
     pub experimental_notice_active: bool,
+    /// ★ §G-19d — the full return's non-gating ADVISORIES, so the export path shows them too.
+    ///
+    /// `advisories_for` had exactly ONE production caller (`cmd::tax::report_tax_year`), which meant a
+    /// filer who ran `export-irs-pdf` and never ran `report` saw NONE of them: not the forgone §63(f)
+    /// boxes, not the FBAR sub-question left blank, not the Schedule C 1099 pair. The export path is
+    /// the one that hands them a PDF to sign, so it is the last place the omissions should be silent.
+    /// Empty on the crypto-slice path, which computes no full return.
+    pub advisories: Vec<btctax_core::tax::advisories::Advisory>,
 }
 
 /// The **[I5]** broker-reporting advisory line, year-aware — or `None` when no disposition may have
@@ -644,6 +652,8 @@ pub(crate) fn export_irs_pdf_from_session(
         .filter(|b| b.kind.severity() == Severity::Hard)
         .count();
     Ok(IrsPdfReport {
+        // The crypto slice computes no full return, so there are no full-return advisories.
+        advisories: Vec::new(),
         full_return_paths: Vec::new(),
         full_return_manifest: None,
         forms_ignored_full_return: false, // crypto-slice path honors --forms
@@ -778,6 +788,12 @@ fn export_full_return(
     if let Some(r) = btctax_core::tax::return_1040::screen_absolute(&ri, &ar, params) {
         return Err(refuse(r));
     }
+    // ★ §G-19d — the same advisories `report --tax-year` shows, carried out on the report so the
+    // EXPORT path surfaces them too. Derived from the identical `advisories_for` call, never a second
+    // list: two derivations would drift, and the one the filer saw would depend on which command they
+    // happened to run.
+    let advisories =
+        btctax_core::tax::advisories::advisories_for(&ri, state, &ar, params, tax_year);
 
     // Pseudo figures are FICTIONAL: they are watermarked no matter what, and the attestation gate for
     // them is unchanged. A clean (real-ledger) packet needs no attestation — SPEC §9 as amended.
@@ -879,6 +895,7 @@ fn export_full_return(
         .filter(|b| b.kind.severity() == Severity::Hard)
         .count();
     Ok(IrsPdfReport {
+        advisories,
         watermarked,
         tax_year,
         unresolved_hard,

@@ -913,7 +913,7 @@ census likely has to record the decision's EXISTENCE separately from its CONTENT
 ★ **Never auto-shred.** Destroying evidence of diligence must be an explicit, informed act by the
 filer — never a default or a background job.
 
-### G-13 — ★★★ FIELD PROVENANCE — **COMPLETE: 15 of 15 forms censused (2026-07-30); 16 GAP fields**
+### G-13 — ★★★ FIELD PROVENANCE — **census COMPLETE (15/15 forms); gaps 16 → 6 and falling**
 
 **Owning phase: NOT B3.** Whole-surface, and it interlocks with **§G-11** (which blocks its honest
 form). Filed 2026-07-30. **Full design note: [`design/forms/FIELD_PROVENANCE.md`](design/forms/FIELD_PROVENANCE.md)** — read that first; this entry is the register hook.
@@ -941,7 +941,21 @@ filer WITH a prior-year QBI loss is never asked, so nothing stops the overstatem
 ★ This is exactly why `unmodeled` and `gap` must stay distinct: `unmodeled` is a benefit the filer
 FORGOES (safe — it can only overstate tax); a missing REDUCTION is the reverse.
 
-**Current gap count: 16 fields / 8 items**, pinned by `recorded_gaps_may_only_shrink` (`GAPS = 16`).
+**Current gap count: 6 fields / 3 items** — all six are Form 8283 lines **5a/5b/5c** — pinned by
+`recorded_gaps_may_only_shrink` (`GAPS = 6`). ★ **The number in this paragraph has gone stale twice; the
+CONSTANT is the truth, this prose is a convenience.** The burn-down, newest first:
+
+| date | gaps | what closed it |
+|---|---|---|
+| 2026-07-31 | 10 → 6 | Schedule C **I/J** — asked as class-(B) skippables, printed from the filer's answer, §6721/§6722 advisory on the skip |
+| 2026-07-31 | 12 → 10 | Form 8283 **page-2 identity** — a pure map fix; btctax held the name and TIN all along |
+| 2026-07-30 | 13 → 12 | Form 8995 **line 3** — the prior-year QBI loss carryforward, the only gap ever recorded in the UNDERSTATEMENT direction |
+| 2026-07-30 | 16 → 13 | the FBAR sub-question (built), Schedule SE line A (reclassified `unmodeled` — clergy out of scope) |
+
+★★ Also corrected 2026-07-31, and NOT a count change: Form 1040 line 7's *"if not required, check
+here"* box was excused as `unmodeled` on a **false premise** ("Schedule D is always required"). See
+**§G-18**. A confidently-wrong `unmodeled` hides a defect exactly as well as a missing entry does — so
+the ratchet, which counts entries rather than judging them, is not the whole guarantee.
 ★ It was 18/9 for about an hour: **Schedule C line G was wrongly recorded as a gap and is now
 `unmodeled`** — see the correction note below, which is the most useful thing in this section.
 Counted per FIELD because that is the mechanical unit — a Yes/No is two widgets for one question.
@@ -1329,7 +1343,17 @@ that inherits the error, not a new class of it — and because a filer with a ca
 slice's stated "crypto-only year" premise. Fixing it properly means the slice collecting the
 carryover, i.e. becoming the full return.
 
-**(G-19d) the FBAR skip advisory only reaches `report --tax-year`. Owning phase: ownerless residue.**
+**(G-19d) ✅ FIXED 2026-07-31 — and it was never an FBAR problem.** `advisories_for` had exactly ONE
+production caller, so `export-irs-pdf` — the path that hands the filer a PDF to SIGN — showed **none**
+of the full return's advisories: not the forgone §63(f) boxes, not the blank FBAR sub-question, not
+the Schedule C 1099 pair, not the uncomputed CTC/ODC. Eight of them appear on the shipped
+worked-example journey where zero did before. The report now carries them out of
+`export_full_return` from the SAME `advisories_for` call the report uses — never a second list, since
+two derivations would drift and the filer would see a different set depending on which command they
+happened to run. Both directions pinned (full return non-empty; crypto slice empty, because it
+computes no full return to advise on) and mutation-verified. Original finding:
+
+**★ the FBAR skip advisory only reached `report --tax-year`.**
 `advisories_for` has exactly one production caller (`cmd/tax.rs`), so `export-irs-pdf` writes
 `schedule_b.pdf` with 7a = Yes and the FBAR pair blank while printing no FBAR notice on that
 invocation. ★ The three load-bearing legs of the class-(B) reversal are all independently verified true

@@ -504,6 +504,15 @@ fn export_dispatches_a_full_return_year_to_the_full_packet() {
     );
     assert!(rep.form_1040_path.is_none());
 
+    // ★★ §G-19d — the full return's ADVISORIES ride out on the report, so the EXPORT path surfaces
+    // them. `advisories_for` had exactly ONE production caller (`report --tax-year`), which meant a
+    // filer who ran only `export-irs-pdf` saw none of them — on the very path that hands them a PDF
+    // to sign. Every advisory names something the return OMITS.
+    assert!(
+        !rep.advisories.is_empty(),
+        "a computed full return must carry its advisories out to the export path"
+    );
+
     // ★ The FULL-return 1040 is a complete return and must NOT carry the partial-worksheet
     // watermark. Half of the guarantee in `crypto_slice_1040_is_watermarked_as_a_worksheet`: a
     // watermark applied to every 1040 would be as wrong as one applied to none.
@@ -528,6 +537,14 @@ fn crypto_slice_1040_is_watermarked_as_a_worksheet() {
     let out = tempfile::tempdir().unwrap();
     let report = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2025, &[], None).unwrap();
     assert!(report.form_1040_path.is_some(), "1040 written");
+
+    // ★ …and the CRYPTO SLICE carries none: it computes no full return, so there is nothing to advise
+    // ON. An empty list here is a real assertion, not an absent one — it pins that the slice does not
+    // borrow the full return's advisories for a return it never computed.
+    assert!(
+        report.advisories.is_empty(),
+        "the crypto slice computes no full return ⇒ no full-return advisories"
+    );
 
     let f1040 = std::fs::read(out.path().join("form_1040_capgains.pdf")).unwrap();
     assert!(
