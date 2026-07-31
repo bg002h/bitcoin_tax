@@ -896,7 +896,7 @@ census likely has to record the decision's EXISTENCE separately from its CONTENT
 ★ **Never auto-shred.** Destroying evidence of diligence must be an explicit, informed act by the
 filer — never a default or a background job.
 
-### G-13 — ★★★ FIELD PROVENANCE — **2 of 15 forms censused (2026-07-30)**
+### G-13 — ★★★ FIELD PROVENANCE — **4 of 15 forms censused (2026-07-30); 3 GAPS recorded**
 
 **Owning phase: NOT B3.** Whole-surface, and it interlocks with **§G-11** (which blocks its honest
 form). Filed 2026-07-30. **Full design note: [`design/forms/FIELD_PROVENANCE.md`](design/forms/FIELD_PROVENANCE.md)** — read that first; this entry is the register hook.
@@ -907,7 +907,17 @@ make, which btctax **never asks**. It is not a forgone benefit (`unmodeled`); a 
 of other self-employment earnings would file an **incomplete Schedule SE** and nothing would say so.
 Recorded as **`rule = "gap"`** — a countable, shrink-only DEFECT, pinned by
 `recorded_gaps_may_only_shrink` so it cannot be added quietly or reclassified away. It closes by
-adding a `QuestionId`, never by deleting the record. **Current gap count: 1.**
+adding a `QuestionId`, never by deleting the record.
+
+★★★ **Schedule B found a WORSE one, and the form states the stakes itself.** Part III's 7a carries an
+unnumbered sub-question — *"If 'Yes,' are you required to file FinCEN Form 114, Report of Foreign
+Bank and Financial Accounts (FBAR)…?"* btctax collects 7a (`foreign_accounts`) and 7b
+(`foreign_country_names`) but **never asks this one**, so it can only be left blank. The form's own
+Caution, verbatim: *"If required, failure to file FinCEN Form 114 may result in **substantial
+penalties**."*
+
+**Current gap count: 3 fields / 2 questions** — the Form 4361 minister box, and the FBAR pair (two
+radio halves of one question). Counted per FIELD because that is the mechanical unit.
 
 **✅ The gate exists.** `btctax-forms/tests/field_census.rs` asserts `(map ∪ [census]) == the PDF's
 AcroForm field set`, exactly. **f8959 is fully censused** — 19 mapped + 7 `unmodeled` = 26 — and

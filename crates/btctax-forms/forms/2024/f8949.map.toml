@@ -62,3 +62,24 @@ ssn  = "topmostSubform[0].Page1[0].f1_2[0]"
 [identity_page2]
 name = "topmostSubform[0].Page2[0].f2_1[0]"
 ssn  = "topmostSubform[0].Page2[0].f2_2[0]"
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# ★★★ THE FIELD CENSUS (§G-13). See f8959.map.toml for the rule vocabulary.
+[census]
+
+# ── Box A/B (short-term) and D/E (long-term): btctax always files under C / F ────────────────────
+# The form: "You must check Box A, B, or C below. Check only one box." btctax files self-custody
+# Bitcoin, whose basis was never reported to the IRS by a broker — that is Box C (short) / Box F
+# (long) on the pre-2025 revisions, and those ARE mapped. A and B (and D and E) describe
+# broker-reported basis, a situation btctax does not handle, so they are never selected.
+"topmostSubform[0].Page1[0].c1_1[0]" = { line = "Box A", rule = "unmodeled", reason = "Short-term transactions reported on Form 1099-B showing basis WAS reported to the IRS — btctax does not file broker-reported-basis lots, so Box C is always the selection." }
+"topmostSubform[0].Page1[0].c1_1[1]" = { line = "Box B", rule = "unmodeled", reason = "Short-term, 1099-B basis NOT reported to the IRS — btctax's self-custody lots have no 1099-B at all, which is Box C, not B." }
+"topmostSubform[0].Page2[0].c2_1[0]" = { line = "Box D", rule = "unmodeled", reason = "Long-term twin of Box A — same reason; btctax selects Box F." }
+"topmostSubform[0].Page2[0].c2_1[1]" = { line = "Box E", rule = "unmodeled", reason = "Long-term twin of Box B — same reason; btctax selects Box F." }
+
+# ── The totals row's column (f), which the FORM excludes from the sum ────────────────────────────
+# Line 2, verbatim: "Totals. Add the amounts in columns (d), (e), (g), and (h)". Column (f) is the
+# adjustment CODE column — codes are not summed, so the grid's uniform layout leaves a cell here
+# that no value belongs in. The form's own instruction is the authority.
+"topmostSubform[0].Page1[0].f1_117[0]" = { line = "2(f)", rule = "artifact", reason = "Totals row under column (f), the adjustment-code column. The form totals only (d), (e), (g), (h) — a code has no sum, so no decision is encodable here." }
+"topmostSubform[0].Page2[0].f2_117[0]" = { line = "2(f)", rule = "artifact", reason = "Page-2 twin: totals row under column (f). Same reason." }

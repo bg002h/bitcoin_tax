@@ -26,7 +26,7 @@ use std::collections::BTreeSet;
 /// have no recorded decision, and this list is how that number is burned down one form at a time.
 /// Forms whose `[census]` section IS written. This list and [`CENSUS_NOT_YET_WRITTEN`] must together
 /// partition the 15 census keys — so a form can never be dropped from both and silently escape.
-const CENSUSED: &[&str] = &["f8959", "schedule_se"];
+const CENSUSED: &[&str] = &["f8959", "schedule_se", "f1040sb", "f8949"];
 
 const CENSUS_NOT_YET_WRITTEN: &[&str] = &[
     "f1040",
@@ -34,11 +34,9 @@ const CENSUS_NOT_YET_WRITTEN: &[&str] = &[
     "f1040s2",
     "f1040s3",
     "f1040sa",
-    "f1040sb",
     "f1040sc",
     "f8275",
     "f8283",
-    "f8949",
     "f8960",
     "f8995",
     "schedule_d",
@@ -148,7 +146,11 @@ fn census_accounts_for_every_field() {
 fn recorded_gaps_may_only_shrink() {
     /// Every `rule = "gap"` in the censused forms. Closing one means deleting its census entry and
     /// mapping the field to a real question — at which point this comes down.
-    const GAPS: usize = 1;
+    // ★ Counted per FIELD, not per question: the FBAR pair is TWO fields (the Yes and No halves of
+    // one radio) for ONE logical question. Fields is the mechanical unit — a question-level count
+    // would need someone to decide what "one question" means, which is exactly the judgement this
+    // ratchet is meant to avoid depending on.
+    const GAPS: usize = 3;
 
     let mut found = Vec::new();
     for stem in CENSUSED {
@@ -186,6 +188,9 @@ fn the_two_lists_partition_every_form() {
     // this set). Every one must be on exactly ONE of the two lists: censused, or recorded as not yet
     // censused. A form on neither would escape the gate entirely — the census's own version of the
     // defect it exists to catch.
+    // ★ The authority for the 15 forms `fill_full_return` can emit — btctax-forms/tests/census.rs
+    // owns that set. This list must NEVER shrink to match a shorter working list; the compiler
+    // enforced that when a careless edit dropped two entries.
     const ALL: [&str; 15] = [
         "f1040",
         "f1040s1",
@@ -221,7 +226,7 @@ fn the_two_lists_partition_every_form() {
 #[test]
 fn the_uncensused_list_may_only_shrink() {
     assert!(
-        CENSUS_NOT_YET_WRITTEN.len() <= 13,
+        CENSUS_NOT_YET_WRITTEN.len() <= 11,
         "the uncensused list has GROWN to {} — a new form must arrive with its census, or the \
          count of unaccounted fields silently rises",
         CENSUS_NOT_YET_WRITTEN.len()

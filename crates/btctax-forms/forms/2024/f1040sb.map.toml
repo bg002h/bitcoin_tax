@@ -156,3 +156,23 @@ amount = "topmostSubform[0].Page1[0].f1_63[0]"
 [identity]
 name = "topmostSubform[0].Page1[0].f1_01[0]"
 ssn  = "topmostSubform[0].Page1[0].f1_02[0]"
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# ★★★ THE FIELD CENSUS (§G-13). Every AcroForm field accounted for exactly once: mapped above, or
+# named here with the rule saying why not. See f8959.map.toml for the rule vocabulary.
+[census]
+"topmostSubform[0].Page1[0].f1_32[0]" = { line = "3", rule = "unmodeled", reason = "Excludable interest on series EE and I U.S. savings bonds issued after 1989 (attach Form 8815) — btctax models no Form 8815, so line 4 = line 2." }
+"topmostSubform[0].Page1[0].f1_66[0]" = { line = "7b", rule = "unmodeled", reason = "SECOND line of the 7b foreign-country list; btctax writes only the first (f1_65). Not a silent truncation: an over-long value FAILS CLOSED at verify.rs:516, so a list needing two lines refuses rather than clipping." }
+
+# ── ★★★ A GAP — and the form itself warns what it costs ──────────────────────────────────────────
+# Part III's 7a carries an UNNUMBERED sub-question: "If 'Yes,' are you required to file FinCEN Form
+# 114, Report of Foreign Bank and Financial Accounts (FBAR)…?" btctax collects `foreign_accounts`
+# (7a) and `foreign_country_names` (7b) but NEVER asks this one, so the box can only be left blank.
+#
+# ★ The form's own Caution, verbatim: "If required, failure to file FinCEN Form 114 may result in
+#   substantial penalties." A filer with a foreign account gets no prompt and no printed answer.
+#
+# Two fields, ONE logical question (the Yes and No halves of a radio pair). Closes by adding a
+# QuestionId, at which point both entries are deleted and the pair becomes `asked(...)`.
+"topmostSubform[0].Page1[0].c1_2[0]" = { line = "7a-FBAR", rule = "gap", reason = "FBAR filing-requirement declaration (YES half). btctax asks no such question, so it can never be answered — and the form warns that failing to file FinCEN 114 may carry substantial penalties." }
+"topmostSubform[0].Page1[0].c1_2[1]" = { line = "7a-FBAR", rule = "gap", reason = "FBAR filing-requirement declaration (NO half) — same question, other radio half." }
