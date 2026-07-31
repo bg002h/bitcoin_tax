@@ -515,7 +515,13 @@ fn fill_one(
         // different marks on the page, and a printed "No" the filer never gave is fabricated testimony
         // (the `3b22ca1` defect class). `Some(true)` cannot arrive — `screen_compute_dependent` refuses
         // the year, because the §170 deduction btctax computed at full FMV would then be too large.
-        if no_restrictions == Some(false) {
+        // ★★ r3 M-1 — SECTION B ONLY. Lines 5a/5b/5c live in Section B Part II and the form scopes
+        // them explicitly: "Complete lines 5a through 5c if conditions were placed on a contribution
+        // listed in Section B, Part I". This block sits outside the `match section` above (it shares
+        // the filer-identity window), so without this guard a Section A return printed three answers
+        // to questions about a Part I that is EMPTY — the same "a mark the form has no place for"
+        // class `3bcf3a0` fixed for Schedule B's FBAR pair.
+        if section == Form8283Section::B && no_restrictions == Some(false) {
             for pair in [&map.line5a, &map.line5b, &map.line5c] {
                 let pair = pair.as_ref().ok_or_else(|| {
                     FormsError::Geometry(format!(

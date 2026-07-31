@@ -159,7 +159,9 @@ pub fn qbi_over_threshold(
 /// ★ Left corrected rather than deleted because this is the one line on the form that **neither
 /// oracle can validate** (OTS takes it as a hand-fed input; Tax-Calculator has no channel), so it is
 /// held only by hand-computed KATs — and a struct doc calling it dead plumbing is exactly how a future
-/// audit concludes the field is vestigial. ★ It is asked of nobody yet: `FOLLOWUPS.md` §G-22.
+/// audit concludes the field is vestigial. ★ It IS collected — the TUI input form's "Carryforwards
+/// from last year" section (`SectionId::Carryforwards`) asks for it. §G-22's remaining gap is the
+/// OTHER carryforward families, which are still import-only.
 ///
 /// **★ Lines 3, 7, 16 and 17 are PARENTHESIZED boxes on the printed form: the parentheses supply the
 /// minus sign, so the value written must be a POSITIVE MAGNITUDE.** Writing `-1234` renders as

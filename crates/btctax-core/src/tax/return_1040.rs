@@ -661,46 +661,6 @@ pub fn screen_compute_dependent(
     year: i32,
     params: &FullReturnParams,
 ) -> Option<Refusal> {
-    // ★★★ §G-21 — Form 8283 Section B lines 5a/5b/5c, the restriction questions.
-    //
-    // THIS is the mandatory half. The question is OFFERED unconditionally (a skippable, so a filer who
-    // donated nothing is never blocked), but on a year that actually files a **Section B** 8283 it must
-    // be answered, and answered NO. A "Yes" to any limb means at least one gift carried a restriction
-    // or a retained right, which reduces or denies the §170 deduction (Reg §1.170A-7) — and btctax
-    // deducts at full FMV and cannot tell WHICH gift, so it refuses rather than file a number it knows
-    // is too large.
-    //
-    // ★ It screens HERE, not in `screen_inputs`, for the same reason the non-crypto-noncash guard
-    // above does: the donations live in the LEDGER, which `FormQuestion::live` cannot see.
-    if crate::forms::year_donation_deduction(state, year)
-        > crate::tax::tables::QUALIFIED_APPRAISAL_THRESHOLD
-    {
-        match ri.donations_had_restrictions {
-            Some(false) => {}
-            Some(true) => {
-                return refusal(
-                    RefuseReason::DonationRestrictionsUnresolved,
-                    "you declared that at least one donated property had a restriction or a retained \
-                     right (Form 8283 line 5a, 5b or 5c). Under Reg §1.170A-7 that REDUCES or DENIES \
-                     the §170 deduction, and btctax values every donation at full fair market value — \
-                     so the deduction it would compute is too large. It cannot tell which gift is \
-                     affected, so it will not file the year: complete Form 8283 for the restricted \
-                     donation by hand, with the reduced amount",
-                );
-            }
-            None => {
-                return refusal(
-                    RefuseReason::DonationRestrictionsUnresolved,
-                    "this year files a Form 8283 SECTION B (donations over $5,000), whose lines 5a, 5b \
-                     and 5c ask whether any donated property carried a restriction or a retained right. \
-                     A \"Yes\" to any of them reduces or denies the §170 deduction (Reg §1.170A-7), and \
-                     btctax deducts at full fair market value — so it cannot file this return without \
-                     the answer. Run `btctax income answer`",
-                );
-            }
-        }
-    }
-
     // ★ Non-crypto NONCASH gifts, keyed on the TOTAL noncash the return claims (Fable P6 r1 I6). The
     // $500 trigger printed on Schedule A line 12 — and Form 8283's own "…if you claimed a total deduction
     // of over $500 for ALL contributed property" — is an AGGREGATE over every noncash gift. Keying the
@@ -1615,7 +1575,59 @@ pub fn screen_absolute(
     ri: &ReturnInputs,
     ar: &AbsoluteReturn,
     params: &FullReturnParams,
+    state: &LedgerState,
+    year: i32,
 ) -> Option<Refusal> {
+    // ★★★ §G-21 — Form 8283 Section B lines 5a/5b/5c, the restriction questions.
+    //
+    // ★★ r3 I-2/I-3 put this HERE rather than in `screen_compute_dependent`, and re-keyed it. It was
+    // gated on `year_donation_deduction > $5,000` — the Form 8283 SECTION split — which is the wrong
+    // predicate in BOTH directions:
+    //
+    //   • TOO NARROW. §170(f)(11)(C)'s $5,000 decides which SECTION of the 8283 you file. It has
+    //     nothing to do with whether a restricted gift's deduction is allowable — Reg §1.170A-7 and
+    //     §170(f)(3)(A) bite at every dollar. So a filer who DECLARED a restriction on a $4,000
+    //     donation had their declaration discarded and the full FMV deducted: an UNDERSTATEMENT on
+    //     facts btctax had collected.
+    //   • TOO WIDE. `year_donation_deduction` reads the LEDGER, not the return. A standard-deduction
+    //     filer claims no §170 deduction and attaches no 8283 (`packet.rs`: "a standard-deduction year
+    //     with donations files none"), so a restriction changes no figure — yet they were refused,
+    //     unescapably, by a message asserting "this year files a Form 8283 SECTION B". It does not.
+    //
+    // The predicate is now the ELECTION the return actually made. `ar.deduction_is_itemized` is the
+    // real §63(e) choice, which is why this screens AFTER `assemble_absolute` — it is not derivable
+    // from the inputs, and re-deriving `choose_deduction` here is exactly the compression the
+    // transcribe rule forbids.
+    let donated = crate::forms::year_donation_deduction(state, year);
+    if ar.deduction_is_itemized && donated > Usd::ZERO {
+        // A DECLARED restriction shrinks or denies the deduction at ANY amount.
+        if ri.donations_had_restrictions == Some(true) {
+            return refusal(
+                RefuseReason::DonationRestrictionsUnresolved,
+                "you declared that at least one donated property had a restriction or a retained \
+                 right (Form 8283 line 5a, 5b or 5c). Under Reg §1.170A-7 that REDUCES or DENIES \
+                 the §170 deduction, and btctax values every donation at full fair market value — \
+                 so the deduction it would compute is too large. It cannot tell which gift is \
+                 affected, so it will not file the year: complete Form 8283 for the restricted \
+                 donation by hand, with the reduced amount",
+            );
+        }
+        // UNANSWERED refuses only when the form actually PRINTS 5a/5b/5c — i.e. a Section B year.
+        // Below that the questions are never posed, so silence forgoes nothing and asserts nothing.
+        if ri.donations_had_restrictions.is_none()
+            && donated > crate::tax::tables::QUALIFIED_APPRAISAL_THRESHOLD
+        {
+            return refusal(
+                RefuseReason::DonationRestrictionsUnresolved,
+                "this year files a Form 8283 SECTION B (donations over $5,000), whose lines 5a, 5b \
+                 and 5c ask whether any donated property carried a restriction or a retained right. \
+                 A \"Yes\" to any of them reduces or denies the §170 deduction (Reg §1.170A-7), and \
+                 btctax deducts at full fair market value — so it cannot file this return without \
+                 the answer. Run `btctax income answer`",
+            );
+        }
+    }
+
     // (a) QBI above the §199A(e)(2) threshold → 8995-A phase-in unmodeled.
     let reit_dividends: Usd = ri.div_1099.iter().map(|d| d.box5_section_199a).sum();
     if qbi_over_threshold(
@@ -1733,10 +1745,18 @@ pub fn apply_carryover_writeback(
     next_year.qbi.reit_ptp_carryforward_in_provenance = CarryProvenance::Computed;
     next_year.qbi.qbi_carryforward_in = ar.qbi_carryforward_out;
     next_year.qbi.qbi_carryforward_in_provenance = CarryProvenance::Computed;
-    // ★ §G-20a — the two BENEFIT carryovers get their provenance stamped too. Without this a computed
+    // ★ §G-20a — the CHARITABLE carryover gets its provenance stamped too. Without this a computed
     // ZERO stays indistinguishable from an unasked one, and next year's advisory nags a filer whose
     // prior year btctax itself computed.
-    next_year.capital_loss_carryforward_in_provenance = CarryProvenance::Computed;
+    //
+    // ★★★ r3 I-4 — THE CAPITAL-LOSS SIBLING IS DELIBERATELY ABSENT, and removing it was the fix.
+    // This stamped `capital_loss_carryforward_in_provenance = Computed` on a value it never writes:
+    // there is no capital-loss carryover-OUT on `AbsoluteReturn` to write, because the §1211/§1212
+    // Capital Loss Carryover Worksheet — the thing that decides how much loss survives — is UNMODELED
+    // in v1 (`screen_absolute` refuses its edge case outright). So the stamp asserted btctax had
+    // "derived it from a prior year it actually computed" when it had derived nothing, and next
+    // year's `BenefitCarryoversNotStated` fell silent about a carryover the filer may genuinely
+    // have. A provenance stamp is a claim of knowledge; do not make one the code cannot support.
     next_year.charitable_carryover_in_provenance = CarryProvenance::Computed;
     Ok(next_year)
 }
@@ -1886,10 +1906,10 @@ mod tests {
         screen_compute_dependent(ri, st, 2024, &ty2024_params()).map(|r| r.reason)
     }
 
-    // ── §G-21 — Form 8283 Section B lines 5a/5b/5c, the restriction questions ────────────────────
+    // ── §G-21 — the restriction questions, re-keyed by r3 I-2/I-3 ────────────────────────────────
 
-    /// A Section-B donation, i.e. one whose claimed deduction is over the $5,000 appraisal threshold.
-    fn section_b_state(claimed: Usd) -> LedgerState {
+    /// A donation of `claimed`, made in 2024.
+    fn donation_state(claimed: Usd) -> LedgerState {
         use crate::state::{Removal, RemovalKind, RemovalLeg};
         LedgerState {
             removals: vec![Removal {
@@ -1898,94 +1918,123 @@ mod tests {
                 removed_at: date!(2024 - 09 - 09),
                 legs: Vec::<RemovalLeg>::new(),
                 appraisal_required: true,
-                donor_acquired_at: None,
                 claimed_deduction: Some(claimed),
+                donor_acquired_at: None,
                 donee: Some("Habitat".into()),
             }],
             ..Default::default()
         }
     }
 
-    /// ★★★ **B1 kill for §G-21, the MANDATORY half.** Form 8283 Section B asks three questions the
-    /// filer alone can answer — 5a (a restriction on the donee's use or disposition), 5b (a retained
-    /// right to the income or possession), 5c (a restriction limiting the donee's right to use). A
-    /// "Yes" to any of them reduces or denies the §170 deduction under Reg §1.170A-7, and btctax
-    /// deducts at **full fair market value**. So on a Section-B year the answer is not optional:
-    /// unanswered refuses, and "Yes" refuses. Only an explicit **No** files.
+    /// ★★★ **r3 I-2 — the gate was TOO NARROW, and the gap was an UNDERSTATEMENT.**
     ///
-    /// Mutation-verified: deleting the `None` arm reds the first assert; deleting the `Some(true)` arm
-    /// reds the second; deleting the whole block reds both.
+    /// The refusal was keyed on `year_donation_deduction > $5,000`, the Form 8283 SECTION split. But
+    /// §170(f)(11)(C)'s $5,000 only decides which section of the form you file — Reg §1.170A-7 and
+    /// §170(f)(3)(A) reduce or deny a restricted gift's deduction at EVERY dollar amount. So a filer
+    /// who explicitly declared a restriction on a $4,000 donation had the declaration discarded and
+    /// the full fair market value deducted: btctax filing a number it held the filer's own testimony
+    /// against.
+    ///
+    /// Mutation-verified: restoring the `> QUALIFIED_APPRAISAL_THRESHOLD` guard on the `Some(true)`
+    /// arm reds the sub-threshold row.
     #[test]
-    fn a_section_b_year_refuses_until_the_restriction_questions_are_answered_no() {
-        let st = section_b_state(dec!(9000));
-        let base = ReturnInputs {
-            filing_status: FilingStatus::Single,
-            ..Default::default()
+    fn a_declared_restriction_refuses_at_any_amount_not_just_over_5000() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let screened = |claimed: Usd, answer: Option<bool>| {
+            let ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                donations_had_restrictions: answer,
+                // Force the itemized election so the §170 deduction is genuinely claimed.
+                schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
+                    salt_state_estimated_payments: dec!(10000),
+                    mortgage_interest_1098: dec!(20000),
+                    ..Default::default()
+                }),
+                w2s: vec![w2(
+                    Owner::Taxpayer,
+                    dec!(200000),
+                    dec!(168600),
+                    dec!(200000),
+                )],
+                ..Default::default()
+            };
+            let st = donation_state(claimed);
+            let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+            assert!(ar.deduction_is_itemized, "the fixture must itemize");
+            screen_absolute(&ri, &ar, &p, &st, 2024).map(|r| r.reason)
         };
 
-        // (1) Never asked ⇒ the year is not computable. `0` here would be FABRICATED testimony:
-        //     three "No" boxes nobody said.
-        let unanswered = ReturnInputs {
-            donations_had_restrictions: None,
-            ..base.clone()
-        };
+        // ★ THE DEFECT: a declared restriction under $5,000 sailed through and deducted full FMV.
         assert_eq!(
-            screened(&unanswered, &st),
+            screened(dec!(4000), Some(true)),
             Some(RefuseReason::DonationRestrictionsUnresolved),
-            "a Section B 8283 prints 5a/5b/5c; btctax must not answer them for the filer"
+            "Reg §1.170A-7 has no dollar floor — a restricted gift's deduction is wrong at $4,000 too"
+        );
+        assert_eq!(
+            screened(dec!(9000), Some(true)),
+            Some(RefuseReason::DonationRestrictionsUnresolved),
+            "…and still refuses over the threshold"
         );
 
-        // (2) Answered YES ⇒ still refuses, and for the OPPOSITE reason: the answer is known and it
-        //     says the FMV deduction btctax computes is too large. btctax cannot tell which gift.
-        let restricted = ReturnInputs {
-            donations_had_restrictions: Some(true),
-            ..base.clone()
-        };
+        // UNANSWERED is different, and correctly still keyed on $5,000: below it the form never
+        // PRINTS 5a/5b/5c, so silence forgoes nothing and asserts nothing.
         assert_eq!(
-            screened(&restricted, &st),
-            Some(RefuseReason::DonationRestrictionsUnresolved),
-            "a restricted gift's §170 deduction is smaller than FMV — refuse, never overstate it"
-        );
-
-        // (3) Answered NO ⇒ the ordinary case, and it files.
-        let clean = ReturnInputs {
-            donations_had_restrictions: Some(false),
-            ..base.clone()
-        };
-        assert_eq!(
-            screened(&clean, &st),
+            screened(dec!(4000), None),
             None,
-            "\"no strings attached\" is the common case and must not be blocked"
+            "a Section A year never poses the question — do not block a small donor"
         );
+        assert_eq!(
+            screened(dec!(9000), None),
+            Some(RefuseReason::DonationRestrictionsUnresolved),
+            "a Section B year PRINTS the three boxes — btctax may not answer them for the filer"
+        );
+
+        // And an explicit No files at both sizes.
+        assert_eq!(screened(dec!(4000), Some(false)), None);
+        assert_eq!(screened(dec!(9000), Some(false)), None);
     }
 
-    /// ★ The gate is SCOPED to Section B. A donation at or below $5,000 files a Section **A**, which
-    /// carries no 5a/5b/5c — so an unanswered filer there must sail through. Getting this wrong would
-    /// block every small donor on a question their form never prints.
+    /// ★★★ **r3 I-3 — the gate was TOO WIDE, and it BLOCKED a correct return.**
     ///
-    /// Mutation-verified twice, and the boundary is the point: dropping the threshold comparison
-    /// (gate every donor) reds, AND widening `>` to `>=` reds on exactly `$5,000` — the form's own
-    /// split is "**more than** $5,000" for Section B, so a gift *at* the threshold is Section A.
+    /// `year_donation_deduction` reads the LEDGER, not the return. A filer who takes the STANDARD
+    /// deduction claims no §170 deduction and attaches no Form 8283 at all (`packet.rs`: "a
+    /// standard-deduction year with donations files none"), so a restriction changes no figure on
+    /// the return — yet the old gate refused them, and the refusal was **unescapable**: the only
+    /// exits were answering "No" (perjury) or deleting a real ledger event. Its message also
+    /// asserted "this year files a Form 8283 SECTION B", which was simply false.
+    ///
+    /// Mutation-verified: dropping the `ar.deduction_is_itemized` term reds both rows.
     #[test]
-    fn a_section_a_year_never_asks_the_restriction_questions() {
-        let unanswered = ReturnInputs {
-            filing_status: FilingStatus::Single,
-            donations_had_restrictions: None,
-            ..Default::default()
+    fn a_standard_deduction_year_is_never_blocked_by_the_restriction_questions() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let screened = |answer: Option<bool>| {
+            let ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                donations_had_restrictions: answer,
+                // No Schedule A inputs ⇒ itemized ($6,000 of gifts) < standard ($14,600).
+                w2s: vec![w2(Owner::Taxpayer, dec!(80000), dec!(80000), dec!(80000))],
+                ..Default::default()
+            };
+            let st = donation_state(dec!(6000));
+            let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+            assert!(
+                !ar.deduction_is_itemized,
+                "the fixture must take the STANDARD deduction"
+            );
+            screen_absolute(&ri, &ar, &p, &st, 2024).map(|r| r.reason)
         };
-        for claimed in [dec!(500), dec!(4999), dec!(5000)] {
-            assert_ne!(
-                screened(&unanswered, &section_b_state(claimed)),
-                Some(RefuseReason::DonationRestrictionsUnresolved),
-                "${claimed} files a Section A, which does not print 5a/5b/5c"
+
+        for answer in [None, Some(true), Some(false)] {
+            assert_eq!(
+                screened(answer),
+                None,
+                "a standard-deduction year claims no §170 deduction and files no 8283 — the \
+                 restriction cannot move a figure, so refusing is a false block with no exit \
+                 (answer was {answer:?})"
             );
         }
-        // …and one dollar over, it does.
-        assert_eq!(
-            screened(&unanswered, &section_b_state(dec!(5001))),
-            Some(RefuseReason::DonationRestrictionsUnresolved),
-            "over $5,000 is Section B"
-        );
     }
 
     /// ★ **Fable P6 r1 I6.** The Form 8283 trigger is an AGGREGATE — Schedule A line 12's "over $500" and
@@ -3243,14 +3292,17 @@ mod tests {
         let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
         // TI-before-QBI = 251,000 − 14,600 = 236,400 > 191,950 → refuse.
         assert_eq!(
-            screen_absolute(&ri, &ar, &p).map(|r| r.reason),
+            screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024).map(|r| r.reason),
             Some(RefuseReason::QbiAboveThreshold)
         );
         // Drop the REIT dividends → no QBI at all → no refuse even at the same high income.
         let mut no_qbi = ri.clone();
         no_qbi.div_1099[0].box5_section_199a = Usd::ZERO;
         let ar2 = assemble_absolute(&no_qbi, &empty_ledger(), &p, &table, 2024);
-        assert_eq!(screen_absolute(&no_qbi, &ar2, &p), None);
+        assert_eq!(
+            screen_absolute(&no_qbi, &ar2, &p, &empty_ledger(), 2024),
+            None
+        );
     }
 
     /// ★ **Fable P7 r1 I2.** The same §199A(e)(2) refuse, driven by a **Schedule C trade or business**
@@ -3291,7 +3343,7 @@ mod tests {
             "TI-before-QBI must clear the §199A(e)(2) threshold, else this test is vacuous"
         );
         assert_eq!(
-            screen_absolute(&ri, &ar, &p).map(|r| r.reason),
+            screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024).map(|r| r.reason),
             Some(RefuseReason::QbiAboveThreshold),
             "an over-threshold Schedule C business must REFUSE — 8995-A's wage/UBIA limits are unmodeled"
         );
@@ -3316,7 +3368,7 @@ mod tests {
         // AGI = 5,000 wages + L7(−2,000 §1211-limited carryforward loss) = 3,000; std 14,600 → TI = 0.
         assert_eq!(ar.taxable_income, Usd::ZERO);
         assert_eq!(
-            screen_absolute(&ri, &ar, &p).map(|r| r.reason),
+            screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024).map(|r| r.reason),
             Some(RefuseReason::TaxableIncomeNonPositiveWithCarryforward)
         );
         // No carryforward → still TI = 0, but a refund-only filer is NOT refused.
@@ -3324,7 +3376,10 @@ mod tests {
         norf.capital_loss_carryforward_in = Carryforward::default();
         let ar2 = assemble_absolute(&norf, &empty_ledger(), &p, &table, 2024);
         assert_eq!(ar2.taxable_income, Usd::ZERO);
-        assert_eq!(screen_absolute(&norf, &ar2, &p), None);
+        assert_eq!(
+            screen_absolute(&norf, &ar2, &p, &empty_ledger(), 2024),
+            None
+        );
     }
 
     // ── L16 regular tax + §7.2 Schedule-D routing (Phase 4 task 2) ────────────────────────────────
@@ -3748,14 +3803,17 @@ mod tests {
             "no Form 6251 attachment required"
         );
         assert_eq!(
-            screen_absolute(&high, &ar_high, &p),
+            screen_absolute(&high, &ar_high, &p, &empty_ledger(), 2024),
             None,
             "a screen-tripping, zero-AMT filer must now COMPUTE, not refuse"
         );
         // $150k wages → line 11 = 64,300 ≤ 232,600 and 26% × it < regular tax → cleared (no refuse).
         let common = wages_single(dec!(150000));
         let ar_common = assemble_absolute(&common, &empty_ledger(), &p, &table, 2024);
-        assert_eq!(screen_absolute(&common, &ar_common, &p), None);
+        assert_eq!(
+            screen_absolute(&common, &ar_common, &p, &empty_ledger(), 2024),
+            None
+        );
     }
 
     /// ★ REGRESSION (whole-branch review, Critical) — a **Qualifying Surviving Spouse** full return must
@@ -3850,7 +3908,7 @@ mod tests {
         assert_eq!(ar.amt.line11, Usd::ZERO, "Form 6251 line 11");
         assert_eq!(ar.amt.amt(), Usd::ZERO, "→ Schedule 2 line 2");
         // 4. And the return computes rather than refusing.
-        assert_eq!(screen_absolute(&ri, &ar, &p), None);
+        assert_eq!(screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024), None);
     }
 
     /// ★ REGRESSION (2026-07-27, `fix/amt-screen-line2`) — **an ITEMIZER must not have their non-SALT
@@ -3925,7 +3983,7 @@ mod tests {
         );
         // (1) The guarantee: no false refusal. This is the assertion a filer would feel.
         assert_eq!(
-            screen_absolute(&ri, &ar, &p),
+            screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024),
             None,
             "an ordinary MFJ itemizer with $300k of wages owes no AMT and Form 6251 line 7 lands below \
              line 10; adding back the AMT-allowed mortgage/charitable deductions manufactures a false \
@@ -4628,6 +4686,44 @@ mod tests {
             "a user-entered business-loss carryforward needs --force to overwrite"
         );
         assert!(apply_carryover_writeback(&ar, user, true).is_ok());
+    }
+
+    /// ★★★ **r3 I-4 — a provenance stamp is a CLAIM OF KNOWLEDGE, and this one was unfounded.**
+    ///
+    /// `apply_carryover_writeback` stamped `capital_loss_carryforward_in_provenance = Computed`
+    /// without ever assigning the value — there is no capital-loss carryover-OUT on `AbsoluteReturn`
+    /// to assign, because the §1211/§1212 Capital Loss Carryover Worksheet is unmodeled in v1. The
+    /// field's own doc says `Computed` means btctax "derived it from a prior year it actually
+    /// computed"; it had derived nothing. The damage was silence: `BenefitCarryoversNotStated`
+    /// defines "unknown" as `zero && User`, so the false stamp made next year stop telling a filer
+    /// that btctax has no capital-loss carryover on file — for a filer who may genuinely have one.
+    ///
+    /// Mutation-verified: restoring the stamp reds this test.
+    #[test]
+    fn the_writeback_does_not_claim_to_have_computed_a_capital_loss_carryover() {
+        let ar = ar_with_carryovers();
+        let next = apply_carryover_writeback(&ar, ReturnInputs::default(), false).unwrap();
+
+        assert_eq!(
+            next.capital_loss_carryforward_in,
+            Carryforward::default(),
+            "nothing writes this — the §1211/§1212 worksheet is unmodeled"
+        );
+        assert_eq!(
+            next.capital_loss_carryforward_in_provenance,
+            CarryProvenance::User,
+            "★ so the provenance must stay at its default. Stamping `Computed` on a value the code \
+             never assigns is a false claim of knowledge, and it silences the advisory that tells \
+             the filer btctax has no carryover on file"
+        );
+
+        // The CHARITABLE sibling is honest — the value IS written one line above the stamp — so the
+        // fix must not have removed it wholesale.
+        assert_eq!(
+            next.charitable_carryover_in_provenance,
+            CarryProvenance::Computed,
+            "the charitable stamp is founded: `charitable_carryover_out` is real and is assigned"
+        );
     }
 
     /// Write-back into a FRESH next year: the computed carryovers become next year's carryover-in, stamped

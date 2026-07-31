@@ -460,15 +460,16 @@ pub fn advisories(
         .spouse
         .as_ref()
         .is_some_and(|s| s.date_of_birth.is_some());
-    let spouse_no_dob = ri.filing_status == FilingStatus::Mfj && !spouse_dob_on_file;
+    let spouse_no_dob = crate::tax::questions::spouse_63f_status_permits(ri) && !spouse_dob_on_file;
     if taxpayer_no_dob || spouse_no_dob {
         out.push(Advisory::AgedBoxForfeitedNoDob { per_box });
     }
 
     // ★ §G-9: the OTHER way to forfeit the aged box — a qualifying DOB is on file but the death
     // question was skipped, so `is_aged` forgoes rather than resolve the carve-out by assuming the
-    // person lived. Counted per person, spouse only on MFJ (mirrors `AgedBlindBoxes::for_return`,
-    // which is the derivation that actually decides the deduction).
+    // person lived. Counted per person; the spouse term asks `spouse_63f_boxes_count`, i.e. exactly
+    // when a spouse box was on the table to lose (r3 I-1 — this said "only on MFJ", which `fd9c15f`
+    // falsified when it made the boxes claimable on a qualifying MFS return).
     let forgone = |p: &crate::tax::return_inputs::Person, died: Option<bool>| {
         crate::tax::return_1040::aged_box_forgone_for_unanswered_death(
             p.date_of_birth,
@@ -481,7 +482,7 @@ pub fn advisories(
         &ri.header.taxpayer,
         ri.header.taxpayer_died_during_year,
     )) + usize::from(
-        ri.filing_status == FilingStatus::Mfj
+        crate::tax::questions::spouse_63f_status_permits(ri)
             && ri
                 .header
                 .spouse
@@ -496,11 +497,13 @@ pub fn advisories(
     }
 
     // ★ §63(f) BLINDNESS forgone (P9 §2.2) — same statute, rate and worksheet line as the aged box, and it
-    // STACKS. Fires on `blind.is_none()` (never asked), never on `Some(false)`, counting the spouse box only
-    // on MFJ (an ABSENT MFJ spouse forfeits too; MFS never counts the spouse — mirrors `AgedBlindBoxes`).
+    // STACKS. Fires on `blind.is_none()` (never asked), never on `Some(false)`, counting the spouse box
+    // through `spouse_63f_boxes_count` (an ABSENT spouse whose boxes WOULD count forfeits too). r3 I-1:
+    // this said "MFS never counts the spouse", which is no longer true on a qualifying MFS return.
     let taxpayer_no_blind = ri.header.taxpayer.blind.is_none();
     let spouse_blind_on_file = ri.header.spouse.as_ref().is_some_and(|s| s.blind.is_some());
-    let spouse_no_blind = ri.filing_status == FilingStatus::Mfj && !spouse_blind_on_file;
+    let spouse_no_blind =
+        crate::tax::questions::spouse_63f_status_permits(ri) && !spouse_blind_on_file;
     let blind_persons = usize::from(taxpayer_no_blind) + usize::from(spouse_no_blind);
     if blind_persons > 0 {
         out.push(Advisory::BlindBoxForfeitedNotDeclared {
@@ -572,11 +575,17 @@ pub fn advisories(
         }
     }
 
-    // ★★ §G-20 — the MFS spouse's §63(f) boxes. Fires only when the filer has actually TOLD us
-    // something that would have qualified the spouse, so it never appears on an MFS return with no
-    // spouse data. btctax asks about the spouse's blindness on MFS and then discards the answer; the
-    // least it can do is say so.
-    if ri.filing_status == FilingStatus::Mfs {
+    // ★★ §G-20 — the MFS spouse's §63(f) boxes, forgone because the i1040gi conditions are NOT met.
+    // Fires only when the filer has actually TOLD us something that would have qualified the spouse,
+    // so it never appears on an MFS return with no spouse data.
+    //
+    // ★★★ r3 I-1 — AND ONLY WHEN THE BOXES ARE NOT ACTUALLY CLAIMED. `fd9c15f` made them claimable
+    // when all three conditions are affirmatively answered; this advisory predates that commit by two
+    // and was left keyed on the filing status alone, so it fired on the very returns the fix enables,
+    // telling a filer whose boxes btctax had ALREADY claimed that "the boxes are yours to check by
+    // hand". Acting on it double-counts them — an UNDERSTATEMENT on a return signed under §6065.
+    // The guard is now the same predicate the deduction asks.
+    if ri.filing_status == FilingStatus::Mfs && !crate::tax::questions::spouse_63f_boxes_count(ri) {
         if let Some(sp) = ri.header.spouse.as_ref() {
             let aged = sp
                 .date_of_birth
@@ -960,6 +969,145 @@ mod tests {
                 .message()
                 .contains("UNDERSTATED"),
             "the sibling goes the other way — if both ever say the same thing, one is wrong"
+        );
+    }
+    /// ★★★ **r3 I-1 — the review's top finding, and an UNDERSTATEMENT path.** `fd9c15f` made the MFS
+    /// spouse's §63(f) boxes CLAIMABLE when all three i1040gi conditions are affirmatively met, and
+    /// routed the deduction through `questions::spouse_63f_boxes_count`. The four §63(f) advisories,
+    /// written two commits earlier, were left keyed on `filing_status == Mfj` — so on exactly the
+    /// returns the fix exists to enable, `Mfs63fSpouseBoxesForgone` still fired, telling the filer
+    /// their tax was OVERSTATED and *"the boxes are yours to check by hand"* while btctax had already
+    /// claimed them. A filer who acted on it would DOUBLE-COUNT the boxes on a return signed
+    /// under §6065.
+    ///
+    /// The advisory now asks the same predicate the deduction asks. Both directions are pinned: it
+    /// must be SILENT when the boxes are claimed, and must still FIRE when they are genuinely forgone.
+    ///
+    /// Mutation-verified: reverting the guard to `filing_status == Mfs` alone reds the first block.
+    #[test]
+    fn the_mfs_63f_advisory_is_silent_once_the_boxes_are_actually_claimed() {
+        let old = time::macros::date!(1955 - 03 - 02); // 65+ in 2024
+        let run = |qualify: bool| {
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Mfs,
+                ..Default::default()
+            };
+            ri.header.spouse = Some(crate::tax::return_inputs::Person {
+                date_of_birth: Some(old),
+                blind: Some(true),
+                ..Default::default()
+            });
+            if qualify {
+                // The three i1040gi conditions, in the CLAIMING direction.
+                ri.header.spouse_had_no_income = Some(true);
+                ri.header.spouse_not_filing_a_return = Some(true);
+                ri.header.can_be_claimed_as_dependent_spouse = Some(false);
+            }
+            let counted = crate::tax::questions::spouse_63f_boxes_count(&ri);
+            let fired = advisories(
+                &ri,
+                &LedgerState::default(),
+                dec!(90000),
+                dec!(90000),
+                Usd::ZERO,
+                &params(),
+                2024,
+                false,
+            )
+            .into_iter()
+            .any(|a| matches!(a, Advisory::Mfs63fSpouseBoxesForgone { .. }));
+            (counted, fired)
+        };
+
+        // ★ QUALIFYING: the boxes ARE counted, so nothing was forgone and the advisory must be SILENT.
+        assert_eq!(
+            run(true),
+            (true, false),
+            "the boxes are claimed — an advisory saying they were forgone invites the filer to \
+             claim them a SECOND time"
+        );
+
+        // ★ NOT QUALIFYING: the boxes are genuinely forgone, so the advisory must still fire. This is
+        //   the half a careless fix would break, leaving a silent conservative omission (§3.4).
+        assert_eq!(
+            run(false),
+            (false, true),
+            "unanswered conditions forgo the boxes — §3.4 permits that only if the filer is TOLD"
+        );
+    }
+
+    /// ★★ **r3 I-1, the FALSE-NEGATIVE half.** The three *forfeit* advisories counted the spouse only
+    /// on MFJ, so on a QUALIFYING MFS return — where the boxes are now claimable — a spouse with no
+    /// DOB, an unanswered death question, or an undeclared blindness forfeited a box in silence.
+    /// Each one now uses `spouse_63f_boxes_count`, i.e. it speaks exactly when a spouse box was on
+    /// the table to lose.
+    ///
+    /// Mutation-verified: reverting any one guard to `== Mfj` reds its own row by name.
+    #[test]
+    fn the_forfeit_advisories_speak_for_a_qualifying_mfs_spouse() {
+        use crate::tax::return_inputs::Person;
+        let old = time::macros::date!(1955 - 03 - 02);
+        let qualifying_mfs = |sp: Person| {
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Mfs,
+                ..Default::default()
+            };
+            ri.header.taxpayer.date_of_birth = Some(time::macros::date!(1990 - 01 - 01));
+            ri.header.taxpayer.blind = Some(false);
+            ri.header.spouse = Some(sp);
+            ri.header.spouse_had_no_income = Some(true);
+            ri.header.spouse_not_filing_a_return = Some(true);
+            ri.header.can_be_claimed_as_dependent_spouse = Some(false);
+            advisories(
+                &ri,
+                &LedgerState::default(),
+                dec!(90000),
+                dec!(90000),
+                Usd::ZERO,
+                &params(),
+                2024,
+                false,
+            )
+        };
+        let has = |v: &[Advisory], f: fn(&Advisory) -> bool| v.iter().any(f);
+
+        // (1) No DOB on file ⇒ the aged box cannot be evaluated at all.
+        let v = qualifying_mfs(Person {
+            date_of_birth: None,
+            blind: Some(false),
+            ..Default::default()
+        });
+        assert!(
+            has(&v, |a| matches!(a, Advisory::AgedBoxForfeitedNoDob { .. })),
+            "a qualifying MFS spouse with no DOB forfeits the aged box — say so"
+        );
+
+        // (2) A qualifying DOB but the death question was never answered ⇒ `is_aged` forgoes.
+        let v = qualifying_mfs(Person {
+            date_of_birth: Some(old),
+            blind: Some(false),
+            ..Default::default()
+        });
+        assert!(
+            has(&v, |a| matches!(
+                a,
+                Advisory::AgedBoxForfeitedDeathUnanswered { .. }
+            )),
+            "an unanswered death question forgoes the aged box on a qualifying MFS return too"
+        );
+
+        // (3) Blindness never declared ⇒ the blind box is forgone.
+        let v = qualifying_mfs(Person {
+            date_of_birth: Some(old),
+            blind: None,
+            ..Default::default()
+        });
+        assert!(
+            has(&v, |a| matches!(
+                a,
+                Advisory::BlindBoxForfeitedNotDeclared { .. }
+            )),
+            "an undeclared blindness forgoes the box on a qualifying MFS return too"
         );
     }
 

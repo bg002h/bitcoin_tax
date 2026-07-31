@@ -121,16 +121,32 @@ impl QuestionId {
 /// asked). Two copies would drift into asking a question whose answer nothing reads, or — worse —
 /// counting a box whose carve-out was never posed.
 pub fn spouse_63f_boxes_count(ri: &ReturnInputs) -> bool {
-    ri.header.spouse.is_some()
-        && match ri.filing_status {
-            FilingStatus::Mfj => true,
-            FilingStatus::Mfs => {
-                ri.header.spouse_had_no_income == Some(true)
-                    && ri.header.spouse_not_filing_a_return == Some(true)
-                    && ri.header.can_be_claimed_as_dependent_spouse == Some(false)
-            }
-            _ => false,
+    ri.header.spouse.is_some() && spouse_63f_status_permits(ri)
+}
+
+/// Does the FILING STATUS (plus, on MFS, the three i1040gi conditions) permit a spouse §63(f) box —
+/// **ignoring whether a spouse record exists**?
+///
+/// ★★★ r3 I-1 — the two predicates are split because their consumers ask different questions, and
+/// collapsing them broke a case. [`spouse_63f_boxes_count`] decides the **deduction**, so it needs a
+/// spouse record: no record, no date of birth, no box. The §63(f) **advisories** are about boxes that
+/// were FORGONE, and an absent MFJ spouse record is *itself* one of the ways to forgo one — so they
+/// must fire precisely where there is nothing to count. Gating them on `spouse_63f_boxes_count` made
+/// the advisory silent in the case it exists to report (`mfj_with_no_spouse_record_still_advises_the_
+/// aged_box_p5_m2`, which caught it).
+///
+/// Everything except the record test lives here, so the two can never disagree about the *status*
+/// half — which is the coupling §G-20 was about.
+pub fn spouse_63f_status_permits(ri: &ReturnInputs) -> bool {
+    match ri.filing_status {
+        FilingStatus::Mfj => true,
+        FilingStatus::Mfs => {
+            ri.header.spouse_had_no_income == Some(true)
+                && ri.header.spouse_not_filing_a_return == Some(true)
+                && ri.header.can_be_claimed_as_dependent_spouse == Some(false)
         }
+        _ => false,
+    }
 }
 
 /// Is `id`'s question LIVE on this return? The single accessor for a liveness predicate outside the
@@ -540,10 +556,10 @@ pub enum SkippableId {
     /// 'Spouse was born before January 2, 1960.'"* Same class-(B) reasoning as
     /// [`Self::TaxpayerDiedDuringYear`].
     ///
-    /// ★ **Live only on MFJ**, not merely "a spouse record exists". `AgedBlindBoxes::for_return`
-    /// filters the spouse to `FilingStatus::Mfj` before it calls `is_aged` at all — *"on MFS the
-    /// spouse's blindness is not the taxpayer's checkbox"* — so on MFS this question's answer could
-    /// never move a figure. It was asked (and, before this, REFUSED) on returns where it was inert.
+    /// ★ **Live exactly when the spouse's §63(f) boxes can count** — `spouse_63f_boxes_count`, not
+    /// merely "a spouse record exists". On MFJ that is any spouse; on MFS it is a spouse meeting all
+    /// three i1040gi conditions. Anywhere else the answer could not move a figure, and it was
+    /// previously asked (and, before that, REFUSED) on returns where it was inert.
     SpouseDiedDuringYear,
     /// ★★ **Schedule B line 7a's unnumbered FBAR sub-question** — *"If 'Yes,' are you required to file
     /// FinCEN Form 114 … ?"* Live only when 7a is answered **Yes**: the form itself conditions it on 7a
@@ -843,9 +859,9 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
         help: "§63(f) / §G-9, spouse. Skipping forgoes the spouse's age-65 box if a qualifying date of \
                birth is on file; the advisory names the amount.",
         kind: SkippableKind::YesNo,
-        // ★ MFJ ONLY — `AgedBlindBoxes::for_return` counts a spouse box on no other status, so on MFS
-        // this answer is inert. Previously `spouse.is_some()`, which asked (and refused) on MFS returns
-        // where nothing could read the reply.
+        // ★ Asked exactly when a spouse box can COUNT — the same predicate `AgedBlindBoxes::for_return`
+        // uses, so the question and the figure can never disagree. Previously `spouse.is_some()`, which
+        // asked (and refused) on returns where nothing could read the reply.
         live: spouse_63f_boxes_count,
         get_bool: |ri| ri.header.spouse_died_during_year,
         set_bool: |ri, v| ri.header.spouse_died_during_year = Some(v),

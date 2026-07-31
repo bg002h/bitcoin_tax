@@ -785,7 +785,9 @@ fn export_full_return(
         return Err(refuse(r));
     }
     let ar = btctax_core::tax::return_1040::assemble_absolute(&ri, state, params, table, tax_year);
-    if let Some(r) = btctax_core::tax::return_1040::screen_absolute(&ri, &ar, params) {
+    if let Some(r) =
+        btctax_core::tax::return_1040::screen_absolute(&ri, &ar, params, state, tax_year)
+    {
         return Err(refuse(r));
     }
     // ★ §G-19d — the same advisories `report --tax-year` shows, carried out on the report so the

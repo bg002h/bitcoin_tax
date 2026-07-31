@@ -1400,6 +1400,24 @@ got.
 
 </details>
 
+### G-23 — `CarryProvenance` cannot express "the filer stated ZERO" (r3 Minor, 2026-07-31)
+
+**Owning phase: whenever the carryover surface is next touched.** Direction is SAFE (over-advising),
+which is why it is filed rather than gating.
+
+`CarryProvenance` has two values, `User` and `Computed`. The advisories define *unknown* as
+`value == 0 && provenance == User` — but a filer who opens the TUI's "Carryforwards from last year"
+section and honestly types `0` lands in exactly that state, so `QbiCarryforwardNotStated` still tells
+them *"btctax has no prior-year loss carryforward on file"*. It now does. A typed zero and the struct
+default are the same two bytes.
+
+★ **This is the [answered-ness invariant](#) again, in a new field.** The surface asks a question it
+cannot record the answer to — the same shape as a hardcoded zero being indistinguishable from a
+computed one. The fix is a third state (or an `Option`), not a tweak to the advisory's predicate.
+
+★ Related: the write-back's no-clobber guards are `> Usd::ZERO && == User`, so a filer's typed `0` is
+neither protected from overwrite nor recorded as an answer.
+
 ### G-21 — ✅ **CLOSED 2026-07-31** — Form 8283 5a/5b/5c, asked ONCE for the whole return
 
 **Owning phase: was "whenever 8283 Section B is next touched". This was the last of the §G-13 gaps
@@ -1486,7 +1504,25 @@ Schedule C uses. Yes is the LEFT widget (x 538) and No the right (x 559), matchi
 
 </details>
 
-### G-20 — the MFS spouse's §63(f) boxes: **now ADVISED (2026-07-31)**; widening still open
+### G-20 — the MFS spouse's §63(f) boxes: ✅ **CLOSED**, and r3 found the half that was missed
+
+★★★ **r3 I-1 — THE ADVISORIES WERE NOT MIGRATED WITH THE DEDUCTION, and the gap was an
+UNDERSTATEMENT path.** When the boxes became claimable, `AgedBlindBoxes::for_return` and the death
+questions' liveness moved to the shared predicate; the four §63(f) *advisories*, written two commits
+earlier, stayed on `filing_status == Mfj`. So on exactly the returns the fix enables,
+`Mfs63fSpouseBoxesForgone` fired and told a filer whose boxes btctax had ALREADY claimed that their
+tax was *"OVERSTATED … and the boxes are yours to check by hand"*. Acting on it double-counts them.
+Three sibling forfeit advisories went silent on MFS at the same time (a §3.4 breach).
+
+★★ **The fix needed TWO predicates, not one, and collapsing them broke a case.**
+`spouse_63f_boxes_count` (record exists AND status permits) decides the **deduction**;
+`spouse_63f_status_permits` (status only) drives the **advisories** — because an absent MFJ spouse
+record is *itself* a way to forgo a box, so the advisory must speak precisely where there is nothing
+to count. The first attempt gated the advisories on `boxes_count` and reddened
+`mfj_with_no_spouse_record_still_advises_the_aged_box_p5_m2`, which is the seen-red-once observation
+for the split.
+
+### (original entry) G-20 — the MFS spouse's §63(f) boxes: **now ADVISED (2026-07-31)**; widening still open
 
 **★★ Half closed, and it was the half §3.4 actually required.** The forfeit itself is lawful — btctax
 cannot verify i1040gi's three conditions, so it does not claim the boxes, which OVERSTATES tax. But

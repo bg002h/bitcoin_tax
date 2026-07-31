@@ -332,7 +332,7 @@ pub fn report_tax_year(
         ) {
             (Some(ri), Some(params), Some(table)) => {
                 let ar = btctax_core::assemble_absolute(&ri, &state, params, table, year);
-                match btctax_core::screen_absolute(&ri, &ar, params) {
+                match btctax_core::screen_absolute(&ri, &ar, params, &state, year) {
                     Some(refusal) => Some(format!(
                         "\n═══ Absolute filed return (Form 1040) — tax year {year} ═══\n  \
                          Profile source: {}\n  NOT COMPUTABLE [{:?}]: {}\n",
@@ -557,7 +557,7 @@ pub fn write_back_carryover(
     let ri = crate::return_inputs::get(s.conn(), year)?
         .ok_or_else(|| CliError::Usage(format!("no return_inputs stored for {year}")))?;
     let ar = btctax_core::assemble_absolute(&ri, &state, params, table, year);
-    if let Some(refusal) = btctax_core::screen_absolute(&ri, &ar, params) {
+    if let Some(refusal) = btctax_core::screen_absolute(&ri, &ar, params, &state, year) {
         return Err(CliError::Usage(format!(
             "the {year} absolute return is not computable [{:?}]: {} — carryover not written",
             refusal.reason, refusal.detail

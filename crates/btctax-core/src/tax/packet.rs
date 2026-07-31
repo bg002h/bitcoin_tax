@@ -268,14 +268,17 @@ impl AgedBlindBoxes {
     /// which is NOT in `legal/primary-sources/` — and neither is **26 USC §63**. So this rests on
     /// rung 2 plus the mechanism, not on rung 3 or 4. It is recorded that way rather than as settled.
     ///
-    /// ★★ **The spouse's boxes count only on MFJ HERE, and that is NARROWER THAN THE LAW.** i1040gi:
-    /// *"If your filing status is married filing separately and your spouse was born before January 2,
-    /// 1960, or was blind at the end of 2024, you can check the appropriate box(es) … if your spouse
-    /// had no income, isn't filing a return, and can't be claimed as a dependent on another person's
-    /// return."* btctax captures none of those three conditions, so it forgoes the boxes on MFS —
-    /// which OVERSTATES tax (the safe direction) but is a conservative omission, **not the rule**. The
-    /// previous wording here asserted it as the rule and was simply wrong. Filed as `FOLLOWUPS.md`
-    /// §G-20; the forfeit is currently UNADVISED, which §3.4 does not permit.
+    /// ★★ **The spouse's boxes are decided by `questions::spouse_63f_boxes_count`, ONE predicate
+    /// shared with the liveness of the questions that feed them.** i1040gi: *"If your filing status is
+    /// married filing separately and your spouse was born before January 2, 1960, or was blind at the
+    /// end of 2024, you can check the appropriate box(es) … if your spouse had no income, isn't filing
+    /// a return, and can't be claimed as a dependent on another person's return."* All three are now
+    /// captured, so MFS CAN claim them — and the gate fails closed: any unanswered or adverse
+    /// condition forgoes, because forgoing costs a deduction the filer can recover by answering while
+    /// granting one they are not entitled to understates a signed return. §G-20 is closed.
+    ///
+    /// ★ r3 I-1: the four §63(f) ADVISORIES ask this same predicate. They were left on `== Mfj` when
+    /// the deduction moved, and told a filer whose boxes were already claimed to claim them again.
     pub fn for_return(ri: &ReturnInputs, year: i32) -> Self {
         let t = &ri.header.taxpayer;
         // ★★★ §G-20 — a spouse's boxes count on MFJ, **or on MFS when all THREE of i1040gi's

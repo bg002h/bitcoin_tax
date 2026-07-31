@@ -2170,7 +2170,25 @@ fn the_8283_restriction_boxes_are_written_only_when_the_filer_answered_no() {
         );
     }
 
-    // (2) UNANSWERED ⇒ six blank widgets. btctax does not testify for the filer.
+    // (2) SECTION A ⇒ six blank widgets even though the filer answered "No". The form scopes these
+    //     to "a contribution listed in Section B, Part I", and on a Section A return that part is
+    //     empty — so the questions were never posed (r3 M-1).
+    let mut sec_a = row.clone();
+    sec_a.section = Some(Form8283Section::A);
+    sec_a.claimed_deduction = Some(dec!(3000));
+    let printed = form_8283_printed(&[sec_a], Some(false)).expect("there is a donation");
+    let pdf = btctax_forms::fill_form_8283_full(&printed, &kitchen_sink_header(), 2024)
+        .unwrap()
+        .expect("a donation ⇒ an 8283");
+    for fqn in boxes.iter().map(|(f, _)| *f).chain(yes_boxes) {
+        assert_eq!(
+            box_on_state(&pdf, fqn),
+            None,
+            "{fqn} is blank on a SECTION A return — Part I lists nothing for 5a/5b/5c to be about"
+        );
+    }
+
+    // (3) UNANSWERED ⇒ six blank widgets. btctax does not testify for the filer.
     let printed = form_8283_printed(&[row], None).expect("there is a donation");
     let pdf = btctax_forms::fill_form_8283_full(&printed, &kitchen_sink_header(), 2024)
         .unwrap()
