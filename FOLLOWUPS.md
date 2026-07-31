@@ -896,7 +896,7 @@ census likely has to record the decision's EXISTENCE separately from its CONTENT
 ★ **Never auto-shred.** Destroying evidence of diligence must be an explicit, informed act by the
 filer — never a default or a background job.
 
-### G-13 — ★★★ FIELD PROVENANCE — **COMPLETE: 15 of 15 forms censused (2026-07-30); 18 GAP fields**
+### G-13 — ★★★ FIELD PROVENANCE — **COMPLETE: 15 of 15 forms censused (2026-07-30); 16 GAP fields**
 
 **Owning phase: NOT B3.** Whole-surface, and it interlocks with **§G-11** (which blocks its honest
 form). Filed 2026-07-30. **Full design note: [`design/forms/FIELD_PROVENANCE.md`](design/forms/FIELD_PROVENANCE.md)** — read that first; this entry is the register hook.
@@ -924,7 +924,9 @@ filer WITH a prior-year QBI loss is never asked, so nothing stops the overstatem
 ★ This is exactly why `unmodeled` and `gap` must stay distinct: `unmodeled` is a benefit the filer
 FORGOES (safe — it can only overstate tax); a missing REDUCTION is the reverse.
 
-**Current gap count: 18 fields / 9 items**, pinned by `recorded_gaps_may_only_shrink` (`GAPS = 18`).
+**Current gap count: 16 fields / 8 items**, pinned by `recorded_gaps_may_only_shrink` (`GAPS = 16`).
+★ It was 18/9 for about an hour: **Schedule C line G was wrongly recorded as a gap and is now
+`unmodeled`** — see the correction note below, which is the most useful thing in this section.
 Counted per FIELD because that is the mechanical unit — a Yes/No is two widgets for one question.
 
 | # | form | line | what is never asked | direction |
@@ -936,19 +938,44 @@ Counted per FIELD because that is the mechanical unit — a Yes/No is two widget
 | 5 | Form 8283 | 5b | retained right to income/possession/voting (2 fields) | **UNDERSTATES** |
 | 6 | Form 8283 | 5c | restriction limiting the property to a particular use (2 fields) | **UNDERSTATES** |
 | 7 | Form 8283 | p2 header | name + TIN btctax HOLDS and never writes (2 fields) | administrative |
-| 8 | Schedule C | G | material participation (2 fields) | **UNDERSTATES** |
-| 9 | Schedule C | I / J | Form 1099 filing declarations (4 fields) | penalties |
+| 8 | Schedule C | I / J | Form 1099 filing declarations (4 fields) | penalties — **but see the open question below** |
 
-★★★ **Item 8 is the one that changes the tax, and it was adjudicated against primary sources rather
-than inferred.** Form 8960 (2024) line 4a reads *"…trusts, **trades or businesses**, etc."*; i8960's
-What's New says line 4a *"was amended to bring attention to certain income reported on Schedule C …
-that is subject to NIIT … to better reflect section 1411(c)(2)"*; and i8960 defines a passive activity
-as *"any trade or business in which you don't materially participate."* btctax's NII is
-`taxable_interest + ordinary_dividends + net_capital_gain + crypto_lending_interest`
-(`other_taxes.rs:232`) — Schedule C income never enters it and Form 8960 line 4a stays blank, which is
-correct **only under the answer btctax never obtained**. ★ Finding it also corrected an entry written
-earlier in the same burndown: the f8960 line 4a census reason had said "none modelled", which is wrong
-on the 2024 revision.
+★★★ **THE CORRECTION — Schedule C line G was wrongly a gap, and its prescribed fix was dangerous.**
+The original entry claimed a "No" makes the income passive §1411 NII that btctax fails to tax, and told
+an implementer to route a "No" into Form 8960 line 4a. **Building that would have added 3.8% NIIT on top
+of the SE tax already charged on the same dollars — the double tax §1411(c)(6) exists to forbid.** Three
+independent confirmations that the answer cannot change btctax's tax:
+
+1. **§1411(c)(6)**, i8960 verbatim: *"NII doesn't include any item taken into account in determining
+   self-employment income subject to tax under section 1401(b) for the tax year."* btctax's Schedule C
+   income is not filer-typed — it is DERIVED as exactly the SE base (`return_1040.rs:527`
+   `business_se_gross: se_net_income(state, year)`; `:1172` nets expenses off it; `:1201` calls it the
+   *"SAME figure that feeds Schedule 1 line 3 and Schedule SE"*). So it is §1401(b) income by
+   construction and is excluded from NII **whether or not** the filer materially participates.
+2. **i8960's line 4b BODY** names this exact back-out: *"Net income or loss from a section 1411 trade
+   or business that's taken into account in determining self-employment income."* A passive sole
+   proprietorship enters 4a and leaves on 4b, netting 4c = 0.
+3. **The repo already held the answer** — `design/full-return/FOLLOWUPS.md:481-483`: *"G especially: a
+   mining/staking trade-or-business with SE tax is materially participated by construction."*
+
+★★ **The root cause is worth more than the fix: I read Form 8960 line 4b's printed CAPTION
+("non-section-1411 trade or business") instead of its instruction BODY, and concluded it was "dead".**
+That is the paraphrase-instead-of-transcribe failure this project has a standing rule against —
+committed *inside the census built to prevent it*, and it then propagated into an f8960 entry I
+"corrected" on the same wrong reading. **A form's line title is not its instruction.** Both entries now
+carry the correction inline.
+
+★ **Honest residue, not rounded away:** below `SE_6017_FLOOR = $400` (`return_1040.rs:868`) no §1401(b)
+tax is due, so §1411(c)(6) shelters nothing. A passive proprietor under $400 of net earnings who is also
+over the NIIT threshold has at most **3.8% × $432 ≈ $16** of untaxed NII. Recorded, not counted.
+
+★★ **OPEN QUESTION this raised, for the owner — it moves the count again.** `btctax limitations`
+(`crates/btctax-cli/LIMITATIONS.md:231-233`) already tells the filer: *"Schedule C lines G, H, I, J —
+left blank (deferred to your pen) … Fill them in yourself."* If a **disclosed** deferral counts as
+honest provenance — and it is hard to argue it does not — then **lines I and J are not gaps either**,
+and the count drops to 12/6. The census criterion never distinguished "silently blank" from "blank and
+disclosed to the filer". Deciding that is a judgement call, not a mechanical one, so it is left open
+rather than settled unilaterally.
 
 ★★ **Item 7 is a different species from the rest and is why `gap` is not simply "unmodelled".** Every
 other gap is a question never asked; that one is a datum btctax **has** (it writes the name and TIN to

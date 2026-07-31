@@ -98,31 +98,47 @@ ssn  = "topmostSubform[0].Page1[0].f1_2[0]"
 "topmostSubform[0].Page1[0].c1_1[2]"          = { line = "F(3)",     rule = "unmodeled", reason = "Accounting method \"Other (specify)\" — AccountingMethod is a two-variant enum (Cash/Accrual), both mapped above, so the third box is unreachable by construction." }
 "topmostSubform[0].Page1[0].f1_9[0]"          = { line = "F(3) text", rule = "unmodeled", reason = "The write-in naming that other method — same." }
 
-# ── ★★★ GAP — line G, material participation ────────────────────────────────────────────────────
+# ── Line G — material participation ★ RE-ADJUDICATED 2026-07-30, was wrongly a `gap` ────────────
 # "Did you 'materially participate' in the operation of this business during 2024? If 'No,' see
 # instructions for limit on losses."
 #
-# btctax never asks, and the answer changes the TAX — not only the loss limit the line's own caption
-# mentions. Adjudicated against the primary sources rather than inferred:
+# ★★★ THIS ENTRY WAS WRONG WHEN FIRST WRITTEN, AND THE FIX IT PRESCRIBED WOULD HAVE INTRODUCED A
+#     DEFECT. It claimed a "No" makes the income passive §1411 NII that btctax fails to tax, and told
+#     the implementer to route a "No" into Form 8960 line 4a. Doing that would add 3.8% NIIT on top of
+#     the SE tax already charged on the same dollars — the double tax §1411(c)(6) exists to forbid.
 #
-#   - Form 8960 (2024) line 4a reads "Rental real estate, royalties, partnerships, S corporations,
-#     trusts, TRADES OR BUSINESSES, etc."
-#   - i8960, What's New, verbatim: "Trade or business income subject to net investment income tax
-#     (NIIT). Line 4a of Form 8960 was amended to bring attention to certain income reported on
-#     Schedule C (Form 1040) and Schedule E (Form 1040) that is subject to NIIT. This change was made
-#     … to better reflect section 1411(c)(2)."
-#   - i8960, Passive activities: "A passive activity includes any trade or business in which you don't
-#     materially participate."
+#     The error was reading Form 8960 line 4b's printed CAPTION ("non-section-1411 trade or business")
+#     instead of its instruction BODY. This is the paraphrase-instead-of-transcribe failure the
+#     project has a standing rule against, committed inside the census built to prevent it.
 #
-# So a sole proprietor who does NOT materially participate has passive business income that IS §1411
-# net investment income. btctax's NII is `taxable_interest + ordinary_dividends + net_capital_gain +
-# crypto_lending_interest` (other_taxes.rs:232) — Schedule C income never enters it, and Form 8960
-# line 4a is left blank. That is correct ONLY under the answer btctax never obtained.
+# WHY THE ANSWER CANNOT CHANGE THE TAX HERE — three independent confirmations:
 #
-# ★★ DIRECTION: UNDERSTATEMENT. The NIIT on that income is simply not computed. Close by adding a
-#    material-participation QuestionId and routing a "No" into Form 8960 line 4a.
-"topmostSubform[0].Page1[0].c1_2[0]" = { line = "G Yes", rule = "gap", reason = "\"Did you materially participate in the operation of this business during 2024?\" — never asked. A No makes the business passive under §469, so its income is §1411 NII (i8960: line 4a was amended to bring attention to Schedule C income subject to NIIT). btctax excludes Schedule C income from NII unconditionally, understating the NIIT." }
-"topmostSubform[0].Page1[0].c1_2[1]" = { line = "G No",  rule = "gap", reason = "The No half of the same unasked question — and the half that would change the tax." }
+#   1. §1411(c)(6), via i8960 verbatim (`design/forms/extract/i8960--2025.txt`): "NII doesn't include
+#      any item taken into account in determining self-employment income subject to tax under section
+#      1401(b) for the tax year." btctax's Schedule C income is not filer-typed — it is DERIVED as
+#      exactly the SE base (`return_1040.rs:527` `business_se_gross: se_net_income(state, year)`, and
+#      `return_1040.rs:1172` `schedule_c_net = business_se_gross − schedule_c_expenses`, the comment on
+#      :1201 saying it is the "SAME figure that feeds Schedule 1 line 3 and Schedule SE"). So every
+#      dollar btctax can put on Schedule C is §1401(b) self-employment income and is excluded from NII
+#      whether the filer materially participates or not.
+#   2. i8960's line 4b BODY names this exact back-out: "Net income or loss from a section 1411 trade
+#      or business that's taken into account in determining self-employment income." A passive sole
+#      proprietorship goes onto 4a and comes straight back out on 4b, leaving 4c = 0. `other_taxes.rs`
+#      reaching the same number by excluding it unconditionally is arithmetically identical.
+#   3. The repo had already reasoned this out and it was not grepped for:
+#      `design/full-return/FOLLOWUPS.md:481-483` — "G especially: a mining/staking trade-or-business
+#      with SE tax is materially participated by construction."
+#
+# ★ THE HONEST RESIDUE, stated rather than rounded away: below the §6017 floor
+#   (`SE_6017_FLOOR = $400`, `return_1040.rs:868`, applied at :1134) no §1401(b) tax is due, so
+#   §1411(c)(6) shelters nothing. A filer with passive Schedule C net earnings under $400 who is ALSO
+#   over the NIIT threshold has un-taxed NII of at most 3.8% × $432 ≈ **$16**. Recorded, not counted:
+#   the field is honestly accounted for, which is the criterion.
+#
+# ★ Also disclosed to the filer, not silently blank: `btctax limitations` (crates/btctax-cli/
+#   LIMITATIONS.md) already says "Schedule C lines G, H, I, J — left blank (deferred to your pen)".
+"topmostSubform[0].Page1[0].c1_2[0]" = { line = "G Yes", rule = "unmodeled", reason = "\"Did you materially participate in the operation of this business during 2024?\" — not asked, and the answer cannot change btctax's tax: its Schedule C income is DERIVED as the SE base (return_1040.rs:527), so §1411(c)(6) excludes it from NII either way (i8960 line 4b's body backs out a §1411 trade or business taken into account in determining SE income). Disclosed as a pen-deferral in LIMITATIONS.md. Residue: below the $400 §6017 floor no §1401(b) tax applies, so ≈$16 of NIIT could escape." }
+"topmostSubform[0].Page1[0].c1_2[1]" = { line = "G No",  rule = "unmodeled", reason = "The No half of the same question — same reasoning; a \"No\" would put the income on Form 8960 line 4a and take it straight back out on 4b." }
 
 # ── Line H ──────────────────────────────────────────────────────────────────────────────────────
 "topmostSubform[0].Page1[0].c1_3[0]" = { line = "H", rule = "unmodeled", reason = "\"If you started or acquired this business during 2024, check here\" — btctax collects no business start date. Informational: it flags a first-year business for the IRS and changes no figure on the return." }

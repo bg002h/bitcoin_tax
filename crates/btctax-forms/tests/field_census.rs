@@ -154,7 +154,7 @@ fn recorded_gaps_may_only_shrink() {
     // one radio) for ONE logical question. Fields is the mechanical unit — a question-level count
     // would need someone to decide what "one question" means, which is exactly the judgement this
     // ratchet is meant to avoid depending on.
-    const GAPS: usize = 18;
+    const GAPS: usize = 16;
 
     let mut found = Vec::new();
     for stem in CENSUSED {

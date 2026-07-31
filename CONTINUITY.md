@@ -9,8 +9,9 @@ _(Supersedes the 2026-06-28 edition, whose deep-research workflow completed long
 > **One line:** on **`main`** — the `feat/amt-e2-vector-population` work is **MERGED** (all five gates
 > green throughout; the branch's §0 order ①–⑥ is **complete**). **The §G-13 FIELD-PROVENANCE CENSUS is
 > DONE: 15 of 15 forms, 1158 AcroForm fields = 668 mapped + 490 censused, ZERO unaccounted**, and the
-> `CENSUS_NOT_YET_WRITTEN` ratchet is closed to `is_empty()`. It surfaced **18 gap fields / 9 unasked
-> items** — the register table is `FOLLOWUPS.md` §G-13. Two tracks remain open — **(A)** Schedule 1-A for
+> `CENSUS_NOT_YET_WRITTEN` ratchet is closed to `is_empty()`. It surfaced **16 gap fields / 8 unasked
+> items** — the register table is `FOLLOWUPS.md` §G-13. ★ One census entry (Schedule C line G) was
+> WRONG and is corrected there; read that note before trusting any single census reason. Two tracks remain open — **(A)** Schedule 1-A for
 > TY2025 (spec + plan green, task **T1 built**, T2–T7 untouched); **(B)** the form-authority pipeline
 > (steps 1–2 of 3 done for all 16 forms; the label reader, §5, is increment 1 built).
 > **The largest ARCHITECTURAL open item is §G-11 (§4a)** — the emitter cannot express "no testimony".
@@ -40,12 +41,16 @@ fields now carries a determinate provenance: filled, or recorded as `unmodeled` 
 **with a reason**. `CENSUS_NOT_YET_WRITTEN` ran 15 → 0 and its bound is now emptiness, so a 16th form
 cannot arrive uncensused — mutation-verified in both directions.
 
-**It found 18 gap fields / 9 unasked items — the table is in `FOLLOWUPS.md` §G-13.** The one that
-changes the tax is **Schedule C line G** (material participation): a non-materially-participating sole
-proprietor's income is passive and therefore §1411 NII, but btctax's NII omits Schedule C income
-unconditionally, so the NIIT is understated. Adjudicated against Form 8960 line 4a and i8960's own
-What's New, not inferred — and finding it corrected an f8960 census entry written earlier in the same
-burndown.
+**It found 16 gap fields / 8 unasked items — the table is in `FOLLOWUPS.md` §G-13.**
+
+★★★ **One of them was wrong, and finding that out is the most valuable thing the census produced.**
+Schedule C line G (material participation) was recorded as a gap that understated NIIT, with a
+prescribed fix — routing a "No" into Form 8960 line 4a — that would have **double-taxed SE income**.
+§1411(c)(6) already shelters it: btctax's Schedule C income is DERIVED as the SE base, so it is §1401(b)
+income whether or not the filer materially participates. The error was reading Form 8960 line 4b's
+printed **caption** instead of its instruction **body**, which names exactly that back-out. The repo had
+already reasoned it out at `design/full-return/FOLLOWUPS.md:481-483` and it was not grepped for.
+**A form's line title is not its instruction.**
 
 ★ **The method that worked, for the next form:** run the field probe, read each line's meaning from the
 form's **extracted text** (never from position alone), verify every claim about btctax's behaviour in
@@ -574,7 +579,7 @@ consult should answer.
 | §G-6c / §G-6d, E4-E6 | AMT Tier-2 items, parked behind the TY2025 pivot |
 | B3 T2-T7, B4 | Schedule 1-A build; filing assets + corpus |
 | — | **1 of 16 forms** has reached conformance (step 3 of the *form-authority* pipeline — distinct from the field census, which is complete) |
-| **§G-13 gaps** | ★★ **18 gap fields / 9 unasked items** from the completed census — table in `FOLLOWUPS.md` §G-13. Schedule C line G (material participation → NIIT) is the one that changes the tax |
+| **§G-13 gaps** | ★★ **16 gap fields / 8 unasked items** from the completed census — table in `FOLLOWUPS.md` §G-13. ★ an OPEN owner question could drop it to 12/6 — see the §G-13 note on disclosed pen-deferrals |
 | — | Schedule C carries ONE aggregate `expenses: Usd`, so line 28 prints a total whose addends (lines 8–27b) are all blank — recorded, deliberately not counted as a gap |
 | **§G-12** | btctax emits Form 8275 but **not 8275-R**, so a position contrary to a REGULATION cannot be disclosed — the duty is unrepresentable |
 | — | `AUTHORITY_CONFLICTS.md` is empty: we believe no reg governing our forms disagrees with the statute. **A statement about what we examined, not a guarantee.** |
