@@ -238,11 +238,11 @@ visible in one line of the form's own extracted text.
 |---|---|---|
 | 1 | **§G-19a** — the all-in §1411 display prints `§1411 0` off the model's PARTIAL NII, so a filer with rental income and a crypto loss year is under-reserved by 3.8 points. Fail-safe vs. a third "can't tell" state; costs a second `frozen_guard` pin exception either way | **owner judgment** |
 | 2 | **§G-21** — Form 8283 5a/5b/5c, the LAST §G-13 gap (6 of 6). Tax ruling settled; the obstacle is structural — the question registry is `ReturnInputs`-shaped and these are the first **per-donation** declarations. Recommended shape, pre-write refusal window and dumped on-states are all in the entry | **owner: where per-row answers live** |
-| 3 | **§G-20a** — capital-loss and charitable carryovers are silent conservative omissions and CANNOT be advised precisely: neither has a readable `CarryProvenance`, so a zero is uninterpretable. Needs a provenance handle on two more input types + a write-back interaction | ready, but a design change |
-| 4 | **§G-20 remainder** — actually CLAIMING the MFS spouse boxes needs the three i1040gi conditions collected, and is **coupled** to the death-gate MFJ liveness. Do not fix one without the other | ready |
+| ~~3~~ | ~~**§G-20a**~~ | ✅ **DONE** (`c7f3942`) — both benefit carryovers got sibling provenance scalars (NOT inside `Carryforward`, which is frozen) and an advisory that MIRRORS the QBI one's direction. ★ Spawned **§G-20b**: the advisory list now has TWO unconditional members; a third means the surface is the problem. |
+| ~~4~~ | ~~**§G-20 remainder**~~ | ✅ **DONE** (`fd9c15f`) — the boxes are claimable on MFS and the gate FAILS CLOSED (7 forgo cases pinned). ★ The coupling was resolved by making it ONE predicate shared by the deduction and the question liveness, not by keeping two in step. |
 | 5 | **archive review-by `2026-08-13`** — reds the WHOLE suite when it passes. The mechanical half is done (`1fc9867`); the DATE is a conscious decision and resetting it silently is what the gate exists to prevent | **owner** |
 | 6 | **§G-11** — the emitter cannot express "no testimony". Largest architectural item; needs its own spec | needs a spec |
-| 7 | **§G-12** — no Form 8275-R, so a position contrary to a REGULATION is unrepresentable | — |
+| 7 | **§G-12** — no Form 8275-R, so a position contrary to a REGULATION is unrepresentable | ⛔ **an ASSET the assistant cannot obtain** — `f8275r.pdf` is unarchived, there is no network, and harness A3 denies new archive paths at `Write` time. The unblock is one `curl` (the exact command is in the §G-12 entry). ★ My 2026-07-31 table wrongly showed NO blocker here; corrected. |
 | 8 | **B3 T2 / Schedule 1-A** — and its plan r3 was never independently reviewed (`design/ty2025/reviews/` holds only r1) | **owner: is B3 the track?** |
 
 ★★ **A pattern worth carrying, observed twice in two days and now written into §G-18:** *filling a

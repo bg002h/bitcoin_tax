@@ -1125,6 +1125,35 @@ the filer never sees how much is left. `live_questions` already enumerates; noth
 
 **Owning phase: unassigned** — a product decision before it is a build. Filed 2026-07-30.
 
+> ### ⛔ BLOCKED ON AN ASSET THE ASSISTANT CANNOT OBTAIN (established 2026-07-31)
+>
+> Attempted as part of a three-item batch and **stopped before writing code**, for two independent
+> reasons — recorded so the next attempt does not rediscover them:
+>
+> 1. **`f8275r.pdf` is not archived**, and the assistant cannot fetch it: there is no network, and
+>    harness **A3 denies a new archive path at `Write` time** by design. The archive convention also
+>    requires a URL note + sha256, which cannot be produced without the bytes.
+> 2. **The entry itself says this is "a product decision before it is a build"** with an unassigned
+>    owning phase. Building an emitter for a form whose *use* has not been decided is the wrong order.
+>
+> ★ **The unblock is one command**, since 8275-R is a **periodic** form (Rev. Month Year, no annual
+> edition) and follows the documented pattern in `design/forms/README.md`:
+>
+> ```sh
+> curl -sSL -o design/forms/periodic/f8275r.pdf https://www.irs.gov/pub/irs-pdf/f8275r.pdf
+> # then the same for the instructions if they are separate, and:
+> cargo run -p xtask -- forms extract      # writes the committed text layer
+> ```
+>
+> ★★ **What was considered and REJECTED as a partial build:** asking the filer *"is this position
+> contrary to a Treasury regulation?"* and refusing on Yes. It is in scope (the filer decides, not
+> btctax — §G-12 forbids only btctax *identifying* conflicts itself) and needs no PDF. It was rejected
+> because btctax has **no channel for a filer-authored contrary position at all**: the only 8275 it
+> emits is its own promoted-basis methodology disclosure, driven by `disclosure_8275(events, …)`. A
+> question with nothing to attach to would be ceremony, and it would land in the same
+> **per-position-vs-per-return** shape that blocks **§G-21** — which is an owner decision, not a
+> coincidence. Fix that shape once, for both.
+
 **The distinction, and it is not cosmetic.** Only **26 USC** is law. A Treasury regulation is the
 executive's *interpretation* of the statute: binding in practice, and **capable of being wrong** — regs
 are regularly held invalid for exceeding or contradicting the statute, the more so since *Loper Bright*
