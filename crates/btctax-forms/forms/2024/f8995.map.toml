@@ -69,3 +69,37 @@ line17 = "topmostSubform[0].Page1[0].f1_33[0]"   # "Total qualified REIT dividen
 [identity]
 name = "topmostSubform[0].Page1[0].f1_1[0]"
 ssn  = "topmostSubform[0].Page1[0].f1_2[0]"
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# ★★★ THE FIELD CENSUS (§G-13). See f8959.map.toml for the rule vocabulary.
+[census]
+
+# ── Line 1 rows B–E: btctax models ONE trade or business ─────────────────────────────────────────
+# `ReturnInputs.schedule_c` is a single `Option<ScheduleCInputs>`, so a second business is not
+# representable — rows B–E can never be reached. Row A (f1_3/4/5) IS mapped.
+"topmostSubform[0].Page1[0].Table[0].Ln1B_Row2[0].f1_6[0]"  = { line = "1(i)B",   rule = "unmodeled", reason = "Trade/business name, row B. btctax models a single Schedule C business, so rows B–E are unreachable." }
+"topmostSubform[0].Page1[0].Table[0].Ln1B_Row2[0].f1_7[0]"  = { line = "1(ii)B",  rule = "unmodeled", reason = "TIN, row B — same reason." }
+"topmostSubform[0].Page1[0].Table[0].Ln1B_Row2[0].f1_8[0]"  = { line = "1(iii)B", rule = "unmodeled", reason = "QBI amount, row B — same reason." }
+"topmostSubform[0].Page1[0].Table[0].Ln1C_Row3[0].f1_9[0]"  = { line = "1(i)C",   rule = "unmodeled", reason = "Trade/business name, row C — same reason." }
+"topmostSubform[0].Page1[0].Table[0].Ln1C_Row3[0].f1_10[0]" = { line = "1(ii)C",  rule = "unmodeled", reason = "TIN, row C — same reason." }
+"topmostSubform[0].Page1[0].Table[0].Ln1C_Row3[0].f1_11[0]" = { line = "1(iii)C", rule = "unmodeled", reason = "QBI amount, row C — same reason." }
+"topmostSubform[0].Page1[0].Table[0].Ln1D_Row4[0].f1_12[0]" = { line = "1(i)D",   rule = "unmodeled", reason = "Trade/business name, row D — same reason." }
+"topmostSubform[0].Page1[0].Table[0].Ln1D_Row4[0].f1_13[0]" = { line = "1(ii)D",  rule = "unmodeled", reason = "TIN, row D — same reason." }
+"topmostSubform[0].Page1[0].Table[0].Ln1D_Row4[0].f1_14[0]" = { line = "1(iii)D", rule = "unmodeled", reason = "QBI amount, row D — same reason." }
+"topmostSubform[0].Page1[0].Table[0].Ln1E_Row5[0].f1_15[0]" = { line = "1(i)E",   rule = "unmodeled", reason = "Trade/business name, row E — same reason." }
+"topmostSubform[0].Page1[0].Table[0].Ln1E_Row5[0].f1_16[0]" = { line = "1(ii)E",  rule = "unmodeled", reason = "TIN, row E — same reason." }
+"topmostSubform[0].Page1[0].Table[0].Ln1E_Row5[0].f1_17[0]" = { line = "1(iii)E", rule = "unmodeled", reason = "QBI amount, row E — same reason." }
+
+# ── ★★★ A GAP, AND THE FIRST ONE IN THE UNDERSTATEMENT DIRECTION ─────────────────────────────────
+# Line 3 is "Qualified business net (loss) carryforward from the prior year", printed in parentheses
+# because it is NEGATIVE. Line 4 combines lines 2 and 3, so line 3 REDUCES the deduction.
+#
+# ★★ Omitting it therefore INFLATES the QBI deduction and UNDERSTATES the tax — the direction this
+#    project holds to be worse than its opposite. That is why this is a `gap` and not `unmodeled`:
+#    `unmodeled` means a benefit the filer FORGOES by using btctax (safe, it can only overstate tax).
+#    A missing REDUCTION is the reverse.
+#
+# `qbi.rs:64` already records the choice in prose — "no QBI loss carryforward in v1 (Form 8995
+# lines 3 and 16 stay blank)" — but a filer WITH a prior-year QBI loss is never asked, so nothing
+# stops the overstated deduction. Closes by collecting the carryforward.
+"topmostSubform[0].Page1[0].f1_19[0]" = { line = "3", rule = "gap", reason = "Qualified business net (loss) carryforward from the prior year — SUBTRACTED at line 4. btctax neither models nor asks for it, so a filer with a prior-year QBI loss gets an INFLATED deduction and UNDERSTATED tax. Closes by collecting it." }

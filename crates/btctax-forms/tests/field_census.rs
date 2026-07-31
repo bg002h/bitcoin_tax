@@ -26,7 +26,7 @@ use std::collections::BTreeSet;
 /// have no recorded decision, and this list is how that number is burned down one form at a time.
 /// Forms whose `[census]` section IS written. This list and [`CENSUS_NOT_YET_WRITTEN`] must together
 /// partition the 15 census keys — so a form can never be dropped from both and silently escape.
-const CENSUSED: &[&str] = &["f8959", "schedule_se", "f1040sb", "f8949"];
+const CENSUSED: &[&str] = &["f8959", "schedule_se", "f1040sb", "f8949", "f8995"];
 
 const CENSUS_NOT_YET_WRITTEN: &[&str] = &[
     "f1040",
@@ -38,7 +38,6 @@ const CENSUS_NOT_YET_WRITTEN: &[&str] = &[
     "f8275",
     "f8283",
     "f8960",
-    "f8995",
     "schedule_d",
 ];
 
@@ -150,7 +149,7 @@ fn recorded_gaps_may_only_shrink() {
     // one radio) for ONE logical question. Fields is the mechanical unit — a question-level count
     // would need someone to decide what "one question" means, which is exactly the judgement this
     // ratchet is meant to avoid depending on.
-    const GAPS: usize = 3;
+    const GAPS: usize = 4;
 
     let mut found = Vec::new();
     for stem in CENSUSED {
@@ -226,7 +225,7 @@ fn the_two_lists_partition_every_form() {
 #[test]
 fn the_uncensused_list_may_only_shrink() {
     assert!(
-        CENSUS_NOT_YET_WRITTEN.len() <= 11,
+        CENSUS_NOT_YET_WRITTEN.len() <= 10,
         "the uncensused list has GROWN to {} — a new form must arrive with its census, or the \
          count of unaccounted fields silently rises",
         CENSUS_NOT_YET_WRITTEN.len()

@@ -896,7 +896,7 @@ census likely has to record the decision's EXISTENCE separately from its CONTENT
 ★ **Never auto-shred.** Destroying evidence of diligence must be an explicit, informed act by the
 filer — never a default or a background job.
 
-### G-13 — ★★★ FIELD PROVENANCE — **4 of 15 forms censused (2026-07-30); 3 GAPS recorded**
+### G-13 — ★★★ FIELD PROVENANCE — **5 of 15 forms censused (2026-07-30); 4 GAPS, one UNDERSTATING**
 
 **Owning phase: NOT B3.** Whole-surface, and it interlocks with **§G-11** (which blocks its honest
 form). Filed 2026-07-30. **Full design note: [`design/forms/FIELD_PROVENANCE.md`](design/forms/FIELD_PROVENANCE.md)** — read that first; this entry is the register hook.
@@ -916,7 +916,15 @@ Bank and Financial Accounts (FBAR)…?"* btctax collects 7a (`foreign_accounts`)
 Caution, verbatim: *"If required, failure to file FinCEN Form 114 may result in **substantial
 penalties**."*
 
-**Current gap count: 3 fields / 2 questions** — the Form 4361 minister box, and the FBAR pair (two
+★★★ **Form 8995 line 3 is the first gap in the UNDERSTATEMENT direction — the worst one.**
+*"Qualified business net (loss) carryforward from the prior year"*, printed in parentheses because it
+is NEGATIVE, and line 4 combines lines 2 and 3. So omitting it **inflates the QBI deduction and
+understates the tax**. `qbi.rs:64` records the v1 choice in prose ("lines 3 and 16 stay blank"), but a
+filer WITH a prior-year QBI loss is never asked, so nothing stops the overstatement.
+★ This is exactly why `unmodeled` and `gap` must stay distinct: `unmodeled` is a benefit the filer
+FORGOES (safe — it can only overstate tax); a missing REDUCTION is the reverse.
+
+**Current gap count: 4 fields / 3 questions** — the Form 4361 minister box, and the FBAR pair (two
 radio halves of one question). Counted per FIELD because that is the mechanical unit.
 
 **✅ The gate exists.** `btctax-forms/tests/field_census.rs` asserts `(map ∪ [census]) == the PDF's
