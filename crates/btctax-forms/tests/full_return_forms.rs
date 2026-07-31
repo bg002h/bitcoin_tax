@@ -1372,7 +1372,6 @@ fn schedule_d_full_refuses_a_negative_in_a_parenthesized_cell() {
 
 fn f1040() -> Form1040Lines {
     Form1040Lines {
-        line7_schedule_d_not_required: false,
         line1a: dec!(120000),
         line2a: dec!(1234),
         line1z: dec!(120000),
@@ -2621,4 +2620,58 @@ fn schedule_c_lines_i_and_j_print_the_filers_own_answer_and_nothing_when_unasked
     assert_eq!(on(&pdf, i_no).as_deref(), Some("No"));
     assert_eq!(on(&pdf, j_yes), None);
     assert_eq!(on(&pdf, j_no), None, "the form does not ask J after a No");
+}
+
+/// ★★★ §G-18, ANSWERED — Form 1040 line 7's *"If not required, check here"* box must stay **BLANK**,
+/// even on a return that attaches no Schedule D.
+///
+/// It was briefly CHECKED, driven off `ScheduleDLines::must_file()`. The r2 tax-lens review found the
+/// flaw: `must_file()` answers *"does **btctax's model** require a Schedule D"*, not *"does the
+/// **form** require one"*. The model has no input for Schedule D lines 4, 5, 11 or 12 (Forms 6252,
+/// 4684, 6781, 8824, 4797, 2439, or a K-1), so for a filer with any of those the box asserted under
+/// §6065 that no Schedule D was required — when one was.
+///
+/// ★★ A blank asserts NOTHING; a checked box is testimony. btctax can know "I have no reason to
+/// attach one"; only the filer can know "none is required". Those are different claims, and the form
+/// has a mark for only the second. **Filling a blank is not automatically an improvement** — this was
+/// the second time in two days that completeness turned out to be new testimony (the first was
+/// `§1411 0` in the marginal-rate line, §G-19a).
+#[test]
+fn the_1040_line7_not_required_box_is_never_checked() {
+    use btctax_core::tax::testonly::{ty2024_params, ty2024_table, w2_only_household};
+    let (ri, state) = w2_only_household();
+    let ar = btctax_core::tax::return_1040::assemble_absolute(
+        &ri,
+        &state,
+        &ty2024_params(),
+        &ty2024_table(),
+        2024,
+    );
+    let pr = btctax_core::tax::packet::assemble_printed_return(
+        &ri,
+        &state,
+        &std::collections::BTreeMap::new(),
+        &ar,
+        &ty2024_table(),
+        2024,
+        &[],
+    )
+    .unwrap();
+    // The premise: this filer really does attach no Schedule D, so the box is REACHABLE here. Without
+    // this the assertion below could pass for the wrong reason.
+    assert!(
+        !pr.forms.sch_d.must_file(),
+        "a W-2-only filer attaches no Schedule D — otherwise this test proves nothing"
+    );
+
+    let pdf =
+        btctax_forms::fill_form_1040_full(&pr.forms.f1040, &pr.header, ri.filing_status, 2024)
+            .unwrap();
+    assert_eq!(
+        box_on_state(&pdf, "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].c1_23[0]"),
+        None,
+        "★ line 7's \"if not required\" box must be BLANK. btctax cannot establish that no Schedule D \
+         is required — `must_file()` speaks only for its own model, which has no input for Schedule D \
+         lines 4/5/11/12. Checking it is testimony the filer never gave."
+    );
 }

@@ -11,10 +11,6 @@ year = 2024
 # The capital-gain amount cell (line 7 for 2024). The struct field is named `line7a` for cross-year
 # uniformity; the value here is 2024's line-7 field.
 line7a = "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].f1_52[0]"
-# ★ §G-18 — line 7's "If not required, check here" box. The form offers TWO lawful states, attach the
-#   schedule or check the box; btctax used to emit NEITHER. Checked exactly when
-#   `ScheduleDLines::must_file()` is false. ON-STATE DUMPED: "1".
-line7_no_schedule_d = { field = "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].c1_23[0]", on = "1" }
 # da_present = true → this year HAS the Digital-Asset question (the adjacency guard runs). A future
 # no-DA year (2017) sets da_present = false and makes da_yes/da_no optional.
 da_present = true
@@ -294,3 +290,4 @@ odc          = { field = "topmostSubform[0].Page1[0].Table_Dependents[0].Row4[0]
 "topmostSubform[0].Page2[0].f2_42[0]" = { line = "firm phone",       rule = "artifact", reason = "Preparer's firm phone — no firm." }
 "topmostSubform[0].Page2[0].f2_43[0]" = { line = "firm address",     rule = "artifact", reason = "Preparer's firm address — no firm." }
 "topmostSubform[0].Page2[0].f2_44[0]" = { line = "firm EIN",         rule = "artifact", reason = "Preparer's firm EIN (/MaxLen 10) — no firm." }
+"topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].c1_23[0]" = { line = "7 no-Sch-D box", rule = "unmodeled", reason = "\"Attach Schedule D if required. If not required, check here.\" ★★ btctax CANNOT establish that Schedule D is NOT required: `ScheduleDLines::must_file()` answers only whether BTCTAX'S MODEL needs one, and the model has no input for Schedule D lines 4, 5, 11 or 12 (Forms 6252/4684/6781/8824/4797/2439, or a K-1). Checking the box would assert under §6065 that no Schedule D is required, for a filer whose capital activity btctax cannot see. A blank asserts nothing, so blank is the only honest mark. ★ The PREVIOUS reason here was FALSE ('Schedule D is always required') — see §G-18, which is reopened with this answer." }

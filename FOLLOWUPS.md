@@ -715,7 +715,44 @@ users), stated so nobody assumes otherwise.
 leaves no bytes behind — that now holds, so §G-14 no longer has to carry the `VACUUM`/`secure_delete`
 requirement itself.
 
-### G-18 — ~~Form 1040 line 7: btctax neither attaches Schedule D nor checks "not required"~~ **FIXED 2026-07-31**
+### G-18 — Form 1040 line 7: the box stays BLANK, and that is the ANSWER — **REOPENED-then-ANSWERED 2026-07-31**
+
+**★★★ Built, reviewed, and REVERTED the same day. The revert is the finding.**
+
+The box was checked from `ScheduleDLines::must_file()`. The r2 tax-lens review found the flaw:
+`must_file()` answers *"does **btctax's model** require a Schedule D"*, not *"does the **form** require
+one"*. The model has no input for Schedule D lines **4, 5, 11 or 12** (Forms 6252/4684/6781/8824/4797/
+2439, or a K-1), so for a filer with any of those the box asserted under §6065 that no Schedule D was
+required — when one was. Before the change it was blank, which asserted nothing.
+
+**Resolution: the box is never checked**, held by `the_1040_line7_not_required_box_is_never_checked`
+(mutation-verified against the re-introduction). btctax can know *"I have no reason to attach one"*;
+only the filer can know *"none is required"*. The form has a mark for the second claim only.
+
+★★ **The original census entry was ALSO wrong, and that part of the finding survives the revert.** It
+read *"Schedule D is always required"* — false. The entry now records the true reason: btctax cannot
+establish the negative. **A confidently-wrong `unmodeled` hides a defect as well as a missing entry
+does**, which is why the gaps ratchet (which counts entries, not their truth) is not the whole guard.
+
+★★★ **THE TRANSFERABLE LESSON, and it is now a PATTERN rather than an incident.** Twice in two days a
+change replaced a lawful silence with an affirmative statement btctax cannot support:
+
+| | what was blank | what was written | caught by |
+|---|---|---|---|
+| §G-19a | no forward §1411 claim at all | `§1411 0` on the marginal-rate line | r1 tax lens |
+| §G-18 | line 7's box | `☑ not required` | r2 tax lens |
+
+Both looked like *completeness*. **Filling a blank is not automatically an improvement, and "the form
+offers two states" does not mean btctax can tell which one is true.** Ask first: *can btctax establish
+the proposition the mark asserts, or only that it has no evidence against it?*
+
+★ **What would reopen it:** an input surface that establishes the filer's capital activity is wholly
+within btctax's model. That is the same premise the crypto-slice Schedule D already leans on ("for a
+crypto-only year that is complete and correct") and has never verified either — worth doing once, for
+both.
+
+<details><summary>Original finding (2026-07-30), kept for the record</summary>
+
 
 **The box is now checked exactly when `ScheduleDLines::must_file()` is false**, threaded through the
 printed chain so the box and the packet's form list are ONE decision — a checked box beside an
@@ -762,6 +799,8 @@ return whose Schedule D status is unstated.
 ★ **Practitioner judgement flagged:** whether an unchecked box on a return with no Schedule D is a
 filing defect or a cosmetic omission is a preparer's call. What is not in doubt is that the form
 states an instruction we do not follow.
+
+</details>
 
 ### G-17 — ★★ MULTI-FORM: the census needs form-level liveness, FQN normalisation, and cross-form provenance
 
