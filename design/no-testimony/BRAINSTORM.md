@@ -117,7 +117,16 @@ expensive: extending the `_`-ban to `Usd` forces a human classification on ~200 
 every omission. That is the *point* — an omission that does not compile cannot ship — but it is a real
 cost and belongs in the spec's phasing, not smuggled in.
 
-## 7. Recommended shape (my read — not decided)
+## 7. Recommended shape — ⚠️ SUPERSEDED
+
+> **The architect consult ([`CONSULT-architect-fable.md`](./CONSULT-architect-fable.md), same day)
+> replaced this phasing.** Two of its four orderings were wrong: the emitter change belongs **FIRST,
+> not last** — no blank can exist anywhere until the writer can express one — and §10 below already
+> conceded gate-first, contradicting this section. The accepted architecture is two types
+> (`Collected<Usd>` at the input boundary, `LineEntry` at the printed layer) with construction only
+> through combinators keyed to the form's own instruction grammar. Kept unedited for the record.
+
+### (superseded) my read — not decided
 
 Four phases, ordered so each is independently green and the cheapest evidence comes first:
 
