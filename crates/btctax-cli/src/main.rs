@@ -803,12 +803,25 @@ fn run() -> Result<ExitCode, CliError> {
                          (appraiser) and Part V (donee acknowledgement) — obtain both before filing."
                     );
                 }
+                // ★ §G-19d — the full return's ADVISORIES, on the path that hands the filer a PDF to
+                // sign. `advisories_for` used to have exactly one caller (`report --tax-year`), so a
+                // filer who only ever ran `export-irs-pdf` saw none of them: not the forgone §63(f)
+                // boxes, not a blank FBAR sub-question, not the Schedule C 1099 pair. Every one of
+                // them names something the return OMITS, which is precisely what a filer about to sign
+                // needs told. Same `advisories_for` derivation as the report — never a second list.
+                if !report.advisories.is_empty() {
+                    eprint!("{}", render::render_advisories(&report.advisories));
+                }
             } else {
-                // The crypto slice only: Schedule D 17-22 is genuinely not filled there.
+                // The crypto slice only: Schedule D Part III is answered as far as the printed page
+                // allows. Line 17 reads lines 15 and 16, both printed above it, so btctax answers it;
+                // 18-22 each need a fact the slice never collects, so they stay blank.
                 eprintln!(
-                    "note: Schedule D lines 17-22 (28%-rate / unrecaptured-§1250 / QDI worksheet, incl. \
-                     the line-21 loss limit) are OUT OF SCOPE and left blank — complete them by hand if \
-                     they apply."
+                    "note: Schedule D line 17 was answered from the printed lines 15 and 16. Lines \
+                     18-22 are OUT OF SCOPE and left blank — complete them by hand if they apply: 18 \
+                     (28%-rate gain) and 19 (unrecaptured §1250) are blank because btctax never asked, \
+                     not because they are zero; 20 also asks whether you are filing Form 4952; 21 is \
+                     the §1211 loss limit; 22 needs Form 1040 line 3a (qualified dividends)."
                 );
             }
             // [I5] loud advisory: rows that MAY belong on a separate broker-reported 8949. The box
@@ -824,7 +837,8 @@ fn run() -> Result<ExitCode, CliError> {
                 eprintln!(
                     "note: Form 1040 — btctax filled ONLY the Digital-Asset question{} \
                      from your btctax activity. Every OTHER 1040 line (income, deductions, tax) is \
-                     yours to complete.",
+                     yours to complete. The page is watermarked \"WORKSHEET — NOT A COMPLETE FORM \
+                     1040\" so it cannot be mistaken for a return after this note scrolls away.",
                     if report.form_1040_filled_7a {
                         " and line 7a (capital gain from Schedule D line 16)"
                     } else {

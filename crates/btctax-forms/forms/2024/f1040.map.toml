@@ -224,7 +224,6 @@ odc          = { field = "topmostSubform[0].Page1[0].Table_Dependents[0].Row4[0]
 "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].c1_22[0]" = { line = "6c", rule = "unmodeled", reason = "The §86(e) lump-sum election checkbox — dead with lines 6a/6b blank." }
 
 # ── Line 7's \"if not required\" checkbox ──────────────────────────────────────────────────────────
-"topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].c1_23[0]" = { line = "7 no-Sch-D box", rule = "unmodeled", reason = "\"Attach Schedule D if required. If not required, check here.\" btctax's returns report BTC dispositions on Form 8949, which Schedule D always summarises, so Schedule D is always required and this box is never checked. Leaving it blank is the correct positive statement, not an omission." }
 
 # ── Page 2, line 16: the alternative-tax-computation checkboxes ──────────────────────────────────
 "topmostSubform[0].Page2[0].c2_1[0]" = { line = "16 box 1", rule = "unmodeled", reason = "Form 8814 (parent's election to report a child's interest and dividends) — btctax models no child's income." }
@@ -291,3 +290,4 @@ odc          = { field = "topmostSubform[0].Page1[0].Table_Dependents[0].Row4[0]
 "topmostSubform[0].Page2[0].f2_42[0]" = { line = "firm phone",       rule = "artifact", reason = "Preparer's firm phone — no firm." }
 "topmostSubform[0].Page2[0].f2_43[0]" = { line = "firm address",     rule = "artifact", reason = "Preparer's firm address — no firm." }
 "topmostSubform[0].Page2[0].f2_44[0]" = { line = "firm EIN",         rule = "artifact", reason = "Preparer's firm EIN (/MaxLen 10) — no firm." }
+"topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].c1_23[0]" = { line = "7 no-Sch-D box", rule = "unmodeled", reason = "\"Attach Schedule D if required. If not required, check here.\" ★★ btctax CANNOT establish that Schedule D is NOT required: `ScheduleDLines::must_file()` answers only whether BTCTAX'S MODEL needs one, and the model has no input for Schedule D lines 4, 5, 11 or 12 (Forms 6252/4684/6781/8824/4797/2439, or a K-1). Checking the box would assert under §6065 that no Schedule D is required, for a filer whose capital activity btctax cannot see. A blank asserts nothing, so blank is the only honest mark. ★ The PREVIOUS reason here was FALSE ('Schedule D is always required') — see §G-18, which is reopened with this answer." }

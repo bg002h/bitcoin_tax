@@ -166,7 +166,30 @@ fn fixture_for(field: &Field, base: &ReturnInputs) -> ReturnInputs {
     let mut ri = base.clone();
     match field.id {
         FieldId::DodTaxpayer => ri.header.taxpayer_died_during_year = Some(true),
-        FieldId::DodSpouse => ri.header.spouse_died_during_year = Some(true),
+        // ★ MFJ too: `DodSpouse` is MFJ-gated (the only status whose spouse §63(f) box is counted),
+        //   so a spouse `Person` plus the death gate is no longer enough to make it live.
+        FieldId::DodSpouse => {
+            ri.filing_status = btctax_core::tax::types::FilingStatus::Mfj;
+            ri.header.spouse_died_during_year = Some(true);
+        }
+        // Likewise the spouse death GATE itself.
+        FieldId::SpouseDiedDuringYear => {
+            ri.filing_status = btctax_core::tax::types::FilingStatus::Mfj;
+        }
+        // ★ Schedule C lines I/J need a `schedule_c` to write onto; line J additionally needs line I
+        //   answered YES (the form's own "If 'Yes,'"), or it is not live and `set` is `NoSuchRow`.
+        FieldId::ScheduleC1099Required => {
+            ri.schedule_c = Some(Default::default());
+        }
+        FieldId::ScheduleC1099Filed => {
+            ri.schedule_c = Some(btctax_core::tax::return_inputs::ScheduleCInputs {
+                payments_requiring_1099: Some(true),
+                ..Default::default()
+            });
+        }
+        // ★ The FBAR sub-question is live only under a Schedule B 7a "Yes"; a set on a non-live
+        //   question correctly refuses with `NoSuchRow`, so the fixture must make it live.
+        FieldId::FbarFilingRequired => ri.foreign_accounts = Some(true),
         _ => {}
     }
     ri
@@ -277,10 +300,8 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         "int_1099",
         "div_1099",
         "g_1099",
-        "schedule_c",
         "capital_loss_carryforward_in",
         "charitable_carryover_in",
-        "qbi",
     ];
     const EXEMPT_LEAVES: &[&str] = &[
         // ★★ §G-15 — `tax_year` is the SCOPE the form is filled in, not a value the filer types into
@@ -288,6 +309,33 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         // field for it would invite the filer to contradict the year their return is filed under.
         // Exempt DELIBERATELY, which is what this census exists to force someone to decide.
         "tax_year",
+        // ★ `schedule_c` is no longer a WHOLESALE exemption: lines I and J are in scope (class-(B)
+        //   skippables), so the struct is exempted LEAF BY LEAF, exactly as `sch1` is for the same
+        //   reason. A blanket prefix here would have silently re-exempted the two the moment they
+        //   became covered — which is precisely the contradiction this census caught.
+        // ★ §G-22 — `qbi` is no longer a WHOLESALE exemption: both loss carryforwards are now in
+        //   scope (they UNDERSTATE tax when omitted, unlike every other carryforward family). Only
+        //   the two provenance leaves stay exempt — they are ours, not the filer's.
+        // ★ §G-20a — the two BENEFIT-carryover provenance leaves. Exempt for the same reason as the
+        //   QBI ones: provenance is OURS, not the filer's — they never type it, btctax stamps it.
+        //   ★ The census caught these the moment they were added, because the wholesale prefixes
+        //   `capital_loss_carryforward_in` / `charitable_carryover_in` do NOT match the `_provenance`
+        //   siblings. That is the census working, not a nuisance.
+        // ★★ §G-20 — i1040gi's two MFS conditions. Exempt DELIBERATELY for now: they are class-(B)
+        //   benefit claims whose silence forgoes, and the form surface for them is the next increment.
+        //   `Advisory::Mfs63fSpouseBoxesForgone` already names the cost, so a filer is not left
+        //   guessing — but this exemption is the reason it still fires for anyone who wants the boxes.
+        "header.spouse_had_no_income",
+        "header.spouse_not_filing_a_return",
+        "capital_loss_carryforward_in_provenance",
+        "charitable_carryover_in_provenance",
+        "qbi.reit_ptp_carryforward_in_provenance",
+        "qbi.qbi_carryforward_in_provenance",
+        "schedule_c.owner",
+        "schedule_c.business_description",
+        "schedule_c.naics_code",
+        "schedule_c.accounting_method",
+        "schedule_c.expenses",
         "sch1.state_refund_taxable",
         "sch1.student_loan_interest_paid",
         "sch1.ira_deduction_claimed",
@@ -367,13 +415,13 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(
-        field_count, 74,
-        "expected 74 Fields (one per §5.8 in-scope leaf)"
+        field_count, 80,
+        "expected 80 Fields (one per §5.8 in-scope leaf)"
     );
     assert_eq!(
         covered.len(),
-        74,
-        "expected 74 distinctly-covered in-scope leaves"
+        80,
+        "expected 80 distinctly-covered in-scope leaves"
     );
 
     // ── 5. ★ I-6: PIN the observed FieldId → leaf-path map against a literal (kills TRANSPOSITION). ──
@@ -522,13 +570,31 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
     // §911/931/933 exclusion gate + the four MAGI add-backs it gates (Schedule 1-A Part I lines
     // 2a-2d / the SALT worksheet's lines 3a-3d — one quantity, five phase-outs).
     (FieldId::DeclHasIncomeExclusion, "has_income_exclusion"),
+    (FieldId::FbarFilingRequired, "fbar_filing_required"),
     (
-        FieldId::DeclTaxpayerDiedDuringYear,
+        FieldId::TaxpayerDiedDuringYear,
         "header.taxpayer_died_during_year",
     ),
     (
-        FieldId::DeclSpouseDiedDuringYear,
+        FieldId::SpouseDiedDuringYear,
         "header.spouse_died_during_year",
+    ),
+    (
+        FieldId::ScheduleC1099Required,
+        "schedule_c.payments_requiring_1099",
+    ),
+    (
+        FieldId::ScheduleC1099Filed,
+        "schedule_c.will_file_required_1099",
+    ),
+    (
+        FieldId::QbiReitPtpCarryforwardIn,
+        "qbi.reit_ptp_carryforward_in",
+    ),
+    (FieldId::QbiCarryforwardIn, "qbi.qbi_carryforward_in"),
+    (
+        FieldId::DonationsHadRestrictions,
+        "donations_had_restrictions",
     ),
     (FieldId::ExclPuertoRico, "excluded_puerto_rico_income"),
     (FieldId::Excl2555L45, "form_2555_line45"),

@@ -154,7 +154,32 @@ fn recorded_gaps_may_only_shrink() {
     // one radio) for ONE logical question. Fields is the mechanical unit — a question-level count
     // would need someone to decide what "one question" means, which is exactly the judgement this
     // ratchet is meant to avoid depending on.
-    const GAPS: usize = 16;
+    // 2026-07-30: 13 → 12. Form 8995 line 3 (`f1_19`) was a gap — the prior-year QBI loss
+    // carryforward, SUBTRACTED at line 4, that btctax neither modelled nor asked for, so a filer who
+    // had one got an INFLATED deduction and UNDERSTATED tax. Closed the way the message below
+    // demands: the field is now MAPPED and the input collected, and its census entry deleted because
+    // it is no longer unaccounted-for — not because the record was inconvenient.
+    // 2026-07-31: 12 → 10. Form 8283's PAGE-2 identity header (`f2_01`/`f2_02`) was a gap of the
+    // "we have the datum and nothing connects it to the field" species — btctax held the name and TIN
+    // and wrote them to page 1, while a filed page 2 went out unidentified. Closed by MAPPING the
+    // cells (`[identity_page2]`), not by re-describing the omission.
+    // 2026-07-31: 10 → 6. Schedule C lines I and J (4 fields) — the Form-1099 compliance pair — are
+    // now ASKED as class-(B) skippables and PRINTED from the filer's own answer, with a §6721/§6722
+    // advisory on the skip. Closed by collecting the input, which is the only way the message below
+    // permits.
+    // 2026-07-31: unchanged at 6 (all six are Form 8283 lines 5a/5b/5c). ★ Form 1040 line 7's
+    // "if not required, check here" box was NOT a gap — it was recorded `unmodeled` on the reasoning
+    // that "Schedule D is always required", which is FALSE (`ScheduleDLines::must_file` exists
+    // precisely because it is not). §G-18: the census REASON was wrong, not the count. The field is
+    // now mapped and written; see the map's own note.
+    // ★★★ 2026-07-31: 6 → 0. THE CENSUS'S GAP SURFACE IS CLOSED. The last six were Form 8283
+    // Section B lines 5a/5b/5c, asked as ONE return-level universal ("did any donation have strings
+    // attached?") and printed as three Nos from the filer's own answer; a YES refuses the year.
+    //
+    // ★ Zero is not the end of the census — it is the ratchet at rest. `<` is still the only legal
+    // direction, and the two lists must still partition every field, so a NEW gap can be added (that
+    // is what the register is for) but not silently.
+    const GAPS: usize = 0;
 
     let mut found = Vec::new();
     for stem in CENSUSED {

@@ -1,9 +1,19 @@
-//! Schedule D fill: lines 3 & 7 (short-term), 10 & 15 (long-term), 16 (total), and the QOF Yes/No
-//! question (SP1 answers **No**). Lines 7/15 are pure arithmetic (only line 3 / line 10 feed them in
-//! SP1), so filling 16 while leaving 7/15 blank would be self-inconsistent — we fill all of them.
+//! Schedule D fill: lines 3 & 7 (short-term), 10 & 15 (long-term), 16 (total), **17** (Part III's
+//! first routing question) and the QOF Yes/No question (SP1 answers **No**). Lines 7/15 are pure
+//! arithmetic (only line 3 / line 10 feed them in SP1), so filling 16 while leaving 7/15 blank would
+//! be self-inconsistent — we fill all of them.
 //!
-//! **Scope-out:** lines 17-22 (the 28%-rate / unrecaptured-§1250 / QDI worksheet path) are NOT filled
-//! — the CLI prints a notice. Line 21 (the §1211 loss limit) lives inside that scoped-out block.
+//! **★ Line 17 is answered here, and lines 18–22 are not.** The distinction is what the question can
+//! be answered FROM. Line 17 — *"Are lines 15 and 16 both gains?"* — reads two lines that are PRINTED
+//! on this very page, so it introduces no fact the form does not already assert; it is the same kind
+//! of derivation as line 16 = line 7 + line 15, and the single definition lives in core
+//! ([`btctax_core::tax::printed::schedule_d_line17`]), shared with the full return so the two can
+//! never disagree. Lines 18/19 (28%-rate gain, unrecaptured §1250) are blank here because nothing was
+//! ever ASKED, not because they are zero; line 20's *"…and you are not filing **Form 4952**?"* is a
+//! fact about the filer that no btctax input carries; line 21 needs the §1211 ceiling by filing
+//! status; and line 22 needs Form 1040 line 3a (qualified dividends), which the crypto slice never
+//! sees. Answering any of those would be testimony the filer never gave — the CLI prints a notice
+//! naming them instead.
 //!
 //! On the 2025 revision Schedule D line 3 reads "Box C **or Box I**" and line 10 "Box F **or Box L**",
 //! so the digital-asset Box I/L totals from Form 8949 flow straight onto these lines; on the pre-2025
@@ -107,6 +117,25 @@ pub fn fill_schedule_d_totals(
             &mut writes,
             &mut placements,
         );
+        // Line 17 — "Are lines 15 and 16 both gains?", read off the two lines just printed. `None`
+        // means the form's OWN routing skips line 17 (line 16 a loss, or zero), so it stays blank.
+        // The 2017/2024/2025 maps all carry the pair; a map without it simply does not answer.
+        if let (Some(answer), Some(pair)) = (
+            btctax_core::tax::printed::schedule_d_line17(totals.lt.gain, total),
+            &map.line17,
+        ) {
+            let choice = if answer { &pair.yes } else { &pair.no };
+            writes.push((
+                choice.field.clone(),
+                pdf::FieldValue::Check {
+                    on: choice.on.clone(),
+                },
+            ));
+            placements.push(Placement {
+                fqn: choice.field.clone(),
+                geo: Geo::Check,
+            });
+        }
     }
     // Answer the QOF question — No — on years that HAVE one (2024/2025). The 2017 Schedule D predates
     // Qualified Opportunity Funds (2019), so its map omits the field and nothing is written.

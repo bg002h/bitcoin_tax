@@ -104,6 +104,32 @@ pub fn fill_schedule_c_with_map(
         crate::cells::page_of(&method.field),
     ));
 
+    // ★★ Lines I and J — the Form-1099 compliance pair, written ONLY when the filer answered.
+    //
+    // The `if let Some(..)` is the whole guarantee. `None` (never asked) and `Some(false)` (asked,
+    // answered no) are DIFFERENT marks on the page — an unwritten pair versus a checked No box — and
+    // an `unwrap_or(false)` here would print a "No" the filer never gave, on a form they sign under
+    // §6065. That is the exact defect `3b22ca1` fixed on Schedule B Part III; it is structural here
+    // rather than conventional, which is what makes it hold.
+    for (pair, answer) in [
+        (&map.line_i, lines.line_i_1099_required),
+        (&map.line_j, lines.line_j_1099_filed),
+    ] {
+        if let (Some(pair), Some(answer)) = (pair, answer) {
+            let choice = if answer { &pair.yes } else { &pair.no };
+            writes.push((
+                choice.field.clone(),
+                pdf::FieldValue::Check {
+                    on: choice.on.clone(),
+                },
+            ));
+            placements.push(FlatPlacement::check(
+                choice.field.clone(),
+                crate::cells::page_of(&choice.field),
+            ));
+        }
+    }
+
     let index = pdf::index(&blank_fields);
     pdf::drop_xfa_and_set_needappearances(&mut doc)?;
     pdf::apply_writes(&mut doc, &index, &writes)?;

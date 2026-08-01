@@ -587,6 +587,27 @@ pub struct Form8283Map {
     /// and the 2017/2025 maps have no verified FQNs; the FULL-return filler refuses on `None`.
     #[serde(default)]
     pub identity: Option<IdentityCells>,
+    /// ★ **PAGE 2's** own "Name(s) shown on your income tax return" + "Identifying number" header.
+    ///
+    /// The form repeats the identity block on page 2 so a detached Section B page can still be tied to
+    /// its return. btctax HELD the name and TIN and wrote them to page 1, but the map declared no
+    /// page-2 cells, so a filed page 2 went out with no identifying header — §G-13's clearest "we have
+    /// the datum and nothing connects it to the field" gap.
+    ///
+    /// ★★ **The FQNs differ per revision and were DUMPED, not inferred**: TY2024 is `f2_01`/`f2_02`,
+    /// TY2025 is `f2_1`/`f2_2`, and the Rev. 12-2014 (TY2017) form uses `p2-t1`/`p2-t2` with a
+    /// **/MaxLen of 12**, not 11. `Option` because only the full-return revision writes an identity at
+    /// all — the crypto-slice maps carry no `[identity]` block either.
+    #[serde(default)]
+    pub identity_page2: Option<IdentityCells>,
+    /// ★ Section B lines **5a / 5b / 5c** — the restriction questions. `Option`: only the full-return
+    /// revision carries them (the crypto slice writes no Section B declarations).
+    #[serde(default)]
+    pub line5a: Option<YesNoPair>,
+    #[serde(default)]
+    pub line5b: Option<YesNoPair>,
+    #[serde(default)]
+    pub line5c: Option<YesNoPair>,
     /// Section A (≤ $5,000).
     pub section_a: Section8283A,
     /// Section B (> $5,000).
@@ -1079,6 +1100,9 @@ pub struct Form8995Map {
     pub row1_qbi: MoneyCell,
     /// L2 — total QBI: "Combine lines 1i through 1v, column (c)". MID column.
     pub line2: MoneyCell,
+    /// ★ L3 — prior-year qualified business net (loss) carryforward, MID column (the paren inset,
+    /// x=[414.4,478.4], same band as line 7). ★ positive magnitude (paren box).
+    pub line3: MoneyCell,
     /// L4 — combine 2 and 3, MID column.
     pub line4: MoneyCell,
     /// L5 — QBI component (20% × 4), AMOUNT column.
@@ -1126,9 +1150,10 @@ impl Form8995Map {
         }
     }
     /// The 15 filled cells in printed reading order (strictly descending y on page 1).
-    pub fn lines(&self) -> [&MoneyCell; 15] {
+    pub fn lines(&self) -> [&MoneyCell; 16] {
         [
             &self.line2,
+            &self.line3,
             &self.line4,
             &self.line5,
             &self.line6,
@@ -1451,6 +1476,17 @@ pub struct ScheduleCMap {
     /// checked (v1 captures only the two).
     pub method_cash: CheckChoice,
     pub method_accrual: CheckChoice,
+    /// ★ Line **I** — "Did you make any payments … that would require you to file Form(s) 1099?"
+    ///
+    /// ★★ ON-STATES: Schedule C's Yes/No pairs are **`"Yes"`/`"No"`**, NOT the `"1"`/`"2"` that
+    /// Schedule B and Schedule D use. Dumped with `xtask dump-fields`; three separate design passes
+    /// asserted 1/2 by analogy and all three were wrong. `Option` because only the full-return
+    /// revision carries these cells.
+    #[serde(default)]
+    pub line_i: Option<YesNoPair>,
+    /// Line **J** — "If 'Yes,' did you or will you file required Form(s) 1099?"
+    #[serde(default)]
+    pub line_j: Option<YesNoPair>,
     /// The name + SSN header cells (P6.2). REQUIRED: a full-return schedule that does not name its
     /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
     pub identity: IdentityCells,
@@ -1552,6 +1588,9 @@ pub struct ScheduleBMap {
     pub line6: MoneyCell,
     /// L7a — the foreign-account Yes/No pair.
     pub line7a: YesNoPair,
+    /// L7a's unnumbered FBAR sub-question Yes/No pair. Written ONLY when the answer is `Some` — the
+    /// form asks it only under a 7a "Yes".
+    pub line7a_fbar: YesNoPair,
     /// L8 — the foreign-trust Yes/No pair.
     pub line8: YesNoPair,
 }

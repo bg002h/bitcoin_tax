@@ -113,7 +113,8 @@ pub fn fill_form_8283(
     rows: &[Form8283Row],
     map: &Form8283Map,
 ) -> Result<Option<Vec<u8>>, FormsError> {
-    fill_form_8283_inner(rows, map, None)
+    // The crypto slice writes no filer identity and no Section B declarations.
+    fill_form_8283_inner(rows, map, None, None)
 }
 
 /// The **full-return** Form 8283: whole-dollar rows (`Printed8283Rows` — a newtype precisely so a CENTS
@@ -123,13 +124,21 @@ pub fn fill_form_8283_full(
     header: &ReturnHeader,
     map: &Form8283Map,
 ) -> Result<Option<Vec<u8>>, FormsError> {
-    fill_form_8283_inner(printed.rows(), map, Some(header))
+    fill_form_8283_inner(
+        printed.rows(),
+        map,
+        Some(header),
+        printed.restrictions_answer(),
+    )
 }
 
 fn fill_form_8283_inner(
     rows: &[Form8283Row],
     map: &Form8283Map,
     filer: Option<&ReturnHeader>,
+    // ★ §G-21 — the filer's answer to lines 5a/5b/5c. `Some(false)` ⇒ all three print No; `None` ⇒ all
+    // three stay BLANK. The crypto slice always passes `None`: it writes no Section B declarations.
+    no_restrictions: Option<bool>,
 ) -> Result<Option<Vec<u8>>, FormsError> {
     if rows.is_empty() {
         return Ok(None);
@@ -159,7 +168,14 @@ fn fill_form_8283_inner(
             for k in 0..n_copies {
                 let chunk: Vec<&Form8283Row> = rows.iter().skip(k * cap).take(cap).collect();
                 let details = chunk.iter().find_map(|r| r.details.as_ref());
-                copies.push(fill_one(&chunk, section, map, details, filer)?);
+                copies.push(fill_one(
+                    &chunk,
+                    section,
+                    map,
+                    details,
+                    filer,
+                    no_restrictions,
+                )?);
             }
         }
         // Section B: group donations by donee + appraiser identity, then count-overflow each group.
@@ -169,7 +185,14 @@ fn fill_form_8283_inner(
                 for k in 0..n {
                     let chunk: Vec<&Form8283Row> =
                         group.rows.iter().skip(k * cap).take(cap).copied().collect();
-                    copies.push(fill_one(&chunk, section, map, group.details, filer)?);
+                    copies.push(fill_one(
+                        &chunk,
+                        section,
+                        map,
+                        group.details,
+                        filer,
+                        no_restrictions,
+                    )?);
                 }
             }
         }
@@ -326,6 +349,8 @@ fn fill_one(
     map: &Form8283Map,
     details: Option<&DonationDetails>,
     filer: Option<&ReturnHeader>,
+    // ★ §G-21 — see `fill_form_8283_inner`.
+    no_restrictions: Option<bool>,
 ) -> Result<Vec<u8>, FormsError> {
     let mut w: Vec<(String, pdf::FieldValue)> = Vec::new();
     let mut p: Vec<FlatPlacement> = Vec::new();
@@ -464,6 +489,58 @@ fn fill_one(
             &header.taxpayer.ssn,
             blank,
         )?;
+        // ★ …and PAGE 2's own header (§G-13). The form repeats it so a detached Section B page can
+        // still be tied to its return, and btctax held the name and TIN all along — it simply had no
+        // cells to write them into. Required in the same breath as page 1's, and for the same reason:
+        // a full return may not attach an unnamed page of a substantiation form.
+        let identity_page2 = map.identity_page2.as_ref().ok_or_else(|| {
+            FormsError::Geometry(format!(
+                "the {} Form 8283 map has no [identity_page2] block — page 2 would go out with no                  identifying header, so a detached Section B page could not be tied to its return",
+                map.year
+            ))
+        })?;
+        crate::cells::push_identity(
+            &mut w,
+            &mut p,
+            identity_page2,
+            &header.name_line,
+            &header.taxpayer.ssn,
+            blank,
+        )?;
+
+        // ★★★ §G-21 — Section B lines 5a/5b/5c, from the filer's ONE return-level answer.
+        //
+        // `Some(false)` — "no donation had strings attached" — is a UNIVERSAL, so each box's answer
+        // follows for every donation on the form. `None` writes NOTHING: not asked and answered-no are
+        // different marks on the page, and a printed "No" the filer never gave is fabricated testimony
+        // (the `3b22ca1` defect class). `Some(true)` cannot arrive — `screen_absolute` refuses
+        // the year, because the §170 deduction btctax computed at full FMV would then be too large.
+        // ★★ r3 M-1 — SECTION B ONLY. Lines 5a/5b/5c live in Section B Part II and the form scopes
+        // them explicitly: "Complete lines 5a through 5c if conditions were placed on a contribution
+        // listed in Section B, Part I". This block sits outside the `match section` above (it shares
+        // the filer-identity window), so without this guard a Section A return printed three answers
+        // to questions about a Part I that is EMPTY — the same "a mark the form has no place for"
+        // class `3bcf3a0` fixed for Schedule B's FBAR pair.
+        if section == Form8283Section::B && no_restrictions == Some(false) {
+            for pair in [&map.line5a, &map.line5b, &map.line5c] {
+                let pair = pair.as_ref().ok_or_else(|| {
+                    FormsError::Geometry(format!(
+                        "the {} Form 8283 map has no 5a/5b/5c pair — a full return may not file a                          Section B with its restriction questions blank when the filer HAS answered",
+                        map.year
+                    ))
+                })?;
+                w.push((
+                    pair.no.field.clone(),
+                    pdf::FieldValue::Check {
+                        on: pair.no.on.clone(),
+                    },
+                ));
+                p.push(FlatPlacement::check(
+                    pair.no.field.clone(),
+                    crate::cells::page_of(&pair.no.field),
+                ));
+            }
+        }
     }
 
     let clusters = sec_clusters(map.year, section);

@@ -48,8 +48,9 @@ penalty** from 1099-INT box 2 (line 18).
 **Other income (Schedule 1 Part I):** a **taxable state or local income-tax refund** (line 1, §111 tax-benefit
 rule) · crypto ordinary income with no other home (line 8v).
 
-**QBI:** the simplified **Form 8995** path for §199A REIT dividends (1099-DIV box 5), with the REIT/PTP loss
-carryforward.
+**QBI:** the simplified **Form 8995** path for §199A REIT dividends (1099-DIV box 5) and your Schedule C
+trade or business, with **both** prior-year loss carryforwards — the qualified-business one (line 3) and the
+REIT/PTP one (line 7).
 
 **Credits:** §904(j) **foreign tax credit** (≤ $300 / $600 MFJ, passive, 1099-reported — no Form 1116) ·
 **excess Social Security** credit (multi-employer, per person).
@@ -104,9 +105,18 @@ wage-and-property limits that take over (that is Form 8995-A, which it does not 
 - **A HoH/QSS qualifying person who is not one of your listed dependents** is not captured; that cell is left
   blank for you to complete.
 
-**Carryovers:** charitable (per class + vintage) and the QBI REIT/PTP loss carryforward are computed and can
-be written forward to next year with `btctax report --tax-year Y --write-carryover`. A carryover you typed in
-yourself is never silently overwritten (pass `--force` if you mean to).
+**Carryovers:** charitable (per class + vintage) and **both** QBI loss carryforwards — qualified business
+(Form 8995 line 16) and REIT/PTP (line 17) — are computed and can be written forward to next year with
+`btctax report --tax-year Y --write-carryover`. A carryover you typed in yourself is never silently
+overwritten (pass `--force` if you mean to).
+★★ **Both QBI loss carryforwards are now ASKED**, in the TUI's "Carryforwards from last year" section —
+Form 8995 line **7** (REIT/PTP) and line **3** (qualified business). Enter each as a POSITIVE number, from
+lines 17 and 16 of *last* year's Form 8995. They REDUCE the deduction, so leaving one out overstates your
+deduction and **understates your tax** — the one direction btctax will not fail in silently. If btctax did
+not compute your prior year it cannot know, so it asks, and an advisory fires until you answer or it has a
+computed figure of its own. (You can still set them under `[qbi]` in the import TOML.)
+★ The capital-loss and charitable carryovers are still import-only. Those go the other way — leaving one
+out costs *you*, not the Treasury — so they are not gated, but check them if you have any.
 
 ---
 
@@ -166,7 +176,7 @@ cannot model it correctly.
 - **A spouse-owned W-2 or Schedule C on a non-joint return.**
 - **Foreign trust** (`foreign_trust = true`) → Form 3520.
 - **You were a dual-status alien** (`dual_status_alien = true`) — v1 does not compute a dual-status return; §63(c)(6)(B) zeroes a nonresident alien's standard deduction, so it refuses rather than over-deduct. This question is asked on every return (`btctax income answer`).
-- **The foreign-account (Schedule B line 7a) or foreign-trust (line 8) question is unanswered.** These are now asked on **every** return, not only when Schedule B otherwise files — because the answer is itself what decides whether Schedule B files, so scoping the question by "does Schedule B file" was a circular defect that silently omitted the FBAR/FinCEN disclosure surface. Unanswered ⇒ refuses (`ScheduleBPart3Unanswered`). Answer with `btctax income answer --year N`.
+- **The foreign-account (Schedule B line 7a) or foreign-trust (line 8) question is unanswered.** These are now asked on **every** return, not only when Schedule B otherwise files — because the answer is itself what decides whether Schedule B files, so scoping the question by "does Schedule B file" was a circular defect that silently omitted the FBAR/FinCEN disclosure surface. Unanswered ⇒ refuses (`ScheduleBPart3Unanswered`). Answer with `btctax income answer --year N`. ★ If you answer 7a **Yes**, its unnumbered sub-question — *"are you required to file FinCEN Form 114 (the FBAR)?"* — is asked too, but it is **SKIPPABLE**, not refusing: no figure on the return reads it, so skipping it prints a true blank and fires a loud advisory quoting the form's Caution. It is not asked at all when 7a is No, because the form does not ask it then.
 - **Schedule B line 7a answered "Yes" but line 7b (the foreign country name[s]) is blank** — refuses. The remedy is to add `foreign_country_names` to your TOML and re-run `btctax income import` — **not** `income answer`, because `income answer` captures only yes/no answers and dates, never free-text strings.
 - **"Someone can claim you as a dependent" unanswered** — required on **every** return. It selects the §63(c)(5) dependent standard-deduction floor over the basic standard deduction, gates the §1(g)/Form-8615 kiddie-tax refusal, and is a **checkbox printed on your 1040**. There is no safe default: guessing "no" *understates* your tax and files an unchecked box you never affirmed; guessing "yes" overstates it. Only you know. (Likewise for your spouse, on a return that has one.) **Answer it with `btctax income answer --year N`** — no TOML file needed. (A return stored by a pre-P9 build refuses *as a whole* before this check is even reached — see the stale-row bullet below — so the fix there is `income clear` + re-import, not answering this one question.)
 - **A Schedule A sales-tax amount with the §164(b)(5) sales-tax election OFF** (a silent drop would hide an input error).
@@ -228,9 +238,19 @@ each one fits you:
 - **Form 8949 Box I (short-term) / Box L (long-term)** — checked on every Form 8949 with rows. These mean
   "transactions NOT reported to you on Form 1099-B." btctax has no 1099-B / 1099-DA input at all, so every
   ledger disposition is un-reported by construction. Never Box C/F.
-- **Schedule C lines G, H, I, J** — left blank (deferred to your pen): material participation, whether you
-  started/acquired the business this year, whether you made payments requiring Form 1099, and whether you
-  filed them. Fill them in yourself.
+- **Clergy self-employment is OUT OF SCOPE.** A minister, member of a religious order, or Christian
+  Science practitioner who has filed Form 4361 or Form 4029 cannot be served by btctax: Schedule SE
+  line A's exemption declaration is never asked, there is no Form 4361/4029 input, and there is no way
+  to print the required "Exempt—Form 4361" notation. Use a preparer.
+- **Schedule C lines I and J** (Form 1099 payments) are **asked** — `btctax income answer` — and printed
+  from your own answer. Skipping is lawful: no figure on your return reads them and the form prints no
+  Caution beside them, so they go out blank and an advisory names **§6721/§6722**, which penalise failing
+  to file a required information return and failing to furnish the payee's copy. That exposure attaches to
+  the PAYMENTS, not to the box.
+- **Schedule C lines G and H** are deliberately **not asked**. Line G (material participation) moves no
+  figure — §1411(c)(6) shelters the Schedule C income from NIIT either way, because btctax derives it as
+  the self-employment base. Line H is a check-if-true box with **no "No" widget**, so an explicit "no" and
+  a never-asked blank are the identical mark on the page; there is nothing an answer could add.
 
 ---
 
@@ -242,10 +262,11 @@ each one fits you:
 
 ## Advisories the report will show you
 
-- **FBAR / FinCEN.** Under FinCEN Notice 2020-2, accounts holding *only* virtual currency are (for now) outside the FBAR requirement — but this is under active reconsideration, and an account holding crypto **plus** fiat or securities may well be reportable. `btctax` **never auto-answers Schedule B Part III** for you. Decide, and answer, yourself.
+- **FBAR / FinCEN.** Under FinCEN Notice 2020-2, accounts holding *only* virtual currency are (for now) outside the FBAR requirement — but this is under active reconsideration, and an account holding crypto **plus** fiat or securities may well be reportable. `btctax` **never auto-answers Schedule B Part III** for you — including the FBAR sub-question under 7a. It ASKS both and prints your answers. Line 7a itself is mandatory (it decides whether Schedule B files at all); the sub-question under it is **skippable** — nothing on the return reads it — and skipping it prints a genuine blank plus a second advisory quoting Schedule B's own Caution: *"If required, failure to file FinCEN Form 114 may result in substantial penalties."* That penalty is for not FILING the FBAR, an obligation this box neither creates nor removes. Decide, and answer, via `btctax income answer`.
 - **Charitable donee class.** The ledger classifies a crypto donation assuming a **public charity (50% organization)** donee — long-term gifts at FMV under the 30% ceiling. If your donee is a **private foundation**, the correct treatment is the 20% ceiling at *basis*, which v1 refuses. Verify who you gave to.
 - **Qualified appraisal.** A year's BTC donations totaling **more than $5,000** need a qualified appraisal and Form 8283 Section B (CCA 202302012: crypto does *not* get the readily-valued exception).
-- **Blindness not declared (§63(f)).** If you never stated whether you (or, on a joint return, your spouse) are legally blind, the additional standard deduction for blindness ($1,550 married / $1,950 unmarried per box) is forfeited — never assumed. It STACKS with the age-65+ box. If blind, answer with `btctax income answer`; your tax is currently overstated.
+- **Age-65 box forgone (§63(f)).** The age-65 additional standard deduction has a carve-out: someone who *died during the year before reaching 65* does not get it. So if a date of birth on file would otherwise qualify you but you skipped the **"did you die during the tax year?"** question, the addition is **forfeited, never assumed** — your tax is overstated, and the advisory names the amount. It is one keystroke: `btctax income answer`. (Skipping is lawful and costs nothing at all if no date of birth on file would have qualified.)
+- **Blindness not declared (§63(f)).** If you never stated whether you (or your spouse — on a joint return always, and on married-filing-separately when i1040gi's three conditions are met: the spouse had no income, isn't filing a return, and can't be claimed as a dependent) are legally blind, the additional standard deduction for blindness ($1,550 married / $1,950 unmarried per box) is forfeited — never assumed. It STACKS with the age-65+ box. If blind, answer with `btctax income answer`; your tax is currently overstated.
 - **Sales-tax election not asked (§164(b)(5)).** If you have a Schedule A but were never asked whether to deduct general sales taxes instead of state/local income taxes, and sales taxes would be larger (a no-income-tax state, or a big-purchase year), your SALT deduction — and your tax — may be overstated. It can even flip a near-standard return into itemizing. Choose with `btctax income answer`.
 - **Mixed-use mortgage (§163(h)(3)(F)).** If you declared that NOT all of your mortgage was used to buy/build/improve the home, v1 cannot compute the Pub. 936 allocation, so Schedule A line 8a is treated as **$0** and the line-8 box is checked. This can be a large overstatement (a $500k acquisition mortgage with a $20k HELOC forfeits ~96% of a real deduction). The advisory names, as a ceiling, up to the full 1098 interest that a Pub. 936 allocation could restore.
 

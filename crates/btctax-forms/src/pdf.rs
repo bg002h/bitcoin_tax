@@ -421,15 +421,39 @@ pub fn apply_writes(
         let field = index
             .get(fqn)
             .ok_or_else(|| FormsError::MapFieldMissing(fqn.clone()))?;
-        let dict = doc.get_dictionary_mut(field.id)?;
         match value {
             FieldValue::Text(s) => {
-                dict.set(
+                doc.get_dictionary_mut(field.id)?.set(
                     "V",
                     Object::String(encode_pdf_text(s), StringFormat::Literal),
                 );
             }
             FieldValue::Check { on } => {
+                // ★★ THE ON-STATE MUST BE ONE THE WIDGET ITSELF DECLARES. A checkbox renders from its
+                // `/AP` `/N` appearance dictionary, so writing an `/AS` with no matching key draws
+                // NOTHING: the box comes out BLANK on every filed copy while `/V` and `/AS` read back
+                // as the value we asked for. That is the worst shape a forms defect can take — the
+                // second row of CLAUDE.md's provenance table ("nothing ever populated it") wearing the
+                // costume of the first ("the inputs say so"), invisible on the page and invisible to
+                // any test that reads the field value back.
+                //
+                // It is reachable from one transposition: a map whose `yes`/`no` FIELD names are
+                // swapped while the on-states stay put. Found as G-19b in the 2026-07-30 review, where
+                // the Schedule D line-17 KAT stayed GREEN under exactly that mutation.
+                //
+                // Checked here rather than per-form because the map is what we distrust, and this is
+                // the ONE chokepoint every checkbox on every form passes through. Widgets with no
+                // `/AP` `/N` at all are left alone: `button_on_states` returns empty for them, and a
+                // form whose appearances are generated at render time is not this bug.
+                let states = button_on_states(doc, field.id);
+                if !states.is_empty() && !states.iter().any(|s| s == on) {
+                    return Err(FormsError::Geometry(format!(
+                        "{fqn}: on-state {on:?} is not one this widget declares ({states:?}) — \
+                         writing it would render the box BLANK on the filed form while reading back \
+                         as checked. This is what a swapped Yes/No map looks like."
+                    )));
+                }
+                let dict = doc.get_dictionary_mut(field.id)?;
                 dict.set("V", Object::Name(on.clone().into_bytes()));
                 dict.set("AS", Object::Name(on.clone().into_bytes()));
             }

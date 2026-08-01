@@ -219,14 +219,15 @@ fn sch_b(part1: Vec<ScheduleBRow>, part2: Vec<ScheduleBRow>, fa: bool, ft: bool)
     let line2: Usd = part1.iter().map(|r| r.amount).sum();
     let line6: Usd = part2.iter().map(|r| r.amount).sum();
     ScheduleBLines {
+        fbar_filing_required: None,
         line7b_countries: String::new(),
         part1_rows: part1,
         line2,
         line4: line2,
         part2_rows: part2,
         line6,
-        foreign_accounts_7a: fa,
-        foreign_trust_8: ft,
+        foreign_accounts_7a: Some(fa),
+        foreign_trust_8: Some(ft),
     }
 }
 
@@ -274,6 +275,7 @@ fn form_8995_row_1i_carries_the_proprietors_tin_not_the_taxpayers() {
         dec!(55761), // business QBI
         Usd::ZERO,
         Usd::ZERO,
+        btctax_core::Usd::ZERO,
         dec!(81161), // TI before QBI
         Usd::ZERO,
     )
@@ -307,6 +309,7 @@ fn form_8995_refuses_to_file_a_qbi_total_for_an_unnamed_business() {
         dec!(55761),
         Usd::ZERO,
         Usd::ZERO,
+        btctax_core::Usd::ZERO,
         dec!(81161),
         Usd::ZERO,
     )
@@ -337,6 +340,7 @@ fn form_8995_with_only_reit_dividends_leaves_part_i_blank() {
         Usd::ZERO,   // …and no business QBI
         dec!(10000), // just REIT dividends
         Usd::ZERO,
+        btctax_core::Usd::ZERO,
         dec!(100000),
         dec!(20000),
     )

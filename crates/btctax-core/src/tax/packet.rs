@@ -244,15 +244,63 @@ pub struct AgedBlindBoxes {
 }
 
 impl AgedBlindBoxes {
-    /// The §63(f) boxes for a return. The spouse's boxes count **only on a joint return** — on MFS the
-    /// spouse's blindness is not the taxpayer's checkbox, and no other status has a spouse at all.
+    /// The §63(f) boxes for a return.
+    ///
+    /// ★★★ **§G-9a ADJUDICATED 2026-07-30 — the BLINDNESS box has NO death interaction, and the
+    /// asymmetry with the aged box is deliberate.** i1040gi (2024) states the carve-out for exactly one
+    /// box, naming it by its printed label:
+    ///
+    /// > *"**Death of spouse in 2024.** If your spouse was born before January 2, 1960, but died in
+    /// > 2024 before reaching age 65, don't check the box that says **'Spouse was born before January
+    /// > 2, 1960.'**"*
+    ///
+    /// There is no matching sentence for blindness, and the MECHANISM says why there could not be. The
+    /// age test is a DURATION test with a gap the year can straddle: a person "is considered to reach
+    /// age 65 on the day before the person's 65th birthday", so a birthday falling after their death
+    /// is an event that never happened — which is precisely what the carve-out resolves. Blindness is a
+    /// POINT-IN-TIME status test, anchored in its own words: *"blind at the end of 2024"* / *"totally
+    /// blind as of December 31, 2024"*. A decedent's tax year ends at death, so someone blind when
+    /// they died was blind at the end of their year. **There is nothing to carve out.**
+    /// The test `the_blind_box_has_no_death_carve_out_but_the_aged_box_does` pins the asymmetry, so a
+    /// future "harmonisation" of the two boxes reds.
+    ///
+    /// ★ **Honest limit on that adjudication:** i1040gi routes a decedent's preparer to **Pub. 501**,
+    /// which is NOT in `legal/primary-sources/` — and neither is **26 USC §63**. So this rests on
+    /// rung 2 plus the mechanism, not on rung 3 or 4. It is recorded that way rather than as settled.
+    ///
+    /// ★★ **The spouse's boxes are decided by `questions::spouse_63f_boxes_count`, ONE predicate
+    /// shared with the liveness of the questions that feed them.** i1040gi: *"If your filing status is
+    /// married filing separately and your spouse was born before January 2, 1960, or was blind at the
+    /// end of 2024, you can check the appropriate box(es) … if your spouse had no income, isn't filing
+    /// a return, and can't be claimed as a dependent on another person's return."* All three are now
+    /// captured, so MFS CAN claim them — and the gate fails closed: any unanswered or adverse
+    /// condition forgoes, because forgoing costs a deduction the filer can recover by answering while
+    /// granting one they are not entitled to understates a signed return. §G-20 is closed.
+    ///
+    /// ★ r3 I-1: the four §63(f) ADVISORIES ask this same predicate. They were left on `== Mfj` when
+    /// the deduction moved, and told a filer whose boxes were already claimed to claim them again.
     pub fn for_return(ri: &ReturnInputs, year: i32) -> Self {
         let t = &ri.header.taxpayer;
+        // ★★★ §G-20 — a spouse's boxes count on MFJ, **or on MFS when all THREE of i1040gi's
+        // conditions are affirmatively true**. This is the only place on the branch where an answer
+        // can only ever REDUCE tax, so it is written to fail closed: every condition must be an
+        // explicit answer in the claiming direction, and ANY unanswered one forgoes.
+        //
+        // > *"…married filing separately … you can check the appropriate box(es) … if your spouse had
+        // > no income, isn't filing a return, and can't be claimed as a dependent on another person's
+        // > return."*
+        //
+        // Forgoing costs the filer a deduction, which they can recover by answering. Granting one they
+        // are not entitled to understates a signed return, which they cannot. The asymmetry decides
+        // the default.
+        // ★ ONE definition, in `questions::spouse_63f_boxes_count` — shared with the liveness of
+        // `SpouseDiedDuringYear` / `DodSpouse`, so a box can never be counted for a spouse whose death
+        // carve-out was never even asked.
         let joint_spouse = ri
             .header
             .spouse
             .as_ref()
-            .filter(|_| ri.filing_status == FilingStatus::Mfj);
+            .filter(|_| crate::tax::questions::spouse_63f_boxes_count(ri));
         Self {
             taxpayer_aged: is_aged(
                 t.date_of_birth,
@@ -539,6 +587,7 @@ pub fn assemble_printed_forms(
         pi.business_qbi,
         pi.reit_dividends,
         pi.reit_ptp_carryforward_in,
+        pi.qbi_carryforward_in,
         pi.ti_before_qbi,
         pi.qbi_net_capital_gain,
     );
@@ -562,7 +611,14 @@ pub fn assemble_printed_forms(
     let f8283 = sch_a
         .as_ref()
         .filter(|a| a.line12 > FORM_8283_THRESHOLD)
-        .and_then(|_| form_8283_printed(&crate::forms::form_8283(state, year, donation_details)));
+        .and_then(|_| {
+            form_8283_printed(
+                &crate::forms::form_8283(state, year, donation_details),
+                // ★ §G-21 — the filer's answer to lines 5a/5b/5c, carried straight through. A
+                // `Some(true)` never gets here: `screen_absolute` refuses the year.
+                ri.donations_had_restrictions,
+            )
+        });
 
     // Form 8275 (Task 16) — `Some` iff a promoted-basis DISPOSAL leg files in `year`; the printed
     // (whole-dollar-rounded Part I) content of `crate::tax::form8275::disclosure_8275`, whose own
@@ -720,6 +776,151 @@ mod tests {
     /// COUNTING the checked boxes. So the header's box count must equal the count core actually used to
     /// build L12 — if the two can drift, a filed return claims an amount its own checkboxes do not
     /// support, which is exactly the defect this KAT exists to make impossible.
+    /// ★★★ §G-20 — the MFS spouse's §63(f) boxes are claimable, and the gate FAILS CLOSED.
+    ///
+    /// i1040gi: *"…married filing separately … you can check the appropriate box(es) … **if your spouse
+    /// had no income, isn't filing a return, and can't be claimed as a dependent on another person's
+    /// return**."* All three must be affirmatively answered in the claiming direction.
+    ///
+    /// ★★ **This is the only change on the branch where an answer can ONLY reduce tax**, so every
+    /// negative case matters more than the positive one. Forgoing costs the filer a deduction they can
+    /// recover by answering; granting one they are not entitled to understates a signed return, which
+    /// they cannot recover. The asymmetry is why *any* unanswered condition forgoes.
+    #[test]
+    fn the_mfs_spouse_63f_boxes_need_all_three_conditions_and_fail_closed() {
+        let build = |no_income: Option<bool>, not_filing: Option<bool>, claimable: Option<bool>| {
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Mfs,
+                ..Default::default()
+            };
+            ri.header.taxpayer = person("John", "Doe", "123456789");
+            ri.header.spouse = Some(Person {
+                date_of_birth: Some(date!(1955 - 03 - 02)), // 65+
+                blind: Some(true),                          // both boxes would qualify
+                ..person("Jane", "Doe", "987654321")
+            });
+            ri.header.spouse_died_during_year = Some(false);
+            ri.header.spouse_had_no_income = no_income;
+            ri.header.spouse_not_filing_a_return = not_filing;
+            ri.header.can_be_claimed_as_dependent_spouse = claimable;
+            AgedBlindBoxes::for_return(&ri, 2024)
+        };
+
+        // ★ ALL THREE in the claiming direction ⇒ both boxes count.
+        let b = build(Some(true), Some(true), Some(false));
+        assert!(
+            b.spouse_aged && b.spouse_blind,
+            "all three answered ⇒ claimed"
+        );
+        assert_eq!(b.count(), 2);
+
+        // ★★ Every other combination forgoes. Each row is a DIFFERENT way to be un-entitled or
+        //    unanswered, and any one of them must be enough on its own.
+        for (label, a, b_, c) in [
+            ("no-income unanswered", None, Some(true), Some(false)),
+            ("no-income denied", Some(false), Some(true), Some(false)),
+            ("not-filing unanswered", Some(true), None, Some(false)),
+            ("not-filing denied", Some(true), Some(false), Some(false)),
+            ("dependent-flag unanswered", Some(true), Some(true), None),
+            (
+                "spouse IS claimable elsewhere",
+                Some(true),
+                Some(true),
+                Some(true),
+            ),
+            ("nothing answered", None, None, None),
+        ] {
+            let boxes = build(a, b_, c);
+            assert_eq!(
+                boxes.count(),
+                0,
+                "★ {label}: the spouse's boxes must be FORGONE. Granting one here understates a \
+                 signed return; forgoing merely costs a deduction the filer can recover by answering."
+            );
+        }
+    }
+
+    /// ★★ The gate and the QUESTIONS it enables are one predicate — `questions::spouse_63f_boxes_count`.
+    ///
+    /// Two copies would drift into the worst shape available here: counting a spouse's aged box on a
+    /// return where `SpouseDiedDuringYear` was never asked, so the §G-9 death carve-out — the whole
+    /// point of that gate — could not have been applied.
+    #[test]
+    fn the_mfs_spouse_death_gate_is_asked_exactly_when_the_boxes_count() {
+        use crate::tax::questions::{spouse_63f_boxes_count, SkippableId, SKIPPABLE_QUESTIONS};
+        let gate = SKIPPABLE_QUESTIONS
+            .iter()
+            .find(|s| s.id == SkippableId::SpouseDiedDuringYear)
+            .unwrap();
+        let mk = |claimable: bool| {
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Mfs,
+                ..Default::default()
+            };
+            ri.header.spouse = Some(Person::default());
+            if claimable {
+                ri.header.spouse_had_no_income = Some(true);
+                ri.header.spouse_not_filing_a_return = Some(true);
+                ri.header.can_be_claimed_as_dependent_spouse = Some(false);
+            }
+            ri
+        };
+        for claimable in [true, false] {
+            let ri = mk(claimable);
+            assert_eq!(
+                (gate.live)(&ri),
+                spouse_63f_boxes_count(&ri),
+                "the death gate must be asked exactly when the boxes can count (claimable={claimable})"
+            );
+            assert_eq!((gate.live)(&ri), claimable);
+        }
+    }
+
+    /// ★★★ §G-9a — **the blindness box has NO death interaction; the aged box does.** One person,
+    /// one date of death, both conditions true: the aged box is carved out and the blind box is not.
+    ///
+    /// This is the executable form of the adjudication written on [`AgedBlindBoxes::for_return`]. The
+    /// asymmetry looks like an oversight — the same statute, the same dollars, the same worksheet line
+    /// — so it is exactly the kind of thing a later reader "tidies up". i1040gi states the carve-out
+    /// for one box by its printed label and gives blindness its own date anchor (*"blind at the end of
+    /// 2024"*); a decedent's tax year ends at death, so someone blind when they died was blind at the
+    /// end of it. Harmonising the two boxes forfeits a deduction the filer is entitled to, and this
+    /// test is what stops it happening quietly.
+    #[test]
+    fn the_blind_box_has_no_death_carve_out_but_the_aged_box_does() {
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        // Born 1959-02-14 ⇒ reaches 65 on 1960-02-13… i.e. on 2024-02-13. Died 2024-02-12: ONE DAY
+        // short, the i1040gi worked example. Blind at death.
+        ri.header.taxpayer = Person {
+            date_of_birth: Some(date!(1959 - 02 - 14)),
+            date_of_death: Some(date!(2024 - 02 - 12)),
+            blind: Some(true),
+            ..person("John", "Doe", "123456789")
+        };
+        ri.header.taxpayer_died_during_year = Some(true);
+        let b = AgedBlindBoxes::for_return(&ri, 2024);
+        assert!(
+            !b.taxpayer_aged,
+            "died one day before reaching 65 ⇒ the AGE box is carved out (i1040gi's own example)"
+        );
+        assert!(
+            b.taxpayer_blind,
+            "★ …and the BLINDNESS box is NOT. Blindness is tested at the end of the tax year, and a \
+             decedent's year ends at death. Harmonising these two forfeits a real deduction."
+        );
+        assert_eq!(b.count(), 1);
+
+        // The control: one day later, and the age box is checked too (so the assertion above is
+        // about the CARVE-OUT, not about the fixture failing some other way).
+        ri.header.taxpayer.date_of_death = Some(date!(2024 - 02 - 13));
+        let b = AgedBlindBoxes::for_return(&ri, 2024);
+        assert!(b.taxpayer_aged && b.taxpayer_blind);
+        assert_eq!(b.count(), 2);
+    }
+
     #[test]
     fn aged_blind_box_count_matches_the_standard_deduction_core_actually_computed() {
         let p = ty2024_params();
@@ -737,6 +938,10 @@ mod tests {
             blind: Some(true),
             ..person("John", "Doe", "123456789")
         };
+        // ★ The age-65 box is now CLAIMED, not defaulted: since the §G-9 death gates became class-(B)
+        // skippables, `is_aged` forgoes the addition while "did you die during the year?" is unanswered.
+        // A fixture that wants the box must say so, exactly as it must state `blind` and the DOB.
+        ri.header.taxpayer_died_during_year = Some(false);
         ri.header.spouse = Some(Person {
             blind: Some(true),
             ..person("Jane", "Doe", "987654321")
@@ -1080,6 +1285,11 @@ mod tests {
         assert!(
             !pr.forms.f8959.must_file(),
             "no Additional Medicare Tax, none withheld"
+        );
+
+        assert!(
+            !pr.forms.sch_d.must_file(),
+            "a W-2-only filer has no Schedule D to attach"
         );
     }
 

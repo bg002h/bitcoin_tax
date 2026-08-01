@@ -9,3 +9,12 @@ line16_h = "topmostSubform[0].Page2[0].f2_1[0]"
 
 qof_yes = { field = "topmostSubform[0].Page1[0].c1_1[0]", on = "1" }
 qof_no = { field = "topmostSubform[0].Page1[0].c1_1[1]", on = "2" }
+
+# Part III line 17 — "Are lines 15 and 16 both gains?" The crypto slice answers THIS ONE (it reads only
+# lines 15 and 16, both printed above); 18-22 stay blank — see `schedule_d.rs`'s module docs.
+# ★ ON-STATES DUMPED, NOT ASSUMED (`xtask dump-fields`): this form's pairs are "1"/"2", but the 2017
+#   Schedule D's are "Yes"/"No" — the analogy would have been wrong one revision over.
+#   Yes is the UPPER widget (y 578-586) and No the lower (566-574), matching the printed order.
+[line17]
+yes = { field = "topmostSubform[0].Page2[0].c2_1[0]", on = "1" }
+no  = { field = "topmostSubform[0].Page2[0].c2_1[1]", on = "2" }

@@ -22,6 +22,9 @@ pub enum SectionId {
     ScheduleA,
     ScheduleACharitable,
     Payments,
+    /// ★ §G-22 — the QBI loss carryforwards. The ONLY carryforward family in the understatement
+    /// direction, and the only one collectable through the form.
+    Carryforwards,
     Declarations,
     IncomeExclusions,
     Skippables,
@@ -100,8 +103,6 @@ pub enum FieldId {
     /// Form 6251 line 3 — is the mortgaged dwelling AMT-qualified? (i6251 p.8.)
     DeclAmtQualifiedDwelling,
     DeclHasIncomeExclusion,
-    DeclTaxpayerDiedDuringYear,
-    DeclSpouseDiedDuringYear,
     ExclPuertoRico,
     Excl2555L45,
     Excl2555L50,
@@ -118,6 +119,22 @@ pub enum FieldId {
     DobSpouse,
     DodTaxpayer,
     DodSpouse,
+    /// Schedule B line 7a's unnumbered FBAR sub-question (FinCEN Form 114) — class (B): nothing on the
+    /// return reads it, so silence is lawful.
+    FbarFilingRequired,
+    /// §G-9 death gates — class (B): silence FORGOES the §63(f) age-65 addition, never grants it.
+    TaxpayerDiedDuringYear,
+    SpouseDiedDuringYear,
+    /// Schedule C lines I / J — the Form-1099 compliance pair. Class (B): no figure reads them and the
+    /// form prints no Caution, but §6721/§6722 exposure is real, so the skip advises.
+    ScheduleC1099Required,
+    ScheduleC1099Filed,
+    /// Form 8283 5a/5b/5c, asked as ONE return-level universal (§G-21).
+    DonationsHadRestrictions,
+    // Carryforwards (§G-22) — Form 8995 lines 7 and 3. Both are prior-year LOSSES that REDUCE a
+    // deduction, so omitting either UNDERSTATES tax. They were import-only until 2026-07-31.
+    QbiReitPtpCarryforwardIn,
+    QbiCarryforwardIn,
 }
 
 /// The value shape of a field.

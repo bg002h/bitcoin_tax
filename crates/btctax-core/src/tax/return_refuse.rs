@@ -12,7 +12,6 @@
 //! across the reconcile system) — additive, per SPEC §2. A `Refusal` maps to
 //! `TaxOutcome::NotComputable(..)` at the report boundary (Phase 4).
 use crate::conventions::Usd;
-use crate::tax::packet::{Ssn, SsnError};
 use crate::tax::return_inputs::{
     Box12Entry, CharitableCarryItem, CharitableClass, CharitableGift, Form1099Div, Form1099G,
     Form1099Int, Owner, Payments, QbiInputs, ReturnInputs, Schedule1Inputs, ScheduleAInputs,
@@ -36,15 +35,13 @@ pub enum RefuseReason {
     /// are produced by the computation, never the input. A negative value is a corrupt import that could
     /// otherwise *offset* an accumulated refusal threshold (e.g. §402(g), §904(j)) into passing (R2-I1).
     NegativeAmount(String),
-    /// A captured SSN is not nine digits. Every IRS form prints the SSN in a fixed-width comb cell, so a
-    /// value that cannot be canonicalized cannot be printed — and §3.4 makes an unprintable identity an
-    /// uncomputable line, not a best-effort cell. Carries WHO ("taxpayer" / "spouse" / a dependent's
-    /// name), **never the digits**: an SSN in an error string is a PII leak.
-    ///
-    /// An *uncaptured* (empty) SSN is deliberately NOT this: the tax math never reads an SSN, so a
-    /// household that has entered no PII still gets a report. The filable packet is what refuses it
-    /// (`ReturnHeader::build` → `SsnError::Missing`).
-    SsnMalformed(String),
+    /// ★★★ Form 8283 Section B lines 5a/5b/5c — the restriction questions — are unresolved: either
+    /// unanswered, or answered **Yes**. A Yes means at least one donated property carried a restriction
+    /// or a retained right, which REDUCES or DENIES the §170 deduction (Reg §1.170A-7). btctax deducts
+    /// at full FMV and cannot tell WHICH gift, so it refuses rather than file a number it knows is too
+    /// large. Raised only for a year that actually files a **Section B** 8283 — see
+    /// `screen_absolute`, which has the ledger AND the computed itemize election.
+    DonationRestrictionsUnresolved,
     /// A **non-crypto NONCASH** charitable gift whose total exceeds the $500 Form 8283 threshold. Those
     /// amounts reach Schedule A line 12, but btctax holds no property details for them (no description,
     /// no acquisition date, no appraiser), so it can produce no 8283 rows — the packet would attach a
@@ -91,13 +88,6 @@ pub enum RefuseReason {
     /// a return whose form needs modified AGI. Only reachable from TY2025 onward; TY2024's flat SALT
     /// cap never reads MAGI (D-11).
     IncomeExclusionUnanswered,
-    /// **1040 line 12a / §63(f) — `FOLLOWUPS.md` §G-9.** "Did the taxpayer die during the tax year?"
-    /// is unanswered. i1040gi carves a taxpayer who died before reaching age 65 out of the age-65
-    /// addition; an unasked death silently GRANTS it, understating the tax.
-    TaxpayerDeathUnanswered,
-    /// **1040 line 12a / §63(f) — `FOLLOWUPS.md` §G-9**, the same rule for the spouse. Live only on a
-    /// return that carries a spouse `Person`.
-    SpouseDeathUnanswered,
     /// Form 6251 line 3 — answered ADVERSELY ("not an AMT-qualified dwelling"). v1 does not model the
     /// §56(b)(1)(C) add-back, so computing would UNDERSTATE the tax.
     AmtNonQualifiedDwelling,
@@ -216,32 +206,6 @@ pub struct Refusal {
     pub detail: String,
 }
 
-/// The first household SSN that was CAPTURED but cannot be canonicalized, as `(who, why)`. An empty SSN
-/// is skipped — "not entered" is a packet-time refusal, not a compute-time one.
-fn first_malformed_ssn(ri: &ReturnInputs) -> Option<(String, SsnError)> {
-    let dependents = ri
-        .header
-        .dependents
-        .iter()
-        .map(|d| (format!("dependent {}'s", d.name), d.ssn.as_str()));
-    let people = [
-        ("taxpayer".to_string(), ri.header.taxpayer.ssn.as_str()),
-        (
-            "spouse".to_string(),
-            ri.header.spouse.as_ref().map_or("", |s| s.ssn.as_str()),
-        ),
-    ]
-    .into_iter()
-    .chain(dependents);
-
-    people.into_iter().find_map(|(who, raw)| {
-        if raw.trim().is_empty() {
-            return None; // uncaptured — the packet refuses this, not the report
-        }
-        Ssn::canonical(raw).err().map(|e| (who, e))
-    })
-}
-
 fn refuse(reason: RefuseReason, detail: impl Into<String>) -> Option<Refusal> {
     Some(Refusal {
         reason,
@@ -286,13 +250,17 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         sch1,
         payments,
         capital_loss_carryforward_in,
+        capital_loss_carryforward_in_provenance: _, // CarryProvenance, not an amount
+        charitable_carryover_in_provenance: _,
         amt_carryover_same_as_regular: _, // a declaration, not money
         amt_depreciation_same_as_regular: _, // a declaration, not money
         charitable_carryover_in,
         qbi,
         foreign_accounts: _,
         foreign_trust: _,
+        fbar_filing_required: _,
         foreign_country_names: _,
+        donations_had_restrictions: _, // Option<bool>, not an amount
         dual_status_alien: _,
         // MAGI add-backs — refused at the worksheet's point of need, not here (D-11).
         has_income_exclusion: _, // refused at the worksheet's point of need (D-11), not here
@@ -461,6 +429,8 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             naics_code: _,
             accounting_method: _,
             expenses,
+            payments_requiring_1099: _, // Option<bool>, not an amount
+            will_file_required_1099: _,
         } = c;
         if neg(*expenses) {
             return Some("Schedule C expenses");
@@ -551,9 +521,16 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
     let QbiInputs {
         reit_ptp_carryforward_in,
         reit_ptp_carryforward_in_provenance: _,
+        qbi_carryforward_in,
+        qbi_carryforward_in_provenance: _,
     } = qbi;
     if neg(*reit_ptp_carryforward_in) {
         return Some("QBI REIT/PTP carryforward");
+    }
+    // ★ Form 8995 line 3 is a PARENTHESIZED box, so the input is a positive MAGNITUDE. A negative here
+    // would flip the sign twice and INCREASE the deduction — the understating direction.
+    if neg(*qbi_carryforward_in) {
+        return Some("QBI business-loss carryforward");
     }
     let Carryforward { short, long } = capital_loss_carryforward_in;
     if neg(*short) {
@@ -577,15 +554,12 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
         );
     }
 
-    // Identity integrity: a CAPTURED SSN that is not nine digits can never reach a form cell, so it
-    // fails here rather than at the export boundary (`p1-ssn-normalization`). An EMPTY SSN is "not
-    // entered yet" and does not block the report — only the packet.
-    if let Some((who, err)) = first_malformed_ssn(ri) {
-        return refuse(
-            RefuseReason::SsnMalformed(who.clone()),
-            format!("the {who} SSN {err} — fix it before the return can be computed"),
-        );
-    }
+    // ★★ NO SSN GATE HERE, DELIBERATELY. A malformed SSN used to refuse the whole computation, which
+    // meant one typo in an identity field blocked `report`, `optimize`, `what-if` and the TUI — none of
+    // which read an SSN. That was strictly WORSE than an EMPTY SSN, which has always been allowed
+    // through to the report. The identity boundary is the FILABLE PACKET, and it is already closed:
+    // `ReturnHeader::build` returns `HeaderError::Ssn(SsnError::{Missing,NotDigits,WrongLength})`, so a
+    // typo still cannot reach a printed comb cell. Screening it twice only cost the filer their numbers.
 
     // ★ P9 §3.2 — THE REGISTRY LOOP. Placed after the integrity gates (negative money, malformed SSN) and
     // before every value-dependent rule (r1 M-2). This is the ONLY unanswered-declaration screen: every
@@ -978,9 +952,9 @@ mod tests {
         ri.sch1.hsa_activity = Some(false);
         ri.dual_status_alien = Some(false);
         ri.has_income_exclusion = Some(false);
-        // §G-9: "did not die during the tax year" — the answer that reproduces the pre-§G-9 behaviour,
-        // so no existing figure moves. (The spouse gate is live only with a spouse `Person`, and every
-        // spouse-bearing fixture below sets it through `answer_every_live_question`.)
+        // §G-9: "did not die during the tax year". No longer REQUIRED (the death gates are class-(B)
+        // skippables now — see `the_death_gates_do_not_block_a_return`), but kept so that every fixture
+        // below claims the age-65 box the way a real filer would, and no existing figure moves.
         ri.header.taxpayer_died_during_year = Some(false);
         ri
     }
@@ -1067,11 +1041,6 @@ mod tests {
                     ..Default::default()
                 });
             }
-            // §G-9: the spouse death gate is live exactly when a spouse `Person` is on the return.
-            QuestionId::SpouseDiedDuringYear => {
-                r.filing_status = FilingStatus::Mfj;
-                r.header.spouse = Some(crate::tax::return_inputs::Person::default());
-            }
             _ => {}
         }
         r
@@ -1086,8 +1055,14 @@ mod tests {
         for q in FORM_QUESTIONS {
             let mut r = scenario_for(q.id); // nothing answered yet
                                             // Answer every OTHER live question, leaving q blank (None, from Default).
+                                            // ★ `is_none()` is not tidiness: a question whose LIVENESS depends on another question's
+                                            //   NON-NEUTRAL answer would otherwise be switched off by this very loop, and its scenario
+                                            //   could never be exercised. Only fill in what the scenario left blank. (The case that
+                                            //   exposed it — the Schedule B 7a FBAR sub-question, live only at 7a = Yes while 7a's
+                                            //   neutral is `false` — is now a SKIPPABLE, so no current entry exercises this guard; the
+                                            //   rule stands because the next such question would hit the same wall silently.)
             for other in FORM_QUESTIONS {
-                if other.id != q.id && (other.live)(&r) {
+                if other.id != q.id && (other.live)(&r) && (other.get)(&r).is_none() {
                     (other.set)(&mut r, other.neutral);
                 }
             }
@@ -1332,34 +1307,77 @@ mod tests {
         assert_eq!(reason(&ok), None, "a NAMED business must file");
     }
 
-    /// A captured SSN that is not nine digits can never be printed on a form, so it fails HERE — at
-    /// compute time, before any PDF is attempted (§3.4: an unprintable SSN is an uncomputable line).
-    /// The refusal names WHO, never the digits: an SSN in an error string is a PII leak.
+    /// ★★ A MALFORMED SSN DOES NOT BLOCK THE COMPUTATION — and the boundary that does refuse it is
+    /// asserted in the same breath, because deleting a gate is only safe if you can name the one behind it.
+    ///
+    /// It used to refuse at compute time. That made a single typo in an identity field block `report`,
+    /// `optimize`, `what-if` and the whole TUI — **none of which read an SSN** — and it was strictly
+    /// harsher than an EMPTY SSN, which has always been let through (see the sibling test). There is no
+    /// number on the return an unparseable SSN can make wrong.
+    ///
+    /// The identity boundary is the FILABLE PACKET, and it is unchanged: `ReturnHeader::build` returns
+    /// `HeaderError::Ssn(..)` for `Missing`, `NotDigits` AND `WrongLength`, so a typo still cannot reach a
+    /// printed comb cell. Each of the three malformed shapes is exercised on both sides.
     #[test]
-    fn a_malformed_ssn_refuses_at_compute_time() {
-        let mut r = ri();
-        r.header.taxpayer.ssn = "12345".into(); // five digits — not an SSN
-        assert!(matches!(reason(&r), Some(RefuseReason::SsnMalformed(who)) if who == "taxpayer"));
+    fn a_malformed_ssn_computes_but_the_packet_still_refuses_it() {
+        use crate::tax::packet::{ReturnHeader, SsnError};
+        // (label, the malformed SSN, the SsnError the packet boundary must raise)
+        let shapes = [
+            ("five digits", "12345", SsnError::WrongLength(5)),
+            ("a non-digit", "123-45-678X", SsnError::NotDigits('X')),
+            ("ten digits", "1234567890", SsnError::WrongLength(10)),
+        ];
+        for (label, ssn, expected) in shapes {
+            // ── the taxpayer's own SSN ──
+            let mut r = ri();
+            r.header.taxpayer.ssn = ssn.into();
+            assert_eq!(
+                reason(&r),
+                None,
+                "{label}: a typo must NOT block the report — nothing reads an SSN"
+            );
+            assert_eq!(
+                ReturnHeader::build(&r, 2024).unwrap_err(),
+                crate::tax::packet::HeaderError::Ssn(expected),
+                "{label}: …but the FILABLE PACKET must still refuse it"
+            );
 
-        let mut r = ri();
-        r.filing_status = FilingStatus::Mfj;
-        r.header.spouse = Some(crate::tax::return_inputs::Person {
-            ssn: "123-45-678X".into(),
-            ..Default::default()
-        });
-        assert!(matches!(reason(&r), Some(RefuseReason::SsnMalformed(who)) if who == "spouse"));
-
-        let mut r = ri();
-        r.header
-            .dependents
-            .push(crate::tax::return_inputs::Dependent {
-                name: "Sam Doe".into(),
-                ssn: "1234567890".into(), // ten digits
+            // ── a spouse's, on a joint return ──
+            let mut r = ri();
+            r.filing_status = FilingStatus::Mfj;
+            r.header.can_be_claimed_as_dependent_spouse = Some(false);
+            r.header.spouse = Some(crate::tax::return_inputs::Person {
+                ssn: ssn.into(),
                 ..Default::default()
             });
-        assert!(
-            matches!(reason(&r), Some(RefuseReason::SsnMalformed(who)) if who.contains("Sam Doe"))
-        );
+            r.header.spouse_died_during_year = Some(false);
+            assert_eq!(reason(&r), None, "{label}: spouse — report computes");
+            assert!(
+                matches!(
+                    ReturnHeader::build(&r, 2024),
+                    Err(crate::tax::packet::HeaderError::Ssn(_))
+                ),
+                "{label}: spouse — packet refuses"
+            );
+
+            // ── a dependent's ──
+            let mut r = ri();
+            r.header
+                .dependents
+                .push(crate::tax::return_inputs::Dependent {
+                    name: "Sam Doe".into(),
+                    ssn: ssn.into(),
+                    ..Default::default()
+                });
+            assert_eq!(reason(&r), None, "{label}: dependent — report computes");
+            assert!(
+                matches!(
+                    ReturnHeader::build(&r, 2024),
+                    Err(crate::tax::packet::HeaderError::Ssn(_))
+                ),
+                "{label}: dependent — packet refuses"
+            );
+        }
     }
 
     /// ★ An **uncaptured** SSN is not the same as a malformed one. The tax math does not read an SSN, so
@@ -1701,6 +1719,127 @@ mod tests {
         assert_eq!(reason(&r), None);
     }
 
+    /// ★★ Schedule B 7a's unnumbered FBAR sub-question is **class (B)** — it must NOT refuse.
+    ///
+    /// It was briefly a class-(A) declaration, and that was the error the refusal review corrected:
+    /// a refusal is justified only when proceeding would put a wrong number or fabricated testimony
+    /// on the return, or silently expose the filer to a penalty. This box fails all three — no
+    /// figure reads it, a blank is no testimony, and the penalty the form's Caution warns of is for
+    /// not FILING FinCEN Form 114, an obligation this box neither creates nor removes. So a return
+    /// with 7a = Yes and the sub-question BLANK must compute clean, and be advised, not refused.
+    #[test]
+    fn the_fbar_sub_question_does_not_refuse_a_return() {
+        let mut r = ri();
+        r.foreign_accounts = Some(true); // 7a Yes ⇒ the sub-question is asked
+        r.foreign_country_names = "Portugal".to_string(); // 7b, else its own value-refusal fires
+        r.fbar_filing_required = None; // …and skipped
+        assert_eq!(
+            reason(&r),
+            None,
+            "a skipped FBAR sub-question is LAWFUL silence — it may not block the return"
+        );
+        // Answering it either way is equally fine.
+        for answered in [Some(true), Some(false)] {
+            r.fbar_filing_required = answered;
+            assert_eq!(reason(&r), None, "answered {answered:?}");
+        }
+        // ★ And it is not in the mandatory registry at all — a re-added FORM_QUESTIONS entry would
+        // re-introduce the refusal silently, since the registry loop screens every live entry.
+        assert!(
+            !FORM_QUESTIONS
+                .iter()
+                .any(|q| (q.get)(&r) == r.fbar_filing_required
+                    && format!("{:?}", q.id).contains("Fbar")),
+            "the FBAR sub-question is a SKIPPABLE, never a mandatory declaration"
+        );
+        assert!(
+            btctax_skippables().any(|s| format!("{s:?}").contains("Fbar")),
+            "…and it IS in the skippable registry, so it is still ASKED"
+        );
+    }
+
+    /// ★★★ THE §G-9 DEATH GATES DO NOT BLOCK A RETURN. `TaxpayerDiedDuringYear` was a class-(A)
+    /// declaration with `live: |_| true`, so an unanswered one refused **every return btctax could
+    /// compute** — the single largest usability cost in the registry.
+    ///
+    /// It bought nothing. `is_aged`'s `(None, None)` arm already returns `false`, so silence FORGOES
+    /// the §63(f) age-65 addition rather than granting it on an unresolved carve-out: the refusal was
+    /// redundant with a fail-safe sitting directly beneath it, and the direction of the residual error
+    /// is OVERSTATEMENT, which §3.4 permits and advises on. This test is the whole claim: a return
+    /// that answers nothing about death computes, and the box it would have claimed is NOT granted.
+    #[test]
+    fn the_death_gates_do_not_block_a_return() {
+        use crate::tax::packet::ReturnHeader;
+        let mut r = ri();
+        r.header.taxpayer_died_during_year = None; // re-blank what the fixture answers
+        r.w2s.push(W2 {
+            box1_wages: dec!(80000),
+            ..Default::default()
+        });
+        assert_eq!(
+            reason(&r),
+            None,
+            "an unanswered death gate must NOT refuse — silence is lawful here"
+        );
+
+        // …and a filer old enough to qualify does NOT get the box while it is unanswered.
+        r.header.taxpayer.date_of_birth = Some(time::macros::date!(1955 - 03 - 02)); // 65+ in 2024
+        r.header.taxpayer.ssn = "123456789".into();
+        r.header.taxpayer.first_name = "John".into();
+        r.header.taxpayer.last_name = "Doe".into();
+        assert_eq!(reason(&r), None, "still computes with a DOB on file");
+        let h = ReturnHeader::build(&r, 2024).unwrap();
+        assert!(
+            !h.aged_blind.taxpayer_aged,
+            "★ the age-65 box is FORGONE while the death carve-out is unresolved — never granted. \
+             Flipping this to `true` restores the understatement §G-9 fixed."
+        );
+
+        // Answering it "no" claims the box, which is what makes the forfeit above a real cost.
+        r.header.taxpayer_died_during_year = Some(false);
+        assert!(
+            ReturnHeader::build(&r, 2024)
+                .unwrap()
+                .aged_blind
+                .taxpayer_aged,
+            "answered ⇒ the box is claimed"
+        );
+    }
+
+    /// ★ The SPOUSE death gate is MFJ-only. `AgedBlindBoxes::for_return` counts a spouse §63(f) box on
+    /// no other status, so on MFS the question was asked — and, before this, REFUSED — on a return
+    /// where its answer could never move a figure. The prompt scope must track the CONSUMER's scope.
+    #[test]
+    fn the_spouse_death_gate_is_asked_only_on_mfj() {
+        use crate::tax::questions::{SkippableId, SKIPPABLE_QUESTIONS};
+        let q = SKIPPABLE_QUESTIONS
+            .iter()
+            .find(|s| s.id == SkippableId::SpouseDiedDuringYear)
+            .expect("the spouse death gate is a skippable");
+        let with_spouse = |fs: FilingStatus| {
+            let mut r = ri();
+            r.filing_status = fs;
+            r.header.spouse = Some(crate::tax::return_inputs::Person::default());
+            r
+        };
+        assert!((q.live)(&with_spouse(FilingStatus::Mfj)), "MFJ: asked");
+        assert!(
+            !(q.live)(&with_spouse(FilingStatus::Mfs)),
+            "MFS: the spouse box is not the taxpayer's checkbox, so the question is inert"
+        );
+        let mut single = ri();
+        single.filing_status = FilingStatus::Single;
+        assert!(!(q.live)(&single), "no spouse: nowhere to record it");
+    }
+
+    /// The skippable registry ids, as strings — a tiny helper so the test above can assert membership
+    /// without importing the whole registry surface.
+    fn btctax_skippables() -> impl Iterator<Item = crate::tax::questions::SkippableId> {
+        crate::tax::questions::SKIPPABLE_QUESTIONS
+            .iter()
+            .map(|s| s.id)
+    }
+
     #[test]
     fn mfs_without_spouse_itemize_answer_refuses() {
         let mut r = ri();
@@ -1748,8 +1887,10 @@ mod tests {
     fn answering_every_live_question_neutral_leaves_no_declaration_refusal() {
         for q in FORM_QUESTIONS {
             let mut r = scenario_for(q.id);
+            // ★ Same `is_none()` rule as the sibling property test above: never overwrite an answer the
+            //   scenario pinned to make `q` live in the first place.
             for other in FORM_QUESTIONS {
-                if (other.live)(&r) {
+                if (other.live)(&r) && (other.get)(&r).is_none() {
                     (other.set)(&mut r, other.neutral);
                 }
             }

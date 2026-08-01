@@ -88,13 +88,17 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         sch1,
         payments,
         capital_loss_carryforward_in,
+        capital_loss_carryforward_in_provenance,
+        charitable_carryover_in_provenance,
         amt_carryover_same_as_regular,
         amt_depreciation_same_as_regular,
         charitable_carryover_in,
         qbi,
         foreign_accounts,
         foreign_trust,
+        fbar_filing_required,
         foreign_country_names: _, // String — scalar
+        donations_had_restrictions,
         dual_status_alien,
         // §164(b)(7)(B)(iv) / Schedule 1-A Part I MAGI add-backs. `Option<Usd>` scalar leaves, so the
         // `_` rule permits binding them here — but they are NOT class-(B) forgone benefits like
@@ -115,6 +119,42 @@ pub fn classify(ri: &ReturnInputs) -> Census {
     c.declaration(mfs_spouse_itemizes, QuestionId::MfsSpouseItemizes);
     c.declaration(foreign_accounts, QuestionId::ForeignAccounts);
     c.declaration(foreign_trust, QuestionId::ForeignTrust);
+    // ★ §G-20a — provenance for the two benefit carryovers. Class (C): no print, no tax direction.
+    // They exist so a ZERO can be told apart from an UNASKED, which is what makes an honest advisory
+    // possible; the per-item provenance on `CharitableCarryItem` cannot speak for an EMPTY list.
+    c.exempt(
+        capital_loss_carryforward_in_provenance,
+        Class::NoTaxDirection,
+        "§2.8: CarryProvenance (§1212(b) capital-loss carryover, §G-20a) — no print, no tax direction",
+    );
+    c.exempt(
+        charitable_carryover_in_provenance,
+        Class::NoTaxDirection,
+        "§2.8: CarryProvenance (§170(d)(1) charitable carryover LIST, §G-20a) — no print, no tax direction",
+    );
+    // ★ Schedule B 7a's unnumbered FBAR sub-question. NOT a declaration: no figure on the return
+    // reads it (the printed chain writes the checkbox and nothing else), so its silence neither
+    // asserts nor forgoes — class (C). Asked as `SkippableId::FbarFilingRequired`, and skipping it
+    // fires `Advisory::FbarSubQuestionNotAnswered` quoting the form's Caution verbatim.
+    c.exempt(
+        fbar_filing_required,
+        Class::NoTaxDirection,
+        "Schedule B line 7a's FBAR sub-question — no figure on the return reads it, and the penalty \
+         the form's Caution names attaches to NOT FILING FinCEN Form 114 (a FinCEN obligation \
+         independent of this box), not to leaving the box blank. Silence is lawful and prints a true \
+         blank; `Advisory::FbarSubQuestionNotAnswered` fires (§2.1)",
+    );
+    // ★★ Form 8283 5a/5b/5c, asked as ONE return-level universal (§G-21). Class (B) HERE — offered
+    // always, silence lawful — because the donations are in the LEDGER and liveness cannot see them.
+    // The MANDATORY half lives in `screen_absolute`, which can: on an ITEMIZING year an
+    // unanswered or `Some(true)` answer REFUSES.
+    c.exempt(
+        donations_had_restrictions,
+        Class::BenefitClaim,
+        "Form 8283 5a/5b/5c (§G-21) — offered as a skippable so a filer who donated nothing is never \
+         blocked; on an itemizing year that claims the §170 deduction `screen_absolute` makes it \
+          mandatory (§2.2)",
+    );
     c.declaration(dual_status_alien, QuestionId::DualStatusAlien);
     c.declaration(has_income_exclusion, QuestionId::HasIncomeExclusion);
     c.declaration(
@@ -171,6 +211,8 @@ fn classify_header(c: &mut Census, h: &HouseholdHeader) {
         dependents,
         can_be_claimed_as_dependent_taxpayer,
         can_be_claimed_as_dependent_spouse,
+        spouse_had_no_income,
+        spouse_not_filing_a_return,
         presidential_fund_taxpayer,
         presidential_fund_spouse,
         taxpayer_died_during_year,
@@ -195,13 +237,41 @@ fn classify_header(c: &mut Census, h: &HouseholdHeader) {
         Class::NoTaxDirection,
         "§2.1: 1040 presidential-fund box (spouse) — §6096, no tax direction",
     );
-    // §G-9: the §63(f) death carve-out. i1040gi states it twice — "Death of a taxpayer" and "Death of
-    // spouse" — so each is its own declaration.
-    c.declaration(
-        taxpayer_died_during_year,
-        QuestionId::TaxpayerDiedDuringYear,
+    // ★★ §G-20 — i1040gi's two uncaptured MFS conditions for the spouse's §63(f) boxes. BENEFIT
+    // CLAIMS (New Colonial Ice): silence FORGOES the boxes and never grants them, so `false`/absent is
+    // lawful and the forgone benefit fires `Mfs63fSpouseBoxesForgone`.
+    c.exempt(
+        spouse_had_no_income,
+        Class::BenefitClaim,
+        "§63(f)/i1040gi MFS condition (spouse had no income) — silence forgoes the spouse's aged/blind \
+         boxes rather than granting them; `Advisory::Mfs63fSpouseBoxesForgone` names the cost (§2.2)",
     );
-    c.declaration(spouse_died_during_year, QuestionId::SpouseDiedDuringYear);
+    c.exempt(
+        spouse_not_filing_a_return,
+        Class::BenefitClaim,
+        "§63(f)/i1040gi MFS condition (spouse isn't filing a return) — same reasoning (§2.2)",
+    );
+    // §G-9: the §63(f) death carve-out. i1040gi states it twice — "Death of a taxpayer" and "Death of
+    // spouse" — so each is its own leaf. ★ BENEFIT CLAIMS, not declarations: silence FORGOES the
+    // age-65 addition (`is_aged`'s `(None, None)` arm returns `false`), so by the sharp test it is
+    // class (B), asked as `SkippableId::{Taxpayer,Spouse}DiedDuringYear`. They were briefly class-(A)
+    // refusals, and the taxpayer one was `live: |_| true` — it blocked every return for a fail-safe
+    // the compute layer already had.
+    c.exempt(
+        taxpayer_died_during_year,
+        Class::BenefitClaim,
+        "§63(f)/§G-9 death carve-out (taxpayer) — New Colonial Ice: silence forgoes the age-65 \
+         addition rather than granting it on an unresolved carve-out, so `false`/absent is lawful; \
+         `Advisory::AgedBoxForfeitedDeathUnanswered` fires when a qualifying DOB makes the skip cost \
+         money (§2.2)",
+    );
+    c.exempt(
+        spouse_died_during_year,
+        Class::BenefitClaim,
+        "§63(f)/§G-9 death carve-out (spouse) — same reasoning; the box is counted exactly when \
+         `spouse_63f_boxes_count` says so (MFJ, or a qualifying MFS), which is the same predicate \
+         that gates the prompt (§2.2)",
+    );
     classify_person(c, taxpayer);
     if let Some(sp) = spouse {
         classify_person(c, sp);
@@ -321,6 +391,8 @@ fn classify_schedule_c(c: &mut Census, sc: &ScheduleCInputs) {
         naics_code: _,
         accounting_method,
         expenses: _,
+        payments_requiring_1099,
+        will_file_required_1099,
     } = sc;
     c.exempt(
         owner,
@@ -332,6 +404,28 @@ fn classify_schedule_c(c: &mut Census, sc: &ScheduleCInputs) {
         Class::TrackedFollowup,
         "§2.8: Cash default; `accrual` is accepted, unmodeled and UNREFUSED and flips the printed Sch C \
          line F — a known open Important, filed → P8",
+    );
+    // ★ Schedule C lines I and J — the Form-1099 compliance pair. Class (B): asked as
+    // `SkippableId::ScheduleC1099{Required,Filed}`, silence lawful. Not `declaration(..)` because no
+    // figure on the return reads them and the form prints no Caution — but NOT plain "no tax
+    // direction" either, because §6721/§6722 exposure is real, which is what the skip advisory names.
+    //
+    // ★★ PRE-MERGE M8 — these are RECORDED, not bound with `_`. This module's own r2 M-6 rule is that
+    // an `Option<bool>` leaf never gets a bare `_`: the whole point of the census is to distinguish
+    // "this encodes no decision" from "we forgot it", and `_` erases exactly that distinction. Both
+    // were silently under-reported as answered-ness decisions and nothing redded. The four other
+    // class-(B) leaves this branch added were all recorded via `exempt`; these two were missed.
+    c.exempt(
+        payments_requiring_1099,
+        Class::BenefitClaim,
+        "Schedule C line I — asked as `SkippableId::ScheduleC1099Required`; silence forgoes nothing on \
+         the return itself, and the §6721/§6722 exposure is named by the skip advisory (§2.2)",
+    );
+    c.exempt(
+        will_file_required_1099,
+        Class::BenefitClaim,
+        "Schedule C line J — asked as `SkippableId::ScheduleC1099Filed`, and gated on line I being \
+         Yes; an answer to J without a Yes on I is not a mark the form has a place for (§2.2)",
     );
 }
 
@@ -425,11 +519,18 @@ fn classify_qbi(c: &mut Census, q: &QbiInputs) {
     let QbiInputs {
         reit_ptp_carryforward_in: _,
         reit_ptp_carryforward_in_provenance,
+        qbi_carryforward_in: _,
+        qbi_carryforward_in_provenance,
     } = q;
     c.exempt(
         reit_ptp_carryforward_in_provenance,
         Class::NoTaxDirection,
         "§2.8: CarryProvenance — no print, no tax direction",
+    );
+    c.exempt(
+        qbi_carryforward_in_provenance,
+        Class::NoTaxDirection,
+        "§2.8: CarryProvenance (Form 8995 line 3) — no print, no tax direction",
     );
 }
 

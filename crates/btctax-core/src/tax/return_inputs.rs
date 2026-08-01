@@ -192,6 +192,27 @@ pub struct HouseholdHeader {
     /// only when a spouse is actually on this return; `Some(true)` refuses (`DependentSpouseUnsupported`).
     #[serde(default)]
     pub can_be_claimed_as_dependent_spouse: Option<bool>,
+    /// ★★ §G-20 — i1040gi's remaining two conditions for claiming a spouse's §63(f) aged/blind boxes on
+    /// **married filing separately**:
+    ///
+    /// > *"If your filing status is married filing separately and your spouse was born before January 2,
+    /// > 1960, or was blind at the end of 2024, you can check the appropriate box(es) … **if your spouse
+    /// > had no income, isn't filing a return, and can't be claimed as a dependent on another person's
+    /// > return**."*
+    ///
+    /// The third condition is [`Self::can_be_claimed_as_dependent_spouse`], already captured. These two
+    /// are class (B) — BENEFIT CLAIMS, so silence FORGOES the boxes and never grants them.
+    ///
+    /// ★★★ **Both must be `Some(true)` (and the dependent flag `Some(false)`) before a single box is
+    /// counted.** Every other combination — including any unanswered — forgoes. This is the one place
+    /// on the branch where an answer can only ever REDUCE tax, so it fails closed by construction: an
+    /// omission here costs the filer a deduction, which is recoverable; a wrong grant understates a
+    /// signed return, which is not.
+    #[serde(default)]
+    pub spouse_had_no_income: Option<bool>,
+    /// See [`Self::spouse_had_no_income`] — the second of i1040gi's two uncaptured MFS conditions.
+    #[serde(default)]
+    pub spouse_not_filing_a_return: Option<bool>,
     #[serde(default)]
     pub presidential_fund_taxpayer: bool,
     #[serde(default)]
@@ -238,6 +259,25 @@ pub struct ScheduleCInputs {
     pub accounting_method: AccountingMethod, // line F
     #[serde(default)]
     pub expenses: Usd,
+    /// ★★ Line **I** — *"Did you make any payments in 2024 that would require you to file Form(s)
+    /// 1099?"* A compliance DECLARATION about the filer's own information-reporting, with real
+    /// §6721/§6722 exposure — but no figure on the return reads it, and the form prints no Caution
+    /// beside it, so it is class (B): asked, and lawfully skippable
+    /// ([`super::questions::SkippableId::ScheduleC1099Required`]).
+    ///
+    /// `Option`, and the `Option` is load-bearing to the PDF writer: `None` (never asked) and
+    /// `Some(false)` (asked, answered no) are DIFFERENT marks on the page — an unwritten pair versus
+    /// a checked No box. A printed "No" the filer never gave is fabricated testimony.
+    #[serde(default)]
+    pub payments_requiring_1099: Option<bool>,
+    /// Line **J** — *"If 'Yes,' did you or will you file required Form(s) 1099?"* The form conditions
+    /// it on line I, so it is live only when [`Self::payments_requiring_1099`] is `Some(true)`.
+    ///
+    /// ★ This is the question whose liveness depends on another question's NON-NEUTRAL answer — the
+    /// shape that silently broke the registry's own property harness once (see the `is_none()` guards
+    /// in `return_refuse.rs`). It is now the live exerciser of those guards.
+    #[serde(default)]
+    pub will_file_required_1099: Option<bool>,
 }
 fn default_naics() -> String {
     "999999".to_string()
@@ -251,6 +291,8 @@ impl Default for ScheduleCInputs {
             naics_code: default_naics(),
             accounting_method: AccountingMethod::Cash,
             expenses: Usd::ZERO,
+            payments_requiring_1099: None,
+            will_file_required_1099: None,
         }
     }
 }
@@ -390,6 +432,22 @@ pub struct QbiInputs {
     pub reit_ptp_carryforward_in: Usd,
     #[serde(default)]
     pub reit_ptp_carryforward_in_provenance: CarryProvenance,
+    /// ★★ **Form 8995 line 3** — the prior-year qualified-business net **(loss)** carryforward, as a
+    /// POSITIVE MAGNITUDE (the form pre-prints the parentheses). Line 4 combines it with line 2, so it
+    /// REDUCES this year's QBI, and omitting it INFLATES the deduction and UNDERSTATES the tax.
+    ///
+    /// ★ It was left out on the reasoning that *"a Schedule C loss refuses upstream, so v1 never
+    /// carries one"* — a non-sequitur: `ScheduleCLoss` is about the CURRENT year, while line 3 is a
+    /// PRIOR-year figure the filer brings in from a return btctax did not compute. Exactly like
+    /// [`Self::reit_ptp_carryforward_in`] eight lines up, which the same function has always consumed.
+    ///
+    /// ★★ **NEITHER ORACLE VALIDATES THIS** (`two-oracle-model` §G-9's limit): OTS takes it as a
+    /// hand-fed input and Tax-Calculator has no channel for it at all, so oracle agreement here proves
+    /// nothing. It is held by hand-computed KATs against i8995 lines 3/4/16 instead.
+    #[serde(default)]
+    pub qbi_carryforward_in: Usd,
+    #[serde(default)]
+    pub qbi_carryforward_in_provenance: CarryProvenance,
 }
 
 /// Standard-vs-itemized election (§63(e)).
@@ -455,6 +513,18 @@ pub struct ReturnInputs {
     pub payments: Payments,
     #[serde(default)]
     pub capital_loss_carryforward_in: Carryforward,
+    /// ★★ §G-20a — provenance for [`Self::capital_loss_carryforward_in`], as a SIBLING scalar.
+    ///
+    /// It is not inside `Carryforward` because that type lives in the **frozen** `tax/types.rs` (the
+    /// crypto-delta engine), and a third `frozen_guard` pin exception for a field the delta path never
+    /// reads would be a poor trade. Semantically it belongs here anyway: the provenance is a fact about
+    /// this YEAR'S INPUT, not about the value type.
+    ///
+    /// **Why it exists at all:** without it a zero is uninterpretable — *"the filer has no carryover"*
+    /// and *"nobody ever asked"* are the same bytes. `Computed` means btctax derived it from a prior
+    /// year it actually computed; `User` (the default) means it is the filer's or nobody's.
+    #[serde(default)]
+    pub capital_loss_carryforward_in_provenance: CarryProvenance,
     /// **Form 6251 line 2k — the AMT capital-loss-carryover declaration.** Line 2k is "Disposition of
     /// property (difference between AMT and regular tax gain or loss)", and i6251 directs any Form
     /// 8949 / Schedule D / 4684 / 4797 adjustment for the activity there rather than to line 3.
@@ -478,6 +548,13 @@ pub struct ReturnInputs {
     pub amt_depreciation_same_as_regular: Option<bool>,
     #[serde(default)]
     pub charitable_carryover_in: Vec<CharitableCarryItem>,
+    /// ★★ §G-20a — provenance for the charitable carryover **LIST AS A WHOLE**.
+    ///
+    /// `CharitableCarryItem` already carries a per-item provenance, which is useless for the case that
+    /// matters: an **EMPTY vec has no items**, so an empty list carries no provenance at all — and an
+    /// empty list is exactly the state that is ambiguous between "no carryover" and "never asked".
+    #[serde(default)]
+    pub charitable_carryover_in_provenance: CarryProvenance,
     #[serde(default)]
     pub qbi: QbiInputs,
     /// Schedule B Part III — required when Sch B files; `None` ⇒ fail-loud (I7).
@@ -488,10 +565,48 @@ pub struct ReturnInputs {
     pub foreign_trust: Option<bool>,
     #[serde(default)]
     pub foreign_country_names: String,
+    /// **Schedule B line 7a's UNNUMBERED sub-question** — *"If 'Yes,' are you required to file FinCEN
+    /// Form 114, Report of Foreign Bank and Financial Accounts (FBAR), to report that financial interest
+    /// or signature authority?"*
+    ///
+    /// ★ A class-**(B)** SKIPPABLE, live only when [`Self::foreign_accounts`] is `Some(true)` — the
+    /// form itself conditions it on 7a being "Yes". It was class (A) for two commits; `cbe651d`
+    /// reversed that, because an unanswered sub-question is a lawful blank and refusing the whole
+    /// return over it is the wrong instrument (the skip advisory names the FinCEN exposure instead).
+    /// ★ PRE-MERGE M9 — this doc still said "class-(A) DECLARATION", which instructs a maintainer to
+    /// restore exactly the refusal that reversal deliberately removed. Stays `Option` all the way to
+    /// the PDF writer: `None`
+    /// (7a was "No", so the question is not live) and `Some(false)` (it IS live and the filer answered
+    /// "No") must print differently — an unwritten pair versus a checked "No" box.
+    ///
+    /// The form's own Caution is why this is not optional: *"If required, failure to file FinCEN Form
+    /// 114 may result in substantial penalties."*
+    #[serde(default)]
+    pub fbar_filing_required: Option<bool>,
     /// 1040 header "you were a dual-status alien" — a class-(A) DECLARATION (P9 §2.5), live always. A single
     /// box asserting a fact whose unchecked state we print today from the MFS coupling alone; `None` ⇒ refuse
     /// (`DualStatusAlienUnanswered`), `Some(true)` ⇒ refuse unsupported (§63(c)(6)(B): NRA standard deduction
     /// is zero), `Some(false)` ⇒ proceed.
+    /// ★★★ **Form 8283 Section B lines 5a / 5b / 5c** — the three restriction questions, asked ONCE
+    /// for the whole return: *"did any of your donations have strings attached?"*
+    ///
+    /// The form asks three things about each donated property, and a **Yes** to any of them shrinks or
+    /// kills the §170 deduction (Reg §1.170A-7 — a gift with retained rights is not a gift of the whole
+    /// thing). btctax deducts at full fair market value, so a Yes means the number on the return is
+    /// **WRONG**, and it refuses rather than compute it.
+    ///
+    /// ★★ **ONE return-level question, three per-donation boxes — sound, not a shortcut.** The filer
+    /// states a UNIVERSAL ("none of my donations had any of these"), from which each box's answer
+    /// follows for every donation. That is why the prompt ENUMERATES all three limbs in the form's own
+    /// words: a "No" to something vaguer would be laundered into three specific answers the filer never
+    /// gave. Enumerate the YES-conditions, default to refusing, so an omission fails closed.
+    ///
+    /// ★ It also dissolves §G-21's blocker. The registry is RETURN-shaped and these looked
+    /// per-donation; asking the universal makes them return-shaped too, so no per-row machinery is
+    /// needed. A **Yes** refuses rather than asking which donation — btctax cannot reduce the right
+    /// gift's deduction, so the honest move is to send that year's 8283 to be completed by hand.
+    #[serde(default)]
+    pub donations_had_restrictions: Option<bool>,
     #[serde(default)]
     pub dual_status_alien: Option<bool>,
 
@@ -584,13 +699,17 @@ impl Default for ReturnInputs {
             sch1: Schedule1Inputs::default(),
             payments: Payments::default(),
             capital_loss_carryforward_in: Carryforward::default(),
+            capital_loss_carryforward_in_provenance: CarryProvenance::default(),
             amt_carryover_same_as_regular: None,
             amt_depreciation_same_as_regular: None,
             charitable_carryover_in: Vec::new(),
+            charitable_carryover_in_provenance: CarryProvenance::default(),
             qbi: QbiInputs::default(),
             foreign_accounts: None,
             foreign_trust: None,
             foreign_country_names: String::new(),
+            fbar_filing_required: None,
+            donations_had_restrictions: None,
             dual_status_alien: None,
         }
     }

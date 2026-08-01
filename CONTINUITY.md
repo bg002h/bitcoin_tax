@@ -1,12 +1,14 @@
 # CONTINUITY — bitcoin_tax (TaxApp)
 
-_Last updated: **2026-07-30**. Written at a pause; safe to exit and restart._
+_Last updated: **2026-07-30** (refusal review). Written at a pause; safe to exit and restart._
+_**Active work is the section immediately below**; §0 onward is the completed census/AMT record._
 _(Supersedes the 2026-06-28 edition, whose deep-research workflow completed long ago.)_
 
 **Written for a reader with NO prior context.** Confirm the tree first:
 `git log --oneline -5`, `git status`, `git branch --show-current`.
 
-> **One line:** on **`main`** — the `feat/amt-e2-vector-population` work is **MERGED** (all five gates
+> **One line (STALE for the active branch — see the ACTIVE WORK section above):** on `main` the
+> `feat/amt-e2-vector-population` work is **MERGED** (all five gates
 > green throughout; the branch's §0 order ①–⑥ is **complete**). **The §G-13 FIELD-PROVENANCE CENSUS is
 > DONE: 15 of 15 forms, 1158 AcroForm fields = 668 mapped + 490 censused, ZERO unaccounted**, and the
 > `CENSUS_NOT_YET_WRITTEN` ratchet is closed to `is_empty()`. It surfaced **16 gap fields / 8 unasked
@@ -16,6 +18,255 @@ _(Supersedes the 2026-06-28 edition, whose deep-research workflow completed long
 > (steps 1–2 of 3 done for all 16 forms; the label reader, §5, is increment 1 built).
 > **The largest ARCHITECTURAL open item is §G-11 (§4a)** — the emitter cannot express "no testimony".
 > **Next work is USER-DIRECTED**; nothing below is auto-start.
+
+---
+
+## ★★★ ACTIVE WORK — branch `feat/no-pen-deferrals` (READ THIS FIRST, updated 2026-07-31)
+
+**28 commits ahead of `main`, tree clean, 2527 tests green, all five gates.** `main` itself is 99
+commits ahead of `origin/main` — **nothing has been pushed in a long time**; see §7 and the BLOCKED
+box below.
+
+### ⛔ BLOCKED ON THE OWNER — read before planning any ship
+
+| blocker | why | who |
+|---|---|---|
+| **push** | `scripts/.pii-patterns` does not exist ⇒ `scripts/pre-push` is fail-closed, every `git push` exits 1. The file is owner-specific and untracked; **the assistant must not author it** — a wrong guess turns the gate green while scanning for nothing. Repo is PUBLIC; 123 commits have never had the owner-specific scan. Escape: `BTCTAX_PII_BYPASS=1 git push`. | owner |
+| **publish** | Blocked by the same thing, and MORE so: `cargo publish` uploads a source tarball to a **public, immutable** registry. Also needs a version bump (0.14.0 is already live) — scoped by the owner to **prepare 0.15.0, do NOT publish**. | owner |
+| **crates.io temp token** | Still unrevoked since the v0.14.0 publish (2026-07-29). Deal with it BEFORE another publish, not after. | owner |
+
+### ★★★ THREE REVIEW ROUNDS RAN, AND THE THIRD FOUND WHAT THE FIRST TWO STRUCTURALLY COULD NOT
+
+| round | scope | model(s) | verdict |
+|---|---|---|---|
+| r1 | `7bde148..65270db` | Opus + Sonnet | 0C/0I; 6 Minors (§G-19a is the one that mattered) |
+| r2 | `afa0ffe..HEAD` | Opus + Sonnet | 0C/0I; 2 Minors + 1 Nit; **20/20 mutations killed** |
+| **pre-publish** | **`main..HEAD` (whole branch)** | **Fable** | **`publish-after-fixing-X`** — one **Important** |
+
+Verbatim outputs in `reviews/`: `crypto-slice-trio-{tax-lens-opus,instrument-lens-sonnet}-r1.md`,
+`branch-r2-{tax-lens-opus,instrument-lens-sonnet}.md`, `branch-prepublish-fable.md`.
+
+★★★ **The Important lived in `b94508d` — the EARLIEST commit — which precedes both earlier review
+ranges.** Schedule B's FBAR pair printed ungated, so a 7a Yes→No correction put a checked FinCEN-114
+box beside a checked "No" under §6065. **The fix already existed in the branch** (Schedule C line J,
+nine commits later, reasoning included) and nobody carried it back, because no reviewer ever held both
+commits at once. Fixed in `3bcf3a0`, and the lesson is now **harness B3** (`design/HARNESS.md` +
+`CLAUDE.md`): *a per-range review is not a branch review; the final pass takes `main..HEAD` and is
+pointed at INTERACTION.*
+
+### The owner's direction, and the correction that reshaped it
+
+1. Owner: *"Let's reverse that decision to leave anything to a user's pen. And then proceed on 8995."*
+   (`btctax limitations` said things like *"Schedule C lines G, H, I, J — left blank (deferred to your
+   pen)… Fill them in yourself."*) So: ASK the filer and PRINT the answer; never fabricate it.
+2. Then, mid-build, owner: **★★★ *"We should review all refusals. A lot of items on a tax return don't
+   need to be answered (or asked, come to think of it)."*** — a correction. The build had been adding
+   questions that REFUSE TO FILE when unanswered. That is too aggressive.
+3. Owner chose scope: **"Safe subset + reverse the FBAR"** (see the decision table below).
+
+### What LANDED
+
+| commit | what |
+|---|---|
+| `b94508d` | Schedule B 7a's FBAR sub-question added as a class-(A) refusing question. ★ **Now scheduled for REVERSAL** — see below. Its PRINTING is correct and stays. |
+| `3b22ca1` | ★★ **A real defect.** `schedule_b_lines` did `unwrap_or(false)` on `foreign_accounts`/`foreign_trust`, printing a **"No" the filer never gave**. Both are now `Option` to the writer. |
+| `7ee5afd` | Schedule SE line A reclassified `gap` → `unmodeled`; clergy self-employment documented OUT OF SCOPE. GAPS 16 → 13. |
+
+★★ **The most transferable thing in `3b22ca1`: THE FIRST TEST DID NOT CATCH THE BUG.** The KAT in
+`btctax-forms` builds `ScheduleBLines` directly, so it pins the WRITER and is blind to the CONSTRUCTOR
+where the bug lived — restoring `unwrap_or(false)` left it GREEN. Found only by mutating the fix. A
+second test now sits at the constructor (`printed.rs`, `part3_answeredness_tests`). Mutation-test the
+FIX, not just the code.
+
+### The refusal review — outcome (the workflow output lived in /tmp and is GONE; this is the record)
+
+47 `RefuseReason` variants + 16 registry questions adjudicated against this criterion:
+
+> A **refusal** is justified ONLY if proceeding without the answer would (a) produce a WRONG NUMBER,
+> (b) put FABRICATED TESTIMONY on a signed return, or (c) silently expose the filer to a PENALTY or a
+> lost right. Failing all three → **skippable** (ask, silence lawful) or **don't ask at all**.
+
+An adversarial pass returned **UNSAFE** on 2 of 9 proposed relaxations. Both verified in source.
+
+**★★★ DO NOT DO THESE TWO — they put a wrong figure on a signed return:**
+
+- **Do NOT drop `AmtScreenTriggered` from the report path.** The justification ("Form 6251 is computed
+  correctly anyway") is true and IRRELEVANT. `total_tax` (`return_1040.rs:1328`) is assembled BEFORE
+  `compute_6251` runs (`:1353`), and hardcodes Schedule 2 line 2 to zero in a comment at `:1319-1321`
+  that **names this very refusal as its warrant**. Printed chain is worse: `printed.rs:652` pins 1040
+  L17 to `Usd::ZERO` and `Schedule2Lines` has no AMT field at all, so L24/L34/L37 all omit the AMT —
+  printed by `render.rs:1547-1558` in a block the CLI calls *"exactly what the filed PDF carries"*.
+  **Understatement.** Blocked until Schedule 2 line 2 exists.
+- **Do NOT relax `IraDeductionClaimed`.** `sch1.ira_deduction_claimed` has NO compute consumer
+  (`classifier.rs:387` destructures and discards it) and `Schedule1Lines` has no line 20 — so relaxing
+  it files a return with the claimed deduction silently GONE. Also the proposed single "active
+  participant?" question fails open under §219(g)(1)/(g)(7), which reaches the SPOUSE's coverage too.
+
+**★★ THE LESSON, worth more than either item:** *a refusal that a compute path was built to rely on is
+not over-asking — it is LOAD-BEARING.* **Before relaxing any refusal, grep for the code whose
+correctness comment names it.**
+
+### The decision table for the six pen-deferral questions
+
+| line | verdict | status |
+|---|---|---|
+| Schedule C **G** (material participation) | **DON'T ASK** — answer moves no figure (§1411(c)(6) shelters the SE-base Sch C income either way) | ✅ already `unmodeled` |
+| Schedule C **H** (started/acquired) | **DON'T ASK** — a check-if-true box with NO "No" widget, so an explicit No and a never-asked blank are the IDENTICAL mark on the page | ✅ already `unmodeled` |
+| Schedule SE **line A** (Form 4361) | **DON'T ASK** — no figure moves, and btctax models no clergy concept anywhere | ✅ done, `7ee5afd` |
+| Schedule C **I / J** (Forms 1099) | **BUILD AS SKIPPABLE**, not a refusal. §6721/§6722 exposure is real (limb c) but there is no in-form Caution; advisory on skip must name §6721/§6722 | ✅ **DONE 2026-07-31** (`de8ffd8`) |
+| Form 8283 **5a/5b/5c** (restrictions) | **BUILD AS REFUSAL-ON-YES** (ask; "No" proceeds, "Yes" refuses). The ONLY limb-(a) item of the six | ✅ **BUILT 2026-07-31** — and it was the LAST §G-13 gap, so **`GAPS` is now 0**. ★★★ The structural obstacle filed as §G-21 was dissolved by the OWNER: ask it as a **return-level universal** ("did any donation have strings attached?"), not per-donation. Unanswered refuses too, not just a Yes. Five observed B1 kills. See §G-21, now closed. |
+| Form 8283 **page-2 identity** | **NO QUESTION** — pure map fix (`f8283.map.toml`), btctax already holds name + TIN | ✅ **DONE 2026-07-31** (`fb33ac6`) |
+| Schedule C **I / J** | (see the row above) | ✅ **DONE 2026-07-31** (`de8ffd8`) — skippable + §6721/§6722 advisory |
+
+★ **The Form 8283 `needs_review` path can NOT substitute for a refusal**: its only consumers
+(`main.rs:792`, `:883`) are `eprintln!`s emitted AFTER `full_return_paths` are written to disk — the
+PDF with the unreduced deduction already exists when the warning prints.
+
+### ⬜ REMAINING, in order
+
+1. ~~**Reverse the FBAR question**~~ — ✅ **DONE 2026-07-30.** `FbarFilingRequired` moved from
+   `FORM_QUESTIONS` (class A, refuses) to `SKIPPABLE_QUESTIONS` (class B, lawful silence). It is now
+   `SkippableId::FbarFilingRequired` at index 7, still live iff `foreign_accounts == Some(true)`, and
+   skipping it fires the NEW `Advisory::FbarSubQuestionNotAnswered`, which quotes Schedule B's Caution
+   verbatim. `RefuseReason::FbarFilingRequirementUnanswered` is gone; the classifier records the leaf
+   as a `Class::NoTaxDirection` exemption. **The printing side needed NO change**, as predicted — the
+   `Option` was already load-bearing to the writer, so a skip prints a true blank.
+   ★ The prediction that survived contact: *nothing on the return reads this box.* That is what makes
+   it class (B) — the penalty the Caution names attaches to **not filing FinCEN Form 114**, an
+   obligation the box neither creates nor removes.
+   ★★ **The two `is_none()` guards in `return_refuse.rs`'s property harnesses are now UNEXERCISED** —
+   the FBAR was their only live case. They were kept, with the comment rewritten to say so: the next
+   question whose liveness depends on another question's *non-neutral* answer would hit the same wall
+   silently.
+2. ~~**Downgrade the death pair**~~ — ✅ **DONE 2026-07-30** (`b3c9829`). Both are now
+   `SkippableId::{Taxpayer,Spouse}DiedDuringYear`. The premise held on inspection: `is_aged`'s
+   `(None, None)` arm returns `false`, so silence already forgoes the addition and the refusal was
+   redundant with a fail-safe beneath it. The spouse gate is now **MFJ-only** (and so is `DodSpouse`)
+   — on MFS its answer could never move a figure, yet it refused there.
+   ★ New `Advisory::AgedBoxForfeitedDeathUnanswered`, firing **iff a DOB on file would have
+   qualified** — not merely on the unanswered gate, which would put it on nearly every return.
+   ★★ **Three fixtures broke, all the same honest way**: they got the aged box free from
+   `answer_all_live_declarations`. Fixed by STATING the claim, never by weakening the assertion. The
+   killer mutation — `(None, None) => true`, the shipped v0.14.0 understatement — reds by name.
+   ★★ TY2024 golden matrix **byte-unchanged** (md5 `c4e1853…`).
+3. ~~**`SsnMalformed`**~~ — ✅ **DONE 2026-07-30** (`443d4a0`). Deleted from `screen_inputs`; the
+   packet boundary is untouched and was **verified to cover all three shapes** (`Missing`,
+   `NotDigits`, `WrongLength`) — "build rejects missing" would not have been enough. The replacement
+   test asserts BOTH sides for 3 shapes × 3 subjects.
+4. ~~**THEN Form 8995 line 3**~~ — ✅ **DONE 2026-07-30** (`3d09552`). Built as the mirror of the
+   REIT/PTP pair, end to end (inputs + provenance, `has_qbi`, `compute_8995`, `qbi_over_threshold`,
+   printed lines 3/4/16, `PrintedInputs`, `AbsoluteReturn`, the negative screen, classifier, map,
+   emitter, write-back, TOML template, LIMITATIONS).
+   ★★ **The line had never been transcribed AT ALL** — `Form8995Lines` went line2 → line4, with no
+   `line3` field. Adding it `E0063`'d every literal and call site, which is how the plumbing was found
+   rather than guessed.
+   ★★ **LINE 3 PRINTS ONLY WHEN THERE IS A CARRYFORWARD.** A pre-existing test said *"L3 must be
+   blank"* and it was right: line 3 is the one line on this form that is neither derived nor computed
+   — it is TESTIMONY — so a printed `0` swears the filer had no prior-year QBI loss. Every other line
+   is btctax's own arithmetic and prints its zero legitimately.
+   ★★★ **THE WRITE-BACK MUTATION SURVIVED THE WHOLE SUITE.** Deleting
+   `next_year.qbi.qbi_carryforward_in = ar.qbi_carryforward_out` left 2519 tests green. A silently
+   extinguished carryforward is not a one-year error — it enlarges the deduction in every later year
+   and no single return looks wrong. Closed by `form_8995_line16_carries_into_next_years_line3`.
+   ★ GAPS ratchet **13 → 12**; TY2024 golden matrix byte-unchanged.
+
+### ★★ THE RANKED BACKLOG — from the 2026-07-30 "what next" recon (8 agents, adversarially checked)
+
+Recovered and pinned here because the workflow output lived in `/tmp`. Status is as of this pause.
+Ranking principles used: a wrong tax figure outranks everything; fails-SILENTLY outranks fails-CLOSED;
+ready outranks blocked-on-a-decision; cheap hazard-removal outranks large projects.
+
+| # | item | effort | status |
+|---|---|---|---|
+| ~~1~~ | ~~Schedule C line G → Form 8960 line 4a~~ | — | ❌ **DEAD — REFUTED.** Would have DOUBLE-TAXED SE income. §1411(c)(6) shelters it. See the ACTIVE WORK correction above. |
+| ~~2~~ | ~~**Form 8995 line 3**~~ | days | ✅ **DONE 2026-07-30** (`3d09552`) — see remaining-list item 4 above. |
+| ~~3~~ | ~~**Crypto-slice export trio**~~ | hours | ✅ **DONE 2026-07-30** — see the box below. **(b) shipped line 17 ONLY; line 20 was REFUSED on inspection.** |
+| **4** | `ARCHIVE_RECONCILIATION_REVIEW_BY = "2026-08-13"` (`archive_check.rs:174`) — re-decide the residual archive duplication or consciously reset the date with a written reason. While in the file: give `the_archive_count_may_only_shrink`'s one-sided `<=3` an `assert_eq!` companion (both its siblings have one) and fix the stale doc comment narrating four archives | hours | ⬜ **DATED — reds the WHOLE SUITE once passed**, blocking everything else. Owner decision. |
+| ~~5~~ | ~~**§G-9a** — the §63(f) BLIND box~~ | hours | ✅ **CLOSED 2026-07-30 as "no change needed"** (`1fa75a1`), the outcome this row predicted. i1040gi names ONE box in the carve-out, and the mechanism says why: age is a DURATION test the year can straddle, blindness a POINT-IN-TIME test whose anchor a decedent's short year satisfies. Pinned by a test on i1040gi's own worked example. ★ Surfaced **§G-20** in the same passage: the MFS spouse's aged/blind boxes are forgone, and the code recorded that as THE RULE when it is a conservative omission. |
+| **6** | **Schedule 1-A plan r3 was NEVER independently reviewed** — the doc reads "Status: r3" but `design/ty2025/reviews/` holds only `…-opus-r1.md`; r2→r3 folded a 13-agent census (`c92cb9b`) that added T3a wholesale. Not green under this repo's own re-review-after-every-fold rule. Then build B3 T2 | hours + days | ⬜ Only if B3 is the chosen track. Owner decision. |
+| ~~7~~ | ~~Batch the remaining §G-13 declarations~~ | — | ⚠️ **SUPERSEDED by the refusal review.** Its premise (ask them all) is what the owner corrected. Use the decision table above instead: SE line A and Sch C G/H are DON'T-ASK and done; FBAR is built and pending REVERSAL; only Sch C I/J (skippable) and 8283 5a/5b/5c (refusal-on-Yes) remain. |
+| **8** | **Push the backlog.** `core.hooksPath=scripts`, `scripts/.pii-patterns` does NOT exist, `scripts/pre-push:27-35` is fail-closed ⇒ every plain `git push` exits 1. Format documented at `scripts/README-pii-setup.md:25-52`. Sanctioned escape: `BTCTAX_PII_BYPASS=1 git push` | minutes | ⬜ **OWNER-ONLY** — the patterns file is owner-specific and untracked; the assistant must not author it. Repo is PUBLIC. Generic scan is clean across all commits. |
+| — | **Revoke the crates.io temp token** from the v0.14.0 publish | minutes | ⬜ owner-only, long-standing |
+
+### ✅ Backlog #3 — the crypto-slice export trio, as SHIPPED (2026-07-30)
+
+**(a) The all-in LTCG marginal rate.** `MarginalRates` gained `niit_at_margin` + `ltcg_all_in()`;
+`report --tax-year` and the TUI Tax tab now headline `LTCG 0.238 all-in (§1(h) 0.20 + §1411 0.038)`.
+
+- ★★ **`niit_applies` is NOT the predicate, and mistaking it for one is the bug.** It is the
+  crypto-vs-no-crypto DELTA, so it is **false** for a filer already over the §1411 threshold whose
+  crypto did not *raise* NIIT — and that filer's next sold sat still costs 3.8 points. The new flag is
+  `magi_with > thr && nii_with >= 0` (the next dollar's right-derivative, boundary-resolved downward
+  like `ltcg`'s `top <= max_zero`). `niit_at_margin_is_not_the_niit_applies_delta` is the KAT that
+  separates them; a second KAT pins the `nii >= 0` conjunct (MAGI over the threshold but NII negative
+  ⇒ still no NIIT at the margin). Both mutations killed.
+- ★★★ **It tripped `frozen_guard` — `tax/types.rs` and `tax/compute.rs` are CONTENT-PINNED.** The pin
+  bump is recorded in that module as "EXCEPTION 1" with the reasoning, per its own documented
+  exception process, and rides in its OWN commit. `golden_returns.rs` re-verified byte-unchanged: the
+  edit is strictly additive and display-only.
+
+**(b) Schedule D Part III — line 17 ONLY. ★★ The backlog said "17 and 20"; 20 was WRONG.** Line 20 reads
+*"Are lines 18 and 19 both zero or blank **and you are not filing Form 4952**?"* — that last conjunct is
+a fact about the filer that **no btctax input surface carries** (`f1040sa.map.toml` records Schedule A
+line 9 as `unmodeled` for exactly this reason), and lines 18/19 are blank on the slice because nothing
+ever *asked*, not because they are zero. A "Yes" there is testimony the filer never gave, and it routes
+them to the QDCGT worksheet when the Schedule D Tax Worksheet is required — an understatement path.
+Line 17 has no such conjunct: it reads lines 15 and 16, **both printed on the same page**.
+
+- The single definition is `printed::schedule_d_line17`, which the full-return `ScheduleDRouting`
+  derivation now also calls, so slice and full return cannot drift.
+- ★ **The 2017 revision's Yes/No on-states are `"Yes"`/`"No"`, NOT the `"1"`/`"2"` that 2024/2025 use** —
+  dumped, not assumed. The KAT asserts the literal per-year on-state, so an analogy-copied on-state
+  (which writes an OFF box ⇒ a line 17 that *looks* filled) reds. Mutation-verified in both directions,
+  plus a planted line-20 answer to prove the "18–22 stay blank" guard bites.
+- Both Schedule D golden hashes moved; each carries an inline note saying what moved them.
+
+**(c) `form_1040_capgains.pdf` is stamped `WORKSHEET — NOT A COMPLETE FORM 1040`** on every page, on the
+opposite diagonal from the DRAFT stamp so a pseudo-reconciled slice carries both legibly. The
+full-return `f1040.pdf` is never stamped — asserted in the same breath, because a watermark on every
+1040 would be as wrong as one on none.
+
+★★ **The trio's transferable lesson:** the recon item was 3-for-3 on *where* the value was and 2-for-3
+on *what to do*. **A backlog entry is a lead, not a spec** — line 20's disqualifying conjunct is
+visible in one line of the form's own extracted text.
+
+### ⬜ WHAT IS OPEN NOW (2026-07-31) — everything else on this page is history
+
+**Nothing below is auto-start. Each names why it is not just "more work".**
+
+| # | item | blocked on |
+|---|---|---|
+| 1 | **§G-19a** — the all-in §1411 display prints `§1411 0` off the model's PARTIAL NII, so a filer with rental income and a crypto loss year is under-reserved by 3.8 points. Fail-safe vs. a third "can't tell" state; costs a second `frozen_guard` pin exception either way | **owner judgment** |
+| ~~2~~ | ~~**§G-21**~~ | ✅ **DONE 2026-07-31.** The owner dissolved the blocker: a **return-level universal** ("did any donation have strings attached?") is stronger than three per-gift answers, fits the existing registry, and costs one prompt. ★ **`GAPS` 6 → 0 — the census gap surface is CLOSED.** |
+| ~~3~~ | ~~**§G-20a**~~ | ✅ **DONE** (`c7f3942`) — both benefit carryovers got sibling provenance scalars (NOT inside `Carryforward`, which is frozen) and an advisory that MIRRORS the QBI one's direction. ★ Spawned **§G-20b**: the advisory list now has TWO unconditional members; a third means the surface is the problem. |
+| ~~4~~ | ~~**§G-20 remainder**~~ | ✅ **DONE** (`fd9c15f`) — the boxes are claimable on MFS and the gate FAILS CLOSED (7 forgo cases pinned). ★ The coupling was resolved by making it ONE predicate shared by the deduction and the question liveness, not by keeping two in step. |
+| 5 | **archive review-by `2026-08-13`** — reds the WHOLE suite when it passes. The mechanical half is done (`1fc9867`); the DATE is a conscious decision and resetting it silently is what the gate exists to prevent | **owner** |
+| 6 | **§G-11** — the emitter cannot express "no testimony". Largest architectural item; needs its own spec | needs a spec |
+| 7 | **§G-12** — no Form 8275-R, so a position contrary to a REGULATION is unrepresentable | ⛔ **an ASSET the assistant cannot obtain** — `f8275r.pdf` is unarchived, there is no network, and harness A3 denies new archive paths at `Write` time. The unblock is one `curl` (the exact command is in the §G-12 entry). ★ My 2026-07-31 table wrongly showed NO blocker here; corrected. |
+| 8 | **B3 T2 / Schedule 1-A** — and its plan r3 was never independently reviewed (`design/ty2025/reviews/` holds only r1) | **owner: is B3 the track?** |
+
+★★ **A pattern worth carrying, observed twice in two days and now written into §G-18:** *filling a
+blank is not automatically an improvement.* Both §G-19a's `§1411 0` and the 1040 line-7 box replaced a
+lawful SILENCE with an affirmative statement btctax cannot support. Ask first: **can btctax establish
+the proposition the mark asserts, or only that it has no evidence against it?**
+
+★★ **The recon's explicit DO-NOT-DO, kept because it is the most appealing wrong turn:** do NOT resume
+the **Tier-2 AMT** thread (E4/E5/E6). It looks like the obvious next step — 13 registered items, the
+freshest thread, Tier 1 just shipped — but **Tier 1 ships a REFUSAL for exactly the population Tier 2
+serves**, so nobody is receiving a wrong AMT number today; it fails CLOSED, which ranks it behind the
+silent understatements. E6 alone (18 adjustment lines + a new existence-question interview) is weeks.
+★ And its most ready-looking sub-item — *"teach `ots_direct.py` to read 1040 line 17 so AMT has a
+second witness"* — is **ALREADY DONE and the register is stale.**
+
+### Two traps that cost time this session
+
+- **`cargo fmt` reflows a shrinking array onto one line and silently breaks a later string replace.**
+  Bit twice. Always re-read the file after an edit near a list.
+- **`make check` does NOT include `cargo fmt --all --check`.** The pre-commit hook does, so a commit can
+  fail after `make check` was green. Run `cargo fmt --all` before committing.
+- **Verify checkbox on-states with `xtask dump-fields`, never by analogy.** Schedule B's Part III pairs
+  are `"1"`/`"2"` but **Schedule C's are `"Yes"`/`"No"`** — three independent design passes assumed 1/2
+  for both and all three would have been wrong.
 
 ---
 

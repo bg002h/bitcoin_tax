@@ -50,9 +50,70 @@ pub enum Advisory {
     /// §63(f): a person's date of birth is not on file, so the aged (65+) additional standard deduction is
     /// NOT granted (never granted on an unsubstantiated birthdate). Overstates tax if they are 65+.
     AgedBoxForfeitedNoDob { per_box: Usd },
+    /// ★ §63(f) / §G-9: a person's date of birth IS on file and DOES qualify them for the aged box, but
+    /// the "died during the year?" question was skipped — so `is_aged` forgoes the addition rather than
+    /// grant it on an unresolved death carve-out. Overstates tax, and unlike
+    /// [`Self::AgedBoxForfeitedNoDob`] the filer has given us everything except one yes/no, so this is
+    /// the cheapest advisory on the list to act on. `persons` counts taxpayer + (on MFJ) spouse.
+    AgedBoxForfeitedDeathUnanswered { per_box: Usd, persons: usize },
     /// FinCEN Notice 2020-2 disclosure — the filer declared a foreign financial account. v1 never
     /// auto-answers Schedule B Part III.
     FbarFinCen,
+    /// ★ Schedule B line 7a is **Yes** but its unnumbered FBAR sub-question was SKIPPED, so the box
+    /// prints blank. Lawful — no figure reads it, and a blank is no testimony — but the form carries a
+    /// Caution about substantial penalties, so skipping it may not be silent. Quotes the Caution
+    /// verbatim. Fires ONLY on the skip (`None`); an answered box, either way, needs no advisory.
+    FbarSubQuestionNotAnswered,
+    /// ★ Schedule C line **I** (and, when reached, line **J**) — the Form-1099 compliance pair — was
+    /// SKIPPED, so the box(es) print blank. Lawful: no figure on the return reads them, and unlike
+    /// Schedule B's FBAR sub-question the form prints no Caution beside them. But the §6721/§6722
+    /// exposure is real and independent of the box, so the skip is said out loud. `line_j_too` is
+    /// `true` when line I was answered **Yes** and line J was then skipped — a strictly worse place to
+    /// stop, since the filer has already declared the payments exist.
+    ScheduleC1099NotAnswered { line_j_too: bool },
+    /// ★★ §G-22 — the return claims a §199A deduction, and btctax holds **no** prior-year QBI loss
+    /// carryforward AND did not compute the prior year itself (`CarryProvenance::User` on a zero).
+    ///
+    /// Both carryforwards (Form 8995 lines **7** and **3**) are prior-year LOSSES that REDUCE the
+    /// deduction, so a zero btctax merely *assumed* inflates it and **UNDERSTATES the tax** — the one
+    /// direction §3.4 never permits silently. Unlike the capital-loss and charitable carryovers, whose
+    /// absence only forgoes a benefit, these two cost the Treasury rather than the filer.
+    ///
+    /// ★ **Deliberately fires for most first-time users, and that is correct.** btctax cannot
+    /// distinguish "no carryforward" from "a carryforward it was never told about" — a zero it wrote
+    /// itself after computing last year is knowledge; a zero that is merely the struct default is not.
+    /// `CarryProvenance` is exactly that distinction, so the advisory goes quiet the moment btctax has
+    /// computed a prior year, or the filer states a figure of their own.
+    QbiCarryforwardNotStated,
+    /// ★★ §G-20 — an **MFS** return whose spouse would qualify for a §63(f) aged and/or blind box, and
+    /// the box is forgone because one of i1040gi's three conditions is UNANSWERED.
+    ///
+    /// i1040gi permits them on MFS *"if your spouse had no income, isn't filing a return, and can't be
+    /// claimed as a dependent on another person's return"*. btctax captures all three and CLAIMS the
+    /// boxes when all three are affirmatively met (`questions::spouse_63f_status_permits`); the gate
+    /// fails closed, so silence forgoes. That is lawful (it OVERSTATES tax) **but §3.4 permits it only
+    /// if the filer is TOLD** — hence this advisory.
+    ///
+    /// ★★★ PRE-MERGE finding 1 — IT FIRES ONLY WHEN ANSWERING COULD STILL RECOVER THE BOX. If the
+    /// filer answered a condition ADVERSELY (the spouse had income, or files their own return), the
+    /// boxes are correctly declined, nothing is recoverable, and advising a hand-claim would invite an
+    /// UNDERSTATEMENT on a §6065 return. The doc and message here previously asserted the pre-`fd9c15f`
+    /// world — "counts spouse boxes on MFJ only", "three conditions btctax captures none of" — for a
+    /// full branch after both became false. `boxes` counts what was forgone: aged, blind, or both.
+    Mfs63fSpouseBoxesForgone { per_box: Usd, boxes: usize },
+    /// ★★ §G-20a — a prior-year **benefit** carryover btctax was never told about: the §1212(b)
+    /// capital-loss carryover and/or the §170(d)(1) charitable carryover.
+    ///
+    /// **Opposite direction from [`Self::QbiCarryforwardNotStated`], and the message must say so.**
+    /// These two REDUCE the filer's tax, so omitting one costs THEM, not the Treasury — a conservative
+    /// omission §3.4 permits, **but only if they are told**. The QBI pair goes the other way.
+    ///
+    /// ★ Gated on `CarryProvenance::User` on an empty/zero value, exactly like the QBI advisory: a zero
+    /// btctax computed from a prior year it saw is knowledge; a zero that is the struct default is not.
+    BenefitCarryoversNotStated {
+        capital_loss: bool,
+        charitable: bool,
+    },
     /// The ledger classified crypto donations assuming a **public charity (50%-org)** donee. A private
     /// foundation is the 20%-ceiling / basis class (which v1 refuses), so the donee must be verified.
     CharitableDoneeAssumedPublicCharity { donations: usize },
@@ -78,7 +139,8 @@ pub enum Advisory {
     },
     /// ★ §63(f) (P9 §2.2 / §3.4): a person's blindness was never declared, so the additional standard
     /// deduction for blindness was NOT granted. Fires on `blind.is_none()` (never asked) — never on
-    /// `Some(false)`. `persons` counts the taxpayer's box plus, ON MFJ ONLY, the spouse's (an absent MFJ
+    /// `Some(false)`. `persons` counts the taxpayer's box plus, WHEN A SPOUSE BOX COULD COUNT
+    /// (`questions::spouse_63f_status_permits` — MFJ, or a qualifying MFS), the spouse's (an absent
     /// spouse forfeits too; MFS never counts the spouse). Same statute, dollars and worksheet line as the
     /// aged box (`AgedBoxForfeitedNoDob`), and the two STACK. Overstates tax if anyone is blind.
     BlindBoxForfeitedNotDeclared { per_box: Usd, persons: usize },
@@ -140,11 +202,114 @@ impl Advisory {
                  OVERSTATED.",
                 fmt_usd(*per_box)
             ),
+            Advisory::AgedBoxForfeitedDeathUnanswered { per_box, persons } => format!(
+                "AGE-65 BOX FORGONE — a date of birth on file qualifies {n} for the §63(f) additional \
+                 standard deduction ({amt} per box), but the \"died during the tax year?\" question was \
+                 not answered, so it was NOT granted. i1040gi carves out someone who died in-year \
+                 before reaching 65, and v1 will not resolve that carve-out by assuming they lived. \
+                 Answering it with `btctax income answer` is one keystroke and worth {total}: your tax \
+                 is currently OVERSTATED.",
+                n = if *persons > 1 {
+                    "you and your spouse"
+                } else {
+                    "someone on this return"
+                },
+                amt = fmt_usd(*per_box),
+                // ★ The VALUE of answering is the whole forfeit, not one box. `persons` already
+                // selects the pronoun; quoting the per-box figure beside "you and your spouse" told an
+                // MFJ couple $1,550 when $3,100 was at stake. A wrong number in the text that exists
+                // to make the number vivid is worse than no number.
+                total = fmt_usd(*per_box * Usd::from(*persons as u64))
+            ),
+            Advisory::QbiCarryforwardNotStated =>
+                "PRIOR-YEAR QBI LOSS CARRYFORWARD NOT STATED — this return claims a §199A qualified \
+                 business income deduction, and btctax has no prior-year loss carryforward on file for \
+                 it (Form 8995 lines 7 and 3). Those lines carry LOSSES that REDUCE the deduction, so \
+                 if you had one and it is not entered, your deduction is too large and your tax is \
+                 UNDERSTATED — the one direction btctax will not fail in silently. Check lines 16 and \
+                 17 of LAST year's Form 8995: if either is non-zero, enter it here as a POSITIVE \
+                 amount. If you had no §199A activity last year, or last year's lines 16 and 17 were \
+                 zero, there is nothing to do and this note is expected."
+                    .to_string(),
+            Advisory::Mfs63fSpouseBoxesForgone { per_box, boxes } => format!(
+                "SPOUSE'S §63(f) BOX{p} NOT CLAIMED ON A SEPARATE RETURN — you told btctax something \
+                 that would qualify your spouse for {n} additional standard-deduction box{p} ({amt} \
+                 each, {total} in total). On married-filing-separately the instructions allow them \
+                 \"if your spouse had no income, isn't filing a return, and can't be claimed as a \
+                 dependent on another person's return\" — and btctax has not been told all three, so \
+                 it does not claim them. Your tax is OVERSTATED by {total} if all three are true. \
+                 ★ ANSWER THEM RATHER THAN CHECKING THE BOX{p} BY HAND: set `spouse_had_no_income` and \
+                 `spouse_not_filing_a_return` (via `btctax income import`, or `btctax income answer` \
+                 for the dependent question) and btctax will check the box{p} AND raise the standard \
+                 deduction together. Checking {they} by hand moves the box count without moving line \
+                 12, and the two must agree.",
+                n = boxes,
+                p = if *boxes > 1 { "ES" } else { "" },
+                they = if *boxes > 1 { "them" } else { "it" },
+                amt = fmt_usd(*per_box),
+                total = fmt_usd(*per_box * Usd::from(*boxes as u64))
+            ),
+            Advisory::BenefitCarryoversNotStated {
+                capital_loss,
+                charitable,
+            } => format!(
+                "PRIOR-YEAR CARRYOVER{p} NOT STATED — btctax has no {which} on file, and it did not \
+                 compute your prior year, so it cannot tell \"you have none\" from \"nobody asked\". \
+                 {p2} REDUCE your tax, so leaving {one} out costs YOU, not the Treasury — btctax will \
+                 not invent {one}, and your tax may be OVERSTATED. Check last year's return and enter \
+                 {one} with `btctax income import` if you have {one}.",
+                p = if *capital_loss && *charitable { "S" } else { "" },
+                which = match (capital_loss, charitable) {
+                    (true, true) =>
+                        "capital-loss carryover (§1212(b), Schedule D lines 6/14) or charitable \
+                         carryover (§170(d)(1))",
+                    (true, false) => "capital-loss carryover (§1212(b), Schedule D lines 6/14)",
+                    _ => "charitable carryover (§170(d)(1))",
+                },
+                p2 = if *capital_loss && *charitable {
+                    "Both"
+                } else {
+                    "It would"
+                },
+                one = if *capital_loss && *charitable {
+                    "them"
+                } else {
+                    "it"
+                }
+            ),
             Advisory::FbarFinCen =>
                 "FBAR / FinCEN — you declared a foreign financial account. Under FinCEN Notice 2020-2 an \
                  account holding ONLY virtual currency is (for now) outside the FBAR requirement, but that \
                  is under active reconsideration, and an account holding crypto PLUS fiat or securities may \
                  well be reportable. btctax never answers Schedule B Part III for you — decide it yourself."
+                    .to_string(),
+            Advisory::ScheduleC1099NotAnswered { line_j_too } => format!(
+                "SCHEDULE C FORM-1099 QUESTION{} LEFT BLANK — {}. That is lawful: no figure on your \
+                 return reads {}, and btctax will never answer for you. But §6721 (failure to file a \
+                 required information return) and §6722 (failure to furnish the payee's copy) apply to \
+                 the PAYMENTS, not to this box — leaving it blank neither creates nor removes that \
+                 exposure. If you paid $600 or more to a contractor or service provider for your \
+                 business, check the Schedule C instructions and answer with `btctax income answer`.",
+                if *line_j_too { "S" } else { "" },
+                if *line_j_too {
+                    "you answered line I \"Yes\" but did not answer line J (\"did you or will you \
+                     file required Form(s) 1099?\"), so BOTH go out blank — and you have already \
+                     declared the payments exist"
+                } else {
+                    "line I (\"did you make any payments that would require you to file Form(s) \
+                     1099?\") was not answered, so the box goes out blank"
+                },
+                if *line_j_too { "them" } else { "it" }
+            ),
+            Advisory::FbarSubQuestionNotAnswered =>
+                "FBAR SUB-QUESTION LEFT BLANK — you answered Schedule B line 7a \"Yes\" but did not answer \
+                 its sub-question (\"are you required to file FinCEN Form 114?\"), so that box prints \
+                 BLANK. That is lawful: no figure on your return reads it, and btctax will never answer \
+                 it for you. But read Schedule B's own Caution first — \"If required, failure to file \
+                 FinCEN Form 114 may result in substantial penalties. Additionally, you may be required \
+                 to file Form 8938, Statement of Specified Foreign Financial Assets.\" That penalty is \
+                 for not FILING the FBAR, an obligation this box does not create or remove. Answer it \
+                 with `btctax income answer` if you want the box completed."
                     .to_string(),
             Advisory::CharitableDoneeAssumedPublicCharity { donations } => format!(
                 "CHARITABLE DONEE ASSUMED — your {donations} crypto donation(s) were valued assuming a \
@@ -302,17 +467,50 @@ pub fn advisories(
         .spouse
         .as_ref()
         .is_some_and(|s| s.date_of_birth.is_some());
-    let spouse_no_dob = ri.filing_status == FilingStatus::Mfj && !spouse_dob_on_file;
+    let spouse_no_dob = crate::tax::questions::spouse_63f_status_permits(ri) && !spouse_dob_on_file;
     if taxpayer_no_dob || spouse_no_dob {
         out.push(Advisory::AgedBoxForfeitedNoDob { per_box });
     }
 
+    // ★ §G-9: the OTHER way to forfeit the aged box — a qualifying DOB is on file but the death
+    // question was skipped, so `is_aged` forgoes rather than resolve the carve-out by assuming the
+    // person lived. Counted per person; the spouse term asks `spouse_63f_boxes_count`, i.e. exactly
+    // when a spouse box was on the table to lose (r3 I-1 — this said "only on MFJ", which `fd9c15f`
+    // falsified when it made the boxes claimable on a qualifying MFS return).
+    let forgone = |p: &crate::tax::return_inputs::Person, died: Option<bool>| {
+        crate::tax::return_1040::aged_box_forgone_for_unanswered_death(
+            p.date_of_birth,
+            died,
+            p.date_of_death,
+            year,
+        )
+    };
+    let death_forgone_persons = usize::from(forgone(
+        &ri.header.taxpayer,
+        ri.header.taxpayer_died_during_year,
+    )) + usize::from(
+        crate::tax::questions::spouse_63f_status_permits(ri)
+            && ri
+                .header
+                .spouse
+                .as_ref()
+                .is_some_and(|s| forgone(s, ri.header.spouse_died_during_year)),
+    );
+    if death_forgone_persons > 0 {
+        out.push(Advisory::AgedBoxForfeitedDeathUnanswered {
+            per_box,
+            persons: death_forgone_persons,
+        });
+    }
+
     // ★ §63(f) BLINDNESS forgone (P9 §2.2) — same statute, rate and worksheet line as the aged box, and it
-    // STACKS. Fires on `blind.is_none()` (never asked), never on `Some(false)`, counting the spouse box only
-    // on MFJ (an ABSENT MFJ spouse forfeits too; MFS never counts the spouse — mirrors `AgedBlindBoxes`).
+    // STACKS. Fires on `blind.is_none()` (never asked), never on `Some(false)`, counting the spouse box
+    // through `spouse_63f_boxes_count` (an ABSENT spouse whose boxes WOULD count forfeits too). r3 I-1:
+    // this said "MFS never counts the spouse", which is no longer true on a qualifying MFS return.
     let taxpayer_no_blind = ri.header.taxpayer.blind.is_none();
     let spouse_blind_on_file = ri.header.spouse.as_ref().is_some_and(|s| s.blind.is_some());
-    let spouse_no_blind = ri.filing_status == FilingStatus::Mfj && !spouse_blind_on_file;
+    let spouse_no_blind =
+        crate::tax::questions::spouse_63f_status_permits(ri) && !spouse_blind_on_file;
     let blind_persons = usize::from(taxpayer_no_blind) + usize::from(spouse_no_blind);
     if blind_persons > 0 {
         out.push(Advisory::BlindBoxForfeitedNotDeclared {
@@ -345,9 +543,103 @@ pub fn advisories(
         });
     }
 
+    // ★ Schedule C's Form-1099 pair. Fires on the SKIP only, and only where the form actually asks:
+    // line I whenever there is a Schedule C, line J only once I is answered "Yes" (the form's own
+    // "If 'Yes,'"). An answered box needs no advisory — re-nagging a filer who already decided is how
+    // an advisory list teaches itself to be scrolled past.
+    if let Some(c) = ri.schedule_c.as_ref() {
+        let i_skipped = c.payments_requiring_1099.is_none();
+        let j_skipped =
+            c.payments_requiring_1099 == Some(true) && c.will_file_required_1099.is_none();
+        if i_skipped || j_skipped {
+            out.push(Advisory::ScheduleC1099NotAnswered {
+                line_j_too: j_skipped,
+            });
+        }
+    }
+
+    // ★★ §G-22 — a §199A deduction claimed with no carryforward btctax can vouch for. Gated on
+    // PROVENANCE, not merely on the value: a zero btctax wrote after computing last year is knowledge
+    // and needs no note; a zero that is only the struct default is an unknown. Fires only when the
+    // return actually claims the deduction, so a filer with no QBI never sees it.
+    // ★ Gated on the INPUTS that mean "this return has §199A activity", not on the computed
+    // deduction: the income limitation can zero the deduction while the carryforward is still wrong,
+    // and a filer whose deduction was limited this year still carries the loss forward.
+    let has_199a_activity =
+        ri.schedule_c.is_some() || ri.div_1099.iter().any(|d| d.box5_section_199a > Usd::ZERO);
+    if has_199a_activity {
+        let unknown = |v: Usd, p: crate::tax::return_inputs::CarryProvenance| {
+            v == Usd::ZERO && p == crate::tax::return_inputs::CarryProvenance::User
+        };
+        if unknown(
+            ri.qbi.reit_ptp_carryforward_in,
+            ri.qbi.reit_ptp_carryforward_in_provenance,
+        ) || unknown(
+            ri.qbi.qbi_carryforward_in,
+            ri.qbi.qbi_carryforward_in_provenance,
+        ) {
+            out.push(Advisory::QbiCarryforwardNotStated);
+        }
+    }
+
+    // ★★ §G-20 — the MFS spouse's §63(f) boxes, forgone because the i1040gi conditions are NOT met.
+    // Fires only when the filer has actually TOLD us something that would have qualified the spouse,
+    // so it never appears on an MFS return with no spouse data.
+    //
+    // ★★★ r3 I-1 — AND ONLY WHEN THE BOXES ARE NOT ACTUALLY CLAIMED. `fd9c15f` made them claimable
+    // when all three conditions are affirmatively answered; this advisory predates that commit by two
+    // and was left keyed on the filing status alone, so it fired on the very returns the fix enables,
+    // telling a filer whose boxes btctax had ALREADY claimed that "the boxes are yours to check by
+    // hand". Acting on it double-counts them — an UNDERSTATEMENT on a return signed under §6065.
+    // The guard is now the same predicate the deduction asks.
+    //
+    // ★★★ PRE-MERGE finding 1 — AND ONLY WHEN ANSWERING COULD STILL RECOVER THE BOX. An adversely
+    // ANSWERED condition disqualifies the spouse outright: btctax correctly declined the boxes, there
+    // is nothing to recover, and telling the filer their tax is overstated invites them to claim a
+    // deduction they are not entitled to. `spouse_not_filing_a_return == Some(false)` is the ORDINARY
+    // MFS case — the spouse files their own return — so without this guard the advisory would be
+    // wrong on the single commonest shape it can meet.
+    let no_condition_is_adverse = ri.header.spouse_had_no_income != Some(false)
+        && ri.header.spouse_not_filing_a_return != Some(false)
+        && ri.header.can_be_claimed_as_dependent_spouse != Some(true);
+    if ri.filing_status == FilingStatus::Mfs
+        && !crate::tax::questions::spouse_63f_boxes_count(ri)
+        && no_condition_is_adverse
+    {
+        if let Some(sp) = ri.header.spouse.as_ref() {
+            let aged = sp
+                .date_of_birth
+                .is_some_and(|d| crate::tax::return_1040::born_early_enough(d, year));
+            let blind = sp.blind == Some(true);
+            let boxes = usize::from(aged) + usize::from(blind);
+            if boxes > 0 {
+                out.push(Advisory::Mfs63fSpouseBoxesForgone { per_box, boxes });
+            }
+        }
+    }
+
+    // ★★ §G-20a — the two BENEFIT carryovers, gated on provenance exactly like the QBI pair. Opposite
+    // direction: omitting one costs the FILER, so §3.4 permits the omission — but only if they are told.
+    let user = crate::tax::return_inputs::CarryProvenance::User;
+    let cl = ri.capital_loss_carryforward_in.short == Usd::ZERO
+        && ri.capital_loss_carryforward_in.long == Usd::ZERO
+        && ri.capital_loss_carryforward_in_provenance == user;
+    let ch = ri.charitable_carryover_in.is_empty() && ri.charitable_carryover_in_provenance == user;
+    if cl || ch {
+        out.push(Advisory::BenefitCarryoversNotStated {
+            capital_loss: cl,
+            charitable: ch,
+        });
+    }
+
     // FinCEN Notice 2020-2 — a declared foreign account.
     if ri.foreign_accounts == Some(true) {
         out.push(Advisory::FbarFinCen);
+        // ★ …and its unnumbered sub-question skipped. Silence is lawful (nothing reads the box), but
+        // the form prints a Caution beside it, so the skip is said out loud rather than passed over.
+        if ri.fbar_filing_required.is_none() {
+            out.push(Advisory::FbarSubQuestionNotAnswered);
+        }
     }
 
     // The ledger's crypto donations assumed a public-charity donee.
@@ -452,14 +744,26 @@ mod tests {
     }
 
     /// A high-income Single filer WITH a DOB, no dependents, no foreign account, no donations gets
-    /// exactly ONE advisory — the unconditional other-credits omission — and no spurious ones.
+    /// exactly the UNCONDITIONAL advisories — and no spurious ones.
     ///
     /// [★ P5-I2] This used to assert NO advisories. That was wrong, not merely untested: the
     /// residential-energy credit has no income limit at all, and the adoption credit reaches into the
     /// $250k band, so "v1 did not compute these" applies to every return ever produced. The test's
     /// real intent — the common case must not be NOISY — is preserved by pinning the exact set.
+    ///
+    /// ★★ **2026-07-31 (§G-20a): the unconditional set grew from ONE to TWO**, and the pinned list is
+    /// the only thing that makes that visible. `BenefitCarryoversNotStated` fires on any return whose
+    /// prior year btctax did not compute, which is every FIRST return — and that is correct rather
+    /// than noisy: a carryover comes from a prior year, so no property of THIS year could narrow it,
+    /// and gating on this year's activity would go silent exactly when it matters most (a filer with a
+    /// large prior loss and no activity now). It goes quiet permanently once btctax computes a year.
+    ///
+    /// ★ **But two unconditional members is a UX budget worth watching** — the failure mode this
+    /// codebase keeps citing is an advisory list that teaches itself to be scrolled past. Recorded in
+    /// `FOLLOWUPS.md` §G-20a; if a third arrives, that is the moment to reconsider the surface rather
+    /// than the individual advisory.
     #[test]
-    fn a_clean_high_income_return_has_only_the_unconditional_omission() {
+    fn a_clean_high_income_return_has_only_the_unconditional_omissions() {
         let mut ri = ReturnInputs {
             filing_status: FilingStatus::Single,
             ..Default::default()
@@ -476,7 +780,19 @@ mod tests {
             2024,
             false,
         );
-        assert_eq!(got, vec![Advisory::OtherCreditsOmitted], "{got:?}");
+        assert_eq!(
+            got,
+            vec![
+                Advisory::OtherCreditsOmitted,
+                // ★ §G-20a — the SECOND unconditional member; see this test's docs for why broad
+                // firing is correct here and what would make it worth reconsidering.
+                Advisory::BenefitCarryoversNotStated {
+                    capital_loss: true,
+                    charitable: true,
+                },
+            ],
+            "{got:?}"
+        );
     }
 
     /// Dependents fire the CTC omission; a missing DOB fires the §63(f) aged-box forfeit; low AGI with
@@ -509,6 +825,10 @@ mod tests {
                 Advisory::OtherCreditsOmitted,
                 Advisory::AgedBoxForfeitedNoDob {
                     per_box: dec!(1950)
+                },
+                Advisory::BenefitCarryoversNotStated {
+                    capital_loss: true,
+                    charitable: true,
                 },
             ]
         );
@@ -586,6 +906,711 @@ mod tests {
         assert!(got.contains(&Advisory::AgedBoxForfeitedNoDob {
             per_box: dec!(1550) // married rate
         }));
+    }
+
+    /// ★★ §G-20a — the BENEFIT carryovers, and the opposite direction from the QBI pair.
+    ///
+    /// Omitting these costs the FILER (they reduce tax), so §3.4 permits the omission — but only if
+    /// they are told. Gated on `CarryProvenance` for the same reason as the QBI advisory: without it, a
+    /// zero btctax COMPUTED last year is indistinguishable from one nobody ever stated, and the note
+    /// nags a filer whose prior year btctax itself produced.
+    #[test]
+    fn the_benefit_carryover_advisory_needs_provenance_to_be_honest() {
+        use crate::tax::return_inputs::CarryProvenance;
+        let run = |cl: Usd, cl_p: CarryProvenance, ch_empty: bool, ch_p: CarryProvenance| {
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                ..Default::default()
+            };
+            ri.capital_loss_carryforward_in.long = cl;
+            ri.capital_loss_carryforward_in_provenance = cl_p;
+            if !ch_empty {
+                ri.charitable_carryover_in = vec![crate::tax::return_inputs::CharitableCarryItem {
+                    class: crate::tax::return_inputs::CharitableClass::Cash60,
+                    amount: dec!(1000),
+                    origin_year: 2023,
+                    provenance: CarryProvenance::User,
+                }];
+            }
+            ri.charitable_carryover_in_provenance = ch_p;
+            advisories(
+                &ri,
+                &LedgerState::default(),
+                dec!(90000),
+                dec!(90000),
+                Usd::ZERO,
+                &params(),
+                2024,
+                false,
+            )
+            .into_iter()
+            .find_map(|a| match a {
+                Advisory::BenefitCarryoversNotStated {
+                    capital_loss,
+                    charitable,
+                } => Some((capital_loss, charitable)),
+                _ => None,
+            })
+        };
+        let u = CarryProvenance::User;
+        let c = CarryProvenance::Computed;
+
+        assert_eq!(
+            run(Usd::ZERO, u, true, u),
+            Some((true, true)),
+            "both unknown ⇒ name both"
+        );
+        assert_eq!(
+            run(Usd::ZERO, c, true, c),
+            None,
+            "★ btctax COMPUTED both zeros last year — that is knowledge, not an unknown"
+        );
+        assert_eq!(
+            run(dec!(3000), u, true, u),
+            Some((false, true)),
+            "a stated capital-loss carryover says nothing about the charitable one"
+        );
+        assert_eq!(
+            run(Usd::ZERO, u, false, u),
+            Some((true, false)),
+            "…and vice versa — an EMPTY list is the ambiguous case, a populated one is not"
+        );
+
+        // ★ The DIRECTION must be named, and it is the opposite of the QBI pair's.
+        let m = Advisory::BenefitCarryoversNotStated {
+            capital_loss: true,
+            charitable: false,
+        }
+        .message();
+        assert!(m.contains("costs YOU, not the Treasury"), "{m}");
+        assert!(m.contains("OVERSTATED"), "{m}");
+        assert!(
+            Advisory::QbiCarryforwardNotStated
+                .message()
+                .contains("UNDERSTATED"),
+            "the sibling goes the other way — if both ever say the same thing, one is wrong"
+        );
+    }
+    /// ★★★ **PRE-MERGE finding 1 — r3 fixed the FIRING CONDITION and never touched the SENTENCE.**
+    ///
+    /// Three independent lenses found this and six skeptics failed to kill it. The message still said
+    /// btctax *"counts a spouse's aged/blind boxes only on a JOINT return"* and called the three
+    /// i1040gi conditions *"three things btctax does not ask and cannot verify"*. Both were falsified
+    /// by `fd9c15f`: btctax asks all three, verifies all three, and claims the boxes when they are met.
+    ///
+    /// Two reachable shapes, and the second is the dangerous one:
+    ///   (a) UNANSWERED — the default, because the input form deliberately exempts two of the three
+    ///       conditions. Something IS recoverable, but the message named the wrong remedy: it told the
+    ///       filer to check the boxes BY HAND, which drifts the §63(f) box count away from the line-12
+    ///       amount `AgedBlindBoxes::count()` is the single source for. The remedy that works is to
+    ///       ANSWER, whereupon the deduction and the boxes move together.
+    ///   (b) ANSWERED ADVERSELY — the filer told btctax the spouse HAD income, btctax correctly
+    ///       declined the boxes, and the advisory still offered a hand-claim on a §6065 return. That
+    ///       is r3's own I-1 mechanism inverted, and it is fixed by NOT FIRING: nothing was forgone
+    ///       that answering could recover.
+    ///
+    /// Mutation-verified: dropping the adverse-answer guard reds shape (b); reinstating either false
+    /// sentence reds the prose row.
+    #[test]
+    fn the_mfs_63f_advisory_is_silent_when_a_condition_was_answered_adversely() {
+        use crate::tax::return_inputs::Person;
+        let old = time::macros::date!(1955 - 03 - 02);
+        let run = |shape: &dyn Fn(&mut ReturnInputs)| {
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Mfs,
+                ..Default::default()
+            };
+            ri.header.spouse = Some(Person {
+                date_of_birth: Some(old),
+                blind: Some(true),
+                ..Default::default()
+            });
+            shape(&mut ri);
+            advisories(
+                &ri,
+                &LedgerState::default(),
+                dec!(90000),
+                dec!(90000),
+                Usd::ZERO,
+                &params(),
+                2024,
+                false,
+            )
+            .into_iter()
+            .find(|a| matches!(a, Advisory::Mfs63fSpouseBoxesForgone { .. }))
+        };
+
+        // (a) NOTHING answered ⇒ the boxes are recoverable, so the filer must be told.
+        let fired = run(&|_ri| {}).expect("an unanswered condition forgoes a recoverable box");
+
+        // ★ …and the message must not carry either falsified sentence, nor send them to do it by hand.
+        let msg = fired.message();
+        for lie in [
+            "only on a JOINT return",
+            "does not ask and cannot verify",
+            "yours to check by hand",
+        ] {
+            assert!(
+                !msg.contains(lie),
+                "the message still says {lie:?} — btctax asks, verifies, and claims these boxes now"
+            );
+        }
+        assert!(
+            msg.contains("income answer") || msg.contains("income import"),
+            "it must name the action that actually works: {msg}"
+        );
+
+        // (b) ★ ANSWERED ADVERSELY ⇒ the spouse is disqualified, btctax correctly declined the boxes,
+        //     and there is nothing to recover. Advising a hand-claim here invites an UNDERSTATEMENT.
+        assert!(
+            run(&|ri| ri.header.spouse_had_no_income = Some(false)).is_none(),
+            "the filer said the spouse HAD income — the boxes are correctly declined, say nothing"
+        );
+        assert!(
+            run(&|ri| ri.header.spouse_not_filing_a_return = Some(false)).is_none(),
+            "the spouse files their own return — the ORDINARY MFS case, and it disqualifies them"
+        );
+        assert!(
+            run(&|ri| ri.header.can_be_claimed_as_dependent_spouse = Some(true)).is_none(),
+            "claimable as someone's dependent — disqualified (this also refuses upstream)"
+        );
+
+        // (c) A partially-answered set still fires: one adverse answer disqualifies, but two claiming
+        //     answers plus one SILENCE is still recoverable.
+        assert!(
+            run(&|ri| {
+                ri.header.spouse_had_no_income = Some(true);
+                ri.header.spouse_not_filing_a_return = Some(true);
+            })
+            .is_some(),
+            "two of three answered in the claiming direction — the third is still worth asking for"
+        );
+    }
+
+    /// ★★★ **r3 I-1 — the review's top finding, and an UNDERSTATEMENT path.** `fd9c15f` made the MFS
+    /// spouse's §63(f) boxes CLAIMABLE when all three i1040gi conditions are affirmatively met, and
+    /// routed the deduction through `questions::spouse_63f_boxes_count`. The four §63(f) advisories,
+    /// written two commits earlier, were left keyed on `filing_status == Mfj` — so on exactly the
+    /// returns the fix exists to enable, `Mfs63fSpouseBoxesForgone` still fired, telling the filer
+    /// their tax was OVERSTATED and *"the boxes are yours to check by hand"* while btctax had already
+    /// claimed them. A filer who acted on it would DOUBLE-COUNT the boxes on a return signed
+    /// under §6065.
+    ///
+    /// The advisory now asks the same predicate the deduction asks. Both directions are pinned: it
+    /// must be SILENT when the boxes are claimed, and must still FIRE when they are genuinely forgone.
+    ///
+    /// Mutation-verified: reverting the guard to `filing_status == Mfs` alone reds the first block.
+    #[test]
+    fn the_mfs_63f_advisory_is_silent_once_the_boxes_are_actually_claimed() {
+        let old = time::macros::date!(1955 - 03 - 02); // 65+ in 2024
+        let run = |qualify: bool| {
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Mfs,
+                ..Default::default()
+            };
+            ri.header.spouse = Some(crate::tax::return_inputs::Person {
+                date_of_birth: Some(old),
+                blind: Some(true),
+                ..Default::default()
+            });
+            if qualify {
+                // The three i1040gi conditions, in the CLAIMING direction.
+                ri.header.spouse_had_no_income = Some(true);
+                ri.header.spouse_not_filing_a_return = Some(true);
+                ri.header.can_be_claimed_as_dependent_spouse = Some(false);
+            }
+            let counted = crate::tax::questions::spouse_63f_boxes_count(&ri);
+            let fired = advisories(
+                &ri,
+                &LedgerState::default(),
+                dec!(90000),
+                dec!(90000),
+                Usd::ZERO,
+                &params(),
+                2024,
+                false,
+            )
+            .into_iter()
+            .any(|a| matches!(a, Advisory::Mfs63fSpouseBoxesForgone { .. }));
+            (counted, fired)
+        };
+
+        // ★ QUALIFYING: the boxes ARE counted, so nothing was forgone and the advisory must be SILENT.
+        assert_eq!(
+            run(true),
+            (true, false),
+            "the boxes are claimed — an advisory saying they were forgone invites the filer to \
+             claim them a SECOND time"
+        );
+
+        // ★ NOT QUALIFYING: the boxes are genuinely forgone, so the advisory must still fire. This is
+        //   the half a careless fix would break, leaving a silent conservative omission (§3.4).
+        assert_eq!(
+            run(false),
+            (false, true),
+            "unanswered conditions forgo the boxes — §3.4 permits that only if the filer is TOLD"
+        );
+    }
+
+    /// ★★ **r3 I-1, the FALSE-NEGATIVE half.** The three *forfeit* advisories counted the spouse only
+    /// on MFJ, so on a QUALIFYING MFS return — where the boxes are now claimable — a spouse with no
+    /// DOB, an unanswered death question, or an undeclared blindness forfeited a box in silence.
+    /// Each one now uses `spouse_63f_boxes_count`, i.e. it speaks exactly when a spouse box was on
+    /// the table to lose.
+    ///
+    /// Mutation-verified: reverting any one guard to `== Mfj` reds its own row by name.
+    #[test]
+    fn the_forfeit_advisories_speak_for_a_qualifying_mfs_spouse() {
+        use crate::tax::return_inputs::Person;
+        let old = time::macros::date!(1955 - 03 - 02);
+        let qualifying_mfs = |sp: Person| {
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Mfs,
+                ..Default::default()
+            };
+            ri.header.taxpayer.date_of_birth = Some(time::macros::date!(1990 - 01 - 01));
+            ri.header.taxpayer.blind = Some(false);
+            ri.header.spouse = Some(sp);
+            ri.header.spouse_had_no_income = Some(true);
+            ri.header.spouse_not_filing_a_return = Some(true);
+            ri.header.can_be_claimed_as_dependent_spouse = Some(false);
+            advisories(
+                &ri,
+                &LedgerState::default(),
+                dec!(90000),
+                dec!(90000),
+                Usd::ZERO,
+                &params(),
+                2024,
+                false,
+            )
+        };
+        let has = |v: &[Advisory], f: fn(&Advisory) -> bool| v.iter().any(f);
+
+        // (1) No DOB on file ⇒ the aged box cannot be evaluated at all.
+        let v = qualifying_mfs(Person {
+            date_of_birth: None,
+            blind: Some(false),
+            ..Default::default()
+        });
+        assert!(
+            has(&v, |a| matches!(a, Advisory::AgedBoxForfeitedNoDob { .. })),
+            "a qualifying MFS spouse with no DOB forfeits the aged box — say so"
+        );
+
+        // (2) A qualifying DOB but the death question was never answered ⇒ `is_aged` forgoes.
+        let v = qualifying_mfs(Person {
+            date_of_birth: Some(old),
+            blind: Some(false),
+            ..Default::default()
+        });
+        assert!(
+            has(&v, |a| matches!(
+                a,
+                Advisory::AgedBoxForfeitedDeathUnanswered { .. }
+            )),
+            "an unanswered death question forgoes the aged box on a qualifying MFS return too"
+        );
+
+        // (3) Blindness never declared ⇒ the blind box is forgone.
+        let v = qualifying_mfs(Person {
+            date_of_birth: Some(old),
+            blind: None,
+            ..Default::default()
+        });
+        assert!(
+            has(&v, |a| matches!(
+                a,
+                Advisory::BlindBoxForfeitedNotDeclared { .. }
+            )),
+            "an undeclared blindness forgoes the box on a qualifying MFS return too"
+        );
+    }
+
+    /// ★★ §G-20 — an MFS return forgoes the spouse's §63(f) boxes, and until now said nothing.
+    ///
+    /// The forfeit is lawful (it OVERSTATES tax; btctax cannot verify the three conditions i1040gi
+    /// requires) but §3.4 permits a conservative omission **only if the filer is told**.
+    ///
+    /// ★ The sharp part: btctax **asks** an MFS filer whether their spouse is blind — `BlindSpouse` is
+    /// live on `spouse.is_some()`, not on MFJ — and then discards the answer. So it fires exactly when
+    /// the filer has told us something that would have counted.
+    #[test]
+    fn the_mfs_spouse_63f_advisory_fires_only_when_a_box_was_actually_forgone() {
+        let run = |status: FilingStatus, dob: Option<time::Date>, blind: Option<bool>| {
+            let mut ri = ReturnInputs {
+                filing_status: status,
+                ..Default::default()
+            };
+            ri.header.spouse = Some(crate::tax::return_inputs::Person {
+                date_of_birth: dob,
+                blind,
+                ..Default::default()
+            });
+            advisories(
+                &ri,
+                &LedgerState::default(),
+                dec!(90000),
+                dec!(90000),
+                Usd::ZERO,
+                &params(),
+                2024,
+                false,
+            )
+            .into_iter()
+            .find_map(|a| match a {
+                Advisory::Mfs63fSpouseBoxesForgone { boxes, .. } => Some(boxes),
+                _ => None,
+            })
+        };
+        let old = Some(time::macros::date!(1955 - 03 - 02)); // 65+ in 2024
+        let young = Some(time::macros::date!(1990 - 01 - 01));
+
+        assert_eq!(
+            run(FilingStatus::Mfs, old, Some(true)),
+            Some(2),
+            "★ aged AND blind ⇒ two boxes forgone"
+        );
+        assert_eq!(run(FilingStatus::Mfs, old, None), Some(1), "aged only");
+        assert_eq!(
+            run(FilingStatus::Mfs, young, Some(true)),
+            Some(1),
+            "blind only — and btctax ASKED for this on MFS, then discarded it"
+        );
+        assert_eq!(
+            run(FilingStatus::Mfs, young, Some(false)),
+            None,
+            "nothing qualifies ⇒ nothing forgone ⇒ silence"
+        );
+        assert_eq!(
+            run(FilingStatus::Mfs, None, None),
+            None,
+            "★ no spouse data ⇒ nothing was told to us, so there is nothing to have discarded"
+        );
+        assert_eq!(
+            run(FilingStatus::Mfj, old, Some(true)),
+            None,
+            "★★ MFJ COUNTS the boxes — an advisory there would be flatly false"
+        );
+
+        // The message must name the whole forfeit, not one box.
+        let m = Advisory::Mfs63fSpouseBoxesForgone {
+            per_box: dec!(1550),
+            boxes: 2,
+        }
+        .message();
+        assert!(m.contains("$3,100 in total"), "{m}");
+        assert!(m.contains("OVERSTATED"), "the direction must be named: {m}");
+    }
+
+    /// ★★★ §G-22 — the two QBI loss carryforwards were IMPORT-ONLY, and they are the only carryforward
+    /// family whose omission UNDERSTATES tax.
+    ///
+    /// Gated on PROVENANCE, not on the value. That is the whole design: a zero btctax wrote itself
+    /// after computing last year is KNOWLEDGE (`Computed`) and needs no note; a zero that is merely the
+    /// struct default is an UNKNOWN (`User`) and does. Without that distinction the advisory would
+    /// either nag forever or go silent exactly when it matters.
+    #[test]
+    fn the_qbi_carryforward_advisory_distinguishes_a_known_zero_from_an_unknown_one() {
+        use crate::tax::return_inputs::CarryProvenance;
+        let run = |sched_c: bool, reit: Usd, prov: CarryProvenance| {
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                ..Default::default()
+            };
+            if sched_c {
+                ri.schedule_c = Some(crate::tax::return_inputs::ScheduleCInputs {
+                    business_description: "Bitcoin mining".into(),
+                    ..Default::default()
+                });
+            }
+            // ★ BOTH leaves, not one. Each carryforward is independently unknown, so a fixture that
+            // states only the REIT one leaves the business one an unknown zero — and the advisory
+            // correctly still fires. That is the behaviour, and stating only one hid it.
+            ri.qbi.reit_ptp_carryforward_in = reit;
+            ri.qbi.qbi_carryforward_in = reit;
+            ri.qbi.reit_ptp_carryforward_in_provenance = prov;
+            ri.qbi.qbi_carryforward_in_provenance = prov;
+            advisories(
+                &ri,
+                &LedgerState::default(),
+                dec!(90000),
+                dec!(90000),
+                Usd::ZERO,
+                &params(),
+                2024,
+                false,
+            )
+            .contains(&Advisory::QbiCarryforwardNotStated)
+        };
+
+        assert!(
+            run(true, Usd::ZERO, CarryProvenance::User),
+            "★ §199A activity + a zero btctax was never told about ⇒ say so. Omitting a prior-year \
+             QBI loss INFLATES the deduction and UNDERSTATES the tax."
+        );
+        assert!(
+            !run(true, Usd::ZERO, CarryProvenance::Computed),
+            "★ a zero btctax COMPUTED last year is knowledge, not an unknown — silence is right"
+        );
+        assert!(
+            !run(true, dec!(20000), CarryProvenance::User),
+            "the filer stated a figure ⇒ nothing unknown"
+        );
+        // ★ EITHER unknown is enough — they are independent lines (8995 line 7 and line 3), and a
+        // filer who states one has said nothing about the other.
+        {
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                ..Default::default()
+            };
+            ri.schedule_c = Some(crate::tax::return_inputs::ScheduleCInputs {
+                business_description: "Bitcoin mining".into(),
+                ..Default::default()
+            });
+            ri.qbi.reit_ptp_carryforward_in = dec!(20000); // stated
+            ri.qbi.reit_ptp_carryforward_in_provenance = CarryProvenance::User;
+            ri.qbi.qbi_carryforward_in = Usd::ZERO; // NOT stated
+            ri.qbi.qbi_carryforward_in_provenance = CarryProvenance::User;
+            assert!(
+                advisories(
+                    &ri,
+                    &LedgerState::default(),
+                    dec!(90000),
+                    dec!(90000),
+                    Usd::ZERO,
+                    &params(),
+                    2024,
+                    false,
+                )
+                .contains(&Advisory::QbiCarryforwardNotStated),
+                "one carryforward stated says nothing about the other"
+            );
+        }
+        assert!(
+            !run(false, Usd::ZERO, CarryProvenance::User),
+            "★ NO §199A activity ⇒ the deduction does not arise, so there is nothing to get wrong"
+        );
+
+        let m = Advisory::QbiCarryforwardNotStated.message();
+        assert!(
+            m.contains("UNDERSTATED"),
+            "the direction must be named: {m}"
+        );
+        assert!(
+            m.contains("lines 16 and 17"),
+            "…and where to find the figure: {m}"
+        );
+    }
+
+    /// ★★ Schedule C's Form-1099 pair advises on the SKIP only, and distinguishes the two places a
+    /// filer can stop. Stopping after a **Yes** on line I is strictly worse — they have already
+    /// declared the payments exist — so the message says so and the flag carries it.
+    ///
+    /// ★ It deliberately does NOT fire when there is no Schedule C: the form does not ask, so there is
+    /// nothing skipped. An advisory that fires where the question was never posed is noise, and noise
+    /// is how an advisory list teaches itself to be scrolled past.
+    #[test]
+    fn the_schedule_c_1099_pair_advises_only_on_the_skip() {
+        let run = |sc: Option<(Option<bool>, Option<bool>)>| {
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                ..Default::default()
+            };
+            ri.schedule_c = sc.map(|(i, j)| crate::tax::return_inputs::ScheduleCInputs {
+                business_description: "Bitcoin mining".into(),
+                payments_requiring_1099: i,
+                will_file_required_1099: j,
+                ..Default::default()
+            });
+            advisories(
+                &ri,
+                &LedgerState::default(),
+                dec!(90000),
+                dec!(90000),
+                Usd::ZERO,
+                &params(),
+                2024,
+                false,
+            )
+            .into_iter()
+            .find_map(|a| match a {
+                Advisory::ScheduleC1099NotAnswered { line_j_too } => Some(line_j_too),
+                _ => None,
+            })
+        };
+
+        assert_eq!(
+            run(None),
+            None,
+            "no Schedule C ⇒ the form never asks ⇒ silence"
+        );
+        assert_eq!(
+            run(Some((None, None))),
+            Some(false),
+            "line I skipped ⇒ advise, and line J was never reached"
+        );
+        assert_eq!(
+            run(Some((Some(true), None))),
+            Some(true),
+            "★ answered I=Yes then stopped ⇒ the WORSE skip: the payments are already declared"
+        );
+        assert_eq!(
+            run(Some((Some(true), Some(true)))),
+            None,
+            "both answered ⇒ nothing forgone, nothing to say"
+        );
+        assert_eq!(
+            run(Some((Some(true), Some(false)))),
+            None,
+            "answered I=Yes, J=No — an ANSWER, not a skip. btctax does not editorialise on it."
+        );
+        assert_eq!(
+            run(Some((Some(false), None))),
+            None,
+            "I=No ⇒ the form does not ask J, so nothing is skipped"
+        );
+
+        // ★ The message names BOTH sections — the exposure is the point of the advisory.
+        let m = Advisory::ScheduleC1099NotAnswered { line_j_too: false }.message();
+        assert!(m.contains("§6721") && m.contains("§6722"), "{m}");
+    }
+
+    /// ★★ Schedule B 7a's FBAR SUB-QUESTION is class (B): skipping it is lawful, so it must not
+    /// refuse — but it must not be silent either. The advisory fires **exactly** on the skip.
+    ///
+    /// The three cases are the whole contract, and the middle one is why the advisory is conditioned
+    /// on `is_none()` rather than on 7a: a filer who ANSWERED (either way) has already made the
+    /// decision, and re-nagging them would train the advisory list to be ignored.
+    #[test]
+    fn the_fbar_sub_question_advises_only_when_it_was_skipped() {
+        let run = |fbar: Option<bool>| {
+            let ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                foreign_accounts: Some(true),
+                fbar_filing_required: fbar,
+                ..Default::default()
+            };
+            advisories(
+                &ri,
+                &LedgerState::default(),
+                dec!(200000),
+                dec!(200000),
+                Usd::ZERO,
+                &params(),
+                2024,
+                false,
+            )
+        };
+        assert!(
+            run(None).contains(&Advisory::FbarSubQuestionNotAnswered),
+            "skipped ⇒ the box prints blank, so say so"
+        );
+        for answered in [Some(true), Some(false)] {
+            assert!(
+                !run(answered).contains(&Advisory::FbarSubQuestionNotAnswered),
+                "answered {answered:?} ⇒ the box is filled; no advisory"
+            );
+        }
+        // Never fires without a 7a "Yes" — the FORM does not ask the sub-question then.
+        for seven_a in [None, Some(false)] {
+            let ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                foreign_accounts: seven_a,
+                ..Default::default()
+            };
+            assert!(!advisories(
+                &ri,
+                &LedgerState::default(),
+                dec!(200000),
+                dec!(200000),
+                Usd::ZERO,
+                &params(),
+                2024,
+                false,
+            )
+            .contains(&Advisory::FbarSubQuestionNotAnswered));
+        }
+        // ★ The message quotes Schedule B's own Caution VERBATIM — the words the filer can find on
+        // their paperwork, not a paraphrase of them.
+        assert!(Advisory::FbarSubQuestionNotAnswered.message().contains(
+            "If required, failure to file FinCEN Form 114 may result in substantial penalties."
+        ));
+    }
+
+    /// ★★ The §G-9 death gate became SKIPPABLE, so the age-65 box can now be forgone by silence — and
+    /// the filer must be told, but ONLY when the silence actually costs them something.
+    ///
+    /// The precision is the point. Firing whenever the gate is unanswered would put this advisory on
+    /// nearly every return (it is always live and most filers skip it), which trains the whole advisory
+    /// list to be scrolled past. It fires iff a date of birth on file WOULD have qualified them.
+    #[test]
+    fn the_forgone_aged_box_advises_only_when_the_skip_actually_costs_something() {
+        let run = |dob: Option<time::Date>, died: Option<bool>| {
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                ..Default::default()
+            };
+            ri.header.taxpayer.date_of_birth = dob;
+            ri.header.taxpayer_died_during_year = died;
+            advisories(
+                &ri,
+                &LedgerState::default(),
+                dec!(90000),
+                dec!(90000),
+                Usd::ZERO,
+                &params(),
+                2024,
+                false,
+            )
+            .iter()
+            .any(|a| matches!(a, Advisory::AgedBoxForfeitedDeathUnanswered { .. }))
+        };
+        let qualifying = Some(time::macros::date!(1955 - 03 - 02)); // 65+ in 2024
+        let too_young = Some(time::macros::date!(1990 - 01 - 01));
+
+        assert!(
+            run(qualifying, None),
+            "a qualifying DOB + an unanswered gate ⇒ the box is forgone; say so"
+        );
+        assert!(
+            !run(qualifying, Some(false)),
+            "answered ⇒ the box is CLAIMED, nothing forgone"
+        );
+        assert!(
+            !run(qualifying, Some(true)),
+            "answered \"died\" ⇒ the DATE skippable governs, not this advisory"
+        );
+        assert!(
+            !run(too_young, None),
+            "★ too young ⇒ the skip costs NOTHING; an advisory here would be noise on nearly every return"
+        );
+        assert!(
+            !run(None, None),
+            "no DOB ⇒ `AgedBoxForfeitedNoDob` already covers it; two advisories for one forfeit is worse than one"
+        );
+        // ★ The message must quote the WHOLE forfeit, not one box. An MFJ couple with two boxes
+        // forgone was told $1,550 when $3,100 was at stake — a wrong number inside the sentence whose
+        // job is to make the number vivid. `persons` was computed and used for the pronoun only.
+        let one = Advisory::AgedBoxForfeitedDeathUnanswered {
+            per_box: dec!(1550),
+            persons: 1,
+        }
+        .message();
+        assert!(one.contains("worth $1,550"), "{one}");
+        let two = Advisory::AgedBoxForfeitedDeathUnanswered {
+            per_box: dec!(1550),
+            persons: 2,
+        }
+        .message();
+        assert!(
+            two.contains("worth $3,100"),
+            "two boxes forgone ⇒ the value of answering is 2 × per-box: {two}"
+        );
+        assert!(
+            two.contains("($1,550 per box)"),
+            "…and per-box stays per-box: {two}"
+        );
     }
 
     /// ★ **P5-I3 regression — the exact household the reviewer reproduced.** MFJ, 3 dependents,

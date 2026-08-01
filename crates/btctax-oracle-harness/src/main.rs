@@ -749,7 +749,7 @@ fn assemble(inputs: &GoldenInputs) -> Option<Ready> {
         return None;
     }
     let ar = assemble_absolute(&ri, &state, &params, &table, YEAR);
-    if screen_absolute(&ri, &ar, &params).is_some() {
+    if screen_absolute(&ri, &ar, &params, &state, YEAR).is_some() {
         // ★ T5 (r2 I-7): this stays a COMBINED check, deliberately. The plan once said to narrow it to
         // the AMT reason; that was wrong twice over. (a) Deleting or narrowing it would admit
         // QBI-over-threshold and taxable-income≤0 returns the corpus excludes for unrelated reasons.

@@ -73,7 +73,10 @@ pub struct TaxProfile {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MarginalRates {
     pub ordinary: Usd, // marginal ordinary rate (Decimal, e.g. dec!(0.22))
-    pub ltcg: Usd,     // marginal LTCG rate (0 / 0.15 / 0.20; Decimal)
+    /// The §1(h) preferential rate alone (0 / 0.15 / 0.20; Decimal). **This is NOT the rate a filer
+    /// sizing a sale should reserve against** — §1411 NIIT rides on top of it. Use
+    /// [`MarginalRates::ltcg_all_in`] for that; this field is the §1(h) component of it.
+    pub ltcg: Usd,
     /// `true` when the crypto items *increased* NIIT (`niit_with > niit_without`).
     ///
     /// This is an **incremental** signal, not a raw MAGI-over-threshold flag: it is `false`
@@ -82,6 +85,34 @@ pub struct MarginalRates {
     /// MAGI is over the threshold both with and without crypto). Display-only — this field feeds
     /// no tax figure or delta. The NIIT delta itself is always `TaxResult::niit`.
     pub niit_applies: bool,
+    /// `true` when the **next** dollar of long-term capital gain would itself attract §1411 NIIT —
+    /// i.e. MAGI is already over the §1411(b) threshold and NII is not negative, so the extra dollar
+    /// raises `min(NII, MAGI − threshold)` off a non-negative base.
+    ///
+    /// **★ This is NOT [`Self::niit_applies`], and the two disagree on a real population.**
+    /// `niit_applies` is the crypto-vs-no-crypto DELTA — it is `false` for a filer who already pays
+    /// NIIT without crypto and whose crypto did not raise it. That same filer's next sold sat is
+    /// still taxed at 3.8% on top of §1(h). Reading `niit_applies` as "will my next sale owe NIIT?"
+    /// understates the reserve by 3.8 points on exactly the filers most likely to be planning one.
+    ///
+    /// Forward-looking (the NEXT dollar), but boundary-resolved the same way the backward-looking
+    /// rates are: exactly AT the threshold reports the lower answer (`magi > threshold`, matching
+    /// `ltcg`'s `top <= max_zero` and `marginal_ordinary_rate`'s `taxable > lower`).
+    pub niit_at_margin: bool,
+}
+
+impl MarginalRates {
+    /// The all-in marginal rate on the next dollar of long-term capital gain: §1(h) + §1411.
+    ///
+    /// This — not [`Self::ltcg`] — is what a filer sizing a sale must reserve against. At the top
+    /// §1(h) bracket over the §1411 threshold it is **0.238**, not 0.20.
+    pub fn ltcg_all_in(&self) -> Usd {
+        if self.niit_at_margin {
+            self.ltcg + crate::tax::tables::NIIT_RATE
+        } else {
+            self.ltcg
+        }
+    }
 }
 
 /// The computed result for a single tax year. All `Usd` fields are exact `Decimal`.

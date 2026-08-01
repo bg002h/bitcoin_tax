@@ -528,8 +528,11 @@ fn ty2024_forms_are_byte_deterministic() {
 }
 
 const GOLDEN_2024_F8949: &str = "42fca4b11085c9181e40d1bd70046285c6254658438ccc2c78b6cb5e957b8373";
+// ★ Moved 2026-07-30 when the crypto slice began ANSWERING Part III line 17 ("Are lines 15 and 16
+// both gains?") from the two lines printed above it. A Schedule D hash that moves for any OTHER
+// reason is a refusal, not a change — investigate before re-pinning.
 const GOLDEN_2024_SCHED_D: &str =
-    "3e7a0074fb159467378ff560d18d5fe883662f43ce961548be03e5a5d988d4c1";
+    "8f903457097e4eca1d3e11c3ebb008c4cb5b3502f37a6f7004bc886ced105969";
 const GOLDEN_2024_SE: &str = "d41317e29ebdf8bbf4391d0306d0d770cb7aec22d9cb7d339ca926aae1af19b1";
 const GOLDEN_2024_8283: &str = "9fef09fcc42d50c6989131cf3f173720dcaf5578b7b2a71ddb7033f7f5607f0e";
 const GOLDEN_2024_1040: &str = "216f946bbde8557056700af2558a400461ad90d2da47b4efa0e5ad939ede758c";

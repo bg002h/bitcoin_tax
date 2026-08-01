@@ -102,7 +102,8 @@ Federal tax attributable to crypto — tax year 2025
   LTCG tax (attributable): 0.00   NIIT (attributable): 0.00
   TOTAL federal tax attributable to crypto (delta): -77.00   (= ordinary-rate + LTCG + NIIT attributable)
   §1211 loss deduction (level): 350.00   carryforward out: short 0.00 / long 0.00
-  marginal rates: ordinary 0.22 / LTCG 0.15 / NIIT increased by crypto: no
+  marginal rates: ordinary 0.22 / LTCG 0.15 all-in (§1(h) 0.15 + §1411 0)
+                  NIIT increased by crypto: no
   (incremental ceteris-paribus delta on the minimal profile; excludes AGI-driven SS/IRMAA/AMT/QBI/phaseout effects — I5. §1411 NIIT reduces NII by the §1211(b)-allowed net capital loss (≤ $3,000 / $1,500 MFS — Form 8960 line 5a / §1.1411-4(d)) and is floored at $0; crypto ordinary income (mining/staking/airdrops/rewards) is correctly excluded from NII; crypto-lending interest income (§1411(c)(1)(A)(i)) is INCLUDED in NII; mining/staking/airdrops/rewards remain excluded (SE income per §1411(c)(6) or non-NII other income).)
 Schedule D (raw pre-netting part totals) — tax year 2025
   Part I  (short-term): proceeds 1340.00   cost basis 1690.00   gain -350.00
@@ -127,7 +128,7 @@ stderr:
 ```console
 
 ⚠ NOT AUTHORISED FOR FILING. btctax is a mechanical calculator. No right is granted and no authorisation is given to use it, or anything it produces, to prepare or file a tax return, and NO WARRANTY is given that any figure or form it produces is accurate, complete, or fit to file. If you file any of this, you do so entirely on your own responsibility: YOU are the preparer, you must check every figure against the forms and instructions before you sign, and the authors accept no liability for the consequences. This is not tax advice. See `btctax limitations`.
-note: Schedule D lines 17-22 (28%-rate / unrecaptured-§1250 / QDI worksheet, incl. the line-21 loss limit) are OUT OF SCOPE and left blank — complete them by hand if they apply.
+note: Schedule D line 17 was answered from the printed lines 15 and 16. Lines 18-22 are OUT OF SCOPE and left blank — complete them by hand if they apply: 18 (28%-rate gain) and 19 (unrecaptured §1250) are blank because btctax never asked, not because they are zero; 20 also asks whether you are filing Form 4952; 21 is the §1211 loss limit; 22 needs Form 1040 line 3a (qualified dividends).
 ⚠ [I5] 1 disposition(s) occurred on an exchange that MAY have issued 1099-DA broker basis reporting — those would belong on a SEPARATE Form 8949 under Box G/H/J/K. This export files EVERY Bitcoin row under Box I/L (not-reported default) and says so; reclassify by hand if you received a 1099-DA.
 ```
 
@@ -195,7 +196,7 @@ stderr:
 ```console
 
 ⚠ NOT AUTHORISED FOR FILING. btctax is a mechanical calculator. No right is granted and no authorisation is given to use it, or anything it produces, to prepare or file a tax return, and NO WARRANTY is given that any figure or form it produces is accurate, complete, or fit to file. If you file any of this, you do so entirely on your own responsibility: YOU are the preparer, you must check every figure against the forms and instructions before you sign, and the authors accept no liability for the consequences. This is not tax advice. See `btctax limitations`.
-note: Schedule D lines 17-22 (28%-rate / unrecaptured-§1250 / QDI worksheet, incl. the line-21 loss limit) are OUT OF SCOPE and left blank — complete them by hand if they apply.
+note: Schedule D line 17 was answered from the printed lines 15 and 16. Lines 18-22 are OUT OF SCOPE and left blank — complete them by hand if they apply: 18 (28%-rate gain) and 19 (unrecaptured §1250) are blank because btctax never asked, not because they are zero; 20 also asks whether you are filing Form 4952; 21 is the §1211 loss limit; 22 needs Form 1040 line 3a (qualified dividends).
 note: Form 8283 — btctax filled the donee/appraiser IDENTITY + per-donation property rows (Section B, with the "k Digital assets" box checked). Every other-party declaration is left BLANK: the Part III taxpayer signature, the Part IV appraiser signature/date, and the Part V donee acknowledgment are NOT btctax's to fill.
 ⚠ a Section B Form 8283 is NOT filing-ready without a signed Part IV (qualified-appraiser declaration) and Part V (donee acknowledgment).
 ⚠ at least one Form 8283 row needs REVIEW — complete any missing donee/appraiser detail with `btctax reconcile set-donation-details …`; a gift spanning MULTIPLE lots also flags its extra property row(s), which are completed on the paper form. NOT filing-ready as written.
@@ -297,7 +298,8 @@ Federal tax attributable to crypto — tax year 2025
   LTCG tax (attributable): 0.00   NIIT (attributable): 0.00
   TOTAL federal tax attributable to crypto (delta): 1721.16   (= ordinary-rate + LTCG + NIIT attributable)
   §1211 loss deduction (level): 0.00   carryforward out: short 0.00 / long 0.00
-  marginal rates: ordinary 0.24 / LTCG 0.15 / NIIT increased by crypto: no
+  marginal rates: ordinary 0.24 / LTCG 0.15 all-in (§1(h) 0.15 + §1411 0)
+                  NIIT increased by crypto: no
   (incremental ceteris-paribus delta on the minimal profile; excludes AGI-driven SS/IRMAA/AMT/QBI/phaseout effects — I5. §1411 NIIT reduces NII by the §1211(b)-allowed net capital loss (≤ $3,000 / $1,500 MFS — Form 8960 line 5a / §1.1411-4(d)) and is floored at $0; crypto ordinary income (mining/staking/airdrops/rewards) is correctly excluded from NII; crypto-lending interest income (§1411(c)(1)(A)(i)) is INCLUDED in NII; mining/staking/airdrops/rewards remain excluded (SE income per §1411(c)(6) or non-NII other income).)
 Schedule D (raw pre-netting part totals) — tax year 2025
   Part I  (short-term): proceeds 0.00   cost basis 0.00   gain 0.00
@@ -528,10 +530,12 @@ $ btctax --vault v.pgp income show --year 2024
     ],
     "can_be_claimed_as_dependent_taxpayer": false,
     "can_be_claimed_as_dependent_spouse": false,
+    "spouse_had_no_income": null,
+    "spouse_not_filing_a_return": null,
     "presidential_fund_taxpayer": false,
     "presidential_fund_spouse": false,
-    "taxpayer_died_during_year": false,
-    "spouse_died_during_year": false,
+    "taxpayer_died_during_year": null,
+    "spouse_died_during_year": null,
     "ip_pin": null
   },
   "w2s": [
@@ -608,7 +612,9 @@ $ btctax --vault v.pgp income show --year 2024
     "business_description": "Bitcoin mining",
     "naics_code": "518210",
     "accounting_method": "cash",
-    "expenses": "1000"
+    "expenses": "1000",
+    "payments_requiring_1099": null,
+    "will_file_required_1099": null
   },
   "schedule_a": {
     "medical": "2000",
@@ -645,16 +651,22 @@ $ btctax --vault v.pgp income show --year 2024
     "short": "0",
     "long": "0"
   },
+  "capital_loss_carryforward_in_provenance": "user",
   "amt_carryover_same_as_regular": null,
   "amt_depreciation_same_as_regular": true,
   "charitable_carryover_in": [],
+  "charitable_carryover_in_provenance": "user",
   "qbi": {
     "reit_ptp_carryforward_in": "0",
-    "reit_ptp_carryforward_in_provenance": "user"
+    "reit_ptp_carryforward_in_provenance": "user",
+    "qbi_carryforward_in": "0",
+    "qbi_carryforward_in_provenance": "user"
   },
   "foreign_accounts": false,
   "foreign_trust": false,
   "foreign_country_names": "",
+  "fbar_filing_required": null,
+  "donations_had_restrictions": false,
   "dual_status_alien": false,
   "has_income_exclusion": null,
   "excluded_puerto_rico_income": "0",
@@ -704,6 +716,59 @@ This feature is newer and less proven than the rest of btctax, and it was develo
 
 Check what this feature actually produced: open the Form 8275 PDF and confirm the Part II narrative renders whole, continuing onto Part IV on page 2, rather than stopping mid-sentence after about one line; confirm the basis in Form 8949 column (e) for each promoted lot equals the floor you consented to at promote time; and confirm the tranche quantity and acquisition window on the 8275 match what you declared.
 ⚠ a Section B Form 8283 is NOT filing-ready without a signed Part IV (appraiser) and Part V (donee acknowledgement) — obtain both before filing.
+
+  ── ADVISORIES (10) ──
+  • CTC/ODC NOT COMPUTED — you captured 1 dependent(s), but v1 does not compute the Child
+    Tax Credit or the Credit for Other Dependents (1040 line 19 is $0). Your tax is
+    OVERSTATED by up to $2,000 per qualifying child / $500 per other dependent. File
+    Schedule 8812 yourself to claim it.
+  • OTHER CREDITS NOT COMPUTED — v1 does not compute the education (Form 8863),
+    dependent-care (Form 2441), retirement-savings/saver's (Form 8880), residential-energy
+    (Form 5695) or adoption (Form 8839) credits: Schedule 3 Part I is $0 apart from the
+    foreign tax credit. If you qualify for any of them your tax is OVERSTATED — claim them
+    yourself.
+  • REFUND BY PAPER CHECK — your return is due a refund of $8,954.20, but v1 never fills the
+    direct-deposit block (1040 lines 35b–35d). As filed, the IRS will mail a check. Add your
+    routing and account numbers by hand if you want it deposited.
+  • DATE OF BIRTH NOT ON FILE — the §63(f) additional standard deduction for age 65+ ($1,550
+    per box) was NOT granted, because v1 never assumes a birthdate. If you (or your spouse)
+    are 65 or older, enter the date of birth and re-run: your tax is currently OVERSTATED.
+  • BLINDNESS NOT DECLARED — the §63(f) additional standard deduction for blindness ($1,550
+    per box) was NOT granted for 2 person(s) whose blindness was never stated (v1 never
+    assumes it). It STACKS with the age-65+ box. If you (or your spouse) are legally blind,
+    run `btctax income answer`: your tax is currently OVERSTATED.
+  • SALES-TAX ELECTION NOT ASKED — your Schedule A used state and local INCOME taxes, but
+    you were never asked whether to deduct general SALES taxes instead (§164(b)(5)). In a
+    no-income-tax state or a big-purchase year the sales-tax figure can be larger. If so,
+    your SALT deduction is too small and your tax is OVERSTATED. Run `btctax income answer`
+    to choose.
+  • SCHEDULE C FORM-1099 QUESTION LEFT BLANK — line I ("did you make any payments that would
+    require you to file Form(s) 1099?") was not answered, so the box goes out blank. That is
+    lawful: no figure on your return reads it, and btctax will never answer for you. But
+    §6721 (failure to file a required information return) and §6722 (failure to furnish the
+    payee's copy) apply to the PAYMENTS, not to this box — leaving it blank neither creates
+    nor removes that exposure. If you paid $600 or more to a contractor or service provider
+    for your business, check the Schedule C instructions and answer with `btctax income
+    answer`.
+  • PRIOR-YEAR QBI LOSS CARRYFORWARD NOT STATED — this return claims a §199A qualified
+    business income deduction, and btctax has no prior-year loss carryforward on file for it
+    (Form 8995 lines 7 and 3). Those lines carry LOSSES that REDUCE the deduction, so if you
+    had one and it is not entered, your deduction is too large and your tax is UNDERSTATED —
+    the one direction btctax will not fail in silently. Check lines 16 and 17 of LAST year's
+    Form 8995: if either is non-zero, enter it here as a POSITIVE amount. If you had no
+    §199A activity last year, or last year's lines 16 and 17 were zero, there is nothing to
+    do and this note is expected.
+  • PRIOR-YEAR CARRYOVERS NOT STATED — btctax has no capital-loss carryover (§1212(b),
+    Schedule D lines 6/14) or charitable carryover (§170(d)(1)) on file, and it did not
+    compute your prior year, so it cannot tell "you have none" from "nobody asked". Both
+    REDUCE your tax, so leaving them out costs YOU, not the Treasury — btctax will not
+    invent them, and your tax may be OVERSTATED. Check last year's return and enter them
+    with `btctax income import` if you have them.
+  • CHARITABLE DONEE ASSUMED — your 1 crypto donation(s) were valued assuming a PUBLIC
+    CHARITY (50%-organization) donee: long-term gifts at fair market value under the
+    30%-of-AGI ceiling. If the donee is a PRIVATE FOUNDATION, the correct treatment is the
+    20% ceiling at BASIS (which v1 refuses). Verify who you gave to.
+  (Advisories never change a number and never fail the command. See `btctax limitations`.)
 ```
 
 ## J7 — income received off-exchange, valued by hand (`--fmv`)
@@ -778,7 +843,8 @@ Federal tax attributable to crypto — tax year 2024
   LTCG tax (attributable): 0.00   NIIT (attributable): 0.00
   TOTAL federal tax attributable to crypto (delta): 726.00   (= ordinary-rate + LTCG + NIIT attributable)
   §1211 loss deduction (level): 0.00   carryforward out: short 0.00 / long 0.00
-  marginal rates: ordinary 0.22 / LTCG 0.15 / NIIT increased by crypto: no
+  marginal rates: ordinary 0.22 / LTCG 0.15 all-in (§1(h) 0.15 + §1411 0)
+                  NIIT increased by crypto: no
   (incremental ceteris-paribus delta on the minimal profile; excludes AGI-driven SS/IRMAA/AMT/QBI/phaseout effects — I5. §1411 NIIT reduces NII by the §1211(b)-allowed net capital loss (≤ $3,000 / $1,500 MFS — Form 8960 line 5a / §1.1411-4(d)) and is floored at $0; crypto ordinary income (mining/staking/airdrops/rewards) is correctly excluded from NII; crypto-lending interest income (§1411(c)(1)(A)(i)) is INCLUDED in NII; mining/staking/airdrops/rewards remain excluded (SE income per §1411(c)(6) or non-NII other income).)
 Schedule D (raw pre-netting part totals) — tax year 2024
   Part I  (short-term): proceeds 0.00   cost basis 0.00   gain 0.00
@@ -950,7 +1016,8 @@ Federal tax attributable to crypto — tax year 2024
   LTCG tax (attributable): 30000.00   NIIT (attributable): 7600.00
   TOTAL federal tax attributable to crypto (delta): 37600.00   (= ordinary-rate + LTCG + NIIT attributable)
   §1211 loss deduction (level): 0.00   carryforward out: short 0.00 / long 0.00
-  marginal rates: ordinary 0.24 / LTCG 0.15 / NIIT increased by crypto: yes
+  marginal rates: ordinary 0.24 / LTCG 0.188 all-in (§1(h) 0.15 + §1411 0.038)
+                  NIIT increased by crypto: yes
   (incremental ceteris-paribus delta on the minimal profile; excludes AGI-driven SS/IRMAA/AMT/QBI/phaseout effects — I5. §1411 NIIT reduces NII by the §1211(b)-allowed net capital loss (≤ $3,000 / $1,500 MFS — Form 8960 line 5a / §1.1411-4(d)) and is floored at $0; crypto ordinary income (mining/staking/airdrops/rewards) is correctly excluded from NII; crypto-lending interest income (§1411(c)(1)(A)(i)) is INCLUDED in NII; mining/staking/airdrops/rewards remain excluded (SE income per §1411(c)(6) or non-NII other income).)
 Schedule D (raw pre-netting part totals) — tax year 2024
   Part I  (short-term): proceeds 0.00   cost basis 0.00   gain 0.00
@@ -980,7 +1047,7 @@ Schedule D (raw pre-netting part totals) — tax year 2024
   The delta's implied deduction is fixed at derivation time (non-crypto AGI), so it is APPROXIMATE where a
   deduction is AGI-sensitive (e.g. the 7.5% medical floor); the two do NOT reconcile to the dollar.
 
-  ── ADVISORIES (3) ──
+  ── ADVISORIES (4) ──
   • OTHER CREDITS NOT COMPUTED — v1 does not compute the education (Form 8863),
     dependent-care (Form 2441), retirement-savings/saver's (Form 8880), residential-energy
     (Form 5695) or adoption (Form 8839) credits: Schedule 3 Part I is $0 apart from the
@@ -993,6 +1060,12 @@ Schedule D (raw pre-netting part totals) — tax year 2024
     per box) was NOT granted for 2 person(s) whose blindness was never stated (v1 never
     assumes it). It STACKS with the age-65+ box. If you (or your spouse) are legally blind,
     run `btctax income answer`: your tax is currently OVERSTATED.
+  • PRIOR-YEAR CARRYOVERS NOT STATED — btctax has no capital-loss carryover (§1212(b),
+    Schedule D lines 6/14) or charitable carryover (§170(d)(1)) on file, and it did not
+    compute your prior year, so it cannot tell "you have none" from "nobody asked". Both
+    REDUCE your tax, so leaving them out costs YOU, not the Treasury — btctax will not
+    invent them, and your tax may be OVERSTATED. Check last year's return and enter them
+    with `btctax income import` if you have them.
   (Advisories never change a number and never fail the command. See `btctax limitations`.)
 ```
 

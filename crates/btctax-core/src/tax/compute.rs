@@ -395,6 +395,14 @@ pub fn compute_tax_year(
             dec_20()
         },
         niit_applies: niit_with > niit_without,
+        // ★ Would the NEXT dollar of long-term gain itself owe §1411? It raises NII and MAGI by $1
+        // each, so NIIT = 3.8% × max(0, min(NII, MAGI − thr)) climbs iff MAGI is already over the
+        // threshold AND the min is taken off a NON-NEGATIVE base — a net-loss year with NII < 0 has
+        // slack to absorb before any NIIT is owed. Strict `>` at the threshold matches `ltcg`'s
+        // `top <= max_zero` and `marginal_ordinary_rate`'s `taxable > lower`: at a boundary, report
+        // the lower rate. Distinct from `niit_applies` (a crypto-vs-no-crypto DELTA) BY DESIGN —
+        // see the field docs and `niit_at_margin_is_not_the_niit_applies_delta`.
+        niit_at_margin: magi_with > thr && nii_with >= Usd::ZERO,
     };
 
     TaxOutcome::Computed(TaxResult {

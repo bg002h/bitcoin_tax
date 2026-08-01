@@ -13,7 +13,7 @@ pub use registries::{
 
 use crate::seam::Section;
 
-/// The v1 `FormSpec`: the twelve sections a renderer walks, in spec §9A render order — the ten
+/// The v1 `FormSpec`: the thirteen sections a renderer walks, in spec §9A render order — the ten
 /// header/W-2/Schedule-A/... sections (the `sections` module), then the two synthetic registry-driven
 /// sections (`Declarations` + `Skippables`), so the tail is `… Payments → Declarations → Skippables`.
 pub fn form_spec() -> &'static [Section] {
@@ -28,6 +28,7 @@ pub fn form_spec() -> &'static [Section] {
         sections::SCHEDULE_A,
         sections::SCHEDULE_A_CHARITABLE,
         sections::PAYMENTS,
+        sections::CARRYFORWARDS,
         registries::DECLARATIONS,
         registries::INCOME_EXCLUSIONS,
         registries::SKIPPABLES,
@@ -109,15 +110,15 @@ mod tests {
             );
         }
         assert_eq!(
-            decl_count, 13,
-            "13 declarations are Decl* fields (the 14th is the mortgage dedup)"
+            decl_count, 11,
+            "11 declarations are Decl* fields (the 12th is the mortgage dedup)"
         );
 
-        // 13 delegating Decl* fields + the foreign_country_names Text field.
+        // 11 delegating Decl* fields + the foreign_country_names Text field.
         assert_eq!(
             decls.fields.len(),
-            14,
-            "13 declarations + foreign_country_names"
+            12,
+            "11 declarations + foreign_country_names"
         );
         assert!(decls
             .fields
@@ -259,7 +260,7 @@ mod tests {
     /// entry; the `FieldId ↔ SkippableId` map stays TOTAL over all 5 skippables (SALT → `SaSaltUseSalesTax`);
     /// and the spouse-gated liveness edge holds.
     #[test]
-    fn skippables_section_delegates_six_skippables_and_the_map_is_total() {
+    fn skippables_section_delegates_twelve_skippables_and_the_map_is_total() {
         let skips = section(SectionId::Skippables);
 
         // SALT election is a Schedule-A Field (Task 5), NOT a Skippables Field.
@@ -271,9 +272,14 @@ mod tests {
             "the SALT election is Schedule-A-owned, not a Skippables Field"
         );
 
-        // Exactly the six non-SALT skippables.
+        // Exactly the twelve non-SALT skippables.
         let ids: Vec<FieldId> = skips.fields.iter().map(|f| f.id).collect();
-        assert_eq!(ids.len(), 6, "blind ×2 + DOB ×2 + DOD ×2 (§G-9)");
+        assert_eq!(
+            ids.len(),
+            12,
+            "blind ×2 + DOB ×2 + DOD ×2 + FBAR + the §G-9 death gates ×2 + Schedule C I/J + \
+             the §G-21 donation-restrictions universal"
+        );
         for expected in [
             FieldId::BlindTaxpayer,
             FieldId::BlindSpouse,
@@ -281,6 +287,12 @@ mod tests {
             FieldId::DobSpouse,
             FieldId::DodTaxpayer,
             FieldId::DodSpouse,
+            FieldId::FbarFilingRequired,
+            FieldId::TaxpayerDiedDuringYear,
+            FieldId::SpouseDiedDuringYear,
+            FieldId::ScheduleC1099Required,
+            FieldId::ScheduleC1099Filed,
+            FieldId::DonationsHadRestrictions,
         ] {
             assert!(
                 ids.contains(&expected),
@@ -308,12 +320,24 @@ mod tests {
             let entry = SKIPPABLE_QUESTIONS.iter().find(|e| e.id == s).unwrap();
             // A spouse-gated skippable needs a spouse present for its setter to stick; the §G-9 dates
             // of death additionally need their gate to say the person died (`SkippableId::Dod*` is live
-            // only then). Both primers are harmless to the other five entries' liveness.
+            // only then); the Schedule B 7a FBAR sub-question needs 7a = Yes (the form's own "If
+            // 'Yes,'"). Every primer is harmless to the other entries' liveness.
             let seed = |ri: &mut ReturnInputs| {
                 if !(entry.live)(ri) {
+                    // ★ MFJ first: `SpouseDiedDuringYear` and `DodSpouse` are MFJ-gated (the only
+                    // status whose spouse §63(f) box is counted), so a spouse `Person` alone is no
+                    // longer enough to make them live.
+                    ri.filing_status = FilingStatus::Mfj;
                     ri.header.spouse = Some(Person::default());
                     ri.header.taxpayer_died_during_year = Some(true);
                     ri.header.spouse_died_during_year = Some(true);
+                    ri.foreign_accounts = Some(true);
+                    // ★ Schedule C lines I/J: a `schedule_c` to write onto, and — for line J — line I
+                    // answered YES, since the form asks J only "If 'Yes,'".
+                    ri.schedule_c = Some(btctax_core::tax::return_inputs::ScheduleCInputs {
+                        payments_requiring_1099: Some(true),
+                        ..Default::default()
+                    });
                 }
             };
             match entry.kind {

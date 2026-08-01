@@ -49,6 +49,28 @@ rows = [
 name = "Form8283[0].Page1[0].f1_01[0]"
 ssn  = "Form8283[0].Page1[0].f1_02[0]"
 
+# ★ Page 2 repeats the header so a detached Section B page can be tied to its return. DUMPED, not
+#   inferred: this revision is f2_01/f2_02 (/MaxLen 11 ⇒ hyphenated), TY2025 is f2_1/f2_2, and the
+#   Rev. 12-2014 form is p2-t1/p2-t2 with /MaxLen 12. Three revisions, three shapes.
+# ★★★ Section B lines 5a/5b/5c — the RESTRICTION questions (§G-21). Written only when the filer
+#   answered the return-level universal "did any donation have strings attached?" with NO; a YES
+#   REFUSES the year upstream (`screen_absolute`), so a "Yes" mark is unreachable by design.
+#   ON-STATES DUMPED: "1"/"2" here — NOT the "Yes"/"No" that Schedule C uses. Yes is the LEFT widget
+#   (x 538), No the right (x 559), matching the printed "Yes No" column header.
+[line5a]
+yes = { field = "Form8283[0].Page2[0].c2_1[0]", on = "1" }
+no  = { field = "Form8283[0].Page2[0].c2_1[1]", on = "2" }
+[line5b]
+yes = { field = "Form8283[0].Page2[0].c2_2[0]", on = "1" }
+no  = { field = "Form8283[0].Page2[0].c2_2[1]", on = "2" }
+[line5c]
+yes = { field = "Form8283[0].Page2[0].c2_3[0]", on = "1" }
+no  = { field = "Form8283[0].Page2[0].c2_3[1]", on = "2" }
+
+[identity_page2]
+name = "Form8283[0].Page2[0].f2_01[0]"
+ssn  = "Form8283[0].Page2[0].f2_02[0]"
+
 # ── §G-13 FIELD-PROVENANCE CENSUS ────────────────────────────────────────────────────────────────
 # Every AcroForm field on this PDF the map above does not fill, with the decision that leaves it blank.
 # `unmodeled` = btctax models no input that could reach the cell; `artifact` = not an entry the FILER
@@ -125,19 +147,6 @@ ssn  = "Form8283[0].Page1[0].f1_02[0]"
 "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_66[0]"  = { line = "3.C(g)", rule = "unmodeled", reason = "Same — row C." }
 "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_67[0]"  = { line = "3.C(h)", rule = "unmodeled", reason = "Same — row C." }
 
-# ── ★ GAP — the page-2 identity header ───────────────────────────────────────────────────────────
-# The form reprints "Name(s) shown on your income tax return | Identifying number" at the top of page
-# 2, because a filed page 2 can be separated from page 1. btctax HAS both values and writes them to
-# page 1 (the `[identity]` table above), and it DOES fill page 2 (the appraiser and donee blocks are
-# mapped) — but the map declares no page-2 identity cells, so they can never be written by any fill
-# path. This is not "we model no input": the datum exists and nothing connects it to the field, which
-# is exactly the omission this census was built to surface.
-#
-# ★ Direction is administrative, not arithmetic — no figure changes. It is still a gap: the ratchet
-#   counts fields with no honest account, and "we have it and never write it" is not one.
-"Form8283[0].Page2[0].f2_01[0]" = { line = "p2 name", rule = "gap", reason = "Page-2 \"Name(s) shown on your income tax return\" — btctax holds the name and writes it to page 1, but the map declares no page-2 cell, so a filed page 2 carries no identifying header. Close by adding the page-2 identity cells to the map." }
-"Form8283[0].Page2[0].f2_02[0]" = { line = "p2 TIN",  rule = "gap", reason = "Page-2 \"Identifying number\" (/MaxLen 11, hyphenated) — same defect, same fix." }
-
 # ── Section B Part II lines 4a-4e — partial interests ────────────────────────────────────────────
 # "Complete lines 4a through 4e if you gave less than an entire interest in a property listed in
 # Section B, Part I." btctax's donation event transfers a QUANTITY of BTC outright; a partial or
@@ -172,12 +181,6 @@ ssn  = "Form8283[0].Page1[0].f1_02[0]"
 #
 # ★ Counted per FIELD (6), consistent with the FBAR pair: each Yes/No is two widgets, one question.
 #   Close by adding a restriction question to `DonationDetails` and mapping these cells.
-"Form8283[0].Page2[0].c2_1[0]" = { line = "5a Yes", rule = "gap", reason = "\"Is there a restriction, either temporary or permanent, on the donee's right to use or dispose of the donated property?\" — never asked; DonationDetails has no restriction field." }
-"Form8283[0].Page2[0].c2_1[1]" = { line = "5a No",  rule = "gap", reason = "The No half of the same unasked question." }
-"Form8283[0].Page2[0].c2_2[0]" = { line = "5b Yes", rule = "gap", reason = "\"Did you give to anyone … the right to the income from the donated property or to the possession of the property … or to designate the person having such income, possession, or right to acquire?\" — never asked." }
-"Form8283[0].Page2[0].c2_2[1]" = { line = "5b No",  rule = "gap", reason = "The No half of the same unasked question." }
-"Form8283[0].Page2[0].c2_3[0]" = { line = "5c Yes", rule = "gap", reason = "\"Is there a restriction limiting the donated property for a particular use?\" — never asked, and the most ordinary of the three in real giving." }
-"Form8283[0].Page2[0].c2_3[1]" = { line = "5c No",  rule = "gap", reason = "The No half of the same unasked question." }
 
 # ── Part III — Taxpayer (Donor) Statement ────────────────────────────────────────────────────────
 "Form8283[0].Page2[0].f2_12[0]" = { line = "III", rule = "unmodeled", reason = "\"List each item included in Section B, Part I above that the appraisal identifies as having a value of $500 or less.\" btctax carries no per-item appraised values below the group level, so it cannot identify such an item. ★ Direction is safe: this is a RELIEF provision (it reduces substantiation for cheap items), so forgoing it is conservative. The taxpayer signature and date beside it are wet-signature lines with no AcroForm cell." }

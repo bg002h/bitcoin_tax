@@ -38,6 +38,20 @@ fn tv(pdf: &[u8], fqn: &str) -> Option<String> {
 }
 
 /// Is a checkbox ON in a filled PDF, by fully-qualified field name?
+/// The checkbox's actual `/AS` ON-STATE, not merely whether something was written. ★ Needed because
+/// the on-state STRING is the fact under test wherever a revision differs from its siblings: Schedule
+/// C's pairs are "Yes"/"No" while Schedule B's and Schedule D's are "1"/"2". `box_on`'s bool cannot
+/// tell a correct on-state from one copied by analogy — and an analogy-copied value writes a box that
+/// renders BLANK while reading back as set.
+fn box_on_state(pdf: &[u8], fqn: &str) -> Option<String> {
+    let doc = load(pdf).unwrap();
+    let fields = collect_fields(&doc).unwrap();
+    fields
+        .iter()
+        .find(|f| f.fqn == fqn)
+        .and_then(|f| checkbox_on(&doc, f.id))
+}
+
 fn box_on(pdf: &[u8], fqn: &str) -> bool {
     let doc = load(pdf).unwrap();
     let fields = collect_fields(&doc).unwrap();
@@ -214,6 +228,7 @@ fn f8995_fills_the_printed_chain_and_reads_back() {
         Usd::ZERO,
         dec!(10000),
         Usd::ZERO,
+        btctax_core::Usd::ZERO,
         dec!(100000),
         dec!(20000),
     )
@@ -267,6 +282,7 @@ fn f8995_loss_carryforward_prints_positive_magnitudes() {
         Usd::ZERO,
         dec!(10000),
         dec!(15000),
+        btctax_core::Usd::ZERO,
         dec!(100000),
         Usd::ZERO,
     )
@@ -302,6 +318,7 @@ fn f8995_refuses_a_negative_in_a_parenthesized_cell() {
         Usd::ZERO,
         dec!(10000),
         dec!(15000),
+        btctax_core::Usd::ZERO,
         dec!(100000),
         Usd::ZERO,
     )
@@ -373,6 +390,7 @@ fn full_return_form_fills_are_byte_deterministic() {
         Usd::ZERO,
         dec!(10000),
         Usd::ZERO,
+        btctax_core::Usd::ZERO,
         dec!(100000),
         dec!(20000),
     )
@@ -406,6 +424,7 @@ fn full_return_forms_refuse_unsupported_years() {
         Usd::ZERO,
         dec!(10000),
         Usd::ZERO,
+        btctax_core::Usd::ZERO,
         dec!(100000),
         dec!(20000),
     )
@@ -718,6 +737,8 @@ fn schedule_1_fills_both_parts_across_two_pages() {
 fn schedule_c_fills_the_printed_chain_and_reads_back() {
     // $60,000 of crypto mining gross, $8,000 of expenses ⇒ $52,000 net profit.
     let lines = ScheduleCLines {
+        line_i_1099_required: None,
+        line_j_1099_filed: None,
         line_a_business: "Bitcoin mining".into(),
         line_b_naics: "518210".into(),
         line_f_accrual: false,
@@ -793,6 +814,8 @@ fn schedule_c_fills_the_printed_chain_and_reads_back() {
 #[test]
 fn schedule_c_same_column_swap_fails_closed() {
     let lines = ScheduleCLines {
+        line_i_1099_required: None,
+        line_j_1099_filed: None,
         line_a_business: "Bitcoin mining".into(),
         line_b_naics: "518210".into(),
         line_f_accrual: false,
@@ -824,14 +847,15 @@ fn sch_b(part1: Vec<ScheduleBRow>, part2: Vec<ScheduleBRow>, fa: bool, ft: bool)
     let line2: Usd = part1.iter().map(|r| r.amount).sum();
     let line6: Usd = part2.iter().map(|r| r.amount).sum();
     ScheduleBLines {
+        fbar_filing_required: None,
         line7b_countries: String::new(),
         part1_rows: part1,
         line2,
         line4: line2,
         part2_rows: part2,
         line6,
-        foreign_accounts_7a: fa,
-        foreign_trust_8: ft,
+        foreign_accounts_7a: Some(fa),
+        foreign_trust_8: Some(ft),
     }
 }
 
@@ -910,62 +934,86 @@ fn schedule_b_lists_payers_and_totals_the_printed_rows() {
 }
 
 /// ★ Part III is TRANSCRIBED, never decided. Lines 7a and 8 carry the filer's OWN answers (the return
-/// is refused upstream if they were left unanswered). The unnumbered FBAR sub-question under 7a
-/// (`c1_2`) and line 7b's country list are left BLANK: v1 has no input for them, and the FbarFinCen
-/// advisory tells the filer in terms that they must decide it themselves. An incomplete Part III is
-/// the honest output; a guessed one would not be.
+/// is refused upstream if they were left unanswered), and since the pen-deferral reversal so does 7a's
+/// unnumbered FBAR sub-question (`c1_2`, `QuestionId::FbarFilingRequired`).
+///
+/// ★★ THE POINT OF THIS TEST is the `None` vs `Some(false)` distinction. The form asks the FBAR
+/// sub-question ONLY under a 7a "Yes". So:
+///   - 7a = Yes, FBAR = Some(true)  ⇒ the YES box is checked
+///   - 7a = Yes, FBAR = Some(false) ⇒ the NO box is checked  (the filer said no)
+///   - 7a = No,  FBAR = None        ⇒ NEITHER box is written (the form never asked)
+///
+/// The last case is what makes "not asked ⇒ blank" structural. Mutation: replace the `if let Some(..)`
+/// in `schedule_b.rs` with `unwrap_or(false)` and the third case reds — a "No" the filer never gave.
 #[test]
-fn schedule_b_part3_transcribes_the_filers_own_answers_and_never_guesses_the_fbar() {
-    let yes = btctax_forms::fill_schedule_b(
-        &sch_b(vec![], vec![], true, false),
-        &kitchen_sink_header(),
-        2024,
-    )
-    .unwrap();
-    let doc = load(&yes).unwrap();
-    let idx = index(&collect_fields(&doc).unwrap());
+fn schedule_b_part3_transcribes_the_filers_own_answers_including_the_fbar_subquestion() {
+    let fbar_lines = |fa: bool, ft: bool, fbar: Option<bool>| {
+        let mut l = sch_b(vec![], vec![], fa, ft);
+        l.fbar_filing_required = fbar;
+        l
+    };
+    let check = |lines: &btctax_core::tax::printed::ScheduleBLines| {
+        let pdf = btctax_forms::fill_schedule_b(lines, &kitchen_sink_header(), 2024).unwrap();
+        let doc = load(&pdf).unwrap();
+        let idx = index(&collect_fields(&doc).unwrap());
+        let on = |fqn: &str| {
+            checkbox_on(
+                &doc,
+                idx[format!("topmostSubform[0].Page1[0].{fqn}").as_str()].id,
+            )
+        };
+        (
+            on("c1_1[0]"),
+            on("c1_1[1]"),
+            on("c1_2[0]"),
+            on("c1_2[1]"),
+            on("c1_3[0]"),
+            on("c1_3[1]"),
+        )
+    };
 
-    // 7a = YES (c1_1[0], on-state "1"); 8 = NO (c1_3[1], on-state "2").
-    assert_eq!(
-        checkbox_on(&doc, idx["topmostSubform[0].Page1[0].c1_1[0]"].id).as_deref(),
-        Some("1"),
-        "7a answered YES"
-    );
-    assert_eq!(
-        checkbox_on(&doc, idx["topmostSubform[0].Page1[0].c1_3[1]"].id).as_deref(),
-        Some("2"),
-        "8 answered NO"
-    );
-    // ★ The FBAR sub-question is NEVER answered — neither box is set.
-    for fbar in ["c1_2[0]", "c1_2[1]"] {
-        let fqn = format!("topmostSubform[0].Page1[0].{fbar}");
-        assert_eq!(
-            checkbox_on(&doc, idx[fqn.as_str()].id),
-            None,
-            "{fqn}: v1 never answers the FBAR sub-question"
-        );
-    }
-    // …nor line 7b's country list (free text, NOT a Yes/No pair).
-    assert_eq!(tv(&yes, "topmostSubform[0].Page1[0].f1_65[0]"), None);
+    // ── 7a YES, FBAR YES ──
+    let (y7a, _, fy, fno, _, n8) = check(&fbar_lines(true, false, Some(true)));
+    assert_eq!(y7a.as_deref(), Some("1"), "7a answered YES");
+    assert_eq!(n8.as_deref(), Some("2"), "8 answered NO");
+    assert_eq!(fy.as_deref(), Some("1"), "FBAR answered YES");
+    assert_eq!(fno, None, "the FBAR NO half stays unwritten");
 
-    // The opposite answers flip the boxes — the filer's declaration is what lands on the form.
-    let no = btctax_forms::fill_schedule_b(
-        &sch_b(vec![], vec![], false, true),
-        &kitchen_sink_header(),
-        2024,
-    )
-    .unwrap();
-    let doc2 = load(&no).unwrap();
-    let idx2 = index(&collect_fields(&doc2).unwrap());
+    // ── 7a YES, FBAR NO — an ANSWER, not a silence ──
+    let (_, _, fy, fno, _, _) = check(&fbar_lines(true, false, Some(false)));
+    assert_eq!(fy, None);
     assert_eq!(
-        checkbox_on(&doc2, idx2["topmostSubform[0].Page1[0].c1_1[1]"].id).as_deref(),
+        fno.as_deref(),
         Some("2"),
-        "7a answered NO"
+        "the filer answered the FBAR question NO; that is testimony and it prints"
     );
+
+    // ── ★ AN UNANSWERED 7a OR 8 WRITES NOTHING — the fabricated-testimony guard. ──
+    // These printed a "No" the filer never gave until `unwrap_or(false)` was removed from
+    // printed.rs. Latent then (an unanswered 7a refused upstream) and live the moment that
+    // refusal relaxes, which is exactly what makes it worth pinning here rather than trusting
+    // the refusal to stay put. Mutation: restore `unwrap_or(false)` and this reds.
+    let mut unanswered = sch_b(vec![], vec![], true, false);
+    unanswered.foreign_accounts_7a = None;
+    unanswered.foreign_trust_8 = None;
+    unanswered.fbar_filing_required = None;
+    let (y7a, n7a, fy, fno, y8, n8) = check(&unanswered);
     assert_eq!(
-        checkbox_on(&doc2, idx2["topmostSubform[0].Page1[0].c1_3[0]"].id).as_deref(),
-        Some("1"),
-        "8 answered YES"
+        (y7a, n7a, fy, fno, y8, n8),
+        (None, None, None, None, None, None),
+        "an UNANSWERED Part III declaration writes NEITHER box — a printed \"No\" would be sworn \
+         testimony the filer never gave"
+    );
+
+    // ── 7a NO ⇒ the form never asks the sub-question ⇒ NEITHER half is written ──
+    let (_, n7a, fy, fno, y8, _) = check(&fbar_lines(false, true, None));
+    assert_eq!(n7a.as_deref(), Some("2"), "7a answered NO");
+    assert_eq!(y8.as_deref(), Some("1"), "8 answered YES");
+    assert_eq!(
+        (fy, fno),
+        (None, None),
+        "7a is NO, so the FBAR sub-question is not asked and NEITHER box may be written — a printed \
+         \"No\" here would be testimony the filer never gave"
     );
 }
 
@@ -1631,6 +1679,10 @@ fn the_1040_prints_the_aged_blind_boxes_its_line_12_depends_on() {
         blind: Some(true),
         ..Default::default()
     });
+    // ★ The age-65 box is CLAIMED, not defaulted: the §G-9 death gates are class-(B) skippables, so
+    // `is_aged` forgoes the addition while "did you die during the year?" is unanswered. A fixture
+    // that wants the box must state it, exactly as it states `blind` and the date of birth.
+    ri.header.taxpayer_died_during_year = Some(false);
     btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
     let h = ReturnHeader::build(&ri, 2024).unwrap();
     assert_eq!(h.aged_blind.count(), 3, "the fixture claims three boxes");
@@ -1856,6 +1908,8 @@ fn schedule_a_prints_the_mixed_use_mortgage_box() {
 #[test]
 fn schedule_c_prints_its_business_naics_and_accounting_method() {
     let lines = ScheduleCLines {
+        line_i_1099_required: None,
+        line_j_1099_filed: None,
         line_a_business: "Bitcoin mining".into(),
         line_b_naics: "518210".into(),
         line_f_accrual: false, // Cash
@@ -2050,6 +2104,104 @@ fn schedule_d_line3_cell_text_equals_the_8949s_printed_column_total() {
     );
 }
 
+/// ★★★ **B1 kill for §G-21, the EMITTER half.** Form 8283 Section B lines 5a/5b/5c each print a Yes/No
+/// pair. `Some(false)` — "no strings attached" — checks all three **No** boxes, because the filer said
+/// so. `None` must check **nothing**: an unanswered question is a blank, and a blank and a "No" are
+/// indistinguishable on the printed page but are not the same thing under §6065. This is exactly the
+/// class of defect fixed in `3b22ca1` (an unanswered Schedule B Part III question printed a "No"
+/// nobody gave), and the reason the parameter is `Option<bool>` rather than `bool`.
+///
+/// A `Some(true)` case is deliberately absent: it is unreachable by construction, because
+/// `screen_absolute` refuses the year before a packet exists — held by
+/// `a_declared_restriction_refuses_at_any_amount_not_just_over_5000`.
+///
+/// Mutation-verified: making the writer unconditional (write "No" on `None` too) reds the blank half;
+/// deleting the write reds the answered half.
+#[test]
+fn the_8283_restriction_boxes_are_written_only_when_the_filer_answered_no() {
+    use btctax_core::forms::{Form8283HowAcquired, Form8283Row, Form8283Section};
+    use btctax_core::tax::printed::form_8283_printed;
+
+    // A SECTION B row — over $5,000 — because 5a/5b/5c live on page 2 and only Section B prints them.
+    let row = Form8283Row {
+        section: Some(Form8283Section::B),
+        description: "1.00000000 BTC".into(),
+        how_acquired: Form8283HowAcquired::Purchased,
+        date_acquired: time::macros::date!(2021 - 03 - 01),
+        date_contributed: time::macros::date!(2024 - 07 - 04),
+        cost_basis: dec!(1200),
+        fmv: dec!(60000),
+        claimed_deduction: Some(dec!(60000)),
+        fmv_method: "qualified appraisal".into(),
+        donee: "Habitat".into(),
+        appraiser: "A. Praiser".into(),
+        needs_review: false,
+        details: None,
+    };
+    let boxes = [
+        ("Form8283[0].Page2[0].c2_1[1]", "5a"),
+        ("Form8283[0].Page2[0].c2_2[1]", "5b"),
+        ("Form8283[0].Page2[0].c2_3[1]", "5c"),
+    ];
+    let yes_boxes = [
+        "Form8283[0].Page2[0].c2_1[0]",
+        "Form8283[0].Page2[0].c2_2[0]",
+        "Form8283[0].Page2[0].c2_3[0]",
+    ];
+
+    // (1) ANSWERED NO ⇒ all three No boxes carry their dumped on-state "2".
+    let printed =
+        form_8283_printed(std::slice::from_ref(&row), Some(false)).expect("there is a donation");
+    let pdf = btctax_forms::fill_form_8283_full(&printed, &kitchen_sink_header(), 2024)
+        .unwrap()
+        .expect("a donation ⇒ an 8283");
+    for (fqn, line) in boxes {
+        assert_eq!(
+            box_on_state(&pdf, fqn).as_deref(),
+            Some("2"),
+            "line {line}'s No box is checked — the filer answered No"
+        );
+    }
+    for fqn in yes_boxes {
+        assert_eq!(
+            box_on_state(&pdf, fqn),
+            None,
+            "…and no Yes box is ever marked"
+        );
+    }
+
+    // (2) SECTION A ⇒ six blank widgets even though the filer answered "No". The form scopes these
+    //     to "a contribution listed in Section B, Part I", and on a Section A return that part is
+    //     empty — so the questions were never posed (r3 M-1).
+    let mut sec_a = row.clone();
+    sec_a.section = Some(Form8283Section::A);
+    sec_a.claimed_deduction = Some(dec!(3000));
+    let printed = form_8283_printed(&[sec_a], Some(false)).expect("there is a donation");
+    let pdf = btctax_forms::fill_form_8283_full(&printed, &kitchen_sink_header(), 2024)
+        .unwrap()
+        .expect("a donation ⇒ an 8283");
+    for fqn in boxes.iter().map(|(f, _)| *f).chain(yes_boxes) {
+        assert_eq!(
+            box_on_state(&pdf, fqn),
+            None,
+            "{fqn} is blank on a SECTION A return — Part I lists nothing for 5a/5b/5c to be about"
+        );
+    }
+
+    // (3) UNANSWERED ⇒ six blank widgets. btctax does not testify for the filer.
+    let printed = form_8283_printed(&[row], None).expect("there is a donation");
+    let pdf = btctax_forms::fill_form_8283_full(&printed, &kitchen_sink_header(), 2024)
+        .unwrap()
+        .expect("a donation ⇒ an 8283");
+    for fqn in boxes.iter().map(|(f, _)| *f).chain(yes_boxes) {
+        assert_eq!(
+            box_on_state(&pdf, fqn),
+            None,
+            "{fqn} is BLANK when unanswered — a blank is no testimony, a \"No\" is testimony"
+        );
+    }
+}
+
 /// The full-return Form 8283 carries the FILER's identity ("Name(s) shown on your income tax return")
 /// and whole-dollar money columns. The crypto slice writes neither — its 8283 rides beside a return
 /// btctax did not produce — and that difference is exactly why the two paths stay separate.
@@ -2073,7 +2225,7 @@ fn the_full_return_8283_names_the_filer_and_prints_whole_dollars() {
         needs_review: false,
         details: None,
     };
-    let printed = form_8283_printed(&[row]).expect("there is a donation");
+    let printed = form_8283_printed(&[row], Some(false)).expect("there is a donation");
     let pdf = btctax_forms::fill_form_8283_full(&printed, &kitchen_sink_header(), 2024)
         .unwrap()
         .expect("a donation ⇒ an 8283");
@@ -2088,6 +2240,25 @@ fn the_full_return_8283_names_the_filer_and_prints_whole_dollars() {
         Some("123-45-6789"),
         "…and their identifying number (this cell is /MaxLen 11 ⇒ hyphenated)"
     );
+    // ★★ §G-13 — PAGE 2 CARRIES THE HEADER TOO. The form repeats "Name(s) shown on your income tax
+    // return" + "Identifying number" on page 2 so a detached Section B page can still be tied to its
+    // return. btctax held both all along and wrote them only to page 1, so a filed page 2 went out
+    // unidentified — the "we have the datum and nothing connects it to the field" gap, which no
+    // golden covered because no golden household donates.
+    //
+    // ★ The FQNs were DUMPED per revision, not inferred: TY2024 is f2_01/f2_02, TY2025 is f2_1/f2_2,
+    // and Rev. 12-2014 is p2-t1/p2-t2 at /MaxLen 12. An analogy would have written a nonexistent cell.
+    assert_eq!(
+        tv(&pdf, "Form8283[0].Page2[0].f2_01[0]").as_deref(),
+        Some("John Doe & Jane Doe"),
+        "page 2's own name header"
+    );
+    assert_eq!(
+        tv(&pdf, "Form8283[0].Page2[0].f2_02[0]").as_deref(),
+        Some("123-45-6789"),
+        "page 2's own identifying number (/MaxLen 11 ⇒ hyphenated, same as page 1)"
+    );
+
     // The money columns are whole dollars — no cents anywhere on the filed page.
     assert_eq!(printed.rows()[0].cost_basis, dec!(1200));
     assert_eq!(
@@ -2095,6 +2266,52 @@ fn the_full_return_8283_names_the_filer_and_prints_whole_dollars() {
         dec!(30001),
         "30,000.50 rounds at the cell"
     );
+}
+
+/// ★ B1 — a map with no `[identity_page2]` FAILS CLOSED on the full-return path, exactly as a map with
+/// no `[identity]` does. Without this, dropping the block from the TOML would silently restore the gap:
+/// the fill would succeed and page 2 would go out unnamed again, which is invisible in every
+/// value-checking test because the cell simply stays empty.
+#[test]
+fn a_full_return_8283_map_without_page2_identity_fails_closed() {
+    use btctax_core::forms::{Form8283HowAcquired, Form8283Row, Form8283Section};
+    use btctax_core::tax::printed::form_8283_printed;
+    use btctax_forms::testonly::*;
+
+    let row = Form8283Row {
+        section: Some(Form8283Section::A),
+        description: "0.50000000 BTC".into(),
+        how_acquired: Form8283HowAcquired::Purchased,
+        date_acquired: time::macros::date!(2021 - 03 - 01),
+        date_contributed: time::macros::date!(2024 - 07 - 04),
+        cost_basis: dec!(1200),
+        fmv: dec!(30000),
+        claimed_deduction: Some(dec!(30000)),
+        fmv_method: String::new(),
+        donee: "Habitat".into(),
+        appraiser: String::new(),
+        needs_review: false,
+        details: None,
+    };
+    let printed = form_8283_printed(&[row], Some(false)).expect("there is a donation");
+
+    let mut map = Form8283Map::for_year(2024).unwrap();
+    map.identity_page2 = None; // the exact omission
+    let err = match fill_8283_full_with_map(&printed, &kitchen_sink_header(), &map) {
+        Ok(_) => panic!(
+            "a map with no [identity_page2] FILLED — page 2 goes out with no identifying header, so a              detached Section B page cannot be tied to its return"
+        ),
+        Err(e) => format!("{e}"),
+    };
+    assert!(
+        err.contains("identity_page2"),
+        "the refusal must name the missing block, got: {err}"
+    );
+
+    // The control: the real map still fills.
+    let map = Form8283Map::for_year(2024).unwrap();
+    fill_8283_full_with_map(&printed, &kitchen_sink_header(), &map)
+        .expect("the committed map must still fill");
 }
 
 // ── fill_full_return — the assembled packet (P6.3b) ─────────────────────────────────────────────
@@ -2374,5 +2591,185 @@ fn the_full_return_schedule_d_answers_the_qof_question() {
     assert!(
         box_on(&pdf, "topmostSubform[0].Page1[0].c1_1[1]"),
         "the QOF question is answered NO, as the slice answers it"
+    );
+}
+
+/// ★★★ B1 — the planted defect for `form8995::assert_paren_magnitudes`, whose list is HAND-MAINTAINED.
+///
+/// Lines 3, 7, 16 and 17 are PARENTHESIZED boxes: the form pre-prints the minus sign, so the value
+/// written must be a positive MAGNITUDE. A negative renders as a POSITIVE number on the filed page —
+/// silently turning a loss carryforward into income. No geometric check can see it; the only guard is
+/// that array, and **nothing forces a newly-transcribed paren line into it**. Line 3 was added to it in
+/// the same commit that began printing line 3; this is what holds that pairing.
+#[test]
+fn a_negative_line3_is_rejected_like_its_paren_siblings() {
+    let lines = form_8995_lines(
+        "Bitcoin mining",
+        btctax_core::Usd::ZERO,
+        btctax_core::Usd::ZERO,
+        btctax_core::Usd::ZERO,
+        rust_decimal_macros::dec!(30000),
+        rust_decimal_macros::dec!(200000),
+        btctax_core::Usd::ZERO,
+    )
+    .unwrap();
+    // Each paren line in turn: a negative must FAIL CLOSED, naming the line.
+    for line in ["3", "7", "16", "17"] {
+        let mut l = lines.clone();
+        match line {
+            "3" => l.line3 = rust_decimal_macros::dec!(-1),
+            "7" => l.line7 = rust_decimal_macros::dec!(-1),
+            "16" => l.line16 = rust_decimal_macros::dec!(-1),
+            _ => l.line17 = rust_decimal_macros::dec!(-1),
+        }
+        let err = match btctax_forms::fill_form_8995(&l, &kitchen_sink_header(), 2024) {
+            Ok(_) => panic!(
+                "line {line} is a PARENTHESIZED box and a negative FILLED. It renders as a POSITIVE \
+                 number on the filed form — a loss carryforward turned into income."
+            ),
+            Err(e) => format!("{e}"),
+        };
+        assert!(
+            err.contains(&format!("line {line}")),
+            "the refusal must name line {line}, got: {err}"
+        );
+    }
+    // The control: the unmutated chain still fills, so the assertions above are about the SIGN and
+    // not about the fixture failing some other way.
+    btctax_forms::fill_form_8995(&lines, &kitchen_sink_header(), 2024)
+        .expect("a well-formed chain must still fill");
+}
+
+/// ★★★ Schedule C lines I / J — **`None` (never asked) and `Some(false)` (asked, answered no) are
+/// DIFFERENT MARKS ON THE PAGE.** An unwritten pair versus a checked No box.
+///
+/// This is the `3b22ca1` defect class, pre-empted: an `unwrap_or(false)` in the writer would print a
+/// "No" the filer never gave, on a form they sign under §6065. The `if let Some(..)` in `schedule_c.rs`
+/// is what makes "not asked ⇒ blank" STRUCTURAL rather than conventional, and this test is what holds
+/// it — the third case below is the one that reds if it is ever collapsed to a `bool`.
+///
+/// ★★ ON-STATES: Schedule C's pairs are **"Yes"/"No"**, NOT the "1"/"2" that Schedule B and Schedule D
+/// use. Asserted literally, so an analogy-copied on-state (which writes an OFF box — a line that LOOKS
+/// answered and is not) reds here.
+#[test]
+fn schedule_c_lines_i_and_j_print_the_filers_own_answer_and_nothing_when_unasked() {
+    use btctax_core::tax::printed::ScheduleCLines;
+    let base = ScheduleCLines {
+        line_a_business: "Bitcoin mining".into(),
+        line_b_naics: "518210".into(),
+        line_f_accrual: false,
+        line_i_1099_required: None,
+        line_j_1099_filed: None,
+        line1: dec!(50000),
+        line3: dec!(50000),
+        line5: dec!(50000),
+        line7: dec!(50000),
+        line28: dec!(1000),
+        line29: dec!(49000),
+        line31: dec!(49000),
+    };
+    let i_yes = "topmostSubform[0].Page1[0].c1_4[0]";
+    let i_no = "topmostSubform[0].Page1[0].c1_4[1]";
+    let j_yes = "topmostSubform[0].Page1[0].c1_5[0]";
+    let j_no = "topmostSubform[0].Page1[0].c1_5[1]";
+    let fill = |l: &ScheduleCLines| {
+        btctax_forms::fill_schedule_c(l, &kitchen_sink_header(), 2024).unwrap()
+    };
+    let on = |pdf: &[u8], fqn: &str| box_on_state(pdf, fqn);
+
+    // (1) I = Yes, J = Yes — both boxes checked, with THIS form's own on-states.
+    let pdf = fill(&ScheduleCLines {
+        line_i_1099_required: Some(true),
+        line_j_1099_filed: Some(true),
+        ..base.clone()
+    });
+    assert_eq!(on(&pdf, i_yes).as_deref(), Some("Yes"), "line I = Yes");
+    assert_eq!(on(&pdf, i_no), None);
+    assert_eq!(on(&pdf, j_yes).as_deref(), Some("Yes"), "line J = Yes");
+    assert_eq!(on(&pdf, j_no), None);
+
+    // (2) I = Yes, J = No — the filer said they will NOT file. Their answer, printed.
+    let pdf = fill(&ScheduleCLines {
+        line_i_1099_required: Some(true),
+        line_j_1099_filed: Some(false),
+        ..base.clone()
+    });
+    assert_eq!(on(&pdf, i_yes).as_deref(), Some("Yes"));
+    assert_eq!(on(&pdf, j_no).as_deref(), Some("No"), "line J = No");
+    assert_eq!(on(&pdf, j_yes), None);
+
+    // (3) ★ NEITHER ASKED — all four halves stay unwritten. A printed "No" here would be testimony
+    //     the filer never gave. This is the case an `unwrap_or(false)` breaks.
+    let pdf = fill(&base);
+    for f in [i_yes, i_no, j_yes, j_no] {
+        assert_eq!(
+            on(&pdf, f),
+            None,
+            "{f}: unasked ⇒ UNWRITTEN. A checked box here is an answer the filer never gave."
+        );
+    }
+
+    // (4) I = No ⇒ the form never asks J, so J stays blank even though I was answered.
+    let pdf = fill(&ScheduleCLines {
+        line_i_1099_required: Some(false),
+        line_j_1099_filed: None,
+        ..base
+    });
+    assert_eq!(on(&pdf, i_no).as_deref(), Some("No"));
+    assert_eq!(on(&pdf, j_yes), None);
+    assert_eq!(on(&pdf, j_no), None, "the form does not ask J after a No");
+}
+
+/// ★★★ §G-18, ANSWERED — Form 1040 line 7's *"If not required, check here"* box must stay **BLANK**,
+/// even on a return that attaches no Schedule D.
+///
+/// It was briefly CHECKED, driven off `ScheduleDLines::must_file()`. The r2 tax-lens review found the
+/// flaw: `must_file()` answers *"does **btctax's model** require a Schedule D"*, not *"does the
+/// **form** require one"*. The model has no input for Schedule D lines 4, 5, 11 or 12 (Forms 6252,
+/// 4684, 6781, 8824, 4797, 2439, or a K-1), so for a filer with any of those the box asserted under
+/// §6065 that no Schedule D was required — when one was.
+///
+/// ★★ A blank asserts NOTHING; a checked box is testimony. btctax can know "I have no reason to
+/// attach one"; only the filer can know "none is required". Those are different claims, and the form
+/// has a mark for only the second. **Filling a blank is not automatically an improvement** — this was
+/// the second time in two days that completeness turned out to be new testimony (the first was
+/// `§1411 0` in the marginal-rate line, §G-19a).
+#[test]
+fn the_1040_line7_not_required_box_is_never_checked() {
+    use btctax_core::tax::testonly::{ty2024_params, ty2024_table, w2_only_household};
+    let (ri, state) = w2_only_household();
+    let ar = btctax_core::tax::return_1040::assemble_absolute(
+        &ri,
+        &state,
+        &ty2024_params(),
+        &ty2024_table(),
+        2024,
+    );
+    let pr = btctax_core::tax::packet::assemble_printed_return(
+        &ri,
+        &state,
+        &std::collections::BTreeMap::new(),
+        &ar,
+        &ty2024_table(),
+        2024,
+        &[],
+    )
+    .unwrap();
+    // The premise: this filer really does attach no Schedule D, so the box is REACHABLE here. Without
+    // this the assertion below could pass for the wrong reason.
+    assert!(
+        !pr.forms.sch_d.must_file(),
+        "a W-2-only filer attaches no Schedule D — otherwise this test proves nothing"
+    );
+
+    let pdf =
+        btctax_forms::fill_form_1040_full(&pr.forms.f1040, &pr.header, ri.filing_status, 2024)
+            .unwrap();
+    assert_eq!(
+        box_on_state(&pdf, "topmostSubform[0].Page1[0].Line4a-11_ReadOrder[0].c1_23[0]"),
+        None,
+        "★ line 7's \"if not required\" box must be BLANK. btctax cannot establish that no Schedule D \
+         is required — `must_file()` speaks only for its own model, which has no input for Schedule D \
+         lines 4/5/11/12. Checking it is testimony the filer never gave."
     );
 }

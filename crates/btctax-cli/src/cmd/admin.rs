@@ -307,6 +307,14 @@ pub struct IrsPdfReport {
     /// (non-voided) DeclareTranche/PromoteTranche is on file. Drives main.rs's stderr notice ONLY — the
     /// notice is interface-only and is never written to `out_dir`.
     pub experimental_notice_active: bool,
+    /// ★ §G-19d — the full return's non-gating ADVISORIES, so the export path shows them too.
+    ///
+    /// `advisories_for` had exactly ONE production caller (`cmd::tax::report_tax_year`), which meant a
+    /// filer who ran `export-irs-pdf` and never ran `report` saw NONE of them: not the forgone §63(f)
+    /// boxes, not the FBAR sub-question left blank, not the Schedule C 1099 pair. The export path is
+    /// the one that hands them a PDF to sign, so it is the last place the omissions should be silent.
+    /// Empty on the crypto-slice path, which computes no full return.
+    pub advisories: Vec<btctax_core::tax::advisories::Advisory>,
 }
 
 /// The **[I5]** broker-reporting advisory line, year-aware — or `None` when no disposition may have
@@ -603,7 +611,14 @@ pub(crate) fn export_irs_pdf_from_session(
         if let Some(fill) = btctax_forms::fill_form_1040_capgains(&inputs, tax_year)? {
             form_1040_filled_7a = fill.filled_7a;
             form_1040_loss = fill.loss;
-            let bytes = stamp(fill.pdf)?;
+            // ★ This form is a WORKSHEET, not a return. btctax vouches for exactly two cells on it
+            // (the digital-asset question and line 7a) and leaves wages, every deduction and every
+            // tax line blank — yet it renders as a Form 1040 with a large line 7a. The stderr note
+            // saying so is transient; the PDF is not. Stamp the disclosure onto the page itself, so a
+            // filer who finds this file a month later cannot mistake it for their return. The
+            // full-return `f1040.pdf` is complete and is NEVER stamped this way.
+            let bytes = btctax_forms::stamp_partial_worksheet_watermark(&fill.pdf)?;
+            let bytes = stamp(bytes)?;
             let path = out_dir.join("form_1040_capgains.pdf");
             write_bytes_owner_only(&path, &bytes)?;
             form_1040_path = Some(path);
@@ -637,6 +652,8 @@ pub(crate) fn export_irs_pdf_from_session(
         .filter(|b| b.kind.severity() == Severity::Hard)
         .count();
     Ok(IrsPdfReport {
+        // The crypto slice computes no full return, so there are no full-return advisories.
+        advisories: Vec::new(),
         full_return_paths: Vec::new(),
         full_return_manifest: None,
         forms_ignored_full_return: false, // crypto-slice path honors --forms
@@ -768,9 +785,17 @@ fn export_full_return(
         return Err(refuse(r));
     }
     let ar = btctax_core::tax::return_1040::assemble_absolute(&ri, state, params, table, tax_year);
-    if let Some(r) = btctax_core::tax::return_1040::screen_absolute(&ri, &ar, params) {
+    if let Some(r) =
+        btctax_core::tax::return_1040::screen_absolute(&ri, &ar, params, state, tax_year)
+    {
         return Err(refuse(r));
     }
+    // ★ §G-19d — the same advisories `report --tax-year` shows, carried out on the report so the
+    // EXPORT path surfaces them too. Derived from the identical `advisories_for` call, never a second
+    // list: two derivations would drift, and the one the filer saw would depend on which command they
+    // happened to run.
+    let advisories =
+        btctax_core::tax::advisories::advisories_for(&ri, state, &ar, params, tax_year);
 
     // Pseudo figures are FICTIONAL: they are watermarked no matter what, and the attestation gate for
     // them is unchanged. A clean (real-ledger) packet needs no attestation — SPEC §9 as amended.
@@ -872,6 +897,7 @@ fn export_full_return(
         .filter(|b| b.kind.severity() == Severity::Hard)
         .count();
     Ok(IrsPdfReport {
+        advisories,
         watermarked,
         tax_year,
         unresolved_hard,

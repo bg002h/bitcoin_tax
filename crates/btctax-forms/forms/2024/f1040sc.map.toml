@@ -57,6 +57,16 @@ line31 = "topmostSubform[0].Page1[0].f1_46[0]"   # "Net profit or (loss)…" →
 #    bare digits — the forms genuinely differ, so `push_identity` reads each cell's capacity).
 # Schedule C's header is "Name of PROPRIETOR" — the business OWNER, who on a joint return may be
 # the SPOUSE. Core decides that (packet::ReturnHeader.proprietor); the filler only transcribes.
+# ★ Lines I and J — the Form-1099 compliance pair, ASKED as class-(B) skippables.
+#   ON-STATES DUMPED, NOT ASSUMED: Schedule C's pairs are "Yes"/"No", NOT the "1"/"2" that Schedule B
+#   and Schedule D use. Three separate design passes assumed 1/2 by analogy and all three were wrong.
+[line_i]
+yes = { field = "topmostSubform[0].Page1[0].c1_4[0]", on = "Yes" }
+no  = { field = "topmostSubform[0].Page1[0].c1_4[1]", on = "No" }
+[line_j]
+yes = { field = "topmostSubform[0].Page1[0].c1_5[0]", on = "Yes" }
+no  = { field = "topmostSubform[0].Page1[0].c1_5[1]", on = "No" }
+
 [identity]
 name = "topmostSubform[0].Page1[0].f1_1[0]"
 ssn  = "topmostSubform[0].Page1[0].f1_2[0]"
@@ -155,10 +165,6 @@ ssn  = "topmostSubform[0].Page1[0].f1_2[0]"
 # ★ Note the interaction with the aggregate-expense problem above: line 11 (contract labor) is exactly
 #   the expense that triggers a 1099-NEC, and it is one of the twenty category lines btctax cannot
 #   populate — so nothing in the return even hints the question applies.
-"topmostSubform[0].Page1[0].c1_4[0]" = { line = "I Yes", rule = "gap", reason = "\"Did you make any payments in 2024 that would require you to file Form(s) 1099?\" — never asked; a compliance declaration with §6721/§6722 exposure, the same class as the Schedule B FBAR pair." }
-"topmostSubform[0].Page1[0].c1_4[1]" = { line = "I No",  rule = "gap", reason = "The No half of the same unasked question." }
-"topmostSubform[0].Page1[0].c1_5[0]" = { line = "J Yes", rule = "gap", reason = "\"If 'Yes,' did you or will you file required Form(s) 1099?\" — never asked; the follow-on declaration, unanswerable while I is unanswered." }
-"topmostSubform[0].Page1[0].c1_5[1]" = { line = "J No",  rule = "gap", reason = "The No half of the same unasked question." }
 
 # ── Part I lines 1 (checkbox), 2, 4, 6 ──────────────────────────────────────────────────────────
 "topmostSubform[0].Page1[0].c1_6[0]" = { line = "1 stat emp", rule = "unmodeled", reason = "\"Check the box if this income was reported to you on Form W-2 and the 'Statutory employee' box on that form was checked.\" btctax collects W-2s and Schedule C separately and never links them. ★ Direction is safe: a statutory employee's income already had FICA withheld and is NOT subject to SE tax, so failing to check the box makes btctax compute SE tax that is not owed — an overstatement." }

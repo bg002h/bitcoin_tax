@@ -715,7 +715,61 @@ users), stated so nobody assumes otherwise.
 leaves no bytes behind — that now holds, so §G-14 no longer has to carry the `VACUUM`/`secure_delete`
 requirement itself.
 
-### G-18 — ★★★ Form 1040 line 7: btctax neither attaches Schedule D nor checks "not required"
+### G-18 — Form 1040 line 7: the box stays BLANK, and that is the ANSWER — **REOPENED-then-ANSWERED 2026-07-31**
+
+**★★★ Built, reviewed, and REVERTED the same day. The revert is the finding.**
+
+The box was checked from `ScheduleDLines::must_file()`. The r2 tax-lens review found the flaw:
+`must_file()` answers *"does **btctax's model** require a Schedule D"*, not *"does the **form** require
+one"*. The model has no input for Schedule D lines **4, 5, 11 or 12** (Forms 6252/4684/6781/8824/4797/
+2439, or a K-1), so for a filer with any of those the box asserted under §6065 that no Schedule D was
+required — when one was. Before the change it was blank, which asserted nothing.
+
+**Resolution: the box is never checked**, held by `the_1040_line7_not_required_box_is_never_checked`
+(mutation-verified against the re-introduction). btctax can know *"I have no reason to attach one"*;
+only the filer can know *"none is required"*. The form has a mark for the second claim only.
+
+★★ **The original census entry was ALSO wrong, and that part of the finding survives the revert.** It
+read *"Schedule D is always required"* — false. The entry now records the true reason: btctax cannot
+establish the negative. **A confidently-wrong `unmodeled` hides a defect as well as a missing entry
+does**, which is why the gaps ratchet (which counts entries, not their truth) is not the whole guard.
+
+★★★ **THE TRANSFERABLE LESSON, and it is now a PATTERN rather than an incident.** Twice in two days a
+change replaced a lawful silence with an affirmative statement btctax cannot support:
+
+| | what was blank | what was written | caught by |
+|---|---|---|---|
+| §G-19a | no forward §1411 claim at all | `§1411 0` on the marginal-rate line | r1 tax lens |
+| §G-18 | line 7's box | `☑ not required` | r2 tax lens |
+
+Both looked like *completeness*. **Filling a blank is not automatically an improvement, and "the form
+offers two states" does not mean btctax can tell which one is true.** Ask first: *can btctax establish
+the proposition the mark asserts, or only that it has no evidence against it?*
+
+★ **What would reopen it:** an input surface that establishes the filer's capital activity is wholly
+within btctax's model. That is the same premise the crypto-slice Schedule D already leans on ("for a
+crypto-only year that is complete and correct") and has never verified either — worth doing once, for
+both.
+
+<details><summary>Original finding (2026-07-30), kept for the record</summary>
+
+
+**The box is now checked exactly when `ScheduleDLines::must_file()` is false**, threaded through the
+printed chain so the box and the packet's form list are ONE decision — a checked box beside an
+attached Schedule D would contradict the return's own contents. Both directions pinned and
+mutation-verified (`the_packet_omits_every_form_that_is_not_required` /
+`a_return_that_attaches_schedule_d_does_not_check_the_line7_box`).
+
+★★ **The census REASON was wrong, not the count.** `c1_23` was recorded `unmodeled` because *"btctax's
+returns … report BTC dispositions on Form 8949, which Schedule D always summarises, so Schedule D is
+always required"*. That is FALSE — `must_file` exists precisely because it is not — and it is the same
+species as the Schedule C line-G entry §G-13 already flags: **a census entry can be confidently wrong,
+and a wrong `unmodeled` hides a defect exactly as well as a missing entry would.** GAPS stayed at 6;
+what changed is that a field is no longer excused by a false premise.
+
+Original finding, kept for the record:
+
+### ~~G-18 (original)~~ — Form 1040 line 7: btctax neither attaches Schedule D nor checks "not required"
 
 **Verified on an emitted return, 2026-07-30** (`btctax-forms/tests/field_census_slice.rs`). Found
 while measuring §G-17 gap 2.
@@ -745,6 +799,8 @@ return whose Schedule D status is unstated.
 ★ **Practitioner judgement flagged:** whether an unchecked box on a return with no Schedule D is a
 filing defect or a cosmetic omission is a preparer's call. What is not in doubt is that the form
 states an instruction we do not follow.
+
+</details>
 
 ### G-17 — ★★ MULTI-FORM: the census needs form-level liveness, FQN normalisation, and cross-form provenance
 
@@ -896,7 +952,7 @@ census likely has to record the decision's EXISTENCE separately from its CONTENT
 ★ **Never auto-shred.** Destroying evidence of diligence must be an explicit, informed act by the
 filer — never a default or a background job.
 
-### G-13 — ★★★ FIELD PROVENANCE — **COMPLETE: 15 of 15 forms censused (2026-07-30); 16 GAP fields**
+### G-13 — ★★★ FIELD PROVENANCE — **census COMPLETE (15/15 forms); gaps 16 → 6 and falling**
 
 **Owning phase: NOT B3.** Whole-surface, and it interlocks with **§G-11** (which blocks its honest
 form). Filed 2026-07-30. **Full design note: [`design/forms/FIELD_PROVENANCE.md`](design/forms/FIELD_PROVENANCE.md)** — read that first; this entry is the register hook.
@@ -924,7 +980,21 @@ filer WITH a prior-year QBI loss is never asked, so nothing stops the overstatem
 ★ This is exactly why `unmodeled` and `gap` must stay distinct: `unmodeled` is a benefit the filer
 FORGOES (safe — it can only overstate tax); a missing REDUCTION is the reverse.
 
-**Current gap count: 16 fields / 8 items**, pinned by `recorded_gaps_may_only_shrink` (`GAPS = 16`).
+**Current gap count: 6 fields / 3 items** — all six are Form 8283 lines **5a/5b/5c** — pinned by
+`recorded_gaps_may_only_shrink` (`GAPS = 6`). ★ **The number in this paragraph has gone stale twice; the
+CONSTANT is the truth, this prose is a convenience.** The burn-down, newest first:
+
+| date | gaps | what closed it |
+|---|---|---|
+| 2026-07-31 | 10 → 6 | Schedule C **I/J** — asked as class-(B) skippables, printed from the filer's answer, §6721/§6722 advisory on the skip |
+| 2026-07-31 | 12 → 10 | Form 8283 **page-2 identity** — a pure map fix; btctax held the name and TIN all along |
+| 2026-07-30 | 13 → 12 | Form 8995 **line 3** — the prior-year QBI loss carryforward, the only gap ever recorded in the UNDERSTATEMENT direction |
+| 2026-07-30 | 16 → 13 | the FBAR sub-question (built), Schedule SE line A (reclassified `unmodeled` — clergy out of scope) |
+
+★★ Also corrected 2026-07-31, and NOT a count change: Form 1040 line 7's *"if not required, check
+here"* box was excused as `unmodeled` on a **false premise** ("Schedule D is always required"). See
+**§G-18**. A confidently-wrong `unmodeled` hides a defect exactly as well as a missing entry does — so
+the ratchet, which counts entries rather than judging them, is not the whole guarantee.
 ★ It was 18/9 for about an hour: **Schedule C line G was wrongly recorded as a gap and is now
 `unmodeled`** — see the correction note below, which is the most useful thing in this section.
 Counted per FIELD because that is the mechanical unit — a Yes/No is two widgets for one question.
@@ -1054,6 +1124,35 @@ the filer never sees how much is left. `live_questions` already enumerates; noth
 ### G-12 — btctax emits Form 8275 but NOT Form 8275-R, so it cannot disclose a position contrary to a REGULATION
 
 **Owning phase: unassigned** — a product decision before it is a build. Filed 2026-07-30.
+
+> ### ⛔ BLOCKED ON AN ASSET THE ASSISTANT CANNOT OBTAIN (established 2026-07-31)
+>
+> Attempted as part of a three-item batch and **stopped before writing code**, for two independent
+> reasons — recorded so the next attempt does not rediscover them:
+>
+> 1. **`f8275r.pdf` is not archived**, and the assistant cannot fetch it: there is no network, and
+>    harness **A3 denies a new archive path at `Write` time** by design. The archive convention also
+>    requires a URL note + sha256, which cannot be produced without the bytes.
+> 2. **The entry itself says this is "a product decision before it is a build"** with an unassigned
+>    owning phase. Building an emitter for a form whose *use* has not been decided is the wrong order.
+>
+> ★ **The unblock is one command**, since 8275-R is a **periodic** form (Rev. Month Year, no annual
+> edition) and follows the documented pattern in `design/forms/README.md`:
+>
+> ```sh
+> curl -sSL -o design/forms/periodic/f8275r.pdf https://www.irs.gov/pub/irs-pdf/f8275r.pdf
+> # then the same for the instructions if they are separate, and:
+> cargo run -p xtask -- forms extract      # writes the committed text layer
+> ```
+>
+> ★★ **What was considered and REJECTED as a partial build:** asking the filer *"is this position
+> contrary to a Treasury regulation?"* and refusing on Yes. It is in scope (the filer decides, not
+> btctax — §G-12 forbids only btctax *identifying* conflicts itself) and needs no PDF. It was rejected
+> because btctax has **no channel for a filer-authored contrary position at all**: the only 8275 it
+> emits is its own promoted-basis methodology disclosure, driven by `disclosure_8275(events, …)`. A
+> question with nothing to attach to would be ceremony, and it would land in the same
+> **per-position-vs-per-return** shape that blocks **§G-21** — which is an owner decision, not a
+> coincidence. Fix that shape once, for both.
 
 **The distinction, and it is not cosmetic.** Only **26 USC** is law. A Treasury regulation is the
 executive's *interpretation* of the statute: binding in practice, and **capable of being wrong** — regs
@@ -1199,16 +1298,465 @@ recorded as carrying no decision **with a reason**. Unaccounted-for must fail. A
 distinguish *"this line encodes no decision"* from *"we forgot this line"* is not a conformance check.
 Owning phase: **B3 T2** (unchanged).
 
-### G-9a — do the §63(f) BLIND boxes have a death interaction?
+### G-9a — ~~do the §63(f) BLIND boxes have a death interaction?~~ **ADJUDICATED 2026-07-30: NO.**
 
-**Owning phase: before TY2025 Part V** (the same gate G-9 was owned by). G-9 examined and fixed the
-**aged** boxes. i1040gi's blind instruction reads *"blind at the end of 2024"* — which on its face a
-person who died mid-year cannot satisfy, yet `Person::blind` is a plain tri-state with no death branch.
-Adjudicate against the instruction text, not by analogy to G-9: the aged carve-out is stated
-explicitly, and the absence of a matching sentence for blindness may itself be the answer (a decedent's
-final return is generally filed as though the year ended at death). The machinery G-9 built —
-`{taxpayer,spouse}_died_during_year` and `Person::date_of_death` — is already in place, so if the rule
-does bite, the fix is a predicate change with no new input collection.
+**Closed as "no change needed" — a legitimate outcome, and the one the entry itself anticipated.**
+i1040gi (2024) states the carve-out for exactly ONE box, naming it by its printed label: *"**Death of
+spouse in 2024.** If your spouse was born before January 2, 1960, but died in 2024 before reaching age
+65, don't check the box that says **'Spouse was born before January 2, 1960.'**"* There is no matching
+sentence for blindness.
+
+★★ **And the MECHANISM says there could not be one.** The age test is a DURATION test with a gap the
+year can straddle — a person *"is considered to reach age 65 on the day before the person's 65th
+birthday"*, so a birthday falling after their death is an event that never happened, which is exactly
+what the carve-out resolves. Blindness is a POINT-IN-TIME status test carrying its own anchor:
+*"blind at the end of 2024"* / *"totally blind as of December 31, 2024"*. A decedent's tax year ends at
+death, so someone blind when they died was blind at the end of their year. **Nothing to carve out.**
+
+Pinned executably, not in prose: `packet.rs::the_blind_box_has_no_death_carve_out_but_the_aged_box_does`
+runs i1040gi's own worked example (born 1959-02-14, died 2024-02-12 — one day short) and asserts the
+aged box is carved out while the blind box is not, plus the one-day-later control. Mutation-verified:
+"harmonising" the two boxes reds it. The asymmetry is the kind of thing a later reader tidies away.
+
+★ **HONEST LIMIT.** i1040gi routes a decedent's preparer to **Pub. 501**, which is NOT in
+`legal/primary-sources/` — and neither is **26 USC §63**. This rests on rung 2 plus the mechanism, not
+on rung 3 or 4. Recorded as such rather than as settled; archiving either would upgrade it.
+
+### G-22 — ~~Form 8995 line 3 is COLLECTABLE but never ASKED~~ **FIXED 2026-07-31 — and it was BIGGER and partly SHIPPED**
+
+**★★★ The filed entry understated the problem. Building the fix found the real shape.**
+
+Not a line-3 oversight: **every carryforward family was import-only**, reachable solely by
+hand-editing the TOML — capital loss (§1212(b)), charitable (§170(d)(1)), and BOTH QBI ones. And the
+four split cleanly by DIRECTION:
+
+| carryforward | omitting it | verdict |
+|---|---|---|
+| capital loss, charitable | forgoes a benefit ⇒ **OVERSTATES** tax | conservative omission; §3.4 permits it |
+| **8995 line 7** (REIT/PTP loss) | reduces line 8 ⇒ inflates the deduction ⇒ **UNDERSTATES** tax | ★ **SHIPPED in v0.14.0** |
+| **8995 line 3** (business loss) | subtracted at line 4 ⇒ **UNDERSTATES** tax | created and closed in the same branch |
+
+★★ **The two in the unsafe direction are exactly the two nobody was asked for, and line 7's hole is
+LIVE IN PUBLISHED CODE.** `"qbi"` has been a wholesale exemption in the input-form coverage census
+since before this branch — so line 7 has never been collectable through the interview either. Found
+only because §G-22 sent me to look at *why* line 3 was unreachable.
+
+**FIXED:** a new `Carryforwards` section in the FormSpec carries both (they are `Usd`, so they belong
+with the money fields — `income answer` handles only yes/no and dates), each stamping
+`CarryProvenance::User` so the write-back refuses to overwrite a filer's own figure without `--force`.
+`"qbi"` is no longer a blanket exemption; only the two provenance leaves remain exempt, since those are
+ours rather than the filer's.
+
+**Plus `Advisory::QbiCarryforwardNotStated`, gated on PROVENANCE rather than value** — the design point:
+a zero btctax wrote after computing last year is KNOWLEDGE (`Computed`) and needs no note; a zero that
+is merely the struct default is an UNKNOWN (`User`) and does. Without that distinction it would either
+nag forever or go quiet exactly when it matters. Both halves mutation-verified, plus the independence
+case (stating one carryforward says nothing about the other).
+
+**STILL OPEN — the other two families.** Capital-loss and charitable carryovers remain import-only.
+Direction is overstatement, so §3.4 permits the omission — **but only if the filer is TOLD**, and there
+is no advisory for either. Owning phase: whenever the input surface is next widened. They are a
+strictly smaller problem than the pair fixed here and were left rather than swept in, so the fix stayed
+scoped to the unsafe direction.
+
+<details><summary>The finding as originally filed (2026-07-31, from the r2 tax lens) — kept because it
+under-described the problem, which is itself the lesson: it named line 3 alone when the cause was a
+whole-family exemption, and missed that the sibling was already shipped.</summary>
+
+**Owning phase: whenever the QBI input surface is next touched. Found by the r2 tax-lens review, and
+it is a correction to my own 2026-07-30 claim that the gap was "closed by collecting the input".**
+
+The field is mapped, the chain computes it, the write-back carries it — but **nothing asks the filer
+for it.** `qbi` is a WHOLESALE prefix exemption in `spec/coverage.rs::EXEMPT_PREFIXES`, so no `Field`
+exists and neither `income answer` nor the TUI ever poses the question; `advisories.rs` mentions no
+carryforward at all. The only way in is hand-editing `[qbi] qbi_carryforward_in` in the import TOML,
+which `LIMITATIONS.md` now documents — and a filer who does not read it gets the old behaviour.
+
+**The reviewer's worked case:** Single TY2024, W-2 $110,000, Schedule C mining net $50,000, TI before
+QBI $150,000 (below the threshold, so no refusal). A $20,000 §199A qualified-business-loss carried
+from a TY2023 return prepared elsewhere. Line 3 prints blank, line 4 = $50,000 instead of $30,000,
+line 15 = $10,000 instead of $6,000 ⇒ **taxable income understated $4,000, tax by ≈$880.**
+
+★★ **I deleted the census entry whose own reason said *"Closes by collecting it"* having only made it
+collect-ABLE.** The register thereby lost its only record of a live understatement path. That is the
+error worth remembering: **a `gap` closes when the FILER can answer, not when the STRUCT can hold the
+answer.**
+
+★ **Why it could not stay in the §G-13 census:** that census is field-provenance, and the field is now
+genuinely mapped and filled. This is an INPUT-COLLECTION gap — a different species, with no ratchet of
+its own. Worth considering whether it needs one, since this is the second time the two have been
+confused (the first was Schedule C line G).
+
+★ **Direction and precedent.** The sibling `reit_ptp_carryforward_in` (line 7) has the identical shape
+— import-only, unadvised — and has been accepted for as long. So this is not a regression in any
+figure; it is a regression in the safety net. Fixing one should fix both.
+
+**Sketch:** drop `"qbi"` from `EXEMPT_PREFIXES` and give both carryforwards real `Field`s (they are
+`Usd`, not tri-states, so they belong with the money fields rather than the question registry), plus an
+advisory that fires when there IS QBI and the carryforward is `0` with `CarryProvenance::User` — i.e.
+btctax did not compute the prior year, so it cannot know. ★ Precision matters: that condition is true
+for most first-time users, which is arguably correct but needs the same care the death-gate advisory
+got.
+
+</details>
+
+### G-23 — `CarryProvenance` cannot express "the filer stated ZERO" (r3 Minor, 2026-07-31)
+
+**Owning phase: whenever the carryover surface is next touched.** Direction is SAFE (over-advising),
+which is why it is filed rather than gating.
+
+`CarryProvenance` has two values, `User` and `Computed`. The advisories define *unknown* as
+`value == 0 && provenance == User` — but a filer who opens the TUI's "Carryforwards from last year"
+section and honestly types `0` lands in exactly that state, so `QbiCarryforwardNotStated` still tells
+them *"btctax has no prior-year loss carryforward on file"*. It now does. A typed zero and the struct
+default are the same two bytes.
+
+★ **This is the [answered-ness invariant](#) again, in a new field.** The surface asks a question it
+cannot record the answer to — the same shape as a hardcoded zero being indistinguishable from a
+computed one. The fix is a third state (or an `Option`), not a tweak to the advisory's predicate.
+
+★ Related: the write-back's no-clobber guards are `> Usd::ZERO && == User`, so a filer's typed `0` is
+neither protected from overwrite nor recorded as an answer.
+
+### G-21 — ✅ **CLOSED 2026-07-31** — Form 8283 5a/5b/5c, asked ONCE for the whole return
+
+**Owning phase: was "whenever 8283 Section B is next touched". This was the last of the §G-13 gaps
+(6 of 6); the census `GAPS` ratchet is now `0`.**
+
+★★★ **The obstacle below was real and the OWNER dissolved it in one sentence** — *"ask the user if any
+of their donations had strings attached, and require them to answer no."* Every analysis under it
+assumed the question had to be **per-donation** because the underlying FACT is per-donation. It does
+not follow. A **return-level universal** — *did ANY donation carry a restriction?* — is a strictly
+stronger statement than the three per-gift answers, it is the one the ordinary filer can answer
+truthfully in one word, and it fits the existing `ReturnInputs`-shaped registry with no new machinery.
+The three boxes are then written from it because a universal "no" entails each particular "no".
+
+★★ **The lesson is not about 8283.** A per-row fact does not imply a per-row QUESTION. When the honest
+answer to "was there any X?" is almost always "no", the universal costs one prompt and carries the same
+signature weight — and asking it that way turned a blocked structural redesign into a skippable and a
+refusal. Look for this shape before building a per-row collection surface.
+
+**As built:**
+
+| piece | where |
+|---|---|
+| `ReturnInputs.donations_had_restrictions: Option<bool>` | `return_inputs.rs:604` |
+| `SkippableId::DonationsHadRestrictions`, `live: |_ri| true` | `questions.rs:927` |
+| the MANDATORY half — refuses unless `Some(false)` | `return_1040.rs`, top of `screen_absolute` (moved there by the pre-merge review; see below) |
+| `RefuseReason::DonationRestrictionsUnresolved` | `return_refuse.rs:44` |
+| the three "No" boxes | `form8283.rs`, inside the page-2 identity block |
+
+**Why the question is offered UNCONDITIONALLY but enforced NARROWLY.** Liveness is `fn(&ReturnInputs)`
+and the donations live in the **`LedgerState`**, which it cannot see — the same blindness that puts the
+non-crypto-noncash guard in a screen rather than in `screen_inputs`. So the skippable is always
+*offered* (a filer who donated nothing is never blocked by it), and the gate that actually **binds**
+lives in `screen_absolute`, keyed on **Schedule A line 12** — the §170(b)-LIMITED figure the return
+actually claims, which is the same quantity `packet.rs` filters on to decide whether a Form 8283
+attaches at all. A declared restriction refuses whenever line 12 is above zero; an UNANSWERED one
+refuses only when an 8283 attaches (line 12 > $500) **and** the year is a Section B (aggregate >
+$5,000), because only then are 5a/5b/5c printed.
+
+**Both refusal directions are enforced, and they refuse for opposite reasons.** Unanswered refuses
+because btctax must not answer for the filer; `Some(true)` refuses because the answer is known and it
+says the full-FMV deduction btctax computed is **too large** (Reg §1.170A-7) — and btctax cannot tell
+which gift, so it declines the year rather than file an overstated number.
+
+★ **B1 discharged with observed kills at every revision.** Refusal side (as re-keyed): reverting the
+outer key to the ledger aggregate, dropping the 8283-attaches term, and dropping the Section-B term
+each red by name. Emitter side: writing "No" on an unanswered return reds, and so does not writing it —
+the `3b22ca1` class in both directions. A sixth, copying Schedule C's `"Yes"/"No"` on-state by analogy,
+is caught **twice**: by the test and independently by the §G-19b on-state guard.
+
+★★★ **AMENDED TWICE THE SAME DAY, both times by review.** The gate as first built was keyed on
+`year_donation_deduction > $5,000` — the Form 8283 SECTION split — and that was wrong in both
+directions (r3 I-2/I-3): §170(f)(11)(C)'s $5,000 picks which *section* you file, while Reg §1.170A-7
+reduces a restricted gift's deduction at *every* dollar; and reading the LEDGER rather than the
+RETURN refused standard-deduction filers who claim no §170 deduction at all. It now lives in
+`screen_absolute` keyed on `ar.deduction_is_itemized`, the real §63(e) election.
+
+★★★ **Then the fix itself leaked (pre-merge finding 2), and this is the durable lesson.** Not
+refusing the standard-deduction year is right *for that year* — but `apply_170b` runs unconditionally
+so the carryover ages, and the carryover rolls out at **full FMV**, the number the filer just said is
+too large. The write-back persisted it into next year stamped `Computed`, where nothing can catch it:
+`donations_had_restrictions` is `PerYear`, and next year's screen reads
+`year_donation_deduction(state, Y+1)` = $0 because the gift was made in Y. `apply_carryover_writeback`
+now refuses to persist a carryover btctax cannot vouch for, and the guard lives in **core** so the
+signature makes an omission fail to compile. `--force` does not open it: that flag overwrites a
+figure the USER entered, it is not a licence to write one btctax knows is wrong.
+
+★ **The shape to remember: narrowing a refusal can leak through a DIFFERENT persistence path.** The
+year stopped being wrong and the *carryover* became wrong instead. When you narrow a gate, ask what
+else consumed the value the gate used to protect.
+
+<details><summary>Original filing (2026-07-31) — the structural obstacle, kept because the reasoning is
+what the owner's proposal overturned</summary>
+
+The decision table already rules on the tax question — *"BUILD AS REFUSAL-ON-YES (ask; 'No' proceeds,
+'Yes' refuses). The ONLY limb-(a) item of the six"* — and that stands. Attempting the build on
+2026-07-31 surfaced a STRUCTURAL obstacle the table did not anticipate, which is why this is filed
+rather than half-built.
+
+**The obstacle.** `FORM_QUESTIONS` and `SKIPPABLE_QUESTIONS` are `ReturnInputs`-shaped: every accessor
+is `fn(&ReturnInputs)`. Lines 5a/5b/5c are facts about **one gift** — a restriction attaches to the
+donated property, not to the return — and their siblings (donee, appraiser, appraisal date) already
+live on `DonationDetails`, a per-donation VAULT SIDE-TABLE that `ReturnInputs` never sees. So these
+would be the registry's first **per-donation** declarations, and it cannot hold them as it stands.
+
+**Recommended shape** (my read; the owner's call, since it decides where a whole class of future
+per-row questions lives):
+
+1. Three `Option<bool>` on **`DonationDetails`** — semantically right, and beside the Section B facts
+   already collected there. Collected by `btctax reconcile set-donation-details`, not `income answer`.
+2. The refusal in the **pre-write window** that already exists: `admin.rs` loads `details` at :789 and
+   `mkdir_out` runs at :835, so a check between them writes ZERO bytes.
+   ★★ It must go there and nowhere later. `needs_review` is NOT a substitute: its only consumers are
+   `eprintln!`s emitted **after** `full_return_paths` are on disk — the PDF carrying the unreduced
+   deduction already exists when the warning prints.
+3. **Unanswered should refuse too, not just a Yes** — the conservative reading. A restriction reduces
+   or denies the §170 deduction (Reg §1.170A-7), so proceeding on an unanswered question risks an
+   OVERSTATED deduction ⇒ UNDERSTATED tax. That is the direction §3.4 never permits. The common
+   answer is "No", so the cost is one prompt per Section B donation.
+
+★ **ON-STATES ALREADY DUMPED, so the next person need not re-do it:** `Form8283[0].Page2[0].c2_1[0]`
+/`c2_2[0]`/`c2_3[0]` are Yes, `[1]` are No, on-states **`"1"`/`"2"`** — NOT the `"Yes"`/`"No"` that
+Schedule C uses. Yes is the LEFT widget (x 538) and No the right (x 559), matching the printed
+"Yes No" column header.
+
+★ These questions exist only in **Section B** (gifts over $5,000, the appraisal path), so liveness is
+"this donation has a Section B row" — narrower than "there is a Schedule A", and narrower still than
+"there is a donation".
+
+</details>
+
+### G-20 — the MFS spouse's §63(f) boxes: ✅ **CLOSED**, and r3 found the half that was missed
+
+★★★ **r3 I-1 — THE ADVISORIES WERE NOT MIGRATED WITH THE DEDUCTION, and the gap was an
+UNDERSTATEMENT path.** When the boxes became claimable, `AgedBlindBoxes::for_return` and the death
+questions' liveness moved to the shared predicate; the four §63(f) *advisories*, written two commits
+earlier, stayed on `filing_status == Mfj`. So on exactly the returns the fix enables,
+`Mfs63fSpouseBoxesForgone` fired and told a filer whose boxes btctax had ALREADY claimed that their
+tax was *"OVERSTATED … and the boxes are yours to check by hand"*. Acting on it double-counts them.
+Three sibling forfeit advisories went silent on MFS at the same time (a §3.4 breach).
+
+★★ **The fix needed TWO predicates, not one, and collapsing them broke a case.**
+`spouse_63f_boxes_count` (record exists AND status permits) decides the **deduction**;
+`spouse_63f_status_permits` (status only) drives the **advisories** — because an absent MFJ spouse
+record is *itself* a way to forgo a box, so the advisory must speak precisely where there is nothing
+to count. The first attempt gated the advisories on `boxes_count` and reddened
+`mfj_with_no_spouse_record_still_advises_the_aged_box_p5_m2`, which is the seen-red-once observation
+for the split.
+
+### (original entry) G-20 — the MFS spouse's §63(f) boxes: **now ADVISED (2026-07-31)**; widening still open
+
+**★★ Half closed, and it was the half §3.4 actually required.** The forfeit itself is lawful — btctax
+cannot verify i1040gi's three conditions, so it does not claim the boxes, which OVERSTATES tax. But
+§3.4 permits a conservative omission **only if the filer is TOLD**, and nothing said a word.
+`Advisory::Mfs63fSpouseBoxesForgone` now does, naming the amount and the three conditions.
+
+★★★ **It is sharper than "a box is forgone": btctax ASKS an MFS filer whether their spouse is blind and
+then DISCARDS the answer.** `SkippableId::BlindSpouse` is live on `spouse.is_some()`, not on MFJ, while
+`AgedBlindBoxes::for_return` filters the spouse to MFJ before counting. So the question is posed, the
+answer stored, and nothing reads it. The advisory fires exactly when the filer told us something that
+would have counted — never on an MFS return with no spouse data, and never on MFJ, where a claim that
+the boxes were forgone would be flatly false. Both gates mutation-verified.
+
+**✅ CLOSED 2026-07-31 — the boxes are now CLAIMABLE on MFS.** `HouseholdHeader` gained
+`spouse_had_no_income` and `spouse_not_filing_a_return` (class (B) benefit claims — silence forgoes);
+the third condition, `can_be_claimed_as_dependent_spouse`, was already captured.
+
+★★★ **It FAILS CLOSED, and that is the whole design.** All three must be affirmatively answered in the
+claiming direction; **any** unanswered or adverse one forgoes. This is the only change on the branch
+where an answer can ONLY reduce tax, so the negative cases matter more than the positive: forgoing
+costs the filer a deduction they can recover by answering, while granting one they are not entitled to
+understates a signed return, which they cannot. Seven distinct forgo cases are pinned, and relaxing a
+single condition to `!= Some(false)` reds the test by name.
+
+★★ **The coupling is resolved by making it ONE predicate**, not by keeping two in step:
+`questions::spouse_63f_boxes_count` is shared by `AgedBlindBoxes::for_return` (which decides the
+deduction) and by the liveness of `SpouseDiedDuringYear` / `DodSpouse` (which decide whether the
+questions are even asked). A test asserts they agree for every input. Two copies would have drifted
+into the worst shape available here — counting a spouse's aged box on a return where the §G-9 death
+carve-out was never posed.
+
+★ **The two new conditions are exempt from the input form for now** (deliberately, recorded in
+`coverage.rs`): they are collectable by `income import`, and `Advisory::Mfs63fSpouseBoxesForgone`
+already names the cost, so nobody is left guessing. A form surface for them is the next increment.
+
+### G-20a — ~~the OTHER unadvised omissions cannot be advised yet~~ **FIXED 2026-07-31**
+
+**Both benefit carryovers now carry provenance and are advised.** `ReturnInputs` gained
+`capital_loss_carryforward_in_provenance` and `charitable_carryover_in_provenance` as **sibling
+scalars**, stamped `Computed` by the write-back; `Advisory::BenefitCarryoversNotStated` fires on an
+empty/zero value with `User` provenance, naming which one and the direction.
+
+★ **Sibling scalars, not fields inside the types**, because `Carryforward` lives in the **frozen**
+`tax/types.rs` — a third `frozen_guard` pin exception for a field the delta engine never reads would be
+a poor trade, and provenance is a fact about this year's INPUT rather than about the value type.
+
+★★ **The message is deliberately the MIRROR of `QbiCarryforwardNotStated`, and a test pins that they
+never converge:** these two REDUCE the filer's tax, so omitting one costs *them* (OVERSTATED); the QBI
+pair inflates a deduction, so omitting one costs the Treasury (UNDERSTATED). If both ever say the same
+thing, one of them is wrong.
+
+★ **The census caught the new leaves immediately** — the wholesale prefixes
+`capital_loss_carryforward_in` / `charitable_carryover_in` do NOT match the `_provenance` siblings, so
+`every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt` reported them as uncovered on the first
+compile. That is the census working.
+
+### ⚠ G-20b — the advisory list now has TWO unconditional members. Watch the budget.
+
+**Owning phase: before the next advisory is added — i.e. this is a gate, not a task.**
+
+`BenefitCarryoversNotStated` fires on **every first return**, because a carryover comes from a prior
+year and no property of THIS year can narrow it (gating on this year's activity would go silent exactly
+when it matters — a filer with a large prior loss and no current activity). It goes quiet permanently
+once btctax computes a year, so it is correct rather than noisy. But it joins `OtherCreditsOmitted`,
+which is unconditional by design.
+
+★★ **Two is defensible; three is the point at which the SURFACE is the problem, not the advisory.** The
+failure mode this codebase keeps citing — *an advisory list that teaches itself to be scrolled past* —
+is the reason every advisory added on 2026-07-30/31 got a precision test. If a third unconditional
+member is proposed, reconsider the presentation (tiering, a "first return" block, collapsing the
+always-on ones) rather than the individual advisory. `a_clean_high_income_return_has_only_the_
+unconditional_omissions` pins the exact set, so the count cannot grow unnoticed.
+
+<details><summary>The finding as originally filed — kept because its diagnosis was right and is the
+reason the fix was possible at all.</summary>
+
+**Owning phase: with §G-22's residue.** Found while closing §G-20. There are two more conservative
+omissions with no advisory — the **capital-loss** (§1212(b)) and **charitable** (§170(d)(1))
+carryovers, both still import-only after §G-22. Both overstate tax, so both are lawful; both are
+silent, so both breach the same §3.4 rule §G-20 just fixed.
+
+★★ **They cannot be advised precisely, and the reason is structural rather than an oversight.** The QBI
+pair was fixable only because each carries a scalar `CarryProvenance`, which is what distinguishes *"a
+zero btctax computed"* from *"a zero nobody ever stated"*. The other two have no such handle:
+
+| leaf | provenance | why the advisory cannot be precise |
+|---|---|---|
+| `capital_loss_carryforward_in` | **none at all** | `Carryforward { short, long }` is two bare `Usd` — a zero is uninterpretable |
+| `charitable_carryover_in` | per-ITEM, on `CharitableCarryItem` | an **empty vec has no items**, so an empty list carries no provenance |
+
+An advisory without that distinction fires on essentially every return and teaches the list to be
+scrolled past — the precision trap the death-gate and QBI advisories were both designed around.
+
+**The fix is to give both a provenance handle first** (a sibling scalar on the carryforward struct; a
+`Option<CarryProvenance>` beside the charitable vec for "the list as a whole"), then advise. Filed
+rather than half-built, because adding provenance to two more input types is a design change with a
+write-back interaction, not a one-line advisory.
+
+★ **The transferable observation:** `CarryProvenance` is the mechanism that makes *"we do not know"*
+expressible for a money field, and only one of the three carryforward families has it where it can be
+read. That is the same answered-ness problem the question registry solved for booleans (§G-11's
+neighbourhood), unsolved for amounts.
+
+**Owning phase: whenever MFS support is next touched.** Found while adjudicating G-9a, in the same
+i1040gi passage. The instruction reads:
+
+> *"If your filing status is married filing separately and your spouse was born before January 2, 1960,
+> or was blind at the end of 2024, you can check the appropriate box(es) on the line labeled
+> 'Age/Blindness' **if your spouse had no income, isn't filing a return, and can't be claimed as a
+> dependent on another person's return**."*
+
+`AgedBlindBoxes::for_return` counts a spouse box on MFJ only, so an MFS filer whose spouse meets all
+three conditions forfeits up to two boxes ($1,550 each for TY2024). Direction is **OVERSTATEMENT** —
+safe — which is why this is not Critical.
+
+★★ **But it was recorded as THE RULE, not as a conservative omission.** The doc comment read *"on MFS
+the spouse's blindness is not the taxpayer's checkbox"*, which is a statement of law and is wrong.
+Corrected in place 2026-07-30. Two things remain:
+1. **The forfeit is UNADVISED.** §3.4 permits a conservative omission only if the filer is TOLD;
+   otherwise the overstatement is silent. There is no advisory for this one.
+2. **btctax captures none of the three conditions** (spouse's income, whether they file, whether they
+   are claimable), so honouring the rule means collecting them — the *"if the form asks something our
+   input surface cannot answer, collect it"* corollary.
+
+★ It also bears on the 2026-07-30 death-gate work: `SkippableId::SpouseDiedDuringYear` and
+`DodSpouse` were tightened to MFJ-only, citing this same derivation. That tightening is **consistent
+with current behaviour** (the MFS spouse box is never counted, so the gate is inert there) but would
+have to widen with it if this is ever fixed. Do not fix one without the other.
+
+</details>
+
+### G-19 — the crypto-slice-trio review residue (2026-07-30). Four Minors, two lenses, 0C/0I.
+
+Two independent reviewers (tax-correctness + instrument-integrity) over commits `1a757f0..65270db`.
+Verdict **0 Critical / 0 Important**; every one of 13 planted defects was killed by a test. Two Minors
+were fixed inline (a stale `ScheduleBLines` doc comment that still promised "unanswered refuses" for a
+box whose refusal this branch deleted; and the §1411 threshold boundary, documented but unpinned —
+flipping `>` to `>=` had left the whole suite green). The four below are filed, not fixed.
+
+**(G-19a) ★★ `niit_at_margin` reads the model's PARTIAL NII, and the false answer is the
+UNDER-RESERVE one. Owning phase: whenever `TaxProfile` next gains an NII field — or sooner, on the
+owner's call.** `compute.rs`'s `nii_with = qd + ST + LT − loss_deduction + crypto interest` omits
+rents, royalties, taxable interest and non-qualified dividends, while `magi_excluding_crypto` **is**
+the filer's complete non-crypto MAGI (its own doc says so). So modelled NII is a **lower bound**:
+`nii_with >= 0` soundly implies real NII ≥ 0, but `nii_with < 0` does **not** imply real NII < 0.
+Concrete miss: Single, OTI 250,000, MAGI 300,000 including $60,000 of rental income, net short-term
+crypto loss $80,000 ⇒ modelled NII = −3,000 ⇒ `niit_at_margin = false` ⇒ the report prints
+`§1411 0` when the filer's next long-term dollar really does owe 3.8%.
+★ The pre-existing display made no forward §1411 claim at all; the new one prints an affirmative zero,
+so this is a NEW affirmative statement, not an inherited silence. Display-only — no tax figure moves
+(verified: the only readers of `MarginalRates` are `render.rs` and the TUI Tax tab; `optimize.rs`
+carries the struct without reading it, `whatif.rs` computes its own NIIT delta).
+★★ **The fix is a product judgment, not a bug fix, which is why it is filed and not applied.** The
+narrow case is "MAGI over the threshold AND modelled NII < 0", where the honest answer is *unknown*.
+Failing safe (always include §1411 once MAGI clears the threshold) over-states by 3.8 points on the
+common crypto **loss** year with high income; a third display state is accurate but wordier. Either
+edit touches `tax/types.rs` + `tax/compute.rs`, so it costs a second `frozen_guard` pin exception.
+
+**(G-19b) ✅ FIXED 2026-07-30 — the class is gone, not just this instance.** `pdf::apply_writes` now
+rejects any checkbox `on` value absent from that widget's own `/AP` `/N` keys, so the defect below
+fails closed at the ONE chokepoint every checkbox on every form passes through — Schedule D line 17,
+the QOF question, the 1040 digital-asset pair, Schedule B Part III, Schedule C's I/J, all of it.
+Paired with the B1 planted-defect test `a_swapped_yes_no_map_fails_closed_instead_of_rendering_a_
+blank_box` (kats.rs), which swaps the field names on all three revisions and asserts the refusal —
+and asserts the UNSWAPPED map still fills, since a guard that rejects everything would pass the first
+half. Observed RED with the checker disabled before landing. Original finding, kept for the record:
+
+**★★ Schedule D line 17's Yes/No pair had NO map-independent oracle — a swapped map was invisible.** Every assertion reads the widget through
+`pair.yes.field` / `pair.no.field`, so the map is both the thing under test and the test's own index.
+Swap only the two `field =` values in `forms/2025/schedule_d.map.toml` `[line17]` and every filed 2025
+Schedule D renders line 17 **blank** — `apply_writes` sets `/AS = /1` on a widget whose only on-state
+is `/2`, so there is no `/AP /N /1` to draw — while `checkbox_on` reads the raw `/AS` back as
+`Some("1")` and the KAT stays green. That is CLAUDE.md's second provenance row (*"nothing ever
+populated it"*) laundered as a blank. ★ **The current maps are verified CORRECT** (`xtask dump-fields`:
+2025 `c2_1[0]` on `"1"` at y 578–586 above `c2_1[1]` on `"2"` at 566–574; 2017 `"Yes"`/`"No"` likewise),
+so this is a latent instrument gap, not a live defect. **The repo already solved exactly this for the
+1040's digital-asset question** — `verify.rs::topmost_yes_no_pair`, *"derived from the blank PDF's
+widget geometry + appearance states, never the map."* Schedule D line 17 wants the same, and the map
+comment already records the geometry (*"Yes is the UPPER widget"*) that would supply it.
+★ A cheaper partial: have `apply_writes` reject an `on` value absent from the widget's own
+`button_on_states`. That kills the whole class, not just this instance.
+
+**(G-19c) the crypto slice's line 17 inherits its missing lines 6/13/14. Owning phase: ownerless
+residue — it is a scope boundary, not a defect.** The slice's lines 15/16 omit capital-loss carryovers
+(6/14) and 1099-DIV capital-gain distributions (13), which the man page discloses. A filer with a
+$20,000 long-term carryover and $5,000 of long-term BTC gain now gets line 17 = **Yes**, where their
+real return has line 15 = −15,000 ⇒ line 16 a loss ⇒ *"skip lines 17 through 20."* Minor because the
+slice's line 15/16 amounts and 1040 line 7a were already wrong for that filer — line 17 adds a cell
+that inherits the error, not a new class of it — and because a filer with a carryover is outside the
+slice's stated "crypto-only year" premise. Fixing it properly means the slice collecting the
+carryover, i.e. becoming the full return.
+
+**(G-19d) ✅ FIXED 2026-07-31 — and it was never an FBAR problem.** `advisories_for` had exactly ONE
+production caller, so `export-irs-pdf` — the path that hands the filer a PDF to SIGN — showed **none**
+of the full return's advisories: not the forgone §63(f) boxes, not the blank FBAR sub-question, not
+the Schedule C 1099 pair, not the uncomputed CTC/ODC. Eight of them appear on the shipped
+worked-example journey where zero did before. The report now carries them out of
+`export_full_return` from the SAME `advisories_for` call the report uses — never a second list, since
+two derivations would drift and the filer would see a different set depending on which command they
+happened to run. Both directions pinned (full return non-empty; crypto slice empty, because it
+computes no full return to advise on) and mutation-verified. Original finding:
+
+**★ the FBAR skip advisory only reached `report --tax-year`.**
+`advisories_for` has exactly one production caller (`cmd/tax.rs`), so `export-irs-pdf` writes
+`schedule_b.pdf` with 7a = Yes and the FBAR pair blank while printing no FBAR notice on that
+invocation. ★ The three load-bearing legs of the class-(B) reversal are all independently verified true
+(no figure reads the box; a blank is no testimony; the Caution's penalty attaches to not filing FinCEN
+114), so the non-refusal itself is justified — only the disclosure's REACH is narrower than
+`LIMITATIONS.md` implies. The pre-existing `Advisory::FbarFinCen` has exactly the same reach, so this
+is a whole-advisory-surface question, not an FBAR one.
 
 ### G-6a — TWO OTS DEFECTS, both ADJUDICATED 2026-07-29, neither a btctax defect
 

@@ -346,6 +346,11 @@ fn st_gain_stacks_on_ordinary() {
     assert_eq!(r.ltcg_tax, dec!(0.00));
     assert_eq!(r.niit, dec!(0.00));
     assert_eq!(r.marginal_rates.ordinary, dec!(0.22));
+    // Below the §1411 threshold (magi_with 60,000 < 200,000): the next LT dollar owes no NIIT, so the
+    // all-in rate IS the §1(h) rate. top = 60,000 ∈ (40,000, 400,000] ⇒ 15%.
+    assert!(!r.marginal_rates.niit_at_margin);
+    assert_eq!(r.marginal_rates.ltcg, dec!(0.15));
+    assert_eq!(r.marginal_rates.ltcg_all_in(), dec!(0.15));
 }
 
 /// §1411 NIIT threshold crossing. OTI/magi 190,000; crypto LT gain 30,000 → magi_with 220,000 crosses the
@@ -417,6 +422,119 @@ fn full_worked_example_ordinary_st_lt_qd_niit_delta() {
     assert!(r.marginal_rates.niit_applies);
     assert_eq!(r.marginal_rates.ordinary, dec!(0.32));
     assert_eq!(r.marginal_rates.ltcg, dec!(0.20)); // top 470,000 > max_fifteen 400,000
+                                                   // ★ THE HEADLINE ALL-IN RATE. magi_with 470,000 > 200,000 and NII 80,000 ≥ 0, so the next LT
+                                                   // dollar owes §1411 on top of §1(h)'s 20%: 0.20 + 0.038 = **0.238**, not 0.20. A filer sizing a
+                                                   // sale off the bare §1(h) rate under-reserves by 3.8 points.
+    assert!(r.marginal_rates.niit_at_margin);
+    assert_eq!(r.marginal_rates.ltcg_all_in(), dec!(0.238));
+}
+
+/// ★★ THE DISCRIMINATOR: `niit_at_margin` is TRUE while `niit_applies` is FALSE. Reading the old flag
+/// as "will my next sale owe NIIT?" is wrong on exactly this filer — one already over the §1411
+/// threshold whose crypto did not *raise* NIIT. Their next sold sat still costs 3.8 points.
+///
+/// Single. OTI 300,000; QD 20,000; MAGI(excl crypto) 320,000; no disposals, mining income 10,000.
+///   NII is unchanged by crypto (mining is not NII): nii_with = nii_without = QD 20,000.
+///   MAGI: 320,000 without → 330,000 with. Both are ≥ $220,000 = threshold + NII, so
+///   min(NII, MAGI − 200,000) = 20,000 in BOTH scenarios ⇒ niit_with == niit_without == 760.00
+///   ⇒ the DELTA is zero ⇒ `niit_applies == false`.
+///   But magi_with 330,000 > 200,000 and NII 20,000 ≥ 0 ⇒ `niit_at_margin == true`.
+///   top = bottom_with 310,000 + QD 20,000 = 330,000 ≤ 400,000 ⇒ §1(h) 15% ⇒ all-in **0.188**.
+#[test]
+fn niit_at_margin_is_not_the_niit_applies_delta() {
+    let st = state_with(vec![], vec![income_rec(date!(2025 - 02 - 01), dec!(10000))]);
+    let out = compute_tax_year(
+        &[],
+        &st,
+        2025,
+        Some(&profile(dec!(300000), dec!(320000), dec!(20000))),
+        &synth(2025),
+    );
+    let TaxOutcome::Computed(r) = out else {
+        panic!("computable")
+    };
+    assert_eq!(r.niit, dec!(0.00), "crypto did not move NIIT");
+    assert!(
+        !r.marginal_rates.niit_applies,
+        "the crypto-vs-no-crypto DELTA is zero"
+    );
+    assert!(
+        r.marginal_rates.niit_at_margin,
+        "but the NEXT LT dollar is still over the §1411 threshold"
+    );
+    assert_eq!(r.marginal_rates.ltcg, dec!(0.15));
+    assert_eq!(r.marginal_rates.ltcg_all_in(), dec!(0.188));
+}
+
+/// The other side of the predicate: MAGI is over the §1411 threshold but NII is NEGATIVE, so the next
+/// LT dollar owes no NIIT — there is slack to absorb first. Pins the `nii_with >= 0` conjunct.
+///
+/// Single. OTI 270,000; QD 1,000; MAGI(excl crypto) 271,000. Crypto: net ST −80,000.
+///   §1211(b) allows 3,000 ⇒ nii_with = 1,000 + 0 + 0 − 3,000 = **−2,000** (< 0).
+///   crypto_agi = −3,000 ⇒ magi_with = 268,000 > 200,000.
+///   ⇒ NIIT is floored at $0 and stays there for the next dollar ⇒ `niit_at_margin == false`.
+///   top = bottom_with 267,000 + QD 1,000 = 268,000 ≤ 400,000 ⇒ all-in == §1(h) == 0.15.
+#[test]
+fn niit_at_margin_is_false_when_nii_has_slack_below_zero() {
+    let st = state_with(
+        vec![disposal(
+            date!(2025 - 09 - 01),
+            dec!(-80000),
+            Term::ShortTerm,
+        )],
+        vec![],
+    );
+    let out = compute_tax_year(
+        &[],
+        &st,
+        2025,
+        Some(&profile(dec!(270000), dec!(271000), dec!(1000))),
+        &synth(2025),
+    );
+    let TaxOutcome::Computed(r) = out else {
+        panic!("computable")
+    };
+    assert_eq!(r.loss_deduction, dec!(3000));
+    assert!(
+        !r.marginal_rates.niit_at_margin,
+        "MAGI is over the threshold, but NII is −2,000 — the next LT dollar owes no §1411"
+    );
+    assert_eq!(r.marginal_rates.ltcg, dec!(0.15));
+    assert_eq!(r.marginal_rates.ltcg_all_in(), dec!(0.15));
+}
+
+/// ★ The §1411 threshold BOUNDARY, pinned. `niit_at_margin` uses a strict `magi_with > thr`, so a
+/// filer sitting EXACTLY on the $200,000 Single threshold reports the lower answer — the same
+/// convention as `ltcg` (`top <= max_zero` ⇒ 0%) and `marginal_ordinary_rate` (`taxable > lower`).
+///
+/// **This test exists because the convention was documented and unpinned**: flipping `>` to `>=`
+/// left the entire suite green, so a prose claim stood in for a guarantee. One dollar either side of
+/// the threshold now fixes the answer in both directions.
+///
+/// Single, threshold $200,000. No crypto disposals, no crypto income, so `crypto_agi == 0` and
+/// `magi_with == magi_excluding_crypto` exactly. QD 20,000 keeps NII ≥ 0 so the other conjunct holds.
+#[test]
+fn niit_at_margin_reports_the_lower_answer_exactly_at_the_threshold() {
+    let at = |magi: Usd| {
+        let out = compute_tax_year(
+            &[],
+            &state_with(vec![], vec![]),
+            2025,
+            Some(&profile(dec!(100000), magi, dec!(20000))),
+            &synth(2025),
+        );
+        let TaxOutcome::Computed(r) = out else {
+            panic!("computable")
+        };
+        r.marginal_rates.niit_at_margin
+    };
+    assert!(!at(dec!(199999)), "a dollar below the threshold: no §1411");
+    assert!(
+        !at(dec!(200000)),
+        "EXACTLY at the threshold reports the LOWER answer (strict `>`), matching `ltcg`'s \
+         `top <= max_zero` and `marginal_ordinary_rate`'s `taxable > lower`"
+    );
+    assert!(at(dec!(200001)), "a dollar above: §1411 reaches the margin");
 }
 
 /// [B-M1 HEADLINE] Loss-year §1411: a net capital loss reduces NII by ONLY the §1211(b)-allowed amount

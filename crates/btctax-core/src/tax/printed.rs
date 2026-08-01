@@ -132,12 +132,27 @@ pub fn form_8949_printed(rows: &[crate::forms::Form8949Row]) -> Option<Printed89
 /// §170(b) ceilings legitimately make L12 *smaller* than the sum of the 8283's per-donation amounts (the
 /// excess becomes carryover). Forcing them equal would be wrong.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Printed8283Rows(Vec<crate::forms::Form8283Row>);
+pub struct Printed8283Rows {
+    rows: Vec<crate::forms::Form8283Row>,
+    /// ★★★ §G-21 — the filer's answer to Form 8283 Section B lines **5a / 5b / 5c**, asked as one
+    /// return-level universal. `Some(false)` = "no donation had strings attached" ⇒ all three boxes
+    /// print **No**. `None` = never answered ⇒ all three stay BLANK.
+    ///
+    /// ★ `Some(true)` never reaches here: `screen_absolute` REFUSES the year on a Yes, since
+    /// the §170 deduction btctax computed at full FMV is then too large. The field is `Option<bool>`
+    /// rather than `bool` so "not asked" and "answered no" stay different marks on the page — the
+    /// distinction `3b22ca1` had to fix on Schedule B the hard way.
+    no_donation_restrictions: Option<bool>,
+}
 
 impl Printed8283Rows {
     /// The rows, whole-dollar.
     pub fn rows(&self) -> &[crate::forms::Form8283Row] {
-        &self.0
+        &self.rows
+    }
+    /// The filer's own answer to lines 5a/5b/5c — `Some(false)` ⇒ print all three as **No**.
+    pub fn restrictions_answer(&self) -> Option<bool> {
+        self.no_donation_restrictions
     }
 }
 
@@ -145,12 +160,19 @@ impl Printed8283Rows {
 ///
 /// The PRESENCE rule (does an 8283 get attached at all?) is the packet's, not this function's: the form
 /// is required when the return itemizes AND the printed Schedule A line 12 exceeds $500.
-pub fn form_8283_printed(rows: &[crate::forms::Form8283Row]) -> Option<Printed8283Rows> {
+pub fn form_8283_printed(
+    rows: &[crate::forms::Form8283Row],
+    // ★ §G-21 — the filer's own answer to lines 5a/5b/5c. `Some(false)` prints all three as No; `None`
+    // leaves them blank. `Some(true)` cannot arrive: the year refuses upstream.
+    no_donation_restrictions: Option<bool>,
+) -> Option<Printed8283Rows> {
     if rows.is_empty() {
         return None;
     }
-    Some(Printed8283Rows(
-        rows.iter()
+    Some(Printed8283Rows {
+        no_donation_restrictions,
+        rows: rows
+            .iter()
             .map(|r| crate::forms::Form8283Row {
                 cost_basis: round_dollar(r.cost_basis),
                 fmv: round_dollar(r.fmv),
@@ -158,7 +180,7 @@ pub fn form_8283_printed(rows: &[crate::forms::Form8283Row]) -> Option<Printed82
                 ..r.clone()
             })
             .collect(),
-    ))
+    })
 }
 
 /// Form 8283 is REQUIRED when the return itemizes and its printed noncash gifts exceed $500 — the
@@ -809,6 +831,28 @@ impl ScheduleDLines {
     }
 }
 
+/// Schedule D **line 17** — *"Are lines 15 and 16 both gains?"* — read off the two PRINTED lines and
+/// nothing else. `None` means the form's own routing SKIPS line 17, so it must be left blank.
+///
+/// The form states the routing in terms, under line 16:
+/// - *"If line 16 is a gain … Then, go to line 17 below."* → line 17 is answered.
+/// - *"If line 16 is a loss, skip lines 17 through 20 below."* → blank.
+/// - *"If line 16 is zero, skip lines 17 through 21 below."* → blank.
+///
+/// **★ This is the ONLY definition of the line-17 answer.** Both the full-return chain (through
+/// [`ScheduleDRouting`]) and the crypto-slice fill (`btctax_forms::fill_schedule_d_totals`) read it,
+/// so the answer cannot differ between a filer's slice and their full return.
+///
+/// **★ Why line 17 and not line 20.** Line 17 asks only about lines 15 and 16, both of which are
+/// PRINTED on the page — answering it introduces no fact the form does not already assert. Line 20
+/// asks *"Are lines 18 and 19 both zero or blank **and you are not filing Form 4952**?"*, and that
+/// last conjunct is a fact about the filer that no btctax input surface carries. The crypto slice
+/// therefore leaves 18–22 blank; only the full return, which composes the whole tax picture, answers
+/// line 20.
+pub fn schedule_d_line17(line15: Usd, line16: Usd) -> Option<bool> {
+    (line16 > Usd::ZERO).then_some(line15 > Usd::ZERO)
+}
+
 /// Derive the printed Schedule D chain, including SPEC §7.2's exhaustive Part III routing.
 pub fn schedule_d_lines(ar: &AbsoluteReturn, f8949: Option<&Printed8949>) -> ScheduleDLines {
     let p = &ar.schedule_d;
@@ -840,21 +884,20 @@ pub fn schedule_d_lines(ar: &AbsoluteReturn, f8949: Option<&Printed8949>) -> Sch
     let line16 = line7 + line15; // ★ combines the PRINTED lines
     let has_qd = round_dollar(p.qualified_dividends) > Usd::ZERO;
 
-    // ★ SPEC §7.2 — exhaustive, and the four branches are mutually exclusive by construction.
-    let routing = if line16 > Usd::ZERO && line15 > Usd::ZERO {
-        ScheduleDRouting::BothGains
-    } else if line16 > Usd::ZERO {
-        // …and line 15 ≤ 0: a short-term gain against a long-term loss.
-        ScheduleDRouting::ShortGainLongLoss { line22_yes: has_qd }
-    } else if line16 < Usd::ZERO {
-        ScheduleDRouting::NetLoss {
+    // ★ SPEC §7.2 — exhaustive, and the four branches are mutually exclusive by construction. Line
+    // 17's own answer comes from `schedule_d_line17`, the SINGLE definition the crypto-slice fill
+    // also reads — the two paths cannot drift.
+    let routing = match schedule_d_line17(line15, line16) {
+        Some(true) => ScheduleDRouting::BothGains,
+        // …line 16 a gain and line 15 ≤ 0: a short-term gain against a long-term loss.
+        Some(false) => ScheduleDRouting::ShortGainLongLoss { line22_yes: has_qd },
+        None if line16 < Usd::ZERO => ScheduleDRouting::NetLoss {
             // §1211(b): the smaller of the loss and the ceiling — on the PRINTED line 16 (magnitude,
             // paren box), so the filed form's own "smaller of" holds.
             line21: line16.abs().min(ar.printed_inputs.capital_loss_limit),
             line22_yes: has_qd,
-        }
-    } else {
-        ScheduleDRouting::Zero { line22_yes: has_qd }
+        },
+        None => ScheduleDRouting::Zero { line22_yes: has_qd },
     };
 
     ScheduleDLines {
@@ -895,9 +938,17 @@ pub struct ScheduleBRow {
 /// .foreign_country_names`), and the claim that "v1 has no input for it" was simply FALSE: the input
 /// existed, was screened, and was then dropped on the floor (ARCH-P6.3a Q7 item 7). It now prints.
 ///
-/// Only the unnumbered FBAR sub-question under 7a is left BLANK — for that one there genuinely is no
-/// input, and the `FbarFinCen` advisory tells the filer in terms that they must decide it themselves.
-/// An incomplete Part III is the honest output there; a guessed one would not be.
+/// ★★ The unnumbered FBAR sub-question under 7a is ASKED and PRINTED too — but as
+/// [`SkippableId::FbarFilingRequired`](crate::tax::questions::SkippableId), live only when 7a is
+/// "Yes", and **skipping it is LAWFUL**: no figure on the return reads that box, so its silence
+/// neither asserts nor forgoes. It was briefly a refusing declaration; that was reversed.
+///
+/// ★★★ **SO `fbar_filing_required == None` IS REACHABLE ON A FILED SCHEDULE B, AND THE `Option`
+/// BELOW IS THE ONLY THING THAT KEEPS IT BLANK.** No refusal stands behind it any more. Do NOT
+/// collapse it to `bool` or `unwrap_or(false)`: that would print a "No" the filer never gave, on a
+/// page they sign under §6065. `Advisory::FbarSubQuestionNotAnswered` is what tells them the box went
+/// out blank; the printed page tells nobody anything, which is exactly right for a blank.
+/// When 7a is "No" the pair is likewise left unwritten, because the form does not ask it then.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduleBLines {
     /// L1 — the listed interest payers (Part I).
@@ -912,11 +963,24 @@ pub struct ScheduleBLines {
     /// L6 — add the amounts on **printed** line 5 → 1040 **L3b**.
     pub line6: Usd,
     /// L7a — "did you have a financial interest in… a foreign country?" — the filer's own answer.
-    pub foreign_accounts_7a: bool,
+    ///
+    /// ★ `Option`, not `bool`. `unwrap_or(false)` here printed a **"No" the filer never gave** — the
+    /// exact fabricated testimony the sibling `fbar_filing_required` doc comment forbids, sitting five
+    /// lines away. It was latent only because an unanswered 7a refuses upstream; it would have gone
+    /// live the moment that refusal was relaxed. A declaration is written iff it was answered.
+    pub foreign_accounts_7a: Option<bool>,
     /// L8 — "did you receive a distribution from… a foreign trust?" — the filer's own answer.
-    pub foreign_trust_8: bool,
+    /// `Option` for the same reason as 7a.
+    pub foreign_trust_8: Option<bool>,
     /// L7b — the foreign-country list. The filer's own words, printed verbatim when 7a is "Yes".
     pub line7b_countries: String,
+    /// **L7a's unnumbered FBAR sub-question** — *"If 'Yes,' are you required to file FinCEN Form 114…?"*
+    ///
+    /// ★ Deliberately `Option`, not `bool`, all the way to the PDF writer. `None` (7a was "No", so the
+    /// sub-question is not live and the form does not ask it) and `Some(false)` (it IS live and the
+    /// filer answered "No") are DIFFERENT printed outputs: an unwritten pair versus a checked "No" box.
+    /// Collapsing this to `bool` with `unwrap_or(false)` would print a "No" the filer never gave.
+    pub fbar_filing_required: Option<bool>,
 }
 
 /// Derive the printed Schedule B chain from the filer's 1099s. Returns `None` when Schedule B is not
@@ -927,9 +991,11 @@ pub struct ScheduleBLines {
 /// no reason.
 ///
 /// # Panics
-/// Never. Part III's answers are `Option<bool>` on the inputs, but `screen_inputs` refuses the return
-/// when either is unanswered, so by the time a return is assembled they are both known; `unwrap_or`
-/// defaults defensively to `false` rather than panicking on a caller that skipped the screen.
+/// Never. Part III's answers stay `Option<bool>` **all the way to the PDF writer** — this function
+/// carries them across verbatim and defaults nothing. Lines 7a and 8 are class-(A) declarations that
+/// `screen_inputs` refuses while unanswered, so in practice they arrive known; 7a's unnumbered FBAR
+/// sub-question is class (B) and **genuinely arrives `None` on a filed return**, which is why the
+/// `Option` — not the screen — is what keeps the box blank.
 pub fn schedule_b_lines(ri: &crate::tax::return_inputs::ReturnInputs) -> Option<ScheduleBLines> {
     if !crate::tax::return_1040::schedule_b_files(ri) {
         return None;
@@ -966,14 +1032,25 @@ pub fn schedule_b_lines(ri: &crate::tax::return_inputs::ReturnInputs) -> Option<
         line4,
         part2_rows,
         line6,
-        foreign_accounts_7a: ri.foreign_accounts.unwrap_or(false),
+        foreign_accounts_7a: ri.foreign_accounts,
+        // ★★ GATED ON 7a, exactly like `line7b_countries` below and Schedule C's line J. The form asks
+        // this only "If 'Yes,'", so a stored answer orphaned by a 7a correction (answer Yes, answer the
+        // sub-question, then correct 7a to No — at which point the sub-question is no longer live, is
+        // never re-asked, and is UN-CLEARABLE through the registry) must not reach the page. A hand-
+        // edited import TOML reaches the same state directly. Ungated, it printed a checked FinCEN-114
+        // box beside a checked "No" — a mark the form has no place for, under §6065.
+        fbar_filing_required: if ri.foreign_accounts == Some(true) {
+            ri.fbar_filing_required
+        } else {
+            None
+        },
         // Printed only when 7a is "Yes" — a country list beside a "No" would contradict the answer.
         line7b_countries: if ri.foreign_accounts == Some(true) {
             ri.foreign_country_names.clone()
         } else {
             String::new()
         },
-        foreign_trust_8: ri.foreign_trust.unwrap_or(false),
+        foreign_trust_8: ri.foreign_trust,
     })
 }
 
@@ -1000,6 +1077,16 @@ pub struct ScheduleCLines {
     pub line_b_naics: String,
     /// Line **F** — the accounting method (a checkbox: Cash or Accrual).
     pub line_f_accrual: bool,
+    /// ★★ Line **I** — *"Did you make any payments … that would require you to file Form(s) 1099?"*
+    ///
+    /// `Option`, and the `Option` is load-bearing ALL THE WAY TO THE PDF WRITER: `None` (never asked)
+    /// and `Some(false)` (asked, answered no) are DIFFERENT marks on the page — an unwritten pair
+    /// versus a checked No box. Collapsing it to `bool` prints a "No" the filer never gave, which is
+    /// the exact defect `3b22ca1` fixed on Schedule B Part III.
+    pub line_i_1099_required: Option<bool>,
+    /// Line **J** — *"If 'Yes,' did you or will you file required Form(s) 1099?"* Answered only when
+    /// line I is `Some(true)`; the form itself asks it conditionally.
+    pub line_j_1099_filed: Option<bool>,
     /// L1 — gross receipts or sales.
     pub line1: Usd,
     /// L3 — subtract line 2 (returns/allowances, blank) from line 1 ⇒ `= line1`.
@@ -1034,6 +1121,16 @@ pub fn schedule_c_lines(ar: &AbsoluteReturn) -> Option<ScheduleCLines> {
         line_a_business: h.business_description.clone(),
         line_b_naics: h.naics_code.clone(),
         line_f_accrual: h.accrual,
+        // ★ Carried across VERBATIM as `Option` — no `unwrap_or`. A `None` here must reach the writer
+        // as a `None`, so an unasked question prints an unwritten pair rather than a checked "No".
+        line_i_1099_required: h.payments_requiring_1099,
+        // The form asks J only "If 'Yes,'" on I, so an answer to J without a Yes on I is not a mark the
+        // form has a place for. The registry's liveness already prevents it; belt-and-braces here so a
+        // TOML import cannot produce a J-without-I page.
+        line_j_1099_filed: h
+            .payments_requiring_1099
+            .and_then(|i| i.then_some(h.will_file_required_1099))
+            .flatten(),
         line1,
         line3,
         line5,
@@ -1372,6 +1469,7 @@ mod tests {
             net_ltcg: z,
             charitable_carryover_out: Vec::new(),
             qbi_reit_ptp_carryforward_out: z,
+            qbi_carryforward_out: z,
             regular_tax: z,
             se_tax_sch2_l4: z,
             schedule_2_other_taxes: z,
@@ -1408,6 +1506,7 @@ mod tests {
                 crypto_lending_interest: z,
                 reit_dividends: z,
                 reit_ptp_carryforward_in: z,
+                qbi_carryforward_in: z,
                 ti_before_qbi: z,
                 qbi_net_capital_gain: z,
                 se_w2_ss_wages: z,
@@ -1653,6 +1752,8 @@ mod tests {
             line_a_business: String::new(),
             line_b_naics: String::new(),
             line_f_accrual: false,
+            line_i_1099_required: None,
+            line_j_1099_filed: None,
             line1: Usd::ZERO,
             line3: Usd::ZERO,
             line5: Usd::ZERO,
@@ -2786,5 +2887,105 @@ mod tests {
             l.line7 < Usd::ZERO,
             "a leading minus — 1040 L7 is not a paren box"
         );
+    }
+}
+
+#[cfg(test)]
+mod part3_answeredness_tests {
+    use super::*;
+    use crate::tax::return_inputs::{Form1099Int, ReturnInputs};
+
+    /// ★★★ THE ORPHANED FBAR ANSWER — a mark in a box the form never asked, contradicting the answer
+    /// directly above it. Found by the pre-publish Fable pass; **`b94508d`, which built this pair, fell
+    /// between both earlier review ranges and had never been read by anyone.**
+    ///
+    /// The form conditions the sub-question on 7a: *"**If "Yes,"** are you required to file FinCEN
+    /// Form 114…?"* So a checked sub-box beside a checked 7a **No** is a mark the form has no place
+    /// for, on a page signed under §6065.
+    ///
+    /// It is reachable, and not only in theory:
+    /// - `income answer` re-asks every LIVE declaration in one pass, so a filer who answers 7a=Yes +
+    ///   sub-question=Yes and later corrects 7a to **No** leaves the stored `Some(true)` behind — the
+    ///   sub-question is no longer live, so it is never re-asked, and the registry's own liveness gate
+    ///   makes it **un-clearable** (`NoSuchRow`).
+    /// - A hand-edited `income import` TOML reaches the same state directly — and `LIMITATIONS.md` now
+    ///   actively directs filers to hand-edit TOML for `qbi_carryforward_in`.
+    ///
+    /// ★★ **The branch's own later commit found the right pattern and nobody carried it back.** Nine
+    /// commits after the FBAR pair, Schedule C line J got exactly this gate, with the reason written
+    /// out: *"an answer to J without a Yes on I is not a mark the form has a place for … belt-and-
+    /// braces here so a TOML import cannot produce a J-without-I page."* The fix mirrors it, and
+    /// mirrors `line7b_countries` sitting one line below in the same constructor.
+    #[test]
+    fn an_fbar_answer_orphaned_by_a_7a_correction_is_not_printed() {
+        let mut ri = ReturnInputs {
+            tax_year: 2024,
+            ..Default::default()
+        };
+        ri.int_1099 = vec![Form1099Int {
+            payer: "Ally Bank".to_string(),
+            box1_interest: rust_decimal_macros::dec!(2000), // > $1,500 ⇒ Schedule B still files
+            ..Default::default()
+        }];
+        // The orphan: 7a corrected to No, the sub-question's stale Yes left behind.
+        ri.foreign_accounts = Some(false);
+        ri.foreign_trust = Some(false);
+        ri.fbar_filing_required = Some(true);
+
+        let sb = schedule_b_lines(&ri).expect("Schedule B files on $2,000 of interest");
+        assert_eq!(sb.foreign_accounts_7a, Some(false), "7a says No");
+        assert_eq!(
+            sb.fbar_filing_required, None,
+            "★ the sub-question box must be UNWRITTEN. The form asks it only \"If 'Yes,'\", so a \
+             checked box here contradicts the No directly above it — a mark the form has no place \
+             for, on a page signed under §6065."
+        );
+        // …and the country list beside it was already gated this way, which is the point: the two
+        // sat one line apart in the same constructor and only one of them was guarded.
+        assert_eq!(sb.line7b_countries, "");
+    }
+
+    /// ★★ THE FABRICATED-TESTIMONY GUARD, at the CONSTRUCTOR. `schedule_b_lines` used to do
+    /// `ri.foreign_accounts.unwrap_or(false)`, turning an UNANSWERED Schedule B Part III question into a
+    /// printed "No" the filer never gave — five lines below the doc comment forbidding exactly that for
+    /// the FBAR sibling.
+    ///
+    /// ★ This test exists because the sibling KAT in `btctax-forms` does NOT cover it: that one builds
+    /// `ScheduleBLines` directly, so it pins the WRITER and is blind to the CONSTRUCTOR. Restoring
+    /// `unwrap_or(false)` left it green. Mutation-verified here instead.
+    #[test]
+    fn an_unanswered_part_iii_question_stays_none_and_is_never_defaulted_to_no() {
+        let mut ri = ReturnInputs {
+            tax_year: 2024,
+            ..Default::default()
+        };
+        // Schedule B files on interest over $1,500, so the lines exist to be inspected.
+        ri.int_1099 = vec![Form1099Int {
+            payer: "Ally Bank".to_string(),
+            box1_interest: rust_decimal_macros::dec!(2000),
+            ..Default::default()
+        }];
+        ri.foreign_accounts = None;
+        ri.foreign_trust = None;
+        ri.fbar_filing_required = None;
+
+        let lines = schedule_b_lines(&ri).expect("Schedule B files on $2,000 of interest");
+        assert_eq!(
+            (
+                lines.foreign_accounts_7a,
+                lines.foreign_trust_8,
+                lines.fbar_filing_required
+            ),
+            (None, None, None),
+            "an unanswered Part III declaration must stay None all the way to the writer — a `false` \
+             here becomes a checked \"No\" box, i.e. sworn testimony the filer never gave"
+        );
+
+        // And a real answer survives unchanged, so the guard is not just \"always None\".
+        ri.foreign_accounts = Some(true);
+        ri.foreign_trust = Some(false);
+        let answered = schedule_b_lines(&ri).expect("still files");
+        assert_eq!(answered.foreign_accounts_7a, Some(true));
+        assert_eq!(answered.foreign_trust_8, Some(false));
     }
 }

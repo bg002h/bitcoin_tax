@@ -145,10 +145,19 @@ pub fn fill_schedule_b_with_map(
     );
 
     // ── Part III — the filer's OWN answers, transcribed. ────────────────────────────────────────
-    for (pair, answer) in [
+    // ★ EVERY Part III answer is written iff the filer ACTUALLY gave it. `None` means the question was
+    //   never answered (or, for the FBAR sub-question, never even asked because 7a was "No"), and a
+    //   checked box would then be testimony nobody gave. This `filter_map` is the mechanism that makes
+    //   "not answered ⇒ blank" structural; `unwrap_or(false)` here was a live fabricated-testimony bug.
+    let pairs: Vec<(&crate::map::YesNoPair, bool)> = [
         (&map.line7a, lines.foreign_accounts_7a),
+        (&map.line7a_fbar, lines.fbar_filing_required),
         (&map.line8, lines.foreign_trust_8),
-    ] {
+    ]
+    .into_iter()
+    .filter_map(|(pair, answer)| answer.map(|a| (pair, a)))
+    .collect();
+    for (pair, answer) in pairs {
         let choice = if answer { &pair.yes } else { &pair.no };
         writes.push((
             choice.field.clone(),

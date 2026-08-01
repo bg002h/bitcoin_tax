@@ -995,6 +995,64 @@ const PAYMENTS_FIELDS: &[Field] = &[
     },
 ];
 
+/// ★★ §G-22 — the two QBI loss carryforwards (Form 8995 lines **7** and **3**).
+///
+/// **Every carryforward family was import-only**, reachable solely by hand-editing the TOML: capital
+/// loss, charitable, and both of these. For the first two that is a conservative omission — a forgone
+/// benefit that OVERSTATES tax. **These two are the opposite.** They are prior-year LOSSES that reduce
+/// the §199A deduction, so leaving them at zero INFLATES the deduction and **UNDERSTATES the tax**.
+///
+/// ★ Line 7's hole shipped in v0.14.0; line 3's was created and closed in the same branch.
+const CARRYFORWARD_FIELDS: &[Field] = &[
+    Field {
+        id: FieldId::QbiReitPtpCarryforwardIn,
+        clear: None,
+        label: "Prior-year qualified REIT dividend / PTP LOSS carryforward (Form 8995 line 7)",
+        help: "A POSITIVE amount. It reduces this year's REIT/PTP income at line 8, so leaving it out \
+               inflates your §199A deduction and understates your tax. Enter it from line 17 of last \
+               year's Form 8995. Leave 0 if you had none.",
+        kind: FieldKind::Money,
+        live: |_| true,
+        get: |ri, _| Some(FieldValue::Money(ri.qbi.reit_ptp_carryforward_in)),
+        set: |ri, _, v| {
+            let FieldValue::Money(m) = v else {
+                return Err(SetError::WrongKind);
+            };
+            ri.qbi.reit_ptp_carryforward_in = m;
+            // ★ A figure the FILER typed is theirs, not ours: stamping it `User` is what makes the
+            // write-back refuse to overwrite it without `--force`.
+            ri.qbi.reit_ptp_carryforward_in_provenance = btctax_core::tax::return_inputs::CarryProvenance::User;
+            Ok(())
+        },
+    },
+    Field {
+        id: FieldId::QbiCarryforwardIn,
+        clear: None,
+        label: "Prior-year qualified business net LOSS carryforward (Form 8995 line 3)",
+        help: "A POSITIVE amount. It is subtracted at line 4, so leaving it out inflates your §199A \
+               deduction and understates your tax. Enter it from line 16 of last year's Form 8995. \
+               Leave 0 if you had none.",
+        kind: FieldKind::Money,
+        live: |_| true,
+        get: |ri, _| Some(FieldValue::Money(ri.qbi.qbi_carryforward_in)),
+        set: |ri, _, v| {
+            let FieldValue::Money(m) = v else {
+                return Err(SetError::WrongKind);
+            };
+            ri.qbi.qbi_carryforward_in = m;
+            ri.qbi.qbi_carryforward_in_provenance = btctax_core::tax::return_inputs::CarryProvenance::User;
+            Ok(())
+        },
+    },
+];
+
+pub(crate) const CARRYFORWARDS: Section = Section {
+    id: SectionId::Carryforwards,
+    title: "Carryforwards from last year",
+    kind: SectionKind::Singleton,
+    fields: CARRYFORWARD_FIELDS,
+};
+
 pub(crate) const PAYMENTS: Section = Section {
     id: SectionId::Payments,
     title: "Payments",

@@ -94,14 +94,6 @@ pub enum QuestionId {
     AmtDepreciationSameAsRegular,
     /// **§164(b)(7)(B)(iv) / Schedule 1-A Part I** — did the filer exclude income under §911/931/933?
     HasIncomeExclusion,
-    /// **1040 line 12a / §63(f) — the death carve-out (`FOLLOWUPS.md` §G-9), taxpayer.** i1040gi:
-    /// *"Death of a taxpayer … If a taxpayer was born before January 2, 1961, but died in 2025 before
-    /// reaching age 65, then the taxpayer doesn't qualify."*
-    TaxpayerDiedDuringYear,
-    /// **1040 line 12a / §63(f) — the death carve-out (`FOLLOWUPS.md` §G-9), spouse.** i1040gi:
-    /// *"If your spouse was born before January 2, 1960, but died in 2024 before reaching age 65,
-    /// don't check the box that says 'Spouse was born before January 2, 1960.'"*
-    SpouseDiedDuringYear,
 }
 
 impl QuestionId {
@@ -118,9 +110,43 @@ impl QuestionId {
         QuestionId::AmtCarryoverSameAsRegular,
         QuestionId::AmtDepreciationSameAsRegular,
         QuestionId::HasIncomeExclusion,
-        QuestionId::TaxpayerDiedDuringYear,
-        QuestionId::SpouseDiedDuringYear,
     ];
+}
+
+/// ★★ §G-20 — do this return's SPOUSE §63(f) boxes count at all? MFJ always; **MFS only when all
+/// three of i1040gi's conditions are affirmatively answered in the claiming direction.**
+///
+/// The ONE definition, shared by `AgedBlindBoxes::for_return` (which decides the deduction) and by the
+/// liveness of `SpouseDiedDuringYear` / `DodSpouse` (which decide whether the questions are even
+/// asked). Two copies would drift into asking a question whose answer nothing reads, or — worse —
+/// counting a box whose carve-out was never posed.
+pub fn spouse_63f_boxes_count(ri: &ReturnInputs) -> bool {
+    ri.header.spouse.is_some() && spouse_63f_status_permits(ri)
+}
+
+/// Does the FILING STATUS (plus, on MFS, the three i1040gi conditions) permit a spouse §63(f) box —
+/// **ignoring whether a spouse record exists**?
+///
+/// ★★★ r3 I-1 — the two predicates are split because their consumers ask different questions, and
+/// collapsing them broke a case. [`spouse_63f_boxes_count`] decides the **deduction**, so it needs a
+/// spouse record: no record, no date of birth, no box. The §63(f) **advisories** are about boxes that
+/// were FORGONE, and an absent MFJ spouse record is *itself* one of the ways to forgo one — so they
+/// must fire precisely where there is nothing to count. Gating them on `spouse_63f_boxes_count` made
+/// the advisory silent in the case it exists to report (`mfj_with_no_spouse_record_still_advises_the_
+/// aged_box_p5_m2`, which caught it).
+///
+/// Everything except the record test lives here, so the two can never disagree about the *status*
+/// half — which is the coupling §G-20 was about.
+pub fn spouse_63f_status_permits(ri: &ReturnInputs) -> bool {
+    match ri.filing_status {
+        FilingStatus::Mfj => true,
+        FilingStatus::Mfs => {
+            ri.header.spouse_had_no_income == Some(true)
+                && ri.header.spouse_not_filing_a_return == Some(true)
+                && ri.header.can_be_claimed_as_dependent_spouse == Some(false)
+        }
+        _ => false,
+    }
 }
 
 /// Is `id`'s question LIVE on this return? The single accessor for a liveness predicate outside the
@@ -483,57 +509,7 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
     // ── §G-9: the §63(f) death carve-out. Two entries, because i1040gi states the rule twice — once
     // under "Death of a taxpayer" and once under "Death of spouse" — and each is a separate fact.
     //
-    // ★ WHY A GATE PLUS A DATE, rather than asking "did they die before reaching 65?" directly: the
-    // day-before-the-birthday convention is exactly the sort of arithmetic a filer gets wrong at the
-    // boundary, and we can do it exactly. So the gate carries answered-ness and `date_of_death`
-    // carries the fact; `is_aged` applies the convention. The date itself is a class-(B) SKIPPABLE
-    // (`SkippableId::DodTaxpayer`/`DodSpouse`) — skipping it forgoes the addition rather than
-    // granting it, which is the only safe direction.
-    FormQuestion {
-        id: QuestionId::TaxpayerDiedDuringYear,
-        prompt: "Did YOU (the taxpayer named on this return) die during the tax year? (A final return \
-                 is filed by a personal representative or surviving spouse. 1040 line 12a: a taxpayer \
-                 who died before reaching age 65 does not get the age-65 addition to the standard \
-                 deduction, however early in the year they were born.)",
-        unanswered: RefuseReason::TaxpayerDeathUnanswered,
-        unanswered_detail:
-            "the age-65 addition to the standard deduction is decided from the date of birth, and \
-             i1040gi carves out a taxpayer who died during the year before reaching 65. Treating an \
-             unasked death as \"did not die\" GRANTS an addition of up to $1,950 that may not be \
-             allowable, understating the tax — run `btctax income answer`",
-        // ★ ALWAYS LIVE. It cannot be scoped to "returns with a date of birth old enough to matter",
-        // because `live` receives no tax year (the same constraint documented on `HasIncomeExclusion`),
-        // and scoping it to "a DOB is on file" would make the answer disappear when the filer later
-        // adds one — the classic never-asked-then-silently-relevant shape §G-9 exists to kill.
-        live: |_ri| true,
-        get: |ri| ri.header.taxpayer_died_during_year,
-        set: |ri, v| ri.header.taxpayer_died_during_year = Some(v),
-        // ★ §G-15 — every class-(A) DECLARATION asserts about a TAX YEAR ("in this tax year, did…"),
-        // so none is durable: last year's answer is not testimony for this one.
-        durability: Durability::PerYear,
-        neutral: false, // "no" is the common answer, but it is still an ANSWER, and it GRANTS the box
-    },
-    FormQuestion {
-        id: QuestionId::SpouseDiedDuringYear,
-        prompt: "Did YOUR SPOUSE die during the tax year? (You may still file jointly for the year of \
-                 death. 1040 line 12a: a spouse who died before reaching age 65 does not get the \
-                 age-65 addition to the standard deduction, however early in the year they were born.)",
-        unanswered: RefuseReason::SpouseDeathUnanswered,
-        unanswered_detail:
-            "i1040gi: \"If your spouse was born before January 2, 1960, but died in 2024 before \
-             reaching age 65, don't check the box that says 'Spouse was born before January 2, \
-             1960.'\" Treating an unasked death as \"did not die\" GRANTS an addition of up to $1,550 \
-             that may not be allowable, understating the tax — run `btctax income answer`",
-        // Live only with a spouse `Person` — there is nowhere to record the answer otherwise, and the
-        // box itself only exists on a joint return.
-        live: |ri| ri.header.spouse.is_some(),
-        get: |ri| ri.header.spouse_died_during_year,
-        set: |ri, v| ri.header.spouse_died_during_year = Some(v),
-        // ★ §G-15 — every class-(A) DECLARATION asserts about a TAX YEAR ("in this tax year, did…"),
-        // so none is durable: last year's answer is not testimony for this one.
-        durability: Durability::PerYear,
-        neutral: false,
-    },
+
 ];
 
 /// The identity of each SKIPPABLE prompt (§2, class B) — the questions where silence is LAWFUL: a bare
@@ -559,10 +535,83 @@ pub enum SkippableId {
     DobSpouse,
     /// §G-9: the DATE OF DEATH (taxpayer). Class (B) — skipping it leaves `is_aged` unable to show the
     /// taxpayer reached 65, so the addition is FORGONE, never granted. Live only once
-    /// `QuestionId::TaxpayerDiedDuringYear` is answered `Some(true)`: nobody else has a date to give.
+    /// [`Self::TaxpayerDiedDuringYear`] is answered `Some(true)`: nobody else has a date to give.
     DodTaxpayer,
-    /// §G-9: the DATE OF DEATH (spouse). Live only once `QuestionId::SpouseDiedDuringYear` is `Some(true)`.
+    /// §G-9: the DATE OF DEATH (spouse). Live only once [`Self::SpouseDiedDuringYear`] is `Some(true)`.
     DodSpouse,
+    /// ★★ **1040 line 12a / §63(f) — the death carve-out (`FOLLOWUPS.md` §G-9), taxpayer.** i1040gi:
+    /// *"Death of a taxpayer … If a taxpayer was born before January 2, 1961, but died in 2025 before
+    /// reaching age 65, then the taxpayer doesn't qualify."*
+    ///
+    /// ★★★ **It was a class-(A) declaration that REFUSED, and it was `live: |_| true` — so it blocked
+    /// EVERY return btctax could compute.** That is the single biggest usability cost in the registry,
+    /// and it bought nothing: [`crate::tax::return_1040::is_aged`]'s `(None, None)` arm already returns
+    /// `false`, so silence FORGOES the addition. The refusal was redundant with a fail-safe sitting
+    /// directly beneath it. Class (B) by the sharp test — *does the silence ASSERT, or FORGO?* It
+    /// forgoes, and [`crate::tax::advisories::Advisory::AgedBoxForfeitedDeathUnanswered`] says so, but
+    /// only when a qualifying date of birth is on file and the skip therefore actually costs money.
+    TaxpayerDiedDuringYear,
+    /// **1040 line 12a / §63(f) — the death carve-out, spouse.** i1040gi: *"If your spouse was born
+    /// before January 2, 1960, but died in 2024 before reaching age 65, don't check the box that says
+    /// 'Spouse was born before January 2, 1960.'"* Same class-(B) reasoning as
+    /// [`Self::TaxpayerDiedDuringYear`].
+    ///
+    /// ★ **Live exactly when the spouse's §63(f) boxes can count** — `spouse_63f_boxes_count`, not
+    /// merely "a spouse record exists". On MFJ that is any spouse; on MFS it is a spouse meeting all
+    /// three i1040gi conditions. Anywhere else the answer could not move a figure, and it was
+    /// previously asked (and, before that, REFUSED) on returns where it was inert.
+    SpouseDiedDuringYear,
+    /// ★★ **Schedule B line 7a's unnumbered FBAR sub-question** — *"If 'Yes,' are you required to file
+    /// FinCEN Form 114 … ?"* Live only when 7a is answered **Yes**: the form itself conditions it on 7a
+    /// ("If 'Yes,'"), so a filer with no foreign account is never asked.
+    ///
+    /// ★★★ **It was briefly a class-(A) refusal, and that was WRONG.** Refusal is justified only when
+    /// proceeding without the answer would produce a wrong number, put fabricated testimony on a signed
+    /// return, or silently expose the filer to a penalty or a lost right. This box fails all three:
+    /// **no figure on the return reads it** (grep `fbar_filing_required` — the printed chain writes the
+    /// checkbox and nothing else), a blank is *no testimony* rather than false testimony, and the
+    /// penalty the form's Caution warns of attaches to **not filing FinCEN Form 114** — a FinCEN
+    /// obligation that exists whatever this box says — not to leaving the box blank. That exposure is
+    /// already put in front of the filer by [`super::advisories::Advisory::FbarFinCen`], which fires on
+    /// 7a = Yes alone.
+    ///
+    /// So silence is lawful and prints a genuine blank; [`super::advisories::Advisory::FbarSubQuestionNotAnswered`]
+    /// quotes the form's Caution **verbatim** when it is skipped. btctax takes no position on the
+    /// answer: FinCEN Notice 2020-2 leaves accounts holding ONLY virtual currency outside the FBAR
+    /// requirement for now, that is under active reconsideration, and an account holding crypto PLUS
+    /// fiat or securities may well be reportable.
+    FbarFilingRequired,
+    /// ★★ **Schedule C line I** — *"Did you make any payments in 2024 that would require you to file
+    /// Form(s) 1099?"* A compliance declaration about the filer's own information-reporting.
+    ///
+    /// Class (B), not a refusal, by the refusal review's criterion applied honestly: no figure on the
+    /// return reads it, a blank is no testimony, and — **unlike Schedule B's FBAR sub-question** —
+    /// the form prints NO Caution beside it. That difference is what decided it. The §6721/§6722
+    /// exposure IS real, so the skip is not silent:
+    /// [`super::advisories::Advisory::ScheduleC1099NotAnswered`] names both sections.
+    ScheduleC1099Required,
+    /// **Schedule C line J** — *"If 'Yes,' did you or will you file required Form(s) 1099?"*
+    ///
+    /// ★★ Live only when line I is answered **Yes** — the form says *"If 'Yes,'"* — which makes this
+    /// the registry's live example of a question whose liveness depends on another question's
+    /// **NON-NEUTRAL** answer. That shape silently broke the registry's own property harness once: a
+    /// loop answering every other live question at its neutral switched this class of question OFF, so
+    /// it could never be exercised. The `is_none()` guards in `return_refuse.rs` were written for it
+    /// and, until now, had no live case.
+    ScheduleC1099Filed,
+    /// ★★★ **Form 8283 Section B lines 5a / 5b / 5c**, asked as ONE return-level universal: *"did any
+    /// of your donations have strings attached?"* A **Yes** to any of the three limbs shrinks or kills
+    /// the §170 deduction (Reg §1.170A-7), and btctax deducts at full FMV — so a Yes means the number
+    /// is WRONG. Asked here so silence never auto-refuses a filer who donated NOTHING; the refusal is scoped by
+    /// `screen_absolute`, which has the computed §63(e) ELECTION that liveness cannot see, and is MANDATORY there:
+    /// on a Section-B year, unanswered refuses and `Some(true)` refuses — only `Some(false)` proceeds.
+    ///
+    /// ★★ **This is what dissolved §G-21.** The three boxes are per-donation and the registry is
+    /// return-shaped, which looked like it needed new per-row machinery. Asking the UNIVERSAL makes
+    /// them return-shaped too: from *"none of my donations had any of these"* each box's answer follows
+    /// for every donation. The prompt therefore enumerates all three limbs in the form's own words — a
+    /// "No" to something vaguer would be laundered into three answers the filer never gave.
+    DonationsHadRestrictions,
 }
 
 /// The value shape of a [`SkippableQuestion`] — a yes/no answer, or a calendar date.
@@ -603,9 +652,22 @@ pub struct SkippableQuestion {
     pub set_date: fn(&mut ReturnInputs, Date),
 }
 
-/// ★ THE SKIPPABLE REGISTRY. Seven class-(B) prompts — SEPARATE from [`FORM_QUESTIONS`] (spec §5.3). The
+/// ★ THE SKIPPABLE REGISTRY. Thirteen prompts — SEPARATE from [`FORM_QUESTIONS`] (spec §5.3). The
 /// liveness gates and prompts are lifted verbatim from the old `answer.rs::Skippable`; the `income answer`
 /// flow and the form engine both DERIVE their skippable prompts from this one list.
+///
+/// ★★ **Two species, and the second is why class (B) is not simply "forgone benefit".**
+///
+/// - **Benefit claims** (*New Colonial Ice*: the burden to claim is the filer's, so forgoing is
+///   lawful) — blindness ×2, the SALT election, the DOBs, the dates of death, and the §G-9 death
+///   gates, whose silence forgoes the §63(f) age-65 addition.
+/// - **Compliance boxes NO FIGURE READS** — [`SkippableId::FbarFilingRequired`] and the Schedule C
+///   pair [`SkippableId::ScheduleC1099Required`] / [`SkippableId::ScheduleC1099Filed`]. Their silence
+///   neither asserts nor forgoes, because nothing on the return depends on them. They are class (B)
+///   for a different reason from everything else here, and each has an advisory naming the exposure
+///   the blank does NOT remove (FinCEN 114; §6721/§6722).
+///
+/// **Class (B) is the set of questions whose silence is LAWFUL, not only the set that costs money.**
 pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     SkippableQuestion {
         id: SkippableId::BlindTaxpayer,
@@ -718,8 +780,11 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
                age-65 addition. A person reaches 65 on the DAY BEFORE their 65th birthday. Skipping \
                leaves the addition unclaimed.",
         kind: SkippableKind::Date,
-        // Both conditions: a spouse `Person` to write the date onto, AND the gate saying they died.
-        live: |ri| ri.header.spouse.is_some() && ri.header.spouse_died_during_year == Some(true),
+        // Three conditions: MFJ (the only status whose spouse box `AgedBlindBoxes::for_return` counts),
+        // a spouse `Person` to write the date onto, AND the gate saying they died. The MFJ term matches
+        // `SkippableId::SpouseDiedDuringYear`'s own liveness — a date whose gate is never asked would be
+        // unreachable, and asking for a date that cannot move a figure is the waste this pass removed.
+        live: |ri| spouse_63f_boxes_count(ri) && ri.header.spouse_died_during_year == Some(true),
         get_bool: |_ri| None,
         set_bool: |_ri, _v| {},
         get_date: |ri| ri.header.spouse.as_ref().and_then(|s| s.date_of_death),
@@ -728,6 +793,157 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
                 sp.date_of_death = Some(v);
             }
         },
+    },
+    SkippableQuestion {
+        id: SkippableId::FbarFilingRequired,
+        // ★ §G-15 — PER-YEAR: whether an FBAR is required turns on the year's account balances.
+        durability: Durability::PerYear,
+        prompt: "Schedule B line 7a (sub-question): you said you had a foreign financial account \u{2014} \
+                 are you REQUIRED to file FinCEN Form 114 (the FBAR) to report that financial interest or \
+                 signature authority?",
+        help: "Schedule B's own Caution: \"If required, failure to file FinCEN Form 114 may result in \
+               substantial penalties. Additionally, you may be required to file Form 8938, Statement of \
+               Specified Foreign Financial Assets.\" That penalty attaches to NOT FILING FinCEN Form 114 \
+               \u{2014} an obligation independent of this box \u{2014} not to leaving the box blank, so \
+               skipping is lawful and prints a true blank. btctax takes no position on the answer: FinCEN \
+               Notice 2020-2 leaves crypto-only accounts outside the requirement for now, that is under \
+               active reconsideration, and an account holding crypto PLUS fiat or securities may well be \
+               reportable.",
+        kind: SkippableKind::YesNo,
+        // ★ The FORM conditions this on 7a \u{2014} "If 'Yes,' are you required to file\u{2026}".
+        live: |ri| ri.foreign_accounts == Some(true),
+        get_bool: |ri| ri.fbar_filing_required,
+        set_bool: |ri, v| ri.fbar_filing_required = Some(v),
+        get_date: |_ri| None,
+        set_date: |_ri, _v| {},
+    },
+    // ★★ THE DEATH PAIR (§G-9). Downgraded from class-(A) refusing declarations, where
+    // `TaxpayerDiedDuringYear` was `live: |_| true` and therefore blocked EVERY return. See the
+    // `SkippableId` docs for why the refusal was redundant: `is_aged`'s `(None, None)` arm already
+    // forgoes the addition, so silence has always failed in the safe direction.
+    //
+    // ★ WHY A GATE PLUS A DATE, rather than asking "did they die before reaching 65?" directly: the
+    // day-before-the-birthday convention is exactly the sort of arithmetic a filer gets wrong at the
+    // boundary, and we can do it exactly. The gate carries answered-ness, `date_of_death` carries the
+    // fact, and `is_aged` applies the convention. Both halves are now class (B).
+    SkippableQuestion {
+        id: SkippableId::TaxpayerDiedDuringYear,
+        // ★ §G-15 — PER-YEAR by definition: the question names a tax year.
+        durability: Durability::PerYear,
+        prompt: "Did YOU (the taxpayer named on this return) die during the tax year? (A final return \
+                 is filed by a personal representative or surviving spouse. 1040 line 12a: a taxpayer \
+                 who died before reaching age 65 does not get the age-65 addition to the standard \
+                 deduction, however early in the year they were born.)",
+        help: "§63(f) / §G-9. Skipping is lawful and costs nothing unless a date of birth on file would \
+               otherwise have qualified you for the age-65 addition — in that case the addition is \
+               FORGONE (never granted on an unresolved death carve-out), your tax is OVERSTATED, and \
+               `Advisory::AgedBoxForfeitedDeathUnanswered` says so with the amount.",
+        kind: SkippableKind::YesNo,
+        // ★ ALWAYS LIVE, and that is now harmless. It cannot be scoped to "a DOB old enough to matter"
+        // because `live` receives no tax year (the constraint `HasIncomeExclusion` documents), and
+        // scoping it to "a DOB is on file" would make the question vanish and reappear as the filer
+        // edits — the never-asked-then-silently-relevant shape §G-9 exists to kill. Always-live is only
+        // a problem when the question REFUSES; as a skippable it is one Enter.
+        live: |_ri| true,
+        get_bool: |ri| ri.header.taxpayer_died_during_year,
+        set_bool: |ri, v| ri.header.taxpayer_died_during_year = Some(v),
+        get_date: |_ri| None,
+        set_date: |_ri, _v| {},
+    },
+    SkippableQuestion {
+        id: SkippableId::SpouseDiedDuringYear,
+        durability: Durability::PerYear,
+        prompt: "Did YOUR SPOUSE die during the tax year? (You may still file jointly for the year of \
+                 death. 1040 line 12a: a spouse who died before reaching age 65 does not get the \
+                 age-65 addition to the standard deduction, however early in the year they were born.)",
+        help: "§63(f) / §G-9, spouse. Skipping forgoes the spouse's age-65 box if a qualifying date of \
+               birth is on file; the advisory names the amount.",
+        kind: SkippableKind::YesNo,
+        // ★ Asked exactly when a spouse box can COUNT — the same predicate `AgedBlindBoxes::for_return`
+        // uses, so the question and the figure can never disagree. Previously `spouse.is_some()`, which
+        // asked (and refused) on returns where nothing could read the reply.
+        live: spouse_63f_boxes_count,
+        get_bool: |ri| ri.header.spouse_died_during_year,
+        set_bool: |ri, v| ri.header.spouse_died_during_year = Some(v),
+        get_date: |_ri| None,
+        set_date: |_ri, _v| {},
+    },
+
+    // ★★ SCHEDULE C's Form-1099 COMPLIANCE PAIR (lines I and J). Class (B) by the refusal review's
+    // criterion: no figure reads them, a blank is no testimony, and the form prints NO Caution beside
+    // them — unlike Schedule B's FBAR sub-question, which is the distinction that decided this. The
+    // §6721/§6722 exposure is real, so the skip fires an advisory naming both sections.
+    SkippableQuestion {
+        id: SkippableId::ScheduleC1099Required,
+        durability: Durability::PerYear,
+        prompt: "Schedule C line I: did you make any payments this year that would require you to file \
+                 Form(s) 1099? (For example, $600 or more to a contractor or service provider for your \
+                 business. See the Schedule C instructions.)",
+        help: "§6721/§6722 penalise failing to file a required information return and failing to \
+               furnish the payee's copy. Skipping is lawful — no figure on your return reads this box, \
+               and btctax will never answer it for you — but the box goes out BLANK and the exposure \
+               is yours either way.",
+        kind: SkippableKind::YesNo,
+        live: |ri| ri.schedule_c.is_some(),
+        get_bool: |ri| ri.schedule_c.as_ref().and_then(|c| c.payments_requiring_1099),
+        set_bool: |ri, v| {
+            if let Some(c) = ri.schedule_c.as_mut() {
+                c.payments_requiring_1099 = Some(v);
+            }
+        },
+        get_date: |_ri| None,
+        set_date: |_ri, _v| {},
+    },
+    SkippableQuestion {
+        id: SkippableId::ScheduleC1099Filed,
+        durability: Durability::PerYear,
+        prompt: "Schedule C line J: did you, or will you, file those required Form(s) 1099?",
+        help: "Asked only because you answered line I \"Yes\" — the form itself says \"If 'Yes,'\". \
+               Skipping leaves the box blank; §6721/§6722 still apply.",
+        kind: SkippableKind::YesNo,
+        // ★ THE FORM CONDITIONS IT ON LINE I — "If 'Yes,'". A Schedule C AND a Yes on I.
+        live: |ri| {
+            ri.schedule_c
+                .as_ref()
+                .is_some_and(|c| c.payments_requiring_1099 == Some(true))
+        },
+        get_bool: |ri| ri.schedule_c.as_ref().and_then(|c| c.will_file_required_1099),
+        set_bool: |ri, v| {
+            if let Some(c) = ri.schedule_c.as_mut() {
+                c.will_file_required_1099 = Some(v);
+            }
+        },
+        get_date: |_ri| None,
+        set_date: |_ri, _v| {},
+    },
+
+    // ★★★ Form 8283 Section B lines 5a/5b/5c, asked as ONE return-level universal (§G-21).
+    SkippableQuestion {
+        id: SkippableId::DonationsHadRestrictions,
+        durability: Durability::PerYear,
+        // ★★ THE PROMPT ENUMERATES ALL THREE LIMBS, in the form's own words. A "No" to something
+        // vaguer ("any strings?") would be laundered into three specific answers the filer never gave
+        // — the widening-an-exemption failure. Enumerate the YES-conditions; anything not listed is
+        // then something the filer has NOT denied, so every omission fails closed.
+        prompt: "Did ANY property you donated this year have strings attached? Answer YES if any of \
+                 these is true of ANY donation: (a) there is a restriction, temporary or permanent, on \
+                 the charity's right to USE or DISPOSE of it; (b) you gave anyone other than the \
+                 charity a right to its INCOME, to POSSESS it, to VOTE it, or to ACQUIRE it; or (c) \
+                 there is a restriction limiting it to a PARTICULAR USE. (Form 8283 lines 5a/5b/5c.)",
+        help: "Skipping is harmless if you donated nothing, or nothing over $5,000 — Form 8283 asks \
+               these only in Section B. On a year that DOES file a Section B, it is MANDATORY: a \
+               \"Yes\" to any limb reduces or denies the §170 deduction (Reg §1.170A-7 — a gift with \
+               retained rights is not a gift of the whole thing), and btctax deducts at full fair \
+               market value, so it refuses rather than file a number it knows is too large.",
+        kind: SkippableKind::YesNo,
+        // ★ ALWAYS OFFERED: `live` receives only `ReturnInputs`, and the donations are in the LEDGER.
+        //   Silence is lawful HERE so a filer who donated nothing is never blocked; the mandatory half
+        //   lives in `screen_absolute`, which has the ledger AND the itemize election, and can tell.
+        live: |_ri| true,
+        get_bool: |ri| ri.donations_had_restrictions,
+        set_bool: |ri, v| ri.donations_had_restrictions = Some(v),
+        get_date: |_ri| None,
+        set_date: |_ri, _v| {},
     },
 ];
 
@@ -758,8 +974,6 @@ mod tests {
                 QuestionId::AmtCarryoverSameAsRegular => 9,
                 QuestionId::AmtDepreciationSameAsRegular => 10,
                 QuestionId::HasIncomeExclusion => 11,
-                QuestionId::TaxpayerDiedDuringYear => 12,
-                QuestionId::SpouseDiedDuringYear => 13,
             };
             assert_eq!(idx, i, "QuestionId::ALL is out of order / missing {id:?}");
             assert_eq!(
@@ -768,8 +982,8 @@ mod tests {
                 "exactly one FORM_QUESTIONS entry for {id:?}"
             );
         }
-        assert_eq!(QuestionId::ALL.len(), 14, "there are 14 declarations");
-        assert_eq!(FORM_QUESTIONS.len(), 14, "one entry per declaration");
+        assert_eq!(QuestionId::ALL.len(), 12, "there are 12 declarations");
+        assert_eq!(FORM_QUESTIONS.len(), 12, "one entry per declaration");
     }
 
     #[test]
@@ -777,8 +991,8 @@ mod tests {
         use crate::tax::types::FilingStatus;
         assert_eq!(
             SKIPPABLE_QUESTIONS.len(),
-            7,
-            "blind ×2, SALT, DOB ×2, DOD ×2"
+            13,
+            "blind ×2, SALT, DOB ×2, DOD ×2, FBAR, the §G-9 death pair, Schedule C I/J, 8283 5a/5b/5c"
         );
         // SALT is live iff a schedule_a exists; spouse-blind iff a spouse Person exists.
         let salt = SKIPPABLE_QUESTIONS

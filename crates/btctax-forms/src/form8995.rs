@@ -66,6 +66,10 @@ const F8995_CLUSTERS: &[(f32, f32)] = &[
 /// see.
 fn assert_paren_magnitudes(lines: &Form8995Lines) -> Result<(), FormsError> {
     for (line, v) in [
+        // ★ Line 3 was ADDED here in the same commit that began printing it. This array is
+        // HAND-MAINTAINED — nothing forces a new parenthesized line into it, which is why
+        // `a_negative_line3_is_rejected_like_its_siblings` plants the exact omission.
+        ("3", lines.line3),
         ("7", lines.line7),
         ("16", lines.line16),
         ("17", lines.line17),
@@ -219,24 +223,38 @@ pub fn fill_form_8995_with_map(
     }
 
     // Parallel to `map.lines()` — printed reading order, strictly descending y on page 1.
-    let plan: [(Usd, usize); 15] = [
+    let plan: [(Usd, usize); 16] = [
         (lines.line2, F8995_COL_MID),     // 2  total QBI (table blank ⇒ 0)
-        (lines.line4, F8995_COL_MID),     // 4  combine 2 and 3
-        (lines.line5, F8995_COL_AMOUNT),  // 5  QBI component
-        (lines.line6, F8995_COL_MID),     // 6  qualified REIT dividends + PTP income
-        (lines.line7, F8995_COL_MID),     // 7  ★ paren — prior-year loss carryforward (magnitude)
-        (lines.line8, F8995_COL_MID),     // 8  combine 6 and 7
-        (lines.line9, F8995_COL_AMOUNT),  // 9  REIT/PTP component
+        (lines.line3, F8995_COL_MID), // 3  ★ paren — prior-year QBI loss carryforward (magnitude)
+        (lines.line4, F8995_COL_MID), // 4  combine 2 and 3
+        (lines.line5, F8995_COL_AMOUNT), // 5  QBI component
+        (lines.line6, F8995_COL_MID), // 6  qualified REIT dividends + PTP income
+        (lines.line7, F8995_COL_MID), // 7  ★ paren — prior-year loss carryforward (magnitude)
+        (lines.line8, F8995_COL_MID), // 8  combine 6 and 7
+        (lines.line9, F8995_COL_AMOUNT), // 9  REIT/PTP component
         (lines.line10, F8995_COL_AMOUNT), // 10 add 5 and 9
-        (lines.line11, F8995_COL_MID),    // 11 taxable income before QBI
-        (lines.line12, F8995_COL_MID),    // 12 net capital gain + qualified dividends
-        (lines.line13, F8995_COL_MID),    // 13 11 - 12, floored
+        (lines.line11, F8995_COL_MID), // 11 taxable income before QBI
+        (lines.line12, F8995_COL_MID), // 12 net capital gain + qualified dividends
+        (lines.line13, F8995_COL_MID), // 13 11 - 12, floored
         (lines.line14, F8995_COL_AMOUNT), // 14 income limitation
         (lines.line15, F8995_COL_AMOUNT), // 15 the deduction -> 1040 L13
         (lines.line16, F8995_COL_AMOUNT), // 16 ★ paren — QB loss carryforward (magnitude)
         (lines.line17, F8995_COL_AMOUNT), // 17 ★ paren — REIT/PTP loss carryforward (magnitude)
     ];
     for (ord, (cell, (value, col))) in map.lines().iter().zip(plan).enumerate() {
+        // ★★ LINE 3 IS WRITTEN ONLY WHEN THERE IS A CARRYFORWARD. It is `Qualified business net (loss)
+        // carryforward FROM THE PRIOR YEAR` — a fact the filer supplies about a return btctax did not
+        // compute. A printed `0` there is an affirmative sworn statement that they had no prior-year
+        // QBI loss; a BLANK is no statement at all, and blank is the truthful mark for the
+        // overwhelming majority of filers, who simply have none. (CLAUDE.md: "most fields on a tax
+        // return are blank, intentionally"; "writing `0` on an unasked line fabricates testimony".)
+        //
+        // Every other line here is DERIVED from figures already on the page, so a zero is btctax's own
+        // arithmetic and prints legitimately. Line 3 is the only line on this form that is neither
+        // derived nor computed — it is testimony — which is exactly why it is the only one gated.
+        if std::ptr::eq(*cell, &map.line3) && value.is_zero() {
+            continue;
+        }
         push_money(
             &mut writes,
             &mut placements,

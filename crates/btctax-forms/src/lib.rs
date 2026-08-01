@@ -7,8 +7,9 @@
 //! - **Form 8949** — Bitcoin under **Box I** (short-term) / **Box L** (long-term), the 1099-DA
 //!   revision (NOT Box C/F, which read "other than digital asset transactions"). 11 rows per part
 //!   per page.
-//! - **Schedule D** — lines 3 & 7 (ST), 10 & 15 (LT), 16 (total), QOF = No. Lines 17-22 are scoped
-//!   out (the caller prints a notice).
+//! - **Schedule D** — lines 3 & 7 (ST), 10 & 15 (LT), 16 (total), **17** (derived from the printed
+//!   lines 15 and 16), QOF = No. Lines 18-22 are scoped out (the caller prints a notice) — each needs
+//!   a fact the crypto slice never collects.
 //! - These are **static XFA-hybrid** PDFs: the fill removes the `/AcroForm` `/XFA` layer (else
 //!   Acrobat shows blank), sets `/NeedAppearances`, and pins determinism (drops `/Info` dates + the
 //!   trailer `/ID`).
@@ -117,6 +118,20 @@ fn div_ceil(n: usize, d: usize) -> usize {
 /// embedded standard font resource, orthogonal to `/NeedAppearances`.
 pub fn stamp_draft_watermark(pdf_bytes: &[u8]) -> Result<Vec<u8>, FormsError> {
     watermark::stamp_draft(pdf_bytes)
+}
+
+/// Stamp a diagonal `WORKSHEET — NOT A COMPLETE FORM 1040` watermark on every page of a filled form.
+///
+/// For the **crypto-slice** Form 1040 only ([`fill_form_1040_capgains`]), which fills exactly two
+/// cells — the digital-asset question and line 7a — and leaves every income, deduction and tax line
+/// blank. Without it the artifact renders as a Form 1040 with a populated line 7a and a blank line
+/// 1a, and its only caveat is a note on stderr that the document outlives. Runs on the OPPOSITE
+/// diagonal from [`stamp_draft_watermark`], so a pseudo-reconciled slice carries both legibly.
+///
+/// **Never applied to the full-return `f1040.pdf`**, which IS complete (see the
+/// `crypto_slice_1040_is_watermarked_and_the_full_return_1040_is_not` KAT).
+pub fn stamp_partial_worksheet_watermark(pdf_bytes: &[u8]) -> Result<Vec<u8>, FormsError> {
+    watermark::stamp_partial_worksheet(pdf_bytes)
 }
 
 /// Fill **Schedule D** for `year` from the part totals and return the PDF bytes.
@@ -417,6 +432,7 @@ pub mod testonly {
     pub use crate::form1040_full::fill_form_1040_full_with_map;
     pub use crate::form8275::fill_form_8275_with_map as fill_8275_with_map;
     pub use crate::form8283::fill_form_8283 as fill_8283_with_map;
+    pub use crate::form8283::fill_form_8283_full as fill_8283_full_with_map;
     pub use crate::form8959::fill_form_8959_with_map;
     pub use crate::form8960::fill_form_8960_with_map;
     pub use crate::form8995::fill_form_8995_with_map;
