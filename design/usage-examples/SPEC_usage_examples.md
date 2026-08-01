@@ -19,7 +19,7 @@ made the golden born-green via an in-tree `regen==committed` test (I6).*
 
 btctax is a Rust workspace (10 crates, v0.6.1, `MIT OR Unlicense`) that reconciles a Bitcoin ledger and
 computes/fills a US tax return. We are building **two distributable usage-example documents** whose
-authoring **doubles as a UX/workflow bug-discovery instrument** — modeled on the sibling mnemonic
+authoring **doubles as a UX/workflow bug-discovery instrument** — modeled on the sibling project
 constellation's method (see `RECON.md`). The dual purpose is co-equal and budgeted.
 
 **What already exists and transfers:**
@@ -363,8 +363,7 @@ same PR (release ritual, like re-pinning). The census MAY key coverage on `(form
   per-cell `fg`/`bg`/`modifier` (they are the gated artifact); a **colorized** groff render driven by the
   style overlay is an explicitly DEFERRED enhancement (FOLLOWUPS **UX-P3-2**), not a P3 deliverable — the
   PDF is a git-ignored convenience render with no consumers.*)
-- **This is the primary bug-hunt surface** — driving the edit reconcile flow is the btctax analogue of the
-  mnemonic `(none)`/reveal-toggle discoveries.
+- **This is the primary bug-hunt surface** — driving the edit reconcile flow is the btctax analogue of the sibling project `(none)`/reveal-toggle discoveries.
 
 ## §9. CI gate (P2)
 
@@ -374,7 +373,7 @@ same PR (release ritual, like re-pinning). The census MAY key coverage on `(form
   capture) under the pinned env, then **`git diff --exit-code docs/examples docs/examples-tui`**; run the
   forms-census (hard) and print the subcommand report (soft); prove each PDF *builds*.
 - **Posture** — born-green **advisory** (the diff/census run but are not yet a required merge check), then
-  **promote to required** in GitHub branch-protection settings once stable, adding the mnemonic fail-safe
+  **promote to required** in GitHub branch-protection settings once stable, adding the sibling project fail-safe
   internal guard (compute `relevant` from a two-dot `git diff`, hard-fail on fetch error) so a required +
   future-path-filtered check can't wedge. **Branch protection is a GitHub-settings action (not in-tree —
   §14 gap 1); the SPEC flags it, the user actions it.**
@@ -431,9 +430,9 @@ item is not deferrable past its owning phase.
   only in the SOFT §6.3 report (non-blocking) — the census never *demands* an example per subcommand.
 - **Does NOT catch (declared gaps):** (a) the **PDF is not byte-gated** (groff/gs not byte-reproducible;
   the golden text is the gated artifact, the PDF is only re-proven to build — same accepted gap as
-  mnemonic's xelatex). (b) **Narration-truth about *unchanged* output** — Gate A (whole-file regen) does
+  the sibling project's xelatex). (b) **Narration-truth about *unchanged* output** — Gate A (whole-file regen) does
   not prove prose describing adjacent output is *true*, only that captured output didn't change; the
-  stronger per-command transcript model (mnemonic's "gate B") is **deferred** and named here so it isn't
+  stronger per-command transcript model (the sibling project's "gate B") is **deferred** and named here so it isn't
   mistaken for solved. (c) **Branch-protection required-status** is a GitHub-settings fact not verifiable
   in-tree (§9, §14 gap 1). (d) **stderr** is captured only in labelled blocks where relevant (§3.3), not
   wholesale — a doc titled "verbatim I/O" shows stdout+exit; the R-P0.4 banner and notices are disclosed,

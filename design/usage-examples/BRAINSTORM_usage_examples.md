@@ -8,7 +8,7 @@ review to 0C/0I.*
 
 ## Goal (unchanged)
 
-Two distributable usage-example docs for the btctax constellation, modeled on the sibling mnemonic
+Two distributable usage-example docs for the btctax constellation, modeled on the sibling project
 method, whose authoring **doubles as a UX/workflow bug-discovery instrument**. The dual purpose is
 explicit and co-equal.
 
@@ -30,7 +30,7 @@ explicit and co-equal.
    builders are the "public test vectors."
 5. **CI posture → WIDE triggers, born-green ADVISORY → promote to REQUIRED.** Fire on `crates/**`,
    `Cargo.lock`, the generator, and the goldens (leading indicator: any output-changing PR reds *in that
-   PR*). At promotion, add mnemonic's fail-safe internal guard so a required + path-filtered check never
+   PR*). At promotion, add the sibling project's fail-safe internal guard so a required + path-filtered check never
    wedges at "Expected — waiting for status."
 6. **Toolchain → REUSE groff** (existing `xtask` + `make bundles` + `groff -Tpdf`; no pandoc/xelatex).
    Licensing is a non-issue — groff/pandoc/xelatex are build-time tools whose licenses don't infect

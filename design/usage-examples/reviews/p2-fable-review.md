@@ -49,7 +49,7 @@ Windows `test` leg — `str::lines()` strips `\r` (autocrlf-safe), the forward-s
 `CARGO_MANIFEST_DIR` path is Windows-valid, and the heavier `golden_packet` full-packet
 fills already run green on Windows under libtest's 8 MiB test threads (the 1 MiB fix was
 binary-only). `make check` green: **1947/1947 passed, 6 skipped**. Nothing in §6/§9 owed
-to P2 was dropped: the mnemonic fail-safe guard and required-check promotion are owned by
+to P2 was dropped: the sibling project fail-safe guard and required-check promotion are owned by
 Task 4.2 (P4), the TUI diff path by P3, and §6.4's year cross-check is a MAY.
 
 ## Findings

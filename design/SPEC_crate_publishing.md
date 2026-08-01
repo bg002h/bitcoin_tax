@@ -5,13 +5,13 @@
 CLEARED both rounds. Round-2 folds: the new-crate 5-burst rate limit → expect a 429 on the 6th
 (`btctax-tui-edit`), safe/resumable with a ~10-min retry [Mnew-1]; license-reuse note [Nnew-1]. Cleared to
 implement (metadata + version-ify deps → workspace dry-run → whole-diff → STOP at the go-ahead gate).**
-**Lineage:** user request (2026-07-04): "crate publishing (you might find credentials in shibboleth project
+**Lineage:** user request (2026-07-04): "crate publishing (you might find credentials in a sibling project
 folder)." Follows the README (#34). **The `cargo publish` step is IRREVERSIBLE + PUBLIC — it happens ONLY
 after an explicit user go-ahead (§Go-ahead gate); all prep + dry-runs are done first.**
 
 ## Preconditions (verified 2026-07-04)
 - **Network:** reachable (`cargo search serde` returns results; the earlier `curl` 403 was UA filtering).
-- **Token:** `~/.cargo/credentials.toml` has `[registry] token = …` (the user has published before — shibboleth
+- **Token:** `~/.cargo/credentials.toml` has `[registry] token = …` (the user has published before — a sibling project
   crates). No token handling needed beyond what cargo already has; NEVER print the token.
 - **Names available:** `cargo search btctax` returns EMPTY — `btctax-core/-store/-adapters/-cli/-tui/-tui-edit`
   are all free. (Names are claimed permanently once published — even a yank doesn't free them.)

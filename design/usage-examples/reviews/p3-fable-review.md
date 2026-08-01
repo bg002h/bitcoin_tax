@@ -59,7 +59,7 @@ guard's doc comment and both commit messages claim the opposite. The env half of
   captured anywhere; the clock guard drives a classify flow but snapshots nothing. Concrete failure
   scenario: a rendering regression in any reconcile modal (e.g. the classify-inbound confirm showing
   the wrong FMV/basis line, or a leaked internal-state string — the exact class §8 cites as "the
-  btctax analogue of the mnemonic `(none)`/reveal-toggle discoveries") leaves every committed golden
+  btctax analogue of the sibling project `(none)`/reveal-toggle discoveries") leaves every committed golden
   green, and P4's audit surface doesn't exist. Neither commit ccfedc5 nor FOLLOWUPS records a
   rescope — the commit message simply re-describes the deliverable as "Browse chrome". Fix: capture
   a reconcile-flow frame sequence (the guard test already drives classify-inbound headlessly —

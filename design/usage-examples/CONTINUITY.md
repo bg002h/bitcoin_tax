@@ -10,7 +10,7 @@ remains the verbatim method reference. Safe to clear context here — everything
 ## The goal (user's ask, 2026-07-16)
 
 Build usage-example documentation for the **btctax constellation**, modeled on what the sibling
-"mnemonic constellation" already did, and use the authoring process to **discover workflow/usability
+"sibling constellation" already did, and use the authoring process to **discover workflow/usability
 bugs** in btctax (that dual purpose is explicit and wanted):
 
 - **Artifact 1 — a CLI verbatim-I/O examples doc**: real `btctax` command-line input **and** output,
@@ -19,12 +19,12 @@ bugs** in btctax (that dual purpose is explicit and wanted):
   **separate file** from the CLI examples on purpose (screenshots/captures make for a big file — the
   user was explicit about the split).
 
-The mnemonic originals: `mnemonic-toolkit/docs/Examples.pdf` (CLI) and
-`mnemonic-toolkit/docs/manual-gui/build/gui_example.pdf` (GUI screenshots).
+The the sibling project's originals: `<sibling-cli>/docs/Examples.pdf` (CLI) and
+`<sibling-cli>/docs/manual-gui/build/gui_example.pdf` (GUI screenshots).
 
 ## What's already done
 
-- **3 Opus recon agents** reverse-engineered the mnemonic method. Their full reports are persisted
+- **3 Opus recon agents** reverse-engineered the sibling project method. Their full reports are persisted
   verbatim in **`design/usage-examples/RECON.md`** (read it first — the digest below is only a map).
 - **Key btctax facts spot-verified** against current source (2026-07-16): `TestBackend::new(120,40)`
   in `crates/btctax-tui/src/tabs/tests.rs`; groff/roff docs pipeline in `crates/xtask/src/docs.rs`
@@ -33,7 +33,7 @@ The mnemonic originals: `mnemonic-toolkit/docs/Examples.pdf` (CLI) and
 
 ## Digest of the method (full detail in RECON.md)
 
-**How mnemonic built the CLI examples doc (`Examples.pdf`):** one hand-written bash generator
+**How the sibling project built the CLI examples doc (`Examples.pdf`):** one hand-written bash generator
 (`.examples-build/gen.sh`) with `run()`/`show()` helpers that print `$ cmd` then **execute the real
 binary at build time** and capture combined stdout+stderr into fenced Markdown, interleaved with prose
 heredocs. `bash gen.sh > Examples.md`, then pandoc→xelatex to PDF. **Determinism is the crux**: FATAL
@@ -44,14 +44,14 @@ regenerate the golden `.md` and `git diff --exit-code` it (the PDF is only re-pr
 byte-gated, xelatex isn't reproducible). Required check with a fail-safe PR guard to avoid the
 "required + path-filtered = wedged" trap.
 
-**How mnemonic built the screenshot doc (`gui_example.pdf`):** mnemonic-gui is a **graphical egui app**,
+**How the sibling project built the screenshot doc (`gui_example.pdf`):** the sibling GUI is a **graphical egui app**,
 so it uses `egui_kittest` → wgpu → **software-rasterizer PNG** capture, byte-gated in CI, byte-copied
 into the toolkit repo, assembled by pandoc→xelatex, **release-attach-only** (~32 MiB, too big to
 commit). **This pixel machinery does NOT transfer to our terminal TUI** — but the architecture around
 it does.
 
 **★ The single most important adaptation insight:** btctax's TUI is a **text** grid with an **existing**
-`TestBackend` render seam. So the expensive, fragile half of the mnemonic method (whole-window pixel
+`TestBackend` render seam. So the expensive, fragile half of the sibling project method (whole-window pixel
 determinism, GPU/rasterizer drift, 32-MiB budget) **is free here** — the TUI can be captured as
 **verbatim text**, committed and gated exactly like the CLI leg. The method collapses to: *run journeys
 against synthetic data → capture verbatim text → commit as goldens → `git diff` in CI → catalog every
@@ -60,7 +60,7 @@ workaround the author had to perform.* The remaining determinism work is entirel
 
 **Why this finds bugs (the payoff):** worked journeys exercise the *assembled* surface in sequence, so
 they hit cross-flag interactions, mode-dependent refusals, and affordance gaps that isolated unit tests
-never probe. In mnemonic, authoring the tutorial *forced the author to be the user* and directly
+never probe. In the sibling project, authoring the tutorial *forced the author to be the user* and directly
 produced real fixes (a `(none)` template affordance that unblocked an unreachable code path; a
 secret-reveal toggle). btctax's analogue = driving `btctax-tui-edit` through a real reconcile flow. The
 deliverable that pays for the exercise is a **workaround-audit** (`tutorial-workaround-audit.md` style):
@@ -94,7 +94,7 @@ catalog every route-around, classify each as bug-to-file / harness-artifact / in
 - **Follows `STANDARD_WORKFLOW.md`** — brainstorm → spec → plan → implement (phased, TDD) →
   whole-diff review → ship, each "→ green" an independent review loop to 0C/0I. **Reviews use Fable**
   (standing user directive). Treat "it's just docs" as exactly the rationalization the gates exist to
-  override — the mnemonic cycle ran docs through the *full* spine, and that discipline is why the gate
+  override — the sibling project cycle ran docs through the *full* spine, and that discipline is why the gate
   works. See [[standard-workflow]], [[binary-docs-infra]].
 - **Synthetic data only** in any committed/distributed artifact — never real taxpayer data/PII.
 - **Two separate artifacts** (CLI doc ≠ TUI doc) — user-mandated split.
@@ -105,7 +105,7 @@ catalog every route-around, classify each as bug-to-file / harness-artifact / in
 ## ▶ Kick-off — paste into a FRESH session in this repo (`/scratch/code/bitcoin_tax`)
 
 > We're building usage-example documentation for the btctax constellation (a CLI verbatim-I/O examples
-> doc + a SEPARATE TUI-capture doc), modeled on the mnemonic constellation's method, and using the
+> doc + a SEPARATE TUI-capture doc), modeled on sibling constellation's method, and using the
 > authoring to discover btctax UX/workflow bugs. Recon is done and persisted. Read
 > `design/usage-examples/CONTINUITY.md` then `design/usage-examples/RECON.md`, then invoke
 > `superpowers:brainstorming` to work through the 8 open questions with me before any spec. Reviews use
