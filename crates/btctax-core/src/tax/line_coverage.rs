@@ -87,7 +87,10 @@ pub struct LineCoverage {
     /// The extract stem the instruction is quoted from, e.g. `"f8995"`.
     pub form: &'static str,
     /// The form's own line label, e.g. `"16"` — for humans and for the map cross-check.
-    pub line: &'static str,
+    ///
+    /// ★ Owned, not `&'static str`: a type serving several form lines part-qualifies its label at the
+    /// call site (`"I-1(d)"` vs `"II-1(d)"` on Form 8949), which cannot be a literal.
+    pub line: String,
     /// The Rust field, e.g. `"line16"`.
     pub field: &'static str,
     pub production: Production,
@@ -110,14 +113,14 @@ impl Coverage {
         &mut self,
         _value: Usd,
         form: &'static str,
-        line: &'static str,
+        line: &str,
         field: &'static str,
         production: Production,
         instruction: &'static str,
     ) {
         self.0.push(LineCoverage {
             form,
-            line,
+            line: line.to_string(),
             field,
             production,
             instruction,
@@ -131,14 +134,14 @@ impl Coverage {
         &mut self,
         _value: Usd,
         form: &'static str,
-        line: &'static str,
+        line: &str,
         field: &'static str,
         instruction: &'static str,
         reason: &'static str,
     ) {
         self.0.push(LineCoverage {
             form,
-            line,
+            line: line.to_string(),
             field,
             production: Production::Exception,
             instruction,
@@ -151,7 +154,7 @@ impl Coverage {
 ///
 /// Chosen as the first covered form because it exercises six of the eight productions AND both clamp
 /// polarities, so the mechanism is proved on a hard case rather than an easy one.
-pub fn cover_f8995(l: &crate::tax::qbi::Form8995Lines) -> Coverage {
+pub fn cover_form8995lines(l: &crate::tax::qbi::Form8995Lines) -> Coverage {
     let crate::tax::qbi::Form8995Lines {
         business_name: _, // not money — out of this module's scope
         line2,
@@ -292,8 +295,8 @@ pub fn cover_f8995(l: &crate::tax::qbi::Form8995Lines) -> Coverage {
 /// ★ Deliberately NOT `#[derive(Default)]` on `Form8995Lines` — §G-11's SPEC forbids `Default` on money
 /// -bearing printed structs, because an implicit constructor is exactly how a field arrives unexamined.
 /// Naming every field here gives a SECOND compile guarantee: a new field is `E0063` here as well as
-/// *pattern does not mention field* in [`cover_f8995`].
-fn zero_f8995() -> crate::tax::qbi::Form8995Lines {
+/// *pattern does not mention field* in [`cover_form8995lines`].
+fn zero_form8995lines() -> crate::tax::qbi::Form8995Lines {
     crate::tax::qbi::Form8995Lines {
         business_name: String::new(),
         line2: Usd::ZERO,
@@ -318,10 +321,10 @@ fn zero_f8995() -> crate::tax::qbi::Form8995Lines {
 /// **ScheduleBLines** (f1040sb) — destructured with no `..`; a new money field cannot compile.
 pub fn cover_scheduleblines(l: &crate::tax::printed::ScheduleBLines) -> Coverage {
     let crate::tax::printed::ScheduleBLines {
-        part1_rows: _,
+        part1_rows,
         line2,
         line4,
-        part2_rows: _,
+        part2_rows,
         line6,
         foreign_accounts_7a: _,
         foreign_trust_8: _,
@@ -330,6 +333,23 @@ pub fn cover_scheduleblines(l: &crate::tax::printed::ScheduleBLines) -> Coverage
     } = l;
     let f = "f1040sb";
     let mut c = Coverage::default();
+    // ★ NESTED MONEY. `ScheduleBRow.amount` is a printed figure on a type one level down, and the
+    //   same type serves TWO different form lines — Part I line 1 (interest) and Part II line 5
+    //   (dividends) — so the context travels as a parameter rather than being baked into the type.
+    //   `zero_schedulebLines()` seeds one row in each Vec so this is never vacuous.
+    for r in part1_rows {
+        c.0.extend(
+            cover_schedulebrow(
+                r,
+                "1",
+                "List name of payer. If any interest is from a seller-financed mortgage and the",
+            )
+            .0,
+        );
+    }
+    for r in part2_rows {
+        c.0.extend(cover_schedulebrow(r, "5", "List name of payer").0);
+    }
     c.line(
         *line2,
         f,
@@ -359,10 +379,12 @@ pub fn cover_scheduleblines(l: &crate::tax::printed::ScheduleBLines) -> Coverage
 
 fn zero_scheduleblines() -> crate::tax::printed::ScheduleBLines {
     crate::tax::printed::ScheduleBLines {
-        part1_rows: Vec::new(),
+        // ★ One representative row each, so the nested coverage above is never vacuous — an empty
+        // Vec would silently emit no rows and the checker would report success over nothing.
+        part1_rows: vec![zero_schedulebrow()],
         line2: Usd::ZERO,
         line4: Usd::ZERO,
-        part2_rows: Vec::new(),
+        part2_rows: vec![zero_schedulebrow()],
         line6: Usd::ZERO,
         foreign_accounts_7a: None,
         foreign_trust_8: None,
@@ -1313,13 +1335,642 @@ fn zero_scheduledlines() -> crate::tax::printed::ScheduleDLines {
     }
 }
 
+/// **ScheduleBRow** — the nested payer row. `line`/`instruction` come from the caller because the
+/// same type prints on Schedule B line 1 (interest) and line 5 (dividends).
+pub fn cover_schedulebrow(
+    r: &crate::tax::printed::ScheduleBRow,
+    line: &'static str,
+    instruction: &'static str,
+) -> Coverage {
+    let crate::tax::printed::ScheduleBRow {
+        payer: _, // not money
+        amount,
+    } = r;
+    let mut c = Coverage::default();
+    c.line(
+        *amount,
+        "f1040sb",
+        line,
+        "amount",
+        Production::Collected,
+        instruction,
+    );
+    c
+}
+
+fn zero_schedulebrow() -> crate::tax::printed::ScheduleBRow {
+    crate::tax::printed::ScheduleBRow {
+        payer: String::new(),
+        amount: Usd::ZERO,
+    }
+}
+
+/// **ScheduleDRouting** — money inside an ENUM VARIANT.
+///
+/// ★ Matched exhaustively with NO `_` arm, so a new variant carrying money is a non-exhaustive-match
+/// COMPILE ERROR. Same guarantee as the struct destructures, one type-constructor over.
+pub fn cover_scheduledrouting(r: &crate::tax::printed::ScheduleDRouting) -> Coverage {
+    use crate::tax::printed::ScheduleDRouting as R;
+    let mut c = Coverage::default();
+    match r {
+        R::BothGains => {}
+        R::ShortGainLongLoss { line22_yes: _ } => {}
+        R::NetLoss {
+            line21,
+            line22_yes: _,
+        } => c.line(
+            *line21,
+            "f1040sd",
+            "21",
+            "line21",
+            Production::Bounded,
+            "If line 16 is a loss, enter here and on Form 1040, 1040-SR, or 1040-NR, line 7, the smaller of:",
+        ),
+        R::Zero { line22_yes: _ } => {}
+    }
+    c
+}
+
+/// **Form1040Lines** — the main form. Destructured with no `..`.
+///
+/// ★ Field keys are STRUCT-QUALIFIED (`Form1040Lines.lineN`) because `Form1040Income` re-declares eleven of
+/// `Form1040Lines`' lines with identical names on the identical form — rule (5) keys on
+/// `(form, line, field)` and would otherwise report each as covered twice.
+pub fn cover_form1040lines(l: &crate::tax::printed::Form1040Lines) -> Coverage {
+    let crate::tax::printed::Form1040Lines {
+        line1z,
+        line1a,
+        line2a,
+        line2b,
+        line3a,
+        line3b,
+        line7,
+        line8,
+        line9,
+        line10,
+        line11,
+        line12,
+        line13,
+        line14,
+        line15,
+        line16,
+        line17,
+        line18,
+        line19,
+        line20,
+        line21,
+        line22,
+        line23,
+        line24,
+        line25a,
+        line25b,
+        line25c,
+        line25d,
+        line26,
+        line31,
+        line32,
+        line33,
+        line34,
+        line37,
+        digital_asset_yes: _,
+    } = l;
+    let mut c = Coverage::default();
+    c.line(
+        *line1z,
+        "f1040",
+        "1z",
+        "Form1040Lines.line1z",
+        Production::Combine,
+        "Add lines 1a through 1h",
+    );
+    c.line(
+        *line1a,
+        "f1040",
+        "1a",
+        "Form1040Lines.line1a",
+        Production::Collected,
+        "Total amount from Form(s) W-2, box 1 (see instructions)",
+    );
+    c.line(
+        *line2a,
+        "f1040",
+        "2a",
+        "Form1040Lines.line2a",
+        Production::Collected,
+        "Tax-exempt interest",
+    );
+    c.line(
+        *line2b,
+        "f1040",
+        "2b",
+        "Form1040Lines.line2b",
+        Production::Collected,
+        "Taxable interest",
+    );
+    c.line(
+        *line3a,
+        "f1040",
+        "3a",
+        "Form1040Lines.line3a",
+        Production::Collected,
+        "Qualified dividends",
+    );
+    c.line(
+        *line3b,
+        "f1040",
+        "3b",
+        "Form1040Lines.line3b",
+        Production::Collected,
+        "Ordinary dividends",
+    );
+    c.line(
+        *line7,
+        "f1040",
+        "7",
+        "Form1040Lines.line7",
+        Production::Carry,
+        "Capital gain or (loss). Attach Schedule D if required. If not required, check here",
+    );
+    c.line(
+        *line8,
+        "f1040",
+        "8",
+        "Form1040Lines.line8",
+        Production::Carry,
+        "Additional income from Schedule 1, line 10",
+    );
+    c.line(
+        *line9,
+        "f1040",
+        "9",
+        "Form1040Lines.line9",
+        Production::Combine,
+        "Add lines 1z, 2b, 3b, 4b, 5b, 6b, 7, and 8. This is your total income",
+    );
+    c.line(
+        *line10,
+        "f1040",
+        "10",
+        "Form1040Lines.line10",
+        Production::Carry,
+        "Adjustments to income from Schedule 1, line 26",
+    );
+    c.line(
+        *line11,
+        "f1040",
+        "11",
+        "Form1040Lines.line11",
+        Production::Combine,
+        "Subtract line 10 from line 9. This is your adjusted gross income",
+    );
+    c.exception(*line12, "f1040", "12", "Form1040Lines.line12",
+        "Standard deduction or itemized deductions (from Schedule A)",
+        "Two branches that BOTH enter a figure, and the line states neither an operation nor a source: itemizing is a Carry of Schedule A's printed line 17, not itemizing is a Constant the form prints in its own left margin (\"• Single or Married filing separately, $14,600\"). No single production states the figure or its blank-ness rule — the f1040sse:4a shape. The instructions adjudicate it as \"the larger of your itemized deductions or standard deduction\", and there is no larger-of production (Bounded is \"the smaller of\").");
+    c.line(
+        *line13,
+        "f1040",
+        "13",
+        "Form1040Lines.line13",
+        Production::Carry,
+        "Qualified business income deduction from Form 8995 or Form 8995-A",
+    );
+    c.line(
+        *line14,
+        "f1040",
+        "14",
+        "Form1040Lines.line14",
+        Production::Combine,
+        "Add lines 12 and 13",
+    );
+    c.line(
+        *line15,
+        "f1040",
+        "15",
+        "Form1040Lines.line15",
+        Production::Clamped(Polarity::FloorAtZero),
+        "Subtract line 14 from line 11. If zero or less, enter -0-. This is your taxable income",
+    );
+    c.exception(*line16, "f1040", "16", "Form1040Lines.line16",
+        "Tax (see instructions). Check if any from Form(s):",
+        "The figure is produced by the Tax Table, the Tax Computation Worksheet, or the Qualified Dividends and Capital Gain Tax Worksheet in the Form 1040 instructions (i1040gi \"Line 16\": \"Figure the tax using one of the methods described later\"). Line 16 itself carries no arithmetic and names no source line, and none of those worksheets is ever emitted — so there is no form-side line to carry from. Same shape as the f1040s1:21 and f1040s3:11 exceptions.");
+    c.line(
+        *line17,
+        "f1040",
+        "17",
+        "Form1040Lines.line17",
+        Production::Carry,
+        "Amount from Schedule 2, line 3",
+    );
+    c.line(
+        *line18,
+        "f1040",
+        "18",
+        "Form1040Lines.line18",
+        Production::Combine,
+        "Add lines 16 and 17",
+    );
+    c.line(
+        *line19,
+        "f1040",
+        "19",
+        "Form1040Lines.line19",
+        Production::Carry,
+        "Child tax credit or credit for other dependents from Schedule 8812",
+    );
+    c.line(
+        *line20,
+        "f1040",
+        "20",
+        "Form1040Lines.line20",
+        Production::Carry,
+        "Amount from Schedule 3, line 8",
+    );
+    c.line(
+        *line21,
+        "f1040",
+        "21",
+        "Form1040Lines.line21",
+        Production::Combine,
+        "Add lines 19 and 20",
+    );
+    c.line(
+        *line22,
+        "f1040",
+        "22",
+        "Form1040Lines.line22",
+        Production::Clamped(Polarity::FloorAtZero),
+        "Subtract line 21 from line 18. If zero or less, enter -0-",
+    );
+    c.line(
+        *line23,
+        "f1040",
+        "23",
+        "Form1040Lines.line23",
+        Production::Carry,
+        "Other taxes, including self-employment tax, from Schedule 2, line 21",
+    );
+    c.line(
+        *line24,
+        "f1040",
+        "24",
+        "Form1040Lines.line24",
+        Production::Combine,
+        "Add lines 22 and 23. This is your total tax",
+    );
+    c.line(
+        *line25a,
+        "f1040",
+        "25a",
+        "Form1040Lines.line25a",
+        Production::Collected,
+        "Federal income tax withheld from: a Form(s) W-2",
+    );
+    c.line(
+        *line25b,
+        "f1040",
+        "25b",
+        "Form1040Lines.line25b",
+        Production::Collected,
+        "Form(s) 1099",
+    );
+    c.line(
+        *line25c,
+        "f1040",
+        "25c",
+        "Form1040Lines.line25c",
+        Production::Collected,
+        "Other forms (see instructions)",
+    );
+    c.line(
+        *line25d,
+        "f1040",
+        "25d",
+        "Form1040Lines.line25d",
+        Production::Combine,
+        "Add lines 25a through 25c",
+    );
+    c.line(
+        *line26,
+        "f1040",
+        "26",
+        "Form1040Lines.line26",
+        Production::Collected,
+        "2024 estimated tax payments and amount applied from 2023 return",
+    );
+    c.line(
+        *line31,
+        "f1040",
+        "31",
+        "Form1040Lines.line31",
+        Production::Carry,
+        "Amount from Schedule 3, line 15",
+    );
+    c.line(
+        *line32,
+        "f1040",
+        "32",
+        "Form1040Lines.line32",
+        Production::Combine,
+        "Add lines 27, 28, 29, and 31. These are your total other payments and refundable credits",
+    );
+    c.line(
+        *line33,
+        "f1040",
+        "33",
+        "Form1040Lines.line33",
+        Production::Combine,
+        "Add lines 25d, 26, and 32. These are your total payments",
+    );
+    c.exception(*line34, "f1040", "34", "Form1040Lines.line34",
+        "If line 33 is more than line 24, subtract line 24 from line 33. This is the amount you overpaid",
+        "A CONDITIONAL entry, not a clamp. The sentence states the condition (\"If line 33 is more than line 24\") but prints no \"enter -0-\", so when the condition fails the line is BLANK — the figure belongs on line 37 instead. No production carries that blank-ness rule: Combine is blank iff its operands are blank (both are populated on an owing return), and Clamped requires an \"enter -0-\" clause the form does not give, which is exactly why checker rule (3)'s \"-0-\" half rejects it even though its clause DOES match the FLOOR_IDIOM \"is more than line\". Its mutually exclusive twin, line 37, states the same subtraction with no condition at all.");
+    c.line(
+        *line37,
+        "f1040",
+        "37",
+        "Form1040Lines.line37",
+        Production::Combine,
+        "Subtract line 33 from line 24. This is the amount you owe.",
+    );
+    c
+}
+
+fn zero_form1040lines() -> crate::tax::printed::Form1040Lines {
+    crate::tax::printed::Form1040Lines {
+        line1z: Usd::ZERO,
+        line1a: Usd::ZERO,
+        line2a: Usd::ZERO,
+        line2b: Usd::ZERO,
+        line3a: Usd::ZERO,
+        line3b: Usd::ZERO,
+        line7: Usd::ZERO,
+        line8: Usd::ZERO,
+        line9: Usd::ZERO,
+        line10: Usd::ZERO,
+        line11: Usd::ZERO,
+        line12: Usd::ZERO,
+        line13: Usd::ZERO,
+        line14: Usd::ZERO,
+        line15: Usd::ZERO,
+        line16: Usd::ZERO,
+        line17: Usd::ZERO,
+        line18: Usd::ZERO,
+        line19: Usd::ZERO,
+        line20: Usd::ZERO,
+        line21: Usd::ZERO,
+        line22: Usd::ZERO,
+        line23: Usd::ZERO,
+        line24: Usd::ZERO,
+        line25a: Usd::ZERO,
+        line25b: Usd::ZERO,
+        line25c: Usd::ZERO,
+        line25d: Usd::ZERO,
+        line26: Usd::ZERO,
+        line31: Usd::ZERO,
+        line32: Usd::ZERO,
+        line33: Usd::ZERO,
+        line34: Usd::ZERO,
+        line37: Usd::ZERO,
+        digital_asset_yes: false,
+    }
+}
+
+/// **Form1040Income** — the main form. Destructured with no `..`.
+///
+/// ★ Field keys are STRUCT-QUALIFIED (`Form1040Income.lineN`) because `Form1040Income` re-declares eleven of
+/// `Form1040Lines`' lines with identical names on the identical form — rule (5) keys on
+/// `(form, line, field)` and would otherwise report each as covered twice.
+pub fn cover_form1040income(l: &crate::tax::printed::Form1040Income) -> Coverage {
+    let crate::tax::printed::Form1040Income {
+        qdcgt_net_capital_gain,
+        line1a,
+        line1z,
+        line2a,
+        line2b,
+        line3a,
+        line3b,
+        line7,
+        line8,
+        line9,
+        line10,
+        line11,
+    } = l;
+    let mut c = Coverage::default();
+    c.exception(*qdcgt_net_capital_gain, "i1040gi", "QDCGT Worksheet, 3", "Form1040Income.qdcgt_net_capital_gain",
+        "Yes. Enter the smaller of line 15 or line 16 of Schedule D. If either line 15 or line 16 is blank or a loss, enter -0-.",
+        "A COMPOSITION whose clamp idiom the checker does not know. The operand is Bounded (\"the smaller of line 15 or line 16 of Schedule D\") and the result is then clamped by \"If either line 15 or line 16 is blank or a loss, enter -0-\" — a phrasing in neither FLOOR_IDIOMS nor CEIL_IDIOMS, so declaring Clamped(FloorAtZero) would assert a polarity the quote does not say and rule (3) would reject it. It is also a two-branch worksheet line (the \"No\" branch enters Form 1040 line 7), and this worksheet is never emitted: the value is a worksheet OPERAND that reaches no filed page. Same shape as the f1040sse:10 exception.");
+    c.line(
+        *line1a,
+        "f1040",
+        "1a",
+        "Form1040Income.line1a",
+        Production::Collected,
+        "Total amount from Form(s) W-2, box 1 (see instructions)",
+    );
+    c.line(
+        *line1z,
+        "f1040",
+        "1z",
+        "Form1040Income.line1z",
+        Production::Combine,
+        "Add lines 1a through 1h",
+    );
+    c.line(
+        *line2a,
+        "f1040",
+        "2a",
+        "Form1040Income.line2a",
+        Production::Collected,
+        "Tax-exempt interest",
+    );
+    c.line(
+        *line2b,
+        "f1040",
+        "2b",
+        "Form1040Income.line2b",
+        Production::Collected,
+        "Taxable interest",
+    );
+    c.line(
+        *line3a,
+        "f1040",
+        "3a",
+        "Form1040Income.line3a",
+        Production::Collected,
+        "Qualified dividends",
+    );
+    c.line(
+        *line3b,
+        "f1040",
+        "3b",
+        "Form1040Income.line3b",
+        Production::Collected,
+        "Ordinary dividends",
+    );
+    c.line(
+        *line7,
+        "f1040",
+        "7",
+        "Form1040Income.line7",
+        Production::Carry,
+        "Capital gain or (loss). Attach Schedule D if required. If not required, check here",
+    );
+    c.line(
+        *line8,
+        "f1040",
+        "8",
+        "Form1040Income.line8",
+        Production::Carry,
+        "Additional income from Schedule 1, line 10",
+    );
+    c.line(
+        *line9,
+        "f1040",
+        "9",
+        "Form1040Income.line9",
+        Production::Combine,
+        "Add lines 1z, 2b, 3b, 4b, 5b, 6b, 7, and 8. This is your total income",
+    );
+    c.line(
+        *line10,
+        "f1040",
+        "10",
+        "Form1040Income.line10",
+        Production::Carry,
+        "Adjustments to income from Schedule 1, line 26",
+    );
+    c.line(
+        *line11,
+        "f1040",
+        "11",
+        "Form1040Income.line11",
+        Production::Combine,
+        "Subtract line 10 from line 9. This is your adjusted gross income",
+    );
+    c
+}
+
+fn zero_form1040income() -> crate::tax::printed::Form1040Income {
+    crate::tax::printed::Form1040Income {
+        qdcgt_net_capital_gain: Usd::ZERO,
+        line1a: Usd::ZERO,
+        line1z: Usd::ZERO,
+        line2a: Usd::ZERO,
+        line2b: Usd::ZERO,
+        line3a: Usd::ZERO,
+        line3b: Usd::ZERO,
+        line7: Usd::ZERO,
+        line8: Usd::ZERO,
+        line9: Usd::ZERO,
+        line10: Usd::ZERO,
+        line11: Usd::ZERO,
+    }
+}
+
+/// **Printed8949Row** — one disposal row. `part` is "I" (short-term) or "II" (long-term).
+///
+/// ★★ ONE TYPE, TWO PARTS, and both number their rows "1". Without the part qualifier rule (5) reports
+/// every field covered twice — the same shape as `ScheduleBRow` on Schedule B lines 1 and 5.
+///
+/// ★★ THE QUOTES ARE COLUMN NAMES, NOT FULL HEADERS, AND THAT IS A LIMIT OF THE TEXT LAYER.
+/// `pdftotext -layout` renders the 8949 header block as horizontal BANDS crossing all seven columns,
+/// so no column's header cell is contiguous after whitespace collapse. The transcription pass verified
+/// that "Subtract column (e) from column (d) and combine the result with column (g)" — which
+/// `printed.rs` presents as *"the form's own column-(h) header"* — is NOT findable contiguously. The
+/// words are on the page; the sentence is not quotable. `gain_h` is still `Combine`: the
+/// subtract-and-combine arithmetic is printed, just not in one span.
+pub fn cover_printed8949row(r: &crate::tax::printed::Printed8949Row, part: &str) -> Coverage {
+    let crate::tax::printed::Printed8949Row {
+        description: _,
+        date_acquired: _,
+        date_sold: _,
+        proceeds_d,
+        cost_e,
+        gain_h,
+    } = r;
+    let mut c = Coverage::default();
+    c.line(
+        *proceeds_d,
+        "f8949",
+        &fmt_part(part, "1", "d"),
+        "proceeds_d",
+        Production::Collected,
+        "Proceeds",
+    );
+    c.line(
+        *cost_e,
+        "f8949",
+        &fmt_part(part, "1", "e"),
+        "cost_e",
+        Production::Collected,
+        "Cost or other basis",
+    );
+    c.line(
+        *gain_h,
+        "f8949",
+        &fmt_part(part, "1", "h"),
+        "gain_h",
+        Production::Combine,
+        "Gain or (loss)",
+    );
+    c
+}
+
+/// **Printed8949Totals** — the per-part totals row.
+pub fn cover_printed8949totals(t: &crate::tax::printed::Printed8949Totals, part: &str) -> Coverage {
+    let crate::tax::printed::Printed8949Totals {
+        proceeds_d,
+        cost_e,
+        gain_h,
+    } = t;
+    let mut c = Coverage::default();
+    c.line(*proceeds_d, "f8949", &fmt_part(part, "2", "d"), "proceeds_d", Production::Combine,
+        "Totals. Add the amounts in columns (d), (e), (g), and (h) (subtract negative amounts). Enter each total here and include on your");
+    c.line(*cost_e, "f8949", &fmt_part(part, "2", "e"), "cost_e", Production::Combine,
+        "Totals. Add the amounts in columns (d), (e), (g), and (h) (subtract negative amounts). Enter each total here and include on your");
+    c.line(*gain_h, "f8949", &fmt_part(part, "2", "h"), "gain_h", Production::Combine,
+        "Totals. Add the amounts in columns (d), (e), (g), and (h) (subtract negative amounts). Enter each total here and include on your");
+    c
+}
+
+/// Part-qualify a line label: `("I", "1", "d")` -> `"I-1(d)"`.
+fn fmt_part(part: &str, line: &str, col: &str) -> String {
+    format!("{part}-{line}({col})")
+}
+
+fn zero_printed8949row() -> crate::tax::printed::Printed8949Row {
+    crate::tax::printed::Printed8949Row {
+        description: String::new(),
+        date_acquired: crate::conventions::TaxDate::from_ordinal_date(2024, 1).unwrap(),
+        date_sold: crate::conventions::TaxDate::from_ordinal_date(2024, 1).unwrap(),
+        proceeds_d: Usd::ZERO,
+        cost_e: Usd::ZERO,
+        gain_h: Usd::ZERO,
+    }
+}
+
+fn zero_printed8949totals() -> crate::tax::printed::Printed8949Totals {
+    crate::tax::printed::Printed8949Totals {
+        proceeds_d: Usd::ZERO,
+        cost_e: Usd::ZERO,
+        gain_h: Usd::ZERO,
+    }
+}
+
 /// Every covered form, in one place. Grows one entry per form as coverage lands.
 ///
 /// ★ The values are irrelevant — only the TABLE is extracted. The instances exist so the exhaustive
 /// destructures run, which is where the compile-time guarantee lives.
 pub fn all() -> Coverage {
     let mut c = Coverage::default();
-    c.0.extend(cover_f8995(&zero_f8995()).0);
+    c.0.extend(cover_form8995lines(&zero_form8995lines()).0);
+    c.0.extend(cover_form1040lines(&zero_form1040lines()).0);
+    c.0.extend(cover_form1040income(&zero_form1040income()).0);
+    // ★ Both 8949 parts, because one type serves Part I and Part II.
+    for part in ["I", "II"] {
+        c.0.extend(cover_printed8949row(&zero_printed8949row(), part).0);
+        c.0.extend(cover_printed8949totals(&zero_printed8949totals(), part).0);
+    }
     c.0.extend(cover_scheduleblines(&zero_scheduleblines()).0);
     c.0.extend(cover_schedulealines(&zero_schedulealines()).0);
     c.0.extend(cover_scheduleclines(&zero_scheduleclines()).0);
@@ -1330,5 +1981,13 @@ pub fn all() -> Coverage {
     c.0.extend(cover_form8959lines(&zero_form8959lines()).0);
     c.0.extend(cover_form8960lines(&zero_form8960lines()).0);
     c.0.extend(cover_scheduledlines(&zero_scheduledlines()).0);
+    // ★ The routing enum's money lives in one variant; cover that variant explicitly.
+    c.0.extend(
+        cover_scheduledrouting(&crate::tax::printed::ScheduleDRouting::NetLoss {
+            line21: Usd::ZERO,
+            line22_yes: false,
+        })
+        .0,
+    );
     c
 }

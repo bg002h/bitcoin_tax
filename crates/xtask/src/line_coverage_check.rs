@@ -77,12 +77,55 @@ const CEIL_IDIOMS: &[(&str, &str)] = &[
     ("more than zero", "the same clause, alternate phrasing"),
 ];
 
+/// ★★★ Money-bearing types that are NOT printed, each with the reason it reaches no page.
+///
+/// **The completeness check (4b) is fail-closed**: every type declaring a `Usd` must be either COVERED
+/// or listed here. Both require a human edit, so a new money-bearing type cannot arrive unexamined.
+/// This is a list of EXEMPTIONS WITH REASONS — the same shape as the field census's "carries no
+/// decision, with a reason" — not a list of outcomes someone happened to observe.
+///
+/// ★ The distinction being drawn is COMPUTE RESULT vs PRINTED LINES. `Form8959` is what the engine
+/// computes; `Form8959Lines` is what the emitter writes. Only the latter reaches paper.
+const NOT_PRINTED: &[(&str, &str)] = &[
+    (
+        "Form8959",
+        "compute result; `Form8959Lines` is the printed shape and IS covered (form8959.rs:5 says core          derives the Lines from this)",
+    ),
+    (
+        "Form8960",
+        "compute result; `Form8960Lines` is the printed shape and IS covered. No reference anywhere in          btctax-forms.",
+    ),
+    (
+        "Qbi8995",
+        "compute result — the QBI deduction figure that feeds 1040 L13 plus the carryforward-out.          `Form8995Lines` is the printed shape. No reference anywhere in btctax-forms.",
+    ),
+];
+
 /// **The ratchet.** Exceptions are lines that fit no production, each carrying a written reason.
 ///
 /// ★ This is the number two full review rounds were spent estimating. It only ever goes DOWN: raising
 /// it requires editing this line, in a diff, with a reason — which is the whole point. Same shape as
 /// the `GAPS` ratchet that went 16 → 0.
-const MAX_EXCEPTIONS: usize = 5;
+const MAX_EXCEPTIONS: usize = 9;
+// ★ RAISED 5 → 9 when Form 1040, Form 1040 income and Form 8949 landed (173 rows over 12 forms).
+//   The four new ones, each argued from the form's own words:
+//     f1040:12   "Standard deduction or itemized deductions (from Schedule A)" — two branches that
+//                BOTH enter. Itemizing is a Carry of Schedule A line 17; not itemizing is a Constant
+//                the form prints in its own margin. i1040gi adjudicates it as "the LARGER of" — and
+//                there is no larger-of production (`Bounded` is "the smaller of").
+//     f1040:16   "Tax (see instructions)" — the figure comes from the Tax Table / Tax Computation
+//                Worksheet / QDCGT Worksheet, none of which is ever emitted. No arithmetic, no source
+//                line. Same shape as f1040s1:21 and f1040s3:11.
+//     f1040:34   ★★ A CONDITIONAL ENTRY, NOT A CLAMP — and the distinction is the whole program.
+//                "If line 33 is more than line 24, subtract line 24 from line 33" states a condition
+//                but prints NO "enter -0-", so when it fails the line is BLANK, not zero. `Combine` is
+//                blank iff its operands are (both are populated on an owing return) and `Clamped`
+//                requires a "-0-" the form does not give — which is why rule (3)'s "-0-" half rejects
+//                it even though its clause matches the FLOOR_IDIOM "is more than line".
+//     QDCGT:3    a COMPOSITION (Bounded feeding a clamp) on a worksheet that is never emitted, whose
+//                clamp phrasing ("If either line 15 or line 16 is blank or a loss") is in neither
+//                idiom set. Filed rather than forced — forcing it would assert a polarity the quote
+//                does not state.
 // ★ RAISED 0 → 5 when the table was populated (118 rows over 11 forms). The five, each a line whose
 //   instruction genuinely fits no production — NOT a nearest-fit, which would print a wrong figure:
 //     f1040sse:4a  two-branch, BOTH branches enter (one Scaled, one Carry)
@@ -221,13 +264,108 @@ pub fn run() -> Result<String, String> {
         }
     }
 
-    // (5) Duplicate coverage of one line would let two rows disagree.
-    let mut seen: BTreeMap<(&str, &str), usize> = BTreeMap::new();
-    for e in &cov.0 {
-        *seen.entry((e.form, e.field)).or_default() += 1;
+    // (4b) ★★★ COMPLETENESS, DERIVED FROM SOURCE — is every money-bearing printed TYPE covered at all?
+    //
+    // The rules above check the rows that EXIST. This one checks that no type was silently skipped,
+    // which is the failure the module's own "honest limit" note recorded before nested money landed:
+    // `ScheduleBRow.amount` reached paper while nothing in the table mentioned it.
+    //
+    // ★ Derived, never hand-listed. Every `pub struct`/`pub enum` in the covered modules that declares
+    // a `Usd` is found by reading the source, and each must have a `cover_*` function. A new
+    // money-bearing type therefore fails the build the moment it is written — the same lesson as the
+    // productions and the missing-extract split: state the mechanism, let it decide, never enumerate
+    // the outcomes you happened to see.
+    {
+        let cov_src =
+            std::fs::read_to_string(root.join("crates/btctax-core/src/tax/line_coverage.rs"))
+                .map_err(|e| format!("cannot read line_coverage.rs: {e}"))?;
+        for rel in [
+            "crates/btctax-core/src/tax/printed.rs",
+            "crates/btctax-core/src/tax/other_taxes.rs",
+            "crates/btctax-core/src/tax/qbi.rs",
+        ] {
+            let src = std::fs::read_to_string(root.join(rel))
+                .map_err(|e| format!("cannot read {rel}: {e}"))?;
+            for (name, body) in money_bearing_types(&src) {
+                if !body.contains("Usd") {
+                    continue;
+                }
+                if NOT_PRINTED.iter().any(|(n, _)| *n == name) {
+                    continue;
+                }
+                let _ = &name;
+                let want = format!("fn cover_{}(", name.to_lowercase());
+                if !cov_src.contains(&want) {
+                    errs.push(format!(
+                        "{rel}: type `{name}` declares a Usd field but has no `cover_{}()` — a \
+                         money-bearing printed type that nothing in the table mentions is exactly the \
+                         gap nested money was",
+                        name.to_lowercase()
+                    ));
+                }
+            }
+        }
     }
-    for ((form, field), n) in seen.iter().filter(|(_, n)| **n > 1) {
-        errs.push(format!("{form}:{field} is covered {n} times"));
+
+    // (4c) ★★★ THE EXEMPTION MUST BE TRUE, NOT MERELY ASSERTED.
+    //
+    // A B1 plant found this loophole: adding a genuinely-printed type to `NOT_PRINTED` with any
+    // reason string silenced rule (4b) and nothing complained. An exemption list that anyone can
+    // extend by writing a sentence is not a gate — it is the oracle excuse list all over again.
+    //
+    // So the claim "this type is not printed" is CHECKED: the type name must not appear in any
+    // non-comment line of the emitter crate. Doc comments are excluded because a legitimate compute
+    // result is often NAMED in the emitter's prose ("core derives the Lines from this `Form8959`")
+    // without ever being consumed there.
+    {
+        let mut emitter_code = String::new();
+        let dir = root.join("crates/btctax-forms/src");
+        let mut stack = vec![dir];
+        while let Some(d) = stack.pop() {
+            if let Ok(rd) = std::fs::read_dir(&d) {
+                for ent in rd.flatten() {
+                    let p = ent.path();
+                    if p.is_dir() {
+                        stack.push(p);
+                    } else if p.extension().is_some_and(|e| e == "rs") {
+                        if let Ok(t) = std::fs::read_to_string(&p) {
+                            for l in t.lines() {
+                                let lt = l.trim_start();
+                                if !lt.starts_with("//") && !lt.starts_with("//!") {
+                                    emitter_code.push_str(l);
+                                    emitter_code.push('\n');
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for (name, why) in NOT_PRINTED {
+            // ★ WORD BOUNDARY, not substring. `Form8959` is a prefix of `Form8960Lines`'s sibling
+            //   `Form8959Lines` — a naive `contains` rejects every legitimate compute-result exemption
+            //   because its own printed counterpart is named after it.
+            if mentions_ident(&emitter_code, name) {
+                errs.push(format!(
+                    "NOT_PRINTED claims `{name}` is not printed ({why:?}) — but it appears in emitter \
+                     CODE under crates/btctax-forms/src. The exemption is false; cover it instead."
+                ));
+            }
+        }
+    }
+
+    // (5) Duplicate coverage of one LINE would let two rows disagree.
+    //
+    // ★ Keyed on (form, LINE, field), not (form, field) — the population pass proved why: a nested
+    //   type can legitimately print on two different lines. `ScheduleBRow.amount` is Schedule B line 1
+    //   (interest) AND line 5 (dividends), one Rust field, two form lines, no conflict. Keying on the
+    //   field alone rejected a correct table.
+    let mut seen: BTreeMap<(&str, &str, &str), usize> = BTreeMap::new();
+    for e in &cov.0 {
+        *seen.entry((e.form, e.line.as_str(), e.field)).or_default() += 1;
+    }
+    for ((form, line, field), n) in seen.iter().filter(|(_, n)| **n > 1) {
+        errs.push(format!("{form}:{line} ({field}) is covered {n} times"));
     }
 
     // (6) The ratchet.
@@ -277,6 +415,71 @@ pub fn run() -> Result<String, String> {
             errs.join("\n  - ")
         ))
     }
+}
+
+/// Every `pub struct` / `pub enum` in `src` that declares at least one `Usd` field, as (name, body).
+///
+/// ★ Deliberately syntactic and conservative: it reads the committed source rather than trusting a
+/// list. A type that stops carrying money simply drops out; one that starts carrying money appears.
+fn money_bearing_types(src: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for kw in ["pub struct ", "pub enum "] {
+        let mut from = 0usize;
+        while let Some(i) = src[from..].find(kw) {
+            let start = from + i;
+            let after = start + kw.len();
+            let name: String = src[after..]
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            from = after;
+            let Some(open) = src[after..].find('{') else {
+                continue;
+            };
+            // A tuple struct or a `;` before the brace is not a braced body.
+            if src[after..after + open].contains(';') {
+                continue;
+            }
+            let mut depth = 1usize;
+            let mut j = after + open + 1;
+            let b = src.as_bytes();
+            while j < b.len() && depth > 0 {
+                match b[j] {
+                    b'{' => depth += 1,
+                    b'}' => depth -= 1,
+                    _ => {}
+                }
+                j += 1;
+            }
+            let body = &src[after + open + 1..j.saturating_sub(1)];
+            // Only a real field declaration counts — not a doc-comment mention of `Usd`.
+            let declares_money = body.lines().any(|l| {
+                let l = l.trim();
+                !l.starts_with("//") && !l.starts_with("///") && l.contains(": Usd")
+            });
+            if declares_money && !name.is_empty() {
+                out.push((name, body.to_string()));
+            }
+        }
+    }
+    out
+}
+
+/// Does `hay` mention `ident` as a whole identifier (not as a prefix of a longer one)?
+fn mentions_ident(hay: &str, ident: &str) -> bool {
+    let b = hay.as_bytes();
+    let mut from = 0usize;
+    while let Some(i) = hay[from..].find(ident) {
+        let at = from + i;
+        let end = at + ident.len();
+        let before_ok = at == 0 || !(b[at - 1].is_ascii_alphanumeric() || b[at - 1] == b'_');
+        let after_ok = end >= b.len() || !(b[end].is_ascii_alphanumeric() || b[end] == b'_');
+        if before_ok && after_ok {
+            return true;
+        }
+        from = end;
+    }
+    false
 }
 
 #[cfg(test)]
@@ -349,7 +552,7 @@ mod tests {
         let mut c = Coverage::default();
         c.0.push(LineCoverage {
             form: "f8995",
-            line: "4",
+            line: "4".to_string(),
             field: "line4",
             production: Production::Exception,
             instruction: "Total qualified business income. Combine lines 2 and 3. If zero or less, enter -0-",
