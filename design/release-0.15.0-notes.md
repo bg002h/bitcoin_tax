@@ -4,15 +4,41 @@ Prepared 2026-07-31. **Not tagged, not pushed, not published.** Paste into the G
 publish gate clears; the repo has no in-repo CHANGELOG convention (v0.5.0–v0.14.0 all used GitHub
 release bodies), so this file is a staging artifact, not a new convention.
 
-Merge commit: `61feb91` — 36 commits from `feat/no-pen-deferrals`.
+**157 commits since v0.14.0.** 36 of them arrived via `61feb91`, the `feat/no-pen-deferrals` merge,
+and are what the sections below describe; the other 121 landed on `main` directly and are mostly
+non-shipping (census infrastructure, the form-authority pipeline, the review harness). Two things in
+that remainder DO reach filers and are covered above and below: the §G-16 vault fix, and §G-15's
+interview changes — `tax_year` now lives on `ReturnInputs` so the row key and the year can no longer
+disagree, answers are split into `PerYear` and `Durable` kinds, and the income-exclusion question is
+asked only for TY2025 and later instead of always.
 
 ---
 
-## ⚠️ Fixes a defect that was live in v0.14.0
+## ⚠️ Two defects that were live in v0.14.0
 
-**Form 8995 line 3 — the prior-year qualified business net loss carryforward — was never modelled.**
-Its absence **inflated the §199A deduction and UNDERSTATED tax** for any filer carrying a prior-year
-business loss. It is now transcribed, collected in the TUI's "Carryforwards from last year" section,
+### Deleted drafts left readable bytes in your vault
+
+**`delete_draft` was a plain SQL DELETE.** SQLite frees the row's pages without overwriting them,
+btctax serializes every page including free ones, and `save()` encrypts that image — so a draft you
+deleted in the TUI kept riding along inside the vault, SSNs, dates of birth and discarded figures
+included, in every subsequent generation of the file. Fixed: the store now enables `secure_delete`,
+so a DELETE destroys its bytes.
+
+**★ Upgrading does not cure an existing vault.** `secure_delete` governs FUTURE deletes; free-page
+residue already written by v0.14.0 or earlier is not scrubbed by it. If you used the TUI's input form
+under an earlier version and deleted a draft, the residue is still in your vault file today. Clearing
+it needs a one-off SQLite `VACUUM`, which btctax does not currently expose as a command — if this
+applies to you, say so and it will be added rather than left to hand-editing an encrypted store.
+
+The exposure is bounded: the vault is encrypted at rest, so this is readable only by someone who
+already has your passphrase *or* a copy of a decrypted image. It matters most if you have ever shared,
+backed up, or synced a vault file.
+
+### Form 8995 line 3 — an understated deduction
+
+**The prior-year qualified business net loss carryforward was never modelled.** Its absence
+**inflated the §199A deduction and UNDERSTATED tax** for any filer carrying a prior-year business
+loss. It is now transcribed, collected in the TUI's "Carryforwards from last year" section,
 and carried year-to-year by `--write-carryover`.
 
 If you filed a return with v0.14.0 or earlier **and** had a prior-year qualified-business loss
@@ -74,21 +100,30 @@ Form 8995-A phase-in is out of scope and refuses rather than approximates. See `
 
 2542 tests. Five gates: `make check`, `cargo fmt --all --check`, `cargo +1.88 check --workspace
 --locked`, `xtask check-isolation`, `scripts/pii-scan-generic.sh`. The TY2024 golden matrix
-(md5 `c4e1853ed82d113ca5cd97ffd8abbf47`) is **byte-unchanged across all 36 commits** — every change
-above either adds a field that was blank, or moves a figure only for filers whose inputs changed.
+(md5 `c4e1853ed82d113ca5cd97ffd8abbf47`) is **byte-unchanged** — checked at every commit of the
+`feat/no-pen-deferrals` branch, and at the endpoint against v0.14.0. Every change above either adds a
+field that was blank, or moves a figure only for filers whose inputs changed.
 
-Six independent review rounds ran on this branch, the last three scoped to what the earlier ones could
-not see. They found 9 blocking defects between them. Reviewer outputs are persisted verbatim under
-`reviews/`.
+Six independent review rounds ran on the branch, the last three scoped to what the earlier ones could
+not see; they found 9 blocking defects between them. A seventh, escalated round reviewed the release
+artifact itself — tarball contents, inter-crate pins, `include_str!` targets — and its one finding is
+folded above. Reviewer outputs are persisted verbatim under `reviews/`.
 
 ---
 
 ## Publish checklist (not yet done)
 
-- [ ] `scripts/.pii-patterns` authored by the owner — **gates both push and publish**
+- [ ] `scripts/.pii-patterns` authored by the owner — **gates PUSH only.** It is a `scripts/` file
+      and ships in no crate, so it does not gate `cargo publish`; publishing before pushing is
+      possible but would put source on crates.io that is not yet on GitHub
 - [ ] revoke the temporary crates.io token from the v0.14.0 publish
-- [ ] final pre-publish review (owner-approved model escalation), scoped to publish mechanics:
-      inter-crate pins, `include_str!` escapes, tarball contents — **not** tax logic, which has converged
+- [x] final pre-publish review (owner-approved model escalation), scoped to publish mechanics:
+      inter-crate pins, `include_str!` escapes, tarball contents — **not** tax logic, which has
+      converged. **DONE 2026-07-31 — verdict `publish`.** All ten tarballs verified: every
+      `include_str!` target in-crate and packaged, every inter-crate pin at 0.15.0, three verify-builds
+      compiled from the packaged form, no `design/`/`reviews/`/`scripts/` file in any listing. Its one
+      Important (the §G-16 disclosure missing from these notes) is folded above.
+      See `reviews/prepublish-0.15.0-fable.md`
 - [ ] `git tag v0.15.0`
 - [ ] publish dependency-first, **not** `--workspace`; verify each crate lands via the SPARSE index
       (the crates.io API 403s without a User-Agent)
