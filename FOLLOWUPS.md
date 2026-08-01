@@ -1178,6 +1178,39 @@ silently decide something on the filer's behalf.
 legal judgement and is out of scope in the same way intent is (§G-11's scope bound). The narrow question
 is whether the filer, having taken such a position, can file it correctly.
 
+### G-24 — ★★★ 1040 lines 34 and 37 print a sworn ZERO where the form says BLANK (found 2026-08-01)
+
+**Owning phase: §G-11 P1.** Found by the §G-11 coverage transcription, from the form's own words.
+
+```
+1040 L37  "Subtract line 33 from line 24. This is the amount you owe."
+          No clamp clause. No condition. => a Combine.
+          printed.rs:697  let line37 = (line24 - line33).max(Usd::ZERO);
+          => a hard 0 on EVERY REFUND RETURN.
+
+1040 L34  "If line 33 is more than line 24, subtract line 24 from line 33..."
+          States a condition, prints NO "enter -0-" => when it fails the line is BLANK.
+          printed.rs:696  let line34 = (line33 - line24).max(Usd::ZERO);
+          => a hard 0 on EVERY OWING RETURN.
+```
+
+**Same defect, opposite directions, on a mutually-exclusive pair.** The ABSENCE of `-0-` on both lines
+is exactly what distinguishes "leave blank" from "enter zero" — the §G-11 thesis, on the most-filed
+form there is.
+
+★ **Direction:** neither changes tax owed; both fabricate testimony. L34's zero on an owing return
+swears "you overpaid $0"; L37's on a refund return swears "you owe $0". Both are statements the filer
+did not make, on lines the form leaves blank.
+
+★★ **Not fixable as a leaf retype alone.** `Usd` cannot express blank, so this waits on §G-11 P0b's
+`LineEntry`. Recorded here so it is not lost between phases — and so the fix, when it lands, is
+recognised as the first real figure §G-11 moves.
+
+**Also filed from the same pass, smaller:** 1040 **25c** — the form's caption is a collected "Other
+forms (see instructions)" but the code computes `f8959.line24 + other_withholding`, a sum the 1040
+states nowhere. 1040 **19** — a hardcoded `Usd::ZERO` on a line whose production is a Carry from
+Schedule 8812, a form btctax never emits; that is the answered-ness class, not a production misfit.
+
 ### G-11 — ★★★ ARCHITECTURAL: the emitter cannot express "no testimony" — `Usd::ZERO` prints `0`
 
 **Owning phase: NOT B3.** This is a whole-surface finding, larger than Schedule 1-A, and it must not be
