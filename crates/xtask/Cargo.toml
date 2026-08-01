@@ -17,6 +17,7 @@ btctax-update-prices = { path = "../btctax-update-prices", version = "0.15.0" }
 # For `dump-fields`: reuses the shipped AcroForm reader (testonly re-exports load/collect_fields)
 # so the map author sees exactly the field names the filler will see — not a second parser's view.
 btctax-forms = { path = "../btctax-forms", version = "0.15.0" }
+btctax-core = { path = "../btctax-core", version = "0.15.0" }
 clap = "4.5"          # for `clap::Command` + the `CommandFactory` trait (Cli::command())
 clap_mangen = "0.2"   # roff man-page generator (clap 4.x-compatible); generator-only
 # `xtask examples` builds synthetic vaults in a tempdir and runs the real `btctax` binary to capture

@@ -18,6 +18,7 @@ mod examples;
 mod form_geometry;
 mod harness_check;
 mod label_reader;
+mod line_coverage_check;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -145,6 +146,17 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some("line-coverage") => {
+            // ★ §G-11: every printed money field declares which IRS instruction production it
+            //   transcribes, checked verbatim against design/forms/extract/.
+            match line_coverage_check::run() {
+                Ok(msg) => println!("{msg}"),
+                Err(e) => {
+                    eprintln!("xtask line-coverage: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
         Some("check-isolation") => {
             if let Err(e) = check_isolation::run() {
                 eprintln!("xtask check-isolation: {e}");
@@ -164,7 +176,7 @@ fn main() {
         _ => {
             eprintln!(
                 "usage: cargo run -p xtask -- <docs [--pdf] | examples | subcommand-coverage | \
-                 check-isolation | cite-check | authority-conflicts | harness-check | archive-check | authority-manifest [--regen] | extract-geometry <stem> | label-census <stem> | label-proof <stem> | label-boxes <stem> | \
+                 check-isolation | line-coverage | cite-check | authority-conflicts | harness-check | archive-check | authority-manifest [--regen] | extract-geometry <stem> | label-census <stem> | label-proof <stem> | label-boxes <stem> | \
                  classify-path <path> | \
                  extract-schedule-1a | dump-fields <pdf>>"
             );

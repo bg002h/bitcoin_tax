@@ -11,6 +11,7 @@ pub mod compute;
 pub mod form6251;
 pub mod form8275;
 pub mod frozen_guard;
+pub mod line_coverage;
 pub mod method;
 /// Test-support (§6.2): reproduces btctax's §3.1 printed chain on an independent oracle's figures for
 /// the differential sweep. Like [`testonly`], a plain `pub mod` (NOT `#[cfg(test)]`) so the `tests/`
