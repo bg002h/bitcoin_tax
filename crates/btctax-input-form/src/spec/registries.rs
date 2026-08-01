@@ -301,8 +301,8 @@ const SKIPPABLE_FIELDS: &[Field] = &[
         }
     }),
     // ★ Index 12 — Form 8283 5a/5b/5c as one return-level universal (§G-21). No parent gate: the
-    // donations are in the LEDGER, so it is offered always and made mandatory by
-    // `screen_compute_dependent` on a Section-B year.
+    // donations are in the LEDGER, so it is offered always and made mandatory by `screen_absolute`
+    // on a return that actually CLAIMS a noncash §170 deduction (Schedule A line 12 > 0).
     skippable_tristate!(12, FieldId::DonationsHadRestrictions, |ri| {
         ri.donations_had_restrictions = None;
         Ok(())

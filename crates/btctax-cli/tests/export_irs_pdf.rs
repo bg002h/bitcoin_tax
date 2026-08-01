@@ -998,7 +998,13 @@ fn full_return_vault(
 }
 
 /// ★ SCREEN 1 — `screen_inputs`. An unanswered mandatory declaration must stop the export.
-/// Mutation-verified: deleting the `screen_inputs` block reds this by writing PDFs.
+///
+/// Mutation-verified: deleting the `screen_inputs` block reds this. ★ Note the mechanism, because the
+/// fold review measured it and an imprecise claim here would be the very thing this file exists to
+/// prevent: it reds via a SECOND by-design backstop (`ReturnHeader::build`'s `HeaderError::Unanswered`,
+/// packet.rs:381-390) rather than by writing bytes, so `wrote_nothing()` still holds. B1 is satisfied —
+/// the test discriminates — but this screen is belt-and-braces, not the sole guard. Screens 2 and 3
+/// red literally as documented, with real PDF bytes observed landing.
 #[test]
 fn the_export_path_refuses_on_an_input_screen_and_writes_no_bytes() {
     let (_d, vault, out) = full_return_vault(&real_events_2024(), |ri| {

@@ -1600,8 +1600,30 @@ pub fn screen_absolute(
     // real §63(e) choice, which is why this screens AFTER `assemble_absolute` — it is not derivable
     // from the inputs, and re-deriving `choose_deduction` here is exactly the compression the
     // transcribe rule forbids.
+    //
+    // ★★★ FOLD-REVIEW — KEYED ON THE QUANTITY `packet.rs` ITSELF FILTERS ON, so the gate and the
+    // packet cannot disagree about whether a Form 8283 exists. r3 re-keyed this once and only got
+    // half of it: `deduction_is_itemized` reads the RETURN for the election, but the amount was still
+    // `year_donation_deduction`, i.e. still the LEDGER — the very thing r3's own rationale above
+    // condemns. An itemizing filer whose §170(b) ceiling zeroes the noncash deduction (itemizing on
+    // mortgage interest, 30% of a small AGI allowing nothing) claims $0 of charity and attaches NO
+    // 8283, yet was hard-blocked, escapable only by a false "No" under §6065 or by deleting a
+    // truthful ledger event.
+    //
+    // Schedule A **line 12** is the §170(b)-LIMITED figure that actually reduces taxable income, and
+    // it is what Form 8283's own text keys on: "Attach one or more Forms 8283 to your tax return if
+    // you claimed a total deduction of over $500 for all contributed property" — the CLAIMED
+    // deduction, not the ledger's fair market value.
+    //
+    // ★ A ceiling-zeroed year is NOT thereby unguarded: its excess rolls forward, and
+    // `apply_carryover_writeback`'s vouch-for gate refuses to persist it. The year files clean
+    // because it claims nothing; the carryover cannot be laundered. The two gates are a pair.
+    let claimed_noncash = ar
+        .schedule_a
+        .as_ref()
+        .map_or(Usd::ZERO, |a| a.charitable_noncash_12);
     let donated = crate::forms::year_donation_deduction(state, year);
-    if ar.deduction_is_itemized && donated > Usd::ZERO {
+    if claimed_noncash > Usd::ZERO {
         // A DECLARED restriction shrinks or denies the deduction at ANY amount.
         if ri.donations_had_restrictions == Some(true) {
             return refusal(
@@ -1616,7 +1638,11 @@ pub fn screen_absolute(
         }
         // UNANSWERED refuses only when the form actually PRINTS 5a/5b/5c — i.e. a Section B year.
         // Below that the questions are never posed, so silence forgoes nothing and asserts nothing.
+        // ★ 5a/5b/5c are printed only when an 8283 ACTUALLY ATTACHES (`packet.rs` filters on line 12
+        //   over $500) **and** the year is a Section B one (`forms.rs` splits on the year aggregate
+        //   over $5,000). Both terms, or the message asserts a form the packet does not write.
         if ri.donations_had_restrictions.is_none()
+            && claimed_noncash > crate::tax::printed::FORM_8283_THRESHOLD
             && donated > crate::tax::tables::QUALIFIED_APPRAISAL_THRESHOLD
         {
             return refusal(
@@ -1728,14 +1754,21 @@ pub fn apply_carryover_writeback(
     // not a licence to write one btctax knows is wrong.
     if !ar.charitable_carryover_out.is_empty() {
         let donated = crate::forms::year_donation_deduction(state, year);
-        if ri.donations_had_restrictions == Some(true) {
+        // ★ FOLD-REVIEW Minor — scoped by `donated`, like its `is_none()` sibling below. Without it
+        //   a year with NO donation at all but a rolled-in `charitable_carryover_in` was refused by a
+        //   message stating as fact that btctax had valued a donation at full FMV. This year's answer
+        //   is about THIS year's gifts; a prior year's carryover is that year's business.
+        if ri.donations_had_restrictions == Some(true) && donated > Usd::ZERO {
             return Err(format!(
                 "carryover write-back REFUSED for {year}: you declared that a donated property carried \
                  a restriction or a retained right (Form 8283 line 5a/5b/5c), which REDUCES or DENIES \
                  the §170 deduction (Reg §1.170A-7) — but btctax values every donation at full fair \
                  market value, so the ${:.2} carryover it computed is too large. Writing it into \
                  {next}'s inputs would put an inflated figure beyond every check, because next year \
-                 has no way to know the gift was restricted. Work the carryover out by hand.",
+                 has no way to know the gift was restricted. Work the carryover out by hand. \
+                 ★ NOTE: this refuses the WHOLE write-back, so your QBI and REIT/PTP carryforwards \
+                 were not written either — nothing was persisted. Enter all three on {next}'s row by \
+                 hand (`btctax income import`).",
                 ar.charitable_carryover_out
                     .iter()
                     .map(|c| c.amount)
@@ -1751,7 +1784,8 @@ pub fn apply_carryover_writeback(
                  SECTION B, whose lines 5a, 5b and 5c ask whether any donated property carried a \
                  restriction — and the answer is not on file. The carryover btctax computed assumes \
                  full fair market value, so it cannot be persisted as {next}'s input without it. \
-                 Run `btctax income answer`, then re-run this.",
+                 ★ This refuses the WHOLE write-back — your QBI and REIT/PTP carryforwards were not \
+                 written either. Run `btctax income answer`, then re-run this and all three land.",
                 next = year + 1
             ));
         }
@@ -1964,21 +1998,20 @@ mod tests {
     // ── §G-21 — the restriction questions, re-keyed by r3 I-2/I-3 ────────────────────────────────
 
     /// A donation of `claimed`, made in 2024.
+    /// A donation of `claimed`, made in 2024, **with a real long-term leg**.
+    ///
+    /// ★★★ FOLD-REVIEW — THE LEG IS THE POINT. This fixture originally set `claimed_deduction` with
+    /// `legs: vec![]`, which is a shape no real ledger produces: `year_donation_deduction` reads
+    /// `claimed_deduction` and saw the gift, while `crypto_charitable_gifts` iterates the LEGS and
+    /// saw nothing — so Schedule A line 12 was `0` and the return claimed no deduction at all. The
+    /// r3 tests therefore passed against the LEDGER figure alone, which is precisely the defect the
+    /// fold review found. A test whose fixture cannot reach the return cannot pin a rule about the
+    /// return.
     fn donation_state(claimed: Usd) -> LedgerState {
-        use crate::state::{Removal, RemovalKind, RemovalLeg};
-        LedgerState {
-            removals: vec![Removal {
-                event: EventId::decision(21),
-                kind: RemovalKind::Donation,
-                removed_at: date!(2024 - 09 - 09),
-                legs: Vec::<RemovalLeg>::new(),
-                appraisal_required: true,
-                claimed_deduction: Some(claimed),
-                donor_acquired_at: None,
-                donee: Some("Habitat".into()),
-            }],
-            ..Default::default()
-        }
+        state_removals(vec![donation(
+            date!(2024 - 09 - 09),
+            vec![donation_leg(Term::LongTerm, claimed / dec!(5), claimed)],
+        )])
     }
 
     /// ★★★ **r3 I-2 — the gate was TOO NARROW, and the gap was an UNDERSTATEMENT.**
@@ -4766,6 +4799,163 @@ mod tests {
         );
     }
 
+    /// ★★★ **FOLD-REVIEW — r3's I-3 fix swapped one wrong predicate for ANOTHER, and I wrote the
+    /// standard it violates three lines above it.**
+    ///
+    /// r3 correctly diagnosed that the gate read the LEDGER rather than the RETURN, and its own
+    /// rationale says so verbatim: *"TOO WIDE. `year_donation_deduction` reads the LEDGER, not the
+    /// return … a restriction changes no figure — yet they were refused, unescapably, by a message
+    /// asserting 'this year files a Form 8283 SECTION B'. It does not."* Then it re-keyed to
+    /// `ar.deduction_is_itemized && year_donation_deduction(state, year) > 0` — which reads the return
+    /// for the ELECTION and **still reads the ledger for the AMOUNT**. Same organ, half-treated.
+    ///
+    /// The case that survives it: an itemizing filer whose §170(b) ceiling zeroes the noncash
+    /// deduction. AGI $0 with $20,000 of mortgage interest itemizes on the mortgage alone, while
+    /// 30% × $0 = $0 allows no charitable deduction at all. Schedule A line 12 is `0`, the packet
+    /// writes **no Form 8283** — both skeptics exported it and confirmed the packet holds only
+    /// `00_f1040.pdf`, `07_f1040sa.pdf` and `manifest.txt` — and the return was still hard-blocked.
+    /// The only exits were a false "No" under §6065, or deleting a truthful ledger event.
+    ///
+    /// ★★ The predicate is now the quantity `packet.rs` ITSELF filters on — Schedule A line 12, the
+    /// §170(b)-LIMITED figure — so the gate and the packet cannot disagree about whether an 8283
+    /// exists. Form 8283's own text keys on the same thing (f8283--2025.txt:8,10: *"Attach one or more
+    /// Forms 8283 to your tax return if you claimed a total deduction of over $500 for all contributed
+    /// property"* — the CLAIMED deduction, not the ledger's fair market value).
+    ///
+    /// ★ The ceiling-zeroed year is not thereby unguarded: its excess rolls forward, and
+    /// `apply_carryover_writeback`'s vouch-for gate refuses to persist it. The year files clean
+    /// because it claims nothing; the carryover cannot be laundered. Those two gates are the pair.
+    ///
+    /// Mutation-verified: restoring either `year_donation_deduction`-keyed arm reds the ceiling row.
+    #[test]
+    fn an_itemizer_whose_170b_ceiling_zeroes_the_gift_files_no_8283_and_is_not_blocked() {
+        let p = ty2024_params();
+        let table = real_2024_table();
+        // AGI $0. Mortgage interest alone ($20,000) beats the $14,600 standard, so the return
+        // ITEMIZES — but §170(b)'s 30% ceiling on a $0 base allows $0 of noncash charity.
+        let screened = |answer: Option<bool>, claimed: Usd| {
+            let ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                donations_had_restrictions: answer,
+                schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
+                    mortgage_interest_1098: dec!(20000),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            let st = state_removals(vec![donation(
+                date!(2024 - 06 - 01),
+                vec![donation_leg(Term::LongTerm, dec!(1000), claimed)],
+            )]);
+            let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+            assert!(ar.deduction_is_itemized, "fixture must ITEMIZE");
+            assert_eq!(
+                ar.schedule_a
+                    .as_ref()
+                    .map_or(Usd::ZERO, |a| a.charitable_noncash_12),
+                Usd::ZERO,
+                "…and the §170(b) ceiling must zero the noncash deduction — the whole point"
+            );
+            screen_absolute(&ri, &ar, &p, &st, 2024).map(|r| r.reason)
+        };
+
+        // ★ THE DEFECT: the return claims $0 of noncash charity and attaches no 8283, so a
+        //   restriction moves no figure — but the ledger-keyed gate refused it, escapably only by
+        //   perjury or by deleting a truthful event.
+        assert_eq!(
+            screened(Some(true), dec!(4000)),
+            None,
+            "nothing is claimed, so nothing is overstated — refusing here is a false block"
+        );
+        assert_eq!(
+            screened(None, dec!(50000)),
+            None,
+            "…and the unanswered arm asserted 'this year files a Form 8283 SECTION B'. It does not."
+        );
+
+        // ★★ AND THE BAND BETWEEN THEM. A ceiling can land the claimed deduction ABOVE $0 but at or
+        //    below the $500 attachment threshold — AGI $1,600 gives a 30% ceiling of $480 — so the
+        //    return claims a noncash deduction and STILL files no Form 8283. The unanswered arm must
+        //    not fire there: with no 8283 attached, lines 5a/5b/5c are never printed, so silence
+        //    asserts nothing. (Mutation-verified: dropping the `> FORM_8283_THRESHOLD` term reds this.)
+        let band = |answer: Option<bool>| {
+            let ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                donations_had_restrictions: answer,
+                schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
+                    mortgage_interest_1098: dec!(20000),
+                    ..Default::default()
+                }),
+                w2s: vec![w2(Owner::Taxpayer, dec!(1600), dec!(1600), dec!(1600))],
+                ..Default::default()
+            };
+            let st = state_removals(vec![donation(
+                date!(2024 - 06 - 01),
+                vec![donation_leg(Term::LongTerm, dec!(1000), dec!(50000))],
+            )]);
+            let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+            let l12 = ar
+                .schedule_a
+                .as_ref()
+                .map_or(Usd::ZERO, |a| a.charitable_noncash_12);
+            assert!(
+                l12 > Usd::ZERO && l12 <= crate::tax::printed::FORM_8283_THRESHOLD,
+                "fixture must claim a noncash deduction in the no-8283 band, got {l12}"
+            );
+            screen_absolute(&ri, &ar, &p, &st, 2024).map(|r| r.reason)
+        };
+        assert_eq!(
+            band(None),
+            None,
+            "no 8283 attaches, so 5a/5b/5c are never printed — an unanswered filer asserts nothing"
+        );
+        // …but a DECLARED restriction still refuses, because the claimed deduction is real and too
+        // large whatever the form-attachment threshold says. Reg §1.170A-7 is about the DEDUCTION.
+        assert_eq!(
+            band(Some(true)),
+            Some(RefuseReason::DonationRestrictionsUnresolved),
+            "the $480 it claims is still overstated — the 8283 threshold governs paperwork, not §170"
+        );
+
+        // …while a return that DOES claim the deduction is still caught. $60,000 of AGI gives a
+        // $18,000 ceiling, so line 12 is non-zero and an 8283 really does attach.
+        let claiming = |answer: Option<bool>, claimed: Usd| {
+            let ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                donations_had_restrictions: answer,
+                schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
+                    mortgage_interest_1098: dec!(20000),
+                    ..Default::default()
+                }),
+                w2s: vec![w2(Owner::Taxpayer, dec!(60000), dec!(60000), dec!(60000))],
+                ..Default::default()
+            };
+            let st = state_removals(vec![donation(
+                date!(2024 - 06 - 01),
+                vec![donation_leg(Term::LongTerm, dec!(1000), claimed)],
+            )]);
+            let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+            assert!(
+                ar.schedule_a
+                    .as_ref()
+                    .map_or(Usd::ZERO, |a| a.charitable_noncash_12)
+                    > crate::tax::printed::FORM_8283_THRESHOLD,
+                "fixture must actually claim a noncash deduction over $500"
+            );
+            screen_absolute(&ri, &ar, &p, &st, 2024).map(|r| r.reason)
+        };
+        assert_eq!(
+            claiming(Some(true), dec!(9000)),
+            Some(RefuseReason::DonationRestrictionsUnresolved),
+            "a claimed, restricted deduction is still too large — refuse"
+        );
+        assert_eq!(
+            claiming(None, dec!(9000)),
+            Some(RefuseReason::DonationRestrictionsUnresolved),
+            "…and an attached Section B still prints 5a/5b/5c, which btctax may not answer"
+        );
+    }
+
     /// ★★★ **PRE-MERGE I-2 — a REGRESSION the r3 fold itself introduced, and a laundering path.**
     ///
     /// r3's I-3 fix correctly stopped refusing a STANDARD-DEDUCTION year that has a declared donation
@@ -4890,6 +5080,39 @@ mod tests {
             apply_carryover_writeback(&ar, &ri, &st, 2024, ReturnInputs::default(), false).is_ok(),
             "a restriction declaration with no charitable carryover blocks nothing"
         );
+
+        // (6) ★ FOLD-REVIEW Minor — a year with NO donation but a rolled-in charitable carryover is
+        //     NOT this gate's business. Refusing it printed a message asserting btctax had valued a
+        //     donation at full FMV, which is false: there was no donation to value.
+        let ri_no_gift = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            donations_had_restrictions: Some(true),
+            charitable_carryover_in: vec![crate::tax::return_inputs::CharitableCarryItem {
+                amount: dec!(5000),
+                class: crate::tax::return_inputs::CharitableClass::CapGainProp30,
+                origin_year: 2023,
+                provenance: CarryProvenance::User,
+            }],
+            w2s: vec![w2(Owner::Taxpayer, dec!(20000), dec!(20000), dec!(20000))],
+            ..Default::default()
+        };
+        let st_no_gift = LedgerState::default(); // no donations THIS year
+        let ar_no_gift = assemble_absolute(&ri_no_gift, &st_no_gift, &p, &table, 2024);
+        if !ar_no_gift.charitable_carryover_out.is_empty() {
+            assert!(
+                apply_carryover_writeback(
+                    &ar_no_gift,
+                    &ri_no_gift,
+                    &st_no_gift,
+                    2024,
+                    ReturnInputs::default(),
+                    false
+                )
+                .is_ok(),
+                "this year's restriction answer is about THIS year's gifts; a prior year's carryover \
+                 is that year's business"
+            );
+        }
 
         // ★ `--force` must NOT open this. It exists to overwrite a USER figure, not to launder one.
         let (ri, st, ar) = build(Some(true), dec!(50000));

@@ -1448,18 +1448,21 @@ refusal. Look for this shape before building a per-row collection surface.
 
 **Why the question is offered UNCONDITIONALLY but enforced NARROWLY.** Liveness is `fn(&ReturnInputs)`
 and the donations live in the **`LedgerState`**, which it cannot see — the same blindness that puts the
-non-crypto-noncash guard sits in a screen rather than in `screen_inputs`. So the skippable is
-always *offered* (a filer who donated nothing is never blocked by it) and the gate that actually
-**binds** is keyed on `year_donation_deduction(state, year) > QUALIFIED_APPRAISAL_THRESHOLD`, i.e. on a
-year that genuinely files a Section B. A gift *at* $5,000 is Section A and is never asked.
+non-crypto-noncash guard in a screen rather than in `screen_inputs`. So the skippable is always
+*offered* (a filer who donated nothing is never blocked by it), and the gate that actually **binds**
+lives in `screen_absolute`, keyed on **Schedule A line 12** — the §170(b)-LIMITED figure the return
+actually claims, which is the same quantity `packet.rs` filters on to decide whether a Form 8283
+attaches at all. A declared restriction refuses whenever line 12 is above zero; an UNANSWERED one
+refuses only when an 8283 attaches (line 12 > $500) **and** the year is a Section B (aggregate >
+$5,000), because only then are 5a/5b/5c printed.
 
 **Both refusal directions are enforced, and they refuse for opposite reasons.** Unanswered refuses
 because btctax must not answer for the filer; `Some(true)` refuses because the answer is known and it
 says the full-FMV deduction btctax computed is **too large** (Reg §1.170A-7) — and btctax cannot tell
 which gift, so it declines the year rather than file an overstated number.
 
-★ **B1 discharged with five observed kills.** Refusal side: dropping the `None` arm, dropping the
-`Some(true)` arm, dropping the threshold scope, and widening `>` to `>=` (which reds on exactly $5,000)
+★ **B1 discharged with observed kills at every revision.** Refusal side (as re-keyed): reverting the
+outer key to the ledger aggregate, dropping the 8283-attaches term, and dropping the Section-B term
 each red by name. Emitter side: writing "No" on an unanswered return reds, and so does not writing it —
 the `3b22ca1` class in both directions. A sixth, copying Schedule C's `"Yes"/"No"` on-state by analogy,
 is caught **twice**: by the test and independently by the §G-19b on-state guard.
