@@ -14,10 +14,20 @@
 //! production. That is the §G-11 SPEC's "the 65th site cannot choose a silent zero", arrived at from
 //! the front — before the types, rather than after the migration.
 //!
-//! ★ **The `_` rule, extended to money.** `classifier.rs` deliberately PERMITS `_` on `Usd` leaves,
-//! which is why it is blind to all 64 fabrication sites. Here `_` is **FORBIDDEN** on money: a `Usd`
-//! must be passed to [`Coverage::line`], which consumes it. Non-money leaves (`String`, `bool`) may be
-//! `_`-bound, because they are not this module's business.
+//! ★★ **The `_` rule — and what it does NOT give you.** `classifier.rs` deliberately PERMITS `_` on
+//! `Usd` leaves, which is why it is blind to all 64 fabrication sites. Here the destructure NAMES every
+//! money field, and the named value is consumed by [`Coverage::line`].
+//!
+//! ★★★ **But the guarantee is "a new money field must be NAMED", not "must be CLASSIFIED"** — review
+//! r6 (I-4) proved it: changing `line4,` to `line4: _,` and deleting its `c.line(..)` compiles, drops
+//! Schedule 2 line 4 (self-employment tax, a real printed line) from the table, and the only visible
+//! difference is a row count nothing asserts on. `#![deny(unused_variables)]` is satisfied by `_`.
+//! An earlier version of this comment claimed `_` was FORBIDDEN on money. **It is not.**
+//!
+//! So the compiler forces *a human must EDIT this file*, and the minimum edit that silences it is two
+//! mechanical lines. That is the same honest limit `classifier.rs` records for itself — the residual
+//! evasion is grep-able review residue, not a compile error — and it is worth having, because every
+//! recurrence of this class began with a field nobody looked at. Filed as §G-27.
 //!
 //! ★★ **THE HONEST LIMIT, stated so it is not mistaken for completeness.** This covers every money
 //! field declared DIRECTLY on a covered struct. Money that lives in a NESTED type is not yet reached:

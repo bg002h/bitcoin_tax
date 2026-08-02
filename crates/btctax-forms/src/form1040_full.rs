@@ -196,6 +196,57 @@ pub fn fill_form_1040_full_with_map(
     // ★ Fixed HERE rather than by retyping the leaf: `Usd` cannot express blank — that is §G-11 P0b's
     // `LineEntry` — but the writer can simply decline to write. When P0b lands this becomes a
     // `LineEntry::Blank` and the comparison moves to the constructor.
+    // ★★★ r6 I-1 — RESTORE THE FAIL-CLOSED GEOMETRY THIS BRANCH TOOK AWAY.
+    //
+    // Before the gate, 34/35a/37 all wrote into one descent group, so `verify.rs`'s ordinal-y check
+    // caught a 34↔37 or 35a↔37 map swap MAP-INDEPENDENTLY and returned `Err(Geometry(..))`. Making the
+    // two arms mutually exclusive means the group never holds both again — so that swap now returns
+    // `Ok` and only a value assertion in one KAT notices. The r6 review demonstrated it by planting
+    // both swaps against the pre- and post-change writers.
+    //
+    // ★ The cost is entirely in the NEXT map: TY2024's is correct and pinned by literal FQN in a test,
+    // but that is a test-time guard on one committed asset, not the production guarantee two doc
+    // comments in this crate still promise. TY2025's full-return map does not exist yet.
+    //
+    // So assert the ordering from the BLANK PDF's own geometry, before either branch runs. It holds on
+    // whichever arm fires — and on neither — because it never looks at what we wrote.
+    //
+    // ★★ B1, observed. This guard sits on the production path of EVERY `fill_form_1040_full`, so the
+    // whole 1040 KAT suite is its kill-test rather than one dedicated case. Both swaps were planted in
+    // the committed `f1040.map.toml` and watched red:
+    //
+    //   line35a ↔ line37 → Geometry("… sit at y 486.0/414.0/474.0, which is not strictly descending")
+    //   line34  ↔ line37 → Geometry("… sit at y 414.0/474.0/486.0, which is not strictly descending")
+    //
+    // Both returned `Ok` before this guard existed, with only a value assertion in one KAT noticing.
+    {
+        let cy_of = |cell: &MoneyCell, what: &str| -> Result<f32, FormsError> {
+            // A pair's dollars field carries the row's y just as a single does.
+            let fqn = cell.fields()[0];
+            blank_fields
+                .iter()
+                .find(|f| f.fqn == fqn)
+                .and_then(|f| f.cy())
+                .ok_or_else(|| {
+                    FormsError::Geometry(format!(
+                        "1040 {what} maps to {fqn}, which has no rectangle in the blank form"
+                    ))
+                })
+        };
+        let y34 = cy_of(need(&map.line34, "line34", y)?, "line 34")?;
+        let y35a = cy_of(need(&map.line35a, "line35a", y)?, "line 35a")?;
+        let y37 = cy_of(need(&map.line37, "line37", y)?, "line 37")?;
+        // The form prints them in this order down the page, so their centres strictly descend.
+        if !(y34 > y35a && y35a > y37) {
+            return Err(FormsError::Geometry(format!(
+                "1040 refund/owe block is mis-mapped: lines 34/35a/37 sit at y {y34}/{y35a}/{y37}, \
+                 which is not strictly descending. The form prints 'amount you overpaid', then \
+                 'refunded to you', then 'amount you owe' — a swap here would print the amount OWED \
+                 into the box captioned OVERPAID."
+            )));
+        }
+    }
+
     let overpaid = lines.line33 > lines.line24;
     let owed = lines.line24 > lines.line33;
     if overpaid {

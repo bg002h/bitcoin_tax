@@ -1498,10 +1498,17 @@ fn the_1040_overpaid_and_owed_lines_are_mutually_exclusive_and_blank_when_not_ap
     //     fixtures could not tell the two gates apart, and that this test's own doc comment claimed
     //     they could.
     //
-    //     They diverge where it matters: a hand-edited `income import` TOML can state a `line34` that
-    //     CONTRADICTS its own operands. That is the `b94508d` orphan class — a stored answer surviving
-    //     a correction to the thing that gated it — and `LIMITATIONS.md` actively directs filers to
-    //     hand-edit TOML. Deriving from the operands is what makes the mark impossible.
+    //     ★★ CORRECTED at r6: I first justified this as reachable through a hand-edited `income
+    //     import` TOML. **That was wrong, and I had not checked it.** `income import` parses into
+    //     `ReturnInputs`; `Form1040Lines` carries no serde derives (`printed.rs:447`) and is built at
+    //     exactly one site (`printed.rs:699`), which always computes 34/37 from 24/33. The state is
+    //     reachable only from a fixture like this one.
+    //
+    //     The gate is still the right one, for a forward-looking reason rather than a present one:
+    //     deriving from the OPERANDS keeps the mark impossible if `printed.rs`'s `.max(Usd::ZERO)`
+    //     ever moves, or if this struct ever becomes deserializable. A `!= ZERO` gate would silently
+    //     start printing again on either change. That is a real guarantee — it is just not the one I
+    //     claimed.
     let mut orphan = f1040();
     orphan.line24 = dec!(27119); // tax exceeds payments ⇒ the filer OWES
     orphan.line33 = dec!(26215);

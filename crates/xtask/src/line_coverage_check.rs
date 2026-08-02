@@ -147,8 +147,22 @@ const MAX_UNVERIFIABLE: usize = 0;
 /// Run the check. Returns `Err` with every failure, so one run reports the whole picture rather than
 /// the first problem.
 pub fn run() -> Result<String, String> {
+    check(&line_coverage::all())
+}
+
+/// The rules, applied to ANY table.
+///
+/// ★★★ **Factored out of [`run`] at review r6 (I-1), and that finding was the sharpest of the round.**
+/// The test named *"B1 — the planted defects"* never called `run()`: it constructed a `LineCoverage`
+/// row and asserted the row had the fields it had just set. **The entire checker could be deleted with
+/// the suite green** — verified by replacing `run()`'s body with `Ok(..)`, which left 55 tests passing.
+/// B1's own reviewable question is *"which test reds when this checker is removed?"*, and the answer
+/// was: none. Real kills HAD been run by hand against the committed table; none of them was committed.
+///
+/// Taking a table as a parameter is what makes a planted defect expressible, so the kills below can
+/// call the rules on a synthetic bad table instead of asserting on their own fixtures.
+pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
     let root = repo_root();
-    let cov = line_coverage::all();
     let mut extracts: BTreeMap<String, String> = BTreeMap::new();
     let mut errs: Vec<String> = Vec::new();
     // Rows on a form btctax emits that has no committed text layer: their quotes cannot be checked.
@@ -493,74 +507,150 @@ mod tests {
         }
     }
 
-    /// ★★★ **B1 — the planted defects.** A checker never watched go red does not exist. Each mutation
-    /// below is a real way this table can rot; each must be REJECTED.
+    /// ★★★ **B1 — the planted defects, and they now CALL THE CHECKER.**
     ///
-    /// These operate on a hand-built table rather than by mutating the committed one, so they assert
-    /// the RULES rather than the current data — the rules are what must not regress.
+    /// The previous version of this test asserted on its own fixtures — it built a row and checked the
+    /// row had the fields it had just set — so no rule was ever invoked. Review r6 (I-1) proved the
+    /// consequence: replacing `run()`'s body with `Ok(..)` left the whole suite green. Twelve rules,
+    /// both ratchets and the completeness scan could all vanish silently.
+    ///
+    /// Each case below builds a table that violates exactly one rule and asserts [`check`] REJECTS it,
+    /// naming the rule. That is the difference between a kill and a decoration.
     #[test]
-    fn a_paraphrased_quote_a_wrong_polarity_and_a_verb_keyed_combine_are_all_rejected() {
-        use btctax_core::tax::line_coverage::{Coverage, LineCoverage, Polarity};
-        let root = repo_root();
-        let text = normalize(
-            &std::fs::read_to_string(root.join("design/forms/extract/f8995--2024.txt")).unwrap(),
+    fn each_rule_rejects_a_table_that_violates_it() {
+        use btctax_core::tax::line_coverage::{Coverage, Polarity, Production};
+
+        // A single row that PASSES everything, so each plant below differs in exactly one way.
+        let good = |c: &mut Coverage| {
+            c.line(
+                btctax_core::conventions::Usd::ZERO,
+                "f8995",
+                "5",
+                "line5",
+                Production::Scaled,
+                "Qualified business income component. Multiply line 4 by 20% (0.20)",
+            )
+        };
+        let mut base = Coverage::default();
+        good(&mut base);
+        assert!(
+            check(&base).is_ok(),
+            "the control table must PASS — otherwise every plant below passes for the wrong reason"
         );
 
-        // (a) A PARAPHRASE. The single most likely rot: someone tidies the wording.
-        let paraphrase = "Total qualified business income. Combine lines 2 and 3, entering zero if the result is negative";
-        assert!(
-            !text.contains(&normalize(paraphrase)),
-            "★ the paraphrase must NOT be found — this is the kill for rule (2)"
-        );
-        // …and the real sentence must be, so the test discriminates rather than always passing.
-        assert!(
-            text.contains(&normalize(
-                "Total qualified business income. Combine lines 2 and 3. If zero or less, enter -0-"
-            )),
-            "the verbatim sentence IS present"
-        );
-
-        // (b) WRAPPED TEXT must still match — the structural false negative normalize() exists for.
-        assert!(
-            text.contains(&normalize(
-                "Total qualified REIT dividends and PTP income. Combine lines 6 and 7. If zero or less, enter -0-"
-            )),
-            "★ f8995 line 8's clause is WRAPPED in the extract; without normalize() this is a false \
-             negative and the checker would be blind to a whole class"
-        );
-
-        // (c) INVERTED POLARITY. f8995 16/17 clamp the other way; declaring FloorAtZero there is a
-        //     wrong FIGURE, not a wrong blank.
-        let q16 = "Total qualified business (loss) carryforward. Combine lines 2 and 3. If greater than zero, enter -0-";
-        let n = normalize(q16).to_lowercase();
-        assert!(
-            !(n.contains("zero or less") || n.contains("less than zero")),
-            "★ line 16's clause does NOT say floor — declaring FloorAtZero must be rejected"
-        );
-        assert!(n.contains("greater than zero"), "…it says ceiling");
-
-        // (d) A VERB-KEYED Combine. r2's C-2: "Combine" with a clamp clause routed to always-print.
-        assert!(
-            normalize(q16).contains("-0-"),
-            "★ line 16 says Combine AND carries a clamp — classifying it Combine must be rejected by \
-             rule (4)"
-        );
-
-        // (e) An Exception with no reason, and a reason on a non-Exception. Both must be errors.
+        // (2) a PARAPHRASE — the single most likely rot.
         let mut c = Coverage::default();
-        c.0.push(LineCoverage {
+        c.line(
+            btctax_core::conventions::Usd::ZERO,
+            "f8995",
+            "5",
+            "line5",
+            Production::Scaled,
+            "Qualified business income component. Take 20 percent of line 4",
+        );
+        let e = check(&c).unwrap_err();
+        assert!(
+            e.contains("NOT FOUND"),
+            "rule (2) must reject a paraphrase: {e}"
+        );
+
+        // (3) a clamp declaring a polarity its own clause does not state.
+        let mut c = Coverage::default();
+        c.line(
+            btctax_core::conventions::Usd::ZERO,
+            "f8995",
+            "16",
+            "line16",
+            Production::Clamped(Polarity::FloorAtZero),
+            "Total qualified business (loss) carryforward. Combine lines 2 and 3. If greater than zero, enter -0-",
+        );
+        let e = check(&c).unwrap_err();
+        assert!(
+            e.contains("polarity is TRANSCRIBED"),
+            "rule (3) must reject an inverted polarity — f8995 16 CEILS: {e}"
+        );
+
+        // (4) a Combine carrying a clamp clause — r2's C-2, the verb-keyed defect.
+        let mut c = Coverage::default();
+        c.line(
+            btctax_core::conventions::Usd::ZERO,
+            "f8995",
+            "4",
+            "line4",
+            Production::Combine,
+            "Total qualified business income. Combine lines 2 and 3. If zero or less, enter -0-",
+        );
+        let e = check(&c).unwrap_err();
+        assert!(
+            e.contains("it is Clamped"),
+            "rule (4) must reject a Combine whose quote clamps: {e}"
+        );
+
+        // (1) an Exception with no reason — how a residual bucket starts.
+        let mut c = Coverage::default();
+        c.0.push(btctax_core::tax::line_coverage::LineCoverage {
             form: "f8995",
             year: btctax_core::tax::line_coverage::DEFAULT_ROW_YEAR,
-            line: "4".to_string(),
-            field: "line4",
+            line: "5".to_string(),
+            field: "line5",
             production: Production::Exception,
-            instruction: "Total qualified business income. Combine lines 2 and 3. If zero or less, enter -0-",
+            instruction: "Qualified business income component. Multiply line 4 by 20% (0.20)",
             reason: None,
         });
+        let e = check(&c).unwrap_err();
         assert!(
-            matches!(c.0[0].production, Production::Exception) && c.0[0].reason.is_none(),
-            "★ the shape rule (1) rejects: an Exception with no reason"
+            e.contains("NO reason"),
+            "rule (1) must reject an unexplained Exception: {e}"
         );
-        let _ = Polarity::CeilAtZero; // the polarity type is part of the guarantee
+
+        // (1, other direction) a reason on a real production — a sign the author was unsure.
+        let mut c = Coverage::default();
+        c.0.push(btctax_core::tax::line_coverage::LineCoverage {
+            form: "f8995",
+            year: btctax_core::tax::line_coverage::DEFAULT_ROW_YEAR,
+            line: "5".to_string(),
+            field: "line5",
+            production: Production::Scaled,
+            instruction: "Qualified business income component. Multiply line 4 by 20% (0.20)",
+            reason: Some("because"),
+        });
+        let e = check(&c).unwrap_err();
+        assert!(
+            e.contains("reasons are for Exceptions only"),
+            "rule (1) must reject a reason on a non-Exception: {e}"
+        );
+
+        // (5) the same (form, line, field) twice — two rows that could disagree.
+        let mut c = Coverage::default();
+        good(&mut c);
+        good(&mut c);
+        let e = check(&c).unwrap_err();
+        assert!(
+            e.contains("is covered 2 times"),
+            "rule (5) must reject duplicate coverage of one line: {e}"
+        );
+
+        // A form with neither an extract nor a map — a typo'd stem.
+        let mut c = Coverage::default();
+        c.line(
+            btctax_core::conventions::Usd::ZERO,
+            "f9999",
+            "1",
+            "line1",
+            Production::Collected,
+            "anything",
+        );
+        let e = check(&c).unwrap_err();
+        assert!(
+            e.contains("the form name is wrong"),
+            "a stem with no extract and no map must be an error, not silently unverifiable: {e}"
+        );
+
+        // An EMPTY table must not pass vacuously.
+        let e = check(&Coverage::default()).unwrap_err();
+        assert!(
+            e.contains("EMPTY"),
+            "an empty table must not vacuously pass: {e}"
+        );
     }
 }

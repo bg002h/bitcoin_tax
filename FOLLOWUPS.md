@@ -1178,6 +1178,38 @@ silently decide something on the filer's behalf.
 legal judgement and is out of scope in the same way intent is (§G-11's scope bound). The narrow question
 is whether the filer, having taken such a position, can file it correctly.
 
+### G-27 — the line-coverage instrument's five remaining holes (r6, 2026-08-02)
+
+**Owning phase: before §G-11 P0b builds on this table.** Two were fixed at r6 (the keystone and the
+false `_` claim); five remain, each verified by mutation by the reviewer.
+
+| # | hole | why it matters |
+|---|---|---|
+| **G-27a** | **rule (2) never binds the quote to the LINE** — it verifies the text exists *somewhere in the form's file*. A row can name line 4, quote line 9, and pass. | ★★★ This is `CLAUDE.md`'s **standing root cause**: Form 6251 line 33 transcribed as *"Subtract line 32 from line 12"* where the form says 22, of which the rule says *"No review would have caught it."* Rule (2) would not have either. **The committed table already carries one instance** — `addl` carries line 12's sentence on a row whose own reason says it is not a Schedule SE line. The fix exists in-tree: `tables.rs::printed_line(label)`, built by Schedule 1-A's T1 for exactly this. |
+| **G-27b** | the (4b) completeness scan is rooted at a **hand-chosen directory** (`src/tax`), so `Form8283Row`, `Form8949Row` and `ScheduleDPart` in `src/forms.rs` are invisible | Form 8283 has three money columns and btctax fills it; the crypto-slice 8949's **column (g) `adjustment_amount` is covered nowhere at all**. ★ Exactly the shape the `MAX_EXCEPTIONS` comment celebrates the predicate catching — one directory out. |
+| **G-27c** | `mentions_ident` has a **realized false negative**: money reached through a parent's field types no name in the emitter | Form 8275 `Part1Item.amount` — a §6662 disclosure amount on a filed return — is unseen. ★★ And `ScheduleBRow`, the module's **own headline example**, would not be demanded by (4b) today either; it is covered only because a human chose to. |
+| **G-27d** | the table **contradicts itself** across the two Schedule SE shapes | f1040sse line 10 is `Exception` in one function and `Scaled` in the other; line 4c's Exception reason says truncating the quote *would hide a real branch*, and the other row **does truncate and passes**. Rule (5) keys on the field name and cannot see it. ★ A line can therefore be re-filed under a second field name to make `MAX_EXCEPTIONS` go DOWN — the ratchet's monotonicity is real, its meaning is not. |
+| **G-27e** | `money_bearing_types` blind shapes | `Vec<Usd>`, a `Usd` in an enum variant, a tuple struct, `amount:Usd` with no space — and `read_dir` is **non-recursive**, so a directory module `tax/schedule_1a/mod.rs` is invisible. ★ That last one matters *now*: the widening's own justification was to see "a new `schedule_1a.rs`", and Schedule 1-A is the next build. |
+
+★ Also: `shipped_tables_are_the_validated_tables.rs` does not compare `gift_annual_exclusion` or
+`gift_lifetime_exclusion` (they agree today), and neither struct is exhaustively destructured — so
+"field by field" holds only for the fields somebody listed, which is the same shape as that file's own
+indictment.
+
+**FIXED AT r6, recorded here so the pair is legible:**
+
+★★★ **The keystone (r6 I-1).** The test named *"B1 — the planted defects"* **never called the checker**
+— it asserted on its own fixtures. Replacing `run()`'s body with `Ok(..)` left **55 tests passing**:
+twelve rules, both ratchets and the completeness scan could all be deleted silently. Real kills had
+been run by hand against the committed table; none was committed. `run()` is now a thin wrapper over
+`check(&Coverage)`, so a planted defect is expressible, and eight kills call it. Gutting `check()` now
+reds. ★ This is F2/F4 in `design/HARNESS.md` exactly — *"an instrument trusted without ever being
+watched to distinguish a true case from a false one"* — committed by the author of the rule.
+
+★★ **The false `_` claim (r6 I-4).** The module doc said `_` was FORBIDDEN on money. It is not:
+`line4: _` compiles and the row vanishes. Corrected to the honest limit `classifier.rs` already states
+for itself.
+
 ### G-26 — ✅ **CLOSED 2026-08-01** — the Schedule 1 text-layer hole
 
 `crates/btctax-forms/forms/2024/f1040s1.map.toml` existed — btctax EMITS Schedule 1 — but no
@@ -1264,10 +1296,16 @@ leaves both blank: both of the form's conditions fail, and it asks for neither.
 `!= Usd::ZERO` gate is *equivalent* under today's `printed.rs`, which computes both lines with
 `.max(Usd::ZERO)`, so the value is non-zero exactly when the condition holds. My first three fixtures
 could not tell the two gates apart **while the test's own doc comment claimed they could**. They
-diverge on a hand-edited `income import` TOML whose stored `line34` contradicts its operands — the
-**`b94508d` orphan class**, a stored answer surviving a correction to the thing that gated it, and
-`LIMITATIONS.md` actively directs filers to hand-edit TOML. Three mutations red: write either line
-unconditionally, or gate on `!= ZERO`.
+★★ **CORRECTED at r6 — the reachability claim was mine and it was wrong.** I wrote that a hand-edited
+`income import` TOML could state a `line34` contradicting its operands. It cannot: `income import`
+parses into `ReturnInputs`, and `Form1040Lines` has no serde derives (`printed.rs:447`) and one
+constructor (`printed.rs:699`) that always computes 34/37 from 24/33. **The state is reachable only
+from a test fixture.** Same class as the tenforty incident — a claim filed without checking it.
+
+**The gate remains right, for a forward-looking reason instead of a present one:** deriving from the
+OPERANDS keeps the mark impossible if `printed.rs`'s `.max(Usd::ZERO)` ever moves, or if the struct
+ever becomes deserializable — a `!= ZERO` gate would silently start printing again on either change.
+Three mutations red: write either line unconditionally, or gate on `!= ZERO`.
 
 ★ **This is §G-11's first real figure removed from paper, and it cost no type migration.** When P0b
 lands, the comparison moves to the constructor and this becomes a `LineEntry::Blank`. TY2024 golden

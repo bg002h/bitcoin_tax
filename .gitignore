@@ -61,3 +61,7 @@ __pycache__/
 # Each has a "<name>.pdf.txt" note beside it with its irs.gov URL and sha256, and its
 # committed TEXT LAYER lives in design/forms/extract/ (which IS what the tests read).
 design/forms/**/*.pdf
+
+# Compiler ICE dumps — rustc writes these to CWD on an internal error. One was committed on
+# 2026-08-02 and found by review r6 (N-1); it is build debris, never a source artifact.
+rustc-ice-*.txt
