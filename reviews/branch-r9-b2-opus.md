@@ -1,3 +1,8 @@
+<!-- ★ SSN-shaped tokens in this report's rendered examples are REDACTED to `111-22-000N`. They
+     were synthetic scaffold values (`format!("111-22-{:04}", i)`), but a literal 3-2-4 token in a
+     committed document is exactly what the generic PII scan exists to catch, and allowlisting
+     document-specific digits would dilute a list whose value is that every entry recurs. -->
+
 # r9 — B2 (>4 dependents / the continuation statement), independent review
 
 **Reviewer:** Opus, own worktree, no commits.
@@ -165,7 +170,7 @@ dependents 5-9 are listed below. Together they are the complete list.
       (1) First name    Last name          (2) Social security   (3) Relationship        Child tax    Credit for other
                                                number               to you                credit        dependents
      ---------------------------------------------------------------------------------------------------------------
-  5  Firstname4 Lastname4               111-22-0004           Daughter              [  ]          [  ]
+  5  Firstname4 Lastname4               111-22-000N           Daughter              [  ]          [  ]
   …
 ```
 
@@ -273,7 +278,7 @@ Second leg: `{:<34}` is a *minimum* width, so a name longer than 34 characters s
 subsequent column right. That is not exotic — `"Christopher Papadopoulos-Wintergreen"` is 36. Rendered:
 
 ```
-  5  Maximiliana Wolfeschlegelsteinhausenbergerdorff-Fitzgerald 111-22-0009           Granddaughter-in-law  [  ]          [  ]
+  5  Maximiliana Wolfeschlegelsteinhausenbergerdorff-Fitzgerald 111-22-000N           Granddaughter-in-law  [  ]          [  ]
 ```
 
 No data is lost or truncated (unlike a PDF comb cell), and a human can still parse it, which is why
