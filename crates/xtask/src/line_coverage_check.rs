@@ -308,6 +308,10 @@ pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
         // itself denies, and rule (2) actively REWARDED it by checking only that the sentence exists.
         // The committed table had exactly one: `SeTaxResult.addl` (Additional Medicare Tax, a Form 8959
         // figure) quoting Schedule SE line 12's *"Self-employment tax. Add lines 10 and 11."*
+        // ★ Rules (2)/(2b) are what a `(none)` row escapes — and ONLY those. An early `continue` here
+        //   would let it skip the polarity, `Combine`-clause and reason rules below too, opening a hole
+        //   in the act of closing one: a `(none)` row could then declare `Clamped(FloorAtZero)` with no
+        //   clause at all and pass.
         if e.line == "(none)" {
             if !e.instruction.trim().is_empty() {
                 errs.push(format!(
@@ -316,25 +320,25 @@ pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
                     e.form, e.field, e.instruction
                 ));
             }
-            continue;
-        }
-        let want = normalize(e.instruction);
-        if !text.contains(&want) {
-            errs.push(format!(
-                "{}:{} ({}) quotes text NOT FOUND in {stem}.txt:\n      {:?}",
-                e.form, e.line, e.field, e.instruction
-            ));
         } else {
-            // ★★★ (2b) THE QUOTE MUST BE THIS LINE'S OWN TEXT, not merely somewhere on the form.
-            match label_precedes(text, e.line.as_str(), &want) {
-                Some(true) => {}
-                Some(false) => errs.push(format!(
+            let want = normalize(e.instruction);
+            if !text.contains(&want) {
+                errs.push(format!(
+                    "{}:{} ({}) quotes text NOT FOUND in {stem}.txt:\n      {:?}",
+                    e.form, e.line, e.field, e.instruction
+                ));
+            } else {
+                // ★★★ (2b) THE QUOTE MUST BE THIS LINE'S OWN TEXT, not merely somewhere on the form.
+                match label_precedes(text, e.line.as_str(), &want) {
+                    Some(true) => {}
+                    Some(false) => errs.push(format!(
                     "{}:{} ({}) quotes text that IS on {stem} but is NOT printed as line {}'s own \
                      text:\n      {:?}\n    This is the Form 6251 line-33 class — a verbatim \
                      sentence attached to the wrong line.",
                     e.form, e.line, e.field, e.line, e.instruction
                 )),
-                None => unlocatable.push(format!("{}:{} ({})", e.form, e.line, e.field)),
+                    None => unlocatable.push(format!("{}:{} ({})", e.form, e.line, e.field)),
+                }
             }
         }
 
@@ -738,6 +742,24 @@ mod tests {
         assert!(
             e.contains("names no line yet quotes form text"),
             "rule (2c) must reject a quote on a \"(none)\" row: {e}"
+        );
+
+        // ★★ (2c) must not become an ESCAPE HATCH. A `(none)` row skips rules (2)/(2b) — it has no
+        // line to bind to — but must still face every rule that reads its production. Here it declares
+        // a floor clamp with no clause whatsoever; rule (3) has to reject it.
+        let mut c = Coverage::default();
+        c.line(
+            btctax_core::conventions::Usd::ZERO,
+            "f1040sse",
+            "(none)",
+            "addl",
+            Production::Clamped(Polarity::FloorAtZero),
+            "",
+        );
+        let e = check(&c).unwrap_err();
+        assert!(
+            e.contains("polarity is TRANSCRIBED"),
+            "a \"(none)\" row must still face rule (3) — otherwise (2c) is a way OUT of the checker: {e}"
         );
 
         // (3) a clamp declaring a polarity its own clause does not state.
