@@ -2093,14 +2093,19 @@ pub fn cover_setaxresult(r: &crate::tax::se::SeTaxResult) -> Coverage {
         "13",
         "deductible_half",
         Production::Scaled,
-        "Multiply line 12 by 50% (0.50).",
+        "Deduction for one-half of self-employment tax. Multiply line 12 by 50% (0.50). Enter here \
+         and on Schedule 1 (Form 1040), line 15",
     );
     // ★ `addl` is Additional Medicare Tax — a FORM 8959 figure, not a Schedule SE line. The emitter
     //   never writes it here, and `schedule_se.rs:75` says so: "SS + regular Medicare ONLY (addl is a
     //   Form 8959 item)". Recorded rather than dropped, because a silently-unmentioned money field is
     //   the gap this module exists to close.
+    //   ★★★ Its instruction is EMPTY, and must be: it used to quote Schedule SE line 12's
+    //   "Self-employment tax. Add lines 10 and 11." — a verbatim sentence from a line this very row
+    //   says it is not. Rule (2) checked only that the sentence existed somewhere on the form, so the
+    //   misattribution passed; rule (2c) now rejects any quote on a "(none)" row.
     c.exception(*addl, f, "(none)", "addl",
-        "Self-employment tax. Add lines 10 and 11.",
+        "",
         "NOT a Schedule SE line. Additional Medicare Tax is computed here for convenience and printed \
          on FORM 8959, whose own coverage carries it. Never written by schedule_se.rs.");
     c

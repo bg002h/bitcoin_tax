@@ -144,6 +144,79 @@ const MAX_UNVERIFIABLE: usize = 0;
 //      separately from the design gap next to it, until the asset could be obtained — instead of
 //      letting a fetch failure quietly masquerade as a grammar exception.
 
+/// The label forms under which line `label`'s own text may be printed, most specific first.
+///
+/// ★★★ **This is the fix for the defect `CLAUDE.md` calls the standing root cause.** Rule (2) verified
+/// a quote existed *somewhere in the form's file*, so a row could name line 4, quote line 9, and pass —
+/// which is how Form 6251 line 33 came to read *"Subtract line 32 from line 12"* where the form says
+/// line 22, and of which the rule says *"No review would have caught it."*
+///
+/// ★★ **The question is not "what span is line N" — it is "is N printed immediately before this
+/// sentence".** A first attempt reconstructed each line's span from `pdftotext -layout` output and lost
+/// to the text layer: the 1040 packs lines 2a and 2b onto one physical row, prints a section caption in
+/// the left column, echoes every label again in the amount column, wraps clauses onto lines that then
+/// *begin* label-shaped (`2 (Form 1040), line 4`), and puts the English article `a` in the address
+/// block. Six heuristics later it still bound only 31 of 189 rows. Asking the direct question needs
+/// none of them, because a form prints a line's number immediately before that line's text — which is
+/// what transcription *means*.
+///
+/// Returns `None` for a label this cannot express (`I-1(d)`, `QDCGT Worksheet, 3`); those are COUNTED,
+/// never waved through.
+fn label_forms(label: &str) -> Option<Vec<String>> {
+    // ★ A COLUMN suffix on a line label (`3(d)` on Schedule D) still quotes the LINE's text — the row
+    //   caption — so it binds after stripping. Form 8949's `I-1(d)` does not: its quote is the column
+    //   HEADER ("Proceeds"), which is not any line's text, so it stays unlocatable by construction
+    //   rather than by being forced onto line 1.
+    let label = label.split_once('(').map_or(label, |(l, _)| l);
+    let stem: String = label.chars().take_while(char::is_ascii_digit).collect();
+    let suffix = &label[stem.len()..];
+    if stem.is_empty() || stem.len() > 2 || suffix.len() > 1 {
+        return None;
+    }
+    if !suffix.chars().all(|c| c.is_ascii_lowercase()) {
+        return None;
+    }
+    let mut v = vec![label.to_string()];
+    if !suffix.is_empty() {
+        // A lettered sub-line prints as a bare letter (`b Taxable interest`), and its stem may carry
+        // the lead-in that the transcription rightly quotes (`25 Federal income tax withheld from:`).
+        v.push(suffix.to_string());
+        v.push(stem);
+    }
+    Some(v)
+}
+
+/// Is `quote` printed as line `label`'s own text — i.e. does some form of the label sit immediately
+/// before it? `text` must already be whitespace-normalized.
+fn label_precedes(text: &str, label: &str, quote: &str) -> Option<bool> {
+    let forms = label_forms(label)?;
+    let stem: String = label.chars().take_while(char::is_ascii_digit).collect();
+    Some(forms.iter().any(|f| {
+        let needle = format!("{f} {quote}");
+        text.match_indices(&needle).any(|(i, _)| {
+            // ★ The bare-letter form pins the LETTER but not the stem, so on its own it would let a row
+            //   claim `5b` while quoting line `2b`. Requiring the stem to appear in the run-up closes
+            //   that without reconstructing spans — the sub-line always follows its own stem's text.
+            !f.chars().all(|c| c.is_ascii_lowercase()) || {
+                // ★ Floored to a char boundary: the extracts carry typographic apostrophes
+                //   (Schedule SE line 4c reads `you don’t owe self-employment tax`, inside the
+                //   run-up of a real match), and a raw byte slice would PANIC mid-character.
+                let mut lo = i.saturating_sub(700);
+                while lo > 0 && !text.is_char_boundary(lo) {
+                    lo -= 1;
+                }
+                text[lo..i].split(' ').any(|w| {
+                    w.chars()
+                        .take_while(char::is_ascii_digit)
+                        .collect::<String>()
+                        == stem
+                        && w.len() <= stem.len() + 1
+                })
+            }
+        })
+    }))
+}
+
 /// Run the check. Returns `Err` with every failure, so one run reports the whole picture rather than
 /// the first problem.
 pub fn run() -> Result<String, String> {
@@ -164,6 +237,10 @@ pub fn run() -> Result<String, String> {
 pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
     let root = repo_root();
     let mut extracts: BTreeMap<String, String> = BTreeMap::new();
+    let mut raw_extracts: BTreeMap<String, String> = BTreeMap::new();
+    // Rows whose form has a text layer but whose LINE LABEL cannot be located in it — so the quote
+    // cannot be bound to its line. Counted separately from a wrong quote, and ratcheted.
+    let mut unlocatable: Vec<String> = Vec::new();
     let mut errs: Vec<String> = Vec::new();
     // Rows on a form btctax emits that has no committed text layer: their quotes cannot be checked.
     let mut unverifiable: Vec<String> = Vec::new();
@@ -195,7 +272,10 @@ pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
             None => {
                 let p = root.join(format!("design/forms/extract/{stem}.txt"));
                 match std::fs::read_to_string(&p) {
-                    Ok(t) => extracts.entry(stem.clone()).or_insert(normalize(&t)),
+                    Ok(t) => {
+                        raw_extracts.insert(stem.clone(), t.clone());
+                        extracts.entry(stem.clone()).or_insert(normalize(&t))
+                    }
                     Err(_) => {
                         // ★★ A form btctax EMITS but has no text layer. Derived, never hand-listed:
                         //    a committed map TOML means we emit it, so the quote is UNVERIFIABLE and
@@ -223,11 +303,39 @@ pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
                 }
             }
         };
-        if !text.contains(&normalize(e.instruction)) {
+        // ★★★ (2c) A ROW THAT NAMES NO LINE MUST QUOTE NO LINE. `(none)` means "this money field is
+        // not a line on this form" — so carrying a verbatim sentence from the form is a claim the row
+        // itself denies, and rule (2) actively REWARDED it by checking only that the sentence exists.
+        // The committed table had exactly one: `SeTaxResult.addl` (Additional Medicare Tax, a Form 8959
+        // figure) quoting Schedule SE line 12's *"Self-employment tax. Add lines 10 and 11."*
+        if e.line == "(none)" {
+            if !e.instruction.trim().is_empty() {
+                errs.push(format!(
+                    "{}:(none) ({}) names no line yet quotes form text — a row that denies being a \
+                     line cannot carry one's instruction:\n      {:?}",
+                    e.form, e.field, e.instruction
+                ));
+            }
+            continue;
+        }
+        let want = normalize(e.instruction);
+        if !text.contains(&want) {
             errs.push(format!(
                 "{}:{} ({}) quotes text NOT FOUND in {stem}.txt:\n      {:?}",
                 e.form, e.line, e.field, e.instruction
             ));
+        } else {
+            // ★★★ (2b) THE QUOTE MUST BE THIS LINE'S OWN TEXT, not merely somewhere on the form.
+            match label_precedes(text, e.line.as_str(), &want) {
+                Some(true) => {}
+                Some(false) => errs.push(format!(
+                    "{}:{} ({}) quotes text that IS on {stem} but is NOT printed as line {}'s own \
+                     text:\n      {:?}\n    This is the Form 6251 line-33 class — a verbatim \
+                     sentence attached to the wrong line.",
+                    e.form, e.line, e.field, e.line, e.instruction
+                )),
+                None => unlocatable.push(format!("{}:{} ({})", e.form, e.line, e.field)),
+            }
         }
 
         // (3) A clamp polarity must be justified by the clause actually quoted. ★ This is the δ class:
@@ -399,6 +507,26 @@ pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
         ));
     }
 
+    // ★★★ THE RATCHET ON RULE (2b)'s REACH. A row whose label cannot be located on the form is a row
+    // whose quote is bound to NOTHING — rule (2) degrades back to "this sentence is somewhere on the
+    // page", which is the very defect (2b) exists to remove. So the number of rows (2b) could not
+    // reach is COUNTED and pinned, not left as a silent shrug. `CLAUDE.md`: an instrument that cannot
+    // say which cases it did not cover is not a check.
+    //
+    // Only ever goes DOWN.
+    // The residue, by class: 12 Form 8949 column cells whose quote is a column HEADER rather than any
+    // line's text, and the Qualified Dividends & Capital Gain Tax Worksheet line 3, which lives in the
+    // instructions booklet and has no form line label. Both are stated, neither is a form line.
+    const MAX_UNLOCATABLE: usize = 13;
+    if unlocatable.len() > MAX_UNLOCATABLE {
+        errs.push(format!(
+            "{} row(s) name a line that cannot be located in the form text, so their quote is bound \
+             to nothing (ratchet {MAX_UNLOCATABLE}): {}",
+            unlocatable.len(),
+            unlocatable.join(", ")
+        ));
+    }
+
     if errs.is_empty() {
         let mut by_form: BTreeMap<&str, usize> = BTreeMap::new();
         for e in &cov.0 {
@@ -406,7 +534,8 @@ pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
         }
         Ok(format!(
             "line-coverage OK: {} money lines across {} form(s) [{}], {exceptions} exception(s) \
-             (ratchet {MAX_EXCEPTIONS}), {} unverifiable (ratchet {MAX_UNVERIFIABLE})",
+             (ratchet {MAX_EXCEPTIONS}), {} unverifiable (ratchet {MAX_UNVERIFIABLE}), {} not \
+             line-bound (ratchet {MAX_UNLOCATABLE})",
             cov.0.len(),
             by_form.len(),
             by_form
@@ -414,7 +543,8 @@ pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
                 .map(|(f, n)| format!("{f}:{n}"))
                 .collect::<Vec<_>>()
                 .join(" "),
-            unverifiable.len()
+            unverifiable.len(),
+            unlocatable.len()
         ))
     } else {
         Err(format!(
@@ -552,6 +682,62 @@ mod tests {
         assert!(
             e.contains("NOT FOUND"),
             "rule (2) must reject a paraphrase: {e}"
+        );
+
+        // ★★★ (2b) THE FORM 6251 LINE-33 CLASS — a VERBATIM sentence attached to the WRONG LINE.
+        // This is the plant rule (2) could never fail, because the sentence really is on the form.
+        // Both lines here are floor-clamped with identically-shaped clauses, so every other rule still
+        // passes and only the line binding decides it.
+        let mut c = Coverage::default();
+        c.line(
+            btctax_core::conventions::Usd::ZERO,
+            "f8995",
+            "4",
+            "line4",
+            Production::Clamped(Polarity::FloorAtZero),
+            "Total qualified REIT dividends and PTP income. Combine lines 6 and 7. If zero or less, \
+             enter -0-",
+        );
+        let e = check(&c).unwrap_err();
+        assert!(
+            e.contains("NOT printed as line 4's own text"),
+            "rule (2b) must reject line 8's sentence filed under line 4 — this is the defect that \
+             shipped Form 6251 line 33 as \"Subtract line 32 from line 12\": {e}"
+        );
+
+        // ★★ (2b) the STEM guard. A lettered sub-line prints as a bare letter, so matching `b Taxable
+        // interest` alone would let any `Nb` claim it. The run-up must carry the row's own stem.
+        let mut c = Coverage::default();
+        c.line(
+            btctax_core::conventions::Usd::ZERO,
+            "f1040",
+            "5b",
+            "line5b",
+            Production::Collected,
+            "Taxable interest",
+        );
+        let e = check(&c).unwrap_err();
+        assert!(
+            e.contains("NOT printed as line 5b's own text"),
+            "rule (2b) must reject line 2b's text claimed as 5b — the bare letter is not enough: {e}"
+        );
+
+        // ★★★ (2c) a row that NAMES NO LINE may not quote one. The committed table shipped exactly
+        // this: `SeTaxResult.addl` carried Schedule SE line 12's sentence on a row whose own reason
+        // says it is not a Schedule SE line.
+        let mut c = Coverage::default();
+        c.exception(
+            btctax_core::conventions::Usd::ZERO,
+            "f1040sse",
+            "(none)",
+            "addl",
+            "Self-employment tax. Add lines 10 and 11.",
+            "not a Schedule SE line",
+        );
+        let e = check(&c).unwrap_err();
+        assert!(
+            e.contains("names no line yet quotes form text"),
+            "rule (2c) must reject a quote on a \"(none)\" row: {e}"
         );
 
         // (3) a clamp declaring a polarity its own clause does not state.

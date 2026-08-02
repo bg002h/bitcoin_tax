@@ -1181,11 +1181,34 @@ is whether the filer, having taken such a position, can file it correctly.
 ### G-27 — the line-coverage instrument's five remaining holes (r6, 2026-08-02)
 
 **Owning phase: before §G-11 P0b builds on this table.** Two were fixed at r6 (the keystone and the
-false `_` claim); five remain, each verified by mutation by the reviewer.
+false `_` claim); **G-27a is now CLOSED** (below); four remain, each verified by mutation by the
+reviewer.
+
+> **G-27a — CLOSED 2026-08-02.** Rules **(2b)** and **(2c)** land in `line_coverage_check.rs`, with three
+> planted-defect kills that call `check()` and were each watched red by mutation.
+>
+> - **(2b)** the quote must be printed as *that line's own text* — `label_precedes()` asks whether some
+>   form of the label (`25a`, the bare `a`, or the stem `25` that carries the lead-in) sits immediately
+>   before the quoted sentence. **189 of 189 rows bind**; 13 do not and are ratcheted (`MAX_UNLOCATABLE`)
+>   and named in the summary line: 12 Form 8949 cells whose quote is a column *header*, and the QDCGT
+>   worksheet line, which has no form line label.
+> - **(2c)** a row naming `(none)` may carry no quote at all. This killed the instance this entry
+>   named: `SeTaxResult.addl` no longer carries Schedule SE line 12's sentence.
+> - **A second real defect fell out**: `SeTaxResult.deductible_half` quoted the mid-line fragment
+>   *"Multiply line 12 by 50% (0.50)."*, dropping *"Deduction for one-half of self-employment tax."* —
+>   the sentence that says what the line **is**. Now the full text, matching the `line13` row.
+>
+> ★ **`tables.rs::printed_line` was the wrong fix and this entry was wrong to name it.** It is
+> `#[cfg(test)]`, hardcoded to Schedule 1-A, and keyed to "the line starts with the label" — which the
+> 1040 breaks four ways (a section caption in the left column, lines 2a and 2b on one physical row, every
+> label echoed in the amount column, and clauses wrapping onto lines that then *begin* label-shaped, e.g.
+> `2 (Form 1040), line 4`). Reconstructing spans from `pdftotext -layout` bound only 31 of 189 rows after
+> six heuristics. Asking the direct question — *is the label printed immediately before this sentence?* —
+> needs none of them, because that is what transcription **means**.
 
 | # | hole | why it matters |
 |---|---|---|
-| **G-27a** | **rule (2) never binds the quote to the LINE** — it verifies the text exists *somewhere in the form's file*. A row can name line 4, quote line 9, and pass. | ★★★ This is `CLAUDE.md`'s **standing root cause**: Form 6251 line 33 transcribed as *"Subtract line 32 from line 12"* where the form says 22, of which the rule says *"No review would have caught it."* Rule (2) would not have either. **The committed table already carries one instance** — `addl` carries line 12's sentence on a row whose own reason says it is not a Schedule SE line. The fix exists in-tree: `tables.rs::printed_line(label)`, built by Schedule 1-A's T1 for exactly this. |
+| **G-27a** ✅ **CLOSED** | rule (2) never bound the quote to the LINE — it verified the text exists *somewhere in the form's file*. A row can name line 4, quote line 9, and pass. | ★★★ This is `CLAUDE.md`'s **standing root cause**: Form 6251 line 33 transcribed as *"Subtract line 32 from line 12"* where the form says 22, of which the rule says *"No review would have caught it."* Rule (2) would not have either. **The committed table already carries one instance** — `addl` carries line 12's sentence on a row whose own reason says it is not a Schedule SE line. The fix exists in-tree: `tables.rs::printed_line(label)`, built by Schedule 1-A's T1 for exactly this. |
 | **G-27b** | the (4b) completeness scan is rooted at a **hand-chosen directory** (`src/tax`), so `Form8283Row`, `Form8949Row` and `ScheduleDPart` in `src/forms.rs` are invisible | Form 8283 has three money columns and btctax fills it; the crypto-slice 8949's **column (g) `adjustment_amount` is covered nowhere at all**. ★ Exactly the shape the `MAX_EXCEPTIONS` comment celebrates the predicate catching — one directory out. |
 | **G-27c** | `mentions_ident` has a **realized false negative**: money reached through a parent's field types no name in the emitter | Form 8275 `Part1Item.amount` — a §6662 disclosure amount on a filed return — is unseen. ★★ And `ScheduleBRow`, the module's **own headline example**, would not be demanded by (4b) today either; it is covered only because a human chose to. |
 | **G-27d** | the table **contradicts itself** across the two Schedule SE shapes | f1040sse line 10 is `Exception` in one function and `Scaled` in the other; line 4c's Exception reason says truncating the quote *would hide a real branch*, and the other row **does truncate and passes**. Rule (5) keys on the field name and cannot see it. ★ A line can therefore be re-filed under a second field name to make `MAX_EXCEPTIONS` go DOWN — the ratchet's monotonicity is real, its meaning is not. |
