@@ -35,6 +35,9 @@
 
 use crate::conventions::Usd;
 
+/// The year every currently-covered form is quoted from. A TY2025+ form sets its own.
+pub const DEFAULT_ROW_YEAR: &str = "2024";
+
 /// Which sentence-shape of the IRS instruction language this line transcribes.
 ///
 /// ★ These are **productions of the forms' own grammar**, not categories we invented: each is keyed to
@@ -86,6 +89,11 @@ pub enum Polarity {
 pub struct LineCoverage {
     /// The extract stem the instruction is quoted from, e.g. `"f8995"`.
     pub form: &'static str,
+    /// The tax year of the extract this line's instruction is quoted from.
+    ///
+    /// ★ Per-row, not a module constant: a form is year-shaped. Schedule 1-A exists only for TY2025+,
+    /// so a global year would send its quotes to an extract that does not exist. r4 buildability I-2.
+    pub year: &'static str,
     /// The form's own line label, e.g. `"16"` — for humans and for the map cross-check.
     ///
     /// ★ Owned, not `&'static str`: a type serving several form lines part-qualifies its label at the
@@ -120,6 +128,7 @@ impl Coverage {
     ) {
         self.0.push(LineCoverage {
             form,
+            year: DEFAULT_ROW_YEAR,
             line: line.to_string(),
             field,
             production,
@@ -141,6 +150,7 @@ impl Coverage {
     ) {
         self.0.push(LineCoverage {
             form,
+            year: DEFAULT_ROW_YEAR,
             line: line.to_string(),
             field,
             production: Production::Exception,
@@ -1957,6 +1967,112 @@ fn zero_printed8949totals() -> crate::tax::printed::Printed8949Totals {
     }
 }
 
+/// **`SeTaxResult`** — the CRYPTO-SLICE Schedule SE.
+///
+/// ★★★ Found by the derived scope predicate, not by anyone looking: `btctax-forms/src/lib.rs:149`
+/// takes `se: &SeTaxResult` to fill a Schedule SE, so these figures reach paper — and no hand-list
+/// would have contained it, because the full-return path uses a *different* type
+/// (`ScheduleSeLines`) that was already covered. Two shapes of one form, one covered and one not.
+///
+/// ★ One value can serve several lines: the emitter writes `se.base` to 4a, 4c and 6, and `se.net_se`
+/// to 2 and 3 — so the rows are per LINE, which is why rule (5) keys on `(form, line, field)`.
+pub fn cover_setaxresult(r: &crate::tax::se::SeTaxResult) -> Coverage {
+    let crate::tax::se::SeTaxResult {
+        net_se,
+        base,
+        ss,
+        medicare,
+        addl,
+        total,
+        deductible_half,
+    } = r;
+    let f = "f1040sse";
+    let mut c = Coverage::default();
+    c.line(*net_se, f, "2", "net_se", Production::Collected,
+        "Net profit or (loss) from Schedule C, line 31; and Schedule K-1 (Form 1065), box 14, code A");
+    c.line(
+        *net_se,
+        f,
+        "3",
+        "net_se",
+        Production::Combine,
+        "Combine lines 1a, 1b, and 2",
+    );
+    c.exception(*base, f, "4a", "base",
+        "If line 3 is more than zero, multiply line 3 by 92.35% (0.9235). Otherwise, enter amount from line 3",
+        "A two-branch line where BOTH branches enter a figure — one Scaled, one Carry. Same class as \
+         the full-return f1040sse:4a exception.");
+    c.line(
+        *base,
+        f,
+        "4c",
+        "base",
+        Production::Combine,
+        "Combine lines 4a and 4b",
+    );
+    c.line(
+        *base,
+        f,
+        "6",
+        "base",
+        Production::Combine,
+        "Add lines 4c and 5b",
+    );
+    c.line(
+        *ss,
+        f,
+        "10",
+        "ss",
+        Production::Scaled,
+        "Multiply the smaller of line 6 or line 9 by 12.4% (0.124)",
+    );
+    c.line(
+        *medicare,
+        f,
+        "11",
+        "medicare",
+        Production::Scaled,
+        "Multiply line 6 by 2.9% (0.029)",
+    );
+    c.line(
+        *total,
+        f,
+        "12",
+        "total",
+        Production::Combine,
+        "Self-employment tax. Add lines 10 and 11.",
+    );
+    c.line(
+        *deductible_half,
+        f,
+        "13",
+        "deductible_half",
+        Production::Scaled,
+        "Multiply line 12 by 50% (0.50).",
+    );
+    // ★ `addl` is Additional Medicare Tax — a FORM 8959 figure, not a Schedule SE line. The emitter
+    //   never writes it here, and `schedule_se.rs:75` says so: "SS + regular Medicare ONLY (addl is a
+    //   Form 8959 item)". Recorded rather than dropped, because a silently-unmentioned money field is
+    //   the gap this module exists to close.
+    c.exception(*addl, f, "(none)", "addl",
+        "Self-employment tax. Add lines 10 and 11.",
+        "NOT a Schedule SE line. Additional Medicare Tax is computed here for convenience and printed \
+         on FORM 8959, whose own coverage carries it. Never written by schedule_se.rs.");
+    c
+}
+
+fn zero_setaxresult() -> crate::tax::se::SeTaxResult {
+    crate::tax::se::SeTaxResult {
+        net_se: Usd::ZERO,
+        base: Usd::ZERO,
+        ss: Usd::ZERO,
+        medicare: Usd::ZERO,
+        addl: Usd::ZERO,
+        total: Usd::ZERO,
+        deductible_half: Usd::ZERO,
+    }
+}
+
 /// Every covered form, in one place. Grows one entry per form as coverage lands.
 ///
 /// ★ The values are irrelevant — only the TABLE is extracted. The instances exist so the exhaustive
@@ -1964,6 +2080,7 @@ fn zero_printed8949totals() -> crate::tax::printed::Printed8949Totals {
 pub fn all() -> Coverage {
     let mut c = Coverage::default();
     c.0.extend(cover_form8995lines(&zero_form8995lines()).0);
+    c.0.extend(cover_setaxresult(&zero_setaxresult()).0);
     c.0.extend(cover_form1040lines(&zero_form1040lines()).0);
     c.0.extend(cover_form1040income(&zero_form1040income()).0);
     // ★ Both 8949 parts, because one type serves Part I and Part II.

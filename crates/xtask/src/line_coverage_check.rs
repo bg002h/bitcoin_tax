@@ -33,9 +33,6 @@ fn normalize(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// The tax year whose extracts the quotes are taken from.
-const YEAR: &str = "2024";
-
 /// ★★★ The CLOSED SET of clamp idioms, each paired with why it denotes that polarity.
 ///
 /// **Fail-closed by construction.** A `Clamped` row whose quote matches NO idiom here is an ERROR, not
@@ -77,36 +74,28 @@ const CEIL_IDIOMS: &[(&str, &str)] = &[
     ("more than zero", "the same clause, alternate phrasing"),
 ];
 
-/// ★★★ Money-bearing types that are NOT printed, each with the reason it reaches no page.
+/// ★★★ **There is deliberately NO exemption list here.** There was one — `NOT_PRINTED`, three entries
+/// with reasons, plus a rule that audited the claim against the emitter's code because a B1 plant
+/// showed anyone could widen it by writing a sentence.
 ///
-/// **The completeness check (4b) is fail-closed**: every type declaring a `Usd` must be either COVERED
-/// or listed here. Both require a human edit, so a new money-bearing type cannot arrive unexamined.
-/// This is a list of EXEMPTIONS WITH REASONS — the same shape as the field census's "carries no
-/// decision, with a reason" — not a list of outcomes someone happened to observe.
+/// It is gone because the audit turned out to be the whole answer: if the emitter's own code is the
+/// witness for "this type is not printed", then it is equally the witness for "this type IS printed",
+/// and the list in between is redundant. Scope is now derived at the point of use — a type is in scope
+/// iff `btctax-forms` names it in real code. **A list nobody can write is a list nobody can widen.**
 ///
-/// ★ The distinction being drawn is COMPUTE RESULT vs PRINTED LINES. `Form8959` is what the engine
-/// computes; `Form8959Lines` is what the emitter writes. Only the latter reaches paper.
-const NOT_PRINTED: &[(&str, &str)] = &[
-    (
-        "Form8959",
-        "compute result; `Form8959Lines` is the printed shape and IS covered (form8959.rs:5 says core          derives the Lines from this)",
-    ),
-    (
-        "Form8960",
-        "compute result; `Form8960Lines` is the printed shape and IS covered. No reference anywhere in          btctax-forms.",
-    ),
-    (
-        "Qbi8995",
-        "compute result — the QBI deduction figure that feeds 1040 L13 plus the carryforward-out.          `Form8995Lines` is the printed shape. No reference anywhere in btctax-forms.",
-    ),
-];
-
 /// **The ratchet.** Exceptions are lines that fit no production, each carrying a written reason.
 ///
 /// ★ This is the number two full review rounds were spent estimating. It only ever goes DOWN: raising
 /// it requires editing this line, in a diff, with a reason — which is the whole point. Same shape as
 /// the `GAPS` ratchet that went 16 → 0.
-const MAX_EXCEPTIONS: usize = 9;
+const MAX_EXCEPTIONS: usize = 11;
+// ★ RAISED 9 → 11 when the CRYPTO-SLICE Schedule SE (`SeTaxResult`) landed — a form shape the derived
+//   scope predicate found and no hand-list contained, because the full-return path uses a DIFFERENT
+//   type that was already covered. Two shapes of one form; one was invisible.
+//     f1040sse:4a  two-branch, BOTH branches enter — the same class as the full-return twin
+//     f1040sse:—   `addl` is Additional Medicare Tax, a FORM 8959 figure that is computed here and
+//                  never written to Schedule SE (schedule_se.rs:75 says so). Recorded rather than
+//                  dropped: a silently-unmentioned money field is the gap this module exists to close.
 // ★ RAISED 5 → 9 when Form 1040, Form 1040 income and Form 8949 landed (173 rows over 12 forms).
 //   The four new ones, each argued from the form's own words:
 //     f1040:12   "Standard deduction or itemized deductions (from Schedule A)" — two branches that
@@ -186,7 +175,7 @@ pub fn run() -> Result<String, String> {
         }
 
         // (2) The instruction must appear VERBATIM in the form's own extracted text.
-        let stem = format!("{}--{YEAR}", e.form);
+        let stem = format!("{}--{}", e.form, e.year);
         let text = match extracts.get(&stem) {
             Some(t) => t,
             None => {
@@ -202,8 +191,8 @@ pub fn run() -> Result<String, String> {
                         //    cannot be fixed without network access.
                         let emitted = root
                             .join(format!(
-                                "crates/btctax-forms/forms/{YEAR}/{}.map.toml",
-                                e.form
+                                "crates/btctax-forms/forms/{}/{}.map.toml",
+                                e.year, e.form
                             ))
                             .exists();
                         if emitted {
@@ -264,60 +253,10 @@ pub fn run() -> Result<String, String> {
         }
     }
 
-    // (4b) ★★★ COMPLETENESS, DERIVED FROM SOURCE — is every money-bearing printed TYPE covered at all?
-    //
-    // The rules above check the rows that EXIST. This one checks that no type was silently skipped,
-    // which is the failure the module's own "honest limit" note recorded before nested money landed:
-    // `ScheduleBRow.amount` reached paper while nothing in the table mentioned it.
-    //
-    // ★ Derived, never hand-listed. Every `pub struct`/`pub enum` in the covered modules that declares
-    // a `Usd` is found by reading the source, and each must have a `cover_*` function. A new
-    // money-bearing type therefore fails the build the moment it is written — the same lesson as the
-    // productions and the missing-extract split: state the mechanism, let it decide, never enumerate
-    // the outcomes you happened to see.
-    {
-        let cov_src =
-            std::fs::read_to_string(root.join("crates/btctax-core/src/tax/line_coverage.rs"))
-                .map_err(|e| format!("cannot read line_coverage.rs: {e}"))?;
-        for rel in [
-            "crates/btctax-core/src/tax/printed.rs",
-            "crates/btctax-core/src/tax/other_taxes.rs",
-            "crates/btctax-core/src/tax/qbi.rs",
-        ] {
-            let src = std::fs::read_to_string(root.join(rel))
-                .map_err(|e| format!("cannot read {rel}: {e}"))?;
-            for (name, body) in money_bearing_types(&src) {
-                if !body.contains("Usd") {
-                    continue;
-                }
-                if NOT_PRINTED.iter().any(|(n, _)| *n == name) {
-                    continue;
-                }
-                let _ = &name;
-                let want = format!("fn cover_{}(", name.to_lowercase());
-                if !cov_src.contains(&want) {
-                    errs.push(format!(
-                        "{rel}: type `{name}` declares a Usd field but has no `cover_{}()` — a \
-                         money-bearing printed type that nothing in the table mentions is exactly the \
-                         gap nested money was",
-                        name.to_lowercase()
-                    ));
-                }
-            }
-        }
-    }
-
-    // (4c) ★★★ THE EXEMPTION MUST BE TRUE, NOT MERELY ASSERTED.
-    //
-    // A B1 plant found this loophole: adding a genuinely-printed type to `NOT_PRINTED` with any
-    // reason string silenced rule (4b) and nothing complained. An exemption list that anyone can
-    // extend by writing a sentence is not a gate — it is the oracle excuse list all over again.
-    //
-    // So the claim "this type is not printed" is CHECKED: the type name must not appear in any
-    // non-comment line of the emitter crate. Doc comments are excluded because a legitimate compute
-    // result is often NAMED in the emitter's prose ("core derives the Lines from this `Form8959`")
-    // without ever being consumed there.
-    {
+    // ★ What the EMITTER crate actually names, comments excluded — the witness for "is this
+    //   printed?". Doc comments are excluded because a compute result is routinely NAMED in the
+    //   emitter's prose ("core derives the Lines from this `Form8959`") without being consumed there.
+    let emitter_code = {
         let mut emitter_code = String::new();
         let dir = root.join("crates/btctax-forms/src");
         let mut stack = vec![dir];
@@ -341,15 +280,70 @@ pub fn run() -> Result<String, String> {
                 }
             }
         }
-        for (name, why) in NOT_PRINTED {
-            // ★ WORD BOUNDARY, not substring. `Form8959` is a prefix of `Form8960Lines`'s sibling
-            //   `Form8959Lines` — a naive `contains` rejects every legitimate compute-result exemption
-            //   because its own printed counterpart is named after it.
-            if mentions_ident(&emitter_code, name) {
-                errs.push(format!(
-                    "NOT_PRINTED claims `{name}` is not printed ({why:?}) — but it appears in emitter \
-                     CODE under crates/btctax-forms/src. The exemption is false; cover it instead."
-                ));
+        emitter_code
+    };
+
+    // (4b) ★★★ COMPLETENESS, DERIVED FROM SOURCE — is every money-bearing printed TYPE covered at all?
+    //
+    // The rules above check the rows that EXIST. This one checks that no type was silently skipped,
+    // which is the failure the module's own "honest limit" note recorded before nested money landed:
+    // `ScheduleBRow.amount` reached paper while nothing in the table mentioned it.
+    //
+    // ★ Derived, never hand-listed. Every `pub struct`/`pub enum` in the covered modules that declares
+    // a `Usd` is found by reading the source, and each must have a `cover_*` function. A new
+    // money-bearing type therefore fails the build the moment it is written — the same lesson as the
+    // productions and the missing-extract split: state the mechanism, let it decide, never enumerate
+    // the outcomes you happened to see.
+    {
+        let cov_src =
+            std::fs::read_to_string(root.join("crates/btctax-core/src/tax/line_coverage.rs"))
+                .map_err(|e| format!("cannot read line_coverage.rs: {e}"))?;
+        // ★★ EVERY module under tax/, not a three-file list. The hand-list could not see a new
+        //    `schedule_1a.rs`, so T2 would have landed 48 printed money lines while this checker
+        //    reported "OK" over zero of them — false completeness one layer down. r4 buildability I-2.
+        let tax_dir = root.join("crates/btctax-core/src/tax");
+        let mut modules: Vec<PathBuf> = std::fs::read_dir(&tax_dir)
+            .map_err(|e| format!("cannot read {}: {e}", tax_dir.display()))?
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "rs"))
+            .collect();
+        modules.sort();
+        for path in modules {
+            let rel = path
+                .strip_prefix(&root)
+                .unwrap_or(&path)
+                .display()
+                .to_string();
+            let src =
+                std::fs::read_to_string(&path).map_err(|e| format!("cannot read {rel}: {e}"))?;
+            for (name, body) in money_bearing_types(&src) {
+                if !body.contains("Usd") {
+                    continue;
+                }
+                // ★★★ IS THIS TYPE PRINTED? THE EMITTER DECIDES — not a list on either side.
+                //
+                // Widening the module scan from a three-file hand-list to every module under `tax/`
+                // was right (it could not see a new `schedule_1a.rs`) but it swept in ~40 internal
+                // compute types — `Advisory`, `CharitableResult` — that reach no page. Answering that
+                // with a bigger exemption list would be the same defect twice.
+                //
+                // So the predicate is derived: a type is IN SCOPE iff the emitter crate names it in
+                // real code. That subsumes the old NOT_PRINTED list — `Form8959`/`Form8960`/`Qbi8995`
+                // drop out because btctax-forms mentions only their `*Lines` counterparts — and it
+                // cannot be widened by writing a sentence.
+                if !mentions_ident(&emitter_code, &name) {
+                    continue;
+                }
+                let want = format!("fn cover_{}(", name.to_lowercase());
+                if !cov_src.contains(&want) {
+                    errs.push(format!(
+                        "{rel}: type `{name}` declares a Usd field but has no `cover_{}()` — a \
+                         money-bearing printed type that nothing in the table mentions is exactly the \
+                         gap nested money was",
+                        name.to_lowercase()
+                    ));
+                }
             }
         }
     }
@@ -455,7 +449,11 @@ fn money_bearing_types(src: &str) -> Vec<(String, String)> {
             // Only a real field declaration counts — not a doc-comment mention of `Usd`.
             let declares_money = body.lines().any(|l| {
                 let l = l.trim();
-                !l.starts_with("//") && !l.starts_with("///") && l.contains(": Usd")
+                // ★ `Option<Usd>` is money too. Gating on ": Usd" alone made every optional money
+                //   leaf invisible — and T3a REQUIRES optional money so a line can express blank.
+                !l.starts_with("//")
+                    && !l.starts_with("///")
+                    && (l.contains(": Usd") || l.contains(": Option<Usd>"))
             });
             if declares_money && !name.is_empty() {
                 out.push((name, body.to_string()));
@@ -552,6 +550,7 @@ mod tests {
         let mut c = Coverage::default();
         c.0.push(LineCoverage {
             form: "f8995",
+            year: btctax_core::tax::line_coverage::DEFAULT_ROW_YEAR,
             line: "4".to_string(),
             field: "line4",
             production: Production::Exception,
