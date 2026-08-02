@@ -1178,6 +1178,34 @@ silently decide something on the filer's behalf.
 legal judgement and is out of scope in the same way intent is (§G-11's scope bound). The narrow question
 is whether the filer, having taken such a position, can file it correctly.
 
+### G-25 — MFS and HoH ordinary brackets ship UNWITNESSED (found 2026-08-01)
+
+**Owning phase: whenever the corpus is next widened.** Direction is unknown, which is the point.
+
+btctax has **two** TY2024 tax tables — `testonly::ty2024_table()`, which every KAT, golden vector and
+oracle comparison is computed against, and the bundled one the **binary actually loads**. Nothing bound
+them, so the entire validated corpus could have been validating a table no filer ever gets.
+`crates/btctax-adapters/tests/shipped_tables_are_the_validated_tables.rs` now binds them, and on its
+first run it measured this:
+
+| schedule | state |
+|---|---|
+| `Mfs/ordinary` | **shipped only — UNWITNESSED** |
+| `HoH/ordinary` | **shipped only — UNWITNESSED** |
+| `Qss/ordinary` | neither, and lawfully so — §1(a)/§2(a) give a QSS the JOINT schedule |
+
+So the ordinary rate brackets applied to **married-filing-separately and head-of-household** filers have
+never been compared to anything. Not a defect in the numbers; an **absence of witness**, invisible until
+an edge was drawn between the two artifacts.
+
+★★ **Closing it must not be a copy.** Pasting the shipped brackets into `testonly` makes the test pass
+by construction and proves nothing — two artifacts agree only when independently derived. Closing it
+means transcribing MFS and HoH from **Rev. Proc. 2023-34 §2.01**, which the shipped table's own `source`
+field already cites. Ratcheted at 3; it only goes down.
+
+★ Related and larger: the `confidence` slice of the 2026-08-01 direction review found **3 of 5 fileable
+statuses have zero 1040-level oracle coverage**. This is the same gap seen from the table end.
+
 ### G-24 — ✅ **FIXED 2026-08-01** — 1040 lines 34/35a/37 print BLANK, not a sworn zero
 
 **Owning phase: §G-11 P1.** Found by the §G-11 coverage transcription, from the form's own words.
