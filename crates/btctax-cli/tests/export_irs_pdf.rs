@@ -205,10 +205,66 @@ fn a_dependents_statement_is_marked_draft_only_on_a_pseudo_ledger() {
     );
     assert!(body.contains("Kid 4"), "the overflow rows are there");
 
-    // ★ The DRAFT half is pinned directly on the rule — `cmd::admin::statement_body`'s own tests.
-    //   Asserting it here would need a pseudo-reconciled TY2024 full return, and the pseudo fixtures
-    //   are TY2025, which has no full-return path: the assertion would never execute and the test
-    //   would silently prove nothing.
+    // ── Pseudo-reconciled ledger: the SAME statement, now banner-first. ──
+    //
+    // ★★★ THIS LEG EXISTS BECAUSE ITS ABSENCE HAD A WRITTEN EXCUSE, AND THE EXCUSE WAS FALSE. The
+    //     comment here used to say a pseudo TY2024 full return was unreachable "because the pseudo
+    //     fixtures are TY2025, which has no full-return path". But the watermark predicate is
+    //     `state.pseudo_active()`, which counts synthetic legs across the WHOLE LEDGER and is not
+    //     year-scoped — while the full-vs-slice dispatch keys purely on `return_inputs::exists(conn,
+    //     tax_year)`. So a TY2025 pseudo ledger with TY2024 `return_inputs` watermarks a TY2024
+    //     full-return export, and the leg was always writable in ~30 lines against fixtures already
+    //     in this file. Review r9 wrote it and watched it red.
+    //
+    //     ★★ Without it, replacing the call site's `watermarked` argument with `false` left
+    //     `make check` at 2568/2568 GREEN — producing a banner-free page listing five dependents'
+    //     names and full SSNs beside fourteen pages all shouting that the figures are synthetic. An
+    //     untested guard is bad; an untested guard with a committed rationale is worse, because the
+    //     rationale stops the next person from trying.
+    let (_d2, pseudo) = make_vault(&pseudo_events());
+    cmd::reconcile::pseudo_set_mode(&pseudo, &pp(), true).unwrap();
+    {
+        let mut s = Session::open(&pseudo, &pp()).unwrap();
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
+            ..Default::default()
+        };
+        ri.header.taxpayer = btctax_core::tax::return_inputs::Person {
+            first_name: "Pat".into(),
+            last_name: "Filer".into(),
+            ssn: "123456789".into(),
+            ..Default::default()
+        };
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        nine(&mut ri);
+        return_inputs::set(s.conn(), 2024, &ri).unwrap();
+        s.save().unwrap();
+    }
+    let out2 = tempfile::tempdir().unwrap();
+    let rep2 = cmd::admin::export_irs_pdf(
+        &pseudo,
+        &pp(),
+        out2.path(),
+        2024,
+        &[],
+        Some(btctax_cli::ATTEST_PHRASE),
+    )
+    .expect("a TY2024 full return on a pseudo ledger exports under attestation");
+    assert!(rep2.watermarked, "a pseudo ledger IS watermarked");
+    let body2 = std::fs::read_to_string(out2.path().join("dependents_statement.txt")).unwrap();
+    assert!(
+        body2.starts_with("*** DRAFT — ESTIMATE, NOT FOR FILING ***"),
+        "the banner must be the FIRST thing on a page the filer detaches:\n{body2}"
+    );
+
+    // ★ And the manifest must TELL them to attach it — a page nobody is told to attach may as well
+    //   not have been written. Deleting that line reddened nothing before r9.
+    let man = std::fs::read_to_string(out2.path().join("manifest.txt")).unwrap();
+    assert!(
+        man.contains("dependents_statement.txt") && man.contains("attach"),
+        "the manifest must name the statement AND say to attach it:\n{man}"
+    );
 }
 #[test]
 fn pseudo_fill_requires_attestation() {
