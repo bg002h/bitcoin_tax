@@ -17,6 +17,7 @@
 
 use btctax_forms::testonly::{collect_fields, load};
 use std::collections::BTreeSet;
+mod common;
 
 /// Forms whose `[census]` section is not yet written. **Shrink-only** — the same ratchet shape as
 /// `cite_check::AUTHORITY_NOT_YET_ARCHIVED`.
@@ -213,30 +214,14 @@ fn recorded_gaps_may_only_shrink() {
 /// section — never by being quietly dropped from the list.
 #[test]
 fn the_two_lists_partition_every_form() {
-    // ★★ The 15 forms `fill_full_return` can emit (btctax-forms/tests/census.rs is the authority for
-    // this set). Every one must be on exactly ONE of the two lists: censused, or recorded as not yet
-    // censused. A form on neither would escape the gate entirely — the census's own version of the
-    // defect it exists to catch.
-    // ★ The authority for the 15 forms `fill_full_return` can emit — btctax-forms/tests/census.rs
-    // owns that set. This list must NEVER shrink to match a shorter working list; the compiler
-    // enforced that when a careless edit dropped two entries.
-    const ALL: [&str; 15] = [
-        "f1040",
-        "f1040s1",
-        "f1040s2",
-        "f1040s3",
-        "f1040sa",
-        "f1040sb",
-        "f1040sc",
-        "schedule_d",
-        "f8949",
-        "schedule_se",
-        "f8959",
-        "f8960",
-        "f8995",
-        "f8283",
-        "f8275",
-    ];
+    // ★★ Every form `fill_full_return` can emit must be on exactly ONE of the two lists: censused, or
+    // recorded as not yet censused. A form on neither would escape the gate entirely — the census's own
+    // version of the defect it exists to catch.
+    //
+    // ★ The set comes from `common::CENSUS_KEYS`, the ONE authority. This was a hand-typed COPY whose
+    // own comment named census.rs as authoritative — an authority nothing enforced. Adding a form is
+    // now one edit there, and no length here can go stale.
+    use common::CENSUS_KEYS as ALL;
     let censused: BTreeSet<&str> = CENSUSED.iter().copied().collect();
     let pending: BTreeSet<&str> = CENSUS_NOT_YET_WRITTEN.iter().copied().collect();
 

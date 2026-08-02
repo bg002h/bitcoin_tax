@@ -97,9 +97,12 @@ wage-and-property limits that take over (that is Form 8995-A, which it does not 
   date, appraiser), and btctax holds none of those details for property that did not come from your ledger. It
   will not attach an 8283 that under-reports its own property list and put your deduction at risk — complete
   that form by hand, or remove the gift.
-- **More than 14 interest payers / 15 dividend payers on Schedule B, or more than 4 dependents on the 1040,
-  REFUSE.** Those grids are full, and the IRS's remedy is a continuation statement this version cannot
-  generate. It will not silently print a subset of your payers or your children.
+- **More than 14 interest payers / 15 dividend payers on Schedule B REFUSE.** That grid is full, and the
+  IRS's remedy is a continuation statement this version cannot generate. It will not silently print a
+  subset of your payers.
+- **More than 4 dependents on the 1040 REFUSE.** The grid holds four, and the IRS's remedy is to check
+  the "more than four dependents" box and attach a statement — which this version cannot generate. It
+  will not silently print a subset of your children.
 - **The spouse's Identity Protection PIN is not captured** (yours is, and it prints). If your spouse has one,
   write it on the form.
 - **A HoH/QSS qualifying person who is not one of your listed dependents** is not captured; that cell is left

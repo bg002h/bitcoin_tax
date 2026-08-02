@@ -2,6 +2,35 @@
 //! everything is built inline from invented values.
 #![allow(dead_code)] // each integration-test crate uses a different subset of these helpers
 
+/// ★★★ THE ONE AUTHORITY for the set of forms `fill_full_return` can emit.
+///
+/// It lived in `census.rs` while `field_census.rs` kept a hand-typed COPY, whose own comment said
+/// *"btctax-forms/tests/census.rs is the authority for this set"* — an authority nothing enforced. Two
+/// lists, one truth, and each carried its own `[&str; 15]` length that a human had to keep in step;
+/// `census.rs` spelled the count a THIRD time in an assertion message. That is `CLAUDE.md` §B3's
+/// field-of-view shape inside one crate: every copy is individually correct and nothing holds them
+/// together.
+///
+/// ★ Adding a form is now ONE edit here. `.len()` is the count everywhere, so no assertion can quote a
+/// stale number.
+pub const CENSUS_KEYS: [&str; 15] = [
+    "f1040",
+    "f1040s1",
+    "f1040s2",
+    "f1040s3",
+    "f1040sa",
+    "f1040sb",
+    "f1040sc",
+    "schedule_d",
+    "f8949",
+    "schedule_se",
+    "f8995",
+    "f8959",
+    "f8960",
+    "f8283",
+    "f8275",
+];
+
 use btctax_core::tax::packet::{assemble_printed_return, PrintedReturn};
 use btctax_core::tax::return_1040::{assemble_absolute, AbsoluteReturn};
 use btctax_core::tax::testonly::{

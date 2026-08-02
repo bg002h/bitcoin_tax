@@ -36,23 +36,8 @@ use time::macros::date;
 
 /// The §6.1 census key set — the 15 forms `fill_full_return` can emit — in ONE place. Schedule D/SE use
 /// bare `schedule_d`/`schedule_se`; the numbered schedules use `f1040s{1,2,3,a,b,c}`.
-const CENSUS_KEYS: [&str; 15] = [
-    "f1040",
-    "f1040s1",
-    "f1040s2",
-    "f1040s3",
-    "f1040sa",
-    "f1040sb",
-    "f1040sc",
-    "schedule_d",
-    "f8949",
-    "schedule_se",
-    "f8995",
-    "f8959",
-    "f8960",
-    "f8283",
-    "f8275",
-];
+use common::CENSUS_KEYS;
+mod common;
 
 /// A minimal, well-formed Section-A Form 8283 row. The census only needs the `f8283` filler to return
 /// `Some` (the double-gate at packet.rs:155); a Section-A gift (≤ $5,000, no appraiser declaration
@@ -135,7 +120,8 @@ fn census_is_exactly_15_forms_including_8275_when_a_promote_is_present() {
     assert_eq!(
         forms.len(),
         15,
-        "fill_full_return must emit EXACTLY 15 forms; got {} ({emitted:?})",
+        "fill_full_return must emit EXACTLY {} forms; got {} ({emitted:?})",
+        CENSUS_KEYS.len(),
         forms.len()
     );
     assert_eq!(
