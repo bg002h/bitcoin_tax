@@ -160,6 +160,68 @@ its planted-defect test land with it. Both legs mutation-verified.
 
 ---
 
+## Scenario B — TaxCalcBench TY2024 `mfj-schedule-2-multiple-w2-excess-social-security-tax`
+
+MIT-licensed corpus (github.com/column-tax/tax-calc-bench), 51 TY2024 cases, each a complete IRS MeF
+2024v5.0 return — machine-readable and line-identified. **This one case found a tax understatement.**
+
+Facts: MFJ, no dependents, four W-2s **all sharing EIN 56-1234567**. Gold standard: L1a 310,600 ·
+L15 281,400 · L16 53,621 · 8959 → Sch 2 L11 965 · L24 54,586 · L25d 53,501 · **L37 owed 1,085**, and
+**no Schedule 3** — because one employer means §6413(c) gives no excess-SS credit.
+
+### R2 · **btctax grants an excess-SS credit without checking "more than one employer" — understating tax**
+
+i1040gi, Schedule 3 line 11, states **two** conditions:
+
+> *"If you, or your spouse if filing a joint return, had **more than one employer** for 2024 and total
+> wages of more than $168,600, too much social security … may have been withheld. You can take a credit
+> on this line for the amount withheld in excess of $10,453.20. But if **any one employer** withheld
+> more than $10,453.20, you can't claim the excess on your return. The employer should adjust the tax
+> for you."*
+
+btctax implements the second and **not the first**. Probe: four W-2s, an *identical* `employer` string,
+each box 4 = $6,200 (under the per-W-2 cap), aggregate over:
+
+```
+per-earner cap                       10,453.20
+taxpayer box4 total 12,400  -> excess 1,946.80
+spouse   box4 total 12,400  -> excess 1,946.80
+correct payments  53,500 + 1 (8959 Part V) = 53,501   -> OWES
+btctax  payments                            57,395    -> REFUND 2,809
+```
+
+**A $3,894 credit the filer is not entitled to.** That is an **understatement of tax on a return signed
+under §6065** — the one direction btctax's whole design says it never goes (*"the credits it omits
+conservatively — your tax is overstated, never understated"*).
+
+**Root cause: `W2` has no EIN.** `employer` is a free-text `String` (`return_inputs.rs:38`) that nothing
+reads, so btctax cannot distinguish one employer from two — which is exactly what §6413(c) turns on. The
+per-earner aggregate is computed and credited unconditionally.
+
+★ It is invisible to both oracles: this is a value they are *handed*, not one they derive — `CLAUDE.md`'s
+standing limit. And `line_coverage.rs:973` already records Schedule 3 line 11 as an Exception carrying
+*"no arithmetic, no source line"*, so the coverage table names the gap without closing it.
+
+### B10 · The same missing input REFUSES a return that is perfectly fileable
+
+The TaxCalcBench case itself does not compute at all:
+
+```
+error: usage: tax year 2024 cannot be computed from its full-return inputs: a single employer
+over-withheld Social Security — recover it from the employer (not creditable)
+```
+
+btctax got the **law** right — it detected the §6413(c) situation, which the corpus flags as *"the
+sharpest adverse test in the whole corpus"*. But the instruction says *"you can't claim the excess"*, not
+*"you can't file"*. The correct return is complete: total tax 54,586, payments 53,501, **owed 1,085**,
+no Schedule 3. btctax refuses instead, so this filer cannot file at all.
+
+The guard is per-W-2 (`return_refuse.rs:779`, `box4_ss_withheld > excess_ss_max`) — a proxy for employer
+identity it does not have. **Both R2 and B10 are the same missing field, failing in opposite
+directions:** over-strict where it should advise, over-generous where it should refuse.
+
+---
+
 ## INCORRECT RESULTS
 
 ### R1 · The CTC advisory ignores the §24(b) phase-out — it advises claiming a credit that is $0
