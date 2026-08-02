@@ -49,3 +49,5 @@ status	bytes	sha256	content_type	path	url
 200	22981	cacb490fcdcc1bc7a0679d236431a9af9ebc40da8c40f933e282c2153ee47686	text/html	statute-irc/26USC_s61.html	https://www.govinfo.gov/content/pkg/USCODE-2024-title26/html/USCODE-2024-title26-subtitleA-chap1-subchapB-partI-sec61.htm
 200	123648	42b763510df2b25efa91c6d12c386ca194c32bc730ef0cf606c401aacc34f040	application/pdf	irs-guidance/CCA_202302012.pdf	https://www.irs.gov/pub/irs-wd/202302012.pdf
 200	90905	2fe9bc204a82a037a50b21c6eda9949e266eafa423e604f312bc177fc721b552	application/pdf	irs-forms/f1040s1--2024.pdf	https://www.irs.gov/pub/irs-prior/f1040s1--2024.pdf
+200	116969	2a6177ce524a89e16ec9ac961c7ed92ce9ff38bd569846f6d564852b4b969979	application/pdf	design/forms/2024/f8995a--2024.pdf	https://www.irs.gov/pub/irs-prior/f8995a--2024.pdf
+200	253361	991b36b735bfbc621b8f0c5e65b2d63524fa242f8d9e6ca4b9bfcadcc4177986	application/pdf	design/forms/2024/i8995a--2024.pdf	https://www.irs.gov/pub/irs-prior/i8995a--2024.pdf

@@ -204,7 +204,8 @@ pub enum Command {
         #[arg(long)]
         tax_year: i32,
         /// Restrict the crypto-slice packet to specific forms (repeat or comma-separate). Values:
-        /// `f8949`, `schedule-d`, `schedule-se`, `form8283`, `form1040`, `form8275`. Default = every
+        /// `f8949`, `schedule-d`, `schedule-se`, `form8283`, `form1040`, `form8275`, `full-return`.
+        /// Default = every
         /// applicable form (f8949 + schedule-d always; schedule-se when SE income ≥ the $400 floor;
         /// form8283 when there are donations; form1040 when there is reportable digital-asset activity;
         /// form8275 when a promoted-basis disposal leg files in the year — Approach-B's Cohan-estimate
@@ -1011,6 +1012,14 @@ pub enum FormArg {
     Form1040,
     /// Form 8275 (Disclosure Statement — Approach-B's Cohan-estimate promoted-basis disclosure).
     Form8275,
+    /// The COMPLETE return packet — the 1040 and every schedule it cites. Only meaningful on a year
+    /// that has full-return inputs (`income import`); that path fills the whole packet anyway, so this
+    /// is an explicit way to say so rather than a value the parser rejects.
+    ///
+    /// ★ It exists because `--forms full-return` was the obvious guess and clap answered *"invalid
+    /// value 'full-return'"* with a list that did not contain it and no hint that the right move is to
+    /// omit the flag entirely (filing trial, B9).
+    FullReturn,
 }
 
 #[derive(Copy, Clone, ValueEnum)]

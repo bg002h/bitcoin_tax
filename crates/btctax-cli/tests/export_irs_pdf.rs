@@ -608,6 +608,36 @@ fn export_full_return_out_collision_names_path() {
     );
 }
 
+/// ★★★ B9 — `--forms full-return` on a year with NO full-return inputs must REFUSE, loudly.
+///
+/// `wants()` is `selected.is_empty() || selected.contains(f)`, so this selection matches no
+/// crypto-slice form. Without the guard the export writes an EMPTY directory and exits 0 — which a
+/// filer would reasonably read as "there was nothing to file". Silence is the one answer a tax tool
+/// may not give here, and it is the failure mode adding the enum variant introduces.
+#[test]
+fn forms_full_return_on_a_crypto_only_year_refuses_instead_of_writing_nothing() {
+    let (_dir, vault) = make_vault(&real_events());
+    let out = tempfile::tempdir().unwrap();
+    let err = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[FormArg::FullReturn],
+        None,
+    )
+    .expect_err("full-return was asked for on a year that has no full-return inputs");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("no full-return inputs") && msg.contains("income import"),
+        "the refusal must name the missing inputs AND how to author them: {msg}"
+    );
+    assert!(
+        wrote_nothing(out.path()),
+        "a refusal writes no bytes — and an EMPTY export dir with exit 0 is the defect this guards"
+    );
+}
+
 /// UX-P4-5: a `--forms` SLICE is ignored on a full-return year (honoring part of a jointly-computed
 /// 14-form packet is tax-unsound) — the whole packet still writes, and the report FLAGS that the
 /// slice was ignored so the caller can warn. With no `--forms`, nothing is ignored.
@@ -647,6 +677,29 @@ fn forms_slice_ignored_on_full_return_year_is_flagged_and_packet_unchanged() {
     assert!(
         !rep.full_return_paths.is_empty(),
         "the full packet still writes despite the ignored slice"
+    );
+
+    // ★★★ `--forms full-return` is the ONE selection this path can HONOR, so it is not "ignored" —
+    //     the filer asked for exactly what they got. Before the B9 fix clap rejected the value
+    //     outright, with a possible-values list that did not contain it and no hint that the right
+    //     move is to omit the flag entirely.
+    let out_fr = tempfile::tempdir().unwrap();
+    let rep_fr = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out_fr.path(),
+        2024,
+        &[FormArg::FullReturn],
+        None,
+    )
+    .expect("--forms full-return on a full-return year succeeds");
+    assert!(
+        !rep_fr.forms_ignored_full_return,
+        "--forms full-return asks for exactly what this path writes — it is HONORED, not ignored"
+    );
+    assert!(
+        !rep_fr.full_return_paths.is_empty(),
+        "the full packet writes under --forms full-return"
     );
 
     // Same year, NO --forms: nothing ignored, and the packet is identical (the slice never changed it).

@@ -411,8 +411,23 @@ pub(crate) fn export_irs_pdf_from_session(
         // UX-P4-5: a --forms slice cannot be honored on a full-return year (the 14-form packet is
         // jointly computed; a slice of it is tax-unsound). The packet still writes in full; flag the
         // ignored slice so the caller warns.
-        report.forms_ignored_full_return = !forms.is_empty();
+        // ★ `--forms full-return` is the one selection this path can HONOR, so it must not be reported
+        //   as ignored — the filer asked for exactly what they got (filing trial, B9).
+        report.forms_ignored_full_return =
+            !forms.is_empty() && forms.iter().any(|f| *f != FormArg::FullReturn);
         return Ok(report);
+    }
+
+    // ★★★ `--forms full-return` on a year with NO full-return inputs must REFUSE, loudly. `wants()` is
+    // `selected.is_empty() || selected.contains(f)`, so this selection matches no crypto-slice form and
+    // would otherwise write an EMPTY export directory and exit 0 — a filer would reasonably read that
+    // as "there was nothing to file". Silence is the one answer a tax tool may not give here.
+    if forms.contains(&FormArg::FullReturn) {
+        return Err(CliError::Usage(format!(
+            "--forms full-return asks for the complete return packet, but tax year {tax_year} has no \
+             full-return inputs. Author them first with `btctax income import --year {tax_year} \
+             --file <inputs.toml>`, or drop --forms to export the crypto slice."
+        )));
     }
 
     // BG-D8 completeness gate (crypto-slice path) — a promoted-basis leg without its complete Form 8275

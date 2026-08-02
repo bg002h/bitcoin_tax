@@ -952,5 +952,23 @@
     "bytes": 22981,
     "url": "https://www.govinfo.gov/content/pkg/USCODE-2024-title26/html/USCODE-2024-title26-subtitleA-chap1-subchapB-partI-sec61.htm",
     "extract": ""
+  },
+  {
+    "path": "design/forms/2024/f8995a--2024.pdf",
+    "kind": "form",
+    "storage": "note",
+    "sha256": "2a6177ce524a89e16ec9ac961c7ed92ce9ff38bd569846f6d564852b4b969979",
+    "bytes": 116969,
+    "url": "https://www.irs.gov/pub/irs-prior/f8995a--2024.pdf",
+    "extract": "design/forms/extract/f8995a--2024.txt"
+  },
+  {
+    "path": "design/forms/2024/i8995a--2024.pdf",
+    "kind": "instructions",
+    "storage": "note",
+    "sha256": "991b36b735bfbc621b8f0c5e65b2d63524fa242f8d9e6ca4b9bfcadcc4177986",
+    "bytes": 253361,
+    "url": "https://www.irs.gov/pub/irs-prior/i8995a--2024.pdf",
+    "extract": "design/forms/extract/i8995a--2024.txt"
   }
 ]
