@@ -1188,10 +1188,13 @@ reviewer.
 > planted-defect kills that call `check()` and were each watched red by mutation.
 >
 > - **(2b)** the quote must be printed as *that line's own text* — `label_precedes()` asks whether some
->   form of the label (`25a`, the bare `a`, or the stem `25` that carries the lead-in) sits immediately
->   before the quoted sentence. **189 of 189 rows bind**; 13 do not and are ratcheted (`MAX_UNLOCATABLE`)
->   and named in the summary line: 12 Form 8949 cells whose quote is a column *header*, and the QDCGT
->   worksheet line, which has no form line label.
+>   form of the label (`25a`, or the bare `a`) sits immediately before the quoted sentence, at a word
+>   boundary. **181 of 189 rows bind; 8 do not** and are ratcheted (`MAX_UNLOCATABLE`) and named in the
+>   summary: 6 Form 8949 **line 1** column cells whose quotes are column *headers*, the QDCGT worksheet
+>   line, and the one `(none)` row.
+>
+>   ★★ **As first landed this rule held in ONE DIRECTION ONLY, and the closure sentence here was wrong.**
+>   It said *"189 of 189 rows bind; 13 do not"*, which is self-contradictory on its face. See §G-27f.
 > - **(2c)** a row naming `(none)` may carry no quote at all. This killed the instance this entry
 >   named: `SeTaxResult.addl` no longer carries Schedule SE line 12's sentence.
 > - **A second real defect fell out**: `SeTaxResult.deductible_half` quoted the mid-line fragment
@@ -1213,6 +1216,50 @@ reviewer.
 | **G-27c** | `mentions_ident` has a **realized false negative**: money reached through a parent's field types no name in the emitter | Form 8275 `Part1Item.amount` — a §6662 disclosure amount on a filed return — is unseen. ★★ And `ScheduleBRow`, the module's **own headline example**, would not be demanded by (4b) today either; it is covered only because a human chose to. |
 | **G-27d** | the table **contradicts itself** across the two Schedule SE shapes | f1040sse line 10 is `Exception` in one function and `Scaled` in the other; line 4c's Exception reason says truncating the quote *would hide a real branch*, and the other row **does truncate and passes**. Rule (5) keys on the field name and cannot see it. ★ A line can therefore be re-filed under a second field name to make `MAX_EXCEPTIONS` go DOWN — the ratchet's monotonicity is real, its meaning is not. |
 | **G-27e** | `money_bearing_types` blind shapes | `Vec<Usd>`, a `Usd` in an enum variant, a tuple struct, `amount:Usd` with no space — and `read_dir` is **non-recursive**, so a directory module `tax/schedule_1a/mod.rs` is invisible. ★ That last one matters *now*: the widening's own justification was to see "a new `schedule_1a.rs`", and Schedule 1-A is the next build. |
+
+### G-27f — rule (2b) shipped holding in ONE DIRECTION (r7, 2026-08-02) — ✅ **CLOSED same day**
+
+The fix for §G-27a was itself half-blind, and the review that found it is the model for why a fold gets
+reviewed. `label_precedes` built the needle `format!("{f} {quote}")` and matched it with `match_indices`
+— **a plain substring scan with no left word boundary** — so a row naming line *N* bound to any line
+whose printed label *ends with* N. `check()` returned `Ok` on:
+
+| row claims | actually quotes |
+|---|---|
+| f8995 line **5** (QBI *component*) | line **15**, the QBI *deduction* |
+| f1040 line **1z** (total wages) | line **11**, adjusted gross income |
+| f1040 line **6b** (taxable social security) | line **16**, *"Tax (see instructions)"* |
+
+★★★ **The asymmetry is the fingerprint.** Line 15's sentence claimed as line 5 was *accepted*; line 5's
+sentence claimed as line 15 was *rejected* — and **both committed plants sat on the rejected side**, so
+the blind half was never observed. That is exactly `CLAUDE.md`'s standing root cause in the direction it
+actually occurred: Form 6251 line 33 read as *"Subtract line 32 from line 12"* where the form says 22 —
+**the wrong line carrying the bigger number**. r7 measured the class at 71 accepted misattributions
+across eight forms; the committed table was clean, so this was latent, not realized.
+
+Closed by a one-line boundary check, plus three further findings from the same review:
+
+- **The stem-caption form was too permissive.** A row named `25d` could quote line 25's caption
+  *"Federal income tax withheld from:"* — but the 1040 prints that as a caption with no amount box, and
+  25d's own text is *"Add lines 25a through 25c"*. The caption is now admitted only when the quote also
+  carries the row's own bare letter, which is what 25a legitimately does.
+- **An EMPTY quote passed everything and moved no counter.** `str::contains("")` is true for every
+  haystack, so rule (2) was vacuous; (2b) then built the needle `"5 "`, which occurs on every form. A
+  `Collected` row with a blank instruction faced **no rule at all** — a cheaper evasion than the
+  `field: _` one r6 named, because it leaves a row that *looks* classified. Now rejected outright, the
+  mirror of (2c). And `(none)` rows are counted in `MAX_UNLOCATABLE`, which (2c) had routed past it.
+- **The ratchet's account of itself was wrong for 6 of 13 rows.** Six were Form 8949 **line 2** — the
+  TOTALS line — quoting its own printed sentence, unbindable only because `fmt_part` writes `I-2(d)` and
+  the stripper stopped at `(`. The class name (*"column headers, not form lines"*) told the next author
+  they were unbindable **in principle**; they were not, and the ratchet carried six units of unearned
+  slack. Stripping the part prefix binds all six: **13 → 8**.
+
+★★ **And five of fifteen mechanisms had no kill at all** — (3b), all three ratchets, and the (4b)
+completeness scan could each be deleted with the suite green. r6's keystone fix made B1's question
+answerable for the checker *as a whole*; B1 is **per-instrument**, and the fold stopped at the twelve
+rules the plants happened to cover. (3b) was not decorative: 1040 line 34's clause matches a FLOOR_IDIOM
+and is kept out of `Clamped` only by it. `missing_cover_fns` was extracted as a pure function so (4b)
+could be reached by a synthetic defect at all. **All eight mechanisms now observed red.**
 
 ★ Also: `shipped_tables_are_the_validated_tables.rs` does not compare `gift_annual_exclusion` or
 `gift_lifetime_exclusion` (they agree today), and neither struct is exhaustively destructured — so

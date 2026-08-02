@@ -89,6 +89,9 @@ const CEIL_IDIOMS: &[(&str, &str)] = &[
 /// it requires editing this line, in a diff, with a reason — which is the whole point. Same shape as
 /// the `GAPS` ratchet that went 16 → 0.
 const MAX_EXCEPTIONS: usize = 11;
+
+/// See the block comment at its use site in [`check`].
+const MAX_UNLOCATABLE: usize = 8;
 // ★ RAISED 9 → 11 when the CRYPTO-SLICE Schedule SE (`SeTaxResult`) landed — a form shape the derived
 //   scope predicate found and no hand-list contained, because the full-return path uses a DIFFERENT
 //   type that was already covered. Two shapes of one form; one was invisible.
@@ -164,10 +167,20 @@ const MAX_UNVERIFIABLE: usize = 0;
 /// never waved through.
 fn label_forms(label: &str) -> Option<Vec<String>> {
     // ★ A COLUMN suffix on a line label (`3(d)` on Schedule D) still quotes the LINE's text — the row
-    //   caption — so it binds after stripping. Form 8949's `I-1(d)` does not: its quote is the column
-    //   HEADER ("Proceeds"), which is not any line's text, so it stays unlocatable by construction
-    //   rather than by being forced onto line 1.
+    //   caption — so it binds after stripping.
     let label = label.split_once('(').map_or(label, |(l, _)| l);
+    // ★★ …and so does a PART prefix. `fmt_part` writes Form 8949's labels as `I-2(d)`, and stripping
+    //    only at '(' leaves `I-2`, whose stem is empty — so the row returned `None` and was counted as
+    //    unlocatable. Six of them are Form 8949 **line 2**, the TOTALS line, quoting its own printed
+    //    sentence *"Totals. Add the amounts in columns (d), (e), (g), and (h)…"*, which is exactly the
+    //    shape (2b) exists to recognise. r7 (I-4): the ratchet was carrying six units of slack under a
+    //    class name — "column headers, not form lines" — that told the next author they were unbindable
+    //    in principle. They are not. What genuinely cannot bind is Form 8949 line **1**, whose quotes
+    //    are column HEADERS ("Proceeds", "Cost or other basis"), no line's text.
+    let label = label
+        .split_once('-')
+        .filter(|(p, _)| !p.is_empty() && p.chars().all(|c| c == 'I' || c == 'V' || c == 'X'))
+        .map_or(label, |(_, l)| l);
     let stem: String = label.chars().take_while(char::is_ascii_digit).collect();
     let suffix = &label[stem.len()..];
     if stem.is_empty() || stem.len() > 2 || suffix.len() > 1 {
@@ -178,10 +191,8 @@ fn label_forms(label: &str) -> Option<Vec<String>> {
     }
     let mut v = vec![label.to_string()];
     if !suffix.is_empty() {
-        // A lettered sub-line prints as a bare letter (`b Taxable interest`), and its stem may carry
-        // the lead-in that the transcription rightly quotes (`25 Federal income tax withheld from:`).
+        // A lettered sub-line prints as a bare letter (`b Taxable interest`).
         v.push(suffix.to_string());
-        v.push(stem);
     }
     Some(v)
 }
@@ -189,11 +200,43 @@ fn label_forms(label: &str) -> Option<Vec<String>> {
 /// Is `quote` printed as line `label`'s own text — i.e. does some form of the label sit immediately
 /// before it? `text` must already be whitespace-normalized.
 fn label_precedes(text: &str, label: &str, quote: &str) -> Option<bool> {
-    let forms = label_forms(label)?;
-    let stem: String = label.chars().take_while(char::is_ascii_digit).collect();
+    let mut forms = label_forms(label)?;
+    let bare = label.split_once('(').map_or(label, |(l, _)| l);
+    let stem: String = bare.chars().take_while(char::is_ascii_digit).collect();
+    let suffix = &bare[stem.len()..];
+    // The stem CAPTION, admitted only when the quote carries the row's own bare letter as a token —
+    // i.e. the transcription spans the caption *through* the sub-line, which is what 1040 line 25a's
+    // "Federal income tax withheld from: a Form(s) W-2" does. A quote of the caption alone is line 25's
+    // text, not 25d's, and is now rejected.
+    if !suffix.is_empty() && quote.split(' ').any(|w| w == suffix) {
+        forms.push(stem.clone());
+    }
+    // ★★★ THE STEM FORM IS GONE, and r7 (I-1) is why. Accepting `25 …` for a row named `25d` let a row
+    //     quote its stem's CAPTION instead of its own text: Form 1040 prints *"25 Federal income tax
+    //     withheld from:"* as a caption with no amount box, while 25a–25d each have their own box and
+    //     line 25d's own text is *"Add lines 25a through 25c"*. It was load-bearing for exactly ONE
+    //     committed row — f1040 25a, whose quote is the caption PLUS the sub-line's own bare letter —
+    //     so the caption is admitted only as a PREFIX to a match on the row's real label form, never
+    //     on its own.
     Some(forms.iter().any(|f| {
         let needle = format!("{f} {quote}");
         text.match_indices(&needle).any(|(i, _)| {
+            // ★★★ A LEFT WORD BOUNDARY, and it is the whole guarantee. `match_indices` is a plain
+            //     substring scan, so without this a row naming line N binds to any line whose printed
+            //     label ENDS with N — the needle `"5 Qualified business income deduction…"` matches
+            //     inside f8995's `"15 Qualified business income deduction…"`, at the `5`.
+            //
+            //     ★★ The rule held in ONE DIRECTION ONLY, and both committed plants sat on the side it
+            //     caught, so the blind half was never observed. r7 built three real misattributions
+            //     that `check()` returned `Ok` on — f8995 line 5 carrying line 15's sentence, f1040 1z
+            //     carrying line 11's AGI sentence, f1040 6b carrying line 16's *"Tax (see
+            //     instructions)"* — and measured the class at 71 accepted misattributions across eight
+            //     forms. This is `CLAUDE.md`'s standing root cause in the direction it actually
+            //     occurred: Form 6251 line 33 read as *"Subtract line 32 from line 12"* where the form
+            //     says 22 — the wrong line carrying the BIGGER number.
+            if i > 0 && text.as_bytes()[i - 1].is_ascii_alphanumeric() {
+                return false;
+            }
             // ★ The bare-letter form pins the LETTER but not the stem, so on its own it would let a row
             //   claim `5b` while quoting line `2b`. Requiring the stem to appear in the run-up closes
             //   that without reconstructing spans — the sub-line always follows its own stem's text.
@@ -234,6 +277,45 @@ pub fn run() -> Result<String, String> {
 ///
 /// Taking a table as a parameter is what makes a planted defect expressible, so the kills below can
 /// call the rules on a synthetic bad table instead of asserting on their own fixtures.
+/// (4b)'s decision for ONE source file, as a pure function of its inputs.
+///
+/// ★★★ Extracted so B1 can be satisfied at all. r7 (I-3) neutralised this scan and the whole suite
+/// stayed green: it reads the repo's real files, so no in-memory table can plant a defect in it, and
+/// "which test reds when this checker is removed?" had the answer "none". Same shape as r6's keystone
+/// finding one level down — the rule was real, and nothing was watching it.
+fn missing_cover_fns(rel: &str, src: &str, emitter_code: &str, cov_src: &str) -> Vec<String> {
+    let mut errs = Vec::new();
+    for (name, body) in money_bearing_types(src) {
+        if !body.contains("Usd") {
+            continue;
+        }
+        // ★★★ IS THIS TYPE PRINTED? THE EMITTER DECIDES — not a list on either side.
+        //
+        // Widening the module scan from a three-file hand-list to every module under `tax/`
+        // was right (it could not see a new `schedule_1a.rs`) but it swept in ~40 internal
+        // compute types — `Advisory`, `CharitableResult` — that reach no page. Answering that
+        // with a bigger exemption list would be the same defect twice.
+        //
+        // So the predicate is derived: a type is IN SCOPE iff the emitter crate names it in
+        // real code. That subsumes the old NOT_PRINTED list — `Form8959`/`Form8960`/`Qbi8995`
+        // drop out because btctax-forms mentions only their `*Lines` counterparts — and it
+        // cannot be widened by writing a sentence.
+        if !mentions_ident(emitter_code, &name) {
+            continue;
+        }
+        let want = format!("fn cover_{}(", name.to_lowercase());
+        if !cov_src.contains(&want) {
+            errs.push(format!(
+                "{rel}: type `{name}` declares a Usd field but has no `cover_{}()` — a \
+                 money-bearing printed type that nothing in the table mentions is exactly the gap \
+                 nested money was",
+                name.to_lowercase()
+            ));
+        }
+    }
+    errs
+}
+
 pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
     let root = repo_root();
     let mut extracts: BTreeMap<String, String> = BTreeMap::new();
@@ -320,7 +402,32 @@ pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
                     e.form, e.field, e.instruction
                 ));
             }
+            // ★★★ …and it is NOT LINE-BOUND, so it is counted. r7 (I-2): the previous fold's own comment
+            //     said a `(none)` row escapes "rules (2)/(2b) — and ONLY those", which was true of the
+            //     RULES and false of the COUNTING. This module's standard, written a few lines below, is
+            //     that a row (2b) could not reach must be "COUNTED and pinned, not left as a silent
+            //     shrug". A `(none)` row is by construction such a row.
+            unlocatable.push(format!("{}:(none) ({})", e.form, e.field));
         } else {
+            // ★★★ AN EMPTY QUOTE IS NOT A QUOTE — and it used to pass EVERYTHING. `str::contains("")`
+            //     is true for every haystack, so rule (2) was vacuous; rule (2b) then built the needle
+            //     `"5 "`, which occurs on every form, and returned true. A `Collected` or `Carry` row
+            //     with a blank instruction therefore faced NO rule at all and moved NO counter — a
+            //     fully-passing, entirely unverified row.
+            //
+            //     ★★ It is the exact mirror of (2c), and the cheaper version of the evasion r6 named:
+            //     `field: _` plus a zero at least leaves a `_` in the diff, whereas a blank sixth
+            //     argument leaves a row that LOOKS classified — it has a form, a line and a production.
+            //     Two blanks that are not the same thing, indistinguishable on the page.
+            if e.instruction.trim().is_empty() {
+                errs.push(format!(
+                    "{}:{} ({}) has an EMPTY instruction. Every line-bound row must carry the form's \
+                     own sentence verbatim; a blank quote satisfies rules (2) and (2b) vacuously and \
+                     is counted by nothing.",
+                    e.form, e.line, e.field
+                ));
+                continue;
+            }
             let want = normalize(e.instruction);
             if !text.contains(&want) {
                 errs.push(format!(
@@ -331,6 +438,17 @@ pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
                 // ★★★ (2b) THE QUOTE MUST BE THIS LINE'S OWN TEXT, not merely somewhere on the form.
                 match label_precedes(text, e.line.as_str(), &want) {
                     Some(true) => {}
+                    // ★★ A COLUMN cell may legitimately quote its COLUMN HEADER rather than its line's
+                    //    text — Form 8949 `I-1(d)` carries "Proceeds". That cannot be bound by this
+                    //    mechanism: `pdftotext -layout` TRANSPOSES the header block, so `(d)` and
+                    //    `Proceeds` land on different physical lines with two other columns' text between
+                    //    them, and no adjacency survives. So a column-suffixed row that does not bind is
+                    //    COUNTED, not accused. ★ It is a real weakening — a Schedule D `3(d)` row quoting
+                    //    the wrong line degrades from an error to a count — but the count is ratcheted and
+                    //    printed, so it moves in the open rather than passing silently.
+                    Some(false) if e.line.contains('(') => {
+                        unlocatable.push(format!("{}:{} ({})", e.form, e.line, e.field))
+                    }
                     Some(false) => errs.push(format!(
                     "{}:{} ({}) quotes text that IS on {stem} but is NOT printed as line {}'s own \
                      text:\n      {:?}\n    This is the Form 6251 line-33 class — a verbatim \
@@ -443,34 +561,7 @@ pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
                 .to_string();
             let src =
                 std::fs::read_to_string(&path).map_err(|e| format!("cannot read {rel}: {e}"))?;
-            for (name, body) in money_bearing_types(&src) {
-                if !body.contains("Usd") {
-                    continue;
-                }
-                // ★★★ IS THIS TYPE PRINTED? THE EMITTER DECIDES — not a list on either side.
-                //
-                // Widening the module scan from a three-file hand-list to every module under `tax/`
-                // was right (it could not see a new `schedule_1a.rs`) but it swept in ~40 internal
-                // compute types — `Advisory`, `CharitableResult` — that reach no page. Answering that
-                // with a bigger exemption list would be the same defect twice.
-                //
-                // So the predicate is derived: a type is IN SCOPE iff the emitter crate names it in
-                // real code. That subsumes the old NOT_PRINTED list — `Form8959`/`Form8960`/`Qbi8995`
-                // drop out because btctax-forms mentions only their `*Lines` counterparts — and it
-                // cannot be widened by writing a sentence.
-                if !mentions_ident(&emitter_code, &name) {
-                    continue;
-                }
-                let want = format!("fn cover_{}(", name.to_lowercase());
-                if !cov_src.contains(&want) {
-                    errs.push(format!(
-                        "{rel}: type `{name}` declares a Usd field but has no `cover_{}()` — a \
-                         money-bearing printed type that nothing in the table mentions is exactly the \
-                         gap nested money was",
-                        name.to_lowercase()
-                    ));
-                }
-            }
+            errs.extend(missing_cover_fns(&rel, &src, &emitter_code, &cov_src));
         }
     }
 
@@ -518,10 +609,21 @@ pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
     // say which cases it did not cover is not a check.
     //
     // Only ever goes DOWN.
-    // The residue, by class: 12 Form 8949 column cells whose quote is a column HEADER rather than any
-    // line's text, and the Qualified Dividends & Capital Gain Tax Worksheet line 3, which lives in the
-    // instructions booklet and has no form line label. Both are stated, neither is a form line.
-    const MAX_UNLOCATABLE: usize = 13;
+    // ★★★ THE RESIDUE, ENUMERATED HONESTLY — because a ratchet's only content is what it is understood
+    // to hold, and this one's account of itself was wrong for 6 of 13 rows (r7, I-4):
+    //
+    //   6  Form 8949 line 1 columns (d)/(e)/(h), both parts — quotes are COLUMN HEADERS ("Proceeds",
+    //      "Cost or other basis"), which are no line's text and which `pdftotext -layout` TRANSPOSES:
+    //      `(d)` and `Proceeds` land on different physical lines with two other columns between them,
+    //      so no adjacency survives to bind.
+    //   1  the QDCGT worksheet line, which lives in the instructions booklet and has no form label.
+    //   1  the `(none)` row — by construction not a line, and now counted rather than slipping past.
+    //
+    // ★★ It used to say "12 Form 8949 column cells whose quote is a column HEADER". Six of those were
+    // Form 8949 **line 2** — the TOTALS line — quoting its own printed sentence, unbindable only
+    // because `fmt_part` writes `I-2(d)` and the stripper stopped at '('. The class name told the next
+    // author they were unbindable in principle; they were not, and the ratchet carried six units of
+    // unearned slack. Only ever goes DOWN.
     if unlocatable.len() > MAX_UNLOCATABLE {
         errs.push(format!(
             "{} row(s) name a line that cannot be located in the form text, so their quote is bound \
@@ -631,6 +733,40 @@ fn mentions_ident(hay: &str, ident: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ★★★ (4b) — the completeness scan, now killable because `missing_cover_fns` is pure.
+    ///
+    /// It reads the repo's real files, so no in-memory `Coverage` can plant a defect in it: r7 (I-3)
+    /// neutralised it and the whole suite stayed green. Feeding it synthetic sources is the only honest
+    /// way to answer B1's question — *which test reds when this checker is removed?*
+    #[test]
+    fn the_completeness_scan_demands_a_cover_fn_for_a_printed_money_type() {
+        let src = "pub struct NewMoneyThing { pub amount: Usd }";
+
+        // Printed (the emitter names it) and uncovered -> a finding.
+        let errs = missing_cover_fns("tax/new.rs", src, "let x: NewMoneyThing = todo!();", "");
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert!(errs[0].contains("cover_newmoneything()"), "{errs:?}");
+
+        // …and each half of the predicate must matter on its own, or the test passes for a stale
+        // reason. Covered -> silent; not named by the emitter -> out of scope.
+        assert!(missing_cover_fns(
+            "tax/new.rs",
+            src,
+            "let x: NewMoneyThing = todo!();",
+            "fn cover_newmoneything(",
+        )
+        .is_empty());
+        assert!(missing_cover_fns("tax/new.rs", src, "nothing mentions it", "").is_empty());
+        // ★ And a type carrying no money is not in scope however loudly the emitter names it.
+        assert!(missing_cover_fns(
+            "tax/new.rs",
+            "pub struct NoMoney { pub n: u32 }",
+            "let x: NoMoney = todo!();",
+            "",
+        )
+        .is_empty());
+    }
 
     /// The checker passes on the committed table.
     #[test]
@@ -760,6 +896,148 @@ mod tests {
         assert!(
             e.contains("polarity is TRANSCRIBED"),
             "a \"(none)\" row must still face rule (3) — otherwise (2c) is a way OUT of the checker: {e}"
+        );
+
+        // ★★★ (2b) THE SUFFIX DIRECTION — the half the rule was BLIND to, and neither plant covered.
+        // `match_indices` is a plain substring scan, so without a left word boundary a row naming line
+        // N binds to any line whose printed label ENDS with N. Here f8995 line 5 carries line **15**'s
+        // verbatim sentence, and `check()` returned Ok on it. r7 measured 71 such accepts across eight
+        // forms. ★ The asymmetry is the fingerprint: line 15's text under line 5 was ACCEPTED while
+        // line 5's text under line 15 was rejected — and both committed plants sat on the rejected
+        // side, which is exactly how a rule ships holding in one direction only.
+        let mut c = Coverage::default();
+        c.line(
+            btctax_core::conventions::Usd::ZERO,
+            "f8995",
+            "5",
+            "line5",
+            Production::Scaled,
+            "Qualified business income deduction. Enter the smaller of line 10 or line 14. Also enter \
+             this amount on the applicable line of your return (see instructions)",
+        );
+        let e = check(&c).unwrap_err();
+        assert!(
+            e.contains("NOT printed as line 5's own text"),
+            "rule (2b) must reject line 15's sentence filed under line 5 — a substring match with no \
+             left boundary finds `5 …` inside `15 …`: {e}"
+        );
+
+        // ★★ (2b) the stem CAPTION may not stand alone. 1040 prints `25 Federal income tax withheld
+        // from:` as a caption with no amount box; line 25d's own text is `Add lines 25a through 25c`.
+        // The caption is admitted only when the quote also carries the row's own bare letter.
+        let mut c = Coverage::default();
+        c.line(
+            btctax_core::conventions::Usd::ZERO,
+            "f1040",
+            "25d",
+            "line25d",
+            Production::Collected,
+            "Federal income tax withheld from:",
+        );
+        let e = check(&c).unwrap_err();
+        assert!(
+            e.contains("NOT printed as line 25d's own text"),
+            "rule (2b) must reject a stem caption quoted as a sub-line's own text: {e}"
+        );
+
+        // ★★★ AN EMPTY QUOTE IS NOT A QUOTE. `str::contains("")` is true for every haystack, so rule
+        // (2) was vacuous; (2b) then built the needle `"5 "`, which occurs on every form. A `Collected`
+        // row with a blank instruction faced NO rule and moved NO counter — a fully-passing, entirely
+        // unverified row, and a cheaper evasion than the `field: _` one r6 named, because it leaves a
+        // row that LOOKS classified.
+        for blank in ["", "   "] {
+            let mut c = Coverage::default();
+            c.line(
+                btctax_core::conventions::Usd::ZERO,
+                "f8995",
+                "5",
+                "smuggled",
+                Production::Collected,
+                blank,
+            );
+            let e = check(&c).unwrap_err();
+            assert!(
+                e.contains("EMPTY instruction"),
+                "a blank quote must be rejected outright, not pass vacuously: {e}"
+            );
+        }
+
+        // ★★ (3b) A `Clamped` row needs a "-0-" clause. r7 (I-3) neutralised this and NOTHING red —
+        // yet it is load-bearing for a live disposition: 1040 line 34's clause matches the FLOOR_IDIOM
+        // "is more than line" and is kept OUT of `Clamped` only by this half. The escape-hatch plant
+        // asserts on "polarity is TRANSCRIBED", which is (3a), a different rule.
+        let mut c = Coverage::default();
+        c.line(
+            btctax_core::conventions::Usd::ZERO,
+            "f1040",
+            "34",
+            "line34",
+            Production::Clamped(Polarity::FloorAtZero),
+            "If line 33 is more than line 24, subtract line 24 from line 33. This is the amount you \
+             overpaid",
+        );
+        let e = check(&c).unwrap_err();
+        assert!(
+            !e.is_empty() && e.contains("34"),
+            "(3b) must reject a Clamped row whose quote prints no -0- — this is what forces 1040 \
+             line 34 into the Exception bucket rather than blessing a clamp the form never states: {e}"
+        );
+
+        // ★★★ THE RATCHETS ARE UNOBSERVABLE WHILE THE TABLE SITS AT THEM (11/11, 0/0, 8/8) — which is
+        // precisely when they need a synthetic table to be watched. r7 (I-3) deleted all three and the
+        // suite stayed green.
+        let mut c = Coverage::default();
+        for i in 0..=MAX_EXCEPTIONS {
+            c.exception(
+                btctax_core::conventions::Usd::ZERO,
+                "f8995",
+                "(none)",
+                Box::leak(format!("filler{i}").into_boxed_str()),
+                "",
+                "a reason",
+            );
+        }
+        let e = check(&c).unwrap_err();
+        assert!(
+            e.contains("exception"),
+            "MAX_EXCEPTIONS must reject one more Exception than the ratchet: {e}"
+        );
+
+        let mut c = Coverage::default();
+        for i in 0..=MAX_UNLOCATABLE {
+            c.line(
+                btctax_core::conventions::Usd::ZERO,
+                "f8995",
+                "QDCGT Worksheet, 3",
+                Box::leak(format!("filler{i}").into_boxed_str()),
+                Production::Collected,
+                "Qualified business income component. Multiply line 4 by 20% (0.20)",
+            );
+        }
+        let e = check(&c).unwrap_err();
+        assert!(
+            e.contains("cannot be located"),
+            "MAX_UNLOCATABLE must reject one more unbindable row than the ratchet: {e}"
+        );
+
+        // `schedule_d` is the MAP's name; the extract is committed as `f1040sd`. So a row naming it has
+        // a map and no text layer — which is exactly `unverifiable`, and the only way to reach that
+        // counter without deleting a committed asset.
+        let mut c = Coverage::default();
+        for i in 0..=MAX_UNVERIFIABLE {
+            c.line(
+                btctax_core::conventions::Usd::ZERO,
+                "schedule_d",
+                "1",
+                Box::leak(format!("filler{i}").into_boxed_str()),
+                Production::Collected,
+                "anything",
+            );
+        }
+        let e = check(&c).unwrap_err();
+        assert!(
+            e.contains("unverifiable") || e.contains("no committed text"),
+            "MAX_UNVERIFIABLE must reject one more unverifiable row than the ratchet: {e}"
         );
 
         // (3) a clamp declaring a polarity its own clause does not state.
