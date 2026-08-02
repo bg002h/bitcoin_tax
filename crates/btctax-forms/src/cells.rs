@@ -41,6 +41,35 @@ pub fn fmt_money_pair(d: Usd) -> (String, String) {
 
 /// Emit the write(s) + flat placement(s) for a money cell. `descent = Some((group, ordinal))` puts
 /// the (dollars) field into a strictly-descending-y sequence; `None` makes it column-only.
+/// Write a money cell **only if there is a value** — `None` writes nothing at all.
+///
+/// ★★★ **This is §G-24 made structural.** [`push_money`] takes a bare [`Usd`] and always writes, and
+/// `fmt_money(Usd::ZERO)` renders `"0"` — so the only way to leave a line blank is to not call it, and
+/// the only way to see that a caller *should* have skipped is to read every call site. That is how 1040
+/// lines 34/35a/37 came to print a sworn `0` on every return, and how Schedule D lines 18 and 19 still
+/// did until this commit.
+///
+/// A blank line and a printed `0` are different speech acts on a return signed under 26 USC §6065: a
+/// blank says nothing, a `0` swears the amount **is** zero. Where a form line is a CONDITIONAL entry —
+/// *"if you are required to complete … enter the amount, **if any**"* — and prints no `-0-` clause, the
+/// unmet condition leaves it **blank**, not zero.
+///
+/// ★ Prefer this over `push_money` for any line whose instruction states a condition. The `Option` is
+/// the point: it makes "there is no value here" expressible, so a reviewer sees the decision instead of
+/// having to infer it from an absent call.
+pub fn push_money_opt(
+    w: &mut Vec<(String, FieldValue)>,
+    p: &mut Vec<FlatPlacement>,
+    cell: &MoneyCell,
+    value: Option<Usd>,
+    col: usize,
+    descent: Option<(u32, u32)>,
+) {
+    if let Some(v) = value {
+        push_money(w, p, cell, v, col, descent);
+    }
+}
+
 pub fn push_money(
     w: &mut Vec<(String, FieldValue)>,
     p: &mut Vec<FlatPlacement>,

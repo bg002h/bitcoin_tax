@@ -1165,15 +1165,26 @@ fn schedule_d_full_routing_both_gains() {
         Some("1"),
         "L17 = Yes"
     );
+    // ★★★ LINES 18 AND 19 ARE BLANK, NOT ZERO — and this test asserted the defect until 2026-08-02.
+    //     Both are conditional entries in the form's own words: "If you are required to complete the
+    //     28% Rate Gain Worksheet … enter the amount, IF ANY" / "…the Unrecaptured Section 1250 Gain
+    //     Worksheet … enter the amount, IF ANY". btctax is required to complete NEITHER — it refuses a
+    //     return carrying §1202, collectibles or unrecaptured §1250 gain — so the condition is unmet
+    //     and there is no `-0-` clause to invoke. A printed `0` swore to an amount nobody computed, on
+    //     every crypto return with gains.
+    //
+    //     ★★ The form itself expects blank: line 20 asks "Are lines 18 and 19 both zero OR BLANK…?",
+    //     so an empty cell answers line 20 exactly as a zero would. That is checked immediately below —
+    //     L20 is still Yes, which is what makes the blank safe rather than merely defensible.
     assert_eq!(
-        tv(&pdf, "topmostSubform[0].Page2[0].f2_02[0]").as_deref(),
-        Some("0"),
-        "L18 = 0"
+        tv(&pdf, "topmostSubform[0].Page2[0].f2_02[0]"),
+        None,
+        "L18 is BLANK — the 28% Rate Gain Worksheet is not required, so the line carries nothing"
     );
     assert_eq!(
-        tv(&pdf, "topmostSubform[0].Page2[0].f2_03[0]").as_deref(),
-        Some("0"),
-        "L19 = 0"
+        tv(&pdf, "topmostSubform[0].Page2[0].f2_03[0]"),
+        None,
+        "L19 is BLANK — the Unrecaptured §1250 Worksheet is not required"
     );
     assert_eq!(
         checkbox_on(&doc, idx["topmostSubform[0].Page2[0].c2_2[0]"].id).as_deref(),

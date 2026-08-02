@@ -24,7 +24,7 @@
 //! ([`ScheduleDRouting`]) — this module only transcribes the branch it is given, so an impossible
 //! combination cannot be filled.
 
-use crate::cells::{push_identity, push_money};
+use crate::cells::{push_identity, push_money, push_money_opt};
 use crate::error::FormsError;
 use crate::map::{MoneyCell, ScheduleDMap};
 use crate::pdf;
@@ -198,17 +198,40 @@ pub fn fill_schedule_d_full_with_map(
                 &mut writes,
                 &mut placements,
             );
-            push_p2(
+            // ★★★ LINES 18 AND 19 ARE LEFT BLANK, and printing `0` here was fabricated testimony on
+            //     EVERY crypto return with gains. Both are CONDITIONAL entries in the form's own
+            //     words:
+            //
+            //       18  "If you are required to complete the 28% Rate Gain Worksheet (see
+            //            instructions), enter the amount, if any, from line 7 of that worksheet"
+            //       19  "If you are required to complete the Unrecaptured Section 1250 Gain Worksheet
+            //            (see instructions), enter the amount, if any, from line 18 of that worksheet"
+            //
+            //     btctax is required to complete NEITHER — it refuses a return with §1202,
+            //     collectibles or unrecaptured §1250 gain (`UnrecapturedOrSpecialRateGain`) — so the
+            //     condition is unmet and the lines carry nothing. There is no `-0-` clause to invoke.
+            //
+            //     ★★ The form ITSELF says blank is expected: line 20 reads "Are lines 18 and 19 both
+            //     zero **or blank** and you are not filing Form 4952?" — so leaving them empty answers
+            //     line 20 exactly as a zero would, without swearing to an amount nobody computed.
+            //
+            //     ★ Same class as the §G-24 defect on 1040 lines 34/35a/37, and invisible for the same
+            //     reason: no struct field carries these, so the line-coverage table never saw them.
+            push_money_opt(
+                &mut writes,
+                &mut placements,
                 need(&map.line18, "line18", y)?,
-                Usd::ZERO,
-                &mut writes,
-                &mut placements,
+                None,
+                COL_AMOUNT_H,
+                None,
             );
-            push_p2(
-                need(&map.line19, "line19", y)?,
-                Usd::ZERO,
+            push_money_opt(
                 &mut writes,
                 &mut placements,
+                need(&map.line19, "line19", y)?,
+                None,
+                COL_AMOUNT_H,
+                None,
             );
             check(
                 need(&map.line20, "line20", y)?,
