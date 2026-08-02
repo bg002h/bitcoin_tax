@@ -10,5 +10,11 @@ https://www.irs.gov/pub/irs-prior/i8995a--2024.pdf
 # ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
 # document. That is a change to the authority: review it, never silently absorb it.
 #
+# ★★ EXTRACTED WITHOUT `-layout`, unlike a FORM. `-layout` preserves a form's row/column
+# geometry, which is essential when transcribing numbered lines — but these instructions are
+# TWO-COLUMN PROSE, and `-layout` interleaves the columns so sentences are cut in half. The
+# rule that skips Parts I-III came out as a fragment beginning "PTP, skip Parts I through III"
+# with its subject stranded in the other column. Forms: `-layout`. Prose instructions: plain.
+#
 # The committed text layer is design/forms/extract/i8995a--2024.txt — that is what the
 # conformance tests read, so they run with no PDF and no network.

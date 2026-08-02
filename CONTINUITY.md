@@ -1,6 +1,54 @@
 # CONTINUITY — bitcoin_tax (TaxApp)
 
-_Last updated: **2026-07-30** (refusal review). Written at a pause; safe to exit and restart._
+_Last updated: **2026-08-02** (filing trial + blocker burndown). Written at a pause; safe to exit._
+
+---
+
+## ▶ RESUME HERE — B1 (Form 8995-A) is the next build
+
+**Everything else from the filing trial is closed.** `design/direction/FILING-TRIAL-2026-08-02.md` has
+the full record; `FOLLOWUPS.md` §G-28 has the open residue. Done today: B2, B9, B10, B11, R1, R2, the
+Schedule D 18/19 sworn zeros, `push_money_opt`, the `Option<Usd>` `_`-ban, the examples-golden guard,
+and P0's single form-name authority.
+
+**B1 is genuinely large and must not be started half-way.** The reason is sharp: narrowing the
+`QbiAboveThreshold` refusal WITHOUT the 8995-A emitter would make btctax emit the **simplified Form
+8995 for a filer i8995a requires to use 8995-A** — a wrong form on a filed return. The refusal
+narrowing and the emitter are ONE unit.
+
+**Prerequisites already done:**
+- `design/forms/2024/f8995a--2024.pdf` + `i8995a--2024.pdf` archived (manifest, provenance note, fetch
+  log), extracts committed.
+- ★ `i8995a--2024.txt` is extracted **without `-layout`** — it is two-column prose and `-layout`
+  interleaves the columns, cutting the governing sentence in half. Forms need `-layout`; prose
+  instructions do not. The rule that scopes B1a reads correctly now: *"You must complete Part I if you
+  have QBI from a qualified trade, business, or aggregation. If you don't have QBI, and only have REIT,
+  PTP, skip Parts I through III and complete Part IV."*
+
+**Size, measured:** `f8995a` has **112 AcroForm fields across 40 lines**; the comparable `f8995.map.toml`
+is 104 lines for ~17 lines, so the map alone is ~250 lines — before the emitter, the census, core's
+40-line struct and its `line_coverage` rows. `f8995a.pdf` is **not yet copied into
+`crates/btctax-forms/forms/2024/`**.
+
+**The plan to execute** is the attacked change-map from the `b1-b2-build-plan` workflow. Its two
+findings that must not be lost:
+1. **The phase-in RANGE WIDTH does not exist in `FullReturnParams`.** Line 23 is *"Phase-in range. Enter
+   $50,000 ($100,000 if married filing jointly)"*. Adding it `E0063`s six literals. ★ It is **statutory
+   and NOT inflation-indexed** (§199A(b)(3)(B)(ii)(II)) while the threshold beside it **is** — so a
+   future table update must not "index" it.
+2. **Inside the phase-in range the deduction is NOT $0.** The filing trial's sketch said it was; that
+   would overstate tax by the whole deduction. Part III must be transcribed, not shortcut.
+
+**Split:** B1a = Part IV alone (REIT/PTP-only above threshold, no new input, `MAX_EXCEPTIONS 11→12`).
+B1b = Parts I–III, the three `ScheduleCInputs` fields, and the **SSTB declaration** — which is class-(A),
+because the code today holds every Schedule C to be mining and therefore non-SSTB, and above the
+threshold an unasked SSTB question is an understatement hole.
+
+**Then:** B3 (Schedule C gross receipts) → B4 (1099-B totals, Schedule-D-shaped, never lot-level) →
+B7/TY2025 → the owner's TY2025 comparison as the acceptance milestone. **B5 is decided: do not build.**
+
+---
+
 _**Active work is the section immediately below**; §0 onward is the completed census/AMT record._
 _(Supersedes the 2026-06-28 edition, whose deep-research workflow completed long ago.)_
 
