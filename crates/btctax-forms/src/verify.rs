@@ -11,7 +11,13 @@ use crate::pdf::{button_on_states, checkbox_on, text_value, Field};
 use lopdf::Document;
 use std::collections::{HashMap, HashSet};
 
-const EPS: f32 = 1.0;
+/// The separation two money cells must have before one counts as ABOVE the other. Two cells within a
+/// point of each other are the same printed row, not an ordering.
+///
+/// ★ Shared with `form1040_full.rs`'s refund/owe guard so the crate expresses "strictly above" ONE
+/// way. They used to differ — this leg demanded a 1.0-point margin while that guard used a bare `>`,
+/// which accepts a 0.0001-point gap (r7 Nit).
+pub(crate) const EPS: f32 = 1.0;
 
 /// Where a written value is supposed to land.
 #[derive(Debug, Clone)]

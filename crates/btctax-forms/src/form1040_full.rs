@@ -211,19 +211,23 @@ pub fn fill_form_1040_full_with_map(
     // So assert the ordering from the BLANK PDF's own geometry, before either branch runs. It holds on
     // whichever arm fires — and on neither — because it never looks at what we wrote.
     //
-    // ★★ B1, observed. This guard sits on the production path of EVERY `fill_form_1040_full`, so the
-    // whole 1040 KAT suite is its kill-test rather than one dedicated case. Both swaps were planted in
-    // the committed `f1040.map.toml` and watched red:
+    // ★★ B1 — the kill-tests are STANDING, in `full_return_forms.rs`:
     //
-    //   line35a ↔ line37 → Geometry("… sit at y 486.0/414.0/474.0, which is not strictly descending")
-    //   line34  ↔ line37 → Geometry("… sit at y 414.0/474.0/486.0, which is not strictly descending")
+    //     form_1040_full_refund_owe_block_swap_34_37_fails_closed
+    //     form_1040_full_refund_owe_block_swap_35a_37_fails_closed
+    //     form_1040_full_refund_owe_block_across_pages_fails_closed
     //
-    // Both returned `Ok` before this guard existed, with only a value assertion in one KAT noticing.
+    // ★★★ An earlier version of this comment claimed *"this guard sits on the production path of every
+    // `fill_form_1040_full`, so the whole 1040 KAT suite is its kill-test"*. **That was wrong, and it is
+    // the exact conflation B1 exists to keep apart.** The KAT suite reds when the MAP is broken *while
+    // the guard is present*; it does not red when the GUARD is broken, because the committed map is
+    // correct. Review r7 deleted this whole block and ran `-p btctax-forms`: 233 passed either way.
+    // Nothing observed the difference — so the guarantee did not exist, by this repo's own definition.
     {
-        let cy_of = |cell: &MoneyCell, what: &str| -> Result<f32, FormsError> {
+        let cy_of = |cell: &MoneyCell, what: &str| -> Result<(usize, f32), FormsError> {
             // A pair's dollars field carries the row's y just as a single does.
             let fqn = cell.fields()[0];
-            blank_fields
+            let cy = blank_fields
                 .iter()
                 .find(|f| f.fqn == fqn)
                 .and_then(|f| f.cy())
@@ -231,18 +235,54 @@ pub fn fill_form_1040_full_with_map(
                     FormsError::Geometry(format!(
                         "1040 {what} maps to {fqn}, which has no rectangle in the blank form"
                     ))
-                })
+                })?;
+            Ok((page_of(fqn), cy))
         };
-        let y34 = cy_of(need(&map.line34, "line34", y)?, "line 34")?;
-        let y35a = cy_of(need(&map.line35a, "line35a", y)?, "line 35a")?;
-        let y37 = cy_of(need(&map.line37, "line37", y)?, "line 37")?;
-        // The form prints them in this order down the page, so their centres strictly descend.
-        if !(y34 > y35a && y35a > y37) {
+        // ★ These three cells are REQUIRED in every full-return map, on every return — including the
+        //   exactly-even return that writes none of them. That is deliberate (fail closed), but it is a
+        //   real coupling and it lands on an ELECTION: line 35a is *"Amount of line 34 you want refunded
+        //   to you"*, which §G-11 records as a choice btctax makes without asking. Unmapping it — the
+        //   obvious way to stop making that election, and what the map already does for 35b/35c/35d and
+        //   36 — would otherwise refuse EVERY 1040 in the product with a message about geometry. So the
+        //   refusal names the line and says what to do instead.
+        fn need_mapped<'a>(
+            cell: &'a Option<MoneyCell>,
+            what: &str,
+        ) -> Result<&'a MoneyCell, FormsError> {
+            cell.as_ref().ok_or_else(|| {
+                FormsError::Geometry(format!(
+                    "1040 {what} is not mapped, and the refund/owe ordering guard requires all three \
+                     of lines 34/35a/37 on every return. If {what} was unmapped deliberately (e.g. to \
+                     stop electing line 35a for the filer), this guard must be taught that — do not \
+                     delete it, or a 34/37 swap goes back to printing the amount OWED into the box \
+                     captioned OVERPAID."
+                ))
+            })
+        }
+        let (p34, y34) = cy_of(need_mapped(&map.line34, "line 34")?, "line 34")?;
+        let (p35a, y35a) = cy_of(need_mapped(&map.line35a, "line 35a")?, "line 35a")?;
+        let (p37, y37) = cy_of(need_mapped(&map.line37, "line 37")?, "line 37")?;
+        // ★ Same page FIRST. Raw PDF y is only comparable within a page, so an ordering test alone is
+        //   page-blind: a `line37` aimed at a page-1 amount cell (page 1's money column runs to low y)
+        //   satisfies `y34 > y35a > y37` and sails through. `verify_flat` cannot catch it either — for
+        //   money cells the expected page comes from `page_of(fqn)`, i.e. from the map's own string, so
+        //   that leg is tautological across pages.
+        if !(p34 == p35a && p35a == p37) {
             return Err(FormsError::Geometry(format!(
-                "1040 refund/owe block is mis-mapped: lines 34/35a/37 sit at y {y34}/{y35a}/{y37}, \
-                 which is not strictly descending. The form prints 'amount you overpaid', then \
-                 'refunded to you', then 'amount you owe' — a swap here would print the amount OWED \
-                 into the box captioned OVERPAID."
+                "1040 refund/owe block is mis-mapped: lines 34/35a/37 land on pages \
+                 {p34}/{p35a}/{p37}. They are one block on one page, and y is only comparable within \
+                 a page — so a cross-page mis-map would defeat the ordering check below."
+            )));
+        }
+        // The form prints them in this order down the page, so their centres strictly descend.
+        // ★ `EPS` rather than a bare `>`, matching `verify.rs`'s descent leg: two money cells within a
+        //   point of each other are the same printed row, not an ordering.
+        if !(y34 > y35a + crate::verify::EPS && y35a > y37 + crate::verify::EPS) {
+            return Err(FormsError::Geometry(format!(
+                "1040 refund/owe block is mis-mapped: lines 34/35a/37 sit at y \
+                 {y34:.1}/{y35a:.1}/{y37:.1}, which is not strictly descending. The form prints \
+                 'amount you overpaid', then 'refunded to you', then 'amount you owe' — a swap here \
+                 would print the amount OWED into the box captioned OVERPAID."
             )));
         }
     }

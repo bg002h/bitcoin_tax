@@ -1732,6 +1732,77 @@ fn form_1040_full_same_column_swap_fails_closed() {
     assert!(matches!(err, FormsError::Geometry(_)), "{err:?}");
 }
 
+// ── The refund/owe ordering guard — §G-24's fail-closed leg (B1) ────────────────────────────────
+//
+// ★★★ **These are the kills the guard shipped WITHOUT, and it did not exist until they were written.**
+// r7 deleted the whole guard block from `form1040_full.rs` and ran this crate's suite: 233 passed
+// either way. The code comment at the time claimed *"this guard sits on the production path of every
+// `fill_form_1040_full`, so the whole 1040 KAT suite is its kill-test"* — which conflates the two
+// things `CLAUDE.md` §B1 exists to keep apart. **The KAT suite reds when the MAP is broken while the
+// guard is present. It never reds when the GUARD is broken, because the committed map is correct.**
+//
+// ★ And the template was already in this file, 500 lines up: `form_1040_full_same_column_swap_fails_
+// closed`. It swaps 9↔15, which is exactly the pair r6 showed CANNOT see the 34/35a/37 case. Nobody
+// carried it across — §B3's field-of-view failure, in the same file.
+//
+// Each asserts on the guard's own message, so it cannot be satisfied by the generic descent leg firing
+// for an unrelated reason.
+
+/// 34 ↔ 37 — the swap that prints the amount **OWED** into the box captioned **OVERPAID**.
+#[test]
+fn form_1040_full_refund_owe_block_swap_34_37_fails_closed() {
+    let mut map = btctax_forms::Form1040Map::ty2024();
+    std::mem::swap(&mut map.line34, &mut map.line37);
+    let err =
+        fill_form_1040_full_with_map(&f1040(), &kitchen_sink_header(), FilingStatus::Single, &map)
+            .expect_err("a 34/37 swap must fail closed");
+    let FormsError::Geometry(m) = &err else {
+        panic!("expected Geometry, got {err:?}")
+    };
+    assert!(
+        m.contains("refund/owe block") && m.contains("not strictly descending"),
+        "must be the ORDERING guard, not some other refusal: {m}"
+    );
+}
+
+/// 35a ↔ 37 — the same class one row down: "refunded to you" and "amount you owe" exchanged.
+#[test]
+fn form_1040_full_refund_owe_block_swap_35a_37_fails_closed() {
+    let mut map = btctax_forms::Form1040Map::ty2024();
+    std::mem::swap(&mut map.line35a, &mut map.line37);
+    let err =
+        fill_form_1040_full_with_map(&f1040(), &kitchen_sink_header(), FilingStatus::Single, &map)
+            .expect_err("a 35a/37 swap must fail closed");
+    let FormsError::Geometry(m) = &err else {
+        panic!("expected Geometry, got {err:?}")
+    };
+    assert!(
+        m.contains("refund/owe block") && m.contains("not strictly descending"),
+        "must be the ORDERING guard, not some other refusal: {m}"
+    );
+}
+
+/// ★★ The **page-blind** hole. Raw PDF y is only comparable within a page, so a `line37` re-aimed at a
+/// page-1 amount cell can satisfy `y34 > y35a > y37` and sail through an ordering test alone.
+/// `verify_flat` cannot catch it either: for money cells the expected page comes from `page_of(fqn)` —
+/// the map's own string — so that leg is tautological across pages.
+#[test]
+fn form_1040_full_refund_owe_block_across_pages_fails_closed() {
+    let mut map = btctax_forms::Form1040Map::ty2024();
+    // line 9 is a page-1 AMOUNT cell, low on the page: exactly the shape that slips past `>`.
+    map.line37 = map.line9.clone();
+    let err =
+        fill_form_1040_full_with_map(&f1040(), &kitchen_sink_header(), FilingStatus::Single, &map)
+            .expect_err("a cross-page refund/owe mapping must fail closed");
+    let FormsError::Geometry(m) = &err else {
+        panic!("expected Geometry, got {err:?}")
+    };
+    assert!(
+        m.contains("land on pages"),
+        "must be the PAGE guard specifically — the ordering leg cannot see this: {m}"
+    );
+}
+
 // ── /MaxLen: the comb-cell guard (P6.2) ─────────────────────────────────────────────────────────
 
 /// ★ The 1040's SSN cells are **9-character COMB cells** — the PDF says so itself (`/MaxLen 9`, comb

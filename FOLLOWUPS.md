@@ -1258,9 +1258,35 @@ closing it was a fetch and a ratchet reset — not an argument about the grammar
 unregistered. That is the instrument built after four overlapping archives were discovered, working on
 the first new asset added since.
 
-### G-25 — MFS and HoH ordinary brackets ship UNWITNESSED (found 2026-08-01)
+### G-25 — MFS and HoH ordinary brackets ship UNWITNESSED (found 2026-08-01) — ✅ **CLOSED 2026-08-02**
 
 **Owning phase: whenever the corpus is next widened.** Direction is unknown, which is the point.
+
+> **CLOSED @ `01446f8`, by transcription.** MFS and HoH ordinary brackets and §1(h) breakpoints are now
+> in `testonly::ty2024_table()`, read off **Rev. Proc. 2023-34** §3.01 Tables 2 and 4 and §3.03 — the
+> source the shipped table's own `source` field cites — never copied across from the bundled table.
+> Transcribing Single and MFJ in the same pass reproduced the committed values exactly, which is what
+> says the reading is right. MFS matches Single through the 35% bracket and then diverges: 37% starts at
+> **$365,600**, not $609,350 (§1(j)(2)(D)).
+>
+> ★ The revenue procedure's *"the excess over"* column carries a **typo** in Tables 2, 3 and 4 —
+> `$191,150` where the boundary column reads *"Over $191,950"*. The boundary is authoritative and agrees
+> with Single and MFJ; recorded at the call site so nobody re-derives it.
+>
+> **Two defects in the instrument itself, fixed here:**
+>
+> - The ordinary and §1(h) comparisons **shared a `continue`**, so a status missing an ordinary schedule
+>   skipped its breakpoint comparison entirely — that gap was neither compared *nor counted*. Decoupling
+>   them immediately revealed `Qss/ltcg`, hidden the whole time. ★ The file's own thesis — *an assurance
+>   surface that does not touch the artifact it is claimed to assure* — one level in.
+> - **The gate was a COUNT**, which cannot distinguish *"the binary ships brackets nobody compared"* from
+>   *"neither side speaks, by law"*, and only the first is a defect. An `UNWITNESSED` entry now fails
+>   outright however few there are; the count is only the lawful-normalisation residue (3 → 2, both Qss).
+>   ★★ A count was also satisfiable by **deleting** a validated schedule — that moves an entry from
+>   "shipped only" to "neither" and lowers the number. Same lesson as everywhere here: state the
+>   mechanism, let it decide, never ratchet the outcome you happened to see.
+>
+> B1: planted-defect verified — deleting MFS from the validated table reds the mechanism gate by name.
 
 btctax has **two** TY2024 tax tables — `testonly::ty2024_table()`, which every KAT, golden vector and
 oracle comparison is computed against, and the bundled one the **binary actually loads**. Nothing bound
