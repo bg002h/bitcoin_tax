@@ -1,0 +1,80 @@
+# Form 8995-A (Qualified Business Income Deduction), TY2024 — logical line → PDF field name.
+#
+# Extracted with `cargo run -p xtask -- dump-fields crates/btctax-forms/forms/2024/f8995a.pdf`
+# (111 AcroForm fields) and correlated against `design/forms/extract/f8995a--2024.txt`.
+#
+# ★★★ WHY THIS FORM EXISTS ALONGSIDE f8995. i8995a: "You must complete Part I if you have QBI from a
+# qualified trade, business, or aggregation. **If you don't have QBI, and only have REIT, PTP, skip
+# Parts I through III and complete Part IV.**" Above the §199A(e)(2) threshold the SIMPLIFIED Form 8995
+# no longer applies, so a filer there must use this form even when the arithmetic is identical — which
+# is exactly why the refusal and the emitter are one unit: narrowing the refusal without this map would
+# print the WRONG FORM on a filed return.
+#
+# Column x-clusters, the same shape as f8995: MID x ≈ [410,482], AMOUNT x ≈ [504,576].
+#
+# ★★ PARENTHESIZED BOXES AND THE SIGN CONVENTION. Lines 29 and 40 are printed inside literal `(   )`
+# and their widgets are inset from the ordinary column — MID-paren [413.4,479.4] vs MID [410.4,481.6];
+# AMOUNT-paren [507.0,573.0] vs AMOUNT [504.0,576.0]. **The parentheses supply the minus sign, so the
+# value written must be a POSITIVE MAGNITUDE.** Writing `-1234` renders as `(-1,234)` — a positive
+# number on a filed return.
+#
+# ★★★ HOW THE PART IV ASSIGNMENT WAS VERIFIED, rather than assumed from ordering. Page 2 carries
+# exactly 14 non-table fields (f2_36…f2_49) and Part IV is exactly 14 lines (27–40), so a naive
+# in-order zip is tempting and unfalsifiable. Three independent corroborations instead:
+#
+#   1. COLUMN COUNTS. Reading the form's own text, seven Part IV lines print in the MID column
+#      (27, 28, 29, 30, 31, 33, 34) and seven in the AMOUNT column (32, 35, 36, 37, 38, 39, 40). The
+#      dump has exactly seven fields at x≈410 and exactly seven at x≈504. Both partitions agree.
+#   2. THE INSET PAIR. The two parenthesized `(loss) carryforward` lines are 29 and 40; the only two
+#      inset widgets are f2_38 (413.4, in MID) and f2_49 (507.0, in AMOUNT). They land on 29 and 40.
+#   3. MONOTONIC y. Field y descends 468 → 240 as the line number ascends 27 → 40, with no crossing.
+#
+# Any one of these alone would be weak. Together they pin the assignment without a single guess.
+#
+# ★ SCOPE — PART IV ONLY, deliberately. This is B1a: the REIT/PTP-only filer the form's own skip rule
+# describes, who needs no input btctax does not already collect. Parts I–III (the W-2-wage and UBIA
+# limitations, the SSTB phase-in) are B1b and need three new filer inputs plus the phase-in range
+# width, which does not exist in `FullReturnParams` at all. Mapping them here with nothing to write
+# would be an instrument nobody has watched discriminate.
+
+year = 2024
+
+# ── Header ───────────────────────────────────────────────────────────────────────────────────────
+name_line = "topmostSubform[0].Page1[0].f1_01[0]"
+tin       = "topmostSubform[0].Page1[0].f1_02[0]"
+
+# ── Part IV — Determine Your Qualified Business Income Deduction ─────────────────────────────────
+# 27 "Total qualified business income component from all qualified trades, businesses, or
+#     aggregations. Enter the amount from line 16"
+line27 = "topmostSubform[0].Page2[0].f2_36[0]"
+# 28 "Qualified REIT dividends and publicly traded partnership (PTP) income or (loss). See
+#     instructions"
+line28 = "topmostSubform[0].Page2[0].f2_37[0]"
+# 29 "Qualified REIT dividends and PTP (loss) carryforward from prior years"  — PARENTHESIZED
+line29 = "topmostSubform[0].Page2[0].f2_38[0]"
+# 30 "Total qualified REIT dividends and PTP income. Combine lines 28 and 29. If less than zero,
+#     enter -0-"
+line30 = "topmostSubform[0].Page2[0].f2_39[0]"
+# 31 "REIT and PTP component. Multiply line 30 by 20% (0.20)"
+line31 = "topmostSubform[0].Page2[0].f2_40[0]"
+# 32 "Qualified business income deduction before the income limitation. Add lines 27 and 31"
+line32 = "topmostSubform[0].Page2[0].f2_41[0]"
+# 33 "Taxable income before qualified business income deduction"
+line33 = "topmostSubform[0].Page2[0].f2_42[0]"
+# 34 "Enter your net capital gain, if any, increased by any qualified dividends (see instructions)"
+line34 = "topmostSubform[0].Page2[0].f2_43[0]"
+# 35 "Subtract line 34 from line 33. If zero or less, enter -0-"
+line35 = "topmostSubform[0].Page2[0].f2_44[0]"
+# 36 "Income limitation. Multiply line 35 by 20% (0.20)"
+line36 = "topmostSubform[0].Page2[0].f2_45[0]"
+# 37 "Qualified business income deduction before the domestic production activities deduction (DPAD)
+#     under section 199A(g). Enter the smaller of line 32 or line 36"
+line37 = "topmostSubform[0].Page2[0].f2_46[0]"
+# 38 "DPAD under section 199A(g) allocated from an agricultural or horticultural cooperative. Don’t
+#     enter more than line 33 minus line 37"
+line38 = "topmostSubform[0].Page2[0].f2_47[0]"
+# 39 "Total qualified business income deduction. Add lines 37 and 38"
+line39 = "topmostSubform[0].Page2[0].f2_48[0]"
+# 40 "Total qualified REIT dividends and PTP (loss) carryforward. Combine lines 28 and 29. If zero or
+#     greater, enter -0-"  — PARENTHESIZED
+line40 = "topmostSubform[0].Page2[0].f2_49[0]"

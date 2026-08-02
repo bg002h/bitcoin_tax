@@ -453,7 +453,7 @@ pub mod testonly {
         SCHEDULE_D_MAP_2024, SCHEDULE_SE_MAP_2024,
     };
     pub use crate::pdf::{
-        button_on_states, checkbox_on, collect_fields, index, load, text_value, Field,
+        button_on_states, checkbox_on, collect_fields, f8995a_pdf, index, load, text_value, Field,
         F1040_PDF_2017, F1040_PDF_2024, F1040_PDF_2025, F8275_PDF_2024, F8283_PDF_2017,
         F8283_PDF_2024, F8283_PDF_2025, F8949_PDF_2017, F8949_PDF_2024, F8949_PDF_2025,
         F8959_PDF_2024, SCHEDULE_D_PDF_2017, SCHEDULE_D_PDF_2024, SCHEDULE_D_PDF_2025,
