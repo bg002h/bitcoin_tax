@@ -1,3 +1,60 @@
+# ⚠️ AMENDED 2026-08-01 by the owner — READ THIS FIRST
+
+> **"The current season is irrelevant. We will support all seasons eventually."**
+
+This fires **falsifier #1** in §6 below, which the synthesis itself anticipated:
+
+> *"The owner wants a current-season filer soon. **Falsified by:** the owner declaring TY2024 a
+> deliberate frozen proving ground … Then the Oct-15 urgency evaporates, the G-11 migration's 'free
+> before users' window becomes the defensible next move, and Steps 1–2 lose their deadline (not their
+> ordering)."*
+
+## What this changes
+
+**§1's opening sentence is wrong as a criticism.** "The only supported year is TY2024" is not a
+defect — it is a **deliberate frozen proving ground**, and seasons are a planned expansion axis rather
+than a wall. TY2024 remains filable (a late return is still a return), so it works as the proving
+ground for Milestone 1.
+
+**Step 1 (TY2025) drops out of the critical path** and becomes ordinary scheduled work, one season
+among many. The Oct-15 statutory pressure — the single argument that ranked it above everything —
+is gone.
+
+**§G-11 is REINSTATED, on the synthesis's own reasoning.** Its "keep the invariant, stop the program"
+verdict rested on one comparison: *"TY2025 has a statutory deadline and G-11 does not."* Remove the
+deadline and the comparison inverts. The "free before users exist" window is real, does close, and now
+has nothing competing with it. ★ The four sub-verdicts that were NOT about sequencing still stand and
+are still right: keep the coverage checker in CI; keep the doctrine for new forms; **fix G-24 now**;
+and **cancel the r3 re-review** — that one was about crossing this repo's own document-review stop-line,
+not about deadlines.
+
+**Everything else in §2–§5 survives unchanged.** The bottleneck is still breadth, not depth. The cheap
+refusal conversions are still the highest filers-unblocked-per-line moves available, and they are
+**year-agnostic form transcriptions** — Form 6251 (already computed and two-oracle validated; only a
+`map.toml` is missing), Schedule 8812/CTC (dependents already collected; unpins a `$0` that costs
+families up to $2,000/child), the W-2 box-12 allowlist, Form 8889, aggregate 1099-B. The bottom of the
+1040 still has **zero oracle witnesses** and has already shipped a defect (§G-24). Web is still a
+rendering project, and the three compounding couplings are still worth paying now.
+
+## The revised order
+
+0. **Ship what exists** — hours of owner action, zero engineering. Unchanged and still first.
+1. **The cheap breadth wins** — year-agnostic form transcriptions, above.
+2. **§G-24 + the bottom-of-the-1040 witnesses** — the refund/owe lines a filer actually reads.
+3. **§G-11 P0b/P1** — reinstated; do it while it is still free.
+4. **The owner files a real return** (TY2024, late — a proving ground filing is still a filing).
+5. **Intake breadth · the TUI's two missing ends · more filing statuses.**
+6. **Seasons** — TY2025 and beyond, scheduled rather than rushed.
+
+## Still open, and it now decides more than it did
+
+**Is filer #1 the owner, or a stranger?** This was the second gating question and the amendment does
+not touch it. If a stranger, `data-in` was the reviewer who had it right and intake jumps above form
+coverage — four venues, one frozen at its 2012–2019 export schema, is a locked door. If the owner,
+intake is effectively done and the order above stands.
+
+---
+
 # DIRECTION — btctax, 2026-08-01
 
 Synthesized from seven independent slice reviews (filing-path, tax-engine, tui, data-in, web-readiness, confidence, allocation — the last commissioned as the adversarial case). Where reviewers disagreed it is surfaced, not averaged.
