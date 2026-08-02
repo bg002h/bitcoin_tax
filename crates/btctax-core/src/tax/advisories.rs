@@ -43,7 +43,17 @@ const EIC_ADVISORY_AGI_CEILING: Usd = dec!(70000);
 pub enum Advisory {
     /// §3.4 conservative omission: the Child Tax Credit / Credit for Other Dependents is not computed
     /// (1040 L19 is pinned to $0) even though dependents were captured. Overstates tax.
-    CtcOdcOmitted { dependents: usize },
+    ///
+    /// ★★★ `provably_zero` is set when **Schedule 8812's own arithmetic** kills the credit whatever the
+    /// dependents' ages are. The advisory used to fire unconditionally and tell every filer with a
+    /// dependent that their tax was *"OVERSTATED by up to $2,000 per qualifying child"* — a filing
+    /// trial caught it telling a filer with AGI $2,085,000 and nine children to claim $18,000 that
+    /// §24(b) had already reduced by $84,250. Line 19 was $0 and correct; the ADVICE was not, and it
+    /// sent the filer to Schedule 8812 for nothing.
+    CtcOdcOmitted {
+        dependents: usize,
+        provably_zero: bool,
+    },
     /// §3.4 conservative omission: the Earned Income Credit is not computed and the household's income is
     /// low enough that it might qualify. Overstates tax.
     EicOmitted,
@@ -198,7 +208,18 @@ impl Advisory {
     /// The user-facing text. Single-sourced here so the CLI, the man page and any future surface agree.
     pub fn message(&self) -> String {
         match self {
-            Advisory::CtcOdcOmitted { dependents } => format!(
+            Advisory::CtcOdcOmitted {
+                dependents,
+                provably_zero: true,
+            } => format!(
+                "CTC/ODC NOT COMPUTED, AND NOT AVAILABLE TO YOU — you captured {dependents} \
+                 dependent(s), and v1 does not compute the Child Tax Credit or the Credit for Other \
+                 Dependents. Here that costs you NOTHING: your income phases the credit out entirely \
+                 under §24(b), whatever your dependents' ages (Schedule 8812 line 11 already exceeds \
+                 the most line 8 could be). 1040 line 19 is $0 and that is the correct figure — there \
+                 is no Schedule 8812 for you to file."
+            ),
+            Advisory::CtcOdcOmitted { dependents, .. } => format!(
                 "CTC/ODC NOT COMPUTED — you captured {dependents} dependent(s), but v1 does not compute the \
                  Child Tax Credit or the Credit for Other Dependents (1040 line 19 is $0). Your tax is \
                  OVERSTATED by up to $2,000 per qualifying child / $500 per other dependent. File Schedule \
@@ -409,6 +430,150 @@ impl Advisory {
 }
 
 /// Collect every advisory that applies to a computed full return for `year`, from the assembled return.
+/// Is the §24 credit ZERO for this filer whatever their dependents' ages are?
+///
+/// ★★★ Transcribed from **Schedule 8812 (Form 1040) Part I**, not derived. btctax does not compute the
+/// credit and does not know which dependents are under 17, so it cannot compute lines 4/6 — but it can
+/// compute the CEILING of line 8 and compare it to line 11, and when the ceiling loses, the credit is
+/// zero for every possible composition. That is a sound one-sided answer, which is exactly what an
+/// advisory needs.
+///
+/// ```text
+///  1  Enter the amount from line 11 of your Form 1040 …
+/// 2a  Enter income from Puerto Rico that you excluded
+///  b  Enter the amounts from lines 45 and 50 of your Form 2555
+///  c  Enter the amount from line 15 of your Form 4563
+/// 2d  Add lines 2a through 2c
+///  3  Add lines 1 and 2d
+///  5  Multiply line 4 by $2,000            ← line 4 = qualifying children under 17
+///  7  Multiply line 6 by $500              ← line 6 = other dependents
+///  8  Add lines 5 and 7
+///  9  Enter the amount shown below for your filing status.
+///     • Married filing jointly—$400,000
+///     • All other filing statuses—$200,000
+/// 10  Subtract line 9 from line 3.
+///     • If zero or less, enter -0-.
+///     • If more than zero and not a multiple of $1,000, enter the next multiple of $1,000. …
+/// 11  Multiply line 10 by 5% (0.05)
+/// 12  Is the amount on line 8 more than the amount on line 11?
+/// ```
+///
+/// Line 12 answering **No** is the whole credit gone. The ceiling of line 8 is `dependents × $2,000`
+/// (every dependent a qualifying child — $500 for an "other dependent" can only be smaller), so
+/// `ceiling ≤ line 11` proves it. ★ btctax already collects every line-2 add-back, so line 3 is exact,
+/// not approximated by AGI.
+fn ctc_provably_zero(ri: &ReturnInputs, dependents: usize, agi: Usd) -> bool {
+    // L2d + L3 — the modified AGI the phase-out actually reads.
+    let l3 = agi
+        + ri.excluded_puerto_rico_income
+        + ri.form_2555_line45
+        + ri.form_2555_line50
+        + ri.form_4563_line15;
+    // L9.
+    let l9 = if ri.filing_status == crate::tax::types::FilingStatus::Mfj {
+        Usd::from(400_000)
+    } else {
+        Usd::from(200_000)
+    };
+    // L10 — "If zero or less, enter -0-. If more than zero and not a multiple of $1,000, enter the
+    // NEXT multiple of $1,000." Rounding UP is the filer-adverse direction and the form says so.
+    let over = (l3 - l9).max(Usd::ZERO);
+    if over.is_zero() {
+        return false;
+    }
+    let thousands = (over / Usd::from(1000)).ceil();
+    let l11 = thousands * Usd::from(1000) * rust_decimal_macros::dec!(0.05); // L11
+    let l8_ceiling = Usd::from(dependents as i64) * Usd::from(2000);
+    // L12 "Is the amount on line 8 more than the amount on line 11?" — No ⇒ no credit.
+    l8_ceiling <= l11
+}
+
+#[cfg(test)]
+mod ctc_phaseout_tests {
+    use super::*;
+    use crate::tax::types::FilingStatus;
+
+    fn ri_with(status: FilingStatus, deps: usize) -> ReturnInputs {
+        let mut ri = ReturnInputs {
+            filing_status: status,
+            ..Default::default()
+        };
+        for i in 0..deps {
+            ri.header
+                .dependents
+                .push(crate::tax::return_inputs::Dependent {
+                    name: format!("Child {i}"),
+                    ..Default::default()
+                });
+        }
+        ri
+    }
+
+    /// ★★★ The filing trial's own vector: AGI $2,085,000, MFJ, NINE children. The advisory told this
+    /// filer their tax was overstated by up to $18,000 and sent them to Schedule 8812 — while §24(b)
+    /// had already reduced the credit by $84,250. Line 19 was $0 and correct; the ADVICE was not.
+    #[test]
+    fn nine_children_at_two_million_agi_is_provably_zero() {
+        let ri = ri_with(FilingStatus::Mfj, 9);
+        assert!(ctc_provably_zero(&ri, 9, Usd::from(2_085_000)));
+    }
+
+    /// …and it must NOT claim provable-zero when the credit is genuinely available. A wrong "you get
+    /// nothing" is the worse error of the two: it talks a filer out of money they are owed.
+    #[test]
+    fn an_ordinary_household_is_not_told_the_credit_is_gone() {
+        let ri = ri_with(FilingStatus::Mfj, 2);
+        assert!(!ctc_provably_zero(&ri, 2, Usd::from(90_000)));
+        // Exactly AT the threshold: L10 is -0-, so nothing is phased out at all.
+        assert!(!ctc_provably_zero(&ri, 2, Usd::from(400_000)));
+    }
+
+    /// ★★ THE BOUNDARY, worked from the form. MFJ, 2 dependents ⇒ line 8 ceiling $4,000. The credit
+    /// survives while line 11 < 4,000, i.e. line 10 < 80,000, i.e. excess ≤ 79,000 (line 10 rounds UP
+    /// to the next $1,000). So $479,000 still has a credit and $479,001 does not.
+    #[test]
+    fn the_phase_out_boundary_is_the_forms_own_rounding() {
+        let ri = ri_with(FilingStatus::Mfj, 2);
+        assert!(
+            !ctc_provably_zero(&ri, 2, Usd::from(479_000)),
+            "excess 79,000 -> L10 79,000 -> L11 3,950 < 4,000 ceiling: credit survives"
+        );
+        assert!(
+            ctc_provably_zero(&ri, 2, Usd::from(479_001)),
+            "excess 79,001 ROUNDS UP to L10 80,000 -> L11 4,000, which is not LESS than the 4,000 \
+             ceiling, so line 12 answers No"
+        );
+    }
+
+    /// The single/HoH threshold is half the joint one, and the code must not assume MFJ.
+    #[test]
+    fn the_threshold_follows_filing_status() {
+        let single = ri_with(FilingStatus::Single, 1);
+        assert!(ctc_provably_zero(&single, 1, Usd::from(240_001)));
+        let mfj = ri_with(FilingStatus::Mfj, 1);
+        assert!(
+            !mfj_is_zero(&mfj),
+            "the same income is nowhere near the joint threshold"
+        );
+    }
+    fn mfj_is_zero(ri: &ReturnInputs) -> bool {
+        ctc_provably_zero(ri, 1, Usd::from(240_001))
+    }
+
+    /// ★ Line 3 is MODIFIED AGI — the excluded-income add-backs push a filer over. btctax collects all
+    /// four, so this is exact rather than approximated by AGI.
+    #[test]
+    fn the_line_2_add_backs_count() {
+        let mut ri = ri_with(FilingStatus::Mfj, 1);
+        assert!(!ctc_provably_zero(&ri, 1, Usd::from(430_000)));
+        ri.excluded_puerto_rico_income = Usd::from(20_000);
+        assert!(
+            ctc_provably_zero(&ri, 1, Usd::from(430_000)),
+            "line 3 = line 1 + line 2d, so excluded Puerto Rico income phases the credit out"
+        );
+    }
+}
+
 pub fn advisories_for(
     ri: &ReturnInputs,
     state: &LedgerState,
@@ -458,7 +623,10 @@ pub fn advisories(
     // §3.4 — CTC/ODC: captured dependents, but line 19 is $0.
     let dependents = ri.header.dependents.len();
     if dependents > 0 {
-        out.push(Advisory::CtcOdcOmitted { dependents });
+        out.push(Advisory::CtcOdcOmitted {
+            dependents,
+            provably_zero: ctc_provably_zero(ri, dependents, agi),
+        });
     }
 
     // §3.4 — EIC: earned income present and AGI low enough that the household might qualify.
@@ -695,7 +863,10 @@ mod tests {
     /// (OVERSTATED) so a filer knows the omission costs them money, not the IRS.
     #[test]
     fn ctc_fires_on_dependents_and_says_overstated() {
-        let a = Advisory::CtcOdcOmitted { dependents: 2 };
+        let a = Advisory::CtcOdcOmitted {
+            dependents: 2,
+            provably_zero: false,
+        };
         let m = a.message();
         assert!(m.contains("2 dependent(s)"));
         assert!(m.contains("OVERSTATED"));
@@ -850,7 +1021,10 @@ mod tests {
         assert_eq!(
             got,
             vec![
-                Advisory::CtcOdcOmitted { dependents: 2 },
+                Advisory::CtcOdcOmitted {
+                    dependents: 2,
+                    provably_zero: false
+                },
                 Advisory::EicOmitted,
                 Advisory::OtherCreditsOmitted,
                 Advisory::AgedBoxForfeitedNoDob {

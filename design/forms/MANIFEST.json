@@ -970,5 +970,23 @@
     "bytes": 253361,
     "url": "https://www.irs.gov/pub/irs-prior/i8995a--2024.pdf",
     "extract": "design/forms/extract/i8995a--2024.txt"
+  },
+  {
+    "path": "design/forms/2024/f1040s8--2024.pdf",
+    "kind": "form",
+    "storage": "note",
+    "sha256": "8b5143ca127b754b2e65904f6be14712b5be612056989bdf06e096ecc500f977",
+    "bytes": 101825,
+    "url": "https://www.irs.gov/pub/irs-prior/f1040s8--2024.pdf",
+    "extract": "design/forms/extract/f1040s8--2024.txt"
+  },
+  {
+    "path": "design/forms/2024/i1040s8--2024.pdf",
+    "kind": "instructions",
+    "storage": "note",
+    "sha256": "90a5507b485f6e8c5ebb7aaaca0d9f999a0ad709269ac22c48320992d25f8d60",
+    "bytes": 326617,
+    "url": "https://www.irs.gov/pub/irs-prior/i1040s8--2024.pdf",
+    "extract": "design/forms/extract/i1040s8--2024.txt"
   }
 ]

@@ -3899,7 +3899,10 @@ mod advisory_wrap_tests {
     #[test]
     fn advisories_wrap_to_the_house_width_with_a_hanging_indent() {
         use btctax_core::tax::advisories::Advisory;
-        let out = render_advisories(&[Advisory::CtcOdcOmitted { dependents: 2 }]);
+        let out = render_advisories(&[Advisory::CtcOdcOmitted {
+            dependents: 2,
+            provably_zero: false,
+        }]);
 
         for line in out.lines() {
             assert!(

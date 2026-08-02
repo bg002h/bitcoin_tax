@@ -277,7 +277,7 @@ rental income"* from *"nobody ever asked"*, exactly as it could not tell *"one e
 
 ## INCORRECT RESULTS
 
-### R1 · The CTC advisory ignores the §24(b) phase-out — it advises claiming a credit that is $0
+### R1 · The CTC advisory ignores the §24(b) phase-out — ✅ **FIXED**
 
 ```
 • CTC/ODC NOT COMPUTED — you captured 9 dependent(s) ... Your tax is OVERSTATED by up to
