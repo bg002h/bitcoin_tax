@@ -29,6 +29,10 @@ SHAPES='\b[0-9]{3}-[0-9]{2}-[0-9]{4}\b|\b[0-9]{2}-[0-9]{7}\b'
 #   EIN-shaped (2-7):
 #     11-1111111   — repeated-digit synthetic EIN, "Charity Alpha" (btctax-forms/tests/sp2.rs)
 #     22-2222222   — repeated-digit synthetic EIN, "Charity Beta" (btctax-forms/tests/sp2.rs)
+#     33-3333333   — repeated-digit synthetic EIN, the SPOUSE's employer in the §6413(c)
+#                    excess-SS test (btctax-core/src/tax/return_1040.rs). Three distinct EINs
+#                    are needed there: the credit turns on "more than one employer", so the
+#                    test cannot state the rule with fewer.
 #     12-3456789   — sequential synthetic EIN / appraiser TIN (btctax-core/src/donation.rs,
 #                    btctax-cli/src/cmd/reconcile.rs, .../donation_details.rs, .../render.rs, kat_forms.rs)
 #     98-7654321   — synthetic donee EIN in the §170 donation worked examples
@@ -37,7 +41,7 @@ SHAPES='\b[0-9]{3}-[0-9]{2}-[0-9]{4}\b|\b[0-9]{2}-[0-9]{7}\b'
 #     99-1234567   — second synthetic sequential EIN (btctax-cli/tests/tax_report.rs) [R0-I1]
 # NOT excluded (cannot match the shapes; documented only): the bare 9-digit TIN
 # and the alphanumeric PTIN used in the same fixtures.
-ALLOWED='^(000-00-0000|111-11-1111|111-22-3333|123-45-6789|222-22-2222|222-33-4444|987-65-4321|11-1111111|22-2222222|12-3456789|98-7654321|99-1234567)$'
+ALLOWED='^(000-00-0000|111-11-1111|111-22-3333|123-45-6789|222-22-2222|222-33-4444|987-65-4321|11-1111111|22-2222222|33-3333333|12-3456789|98-7654321|99-1234567)$'
 
 # Token-level extraction [R0-M1]: -o emits only matched tokens; exclusions filter
 # tokens, not lines. -I skips binaries [R0-M3]; git grep is tree-accurate and
