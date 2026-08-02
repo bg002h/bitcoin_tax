@@ -101,6 +101,19 @@ pub enum Advisory {
     /// world — "counts spouse boxes on MFJ only", "three conditions btctax captures none of" — for a
     /// full branch after both became false. `boxes` counts what was forgone: aged, blind, or both.
     Mfs63fSpouseBoxesForgone { per_box: Usd, boxes: usize },
+    /// ★★★ §6413(c) — one employer over-withheld Social Security, so the excess is **not creditable on
+    /// this return**, and the filer must be TOLD where their money is.
+    ///
+    /// btctax used to REFUSE here. i1040gi says *"you can't claim the excess on your return"*, not "you
+    /// can't file", so the return now files with a $0 credit — but a conservative omission is permitted
+    /// **only if the filer is told** (the rule [`Self::BenefitCarryoversNotStated`] states). Without
+    /// this, a known, computed, recoverable amount was silently dropped: the review that caught it
+    /// noted the code comment already CLAIMED an advisory that had never been written.
+    ///
+    /// Carries the remedy the instruction gives and that the earlier transcription stopped short of:
+    /// *"The employer should adjust the tax for you. If the employer doesn't adjust the overcollection,
+    /// you can file a claim for refund using Form 843."*
+    ExcessSsSingleEmployerNotCreditable { amount: Usd },
     /// ★★ §G-20a — a prior-year **benefit** carryover btctax was never told about: the §1212(b)
     /// capital-loss carryover and/or the §170(d)(1) charitable carryover.
     ///
@@ -231,6 +244,14 @@ impl Advisory {
                  amount. If you had no §199A activity last year, or last year's lines 16 and 17 were \
                  zero, there is nothing to do and this note is expected."
                     .to_string(),
+            Advisory::ExcessSsSingleEmployerNotCreditable { amount } => format!(
+                "SOCIAL SECURITY OVER-WITHHELD BY ONE EMPLOYER — {} more than the §3101(a) cap \
+                 was withheld, but it came from a SINGLE employer, so §6413(c) does not let you claim \
+                 it on this return (Schedule 3 line 11 is $0 and that is correct). The money is still \
+                 yours: ask that employer to adjust the overcollection, and if they don't, file a claim \
+                 for refund using Form 843.",
+                fmt_usd(*amount)
+            ),
             Advisory::Mfs63fSpouseBoxesForgone { per_box, boxes } => format!(
                 "SPOUSE'S §63(f) BOX{p} NOT CLAIMED ON A SEPARATE RETURN — you told btctax something \
                  that would qualify your spouse for {n} additional standard-deduction box{p} ({amt} \
@@ -396,7 +417,7 @@ pub fn advisories_for(
     year: i32,
 ) -> Vec<Advisory> {
     let earned = ar.wages + ar.se.as_ref().map_or(Usd::ZERO, |s| s.net_se);
-    advisories(
+    let mut out = advisories(
         ri,
         state,
         earned,
@@ -405,7 +426,16 @@ pub fn advisories_for(
         params,
         year,
         ar.deduction_is_itemized,
-    )
+    );
+    // ★★★ §6413(c) — computed on the return (it needs the year's wage base, which the scalar form does
+    // not carry), appended here so the filer is TOLD that money withheld above the cap by a SINGLE
+    // employer is real, recoverable, and simply not claimable on this return.
+    if ar.excess_ss_not_creditable > Usd::ZERO {
+        out.push(Advisory::ExcessSsSingleEmployerNotCreditable {
+            amount: ar.excess_ss_not_creditable,
+        });
+    }
+    out
 }
 
 /// Collect every advisory that applies (the scalar form — `earned_income` = wages + net SE earnings;

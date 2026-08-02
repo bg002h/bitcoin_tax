@@ -1420,6 +1420,7 @@ mod tests {
         let z = Usd::ZERO;
         AbsoluteReturn {
             schedule_1a_additional: Usd::ZERO,
+            excess_ss_not_creditable: Usd::ZERO,
             amt: Default::default(),
             wages: z,
             taxable_interest: z,

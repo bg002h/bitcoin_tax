@@ -972,7 +972,13 @@ pub fn cover_schedule3lines(l: &crate::tax::printed::Schedule3Lines) -> Coverage
     );
     c.exception(*line11, f, "11", "line11",
         "Excess social security and tier 1 RRTA tax withheld",
-        "The §6413(c) credit is produced by the \"Excess Social Security and Tier 1 RRTA Tax Withheld\" computation in the Form 1040 general instructions (per person, max(0, Σ W-2 box 4 − 6.2% × wage base)); Schedule 3 line 11 carries no arithmetic, no source line, and the worksheet is never emitted.");
+        "The §6413(c) credit is produced by the \"Excess Social Security and Tier 1 RRTA Tax Withheld\" \
+         computation in the Form 1040 general instructions; Schedule 3 line 11 itself carries no \
+         arithmetic, no source line, and the worksheet is never emitted. ★ Per person, never pooled, \
+         and it REQUIRES MORE THAN ONE EMPLOYER: Σ over employers of min(that employer's Σ box 4, MAX), \
+         less MAX, floored at zero — where MAX = 6.2% × the wage base and employers are identified by \
+         CANONICALIZED EIN. This reason previously recorded max(0, Σ box 4 − MAX), which omitted both \
+         conditions and was a live understatement of tax.");
     c.line(
         *line15,
         f,

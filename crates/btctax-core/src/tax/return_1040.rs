@@ -628,6 +628,45 @@ fn crypto_charitable_gifts(state: &LedgerState, year: i32) -> Vec<CharitableGift
     gifts
 }
 
+/// An EIN reduced to its nine digits, or `None` if it is absent, blank, or not nine digits.
+///
+/// ★ Modelled on [`crate::tax::packet::Ssn::canonical`] — strip hyphens and whitespace, then require
+///   exactly nine digits. Identity comparisons must never be spelling comparisons: `11-1111111` and
+///   `111111111` are ONE employer, and treating them as two understates tax (§6413(c)).
+///
+/// Returns `None` rather than an error because the caller already distinguishes "cannot decide" from
+/// "decided": a malformed or missing EIN reaches the screen, which refuses and asks.
+pub(crate) fn canonical_ein(raw: &str) -> Option<String> {
+    let digits: String = raw
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '-')
+        .collect();
+    (digits.len() == 9 && digits.chars().all(|c| c.is_ascii_digit())).then_some(digits)
+}
+
+/// Social Security withheld above the cap by a person's SINGLE employer — the amount that is real,
+/// recoverable, and **not claimable on this return**. Zero when the person had two or more employers
+/// (then it is a credit) or when identity is unknown (then the screen refuses).
+pub(crate) fn single_employer_excess_ss(ri: &ReturnInputs, table: &TaxTable) -> Usd {
+    let max = table.ss_wage_base * EMPLOYEE_OASDI_RATE;
+    [Owner::Taxpayer, Owner::Spouse]
+        .into_iter()
+        .map(|owner| {
+            let mine: Vec<_> = ri.w2s.iter().filter(|w| w.owner == owner).collect();
+            let withheld: Usd = mine.iter().map(|w| w.box4_ss_withheld).sum();
+            let eins: std::collections::BTreeSet<String> = mine
+                .iter()
+                .filter_map(|w| w.ein.as_deref().and_then(canonical_ein))
+                .collect();
+            if withheld > max && eins.len() == 1 {
+                withheld - max
+            } else {
+                Usd::ZERO
+            }
+        })
+        .sum()
+}
+
 /// §6413(c) **excess Social Security** credit (Schedule 3 line 11), PER PERSON — never pooled (§4.9).
 ///
 /// ★★★ Transcribed from i1040gi's two sentences, both of which are conditions:
@@ -662,9 +701,19 @@ pub(crate) fn excess_social_security(ri: &ReturnInputs, table: &TaxTable) -> Usd
             return Usd::ZERO;
         }
         // Over the cap ⇒ the credit turns on employer identity, so it must be stated.
-        let mut eins: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        // ★★★ CANONICALIZED, NOT TRIMMED. An EIN has two standard renderings — `11-1111111` off the
+        //     paper W-2 and `111111111` off a payroll-portal export — and to a string compare those are
+        //     TWO EMPLOYERS. That restores the exact understatement this function exists to kill: a
+        //     Fable review built the probe (one employer, a W-2 and its W-2c, box 4 $6,200 each, the two
+        //     spellings) and got a $1,946.80 credit for a filer entitled to $0.
+        //
+        //     ★★ The field's own doc comment stated the governing rule while the code violated it —
+        //     *"two spellings of one employer are two employers to a string compare"* — and §6413(c) was
+        //     then decided by a string compare. Same shape as the equivalence comment this whole fix
+        //     replaced.
+        let mut eins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         for w in &mine {
-            match w.ein.as_deref().map(str::trim).filter(|e| !e.is_empty()) {
+            match w.ein.as_deref().and_then(canonical_ein) {
                 Some(e) => {
                     eins.insert(e);
                 }
@@ -685,7 +734,7 @@ pub(crate) fn excess_social_security(ri: &ReturnInputs, table: &TaxTable) -> Usd
             .map(|e| {
                 let per_employer: Usd = mine
                     .iter()
-                    .filter(|w| w.ein.as_deref().map(str::trim) == Some(*e))
+                    .filter(|w| w.ein.as_deref().and_then(canonical_ein).as_ref() == Some(e))
                     .map(|w| w.box4_ss_withheld)
                     .sum();
                 per_employer.min(max)
@@ -1077,9 +1126,21 @@ pub struct AbsoluteReturn {
     /// 1040 **L24** — TOTAL TAX = L22 + L23.
     pub total_tax: Usd,
     /// §6413(c) **excess Social Security** credit → Schedule 3 line 11 — per person `max(0, Σ box4 − MAX)`
-    /// (MAX = 6.2% × the year's SS wage base), summed over taxpayer + spouse (never pooled). A single
-    /// employer over-withholding refuses upstream (`SingleEmployerExcessSs`), so each box4 ≤ MAX here.
+    /// (MAX = 6.2% × the year's SS wage base), summed over taxpayer + spouse (never pooled).
+    ///
+    /// ★ Requires **more than one employer** (§6413(c)); each employer contributes at most MAX before
+    ///   the aggregate is compared to it. A single employer's over-withholding is $0 here and surfaces
+    ///   as [`Self::excess_ss_not_creditable`] instead.
     pub excess_social_security: Usd,
+    /// Social Security withheld above the §3101(a) cap by a **single** employer — **not creditable** on
+    /// this return, and therefore not a figure that appears on any line.
+    ///
+    /// ★★ It exists so the filer can be TOLD. i1040gi: *"The employer should adjust the tax for you. If
+    /// the employer doesn't adjust the overcollection, you can file a claim for refund using Form
+    /// 843."* btctax used to refuse outright here; it now files a correct $0 credit, and a conservative
+    /// omission is permitted **only if the filer is told**. Drives
+    /// [`crate::tax::advisories::Advisory::ExcessSsSingleEmployerNotCreditable`].
+    pub excess_ss_not_creditable: Usd,
     /// 1040 **L25a** — federal income tax withheld from Form(s) W-2 (Σ box 2).
     pub withholding_25a: Usd,
     /// 1040 **L25b** — federal income tax withheld from Form(s) 1099 (Σ box 4, across INT/DIV/G).
@@ -1419,6 +1480,7 @@ pub fn assemble_absolute(
 
     // ── Excess-SS + payments → refund/owed (SPEC §5 stages 8–9) ─────────────────────────────────────
     let excess_social_security = excess_social_security(ri, table);
+    let excess_ss_not_creditable = single_employer_excess_ss(ri, table);
 
     // 1040 L25 withholding: 25a Σ W-2 box2; 25b Σ 1099 box4 (INT/DIV/G); 25c Form 8959 Part V + other.
     let wh_25a: Usd = ri.w2s.iter().map(|w| w.box2_fed_withheld).sum();
@@ -1501,6 +1563,7 @@ pub fn assemble_absolute(
         schedule_2_other_taxes,
         total_tax,
         excess_social_security,
+        excess_ss_not_creditable,
         withholding_25a: wh_25a,
         withholding_25b: wh_25b,
         total_withholding,
@@ -4417,6 +4480,34 @@ mod tests {
             "one employer over several W-2s is NOT 'more than one employer' — crediting here \
              UNDERSTATES tax on a §6065 return"
         );
+
+        // ★★★ THE SAME EMPLOYER, SPELLED TWO WAYS — a W-2 and its W-2c, box b typed off the paper
+        //     form on one and off a payroll-portal export on the other. A Fable review built exactly
+        //     this and got a $1,946.80 credit for a filer entitled to $0: identity was decided by a
+        //     STRING COMPARE, which the field's own doc comment had warned against in so many words.
+        let two_spellings = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![
+                w2_ss(Owner::Taxpayer, dec!(6000), "11-1111111"),
+                w2_ss(Owner::Taxpayer, dec!(6000), "111111111"),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            excess_social_security(&two_spellings, &table),
+            Usd::ZERO,
+            "an EIN's two standard renderings are ONE employer — comparing spellings instead of \
+             identities restores the §6413(c) understatement"
+        );
+
+        // …and whitespace/format noise is identity-neutral in the other direction too.
+        assert_eq!(canonical_ein(" 11-1111111 "), Some("111111111".to_string()));
+        assert_eq!(
+            canonical_ein("11-111111"),
+            None,
+            "eight digits is not an EIN"
+        );
+        assert_eq!(canonical_ein("XX-1111111"), None, "letters are not an EIN");
 
         // One employer $6,000 (< MAX) → no excess, and no EIN is needed to say so.
         let one = ReturnInputs {

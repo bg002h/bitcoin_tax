@@ -140,8 +140,15 @@ pub enum RefuseReason {
     ///
     /// ★★ NO LONGER RAISED. i1040gi says *"you can't claim the excess on your return. The employer
     /// should adjust the tax for you"* — **not** "you can't file". The return is complete and correct
-    /// without the credit, so this now yields $0 on Schedule 3 line 11 and an advisory. Kept as a
-    /// variant so the exhaustive cross-crate matches stay honest and any persisted value still maps.
+    /// without the credit, so this now yields $0 on Schedule 3 line 11 plus
+    /// [`crate::tax::advisories::Advisory::ExcessSsSingleEmployerNotCreditable`], which carries the
+    /// amount and the Form 843 remedy. Kept as a variant so the exhaustive cross-crate matches stay
+    /// honest and any persisted value still maps.
+    ///
+    /// ★ When this comment was written the advisory did not exist — it asserted one, and a review
+    /// caught the claim as false. The omission mattered: a filer was told nothing about money that is
+    /// real and recoverable, in a codebase whose rule is that a conservative omission is permitted
+    /// **only if the filer is told**.
     SingleEmployerExcessSs,
     /// §6413(c) turns on employer identity and at least one W-2 has no EIN, on a person whose
     /// aggregate box 4 exceeds the §3101(a) cap. Refuses rather than guessing — the credit is a real
@@ -769,7 +776,8 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
         }
     }
 
-    // W-2 rows: box-12 allowlist + §402(g) deferral cap + box 8/10 + single-employer excess SS.
+    // W-2 rows: box-12 allowlist + §402(g) deferral cap + box 8/10. (The single-employer excess-SS
+    // guard is gone — see the §6413(c) block below, which refuses only on UNKNOWN employer identity.)
     let excess_ss_max = tbl.ss_wage_base * EMPLOYEE_OASDI_RATE; // §3101(a)/§6413(c)
                                                                 // §402(g)(1) limits an INDIVIDUAL's elective deferrals — accumulate PER OWNER (each spouse on a joint
                                                                 // return gets its own limit; review I1), refusing iff any one person exceeds it. Amounts are already
@@ -793,11 +801,12 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
             let mine = ri.w2s.iter().filter(|w| w.owner == owner);
             let withheld: Usd = mine.clone().map(|w| w.box4_ss_withheld).sum();
             withheld > excess_ss_max
+                // ★ CANONICALIZED — a malformed EIN is as undecidable as a missing one, and a
+                //   differently-spelled one is not a second employer. See `canonical_ein`.
                 && mine.clone().any(|w| {
                     w.ein
                         .as_deref()
-                        .map(str::trim)
-                        .filter(|e| !e.is_empty())
+                        .and_then(crate::tax::return_1040::canonical_ein)
                         .is_none()
                 })
         };

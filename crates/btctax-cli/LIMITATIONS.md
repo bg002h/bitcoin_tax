@@ -191,7 +191,11 @@ cannot model it correctly.
 - **1099-INT box 9 / 1099-DIV box 13** (private-activity-bond interest — an AMT preference).
 - **1099-DIV box 2b / 2c / 2d** (unrecaptured §1250, §1202, 28% collectibles → the Schedule D Tax Worksheet).
 - **Foreign tax above the §904(j) ceiling** ($300 / $600 MFJ) → Form 1116.
-- **A single employer over-withholding Social Security** (not creditable — recover it from the employer).
+- **Social Security withheld over the §3101(a) cap with a W-2 that has no EIN.** §6413(c) gives the
+  excess-SS credit only when you had **more than one employer**, so the answer depends on employer
+  identity — and a missing EIN makes it unknowable. Add `ein` to every W-2 for that person.
+  (A *single* employer over-withholding no longer refuses: the return files with a $0 credit, which is
+  correct, and an advisory tells you to recover it from the employer or on Form 843.)
 - **A Form 8889 trigger fires and the question is unanswered.** The question is no longer merely "do you hold an HSA" — it is whether **any** Form 8889 trigger occurred: a contribution by anyone on your behalf, a distribution, a testing-period inclusion (the last-month rule, or IRA-to-HSA funding followed by losing eligibility), or an inheritance. Unanswered refuses (`HsaActivityUnanswered`); answered "yes" also refuses, because Form 8889 itself is unsupported. A dormant HSA (no such activity) answers "no" and proceeds. Answer with `btctax income answer`.
 - **Schedule 1 line 20 with an IRA deduction claimed** (the active-participant phase-out is unmodeled).
 - **A stored return from a pre-P9 build refuses as stale** (`StaleReturnInputs`, schema version mismatch). This is deliberate — pre-P9 rows stored some yes/no answers as bare defaults that cannot be told apart from a real "no". The remedy, IN ORDER: `btctax income clear <year>` (this DISCARDS any computed carryover that a prior `report --write-carryover` put on the row), then `btctax income import`, and THEN — **if that row carried a computed carryover** — `btctax report --tax-year <year−1> --write-carryover` to rebuild it. Note `btctax income show` also refuses a stale row, so you cannot inspect it before clearing.
