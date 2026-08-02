@@ -9,6 +9,15 @@
     "extract": "design/forms/extract/f1040--2024.txt"
   },
   {
+    "path": "design/forms/2024/f1040s1--2024.pdf",
+    "kind": "form",
+    "storage": "note",
+    "sha256": "2fe9bc204a82a037a50b21c6eda9949e266eafa423e604f312bc177fc721b552",
+    "bytes": 90905,
+    "url": "https://www.irs.gov/pub/irs-prior/f1040s1--2024.pdf",
+    "extract": "design/forms/extract/f1040s1--2024.txt"
+  },
+  {
     "path": "design/forms/2024/f1040s2--2024.pdf",
     "kind": "form",
     "storage": "note",

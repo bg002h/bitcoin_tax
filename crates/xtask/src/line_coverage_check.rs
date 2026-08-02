@@ -134,15 +134,15 @@ const MAX_EXCEPTIONS: usize = 11;
 /// ★ Kept separate from `MAX_EXCEPTIONS` deliberately: an Exception is *"the grammar does not cover
 /// this line"*, which is a design fact. An unverifiable row is *"we cannot check what this line says"*,
 /// which is a missing ASSET. Collapsing them would let a fetch failure masquerade as a grammar gap.
-const MAX_UNVERIFIABLE: usize = 10;
-// ★★ RAISED 0 → 10: every Schedule 1 line. `crates/btctax-forms/forms/2024/f1040s1.map.toml` exists —
-//    btctax EMITS this form — but neither `design/forms/extract/f1040s1--2024.txt` nor the source PDF
-//    is committed, so the ten quotes cannot be checked at all. This is the hole the SPEC r2 doctrine
-//    reviewer found, and it is an ASSET problem: fixing it needs one fetch, which this environment has
-//    no network for.
-//    ★ The rows are kept rather than dropped ON PURPOSE. Dropping them would delete the compile-time
-//      guarantee for `Schedule1Lines` too, so a new Schedule 1 money field would once again arrive
-//      unexamined — trading a visible, counted gap for an invisible one.
+const MAX_UNVERIFIABLE: usize = 0;
+// ★★★ BACK TO 0 (2026-08-01). It was 10 — every Schedule 1 row — because `f1040s1--2024.txt` was not
+//    committed and the environment had no network, so ten quotes could not be checked at all. The
+//    owner granted network access; the TY2024 revision was fetched from irs.gov, archived with its
+//    sha256 in `legal/_provenance/fetch_log.tsv`, extracted, and all ten quotes now verify verbatim.
+//
+//    ★ The ratchet did exactly what a ratchet is for: it held a MISSING ASSET visible and counted,
+//      separately from the design gap next to it, until the asset could be obtained — instead of
+//      letting a fetch failure quietly masquerade as a grammar exception.
 
 /// Run the check. Returns `Err` with every failure, so one run reports the whole picture rather than
 /// the first problem.

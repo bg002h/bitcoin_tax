@@ -1178,6 +1178,31 @@ silently decide something on the filer's behalf.
 legal judgement and is out of scope in the same way intent is (§G-11's scope bound). The narrow question
 is whether the filer, having taken such a position, can file it correctly.
 
+### G-26 — ✅ **CLOSED 2026-08-01** — the Schedule 1 text-layer hole
+
+`crates/btctax-forms/forms/2024/f1040s1.map.toml` existed — btctax EMITS Schedule 1 — but no
+`f1040s1--2024.txt` was committed and no PDF either, so **ten money lines could not be checked against
+the form at all.** Found by the SPEC r2 doctrine review as a structural blind spot: the `-0-` grep
+*"auto-joins new form years"* and could never join this one.
+
+**Closed by fetching it.** The owner granted network access; the TY2024 revision came from
+`irs.gov/pub/irs-prior/f1040s1--2024.pdf`, sha256 `2fe9bc20…`, archived under the existing conventions
+(PDF gitignored + note in `design/forms/MANIFEST.json`, extract committed, row appended to
+`legal/_provenance/fetch_log.tsv`). All ten quotes now verify verbatim.
+
+  `0 unverifiable (ratchet 0)` — every one of 189 money lines across 14 forms is now checked
+  against committed form text.
+
+★★ **The two-ratchet split earned itself here.** `MAX_UNVERIFIABLE` was deliberately kept separate
+from `MAX_EXCEPTIONS` so that *"we cannot check what this line says"* (a missing **asset**) could never
+masquerade as *"the grammar does not cover this line"* (a **design** fact). Because they were separate,
+closing it was a fetch and a ratchet reset — not an argument about the grammar.
+
+★ **And the archive census caught the new file before the commit did.**
+`authority_manifest::every_primary_source_is_in_the_manifest` redded the moment the PDF landed
+unregistered. That is the instrument built after four overlapping archives were discovered, working on
+the first new asset added since.
+
 ### G-25 — MFS and HoH ordinary brackets ship UNWITNESSED (found 2026-08-01)
 
 **Owning phase: whenever the corpus is next widened.** Direction is unknown, which is the point.

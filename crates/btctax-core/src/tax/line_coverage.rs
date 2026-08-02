@@ -790,37 +790,72 @@ pub fn cover_schedule1lines(l: &crate::tax::printed::Schedule1Lines) -> Coverage
     } = l;
     let f = "f1040s1";
     let mut c = Coverage::default();
-    c.line(*line1, f, "1", "line1", Production::Collected, "NO EXTRACT");
-    c.line(*line3, f, "3", "line3", Production::Carry, "NO EXTRACT");
-    c.line(*line7, f, "7", "line7", Production::Collected, "NO EXTRACT");
+    c.line(
+        *line1,
+        f,
+        "1",
+        "line1",
+        Production::Collected,
+        "Taxable refunds, credits, or offsets of state and local income taxes",
+    );
+    c.line(
+        *line3,
+        f,
+        "3",
+        "line3",
+        Production::Carry,
+        "Business income or (loss). Attach Schedule C",
+    );
+    c.line(
+        *line7,
+        f,
+        "7",
+        "line7",
+        Production::Collected,
+        "Unemployment compensation",
+    );
     c.line(
         *line8v,
         f,
         "8v",
         "line8v",
         Production::Collected,
-        "NO EXTRACT",
+        "Digital assets received as ordinary income not reported elsewhere. See",
     );
-    c.line(*line9, f, "9", "line9", Production::Combine, "NO EXTRACT");
+    c.line(
+        *line9,
+        f,
+        "9",
+        "line9",
+        Production::Combine,
+        "Total other income. Add lines 8a through 8z",
+    );
     c.line(
         *line10,
         f,
         "10",
         "line10",
         Production::Combine,
-        "NO EXTRACT",
+        "Combine lines 1 through 7 and 9. This is your additional income.",
     );
-    c.line(*line15, f, "15", "line15", Production::Carry, "NO EXTRACT");
+    c.line(
+        *line15,
+        f,
+        "15",
+        "line15",
+        Production::Carry,
+        "Deductible part of self-employment tax. Attach Schedule SE",
+    );
     c.line(
         *line18,
         f,
         "18",
         "line18",
         Production::Collected,
-        "NO EXTRACT",
+        "Penalty on early withdrawal of savings",
     );
     c.exception(*line21, f, "21", "line21",
-        "NO EXTRACT",
+        "Student loan interest deduction",
         "The §221 deduction is produced by the \"Student Loan Interest Deduction Worksheet\" in the Form 1040 instructions (a MAGI phase-out btctax implements in student_loan_deduction()); Schedule 1 line 21 itself carries no arithmetic and the worksheet is never emitted, so there is no form-side line to carry from.");
     c.line(
         *line26,
@@ -828,7 +863,7 @@ pub fn cover_schedule1lines(l: &crate::tax::printed::Schedule1Lines) -> Coverage
         "26",
         "line26",
         Production::Combine,
-        "NO EXTRACT",
+        "Add lines 11 through 23 and 25. These are your adjustments to income.",
     );
     c
 }
