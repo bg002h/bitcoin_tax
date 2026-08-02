@@ -1178,7 +1178,7 @@ silently decide something on the filer's behalf.
 legal judgement and is out of scope in the same way intent is (§G-11's scope bound). The narrow question
 is whether the filer, having taken such a position, can file it correctly.
 
-### G-24 — ★★★ 1040 lines 34 and 37 print a sworn ZERO where the form says BLANK (found 2026-08-01)
+### G-24 — ✅ **FIXED 2026-08-01** — 1040 lines 34/35a/37 print BLANK, not a sworn zero
 
 **Owning phase: §G-11 P1.** Found by the §G-11 coverage transcription, from the form's own words.
 
@@ -1202,9 +1202,24 @@ form there is.
 swears "you overpaid $0"; L37's on a refund return swears "you owe $0". Both are statements the filer
 did not make, on lines the form leaves blank.
 
-★★ **Not fixable as a leaf retype alone.** `Usd` cannot express blank, so this waits on §G-11 P0b's
-`LineEntry`. Recorded here so it is not lost between phases — and so the fix, when it lands, is
-recognised as the first real figure §G-11 moves.
+★★ **FIXED AT THE WRITER, not by retyping the leaf.** `Usd` still cannot express blank — that remains
+§G-11 P0b — but the emitter can decline to write. `form1040_full.rs` gates lines 34/35a and 37 on **the
+form's own comparison** (`line33 > line24` / `line24 > line33`), which is why the exactly-even case
+leaves both blank: both of the form's conditions fail, and it asks for neither.
+
+★★★ **The gate reads the OPERANDS, not the carried value — and mutation testing forced that.** A
+`!= Usd::ZERO` gate is *equivalent* under today's `printed.rs`, which computes both lines with
+`.max(Usd::ZERO)`, so the value is non-zero exactly when the condition holds. My first three fixtures
+could not tell the two gates apart **while the test's own doc comment claimed they could**. They
+diverge on a hand-edited `income import` TOML whose stored `line34` contradicts its operands — the
+**`b94508d` orphan class**, a stored answer surviving a correction to the thing that gated it, and
+`LIMITATIONS.md` actively directs filers to hand-edit TOML. Three mutations red: write either line
+unconditionally, or gate on `!= ZERO`.
+
+★ **This is §G-11's first real figure removed from paper, and it cost no type migration.** When P0b
+lands, the comparison moves to the constructor and this becomes a `LineEntry::Blank`. TY2024 golden
+matrix md5 unchanged — the fix removes fabricated marks without touching a computed figure, which is
+what a correct §G-11 fix looks like.
 
 **Also filed from the same pass, smaller:** 1040 **25c** — the form's caption is a collected "Other
 forms (see instructions)" but the code computes `f8959.line24 + other_withholding`, a sum the 1040
