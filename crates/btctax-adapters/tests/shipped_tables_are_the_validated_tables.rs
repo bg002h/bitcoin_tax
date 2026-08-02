@@ -68,29 +68,40 @@ fn the_shipped_ty2024_table_equals_the_one_every_test_validates() {
         // ★ Symmetric: NEITHER side is required to carry every status. QSS, for one, takes the MFJ
         //   schedule by law (§1(a)/§2(a)), so a table may legitimately omit it and normalise at
         //   lookup. What must never happen is the two DISAGREEING where both speak.
-        let (Some(s), Some(v)) = (shipped.ordinary.get(&st), validated.ordinary.get(&st)) else {
-            unvalidated.push(format!(
-                "{st:?}/ordinary({})",
-                match (
-                    shipped.ordinary.contains_key(&st),
-                    validated.ordinary.contains_key(&st)
-                ) {
-                    (true, false) => "shipped only — UNWITNESSED",
-                    (false, true) => "validated only",
-                    _ => "neither",
-                }
-            ));
-            continue;
-        };
-        assert_eq!(
-            s.brackets.len(),
-            v.brackets.len(),
-            "{st:?}: bracket COUNT differs — shipped {} vs validated {}",
-            s.brackets.len(),
-            v.brackets.len()
-        );
-        for (i, (sb, vb)) in s.brackets.iter().zip(v.brackets.iter()).enumerate() {
+        // ★★ The two schedules are checked INDEPENDENTLY. They used to share a `continue`: a status
+        //    missing an ordinary schedule skipped the §1(h) comparison entirely, so its breakpoint gap
+        //    was neither compared NOR counted — the instrument's own failure class, one level in. MFS
+        //    and HoH were in exactly that state.
+        let ordinary =
+            if !shipped.ordinary.contains_key(&st) || !validated.ordinary.contains_key(&st) {
+                unvalidated.push(format!(
+                    "{st:?}/ordinary({})",
+                    match (
+                        shipped.ordinary.contains_key(&st),
+                        validated.ordinary.contains_key(&st)
+                    ) {
+                        (true, false) => "shipped only — UNWITNESSED",
+                        (false, true) => "validated only",
+                        _ => "neither",
+                    }
+                ));
+                None
+            } else {
+                Some((
+                    shipped.ordinary.get(&st).unwrap(),
+                    validated.ordinary.get(&st).unwrap(),
+                ))
+            };
+        if let Some((s, v)) = ordinary {
             assert_eq!(
+                s.brackets.len(),
+                v.brackets.len(),
+                "{st:?}: bracket COUNT differs — shipped {} vs validated {}",
+                s.brackets.len(),
+                v.brackets.len()
+            );
+            for (i, (sb, vb)) in s.brackets.iter().zip(v.brackets.iter()).enumerate() {
+                assert_eq!(
                 (sb.lower, sb.rate),
                 (vb.lower, vb.rate),
                 "{st:?} ordinary bracket {i}: shipped ({}, {}) vs validated ({}, {}) — the binary \
@@ -100,6 +111,7 @@ fn the_shipped_ty2024_table_equals_the_one_every_test_validates() {
                 vb.lower,
                 vb.rate
             );
+            }
         }
 
         // ── §1(h) long-term capital-gain breakpoints ────────────────────────────────────────────
@@ -129,30 +141,50 @@ fn the_shipped_ty2024_table_equals_the_one_every_test_validates() {
         );
     }
 
-    // ★★★ THE RATCHET — and what it measured on this test's FIRST RUN:
+    // ★★★ WHAT THIS MEASURED ON ITS FIRST RUN, AND WHAT CLOSED IT:
     //
-    //     Mfs/ordinary  — shipped only, UNWITNESSED
-    //     HoH/ordinary  — shipped only, UNWITNESSED
+    //     Mfs/ordinary  — shipped only, UNWITNESSED   ← CLOSED 2026-08-02
+    //     HoH/ordinary  — shipped only, UNWITNESSED   ← CLOSED 2026-08-02
     //     Qss/ordinary  — neither, and legitimately so: §1(a)/§2(a) give a qualifying surviving
     //                     spouse the JOINT schedule, so both tables normalise at lookup
     //
-    // So the ordinary rate brackets the binary applies to **married-filing-separately and
-    // head-of-household filers have never been compared to anything.** That is not a defect in the
-    // shipped numbers — it is an absence of witness, which is the whole class this file exists to
-    // surface, and it was invisible until an edge was drawn between the two artifacts.
+    // The ordinary rate brackets the binary applied to **married-filing-separately and
+    // head-of-household filers had never been compared to anything.** Not a defect in the shipped
+    // numbers — an absence of witness, invisible until an edge was drawn between the two artifacts.
     //
-    // ★★ CLOSING THIS MUST NOT BE A COPY. Pasting the shipped brackets into
-    // `testonly::ty2024_table()` would make this test pass by construction and prove nothing — two
-    // artifacts agree only because they were derived independently. Closing it means transcribing
-    // MFS and HoH from Rev. Proc. 2023-34 §2.01 directly, as the shipped table's own `source` field
-    // cites. Real work against a real source, not a `cp`.
+    // ★★ CLOSING IT WAS NOT A COPY. Pasting the shipped brackets into `testonly::ty2024_table()`
+    // would have made this pass by construction and proved nothing — two artifacts agree only if they
+    // were derived independently. Both statuses are now TRANSCRIBED from Rev. Proc. 2023-34 §3.01
+    // Tables 2 and 4 and §3.03, the source the shipped table's own `source` field cites. Transcribing
+    // Single and MFJ in the same pass reproduced the committed values exactly, which is what says the
+    // reading is right.
     //
-    // Only ever goes DOWN.
-    const MAX_UNVALIDATED: usize = 3;
+    // ★★★ THE GATE IS THE MECHANISM, NOT A COUNT. A count cannot tell "the binary ships brackets
+    // nobody compared" from "neither side speaks, by law" — and only the first is a defect. So an
+    // `UNWITNESSED` entry fails outright, however few there are, and however the count is doing.
+    // `CLAUDE.md`: state the mechanism, let it decide, never enumerate the outcomes you happened to
+    // see. ★ This also stops the ratchet being satisfiable by DELETING a validated schedule, which
+    // would move an entry from "shipped only" to "neither" and lower the number.
+    let unwitnessed: Vec<&String> = unvalidated
+        .iter()
+        .filter(|u| u.contains("UNWITNESSED"))
+        .collect();
+    assert!(
+        unwitnessed.is_empty(),
+        "{} schedule(s) are SHIPPED to filers with no validated counterpart: {:?}. Each is brackets \
+         the binary applies to a real return that no test has ever compared. Close it by \
+         transcribing the status from Rev. Proc. 2023-34 — never by copying the shipped table.",
+        unwitnessed.len(),
+        unwitnessed
+    );
+
+    // The remainder — statuses NEITHER side carries, which is lawful normalisation, not a gap. Still
+    // ratcheted, because a growing set of them means the two artifacts are drifting apart in scope.
+    // Only ever goes DOWN. (2: Qss/ordinary and Qss/ltcg, both "neither".)
+    const MAX_UNVALIDATED: usize = 2;
     assert!(
         unvalidated.len() <= MAX_UNVALIDATED,
-        "{} shipped schedule(s) have no validated counterpart (ratchet {MAX_UNVALIDATED}): {}. \
-         Each is brackets the binary applies to a real filer that no test has ever compared.",
+        "{} schedule(s) have no validated counterpart (ratchet {MAX_UNVALIDATED}): {}.",
         unvalidated.len(),
         unvalidated.join(", ")
     );

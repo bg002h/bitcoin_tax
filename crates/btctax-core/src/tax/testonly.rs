@@ -94,8 +94,18 @@ pub fn ty2024_params() -> FullReturnParams {
     }
 }
 
-/// The real TY2024 ordinary + §1(h) schedules for Single and MFJ (Rev. Proc. 2023-34). Enough for every
-/// fixture household here; MFS/HoH pricing is not exercised by the packet KATs.
+/// The real TY2024 ordinary + §1(h) schedules, transcribed from **Rev. Proc. 2023-34** — §3.01 Tables
+/// 1–4 (rates) and §3.03 (the §1(h) breakpoints).
+///
+/// ★★★ **MFS and HoH were added because they were UNWITNESSED, and the closure had to be a
+/// TRANSCRIPTION.** `shipped_tables_are_the_validated_tables.rs` found that the binary ships ordinary
+/// brackets for all five statuses while this table carried only Single and MFJ — so the rates applied
+/// to a real married-filing-separately or head-of-household filer had never been compared to anything.
+/// Pasting the shipped numbers across would have made that test pass by construction and proved
+/// nothing: two artifacts agree only if they were derived **independently**. These come from the
+/// revenue procedure the shipped table's own `source` field cites, read off its text layer.
+/// ★ The independence is not just asserted — transcribing Single and MFJ from the same pass reproduced
+/// the committed values exactly, which is what says the reading is right.
 pub fn ty2024_table() -> TaxTable {
     let mut ordinary = BTreeMap::new();
     ordinary.insert(
@@ -126,6 +136,43 @@ pub fn ty2024_table() -> TaxTable {
             ],
         },
     );
+    // TABLE 2 - Section 1(j)(2)(B) - Heads of Households.
+    // ★ The revenue procedure's own "the excess over" column carries a TYPO in Tables 2, 3 and 4 — it
+    //   reads "$191,150" where the bracket boundary column reads "Over $191,950 but not over ...". The
+    //   BOUNDARY is authoritative (and agrees with Single and MFJ, which are unaffected); the running
+    //   "plus $X" figures are a convenience restatement, not the bracket definition.
+    ordinary.insert(
+        FilingStatus::HoH,
+        OrdinarySchedule {
+            brackets: vec![
+                bracket(dec!(0), dec!(0.10)),
+                bracket(dec!(16550), dec!(0.12)),
+                bracket(dec!(63100), dec!(0.22)),
+                bracket(dec!(100500), dec!(0.24)),
+                bracket(dec!(191950), dec!(0.32)),
+                bracket(dec!(243700), dec!(0.35)),
+                bracket(dec!(609350), dec!(0.37)),
+            ],
+        },
+    );
+    // TABLE 4 - Section 1(j)(2)(D) - Married Individuals Filing Separate Returns.
+    // ★ Identical to Single through the 35% bracket and then DIVERGES: the 37% bracket starts at
+    //   $365,600, not $609,350 — half the joint figure, per §1(j)(2)(D). That single row is the whole
+    //   reason a copy-paste closure would have been worthless.
+    ordinary.insert(
+        FilingStatus::Mfs,
+        OrdinarySchedule {
+            brackets: vec![
+                bracket(dec!(0), dec!(0.10)),
+                bracket(dec!(11600), dec!(0.12)),
+                bracket(dec!(47150), dec!(0.22)),
+                bracket(dec!(100525), dec!(0.24)),
+                bracket(dec!(191950), dec!(0.32)),
+                bracket(dec!(243725), dec!(0.35)),
+                bracket(dec!(365600), dec!(0.37)),
+            ],
+        },
+    );
     let mut ltcg = BTreeMap::new();
     ltcg.insert(
         FilingStatus::Single,
@@ -139,6 +186,21 @@ pub fn ty2024_table() -> TaxTable {
         LtcgBreakpoints {
             max_zero: dec!(94050),
             max_fifteen: dec!(583750),
+        },
+    );
+    // §3.03 Maximum Capital Gains Rate (§1(h), §1(j)(5)).
+    ltcg.insert(
+        FilingStatus::Mfs,
+        LtcgBreakpoints {
+            max_zero: dec!(47025),
+            max_fifteen: dec!(291850),
+        },
+    );
+    ltcg.insert(
+        FilingStatus::HoH,
+        LtcgBreakpoints {
+            max_zero: dec!(63000),
+            max_fifteen: dec!(551350),
         },
     );
     TaxTable {
