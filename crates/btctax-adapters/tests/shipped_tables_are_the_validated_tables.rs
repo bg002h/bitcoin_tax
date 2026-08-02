@@ -294,6 +294,47 @@ fn the_shipped_ty2024_params_equal_the_ones_every_test_validates() {
         "the §199A(e)(2) thresholds differ — this decides whether a return REFUSES for 8995-A"
     );
     assert_eq!(
+        (s.qbi_phase_in_range_unmarried, s.qbi_phase_in_range_married),
+        (v.qbi_phase_in_range_unmarried, v.qbi_phase_in_range_married),
+        "the Form 8995-A line 23 phase-in RANGE WIDTHS differ — this scales the phase-in percentage \
+         and therefore the whole deduction"
+    );
+
+    // ★★★ THE INVARIANT THAT MAKES THE §199A TRAP UNCATCHABLE-BY-EYE INTO A FAILING TEST.
+    //
+    // Rev. Proc. 2023-34 §.27 publishes TWO columns — "Threshold amount" and "Phase-in range amount":
+    //
+    //     Married Individuals Filing Joint Returns    $383,900     $483,900
+    //     Married Individuals Filing Separate Returns $191,950     $241,950
+    //     All Other Returns                           $191,950     $241,950
+    //
+    // ★★ The second column is the TOP OF THE RANGE, not its width. Form 8995-A line 23 asks for the
+    //    WIDTH — "Enter $50,000 ($100,000 if married filing jointly)". Pasting the published amount
+    //    into the width field puts $483,900 where $100,000 belongs, off by roughly 5×, and it
+    //    CROSS-FOOTS PERFECTLY because line 24 merely divides by it: the phase-in percentage collapses
+    //    toward zero, the deduction is barely reduced, and the tax is UNDERSTATED. Nothing downstream
+    //    looks wrong.
+    //
+    // ★ And the width is STATUTORY (§199A(b)(3)(B)(ii)(II)) while the threshold beside it is INDEXED
+    //   (§199A(e)(2)(B)) — so a future table update that "indexes" the width alongside its neighbour
+    //   is also wrong. Both mistakes break this equality, because it ties the two together through the
+    //   Rev. Proc.'s OWN published figure rather than through anyone's arithmetic.
+    for (status, published_top) in [
+        (FilingStatus::Mfj, rust_decimal_macros::dec!(483900)),
+        (FilingStatus::Single, rust_decimal_macros::dec!(241950)),
+        (FilingStatus::Mfs, rust_decimal_macros::dec!(241950)),
+        (FilingStatus::HoH, rust_decimal_macros::dec!(241950)),
+    ] {
+        assert_eq!(
+            s.qbi_phase_in_top(status),
+            published_top,
+            "{status:?}: threshold + phase-in width must equal Rev. Proc. 2023-34 §.27's published \
+             \"Phase-in range amount\" of {published_top}. It does not, which means either the WIDTH \
+             was set from that published column (it is the range's TOP, not its width) or the width \
+             was inflation-indexed (it is statutory and must not be)."
+        );
+    }
+    assert_eq!(
         (
             s.student_loan_phaseout_unmarried,
             s.student_loan_phaseout_married

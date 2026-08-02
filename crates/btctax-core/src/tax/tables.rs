@@ -455,6 +455,26 @@ pub struct FullReturnParams {
     /// NOT a joint return, so it uses the unmarried base (the lower threshold refuses sooner — the
     /// fail-closed direction; mirrors the §904(j) FTC ceiling / §221 student-loan QSS treatment).
     pub qbi_ti_threshold_married: Usd,
+    /// **Form 8995-A line 23 — the phase-in range WIDTH**, unmarried base. TY2024 = **$50,000**.
+    ///
+    /// > *"Phase-in range. Enter $50,000 ($100,000 if married filing jointly)"*
+    ///
+    /// ★★★ **STATUTORY, AND NOT INFLATION-INDEXED** (§199A(b)(3)(B)(ii)(II) / §199A(d)(3)(A)) — unlike
+    /// the threshold immediately above it, which IS indexed (§199A(e)(2)(B), republished every year in
+    /// the Rev. Proc.). A table update that "indexes" this alongside its neighbour is wrong, and the
+    /// invariant below is what catches it.
+    ///
+    /// ★★ **DO NOT COPY THE REV. PROC.'s "PHASE-IN RANGE AMOUNT" INTO THIS FIELD.** Rev. Proc. 2023-34
+    /// §.27 publishes a two-column table whose second column is headed *"Phase-in range amount"* and
+    /// reads **$483,900** (MFJ) / **$241,950** (all others). That is the **TOP OF THE RANGE**
+    /// (threshold + width), not the width the form asks for. Substituting it puts $483,900 where
+    /// $100,000 belongs — off by roughly 5× — and it **cross-foots perfectly**, because line 24 merely
+    /// divides by it: the phase-in percentage collapses toward zero, the deduction is barely reduced,
+    /// and the tax is UNDERSTATED. Nothing downstream would look wrong.
+    pub qbi_phase_in_range_unmarried: Usd,
+    /// Form 8995-A line 23 — the phase-in range width, **MFJ**. TY2024 = **$100,000** (200% of the
+    /// base). Same statutory/not-indexed caveat as [`Self::qbi_phase_in_range_unmarried`].
+    pub qbi_phase_in_range_married: Usd,
     /// §221(b)(2) student-loan-interest deduction MAGI phase-out `(start, end)` — unmarried (Single/HoH).
     pub student_loan_phaseout_unmarried: (Usd, Usd),
     /// §221(b)(2) phase-out `(start, end)` — MFJ/QSS. MFS gets **no** deduction (§221(e)(2)), so no range.
@@ -477,6 +497,26 @@ impl FullReturnParams {
             FilingStatus::Mfj => self.qbi_ti_threshold_married,
             _ => self.qbi_ti_threshold_unmarried,
         }
+    }
+
+    /// Form 8995-A line 23 — the phase-in range WIDTH for `status`. Follows the threshold's own
+    /// MFJ-doubles / QSS-uses-the-unmarried-base convention, so the two always pair.
+    pub fn qbi_phase_in_range(&self, status: FilingStatus) -> Usd {
+        match status {
+            FilingStatus::Mfj => self.qbi_phase_in_range_married,
+            _ => self.qbi_phase_in_range_unmarried,
+        }
+    }
+
+    /// The **top** of the §199A phase-in range — the figure Rev. Proc. 2023-34 §.27 publishes under
+    /// *"Phase-in range amount"*.
+    ///
+    /// ★★★ This exists so the invariant is CHECKABLE against the primary source: `threshold + width`
+    /// must equal the published amount. It ties a STATUTORY width to an INDEXED threshold through the
+    /// Rev. Proc.'s own number, so "indexing" the width — or pasting the published amount into the
+    /// width field — breaks an equality rather than sailing through as a plausible figure.
+    pub fn qbi_phase_in_top(&self, status: FilingStatus) -> Usd {
+        self.qbi_ti_threshold(status) + self.qbi_phase_in_range(status)
     }
 
     /// §221 student-loan-interest MAGI phase-out `(start, end)` for `status`; `None` for **MFS**

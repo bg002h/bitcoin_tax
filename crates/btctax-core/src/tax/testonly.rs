@@ -72,6 +72,8 @@ pub fn ty2024_params() -> FullReturnParams {
         ftc_ceiling: dec!(300),
         qbi_ti_threshold_unmarried: dec!(191950),
         qbi_ti_threshold_married: dec!(383900),
+        qbi_phase_in_range_unmarried: dec!(50000),
+        qbi_phase_in_range_married: dec!(100000),
         student_loan_phaseout_unmarried: (dec!(80000), dec!(95000)),
         student_loan_phaseout_married: (dec!(165000), dec!(195000)),
         amt: AmtParams {

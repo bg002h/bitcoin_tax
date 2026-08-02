@@ -137,6 +137,8 @@ fn ty2024_full_return() -> FullReturnParams {
         // §199A(e)(2) QBI TI-before-QBI threshold (Rev. Proc. 2023-34 §2.10): $191,950 base / $383,900 MFJ.
         qbi_ti_threshold_unmarried: dec!(191950),
         qbi_ti_threshold_married: dec!(383900),
+        qbi_phase_in_range_unmarried: dec!(50000),
+        qbi_phase_in_range_married: dec!(100000),
         // §221(b)(2) student-loan-interest MAGI phase-out (Rev. Proc. 2023-34 §3.22): $80k–$95k
         // single/HoH, $165k–$195k MFJ; MFS gets no deduction (handled in `student_loan_phaseout`).
         student_loan_phaseout_unmarried: (dec!(80000), dec!(95000)),
