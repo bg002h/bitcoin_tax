@@ -27,7 +27,7 @@ With both worked around it computes and emits a correct packet — see "what it 
 
 ## BLOCKERS — these stop a return
 
-### B1 · `NOT COMPUTABLE [QbiAboveThreshold]` — self-employment + high income refuses
+### B1 · `NOT COMPUTABLE [QbiAboveThreshold]` — ✅ **HALF FIXED (B1a); B1b open**
 
 ```
 NOT COMPUTABLE [QbiAboveThreshold]: taxable income before the QBI deduction is above the
@@ -44,7 +44,19 @@ Collecting those two numbers would turn a refusal into a computation for the who
 employees, above the threshold" population. `CLAUDE.md`'s own corollary applies: *"If the form asks
 something our input surface cannot answer, collect it."*
 
-**Blocks any return with a Schedule C and taxable income over $383,900 MFJ / $191,950 otherwise.**
+**B1a — DONE.** A filer whose only §199A item is REIT/PTP income now files **Form 8995-A Part IV**.
+i8995a: *"If you don't have QBI, and only have REIT, PTP, skip Parts I through III and complete Part
+IV."* That filer has no trade or business for the wage/UBIA limitations or the SSTB phase-in to attach
+to, and Part IV needs no input btctax lacks — so refusing them was refusing a return the form itself
+tells us how to complete.
+
+**B1b — still open, and still blocks any return with a Schedule C above the threshold.** It needs three
+inputs that do not exist: **W-2 wages paid by the business** (8995-A line 4), **UBIA of qualified
+property** (line 7), and the **SSTB declaration** (Part I column (b)) — plus the phase-in range width
+($50,000 / $100,000), which `FullReturnParams` does not carry and which is **statutory, not
+inflation-indexed**, unlike the threshold beside it. ★ The SSTB question is class-(A): the code today
+holds every Schedule C to be mining and therefore non-SSTB, and above the threshold an unasked SSTB
+question is an understatement hole.
 
 ### B2 · 9 dependents exceed the 1040's 4-row grid — the PDF refuses
 
