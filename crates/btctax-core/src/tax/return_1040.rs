@@ -644,30 +644,56 @@ pub(crate) fn canonical_ein(raw: &str) -> Option<String> {
     (digits.len() == 9 && digits.chars().all(|c| c.is_ascii_digit())).then_some(digits)
 }
 
-/// Social Security withheld above the cap by a person's SINGLE employer — the amount that is real,
-/// recoverable, and **not claimable on this return**. Zero when the person had two or more employers
-/// (then it is a credit) or when identity is unknown (then the screen refuses).
-pub(crate) fn single_employer_excess_ss(ri: &ReturnInputs, table: &TaxTable) -> Usd {
-    let max = table.ss_wage_base * EMPLOYEE_OASDI_RATE;
-    [Owner::Taxpayer, Owner::Spouse]
-        .into_iter()
-        .map(|owner| {
-            let mine: Vec<_> = ri.w2s.iter().filter(|w| w.owner == owner).collect();
-            let withheld: Usd = mine.iter().map(|w| w.box4_ss_withheld).sum();
-            let eins: std::collections::BTreeSet<String> = mine
-                .iter()
-                .filter_map(|w| w.ein.as_deref().and_then(canonical_ein))
-                .collect();
-            if withheld > max && eins.len() == 1 {
-                withheld - max
-            } else {
-                Usd::ZERO
-            }
-        })
-        .sum()
+/// One employer's over-cap Social Security withholding for one person — real money, recoverable, and
+/// **not claimable on this return**.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NonCreditableSs {
+    /// Whose W-2 it was. The §3101(a) cap is per person, and so is the remedy.
+    pub owner: Owner,
+    /// The employer to ask, canonicalized to nine digits.
+    pub ein: String,
+    /// How much that employer withheld above the cap.
+    pub amount: Usd,
 }
 
-/// §6413(c) **excess Social Security** credit (Schedule 3 line 11), PER PERSON — never pooled (§4.9).
+/// Every (person, employer) pair whose withholding exceeded the §3101(a) cap — the amounts §6413(c)
+/// will not credit, itemized so the filer knows **which employer to ask and for how much**.
+///
+/// ★★★ PER EMPLOYER, not per person, because that is what i1040gi says: *"But if **any one employer**
+/// withheld more than $10,453.20, you can't claim the excess on your return. The employer should adjust
+/// the tax for you."* An earlier version fired only when a person had EXACTLY ONE employer, which is a
+/// different test and silently dropped the disclosure in the common case. Review r8 showed the sharpest
+/// consequence: adding a second employer who withheld **nothing** left the tax outcome byte-identical
+/// ($0 credit, the same amount stranded) and switched the disclosure OFF.
+///
+/// ★★ And it is a LIST, not a scalar. Summing an MFJ couple's two amounts produced one number that no
+/// employer withheld, attached to a message telling the filer to "ask that employer" — an employer that
+/// does not exist. The credit is figured per person and never pooled; so is this.
+pub(crate) fn non_creditable_ss(ri: &ReturnInputs, table: &TaxTable) -> Vec<NonCreditableSs> {
+    let max = table.ss_wage_base * EMPLOYEE_OASDI_RATE;
+    let mut out = Vec::new();
+    for owner in [Owner::Taxpayer, Owner::Spouse] {
+        let mine: Vec<_> = ri.w2s.iter().filter(|w| w.owner == owner).collect();
+        let mut by_ein: std::collections::BTreeMap<String, Usd> = std::collections::BTreeMap::new();
+        for w in &mine {
+            if let Some(e) = w.ein.as_deref().and_then(canonical_ein) {
+                *by_ein.entry(e).or_insert(Usd::ZERO) += w.box4_ss_withheld;
+            }
+        }
+        for (ein, withheld) in by_ein {
+            if withheld > max {
+                out.push(NonCreditableSs {
+                    owner,
+                    ein,
+                    amount: withheld - max,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// §6413(c) **excess Social Security** credit (Schedule 3 line 11), PER PERSON/// §6413(c) **excess Social Security** credit (Schedule 3 line 11), PER PERSON — never pooled (§4.9).
 ///
 /// ★★★ Transcribed from i1040gi's two sentences, both of which are conditions:
 ///
@@ -1132,15 +1158,15 @@ pub struct AbsoluteReturn {
     ///   the aggregate is compared to it. A single employer's over-withholding is $0 here and surfaces
     ///   as [`Self::excess_ss_not_creditable`] instead.
     pub excess_social_security: Usd,
-    /// Social Security withheld above the §3101(a) cap by a **single** employer — **not creditable** on
-    /// this return, and therefore not a figure that appears on any line.
+    /// Every (person, employer) pair whose Social Security withholding exceeded the §3101(a) cap —
+    /// **not creditable** on this return, and therefore appearing on no line.
     ///
     /// ★★ It exists so the filer can be TOLD. i1040gi: *"The employer should adjust the tax for you. If
     /// the employer doesn't adjust the overcollection, you can file a claim for refund using Form
     /// 843."* btctax used to refuse outright here; it now files a correct $0 credit, and a conservative
     /// omission is permitted **only if the filer is told**. Drives
     /// [`crate::tax::advisories::Advisory::ExcessSsSingleEmployerNotCreditable`].
-    pub excess_ss_not_creditable: Usd,
+    pub excess_ss_not_creditable: Vec<NonCreditableSs>,
     /// 1040 **L25a** — federal income tax withheld from Form(s) W-2 (Σ box 2).
     pub withholding_25a: Usd,
     /// 1040 **L25b** — federal income tax withheld from Form(s) 1099 (Σ box 4, across INT/DIV/G).
@@ -1480,7 +1506,7 @@ pub fn assemble_absolute(
 
     // ── Excess-SS + payments → refund/owed (SPEC §5 stages 8–9) ─────────────────────────────────────
     let excess_social_security = excess_social_security(ri, table);
-    let excess_ss_not_creditable = single_employer_excess_ss(ri, table);
+    let excess_ss_not_creditable = non_creditable_ss(ri, table);
 
     // 1040 L25 withholding: 25a Σ W-2 box2; 25b Σ 1099 box4 (INT/DIV/G); 25c Form 8959 Part V + other.
     let wh_25a: Usd = ri.w2s.iter().map(|w| w.box2_fed_withheld).sum();
@@ -4537,6 +4563,72 @@ mod tests {
             excess_social_security(&one_over_cap, &table),
             dec!(6000),
             "an employer's own over-cap withholding is not claimable on the return"
+        );
+
+        // ★★★ r8 I-1 — THE DISCLOSURE IS PER EMPLOYER, NOT PER PERSON. The first version fired only
+        //     when a person had EXACTLY ONE employer, which is a different test from the instruction's
+        //     *"if ANY ONE EMPLOYER withheld more than $10,453.20"*. The reviewer's sharpest probe:
+        //     adding a second employer who withheld NOTHING left the tax outcome byte-identical and
+        //     switched the disclosure OFF.
+        let one_employer_over = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2_ss(Owner::Taxpayer, dec!(12000), "11-1111111")],
+            ..Default::default()
+        };
+        let with_a_silent_second = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![
+                w2_ss(Owner::Taxpayer, dec!(12000), "11-1111111"),
+                w2_ss(Owner::Taxpayer, Usd::ZERO, "44-4444444"),
+            ],
+            ..Default::default()
+        };
+        for ri in [&one_employer_over, &with_a_silent_second] {
+            assert_eq!(excess_social_security(ri, &table), Usd::ZERO);
+            let nc = non_creditable_ss(ri, &table);
+            assert_eq!(
+                nc.len(),
+                1,
+                "one employer over the cap ⇒ one disclosure: {nc:?}"
+            );
+            assert_eq!(nc[0].amount, dec!(1546.80));
+            assert_eq!(nc[0].ein, "111111111");
+        }
+
+        // …and it fires ALONGSIDE a correct credit. Employer A strands $546.80 while the return
+        // rightly pays $2,000 on B's contribution — both facts are true at once.
+        let over_and_credited = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![
+                w2_ss(Owner::Taxpayer, dec!(11000), "11-1111111"),
+                w2_ss(Owner::Taxpayer, dec!(2000), "44-4444444"),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            excess_social_security(&over_and_credited, &table),
+            dec!(2000)
+        );
+        let nc = non_creditable_ss(&over_and_credited, &table);
+        assert_eq!((nc.len(), nc[0].amount), (1, dec!(546.80)));
+
+        // ★★ r8 I-2 — NEVER POOLED. Two spouses, two employers, two disclosures: summing them yields a
+        //    number no employer withheld, attached to a message saying "ask THAT employer".
+        let mfj_both_over = ReturnInputs {
+            filing_status: FilingStatus::Mfj,
+            w2s: vec![
+                w2_ss(Owner::Taxpayer, dec!(12000), "11-1111111"),
+                w2_ss(Owner::Spouse, dec!(11000), "33-3333333"),
+            ],
+            ..Default::default()
+        };
+        let nc = non_creditable_ss(&mfj_both_over, &table);
+        assert_eq!(nc.len(), 2, "one disclosure per (person, employer): {nc:?}");
+        assert_eq!(nc[0].amount, dec!(1546.80));
+        assert_eq!(nc[1].amount, dec!(546.80));
+        assert_ne!(
+            nc[0].owner, nc[1].owner,
+            "the two disclosures belong to DIFFERENT people — pooling them invents an employer"
         );
 
         // MFJ: taxpayer 2×$6,000 across two EINs (excess $1,546.80) + spouse 1×$8,000 (< MAX → 0) →

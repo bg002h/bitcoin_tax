@@ -1580,6 +1580,33 @@ mod tests {
         assert_eq!(reason(&b), Some(RefuseReason::DependentCareBenefit));
     }
 
+    /// ★★★ §G-22/B11 — BOTH legs of the scope attestation, and the `Some(true)` leg shipped with NO
+    /// test at all: r8 deleted its whole refusal block and 2559/2559 stayed green. The unanswered leg
+    /// was covered incidentally (every fixture answers it), which is exactly the kind of accidental
+    /// coverage B1 exists to distinguish from a kill.
+    #[test]
+    fn the_scope_attestation_refuses_unanswered_and_affirmed_alike() {
+        // `None` — never asked. Silence is not testimony that there is no rental income.
+        let mut unanswered = ri();
+        unanswered.other_out_of_scope_income = None;
+        assert_eq!(
+            reason(&unanswered),
+            Some(RefuseReason::OtherIncomeUnanswered)
+        );
+
+        // `Some(true)` — the filer AFFIRMED income v1 cannot model. Filing anyway would omit §61
+        // income, so this refuses rather than emitting a packet that is silently short.
+        let mut affirmed = ri();
+        affirmed.other_out_of_scope_income = Some(true);
+        assert_eq!(reason(&affirmed), Some(RefuseReason::OtherIncomeOutOfScope));
+
+        // `Some(false)` — answered, and the return proceeds. Without this the rule could refuse
+        // everything, which catches nothing.
+        let mut answered = ri();
+        answered.other_out_of_scope_income = Some(false);
+        assert_eq!(reason(&answered), None);
+    }
+
     #[test]
     fn excess_ss_refuses_only_when_employer_identity_is_unknown() {
         // ★★★ Over the §3101(a) cap with NO EIN: the credit turns on "more than one employer" and we

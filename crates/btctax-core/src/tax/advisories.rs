@@ -123,7 +123,13 @@ pub enum Advisory {
     /// Carries the remedy the instruction gives and that the earlier transcription stopped short of:
     /// *"The employer should adjust the tax for you. If the employer doesn't adjust the overcollection,
     /// you can file a claim for refund using Form 843."*
-    ExcessSsSingleEmployerNotCreditable { amount: Usd },
+    ExcessSsNotCreditable {
+        /// "you" or "your spouse" — the §3101(a) cap is per person and so is the remedy.
+        whose: &'static str,
+        /// The employer to ask, canonicalized to nine digits.
+        ein: String,
+        amount: Usd,
+    },
     /// ★★ §G-20a — a prior-year **benefit** carryover btctax was never told about: the §1212(b)
     /// capital-loss carryover and/or the §170(d)(1) charitable carryover.
     ///
@@ -265,12 +271,12 @@ impl Advisory {
                  amount. If you had no §199A activity last year, or last year's lines 16 and 17 were \
                  zero, there is nothing to do and this note is expected."
                     .to_string(),
-            Advisory::ExcessSsSingleEmployerNotCreditable { amount } => format!(
-                "SOCIAL SECURITY OVER-WITHHELD BY ONE EMPLOYER — {} more than the §3101(a) cap \
-                 was withheld, but it came from a SINGLE employer, so §6413(c) does not let you claim \
-                 it on this return (Schedule 3 line 11 is $0 and that is correct). The money is still \
-                 yours: ask that employer to adjust the overcollection, and if they don't, file a claim \
-                 for refund using Form 843.",
+            Advisory::ExcessSsNotCreditable { whose, ein, amount } => format!(
+                "SOCIAL SECURITY OVER-WITHHELD BY ONE EMPLOYER — employer EIN {ein} withheld {} more \
+                 than the §3101(a) cap from {whose}. §6413(c) does not let you claim THAT employer's \
+                 excess on this return, however many employers {whose} had, so Schedule 3 line 11 \
+                 omits it and that is correct. The money is still yours: ask that employer to adjust \
+                 the overcollection, and if they don't, file a claim for refund using Form 843.",
                 fmt_usd(*amount)
             ),
             Advisory::Mfs63fSpouseBoxesForgone { per_box, boxes } => format!(
@@ -463,12 +469,21 @@ impl Advisory {
 /// `ceiling ≤ line 11` proves it. ★ btctax already collects every line-2 add-back, so line 3 is exact,
 /// not approximated by AGI.
 fn ctc_provably_zero(ri: &ReturnInputs, dependents: usize, agi: Usd) -> bool {
-    // L2d + L3 — the modified AGI the phase-out actually reads.
-    let l3 = agi
-        + ri.excluded_puerto_rico_income
-        + ri.form_2555_line45
-        + ri.form_2555_line50
-        + ri.form_4563_line15;
+    // ★★★ L3 comes from the ONE canonical accessor, and its `None` is decisive.
+    //
+    // This open-coded the sum — `agi + excluded_puerto_rico_income + form_2555_line45 + …` — which
+    // consumes the four add-backs WITHOUT the `has_income_exclusion` gate that gives them meaning. On
+    // TY2024, the only computable year, that gate is never even asked (`live: |ri| ri.tax_year >= 2025`)
+    // while the amount fields are an always-live input section. So a filer could carry $200,000 in
+    // `form_2555_line45` that no question ever blessed, and be told **"there is no Schedule 8812 for you
+    // to file"** while Schedule 8812 owed them $2,000. Reproduced against the shipped binary (r8 F2).
+    //
+    // ★★ `None` (never asked) ⇒ MAGI is UNKNOWN ⇒ this cannot prove anything, so it must NOT claim the
+    // credit is gone. The false-negative direction — telling a filer they get nothing when they are owed
+    // money — is the one that costs them, and an unanswered gate is exactly when to stay quiet.
+    let Some(l3) = ri.modified_agi(agi) else {
+        return false;
+    };
     // L9.
     let l9 = if ri.filing_status == crate::tax::types::FilingStatus::Mfj {
         Usd::from(400_000)
@@ -496,6 +511,10 @@ mod ctc_phaseout_tests {
     fn ri_with(status: FilingStatus, deps: usize) -> ReturnInputs {
         let mut ri = ReturnInputs {
             filing_status: status,
+            // ★ ANSWERED, because these cases are about the PHASE-OUT arithmetic, not the gate. An
+            //   unanswered gate makes MAGI unknown and `ctc_provably_zero` correctly declines to prove
+            //   anything — see `the_line_2_add_backs_count_but_only_once_the_gate_is_answered`.
+            has_income_exclusion: Some(false),
             ..Default::default()
         };
         for i in 0..deps {
@@ -560,17 +579,39 @@ mod ctc_phaseout_tests {
         ctc_provably_zero(ri, 1, Usd::from(240_001))
     }
 
-    /// ★ Line 3 is MODIFIED AGI — the excluded-income add-backs push a filer over. btctax collects all
-    /// four, so this is exact rather than approximated by AGI.
+    /// ★ Line 3 is MODIFIED AGI — the excluded-income add-backs push a filer over. They count only
+    /// when the §911/931/933 GATE says they exist.
     #[test]
-    fn the_line_2_add_backs_count() {
+    fn the_line_2_add_backs_count_but_only_once_the_gate_is_answered() {
         let mut ri = ri_with(FilingStatus::Mfj, 1);
+        ri.has_income_exclusion = Some(true);
         assert!(!ctc_provably_zero(&ri, 1, Usd::from(430_000)));
         ri.excluded_puerto_rico_income = Usd::from(20_000);
         assert!(
             ctc_provably_zero(&ri, 1, Usd::from(430_000)),
             "line 3 = line 1 + line 2d, so excluded Puerto Rico income phases the credit out"
         );
+
+        // ★★★ r8 F2 — THE SAME AMOUNTS WITH THE GATE UNANSWERED PROVE NOTHING. On TY2024 the gate is
+        //     never asked while the amount fields are always-live inputs, so this is the SHIPPED shape,
+        //     not a contrived one. Claiming the credit is gone here tells a filer owed $2,000 that
+        //     "there is no Schedule 8812 for you to file".
+        let mut ungated = ri_with(FilingStatus::Mfj, 1);
+        // Re-blank the gate: `ri_with` answers it, and THIS case is precisely the unanswered one.
+        ungated.has_income_exclusion = None;
+        ungated.form_2555_line45 = Usd::from(200_000);
+        assert!(
+            !ctc_provably_zero(&ungated, 1, Usd::from(296_500)),
+            "MAGI is UNKNOWN when the gate is unanswered — an advisory may not claim a benefit is \
+             gone on a number nobody confirmed"
+        );
+
+        // …and Some(false) means the add-backs are genuinely zero, so MAGI == AGI and the ordinary
+        // arithmetic applies. Without this the fix could pass by never proving anything at all.
+        let mut none_stated = ri_with(FilingStatus::Mfj, 1);
+        none_stated.has_income_exclusion = Some(false);
+        assert!(ctc_provably_zero(&none_stated, 1, Usd::from(500_000)));
+        assert!(!ctc_provably_zero(&none_stated, 1, Usd::from(296_500)));
     }
 }
 
@@ -595,9 +636,14 @@ pub fn advisories_for(
     // ★★★ §6413(c) — computed on the return (it needs the year's wage base, which the scalar form does
     // not carry), appended here so the filer is TOLD that money withheld above the cap by a SINGLE
     // employer is real, recoverable, and simply not claimable on this return.
-    if ar.excess_ss_not_creditable > Usd::ZERO {
-        out.push(Advisory::ExcessSsSingleEmployerNotCreditable {
-            amount: ar.excess_ss_not_creditable,
+    for nc in &ar.excess_ss_not_creditable {
+        out.push(Advisory::ExcessSsNotCreditable {
+            whose: match nc.owner {
+                crate::tax::return_inputs::Owner::Taxpayer => "you",
+                crate::tax::return_inputs::Owner::Spouse => "your spouse",
+            },
+            ein: nc.ein.clone(),
+            amount: nc.amount,
         });
     }
     out
