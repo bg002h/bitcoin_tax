@@ -13,8 +13,20 @@
 //! is worth having: every recurrence of this class began with a field nobody looked at.
 //!
 //! **★ The `_` rule (r2 M-6).** `_` — and every `_`-prefixed binding — is **FORBIDDEN** on structs,
-//! collections, and `bool` / `Option<bool>` / defaulted-enum leaves (they must recurse or be classified).
-//! `_` is **PERMITTED** on other scalar leaves (`String`, `Usd`, `Date`, `Option<Date>`, `Option<String>`).
+//! collections, and `bool` / `Option<bool>` / **`Option<Usd>`** / defaulted-enum leaves (they must recurse
+//! or be classified). `_` is **PERMITTED** on other scalar leaves (`String`, `Usd`, `Date`,
+//! `Option<Date>`, `Option<String>`).
+//!
+//! ★★★ **`Option<Usd>` was added to the forbidden set, and the codebase had already ROUTED AROUND its
+//! absence.** `return_inputs.rs` says of the §911/931/933 gate: *"The gate carries the answered-ness, not
+//! the amounts, and that is deliberate. `Option<bool>` is a leaf the classifier forbids `_` on, so it
+//! cannot be added without a human classifying it — whereas `Option<Usd>` is a scalar the `_` rule
+//! permits."* A design choosing its TYPE to avoid a hole in this rule is the clearest possible evidence
+//! the hole was real. `Option<Usd>` is the answered-ness shape for money — `None` = never asked — and
+//! letting it slip past unclassified is exactly the class this module exists to prevent.
+//!
+//! ★ Enforced by [`tests::no_option_money_leaf_is_bound_with_underscore`], which reads BOTH sources and
+//! is exercised on planted defects — not by doctrine.
 //!
 //! This module does no tax arithmetic and is never on a compute path; [`classify`] returns a [`Census`] only
 //! so a test can prove the registry declarations line up with [`FORM_QUESTIONS`].
@@ -100,10 +112,13 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         foreign_country_names: _, // String — scalar
         donations_had_restrictions,
         dual_status_alien,
-        // §164(b)(7)(B)(iv) / Schedule 1-A Part I MAGI add-backs. `Option<Usd>` scalar leaves, so the
-        // `_` rule permits binding them here — but they are NOT class-(B) forgone benefits like
-        // `medical`: an unasked add-back understates MAGI and RAISES two deductions. Their `None` is
-        // refused at the point of need (`SaltLimitation::line_5e`), not defaulted to zero.
+        // §164(b)(7)(B)(iv) / Schedule 1-A Part I MAGI add-backs. Plain `Usd` scalar leaves, which the
+        // `_` rule permits — their answered-ness lives in the `has_income_exclusion` GATE above, which
+        // is an `Option<bool>` for exactly that reason. ★ This comment used to call them
+        // `Option<Usd>`; they are not, and the distinction now matters because `Option<Usd>` is
+        // forbidden a `_`. They are NOT class-(B) forgone benefits like `medical`: an unasked add-back
+        // understates MAGI and RAISES two deductions, so `None` on the gate is refused at the point of
+        // need (`SaltLimitation::line_5e`), never defaulted to zero.
         has_income_exclusion,
         other_out_of_scope_income,
         excluded_puerto_rico_income: _,
@@ -543,6 +558,93 @@ fn classify_qbi(c: &mut Census, q: &QbiInputs) {
 
 #[cfg(test)]
 mod tests {
+    /// The names bound with a bare `_` (or a `_`-prefixed binding) anywhere in `classifier_src`.
+    fn underscored(classifier_src: &str) -> std::collections::BTreeSet<String> {
+        classifier_src
+            .lines()
+            .filter_map(|l| {
+                let t = l.trim().trim_end_matches(',');
+                let (name, rhs) = t.split_once(": ")?;
+                let name = name.trim();
+                (rhs.trim() == "_" || rhs.trim().starts_with('_'))
+                    .then(|| name.to_string())
+                    // ★ alphanumeric, NOT just lowercase: `form_2555_line45` and `qbi_w2_wages` carry
+                    //   digits, and a filter that dropped them would make this rule blind to exactly
+                    //   the field names this codebase uses.
+                    .filter(|n: &String| n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+            })
+            .collect()
+    }
+
+    /// Every `pub <name>: Option<Usd>` declared in `inputs_src`.
+    fn option_money_fields(inputs_src: &str) -> std::collections::BTreeSet<String> {
+        inputs_src
+            .lines()
+            .filter_map(|l| {
+                let t = l.trim();
+                let rest = t.strip_prefix("pub ")?;
+                let (name, ty) = rest.split_once(": ")?;
+                (ty.trim_end_matches(',').trim() == "Option<Usd>").then(|| name.trim().to_string())
+            })
+            .collect()
+    }
+
+    /// The rule, as a pure function of the two sources, so a planted defect can reach it.
+    fn violations(inputs_src: &str, classifier_src: &str) -> Vec<String> {
+        let under = underscored(classifier_src);
+        option_money_fields(inputs_src)
+            .into_iter()
+            .filter(|f| under.contains(f))
+            .collect()
+    }
+
+    /// ★★★ `_` is FORBIDDEN on an `Option<Usd>` leaf — the answered-ness shape for money.
+    ///
+    /// `Option<Usd>`'s `None` means **never asked**, which is precisely what this module exists to stop
+    /// anyone adding without looking at. The rule permitted it until 2026-08-02, and the codebase had
+    /// already ROUTED AROUND the gap: `return_inputs.rs` explains that the §911/931/933 answered-ness
+    /// lives in an `Option<bool>` gate *because* `Option<bool>` forbids `_` "whereas `Option<Usd>` is a
+    /// scalar the `_` rule permits". A design picking its type to dodge a hole is the strongest evidence
+    /// the hole was real.
+    ///
+    /// ★ Today the real sources have ZERO `Option<Usd>` fields, so a test asserting only on them would
+    /// pass vacuously and prove nothing — B1's "shipped an instrument never seen discriminating". The
+    /// rule is therefore a pure function over both sources, and the planted cases below drive it.
+    #[test]
+    fn no_option_money_leaf_is_bound_with_underscore() {
+        // The real sources, which must be clean.
+        assert!(
+            violations(
+                include_str!("return_inputs.rs"),
+                include_str!("classifier.rs")
+            )
+            .is_empty(),
+            "an Option<Usd> leaf is bound with `_` — classify it instead"
+        );
+
+        // ── The kills. ──────────────────────────────────────────────────────────────────────────
+        let inputs =
+            "pub qbi_w2_wages: Option<Usd>,\n    pub medical: Usd,\n    pub blind: Option<bool>,";
+
+        // (1) THE DEFECT: an Option<Usd> money leaf waved past with `_`.
+        assert_eq!(
+            violations(inputs, "        qbi_w2_wages: _,"),
+            vec!["qbi_w2_wages".to_string()],
+            "a `_` on an Option<Usd> leaf must be a finding"
+        );
+        // (2) …and a `_`-PREFIXED binding is the same evasion wearing a name.
+        assert_eq!(
+            violations(inputs, "        qbi_w2_wages: _unused,"),
+            vec!["qbi_w2_wages".to_string()]
+        );
+        // (3) Bound by name (i.e. classified) ⇒ silent. Without this the rule could red on everything,
+        //     which reds on nothing.
+        assert!(violations(inputs, "        qbi_w2_wages,").is_empty());
+        // (4) A plain `Usd` keeps its permission — narrowing the rule further is a separate decision,
+        //     and a test that quietly forbade `_` on every money field would be making it here.
+        assert!(violations(inputs, "        medical: _,").is_empty());
+    }
+
     use super::*;
 
     /// ★ §3.3 / §4 — the classifier's registry DECLARATIONS line up EXACTLY with [`FORM_QUESTIONS`]: every
