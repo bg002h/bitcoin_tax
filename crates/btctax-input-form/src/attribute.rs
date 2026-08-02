@@ -42,6 +42,10 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::MixedUseMortgageUnanswered => vec![decl(QuestionId::MortgageAllUsedToBuyBuildImprove)],
         R::AmtQualifiedDwellingUnanswered => vec![decl(QuestionId::AmtQualifiedDwelling)],
         R::IncomeExclusionUnanswered => vec![decl(QuestionId::HasIncomeExclusion)],
+        // §G-22/B11 — both legs point at the one declaration that decides them.
+        R::OtherIncomeUnanswered | R::OtherIncomeOutOfScope => {
+            vec![decl(QuestionId::OtherOutOfScopeIncome)]
+        }
         R::AmtCarryoverDeclarationUnanswered => vec![decl(QuestionId::AmtCarryoverSameAsRegular)],
         R::AmtDepreciationDeclarationUnanswered => {
             vec![decl(QuestionId::AmtDepreciationSameAsRegular)]

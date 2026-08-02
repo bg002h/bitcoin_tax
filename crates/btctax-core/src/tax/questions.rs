@@ -94,6 +94,8 @@ pub enum QuestionId {
     AmtDepreciationSameAsRegular,
     /// **§164(b)(7)(B)(iv) / Schedule 1-A Part I** — did the filer exclude income under §911/931/933?
     HasIncomeExclusion,
+    /// **§G-22 / B11** — the scope attestation: income this tool never asked about.
+    OtherOutOfScopeIncome,
 }
 
 impl QuestionId {
@@ -110,6 +112,7 @@ impl QuestionId {
         QuestionId::AmtCarryoverSameAsRegular,
         QuestionId::AmtDepreciationSameAsRegular,
         QuestionId::HasIncomeExclusion,
+        QuestionId::OtherOutOfScopeIncome,
     ];
 }
 
@@ -505,6 +508,35 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         // so none is durable: last year's answer is not testimony for this one.
         durability: Durability::PerYear,
         neutral: false, // "no exclusions" is the AMT/MAGI-neutral answer, but it is still an ANSWER
+    },
+    // ── §G-22 / B11: the SCOPE ATTESTATION. ─────────────────────────────────────────────────────────
+    FormQuestion {
+        id: QuestionId::OtherOutOfScopeIncome,
+        prompt: "In this tax year, did you receive ANY income other than what you have entered here — \
+                 rent or royalties, a farm, a partnership, S corporation, estate or trust (any \
+                 Schedule K-1), unreported tips, gambling winnings, alimony, a business this tool did \
+                 not capture, or anything else it never asked about?",
+        unanswered: RefuseReason::OtherIncomeUnanswered,
+        unanswered_detail:
+            "btctax asks about HSA activity, dual-status alien status and foreign accounts, and a \
+             `yes` to any of them stops the return — but it never asked whether you had rental, \
+             royalty, farm or K-1 income, so silence LOOKED like `none` and a return could file with \
+             §61 income left off it. Silence is not testimony that there is none: answer it — run \
+             `btctax income answer`",
+        // ★★★ ALWAYS LIVE, and deliberately so. Every other class-(A) declaration is scoped to the
+        // years or shapes that read it; this one is read by NOTHING — it exists precisely because
+        // there is no field for the income it asks about. A liveness predicate here could only be
+        // "was the filer likely to have some?", which is the guess the question exists to refuse to
+        // make. ★ It is also stable across years in a way per-schedule questions are not: the
+        // out-of-scope SET moves every tax year, the union does not.
+        live: |_| true,
+        get: |ri| ri.other_out_of_scope_income,
+        set: |ri, v| ri.other_out_of_scope_income = Some(v),
+        durability: Durability::PerYear,
+        // ★★ NOT neutral. "No other income" is an affirmative statement about the filer's year that no
+        // default may make on their behalf — that is the whole finding. `false` here would let the
+        // answer be assumed, restoring the silence this question exists to break.
+        neutral: false,
     },
     // ── §G-9: the §63(f) death carve-out. Two entries, because i1040gi states the rule twice — once
     // under "Death of a taxpayer" and once under "Death of spouse" — and each is a separate fact.
@@ -974,6 +1006,7 @@ mod tests {
                 QuestionId::AmtCarryoverSameAsRegular => 9,
                 QuestionId::AmtDepreciationSameAsRegular => 10,
                 QuestionId::HasIncomeExclusion => 11,
+                QuestionId::OtherOutOfScopeIncome => 12,
             };
             assert_eq!(idx, i, "QuestionId::ALL is out of order / missing {id:?}");
             assert_eq!(
@@ -982,8 +1015,8 @@ mod tests {
                 "exactly one FORM_QUESTIONS entry for {id:?}"
             );
         }
-        assert_eq!(QuestionId::ALL.len(), 12, "there are 12 declarations");
-        assert_eq!(FORM_QUESTIONS.len(), 12, "one entry per declaration");
+        assert_eq!(QuestionId::ALL.len(), 13, "there are 13 declarations");
+        assert_eq!(FORM_QUESTIONS.len(), 13, "one entry per declaration");
     }
 
     #[test]

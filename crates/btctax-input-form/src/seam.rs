@@ -105,6 +105,8 @@ pub enum FieldId {
     /// Form 6251 line 3 — is the mortgaged dwelling AMT-qualified? (i6251 p.8.)
     DeclAmtQualifiedDwelling,
     DeclHasIncomeExclusion,
+    /// §G-22/B11 — the scope attestation: income this tool never asked about.
+    DeclOtherOutOfScopeIncome,
     ExclPuertoRico,
     Excl2555L45,
     Excl2555L50,

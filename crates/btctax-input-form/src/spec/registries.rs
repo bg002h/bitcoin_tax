@@ -204,6 +204,13 @@ const DECL_FIELDS: &[Field] = &[
         ri.has_income_exclusion = None;
         Ok(())
     }),
+    // Index 12 — the §G-22/B11 scope attestation. Appended at the END for the reason stated above:
+    // `decl_tristate!` couples to the ARRAY INDEX, so inserting mid-array silently repoints every
+    // later entry.
+    decl_tristate!(12, FieldId::DeclOtherOutOfScopeIncome, |ri| {
+        ri.other_out_of_scope_income = None;
+        Ok(())
+    }),
     FOREIGN_COUNTRY_NAMES,
 ];
 
@@ -334,6 +341,7 @@ pub fn field_to_question(id: FieldId) -> Option<QuestionId> {
         FieldId::DeclAmtCarryoverSame => QuestionId::AmtCarryoverSameAsRegular,
         FieldId::DeclAmtDepreciationSame => QuestionId::AmtDepreciationSameAsRegular,
         FieldId::DeclHasIncomeExclusion => QuestionId::HasIncomeExclusion,
+        FieldId::DeclOtherOutOfScopeIncome => QuestionId::OtherOutOfScopeIncome,
         _ => return None,
     })
 }
@@ -356,6 +364,7 @@ pub fn question_to_field(id: QuestionId) -> FieldId {
         QuestionId::AmtCarryoverSameAsRegular => FieldId::DeclAmtCarryoverSame,
         QuestionId::AmtDepreciationSameAsRegular => FieldId::DeclAmtDepreciationSame,
         QuestionId::HasIncomeExclusion => FieldId::DeclHasIncomeExclusion,
+        QuestionId::OtherOutOfScopeIncome => FieldId::DeclOtherOutOfScopeIncome,
     }
 }
 

@@ -20,6 +20,7 @@ form_2555_line45 = "0"
 form_2555_line50 = "0"
 form_4563_line15 = "0"
 itemize_election = "auto"
+other_out_of_scope_income = false
 tax_year = 2024
 
 [capital_loss_carryforward_in]

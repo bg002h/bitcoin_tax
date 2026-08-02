@@ -248,6 +248,9 @@ pub fn kitchen_sink_household() -> (ReturnInputs, LedgerState) {
         // or `Some(true)` REFUSES the year, because a restricted gift's §170 deduction is smaller than
         // the full fair market value btctax computes. "No strings" is the ordinary case.
         donations_had_restrictions: Some(false),
+        // §G-22/B11 — the scope attestation. ANSWERED, never defaulted: `None` refuses, and a fixture
+        // that let it default would be re-asserting the silence the question exists to break.
+        other_out_of_scope_income: Some(false),
         header: HouseholdHeader {
             taxpayer: person("John", "Doe", "123-45-6789", "Engineer"),
             spouse: Some(person("Jane", "Doe", "987-65-4321", "Architect")),

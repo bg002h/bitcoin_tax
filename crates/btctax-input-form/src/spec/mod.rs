@@ -110,14 +110,14 @@ mod tests {
             );
         }
         assert_eq!(
-            decl_count, 11,
-            "11 declarations are Decl* fields (the 12th is the mortgage dedup)"
+            decl_count, 12,
+            "12 declarations are Decl* fields (the 13th is the mortgage dedup)"
         );
 
-        // 11 delegating Decl* fields + the foreign_country_names Text field.
+        // 12 delegating Decl* fields + the foreign_country_names Text field.
         assert_eq!(
             decls.fields.len(),
-            12,
+            13,
             "11 declarations + foreign_country_names"
         );
         assert!(decls

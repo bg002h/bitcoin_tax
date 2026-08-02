@@ -257,7 +257,7 @@ Blocked at the input surface: the $8,183 is **Schedule E**, and `ReturnInputs` h
 field. It is named as out of scope in `btctax limitations` — *"Schedule E (rental, royalty,
 partnership/S-corp K-1) and Schedule F (farm)"* — so this is a documented boundary, not a surprise.
 
-### B11 · Out-of-scope INCOME is documented but never ASKED — so silence looks like "none"
+### B11 · Out-of-scope INCOME is documented but never ASKED — ✅ **FIXED**
 
 This is the one worth acting on, and it is not a missing feature. Compare:
 

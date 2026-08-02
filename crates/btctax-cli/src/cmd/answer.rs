@@ -296,6 +296,12 @@ mod tests {
                 // §911/931/933 exclusion gate — always live, like DualStatusAlien: one yes/no every
                 // filer can answer, and TY2025's SALT worksheet and Schedule 1-A both need it.
                 QuestionId::HasIncomeExclusion,
+                // ★★★ §G-22/B11 — the scope attestation, always live for EVERY filer by construction.
+                // Every other declaration is scoped to the years or shapes that read it; this one is
+                // read by nothing, because it exists precisely where there is no field for the income
+                // it asks about. A liveness predicate could only guess whether the filer has some,
+                // which is the guess it exists to refuse to make.
+                QuestionId::OtherOutOfScopeIncome,
             ]
         );
         assert!(!has_spouse_dob(&single()), "no spouse ⇒ no spouse DOB");

@@ -105,6 +105,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         // `medical`: an unasked add-back understates MAGI and RAISES two deductions. Their `None` is
         // refused at the point of need (`SaltLimitation::line_5e`), not defaulted to zero.
         has_income_exclusion,
+        other_out_of_scope_income,
         excluded_puerto_rico_income: _,
         form_2555_line45: _,
         form_2555_line50: _,
@@ -157,6 +158,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
     );
     c.declaration(dual_status_alien, QuestionId::DualStatusAlien);
     c.declaration(has_income_exclusion, QuestionId::HasIncomeExclusion);
+    c.declaration(other_out_of_scope_income, QuestionId::OtherOutOfScopeIncome);
     c.declaration(
         amt_carryover_same_as_regular,
         QuestionId::AmtCarryoverSameAsRegular,

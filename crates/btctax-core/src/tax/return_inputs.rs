@@ -654,6 +654,30 @@ pub struct ReturnInputs {
     /// amounts are zero. `Some(true)` ⇒ the amounts below are the filer's answers.
     #[serde(default)]
     pub has_income_exclusion: Option<bool>,
+    /// ★★★ **§G-22 / B11 — the SCOPE ATTESTATION.** Did the filer receive any income this tool never
+    /// asked about? `None` = never asked ⇒ **refuses**. `Some(true)` ⇒ refuses (out of scope).
+    /// `Some(false)` ⇒ the filer has affirmed there is none, and the return may be filed.
+    ///
+    /// **Why this exists, and why it is a DECLARATION and not a doc line.** btctax asks about HSA
+    /// activity, dual-status alien status, foreign accounts and foreign trusts — and a "yes" to any of
+    /// them refuses. It never asked about rental, royalty, farm, or K-1 income, so a filer with a
+    /// rental could enter every other fact, get a clean packet with **no advisory and no refusal**, and
+    /// file a return omitting §61 income. A filing trial reproduced exactly that with Publication 559's
+    /// $8,183 of net rental income. `btctax limitations` names the boundary, but that is prose the
+    /// filer must think to read, not a gate the return must pass.
+    ///
+    /// ★★ This is the [answered-ness invariant](super::questions) at the **scope boundary** rather than
+    /// the money line, and the failure direction is an UNDERSTATEMENT. Before the question, the filer's
+    /// silence *asserted* "I had no rental income" on a return signed under §6065; after it, silence
+    /// merely *forgoes filing*. That is the doctrine's own sharp test — does the silence ASSERT or
+    /// FORGO? — and it is what every human preparer asks.
+    ///
+    /// ★ ONE union question, not one per schedule. The out-of-scope set moves every tax year; the
+    /// union is stable and the refusal message can enumerate. Scoped to **income only**: out-of-scope
+    /// deductions and credits fail conservatively and are already advised, and widening this to every
+    /// out-of-scope item is how it becomes the questionnaire nobody finishes.
+    #[serde(default)]
+    pub other_out_of_scope_income: Option<bool>,
     /// **Schedule 1-A line 2a / SALT worksheet line 3a** — "Enter any income from Puerto Rico that
     /// you excluded." (§933.) Meaningful iff [`Self::has_income_exclusion`] is `Some(true)`.
     #[serde(default)]
@@ -699,6 +723,8 @@ impl Default for ReturnInputs {
             // ★ §G-15: `0` = NOT STATED. Default() is a test convenience and must not fabricate a
             // tax year any more than it fabricates an answer.
             tax_year: 0,
+            // §G-22/B11 — `None` = never asked, and that REFUSES. A default may not answer it.
+            other_out_of_scope_income: None,
             // §911/931/933 add-backs: `None` = never asked. Default() is a TEST convenience, so
             // it must not fabricate an answer — see the field docs.
             has_income_exclusion: None,

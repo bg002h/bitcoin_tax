@@ -670,7 +670,7 @@ fn report_tax_year_derives_and_computes_from_ty2024_return_inputs() {
     let toml = _dir.path().join("inputs.toml");
     std::fs::write(
         &toml,
-        "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"90000\"\nbox2_fed_withheld = \"12000\"\nbox5_medicare_wages = \"90000\"\n",
+        "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"90000\"\nbox2_fed_withheld = \"12000\"\nbox5_medicare_wages = \"90000\"\n",
     )
     .unwrap();
     // The CSV disposal is in 2025, but v1 full-return tables are TY2024-only; import for 2024 to exercise
@@ -721,7 +721,7 @@ fn report_tax_year_refuses_business_income_without_schedule_c() {
 
     // Full-return inputs for 2024 with NO Schedule C.
     let toml = _dir.path().join("inputs.toml");
-    std::fs::write(&toml, "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n").unwrap();
+    std::fs::write(&toml, "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n").unwrap();
     cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml).unwrap();
 
     let err = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap_err();
@@ -1945,7 +1945,7 @@ fn answered_toml(dir: &Path) -> PathBuf {
     std::fs::write(
         &toml,
         "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\n\
-         dual_status_alien = false\nhas_income_exclusion = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n\
+         dual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n\
          [sch1]\nhsa_activity = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\n\
          box1_wages = \"50000\"\nbox2_fed_withheld = \"6000\"\nbox5_medicare_wages = \"50000\"\n",
     )

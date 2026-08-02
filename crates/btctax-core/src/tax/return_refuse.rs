@@ -150,6 +150,12 @@ pub enum RefuseReason {
     /// real and recoverable, in a codebase whose rule is that a conservative omission is permitted
     /// **only if the filer is told**.
     SingleEmployerExcessSs,
+    /// **§G-22 / B11** — the scope attestation is unanswered. Silence about out-of-scope INCOME is
+    /// indistinguishable from "there is none", and the failure direction is omitted §61 income.
+    OtherIncomeUnanswered,
+    /// **§G-22 / B11** — the filer affirmed income this version cannot model (rental, royalty, farm,
+    /// K-1, and the rest). Out of scope, and a return that silently omitted it would understate tax.
+    OtherIncomeOutOfScope,
     /// §6413(c) turns on employer identity and at least one W-2 has no EIN, on a person whose
     /// aggregate box 4 exceeds the §3101(a) cap. Refuses rather than guessing — the credit is a real
     /// figure on a signed return and the wrong guess UNDERSTATES tax.
@@ -250,6 +256,9 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
     let ReturnInputs {
         // ★ §G-15 — the scope questions are asked in, not a money field: nothing here to screen.
         tax_year: _,
+        // §G-22/B11 — a declaration; the registry screens unanswered, and a dedicated gate screens
+        // `Some(true)`. Nothing to negative-screen here: it is a yes/no, not a money field.
+        other_out_of_scope_income: _,
         filing_status: _,
         // PII only — no money today. This `_` is the ONE header waiver; its exhaustiveness (a future field
         // in HouseholdHeader/Person/Dependent) is now compiler-forced by the P9 §3.3 CLASSIFIER, which
@@ -653,6 +662,17 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
 
     // ★ P9 §2.5 (r5 I-3) — a truthful dual-status "yes" is UNSUPPORTED. VALUE-refusal (`Some(true)`);
     // WITHOUT it a "yes" computes, taking the standard deduction §63(c)(6)(B) denies a nonresident alien.
+    // ★★★ §G-22 / B11 — the filer AFFIRMED income this version cannot model.
+    if ri.other_out_of_scope_income == Some(true) {
+        return refuse(
+            RefuseReason::OtherIncomeOutOfScope,
+            "you answered YES to having income this tool never asked about — rent or royalties, a \
+             farm, a partnership/S-corp/estate/trust K-1, unreported tips, gambling winnings, \
+             alimony, or another business. v1 models none of those (see `btctax limitations`), and a \
+             return that silently left it off would understate your tax. File with a preparer, or \
+             remove that income and file the rest yourself",
+        );
+    }
     if ri.dual_status_alien == Some(true) {
         return refuse(
             RefuseReason::DualStatusAlienUnsupported,
@@ -999,7 +1019,7 @@ mod tests {
         };
         // ★ ANSWERED, not defaulted. Every fixture must state these — that is the whole point of D-8/P9, and
         // if `Default` supplied them these tests would be re-asserting the very guess we just removed. All
-        // SEVEN always-live declarations are answered here so a computing fixture is not tripped by the
+        // EIGHT always-live declarations are answered here so a computing fixture is not tripped by the
         // registry loop (§3.1 churn note); a test that wants one UNANSWERED re-blanks it explicitly.
         ri.header.can_be_claimed_as_dependent_taxpayer = Some(false);
         ri.foreign_accounts = Some(false);
@@ -1007,6 +1027,9 @@ mod tests {
         ri.sch1.hsa_activity = Some(false);
         ri.dual_status_alien = Some(false);
         ri.has_income_exclusion = Some(false);
+        // §G-22/B11 — the scope attestation. ANSWERED here, never defaulted: `None` refuses, which is
+        // the whole point, and a `Default` that supplied it would restore the silence it exists to break.
+        ri.other_out_of_scope_income = Some(false);
         // §G-9: "did not die during the tax year". No longer REQUIRED (the death gates are class-(B)
         // skippables now — see `the_death_gates_do_not_block_a_return`), but kept so that every fixture
         // below claims the age-65 box the way a real filer would, and no existing figure moves.
@@ -1647,6 +1670,7 @@ mod tests {
             r.sch1.hsa_activity = Some(false);
             r.dual_status_alien = Some(false);
             r.has_income_exclusion = Some(false);
+            r.other_out_of_scope_income = Some(false); // §G-22/B11
             r.header.taxpayer_died_during_year = Some(false); // §G-9
             r
         };
