@@ -1934,6 +1934,44 @@ mod tests {
     /// The committed golden matches a fresh generation, byte-for-byte — reds when `docs/examples/examples.md`
     /// is STALE (a code/output change that wasn't regenerated). This is the in-tree half of the CI
     /// `git diff --exit-code docs/examples` gate (Task 2.3); it fires on every `make check`.
+    /// ★★★ A WORKED EXAMPLE MUST NOT CONTAIN THE OUTPUT OF A COMMAND THAT ERRORED.
+    ///
+    /// `[exit 2]` is `run()` returning `Err` (`main.rs:39-46`) — a usage error, a malformed input, a
+    /// command that did not do what the prose says it does. `[exit 1]` is different and legitimate: a
+    /// deliberate non-zero outcome, like `verify` reporting FR9 blockers, which three journeys
+    /// demonstrate on purpose.
+    ///
+    /// ★★ **Why this exists, and why the sibling test could never catch it.**
+    /// `examples_golden_matches_committed` asserts `regenerated == committed`. Regenerating to match a
+    /// BREAKAGE is therefore always green. On 2026-08-02 a literal `\n` inside a raw string malformed
+    /// J10's TOML; `income import` exited 2, the journey stopped computing, the golden was regenerated
+    /// to match, and **51 lines vanished — including btctax's only worked AMT example — while the
+    /// surrounding prose still described it.** Both instruments reading that file stayed green.
+    ///
+    /// A golden refreshed by the same command that validates it cannot tell "this is what we produce"
+    /// from "this is what we produce now that it is broken". This test supplies the missing half: a
+    /// property the OUTPUT must have, independent of what regeneration happens to produce.
+    #[test]
+    fn no_worked_example_shows_a_command_that_errored() {
+        let path = workspace_root().join("docs/examples/examples.md");
+        let doc = std::fs::read_to_string(&path).expect("committed examples.md");
+        let offenders: Vec<(usize, &str)> = doc
+            .lines()
+            .enumerate()
+            .filter(|(_, l)| l.trim() == "[exit 2]")
+            .map(|(i, l)| (i + 1, l))
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "docs/examples/examples.md shows {} command(s) that ERRORED (exit 2 = run() returned Err) \
+             at line(s) {:?}. A worked example whose command failed is not an example — it is a \
+             regression that regeneration will happily bless, because the golden only checks \
+             regenerated == committed. Fix the journey, not this test.",
+            offenders.len(),
+            offenders.iter().map(|(n, _)| *n).collect::<Vec<_>>()
+        );
+    }
+
     #[test]
     fn examples_golden_matches_committed() {
         let _guard = BUILD_ENV_LOCK.lock().unwrap();
