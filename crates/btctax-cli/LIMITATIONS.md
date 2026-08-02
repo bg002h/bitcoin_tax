@@ -100,9 +100,11 @@ wage-and-property limits that take over (that is Form 8995-A, which it does not 
 - **More than 14 interest payers / 15 dividend payers on Schedule B REFUSE.** That grid is full, and the
   IRS's remedy is a continuation statement this version cannot generate. It will not silently print a
   subset of your payers.
-- **More than 4 dependents on the 1040 REFUSE.** The grid holds four, and the IRS's remedy is to check
-  the "more than four dependents" box and attach a statement — which this version cannot generate. It
-  will not silently print a subset of your children.
+- **More than 4 dependents FILE**, using the form's own remedy. The grid holds four; btctax prints the
+  first four in the order you entered them, checks the "more than four dependents" box, and writes
+  `dependents_statement.txt` listing the rest with the same four columns Form 1040 uses. **Attach it** —
+  the packet manifest says so. (The credit is a separate matter: v1 computes no CTC/ODC, and column 4 is
+  blank on the page and in the statement alike.)
 - **The spouse's Identity Protection PIN is not captured** (yours is, and it prints). If your spouse has one,
   write it on the form.
 - **A HoH/QSS qualifying person who is not one of your listed dependents** is not captured; that cell is left

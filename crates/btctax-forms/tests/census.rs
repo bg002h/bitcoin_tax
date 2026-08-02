@@ -114,7 +114,9 @@ fn all_arms_return() -> PrintedReturn {
 #[test]
 fn census_is_exactly_15_forms_including_8275_when_a_promote_is_present() {
     let pr = all_arms_return();
-    let forms = fill_full_return(&pr, 2024).expect("the all-arms packet must fill");
+    let forms = fill_full_return(&pr, 2024)
+        .expect("the all-arms packet must fill")
+        .forms;
     let emitted: BTreeSet<&str> = forms.iter().map(|f| f.name.as_str()).collect();
     let expected: BTreeSet<&str> = CENSUS_KEYS.iter().copied().collect();
     assert_eq!(
@@ -184,8 +186,9 @@ fn full_return_packet_emits_8275_iff_a_promoted_leg_is_filed() {
         pr_unpromoted.forms.f8275.is_none(),
         "a plain (non-promoted) disposal leg discloses nothing"
     );
-    let packet_unpromoted =
-        fill_full_return(&pr_unpromoted, 2024).expect("the packet without a promote must fill");
+    let packet_unpromoted = fill_full_return(&pr_unpromoted, 2024)
+        .expect("the packet without a promote must fill")
+        .forms;
     assert!(
         !packet_unpromoted.iter().any(|f| f.name == "f8275"),
         "no f8275 in the packet when no leg is promoted"
@@ -235,8 +238,9 @@ fn full_return_packet_emits_8275_iff_a_promoted_leg_is_filed() {
         "cash P2P purchase, no records; window bounded on-chain"
     );
 
-    let packet_promoted =
-        fill_full_return(&pr_promoted, 2024).expect("the promoted packet must fill");
+    let packet_promoted = fill_full_return(&pr_promoted, 2024)
+        .expect("the promoted packet must fill")
+        .forms;
     let f8275_form = packet_promoted
         .iter()
         .find(|f| f.name == "f8275")

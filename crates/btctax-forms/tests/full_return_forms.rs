@@ -1990,7 +1990,7 @@ fn the_1040_prints_names_ssns_address_and_dependents() {
 /// (same posture as Schedule B's >14-payer refusal). Printing four of five would silently file a return
 /// that misstates the household.
 #[test]
-fn more_dependents_than_the_form_holds_fails_closed() {
+fn more_than_four_dependents_checks_the_box_and_prints_the_first_four() {
     use btctax_core::tax::packet::ReturnHeader;
     use btctax_core::tax::return_inputs::{Dependent, Person, ReturnInputs};
 
@@ -2015,18 +2015,153 @@ fn more_dependents_than_the_form_holds_fails_closed() {
     btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
     let h = ReturnHeader::build(&ri, 2024).unwrap();
 
-    let err = btctax_forms::fill_form_1040_full(&f1040(), &h, FilingStatus::Single, 2024)
-        .expect_err("five dependents must not silently become four");
+    let pdf = btctax_forms::fill_form_1040_full(&f1040(), &h, FilingStatus::Single, 2024)
+        .expect("five dependents FILE — the form supplies its own remedy");
+
+    // ★★★ THE BOX IS CHECKED and exactly FOUR rows print. i1040gi: "If you have more than four
+    //     dependents, check the box under Dependents on page 1 of Form 1040 or 1040-SR and include a
+    //     statement showing the information required in columns (1) through (4)." btctax used to
+    //     REFUSE here — the wrong remedy for a limit the IRS already answers.
+    let doc = load(&pdf).unwrap();
+    let idx = index(&collect_fields(&doc).unwrap());
+    assert_eq!(
+        checkbox_on(
+            &doc,
+            idx["topmostSubform[0].Page1[0].Dependents_ReadOrder[0].c1_13[0]"].id
+        )
+        .as_deref(),
+        Some("1"),
+        "the 'more than four dependents' box must be CHECKED"
+    );
+
+    // Rows 1-4 carry the FIRST FOUR in capture order; the fifth is on the statement, not the page.
+    // ★ The row FQNs come from the MAP, not from a guess — the same authority the emitter writes
+    //   through, so this cannot drift from what was actually filled.
+    let map = btctax_forms::Form1040Map::ty2024();
+    let rows = &map.header.as_ref().unwrap().dependent_rows;
+    let printed: Vec<String> = rows.iter().filter_map(|r| tv(&pdf, &r.name)).collect();
+    assert_eq!(
+        printed.len(),
+        4,
+        "exactly four dependent rows print; got {printed:?}"
+    );
     assert!(
-        matches!(
-            err,
-            FormsError::Overflow {
-                rows: 5,
-                capacity: 4,
-                ..
-            }
-        ),
-        "expected a capacity refusal, got {err:?}"
+        printed.iter().any(|n| n.contains("Kid 0")) && printed.iter().any(|n| n.contains("Kid 3")),
+        "the first four in CAPTURE order: {printed:?}"
+    );
+    assert!(
+        !printed.iter().any(|n| n.contains("Kid 4")),
+        "the fifth belongs on the continuation statement, not the page: {printed:?}"
+    );
+
+    // …and the split core computed is the same one the page shows.
+    let (on_form, overflow) = h.dependents_split();
+    assert_eq!((on_form.len(), overflow.len()), (4, 1));
+    assert!(h.more_than_four_dependents());
+}
+
+/// ★★★ THE BOX AND THE STATEMENT ARE ONE DECISION — for every household size across the boundary.
+///
+/// A checked box with no attached statement is an incomplete return; an attached statement with an
+/// unchecked box is a return that contradicts its own attachment. Both read
+/// `ReturnHeader::more_than_four_dependents()`, so neither is expressible — this pins that, and would
+/// red the moment the two grew separate predicates.
+#[test]
+fn the_checkbox_and_the_statement_are_the_same_decision() {
+    use btctax_core::tax::packet::ReturnHeader;
+    use btctax_core::tax::return_inputs::{Dependent, Person, ReturnInputs};
+
+    let map = btctax_forms::Form1040Map::ty2024();
+    for n in 0..=12usize {
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        ri.header.taxpayer = Person {
+            first_name: "John".into(),
+            last_name: "Doe".into(),
+            ssn: "123456789".into(),
+            ..Default::default()
+        };
+        ri.header.dependents = (0..n)
+            .map(|i| Dependent {
+                name: format!("Kid {i}"),
+                ssn: format!("1112233{:02}", i),
+                relationship: "Child".into(),
+                ..Default::default()
+            })
+            .collect();
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        let h = ReturnHeader::build(&ri, 2024).unwrap();
+
+        let pdf = fill_form_1040_full_with_map(&f1040(), &h, FilingStatus::Single, &map)
+            .unwrap_or_else(|e| panic!("n={n}: must fill — {e:?}"));
+        let doc = load(&pdf).unwrap();
+        let idx = index(&collect_fields(&doc).unwrap());
+        let boxed = checkbox_on(
+            &doc,
+            idx["topmostSubform[0].Page1[0].Dependents_ReadOrder[0].c1_13[0]"].id,
+        )
+        .as_deref()
+            == Some("1");
+
+        let stmt = btctax_core::tax::dependents_statement::dependents_statement(&h, 2024).is_some();
+        assert_eq!(
+            boxed, stmt,
+            "n={n}: box checked = {boxed}, statement = {stmt}"
+        );
+        assert_eq!(boxed, n > 4, "n={n}: the boundary is FOUR");
+
+        // …and the grid never prints more than it holds, whatever n is.
+        let rows = &map.header.as_ref().unwrap().dependent_rows;
+        let printed = rows.iter().filter_map(|r| tv(&pdf, &r.name)).count();
+        assert_eq!(printed, n.min(4), "n={n}: printed rows");
+    }
+}
+
+/// ★★★ THE MAP AND CORE MUST AGREE ABOUT CAPACITY, and disagreement REFUSES before a cell is written.
+///
+/// Core owns the split; the map independently declares the row count. If they diverge, the page-1 grid
+/// and the continuation statement disagree about where the split falls — a row goes to the statement
+/// while an empty map cell sits on the page, or a fifth row prints while the statement says "1-4".
+/// Neither is visible in the emitted PDF, which is why this is a fill-time guard and not a test.
+#[test]
+fn a_map_that_declares_a_different_dependent_capacity_fails_closed() {
+    use btctax_core::tax::packet::ReturnHeader;
+    use btctax_core::tax::return_inputs::{Dependent, Person, ReturnInputs};
+
+    let mut ri = ReturnInputs {
+        filing_status: FilingStatus::Single,
+        ..Default::default()
+    };
+    ri.header.taxpayer = Person {
+        first_name: "John".into(),
+        last_name: "Doe".into(),
+        ssn: "123456789".into(),
+        ..Default::default()
+    };
+    ri.header.dependents = (0..2)
+        .map(|i| Dependent {
+            name: format!("Kid {i}"),
+            ssn: format!("11122333{i}"),
+            relationship: "Child".into(),
+            ..Default::default()
+        })
+        .collect();
+    btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+    let h = ReturnHeader::build(&ri, 2024).unwrap();
+
+    let mut map = btctax_forms::Form1040Map::ty2024();
+    // A map that holds only three rows — the shape a future year's unwritten map could take.
+    map.header.as_mut().unwrap().dependent_rows.pop();
+    let err = fill_form_1040_full_with_map(&f1040(), &h, FilingStatus::Single, &map)
+        .expect_err("a capacity disagreement must fail closed");
+    let FormsError::Geometry(m) = &err else {
+        panic!("expected Geometry, got {err:?}")
+    };
+    assert!(
+        m.contains("dependent row(s)") && m.contains("DEPENDENTS_GRID_ROWS"),
+        "the refusal must name both sides of the disagreement: {m}"
     );
 }
 
@@ -2613,7 +2748,7 @@ fn the_packet_emits_every_required_form_in_attachment_sequence_order() {
     )
     .unwrap();
 
-    let packet = btctax_forms::fill_full_return(&pr, 2024).unwrap();
+    let packet = btctax_forms::fill_full_return(&pr, 2024).unwrap().forms;
     let names: Vec<&str> = packet.iter().map(|f| f.name.as_str()).collect();
 
     assert_eq!(
@@ -2661,7 +2796,7 @@ fn a_w2_only_household_files_a_1040_and_nothing_else() {
     )
     .unwrap();
 
-    let packet = btctax_forms::fill_full_return(&pr, 2024).unwrap();
+    let packet = btctax_forms::fill_full_return(&pr, 2024).unwrap().forms;
     let names: Vec<&str> = packet.iter().map(|f| f.name.as_str()).collect();
     assert_eq!(names, vec!["f1040"]);
 }

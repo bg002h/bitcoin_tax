@@ -877,7 +877,7 @@ fn export_full_return(
     let experimental_notice_active = btctax_core::experimental::uses_approach_b(events);
     let mut manifest = String::from("# btctax full-return packet — staple in this order\n");
     let mut paths: Vec<PathBuf> = Vec::new();
-    for form in &packet {
+    for form in &packet.forms {
         let bytes = if watermarked {
             btctax_forms::stamp_draft_watermark(&form.bytes)?
         } else {
@@ -901,6 +901,16 @@ fn export_full_return(
             "{seq:>4}  {}",
             path.file_name().unwrap_or_default().to_string_lossy()
         );
+        paths.push(path);
+    }
+    // ★★★ The statements the return OBLIGES. A checked "more than four dependents" box with no
+    //     attachment is an incomplete return, so these are written from the same packet that checked
+    //     it — and they are listed in the manifest, because the manifest is what tells a filer what to
+    //     staple. A page the filer never learns to attach may as well not have been generated.
+    for st in &packet.statements {
+        let path = out_dir.join(format!("{}.txt", st.name));
+        write_bytes_owner_only(&path, st.body.as_bytes())?;
+        let _ = writeln!(manifest, "  ATT  {}.txt  (attach to Form 1040)", st.name);
         paths.push(path);
     }
     let manifest_path = out_dir.join("manifest.txt");

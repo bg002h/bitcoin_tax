@@ -418,7 +418,7 @@ pub fn rows_possibly_broker_reported(rows: &[Form8949Row]) -> usize {
 
 // ── Internals exposed for the KATs (fault injection needs a corruptible map + the verifier). ──────
 #[doc(hidden)]
-pub use packet::{fill_full_return, NamedForm};
+pub use packet::{fill_full_return, FiledPacket, NamedForm, NamedStatement};
 
 pub mod testonly {
     // ★ The raw AcroForm write path, for `xtask label-proof`: it fills EVERY box on a blank form

@@ -148,6 +148,8 @@ pub fn totals_for(rows: &[Form8949Row]) -> ScheduleDTotals {
 /// btctax-on-paper` — internal matches the oracle but paper does not ⇒ a fill bug; both btctax values
 /// differ ⇒ a compute bug). One assembly, so the reproduction reads the SAME return it filled.
 pub struct FullReturn {
+    /// Non-PDF pages the return obliges (§G-28/B2: the >4-dependents continuation statement).
+    pub statements: Vec<btctax_forms::NamedStatement>,
     /// The exact-cents compute (1040 line figures as [`AbsoluteReturn`]) — the "btctax-internal" side.
     pub ar: AbsoluteReturn,
     /// The §3.1 printed chain (the whole-dollar lines btctax INTENDS to print) — the internal value a
@@ -168,9 +170,14 @@ pub fn full_return(h: &GoldenHousehold) -> FullReturn {
     // No golden household makes a charitable donation, so there are no §170(e) details to carry.
     let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, &table, 2024, &[])
         .expect("the golden households carry well-formed SSNs");
-    let forms = fill_full_return(&pr, 2024)
+    let packet = fill_full_return(&pr, 2024)
         .unwrap_or_else(|e| panic!("{}: the packet must fill — {e}", h.name));
-    FullReturn { ar, pr, forms }
+    FullReturn {
+        ar,
+        pr,
+        forms: packet.forms,
+        statements: packet.statements,
+    }
 }
 
 /// Fill the whole packet for one golden household (the filled forms only; see [`full_return`] for the

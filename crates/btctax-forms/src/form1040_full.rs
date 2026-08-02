@@ -30,6 +30,7 @@ use crate::error::FormsError;
 use crate::map::{CheckChoice, Form1040HeaderCells, Form1040Map, MoneyCell};
 use crate::pdf;
 use crate::verify::{verify_flat, FlatPlacement};
+use btctax_core::tax::dependents_statement::DEPENDENTS_GRID_ROWS;
 use btctax_core::tax::packet::ReturnHeader;
 use btctax_core::tax::printed::Form1040Lines;
 use btctax_core::tax::types::FilingStatus;
@@ -488,18 +489,35 @@ fn push_header_block(
     check(w, p, &cells.spouse_aged, ab.spouse_aged);
     check(w, p, &cells.spouse_blind, ab.spouse_blind);
 
-    // Dependents. More than the form physically holds REFUSES: the IRS's own remedy is to check
-    // `more_than_four_dependents` and attach a continuation statement, which is a synthetic page
-    // generator v1 does not have (the same posture as Schedule B's >14-payer refusal, SPEC §7.4).
-    // Printing only the first four would file a return that misstates the household — silently.
-    if header.dependents.len() > cells.dependent_rows.len() {
-        return Err(FormsError::Overflow {
-            part: "the 1040 dependents table",
-            rows: header.dependents.len(),
-            capacity: cells.dependent_rows.len(),
-        });
+    // ── Dependents (§G-28/B2). ───────────────────────────────────────────────────────────────────
+    //
+    // More than four no longer refuses. The form supplies its own remedy and i1040gi states it:
+    // *"If you have more than four dependents, check the box under Dependents on page 1 of Form 1040
+    // or 1040-SR and include a statement showing the information required in columns (1) through
+    // (4)."* btctax used to refuse a fifth dependent — the wrong remedy for a limit the IRS already
+    // answers.
+    //
+    // ★★★ THE MAP AND CORE MUST AGREE ABOUT CAPACITY, and this refuses when they do not. Core owns the
+    // split (`ReturnHeader::dependents_split`, driven by `DEPENDENTS_GRID_ROWS`) because core decides
+    // whether a statement is required; the MAP independently declares the same number as
+    // `dependent_rows.len()`. If a future year's map declares a different row count, the box/statement
+    // decision and the printed grid would diverge SILENTLY — a row could go to the statement while an
+    // empty map cell sat on the page, or a fifth row could print while the statement said "1-4".
+    // Neither is visible in the emitted PDF. Checked here, before a single cell is written.
+    if cells.dependent_rows.len() != DEPENDENTS_GRID_ROWS {
+        return Err(FormsError::Geometry(format!(
+            "the 1040 map declares {} dependent row(s) but core splits the household at {} \
+             (`DEPENDENTS_GRID_ROWS`). The page-1 grid and the continuation statement would disagree \
+             about where the split falls, and nothing on the emitted page would show it. Reconcile the \
+             map with core before filing.",
+            cells.dependent_rows.len(),
+            DEPENDENTS_GRID_ROWS
+        )));
     }
-    for (d, row) in header.dependents.iter().zip(&cells.dependent_rows) {
+    let (on_form, overflow) = header.dependents_split();
+    // The box and the statement are ONE decision — see `more_than_four_dependents`.
+    check(w, p, &cells.more_than_four_dependents, !overflow.is_empty());
+    for (d, row) in on_form.iter().zip(&cells.dependent_rows) {
         text(w, p, &row.name, &d.name);
         text(w, p, &row.ssn, &render_ssn(&d.ssn, max_len_of(&row.ssn))?);
         text(w, p, &row.relationship, &d.relationship);

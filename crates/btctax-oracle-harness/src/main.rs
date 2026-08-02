@@ -759,7 +759,10 @@ fn assemble(inputs: &GoldenInputs) -> Option<Ready> {
         return None;
     }
     let pr = assemble_printed_return(&ri, &state, &BTreeMap::new(), &ar, &table, YEAR, &[]).ok()?; // identity would not print (D-2)
-    let forms = fill_full_return(&pr, YEAR).ok()?; // a member filler refused (overflow etc.)
+                                                                                                   // ★ The harness reads PDFs back; statements carry no AcroForm and no compared line, so it takes
+                                                                                                   //   the forms half. That is a deliberate narrowing, not an oversight: a statement is prose the
+                                                                                                   //   filer attaches, and `read_back_lines` has nothing to read from it.
+    let forms = fill_full_return(&pr, YEAR).ok()?.forms; // a member filler refused (overflow etc.)
     Some((ar, pr, forms))
 }
 

@@ -6,6 +6,7 @@ pub mod amt;
 pub mod charitable;
 pub mod classifier;
 pub mod compute;
+pub mod dependents_statement;
 /// Form 8275 (Disclosure Statement) content — Part I (auto, promoted 8949 disposal legs) + Part II
 /// (the filer's stored narrative) + the BG-D10 penalty-risk copy. See module doc.
 pub mod form6251;

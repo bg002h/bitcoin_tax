@@ -33,7 +33,29 @@ pub struct NamedForm {
 /// All-or-nothing: any member filler's refusal (a Schedule B that overflows its payer rows, a value too
 /// long for its comb cell, a map missing its identity block) aborts the whole packet with zero bytes
 /// written, and the error names WHICH form refused.
-pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<Vec<NamedForm>, FormsError> {
+/// A non-PDF page the return must carry — an IRS-mandated continuation statement.
+///
+/// ★★★ It rides INSIDE `fill_full_return`, produced by the same call that checks the box it belongs to.
+/// A parallel `write_*_txt` helper was the alternative and it carries a known cost: `write_form_8275_txt`
+/// must be reached from four call sites plus the TUI (`render.rs:937-952` documents it). A missing
+/// Form 8275 copy is a redundancy; **a missing dependents statement is a filed return with a checked
+/// box and no attachment.** The box and the page cannot be produced by different code paths.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NamedStatement {
+    /// The file stem — `"dependents_statement"`.
+    pub name: String,
+    /// The rendered page.
+    pub body: String,
+}
+
+/// The complete filed packet: PDFs plus any statements they oblige.
+#[derive(Debug, Clone, Default)]
+pub struct FiledPacket {
+    pub forms: Vec<NamedForm>,
+    pub statements: Vec<NamedStatement>,
+}
+
+pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<FiledPacket, FormsError> {
     // ★ NO `..` — adding a member to `PrintedForms` without filling it here is a compile error.
     let PrintedReturn {
         header,
@@ -168,5 +190,19 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<Vec<NamedForm>,
         }
     }
 
-    Ok(out)
+    // ★★★ The continuation statement, produced by the SAME call that checked the box on page 1.
+    //     `more_than_four_dependents()` is the one predicate both read, so "box checked, no statement"
+    //     and "statement, no box" are not expressible.
+    let statements = btctax_core::tax::dependents_statement::dependents_statement(header, year)
+        .map(|st| NamedStatement {
+            name: "dependents_statement".to_string(),
+            body: st.render(),
+        })
+        .into_iter()
+        .collect();
+
+    Ok(FiledPacket {
+        forms: out,
+        statements,
+    })
 }
