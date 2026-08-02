@@ -148,6 +148,68 @@ fn real_ledger_fills_clean_official_pdfs() {
     );
 }
 
+/// ★★★ A CONTINUATION STATEMENT RIDING WITH DRAFT FORMS MUST SAY SO.
+///
+/// Every PDF in a pseudo-reconciled packet is stamped `DRAFT — ESTIMATE, NOT FOR FILING`. A `.txt`
+/// cannot carry a diagonal watermark, so without an explicit banner the dependents statement would
+/// leave the machine looking like a clean page — and it is the one artifact a filer DETACHES, so it is
+/// the most likely of all of them to be separated from the forms that carry the warning.
+///
+/// Both legs, because a banner that always fires is as wrong as one that never does: a clean ledger's
+/// statement must be free of it, or the filer learns to ignore the words.
+#[test]
+fn a_dependents_statement_is_marked_draft_only_on_a_pseudo_ledger() {
+    use btctax_cli::{return_inputs, Session};
+    use btctax_core::tax::return_inputs::{Dependent, ReturnInputs};
+    use btctax_core::tax::types::FilingStatus;
+
+    let nine = |ri: &mut ReturnInputs| {
+        ri.header.dependents = (0..9)
+            .map(|i| Dependent {
+                name: format!("Kid {i}"),
+                ssn: format!("1112233{:02}", i),
+                relationship: "Child".into(),
+                ..Default::default()
+            })
+            .collect();
+    };
+
+    // ── Clean ledger: a statement, and NO draft banner. ──
+    let (_d1, clean) = make_vault(&real_events());
+    {
+        let mut s = Session::open(&clean, &pp()).unwrap();
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
+            ..Default::default()
+        };
+        ri.header.taxpayer = btctax_core::tax::return_inputs::Person {
+            first_name: "Pat".into(),
+            last_name: "Filer".into(),
+            ssn: "123456789".into(),
+            ..Default::default()
+        };
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        nine(&mut ri);
+        return_inputs::set(s.conn(), 2024, &ri).unwrap();
+        s.save().unwrap();
+    }
+    let out = tempfile::tempdir().unwrap();
+    let rep = cmd::admin::export_irs_pdf(&clean, &pp(), out.path(), 2024, &[], None).unwrap();
+    assert!(!rep.watermarked, "a real ledger is never watermarked");
+    let body = std::fs::read_to_string(out.path().join("dependents_statement.txt"))
+        .expect("nine dependents ⇒ a statement");
+    assert!(
+        !body.contains("NOT FOR FILING"),
+        "a clean statement must carry NO draft banner:\n{body}"
+    );
+    assert!(body.contains("Kid 4"), "the overflow rows are there");
+
+    // ★ The DRAFT half is pinned directly on the rule — `cmd::admin::statement_body`'s own tests.
+    //   Asserting it here would need a pseudo-reconciled TY2024 full return, and the pseudo fixtures
+    //   are TY2025, which has no full-return path: the assertion would never execute and the test
+    //   would silently prove nothing.
+}
 #[test]
 fn pseudo_fill_requires_attestation() {
     let (_dir, vault) = make_vault(&pseudo_events());

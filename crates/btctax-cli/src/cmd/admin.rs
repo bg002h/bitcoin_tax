@@ -353,6 +353,54 @@ fn sd_part_active(p: &ScheduleDPart) -> bool {
     !p.proceeds.is_zero() || !p.cost_basis.is_zero() || !p.gain.is_zero()
 }
 
+/// A statement's body as it is written to disk — banner-prefixed exactly when the packet is DRAFT.
+///
+/// ★★★ Extracted so the guarantee is TESTABLE. Every PDF in a pseudo-reconciled packet is stamped
+/// `DRAFT — ESTIMATE, NOT FOR FILING`; a `.txt` cannot carry a diagonal watermark, so without this it
+/// would leave the machine looking like a clean page — and a continuation statement is the one artifact
+/// a filer DETACHES, so it is the most likely of all of them to be separated from the forms carrying
+/// the warning.
+///
+/// ★★ Inline, this could only be exercised through a full pseudo-reconciled export, and the only year
+/// with a full-return path (TY2024) is not the year the pseudo fixtures use — so the test would have
+/// been a conditional that asserts nothing. A rule with no reachable red is not a rule.
+pub(crate) fn statement_body(body: &str, watermarked: bool) -> String {
+    if !watermarked {
+        return body.to_string();
+    }
+    format!(
+        "*** DRAFT — ESTIMATE, NOT FOR FILING ***\n\
+         *** This statement was produced from a PSEUDO-RECONCILED ledger: at least one figure on the \
+         return it belongs to is a synthetic default, not your data. ***\n\n{body}"
+    )
+}
+
+#[cfg(test)]
+mod statement_body_tests {
+    use super::statement_body;
+
+    /// Both legs. A banner that always fires is as wrong as one that never does — the filer learns to
+    /// ignore the words.
+    #[test]
+    fn a_statement_is_marked_draft_exactly_when_the_packet_is() {
+        let page = "Form 1040 (2024) — CONTINUATION STATEMENT: DEPENDENTS\nKid 4 ...";
+        let clean = statement_body(page, false);
+        assert_eq!(clean, page, "a real ledger's statement is untouched");
+        assert!(!clean.contains("NOT FOR FILING"));
+
+        let draft = statement_body(page, true);
+        assert!(
+            draft.starts_with("*** DRAFT — ESTIMATE, NOT FOR FILING ***"),
+            "the banner must be the FIRST thing on a detached page: {draft}"
+        );
+        assert!(
+            draft.contains("PSEUDO-RECONCILED") && draft.contains("synthetic default"),
+            "it must say WHY, not just shout: {draft}"
+        );
+        assert!(draft.contains(page), "the statement itself survives intact");
+    }
+}
+
 /// `export-irs-pdf`: fill the OFFICIAL IRS PDFs for `tax_year` and write them (owner-only) to
 /// `out_dir`. THIN OPENER (★ arch-C-1, Defensive Filing Wizard Task 3): opens its OWN `Session` and
 /// projects ONCE, then delegates everything else to [`export_irs_pdf_from_session`] — the `&Session`
@@ -909,7 +957,12 @@ fn export_full_return(
     //     staple. A page the filer never learns to attach may as well not have been generated.
     for st in &packet.statements {
         let path = out_dir.join(format!("{}.txt", st.name));
-        write_bytes_owner_only(&path, st.body.as_bytes())?;
+        // ★★★ A STATEMENT RIDING WITH DRAFT FORMS MUST SAY SO. Every PDF in a pseudo-reconciled
+        //     packet is stamped `DRAFT — ESTIMATE, NOT FOR FILING`; a `.txt` cannot carry a diagonal
+        //     watermark, and without this it would leave the machine looking like a clean page. It is
+        //     a page the filer DETACHES and attaches to a return — the one artifact most likely to be
+        //     separated from the forms that carry the warning.
+        write_bytes_owner_only(&path, statement_body(&st.body, watermarked).as_bytes())?;
         let _ = writeln!(manifest, "  ATT  {}.txt  (attach to Form 1040)", st.name);
         paths.push(path);
     }
