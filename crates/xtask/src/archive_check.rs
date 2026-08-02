@@ -189,6 +189,12 @@ pub const NOT_AN_ARCHIVE: &[(&str, &str)] = &[
 /// Directories never worth walking.
 const SKIP: &[&str] = &[
     ".git",
+    // ★★★ A git WORKTREE is a second checkout of the same commit, so every file in it is already
+    //     accounted for at its canonical path. Walking it reports the ENTIRE archive as strays — 130+
+    //     of them on the first isolated review — which is worse than useless: an alarm that fires on
+    //     nothing teaches people to ignore it, and this one exists precisely because a real overlap
+    //     went unnoticed. Worktrees are where isolated reviewers run, so this is not a corner case.
+    ".claude",
     "target",
     "target-clippy",
     ".venv",

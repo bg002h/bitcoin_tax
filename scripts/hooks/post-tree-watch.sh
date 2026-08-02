@@ -35,7 +35,13 @@ mkdir -p "$STATE"
 CACHE="$STATE/tree-listing"
 NEW="$STATE/tree-listing.new"
 
-find . -path ./.git -prune -o -path ./target -prune -o -path ./target-clippy -prune \
+# ★★★ `.claude` is pruned because it holds git WORKTREES — second checkouts of the same commit, where
+# isolated reviewers run. Every file in one is already accounted for at its canonical path, so walking
+# it reports the entire archive as new (130+ paths on the first isolated review). An alarm that fires
+# on nothing is worse than no alarm: it teaches the reader to skip it, and this one exists precisely
+# because a real overlap went unnoticed.
+find . -path ./.git -prune -o -path ./.claude -prune -o -path ./target -prune \
+       -o -path ./target-clippy -prune \
        -o -path ./.venv -prune -o -path ./node_modules -prune -o -name __pycache__ -prune \
        -o -type f -print 2>/dev/null | sed 's|^\./||' | sort > "$NEW"
 
