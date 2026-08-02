@@ -222,6 +222,59 @@ directions:** over-strict where it should advise, over-generous where it should 
 
 ---
 
+## Scenario C — Publication 560 (2024) Ch. 5, filled-in Schedule SE — ✅ **EXACT MATCH**
+
+Sole proprietor, no employees, Schedule C line 31 net profit **$200,000**, no wages. The publication
+prints every populated Schedule SE cell, and btctax reproduces all of them:
+
+| Sch SE | Pub 560 | btctax (read off the emitted PDF) |
+|---|---|---|
+| 2 / 3 | 200,000 | 200,000 |
+| 4a / 4c / 6 | 184,700 | 184,700 |
+| 7 | 168,600 | 168,600 |
+| 10 | 20,906 | 20,906 |
+| 11 | 5,356 | 5,356 |
+| **12** | **26,262** | **26,262** |
+| 13 | 13,131 | 13,131 |
+
+★★ **Line 12 is a PRESENTATION convention, and btctax gets it right.** The IRS adds the *already
+rounded* 20,906 + 5,356 = **26,262**; an engine that rounds the true 26,262.70 prints **26,263**. Neither
+OTS nor Tax-Calculator can testify to this — they compute the SE tax, they do not adjudicate which of
+two dollar figures the form prints. Only the filled-in form can.
+
+★ Reaching it still required B3's workaround: $200,000 of "net profit" had to be mined, because
+`ScheduleCInputs` has no gross-receipts field.
+
+---
+
+## Scenario D — Publication 559 (2024), decedent's final joint return — **CANNOT BE ENTERED**
+
+MFJ final return: W-2 20,000 · interest 3,140 · **net rental income 8,183** → AGI 31,323; itemized
+24,378 (medical 10,557 after the 7.5% floor, SALT 8,991, **charity 4,830**); taxable 6,945; tax from the
+Tax Table 693; withheld 845; **refund 152**.
+
+Blocked at the input surface: the $8,183 is **Schedule E**, and `ReturnInputs` has no rental/royalty
+field. It is named as out of scope in `btctax limitations` — *"Schedule E (rental, royalty,
+partnership/S-corp K-1) and Schedule F (farm)"* — so this is a documented boundary, not a surprise.
+
+### B11 · Out-of-scope INCOME is documented but never ASKED — so silence looks like "none"
+
+This is the one worth acting on, and it is not a missing feature. Compare:
+
+- HSA activity, dual-status alien, foreign accounts, foreign trusts → **asked**, and a "yes" **refuses**.
+- Rental / royalty / K-1 / farm income → **never asked**, and nothing refuses.
+
+A filer with rental income can enter every other fact, produce a clean packet with no advisory and no
+refusal, and file a return that omits $8,183 of income. Nothing in the run says a word. The
+`limitations` document is prose the filer must think to read, not a gate the return must pass.
+
+★★★ **This is the §G-11 answered-ness invariant one level up — at the SCOPE boundary rather than the
+money line.** An unasked scope question is indistinguishable from a negative answer, and the failure
+direction is an **understatement**. It is the same shape as R2: btctax cannot tell *"the filer has no
+rental income"* from *"nobody ever asked"*, exactly as it could not tell *"one employer"* from *"two"*.
+
+---
+
 ## INCORRECT RESULTS
 
 ### R1 · The CTC advisory ignores the §24(b) phase-out — it advises claiming a credit that is $0
