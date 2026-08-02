@@ -13,7 +13,7 @@
 ///
 /// ★ Adding a form is now ONE edit here. `.len()` is the count everywhere, so no assertion can quote a
 /// stale number.
-pub const CENSUS_KEYS: [&str; 15] = [
+pub const CENSUS_KEYS: [&str; 16] = [
     "f1040",
     "f1040s1",
     "f1040s2",
@@ -25,6 +25,7 @@ pub const CENSUS_KEYS: [&str; 15] = [
     "f8949",
     "schedule_se",
     "f8995",
+    "f8995a",
     "f8959",
     "f8960",
     "f8283",

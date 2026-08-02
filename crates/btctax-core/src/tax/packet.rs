@@ -503,6 +503,12 @@ pub struct PrintedForms {
     pub f8959: Form8959Lines,
     pub f8960: Option<Form8960Lines>,
     pub f8995: Option<Form8995Lines>,
+    /// **Form 8995-A Part IV** (§G-28/B1a) — the FULL §199A form, filed instead of [`Self::f8995`]
+    /// above the §199A(e)(2) threshold, where i8995a's "Who Must File" retires the simplified one.
+    ///
+    /// ★★ The two are ALTERNATIVES: exactly one is `Some` on any return that claims §199A at all.
+    /// Filing both would claim the deduction twice on paper.
+    pub f8995a: Option<crate::tax::qbi_a::Form8995APartIv>,
     /// Form 8283 — REQUIRED when the return itemizes and its printed noncash gifts exceed $500 (the
     /// threshold is printed on Schedule A line 12 itself: "You must attach Form 8283 if over $500").
     ///
@@ -592,6 +598,24 @@ pub fn assemble_printed_forms(
         pi.qbi_net_capital_gain,
     );
 
+    // ★★★ §G-28/B1a — WHICH §199A FORM. Above the §199A(e)(2) threshold the simplified Form 8995 no
+    //     longer applies (i8995a, "Who Must File"), so the same chain is transcribed onto Form 8995-A
+    //     Part IV instead. `qbi_a` carries the written proof that the two forms' arithmetic is
+    //     pointwise identical, so this is a FORM choice and never a figure change.
+    //
+    //     ★★ Exactly one of the two is `Some`. Filing both would claim the deduction twice on paper.
+    //     ★ Read from `AbsoluteReturn`, which decided it where `FullReturnParams` is in scope. The
+    //       printer transcribes a decision; it does not re-derive one.
+    let on_8995a = ar.uses_8995a;
+    let f8995a = on_8995a
+        .then(|| {
+            f8995
+                .as_ref()
+                .map(crate::tax::qbi_a::Form8995APartIv::from_8995)
+        })
+        .flatten();
+    let f8995 = if f8995a.is_some() { None } else { f8995 };
+
     let sch_b = schedule_b_lines(ri);
     let sch_c = schedule_c_lines(ar);
     let sch_d = schedule_d_lines(ar, f8949.as_ref());
@@ -655,6 +679,7 @@ pub fn assemble_printed_forms(
         f8959,
         f8960,
         f8995,
+        f8995a,
         f8283,
         f8275,
     }

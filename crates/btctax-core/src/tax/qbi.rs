@@ -130,6 +130,50 @@ pub fn qbi_over_threshold(
     // §199A(e)(2) threshold: above it the simplified Form 8995 no longer applies (the W-2-wage / UBIA
     // limitations and the SSTB phase-in take over, which is Form 8995-A), and v1 REFUSES rather than
     // compute a deduction it cannot bound.
+    // ★★★ §G-28/B1a — NARROWED. Above the threshold, what the simplified Form 8995 cannot do is the
+    //     Part I-III machinery: the W-2-wage and UBIA limitations and the SSTB phase-in. Those attach to
+    //     a TRADE OR BUSINESS. A filer whose only §199A item is REIT/PTP income has no business for them
+    //     to attach to, and i8995a says so in its own words:
+    //
+    //       "You must complete Part I if you have QBI from a qualified trade, business, or aggregation.
+    //        If you don't have QBI, and only have REIT, PTP, skip Parts I through III and complete
+    //        Part IV."
+    //
+    //     Part IV needs no input btctax does not already collect, so that filer is computable — and
+    //     refusing them was refusing a return the form itself tells us how to complete. They now file
+    //     Form 8995-A Part IV.
+    //
+    //     ★★ The refusal SURVIVES for a filer with business QBI above the threshold. That is B1b, and it
+    //     genuinely needs three inputs that do not exist yet (W-2 wages paid, UBIA, and the SSTB
+    //     declaration) plus the phase-in range width. Narrowing further without them would compute a
+    //     deduction btctax cannot bound.
+    let has_business_qbi = business_qbi > Usd::ZERO || qbi_carryforward_in > Usd::ZERO;
+    has_business_qbi
+        && has_qbi(
+            business_qbi,
+            reit_dividends,
+            reit_ptp_carryforward_in,
+            qbi_carryforward_in,
+        )
+        && ti_before_qbi > params.qbi_ti_threshold(status)
+}
+
+/// Is this return's §199A deduction figured on **Form 8995-A Part IV** rather than the simplified
+/// Form 8995? (§G-28/B1a.)
+///
+/// ★★★ Above the §199A(e)(2) threshold the simplified form no longer applies — i8995a's own "Who Must
+/// File" — so a filer there must use 8995-A **even when the arithmetic is identical**. Getting this
+/// backwards prints the wrong form on a filed return, which is why the refusal narrowing and the
+/// 8995-A emitter had to land together.
+pub fn uses_8995a(
+    business_qbi: Usd,
+    reit_dividends: Usd,
+    reit_ptp_carryforward_in: Usd,
+    qbi_carryforward_in: Usd,
+    ti_before_qbi: Usd,
+    status: FilingStatus,
+    params: &FullReturnParams,
+) -> bool {
     has_qbi(
         business_qbi,
         reit_dividends,
@@ -646,29 +690,60 @@ mod tests {
     #[test]
     fn over_threshold_refuse_boundary() {
         let p = params();
-        // Single: $191,951 > $191,950 → refuse; exactly $191,950 → OK.
-        assert!(qbi_over_threshold(
-            Usd::ZERO,
-            dec!(1000),
-            Usd::ZERO,
-            Usd::ZERO,
-            dec!(191951),
-            FilingStatus::Single,
-            &p
-        ));
+        // ★★★ §G-28/B1a — THE REFUSAL IS NOW ABOUT A TRADE OR BUSINESS, not about income level.
+        //
+        //     What the simplified Form 8995 cannot do above the threshold is Parts I-III: the W-2-wage
+        //     and UBIA limitations and the SSTB phase-in. Those attach to a BUSINESS. i8995a: "If you
+        //     don't have QBI, and only have REIT, PTP, skip Parts I through III and complete Part IV."
+        //     So a REIT/PTP-only filer is computable at any income, and refusing them was refusing a
+        //     return the form itself tells us how to complete.
+        let reit_only = |ti| {
+            qbi_over_threshold(
+                Usd::ZERO,
+                dec!(1000),
+                Usd::ZERO,
+                Usd::ZERO,
+                ti,
+                FilingStatus::Single,
+                &p,
+            )
+        };
+        assert!(
+            !reit_only(dec!(191951)),
+            "REIT-only ABOVE the threshold FILES (8995-A Part IV)"
+        );
+        assert!(!reit_only(dec!(191950)), "…and at it");
+        assert!(
+            !reit_only(dec!(10_000_000)),
+            "…at any income at all — there is no business to limit"
+        );
+
+        // ★★ The refusal SURVIVES with business QBI, and that is B1b: it needs W-2 wages paid, UBIA and
+        //    the SSTB declaration, none of which exist yet. Narrowing further would compute a deduction
+        //    btctax cannot bound.
+        let with_business = |ti| {
+            qbi_over_threshold(
+                dec!(50000),
+                Usd::ZERO,
+                Usd::ZERO,
+                Usd::ZERO,
+                ti,
+                FilingStatus::Single,
+                &p,
+            )
+        };
+        assert!(
+            with_business(dec!(191951)),
+            "business QBI above the threshold still refuses"
+        );
+        assert!(
+            !with_business(dec!(191950)),
+            "exactly AT the threshold is fine — 8995 still applies"
+        );
+        // MFJ's threshold is $383,900, and the split follows filing status.
         assert!(!qbi_over_threshold(
+            dec!(50000),
             Usd::ZERO,
-            dec!(1000),
-            Usd::ZERO,
-            Usd::ZERO,
-            dec!(191950),
-            FilingStatus::Single,
-            &p
-        ));
-        // MFJ threshold is $383,900: $300,000 OK, $400,000 refuses.
-        assert!(!qbi_over_threshold(
-            Usd::ZERO,
-            dec!(1000),
             Usd::ZERO,
             Usd::ZERO,
             dec!(300000),
@@ -676,34 +751,40 @@ mod tests {
             &p
         ));
         assert!(qbi_over_threshold(
+            dec!(50000),
             Usd::ZERO,
-            dec!(1000),
             Usd::ZERO,
             Usd::ZERO,
             dec!(400000),
             FilingStatus::Mfj,
             &p
         ));
-        // QSS is NOT a joint return → uses the $191,950 base (refuses at $300,000, unlike MFJ).
-        assert!(qbi_over_threshold(
-            Usd::ZERO,
-            dec!(1000),
-            Usd::ZERO,
-            Usd::ZERO,
-            dec!(300000),
-            FilingStatus::Qss,
-            &p
-        ));
-        // A carryforward alone (no current REIT) is still QBI for the refuse trigger.
-        assert!(qbi_over_threshold(
-            Usd::ZERO,
-            Usd::ZERO,
-            dec!(5000),
-            Usd::ZERO,
-            dec!(200000),
-            FilingStatus::Single,
-            &p
-        ));
+
+        // ★ FORM SELECTION is a DIFFERENT question from refusal, and getting it backwards prints the
+        //   wrong form. Above the threshold ⇒ 8995-A, whether or not there is a business.
+        let uses_a = |bqbi, ti| {
+            uses_8995a(
+                bqbi,
+                dec!(1000),
+                Usd::ZERO,
+                Usd::ZERO,
+                ti,
+                FilingStatus::Single,
+                &p,
+            )
+        };
+        assert!(
+            uses_a(Usd::ZERO, dec!(191951)),
+            "REIT-only above ⇒ Form 8995-A"
+        );
+        assert!(
+            !uses_a(Usd::ZERO, dec!(191950)),
+            "at or below ⇒ the simplified Form 8995"
+        );
+        assert!(
+            uses_a(dec!(50000), dec!(191951)),
+            "above ⇒ 8995-A (this case refuses anyway, for now)"
+        );
     }
 
     /// Printed Form 8995 lines are `round_dollar` (half-up): a $2,502.50 REIT component rounds the 20%

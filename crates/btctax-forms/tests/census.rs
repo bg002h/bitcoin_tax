@@ -119,11 +119,18 @@ fn census_is_exactly_15_forms_including_8275_when_a_promote_is_present() {
         .forms;
     let emitted: BTreeSet<&str> = forms.iter().map(|f| f.name.as_str()).collect();
     let expected: BTreeSet<&str> = CENSUS_KEYS.iter().copied().collect();
+    // ★★★ f8995 and f8995a are ALTERNATIVES, so no single return can demonstrate both. Above the
+    //     §199A(e)(2) threshold i8995a retires the simplified form; at or below it, 8995-A is not the
+    //     filer's form. `assemble_printed_return` guarantees exactly one is `Some` — filing both would
+    //     claim the deduction twice on paper — so this fixture (below the threshold) shows f8995, and
+    //     `an_above_threshold_return_files_8995a_instead` shows the other arm.
+    let alternatives: BTreeSet<&str> = ["f8995a"].into_iter().collect();
+    let expected: BTreeSet<&str> = expected.difference(&alternatives).copied().collect();
     assert_eq!(
         forms.len(),
-        15,
+        expected.len(),
         "fill_full_return must emit EXACTLY {} forms; got {} ({emitted:?})",
-        CENSUS_KEYS.len(),
+        expected.len(),
         forms.len()
     );
     assert_eq!(
@@ -290,10 +297,88 @@ fn j6_packet_names(golden: &str) -> BTreeSet<String> {
     names
 }
 
+/// ★★★ THE OTHER ARM. `f8995a` is censused, so it must also be DEMONSTRATED — otherwise the census
+/// tracks a form nothing has ever been seen to emit, which is the "present is not populated" failure
+/// one level up.
+///
+/// A REIT/PTP-only filer above the §199A(e)(2) threshold: i8995a sends them to Part IV
+/// (*"If you don't have QBI, and only have REIT, PTP, skip Parts I through III and complete Part IV"*),
+/// and until §G-28/B1a btctax REFUSED this return outright.
+#[test]
+fn an_above_threshold_return_files_8995a_instead() {
+    use btctax_core::tax::return_inputs::{Form1099Div, ReturnInputs};
+    use btctax_core::tax::types::FilingStatus;
+
+    let mut ri = ReturnInputs {
+        filing_status: FilingStatus::Single,
+        header: btctax_core::tax::testonly::not_a_dependent(),
+        ..Default::default()
+    };
+    ri.header.taxpayer = btctax_core::tax::return_inputs::Person {
+        first_name: "Pat".into(),
+        last_name: "Filer".into(),
+        ssn: "123456789".into(),
+        ..Default::default()
+    };
+    btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+    // Wages high enough to clear the $191,950 single threshold, and REIT dividends as the only §199A
+    // item — so there is no trade or business for Parts I-III to attach to.
+    ri.w2s = vec![btctax_core::tax::return_inputs::W2 {
+        owner: btctax_core::tax::return_inputs::Owner::Taxpayer,
+        box1_wages: rust_decimal_macros::dec!(250000),
+        box3_ss_wages: rust_decimal_macros::dec!(168600),
+        box5_medicare_wages: rust_decimal_macros::dec!(250000),
+        ..Default::default()
+    }];
+    ri.div_1099 = vec![Form1099Div {
+        box1a_ordinary: rust_decimal_macros::dec!(1000),
+        box5_section_199a: rust_decimal_macros::dec!(1000),
+        ..Default::default()
+    }];
+
+    let params = btctax_core::tax::testonly::ty2024_params();
+    let table = btctax_core::tax::testonly::ty2024_table();
+    let state = btctax_core::state::LedgerState::default();
+    let ar = btctax_core::tax::return_1040::assemble_absolute(&ri, &state, &params, &table, 2024);
+    assert!(ar.uses_8995a, "above the threshold ⇒ Form 8995-A");
+
+    let pr = btctax_core::tax::packet::assemble_printed_return(
+        &ri,
+        &state,
+        &std::collections::BTreeMap::new(),
+        &ar,
+        &table,
+        2024,
+        &[],
+    )
+    .expect("the printed return assembles");
+    // ★★ EXACTLY ONE of the two §199A forms — filing both would claim the deduction twice on paper.
+    assert!(pr.forms.f8995a.is_some(), "Part IV is built");
+    assert!(
+        pr.forms.f8995.is_none(),
+        "the SIMPLIFIED form must NOT also be filed"
+    );
+
+    let packet = fill_full_return(&pr, 2024).expect("the packet fills");
+    let names: BTreeSet<&str> = packet.forms.iter().map(|f| f.name.as_str()).collect();
+    assert!(names.contains("f8995a"), "the packet carries it: {names:?}");
+    assert!(
+        !names.contains("f8995"),
+        "and not its alternative: {names:?}"
+    );
+}
+
 #[test]
 fn every_census_form_demonstrated_in_j6() {
     let names = j6_packet_names(&golden());
-    let expected: BTreeSet<String> = CENSUS_KEYS.iter().map(|s| s.to_string()).collect();
+    // ★ f8995a is the ALTERNATIVE to f8995 above the §199A threshold — see the note in
+    //   `census_is_exactly_15_forms_including_8275_when_a_promote_is_present`. J6 is below it, so it
+    //   demonstrates f8995; the other arm has its own test.
+    let expected: BTreeSet<String> = CENSUS_KEYS
+        .iter()
+        .filter(|s| **s != "f8995a")
+        .map(|s| s.to_string())
+        .collect();
     let missing: Vec<&String> = expected.difference(&names).collect();
     assert!(
         missing.is_empty(),

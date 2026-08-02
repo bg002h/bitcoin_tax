@@ -1158,6 +1158,14 @@ pub struct AbsoluteReturn {
     ///   the aggregate is compared to it. A single employer's over-withholding is $0 here and surfaces
     ///   as [`Self::excess_ss_not_creditable`] instead.
     pub excess_social_security: Usd,
+    /// **Which §199A form this return files** (§G-28/B1a): `true` ⇒ Form 8995-A Part IV, `false` ⇒ the
+    /// simplified Form 8995.
+    ///
+    /// ★★ A CORE fact, not the filler's — the same principle `packet.rs` already states for Form 8959's
+    /// filing decision. Above the §199A(e)(2) threshold i8995a's "Who Must File" retires the simplified
+    /// form, and that test needs `FullReturnParams`, which the printed-return assembler does not hold.
+    /// Deciding it here means the printer transcribes a decision instead of re-deriving one.
+    pub uses_8995a: bool,
     /// Every (person, employer) pair whose Social Security withholding exceeded the §3101(a) cap —
     /// **not creditable** on this return, and therefore appearing on no line.
     ///
@@ -1507,6 +1515,16 @@ pub fn assemble_absolute(
     // ── Excess-SS + payments → refund/owed (SPEC §5 stages 8–9) ─────────────────────────────────────
     let excess_social_security = excess_social_security(ri, table);
     let excess_ss_not_creditable = non_creditable_ss(ri, table);
+    // §G-28/B1a — the §199A FORM choice. See the field's doc for why it is decided here.
+    let uses_8995a = crate::tax::qbi::uses_8995a(
+        business_qbi,
+        ri.div_1099.iter().map(|d| d.box5_section_199a).sum(),
+        ri.qbi.reit_ptp_carryforward_in,
+        ri.qbi.qbi_carryforward_in,
+        agi - deduction,
+        status,
+        params,
+    );
 
     // 1040 L25 withholding: 25a Σ W-2 box2; 25b Σ 1099 box4 (INT/DIV/G); 25c Form 8959 Part V + other.
     let wh_25a: Usd = ri.w2s.iter().map(|w| w.box2_fed_withheld).sum();
@@ -1590,6 +1608,7 @@ pub fn assemble_absolute(
         total_tax,
         excess_social_security,
         excess_ss_not_creditable,
+        uses_8995a,
         withholding_25a: wh_25a,
         withholding_25b: wh_25b,
         total_withholding,
@@ -3517,10 +3536,30 @@ mod tests {
             ..Default::default()
         };
         let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
-        // TI-before-QBI = 251,000 − 14,600 = 236,400 > 191,950 → refuse.
+        // ★★★ §G-28/B1a — THIS FILER NOW FILES. TI-before-QBI = 251,000 − 14,600 = 236,400 > 191,950,
+        //     but their only §199A item is REIT dividends: there is no trade or business for the
+        //     W-2-wage/UBIA limitations or the SSTB phase-in to attach to. i8995a says so — "If you
+        //     don't have QBI, and only have REIT, PTP, skip Parts I through III and complete Part IV" —
+        //     and Part IV needs no input btctax lacks. Refusing them was refusing a return the form
+        //     itself tells us how to complete.
         assert_eq!(
             screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024).map(|r| r.reason),
-            Some(RefuseReason::QbiAboveThreshold)
+            None,
+            "a REIT/PTP-only filer above the threshold files on Form 8995-A Part IV"
+        );
+        // ★★ …and they file 8995-A, NOT the simplified Form 8995. Getting that backwards prints a form
+        //    i8995a's "Who Must File" forbids at this income.
+        assert!(
+            crate::tax::qbi::uses_8995a(
+                ar.printed_inputs.business_qbi,
+                dec!(1000),
+                Usd::ZERO,
+                Usd::ZERO,
+                ar.agi - ar.deduction,
+                FilingStatus::Single,
+                &p,
+            ),
+            "above the threshold the simplified Form 8995 no longer applies"
         );
         // Drop the REIT dividends → no QBI at all → no refuse even at the same high income.
         let mut no_qbi = ri.clone();

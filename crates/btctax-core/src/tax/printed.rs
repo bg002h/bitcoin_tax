@@ -1421,6 +1421,7 @@ mod tests {
         AbsoluteReturn {
             schedule_1a_additional: Usd::ZERO,
             excess_ss_not_creditable: Vec::new(),
+            uses_8995a: false,
             amt: Default::default(),
             wages: z,
             taxable_interest: z,

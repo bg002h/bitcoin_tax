@@ -75,6 +75,7 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<FiledPacket, Fo
                 f8959,
                 f8960,
                 f8995,
+                f8995a,
                 f8283,
                 f8275,
             },
@@ -166,6 +167,21 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<FiledPacket, Fo
     }
     if let Some(l) = f8995 {
         push("f8995", Some("55"), crate::fill_form_8995(l, header, year)?);
+    }
+    // ★★★ §G-28/B1a — Form 8995-A, filed INSTEAD of the simplified 8995 above the §199A(e)(2)
+    //     threshold. Core guarantees exactly one of the two is `Some`; filing both would claim the
+    //     deduction twice on paper. Attachment Sequence No. 55A, so it staples immediately after where
+    //     8995 would have gone.
+    if let Some(p4) = f8995a {
+        push(
+            "f8995a",
+            Some("55A"),
+            crate::form8995a::fill_form_8995a_with_map(
+                p4,
+                header,
+                &crate::map::Form8995AMap::ty2024(),
+            )?,
+        );
     }
     // Form 8959's filing decision is a CORE fact (`must_file`), not the filler's — the chain is built
     // either way because Schedule 2 and the 1040 read its printed lines.

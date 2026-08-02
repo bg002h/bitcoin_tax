@@ -1231,7 +1231,7 @@ fn the_export_path_refuses_on_the_compute_screen_and_writes_no_bytes() {
 /// §199A(e)(2) phase-in applies.
 /// Mutation-verified: deleting the `screen_absolute` block reds this.
 #[test]
-fn the_export_path_refuses_on_the_absolute_screen_and_writes_no_bytes() {
+fn an_above_threshold_reit_only_export_files_form_8995a() {
     use btctax_core::tax::return_inputs::Owner;
     use btctax_core::tax::return_inputs::{Form1099Div, W2};
     let (_d, vault, out) = full_return_vault(&real_events_2024(), |ri| {
@@ -1252,16 +1252,25 @@ fn the_export_path_refuses_on_the_absolute_screen_and_writes_no_bytes() {
             ..Default::default()
         }];
     });
-    let err = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
-        .expect_err("QBI above the §199A(e)(2) threshold needs Form 8995-A, which v1 cannot file");
-    let msg = format!("{err:?}");
+    // ★★★ §G-28/B1a — THIS EXPORT NOW SUCCEEDS, and writes Form 8995-A. The filer's only §199A item is
+    //     REIT dividends, so there is no trade or business for Parts I-III to attach to, and i8995a
+    //     sends them straight to Part IV. Until B1a this refused outright.
+    let rep = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
+        .expect("a REIT/PTP-only filer above the threshold files on Form 8995-A Part IV");
+    let names: Vec<String> = rep
+        .full_return_paths
+        .iter()
+        .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+        .collect();
     assert!(
-        msg.contains("QbiAboveThreshold") && msg.contains("no forms were written"),
-        "{msg}"
+        names.iter().any(|n| n == "55A_f8995a.pdf"),
+        "the packet must carry Form 8995-A: {names:?}"
     );
+    // ★★ …and NOT the simplified form. The original skeptic's observation still stands, inverted: with
+    //    the wrong form selected, "00_f1040.pdf + the SIMPLIFIED 55_f8995.pdf land here — the wrong
+    //    form, on disk, ready to sign." Above the threshold i8995a's "Who Must File" forbids it.
     assert!(
-        wrote_nothing(out.path()),
-        "★ the skeptic observed 00_f1040.pdf + the SIMPLIFIED 55_f8995.pdf land here with the screen \
-         removed — the wrong form, on disk, ready to sign"
+        !names.iter().any(|n| n.contains("f8995.pdf")),
+        "the SIMPLIFIED Form 8995 must not be filed above the threshold: {names:?}"
     );
 }

@@ -33,6 +33,7 @@ const CENSUSED: &[&str] = &[
     "f1040sb",
     "f8949",
     "f8995",
+    "f8995a",
     "f1040sa",
     "f8960",
     "schedule_d",
