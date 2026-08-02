@@ -1410,6 +1410,144 @@ fn f1040() -> Form1040Lines {
     }
 }
 
+/// ★★★ **§G-24 — 1040 lines 34 and 37 are MUTUALLY EXCLUSIVE, and the form says BLANK, not zero.**
+///
+/// Found by the §G-11 coverage transcription, from the form's own words:
+///
+/// - **L34** *"If line 33 is more than line 24, subtract line 24 from line 33. This is the amount you
+///   overpaid"* — a **condition**, and no `-0-` clause. When the condition fails the line is blank.
+/// - **L37** *"Subtract line 33 from line 24. This is the amount you owe."* — no clamp, no condition.
+///
+/// `printed.rs` computes both with `.max(Usd::ZERO)`, so **every owing return swore "you overpaid $0"
+/// and every refund return swore "you owe $0"** — statements the filer never made, on lines the form
+/// leaves empty. Neither changes tax; both fabricate testimony, which is the §6065 problem this
+/// project exists to refuse.
+///
+/// ★ Fixed at the WRITER, not by retyping the leaf: `Usd` cannot express blank (that is §G-11 P0b),
+/// but the emitter can decline to write. The pair is mutually exclusive by construction, so the gate
+/// is the comparison the form itself states.
+///
+/// Mutation-verified three ways: writing either line unconditionally reds its own half, AND gating on
+/// `!= Usd::ZERO` — the tempting fix, equivalent under today's `printed.rs` — reds on the orphan row,
+/// because the form's condition reads the OPERANDS, not the carried value.
+#[test]
+fn the_1040_overpaid_and_owed_lines_are_mutually_exclusive_and_blank_when_not_applicable() {
+    let cell_34 = "topmostSubform[0].Page2[0].f2_23[0]";
+    let cell_35a = "topmostSubform[0].Page2[0].f2_24[0]";
+    let cell_37 = "topmostSubform[0].Page2[0].f2_28[0]";
+
+    // (1) An OWING return: line 24 (total tax) exceeds line 33 (total payments).
+    let mut owing = f1040();
+    owing.line24 = dec!(27119);
+    owing.line33 = dec!(26215);
+    owing.line34 = Usd::ZERO; // what printed.rs computes today
+    owing.line37 = dec!(904);
+    let pdf = btctax_forms::fill_form_1040_full(
+        &owing,
+        &kitchen_sink_header(),
+        FilingStatus::Single,
+        2024,
+    )
+    .unwrap();
+    assert_eq!(
+        tv(&pdf, cell_37).as_deref(),
+        Some("904"),
+        "the amount owed is entered"
+    );
+    assert_eq!(
+        tv(&pdf, cell_34),
+        None,
+        "★ line 34 must be BLANK on an owing return — a printed 0 swears 'you overpaid $0', which the \
+         form never asks and the filer never said"
+    );
+    assert_eq!(
+        tv(&pdf, cell_35a),
+        None,
+        "…and 35a (the overpayment refunded to you) is blank for the same reason"
+    );
+
+    // (2) A REFUND return: payments exceed tax. The mirror.
+    let mut refund = f1040();
+    refund.line24 = dec!(26215);
+    refund.line33 = dec!(27119);
+    refund.line34 = dec!(904);
+    refund.line37 = Usd::ZERO;
+    let pdf = btctax_forms::fill_form_1040_full(
+        &refund,
+        &kitchen_sink_header(),
+        FilingStatus::Single,
+        2024,
+    )
+    .unwrap();
+    assert_eq!(
+        tv(&pdf, cell_34).as_deref(),
+        Some("904"),
+        "the overpayment is entered"
+    );
+    assert_eq!(
+        tv(&pdf, cell_37),
+        None,
+        "★ line 37 must be BLANK on a refund return — a printed 0 swears 'you owe $0'"
+    );
+
+    // (3) ★★★ AN ORPHANED VALUE — the row that actually distinguishes the gate.
+    //
+    //     A `!= Usd::ZERO` gate would be EQUIVALENT to the form's comparison *given today's*
+    //     `printed.rs`, because it computes both lines with `.max(Usd::ZERO)` — so the value is
+    //     non-zero exactly when the condition holds. Mutation-testing caught that my first three
+    //     fixtures could not tell the two gates apart, and that this test's own doc comment claimed
+    //     they could.
+    //
+    //     They diverge where it matters: a hand-edited `income import` TOML can state a `line34` that
+    //     CONTRADICTS its own operands. That is the `b94508d` orphan class — a stored answer surviving
+    //     a correction to the thing that gated it — and `LIMITATIONS.md` actively directs filers to
+    //     hand-edit TOML. Deriving from the operands is what makes the mark impossible.
+    let mut orphan = f1040();
+    orphan.line24 = dec!(27119); // tax exceeds payments ⇒ the filer OWES
+    orphan.line33 = dec!(26215);
+    orphan.line34 = dec!(500); // …but a stale/hand-edited overpayment rides along
+    orphan.line37 = dec!(904);
+    let pdf = btctax_forms::fill_form_1040_full(
+        &orphan,
+        &kitchen_sink_header(),
+        FilingStatus::Single,
+        2024,
+    )
+    .unwrap();
+    assert_eq!(
+        tv(&pdf, cell_34),
+        None,
+        "★ line 33 is NOT more than line 24, so the form's condition fails and the line is blank — \
+         however non-zero the carried value happens to be. A `!= ZERO` gate prints 500 here."
+    );
+    assert_eq!(
+        tv(&pdf, cell_35a),
+        None,
+        "…and 35a, which mirrors it, is blank too"
+    );
+    assert_eq!(
+        tv(&pdf, cell_37).as_deref(),
+        Some("904"),
+        "the owed amount still enters — the pair stays mutually exclusive"
+    );
+
+    // (4) EXACTLY EVEN — payments equal tax. Both of the form's conditions fail, so both are blank.
+    let mut even = f1040();
+    even.line24 = dec!(26215);
+    even.line33 = dec!(26215);
+    even.line34 = Usd::ZERO;
+    even.line37 = Usd::ZERO;
+    let pdf = btctax_forms::fill_form_1040_full(
+        &even,
+        &kitchen_sink_header(),
+        FilingStatus::Single,
+        2024,
+    )
+    .unwrap();
+    assert_eq!(tv(&pdf, cell_34), None, "nothing was overpaid — blank");
+    assert_eq!(tv(&pdf, cell_37), None, "nothing is owed — blank");
+}
+
 #[test]
 fn form_1040_full_fills_every_line_and_reads_back() {
     let pdf = btctax_forms::fill_form_1040_full(

@@ -153,7 +153,7 @@ pub fn fill_form_1040_full_with_map(
     );
 
     // ── Page 2, AMOUNT column. ──────────────────────────────────────────────────────────────────
-    let p2_amount: [(&MoneyCell, Usd); 15] = [
+    let p2_amount: [(&MoneyCell, Usd); 13] = [
         (need(&map.line16, "line16", y)?, lines.line16),
         (need(&map.line17, "line17", y)?, lines.line17),
         (need(&map.line18, "line18", y)?, lines.line18),
@@ -167,8 +167,6 @@ pub fn fill_form_1040_full_with_map(
         (need(&map.line26, "line26", y)?, lines.line26),
         (need(&map.line32, "line32", y)?, lines.line32),
         (need(&map.line33, "line33", y)?, lines.line33),
-        (need(&map.line34, "line34", y)?, lines.line34),
-        (need(&map.line35a, "line35a", y)?, lines.line34), // 35a = the overpayment refunded
     ];
     for (ord, (cell, value)) in p2_amount.iter().enumerate() {
         push_money(
@@ -180,15 +178,55 @@ pub fn fill_form_1040_full_with_map(
             Some((GRP_P2_AMOUNT, ord as u32)),
         );
     }
+    // ★★★ §G-24 — LINES 34 AND 37 ARE MUTUALLY EXCLUSIVE, AND THE FORM SAYS BLANK, NOT ZERO.
+    //
+    // L34: "If line 33 is more than line 24, subtract line 24 from line 33. This is the amount you
+    //       overpaid" — a CONDITION, and no "-0-" clause anywhere on the line.
+    // L37: "Subtract line 33 from line 24. This is the amount you owe." — no clamp, no condition.
+    //
+    // `printed.rs` computes both with `.max(Usd::ZERO)`, so before this gate EVERY OWING RETURN swore
+    // "you overpaid $0" and EVERY REFUND RETURN swore "you owe $0" — figures the filer never gave, on
+    // lines the form leaves empty. Neither moves the tax; both fabricate testimony under §6065, which
+    // is the defect §G-11 exists to name and this is its first real instance on paper.
+    //
+    // ★ The gate is the FORM'S OWN COMPARISON, not a negation of one arm — which is why the
+    // exactly-even case (payments == tax) leaves BOTH blank: both conditions fail, and the form asks
+    // for neither. A `!= ZERO` test would have got that case wrong in the same direction as the bug.
+    //
+    // ★ Fixed HERE rather than by retyping the leaf: `Usd` cannot express blank — that is §G-11 P0b's
+    // `LineEntry` — but the writer can simply decline to write. When P0b lands this becomes a
+    // `LineEntry::Blank` and the comparison moves to the constructor.
+    let overpaid = lines.line33 > lines.line24;
+    let owed = lines.line24 > lines.line33;
+    if overpaid {
+        for (ord, cell) in [
+            need(&map.line34, "line34", y)?,
+            need(&map.line35a, "line35a", y)?, // 35a = the overpayment refunded
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            push_money(
+                &mut writes,
+                &mut placements,
+                cell,
+                lines.line34,
+                COL_AMOUNT,
+                Some((GRP_P2_AMOUNT, (p2_amount.len() + ord) as u32)),
+            );
+        }
+    }
     // Line 37 (amount owed) sits below 35a and is still the AMOUNT column.
-    push_money(
-        &mut writes,
-        &mut placements,
-        need(&map.line37, "line37", y)?,
-        lines.line37,
-        COL_AMOUNT,
-        Some((GRP_P2_AMOUNT, p2_amount.len() as u32)),
-    );
+    if owed {
+        push_money(
+            &mut writes,
+            &mut placements,
+            need(&map.line37, "line37", y)?,
+            lines.line37,
+            COL_AMOUNT,
+            Some((GRP_P2_AMOUNT, (p2_amount.len() + 2) as u32)),
+        );
+    }
 
     // ── Page 2, MID column. ─────────────────────────────────────────────────────────────────────
     let p2_mid: [(&MoneyCell, Usd); 4] = [
