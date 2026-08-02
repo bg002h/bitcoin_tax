@@ -1280,6 +1280,34 @@ watched to distinguish a true case from a false one"* — committed by the autho
 `line4: _` compiles and the row vanishes. Corrected to the honest limit `classifier.rs` already states
 for itself.
 
+### G-28 — the FILING TRIAL residue (2026-08-02)
+
+`design/direction/FILING-TRIAL-2026-08-02.md` drove the shipped binary end to end against the owner's
+scenario and three published gold standards. Eleven blockers; two retracted after testing (B6, B8 — I
+filed them from reading, not running). Closed the same day: **B9**, **B10**, **B11**, **R1**, **R2** and
+the Schedule D 18/19 sworn zeros. What remains open, with its owning phase:
+
+| # | open item | owning phase |
+|---|---|---|
+| **B1** | `QbiAboveThreshold` refuses any Schedule C above §199A(e)(2). The refusal is a MISSING INPUT — Form 8995-A lines 4 and 7 are W-2 wages and UBIA, which `QbiInputs` does not carry. ★ Its scope must include the **SSTB checkbox**: the code holds every Schedule C to be mining and therefore non-SSTB, and above the threshold an unasked SSTB question is an understatement hole. | next build |
+| **B2** | >4 dependents refuse at the EMITTER. Form 1040 has an *"If more than four dependents … check here"* box; the IRS remedy is four rows + the box + a statement. ★ `report` computes 9 dependents happily, so the filer discovers this at the last step. | next build |
+| **B3** | `ScheduleCInputs` has no gross-receipts field — self-employment income can only arrive as mined Bitcoin. | after B1 |
+| **B4** | No 1099-B input — capital gains can only arrive as BTC disposals. Schedule-D-shaped TOTALS only; never a second lot-level engine. | after B3 |
+| **B5** | **DO NOT BUILD.** A filer-stated USD for a ledger asset is testimony about value and creates a second authority for a number the FMV dataset already answers. The trial's pain was HARNESS pain — solve it in `xtask`. | — |
+| **B7** | TY2025 unsupported. This is the existing TY2025 program (spec+plan green, T1 built), not a fix. | its own track |
+
+★★ **The pattern the trial and its reviews made undeniable: the FOLD carries the defect.** Three
+consecutive rounds found a Critical or Important in the *previous round's fix* — r7 in r6's guard
+(no kill test at all), Fable in the §6413(c) fix (a string compare restored the very understatement it
+killed), r8 in the §6413(c) advisory (fired per PERSON where the instruction says per EMPLOYER, and
+pooled two spouses into one employer that does not exist). Budget review for folds, not just for
+features.
+
+★ And one instrument lesson worth more than any single fix: **a golden refreshed by the same command
+that validates it cannot detect that what it captured is broken.** See
+`crates/xtask/src/examples.rs::no_worked_example_shows_a_command_that_errored`, which is demonstrated
+side by side with the old guard on the real defect.
+
 ### G-26 — ✅ **CLOSED 2026-08-01** — the Schedule 1 text-layer hole
 
 `crates/btctax-forms/forms/2024/f1040s1.map.toml` existed — btctax EMITS Schedule 1 — but no
