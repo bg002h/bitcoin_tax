@@ -28,6 +28,7 @@ mod form8283;
 mod form8959;
 mod form8960;
 mod form8995;
+mod form8995a;
 mod map;
 mod overflow;
 mod packet;
@@ -436,6 +437,7 @@ pub mod testonly {
     pub use crate::form8959::fill_form_8959_with_map;
     pub use crate::form8960::fill_form_8960_with_map;
     pub use crate::form8995::fill_form_8995_with_map;
+    pub use crate::form8995a::fill_form_8995a_with_map;
     pub use crate::pdf::{
         apply_writes, drop_xfa_and_set_needappearances, save, strip_nondeterminism, FieldValue,
     };
@@ -443,8 +445,9 @@ pub mod testonly {
     // read-back tests need the map itself, not just its parsed struct.
     pub use crate::map::{
         AmountCols, Form1040Map, Form8275Map, Form8275Row, Form8283Map, Form8949Map, Form8959Map,
-        Form8960Map, Form8995Map, MoneyCell, MoneyPair, PartMap, Schedule1Map, Schedule2Map,
-        Schedule3Map, ScheduleAMap, ScheduleBMap, ScheduleCMap, ScheduleDMap, ScheduleSeMap,
+        Form8960Map, Form8995AMap, Form8995Map, MoneyCell, MoneyPair, PartMap, Schedule1Map,
+        Schedule2Map, Schedule3Map, ScheduleAMap, ScheduleBMap, ScheduleCMap, ScheduleDMap,
+        ScheduleSeMap,
     };
     pub use crate::map::{
         F1040_MAP_2024, F8275_MAP_2024, F8283_MAP_2024, F8949_MAP_2024, F8959_MAP_2024,

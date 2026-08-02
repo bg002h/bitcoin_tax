@@ -72,6 +72,15 @@ const CEIL_IDIOMS: &[(&str, &str)] = &[
         "Form 8995 16/17: a loss carryforward is clamped down to -0-",
     ),
     ("more than zero", "the same clause, alternate phrasing"),
+    // ★★ Form 8995-A line 40's phrasing, and it was watched RED before being added: the checker
+    //    refused `Clamped(CeilAtZero)` on "If zero or greater, enter -0-" because no idiom covered it.
+    //    ★ It is the INCLUSIVE twin of "greater than zero" above — 8995 L17 and 8995-A L40 are the same
+    //      quantity worded differently, and `qbi_a`'s KAT proves they never differ in value. Both
+    //      idioms are needed because the checker matches the QUOTE, and the two forms quote differently.
+    (
+        "zero or greater",
+        "Form 8995-A L40: the inclusive form of 'greater than zero'; a loss carryforward clamps down",
+    ),
 ];
 
 /// ★★★ **There is deliberately NO exemption list here.** There was one — `NOT_PRINTED`, three entries
@@ -88,7 +97,13 @@ const CEIL_IDIOMS: &[(&str, &str)] = &[
 /// ★ This is the number two full review rounds were spent estimating. It only ever goes DOWN: raising
 /// it requires editing this line, in a diff, with a reason — which is the whole point. Same shape as
 /// the `GAPS` ratchet that went 16 → 0.
-const MAX_EXCEPTIONS: usize = 11;
+const MAX_EXCEPTIONS: usize = 12;
+// ★ RAISED 11 → 12 for Form 8995-A **line 38** (§G-28/B1a). The DPAD line is a CONDITIONAL entry with
+//   no "-0-" clause — "DPAD under section 199A(g) allocated from an agricultural or horticultural
+//   cooperative. Don't enter more than line 33 minus line 37" presumes an allocation from a Schedule D
+//   (Form 8995-A) that btctax does not fill. It is `Option<Usd>`, always `None`, and the emitter writes
+//   NOTHING through it. No production describes "a line that is never written", which is precisely what
+//   an Exception is for.
 
 /// See the block comment at its use site in [`check`].
 const MAX_UNLOCATABLE: usize = 8;

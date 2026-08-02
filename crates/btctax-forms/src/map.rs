@@ -61,6 +61,8 @@ pub const F8959_MAP_2024: &str = include_str!("../forms/2024/f8959.map.toml");
 pub const F8960_MAP_2024: &str = include_str!("../forms/2024/f8960.map.toml");
 /// The TY2024 Form 8995 (QBI deduction, simplified) map (embedded at compile time).
 pub const F8995_MAP_2024: &str = include_str!("../forms/2024/f8995.map.toml");
+/// Form 8995-A (§G-28/B1a) — Part IV only; see the map's own header for why.
+pub const F8995A_MAP_2024: &str = include_str!("../forms/2024/f8995a.map.toml");
 /// The TY2024 Schedule 2 (Additional Taxes) map (embedded at compile time).
 pub const SCHEDULE_2_MAP_2024: &str = include_str!("../forms/2024/f1040s2.map.toml");
 /// The TY2024 Schedule 3 (Additional Credits and Payments) map (embedded at compile time).
@@ -1083,6 +1085,49 @@ impl Form8960Map {
 ///
 /// **Lines 7, 16 and 17 are PARENTHESIZED boxes — the form prints the minus sign, so the value must
 /// be a POSITIVE MAGNITUDE.** `qbi::Form8995Lines` guarantees that.
+/// Form 8995-A (§G-28/B1a) — **Part IV only**. See `forms/2024/f8995a.map.toml` for the scope note
+/// and for how the field assignment was corroborated rather than assumed.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Form8995AMap {
+    /// `"f8995a"`.
+    pub form: String,
+    /// Tax year.
+    pub year: i32,
+    /// Name + SSN. REQUIRED — a schedule that does not name its taxpayer is not filable.
+    pub identity: IdentityCells,
+    /// Part IV lines 27-40, in the form's own numbering. See `forms/2024/f8995a.map.toml` for how the
+    /// assignment was corroborated (column partition, the inset `(loss)` pair, and monotonic y) rather
+    /// than assumed from field order.
+    pub line27: MoneyCell,
+    pub line28: MoneyCell,
+    /// Parenthesized — the box supplies the minus sign, so a POSITIVE MAGNITUDE is written.
+    pub line29: MoneyCell,
+    pub line30: MoneyCell,
+    pub line31: MoneyCell,
+    pub line32: MoneyCell,
+    pub line33: MoneyCell,
+    pub line34: MoneyCell,
+    pub line35: MoneyCell,
+    pub line36: MoneyCell,
+    pub line37: MoneyCell,
+    /// DPAD — mapped so the cell is authorized, but written only if a value ever exists. btctax fills
+    /// no Schedule D (Form 8995-A), so today it is always blank.
+    pub line38: MoneyCell,
+    pub line39: MoneyCell,
+    /// Parenthesized — POSITIVE MAGNITUDE.
+    pub line40: MoneyCell,
+}
+
+impl Form8995AMap {
+    /// The bundled TY2024 map.
+    pub fn ty2024() -> Self {
+        Self::parse(F8995A_MAP_2024).expect("bundled f8995a 2024 map parses")
+    }
+    fn parse(s: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(s)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Form8995Map {
     /// `"f8995"`.

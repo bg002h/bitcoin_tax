@@ -174,6 +174,110 @@ impl Coverage {
 ///
 /// Chosen as the first covered form because it exercises six of the eight productions AND both clamp
 /// polarities, so the mechanism is proved on a hard case rather than an easy one.
+/// §G-28/B1a — **Form 8995-A Part IV**. Every line, in the form's own numbering.
+///
+/// ★ Part IV is Form 8995's lines 5-17 with a DPAD line inserted, and `qbi_a` carries the written
+/// equivalence proof plus the KAT that pins the branch where it would break. The rows below quote
+/// **8995-A's own sentences**, which differ in wording from 8995's at two clamps even though they
+/// never differ in value — so these are transcribed from `f8995a--2024.txt`, not copied from the
+/// sibling coverage fn.
+pub fn cover_form8995apartiv(p: &crate::tax::qbi_a::Form8995APartIv) -> Coverage {
+    let crate::tax::qbi_a::Form8995APartIv {
+        line27,
+        line28,
+        line29,
+        line30,
+        line31,
+        line32,
+        line33,
+        line34,
+        line35,
+        line36,
+        line37,
+        line38,
+        line39,
+        line40,
+    } = p;
+    let f = "f8995a";
+    let mut c = Coverage::default();
+    c.line(*line27, f, "27", "line27", Production::Carry,
+        "Total qualified business income component from all qualified trades, businesses, or aggregations. Enter the amount from line 16");
+    c.line(*line28, f, "28", "line28", Production::Collected,
+        "Qualified REIT dividends and publicly traded partnership (PTP) income or (loss). See instructions");
+    c.line(
+        *line29,
+        f,
+        "29",
+        "line29",
+        Production::Collected,
+        "Qualified REIT dividends and PTP (loss) carryforward from prior years",
+    );
+    c.line(*line30, f, "30", "line30", Production::Clamped(Polarity::FloorAtZero),
+        "Total qualified REIT dividends and PTP income. Combine lines 28 and 29. If less than zero, enter -0-");
+    c.line(
+        *line31,
+        f,
+        "31",
+        "line31",
+        Production::Scaled,
+        "REIT and PTP component. Multiply line 30 by 20% (0.20)",
+    );
+    c.line(
+        *line32,
+        f,
+        "32",
+        "line32",
+        Production::Combine,
+        "Qualified business income deduction before the income limitation. Add lines 27 and 31",
+    );
+    c.line(
+        *line33,
+        f,
+        "33",
+        "line33",
+        Production::Carry,
+        "Taxable income before qualified business income deduction",
+    );
+    c.line(*line34, f, "34", "line34", Production::Carry,
+        "Enter your net capital gain, if any, increased by any qualified dividends (see instructions)");
+    c.line(
+        *line35,
+        f,
+        "35",
+        "line35",
+        Production::Clamped(Polarity::FloorAtZero),
+        "Subtract line 34 from line 33. If zero or less, enter -0-",
+    );
+    c.line(
+        *line36,
+        f,
+        "36",
+        "line36",
+        Production::Scaled,
+        "Income limitation. Multiply line 35 by 20% (0.20)",
+    );
+    c.line(*line37, f, "37", "line37", Production::Bounded,
+        "Qualified business income deduction before the domestic production activities deduction (DPAD) under section 199A(g). Enter the smaller of line 32 or line 36");
+    // ★★ The DPAD line is the ONE Part IV line btctax never writes. It is a CONDITIONAL entry with no
+    //    `-0-` clause — "Don't enter more than line 33 minus line 37" presumes an amount a cooperative
+    //    allocated to the filer — and btctax fills no Schedule D (Form 8995-A), so none exists. It is
+    //    an `Option<Usd>` that is always `None`, and the emitter writes NOTHING through it.
+    c.exception(line38.unwrap_or(Usd::ZERO), f, "38", "line38",
+        "DPAD under section 199A(g) allocated from an agricultural or horticultural cooperative. Don’t enter more than line 33 minus line 37",
+        "NEVER WRITTEN. A conditional entry with no \"-0-\" clause, whose condition requires a Schedule D (Form 8995-A) allocation btctax does not fill. `Option<Usd>`, always `None`; the emitter uses `push_money_opt` so the cell stays BLANK. A printed 0 would swear the filer received an allocation of zero.");
+    c.line(
+        *line39,
+        f,
+        "39",
+        "line39",
+        Production::Combine,
+        "Total qualified business income deduction. Add lines 37 and 38",
+    );
+    c.line(*line40, f, "40", "line40", Production::Clamped(Polarity::CeilAtZero),
+        "Total qualified REIT dividends and PTP (loss) carryforward. Combine lines 28 and 29. If zero or greater, enter -0-");
+    c
+}
+
 pub fn cover_form8995lines(l: &crate::tax::qbi::Form8995Lines) -> Coverage {
     let crate::tax::qbi::Form8995Lines {
         business_name: _, // not money — out of this module's scope
@@ -2136,6 +2240,7 @@ fn zero_setaxresult() -> crate::tax::se::SeTaxResult {
 pub fn all() -> Coverage {
     let mut c = Coverage::default();
     c.0.extend(cover_form8995lines(&zero_form8995lines()).0);
+    c.0.extend(cover_form8995apartiv(&crate::tax::qbi_a::Form8995APartIv::default()).0);
     c.0.extend(cover_setaxresult(&zero_setaxresult()).0);
     c.0.extend(cover_form1040lines(&zero_form1040lines()).0);
     c.0.extend(cover_form1040income(&zero_form1040income()).0);

@@ -37,11 +37,8 @@
 # width, which does not exist in `FullReturnParams` at all. Mapping them here with nothing to write
 # would be an instrument nobody has watched discriminate.
 
+form = "f8995a"
 year = 2024
-
-# ── Header ───────────────────────────────────────────────────────────────────────────────────────
-name_line = "topmostSubform[0].Page1[0].f1_01[0]"
-tin       = "topmostSubform[0].Page1[0].f1_02[0]"
 
 # ── Part IV — Determine Your Qualified Business Income Deduction ─────────────────────────────────
 # 27 "Total qualified business income component from all qualified trades, businesses, or
@@ -78,3 +75,13 @@ line39 = "topmostSubform[0].Page2[0].f2_48[0]"
 # 40 "Total qualified REIT dividends and PTP (loss) carryforward. Combine lines 28 and 29. If zero or
 #     greater, enter -0-"  — PARENTHESIZED
 line40 = "topmostSubform[0].Page2[0].f2_49[0]"
+
+# ── Header ───────────────────────────────────────────────────────────────────────────────────────
+# REQUIRED, like every full-return schedule: a form that does not name its taxpayer is not filable.
+#
+# ★ LAST on purpose. TOML binds every bare key after a table header INTO that table, so an `[identity]`
+#   block placed above the `lineNN` keys silently swallows all fourteen of them — the parse then fails
+#   with "missing field `line27`", which reads like a typo and is really a layout error.
+[identity]
+name = "topmostSubform[0].Page1[0].f1_01[0]"
+ssn  = "topmostSubform[0].Page1[0].f1_02[0]"
