@@ -646,6 +646,29 @@ const W2_FIELDS: &[Field] = &[
             Ok(())
         },
     },
+    Field {
+        id: FieldId::W2Ein,
+        clear: None,
+        label: "Employer EIN (box b)",
+        help: "The employer's EIN (W-2 box b). Required only when Social Security withheld exceeds the \
+               §3101(a) cap: the excess-SS credit needs MORE THAN ONE EMPLOYER (Schedule 3 line 11), \
+               and one employer's over-withholding is recovered from the employer, never on the return.",
+        kind: FieldKind::Text,
+        live: |_| true,
+        get: |ri, a| {
+            ri.w2s
+                .get(a.0[0])
+                .map(|w| FieldValue::Text(w.ein.clone().unwrap_or_default()))
+        },
+        set: |ri, a, v| {
+            let FieldValue::Text(s) = v else { return Err(SetError::WrongKind) };
+            let w = ri.w2s.get_mut(a.0[0]).ok_or(SetError::NoSuchRow)?;
+            // Blank means NOT STATED, which is different from "stated as empty" — the refusal screen
+            // distinguishes them and asks rather than guessing.
+            w.ein = Some(s).filter(|t| !t.trim().is_empty());
+            Ok(())
+        },
+    },
     w2_money!(FieldId::Box1Wages, "Box 1 — wages", "W-2 box 1 (wages, tips, other comp.)", box1_wages),
     w2_money!(FieldId::Box2FedWh, "Box 2 — federal tax withheld", "W-2 box 2 → 1040 25a", box2_fed_withheld),
     w2_money!(FieldId::Box3SsWages, "Box 3 — Social Security wages", "W-2 box 3 (per-earner SS cap)", box3_ss_wages),

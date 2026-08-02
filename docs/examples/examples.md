@@ -542,6 +542,7 @@ $ btctax --vault v.pgp income show --year 2024
     {
       "owner": "taxpayer",
       "employer": "ACME",
+      "ein": null,
       "box1_wages": "200000",
       "box2_fed_withheld": "40000",
       "box3_ss_wages": "168600",
@@ -558,6 +559,7 @@ $ btctax --vault v.pgp income show --year 2024
     {
       "owner": "spouse",
       "employer": "GLOBEX",
+      "ein": null,
       "box1_wages": "90000",
       "box2_fed_withheld": "15000",
       "box3_ss_wages": "90000",

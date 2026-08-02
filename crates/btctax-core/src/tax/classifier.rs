@@ -315,6 +315,11 @@ fn classify_w2(c: &mut Census, w: &W2) {
     let W2 {
         owner,
         employer: _,
+        // ★ An IDENTIFIER, not a benefit claim and not testimony about an amount. `None` forgoes no
+        //   deduction and asserts nothing; it only means §6413(c)'s "more than one employer" test
+        //   cannot be run, which `excess_social_security` answers by refusing to credit rather than by
+        //   guessing. Nothing to classify.
+        ein: _,
         box1_wages: _,
         box2_fed_withheld: _,
         box3_ss_wages: _,

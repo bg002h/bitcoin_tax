@@ -3,21 +3,21 @@
   1││  ✓ Return options              ││  W-2s #1                                                                           │
   2││  … Taxpayer                    ││  Owner  [Taxpayer]                                                                 │
   3││  … Spouse                      ││  Employer  [ACME]                                                                  │
-  4││  ✓ Address                     ││  Box 1 — wages  [$200000]                                                          │
-  5││  ✓ Dependents                  ││  Box 2 — federal tax withheld  [$40000]                                            │
-  6││> ✓ W-2s                        ││  Box 3 — Social Security wages  [$168600]                                          │
-  7││  … Schedule A (itemized deducti││  Box 4 — Social Security tax withheld  [$10453.20]                                 │
-  8││  … Payments                    ││  Box 5 — Medicare wages  [$200000]                                                 │
-  9││  … Carryforwards from last year││  Box 6 — Medicare tax withheld  [$2900]                                            │
- 10││  ✓ Declarations                ││  Box 7 — Social Security tips  [$0]                                                │
- 11││  … Income exclusions (§911/931/││  Box 17 — state income tax  [$9000]                                                │
- 12││  … Skippables                  ││  Box 19 — local income tax  [$0]                                                   │
- 13││                                ││  Box 8 — allocated tips  [$0]                                                      │
- 14││                                ││  Box 10 — dependent-care benefits  [$0]                                            │
- 15││                                ││  Box 12 entries (0) →                                                              │
- 16││                                ││                                                                                    │
- 17││                                ││  [Left/Esc] back to rows                                                           │
- 18││                                ││                                                                                    │
+  4││  ✓ Address                     ││  Employer EIN (box b)  []                                                          │
+  5││  ✓ Dependents                  ││  Box 1 — wages  [$200000]                                                          │
+  6││> ✓ W-2s                        ││  Box 2 — federal tax withheld  [$40000]                                            │
+  7││  … Schedule A (itemized deducti││  Box 3 — Social Security wages  [$168600]                                          │
+  8││  … Payments                    ││  Box 4 — Social Security tax withheld  [$10453.20]                                 │
+  9││  … Carryforwards from last year││  Box 5 — Medicare wages  [$200000]                                                 │
+ 10││  ✓ Declarations                ││  Box 6 — Medicare tax withheld  [$2900]                                            │
+ 11││  … Income exclusions (§911/931/││  Box 7 — Social Security tips  [$0]                                                │
+ 12││  … Skippables                  ││  Box 17 — state income tax  [$9000]                                                │
+ 13││                                ││  Box 19 — local income tax  [$0]                                                   │
+ 14││                                ││  Box 8 — allocated tips  [$0]                                                      │
+ 15││                                ││  Box 10 — dependent-care benefits  [$0]                                            │
+ 16││                                ││  Box 12 entries (0) →                                                              │
+ 17││                                ││                                                                                    │
+ 18││                                ││  [Left/Esc] back to rows                                                           │
  19││                                ││                                                                                    │
  20││                                ││                                                                                    │
  21││                                ││                                                                                    │
@@ -104,20 +104,20 @@
  15│ 0..1 fg=Cyan mod=BOLD
  15│ 33..34 fg=Cyan mod=BOLD
  15│ 34..35 fg=Yellow
- 15│ 35..57 fg=Cyan
  15│ 119..120 fg=Yellow
  16│ 0..1 fg=Cyan mod=BOLD
  16│ 33..34 fg=Cyan mod=BOLD
  16│ 34..35 fg=Yellow
+ 16│ 35..57 fg=Cyan
  16│ 119..120 fg=Yellow
  17│ 0..1 fg=Cyan mod=BOLD
  17│ 33..34 fg=Cyan mod=BOLD
  17│ 34..35 fg=Yellow
- 17│ 35..60 fg=DarkGray
  17│ 119..120 fg=Yellow
  18│ 0..1 fg=Cyan mod=BOLD
  18│ 33..34 fg=Cyan mod=BOLD
  18│ 34..35 fg=Yellow
+ 18│ 35..60 fg=DarkGray
  18│ 119..120 fg=Yellow
  19│ 0..1 fg=Cyan mod=BOLD
  19│ 33..34 fg=Cyan mod=BOLD

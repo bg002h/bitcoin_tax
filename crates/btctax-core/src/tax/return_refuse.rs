@@ -137,7 +137,16 @@ pub enum RefuseReason {
     /// Foreign tax > the §904(j) $300/$600 no-Form-1116 ceiling.
     ForeignTaxOverCeiling,
     /// A single employer over-withheld Social Security (not creditable — recover from the employer).
+    ///
+    /// ★★ NO LONGER RAISED. i1040gi says *"you can't claim the excess on your return. The employer
+    /// should adjust the tax for you"* — **not** "you can't file". The return is complete and correct
+    /// without the credit, so this now yields $0 on Schedule 3 line 11 and an advisory. Kept as a
+    /// variant so the exhaustive cross-crate matches stay honest and any persisted value still maps.
     SingleEmployerExcessSs,
+    /// §6413(c) turns on employer identity and at least one W-2 has no EIN, on a person whose
+    /// aggregate box 4 exceeds the §3101(a) cap. Refuses rather than guessing — the credit is a real
+    /// figure on a signed return and the wrong guess UNDERSTATES tax.
+    ExcessSsEmployerUnknown,
     /// Schedule 1 line 13 HSA ACTIVITY (§223 trigger) affirmed → Form 8889 mandatory, out of scope for v1.
     /// (Renamed from `HsaPresent`: the field it reads was renamed `hsa_present → hsa_activity` in P9 §2.4 —
     /// the question is now whether a trigger fired, not mere holding.)
@@ -274,6 +283,8 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         let W2 {
             owner: _,
             employer: _,
+            // Not a money leaf — no negative screen applies. §6413(c) reads it in `return_1040`.
+            ein: _,
             box1_wages,
             box2_fed_withheld,
             box3_ss_wages,
@@ -763,6 +774,47 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
                                                                 // §402(g)(1) limits an INDIVIDUAL's elective deferrals — accumulate PER OWNER (each spouse on a joint
                                                                 // return gets its own limit; review I1), refusing iff any one person exceeds it. Amounts are already
                                                                 // guaranteed ≥ 0 by the negative screen above, so no per-entry clamp is needed.
+                                                                // ★★★ §6413(c) / Schedule 3 line 11 — the excess-SS credit turns on EMPLOYER IDENTITY.
+                                                                //
+                                                                // i1040gi: *"If you, or your spouse if filing a joint return, had **more than one employer** for
+                                                                // 2024 and total wages of more than $168,600 … You can take a credit … in excess of $10,453.20.
+                                                                // But if **any one employer** withheld more than $10,453.20, you can't claim the excess on your
+                                                                // return. The employer should adjust the tax for you."*
+                                                                //
+                                                                // ★★ The old guard here refused whenever ONE W-2's box 4 exceeded the cap — a proxy for employer
+                                                                // identity it did not have, and wrong in both directions. It **refused a return the instructions
+                                                                // say is fileable** (the credit is simply $0; the employer adjusts), while letting a filer with
+                                                                // several W-2s from ONE employer claim a credit they are not entitled to: a filing trial credited
+                                                                // $3,894 to a filer owed $0, turning an $1,085 liability into a $2,809 refund. Now the credit is
+                                                                // computed from EINs, and the only refusal left is the one case where the answer is genuinely
+                                                                // unknowable — over the cap, with an EIN missing.
+    {
+        let over_cap_needs_ein = |owner: Owner| -> bool {
+            let mine = ri.w2s.iter().filter(|w| w.owner == owner);
+            let withheld: Usd = mine.clone().map(|w| w.box4_ss_withheld).sum();
+            withheld > excess_ss_max
+                && mine.clone().any(|w| {
+                    w.ein
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|e| !e.is_empty())
+                        .is_none()
+                })
+        };
+        for owner in [Owner::Taxpayer, Owner::Spouse] {
+            if over_cap_needs_ein(owner) {
+                return refuse(
+                    RefuseReason::ExcessSsEmployerUnknown,
+                    "Social Security withheld exceeds the §3101(a) cap, so whether any of it is \
+                     creditable depends on whether it came from MORE THAN ONE EMPLOYER (§6413(c), \
+                     Schedule 3 line 11) — and a W-2 has no EIN. Add `ein` to every W-2 for that \
+                     person: one employer's over-withholding is recovered FROM THE EMPLOYER and is \
+                     never claimable on the return",
+                );
+            }
+        }
+    }
+
     let mut deferral_tp = Usd::ZERO; // taxpayer
     let mut deferral_sp = Usd::ZERO; // spouse
     for w2 in &ri.w2s {
@@ -776,12 +828,6 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
             return refuse(
                 RefuseReason::DependentCareBenefit,
                 "W-2 box 10 dependent-care benefits require Form 2441",
-            );
-        }
-        if w2.box4_ss_withheld > excess_ss_max {
-            return refuse(
-                RefuseReason::SingleEmployerExcessSs,
-                "a single employer over-withheld Social Security — recover it from the employer (not creditable)",
             );
         }
         for entry in &w2.box12 {
@@ -1503,14 +1549,59 @@ mod tests {
     }
 
     #[test]
-    fn single_employer_excess_ss_refuses() {
-        let mut r = ri();
-        // One employer withheld more than 6.2% × 176,100 = 10,918.20.
-        r.w2s.push(W2 {
+    fn excess_ss_refuses_only_when_employer_identity_is_unknown() {
+        // ★★★ Over the §3101(a) cap with NO EIN: the credit turns on "more than one employer" and we
+        //     cannot tell. Refuse and collect it — guessing either way is a real figure on a signed
+        //     return, and guessing "yes" UNDERSTATES tax.
+        let mut unknown = ri();
+        unknown.w2s.push(W2 {
             box4_ss_withheld: dec!(11000),
             ..Default::default()
         });
-        assert_eq!(reason(&r), Some(RefuseReason::SingleEmployerExcessSs));
+        assert_eq!(
+            reason(&unknown),
+            Some(RefuseReason::ExcessSsEmployerUnknown)
+        );
+
+        // ★★ …but a SINGLE employer over-withholding no longer refuses at all. i1040gi says "you can't
+        //    claim the excess on your return. The employer should adjust the tax for you" — NOT "you
+        //    can't file". The return is complete and correct with a $0 credit. This is the shape of the
+        //    TaxCalcBench vector `mfj-schedule-2-multiple-w2-excess-social-security-tax`, which btctax
+        //    previously could not file at all.
+        let mut single = ri();
+        single.w2s.push(W2 {
+            box4_ss_withheld: dec!(11000),
+            ein: Some("11-1111111".into()),
+            ..Default::default()
+        });
+        assert_eq!(
+            reason(&single),
+            None,
+            "a single employer's over-withholding is not creditable, but the return still FILES"
+        );
+
+        // Two employers, identity stated → no refusal; the credit is computed.
+        let mut two = ri();
+        for e in ["11-1111111", "22-2222222"] {
+            two.w2s.push(W2 {
+                box4_ss_withheld: dec!(6000),
+                ein: Some(e.into()),
+                ..Default::default()
+            });
+        }
+        assert_eq!(reason(&two), None);
+
+        // Under the cap → employer identity never matters, and no EIN is demanded.
+        let mut under = ri();
+        under.w2s.push(W2 {
+            box4_ss_withheld: dec!(1000),
+            ..Default::default()
+        });
+        assert_eq!(
+            reason(&under),
+            None,
+            "an EIN is only required when it decides something"
+        );
     }
 
     #[test]

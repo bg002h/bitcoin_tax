@@ -61,6 +61,8 @@ pub enum FieldId {
     // W2 (per row)
     W2Owner,
     W2Employer,
+    /// The employer's **EIN** (W-2 box b) — §6413(c)'s "more than one employer" test reads it.
+    W2Ein,
     Box1Wages,
     Box2FedWh,
     Box3SsWages,

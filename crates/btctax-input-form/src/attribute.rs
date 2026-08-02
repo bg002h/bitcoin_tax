@@ -100,6 +100,8 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::AllocatedTips => vec![Anchor::Section(SectionId::W2s)],
         R::DependentCareBenefit => vec![Anchor::Section(SectionId::W2s)],
         R::SingleEmployerExcessSs => vec![Anchor::Section(SectionId::W2s)],
+        // ★ The fix is a missing EIN on a W-2, so the W-2 section is exactly where to send the filer.
+        R::ExcessSsEmployerUnknown => vec![Anchor::Section(SectionId::W2s)],
 
         // ── Spouse-owner: an in-form W-2 leg + a deferred Schedule-C-owner leg (§7 line 518, M-3). ──
         R::SpouseOwnerWithoutJointReturn => vec![
@@ -188,6 +190,11 @@ mod tests {
     fn single_employer_excess_ss_anchors_the_w2_section() {
         assert_eq!(
             attribute(&RefuseReason::SingleEmployerExcessSs),
+            vec![Section(SectionId::W2s)],
+        );
+        // The §6413(c) EIN refusal is fixed in the same place — a missing `ein` on a W-2.
+        assert_eq!(
+            attribute(&RefuseReason::ExcessSsEmployerUnknown),
             vec![Section(SectionId::W2s)],
         );
     }

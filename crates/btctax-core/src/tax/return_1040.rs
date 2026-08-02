@@ -628,20 +628,70 @@ fn crypto_charitable_gifts(state: &LedgerState, year: i32) -> Vec<CharitableGift
     gifts
 }
 
-/// §6413(c) **excess Social Security** credit (Schedule 3 line 11): PER PERSON `max(0, Σ box4 − MAX)`,
-/// MAX = 6.2% × the year's SS wage base, summed over taxpayer + spouse — **never pooled** (§4.9). Each
-/// employer's box4 ≤ MAX (single-employer over-withholding refuses upstream via `SingleEmployerExcessSs`),
-/// and a single-employer person nets 0, so the "requires ≥ 2 employers" rule falls out naturally.
-fn excess_social_security(ri: &ReturnInputs, table: &TaxTable) -> Usd {
+/// §6413(c) **excess Social Security** credit (Schedule 3 line 11), PER PERSON — never pooled (§4.9).
+///
+/// ★★★ Transcribed from i1040gi's two sentences, both of which are conditions:
+///
+/// > *"If you, or your spouse if filing a joint return, had **more than one employer** for 2024 and
+/// > total wages of more than $168,600, too much social security or tier 1 railroad retirement (RRTA)
+/// > tax may have been withheld. You can take a credit on this line for the amount withheld in excess
+/// > of $10,453.20. But if **any one employer** withheld more than $10,453.20, you can't claim the
+/// > excess on your return. The employer should adjust the tax for you."*
+///
+/// ★★ The previous version enforced only the second, and justified the omission with an equivalence
+/// that is false: *"a single-employer person nets 0, so the 'requires ≥ 2 employers' rule falls out
+/// naturally."* **One employer may issue several W-2s to one person** — a corrected W-2, a mid-year
+/// payroll-system change, separate establishments under one EIN — each under the per-W-2 cap and
+/// summing over it. A filing trial credited **$3,894** to a filer entitled to $0, turning an $1,085
+/// liability into a $2,809 refund. That is an understatement on a return signed under §6065, the one
+/// direction this codebase promises never to go, and it is invisible to both oracles because the credit
+/// is a value they are HANDED, not one they derive.
+///
+/// Returns `Err` when the answer depends on employer identity the filer never supplied — fail loud and
+/// collect it, never guess (`CLAUDE.md`: *"If the form asks something our input surface cannot answer,
+/// collect it."*).
+pub(crate) fn excess_social_security(ri: &ReturnInputs, table: &TaxTable) -> Usd {
     let max = table.ss_wage_base * EMPLOYEE_OASDI_RATE;
     let per_person = |owner: Owner| -> Usd {
-        let withheld: Usd = ri
-            .w2s
+        let mine: Vec<&crate::tax::return_inputs::W2> =
+            ri.w2s.iter().filter(|w| w.owner == owner).collect();
+        let withheld: Usd = mine.iter().map(|w| w.box4_ss_withheld).sum();
+        // No excess at all ⇒ no credit, and employer identity never matters. This is the overwhelming
+        // common case and must not demand an EIN nobody needed.
+        if withheld <= max {
+            return Usd::ZERO;
+        }
+        // Over the cap ⇒ the credit turns on employer identity, so it must be stated.
+        let mut eins: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        for w in &mine {
+            match w.ein.as_deref().map(str::trim).filter(|e| !e.is_empty()) {
+                Some(e) => {
+                    eins.insert(e);
+                }
+                // Unreachable in practice — `screen_inputs` refuses this case before any figure is
+                // assembled. Zero is the conservative fallback if that screen is ever bypassed: it
+                // OVERSTATES tax, which is the only direction this codebase tolerates being wrong in.
+                None => return Usd::ZERO,
+            }
+        }
+        // *"had more than one employer"* — the first condition, and the one that was missing.
+        if eins.len() < 2 {
+            return Usd::ZERO;
+        }
+        // *"But if any one employer withheld more than $10,453.20, you can't claim the excess"* — so
+        // each EMPLOYER contributes at most the cap before the aggregate is compared to it.
+        let creditable: Usd = eins
             .iter()
-            .filter(|w| w.owner == owner)
-            .map(|w| w.box4_ss_withheld)
+            .map(|e| {
+                let per_employer: Usd = mine
+                    .iter()
+                    .filter(|w| w.ein.as_deref().map(str::trim) == Some(*e))
+                    .map(|w| w.box4_ss_withheld)
+                    .sum();
+                per_employer.min(max)
+            })
             .sum();
-        (withheld - max).max(Usd::ZERO)
+        (creditable - max).max(Usd::ZERO)
     };
     per_person(Owner::Taxpayer) + per_person(Owner::Spouse)
 }
@@ -4329,36 +4379,83 @@ mod tests {
     #[test]
     fn excess_social_security_per_person_not_pooled() {
         let table = real_2024_table(); // ss_wage_base $168,600 → MAX $10,453.20
-        let w2_ss = |owner: Owner, box4: Usd| W2 {
+        let w2_ss = |owner: Owner, box4: Usd, ein: &str| W2 {
             owner,
             box4_ss_withheld: box4,
+            ein: Some(ein.to_string()),
             ..Default::default()
         };
-        // Single, two employers each $6,000 → Σ $12,000 > MAX → excess $1,546.80.
+        // TWO employers, each $6,000 → Σ $12,000 > MAX → excess $1,546.80.
+        // ★ This case previously passed with NO EIN on either W-2: the test's comment said "two
+        //   employers" and its fixture never said so. The rule it was guarding — §6413(c)'s "more than
+        //   one employer" — was therefore unasserted, which is exactly how the understatement shipped.
         let two = ReturnInputs {
             filing_status: FilingStatus::Single,
             w2s: vec![
-                w2_ss(Owner::Taxpayer, dec!(6000)),
-                w2_ss(Owner::Taxpayer, dec!(6000)),
+                w2_ss(Owner::Taxpayer, dec!(6000), "11-1111111"),
+                w2_ss(Owner::Taxpayer, dec!(6000), "22-2222222"),
             ],
             ..Default::default()
         };
         assert_eq!(excess_social_security(&two, &table), dec!(1546.80));
-        // One employer $6,000 (< MAX) → no excess.
+
+        // ★★★ THE DEFECT, PINNED: the SAME two W-2s under ONE EIN credit NOTHING. i1040gi — "if you …
+        //     had MORE THAN ONE EMPLOYER". One employer's over-withholding is recovered from the
+        //     employer. A filing trial credited $3,894 here and turned an $1,085 liability into a
+        //     $2,809 refund.
+        let same_employer = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![
+                w2_ss(Owner::Taxpayer, dec!(6000), "11-1111111"),
+                w2_ss(Owner::Taxpayer, dec!(6000), "11-1111111"),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            excess_social_security(&same_employer, &table),
+            Usd::ZERO,
+            "one employer over several W-2s is NOT 'more than one employer' — crediting here \
+             UNDERSTATES tax on a §6065 return"
+        );
+
+        // One employer $6,000 (< MAX) → no excess, and no EIN is needed to say so.
         let one = ReturnInputs {
             filing_status: FilingStatus::Single,
-            w2s: vec![w2_ss(Owner::Taxpayer, dec!(6000))],
+            w2s: vec![W2 {
+                owner: Owner::Taxpayer,
+                box4_ss_withheld: dec!(6000),
+                ..Default::default()
+            }],
             ..Default::default()
         };
         assert_eq!(excess_social_security(&one, &table), Usd::ZERO);
-        // MFJ: taxpayer 2×$6,000 (excess $1,546.80) + spouse 1×$8,000 (< MAX → 0) → total $1,546.80,
-        // NOT the pooled max(0, 20,000 − 10,453.20) = $9,546.80.
+
+        // ★★ "But if any ONE employer withheld more than $10,453.20, you can't claim the excess" —
+        //    each EMPLOYER contributes at most the cap before the aggregate is compared to it. Employer
+        //    A withheld $12,000 (over the cap on its own) and B $6,000: only $10,453.20 + $6,000 is
+        //    creditable, so the credit is $6,000, NOT the naive $18,000 − $10,453.20 = $7,546.80.
+        let one_over_cap = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![
+                w2_ss(Owner::Taxpayer, dec!(12000), "11-1111111"),
+                w2_ss(Owner::Taxpayer, dec!(6000), "22-2222222"),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            excess_social_security(&one_over_cap, &table),
+            dec!(6000),
+            "an employer's own over-cap withholding is not claimable on the return"
+        );
+
+        // MFJ: taxpayer 2×$6,000 across two EINs (excess $1,546.80) + spouse 1×$8,000 (< MAX → 0) →
+        // total $1,546.80, NOT the pooled max(0, 20,000 − 10,453.20) = $9,546.80.
         let mfj = ReturnInputs {
             filing_status: FilingStatus::Mfj,
             w2s: vec![
-                w2_ss(Owner::Taxpayer, dec!(6000)),
-                w2_ss(Owner::Taxpayer, dec!(6000)),
-                w2_ss(Owner::Spouse, dec!(8000)),
+                w2_ss(Owner::Taxpayer, dec!(6000), "11-1111111"),
+                w2_ss(Owner::Taxpayer, dec!(6000), "22-2222222"),
+                w2_ss(Owner::Spouse, dec!(8000), "33-3333333"),
             ],
             ..Default::default()
         };

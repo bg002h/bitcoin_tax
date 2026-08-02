@@ -415,13 +415,13 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(
-        field_count, 80,
-        "expected 80 Fields (one per §5.8 in-scope leaf)"
+        field_count, 81,
+        "expected 81 Fields (one per §5.8 in-scope leaf)"
     );
     assert_eq!(
         covered.len(),
-        80,
-        "expected 80 distinctly-covered in-scope leaves"
+        81,
+        "expected 81 distinctly-covered in-scope leaves"
     );
 
     // ── 5. ★ I-6: PIN the observed FieldId → leaf-path map against a literal (kills TRANSPOSITION). ──
@@ -512,6 +512,7 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
     (FieldId::DepDob, "header.dependents[0].date_of_birth"),
     (FieldId::W2Owner, "w2s[0].owner"),
     (FieldId::W2Employer, "w2s[0].employer"),
+    (FieldId::W2Ein, "w2s[0].ein"),
     (FieldId::Box1Wages, "w2s[0].box1_wages"),
     (FieldId::Box2FedWh, "w2s[0].box2_fed_withheld"),
     (FieldId::Box3SsWages, "w2s[0].box3_ss_wages"),

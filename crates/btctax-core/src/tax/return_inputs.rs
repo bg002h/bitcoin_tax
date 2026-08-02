@@ -36,6 +36,26 @@ pub struct Box12Entry {
 pub struct W2 {
     pub owner: Owner,
     pub employer: String,
+    /// Box b — the employer's **EIN**, and the only thing that can answer §6413(c)'s *"more than one
+    /// employer"* test. `None` = never stated.
+    ///
+    /// ★★★ It is here because its absence was a live **understatement of tax**. i1040gi, Schedule 3
+    /// line 11: *"If you, or your spouse if filing a joint return, had **more than one employer** for
+    /// 2024 and total wages of more than $168,600 … You can take a credit … for the amount withheld in
+    /// excess of $10,453.20. But if **any one employer** withheld more than $10,453.20, you can't claim
+    /// the excess on your return."* Two conditions; btctax enforced only the second.
+    ///
+    /// ★★ [`super::return_1040::excess_social_security`] carried a confident equivalence comment that
+    /// was simply wrong — *"a single-employer person nets 0, so the 'requires ≥ 2 employers' rule falls
+    /// out naturally"*. It does not: **one employer may issue several W-2s to one person** (a corrected
+    /// W-2, a payroll-system change mid-year, separate establishments under one EIN), each under the
+    /// per-W-2 cap and summing over it. A filing trial credited **$3,894** to a filer entitled to $0,
+    /// turning an $1,085 liability into a $2,809 refund, on a return signed under §6065.
+    ///
+    /// `employer` is free text and is NOT a substitute — nothing reads it, and two spellings of one
+    /// employer are two employers to a string compare.
+    #[serde(default)]
+    pub ein: Option<String>,
     pub box1_wages: Usd,        // → 1040 1a
     pub box2_fed_withheld: Usd, // → 1040 25a
     #[serde(default)]

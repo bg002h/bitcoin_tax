@@ -165,7 +165,7 @@ its planted-defect test land with it. Both legs mutation-verified.
 MIT-licensed corpus (github.com/column-tax/tax-calc-bench), 51 TY2024 cases, each a complete IRS MeF
 2024v5.0 return — machine-readable and line-identified. **This one case found a tax understatement.**
 
-Facts: MFJ, no dependents, four W-2s **all sharing EIN 56-1234567**. Gold standard: L1a 310,600 ·
+Facts: MFJ, no dependents, four W-2s **all sharing one employer EIN**. Gold standard: L1a 310,600 ·
 L15 281,400 · L16 53,621 · 8959 → Sch 2 L11 965 · L24 54,586 · L25d 53,501 · **L37 owed 1,085**, and
 **no Schedule 3** — because one employer means §6413(c) gives no excess-SS credit.
 
