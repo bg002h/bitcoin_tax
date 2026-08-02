@@ -1,3 +1,88 @@
+# ⚠️ AMENDED (2) 2026-08-01 — TY2025 IS AN ORACLE, NOT A DEADLINE
+
+> **"I am filer number one. We will first complete 2025 so I can compare btctax output to my real 2025
+> tax return. We can also check prior years if needed. Ideally first file would be 2026 or 2027, but
+> tax tables aren't out yet."**
+
+This resolves the last fork and **reframes TY2025 in a way no reviewer considered.**
+
+## What it settles
+
+**Filer #1 is the owner.** So intake is effectively done — the adapters were built against these very
+exports — and `data-in`'s "locked door" is a Milestone-2 problem, not a Milestone-1 one. Form/fact
+coverage outranks venue breadth.
+
+**TY2025 is not a filing target. It is ORACLE ACQUISITION.** The owner holds a real, prepared,
+known-correct TY2025 return. That is a **third independent witness** — and a better one than either
+existing oracle, because:
+
+- OpenTaxSolver and Tax-Calculator validate **synthetic corpora**; the real return validates the
+  **actual data path** — intake, reconciliation, interview, screens, emission — on one real household.
+- It covers **the fact patterns the owner actually has**, replacing the demographic guessing the
+  synthesis itself flagged (*"the frequency claims … are demographic reasoning, not measurement"*).
+  For filer #1, the real return **is** the measurement.
+- ★★ **It is a direct test of §G-11's thesis.** A prepared return carries blanks exactly where the form
+  says blank. Every fabricated `0` btctax prints shows up as a diff, on real paper. No synthetic
+  fixture can produce that evidence.
+
+**First FILING is TY2026 or TY2027** — so there is real runway, and no statutory clock on anything
+before it. ★ Note TY2026 is *also* fail-closed, and partly for reasons outside our control: the 2026
+Form 6251 instructions were unpublished as of 2026-07-29 and **no oracle covers 2026**. That external
+dependency should be tracked, because it gates the first real filing.
+
+## The metric to optimize: TIME-TO-FIRST-DIFF
+
+Everything downstream re-ranks on what the comparison finds. Building form coverage *before* the diff
+is guessing; building it *after* is reading a list. **Get to the diff on the shortest honest path.**
+
+★ "Honest" is doing work here. The TY2025 gate documents its own four exit conditions and warns that
+**a partial landing is not a smaller version of TY2025 — it is a silently wrong return.** A diff
+against plausible-wrong numbers is worse than no diff: it either falsely validates, or sends us chasing
+phantoms. So all four conditions land before the comparison means anything.
+
+## The revised critical path
+
+**0. Ship what exists.** Unchanged, still first, still hours of owner action: push, `.pii-patterns`,
+revoke the token, publish v0.15.0. 99 unpushed commits is loss-on-disaster, not caution.
+
+**1. Complete TY2025 — all four gate conditions** (`tax_tables.rs:789-812`): every `FullReturnParams`
+field with a per-field citation (★ `std_deduction` and `salt_cap` are OBBBA, *not* Rev. Proc. 2024-40);
+the §164(b) SALT **worksheet**, not a scalar; Form 6251 Part I re-transcribed for 2025 (1a/1b, line 2a
+citing 1040 line 12e, line 4 combining **1b** through 3) plus the 1040's 11a/11b/12e/13a/13b reshape;
+and Schedule 1-A, all six parts. This is the B3 track. ★ **Its plan r3 was never independently
+reviewed** — `design/ty2025/reviews/` holds only r1 — and the gate's own doc is the argument for fixing
+that first.
+
+**2. Build the real-return comparison harness.** Same shape as the existing oracle diff: a per-line
+expected vector, diffed against btctax's computed and *printed* output.
+★★ **The vector holds the owner's real financial data and MUST NOT be committed.** It lives untracked
+(same posture as `.pii-patterns`); the harness reads it when present and skips cleanly when absent, so
+CI is unaffected. Only the derived findings — which lines diverged and why — get committed.
+
+**3. Run the diff, and let it re-rank.** Its output becomes the breadth backlog, replacing the
+reviewers' demographic guesses with this filer's actual facts.
+
+**4. §G-11 P0b/P1.** Independent of the above and can run in parallel or after; the "free before users"
+window is open and now uncontested. ★ The diff may also *price* it — every fabricated zero appears
+there as a real divergence.
+
+**5. TY2026** for the actual first filing, tracking the external blockers (6251 instructions, oracle
+coverage).
+
+**6. Milestone 2 — a stranger files.** Intake breadth, the TUI's two missing ends, more statuses.
+
+## What this demotes
+
+The cheap-refusal conversions (Form 6251 attach, Schedule 8812/CTC, box-12, 8889, 1099-B) drop from
+"do next" to **"do what the diff says"**. They may all be needed — or the owner's return may not have a
+child, an HSA, or a brokerage account, and three of the five would be speculative work. **The diff
+costs less than guessing wrong.** The two exceptions that stay above the diff, because they are cheap
+and unconditional: **§G-24** (a sworn `$0` on the refund/owe lines, already found) and the
+**bottom-of-the-1040 witnesses** (those lines have zero oracle coverage and have already shipped a
+defect — and they are precisely the lines the diff will compare first).
+
+---
+
 # ⚠️ AMENDED 2026-08-01 by the owner — READ THIS FIRST
 
 > **"The current season is irrelevant. We will support all seasons eventually."**
