@@ -3,6 +3,40 @@
 **Status: r3** (r2→r3: the 13-agent provenance census folded — see `reviews/PROVENANCE_CENSUS_schedule_1a.md`. It found a MISSING INPUT SURFACE and a hole in T2's own conformance approach; C-1 grew. Earlier: (r1 folded 2026-07-29 — **2 Critical, 4 Important, 2 Minor, 1 Nit**, all confirmed against the text layer before folding; reviewer output persisted verbatim at `design/ty2025/reviews/PLAN_schedule_1a-opus-r1.md`, with my re-verification notes appended there rather than mixed into it). The two Criticals were both **missing eligibility**, not wrong arithmetic — the defect class this project keeps rediscovering. Implements `design/ty2025/SPEC_schedule_1a.md` **r3** (0 Critical / 0 Important),
 which is branch **B3** of `design/ty2025/SPEC.md` §8a. Parent decisions D-1 … D-11 bind.
 
+**★★★ r4 FOLD (2026-08-01) — 0 Critical / 9 Important, two independent lenses.** This plan read
+**r3** while `reviews/` held exactly ONE independent review of it; the r2→r3 fold was a 13-agent
+provenance CENSUS, which is not a review, and it *grew* a Critical. Two folds went unreviewed against a
+rule that says re-review after every fold. Reviews persisted verbatim at
+`reviews/PLAN_schedule_1a-conformance-r4.md` and `reviews/PLAN_schedule_1a-buildability-r4.md`.
+
+| # | finding | resolution |
+|---|---|---|
+| C-I1 | T2's KAT cannot produce 48 from the extract — the text layer yields **50** labels; lines **4 and 22** are headings with instruction text and no box | drive the expected set from `xtask/src/label_reader.rs` (landed 2026-07-30, one day AFTER this plan's last commit), which already adjudicates 50 / 48 / 2 with a required `note` per non-Amount row |
+| C-I2 | **no COMPLETION conditions** — the only gate is `L38 > 0`, so a car-loan-only filer computes 15 phase-out lines the form says to skip and **line 35 prints $6,000 for a non-senior**; a filer with no §911 exclusion prints `$0` on 2a–2e | transcribe each part's Caution as a completion predicate; make the affected leaves able to express *not completed* **at T2**, because B4 cannot fix it if T2 makes every line non-optional |
+| C-I3 | ★ the **refinance balance cap** was LOST in the r1 fold, and the prose states the rule BACKWARDS | see T3 below — added as a per-vehicle condition; **understates tax** without it |
+| C-I4 | Part II's *"not qualified tips"* list has **three** bullets; the table carries one | add the illegal-service exclusion, worded on the IRS's own matched examples |
+| B-I1 | the KAT has CLAUDE.md's half (a) and **not half (b)** — no per-line provenance, so "present but never populated" passes | every line carries a `Production` (or an `Exception` with a reason); build the actual set as `(label, got.lineN)` pairs so the compiler ties names to the struct |
+| B-I2 | `line_coverage` was structurally blind to a new `schedule_1a.rs` | ✅ **FIXED IN CODE** — scope is now derived from the emitter, `Option<Usd>` counts as money, and the year is per-row |
+| B-I3 | T2's doc-comment gate is `cite-check` semantics: it proves a quotation is *the form's* words, not *that line's* | use `tables.rs::printed_line(label)` — which **T1, in this same plan, already built for exactly this**, whose own doc says *"The fix is not more citation checking"* |
+| B-I4 | T3a refuses on `schedule_c.is_some()` | ✅ corrected in T3a below — gate on the CLAIM |
+| B-I5 | line **4b** (Form 4137) is a third line of the T3a shape with no recorded disposition | ✅ added to the T3a table |
+
+★★ **AND THE CENTRAL SEQUENCING CLAIM WAS CORRECTED.** The author had concluded §G-11's `line_coverage`
+was the prerequisite for T3's ~25 `Option<Usd>` inputs. It is not — `line_coverage` is a **printed-line**
+instrument and does not answer the input-side question. The input-side answer **already exists**:
+`return_inputs.rs:626-652`, where answered-ness rides an `Option<bool>` **class-(A) gate** (which the
+classifier *forbids* `_` on) with the amounts hanging off it as plain `Usd`. Its own doc says an
+`Option<Usd>` is a scalar the `_` rule permits — which would make this convention again.
+**⇒ T3 uses ONE CLAIM GATE PER PART, not ~25 loose `Option<Usd>`s.** Part I needs no new input at all —
+its four add-backs are already collected.
+
+★ **Sizing correction (r4 M-1):** "~25 leaves plus six declarations" is stale by ~3×. Recount: Part II 5,
+Part III 3, **Part IV 9 PER VEHICLE**, plus the SSN bar per person for II/III/V ⇒ **≈19 declarations**,
+against a line-22 structure (2 rows × 3 columns) `ReturnInputs` has no shape for. T3's touchpoint list
+also omits `btctax-input-form/src/attribute.rs` and the pinned counters (`questions.rs:985-986`,
+`coverage.rs`'s 80-row `EXPECTED_LEAF_PATHS`). All compiler- or test-forced, so nothing escapes — but
+"landed whole in one pass" is a materially larger pass than stated.
+
 **Branch:** `feat/amt-e2-vector-population` (current; B1 + B2 already on it).
 
 ---
@@ -172,9 +206,38 @@ finding nothing, which is the exact false-completeness this plan warns about eve
 - each field's doc comment contains the line's own instruction text, checked against a committed
   extract of the text layer, so a paraphrase reds.
 
+★★ **r4 CORRECTIONS TO THIS KAT — three, and the first two are what make it a conformance check.**
+
+1. **Half (b) is missing.** The bullets above are (a), (a) and quotation. CLAUDE.md is explicit that a checker
+   which cannot distinguish *this line encodes no decision* from *we forgot this line* is not a
+   conformance check. As written, a field declared, doc-commented and **never assigned by T4** passes. ⇒ every
+   line additionally carries a `Production` from `tax/line_coverage.rs` — `Collected`, `Carry`,
+   `Combine`, `Clamped(Polarity)`, `Scaled`, `Bounded`, `Constant`, or an `Exception` **with a written
+   reason**, ratcheted. Schedule 1-A maps onto it almost exactly; lines 10/18/27/33 are `Exception`s
+   (conditional *jumps*, not clamps — the class the ratchet already records for `f1040:34`).
+2. **The doc-comment check must be PER LINE, not per document.** *"Checked against a committed
+   extract"* is `cite-check` semantics, which proves a quotation is **the form's** words, not **that
+   line's**. Line 28's rounding sentence sitting on line 11 passes — and that swap *inverts the
+   rounding for Parts II/III*. ★ `tables.rs:1295-1313` already has `printed_line(label)`, built by **T1
+   in this same plan**, whose own doc says in terms that the fix is **not** more citation checking Use it:
+   `printed_line(<the field's label>)` ∋ the quoted instruction, whitespace-normalized.
+3. **The expected set comes from `label_reader`, not a fresh parse.** The text layer yields **50**
+   labels; lines 4 and 22 are headings that carry instruction text and no amount box, and the layer
+   *cannot say which* — `label_reader.rs`'s own doc says distinguishing a heading from a label
+   means knowing whether the line has an amount box — **which the text layer does not directly say**. It
+   resolves this with two witnesses and asserts 50 / 48 / `["4","22"]`. Assert against that. ★ The
+   plan's gloss elsewhere names line **14** as the second box-less heading — that is wrong; 14a is a
+   real entry line, and the two headings are **4 and 22**. The per-part counts (7+12+10+10+8+1 = 48 entry lines) are right.
+4. **Completion conditions are part of conformance** (r4 C-I2). Each part's Caution — *"Fill out Part
+   II only if you received qualified tips"* — is transcribed as a completion predicate, and the KAT
+   asserts an uncompleted part's lines are **not entered**. This is a T2 decision because B4 cannot
+   fix it if T2 makes every line non-optional.
+
 ### T3 — the input surface, landed whole
 
-~25 leaves plus **six declarations**, through the whole stack in one pass (the G-9 walk, since the user
+~25 leaves plus **≈19 declarations** (r4 M-1 recount: Part II 5, Part III 3, **Part IV 9 per
+vehicle**, plus the SSN bar per person for II/III/V — the header said six), through the whole stack in
+one pass (the G-9 walk, since the user
 has directed that the input surface not lag the core): `return_inputs.rs` → `classifier.rs` →
 `questions.rs` → `return_refuse.rs` → `input-form` `seam/registries/coverage/sections` → CLI `answer.rs`
 → TUI. The exhaustive matches and the coverage KAT force every site; nothing here is found by grep.
@@ -206,7 +269,7 @@ entitlement must arise under FLSA §7).
 **Part IV — car loan interest.** ★★ r1 had **no eligibility declarations at all** for this part (C-2):
 only the cap, the threshold, the ceil, and a VIN deferred to B4. So every filer who typed a car-loan
 interest figure got up to **$10,000** of deduction — including on a lease, a used car, a
-non-US-assembled car, a refinance, a pre-2025 loan, or negative equity. **Understates tax.** The
+non-US-assembled car, ~~a refinance~~, a pre-2025 loan, or negative equity. **Understates tax.** The
 instructions state the conditions flatly, and none is derivable:
 
 > "the interest must be paid or accrued on a loan that generally meets **all** the following
@@ -243,7 +306,39 @@ Death of a taxpayer/spouse needs **no new collection**: §G-9 landed
 `HouseholdHeader::{taxpayer,spouse}_died_during_year` and `Person::date_of_death`, with the
 day-before-the-65th-birthday convention in `reaches_65_on`. Part V reuses them at $6,000 per person.
 
-### T3a — ★★ TWO LINES HAVE NO INPUT PATH AT ALL, AND MUST NOT PRINT ZERO
+★★★ **r4 CONFORMANCE — TWO ELIGIBILITY CONDITIONS ARE MISSING, BOTH IN THE UNDERSTATEMENT DIRECTION.**
+This is the third and fourth instance of the class r1 found twice; this plan already records that r1 found
+the same table incomplete in the dangerous direction, **twice**.
+
+**(1) Part IV — the refinance balance cap (r4 C-I3).** r1's C-2 named a refinance **beyond the prior
+balance**; the fold reduced that to a bare refinance and kept no condition. Worse, the prose listed a
+refinance among the things that DISQUALIFY. The instructions say the opposite, in one paragraph
+(`i1040gi--2025.txt:44486`):
+
+> **Refinanced loan.** If your prior loan that had QPVLI is later refinanced, interest paid on the
+> refinanced amount is **generally eligible** for the deduction, so long as the new loan is secured by
+> a first lien on the APV with respect to which the refinanced loan was incurred. **The loan amount is
+> limited to the outstanding balance of the refinanced loan as of the date of the refinancing.**
+
+Without the cap, a cash-out refi deducts interest on the **entire** new balance — every YES-condition
+the plan collects answers *yes* — up to $10,000 of interest on non-qualifying principal. ⇒ add a
+per-vehicle row asking whether this is a refinancing and, if so, the outstanding balance of the
+refinanced loan on the refinancing date — limiting the interest to that fraction; and correct the prose.
+
+**(2) Part II — the illegal-service exclusion (r4 C-I4).** The *"Amounts received that are not
+qualified tips"* list has **three** bullets and the table carries one (SSTB). Missing: tips for a
+service that is a felony or misdemeanour, and amounts for prostitution or pornographic activity.
+★ The occupation gate **cannot** answer this, and the IRS proves it with a matched pair — a bartender
+who served alcohol unlawfully has **non**-qualified tips, while a server working legally has qualified
+ones. ⇒ one more YES-condition defaulting to NO, worded on that distinction (the *service* must be
+legal; the employer's unrelated violations do not disqualify), citing both examples in the prompt.
+
+★ Also carried (r4 N-1): loan requirement 2's *"change in obligor by reason of previous obligor's
+death"* exception (an heir assuming a qualifying loan **does** qualify — omitting it fails closed, so
+it is a Minor), and the *personal use* operative test (*"more than 50% of the time"*), which the plan
+collects as a bare declaration and the instructions define.
+
+### T3a — ★★ THREE LINES HAVE NO INPUT PATH AT ALL, AND MUST NOT PRINT ZERO
 
 Census **F-1**, confirmed against source. `ReturnInputs` carries `w2s`, `int_1099`, `div_1099`, `g_1099`
 and **nothing else** (`return_inputs.rs:417-423`). But the form reads:
@@ -263,8 +358,9 @@ is none of them.** For B3, choose per line and record the reason:
 
 | line | move | why |
 |---|---|---|
-| 5 | **REFUSE** when a Schedule C is present | a filer with self-employment income may well have 1099-reported tips, and we cannot ask. Refusing is the only move that does not swear for them. |
-| 14b | **REFUSE** when a Schedule C is present, else genuinely blank | same rule; with no Schedule C there is no payor relationship to report. |
+| 4b | **form-directed `-0-`**, with the reason recorded | *"If Form 4137 is not filed, enter -0-."* btctax emits no Form 4137, so that condition is **true of every return it produces** — this is the form's own conditional constant, not a guess. ★ But the existing guard is PARTIAL: `return_refuse.rs:769` refuses on `w2.box8_allocated_tips > 0` (*allocated* tips), while Form 4137 is also required for tips the employee did not report to the employer, which `W2` cannot see. T2 must state whether that refusal needs a companion declaration. (r4 buildability I-5.) |
+| 5 | **REFUSE** when the Part II **claim gate** is `Some(true)` | ★★ **NOT `schedule_c.is_some()`** (r4 buildability I-4). A Schedule C **is the mining household** — btctax's core case — and Part II's own Caution makes the deduction opt-in: *"Fill out Part II only if you received qualified tips."* Refusing on the presence of a Schedule C would refuse **every** TY2025 mining return once the fail-closed gate comes out, on a part the filer was told not to complete. The tree already learned this: `questions.rs:546-552` records a class-(A) declaration that was `live: |_| true` and blocked **every** return btctax could compute, buying nothing. T3 already collects the gate (occupation on the Treasury list, defaulting to NO), so condition the refusal on the CLAIM. |
+| 14b | **REFUSE** when the Part III **claim gate** is `Some(true)`, else genuinely blank | Same correction. ★ And the old rationale — that with no Schedule C there is no payor relationship to report — is wrong on its own terms for the **1099-MISC box 3** half — that is Other Income on Schedule 1 line 8z, not Schedule C. |
 
 **Collecting the 1099 surface is the right long-term answer** (CLAUDE.md: *if the form asks something our
 input surface cannot answer, collect it* — that is following instructions, not scope creep). It is out of
