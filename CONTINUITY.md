@@ -1,95 +1,88 @@
 # CONTINUITY — bitcoin_tax (TaxApp)
 
-_Last updated: **2026-08-02** (filing trial + blocker burndown). Written at a pause; safe to exit._
+_Last updated: **2026-08-03** (v0.16.0 released; `income scrub` spec r2). Written at a pause; safe to exit._
 
 ---
 
-## ▶ RESUME HERE — B1 is DONE. Next is **B3** (Schedule C gross receipts).
+## ▶ RESUME HERE — `income scrub`, spec r2 folded, **awaiting re-review**. No code yet.
 
-**The whole of B1 shipped 2026-08-02.** A self-employed filer above the §199A(e)(2) threshold now
-FILES. Verified on the real binary end to end: a single filer with $240,000 of mined income exports a
-packet containing `55A_f8995a.pdf` with Parts I–IV filled, and 1040 line 13 = 8995-A line 16 = line 27
-= line 39 = **$27,357**. `design/direction/FILING-TRIAL-2026-08-02.md` has the full record;
-`FOLLOWUPS.md` §G-28 (closed items) and §G-29 (the one new follow-up) have the residue.
+### ★★★ FIRST: YOU ARE ON `feat/income-scrub`, AND IT IS LOCAL ONLY
 
-Also closed this sitting: **B2** and **B10**, which had been fixed in code and never marked.
+```
+git branch --show-current     # expect: feat/income-scrub
+git log --oneline -4
+```
 
-**Still open from the trial:** **B3** (Schedule C gross receipts) → **B4** (1099-B totals,
-Schedule-D-shaped, never lot-level) → **B7**/TY2025 → the owner's TY2025 comparison as the acceptance
-milestone. **B5 is decided: do not build.**
+**This branch has never been pushed and is UNBACKED — it exists on one machine.** It cannot be pushed
+today: the generic PII scan flags the synthetic EINs (`90-0000001`, …) quoted inside
+`reviews/scrub-r1-workflow.md`, which is *sweep finding #4 landing on the review that filed it*. It
+pushes once `synthetic_ein` gets a documented structural window plus an `ALLOWED_EIN_SYNTHETIC` rule
+(SPEC §7, build step 7). Until then, **do not delete this branch and do not `git checkout` carelessly.**
 
-### ★ B3 is scoped but NOT started, and it carries a product decision
+`main` is clean, pushed, and level with `origin/main` at the v0.16.0 release.
 
-`gross_receipts_1` (`return_1040.rs`) is `crypto.business_se_gross` — Schedule C revenue comes
-*exclusively* from the Bitcoin ledger. The fix is an additive filer-stated field on `ScheduleCInputs`,
-after which SE tax, QBI and everything downstream follow. **But it changes product identity:** btctax
-stops being a Bitcoin-only self-employment tool. Flag it to the owner rather than assume.
+### Where things stand
 
-Watch on the way in: `BusinessIncomeWithoutScheduleC` currently fires from ledger income, so a
-Schedule C with only non-ledger receipts must not refuse.
+**v0.16.0 IS RELEASED** (2026-08-03) — all 10 crates on crates.io, tagged, GitHub release live,
+verified 10/10 via the sparse index *and* by `cargo install` from the registry. It ships
+`btctax --version`, the CTC-advisory fix, and the nine-dependent fixture. **`income scrub` is NOT in
+it, deliberately.**
 
-### ★★★ WHAT B1 COST, AND THE THREE LESSONS WORTH MORE THAN THE FEATURE
+**`income scrub` is written but held back.** Two adversarial reviews and a Fable consult say it must not
+ship as-is:
 
-1. **PER-FORM TESTS ARE NOT A PACKET TEST.** Two **Criticals** sat in a green 2601-test suite across
-   five green gates, and both fell out of reading the emitted `55A_f8995a.pdf` beside the emitted
-   `00_f1040.pdf` — the only place the two forms are side by side. The 1040's line 13 read *only* Form
-   8995 and printed ZERO on the 8995-A path (**shipped by B1a**, i.e. it survived that commit), and the
-   deduction was UNCAPPED so the form's line 27 printed $45,267 against its own line 16 of $27,357.
-   This is harness **B3** one layer down. The standing counter is the cross-form IDENTITY test
-   `the_1040_deduction_equals_the_attached_8995a_line_39`, which asserts the two AGREE rather than
-   asserting either figure — a value-pinning test would have passed on the first defect the moment
-   someone "fixed" line 39 down to the zero the 1040 was printing.
+| artifact | what it is |
+|---|---|
+| `reviews/scrub-r1-workflow.md` | code review, 27 agents — 22 raw → **19 confirmed + 6 sweep**, two CRITICALs |
+| `reviews/scrub-r2-fable-consult.md` | Fable scope adjudication — ship 0.16.0 without scrub; scrub alone later |
+| `reviews/scrub-spec-r1-review.md` | review of the SPEC — 31 raw → **19 blocking**, all folded into r2 |
+| `design/SPEC_income_scrub.md` | **the spec, r2 (`ffdf249`) — the thing to re-review** |
 
-2. **THE TWO-ORACLE RULE CANNOT BE MET FOR §199A.** OpenTaxSolver reads the QBI deduction as a
-   hand-fed input (`GetLine( "L13", &L[13] )` in `taxsolve_US_1040_2024.c`) and never derives it —
-   §G-9 in its purest form. Tax-Calculator 6.7.2 is the only witness; it was diffed byte-for-byte
-   against the pristine PyPI sdist before being trusted, and it earned its keep immediately by catching
-   a missing §199A(d)(3) SSTB exclusion worth a $40,000 overstated deduction. ★ The FIRST oracle sweep
-   witnessed **nothing** — Part IV's income limitation bound on every phase-in vector, so `qbided` came
-   back identical whether Part III ran or was skipped. Every vector now carries W-2 wage income to hold
-   that cap slack, and a test asserts the two phase-in vectors DISAGREE.
+### ▶ THE NEXT ACTION
 
-3. **THE SSTB QUESTION WAS NOT CLASS-(A)**, contrary to what this file said before. Making it a live
-   mandatory declaration refused **every Schedule C return at any income** — below the threshold the
-   simplified Form 8995 has no SSTB checkbox, so the answer changes nothing there. It is the
-   `DonationsHadRestrictions` shape: offered always, mandatory only in `screen_absolute` where taxable
-   income is known. `below_the_threshold_an_unanswered_sstb_does_not_refuse` reds if that regresses.
+**Re-review `design/SPEC_income_scrub.md` (r2) to 0C/0I.** Brief the reviewer on what
+`reviews/scrub-spec-r1-review.md` already covered so it spends its budget on the seams, not on
+re-deriving folded findings. Only when green, build in the order at **SPEC §8** — it is sequenced, and
+the sequencing was itself reviewed.
 
-★ A fourth, smaller: the **cooperative-patron** checkbox (Part I column (e)) had to be collected too,
-and it refuses at ANY income — 8995-A's header sends a patron to that form regardless of income, so an
-unasked `no` prints the WRONG FORM rather than merely leaving a box blank.
+Do NOT start coding before that gate. Two spec reviews have each found ~19 blocking issues in a
+document that looked finished; the third is cheap next to a wrong safety authorization shipped
+permanently.
 
-### Reviews
+### The three things most likely to be got wrong again
 
-Two independent Opus lenses ran on `9880385..21fa20e` (composition + form-conformance), both persisted
-verbatim BEFORE folding at `reviews/b1b-r1-composition-opus.md` and `reviews/b1b-r2-conformance-opus.md`:
-0 Critical, 4 Important, 5 Minor, 4 Nit. All folded in `62f1498`. The conformance lens returned a PASS
-worth keeping: it regenerated `pdftotext -layout` from the shipped PDF, found it **byte-identical** to
-the committed extract, and machine-checked every quote against it.
+1. **The refusal predicate is scrub-OWNED, not the digital-asset box.** Year-scope ≠ artifact-scope:
+   `pseudo_active()` and `first_hard_blocker()` are projection-wide, so a filer whose export is
+   DRAFT-watermarked gets a scrubbed file where none of that reproduces. And the box predicate's `false`
+   means *unchecked, not "No"* — reading that silence as "ledger is empty" is widening an exemption.
+2. **No original identity value is emitted in ANY class.** `malformed → SYNTHETIC-malformed`; the thing
+   preserved is the *error variant*, never the bytes. The IP PIN is the carve-out — never synthesised,
+   because minting one fabricates a live IRS credential.
+3. **The two class-level tests are VACUOUS on today's fixtures** (all `None == None`). The spec imposes a
+   fixture *matrix* that fails on an empty cell. Do not satisfy it with a hand-list.
 
-★★ The fold itself closed a hole in the line-coverage INSTRUMENT: deleting a `cover_*` call from `all()`
-took the run from 228 money lines to 218 and still printed **OK**. `cover_fns_not_registered` now walks
-the call graph transitively from `all()`, with a planted-defect kill test (harness B1).
+### Owner-only, still open
+
+- **The temporary crates.io token from v0.14.0 is UNREVOKED** — now used across three releases
+  (0.14.0, 0.15.0, 0.16.0). This is the oldest open hygiene item.
+- `scripts/.pii-patterns` now EXISTS (owner-supplied, untracked, gitignored). The push gate is green.
+
+### Traps hit this session, so they are not re-hit
+
+- **`/tmp` filled to 100% mid-release** and `cargo install` failed with a `syn` compile error that reads
+  exactly like a broken published tarball. It was ENOSPC. Scratch build dirs had reached 23G. Clear
+  `scratchpad/{target,probe,verify,*-target}`; keep `scratchpad/filing/` (the vaults and input TOMLs).
+- **Simulate the range a push will ACTUALLY use.** A new branch uses `rev-list <sha> --not --remotes`;
+  an existing ref uses `origin/main..main`. Those differed by 55 commits here, and the first dry run
+  measured the wrong one.
+- A **golden cannot validate its own regeneration** — when a golden reds, read the diff and confirm it is
+  exactly the intended consequence before accepting it.
 
 ---
 
-_**Active work is the section immediately below**; §0 onward is the completed census/AMT record._
-_(Supersedes the 2026-06-28 edition, whose deep-research workflow completed long ago.)_
-
-**Written for a reader with NO prior context.** Confirm the tree first:
-`git log --oneline -5`, `git status`, `git branch --show-current`.
-
-> **One line (STALE for the active branch — see the ACTIVE WORK section above):** on `main` the
-> `feat/amt-e2-vector-population` work is **MERGED** (all five gates
-> green throughout; the branch's §0 order ①–⑥ is **complete**). **The §G-13 FIELD-PROVENANCE CENSUS is
-> DONE: 15 of 15 forms, 1158 AcroForm fields = 668 mapped + 490 censused, ZERO unaccounted**, and the
-> `CENSUS_NOT_YET_WRITTEN` ratchet is closed to `is_empty()`. It surfaced **16 gap fields / 8 unasked
-> items** — the register table is `FOLLOWUPS.md` §G-13. ★ One census entry (Schedule C line G) was
-> WRONG and is corrected there; read that note before trusting any single census reason. Two tracks remain open — **(A)** Schedule 1-A for
-> TY2025 (spec + plan green, task **T1 built**, T2–T7 untouched); **(B)** the form-authority pipeline
-> (steps 1–2 of 3 done for all 16 forms; the label reader, §5, is increment 1 built).
-> **The largest ARCHITECTURAL open item is §G-11 (§4a)** — the emitter cannot express "no testimony".
-> **Next work is USER-DIRECTED**; nothing below is auto-start.
+_Everything below is the historical record of earlier tracks (the pen-deferral branch, the AMT/§G-13
+census, the form-authority pipeline). All of it shipped; it is retained for provenance, not as a work
+queue._
 
 ---
 
