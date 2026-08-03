@@ -27,7 +27,7 @@ With both worked around it computes and emits a correct packet — see "what it 
 
 ## BLOCKERS — these stop a return
 
-### B1 · `NOT COMPUTABLE [QbiAboveThreshold]` — ✅ **HALF FIXED (B1a); B1b open**
+### B1 · `NOT COMPUTABLE [QbiAboveThreshold]` — ✅ **FIXED (B1a + B1b)**
 
 ```
 NOT COMPUTABLE [QbiAboveThreshold]: taxable income before the QBI deduction is above the
@@ -50,15 +50,35 @@ IV."* That filer has no trade or business for the wage/UBIA limitations or the S
 to, and Part IV needs no input btctax lacks — so refusing them was refusing a return the form itself
 tells us how to complete.
 
-**B1b — still open, and still blocks any return with a Schedule C above the threshold.** It needs three
-inputs that do not exist: **W-2 wages paid by the business** (8995-A line 4), **UBIA of qualified
-property** (line 7), and the **SSTB declaration** (Part I column (b)) — plus the phase-in range width
-($50,000 / $100,000), which `FullReturnParams` does not carry and which is **statutory, not
-inflation-indexed**, unlike the threshold beside it. ★ The SSTB question is class-(A): the code today
-holds every Schedule C to be mining and therefore non-SSTB, and above the threshold an unasked SSTB
-question is an understatement hole.
+**B1b — DONE.** Form 8995-A Parts I–III are transcribed and computed, the four inputs are collected
+(W-2 wages line 4, UBIA line 7, the SSTB checkbox Part I(b), the patron checkbox Part I(e)), and the
+statutory phase-in range width ($50,000 / $100,000) is in `FullReturnParams` with an invariant tying
+it to Rev. Proc. 2023-34's published top-of-range. Verified end to end: a single filer with $240,000
+of mined income now exports a packet containing `55A_f8995a.pdf` with Parts I–IV filled, and 1040
+line 13 equals its line 39.
 
-### B2 · 9 dependents exceed the 1040's 4-row grid — the PDF refuses
+What still refuses is no longer a population but four named SUB-SCHEDULES btctax does not fill —
+Schedule A (an SSTB inside the phase-in range), Schedule C (a prior-year QBI loss carryforward),
+Schedule D (a cooperative patron) — plus a narrowed `QbiAboveThreshold` that now means only
+*"you have not told me your W-2 wages or UBIA"*, and says so.
+
+★ The SSTB question turned out NOT to be class-(A). Making it a live mandatory declaration refused
+**every Schedule C return at any income** — below the threshold the simplified Form 8995 has no SSTB
+checkbox, so the answer changes nothing there. It is the `DonationsHadRestrictions` shape instead:
+offered always, mandatory only in `screen_absolute` where taxable income is known.
+
+★★ **Two Criticals surfaced only when the emitted packet was read**, both invisible to a green suite:
+the 1040's line 13 read *only* Form 8995 and printed ZERO on the 8995-A path (overstating tax by the
+whole deduction — shipped by B1a), and the deduction itself was UNCAPPED, so the form's line 27
+printed $45,267 against its own line 16 of $27,357. Fixed in af202b1 with a cross-form identity test.
+
+★ **Only ONE oracle witnesses §199A.** OpenTaxSolver reads the deduction as a hand-fed input
+(`GetLine( "L13", &L[13] )`) and never derives it, so the two-oracle rule cannot be met here;
+Tax-Calculator 6.7.2 (diffed byte-for-byte against the pristine sdist) plus hand-computation from the
+form text is what stands behind the figures. Tax-Calculator found the §199A(d)(3) SSTB-exclusion
+defect on its first run.
+
+### B2 · 9 dependents exceed the 1040's 4-row grid — ✅ **FIXED**
 
 ```
 error: IRS form fill: 9 rows exceed the 4-row capacity of a single the 1040 dependents table page
@@ -74,7 +94,10 @@ complaint**; only the emitter refuses, so the filer discovers this at the last s
 
 ★ The message also has a grammar bug: *"a single **the** 1040 dependents table page"*.
 
-**Blocks any family with 5+ dependents.**
+**FIXED (3a4d06a).** btctax now files the form's own remedy: the first four dependents in the grid,
+the *"If more than four dependents"* box checked, and a `dependents_statement.txt` continuation
+carrying all nine in the grid's own four columns. Verified on the owner's nine-child scenario, whose
+exported packet contains that statement. `crates/btctax-core/src/tax/dependents_statement.rs`.
 
 ### B3 · Self-employment income cannot be entered — only mined
 
@@ -214,7 +237,7 @@ per-earner aggregate is computed and credited unconditionally.
 standing limit. And `line_coverage.rs:973` already records Schedule 3 line 11 as an Exception carrying
 *"no arithmetic, no source line"*, so the coverage table names the gap without closing it.
 
-### B10 · The same missing input REFUSES a return that is perfectly fileable
+### B10 · The same missing input REFUSES a return that is perfectly fileable — ✅ **FIXED**
 
 The TaxCalcBench case itself does not compute at all:
 
@@ -227,6 +250,13 @@ btctax got the **law** right — it detected the §6413(c) situation, which the 
 sharpest adverse test in the whole corpus"*. But the instruction says *"you can't claim the excess"*, not
 *"you can't file"*. The correct return is complete: total tax 54,586, payments 53,501, **owed 1,085**,
 no Schedule 3. btctax refuses instead, so this filer cannot file at all.
+
+**FIXED.** A single employer's over-withholding is no longer a refusal — the excess is simply not
+creditable and the return FILES, which is what the instruction says. `return_refuse.rs` pins it:
+*"a single employer's over-withholding is not creditable, but the return still FILES"*. The related
+§6413(c) work (18c9980, 03527f7) also closed a real **understatement**: the excess-Social-Security
+credit was being allowed across what was actually one employer, because the comparison was on the
+employer NAME and no EIN was collected.
 
 The guard is per-W-2 (`return_refuse.rs:779`, `box4_ss_withheld > excess_ss_max`) — a proxy for employer
 identity it does not have. **Both R2 and B10 are the same missing field, failing in opposite
