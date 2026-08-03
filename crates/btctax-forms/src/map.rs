@@ -63,6 +63,8 @@ pub const F8960_MAP_2024: &str = include_str!("../forms/2024/f8960.map.toml");
 pub const F8995_MAP_2024: &str = include_str!("../forms/2024/f8995.map.toml");
 /// Form 8995-A (§G-28/B1a) — Part IV only; see the map's own header for why.
 pub const F8995A_MAP_2024: &str = include_str!("../forms/2024/f8995a.map.toml");
+/// §G-6 — the bundled TY2024 Form 6251 map.
+pub const F6251_MAP_2024: &str = include_str!("../forms/2024/f6251.map.toml");
 /// The TY2024 Schedule 2 (Additional Taxes) map (embedded at compile time).
 pub const SCHEDULE_2_MAP_2024: &str = include_str!("../forms/2024/f1040s2.map.toml");
 /// The TY2024 Schedule 3 (Additional Credits and Payments) map (embedded at compile time).
@@ -99,6 +101,175 @@ pub struct AmountCols {
     pub adj_g: String,
     /// Column (h) — gain/loss.
     pub gain_h: String,
+}
+
+/// **Form 6251** (Alternative Minimum Tax—Individuals), TY2024 — §G-6.
+///
+/// 41 of the form's 59 numbered money boxes. Lines 2c-2t are Part I add-backs core does not model and
+/// are CENSUSED as `gap` (not `unmodeled`): they are add-backs, so silence understates tax, and the
+/// filer is refused through the §G-22 out-of-scope declaration rather than filed with a laundered zero.
+///
+/// ★ See `forms/2024/f6251.map.toml` for how the assignment was corroborated — the page-1 field names
+/// are NOT a uniform offset, and the three inset widgets landing exactly on the three parenthesised
+/// lines 2b/2f/2s is what pins it.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Form6251Map {
+    /// `"f6251"`.
+    pub form: String,
+    /// Tax year.
+    pub year: i32,
+    pub line1: MoneyCell,
+    pub line2a: MoneyCell,
+    pub line2b: MoneyCell,
+    pub line3: MoneyCell,
+    pub line4: MoneyCell,
+    pub line5: MoneyCell,
+    pub line6: MoneyCell,
+    pub line7: MoneyCell,
+    pub line8: MoneyCell,
+    pub line9: MoneyCell,
+    pub line10: MoneyCell,
+    pub line11: MoneyCell,
+    pub line12: MoneyCell,
+    pub line13: MoneyCell,
+    pub line14: MoneyCell,
+    pub line15: MoneyCell,
+    pub line16: MoneyCell,
+    pub line17: MoneyCell,
+    pub line18: MoneyCell,
+    pub line19: MoneyCell,
+    pub line20: MoneyCell,
+    pub line21: MoneyCell,
+    pub line22: MoneyCell,
+    pub line23: MoneyCell,
+    pub line24: MoneyCell,
+    pub line25: MoneyCell,
+    pub line26: MoneyCell,
+    pub line27: MoneyCell,
+    pub line28: MoneyCell,
+    pub line29: MoneyCell,
+    pub line30: MoneyCell,
+    pub line31: MoneyCell,
+    pub line32: MoneyCell,
+    pub line33: MoneyCell,
+    pub line34: MoneyCell,
+    pub line35: MoneyCell,
+    pub line36: MoneyCell,
+    pub line37: MoneyCell,
+    pub line38: MoneyCell,
+    pub line39: MoneyCell,
+    pub line40: MoneyCell,
+    /// Name + SSN. REQUIRED — a schedule that does not name its taxpayer is not filable.
+    pub identity: IdentityCells,
+}
+
+impl Form6251Map {
+    /// The bundled TY2024 map.
+    pub fn ty2024() -> Self {
+        Self::parse(F6251_MAP_2024).expect("bundled f6251 2024 map parses")
+    }
+    fn parse(s: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(s)
+    }
+
+    /// Every modelled money cell, in the form's own printed order.
+    ///
+    /// ★★★ EXHAUSTIVE destructure, no `..` — a cell added to this map is *pattern does not mention
+    /// field* here. That matters because the sweeps that read the FILLED page back (whole-dollar,
+    /// paren-magnitude) iterate this list: a cell missing from it is a cell no read-back ever checks,
+    /// which is the quietest way for a line to stop being verified while every test stays green.
+    #[must_use]
+    pub fn money_cells(&self) -> Vec<&MoneyCell> {
+        let Self {
+            form: _,
+            year: _,
+            identity: _, // not money
+            line1: _,
+            line2a: _,
+            line2b: _,
+            line3: _,
+            line4: _,
+            line5: _,
+            line6: _,
+            line7: _,
+            line8: _,
+            line9: _,
+            line10: _,
+            line11: _,
+            line12: _,
+            line13: _,
+            line14: _,
+            line15: _,
+            line16: _,
+            line17: _,
+            line18: _,
+            line19: _,
+            line20: _,
+            line21: _,
+            line22: _,
+            line23: _,
+            line24: _,
+            line25: _,
+            line26: _,
+            line27: _,
+            line28: _,
+            line29: _,
+            line30: _,
+            line31: _,
+            line32: _,
+            line33: _,
+            line34: _,
+            line35: _,
+            line36: _,
+            line37: _,
+            line38: _,
+            line39: _,
+            line40: _,
+        } = self;
+        vec![
+            &self.line1,
+            &self.line2a,
+            &self.line2b,
+            &self.line3,
+            &self.line4,
+            &self.line5,
+            &self.line6,
+            &self.line7,
+            &self.line8,
+            &self.line9,
+            &self.line10,
+            &self.line11,
+            &self.line12,
+            &self.line13,
+            &self.line14,
+            &self.line15,
+            &self.line16,
+            &self.line17,
+            &self.line18,
+            &self.line19,
+            &self.line20,
+            &self.line21,
+            &self.line22,
+            &self.line23,
+            &self.line24,
+            &self.line25,
+            &self.line26,
+            &self.line27,
+            &self.line28,
+            &self.line29,
+            &self.line30,
+            &self.line31,
+            &self.line32,
+            &self.line33,
+            &self.line34,
+            &self.line35,
+            &self.line36,
+            &self.line37,
+            &self.line38,
+            &self.line39,
+            &self.line40,
+        ]
+    }
 }
 
 /// Schedule D lines **1a** and **8a** — columns (d), (e) and (h) only. §G-28/B4.
@@ -1326,6 +1497,11 @@ pub struct Schedule2Map {
     /// taxpayer is not a filable form, so a map lacking `[identity]` fails at deserialization.
     pub identity: IdentityCells,
     /// L4 — self-employment tax (SS + regular Medicare only), AMOUNT column, page 1.
+    /// §G-6 — L2, the AMT from Form 6251 line 11.
+    pub line2: MoneyCell,
+    /// §G-6 — L3, "Add lines 1z and 2", which **1040 line 17 names by number**. Blank while Part I is
+    /// empty; once an AMT lands on line 2 the 1040 carries a figure that must be visible here.
+    pub line3: MoneyCell,
     pub line4: MoneyCell,
     /// L11 — Additional Medicare Tax (Form 8959's printed L18), AMOUNT column, page 1.
     pub line11: MoneyCell,
@@ -1351,10 +1527,18 @@ impl Schedule2Map {
             _ => Err(FormsError::UnsupportedYear(year)),
         }
     }
-    /// The 4 filled cells in printed reading order. **Descent is grouped by PAGE** — line 21 sits on
+    /// The 6 filled cells in printed reading order. **Descent is grouped by PAGE** — line 21 sits on
     /// page 2, whose y-coordinates are not comparable with page 1's.
-    pub fn lines(&self) -> [&MoneyCell; 4] {
-        [&self.line4, &self.line11, &self.line12, &self.line21]
+    /// ★ §G-6 — line 2 (the AMT) leads, so its descent ordinal is 0 on page 1.
+    pub fn lines(&self) -> [&MoneyCell; 6] {
+        [
+            &self.line2,
+            &self.line3,
+            &self.line4,
+            &self.line11,
+            &self.line12,
+            &self.line21,
+        ]
     }
 }
 

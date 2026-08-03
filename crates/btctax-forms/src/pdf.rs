@@ -43,6 +43,8 @@ pub const F8995_PDF_2024: &[u8] = include_bytes!("../forms/2024/f8995.pdf");
 /// Form 8995-A — the FULL §199A form, required above the §199A(e)(2) threshold where the simplified
 /// Form 8995 no longer applies (§G-28/B1).
 pub const F8995A_PDF_2024: &[u8] = include_bytes!("../forms/2024/f8995a.pdf");
+/// §G-6 — the bundled TY2024 Form 6251.
+static F6251_PDF_2024: &[u8] = include_bytes!("../forms/2024/f6251.pdf");
 /// The bundled TY2024 Schedule 2, Additional Taxes (official IRS fillable PDF, public domain).
 pub const SCHEDULE_2_PDF_2024: &[u8] = include_bytes!("../forms/2024/f1040s2.pdf");
 /// The bundled TY2024 Schedule 3, Additional Credits and Payments (official IRS fillable PDF, public domain).
@@ -122,6 +124,14 @@ pub fn f8995_pdf(year: i32) -> Result<&'static [u8], FormsError> {
 }
 
 /// The bundled Form 8995-A PDF bytes. Full-return v1 is TY2024-only.
+/// §G-6 — the bundled Form 6251 PDF bytes. Full-return v1 is TY2024-only.
+pub fn f6251_pdf(year: i32) -> Result<&'static [u8], FormsError> {
+    match year {
+        2024 => Ok(F6251_PDF_2024),
+        _ => Err(FormsError::UnsupportedYear(year)),
+    }
+}
+
 pub fn f8995a_pdf(year: i32) -> Result<&'static [u8], FormsError> {
     match year {
         2024 => Ok(F8995A_PDF_2024),

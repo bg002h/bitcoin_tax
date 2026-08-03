@@ -28,6 +28,12 @@
 form = "f1040s2"
 year = 2024
 
+# §G-6 — "Alternative minimum tax. Attach Form 6251", from Form 6251's own printed line 11.
+#   ★ Was CENSUSED as "$0 by construction, because a return needing Form 6251 is refused" —
+#     a reason the emitter itself made false.
+line2  = "form1[0].Page1[0].f1_12[0]"
+# 3 "Add lines 1z and 2. Enter here and on Form 1040, 1040-SR, or 1040-NR, line 17"
+line3  = "form1[0].Page1[0].f1_13[0]"
 line4  = "form1[0].Page1[0].f1_14[0]"   # "Self-employment tax. Attach Schedule SE"   (SS + regular Medicare ONLY)
 line11 = "form1[0].Page1[0].f1_21[0]"   # "Additional Medicare Tax. Attach Form 8959" (the form's PRINTED line 18)
 line12 = "form1[0].Page1[0].f1_22[0]"   # "Net investment income tax. Attach Form 8960" (the form's PRINTED line 17)
@@ -96,8 +102,6 @@ ssn  = "form1[0].Page1[0].f1_02[0]"
 "form1[0].Page1[0].f1_11[0]" = { line = "1z",        rule = "unmodeled", reason = "\"Add lines 1a through 1y\" — dead with every line 1 item blank." }
 
 # ── Line 2 — Alternative minimum tax ★ the one line here btctax genuinely computes ───────────────
-"form1[0].Page1[0].f1_12[0]" = { line = "2", rule = "unmodeled", reason = "Alternative minimum tax (Form 6251). btctax DOES compute Form 6251, but a return requiring it to be ATTACHED is refused outright at return_1040.rs:1576 (Who Must File condition 1, line 7 > line 10) because v1 cannot file the attachment. AMT > 0 implies line 7 > line 10, so every return that reaches the PDF stage has AMT of $0 — the blank is structural, not an omission." }
-"form1[0].Page1[0].f1_13[0]" = { line = "3", rule = "unmodeled", reason = "\"Add lines 1z and 2\" — both are structurally zero, so 1040 line 17 is zero." }
 
 # ── Part II lines 5-10: other taxes ──────────────────────────────────────────────────────────────
 "form1[0].Page1[0].Line5_ReadOrder[0].f1_15[0]" = { line = "5",  rule = "unmodeled", reason = "SS and Medicare tax on UNREPORTED tip income (Form 4137). btctax collects W-2 box 7 (tips already reported to the employer) and refuses on box 8 allocated tips; it never asks about tips withheld from the employer, and models no Form 4137. ★ The filer-facing question lives on Form 1040 line 1c (tip income not reported on line 1a) — see that form's census." }

@@ -115,7 +115,27 @@ const CEIL_IDIOMS: &[(&str, &str)] = &[
 ///
 /// ★ The ratchet did its job anyway — it forced the raise into a diff, where a reviewer read the
 /// reason and checked it against the production list. A silent counter would have absorbed both.
-const MAX_EXCEPTIONS: usize = 13;
+///
+/// **RAISED 13 → 14 on 2026-08-03 (§G-6), for ONE line: `f6251:7`.** Form 6251 line 7 prints THREE
+/// bullets under a single label — a Form 2555 referral, *"complete Part III on the back and enter the
+/// amount from line 40 here"*, and an *"All others"* flat 26/28% computation — and core takes the
+/// second or the third depending on whether Part III routed. That is a BRANCH, not a production:
+/// Carry on one path, Scaled on the other.
+///
+/// ★★ And only the first bullet is quotable at all. The Part III bullet carries the box label printed
+/// MID-SENTENCE (*"complete Part III on the · · 7 back and enter…"*), so quoting it fails rule (2b)'s
+/// label-precedes test. The first draft quoted the *"All others"* bullet and the checker rejected it
+/// as **verbatim-but-attached-to-the-wrong-line** — which is the Form 6251 line-33 class, caught on
+/// Form 6251 itself, by the rule that exists because of it.
+/// **RAISED 14 → 15 on 2026-08-03 (§G-6), for ONE line: `f1040s2:2`.** *"Alternative minimum tax.
+/// **Attach Form 6251**"* is a CONDITIONAL entry, not a production: it carries Form 6251 line 11 when
+/// that form is in the packet and is **BLANK when it is not** — so `Schedule2Lines::line2` is
+/// `Option<Usd>` and the emitter skips the cell entirely rather than writing a `0`.
+///
+/// ★★ A `Carry` here would have been a lie in the direction this repo cares about: it asserts the line
+/// always holds a figure, and the figure on a no-AMT return would be a sworn `0` on a form that is not
+/// attached (§G-11 — *an entry is testimony*). The exception exists to say the blank is a DECISION.
+const MAX_EXCEPTIONS: usize = 15;
 // ★ RAISED 11 → 12 for Form 8995-A **line 38** (§G-28/B1a). The DPAD line is a CONDITIONAL entry with
 //   no "-0-" clause — "DPAD under section 199A(g) allocated from an agricultural or horticultural
 //   cooperative. Don't enter more than line 33 minus line 37" presumes an allocation from a Schedule D

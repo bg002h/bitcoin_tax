@@ -314,6 +314,24 @@ pub fn schedule_se_lines(ar: &AbsoluteReturn, sch_c: &ScheduleCLines) -> Option<
 /// double-count it (deep/02 C5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Schedule2Lines {
+    /// **L2 — "Alternative minimum tax. Attach Form 6251"** (§G-6), which is Form 6251's own printed
+    /// line 11: *"AMT. Subtract line 10 from line 9. If zero or less, enter -0-. Enter here and on
+    /// Schedule 2 (Form 1040), line 2."*
+    ///
+    /// ★★★ This field did not exist until the Form 6251 emitter landed, and its absence would have
+    /// been a CRITICAL the moment that emitter shipped: the packet would carry an attached Form 6251
+    /// claiming AMT that the return never assessed, so 1040 line 17 — and total tax — would omit it.
+    /// That is the same shape as the 1040-vs-Form-8995-A pair (§G-28/B1b), and it UNDERSTATES.
+    /// Schedule 2's own census reason said the blank was "structural, not an omission" because a
+    /// return needing Form 6251 was refused outright; shipping the emitter is exactly what made that
+    /// reason false.
+    /// ★★ `Option`: line 2 is a CONDITIONAL entry — "Alternative minimum tax. **Attach Form 6251**".
+    /// With no Form 6251 attached, a printed `0` would swear the filer figured an AMT of zero on a
+    /// form that is not in the packet. Blank is the only honest mark.
+    pub line2: Option<Usd>,
+    /// **L3 — "Add lines 1z and 2. Enter here and on Form 1040, 1040-SR, or 1040-NR, line 17."** Line
+    /// 1z is the additions-to-tax block, which btctax fills with nothing, so this IS line 2 today.
+    pub line3: Usd,
     /// L4 — self-employment tax (Schedule SE): §1401(a) Social Security + §1401(b)(1) regular
     /// Medicare ONLY.
     pub line4: Usd,
@@ -334,6 +352,8 @@ pub fn schedule_2_lines(
     sch_se: Option<&ScheduleSeLines>,
     f8959: &Form8959Lines,
     f8960: Option<&Form8960Lines>,
+    // §G-6 — the attached Form 6251, when one is filed. `Some` exactly when `must_attach()` holds.
+    f6251: Option<&crate::tax::form6251::Form6251>,
 ) -> Option<Schedule2Lines> {
     // ★ L4 IS Schedule SE's PRINTED line 12 — the form says so ("Enter here and on Schedule 2, line 4").
     // A re-rounding of the exact SE tax would put this schedule a dollar away from the Schedule SE
@@ -341,12 +361,23 @@ pub fn schedule_2_lines(
     let line4 = sch_se.map_or(Usd::ZERO, |s| s.line12);
     let line11 = f8959.line18; // already a printed whole dollar
     let line12 = f8960.map_or(Usd::ZERO, |f| f.line17); // ditto
+                                                        // ★★★ §G-6 — Form 6251's PRINTED line 11, rounded there, not re-derived here. The form itself
+                                                        //     routes it: *"Enter here and on Schedule 2 (Form 1040), line 2."* Re-rounding the exact AMT
+                                                        //     would put this schedule a dollar away from the Form 6251 stapled behind it — the same rule
+                                                        //     line 4 (← Schedule SE line 12) and line 11 (← Form 8959 line 18) already follow.
+    let line2 = f6251.map(|f| round_dollar(f.line11));
+    // ★ line 3 SUMS lines 1z and 2, and a blank line 2 sums as zero — the sum is our arithmetic, not
+    //   the filer's testimony, so `unwrap_or(ZERO)` here is right where a printed `0` on line 2 is not.
+    // "Add lines 1z and 2" — btctax fills nothing on the 1z additions block, so line 3 IS line 2.
+    let line3 = line2.unwrap_or(Usd::ZERO);
     let line21 = line4 + line11 + line12; // ★ sums the PRINTED lines
 
     if line21 <= Usd::ZERO {
         return None;
     }
     Some(Schedule2Lines {
+        line2,
+        line3,
         line4,
         line11,
         line12,
@@ -692,7 +723,12 @@ pub fn form_1040_lines(
         line3a,
         qdcgt_net_capital_gain, // ★ the PRINTED Schedule D figure, not round(exact) — r2 NEW-I1
     );
-    let line17 = Usd::ZERO; // Schedule 2 Part I is blank in v1 (see Schedule2Lines)
+    // ★★★ §G-6 — Schedule 2's PRINTED line 3, which the form itself routes here: *"Add lines 1z and 2.
+    //     Enter here and on Form 1040, 1040-SR, or 1040-NR, line 17."* It was hardcoded ZERO while a
+    //     return needing Form 6251 was refused outright — and the moment that emitter landed, the
+    //     hardcode became a CRITICAL: an attached Form 6251 claiming AMT that total tax never
+    //     assessed. Same shape as the 1040-vs-Form-8995-A pair, same direction (understating).
+    let line17 = sch_2.map_or(Usd::ZERO, |s| s.line3);
     let line18 = line16 + line17;
     let line19 = Usd::ZERO; // ★ CTC/ODC — a §3.4 conservative omission (advisory fires)
     let line20 = sch_3.map_or(Usd::ZERO, |s| s.line8);
@@ -1772,7 +1808,8 @@ mod tests {
         );
 
         let f8959 = form_8959_lines(FilingStatus::Single, Usd::ZERO, Usd::ZERO, Some(&se));
-        let s2 = schedule_2_lines(Some(&sse), &f8959, None).expect("SE tax ⇒ Schedule 2 files");
+        let s2 =
+            schedule_2_lines(Some(&sse), &f8959, None, None).expect("SE tax ⇒ Schedule 2 files");
         assert_eq!(
             s2.line4, sse.line12,
             "★ Schedule 2 L4 IS Schedule SE's printed L12"
@@ -2237,7 +2274,7 @@ mod tests {
         let sch_c = schedule_c_lines(&ar).unwrap();
         let sse = schedule_se_lines(&ar, &sch_c).unwrap();
         let f8959 = form_8959_lines(FilingStatus::Single, Usd::ZERO, Usd::ZERO, Some(&se));
-        let s2 = schedule_2_lines(Some(&sse), &f8959, None).unwrap();
+        let s2 = schedule_2_lines(Some(&sse), &f8959, None, None).unwrap();
 
         // ★ L4 IS Schedule SE's printed L12 = printed L10 + printed L11 = round(21,836.40) +
         // round(8,034.45) = 21,836 + 8,034 = 29,870 — and NOT round_dollar(29,870.85) = 29,871.
@@ -2285,7 +2322,7 @@ mod tests {
         let exact_total = dec!(274.50) + dec!(499.50); // what the engine carries, in cents
         assert_eq!(round_dollar(exact_total), dec!(774)); // …which rounds to something ELSE
 
-        let s2 = schedule_2_lines(None, &f8959, None).unwrap();
+        let s2 = schedule_2_lines(None, &f8959, None, None).unwrap();
         assert_eq!(
             s2.line11,
             dec!(775),
@@ -2299,7 +2336,7 @@ mod tests {
     fn schedule_2_absent_when_no_other_taxes() {
         let f8959 = form_8959_lines(FilingStatus::Single, dec!(50000), Usd::ZERO, None);
         assert_eq!(f8959.line18, Usd::ZERO);
-        assert!(schedule_2_lines(None, &f8959, None).is_none());
+        assert!(schedule_2_lines(None, &f8959, None, None).is_none());
     }
 
     /// Schedule 3 carries the FTC and the excess-SS credit, and cross-foots to 1040 L20 / L31.
@@ -2785,7 +2822,7 @@ mod tests {
             "…the exact one differs"
         );
 
-        let s2 = schedule_2_lines(None, &f8959, None).unwrap();
+        let s2 = schedule_2_lines(None, &f8959, None, None).unwrap();
         assert_eq!(
             s2.line11,
             dec!(775),

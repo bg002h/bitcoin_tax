@@ -519,7 +519,39 @@ question's yes-conditions is the SAFE direction of edit; widening an *exemption*
 `the_out_of_scope_question_names_the_iso_exercise_and_the_amt_items`, which pins the prompt because
 the prompt IS the mechanism — nothing computes from it.
 
-**Still open, and this is a mitigation not a fix:** the filer is REFUSED rather than served. Collecting
+**★★★ THE EMITTER LANDED 2026-08-03 — Form 6251 IS NOW FILED, and the attach refusal is GONE.**
+
+`f6251.map.toml` (41 mapped lines, 18 censused), `btctax-forms/src/form6251.rs`, and packet sequence 32.
+Schedule 2 line 2 carries Form 6251's printed line 11; line 3 carries it to 1040 line 17. Verified
+end-to-end on a real export: 6251 L11 = 11,322 → Sch 2 L2 = L3 = 11,322 → 1040 L17 = 11,322, and
+L24 = 481,225 including it.
+
+**Three defects the emitter EXPOSED, each invisible until the form could actually be filed:**
+
+1. **Schedule 2 had no line 2 at all** — the packet would have carried a Form 6251 claiming an AMT the
+   return never assessed. Understatement. Schedule 2's own census reason said *"every return that
+   reaches the PDF stage has AMT of $0 — the blank is structural, not an omission"*, which the emitter
+   made false the moment it existed.
+2. **Schedule 2 line 3 was censused** as *"both are structurally zero"* — so the first AMT export
+   printed **1040 line 17 = 11,322 above a blank line 3**, a filed 1040 figure whose named source box
+   was empty. The §G-11 defect inverted: not a fabricated entry, a MISSING one behind a figure that IS
+   filed.
+3. **`AbsoluteReturn::total_tax` was short by the entire AMT.** `l18` was hardcoded to `regular_tax`
+   with a comment naming the *removed* refusal as its warrant, and `compute_6251` ran BELOW `total_tax`.
+   `CONTINUITY.md` predicted this exactly ("Blocked until Schedule 2 line 2 exists") — and it stayed
+   green because **nothing outside `assemble_absolute` reads `total_tax`**, so no test compared the two
+   chains. Now pinned by `the_absolute_total_tax_equals_the_printed_1040_line_24`, mutation-verified
+   RED at $13,461 short.
+
+★ The lesson is #3's: a figure with no reader is not thereby correct. It is a wrong number waiting for
+its first caller, and only a comparison against the chain that IS read can find it.
+
+**`RefuseReason::AmtScreenTriggered` is now DEAD** — declared, matched in `btctax-input-form`, and never
+constructed. Left in place deliberately (the rename is already filed below); **owning phase: the Tier-2
+rename**, which should delete it rather than rename it.
+
+**Still open, and the DECLARATION mitigation is still a mitigation not a fix:** the ISO filer is
+REFUSED rather than served. Collecting
 Form 3921 box 3 / box 4 / box 5, the same-year-disposition question and the substantial-risk-of-
 forfeiture flag — three numbers and two booleans, off a form the IRS mails them — would let them file.
 **Owning phase: with the Form 6251 emitter, or immediately after it.**

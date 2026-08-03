@@ -509,6 +509,13 @@ pub struct PrintedForms {
     /// ★★ The two are ALTERNATIVES: exactly one is `Some` on any return that claims §199A at all.
     /// Filing both would claim the deduction twice on paper.
     pub f8995a: Option<crate::tax::qbi_a::Form8995A>,
+    /// **Form 6251** (§G-6) — `Some` exactly when i6251's *Who Must File* condition 1 holds:
+    /// *"Form 6251, line 7, is greater than line 10."*
+    ///
+    /// ★★ That is the ATTACH test, not `amt > 0`: when line 7 exceeds line 10 the AMT foreign tax
+    /// credit is figured, so the AMT can be $0 while the form is still required. btctax has computed
+    /// this form for every return since v0.14.0 — what was missing was the ability to FILE it.
+    pub f6251: Option<crate::tax::form6251::Form6251>,
     /// Form 8283 — REQUIRED when the return itemizes and its printed noncash gifts exceed $500 (the
     /// threshold is printed on Schedule A line 12 itself: "You must attach Form 8283 if over $500").
     ///
@@ -641,7 +648,10 @@ pub fn assemble_printed_forms(
     let sch_a = schedule_a_lines(ar, income.line11);
     // Schedule SE is upstream of Schedule 2: L4 IS its printed line 12.
     let sch_se = sch_c.as_ref().and_then(|c| schedule_se_lines(ar, c));
-    let sch_2 = schedule_2_lines(sch_se.as_ref(), &f8959, f8960.as_ref());
+    // §G-6 — the attached Form 6251, decided by its OWN Who-Must-File test. Bound before Schedule 2
+    // because Schedule 2 line 2 is Form 6251's printed line 11 and must not re-derive it.
+    let f6251 = ar.amt.must_attach().then(|| ar.amt.clone());
+    let sch_2 = schedule_2_lines(sch_se.as_ref(), &f8959, f8960.as_ref(), f6251.as_ref());
     let sch_3 = schedule_3_lines(ar);
 
     // Form 8283 files only when the return ITEMIZES and its printed noncash gifts clear the $500
@@ -695,6 +705,8 @@ pub fn assemble_printed_forms(
         f8960,
         f8995,
         f8995a,
+        // §G-6 — attached exactly when the form's own Who-Must-File test says so.
+        f6251,
         f8283,
         f8275,
     }
@@ -706,7 +718,7 @@ mod tests {
     use crate::tax::return_1040::assemble_absolute;
     use crate::tax::return_inputs::{Dependent, HouseholdHeader, ScheduleCInputs, W2};
     use crate::tax::testonly::{
-        kitchen_sink_household, ty2024_params, ty2024_table, w2_only_household,
+        amt_owing_household, kitchen_sink_household, ty2024_params, ty2024_table, w2_only_household,
     };
     use rust_decimal_macros::dec;
     use time::macros::date;
@@ -1290,6 +1302,118 @@ mod tests {
     /// A form that is not required is not in the packet — a plain W-2 household files a 1040 and nothing
     /// else. (`fill_full_return` emits exactly the `Some` members, so an over-eager `Some` here would
     /// staple a blank Schedule C to a return that has no business.)
+    /// ★★★ §G-6 — SCHEDULE 2 LINE 2 IS NON-BLANK **EXACTLY** WHEN FORM 6251 IS IN THE PACKET.
+    ///
+    /// Two failures live here, in opposite directions, and both are Critical:
+    ///
+    ///   * a packet carrying **Form 6251 with no Schedule 2 line 2** files a form claiming an AMT the
+    ///     return never assesses — the return UNDERSTATES tax while the evidence for the shortfall is
+    ///     stapled to it. (That is the state this tree was in mid-build, and the class the 1040-vs-8995-A
+    ///     pair was caught in.)
+    ///   * a packet carrying **line 2 with no Form 6251** swears the filer figured an AMT on a form the
+    ///     IRS never receives (§G-11 — *an entry is testimony*).
+    ///
+    /// ★ Both directions collapse to one `assert_eq!` on the two `is_some()`s, so neither can be
+    /// satisfied without the other, and the VALUE is checked against the form's own line 11 so the
+    /// figure cannot be re-derived. `must_attach()` is the single predicate: it decides the attachment,
+    /// and the attachment decides the line.
+    #[test]
+    fn schedule_2_line_2_is_non_blank_exactly_when_form_6251_is_attached() {
+        // ★★★ THE `expect_attached` COLUMN IS THE ANTI-VACUITY GUARD, and it is not decoration.
+        //     The first draft of this test iterated only the two general fixtures — NEITHER of which
+        //     owes AMT — so it asserted `None == None` twice and passed against a tree whose Schedule 2
+        //     had no line 2 at all. Declaring the expected side per household means the biconditional
+        //     can never again be satisfied by both sides being empty.
+        for (name, hh, expect_attached) in [
+            ("kitchen sink", kitchen_sink_household(), false),
+            ("W-2 only", w2_only_household(), false),
+            ("AMT-owing", amt_owing_household(), true),
+        ] {
+            let (ri, state) = hh;
+            let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
+            let pr = assemble_printed_return(
+                &ri,
+                &state,
+                &BTreeMap::new(),
+                &ar,
+                &ty2024_table(),
+                2024,
+                &[],
+            )
+            .unwrap();
+            let line2 = pr.forms.sch_2.as_ref().and_then(|s| s.line2);
+            assert_eq!(
+                pr.forms.f6251.is_some(),
+                expect_attached,
+                "{name}: this fixture is here to exercise attached = {expect_attached}. If the AMT \
+                 case stops attaching, the biconditional below goes VACUOUS and stops discriminating."
+            );
+            assert_eq!(
+                pr.forms.f6251.is_some(),
+                line2.is_some(),
+                "{name}: Form 6251 attached = {}, but Schedule 2 line 2 = {line2:?}. A packet may not \
+                 carry one without the other in EITHER direction.",
+                pr.forms.f6251.is_some()
+            );
+            if let (Some(f), Some(l2)) = (pr.forms.f6251.as_ref(), line2) {
+                assert_eq!(
+                    l2,
+                    crate::conventions::round_dollar(f.line11),
+                    "{name}: Schedule 2 line 2 must TRANSCRIBE Form 6251 line 11, never re-derive it"
+                );
+                assert_eq!(
+                    f.printed().line11,
+                    l2,
+                    "{name}: …and the two must agree AS PRINTED — same rounding, one figure, two pages"
+                );
+            }
+        }
+    }
+
+    /// ★★★ §G-6 — THE ABSOLUTE `total_tax` EQUALS THE PRINTED 1040 LINE 24.
+    ///
+    /// btctax carries two chains: the unrounded `AbsoluteReturn` and the whole-dollar printed packet.
+    /// They are assembled by different code, and **only the printed one is read today** — `total_tax`
+    /// has no consumer outside `assemble_absolute`. That is precisely how it came to be short by the
+    /// entire AMT: `l18` was hardcoded to `regular_tax` with a comment citing the AMT refusal as its
+    /// warrant, the refusal was removed, and the printed chain was fixed while the absolute one was not.
+    /// Nothing was red, because nothing compared them.
+    ///
+    /// ★ This is the comparison. A figure with no reader is not thereby correct — it is a wrong number
+    ///   waiting for its first caller.
+    #[test]
+    fn the_absolute_total_tax_equals_the_printed_1040_line_24() {
+        for (name, hh, expect_amt) in [
+            ("kitchen sink", kitchen_sink_household(), false),
+            ("AMT-owing", amt_owing_household(), true),
+        ] {
+            let (ri, state) = hh;
+            let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
+            let pr = assemble_printed_return(
+                &ri,
+                &state,
+                &BTreeMap::new(),
+                &ar,
+                &ty2024_table(),
+                2024,
+                &[],
+            )
+            .unwrap();
+            assert_eq!(
+                ar.amt.line11 > crate::conventions::Usd::ZERO,
+                expect_amt,
+                "{name}: fixture must exercise AMT = {expect_amt}, else this comparison goes vacuous \
+                 on the one term it exists to catch"
+            );
+            assert_eq!(
+                crate::conventions::round_dollar(ar.total_tax),
+                pr.forms.f1040.line24,
+                "{name}: the absolute total tax and the FILED 1040 line 24 must be the same number. \
+                 A gap here is what the filer signs versus what the engine believes."
+            );
+        }
+    }
+
     #[test]
     fn the_packet_omits_every_form_that_is_not_required() {
         let (ri, state) = w2_only_household();

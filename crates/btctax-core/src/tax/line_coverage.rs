@@ -170,6 +170,312 @@ impl Coverage {
     }
 }
 
+/// §G-6 — **Form 6251** (Alternative Minimum Tax—Individuals), the 41 lines core models.
+///
+/// ★★ Lines 2c-2t are absent from the struct and therefore from this table. They are censused `gap`
+/// in `f6251.map.toml`, not `unmodeled`: every one is an ADD-BACK, so a laundered zero UNDERSTATES
+/// tax. The §G-22 out-of-scope declaration refuses a filer who has one.
+///
+/// ★★★ LINE 33 IS *"Subtract line 32 from line 22"* AND LINE 36 IS *"Subtract line 35 from line 12"*
+/// — the pair that produced this repo's standing transcription rule, four rows apart with the same
+/// verb, once shipped as "from line 12" on both. Both are quoted verbatim here and the quote is
+/// checked against `f6251--2024.txt` by `xtask line-coverage`.
+pub fn cover_form6251(p: &crate::tax::form6251::Form6251) -> Coverage {
+    let crate::tax::form6251::Form6251 {
+        line1,
+        line2a,
+        line2b,
+        line3,
+        line4,
+        line5,
+        line6,
+        line7,
+        line8,
+        line9,
+        line10,
+        line11,
+        line12,
+        line13,
+        line14,
+        line15,
+        line16,
+        line17,
+        line18,
+        line19,
+        line20,
+        line21,
+        line22,
+        line23,
+        line24,
+        line25,
+        line26,
+        line27,
+        line28,
+        line29,
+        line30,
+        line31,
+        line32,
+        line33,
+        line34,
+        line35,
+        line36,
+        line37,
+        line38,
+        line39,
+        line40,
+        part_iii_completed: _,
+    } = p;
+    let f = "f6251";
+    let mut c = Coverage::default();
+    c.0.extend(cover_form6251line1(line1).0);
+    c.line(*line2a, f, "2a", "line2a", Production::Collected,
+        "If filing Schedule A (Form 1040), enter the taxes from Schedule A, line 7; otherwise, enter the amount from Form 1040 or 1040-SR, line 12");
+    c.line(
+        *line2b,
+        f,
+        "2b",
+        "line2b",
+        Production::Collected,
+        "Tax refund from Schedule 1 (Form 1040), line 1 or line 8z",
+    );
+    c.line(
+        *line3,
+        f,
+        "3",
+        "line3",
+        Production::Collected,
+        "Other adjustments, including income-based related adjustments",
+    );
+    c.line(*line4, f, "4", "line4", Production::Collected,
+        "Alternative minimum taxable income. Combine lines 1 through 3. (If married filing separately and line 4 is more than $875,950, see instructions.)");
+    c.line(*line5, f, "5", "line5", Production::Constant, "Exemption.");
+    c.line(*line6, f, "6", "line6", Production::Clamped(Polarity::FloorAtZero),
+        "Subtract line 5 from line 4. If more than zero, go to line 7. If zero or less, enter -0- here and on lines 7, 9, and");
+    // ★★★ LINE 7 IS AN EXCEPTION, AND THE CHECKER IS WHY. Two things are true of it at once:
+    //
+    //   · IT HAS NO SINGLE PRODUCTION. The form prints THREE bullets under one label: a Form 2555
+    //     referral, "complete Part III … and enter the amount from line 40 here", and the "All others"
+    //     flat 26/28% computation. Core takes the second or the third depending on
+    //     `part_iii_completed`, so line 7 is a Carry OR a Scaled — a branch, not a production.
+    //   · ONLY THE FIRST BULLET IS LABEL-BOUND. The label `7` opens that row; the Part III bullet
+    //     carries the box label EMBEDDED MID-SENTENCE ("complete Part III on the . . 7 back and
+    //     enter…"), so quoting it fails rule (2b) — which is the Form 6251 line-33 class working
+    //     exactly as designed, on Form 6251. The first draft here quoted the "All others" bullet, and
+    //     the checker rejected it as verbatim-but-attached-to-the-wrong-line.
+    c.exception(*line7, f, "7", "line7",
+        "• If you are filing Form 2555, see instructions for the amount to enter.",
+        "Three bullets under one label, and a two-branch production: Part III's line 40 when line 7 routes there (`part_iii_completed`), else the flat 26/28% on line 6. The quote is the only one of the three bound to line 7's own label — the Part III bullet has the box label printed mid-sentence, so it cannot be quoted under rule (2b). btctax never takes the Form 2555 branch (`form_2555_line45/50` reach no §911 path).");
+    c.line(
+        *line8,
+        f,
+        "8",
+        "line8",
+        Production::Collected,
+        "Alternative minimum tax foreign tax credit (see instructions)",
+    );
+    c.line(
+        *line9,
+        f,
+        "9",
+        "line9",
+        Production::Collected,
+        "Tentative minimum tax. Subtract line 8 from line 7",
+    );
+    c.line(*line10, f, "10", "line10", Production::Clamped(Polarity::FloorAtZero),
+        "Add Form 1040 or 1040-SR, line 16 (minus any tax from Form 4972), and Schedule 2 (Form 1040), line 1z. Subtract from the result Schedule 3 (Form 1040), line 1 and any negative amount reported on Form 8978, line 14 (treated as a positive number). If zero or less, enter -0-. If you used Schedule J to figure your tax on Form 1040 or 1040-SR, line 16, refigure that tax without using Schedule J before completing this line. See instructions");
+    c.line(*line11, f, "11", "line11", Production::Collected,
+        "AMT. Subtract line 10 from line 9. If zero or less, enter -0-. Enter here and on Schedule 2 (Form 1040), line 2");
+    c.line(*line12, f, "12", "line12", Production::Carry,
+        "Enter the amount from Form 6251, line 6. If you are filing Form 2555, enter the amount from line 3 of the worksheet in the instructions for line 7");
+    c.line(*line13, f, "13", "line13", Production::Carry,
+        "Enter the amount from line 4 of the Qualified Dividends and Capital Gain Tax Worksheet in the Instructions for Form 1040 or the amount from line 13 of the Schedule D Tax Worksheet in the Instructions for Schedule D (Form 1040), whichever applies (as refigured for the AMT, if necessary). See instructions. If you are filing Form 2555, see instructions for the amount to enter");
+    c.line(*line14, f, "14", "line14", Production::Carry,
+        "Enter the amount from Schedule D (Form 1040), line 19 (as refigured for the AMT, if necessary). See instructions. If you are filing Form 2555, see instructions for the amount to enter");
+    c.line(*line15, f, "15", "line15", Production::Bounded,
+        "If you did not complete a Schedule D Tax Worksheet for the regular tax or the AMT, enter the amount from line 13. Otherwise, add lines 13 and 14, and enter the smaller of that result or the amount from line 10 of the Schedule D Tax Worksheet (as refigured for the AMT, if necessary). If you are filing Form 2555, see instructions for the amount to enter");
+    c.line(
+        *line16,
+        f,
+        "16",
+        "line16",
+        Production::Bounded,
+        "Enter the smaller of line 12 or line 15",
+    );
+    c.line(
+        *line17,
+        f,
+        "17",
+        "line17",
+        Production::Combine,
+        "Subtract line 16 from line 12",
+    );
+    c.line(*line18, f, "18", "line18", Production::Scaled,
+        "If line 17 is $232,600 or less ($116,300 or less if married filing separately), multiply line 17 by 26% (0.26). Otherwise, multiply line 17 by 28% (0.28) and subtract $4,652 ($2,326 if married filing separately) from the result");
+    c.line(*line19, f, "19", "line19", Production::Constant,
+        "Enter: • $94,050 if married filing jointly or qualifying surviving spouse, • $47,025 if single or married filing separately, or • $63,000 if head of household.");
+    c.line(*line20, f, "20", "line20", Production::Carry,
+        "Enter the amount from line 5 of the Qualified Dividends and Capital Gain Tax Worksheet or the amount from line 14 of the Schedule D Tax Worksheet, whichever applies (as figured for the regular tax). If you did not complete either worksheet for the regular tax, enter the amount from Form 1040 or 1040-SR, line 15; if zero or less, enter -0-. If you are filing Form 2555, see instructions for the amount to enter");
+    c.line(
+        *line21,
+        f,
+        "21",
+        "line21",
+        Production::Clamped(Polarity::FloorAtZero),
+        "Subtract line 20 from line 19. If zero or less, enter -0-",
+    );
+    c.line(
+        *line22,
+        f,
+        "22",
+        "line22",
+        Production::Bounded,
+        "Enter the smaller of line 12 or line 13",
+    );
+    c.line(
+        *line23,
+        f,
+        "23",
+        "line23",
+        Production::Bounded,
+        "Enter the smaller of line 21 or line 22. This amount is taxed at 0%",
+    );
+    c.line(
+        *line24,
+        f,
+        "24",
+        "line24",
+        Production::Combine,
+        "Subtract line 23 from line 22",
+    );
+    c.line(*line25, f, "25", "line25", Production::Constant,
+        "Enter: • $518,900 if single, • $291,850 if married filing separately, • $583,750 if married filing jointly or qualifying surviving spouse, or • $551,350 if head of household. }");
+    c.line(
+        *line26,
+        f,
+        "26",
+        "line26",
+        Production::Carry,
+        "Enter the amount from line 21",
+    );
+    c.line(*line27, f, "27", "line27", Production::Carry,
+        "Enter the amount from line 5 of the Qualified Dividends and Capital Gain Tax Worksheet or the amount from line 21 of the Schedule D Tax Worksheet, whichever applies (as figured for the regular tax). If you did not complete either worksheet for the regular tax, enter the amount from Form 1040 or 1040-SR, line 15; if zero or less, enter -0-. If you are filing Form 2555, see instructions for the amount to enter");
+    c.line(
+        *line28,
+        f,
+        "28",
+        "line28",
+        Production::Combine,
+        "Add line 26 and line 27",
+    );
+    c.line(
+        *line29,
+        f,
+        "29",
+        "line29",
+        Production::Clamped(Polarity::FloorAtZero),
+        "Subtract line 28 from line 25. If zero or less, enter -0-",
+    );
+    c.line(
+        *line30,
+        f,
+        "30",
+        "line30",
+        Production::Bounded,
+        "Enter the smaller of line 24 or line 29",
+    );
+    c.line(
+        *line31,
+        f,
+        "31",
+        "line31",
+        Production::Scaled,
+        "Multiply line 30 by 15% (0.15)",
+    );
+    c.line(
+        *line32,
+        f,
+        "32",
+        "line32",
+        Production::Combine,
+        "Add lines 23 and 30",
+    );
+    c.line(
+        *line33,
+        f,
+        "33",
+        "line33",
+        Production::Combine,
+        "Subtract line 32 from line 22",
+    );
+    c.line(
+        *line34,
+        f,
+        "34",
+        "line34",
+        Production::Scaled,
+        "Multiply line 33 by 20% (0.20)",
+    );
+    c.line(
+        *line35,
+        f,
+        "35",
+        "line35",
+        Production::Combine,
+        "Add lines 17, 32, and 33",
+    );
+    c.line(
+        *line36,
+        f,
+        "36",
+        "line36",
+        Production::Combine,
+        "Subtract line 35 from line 12",
+    );
+    c.line(
+        *line37,
+        f,
+        "37",
+        "line37",
+        Production::Scaled,
+        "Multiply line 36 by 25% (0.25)",
+    );
+    c.line(
+        *line38,
+        f,
+        "38",
+        "line38",
+        Production::Combine,
+        "Add lines 18, 31, 34, and 37",
+    );
+    c.line(*line39, f, "39", "line39", Production::Scaled,
+        "If line 12 is $232,600 or less ($116,300 or less if married filing separately), multiply line 12 by 26% (0.26). Otherwise, multiply line 12 by 28% (0.28) and subtract $4,652 ($2,326 if married filing separately) from the result");
+    c.line(*line40, f, "40", "line40", Production::Bounded,
+        "Enter the smaller of line 38 or line 39 here and on line 7. If you are filing Form 2555, do not enter this amount on line 7. Instead, enter it on line 4 of the worksheet in the instructions for line 7");
+    c
+}
+
+/// §G-6 — Form 6251 **line 1**, which is year-shaped: TY2024 prints one box, TY2025 splits it into
+/// 1a/1b. Its own `cover_*` because the enum is a money-bearing type in its own right.
+pub fn cover_form6251line1(p: &crate::tax::form6251::Form6251Line1) -> Coverage {
+    let mut c = Coverage::default();
+    let f = "f6251";
+    // ★ TY2025's 1a/1b are a DIFFERENT form revision with 60 boxes; they get their own rows when that
+    //   year's map lands, and the emitter refuses them against the TY2024 map today. `if let` rather
+    //   than `match`, because the enum is `#[non_exhaustive]` and clippy is right that one arm plus a
+    //   catch-all is a destructure.
+    if let crate::tax::form6251::Form6251Line1::Y2024 { line1 } = p {
+        c.line(
+            *line1,
+            f,
+            "1",
+            "line1",
+            Production::Carry,
+            "Enter the amount from Form 1040 or 1040-SR, line 15, if more than zero. If Form 1040 or 1040-SR, line 15, is zero, subtract line 14 of Form 1040 or 1040-SR from line 11 of Form 1040 or 1040-SR and enter the result here. (If less than zero, enter as a negative amount.)",
+        );
+    }
+    c
+}
+
 /// §G-28/B1b — Form 8995-A **Part II** (lines 2-16), column A.
 ///
 /// ★★ These 15 lines and Part III's 10 shipped OUTSIDE this table, and the module's blast-radius
@@ -1220,6 +1526,8 @@ fn zero_schedule1lines() -> crate::tax::printed::Schedule1Lines {
 /// **Schedule2Lines** (f1040s2) — destructured with no `..`; a new money field cannot compile.
 pub fn cover_schedule2lines(l: &crate::tax::printed::Schedule2Lines) -> Coverage {
     let crate::tax::printed::Schedule2Lines {
+        line2,
+        line3,
         line4,
         line11,
         line12,
@@ -1227,6 +1535,26 @@ pub fn cover_schedule2lines(l: &crate::tax::printed::Schedule2Lines) -> Coverage
     } = l;
     let f = "f1040s2";
     let mut c = Coverage::default();
+    // §G-6 — the AMT reaches the return here, and line 3 carries it to 1040 line 17.
+    // ★★ CONDITIONAL — "Attach Form 6251". BLANK when no Form 6251 is in the packet, because a `0`
+    //    would swear the filer figured an AMT on a form that is not there (§G-11).
+    c.exception(
+        line2.unwrap_or(Usd::ZERO),
+        f,
+        "2",
+        "line2",
+        "Alternative minimum tax. Attach Form 6251",
+        "BLANK unless Form 6251 is attached (§G-6). `Option<Usd>`; the emitter skips the cell entirely \
+         when `must_attach()` is false, so a return with no AMT carries no testimony about one.",
+    );
+    c.line(
+        *line3,
+        f,
+        "3",
+        "line3",
+        Production::Combine,
+        "Add lines 1z and 2. Enter here and on Form 1040, 1040-SR, or 1040-NR, line 17",
+    );
     c.line(
         *line4,
         f,
@@ -1258,6 +1586,8 @@ pub fn cover_schedule2lines(l: &crate::tax::printed::Schedule2Lines) -> Coverage
 
 fn zero_schedule2lines() -> crate::tax::printed::Schedule2Lines {
     crate::tax::printed::Schedule2Lines {
+        line2: None,
+        line3: Usd::ZERO,
         line4: Usd::ZERO,
         line11: Usd::ZERO,
         line12: Usd::ZERO,
@@ -2486,6 +2816,7 @@ pub fn all() -> Coverage {
     // §G-28/B1b — Parts II and III. ★ A NEW STRUCT produces no compile error here, unlike a new FIELD
     // on an existing one, so these two lines are the only thing standing between 25 printed money
     // lines and no instruction-text check at all. They shipped missing once.
+    c.0.extend(cover_form6251(&crate::tax::form6251::Form6251::default()).0);
     c.0.extend(cover_form8995apartii(&crate::tax::qbi_a::Form8995APartIi::default()).0);
     c.0.extend(cover_form8995apartiii(&crate::tax::qbi_a::Form8995APartIii::default()).0);
     c.0.extend(cover_setaxresult(&zero_setaxresult()).0);

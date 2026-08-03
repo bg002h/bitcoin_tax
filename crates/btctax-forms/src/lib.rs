@@ -23,6 +23,7 @@ mod fill8949;
 mod fill8949_full;
 mod form1040;
 mod form1040_full;
+mod form6251;
 mod form8275;
 mod form8283;
 mod form8959;
@@ -431,6 +432,7 @@ pub mod testonly {
     pub use crate::fill8949_full::fill_8949_full_with_map;
     pub use crate::form1040::{fill_form_1040_capgains as fill_1040_with_map, Form1040Fill};
     pub use crate::form1040_full::fill_form_1040_full_with_map;
+    pub use crate::form6251::fill_form_6251_with_map;
     pub use crate::form8275::fill_form_8275_with_map as fill_8275_with_map;
     pub use crate::form8283::fill_form_8283 as fill_8283_with_map;
     pub use crate::form8283::fill_form_8283_full as fill_8283_full_with_map;
@@ -444,9 +446,9 @@ pub mod testonly {
     // The committed map TOML, for the line-keyed inverse transcriber (`extract_lines`). Downstream
     // read-back tests need the map itself, not just its parsed struct.
     pub use crate::map::{
-        AmountCols, AmountColsNoAdjustment, Form1040Map, Form8275Map, Form8275Row, Form8283Map,
-        Form8949Map, Form8959Map, Form8960Map, Form8995AMap, Form8995Map, MoneyCell, MoneyPair,
-        PartMap, Schedule1Map, Schedule2Map, Schedule3Map, ScheduleAMap, ScheduleBMap,
+        AmountCols, AmountColsNoAdjustment, Form1040Map, Form6251Map, Form8275Map, Form8275Row,
+        Form8283Map, Form8949Map, Form8959Map, Form8960Map, Form8995AMap, Form8995Map, MoneyCell,
+        MoneyPair, PartMap, Schedule1Map, Schedule2Map, Schedule3Map, ScheduleAMap, ScheduleBMap,
         ScheduleCMap, ScheduleDMap, ScheduleSeMap,
     };
     pub use crate::map::{
@@ -456,11 +458,11 @@ pub mod testonly {
         SCHEDULE_D_MAP_2024, SCHEDULE_SE_MAP_2024,
     };
     pub use crate::pdf::{
-        button_on_states, checkbox_on, collect_fields, f8995a_pdf, index, load, text_value, Field,
-        F1040_PDF_2017, F1040_PDF_2024, F1040_PDF_2025, F8275_PDF_2024, F8283_PDF_2017,
-        F8283_PDF_2024, F8283_PDF_2025, F8949_PDF_2017, F8949_PDF_2024, F8949_PDF_2025,
-        F8959_PDF_2024, SCHEDULE_D_PDF_2017, SCHEDULE_D_PDF_2024, SCHEDULE_D_PDF_2025,
-        SCHEDULE_SE_PDF_2017, SCHEDULE_SE_PDF_2024, SCHEDULE_SE_PDF_2025,
+        button_on_states, checkbox_on, collect_fields, f6251_pdf, f8995a_pdf, index, load,
+        text_value, Field, F1040_PDF_2017, F1040_PDF_2024, F1040_PDF_2025, F8275_PDF_2024,
+        F8283_PDF_2017, F8283_PDF_2024, F8283_PDF_2025, F8949_PDF_2017, F8949_PDF_2024,
+        F8949_PDF_2025, F8959_PDF_2024, SCHEDULE_D_PDF_2017, SCHEDULE_D_PDF_2024,
+        SCHEDULE_D_PDF_2025, SCHEDULE_SE_PDF_2017, SCHEDULE_SE_PDF_2024, SCHEDULE_SE_PDF_2025,
     };
     pub use crate::schedule23::{
         fill_schedule_1_with_map, fill_schedule_2_with_map, fill_schedule_3_with_map,

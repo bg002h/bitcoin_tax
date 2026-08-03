@@ -13,7 +13,7 @@ use crate::identity::{EventId, LotId, WalletId};
 use crate::state::{Disposal, DisposalLeg, IncomeRecord, LedgerState, Term};
 use crate::tax::questions::FORM_QUESTIONS;
 use crate::tax::return_inputs::{
-    CharitableClass, CharitableGift, Dependent, Form1099Div, Form1099G, Form1099Int,
+    CharitableClass, CharitableGift, Dependent, Form1099B, Form1099Div, Form1099G, Form1099Int,
     HouseholdHeader, Owner, Payments, Person, ReturnInputs, ScheduleAInputs, ScheduleCInputs, W2,
 };
 use crate::tax::tables::{
@@ -430,6 +430,57 @@ pub fn w2_only_household() -> (ReturnInputs, LedgerState) {
             box4_ss_withheld: dec!(3720),
             box5_medicare_wages: dec!(60000),
             box6_medicare_withheld: dec!(870), // 1.45% × 60,000 ⇒ no Part V excess
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    answer_all_live_declarations(&mut ri);
+    (ri, LedgerState::default())
+}
+
+/// **§G-6 — a household that OWES AMT and must attach Form 6251.**
+///
+/// ★★★ Neither `kitchen_sink_household` nor `w2_only_household` triggers the AMT, so a test that
+/// merely iterated those two would assert `None == None` twice and pass forever while the emitter was
+/// broken. This fixture exists so the Schedule-2-line-2 biconditional has a TRUE case to discriminate
+/// against — the vacuity was real and was caught by probing, not by reading.
+///
+/// The mechanism is the post-TCJA one that survives for a filer with no ISOs: a large **long-term**
+/// gain plus a modest ordinary slice. Both systems tax the gain at the same preferential rates, so
+/// Part III runs, but AMTI of ~$2.3M has phased the $85,700 exemption away entirely and the ordinary
+/// slice meets a flat 26/28% instead of the regular graduated brackets. Line 7 clears line 10 by a
+/// few thousand dollars — which is what *Who Must File* condition 1 tests, and it is deliberately a
+/// NARROW margin, because a fixture that owed AMT by a mile would also pass with the exemption
+/// phase-out miscomputed.
+///
+/// ★ Ledger-free on purpose: the gain arrives as a §G-28/B4 Form 1099-B, so the fixture exercises the
+/// packet without depending on a lot construction that a basis-method change could move underneath it.
+pub fn amt_owing_household() -> (ReturnInputs, LedgerState) {
+    let mut ri = ReturnInputs {
+        filing_status: FilingStatus::Single,
+        header: HouseholdHeader {
+            taxpayer: person("Dana", "Quill", "333-44-5555", "Analyst"),
+            address_street: "77 Ridge Rd".into(),
+            address_city: "Boulder".into(),
+            address_state: "CO".into(),
+            address_zip: "80301".into(),
+            ..Default::default()
+        },
+        w2s: vec![W2 {
+            owner: Owner::Taxpayer,
+            employer: "QUILL ANALYTICS".into(),
+            box1_wages: dec!(150000),
+            box2_fed_withheld: dec!(30000),
+            box3_ss_wages: dec!(150000),
+            box4_ss_withheld: dec!(9300),
+            box5_medicare_wages: dec!(150000),
+            box6_medicare_withheld: dec!(2175),
+            ..Default::default()
+        }],
+        b_1099: vec![Form1099B {
+            payer: "BROADLEAF SECURITIES".into(),
+            long_term_proceeds: dec!(2500000),
+            long_term_basis: dec!(300000),
             ..Default::default()
         }],
         ..Default::default()

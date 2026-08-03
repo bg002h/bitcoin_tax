@@ -162,6 +162,12 @@ An adversarial pass returned **UNSAFE** on 2 of 9 proposed relaxations. Both ver
 
 **★★★ DO NOT DO THESE TWO — they put a wrong figure on a signed return:**
 
+- ~~**Do NOT drop `AmtScreenTriggered` from the report path.**~~ **RESOLVED 2026-08-03** — the
+  precondition it names ("Blocked until Schedule 2 line 2 exists") is met: Schedule 2 lines 2 and 3 are
+  mapped and emitted, and `l18` now adds `amt.line11` with `compute_6251` moved above it. This entry was
+  RIGHT, and the understatement it predicted was live in the tree until the two-chain KAT
+  (`the_absolute_total_tax_equals_the_printed_1040_line_24`) was written. Kept, struck through, because
+  the reasoning is the record of a correct call. Original:
 - **Do NOT drop `AmtScreenTriggered` from the report path.** The justification ("Form 6251 is computed
   correctly anyway") is true and IRRELEVANT. `total_tax` (`return_1040.rs:1328`) is assembled BEFORE
   `compute_6251` runs (`:1353`), and hardcodes Schedule 2 line 2 to zero in a comment at `:1319-1321`

@@ -61,7 +61,7 @@ Additional Medicare Tax, Parts I (wages), II (SE) and V (withholding).
 **Forms — computed vs. filled.** Two different things, and the difference matters:
 
 - **Filled as an official IRS PDF** (`export-irs-pdf`), for a year with full-return inputs: **the whole
-  packet** — Form 1040 and Schedules 1, 2, 3, A, B, C, D, SE, plus Forms 8949, 8959, 8960, 8995 and (when
+  packet** — Form 1040 and Schedules 1, 2, 3, A, B, C, D, SE, plus Forms 6251, 8949, 8959, 8960, 8995/8995-A and (when
   required) 8283. They come out in IRS **Attachment Sequence No.** order with a `manifest.txt`, which is your
   stapling order.
 - **The packet is ALL-OR-NOTHING.** If any form cannot be filled correctly, **nothing is written** — you never
@@ -89,8 +89,13 @@ Schedule D add up against the 8949 behind it.
 (Schedule C), you are entitled to a **qualified business income deduction of up to 20%** of that profit
 (Form 8995), and btctax computes it — the QBI base is your Schedule C net profit less the deductible half of
 your self-employment tax. Above the §199A(e)(2) income threshold ($191,950 single / $383,900 joint for
-TY2024) the simplified Form 8995 no longer applies and btctax **refuses** rather than guess at the
-wage-and-property limits that take over (that is Form 8995-A, which it does not fill).
+TY2024) the simplified Form 8995 no longer applies and btctax fills **Form 8995-A** instead, where the
+deduction is capped by the greater of 50% of your business's W-2 wages or 25% of those wages plus 2.5%
+of the unadjusted basis of its qualified property. btctax cannot know either figure, so it **asks** for
+them (`btctax income import`) rather than defaulting: zero would cap a wage-paying business at nothing
+and overstate your tax, and any other guess would invent wages you never reported. A sole proprietor
+with no employees and no qualified property is genuinely capped at $0 — that is the statute, not a
+shortfall in btctax.
 
 **What the packet still will not do for you:**
 - **Non-crypto NONCASH gifts over $500 REFUSE.** Form 8283 must list the property (description, how acquired,
@@ -211,9 +216,10 @@ cannot model it correctly.
 - **SE-eligible business crypto income with no Schedule C** (owner and description are unknowable).
 - **A Schedule C loss** (net < 0) — §465 at-risk substantiation is out of scope.
 - **Form 8615 "kiddie tax"** — a claimable-as-dependent filer with unearned income over the §1(g) threshold ($2,600) must be taxed at the parent's rate.
-- **Taxable income (before the QBI deduction) above the §199A(e)(2) threshold** ($191,950 / $383,900 MFJ) — the Form 8995-A phase-in is unmodeled. (It is the taxable-income figure that is tested, not the QBI itself.)
-- **Form 6251 must be ATTACHED** (i6251, *Who Must File*, condition 1: **line 7 is greater than line 10**). v1 **computes** Form 6251 in full for every return, but cannot yet attach it to a filing, so a return that must attach one is **refused** rather than filed incomplete. If line 7 is at or below line 10, Form 6251 line 11 — and so Schedule 2 line 2 — is $0, and the return files normally. Note this is *not* the same as "you owe no AMT": the form can be required while the AMT itself is $0, because the AMT foreign tax credit is figured only after line 7 exceeds line 10.
-  - Three Form 6251 adjustments v1 cannot see are handled by **declaration** instead: a non-AMT-qualified mortgaged dwelling (line 3), a divergent AMT capital-loss carryover (line 2k), and depreciation inside your Schedule C expense total whose AMT amount differs (line 2l). Each is asked only when it can apply — respectively a Schedule A carrying Form 1098 mortgage interest, a capital-loss carryforward, and Schedule C expenses above $0 — and must then be answered via `btctax income answer`. An adverse answer refuses, because computing without the add-back would understate your tax.
+- **Form 8995-A lines 4 and 7 unstated** — above the §199A(e)(2) threshold ($191,950 / $383,900 MFJ) the deduction is capped by your business's W-2 wages and the unadjusted basis of its qualified property, and neither can be guessed safely. Supply both with `btctax income import` and the return files. (It is the taxable-income figure that is tested, not the QBI itself.)
+- **A specified service trade or business INSIDE the §199A phase-in range** — only an applicable percentage of it is a qualified trade or business, figured on Schedule A (Form 8995-A), which btctax does not fill. Above the range no such schedule is needed and the return files.
+- **A §199A carryforward that needs Schedule C (Form 8995-A)**.
+- **A Form 6251 adjustment v1 cannot see, declared as present.** Three are handled by **declaration**: a non-AMT-qualified mortgaged dwelling (line 3), a divergent AMT capital-loss carryover (line 2k), and depreciation inside your Schedule C expense total whose AMT amount differs (line 2l). Each is asked only when it can apply — respectively a Schedule A carrying Form 1098 mortgage interest, a capital-loss carryforward, and Schedule C expenses above $0 — and must then be answered via `btctax income answer`. An adverse answer refuses, because computing without the add-back would understate your tax.
 - **Taxable income ≤ $0 with a capital-loss carryforward** — the §1211/§1212 Capital Loss Carryover Worksheet edge is unmodeled. (A refund-only filer with *no* carryforward is fine: tax = $0, withholding refunded.)
 
 ## (iii) UNREPRESENTABLE — no input exists (would refuse if it did)

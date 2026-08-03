@@ -444,15 +444,22 @@ fn full_return_forms_refuse_unsupported_years() {
 
 // ────────────────────────────── Schedule 2 / Schedule 3 ───────────────────────────────────────
 
-/// Schedule 2 carries the three taxes v1 computes, and **Part I stays blank** — line 1a (excess
-/// APTC) has no input and would refuse if it did, and line 2 (AMT) is $0 because line 7 ≤ line 10 ⇒ Form 6251 line 11 is $0, and a return where line 7 EXCEEDS line 10 is refused (Who Must File condition 1 — v1 computes the form but cannot file it). A 0 printed there would be a lie. (Reason RESTATED in v0.14.0:
-/// the old "refused if the screen trips" mechanism no longer exists — btctax computes Form 6251 for
-/// every return and gates on the form itself.)
+/// Schedule 2 carries the three taxes v1 computes, and **Part I stays blank** — line 1a (excess APTC)
+/// has no input and would refuse if it did, and no Form 6251 is attached, so lines 2 and 3 carry no
+/// testimony at all. A `0` printed on either would swear the filer figured an AMT on a form the IRS
+/// never receives (§G-11).
+///
+/// ★ RESTATED for §G-6 (2026-08-03): btctax now FILES Form 6251, so "Part I is blank" is no longer a
+/// property of the whole program — it is a property of THIS household. The attached case is
+/// [`schedule_2_part_i_prints_lines_2_and_3_when_form_6251_is_attached`], and the two together are
+/// what make the blank a decision rather than an omission.
 ///
 /// Line 21 is on **page 2**, so this also exercises the per-page descent grouping.
 #[test]
 fn schedule_2_fills_part_ii_and_leaves_part_i_blank() {
     let lines = Schedule2Lines {
+        line2: None,
+        line3: Usd::ZERO,
         line4: dec!(29871),
         line11: dec!(693),
         line12: dec!(1406),
@@ -471,6 +478,43 @@ fn schedule_2_fills_part_ii_and_leaves_part_i_blank() {
         let fqn = format!("form1[0].Page1[0].{p1}");
         assert_eq!(g(&fqn), None, "{fqn} (Schedule 2 Part I) must be blank");
     }
+}
+
+/// ★★★ §G-6 — THE ATTACHED CASE: Part I prints line 2 **and line 3**.
+///
+/// Line 3 is *"Add lines 1z and 2"*, and **Form 1040 line 17 names it by number** — so a filed packet
+/// whose 1040 carries a figure while Schedule 2 line 3 sits empty is a 1040 line sourced from a blank
+/// box. That is not a harmless duplicate: it is the §G-11 defect inverted, a MISSING entry behind a
+/// figure that IS filed, and it is precisely what the first end-to-end AMT export printed — 1040 line
+/// 17 = 11,322 above a blank line 3 — because the map censused f1_13 with the reason *"both are
+/// structurally zero"*, which stopped being true the moment Form 6251 could be attached.
+#[test]
+fn schedule_2_part_i_prints_lines_2_and_3_when_form_6251_is_attached() {
+    let lines = Schedule2Lines {
+        line2: Some(dec!(11322)),
+        line3: dec!(11322), // 1z (nothing) + 2
+        line4: dec!(29871),
+        line11: dec!(693),
+        line12: dec!(1406),
+        line21: dec!(31970),
+    };
+    let pdf = btctax_forms::fill_schedule_2(&lines, &kitchen_sink_header(), 2024).unwrap();
+    let g = |fqn: &str| tv(&pdf, fqn);
+    assert_eq!(
+        g("form1[0].Page1[0].f1_12[0]").as_deref(),
+        Some("11322"),
+        "L2 — the AMT from Form 6251 line 11"
+    );
+    assert_eq!(
+        g("form1[0].Page1[0].f1_13[0]").as_deref(),
+        Some("11322"),
+        "L3 — the line Form 1040 line 17 names by number; blank here files a 1040 figure with no source"
+    );
+    // …and Part II still fills, so the Part I entries did not displace the descent.
+    assert_eq!(g("form1[0].Page1[0].f1_14[0]").as_deref(), Some("29871"));
+    assert_eq!(g("form1[0].Page2[0].f2_25[0]").as_deref(), Some("31970"));
+    // Line 1a stays blank — an AMT does not conjure an excess-APTC repayment.
+    assert_eq!(g("form1[0].Page1[0].f1_03[0]"), None);
 }
 
 /// Schedule 3 carries the FTC and the excess-SS credit. Every other Part I credit is a §3.4

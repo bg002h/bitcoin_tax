@@ -76,6 +76,7 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<FiledPacket, Fo
                 f8960,
                 f8995,
                 f8995a,
+                f6251,
                 f8283,
                 f8275,
             },
@@ -181,6 +182,20 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<FiledPacket, Fo
                 p4.parts_i_to_iii.as_ref(),
                 header,
                 &crate::map::Form8995AMap::ty2024(),
+            )?,
+        );
+    }
+    // ★★★ §G-6 — Form 6251, **Attachment Sequence No. 32** (read off the form itself, not guessed),
+    //     so it staples between Schedule SE ("17") and Form 8995 ("55"). `Some` exactly when i6251's
+    //     Who Must File condition 1 holds — core decides that, the filler transcribes it.
+    if let Some(amt) = f6251 {
+        push(
+            "f6251",
+            Some("32"),
+            crate::form6251::fill_form_6251_with_map(
+                amt,
+                header,
+                &crate::map::Form6251Map::ty2024(),
             )?,
         );
     }

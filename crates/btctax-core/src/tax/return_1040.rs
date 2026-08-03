@@ -1835,10 +1835,47 @@ pub fn assemble_absolute(
         .sum();
     // CTC/ODC — conservative omission (§3.4): L19 = 0 (loud advisory surfaced at render, P5).
     let ctc_odc_credit = Usd::ZERO;
-    // Sch 2 Part I: L1z (excess-APTC) = 0 (no input); L2 (AMT) = 0 for a computed return (a triggered AMT
-    // return refuses via `screen_absolute` when Form 6251 line 7 exceeds line 10). So 1040 L17 = 0
-    // and L18 = L16.
-    let l18 = regular_tax; // L16 + Sch 2 L3 (= 0)
+    // ★★★ §G-6 — FORM 6251 IS COMPUTED **HERE**, ABOVE L18, BECAUSE L18 CONSUMES IT.
+    //
+    //     It used to run below `total_tax`, and `l18` was hardcoded to `regular_tax` with a comment
+    //     citing the AMT REFUSAL as its warrant. Removing that refusal made the comment false and left
+    //     `AbsoluteReturn::total_tax` short by exactly the AMT — an UNDERSTATEMENT. It was invisible
+    //     because the printed chain is assembled separately and was fixed first, and because nothing
+    //     outside this function reads `total_tax` today. "Nothing reads it yet" is not a guarantee; a
+    //     wrong public figure is a trap with a fuse on it.
+    //
+    //     ★ `compute_6251` needs `foreign_tax_credit` (line 8, the AMTFTC input), so it cannot move any
+    //       higher than this — which is exactly why the ordering was wrong in the first place.
+    let amt = crate::tax::form6251::compute_6251(
+        form6251_inputs_from_parts(
+            ri,
+            agi,
+            taxable_income,
+            deduction,
+            qbi.deduction,
+            deduction_is_itemized,
+            schedule_a.as_ref(),
+            qualified_dividends,
+            net_ltcg,
+            regular_tax,
+            foreign_tax_credit,
+        ),
+        &params.amt,
+        // ★ `ltcg_for`, NOT a raw `ltcg.get(&status)`: the map carries no `Qss` key (the adapters note
+        // "QSS is not inserted explicitly; `TaxTable::key` maps `Qss → Mfj` at lookup time"), so the raw
+        // lookup aborts the process for every Qualifying-Surviving-Spouse return. Same accessor the
+        // regular-tax call uses above.
+        table.ltcg_for(status),
+    );
+
+    // Sch 2 Part I: L1z (excess-APTC) = 0 (no input); L2 (AMT) = Form 6251 line 11. So L17 = Sch 2 L3
+    // = L1z + L2 = the AMT, and L18 = L16 + L17.
+    //
+    // ★ Unconditional, matching `printed.rs`: line 11 is $0 whenever no AMT is owed, and a positive
+    //   line 11 implies Who-Must-File condition 1 (line 11 = line 7 − line 8 − line 10 with line 8 ≥ 0,
+    //   so line 11 > 0 ⇒ line 7 > line 10). The printed blank on Schedule 2 line 2 is a PRESENTATION
+    //   decision about an absent form; it never drops a non-zero figure.
+    let l18 = regular_tax + amt.line11; // L16 + L17
     let nonrefundable_credits = ctc_odc_credit + foreign_tax_credit; // L21 = L19 + L20 (v1: FTC only)
     let tax_after_credits = (l18 - nonrefundable_credits).max(Usd::ZERO); // L22
                                                                           // Sch 2 Part II (L21) → 1040 L23 = SE (L4) + Additional Medicare (L11) + NIIT (L12).
@@ -1869,28 +1906,6 @@ pub fn assemble_absolute(
     // L34→L35a refund vs L37 owed (L36 apply-to-next pinned 0/blank in v1).
     let overpayment_refund = (total_payments - total_tax).max(Usd::ZERO);
     let amount_owed = (total_tax - total_payments).max(Usd::ZERO);
-
-    let amt = crate::tax::form6251::compute_6251(
-        form6251_inputs_from_parts(
-            ri,
-            agi,
-            taxable_income,
-            deduction,
-            qbi.deduction,
-            deduction_is_itemized,
-            schedule_a.as_ref(),
-            qualified_dividends,
-            net_ltcg,
-            regular_tax,
-            foreign_tax_credit,
-        ),
-        &params.amt,
-        // ★ `ltcg_for`, NOT a raw `ltcg.get(&status)`: the map carries no `Qss` key (the adapters note
-        // "QSS is not inserted explicitly; `TaxTable::key` maps `Qss → Mfj` at lookup time"), so the raw
-        // lookup aborts the process for every Qualifying-Surviving-Spouse return. Same accessor the
-        // regular-tax call uses above.
-        table.ltcg_for(status),
-    );
 
     AbsoluteReturn {
         schedule_1a_additional,
@@ -2300,14 +2315,20 @@ pub fn screen_absolute(
     // Condition 1 (i6251 p.1): "Form 6251, line 7, is greater than line 10." NOT `amt > 0` — when
     // line 7 exceeds line 10 the AMTFTC is figured, so line 9 can still land at or below line 10 and
     // the AMT be $0 while the form is still required.
-    if ar.amt.must_attach() {
-        return refusal(
-            RefuseReason::AmtScreenTriggered,
-            "Form 6251 line 7 exceeds line 10, so Form 6251 must be attached to this return \
-             (i6251, Who Must File, condition 1) — v1 computes the form but cannot yet FILE it, so \
-             the return is refused rather than filed incomplete",
-        );
-    }
+    // ★★★ §G-6 — THIS REFUSAL IS GONE. btctax computed Form 6251 for every return since v0.14.0 and
+    //     could not FILE it, so i6251's Who Must File condition 1 — *"Form 6251, line 7, is greater
+    //     than line 10"* — refused the return instead of attaching the form. `f6251.map.toml` and
+    //     `btctax-forms::form6251` now emit it at Attachment Sequence 32, and `PrintedForms::f6251`
+    //     carries it exactly when `must_attach()` holds.
+    //
+    //     ★★ WHAT REPLACED IT IS NOT NOTHING. Core models Part I lines 1, 2a, 2b, 3 and 4 only; the
+    //     eighteen add-backs 2c-2t have no field, and every one of them is an ADD-BACK — so a filer
+    //     who has one and files anyway UNDERSTATES tax. They are censused `gap`, and the gate is the
+    //     §G-22 out-of-scope declaration, whose limb (b) names an ISO exercise and limb (c) the other
+    //     AMT items. A `yes` there still refuses. That gate had to be widened in the same programme
+    //     because an ISO exercise is not INCOME for the regular tax, so the income half of the
+    //     question could never have caught it — and because the missing add-back also suppressed this
+    //     very `must_attach()` test, the gap hid its own detection (FOLLOWUPS §G-6).
 
     // (c) Taxable income ≤ 0 with a capital-loss carryforward-in (the §1211/§1212 carryover-worksheet edge).
     let cf = ri.capital_loss_carryforward_in;

@@ -32,7 +32,7 @@
 //! (`design/full-return/ROUNDING_AUTHORITY.md` Reading A). The *printed* form rounds per line and
 //! cross-foots the rounded lines; that is the forms crate's job, not this module's.
 
-use crate::conventions::Usd;
+use crate::conventions::{round_dollar, Usd};
 use crate::tax::tables::{AmtParams, LtcgBreakpoints};
 use crate::tax::types::FilingStatus;
 use rust_decimal::Decimal;
@@ -234,9 +234,133 @@ pub struct Form6251 {
     pub line39: Usd,
     /// L40 — "**Enter the smaller of line 38 or line 39** here and on line 7."
     pub line40: Usd,
+    /// ★★★ **Was Part III COMPLETED?** — the form's own gate, verbatim: *"Complete Part III only if
+    /// you are required to do so by line 7 or by the Foreign Earned Income Tax Worksheet in the
+    /// instructions."* Line 7's middle bullet is what routes there.
+    ///
+    /// ★★ The EMITTER needs this and cannot derive it. Lines 12–40 are ordinary `Usd` and are zero on
+    /// the un-routed path — so without this flag a filer whose Form 6251 must be attached but who has
+    /// no preferential income would file **twenty-nine sworn zeros** on a page the form told them not
+    /// to complete. A `0` is testimony; "skip" is not an instruction to enter zero, and this form says
+    /// *"enter -0-"* elsewhere when that is what it means.
+    ///
+    /// ★ A bool rather than 29 `Option`s: the form completes Part III as a UNIT, so one flag matches
+    /// the instruction and cannot go half-set.
+    pub part_iii_completed: bool,
 }
 
 impl Form6251 {
+    /// **The PRINTED form — every line rounded to whole dollars (SPEC §3.1).**
+    ///
+    /// i6251/i1040 *Rounding Off to Whole Dollars*: *"You may round off cents to whole dollars on your
+    /// return and schedules."* This repo elected per-line rounding, and the emitter must not be the
+    /// place that decides it — a filed Form 6251 reading `471037.2840` is not a return.
+    ///
+    /// ★★ Rounding happens HERE and never in the computation. Line 11 feeds Schedule 2 line 2, so both
+    /// take `round_dollar` of the same unrounded figure and agree by construction rather than by luck.
+    ///
+    /// ★★★ EXHAUSTIVE DESTRUCTURE, no `..` — a line added to this form is *pattern does not mention
+    /// field* here, so it cannot reach a filed page carrying cents.
+    #[must_use]
+    pub fn printed(&self) -> Self {
+        let Self {
+            line1,
+            line2a,
+            line2b,
+            line3,
+            line4,
+            line5,
+            line6,
+            line7,
+            line8,
+            line9,
+            line10,
+            line11,
+            line12,
+            line13,
+            line14,
+            line15,
+            line16,
+            line17,
+            line18,
+            line19,
+            line20,
+            line21,
+            line22,
+            line23,
+            line24,
+            line25,
+            line26,
+            line27,
+            line28,
+            line29,
+            line30,
+            line31,
+            line32,
+            line33,
+            line34,
+            line35,
+            line36,
+            line37,
+            line38,
+            line39,
+            line40,
+            part_iii_completed,
+        } = self;
+        Self {
+            line1: match *line1 {
+                Form6251Line1::Y2024 { line1 } => Form6251Line1::Y2024 {
+                    line1: round_dollar(line1),
+                },
+                Form6251Line1::Y2025 { line1a, line1b } => Form6251Line1::Y2025 {
+                    line1a: round_dollar(line1a),
+                    line1b: round_dollar(line1b),
+                },
+            },
+            line2a: round_dollar(*line2a),
+            line2b: round_dollar(*line2b),
+            line3: round_dollar(*line3),
+            line4: round_dollar(*line4),
+            line5: round_dollar(*line5),
+            line6: round_dollar(*line6),
+            line7: round_dollar(*line7),
+            line8: round_dollar(*line8),
+            line9: round_dollar(*line9),
+            line10: round_dollar(*line10),
+            line11: round_dollar(*line11),
+            line12: round_dollar(*line12),
+            line13: round_dollar(*line13),
+            line14: round_dollar(*line14),
+            line15: round_dollar(*line15),
+            line16: round_dollar(*line16),
+            line17: round_dollar(*line17),
+            line18: round_dollar(*line18),
+            line19: round_dollar(*line19),
+            line20: round_dollar(*line20),
+            line21: round_dollar(*line21),
+            line22: round_dollar(*line22),
+            line23: round_dollar(*line23),
+            line24: round_dollar(*line24),
+            line25: round_dollar(*line25),
+            line26: round_dollar(*line26),
+            line27: round_dollar(*line27),
+            line28: round_dollar(*line28),
+            line29: round_dollar(*line29),
+            line30: round_dollar(*line30),
+            line31: round_dollar(*line31),
+            line32: round_dollar(*line32),
+            line33: round_dollar(*line33),
+            line34: round_dollar(*line34),
+            line35: round_dollar(*line35),
+            line36: round_dollar(*line36),
+            line37: round_dollar(*line37),
+            line38: round_dollar(*line38),
+            line39: round_dollar(*line39),
+            line40: round_dollar(*line40),
+            part_iii_completed: *part_iii_completed,
+        }
+    }
+
     /// **Who Must File, condition 1** (i6251 p.1): *"Form 6251, line 7, is greater than line 10."*
     ///
     /// This — not `amt() > 0` — is the attach test. When line 7 exceeds line 10 the AMTFTC is figured
@@ -372,6 +496,8 @@ pub fn compute_6251(i: Form6251Inputs, amt: &AmtParams, bp: &LtcgBreakpoints) ->
     };
 
     let mut f = Form6251 {
+        // ★ Set true ONLY on line 7's Part III branch below — the form's own gate.
+        part_iii_completed: false,
         line1,
         line2a,
         line2b,
@@ -469,6 +595,8 @@ pub fn compute_6251(i: Form6251Inputs, amt: &AmtParams, bp: &LtcgBreakpoints) ->
         f.line39 = flat_26_28(f.line12);
         f.line40 = f.line38.min(f.line39);
         f.line7 = f.line40;
+        // ★ The form's gate, recorded for the emitter — see the field's doc.
+        f.part_iii_completed = true;
     } else {
         // L7's "All others" bullet.
         f.line7 = flat_26_28(line6);

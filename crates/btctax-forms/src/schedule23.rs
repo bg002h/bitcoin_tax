@@ -37,11 +37,34 @@ pub fn fill_schedule_2_with_map(
     let mut writes: Vec<(String, pdf::FieldValue)> = Vec::new();
     let mut placements: Vec<FlatPlacement> = Vec::new();
 
-    let plan: [Usd; 4] = [lines.line4, lines.line11, lines.line12, lines.line21];
+    // ★★★ §G-6 — LINES 2 AND 3 ARE PART I, AND THEY STAND OR FALL TOGETHER.
+    //
+    //     Line 2 is the AMT from Form 6251's printed line 11; line 3 is "Add lines 1z and 2", which
+    //     **Form 1040 line 17 names by number** — so the IRS reads line 3 directly. Leaving it blank
+    //     while the 1040 carries its value prints a 1040 line sourced from an empty box, which is the
+    //     §G-11 defect inverted: not a fabricated entry, a MISSING one behind a figure that is filed.
+    //     (This is exactly what the first end-to-end AMT export showed: 1040 line 17 = 11,322 above a
+    //     blank Schedule 2 line 3.)
+    //
+    //     ★ Both are skipped together when no Form 6251 is attached: btctax fills no line-1z addition,
+    //       so an empty Part I totals to nothing, and a printed `0` on either line would swear the
+    //       filer figured an AMT on a form that is not in the packet.
+    let part_i = lines.line2.is_some();
+    let plan: [Usd; 6] = [
+        lines.line2.unwrap_or(Usd::ZERO),
+        lines.line3,
+        lines.line4,
+        lines.line11,
+        lines.line12,
+        lines.line21,
+    ];
 
     // Descent is grouped BY PAGE (line 21 is on page 2). Ordinals restart per page.
     let mut ord_on_page = [0u32; 2];
-    for (cell, value) in map.lines().iter().zip(plan) {
+    for (i, (cell, value)) in map.lines().iter().zip(plan).enumerate() {
+        if i < 2 && !part_i {
+            continue; // §G-6 — no Form 6251 attached ⇒ Part I carries NO testimony
+        }
         let page = page_of(cell.fields()[0]) as u32;
         let ord = ord_on_page[page as usize];
         ord_on_page[page as usize] += 1;
