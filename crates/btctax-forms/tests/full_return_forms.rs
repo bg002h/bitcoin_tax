@@ -1107,10 +1107,6 @@ fn sd(
     }
 }
 
-/// ★ The three lines the CRYPTO-SLICE Schedule D omits — 13 (1099-DIV box-2a capital-gain
-/// distributions) and 6/14 (capital-loss carryovers) — all appear on the full-return form. Their
-/// absence is exactly the defect the P5-C1 refusal covers, and this filler is what retires it.
-/// Lines 6 and 14 are PAREN boxes ⇒ positive magnitudes.
 /// ★★★ §G-28/B4 r2-I2 — LINES 1a AND 8a ARE **BLANK** ON A RETURN WITH NO 1099-B.
 ///
 /// Line 1a's own text ends *"However, if you choose to report all these transactions on Form 8949,
@@ -1173,6 +1169,10 @@ fn schedule_d_lines_1a_and_8a_are_blank_without_a_1099b() {
     );
 }
 
+/// ★ The three lines the CRYPTO-SLICE Schedule D omits — 13 (1099-DIV box-2a capital-gain
+/// distributions) and 6/14 (capital-loss carryovers) — all appear on the full-return form. Their
+/// absence is exactly the defect the P5-C1 refusal covers, and this filler is what retires it.
+/// Lines 6 and 14 are PAREN boxes ⇒ positive magnitudes.
 #[test]
 fn schedule_d_full_fills_the_lines_the_crypto_slice_omits() {
     let lines = sd(

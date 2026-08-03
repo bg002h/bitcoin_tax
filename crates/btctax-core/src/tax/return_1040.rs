@@ -995,7 +995,44 @@ pub fn derive_tax_profile(ri: &ReturnInputs, params: &FullReturnParams, year: i3
                                                  //     documented as exactly "non-crypto net LT-character capital gain", and `derive_tax_profile`
                                                  //     is not in the pinned set. The SHORT-TERM half has no profile field and no `net_1222`
                                                  //     argument, so it is §G-30-shaped and filed there.
-    let (b1099_st, b1099_lt) = form_1099b_gains(ri);
+    let (_b1099_st, b1099_lt) = form_1099b_gains(ri);
+
+    // ★★★ THE NON-CRYPTO CAPITAL RESULT, COMPUTED THE WAY THE ENGINE WILL COMPUTE IT.
+    //
+    //     `compute_tax_year` runs `without = net_1222(0, 0, other_net_capital_gain, cf.short,
+    //     cf.long, limit)` and then `bottom_without = ordinary_taxable_income + without.ordinary_gain
+    //     − without.loss_deduction`. So the contract on this profile is exact and in two parts:
+    //       · `magi_excluding_crypto` INCLUDES the non-crypto capital result — `compute.rs` says so in
+    //         terms: *"already includes QD + non-crypto cap gain"* — and
+    //       · `ordinary_taxable_income` EXCLUDES it, because the engine adds it back.
+    //     Calling `net_1222` here with the SAME arguments the engine will use makes the two agree by
+    //     construction rather than by coincidence.
+    //
+    //     ★★★ THE FOLD THAT INTRODUCED THIS ADDED THE RAW SIGNED GAINS INSTEAD, and it was two
+    //     Criticals. `cap_gain_distr` (1099-DIV box 2a) is a DISTRIBUTION and can never be negative,
+    //     so for its whole life `income_total` could add it unlimited and be right. A broker total can
+    //     be a LOSS, and adding one raw deducts it from AGI at full size — where §1211(b) caps the
+    //     deduction at $3,000 ($1,500 MFS). A $100,000 broker short-term loss moved MAGI from $200,000
+    //     to $100,000 where the truth is $197,000: ≈$6,704 of understated crypto-attributable tax, on
+    //     the number `optimize` minimizes to pick a lot method.
+    //
+    //     ★★ THE SHORT-TERM HALF IS DELIBERATELY ABSENT. `net_1222` has no short-term "other" slot and
+    //     `TaxProfile` no field for one, so the engine's `without` cannot see a broker short-term
+    //     position at all. Putting it in the profile ANYWAY — which the fold did — makes
+    //     `magi_excluding_crypto` and the engine's own `without` disagree, which is exactly how both
+    //     Criticals happened. Excluding it keeps the two consistent by construction; the residual gap
+    //     is §G-30's, recorded there with its direction.
+    let noncrypto_cap = crate::tax::compute::net_1222(
+        Usd::ZERO,
+        Usd::ZERO,
+        cap_gain_distr + b1099_lt,
+        ri.capital_loss_carryforward_in.short,
+        ri.capital_loss_carryforward_in.long,
+        loss_limit(status),
+    );
+    // 1040 line 7 as the NON-crypto return would print it — gains net of the §1211(b)-limited loss.
+    let noncrypto_cap_agi = noncrypto_cap.ordinary_gain + noncrypto_cap.preferential_gain
+        - noncrypto_cap.loss_deduction;
 
     // Sch 1 Part I additional income (non-crypto): L1 taxable state refund + L7 Σ unemployment.
     // (L3 Schedule C's CRYPTO half and L8v digital-asset income are crypto → excluded from the frozen
@@ -1032,8 +1069,7 @@ pub fn derive_tax_profile(ri: &ReturnInputs, params: &FullReturnParams, year: i3
     // ★ BOTH characters enter the income total, because MAGI is a LEVEL — the §1411 threshold test
     //   does not care whether a gain is short- or long-term, only how big AGI is. Only the LT half can
     //   also reach `other_net_capital_gain` below, where character does matter.
-    let income_total =
-        wages + taxable_int + ord_div + cap_gain_distr + b1099_st + b1099_lt + sch1_income;
+    let income_total = wages + taxable_int + ord_div + noncrypto_cap_agi + sch1_income;
     let agi_before_student_loan = income_total - early_wd;
     let student_loan = student_loan_deduction(
         ri.sch1.student_loan_interest_paid,
@@ -1058,24 +1094,32 @@ pub fn derive_tax_profile(ri: &ReturnInputs, params: &FullReturnParams, year: i3
     );
     let itemized = schedule_a_deduction(ri, agi, &charitable, params);
     let deduction = choose_deduction(ri, full_std, itemized);
-    let taxable_income = (agi - deduction).max(Usd::ZERO); // 1040 L15 (non-crypto)
-                                                           // Strip the preferential slice (qualified div + LT cap-gain distr) EXACTLY ONCE — the engine re-adds
-                                                           // it on top of the ordinary bottom via `other_net_capital_gain` + the QD channel (deep/02 §1.4).
-                                                           // KNOWN APPROXIMATION (audit-M2 / review M1, → `p2-pref-over-ti-clamp` FOLLOWUP): when
-                                                           // `TI < qd + cap_gain_distr` (low ordinary income + large preferential income — e.g. a retiree), the
-                                                           // `.max(0)` floors the ordinary base to 0 while the FULL pref slice still reaches the frozen engine
-                                                           // (which stacks `qd + pref_gain` with no min-against-TI cap). The reconstructed TI is then ≥ the true
-                                                           // TI, so the delta/planning number can only OVERSTATE, never understate (conservative). Exact handling
-                                                           // (cap the pref slice at TI, reducing `other` first — the QDCGT worksheet's min) RE-SCHEDULED to P4
-                                                           // (review I2): the cap reduces the pref income that feeds the frozen engine, which is the same channel
-                                                           // P4's absolute assembly and crypto-delta stacking rewire — doing it here would be undone there. The
-                                                           // larger P3 Schedule A deductions make this region more reachable but never flip the conservative sign.
-                                                           // ★ §G-28/B4 — the broker LONG-TERM total is preferential-character, so it comes OUT of the
-                                                           //   ordinary slice alongside qualified dividends and box-2a distributions. The SHORT-TERM half
-                                                           //   stays IN: a short-term capital gain is taxed at ordinary rates, which is exactly what this
-                                                           //   quantity means. (It is still absent from the §1222 netting — see §G-30.)
-    let ordinary_taxable_income =
-        (taxable_income - qual_div - cap_gain_distr - b1099_lt).max(Usd::ZERO);
+    // ★ 1040 L15 (non-crypto) is NOT bound here any more. It was `(agi − deduction).max(0)`, and
+    //   `ordinary_taxable_income` below deliberately works from the UNCLAMPED difference — see its
+    //   comment for why that clamp, applied first, manufactured income out of a capital loss.
+    // Strip the preferential slice (qualified div + LT cap-gain distr) EXACTLY ONCE — the engine re-adds
+    // it on top of the ordinary bottom via `other_net_capital_gain` + the QD channel (deep/02 §1.4).
+    // KNOWN APPROXIMATION (audit-M2 / review M1, → `p2-pref-over-ti-clamp` FOLLOWUP): when
+    // `TI < qd + cap_gain_distr` (low ordinary income + large preferential income — e.g. a retiree), the
+    // `.max(0)` floors the ordinary base to 0 while the FULL pref slice still reaches the frozen engine
+    // (which stacks `qd + pref_gain` with no min-against-TI cap). The reconstructed TI is then ≥ the true
+    // TI, so the delta/planning number can only OVERSTATE, never understate (conservative). Exact handling
+    // (cap the pref slice at TI, reducing `other` first — the QDCGT worksheet's min) RE-SCHEDULED to P4
+    // (review I2): the cap reduces the pref income that feeds the frozen engine, which is the same channel
+    // P4's absolute assembly and crypto-delta stacking rewire — doing it here would be undone there. The
+    // larger P3 Schedule A deductions make this region more reachable but never flip the conservative sign.
+    // ★★★ COMPUTED FROM `agi`, NOT FROM `taxable_income`, and that is the second Critical the fold
+    //     introduced. `taxable_income` is `(agi − deduction).max(0)`, already floored — so when a
+    //     broker loss drove AGI below the deduction, the clamp discarded the negative and subtracting
+    //     a NEGATIVE capital term then MANUFACTURED ordinary income out of nothing: W-2 $50,000 with a
+    //     $200,000 broker long-term loss produced an ordinary base of $200,000 against a true
+    //     $32,400, pricing every crypto ordinary dollar at 32-35% instead of 12%.
+    //
+    //     Subtracting the capital term from the UNCLAMPED `agi − deduction` and clamping once, at the
+    //     end, is both correct and identical to the old expression on every path where `agi` clears
+    //     the deduction — which is every pre-existing one, since box-2a distributions cannot be
+    //     negative.
+    let ordinary_taxable_income = (agi - deduction - qual_div - noncrypto_cap_agi).max(Usd::ZERO);
 
     // ── W-2 SE/Medicare channels (two DIFFERENT aggregations — deep/02 §3.4 / C4) ─────────────────
     // §1402(b)(1) SS cap is PER-INDIVIDUAL: `w2_ss_wages` = the SE-earner's OWN box 3 + box 7 tips, NOT
@@ -4024,7 +4068,7 @@ mod tests {
         );
     }
 
-    /// ★★★ §G-28/B4 r2-I2 — A RETURN WITH NO 1099-B LEAVES LINES 1a AND 8a BLANK.
+    /// ★★ §G-28/B4 — a return with no 1099-B carries NO 1a/8a AMOUNTS into the printed chain.
     ///
     /// Line 1a's own text ends *"However, if you choose to report all these transactions on Form 8949,
     /// **leave this line blank** and go to line 1b."* A printed `0` there is not a neutral zero: it
@@ -4032,10 +4076,18 @@ mod tests {
     /// nothing. This is the §G-24 class, and the first draft of B4 reintroduced it for EVERY
     /// pure-crypto return.
     ///
-    /// ★ The assertion is on `ScheduleDParts`, which is what the emitter reads; the emitter-side half
-    /// (`push_money_opt`-equivalent gating) is held by `btctax-forms`' own fill tests.
+    /// ★★★ RENAMED AFTER r3, AND THE OLD NAME WAS THE FINDING. It was
+    /// `..._leaves_lines_1a_and_8a_blank`, which claims the blank-vs-zero distinction — and the body
+    /// asserts a ZERO, over a fold across an EMPTY vector. It is an arithmetic identity: restoring the
+    /// whole "prints a sworn 0" defect left it green. A `0` and a blank are exactly what the old name
+    /// said it distinguished and exactly what it could not, which is §G-24's own thesis turned on the
+    /// test written to honour it.
+    ///
+    /// What it legitimately holds is that no AMOUNT reaches the printed chain. The BLANK-ness is held
+    /// where blankness exists — `schedule_d_lines_1a_and_8a_are_blank_without_a_1099b` in
+    /// `btctax-forms`, which reads the serialized PDF back and asserts the fields are ABSENT.
     #[test]
-    fn a_return_with_no_1099b_leaves_lines_1a_and_8a_blank() {
+    fn a_return_with_no_1099b_carries_no_1a_or_8a_amounts() {
         let p = ty2024_params();
         let table = synthetic_table(2024);
         let mut ri = ReturnInputs {
@@ -4060,20 +4112,25 @@ mod tests {
     ///
     /// Both review lenses found this independently. `compute_tax_year` prices the crypto slice by
     /// running §1222 twice — with and without the crypto legs — so anything NON-crypto has to be in
-    /// the profile or the slice is stacked from the wrong bottom. `other_net_capital_gain` was
-    /// complete before B4 (box-2a distributions were the only non-crypto channel) and B4 added two
-    /// more without threading either.
+    /// the profile or the slice is stacked from the wrong bottom. On $2,000,000 of broker long-term
+    /// gain the engine reported ≈$7,946 of crypto-attributable tax against a true ≈$23,800.
     ///
-    /// On $2,000,000 of broker long-term gain the engine reported ≈$7,946 of crypto-attributable tax
-    /// against a true ≈$23,800 — it stacked from zero instead of from $2M, so §1(h) came out 15%
-    /// where it is 20%, and MAGI missed $2M so §1411 never tripped. **Understating**, and the
-    /// optimizer selects a lot method by minimizing exactly this number.
+    /// ★★ EXACT EQUALITIES, not bands. The first draft asserted `magi >= 2_105_000` and
+    /// `0 < ord_ti < 2_000_000`, which r3 showed were blind to a DOUBLE-COUNT and to moving the
+    /// short-term half between the two slices. `cap_gain_distr` is deliberately non-zero here so
+    /// `cap_gain_distr + b1099_lt` is distinguishable from `b1099_lt` alone.
     #[test]
     fn the_delta_baseline_sees_non_crypto_capital_gain_and_receipts() {
         let p = ty2024_params();
         let mut ri = ReturnInputs {
             filing_status: FilingStatus::Single,
             header: crate::tax::testonly::kitchen_sink_household().0.header,
+            div_1099: vec![crate::tax::return_inputs::Form1099Div {
+                payer: "Broker LLC".into(),
+                box1a_ordinary: dec!(1000),
+                box2a_capgain_distr: dec!(5000),
+                ..Default::default()
+            }],
             b_1099: vec![crate::tax::return_inputs::Form1099B {
                 payer: "Broker LLC".into(),
                 short_term_proceeds: dec!(30000),
@@ -4097,27 +4154,128 @@ mod tests {
         crate::tax::testonly::answer_all_live_declarations(&mut ri);
         let profile = derive_tax_profile(&ri, &p, 2024);
 
-        // ★ The LONG-TERM broker gain is non-crypto LT-character capital gain — exactly what this
-        //   field is documented to hold.
+        // box-2a distributions PLUS the broker long-term total — both non-crypto LT-character gain.
         assert_eq!(
             profile.other_net_capital_gain,
-            dec!(2000000),
-            "the broker's long-term gain must be in the delta engine's §1222 LT baseline"
+            dec!(2005000),
+            "5,000 of box-2a distributions + 2,000,000 of broker long-term gain"
         );
-        // ★★ MAGI is a LEVEL — the §1411 threshold does not care about character, so BOTH halves and
-        //    the non-ledger Schedule C revenue must be in it. Without them the threshold test flips.
-        assert!(
-            profile.magi_excluding_crypto >= dec!(2105000),
-            "MAGI must include both 1099-B characters ($2,020,000) and the $85,000 of consulting: {}",
-            profile.magi_excluding_crypto
+        // AGI = ordinary dividends 1,000 + the §1211-limited capital result 2,005,000 + consulting
+        // 85,000. ★ The $20,000 SHORT-term broker gain is deliberately ABSENT: `net_1222` has no
+        // short-term "other" slot, so the engine's own `without` cannot see it, and putting it here
+        // alone would make the profile and the engine disagree (§G-30).
+        assert_eq!(profile.magi_excluding_crypto, dec!(2091000));
+        // …and the ordinary slice is AGI − standard deduction − QD − the capital result, so the
+        // engine can add the capital result back through `without` without double-counting.
+        assert_eq!(profile.ordinary_taxable_income, dec!(71400));
+    }
+
+    /// ★★★ r3-C1 — A BROKER **LOSS** IS §1211(b)-LIMITED BEFORE IT REACHES AGI.
+    ///
+    /// The fold added the raw signed 1099-B gains to `income_total`. `cap_gain_distr` (1099-DIV box
+    /// 2a) is a DISTRIBUTION and can never be negative, so for its whole life that term could be
+    /// added unlimited and be right — a broker total can be a LOSS, and adding one raw deducts it
+    /// from AGI at full size. §1211(b) caps the deduction at $3,000 ($1,500 MFS).
+    #[test]
+    fn a_broker_loss_is_limited_to_3000_before_it_reaches_the_delta_baseline() {
+        let p = ty2024_params();
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: crate::tax::testonly::kitchen_sink_household().0.header,
+            w2s: vec![crate::tax::return_inputs::W2 {
+                owner: Owner::Taxpayer,
+                employer: "ACME".into(),
+                box1_wages: dec!(200000),
+                ..Default::default()
+            }],
+            b_1099: vec![crate::tax::return_inputs::Form1099B {
+                payer: "Broker LLC".into(),
+                long_term_proceeds: Usd::ZERO,
+                long_term_basis: dec!(100000), // a $100,000 long-term LOSS
+                basis_reported_and_no_adjustments: Some(true),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        crate::tax::testonly::answer_all_live_declarations(&mut ri);
+        let profile = derive_tax_profile(&ri, &p, 2024);
+        assert_eq!(
+            profile.magi_excluding_crypto,
+            dec!(197000),
+            "$200,000 of wages less the §1211(b)-limited $3,000 — NOT the whole $100,000 loss"
         );
-        // ★ …and the ordinary slice keeps the SHORT-term gain (taxed at ordinary rates) while the
-        //   long-term one is removed with the other preferential income.
-        assert!(
-            profile.ordinary_taxable_income > Usd::ZERO
-                && profile.ordinary_taxable_income < dec!(2000000),
-            "short-term stays in the ordinary slice, long-term comes out: {}",
-            profile.ordinary_taxable_income
+        assert_eq!(
+            profile.other_net_capital_gain,
+            dec!(-100000),
+            "the raw non-crypto LT position still reaches the engine, which applies §1211 itself"
+        );
+    }
+
+    /// ★★★ r3-C2 — A LOSS THAT DRIVES AGI BELOW THE DEDUCTION MUST NOT MANUFACTURE ORDINARY INCOME.
+    ///
+    /// `taxable_income` was `(agi − deduction).max(0)` — already floored — and the fold subtracted the
+    /// capital term from THAT. With a negative capital term the subtraction is an ADDITION, so the
+    /// clamp discarded the negative and the add-back invented income: W-2 $50,000 with a $200,000
+    /// broker long-term loss produced an ordinary base of $200,000 against a true $32,400, pricing
+    /// every crypto ordinary dollar at 32-35% instead of 12%.
+    #[test]
+    fn a_loss_below_the_deduction_does_not_manufacture_ordinary_income() {
+        let p = ty2024_params();
+        let mk2 = |long: bool, wages: Usd| {
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                header: crate::tax::testonly::kitchen_sink_household().0.header,
+                w2s: vec![crate::tax::return_inputs::W2 {
+                    owner: Owner::Taxpayer,
+                    employer: "ACME".into(),
+                    box1_wages: wages,
+                    ..Default::default()
+                }],
+                b_1099: vec![crate::tax::return_inputs::Form1099B {
+                    payer: "Broker LLC".into(),
+                    long_term_basis: if long { dec!(200000) } else { Usd::ZERO },
+                    short_term_basis: if long { Usd::ZERO } else { dec!(200000) },
+                    basis_reported_and_no_adjustments: Some(true),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+            crate::tax::testonly::answer_all_live_declarations(&mut ri);
+            derive_tax_profile(&ri, &p, 2024)
+        };
+        let mk = |long: bool| mk2(long, dec!(50000));
+        // LONG-term loss: AGI = 50,000 − 3,000 = 47,000; ordinary base = 47,000 − 14,600 + 3,000.
+        // ★ The `+ 3,000` is the capital term coming back OUT of the ordinary slice, which is right:
+        //   the engine subtracts `without.loss_deduction` itself, landing on the true 32,400.
+        let lt = mk(true);
+        assert_eq!(lt.magi_excluding_crypto, dec!(47000));
+        assert_eq!(
+            lt.ordinary_taxable_income,
+            dec!(35400),
+            "50,000 of wages less the 14,600 standard deduction — NOT 200,000"
+        );
+        // SHORT-term loss: absent from the profile entirely (§G-30), so nothing moves at all.
+        let st = mk(false);
+        assert_eq!(st.magi_excluding_crypto, dec!(50000));
+        assert_eq!(st.ordinary_taxable_income, dec!(35400));
+
+        // ★★★ AND THE CASE THAT ACTUALLY REACHES THE CLAMP. With §1211(b) now limiting the capital
+        //     term to −$3,000, AGI can only dip that far below the standard deduction — so the
+        //     clamp-before-subtraction bug is reachable ONLY at low income, and the $50,000 fixture
+        //     above cannot see it (47,000 clears 14,600 either way). r3 named exactly this class of
+        //     vacuous fixture; mutation confirmed my first draft of this test could not red on the
+        //     defect in its own name.
+        //
+        //     Wages $5,000 ⇒ AGI = 5,000 − 3,000 = 2,000, under the $14,600 deduction. Correct:
+        //     (2,000 − 14,600 − 0 + 3,000) = −9,600 ⇒ clamped to 0. Clamping FIRST gives
+        //     (2,000 − 14,600).max(0) = 0, then +3,000 = $3,000 of income the filer never had.
+        let poor = mk2(true, dec!(5000));
+        assert_eq!(poor.magi_excluding_crypto, dec!(2000));
+        assert_eq!(
+            poor.ordinary_taxable_income,
+            Usd::ZERO,
+            "a filer whose income is below the standard deduction has NO ordinary base — the capital \
+             add-back must not manufacture one"
         );
     }
 

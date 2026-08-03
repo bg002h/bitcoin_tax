@@ -1323,14 +1323,30 @@ equivalence and the branch where it breaks are written at the call site, and
 `other_gross_receipts` to `TaxProfile`, thread it into `compute_se_tax`, add `--other-gross-receipts`
 to `tax-profile`, bump BOTH pins, in a commit that does nothing else.
 
-★★ **§G-28/B4 adds a second, SMALLER instance of the same shape.** The broker LONG-term total now
-reaches the delta baseline (`other_net_capital_gain`, a field that already existed for exactly it), and
-both characters reach MAGI — all in the non-frozen `derive_tax_profile`. What is still missing is the
-SHORT-term half of the §1222 netting: `net_1222` has no short-term "other" argument and `TaxProfile`
-has no field for one, so a broker SHORT-term gain or loss cannot enter the delta engine's within-
-character netting. Direction: a broker short-term LOSS is invisible, so the crypto short-term slice is
-priced from too high a base — **overstating** crypto-attributable tax (safe); a broker short-term GAIN
-is likewise invisible — **understating** it (unsafe). Fold into the same frozen-exception commit.
+★★ **§G-28/B4 adds a second, SMALLER instance of the same shape.** The broker LONG-term total reaches
+the delta baseline (`other_net_capital_gain`, a field that already existed for exactly it) and the
+§1211(b)-limited capital result reaches MAGI — all in the non-frozen `derive_tax_profile`. What is
+missing is the broker **SHORT-term** position entirely: `net_1222` has no short-term "other" argument
+and `TaxProfile` has no field for one, so the engine's own `without` scenario cannot see it.
+
+**Direction: a broker short-term GAIN is invisible, so the crypto slice is priced from too low a base
+and the §1411 MAGI test can read under-threshold — UNDERSTATING (unsafe). A broker short-term LOSS is
+likewise invisible, so the base is too high — OVERSTATING (safe).**
+
+★★★ **THIS PARAGRAPH HAS NOW BEEN WRONG TWICE, ON THE SAME ENTRY, IN THE SAME WAY** — and that is
+worth more than the fix. The first version claimed B3's blindness was purely overstating; a review
+showed it ran both ways. The rewrite then asserted a direction for B4 that was false *because of the
+edit made in the same commit* (both halves were reaching MAGI at that moment, so neither was
+"invisible"), and a later round found the raw-signed-gains Critical underneath it. Both errors have
+the identical cause: **a direction was written from the mechanism I had in mind rather than from a
+walk of the code as committed.** A follow-up that names a direction is making a SAFETY CLAIM about a
+return signed under §6065, and this entry is the standing evidence that such a claim must be executed,
+not reasoned.
+
+**Do NOT half-fix it.** Adding a short-term `other` argument to `net_1222` in the frozen-exception
+commit does not by itself close this: `derive_tax_profile`'s `income_total` deliberately excludes the
+short-term half TOO, precisely so the profile and the engine's `without` stay consistent. Both must
+move together, in the same commit, or the inconsistency that produced two Criticals returns.
 
 ### G-29 — ✅ **CLOSED 2026-08-02, and it was WRONG when filed** — plus one instrument fix that stuck
 
