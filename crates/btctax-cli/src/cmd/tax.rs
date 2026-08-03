@@ -161,6 +161,27 @@ fn mask_pii(ri: &ReturnInputs) -> ReturnInputs {
     m
 }
 
+/// `income scrub` — the stored [`ReturnInputs`] for `year` as SHAREABLE TOML, or `None` if unset.
+///
+/// ★ TOML, not the JSON `income show` emits, because the whole point is that `income import` can take
+/// it straight back — a scrubbed copy nobody can load is a screenshot with extra steps. (`show`'s
+/// "serde-toml needs scalars before tables" note is stale: the round trip works.)
+pub fn scrub_return_inputs(
+    vault: &Path,
+    pp: &Passphrase,
+    year: i32,
+) -> Result<Option<String>, CliError> {
+    let ri = return_inputs::get(Session::open(vault, pp)?.conn(), year)?;
+    ri.map(|ri| {
+        let scrubbed = btctax_core::tax::scrub::scrub_pii(&ri);
+        toml::to_string_pretty(&scrubbed).map_err(|e| CliError::BadConfigValue {
+            key: format!("return_inputs[{year}]"),
+            value: e.to_string(),
+        })
+    })
+    .transpose()
+}
+
 /// `income clear` — remove the stored full-return inputs for `year` (recovery path so a year with
 /// `ReturnInputs` isn't a dead end while derivation is pending — review I3). Returns whether a row existed.
 pub fn clear_return_inputs(vault: &Path, pp: &Passphrase, year: i32) -> Result<bool, CliError> {

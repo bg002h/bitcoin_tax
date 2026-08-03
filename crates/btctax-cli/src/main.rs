@@ -304,6 +304,23 @@ fn run() -> Result<ExitCode, CliError> {
                 cmd::answer::answer_return_inputs(vault, &pp, year, &mut input, &mut out)?;
                 println!("Answered the full-return questions for tax year {year}.");
             }
+            IncomeCmd::Scrub { year, out } => {
+                let pp = passphrase(false)?;
+                match cmd::tax::scrub_return_inputs(vault, &pp, year)? {
+                    Some(toml) => match out {
+                        Some(path) => {
+                            std::fs::write(&path, toml).map_err(CliError::Io)?;
+                            println!(
+                                "Wrote scrubbed inputs for {year} to {}. Every figure is preserved; \
+                                 the identity is not. Read it before you send it.",
+                                path.display()
+                            );
+                        }
+                        None => print!("{toml}"),
+                    },
+                    None => println!("No full-return inputs set for tax year {year}."),
+                }
+            }
             IncomeCmd::Clear { year } => {
                 let pp = passphrase(false)?;
                 if cmd::tax::clear_return_inputs(vault, &pp, year)? {

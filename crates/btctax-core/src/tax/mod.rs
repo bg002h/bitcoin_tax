@@ -28,6 +28,7 @@ pub mod questions;
 pub mod return_1040;
 pub mod return_inputs;
 pub mod return_refuse;
+pub mod scrub;
 pub mod se;
 pub mod tables;
 /// Test scaffolding (synthetic households + TY2024 fixtures) shared with `btctax-forms`' KATs and the

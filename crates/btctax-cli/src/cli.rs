@@ -410,6 +410,30 @@ pub enum IncomeCmd {
         #[arg(long)]
         year: i32,
     },
+    /// Write a SHAREABLE copy of this year's inputs: every figure preserved, the identity replaced.
+    ///
+    /// For handing a real return to someone else — a maintainer, a reviewer — so they can reproduce a
+    /// refusal or a wrong figure without receiving your PII. Names, SSNs, the address, employer and
+    /// payer names are replaced with synthetic stand-ins; the IP PIN is DROPPED, never faked, because
+    /// a plausible-looking one in a file marked safe to share is worse than none.
+    ///
+    /// Everything the computation reads survives unchanged: every dollar figure, the filing status,
+    /// dates of birth and death, blindness, the dependent count and each relationship, and every
+    /// fail-loud declaration. W-2 EINs are replaced but keep their SAMENESS, because §6413(c)'s
+    /// excess-social-security credit turns on having more than one employer.
+    ///
+    /// The output is TOML that `income import` accepts, and it computes an IDENTICAL return — a
+    /// guarantee held by a test, not a hope. What it is NOT is anonymous: the figures alone are a
+    /// financial profile. Do not round or fuzz them to compensate; crossing a bracket, a phase-out or
+    /// the standard-vs-itemized line changes the behaviour you are trying to show.
+    Scrub {
+        /// The tax year (e.g. 2024).
+        #[arg(long)]
+        year: i32,
+        /// Write here instead of stdout.
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
     /// Remove the stored full-return inputs for a tax year (fall back to a raw `tax-profile`).
     Clear {
         /// The tax year (e.g. 2024).

@@ -1,0 +1,25 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH btctax-income-scrub 1  btctax "btctax manual"
+.SH NAME
+scrub \- Write a SHAREABLE copy of this year\*(Aqs inputs: every figure preserved, the identity replaced
+.SH SYNOPSIS
+\fBscrub\fR <\fB\-\-year\fR> [\fB\-\-out\fR] [\fB\-h\fR|\fB\-\-help\fR] 
+.SH DESCRIPTION
+Write a SHAREABLE copy of this year\*(Aqs inputs: every figure preserved, the identity replaced.
+.PP
+For handing a real return to someone else — a maintainer, a reviewer — so they can reproduce a refusal or a wrong figure without receiving your PII. Names, SSNs, the address, employer and payer names are replaced with synthetic stand\-ins; the IP PIN is DROPPED, never faked, because a plausible\-looking one in a file marked safe to share is worse than none.
+.PP
+Everything the computation reads survives unchanged: every dollar figure, the filing status, dates of birth and death, blindness, the dependent count and each relationship, and every fail\-loud declaration. W\-2 EINs are replaced but keep their SAMENESS, because §6413(c)\*(Aqs excess\-social\-security credit turns on having more than one employer.
+.PP
+The output is TOML that `income import` accepts, and it computes an IDENTICAL return — a guarantee held by a test, not a hope. What it is NOT is anonymous: the figures alone are a financial profile. Do not round or fuzz them to compensate; crossing a bracket, a phase\-out or the standard\-vs\-itemized line changes the behaviour you are trying to show.
+.SH OPTIONS
+.TP
+\fB\-\-year\fR \fI<YEAR>\fR
+The tax year (e.g. 2024)
+.TP
+\fB\-\-out\fR \fI<OUT>\fR
+Write here instead of stdout
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help (see a summary with \*(Aq\-h\*(Aq)
