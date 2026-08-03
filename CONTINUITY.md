@@ -4,48 +4,72 @@ _Last updated: **2026-08-02** (filing trial + blocker burndown). Written at a pa
 
 ---
 
-## ▶ RESUME HERE — B1 (Form 8995-A) is the next build
+## ▶ RESUME HERE — B1 is DONE. Next is **B3** (Schedule C gross receipts).
 
-**Everything else from the filing trial is closed.** `design/direction/FILING-TRIAL-2026-08-02.md` has
-the full record; `FOLLOWUPS.md` §G-28 has the open residue. Done today: B2, B9, B10, B11, R1, R2, the
-Schedule D 18/19 sworn zeros, `push_money_opt`, the `Option<Usd>` `_`-ban, the examples-golden guard,
-and P0's single form-name authority.
+**The whole of B1 shipped 2026-08-02.** A self-employed filer above the §199A(e)(2) threshold now
+FILES. Verified on the real binary end to end: a single filer with $240,000 of mined income exports a
+packet containing `55A_f8995a.pdf` with Parts I–IV filled, and 1040 line 13 = 8995-A line 16 = line 27
+= line 39 = **$27,357**. `design/direction/FILING-TRIAL-2026-08-02.md` has the full record;
+`FOLLOWUPS.md` §G-28 (closed items) and §G-29 (the one new follow-up) have the residue.
 
-**B1 is genuinely large and must not be started half-way.** The reason is sharp: narrowing the
-`QbiAboveThreshold` refusal WITHOUT the 8995-A emitter would make btctax emit the **simplified Form
-8995 for a filer i8995a requires to use 8995-A** — a wrong form on a filed return. The refusal
-narrowing and the emitter are ONE unit.
+Also closed this sitting: **B2** and **B10**, which had been fixed in code and never marked.
 
-**Prerequisites already done:**
-- `design/forms/2024/f8995a--2024.pdf` + `i8995a--2024.pdf` archived (manifest, provenance note, fetch
-  log), extracts committed.
-- ★ `i8995a--2024.txt` is extracted **without `-layout`** — it is two-column prose and `-layout`
-  interleaves the columns, cutting the governing sentence in half. Forms need `-layout`; prose
-  instructions do not. The rule that scopes B1a reads correctly now: *"You must complete Part I if you
-  have QBI from a qualified trade, business, or aggregation. If you don't have QBI, and only have REIT,
-  PTP, skip Parts I through III and complete Part IV."*
+**Still open from the trial:** **B3** (Schedule C gross receipts) → **B4** (1099-B totals,
+Schedule-D-shaped, never lot-level) → **B7**/TY2025 → the owner's TY2025 comparison as the acceptance
+milestone. **B5 is decided: do not build.**
 
-**Size, measured:** `f8995a` has **112 AcroForm fields across 40 lines**; the comparable `f8995.map.toml`
-is 104 lines for ~17 lines, so the map alone is ~250 lines — before the emitter, the census, core's
-40-line struct and its `line_coverage` rows. `f8995a.pdf` is **not yet copied into
-`crates/btctax-forms/forms/2024/`**.
+### ★ B3 is scoped but NOT started, and it carries a product decision
 
-**The plan to execute** is the attacked change-map from the `b1-b2-build-plan` workflow. Its two
-findings that must not be lost:
-1. **The phase-in RANGE WIDTH does not exist in `FullReturnParams`.** Line 23 is *"Phase-in range. Enter
-   $50,000 ($100,000 if married filing jointly)"*. Adding it `E0063`s six literals. ★ It is **statutory
-   and NOT inflation-indexed** (§199A(b)(3)(B)(ii)(II)) while the threshold beside it **is** — so a
-   future table update must not "index" it.
-2. **Inside the phase-in range the deduction is NOT $0.** The filing trial's sketch said it was; that
-   would overstate tax by the whole deduction. Part III must be transcribed, not shortcut.
+`gross_receipts_1` (`return_1040.rs`) is `crypto.business_se_gross` — Schedule C revenue comes
+*exclusively* from the Bitcoin ledger. The fix is an additive filer-stated field on `ScheduleCInputs`,
+after which SE tax, QBI and everything downstream follow. **But it changes product identity:** btctax
+stops being a Bitcoin-only self-employment tool. Flag it to the owner rather than assume.
 
-**Split:** B1a = Part IV alone (REIT/PTP-only above threshold, no new input, `MAX_EXCEPTIONS 11→12`).
-B1b = Parts I–III, the three `ScheduleCInputs` fields, and the **SSTB declaration** — which is class-(A),
-because the code today holds every Schedule C to be mining and therefore non-SSTB, and above the
-threshold an unasked SSTB question is an understatement hole.
+Watch on the way in: `BusinessIncomeWithoutScheduleC` currently fires from ledger income, so a
+Schedule C with only non-ledger receipts must not refuse.
 
-**Then:** B3 (Schedule C gross receipts) → B4 (1099-B totals, Schedule-D-shaped, never lot-level) →
-B7/TY2025 → the owner's TY2025 comparison as the acceptance milestone. **B5 is decided: do not build.**
+### ★★★ WHAT B1 COST, AND THE THREE LESSONS WORTH MORE THAN THE FEATURE
+
+1. **PER-FORM TESTS ARE NOT A PACKET TEST.** Two **Criticals** sat in a green 2601-test suite across
+   five green gates, and both fell out of reading the emitted `55A_f8995a.pdf` beside the emitted
+   `00_f1040.pdf` — the only place the two forms are side by side. The 1040's line 13 read *only* Form
+   8995 and printed ZERO on the 8995-A path (**shipped by B1a**, i.e. it survived that commit), and the
+   deduction was UNCAPPED so the form's line 27 printed $45,267 against its own line 16 of $27,357.
+   This is harness **B3** one layer down. The standing counter is the cross-form IDENTITY test
+   `the_1040_deduction_equals_the_attached_8995a_line_39`, which asserts the two AGREE rather than
+   asserting either figure — a value-pinning test would have passed on the first defect the moment
+   someone "fixed" line 39 down to the zero the 1040 was printing.
+
+2. **THE TWO-ORACLE RULE CANNOT BE MET FOR §199A.** OpenTaxSolver reads the QBI deduction as a
+   hand-fed input (`GetLine( "L13", &L[13] )` in `taxsolve_US_1040_2024.c`) and never derives it —
+   §G-9 in its purest form. Tax-Calculator 6.7.2 is the only witness; it was diffed byte-for-byte
+   against the pristine PyPI sdist before being trusted, and it earned its keep immediately by catching
+   a missing §199A(d)(3) SSTB exclusion worth a $40,000 overstated deduction. ★ The FIRST oracle sweep
+   witnessed **nothing** — Part IV's income limitation bound on every phase-in vector, so `qbided` came
+   back identical whether Part III ran or was skipped. Every vector now carries W-2 wage income to hold
+   that cap slack, and a test asserts the two phase-in vectors DISAGREE.
+
+3. **THE SSTB QUESTION WAS NOT CLASS-(A)**, contrary to what this file said before. Making it a live
+   mandatory declaration refused **every Schedule C return at any income** — below the threshold the
+   simplified Form 8995 has no SSTB checkbox, so the answer changes nothing there. It is the
+   `DonationsHadRestrictions` shape: offered always, mandatory only in `screen_absolute` where taxable
+   income is known. `below_the_threshold_an_unanswered_sstb_does_not_refuse` reds if that regresses.
+
+★ A fourth, smaller: the **cooperative-patron** checkbox (Part I column (e)) had to be collected too,
+and it refuses at ANY income — 8995-A's header sends a patron to that form regardless of income, so an
+unasked `no` prints the WRONG FORM rather than merely leaving a box blank.
+
+### Reviews
+
+Two independent Opus lenses ran on `9880385..21fa20e` (composition + form-conformance), both persisted
+verbatim BEFORE folding at `reviews/b1b-r1-composition-opus.md` and `reviews/b1b-r2-conformance-opus.md`:
+0 Critical, 4 Important, 5 Minor, 4 Nit. All folded in `62f1498`. The conformance lens returned a PASS
+worth keeping: it regenerated `pdftotext -layout` from the shipped PDF, found it **byte-identical** to
+the committed extract, and machine-checked every quote against it.
+
+★★ The fold itself closed a hole in the line-coverage INSTRUMENT: deleting a `cover_*` call from `all()`
+took the run from 228 money lines to 218 and still printed **OK**. `cover_fns_not_registered` now walks
+the call graph transitively from `all()`, with a planted-defect kill test (harness B1).
 
 ---
 
