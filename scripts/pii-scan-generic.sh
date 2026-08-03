@@ -80,13 +80,42 @@ ALLOWED_SSN_IMPOSSIBLE='^(000|666)-[0-9]{2}-[0-9]{4}$|^[0-8][0-9]{2}-00-[0-9]{4}
 #    A NEW synthetic SSN goes in the structural space, not here.
 ALLOWED_SSN_LEGACY='^(111-11-1111|111-22-3333|123-45-6789|222-22-2222|222-33-4444)$'
 
+# ── SSN exclusion, part 3: tokens that survive ONLY IN UNPUSHED HISTORY ──────
+# ★★★ NONE OF THESE APPEARS AT HEAD. Grep the working tree and you will not find
+#     them — which is exactly why they need a comment rather than just a listing.
+#     `pre-push` scans EVERY COMMIT in the pushed range, not the tip, so a token
+#     that was introduced and later removed still blocks the push from the
+#     intermediate commit that carried it. Fixing HEAD does not fix history.
+#
+#     All three are synthetic; the alternative was rewriting the commits, and the
+#     owner chose the allowlist (2026-08-03).
+#
+#   111-22-0004  — synthetic dependent SSN in a rendered Form 1040 dependents
+#   111-22-0009    table, reviews/branch-r9-b2-opus.md. Since removed from that
+#                  file; the review commit that introduced it is in the range.
+#   333-44-5555  — synthetic SSN in the §G-6 AMT fixture (btctax-core
+#                  testonly.rs) and quoted in a FOLLOWUPS entry. Both replaced
+#                  at HEAD — the fixture now uses an allowed number and the
+#                  entry names the class instead of the token — but commits
+#                  942120e/3d53ecd still carry it.
+#
+# ★ This bucket is CLOSED and should shrink to nothing the moment these commits
+#   become public (once pushed, they leave the pushed range and are never
+#   rescanned). It is scaffolding for one push, not a permanent exemption. A new
+#   synthetic SSN still belongs in the structural space above, never here.
+ALLOWED_SSN_UNPUSHED_HISTORY='^(111-22-0004|111-22-0009|333-44-5555)$'
+
 # ── EIN exclusion (2-7 shape) ────────────────────────────────────────────────
 # No structural rule is available: the IRS has issued prefixes across nearly the
 # whole 2-digit space, so there is no "impossible EIN" to build a mechanism from.
 # Token-exact, with a citation comment above, remains correct here.
-ALLOWED_EIN='^(11-1111111|22-2222222|33-3333333|44-4444444|12-3456789|98-7654321|99-1234567)$'
+#   56-1234567   — synthetic shared employer EIN in the four-W-2 §6413(c) worked
+#                  example, design/direction/FILING-TRIAL-2026-08-02.md. Same
+#                  unpushed-history case as the SSN bucket above: absent at HEAD,
+#                  present in the commit that introduced the trial write-up.
+ALLOWED_EIN='^(11-1111111|22-2222222|33-3333333|44-4444444|12-3456789|98-7654321|99-1234567|56-1234567)$'
 
-ALLOWED="$ALLOWED_SSN_IMPOSSIBLE|$ALLOWED_SSN_LEGACY|$ALLOWED_EIN"
+ALLOWED="$ALLOWED_SSN_IMPOSSIBLE|$ALLOWED_SSN_LEGACY|$ALLOWED_SSN_UNPUSHED_HISTORY|$ALLOWED_EIN"
 
 # Token-level extraction [R0-M1]: -o emits only matched tokens; exclusions filter
 # tokens, not lines. -I skips binaries [R0-M3]; git grep is tree-accurate and

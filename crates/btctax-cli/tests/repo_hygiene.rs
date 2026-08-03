@@ -264,8 +264,27 @@ fn the_pii_exclusion_rule_admits_only_impossible_identifiers() {
             "legacy synthetic, frozen in persisted reviews",
         ),
         ("222-33-4444", true, "legacy synthetic"),
+        // ── ADMITTED: the UNPUSHED-HISTORY bucket — absent at HEAD, alive in the pushed range ────
+        // ★ These pin the third bucket's existence. `pre-push` scans every commit in the range, so a
+        //   token introduced and later removed still blocks from the intermediate commit. Grepping
+        //   the working tree for them finds nothing, which is exactly why a test should assert them.
+        (
+            "333-44-5555",
+            true,
+            "unpushed-history synthetic (§G-6 AMT fixture)",
+        ),
+        (
+            "111-22-0004",
+            true,
+            "unpushed-history synthetic (dependents table)",
+        ),
         // ── EINs: token-exact, no structural rule is available ──────────────────────────────────
         ("12-3456789", true, "documented synthetic EIN"),
+        (
+            "56-1234567",
+            true,
+            "unpushed-history synthetic EIN (filing-trial write-up)",
+        ),
     ];
 
     // ★★★ THE FLAGGED VECTORS ARE ASSEMBLED, NEVER WRITTEN AS LITERALS — and this is the test
@@ -282,7 +301,11 @@ fn the_pii_exclusion_rule_admits_only_impossible_identifiers() {
     //       allowlisting this file — would have been the exemption-widening the rule exists to refuse.
     let j = |a: &str, b: &str, c: &str| format!("{a}-{b}-{c}");
     let flagged: Vec<(String, bool, &str)> = vec![
-        (j("333", "44", "5555"), false, "valid-shaped, not legacy"),
+        (
+            j("477", "22", "1938"),
+            false,
+            "valid-shaped and on no list at all",
+        ),
         (j("529", "11", "4783"), false, "an ordinary valid SSN shape"),
         (
             j("987", "65", "4331"),
