@@ -1111,6 +1111,68 @@ fn sd(
 /// distributions) and 6/14 (capital-loss carryovers) — all appear on the full-return form. Their
 /// absence is exactly the defect the P5-C1 refusal covers, and this filler is what retires it.
 /// Lines 6 and 14 are PAREN boxes ⇒ positive magnitudes.
+/// ★★★ §G-28/B4 r2-I2 — LINES 1a AND 8a ARE **BLANK** ON A RETURN WITH NO 1099-B.
+///
+/// Line 1a's own text ends *"However, if you choose to report all these transactions on Form 8949,
+/// **leave this line blank** and go to line 1b."* A printed `0` there is not a neutral zero: it swears
+/// the filer had Form 1099-B transactions, with basis reported to the IRS, totalling nothing.
+///
+/// ★★ The first draft of B4 wrote all six cells unconditionally, so EVERY pure-crypto return started
+/// printing that zero — the §G-24 class this same file fixed for lines 18/19, reintroduced a hundred
+/// lines above it. The fixture sets the six to `Usd::ZERO`, so every pre-existing KAT exercised the
+/// zero-write path and passed.
+#[test]
+fn schedule_d_lines_1a_and_8a_are_blank_without_a_1099b() {
+    let lines = sd(
+        dec!(1000),
+        dec!(15000),
+        dec!(2000),
+        dec!(500),
+        dec!(3000),
+        ScheduleDRouting::BothGains,
+    );
+    let pdf = btctax_forms::fill_schedule_d_full(&lines, &kitchen_sink_header(), 2024).unwrap();
+    for (fqn, what) in [
+        (
+            "topmostSubform[0].Page1[0].Table_PartI[0].Row1a[0].f1_03[0]",
+            "1a(d)",
+        ),
+        (
+            "topmostSubform[0].Page1[0].Table_PartI[0].Row1a[0].f1_04[0]",
+            "1a(e)",
+        ),
+        (
+            "topmostSubform[0].Page1[0].Table_PartI[0].Row1a[0].f1_06[0]",
+            "1a(h)",
+        ),
+        (
+            "topmostSubform[0].Page1[0].Table_PartII[0].Row8a[0].f1_23[0]",
+            "8a(d)",
+        ),
+        (
+            "topmostSubform[0].Page1[0].Table_PartII[0].Row8a[0].f1_24[0]",
+            "8a(e)",
+        ),
+        (
+            "topmostSubform[0].Page1[0].Table_PartII[0].Row8a[0].f1_26[0]",
+            "8a(h)",
+        ),
+    ] {
+        assert_eq!(
+            tv(&pdf, fqn),
+            None,
+            "line {what} must be ABSENT on a return with no Form 1099-B — the line's own text says \
+             to leave it blank, and a printed 0 swears to broker transactions that do not exist"
+        );
+    }
+    // …and the crypto lines still print, so the blanks are deliberate rather than a failed fill.
+    assert_eq!(
+        tv(&pdf, "topmostSubform[0].Page1[0].f1_41[0]").as_deref(),
+        Some("3000"),
+        "line 13 still fills"
+    );
+}
+
 #[test]
 fn schedule_d_full_fills_the_lines_the_crypto_slice_omits() {
     let lines = sd(

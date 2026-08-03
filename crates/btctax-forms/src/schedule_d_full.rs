@@ -104,13 +104,23 @@ pub fn fill_schedule_d_full_with_map(
         || lines.line1a_e != Usd::ZERO
         || lines.line8a_d != Usd::ZERO
         || lines.line8a_e != Usd::ZERO;
+    // ★★★ AND WHEN THERE ARE NO 1099-B TOTALS, THE CELLS ARE NOT WRITTEN AT ALL.
+    //
+    //     Line 1a's own text ends *"However, if you choose to report all these transactions on Form
+    //     8949, **leave this line blank** and go to line 1b."* It is a CONDITIONAL entry with an
+    //     explicit blank clause, so a printed `0` is not a neutral zero — it swears the filer had
+    //     Form 1099-B transactions, with basis reported to the IRS, totalling nothing.
+    //
+    //     ★★ The first draft took `map.line1a.as_ref()` here, which is `Some` for TY2024 because B4
+    //     added the mapping — so EVERY pure-crypto return started printing that zero. Same §G-24 class
+    //     this very file fixed for lines 18/19 a hundred lines below, reintroduced above it.
     let (c1a, c8a) = if needs_1099b {
         (
             Some(need(&map.line1a, "line1a", y)?),
             Some(need(&map.line8a, "line8a", y)?),
         )
     } else {
-        (map.line1a.as_ref(), map.line8a.as_ref())
+        (None, None)
     };
 
     // ★ A `Vec`, not a fixed array: lines 1a and 8a are present only when the year's map carries them,

@@ -1286,12 +1286,24 @@ for itself.
 (`btctax report --tax-year`, the TUI tax tab, `tax-profile`) still cannot see it, because `TaxProfile`
 has no such field and `tax/types.rs` is **FROZEN** (`frozen_guard.rs`; SPEC_full_return §2).
 
-**The effect, stated with its direction.** `compute_se_tax` reduces the §1401(a) Social Security band
-by W-2 wages (`w2_ss_wages`) precisely because other earnings consume it. Non-ledger self-employment
-receipts consume it the same way and are invisible, so the band the delta engine believes is available
-is too large and the crypto-ATTRIBUTABLE SE tax it reports comes out **too high**. That is the
-overstating (safe) direction, and it sits inside the report's already-disclosed ceteris-paribus limits
-— *"excludes AGI-driven SS/IRMAA/AMT/QBI/phaseout effects"* — but it is wrong, not merely conservative.
+**The effect, stated with its direction — and the FIRST statement of it was HALF WRONG.** As filed,
+this entry claimed the omission was purely overstating and therefore safe. A review of B3/B4
+(`reviews/b3-b4-r2-money-flow-opus.md`) showed it runs BOTH ways, and the second way is the unsafe one:
+
+* **Overstating (safe), the SE half.** `compute_se_tax` reduces the §1401(a) Social Security band by
+  W-2 wages precisely because other earnings consume it. Non-ledger receipts consume it the same way
+  and are invisible to the frozen `TaxProfile`, so the band the delta engine believes is available is
+  too large and the crypto-attributable SE tax comes out too high.
+* **UNDERSTATING (unsafe), the income-tax half — now FIXED.** The receipts were also missing from
+  `income_total`, hence from `ordinary_taxable_income` and `magi_excluding_crypto`. That priced the
+  crypto ordinary slice from a bracket bottom $85,000 too low and could read the §1411 MAGI test as
+  under-threshold for a filer who is over. `derive_tax_profile` is NOT in the frozen set, so this half
+  was fixed inline; only the SE half genuinely needs the frozen-file exception.
+
+★ Recorded rather than quietly amended, because the error is instructive: a follow-up that names a
+direction is making a safety claim, and a safety claim is exactly the kind of thing that should be
+checked rather than believed. This one was written from the mechanism I had in mind (the SS band) and
+not from a walk of every consumer.
 
 **Why it was not fixed inline.** It was, briefly: a field was added to `TaxProfile` and a parameter to
 `compute_se_tax`, and the frozen-content guard fired. Its own doctrine is unambiguous — *"a legitimate
@@ -1310,6 +1322,15 @@ equivalence and the branch where it breaks are written at the call site, and
 **Owning phase:** whenever the delta engine is next opened deliberately. Scope when it happens: add
 `other_gross_receipts` to `TaxProfile`, thread it into `compute_se_tax`, add `--other-gross-receipts`
 to `tax-profile`, bump BOTH pins, in a commit that does nothing else.
+
+★★ **§G-28/B4 adds a second, SMALLER instance of the same shape.** The broker LONG-term total now
+reaches the delta baseline (`other_net_capital_gain`, a field that already existed for exactly it), and
+both characters reach MAGI — all in the non-frozen `derive_tax_profile`. What is still missing is the
+SHORT-term half of the §1222 netting: `net_1222` has no short-term "other" argument and `TaxProfile`
+has no field for one, so a broker SHORT-term gain or loss cannot enter the delta engine's within-
+character netting. Direction: a broker short-term LOSS is invisible, so the crypto short-term slice is
+priced from too high a base — **overstating** crypto-attributable tax (safe); a broker short-term GAIN
+is likewise invisible — **understating** it (unsafe). Fold into the same frozen-exception commit.
 
 ### G-29 — ✅ **CLOSED 2026-08-02, and it was WRONG when filed** — plus one instrument fix that stuck
 

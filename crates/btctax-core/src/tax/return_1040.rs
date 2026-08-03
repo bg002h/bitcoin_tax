@@ -976,10 +976,51 @@ pub fn derive_tax_profile(ri: &ReturnInputs, params: &FullReturnParams, year: i3
     let ord_div = sum_ordinary_dividends(ri);
     let qual_div = sum_qualified_dividends(ri);
     let cap_gain_distr = sum_cap_gain_distr(ri); // box 2a → Sch D L13 → 1040 L7 (LT character)
+                                                 // ★★★ §G-28/B4 — THE BROKER TOTALS ARE NON-CRYPTO CAPITAL GAIN AND BELONG IN THIS PROFILE.
+                                                 //
+                                                 //     This is the delta engine's BASELINE: `compute_tax_year` runs `net_1222` twice, once with the
+                                                 //     crypto legs and once without, and prices the difference. Everything NON-crypto has to be in
+                                                 //     the profile or the crypto slice is stacked from the wrong bottom.
+                                                 //
+                                                 //     ★★ Before B4, `cap_gain_distr` (1099-DIV box 2a) was the ONLY non-crypto capital-gain
+                                                 //     channel in `ReturnInputs`, so `other_net_capital_gain: cap_gain_distr` was complete. B4 added
+                                                 //     two more and threaded neither — found independently by BOTH review lenses. On a $2,000,000
+                                                 //     broker long-term gain plus $100,000 of crypto LTCG the engine reported ≈$7,946 of
+                                                 //     crypto-attributable tax against a true ≈$23,800: it stacked the crypto slice from zero
+                                                 //     instead of from $2M, so the §1(h) rate came out 15% where it is 20%, and MAGI missed $2M so
+                                                 //     the §1411 threshold never tripped. **Understates**, and the optimizer picks a lot method by
+                                                 //     minimizing this number.
+                                                 //
+                                                 //     ★ The LONG-TERM half needs no frozen-file change: `TaxProfile::other_net_capital_gain` is
+                                                 //     documented as exactly "non-crypto net LT-character capital gain", and `derive_tax_profile`
+                                                 //     is not in the pinned set. The SHORT-TERM half has no profile field and no `net_1222`
+                                                 //     argument, so it is §G-30-shaped and filed there.
+    let (b1099_st, b1099_lt) = form_1099b_gains(ri);
 
     // Sch 1 Part I additional income (non-crypto): L1 taxable state refund + L7 Σ unemployment.
-    // (L3 Schedule C and L8v digital-asset income are CRYPTO → excluded from the frozen profile.)
-    let sch1_income = ri.sch1.state_refund_taxable + sum_unemployment(ri);
+    // (L3 Schedule C's CRYPTO half and L8v digital-asset income are crypto → excluded from the frozen
+    // profile; the NON-ledger half of Schedule C is not, and is added below.)
+    //
+    // ★★★ §G-28/B3 — the non-ledger Schedule C revenue is NON-CRYPTO income by definition, so it
+    //     belongs in the delta engine's baseline for exactly the reason `wages` does. Omitting it
+    //     priced the crypto ordinary slice from a bracket bottom $85,000 too low and could read the
+    //     §1411 MAGI test as under-threshold for a filer who is over — **understating**, which is the
+    //     opposite of the safe direction §G-30 first claimed for B3.
+    //
+    //     ★ GROSS receipts, not net, and the reason is the profile's own standing convention rather
+    //       than a double-count argument. `TaxProfile::schedule_c_expenses` is consumed by
+    //       `compute_se_tax` ONLY; its own doc says so in terms — *"the income-tax stack (engine B /
+    //       `crypto_ord`) is NOT adjusted — the ordinary-income overstatement is disclosed via the
+    //       render advisory"*. So expenses never reduce this baseline for anyone, and matching that
+    //       keeps the non-crypto slice on the same footing as the crypto one. It also errs the SAFE
+    //       way: a baseline slightly high stacks the crypto slice higher, OVERSTATING the
+    //       crypto-attributable figure rather than understating it.
+    let non_ledger_sch_c = ri
+        .schedule_c
+        .as_ref()
+        .map(|c| c.other_gross_receipts)
+        .unwrap_or(Usd::ZERO);
+    let sch1_income = ri.sch1.state_refund_taxable + sum_unemployment(ri) + non_ledger_sch_c;
 
     // Sch 1 Part II adjustments (non-crypto): L18 early-withdrawal penalty + L21 student-loan.
     // (L15 ½-SE is crypto-Schedule-C-driven → excluded here.)
@@ -988,7 +1029,11 @@ pub fn derive_tax_profile(ri: &ReturnInputs, params: &FullReturnParams, year: i3
         .iter()
         .map(|i| i.box2_early_withdrawal_penalty)
         .sum();
-    let income_total = wages + taxable_int + ord_div + cap_gain_distr + sch1_income;
+    // ★ BOTH characters enter the income total, because MAGI is a LEVEL — the §1411 threshold test
+    //   does not care whether a gain is short- or long-term, only how big AGI is. Only the LT half can
+    //   also reach `other_net_capital_gain` below, where character does matter.
+    let income_total =
+        wages + taxable_int + ord_div + cap_gain_distr + b1099_st + b1099_lt + sch1_income;
     let agi_before_student_loan = income_total - early_wd;
     let student_loan = student_loan_deduction(
         ri.sch1.student_loan_interest_paid,
@@ -1025,7 +1070,12 @@ pub fn derive_tax_profile(ri: &ReturnInputs, params: &FullReturnParams, year: i3
                                                            // (review I2): the cap reduces the pref income that feeds the frozen engine, which is the same channel
                                                            // P4's absolute assembly and crypto-delta stacking rewire — doing it here would be undone there. The
                                                            // larger P3 Schedule A deductions make this region more reachable but never flip the conservative sign.
-    let ordinary_taxable_income = (taxable_income - qual_div - cap_gain_distr).max(Usd::ZERO);
+                                                           // ★ §G-28/B4 — the broker LONG-TERM total is preferential-character, so it comes OUT of the
+                                                           //   ordinary slice alongside qualified dividends and box-2a distributions. The SHORT-TERM half
+                                                           //   stays IN: a short-term capital gain is taxed at ordinary rates, which is exactly what this
+                                                           //   quantity means. (It is still absent from the §1222 netting — see §G-30.)
+    let ordinary_taxable_income =
+        (taxable_income - qual_div - cap_gain_distr - b1099_lt).max(Usd::ZERO);
 
     // ── W-2 SE/Medicare channels (two DIFFERENT aggregations — deep/02 §3.4 / C4) ─────────────────
     // §1402(b)(1) SS cap is PER-INDIVIDUAL: `w2_ss_wages` = the SE-earner's OWN box 3 + box 7 tips, NOT
@@ -1054,7 +1104,9 @@ pub fn derive_tax_profile(ri: &ReturnInputs, params: &FullReturnParams, year: i3
         ordinary_taxable_income,
         magi_excluding_crypto: agi,
         qualified_dividends_and_other_pref_income: qual_div,
-        other_net_capital_gain: cap_gain_distr,
+        // §G-28/B4 — box-2a distributions PLUS the broker long-term totals. Both are non-crypto
+        // LT-character capital gain, which is precisely what this field is for.
+        other_net_capital_gain: cap_gain_distr + b1099_lt,
         capital_loss_carryforward_in: ri.capital_loss_carryforward_in,
         w2_ss_wages,
         w2_medicare_wages,
@@ -1384,6 +1436,16 @@ pub fn assemble_absolute(
     //     silently; and `non_ledger_receipts_reach_schedule_se_exactly` is the KAT that pins the
     //     equality itself.
     //
+    //     ★★★ AND THE SPECIFIC EDIT TO EXPECT IS A CLAMP, because that file's OWN DOC invites it:
+    //         *"`schedule_c_expenses`: … **Must be ≥ 0** — the CLI validates; this function assumes
+    //         the precondition holds."* That precondition is now FALSE — this call passes a negative
+    //         whenever receipts exceed expenses — so a well-meaning hardening pass adding
+    //         `schedule_c_expenses.max(Usd::ZERO)` would silently truncate every such filer's SE base
+    //         to the ledger half. On the KAT's own vector that is $40,000 instead of $120,000, about
+    //         **$10,400 of understated SE tax**. `frozen_guard`'s exception process explicitly permits
+    //         that edit in its own reviewed commit, so the KAT — not the freeze — is what stops it.
+    //         Anyone taking that exception must read this comment first.
+    //
     //     ★ The DELTA engine still cannot see these receipts — `TaxProfile` has no field for them and
     //     it is frozen too. That understates the §1401(a) band it thinks is available, so the
     //     crypto-ATTRIBUTABLE SE tax it reports comes out too high (the safe direction, and already
@@ -1435,6 +1497,10 @@ pub fn assemble_absolute(
         st_carryover_6: cf_in.short,
         st_1099b_proceeds_1ad: b1099_st_proceeds,
         st_1099b_cost_1ae: b1099_st_basis,
+        // ★ Kept as the exact difference, but note the PRINTED form does not read it: `schedule_d_lines`
+        //   recomputes column (h) from the two ROUNDED cells, because "Subtract column (e) from column
+        //   (d)" must check out for a reader of the filed page. This field is the unrounded truth the
+        //   tests assert against; the two agree at every whole-dollar input, which is all of them.
         st_1099b_gain_1ah: b1099_st_proceeds - b1099_st_basis,
         lt_1099b_proceeds_8ad: b1099_lt_proceeds,
         lt_1099b_cost_8ae: b1099_lt_basis,
@@ -3902,6 +3968,159 @@ mod tests {
     /// argument to `qbi_over_threshold` was load-bearing and untested: the reviewer replaced it with
     /// `Usd::ZERO` — deleting the refusal for every Schedule C filer — and all 1702 tests still passed.
     ///
+    /// ★★★ §G-28/B4 r1-I1 — OFFSETTING 1099-B TOTALS STILL FILE A SCHEDULE D.
+    ///
+    /// `must_file()` never learned about lines 1a/8a. Line 16 is `line7 + line15`, so it is exactly
+    /// zero when the short- and long-term totals cancel — and line 16 was the only term in that gate
+    /// which could have carried them. A filer with $1,050,000 of short-term proceeds and $400,000 of
+    /// long-term proceeds, every dollar reported to the IRS on a Form 1099-B, filed a packet with NO
+    /// SCHEDULE D IN IT.
+    ///
+    /// ★★ NOTE THE SHAPE: no dollar was wrong. 1040 line 7 was correctly zero. The defect is a
+    /// REQUIRED SCHEDULE OMITTED, which is invisible to every test that checks a value — so this test
+    /// checks the ATTACHMENT DECISION, which is a different question.
+    #[test]
+    fn offsetting_1099b_totals_still_require_a_schedule_d() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: crate::tax::testonly::kitchen_sink_household().0.header,
+            b_1099: vec![crate::tax::return_inputs::Form1099B {
+                payer: "Broker LLC".into(),
+                short_term_proceeds: dec!(1050000),
+                short_term_basis: dec!(1000000), // +50,000 short-term
+                long_term_proceeds: dec!(400000),
+                long_term_basis: dec!(450000), // −50,000 long-term
+                basis_reported_and_no_adjustments: Some(true),
+            }],
+            ..Default::default()
+        };
+        crate::tax::testonly::answer_all_live_declarations(&mut ri);
+        let ar = assemble_absolute(&ri, &crate::state::LedgerState::default(), &p, &table, 2024);
+        let pr = crate::tax::packet::assemble_printed_return(
+            &ri,
+            &crate::state::LedgerState::default(),
+            &std::collections::BTreeMap::new(),
+            &ar,
+            &table,
+            2024,
+            &[],
+        )
+        .expect("the printed return assembles");
+        let d = &pr.forms.sch_d;
+        // The fixture must actually OFFSET, or the old gate would have caught it anyway.
+        assert_eq!(
+            d.line16,
+            Usd::ZERO,
+            "the two characters must cancel, else this is vacuous"
+        );
+        assert_eq!(d.line7, dec!(50000));
+        assert_eq!(d.line15, dec!(-50000));
+        assert!(
+            d.must_file(),
+            "$1,450,000 of proceeds were reported to the IRS on Forms 1099-B — the schedule that \
+             reports them cannot be omitted just because the two characters happen to net to zero"
+        );
+    }
+
+    /// ★★★ §G-28/B4 r2-I2 — A RETURN WITH NO 1099-B LEAVES LINES 1a AND 8a BLANK.
+    ///
+    /// Line 1a's own text ends *"However, if you choose to report all these transactions on Form 8949,
+    /// **leave this line blank** and go to line 1b."* A printed `0` there is not a neutral zero: it
+    /// swears the filer had Form 1099-B transactions, with basis reported to the IRS, totalling
+    /// nothing. This is the §G-24 class, and the first draft of B4 reintroduced it for EVERY
+    /// pure-crypto return.
+    ///
+    /// ★ The assertion is on `ScheduleDParts`, which is what the emitter reads; the emitter-side half
+    /// (`push_money_opt`-equivalent gating) is held by `btctax-forms`' own fill tests.
+    #[test]
+    fn a_return_with_no_1099b_leaves_lines_1a_and_8a_blank() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: crate::tax::testonly::kitchen_sink_household().0.header,
+            ..Default::default()
+        };
+        crate::tax::testonly::answer_all_live_declarations(&mut ri);
+        let st = state_income(vec![mining(dec!(60000))]);
+        let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+        for (v, what) in [
+            (ar.schedule_d.st_1099b_proceeds_1ad, "1a(d)"),
+            (ar.schedule_d.st_1099b_cost_1ae, "1a(e)"),
+            (ar.schedule_d.lt_1099b_proceeds_8ad, "8a(d)"),
+            (ar.schedule_d.lt_1099b_cost_8ae, "8a(e)"),
+        ] {
+            assert_eq!(v, Usd::ZERO, "line {what} has no 1099-B behind it");
+        }
+    }
+
+    /// ★★★ §G-28/B4 r1+r2 — THE CRYPTO-DELTA BASELINE MUST SEE THE BROKER POSITION.
+    ///
+    /// Both review lenses found this independently. `compute_tax_year` prices the crypto slice by
+    /// running §1222 twice — with and without the crypto legs — so anything NON-crypto has to be in
+    /// the profile or the slice is stacked from the wrong bottom. `other_net_capital_gain` was
+    /// complete before B4 (box-2a distributions were the only non-crypto channel) and B4 added two
+    /// more without threading either.
+    ///
+    /// On $2,000,000 of broker long-term gain the engine reported ≈$7,946 of crypto-attributable tax
+    /// against a true ≈$23,800 — it stacked from zero instead of from $2M, so §1(h) came out 15%
+    /// where it is 20%, and MAGI missed $2M so §1411 never tripped. **Understating**, and the
+    /// optimizer selects a lot method by minimizing exactly this number.
+    #[test]
+    fn the_delta_baseline_sees_non_crypto_capital_gain_and_receipts() {
+        let p = ty2024_params();
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: crate::tax::testonly::kitchen_sink_household().0.header,
+            b_1099: vec![crate::tax::return_inputs::Form1099B {
+                payer: "Broker LLC".into(),
+                short_term_proceeds: dec!(30000),
+                short_term_basis: dec!(10000), // +20,000 short-term
+                long_term_proceeds: dec!(2500000),
+                long_term_basis: dec!(500000), // +2,000,000 long-term
+                basis_reported_and_no_adjustments: Some(true),
+            }],
+            schedule_c: Some(ScheduleCInputs {
+                owner: Owner::Taxpayer,
+                business_description: "Consulting".into(),
+                other_gross_receipts: dec!(85000), // §G-28/B3
+                is_sstb: Some(false),
+                is_cooperative_patron: Some(false),
+                qbi_w2_wages: Some(Usd::ZERO),
+                qbi_ubia: Some(Usd::ZERO),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        crate::tax::testonly::answer_all_live_declarations(&mut ri);
+        let profile = derive_tax_profile(&ri, &p, 2024);
+
+        // ★ The LONG-TERM broker gain is non-crypto LT-character capital gain — exactly what this
+        //   field is documented to hold.
+        assert_eq!(
+            profile.other_net_capital_gain,
+            dec!(2000000),
+            "the broker's long-term gain must be in the delta engine's §1222 LT baseline"
+        );
+        // ★★ MAGI is a LEVEL — the §1411 threshold does not care about character, so BOTH halves and
+        //    the non-ledger Schedule C revenue must be in it. Without them the threshold test flips.
+        assert!(
+            profile.magi_excluding_crypto >= dec!(2105000),
+            "MAGI must include both 1099-B characters ($2,020,000) and the $85,000 of consulting: {}",
+            profile.magi_excluding_crypto
+        );
+        // ★ …and the ordinary slice keeps the SHORT-term gain (taxed at ordinary rates) while the
+        //   long-term one is removed with the other preferential income.
+        assert!(
+            profile.ordinary_taxable_income > Usd::ZERO
+                && profile.ordinary_taxable_income < dec!(2000000),
+            "short-term stays in the ordinary slice, long-term comes out: {}",
+            profile.ordinary_taxable_income
+        );
+    }
+
     /// ★★★ §G-28/B4 — 1099-B TOTALS REACH SCHEDULE D LINES 1a/8a AND THE §1222 NETTING.
     ///
     /// The blocker: no 1099-B input existed, so $2,000,000 of stock gain was inexpressible. Schedule D
@@ -4044,6 +4263,67 @@ mod tests {
                 .map(|r| r.reason),
             None,
             "an empty 1099-B row carries no testimony and must not gate the return"
+        );
+    }
+
+    /// ★★★ §G-28/B4 r1-Minor — THE BROKER TOTALS NET AGAINST A NONZERO **CRYPTO** POSITION.
+    ///
+    /// Every other B4 test runs on an EMPTY ledger, so the claim that the totals "join the crypto
+    /// nets" was never observed with a crypto net to join: mutating `capital_net` to drop the crypto
+    /// addend entirely — `net_1222(b_st, b_lt, …)` — survived all of them.
+    ///
+    /// This is the arrangement B4's own sentence describes: a broker loss against a crypto gain of the
+    /// SAME character, netting within character before the §1211(b) limit, which is Schedule D's order
+    /// (lines 1a‥6 → 7; 8a‥14 → 15; then 16).
+    #[test]
+    fn broker_totals_net_against_a_nonzero_crypto_position() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: crate::tax::testonly::kitchen_sink_household().0.header,
+            b_1099: vec![crate::tax::return_inputs::Form1099B {
+                payer: "Broker LLC".into(),
+                // A $40,000 LONG-TERM broker LOSS, against the ledger's long-term crypto GAIN.
+                long_term_proceeds: dec!(10000),
+                long_term_basis: dec!(50000),
+                basis_reported_and_no_adjustments: Some(true),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        crate::tax::testonly::answer_all_live_declarations(&mut ri);
+        // A $100,000 LONG-TERM crypto gain from the ledger.
+        let st = state_disposals(vec![disp_leg(Term::LongTerm, dec!(150000), dec!(50000))]);
+        let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+
+        // The fixture must have a REAL crypto net, or the test is the empty-ledger one again.
+        let crypto_only = assemble_absolute(
+            &{
+                let mut r = ri.clone();
+                r.b_1099.clear();
+                r
+            },
+            &st,
+            &p,
+            &table,
+            2024,
+        );
+        assert_eq!(
+            crypto_only.capital_gain,
+            dec!(100000),
+            "the ledger alone must produce a $100,000 long-term gain, else this is vacuous"
+        );
+        // …and the broker loss nets against it WITHIN character, before anything else.
+        assert_eq!(
+            ar.schedule_d.lt_1099b_gain_8ah,
+            dec!(-40000),
+            "line 8a(h) is the broker's own signed total"
+        );
+        assert_eq!(
+            ar.capital_gain,
+            dec!(60000),
+            "$100,000 crypto LT gain − $40,000 broker LT loss = $60,000, netted within character"
         );
     }
 

@@ -845,6 +845,22 @@ impl ScheduleDLines {
     /// packet's KATs can see it (ARCH-P6 Q2).
     pub fn must_file(&self) -> bool {
         [
+            // §G-28/B4 — the 1099-B totals. ★★★ WITHOUT THESE, A RETURN WHOSE SHORT- AND LONG-TERM
+            //   broker totals OFFSET files with no Schedule D at all: line 16 is `line7 + line15`, so
+            //   it is exactly zero when the two characters cancel, and line 16 was the only term here
+            //   that could have carried them. A filer with $1,050,000 of short-term proceeds and
+            //   $400,000 of long-term proceeds — every dollar of it reported to the IRS on a Form
+            //   1099-B — would have had none of it appear anywhere in the filed packet.
+            //
+            // ★★ Note the shape of the miss: no DOLLAR was wrong. 1040 line 7 was correctly zero. The
+            //   defect is a REQUIRED SCHEDULE OMITTED, which no value-checking test can see — which is
+            //   why the columns are listed individually rather than trusting a net.
+            self.line1a_d,
+            self.line1a_e,
+            self.line1a_h,
+            self.line8a_d,
+            self.line8a_e,
+            self.line8a_h,
             self.line3_d,
             self.line3_e,
             self.line3_h,
