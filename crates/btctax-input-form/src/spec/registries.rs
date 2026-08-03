@@ -323,6 +323,15 @@ const SKIPPABLE_FIELDS: &[Field] = &[
             Err(SetError::NoSuchRow)
         }
     }),
+    // Index 14 — the §G-28/B1b cooperative-patron checkbox, likewise appended.
+    skippable_tristate!(14, FieldId::ScheduleCIsCooperativePatron, |ri| {
+        if let Some(c) = ri.schedule_c.as_mut() {
+            c.is_cooperative_patron = None;
+            Ok(())
+        } else {
+            Err(SetError::NoSuchRow)
+        }
+    }),
 ];
 
 pub(crate) const SKIPPABLES: Section = Section {
@@ -394,6 +403,7 @@ pub fn field_to_skippable(id: FieldId) -> Option<SkippableId> {
         FieldId::ScheduleC1099Filed => SkippableId::ScheduleC1099Filed,
         FieldId::DonationsHadRestrictions => SkippableId::DonationsHadRestrictions,
         FieldId::ScheduleCIsSstb => SkippableId::ScheduleCIsSstb,
+        FieldId::ScheduleCIsCooperativePatron => SkippableId::ScheduleCIsCooperativePatron,
         _ => return None,
     })
 }
@@ -416,5 +426,6 @@ pub fn skippable_to_field(id: SkippableId) -> FieldId {
         SkippableId::ScheduleC1099Filed => FieldId::ScheduleC1099Filed,
         SkippableId::DonationsHadRestrictions => FieldId::DonationsHadRestrictions,
         SkippableId::ScheduleCIsSstb => FieldId::ScheduleCIsSstb,
+        SkippableId::ScheduleCIsCooperativePatron => FieldId::ScheduleCIsCooperativePatron,
     }
 }

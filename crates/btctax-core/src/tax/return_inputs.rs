@@ -318,14 +318,36 @@ pub struct ScheduleCInputs {
     pub qbi_ubia: Option<Usd>,
     /// **Form 8995-A Part I, column (b)** — *"Check if specified service"*.
     ///
-    /// ★★★ A class-(A) DECLARATION, and the direction is why. Above the phase-in range an SSTB's QBI is
-    /// excluded ENTIRELY (§199A(d)(3)), so a "no" the filer never gave hands them a deduction the
-    /// statute denies — an understatement. The code today reasons that every Schedule C here is crypto
-    /// mining and therefore not an SSTB; that is true of mining and will stop being true the moment a
-    /// filer can state their own gross receipts (B3). Asking is transcription: the checkbox is on the
-    /// form.
+    /// ★★★ **Offered always, MANDATORY only where it matters** — the `DonationsHadRestrictions` shape,
+    /// not a class-(A) declaration. Above the phase-in range an SSTB's QBI is excluded ENTIRELY
+    /// (§199A(d)(3)), so a "no" the filer never gave hands them a deduction the statute denies — an
+    /// understatement — and `screen_absolute` demands the answer *there*, where taxable income is known.
+    /// **Below** the threshold §199A is the simplified Form 8995, which has **no SSTB checkbox at all**,
+    /// so the answer changes nothing and demanding it is a refusal with no purpose.
+    ///
+    /// ★ A draft made it live-and-mandatory on `schedule_c.is_some()` and it refused **every Schedule C
+    /// return at any income**; `below_the_threshold_an_unanswered_sstb_does_not_refuse` is what reds if
+    /// that regresses.
+    ///
+    /// The code once reasoned that every Schedule C here is crypto mining and therefore not an SSTB;
+    /// that is true of mining and stops being true the moment a filer can state their own gross
+    /// receipts (B3). Asking is transcription: the checkbox is on the form.
     #[serde(default)]
     pub is_sstb: Option<bool>,
+    /// **Form 8995-A Part I, column (e)** — *"Check if patron"* (of an agricultural or horticultural
+    /// cooperative).
+    ///
+    /// ★★★ This decides **which form is filed**, not just a box. Form 8995-A's own header: *"Use this
+    /// form if your taxable income, before your qualified business income deduction, is above $191,950
+    /// ($383,900 if married filing jointly), **or you're a patron of an agricultural or horticultural
+    /// cooperative**."* So a patron **below** the threshold must file 8995-A too — and btctax would
+    /// otherwise print the simplified Form 8995, which is the wrong form on a filed return.
+    ///
+    /// A `yes` REFUSES: it requires Schedule D (Form 8995-A), which computes the patron reduction that
+    /// Part II line 14 subtracts, and btctax fills no such schedule. Refusing is the fail-closed
+    /// direction; printing a return with line 14 blank would OVERSTATE the deduction.
+    #[serde(default)]
+    pub is_cooperative_patron: Option<bool>,
 }
 fn default_naics() -> String {
     "999999".to_string()
@@ -344,6 +366,7 @@ impl Default for ScheduleCInputs {
             qbi_w2_wages: None,
             qbi_ubia: None,
             is_sstb: None,
+            is_cooperative_patron: None,
             expenses: Usd::ZERO,
             payments_requiring_1099: None,
             will_file_required_1099: None,

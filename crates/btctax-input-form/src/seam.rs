@@ -112,6 +112,9 @@ pub enum FieldId {
     DeclOtherOutOfScopeIncome,
     /// §G-28/B1b — Form 8995-A Part I column (b): is the business a specified service trade or business?
     ScheduleCIsSstb,
+    /// §G-28/B1b — Form 8995-A Part I column (e): is the filer a patron of an agricultural or
+    /// horticultural cooperative? Decides WHICH §199A form is filed, at any income.
+    ScheduleCIsCooperativePatron,
     /// §G-28/B1b — Form 8995-A line 4.
     QbiW2Wages,
     /// §G-28/B1b — Form 8995-A line 7.

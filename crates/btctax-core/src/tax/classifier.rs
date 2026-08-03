@@ -418,6 +418,7 @@ fn classify_schedule_c(c: &mut Census, sc: &ScheduleCInputs) {
         qbi_w2_wages,
         qbi_ubia,
         is_sstb,
+        is_cooperative_patron,
     } = sc;
     // ★★★ §G-28/B1b — the two §199A(b)(2) limitation amounts. `Option<Usd>` is the answered-ness shape
     //     for money, and the `_` rule now FORBIDS waving one past, so these must be classified here.
@@ -447,6 +448,17 @@ fn classify_schedule_c(c: &mut Census, sc: &ScheduleCInputs) {
          §199A(e)(2) threshold, for whom the answer changes nothing, is never blocked; above the \
          threshold `screen_absolute` makes it MANDATORY, because past the phase-in range an SSTB's \
          QBI is excluded entirely and an unasked `no` would understate tax",
+    );
+    // ★★★ The patron flag decides WHICH FORM IS FILED, not just a checkbox: Form 8995-A's header sends
+    //     a cooperative patron to 8995-A at ANY income. A `yes` refuses (Schedule D (Form 8995-A) is
+    //     not filled), so the only answer that reaches a filed return is a `no`, and an unasked one
+    //     would print the simplified Form 8995 for a filer the form sends elsewhere.
+    c.exempt(
+        is_cooperative_patron,
+        Class::BenefitClaim,
+        "Form 8995-A Part I column (e) (§G-28/B1b) — offered as a SKIPPABLE; a `yes` REFUSES because \
+         the Part II line 14 patron reduction comes from Schedule D (Form 8995-A), which btctax does \
+         not fill, and printing line 14 blank would OVERSTATE the deduction",
     );
     c.exempt(
         owner,

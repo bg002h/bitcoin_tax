@@ -647,6 +647,10 @@ pub enum SkippableId {
     /// **Form 8995-A Part I column (b)** — is the trade or business a specified service trade or
     /// business? (§G-28/B1b.)
     ScheduleCIsSstb,
+    /// **Form 8995-A Part I column (e)** — is the filer a patron of an agricultural or horticultural
+    /// cooperative? (§G-28/B1b.) Unlike every other question here this one decides **which form is
+    /// filed**, at any level of income.
+    ScheduleCIsCooperativePatron,
 }
 
 /// The value shape of a [`SkippableQuestion`] — a yes/no answer, or a calendar date.
@@ -1015,6 +1019,34 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
         get_date: |_ri| None,
         set_date: |_ri, _v| {},
     },
+    // ★★★ §G-28/B1b — Form 8995-A Part I column (e), the PATRON checkbox. Appended at the END, for the
+    //     array-index reason above.
+    SkippableQuestion {
+        id: SkippableId::ScheduleCIsCooperativePatron,
+        durability: Durability::PerYear,
+        prompt: "Are you a patron of an agricultural or horticultural cooperative? Answer YES if a \
+                 cooperative paid you patronage dividends, per-unit retain allocations, or passed \
+                 through a section 199A(g) deduction for this business. (Form 8995-A, Part I, \
+                 column (e).)",
+        help: "Skipping is harmless if this business has no qualified business income. Where it DOES, \
+               the answer decides which form is filed at ANY income: Form 8995-A's own header says to \
+               use it if your taxable income is above the threshold \"or you're a patron of an \
+               agricultural or horticultural cooperative\", and Form 8995 says the same in reverse. A \
+               \"Yes\" REFUSES — the patron reduction comes from Schedule D (Form 8995-A), which \
+               btctax does not fill, and filing without it would OVERSTATE your deduction.",
+        kind: SkippableKind::YesNo,
+        // ★ Offered wherever there is a trade or business to be a patron through; the mandatory half
+        //   is in `screen_absolute`, which knows whether a §199A form is actually being printed.
+        live: |ri| ri.schedule_c.is_some(),
+        get_bool: |ri| ri.schedule_c.as_ref().and_then(|c| c.is_cooperative_patron),
+        set_bool: |ri, v| {
+            if let Some(c) = ri.schedule_c.as_mut() {
+                c.is_cooperative_patron = Some(v);
+            }
+        },
+        get_date: |_ri| None,
+        set_date: |_ri, _v| {},
+    }
 ];
 
 #[cfg(test)]
@@ -1062,9 +1094,9 @@ mod tests {
         use crate::tax::types::FilingStatus;
         assert_eq!(
             SKIPPABLE_QUESTIONS.len(),
-            14,
+            15,
             "blind ×2, SALT, DOB ×2, DOD ×2, FBAR, the §G-9 death pair, Schedule C I/J, 8283 5a/5b/5c, \
-             8995-A SSTB"
+             8995-A SSTB + patron"
         );
         // SALT is live iff a schedule_a exists; spouse-blind iff a spouse Person exists.
         let salt = SKIPPABLE_QUESTIONS

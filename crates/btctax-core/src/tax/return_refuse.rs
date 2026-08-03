@@ -459,11 +459,14 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             business_description: _,
             naics_code: _,
             accounting_method: _,
-            // §G-28/B1b — screened where they are NEEDED (above the §199A threshold), not here; and
-            // the SSTB declaration is screened by the registry loop like every other class-(A).
+            // §G-28/B1b — screened where they are NEEDED (above the §199A threshold), not here.
             qbi_w2_wages,
             qbi_ubia,
+            // Two `Option<bool>` DECLARATIONS, not amounts: the SSTB checkbox is mandatory only above
+            // the threshold (`screen_absolute`), and the patron flag refuses on a `yes` at any income
+            // — Schedule D (Form 8995-A), which btctax does not fill.
             is_sstb: _,
+            is_cooperative_patron: _,
             expenses,
             payments_requiring_1099: _, // Option<bool>, not an amount
             will_file_required_1099: _,
