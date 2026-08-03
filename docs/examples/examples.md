@@ -53,6 +53,7 @@ Commands:
 Options:
       --vault <VAULT>  Path to the encrypted vault (vault.pgp) [default: vault.pgp]
   -h, --help           Print help
+  -V, --version        Print version
 ```
 
 ## J1 — a single buyer, start to finish

@@ -14,7 +14,15 @@ use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "btctax", about = "Offline US Bitcoin tax ledger (Phase 1)")]
+// ★ `version` derives `--version`/`-V` from CARGO_PKG_VERSION. Absent until v0.15.0 was already
+//   published, so `btctax --version` answered "unexpected argument" — the first thing anyone types to
+//   check what they installed, and the one question a tax tool should never be coy about: the return a
+//   filer signs is only reproducible if they can say which build produced it.
+#[command(
+    name = "btctax",
+    version,
+    about = "Offline US Bitcoin tax ledger (Phase 1)"
+)]
 pub struct Cli {
     /// Path to the encrypted vault (vault.pgp).
     #[arg(long, global = true, default_value = "vault.pgp")]
