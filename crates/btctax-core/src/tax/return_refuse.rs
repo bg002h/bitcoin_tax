@@ -490,11 +490,21 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             is_sstb: _,
             is_cooperative_patron: _,
             expenses,
+            // §G-28/B3 — non-ledger Schedule C revenue. Screened below: a NEGATIVE would reduce line 1
+            // and understate self-employment income, SE tax and QBI all at once.
+            other_gross_receipts,
             payments_requiring_1099: _, // Option<bool>, not an amount
             will_file_required_1099: _,
         } = c;
         if neg(*expenses) {
             return Some("Schedule C expenses");
+        }
+        // ★ §G-28/B3 — a negative is not a quantity that exists. Schedule C line 2 ("Returns and
+        //   allowances") is the form's own home for revenue given back, and btctax does not fill it;
+        //   letting a negative in here would reduce gross receipts through the wrong line and
+        //   UNDERSTATE income, SE tax and the §199A deduction base together.
+        if neg(*other_gross_receipts) {
+            return Some("Schedule C non-ledger gross receipts");
         }
         // §G-28/B1b — a negative W-2-wage or UBIA figure is not a quantity that exists. Both raise the
         // §199A(b)(2) cap, so a negative would LOWER it and overstate tax; either way it is nonsense.

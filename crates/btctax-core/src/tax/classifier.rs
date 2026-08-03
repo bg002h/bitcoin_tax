@@ -413,6 +413,7 @@ fn classify_schedule_c(c: &mut Census, sc: &ScheduleCInputs) {
         naics_code: _,
         accounting_method,
         expenses: _,
+        other_gross_receipts: _,
         payments_requiring_1099,
         will_file_required_1099,
         qbi_w2_wages,

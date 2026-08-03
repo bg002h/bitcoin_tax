@@ -615,6 +615,7 @@ $ btctax --vault v.pgp income show --year 2024
     "naics_code": "518210",
     "accounting_method": "cash",
     "expenses": "1000",
+    "other_gross_receipts": "0",
     "payments_requiring_1099": null,
     "will_file_required_1099": null,
     "qbi_w2_wages": null,

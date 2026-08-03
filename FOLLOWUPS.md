@@ -1280,6 +1280,37 @@ watched to distinguish a true case from a false one"* — committed by the autho
 `line4: _` compiles and the row vanishes. Corrected to the honest limit `classifier.rs` already states
 for itself.
 
+### G-30 — the DELTA engine cannot see non-ledger Schedule C receipts (2026-08-02)
+
+§G-28/B3 gave the FULL-RETURN path a `schedule_c.other_gross_receipts`. The crypto-**delta** path
+(`btctax report --tax-year`, the TUI tax tab, `tax-profile`) still cannot see it, because `TaxProfile`
+has no such field and `tax/types.rs` is **FROZEN** (`frozen_guard.rs`; SPEC_full_return §2).
+
+**The effect, stated with its direction.** `compute_se_tax` reduces the §1401(a) Social Security band
+by W-2 wages (`w2_ss_wages`) precisely because other earnings consume it. Non-ledger self-employment
+receipts consume it the same way and are invisible, so the band the delta engine believes is available
+is too large and the crypto-ATTRIBUTABLE SE tax it reports comes out **too high**. That is the
+overstating (safe) direction, and it sits inside the report's already-disclosed ceteris-paribus limits
+— *"excludes AGI-driven SS/IRMAA/AMT/QBI/phaseout effects"* — but it is wrong, not merely conservative.
+
+**Why it was not fixed inline.** It was, briefly: a field was added to `TaxProfile` and a parameter to
+`compute_se_tax`, and the frozen-content guard fired. Its own doctrine is unambiguous — *"a legitimate
+change to a frozen file … is its own **separately-reviewed commit** that ALSO updates the pin — never a
+silent pin bump folded into other work."* Two frozen files, ~80 initializer edits and a new CLI flag
+had accumulated inside a B3 commit before the guard stopped it. **The guard was right and the fold was
+wrong**, and `return_inputs.rs`'s own module doc had said so all along (*"the crypto delta engine and
+`TaxProfile` stay FROZEN"*) — it was read this session and proceeded past.
+
+★ B3 reaches Schedule SE without touching either frozen file, through the ONE arithmetic use of
+`compute_se_tax`'s expenses argument (`n = gross_se − expenses`), passed as `expenses − receipts`. The
+equivalence and the branch where it breaks are written at the call site, and
+`non_ledger_receipts_reach_schedule_se_exactly` pins the equality rather than trusting the algebra —
+`CLAUDE.md`'s standing terms for a derived form.
+
+**Owning phase:** whenever the delta engine is next opened deliberately. Scope when it happens: add
+`other_gross_receipts` to `TaxProfile`, thread it into `compute_se_tax`, add `--other-gross-receipts`
+to `tax-profile`, bump BOTH pins, in a commit that does nothing else.
+
 ### G-29 — ✅ **CLOSED 2026-08-02, and it was WRONG when filed** — plus one instrument fix that stuck
 
 **Filed** claiming three Form 8995-A exception rows shared a mechanism the grammar lacked, and

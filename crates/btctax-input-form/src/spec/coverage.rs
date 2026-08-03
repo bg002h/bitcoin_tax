@@ -336,6 +336,14 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         "schedule_c.naics_code",
         "schedule_c.accounting_method",
         "schedule_c.expenses",
+        // ★★ §G-28/B3 — Schedule C line 1's non-ledger half, exempt for the SAME reason as
+        //    `expenses` directly above it: Schedule C is not a v1 input-form section, so its owner,
+        //    description, NAICS code, method and money lines all arrive through `income import`. A
+        //    lone gross-receipts field in the editor would be incoherent — there would be no business
+        //    to attach it to. ★ If Schedule C ever becomes a form section, these two arrive together.
+        //    (`schedule_c.qbi_w2_wages`/`qbi_ubia` are NOT exempt: their refusal points at them, so
+        //    the filer must be able to reach them from the editor.)
+        "schedule_c.other_gross_receipts",
         "sch1.state_refund_taxable",
         "sch1.student_loan_interest_paid",
         "sch1.ira_deduction_claimed",

@@ -279,6 +279,29 @@ pub struct ScheduleCInputs {
     pub accounting_method: AccountingMethod, // line F
     #[serde(default)]
     pub expenses: Usd,
+    /// **Schedule C line 1** — gross receipts or sales that did **not** arrive through the Bitcoin
+    /// ledger. Consulting, freelance, any non-crypto revenue of the same trade or business.
+    ///
+    /// ★★★ §G-28/B3 — THIS IS THE FIELD THAT STOPS btctax BEING BITCOIN-ONLY FOR SELF-EMPLOYMENT.
+    /// Before it, Schedule C revenue came *exclusively* from `se_net_income(state, year)`, so a filer
+    /// with $85,000 of consulting income could not represent it at all. Line 1 is now the SUM: the
+    /// ledger's SE-eligible business crypto **plus** this. Everything downstream — net profit,
+    /// Schedule SE, §199A QBI — follows from that one line.
+    ///
+    /// ★★ A PLAIN `Usd` defaulting to zero, and the reason is a guard rather than a convention. A
+    /// defaulted zero here is testimony that all business revenue came through the ledger, and that
+    /// is the UNDERSTATING direction — so it would need answered-ness were it not already covered.
+    /// It is: [`ReturnInputs::other_out_of_scope_income`] is a MANDATORY class-(A) declaration whose
+    /// prompt asks about *"a business this tool did not capture, or anything else it never asked
+    /// about"*, and a `yes` refuses. A filer with non-ledger receipts must answer it, so they cannot
+    /// reach a filed return by silence. ★ If that declaration is ever narrowed, this field must
+    /// become `Option<Usd>` in the same commit.
+    ///
+    /// ★ The LEDGER remains the sole authority for crypto receipts. This is additive and never
+    /// replaces it — a filer cannot restate their mined income here (that is §G-28/B5, decided
+    /// DO-NOT-BUILD for exactly that reason).
+    #[serde(default)]
+    pub other_gross_receipts: Usd,
     /// ★★ Line **I** — *"Did you make any payments in 2024 that would require you to file Form(s)
     /// 1099?"* A compliance DECLARATION about the filer's own information-reporting, with real
     /// §6721/§6722 exposure — but no figure on the return reads it, and the form prints no Caution
@@ -368,6 +391,10 @@ impl Default for ScheduleCInputs {
             is_sstb: None,
             is_cooperative_patron: None,
             expenses: Usd::ZERO,
+            // ★ $0 = all business revenue arrived through the ledger, which is the common case and a
+            //   real answer; the §G-22 out-of-scope-income declaration is what stops it being a
+            //   silent one (see the field's doc).
+            other_gross_receipts: Usd::ZERO,
             payments_requiring_1099: None,
             will_file_required_1099: None,
         }

@@ -842,7 +842,10 @@ pub fn screen_compute_dependent(
             Usd::ZERO
         }
         Some(sc) => {
-            let net = crypto.business_se_gross - sc.expenses;
+            // §G-28/B3 — Schedule C line 1 is the SUM: the ledger's SE-eligible business crypto plus
+            // any non-ledger receipts. Testing the loss against the crypto half alone would refuse a
+            // filer whose consulting revenue covers their expenses.
+            let net = crypto.business_se_gross + sc.other_gross_receipts - sc.expenses;
             if net < Usd::ZERO {
                 return refusal(
                     RefuseReason::ScheduleCLoss,
@@ -1313,6 +1316,37 @@ pub fn assemble_absolute(
         .as_ref()
         .map(|c| c.expenses)
         .unwrap_or(Usd::ZERO);
+    // §G-28/B3 — non-ledger Schedule C revenue. Zero unless the filer stated it; see the field's doc
+    // for why a plain `Usd` is safe here (the §G-22 out-of-scope-income declaration is the guard).
+    let other_gross_receipts = ri
+        .schedule_c
+        .as_ref()
+        .map(|c| c.other_gross_receipts)
+        .unwrap_or(Usd::ZERO);
+    // ★★★ §G-28/B3 — NON-LEDGER RECEIPTS REACH SCHEDULE SE THROUGH THE EXPENSES ARGUMENT, and that
+    //     needs a proof rather than a shrug, because `compute_se_tax` lives in the FROZEN delta engine
+    //     (`frozen_guard.rs`; SPEC_full_return §2 — the full-return build wraps it and never edits it).
+    //
+    //     THE PROOF. `schedule_c_expenses` has exactly ONE arithmetic use in that function:
+    //
+    //         let gross_se = se_net_income(state, year);
+    //         let n = gross_se - schedule_c_expenses;      // net SE earnings, then `.max(0)`
+    //
+    //     Substituting `expenses − receipts` gives `n = gross_se − expenses + receipts`, which IS
+    //     `(ledger gross + non-ledger receipts) − expenses` — Schedule C line 1 minus line 28,
+    //     identically. Every later term (the 92.35% factor, the §1401(a) cap, §1401(b)) reads only
+    //     `n`, so nothing else can differ.
+    //
+    //     ★★ THE BRANCH WHERE IT BREAKS: if `compute_se_tax` ever reads `schedule_c_expenses` a
+    //     SECOND time — say to print it, or to floor it at zero independently — the substitution stops
+    //     being a substitution. `frozen_guard` pins that file's SHA-256, so such an edit cannot land
+    //     silently; and `non_ledger_receipts_reach_schedule_se_exactly` is the KAT that pins the
+    //     equality itself.
+    //
+    //     ★ The DELTA engine still cannot see these receipts — `TaxProfile` has no field for them and
+    //     it is frozen too. That understates the §1401(a) band it thinks is available, so the
+    //     crypto-ATTRIBUTABLE SE tax it reports comes out too high (the safe direction, and already
+    //     within the report's disclosed ceteris-paribus limits). Filed as §G-30.
     let se = compute_se_tax(
         state,
         year,
@@ -1320,7 +1354,7 @@ pub fn assemble_absolute(
         table,
         w2_ss_wages,
         w2_medicare_wages,
-        schedule_c_expenses,
+        schedule_c_expenses - other_gross_receipts,
     )
     .filter(|r| r.base >= SE_6017_FLOOR);
     let half_se = se.as_ref().map_or(Usd::ZERO, |r| r.deductible_half);
@@ -1360,7 +1394,11 @@ pub fn assemble_absolute(
     // 1040 L8 = Sch 1 L10: state refund + Σ unemployment + Schedule C net (crypto business) + L8v
     // non-business crypto ordinary. Screening guarantees `business_se_gross ≥ expenses` here (no loss).
     let crypto = crypto_income(state, year);
-    let schedule_c_net = (crypto.business_se_gross - schedule_c_expenses).max(Usd::ZERO);
+    // ★★★ §G-28/B3 — SCHEDULE C LINE 1, and the ONE place it is formed. The ledger's SE-eligible
+    //     business crypto PLUS the filer's non-ledger receipts. Everything below reads this: net
+    //     profit, Schedule 1 line 3, Schedule SE, and the §199A QBI base.
+    let schedule_c_gross = crypto.business_se_gross + other_gross_receipts;
+    let schedule_c_net = (schedule_c_gross - schedule_c_expenses).max(Usd::ZERO);
     let schedule_1_income = ri.sch1.state_refund_taxable
         + sum_unemployment(ri)
         + schedule_c_net
@@ -1387,11 +1425,11 @@ pub fn assemble_absolute(
     let adjustments = early_wd + half_se + student_loan;
     let agi = total_income - adjustments; // 1040 L11 (with-crypto AGI)
 
-    // Schedule C exists only when the filer declared a crypto trade or business. Gross receipts are
-    // the SE-eligible business crypto income; the net (floored at 0 — a loss refuses upstream) is the
-    // SAME figure that feeds Schedule 1 line 3 and Schedule SE.
+    // Schedule C exists whenever the filer declared a trade or business. Gross receipts (line 1) are
+    // the SE-eligible business crypto income PLUS any non-ledger receipts (§G-28/B3); the net (floored
+    // at 0 — a loss refuses upstream) is the SAME figure that feeds Schedule 1 line 3 and Schedule SE.
     let schedule_c = ri.schedule_c.as_ref().map(|_| ScheduleCParts {
-        gross_receipts_1: crypto.business_se_gross,
+        gross_receipts_1: schedule_c_gross,
         total_expenses_28: schedule_c_expenses,
         net_profit_31: schedule_c_net,
     });
@@ -3804,6 +3842,148 @@ mod tests {
     /// argument to `qbi_over_threshold` was load-bearing and untested: the reviewer replaced it with
     /// `Usd::ZERO` — deleting the refusal for every Schedule C filer — and all 1702 tests still passed.
     ///
+    /// ★★★ §G-28/B3 — NON-LEDGER GROSS RECEIPTS REACH SCHEDULE C LINE 1, SCHEDULE SE AND §199A.
+    ///
+    /// The blocker: `ScheduleCInputs` had no gross-receipts field, so Schedule C revenue could only
+    /// arrive as mined Bitcoin and a filer with $85,000 of consulting income could not represent it
+    /// at all. Line 1 is now the SUM, and this pins that the sum reaches all three consumers.
+    ///
+    /// ★★ THE EQUIVALENCE THIS EXISTS TO PIN. `compute_se_tax` is in the FROZEN delta engine, so the
+    /// receipts reach it through its ONE arithmetic use of the expenses argument
+    /// (`n = gross_se − expenses`), passed as `expenses − receipts`. This asserts the resulting net SE
+    /// equals the direct figure — Schedule C line 1 minus line 28 — rather than trusting the algebra.
+    #[test]
+    fn non_ledger_receipts_reach_schedule_se_exactly() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let mk = |mined: Usd, other: Usd, expenses: Usd| {
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                header: crate::tax::testonly::kitchen_sink_household().0.header,
+                schedule_c: Some(ScheduleCInputs {
+                    owner: Owner::Taxpayer,
+                    business_description: "Consulting and mining".into(),
+                    expenses,
+                    other_gross_receipts: other,
+                    is_sstb: Some(false),
+                    is_cooperative_patron: Some(false),
+                    qbi_w2_wages: Some(Usd::ZERO),
+                    qbi_ubia: Some(Usd::ZERO),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            crate::tax::testonly::answer_all_live_declarations(&mut ri);
+            let st = if mined > Usd::ZERO {
+                state_income(vec![mining(mined)])
+            } else {
+                crate::state::LedgerState::default()
+            };
+            let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+            (ri, st, ar)
+        };
+
+        // (a) $40,000 mined + $85,000 consulting − $5,000 expenses. Line 1 = $125,000.
+        let (_, _, ar) = mk(dec!(40000), dec!(85000), dec!(5000));
+        let sc = ar.schedule_c.as_ref().expect("a Schedule C files");
+        assert_eq!(
+            sc.gross_receipts_1,
+            dec!(125000),
+            "line 1 is the LEDGER plus the filer's non-ledger receipts"
+        );
+        assert_eq!(sc.net_profit_31, dec!(120000), "line 31 = line 1 − line 28");
+        let se = ar.se.as_ref().expect("SE tax applies");
+        assert_eq!(
+            se.net_se, dec!(120000),
+            "★ Schedule SE's net earnings are line 1 − line 28, NOT the ledger's gross − expenses. \
+             This is the whole equivalence: it is reached through the frozen function's expenses \
+             argument, and it must land on the same number."
+        );
+
+        // (b) ★★★ A PURELY NON-CRYPTO BUSINESS — the case the blocker made inexpressible. No ledger
+        //     income at all, so `se_net_income` returns zero and every figure comes from the filer.
+        let (_, _, ar) = mk(Usd::ZERO, dec!(85000), dec!(5000));
+        let sc = ar
+            .schedule_c
+            .as_ref()
+            .expect("a Schedule C files with no crypto at all");
+        assert_eq!(sc.gross_receipts_1, dec!(85000));
+        assert_eq!(sc.net_profit_31, dec!(80000));
+        assert_eq!(
+            ar.se
+                .as_ref()
+                .expect("SE tax applies to non-crypto self-employment too")
+                .net_se,
+            dec!(80000)
+        );
+        // …and it earns the §199A deduction like any other qualified trade or business.
+        assert!(
+            ar.printed_inputs.business_qbi > Usd::ZERO,
+            "non-crypto self-employment is a qualified trade or business too"
+        );
+
+        // (c) The regression guard: with NO non-ledger receipts nothing moves.
+        let (_, _, ar) = mk(dec!(40000), Usd::ZERO, dec!(5000));
+        let sc = ar.schedule_c.as_ref().unwrap();
+        assert_eq!(sc.gross_receipts_1, dec!(40000));
+        assert_eq!(sc.net_profit_31, dec!(35000));
+        assert_eq!(ar.se.as_ref().unwrap().net_se, dec!(35000));
+    }
+
+    /// ★★ Non-ledger receipts can COVER the expenses that would otherwise be a Schedule C loss.
+    ///
+    /// The loss screen used to test `ledger gross − expenses`, so a filer whose consulting revenue
+    /// paid for their mining costs was refused for a loss they did not have.
+    #[test]
+    fn consulting_revenue_covers_mining_expenses_instead_of_refusing_a_loss() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: crate::tax::testonly::kitchen_sink_household().0.header,
+            schedule_c: Some(ScheduleCInputs {
+                owner: Owner::Taxpayer,
+                business_description: "Consulting and mining".into(),
+                expenses: dec!(30000), // more than the mined income…
+                other_gross_receipts: dec!(50000), // …but the consulting revenue covers it
+                is_sstb: Some(false),
+                is_cooperative_patron: Some(false),
+                qbi_w2_wages: Some(Usd::ZERO),
+                qbi_ubia: Some(Usd::ZERO),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        crate::tax::testonly::answer_all_live_declarations(&mut ri);
+        let st = state_income(vec![mining(dec!(20000))]);
+        // ★★★ `screen_compute_dependent` IS THE SCREEN THAT HOLDS THE LOSS TEST, and calling
+        //     `screen_absolute` instead is why the first draft of this test let the mutation live:
+        //     reverting the loss check to `ledger gross − expenses` did not red anything. A test that
+        //     names the wrong screen is an untested guard wearing a green tick.
+        assert_eq!(
+            screen_compute_dependent(&ri, &st, 2024, &p).map(|r| r.reason),
+            None,
+            "$20k mined + $50k consulting − $30k expenses is a $40,000 PROFIT, not a loss"
+        );
+        let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+        assert_eq!(
+            screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024).map(|r| r.reason),
+            None,
+            "…and nothing downstream refuses it either"
+        );
+        assert_eq!(ar.schedule_c.as_ref().unwrap().net_profit_31, dec!(40000));
+
+        // ★★ And the guard is NOT always-off: the same business WITHOUT the consulting revenue is a
+        //    genuine loss and must still refuse.
+        let mut loss = ri.clone();
+        loss.schedule_c.as_mut().unwrap().other_gross_receipts = Usd::ZERO;
+        assert_eq!(
+            screen_compute_dependent(&loss, &st, 2024, &p).map(|r| r.reason),
+            Some(RefuseReason::ScheduleCLoss),
+            "$20k mined − $30k expenses with no other revenue IS a loss, and still refuses"
+        );
+    }
+
     /// ★★★ §G-28/B1b — THIS RETURN NO LONGER REFUSES. It is the case the blocker existed for.
     ///
     /// A sole proprietor above the §199A(e)(2) threshold with no employees and no qualified property:

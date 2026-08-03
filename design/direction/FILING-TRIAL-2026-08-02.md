@@ -99,7 +99,7 @@ the *"If more than four dependents"* box checked, and a `dependents_statement.tx
 carrying all nine in the grid's own four columns. Verified on the owner's nine-child scenario, whose
 exported packet contains that statement. `crates/btctax-core/src/tax/dependents_statement.rs`.
 
-### B3 · Self-employment income cannot be entered — only mined
+### B3 · Self-employment income cannot be entered — only mined — ✅ **FIXED**
 
 `ScheduleCInputs` (`return_inputs.rs:252`) has `expenses` but **no gross-receipts field**. Schedule C
 revenue comes exclusively from the Bitcoin ledger (income events reclassified with
@@ -108,6 +108,26 @@ other non-Bitcoin self-employment income **cannot represent it at all**.
 
 **Blocks every self-employed filer whose business is not Bitcoin.** For this trial I modelled the
 $85,000 as mining, which is in scope — but that is my substitution, not the scenario.
+
+**FIXED 2026-08-02.** `ScheduleCInputs.other_gross_receipts` is Schedule C line 1's non-ledger half;
+line 1 is now the SUM. Verified end to end on the real binary: $240,000 mined + **$85,000 of
+consulting** exports a Schedule C line 1 of **$325,000** flowing to Schedule SE line 3, and a purely
+NON-CRYPTO business files with no ledger income at all. It also stopped a wrong refusal — the loss
+screen tested `ledger gross − expenses`, so a filer whose consulting revenue paid for their mining
+costs was refused for a loss they did not have.
+
+★★ **This is the product-identity change**, and it is deliberate: btctax is no longer Bitcoin-only for
+self-employment income. The LEDGER remains the sole authority for crypto receipts — the new field is
+additive and can never restate them, which is exactly why B5 stays DO-NOT-BUILD.
+
+★ A plain `Usd` defaulting to $0 rather than an `Option`, because the §G-22 out-of-scope-income
+declaration already stands in front of it: its prompt asks about *"a business this tool did not
+capture"*, it is MANDATORY, and a `yes` refuses. A filer with non-ledger receipts cannot reach a filed
+return by silence. If that declaration is ever narrowed, this field must become `Option<Usd>` in the
+same commit.
+
+★ The DELTA engine still cannot see them (`TaxProfile` is frozen) — filed as `FOLLOWUPS.md` §G-30 with
+the direction it errs in.
 
 ### B4 · Capital gains cannot be entered — only disposed
 
