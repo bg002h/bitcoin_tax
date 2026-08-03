@@ -110,34 +110,41 @@ The committed fixture `crates/btctax-cli/tests/fixtures/examples/nine_dependents
 adds to the vector above: **9 dependents**, **$45,000** of 1099-INT bank interest, and **$12,000** of
 Form 1098 mortgage interest.
 
+**Raised to $18,000 of mortgage interest**, which clears the $14,600 standard deduction, so the filer
+**itemizes** — and that is the point of the amount. Form 6251 line 2a reads *"If filing Schedule A,
+enter the taxes from Schedule A, **line 7**; otherwise, enter the amount from Form 1040 line 12."* A
+standard-deduction filer adds back 14,600; an itemizer adds back **taxes**, and this household reports
+none, so line 2a is **$0**. Conflating Schedule A line 7 with line 17 (the itemized total) is the
+defect that shipped in v0.6.0–v0.13.0, and only an itemizing vector exercises that branch.
+
 | figure | btctax | Tax-Calculator 6.7.2 | OpenTaxSolver 2024 |
 |---|---:|---:|---:|
 | AGI | 2,123,995 | 2,123,995 | — |
-| standard deduction | 14,600 | 14,600 | — |
-| itemized (not taken) | 12,000 | 0 (std wins) | — |
-| taxable income | 2,109,395 | 2,109,395 | 2,093,595.94 ✗ |
+| deduction (ITEMIZED) | 18,000 | 18,000 | 18,000 |
+| taxable income | 2,105,995 | 2,105,995 | 2,090,195.94 ✗ |
 | SE tax | 12,010 | 12,010 | 12,010.12 |
 | NIIT | 73,112 | 73,112 | 73,111.81 |
-| **Form 6251 line 2a** | **14,600** | *omitted* ✗ | 14,600 |
-| **AMT (6251 L11)** | **12,941** | 9,145 ✗ | 12,490.94 ✗ |
-| total tax | 496,885 | 493,089 ✗ | 491,987.67 |
+| **Form 6251 line 2a** | **0** | 0 | 0 |
+| 6251 line 4 (AMTI) | 2,105,995 | — | 2,090,195.94 ✗ |
+| **AMT (6251 L11)** | **9,077** | **9,077** ✓ | 8,558.94 ✗ |
+| total tax | **492,035** | **492,035** ✓ | 487,137.67 |
 
-**Tax-Calculator** matches AGI, the standard deduction, taxable income, SE tax and NIIT to the dollar.
-Its AMT and its total each differ by **exactly $3,796**, and the ordinary AMT slice here is
-2,123,995 − 2,000,000 = $123,995, still below the $232,600 breakpoint, so the marginal AMT rate is
-26%: `14,600 × 26% = 3,796` — its own open line-2a defect (PSLmodels#3108), unchanged in size by the
-new income because the standard deduction did not change. Corrected for it, taxcalc lands on
-**12,941** and **496,885** exactly.
+**Tax-Calculator matches btctax EXACTLY on every line**, AMT and total included, with no divergence to
+correct for — the first vector in this file where that is true. The reason is worth stating rather than
+enjoying: taxcalc's open line-2a defect (PSLmodels#3108) omits the *add-back*, and **an itemizer with no
+SALT has nothing to add back**, so the defect is worth $0 here. Agreement is therefore weaker evidence
+about line 2a than it looks — it confirms the rest of the chain while saying nothing about a term that
+is zero on both sides. The standard-deduction variant above is what actually exercises that term.
 
-**OpenTaxSolver** gets line 2a right and its NIIT agrees. Its taxable income is low by **$15,799**,
+**OpenTaxSolver** takes the same line-2a branch ($0) and its NIIT agrees. Its taxable income is low by
+**$15,799**,
 which is precisely the simplified-Form-8995 deduction its wrapper hand-feeds
 (`GetLine("L13", &L[13])`) and which §199A(b)(2) denies this filer. That cascade accounts for the whole
-$450.49 AMT difference: the add-back raises both the tentative minimum tax and the regular tax, and
+$518.49 AMT difference: the add-back raises both the tentative minimum tax and the regular tax, and
 the AMT is their difference. §G-9 again — a value an oracle takes as INPUT is never validated by its
 agreement.
 
-★ **What the mortgage contributes is a REFUSAL, not a deduction.** $12,000 loses to the $14,600
-standard deduction, so no Schedule A files and no figure moves. It is in the fixture because omitting
+★ **The mortgage also carries a REFUSAL.** Omitting
 `mortgage_dwelling_is_amt_qualified` refuses the entire return with `AmtQualifiedDwellingUnanswered`
 and writes zero bytes — i6251 line 3 adds back interest on a dwelling that is not AMT-qualified, and
 guessing would understate the tax. Deleting that one line is a live kill-test, verified red.

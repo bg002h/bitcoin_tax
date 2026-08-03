@@ -49,13 +49,13 @@ fn the_nine_dependent_amt_return_files_a_complete_packet() {
         .expect("AMT: line 7 exceeds line 10");
     assert_eq!(
         btctax_core::conventions::round_dollar(f6251.line11),
-        dec!(12941),
+        dec!(9077),
         "the AMT both oracles witnessed on this vector"
     );
     let sch2 = pr.forms.sch_2.as_ref().expect("Schedule 2 files");
     assert_eq!(
         sch2.line2,
-        Some(dec!(12941)),
+        Some(dec!(9077)),
         "Sch 2 L2 transcribes 6251 L11"
     );
 
@@ -70,18 +70,41 @@ fn the_nine_dependent_amt_return_files_a_complete_packet() {
     );
 
     // ★ Total tax, pinned to the oracle-validated figure. Dependents do not move it — see below.
-    assert_eq!(pr.forms.f1040.line24, dec!(496885));
+    assert_eq!(pr.forms.f1040.line24, dec!(492035));
 
-    // ★★ Schedule B files: $45,000 of interest clears the $1,500 floor. And Schedule A does NOT --
-    //    $12,000 of mortgage interest loses to the $14,600 standard deduction, so the deduction stays
-    //    standard. The mortgage is in this fixture for the REFUSAL it forces, not for a deduction.
+    // ★★ Schedule B files ($45,000 of interest clears the $1,500 floor) and so does Schedule A --
+    //    $18,000 of mortgage interest CLEARS the $14,600 standard deduction, so the filer itemizes.
     assert!(
         pr.forms.sch_b.is_some(),
         "interest over $1,500 files Schedule B"
     );
-    assert!(
-        pr.forms.sch_a.is_none(),
-        "$12,000 itemized loses to the $14,600 standard deduction"
+    let sch_a = pr
+        .forms
+        .sch_a
+        .as_ref()
+        .expect("$18,000 itemized beats the $14,600 standard deduction");
+    assert_eq!(sch_a.line8a, dec!(18000), "Form 1098 mortgage interest");
+    assert_eq!(
+        pr.forms.f1040.line12,
+        dec!(18000),
+        "1040 L12 is the itemized total"
+    );
+
+    // ★★★ FORM 6251 LINE 2a IS ZERO, AND THAT IS THE WHOLE POINT OF ITEMIZING HERE.
+    //     "If filing Schedule A, enter the taxes from Schedule A, **line 7**; otherwise, enter the
+    //     amount from Form 1040 line 12." This filer reports no taxes, so line 2a is $0 -- NOT the
+    //     $18,000 deduction. Conflating Schedule A line 7 (taxes) with line 17 (the itemized total)
+    //     is the defect that shipped in v0.6.0-v0.13.0, and a standard-deduction fixture cannot
+    //     exercise the branch it lived on.
+    assert_eq!(
+        f6251.line2a,
+        btctax_core::conventions::Usd::ZERO,
+        "an itemizer adds back TAXES (Sch A line 7 = 0), never the itemized total"
+    );
+    assert_eq!(
+        btctax_core::conventions::round_dollar(f6251.line4),
+        dec!(2105995),
+        "AMTI = taxable income + line 2a(0)"
     );
 }
 

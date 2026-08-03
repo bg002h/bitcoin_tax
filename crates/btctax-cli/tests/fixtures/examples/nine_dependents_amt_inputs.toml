@@ -9,15 +9,22 @@
 #   * $2,000,000 LTCG     as Form 1099-B totals (§G-28/B4) -> Schedule D lines 1a/8a
 #   * $45,000 bank interest  1099-INT box 1 -> Schedule B (over the $1,500 filing floor), 1040 L2b,
 #                          AGI, the §1411 NII base, AND AMTI
-#   * $12,000 mortgage interest  Form 1098 -> Schedule A line 8a. It does NOT change the tax: $12,000
-#                          itemized loses to the $14,600 single standard deduction, so L12 stays
-#                          standard and no Schedule A files. It is here for what it DOES trigger --
-#                          the Form 6251 line 3 declaration below.
-#   * the combination     -> AMTI $2,123,995, exemption fully phased out, Form 6251 ATTACHED (§G-6),
+#   * $18,000 mortgage interest  Form 1098 -> Schedule A line 8a. This CLEARS the $14,600 single
+#                          standard deduction, so the filer ITEMIZES: Schedule A files and 1040 L12
+#                          is 18,000.
+#   * the combination     -> AMTI $2,105,995, exemption fully phased out, Form 6251 ATTACHED (§G-6),
 #                          and taxable income far above §199A(e)(2) so Form 8995-A governs
 #
-# Expected packet (11 forms): 1040, Sch 1, Sch 2, Sch B, Sch C, Sch D, Sch SE, f6251(32), f8995a(55A),
-# f8960 plus dependents_statement.txt.  AMT = 12,941 · total tax = 496,885.
+# Expected packet (12 forms): 1040, Sch 1, Sch 2, Sch A, Sch B, Sch C, Sch D, Sch SE, f6251(32),
+# f8995a(55A), f8960 plus dependents_statement.txt.  AMT = 9,077 · total tax = 492,035.
+#
+# ★★★ ITEMIZING IS WHY THIS AMOUNT WAS CHOSEN — it swings Form 6251 line 2a onto its OTHER branch.
+#     Line 2a reads "If filing Schedule A, enter the taxes from Schedule A, **line 7**; otherwise,
+#     enter the amount from Form 1040 line 12." A standard-deduction filer adds back 14,600; an
+#     itemizer adds back TAXES, and this household reports none, so line 2a is $0 and AMTI is just
+#     taxable income. Conflating Schedule A line 7 (taxes) with line 17 (the itemized TOTAL) is the
+#     defect that shipped in v0.6.0-v0.13.0; at $18,000 this fixture exercises the branch that was
+#     wrong, and at $12,000 it did not.
 #
 # ★★★ THE MORTGAGE INTEREST IS A REFUSAL TRIGGER, and that is why it is in the fixture. Adding it
 #     without `mortgage_dwelling_is_amt_qualified` refuses the whole return with
@@ -25,12 +32,13 @@
 #     dwelling that is not a principal residence or otherwise AMT-qualified, and guessing would
 #     understate the tax. Deleting that one line below is a live kill-test for the gate.
 #
-# ★ BOTH ORACLES witness these figures (2026-08-03). Tax-Calculator matches AGI, the standard
-#   deduction, taxable income, SE tax and NIIT to the dollar, and its AMT/total differ by EXACTLY
-#   $3,796 = 14,600 x 26%, its own open line-2a defect (PSLmodels#3108) -- corrected for, it lands on
-#   12,941 and 496,885 exactly. OpenTaxSolver gets line 2a right and differs by $450.49, entirely from
-#   the spurious $15,799 simplified-8995 deduction its wrapper hand-feeds (§G-9: a value an oracle
-#   takes as INPUT is never validated by its agreement).
+# ★★ BOTH ORACLES witness these figures (2026-08-03), and Tax-Calculator now matches btctax EXACTLY
+#    on every line -- AGI, deduction, taxable income, SE tax, NIIT, AMT 9,077 and total 492,035, with
+#    NO divergence to correct for. Its open line-2a defect (PSLmodels#3108) omits the add-back, and an
+#    itemizer with no SALT has nothing to add back, so the defect is worth $0 here. That makes this the
+#    cleanest witness in the file. OpenTaxSolver agrees structurally and differs by $518.49, entirely
+#    from the spurious $15,799 simplified-8995 deduction its wrapper hand-feeds (§G-9: a value an
+#    oracle takes as INPUT is never validated by its agreement).
 #
 # ★ Dependents do not move the tax: §24(b) has phased the CTC out entirely at this income, which is
 #   why this fixture is also the CTC-advisory regression case.
@@ -167,9 +175,9 @@ payer = "Community Savings Bank"
 box1_interest = "45000"
 
 [schedule_a]
-# ★ $12,000 loses to the $14,600 standard deduction, so this Schedule A never files. It is here for
-#   the Form 6251 line 3 declaration it forces — see the header.
-mortgage_interest_1098 = "12000"
+# ★ $18,000 CLEARS the $14,600 standard deduction, so this Schedule A DOES file and the filer itemizes
+#   — which is what swings Form 6251 line 2a onto its Schedule-A-line-7 branch. See the header.
+mortgage_interest_1098 = "18000"
 mortgage_all_used_to_buy_build_improve = true
 # i6251 line 3 — a principal residence IS an AMT-qualified dwelling, so there is no add-back.
 # ★ DELETING THIS LINE REFUSES THE RETURN (AmtQualifiedDwellingUnanswered). That is the point.
