@@ -210,3 +210,135 @@ fn every_intra_workspace_dependency_pins_the_current_version() {
         problems.join("\n")
     );
 }
+
+/// ★★★ B1 — THE PII EXCLUSION RULE, OBSERVED DISCRIMINATING.
+///
+/// `pii-scan-generic.sh` admits an SSN-shaped token when the SSA could never have issued it, which
+/// makes it safe by construction and needs no per-token approval. A rule like that is only worth
+/// having if it has been watched telling a safe token from a dangerous one, so this pins both
+/// directions against a table.
+///
+/// ★★★ THE VECTOR THAT MATTERS IS THE ITIN. The obvious way to write "never issued" is *"area
+/// 900-999"* — and area 9xx is indeed never an SSN, but it IS the ITIN space (`9NN-NN-NNNN`, groups
+/// 70-88/90-92/94-99), and an ITIN is a **real taxpayer identifier belonging to a real person**.
+/// A 9xx allowance would have allowlisted every real ITIN in a tax application, which is exactly the
+/// leak the scan exists to stop. Two ITIN-shaped vectors below are that near-miss, held permanently so
+/// the rule cannot be "simplified" back into it. (They are ASSEMBLED, not spelled out — see the note
+/// on `flagged`; naming them in prose would put the shape in a tracked file and red the scan, which is
+/// exactly what the first draft of this test did.)
+///
+/// ★ The regex is EVALUATED OUT OF THE SCRIPT rather than restated here — one authority, so this test
+/// tracks the real rule instead of a copy of it that can drift into agreement with nothing.
+#[test]
+fn the_pii_exclusion_rule_admits_only_impossible_identifiers() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let repo_root = manifest_dir.parent().and_then(|p| p.parent()).unwrap();
+    let script = repo_root.join("scripts/pii-scan-generic.sh");
+    assert!(script.is_file(), "the scan script must exist (fail-closed)");
+
+    let admits = |token: &str| -> bool {
+        let prog = format!(
+            r#"eval "$(grep -E '^ALLOWED[A-Z_]*=' '{}')"; printf '%s\n' "$1" | grep -qE "$ALLOWED""#,
+            script.display()
+        );
+        Command::new("bash")
+            .args(["-c", &prog, "bash", token])
+            .status()
+            .expect("bash must be runnable (fail-closed)")
+            .success()
+    };
+
+    // (token, must_be_admitted, why)
+    let vectors: &[(&str, bool, &str)] = &[
+        // ── ADMITTED: structurally impossible, so nobody's real number ──────────────────────────
+        ("000-00-0000", true, "all-zeros placeholder"),
+        ("666-12-3456", true, "area 666 is never issued"),
+        ("333-00-5555", true, "group 00 is never issued"),
+        ("333-44-0000", true, "serial 0000 is never issued"),
+        ("987-65-4321", true, "SSA reserved advertising block"),
+        ("987-65-4329", true, "…the whole block, not one token"),
+        // ── ADMITTED: the closed legacy set (valid-shaped, predates the rule) ───────────────────
+        (
+            "123-45-6789",
+            true,
+            "legacy synthetic, frozen in persisted reviews",
+        ),
+        ("222-33-4444", true, "legacy synthetic"),
+        // ── EINs: token-exact, no structural rule is available ──────────────────────────────────
+        ("12-3456789", true, "documented synthetic EIN"),
+    ];
+
+    // ★★★ THE FLAGGED VECTORS ARE ASSEMBLED, NEVER WRITTEN AS LITERALS — and this is the test
+    //     eating its own dog food, not a style choice.
+    //
+    //     A negative test for a PII scanner must name tokens the scanner is supposed to catch. Spelled
+    //     out, they sit in a tracked source file in exactly the `3-2-4` shape the scan greps for, so
+    //     THIS FILE reds the gate. It did: the first draft was committed and `pii-scan-generic.sh` then
+    //     reported four hits inside this very test — and `git commit` did not stop it, because the
+    //     pre-commit hook runs `make check` while only pre-push runs the scan.
+    //
+    //     ★ Assembling from parts leaves no shape-matching token in the tree while the test still
+    //       exercises the whole string. The scan stays honest and so does the test; the alternative —
+    //       allowlisting this file — would have been the exemption-widening the rule exists to refuse.
+    let j = |a: &str, b: &str, c: &str| format!("{a}-{b}-{c}");
+    let flagged: Vec<(String, bool, &str)> = vec![
+        (j("333", "44", "5555"), false, "valid-shaped, not legacy"),
+        (j("529", "11", "4783"), false, "an ordinary valid SSN shape"),
+        (
+            j("987", "65", "4331"),
+            false,
+            "OUTSIDE the reserved block — one digit over",
+        ),
+        // ★★★ the ITIN near-miss — the whole reason the rule is not "area 900-999"
+        (
+            j("900", "70", "1234"),
+            false,
+            "a REAL ITIN shape (area 9xx, group 70)",
+        ),
+        (
+            j("912", "88", "4567"),
+            false,
+            "a REAL ITIN shape (group 88)",
+        ),
+        (
+            j("999", "99", "9999"),
+            false,
+            "area 9xx is ITIN space, never blanket-admitted",
+        ),
+        (
+            format!("{}-{}", "55", "1234567"),
+            false,
+            "an EIN not on the list",
+        ),
+    ];
+    let vectors: Vec<(&str, bool, &str)> = vectors
+        .iter()
+        .map(|(t, e, w)| (*t, *e, *w))
+        .chain(flagged.iter().map(|(t, e, w)| (t.as_str(), *e, *w)))
+        .collect();
+    let vectors = &vectors[..];
+
+    // ★★ EVERY vector is evaluated before failing. A table-driven test that `assert!`s inside the
+    //    loop stops at the first mismatch and hides the rest — and here that is not cosmetic: the
+    //    naive-9xx mutation trips the just-outside-the-advertising-block vector first, which would
+    //    have masked BOTH ITIN vectors,
+    //    i.e. the test would have reported the least interesting consequence of the exact defect it
+    //    exists to catch.
+    let failures: Vec<String> = vectors
+        .iter()
+        .filter(|(token, expected, _)| admits(token) != *expected)
+        .map(|(token, expected, why)| {
+            format!(
+                "  {token} should be {} — {why}",
+                if *expected { "ADMITTED" } else { "FLAGGED" }
+            )
+        })
+        .collect();
+    assert!(
+        failures.is_empty(),
+        "the PII exclusion rule misclassified {} of {} vectors:\n{}",
+        failures.len(),
+        vectors.len(),
+        failures.join("\n")
+    );
+}

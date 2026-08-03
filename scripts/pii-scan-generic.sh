@@ -45,7 +45,48 @@ SHAPES='\b[0-9]{3}-[0-9]{2}-[0-9]{4}\b|\b[0-9]{2}-[0-9]{7}\b'
 #     99-1234567   — second synthetic sequential EIN (btctax-cli/tests/tax_report.rs) [R0-I1]
 # NOT excluded (cannot match the shapes; documented only): the bare 9-digit TIN
 # and the alphanumeric PTIN used in the same fixtures.
-ALLOWED='^(000-00-0000|111-11-1111|111-22-3333|123-45-6789|222-22-2222|222-33-4444|987-65-4321|11-1111111|22-2222222|33-3333333|44-4444444|12-3456789|98-7654321|99-1234567)$'
+# ── SSN exclusion, part 1: a STRUCTURAL rule, not an enumeration ─────────────
+# An SSN the SSA can NEVER have issued cannot be any real person's, so it is safe
+# by construction and needs no per-token approval. This is the repo's standing
+# rule (CLAUDE.md, the oracle excuse lists): state the mechanism, let it decide,
+# never enumerate the outcomes you happened to see. A test author needing a fresh
+# synthetic SSN now picks one from this space and edits nothing here.
+#
+#   area 000 or 666      — never issued, and never an ITIN prefix
+#   group 00             — never issued (no valid SSN or ITIN has it)
+#   serial 0000          — never issued
+#   987-65-432x          — the SSA's own reserved advertising block
+#
+# ★★★ THE ITIN TRAP, and why the never-issued area range 900-999 is NOT here.
+#     Area 9xx is never an SSN — but it IS the ITIN space (9NN-NN-NNNN, groups
+#     70-88/90-92/94-99), and an ITIN is a REAL taxpayer identifier belonging to a
+#     real person. Allowing 9xx wholesale would allowlist every real ITIN, in a tax
+#     application, which is precisely the leak this scan exists to stop. So the
+#     group/serial rules are anchored to a NON-9 area ([0-8][0-9]{2}) and 9xx is
+#     admitted nowhere. Widening an exemption is never the safe edit.
+ALLOWED_SSN_IMPOSSIBLE='^(000|666)-[0-9]{2}-[0-9]{4}$|^[0-8][0-9]{2}-00-[0-9]{4}$|^[0-8][0-9]{2}-[0-9]{2}-0000$|^987-65-432[0-9]$'
+
+# ── SSN exclusion, part 2: the LEGACY tokens, and why this list is permanent ──
+# These five are valid-SHAPED SSNs (they break no SSA rule), so the structural
+# rule above cannot admit them and must not be bent to. They predate it.
+#
+# ★★ They can never be retired, and the reason is worth stating so nobody spends
+#    an afternoon trying. Each appears not only in live code but in PERSISTED
+#    REVIEW ARTIFACTS — design/**/reviews/*.md, reviews/branch-r9-b2-opus.md,
+#    design/no-testimony/CONSULT-architect-fable.md — which the workflow requires
+#    be kept VERBATIM. Migrating every call site would still leave the tokens in
+#    the tree, and editing a reviewer's persisted output to clear a scan would
+#    falsify the record to make a gate green. So: closed set, never extended.
+#    A NEW synthetic SSN goes in the structural space, not here.
+ALLOWED_SSN_LEGACY='^(111-11-1111|111-22-3333|123-45-6789|222-22-2222|222-33-4444)$'
+
+# ── EIN exclusion (2-7 shape) ────────────────────────────────────────────────
+# No structural rule is available: the IRS has issued prefixes across nearly the
+# whole 2-digit space, so there is no "impossible EIN" to build a mechanism from.
+# Token-exact, with a citation comment above, remains correct here.
+ALLOWED_EIN='^(11-1111111|22-2222222|33-3333333|44-4444444|12-3456789|98-7654321|99-1234567)$'
+
+ALLOWED="$ALLOWED_SSN_IMPOSSIBLE|$ALLOWED_SSN_LEGACY|$ALLOWED_EIN"
 
 # Token-level extraction [R0-M1]: -o emits only matched tokens; exclusions filter
 # tokens, not lines. -I skips binaries [R0-M3]; git grep is tree-accurate and
