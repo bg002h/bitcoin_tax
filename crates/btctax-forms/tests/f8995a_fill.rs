@@ -251,12 +251,10 @@ fn the_phase_in_percentage_prints_scaled_by_a_hundred() {
         printed, "28.062",
         "line 24 holds the ratio 0.28062 and must print as 28.062 percent"
     );
-    // ★★ …and with NO trailing zeros. 14031/50000 carries Decimal scale 5, so the un-normalized
-    //    product renders "28.06200" — arithmetically identical, and wrong ink on a filed form.
-    assert!(
-        !printed.ends_with('0'),
-        "line 24 must not carry the Decimal scale's trailing zeros: {printed}"
-    );
+    // ★★ The exact assertion above already pins the normalization: 14031/50000 carries Decimal scale
+    //    5, so the un-normalized product renders "28.06200" — arithmetically identical, wrong ink on a
+    //    filed form. ★ A blanket "must not end in 0" would be FALSE for line 24 in general: a ratio of
+    //    25000/50000 prints "50" and 50000/50000 prints "100", both correct.
 }
 
 /// ★★ THE FAIL-CLOSED GUARD ON A NAMELESS BUSINESS — carried across from the Form 8995 emitter,

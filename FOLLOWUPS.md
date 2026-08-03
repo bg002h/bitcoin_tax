@@ -1280,39 +1280,35 @@ watched to distinguish a true case from a false one"* — committed by the autho
 `line4: _` compiles and the row vanishes. Corrected to the honest limit `classifier.rs` already states
 for itself.
 
-### G-29 — four exception rows share ONE mechanism, so the grammar is missing a production (2026-08-02)
+### G-29 — ✅ **CLOSED 2026-08-02, and it was WRONG when filed** — plus one instrument fix that stuck
 
-Raising `MAX_EXCEPTIONS` from 12 to 15 for Form 8995-A Parts II/III surfaced this. Of the four
-8995-A exception rows, **three** carry the identical sentence:
+**Filed** claiming three Form 8995-A exception rows shared a mechanism the grammar lacked, and
+proposing a new `Production::ConditionalBlank`. **Review r2 killed it in one line:** two of the three
+are [`Production::Carry`], which is defined *three lines from where they were written* as
 
-| row | instruction | why it is an exception |
-|---|---|---|
-| f8995a:12 | *"Phased-in reduction. Enter the amount from line 26, **if any**"* | conditional entry, no `-0-` clause ⇒ BLANK outside the phase-in range |
-| f8995a:14 | *"Patron reduction. Enter the amount from Schedule D (Form 8995-A), line 6, **if any**"* | same, and never written at all |
-| f8995a:38 | *"DPAD … **Don't enter more than** line 33 minus line 37"* | same — pre-existing, from B1a |
+> *"Enter the amount from line N"* — blank when the source line is blank.
 
-(The fourth, f8995a:24, is genuinely sui generis: a percentage, the only non-money printed line.)
+…which is Form 8995-A line 12 (*"Phased-in reduction. **Enter the amount from line 26**, if any"*) and
+line 14 (*"Patron reduction. **Enter the amount from** Schedule D (Form 8995-A), **line 6**, if any"*)
+verbatim. Both are now `Carry`, and `MAX_EXCEPTIONS` went **15 → 13** rather than staying raised. Only
+`f8995a:24` — a percentage, the one non-money printed line, with no `Divide` production — is a genuine
+exception.
 
-**One sentence covers three rows: *an `if any` conditional entry with no `-0-` clause, therefore
-blank*.** That is a PRODUCTION the grammar does not have, not three independent misfits — and
-absorbing them into the ratchet is precisely the *"enumerate the outcomes you happened to see"*
-failure `line_coverage_check.rs` warns about in its own comments. Adding
-`Production::ConditionalBlank` would take `MAX_EXCEPTIONS` **down by three**, which is the direction
-the ratchet exists for, and would make the §G-11 "blank is not zero" rule enforceable by the grammar
-instead of by a per-row prose reason.
+★★ **This is the hook's own rule, failed on the file that documents the productions.** *"Before
+deriving or building, grep for what already exists — I conclude from not having looked."* A production
+list eight items long was not read before a ninth was proposed. Recorded rather than quietly deleted,
+because the near-miss is the lesson: the RATCHET is what caught it. It forced the raise into a diff,
+where a reviewer read the stated reason and checked it against the production list. A silent counter
+would have absorbed two units of unearned slack permanently.
 
-★ Not done inline because the production enum is shared by fifteen forms, so it is a change to a
-common instrument and deserves its own diff — not a rider on a §199A fold. **Owning phase:** the next
-line-coverage instrument change (with §G-27b–e).
-
-★★ **The other half of this entry is already CLOSED**, and it is the sharper half. The same ratchet
-raise exposed that `all()` could silently DROP a coverage function: deleting
-`cover_form8995apartiii` took the run from 228 money lines to 218 and still printed **OK**. A defined
--but-uncalled `pub fn` is legal, so `missing_cover_fns` (which demands the function EXIST) structurally
-cannot see it. `cover_fns_not_registered` now walks the call graph transitively from `all()` and reds
-on an unreachable coverage function — with a planted-defect kill test, per harness B1. Reachability
-rather than direct-call, because `cover_schedulebrow` is legitimately reached *through*
-`cover_schedulelines_b` and a direct-call rule false-positived on the first honest case it met.
+★ **What DID stick, and it is the valuable half:** the same raise exposed that `all()` could silently
+DROP a coverage function — deleting `cover_form8995apartiii` took the run from 228 money lines to 218
+and still printed **OK**. A defined-but-uncalled `pub fn` is legal, so `missing_cover_fns` (which
+demands the function EXIST) structurally cannot see it. `cover_fns_not_registered` now walks the call
+graph transitively from `all()`. Three of its own blind spots were found by mutation and closed, each
+with a kill-test case: a `pub fn` at offset zero; a `cover_*` named only in a COMMENT; and — because
+`all()` is the LAST top-level fn in `line_coverage.rs`, so its chunk runs to EOF — a `#[cfg(test)] mod
+tests` appended after it granting reachability to everything the tests name.
 
 ### G-28 — the FILING TRIAL residue (2026-08-02)
 

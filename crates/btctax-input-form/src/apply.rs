@@ -65,7 +65,7 @@ fn apply_to(ri: &mut ReturnInputs, e: Edit) -> Result<(), ApplyError> {
             guard_arity(&addr, depth)?;
             // ★ The un-answer path (spec §5.7 M-6, review I-1). An `Enum` has no empty state (this includes
             // `filing_status`) → `Immutable`, WITHOUT touching anything. Else, a field carrying a dedicated
-            // `clear` (the 13 registry-delegating tri-state/date leaves — whose registry setter writes only a
+            // `clear` (the registry-delegating tri-state/date leaves — whose registry setter writes only a
             // definite yes/no, so it cannot un-answer) routes through it, writing its `Option` leaf to `None`.
             // Every plain field clears via its own `set(empty_for_kind)`.
             if let FieldKind::Enum(_) = field.kind {
@@ -672,9 +672,15 @@ mod tests {
     }
 
     /// ★ ClearField per-kind (review I-1/I-2, updated from the old "registry limitation" that pinned the bug):
-    /// Enum → `Immutable`; the 13 registry-delegating tri-state/date fields UN-ANSWER their underlying `Option`
-    /// leaf to `None` (spec §5.7 M-6); plain Date/Money/Text/Bool/Secret clear to their empty value; and the
-    /// `IpPin` Secret clears to `None` (never `Some("")`).
+    /// Enum → `Immutable`; the registry-delegating tri-state/date fields UN-ANSWER their underlying `Option`
+    /// leaf to `None` (spec §5.7 M-6); the `IpPin` Secret clears to `None` (never `Some("")`); and everything
+    /// else clears to its empty value.
+    ///
+    /// ★★ **A dedicated `clear` is NOT limited to registry-delegating fields**, and this comment used to
+    /// say it was. `QbiW2Wages`/`QbiUbia` are plain `FieldKind::Money` over `Option<Usd>` leaves — the only
+    /// two in `ReturnInputs` — so "clear to the empty value" would write `Some($0)`, which is the ANSWER
+    /// "my business paid no wages" rather than an un-answer. The rule is about the LEAF's shape, not the
+    /// field's registry membership: any field whose leaf is an `Option` needs its own `clear`.
     #[test]
     fn clearfield_kind_matrix_and_registry_unanswer() {
         let mut w: Working = None;

@@ -170,17 +170,6 @@ impl Coverage {
     }
 }
 
-/// **Form 8995** — the whole struct, destructured with no `..`.
-///
-/// Chosen as the first covered form because it exercises six of the eight productions AND both clamp
-/// polarities, so the mechanism is proved on a hard case rather than an easy one.
-/// §G-28/B1a — **Form 8995-A Part IV**. Every line, in the form's own numbering.
-///
-/// ★ Part IV is Form 8995's lines 5-17 with a DPAD line inserted, and `qbi_a` carries the written
-/// equivalence proof plus the KAT that pins the branch where it would break. The rows below quote
-/// **8995-A's own sentences**, which differ in wording from 8995's at two clamps even though they
-/// never differ in value — so these are transcribed from `f8995a--2024.txt`, not copied from the
-/// sibling coverage fn.
 /// §G-28/B1b — Form 8995-A **Part II** (lines 2-16), column A.
 ///
 /// ★★ These 15 lines and Part III's 10 shipped OUTSIDE this table, and the module's blast-radius
@@ -270,17 +259,27 @@ pub fn cover_form8995apartii(p: &crate::tax::qbi_a::Form8995APartIi) -> Coverage
     );
     c.line(*line11, f, "11", "line11", Production::Bounded,
         "W-2 wage and UBIA of qualified property limitation. Enter the smaller of line 3 or line 10");
-    // ★★ L12 is a CONDITIONAL entry — "if any" with no "-0-" clause. Outside the §199A phase-in range
-    //    there is no line 26, so the cell stays BLANK; the emitter uses `push_money_opt`.
-    c.exception(line12.unwrap_or(Usd::ZERO), f, "12", "line12",
+    // ★★ `Carry`, NOT an exception. Its own definition is *"Enter the amount from line N" — blank when
+    //    the source line is blank*, and that is this line verbatim: outside the §199A phase-in range
+    //    there is no line 26, so the cell stays BLANK (the emitter uses `push_money_opt`). Filing it as
+    //    an exception cost the ratchet a unit of unearned slack, and filed a FOLLOW-UP proposing a
+    //    production the grammar already has — "I conclude from not having looked", on the one file
+    //    that documents its productions three lines apart.
+    c.line(
+        line12.unwrap_or(Usd::ZERO),
+        f,
+        "12",
+        "line12",
+        Production::Carry,
         "Phased-in reduction. Enter the amount from line 26, if any",
-        "BLANK unless Part III ran. \"if any\" is a conditional entry with no \"-0-\" clause: outside the phase-in range there is no line 26 to enter, and a printed 0 would swear a phased-in reduction was figured and came to nothing. `Option<Usd>`; the emitter uses `push_money_opt`.");
+    );
     c.line(*line13, f, "13", "line13", Production::Bounded,
         "Qualified business income deduction before patron reduction. Enter the greater of line 11 or line 12");
-    // ★★ L14 likewise — and it is ALWAYS blank, because a cooperative patron refuses upstream.
-    c.exception(line14.unwrap_or(Usd::ZERO), f, "14", "line14",
-        "Patron reduction. Enter the amount from Schedule D (Form 8995-A), line 6, if any. See instructions",
-        "NEVER WRITTEN. A conditional entry with no \"-0-\" clause whose condition requires Schedule D (Form 8995-A), which btctax does not fill — a cooperative patron REFUSES (`RefuseReason::CooperativePatron`) rather than file with this line blank. `Option<Usd>`, always `None`.");
+    // ★★ Also `Carry` — "Enter the amount from Schedule D (Form 8995-A), line 6". Its source line is
+    //    always blank here, because btctax fills no Schedule D: a cooperative patron REFUSES
+    //    (`RefuseReason::CooperativePatron`) rather than file with this line empty.
+    c.line(line14.unwrap_or(Usd::ZERO), f, "14", "line14", Production::Carry,
+        "Patron reduction. Enter the amount from Schedule D (Form 8995-A), line 6, if any. See instructions");
     c.line(
         *line15,
         f,
@@ -391,6 +390,13 @@ pub fn cover_form8995apartiii(p: &crate::tax::qbi_a::Form8995APartIii) -> Covera
     c
 }
 
+/// §G-28/B1a — **Form 8995-A Part IV**. Every line, in the form's own numbering.
+///
+/// ★ Part IV is Form 8995's lines 5-17 with a DPAD line inserted, and `qbi_a` carries the written
+/// equivalence proof plus the KAT that pins the branch where it would break. The rows below quote
+/// **8995-A's own sentences**, which differ in wording from 8995's at two clamps even though they
+/// never differ in value — so these are transcribed from `f8995a--2024.txt`, not copied from the
+/// sibling coverage fn.
 pub fn cover_form8995apartiv(p: &crate::tax::qbi_a::Form8995APartIv) -> Coverage {
     let crate::tax::qbi_a::Form8995APartIv {
         line27,
@@ -488,6 +494,10 @@ pub fn cover_form8995apartiv(p: &crate::tax::qbi_a::Form8995APartIv) -> Coverage
     c
 }
 
+/// **Form 8995** — the whole struct, destructured with no `..`.
+///
+/// Chosen as the first covered form because it exercises six of the eight productions AND both clamp
+/// polarities, so the mechanism is proved on a hard case rather than an easy one.
 pub fn cover_form8995lines(l: &crate::tax::qbi::Form8995Lines) -> Coverage {
     let crate::tax::qbi::Form8995Lines {
         business_name: _, // not money — out of this module's scope

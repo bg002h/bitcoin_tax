@@ -268,13 +268,16 @@ fn every_quoted_instruction_is_verbatim_on_the_form() {
         if !l.contains("(b) Check if") {
             continue;
         }
-        // The continuation is the next non-empty line whose first cell is not a line number.
+        // ★ The continuation is the FIRST of the next three lines with the same cell count — and the
+        //   `break` is the point: without it every matching line within three is zipped in, so a second
+        //   equal-arity row would silently append a wrong reconstruction. Today exactly one matches.
         for cont in lines.iter().skip(i + 1).take(3) {
             let (top, bot) = (cells(l), cells(cont));
             if top.len() == bot.len() && top.len() > 1 {
                 for (t, b) in top.iter().zip(bot.iter()) {
                     rejoined.push_str(&format!("{t} {b}\n"));
                 }
+                break;
             }
         }
     }

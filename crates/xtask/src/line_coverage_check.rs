@@ -98,24 +98,24 @@ const CEIL_IDIOMS: &[(&str, &str)] = &[
 /// it requires editing this line, in a diff, with a reason — which is the whole point. Same shape as
 /// the `GAPS` ratchet that went 16 → 0.
 ///
-/// **RAISED 12 → 15 on 2026-08-02 (§G-28/B1b), and here is the reason.** Form 8995-A Parts II and III
-/// entered the table, and three of their lines fit no production:
+/// **RAISED 12 → 13 on 2026-08-02 (§G-28/B1b), and here is the reason.** Form 8995-A Parts II and III
+/// entered the table. Exactly ONE of their 25 lines fits no production:
 ///
-///   * **f8995a:12** *"Phased-in reduction. Enter the amount from line 26, **if any**"* — a conditional
-///     entry with no `-0-` clause. Outside the §199A phase-in range there is no line 26, so the cell is
-///     BLANK, and a printed `0` would swear a phased-in reduction was figured and came to nothing.
-///   * **f8995a:14** *"Patron reduction. Enter the amount from Schedule D (Form 8995-A), line 6, **if
-///     any**"* — same shape, and never written at all: a cooperative patron REFUSES upstream.
 ///   * **f8995a:24** *"Phase-in percentage. Divide line 22 by line 23"* — a PERCENTAGE, the only
-///     non-money printed line on the form. Whole-dollar rounding would collapse it to 0 or 1.
+///     non-money printed line on the form, and there is no `Divide` production. Whole-dollar rounding
+///     would collapse it to 0 or 1.
 ///
-/// ★★ TWO OF THE THREE SHARE ONE MECHANISM — *"an `if any` conditional entry with no `-0-` clause,
-/// therefore blank"* — and so does the pre-existing **f8995a:38** (DPAD). Four rows, one sentence: that
-/// is a PRODUCTION the grammar is missing, not four independent misfits, and absorbing them into the
-/// ratchet is exactly the "enumerate the outcomes you happened to see" failure this file warns about
-/// elsewhere. Filed as `FOLLOWUPS.md` §G-29; adding it would take this number DOWN by four, which is
-/// the direction the ratchet is for.
-const MAX_EXCEPTIONS: usize = 15;
+/// ★★ IT WAS FIRST RAISED TO **15**, and that was wrong — worth recording, because the mistake is the
+/// one this file exists to prevent. Lines **12** (*"Phased-in reduction. Enter the amount from line 26,
+/// if any"*) and **14** (*"Patron reduction. Enter the amount from Schedule D (Form 8995-A), line 6"*)
+/// were filed as exceptions on the reasoning that an *"if any"* conditional entry has no production.
+/// It does: [`Production::Carry`] is defined three lines from where they were written as *"Enter the
+/// amount from line N" — blank when the source line is blank*, which is those two verbatim. A
+/// follow-up (§G-29) was even filed proposing a NEW production to cover them.
+///
+/// ★ The ratchet did its job anyway — it forced the raise into a diff, where a reviewer read the
+/// reason and checked it against the production list. A silent counter would have absorbed both.
+const MAX_EXCEPTIONS: usize = 13;
 // ★ RAISED 11 → 12 for Form 8995-A **line 38** (§G-28/B1a). The DPAD line is a CONDITIONAL entry with
 //   no "-0-" clause — "DPAD under section 199A(g) allocated from an agricultural or horticultural
 //   cooperative. Don't enter more than line 33 minus line 37" presumes an allocation from a Schedule D
@@ -310,12 +310,6 @@ pub fn run() -> Result<String, String> {
 ///
 /// Taking a table as a parameter is what makes a planted defect expressible, so the kills below can
 /// call the rules on a synthetic bad table instead of asserting on their own fixtures.
-/// (4b)'s decision for ONE source file, as a pure function of its inputs.
-///
-/// ★★★ Extracted so B1 can be satisfied at all. r7 (I-3) neutralised this scan and the whole suite
-/// stayed green: it reads the repo's real files, so no in-memory table can plant a defect in it, and
-/// "which test reds when this checker is removed?" had the answer "none". Same shape as r6's keystone
-/// finding one level down — the rule was real, and nothing was watching it.
 /// ★★★ EVERY `cover_*` FUNCTION MUST BE CALLED BY `all()`.
 ///
 /// `missing_cover_fns` below demands that a money-bearing type HAS a coverage function. It does not —
@@ -343,7 +337,29 @@ fn cover_fns_not_registered(cov_src: &str) -> Vec<String> {
     // ★ The leading newline is prepended so a `pub fn` at OFFSET ZERO is found. Without it the first
     //   function in the file is invisible — and in a fixture that begins with `pub fn all()`, that is
     //   the ROOT, so nothing is reachable and every function is reported. The kill test caught this.
-    let owned = format!("\n{cov_src}");
+    // ★★★ COMMENTS AND STRINGS ARE STRIPPED FIRST, and the file is TRUNCATED at `mod tests`.
+    //
+    //     This walk is a substring scan, so without both, two silent disablings exist — and r2 found
+    //     them by running the algorithm rather than reading it:
+    //       · a single `// see cover_form8995apartiii(x)` inside `all()` marks that function reached;
+    //       · `all()` is the LAST top-level `pub fn` in `line_coverage.rs`, so its chunk runs to EOF —
+    //         a `#[cfg(test)] mod tests` appended after it grants reachability to everything its tests
+    //         happen to name.
+    //     Either turns the checker off while it keeps printing OK, which is the exact
+    //     false-completeness class it was written to kill.
+    let stripped: String = cov_src
+        .lines()
+        .take_while(|l| !l.starts_with("mod tests") && !l.starts_with("#[cfg(test)]"))
+        .map(|l| match l.find("//") {
+            Some(i) => &l[..i],
+            None => l,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    // ★ The leading newline is prepended so a `pub fn` at OFFSET ZERO is found. Without it the first
+    //   function in the file is invisible — and in a fixture that begins with `pub fn all()`, that is
+    //   the ROOT, so nothing is reachable and every function is reported. The kill test caught this.
+    let owned = format!("\n{stripped}");
     let cov_src: &str = &owned;
     let mut names: Vec<String> = Vec::new();
     let mut bodies: Vec<(String, String)> = Vec::new();
@@ -403,6 +419,12 @@ fn cover_fns_not_registered(cov_src: &str) -> Vec<String> {
         .collect()
 }
 
+/// (4b)'s decision for ONE source file, as a pure function of its inputs.
+///
+/// ★★★ Extracted so B1 can be satisfied at all. r7 (I-3) neutralised this scan and the whole suite
+/// stayed green: it reads the repo's real files, so no in-memory table can plant a defect in it, and
+/// "which test reds when this checker is removed?" had the answer "none". Same shape as r6's keystone
+/// finding one level down — the rule was real, and nothing was watching it.
 fn missing_cover_fns(rel: &str, src: &str, emitter_code: &str, cov_src: &str) -> Vec<String> {
     let mut errs = Vec::new();
     for (name, body) in money_bearing_types(src) {
@@ -856,11 +878,6 @@ fn mentions_ident(hay: &str, ident: &str) -> bool {
 mod tests {
     use super::*;
 
-    /// ★★★ (4b) — the completeness scan, now killable because `missing_cover_fns` is pure.
-    ///
-    /// It reads the repo's real files, so no in-memory `Coverage` can plant a defect in it: r7 (I-3)
-    /// neutralised it and the whole suite stayed green. Feeding it synthetic sources is the only honest
-    /// way to answer B1's question — *which test reds when this checker is removed?*
     /// ★★★ THE KILL TEST for `cover_fns_not_registered` (harness B1: no checker exists until it has
     /// been observed RED on a planted defect).
     ///
@@ -909,8 +926,54 @@ pub fn cover_beta(p: &B) -> Coverage { Coverage::default() }
 
         // (c) A missing `all()` at all is itself the loudest possible failure, not a silent pass.
         assert_eq!(cover_fns_not_registered("pub fn cover_x() {}").len(), 1);
+
+        // ★★★ (d) AND (e) — THE TWO WAYS A SUBSTRING SCAN CAN BE SILENTLY TURNED OFF, both found by
+        //     r2 running the algorithm rather than reading it. Note the shape: `all()` is LAST, which
+        //     is how `line_coverage.rs` is actually laid out — cases (a)/(b) above put it first and so
+        //     could never have exercised either.
+        let orphan_but_named_in_a_comment = "\
+pub fn cover_alpha(p: &A) -> Coverage { Coverage::default() }
+pub fn cover_beta(p: &B) -> Coverage { Coverage::default() }
+pub fn all() -> Coverage {
+    let mut c = Coverage::default();
+    // see cover_beta(x) for the nested rows
+    c.0.extend(cover_alpha(&x).0);
+    c
+}
+";
+        assert_eq!(
+            cover_fns_not_registered(orphan_but_named_in_a_comment).len(),
+            1,
+            "a `cover_*` named only in a COMMENT must not count as reached — one comment would \
+             otherwise disable this checker for that function while it keeps printing OK"
+        );
+
+        let orphan_named_only_in_tests = "\
+pub fn cover_alpha(p: &A) -> Coverage { Coverage::default() }
+pub fn cover_beta(p: &B) -> Coverage { Coverage::default() }
+pub fn all() -> Coverage {
+    let mut c = Coverage::default();
+    c.0.extend(cover_alpha(&x).0);
+    c
+}
+#[cfg(test)]
+mod tests {
+    fn t() { super::cover_beta(&Default::default()); }
+}
+";
+        assert_eq!(
+            cover_fns_not_registered(orphan_named_only_in_tests).len(),
+            1,
+            "`all()` is the LAST top-level fn in the real file, so its chunk runs to EOF — a test \
+             module appended after it must not grant reachability to everything the tests name"
+        );
     }
 
+    /// ★★★ (4b) — the completeness scan, now killable because `missing_cover_fns` is pure.
+    ///
+    /// It reads the repo's real files, so no in-memory `Coverage` can plant a defect in it: r7 (I-3)
+    /// neutralised it and the whole suite stayed green. Feeding it synthetic sources is the only honest
+    /// way to answer B1's question — *which test reds when this checker is removed?*
     #[test]
     fn the_completeness_scan_demands_a_cover_fn_for_a_printed_money_type() {
         let src = "pub struct NewMoneyThing { pub amount: Usd }";
