@@ -469,21 +469,32 @@ impl Advisory {
 /// `ceiling ≤ line 11` proves it. ★ btctax already collects every line-2 add-back, so line 3 is exact,
 /// not approximated by AGI.
 fn ctc_provably_zero(ri: &ReturnInputs, dependents: usize, agi: Usd) -> bool {
-    // ★★★ L3 comes from the ONE canonical accessor, and its `None` is decisive.
+    // ★★★ L3 IS A LOWER BOUND, and a bound is all this predicate needs.
     //
-    // This open-coded the sum — `agi + excluded_puerto_rico_income + form_2555_line45 + …` — which
-    // consumes the four add-backs WITHOUT the `has_income_exclusion` gate that gives them meaning. On
-    // TY2024, the only computable year, that gate is never even asked (`live: |ri| ri.tax_year >= 2025`)
-    // while the amount fields are an always-live input section. So a filer could carry $200,000 in
-    // `form_2555_line45` that no question ever blessed, and be told **"there is no Schedule 8812 for you
-    // to file"** while Schedule 8812 owed them $2,000. Reproduced against the shipped binary (r8 F2).
+    // This used `modified_agi`, whose `None` (gate never asked) made it return false. Correct in
+    // isolation — but `HasIncomeExclusion` is `live: |ri| ri.tax_year >= 2025`, so on TY2024, the only
+    // year btctax can file, the gate is NEVER ASKED and `modified_agi` is ALWAYS `None`. The whole
+    // provable-zero branch was therefore **dead in production**, while its tests passed by setting the
+    // gate by hand. A filer with nine children at $2.08M AGI was still told their tax was overstated
+    // by up to $18,000 and sent to Schedule 8812 for a credit §24(b) had entirely removed — the exact
+    // defect the branch was written to fix, still shipping.
     //
-    // ★★ `None` (never asked) ⇒ MAGI is UNKNOWN ⇒ this cannot prove anything, so it must NOT claim the
-    // credit is gone. The false-negative direction — telling a filer they get nothing when they are owed
-    // money — is the one that costs them, and an unanswered gate is exactly when to stay quiet.
-    let Some(l3) = ri.modified_agi(agi) else {
-        return false;
-    };
+    // ★★ MONOTONICITY is what makes a bound sufficient: L11 = 5% × ceil(L3 − L9) is non-decreasing in
+    //    L3, and the test is `L8_ceiling ≤ L11`. So if the credit is provably gone at a LOWER BOUND on
+    //    MAGI, it is gone at the true MAGI too. No answer to the gate is required, and none is assumed.
+    //
+    // ★ The bound stays conservative in the direction that costs a filer money: an unblessed exclusion
+    //   yields `agi`, the proof fails, and they are told to check Schedule 8812 (r8 F2), never the
+    //   reverse. See `ReturnInputs::modified_agi_lower_bound` for the two-branch argument.
+    // ★★ EXACT WHEN KNOWN, BOUNDED WHEN NOT — and the first draft of this fix got it wrong by using
+    //    the bound unconditionally, which threw away add-backs the filer HAD blessed. A gate answered
+    //    `true` with $20,000 of excluded Puerto Rico income is testimony that raises MAGI and can
+    //    legitimately complete the proof; discarding it is conservative in the harmless direction but
+    //    it is still discarding an answer the filer gave. `the_line_2_add_backs_count_but_only_once_
+    //    the_gate_is_answered` caught it.
+    let l3 = ri
+        .modified_agi(agi)
+        .unwrap_or_else(|| ri.modified_agi_lower_bound(agi));
     // L9.
     let l9 = if ri.filing_status == crate::tax::types::FilingStatus::Mfj {
         Usd::from(400_000)
@@ -535,6 +546,62 @@ mod ctc_phaseout_tests {
     fn nine_children_at_two_million_agi_is_provably_zero() {
         let ri = ri_with(FilingStatus::Mfj, 9);
         assert!(ctc_provably_zero(&ri, 9, Usd::from(2_085_000)));
+    }
+
+    /// ★★★ THE PRODUCTION STATE — the gate UNANSWERED, which is every TY2024 return.
+    ///
+    /// `HasIncomeExclusion` is `live: |ri| ri.tax_year >= 2025`, so on the only year btctax can file
+    /// it is never asked and `has_income_exclusion` stays `None`. Every other test in this module sets
+    /// it by hand, which is legitimate for exercising the phase-out arithmetic but meant the
+    /// provable-zero branch was **never exercised as production reaches it** — and in production it
+    /// could not be reached at all. This is the test that distinguishes the two.
+    #[test]
+    fn the_gate_being_unasked_does_not_defeat_the_proof() {
+        let mut ri = ri_with(FilingStatus::Mfj, 9);
+        ri.has_income_exclusion = None; // TY2024, as shipped
+        assert_eq!(
+            ri.modified_agi(Usd::from(2_085_000)),
+            None,
+            "gate unanswered"
+        );
+        assert!(
+            ctc_provably_zero(&ri, 9, Usd::from(2_085_000)),
+            "a LOWER BOUND proves the phase-out; the gate's answer cannot lower MAGI, only raise it"
+        );
+    }
+
+    /// ★★ …and the r8 F2 protection survives: an UNBLESSED exclusion must never produce a false
+    /// "you get nothing". The bound ignores positive add-backs, so the proof simply fails — the filer
+    /// is told to check Schedule 8812 rather than talked out of money they may be owed.
+    #[test]
+    fn an_unblessed_exclusion_never_manufactures_a_provable_zero() {
+        let mut ri = ri_with(FilingStatus::Mfj, 2);
+        ri.has_income_exclusion = None;
+        ri.form_2555_line45 = Usd::from(200_000);
+        // True MAGI *might* be 600,000 (enough to kill a 2-child credit), but nothing blessed it.
+        assert!(
+            !ctc_provably_zero(&ri, 2, Usd::from(400_000)),
+            "an unasked exclusion must not be counted toward proving the credit gone"
+        );
+    }
+
+    /// ★★ A NEGATIVE add-back cannot inflate the bound. The four fields are exclusion amounts and a
+    /// negative is nonsense, but `first_negative_amount` explicitly waives them, so the bound is
+    /// written to survive one instead of assuming it away.
+    #[test]
+    fn a_negative_add_back_only_lowers_the_bound() {
+        let mut ri = ri_with(FilingStatus::Mfj, 9);
+        ri.has_income_exclusion = None;
+        ri.form_2555_line45 = Usd::from(-50_000);
+        assert_eq!(
+            ri.modified_agi_lower_bound(Usd::from(2_085_000)),
+            Usd::from(2_035_000),
+            "a negative is added back, never clamped away — the bound must stay a bound"
+        );
+        assert!(
+            ctc_provably_zero(&ri, 9, Usd::from(2_085_000)),
+            "still gone"
+        );
     }
 
     /// …and it must NOT claim provable-zero when the credit is genuinely available. A wrong "you get

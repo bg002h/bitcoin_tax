@@ -842,6 +842,48 @@ impl ReturnInputs {
     /// `None` when any add-back was never asked, so a caller that genuinely needs MAGI refuses rather
     /// than silently treating an unasked exclusion as zero. Callers that never need it (TY2024's flat
     /// SALT cap) never call this.
+    /// A **LOWER BOUND** on modified AGI that needs no answer to the §911/931/933 gate.
+    ///
+    /// ★★★ WHY A BOUND IS ENOUGH, AND WHY [`Self::modified_agi`] CANNOT SERVE HERE.
+    ///
+    /// `modified_agi` returns `None` when `has_income_exclusion` was never asked, and that is right
+    /// for a consumer whose answer moves the wrong way under an unknown (the TY2025 SALT worksheet
+    /// gives the filer the SMALLEST deduction, so it must not be handed an optimistic MAGI). But the
+    /// gate is `live: |ri| ri.tax_year >= 2025`, so on **TY2024 — the only year btctax can file — it
+    /// is never asked**, `modified_agi` is always `None`, and any consumer that refuses on `None`
+    /// is dead code in production while its tests pass by setting the gate by hand.
+    ///
+    /// Some consumers are **monotonic**: the CTC phase-out only ever grows with MAGI, so a predicate
+    /// like "the credit is entirely phased out" that holds at a LOWER BOUND holds at the true value
+    /// too. Those need no answer — only a bound that is honest.
+    ///
+    /// ★★ The bound adds back only the NEGATIVE parts, which makes it valid without assuming the
+    /// gate's answer OR the amounts' signs:
+    ///   * gate `false` ⇒ MAGI = agi, and the bound ≤ agi because it adds only non-positive terms;
+    ///   * gate `true`  ⇒ MAGI = agi + Σx, and the bound = agi + Σmin(x,0) ≤ agi + Σx.
+    ///
+    /// Both branches dominate the bound, so it is a lower bound under either answer. The four fields
+    /// are exclusion AMOUNTS and negative values are nonsense, but nothing screens them
+    /// (`first_negative_amount` explicitly waives them, "refused at the worksheet's point of need"),
+    /// so the bound is written to survive one rather than to assume it away.
+    ///
+    /// ★ It is deliberately CONSERVATIVE where it matters: a filer carrying an unblessed $200,000
+    /// exclusion gets a bound of `agi`, so a phase-out proof simply fails and they are told to check
+    /// Schedule 8812. That is the r8 F2 protection — never talk a filer out of money they are owed —
+    /// preserved by construction rather than by a separate guard.
+    #[must_use]
+    pub fn modified_agi_lower_bound(&self, agi: Usd) -> Usd {
+        agi + [
+            self.excluded_puerto_rico_income,
+            self.form_2555_line45,
+            self.form_2555_line50,
+            self.form_4563_line15,
+        ]
+        .into_iter()
+        .map(|x| x.min(Usd::ZERO))
+        .sum::<Usd>()
+    }
+
     pub fn modified_agi(&self, agi: Usd) -> Option<Usd> {
         match self.has_income_exclusion {
             None => None, // never asked — a caller that needs MAGI must refuse, not assume zero

@@ -1,0 +1,146 @@
+# NINE DEPENDENTS, §199A ABOVE THE THRESHOLD, AND AN AMT — one return, four things v0.14.0 could not do.
+#
+# Kept because it is the smallest input that exercises all four at once, and because each was a
+# separate refusal before v0.15.0:
+#
+#   * 9 dependents      -> §G-28/B2: 1-4 on page 1, the "more than four" box CHECKED, 5-9 on the
+#                          generated dependents_statement.txt (the form's own remedy, not a refusal)
+#   * $85,000 Schedule C  non-ledger receipts (§G-28/B3) -> SE tax, §1401 caps, AGI
+#   * $2,000,000 LTCG     as Form 1099-B totals (§G-28/B4) -> Schedule D lines 1a/8a
+#   * the combination     -> AMTI $2,078,995, exemption fully phased out, Form 6251 ATTACHED (§G-6),
+#                          and taxable income far above §199A(e)(2) so Form 8995-A governs
+#
+# Expected packet (10 forms): 1040, Sch 1, Sch 2, Sch C, Sch D, Sch SE, f6251(32), f8995a(55A), f8960
+# plus dependents_statement.txt.  AMT = 11,322 · total tax = 481,225.
+#
+# ★ The AMT and total tax are the figures BOTH ORACLES witnessed on the childless variant of this
+#   vector (design/direction/G6-AMT-ORACLE-VALIDATION.md) — dependents do not move them, because
+#   §24(b) has phased the CTC out entirely at this income. That is exactly why this fixture is also
+#   the CTC-advisory regression case.
+#
+# ★★ Every SSN here is STRUCTURALLY IMPOSSIBLE (group 00), so it is safe by construction and needs no
+#    entry in the PII allowlist -- see scripts/pii-scan-generic.sh.
+
+tax_year = 2024
+other_out_of_scope_income = false
+filing_status = "Single"
+itemize_election = "auto"
+dual_status_alien = false
+foreign_accounts = false
+foreign_trust = false
+foreign_country_names = ""
+donations_had_restrictions = false
+amt_depreciation_same_as_regular = true
+excluded_puerto_rico_income = "0"
+form_2555_line45 = "0"
+form_2555_line50 = "0"
+form_4563_line15 = "0"
+charitable_carryover_in = []
+charitable_carryover_in_provenance = "user"
+capital_loss_carryforward_in_provenance = "user"
+
+[capital_loss_carryforward_in]
+long = "0"
+short = "0"
+
+[header]
+address_city = "Springfield"
+address_state = "IL"
+address_street = "100 Main St"
+address_zip = "62704"
+can_be_claimed_as_dependent_taxpayer = false
+presidential_fund_spouse = false
+presidential_fund_taxpayer = false
+
+[header.taxpayer]
+first_name = "Pat"
+last_name = "Testcase"
+occupation = "Miner"
+ssn = "123-45-6789"
+
+
+
+
+[sch1]
+hsa_activity = false
+ira_deduction_claimed = "0"
+state_refund_taxable = "0"
+student_loan_interest_paid = "0"
+
+[payments]
+estimated_tax_payments = "0"
+extension_payment = "0"
+other_withholding = "0"
+
+[qbi]
+qbi_carryforward_in = "0"
+qbi_carryforward_in_provenance = "user"
+reit_ptp_carryforward_in = "0"
+reit_ptp_carryforward_in_provenance = "user"
+
+[schedule_c]
+accounting_method = "cash"
+business_description = "Bitcoin mining"
+expenses = "0"
+# §G-28/B3 — $85,000 of consulting revenue that never touched the Bitcoin ledger.
+other_gross_receipts = "85000"
+naics_code = "518210"
+owner = "taxpayer"
+# §G-28/B1b — the four §199A answers a filer above the threshold must give.
+is_sstb = false
+is_cooperative_patron = false
+qbi_w2_wages = "0"
+qbi_ubia = "0"
+
+# §G-28/B4 — $2,000,000 of STOCK gain, as Schedule D line 8a totals. Basis was reported to the IRS
+# and no adjustment is needed, so Form 8949 is not required for these.
+[[b_1099]]
+payer = "Broker LLC"
+long_term_proceeds = "2500000"
+long_term_basis = "500000"
+basis_reported_and_no_adjustments = true
+
+[[header.dependents]]
+name = "Child1 Testcase"
+ssn = "101-00-0001"
+relationship = "Daughter"
+
+[[header.dependents]]
+name = "Child2 Testcase"
+ssn = "101-00-0002"
+relationship = "Daughter"
+
+[[header.dependents]]
+name = "Child3 Testcase"
+ssn = "101-00-0003"
+relationship = "Daughter"
+
+[[header.dependents]]
+name = "Child4 Testcase"
+ssn = "101-00-0004"
+relationship = "Daughter"
+
+[[header.dependents]]
+name = "Child5 Testcase"
+ssn = "101-00-0005"
+relationship = "Daughter"
+
+[[header.dependents]]
+name = "Child6 Testcase"
+ssn = "101-00-0006"
+relationship = "Daughter"
+
+[[header.dependents]]
+name = "Child7 Testcase"
+ssn = "101-00-0007"
+relationship = "Daughter"
+
+[[header.dependents]]
+name = "Child8 Testcase"
+ssn = "101-00-0008"
+relationship = "Daughter"
+
+[[header.dependents]]
+name = "Child9 Testcase"
+ssn = "101-00-0009"
+relationship = "Daughter"
