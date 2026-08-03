@@ -1069,6 +1069,62 @@ const CARRYFORWARD_FIELDS: &[Field] = &[
     },
 ];
 
+/// §G-28/B1b — Form 8995-A Part II's two inputs. Live only when there IS a trade or business.
+const QBI_LIMITATION_FIELDS: &[Field] = &[
+    Field {
+        id: FieldId::QbiW2Wages,
+        clear: None,
+        label: "W-2 wages your business paid (Form 8995-A line 4)",
+        help: "\"Allocable share of W-2 wages from the trade, business, or aggregation.\" Needed only                if your taxable income is above $191,950 ($383,900 married filing jointly) — above that,                §199A(b)(2) caps your deduction at the greater of 50% of these wages, or 25% of them                plus 2.5% of your qualified-property basis. A sole proprietor with NO employees enters                0, and that is a real answer: it caps the deduction at zero.",
+        kind: FieldKind::Money,
+        live: |ri| ri.schedule_c.is_some(),
+        get: |ri, _| {
+            ri.schedule_c
+                .as_ref()
+                .and_then(|c| c.qbi_w2_wages)
+                .map(FieldValue::Money)
+        },
+        set: |ri, _, v| {
+            let FieldValue::Money(m) = v else {
+                return Err(SetError::WrongKind);
+            };
+            ri.schedule_c
+                .as_mut()
+                .ok_or(SetError::NoSuchRow)?
+                .qbi_w2_wages = Some(m);
+            Ok(())
+        },
+    },
+    Field {
+        id: FieldId::QbiUbia,
+        clear: None,
+        label: "Unadjusted basis of qualified property (UBIA) (Form 8995-A line 7)",
+        help: "\"Allocable share of the unadjusted basis immediately after acquisition (UBIA) of all                qualified property.\" The original cost of depreciable property the business still                uses, before depreciation. Needed only above the taxable-income threshold; enter 0 if                the business holds no such property.",
+        kind: FieldKind::Money,
+        live: |ri| ri.schedule_c.is_some(),
+        get: |ri, _| {
+            ri.schedule_c
+                .as_ref()
+                .and_then(|c| c.qbi_ubia)
+                .map(FieldValue::Money)
+        },
+        set: |ri, _, v| {
+            let FieldValue::Money(m) = v else {
+                return Err(SetError::WrongKind);
+            };
+            ri.schedule_c.as_mut().ok_or(SetError::NoSuchRow)?.qbi_ubia = Some(m);
+            Ok(())
+        },
+    },
+];
+
+pub(crate) const QBI_LIMITATION: Section = Section {
+    id: SectionId::QbiLimitation,
+    title: "§199A limitation (only if your income is above the threshold)",
+    kind: SectionKind::Singleton,
+    fields: QBI_LIMITATION_FIELDS,
+};
+
 pub(crate) const CARRYFORWARDS: Section = Section {
     id: SectionId::Carryforwards,
     title: "Carryforwards from last year",

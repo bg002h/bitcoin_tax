@@ -29,6 +29,7 @@ pub fn form_spec() -> &'static [Section] {
         sections::SCHEDULE_A_CHARITABLE,
         sections::PAYMENTS,
         sections::CARRYFORWARDS,
+        sections::QBI_LIMITATION,
         registries::DECLARATIONS,
         registries::INCOME_EXCLUSIONS,
         registries::SKIPPABLES,
@@ -260,7 +261,7 @@ mod tests {
     /// entry; the `FieldId ↔ SkippableId` map stays TOTAL over all 5 skippables (SALT → `SaSaltUseSalesTax`);
     /// and the spouse-gated liveness edge holds.
     #[test]
-    fn skippables_section_delegates_twelve_skippables_and_the_map_is_total() {
+    fn skippables_section_delegates_thirteen_skippables_and_the_map_is_total() {
         let skips = section(SectionId::Skippables);
 
         // SALT election is a Schedule-A Field (Task 5), NOT a Skippables Field.
@@ -272,13 +273,13 @@ mod tests {
             "the SALT election is Schedule-A-owned, not a Skippables Field"
         );
 
-        // Exactly the twelve non-SALT skippables.
+        // Exactly the thirteen non-SALT skippables.
         let ids: Vec<FieldId> = skips.fields.iter().map(|f| f.id).collect();
         assert_eq!(
             ids.len(),
-            12,
+            13,
             "blind ×2 + DOB ×2 + DOD ×2 + FBAR + the §G-9 death gates ×2 + Schedule C I/J + \
-             the §G-21 donation-restrictions universal"
+             the §G-21 donation-restrictions universal + the §G-28 SSTB checkbox"
         );
         for expected in [
             FieldId::BlindTaxpayer,
@@ -293,6 +294,7 @@ mod tests {
             FieldId::ScheduleC1099Required,
             FieldId::ScheduleC1099Filed,
             FieldId::DonationsHadRestrictions,
+            FieldId::ScheduleCIsSstb,
         ] {
             assert!(
                 ids.contains(&expected),

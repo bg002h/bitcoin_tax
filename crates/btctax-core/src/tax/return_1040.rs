@@ -1825,10 +1825,28 @@ pub fn screen_absolute(
         ri.filing_status,
         params,
     ) {
+        // ★★ §G-28/B1b — the SSTB answer becomes MANDATORY exactly here, where taxable income is known.
+        //    Past the phase-in range an SSTB's QBI is excluded ENTIRELY (§199A(d)(3)), so an unasked
+        //    "no" hands the filer a deduction the statute denies. Below the threshold the question is
+        //    offered and skippable, because the simplified Form 8995 never asks it.
+        //
+        //    ★ Checked BEFORE the wage/UBIA refusal below: if the business is an SSTB above the range
+        //      the deduction is zero regardless of wages, so asking for wages first would demand two
+        //      numbers that cannot matter.
+        if ri.schedule_c.as_ref().is_some_and(|c| c.is_sstb.is_none()) {
+            return refusal(
+                RefuseReason::SstbUnanswered,
+                "above the §199A(e)(2) threshold, whether the business is a SPECIFIED SERVICE trade or \
+                 business decides the deduction — past the phase-in range an SSTB's qualified business \
+                 income is EXCLUDED ENTIRELY (§199A(d)(3)), so an unasked `no` would hand you a \
+                 deduction the statute denies and understate your tax. It is a checkbox on Form 8995-A \
+                 because only you can answer it — run `btctax income answer`",
+            );
+        }
         return refusal(
             RefuseReason::QbiAboveThreshold,
-            "taxable income before the QBI deduction is above the §199A(e)(2) threshold — the Form 8995-A \
-             phase-in (SSTB / wage-and-UBIA limits) is out of scope for v1",
+            "taxable income before the QBI deduction is above the §199A(e)(2) threshold — Form 8995-A's \
+             W-2-wage and UBIA limitations (Part II) need two figures btctax does not yet collect",
         );
     }
 
@@ -3593,6 +3611,10 @@ mod tests {
             schedule_c: Some(ScheduleCInputs {
                 owner: Owner::Taxpayer,
                 business_description: "Bitcoin mining".into(),
+                // ★ ANSWERED, so this vector reaches the wage/UBIA refusal it is about. The SSTB
+                //   mandate sits in front of it; `an_unanswered_sstb_refuses_before_the_wage_ubia_
+                //   refusal` covers the blank.
+                is_sstb: Some(false),
                 ..Default::default()
             }),
             ..Default::default()
@@ -3614,6 +3636,80 @@ mod tests {
             screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024).map(|r| r.reason),
             Some(RefuseReason::QbiAboveThreshold),
             "an over-threshold Schedule C business must REFUSE — 8995-A's wage/UBIA limits are unmodeled"
+        );
+    }
+
+    /// ★★★ §G-28/B1b — ABOVE the §199A(e)(2) threshold an UNANSWERED SSTB checkbox refuses, and it
+    /// refuses BEFORE the wage/UBIA one.
+    ///
+    /// Past the phase-in range an SSTB's QBI is excluded **entirely** (§199A(d)(3)), so an unasked
+    /// `no` hands the filer a deduction the statute denies. It is asked first because if the answer
+    /// is `yes` the deduction is zero regardless of wages, and demanding two figures that cannot
+    /// matter is the wrong question.
+    #[test]
+    fn an_unanswered_sstb_refuses_before_the_wage_ubia_refusal() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            schedule_c: Some(ScheduleCInputs {
+                owner: Owner::Taxpayer,
+                business_description: "Bitcoin mining".into(),
+                is_sstb: None, // ← the only difference from the vector above
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let st = state_income(vec![mining(dec!(260000))]);
+        let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+        let r = screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024).expect("must refuse");
+        assert_eq!(
+            r.reason,
+            RefuseReason::SstbUnanswered,
+            "the SSTB question is mandatory above the threshold, and precedes the wage/UBIA refusal"
+        );
+        assert!(
+            r.detail.contains("§199A(d)(3)") && r.detail.contains("income answer"),
+            "the refusal must name the statute and the command that answers it: {}",
+            r.detail
+        );
+    }
+
+    /// ★★★ ...and BELOW the threshold the very same blank does NOT refuse.
+    ///
+    /// This is the `DonationsHadRestrictions` shape — *offered always, mandatory only where it
+    /// matters*. Under the threshold §199A is the simplified Form 8995, which has no SSTB checkbox at
+    /// all, so the answer changes nothing and demanding it would be a refusal with no purpose. A
+    /// draft that made this a live class-(A) declaration refused **every Schedule C return at any
+    /// income**; this test is what reds if that regresses.
+    #[test]
+    fn below_the_threshold_an_unanswered_sstb_does_not_refuse() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            schedule_c: Some(ScheduleCInputs {
+                owner: Owner::Taxpayer,
+                business_description: "Bitcoin mining".into(),
+                is_sstb: None,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let st = state_income(vec![mining(dec!(60000))]);
+        let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+        assert!(
+            ar.printed_inputs.business_qbi > Usd::ZERO,
+            "the fixture must produce business QBI, else this test is vacuous"
+        );
+        assert!(
+            ar.agi - ar.deduction < p.qbi_ti_threshold(FilingStatus::Single),
+            "TI-before-QBI must be UNDER the threshold, else this test proves the opposite"
+        );
+        assert_eq!(
+            screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024).map(|r| r.reason),
+            None,
+            "under the threshold the SSTB answer is irrelevant — Form 8995 has no such checkbox"
         );
     }
 

@@ -380,6 +380,11 @@ fn section_is_live(
     match section.id {
         SectionId::W2Box12 | SectionId::ScheduleACharitable => false,
         SectionId::Spouse => spouse_offered(ri),
+        // ★ §G-28/B1b — the §199A limitation amounts are facts about a TRADE OR BUSINESS. A filer with
+        //   no Schedule C has nothing to answer, and an empty section header offering two questions
+        //   that cannot apply is the section-level twin of asking a spouse-less return a spouse
+        //   question. Its fields are gated the same way, so this only removes the empty heading.
+        SectionId::QbiLimitation => ri.schedule_c.is_some(),
         _ => true,
     }
 }

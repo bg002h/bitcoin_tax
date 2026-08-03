@@ -9,10 +9,10 @@
   7││  … Schedule A (itemized deducti││  Box 3 — Social Security wages  [$168600]                                          │
   8││  … Payments                    ││  Box 4 — Social Security tax withheld  [$10453.20]                                 │
   9││  … Carryforwards from last year││  Box 5 — Medicare wages  [$200000]                                                 │
- 10││  ✓ Declarations                ││  Box 6 — Medicare tax withheld  [$2900]                                            │
- 11││  … Income exclusions (§911/931/││  Box 7 — Social Security tips  [$0]                                                │
- 12││  … Skippables                  ││  Box 17 — state income tax  [$9000]                                                │
- 13││                                ││  Box 19 — local income tax  [$0]                                                   │
+ 10││  … §199A limitation (only if yo││  Box 6 — Medicare tax withheld  [$2900]                                            │
+ 11││  ✓ Declarations                ││  Box 7 — Social Security tips  [$0]                                                │
+ 12││  … Income exclusions (§911/931/││  Box 17 — state income tax  [$9000]                                                │
+ 13││  … Skippables                  ││  Box 19 — local income tax  [$0]                                                   │
  14││                                ││  Box 8 — allocated tips  [$0]                                                      │
  15││                                ││  Box 10 — dependent-care benefits  [$0]                                            │
  16││                                ││  Box 12 entries (0) →                                                              │

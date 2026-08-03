@@ -25,6 +25,9 @@ pub enum SectionId {
     /// ★ §G-22 — the QBI loss carryforwards. The ONLY carryforward family in the understatement
     /// direction, and the only one collectable through the form.
     Carryforwards,
+    /// ★ §G-28/B1b — the §199A(b)(2) limitation amounts. NOT carryforwards: they are facts about the
+    ///   business THIS year, and above the §199A(e)(2) threshold they cap the deduction.
+    QbiLimitation,
     Declarations,
     IncomeExclusions,
     Skippables,
@@ -107,6 +110,12 @@ pub enum FieldId {
     DeclHasIncomeExclusion,
     /// §G-22/B11 — the scope attestation: income this tool never asked about.
     DeclOtherOutOfScopeIncome,
+    /// §G-28/B1b — Form 8995-A Part I column (b): is the business a specified service trade or business?
+    ScheduleCIsSstb,
+    /// §G-28/B1b — Form 8995-A line 4.
+    QbiW2Wages,
+    /// §G-28/B1b — Form 8995-A line 7.
+    QbiUbia,
     ExclPuertoRico,
     Excl2555L45,
     Excl2555L50,

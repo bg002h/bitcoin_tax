@@ -46,6 +46,8 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::OtherIncomeUnanswered | R::OtherIncomeOutOfScope => {
             vec![decl(QuestionId::OtherOutOfScopeIncome)]
         }
+        // §G-28/B1b — a SKIPPABLE, offered always and mandatory only above the §199A threshold.
+        R::SstbUnanswered => vec![skip(btctax_core::tax::questions::SkippableId::ScheduleCIsSstb)],
         R::AmtCarryoverDeclarationUnanswered => vec![decl(QuestionId::AmtCarryoverSameAsRegular)],
         R::AmtDepreciationDeclarationUnanswered => {
             vec![decl(QuestionId::AmtDepreciationSameAsRegular)]

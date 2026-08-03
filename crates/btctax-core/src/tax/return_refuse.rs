@@ -153,6 +153,10 @@ pub enum RefuseReason {
     /// **§G-22 / B11** — the scope attestation is unanswered. Silence about out-of-scope INCOME is
     /// indistinguishable from "there is none", and the failure direction is omitted §61 income.
     OtherIncomeUnanswered,
+    /// **§G-28/B1b** — Form 8995-A Part I column (b) is unanswered on a return that has a trade or
+    /// business. Above the §199A(d)(3) phase-in range an SSTB's QBI is excluded entirely, so an
+    /// unasked "no" hands the filer a deduction the statute denies.
+    SstbUnanswered,
     /// **§G-22 / B11** — the filer affirmed income this version cannot model (rental, royalty, farm,
     /// K-1, and the rest). Out of scope, and a return that silently omitted it would understate tax.
     OtherIncomeOutOfScope,
@@ -455,12 +459,25 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             business_description: _,
             naics_code: _,
             accounting_method: _,
+            // §G-28/B1b — screened where they are NEEDED (above the §199A threshold), not here; and
+            // the SSTB declaration is screened by the registry loop like every other class-(A).
+            qbi_w2_wages,
+            qbi_ubia,
+            is_sstb: _,
             expenses,
             payments_requiring_1099: _, // Option<bool>, not an amount
             will_file_required_1099: _,
         } = c;
         if neg(*expenses) {
             return Some("Schedule C expenses");
+        }
+        // §G-28/B1b — a negative W-2-wage or UBIA figure is not a quantity that exists. Both raise the
+        // §199A(b)(2) cap, so a negative would LOWER it and overstate tax; either way it is nonsense.
+        if qbi_w2_wages.is_some_and(neg) {
+            return Some("Form 8995-A line 4 (allocable W-2 wages)");
+        }
+        if qbi_ubia.is_some_and(neg) {
+            return Some("Form 8995-A line 7 (UBIA of qualified property)");
         }
     }
     if let Some(a) = schedule_a {
@@ -1032,6 +1049,11 @@ mod tests {
         // §G-22/B11 — the scope attestation. ANSWERED here, never defaulted: `None` refuses, which is
         // the whole point, and a `Default` that supplied it would restore the silence it exists to break.
         ri.other_out_of_scope_income = Some(false);
+        // §G-28/B1b — answered whenever the fixture has a trade or business, since the SSTB question
+        // is live exactly then. Set through the same path a filer would use.
+        if let Some(c) = ri.schedule_c.as_mut() {
+            c.is_sstb = Some(false);
+        }
         // §G-9: "did not die during the tax year". No longer REQUIRED (the death gates are class-(B)
         // skippables now — see `the_death_gates_do_not_block_a_return`), but kept so that every fixture
         // below claims the age-65 box the way a real filer would, and no existing figure moves.
@@ -1355,6 +1377,7 @@ mod tests {
         r.schedule_c = Some(crate::tax::return_inputs::ScheduleCInputs {
             owner: Owner::Taxpayer,
             business_description: String::new(), // as an import omitting the key would give
+            is_sstb: Some(false), // §G-28/B1b — the SSTB declaration is live whenever there is a business
             ..Default::default()
         });
         assert_eq!(
@@ -1368,6 +1391,7 @@ mod tests {
         ws.schedule_c = Some(crate::tax::return_inputs::ScheduleCInputs {
             owner: Owner::Taxpayer,
             business_description: "   ".into(),
+            is_sstb: Some(false), // §G-28/B1b — the SSTB declaration is live whenever there is a business
             ..Default::default()
         });
         assert_eq!(
@@ -1382,6 +1406,7 @@ mod tests {
         ok.schedule_c = Some(crate::tax::return_inputs::ScheduleCInputs {
             owner: Owner::Taxpayer,
             business_description: "Bitcoin mining".into(),
+            is_sstb: Some(false), // §G-28/B1b — the SSTB declaration is live whenever there is a business
             ..Default::default()
         });
         assert_eq!(reason(&ok), None, "a NAMED business must file");
@@ -1839,6 +1864,7 @@ mod tests {
         hoh.filing_status = FilingStatus::HoH;
         hoh.schedule_c = Some(crate::tax::return_inputs::ScheduleCInputs {
             owner: Owner::Spouse,
+            is_sstb: Some(false), // §G-28/B1b — the SSTB declaration is live whenever there is a business
             ..Default::default()
         });
         assert_eq!(
@@ -2141,6 +2167,7 @@ mod tests {
             business_description: "Bitcoin mining".to_string(),
             naics_code: "518210".to_string(),
             expenses: Usd::ZERO,
+            is_sstb: Some(false), // §G-28/B1b — the SSTB declaration is live whenever there is a business
             ..Default::default()
         });
         r.amt_depreciation_same_as_regular = Some(false);
@@ -2252,6 +2279,7 @@ mod tests {
                 business_description: "Bitcoin mining".to_string(),
                 naics_code: "518210".to_string(),
                 expenses: dec!(5000),
+                is_sstb: Some(false), // §G-28/B1b — the SSTB declaration is live whenever there is a business
                 ..Default::default()
             });
             r.amt_depreciation_same_as_regular = ans;

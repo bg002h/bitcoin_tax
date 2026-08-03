@@ -644,6 +644,9 @@ pub enum SkippableId {
     /// for every donation. The prompt therefore enumerates all three limbs in the form's own words — a
     /// "No" to something vaguer would be laundered into three answers the filer never gave.
     DonationsHadRestrictions,
+    /// **Form 8995-A Part I column (b)** — is the trade or business a specified service trade or
+    /// business? (§G-28/B1b.)
+    ScheduleCIsSstb,
 }
 
 /// The value shape of a [`SkippableQuestion`] — a yes/no answer, or a calendar date.
@@ -977,6 +980,41 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
         get_date: |_ri| None,
         set_date: |_ri, _v| {},
     },
+    // ★★★ §G-28/B1b — Form 8995-A Part I column (b), the SSTB checkbox.
+    //
+    // ★ APPENDED AT THE END, like every other entry here. `skippable_tristate!` in the input-form
+    //   registry couples to this array's INDEX, so inserting mid-array silently repoints every later
+    //   question — placing this before `DonationsHadRestrictions` in draft did exactly that.
+    SkippableQuestion {
+        id: SkippableId::ScheduleCIsSstb,
+        durability: Durability::PerYear,
+        prompt: "Is your business a SPECIFIED SERVICE trade or business? Answer YES if its principal \
+                 asset is the reputation or skill of its owners or employees, or if it is in health, \
+                 law, accounting, actuarial science, performing arts, consulting, athletics, financial \
+                 services, brokerage services, or investing and investment management. (Form 8995-A, \
+                 Part I, column (b).)",
+        help: "Skipping is harmless below the §199A(e)(2) threshold — the simplified Form 8995 does \
+               not ask, because the answer changes nothing there. ABOVE it, it is MANDATORY: past the \
+               phase-in range an SSTB's qualified business income is EXCLUDED ENTIRELY \
+               (§199A(d)(3)), so an unasked \"no\" would hand you a deduction the statute denies and \
+               understate your tax. btctax cannot infer it from your business description — it is a \
+               checkbox on the form because only you can answer it.",
+        kind: SkippableKind::YesNo,
+        // ★★ ALWAYS OFFERED, MANDATORY ONLY WHERE IT MATTERS — the `DonationsHadRestrictions` shape,
+        //    and for the same reason. `live` sees only `ReturnInputs`, which cannot know taxable
+        //    income; making this a live DECLARATION refused EVERY Schedule C return at every income
+        //    level, including the great majority for whom the answer is irrelevant. The mandatory half
+        //    lives in `screen_absolute`, which knows the threshold.
+        live: |ri| ri.schedule_c.is_some(),
+        get_bool: |ri| ri.schedule_c.as_ref().and_then(|c| c.is_sstb),
+        set_bool: |ri, v| {
+            if let Some(c) = ri.schedule_c.as_mut() {
+                c.is_sstb = Some(v);
+            }
+        },
+        get_date: |_ri| None,
+        set_date: |_ri, _v| {},
+    },
 ];
 
 #[cfg(test)]
@@ -1024,8 +1062,9 @@ mod tests {
         use crate::tax::types::FilingStatus;
         assert_eq!(
             SKIPPABLE_QUESTIONS.len(),
-            13,
-            "blind ×2, SALT, DOB ×2, DOD ×2, FBAR, the §G-9 death pair, Schedule C I/J, 8283 5a/5b/5c"
+            14,
+            "blind ×2, SALT, DOB ×2, DOD ×2, FBAR, the §G-9 death pair, Schedule C I/J, 8283 5a/5b/5c, \
+             8995-A SSTB"
         );
         // SALT is live iff a schedule_a exists; spouse-blind iff a spouse Person exists.
         let salt = SKIPPABLE_QUESTIONS

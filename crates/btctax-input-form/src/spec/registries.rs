@@ -314,6 +314,15 @@ const SKIPPABLE_FIELDS: &[Field] = &[
         ri.donations_had_restrictions = None;
         Ok(())
     }),
+    // Index 13 — the §G-28/B1b SSTB checkbox, appended at the END for the reason above.
+    skippable_tristate!(13, FieldId::ScheduleCIsSstb, |ri| {
+        if let Some(c) = ri.schedule_c.as_mut() {
+            c.is_sstb = None;
+            Ok(())
+        } else {
+            Err(SetError::NoSuchRow)
+        }
+    }),
 ];
 
 pub(crate) const SKIPPABLES: Section = Section {
@@ -384,6 +393,7 @@ pub fn field_to_skippable(id: FieldId) -> Option<SkippableId> {
         FieldId::ScheduleC1099Required => SkippableId::ScheduleC1099Required,
         FieldId::ScheduleC1099Filed => SkippableId::ScheduleC1099Filed,
         FieldId::DonationsHadRestrictions => SkippableId::DonationsHadRestrictions,
+        FieldId::ScheduleCIsSstb => SkippableId::ScheduleCIsSstb,
         _ => return None,
     })
 }
@@ -405,5 +415,6 @@ pub fn skippable_to_field(id: SkippableId) -> FieldId {
         SkippableId::ScheduleC1099Required => FieldId::ScheduleC1099Required,
         SkippableId::ScheduleC1099Filed => FieldId::ScheduleC1099Filed,
         SkippableId::DonationsHadRestrictions => FieldId::DonationsHadRestrictions,
+        SkippableId::ScheduleCIsSstb => FieldId::ScheduleCIsSstb,
     }
 }

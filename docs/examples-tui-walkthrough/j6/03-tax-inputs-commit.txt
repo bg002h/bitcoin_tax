@@ -9,10 +9,10 @@
   7││  … Schedule A (itemized deducti││                                                                                    │
   8││  … Payments                    ││                                                                                    │
   9││  … Carryforwards from last year││                                                                                    │
- 10││  ✓ Declarations                ││                                                                                    │
- 11││  … Income exclusions (§911/931/││                                                                                    │
- 12││  … Skippables                  ││                                                                                    │
- 13││                                ││                                                                                    │
+ 10││  … §199A limitation (only if yo││                                                                                    │
+ 11││  ✓ Declarations                ││                                                                                    │
+ 12││  … Income exclusions (§911/931/││                                                                                    │
+ 13││  … Skippables                  ││                                                                                    │
  14││                                ││                                                                                    │
  15││                        ┌ Confirm commit for 2024 ───────────────────────────────────────────┐                        │
  16││                        │  Commit tax inputs for 2024 — WRITES THE VAULT                     │                        │

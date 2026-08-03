@@ -415,7 +415,39 @@ fn classify_schedule_c(c: &mut Census, sc: &ScheduleCInputs) {
         expenses: _,
         payments_requiring_1099,
         will_file_required_1099,
+        qbi_w2_wages,
+        qbi_ubia,
+        is_sstb,
     } = sc;
+    // ★★★ §G-28/B1b — the two §199A(b)(2) limitation amounts. `Option<Usd>` is the answered-ness shape
+    //     for money, and the `_` rule now FORBIDS waving one past, so these must be classified here.
+    //     They are NOT class-(B) forgone benefits like `medical`: an unasked W-2-wage figure defaulting
+    //     to zero would CAP the deduction at zero for a filer who does pay wages (overstating tax), and
+    //     any other default would invent wages they never reported (understating it). Neither direction
+    //     is safe, so `None` refuses at the point of need — above the threshold, where Part II is
+    //     reached — and is simply unread below it.
+    c.exempt(
+        qbi_w2_wages,
+        Class::NoTaxDirection,
+        "Form 8995-A line 4: `None` is REFUSED above the §199A(e)(2) threshold (screen_absolute) and \
+         unread below it, so it defaults to nothing in either direction",
+    );
+    c.exempt(
+        qbi_ubia,
+        Class::NoTaxDirection,
+        "Form 8995-A line 7: same treatment as line 4 — refused where it is needed, unread where it \
+         is not",
+    );
+    // ★★ The SSTB checkbox is a DECLARATION: above the phase-in range an SSTB's QBI is excluded
+    //    entirely (§199A(d)(3)), so an unasked "no" hands the filer a deduction the statute denies.
+    c.exempt(
+        is_sstb,
+        Class::BenefitClaim,
+        "Form 8995-A Part I column (b) (§G-28/B1b) — offered as a SKIPPABLE so a filer below the \
+         §199A(e)(2) threshold, for whom the answer changes nothing, is never blocked; above the \
+         threshold `screen_absolute` makes it MANDATORY, because past the phase-in range an SSTB's \
+         QBI is excluded entirely and an unasked `no` would understate tax",
+    );
     c.exempt(
         owner,
         Class::SerdeRequired,
@@ -655,6 +687,11 @@ mod tests {
     fn every_registry_question_is_declared_exactly_once() {
         let mut ri = ReturnInputs {
             schedule_a: Some(ScheduleAInputs::default()),
+            // ★ A Schedule C too, because the SSTB declaration (§G-28/B1b) is declared inside
+            //   `classify_schedule_c` — a census over a return with no business would simply never
+            //   visit it, and this test would report a missing declaration that is really a missing
+            //   FIXTURE. Populate every optional section the registry has a question for.
+            schedule_c: Some(crate::tax::return_inputs::ScheduleCInputs::default()),
             ..Default::default()
         };
         // A spouse Person exercises the spouse branch too (its bools are on the header, always destructured,

@@ -298,6 +298,34 @@ pub struct ScheduleCInputs {
     /// in `return_refuse.rs`). It is now the live exerciser of those guards.
     #[serde(default)]
     pub will_file_required_1099: Option<bool>,
+    /// **Form 8995-A line 4** — *"Allocable share of W-2 wages from the trade, business, or
+    /// aggregation"*.
+    ///
+    /// ★★★ Above the §199A(e)(2) threshold this is half of what decides the deduction: §199A(b)(2)
+    /// caps it at the greater of 50% of W-2 wages, or 25% of wages plus 2.5% of UBIA. A sole
+    /// proprietor with no employees has **zero**, which caps the deduction at zero — a real answer, and
+    /// the reason the old blanket refusal was wrong for that filer.
+    ///
+    /// `None` = never asked, and it REFUSES above the threshold rather than defaulting: a defaulted
+    /// zero would understate the cap for a filer who does pay wages, and a defaulted anything-else
+    /// would invent them. Below the threshold nothing reads it.
+    #[serde(default)]
+    pub qbi_w2_wages: Option<Usd>,
+    /// **Form 8995-A line 7** — *"Allocable share of the unadjusted basis immediately after
+    /// acquisition (UBIA) of all qualified property"*. The other half of the §199A(b)(2) cap; same
+    /// `None`-refuses treatment as [`Self::qbi_w2_wages`].
+    #[serde(default)]
+    pub qbi_ubia: Option<Usd>,
+    /// **Form 8995-A Part I, column (b)** — *"Check if specified service"*.
+    ///
+    /// ★★★ A class-(A) DECLARATION, and the direction is why. Above the phase-in range an SSTB's QBI is
+    /// excluded ENTIRELY (§199A(d)(3)), so a "no" the filer never gave hands them a deduction the
+    /// statute denies — an understatement. The code today reasons that every Schedule C here is crypto
+    /// mining and therefore not an SSTB; that is true of mining and will stop being true the moment a
+    /// filer can state their own gross receipts (B3). Asking is transcription: the checkbox is on the
+    /// form.
+    #[serde(default)]
+    pub is_sstb: Option<bool>,
 }
 fn default_naics() -> String {
     "999999".to_string()
@@ -310,6 +338,12 @@ impl Default for ScheduleCInputs {
             business_description: String::new(),
             naics_code: default_naics(),
             accounting_method: AccountingMethod::Cash,
+            // ★ `None` = never asked, for all three. A `Default` may not answer a question the filer
+            //   was never put; the §199A(b)(2) amounts refuse where they are needed, and the SSTB
+            //   declaration refuses unanswered like every other class-(A).
+            qbi_w2_wages: None,
+            qbi_ubia: None,
+            is_sstb: None,
             expenses: Usd::ZERO,
             payments_requiring_1099: None,
             will_file_required_1099: None,
