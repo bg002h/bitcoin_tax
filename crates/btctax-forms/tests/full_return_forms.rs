@@ -226,6 +226,7 @@ fn f8995_fills_the_printed_chain_and_reads_back() {
     let lines = form_8995_lines(
         "",
         Usd::ZERO,
+        None, // the simplified path — no Form 8995-A line 16
         dec!(10000),
         Usd::ZERO,
         btctax_core::Usd::ZERO,
@@ -280,6 +281,7 @@ fn f8995_loss_carryforward_prints_positive_magnitudes() {
     let lines = form_8995_lines(
         "",
         Usd::ZERO,
+        None,
         dec!(10000),
         dec!(15000),
         btctax_core::Usd::ZERO,
@@ -316,6 +318,7 @@ fn f8995_refuses_a_negative_in_a_parenthesized_cell() {
     let mut lines = form_8995_lines(
         "",
         Usd::ZERO,
+        None,
         dec!(10000),
         dec!(15000),
         btctax_core::Usd::ZERO,
@@ -388,6 +391,7 @@ fn full_return_form_fills_are_byte_deterministic() {
     let l95 = form_8995_lines(
         "",
         Usd::ZERO,
+        None,
         dec!(10000),
         Usd::ZERO,
         btctax_core::Usd::ZERO,
@@ -422,6 +426,7 @@ fn full_return_forms_refuse_unsupported_years() {
     let l95 = form_8995_lines(
         "",
         Usd::ZERO,
+        None,
         dec!(10000),
         Usd::ZERO,
         btctax_core::Usd::ZERO,
@@ -2968,6 +2973,7 @@ fn a_negative_line3_is_rejected_like_its_paren_siblings() {
     let lines = form_8995_lines(
         "Bitcoin mining",
         btctax_core::Usd::ZERO,
+        None,
         btctax_core::Usd::ZERO,
         btctax_core::Usd::ZERO,
         rust_decimal_macros::dec!(30000),

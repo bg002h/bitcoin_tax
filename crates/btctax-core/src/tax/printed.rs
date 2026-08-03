@@ -624,6 +624,10 @@ pub fn form_1040_lines(
     sch_3: Option<&Schedule3Lines>,
     f8959: &Form8959Lines,
     f8995: Option<&crate::tax::qbi::Form8995Lines>,
+    // ★★★ §G-28 — the OTHER §199A form. Line 13's own text is "Qualified business income deduction
+    // from Form 8995 **or Form 8995-A**", and the two are alternatives: exactly one is `Some` on a
+    // return that claims §199A at all.
+    f8995a: Option<&crate::tax::qbi_a::Form8995A>,
     table: &crate::tax::tables::TaxTable,
     status: FilingStatus,
     other_withholding: Usd,
@@ -651,7 +655,24 @@ pub fn form_1040_lines(
         Some(a) => a.line17, // itemizing — Schedule A's PRINTED total
         None => round_dollar(ar.deduction),
     };
-    let line13 = f8995.map_or(Usd::ZERO, |q| q.line15);
+    // ★★★ L13 — "Qualified business income deduction from Form 8995 **or Form 8995-A**".
+    //
+    //     ★★ Reading only Form 8995 was a live defect: on the 8995-A path `f8995` is `None` (the two
+    //     forms are alternatives and filing both would claim the deduction twice on paper), so line 13
+    //     printed ZERO while the attached Form 8995-A line 39 claimed the deduction. The return
+    //     disagreed with its own attachment, and OVERSTATED the filer's tax by the whole deduction.
+    //
+    //     Found by reading the emitted packet, which is the only place the two forms are side by side.
+    let line13 = match (f8995, f8995a) {
+        (Some(q), None) => q.line15,
+        (None, Some(a)) => a.part_iv.line39,
+        // Both `None` is the ordinary case — most returns claim no §199A deduction at all.
+        (None, None) => Usd::ZERO,
+        // ★ Both `Some` is unreachable by construction (`assemble_printed` nulls `f8995` whenever
+        //   8995-A files) and would be a DOUBLE deduction on paper. Take the 8995-A figure, which is
+        //   the one the packet actually staples, rather than silently summing them.
+        (Some(_), Some(a)) => a.part_iv.line39,
+    };
     // L14 — "Add lines 12e, 13a, and 13b" (2025) / "Add lines 12 and 13" (2024). The third term is
     // Schedule 1-A's total, which does not exist on the 2024 form.
     let line14 = line12 + line13 + round_dollar(ar.schedule_1a_additional);
@@ -1386,6 +1407,7 @@ mod tests {
             None,
             &f8959,
             None,
+            None,
             &tt(),
             FilingStatus::Single,
             Usd::ZERO,
@@ -1570,6 +1592,7 @@ mod tests {
             None,
             None,
             &f8959,
+            None,
             None,
             &tt(),
             FilingStatus::Single,
@@ -1806,6 +1829,7 @@ mod tests {
             None,
             &f8959,
             None,
+            None,
             &tt(),
             FilingStatus::Single,
             Usd::ZERO,
@@ -1919,6 +1943,7 @@ mod tests {
             None,
             None,
             &f8959,
+            None,
             None,
             &tt(),
             FilingStatus::Single,
@@ -2725,6 +2750,7 @@ mod tests {
                 None,
                 &f8959,
                 None,
+                None,
                 &tt(),
                 FilingStatus::Single,
                 Usd::ZERO,
@@ -2768,6 +2794,7 @@ mod tests {
                 None,
                 Some(&s3),
                 &f8959,
+                None,
                 None,
                 &tt(),
                 FilingStatus::Single,
@@ -2873,6 +2900,7 @@ mod tests {
                 None,
                 None,
                 &f8959,
+                None,
                 None,
                 &tt(),
                 FilingStatus::Single,

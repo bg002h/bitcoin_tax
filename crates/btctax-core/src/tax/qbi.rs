@@ -61,6 +61,20 @@ pub fn has_qbi(
 /// present ([`qbi_over_threshold`]) — the 8995-A phase-in is unmodeled.
 pub fn compute_8995(
     business_qbi: Usd,
+    // ★★★ §G-28/B1b — **Form 8995-A line 16**, when the return files Form 8995-A rather than the
+    // simplified Form 8995. `None` on the simplified path.
+    //
+    // The two forms figure the QUALIFIED BUSINESS component differently, and that is the whole
+    // difference between them: Form 8995 line 5 is a flat 20% of QBI, while Form 8995-A line 16 is
+    // that same 20% AFTER the §199A(b)(2) W-2-wage/UBIA cap and the Part III phase-in. Everything
+    // downstream — the REIT component, the income limitation, the deduction — is identical, which is
+    // why the two share this function at all.
+    //
+    // ★★ Taking it as an ARGUMENT instead of recomputing 20% here is what stops the return from
+    // carrying an UNCAPPED deduction. A printed Form 8995-A whose line 27 ("Enter the amount from
+    // line 16") disagreed with its own line 16 by $17,910 is how this was found — and the 1040's
+    // line 13 was wrong by the same amount, in the UNDERSTATING direction.
+    qbi_component_8995a: Option<Usd>,
     reit_dividends: Usd,
     reit_ptp_carryforward_in: Usd,
     qbi_carryforward_in: Usd,
@@ -87,7 +101,7 @@ pub fn compute_8995(
     // Line 4 — "Combine lines 2 and 3. If zero or less, enter -0-". `qbi_carryforward_in` is a
     // positive MAGNITUDE (the form pre-prints line 3's parentheses), so combining means SUBTRACTING.
     let line4 = (business_qbi.max(Usd::ZERO) - qbi_carryforward_in).max(Usd::ZERO);
-    let line5 = round_dollar(QBI_RATE * line4);
+    let line5 = qbi_component_8995a.unwrap_or_else(|| round_dollar(QBI_RATE * line4));
 
     // Line 8 — total qualified REIT dividends + PTP income (line 6 + line-7 loss, not below zero).
     let line8 = (reit_dividends - reit_ptp_carryforward_in).max(Usd::ZERO);
@@ -278,6 +292,9 @@ pub struct Form8995Lines {
 pub fn form_8995_lines(
     business_name: &str,
     business_qbi: Usd,
+    // §G-28/B1b — Form 8995-A line 16 on the 8995-A path; see [`compute_8995`]. It MUST be the same
+    // value both functions receive, or the printed form and the 1040 disagree.
+    qbi_component_8995a: Option<Usd>,
     reit_dividends: Usd,
     reit_ptp_carryforward_in: Usd,
     qbi_carryforward_in: Usd,
@@ -299,7 +316,7 @@ pub fn form_8995_lines(
     let line2 = round_dollar(business_qbi.max(Usd::ZERO));
     let line3 = round_dollar(qbi_carryforward_in);
     let line4 = (line2 - line3).max(Usd::ZERO);
-    let line5 = round_dollar(QBI_RATE * line4);
+    let line5 = qbi_component_8995a.unwrap_or_else(|| round_dollar(QBI_RATE * line4));
 
     // Part I (cont.) — the REIT/PTP component. Line 7 is a positive magnitude that REDUCES line 6.
     let line6 = round_dollar(reit_dividends);
@@ -373,6 +390,7 @@ mod tests {
     fn qbi_line3_carryforward_reduces_the_deduction() {
         let without = compute_8995(
             dec!(50000),
+            None, // simplified path — no Form 8995-A line 16
             Usd::ZERO,
             Usd::ZERO,
             Usd::ZERO,
@@ -382,6 +400,7 @@ mod tests {
         assert_eq!(without.deduction, dec!(10000), "20% of 50,000");
         let with = compute_8995(
             dec!(50000),
+            None, // simplified path — no Form 8995-A line 16
             Usd::ZERO,
             Usd::ZERO,
             dec!(20000), // L3 magnitude
@@ -406,6 +425,7 @@ mod tests {
     fn qbi_line3_carry_in_over_current_qbi_zeroes_line4_and_carries_the_remainder() {
         let r = compute_8995(
             dec!(10000),
+            None, // simplified path — no Form 8995-A line 16
             Usd::ZERO,
             Usd::ZERO,
             dec!(30000),
@@ -431,6 +451,7 @@ mod tests {
         let l = form_8995_lines(
             "",
             Usd::ZERO,
+            None, // simplified path
             Usd::ZERO,
             Usd::ZERO,
             dec!(30000),
@@ -456,6 +477,7 @@ mod tests {
         let l = form_8995_lines(
             "Bitcoin mining",
             dec!(40000),
+            None, // simplified path
             Usd::ZERO,
             Usd::ZERO,
             dec!(15000),
@@ -494,7 +516,15 @@ mod tests {
     fn schedule_c_business_income_earns_the_199a_deduction_net_of_the_half_se_deduction() {
         // The deep/02 Ex.2 shape: $60k of mining, $40k of wages.
         let qbi = dec!(60000) - dec!(4239); // Sch C net − the §164(f) half-SE deduction
-        let r = compute_8995(qbi, Usd::ZERO, Usd::ZERO, Usd::ZERO, dec!(95761), Usd::ZERO);
+        let r = compute_8995(
+            qbi,
+            None,
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(95761),
+            Usd::ZERO,
+        );
 
         assert_eq!(
             r.deduction,
@@ -511,6 +541,7 @@ mod tests {
         // $50,000 of QBI (⇒ a $10,000 component), but only $12,000 of ordinary taxable income.
         let r = compute_8995(
             dec!(50000),
+            None, // simplified path — no Form 8995-A line 16
             Usd::ZERO,
             Usd::ZERO,
             Usd::ZERO,
@@ -532,6 +563,7 @@ mod tests {
     fn the_business_and_reit_components_add() {
         let r = compute_8995(
             dec!(50000),
+            None, // simplified path — no Form 8995-A line 16
             dec!(10000),
             Usd::ZERO,
             Usd::ZERO,
@@ -603,6 +635,7 @@ mod tests {
     fn reit_component_when_income_limit_slack() {
         let r = compute_8995(
             Usd::ZERO, /* no business QBI */
+            None,
             dec!(10000),
             Usd::ZERO,
             Usd::ZERO,
@@ -619,6 +652,7 @@ mod tests {
     fn income_limit_binds_below_component() {
         let r = compute_8995(
             Usd::ZERO, /* no business QBI */
+            None,
             dec!(10000),
             Usd::ZERO,
             Usd::ZERO,
@@ -635,6 +669,7 @@ mod tests {
         // TI-before-QBI $50,000 all of which is net capital gain → line 13 = 0 → limit 0 → L13 = 0.
         let r = compute_8995(
             Usd::ZERO, /* no business QBI */
+            None,
             dec!(10000),
             Usd::ZERO,
             Usd::ZERO,
@@ -651,6 +686,7 @@ mod tests {
         // $4,000 REIT − $10,000 prior loss → line 8 = 0 → deduction 0; $6,000 loss carries out.
         let r = compute_8995(
             Usd::ZERO, /* no business QBI */
+            None,
             dec!(4000),
             dec!(10000),
             Usd::ZERO,
@@ -667,6 +703,7 @@ mod tests {
         assert!(!has_qbi(Usd::ZERO, Usd::ZERO, Usd::ZERO, Usd::ZERO));
         let r = compute_8995(
             Usd::ZERO, /* no business QBI */
+            None,
             Usd::ZERO,
             Usd::ZERO,
             Usd::ZERO,
@@ -795,6 +832,7 @@ mod tests {
     fn component_line_rounds_half_up() {
         let r = compute_8995(
             Usd::ZERO, /* no business QBI */
+            None,
             dec!(2502.50),
             Usd::ZERO,
             Usd::ZERO,
@@ -814,6 +852,7 @@ mod tests {
         let l = form_8995_lines(
             "",
             Usd::ZERO,
+            None, // simplified path
             dec!(10000),
             Usd::ZERO,
             Usd::ZERO,
@@ -845,6 +884,7 @@ mod tests {
         let l = form_8995_lines(
             "",
             Usd::ZERO,
+            None, // simplified path
             dec!(10000),
             Usd::ZERO,
             Usd::ZERO,
@@ -869,6 +909,7 @@ mod tests {
         let l = form_8995_lines(
             "",
             Usd::ZERO,
+            None, // simplified path
             dec!(10000),
             dec!(15000),
             Usd::ZERO,
@@ -898,6 +939,7 @@ mod tests {
         assert!(form_8995_lines(
             "",
             Usd::ZERO,
+            None, // simplified path
             Usd::ZERO,
             Usd::ZERO,
             Usd::ZERO,
@@ -910,6 +952,7 @@ mod tests {
         let l = form_8995_lines(
             "",
             Usd::ZERO,
+            None, // simplified path
             Usd::ZERO,
             dec!(5000),
             Usd::ZERO,
@@ -929,7 +972,7 @@ mod tests {
             (dec!(2502.50), Usd::ZERO, dec!(80000.49), dec!(0.50)), // cents in, dollars out
             (dec!(10000), Usd::ZERO, dec!(12000), dec!(12000)),     // income limit binds
         ] {
-            let l = form_8995_lines("", Usd::ZERO, reit, cf_in, Usd::ZERO, ti, ncg).unwrap();
+            let l = form_8995_lines("", Usd::ZERO, None, reit, cf_in, Usd::ZERO, ti, ncg).unwrap();
             assert_eq!(l.line4, l.line2, "L4 = 2 + 3 (3 blank)");
             assert_eq!(l.line5, round_dollar(QBI_RATE * l.line4), "L5 = 20% × 4");
             assert_eq!(

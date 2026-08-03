@@ -273,6 +273,7 @@ fn form_8995_row_1i_carries_the_proprietors_tin_not_the_taxpayers() {
     let lines = btctax_core::tax::qbi::form_8995_lines(
         "Bitcoin mining",
         dec!(55761), // business QBI
+        None,        // the simplified path — no Form 8995-A line 16
         Usd::ZERO,
         Usd::ZERO,
         btctax_core::Usd::ZERO,
@@ -307,6 +308,7 @@ fn form_8995_refuses_to_file_a_qbi_total_for_an_unnamed_business() {
     let lines = btctax_core::tax::qbi::form_8995_lines(
         "", // no name — as an import omitting `business_description` would give
         dec!(55761),
+        None, // the simplified path
         Usd::ZERO,
         Usd::ZERO,
         btctax_core::Usd::ZERO,
@@ -338,6 +340,7 @@ fn form_8995_with_only_reit_dividends_leaves_part_i_blank() {
     let lines = btctax_core::tax::qbi::form_8995_lines(
         "",          // no trade or business…
         Usd::ZERO,   // …and no business QBI
+        None,        // the simplified path
         dec!(10000), // just REIT dividends
         Usd::ZERO,
         btctax_core::Usd::ZERO,

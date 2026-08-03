@@ -1463,8 +1463,71 @@ pub fn assemble_absolute(
     );
     let reit_dividends: Usd = ri.div_1099.iter().map(|d| d.box5_section_199a).sum();
     let net_capital_gain = qualified_dividends + net_ltcg; // Form 8995 line 12
+
+    // §G-28/B1a — the §199A FORM choice. See the field's doc for why it is decided here.
+    let uses_8995a = crate::tax::qbi::uses_8995a(
+        business_qbi,
+        reit_dividends,
+        ri.qbi.reit_ptp_carryforward_in,
+        ri.qbi.qbi_carryforward_in,
+        agi - deduction,
+        status,
+        params,
+    );
+    // §G-28/B1b — Parts I–III, decided here for the same reason: lines 21 and 23 need `params`.
+    //
+    // ★ Built from `business_qbi` AFTER the §199A(d)(3) SSTB exclusion above, so an excluded SSTB has
+    //   no qualified business and `compute` returns `None` — Parts I–III are then not filed at all,
+    //   which is what the statute means by "not a qualified trade or business".
+    let f8995a_parts_i_to_iii = uses_8995a
+        .then(|| {
+            crate::tax::qbi_a::Form8995APartIToIii::compute(
+                &crate::tax::qbi_a::PartIToIiiInputs {
+                    business_name: ri
+                        .schedule_c
+                        .as_ref()
+                        .map(|c| c.business_description.clone())
+                        .unwrap_or_default(),
+                    is_sstb: ri.schedule_c.as_ref().and_then(|c| c.is_sstb) == Some(true),
+                    business_qbi,
+                    // ★ `unwrap_or(ZERO)` is safe ONLY because `screen_absolute` refuses an
+                    //   unanswered pair above the threshold, and `uses_8995a` is false below it. A
+                    //   defaulted zero here would otherwise CAP the deduction at zero for a filer who
+                    //   does pay wages, which overstates their tax.
+                    w2_wages: ri
+                        .schedule_c
+                        .as_ref()
+                        .and_then(|c| c.qbi_w2_wages)
+                        .unwrap_or(Usd::ZERO),
+                    ubia: ri
+                        .schedule_c
+                        .as_ref()
+                        .and_then(|c| c.qbi_ubia)
+                        .unwrap_or(Usd::ZERO),
+                    ti_before_qbi: agi - deduction,
+                },
+                Qbi199aRegime::of(agi - deduction, status, params),
+                status,
+                params,
+            )
+        })
+        .flatten();
+    // ★★★ §G-28/B1b — THE QUALIFIED BUSINESS COMPONENT, and the ONE place it is decided.
+    //
+    //     On the Form 8995-A path it is Part II line 16 — 20% of QBI AFTER the §199A(b)(2)
+    //     W-2-wage/UBIA cap and the Part III phase-in. Letting `compute_8995` recompute a flat 20%
+    //     here would carry an UNCAPPED deduction onto the 1040 while the attached Form 8995-A printed
+    //     the capped figure on its own line 16 — the two-authorities-for-one-number defect, in the
+    //     UNDERSTATING direction.
+    //
+    //     ★ `None` when there is no qualified trade or business (REIT/PTP only, or an SSTB the
+    //       §199A(d)(3) exclusion removed): `business_qbi` is then zero and the flat 20% of zero is
+    //       the same answer, so the simplified path is not merely safe there, it is identical.
+    let qbi_component_8995a = f8995a_parts_i_to_iii.as_ref().map(|f| f.part_ii.line16);
+
     let qbi = compute_8995(
         business_qbi,
+        qbi_component_8995a,
         reit_dividends,
         ri.qbi.reit_ptp_carryforward_in,
         ri.qbi.qbi_carryforward_in, // Form 8995 line 3 (magnitude; line 4 subtracts it)
@@ -1537,54 +1600,6 @@ pub fn assemble_absolute(
     // ── Excess-SS + payments → refund/owed (SPEC §5 stages 8–9) ─────────────────────────────────────
     let excess_social_security = excess_social_security(ri, table);
     let excess_ss_not_creditable = non_creditable_ss(ri, table);
-    // §G-28/B1a — the §199A FORM choice. See the field's doc for why it is decided here.
-    let uses_8995a = crate::tax::qbi::uses_8995a(
-        business_qbi,
-        ri.div_1099.iter().map(|d| d.box5_section_199a).sum(),
-        ri.qbi.reit_ptp_carryforward_in,
-        ri.qbi.qbi_carryforward_in,
-        agi - deduction,
-        status,
-        params,
-    );
-    // §G-28/B1b — Parts I–III, decided here for the same reason: lines 21 and 23 need `params`.
-    //
-    // ★ Built from `business_qbi` AFTER the §199A(d)(3) SSTB exclusion above, so an excluded SSTB has
-    //   no qualified business and `compute` returns `None` — Parts I–III are then not filed at all,
-    //   which is what the statute means by "not a qualified trade or business".
-    let f8995a_parts_i_to_iii = uses_8995a
-        .then(|| {
-            crate::tax::qbi_a::Form8995APartIToIii::compute(
-                &crate::tax::qbi_a::PartIToIiiInputs {
-                    business_name: ri
-                        .schedule_c
-                        .as_ref()
-                        .map(|c| c.business_description.clone())
-                        .unwrap_or_default(),
-                    is_sstb: ri.schedule_c.as_ref().and_then(|c| c.is_sstb) == Some(true),
-                    business_qbi,
-                    // ★ `unwrap_or(ZERO)` is safe ONLY because `screen_absolute` refuses an
-                    //   unanswered pair above the threshold, and `uses_8995a` is false below it. A
-                    //   defaulted zero here would otherwise CAP the deduction at zero for a filer who
-                    //   does pay wages, which overstates their tax.
-                    w2_wages: ri
-                        .schedule_c
-                        .as_ref()
-                        .and_then(|c| c.qbi_w2_wages)
-                        .unwrap_or(Usd::ZERO),
-                    ubia: ri
-                        .schedule_c
-                        .as_ref()
-                        .and_then(|c| c.qbi_ubia)
-                        .unwrap_or(Usd::ZERO),
-                    ti_before_qbi: agi - deduction,
-                },
-                Qbi199aRegime::of(agi - deduction, status, params),
-                status,
-                params,
-            )
-        })
-        .flatten();
 
     // 1040 L25 withholding: 25a Σ W-2 box2; 25b Σ 1099 box4 (INT/DIV/G); 25c Form 8959 Part V + other.
     let wh_25a: Usd = ri.w2s.iter().map(|w| w.box2_fed_withheld).sum();
@@ -3827,6 +3842,107 @@ mod tests {
         assert!(
             ar.uses_8995a,
             "and it files Form 8995-A, not the simplified 8995"
+        );
+    }
+
+    /// ★★★ §G-28/B1b — THE 1040 AND THE ATTACHED FORM MUST CLAIM THE SAME DEDUCTION.
+    ///
+    /// Two Criticals lived in this one sentence, and BOTH were found by reading the emitted packet
+    /// rather than by any test that passed:
+    ///
+    ///   1. **The 1040 took no deduction at all.** Line 13 read only Form 8995's line 15, and on the
+    ///      8995-A path `f8995` is `None` (the two are alternatives). So the 1040 printed ZERO while
+    ///      the stapled Form 8995-A line 39 claimed $27,357 — the return disagreed with its own
+    ///      attachment, and OVERSTATED the filer's tax by the whole deduction. Shipped by B1a.
+    ///   2. **The deduction was UNCAPPED.** `compute_8995` recomputed a flat 20% of QBI, so Part IV
+    ///      line 27 ("Enter the amount from line 16") printed $45,267 against its own line 16 of
+    ///      $27,357 — a $17,910 overstated deduction, in the UNDERSTATING direction for tax.
+    ///
+    /// ★★ This asserts the IDENTITY, not either figure. A test that pinned only the number would have
+    /// passed on defect 1 the moment someone "fixed" line 39 to match the zero.
+    #[test]
+    fn the_1040_deduction_equals_the_attached_8995a_line_39() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        // A single filer INSIDE the phase-in range with no employees: the cap binds, Part III softens
+        // it, and the answer is neither 20% of QBI nor zero — so all three candidates are distinct.
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            // A real header — the printed packet will not assemble a return that names nobody.
+            header: crate::tax::testonly::kitchen_sink_household().0.header,
+            schedule_c: Some(ScheduleCInputs {
+                owner: Owner::Taxpayer,
+                business_description: "Bitcoin mining".into(),
+                is_sstb: Some(false),
+                is_cooperative_patron: Some(false),
+                qbi_w2_wages: Some(Usd::ZERO),
+                qbi_ubia: Some(Usd::ZERO),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        // The printed packet REFUSES on any unanswered declaration, so this fixture answers them all
+        // — the subject here is the §199A identity, not the answered-ness screen.
+        crate::tax::testonly::answer_all_live_declarations(&mut ri);
+        let st = state_income(vec![mining(dec!(240000))]);
+        let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+        assert_eq!(
+            screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024).map(|r| r.reason),
+            None,
+            "this return must FILE, else the test proves nothing"
+        );
+        let pr = crate::tax::packet::assemble_printed_return(
+            &ri,
+            &st,
+            &std::collections::BTreeMap::new(),
+            &ar,
+            &table,
+            2024,
+            &[],
+        )
+        .expect("the printed return assembles");
+        let a = pr
+            .forms
+            .f8995a
+            .as_ref()
+            .expect("above the threshold ⇒ Form 8995-A");
+        let parts = a
+            .parts_i_to_iii
+            .as_ref()
+            .expect("a trade or business ⇒ Parts I-III");
+
+        // ★ The fixture must actually EXERCISE the cap and the phase-in, or the three candidate
+        //   figures collapse into one and the identity below is trivially true.
+        assert!(parts.part_iii.is_some(), "the fixture must run Part III");
+        assert!(
+            parts.part_ii.line16 < parts.part_ii.line3,
+            "the cap must BIND (line 16 < 20% of QBI), else this fixture cannot tell the two \
+             defects apart"
+        );
+        assert!(
+            parts.part_ii.line16 > Usd::ZERO,
+            "…and must not be zero either"
+        );
+
+        // 1. Part IV line 27 IS line 16 — the form's own words.
+        assert_eq!(
+            a.part_iv.line27, parts.part_ii.line16,
+            "Part IV line 27 is \"Enter the amount from line 16\""
+        );
+        // 2. The 1040 takes what the attached form claims.
+        assert_eq!(
+            pr.forms.f1040.line13, a.part_iv.line39,
+            "1040 line 13 is \"Qualified business income deduction from Form 8995 OR Form 8995-A\""
+        );
+        // 3. …and the engine's own deduction is the same figure, so the tax computed matches the
+        //    tax the printed page justifies.
+        assert_eq!(
+            ar.qbi_deduction, a.part_iv.line39,
+            "the engine's deduction and the printed one are the same number"
+        );
+        assert!(
+            pr.forms.f8995.is_none(),
+            "and the simplified form is NOT also filed"
         );
     }
 

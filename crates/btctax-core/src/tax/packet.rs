@@ -591,6 +591,11 @@ pub fn assemble_printed_forms(
         // "Combine lines 1i through 1v, column (c)" — a total over an empty column names no business.
         &pi.schedule_c_header.business_description,
         pi.business_qbi,
+        // ★★★ §G-28/B1b — the SAME Form 8995-A line 16 the 1040's own chain read. Transcribed from
+        //     `AbsoluteReturn`, never re-derived: the printed form's line 27 is "Enter the amount
+        //     from line 16", and a second derivation here is exactly how it once printed $45,267
+        //     against its own line 16 of $27,357.
+        ar.f8995a_parts_i_to_iii.as_ref().map(|f| f.part_ii.line16),
         pi.reit_dividends,
         pi.reit_ptp_carryforward_in,
         pi.qbi_carryforward_in,
@@ -667,6 +672,7 @@ pub fn assemble_printed_forms(
         sch_3.as_ref(),
         &f8959,
         f8995.as_ref(),
+        f8995a.as_ref(),
         table,
         status,
         ri.payments.other_withholding,
