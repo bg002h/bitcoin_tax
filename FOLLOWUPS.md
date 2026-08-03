@@ -1280,6 +1280,36 @@ watched to distinguish a true case from a false one"* — committed by the autho
 `line4: _` compiles and the row vanishes. Corrected to the honest limit `classifier.rs` already states
 for itself.
 
+### G-31 — Schedule D lines 1a/8a are EMITTED by a branch no test reaches (2026-08-03)
+
+§G-28/B4 r3, Important. The blank-vs-zero fix made the emitter take `(None, None)` when there are no
+1099-B totals — correct, and held by `schedule_d_lines_1a_and_8a_are_blank_without_a_1099b`. But it
+also made the **other** branch unreachable in the whole suite:
+
+* `btctax-forms`' only `ScheduleDLines` fixture hard-sets all six 1a/8a fields to `Usd::ZERO`;
+* `b_1099` exists in no crate below `btctax-core`, so no packet-level test ever reaches the emitter
+  with broker totals;
+* `schedule_d_2024_field_names()` omits `line1a`/`line8a`, so the map-vs-PDF fieldset test misses them.
+
+**Before the fix**, `push_money` pushed a `FlatPlacement` unconditionally — even for a zero — so
+`verify_flat` checked page membership, the (d)/(e)/(h) x-clusters and the y-descent for all six on
+every Schedule D fill. **After it, no placement is ever produced.**
+
+**The kill that now finds nothing:** swap `proceeds_d` and `cost_e` in `forms/2024/schedule_d.map.toml`.
+The census union is unchanged, no placement is emitted, **zero tests red** — and a filer prints
+$1,050,000 of proceeds in the cost column of a return signed under §6065. Under harness **B1** the
+reviewable question is *"which test reds when this checker is removed?"*, and for these six cells the
+answer is now **none**.
+
+★ Not fixed inline because the fix is a packet-level fixture carrying real broker totals through
+`fill_schedule_d_full`, plus adding the two cells to `schedule_d_2024_field_names()` — its own change,
+not a rider on a Critical fold. **Owning phase:** before any release that ships B4, since the geometry
+of six cells on a filed schedule is exactly the class `verify_flat` exists to hold.
+
+★★ The general lesson is sharper than the instance: **making an emitter correctly SKIP a cell can
+silently retire the verification that cell had.** A conditional write is a coverage change as well as a
+behaviour change, and nothing in this repo currently notices that.
+
 ### G-30 — the DELTA engine cannot see non-ledger Schedule C receipts (2026-08-02)
 
 §G-28/B3 gave the FULL-RETURN path a `schedule_c.other_gross_receipts`. The crypto-**delta** path
