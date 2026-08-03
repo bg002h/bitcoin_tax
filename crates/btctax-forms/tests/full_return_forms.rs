@@ -1085,6 +1085,12 @@ fn sd(
     routing: ScheduleDRouting,
 ) -> ScheduleDLines {
     ScheduleDLines {
+        line1a_d: Usd::ZERO,
+        line1a_e: Usd::ZERO,
+        line1a_h: Usd::ZERO,
+        line8a_d: Usd::ZERO,
+        line8a_e: Usd::ZERO,
+        line8a_h: Usd::ZERO,
         line3_d: dec!(50000),
         line3_e: dec!(45000),
         line3_h: st + st_cf,

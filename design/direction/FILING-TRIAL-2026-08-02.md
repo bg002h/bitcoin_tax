@@ -129,11 +129,38 @@ same commit.
 ★ The DELTA engine still cannot see them (`TaxProfile` is frozen) — filed as `FOLLOWUPS.md` §G-30 with
 the direction it errs in.
 
-### B4 · Capital gains cannot be entered — only disposed
+### B4 · Capital gains cannot be entered — only disposed — ✅ **FIXED**
 
 No 1099-B input exists anywhere in `ReturnInputs`. The only capital-gain paths are the BTC ledger and
 1099-DIV box 2a capital-gain *distributions* (Schedule D line 13). **$2M of stock gain is
 inexpressible.** Same modelling substitution applied.
+
+**FIXED 2026-08-02.** `ReturnInputs.b_1099` carries broker TOTALS onto **Schedule D lines 1a and 8a**,
+which is the FORM'S OWN totals-without-Form-8949 mechanism rather than a shortcut of ours:
+
+> *"Totals for all short-term transactions reported on Form 1099-B for which basis was reported to the
+> IRS and for which you have no adjustments … However, if you choose to report all these transactions
+> on Form 8949, leave this line blank and go to line 1b."*
+
+So a filer whose broker reported basis is expressly told they need no Form 8949 — four numbers replace
+a transaction list, and **btctax still has exactly one lot-level engine** (the crypto one), which is
+the constraint this blocker was filed under. Verified on the real binary: line 8a prints
+`260000 / 200000 / 60000` and combines into lines 15 and 16.
+
+★★ THE FORM'S TWO CONDITIONS ARE ASKED, NOT ASSUMED. `basis_reported_and_no_adjustments` must be an
+affirmative `true`; `None` and `false` both REFUSE (`Form1099BNeedsForm8949`), naming the broker and
+saying those transactions belong on Form 8949 with Box B/C/E/F and one row per sale. An all-zero row
+does not gate — it asserts nothing.
+
+★ Column **(g)** (adjustments) is unmappable BY CONSTRUCTION: the map type for these two lines
+(`AmountColsNoAdjustment`) has no such cell, because needing an adjustment is precisely what
+disqualifies a transaction from the line. A type that cannot express it beats a cell someone remembered
+not to fill.
+
+★★★ **AND THE $2M SCENARIO NOW HITS THE NEXT WALL, WHICH IS REAL:** with the gain expressible, the
+owner's return refuses with `AmtScreenTriggered` — *"Form 6251 line 7 exceeds line 10, so Form 6251
+must be attached … v1 computes the form but cannot yet FILE it."* That is the AMT Tier-2 track
+(`FOLLOWUPS.md` §G-6), not a B4 defect, and it is the honest next blocker for this scenario.
 
 ### B5 · An income amount cannot be stated in dollars
 

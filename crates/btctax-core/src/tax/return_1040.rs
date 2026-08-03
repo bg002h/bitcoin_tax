@@ -221,6 +221,23 @@ pub const MEDICAL_FLOOR_RATE: Usd = dec!(0.075);
 /// offset (≤ $3,000 / $1,500 MFS), also a magnitude.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScheduleDParts {
+    /// **L1a (d)** — *"Totals for all short-term transactions reported on Form 1099-B for which basis
+    /// was reported to the IRS and for which you have no adjustments"*, proceeds. §G-28/B4.
+    ///
+    /// ★ Distinct from line 3, which is the attached Form 8949's Box C/I total. These transactions are
+    /// NOT on the 8949 at all — that is the whole point of line 1a, and why btctax needs no second
+    /// lot-level engine to report them.
+    pub st_1099b_proceeds_1ad: Usd,
+    /// **L1a (e)** — the same transactions' cost basis.
+    pub st_1099b_cost_1ae: Usd,
+    /// **L1a (h)** — *"Subtract column (e) from column (d)…"*, signed.
+    pub st_1099b_gain_1ah: Usd,
+    /// **L8a (d)** — the long-term counterpart of line 1a. §G-28/B4.
+    pub lt_1099b_proceeds_8ad: Usd,
+    /// **L8a (e)** — cost basis.
+    pub lt_1099b_cost_8ae: Usd,
+    /// **L8a (h)** — signed gain or loss.
+    pub lt_1099b_gain_8ah: Usd,
     /// L3 (d) — short-term proceeds from Form 8949 (Box C or **Box I**, the digital-asset box).
     pub st_proceeds_3d: Usd,
     /// L3 (e) — short-term cost basis.
@@ -565,12 +582,36 @@ fn crypto_income(state: &LedgerState, year: i32) -> CryptoIncome {
 /// distributions (LT character), with the §1212 carryforward-in applied. The single source for 1040 L7
 /// ([`capital_gain_line7`]), the QDCGT net-LTCG (`preferential_gain`, → L16), and the Form 8995
 /// net-capital-gain (`preferential_gain`, → line 12).
+/// §G-28/B4 — the Form 1099-B totals for Schedule D lines **1a** and **8a**, as `(short-term gain,
+/// long-term gain)`. Each is `Σ(proceeds − basis)` over the filer's 1099-B rows, and each may be
+/// NEGATIVE: a broker's netted totals are a loss as readily as a gain, and §1222 nets within character
+/// before the §1211 limit applies.
+///
+/// ★★ Summed as GAINS per row, not as (Σproceeds − Σbasis), because that is what the printed column
+/// (h) is per row — and the two agree only while every row is present. Keeping the per-row shape means
+/// a future per-row output (a second Schedule D page, say) needs no re-derivation.
+pub fn form_1099b_gains(ri: &ReturnInputs) -> (Usd, Usd) {
+    ri.b_1099
+        .iter()
+        .fold((Usd::ZERO, Usd::ZERO), |(st, lt), b| {
+            (
+                st + (b.short_term_proceeds - b.short_term_basis),
+                lt + (b.long_term_proceeds - b.long_term_basis),
+            )
+        })
+}
+
 fn capital_net(ri: &ReturnInputs, state: &LedgerState, year: i32, status: FilingStatus) -> CapNet {
     let sd = schedule_d(state, year); // raw crypto ST/LT nets (traverses state.disposals)
     let cf = ri.capital_loss_carryforward_in;
+    // ★★★ §G-28/B4 — the broker totals join the crypto nets HERE, at the §1222 within-character
+    //     netting, which is where Schedule D combines lines 1a..6 and 8a..14. `net_1222` itself is in
+    //     the FROZEN delta engine (`frozen_guard.rs`), so only its ARGUMENTS change — the securities
+    //     gain is added to the same character it belongs to and nothing inside is touched.
+    let (b_st, b_lt) = form_1099b_gains(ri);
     net_1222(
-        sd.st.gain,
-        sd.lt.gain,
+        sd.st.gain + b_st,
+        sd.lt.gain + b_lt,
         sum_cap_gain_distr(ri), // box 2a is LT-character "other" capital gain
         cf.short,
         cf.long,
@@ -1367,6 +1408,19 @@ pub fn assemble_absolute(
     // §1222/§1211 capital netting computed ONCE: L7 (below) and the preferential slice (`net_ltcg`, → L16
     // / the QBI income limit) share this single `CapNet` (crypto Sch D + Σ box 2a, carryforward applied).
     let cap = capital_net(ri, state, year, status);
+    // §G-28/B4 — Schedule D lines 1a and 8a, columns (d) and (e). Summed here, printed there.
+    let (b1099_st_proceeds, b1099_st_basis, b1099_lt_proceeds, b1099_lt_basis) =
+        ri.b_1099.iter().fold(
+            (Usd::ZERO, Usd::ZERO, Usd::ZERO, Usd::ZERO),
+            |(sp, sb, lp, lb), b| {
+                (
+                    sp + b.short_term_proceeds,
+                    sb + b.short_term_basis,
+                    lp + b.long_term_proceeds,
+                    lb + b.long_term_basis,
+                )
+            },
+        );
     let capital_gain = cap.ordinary_gain + cap.preferential_gain - cap.loss_deduction; // L7
     let net_ltcg = cap.preferential_gain; // §1(h) preferential net capital gain (≥ 0)
 
@@ -1379,6 +1433,12 @@ pub fn assemble_absolute(
         st_cost_3e: sd_raw.st.cost_basis,
         st_gain_3h: sd_raw.st.gain,
         st_carryover_6: cf_in.short,
+        st_1099b_proceeds_1ad: b1099_st_proceeds,
+        st_1099b_cost_1ae: b1099_st_basis,
+        st_1099b_gain_1ah: b1099_st_proceeds - b1099_st_basis,
+        lt_1099b_proceeds_8ad: b1099_lt_proceeds,
+        lt_1099b_cost_8ae: b1099_lt_basis,
+        lt_1099b_gain_8ah: b1099_lt_proceeds - b1099_lt_basis,
         st_net_7: cap.st_net,
         lt_proceeds_10d: sd_raw.lt.proceeds,
         lt_cost_10e: sd_raw.lt.cost_basis,
@@ -3842,6 +3902,182 @@ mod tests {
     /// argument to `qbi_over_threshold` was load-bearing and untested: the reviewer replaced it with
     /// `Usd::ZERO` — deleting the refusal for every Schedule C filer — and all 1702 tests still passed.
     ///
+    /// ★★★ §G-28/B4 — 1099-B TOTALS REACH SCHEDULE D LINES 1a/8a AND THE §1222 NETTING.
+    ///
+    /// The blocker: no 1099-B input existed, so $2,000,000 of stock gain was inexpressible. Schedule D
+    /// lines 1a and 8a are the FORM'S OWN totals-without-Form-8949 mechanism, which is why btctax needs
+    /// no second lot-level engine for securities.
+    #[test]
+    fn form_1099b_totals_reach_schedule_d_and_the_1222_netting() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: crate::tax::testonly::kitchen_sink_household().0.header,
+            b_1099: vec![crate::tax::return_inputs::Form1099B {
+                payer: "Broker LLC".into(),
+                short_term_proceeds: dec!(150000),
+                short_term_basis: dec!(120000),
+                long_term_proceeds: dec!(2500000),
+                long_term_basis: dec!(500000),
+                basis_reported_and_no_adjustments: Some(true),
+            }],
+            ..Default::default()
+        };
+        crate::tax::testonly::answer_all_live_declarations(&mut ri);
+        let st = crate::state::LedgerState::default();
+        assert_eq!(
+            crate::tax::return_refuse::screen_inputs(&ri, &table, &p).map(|r| r.reason),
+            None,
+            "a confirmed 1099-B files"
+        );
+        let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+        let sd = &ar.schedule_d;
+        assert_eq!(sd.st_1099b_proceeds_1ad, dec!(150000), "line 1a(d)");
+        assert_eq!(sd.st_1099b_cost_1ae, dec!(120000), "line 1a(e)");
+        assert_eq!(sd.st_1099b_gain_1ah, dec!(30000), "line 1a(h) = (d) − (e)");
+        assert_eq!(sd.lt_1099b_proceeds_8ad, dec!(2500000), "line 8a(d)");
+        assert_eq!(
+            sd.lt_1099b_gain_8ah,
+            dec!(2000000),
+            "line 8a(h) — the $2M the trial could not express"
+        );
+
+        // ★★ …and they reach the NETTING, so 1040 line 7 and the preferential-rate stack see them.
+        assert_eq!(sd.st_net_7, dec!(30000), "line 7 combines 1a through 6");
+        assert_eq!(
+            sd.lt_net_15,
+            dec!(2000000),
+            "line 15 combines 8a through 14"
+        );
+        assert_eq!(ar.capital_gain, dec!(2030000), "1040 line 7");
+        assert!(
+            ar.printed_inputs.qbi_net_capital_gain >= dec!(2000000),
+            "the §199A net-capital-gain limitation must see the long-term gain too"
+        );
+
+        // ★★★ AND THE PRINTED SCHEDULE D, which is a DIFFERENT chain from the core nets above.
+        //
+        //     `st_net_7` is `CapNet::st_net`; `ScheduleDLines::line7` is *"Combine lines 1a through 6
+        //     in column (h)"* over the PRINTED cells. Asserting only the first left both printed
+        //     combinations unheld — deleting `line1a_h` from line 7 and `line8a_h` from line 15 red
+        //     NOTHING until this block existed. Same field-of-view failure as the 1040-vs-8995-A pair.
+        let pr = crate::tax::packet::assemble_printed_return(
+            &ri,
+            &st,
+            &std::collections::BTreeMap::new(),
+            &ar,
+            &table,
+            2024,
+            &[],
+        )
+        .expect("the printed return assembles");
+        let d = &pr.forms.sch_d;
+        assert_eq!(d.line1a_d, dec!(150000), "printed line 1a(d)");
+        assert_eq!(d.line1a_e, dec!(120000), "printed line 1a(e)");
+        assert_eq!(d.line1a_h, dec!(30000), "printed line 1a(h)");
+        assert_eq!(d.line8a_d, dec!(2500000), "printed line 8a(d)");
+        assert_eq!(d.line8a_h, dec!(2000000), "printed line 8a(h)");
+        assert_eq!(
+            d.line7, d.line1a_h,
+            "line 7 COMBINES line 1a — with no 8949 rows it IS line 1a(h)"
+        );
+        assert_eq!(d.line15, d.line8a_h, "line 15 COMBINES line 8a — likewise");
+        assert_eq!(
+            d.line16,
+            d.line7 + d.line15,
+            "line 16 = 7 + 15, over the printed cells"
+        );
+        // …and the 1040 takes the same figure.
+        assert_eq!(
+            pr.forms.f1040.line7, ar.capital_gain,
+            "1040 line 7 = Schedule D's answer"
+        );
+    }
+
+    /// ★★★ THE FORM'S OWN TWO CONDITIONS, AND THEY FAIL CLOSED.
+    ///
+    /// Schedule D line 1a is available only *"for which basis was reported to the IRS and for which
+    /// you have no adjustments"*. Anything else needs Form 8949 with Box B/C/E/F and per-transaction
+    /// detail — the lot-level engine btctax will not build for securities. `None` (never asked) and
+    /// `Some(false)` must BOTH refuse, or an omission becomes a claim.
+    #[test]
+    fn a_1099b_that_does_not_qualify_for_line_1a_refuses() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let mk = |gate: Option<bool>, amount: Usd| {
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                header: crate::tax::testonly::kitchen_sink_household().0.header,
+                b_1099: vec![crate::tax::return_inputs::Form1099B {
+                    payer: "Broker LLC".into(),
+                    long_term_proceeds: amount,
+                    long_term_basis: Usd::ZERO,
+                    basis_reported_and_no_adjustments: gate,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+            crate::tax::testonly::answer_all_live_declarations(&mut ri);
+            ri
+        };
+        for gate in [None, Some(false)] {
+            let r = crate::tax::return_refuse::screen_inputs(&mk(gate, dec!(2500000)), &table, &p)
+                .unwrap_or_else(|| panic!("{gate:?} must REFUSE — an omission is not a claim"));
+            assert_eq!(r.reason, RefuseReason::Form1099BNeedsForm8949);
+            assert!(
+                r.detail.contains("Broker LLC") && r.detail.contains("Form 8949"),
+                "the refusal must name the broker and where those transactions belong: {}",
+                r.detail
+            );
+        }
+        // ★ …and it is NOT always-on: an affirmative `yes` files.
+        assert_eq!(
+            crate::tax::return_refuse::screen_inputs(&mk(Some(true), dec!(2500000)), &table, &p)
+                .map(|r| r.reason),
+            None
+        );
+        // ★★ …nor does an ALL-ZERO row refuse. It asserts nothing and reports nothing, so demanding a
+        //    confirmation for it would be a refusal with no purpose.
+        assert_eq!(
+            crate::tax::return_refuse::screen_inputs(&mk(None, Usd::ZERO), &table, &p)
+                .map(|r| r.reason),
+            None,
+            "an empty 1099-B row carries no testimony and must not gate the return"
+        );
+    }
+
+    /// ★★ A 1099-B LOSS nets within its own character and is limited by §1211(b) like any other.
+    #[test]
+    fn a_1099b_loss_nets_within_character_and_hits_the_1211_limit() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: crate::tax::testonly::kitchen_sink_household().0.header,
+            b_1099: vec![crate::tax::return_inputs::Form1099B {
+                payer: "Broker LLC".into(),
+                short_term_proceeds: dec!(10000),
+                short_term_basis: dec!(60000), // a $50,000 short-term LOSS
+                basis_reported_and_no_adjustments: Some(true),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        crate::tax::testonly::answer_all_live_declarations(&mut ri);
+        let ar = assemble_absolute(&ri, &crate::state::LedgerState::default(), &p, &table, 2024);
+        assert_eq!(
+            ar.schedule_d.st_1099b_gain_1ah,
+            dec!(-50000),
+            "line 1a(h) is SIGNED — a broker's netted totals are a loss as readily as a gain"
+        );
+        assert_eq!(
+            ar.capital_gain,
+            dec!(-3000),
+            "§1211(b) limits the deductible loss to $3,000 for a single filer"
+        );
+    }
+
     /// ★★★ §G-28/B3 — NON-LEDGER GROSS RECEIPTS REACH SCHEDULE C LINE 1, SCHEDULE SE AND §199A.
     ///
     /// The blocker: `ScheduleCInputs` had no gross-receipts field, so Schedule C revenue could only

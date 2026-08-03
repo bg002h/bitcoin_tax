@@ -101,6 +101,24 @@ pub struct AmountCols {
     pub gain_h: String,
 }
 
+/// Schedule D lines **1a** and **8a** — columns (d), (e) and (h) only. §G-28/B4.
+///
+/// ★★★ THERE IS NO `adj_g`, AND ITS ABSENCE IS THE POINT. These lines are available only for
+/// transactions *"for which basis was reported to the IRS and **for which you have no adjustments**"*.
+/// Needing an adjustment is precisely what disqualifies a transaction from the line, so a cell for one
+/// could never legitimately be written — and a type that cannot express it is a stronger guarantee
+/// than a cell someone remembered not to fill. (The widget exists on the PDF and stays censused; it is
+/// `_RO`, owned by the form's own JavaScript.)
+#[derive(Debug, Clone, Deserialize)]
+pub struct AmountColsNoAdjustment {
+    /// Column (d) — proceeds.
+    pub proceeds_d: String,
+    /// Column (e) — cost basis.
+    pub cost_e: String,
+    /// Column (h) — gain/loss.
+    pub gain_h: String,
+}
+
 /// One Form 8949 part (Part I short-term on page 0, Part II long-term on page 1).
 #[derive(Debug, Clone, Deserialize)]
 pub struct PartMap {
@@ -815,6 +833,16 @@ pub struct ScheduleDMap {
     #[serde(default)]
     pub identity: Option<IdentityCells>,
     /// Line 3 — Part I total from Form 8949 (Box C **or Box I**): columns d,e,g,h.
+    /// §G-28/B4 — line 1a, the short-term 1099-B totals that need no Form 8949.
+    ///
+    /// ★ `Option` because only the TY2024 map carries it so far, exactly like `line6`/`line13`/`line14`
+    /// beside it. A year whose map lacks the cells and whose filer HAS 1099-B totals fails closed at
+    /// fill time (`need`), rather than silently dropping a reported figure off the return.
+    #[serde(default)]
+    pub line1a: Option<AmountColsNoAdjustment>,
+    /// §G-28/B4 — line 8a, the long-term counterpart. Same `Option` treatment as [`Self::line1a`].
+    #[serde(default)]
+    pub line8a: Option<AmountColsNoAdjustment>,
     pub line3: AmountCols,
     /// Line 7 — net short-term gain/loss (column h).
     pub line7_h: String,

@@ -609,6 +609,7 @@ $ btctax --vault v.pgp income show --year 2024
       "box4_fed_withheld": "0"
     }
   ],
+  "b_1099": [],
   "schedule_c": {
     "owner": "taxpayer",
     "business_description": "Bitcoin mining",

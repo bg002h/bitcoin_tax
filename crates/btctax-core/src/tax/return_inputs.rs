@@ -135,6 +135,58 @@ pub struct Form1099G {
     pub box4_fed_withheld: Usd, // → 1040 25b
 }
 
+/// **Form 1099-B** — broker proceeds, as TOTALS for Schedule D lines 1a and 8a (§G-28/B4).
+///
+/// ★★★ TOTALS, NEVER LOT-LEVEL, and that is the FORM'S OWN DESIGN rather than a shortcut. Schedule D
+/// line 1a reads:
+///
+/// > *"Totals for all short-term transactions reported on Form 1099-B for which basis was reported to
+/// > the IRS and for which you have no adjustments (see instructions). However, if you choose to report
+/// > all these transactions on Form 8949, leave this line blank and go to line 1b."*
+///
+/// Line 8a says the same for long-term. So a filer whose broker reported basis and who needs no
+/// adjustment is expressly told they *"aren't required to report these transactions on Form 8949"* —
+/// four numbers replace a transaction list. btctax therefore never builds a second lot-level engine for
+/// non-crypto securities: the crypto lot engine stays the only one, and these totals arrive already
+/// netted from the broker.
+///
+/// ★★ THE TWO CONDITIONS ARE THE FILER'S TESTIMONY, so they are asked, not assumed — see
+/// [`Self::basis_reported_and_no_adjustments`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Form1099B {
+    /// The broker, for the filer's own records. Schedule D lines 1a/8a name no payer (Form 8949 would),
+    /// so nothing on the printed return reads this — it exists so a filer with three brokers can tell
+    /// their three rows apart.
+    pub payer: String,
+    /// **Schedule D line 1a, column (d)** — *"Proceeds (sales price)"*, short-term.
+    #[serde(default)]
+    pub short_term_proceeds: Usd,
+    /// **Schedule D line 1a, column (e)** — *"Cost (or other basis)"*, short-term.
+    #[serde(default)]
+    pub short_term_basis: Usd,
+    /// **Schedule D line 8a, column (d)** — *"Proceeds (sales price)"*, long-term.
+    #[serde(default)]
+    pub long_term_proceeds: Usd,
+    /// **Schedule D line 8a, column (e)** — *"Cost (or other basis)"*, long-term.
+    #[serde(default)]
+    pub long_term_basis: Usd,
+    /// ★★★ THE GATE. Lines 1a/8a are available ONLY for transactions where **basis was reported to the
+    /// IRS** *and* **there are no adjustments**. Anything else belongs on Form 8949 with Box B, C, E or
+    /// F checked and PER-TRANSACTION detail — which is exactly the lot-level engine btctax will not
+    /// build for non-crypto securities. A row that is not `Some(true)` REFUSES
+    /// ([`super::return_refuse::RefuseReason::Form1099BNeedsForm8949`]).
+    ///
+    /// ★★ Framed as the YES-condition, and both limbs are named in the prompt, because *"widening an
+    /// exemption is never the safe edit"*: a filer answering something vaguer would have a `no` on one
+    /// limb laundered into a `yes` on both. `None` and `Some(false)` both refuse, so every omission
+    /// fails closed.
+    ///
+    /// ★ It is per-1099-B, not per-return: one broker may report basis on everything while another does
+    /// not, and the filer should not have to answer for the worst of them.
+    #[serde(default)]
+    pub basis_reported_and_no_adjustments: Option<bool>,
+}
+
 /// A person on the return (taxpayer or spouse). DOB drives §63(f) age-65 (F3); `blind` is an explicit
 /// input (not DOB-derivable, spec I5). SSN is stored AS ENTERED and rendered masked by `mask_pii` (the
 /// security-load-bearing half); canonicalization to NNN-NN-NNNN is deferred to P6 (see FOLLOWUPS).
@@ -602,6 +654,9 @@ pub struct ReturnInputs {
     pub div_1099: Vec<Form1099Div>,
     #[serde(default)]
     pub g_1099: Vec<Form1099G>,
+    /// §G-28/B4 — broker 1099-B TOTALS for Schedule D lines 1a/8a. Empty on a pure-crypto return.
+    #[serde(default)]
+    pub b_1099: Vec<Form1099B>,
     #[serde(default)]
     pub schedule_c: Option<ScheduleCInputs>,
     #[serde(default)]
@@ -822,6 +877,7 @@ impl Default for ReturnInputs {
             int_1099: Vec::new(),
             div_1099: Vec::new(),
             g_1099: Vec::new(),
+            b_1099: Vec::new(),
             schedule_c: None,
             schedule_a: None,
             itemize_election: ItemizeElection::Auto,

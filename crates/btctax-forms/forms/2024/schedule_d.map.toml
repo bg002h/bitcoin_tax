@@ -5,6 +5,12 @@
 form = "schedule_d"
 year = 2024
 
+# §G-28/B4 — the 1099-B totals the form lets a filer report WITHOUT a Form 8949. Column (g)
+# (adjustments) stays CENSUSED, not mapped: "no adjustments" is a CONDITION of using these lines at
+# all, so a filer who needs one is refused (`Form1099BNeedsForm8949`) and the cell can never carry a
+# value. `_RO` marks it read-only anyway — the form's own JavaScript owns it.
+line1a = { proceeds_d = "topmostSubform[0].Page1[0].Table_PartI[0].Row1a[0].f1_03[0]", cost_e = "topmostSubform[0].Page1[0].Table_PartI[0].Row1a[0].f1_04[0]", gain_h = "topmostSubform[0].Page1[0].Table_PartI[0].Row1a[0].f1_06[0]" }
+line8a = { proceeds_d = "topmostSubform[0].Page1[0].Table_PartII[0].Row8a[0].f1_23[0]", cost_e = "topmostSubform[0].Page1[0].Table_PartII[0].Row8a[0].f1_24[0]", gain_h = "topmostSubform[0].Page1[0].Table_PartII[0].Row8a[0].f1_26[0]" }
 line3 = { proceeds_d = "topmostSubform[0].Page1[0].Table_PartI[0].Row3[0].f1_15[0]", cost_e = "topmostSubform[0].Page1[0].Table_PartI[0].Row3[0].f1_16[0]", adj_g = "topmostSubform[0].Page1[0].Table_PartI[0].Row3[0].f1_17[0]", gain_h = "topmostSubform[0].Page1[0].Table_PartI[0].Row3[0].f1_18[0]" }
 line7_h = "topmostSubform[0].Page1[0].f1_22[0]"
 line10 = { proceeds_d = "topmostSubform[0].Page1[0].Table_PartII[0].Row10[0].f1_35[0]", cost_e = "topmostSubform[0].Page1[0].Table_PartII[0].Row10[0].f1_36[0]", adj_g = "topmostSubform[0].Page1[0].Table_PartII[0].Row10[0].f1_37[0]", gain_h = "topmostSubform[0].Page1[0].Table_PartII[0].Row10[0].f1_38[0]" }
@@ -79,10 +85,7 @@ ssn  = "topmostSubform[0].Page1[0].f1_02[0]"
 # Line 1a is additionally the only row that reports transactions NOT listed on Form 8949 at all (the
 # "basis reported, no adjustments" shortcut). btctax always lists every disposition, so 1a is unused
 # by construction, not merely unpopulated.
-"topmostSubform[0].Page1[0].Table_PartI[0].Row1a[0].f1_03[0]"    = { line = "1a(d)", rule = "unmodeled", reason = "Box A aggregate, proceeds. btctax never emits Box A (no 1099-B signal — forms.rs D4); ST dispositions go to line 3." }
-"topmostSubform[0].Page1[0].Table_PartI[0].Row1a[0].f1_04[0]"    = { line = "1a(e)", rule = "unmodeled", reason = "Box A aggregate, cost basis — same." }
-"topmostSubform[0].Page1[0].Table_PartI[0].Row1a[0].f1_05_RO[0]" = { line = "1a(g)", rule = "unmodeled", reason = "Box A aggregate, adjustments — same. btctax emits no 8949 adjustment codes at all (column (f)/(g) are always empty)." }
-"topmostSubform[0].Page1[0].Table_PartI[0].Row1a[0].f1_06[0]"    = { line = "1a(h)", rule = "unmodeled", reason = "Box A aggregate, gain/loss — same." }
+"topmostSubform[0].Page1[0].Table_PartI[0].Row1a[0].f1_05_RO[0]" = { line = "1a(g)", rule = "unmodeled", reason = "§G-28/B4 — line 1a IS now filled, but column (g) never is: \"no adjustments\" is a CONDITION of using line 1a at all, so a filer needing one is refused (Form1099BNeedsForm8949) rather than filed here. `_RO` besides — the form's own JavaScript owns the cell." }
 "topmostSubform[0].Page1[0].Table_PartI[0].Row1b[0].f1_07[0]"    = { line = "1b(d)", rule = "unmodeled", reason = "Box A (reported on 8949) aggregate, proceeds — btctax never assigns Box A." }
 "topmostSubform[0].Page1[0].Table_PartI[0].Row1b[0].f1_08[0]"    = { line = "1b(e)", rule = "unmodeled", reason = "Box A aggregate, cost basis — same." }
 "topmostSubform[0].Page1[0].Table_PartI[0].Row1b[0].f1_09[0]"    = { line = "1b(g)", rule = "unmodeled", reason = "Box A aggregate, adjustments — same." }
@@ -91,10 +94,7 @@ ssn  = "topmostSubform[0].Page1[0].f1_02[0]"
 "topmostSubform[0].Page1[0].Table_PartI[0].Row2[0].f1_12[0]"     = { line = "2(e)",  rule = "unmodeled", reason = "Box B aggregate, cost basis — same." }
 "topmostSubform[0].Page1[0].Table_PartI[0].Row2[0].f1_13[0]"     = { line = "2(g)",  rule = "unmodeled", reason = "Box B aggregate, adjustments — same." }
 "topmostSubform[0].Page1[0].Table_PartI[0].Row2[0].f1_14[0]"     = { line = "2(h)",  rule = "unmodeled", reason = "Box B aggregate, gain/loss — same." }
-"topmostSubform[0].Page1[0].Table_PartII[0].Row8a[0].f1_23[0]"    = { line = "8a(d)", rule = "unmodeled", reason = "Box D aggregate, proceeds. LT dispositions go to line 10; btctax never assigns Box D." }
-"topmostSubform[0].Page1[0].Table_PartII[0].Row8a[0].f1_24[0]"    = { line = "8a(e)", rule = "unmodeled", reason = "Box D aggregate, cost basis — same." }
-"topmostSubform[0].Page1[0].Table_PartII[0].Row8a[0].f1_25_RO[0]" = { line = "8a(g)", rule = "unmodeled", reason = "Box D aggregate, adjustments — same; no 8949 adjustment codes are ever emitted." }
-"topmostSubform[0].Page1[0].Table_PartII[0].Row8a[0].f1_26[0]"    = { line = "8a(h)", rule = "unmodeled", reason = "Box D aggregate, gain/loss — same." }
+"topmostSubform[0].Page1[0].Table_PartII[0].Row8a[0].f1_25_RO[0]" = { line = "8a(g)", rule = "unmodeled", reason = "§G-28/B4 — same as line 1a(g): the cell can never carry a value, because needing an adjustment is exactly what disqualifies a transaction from line 8a." }
 "topmostSubform[0].Page1[0].Table_PartII[0].Row8b[0].f1_27[0]"    = { line = "8b(d)", rule = "unmodeled", reason = "Box D (reported on 8949) aggregate, proceeds — same." }
 "topmostSubform[0].Page1[0].Table_PartII[0].Row8b[0].f1_28[0]"    = { line = "8b(e)", rule = "unmodeled", reason = "Box D aggregate, cost basis — same." }
 "topmostSubform[0].Page1[0].Table_PartII[0].Row8b[0].f1_29[0]"    = { line = "8b(g)", rule = "unmodeled", reason = "Box D aggregate, adjustments — same." }

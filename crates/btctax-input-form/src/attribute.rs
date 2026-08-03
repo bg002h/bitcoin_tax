@@ -170,6 +170,11 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::ScheduleCNoBusinessDescription => vec![Anchor::NotInForm {
             note: "Schedule C is not a v1 form section — its business description is entered via TOML import",
         }],
+        // §G-28/B4 — 1099-B rows are not a v1 form section either; they arrive by TOML import, and the
+        // confirmation that fixes this refusal is a field on the row itself.
+        R::Form1099BNeedsForm8949 => vec![Anchor::NotInForm {
+            note: "Form 1099-B rows are entered via TOML import — set `basis_reported_and_no_adjustments` on the row",
+        }],
         R::KiddieTax => vec![Anchor::NotInForm {
             note: "the §1(g) kiddie-tax screen is computed at `report`, not a v1 form field",
         }],
@@ -390,6 +395,7 @@ mod tests {
             RefuseReason::BusinessIncomeWithoutScheduleC,
             RefuseReason::ScheduleCLoss,
             RefuseReason::ScheduleCNoBusinessDescription,
+            RefuseReason::Form1099BNeedsForm8949,
             RefuseReason::KiddieTax,
             RefuseReason::AmtScreenTriggered,
             RefuseReason::TaxableIncomeNonPositiveWithCarryforward,

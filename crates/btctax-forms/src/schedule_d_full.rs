@@ -94,18 +94,45 @@ pub fn fill_schedule_d_full_with_map(
 
     // ── Page 1, column (h) + the standalone amount cells, top to bottom. ────────────────────────
     // Column (g) (adjustments from Form 8949) is never written — v1 models no basis adjustment.
-    let p1_amounts: [(&MoneyCell, Usd); 7] = [
-        (&MoneyCell::Single(map.line3.gain_h.clone()), lines.line3_h),
-        (need(&map.line6, "line6", y)?, lines.line6), // ★ PAREN
-        (&MoneyCell::Single(map.line7_h.clone()), lines.line7),
+    // ★ §G-28/B4 — lines 1a and 8a lead their parts, so they take descent ordinals 0 and 3. Column (g)
+    //   is absent from their map type ENTIRELY (`AmountColsNoAdjustment`): "no adjustments" is a
+    //   condition of using those lines, so an adjustment cell there is unwritable by construction.
+    // ★★ The 1a/8a cells are demanded ONLY when the filer actually has 1099-B totals. A pure-crypto
+    //    return on a year whose map predates B4 must still file — but one carrying broker totals on
+    //    such a year fails closed instead of dropping them off the page.
+    let needs_1099b = lines.line1a_d != Usd::ZERO
+        || lines.line1a_e != Usd::ZERO
+        || lines.line8a_d != Usd::ZERO
+        || lines.line8a_e != Usd::ZERO;
+    let (c1a, c8a) = if needs_1099b {
         (
-            &MoneyCell::Single(map.line10.gain_h.clone()),
-            lines.line10_h,
-        ),
-        (need(&map.line13, "line13", y)?, lines.line13),
-        (need(&map.line14, "line14", y)?, lines.line14), // ★ PAREN
-        (&MoneyCell::Single(map.line15_h.clone()), lines.line15),
-    ];
+            Some(need(&map.line1a, "line1a", y)?),
+            Some(need(&map.line8a, "line8a", y)?),
+        )
+    } else {
+        (map.line1a.as_ref(), map.line8a.as_ref())
+    };
+
+    // ★ A `Vec`, not a fixed array: lines 1a and 8a are present only when the year's map carries them,
+    //   and an absent cell must produce NO WRITE rather than a write to an empty field name.
+    let mut p1_amounts: Vec<(MoneyCell, Usd)> = Vec::new();
+    if let Some(c) = c1a {
+        p1_amounts.push((MoneyCell::Single(c.gain_h.clone()), lines.line1a_h));
+    }
+    p1_amounts.extend([
+        (MoneyCell::Single(map.line3.gain_h.clone()), lines.line3_h),
+        (need(&map.line6, "line6", y)?.clone(), lines.line6), // ★ PAREN
+        (MoneyCell::Single(map.line7_h.clone()), lines.line7),
+    ]);
+    if let Some(c) = c8a {
+        p1_amounts.push((MoneyCell::Single(c.gain_h.clone()), lines.line8a_h));
+    }
+    p1_amounts.extend([
+        (MoneyCell::Single(map.line10.gain_h.clone()), lines.line10_h),
+        (need(&map.line13, "line13", y)?.clone(), lines.line13),
+        (need(&map.line14, "line14", y)?.clone(), lines.line14), // ★ PAREN
+        (MoneyCell::Single(map.line15_h.clone()), lines.line15),
+    ]);
     for (ord, (cell, value)) in p1_amounts.iter().enumerate() {
         push_money(
             &mut writes,
@@ -118,13 +145,16 @@ pub fn fill_schedule_d_full_with_map(
     }
 
     // ── Page 1, columns (d) and (e) — the two 8949 totals rows. ─────────────────────────────────
-    for (ord, (fqn, value)) in [
-        (&map.line3.proceeds_d, lines.line3_d),
-        (&map.line10.proceeds_d, lines.line10_d),
-    ]
-    .iter()
-    .enumerate()
-    {
+    let mut p1_d: Vec<(&String, Usd)> = Vec::new();
+    if let Some(c) = c1a {
+        p1_d.push((&c.proceeds_d, lines.line1a_d));
+    }
+    p1_d.push((&map.line3.proceeds_d, lines.line3_d));
+    if let Some(c) = c8a {
+        p1_d.push((&c.proceeds_d, lines.line8a_d));
+    }
+    p1_d.push((&map.line10.proceeds_d, lines.line10_d));
+    for (ord, (fqn, value)) in p1_d.iter().enumerate() {
         push_money(
             &mut writes,
             &mut placements,
@@ -134,13 +164,16 @@ pub fn fill_schedule_d_full_with_map(
             Some((GRP_P1_D, ord as u32)),
         );
     }
-    for (ord, (fqn, value)) in [
-        (&map.line3.cost_e, lines.line3_e),
-        (&map.line10.cost_e, lines.line10_e),
-    ]
-    .iter()
-    .enumerate()
-    {
+    let mut p1_e: Vec<(&String, Usd)> = Vec::new();
+    if let Some(c) = c1a {
+        p1_e.push((&c.cost_e, lines.line1a_e));
+    }
+    p1_e.push((&map.line3.cost_e, lines.line3_e));
+    if let Some(c) = c8a {
+        p1_e.push((&c.cost_e, lines.line8a_e));
+    }
+    p1_e.push((&map.line10.cost_e, lines.line10_e));
+    for (ord, (fqn, value)) in p1_e.iter().enumerate() {
         push_money(
             &mut writes,
             &mut placements,

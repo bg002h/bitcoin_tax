@@ -797,6 +797,11 @@ pub enum ScheduleDRouting {
 /// Column (g) (adjustments from Form 8949) is left blank throughout: v1 models no basis adjustment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScheduleDLines {
+    /// **L1a (d)/(e)/(h)** — the Form 1099-B totals the form itself lets a filer report WITHOUT a
+    /// Form 8949 (§G-28/B4). Zero on a pure-crypto return.
+    pub line1a_d: Usd,
+    pub line1a_e: Usd,
+    pub line1a_h: Usd,
     /// L3 (d) — short-term proceeds (Form 8949 Box C or **Box I**).
     pub line3_d: Usd,
     /// L3 (e) — short-term cost basis.
@@ -807,6 +812,10 @@ pub struct ScheduleDLines {
     pub line6: Usd,
     /// L7 — net short-term gain or loss (signed).
     pub line7: Usd,
+    /// **L8a (d)/(e)/(h)** — the long-term counterpart of line 1a (§G-28/B4).
+    pub line8a_d: Usd,
+    pub line8a_e: Usd,
+    pub line8a_h: Usd,
     /// L10 (d) — long-term proceeds (Form 8949 Box F or **Box L**).
     pub line10_d: Usd,
     /// L10 (e) — long-term cost basis.
@@ -887,20 +896,30 @@ pub fn schedule_d_lines(ar: &AbsoluteReturn, f8949: Option<&Printed8949>) -> Sch
     let st = f8949.map(|f| f.st_totals).unwrap_or_default();
     let lt = f8949.map(|f| f.lt_totals).unwrap_or_default();
 
+    // §G-28/B4 — line 1a, the 1099-B totals that need no Form 8949.
+    let line1a_d = round_dollar(p.st_1099b_proceeds_1ad);
+    let line1a_e = round_dollar(p.st_1099b_cost_1ae);
+    // ★ Column (h) is "Subtract column (e) from column (d)" over the PRINTED cells, so it is derived
+    //   from the two rounded figures rather than from the exact difference — the filed form's own
+    //   subtraction must check out for a reader.
+    let line1a_h = line1a_d - line1a_e;
     let line3_d = st.proceeds_d;
     let line3_e = st.cost_e;
     let line3_h = st.gain_h;
     let line6 = round_dollar(p.st_carryover_6); // magnitude (paren box)
                                                 // ★ "Combine lines 1a through 6 in column (h)" — an addition chain over the PRINTED cells.
-    let line7 = line3_h - line6;
+    let line7 = line1a_h + line3_h - line6;
 
+    let line8a_d = round_dollar(p.lt_1099b_proceeds_8ad);
+    let line8a_e = round_dollar(p.lt_1099b_cost_8ae);
+    let line8a_h = line8a_d - line8a_e;
     let line10_d = lt.proceeds_d;
     let line10_e = lt.cost_e;
     let line10_h = lt.gain_h;
     let line13 = round_dollar(p.cap_gain_distr_13);
     let line14 = round_dollar(p.lt_carryover_14); // magnitude (paren box)
                                                   // ★ "Combine lines 8a through 14 in column (h)" — again over the PRINTED cells.
-    let line15 = line10_h + line13 - line14;
+    let line15 = line8a_h + line10_h + line13 - line14;
 
     let line16 = line7 + line15; // ★ combines the PRINTED lines
     let has_qd = round_dollar(p.qualified_dividends) > Usd::ZERO;
@@ -922,11 +941,17 @@ pub fn schedule_d_lines(ar: &AbsoluteReturn, f8949: Option<&Printed8949>) -> Sch
     };
 
     ScheduleDLines {
+        line1a_d,
+        line1a_e,
+        line1a_h,
         line3_d,
         line3_e,
         line3_h,
         line6,
         line7,
+        line8a_d,
+        line8a_e,
+        line8a_h,
         line10_d,
         line10_e,
         line10_h,
@@ -1468,6 +1493,12 @@ mod tests {
             },
             schedule_c: None,
             schedule_d: crate::tax::return_1040::ScheduleDParts {
+                st_1099b_proceeds_1ad: Usd::ZERO,
+                st_1099b_cost_1ae: Usd::ZERO,
+                st_1099b_gain_1ah: Usd::ZERO,
+                lt_1099b_proceeds_8ad: Usd::ZERO,
+                lt_1099b_cost_8ae: Usd::ZERO,
+                lt_1099b_gain_8ah: Usd::ZERO,
                 st_proceeds_3d: z,
                 st_cost_3e: z,
                 st_gain_3h: z,
@@ -2544,6 +2575,12 @@ mod tests {
         use crate::tax::return_1040::ScheduleDParts;
         let mut ar = ar_with(None, Usd::ZERO, Usd::ZERO);
         ar.schedule_d = ScheduleDParts {
+            st_1099b_proceeds_1ad: Usd::ZERO,
+            st_1099b_cost_1ae: Usd::ZERO,
+            st_1099b_gain_1ah: Usd::ZERO,
+            lt_1099b_proceeds_8ad: Usd::ZERO,
+            lt_1099b_cost_8ae: Usd::ZERO,
+            lt_1099b_gain_8ah: Usd::ZERO,
             st_proceeds_3d: Usd::ZERO,
             st_cost_3e: Usd::ZERO,
             st_gain_3h: st_net + st_cf, // the raw crypto gain, before the line-6 carryover

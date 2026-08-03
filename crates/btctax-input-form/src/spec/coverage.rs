@@ -300,6 +300,9 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         "int_1099",
         "div_1099",
         "g_1099",
+        // §G-28/B4 — 1099-B rows join the other information-return vectors: all of them are
+        // TOML-import surfaces, none is a v1 input-form section.
+        "b_1099",
         "capital_loss_carryforward_in",
         "charitable_carryover_in",
     ];

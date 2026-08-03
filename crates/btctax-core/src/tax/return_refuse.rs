@@ -228,6 +228,12 @@ pub enum RefuseReason {
     /// The answer decides WHICH form is filed, so an unasked "no" prints the simplified Form 8995 for a
     /// filer the instructions send to 8995-A.
     CooperativePatronUnanswered,
+    /// **§G-28/B4** — a Form 1099-B whose transactions do not all qualify for Schedule D lines 1a/8a.
+    /// Those lines are available only *"for which basis was reported to the IRS and for which you have
+    /// no adjustments"*; anything else needs Form 8949 with Box B/C/E/F checked and PER-TRANSACTION
+    /// detail. btctax fills Form 8949 from its own crypto lot engine only and will not build a second
+    /// one for securities, so this refuses rather than file totals on a line that cannot carry them.
+    Form1099BNeedsForm8949,
     /// **Form 6251 must be ATTACHED** — i6251, *Who Must File*, condition 1: line 7 is greater than
     /// line 10. btctax COMPUTES the form for every return (v0.14.0+) but cannot yet file it, so such a
     /// return is refused rather than filed incomplete. Compute-dependent (needs the assembled return).
@@ -294,6 +300,7 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         int_1099,
         div_1099,
         g_1099,
+        b_1099,
         schedule_c,
         schedule_a,
         itemize_election: _,
@@ -475,6 +482,22 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             return Some("1099-G box 4 federal withholding");
         }
     }
+    // §G-28/B4 — Schedule D line 1a/8a totals. ★ A negative PROCEEDS or BASIS is not a quantity that
+    // exists; a broker reports both as magnitudes. The GAIN may of course be negative, and is derived.
+    for b in b_1099 {
+        if neg(b.short_term_proceeds) {
+            return Some("1099-B short-term proceeds (Schedule D line 1a(d))");
+        }
+        if neg(b.short_term_basis) {
+            return Some("1099-B short-term cost basis (Schedule D line 1a(e))");
+        }
+        if neg(b.long_term_proceeds) {
+            return Some("1099-B long-term proceeds (Schedule D line 8a(d))");
+        }
+        if neg(b.long_term_basis) {
+            return Some("1099-B long-term cost basis (Schedule D line 8a(e))");
+        }
+    }
     if let Some(c) = schedule_c {
         let ScheduleCInputs {
             owner: _,
@@ -631,6 +654,40 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
             RefuseReason::NegativeAmount(field.to_string()),
             format!("{field} is negative — every full-return money amount is a form-box magnitude (≥ 0); fix the import"),
         );
+    }
+
+    // ★★★ §G-28/B4 — Schedule D lines 1a/8a carry TOTALS only for transactions the form itself admits:
+    //     *"for which basis was reported to the IRS and for which you have no adjustments"*. Both limbs,
+    //     answered by the filer. `None` (never asked) and `Some(false)` both refuse — a row that is not
+    //     an affirmative `yes` fails closed, so an omission can never become a claim.
+    //
+    //     ★ Gated on the row carrying an AMOUNT: an all-zero 1099-B row asserts nothing and reports
+    //       nothing, so demanding a confirmation for it would be a refusal with no purpose.
+    for b in &ri.b_1099 {
+        let carries_totals = b.short_term_proceeds > Usd::ZERO
+            || b.short_term_basis > Usd::ZERO
+            || b.long_term_proceeds > Usd::ZERO
+            || b.long_term_basis > Usd::ZERO;
+        if carries_totals && b.basis_reported_and_no_adjustments != Some(true) {
+            let who = if b.payer.trim().is_empty() {
+                "(unnamed broker)"
+            } else {
+                b.payer.trim()
+            };
+            return refuse(
+                RefuseReason::Form1099BNeedsForm8949,
+                format!(
+                    "the Form 1099-B from {who} carries totals, but Schedule D lines 1a and 8a accept \
+                     totals ONLY for transactions \"for which basis was reported to the IRS and for \
+                     which you have no adjustments\". Confirm BOTH by setting \
+                     `basis_reported_and_no_adjustments = true` on that 1099-B and re-running \
+                     `btctax income import`. If either is untrue, those transactions belong on Form \
+                     8949 with Box B, C, E or F checked and one row per sale — btctax fills Form 8949 \
+                     from its own crypto lot engine only, and will not report securities it cannot \
+                     itemize"
+                ),
+            );
+        }
     }
 
     // ★★ NO SSN GATE HERE, DELIBERATELY. A malformed SSN used to refuse the whole computation, which

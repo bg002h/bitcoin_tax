@@ -93,6 +93,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         int_1099,
         div_1099,
         g_1099,
+        b_1099,
         schedule_c,
         schedule_a,
         itemize_election,
@@ -200,6 +201,9 @@ pub fn classify(ri: &ReturnInputs) -> Census {
     }
     for g in g_1099 {
         classify_1099g(&mut c, g);
+    }
+    for b in b_1099 {
+        classify_1099b(&mut c, b);
     }
     if let Some(sc) = schedule_c {
         classify_schedule_c(&mut c, sc);
@@ -404,6 +408,29 @@ fn classify_1099g(_c: &mut Census, g: &Form1099G) {
         box1_unemployment: _,
         box4_fed_withheld: _,
     } = g;
+}
+
+/// §G-28/B4 — Form 1099-B totals for Schedule D lines 1a/8a.
+fn classify_1099b(c: &mut Census, b: &crate::tax::return_inputs::Form1099B) {
+    let crate::tax::return_inputs::Form1099B {
+        payer: _,
+        short_term_proceeds: _,
+        short_term_basis: _,
+        long_term_proceeds: _,
+        long_term_basis: _,
+        basis_reported_and_no_adjustments,
+    } = b;
+    // ★★★ The two conditions Schedule D line 1a itself imposes. `None` and `Some(false)` BOTH refuse
+    //     (`Form1099BNeedsForm8949`), so this can never answer for the filer — which is why it is a
+    //     `BenefitClaim` rather than an exemption: entering totals on line 1a IS the claim that the
+    //     broker reported basis and no adjustment is needed.
+    c.exempt(
+        basis_reported_and_no_adjustments,
+        Class::BenefitClaim,
+        "Schedule D line 1a/8a's own two conditions (§G-28/B4) — \"basis was reported to the IRS\" \
+         and \"you have no adjustments\". Not a default: `None` and `Some(false)` both REFUSE, because \
+         anything else belongs on Form 8949 with per-transaction detail",
+    );
 }
 
 fn classify_schedule_c(c: &mut Census, sc: &ScheduleCInputs) {

@@ -1599,11 +1599,17 @@ fn zero_form8960lines() -> crate::tax::other_taxes::Form8960Lines {
 /// **ScheduleDLines** (f1040sd) — destructured with no `..`; a new money field cannot compile.
 pub fn cover_scheduledlines(l: &crate::tax::printed::ScheduleDLines) -> Coverage {
     let crate::tax::printed::ScheduleDLines {
+        line1a_d,
+        line1a_e,
+        line1a_h,
         line3_d,
         line3_e,
         line3_h,
         line6,
         line7,
+        line8a_d,
+        line8a_e,
+        line8a_h,
         line10_d,
         line10_e,
         line10_h,
@@ -1615,6 +1621,16 @@ pub fn cover_scheduledlines(l: &crate::tax::printed::ScheduleDLines) -> Coverage
     } = l;
     let f = "f1040sd";
     let mut c = Coverage::default();
+    // §G-28/B4 — Schedule D's own totals-without-Form-8949 lines.
+    c.line(*line1a_d, f, "1a(d)", "line1a_d", Production::Collected, "Totals for all short-term transactions reported on Form 1099-B for which basis was reported to the IRS and for which you have no adjustments (see instructions). However, if you choose to report all these transactions on Form 8949, leave this line blank and go to line 1b");
+    c.line(*line1a_e, f, "1a(e)", "line1a_e", Production::Collected, "Totals for all short-term transactions reported on Form 1099-B for which basis was reported to the IRS and for which you have no adjustments (see instructions). However, if you choose to report all these transactions on Form 8949, leave this line blank and go to line 1b");
+    // ★ Column (h) quotes the LINE's own sentence, like lines 3 and 10 beside it — the column header
+    //   ("Subtract column (e) from column (d)…") is a four-row wrap in the text layer and is carried
+    //   by the `1a(h)` LABEL, not by the quote.
+    c.line(*line1a_h, f, "1a(h)", "line1a_h", Production::Combine, "Totals for all short-term transactions reported on Form 1099-B for which basis was reported to the IRS and for which you have no adjustments (see instructions). However, if you choose to report all these transactions on Form 8949, leave this line blank and go to line 1b");
+    c.line(*line8a_d, f, "8a(d)", "line8a_d", Production::Collected, "Totals for all long-term transactions reported on Form 1099-B for which basis was reported to the IRS and for which you have no adjustments (see instructions). However, if you choose to report all these transactions on Form 8949, leave this line blank and go to line 8b");
+    c.line(*line8a_e, f, "8a(e)", "line8a_e", Production::Collected, "Totals for all long-term transactions reported on Form 1099-B for which basis was reported to the IRS and for which you have no adjustments (see instructions). However, if you choose to report all these transactions on Form 8949, leave this line blank and go to line 8b");
+    c.line(*line8a_h, f, "8a(h)", "line8a_h", Production::Combine, "Totals for all long-term transactions reported on Form 1099-B for which basis was reported to the IRS and for which you have no adjustments (see instructions). However, if you choose to report all these transactions on Form 8949, leave this line blank and go to line 8b");
     c.line(
         *line3_d,
         f,
@@ -1704,6 +1720,12 @@ pub fn cover_scheduledlines(l: &crate::tax::printed::ScheduleDLines) -> Coverage
 
 fn zero_scheduledlines() -> crate::tax::printed::ScheduleDLines {
     crate::tax::printed::ScheduleDLines {
+        line1a_d: Usd::ZERO,
+        line1a_e: Usd::ZERO,
+        line1a_h: Usd::ZERO,
+        line8a_d: Usd::ZERO,
+        line8a_e: Usd::ZERO,
+        line8a_h: Usd::ZERO,
         line3_d: Usd::ZERO,
         line3_e: Usd::ZERO,
         line3_h: Usd::ZERO,
