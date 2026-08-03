@@ -101,3 +101,43 @@ both oracles' blind spots at the identical $875,950 and neither can witness (see
 Does not witness a vector where line 8 (AMTFTC) is non-zero, so the "form required while AMT is $0"
 branch of *Who Must File* condition 1 remains held by KAT only. Stated so the silence is not mistaken
 for coverage.
+
+---
+
+## Addendum (2026-08-03) — the NINE-DEPENDENT variant, with interest and a mortgage
+
+The committed fixture `crates/btctax-cli/tests/fixtures/examples/nine_dependents_amt_inputs.toml`
+adds to the vector above: **9 dependents**, **$45,000** of 1099-INT bank interest, and **$12,000** of
+Form 1098 mortgage interest.
+
+| figure | btctax | Tax-Calculator 6.7.2 | OpenTaxSolver 2024 |
+|---|---:|---:|---:|
+| AGI | 2,123,995 | 2,123,995 | — |
+| standard deduction | 14,600 | 14,600 | — |
+| itemized (not taken) | 12,000 | 0 (std wins) | — |
+| taxable income | 2,109,395 | 2,109,395 | 2,093,595.94 ✗ |
+| SE tax | 12,010 | 12,010 | 12,010.12 |
+| NIIT | 73,112 | 73,112 | 73,111.81 |
+| **Form 6251 line 2a** | **14,600** | *omitted* ✗ | 14,600 |
+| **AMT (6251 L11)** | **12,941** | 9,145 ✗ | 12,490.94 ✗ |
+| total tax | 496,885 | 493,089 ✗ | 491,987.67 |
+
+**Tax-Calculator** matches AGI, the standard deduction, taxable income, SE tax and NIIT to the dollar.
+Its AMT and its total each differ by **exactly $3,796**, and the ordinary AMT slice here is
+2,123,995 − 2,000,000 = $123,995, still below the $232,600 breakpoint, so the marginal AMT rate is
+26%: `14,600 × 26% = 3,796` — its own open line-2a defect (PSLmodels#3108), unchanged in size by the
+new income because the standard deduction did not change. Corrected for it, taxcalc lands on
+**12,941** and **496,885** exactly.
+
+**OpenTaxSolver** gets line 2a right and its NIIT agrees. Its taxable income is low by **$15,799**,
+which is precisely the simplified-Form-8995 deduction its wrapper hand-feeds
+(`GetLine("L13", &L[13])`) and which §199A(b)(2) denies this filer. That cascade accounts for the whole
+$450.49 AMT difference: the add-back raises both the tentative minimum tax and the regular tax, and
+the AMT is their difference. §G-9 again — a value an oracle takes as INPUT is never validated by its
+agreement.
+
+★ **What the mortgage contributes is a REFUSAL, not a deduction.** $12,000 loses to the $14,600
+standard deduction, so no Schedule A files and no figure moves. It is in the fixture because omitting
+`mortgage_dwelling_is_amt_qualified` refuses the entire return with `AmtQualifiedDwellingUnanswered`
+and writes zero bytes — i6251 line 3 adds back interest on a dwelling that is not AMT-qualified, and
+guessing would understate the tax. Deleting that one line is a live kill-test, verified red.

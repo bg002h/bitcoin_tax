@@ -22,7 +22,7 @@ fn load() -> ReturnInputs {
     ri
 }
 
-/// ★★★ The scenario FILES, and files the four things it exists to pin.
+/// ★★★ The scenario FILES, and files the six things it exists to pin.
 #[test]
 fn the_nine_dependent_amt_return_files_a_complete_packet() {
     let ri = load();
@@ -49,13 +49,13 @@ fn the_nine_dependent_amt_return_files_a_complete_packet() {
         .expect("AMT: line 7 exceeds line 10");
     assert_eq!(
         btctax_core::conventions::round_dollar(f6251.line11),
-        dec!(11322),
+        dec!(12941),
         "the AMT both oracles witnessed on this vector"
     );
     let sch2 = pr.forms.sch_2.as_ref().expect("Schedule 2 files");
     assert_eq!(
         sch2.line2,
-        Some(dec!(11322)),
+        Some(dec!(12941)),
         "Sch 2 L2 transcribes 6251 L11"
     );
 
@@ -70,7 +70,19 @@ fn the_nine_dependent_amt_return_files_a_complete_packet() {
     );
 
     // ★ Total tax, pinned to the oracle-validated figure. Dependents do not move it — see below.
-    assert_eq!(pr.forms.f1040.line24, dec!(481225));
+    assert_eq!(pr.forms.f1040.line24, dec!(496885));
+
+    // ★★ Schedule B files: $45,000 of interest clears the $1,500 floor. And Schedule A does NOT --
+    //    $12,000 of mortgage interest loses to the $14,600 standard deduction, so the deduction stays
+    //    standard. The mortgage is in this fixture for the REFUSAL it forces, not for a deduction.
+    assert!(
+        pr.forms.sch_b.is_some(),
+        "interest over $1,500 files Schedule B"
+    );
+    assert!(
+        pr.forms.sch_a.is_none(),
+        "$12,000 itemized loses to the $14,600 standard deduction"
+    );
 }
 
 /// ★★★ THE CTC ADVISORY — this fixture is also the regression case for it.
