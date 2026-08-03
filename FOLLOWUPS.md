@@ -1289,8 +1289,8 @@ the Schedule D 18/19 sworn zeros. What remains open, with its owning phase:
 
 | # | open item | owning phase |
 |---|---|---|
-| **B1** | `QbiAboveThreshold` refuses any Schedule C above §199A(e)(2). The refusal is a MISSING INPUT — Form 8995-A lines 4 and 7 are W-2 wages and UBIA, which `QbiInputs` does not carry. ★ Its scope must include the **SSTB checkbox**: the code holds every Schedule C to be mining and therefore non-SSTB, and above the threshold an unasked SSTB question is an understatement hole. | next build |
-| **B2** | >4 dependents refuse at the EMITTER. Form 1040 has an *"If more than four dependents … check here"* box; the IRS remedy is four rows + the box + a statement. ★ `report` computes 9 dependents happily, so the filer discovers this at the last step. | next build |
+| ~~**B1**~~ ✅ **CLOSED 2026-08-02** | Form 8995-A Parts I–IV are transcribed, computed and emitted; the four inputs (lines 4 and 7, Part I(b) and Part I(e)) are collected. What still refuses is four named SUB-SCHEDULES of 8995-A, not a population. ★ The SSTB checkbox turned out NOT to be class-(A) — mandatory-on-liveness refused **every** Schedule C at any income, because below the threshold Form 8995 has no such box. | — |
+| ~~**B2**~~ ✅ **CLOSED** | landed in `3a4d06a` — four rows, the *"more than four dependents"* box, and a continuation statement. | — |
 | **B3** | `ScheduleCInputs` has no gross-receipts field — self-employment income can only arrive as mined Bitcoin. | after B1 |
 | **B4** | No 1099-B input — capital gains can only arrive as BTC disposals. Schedule-D-shaped TOTALS only; never a second lot-level engine. | after B3 |
 | **B5** | **DO NOT BUILD.** A filer-stated USD for a ledger asset is testimony about value and creates a second authority for a number the FMV dataset already answers. The trial's pain was HARNESS pain — solve it in `xtask`. | — |
@@ -1307,6 +1307,32 @@ features.
 that validates it cannot detect that what it captured is broken.** See
 `crates/xtask/src/examples.rs::no_worked_example_shows_a_command_that_errored`, which is demonstrated
 side by side with the old guard on the real defect.
+
+★★★ **B1b's own lesson, and it is the sharpest one here: PER-FORM TESTS ARE NOT A PACKET TEST.**
+`qbi_a`'s KATs verified Parts I–III in isolation and were right; the Part IV tests verified Part IV in
+isolation and were right; the suite was green at 2601 tests across five green gates. Two **Criticals**
+were sitting in the composition, and both were found within minutes of reading the emitted
+`55A_f8995a.pdf` beside the emitted `00_f1040.pdf` — the only place the two forms are side by side:
+
+  * the 1040's line 13 read *only* Form 8995, so on the 8995-A path (which `assemble_printed_return`
+    nulls `f8995` on, deliberately) it printed **zero** while the stapled form claimed the deduction —
+    the return contradicting its own attachment, OVERSTATING tax by the whole deduction. **Shipped by
+    B1a**, i.e. it survived that commit's own review-by-construction;
+  * the deduction was **uncapped** — `compute_8995` recomputed a flat 20% of QBI on both paths, so the
+    form printed line 27 = $45,267 against its own line 16 = $27,357, understating tax.
+
+This is harness **B3** one layer down: a stack of per-form reviews does not add up to a packet review,
+because the defect lives in a field of view no single form's test can hold. The standing counter is the
+cross-form IDENTITY test (`the_1040_deduction_equals_the_attached_8995a_line_39`), which asserts the
+two forms agree rather than asserting either figure — a value-pinning test would have passed on the
+first defect the moment someone "fixed" line 39 down to the zero the 1040 was printing.
+
+★ **And the two-oracle rule cannot be met for §199A at all.** OpenTaxSolver reads the QBI deduction as
+a hand-fed input (`GetLine( "L13", &L[13] )` in `taxsolve_US_1040_2024.c`) and never derives it — §G-9
+in its purest form. Tax-Calculator 6.7.2 is the only witness, and it earned its keep immediately by
+catching a missing §199A(d)(3) SSTB exclusion worth a $40,000 overstated deduction. Before trusting it
+the installed package was diffed byte-for-byte against the pristine PyPI sdist; a locally patched
+oracle is not an independent witness.
 
 ### G-26 — ✅ **CLOSED 2026-08-01** — the Schedule 1 text-layer hole
 
