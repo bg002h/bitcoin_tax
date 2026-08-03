@@ -369,8 +369,9 @@ the residue.
 commit carrying a real SSN/EIN-shaped token is accepted without complaint and is caught later, at push
 — by which point removing it means rewriting history, not amending a commit.
 
-**Observed, not theorised.** Twice in one sitting: `333-44-5555` in an AMT fixture (caught only because
-the gate was run by hand after committing), and then the kill-test for the new structural rule itself,
+**Observed, not theorised.** Twice in one sitting: a valid-shaped synthetic SSN in an AMT fixture
+(caught only because the gate was run by hand after committing), and then the kill-test for the new
+structural rule itself,
 which necessarily names tokens the scanner must catch and therefore red the scan from inside the test —
 committed clean, flagged four hits afterwards. The second is now fixed by ASSEMBLING the dangerous
 vectors from parts (`repo_hygiene.rs`), so no shape-matching literal is in the tree.
@@ -383,6 +384,11 @@ Changing which gate runs where is the repo owner's call, not a mechanical fix.
 **Options, for whoever picks this up:** (a) run the generic (not owner-pattern) scan in pre-commit — it
 is fast and has no external dependency; (b) leave it and rely on push, accepting that a bad token means
 a history rewrite; (c) scan only the staged delta in pre-commit and keep the full-tree scan at push.
+
+**★★★ AND A THIRD TIME, IN THIS ENTRY.** Its first draft QUOTED the offending token literally, to
+document the problem — putting a shape-matching string into a tracked file and reding the gate from
+inside the write-up warning about it. Prose describing a scanner is subject to that scanner. Name the
+CLASS, never the token.
 
 **Owning phase:** pre-publish, with the other push-blockers (`.pii-patterns`, the crates.io token).
 
