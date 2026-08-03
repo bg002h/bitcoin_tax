@@ -1354,24 +1354,41 @@ equivalence and the branch where it breaks are written at the call site, and
 to `tax-profile`, bump BOTH pins, in a commit that does nothing else.
 
 ★★ **§G-28/B4 adds a second, SMALLER instance of the same shape.** The broker LONG-term total reaches
-the delta baseline (`other_net_capital_gain`, a field that already existed for exactly it) and the
-§1211(b)-limited capital result reaches MAGI — all in the non-frozen `derive_tax_profile`. What is
-missing is the broker **SHORT-term** position entirely: `net_1222` has no short-term "other" argument
-and `TaxProfile` has no field for one, so the engine's own `without` scenario cannot see it.
+the delta baseline (`other_net_capital_gain`) and the §1211(b)-limited capital result reaches MAGI —
+all in the non-frozen `derive_tax_profile`. What is missing is the broker **SHORT-term** position
+entirely: `net_1222` has no short-term "other" argument and `TaxProfile` has no field for one, so the
+engine's own `without` scenario cannot see it. `derive_tax_profile` therefore excludes it too, on
+purpose, so the profile and the engine stay consistent.
 
-**Direction: a broker short-term GAIN is invisible, so the crypto slice is priced from too low a base
-and the §1411 MAGI test can read under-threshold — UNDERSTATING (unsafe). A broker short-term LOSS is
-likewise invisible, so the base is too high — OVERSTATING (safe).**
+### ★★★ THE DIRECTION OF THIS GAP IS NOT STATED HERE, AND THAT IS THE FINDING
 
-★★★ **THIS PARAGRAPH HAS NOW BEEN WRONG TWICE, ON THE SAME ENTRY, IN THE SAME WAY** — and that is
-worth more than the fix. The first version claimed B3's blindness was purely overstating; a review
-showed it ran both ways. The rewrite then asserted a direction for B4 that was false *because of the
-edit made in the same commit* (both halves were reaching MAGI at that moment, so neither was
-"invisible"), and a later round found the raw-signed-gains Critical underneath it. Both errors have
-the identical cause: **a direction was written from the mechanism I had in mind rather than from a
-walk of the code as committed.** A follow-up that names a direction is making a SAFETY CLAIM about a
-return signed under §6065, and this entry is the standing evidence that such a claim must be executed,
-not reasoned.
+This paragraph has now been **WRONG THREE TIMES**, on the same entry, each time in the same way:
+
+| version | claim | how it was wrong |
+|---|---|---|
+| 1 (B3) | "purely overstating, therefore safe" | the income-tax half understated |
+| 2 (B4) | short-term "invisible" ⇒ loss overstates, gain understates | both halves were reaching MAGI at that moment; neither was invisible |
+| 3 (B4, post-fix) | loss **overstates (safe)**, gain understates | measured: broker ST loss $100k + crypto ST loss $50k ⇒ engine **−$720**, truth **$0** — the "safe" branch UNDERSTATES |
+
+**The mechanism, which is what should have been written all along.** §1211(b)'s $3,000 ($1,500 MFS) is
+**one allowance per return**, not per position. When the broker's short-term leg is invisible, the
+engine's `without` scenario sees no capital loss at all, so the `with` scenario attributes the ENTIRE
+allowance to crypto — an ordinary deduction the filer already had. That is an *interaction* between the
+two legs, so **the sign of the error is not a function of the sign of the broker leg**. Measured, same
+build:
+
+* broker ST loss $100k + crypto ST loss $50k → −$720 vs $0 — **understates**
+* broker ST gain $60k + crypto LT gain $20k → $3,000 vs $3,760 — **understates** (via §1411)
+* broker ST gain $100k + crypto ST loss $100k → −$720 vs −$36,526 — **overstates by $35,806**
+
+`optimize` minimizes exactly this number, so it can prefer a lot method that manufactures a crypto
+capital loss with no real benefit.
+
+★★ **This is `CLAUDE.md`'s own standing rule, failed three times on one entry:** *"state the mechanism,
+let it decide, never enumerate the outcomes you happened to see."* A follow-up naming a direction is
+making a SAFETY CLAIM about a return signed under §6065, and every version of this one was written from
+the mechanism I had in mind rather than from a walk — or better, an EXECUTION — of the code as
+committed. All three errors were found by a reviewer *running* it.
 
 **Do NOT half-fix it.** Adding a short-term `other` argument to `net_1222` in the frozen-exception
 commit does not by itself close this: `derive_tax_profile`'s `income_total` deliberately excludes the

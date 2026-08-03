@@ -1013,8 +1013,13 @@ pub fn derive_tax_profile(ri: &ReturnInputs, params: &FullReturnParams, year: i3
     //     so for its whole life `income_total` could add it unlimited and be right. A broker total can
     //     be a LOSS, and adding one raw deducts it from AGI at full size — where §1211(b) caps the
     //     deduction at $3,000 ($1,500 MFS). A $100,000 broker short-term loss moved MAGI from $200,000
-    //     to $100,000 where the truth is $197,000: ≈$6,704 of understated crypto-attributable tax, on
-    //     the number `optimize` minimizes to pick a lot method.
+    //     to $100,000 where the truth is $197,000: **$6,590.25** of understated crypto-attributable
+    //     tax, on the number `optimize` minimizes to pick a lot method.
+    //
+    //     ★ That figure was quoted as $6,704 when this fix landed, inherited from the review that
+    //       found the defect and not recomputed. It is $114 out — the source used NII $50,000 and
+    //       omitted Form 8960 line 5a's §1211(b) −$3,000, giving NIIT $1,900 where it is $1,786. A
+    //       number carried across from a review is still a number this file asserts.
     //
     //     ★★ THE SHORT-TERM HALF IS DELIBERATELY ABSENT. `net_1222` has no short-term "other" slot and
     //     `TaxProfile` no field for one, so the engine's `without` cannot see a broker short-term
@@ -1066,9 +1071,9 @@ pub fn derive_tax_profile(ri: &ReturnInputs, params: &FullReturnParams, year: i3
         .iter()
         .map(|i| i.box2_early_withdrawal_penalty)
         .sum();
-    // ★ BOTH characters enter the income total, because MAGI is a LEVEL — the §1411 threshold test
-    //   does not care whether a gain is short- or long-term, only how big AGI is. Only the LT half can
-    //   also reach `other_net_capital_gain` below, where character does matter.
+    // ★ `noncrypto_cap_agi` stands where a bare `cap_gain_distr` used to: the same figure whenever
+    //   distributions are positive and there is no carryforward (every golden), and the
+    //   §1211(b)-limited one when a broker loss makes the difference matter.
     let income_total = wages + taxable_int + ord_div + noncrypto_cap_agi + sch1_income;
     let agi_before_student_loan = income_total - early_wd;
     let student_loan = student_loan_deduction(
@@ -1119,6 +1124,15 @@ pub fn derive_tax_profile(ri: &ReturnInputs, params: &FullReturnParams, year: i3
     //     end, is both correct and identical to the old expression on every path where `agi` clears
     //     the deduction — which is every pre-existing one, since box-2a distributions cannot be
     //     negative.
+    //
+    //     ★★ THE KNOWN APPROXIMATION ABOVE IS TRIGGERED BY `agi < deduction`, NOT by the preferential
+    //     slice. Its own text names `TI < qd + cap_gain_distr`, and r4 measured the real region: a
+    //     filer with W-2 $5,000 and unused standard deduction diverges with ZERO preferential income
+    //     (engine $1,808 vs a form-derived $740). Pre-existing — the same shape reproduces on a
+    //     box-2a-only vector that predates B4 entirely — and it OVERSTATES, so it is conservative in
+    //     the direction that matters. Recorded here because the paragraph immediately above reasons
+    //     about exactly this low-income region ("AGI can only dip $3,000 below the deduction") and
+    //     would otherwise leave the next reader believing it is the only thing living there.
     let ordinary_taxable_income = (agi - deduction - qual_div - noncrypto_cap_agi).max(Usd::ZERO);
 
     // ── W-2 SE/Medicare channels (two DIFFERENT aggregations — deep/02 §3.4 / C4) ─────────────────
@@ -4168,6 +4182,77 @@ mod tests {
         // …and the ordinary slice is AGI − standard deduction − QD − the capital result, so the
         // engine can add the capital result back through `without` without double-counting.
         assert_eq!(profile.ordinary_taxable_income, dec!(71400));
+    }
+
+    /// ★★★ r4-I3 — THE PROFILE PASSES **ALL SIX** `net_1222` ARGUMENTS THE ENGINE WILL USE.
+    ///
+    /// The whole fix rests on one claim: *"the profile calls `net_1222` with the SAME arguments the
+    /// engine will use, so the two agree by construction rather than by coincidence."* r4 mutated the
+    /// call — dropping both carryforwards and hardcoding the §1211(b) limit at $3,000 — and the ENTIRE
+    /// workspace stayed green. Four of six arguments were pinned; the two that vary by filer were not.
+    ///
+    /// ★★ AND THE CARRYFORWARD ARGUMENT WAS NOT COSMETIC. Before this fix `income_total` added a bare
+    /// `cap_gain_distr`, so a filer with a capital-loss carryover had a `magi_excluding_crypto` up to
+    /// the §1211(b) limit too high — a LIVE wrong AGI on the delta path, which `assemble_absolute` had
+    /// right all along. The fix corrected it silently and pinned nothing; this is that pin.
+    #[test]
+    fn the_profile_passes_every_net_1222_argument_the_engine_uses() {
+        let p = ty2024_params();
+        let base = |status: FilingStatus, cf_short: Usd, cf_long: Usd, distr: Usd| {
+            let mut ri = ReturnInputs {
+                filing_status: status,
+                header: crate::tax::testonly::kitchen_sink_household().0.header,
+                w2s: vec![crate::tax::return_inputs::W2 {
+                    owner: Owner::Taxpayer,
+                    employer: "ACME".into(),
+                    box1_wages: dec!(120000),
+                    ..Default::default()
+                }],
+                div_1099: vec![crate::tax::return_inputs::Form1099Div {
+                    payer: "Broker LLC".into(),
+                    box2a_capgain_distr: distr,
+                    ..Default::default()
+                }],
+                capital_loss_carryforward_in: crate::tax::types::Carryforward {
+                    short: cf_short,
+                    long: cf_long,
+                },
+                ..Default::default()
+            };
+            crate::tax::testonly::answer_all_live_declarations(&mut ri);
+            derive_tax_profile(&ri, &p, 2024)
+        };
+
+        // ★ THE CARRYFORWARD PAIR. A $50,000 short-term carryover with no gains to absorb it is a
+        //   §1211(b)-limited $3,000 deduction against AGI. Dropping the argument leaves AGI at
+        //   $120,000 — $3,000 too high for every carryforward filer.
+        assert_eq!(
+            base(FilingStatus::Single, dec!(50000), Usd::ZERO, Usd::ZERO).magi_excluding_crypto,
+            dec!(117000),
+            "a short-term carryover must reduce AGI by the §1211(b)-limited $3,000"
+        );
+        assert_eq!(
+            base(FilingStatus::Single, Usd::ZERO, dec!(50000), Usd::ZERO).magi_excluding_crypto,
+            dec!(117000),
+            "…and so must a LONG-term one — the second argument is separate from the first"
+        );
+
+        // ★★ THE STATUS-DEPENDENT LIMIT. §1211(b)(1) is $1,500 for MFS, not $3,000. Hardcoding the
+        //    figure puts an MFS filer's AGI $1,500 too low, and the MFS §1411 threshold is $125,000 —
+        //    so the NIIT test flips inside a $1,500 band.
+        assert_eq!(
+            base(FilingStatus::Mfs, dec!(50000), Usd::ZERO, Usd::ZERO).magi_excluding_crypto,
+            dec!(118500),
+            "MFS's §1211(b) allowance is HALF — $1,500, not $3,000"
+        );
+
+        // ★ …and a carryover is absorbed by distributions before the limit bites, which is what makes
+        //   this `net_1222` rather than a subtraction.
+        assert_eq!(
+            base(FilingStatus::Single, Usd::ZERO, dec!(50000), dec!(20000)).magi_excluding_crypto,
+            dec!(117000),
+            "$20,000 of distributions absorb $20,000 of the carryover; the residue is still limited"
+        );
     }
 
     /// ★★★ r3-C1 — A BROKER **LOSS** IS §1211(b)-LIMITED BEFORE IT REACHES AGI.
