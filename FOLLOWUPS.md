@@ -486,7 +486,9 @@ filers cannot evaluate. They will guess "yes", and btctax will print a signed 0 
 For attach mode it must be re-phrased to existence: *"does your Schedule C include any depreciation or
 §179 deduction?"* → yes ⇒ refuse. Same for any sibling. Owning phase: **Tier 2, before attach.**
 
-**★★ THE MOST LIKELY WRONG FILED NUMBER: an ISO exercise (line 2m) printed as 0 on a signed form.**
+**★★ THE MOST LIKELY WRONG FILED NUMBER: an ISO exercise (line 2i) printed as 0 on a signed form.**
+★ It said "line 2m" until 2026-08-03; 2m is passive activities. The correction matters because this
+entry is the one a future author greps for when they go to collect the input.
 It is invisible to the ENTIRE validation apparatus — no oracle can witness an input btctax never
 collects, no vector can encode it, no transcription test reds — and post-TCJA it is the dominant
 real-world reason an individual owes AMT, in exactly the high-income equity-comp population Tier 2 is
@@ -495,6 +497,32 @@ not have it*; for a refusing v1 that was survivable, on an attached form it is t
 reappearing on 18 lines at once. Cheapest catch: the existence-question interview over i6251's
 Who-Must-File Exception items (ISO, §1202, §4952, NOL, Form 8801, accelerated depreciation — PAB is
 already refused), any "yes" refusing, plus a test asserting every 2c–2t field is non-silent before emit.
+
+**★★★ PARTLY MITIGATED 2026-08-03 — AND THE SURVEY FOUND SOMETHING WORSE THAN A WRONG NUMBER.**
+
+`must_attach()` is `line7 > line10`. The missing 2i add-back is *exactly* what would have pushed line 7
+past line 10 — so an ISO filer's return did not merely print a wrong 2i, **it never tripped
+`AmtScreenTriggered` at all**. No refusal, no Form 6251, no AMT, filed clean under §6065. **The gap
+suppressed its own detection.**
+
+And no existing question caught it. `other_out_of_scope_income` asked *"did you RECEIVE any income…"*,
+while i6251's line-2i instruction opens *"For the regular tax, no income is recognized when an
+incentive stock option (ISO) … is exercised. However, this rule doesn't apply for the AMT."* A truthful
+filer with a $180,000 adjustment answered **No**, correctly, and the gate stayed shut. That is the
+answered-ness rule's own sharp test failing: the silence did not FORGO anything, it ASSERTED.
+
+**The mitigation** is to widen that mandatory declaration's YES-conditions to name (b) an ISO exercise
+still held at year end, and (c) the other AMT items `form6251.rs` cannot see — since it models Part I
+lines 2, 2a and 2b only, and 2c–2t are all silently zero. A `yes` refuses. Widening a mandatory
+question's yes-conditions is the SAFE direction of edit; widening an *exemption* is the one
+`widening-an-exemption-is-never-the-safe-edit` warns about. Held by
+`the_out_of_scope_question_names_the_iso_exercise_and_the_amt_items`, which pins the prompt because
+the prompt IS the mechanism — nothing computes from it.
+
+**Still open, and this is a mitigation not a fix:** the filer is REFUSED rather than served. Collecting
+Form 3921 box 3 / box 4 / box 5, the same-year-disposition question and the substantial-risk-of-
+forfeiture flag — three numbers and two booleans, off a form the IRS mails them — would let them file.
+**Owning phase: with the Form 6251 emitter, or immediately after it.**
 
 **Explicitly NOT to be done:** ship Tier 2 on the 11-vector fixture as-is; let any equivalence-phrased
 declaration into attach mode; encode an oracle defect as truth; patch OTS locally (the form's own worked

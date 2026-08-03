@@ -512,17 +512,47 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
     // ── §G-22 / B11: the SCOPE ATTESTATION. ─────────────────────────────────────────────────────────
     FormQuestion {
         id: QuestionId::OtherOutOfScopeIncome,
-        prompt: "In this tax year, did you receive ANY income other than what you have entered here — \
-                 rent or royalties, a farm, a partnership, S corporation, estate or trust (any \
-                 Schedule K-1), unreported tips, gambling winnings, alimony, a business this tool did \
-                 not capture, or anything else it never asked about?",
+        prompt: "In this tax year, did ANY of these happen? (a) You received income other than what \
+                 you have entered here — rent or royalties, a farm, a partnership, S corporation, \
+                 estate or trust (any Schedule K-1), unreported tips, gambling winnings, alimony, a \
+                 business this tool did not capture, or anything else it never asked about. (b) You \
+                 EXERCISED AN INCENTIVE STOCK OPTION (ISO) and still held the stock at the end of the \
+                 year — you would have a Form 3921. (c) You had any other item this tool never asked \
+                 about that changes your ALTERNATIVE MINIMUM TAX — depletion, a tax-shelter farm \
+                 activity, a passive activity, or research and experimental costs.",
         unanswered: RefuseReason::OtherIncomeUnanswered,
         unanswered_detail:
             "btctax asks about HSA activity, dual-status alien status and foreign accounts, and a \
              `yes` to any of them stops the return — but it never asked whether you had rental, \
              royalty, farm or K-1 income, so silence LOOKED like `none` and a return could file with \
-             §61 income left off it. Silence is not testimony that there is none: answer it — run \
-             `btctax income answer`",
+             §61 income left off it. It now also asks whether you EXERCISED AN INCENTIVE STOCK OPTION \
+             (Form 6251 line 2i), which is not income at all for the regular tax and so was invisible \
+             to the income half of this question. Silence is not testimony that there is none: answer \
+             it — run `btctax income answer`",
+        // ★★★ LIMB (b) IS AN ISO EXERCISE, AND IT IS NOT INCOME — which is exactly why it had to be
+        //     added here rather than left to the income half. i6251, first sentence of the line-2i
+        //     instruction: *"For the regular tax, no income is recognized when an incentive stock
+        //     option (ISO), as defined in section 422(b), is exercised. However, this rule doesn't
+        //     apply for the AMT."* So a truthful filer with a $180,000 ISO adjustment answered the OLD
+        //     prompt — *"did you RECEIVE any income…"* — with a truthful **No**, and the gate stayed
+        //     shut.
+        //
+        //     ★★★ AND THE GAP HID ITS OWN DETECTION. `Form6251::must_attach()` is `line7 > line10`,
+        //     and the missing 2i add-back is exactly what would have pushed line 7 past line 10. So
+        //     the return did not merely print a wrong 2i — it never tripped `AmtScreenTriggered` at
+        //     all and filed clean, with no Form 6251 and no AMT, on a return signed under §6065.
+        //     Understating, invisible to both oracles, and invisible to every value test.
+        //
+        //     ★★ Limb (c) is the same argument generalised: `form6251.rs` models lines 2, 2a and 2b
+        //     only, so every other Part I add-back (2c–2t) is silently zero. Naming the four that a
+        //     btctax filer could plausibly have — rather than asking "any AMT item?" — follows the
+        //     enumerate-the-YES-conditions rule: a filer cannot answer `no` to a category they were
+        //     never shown.
+        //
+        //     ★ WIDENING a mandatory question's YES-conditions is the SAFE direction of edit, which is
+        //     why it is done here rather than by adding a second question. The unsafe direction —
+        //     widening an EXEMPTION — is what `widening-an-exemption-is-never-the-safe-edit` names.
+        //
         // ★★★ ALWAYS LIVE, and deliberately so. Every other class-(A) declaration is scoped to the
         // years or shapes that read it; this one is read by NOTHING — it exists precisely because
         // there is no field for the income it asks about. A liveness predicate here could only be
@@ -1087,6 +1117,59 @@ mod tests {
         }
         assert_eq!(QuestionId::ALL.len(), 13, "there are 13 declarations");
         assert_eq!(FORM_QUESTIONS.len(), 13, "one entry per declaration");
+    }
+
+    /// ★★★ §G-6/ISO — THE OUT-OF-SCOPE QUESTION MUST NAME THE ISO EXERCISE, WHICH IS NOT INCOME.
+    ///
+    /// `form6251.rs` models Part I lines 2, 2a and 2b only; 2c–2t are absent, and line **2i** is the
+    /// exercise of an incentive stock option — the dominant real AMT trigger post-TCJA, since the 2017
+    /// Act removed the SALT and miscellaneous-deduction add-backs that used to drive individual AMT.
+    ///
+    /// ★★★ THE OLD PROMPT COULD NOT CATCH IT, and the reason is in i6251's own first sentence:
+    /// *"For the regular tax, no income is recognized when an incentive stock option (ISO), as defined
+    /// in section 422(b), is exercised. However, this rule doesn't apply for the AMT."* The question
+    /// asked *"did you RECEIVE any income…"*, so a filer with a $180,000 ISO adjustment answered a
+    /// truthful **No** and the gate stayed shut.
+    ///
+    /// ★★ AND THE GAP HID ITS OWN DETECTION: `must_attach()` is `line7 > line10`, and the missing 2i
+    /// add-back is exactly what would have pushed line 7 past line 10 — so the return never tripped
+    /// `AmtScreenTriggered`, filed clean with no Form 6251 and no AMT, and understated tax on a return
+    /// signed under §6065. Invisible to both oracles and to every value-checking test.
+    ///
+    /// This pins the PROMPT, because the prompt is the whole mechanism: nothing computes from it.
+    #[test]
+    fn the_out_of_scope_question_names_the_iso_exercise_and_the_amt_items() {
+        let q = FORM_QUESTIONS
+            .iter()
+            .find(|q| q.id == QuestionId::OtherOutOfScopeIncome)
+            .expect("the out-of-scope declaration exists");
+        let p = q.prompt.to_ascii_lowercase();
+        assert!(
+            p.contains("incentive stock option") && p.contains("3921"),
+            "the prompt must name the ISO exercise AND the form the filer already holds: {}",
+            q.prompt
+        );
+        assert!(
+            p.contains("alternative minimum tax"),
+            "…and must name the AMT category, since lines 2c-2t are all silently zero: {}",
+            q.prompt
+        );
+        // ★ The income limbs must SURVIVE the widening — this question's original job is unchanged.
+        for limb in ["rent", "royalt", "k-1", "alimony", "gambling"] {
+            assert!(
+                p.contains(limb),
+                "the income limbs must remain: {limb} missing"
+            );
+        }
+        // ★★ And it must still be a MANDATORY class-(A) declaration that refuses unanswered. A prompt
+        //    nobody has to answer would make all of the above decoration.
+        assert!((q.live)(&ReturnInputs::default()), "always live");
+        assert_eq!(q.unanswered, RefuseReason::OtherIncomeUnanswered);
+        assert_eq!(
+            (q.get)(&ReturnInputs::default()),
+            None,
+            "and `Default` must not answer it"
+        );
     }
 
     #[test]

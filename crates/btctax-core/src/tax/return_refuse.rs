@@ -775,11 +775,14 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
     if ri.other_out_of_scope_income == Some(true) {
         return refuse(
             RefuseReason::OtherIncomeOutOfScope,
-            "you answered YES to having income this tool never asked about — rent or royalties, a \
-             farm, a partnership/S-corp/estate/trust K-1, unreported tips, gambling winnings, \
-             alimony, or another business. v1 models none of those (see `btctax limitations`), and a \
-             return that silently left it off would understate your tax. File with a preparer, or \
-             remove that income and file the rest yourself",
+            "you answered YES to something this version cannot model — income it never asked about \
+             (rent, royalties, a farm, a K-1, tips, gambling, alimony, an uncaptured business), an \
+             INCENTIVE STOCK OPTION exercise you still held at year end (Form 6251 line 2i, from your \
+             Form 3921), or another alternative-minimum-tax item. btctax models Form 6251 lines 2, 2a \
+             and 2b only, so any other Part I add-back would print as ZERO — and because \
+             `must_attach` tests line 7 against line 10, a missing add-back would also stop the AMT \
+             screen from firing at all. It refuses rather than file a return that understates on a \
+             line it cannot see. Remove that item and file the rest yourself"
         );
     }
     if ri.dual_status_alien == Some(true) {
