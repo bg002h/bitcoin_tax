@@ -11,11 +11,20 @@
 //!
 //! ## ★★★ WHY THIS DESTRUCTURES EXHAUSTIVELY
 //!
-//! Every struct touched here is taken apart with **no `..`**. A scrubber that silently passes a NEW
-//! PII field through is worse than no scrubber at all: it carries the user's authorisation ("this file
-//! is safe to share") onto a file that is not. So adding a field to `Person`, `Dependent` or
-//! `HouseholdHeader` is *pattern does not mention field* here, and the author must decide which side
-//! it falls on. The same argument the P9 classifier makes about answered-ness, applied to disclosure.
+//! Every struct touched here is taken apart with **no `..`** — `ReturnInputs` itself included. A
+//! scrubber that silently passes a NEW PII field through is worse than no scrubber at all: it carries
+//! the user's authorisation ("this file is safe to share") onto a file that is not. So adding a field
+//! to `ReturnInputs`, `Person`, `Dependent` or `HouseholdHeader` is *pattern does not mention field*
+//! here, and the author must decide which side it falls on. The same argument the P9 classifier makes
+//! about answered-ness, applied to disclosure.
+//!
+//! ★★★ THE TOP LEVEL WAS THE ONE THAT MATTERED, AND IT WAS THE ONE THAT WAS MISSING. The first
+//! version of this module made the sentence above true of the three nested structs and false of
+//! `ReturnInputs`, which was a `clone()` plus targeted mutation — so `business_description` (free
+//! text, where a filer writes their business NAME) and `foreign_country_names` (which countries this
+//! person banks in) rode straight through into a file the tool called shareable. New input types are
+//! added at the TOP level, so that is precisely where the compile-time guard was worth having. Caught
+//! by a security review, not by the suite.
 //!
 //! ## What is REPLACED, and what must survive
 //!
@@ -23,8 +32,9 @@
 //! |---|---|
 //! | names, SSNs, occupation, street/city/state/ZIP, IP PIN | filing status, every dollar figure |
 //! | employer / payer / bank names | dates of birth and death, blindness |
-//! | | `can_be_claimed_*`, the spouse flags, presidential-fund boxes |
-//! | | the NUMBER of dependents and each `relationship` |
+//! | Schedule C `business_description` (free text) | `can_be_claimed_*`, the spouse flags, presidential-fund boxes |
+//! | foreign account COUNTRY NAMES (count kept) | the NUMBER of dependents and each `relationship` |
+//! | | Schedule C `naics_code` — a federal industry code, not a person |
 //!
 //! ★★ **EINs are replaced but keep their SAMENESS.** §6413(c)'s excess-social-security credit turns on
 //! having *more than one employer*, decided by comparing canonicalised W-2 EINs
@@ -155,13 +165,94 @@ fn scrub_header(h: &HouseholdHeader) -> HouseholdHeader {
     }
 }
 
+/// Replace each name in a delimited free-text list, preserving how many there are.
+///
+/// ★ Schedule B line 7b prints the COUNTRIES a filer holds foreign accounts in — which is free text
+/// and is identifying (it is a fact about a specific person's offshore banking). The count and the
+/// delimiter shape are kept because line 7b prints them and a refusal fires when the list is empty
+/// while `foreign_accounts` is `Some(true)`; the names themselves carry nothing a reproducer needs.
+fn scrub_name_list(s: &str) -> String {
+    if s.trim().is_empty() {
+        return String::new();
+    }
+    s.split(',')
+        .enumerate()
+        .map(|(i, _)| format!("Country{}", i + 1))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// Scrub the identity out of `ri`, preserving every figure and every computation-bearing field.
 ///
 /// See the module docs for the guarantee and for why EIN sameness is preserved.
 #[must_use]
 pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
+    // ★★★ THE COMPLETENESS WITNESS. No `..`, so a new `ReturnInputs` field is *pattern does not
+    //     mention field* HERE and someone must decide whether it can carry identity before this
+    //     compiles.
+    //
+    //     This was missing in the first version, and a background security review caught it. The
+    //     module doc claimed "every struct touched here is taken apart with no `..`" — true of
+    //     `Person`, `Dependent` and `HouseholdHeader`, and FALSE of the top level, which was a
+    //     `clone()` plus targeted mutation. So `schedule_c.business_description` (free text: a real
+    //     filer writes their business NAME there) and `foreign_country_names` (which countries this
+    //     person banks in) both rode straight through into a file the tool told the user was safe to
+    //     share. The guarantee is worthless exactly where new input types get added, which is the
+    //     top level. Same lesson as `a-figure-with-no-reader`: the doc asserted a property nothing
+    //     enforced.
+    //
+    //     `_` = carries no identity: a figure, a flag, a provenance tag, or an enum.
+    let ReturnInputs {
+        tax_year: _,
+        filing_status: _,
+        header,
+        w2s: _,
+        int_1099: _,
+        div_1099: _,
+        g_1099: _,
+        b_1099: _,
+        schedule_c,    // ★ business_description is FREE TEXT — scrubbed below
+        schedule_a: _, // money only
+        itemize_election: _,
+        mfs_spouse_itemizes: _,
+        sch1: _, // money only
+        payments: _,
+        capital_loss_carryforward_in: _,
+        capital_loss_carryforward_in_provenance: _,
+        amt_carryover_same_as_regular: _,
+        amt_depreciation_same_as_regular: _,
+        charitable_carryover_in: _, // money + year only; no donee identity here
+        charitable_carryover_in_provenance: _,
+        qbi: _, // money only
+        foreign_accounts: _,
+        foreign_trust: _,
+        foreign_country_names, // ★ FREE TEXT and identifying — scrubbed below
+        fbar_filing_required: _,
+        donations_had_restrictions: _,
+        dual_status_alien: _,
+        has_income_exclusion: _,
+        other_out_of_scope_income: _,
+        excluded_puerto_rico_income: _,
+        form_2555_line45: _,
+        form_2555_line50: _,
+        form_4563_line15: _,
+    } = ri;
+
     let mut out = ri.clone();
-    out.header = scrub_header(&ri.header);
+    out.header = scrub_header(header);
+    out.foreign_country_names = scrub_name_list(foreign_country_names);
+
+    if let (Some(sc_out), Some(_sc)) = (out.schedule_c.as_mut(), schedule_c.as_ref()) {
+        // ★★ FREE TEXT, and the one field here a filer fills in their own words. "Smith Family
+        //    Dental" is a perfectly ordinary answer. It must stay NON-EMPTY: an empty description
+        //    refuses the return (`ScheduleCNoBusinessDescription`), so scrubbing it to "" would make
+        //    the scrubbed copy refuse where the original filed — breaking the reproduce-it guarantee
+        //    in the other direction.
+        sc_out.business_description = "Example business".into();
+        // ★ `naics_code` is KEPT: a six-digit federal industry taxonomy shared by thousands of
+        //   businesses is not a personal identifier, and it is printed on Schedule C line B, so a
+        //   reproducer wants the real one. Recorded as a decision rather than an oversight.
+    }
 
     // ★★ W-2 employers: the NAME is free to replace, the EIN is not — only its sameness matters.
     let mut eins = EinMap::default();
@@ -207,8 +298,35 @@ mod tests {
             ("AMT-owing", crate::tax::testonly::amt_owing_household()),
         ] {
             let scrubbed = scrub_pii(&ri);
-            let a = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
-            let b = assemble_absolute(&scrubbed, &state, &ty2024_params(), &ty2024_table(), 2024);
+            let mut a = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
+            let mut b =
+                assemble_absolute(&scrubbed, &state, &ty2024_params(), &ty2024_table(), 2024);
+
+            // ★★★ ONE normalisation, and it is named rather than blanket. `business_description` is
+            //     the ONLY identity-bearing string that survives into `AbsoluteReturn` (Schedule C
+            //     line A, carried for printing; every other field there is a figure, a flag or an
+            //     enum). Scrubbing it is the POINT — a filer writes their business name in it — so it
+            //     is blanked on BOTH sides and everything else must still be equal.
+            //
+            //     ★★ It lands in TWO places, which is why this is a helper and not one line: Schedule
+            //        C line A, and Form 8995-A line 1(a)'s trade-or-business name. An identity string
+            //        PROPAGATES, so the set of places to normalise grows as the forms grow — and the
+            //        growth is safe precisely because forgetting one REDS THIS TEST rather than
+            //        silently weakening it.
+            //
+            //     ★ This is deliberately not a `..`-style exclusion list. If a future field makes the
+            //       two sides differ, this test reds and the author must decide whether that field is
+            //       identity (blank it here, and scrub it) or a figure (a real bug). The opposite
+            //       direction — a string that should have been scrubbed but was not — is held by
+            //       `the_identity_does_not_survive`.
+            let blank_identity = |r: &mut crate::tax::return_1040::AbsoluteReturn| {
+                r.printed_inputs.schedule_c_header.business_description = String::new();
+                if let Some(p) = r.f8995a_parts_i_to_iii.as_mut() {
+                    p.part_i.col_a_name = String::new();
+                }
+            };
+            blank_identity(&mut a);
+            blank_identity(&mut b);
             assert_eq!(a, b, "{name}: scrubbing moved a computed figure");
         }
     }
@@ -267,6 +385,34 @@ mod tests {
                 "relationship is computational"
             );
         }
+        // ★★ …and the two fields a security review found riding through the FIRST version of this
+        //    module: free text where a filer writes a business name, and the countries they bank in.
+        let mut ri2 = ri.clone();
+        if let Some(c) = ri2.schedule_c.as_mut() {
+            c.business_description = "Smith Family Dental".into();
+        }
+        ri2.foreign_accounts = Some(true);
+        ri2.foreign_country_names = "Switzerland, Liechtenstein".into();
+        let s2 = scrub_pii(&ri2);
+        assert_eq!(
+            s2.schedule_c
+                .as_ref()
+                .map(|c| c.business_description.as_str()),
+            Some("Example business"),
+            "a business NAME is free text and must not survive"
+        );
+        assert!(
+            !s2.foreign_country_names.contains("Switzerland")
+                && !s2.foreign_country_names.contains("Liechtenstein"),
+            "which countries someone banks in is identifying: {}",
+            s2.foreign_country_names
+        );
+        assert_eq!(
+            s2.foreign_country_names.split(',').count(),
+            2,
+            "the COUNT is kept — Schedule B line 7b prints the list and an empty one refuses"
+        );
+
         // ★ …and the SSNs it emits are structurally impossible, so the output is safe to commit.
         assert!(
             s.header.taxpayer.ssn.contains("-00-"),
