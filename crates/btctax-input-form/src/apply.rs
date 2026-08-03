@@ -610,6 +610,67 @@ mod tests {
         );
     }
 
+    /// ★★★ §G-28/B1b — CLEARING AN `Option<Usd>` MONEY FIELD MUST WRITE `None`, NOT `Some($0)`.
+    ///
+    /// `qbi_w2_wages` and `qbi_ubia` are the ONLY two `Option<Usd>` leaves in `ReturnInputs`, so they
+    /// are the only fields where the generic un-answer path would launder "un-answered" into the
+    /// ANSWER "my business paid no wages". Those are not the same testimony, and the difference is
+    /// the whole of `screen_absolute`'s `QbiAboveThreshold` guard: it refuses on `is_none()`, so a
+    /// laundered `Some(0)` walks straight past it into `unwrap_or(Usd::ZERO)` and caps a
+    /// wage-paying filer's §199A deduction at zero — OVERSTATING their tax.
+    ///
+    /// ★ This is the case the kind-matrix below did not have. It reds if either field's dedicated
+    ///   `clear` is dropped back to `None`.
+    #[test]
+    fn clearing_an_option_money_field_un_answers_it_rather_than_answering_zero() {
+        for (id, get) in [
+            (
+                FieldId::QbiW2Wages,
+                (|ri: &ReturnInputs| ri.schedule_c.as_ref().and_then(|c| c.qbi_w2_wages))
+                    as fn(&ReturnInputs) -> Option<btctax_core::Usd>,
+            ),
+            (FieldId::QbiUbia, |ri: &ReturnInputs| {
+                ri.schedule_c.as_ref().and_then(|c| c.qbi_ubia)
+            }),
+        ] {
+            let mut w: Working = None;
+            materialize(&mut w, FilingStatus::Single);
+            w.as_mut().unwrap().schedule_c = Some(Default::default());
+
+            // Answer it with a real figure…
+            apply(
+                &mut w,
+                Edit::SetField {
+                    id,
+                    addr: RowAddr::default(),
+                    value: FieldValue::Money(rust_decimal_macros::dec!(120000)),
+                },
+            )
+            .expect("set");
+            assert_eq!(
+                get(w.as_ref().unwrap()),
+                Some(rust_decimal_macros::dec!(120000)),
+                "{id:?}: the fixture must actually be answered first"
+            );
+
+            // …then un-answer it, and it must be BLANK, not zero.
+            apply(
+                &mut w,
+                Edit::ClearField {
+                    id,
+                    addr: RowAddr::default(),
+                },
+            )
+            .expect("clear");
+            assert_eq!(
+                get(w.as_ref().unwrap()),
+                None,
+                "{id:?}: clearing must UN-ANSWER. `Some($0)` is the answer \"no wages\", which \
+                 walks past the QbiAboveThreshold refusal that exists to demand this figure"
+            );
+        }
+    }
+
     /// ★ ClearField per-kind (review I-1/I-2, updated from the old "registry limitation" that pinned the bug):
     /// Enum → `Immutable`; the 13 registry-delegating tri-state/date fields UN-ANSWER their underlying `Option`
     /// leaf to `None` (spec §5.7 M-6); plain Date/Money/Text/Bool/Secret clear to their empty value; and the

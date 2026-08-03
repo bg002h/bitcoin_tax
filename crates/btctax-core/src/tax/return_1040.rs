@@ -1444,6 +1444,32 @@ pub fn assemble_absolute(
     // OVERSTATED a miner's tax by ~20% of their business income. The P7 independent-oracle cross-check
     // found it (the PSL Tax-Calculator applies the deduction and btctax did not), and it confirms this
     // exact rule to the dollar: $60,000 profit − $4,239 half-SE = $55,761 of QBI ⇒ an $11,152 deduction.
+    // 1040 L13b — "Additional deductions from Schedule 1-A, line 38". Zero until Schedule 1-A lands
+    // (design/ty2025 B3); the 2024 form has no such line, so zero is the RIGHT value there, not a stub.
+    //
+    // ★ Defined HERE rather than beside line 14 below, because TI-before-QBI subtracts it and the
+    //   §199A regime is decided from TI-before-QBI — the ordering is load-bearing, not cosmetic.
+    let schedule_1a_additional = Usd::ZERO;
+
+    // ★★★ TAXABLE INCOME BEFORE THE QBI DEDUCTION — defined ONCE, here, and read by everything.
+    //
+    //     i8995a: *"Form 1040 … filers: Form 1040 … line 11, minus Form 1040 … line 12."* On the
+    //     TY2025 form that subtrahend is 12 **and 13b** (Schedule 1-A), which is why the third term is
+    //     here and not just `agi - deduction`.
+    //
+    //     ★★ It prints on the SAME PAGE TWICE — Form 8995-A line 20 (Part III) and line 33 (Part IV) —
+    //     and it also decides the §199A regime, the form choice, and the refusal. B1b's first draft
+    //     had the regime, the form choice and line 20 reading `agi - deduction` while line 33 read the
+    //     13b-adjusted figure. That is dormant only while `schedule_1a_additional` is zero: the moment
+    //     Schedule 1-A lands, a filer with 13b deductions is classified into the wrong regime, Part III
+    //     is skipped when it should run, and the emitted form prints line 20 ≠ line 33.
+    //
+    //     ★ ROUNDED at the source, so the DECISION and the PAGE agree. A hand-filer rounding to whole
+    //     dollars (SPEC §3.1) compares the rounded figure against the threshold, and a return whose
+    //     line 20 prints $191,950 against a line 21 of $191,950 must not simultaneously claim to be
+    //     *"more than $191,950"*. Rounding after the test made the page contradict its own gate.
+    let ti_before_qbi = round_dollar(agi - deduction - schedule_1a_additional);
+
     let business_qbi_before_sstb =
         (schedule_c.as_ref().map_or(Usd::ZERO, |c| c.net_profit_31) - half_se).max(Usd::ZERO);
     // ★★★ §G-28/B1b — §199A(d)(3): above the phase-in range a SPECIFIED SERVICE trade or business is
@@ -1459,7 +1485,7 @@ pub fn assemble_absolute(
         // ★ Read off the INPUTS, and gated on the assembled Schedule C existing at all — a return
         //   whose business assembled to nothing has no QBI for the exclusion to bite on.
         schedule_c.is_some() && ri.schedule_c.as_ref().and_then(|c| c.is_sstb) == Some(true),
-        Qbi199aRegime::of(agi - deduction, ri.filing_status, params),
+        Qbi199aRegime::of(ti_before_qbi, ri.filing_status, params),
     );
     let reit_dividends: Usd = ri.div_1099.iter().map(|d| d.box5_section_199a).sum();
     let net_capital_gain = qualified_dividends + net_ltcg; // Form 8995 line 12
@@ -1470,7 +1496,7 @@ pub fn assemble_absolute(
         reit_dividends,
         ri.qbi.reit_ptp_carryforward_in,
         ri.qbi.qbi_carryforward_in,
-        agi - deduction,
+        ti_before_qbi,
         status,
         params,
     );
@@ -1483,10 +1509,14 @@ pub fn assemble_absolute(
         .then(|| {
             crate::tax::qbi_a::Form8995APartIToIii::compute(
                 &crate::tax::qbi_a::PartIToIiiInputs {
+                    // ★ TRIMMED, like `schedule_c_header.business_description` below — the same
+                    //   business must not be named two ways in one packet (Schedule C line A and
+                    //   Form 8995 row 1i(a) already share the canonical form). Core refuses an
+                    //   all-whitespace name, so this only ever strips surrounding padding.
                     business_name: ri
                         .schedule_c
                         .as_ref()
-                        .map(|c| c.business_description.clone())
+                        .map(|c| c.business_description.trim().to_string())
                         .unwrap_or_default(),
                     is_sstb: ri.schedule_c.as_ref().and_then(|c| c.is_sstb) == Some(true),
                     business_qbi,
@@ -1504,9 +1534,9 @@ pub fn assemble_absolute(
                         .as_ref()
                         .and_then(|c| c.qbi_ubia)
                         .unwrap_or(Usd::ZERO),
-                    ti_before_qbi: agi - deduction,
+                    ti_before_qbi,
                 },
-                Qbi199aRegime::of(agi - deduction, status, params),
+                Qbi199aRegime::of(ti_before_qbi, status, params),
                 status,
                 params,
             )
@@ -1531,12 +1561,9 @@ pub fn assemble_absolute(
         reit_dividends,
         ri.qbi.reit_ptp_carryforward_in,
         ri.qbi.qbi_carryforward_in, // Form 8995 line 3 (magnitude; line 4 subtracts it)
-        agi - deduction,            // Form 8995 line 11 = TI before the QBI deduction
+        ti_before_qbi,              // Form 8995 line 11 = TI before the QBI deduction
         net_capital_gain,
     );
-    // 1040 L13b — "Additional deductions from Schedule 1-A, line 38". Zero until Schedule 1-A lands
-    // (design/ty2025 B3); the 2024 form has no such line, so zero is the RIGHT value there, not a stub.
-    let schedule_1a_additional = Usd::ZERO;
     // L14 — "Add lines 12e, 13a, and 13b" (2025) / "Add lines 12 and 13" (2024).
     let total_deductions = deduction + qbi.deduction + schedule_1a_additional;
     let taxable_income = (agi - total_deductions).max(Usd::ZERO); // L15
@@ -1705,7 +1732,7 @@ pub fn assemble_absolute(
             // 13a, which IS the QBI deduction being computed. Omitting 13b would OVERSTATE this,
             // inflating the §199A deduction and firing `qbi_over_threshold` too EARLY: a false
             // refusal. Zero today because Schedule 1-A is B3.
-            ti_before_qbi: agi - deduction - schedule_1a_additional,
+            ti_before_qbi,
             qbi_net_capital_gain: net_capital_gain,
             schedule_c_header: ri
                 .schedule_c
@@ -1895,12 +1922,19 @@ pub fn screen_absolute(
     //
     // ★★★ §G-28/B1b REPLACED a single blanket `QbiAboveThreshold` here. The old refusal covered every
     //     filer above the §199A(e)(2) threshold on the grounds that "the 8995-A phase-in is unmodeled";
-    //     Parts I–III now ARE modelled, so what is left is precisely the four schedules attached to
-    //     8995-A — A (SSTB in the range), B (aggregation), C (loss carryforward) and D (patron) —
-    //     each of which gets its own named refusal below. Keeping one broad reason would have hidden
+    //     Parts I–III now ARE modelled, so what is left is the sub-schedules of 8995-A that btctax
+    //     does not fill: **A** (an SSTB inside the phase-in range), **C** (a prior-year qualified
+    //     business loss carryforward) and **D** (a cooperative patron), each with its own named
+    //     refusal below. ★ Schedule **B** (aggregation) needs none and gets none: aggregation is an
+    //     ELECTION over two or more trades or businesses, btctax has exactly one, so there is nothing
+    //     to aggregate and column (c) is correctly unchecked rather than unasked. Keeping one broad reason would have hidden
     //     which schedule was actually missing, and refused the majority of filers who need none of them.
     let reit_dividends: Usd = ri.div_1099.iter().map(|d| d.box5_section_199a).sum();
-    let ti_before_qbi = ar.agi - ar.deduction; // Form 8995 line 11 / 8995-A line 20
+    // ★★ TRANSCRIBED, not re-derived: `assemble_absolute` already computed this (with the
+    //    Schedule 1-A line 13b term, and rounded), and a screen that classifies the regime differently
+    //    from the assembler refuses returns the packet would have filed — or files ones it would have
+    //    refused.
+    let ti_before_qbi = ar.printed_inputs.ti_before_qbi; // Form 8995 line 11 / 8995-A line 20
     let regime = Qbi199aRegime::of(ti_before_qbi, ri.filing_status, params);
     let files_a_199a_form = has_qbi(
         ar.printed_inputs.business_qbi,
@@ -1990,13 +2024,19 @@ pub fn screen_absolute(
             {
                 return refusal(
                     RefuseReason::QbiAboveThreshold,
+                    // ★★ The exit is `income import`, NOT `income answer`. `answer` walks the
+                    //    DECLARATION and SKIPPABLE registries — bools and dates — and will never ask
+                    //    for a money amount, so sending the filer there is a dead end. Same precedent
+                    //    as the Schedule B line 7b country-names refusal above.
                     "above the §199A(e)(2) threshold the deduction is capped by the GREATER of 50% of \
                      the W-2 wages your business paid, or 25% of those wages plus 2.5% of the \
                      unadjusted basis of its qualified property (Form 8995-A lines 4 and 7). btctax \
                      will not guess either one — a guessed zero would cap your deduction at zero, and \
                      any other guess would invent wages you never reported. If your business has no \
-                     employees and no property, answer zero and the return files — run \
-                     `btctax income answer`",
+                     employees and no property, enter 0 for both and the return files: add \
+                     `qbi_w2_wages` and `qbi_ubia` under `[schedule_c]` in the TOML and re-run \
+                     `btctax income import`, or fill the \"§199A limitation\" section in the tax-inputs \
+                     editor",
                 );
             }
         }
@@ -3977,10 +4017,29 @@ mod tests {
                 ..Default::default()
             };
             let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+            let r = screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024).expect("must refuse");
             assert_eq!(
-                screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024).map(|r| r.reason),
-                Some(RefuseReason::QbiAboveThreshold),
+                r.reason,
+                RefuseReason::QbiAboveThreshold,
                 "an unanswered {which} above the threshold must REFUSE, not default to zero"
+            );
+            // ★★★ AND THE WAY OUT MUST BE A COMMAND THAT CAN ACTUALLY COLLECT THE ANSWER.
+            //
+            //     `btctax income answer` walks the DECLARATION and SKIPPABLE registries — bools and
+            //     dates. It will never ask for a money amount, so naming it here refuses the filer
+            //     and then sends them somewhere that cannot help: they run it, it completes, and the
+            //     return still refuses. Same trap the Schedule B line 7b country-names refusal names.
+            assert!(
+                !r.detail.contains("income answer"),
+                "{which}: the exit must not be `income answer`, which collects no money amounts: {}",
+                r.detail
+            );
+            assert!(
+                r.detail.contains("income import")
+                    && r.detail.contains("qbi_w2_wages")
+                    && r.detail.contains("qbi_ubia"),
+                "{which}: the exit must NAME the two fields and the command that takes them: {}",
+                r.detail
             );
         }
     }

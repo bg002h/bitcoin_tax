@@ -31,11 +31,12 @@
 #
 # Any one of these alone would be weak. Together they pin the assignment without a single guess.
 #
-# ★ SCOPE — PART IV ONLY, deliberately. This is B1a: the REIT/PTP-only filer the form's own skip rule
-# describes, who needs no input btctax does not already collect. Parts I–III (the W-2-wage and UBIA
-# limitations, the SSTB phase-in) are B1b and need three new filer inputs plus the phase-in range
-# width, which does not exist in `FullReturnParams` at all. Mapping them here with nothing to write
-# would be an instrument nobody has watched discriminate.
+# ★ SCOPE — ALL FOUR PARTS, as of B1b. Part IV alone was B1a (the REIT/PTP-only filer the form's own
+# skip rule sends straight there); Parts I–III arrived with the four filer inputs they need — W-2 wages
+# (line 4), UBIA (line 7), the SSTB checkbox (Part I column (b)) and the patron checkbox (column (e)) —
+# plus the statutory phase-in range width in `FullReturnParams`. What remains censused rather than
+# mapped is not a part of the form btctax skips: it is the SECOND AND THIRD business columns of a grid
+# that has room for three, plus the form's own read-only `_RO` mirrors. See the census header below.
 
 form = "f8995a"
 year = 2024

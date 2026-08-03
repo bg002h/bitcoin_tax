@@ -242,7 +242,43 @@ fn the_lines_descend_the_page_in_order() {
 #[test]
 fn every_quoted_instruction_is_verbatim_on_the_form() {
     let norm = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
-    let form = norm(FORM_TEXT);
+    // ★★★ THE TWO-ROW COLUMN HEADER, REJOINED BY COLUMN.
+    //
+    //     Part I's column captions are printed as a table header wrapped over two rows: the extract
+    //     has `(b) Check if   (c) Check if   (d) Taxpayer   (e) Check if` on one line and
+    //     `specified service   aggregation   identification number   patron` two lines below. So
+    //     `"Check if specified service"` — the form's actual caption — is NOWHERE contiguous in the
+    //     text layer, and a naive `contains` would reject a FAITHFUL quote.
+    //
+    //     ★★ Rejoined MECHANICALLY: split both rows on runs of 2+ spaces (the column separator this
+    //     layout uses) and zip them by position. That is the same thing the eye does reading the
+    //     printed page, and it is derived from the form's own layout rather than from a hand-list of
+    //     the four captions we happen to expect — which would be the "enumerate the outcomes you
+    //     happened to see" failure this repo keeps paying for.
+    let cells = |l: &str| -> Vec<String> {
+        l.split("  ")
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .map(str::to_string)
+            .collect()
+    };
+    let lines: Vec<&str> = FORM_TEXT.lines().collect();
+    let mut rejoined = String::new();
+    for (i, l) in lines.iter().enumerate() {
+        if !l.contains("(b) Check if") {
+            continue;
+        }
+        // The continuation is the next non-empty line whose first cell is not a line number.
+        for cont in lines.iter().skip(i + 1).take(3) {
+            let (top, bot) = (cells(l), cells(cont));
+            if top.len() == bot.len() && top.len() > 1 {
+                for (t, b) in top.iter().zip(bot.iter()) {
+                    rejoined.push_str(&format!("{t} {b}\n"));
+                }
+            }
+        }
+    }
+    let form = format!("{} {}", norm(FORM_TEXT), norm(&rejoined));
     // The map quotes each line's sentence in the `#` comment directly above it. Pull them back out.
     let mut checked = 0;
     let lines: Vec<&str> = MAP.lines().collect();
@@ -257,7 +293,18 @@ fn every_quoted_instruction_is_verbatim_on_the_form() {
         let Some((num, tail)) = rest.split_once(' ') else {
             continue;
         };
-        if !(num.len() <= 2 && num.chars().all(|c| c.is_ascii_digit())) || !tail.starts_with('"') {
+        // ★★ A label is either a line number (`27`) or a Part I COLUMN (`1(a)`). The original parser
+        //    accepted only the first, so all five Part I quotes were silently skipped — and the
+        //    `checked` count was set to exactly the number of numbered lines, so their absence could
+        //    not show up there either. A checker with a blind region and a count that fits the
+        //    sighted region is the shape of `cite-check` before its own kill test.
+        let label_ok = !num.is_empty()
+            && num.len() <= 5
+            && num.chars().next().is_some_and(|c| c.is_ascii_digit())
+            && num
+                .chars()
+                .all(|c| c.is_ascii_digit() || c == '(' || c == ')' || c.is_ascii_lowercase());
+        if !label_ok || !tail.starts_with('"') {
             continue;
         }
         let mut quote = tail.to_string();
@@ -286,9 +333,9 @@ fn every_quoted_instruction_is_verbatim_on_the_form() {
         checked += 1;
     }
     assert_eq!(
-        checked, 39,
-        "all THIRTY-NINE numbered instructions (Parts II, III and IV) must be checked, not merely \
-         present — the count is the guard against a quote that stops being parsed and silently \
-         stops being verified"
+        checked, 44,
+        "all FORTY-FOUR quoted captions must be checked — Parts II, III and IV's 39 numbered lines \
+         PLUS Part I's five columns. The count is the guard against a quote that stops being parsed \
+         and therefore silently stops being verified, which is exactly what happened to Part I"
     );
 }

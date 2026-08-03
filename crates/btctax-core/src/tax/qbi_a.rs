@@ -204,6 +204,12 @@ pub struct Form8995APartIi {
     /// therefore blank — the same reason Part IV line 38 is blank.
     pub line14: Option<Usd>,
     /// L15 — *"Qualified business income component. Subtract line 14 from line 13"*.
+    ///
+    /// ★★ i8995a adds a clamp the FORM does not print: *"Line 15. Subtract the patron reduction on
+    /// line 14 from the amount on line 13. **If zero or less, enter zero.**"* It cannot bind today —
+    /// line 13 ≥ 0 always (see `compute`) and line 14 is always blank because a patron refuses — but
+    /// a dropped term is invisible once the sentence is gone, and this one becomes live the moment
+    /// Schedule C (Form 8995-A) loss netting or the patron reduction is ever modelled.
     pub line15: Usd,
     /// L16 — *"Total qualified business income component. Add all amounts reported on line 15"*.
     ///
@@ -362,7 +368,8 @@ impl Form8995APartIToIii {
         //   `line15 = line13` deletes the subtraction, and the next reader has no way to tell whether
         //   line 14 was considered or forgotten — the compression this codebase keeps paying for.
         #[allow(clippy::unnecessary_literal_unwrap)]
-        let line15 = line13 - line14.unwrap_or(Usd::ZERO); // "Subtract line 14 from line 13"
+        // "Subtract line 14 from line 13" + i8995a's "If zero or less, enter zero".
+        let line15 = (line13 - line14.unwrap_or(Usd::ZERO)).max(Usd::ZERO);
         let line16 = line15; // "Add all amounts reported on line 15" — one business, one amount
 
         Some(Self {
@@ -426,7 +433,7 @@ pub struct Form8995APartIv {
     /// (DPAD) under section 199A(g). Enter the smaller of line 32 or line 36"*.
     pub line37: Usd,
     /// L38 — *"DPAD under section 199A(g) allocated from an agricultural or horticultural cooperative.
-    /// Don't enter more than line 33 minus line 37"*.
+    /// Don’t enter more than line 33 minus line 37"*.
     ///
     /// ★★ `None` and it must be: btctax fills no Schedule D (Form 8995-A), so no cooperative has
     /// allocated anything. The line is a CONDITIONAL entry with no `-0-` clause, so the unmet condition

@@ -121,6 +121,21 @@ pub fn fill_form_8995a_with_map(
     //    REIT/PTP-only filer, and a filer whose SSTB §199A(d)(3) excluded, file Part IV alone: that is
     //    i8995a's own "If you don't have QBI, and only have REIT, PTP, skip Parts I through III".
     if let Some(f) = parts_i_to_iii {
+        // ★★★ FAIL CLOSED ON A NAMELESS TRADE OR BUSINESS — the identical guard `form8995.rs` carries
+        //     for the identical decision. Part II line 2 is this business's QBI and Part I row A is
+        //     where it is named; a non-zero line 2 over a blank row A claims a §199A deduction for a
+        //     business the return never names. Core refuses it first
+        //     (`ScheduleCNoBusinessDescription`), so this is unreachable today and exists to STAY
+        //     unreachable — it was missing here purely because nobody held the two emitters at once,
+        //     which is the branch's own recurring failure mode.
+        if f.part_ii.line2 > Usd::ZERO && f.part_i.col_a_name.trim().is_empty() {
+            return Err(FormsError::Geometry(
+                "Form 8995-A Part II line 2 is non-zero but the trade or business has no name: \
+                 Part I column (a) is \"Trade, business, or aggregation name\", so this would file a \
+                 qualified business income component for a business the return never names."
+                    .into(),
+            ));
+        }
         // Part I row A. The name and TIN are wide free-text cells (geometry-exempt, page-checked);
         // the three checkboxes are written only when TRUE — an unchecked box is not written at all,
         // because writing an "off" value is a mark the filer did not make.
@@ -272,7 +287,10 @@ pub fn fill_form_8995a_with_map(
                 &mut writes,
                 &mut placements,
                 &m3.line24,
-                iii.line24_ratio * rust_decimal::Decimal::from(100),
+                //     ★ `.normalize()` strips the Decimal SCALE's trailing zeros: 14031/50000 has
+                //       scale 5, so the raw product renders "28.06200 %" on a filed form. The value
+                //       is identical; only the ink changes.
+                (iii.line24_ratio * rust_decimal::Decimal::from(100)).normalize(),
                 COL_LN,
                 Some((GRP_PART_III, 24)),
             );

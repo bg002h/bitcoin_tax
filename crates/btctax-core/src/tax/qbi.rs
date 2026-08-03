@@ -246,7 +246,16 @@ pub struct Form8995Lines {
     pub line3: Usd,
     /// L4 — combine 2 and 3; if zero or less, `-0-`.
     pub line4: Usd,
-    /// L5 — QBI component = 20% × line 4.
+    /// L5 — the QUALIFIED BUSINESS component.
+    ///
+    /// ★★ 20% × line 4 on the simplified path — but **not** on the Form 8995-A path, where this field
+    /// carries 8995-A **line 16** instead: the same 20% AFTER the §199A(b)(2) W-2-wage/UBIA cap and
+    /// the Part III phase-in (see [`compute_8995`]'s `qbi_component_8995a`). On that path this struct
+    /// is never printed AS Form 8995 — `assemble_printed_return` nulls it, because the two forms are
+    /// alternatives — it is only transcribed into Part IV, whose line 27 is *"Enter the amount from
+    /// line 16"*. So the value is right for its destination, and the struct's cross-footing promise
+    /// applies to the simplified path. Said here because a doc reading "20% × line 4" would send the
+    /// next reader hunting for a bug that is a deliberate override.
     pub line5: Usd,
     /// L6 — qualified REIT dividends + PTP income (Σ 1099-DIV box 5).
     pub line6: Usd,

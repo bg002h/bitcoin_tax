@@ -1280,6 +1280,40 @@ watched to distinguish a true case from a false one"* — committed by the autho
 `line4: _` compiles and the row vanishes. Corrected to the honest limit `classifier.rs` already states
 for itself.
 
+### G-29 — four exception rows share ONE mechanism, so the grammar is missing a production (2026-08-02)
+
+Raising `MAX_EXCEPTIONS` from 12 to 15 for Form 8995-A Parts II/III surfaced this. Of the four
+8995-A exception rows, **three** carry the identical sentence:
+
+| row | instruction | why it is an exception |
+|---|---|---|
+| f8995a:12 | *"Phased-in reduction. Enter the amount from line 26, **if any**"* | conditional entry, no `-0-` clause ⇒ BLANK outside the phase-in range |
+| f8995a:14 | *"Patron reduction. Enter the amount from Schedule D (Form 8995-A), line 6, **if any**"* | same, and never written at all |
+| f8995a:38 | *"DPAD … **Don't enter more than** line 33 minus line 37"* | same — pre-existing, from B1a |
+
+(The fourth, f8995a:24, is genuinely sui generis: a percentage, the only non-money printed line.)
+
+**One sentence covers three rows: *an `if any` conditional entry with no `-0-` clause, therefore
+blank*.** That is a PRODUCTION the grammar does not have, not three independent misfits — and
+absorbing them into the ratchet is precisely the *"enumerate the outcomes you happened to see"*
+failure `line_coverage_check.rs` warns about in its own comments. Adding
+`Production::ConditionalBlank` would take `MAX_EXCEPTIONS` **down by three**, which is the direction
+the ratchet exists for, and would make the §G-11 "blank is not zero" rule enforceable by the grammar
+instead of by a per-row prose reason.
+
+★ Not done inline because the production enum is shared by fifteen forms, so it is a change to a
+common instrument and deserves its own diff — not a rider on a §199A fold. **Owning phase:** the next
+line-coverage instrument change (with §G-27b–e).
+
+★★ **The other half of this entry is already CLOSED**, and it is the sharper half. The same ratchet
+raise exposed that `all()` could silently DROP a coverage function: deleting
+`cover_form8995apartiii` took the run from 228 money lines to 218 and still printed **OK**. A defined
+-but-uncalled `pub fn` is legal, so `missing_cover_fns` (which demands the function EXIST) structurally
+cannot see it. `cover_fns_not_registered` now walks the call graph transitively from `all()` and reds
+on an unreachable coverage function — with a planted-defect kill test, per harness B1. Reachability
+rather than direct-call, because `cover_schedulebrow` is legitimately reached *through*
+`cover_schedulelines_b` and a direct-call rule false-positived on the first honest case it met.
+
 ### G-28 — the FILING TRIAL residue (2026-08-02)
 
 `design/direction/FILING-TRIAL-2026-08-02.md` drove the shipped binary end to end against the owner's

@@ -181,6 +181,216 @@ impl Coverage {
 /// **8995-A's own sentences**, which differ in wording from 8995's at two clamps even though they
 /// never differ in value — so these are transcribed from `f8995a--2024.txt`, not copied from the
 /// sibling coverage fn.
+/// §G-28/B1b — Form 8995-A **Part II** (lines 2-16), column A.
+///
+/// ★★ These 15 lines and Part III's 10 shipped OUTSIDE this table, and the module's blast-radius
+/// guarantee did not fire: an omitted field on a struct already destructured here is a compile error,
+/// but a whole NEW struct produces no error at all. The consequence was that every Part II and Part III
+/// doc comment went unverified against `design/forms/extract/f8995a--2024.txt` — i.e. the one instrument
+/// that exists to catch a Form 6251-line-33-class slip did not see the form it was most needed on.
+pub fn cover_form8995apartii(p: &crate::tax::qbi_a::Form8995APartIi) -> Coverage {
+    let crate::tax::qbi_a::Form8995APartIi {
+        line2,
+        line3,
+        line4,
+        line5,
+        line6,
+        line7,
+        line8,
+        line9,
+        line10,
+        line11,
+        line12,
+        line13,
+        line14,
+        line15,
+        line16,
+    } = p;
+    let f = "f8995a";
+    let mut c = Coverage::default();
+    c.line(
+        *line2,
+        f,
+        "2",
+        "line2",
+        Production::Carry,
+        "Qualified business income from the trade, business, or aggregation. See instructions",
+    );
+    c.line(*line3, f, "3", "line3", Production::Scaled,
+        "Multiply line 2 by 20% (0.20). If your taxable income is $191,950 or less ($383,900 if married filing jointly), skip lines 4 through 12 and enter the amount from line 3 on line 13");
+    c.line(
+        *line4,
+        f,
+        "4",
+        "line4",
+        Production::Collected,
+        "Allocable share of W-2 wages from the trade, business, or aggregation",
+    );
+    c.line(
+        *line5,
+        f,
+        "5",
+        "line5",
+        Production::Scaled,
+        "Multiply line 4 by 50% (0.50)",
+    );
+    c.line(
+        *line6,
+        f,
+        "6",
+        "line6",
+        Production::Scaled,
+        "Multiply line 4 by 25% (0.25)",
+    );
+    c.line(*line7, f, "7", "line7", Production::Collected,
+        "Allocable share of the unadjusted basis immediately after acquisition (UBIA) of all qualified property");
+    c.line(
+        *line8,
+        f,
+        "8",
+        "line8",
+        Production::Scaled,
+        "Multiply line 7 by 2.5% (0.025)",
+    );
+    c.line(
+        *line9,
+        f,
+        "9",
+        "line9",
+        Production::Combine,
+        "Add lines 6 and 8",
+    );
+    c.line(
+        *line10,
+        f,
+        "10",
+        "line10",
+        Production::Bounded,
+        "Enter the greater of line 5 or line 9",
+    );
+    c.line(*line11, f, "11", "line11", Production::Bounded,
+        "W-2 wage and UBIA of qualified property limitation. Enter the smaller of line 3 or line 10");
+    // ★★ L12 is a CONDITIONAL entry — "if any" with no "-0-" clause. Outside the §199A phase-in range
+    //    there is no line 26, so the cell stays BLANK; the emitter uses `push_money_opt`.
+    c.exception(line12.unwrap_or(Usd::ZERO), f, "12", "line12",
+        "Phased-in reduction. Enter the amount from line 26, if any",
+        "BLANK unless Part III ran. \"if any\" is a conditional entry with no \"-0-\" clause: outside the phase-in range there is no line 26 to enter, and a printed 0 would swear a phased-in reduction was figured and came to nothing. `Option<Usd>`; the emitter uses `push_money_opt`.");
+    c.line(*line13, f, "13", "line13", Production::Bounded,
+        "Qualified business income deduction before patron reduction. Enter the greater of line 11 or line 12");
+    // ★★ L14 likewise — and it is ALWAYS blank, because a cooperative patron refuses upstream.
+    c.exception(line14.unwrap_or(Usd::ZERO), f, "14", "line14",
+        "Patron reduction. Enter the amount from Schedule D (Form 8995-A), line 6, if any. See instructions",
+        "NEVER WRITTEN. A conditional entry with no \"-0-\" clause whose condition requires Schedule D (Form 8995-A), which btctax does not fill — a cooperative patron REFUSES (`RefuseReason::CooperativePatron`) rather than file with this line blank. `Option<Usd>`, always `None`.");
+    c.line(
+        *line15,
+        f,
+        "15",
+        "line15",
+        Production::Combine,
+        "Qualified business income component. Subtract line 14 from line 13",
+    );
+    c.line(
+        *line16,
+        f,
+        "16",
+        "line16",
+        Production::Combine,
+        "Total qualified business income component. Add all amounts reported on line 15",
+    );
+    c
+}
+
+/// §G-28/B1b — Form 8995-A **Part III** (lines 17-26), the phased-in reduction.
+///
+/// ★ Line 24 is a PERCENTAGE, not a dollar amount, and is the one line here that is not `Usd`. It is
+/// covered through its printed form (ratio × 100) so the table's shape is uniform; the note records it.
+pub fn cover_form8995apartiii(p: &crate::tax::qbi_a::Form8995APartIii) -> Coverage {
+    let crate::tax::qbi_a::Form8995APartIii {
+        line17,
+        line18,
+        line19,
+        line20,
+        line21,
+        line22,
+        line23,
+        line24_ratio,
+        line25,
+        line26,
+    } = p;
+    let f = "f8995a";
+    let mut c = Coverage::default();
+    c.line(
+        *line17,
+        f,
+        "17",
+        "line17",
+        Production::Carry,
+        "Enter the amounts from line 3",
+    );
+    c.line(
+        *line18,
+        f,
+        "18",
+        "line18",
+        Production::Carry,
+        "Enter the amounts from line 10",
+    );
+    c.line(
+        *line19,
+        f,
+        "19",
+        "line19",
+        Production::Combine,
+        "Subtract line 18 from line 17",
+    );
+    c.line(
+        *line20,
+        f,
+        "20",
+        "line20",
+        Production::Carry,
+        "Taxable income before qualified business income deduction",
+    );
+    c.line(
+        *line21,
+        f,
+        "21",
+        "line21",
+        Production::Constant,
+        "Threshold. Enter $191,950 ($383,900 if married filing jointly)",
+    );
+    c.line(
+        *line22,
+        f,
+        "22",
+        "line22",
+        Production::Combine,
+        "Subtract line 21 from line 20",
+    );
+    c.line(
+        *line23,
+        f,
+        "23",
+        "line23",
+        Production::Constant,
+        "Phase-in range. Enter $50,000 ($100,000 if married filing jointly)",
+    );
+    c.exception(*line24_ratio, f, "24", "line24_ratio",
+        "Phase-in percentage. Divide line 22 by line 23",
+        "A PERCENTAGE, not a dollar amount, and the only non-money printed line on this form. Stored as the RATIO (line 22 / line 23) because that is what line 25 multiplies by; the emitter scales it by 100 once, at the single point where it becomes ink, so the arithmetic and the printing cannot disagree. Whole-dollar rounding would collapse every percentage to 0 or 1.");
+    c.line(
+        *line25,
+        f,
+        "25",
+        "line25",
+        Production::Scaled,
+        "Total phase-in reduction. Multiply line 19 by line 24",
+    );
+    c.line(*line26, f, "26", "line26", Production::Combine,
+        "Qualified business income after phase-in reduction. Subtract line 25 from line 17. Enter this amount here and on line 12, for the corresponding trade or business");
+    c
+}
+
 pub fn cover_form8995apartiv(p: &crate::tax::qbi_a::Form8995APartIv) -> Coverage {
     let crate::tax::qbi_a::Form8995APartIv {
         line27,
@@ -2241,6 +2451,11 @@ pub fn all() -> Coverage {
     let mut c = Coverage::default();
     c.0.extend(cover_form8995lines(&zero_form8995lines()).0);
     c.0.extend(cover_form8995apartiv(&crate::tax::qbi_a::Form8995APartIv::default()).0);
+    // §G-28/B1b — Parts II and III. ★ A NEW STRUCT produces no compile error here, unlike a new FIELD
+    // on an existing one, so these two lines are the only thing standing between 25 printed money
+    // lines and no instruction-text check at all. They shipped missing once.
+    c.0.extend(cover_form8995apartii(&crate::tax::qbi_a::Form8995APartIi::default()).0);
+    c.0.extend(cover_form8995apartiii(&crate::tax::qbi_a::Form8995APartIii::default()).0);
     c.0.extend(cover_setaxresult(&zero_setaxresult()).0);
     c.0.extend(cover_form1040lines(&zero_form1040lines()).0);
     c.0.extend(cover_form1040income(&zero_form1040income()).0);

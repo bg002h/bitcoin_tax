@@ -1073,7 +1073,21 @@ const CARRYFORWARD_FIELDS: &[Field] = &[
 const QBI_LIMITATION_FIELDS: &[Field] = &[
     Field {
         id: FieldId::QbiW2Wages,
-        clear: None,
+        // ★★★ A DEDICATED `clear`, and it is load-bearing. These two are the ONLY `Option<Usd>` leaves
+        //     in `ReturnInputs`, so they are the only fields for which the generic un-answer path —
+        //     `set(empty_for_kind)`, which for `FieldKind::Money` is `Money(Usd::ZERO)` — would write
+        //     `Some($0)` instead of `None`. That is not "cleared": it is the answer "my business paid
+        //     no wages", and it is EXACTLY the state `screen_absolute`'s `QbiAboveThreshold` refusal
+        //     tests for. Laundering it defeats the only guard standing in front of
+        //     `qbi_w2_wages.unwrap_or(ZERO)`, and caps a wage-paying filer's deduction at zero —
+        //     OVERSTATING their tax.
+        clear: Some(|ri, _| {
+            ri.schedule_c
+                .as_mut()
+                .ok_or(SetError::NoSuchRow)?
+                .qbi_w2_wages = None;
+            Ok(())
+        }),
         label: "W-2 wages your business paid (Form 8995-A line 4)",
         help: "\"Allocable share of W-2 wages from the trade, business, or aggregation.\" Needed only                if your taxable income is above $191,950 ($383,900 married filing jointly) — above that,                §199A(b)(2) caps your deduction at the greater of 50% of these wages, or 25% of them                plus 2.5% of your qualified-property basis. A sole proprietor with NO employees enters                0, and that is a real answer: it caps the deduction at zero.",
         kind: FieldKind::Money,
@@ -1097,7 +1111,14 @@ const QBI_LIMITATION_FIELDS: &[Field] = &[
     },
     Field {
         id: FieldId::QbiUbia,
-        clear: None,
+        // ★★★ Same reason as `QbiW2Wages` above — see that comment.
+        clear: Some(|ri, _| {
+            ri.schedule_c
+                .as_mut()
+                .ok_or(SetError::NoSuchRow)?
+                .qbi_ubia = None;
+            Ok(())
+        }),
         label: "Unadjusted basis of qualified property (UBIA) (Form 8995-A line 7)",
         help: "\"Allocable share of the unadjusted basis immediately after acquisition (UBIA) of all                qualified property.\" The original cost of depreciable property the business still                uses, before depreciation. Needed only above the taxable-income threshold; enter 0 if                the business holds no such property.",
         kind: FieldKind::Money,

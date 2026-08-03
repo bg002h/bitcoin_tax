@@ -173,9 +173,16 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::KiddieTax => vec![Anchor::NotInForm {
             note: "the §1(g) kiddie-tax screen is computed at `report`, not a v1 form field",
         }],
-        R::QbiAboveThreshold => vec![Anchor::NotInForm {
-            note: "the §199A QBI-over-threshold screen is computed at `report`, not a v1 form field",
-        }],
+        // ★★★ §G-28/B1b — NO LONGER `NotInForm`, and the change is the whole point of B1b.
+        //
+        //     This reason used to mean "the 8995-A phase-in is unmodeled and nothing you can enter
+        //     will help". It now means precisely "Form 8995-A lines 4 and 7 are unanswered", and both
+        //     are v1 form fields — so an anchor saying the refusal has no form field is a FALSEHOOD
+        //     that leaves the filer with nowhere to go. It was one, and a green test pinned it.
+        R::QbiAboveThreshold => vec![
+            Anchor::Field(FieldId::QbiW2Wages),
+            Anchor::Field(FieldId::QbiUbia),
+        ],
         R::AmtScreenTriggered => vec![Anchor::NotInForm {
             note: "the Form 6251 AMT screen is computed at `report`, not a v1 form field",
         }],
@@ -384,7 +391,6 @@ mod tests {
             RefuseReason::ScheduleCLoss,
             RefuseReason::ScheduleCNoBusinessDescription,
             RefuseReason::KiddieTax,
-            RefuseReason::QbiAboveThreshold,
             RefuseReason::AmtScreenTriggered,
             RefuseReason::TaxableIncomeNonPositiveWithCarryforward,
             RefuseReason::NegativeAmount("W-2 box 1 wages".into()),
@@ -394,6 +400,38 @@ mod tests {
             assert!(
                 matches!(anchors[0], NotInForm { .. }),
                 "{r:?} must be NotInForm: {anchors:?}"
+            );
+        }
+    }
+
+    /// ★★★ §G-28/B1b — `QbiAboveThreshold` ANCHORS ON THE TWO FIELDS THAT RESOLVE IT.
+    ///
+    /// It used to mean "the 8995-A phase-in is unmodeled and nothing you enter will help", and it was
+    /// listed above as `NotInForm`. B1b repurposed it to mean exactly "Form 8995-A lines 4 and 7 are
+    /// unanswered" — and both ARE v1 form fields. Leaving it in the `NotInForm` list made a GREEN test
+    /// pin a falsehood, and left the TUI with nothing to highlight for the one refusal B1b exists to
+    /// make fixable.
+    #[test]
+    fn the_qbi_wage_and_ubia_refusal_points_at_the_two_fields_that_fix_it() {
+        let anchors = attribute(&RefuseReason::QbiAboveThreshold);
+        assert_eq!(
+            anchors,
+            vec![
+                Anchor::Field(FieldId::QbiW2Wages),
+                Anchor::Field(FieldId::QbiUbia)
+            ],
+            "the refusal must anchor on Form 8995-A lines 4 and 7"
+        );
+        // …and both really are fields of the form, in a live section — not dangling ids.
+        for a in &anchors {
+            let Anchor::Field(id) = a else {
+                panic!("expected a Field anchor, got {a:?}")
+            };
+            assert!(
+                crate::spec::form_spec()
+                    .iter()
+                    .any(|s| s.fields.iter().any(|f| f.id == *id)),
+                "{id:?} is not a field in the form spec"
             );
         }
     }

@@ -247,10 +247,47 @@ fn the_phase_in_percentage_prints_scaled_by_a_hundred() {
     )
     .unwrap();
     let printed = tv(&pdf, map.part3_col_a.line24.fields()[0]).expect("line 24 must print");
-    assert!(
-        printed.starts_with("28"),
-        "line 24 holds the ratio 0.28062 and must print as ~28 percent, not {printed}"
+    assert_eq!(
+        printed, "28.062",
+        "line 24 holds the ratio 0.28062 and must print as 28.062 percent"
     );
+    // ★★ …and with NO trailing zeros. 14031/50000 carries Decimal scale 5, so the un-normalized
+    //    product renders "28.06200" — arithmetically identical, and wrong ink on a filed form.
+    assert!(
+        !printed.ends_with('0'),
+        "line 24 must not carry the Decimal scale's trailing zeros: {printed}"
+    );
+}
+
+/// ★★ THE FAIL-CLOSED GUARD ON A NAMELESS BUSINESS — carried across from the Form 8995 emitter,
+/// which has held the identical guard for the identical decision since P7.
+///
+/// Part II line 2 is this business's QBI; Part I column (a) is where it is named. A non-zero line 2
+/// over a blank row A claims a §199A deduction for a business the return never names. Core refuses
+/// it first, so this exists to keep that unreachable.
+#[test]
+fn a_nameless_business_with_qbi_fails_closed() {
+    let map = Form8995AMap::ty2024();
+    let mut f = phased_in();
+    f.part_i.col_a_name = "   ".into();
+    let err =
+        btctax_forms::testonly::fill_form_8995a_with_map(&reit_only(), Some(&f), &header(), &map)
+            .expect_err("a nameless business with QBI must refuse");
+    let FormsError::Geometry(m) = &err else {
+        panic!("expected Geometry, got {err:?}")
+    };
+    assert!(
+        m.contains("line 2") && m.contains("never names"),
+        "the refusal must name the line and the reason: {m}"
+    );
+    // …and a NAMED business with the same figures still fills, so the guard is not always-on.
+    btctax_forms::testonly::fill_form_8995a_with_map(
+        &reit_only(),
+        Some(&phased_in()),
+        &header(),
+        &map,
+    )
+    .expect("a named business fills");
 }
 
 /// ★★★ LINE 14 IS BLANK ON EVERY FILED RETURN, and line 12 is blank OUTSIDE the phase-in range.

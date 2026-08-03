@@ -97,7 +97,25 @@ const CEIL_IDIOMS: &[(&str, &str)] = &[
 /// ★ This is the number two full review rounds were spent estimating. It only ever goes DOWN: raising
 /// it requires editing this line, in a diff, with a reason — which is the whole point. Same shape as
 /// the `GAPS` ratchet that went 16 → 0.
-const MAX_EXCEPTIONS: usize = 12;
+///
+/// **RAISED 12 → 15 on 2026-08-02 (§G-28/B1b), and here is the reason.** Form 8995-A Parts II and III
+/// entered the table, and three of their lines fit no production:
+///
+///   * **f8995a:12** *"Phased-in reduction. Enter the amount from line 26, **if any**"* — a conditional
+///     entry with no `-0-` clause. Outside the §199A phase-in range there is no line 26, so the cell is
+///     BLANK, and a printed `0` would swear a phased-in reduction was figured and came to nothing.
+///   * **f8995a:14** *"Patron reduction. Enter the amount from Schedule D (Form 8995-A), line 6, **if
+///     any**"* — same shape, and never written at all: a cooperative patron REFUSES upstream.
+///   * **f8995a:24** *"Phase-in percentage. Divide line 22 by line 23"* — a PERCENTAGE, the only
+///     non-money printed line on the form. Whole-dollar rounding would collapse it to 0 or 1.
+///
+/// ★★ TWO OF THE THREE SHARE ONE MECHANISM — *"an `if any` conditional entry with no `-0-` clause,
+/// therefore blank"* — and so does the pre-existing **f8995a:38** (DPAD). Four rows, one sentence: that
+/// is a PRODUCTION the grammar is missing, not four independent misfits, and absorbing them into the
+/// ratchet is exactly the "enumerate the outcomes you happened to see" failure this file warns about
+/// elsewhere. Filed as `FOLLOWUPS.md` §G-29; adding it would take this number DOWN by four, which is
+/// the direction the ratchet is for.
+const MAX_EXCEPTIONS: usize = 15;
 // ★ RAISED 11 → 12 for Form 8995-A **line 38** (§G-28/B1a). The DPAD line is a CONDITIONAL entry with
 //   no "-0-" clause — "DPAD under section 199A(g) allocated from an agricultural or horticultural
 //   cooperative. Don't enter more than line 33 minus line 37" presumes an allocation from a Schedule D
@@ -298,6 +316,93 @@ pub fn run() -> Result<String, String> {
 /// stayed green: it reads the repo's real files, so no in-memory table can plant a defect in it, and
 /// "which test reds when this checker is removed?" had the answer "none". Same shape as r6's keystone
 /// finding one level down — the rule was real, and nothing was watching it.
+/// ★★★ EVERY `cover_*` FUNCTION MUST BE CALLED BY `all()`.
+///
+/// `missing_cover_fns` below demands that a money-bearing type HAS a coverage function. It does not —
+/// and structurally cannot — notice that the function is never invoked, because a defined-but-unused
+/// `pub fn` is perfectly legal. So a table can be complete, correct, and **entirely absent** from the
+/// extracted rows.
+///
+/// ★★ This was found by mutation, not by reading: deleting `cover_form8995apartiii` from `all()` took
+/// the run from 228 money lines to 218 and still printed **OK**. Ten printed lines of a filed form
+/// silently left the instrument, which is exactly the false-completeness class this file exists to
+/// prevent — and it is worse than the gap it guards, because the report says "OK" while it happens.
+///
+/// ★ REACHABILITY, not a direct-call check. `cover_schedulebrow` is invoked by
+/// `cover_schedulelines_b`, never by `all()` — a nested payer row is legitimately covered one level
+/// down — so "is it called BY `all()`" false-positives on the first honest case it meets. What matters
+/// is whether `all()` can reach it at all.
+///
+/// A pure function over the source so it can be watched going red on a planted case (harness B1).
+fn cover_fns_not_registered(cov_src: &str) -> Vec<String> {
+    if !cov_src.contains("pub fn all() -> Coverage {") {
+        return vec!["line_coverage.rs has no `pub fn all() -> Coverage`".into()];
+    }
+    // Every `pub fn cover_*`, and the body text between its signature and the next top-level `pub fn`.
+    //
+    // ★ The leading newline is prepended so a `pub fn` at OFFSET ZERO is found. Without it the first
+    //   function in the file is invisible — and in a fixture that begins with `pub fn all()`, that is
+    //   the ROOT, so nothing is reachable and every function is reported. The kill test caught this.
+    let owned = format!("\n{cov_src}");
+    let cov_src: &str = &owned;
+    let mut names: Vec<String> = Vec::new();
+    let mut bodies: Vec<(String, String)> = Vec::new();
+    let starts: Vec<usize> = cov_src
+        .match_indices("\npub fn ")
+        .map(|(i, _)| i + 1)
+        .collect();
+    for (k, &i) in starts.iter().enumerate() {
+        let end = starts.get(k + 1).copied().unwrap_or(cov_src.len());
+        let chunk = &cov_src[i..end];
+        let Some(rest) = chunk.strip_prefix("pub fn ") else {
+            continue;
+        };
+        let Some(fname) = rest.split(['(', '<']).next() else {
+            continue;
+        };
+        if fname == "all" || fname.starts_with("cover_") {
+            if fname.starts_with("cover_") {
+                names.push(fname.to_string());
+            }
+            bodies.push((fname.to_string(), chunk.to_string()));
+        }
+    }
+    // Transitive closure from `all()`.
+    let body_of = |n: &str| -> String {
+        bodies
+            .iter()
+            .find(|(f, _)| f == n)
+            .map(|(_, b)| b.clone())
+            .unwrap_or_default()
+    };
+    let mut reached: Vec<String> = Vec::new();
+    let mut queue: Vec<String> = vec!["all".to_string()];
+    while let Some(cur) = queue.pop() {
+        let body = body_of(&cur);
+        for n in &names {
+            if reached.iter().any(|r| r == n) {
+                continue;
+            }
+            // A call, not the definition itself.
+            if n != &cur && body.contains(&format!("{n}(")) {
+                reached.push(n.clone());
+                queue.push(n.clone());
+            }
+        }
+    }
+    names
+        .iter()
+        .filter(|n| !reached.iter().any(|r| &r == n))
+        .map(|n| {
+            format!(
+                "line_coverage.rs defines `{n}` but `all()` cannot reach it — its lines are absent \
+                 from every check, and the run still reports OK. Register it in `all()`, or call it \
+                 from a coverage function that `all()` does reach."
+            )
+        })
+        .collect()
+}
+
 fn missing_cover_fns(rel: &str, src: &str, emitter_code: &str, cov_src: &str) -> Vec<String> {
     let mut errs = Vec::new();
     for (name, body) in money_bearing_types(src) {
@@ -578,6 +683,8 @@ pub fn check(cov: &line_coverage::Coverage) -> Result<String, String> {
                 std::fs::read_to_string(&path).map_err(|e| format!("cannot read {rel}: {e}"))?;
             errs.extend(missing_cover_fns(&rel, &src, &emitter_code, &cov_src));
         }
+        // …and every coverage function that DOES exist must actually be registered.
+        errs.extend(cover_fns_not_registered(&cov_src));
     }
 
     // (5) Duplicate coverage of one LINE would let two rows disagree.
@@ -754,6 +861,56 @@ mod tests {
     /// It reads the repo's real files, so no in-memory `Coverage` can plant a defect in it: r7 (I-3)
     /// neutralised it and the whole suite stayed green. Feeding it synthetic sources is the only honest
     /// way to answer B1's question — *which test reds when this checker is removed?*
+    /// ★★★ THE KILL TEST for `cover_fns_not_registered` (harness B1: no checker exists until it has
+    /// been observed RED on a planted defect).
+    ///
+    /// The defect it exists to catch is REAL and was found by mutation on live source: deleting
+    /// `cover_form8995apartiii` from `all()` took the run from 228 money lines to 218 and still
+    /// printed **OK**. Ten printed lines of a filed form left the instrument silently — worse than an
+    /// uncovered line, because the report asserts completeness while it happens.
+    #[test]
+    fn an_unregistered_coverage_function_is_caught_and_a_transitively_reached_one_is_not() {
+        // (a) The real shape: defined, never reached.
+        let orphaned = "\
+pub fn all() -> Coverage {
+    let mut c = Coverage::default();
+    c.0.extend(cover_alpha(&x).0);
+    c
+}
+pub fn cover_alpha(p: &A) -> Coverage { Coverage::default() }
+pub fn cover_beta(p: &B) -> Coverage { Coverage::default() }
+";
+        let errs = cover_fns_not_registered(orphaned);
+        assert_eq!(errs.len(), 1, "exactly the orphan is reported: {errs:?}");
+        assert!(
+            errs[0].contains("cover_beta") && errs[0].contains("reports OK"),
+            "the message must name the function AND why silence is the danger: {}",
+            errs[0]
+        );
+
+        // (b) ★★ TRANSITIVE reachability, not a direct-call check. `cover_schedulebrow` is invoked by
+        //     `cover_schedulelines_b`, never by `all()` — a nested payer row covered one level down is
+        //     legitimate, and a direct-call rule false-positives on it. This half is what kept the
+        //     first draft of this checker from landing broken.
+        let nested = "\
+pub fn all() -> Coverage {
+    let mut c = Coverage::default();
+    c.0.extend(cover_alpha(&x).0);
+    c
+}
+pub fn cover_alpha(p: &A) -> Coverage { cover_beta(&p.row) }
+pub fn cover_beta(p: &B) -> Coverage { Coverage::default() }
+";
+        assert!(
+            cover_fns_not_registered(nested).is_empty(),
+            "a function `all()` reaches THROUGH another must not be reported: {:?}",
+            cover_fns_not_registered(nested)
+        );
+
+        // (c) A missing `all()` at all is itself the loudest possible failure, not a silent pass.
+        assert_eq!(cover_fns_not_registered("pub fn cover_x() {}").len(), 1);
+    }
+
     #[test]
     fn the_completeness_scan_demands_a_cover_fn_for_a_printed_money_type() {
         let src = "pub struct NewMoneyThing { pub amount: Usd }";
