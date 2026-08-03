@@ -622,8 +622,15 @@ fn schedule_d_2024_field_names() -> Vec<String> {
             c.gain_h.clone(),
         ]
     };
+    // §G-28/B4 — lines 1a and 8a, whose cells have no adjustment column BY CONSTRUCTION
+    // (`AmountColsNoAdjustment`): "no adjustments" is a condition of using those lines at all.
+    let b = |c: &btctax_forms::testonly::AmountColsNoAdjustment| {
+        vec![c.proceeds_d.clone(), c.cost_e.clone(), c.gain_h.clone()]
+    };
     let mut names = a(&m.line3);
     names.extend(a(&m.line10));
+    names.extend(b(m.line1a.as_ref().expect("TY2024 maps line 1a")));
+    names.extend(b(m.line8a.as_ref().expect("TY2024 maps line 8a")));
     names.push(m.line7_h.clone());
     names.push(m.line15_h.clone());
     names.push(m.line16_h.clone());

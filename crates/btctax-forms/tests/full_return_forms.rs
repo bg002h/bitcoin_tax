@@ -1107,6 +1107,84 @@ fn sd(
     }
 }
 
+/// ★★★ §G-31 — THE **WRITE** BRANCH FOR LINES 1a/8a, WHICH NO TEST REACHED.
+///
+/// Making the emitter correctly SKIP those cells when there is no 1099-B also made the other branch
+/// unreachable: the only `ScheduleDLines` fixture zeroed all six, and `b_1099` exists in no crate
+/// below `btctax-core`, so nothing ever drove broker totals through `fill_schedule_d_full`.
+///
+/// ★★ THAT SILENTLY RETIRED A VERIFICATION. `push_money` pushes a `FlatPlacement` even for a zero, so
+/// before the skip, `verify_flat` was checking these six cells' page, x-cluster and y-descent on
+/// EVERY Schedule D fill. Afterwards no placement was produced at all — and swapping `proceeds_d`
+/// with `cost_e` in the map red **zero** tests, printing $1,050,000 of proceeds in the cost column of
+/// a return signed under §6065.
+///
+/// ★ The general lesson, recorded in `FOLLOWUPS.md` §G-31: making an emitter correctly skip a cell is
+/// a COVERAGE change as well as a behaviour change, and nothing here notices that on its own.
+#[test]
+fn schedule_d_lines_1a_and_8a_write_through_the_geometric_verifier() {
+    let mut lines = sd(
+        dec!(1000),
+        dec!(15000),
+        dec!(2000),
+        dec!(500),
+        dec!(3000),
+        ScheduleDRouting::BothGains,
+    );
+    // Deliberately DISTINCT figures per cell, so a transposition cannot hide behind equal values.
+    lines.line1a_d = dec!(1050000);
+    lines.line1a_e = dec!(1000000);
+    lines.line1a_h = dec!(50000);
+    lines.line8a_d = dec!(400000);
+    lines.line8a_e = dec!(450000);
+    lines.line8a_h = dec!(-50000);
+
+    // ★ `fill_schedule_d_full` runs the geometric read-back itself: a cell in the wrong column fails
+    //   CLOSED here rather than returning bytes. Reaching this call at all is the point of the test.
+    let pdf = btctax_forms::fill_schedule_d_full(&lines, &kitchen_sink_header(), 2024)
+        .expect("a Schedule D carrying 1099-B totals must fill and pass the geometric verifier");
+
+    for (fqn, want, what) in [
+        (
+            "topmostSubform[0].Page1[0].Table_PartI[0].Row1a[0].f1_03[0]",
+            "1050000",
+            "1a(d) proceeds",
+        ),
+        (
+            "topmostSubform[0].Page1[0].Table_PartI[0].Row1a[0].f1_04[0]",
+            "1000000",
+            "1a(e) cost",
+        ),
+        (
+            "topmostSubform[0].Page1[0].Table_PartI[0].Row1a[0].f1_06[0]",
+            "50000",
+            "1a(h) gain",
+        ),
+        (
+            "topmostSubform[0].Page1[0].Table_PartII[0].Row8a[0].f1_23[0]",
+            "400000",
+            "8a(d) proceeds",
+        ),
+        (
+            "topmostSubform[0].Page1[0].Table_PartII[0].Row8a[0].f1_24[0]",
+            "450000",
+            "8a(e) cost",
+        ),
+        (
+            "topmostSubform[0].Page1[0].Table_PartII[0].Row8a[0].f1_26[0]",
+            "-50000",
+            "8a(h) loss",
+        ),
+    ] {
+        assert_eq!(
+            tv(&pdf, fqn).as_deref(),
+            Some(want),
+            "{what} must read {want} — a proceeds/cost transposition is invisible to every \
+             arithmetic test and lands a real figure in the wrong box on a signed return"
+        );
+    }
+}
+
 /// ★★★ §G-28/B4 r2-I2 — LINES 1a AND 8a ARE **BLANK** ON A RETURN WITH NO 1099-B.
 ///
 /// Line 1a's own text ends *"However, if you choose to report all these transactions on Form 8949,

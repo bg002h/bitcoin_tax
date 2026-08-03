@@ -1280,7 +1280,7 @@ watched to distinguish a true case from a false one"* — committed by the autho
 `line4: _` compiles and the row vanishes. Corrected to the honest limit `classifier.rs` already states
 for itself.
 
-### G-31 — Schedule D lines 1a/8a are EMITTED by a branch no test reaches (2026-08-03)
+### G-31 — ✅ **CLOSED 2026-08-03** — Schedule D lines 1a/8a were emitted by a branch no test reached
 
 §G-28/B4 r3, Important. The blank-vs-zero fix made the emitter take `(None, None)` when there are no
 1099-B totals — correct, and held by `schedule_d_lines_1a_and_8a_are_blank_without_a_1099b`. But it
@@ -1301,10 +1301,14 @@ $1,050,000 of proceeds in the cost column of a return signed under §6065. Under
 reviewable question is *"which test reds when this checker is removed?"*, and for these six cells the
 answer is now **none**.
 
-★ Not fixed inline because the fix is a packet-level fixture carrying real broker totals through
-`fill_schedule_d_full`, plus adding the two cells to `schedule_d_2024_field_names()` — its own change,
-not a rider on a Critical fold. **Owning phase:** before any release that ships B4, since the geometry
-of six cells on a filed schedule is exactly the class `verify_flat` exists to hold.
+**CLOSED** by exactly that: `schedule_d_lines_1a_and_8a_write_through_the_geometric_verifier` drives
+six DISTINCT figures through `fill_schedule_d_full` (which runs the geometric read-back itself, so a
+cell in the wrong column fails closed rather than returning bytes), and `schedule_d_2024_field_names()`
+now includes both cells so the map-vs-PDF fieldset test covers them.
+
+★ The kill named in this entry was run: transposing `proceeds_d` and `cost_e` on line 1a red **zero**
+tests before, and reds one now. Distinct per-cell figures are deliberate — equal values would let a
+transposition hide.
 
 ★★ The general lesson is sharper than the instance: **making an emitter correctly SKIP a cell can
 silently retire the verification that cell had.** A conditional write is a coverage change as well as a
