@@ -362,6 +362,30 @@ the residue.
   renders as "Form 1040" showing $500,000 on line 7 and a blank line 1a — for a taxpayer with $1,500,000
   of income. The stderr note says only two fields were filled, but the artifact outlives the note. A
   document that looks filable and understates income by $1,000,000 if mistaken for one.
+### G-32 — a PII-flagging commit LANDS silently; only `git push` catches it (2026-08-03)
+
+**Severity: Minor, but the cost is asymmetric.** `scripts/pre-commit` runs `make check` + `cargo fmt
+--all --check`. It does **not** run `scripts/pii-scan-generic.sh`; only `scripts/pre-push` does. So a
+commit carrying a real SSN/EIN-shaped token is accepted without complaint and is caught later, at push
+— by which point removing it means rewriting history, not amending a commit.
+
+**Observed, not theorised.** Twice in one sitting: `333-44-5555` in an AMT fixture (caught only because
+the gate was run by hand after committing), and then the kill-test for the new structural rule itself,
+which necessarily names tokens the scanner must catch and therefore red the scan from inside the test —
+committed clean, flagged four hits afterwards. The second is now fixed by ASSEMBLING the dangerous
+vectors from parts (`repo_hygiene.rs`), so no shape-matching literal is in the tree.
+
+**Why it is not simply "add the scan to pre-commit".** The scan takes a REV and greps the whole tree at
+that rev, so on every commit it re-scans all history-visible content rather than the delta — cheap
+today, but the hook design deliberately scopes the expensive owner-pattern scan to the pushed *range*.
+Changing which gate runs where is the repo owner's call, not a mechanical fix.
+
+**Options, for whoever picks this up:** (a) run the generic (not owner-pattern) scan in pre-commit — it
+is fast and has no external dependency; (b) leave it and rely on push, accepting that a bad token means
+a history rewrite; (c) scan only the staged delta in pre-commit and keep the full-tree scan at push.
+
+**Owning phase:** pre-publish, with the other push-blockers (`.pii-patterns`, the crates.io token).
+
 ### G-6 — the oracle cross-check RAN, and it found a Tax-Calculator defect (2026-07-28)
 
 **★ CORRECTION.** An earlier version of this entry said `taxcalc`/`pandas` were "not installed" and
