@@ -28,6 +28,9 @@ mod common;
 /// Forms whose `[census]` section IS written. This list and [`CENSUS_NOT_YET_WRITTEN`] must together
 /// partition the 15 census keys — so a form can never be dropped from both and silently escape.
 const CENSUSED: &[&str] = &[
+    // §G-6 — 41 lines mapped, 18 (`2c`–`2t`) recorded `unmodeled`: Part I add-backs core does not
+    // model, every one gated by the §G-22 out-of-scope declaration that refuses the year.
+    "f6251",
     "f8959",
     "schedule_se",
     "f1040sb",

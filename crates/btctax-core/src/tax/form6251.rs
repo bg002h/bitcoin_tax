@@ -427,6 +427,21 @@ pub struct Form6251Inputs {
     /// QDCGT Worksheet line 5 **as figured for the regular tax** — lines 20 and 27.
     pub qdcgt_line5_regular: Usd,
     /// 1040 line 16.
+    ///
+    /// ★★ **This is `ar.regular_tax` (exact cents), NOT the PRINTED 1040 line 16 — recorded because it
+    /// is a deliberate exception to the transcribe-the-printed-source rule the surrounding code follows
+    /// three times** (Schedule 2 line 4 ← Schedule SE line 12, line 11 ← Form 8959 line 18, line 2 ←
+    /// Form 6251 line 11). `printed.rs` figures line 16 by applying the worksheet to the *printed* line
+    /// 15, which is NOT a re-rounding of the tax on exact-cents taxable income and can differ by a whole
+    /// Tax-Table bin step.
+    ///
+    /// ★ The exception is bounded and deliberate: an AMT-owing return always has taxable income ≳
+    /// $600,000, far above the $100,000 Tax-Table ceiling, so the step function does not apply and the
+    /// QDCGT worksheet is continuous there — the two figures differ only by sub-dollar residuals, inside
+    /// SPEC §3.1's elected per-line tolerance. Feeding the exact-cents figure keeps line 10 on the same
+    /// footing as line 7, which is also computed in cents, so the line 7 > line 10 attach test compares
+    /// like with like. Flagged by r1 as a two-authorities-for-one-number instance; kept, with the reason
+    /// written down rather than left to be rediscovered.
     pub regular_tax_l16: Usd,
     /// Schedule 2 line 1z (excess APTC). No v1 input ⇒ 0.
     pub schedule_2_line1z: Usd,

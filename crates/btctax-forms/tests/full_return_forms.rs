@@ -2970,6 +2970,50 @@ fn the_packet_emits_every_required_form_in_attachment_sequence_order() {
     }
 }
 
+/// ★★★ §G-6 — THE AMT HOUSEHOLD, WHICH IS THE ONE THAT DISCRIMINATES ON ORDER.
+///
+/// Form 6251 is Attachment Sequence **32**, so it staples between Schedule SE (17) and Form 8995/8995-A
+/// (55/55A). The kitchen sink above cannot catch a misordering here because it owes no AMT — and the
+/// emitter shipped with the `f6251` block written *after* the 8995 blocks, producing
+/// `… schedule_se(17), f8995a(55A), f6251(32), f8959(71) …`. Every ordering test passed; the filer
+/// would have been handed a `manifest.txt` labelled "← your stapling order" that was not in order.
+///
+/// ★ This fixture carries a Schedule C **and** an AMT on purpose, so 55A and 32 are both present and
+/// their relative order is actually observable. A household with only one of them proves nothing.
+#[test]
+fn the_amt_packet_staples_form_6251_at_sequence_32_before_form_8995a() {
+    use btctax_core::tax::packet::assemble_printed_return;
+    use btctax_core::tax::return_1040::assemble_absolute;
+    use btctax_core::tax::testonly::{amt_owing_household, ty2024_params, ty2024_table};
+
+    let (ri, state) = amt_owing_household();
+    let ar = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
+    let pr = assemble_printed_return(
+        &ri,
+        &state,
+        &std::collections::BTreeMap::new(),
+        &ar,
+        &ty2024_table(),
+        2024,
+        &[],
+    )
+    .unwrap();
+
+    let packet = btctax_forms::fill_full_return(&pr, 2024).unwrap().forms;
+    let names: Vec<&str> = packet.iter().map(|f| f.name.as_str()).collect();
+    assert!(
+        names.contains(&"f6251") && names.contains(&"f8995a"),
+        "this fixture exists to hold BOTH; without both, order proves nothing: {names:?}"
+    );
+    let i6251 = names.iter().position(|n| *n == "f6251").unwrap();
+    let i8995a = names.iter().position(|n| *n == "f8995a").unwrap();
+    let ise = names.iter().position(|n| *n == "schedule_se").unwrap();
+    assert!(
+        ise < i6251 && i6251 < i8995a,
+        "sequence 17 < 32 < 55A, the order printed on the forms themselves: {names:?}"
+    );
+}
+
 /// A plain W-2 household files a 1040 and NOTHING else — the packet's `None` arms are as load-bearing
 /// as its `Some` ones (a blank Schedule C stapled to a return with no business is a wrong return).
 #[test]

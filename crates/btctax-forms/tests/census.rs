@@ -124,7 +124,17 @@ fn census_is_exactly_15_forms_including_8275_when_a_promote_is_present() {
     //     filer's form. `assemble_printed_return` guarantees exactly one is `Some` — filing both would
     //     claim the deduction twice on paper — so this fixture (below the threshold) shows f8995, and
     //     `an_above_threshold_return_files_8995a_instead` shows the other arm.
-    let alternatives: BTreeSet<&str> = ["f8995a"].into_iter().collect();
+    //
+    // ★★★ f6251 is excluded for a DIFFERENT and stronger reason, recorded so it is not mistaken for
+    //     the same one: Form 6251 is not an alternative to anything, but it is very nearly mutually
+    //     exclusive with the SIMPLIFIED Form 8995 above. AMT bites only once the §55(d)(3) exemption
+    //     has begun phasing out (AMTI ≳ $609,350 Single / $1,218,700 MFJ), while the simplified 8995
+    //     requires taxable income at or below the §199A(e)(2) threshold ($191,950 / $383,900). No
+    //     single return can be on both sides of that gap, so no all-arms fixture can demonstrate
+    //     f8995 and f6251 together. It is demonstrated by
+    //     `full_return_forms::the_amt_packet_staples_form_6251_at_sequence_32_before_form_8995a`,
+    //     which is also the test that pins its Attachment Sequence position (32, before 55A).
+    let alternatives: BTreeSet<&str> = ["f8995a", "f6251"].into_iter().collect();
     let expected: BTreeSet<&str> = expected.difference(&alternatives).copied().collect();
     assert_eq!(
         forms.len(),
@@ -371,12 +381,14 @@ fn an_above_threshold_return_files_8995a_instead() {
 #[test]
 fn every_census_form_demonstrated_in_j6() {
     let names = j6_packet_names(&golden());
-    // ★ f8995a is the ALTERNATIVE to f8995 above the §199A threshold — see the note in
-    //   `census_is_exactly_15_forms_including_8275_when_a_promote_is_present`. J6 is below it, so it
-    //   demonstrates f8995; the other arm has its own test.
+    // ★ f8995a is the ALTERNATIVE to f8995 above the §199A threshold, and f6251 cannot coexist with
+    //   the simplified f8995 at all (AMT needs AGI ≳ $609,350; simplified 8995 needs taxable income
+    //   ≤ $191,950) — both reasons are set out in
+    //   `census_is_exactly_15_forms_including_8275_when_a_promote_is_present`. J6 is a below-threshold
+    //   journey, so it demonstrates f8995; each excluded arm has its own named test.
     let expected: BTreeSet<String> = CENSUS_KEYS
         .iter()
-        .filter(|s| **s != "f8995a")
+        .filter(|s| **s != "f8995a" && **s != "f6251")
         .map(|s| s.to_string())
         .collect();
     let missing: Vec<&String> = expected.difference(&names).collect();

@@ -10,6 +10,7 @@
 //! twice and inflating the tentative minimum tax by $200,000 on one vector.
 
 use btctax_forms::testonly::{collect_fields, f6251_pdf, load};
+use std::collections::BTreeSet;
 
 const MAP: &str = include_str!("../forms/2024/f6251.map.toml");
 const FORM_TEXT: &str = include_str!("../../../design/forms/extract/f6251--2024.txt");
@@ -32,7 +33,7 @@ fn mapped() -> Vec<(String, String)> {
 fn every_mapped_field_exists_in_the_blank_form() {
     let doc = load(f6251_pdf(2024).expect("the crate ships f6251.pdf")).unwrap();
     let fields = collect_fields(&doc).unwrap();
-    let present: std::collections::BTreeSet<&str> = fields.iter().map(|f| f.fqn.as_str()).collect();
+    let present: BTreeSet<&str> = fields.iter().map(|f| f.fqn.as_str()).collect();
 
     let m = mapped();
     assert_eq!(
@@ -46,16 +47,64 @@ fn every_mapped_field_exists_in_the_blank_form() {
             "line {line} maps to {fqn}, which is NOT a field on the blank form"
         );
     }
-    // ★★ …and every one of the 61 fields is accounted for exactly once — 2 identity + 41 + 18.
-    let censused = MAP
+    // ★★★ …and the three sets PARTITION the AcroForm — a disjoint union, not a matching count.
+    //
+    //     r1 found this was a COUNT: `mapped + censused + identity == fields.len()`. That is satisfied
+    //     by any bijection-shaped mistake. Concretely, shifting the `3..11` block DOWN one widget
+    //     (line 3 → `f1_23`, … line 11 → `f1_31`) keeps the count at 61, keeps every FQN existent,
+    //     keeps y descending, and keeps 2b inset — it passes all four tests while printing line 3's
+    //     figure in line 2t's box and leaving `f1_32` blank on a filed return.
+    //
+    //     ★ The same repo has been bitten by count-not-partition before (a `BTreeSet` built from
+    //       `1..=38` when the label set was 48). A count answers "how many"; only a partition answers
+    //       "which", and "which" is the question a field map exists to answer.
+    let censused: BTreeSet<&str> = MAP
         .lines()
         .filter(|l| l.starts_with("\"topmostSubform"))
-        .count();
-    assert_eq!(censused, 18, "lines 2c-2t are censused");
+        .filter_map(|l| l.split('"').nth(1))
+        .collect();
+    assert_eq!(censused.len(), 18, "lines 2c-2t are censused");
+
+    let mapped: BTreeSet<&str> = m.iter().map(|(_, f)| f.as_str()).collect();
+    assert_eq!(mapped.len(), m.len(), "no FQN is mapped to two lines");
+
+    let overlap: Vec<&&str> = mapped.intersection(&censused).collect();
+    assert!(
+        overlap.is_empty(),
+        "{overlap:?} are BOTH mapped and censused — a line pointed at a widget the map also declares \
+         carries nothing. This is the shift the old count could not see."
+    );
+
+    // ★ Keyed on `name`/`ssn`, NOT on "everything after `[identity]`" — the census section follows it
+    //   in the file (the header must come last so TOML does not swallow the `lineNN` keys), so a
+    //   positional read picks up all 18 census FQNs as identity and the partition silently widens.
+    let identity: BTreeSet<&str> = MAP
+        .lines()
+        .filter(|l| {
+            let k = l.split('=').next().unwrap_or("").trim();
+            k == "name" || k == "ssn"
+        })
+        .filter_map(|l| l.split('"').nth(1))
+        .collect();
+    assert_eq!(identity.len(), 2, "name + SSN");
+
+    let accounted: BTreeSet<&str> = mapped
+        .union(&censused)
+        .copied()
+        .collect::<BTreeSet<&str>>()
+        .union(&identity)
+        .copied()
+        .collect();
+    let unaccounted: Vec<&str> = present.difference(&accounted).copied().collect();
+    assert!(
+        unaccounted.is_empty(),
+        "{unaccounted:?} exist on the blank form but are neither mapped, censused, nor identity — a \
+         widget no decision reaches, which is invisible on the printed page and to both oracles"
+    );
     assert_eq!(
-        m.len() + censused + 2,
+        accounted.len(),
         fields.len(),
-        "mapped + censused + identity must exhaust the AcroForm exactly"
+        "mapped ∪ censused ∪ identity must be exactly the AcroForm"
     );
 }
 

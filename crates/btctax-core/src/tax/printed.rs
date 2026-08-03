@@ -303,11 +303,20 @@ pub fn schedule_se_lines(ar: &AbsoluteReturn, sch_c: &ScheduleCLines) -> Option<
 
 /// The printable **Schedule 2 (Additional Taxes)** line chain.
 ///
-/// **Part I is entirely BLANK in v1**, and that is a load-bearing fact rather than an omission:
-/// line 1a (excess advance premium tax credit) has no input and would REFUSE if it did (repaying it
-/// *increases* tax, so omitting it would understate), and line 2 (AMT) is $0 by construction — the
-/// return is refused outright if the official "Should You Fill In Form 6251" worksheet trips. So
-/// 1040 line 17 is zero, and nothing in Part I is printed.
+/// **Part I carries the AMT since §G-6 (2026-08-03), and nothing else.** Line 1a (excess advance
+/// premium tax credit) has no input and would REFUSE if it did — repaying it *increases* tax, so
+/// omitting it would understate. Line 2 is Form 6251's printed line 11, and line 3 (= 1z + 2) is what
+/// **1040 line 17 names by number**.
+///
+/// ★★ Line 2 is `Option<Usd>`: the entry is conditional on the form being attached (*"Alternative
+/// minimum tax. **Attach Form 6251**"*), and a printed `0` on a return carrying no Form 6251 would
+/// swear the filer figured an AMT on a form the IRS never receives (§G-11 — an entry is testimony).
+/// Line 3 is plain `Usd` because it is arithmetic btctax performs, not a conditional entry; the
+/// emitter skips both together when Part I is empty.
+///
+/// ★ This doc previously said Part I was *"entirely BLANK in v1 … the return is refused outright if the
+/// official 'Should You Fill In Form 6251' worksheet trips"*. Both halves are now false: btctax files
+/// Form 6251, and that refusal is gone.
 ///
 /// Part II carries the three taxes v1 does compute. Note **line 4 excludes the 0.9% Additional
 /// Medicare Tax**: that is a Form 8959 item routed to line 11, and bundling it into line 4 would
@@ -346,7 +355,8 @@ pub struct Schedule2Lines {
 /// Derive the printed Schedule 2 chain. Takes the **printed** 8959/8960 chains, not the computed
 /// figures, so the schedule and its attachments agree to the dollar.
 ///
-/// Returns `None` when there is nothing to report — no SE tax, no Additional Medicare Tax, no NIIT —
+/// Returns `None` when there is nothing to report on EITHER part — no AMT (Part I), and no SE tax,
+/// Additional Medicare Tax or NIIT (Part II) —
 /// in which case Schedule 2 is not filed at all and 1040 line 23 is zero.
 pub fn schedule_2_lines(
     sch_se: Option<&ScheduleSeLines>,
@@ -372,7 +382,19 @@ pub fn schedule_2_lines(
     let line3 = line2.unwrap_or(Usd::ZERO);
     let line21 = line4 + line11 + line12; // ★ sums the PRINTED lines
 
-    if line21 <= Usd::ZERO {
+    // ★★★ THE FILING GATE CARRIES **BOTH PARTS**, because Schedule 2 files on either.
+    //
+    //     `line21` is Part II only (SE tax + Additional Medicare + NIIT). Gating on it alone means a
+    //     return with an AMT but no Part II tax would drop the whole schedule — stapling a Form 6251
+    //     showing a positive line 11 while 1040 line 17 read `$0` from a `None` Schedule 2. An
+    //     understatement with its own evidence attached to it.
+    //
+    //     ★ r1 argued that state is unreachable today, and the argument is right but INCIDENTAL: AMT
+    //       needs AGI ≳ $609,350, which is far above every §1411(b) NIIT threshold, and an AMT-owing
+    //       return always has preferential income, so NII > 0 and line 12 > 0. That is a coincidence of
+    //       two unrelated thresholds living two modules apart, not a guarantee. The gate now says what
+    //       the form says, so it does not depend on the coincidence holding.
+    if line21 <= Usd::ZERO && line2.is_none() {
         return None;
     }
     Some(Schedule2Lines {

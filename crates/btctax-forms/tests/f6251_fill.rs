@@ -137,9 +137,18 @@ fn part_iii_prints_in_full_when_line_7_routes_there() {
     );
 }
 
-/// ★★ A negative arriving in a parenthesised box fails CLOSED rather than rendering `(-500)`.
+/// ★★ ZERO IS A MAGNITUDE AND MUST FILL — and this test is named for what it asserts, which is NOT
+/// that `assert_paren_magnitudes` fires.
+///
+/// ★★★ B1 honesty. It was called `a_negative_magnitude_in_a_parenthesised_box_fails_closed`, which it
+/// never tested: the emitter's `.abs()` precedes the guard, so no input reachable through
+/// `fill_form_6251_with_map` can present a negative magnitude to it. `assert_paren_magnitudes` is a
+/// **compile-time-unreachable backstop** — it exists so that REMOVING the `.abs()` fails closed instead
+/// of rendering `(-500)` as a positive number on a filed return — and it has never been observed red,
+/// because an honest kill-test for it cannot be written through the public entry point. Recorded here
+/// rather than papered over with a name that claims otherwise (r1 Nit).
 #[test]
-fn a_negative_magnitude_in_a_parenthesised_box_fails_closed() {
+fn zero_is_a_valid_magnitude_in_a_parenthesised_box() {
     let map = Form6251Map::ty2024();
     let mut f = part_i_only();
     // Defeat the emitter's own `.abs()` by handing it a value whose magnitude is already negative —

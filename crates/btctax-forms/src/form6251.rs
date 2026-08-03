@@ -35,11 +35,18 @@
 //!
 //! ## What stays out
 //!
-//! Part I lines **2c–2t** are not modelled by core and are CENSUSED as `gap`, not `unmodeled`. Every
-//! one is an ADD-BACK, so a laundered zero understates tax rather than forgoing a benefit. They are
-//! reachable only through the §G-22 out-of-scope refusal, whose limb (b) names an ISO exercise
-//! explicitly — necessary because an ISO exercise is not *income* for the regular tax, so the income
-//! half of that question could never have caught it.
+//! Part I lines **2c–2t** are not modelled by core and are CENSUSED as `unmodeled`. Every one is an
+//! ADD-BACK, so a laundered zero would understate tax rather than forgo a benefit — but none is
+//! laundered: the filer is REFUSED through the §G-22 out-of-scope declaration, whose limb (b) names an
+//! ISO exercise explicitly. That limb is necessary because an ISO exercise is not *income* for the
+//! regular tax, so the income half of that question could never have caught it.
+//!
+//! ★★ `unmodeled` and NOT `gap`, and the distinction is the census's, not a preference. The register's
+//! own legend defines `gap` as *"a field btctax CANNOT honestly account for — **a declaration it never
+//! asks**"*. btctax does ask, and an adverse answer refuses the year, so these lines ARE accounted for.
+//! r1 shipped them as `gap` with reasons that said "the filer is REFUSED through the §G-22 declaration"
+//! — the reason was right and contradicted its own label, which would have put eighteen entries on a
+//! shrink-only ratchet that nothing could ever close.
 
 use crate::cells::{push_identity, push_money};
 use crate::error::FormsError;

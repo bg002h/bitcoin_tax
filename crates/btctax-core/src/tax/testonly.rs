@@ -455,32 +455,51 @@ pub fn w2_only_household() -> (ReturnInputs, LedgerState) {
 ///
 /// ★ Ledger-free on purpose: the gain arrives as a §G-28/B4 Form 1099-B, so the fixture exercises the
 /// packet without depending on a lot construction that a basis-method change could move underneath it.
+///
+/// ★★★ THIS IS THE VECTOR BOTH ORACLES WITNESSED — `design/direction/G6-AMT-ORACLE-VALIDATION.md`.
+/// btctax files AMT = $11,322 and total tax = $481,225 on it; Tax-Calculator reproduces the AMT to $3
+/// once its own open line-2a defect (PSLmodels#3108) is corrected for, and OpenTaxSolver reproduces the
+/// whole Part I/Part III structure. Keeping the fixture identical to the validated vector is the point:
+/// a fixture that drifts from the vector its oracles blessed is validating a different taxpayer.
+///
+/// ★ It also carries a **Schedule C**, so the packet contains Form 8995-A (sequence 55A) *and* Form
+/// 6251 (sequence 32) at once — which is what lets the attachment-order guard discriminate. Without a
+/// household holding both, Form 6251 stapling after Form 8995 passes every ordering test (r1 Minor).
 pub fn amt_owing_household() -> (ReturnInputs, LedgerState) {
     let mut ri = ReturnInputs {
         filing_status: FilingStatus::Single,
         header: HouseholdHeader {
-            taxpayer: person("Dana", "Quill", "333-44-5555", "Analyst"),
+            // ★ An ALLOWED synthetic SSN (`scripts/pii-scan-generic.sh`'s list). A fresh fake number
+            //   is not free here: the scan runs over HEAD, so inventing one reds the gate after the
+            //   commit lands, which is exactly how this fixture first broke it.
+            taxpayer: person("Dana", "Quill", "987-65-4321", "Miner"),
             address_street: "77 Ridge Rd".into(),
             address_city: "Boulder".into(),
             address_state: "CO".into(),
             address_zip: "80301".into(),
             ..Default::default()
         },
-        w2s: vec![W2 {
+        schedule_c: Some(ScheduleCInputs {
             owner: Owner::Taxpayer,
-            employer: "QUILL ANALYTICS".into(),
-            box1_wages: dec!(150000),
-            box2_fed_withheld: dec!(30000),
-            box3_ss_wages: dec!(150000),
-            box4_ss_withheld: dec!(9300),
-            box5_medicare_wages: dec!(150000),
-            box6_medicare_withheld: dec!(2175),
+            business_description: "Bitcoin mining".into(),
+            naics_code: "518210".into(),
+            other_gross_receipts: dec!(85000),
+            expenses: Usd::ZERO,
+            is_sstb: Some(false),
+            is_cooperative_patron: Some(false),
+            // ★ Both ANSWERED as zero, which is a fact about this household (no employees, no
+            //   qualified property) and not fixture grease — it is also what makes Form 8995-A
+            //   Part II cap the §199A deduction at $0, the figure Tax-Calculator independently
+            //   confirms.
+            qbi_w2_wages: Some(Usd::ZERO),
+            qbi_ubia: Some(Usd::ZERO),
             ..Default::default()
-        }],
+        }),
         b_1099: vec![Form1099B {
-            payer: "BROADLEAF SECURITIES".into(),
+            payer: "BROKER LLC".into(),
             long_term_proceeds: dec!(2500000),
-            long_term_basis: dec!(300000),
+            long_term_basis: dec!(500000),
+            basis_reported_and_no_adjustments: Some(true),
             ..Default::default()
         }],
         ..Default::default()

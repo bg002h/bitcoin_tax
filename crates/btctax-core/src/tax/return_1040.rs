@@ -2065,10 +2065,14 @@ pub(crate) fn form6251_inputs_from_parts(
 /// [`crate::tax::return_refuse::screen_inputs`] (input-screenable) and [`screen_compute_dependent`]
 /// (income/ledger-dependent). Returns the FIRST [`Refusal`], or `None`.
 ///
-/// Rows: (a) QBI present with taxable-income-before-QBI above the §199A(e)(2) threshold (the 8995-A
-/// phase-in is unmodeled, §4.5); (b) **Form 6251 Who Must File condition 1** — the computed `ar.amt` has
-/// line 7 > line 10, so the form must be attached and v1 cannot yet file it (§4.11); (c) taxable income
-/// ≤ 0 WITH a capital-loss carryforward-in (the G22 §1211/§1212 Capital Loss Carryover Worksheet edge).
+/// Rows: (a) the §199A rows — an SSTB inside the phase-in range, and Form 8995-A lines 4/7 unstated
+/// above the threshold (§4.5); (b) taxable income ≤ 0 WITH a capital-loss carryforward-in (the G22
+/// §1211/§1212 Capital Loss Carryover Worksheet edge).
+///
+/// ★ There is NO LONGER an AMT row here. It read *"(b) Form 6251 Who Must File condition 1 — the form
+/// must be attached and v1 cannot yet file it"*; §G-6 built the emitter, so the form is filed and the
+/// row was deleted from this function's body. `RefuseReason::AmtScreenTriggered` survives as a dead
+/// variant pending its Tier-2 rename.
 /// A refund-only TI≤0 filer with NO carryforward is NOT refused (tax = 0, withholding refunded — the
 /// r5-narrowed rule).
 pub fn screen_absolute(

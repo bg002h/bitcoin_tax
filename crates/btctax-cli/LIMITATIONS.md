@@ -219,6 +219,14 @@ cannot model it correctly.
 - **Form 8995-A lines 4 and 7 unstated** — above the §199A(e)(2) threshold ($191,950 / $383,900 MFJ) the deduction is capped by your business's W-2 wages and the unadjusted basis of its qualified property, and neither can be guessed safely. Supply both with `btctax income import` and the return files. (It is the taxable-income figure that is tested, not the QBI itself.)
 - **A specified service trade or business INSIDE the §199A phase-in range** — only an applicable percentage of it is a qualified trade or business, figured on Schedule A (Form 8995-A), which btctax does not fill. Above the range no such schedule is needed and the return files.
 - **A §199A carryforward that needs Schedule C (Form 8995-A)**.
+- **An AMT adjustment on Form 6251 lines 2c–2t.** btctax models Part I lines 1, 2a and 2b only; the
+  other eighteen add-backs are not computed. The most consequential is line **2i, an incentive stock
+  option exercised and still held at year end** — the dominant reason an individual owes AMT since the
+  2017 Act, and one the regular tax recognises no income for at all, so nothing else on your return
+  reveals it. btctax therefore **asks**, as part of the out-of-scope declaration, and a *yes* refuses the
+  year rather than filing a Form 6251 that silently treats the adjustment as zero. Others in the same
+  class: §1202 small-business stock, §4952 investment interest, a net operating loss, a Form 8801 credit,
+  and accelerated depreciation.
 - **A Form 6251 adjustment v1 cannot see, declared as present.** Three are handled by **declaration**: a non-AMT-qualified mortgaged dwelling (line 3), a divergent AMT capital-loss carryover (line 2k), and depreciation inside your Schedule C expense total whose AMT amount differs (line 2l). Each is asked only when it can apply — respectively a Schedule A carrying Form 1098 mortgage interest, a capital-loss carryforward, and Schedule C expenses above $0 — and must then be answered via `btctax income answer`. An adverse answer refuses, because computing without the add-back would understate your tax.
 - **Taxable income ≤ $0 with a capital-loss carryforward** — the §1211/§1212 Capital Loss Carryover Worksheet edge is unmodeled. (A refund-only filer with *no* carryforward is fine: tax = $0, withholding refunded.)
 

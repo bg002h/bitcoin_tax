@@ -1355,6 +1355,22 @@ mod tests {
                  carry one without the other in EITHER direction.",
                 pr.forms.f6251.is_some()
             );
+            if name == "AMT-owing" {
+                // ★★★ PINNED TO THE ORACLE-VALIDATED VECTOR
+                //     (`design/direction/G6-AMT-ORACLE-VALIDATION.md`). If this fixture drifts, it stops
+                //     being the return the two engines witnessed and these KATs start validating a
+                //     taxpayer nobody checked.
+                assert_eq!(
+                    crate::conventions::round_dollar(pr.forms.f6251.as_ref().unwrap().line11),
+                    dec!(11322),
+                    "AMT must stay the figure Tax-Calculator reproduces to $3 and OTS corroborates"
+                );
+                assert_eq!(
+                    pr.forms.f1040.line24,
+                    dec!(481225),
+                    "total tax, same vector"
+                );
+            }
             if let (Some(f), Some(l2)) = (pr.forms.f6251.as_ref(), line2) {
                 assert_eq!(
                     l2,
@@ -1381,6 +1397,14 @@ mod tests {
     ///
     /// ★ This is the comparison. A figure with no reader is not thereby correct — it is a wrong number
     ///   waiting for its first caller.
+    ///
+    /// ★★ ON THE STRICTNESS: `round_dollar(ar.total_tax)` rounds an exact-cents sum, while
+    /// `f1040.line24` sums independently rounded lines, so under SPEC §3.1's per-line rounding these
+    /// are not equal *in general* — they can legitimately differ by a dollar or two. Exact equality is
+    /// kept anyway, because it is the strongest statement these fixtures support and it is what caught
+    /// a $13,461 understatement. **If a future fixture reds this for a rounding reason, the fix is to
+    /// say so in the message and widen to a named tolerance — NOT to weaken it to something that would
+    /// also have passed with the AMT missing.**
     #[test]
     fn the_absolute_total_tax_equals_the_printed_1040_line_24() {
         for (name, hh, expect_amt) in [

@@ -29,8 +29,25 @@ fn repo_root() -> PathBuf {
 /// clause mid-sentence, so Form 8995 line 8's instruction reads *"…If zero\n or less, enter -0-…"* in
 /// the extract. A literal `contains` would miss it, and the SPEC r2 reviewer identified exactly this
 /// (WRAPPING) as a class the checker must not be blind to.
+/// ★★★ STANDALONE BRACE GLYPHS ARE DROPPED, and this is layout normalisation rather than an exception.
+///
+/// A form draws large `{` / `}` braces to group its bracketed rows, and `pdftotext` emits them as lone
+/// tokens INSIDE a sentence: Form 6251 line 6's own text comes out as *"…on lines 7, 9, and } 11, and
+/// go to line 10"*. Without this filter a `contains` over the extract REJECTS the faithful quote and
+/// ACCEPTS a truncated one ending *"…lines 7, 9, and"* — silently dropping line 11 from the zero-out
+/// set. That is the Form 6251 line-33 defect class: a citation shortened until the checker was
+/// satisfied, on the very form the transcription rule exists because of.
+///
+/// ★★ This checker and `f6251_map.rs::norm` are two authorities on one question ("is this quote
+/// verbatim?"). They now normalise identically. When they did not, the weaker one was satisfied by a
+/// degraded citation and reported success — r1 Minor.
+///
+/// ★ A lone `{`/`}` between spaces is a glyph, never instruction text, so no per-line list is involved.
 fn normalize(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ")
+    s.split_whitespace()
+        .filter(|t| *t != "{" && *t != "}")
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// ★★★ The CLOSED SET of clamp idioms, each paired with why it denotes that polarity.

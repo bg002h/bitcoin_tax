@@ -166,6 +166,20 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<FiledPacket, Fo
             crate::fill_schedule_se_full(l, header, year)?,
         );
     }
+    // ★★★ §G-6 — Form 6251, **Attachment Sequence No. 32** (read off the form itself, not guessed),
+    //     so it staples between Schedule SE ("17") and Form 8995 ("55"). `Some` exactly when i6251's
+    //     Who Must File condition 1 holds — core decides that, the filler transcribes it.
+    if let Some(amt) = f6251 {
+        push(
+            "f6251",
+            Some("32"),
+            crate::form6251::fill_form_6251_with_map(
+                amt,
+                header,
+                &crate::map::Form6251Map::ty2024(),
+            )?,
+        );
+    }
     if let Some(l) = f8995 {
         push("f8995", Some("55"), crate::fill_form_8995(l, header, year)?);
     }
@@ -182,20 +196,6 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<FiledPacket, Fo
                 p4.parts_i_to_iii.as_ref(),
                 header,
                 &crate::map::Form8995AMap::ty2024(),
-            )?,
-        );
-    }
-    // ★★★ §G-6 — Form 6251, **Attachment Sequence No. 32** (read off the form itself, not guessed),
-    //     so it staples between Schedule SE ("17") and Form 8995 ("55"). `Some` exactly when i6251's
-    //     Who Must File condition 1 holds — core decides that, the filler transcribes it.
-    if let Some(amt) = f6251 {
-        push(
-            "f6251",
-            Some("32"),
-            crate::form6251::fill_form_6251_with_map(
-                amt,
-                header,
-                &crate::map::Form6251Map::ty2024(),
             )?,
         );
     }

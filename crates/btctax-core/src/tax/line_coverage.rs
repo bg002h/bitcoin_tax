@@ -250,7 +250,12 @@ pub fn cover_form6251(p: &crate::tax::form6251::Form6251) -> Coverage {
         "Alternative minimum taxable income. Combine lines 1 through 3. (If married filing separately and line 4 is more than $875,950, see instructions.)");
     c.line(*line5, f, "5", "line5", Production::Constant, "Exemption.");
     c.line(*line6, f, "6", "line6", Production::Clamped(Polarity::FloorAtZero),
-        "Subtract line 5 from line 4. If more than zero, go to line 7. If zero or less, enter -0- here and on lines 7, 9, and");
+        // ★★★ THE FULL SENTENCE, including "11". r1 shipped this truncated at "and", which dropped
+        //     line 11 from the zero-out set — the map file names this exact trap ("a row-wise reader
+        //     stops at 'lines 7, 9,' and silently drops 11"). It passed only because this checker's
+        //     `normalize` did not strip the brace glyph that splits the sentence in the extract; it
+        //     now does, so the faithful quote matches and the truncated one would not.
+        "Subtract line 5 from line 4. If more than zero, go to line 7. If zero or less, enter -0- here and on lines 7, 9, and 11, and go to line 10");
     // ★★★ LINE 7 IS AN EXCEPTION, AND THE CHECKER IS WHY. Two things are true of it at once:
     //
     //   · IT HAS NO SINGLE PRODUCTION. The form prints THREE bullets under one label: a Form 2555
@@ -348,7 +353,7 @@ pub fn cover_form6251(p: &crate::tax::form6251::Form6251) -> Coverage {
         "Subtract line 23 from line 22",
     );
     c.line(*line25, f, "25", "line25", Production::Constant,
-        "Enter: • $518,900 if single, • $291,850 if married filing separately, • $583,750 if married filing jointly or qualifying surviving spouse, or • $551,350 if head of household. }");
+        "Enter: • $518,900 if single, • $291,850 if married filing separately, • $583,750 if married filing jointly or qualifying surviving spouse, or • $551,350 if head of household.");
     c.line(
         *line26,
         f,
