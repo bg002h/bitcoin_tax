@@ -619,8 +619,8 @@ $ btctax --vault v.pgp income show --year 2024
     "will_file_required_1099": null,
     "qbi_w2_wages": null,
     "qbi_ubia": null,
-    "is_sstb": null,
-    "is_cooperative_patron": null
+    "is_sstb": false,
+    "is_cooperative_patron": false
   },
   "schedule_a": {
     "medical": "2000",

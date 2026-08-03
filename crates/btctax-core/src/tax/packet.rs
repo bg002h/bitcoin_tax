@@ -508,7 +508,7 @@ pub struct PrintedForms {
     ///
     /// ★★ The two are ALTERNATIVES: exactly one is `Some` on any return that claims §199A at all.
     /// Filing both would claim the deduction twice on paper.
-    pub f8995a: Option<crate::tax::qbi_a::Form8995APartIv>,
+    pub f8995a: Option<crate::tax::qbi_a::Form8995A>,
     /// Form 8283 — REQUIRED when the return itemizes and its printed noncash gifts exceed $500 (the
     /// threshold is printed on Schedule A line 12 itself: "You must attach Form 8283 if over $500").
     ///
@@ -609,9 +609,18 @@ pub fn assemble_printed_forms(
     let on_8995a = ar.uses_8995a;
     let f8995a = on_8995a
         .then(|| {
-            f8995
-                .as_ref()
-                .map(crate::tax::qbi_a::Form8995APartIv::from_8995)
+            f8995.as_ref().map(|l| {
+                // ★★★ §G-28/B1b — Parts I–III travel WITH Part IV, built from the same `PrintedInputs`
+                //     `AbsoluteReturn` decided. Parts I–III are `None` for a filer with no qualified
+                //     trade or business (REIT/PTP only, or an SSTB §199A(d)(3) excluded), which is
+                //     i8995a's own "skip Parts I through III and complete Part IV".
+                crate::tax::qbi_a::Form8995A {
+                    // ★ TRANSCRIBED from `AbsoluteReturn`, which decided it where
+                    //   `FullReturnParams` is in scope. The printer never re-derives.
+                    parts_i_to_iii: ar.f8995a_parts_i_to_iii.clone(),
+                    part_iv: crate::tax::qbi_a::Form8995APartIv::from_8995(l),
+                }
+            })
         })
         .flatten();
     let f8995 = if f8995a.is_some() { None } else { f8995 };

@@ -1422,6 +1422,7 @@ mod tests {
             schedule_1a_additional: Usd::ZERO,
             excess_ss_not_creditable: Vec::new(),
             uses_8995a: false,
+            f8995a_parts_i_to_iii: None,
             amt: Default::default(),
             wages: z,
             taxable_interest: z,

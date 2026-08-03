@@ -120,6 +120,8 @@ class = "cash60"
 accounting_method = "cash"
 business_description = "Bitcoin mining"
 expenses = "1000"
+is_cooperative_patron = false
+is_sstb = false
 naics_code = "518210"
 owner = "taxpayer"
 

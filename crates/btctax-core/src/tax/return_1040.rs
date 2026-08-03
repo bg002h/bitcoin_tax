@@ -20,7 +20,8 @@ use crate::tax::charitable::apply_170b;
 use crate::tax::compute::{net_1222, CapNet};
 use crate::tax::method::qdcgt_line16;
 use crate::tax::other_taxes::{form_8959, form_8960, sch2_line4_se, Form8959, Form8960};
-use crate::tax::qbi::{compute_8995, qbi_over_threshold};
+use crate::tax::qbi::{compute_8995, has_qbi};
+use crate::tax::qbi_a::{qbi_after_sstb_exclusion, Qbi199aRegime};
 use crate::tax::return_inputs::{
     CarryProvenance, CharitableCarryItem, CharitableClass, CharitableGift, Owner, ReturnInputs,
 };
@@ -1166,6 +1167,12 @@ pub struct AbsoluteReturn {
     /// form, and that test needs `FullReturnParams`, which the printed-return assembler does not hold.
     /// Deciding it here means the printer transcribes a decision instead of re-deriving one.
     pub uses_8995a: bool,
+    /// **§G-28/B1b — Form 8995-A Parts I–III**, for the same reason [`Self::uses_8995a`] lives here:
+    /// Part III lines 21 and 23 are the §199A(e)(2) threshold and the phase-in range width, which come
+    /// from `FullReturnParams`, and the printed-return assembler does not hold it. `None` when there is
+    /// no qualified trade or business to list — a REIT/PTP-only filer, or one whose SSTB §199A(d)(3)
+    /// excluded.
+    pub f8995a_parts_i_to_iii: Option<crate::tax::qbi_a::Form8995APartIToIii>,
     /// Every (person, employer) pair whose Social Security withholding exceeded the §3101(a) cap —
     /// **not creditable** on this return, and therefore appearing on no line.
     ///
@@ -1437,8 +1444,23 @@ pub fn assemble_absolute(
     // OVERSTATED a miner's tax by ~20% of their business income. The P7 independent-oracle cross-check
     // found it (the PSL Tax-Calculator applies the deduction and btctax did not), and it confirms this
     // exact rule to the dollar: $60,000 profit − $4,239 half-SE = $55,761 of QBI ⇒ an $11,152 deduction.
-    let business_qbi =
+    let business_qbi_before_sstb =
         (schedule_c.as_ref().map_or(Usd::ZERO, |c| c.net_profit_31) - half_se).max(Usd::ZERO);
+    // ★★★ §G-28/B1b — §199A(d)(3): above the phase-in range a SPECIFIED SERVICE trade or business is
+    //     not a qualified trade or business at all, so *"no QBI, W-2 wages, or UBIA of qualified
+    //     property from the specified service trade or business are taken into account"* (i8995a).
+    //
+    //     ★★ Applied HERE, at the one place `business_qbi` is born, so the Form 8995 chain, Form
+    //     8995-A Parts I–III and the refusal screen all read the same figure. Applying it inside the
+    //     8995-A emitter instead would leave Form 8995 and Schedule SE reading an un-excluded QBI —
+    //     the two-authorities-for-one-number defect this codebase keeps finding.
+    let business_qbi = qbi_after_sstb_exclusion(
+        business_qbi_before_sstb,
+        // ★ Read off the INPUTS, and gated on the assembled Schedule C existing at all — a return
+        //   whose business assembled to nothing has no QBI for the exclusion to bite on.
+        schedule_c.is_some() && ri.schedule_c.as_ref().and_then(|c| c.is_sstb) == Some(true),
+        Qbi199aRegime::of(agi - deduction, ri.filing_status, params),
+    );
     let reit_dividends: Usd = ri.div_1099.iter().map(|d| d.box5_section_199a).sum();
     let net_capital_gain = qualified_dividends + net_ltcg; // Form 8995 line 12
     let qbi = compute_8995(
@@ -1525,6 +1547,44 @@ pub fn assemble_absolute(
         status,
         params,
     );
+    // §G-28/B1b — Parts I–III, decided here for the same reason: lines 21 and 23 need `params`.
+    //
+    // ★ Built from `business_qbi` AFTER the §199A(d)(3) SSTB exclusion above, so an excluded SSTB has
+    //   no qualified business and `compute` returns `None` — Parts I–III are then not filed at all,
+    //   which is what the statute means by "not a qualified trade or business".
+    let f8995a_parts_i_to_iii = uses_8995a
+        .then(|| {
+            crate::tax::qbi_a::Form8995APartIToIii::compute(
+                &crate::tax::qbi_a::PartIToIiiInputs {
+                    business_name: ri
+                        .schedule_c
+                        .as_ref()
+                        .map(|c| c.business_description.clone())
+                        .unwrap_or_default(),
+                    is_sstb: ri.schedule_c.as_ref().and_then(|c| c.is_sstb) == Some(true),
+                    business_qbi,
+                    // ★ `unwrap_or(ZERO)` is safe ONLY because `screen_absolute` refuses an
+                    //   unanswered pair above the threshold, and `uses_8995a` is false below it. A
+                    //   defaulted zero here would otherwise CAP the deduction at zero for a filer who
+                    //   does pay wages, which overstates their tax.
+                    w2_wages: ri
+                        .schedule_c
+                        .as_ref()
+                        .and_then(|c| c.qbi_w2_wages)
+                        .unwrap_or(Usd::ZERO),
+                    ubia: ri
+                        .schedule_c
+                        .as_ref()
+                        .and_then(|c| c.qbi_ubia)
+                        .unwrap_or(Usd::ZERO),
+                    ti_before_qbi: agi - deduction,
+                },
+                Qbi199aRegime::of(agi - deduction, status, params),
+                status,
+                params,
+            )
+        })
+        .flatten();
 
     // 1040 L25 withholding: 25a Σ W-2 box2; 25b Σ 1099 box4 (INT/DIV/G); 25c Form 8959 Part V + other.
     let wh_25a: Usd = ri.w2s.iter().map(|w| w.box2_fed_withheld).sum();
@@ -1609,6 +1669,7 @@ pub fn assemble_absolute(
         excess_social_security,
         excess_ss_not_creditable,
         uses_8995a,
+        f8995a_parts_i_to_iii,
         withholding_25a: wh_25a,
         withholding_25b: wh_25b,
         total_withholding,
@@ -1814,40 +1875,130 @@ pub fn screen_absolute(
         }
     }
 
-    // (a) QBI above the §199A(e)(2) threshold → 8995-A phase-in unmodeled.
+    // (a) §199A — the sub-schedules of Form 8995-A that btctax does not fill, and the two answers it
+    //     needs before it can choose between Form 8995 and Form 8995-A at all.
+    //
+    // ★★★ §G-28/B1b REPLACED a single blanket `QbiAboveThreshold` here. The old refusal covered every
+    //     filer above the §199A(e)(2) threshold on the grounds that "the 8995-A phase-in is unmodeled";
+    //     Parts I–III now ARE modelled, so what is left is precisely the four schedules attached to
+    //     8995-A — A (SSTB in the range), B (aggregation), C (loss carryforward) and D (patron) —
+    //     each of which gets its own named refusal below. Keeping one broad reason would have hidden
+    //     which schedule was actually missing, and refused the majority of filers who need none of them.
     let reit_dividends: Usd = ri.div_1099.iter().map(|d| d.box5_section_199a).sum();
-    if qbi_over_threshold(
-        ar.printed_inputs.business_qbi, // the Schedule C trade or business now earns §199A too
+    let ti_before_qbi = ar.agi - ar.deduction; // Form 8995 line 11 / 8995-A line 20
+    let regime = Qbi199aRegime::of(ti_before_qbi, ri.filing_status, params);
+    let files_a_199a_form = has_qbi(
+        ar.printed_inputs.business_qbi,
         reit_dividends,
         ri.qbi.reit_ptp_carryforward_in,
         ri.qbi.qbi_carryforward_in,
-        ar.agi - ar.deduction, // TI before QBI (Form 8995 line 11)
-        ri.filing_status,
-        params,
-    ) {
-        // ★★ §G-28/B1b — the SSTB answer becomes MANDATORY exactly here, where taxable income is known.
-        //    Past the phase-in range an SSTB's QBI is excluded ENTIRELY (§199A(d)(3)), so an unasked
-        //    "no" hands the filer a deduction the statute denies. Below the threshold the question is
-        //    offered and skippable, because the simplified Form 8995 never asks it.
-        //
-        //    ★ Checked BEFORE the wage/UBIA refusal below: if the business is an SSTB above the range
-        //      the deduction is zero regardless of wages, so asking for wages first would demand two
-        //      numbers that cannot matter.
-        if ri.schedule_c.as_ref().is_some_and(|c| c.is_sstb.is_none()) {
+    );
+    if files_a_199a_form {
+        if let Some(c) = ri.schedule_c.as_ref() {
+            // ★★ THE PATRON QUESTION IS MANDATORY AT ANY INCOME, and that is the whole point of it:
+            //    Form 8995-A's header says to use that form if taxable income is above the threshold
+            //    "or you're a patron of an agricultural or horticultural cooperative", and Form 8995's
+            //    "Who Must File" says the same in reverse. An unasked `no` therefore does not merely
+            //    leave a box blank — it prints the WRONG FORM.
+            match c.is_cooperative_patron {
+                None => {
+                    return refusal(
+                        RefuseReason::CooperativePatronUnanswered,
+                        "whether you are a PATRON of an agricultural or horticultural cooperative \
+                         decides which §199A form you file: Form 8995-A's own header sends a patron \
+                         to that form at ANY income, and Form 8995 excludes them. btctax cannot pick \
+                         the form without the answer — run `btctax income answer`",
+                    );
+                }
+                Some(true) => {
+                    return refusal(
+                        RefuseReason::CooperativePatron,
+                        "a patron of an agricultural or horticultural cooperative must reduce the \
+                         qualified business income component by an amount figured on Schedule D \
+                         (Form 8995-A) — Form 8995-A line 14. btctax does not fill that schedule, and \
+                         filing with line 14 blank would OVERSTATE your deduction",
+                    );
+                }
+                Some(false) => {}
+            }
+            // ★★ The SSTB answer is mandatory only ABOVE the threshold. Below it the simplified Form
+            //    8995 has no such checkbox, so the answer changes nothing and demanding it would be a
+            //    refusal with no purpose.
+            //
+            //    ★ Asked BEFORE the sub-schedule refusals below, because if the business is an SSTB
+            //      above the range the deduction is zero regardless of wages or UBIA, and demanding
+            //      two figures that cannot matter is the wrong question.
+            if regime != Qbi199aRegime::AtOrBelowThreshold {
+                match c.is_sstb {
+                    None => {
+                        return refusal(
+                            RefuseReason::SstbUnanswered,
+                            "above the §199A(e)(2) threshold, whether the business is a SPECIFIED \
+                             SERVICE trade or business decides the deduction — past the phase-in \
+                             range an SSTB's qualified business income is EXCLUDED ENTIRELY \
+                             (§199A(d)(3)), so an unasked `no` would hand you a deduction the statute \
+                             denies and understate your tax. It is a checkbox on Form 8995-A because \
+                             only you can answer it — run `btctax income answer`",
+                        );
+                    }
+                    // ★★★ INSIDE the range an SSTB is only PARTLY excluded — an "applicable
+                    //     percentage" scales its QBI, W-2 wages and UBIA on Schedule A (Form 8995-A)
+                    //     before Part I ever runs. ABOVE the range no schedule is needed: the business
+                    //     is simply not a qualified trade or business, which core handles.
+                    Some(true) if regime == Qbi199aRegime::InPhaseInRange => {
+                        return refusal(
+                            RefuseReason::SstbInPhaseInRange,
+                            "your taxable income is inside the §199A phase-in range and the business \
+                             is a SPECIFIED SERVICE trade or business, so only an APPLICABLE \
+                             PERCENTAGE of it is treated as a qualified trade or business — figured \
+                             on Schedule A (Form 8995-A), which btctax does not fill. Above the range \
+                             no such schedule is needed and btctax files the return",
+                        );
+                    }
+                    Some(_) => {}
+                }
+            }
+            // ★★★ THE §199A(b)(2) LIMITATION AMOUNTS. Above the threshold Form 8995-A lines 4 and 7
+            //     decide the cap, and `assemble_absolute` defaults both to ZERO when building Parts
+            //     I–III — a default that is safe ONLY because this refusal stands in front of it.
+            //
+            //     Neither direction of a default is safe: zero CAPS the deduction at zero for a filer
+            //     who does pay wages (overstating their tax), and anything else invents wages they
+            //     never reported (understating it). So `None` refuses at the point of need.
+            //
+            //     ★ Gated on there BEING a qualified trade or business: an excluded SSTB and a
+            //       REIT/PTP-only filer both reach Part IV without ever touching lines 4 or 7, and
+            //       demanding two figures nothing reads would be a refusal with no purpose.
+            if regime != Qbi199aRegime::AtOrBelowThreshold
+                && ar.printed_inputs.business_qbi > Usd::ZERO
+                && (c.qbi_w2_wages.is_none() || c.qbi_ubia.is_none())
+            {
+                return refusal(
+                    RefuseReason::QbiAboveThreshold,
+                    "above the §199A(e)(2) threshold the deduction is capped by the GREATER of 50% of \
+                     the W-2 wages your business paid, or 25% of those wages plus 2.5% of the \
+                     unadjusted basis of its qualified property (Form 8995-A lines 4 and 7). btctax \
+                     will not guess either one — a guessed zero would cap your deduction at zero, and \
+                     any other guess would invent wages you never reported. If your business has no \
+                     employees and no property, answer zero and the return files — run \
+                     `btctax income answer`",
+                );
+            }
+        }
+        // ★★ A prior-year qualified business net loss carryforward needs Schedule C (Form 8995-A)
+        //    before Part I — but ONLY on the 8995-A path. The simplified Form 8995 carries the same
+        //    carryforward on its own line 3, which btctax already fills, so this must not refuse below
+        //    the threshold. (A CURRENT-year loss refuses further upstream as `ScheduleCLoss`.)
+        if regime != Qbi199aRegime::AtOrBelowThreshold && ri.qbi.qbi_carryforward_in > Usd::ZERO {
             return refusal(
-                RefuseReason::SstbUnanswered,
-                "above the §199A(e)(2) threshold, whether the business is a SPECIFIED SERVICE trade or \
-                 business decides the deduction — past the phase-in range an SSTB's qualified business \
-                 income is EXCLUDED ENTIRELY (§199A(d)(3)), so an unasked `no` would hand you a \
-                 deduction the statute denies and understate your tax. It is a checkbox on Form 8995-A \
-                 because only you can answer it — run `btctax income answer`",
+                RefuseReason::QbiCarryforwardNeedsSchedule8995AC,
+                "a qualified business net loss carried forward from a prior year must be netted on \
+                 Schedule C (Form 8995-A) before Form 8995-A Part I — i8995a requires it whenever such \
+                 a carryforward exists — and btctax does not fill that schedule. Below the §199A(e)(2) \
+                 threshold the simplified Form 8995 carries the same figure on its line 3, and btctax \
+                 files that return",
             );
         }
-        return refusal(
-            RefuseReason::QbiAboveThreshold,
-            "taxable income before the QBI deduction is above the §199A(e)(2) threshold — Form 8995-A's \
-             W-2-wage and UBIA limitations (Part II) need two figures btctax does not yet collect",
-        );
     }
 
     // (b) Form 6251 Who Must File, condition 1 (§4.11).
@@ -3598,12 +3749,20 @@ mod tests {
     /// argument to `qbi_over_threshold` was load-bearing and untested: the reviewer replaced it with
     /// `Usd::ZERO` — deleting the refusal for every Schedule C filer — and all 1702 tests still passed.
     ///
-    /// This is the guarantee `LIMITATIONS.md` and SPEC §4.5 advertise: above the threshold the law
-    /// requires Form 8995-A's W-2-wage and UBIA limits, which can make the deduction **SMALLER** than
-    /// the simplified computation. Handing an over-threshold miner the simplified deduction anyway
-    /// overstates it — and understates their tax. btctax must refuse, not guess.
+    /// ★★★ §G-28/B1b — THIS RETURN NO LONGER REFUSES. It is the case the blocker existed for.
+    ///
+    /// A sole proprietor above the §199A(e)(2) threshold with no employees and no qualified property:
+    /// §199A(b)(2) caps the deduction at the greater of 50% of W-2 wages ($0) and 25% of wages plus
+    /// 2.5% of UBIA ($0), so the cap is **zero** and so is the deduction. That is a real answer,
+    /// figured from two numbers the filer can state — and the old blanket `QbiAboveThreshold` refusal
+    /// was refusing a return Form 8995-A tells us exactly how to complete.
+    ///
+    /// ★★ The assertion is deliberately BOTH halves: the return computes, AND the deduction is the
+    /// figure the cap produces. A test that only asserted "no refusal" would pass just as well if the
+    /// deduction silently became the uncapped 20% of QBI — which is the overstating direction, and
+    /// the direction the refusal was protecting against in the first place.
     #[test]
-    fn qbi_above_threshold_refuses_on_a_schedule_c_business_with_no_reit_dividends() {
+    fn an_over_threshold_schedule_c_with_no_wages_now_files_with_a_zero_deduction() {
         let p = ty2024_params();
         let table = synthetic_table(2024);
         let ri = ReturnInputs {
@@ -3611,17 +3770,24 @@ mod tests {
             schedule_c: Some(ScheduleCInputs {
                 owner: Owner::Taxpayer,
                 business_description: "Bitcoin mining".into(),
-                // ★ ANSWERED, so this vector reaches the wage/UBIA refusal it is about. The SSTB
-                //   mandate sits in front of it; `an_unanswered_sstb_refuses_before_the_wage_ubia_
-                //   refusal` covers the blank.
                 is_sstb: Some(false),
+                is_cooperative_patron: Some(false),
+                // ★ ANSWERED as zero, which is a real fact about a solo miner — not a default. An
+                //   UNANSWERED pair still refuses; `an_unanswered_wage_or_ubia_figure_refuses` covers it.
+                qbi_w2_wages: Some(Usd::ZERO),
+                qbi_ubia: Some(Usd::ZERO),
                 ..Default::default()
             }),
             ..Default::default()
         };
-        // $260,000 of mined crypto: TI-before-QBI = 260,000 − ½SE − 14,600 std, comfortably over the
-        // $191,950 single threshold, and there is not a single REIT dividend on the return.
-        let st = state_income(vec![mining(dec!(260000))]);
+        // $400,000 of mined crypto ⇒ TI-before-QBI ≈ $369,590, clear of the $241,950 TOP of the single
+        // phase-in range, and there is not a single REIT dividend on the return.
+        //
+        // ★ $260,000 was the figure the old refusal test used, and it lands INSIDE the range (≈
+        //   $231,465) — where Part III correctly yields a PARTIAL deduction rather than zero. Worth
+        //   recording: the first draft of this test asserted the above-the-range answer on an
+        //   in-range fixture and read as a bug in the code.
+        let st = state_income(vec![mining(dec!(400000))]);
         let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
 
         assert!(
@@ -3629,14 +3795,78 @@ mod tests {
             "the fixture must actually produce business QBI, else this test is vacuous"
         );
         assert!(
-            ar.agi - ar.deduction > p.qbi_ti_threshold(FilingStatus::Single),
-            "TI-before-QBI must clear the §199A(e)(2) threshold, else this test is vacuous"
+            ar.agi - ar.deduction > p.qbi_phase_in_top(FilingStatus::Single),
+            "TI-before-QBI must clear the TOP of the phase-in range, else Part III softens the cap \
+             and this test is asserting the wrong regime's answer"
         );
         assert_eq!(
             screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024).map(|r| r.reason),
-            Some(RefuseReason::QbiAboveThreshold),
-            "an over-threshold Schedule C business must REFUSE — 8995-A's wage/UBIA limits are unmodeled"
+            None,
+            "an over-threshold Schedule C with no wages and no UBIA is COMPUTABLE — Form 8995-A \
+             Parts I-III figure the §199A(b)(2) cap from two numbers the filer stated"
         );
+        // ★★ …and the cap is what produced the answer, not an uncapped 20% of QBI.
+        let f = ar
+            .f8995a_parts_i_to_iii
+            .as_ref()
+            .expect("a trade or business above the threshold files Parts I-III");
+        assert!(
+            f.part_ii.line3 > Usd::ZERO,
+            "line 3 (20% of QBI) must be non-zero, else the cap has nothing to bind against"
+        );
+        assert_eq!(
+            f.part_ii.line10,
+            Usd::ZERO,
+            "line 10 — the greater of 50%×0 wages and 25%×0 + 2.5%×0 UBIA"
+        );
+        assert_eq!(
+            f.part_ii.line16,
+            Usd::ZERO,
+            "so the qualified business income component is ZERO, not 20% of QBI"
+        );
+        assert!(
+            ar.uses_8995a,
+            "and it files Form 8995-A, not the simplified 8995"
+        );
+    }
+
+    /// ★★★ An UNANSWERED W-2-wage or UBIA figure still refuses above the threshold.
+    ///
+    /// `assemble_absolute` defaults both to zero when building Parts I–III, and that default is safe
+    /// ONLY because this refusal stands in front of it. A defaulted zero would CAP the deduction at
+    /// zero for a filer who does pay wages — overstating their tax — and any other default would
+    /// invent wages they never reported. Neither direction is safe, so `None` refuses at the point of
+    /// need. This test is what reds if the refusal is ever narrowed away and the default is left.
+    #[test]
+    fn an_unanswered_wage_or_ubia_figure_refuses_above_the_threshold() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let st = state_income(vec![mining(dec!(260000))]);
+        for (wages, ubia, which) in [
+            (None, Some(Usd::ZERO), "W-2 wages"),
+            (Some(Usd::ZERO), None, "UBIA"),
+            (None, None, "both"),
+        ] {
+            let ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                schedule_c: Some(ScheduleCInputs {
+                    owner: Owner::Taxpayer,
+                    business_description: "Bitcoin mining".into(),
+                    is_sstb: Some(false),
+                    is_cooperative_patron: Some(false),
+                    qbi_w2_wages: wages,
+                    qbi_ubia: ubia,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+            assert_eq!(
+                screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024).map(|r| r.reason),
+                Some(RefuseReason::QbiAboveThreshold),
+                "an unanswered {which} above the threshold must REFUSE, not default to zero"
+            );
+        }
     }
 
     /// ★★★ §G-28/B1b — ABOVE the §199A(e)(2) threshold an UNANSWERED SSTB checkbox refuses, and it
@@ -3655,7 +3885,8 @@ mod tests {
             schedule_c: Some(ScheduleCInputs {
                 owner: Owner::Taxpayer,
                 business_description: "Bitcoin mining".into(),
-                is_sstb: None, // ← the only difference from the vector above
+                is_cooperative_patron: Some(false), // answered; it precedes the SSTB mandate
+                is_sstb: None,                      // ← the only difference from the vector above
                 ..Default::default()
             }),
             ..Default::default()
@@ -3691,6 +3922,7 @@ mod tests {
             schedule_c: Some(ScheduleCInputs {
                 owner: Owner::Taxpayer,
                 business_description: "Bitcoin mining".into(),
+                is_cooperative_patron: Some(false),
                 is_sstb: None,
                 ..Default::default()
             }),

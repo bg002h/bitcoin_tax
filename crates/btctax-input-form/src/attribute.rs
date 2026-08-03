@@ -46,8 +46,17 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::OtherIncomeUnanswered | R::OtherIncomeOutOfScope => {
             vec![decl(QuestionId::OtherOutOfScopeIncome)]
         }
-        // §G-28/B1b — a SKIPPABLE, offered always and mandatory only above the §199A threshold.
+        // §G-28/B1b — SKIPPABLES, offered always and mandatory only where the answer changes the form.
         R::SstbUnanswered => vec![skip(btctax_core::tax::questions::SkippableId::ScheduleCIsSstb)],
+        R::CooperativePatronUnanswered => vec![skip(
+            btctax_core::tax::questions::SkippableId::ScheduleCIsCooperativePatron,
+        )],
+        // ★ These three are NOT unanswered questions — the filer answered, and the answer is one
+        //   btctax cannot file (a sub-schedule of Form 8995-A it does not fill). No input fixes them,
+        //   so there is nothing to point the filer at.
+        R::CooperativePatron
+        | R::SstbInPhaseInRange
+        | R::QbiCarryforwardNeedsSchedule8995AC => vec![],
         R::AmtCarryoverDeclarationUnanswered => vec![decl(QuestionId::AmtCarryoverSameAsRegular)],
         R::AmtDepreciationDeclarationUnanswered => {
             vec![decl(QuestionId::AmtDepreciationSameAsRegular)]

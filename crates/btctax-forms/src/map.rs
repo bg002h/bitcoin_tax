@@ -1116,6 +1116,70 @@ pub struct Form8995AMap {
     pub line39: MoneyCell,
     /// Parenthesized — POSITIVE MAGNITUDE.
     pub line40: MoneyCell,
+    /// §G-28/B1b — Part I row A's five columns. See the map TOML for how (b)/(c)/(d)/(e) were assigned
+    /// by x-position: the dump lists the checkboxes c1_3, c1_1, c1_2, so reading field order would
+    /// transpose "specified service" with "patron".
+    pub part1_row_a: Form8995APartIRowACells,
+    /// §G-28/B1b — Part II lines 2-16, COLUMN A (the first widget of each row triple).
+    pub part2_col_a: Form8995APartIiCells,
+    /// §G-28/B1b — Part III lines 17-26. Lines 20-24 are the single `Ln` entry boxes, NOT column A.
+    pub part3_col_a: Form8995APartIiiCells,
+}
+
+/// Form 8995-A Part I, row A — the five columns the form prints left to right.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Form8995APartIRowACells {
+    /// 1(a) "Trade, business, or aggregation name".
+    pub name: String,
+    /// 1(d) "Taxpayer identification number" (`/MaxLen` 11 ⇒ hyphenated SSN).
+    pub tin: String,
+    /// 1(b) "Check if specified service".
+    pub specified_service: CheckChoice,
+    /// 1(c) "Check if aggregation".
+    pub aggregation: CheckChoice,
+    /// 1(e) "Check if patron".
+    pub patron: CheckChoice,
+}
+
+/// Form 8995-A Part II, column A — lines 2-16.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Form8995APartIiCells {
+    pub line2: MoneyCell,
+    pub line3: MoneyCell,
+    pub line4: MoneyCell,
+    pub line5: MoneyCell,
+    pub line6: MoneyCell,
+    pub line7: MoneyCell,
+    pub line8: MoneyCell,
+    pub line9: MoneyCell,
+    pub line10: MoneyCell,
+    pub line11: MoneyCell,
+    /// "Enter the amount from line 26, **if any**" — mapped so the cell is authorized, written only
+    /// when Part III ran.
+    pub line12: MoneyCell,
+    pub line13: MoneyCell,
+    /// "Enter the amount from Schedule D (Form 8995-A), line 6, **if any**" — btctax fills no
+    /// Schedule D (a patron refuses), so this is always blank.
+    pub line14: MoneyCell,
+    pub line15: MoneyCell,
+    pub line16: MoneyCell,
+}
+
+/// Form 8995-A Part III — lines 17-26.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Form8995APartIiiCells {
+    pub line17: MoneyCell,
+    pub line18: MoneyCell,
+    pub line19: MoneyCell,
+    /// Lines 20-24 are the `LnNN` single-entry boxes at x≈[266,338], NOT the `_RO` column mirrors.
+    pub line20: MoneyCell,
+    pub line21: MoneyCell,
+    pub line22: MoneyCell,
+    pub line23: MoneyCell,
+    /// A PERCENTAGE, not a dollar amount — the form prints the `%` beside the box.
+    pub line24: MoneyCell,
+    pub line25: MoneyCell,
+    pub line26: MoneyCell,
 }
 
 impl Form8995AMap {

@@ -324,6 +324,11 @@ pub fn kitchen_sink_household() -> (ReturnInputs, LedgerState) {
             business_description: "Bitcoin mining".into(),
             naics_code: "518210".into(),
             expenses: dec!(1000),
+            // ★ §G-28/B1b — ANSWERED, and both answers are facts about this synthetic household
+            //   rather than fixture grease: crypto mining is not one of §199A(d)(2)'s specified
+            //   service fields, and a miner is not a patron of an agricultural cooperative.
+            is_sstb: Some(false),
+            is_cooperative_patron: Some(false),
             ..Default::default()
         }),
         // Itemized ≈ 10,000 SALT (capped) + 22,000 mortgage + 5,000 charity ⇒ well over the $29,200
@@ -705,6 +710,10 @@ pub fn build_golden_return(i: &GoldenInputs) -> (ReturnInputs, LedgerState) {
         ri.schedule_c = Some(ScheduleCInputs {
             owner: Owner::Taxpayer,
             business_description: "Bitcoin mining".into(),
+            // ★ §G-28/B1b — see the kitchen-sink fixture above: mining is neither an SSTB nor a
+            //   cooperative patronage, so these are the household's real answers.
+            is_sstb: Some(false),
+            is_cooperative_patron: Some(false),
             ..Default::default()
         });
     }

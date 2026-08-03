@@ -177,7 +177,8 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<FiledPacket, Fo
             "f8995a",
             Some("55A"),
             crate::form8995a::fill_form_8995a_with_map(
-                p4,
+                &p4.part_iv,
+                p4.parts_i_to_iii.as_ref(),
                 header,
                 &crate::map::Form8995AMap::ty2024(),
             )?,

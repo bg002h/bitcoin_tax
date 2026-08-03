@@ -206,6 +206,28 @@ pub enum RefuseReason {
     /// the §199A(e)(2) threshold — the simplified Form 8995 no longer applies and the 8995-A phase-in is
     /// unmodeled in v1 (SPEC §4.5). Compute-dependent (needs L12 → TI-before-QBI).
     QbiAboveThreshold,
+    /// **§G-28/B1b** — the filer is a PATRON of an agricultural or horticultural cooperative. Form
+    /// 8995-A Part II line 14 subtracts a patron reduction figured on **Schedule D (Form 8995-A)**,
+    /// which btctax does not fill; filing with line 14 blank would OVERSTATE the deduction. Note this
+    /// refuses at ANY income — 8995-A's own header sends a patron to that form regardless.
+    CooperativePatron,
+    /// **§G-28/B1b** — a SPECIFIED SERVICE trade or business whose taxable income is INSIDE the
+    /// §199A phase-in range. i8995a Exception 2: *"an applicable percentage of your SSTB is treated as
+    /// a qualified trade or business, you must complete Schedule A (Form 8995-A)"* — which scales QBI,
+    /// W-2 wages and UBIA before Part I. btctax does not fill that schedule, and approximating the
+    /// applicable percentage would overstate the deduction.
+    SstbInPhaseInRange,
+    /// **§G-28/B1b** — a prior-year qualified business net LOSS carryforward on a return that files
+    /// Form 8995-A. i8995a: *"If any of your trades, businesses, or aggregations have a qualified
+    /// business loss for the current year **or you have a qualified business net loss carryforward from
+    /// prior years**, you must complete Schedule C (Form 8995-A) before starting Form 8995-A, Part I."*
+    /// btctax does not fill it. (Below the threshold the simplified Form 8995 carries the same
+    /// carryforward on its own line 3, so this refuses only on the 8995-A path.)
+    QbiCarryforwardNeedsSchedule8995AC,
+    /// **§G-28/B1b** — Form 8995-A Part I column (e) is unanswered on a return that files a §199A form.
+    /// The answer decides WHICH form is filed, so an unasked "no" prints the simplified Form 8995 for a
+    /// filer the instructions send to 8995-A.
+    CooperativePatronUnanswered,
     /// **Form 6251 must be ATTACHED** — i6251, *Who Must File*, condition 1: line 7 is greater than
     /// line 10. btctax COMPUTES the form for every return (v0.14.0+) but cannot yet file it, so such a
     /// return is refused rather than filed incomplete. Compute-dependent (needs the assembled return).

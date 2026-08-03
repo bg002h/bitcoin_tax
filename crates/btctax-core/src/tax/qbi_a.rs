@@ -86,6 +86,22 @@ impl Qbi199aRegime {
     }
 }
 
+/// The whole of **Form 8995-A** as btctax files it.
+///
+/// ★★ Parts I–III and Part IV travel together in ONE value rather than as two parallel `Option`s on
+/// the packet. Part IV line 27 is *"Enter the amount from line 16"*, so a Part IV without its Parts
+/// I–III is a form whose top line totals a grid that is not there — and two independent `Option`s
+/// make that state representable. This makes it unrepresentable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Form8995A {
+    /// `None` for a filer with no qualified trade or business — i8995a's *"If you don't have QBI, and
+    /// only have REIT, PTP, skip Parts I through III and complete Part IV."* Also `None` when
+    /// §199A(d)(3) excluded the filer's SSTB, which leaves them with no qualified business either.
+    pub parts_i_to_iii: Option<Form8995APartIToIii>,
+    /// Part IV — always present; it is the part that produces the deduction.
+    pub part_iv: Form8995APartIv,
+}
+
 /// §199A(d)(3) — the QBI that survives the **specified-service exclusion**.
 ///
 /// ★★★ ABOVE the phase-in range an SSTB is **not a qualified trade or business at all**, so this is not
@@ -127,9 +143,11 @@ pub struct Form8995ARowA {
     /// Schedule B (Form 8995-A), and btctax has exactly one. There is nothing to aggregate, so the
     /// unchecked box is the correct answer rather than an unasked one.
     pub col_c_aggregation: bool,
-    /// L1 column **(d)** — *"Taxpayer identification number"*. A sole proprietor's is their SSN;
-    /// btctax has no EIN input, matching Form 8995 row 1i(b).
-    pub col_d_tin: String,
+    // ★★★ COLUMN (d), the TIN, IS DELIBERATELY NOT HERE. It is the PROPRIETOR's SSN — a
+    //     spouse-owned business files under the spouse's, even on a joint return — and the emitter
+    //     already resolves that from `header.proprietor` and renders it against the target cell's own
+    //     `/MaxLen`, exactly as Form 8995 row 1i(b) does. Carrying it in core would (a) create a
+    //     second authority for one identity and (b) put an SSN into a struct that goldens serialize.
     /// L1 column **(e)** — *"Check if patron"*. Always `false` on a filed return: a `yes` answer
     /// refuses upstream, because a patron needs Schedule D (Form 8995-A) for the line 14 reduction.
     pub col_e_patron: bool,
@@ -248,8 +266,6 @@ pub struct Form8995APartIToIii {
 pub struct PartIToIiiInputs {
     /// Part I column (a) and Schedule C line A.
     pub business_name: String,
-    /// Part I column (d) — the sole proprietor's SSN.
-    pub tin: String,
     /// Part I column (b).
     pub is_sstb: bool,
     /// L2 — QBI from the trade or business (net profit less the deductible half of SE tax).
@@ -354,7 +370,6 @@ impl Form8995APartIToIii {
                 col_a_name: i.business_name.clone(),
                 col_b_specified_service: i.is_sstb,
                 col_c_aggregation: false,
-                col_d_tin: i.tin.clone(),
                 col_e_patron: false,
             },
             part_ii: Form8995APartIi {
@@ -634,7 +649,6 @@ mod tests {
     fn inputs(business_qbi: Usd, w2_wages: Usd, ubia: Usd, ti: Usd) -> PartIToIiiInputs {
         PartIToIiiInputs {
             business_name: "Bitcoin mining".into(),
-            tin: "123-45-6789".into(),
             is_sstb: false,
             business_qbi,
             w2_wages,
@@ -910,10 +924,6 @@ mod tests {
             &p,
         );
         assert_eq!(f.part_i.col_a_name, "Bitcoin mining");
-        assert_eq!(
-            f.part_i.col_d_tin, "123-45-6789",
-            "a sole proprietor's TIN is their SSN"
-        );
         assert!(
             f.part_i.col_b_specified_service,
             "column (b) carries the filer's own answer"
