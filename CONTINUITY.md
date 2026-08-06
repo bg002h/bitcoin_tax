@@ -14,7 +14,7 @@ git log --oneline -4
 ```
 
 **This branch has never been pushed and is UNBACKED — it exists on one machine.** It cannot be pushed
-today: the generic PII scan flags the synthetic EINs (`90-0000001`, …) quoted inside
+today: the generic PII scan flags the synthetic EINs quoted inside
 `reviews/scrub-r1-workflow.md`, which is *sweep finding #4 landing on the review that filed it*. It
 pushes once `synthetic_ein` gets a documented structural window plus an `ALLOWED_EIN_SYNTHETIC` rule
 (SPEC §7, build step 7). Until then, **do not delete this branch and do not `git checkout` carelessly.**

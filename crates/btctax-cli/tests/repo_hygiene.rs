@@ -280,6 +280,22 @@ fn the_pii_exclusion_rule_admits_only_impossible_identifiers() {
         ),
         // ── EINs: token-exact, no structural rule is available ──────────────────────────────────
         ("12-3456789", true, "documented synthetic EIN"),
+        // ── ADMITTED: synthetic EINs quoted in PERSISTED REVIEW ARTIFACTS ───────────────────────
+        // ★ Minted by `scrub::synthetic_ein` and quoted inside reviews that must stay verbatim. Pinned
+        //   so the bucket cannot be deleted silently — and so its SHAPE is visible: these are ordinary
+        //   valid-looking EINs, admitted by citation alone, which is why SPEC_income_scrub §7 moves the
+        //   generator into a structural window instead of growing this list.
+        (
+            "90-0000001",
+            true,
+            "the EIN-splitting reproduction, scrub code review",
+        ),
+        ("91-0000002", true, "…its second employer"),
+        (
+            "55-5555555",
+            true,
+            "a worked EIN example, scrub spec review",
+        ),
         (
             "56-1234567",
             true,
@@ -332,6 +348,14 @@ fn the_pii_exclusion_rule_admits_only_impossible_identifiers() {
             format!("{}-{}", "55", "1234567"),
             false,
             "an EIN not on the list",
+        ),
+        // ★★ THE NEAR-MISS for the review-artifact bucket: one digit off a listed token must still
+        //    FLAG. A bucket admitted by citation has no structural shape to lean on, so the only
+        //    thing standing between it and a blanket `9N-` hole is that it is token-EXACT.
+        (
+            format!("{}-{}", "90", "0000002"),
+            false,
+            "adjacent to a review-artifact EIN, but not one",
         ),
     ];
     let vectors: Vec<(&str, bool, &str)> = vectors

@@ -113,9 +113,24 @@ ALLOWED_SSN_UNPUSHED_HISTORY='^(111-22-0004|111-22-0009|333-44-5555)$'
 #                  example, design/direction/FILING-TRIAL-2026-08-02.md. Same
 #                  unpushed-history case as the SSN bucket above: absent at HEAD,
 #                  present in the commit that introduced the trial write-up.
+# ── EIN exclusion, part 2: synthetic EINs QUOTED IN PERSISTED REVIEW ARTIFACTS ──
+# ★★★ These are minted by `btctax_core::tax::scrub::synthetic_ein` and appear inside review documents
+#     that the workflow requires be kept VERBATIM (reviews/scrub-r1-workflow.md,
+#     reviews/scrub-spec-r1-review.md). Editing a reviewer's persisted output to clear a scan would
+#     falsify the record to make a gate green — the same refusal recorded for the SSN legacy list.
+#
+#   90-0000001  — the EIN-splitting reproduction in the scrub code review: one employer's two W-2
+#   91-0000002    spellings became TWO synthetic employers, manufacturing an excess-SS credit
+#   55-5555555  — a worked EIN example inside the scrub SPEC review
+#
+# ★ THIS BUCKET IS RESIDUE, NOT A PATTERN. `design/SPEC_income_scrub.md` §7 moves `synthetic_ein`
+#   into a documented STRUCTURAL window so future output needs no entry here at all. These three
+#   predate that and are permanent only because the documents quoting them are.
+ALLOWED_EIN_REVIEW_ARTIFACT='^(90-0000001|91-0000002|55-5555555)$'
+
 ALLOWED_EIN='^(11-1111111|22-2222222|33-3333333|44-4444444|12-3456789|98-7654321|99-1234567|56-1234567)$'
 
-ALLOWED="$ALLOWED_SSN_IMPOSSIBLE|$ALLOWED_SSN_LEGACY|$ALLOWED_SSN_UNPUSHED_HISTORY|$ALLOWED_EIN"
+ALLOWED="$ALLOWED_SSN_IMPOSSIBLE|$ALLOWED_SSN_LEGACY|$ALLOWED_SSN_UNPUSHED_HISTORY|$ALLOWED_EIN|$ALLOWED_EIN_REVIEW_ARTIFACT"
 
 # Token-level extraction [R0-M1]: -o emits only matched tokens; exclusions filter
 # tokens, not lines. -I skips binaries [R0-M3]; git grep is tree-accurate and
