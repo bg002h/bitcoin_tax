@@ -1,23 +1,27 @@
 # CONTINUITY — bitcoin_tax (TaxApp)
 
-_Last updated: **2026-08-03** (v0.16.0 released; `income scrub` spec r2). Written at a pause; safe to exit._
+_Last updated: **2026-08-05** (v0.16.0 released; `income scrub` spec r2; branch pushed). Written at a pause; safe to exit._
 
 ---
 
 ## ▶ RESUME HERE — `income scrub`, spec r2 folded, **awaiting re-review**. No code yet.
 
-### ★★★ FIRST: YOU ARE ON `feat/income-scrub`, AND IT IS LOCAL ONLY
+### FIRST: YOU ARE ON `feat/income-scrub`
 
 ```
 git branch --show-current     # expect: feat/income-scrub
-git log --oneline -4
+git log --oneline -5
 ```
 
-**This branch has never been pushed and is UNBACKED — it exists on one machine.** It cannot be pushed
-today: the generic PII scan flags the synthetic EINs quoted inside
-`reviews/scrub-r1-workflow.md`, which is *sweep finding #4 landing on the review that filed it*. It
-pushes once `synthetic_ein` gets a documented structural window plus an `ALLOWED_EIN_SYNTHETIC` rule
-(SPEC §7, build step 7). Until then, **do not delete this branch and do not `git checkout` carelessly.**
+**PUSHED and backed up** (2026-08-05, `c897aef`) — `origin/feat/income-scrub` exists and the branch
+tracks it. It was briefly local-only and unbacked; the generic PII scan had been flagging the synthetic
+EINs quoted inside the persisted reviews, which was *sweep finding #4 landing on the review that filed
+it*. Resolved by admitting those three tokens by CITATION in a self-limiting bucket — the reviews must
+stay verbatim, so the scan config moved, not the record.
+
+★ That bucket is residue, not a pattern. SPEC §7 still moves `synthetic_ein` into a documented
+structural window so future output needs no entry; the three are permanent only because the documents
+quoting them are.
 
 `main` is clean, pushed, and level with `origin/main` at the v0.16.0 release.
 
