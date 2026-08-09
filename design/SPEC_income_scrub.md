@@ -4,19 +4,30 @@
 gates are NOT scaled: this reaches 0C/0I before a line of the rework is written, then again on the
 whole branch before it ships.*
 
-**Status:** DRAFT r3. Supersedes the unreviewed behaviour on `feat/income-scrub` (`31d5c79`,
+**Status:** DRAFT r4. Supersedes the unreviewed behaviour on `feat/income-scrub` (`31d5c79`,
 `2449ee4`), held back from every release pending this spec.
 Prior art: `reviews/scrub-r1-workflow.md` (code review, 19 confirmed + 6 sweep),
 `reviews/scrub-r2-fable-consult.md` (scope adjudication), `reviews/scrub-spec-r1-review.md`
-(**this spec's r1: 31 raw → 19 blocking**, all folded), `reviews/scrub-spec-r2-review.md`
-(**r2: 0C / 4I / 3M**, all folded below).
+(**r1: 31 raw → 19 blocking**), `reviews/scrub-spec-r2-review.md` (**r2: 0C/4I/3M**),
+`reviews/scrub-spec-r3-review.md` (**r3: 0C/4I/3M/1N**) — all folded.
 
-★★ **r2's four blocking findings were ONE mechanism, and it is this project's signature defect.**
-§3.2 stated its rule over a *mechanism*; §3.3 and §5 then implemented that rule against a **hand-list
-of four fields the mechanism does not stop at**. r1 could not have caught it — r1 wrote those lists.
-Every list in this document is now **derived from `scrub_pii`'s replaced set** and fails on a member
-with no row. Where a list is still written out, it is an enumeration *of* the derivation, present so a
-reader can check the derivation, never the authority itself.
+★★★ **THREE ROUNDS HAVE NOW FOUND THE SAME DEFECT AT THREE DEPTHS, AND THAT IS THE MOST IMPORTANT
+THING ON THIS PAGE.** §3.2 states its rule over a **mechanism**; each round then found that some
+*instrument* implementing it had been written as a hand-list one level down:
+
+| round | the list that was not derived |
+|---|---|
+| r2 | §3.3's field axis and §5's divergence set were four fields and two entries, chosen by what redded an existing test |
+| r3 | the fold's replacements: an emptiness rule keyed to `""` when every reader keys on `trim()`, scoped to "payer/employer loops" when `business_description` is the field that matters, and a §5.1 table that enumerated the fields already under discussion — **missing the IP PIN, which is replaced, printed, and invisible to both §3.3 tests** |
+| r4 | *(this document — see §3.3, where the derivation now names what computes it)* |
+
+★★ **The lesson is not "derive it" — every round already said that. It is that a derivation is not one
+until the spec names the operation that computes it and the blind spot that operation has.** "The set
+of fields `scrub_pii` replaces" is a hand-list wearing a mechanism's clothes, because Rust has no
+reflection to answer it. §3.3 now names the operation (a value-diff over a sentinel fixture) and its
+blind spot (a fixture value colliding with a stand-in), and §5.1 now states the filter it was silently
+applying. **A reviewer should check those two paragraphs first**: if they are wrong, the same defect
+returns at a fourth depth.
 
 ---
 
@@ -54,21 +65,32 @@ sentence; its doc comment carries it, and every disjunct names the mechanism tha
 ```
 ledger_contributes(state, year) =
       digital_asset_activity(state, year)          // disposals / income / removals in-year
-   || digital_asset_activity(state, year - 1)      // the prior year's ledger feeds THIS year's
-                                                   //   carryforward-in figures
+   || digital_asset_activity(state, year - 1)      // DELIBERATE OVER-REFUSAL — see below; this
+                                                   //   disjunct secures no live read
    || state.pseudo_active()                        // DRAFT watermark + attestation gate
    || first_hard_blocker(state).is_some()          // NotComputable, projection-wide
 ```
 
-★ **r2 M-1 — the `year - 1` comment named the wrong mechanism and is corrected above.** It previously
-cited the M4 carryforward-consistency advisory. That advisory needs the prior year's stored *profile*,
-not merely its ledger (`cmd/tax.rs:465-487` — `resolve_screened(.., year - 1, ..)` yields
-`Ready { profile: None }` on a recipient who imported one year), so it does not reproduce from a
-one-year file **whatever this disjunct decides**. The disjunct is still a correct member — it does
-stop emission where the prior year's ledger fed this year's carryforward — and the direction of any
-error is over-refusal. But §2.2 requires every disjunct to name the mechanism that put it there, and a
-comment a maintainer would read as "the M4 advisory reproduces when this is false" is exactly the kind
-of false assurance this section exists to prevent. The residue is recorded in §5.
+★★ **The `year - 1` disjunct is retained as DELIBERATE OVER-REFUSAL, and two rounds of naming a
+mechanism for it were both wrong (r2 M-1, r3 M-1).** The honest statement is that it secures no live
+read:
+
+- It is **not** the M4 carryforward-consistency advisory. That needs the prior year's stored *profile*,
+  not merely its ledger (`cmd/tax.rs:465-487` — `resolve_screened(.., year - 1, ..)` yields
+  `Ready { profile: None }` on a recipient who imported one year), so M4 does not reproduce from a
+  one-year file **whatever this disjunct decides**.
+- It is **not** "the prior year's ledger feeds this year's carryforward-in" either. `scrub_pii`
+  preserves `capital_loss_carryforward_in` and its provenance tag verbatim (`scrub.rs:220-221` — r3
+  cited `:222-223`, which is the AMT carryover pair; corrected here), so
+  those figures travel in the TOML and reproduce on the recipient's machine **with no ledger at all**.
+  Nothing derives them live: the prior year's ledger produces the prior year's `carryforward_out`
+  (`compute.rs:415`), which is either compared against the declared figure by `carryforward_consistency`
+  (`compute.rs:450`) or written into next year's stored inputs by the separate `write_back_carryover`.
+
+**So it is kept because scrub declines to prove a negative** — that no path reads the prior year's
+ledger live — on a command whose whole posture is to refuse more than it scrubs. The direction of any
+error is over-refusal, which is the safe direction, and the comment now says that instead of
+manufacturing a third mechanism. ★ The cross-year residue is recorded in §5.1.
 
 **r1 killed the first draft's predicate and its justification.** It reused
 `digital_asset_activity(state, year)` alone, arguing the refusal was "exactly as accurate as a box
@@ -179,10 +201,32 @@ payer's name (`return_refuse.rs:672-676`) — and `scrub_pii` sets `f.payer = fo
 violated in current code, and §3.3's variant-only comparison cannot see it (the `RefuseReason` is
 `Form1099BNeedsForm8949` on both sides; the difference lives in the message).
 
-**Every replacement preserves emptiness: `"" → ""`.** This costs nothing and leaks nothing — an empty
-string carries no identity — and it makes the ★ rule true rather than aspirational. It applies to
-every payer/employer loop in `scrub_pii`, not only the broker one, because the next reader of one of
-those fields is not required to announce itself.
+**Every replacement preserves TRIM-emptiness: a value with `trim().is_empty()` is replaced by `""`,
+never by a stand-in.** It applies to **every string `scrub_pii` replaces** — not to the payer/employer
+loops only — because the next reader of one of those fields is not required to announce itself.
+
+★★★ **Both halves of that sentence were wrong in r3 and each was wrong in a way that kept the defect
+alive (r3's I-1 and I-2).**
+
+- **`""` is not the class.** All three emptiness readers in the screen key on **`trim()`**:
+  `return_refuse.rs:672` (broker payer), `:798` (country names), `:901` (business description). A rule
+  keyed to `""` leaves `"   "` in the replaced set, so the class still flips — and the repo already
+  pins this exact substitution at `return_refuse.rs:1484`: *"Whitespace is not a name. This pins the
+  `trim()`, which a naive `is_empty()` would miss."* Emitting `""` for a whitespace-only original
+  preserves the class and leaks nothing, so the correction opens no disclosure channel.
+- **The payer/employer scoping excluded the one field where the flip removes a REFUSAL.**
+  `business_description` is replaced unconditionally at `scrub.rs:251`, and
+  `screen_inputs` refuses `ScheduleCNoBusinessDescription` when it is trim-empty
+  (`return_refuse.rs:897-905`; the three-space case is pinned at `:1487-1495`). It is `#[serde(default)]`,
+  so an imported TOML that omits the key produces `""`. A filer whose description is blank therefore
+  **hits that refusal, runs `income scrub` because of it, and hands over a file on which the refusal
+  does not exist** — §3.2's own governing harm, reached through the field the rule declined to cover.
+
+★ **`scrub.rs:246-250` orders the opposite and must be corrected in the same step** (§7). Its claim —
+*"It must stay NON-EMPTY: an empty description refuses the return … so scrubbing it to `""` would make
+the scrubbed copy refuse where the original filed"* — is sound only when the original was non-empty.
+As written it is unconditional, and a red matrix cell will be argued away against it rather than fixed.
+The correct rule is: **non-empty in, stand-in out; trim-empty in, `""` out.**
 
 Applies to **SSN, EIN, `business_description`**, and — with a carve-out — the **IP PIN**:
 
@@ -222,10 +266,48 @@ count.
 
 ★★★ **The matrix's FIELD AXIS IS DERIVED FROM `scrub_pii`'s REPLACED SET — not from §3.2's four.**
 This is r2's I-3, and it is the same "enumerate from the mechanism, never a hand-list" rule §3.3
-already applied to the *state* axis while violating it on the field axis one line later. The loop
-enumerates `{every field scrub_pii replaces} × {absent, empty, malformed, valid}` and **fails on any
-member with no row** — so a field added to the scrubber cannot reach a release without someone
-deciding its class behaviour. `empty` is on the state axis because §3.2 makes emptiness a class.
+already applied to the *state* axis while violating it on the field axis one line later.
+
+**And a derivation is not a derivation until the spec names what computes it (r3's I-3).** "The set of
+fields `scrub_pii` replaces" has no reflection behind it in Rust, so left unnamed an implementer writes
+`const REPLACED: &[&str] = &[…]` — correct the day it is written, silently wrong the first time a field
+changes from kept to replaced, and the spec's claim would then be a guarantee no test holds. Note the
+`..`-free destructure guard does **not** close this: it fires when a field is *added* to
+`ReturnInputs`/`Person`/`Dependent`/`HouseholdHeader`, never when an existing field's classification
+changes.
+
+**The mechanism, stated so it is not reinvented.** `ReturnInputs` derives `Serialize`
+(`btctax-core/src/tax/return_inputs.rs:28` — there is an unrelated `return_inputs.rs` in `btctax-cli`)
+— it is the TOML type — so the replaced set is computable as
+
+> the set of paths at which `to_value(ri)` and `to_value(scrub_pii(&ri))` **differ**, over a
+> sentinel fixture in which every replaceable string holds a distinct, recognisable value.
+
+★ **Its blind spot, named because a gate that hides its own is worse than none:** a field whose fixture
+value happens to equal its stand-in shows no diff and drops out of the axis silently. §3.4 already
+models the fix for exactly one field (`assert_ne!(original.address_city, SCRUB_CITY)`); that precondition
+becomes **general — one per derived field** — so the sentinel fixture cannot collide with a constant.
+
+**The loop then enumerates `{derived field set} × {absent, empty, malformed, valid}`** and every cell
+carries one of **three** verdicts:
+
+| verdict | meaning |
+|---|---|
+| a fixture | the cell is exercised |
+| **`no such state`, with the TYPE as the reason** | the state is unrepresentable for this field |
+| nothing | **the defect — fails the loop** |
+
+★★ **The third verdict is not optional, and omitting it is what made r3's version unsatisfiable.** The
+state axis means different things per field: `header.taxpayer.ssn` is a `String`
+(`btctax-core/src/tax/return_inputs.rs:197`), so for it `absent ≡ empty` — both are `""` →
+`SsnError::Missing` — while
+`w2s[].ein` and `header.ip_pin` are `Option<String>` and distinguish the two; and `occupation`,
+`first_name`, `address_*`, `dependents[].name`, the payer/employer fields, `business_description` and
+`foreign_country_names` are plain `String`s with **no malformed state at all**. Demanding a fixture for
+a malformed `occupation` is demanding the impossible, and the only escape from an unsatisfiable loop is
+an exception hand-list — reintroducing precisely what this section removes. This is the project's own
+conformance rule: a checker that cannot tell *"this cell encodes no decision"* from *"we forgot this
+cell"* is not a conformance check.
 
 The failure this closes, verified live: `screen_inputs:798` refuses on
 `foreign_accounts == Some(true) && foreign_country_names.trim().is_empty()`. `scrub_name_list`
@@ -319,7 +401,16 @@ r2's I-2: the old two-item list was not chosen by a mechanism. It was exactly th
 every replaced string reaching only the printed-forms surface was missing.
 
 > **The rule: every field `scrub_pii` replaces that reaches a PRINTED CELL or a USER-FACING MESSAGE is
-> a divergence, and the help names it.**
+> a divergence, and the help names it — including a replacement that changes a printed cell's
+> PRESENCE rather than its contents.**
+
+★★★ **The filter, stated — r3's I-4 was that the table applied one the rule did not state.** The
+header identity (`first_name`, `last_name`, `ssn`, `occupation`, `address_*`, `dependents[].name`,
+`dependents[].ssn`) is replaced and *does* reach printed cells on Form 1040, and is deliberately **not
+enumerated row by row**: the help announces the identity as replaced in one sentence, which is the
+whole premise of the command. What the table enumerates is everything **beyond** that sentence — a
+replacement a recipient would not predict from "the identity is replaced". Without this clause a future
+re-derivation does not reproduce these rows, which is the same defect r2 filed one level up.
 
 Enumerated from that rule against current source, so a reader can check the derivation:
 
@@ -329,10 +420,11 @@ Enumerated from that rule against current source, so a reader can check the deri
 | `foreign_country_names` | **Schedule B line 7b, printed verbatim** (`schedule_b.rs:183-192`) | **printed** |
 | `int_1099[].payer` | Schedule B Part I payer rows (`printed.rs:1129` → `schedule_b.rs:84`) | **printed** |
 | `div_1099[].payer` | Schedule B Part II payer rows (`printed.rs:1142` → `schedule_b.rs:84`) | **printed** |
+| **`header.ip_pin`** | **Form 1040's IP PIN cell (`form1040_full.rs:449-450`) — the replacement is `None`, so the cell is not written AT ALL** | **printed (PRESENCE)** |
 | `b_1099[].payer` | the `Form1099BNeedsForm8949` refusal text (`return_refuse.rs:672-676`) | message |
 | `excess_ss_not_creditable[].ein` | the excess-SS advisory (`advisories.rs:706`) | message |
-| `w2s[].employer` | **nothing** — no printed cell, no message | neither |
-| `g_1099[].payer` | **nothing** — replaced, and read by no printer and no message | neither |
+| `w2s[].employer` | no printed cell and no computed message; its one reader is the input-form surface echoing the stored value back to its own author (`btctax-input-form/src/spec/sections.rs:642`) | neither |
+| `g_1099[].payer` | no printed cell, no message, and no reader at all | neither |
 
 ★★ **`scrub_name_list` changes the SHAPE as well as the content**, which the old list would not have
 surfaced even had it named the field: it splits on `,` only, so a comma-free entry
@@ -343,10 +435,24 @@ surfaced even had it named the field: it splits on `,` only, so a comma-free ent
 among them — do not reproduce from a one-year file, because they read the prior year's stored profile
 and the recipient has only one year.
 
+★★★ **The IP PIN row is the one NO instrument in §3 can ever surface, which is why it was missed.**
+§3.2's carve-out already says it: *"neither §3.3 test can see it because nothing computes from it."*
+Test 2 compares `ReturnHeader::build(..).err()`, and a **valid** IP PIN yields `Ok` on both sides, so
+the drop is invisible; the figure invariant is `AbsoluteReturn`-scoped and never reaches Form 1040's
+comb. So nothing will ever red on it. The vector is live: this repo has `wrap.rs`, `overflow.rs` and a
+read-back `verify.rs`, so "my IP PIN prints outside its comb" is a real class of report — and on the
+scrubbed copy `form1040_full.rs:449` never fires, so the cell is simply blank and the maintainer
+cannot reproduce it. **A cell that goes MISSING is a divergence exactly as much as one whose contents
+change**, and the rule above now says so.
+
 ★ The last two rows are *not* divergences and are recorded so the next reader does not re-derive them:
-a field that reaches no printed cell and no message cannot make the recipient's copy behave
+a field that reaches no printed cell and no computed message cannot make the recipient's copy behave
 differently. They stay in the table because the derivation must be checkable in both directions —
-"replaced but harmless" is a conclusion, not an omission.
+"replaced but harmless" is a conclusion, not an omission. ★ Note `w2s[].employer` is not read by
+*nothing*: the input-form surface echoes it back to the person who typed it
+(`btctax-input-form/src/spec/sections.rs:642`). That is not a divergence in §5's sense — the recipient's
+own copy shows the recipient's own stored value — but the row says so rather than claiming an absence
+of readers that is not true (r3's Nit).
 
 ---
 
@@ -370,6 +476,13 @@ r1 found four items no other section reaches:
 
 - The `..`-free destructure guard covers **4 of 10** structs; the six it misses hold the free text scrub
   must replace. Give each the same treatment, and correct `scrub.rs:14`, which overclaims.
+- ★ **A THIRD `scrub.rs` comment is wrong and must be corrected in the same step (r3's I-2).**
+  `scrub.rs:246-250` orders `business_description` to *"stay NON-EMPTY"* unconditionally. That is sound
+  only when the original was non-empty; applied to a trim-empty original it is the instruction that
+  produces the refusal-losing vector in §3.2. Rewrite it to the actual rule — **non-empty in, stand-in
+  out; trim-empty in, `""` out** — because a red matrix cell will otherwise be argued away against the
+  comment rather than fixed. (The other two corrections: `scrub.rs:14`'s destructure overclaim, above,
+  and the middle-group-`00` claim, below.)
 - `w2s[].box12[].code` has no recorded decision: **kept** — a box-12 code is a taxonomy, not a person.
 - **Synthetic EINs red the repo's own `pii-scan`.** ★★★ **DECIDED HERE — take the narrow option. There
   is no structural EIN window, so the generator-keyed allowlist is not available at any price.**
@@ -417,21 +530,28 @@ r1 found four items no other section reaches:
    it, splitting them leaves the suite red across two gates. A red suite is itself a blocking finding
    here.
 4. §3.2 validity-class preservation — the IP PIN carve-out, the `NotDigits(_) → NotDigits('x')`
-   coarsening, and `"" → ""` emptiness on every payer/employer loop — plus the two §3.3 class-level
-   tests, each RED first, over the §3.3 fixture matrix. **The matrix's field axis is derived from
-   `scrub_pii`'s replaced set and fails on a member with no row** (§3.3); it is not the four fields
-   §3.2 happens to discuss.
-5. §3.4 scrub constants moved; exhaustive disclosure test; `b_1099` fixture to exercise the payer loop;
-   a `foreign_accounts: Some(true)` fixture, since **no fixture is in that class today** and the
-   `scrub_name_list` mutation ships green without one (§3.3); a fixture with
+   coarsening, and **trim-emptiness preservation on every string `scrub_pii` replaces** (not the
+   payer/employer loops only — `business_description` is the one that matters) — plus the two §3.3
+   class-level tests, each RED first, over the §3.3 fixture matrix.
+   **The matrix's field axis is derived by value-diffing `to_value(ri)` against
+   `to_value(scrub_pii(&ri))` over an all-sentinel fixture, with a per-field `assert_ne!` precondition**
+   (§3.3); it is not the four fields §3.2 happens to discuss, and it is not a `const` list.
+   ★ **The fixtures the matrix needs are built HERE, in this step, not later** (r3 M-2): a `b_1099`
+   fixture exercising the payer loop, and a `foreign_accounts: Some(true)` fixture, since **no fixture
+   is in that class today** and the `scrub_name_list` mutation ships green without one. Scheduling them
+   after the test that fails without them leaves the suite red across a gate, which is itself a
+   blocking finding here — the same defect merging old steps 3 and 5 fixed.
+5. §3.4 scrub constants moved; exhaustive disclosure test; a fixture with
    `date_of_birth`/`blind`/`date_of_death` set so §3's KEPT fields are load-bearing on at least one
    vector.
-6. §6 dependent-DOB drop + comment correction; §7's four items, including narrowing the `scrub.rs`
-   middle-group-`00` claim to SSNs.
+6. §6 dependent-DOB drop + comment correction; §7's items — including **all three `scrub.rs` comment
+   corrections**: the `:14` destructure overclaim, the `:246-250` unconditional non-empty order, and
+   narrowing the middle-group-`00` claim to SSNs.
 7. §4 artifact safety, each with its planted-defect test. `--force` is created here, scoped to the
    marker guard alone (§4.3).
-8. TOML round-trip test; help + man regenerated to §5 — the claims name **every** member of §5.1's
-   derived divergence table, not the printed ones only.
+8. TOML round-trip test; help + man regenerated to §5 — the claims name every member §5.1's table
+   classes as **printed** or **message** (the two `neither` rows are part of the derivation's audit
+   trail, not divergences, and do not belong in user-facing help).
 9. Whole-branch `main..HEAD` review to 0C/0I, briefed on what r1 and r2 covered so it spends its budget
    on the seams (harness B3).
 
