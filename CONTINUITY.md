@@ -1,69 +1,116 @@
 # CONTINUITY — bitcoin_tax (TaxApp)
 
-_Last updated: **2026-08-05** (v0.16.0 released; `income scrub` spec r2; branch pushed). Written at a pause; safe to exit._
+_Last updated: **2026-08-09** (`income scrub` spec GREEN at r6; build started at SPEC §8). Written at a
+pause; safe to exit._
 
 ---
 
-## ▶ RESUME HERE — `income scrub`, spec r2 folded, **awaiting re-review**. No code yet.
+## ▶ RESUME HERE — `income scrub` spec is **GREEN (r6)**. Building, at SPEC §8.
 
 ### FIRST: YOU ARE ON `feat/income-scrub`
 
 ```
 git branch --show-current     # expect: feat/income-scrub
-git log --oneline -5
+git log --oneline -12
 ```
 
-**PUSHED and backed up** (2026-08-05, `c897aef`) — `origin/feat/income-scrub` exists and the branch
-tracks it. It was briefly local-only and unbacked; the generic PII scan had been flagging the synthetic
-EINs quoted inside the persisted reviews, which was *sweep finding #4 landing on the review that filed
-it*. Resolved by admitting those three tokens by CITATION in a self-limiting bucket — the reviews must
-stay verbatim, so the scan config moved, not the record.
+`main` is clean and level with `origin/main` at the v0.16.0 release. **`income scrub` is NOT in
+v0.16.0, deliberately** — it was held back after a code review found two CRITICALs.
 
-★ That bucket is residue, not a pattern. SPEC §7 still moves `synthetic_ein` into a documented
-structural window so future output needs no entry; the three are permanent only because the documents
-quoting them are.
+### ▶ THE NEXT ACTION — build **SPEC §8**, in order, starting at step 2
 
-`main` is clean, pushed, and level with `origin/main` at the v0.16.0 release.
+`design/SPEC_income_scrub.md` is **r6 and build-ready**. The order in §8 is sequenced and the
+sequencing was itself reviewed. **Do not re-open the spec for another prose round** — see "why the
+loop is closed" below.
 
-### Where things stand
+★★★ **§8 step 4's FIRST act is the whole point: land the axis derivation and WATCH IT GO RED (B1),
+before any matrix row exists.** Print the derived path set; it must contain **`w2s[].ein`,
+`header.ip_pin`, `foreign_country_names`, `b_1099[].payer` and `schedule_c.business_description`**.
+Those five are a **backstop against a non-maximal fixture, never the definition of the axis**.
 
-**v0.16.0 IS RELEASED** (2026-08-03) — all 10 crates on crates.io, tagged, GitHub release live,
-verified 10/10 via the sparse index *and* by `cargo install` from the registry. It ships
-`btctax --version`, the CTC-advisory fix, and the nine-dependent fixture. **`income scrub` is NOT in
-it, deliberately.**
-
-**`income scrub` is written but held back.** Two adversarial reviews and a Fable consult say it must not
-ship as-is:
+### Where things stand — five review passes, all folded, all persisted
 
 | artifact | what it is |
 |---|---|
-| `reviews/scrub-r1-workflow.md` | code review, 27 agents — 22 raw → **19 confirmed + 6 sweep**, two CRITICALs |
+| `reviews/scrub-r1-workflow.md` | code review of the held implementation — 19 confirmed + 6 sweep, **two CRITICALs** |
 | `reviews/scrub-r2-fable-consult.md` | Fable scope adjudication — ship 0.16.0 without scrub; scrub alone later |
-| `reviews/scrub-spec-r1-review.md` | review of the SPEC — 31 raw → **19 blocking**, all folded into r2 |
-| `design/SPEC_income_scrub.md` | **the spec, r2 (`ffdf249`) — the thing to re-review** |
+| `reviews/scrub-spec-r1-review.md` | spec r1 — 31 raw → **19 blocking** |
+| `reviews/scrub-spec-r2-review.md` | spec r2 — **0C/4I/3M** |
+| `reviews/scrub-spec-r3-review.md` | spec r3 — **0C/4I/3M/1N** |
+| `reviews/scrub-spec-r4-review.md` | spec r4 — **0C/2I/3M/1N**, and it answered *when to stop* |
+| `reviews/scrub-spec-r5-folddiff-check.md` | scoped fold-diff check — I-2/M-1/M-3/N closed, one I-1 residue |
+| `design/SPEC_income_scrub.md` | **the spec, r6 (`5ba1e79d`) — GREEN** |
 
-### ▶ THE NEXT ACTION
+★ **Commit shape, and it is load-bearing:** persist and fold are always **two commits**. `git show
+<persist>` is what a reviewer found, verbatim; `git diff <persist>..<fold>` is exactly what changed in
+response and nothing else; the fold's message carries the build-gate output.
 
-**Re-review `design/SPEC_income_scrub.md` (r2) to 0C/0I.** Brief the reviewer on what
-`reviews/scrub-spec-r1-review.md` already covered so it spends its budget on the seams, not on
-re-deriving folded findings. Only when green, build in the order at **SPEC §8** — it is sequenced, and
-the sequencing was itself reviewed.
+### ★★★ Why the loop is closed, and why another prose round is the wrong instrument
 
-Do NOT start coding before that gate. Two spec reviews have each found ~19 blocking issues in a
-document that looked finished; the third is cheap next to a wrong safety authorization shipped
-permanently.
+**Five passes found the SAME defect at five depths.** §3.2 states its rule over a *mechanism*; each
+pass then found some *instrument* implementing it written as a hand-list one level down — r2 in §3.3's
+field axis and §5's divergence set, r3 in r2's fixes, r4 in r3's fixes, and the r5 check inside r4's
+fix, on the sixth pass.
 
-### The three things most likely to be got wrong again
+**Every pass was about the same handful of fields**, and each pass's instrument missed them for a
+*different* reason. r4 was asked directly whether the remaining risk was prose- or test-shaped and
+answered **test-shaped**, with the right evidence: its own findings came from *executing* the
+derivation against real fixtures (`grep ip_pin testonly.rs` → 0), not from reading section against
+section. **The risk has moved out of the prose and into a fixture nobody has written yet.** A sixth
+prose round structurally cannot reach it; §8 step 4 answers it in one command.
+
+### ★★ The lesson worth carrying off this branch
+
+**"Derive it, don't hand-list it" is NOT the lesson — every round already said that.** A derivation is
+not one until the spec names **the operation that computes it, the blind spot that operation has, and
+the property that authorises each exemption**. Naming an operation is not enough if the named blind
+spot is the wrong one: r4's version named value-collision when the hazard was **structural absence**,
+and stayed blind to all four fields. The r5 check then found the same shape again — maximality defined
+over *presence* when emptiness collapses identically.
+
+★ And when a check names one instance, **fold the class**. The r5 check named `business_description`;
+the class was every replaced string, because §3.2's own trim-emptiness rule makes them all
+conditionally replaced. Fixing the named instance would have been the identical error, on the sixth pass.
+
+### The things most likely to be got wrong during the build
 
 1. **The refusal predicate is scrub-OWNED, not the digital-asset box.** Year-scope ≠ artifact-scope:
-   `pseudo_active()` and `first_hard_blocker()` are projection-wide, so a filer whose export is
-   DRAFT-watermarked gets a scrubbed file where none of that reproduces. And the box predicate's `false`
-   means *unchecked, not "No"* — reading that silence as "ledger is empty" is widening an exemption.
-2. **No original identity value is emitted in ANY class.** `malformed → SYNTHETIC-malformed`; the thing
-   preserved is the *error variant*, never the bytes. The IP PIN is the carve-out — never synthesised,
-   because minting one fabricates a live IRS credential.
-3. **The two class-level tests are VACUOUS on today's fixtures** (all `None == None`). The spec imposes a
-   fixture *matrix* that fails on an empty cell. Do not satisfy it with a hand-list.
+   `pseudo_active()` and `first_hard_blocker()` are projection-wide. The box predicate's `false` means
+   *unchecked, not "No"* — reading that silence as "ledger is empty" is widening an exemption.
+   ★ The `year - 1` disjunct is **deliberate over-refusal that secures no live read**; two rounds of
+   naming a mechanism for it were both wrong. Do not "fix" it by inventing a third.
+2. **No original identity value is emitted in ANY class** — the *error variant* is preserved, never the
+   bytes. Two deliberate exceptions, each with its reason in §3.2: the **IP PIN** is never synthesised
+   (minting one fabricates a live IRS credential), and **`NotDigits(_) → NotDigits('x')`** is a
+   coarsening, because that payload is a character of the filer's real entry while `WrongLength(n)` is
+   only a shape.
+3. **Emptiness is `trim()`, not `""`** — all three readers key on `.trim().is_empty()`, and the repo
+   pins that substitution at `return_refuse.rs:1484` ("Whitespace is not a name").
+4. **A `no such state` exemption on a `malformed` cell is authorised by "no predicate reads a validity
+   class off this field", NEVER by the type.** `header.taxpayer.ssn` is a plain `String` *with* a
+   malformed state. Getting this wrong exempts `dependents[].ssn`, where an eight-digit SSN refuses on
+   the original and **exports** on the scrubbed copy.
+
+### ★ The citation gate — run it on every spec edit
+
+```
+# resolves every file:line in the spec; catches ambiguity ACROSS CRATES
+# (packet.rs, testonly.rs, return_inputs.rs each exist in 2+ crates)
+```
+
+It caught, across three folds: 2 ambiguous, then 5 ambiguous + 2 out-of-range, plus a citation
+transcribed **from a review report** that was off by two (`scrub.rs:222-223` → `:220-221`), plus a
+defect in **the gate itself** (a lowercase-only regex class read `Cargo.toml` as `argo.toml`).
+
+### Owner-only, still open
+
+- **The temporary crates.io token from v0.14.0 is UNREVOKED** — now used across three releases
+  (0.14.0, 0.15.0, 0.16.0). This is the oldest open hygiene item.
+- `scripts/.pii-patterns` EXISTS (owner-supplied, untracked, gitignored). The push gate is green.
+- ★ The three synthetic EINs quoted in persisted reviews are admitted by CITATION in a self-limiting
+  bucket (`ALLOWED_EIN_REVIEW_ARTIFACT`). **SPEC §7 now DECIDES that this bucket does not grow**: there
+  is no structural EIN window, so a generator-keyed rule would exempt real EINs under 91/94/95/99.
+  Committing a scrubbed return as a fixture is **out of scope for v1**.
 
 ### Owner-only, still open
 
