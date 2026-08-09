@@ -21,9 +21,17 @@ written yet**, which a fifth prose round structurally cannot reach and one comma
 
 **So the next action is §8 step 2, not another review** — and §8 step 4's first act is to land the axis
 derivation and *watch it go red* (B1). The one-command check that settles this permanently: **the
-derived path set must contain `w2s[].ein`, `header.ip_pin`, `foreign_country_names` and
-`b_1099[].payer`.** If it does not, the sentinel fixture is not maximal and the derivation is blind on
-exactly the four fields four review rounds were spent on.
+derived path set must contain `w2s[].ein`, `header.ip_pin`, `foreign_country_names`, `b_1099[].payer`
+and `schedule_c.business_description`.** If it does not, the sentinel fixture is not maximal and the
+derivation is blind on exactly the fields these review passes were spent on.
+
+★ **A scoped fold-diff check on r5 (`reviews/scrub-spec-r5-folddiff-check.md`) confirmed r4's I-2 and
+all three Minors closed, and caught one residue in I-1** — maximality had been defined over *presence*
+only, so a plain `String` left `""` would collapse exactly as an absent `Option` does. Folded as
+§3.3's clause 2. ★★ It named `business_description`; the class is **every replaced string**, because
+§3.2's own trim-emptiness rule makes them all conditionally replaced. Folding the named instance and
+leaving the class is the precise error r2, r3 and r4 each found — worth noting that it was still live
+on the sixth pass.
 
 ★★★ **THREE ROUNDS HAVE NOW FOUND THE SAME DEFECT AT THREE DEPTHS, AND THAT IS THE MOST IMPORTANT
 THING ON THIS PAGE.** §3.2 states its rule over a **mechanism**; each round then found that some
@@ -330,17 +338,27 @@ discipline:**
 
 1. **Every `Option` is `Some`, every `Vec` holds ≥ 2 elements, every nested struct is present.** Two
    elements, not one — so an index-varying stand-in (`Payer{i+1}`) and `EinMap`'s distinctness both show.
-2. **It is written as an exhaustive struct literal — no `..`, no `..Default::default()` — for all ten
+2. ★★★ **Every string is NON-EMPTY and distinct — maximality is about VALUE as well as presence.**
+   §3.2's trim-emptiness rule makes *every* replaced string conditionally replaced (trim-empty in ⇒
+   `""` out), so a plain `String` left `""` in the fixture yields `""` on **both** sides and drops out
+   of the axis exactly as an absent `Option` does. That reaches `business_description`, `occupation`,
+   `first_name`, `last_name`, `address_*`, `dependents[].name` and every payer/employer field — i.e.
+   most of the replaced set. Presence-only maximality would have re-opened the whole hole one field to
+   the left of where it was closed.
+3. **It is written as an exhaustive struct literal — no `..`, no `..Default::default()` — for all ten
    structs** (§7). A field added anywhere is then a compile error *in the fixture*, not a quietly
    smaller axis. This is the same construction §7 extends the `..`-free guard for, applied to the
    instrument that polices it.
-3. **B1 kill-test for the derivation itself:** a fixture variant that leaves `ip_pin: None` must make the
-   axis check **RED**. Without it the derivation ships never having been observed discriminating, which
-   is the failure class B1 exists for.
+4. **B1 kill-tests for the derivation itself — one per collapse mode, because they are different
+   mechanisms:** a fixture variant leaving `ip_pin: None` (absence) and one leaving
+   `business_description: ""` (emptiness) must **each** make the axis check RED. Without both, the
+   derivation ships never having been observed discriminating on the mode that actually hid the fields,
+   which is the failure class B1 exists for.
 
-★ The value-collision precondition is kept and is *secondary*: §3.4 models it for one field
+★ The value-collision precondition is kept and is *secondary* to clause 2: §3.4 models it for one field
 (`assert_ne!(original.address_city, SCRUB_CITY)`) and it becomes general, one per derived field, so a
-sentinel value cannot silently equal its own stand-in.
+sentinel value cannot silently equal its own stand-in. Clause 2 stops a field vanishing from the axis;
+this stops a field that IS in the axis from being compared against a colliding constant.
 
 **The loop then enumerates `{derived field set} × {absent, empty, malformed, valid}`** and every cell
 carries one of **three** verdicts:
@@ -619,11 +637,14 @@ r1 found four items no other section reaches:
    ★★★ **BUILD THE AXIS DERIVATION FIRST, AND WATCH IT GO RED (B1).** Before any matrix row exists,
    land the derivation of §3.3 — `serde_json::to_value(ri)` vs `to_value(scrub_pii(&ri))` over the
    **maximal** sentinel fixture, presence-difference included — and **print the derived path set**. It
-   must contain **`w2s[].ein`, `header.ip_pin`, `foreign_country_names` and `b_1099[].payer`**. If it
-   does not, the fixture is not maximal and the derivation is blind on the four fields four review
-   rounds were spent on. Pair it with its kill-test: a fixture variant leaving `ip_pin: None` must make
-   the axis check **RED**. This is the step that converts the last four rounds of argument into a
-   command, and it is why no fifth prose round was run.
+   must contain **`w2s[].ein`, `header.ip_pin`, `foreign_country_names`, `b_1099[].payer` and
+   `schedule_c.business_description`**. If it does not, the fixture is not maximal and the derivation is
+   blind on the very fields five review passes were spent on. Pair it with **both** §3.3 kill-tests —
+   an `ip_pin: None` variant and a `business_description: ""` variant must each red the axis check.
+   ★ The named five are a **backstop, not the authority**: they catch a fixture that is not maximal,
+   they do not define the axis. The axis is whatever the diff yields.
+   This is the step that converts five passes of argument into a command, and it is why no fifth prose
+   round was run.
    ★ The axis is derived, never a `const` list, and never the four fields §3.2 happens to discuss.
    ★ **The fixtures the matrix needs are built HERE, in this step, not later** (r3 M-2): a `b_1099`
    fixture exercising the payer loop, and a `foreign_accounts: Some(true)` fixture, since **no fixture
