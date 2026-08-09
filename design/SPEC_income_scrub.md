@@ -4,12 +4,26 @@
 gates are NOT scaled: this reaches 0C/0I before a line of the rework is written, then again on the
 whole branch before it ships.*
 
-**Status:** DRAFT r4. Supersedes the unreviewed behaviour on `feat/income-scrub` (`31d5c79`,
-`2449ee4`), held back from every release pending this spec.
+**Status:** **r5 — BUILD-READY.** Supersedes the unreviewed behaviour on `feat/income-scrub`
+(`31d5c79`, `2449ee4`), held back from every release pending this spec.
 Prior art: `reviews/scrub-r1-workflow.md` (code review, 19 confirmed + 6 sweep),
 `reviews/scrub-r2-fable-consult.md` (scope adjudication), `reviews/scrub-spec-r1-review.md`
 (**r1: 31 raw → 19 blocking**), `reviews/scrub-spec-r2-review.md` (**r2: 0C/4I/3M**),
-`reviews/scrub-spec-r3-review.md` (**r3: 0C/4I/3M/1N**) — all folded.
+`reviews/scrub-spec-r3-review.md` (**r3: 0C/4I/3M/1N**), `reviews/scrub-spec-r4-review.md`
+(**r4: 0C/2I/3M/1N**) — all folded.
+
+★★★ **r4 ANSWERED THE QUESTION OF WHEN TO STOP, AND ITS ANSWER GOVERNS: the remaining risk is
+TEST-SHAPED, not prose-shaped. No fifth whole-document round.** Its evidence was *how* its own findings
+were reached — not by reading section against section, but by executing §3.3's derivation against the
+real fixtures (`grep ip_pin testonly.rs` → **0**; `foreign_country_names` → **0**; `ein:` → **0**; one
+`b_1099`, in the wrong household). **The risk has moved out of the prose and into a fixture nobody has
+written yet**, which a fifth prose round structurally cannot reach and one command answers.
+
+**So the next action is §8 step 2, not another review** — and §8 step 4's first act is to land the axis
+derivation and *watch it go red* (B1). The one-command check that settles this permanently: **the
+derived path set must contain `w2s[].ein`, `header.ip_pin`, `foreign_country_names` and
+`b_1099[].payer`.** If it does not, the sentinel fixture is not maximal and the derivation is blind on
+exactly the four fields four review rounds were spent on.
 
 ★★★ **THREE ROUNDS HAVE NOW FOUND THE SAME DEFECT AT THREE DEPTHS, AND THAT IS THE MOST IMPORTANT
 THING ON THIS PAGE.** §3.2 states its rule over a **mechanism**; each round then found that some
@@ -19,15 +33,20 @@ THING ON THIS PAGE.** §3.2 states its rule over a **mechanism**; each round the
 |---|---|
 | r2 | §3.3's field axis and §5's divergence set were four fields and two entries, chosen by what redded an existing test |
 | r3 | the fold's replacements: an emptiness rule keyed to `""` when every reader keys on `trim()`, scoped to "payer/employer loops" when `business_description` is the field that matters, and a §5.1 table that enumerated the fields already under discussion — **missing the IP PIN, which is replaced, printed, and invisible to both §3.3 tests** |
-| r4 | *(this document — see §3.3, where the derivation now names what computes it)* |
+| r4 | the derivation r3 added named the wrong **blind spot** (value collision, not structural absence) and authorised its third verdict by the wrong **discriminator** (the type, which does not decide malformed-ness) — each one level short, and each still hiding the same four fields |
 
-★★ **The lesson is not "derive it" — every round already said that. It is that a derivation is not one
-until the spec names the operation that computes it and the blind spot that operation has.** "The set
-of fields `scrub_pii` replaces" is a hand-list wearing a mechanism's clothes, because Rust has no
-reflection to answer it. §3.3 now names the operation (a value-diff over a sentinel fixture) and its
-blind spot (a fixture value colliding with a stand-in), and §5.1 now states the filter it was silently
-applying. **A reviewer should check those two paragraphs first**: if they are wrong, the same defect
-returns at a fourth depth.
+★★ **The lesson is not "derive it" — every round said that. It is that a derivation is not one until
+the spec names the operation that computes it, the blind spot that operation has, and the property that
+authorises each exemption.** "The set of fields `scrub_pii` replaces" is a hand-list wearing a
+mechanism's clothes, because Rust has no reflection to answer it — and naming an operation is still not
+enough if the named blind spot is the wrong one, which is exactly how r4's version stayed blind to the
+same four fields.
+
+★★★ **THE MEASURE IS THE FOUR FIELDS, NOT THE PROSE.** Every round has been about the same handful —
+`w2s[].ein` (§3.1's Critical), `header.ip_pin`, `foreign_country_names`, `b_1099[].payer` — and each
+round's instrument failed to reach them for a *different* reason. That is why §8 step 4 now begins by
+printing the derived set and asserting those four are in it: **the question stops being reviewable and
+becomes a command.**
 
 ---
 
@@ -277,16 +296,51 @@ changes from kept to replaced, and the spec's claim would then be a guarantee no
 changes.
 
 **The mechanism, stated so it is not reinvented.** `ReturnInputs` derives `Serialize`
-(`btctax-core/src/tax/return_inputs.rs:28` — there is an unrelated `return_inputs.rs` in `btctax-cli`)
-— it is the TOML type — so the replaced set is computable as
+(`btctax-core/src/tax/return_inputs.rs:28` — there is an unrelated `return_inputs.rs` in `btctax-cli`),
+so the replaced set is computable as
 
-> the set of paths at which `to_value(ri)` and `to_value(scrub_pii(&ri))` **differ**, over a
-> sentinel fixture in which every replaceable string holds a distinct, recognisable value.
+> the set of paths at which `serde_json::to_value(ri)` and `serde_json::to_value(scrub_pii(&ri))`
+> **differ**, over a MAXIMAL sentinel fixture — **and a path present on one side and absent on the
+> other is a difference.**
 
-★ **Its blind spot, named because a gate that hides its own is worse than none:** a field whose fixture
-value happens to equal its stand-in shows no diff and drops out of the axis silently. §3.4 already
-models the fix for exactly one field (`assert_ne!(original.address_city, SCRUB_CITY)`); that precondition
-becomes **general — one per derived field** — so the sentinel fixture cannot collide with a constant.
+★ **Use `serde_json`, not `toml`.** `serde_json` is already a `btctax-core` dependency
+(`btctax-core/Cargo.toml:19`) and `toml` is **not** one at all — TOML serialization happens a crate up,
+at `btctax-cli/src/cmd/tax.rs:177`. It is also the correct choice on the merits: `serde_json` renders
+`None` as `Value::Null` **at a present key**, so a presence change is an ordinary value difference,
+whereas `toml::Value` omits the key entirely and `header.ip_pin` — replaced with `None` — would differ
+only by absence. §5.1 argues that a cell going *missing* is as much a divergence as one whose contents
+change; the differ has to agree.
+
+★★★ **THE BLIND SPOT IS STRUCTURAL ABSENCE, NOT VALUE COLLISION — and getting this wrong would have
+made the derivation blind to every field the last three review rounds were about.** A replaced field
+produces no differing path when the fixture **never instantiates it**: `None` on both sides, `""` on
+both sides, or inside an empty `Vec`. Constraining the fixture over *values* alone is also circular —
+you would have to already know the replaced set to populate it. Measured against
+`kitchen_sink_household`, the natural sentinel base, the derived axis would silently omit:
+
+| field | why no path differs | the round it was |
+|---|---|---|
+| `w2s[].ein` | every W-2 literal ends `..Default::default()` ⇒ `ein: None` both sides (**zero `ein:` in the whole file**) | §3.1's **CRITICAL** — the $1,546.80 manufactured credit |
+| `header.ip_pin` | **zero occurrences of `ip_pin` in the file** ⇒ `None` both sides | r3's I-4 |
+| `foreign_country_names` | **zero occurrences in the file** ⇒ `""`, and `scrub_name_list` early-returns `String::new()` on trim-empty ⇒ `""` both sides | r2's I-3, and §3.3's own worked example below |
+| `b_1099[].payer` | `kitchen_sink_household` has no `b_1099`; only `amt_owing_household` does (`btctax-core/src/tax/testonly.rs:498`) | r3's I-1 vector A |
+
+★★ **So the sentinel fixture is MAXIMAL, and the constraint is a compile error rather than a
+discipline:**
+
+1. **Every `Option` is `Some`, every `Vec` holds ≥ 2 elements, every nested struct is present.** Two
+   elements, not one — so an index-varying stand-in (`Payer{i+1}`) and `EinMap`'s distinctness both show.
+2. **It is written as an exhaustive struct literal — no `..`, no `..Default::default()` — for all ten
+   structs** (§7). A field added anywhere is then a compile error *in the fixture*, not a quietly
+   smaller axis. This is the same construction §7 extends the `..`-free guard for, applied to the
+   instrument that polices it.
+3. **B1 kill-test for the derivation itself:** a fixture variant that leaves `ip_pin: None` must make the
+   axis check **RED**. Without it the derivation ships never having been observed discriminating, which
+   is the failure class B1 exists for.
+
+★ The value-collision precondition is kept and is *secondary*: §3.4 models it for one field
+(`assert_ne!(original.address_city, SCRUB_CITY)`) and it becomes general, one per derived field, so a
+sentinel value cannot silently equal its own stand-in.
 
 **The loop then enumerates `{derived field set} × {absent, empty, malformed, valid}`** and every cell
 carries one of **three** verdicts:
@@ -294,20 +348,42 @@ carries one of **three** verdicts:
 | verdict | meaning |
 |---|---|
 | a fixture | the cell is exercised |
-| **`no such state`, with the TYPE as the reason** | the state is unrepresentable for this field |
+| **`no such state`, with the DISCRIMINATOR below as the reason** | the state is unrepresentable for this field |
 | nothing | **the defect — fails the loop** |
 
-★★ **The third verdict is not optional, and omitting it is what made r3's version unsatisfiable.** The
-state axis means different things per field: `header.taxpayer.ssn` is a `String`
-(`btctax-core/src/tax/return_inputs.rs:197`), so for it `absent ≡ empty` — both are `""` →
-`SsnError::Missing` — while
-`w2s[].ein` and `header.ip_pin` are `Option<String>` and distinguish the two; and `occupation`,
-`first_name`, `address_*`, `dependents[].name`, the payer/employer fields, `business_description` and
-`foreign_country_names` are plain `String`s with **no malformed state at all**. Demanding a fixture for
-a malformed `occupation` is demanding the impossible, and the only escape from an unsatisfiable loop is
-an exception hand-list — reintroducing precisely what this section removes. This is the project's own
-conformance rule: a checker that cannot tell *"this cell encodes no decision"* from *"we forgot this
-cell"* is not a conformance check.
+★★ **The third verdict is not optional, and omitting it is what made r3's version unsatisfiable.**
+Demanding a fixture for a malformed `occupation` is demanding the impossible, and the only escape from
+an unsatisfiable loop is an exception hand-list — reintroducing precisely what this section removes.
+This is the project's own conformance rule: a checker that cannot tell *"this cell encodes no
+decision"* from *"we forgot this cell"* is not a conformance check.
+
+★★★ **BUT THE REASON IS NEVER "THE TYPE" — the two axes have DIFFERENT discriminators, and conflating
+them licenses exempting a cell on which the scrubber is wrong TODAY.** `header.taxpayer.ssn` is a plain
+`String` (`btctax-core/src/tax/return_inputs.rs:197`) and it certainly has a malformed state, so the
+type cannot be what decides:
+
+| state | what decides representability |
+|---|---|
+| `absent` | **the type** — representable iff the field is an `Option` or lives in a `Vec`; mechanically checkable. (So for the `String` SSNs `absent ≡ empty`, both `""` → `SsnError::Missing`, while `w2s[].ein` and `header.ip_pin` are `Option<String>` and distinguish them.) |
+| `malformed` | **whether any predicate in the program reads a VALIDITY CLASS off the field** — §3.2's ★ mechanism, not the type. |
+
+**A `no such state` verdict on a `malformed` cell must name the absence of such a reader, never the
+type.** There are exactly three such readers today, and they enumerate the malformed-bearing cells:
+
+- `Ssn::canonical` — `btctax-core/src/tax/packet.rs:208` (taxpayer **and spouse**, via `FiledPerson::build`) and
+  `btctax-core/src/tax/packet.rs:425` (**every dependent**)
+- `IpPin::canonical` — `btctax-core/src/tax/packet.rs:169`
+- `canonical_ein` — `return_1040.rs:681`
+
+★★★ **The live vector this closes, which is why the distinction is Important and not pedantic.**
+`header.spouse.ssn` and `header.dependents[].ssn` are plain `String`s, so a type-authorised rule marks
+their `malformed` cells `no such state` — *correctly, by the wording* — and the loop stays green with
+no fixture. But `Ssn::canonical` reads both, and `scrub_dependent` writes `synthetic_ssn(100 + n)`
+**unconditionally** (`scrub.rs:111`). So: one dependent whose SSN is eight digits (an ordinary typo) ⇒
+the original `ReturnHeader::build` returns `Err(HeaderError::Ssn(SsnError::WrongLength(8)))` and the
+filer cannot export — *which is why they run `income scrub`* — while the scrubbed copy canonicalizes
+`Ok` and **exports where the original refused**. §3.3 test 2 catches it, but only if the matrix demands
+that cell.
 
 The failure this closes, verified live: `screen_inputs:798` refuses on
 `foreign_accounts == Some(true) && foreign_country_names.trim().is_empty()`. `scrub_name_list`
@@ -412,6 +488,12 @@ whole premise of the command. What the table enumerates is everything **beyond**
 replacement a recipient would not predict from "the identity is replaced". Without this clause a future
 re-derivation does not reproduce these rows, which is the same defect r2 filed one level up.
 
+★ **Every key is a `ReturnInputs` path — the vocabulary §3.3's derivation emits** — so the table is
+checkable against that derivation in both directions. r4 M-1: the excess-SS row was previously keyed
+`excess_ss_not_creditable[].ein`, an `AbsoluteReturn` path that `scrub_pii` does not replace, so a
+maintainer re-deriving from §3.3 would get `w2s[].ein`, find no row for it, and find a row with no
+derivation.
+
 Enumerated from that rule against current source, so a reader can check the derivation:
 
 | replaced field | reaches | class |
@@ -422,7 +504,8 @@ Enumerated from that rule against current source, so a reader can check the deri
 | `div_1099[].payer` | Schedule B Part II payer rows (`printed.rs:1142` → `schedule_b.rs:84`) | **printed** |
 | **`header.ip_pin`** | **Form 1040's IP PIN cell (`form1040_full.rs:449-450`) — the replacement is `None`, so the cell is not written AT ALL** | **printed (PRESENCE)** |
 | `b_1099[].payer` | the `Form1099BNeedsForm8949` refusal text (`return_refuse.rs:672-676`) | message |
-| `excess_ss_not_creditable[].ein` | the excess-SS advisory (`advisories.rs:706`) | message |
+| `w2s[].ein` | the excess-SS advisory (`advisories.rs:706`), **via `NonCreditableSs.ein`** | message |
+| `header.dependents[].date_of_birth` | nothing — dropped per §6; `DependentRow` carries `name`/`ssn`/`relationship` only (`btctax-core/src/tax/packet.rs:418-428`) and the dependent advisories read `.len()` and `.name` | neither |
 | `w2s[].employer` | no printed cell and no computed message; its one reader is the input-form surface echoing the stored value back to its own author (`btctax-input-form/src/spec/sections.rs:642`) | neither |
 | `g_1099[].payer` | no printed cell, no message, and no reader at all | neither |
 
@@ -514,7 +597,7 @@ r1 found four items no other section reaches:
 
 ## 8. Build order
 
-1. This spec → review → 0C/0I. *(r3 is this document.)*
+1. This spec → review → 0C/0I. *(r5 is this document.)*
 2. `ledger_contributes` made public with its obligation doc; the two helpers it calls widened to
    `pub(crate)` **in their own two modules** (§2.2 ★); ledger projection added to the scrub path;
    §2.2 refusal as a **`CliError`**, not a `RefuseReason`.
@@ -533,9 +616,15 @@ r1 found four items no other section reaches:
    coarsening, and **trim-emptiness preservation on every string `scrub_pii` replaces** (not the
    payer/employer loops only — `business_description` is the one that matters) — plus the two §3.3
    class-level tests, each RED first, over the §3.3 fixture matrix.
-   **The matrix's field axis is derived by value-diffing `to_value(ri)` against
-   `to_value(scrub_pii(&ri))` over an all-sentinel fixture, with a per-field `assert_ne!` precondition**
-   (§3.3); it is not the four fields §3.2 happens to discuss, and it is not a `const` list.
+   ★★★ **BUILD THE AXIS DERIVATION FIRST, AND WATCH IT GO RED (B1).** Before any matrix row exists,
+   land the derivation of §3.3 — `serde_json::to_value(ri)` vs `to_value(scrub_pii(&ri))` over the
+   **maximal** sentinel fixture, presence-difference included — and **print the derived path set**. It
+   must contain **`w2s[].ein`, `header.ip_pin`, `foreign_country_names` and `b_1099[].payer`**. If it
+   does not, the fixture is not maximal and the derivation is blind on the four fields four review
+   rounds were spent on. Pair it with its kill-test: a fixture variant leaving `ip_pin: None` must make
+   the axis check **RED**. This is the step that converts the last four rounds of argument into a
+   command, and it is why no fifth prose round was run.
+   ★ The axis is derived, never a `const` list, and never the four fields §3.2 happens to discuss.
    ★ **The fixtures the matrix needs are built HERE, in this step, not later** (r3 M-2): a `b_1099`
    fixture exercising the payer loop, and a `foreign_accounts: Some(true)` fixture, since **no fixture
    is in that class today** and the `scrub_name_list` mutation ships green without one. Scheduling them
@@ -552,7 +641,9 @@ r1 found four items no other section reaches:
 8. TOML round-trip test; help + man regenerated to §5 — the claims name every member §5.1's table
    classes as **printed** or **message** (the two `neither` rows are part of the derivation's audit
    trail, not divergences, and do not belong in user-facing help).
-9. Whole-branch `main..HEAD` review to 0C/0I, briefed on what r1 and r2 covered so it spends its budget
-   on the seams (harness B3).
+9. Whole-branch `main..HEAD` review to 0C/0I, briefed on what **r1–r4** covered — all four are persisted
+   in `reviews/`, with CLEAN sections recording what each could not break — so it spends its budget on
+   the seams (harness B3). ★ Under-stating that count is not cosmetic: B3's whole point is telling the
+   last pass what the earlier rounds already held.
 
 Ships alone, in its own release.
