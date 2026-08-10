@@ -135,12 +135,28 @@ btctax already prints." Both halves were wrong:
   is `widening-an-exemption-is-never-the-safe-edit` in miniature.
 
 ★ **The two helpers are private and live in TWO DIFFERENT modules, neither of them `scrub`** —
-`digital_asset_activity` at `return_1040.rs:2013` and `first_hard_blocker` at `compute.rs:462`. So the
-§8 step widens **two** visibilities, not one, and `ledger_contributes` takes a dependency on two
-modules it does not live in. Widen each to `pub(crate)` only — the precedent is `canonical_ein`
-(`return_1040.rs:681`), already `pub(crate)` and already called cross-module from
-`return_refuse.rs:941`. `ledger_contributes` itself is the only new `pub` item, and its doc names both
-callers so neither drifts. The scrub path must also **project the ledger**, which it currently never
+`digital_asset_activity` at `return_1040.rs:2013` and `first_hard_blocker` at `compute.rs:462`.
+`ledger_contributes` itself is the only new `pub` item.
+
+> ★★★ **CORRECTED BY THE BUILD (2026-08-09) — only ONE visibility is widened, and it is not the one
+> that mattered.** This section directed widening **both** to `pub(crate)`. `first_hard_blocker`
+> **cannot be**: `tax/compute.rs` is a **FROZEN engine file**, content-pinned by
+> `btctax-core/src/tax/frozen_guard.rs` (SPEC_full_return §2). The pin is on *content*, deliberately,
+> so even an edit preserving the public API trips `frozen_engine_files_are_unchanged` — which is
+> exactly what it is for. Its exception process wants a separately-reviewed commit for a change that
+> should be "exceedingly rare in v1", and *a sharing feature wanting one more caller* is not that case.
+>
+> **So the hard-blocker disjunct uses the predicate every other non-frozen caller already uses** —
+> `state.blockers.iter().any(|b| b.kind.severity() == Severity::Hard)`, as at `admin.rs:234`, `:712`
+> and `:972`. `first_hard_blocker` keeps its zero callers outside `compute.rs`; it returns the *first*
+> such blocker for a deterministic `TaxYearNotComputable` detail, and this disjunct needs only
+> existence. `digital_asset_activity` **is** widened to `pub(crate)` — `return_1040.rs` is not frozen —
+> and the precedent for that is `canonical_ein` (`return_1040.rs:681`), already `pub(crate)` and
+> already called cross-module from `return_refuse.rs:941`.
+>
+> ★★ **Five review rounds mandated an edit to a frozen file and none of them noticed.** The fact was
+> one `cargo nextest` away the whole time, and the build found it in a single run. It is the cleanest
+> evidence on this branch for r4's call that the remaining risk had stopped being prose-shaped. The scrub path must also **project the ledger**, which it currently never
 does (`Session::project()`); if projection fails, scrub **refuses** — it never falls back to "assume
 empty".
 
