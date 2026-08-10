@@ -189,6 +189,32 @@ fn synthetic_ein(n: usize) -> String {
     format!("9{}-{:07}", n % 10, n + 1)
 }
 
+/// ★★★ **TRIM-EMPTINESS IS A VALIDITY CLASS, AND EVERY REPLACEMENT PRESERVES IT** (§3.2).
+///
+/// Replace `s` with `stand_in` — **unless `s` is trim-empty, in which case emit `""`.**
+///
+/// The class every screen induces is `trim().is_empty()`, **not** `is_empty()`: `return_refuse.rs`
+/// reads it at `:672` (broker payer), `:798` (country names) and `:901` (business description), and
+/// the repo pins that exact substitution at `:1484` — *"Whitespace is not a name. This pins the
+/// `trim()`, which a naive `is_empty()` would miss."* A rule keyed to `""` alone leaves `"   "` in
+/// the replaced set and the class still flips.
+///
+/// **Why it matters most on `business_description`:** it is `#[serde(default)]`, so an imported TOML
+/// that omits the key yields `""`, and `screen_inputs` then refuses `ScheduleCNoBusinessDescription`.
+/// A filer whose description is blank hits that refusal, runs `income scrub` **because of it**, and
+/// under an unconditional replacement is handed a file on which the refusal does not exist. That is
+/// §3.2's governing harm — the scrubbed copy files where the original refused.
+///
+/// ★ Emitting `""` for a trim-empty original leaks nothing: an empty or whitespace-only string
+/// carries no identity, so this opens no disclosure channel in exchange for closing a class flip.
+fn replace_preserving_emptiness(s: &str, stand_in: String) -> String {
+    if s.trim().is_empty() {
+        String::new()
+    } else {
+        stand_in
+    }
+}
+
 /// Remaps EINs so that DISTINCTNESS is preserved and nothing else is.
 ///
 /// ★★★ **KEYED ON `canonical_ein`, NOT ON THE RAW SPELLING — this is r1's CRITICAL.** §3.1 of
@@ -220,41 +246,109 @@ impl EinMap {
     }
 }
 
+/// ★★★ **THE VALIDITY CLASS SURVIVES, AND NO ORIGINAL BYTE DOES** (§3.2).
+///
+/// `absent → absent`, `malformed → SYNTHETIC-malformed`, `valid → synthetic-valid`. The preserved
+/// thing is the **error variant**, never the bytes, because the whole point is that the recipient's
+/// copy refuses exactly where the filer's did — the filer is sending the file *to reproduce a
+/// refusal*. Normalizing every class into "valid" makes identity-shaped fail-closed screens vanish
+/// and the scrubbed copy **files where the original refused**.
+///
+/// ★★ **`NotDigits` is the one deliberate COARSENING.** `SsnError::NotDigits(c)` carries a character
+/// of the filer's REAL entry (`packet.rs:66-67`), the only `SsnError` payload that is *content*
+/// rather than *shape* — `WrongLength(n)` is a digit count, which is what makes it both safe to
+/// preserve and diagnostically load-bearing ("my SSN has four digits"). So a malformed original maps
+/// to a stand-in whose first non-digit is a constant `'x'`, and `Ssn::canonical` checks `NotDigits`
+/// **before** length, so the variant holds at any length and `'x'` cannot collapse into `Ok`.
+fn class_preserving_stand_in(
+    class: Result<(), crate::tax::packet::SsnError>,
+    valid: String,
+) -> String {
+    use crate::tax::packet::SsnError;
+    match class {
+        Ok(()) => valid,
+        // `absent → absent`: nothing was given, and inventing a value would file where the original
+        // refused.
+        Err(SsnError::Missing) => String::new(),
+        // The payload is a real character of the filer's entry. Coarsen it; keep the variant.
+        Err(SsnError::NotDigits(_)) => "x".to_string(),
+        // A digit count is a shape, not content — preserve it exactly.
+        Err(SsnError::WrongLength(n)) => "1".repeat(n),
+    }
+}
+
+/// The SSN leg of [`class_preserving_stand_in`].
+fn synthetic_ssn_like(real: &str, valid: String) -> String {
+    class_preserving_stand_in(crate::tax::packet::Ssn::canonical(real).map(|_| ()), valid)
+}
+
+/// The IP PIN leg, which is §3.2's one deliberate exception and has **three** outcomes, not two.
+///
+/// ★ **It MUST validate with `IpPin::canonical`, not `Ssn::canonical`** — an IP PIN is SIX digits and
+/// an SSN is nine, so the SSN validator reads a perfectly valid PIN as `WrongLength(6)` and mints a
+/// stand-in for it. That inverts the carve-out precisely: the *valid* case, which must be DROPPED,
+/// would instead be replaced. Caught by `the_identity_does_not_survive`.
+///
+/// ★★ **`Some("")` IS NOT `None`.** `ReturnHeader::build` canonicalizes a present PIN, so an empty
+/// one errs `Missing` while an absent one is `Ok`. Collapsing `Some("")` to `None` therefore changes
+/// the packet-boundary class — the scrubbed copy builds a header where the filer's refused. It is
+/// preserved as `Some("")`, which leaks nothing and still errs `Missing`.
+fn scrub_ip_pin(real: &str) -> Option<String> {
+    use crate::tax::packet::{IpPin, SsnError};
+    match IpPin::canonical(real) {
+        // ★★★ VALID → DROPPED, never synthesised. A well-formed stand-in inside a file stamped
+        //     shareable would FABRICATE a live IRS anti-fraud credential. Nothing computes from it,
+        //     and `build` is `Ok` for both `Some(valid)` and `None`, so dropping moves no figure and
+        //     changes no class.
+        Ok(_) => None,
+        // Present but empty: still errs `Missing`, so the stand-in must too.
+        Err(SsnError::Missing) => Some(String::new()),
+        // A character of the filer's real entry — coarsen it, keep the variant (§3.2).
+        Err(SsnError::NotDigits(_)) => Some("x".to_string()),
+        // n can never be 6 here (that is the `Ok` arm), so this cannot canonicalize into a
+        // well-formed credential.
+        Err(SsnError::WrongLength(n)) => Some("1".repeat(n)),
+    }
+}
+
 fn scrub_person(p: &Person, who: &str, n: usize) -> Person {
     // ★ No `..` — a new `Person` field must be classified here before this compiles.
     let Person {
-        first_name: _,
-        last_name: _,
-        ssn: _,
+        first_name,
+        last_name,
+        ssn,
         date_of_birth,
         date_of_death,
         blind,
-        occupation: _,
+        occupation,
     } = p;
     Person {
-        first_name: who.to_string(),
-        last_name: "Example".into(),
-        ssn: synthetic_ssn(n),
+        first_name: replace_preserving_emptiness(first_name, who.to_string()),
+        last_name: replace_preserving_emptiness(last_name, "Example".into()),
+        ssn: synthetic_ssn_like(ssn, synthetic_ssn(n)),
         // ★★ KEPT. §63(f)'s age-65 and blindness additions read these, and i1040gi's carve-out for
         //    someone who died in-year before reaching 65 reads the death date. Scrubbing them would
         //    move the deduction and break the invariant this module exists to guarantee.
         date_of_birth: *date_of_birth,
         date_of_death: *date_of_death,
         blind: *blind,
-        occupation: "Occupation".into(),
+        occupation: replace_preserving_emptiness(occupation, "Occupation".into()),
     }
 }
 
 fn scrub_dependent(d: &Dependent, n: usize) -> Dependent {
     let Dependent {
-        name: _,
-        ssn: _,
+        name,
+        ssn,
         relationship,
         date_of_birth,
     } = d;
     Dependent {
-        name: format!("Dependent{n}"),
-        ssn: synthetic_ssn(100 + n),
+        name: replace_preserving_emptiness(name, format!("Dependent{n}")),
+        // ★ A dependent's SSN is read by `Ssn::canonical` too (`packet.rs:425`), so its validity class
+        //   is as load-bearing as the taxpayer's: an eight-digit typo refuses on the original, and an
+        //   unconditional stand-in would let the scrubbed copy EXPORT where the filer could not.
+        ssn: synthetic_ssn_like(ssn, synthetic_ssn(100 + n)),
         // ★ KEPT: relationship decides child-vs-other-dependent, and the DOB decides qualifying-child
         //   age. Both are read; only the name and SSN are not.
         relationship: relationship.clone(),
@@ -266,10 +360,10 @@ fn scrub_header(h: &HouseholdHeader) -> HouseholdHeader {
     let HouseholdHeader {
         taxpayer,
         spouse,
-        address_street: _,
-        address_city: _,
-        address_state: _,
-        address_zip: _,
+        address_street,
+        address_city,
+        address_state,
+        address_zip,
         dependents,
         can_be_claimed_as_dependent_taxpayer,
         can_be_claimed_as_dependent_spouse,
@@ -279,17 +373,17 @@ fn scrub_header(h: &HouseholdHeader) -> HouseholdHeader {
         presidential_fund_spouse,
         taxpayer_died_during_year,
         spouse_died_during_year,
-        ip_pin: _,
+        ip_pin,
     } = h;
     HouseholdHeader {
         taxpayer: scrub_person(taxpayer, "Taxpayer", 1),
         spouse: spouse.as_ref().map(|s| scrub_person(s, "Spouse", 2)),
-        address_street: "1 Example St".into(),
-        address_city: "Springfield".into(),
+        address_street: replace_preserving_emptiness(address_street, "1 Example St".into()),
+        address_city: replace_preserving_emptiness(address_city, "Springfield".into()),
         // ★ The STATE is replaced too. btctax computes no state tax, so nothing reads it — but a
         //   state plus a filing status plus an income is a long way toward identifying a household.
-        address_state: "IL".into(),
-        address_zip: "62704".into(),
+        address_state: replace_preserving_emptiness(address_state, "IL".into()),
+        address_zip: replace_preserving_emptiness(address_zip, "62704".into()),
         dependents: dependents
             .iter()
             .enumerate()
@@ -304,10 +398,24 @@ fn scrub_header(h: &HouseholdHeader) -> HouseholdHeader {
         presidential_fund_spouse: *presidential_fund_spouse,
         taxpayer_died_during_year: *taxpayer_died_during_year,
         spouse_died_during_year: *spouse_died_during_year,
-        // ★★★ DROPPED, never replaced. The IP PIN is a live anti-fraud credential issued by the IRS;
-        //     a synthetic one would be a plausible-looking secret in a file marked safe to share.
-        //     Nothing computes from it, so dropping it cannot move a figure.
-        ip_pin: None,
+        // ★★★ THE CARVE-OUT (§3.2). The IP PIN is a live IRS anti-fraud CREDENTIAL, so minting a
+        //     well-formed one inside a file stamped shareable would fabricate a credential — the one
+        //     thing worse than leaking the real value. So it is NEVER synthesised:
+        //
+        //       absent or valid → None   (keep dropping it; nothing computes from it, so no figure
+        //                                 moves, and neither §3.3 test can see the drop)
+        //       malformed       → a malformed NON-credential stand-in
+        //
+        //     ★ The malformed leg is not decoration: it is the only leg `ReturnHeader::build` reads.
+        //       `IpPin::canonical` errs only on malformed, so `absent`/`valid` are both invisible to
+        //       its `Result` and collapsing them to `None` changes no behaviour — while a malformed
+        //       original must still refuse on the recipient's copy, or the scrubbed file EXPORTS
+        //       where the filer's could not. The stand-in preserves `WrongLength(n)` for n ≠ 6, so it
+        //       can never canonicalize into a well-formed credential.
+        //
+        //     ★★ This is a DELIBERATE EXCEPTION to §3.2's blanket "malformed → SYNTHETIC-malformed,
+        //        valid → synthetic-valid", and it is the only one.
+        ip_pin: ip_pin.as_deref().and_then(scrub_ip_pin),
     }
 }
 
@@ -388,37 +496,51 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
     out.header = scrub_header(header);
     out.foreign_country_names = scrub_name_list(foreign_country_names);
 
-    if let (Some(sc_out), Some(_sc)) = (out.schedule_c.as_mut(), schedule_c.as_ref()) {
+    if let (Some(sc_out), Some(sc)) = (out.schedule_c.as_mut(), schedule_c.as_ref()) {
         // ★★ FREE TEXT, and the one field here a filer fills in their own words. "Smith Family
-        //    Dental" is a perfectly ordinary answer. It must stay NON-EMPTY: an empty description
-        //    refuses the return (`ScheduleCNoBusinessDescription`), so scrubbing it to "" would make
-        //    the scrubbed copy refuse where the original filed — breaking the reproduce-it guarantee
-        //    in the other direction.
-        sc_out.business_description = "Example business".into();
+        //    Dental" is a perfectly ordinary answer.
+        //
+        //    ★★★ NON-EMPTY IN, STAND-IN OUT; TRIM-EMPTY IN, `""` OUT. The earlier comment here
+        //        ordered it to "stay NON-EMPTY" unconditionally, which is sound only when the
+        //        original was non-empty. `business_description` is `#[serde(default)]`, so an
+        //        imported TOML that omits the key yields `""` and `screen_inputs` refuses
+        //        `ScheduleCNoBusinessDescription` (`return_refuse.rs:897-905`; the three-space case
+        //        is pinned at `:1487-1495`). A filer whose description is blank hits that refusal,
+        //        runs `income scrub` BECAUSE of it, and an unconditional stand-in hands them a file
+        //        on which the refusal does not exist — the scrubbed copy files where the original
+        //        refused. Both directions are now preserved.
+        sc_out.business_description =
+            replace_preserving_emptiness(&sc.business_description, "Example business".into());
         // ★ `naics_code` is KEPT: a six-digit federal industry taxonomy shared by thousands of
         //   businesses is not a personal identifier, and it is printed on Schedule C line B, so a
         //   reproducer wants the real one. Recorded as a decision rather than an oversight.
     }
 
     // ★★ W-2 employers: the NAME is free to replace, the EIN is not — only its sameness matters.
+    //
+    // ★ Every loop below preserves trim-emptiness (§3.2). The broker one is not hypothetical:
+    //   `screen_inputs` reads `b.payer.trim().is_empty()` to choose between "(unnamed broker)" and
+    //   the payer's name (`return_refuse.rs:672-676`), so an unconditional stand-in flips what the
+    //   recipient's copy says. The others are held to the same rule because the next reader of one
+    //   of these fields is not required to announce itself.
     let mut eins = EinMap::default();
     for (i, w) in out.w2s.iter_mut().enumerate() {
-        w.employer = format!("Employer{}", i + 1);
-        if let Some(e) = w.ein.as_ref().filter(|e| !e.is_empty()) {
+        w.employer = replace_preserving_emptiness(&w.employer, format!("Employer{}", i + 1));
+        if let Some(e) = w.ein.as_ref().filter(|e| !e.trim().is_empty()) {
             w.ein = Some(eins.map(e));
         }
     }
     for (i, f) in out.int_1099.iter_mut().enumerate() {
-        f.payer = format!("Payer{}", i + 1);
+        f.payer = replace_preserving_emptiness(&f.payer, format!("Payer{}", i + 1));
     }
     for (i, f) in out.div_1099.iter_mut().enumerate() {
-        f.payer = format!("Payer{}", i + 1);
+        f.payer = replace_preserving_emptiness(&f.payer, format!("Payer{}", i + 1));
     }
     for (i, f) in out.b_1099.iter_mut().enumerate() {
-        f.payer = format!("Broker{}", i + 1);
+        f.payer = replace_preserving_emptiness(&f.payer, format!("Broker{}", i + 1));
     }
     for (i, f) in out.g_1099.iter_mut().enumerate() {
-        f.payer = format!("Agency{}", i + 1);
+        f.payer = replace_preserving_emptiness(&f.payer, format!("Agency{}", i + 1));
     }
     out
 }
@@ -514,6 +636,43 @@ mod tests {
         assert_eq!(
             a.total_payments, b.total_payments,
             "scrubbing moved total payments"
+        );
+    }
+
+    /// ★★★ **THE COARSENING'S WHOLE PURPOSE, AND NO OTHER TEST CAN SEE IT.**
+    ///
+    /// §3.3's matrix compares `NotDigits` by DISCRIMINANT — it has to, because §3.2 mandates the
+    /// payload change — so the matrix is structurally blind to whether the payload leaks. That makes
+    /// this the only instrument standing between the filer's real keystroke and a file the command
+    /// stamps shareable.
+    ///
+    /// `SsnError::NotDigits(c)` carries the **first non-digit character of the filer's own entry**
+    /// (`packet.rs:66-67`). Preserving it verbatim — which is what value equality would demand, and
+    /// what this repo's existing idiom does at `return_refuse.rs:1527` — emits an original identity
+    /// byte, contradicting §3.2's governing sentence: *no original identity value is emitted in any
+    /// class.*
+    #[test]
+    fn a_malformed_ssn_keeps_its_variant_without_leaking_the_filers_character() {
+        use crate::tax::packet::{Ssn, SsnError};
+
+        let (base, _) = w2_only_household();
+        // 'Z' is deliberately distinctive: if it appears anywhere in the output, it came from here.
+        let mut ri = base;
+        ri.header.taxpayer.ssn = "123-45-678Z".into();
+        let scrubbed = scrub_pii(&ri);
+
+        assert!(
+            matches!(
+                Ssn::canonical(&scrubbed.header.taxpayer.ssn),
+                Err(SsnError::NotDigits(_))
+            ),
+            "the ERROR VARIANT must survive, or the scrubbed copy files where the original refused: \
+             {:?}",
+            Ssn::canonical(&scrubbed.header.taxpayer.ssn)
+        );
+        assert!(
+            !serde_json::to_string(&scrubbed).unwrap().contains('Z'),
+            "the filer's own offending character LEAKED into a file stamped safe to share"
         );
     }
 

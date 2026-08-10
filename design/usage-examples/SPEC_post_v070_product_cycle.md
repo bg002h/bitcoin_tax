@@ -378,6 +378,10 @@ already-guarded `main.rs:887/890/895/898/905/908`. EIN/TIN verbatim `main.rs:109
 `Value`-OUTPUT sites (the true blast radius, corrected per impl-review r1 — the original list omitted the
 oracle-harness) = **income-show display** (`btctax-cli/src/cmd/tax.rs`, never parsed) + **oracle-harness
 `json!`→stdout** (`btctax-oracle-harness/src/main.rs`, displayed/re-parsed, never stored/hashed) +
-**input-form coverage tooling** (`btctax-input-form/src/spec/coverage.rs`, `#[cfg(test)]`-gated);
-update-prices is PARSE-only (`from_str`, constructs no output `Value`); `btctax-forms`/`xtask`
-serde_json-free. Pinned by the `m1_preserve_order_value_output_sites_are_enumerated` scan tripwire.
+**input-form coverage tooling** (`btctax-input-form/src/spec/coverage.rs`, `#[cfg(test)]`-gated) +
+**the scrub replaced-field derivation** (`btctax-core/src/tax/scrub_axis.rs`, added 2026-08-09 for
+SPEC_income_scrub.md §3.3: it serializes a `ReturnInputs` and its scrubbed twin ONLY to diff them into
+a `BTreeSet<String>` of field PATHS, so neither `Value` is stored, hashed or emitted and key order
+cannot reach persisted bytes); update-prices is PARSE-only (`from_str`, constructs no output `Value`);
+`btctax-forms`/`xtask` serde_json-free. Pinned by the
+`m1_preserve_order_value_output_sites_are_enumerated` scan tripwire.

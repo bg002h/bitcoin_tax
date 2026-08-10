@@ -246,6 +246,15 @@ fn m1_preserve_order_value_output_sites_are_enumerated() {
         "btctax-cli/src/cmd/tax.rs",
         "btctax-oracle-harness/src/main.rs",
         "btctax-input-form/src/spec/coverage.rs",
+        // ★ AUDITED 2026-08-09 (SPEC_income_scrub.md §3.3, §8 step 4). `replaced_paths` serializes a
+        //   `ReturnInputs` and its scrubbed twin ONLY to diff them into a set of field PATHS — the
+        //   derived axis §3.3's fixture matrix is driven by. Neither `Value` is written, stored,
+        //   hashed or emitted: the function returns `BTreeSet<String>` and every caller is an
+        //   assertion. So key order cannot reach persisted or fingerprinted bytes, which is the
+        //   invariant this enumeration protects. (Deliberately NOT hidden behind `#[cfg(test)]` — the
+        //   scan reads test regions too, by design, and gating it would evade the audit rather than
+        //   answer it.)
+        "btctax-core/src/tax/scrub_axis.rs",
     ];
     let crates_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
