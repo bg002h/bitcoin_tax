@@ -236,27 +236,59 @@ fn the_pii_exclusion_rule_admits_only_impossible_identifiers() {
     let script = repo_root.join("scripts/pii-scan-generic.sh");
     assert!(script.is_file(), "the scan script must exist (fail-closed)");
 
-    // ★★★ THE SCRIPT PATH IS PASSED AS AN ARGUMENT, AND SLASH-NORMALISED. Interpolating it into the
-    //     `bash -c` program text broke this test on WINDOWS for as long as the Windows leg has
-    //     existed: `Path::display()` there yields `C:\…\pii-scan-generic.sh`, and bash eats each
-    //     backslash as an escape, so `grep` opened nothing, `$ALLOWED` came out EMPTY, and every
-    //     admit-vector was reported misclassified — 15 of 23 on 2026-08-06, and it stayed red.
+    // ★★★ THE PROGRAM IS A TEMP SCRIPT, NOT A `bash -c` STRING, AND THE RULE IS READ *BEFORE* ANY
+    //     VECTOR IS JUDGED. Two separate defects lived here, and the second is why the first survived
+    //     so long.
     //
-    //     ★ The failure LOOKED like a broken exclusion rule and was a broken test harness. That is
-    //       the expensive shape: a red CI job that appears to indict the security control it is
-    //       checking gets read as "the rule is wrong", not "the test cannot see the rule".
+    //     (1) Passing the program text and the script path through `Command::new("bash")` on Windows
+    //         puts them through MSVCRT-style quoting on the Rust side and MSYS argument mangling
+    //         (path conversion, glob expansion) on the Git-Bash side. A temp `.sh` invoked as
+    //         `bash <file> <token> <script>` removes all of that from the picture: the only things
+    //         crossing the boundary are two plain paths and one token.
     //
-    //     Passing it as `$2` removes shell escaping from the picture entirely; forward slashes are
-    //     what Git Bash's coreutils accept for a Windows path.
+    //     (2) ★★ THE OLD TEST COULD NOT TELL "THE RULE IS WRONG" FROM "I COULD NOT READ THE RULE."
+    //         When `$ALLOWED` came out EMPTY it reported *"the PII exclusion rule misclassified 15 of
+    //         23 vectors"* — an accusation against the security control, for what was a broken test
+    //         harness. That is why a red Windows leg was read as "the rule needs looking at" and left.
+    //         The rule is now resolved and asserted NON-EMPTY on its own, with bash's stderr, before
+    //         a single vector is checked, so the two failures can never again be confused.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let prog_path = dir.path().join("admits.sh");
+    std::fs::write(
+        &prog_path,
+        "eval \"$(grep -E '^ALLOWED[A-Z_]*=' \"$2\")\"\n         if [ \"${1:-}\" = \"--dump\" ]; then printf '%s' \"$ALLOWED\"; exit 0; fi\n         printf '%s\\n' \"$1\" | grep -qE \"$ALLOWED\"\n",
+    )
+    .expect("write temp program");
+
     let script_arg = script.display().to_string().replace('\\', "/");
-    let admits = |token: &str| -> bool {
-        let prog = r#"eval "$(grep -E '^ALLOWED[A-Z_]*=' "$2")"; printf '%s\n' "$1" | grep -qE "$ALLOWED""#;
+    let run = |token: &str| -> std::process::Output {
         Command::new("bash")
-            .args(["-c", prog, "bash", token, &script_arg])
-            .status()
+            .args([
+                prog_path.display().to_string().replace('\\', "/"),
+                token.to_string(),
+                script_arg.clone(),
+            ])
+            .output()
             .expect("bash must be runnable (fail-closed)")
-            .success()
     };
+
+    // ★ Resolve the rule FIRST. If this is empty the harness is broken, not the rule.
+    let dump = run("--dump");
+    let resolved = String::from_utf8_lossy(&dump.stdout).to_string();
+    assert!(
+        !resolved.trim().is_empty(),
+        "could not READ the exclusion rule from {} — this is a broken test harness, NOT a broken \
+         PII rule. bash stderr: {:?}",
+        script.display(),
+        String::from_utf8_lossy(&dump.stderr)
+    );
+    assert!(
+        resolved.contains("666"),
+        "the resolved rule does not look like the committed one (got {resolved:?}) — the harness \
+         read something, but not the ALLOWED set"
+    );
+
+    let admits = |token: &str| -> bool { run(token).status.success() };
 
     // (token, must_be_admitted, why)
     let vectors: &[(&str, bool, &str)] = &[
