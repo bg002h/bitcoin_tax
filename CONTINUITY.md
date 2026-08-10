@@ -1,133 +1,93 @@
 # CONTINUITY — bitcoin_tax (TaxApp)
 
-_Last updated: **2026-08-09** (`income scrub` spec GREEN at r6; build started at SPEC §8). Written at a
+_Last updated: **2026-08-10** (v0.17.0 RELEASED and PUBLISHED — `income scrub` shipped). Written at a
 pause; safe to exit._
 
 ---
 
-## ▶ RESUME HERE — `income scrub` spec is **GREEN (r6)**. Building, at SPEC §8.
+## ▶ RESUME HERE — nothing is in flight. `income scrub` SHIPPED in v0.17.0.
 
-### FIRST: YOU ARE ON `feat/income-scrub`
+**v0.17.0 is live**: all 10 crates on crates.io, verified 10/10 via the **sparse index** *and* by
+`cargo install btctax-cli --version 0.17.0` from the registry — which is the check that matters,
+because an escaping `include_str!` ships a broken tarball with exit 0 and the index cannot see it.
+The registry-built binary reports `btctax 0.17.0` and carries `income scrub`. Tag `v0.17.0` pushed,
+GitHub release published, `main` at `f385570d`.
 
-```
-git branch --show-current     # expect: feat/income-scrub
-git log --oneline -12
-```
+### ★★★ THE ONE OPEN ITEM: a FABLE DEEP PASS on `income scrub` — see `FOLLOWUPS.md`
 
-`main` is clean and level with `origin/main` at the v0.16.0 release. **`income scrub` is NOT in
-v0.16.0, deliberately** — it was held back after a code review found two CRITICALs.
+Owner-scheduled for later this week or next, deliberately POST-publish (a pass at that depth is
+expensive; the owner chose a considered read over a release gate). **Its brief is already written and
+is the point** — it does NOT ask for a fresh audit:
 
-### ▶ THE NEXT ACTION — build **SPEC §8**, in order, starting at step 2
+> Nine passes ran on this feature, and each one found an instrument that was **green and blind**.
+> Each fix was then itself found blind by the next pass. **What is still green and blind now?**
+> Name the instrument, not the defect.
 
-`design/SPEC_income_scrub.md` is **r6 and build-ready**. The order in §8 is sequenced and the
-sequencing was itself reviewed. **Do not re-open the spec for another prose round** — see "why the
-loop is closed" below.
+The four CLEAN sections in `reviews/scrub-*` are marked off-limits so budget is not re-spent where
+things are settled, and the settled decisions are listed so it cannot re-litigate them (especially the
+`year - 1` disjunct — two attempts to name a mechanism for it were both wrong; a third is not wanted).
 
-★★★ **§8 step 4's FIRST act is the whole point: land the axis derivation and WATCH IT GO RED (B1),
-before any matrix row exists.** Print the derived path set; it must contain **`w2s[].ein`,
-`header.ip_pin`, `foreign_country_names`, `b_1099[].payer` and `schedule_c.business_description`**.
-Those five are a **backstop against a non-maximal fixture, never the definition of the axis**.
+### What `income scrub` is, in one paragraph
 
-### Where things stand — five review passes, all folded, all persisted
+`btctax income scrub --year N [--out FILE]` emits a copy of a stored return with the identity replaced
+and every computed FIGURE intact, so a filer can hand a real return to a stranger to reproduce a
+defect. **The product is the AUTHORIZATION, not the file** — so it refuses more than it scrubs: only
+when the ledger contributes nothing to the year (four projection-wide disjuncts, NOT the 1040
+digital-asset box), preserving the *equivalence class* rather than the value (a malformed SSN or EIN
+stays malformed, so the copy refuses exactly where the original did), dropping the IP PIN rather than
+minting a live IRS credential, writing owner-only with a provenance marker that makes a plain
+`income import` refuse.
 
-| artifact | what it is |
+### ★★ THE TRANSFERABLE LESSON OF THIS WHOLE BRANCH — one shape, nine times
+
+Every pass found **an instrument that had never been watched discriminating**:
+
+| what was green and blind | how it was caught |
 |---|---|
-| `reviews/scrub-r1-workflow.md` | code review of the held implementation — 19 confirmed + 6 sweep, **two CRITICALs** |
-| `reviews/scrub-r2-fable-consult.md` | Fable scope adjudication — ship 0.16.0 without scrub; scrub alone later |
-| `reviews/scrub-spec-r1-review.md` | spec r1 — 31 raw → **19 blocking** |
-| `reviews/scrub-spec-r2-review.md` | spec r2 — **0C/4I/3M** |
-| `reviews/scrub-spec-r3-review.md` | spec r3 — **0C/4I/3M/1N** |
-| `reviews/scrub-spec-r4-review.md` | spec r4 — **0C/2I/3M/1N**, and it answered *when to stop* |
-| `reviews/scrub-spec-r5-folddiff-check.md` | scoped fold-diff check — I-2/M-1/M-3/N closed, one I-1 residue |
-| `design/SPEC_income_scrub.md` | **the spec, r6 (`5ba1e79d`) — GREEN** |
+| 2 of the refusal predicate's 4 disjuncts | mutation — deleting either left 2649 tests green |
+| the derived field axis | blind to all four fields the reviews were about |
+| §3.3's matrix refusal assertion | compared `Some(ForeignTrust)` to ITSELF on every row |
+| the TOML round trip | could not fail on a lossy emit (fixture too thin) |
+| the `--out` mode test | blind to the window it was written for |
+| a scan list | 3 entries naming tokens that no longer existed |
+| the A3 write-hook test | depended on an ambient `target/debug/xtask` |
+| the Windows PII test | ran the **WSL launcher**, never a shell, for months |
 
-★ **Commit shape, and it is load-bearing:** persist and fold are always **two commits**. `git show
-<persist>` is what a reviewer found, verbatim; `git diff <persist>..<fold>` is exactly what changed in
-response and nothing else; the fold's message carries the build-gate output.
+★★★ **The last two were CI-red for days and read as something else.** The Windows one announced *"the
+PII exclusion rule misclassified 15 of 23 vectors"* — an accusation against a security control, from a
+harness that had never executed anything. **An instrument that cannot say WHY it failed will be
+believed about WHAT failed.** Three guesses at the cause were all wrong; what settled it in one CI
+round was making the test resolve the rule FIRST and print what came back.
 
-### ★★★ Why the loop is closed, and why another prose round is the wrong instrument
+### The build's own findings, worth not re-deriving
 
-**Five passes found the SAME defect at five depths.** §3.2 states its rule over a *mechanism*; each
-pass then found some *instrument* implementing it written as a hand-list one level down — r2 in §3.3's
-field axis and §5's divergence set, r3 in r2's fixes, r4 in r3's fixes, and the r5 check inside r4's
-fix, on the sixth pass.
-
-**Every pass was about the same handful of fields**, and each pass's instrument missed them for a
-*different* reason. r4 was asked directly whether the remaining risk was prose- or test-shaped and
-answered **test-shaped**, with the right evidence: its own findings came from *executing* the
-derivation against real fixtures (`grep ip_pin testonly.rs` → 0), not from reading section against
-section. **The risk has moved out of the prose and into a fixture nobody has written yet.** A sixth
-prose round structurally cannot reach it; §8 step 4 answers it in one command.
-
-### ★★ The lesson worth carrying off this branch
-
-**"Derive it, don't hand-list it" is NOT the lesson — every round already said that.** A derivation is
-not one until the spec names **the operation that computes it, the blind spot that operation has, and
-the property that authorises each exemption**. Naming an operation is not enough if the named blind
-spot is the wrong one: r4's version named value-collision when the hazard was **structural absence**,
-and stayed blind to all four fields. The r5 check then found the same shape again — maximality defined
-over *presence* when emptiness collapses identically.
-
-★ And when a check names one instance, **fold the class**. The r5 check named `business_description`;
-the class was every replaced string, because §3.2's own trim-emptiness rule makes them all
-conditionally replaced. Fixing the named instance would have been the identical error, on the sixth pass.
-
-### The things most likely to be got wrong during the build
-
-1. **The refusal predicate is scrub-OWNED, not the digital-asset box.** Year-scope ≠ artifact-scope:
-   `pseudo_active()` and `first_hard_blocker()` are projection-wide. The box predicate's `false` means
-   *unchecked, not "No"* — reading that silence as "ledger is empty" is widening an exemption.
-   ★ The `year - 1` disjunct is **deliberate over-refusal that secures no live read**; two rounds of
-   naming a mechanism for it were both wrong. Do not "fix" it by inventing a third.
-2. **No original identity value is emitted in ANY class** — the *error variant* is preserved, never the
-   bytes. Two deliberate exceptions, each with its reason in §3.2: the **IP PIN** is never synthesised
-   (minting one fabricates a live IRS credential), and **`NotDigits(_) → NotDigits('x')`** is a
-   coarsening, because that payload is a character of the filer's real entry while `WrongLength(n)` is
-   only a shape.
-3. **Emptiness is `trim()`, not `""`** — all three readers key on `.trim().is_empty()`, and the repo
-   pins that substitution at `return_refuse.rs:1484` ("Whitespace is not a name").
-4. **A `no such state` exemption on a `malformed` cell is authorised by "no predicate reads a validity
-   class off this field", NEVER by the type.** `header.taxpayer.ssn` is a plain `String` *with* a
-   malformed state. Getting this wrong exempts `dependents[].ssn`, where an eight-digit SSN refuses on
-   the original and **exports** on the scrubbed copy.
-
-### ★ The citation gate — run it on every spec edit
-
-```
-# resolves every file:line in the spec; catches ambiguity ACROSS CRATES
-# (packet.rs, testonly.rs, return_inputs.rs each exist in 2+ crates)
-```
-
-It caught, across three folds: 2 ambiguous, then 5 ambiguous + 2 out-of-range, plus a citation
-transcribed **from a review report** that was off by two (`scrub.rs:222-223` → `:220-221`), plus a
-defect in **the gate itself** (a lowercase-only regex class read `Cargo.toml` as `argo.toml`).
+- **The spec mandated an edit to a FROZEN file** (`tax/compute.rs`, content-pinned). Five spec-review
+  rounds missed it; `cargo nextest` found it in one run. The hard-blocker disjunct uses the predicate
+  every non-frozen caller already uses instead.
+- **A malformed EIN was still upgraded to a well-formed synthetic**, so the copy filed where the
+  original refused and claimed a $1,546.80 §6413(c) credit. Found by the whole-branch pass — §3.2 named
+  the EIN, `EinMap`'s doc *delegated* to §3.2, and §3.2 had no EIN leg. **A pointer to another section
+  is not an implementation.**
+- **The PII allowlist bucket DOES grow.** A comment claiming otherwise was falsified two commits later.
+  What stays refused is the *structural* window (`^9[0-9]-[0-9]{7}$` — it would exempt real EINs under
+  91/94/95/99); token-exact entries with citations are bounded bookkeeping.
 
 ### Owner-only, still open
 
-- **The temporary crates.io token from v0.14.0 is UNREVOKED** — now used across three releases
-  (0.14.0, 0.15.0, 0.16.0). This is the oldest open hygiene item.
-- `scripts/.pii-patterns` EXISTS (owner-supplied, untracked, gitignored). The push gate is green.
-- ★ The three synthetic EINs quoted in persisted reviews are admitted by CITATION in a self-limiting
-  bucket (`ALLOWED_EIN_REVIEW_ARTIFACT`). **SPEC §7 now DECIDES that this bucket does not grow**: there
-  is no structural EIN window, so a generator-keyed rule would exempt real EINs under 91/94/95/99.
-  Committing a scrubbed return as a fixture is **out of scope for v1**.
+- **The crates.io token** — owner has decided: it auto-expires, and is being used until then. No action.
+- `scripts/.pii-patterns` exists (owner-supplied, untracked, gitignored); the push gate is green.
 
-### Owner-only, still open
+### Traps that cost time, so they are not re-hit
 
-- **The temporary crates.io token from v0.14.0 is UNREVOKED** — now used across three releases
-  (0.14.0, 0.15.0, 0.16.0). This is the oldest open hygiene item.
-- `scripts/.pii-patterns` now EXISTS (owner-supplied, untracked, gitignored). The push gate is green.
-
-### Traps hit this session, so they are not re-hit
-
-- **`/tmp` filled to 100% mid-release** and `cargo install` failed with a `syn` compile error that reads
-  exactly like a broken published tarball. It was ENOSPC. Scratch build dirs had reached 23G. Clear
-  `scratchpad/{target,probe,verify,*-target}`; keep `scratchpad/filing/` (the vaults and input TOMLs).
-- **Simulate the range a push will ACTUALLY use.** A new branch uses `rev-list <sha> --not --remotes`;
-  an existing ref uses `origin/main..main`. Those differed by 55 commits here, and the first dry run
-  measured the wrong one.
-- A **golden cannot validate its own regeneration** — when a golden reds, read the diff and confirm it is
-  exactly the intended consequence before accepting it.
+- **`make check` is NOT CI.** It is nextest + clippy only — no fmt-check, msrv, `check-isolation` or
+  `pii-scan`, and it cannot see a platform-specific test. This branch was CI-red for four days while
+  `make check` was green.
+- **A golden cannot validate its own regeneration.** After the 0.17.0 bump both goldens were
+  regenerated and the diffs READ: exactly one version line each.
+- **An unapplied mutation is indistinguishable from a surviving one.** One "surviving" mutation had
+  simply never matched its anchor (a `\n` escaping slip). Every mutation now asserts its anchor first.
+- **The pre-push PII scan flags the review that filed the finding.** Twice now. Reviews stay verbatim,
+  so the scan config moves, not the record.
 
 ---
 
