@@ -13105,6 +13105,8 @@ mod tests {
             &Passphrase::new(pp.into()),
             2024,
             &toml,
+            // ★ no --force: an ordinary fixture carries no scrub marker (§4.3).
+            false,
         )
         .unwrap();
 

@@ -434,3 +434,152 @@ fn scrub_reads_the_draft_that_shadows_the_committed_row() {
         "the shadowed committed figure must not be what travels: {stdout}"
     );
 }
+
+// ── §4 — THE ARTIFACT MUST BE SAFE AS A FILE. Each item lands with its planted-defect test (B1). ──
+
+/// §4.1 — the `--out` file is OWNER-ONLY.
+///
+/// ★ It was a bare `std::fs::write`, which lands 0644 under the default umask: **world-readable**.
+/// The identity in this file is synthetic; every FIGURE in it is real, so on a shared machine a
+/// filer's whole income was readable by every other account on the box.
+#[cfg(unix)]
+#[test]
+fn the_out_file_is_owner_only_even_when_it_already_exists() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let vault = empty_vault(dir.path());
+    store_wage_only_return(&vault);
+    let out = dir.path().join("scrubbed.toml");
+
+    // ★ PRE-CREATE it world-readable. `write_owner_only` creates with 0600, but an EXISTING path
+    //   keeps its old mode — and scrub is exactly the command a filer re-runs to the same path.
+    std::fs::write(&out, b"stale").unwrap();
+    std::fs::set_permissions(&out, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+    let (code, _o, stderr) = run_btctax(
+        &vault,
+        &[
+            "income",
+            "scrub",
+            "--year",
+            "2024",
+            "--out",
+            out.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(code, 0, "stderr: {stderr}");
+
+    let mode = std::fs::metadata(&out).unwrap().permissions().mode() & 0o777;
+    assert_eq!(
+        mode, 0o600,
+        "a scrubbed return must be readable only by its owner, got {mode:o}"
+    );
+}
+
+/// §4.2 — the marker rides on the EMITTED STRING, so stdout and `--out` carry it identically.
+#[test]
+fn the_scrubbed_output_carries_the_provenance_marker_on_both_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = empty_vault(dir.path());
+    store_wage_only_return(&vault);
+    let marker = btctax_core::tax::scrub::SCRUB_PROVENANCE_MARKER;
+
+    let (code, stdout, stderr) = run_btctax(&vault, &["income", "scrub", "--year", "2024"]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert!(stdout.contains(marker), "stdout is unmarked: {stdout}");
+
+    let out = dir.path().join("scrubbed.toml");
+    let (code, _o, stderr) = run_btctax(
+        &vault,
+        &[
+            "income",
+            "scrub",
+            "--year",
+            "2024",
+            "--out",
+            out.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert!(
+        std::fs::read_to_string(&out).unwrap().contains(marker),
+        "the --out file is unmarked, so re-importing it would be silently accepted"
+    );
+}
+
+/// §4.3 — a marked file is REFUSED by `income import`, and `--force` is the only way past.
+///
+/// ★★ The harm is data loss: a scrubbed file is schema-identical to a real one and import is an
+/// unconfirmed whole-blob upsert, so this would overwrite the vault's real identity and IP PIN —
+/// unrestorable — leaving a synthetic SSN well-formed enough to print on a filed 1040.
+#[test]
+fn importing_a_scrubbed_file_is_refused_without_force_and_accepted_with_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = empty_vault(dir.path());
+    store_wage_only_return(&vault);
+    let out = dir.path().join("scrubbed.toml");
+    let (code, _o, _e) = run_btctax(
+        &vault,
+        &[
+            "income",
+            "scrub",
+            "--year",
+            "2024",
+            "--out",
+            out.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(code, 0);
+
+    let args = [
+        "income",
+        "import",
+        "--year",
+        "2024",
+        "--file",
+        out.to_str().unwrap(),
+    ];
+    let (code, _o, stderr) = run_btctax(&vault, &args);
+    assert_ne!(code, 0, "a marked file must be REFUSED");
+    assert!(
+        stderr.to_lowercase().contains("scrub"),
+        "the refusal must say WHY: {stderr}"
+    );
+
+    let mut forced = args.to_vec();
+    forced.push("--force");
+    let (code, _o, stderr) = run_btctax(&vault, &forced);
+    assert_eq!(code, 0, "--force must get past the marker guard: {stderr}");
+}
+
+/// ★★★ THE NEGATIVE TEST, and it is the one that matters most: the guard must not become a wall.
+/// Both committed example TOMLs — ordinary, unscrubbed returns — still import CLEAN with no flag.
+/// A marker check that reds on real files would break `income import` for everyone.
+#[test]
+fn the_committed_example_tomls_still_import_without_force() {
+    for fixture in ["fullreturn_inputs.toml", "nine_dependents_amt_inputs.toml"] {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = empty_vault(dir.path());
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/examples")
+            .join(fixture);
+        assert!(src.exists(), "fixture missing: {}", src.display());
+
+        let (code, _o, stderr) = run_btctax(
+            &vault,
+            &[
+                "income",
+                "import",
+                "--year",
+                "2024",
+                "--file",
+                src.to_str().unwrap(),
+            ],
+        );
+        assert_eq!(
+            code, 0,
+            "{fixture}: an ordinary return must import with no --force. stderr: {stderr}"
+        );
+    }
+}

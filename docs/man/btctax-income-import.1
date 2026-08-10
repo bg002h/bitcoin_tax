@@ -4,7 +4,7 @@
 .SH NAME
 import \- Import full\-return inputs from an offline TOML file into the vault for a tax year
 .SH SYNOPSIS
-\fBimport\fR <\fB\-\-year\fR> <\fB\-\-file\fR> [\fB\-h\fR|\fB\-\-help\fR] 
+\fBimport\fR <\fB\-\-year\fR> <\fB\-\-file\fR> [\fB\-\-force\fR] [\fB\-h\fR|\fB\-\-help\fR] 
 .SH DESCRIPTION
 Import full\-return inputs from an offline TOML file into the vault for a tax year
 .SH OPTIONS
@@ -15,5 +15,10 @@ The tax year (e.g. 2024)
 \fB\-\-file\fR \fI<FILE>\fR
 Path to the TOML file describing the full\-return inputs
 .TP
+\fB\-\-force\fR
+Load a file that carries the btctax SCRUB marker (a scrubbed copy: synthetic identity, no IP PIN). Without this, importing one is refused — it would overwrite this vault\*(Aqs real identity with placeholders, unrecoverably. Prefer a scratch vault.
+
+This overrides the scrub\-marker guard and NOTHING else; a parked full return still blocks the write.
+.TP
 \fB\-h\fR, \fB\-\-help\fR
-Print help
+Print help (see a summary with \*(Aq\-h\*(Aq)

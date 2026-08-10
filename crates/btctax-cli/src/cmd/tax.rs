@@ -51,8 +51,25 @@ pub fn import_return_inputs(
     pp: &Passphrase,
     year: i32,
     file: &Path,
+    force: bool,
 ) -> Result<(), CliError> {
     let text = std::fs::read_to_string(file)?;
+    // ★★★ §4.3 — THE MARKER GUARD, A PRE-PARSE SCAN OF THE FILE TEXT.
+    //
+    //     It lives HERE and not in `parse_return_inputs_toml`, which the round-trip test also calls:
+    //     a guard in the parser would make the parser unable to read its own output. And it is a
+    //     text scan rather than a key lookup because the marker is a COMMENT — TOML parsing discards
+    //     comments, and an unknown KEY would be rejected before any guard could run.
+    //
+    //     What it stops: a scrubbed file is schema-identical to a real one and this is an
+    //     unconfirmed whole-blob upsert, so importing one over a real vault destroys that vault's
+    //     identity and IP PIN — unrestorable — and leaves a synthetic SSN well-formed enough to
+    //     print on a filed 1040.
+    if !force && text.contains(btctax_core::tax::scrub::SCRUB_PROVENANCE_MARKER) {
+        return Err(CliError::ImportOfScrubbedFile {
+            path: file.display().to_string(),
+        });
+    }
     let mut ri = parse_return_inputs_toml(&text)?;
     let mut s = Session::open(vault, pp)?;
     // ★ §6.2 (M-1): reconcile the crash-recovery draft BEFORE any committed-row read/write — clear a WIP
@@ -206,10 +223,18 @@ pub fn scrub_return_inputs(
 
     ri.map(|ri| {
         let scrubbed = btctax_core::tax::scrub::scrub_pii(&ri);
-        toml::to_string_pretty(&scrubbed).map_err(|e| CliError::BadConfigValue {
+        let body = toml::to_string_pretty(&scrubbed).map_err(|e| CliError::BadConfigValue {
             key: format!("return_inputs[{year}]"),
             value: e.to_string(),
-        })
+        })?;
+        // ★★ §4.2 — the marker rides on the EMITTED STRING, not on the `--out` path, so stdout and
+        //    the file carry it identically. A filer who pipes this to a file must not get an
+        //    unmarked one.
+        Ok(format!(
+            "{}\n{}",
+            btctax_core::tax::scrub::SCRUB_PROVENANCE_MARKER,
+            body
+        ))
     })
     .transpose()
 }

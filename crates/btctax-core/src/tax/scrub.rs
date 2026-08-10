@@ -195,6 +195,20 @@ pub fn ledger_contribution(state: &LedgerState, year: i32) -> Option<LedgerContr
     }
 }
 
+/// ★★★ **THE PROVENANCE MARKER** (§4.2). A leading COMMENT LINE on the emitted raw text — never a
+/// TOML key, because `parse_return_inputs_toml` rejects unknown keys *before* any guard could run.
+///
+/// **Why it is not cosmetic.** A scrubbed file is schema-identical to a real one and `income import`
+/// is an unconfirmed whole-blob upsert, so re-importing one over a real vault destroys that vault's
+/// identity and IP PIN — **unrestorable** — and leaves a synthetic SSN well-formed enough to print on
+/// a filed 1040. This repo's rubric grades data loss Critical.
+///
+/// ★ The token is deliberately long and unpunctuated so it cannot arise by accident in a real file,
+/// and it is matched as a SUBSTRING of the file text, so a filer who adds their own comments above it
+/// does not defeat the guard.
+pub const SCRUB_PROVENANCE_MARKER: &str =
+    "# btctax-scrubbed-return: identity replaced, figures intact. NOT your real return.";
+
 /// ★★★ **THE SCRUB CONSTANTS, MOVED RATHER THAN THE FIXTURES** (§3.4).
 ///
 /// The stand-in address used to be `Springfield / IL / 62704` — **the same address the repo's own

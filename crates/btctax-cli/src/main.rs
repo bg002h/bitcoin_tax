@@ -284,9 +284,9 @@ fn run() -> Result<ExitCode, CliError> {
             }
         },
         Command::Income(income) => match income {
-            IncomeCmd::Import { year, file } => {
+            IncomeCmd::Import { year, file, force } => {
                 let pp = passphrase(false)?;
-                cmd::tax::import_return_inputs(vault, &pp, year, &file)?;
+                cmd::tax::import_return_inputs(vault, &pp, year, &file, force)?;
                 println!("Imported full-return inputs for tax year {year}.");
             }
             IncomeCmd::Show { year } => {
@@ -309,7 +309,17 @@ fn run() -> Result<ExitCode, CliError> {
                 match cmd::tax::scrub_return_inputs(vault, &pp, year)? {
                     Some(toml) => match out {
                         Some(path) => {
-                            std::fs::write(&path, toml).map_err(CliError::Io)?;
+                            // ★★★ §4.1 — OWNER-ONLY, like every other decrypted output. This was a
+                            //     bare `std::fs::write`, which lands 0644 under the default umask:
+                            //     world-readable. The file holds a real return's every FIGURE — the
+                            //     identity is synthetic, the income is not — so on a shared machine
+                            //     it was readable by every other account.
+                            //
+                            //     ★ `write_owner_only` creates with 0600, but a PRE-EXISTING path
+                            //       keeps its old mode, so `restrict_file_to_owner` follows. Scrub
+                            //       is exactly the command a filer re-runs to the same path.
+                            btctax_store::fsperms::write_owner_only(&path, toml.as_bytes())?;
+                            btctax_store::fsperms::restrict_file_to_owner(&path)?;
                             println!(
                                 "Wrote scrubbed inputs for {year} to {}. Every figure is preserved; \
                                  the identity is not. Read it before you send it.",

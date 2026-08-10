@@ -632,7 +632,7 @@ fn report_tax_year_with_return_inputs_for_unsupported_year_refuses_with_income_c
         "filing_status = \"Single\"\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n",
     )
     .unwrap();
-    cmd::tax::import_return_inputs(&vault, &pp(), 2025, &toml).unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2025, &toml, false).unwrap();
 
     let err = cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap_err();
     match err {
@@ -675,7 +675,7 @@ fn report_tax_year_derives_and_computes_from_ty2024_return_inputs() {
     .unwrap();
     // The CSV disposal is in 2025, but v1 full-return tables are TY2024-only; import for 2024 to exercise
     // the derive+compute happy path (the ledger has no 2024 disposals → a clean profile-only computation).
-    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml).unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap();
 
     let TaxYearReport { outcome, .. } =
         cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap();
@@ -722,7 +722,7 @@ fn report_tax_year_refuses_business_income_without_schedule_c() {
     // Full-return inputs for 2024 with NO Schedule C.
     let toml = _dir.path().join("inputs.toml");
     std::fs::write(&toml, "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n").unwrap();
-    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml).unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap();
 
     let err = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap_err();
     match err {
@@ -1752,7 +1752,7 @@ fn import_preserves_a_computed_carryover() {
         "filing_status = \"Single\"\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n",
     )
     .unwrap();
-    cmd::tax::import_return_inputs(&vault, &pp(), 2025, &toml).unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2025, &toml, false).unwrap();
     let after = {
         let s = Session::open(&vault, &pp()).unwrap();
         btctax_cli::return_inputs::get(s.conn(), 2025)
@@ -1844,7 +1844,7 @@ fn a_pre_d8_vault_refuses_until_answered_and_income_answer_is_the_way_out() {
          box1_wages = \"90000\"\nbox2_fed_withheld = \"12000\"\nbox5_medicare_wages = \"90000\"\n",
     )
     .unwrap();
-    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml).unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap();
 
     // (b) It REFUSES — loudly, as an error. It does not quietly hand back a number computed from a guess.
     let err = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap_err();
@@ -1990,10 +1990,10 @@ fn import_over_a_stale_row_refuses() {
     let toml_dir = tempfile::tempdir().unwrap();
     let toml = answered_toml(toml_dir.path());
 
-    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml).unwrap(); // a v2 row
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap(); // a v2 row
     stale_the_row(&vault, 2024); // now it is pre-P9
 
-    let err = cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml).unwrap_err();
+    let err = cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap_err();
     assert!(
         matches!(err, btctax_cli::CliError::StaleReturnInputs { year: 2024, .. }),
         "import over a stale row must refuse (naming the remedy), not silently overwrite it: {err:?}"
@@ -2010,14 +2010,14 @@ fn clear_then_import_recovers_a_stale_row_to_v2() {
     let toml_dir = tempfile::tempdir().unwrap();
     let toml = answered_toml(toml_dir.path());
 
-    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml).unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap();
     stale_the_row(&vault, 2024);
 
     assert!(
         cmd::tax::clear_return_inputs(&vault, &pp(), 2024).unwrap(),
         "clear works on a stale row (it never deserializes)"
     );
-    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml).unwrap(); // no existing row now ⇒ succeeds
+    cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap(); // no existing row now ⇒ succeeds
     assert_eq!(
         row_version(&vault, 2024),
         2,
@@ -2101,7 +2101,7 @@ fn the_full_remedy_chain_restores_a_computed_carryover() {
     let toml = answered_toml(toml_dir.path());
     for year in [2024, 2025] {
         cmd::tax::clear_return_inputs(&vault, &pp(), year).unwrap();
-        cmd::tax::import_return_inputs(&vault, &pp(), year, &toml).unwrap();
+        cmd::tax::import_return_inputs(&vault, &pp(), year, &toml, false).unwrap();
     }
     // NOTE: the re-imported 2024 has no charitable gift (the minimal TOML), so to reproduce the carryover
     // the filer re-imports 2024's REAL inputs. Here we re-store them, then re-run the write-back.

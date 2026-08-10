@@ -164,6 +164,24 @@ pub enum CliError {
          'discard parked draft' (a confirmed delete) to drop it; then re-run this command."
     )]
     ParkedDraftBlocksWrite { year: i32 },
+    /// `income import` refused a file carrying the scrub provenance marker (SPEC_income_scrub.md
+    /// §4.3). A scrubbed file is schema-identical to a real one and import is an unconfirmed
+    /// whole-blob upsert, so this would destroy the vault's real identity and IP PIN —
+    /// unrestorable — and leave a synthetic SSN well-formed enough to print on a filed 1040.
+    ///
+    /// ★★ `--force` overrides THIS guard and nothing else. The parked-draft refusal
+    /// ([`Self::ParkedDraftBlocksWrite`], raised by `coherence_clear_or_refuse` before any marker
+    /// logic) stays unconditional: it protects the sole copy of a screened return, and a flag named
+    /// `--force` must not be read as licence to destroy that too.
+    #[error(
+        "refusing to import {path}: it carries the btctax scrub marker, so it is a SCRUBBED copy — \
+         its identity is synthetic and its IP PIN was dropped. Importing it would overwrite this \
+         vault's real identity with placeholders, and that cannot be undone.\n\
+         \n\
+         If you meant to load a scrubbed return (to reproduce someone else's defect), re-run with \
+         --force, ideally against a scratch vault."
+    )]
+    ImportOfScrubbedFile { path: String },
     /// `income scrub` refused because the LEDGER contributes to `year` (SPEC_income_scrub.md §2.2).
     ///
     /// ★★★ This is a `CliError` and deliberately **NOT** a `RefuseReason`. That taxonomy answers

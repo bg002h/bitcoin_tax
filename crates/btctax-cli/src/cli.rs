@@ -403,6 +403,14 @@ pub enum IncomeCmd {
         /// Path to the TOML file describing the full-return inputs.
         #[arg(long)]
         file: std::path::PathBuf,
+        /// Load a file that carries the btctax SCRUB marker (a scrubbed copy: synthetic identity, no
+        /// IP PIN). Without this, importing one is refused — it would overwrite this vault's real
+        /// identity with placeholders, unrecoverably. Prefer a scratch vault.
+        ///
+        /// This overrides the scrub-marker guard and NOTHING else; a parked full return still blocks
+        /// the write.
+        #[arg(long)]
+        force: bool,
     },
     /// Show the stored full-return inputs for a tax year (JSON, PII redacted), or nothing if none set.
     Show {

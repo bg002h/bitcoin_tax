@@ -648,6 +648,6 @@ pub fn seed_j6_full(
     // 4. the non-crypto household — a programmatic `income import` (reads a file, so materialize the TOML).
     let toml = dir.join("fullreturn.toml");
     std::fs::write(&toml, J6_FULLRETURN_TOML).unwrap();
-    crate::cmd::tax::import_return_inputs(&vault, pp, 2024, &toml).unwrap();
+    crate::cmd::tax::import_return_inputs(&vault, pp, 2024, &toml, false).unwrap();
     vault
 }
