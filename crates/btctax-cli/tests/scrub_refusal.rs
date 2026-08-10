@@ -392,3 +392,45 @@ fn a_ledger_free_vault_still_scrubs() {
         "and it must be scrubbed: {stdout:?}"
     );
 }
+
+// ── §7 — a DRAFT shadows the committed row, and scrub must read what the filer is looking at ─────
+
+/// ★★★ `return_inputs::get` sees only the COMMITTED row, but §6.1's precedence is that a
+/// version-current DRAFT shadows it. A filer who edited their return in the input form and has not
+/// committed is **looking at the draft** — and the defect they are writing in to report lives in the
+/// return on their screen, not in the one underneath it.
+///
+/// Scrubbing the committed row would hand a stranger a DIFFERENT return and send them after a bug
+/// that is not there, which is the same harm §2.2 refuses ledger-bearing years to avoid.
+#[test]
+fn scrub_reads_the_draft_that_shadows_the_committed_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = empty_vault(dir.path());
+    store_wage_only_return(&vault); // the COMMITTED row: $80,000 of wages
+
+    // …then an uncommitted draft the filer is actually looking at, with a different figure.
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        let mut ri = btctax_cli::return_inputs::get(s.conn(), SCRUB_YEAR)
+            .unwrap()
+            .unwrap();
+        // All three wage boxes, so `80000` cannot survive anywhere for an innocent reason and the
+        // negative assertion below means what it says.
+        ri.w2s[0].box1_wages = dec!(12345);
+        ri.w2s[0].box3_ss_wages = dec!(12345);
+        ri.w2s[0].box5_medicare_wages = dec!(12345);
+        btctax_cli::input_form_store::save_draft(&mut s, SCRUB_YEAR, &ri).unwrap();
+        s.save().unwrap();
+    }
+
+    let (code, stdout, stderr) = run_btctax(&vault, &["income", "scrub", "--year", "2024"]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert!(
+        stdout.contains("12345"),
+        "scrub emitted the COMMITTED row, not the draft the filer is looking at: {stdout}"
+    );
+    assert!(
+        !stdout.contains("80000"),
+        "the shadowed committed figure must not be what travels: {stdout}"
+    );
+}

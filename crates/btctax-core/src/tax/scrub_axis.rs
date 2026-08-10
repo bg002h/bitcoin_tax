@@ -630,6 +630,16 @@ mod matrix {
                 Fixture(|r| r.header.dependents[0].name = String::new()),
                 NoSuchState(NO_READER),
             ),
+            // ★★★ THIS ROW EXISTS BECAUSE THE MATRIX DEMANDED IT, NOT BECAUSE ANYONE REMEMBERED.
+            //     §6 dropped the dependent DOB, which put a NEW field into the derived axis, and the
+            //     loop refused to pass until its class behaviour was decided. That is the whole
+            //     mechanism working on its first real occasion — no reader had to notice.
+            (
+                "header.dependents[].date_of_birth",
+                Fixture(|r| r.header.dependents.clear()),
+                NoSuchState("an Option<Date>: absent IS its empty state, there is no third value"),
+                NoSuchState(NO_READER),
+            ),
             (
                 "header.address_street",
                 NoSuchState(PLAIN_STRING),

@@ -11,12 +11,19 @@
 //!
 //! ## ★★★ WHY THIS DESTRUCTURES EXHAUSTIVELY
 //!
-//! Every struct touched here is taken apart with **no `..`** — `ReturnInputs` itself included. A
-//! scrubber that silently passes a NEW PII field through is worse than no scrubber at all: it carries
-//! the user's authorisation ("this file is safe to share") onto a file that is not. So adding a field
-//! to `ReturnInputs`, `Person`, `Dependent` or `HouseholdHeader` is *pattern does not mention field*
-//! here, and the author must decide which side it falls on. The same argument the P9 classifier makes
-//! about answered-ness, applied to disclosure.
+//! Every struct touched here is taken apart with **no `..`** — all TEN of them. A scrubber that
+//! silently passes a NEW PII field through is worse than no scrubber at all: it carries the user's
+//! authorisation ("this file is safe to share") onto a file that is not. So adding a field to
+//! `ReturnInputs`, `Person`, `Dependent`, `HouseholdHeader`, `W2`, `ScheduleCInputs`, `Form1099Int`,
+//! `Form1099Div`, `Form1099G` or `Form1099B` is *pattern does not mention field* here, and the author
+//! must decide which side it falls on. The same argument the P9 classifier makes about answered-ness,
+//! applied to disclosure.
+//!
+//! ★ **This sentence was an OVERCLAIM until 2026-08-09 and is the reason to distrust prose here.** It
+//! said "every struct touched here", and it was true of four: the six it missed — the W-2 and the four
+//! 1099s and Schedule C — are precisely the ones holding the free text a filer types in their own
+//! words. A doc comment asserting a property nothing enforced, in the module whose whole subject is
+//! that distinction.
 //!
 //! ★★★ THE TOP LEVEL WAS THE ONE THAT MATTERED, AND IT WAS THE ONE THAT WAS MISSING. The first
 //! version of this module made the sentence above true of the three nested structs and false of
@@ -43,8 +50,18 @@
 //! employer still share one afterwards. Replacing them independently would silently turn one employer
 //! into two and manufacture a credit; replacing them all with one constant would do the reverse.
 //!
-//! ★ SSNs are emitted with a middle group of `00`, which the SSA never issues — so the output is safe
-//! by construction and needs no allowlist entry if it is ever committed as a fixture.
+//! ★★ **SSNs — AND ONLY SSNs — ARE SAFE BY CONSTRUCTION.** [`synthetic_ssn`] emits a middle group of
+//! `00`, which the SSA has never issued, and `scripts/pii-scan-generic.sh` has a matching STRUCTURAL
+//! rule (`ALLOWED_SSN_IMPOSSIBLE`) that admits the whole shape.
+//!
+//! ★★★ **The same is NOT true of EINs, and the claim used to be written as though it were.** There is
+//! no impossible EIN — the IRS has issued prefixes across nearly the whole 2-digit space — so the
+//! scanner has no structural rule for them and says so in its own comments. A generator-keyed
+//! allowlist would be `^9[0-9]-[0-9]{7}$`, which exempts every REAL EIN issued under 91/94/95/99 from
+//! a scan whose entire purpose is stopping a real taxpayer identifier reaching a public repo.
+//! Widening an exemption is never the safe edit, so (SPEC_income_scrub.md §7): **committing a scrubbed
+//! return as a repo fixture is OUT OF SCOPE for v1.** If it is ever wanted it is its own decision, and
+//! it must state the real-EIN intersection of whatever window it proposes in writing first.
 
 use crate::state::LedgerState;
 use crate::tax::return_inputs::{Dependent, HouseholdHeader, Person, ReturnInputs};
@@ -357,7 +374,10 @@ fn scrub_dependent(d: &Dependent, n: usize) -> Dependent {
         name,
         ssn,
         relationship,
-        date_of_birth,
+        // ★ Bound and discarded rather than omitted: the `..`-free destructure is the guard, so this
+        //   must stay named even though §6 drops the value. Removing it would silently re-open the
+        //   hole for the NEXT field added to `Dependent`.
+        date_of_birth: _,
     } = d;
     Dependent {
         name: replace_preserving_emptiness(name, format!("Dependent{n}")),
@@ -365,10 +385,19 @@ fn scrub_dependent(d: &Dependent, n: usize) -> Dependent {
         //   is as load-bearing as the taxpayer's: an eight-digit typo refuses on the original, and an
         //   unconditional stand-in would let the scrubbed copy EXPORT where the filer could not.
         ssn: synthetic_ssn_like(ssn, synthetic_ssn(100 + n)),
-        // ★ KEPT: relationship decides child-vs-other-dependent, and the DOB decides qualifying-child
-        //   age. Both are read; only the name and SSN are not.
+        // ★ KEPT: `relationship` decides child-vs-other-dependent, and it IS read.
         relationship: relationship.clone(),
-        date_of_birth: *date_of_birth,
+        // ★★★ DROPPED (§6) — and the comment this replaces was FALSE. It said "the DOB decides
+        //     qualifying-child age. BOTH are read", which is not true of a DEPENDENT's DOB: btctax
+        //     does not compute the CTC, and every non-test reader of `date_of_birth` is the
+        //     taxpayer's or the spouse's (`questions.rs:804,820`; `packet.rs:306,314`).
+        //     `DependentRow` carries `name`/`ssn`/`relationship` only (`packet.rs:418-428`).
+        //
+        //     So retaining it is RETENTION, not computation — a child's date of birth kept in a file
+        //     stamped shareable for no reason anything reads. Dropping it cannot move a figure,
+        //     which is exactly why it must be dropped rather than quantized: quantizing would be
+        //     inventing a value to stand in for one nothing consumes.
+        date_of_birth: None,
     }
 }
 
@@ -513,6 +542,21 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
     out.foreign_country_names = scrub_name_list(foreign_country_names);
 
     if let (Some(sc_out), Some(sc)) = (out.schedule_c.as_mut(), schedule_c.as_ref()) {
+        // ★ The `..`-free guard, extended to the tenth struct (§7).
+        let crate::tax::return_inputs::ScheduleCInputs {
+            owner: _,
+            business_description: _,
+            naics_code: _,
+            accounting_method: _,
+            expenses: _,
+            other_gross_receipts: _,
+            payments_requiring_1099: _,
+            will_file_required_1099: _,
+            qbi_w2_wages: _,
+            qbi_ubia: _,
+            is_sstb: _,
+            is_cooperative_patron: _,
+        } = sc;
         // ★★ FREE TEXT, and the one field here a filer fills in their own words. "Smith Family
         //    Dental" is a perfectly ordinary answer.
         //
@@ -539,23 +583,88 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
     //   the payer's name (`return_refuse.rs:672-676`), so an unconditional stand-in flips what the
     //   recipient's copy says. The others are held to the same rule because the next reader of one
     //   of these fields is not required to announce itself.
+    //
+    // ★★★ EACH LOOP OPENS WITH AN EXHAUSTIVE `..`-FREE DESTRUCTURE (§7). The guard used to cover 4
+    //     of 10 structs — `ReturnInputs`, `Person`, `Dependent`, `HouseholdHeader` — and the six it
+    //     missed are exactly the ones holding free text a filer types: employer and payer names, and
+    //     the business description. These destructures bind nothing and are compiled away; their
+    //     entire job is to make *pattern does not mention field* fire when someone adds a field to
+    //     one of these types, so the author must decide which side it falls on BEFORE it can ride
+    //     into a file the tool calls shareable.
     let mut eins = EinMap::default();
     for (i, w) in out.w2s.iter_mut().enumerate() {
+        let crate::tax::return_inputs::W2 {
+            owner: _,
+            employer: _,
+            ein: _,
+            box1_wages: _,
+            box2_fed_withheld: _,
+            box3_ss_wages: _,
+            box4_ss_withheld: _,
+            box5_medicare_wages: _,
+            box6_medicare_withheld: _,
+            box7_ss_tips: _,
+            box17_state_tax_withheld: _,
+            box19_local_tax: _,
+            // ★ `box12[].code` is KEPT and this is the record of that decision (§7): a box-12 code is
+            //   a TAXONOMY ("D" = 401(k) elective deferral), not a person. Replacing it would destroy
+            //   a reproducer's fidelity for no disclosure gain.
+            box12: _,
+            box8_allocated_tips: _,
+            box10_dependent_care: _,
+        } = w;
         w.employer = replace_preserving_emptiness(&w.employer, format!("Employer{}", i + 1));
         if let Some(e) = w.ein.as_ref().filter(|e| !e.trim().is_empty()) {
             w.ein = Some(eins.map(e));
         }
     }
     for (i, f) in out.int_1099.iter_mut().enumerate() {
+        let crate::tax::return_inputs::Form1099Int {
+            payer: _,
+            box1_interest: _,
+            box2_early_withdrawal_penalty: _,
+            box3_treasury_interest: _,
+            box4_fed_withheld: _,
+            box6_foreign_tax: _,
+            box8_tax_exempt_interest: _,
+            box9_private_activity_bond_amt: _,
+        } = f;
         f.payer = replace_preserving_emptiness(&f.payer, format!("Payer{}", i + 1));
     }
     for (i, f) in out.div_1099.iter_mut().enumerate() {
+        let crate::tax::return_inputs::Form1099Div {
+            payer: _,
+            box1a_ordinary: _,
+            box1b_qualified: _,
+            box2a_capgain_distr: _,
+            box2b_unrecap_1250: _,
+            box2c_section_1202: _,
+            box2d_collectibles_28: _,
+            box4_fed_withheld: _,
+            box5_section_199a: _,
+            box7_foreign_tax: _,
+            box12_exempt_interest_dividends: _,
+            box13_private_activity_amt: _,
+        } = f;
         f.payer = replace_preserving_emptiness(&f.payer, format!("Payer{}", i + 1));
     }
     for (i, f) in out.b_1099.iter_mut().enumerate() {
+        let crate::tax::return_inputs::Form1099B {
+            payer: _,
+            short_term_proceeds: _,
+            short_term_basis: _,
+            long_term_proceeds: _,
+            long_term_basis: _,
+            basis_reported_and_no_adjustments: _,
+        } = f;
         f.payer = replace_preserving_emptiness(&f.payer, format!("Broker{}", i + 1));
     }
     for (i, f) in out.g_1099.iter_mut().enumerate() {
+        let crate::tax::return_inputs::Form1099G {
+            payer: _,
+            box1_unemployment: _,
+            box4_fed_withheld: _,
+        } = f;
         f.payer = replace_preserving_emptiness(&f.payer, format!("Agency{}", i + 1));
     }
     out
@@ -882,9 +991,12 @@ mod tests {
                 o.relationship, n.relationship,
                 "relationship is computational"
             );
+            // ★ §6: DROPPED, not preserved. Nothing reads a dependent's DOB — btctax does not
+            //   compute the CTC — so keeping it is retention with no computational warrant.
             assert_eq!(
-                o.date_of_birth, n.date_of_birth,
-                "a dependent's DOB decides qualifying-child age"
+                n.date_of_birth, None,
+                "a dependent's DOB is DROPPED: nothing reads it, so retaining a child's date of \
+                 birth in a file stamped shareable buys nothing"
             );
         }
         // ★★ …and the two fields a security review found riding through the FIRST version of this

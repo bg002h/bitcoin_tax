@@ -172,7 +172,20 @@ pub fn scrub_return_inputs(
     year: i32,
 ) -> Result<Option<String>, CliError> {
     let s = Session::open(vault, pp)?;
-    let ri = return_inputs::get(s.conn(), year)?;
+
+    // ★★★ §7 — READ THE ROW EVERY OTHER READER READS. `return_inputs::get` sees only the COMMITTED
+    //     row, but §6.1's precedence is that a version-current DRAFT shadows it. A filer who edited
+    //     their return in the input form and has not committed is looking at the draft; scrubbing the
+    //     committed row would hand a stranger a DIFFERENT return from the one on their screen — and
+    //     the defect they are writing in to report lives in the one on their screen.
+    //
+    //     ★ A PARKED draft is the sole copy of a screened return, so it must be scrubbed for the same
+    //       reason, and more so: there is no committed row behind it to fall back to.
+    let ri = match crate::input_form_store::load(s.conn(), year)?.0 {
+        crate::input_form_store::Loaded::Draft { ri, .. } => Some(ri),
+        crate::input_form_store::Loaded::Committed(ri) => Some(ri),
+        crate::input_form_store::Loaded::Fresh => None,
+    };
 
     // ★★★ SPEC §2.2 — the SCRUB-OWNED refusal, checked before anything is emitted.
     //
