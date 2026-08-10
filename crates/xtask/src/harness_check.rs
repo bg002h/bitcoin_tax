@@ -527,6 +527,31 @@ mod tests {
     /// legitimate write INTO an archive must pass, a path outside the repo must be ignored entirely,
     /// and A4's second attempt must proceed (it is a speed bump, not a wall — a wall gets routed
     /// around with `mkdir -p`).
+    /// Build `xtask` if no binary is where `on-write.sh` looks for it, so the hook's authoritative
+    /// branch can actually run. Establishing the precondition is the test's job — the alternative is
+    /// what shipped: a silent dependence on whatever happens to be in `target/`.
+    #[cfg(unix)]
+    fn ensure_xtask_binary() {
+        let root = repo_root();
+        if root.join("target/debug/xtask").exists() || root.join("target/release/xtask").exists() {
+            return;
+        }
+        let st = Command::new(env!("CARGO"))
+            .args(["build", "-p", "xtask"])
+            .current_dir(&root)
+            .status()
+            .expect("spawn cargo build -p xtask");
+        assert!(
+            st.success(),
+            "could not build xtask, which this test's ALLOW cases require"
+        );
+        assert!(
+            root.join("target/debug/xtask").exists() || root.join("target/release/xtask").exists(),
+            "cargo build -p xtask succeeded but left no binary where on-write.sh looks — if the \
+             target dir moved, the HOOK's lookup needs updating too, not just this test"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn the_write_hook_denies_new_archives_and_asks_once_per_new_directory() {
@@ -535,6 +560,18 @@ mod tests {
 
         let script = repo_root().join("scripts/hooks/on-write.sh");
         assert!(script.exists(), "{} missing", script.display());
+        // ★★★ THIS TEST HAD AN UNSTATED AMBIENT PRECONDITION, AND IT WAS RED IN CI FOR DAYS.
+        //     A3's ALLOW cases below are primary-source-SHAPED (`f6251--2025.pdf`, `26USC_s55.html`),
+        //     so they reach the authoritative `xtask classify-path` branch — and the hook fails
+        //     CLOSED with exit 2 when no built binary is at `target/{debug,release}/xtask`, which is
+        //     deliberate and correct ("the checker could not run" must never be the quiet path).
+        //
+        //     `cargo nextest` builds TEST binaries, not `target/debug/xtask`, so in CI that path is
+        //     absent and every ALLOW assertion sees exit 2. It passed on a developer machine only
+        //     because a previous `cargo build` had left the artifact lying there — the test was
+        //     green for a reason unrelated to what it checks, on all three platforms, in the module
+        //     whose entire subject is instruments that have never been watched discriminating.
+        ensure_xtask_binary();
         // ★ Isolated ack dir — see the mkdir test: a shared one-shot file makes these tests pass
         // once and fail forever after, and race each other.
         let state = tempfile::tempdir().expect("tempdir");
