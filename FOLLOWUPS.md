@@ -4,6 +4,56 @@ Open/!resolved action items (STANDARD_WORKFLOW §4). Each: what · why · status
 
 ---
 
+## ⛔ OPEN — FABLE DEEP PASS on `income scrub`, POST-PUBLISH (filed 2026-08-10)
+
+**Owner: the owner. Schedule: later this week or next week — deliberately NOT before the 0.17.0
+publish, because a Fable pass at this depth eats a large amount of usage and the owner chose to spend
+it on a considered read rather than a release gate.**
+
+**Status when filed:** `income scrub` shipped in 0.17.0 after nine review passes (one code review of
+the original, five spec rounds, a whole-branch pass, and two scoped fold checks). The last two
+returned 0C/0I. **This entry is not a doubt about a specific defect — it is the deliberate use of the
+one slot the tiering rule reserves for Fable**, taken *after* the irreversible action rather than
+before it, on the owner's call.
+
+### Why it is still worth paying for after the fact
+
+`income scrub` is the one command whose product is an **authorization**: it tells a filer "this file
+is safe to hand to a stranger." A wrong figure is a bug they can audit; a wrong safety claim is one
+nobody can audit afterwards, and it is now in every installed copy (crates.io yanks, never deletes).
+Post-publish, the remedy for a finding is a 0.17.1 and a yank — worse than catching it, better than
+never knowing.
+
+### ★★★ The brief, and the reason it should NOT be a fresh audit
+
+Every pass on this branch found the same shape: **an instrument that was never watched
+discriminating.** In order — the four-disjunct refusal predicate (two disjuncts unheld), the derived
+field axis (blind to four fields), §3.3's matrix (its refusal assertion compared
+`Some(ForeignTrust)` to itself on *every* row), the TOML round trip (could not fail on a lossy emit),
+the `--out` mode test (blind to the window it was written for), a scan list with three entries that
+could never fire, and finally the harness's OWN test, green for four days in CI-red because it
+depended on an ambient build artifact.
+
+**So the question for Fable is not "find bugs in scrub".** It is:
+
+> Given that seven passes each found a green-and-blind instrument, and each fix was itself found
+> blind by the next pass — **what is still green and blind now?** Name the instrument, not the
+> defect, and say what would have to be true for it to be discriminating.
+
+Give it: `design/SPEC_income_scrub.md` (r6), the nine persisted reviews in `reviews/scrub-*`, and
+`main..` for the branch. Forbid re-deriving anything the CLEAN sections already settled — four of
+them record what could not be broken, and re-spending budget there is the failure this brief exists
+to avoid.
+
+### Do NOT let it re-litigate
+
+`absent → absent`; the ledger is never scrubbed (figures on a public chain ARE the identifier); no
+perturbing figures; the refusal is a `CliError` not a `RefuseReason`; the `year-1` disjunct is
+deliberate over-refusal securing no live read (**two attempts to name a mechanism for it were both
+wrong — a third is not wanted**); the structural EIN window stays refused; the IP PIN is never
+synthesised when valid.
+
+
 ## ★ STALE-SWEEP AUDIT (2026-07-20, verified against HEAD `de5e4a1`)
 
 A full audit checked every "OPEN" marker in this file against **current source** (not the

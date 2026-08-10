@@ -236,13 +236,23 @@ fn the_pii_exclusion_rule_admits_only_impossible_identifiers() {
     let script = repo_root.join("scripts/pii-scan-generic.sh");
     assert!(script.is_file(), "the scan script must exist (fail-closed)");
 
+    // ★★★ THE SCRIPT PATH IS PASSED AS AN ARGUMENT, AND SLASH-NORMALISED. Interpolating it into the
+    //     `bash -c` program text broke this test on WINDOWS for as long as the Windows leg has
+    //     existed: `Path::display()` there yields `C:\…\pii-scan-generic.sh`, and bash eats each
+    //     backslash as an escape, so `grep` opened nothing, `$ALLOWED` came out EMPTY, and every
+    //     admit-vector was reported misclassified — 15 of 23 on 2026-08-06, and it stayed red.
+    //
+    //     ★ The failure LOOKED like a broken exclusion rule and was a broken test harness. That is
+    //       the expensive shape: a red CI job that appears to indict the security control it is
+    //       checking gets read as "the rule is wrong", not "the test cannot see the rule".
+    //
+    //     Passing it as `$2` removes shell escaping from the picture entirely; forward slashes are
+    //     what Git Bash's coreutils accept for a Windows path.
+    let script_arg = script.display().to_string().replace('\\', "/");
     let admits = |token: &str| -> bool {
-        let prog = format!(
-            r#"eval "$(grep -E '^ALLOWED[A-Z_]*=' '{}')"; printf '%s\n' "$1" | grep -qE "$ALLOWED""#,
-            script.display()
-        );
+        let prog = r#"eval "$(grep -E '^ALLOWED[A-Z_]*=' "$2")"; printf '%s\n' "$1" | grep -qE "$ALLOWED""#;
         Command::new("bash")
-            .args(["-c", &prog, "bash", token])
+            .args(["-c", prog, "bash", token, &script_arg])
             .status()
             .expect("bash must be runnable (fail-closed)")
             .success()
