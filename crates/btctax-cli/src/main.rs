@@ -318,7 +318,21 @@ fn run() -> Result<ExitCode, CliError> {
                             //     ★ `write_owner_only` creates with 0600, but a PRE-EXISTING path
                             //       keeps its old mode, so `restrict_file_to_owner` follows. Scrub
                             //       is exactly the command a filer re-runs to the same path.
-                            btctax_store::fsperms::write_owner_only(&path, toml.as_bytes())?;
+                            // ★★ REMOVE FIRST. `write_owner_only`'s 0600 applies at CREATE; for a
+                            //    pre-existing path the content is written at the OLD mode and only
+                            //    then narrowed — a window in which the whole return sits
+                            //    world-readable, and if the narrowing errors it stays that way with
+                            //    the content in it. The mode assertion cannot see that window.
+                            let _ = std::fs::remove_file(&path);
+                            btctax_store::fsperms::write_owner_only(&path, toml.as_bytes())
+                                // ★ Name the PATH: a bare io::Error here says "permission denied"
+                                //   with no hint which file (r1 sweep).
+                                .map_err(|e| {
+                                    CliError::Usage(format!(
+                                        "could not write the scrubbed return to {}: {e}",
+                                        path.display()
+                                    ))
+                                })?;
                             btctax_store::fsperms::restrict_file_to_owner(&path)?;
                             println!(
                                 "Wrote scrubbed inputs for {year} to {}. Every figure is preserved; \

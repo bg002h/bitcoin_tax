@@ -155,20 +155,32 @@ pub fn maximal_sentinel() -> ReturnInputs {
         ein: Some(ein.to_string()),
         box1_wages: dec!(1000),
         box2_fed_withheld: dec!(10),
-        box3_ss_wages: dec!(1000),
-        box4_ss_withheld: dec!(62),
+        // ★★★ OVER THE §3101(a) CAP ON PURPOSE. With two W-2s at $6,000 each the household total is
+        //     $12,000 > the $10,453.20 cap, which is what makes `over_cap_needs_ein` LIVE — and that
+        //     screen is the only thing that can discriminate the `w2s[].ein @ malformed` cell below.
+        //
+        //     ★ At the old $62 the cell was EXERCISED AND VACUOUS: about $10,329 under the cap, so
+        //       the refusal could never fire and a scrubber that upgraded a malformed EIN to a
+        //       well-formed one passed. That shipped r1's CRITICAL through the very instrument built
+        //       to catch it — B1's failure mode inside the B1 mechanism.
+        box3_ss_wages: dec!(6000),
+        box4_ss_withheld: dec!(6000),
         box5_medicare_wages: dec!(1000),
         box6_medicare_withheld: dec!(14),
         box7_ss_tips: dec!(1),
         box17_state_tax_withheld: dec!(5),
         box19_local_tax: dec!(2),
+        // ★ REAL box-12 codes ("D" = 401(k) elective deferral, "DD" = employer-sponsored health
+        //   coverage). Gibberish here refuses `UnsupportedBox12Code`, which — because `screen_inputs`
+        //   returns the FIRST refusal — would mask every other cell in the matrix. That these are
+        //   KEPT is asserted directly by value in `the_surviving_sentinels_...`, not via a token.
         box12: vec![
             Box12Entry {
-                code: format!("SENTINEL_box12_code_{tag}_a"),
+                code: "D".into(),
                 amount: dec!(3),
             },
             Box12Entry {
-                code: format!("SENTINEL_box12_code_{tag}_b"),
+                code: "DD".into(),
                 amount: dec!(4),
             },
         ],
@@ -270,7 +282,7 @@ pub fn maximal_sentinel() -> ReturnInputs {
                     amount: dec!(7),
                 },
                 CharitableGift {
-                    class: CharitableClass::Cash30,
+                    class: CharitableClass::Cash60,
                     amount: dec!(8),
                 },
             ],
@@ -280,7 +292,8 @@ pub fn maximal_sentinel() -> ReturnInputs {
         sch1: Schedule1Inputs {
             state_refund_taxable: dec!(1),
             student_loan_interest_paid: dec!(2),
-            ira_deduction_claimed: dec!(3),
+            // ★ Zero: a claimed IRA deduction refuses (no compute consumer), masking every cell.
+            ira_deduction_claimed: dec!(0),
             hsa_activity: Some(false),
         },
         payments: Payments {
@@ -303,7 +316,7 @@ pub fn maximal_sentinel() -> ReturnInputs {
                 provenance: CarryProvenance::User,
             },
             CharitableCarryItem {
-                class: CharitableClass::Cash30,
+                class: CharitableClass::Cash60,
                 amount: dec!(2),
                 origin_year: 2023,
                 provenance: CarryProvenance::User,
@@ -317,7 +330,7 @@ pub fn maximal_sentinel() -> ReturnInputs {
             qbi_carryforward_in_provenance: CarryProvenance::User,
         },
         foreign_accounts: Some(true),
-        foreign_trust: Some(true),
+        foreign_trust: Some(false),
         foreign_country_names: "SENTINEL_countryA, SENTINEL_countryB".into(),
         fbar_filing_required: Some(true),
         donations_had_restrictions: Some(false),
@@ -420,7 +433,6 @@ mod tests {
         let mut survived: BTreeSet<&str> = BTreeSet::new();
         for kept in [
             "SENTINEL_relationship",
-            "SENTINEL_box12_code",
             "SENTINEL_naics",
             "SENTINEL_first",
             "SENTINEL_last",
@@ -446,13 +458,9 @@ mod tests {
                 survived.insert(kept);
             }
         }
-        let expected: BTreeSet<&str> = [
-            "SENTINEL_relationship",
-            "SENTINEL_box12_code",
-            "SENTINEL_naics",
-        ]
-        .into_iter()
-        .collect();
+        let expected: BTreeSet<&str> = ["SENTINEL_relationship", "SENTINEL_naics"]
+            .into_iter()
+            .collect();
         assert_eq!(
             survived, expected,
             "the set of sentinels surviving a scrub must be exactly the fields §7 records as KEPT \
@@ -852,6 +860,29 @@ mod matrix {
     #[test]
     fn every_replaced_field_preserves_its_class_in_every_representable_state() {
         let base = maximal_sentinel();
+
+        // ★★★ THE BASELINE MUST NOT REFUSE, AND THIS ASSERTION IS THE WHOLE REASON THE MATRIX IS
+        //     WORTH RUNNING. `screen_inputs` returns the FIRST refusal it finds. If the sentinel
+        //     refuses for ANY unrelated reason, every cell compares that same constant to itself and
+        //     `assert_same_refusal` can never discriminate — the matrix is exercised, green, and
+        //     blind, on every row at once.
+        //
+        //     ★ That is not hypothetical: it was TRUE until the whole-branch review. The sentinel
+        //       carried `foreign_trust: Some(true)`, so all 23 rows compared
+        //       `Some(ForeignTrust) == Some(ForeignTrust)`. Four further masks surfaced one at a time
+        //       behind it — a non-public-charity gift class, gibberish box-12 codes, a claimed IRA
+        //       deduction — each hidden by the one before. A refusal-comparison matrix over a
+        //       REFUSING baseline asserts nothing whatsoever.
+        //
+        //     ★★ Maximality is about PRESENCE, not about choosing the "loudest" value: every Option
+        //        here is still `Some`, and the fixture is still exhaustive. It is simply a return
+        //        that FILES, so a refusal seen in a cell was caused by that cell.
+        assert_eq!(
+            screen_inputs(&base, &ty2024_table(), &ty2024_params()).map(|r| r.reason),
+            None,
+            "the maximal sentinel must be a FILEABLE return — a refusing baseline masks every cell              of this matrix behind whatever refuses first"
+        );
+
         let derived = replaced_paths(&base);
         let table = matrix();
 

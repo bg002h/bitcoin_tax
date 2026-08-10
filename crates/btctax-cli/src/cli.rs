@@ -443,8 +443,12 @@ pub enum IncomeCmd {
     /// so its box goes blank: the IP PIN. And a cross-year advisory will not fire, because the copy
     /// carries one year.
     ///
-    /// The file is written owner-only and carries a marker line, so a plain `income import` refuses
-    /// it; load it with `income import --force`, ideally into a scratch vault.
+    /// With --out the file is written owner-only (0600). Without it the TOML goes to stdout, and a
+    /// shell redirect creates the file at your umask — usually world-readable — so prefer --out
+    /// for anything you keep.
+    ///
+    /// Either way the output carries a marker line, so a plain `income import` refuses it; load it
+    /// with `income import --force`, ideally into a scratch vault.
     ///
     /// What it is NOT is anonymous: the figures alone are a financial profile. Do not round or fuzz
     /// them to compensate; crossing a bracket, a phase-out or the standard-vs-itemized line changes

@@ -236,6 +236,22 @@ fn synthetic_ein(n: usize) -> String {
     format!("9{}-{:07}", n % 10, n + 1)
 }
 
+/// A synthetic EIN that **`canonical_ein` REJECTS**, distinct per `n` — eight digits, one short.
+///
+/// ★★★ THE VALIDITY CLASS OF AN EIN IS LOAD-BEARING, AND MISSING THIS SHIPPED r1's CRITICAL TWICE.
+/// `screen_inputs` refuses `ExcessSsEmployerUnknown` when a filer is over the §3101(a) cap and any of
+/// their W-2s has an EIN `canonical_ein` cannot read (`return_refuse.rs`'s `over_cap_needs_ein`):
+/// whether the over-withholding is creditable turns on "more than one employer", and a malformed EIN
+/// makes that **undecidable**.
+///
+/// Upgrading it to a well-formed stand-in ANSWERS a question the filer's own data cannot answer. The
+/// scrubbed copy then stops refusing and claims a §6413(c) credit — $1,546.80 on the vector in
+/// `a_malformed_ein_stays_malformed_so_the_copy_refuses_where_the_original_did` — that the original
+/// does not have. The filer is sending the file precisely to reproduce that refusal.
+fn synthetic_malformed_ein(n: usize) -> String {
+    format!("9{}-{:06}", n % 10, n + 1)
+}
+
 /// ★★★ **TRIM-EMPTINESS IS A VALIDITY CLASS, AND EVERY REPLACEMENT PRESERVES IT** (§3.2).
 ///
 /// Replace `s` with `stand_in` — **unless `s` is trim-empty, in which case emit `""`.**
@@ -284,11 +300,27 @@ struct EinMap(BTreeMap<String, String>);
 
 impl EinMap {
     fn map(&mut self, real: &str) -> String {
-        let key = crate::tax::return_1040::canonical_ein(real).unwrap_or_else(|| real.to_string());
+        let canonical = crate::tax::return_1040::canonical_ein(real);
+        // ★★★ THE VALIDITY CLASS SURVIVES TOO (§3.2), not just the partition (§3.1). A value
+        //     `canonical_ein` rejects keys on its own raw spelling — two malformed EINs that differ
+        //     as text stay distinct — AND maps to a stand-in that is *also* unreadable, so the
+        //     undecidability the screen depends on is preserved rather than resolved.
+        //
+        //     ★ This is the leg the build originally omitted. `EinMap`'s doc used to forward the
+        //       obligation to §3.2, and §3.2's implementation had an SSN leg and an IP PIN leg and
+        //       nothing for the EIN — so the delegation pointed at an empty room. It is handled here
+        //       now, where the mapping happens, rather than delegated anywhere.
+        let key = canonical.clone().unwrap_or_else(|| real.to_string());
         let next = self.0.len();
         self.0
             .entry(key)
-            .or_insert_with(|| synthetic_ein(next))
+            .or_insert_with(|| {
+                if canonical.is_some() {
+                    synthetic_ein(next)
+                } else {
+                    synthetic_malformed_ein(next)
+                }
+            })
             .clone()
     }
 }
@@ -715,6 +747,94 @@ mod tests {
     /// cap. The correct §6413(c) credit is **$0** and the over-withholding is *stranded* — it appears
     /// in `AbsoluteReturn::excess_ss_not_creditable`, which is what makes this vector exercise BOTH
     /// halves of §8 step 3.
+    /// ★★★ THE MALFORMED-EIN VECTOR — the half of r1's CRITICAL the build missed.
+    ///
+    /// One digit dropped from an EIN (`"11111111"`, eight digits — the ordinary hand-typing typo),
+    /// on a filer whose W-2s withhold over the §3101(a) cap. `canonical_ein` returns `None`, so
+    /// `over_cap_needs_ein` is true and `screen_inputs` REFUSES `ExcessSsEmployerUnknown`: whether
+    /// any of the over-withholding is creditable is genuinely undecidable without a real EIN.
+    ///
+    /// A scrubber that upgrades it to a well-formed synthetic makes the answer decidable — and wrong.
+    fn malformed_ein_over_cap_household() -> (ReturnInputs, crate::state::LedgerState) {
+        use crate::tax::return_inputs::W2;
+        let (base, state) = w2_only_household();
+        let w = base.w2s[0].clone();
+        let ri = ReturnInputs {
+            w2s: vec![
+                W2 {
+                    ein: Some("111111111".into()),
+                    box3_ss_wages: rust_decimal_macros::dec!(6000),
+                    box4_ss_withheld: rust_decimal_macros::dec!(6000),
+                    ..w.clone()
+                },
+                W2 {
+                    ein: Some("11111111".into()), // EIGHT digits — undecidable, not a second employer
+                    box3_ss_wages: rust_decimal_macros::dec!(6000),
+                    box4_ss_withheld: rust_decimal_macros::dec!(6000),
+                    ..w
+                },
+            ],
+            ..base
+        };
+        (ri, state)
+    }
+
+    /// ★★★ r1's CRITICAL named this as the adjacent instance its fix **must cover**, SPEC §3.2
+    /// mandated it by name — *"Applies to SSN, **EIN**, `business_description`…"* — and the build
+    /// shipped an SSN leg and an IP PIN leg and no EIN leg at all.
+    ///
+    /// A malformed EIN is **undecidable**, and that undecidability is load-bearing: it is what makes
+    /// the original refuse. Replacing it with a well-formed synthetic answers a question the filer's
+    /// own data cannot answer, so the scrubbed copy FILES where the original refused **and** claims a
+    /// §6413(c) credit of $1,546.80 it is not entitled to. The filer is sending this file precisely
+    /// to reproduce that refusal.
+    #[test]
+    fn a_malformed_ein_stays_malformed_so_the_copy_refuses_where_the_original_did() {
+        use crate::tax::return_refuse::screen_inputs;
+        use crate::tax::testonly::{ty2024_params, ty2024_table};
+
+        let (ri, state) = malformed_ein_over_cap_household();
+        let scrubbed = scrub_pii(&ri);
+
+        // The class itself: still undecidable after scrubbing.
+        let canon = |r: &ReturnInputs, i: usize| {
+            r.w2s[i]
+                .ein
+                .as_deref()
+                .and_then(crate::tax::return_1040::canonical_ein)
+        };
+        assert!(
+            canon(&ri, 1).is_none(),
+            "precondition: the original is malformed"
+        );
+        assert!(
+            canon(&scrubbed, 1).is_none(),
+            "a MALFORMED EIN must stay malformed — upgrading it decides §6413(c) on a fact the \
+             filer's data does not contain"
+        );
+        assert_ne!(
+            ri.w2s[1].ein, scrubbed.w2s[1].ein,
+            "…and the real one must not survive"
+        );
+
+        // The refusal the filer is trying to reproduce.
+        let tbl = ty2024_table();
+        let p = ty2024_params();
+        assert_eq!(
+            screen_inputs(&ri, &tbl, &p).map(|r| r.reason),
+            screen_inputs(&scrubbed, &tbl, &p).map(|r| r.reason),
+            "the scrubbed copy must refuse exactly as the original does"
+        );
+
+        // …and the figure, which is what would actually be filed.
+        let a = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
+        let b = assemble_absolute(&scrubbed, &state, &ty2024_params(), &ty2024_table(), 2024);
+        assert_eq!(
+            a.excess_social_security, b.excess_social_security,
+            "scrubbing manufactured a §6413(c) credit"
+        );
+    }
+
     fn two_spellings_household() -> (ReturnInputs, crate::state::LedgerState) {
         use crate::tax::return_inputs::W2;
         let (base, state) = w2_only_household();
@@ -836,11 +956,14 @@ mod tests {
             let mut b =
                 assemble_absolute(&scrubbed, &state, &ty2024_params(), &ty2024_table(), 2024);
 
-            // ★★★ ONE normalisation, and it is named rather than blanket. `business_description` is
-            //     the ONLY identity-bearing string that survives into `AbsoluteReturn` (Schedule C
-            //     line A, carried for printing; every other field there is a figure, a flag or an
-            //     enum). Scrubbing it is the POINT — a filer writes their business name in it — so it
-            //     is blanked on BOTH sides and everything else must still be equal.
+            // ★★★ THREE normalisations, each named rather than blanket. They are the identity
+            //     strings that survive into `AbsoluteReturn`; every other field there is a figure, a
+            //     flag or an enum. Scrubbing them is the POINT — a filer writes their business name
+            //     in one — so each is blanked on BOTH sides and everything else must still be equal.
+            //
+            //     ★ This comment said "ONE normalisation" and called `business_description` "the
+            //       ONLY identity-bearing string" long after the second and third members were added
+            //       below it. r1 filed that sentence; the fold went around it instead of through it.
             //
             //     ★★ It lands in TWO places, which is why this is a helper and not one line: Schedule
             //        C line A, and Form 8995-A line 1(a)'s trade-or-business name. An identity string

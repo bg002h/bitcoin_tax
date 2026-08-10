@@ -283,8 +283,13 @@ fn the_pii_exclusion_rule_admits_only_impossible_identifiers() {
         // ── ADMITTED: synthetic EINs quoted in PERSISTED REVIEW ARTIFACTS ───────────────────────
         // ★ Minted by `scrub::synthetic_ein` and quoted inside reviews that must stay verbatim. Pinned
         //   so the bucket cannot be deleted silently — and so its SHAPE is visible: these are ordinary
-        //   valid-looking EINs, admitted by citation alone, which is why SPEC_income_scrub §7 moves the
-        //   generator into a structural window instead of growing this list.
+        //   valid-looking EINs, admitted by citation alone.
+        // ★★ This comment used to say §7 "moves the generator into a structural window instead of
+        //    growing this list". §7 DECIDED THE OPPOSITE, and this text predated that fold: there is
+        //    no impossible EIN, so a generator-keyed rule would be `^9[0-9]-[0-9]{7}$` and would
+        //    exempt real EINs issued under 91/94/95/99 from the PII scan. The list is CAPPED residue,
+        //    committing a scrubbed return as a fixture is out of scope for v1, and the next person
+        //    tempted to widen it should read `scrub.rs`'s module header first.
         (
             "90-0000001",
             true,

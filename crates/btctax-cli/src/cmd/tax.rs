@@ -198,7 +198,15 @@ pub fn scrub_return_inputs(
     //
     //     ★ A PARKED draft is the sole copy of a screened return, so it must be scrubbed for the same
     //       reason, and more so: there is no committed row behind it to fall back to.
-    let ri = match crate::input_form_store::load(s.conn(), year)?.0 {
+    let (loaded, stale) = crate::input_form_store::load(s.conn(), year)?;
+    // ★ Every other caller of `load` surfaces this; scrub was the only one discarding it. A filer
+    //   whose WIP draft was schema-stale gets the COMMITTED row scrubbed, and without this they are
+    //   not told the draft they were editing was skipped — the soft form of "emits a return the
+    //   filer is not looking at", which is the whole reason scrub reads through `load` at all.
+    if let Some(note) = stale {
+        eprintln!("note: {note}");
+    }
+    let ri = match loaded {
         crate::input_form_store::Loaded::Draft { ri, .. } => Some(ri),
         crate::input_form_store::Loaded::Committed(ri) => Some(ri),
         crate::input_form_store::Loaded::Fresh => None,
@@ -223,9 +231,14 @@ pub fn scrub_return_inputs(
 
     ri.map(|ri| {
         let scrubbed = btctax_core::tax::scrub::scrub_pii(&ri);
-        let body = toml::to_string_pretty(&scrubbed).map_err(|e| CliError::BadConfigValue {
-            key: format!("return_inputs[{year}]"),
-            value: e.to_string(),
+        // ★ NOT `BadConfigValue`, which is documented as "a `cli_config` row held an unrecognized
+        //   value (corrupt DB)" — its natural remedy is to clear the row and re-import, which is
+        //   DESTRUCTIVE and is the wrong advice for what is really a serializer limitation on
+        //   btctax's side. r1's sweep filed this; it reached neither the spec nor the build.
+        let body = toml::to_string_pretty(&scrubbed).map_err(|e| {
+            CliError::Usage(format!(
+                "could not serialize the scrubbed {year} return as TOML: {e}. This is a btctax                  limitation, not a problem with your vault — your stored return is untouched.                  Please report it."
+            ))
         })?;
         // ★★ §4.2 — the marker rides on the EMITTED STRING, not on the `--out` path, so stdout and
         //    the file carry it identically. A filer who pipes this to a file must not get an

@@ -598,7 +598,26 @@ fn the_committed_example_tomls_still_import_without_force() {
 fn the_scrubbed_toml_round_trips_back_through_import() {
     let dir = tempfile::tempdir().unwrap();
     let vault = empty_vault(dir.path());
-    store_wage_only_return(&vault);
+
+    // ★★★ THE MAXIMAL SENTINEL, not the wage-only fixture. `store_wage_only_return` leaves every
+    //     nested shape at its default — no payments, no Schedule A/C, no dependents, no 1099s, no
+    //     box-12 entries — so an emitter that DROPPED a whole block still compares equal on both
+    //     sides. Mutation-verified: dropping `payments` SURVIVED against the thin fixture.
+    //
+    //     `maximal_sentinel` is the fixture §3.3 already maintains: every `Option` `Some`, every
+    //     `Vec` with two elements, every nested struct present. It is also the only thing in the repo
+    //     that emits an array-of-tables inside an array-of-tables (`[[w2s]]` carrying `box12`) —
+    //     the shape this repo documents TOML serialization as fragile about.
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::set(
+            s.conn(),
+            SCRUB_YEAR,
+            &btctax_core::tax::scrub_axis::maximal_sentinel(),
+        )
+        .unwrap();
+        s.save().unwrap();
+    }
 
     let out = dir.path().join("scrubbed.toml");
     let (code, _o, stderr) = run_btctax(
@@ -631,10 +650,20 @@ fn the_scrubbed_toml_round_trips_back_through_import() {
     );
     assert_eq!(code, 0, "the scrubbed file must load: {stderr}");
 
-    // …and what landed is what was sent, field for field.
+    // ★★★ COMPARE AGAINST THE IN-MEMORY SCRUB, NOT AGAINST THE FILE. Parsing the emitted file and
+    //     comparing it to what the recipient stored puts the FILE on both sides of the assertion, so
+    //     it tests the storage layer and not the emitter. Every `ReturnInputs` field is
+    //     `#[serde(default)]`, so a field the emitter DROPS is simply absent from the file, defaults
+    //     on both sides, and compares equal — losing, say, the filer's estimated-tax payments and
+    //     their balance due, while the whole suite stays green.
+    //
+    //     The filer's own scrubbed return is the only expectation that can red on emitter loss.
     let sent: btctax_core::tax::return_inputs::ReturnInputs = {
-        let text = std::fs::read_to_string(&out).unwrap();
-        toml::from_str(&text).expect("the emitted TOML must parse")
+        let s = Session::open(&vault, &pp()).unwrap();
+        let stored = btctax_cli::return_inputs::get(s.conn(), 2024)
+            .unwrap()
+            .unwrap();
+        btctax_core::tax::scrub::scrub_pii(&stored)
     };
     let landed = {
         let s = Session::open(&recipient, &pp()).unwrap();
