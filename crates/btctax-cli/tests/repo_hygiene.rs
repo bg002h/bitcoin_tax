@@ -260,9 +260,42 @@ fn the_pii_exclusion_rule_admits_only_impossible_identifiers() {
     )
     .expect("write temp program");
 
+    // ★★★ WHICH `bash`. On the GitHub Windows runner, `Command::new("bash")` resolves to
+    //     `C:\Windows\System32\bash.exe` — **the WSL launcher**, not Git Bash. There is no distro
+    //     installed, so it prints (in UTF-16LE) "Windows Subsystem for Linux has no installed
+    //     distributions." and exits non-zero. The test was never running a shell at all: every vector
+    //     came back "not admitted", and the old assertion blamed the PII RULE for it.
+    //
+    //     ★ Three plausible causes were guessed and all three were wrong — backslash escaping, CRLF,
+    //       MSYS argument mangling. What settled it in one CI round was the assertion added alongside
+    //       this: resolve the rule FIRST and print what came back. The bytes named the culprit.
+    //
+    //     Git Bash's own path is used explicitly, and a missing one FAILS rather than silently
+    //     skipping — a platform quietly not running this test is how it stayed broken.
+    let bash = if cfg!(windows) {
+        let candidates = [
+            r"C:\Program Files\Git\bin\bash.exe",
+            r"C:\Program Files\Git\usr\bin\bash.exe",
+            r"C:\Program Files (x86)\Git\bin\bash.exe",
+        ];
+        candidates
+            .iter()
+            .find(|p| std::path::Path::new(p).is_file())
+            .map(|p| (*p).to_string())
+            .unwrap_or_else(|| {
+                panic!(
+                    "no Git Bash found at any of {candidates:?}. NOT falling back to `bash` on PATH: \
+                     on a Windows runner that is the WSL launcher, which is how this test spent \
+                     months reporting a broken PII rule when it had never run a shell."
+                )
+            })
+    } else {
+        "bash".to_string()
+    };
+
     let script_arg = script.display().to_string().replace('\\', "/");
     let run = |token: &str| -> std::process::Output {
-        Command::new("bash")
+        Command::new(&bash)
             .args([
                 prog_path.display().to_string().replace('\\', "/"),
                 token.to_string(),
