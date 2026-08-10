@@ -204,7 +204,14 @@ pub fn scrub_return_inputs(
     //   not told the draft they were editing was skipped — the soft form of "emits a return the
     //   filer is not looking at", which is the whole reason scrub reads through `load` at all.
     if let Some(note) = stale {
-        eprintln!("note: {note}");
+        // ★ Reworded rather than printed verbatim: `StaleNote`'s Display says "DISCARDED a stale
+        //   draft", which is true of the writing callers but not of this one — scrub never calls
+        //   `s.save()`, so nothing is persistently discarded here. The load-bearing half is that the
+        //   draft the filer was editing was SKIPPED, and the committed row is what travels.
+        eprintln!(
+            "note: your {}-schema draft for {} could not be read by this build (expected v{}), so              the last COMMITTED return is what was scrubbed. Nothing was deleted.",
+            note.found, note.year, note.expected
+        );
     }
     let ri = match loaded {
         crate::input_form_store::Loaded::Draft { ri, .. } => Some(ri),

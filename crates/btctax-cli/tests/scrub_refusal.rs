@@ -456,7 +456,18 @@ fn the_out_file_is_owner_only_even_when_it_already_exists() {
     //   keeps its old mode — and scrub is exactly the command a filer re-runs to the same path.
     std::fs::write(&out, b"stale").unwrap();
     std::fs::set_permissions(&out, std::fs::Permissions::from_mode(0o644)).unwrap();
-    let ino_before = std::fs::metadata(&out).unwrap().ino();
+    // ★★★ PIN THE OLD INODE WITH A HARD LINK. Comparing inode NUMBERS alone can flake RED on ext4:
+    //     `__ext4_new_inode` allocates the LOWEST FREE BIT in the parent's block group, so an inode
+    //     freed by `remove_file` and immediately re-created in the same directory can come back with
+    //     the SAME number — failing on a CORRECT fix. It could not flake here because this machine's
+    //     /tmp is tmpfs (monotonic counter) — which is exactly why it would have passed locally and
+    //     broken CI, where ubuntu-latest runs /tmp on ext4.
+    //
+    //     The link keeps the old inode alive so its number cannot be reused, AND it witnesses the
+    //     property directly rather than by proxy: if the file was created fresh, `pin` still holds
+    //     the STALE bytes; if it was written through, `pin` holds the scrubbed return itself.
+    let pin = dir.path().join("pin");
+    std::fs::hard_link(&out, &pin).unwrap();
 
     let (code, _o, stderr) = run_btctax(
         &vault,
@@ -485,10 +496,17 @@ fn the_out_file_is_owner_only_even_when_it_already_exists() {
     //
     //     A changed inode is the evidence that the `remove_file` happened. Without this the fix was
     //     UNHELD: deleting that line red nothing, which the fold check caught.
-    let ino_after = std::fs::metadata(&out).unwrap().ino();
+    assert_eq!(
+        std::fs::read(&pin).unwrap(),
+        b"stale",
+        "the scrubbed return was written INTO the pre-existing world-readable file and narrowed \
+         afterwards — the pinned link is holding the RETURN, which is the window the mode assertion \
+         above structurally cannot see. It must be created fresh at 0600 instead."
+    );
     assert_ne!(
-        ino_before, ino_after,
-        "the scrubbed return was written INTO the pre-existing world-readable file and narrowed          afterwards; it must be created fresh at 0600 instead"
+        std::fs::metadata(&pin).unwrap().ino(),
+        std::fs::metadata(&out).unwrap().ino(),
+        "the output must be a NEW inode, not the pre-existing one"
     );
 }
 

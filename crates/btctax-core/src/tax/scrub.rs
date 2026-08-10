@@ -236,7 +236,16 @@ fn synthetic_ein(n: usize) -> String {
     format!("9{}-{:07}", n % 10, n + 1)
 }
 
-/// A synthetic EIN that **`canonical_ein` REJECTS**, distinct per `n` — eight digits, one short.
+/// A synthetic EIN that **`canonical_ein` REJECTS** — eight digits, one short — and distinct per `n`
+/// for every `n` a return can reach.
+///
+/// ★ Distinctness is PERIODIC, not total: the `% 1_000_000` below (which is what makes the class
+/// guarantee hold for every `usize`) gives period 10^6, so `f(0) == f(1_000_000)`. `EinMap` passes
+/// `n = self.0.len()`, so reaching it needs a million DISTINCT EINs on one return. It is also benign
+/// if reached: merging two MALFORMED stand-ins cannot move a §6413(c) figure, because both stay
+/// unreadable and `over_cap_needs_ein` still refuses. Stated rather than left to be rediscovered —
+/// the previous version of this line said "distinct per `n`" flatly, which stopped being true when
+/// the modulo was added.
 ///
 /// ★★★ THE VALIDITY CLASS OF AN EIN IS LOAD-BEARING, AND MISSING THIS SHIPPED r1's CRITICAL TWICE.
 /// `screen_inputs` refuses `ExcessSsEmployerUnknown` when a filer is over the §3101(a) cap and any of

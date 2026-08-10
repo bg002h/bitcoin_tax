@@ -115,12 +115,27 @@ pub fn replaced_paths(ri: &ReturnInputs) -> BTreeSet<String> {
 /// ★★ **Two `Vec` elements, not one**, so an index-varying stand-in (`Payer{i+1}`) and `EinMap`'s
 /// distinctness both show up as real differences.
 ///
-/// ★ Every string is distinct, and every string SCRUB REPLACES carries a `SENTINEL_*` token, so no
-/// fixture value can silently equal its own stand-in — the *secondary* precondition (§3.4 models it
-/// for one field with `assert_ne!(original.address_city, SCRUB_CITY)`; here it is general).
-/// ★★ Two KEPT fields deliberately carry REAL values instead — `box12[].code` and the SSNs. Gibberish
-/// in either REFUSES, and `screen_inputs` returns the FIRST refusal, which would mask every cell of
-/// the matrix. They are held by the derived axis, not by a token.
+/// ★ Every string is distinct, so no fixture value can silently equal its own stand-in — the
+/// *secondary* precondition (§3.4 models it for one field with
+/// `assert_ne!(original.address_city, SCRUB_CITY)`; `no_fixture_value_collides_with_a_stand_in`
+/// generalizes it, and that test — not this comment — is what holds it).
+///
+/// ★★ **FIVE replaced fields deliberately carry REAL values rather than a `SENTINEL_*` token**, and
+/// the reason differs by field, which is why the earlier one-line version of this note was wrong
+/// twice over:
+/// - `box12[].code` (`"D"`/`"DD"`) — gibberish refuses `UnsupportedBox12Code`, and `screen_inputs`
+///   returns the FIRST refusal, so it would mask every cell of the matrix.
+/// - the three SSNs and `header.ip_pin` — a malformed value here does NOT refuse via
+///   `screen_inputs` (`return_refuse.rs:693` is explicit: *"NO SSN GATE HERE, DELIBERATELY"*); it
+///   surfaces at `ReturnHeader::build`, which is a different instrument. They are real so the
+///   BASELINE is clean, letting each matrix cell's own mutation be what discriminates.
+/// - `w2s[].ein` — must canonicalize, or §3.1's partition has nothing to preserve.
+///
+/// ★ All five are REPLACED by scrub, not kept, and all five are held by the DERIVED AXIS: a change
+/// to how scrub treats any of them moves a path in or out of `replaced_paths`, which the matrix's
+/// "every derived path has a row" check catches. An earlier version of this note called them "KEPT"
+/// and claimed gibberish in them refuses — both false, and asserting a mechanism that does not do
+/// what is claimed is exactly what this module exists to stamp out.
 #[must_use]
 pub fn maximal_sentinel() -> ReturnInputs {
     use crate::tax::return_inputs::*;
@@ -445,20 +460,22 @@ mod tests {
 
         // Each sentinel is `SENTINEL_<tag>_<suffix>`; group by the field it names.
         let mut survived: BTreeSet<&str> = BTreeSet::new();
+        // ★ Only tokens the fixture actually CARRIES. Three names here (`SENTINEL_ssn`,
+        //   `SENTINEL_dependent_ssn`, `SENTINEL_ippin`) named values that no longer exist anywhere in
+        //   `maximal_sentinel` — they were left behind when those fields were given real values. A
+        //   scan entry for a token that cannot occur can never fire: it looks like coverage and is
+        //   not, which is this module's own subject.
         for kept in [
             "SENTINEL_relationship",
             "SENTINEL_naics",
             "SENTINEL_first",
             "SENTINEL_last",
-            "SENTINEL_ssn",
             "SENTINEL_occupation",
             "SENTINEL_dependent_name",
-            "SENTINEL_dependent_ssn",
             "SENTINEL_street",
             "SENTINEL_city",
             "SENTINEL_state",
             "SENTINEL_zip",
-            "SENTINEL_ippin",
             "SENTINEL_employer",
             "SENTINEL_int_payer",
             "SENTINEL_div_payer",
