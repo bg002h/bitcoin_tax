@@ -468,14 +468,18 @@ mod tests {
     #[test]
     fn no_fixture_value_collides_with_a_stand_in() {
         let json = serde_json::to_string(&maximal_sentinel()).unwrap();
+        // ★ The address stand-ins are read from the CONSTANTS, not copied — §3.4 moved them once
+        //   already, and a copy here would silently stop checking the real values.
+        use crate::tax::scrub::{SCRUB_CITY, SCRUB_STATE, SCRUB_STREET, SCRUB_ZIP};
         for stand_in in [
             "Taxpayer",
             "Spouse",
             "Example",
             "Occupation",
-            "1 Example St",
-            "Springfield",
-            "62704",
+            SCRUB_STREET,
+            SCRUB_CITY,
+            SCRUB_STATE,
+            SCRUB_ZIP,
             "Dependent1",
             "Example business",
             "Country1",

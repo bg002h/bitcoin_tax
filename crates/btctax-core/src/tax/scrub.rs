@@ -178,6 +178,22 @@ pub fn ledger_contribution(state: &LedgerState, year: i32) -> Option<LedgerContr
     }
 }
 
+/// ★★★ **THE SCRUB CONSTANTS, MOVED RATHER THAN THE FIXTURES** (§3.4).
+///
+/// The stand-in address used to be `Springfield / IL / 62704` — **the same address the repo's own
+/// fixtures carry** (`testonly.rs:260-262`, `:419-421`). A disclosure test asserting "the address
+/// changed" was therefore VACUOUS on every existing household, and the natural fix — editing the
+/// fixtures — reds three committed byte-pinned artifacts.
+///
+/// Moving the SCRUB constants instead is one file, zero golden churn, and it immunises **every future
+/// fixture** rather than the three that exist. ★ The values are deliberately not plausible: a
+/// recipient must never mistake a scrubbed address for a real one, so `XX` is not a state and `00000`
+/// is not a ZIP.
+pub(crate) const SCRUB_STREET: &str = "1 Example St";
+pub(crate) const SCRUB_CITY: &str = "Exampleton";
+pub(crate) const SCRUB_STATE: &str = "XX";
+pub(crate) const SCRUB_ZIP: &str = "00000";
+
 /// A synthetic SSN that the SSA can never have issued (middle group `00`), distinct per `n`.
 fn synthetic_ssn(n: usize) -> String {
     format!("1{:02}-00-{:04}", n % 100, (n % 9999) + 1)
@@ -378,12 +394,12 @@ fn scrub_header(h: &HouseholdHeader) -> HouseholdHeader {
     HouseholdHeader {
         taxpayer: scrub_person(taxpayer, "Taxpayer", 1),
         spouse: spouse.as_ref().map(|s| scrub_person(s, "Spouse", 2)),
-        address_street: replace_preserving_emptiness(address_street, "1 Example St".into()),
-        address_city: replace_preserving_emptiness(address_city, "Springfield".into()),
+        address_street: replace_preserving_emptiness(address_street, SCRUB_STREET.into()),
+        address_city: replace_preserving_emptiness(address_city, SCRUB_CITY.into()),
         // ★ The STATE is replaced too. btctax computes no state tax, so nothing reads it — but a
         //   state plus a filing status plus an income is a long way toward identifying a household.
-        address_state: replace_preserving_emptiness(address_state, "IL".into()),
-        address_zip: replace_preserving_emptiness(address_zip, "62704".into()),
+        address_state: replace_preserving_emptiness(address_state, SCRUB_STATE.into()),
+        address_zip: replace_preserving_emptiness(address_zip, SCRUB_ZIP.into()),
         dependents: dependents
             .iter()
             .enumerate()
@@ -786,19 +802,89 @@ mod tests {
     fn the_identity_does_not_survive() {
         let (mut ri, _) = kitchen_sink_household();
         ri.header.ip_pin = Some("123456".into());
+
+        // ★★★ EXHAUSTIVE, NOT A HAND-LIST (r1: this named 6 of 16 fields and left the ENTIRE SPOUSE
+        //     untested). The taxpayer and the spouse are the same `Person` type, so a scrubber
+        //     correct on one and broken on the other is exactly the asymmetry a per-field list
+        //     misses — and `kitchen_sink_household` has no spouse, so the loop below would silently
+        //     cover nothing. One is planted here.
+        ri.header.spouse = Some(crate::tax::return_inputs::Person {
+            first_name: "Spousefirst".into(),
+            last_name: "Spouselast".into(),
+            ssn: "000-77-7777".into(),
+            date_of_birth: Some(time::macros::date!(1972 - 02 - 02)),
+            date_of_death: None,
+            blind: Some(false),
+            occupation: "Spouseoccupation".into(),
+        });
+
         let s = scrub_pii(&ri);
-        assert_ne!(s.header.taxpayer.ssn, ri.header.taxpayer.ssn);
-        assert_ne!(s.header.taxpayer.last_name, ri.header.taxpayer.last_name);
+
+        // Every identity field of BOTH people, driven off one closure so neither can be forgotten.
+        let check_person = |o: &crate::tax::return_inputs::Person,
+                            n: &crate::tax::return_inputs::Person,
+                            who: &str| {
+            assert_ne!(o.first_name, n.first_name, "{who}: first name survived");
+            assert_ne!(o.last_name, n.last_name, "{who}: last name survived");
+            assert_ne!(o.ssn, n.ssn, "{who}: SSN survived");
+            assert_ne!(o.occupation, n.occupation, "{who}: occupation survived");
+            // ★★ KEPT, and asserted in the same breath: §63(f)'s age-65 and blindness additions read
+            //    these, so scrubbing them would move the deduction.
+            assert_eq!(
+                o.date_of_birth, n.date_of_birth,
+                "{who}: DOB is computational"
+            );
+            assert_eq!(
+                o.date_of_death, n.date_of_death,
+                "{who}: DOD is computational"
+            );
+            assert_eq!(o.blind, n.blind, "{who}: blindness is computational");
+        };
+        check_person(&ri.header.taxpayer, &s.header.taxpayer, "taxpayer");
+        check_person(
+            ri.header.spouse.as_ref().unwrap(),
+            s.header
+                .spouse
+                .as_ref()
+                .expect("the spouse must survive AS a spouse"),
+            "spouse",
+        );
+
         assert_ne!(s.header.address_street, ri.header.address_street);
+        assert_ne!(s.header.address_city, ri.header.address_city);
+        assert_ne!(s.header.address_state, ri.header.address_state);
+        assert_ne!(s.header.address_zip, ri.header.address_zip);
+        // ★ §3.4's precondition, so the four assertions above cannot pass VACUOUSLY. They used to:
+        //   the stand-in address WAS `Springfield / IL / 62704`, which is what the fixtures carry.
+        assert_ne!(ri.header.address_city, SCRUB_CITY, "§3.4 precondition");
+        assert_ne!(ri.header.address_zip, SCRUB_ZIP, "§3.4 precondition");
+
         assert_eq!(
             s.header.ip_pin, None,
             "an IP PIN is a live credential: DROPPED"
         );
+
+        // ★★★ LENGTH FIRST. `zip` silently truncates to the shorter side, so a scrubber that DROPPED
+        //     every dependent would satisfy the loop below by iterating zero times.
+        assert_eq!(
+            ri.header.dependents.len(),
+            s.header.dependents.len(),
+            "the NUMBER of dependents is computational and must survive"
+        );
+        assert!(
+            !ri.header.dependents.is_empty(),
+            "the fixture must actually have dependents, or the loop below asserts nothing"
+        );
         for (o, n) in ri.header.dependents.iter().zip(&s.header.dependents) {
             assert_ne!(o.ssn, n.ssn);
+            assert_ne!(o.name, n.name, "a dependent's NAME is identity");
             assert_eq!(
                 o.relationship, n.relationship,
                 "relationship is computational"
+            );
+            assert_eq!(
+                o.date_of_birth, n.date_of_birth,
+                "a dependent's DOB decides qualifying-child age"
             );
         }
         // ★★ …and the two fields a security review found riding through the FIRST version of this
