@@ -190,14 +190,31 @@ fn synthetic_ein(n: usize) -> String {
 }
 
 /// Remaps EINs so that DISTINCTNESS is preserved and nothing else is.
+///
+/// ★★★ **KEYED ON `canonical_ein`, NOT ON THE RAW SPELLING — this is r1's CRITICAL.** §3.1 of
+/// SPEC_income_scrub.md: where code compares identifiers, scrub must preserve the partition **that
+/// comparison** induces, never string equality. §6413(c)'s excess-Social-Security credit turns on
+/// having *more than one employer*, and `excess_social_security` decides that by comparing
+/// **canonicalized** EINs — so `"11-1111111"` and `"111111111"` are ONE employer.
+///
+/// Keying the raw string split them into two synthetic EINs that canonicalize apart, manufacturing a
+/// **$1,546.80** credit on the repo's own `two_spellings` vector, raising `total_payments` and the
+/// refund by the same. An understatement on a §6065 return, inside a file the command called safe to
+/// share. Held by `two_spellings_of_one_employer_survive_as_one_employer`.
+///
+/// ★ A value `canonical_ein` REJECTS (letters, wrong digit count) has no canonical form, so it falls
+/// back to the raw string as its own key: two malformed EINs that differ as text stay distinct, and
+/// nothing is merged on the strength of a comparison the program never makes. Preserving the
+/// malformed *class* into the output is §3.2's job, not this map's.
 #[derive(Default)]
 struct EinMap(BTreeMap<String, String>);
 
 impl EinMap {
     fn map(&mut self, real: &str) -> String {
+        let key = crate::tax::return_1040::canonical_ein(real).unwrap_or_else(|| real.to_string());
         let next = self.0.len();
         self.0
-            .entry(real.to_string())
+            .entry(key)
             .or_insert_with(|| synthetic_ein(next))
             .clone()
     }
@@ -414,6 +431,92 @@ mod tests {
         kitchen_sink_household, ty2024_params, ty2024_table, w2_only_household,
     };
 
+    /// ★★★ r1's CRITICAL, PINNED: **one employer spelled two ways must stay ONE employer.**
+    ///
+    /// §6413(c)'s excess-social-security credit turns on having *more than one employer*, and
+    /// `excess_social_security` decides identity by comparing **canonicalized** EINs
+    /// (`return_1040.rs::canonical_ein`). A W-2 and its W-2c — box b typed off the paper form on one
+    /// and off a payroll-portal export on the other — are `"11-1111111"` and `"111111111"`: the SAME
+    /// employer, and the repo pins that at `return_1040.rs`'s `two_spellings` vector, where the
+    /// correct credit is **$0**.
+    ///
+    /// The held scrubber keyed `EinMap` on the RAW STRING, so the two spellings became two distinct
+    /// synthetic EINs, which canonicalize apart — **two employers** — and manufacture a
+    /// **$1,546.80** credit the filer is not entitled to. `total_payments` rises by it and so does
+    /// the refund. That is an UNDERSTATEMENT on a §6065 return, reached through a file the command
+    /// told the filer was safe to share, and it is the exact failure the module's own EIN paragraph
+    /// says it exists to prevent.
+    ///
+    /// ★ Neither existing test could see it: the three fixtures in
+    /// `scrub_preserves_every_computed_figure` carry no EIN at all, and
+    /// `ein_distinctness_is_preserved_exactly` uses two IDENTICAL spellings.
+    /// One employer, two standard spellings of its EIN, each W-2 withholding over half the §3101(a)
+    /// cap. The correct §6413(c) credit is **$0** and the over-withholding is *stranded* — it appears
+    /// in `AbsoluteReturn::excess_ss_not_creditable`, which is what makes this vector exercise BOTH
+    /// halves of §8 step 3.
+    fn two_spellings_household() -> (ReturnInputs, crate::state::LedgerState) {
+        use crate::tax::return_inputs::W2;
+        let (base, state) = w2_only_household();
+        let w = base.w2s[0].clone();
+        let ri = ReturnInputs {
+            w2s: vec![
+                W2 {
+                    ein: Some("11-1111111".into()),
+                    box3_ss_wages: rust_decimal_macros::dec!(6000),
+                    box4_ss_withheld: rust_decimal_macros::dec!(6000),
+                    ..w.clone()
+                },
+                W2 {
+                    ein: Some("111111111".into()), // the SAME employer, the other standard spelling
+                    box3_ss_wages: rust_decimal_macros::dec!(6000),
+                    box4_ss_withheld: rust_decimal_macros::dec!(6000),
+                    ..w
+                },
+            ],
+            ..base
+        };
+        (ri, state)
+    }
+
+    #[test]
+    fn two_spellings_of_one_employer_survive_as_one_employer() {
+        let (ri, state) = two_spellings_household();
+        let scrubbed = scrub_pii(&ri);
+
+        // The partition the PROGRAM'S OWN comparison induces must survive — never string equality.
+        let canon = |r: &ReturnInputs| -> Vec<Option<String>> {
+            r.w2s
+                .iter()
+                .map(|w| {
+                    w.ein
+                        .as_deref()
+                        .and_then(crate::tax::return_1040::canonical_ein)
+                })
+                .collect()
+        };
+        let c = canon(&scrubbed);
+        assert_eq!(
+            c[0], c[1],
+            "two spellings of ONE employer must canonicalize to one employer after scrubbing, or \
+             §6413(c) manufactures an excess-Social-Security credit"
+        );
+        for (o, n) in ri.w2s.iter().zip(&scrubbed.w2s) {
+            assert_ne!(o.ein, n.ein, "the real EIN must not survive");
+        }
+
+        // …and the figure itself, which is what the filer would actually be handed.
+        let a = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
+        let b = assemble_absolute(&scrubbed, &state, &ty2024_params(), &ty2024_table(), 2024);
+        assert_eq!(
+            a.excess_social_security, b.excess_social_security,
+            "scrubbing moved the §6413(c) credit"
+        );
+        assert_eq!(
+            a.total_payments, b.total_payments,
+            "scrubbing moved total payments"
+        );
+    }
+
     /// ★★★ THE GUARANTEE: scrubbing changes NO computed figure, on any household.
     ///
     /// Asserted over the whole `AbsoluteReturn` rather than a sampled line, because the failure this
@@ -425,6 +528,10 @@ mod tests {
             ("kitchen sink", kitchen_sink_household()),
             ("W-2 only", w2_only_household()),
             ("AMT-owing", crate::tax::testonly::amt_owing_household()),
+            // ★ §8 step 3: the ONLY vector here carrying an EIN at all, and the only one that
+            //   populates `excess_ss_not_creditable` — so it is what makes the `ein` normalization
+            //   below load-bearing instead of speculative.
+            ("two spellings, one employer", two_spellings_household()),
         ] {
             let scrubbed = scrub_pii(&ri);
             let mut a = assemble_absolute(&ri, &state, &ty2024_params(), &ty2024_table(), 2024);
@@ -448,11 +555,32 @@ mod tests {
             //       identity (blank it here, and scrub it) or a figure (a real bug). The opposite
             //       direction — a string that should have been scrubbed but was not — is held by
             //       `the_identity_does_not_survive`.
+            //     ★★★ THE THIRD MEMBER IS `excess_ss_not_creditable[].ein`, and without it this test
+            //         REDS ON A CORRECT SCRUB (§3.3). That advisory names the employer to go and ask,
+            //         canonicalized — so it carries a scrubbed identity string into `AbsoluteReturn`,
+            //         and the two sides differ by `"111111111"` vs `"900000001"` while every figure
+            //         matches. The **re-sort by `(owner, amount)`** goes with it: once the eins are
+            //         blanked, two entries that differed only by employer are otherwise equal, and
+            //         `non_creditable_ss` buckets by canonical EIN — so their ORDER is a function of
+            //         identity strings that scrubbing legitimately changes. Comparing unsorted would
+            //         make this test fail on employer count, not on any figure.
+            //
+            //     ★ The normalization set is stated HERE, in full, and never inherited: Schedule C
+            //       line A, Form 8995-A line 1(a), and this. Three members, each with a reason.
             let blank_identity = |r: &mut crate::tax::return_1040::AbsoluteReturn| {
                 r.printed_inputs.schedule_c_header.business_description = String::new();
                 if let Some(p) = r.f8995a_parts_i_to_iii.as_mut() {
                     p.part_i.col_a_name = String::new();
                 }
+                for nc in &mut r.excess_ss_not_creditable {
+                    nc.ein = String::new();
+                }
+                // ★ Keyed on the Debug rendering of `owner` rather than deriving `Ord` on it: this is
+                //   a test-local normalization and it must not reach back into a production type to
+                //   get one.
+                r.excess_ss_not_creditable.sort_by(|x, y| {
+                    (format!("{:?}", x.owner), x.amount).cmp(&(format!("{:?}", y.owner), y.amount))
+                });
             };
             blank_identity(&mut a);
             blank_identity(&mut b);
