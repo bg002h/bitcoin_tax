@@ -249,7 +249,16 @@ fn synthetic_ein(n: usize) -> String {
 /// `a_malformed_ein_stays_malformed_so_the_copy_refuses_where_the_original_did` — that the original
 /// does not have. The filer is sending the file precisely to reproduce that refusal.
 fn synthetic_malformed_ein(n: usize) -> String {
-    format!("9{}-{:06}", n % 10, n + 1)
+    // ★ `{:06}` PADS, it does not truncate, so at n = 999_999 this would emit nine digits and
+    //   silently canonicalize — inverting the very class it exists to preserve. Unreachable (it needs
+    //   a million distinct EINs on one return) but the assert makes it structural rather than
+    //   incidental, which is the difference between a guarantee and a coincidence.
+    let s = format!("9{}-{:06}", n % 10, (n + 1) % 1_000_000);
+    debug_assert!(
+        crate::tax::return_1040::canonical_ein(&s).is_none(),
+        "a malformed-EIN stand-in that canonicalizes defeats its own purpose: {s}"
+    );
+    s
 }
 
 /// ★★★ **TRIM-EMPTINESS IS A VALIDITY CLASS, AND EVERY REPLACEMENT PRESERVES IT** (§3.2).
@@ -293,8 +302,15 @@ fn replace_preserving_emptiness(s: &str, stand_in: String) -> String {
 ///
 /// ★ A value `canonical_ein` REJECTS (letters, wrong digit count) has no canonical form, so it falls
 /// back to the raw string as its own key: two malformed EINs that differ as text stay distinct, and
-/// nothing is merged on the strength of a comparison the program never makes. Preserving the
-/// malformed *class* into the output is §3.2's job, not this map's.
+/// nothing is merged on the strength of a comparison the program never makes.
+///
+/// ★★★ **AND ITS VALIDITY CLASS IS PRESERVED HERE, IN THIS MAP.** This sentence used to end
+/// "preserving the malformed *class* into the output is §3.2's job, not this map's" — and §3.2's
+/// implementation had an SSN leg, an IP PIN leg and nothing for the EIN, so the delegation pointed
+/// at an empty room. A malformed EIN was upgraded to a well-formed synthetic, the scrubbed copy
+/// stopped refusing `ExcessSsEmployerUnknown`, and it claimed a $1,546.80 §6413(c) credit the
+/// original does not have. **A pointer to another section is not an implementation**, and a whole-
+/// branch review is what finally noticed.
 #[derive(Default)]
 struct EinMap(BTreeMap<String, String>);
 

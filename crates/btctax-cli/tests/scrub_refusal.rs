@@ -445,7 +445,7 @@ fn scrub_reads_the_draft_that_shadows_the_committed_row() {
 #[cfg(unix)]
 #[test]
 fn the_out_file_is_owner_only_even_when_it_already_exists() {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
     let dir = tempfile::tempdir().unwrap();
     let vault = empty_vault(dir.path());
@@ -456,6 +456,7 @@ fn the_out_file_is_owner_only_even_when_it_already_exists() {
     //   keeps its old mode — and scrub is exactly the command a filer re-runs to the same path.
     std::fs::write(&out, b"stale").unwrap();
     std::fs::set_permissions(&out, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let ino_before = std::fs::metadata(&out).unwrap().ino();
 
     let (code, _o, stderr) = run_btctax(
         &vault,
@@ -474,6 +475,20 @@ fn the_out_file_is_owner_only_even_when_it_already_exists() {
     assert_eq!(
         mode, 0o600,
         "a scrubbed return must be readable only by its owner, got {mode:o}"
+    );
+
+    // ★★★ AND THE FILE MUST HAVE BEEN CREATED FRESH, NOT WRITTEN THROUGH. The mode assertion above
+    //     reads the FINAL mode, so it is structurally blind to the window that matters:
+    //     `write_owner_only`'s 0600 applies at CREATE, so writing into a pre-existing 0644 file puts
+    //     the whole return on disk world-readable and only then narrows it — and if the narrowing
+    //     errors, it stays that way with the content in it.
+    //
+    //     A changed inode is the evidence that the `remove_file` happened. Without this the fix was
+    //     UNHELD: deleting that line red nothing, which the fold check caught.
+    let ino_after = std::fs::metadata(&out).unwrap().ino();
+    assert_ne!(
+        ino_before, ino_after,
+        "the scrubbed return was written INTO the pre-existing world-readable file and narrowed          afterwards; it must be created fresh at 0600 instead"
     );
 }
 

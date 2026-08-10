@@ -164,6 +164,15 @@ pub enum CliError {
          'discard parked draft' (a confirmed delete) to drop it; then re-run this command."
     )]
     ParkedDraftBlocksWrite { year: i32 },
+    /// `income scrub` could not render the scrubbed return as TOML, or could not write it.
+    ///
+    /// ★ NOT `Usage` (which renders "usage:" and means the filer typed the command wrong) and NOT
+    /// `BadConfigValue` (documented as a corrupt-DB row, whose natural remedy — clear it and
+    /// re-import — is DESTRUCTIVE). Both were used here at some point; neither is true. A
+    /// serialization limit is btctax's fault and an I/O failure is the filesystem's, and in both
+    /// cases the filer's stored return is untouched.
+    #[error("income scrub: {0}")]
+    ScrubOutput(String),
     /// `income import` refused a file carrying the scrub provenance marker (SPEC_income_scrub.md
     /// §4.3). A scrubbed file is schema-identical to a real one and import is an unconfirmed
     /// whole-blob upsert, so this would destroy the vault's real identity and IP PIN —

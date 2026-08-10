@@ -236,8 +236,9 @@ pub fn scrub_return_inputs(
         //   DESTRUCTIVE and is the wrong advice for what is really a serializer limitation on
         //   btctax's side. r1's sweep filed this; it reached neither the spec nor the build.
         let body = toml::to_string_pretty(&scrubbed).map_err(|e| {
-            CliError::Usage(format!(
-                "could not serialize the scrubbed {year} return as TOML: {e}. This is a btctax                  limitation, not a problem with your vault — your stored return is untouched.                  Please report it."
+            CliError::ScrubOutput(format!(
+                "could not render the {year} return as TOML: {e}. This is a btctax limitation, not \
+                 a problem with your vault — your stored return is untouched. Please report it."
             ))
         })?;
         // ★★ §4.2 — the marker rides on the EMITTED STRING, not on the `--out` path, so stdout and

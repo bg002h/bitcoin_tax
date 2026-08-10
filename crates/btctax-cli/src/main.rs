@@ -328,8 +328,8 @@ fn run() -> Result<ExitCode, CliError> {
                                 // ★ Name the PATH: a bare io::Error here says "permission denied"
                                 //   with no hint which file (r1 sweep).
                                 .map_err(|e| {
-                                    CliError::Usage(format!(
-                                        "could not write the scrubbed return to {}: {e}",
+                                    CliError::ScrubOutput(format!(
+                                        "could not write to {}: {e}",
                                         path.display()
                                     ))
                                 })?;

@@ -115,9 +115,12 @@ pub fn replaced_paths(ri: &ReturnInputs) -> BTreeSet<String> {
 /// ★★ **Two `Vec` elements, not one**, so an index-varying stand-in (`Payer{i+1}`) and `EinMap`'s
 /// distinctness both show up as real differences.
 ///
-/// ★ Every string is a distinct `SENTINEL_*` token so that no fixture value can silently equal its
-/// own stand-in — the *secondary* precondition (§3.4 models it for one field with
-/// `assert_ne!(original.address_city, SCRUB_CITY)`; here it is general by construction).
+/// ★ Every string is distinct, and every string SCRUB REPLACES carries a `SENTINEL_*` token, so no
+/// fixture value can silently equal its own stand-in — the *secondary* precondition (§3.4 models it
+/// for one field with `assert_ne!(original.address_city, SCRUB_CITY)`; here it is general).
+/// ★★ Two KEPT fields deliberately carry REAL values instead — `box12[].code` and the SSNs. Gibberish
+/// in either REFUSES, and `screen_inputs` returns the FIRST refusal, which would mask every cell of
+/// the matrix. They are held by the derived axis, not by a token.
 #[must_use]
 pub fn maximal_sentinel() -> ReturnInputs {
     use crate::tax::return_inputs::*;
@@ -172,8 +175,15 @@ pub fn maximal_sentinel() -> ReturnInputs {
         box19_local_tax: dec!(2),
         // ★ REAL box-12 codes ("D" = 401(k) elective deferral, "DD" = employer-sponsored health
         //   coverage). Gibberish here refuses `UnsupportedBox12Code`, which — because `screen_inputs`
-        //   returns the FIRST refusal — would mask every other cell in the matrix. That these are
-        //   KEPT is asserted directly by value in `the_surviving_sentinels_...`, not via a token.
+        //   returns the FIRST refusal — would mask every other cell in the matrix.
+        //
+        //   ★★ They carry no `SENTINEL_` token, so the survival test cannot speak for them. What
+        //      holds their KEPT-ness is the DERIVATION: if scrub ever began replacing the code,
+        //      `replaced_paths` would gain `w2s[].box12[].code` and the matrix's "every derived path
+        //      has a row" check reds. Stronger than a token scan and needs no maintenance — but it is
+        //      a DIFFERENT instrument, and an earlier version of this comment claimed the survival
+        //      test asserted it "directly by value", which the same edit had just made false. That is
+        //      the false-citation class this module exists to stamp out, committed inside it.
         box12: vec![
             Box12Entry {
                 code: "D".into(),
@@ -420,9 +430,13 @@ mod tests {
     /// - a name leaving this list means a KEPT decision was silently reversed, which moves a figure
     ///   (`relationship` decides child-vs-other-dependent) or destroys a reproducer's fidelity.
     ///
-    /// The three are §7's recorded decisions: `relationship` is computational, a **box-12 code is a
-    /// taxonomy, not a person**, and `naics_code` is a six-digit federal industry code shared by
-    /// thousands of businesses and printed on Schedule C line B.
+    /// Both are §7's recorded decisions: `relationship` is computational, and `naics_code` is a
+    /// six-digit federal industry code shared by thousands of businesses and printed on Schedule C
+    /// line B.
+    ///
+    /// ★ §7's THIRD KEPT decision — a box-12 code is a taxonomy, not a person — is deliberately NOT
+    /// scanned here: the fixture carries a real code (`"D"`), because gibberish refuses
+    /// `UnsupportedBox12Code` and masks the whole matrix. The derived axis holds it instead.
     #[test]
     fn the_surviving_sentinels_are_exactly_the_deliberately_kept_fields() {
         let ri = maximal_sentinel();
@@ -463,9 +477,10 @@ mod tests {
             .collect();
         assert_eq!(
             survived, expected,
-            "the set of sentinels surviving a scrub must be exactly the fields §7 records as KEPT \
-             (relationship, box-12 code, NAICS). Anything extra is identity riding into a shareable \
-             file; anything missing is a KEPT decision silently reversed."
+            "the set of sentinels surviving a scrub must be exactly the SENTINEL-BEARING fields §7 \
+             records as KEPT (relationship, NAICS — box-12 carries a REAL code and is held by the \
+             derived axis instead). Anything extra is identity riding into a shareable file; \
+             anything missing is a KEPT decision silently reversed."
         );
     }
 
@@ -868,7 +883,7 @@ mod matrix {
         //     blind, on every row at once.
         //
         //     ★ That is not hypothetical: it was TRUE until the whole-branch review. The sentinel
-        //       carried `foreign_trust: Some(true)`, so all 23 rows compared
+        //       carried `foreign_trust: Some(true)`, so every row compared
         //       `Some(ForeignTrust) == Some(ForeignTrust)`. Four further masks surfaced one at a time
         //       behind it — a non-public-charity gift class, gibberish box-12 codes, a claimed IRA
         //       deduction — each hidden by the one before. A refusal-comparison matrix over a
@@ -880,7 +895,8 @@ mod matrix {
         assert_eq!(
             screen_inputs(&base, &ty2024_table(), &ty2024_params()).map(|r| r.reason),
             None,
-            "the maximal sentinel must be a FILEABLE return — a refusing baseline masks every cell              of this matrix behind whatever refuses first"
+            "the maximal sentinel must be a FILEABLE return — a refusing baseline masks every cell \
+             of this matrix behind whatever refuses first"
         );
 
         let derived = replaced_paths(&base);
