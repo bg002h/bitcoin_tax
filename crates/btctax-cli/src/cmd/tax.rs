@@ -171,7 +171,26 @@ pub fn scrub_return_inputs(
     pp: &Passphrase,
     year: i32,
 ) -> Result<Option<String>, CliError> {
-    let ri = return_inputs::get(Session::open(vault, pp)?.conn(), year)?;
+    let s = Session::open(vault, pp)?;
+    let ri = return_inputs::get(s.conn(), year)?;
+
+    // ★★★ SPEC §2.2 — the SCRUB-OWNED refusal, checked before anything is emitted.
+    //
+    //     The ledger must be PROJECTED to ask the question at all; this path never did, and
+    //     assuming an unprojected ledger is empty is the widening the predicate exists to stop. A
+    //     projection failure propagates as an error — it is never a fallback to "assume empty".
+    //
+    //     ★ Checked even when `ri` is None. The refusal is a fact about the YEAR, not about whether
+    //       a return happens to be stored, and reporting "no inputs set" to a filer whose ledger
+    //       would have blocked the scrub anyway tells them the wrong thing about their vault.
+    let (state, _cfg) = s.project()?;
+    if let Some(c) = btctax_core::tax::scrub::ledger_contribution(&state, year) {
+        return Err(CliError::ScrubLedgerContributes {
+            year,
+            cause: c.cause().to_string(),
+        });
+    }
+
     ri.map(|ri| {
         let scrubbed = btctax_core::tax::scrub::scrub_pii(&ri);
         toml::to_string_pretty(&scrubbed).map_err(|e| CliError::BadConfigValue {

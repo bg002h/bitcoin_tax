@@ -46,8 +46,137 @@
 //! ★ SSNs are emitted with a middle group of `00`, which the SSA never issues — so the output is safe
 //! by construction and needs no allowlist entry if it is ever committed as a fixture.
 
+use crate::state::LedgerState;
 use crate::tax::return_inputs::{Dependent, HouseholdHeader, Person, ReturnInputs};
 use std::collections::BTreeMap;
+
+/// **THE OBLIGATION.** Scrub may emit only when the ledger contributes **nothing** to any figure,
+/// refusal, gate, watermark or advisory btctax produces for `year`. This function owns that
+/// sentence; `true` means the year is NOT scrubbable and the command must refuse.
+///
+/// ★★★ IT IS SCRUB-OWNED, AND IT IS **NOT** THE 1040 DIGITAL-ASSET BOX. The first draft reused
+/// [`crate::tax::return_1040::digital_asset_activity`] alone, arguing the refusal was "exactly as
+/// accurate as a box btctax already prints". Both halves of that were wrong, and a spec review
+/// killed it (SPEC_income_scrub.md §2.2):
+///
+/// 1. **Year-scope is not artifact-scope.** [`LedgerState::pseudo_active`] and the Hard-blocker gate
+///    are **projection-wide and year-blind**. A vault
+///    whose only activity is an unclassified inbound has no in-year digital-asset activity at all,
+///    yet the FILER's export is DRAFT-watermarked and attestation-gated while the recipient's copy
+///    would be clean and ungated. A 2022 `ImportConflict` makes the filer's 2024 delta
+///    `NotComputable` and the recipient's computable. **That is precisely the filer most likely to
+///    run `income scrub`** — "btctax won't export my forms" — handed the one file on which the
+///    problem vanishes.
+/// 2. **It leaned on a don't-know.** `digital_asset_activity`'s own doc says `false` leaves the box
+///    **unchecked, NOT answered "No"**. Reading that deliberate silence as "the ledger is empty" is
+///    widening an exemption, which is never the safe edit.
+///
+/// Every disjunct names the mechanism that put it there:
+///
+/// - `digital_asset_activity(state, year)` — disposals / income / removals dated in-year.
+/// - `digital_asset_activity(state, year - 1)` — ★ **DELIBERATE OVER-REFUSAL that secures no live
+///   read.** Two rounds of naming a mechanism for it were both wrong: it is *not* the M4
+///   carryforward-consistency advisory (which needs the prior year's stored *profile*, so it does
+///   not reproduce from a one-year file whatever this decides), and it is *not* "the prior year's
+///   ledger feeds this year's carryforward-in" ([`scrub_pii`] preserves
+///   `capital_loss_carryforward_in` and its provenance verbatim, so those figures travel in the
+///   TOML and reproduce with no ledger at all). It is kept because scrub declines to prove the
+///   negative that no path reads the prior year's ledger live. The error direction is over-refusal,
+///   which is the safe one. **Do not "fix" it by inventing a third mechanism.**
+/// - [`LedgerState::pseudo_active`] — the DRAFT watermark and the attestation gate.
+/// - An unresolved `Severity::Hard` blocker — `NotComputable`, projection-wide.
+///
+/// ★★★ **THE HARD-BLOCKER DISJUNCT DOES NOT CALL `compute::first_hard_blocker`, AND THAT IS A
+/// CORRECTION TO THE SPEC.** SPEC_income_scrub.md §2.2 directed widening that helper to
+/// `pub(crate)`. It cannot be: `tax/compute.rs` is a **frozen engine file**, content-pinned by
+/// [`crate::tax::frozen_guard`] (SPEC_full_return §2), and even an edit preserving the public API
+/// trips `frozen_engine_files_are_unchanged` — which is exactly what the pin is for. Its exception
+/// process demands a separately-reviewed commit, and "a sharing feature wanted one more caller" is
+/// not the exceedingly-rare case that process exists for.
+///
+/// So this uses the predicate every other non-frozen caller already uses —
+/// `state.blockers.iter().any(|b| b.kind.severity() == Severity::Hard)`, as at `admin.rs:234`,
+/// `:712` and `:972`. `first_hard_blocker` has no caller outside `compute.rs`; it returns the FIRST
+/// such blocker for a deterministic `TaxYearNotComputable` detail, and this only needs existence.
+/// ★ Five spec-review rounds mandated an edit to a frozen file and none of them noticed. It was a
+/// `cargo nextest` away, and the build found it in one run.
+///
+/// ★ The caller must also **project the ledger** before asking, and **refuse if projection fails**
+/// — never fall back to "assume empty".
+#[must_use]
+pub fn ledger_contributes(state: &LedgerState, year: i32) -> bool {
+    ledger_contribution(state, year).is_some()
+}
+
+/// Which disjunct of [`ledger_contributes`] fires, so a refusal can name its own mechanism.
+///
+/// ★★ The CAUSE is the primitive and the bool is derived from it — `ledger_contributes` is literally
+/// `self.is_some()`. The alternative (a `bool` here plus a separate cause-finder for the message, or
+/// the CLI re-deriving the cause from public state) would be **two sources of truth for one
+/// obligation**, and they would drift on the first new disjunct. The refusal message is not
+/// decoration: a filer who cannot see which mechanism stopped them cannot act on it.
+///
+/// Order is the disjunction's own and matters only to the message, never to the verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LedgerContribution {
+    /// Disposals / recognized income / removals dated in the scrub year itself.
+    InYearActivity,
+    /// The same, in `year - 1`. ★ Deliberate over-refusal — see [`ledger_contributes`]; this
+    /// disjunct secures no live read and must not be re-justified with a fresh mechanism.
+    PriorYearActivity,
+    /// A synthetic default contributes to the projection: the filer's export is DRAFT-watermarked
+    /// and attestation-gated, and the recipient's copy would be neither. Projection-wide.
+    PseudoActive,
+    /// An unresolved `Severity::Hard` blocker anywhere in the projection makes the filer's year
+    /// `NotComputable` while the recipient's computes. Projection-wide and year-blind.
+    HardBlocker,
+}
+
+impl LedgerContribution {
+    /// A short phrase naming the mechanism, for the refusal message.
+    #[must_use]
+    pub fn cause(self) -> &'static str {
+        match self {
+            Self::InYearActivity => "the ledger records digital-asset activity in that year",
+            Self::PriorYearActivity => {
+                "the ledger records digital-asset activity in the PRIOR year, which this command \
+                 refuses on deliberately rather than prove that nothing reads it"
+            }
+            Self::PseudoActive => {
+                "the ledger is pseudo-reconciled — a synthetic default contributes to the \
+                 projection, so your own export carries a DRAFT watermark and an attestation gate \
+                 that a scrubbed copy would not reproduce"
+            }
+            Self::HardBlocker => {
+                "the projection carries an unresolved hard blocker, so your year is not computable \
+                 while a scrubbed copy of these inputs would compute cleanly"
+            }
+        }
+    }
+}
+
+/// See [`LedgerContribution`]. Returns the first firing disjunct, or `None` when the year is
+/// scrubbable.
+#[must_use]
+pub fn ledger_contribution(state: &LedgerState, year: i32) -> Option<LedgerContribution> {
+    use crate::tax::return_1040::digital_asset_activity;
+
+    if digital_asset_activity(state, year) {
+        Some(LedgerContribution::InYearActivity)
+    } else if digital_asset_activity(state, year - 1) {
+        Some(LedgerContribution::PriorYearActivity)
+    } else if state.pseudo_active() {
+        Some(LedgerContribution::PseudoActive)
+    } else if state
+        .blockers
+        .iter()
+        .any(|b| b.kind.severity() == crate::state::Severity::Hard)
+    {
+        Some(LedgerContribution::HardBlocker)
+    } else {
+        None
+    }
+}
 
 /// A synthetic SSN that the SSA can never have issued (middle group `00`), distinct per `n`.
 fn synthetic_ssn(n: usize) -> String {

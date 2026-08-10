@@ -164,6 +164,29 @@ pub enum CliError {
          'discard parked draft' (a confirmed delete) to drop it; then re-run this command."
     )]
     ParkedDraftBlocksWrite { year: i32 },
+    /// `income scrub` refused because the LEDGER contributes to `year` (SPEC_income_scrub.md §2.2).
+    ///
+    /// ★★★ This is a `CliError` and deliberately **NOT** a `RefuseReason`. That taxonomy answers
+    /// *why a return cannot be FILED*, and its exhaustive cross-crate anchor map in
+    /// `btctax-input-form` has no honest entry for a SHARING refusal. Adding one would be a category
+    /// error: this return may be perfectly filable — it is the scrubbed COPY that cannot be
+    /// authorized as safe, because the recipient's file would not reproduce the ledger's effect.
+    ///
+    /// ★ Ledger-bearing years have no scrub path in v1 and the message says so plainly rather than
+    /// offering a consolation the spec refuted. It must **never** point at `export-snapshot`: that
+    /// is the FR10 plaintext exception and is not scrubbed at all.
+    #[error(
+        "income scrub refused for {year}: {cause}.\n\
+         \n\
+         Scrub may emit only when the ledger contributes NOTHING to the year — no figure, refusal, \
+         gate, watermark or advisory. Here it contributes, so a scrubbed copy would behave \
+         DIFFERENTLY from your own: the recipient would not reproduce what you are seeing, and the \
+         file would carry an authorization it has not earned.\n\
+         \n\
+         There is no scrub path for a ledger-bearing year in this version. What does not travel is \
+         the ledger's effect on the return, and nothing here can stand in for it."
+    )]
+    ScrubLedgerContributes { year: i32, cause: String },
     /// Sub-project 3 attestation gate: an export was attempted while the ledger is pseudo-reconciled
     /// (a synthetic, non-persisted default contributes to the projection) and NO attestation phrase was
     /// supplied. Producing a form/data file from a fictional draft requires typing the exact phrase.

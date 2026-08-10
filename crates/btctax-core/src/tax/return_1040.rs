@@ -2010,7 +2010,12 @@ pub fn assemble_absolute(
 ///
 /// `false` means the box is left **unchecked**, NOT answered "No": btctax never answers "No" (§3.4 —
 /// a "No" it cannot vouch for is worse than leaving the question to the filer).
-fn digital_asset_activity(state: &LedgerState, year: i32) -> bool {
+///
+/// ★ `pub(crate)` for [`crate::tax::scrub::ledger_contributes`], which is the ONLY other caller.
+/// That predicate uses this as one disjunct of four and must not be confused with it: reading a
+/// `false` here as "the ledger is empty" is exactly the widening `ledger_contributes` exists to
+/// prevent (SPEC_income_scrub.md §2.2).
+pub(crate) fn digital_asset_activity(state: &LedgerState, year: i32) -> bool {
     state.disposals.iter().any(|d| d.disposed_at.year() == year)
         || state
             .income_recognized
