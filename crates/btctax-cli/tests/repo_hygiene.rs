@@ -287,9 +287,16 @@ fn the_pii_exclusion_rule_admits_only_impossible_identifiers() {
         // ★★ This comment used to say §7 "moves the generator into a structural window instead of
         //    growing this list". §7 DECIDED THE OPPOSITE, and this text predated that fold: there is
         //    no impossible EIN, so a generator-keyed rule would be `^9[0-9]-[0-9]{7}$` and would
-        //    exempt real EINs issued under 91/94/95/99 from the PII scan. The list is CAPPED residue,
-        //    committing a scrubbed return as a fixture is out of scope for v1, and the next person
-        //    tempted to widen it should read `scrub.rs`'s module header first.
+        //    exempt real EINs issued under 91/94/95/99 from the PII scan. Committing a scrubbed
+        //    return as a fixture is out of scope for v1, and the next person tempted to widen it
+        //    should read `scrub.rs`'s module header first.
+        // ★★★ THAT REPLACEMENT ALSO OVERCLAIMED: it called this list "CAPPED residue". It is not
+        //    capped — `99-1000000` was added two commits later by the ordinary route, because the
+        //    bucket's purpose is admitting synthetic EINs quoted in PERSISTED reviews, reviews stay
+        //    verbatim, and reviews keep discussing the EIN generator. What is refused permanently is
+        //    the STRUCTURAL window (unbounded, includes real EINs); what grows is TOKEN-EXACT
+        //    entries, each one literal string with its citation. Conflating the two is what produced
+        //    two wrong comments in a row here.
         (
             "90-0000001",
             true,
@@ -300,6 +307,11 @@ fn the_pii_exclusion_rule_admits_only_impossible_identifiers() {
             "55-5555555",
             true,
             "a worked EIN example, scrub spec review",
+        ),
+        (
+            "99-1000000",
+            true,
+            "the pad-not-truncate boundary of synthetic_malformed_ein, computed by two fold checks              — a value that was never emitted, recorded because it WAS the defect",
         ),
         (
             "56-1234567",

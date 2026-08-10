@@ -123,15 +123,27 @@ ALLOWED_SSN_UNPUSHED_HISTORY='^(111-22-0004|111-22-0009|333-44-5555)$'
 #   91-0000002    spellings became TWO synthetic employers, manufacturing an excess-SS credit
 #   55-5555555  — a worked EIN example inside the scrub SPEC review
 #
-# ★★★ THIS BUCKET IS PERMANENT RESIDUE, AND IT DOES NOT GROW. An earlier version of this comment
-#   said §7 would move `synthetic_ein` into a "documented STRUCTURAL window so future output needs
-#   no entry here at all". §7 DECIDED THE EXACT OPPOSITE, and this comment predated that fold:
-#   there is no impossible EIN, so the generator-keyed rule would be `^9[0-9]-[0-9]{7}$` — which
-#   would exempt every REAL EIN issued under the 91/94/95/99 prefixes from this scan. Widening an
-#   exemption is never the safe edit, least of all inside the control doing the exempting.
-#   Consequently: committing a scrubbed return as a repo fixture is OUT OF SCOPE for v1. These three
-#   tokens are permanent only because the review documents quoting them are.
-ALLOWED_EIN_REVIEW_ARTIFACT='^(90-0000001|91-0000002|55-5555555)$'
+#   99-1000000  — NOT an emitted value: what `synthetic_malformed_ein` WOULD have produced at
+#                 n = 999_999 before the `% 1_000_000` fix. Two reviews computed it to show the
+#                 pad-not-truncate boundary, i.e. it exists in the record precisely BECAUSE it was
+#                 the defect. (reviews/scrub-branch-fold-check.md, reviews/scrub-nit-fold-check.md)
+#
+# ★★★ THE STRUCTURAL WINDOW STAYS REFUSED; THIS TOKEN-EXACT BUCKET DOES GROW. An earlier version of
+#   this comment said §7 would move `synthetic_ein` into a "documented STRUCTURAL window so future
+#   output needs no entry here at all". §7 DECIDED THE OPPOSITE and that still stands: there is no
+#   impossible EIN, so the generator-keyed rule would be `^9[0-9]-[0-9]{7}$` — which would exempt
+#   every REAL EIN issued under the 91/94/95/99 prefixes. Widening an exemption is never the safe
+#   edit, least of all inside the control doing the exempting.
+#
+# ★★ BUT THE REPLACEMENT CLAIMED TOO MUCH, AND WAS FALSIFIED TWO COMMITS LATER. It said this bucket
+#   "DOES NOT GROW". It does: the bucket's whole purpose is admitting synthetic EINs quoted in
+#   PERSISTED REVIEWS, reviews must stay verbatim, and reviews keep discussing the EIN generator —
+#   so the next one that does will need an entry too. `99-1000000` was added by exactly that route.
+#   The two are different things and the old comment conflated them: a STRUCTURAL window exempts an
+#   unbounded set including real EINs; a TOKEN-EXACT entry exempts one literal string, cited to the
+#   document that forced it. The first is refused permanently; the second is bounded bookkeeping.
+#   ★ The invariant that actually holds: every entry here is token-exact and carries its citation.
+ALLOWED_EIN_REVIEW_ARTIFACT='^(90-0000001|91-0000002|55-5555555|99-1000000)$'
 
 ALLOWED_EIN='^(11-1111111|22-2222222|33-3333333|44-4444444|12-3456789|98-7654321|99-1234567|56-1234567)$'
 
