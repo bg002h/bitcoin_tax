@@ -430,10 +430,25 @@ pub enum IncomeCmd {
     /// fail-loud declaration. W-2 EINs are replaced but keep their SAMENESS, because §6413(c)'s
     /// excess-social-security credit turns on having more than one employer.
     ///
-    /// The output is TOML that `income import` accepts, and it computes an IDENTICAL return — a
-    /// guarantee held by a test, not a hope. What it is NOT is anonymous: the figures alone are a
-    /// financial profile. Do not round or fuzz them to compensate; crossing a bracket, a phase-out or
-    /// the standard-vs-itemized line changes the behaviour you are trying to show.
+    /// Every computed FIGURE is preserved — a guarantee held by
+    /// `scrub_preserves_every_computed_figure`, which compares the whole assembled return, not a
+    /// sampled line.
+    ///
+    /// It does NOT compute an identical return in every respect, and here is the whole list of what
+    /// differs. Four things are REPLACED and still printed on a form: the Schedule C business
+    /// description (line A, and Form 8995-A line 1(a)), the foreign-account country list (Schedule B
+    /// line 7b), and the interest and dividend payer names (Schedule B Parts I and II). Two more
+    /// change a MESSAGE rather than a page: the broker name inside a Form 1099-B refusal, and the
+    /// employer EIN inside the excess-social-security advisory. One is DROPPED rather than replaced,
+    /// so its box goes blank: the IP PIN. And a cross-year advisory will not fire, because the copy
+    /// carries one year.
+    ///
+    /// The file is written owner-only and carries a marker line, so a plain `income import` refuses
+    /// it; load it with `income import --force`, ideally into a scratch vault.
+    ///
+    /// What it is NOT is anonymous: the figures alone are a financial profile. Do not round or fuzz
+    /// them to compensate; crossing a bracket, a phase-out or the standard-vs-itemized line changes
+    /// the behaviour you are trying to show.
     Scrub {
         /// The tax year (e.g. 2024).
         #[arg(long)]

@@ -583,3 +583,67 @@ fn the_committed_example_tomls_still_import_without_force() {
         );
     }
 }
+
+// ── §8 step 8 — the TOML ROUND TRIP. The output is only useful if it can be loaded back. ─────────
+
+/// ★★★ A scrubbed copy nobody can load is a screenshot with extra steps. The whole product is that
+/// the recipient can `import` it and reproduce the filer's numbers — so the round trip is the
+/// feature, not a nicety.
+///
+/// ★ This also pins the marker's shape from the other side: it must be a COMMENT, invisible to
+/// deserialization. A marker emitted as a TOML KEY would be rejected by
+/// `parse_return_inputs_toml`'s unknown-key check and the file would be unloadable — which is
+/// exactly why §4.2 specifies a comment line.
+#[test]
+fn the_scrubbed_toml_round_trips_back_through_import() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = empty_vault(dir.path());
+    store_wage_only_return(&vault);
+
+    let out = dir.path().join("scrubbed.toml");
+    let (code, _o, stderr) = run_btctax(
+        &vault,
+        &[
+            "income",
+            "scrub",
+            "--year",
+            "2024",
+            "--out",
+            out.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(code, 0, "stderr: {stderr}");
+
+    // A FRESH vault, which is the real workflow: the recipient is not the filer.
+    let dir2 = tempfile::tempdir().unwrap();
+    let recipient = empty_vault(dir2.path());
+    let (code, _o, stderr) = run_btctax(
+        &recipient,
+        &[
+            "income",
+            "import",
+            "--year",
+            "2024",
+            "--file",
+            out.to_str().unwrap(),
+            "--force",
+        ],
+    );
+    assert_eq!(code, 0, "the scrubbed file must load: {stderr}");
+
+    // …and what landed is what was sent, field for field.
+    let sent: btctax_core::tax::return_inputs::ReturnInputs = {
+        let text = std::fs::read_to_string(&out).unwrap();
+        toml::from_str(&text).expect("the emitted TOML must parse")
+    };
+    let landed = {
+        let s = Session::open(&recipient, &pp()).unwrap();
+        btctax_cli::return_inputs::get(s.conn(), 2024)
+            .unwrap()
+            .unwrap()
+    };
+    assert_eq!(
+        sent, landed,
+        "the return that landed differs from the one that was sent"
+    );
+}
