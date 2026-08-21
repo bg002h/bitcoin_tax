@@ -171,7 +171,26 @@ pub const KNOWN_ARCHIVES: &[(&str, &str)] = &[
 ///
 /// Set 2026-08-13 (two weeks after the four were discovered on 2026-07-30). Reconciliation is step ③
 /// in `CONTINUITY.md` §0, i.e. the very next piece of work after this harness.
-pub const ARCHIVE_RECONCILIATION_REVIEW_BY: &str = "2026-08-13";
+///
+/// ## ★★★ RESET LOG — every extension, who decided it, and why
+///
+/// **The log exists because a date nobody records re-pushing is not a deadline, it is furniture.**
+/// The gate's whole claim is that the four archives cannot become permanent by inattention; a reset
+/// is a legitimate move, but an *unlogged* reset defeats it silently and the next reader cannot tell
+/// a considered deferral from a reflex. Two entries here is a decision; five is the gate being
+/// routed around, and that must be visible without reading git history.
+///
+/// | # | from | to | date | who | why |
+/// |---|---|---|---|---|---|
+/// | 1 | 2026-08-13 | 2026-08-28 | 2026-08-20 | owner | The gate fired as designed and blocked all commits (pre-commit runs `make check`). The owner deferred the reconciliation itself to a window when **model usage is expected to be more available** — the remaining work is two genuine decisions, not cleanup, and neither should ride along behind other work. Nothing about the duplication changed; only when it is decided. |
+///
+/// ★ What is still owed, unchanged: the **two** remaining duplicate groups (`DUPLICATE_SOURCE_GROUPS`
+/// = 7 across them). Group A — `design/forms/{year}/{f8275,i8275,f8283}` aliasing
+/// `design/forms/periodic/*` — is a question about whether year-indexed lookup may resolve through
+/// `periodic/`. Group B — `design/forms/2025/*` vs `legal/primary-sources/irs-forms/*` — is the
+/// genuine (A)/(B) overlap, and under the hybrid rule (B)'s copies are the redundant ones, so it is a
+/// DELETION decision about committed binaries, not a tidy-up.
+pub const ARCHIVE_RECONCILIATION_REVIEW_BY: &str = "2026-08-28";
 
 /// Trees that legitimately hold form-shaped files that are **not** an archive.
 pub const NOT_AN_ARCHIVE: &[(&str, &str)] = &[
