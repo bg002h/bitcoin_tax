@@ -458,46 +458,50 @@ mod tests {
         let scrubbed = super::super::scrub::scrub_pii(&ri);
         let json = serde_json::to_string(&scrubbed).unwrap();
 
-        // Each sentinel is `SENTINEL_<tag>_<suffix>`; group by the field it names.
-        let mut survived: BTreeSet<&str> = BTreeSet::new();
-        // ★ Only tokens the fixture actually CARRIES. Three names here (`SENTINEL_ssn`,
-        //   `SENTINEL_dependent_ssn`, `SENTINEL_ippin`) named values that no longer exist anywhere in
-        //   `maximal_sentinel` — they were left behind when those fields were given real values. A
-        //   scan entry for a token that cannot occur can never fire: it looks like coverage and is
-        //   not, which is this module's own subject.
-        for kept in [
-            "SENTINEL_relationship",
-            "SENTINEL_naics",
-            "SENTINEL_first",
-            "SENTINEL_last",
-            "SENTINEL_occupation",
-            "SENTINEL_dependent_name",
-            "SENTINEL_street",
-            "SENTINEL_city",
-            "SENTINEL_state",
-            "SENTINEL_zip",
-            "SENTINEL_employer",
-            "SENTINEL_int_payer",
-            "SENTINEL_div_payer",
-            "SENTINEL_g_payer",
-            "SENTINEL_b_payer",
-            "SENTINEL_business_description",
-            "SENTINEL_countryA",
-            "SENTINEL_countryB",
-        ] {
-            if json.contains(kept) {
-                survived.insert(kept);
-            }
+        // ★★★ SCANNED FROM THE OUTPUT, NEVER MATCHED AGAINST A LIST. The previous version built the
+        //     surviving set by iterating 18 known token names and asking `json.contains(name)` — so a
+        //     surviving token NOT already on the list was invisible BY CONSTRUCTION, and the
+        //     "anything extra is identity riding into a shareable file" half held for no extras at
+        //     all. An earlier fold removed three DEAD entries from that same list and kept the scan
+        //     DIRECTION that produces the blindness: false coverage fixed, the mechanism left broken.
+        //
+        //     THE VECTOR IT NOW CATCHES: a new form type — `Form1099Misc { payer, .. }` is the
+        //     realistic one, since that is exactly how the six originally-unguarded structs entered.
+        //     The `..`-free destructure forces a classification, the author marks it `_` ("money
+        //     only" — wrong, `payer` is free text), and scrub keeps it. The derived axis sees no diff,
+        //     so the matrix demands no row; the figure test compares two identical values; the round
+        //     trip is green. Only a scan of the OUTPUT can see it.
+        let mut survived: BTreeSet<String> = BTreeSet::new();
+        let mut rest = json.as_str();
+        while let Some(i) = rest.find("SENTINEL_") {
+            let tail = &rest[i..];
+            let stop = tail
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .unwrap_or(tail.len());
+            let tok = &tail[..stop];
+            // Group by FIELD, not element: `..._one`/`..._two` are one decision, and a per-element
+            // set would make the expectation grow with the fixture.
+            let group = tok
+                .rsplit_once('_')
+                .filter(|(_, suf)| matches!(*suf, "one" | "two" | "taxpayer" | "spouse"))
+                .map_or(tok, |(head, _)| head);
+            survived.insert(group.to_string());
+            rest = &tail[stop..];
         }
-        let expected: BTreeSet<&str> = ["SENTINEL_relationship", "SENTINEL_naics"]
+
+        // §7's KEPT decisions that carry a sentinel. `box12[].code` is §7's third and is deliberately
+        // absent: it holds a REAL code (`"D"`), because gibberish there refuses
+        // `UnsupportedBox12Code` and — `screen_inputs` returning the FIRST refusal — would mask every
+        // cell of the matrix. The derived axis holds that one instead.
+        let expected: BTreeSet<String> = ["SENTINEL_relationship", "SENTINEL_naics"]
             .into_iter()
+            .map(String::from)
             .collect();
         assert_eq!(
             survived, expected,
-            "the set of sentinels surviving a scrub must be exactly the SENTINEL-BEARING fields §7 \
-             records as KEPT (relationship, NAICS — box-12 carries a REAL code and is held by the \
-             derived axis instead). Anything extra is identity riding into a shareable file; \
-             anything missing is a KEPT decision silently reversed."
+            "the sentinels surviving a scrub must be exactly the sentinel-bearing fields §7 records \
+             as KEPT. Anything EXTRA is a filer's own text riding into a file the command stamps \
+             shareable; anything MISSING is a KEPT decision silently reversed."
         );
     }
 
@@ -507,33 +511,74 @@ mod tests {
     /// string scrub can emit may appear anywhere in the ORIGINAL fixture.
     #[test]
     fn no_fixture_value_collides_with_a_stand_in() {
-        let json = serde_json::to_string(&maximal_sentinel()).unwrap();
-        // ★ The address stand-ins are read from the CONSTANTS, not copied — §3.4 moved them once
-        //   already, and a copy here would silently stop checking the real values.
-        use crate::tax::scrub::{SCRUB_CITY, SCRUB_STATE, SCRUB_STREET, SCRUB_ZIP};
-        for stand_in in [
-            "Taxpayer",
-            "Spouse",
-            "Example",
-            "Occupation",
-            SCRUB_STREET,
-            SCRUB_CITY,
-            SCRUB_STATE,
-            SCRUB_ZIP,
-            "Dependent1",
-            "Example business",
-            "Country1",
-            "Employer1",
-            "Payer1",
-            "Broker1",
-            "Agency1",
-        ] {
-            assert!(
-                !json.contains(stand_in),
-                "the sentinel fixture contains `{stand_in}`, which is a value scrub itself emits — \
-                 that field would show NO diff and drop out of the derived axis silently"
-            );
+        // ★★★ EVERY ELEMENT AT A REPLACED PATH MUST DIFFER. A path in the derived axis means scrub
+        //     REPLACES that field — so if any single instance is unchanged, the fixture value
+        //     collided with the stand-in there, and that instance is silently unscrubbed.
+        //
+        //     ★★ TWO WRONG VERSIONS PRECEDED THIS, and the second is the instructive one. The first
+        //        checked a 15-literal hand-list, missing the synthetic SSN/EIN families, `"x"`, the
+        //        `"1"`-repeats and every index-2 stand-in. The second tried to derive it but SKIPPED
+        //        any emitted value that also appeared in the original, calling that "a KEPT field" —
+        //        and a collision IS a value that appears in the original, so the filter excluded
+        //        precisely the case it was hunting. Caught by planting `"Payer2"` as the second
+        //        1099-INT payer and watching the test stay green.
+        //
+        //     ★ Why the axis cannot see this alone: `int_1099[].payer` is ONE member. Element 0 still
+        //       differs, so the path stays in the axis and the matrix is satisfied while element 1
+        //       goes out unscrubbed.
+        let ri = maximal_sentinel();
+        let scrubbed = super::super::scrub::scrub_pii(&ri);
+        let replaced = replaced_paths(&ri);
+        let before = serde_json::to_value(&ri).unwrap();
+        let after = serde_json::to_value(&scrubbed).unwrap();
+
+        fn check(
+            a: &serde_json::Value,
+            b: &serde_json::Value,
+            path: &str,
+            replaced: &BTreeSet<String>,
+            hits: &mut usize,
+        ) {
+            use serde_json::Value;
+            match (a, b) {
+                (Value::Object(x), Value::Object(y)) => {
+                    for (k, av) in x {
+                        if let Some(bv) = y.get(k) {
+                            let child = if path.is_empty() {
+                                k.clone()
+                            } else {
+                                format!("{path}.{k}")
+                            };
+                            check(av, bv, &child, replaced, hits);
+                        }
+                    }
+                }
+                (Value::Array(x), Value::Array(y)) => {
+                    for (av, bv) in x.iter().zip(y.iter()) {
+                        check(av, bv, &format!("{path}[]"), replaced, hits);
+                    }
+                }
+                _ => {
+                    if replaced.contains(path) {
+                        *hits += 1;
+                        assert_ne!(
+                            a, b,
+                            "`{path}`: this element is UNCHANGED although scrub replaces the field — \
+                             the fixture value collided with the stand-in, so this instance ships \
+                             unscrubbed and shows no diff"
+                        );
+                    }
+                }
+            }
         }
+
+        let mut hits = 0usize;
+        check(&before, &after, "", &replaced, &mut hits);
+        assert!(
+            hits >= replaced.len(),
+            "asserted less than the axis: {hits} elements over {} replaced paths",
+            replaced.len()
+        );
     }
 }
 
@@ -836,6 +881,15 @@ mod matrix {
                      keys on `.trim().is_empty()`, so this flips what the recipient's copy does."
                 ),
                 (Value::Object(x), Value::Object(y)) => {
+                    // ★★★ KEY SETS FIRST. Skipping a one-sided key made this walk blind to a field
+                    //     appearing or vanishing — and because it runs per MUTATED cell, that was
+                    //     the only structural check operating there at all.
+                    let kx: BTreeSet<&String> = x.keys().collect();
+                    let ky: BTreeSet<&String> = y.keys().collect();
+                    assert_eq!(
+                        kx, ky,
+                        "{label}: `{path}` changed its KEY SET — a field appeared or vanished"
+                    );
                     for (k, av) in x {
                         if let Some(bv) = y.get(k) {
                             let child = if path.is_empty() {
@@ -848,6 +902,25 @@ mod matrix {
                     }
                 }
                 (Value::Array(x), Value::Array(y)) => {
+                    // ★★★ LENGTH FIRST, for the reason `the_identity_does_not_survive` asserts
+                    //     `dependents.len()` before its own `zip`: zip truncates to the shorter
+                    //     side, so a scrubber that DROPPED a collection satisfied this walk by
+                    //     iterating zero times.
+                    //
+                    //     ★★ The backstop everyone relied on — a length diff landing `path[]` in the
+                    //        derived axis, so the matrix reds on a missing row — runs only on the
+                    //        UNMUTATED base. It does not run here. A state-CONDITIONAL drop (say,
+                    //        clearing dependents whenever the spouse is absent) was invisible to the
+                    //        entire suite, while handing a filer with a malformed dependent SSN a
+                    //        copy that exports where their own return refused.
+                    assert_eq!(
+                        x.len(),
+                        y.len(),
+                        "{label}: `{path}` changed LENGTH ({} -> {}) — scrubbing must not add or drop \
+                         collection elements",
+                        x.len(),
+                        y.len()
+                    );
                     for (av, bv) in x.iter().zip(y.iter()) {
                         walk(av, bv, &format!("{path}[]"), label);
                     }
@@ -915,6 +988,27 @@ mod matrix {
             "the maximal sentinel must be a FILEABLE return — a refusing baseline masks every cell \
              of this matrix behind whatever refuses first"
         );
+
+        // ★★★ AND THE `w2s[].ein @ malformed` CELL MUST BE ARMED, NOT MERELY PRESENT. That cell only
+        //     discriminates because the sentinel withholds OVER the §3101(a) cap, making
+        //     `over_cap_needs_ein` live — and that precondition was held by a COMMENT. Value drift
+        //     that keeps the path in the axis while disarming the screen (lowering `box3_ss_wages` to
+        //     a normal-looking figure) reverts the cell to comparing `None == None`: exactly the
+        //     "exercised and vacuous" state that shipped r1's CRITICAL through the instrument built
+        //     to catch it. A positive control for the cell, the same shape as the baseline control.
+        {
+            let mut armed = maximal_sentinel();
+            for w in &mut armed.w2s {
+                w.ein = Some("XX-1111111".into());
+            }
+            assert_eq!(
+                screen_inputs(&armed, &ty2024_table(), &ty2024_params()).map(|r| r.reason),
+                Some(crate::tax::return_refuse::RefuseReason::ExcessSsEmployerUnknown),
+                "the `w2s[].ein @ malformed` cell is DISARMED: with malformed EINs the fixture no \
+                 longer refuses, so that cell compares None to None and cannot catch the CRITICAL it \
+                 exists for. Restore over-cap withholding in `maximal_sentinel`."
+            );
+        }
 
         let derived = replaced_paths(&base);
         let table = matrix();

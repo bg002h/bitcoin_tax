@@ -35,6 +35,13 @@ use time::UtcOffset;
 /// OUTSIDE it and outside `SCRUB_YEAR - 1`, isolating the disjunct each test is about.
 const SCRUB_YEAR: i32 = 2024;
 
+/// Identity the wage-only fixture actually STORES, so the positive control's canary can fire.
+/// ★ The SSN is `000-`-prefixed: structurally impossible, so `pii-scan`'s own rule admits it and it
+/// cannot collide with `synthetic_ssn`, which emits `1NN-00-NNNN`.
+const CANARY_LAST_NAME: &str = "Realsurname";
+const CANARY_SSN: &str = "000-55-5555";
+const CANARY_STREET: &str = "42 Realstreet Ave";
+
 fn pp() -> Passphrase {
     Passphrase::new("pw".into())
 }
@@ -77,7 +84,20 @@ fn store_wage_only_return(vault: &Path) {
         SCRUB_YEAR,
         &btctax_core::tax::testonly::answered(ReturnInputs {
             filing_status: FilingStatus::Single,
-            header: btctax_core::tax::testonly::not_a_dependent(),
+            // ★ A header that CARRIES identity. `not_a_dependent()` alone is
+            //   `..Default::default()` — every identity string empty — which is what made the
+            //   canary below unfireable.
+            header: btctax_core::tax::return_inputs::HouseholdHeader {
+                taxpayer: btctax_core::tax::return_inputs::Person {
+                    first_name: "Realfirst".into(),
+                    last_name: CANARY_LAST_NAME.into(),
+                    ssn: CANARY_SSN.into(),
+                    occupation: "Realoccupation".into(),
+                    ..Default::default()
+                },
+                address_street: CANARY_STREET.into(),
+                ..btctax_core::tax::testonly::not_a_dependent()
+            },
             w2s: vec![W2 {
                 owner: Owner::Taxpayer,
                 box1_wages: dec!(80000),
@@ -387,10 +407,26 @@ fn a_ledger_free_vault_still_scrubs() {
         stdout.contains("filing_status"),
         "the scrubbed TOML must actually be emitted: {stdout:?}"
     );
+    // ★★★ THE CANARY IS KEYED ON A VALUE THIS VAULT ACTUALLY STORES. It used to scan for
+    //     "111-22-3333" — a kitchen-sink dependent SSN that `store_wage_only_return` never writes,
+    //     because `not_a_dependent()` is `..Default::default()`: every identity string empty, no
+    //     dependents, no IP PIN. The canary looked for a value that could not be there, so it could
+    //     not fire on ANY defect — including `scrub_pii` being the identity function.
+    //
+    //     ★ Third instance of the class "a scan entry naming a token that cannot occur", and this
+    //       time it was in the POSITIVE CONTROL — the test whose whole job is proving the command
+    //       still emits when it should.
     assert!(
-        !stdout.contains("111-22-3333"),
-        "and it must be scrubbed: {stdout:?}"
+        stdout.contains("Example"),
+        "the emitted TOML must carry the STAND-IN identity, or nothing here is evidence of a scrub: \
+         {stdout:?}"
     );
+    for real in [CANARY_LAST_NAME, CANARY_SSN, CANARY_STREET] {
+        assert!(
+            !stdout.contains(real),
+            "the filer's own {real:?} survived into the emitted copy: {stdout:?}"
+        );
+    }
 }
 
 // ── §7 — a DRAFT shadows the committed row, and scrub must read what the filer is looking at ─────
@@ -613,6 +649,135 @@ fn the_committed_example_tomls_still_import_without_force() {
         assert_eq!(
             code, 0,
             "{fixture}: an ordinary return must import with no --force. stderr: {stderr}"
+        );
+    }
+}
+
+/// ★★★ **THE MALFORMED CLASSES CROSS THE ARTIFACT BOUNDARY — and until this test, none ever had.**
+///
+/// The round trip below uses `maximal_sentinel`, which *must* be all-valid so §3.3's matrix baseline
+/// files. So the only point in the output space any test had ever emitted and re-parsed was the
+/// **all-valid** one: no empty string, no malformed value, and no `ip_pin` key at all (valid is
+/// dropped). Two design constraints pulled one fixture in opposite directions and the round trip
+/// inherited the matrix's.
+///
+/// Meanwhile §3.2's entire product — `absent → absent`, `Some("") → Some("")`,
+/// `NotDigits(_) → 'x'`, `WrongLength(n) → "1".repeat(n)`, a malformed EIN staying unreadable — was
+/// proven ONLY by in-memory value comparison. The feature's promise is *"the recipient's copy refuses
+/// exactly where the filer's did"*, and no malformed-class copy had ever been created.
+///
+/// ★★ What that leaves open is not hypothetical: any transport-layer tidy that drops `key = ""` from
+/// the emitted TOML turns `scrub_ip_pin`'s `Missing` leg — which emits `Some("")` precisely so the
+/// recipient's `ReturnHeader::build` still errs `Missing` — into `None`, which builds `Ok`. The copy
+/// then EXPORTS where the filer's refused. §3.2's governing harm, delivered through §4's transport,
+/// with the in-memory matrix green and the existing round trip carrying no empty string to notice.
+///
+/// So this asserts the **classes** that land, not the bytes: what the recipient's own packet boundary
+/// makes of the file.
+#[test]
+fn the_malformed_classes_survive_the_artifact_boundary() {
+    use btctax_core::tax::packet::{ReturnHeader, SsnError};
+
+    let dir = tempfile::tempdir().unwrap();
+    let vault = empty_vault(dir.path());
+    {
+        let mut ri = btctax_core::tax::scrub_axis::maximal_sentinel();
+        // One of each non-valid class, on the fields whose class an instrument actually reads.
+        ri.header.taxpayer.ssn = "123-45-678Z".into(); // NotDigits — must coarsen, not leak 'Z'
+        ri.header.spouse.as_mut().unwrap().ssn = "12345".into(); // WrongLength(5)
+        ri.header.ip_pin = Some(String::new()); // present-but-empty: errs Missing, unlike None
+        for w in &mut ri.w2s {
+            w.ein = Some("11111111".into()); // eight digits — undecidable, must stay so
+        }
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::set(s.conn(), SCRUB_YEAR, &ri).unwrap();
+        s.save().unwrap();
+    }
+
+    let out = dir.path().join("scrubbed.toml");
+    let (code, _o, stderr) = run_btctax(
+        &vault,
+        &[
+            "income",
+            "scrub",
+            "--year",
+            "2024",
+            "--out",
+            out.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(code, 0, "stderr: {stderr}");
+
+    // The recipient's vault, reached the way a recipient reaches it.
+    let dir2 = tempfile::tempdir().unwrap();
+    let recipient = empty_vault(dir2.path());
+    let (code, _o, stderr) = run_btctax(
+        &recipient,
+        &[
+            "income",
+            "import",
+            "--year",
+            "2024",
+            "--file",
+            out.to_str().unwrap(),
+            "--force",
+        ],
+    );
+    assert_eq!(code, 0, "the scrubbed file must load: {stderr}");
+
+    let landed = {
+        let s = Session::open(&recipient, &pp()).unwrap();
+        btctax_cli::return_inputs::get(s.conn(), 2024)
+            .unwrap()
+            .unwrap()
+    };
+
+    // ★ The classes, judged by the recipient's OWN packet boundary — the thing that decides whether
+    //   their copy refuses where the filer's did.
+    assert!(
+        matches!(
+            ReturnHeader::build(&landed, 2024).err(),
+            Some(btctax_core::tax::packet::HeaderError::Ssn(_))
+        ),
+        "the recipient's copy must still fail the packet boundary on an SSN, or it EXPORTS where the \
+         filer's return refused: {:?}",
+        ReturnHeader::build(&landed, 2024).err()
+    );
+    assert!(
+        matches!(
+            btctax_core::tax::packet::Ssn::canonical(&landed.header.taxpayer.ssn),
+            Err(SsnError::NotDigits(_))
+        ),
+        "NotDigits must survive transport as NotDigits, got {:?}",
+        landed.header.taxpayer.ssn
+    );
+    assert!(
+        !std::fs::read_to_string(&out).unwrap().contains('Z'),
+        "the filer's own offending character crossed the boundary into the shared FILE"
+    );
+    assert_eq!(
+        landed.header.ip_pin,
+        Some(String::new()),
+        "a present-but-empty IP PIN must NOT arrive as None — None builds Ok, Some(\"\") errs \
+         Missing, so collapsing them lets the copy export where the filer's could not"
+    );
+    for w in &landed.w2s {
+        // ★ `canonical_ein` is pub(crate) to btctax-core, so its RULE is applied here rather than
+        //   called: exactly nine digits after stripping separators, else unreadable. Asserting the
+        //   shape keeps this test at the CLI boundary where it belongs.
+        let digits = w
+            .ein
+            .as_deref()
+            .unwrap_or_default()
+            .chars()
+            .filter(|c| c.is_ascii_digit())
+            .count();
+        assert_ne!(
+            digits, 9,
+            "a malformed EIN arrived READABLE ({:?}) — §6413(c)'s 'more than one employer' becomes \
+             decidable on a fact the filer's data does not contain, and the copy claims a credit the \
+             original does not have",
+            w.ein
         );
     }
 }
