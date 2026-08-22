@@ -1320,42 +1320,61 @@ fn dca_events_2024(lots: usize) -> Vec<LedgerEvent> {
     evs
 }
 
-/// ★ P2a. 16 long-term legs on the full-return path: the refusal must be OURS — `CliError::Usage`
-/// naming the tax year, the leg count, the per-page capacity, that this is a btctax limitation, and a
-/// remedy that exists today — NOT the raw `FormsError::Overflow`, which names none of those.
+/// ★★ **This test asserted the OPPOSITE until P2b landed, and the inversion is the point.**
 ///
-/// B1 planted defect = the 16-leg household itself; delete the preflight and this reds on the error
-/// variant (`CliError::FormFill`, "16 rows exceed the 14-row capacity of a single Part II page").
+/// P2a shipped an honest overflow refusal here — correct while the full-return path could not
+/// paginate. P2b then made it paginate (`fill_full_return` → `fill_8949_full_with_map`, chunking into
+/// ⌈rows/grid⌉ copies with no ceiling), which turned that refusal into a FALSE one: the CLI rejected a
+/// packet the filler would have produced, reintroducing the exact total loss — exit 2, zero bytes,
+/// every form in the packet gone — that P2b existed to end, for the DCA population P2a itself named as
+/// the most exposed.
+///
+/// ★★★ **B3, demonstrated.** P2a (btctax-cli) and P2b (btctax-forms) were built in PARALLEL worktrees
+/// off one base. Each shipped a passing kill-test, and the two asserted contradictory things about
+/// this same 16-leg filer: the forms test that it PAGINATES, this one that it REFUSES. Both suites
+/// were green simultaneously, because each was scoped to one layer and neither could see the other.
+/// A per-range review is not a branch review, and a green suite per lane does not compose into a
+/// correct product.
+///
+/// B1 planted defect: restore the deleted preflight in `export_irs_pdf` and this reds at the
+/// `expect()` with `CliError::Usage`.
 #[test]
-fn a_full_return_with_more_8949_legs_than_a_page_holds_refuses_with_year_capacity_and_remedy() {
+fn a_full_return_with_more_8949_legs_than_a_page_holds_now_files_on_multiple_copies() {
     let (_d, vault, out) = full_return_vault(&dca_events_2024(16), |_ri| {});
 
-    let err = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
-        .expect_err("16 legs exceed the 14-row Form 8949 page and cannot be filled");
+    // The premise: this fixture really does exceed one page's grid. Without it the test proves
+    // nothing — it would pass on a 1-leg household that never reaches the pagination path at all.
+    assert_eq!(
+        btctax_forms::Form8949Map::ty2024().rows_per_page,
+        14,
+        "the TY2024 grid — the capacity 16 legs must exceed"
+    );
 
-    let msg = match &err {
-        CliError::Usage(m) => m.clone(),
-        other => panic!(
-            "the overflow must be OUR named refusal (CliError::Usage), not the raw forms error: \
-             {other:?}"
-        ),
-    };
-    assert!(msg.contains("2024"), "names the tax year: {msg}");
-    assert!(msg.contains("Form 8949"), "names the form: {msg}");
-    assert!(msg.contains("16"), "names how many legs there are: {msg}");
-    assert!(msg.contains("14"), "names the per-page capacity: {msg}");
-    assert!(
-        msg.contains("btctax cannot yet"),
-        "says this is a btctax limitation, not the filer's error: {msg}"
-    );
-    assert!(
-        msg.contains("report --tax-year 2024") && msg.contains("export-snapshot"),
-        "names a remedy that exists today — every figure via `report`, the per-leg rows via the \
-         form8949.csv `export-snapshot` writes: {msg}"
-    );
-    assert!(
-        wrote_nothing(out.path()),
-        "a refused export leaves out_dir untouched — the packet is all-or-nothing"
+    cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
+        .expect("★ 16 legs must FILE now that the full-return 8949 paginates (P2b)");
+
+    // ★ The full-return packet writes SEQUENCE-PREFIXED names (`12A_f8949.pdf`) so a slice run and a
+    // packet run into one directory cannot interleave; find it by stem rather than pinning the
+    // prefix, which is the attachment sequence and not this test's subject.
+    let f8949_path = std::fs::read_dir(out.path())
+        .expect("out_dir exists")
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .find(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.ends_with("_f8949.pdf"))
+        })
+        .expect("the packet must contain a Form 8949, not be lost to a false refusal");
+    let f8949 = std::fs::read(&f8949_path).unwrap();
+    assert!(f8949.starts_with(b"%PDF"));
+
+    use btctax_forms::testonly::*;
+    let doc = load(&f8949).unwrap();
+    assert_eq!(
+        doc.get_pages().len(),
+        4,
+        "16 legs ⇒ 2 copies × 2 pages — the 15th and 16th legs have somewhere to print"
     );
 }
 
