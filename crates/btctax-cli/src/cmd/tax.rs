@@ -550,8 +550,47 @@ pub fn report_tax_year(
         if let Some(prev_p) = prior_profile {
             let prior_out = compute_tax_year(&events, &state, year - 1, Some(&prev_p), &tables);
             if let TaxOutcome::Computed(prev) = prior_out {
+                // ★★★ F1 (phase-1 seam review). WHICH figure is the authority on last year's
+                // carryforward-out? Until N1 there was only one answer, so this compared against the
+                // frozen delta engine's flat "loss − $3,000". N1 made the §1212(b)(2)(B) worksheet the
+                // correct figure on a full-return year, and the two DIVERGE exactly on the floor
+                // household the worksheet exists for: L4 carries $20,000, the flat rule says $17,000.
+                //
+                // The seam: N1's advisory tells the filer to enter $20,000, and M4 then told them
+                // "verify your prior return" — an instrument DISPUTING the figure the product itself
+                // instructed them to enter, phrased as an audit of it. A filer who obeys the audit
+                // "corrects" to $17,000 and permanently forfeits $3,000 of capital loss. Neither lane
+                // could see it: nobody touched M4, so the base tree was the second lane.
+                //
+                // ★ The fix is here, at the CALLER, and not only because `compute.rs` is frozen:
+                // `carryforward_consistency` is a pure comparison, and CHOOSING the authority is the
+                // caller's job. State the mechanism and let it decide — when last year has full-return
+                // inputs and its absolute return computes, the worksheet figure IS last year's
+                // carryforward-out; otherwise fall back to the flat one, which remains correct for a
+                // crypto-slice year that never had a worksheet.
+                let worksheet_out = match (
+                    crate::return_inputs::get(s.conn(), year - 1)?,
+                    fr_tables.full_return_for(year - 1),
+                    tables.table_for(year - 1),
+                ) {
+                    (Some(ri_prev), Some(params), Some(table)) => {
+                        let ar_prev = btctax_core::assemble_absolute(
+                            &ri_prev,
+                            &state,
+                            params,
+                            table,
+                            year - 1,
+                        );
+                        // A prior year whose ABSOLUTE return refuses has no worksheet figure to be
+                        // the authority — fall back rather than quoting a number off a refused return.
+                        btctax_core::screen_absolute(&ri_prev, &ar_prev, params, &state, year - 1)
+                            .is_none()
+                            .then_some(ar_prev.capital_loss_carryforward_out)
+                    }
+                    _ => None,
+                };
                 carryforward_consistency(
-                    Some(&prev.carryforward_out),
+                    Some(worksheet_out.as_ref().unwrap_or(&prev.carryforward_out)),
                     &p.capital_loss_carryforward_in,
                 )
             } else {

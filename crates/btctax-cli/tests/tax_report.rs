@@ -2414,3 +2414,120 @@ fn a_gift_within_its_ceiling_prints_no_charitable_carryover_line() {
         "a gift within its ceiling creates no carryover, so nothing may be printed: {dual}"
     );
 }
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// ★★★ F1 (phase-1 seam review) — M4 must not dispute the figure N1's advisory told the filer to
+// enter. Until N1 there was one answer for "last year's carryforward-out"; N1 made the
+// §1212(b)(2)(B) worksheet the correct one on a full-return year, and the two DIVERGE exactly on
+// the floor household the worksheet exists for. Nobody touched M4, so the base tree was the second
+// lane and no lane's mutations could see the contradiction.
+
+/// A TY2024 vault holding one long-term crypto LOSS of $20,000 (buy 1 BTC @ $60k in 2022, sell @
+/// $40k in 2024) — lane C's L4 shape.
+fn write_lt_loss_2024(dir: &Path) -> PathBuf {
+    let p = dir.join("coinbase_lt_loss24.csv");
+    std::fs::write(
+        &p,
+        "\r\nTransactions\r\nUser,00000000-0000-0000-0000-000000000000\r\n\
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,\
+Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address\r\n\
+lt-buy,2022-01-01 12:00:00 UTC,Buy,BTC,1.00000000,USD,60000.00,60000.00,60000.00,0.00,,,\r\n\
+lt-sell,2024-06-15 12:00:00 UTC,Sell,BTC,1.00000000,USD,40000.00,40000.00,40000.00,0.00,,,\r\n",
+    )
+    .unwrap();
+    p
+}
+
+/// Build the F1 scenario and return the rendered TY2025 advisory, if any.
+///
+/// 2024 is a `ReturnInputs` (full-return) year with NO wages and a $20,000 LT loss ⇒ taxable income
+/// floors at zero, NOTHING of the §1211(b) $3,000 allowance is absorbed, and the worksheet carries
+/// the WHOLE $20,000. The frozen delta engine still says $17,000 and structurally cannot say
+/// otherwise. 2025 declares `carryforward_in.long = declared`.
+fn f1_advisory_for_declared_carryforward(declared: rust_decimal::Decimal) -> Option<String> {
+    use btctax_core::tax::return_inputs::ReturnInputs;
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_loss_2024(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::set(
+            s.conn(),
+            2024,
+            &btctax_core::tax::testonly::answered(ReturnInputs {
+                filing_status: FilingStatus::Single,
+                header: btctax_core::tax::testonly::not_a_dependent(),
+                ..Default::default() // no wages — this is what puts TI at the floor
+            }),
+        )
+        .unwrap();
+        s.save().unwrap();
+    }
+    cmd::tax::set_profile(
+        &vault,
+        &pp(),
+        2025,
+        TaxProfile {
+            filing_status: btctax_core::FilingStatus::Single,
+            ordinary_taxable_income: dec!(100000),
+            magi_excluding_crypto: dec!(100000),
+            qualified_dividends_and_other_pref_income: dec!(0),
+            other_net_capital_gain: dec!(0),
+            capital_loss_carryforward_in: Carryforward {
+                short: dec!(0),
+                long: declared,
+            },
+            w2_ss_wages: dec!(0),
+            w2_medicare_wages: dec!(0),
+            schedule_c_expenses: dec!(0),
+        },
+        false,
+    )
+    .unwrap();
+    let TaxYearReport { advisory, .. } =
+        cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+    advisory
+}
+
+/// ★★★ **F1, the kill-test.** The filer obeys the N1 advisory and carries the WORKSHEET figure
+/// ($20,000). M4 must be SILENT.
+///
+/// Before the fix M4 compared against the frozen engine's flat $17,000 and fired "verify your prior
+/// return" — an instrument disputing the figure the product itself instructed them to enter, phrased
+/// as an audit of it. A filer who obeys the audit "corrects" to $17,000 and permanently forfeits
+/// $3,000 of capital loss.
+///
+/// B1 planted defect: pass `&prev.carryforward_out` (the flat figure) instead of the worksheet
+/// authority in `cmd/tax.rs`, and this reds with "does not match prior-year carryforward_out".
+#[test]
+fn m4_is_silent_when_the_filer_carries_the_worksheet_figure_n1_told_them_to() {
+    // The premise: the two figures really do diverge here, or this test proves nothing.
+    let flat = f1_advisory_for_declared_carryforward(dec!(17000));
+    assert!(
+        flat.is_some_and(|a| a.contains("does not match")),
+        "★ This assertion has TWO possible causes and they are not the same defect — do not assume \
+         the first one. Either (a) `cmd/tax.rs` reverted to comparing against the frozen engine's \
+         FLAT figure, so $17,000 now matches and F1 is back; or (b) the fixture stopped being the \
+         floor case, so the worksheet and the flat rule agree and this test proves nothing either \
+         way. Check the M4 call site in `cmd/tax.rs` FIRST — (a) is the regression this test exists \
+         to catch, and it is the one that silently forfeits $3,000 of a filer's capital loss."
+    );
+
+    let advisory = f1_advisory_for_declared_carryforward(dec!(20000));
+    assert_eq!(
+        advisory, None,
+        "★ M4 must not dispute the §1212(b)(2)(B) worksheet figure that N1's own advisory \
+         instructed the filer to carry"
+    );
+}
+
+/// ★ The other half: M4 must still DISPUTE an arbitrary figure. A consistency check that went silent
+/// on everything would satisfy the test above and be worthless.
+#[test]
+fn m4_still_disputes_a_carryforward_that_matches_neither_authority() {
+    let advisory = f1_advisory_for_declared_carryforward(dec!(19000));
+    assert!(
+        advisory.is_some_and(|a| a.contains("does not match")),
+        "★ M4 must still fire on a figure that is neither the worksheet's nor the flat rule's"
+    );
+}
