@@ -250,6 +250,13 @@ pub fn kitchen_sink_household() -> (ReturnInputs, LedgerState) {
         // or `Some(true)` REFUSES the year, because a restricted gift's §170 deduction is smaller than
         // the full fair market value btctax computes. "No strings" is the ordinary case.
         donations_had_restrictions: Some(false),
+        // ★★ §170(f)(8) — the contemporaneous written acknowledgment, asked ONCE for the whole return.
+        // This household itemizes and both its gifts (a $5,000 cash gift and a crypto donation) are far
+        // over $250, so the answer is MANDATORY: unanswered or `Some(false)` REFUSES the year, because
+        // §170(f)(8)(A) makes the acknowledgment a condition of the deduction itself. Holding one is
+        // the ordinary case. ★ NOT covered by `answer_all_live_declarations`, which walks the
+        // DECLARATION registry — this is a class-(B) skippable, mandatory only in `screen_absolute`.
+        charitable_cwa_obtained: Some(true),
         // §G-22/B11 — the scope attestation. ANSWERED, never defaulted: `None` refuses, and a fixture
         // that let it default would be re-asserting the silence the question exists to break.
         other_out_of_scope_income: Some(false),

@@ -55,6 +55,9 @@ foreign_accounts = false
 foreign_trust = false
 foreign_country_names = ""
 donations_had_restrictions = false
+# §170(f)(8) — inert on this return (it claims no charitable deduction), but stated rather than left
+# blank so the fixture never depends on the gate's scoping to stay computable.
+charitable_cwa_obtained = true
 amt_depreciation_same_as_regular = true
 excluded_puerto_rico_income = "0"
 form_2555_line45 = "0"

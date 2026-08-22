@@ -112,6 +112,12 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::DonationRestrictionsUnresolved => {
             vec![skip(btctax_core::tax::questions::SkippableId::DonationsHadRestrictions)]
         }
+        // ★ §170(f)(8) — both legs (unanswered and "no, I don't hold one") point at the one
+        //   skippable that decides them. Same shape as §G-21 directly above: offered always,
+        //   mandatory only where `screen_absolute` can see the deduction is actually claimed.
+        R::CharitableCwaUnresolved => {
+            vec![skip(btctax_core::tax::questions::SkippableId::CharitableCwaObtained)]
+        }
         R::NonCryptoNoncashGift => vec![Anchor::Section(SectionId::ScheduleACharitable)],
 
         // ── W-2 sections (§7 lines 515-517). `SingleEmployerExcessSs` is an in-form field, so W2s (I-4). ──

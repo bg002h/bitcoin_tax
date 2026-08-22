@@ -2163,6 +2163,81 @@ pub fn screen_absolute(
         }
     }
 
+    // ★★★ §170(f)(8) — THE CONTEMPORANEOUS WRITTEN ACKNOWLEDGMENT (P4 / adjudication D4).
+    //
+    // Two conditions, both required, and BOTH are things liveness cannot see — which is why this sits
+    // here and not in the skippable registry:
+    //
+    //   (i)  the return actually CLAIMS a current-year charitable deduction. `deduction_is_itemized`
+    //        is the real §63(e) election (a standard-deduction filer claims no §170 deduction, so
+    //        §170(f)(8) conditions nothing for them), and lines 11 + 12 are the §170(b)-limited
+    //        amounts actually claimed — a ceiling-zeroed year claims nothing either. ★ Line 13, the
+    //        prior-year CARRYOVER, is deliberately EXCLUDED: this year's answer is about THIS year's
+    //        gifts, and the carryover year's CWA deadline passed with that year's return (the same
+    //        scoping `apply_carryover_writeback` already states).
+    //
+    //   (ii) at least one SINGLE contribution reaches $250. i1040sca: *"In figuring whether a gift is
+    //        $250 or more, don't combine separate donations."* Per contribution, NEVER the year
+    //        aggregate — a filer whose every gift is under $250 is never asked. Crypto donations come
+    //        from the ledger (one `Removal` = one contribution, measured at the FMV contributed);
+    //        non-crypto gifts are one `CharitableGift` entry each.
+    //
+    // ★★ WHY THIS REFUSES RATHER THAN ADVISES, and the line that stops it generalising:
+    //    §170(f)(8)(C) makes an acknowledgment contemporaneous only if obtained by the EARLIER of
+    //    filing or the due date, so **filing itself extinguishes the cure**. Refuse where filing
+    //    extinguishes the cure; advise where the record can be assembled later — which is why
+    //    §170(f)(17) bank-record substantiation for small cash gifts is NOT gated here by analogy.
+    let cwa_claimed = ar.schedule_a.as_ref().map_or(Usd::ZERO, |a| {
+        a.charitable_cash_11 + a.charitable_noncash_12
+    });
+    if ar.deduction_is_itemized && cwa_claimed > Usd::ZERO {
+        let largest_gift = crate::forms::max_single_donation_contribution(state, year).max(
+            ri.schedule_a
+                .as_ref()
+                .and_then(|a| a.charitable.iter().map(|g| g.amount).max())
+                .unwrap_or(Usd::ZERO),
+        );
+        if largest_gift >= crate::tax::tables::CWA_SUBSTANTIATION_THRESHOLD {
+            match ri.charitable_cwa_obtained {
+                None => {
+                    return refusal(
+                        RefuseReason::CharitableCwaUnresolved,
+                        "this return claims a charitable deduction and at least one of your gifts was \
+                         $250 or more, so Schedule A lines 11 and 12 send you to the instructions: \
+                         \"You can deduct a gift of $250 or more only if you have a contemporaneous \
+                         written acknowledgment from the charitable organization.\" §170(f)(8)(A) \
+                         makes that a condition of the deduction itself, and btctax has not been told \
+                         whether you have one. It will not claim a deduction the statute may deny. \
+                         ★ YOU CAN STILL GET ONE — the acknowledgment counts as contemporaneous if \
+                         you obtain it \"by the date you file your return or the due date (including \
+                         extensions) for filing your return, whichever is earlier\", so ask the \
+                         charity now; don't attach it to the return, keep it for your records. Run \
+                         `btctax income answer`",
+                    );
+                }
+                Some(false) => {
+                    return refusal(
+                        RefuseReason::CharitableCwaUnresolved,
+                        "you told btctax you do NOT hold a contemporaneous written acknowledgment for \
+                         every gift of $250 or more that this return deducts. §170(f)(8)(A): \"No \
+                         deduction shall be allowed … for any contribution of $250 or more unless the \
+                         taxpayer substantiates the contribution by a contemporaneous written \
+                         acknowledgment\" — so the deduction as computed is too large, and filing it \
+                         would understate your tax. ★ THE CURE IS STILL OPEN, but only until you \
+                         file: §170(f)(8)(C) counts an acknowledgment as contemporaneous if you get \
+                         it \"by the date you file your return or the due date (including extensions) \
+                         for filing your return, whichever is earlier\". Ask each charity for one \
+                         showing the amount of money and a description (but not the value) of any \
+                         property, and whether it gave you goods or services in return. Then answer \
+                         yes and re-run. If a charity will not provide one, remove that gift from the \
+                         deduction",
+                    );
+                }
+                Some(true) => {}
+            }
+        }
+    }
+
     // (a) §199A — the sub-schedules of Form 8995-A that btctax does not fill, and the two answers it
     //     needs before it can choose between Form 8995 and Form 8995-A at all.
     //
@@ -2669,6 +2744,9 @@ mod tests {
             let ri = ReturnInputs {
                 filing_status: FilingStatus::Single,
                 donations_had_restrictions: answer,
+                // §170(f)(8) answered NEUTRAL so this test keeps testing the §G-21 RESTRICTION
+                // question. The donation here is well over $250, so the CWA gate is genuinely live.
+                charitable_cwa_obtained: Some(true),
                 // Force the itemized election so the §170 deduction is genuinely claimed.
                 schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
                     salt_state_estimated_payments: dec!(10000),
@@ -5706,6 +5784,9 @@ mod tests {
                 }],
                 ..Default::default()
             }),
+            // §170(f)(8) neutral — a $30,000 gift is over $250, so the CWA gate is live on this
+            // itemizer. Answered so the assertion below still measures the AMT screen.
+            charitable_cwa_obtained: Some(true),
             ..Default::default()
         };
 
@@ -6675,6 +6756,9 @@ mod tests {
             let ri = ReturnInputs {
                 filing_status: FilingStatus::Single,
                 donations_had_restrictions: answer,
+                // §170(f)(8) neutral — the $50,000 contribution is over $250, so the CWA gate IS
+                // live here; this test is about the §G-21 8283-attachment band, not about it.
+                charitable_cwa_obtained: Some(true),
                 schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
                     mortgage_interest_1098: dec!(20000),
                     ..Default::default()
@@ -6716,6 +6800,8 @@ mod tests {
             let ri = ReturnInputs {
                 filing_status: FilingStatus::Single,
                 donations_had_restrictions: answer,
+                // §170(f)(8) neutral — this test is about the §G-21 restriction question.
+                charitable_cwa_obtained: Some(true),
                 schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
                     mortgage_interest_1098: dec!(20000),
                     ..Default::default()
@@ -6747,6 +6833,210 @@ mod tests {
             Some(RefuseReason::DonationRestrictionsUnresolved),
             "…and an attached Section B still prints 5a/5b/5c, which btctax may not answer"
         );
+    }
+
+    /// ★★★ **P4 / §170(f)(8) — THE CONTEMPORANEOUS WRITTEN ACKNOWLEDGMENT TERNARY.**
+    ///
+    /// unanswered ⇒ refuse, `Some(false)` ⇒ refuse, `Some(true)` ⇒ proceed — on a return that
+    /// itemizes and claims a §170 deduction with at least one single gift of $250 or more.
+    ///
+    /// **B1 mutations, each observed RED before the fix landed:**
+    /// - delete the `None` arm ⇒ the unanswered row reds with `None`: btctax silently claims a
+    ///   deduction §170(f)(8)(A) may deny, and the filer's chance to cure it dies at filing;
+    /// - delete the `Some(false)` arm ⇒ the "no acknowledgment" row reds the same way, which is the
+    ///   worse half — the filer TOLD us and we filed it anyway.
+    #[test]
+    fn the_cwa_question_refuses_unanswered_and_refuses_no_but_proceeds_on_yes() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let screened = |answer: Option<bool>| {
+            let ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                donations_had_restrictions: Some(false),
+                charitable_cwa_obtained: answer,
+                schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
+                    salt_state_estimated_payments: dec!(10000),
+                    mortgage_interest_1098: dec!(20000),
+                    ..Default::default()
+                }),
+                w2s: vec![w2(
+                    Owner::Taxpayer,
+                    dec!(200000),
+                    dec!(168600),
+                    dec!(200000),
+                )],
+                ..Default::default()
+            };
+            let st = donation_state(dec!(4000));
+            let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+            assert!(ar.deduction_is_itemized, "the fixture must itemize");
+            screen_absolute(&ri, &ar, &p, &st, 2024).map(|r| r.reason)
+        };
+        assert_eq!(
+            screened(None),
+            Some(RefuseReason::CharitableCwaUnresolved),
+            "unanswered ⇒ refuse: §170(f)(8)(A) conditions the deduction on the acknowledgment, and \
+             filing is the moment the cure expires"
+        );
+        assert_eq!(
+            screened(Some(false)),
+            Some(RefuseReason::CharitableCwaUnresolved),
+            "\"no, I don't hold one\" ⇒ refuse: the deduction as computed is disallowed by statute"
+        );
+        assert_eq!(screened(Some(true)), None, "holding one ⇒ file");
+    }
+
+    /// ★★★ **P4 — THE SCOPING, which is how the owner's \"too aggressive with refusals\" correction is
+    /// honoured STRUCTURALLY rather than by wording.** Three filers must NEVER be asked, and each
+    /// failing row is a real over-refusal a live filer would hit:
+    ///
+    /// 1. **the standard-deduction filer.** §170(f)(8) conditions a *deduction*; they claim none, so
+    ///    silence forgoes nothing and asserts nothing.
+    /// 2. **the filer whose every gift is under $250.** i1040sca: *"In figuring whether a gift is $250
+    ///    or more, don't combine separate donations."* PER CONTRIBUTION — a year AGGREGATE of $400
+    ///    across two $200 gifts poses no question.
+    /// 3. **the itemizer whose §170(b) ceiling zeroes the charitable deduction entirely** — they claim
+    ///    nothing either, so there is nothing for the statute to disallow.
+    ///
+    /// **B1 mutations, each observed RED:**
+    /// - drop the `deduction_is_itemized` conjunct ⇒ row 1 reds;
+    /// - key the threshold on the year AGGREGATE (`year_donation_deduction`) instead of the largest
+    ///   SINGLE contribution ⇒ row 2 reds — the exact defect the adjudication names;
+    /// - drop the `cwa_claimed > 0` conjunct ⇒ row 3 reds.
+    #[test]
+    fn the_cwa_question_is_never_posed_to_a_standard_deduction_or_small_gift_or_ceiling_zeroed_filer(
+    ) {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let run = |sched_a: Option<crate::tax::return_inputs::ScheduleAInputs>,
+                   wages: Usd,
+                   st: LedgerState| {
+            let ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                donations_had_restrictions: Some(false),
+                charitable_cwa_obtained: None, // NEVER ANSWERED — the whole point
+                schedule_a: sched_a,
+                w2s: vec![w2(Owner::Taxpayer, wages, wages, wages)],
+                ..Default::default()
+            };
+            let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+            (
+                ar.deduction_is_itemized,
+                screen_absolute(&ri, &ar, &p, &st, 2024).map(|r| r.reason),
+            )
+        };
+
+        // ★★★ (1) THE STANDARD-DEDUCTION FILER, and the fixture has to be built with care or it
+        //     proves nothing. A return with NO `schedule_a` at all leaves `ar.schedule_a` = `None`,
+        //     so lines 11/12 are $0 and the gate is already shut by the CLAIMED-amount conjunct —
+        //     dropping `deduction_is_itemized` would then survive, and did (B1 caught it). This
+        //     fixture therefore HAS a Schedule A carrying a $5,000 cash gift — so
+        //     `charitable_cash_11` is genuinely non-zero — but a $5,000 itemized total loses to the
+        //     $14,600 standard deduction, which makes `deduction_is_itemized` the ONLY thing
+        //     standing between this filer and a refusal.
+        use crate::tax::return_inputs::{CharitableClass, CharitableGift};
+        let loses_to_standard = crate::tax::return_inputs::ScheduleAInputs {
+            charitable: vec![CharitableGift {
+                class: CharitableClass::Cash60,
+                amount: dec!(5000),
+            }],
+            ..Default::default()
+        };
+        let (itemized, reason) = run(Some(loses_to_standard), dec!(200000), empty_ledger());
+        assert!(!itemized, "fixture 1 must take the standard deduction");
+        assert_eq!(
+            reason, None,
+            "a standard-deduction filer claims no §170 deduction, so §170(f)(8) conditions nothing"
+        );
+
+        // (2) An ITEMIZER whose gifts are all under $250 — two $200 cash gifts, a $400 aggregate.
+        //     Per contribution, so the question is never posed.
+        let small = crate::tax::return_inputs::ScheduleAInputs {
+            salt_state_estimated_payments: dec!(10000),
+            mortgage_interest_1098: dec!(20000),
+            charitable: vec![
+                CharitableGift {
+                    class: CharitableClass::Cash60,
+                    amount: dec!(200),
+                },
+                CharitableGift {
+                    class: CharitableClass::Cash60,
+                    amount: dec!(200),
+                },
+            ],
+            ..Default::default()
+        };
+        let (itemized, reason) = run(Some(small), dec!(200000), empty_ledger());
+        assert!(itemized, "fixture 2 must itemize");
+        assert_eq!(
+            reason, None,
+            "two $200 gifts are two contributions, not one $400 one — i1040sca says not to combine \
+             them, so no CWA question exists"
+        );
+
+        // (3) An ITEMIZER (on mortgage interest) whose §170(b) ceiling zeroes the charitable
+        //     deduction: $0 of AGI-based ceiling ⇒ lines 11 and 12 are both $0.
+        let zeroed = crate::tax::return_inputs::ScheduleAInputs {
+            mortgage_interest_1098: dec!(20000),
+            ..Default::default()
+        };
+        let (itemized, reason) = run(Some(zeroed), Usd::ZERO, donation_state(dec!(50000)));
+        assert!(
+            itemized,
+            "fixture 3 must itemize on the mortgage interest alone"
+        );
+        assert_eq!(
+            reason, None,
+            "the §170(b) ceiling allows $0, so nothing is claimed and nothing can be disallowed"
+        );
+    }
+
+    /// ★★ **P4 — the refusal must carry the DEADLINE, because the deadline is the whole reason this
+    /// is a gate and not an advisory.** A filer who reads "you need an acknowledgment" and files
+    /// anyway has destroyed the cure; a filer who reads "you can still get one, until you file" has
+    /// not. §170(f)(8)(C), quoted through i1040sca.
+    ///
+    /// B1 mutation: drop the "whichever is earlier" deadline sentence from either detail and the
+    /// matching assertion reds by name.
+    #[test]
+    fn both_cwa_refusals_quote_the_still_curable_deadline() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        for answer in [None, Some(false)] {
+            let ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                donations_had_restrictions: Some(false),
+                charitable_cwa_obtained: answer,
+                schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
+                    salt_state_estimated_payments: dec!(10000),
+                    mortgage_interest_1098: dec!(20000),
+                    ..Default::default()
+                }),
+                w2s: vec![w2(
+                    Owner::Taxpayer,
+                    dec!(200000),
+                    dec!(168600),
+                    dec!(200000),
+                )],
+                ..Default::default()
+            };
+            let st = donation_state(dec!(4000));
+            let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+            let r = screen_absolute(&ri, &ar, &p, &st, 2024)
+                .unwrap_or_else(|| panic!("{answer:?} must refuse"));
+            let d = r.detail.to_ascii_lowercase();
+            for phrase in [
+                "by the date you file your return or the due date (including extensions)",
+                "whichever is earlier",
+                "§170(f)(8)",
+            ] {
+                assert!(
+                    d.contains(phrase),
+                    "the {answer:?} refusal must quote {phrase:?}; got: {}",
+                    r.detail
+                );
+            }
+        }
     }
 
     /// ★★★ **PRE-MERGE I-2 — a REGRESSION the r3 fold itself introduced, and a laundering path.**

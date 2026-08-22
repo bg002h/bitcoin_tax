@@ -794,6 +794,42 @@ pub struct ReturnInputs {
     /// gift's deduction, so the honest move is to send that year's 8283 to be completed by hand.
     #[serde(default)]
     pub donations_had_restrictions: Option<bool>,
+    /// ★★★ **§170(f)(8) — the CONTEMPORANEOUS WRITTEN ACKNOWLEDGMENT**, asked as one return-level
+    /// universal (the [`Self::donations_had_restrictions`] shape, and for the same structural reason).
+    ///
+    /// Schedule A lines 11 and 12 both print *"If you made any gift of $250 or more, see
+    /// instructions"* on the form's face, and the first thing those instructions say is:
+    ///
+    /// > *"Gifts of $250 or more. You can deduct a gift of $250 or more only if you have a
+    /// > contemporaneous written acknowledgment from the charitable organization showing the
+    /// > information in (1) and (2) next."*
+    /// >
+    /// > *"In figuring whether a gift is $250 or more, don't combine separate donations."*
+    /// >
+    /// > *"To be contemporaneous, you must get the written acknowledgment from the charitable
+    /// > organization by the date you file your return or the due date (including extensions) for
+    /// > filing your return, whichever is earlier. Don't attach the contemporaneous written
+    /// > acknowledgment to your return. Instead, keep it for your records."*
+    ///
+    /// §170(f)(8)(A) is a strict statutory precondition of ALLOWABILITY, not a recordkeeping nicety:
+    /// *"No deduction shall be allowed … for any contribution of $250 or more unless the taxpayer
+    /// substantiates the contribution by a contemporaneous written acknowledgment."*
+    ///
+    /// ★★ **FILING IS THE POINT OF NO RETURN**, which is what makes this a refusal rather than an
+    /// advisory. §170(f)(8)(C) defines contemporaneous by the **earlier of** filing or the due date,
+    /// so a filer who exports and files without a CWA has permanently extinguished the cure — a
+    /// post-filing acknowledgment fails (C) by its terms (*Durden v. Comm'r*, T.C. Memo. 2012-140).
+    /// The sharp line that keeps this from generalising: **refuse where filing itself extinguishes the
+    /// cure; advise where the record can be assembled later.** §170(f)(17) bank-record substantiation
+    /// for small cash gifts has no filing-linked deadline and is deliberately NOT gated.
+    ///
+    /// ★ Class (B) HERE and mandatory in [`crate::tax::return_1040::screen_absolute`], because
+    /// liveness sees only `ReturnInputs`: whether the return itemizes is the computed §63(e) election,
+    /// and the donations are in the LEDGER. `None` while live ⇒ refuse; `Some(false)` ⇒ refuse;
+    /// `Some(true)` ⇒ proceed. A standard-deduction filer, or one whose every gift is under $250, is
+    /// never asked — silence there forgoes nothing and asserts nothing.
+    #[serde(default)]
+    pub charitable_cwa_obtained: Option<bool>,
     #[serde(default)]
     pub dual_status_alien: Option<bool>,
 
@@ -966,6 +1002,9 @@ impl Default for ReturnInputs {
             foreign_country_names: String::new(),
             fbar_filing_required: None,
             donations_had_restrictions: None,
+            // §170(f)(8) — `None` = never asked. On a return that claims a §170 deduction with a
+            // ≥$250 gift that REFUSES (`screen_absolute`), and a default may not answer it.
+            charitable_cwa_obtained: None,
             dual_status_alien: None,
         }
     }

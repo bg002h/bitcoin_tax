@@ -276,7 +276,7 @@ mod tests {
     /// entry; the `FieldId ↔ SkippableId` map stays TOTAL over all 5 skippables (SALT → `SaSaltUseSalesTax`);
     /// and the spouse-gated liveness edge holds.
     #[test]
-    fn skippables_section_delegates_fourteen_skippables_and_the_map_is_total() {
+    fn skippables_section_delegates_every_non_salt_skippable_and_the_map_is_total() {
         let skips = section(SectionId::Skippables);
 
         // SALT election is a Schedule-A Field (Task 5), NOT a Skippables Field.
@@ -288,13 +288,18 @@ mod tests {
             "the SALT election is Schedule-A-owned, not a Skippables Field"
         );
 
-        // Exactly the fourteen non-SALT skippables.
+        // ★ EXACTLY the non-SALT skippables — DERIVED from the registry, not a hand-count, so a new
+        //   `SKIPPABLE_QUESTIONS` entry that never reached this section fails HERE by name rather
+        //   than by an off-by-one on a literal somebody has to remember to bump.
         let ids: Vec<FieldId> = skips.fields.iter().map(|f| f.id).collect();
+        let expected_here: Vec<FieldId> = SKIPPABLE_QUESTIONS
+            .iter()
+            .map(|s| skippable_to_field(s.id))
+            .filter(|f| *f != FieldId::SaSaltUseSalesTax)
+            .collect();
         assert_eq!(
-            ids.len(),
-            14,
-            "blind ×2 + DOB ×2 + DOD ×2 + FBAR + the §G-9 death gates ×2 + Schedule C I/J + \
-             the §G-21 donation-restrictions universal + the §G-28 SSTB and patron checkboxes"
+            ids, expected_here,
+            "the Skippables section must hold exactly the non-SALT skippables, in registry order"
         );
         for expected in [
             FieldId::BlindTaxpayer,
@@ -311,6 +316,7 @@ mod tests {
             FieldId::DonationsHadRestrictions,
             FieldId::ScheduleCIsSstb,
             FieldId::ScheduleCIsCooperativePatron,
+            FieldId::CharitableCwaObtained,
         ] {
             assert!(
                 ids.contains(&expected),

@@ -9,6 +9,10 @@ amt_depreciation_same_as_regular = true
 capital_loss_carryforward_in_provenance = "user"
 charitable_carryover_in = []
 charitable_carryover_in_provenance = "user"
+# §170(f)(8) — this household holds a contemporaneous written acknowledgment for every gift of $250
+# or more that this return deducts. ★ DELETING THIS LINE REFUSES THE RETURN (CharitableCwaUnresolved),
+# and so does setting it `false`: the crypto donation below is far over $250 and the return itemizes.
+charitable_cwa_obtained = true
 donations_had_restrictions = false
 dual_status_alien = false
 excluded_puerto_rico_income = "0"

@@ -1313,11 +1313,17 @@ pub struct ScheduleALines {
     pub line8e: Usd,
     /// L10 — add 8e and 9 (9 blank) ⇒ `= line8e`.
     pub line10: Usd,
-    /// L11 — gifts by cash or check.
+    /// L11 — "Gifts by cash or check. **If you made any gift of $250 or more, see instructions**"
+    ///
+    /// ★ The second sentence had been paraphrased away, and it is the whole §170(f)(8) gate: the
+    /// instruction it points at is *"You can deduct a gift of $250 or more only if you have a
+    /// contemporaneous written acknowledgment from the charitable organization"*. A line's text is
+    /// what tells the reader a question exists.
     pub line11: Usd,
-    /// L12 — gifts other than by cash or check (includes crypto donations; Form 8283 over $500).
+    /// L12 — "Other than by cash or check. **If you made any gift of $250 or more, see instructions.
+    /// You must attach Form 8283 if over $500**" (this is where crypto donations land)
     pub line12: Usd,
-    /// L13 — carryover from a prior year.
+    /// L13 — "Carryover from prior year"
     pub line13: Usd,
     /// L14 — add **printed** 11, 12 and 13.
     pub line14: Usd,

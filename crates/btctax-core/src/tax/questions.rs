@@ -737,6 +737,11 @@ pub enum SkippableId {
     /// cooperative? (§G-28/B1b.) Unlike every other question here this one decides **which form is
     /// filed**, at any level of income.
     ScheduleCIsCooperativePatron,
+    /// ★★★ **§170(f)(8) — the CONTEMPORANEOUS WRITTEN ACKNOWLEDGMENT**, Schedule A lines 11/12's own
+    /// *"If you made any gift of $250 or more, see instructions"*. Asked as one return-level
+    /// universal, exactly like [`Self::DonationsHadRestrictions`]; the MANDATORY half lives in
+    /// `screen_absolute`, which has the ledger AND the computed §63(e) itemize election.
+    CharitableCwaObtained,
 }
 
 /// The value shape of a [`SkippableQuestion`] — a yes/no answer, or a calendar date.
@@ -1132,6 +1137,48 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
         },
         get_date: |_ri| None,
         set_date: |_ri, _v| {},
+    },
+    // ★★★ §170(f)(8) — THE CONTEMPORANEOUS WRITTEN ACKNOWLEDGMENT. Index 15; appended at the END for
+    //     the array-index reason stated above.
+    //
+    // ★★ THE PROMPT MUST BE ANSWERABLE **YES** BY A FILER WITH NO ≥$250 GIFT. i1040sca: *"In figuring
+    //    whether a gift is $250 or more, don't combine separate donations"* — so a filer who gave $25
+    //    a week has no ≥$250 gift at all and answers yes vacuously. That matters because btctax holds
+    //    non-crypto gifts as one amount per entry, which may itself be a roll-up of small gifts: the
+    //    gate can over-ASK, but the question must never over-CLAIM.
+    SkippableQuestion {
+        id: SkippableId::CharitableCwaObtained,
+        durability: Durability::PerYear,
+        prompt: "For EVERY charitable gift of $250 or more that you are deducting this year, do you \
+                 already hold — or will you obtain before you file — a CONTEMPORANEOUS WRITTEN \
+                 ACKNOWLEDGMENT from the charity showing (1) the amount of money and a description \
+                 (but not the value) of any property donated, and (2) whether the organization gave \
+                 you any goods or services in return, with a description and estimate of their value \
+                 if it did? (Schedule A lines 11 and 12: \"If you made any gift of $250 or more, see \
+                 instructions.\" In figuring whether a gift is $250 or more, don't combine separate \
+                 donations — so answer YES if you made no single gift that large. Don't attach the \
+                 acknowledgment to your return; keep it for your records.)",
+        help: "Skipping is harmless if you claim no charitable deduction, or made no single gift of \
+               $250 or more. Where you DO claim one, it is MANDATORY: §170(f)(8)(A) says \"No \
+               deduction shall be allowed … for any contribution of $250 or more unless the taxpayer \
+               substantiates the contribution by a contemporaneous written acknowledgment\" — a \
+               precondition of the deduction itself, not a recordkeeping nicety. \
+               ★ THE DEADLINE IS WHY THIS IS ASKED NOW: §170(f)(8)(C) makes an acknowledgment \
+               contemporaneous only if you get it \"by the date you file your return or the due date \
+               (including extensions) for filing your return, whichever is earlier\". You can still \
+               get one — right up until you file. Once you file without it, the cure is gone.",
+        kind: SkippableKind::YesNo,
+        // ★ ALWAYS OFFERED — the `DonationsHadRestrictions` shape, and for the same two reasons:
+        //   `live` sees only `ReturnInputs`, so it can see neither the LEDGER (where the crypto
+        //   donations are) nor the computed §63(e) itemize election. Making this a live class-(A)
+        //   DECLARATION would refuse every return at every income level, including the standard-
+        //   deduction filers the adjudication says must never be asked. The mandatory half is in
+        //   `screen_absolute`, which can tell.
+        live: |_ri| true,
+        get_bool: |ri| ri.charitable_cwa_obtained,
+        set_bool: |ri, v| ri.charitable_cwa_obtained = Some(v),
+        get_date: |_ri| None,
+        set_date: |_ri, _v| {},
     }
 ];
 
@@ -1234,9 +1281,9 @@ mod tests {
         use crate::tax::types::FilingStatus;
         assert_eq!(
             SKIPPABLE_QUESTIONS.len(),
-            15,
+            16,
             "blind ×2, SALT, DOB ×2, DOD ×2, FBAR, the §G-9 death pair, Schedule C I/J, 8283 5a/5b/5c, \
-             8995-A SSTB + patron"
+             8995-A SSTB + patron, §170(f)(8) CWA"
         );
         // SALT is live iff a schedule_a exists; spouse-blind iff a spouse Person exists.
         let salt = SKIPPABLE_QUESTIONS

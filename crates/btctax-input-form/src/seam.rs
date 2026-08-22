@@ -149,6 +149,8 @@ pub enum FieldId {
     ScheduleC1099Filed,
     /// Form 8283 5a/5b/5c, asked as ONE return-level universal (§G-21).
     DonationsHadRestrictions,
+    /// §170(f)(8) — the contemporaneous-written-acknowledgment universal (`SKIPPABLE_QUESTIONS` 15).
+    CharitableCwaObtained,
     // Carryforwards (§G-22) — Form 8995 lines 7 and 3. Both are prior-year LOSSES that REDUCE a
     // deduction, so omitting either UNDERSTATES tax. They were import-only until 2026-07-31.
     QbiReitPtpCarryforwardIn,

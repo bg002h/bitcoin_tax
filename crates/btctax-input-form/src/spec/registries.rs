@@ -332,6 +332,14 @@ const SKIPPABLE_FIELDS: &[Field] = &[
             Err(SetError::NoSuchRow)
         }
     }),
+    // ★ Index 15 — §170(f)(8)'s contemporaneous written acknowledgment, as one return-level
+    //   universal. Same shape as index 12 and for the same reason: no parent gate, because the
+    //   donations are in the LEDGER and the §63(e) itemize election is computed. `screen_absolute`
+    //   makes it mandatory where the return actually claims the deduction.
+    skippable_tristate!(15, FieldId::CharitableCwaObtained, |ri| {
+        ri.charitable_cwa_obtained = None;
+        Ok(())
+    }),
 ];
 
 pub(crate) const SKIPPABLES: Section = Section {
@@ -406,6 +414,7 @@ pub fn field_to_skippable(id: FieldId) -> Option<SkippableId> {
         FieldId::ScheduleC1099Required => SkippableId::ScheduleC1099Required,
         FieldId::ScheduleC1099Filed => SkippableId::ScheduleC1099Filed,
         FieldId::DonationsHadRestrictions => SkippableId::DonationsHadRestrictions,
+        FieldId::CharitableCwaObtained => SkippableId::CharitableCwaObtained,
         FieldId::ScheduleCIsSstb => SkippableId::ScheduleCIsSstb,
         FieldId::ScheduleCIsCooperativePatron => SkippableId::ScheduleCIsCooperativePatron,
         _ => return None,
@@ -429,6 +438,7 @@ pub fn skippable_to_field(id: SkippableId) -> FieldId {
         SkippableId::ScheduleC1099Required => FieldId::ScheduleC1099Required,
         SkippableId::ScheduleC1099Filed => FieldId::ScheduleC1099Filed,
         SkippableId::DonationsHadRestrictions => FieldId::DonationsHadRestrictions,
+        SkippableId::CharitableCwaObtained => FieldId::CharitableCwaObtained,
         SkippableId::ScheduleCIsSstb => FieldId::ScheduleCIsSstb,
         SkippableId::ScheduleCIsCooperativePatron => FieldId::ScheduleCIsCooperativePatron,
     }

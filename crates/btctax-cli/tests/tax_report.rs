@@ -1605,6 +1605,10 @@ fn carryover_write_back_round_trips_and_respects_user_precedence() {
                     box5_medicare_wages: dec!(50000),
                     ..Default::default()
                 }],
+                // §170(f)(8): this filer holds a contemporaneous written acknowledgment for the
+                // $40,000 gift. Not covered by `answered()`, which walks the DECLARATION registry;
+                // the CWA is a class-(B) skippable made mandatory by `screen_absolute`.
+                charitable_cwa_obtained: Some(true),
                 schedule_a: Some(ScheduleAInputs {
                     charitable: vec![CharitableGift {
                         class: CharitableClass::Cash60,
@@ -1719,6 +1723,10 @@ fn import_preserves_a_computed_carryover() {
                     box5_medicare_wages: dec!(50000),
                     ..Default::default()
                 }],
+                // §170(f)(8): this filer holds a contemporaneous written acknowledgment for the
+                // $40,000 gift. Not covered by `answered()`, which walks the DECLARATION registry;
+                // the CWA is a class-(B) skippable made mandatory by `screen_absolute`.
+                charitable_cwa_obtained: Some(true),
                 schedule_a: Some(ScheduleAInputs {
                     charitable: vec![CharitableGift {
                         class: CharitableClass::Cash60,
@@ -2052,6 +2060,10 @@ fn the_full_remedy_chain_restores_a_computed_carryover() {
                     box5_medicare_wages: dec!(50000),
                     ..Default::default()
                 }],
+                // §170(f)(8): this filer holds a contemporaneous written acknowledgment for the
+                // $40,000 gift. Not covered by `answered()`, which walks the DECLARATION registry;
+                // the CWA is a class-(B) skippable made mandatory by `screen_absolute`.
+                charitable_cwa_obtained: Some(true),
                 schedule_a: Some(ScheduleAInputs {
                     charitable: vec![CharitableGift {
                         class: CharitableClass::Cash60,
@@ -2118,6 +2130,10 @@ fn the_full_remedy_chain_restores_a_computed_carryover() {
                     box5_medicare_wages: dec!(50000),
                     ..Default::default()
                 }],
+                // §170(f)(8): this filer holds a contemporaneous written acknowledgment for the
+                // $40,000 gift. Not covered by `answered()`, which walks the DECLARATION registry;
+                // the CWA is a class-(B) skippable made mandatory by `screen_absolute`.
+                charitable_cwa_obtained: Some(true),
                 schedule_a: Some(ScheduleAInputs {
                     charitable: vec![CharitableGift {
                         class: CharitableClass::Cash60,
@@ -2171,6 +2187,10 @@ fn fr2024_writeback_vault_with_pseudo_trigger() -> (tempfile::TempDir, PathBuf) 
                 box5_medicare_wages: dec!(50000),
                 ..Default::default()
             }],
+            // §170(f)(8): this filer holds a contemporaneous written acknowledgment for the
+            // $40,000 gift. Not covered by `answered()`, which walks the DECLARATION registry;
+            // the CWA is a class-(B) skippable made mandatory by `screen_absolute`.
+            charitable_cwa_obtained: Some(true),
             schedule_a: Some(ScheduleAInputs {
                 charitable: vec![CharitableGift {
                     class: CharitableClass::Cash60,

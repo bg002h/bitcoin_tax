@@ -599,6 +599,7 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
         foreign_country_names, // ★ FREE TEXT and identifying — scrubbed below
         fbar_filing_required: _,
         donations_had_restrictions: _,
+        charitable_cwa_obtained: _,
         dual_status_alien: _,
         has_income_exclusion: _,
         other_out_of_scope_income: _,

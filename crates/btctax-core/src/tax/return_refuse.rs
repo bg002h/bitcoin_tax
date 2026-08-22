@@ -42,6 +42,21 @@ pub enum RefuseReason {
     /// large. Raised only for a year that actually files a **Section B** 8283 — see
     /// `screen_absolute`, which has the ledger AND the computed itemize election.
     DonationRestrictionsUnresolved,
+    /// ★★★ **§170(f)(8)** — the contemporaneous-written-acknowledgment question is unresolved on a
+    /// return that CLAIMS a charitable deduction and has at least one single contribution of $250 or
+    /// more: either unanswered, or answered **No**.
+    ///
+    /// §170(f)(8)(A): *"No deduction shall be allowed under subsection (a) for any contribution of
+    /// $250 or more unless the taxpayer substantiates the contribution by a contemporaneous written
+    /// acknowledgment."* It is a precondition of allowability, so proceeding on silence claims a
+    /// deduction the statute may deny — an understatement — while §170(f)(8)(C)'s *"earlier of"* rule
+    /// means **filing itself extinguishes the cure**. Both halves are required for a refusal; a
+    /// substantiation rule with no filing-linked deadline (§170(f)(17) bank records) gets an advisory,
+    /// not a gate.
+    ///
+    /// Raised only by `screen_absolute`, which has the ledger AND the computed §63(e) election — the
+    /// `DonationRestrictionsUnresolved` pattern exactly.
+    CharitableCwaUnresolved,
     /// A **non-crypto NONCASH** charitable gift whose total exceeds the $500 Form 8283 threshold. Those
     /// amounts reach Schedule A line 12, but btctax holds no property details for them (no description,
     /// no acquisition date, no appraiser), so it can produce no 8283 rows — the packet would attach a
@@ -330,6 +345,7 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         fbar_filing_required: _,
         foreign_country_names: _,
         donations_had_restrictions: _, // Option<bool>, not an amount
+        charitable_cwa_obtained: _,    // Option<bool>, not an amount
         dual_status_alien: _,
         // MAGI add-backs — refused at the worksheet's point of need, not here (D-11).
         has_income_exclusion: _, // refused at the worksheet's point of need (D-11), not here

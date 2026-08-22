@@ -360,6 +360,7 @@ pub fn maximal_sentinel() -> ReturnInputs {
         foreign_country_names: "SENTINEL_countryA, SENTINEL_countryB".into(),
         fbar_filing_required: Some(true),
         donations_had_restrictions: Some(false),
+        charitable_cwa_obtained: Some(true),
         dual_status_alien: Some(false),
         has_income_exclusion: Some(false),
         other_out_of_scope_income: Some(false),
