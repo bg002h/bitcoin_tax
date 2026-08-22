@@ -733,7 +733,18 @@ mod tests {
                 agi_l11: d(&der["agi_1040_L11"]),
                 deduction_l12: d(&der["deduction_1040_L14"]),
                 deduction_l14: d(&der["deduction_1040_L14"]),
-                schedule_a_line7: Usd::ZERO,
+                // ★★★ G-6d — this was a hardcoded `Usd::ZERO`, and that was the whole finding:
+                //     *"no fixture vector has Schedule A line 7 > 0. Every itemizing vector deducts
+                //     a cash gift only, so the fixture drives line 2a's itemizer limb at zero
+                //     throughout."* It now reads the vector's own §164(b)(6)-capped figure.
+                //
+                //     ★ ABSENT ⇒ ZERO, and that is correct rather than lenient: V1-V29 predate the
+                //       key and genuinely deduct a cash gift only. What stops the default becoming
+                //       a silent hole is the liveness assertion in
+                //       `the_itemizer_limb_of_line_2a_is_exercised_by_a_vector` below — at least
+                //       one vector MUST carry a positive figure here, so a regenerated fixture that
+                //       dropped the key reds instead of quietly returning to the G-6d state.
+                schedule_a_line7: der.get("schedule_a_line7").map_or(Usd::ZERO, d),
                 itemized: der["itemized"].as_bool().unwrap(),
                 state_refund_sch1_l1: d(&inp["state_refund"]),
                 net_capital_gain: pref,
@@ -857,6 +868,92 @@ mod tests {
                 got.must_attach(),
                 v["attach_required_who_must_file_cond1"].as_bool().unwrap(),
                 "{id}: Who Must File condition 1 (line 7 > line 10)"
+            );
+        }
+    }
+
+    /// ★★★ **G-6d — LINE 2a's ITEMIZER LIMB IS EXERCISED BY A VECTOR, AND THE VECTOR IS LOAD-BEARING.**
+    ///
+    /// FOLLOWUPS §G-6d, verbatim: *"no fixture vector has Schedule A line 7 > 0. Every itemizing
+    /// vector deducts a cash gift only, so the fixture drives line 2a's itemizer limb at zero
+    /// throughout."* On an itemizing return line 2a is *"Enter the amount from … Schedule A, line
+    /// 7"* — the §164 taxes add-back, and on such a filer the one figure on Form 6251 that is not
+    /// taxable income re-stated. It was covered by a unit KAT
+    /// (`itemizer_addback_is_schedule_a_line7_not_the_itemized_total`) and by nothing else, so the
+    /// figure filed on a §6065-signed form rested on our own transcription.
+    ///
+    /// This asserts two things a conformance sweep cannot:
+    ///
+    ///  1. **At least one vector actually carries a positive Schedule A line 7.** The fixture loader
+    ///     defaults an absent key to zero — correct for V1-V29, which genuinely have none — and this
+    ///     is what stops that default from silently restoring the G-6d state when the fixture is
+    ///     regenerated.
+    ///  2. **On that vector the add-back is the WHOLE alternative minimum tax.** Zeroing line 2a
+    ///     takes the AMT to $0. A vector where the add-back merely nudged a large AMT would leave
+    ///     the limb technically exercised and practically unwitnessed; here the two are the same
+    ///     number, so the oracle comparison in `scripts/oracle/verify_f6251.py` is a comparison of
+    ///     this limb and nothing else.
+    #[test]
+    fn the_itemizer_limb_of_line_2a_is_exercised_by_a_vector() {
+        let json: serde_json::Value = serde_json::from_str(VECTORS).expect("fixture parses");
+        let vectors = json["vectors"].as_array().expect("vectors array");
+        let p = params();
+
+        let salt_vectors: Vec<&serde_json::Value> = vectors
+            .iter()
+            .filter(|v| {
+                v["derived"]
+                    .get("schedule_a_line7")
+                    .map(|x| d(x) > Usd::ZERO)
+                    .unwrap_or(false)
+            })
+            .collect();
+        assert!(
+            !salt_vectors.is_empty(),
+            "G-6d is OPEN again: no fixture vector has Schedule A line 7 > 0, so Form 6251 line 2a's \
+             ITEMIZER limb is driven at zero throughout and no oracle has ever scored a household of \
+             that shape. Regenerate with `design/amt-form6251/gen_e2_vectors.py`, which emits the \
+             §164(b)(6)-capped figure into `derived.schedule_a_line7`."
+        );
+
+        for v in &salt_vectors {
+            let id = v["id"].as_str().unwrap();
+            let with = compute_vector(v, &p);
+            assert!(
+                with.line2a > Usd::ZERO,
+                "{id}: the vector carries a positive Schedule A line 7, so line 2a must be the \
+                 ITEMIZER limb's add-back and not the standard deduction"
+            );
+            assert_eq!(
+                with.line2a,
+                d(&v["derived"]["schedule_a_line7"]),
+                "{id}: line 2a on an ITEMIZING return is Schedule A line 7 exactly — not the \
+                 itemized TOTAL, which is the conflation the 2026-07-27 AMT defect shipped"
+            );
+            assert!(
+                with.line11 > Usd::ZERO,
+                "{id}: the vector must OWE alternative minimum tax, or the add-back reaches no \
+                 filed figure and no oracle disagreement could ever surface"
+            );
+
+            // ── The counterfactual: the SAME vector with the add-back removed. ──────────────────
+            let mut without_json = (*v).clone();
+            without_json["derived"]["schedule_a_line7"] =
+                serde_json::Value::String("0".to_string());
+            let without = compute_vector(&without_json, &p);
+            assert_eq!(
+                without.line11,
+                Usd::ZERO,
+                "{id}: with Schedule A line 7 zeroed this vector must owe NO alternative minimum \
+                 tax — the whole AMT here IS the §164 add-back, which is what makes the oracle \
+                 comparison a comparison of line 2a's itemizer limb and nothing else. If a future \
+                 edit gives this vector AMT from another source, the limb has stopped being \
+                 isolated and G-6d needs a fresh vector rather than a relaxed assertion."
+            );
+            assert_eq!(
+                with.line11 - without.line11,
+                with.line11,
+                "{id}: …so the whole of line 11 is attributable to the add-back"
             );
         }
     }

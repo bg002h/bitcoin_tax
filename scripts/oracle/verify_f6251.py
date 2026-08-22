@@ -237,6 +237,12 @@ def main() -> int:
             "e00200": float(i["wages"]), "e00200p": float(i["wages"]), "e00200s": 0.0,
             "p23250": float(i["net_ltcg"]),
             "e19800": float(i["cash_gift"]),   # cash charitable — absent from gen_goldens' builder
+            # ★★★ e18400 = state and local INCOME taxes (Schedule A line 5a), RAW: taxcalc applies
+            #     §164(b)(6) itself, so the cap is a second independent witness rather than an
+            #     assumption shared with the reference. This is G-6d's missing input — with it at
+            #     zero, Form 6251 line 2a's itemizer limb was driven at zero on every vector and
+            #     neither engine had ever scored a household of that shape.
+            "e18400": float(i.get("state_local_tax", 0)),
             # ★ e00700 = "taxable refunds of state and local income taxes" = Schedule 1 line 1, which
             #   is exactly Form 6251 line 2b's source, and the variable taxcalc's own AMTI block
             #   subtracts. This was `e00300` (taxable INTEREST): same effect on AGI, so nothing
@@ -389,8 +395,19 @@ def _ots_pass(vectors) -> tuple[int, dict[str, str], bool]:
             }
             if d["itemized"]:
                 # A11 is cash/check charity — NOT A16 ("other"), which sails past Schedule A's own
-                # handling of the gift. The vectors' only itemized component is the cash gift.
-                vals |= {"A5a": 0, "A5b": 0, "A8a": 0, "A11": float(i["cash_gift"])}
+                # handling of the gift.
+                #
+                # ★★★ A5a is Schedule A line 5a, STATE AND LOCAL INCOME TAX, and it is handed over
+                #     RAW — pre-§164(b)(6). OTS applies its own $10,000/$5,000 cap and prints its own
+                #     Schedule A line 7, so the CAP is witnessed rather than assumed; feeding the
+                #     already-capped figure would have made the two engines agree by construction on
+                #     the one number this vector exists to check (G-6d).
+                vals |= {
+                    "A5a": float(i.get("state_local_tax", 0)),
+                    "A5b": 0,
+                    "A8a": 0,
+                    "A11": float(i["cash_gift"]),
+                }
             parsed, _ = o.run_form("US_1040", "US_1040", "US_1040", vals, work,
                                    capgains=o._capgains_rows(0.0, float(i["net_ltcg"])),
                                    year=_year_of(v))

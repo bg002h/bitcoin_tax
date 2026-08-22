@@ -33,18 +33,39 @@ FIXTURE = ROOT / "crates/btctax-core/src/tax/fixtures/form6251_vectors.json"
 CASH_CEILING = D("0.6")
 KICK_START = D(875950)  # i6251 p.9, line 4 — and, for MFS, the zero-exemption threshold as well
 
+# ★★★ §164(b)(6) — the SALT cap, and why a vector needs it at all (G-6d).
+#
+# FOLLOWUPS §G-6d, verbatim: *"no fixture vector has Schedule A line 7 > 0. Every itemizing vector
+# deducts a cash gift only, so the fixture drives line 2a's itemizer limb at zero throughout."*
+# Form 6251 line 2a is *"Enter the amount from Form 1040 … Schedule A, line 7"* on an ITEMIZING
+# return — the taxes add-back, and the one figure on such a filer's Form 6251 that is not just
+# taxable income re-stated. With every vector at SALT = 0 that limb was exercised by nothing but a
+# unit KAT. §164(b)(6) caps the deduction at $10,000 ($5,000 MFS) for TY2024, so a vector whose
+# state and local taxes exceed the cap lands Schedule A line 7 exactly ON it.
+SALT_CAP = {"mfj": D(10_000), "mfs": D(5_000), "single": D(10_000), "hoh": D(10_000)}
 
-def derive(st, wages, ltcg, gift, refund, ftc):
-    """The 1040 figures a vector's inputs imply, then the whole Form 6251."""
+
+def derive(st, wages, ltcg, gift, refund, ftc, salt=D(0)):
+    """The 1040 figures a vector's inputs imply, then the whole Form 6251.
+
+    `salt` is the filer's state and local taxes BEFORE §164(b)(6); Schedule A line 7 is the capped
+    figure, and it is what Form 6251 line 2a adds back on an itemizing return.
+    """
     agi = wages + ltcg + refund
     allowed = min(gift, CASH_CEILING * agi)
-    itemized = allowed > STD[st]
-    deduction = allowed if itemized else STD[st]
+    sch_a_line7 = min(salt, SALT_CAP[st])
+    itemized_total = allowed + sch_a_line7
+    itemized = itemized_total > STD[st]
+    deduction = itemized_total if itemized else STD[st]
     ti = max(D(0), agi - deduction)
     regular_tax, _ = qdcgt(ti, ltcg, st)
     f = form6251(
         st=st, taxable_income_L15=ti, agi_L11=agi, deduction_L14=deduction,
-        sch_a_line7=D(0), itemized=itemized, refund_sch1_L1=refund,
+        # A standard-deduction filer has no Schedule A at all, so line 2a takes the standard
+        # deduction instead and this figure is not consulted — but pass zero rather than a stale
+        # number, so a mis-set `itemized` cannot quietly add back a line that is not on the return.
+        sch_a_line7=sch_a_line7 if itemized else D(0),
+        itemized=itemized, refund_sch1_L1=refund,
         net_ltcg=ltcg, qual_div=D(0), regular_tax_L16=regular_tax,
         sch2_L1z=D(0), sch3_L1=ftc,
     )
@@ -52,6 +73,11 @@ def derive(st, wages, ltcg, gift, refund, ftc):
         "agi_1040_L11": agi, "deduction_1040_L14": deduction, "itemized": itemized,
         "charitable_allowed": allowed, "taxable_income_1040_L15": ti,
         "regular_tax_1040_L16": regular_tax,
+        # ★ The CAPPED figure, emitted separately from the raw `state_local_tax` input: the Rust
+        #   fixture loader reads THIS (it is Form 6251 line 2a's operand), while `verify_f6251.py`
+        #   hands the RAW amount to each oracle and lets the oracle apply its own §164(b)(6) — which
+        #   is what makes the cap itself independently witnessed rather than assumed.
+        "schedule_a_line7": sch_a_line7 if itemized else D(0),
     }
     return derived, f
 
@@ -78,6 +104,10 @@ def routing(st, f):
         "l2b_live": f["2b"] != 0,       # the state-refund subtraction
         "l2a_live": f["2a"] != 0,       # the standard-deduction add-back (§56(b)(1)(D))
         "l20slice": f[33] > 0,          # a 20% tranche survives lines 32/33
+        # ★ lines 20/27 = the QDCGT worksheet's line 5, the REGULAR-tax ordinary bottom. Zero exactly
+        #   when the preferential slice reaches or exceeds taxable income — a routing no vector
+        #   exercised before V30, and the one where line 21 gets the whole 0% band.
+        "l20_zero": 20 in f and f[20] == 0,
         "kicker": st == "mfs" and f[4] > KICK_START,
     }
 
@@ -171,6 +201,29 @@ SPEC = [
      "R8 single — line 2b (the state-refund subtraction) with AMT > 0, so dropping it moves the "
      "AMT itself and not merely AMTI. Control: V13, same $175,000 ordinary bottom",
      dict(amt=True, l2b_live=True, phaseout="partial")),
+
+    # ── G-6d: the itemizer limb of line 2a, at last ────────────────────────────────────────────
+    #
+    # ★★★ The household FOLLOWUPS §G-6d names. Every vector above deducts a cash gift only, so
+    #     Form 6251 line 2a's ITEMIZER limb — "the amount from Schedule A, line 7" — has been zero
+    #     throughout, held by one unit KAT and by nothing independent. Here SALT of $25,000 is
+    #     capped by §164(b)(6) to $10,000, and that $10,000 IS this filer's entire AMT preference:
+    #     the one number on their Form 6251 that is not just taxable income re-stated.
+    #
+    # ★★ It is also a Part III routing no vector exercises: wages are deliberately BELOW the
+    #    $60,000 itemized total, so the long-term gain EXCEEDS taxable income, the QDCGT worksheet's
+    #    line 5 is driven to zero, and Form 6251 lines 20 and 27 print $0 — the branch where line
+    #    21 ("subtract line 20 from line 19") gets the whole 0% band.
+    #
+    # ★ The gift stays far under the §170(b) 60%-of-AGI ceiling ($984,000 here), so OTS remains a
+    #   witness; the SALT is what is new, not the charitable branch.
+    ("V30", "mfj",     40_000, 2_000_000, 50_000,      0,     0,
+     "G-6d mfj — SCHEDULE A LINE 7 > 0 at last: $25,000 of state and local taxes capped by "
+     "§164(b)(6) to $10,000, which is this filer's whole Form 6251 line 2a add-back. Also the "
+     "first vector whose long-term gain EXCEEDS taxable income, so the QDCGT worksheet's line 5 "
+     "is zero and lines 20/27 print $0",
+     dict(amt=True, attach=True, part3=True, l2a_live=True, l20_zero=True,
+          phaseout="full", l23_pos=True, l18_26=True, l20slice=True), 25_000),
 ]
 
 
@@ -186,8 +239,13 @@ def main() -> int:
     bad = 0
     for v in doc["vectors"]:
         i = v["inputs"]
+        # ★ `state_local_tax` is absent from V1-V29, which predate G-6d. Absent means ZERO — those
+        #   vectors deduct a cash gift only, which is precisely the gap V30 exists to close — and
+        #   the regression guard below still re-derives every one of their committed figures, so a
+        #   vector that silently GAINED a SALT it should not have would drift and abort.
         d, f = derive(i["filing_status"], D(i["wages"]), D(i["net_ltcg"]), D(i["cash_gift"]),
-                      D(i["state_refund"]), D(i["sch3_line1_ftc"]))
+                      D(i["state_refund"]), D(i["sch3_line1_ftc"]),
+                      D(i.get("state_local_tax", "0")))
         for k, want in v["derived"].items():
             got = d[k]
             same = got == want if isinstance(want, bool) else D(got) == D(want)
@@ -206,11 +264,29 @@ def main() -> int:
     print(f"regression guard OK — all {len(doc['vectors'])} committed vectors reproduce")
 
     new = []
-    for vid, st, wages, ltcg, gift, refund, ftc, why, expect in SPEC:
-        if vid in existing:
-            print(f"ABORT: {vid} already in the fixture")
+    for row in SPEC:
+        # ★ A row is 9 fields, or 10 with a trailing state-and-local-tax amount. Any other width is
+        #   a typo in the table, and it ABORTS rather than unpacking into the wrong columns — the
+        #   failure mode a positional table is prone to, and one that would shift `expect` onto
+        #   `why` and silently stop asserting the routing.
+        if len(row) == 9:
+            vid, st, wages, ltcg, gift, refund, ftc, why, expect = row
+            salt = 0
+        elif len(row) == 10:
+            vid, st, wages, ltcg, gift, refund, ftc, why, expect, salt = row
+        else:
+            print(f"ABORT: SPEC row {row[0]} has {len(row)} fields; expected 9 or 10")
             return 1
-        d, f = derive(st, D(wages), D(ltcg), D(gift), D(refund), D(ftc))
+        # ★ Already committed ⇒ SKIP, never overwrite. This used to ABORT, which made the script
+        #   single-use: `SPEC` is the population's permanent record, so the moment V11-V29 were
+        #   written the generator could never be run again to append a thirtieth. Skipping keeps the
+        #   safety it was protecting (a committed vector is never silently rewritten — and the
+        #   regression guard above has ALREADY re-derived it from its own inputs and aborted on any
+        #   drift) while letting the population grow.
+        if vid in existing:
+            print(f"  [skip] {vid} already committed — re-derived by the regression guard above")
+            continue
+        d, f = derive(st, D(wages), D(ltcg), D(gift), D(refund), D(ftc), D(salt))
         got = routing(st, f)
         for k, want in expect.items():
             if got[k] != want:
@@ -225,7 +301,11 @@ def main() -> int:
             "why": why,
             "inputs": {"filing_status": st, "wages": str(wages), "net_ltcg": str(ltcg),
                        "cash_gift": str(gift), "state_refund": str(refund),
-                       "sch3_line1_ftc": str(ftc)},
+                       "sch3_line1_ftc": str(ftc),
+                       # The RAW state and local taxes, pre-§164(b)(6). Each oracle applies its own
+                       # cap, so the cap is witnessed rather than assumed; the capped figure lives
+                       # in `derived.schedule_a_line7`.
+                       "state_local_tax": str(salt)},
             "derived": {k: (v if isinstance(v, bool) else str(v)) for k, v in d.items()},
             "form6251": {f"line{k}": str(v) for k, v in f.items()},
             "attach_required_who_must_file_cond1": bool(f[7] > f[10]),

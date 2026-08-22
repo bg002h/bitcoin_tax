@@ -738,13 +738,27 @@ TY2026 draft at its implied 50%. They turn five separately-typed MFS constants i
 catches its own transcription slips, which is what makes typing TY2025 in safe. Identity (i) is also
 *why* the MFS region has no TY2024 oracle: "exemption gone" and "kicker live" are one condition.
 
-**→ NEW: G-6d — no fixture vector has Schedule A line 7 > 0.** Every itemizing vector deducts a cash
-gift only, so the fixture drives line 2a's *itemizer* limb at zero throughout. The limb is not
-untested — the original shipped bug's regression KAT
+**→ ~~G-6d — no fixture vector has Schedule A line 7 > 0~~ CLOSED 2026-08-22 (filing-readiness P9).**
+Every itemizing vector deducted a cash gift only, so the fixture drove line 2a's *itemizer* limb at
+zero throughout. The limb was not untested — the original shipped bug's regression KAT
 (`amt::tests::itemizer_addback_is_schedule_a_line7_not_the_itemized_total`) exercises it with a
-nonzero SALT, and `return_1040.rs:1439` wires `salt_5e` in — but nothing carries a line-7-live
-household end to end through both oracles. Adding one means a SALT input in the vector surface plus
-`A5a/A5b` (OTS) and `e18400/e18500` (taxcalc). Owning phase: **Tier 2 · E4**.
+nonzero SALT — but nothing carried a line-7-live household end to end through both oracles.
+
+**V30 is that household.** MFJ, itemizing, $25,000 of state and local taxes capped by §164(b)(6) to
+**$10,000**, which is its entire Form 6251 line 2a add-back — and its entire alternative minimum tax:
+$2,000, exactly 20% of the add-back. Zeroing Schedule A line 7 takes the AMT to $0, so the oracle
+comparison on this vector is a comparison of that limb and nothing else
+(`form6251::tests::the_itemizer_limb_of_line_2a_is_exercised_by_a_vector` asserts the counterfactual).
+It is also the first vector whose long-term gain **exceeds** taxable income, so the QDCGT worksheet's
+line 5 is zero and lines 20/27 print $0 — a Part III routing no vector exercised.
+
+**BOTH oracles witness it**, which is what closes the finding rather than merely adding a vector: the
+raw pre-cap SALT goes to OTS as `A5a` and to taxcalc as `e18400`, so each engine applies its own
+§164(b)(6) and the cap is witnessed rather than assumed. `verify_f6251.py` now reports V30 under
+*"mfj 6 AMT-owing vector(s) agreed by BOTH oracles"*, with 759 lines compared against OTS (was 730),
+0 unexpected. Watched RED: dropping the itemizer limb from `f6251_reference.py` gives taxcalc
+*"★ UNEXPECTED DIVERGENCE · AMTI off by −10,000.00"* and OTS 15 unexpected lines including
+`line2a 10,000 vs 0` and `line11 2,000 vs 0`.
 
 ### G-9 — ★★★ ~~LIVE DEFECT IN SHIPPED CODE~~ **FIXED 2026-07-29**: the §63(f) aged box ignored the death carve-out
 
