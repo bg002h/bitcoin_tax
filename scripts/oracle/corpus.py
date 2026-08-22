@@ -557,6 +557,39 @@ PINNED_CELLS = [
 #   engine prints a carryover-OUT to next year — so that figure stays held by btctax's own KAT
 #   (`kat_attestation::the_1211b_1212b_pair_...`) and by `capital_loss_carryover.rs`'s worksheet
 #   transcription. The corpus entry is for the REST of the household, exactly as the plan says.
+# ── The NON-INTERACTION cells ─────────────────────────────────────────────────────────────────────
+# Households that exist to make a claimed NON-interaction observable. A guarantee of the form "X does
+# not move Y" is invisible to a corpus in which X and Y never co-occur — the sweep reports OK and has
+# checked nothing.
+NON_INTERACTION = [
+    {
+        "name": "mfj_niit_with_a_large_charitable_gift",
+        "why": "★ NON-INTERACTION — §170 against §1411. A $50,000 cash gift to a public charity on a "
+        "household that OWES net investment income tax ($380,000 AGI, $140,000 of NII from interest "
+        "and a long-term gain). ★★ STEERED so Form 8960 line 16 takes the EXCESS-MAGI leg "
+        "(line 15 = MAGI - $250,000 = $130,000, under NII of $140,000), which is what makes the "
+        "cell DISCRIMINATING: while NII is the smaller of the two, a charitable term wired into "
+        "MAGI moves nothing and the household reconciles with the defect present. Charitable appears on Form 8960 only at line 18b, inside Part III's "
+        "ESTATES AND TRUSTS block, and §170 is not in Reg. §1.1411-4(f)'s properly-allocable list — "
+        "and the deduction is below the line, so it cannot reach line 13's MAGI either. The gift must "
+        "therefore move 1040 line 15 and NOT one line of Form 8960. Until this cell existed, NO "
+        "corpus household combined a gift with NIIT and neither engine had ever been asked (N-6/N-7). "
+        "★ The gift is kept far under the §170(b)(1)(G) 60%-of-AGI ceiling ($264,000 here): OTS 2024 "
+        "applies no such ceiling, so a cell that crossed it would lose an oracle.",
+        "inputs": {
+            "filing_status": "Married/Joint",
+            "w2_income": 240_000,
+            "taxable_interest": 40_000,
+            "long_term_capital_gains": 100_000,
+            "state_income_tax": 8_000,
+            "real_estate_tax": 9_000,
+            "mortgage_interest": 30_000,
+            "charitable_cash": 50_000,
+            "standard_or_itemized": "Itemized",
+        },
+    },
+]
+
 LOW_END = [
     {
         "name": "single_loss_year_taxable_income_at_the_floor",
@@ -578,7 +611,8 @@ def _inputs_key(inp):
 
 def households():
     """The full candidate corpus: the 12 anchors (verbatim, first) + the 2 pinned liveness cells +
-    the hand-written LOW_END cells + the generated covering array (Block A ∪ Block B ∪ Block P),
+    the hand-written LOW_END and NON_INTERACTION cells + the generated covering array (Block A ∪
+    Block B ∪ Block P),
     DEDUPLICATED by inputs (M3).
 
     Anchors, pinned cells and low-end cells are kept whenever they appear; a generated row that
@@ -588,7 +622,7 @@ def households():
     """
     out = []
     seen = set()
-    for h in ANCHORS + PINNED_CELLS + LOW_END + block_a() + block_b() + block_p():
+    for h in ANCHORS + PINNED_CELLS + LOW_END + NON_INTERACTION + block_a() + block_b() + block_p():
         key = _inputs_key(h["inputs"])
         if key in seen:
             continue
@@ -660,7 +694,7 @@ def _reconstruct_cell(inp):
         cap = "none"
     if inp.get("standard_or_itemized") == "Itemized":
         dedsalt = "io" if (inp.get("state_income_tax", 0) + inp.get("real_estate_tax", 0)) > 10_000 else "iu"
-    elif any(inp.get(k, 0) for k in ("state_income_tax", "real_estate_tax", "mortgage_interest", "itemized_deductions")):
+    elif any(inp.get(k, 0) for k in ("state_income_tax", "real_estate_tax", "mortgage_interest", "itemized_deductions", "charitable_cash")):
         return None  # itemized-by-components without the Itemized flag (anchor lump) — not a grid cell
     else:
         dedsalt = "std"
@@ -687,7 +721,8 @@ if __name__ == "__main__":  # a quick offline sanity dump (no oracles)
     hs = households()
     print(
         f"candidates: {len(hs)} (anchors {len(ANCHORS)} + pinned {len(PINNED_CELLS)} + "
-        f"low-end {len(LOW_END)} + generated {len(hs) - len(ANCHORS) - len(PINNED_CELLS) - len(LOW_END)})"
+        f"low-end {len(LOW_END)} + non-interaction {len(NON_INTERACTION)} + "
+        f"generated {len(hs) - len(ANCHORS) - len(PINNED_CELLS) - len(LOW_END) - len(NON_INTERACTION)})"
     )
     print(f"  block A {len(block_a())}, block B {len(block_b())}, block P {len(block_p())}")
     na, nb = assert_named_triple_coverage(hs)

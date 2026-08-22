@@ -94,6 +94,7 @@ fn zero_inputs(filing_status: &str) -> GoldenInputs {
         state_income_tax: 0.0,
         real_estate_tax: 0.0,
         mortgage_interest: 0.0,
+        charitable_cash: 0.0,
     }
 }
 

@@ -172,6 +172,10 @@ def _taxcalc_row(n, i, year: int = 2024):
         "e18500": i.get("real_estate_tax", 0),            # real estate tax           (Sch A 5b)
         "e19200": i.get("itemized_deductions", 0)         # interest paid             (Sch A 8a)
         + i.get("mortgage_interest", 0),
+        # Cash gifts to public charities (Sch A 11). Present so the corpus can witness a
+        # NON-interaction: §170 is not in Reg. §1.1411-4(f)'s properly-allocable list, so this must
+        # move 1040 line 15 and not one line of Form 8960.
+        "e19800": i.get("charitable_cash", 0),
         "s006": 1.0,
     }
 

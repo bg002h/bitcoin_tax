@@ -180,6 +180,86 @@ fn a_million_dollar_gift_moves_the_1040_and_not_one_line_of_form_8960() {
     );
 }
 
+/// ★★★ **…AND THE SAME NON-INTERACTION HAS A TWO-ORACLE WITNESS (N-6).**
+///
+/// The KAT above is btctax checking btctax: it proves the guarantee is held *consistently*, not that
+/// it is held *correctly*. Until this corpus cell existed, `grep charit scripts/oracle/corpus.py`
+/// returned nothing — **no corpus household combined a gift with NIIT**, so neither OpenTaxSolver nor
+/// Tax-Calculator had ever scored the pair and the differential sweep reported OK having checked
+/// nothing about it.
+///
+/// This asserts the cell is still THERE and still exercises both halves. It is deliberately an
+/// assertion about the corpus rather than about a number: a cell that is dropped, renamed, or
+/// re-steered until its gift stops being deducted or its MAGI stops clearing the §1411 threshold takes
+/// the witness with it, silently, while every other test stays green.
+#[test]
+fn the_corpus_carries_a_household_where_a_gift_and_the_niit_actually_meet() {
+    let params = ty2024_params();
+    let table = ty2024_table();
+    let mut witnesses = 0;
+    for h in golden_households() {
+        if h.inputs.charitable_cash <= 0.0 {
+            continue;
+        }
+        let (ri, state) = build_golden_return(&h.inputs);
+        let ar = assemble_absolute(&ri, &state, &params, &table, 2024);
+        let pf = assemble_printed_forms(&ri, &state, &BTreeMap::new(), &ar, &table, 2024, &[]);
+        let Some(f8960) = pf.f8960.as_ref() else {
+            continue; // a gifting household that owes no NIIT witnesses only half of the pair
+        };
+        if f8960.line17 <= Usd::ZERO {
+            continue;
+        }
+        // Both halves must be LIVE on the same return: a deducted gift AND a positive NIIT.
+        let claimed = pf.sch_a.as_ref().map(|a| a.line11).unwrap_or(Usd::ZERO);
+        if claimed <= Usd::ZERO {
+            continue; // the standard deduction won; no §170 deduction is claimed
+        }
+        // ★ The §170(b) 60%-of-AGI ceiling must NOT bind, or OTS is disqualified as a witness:
+        //   OTS 2024 applies no cash ceiling, and a household that crosses it diverges for that
+        //   reason alone (the fate of the Form 6251 fixture's V2b).
+        assert_eq!(
+            claimed,
+            Usd::try_from(h.inputs.charitable_cash).expect("a finite fixture figure"),
+            "{}: the whole gift must be deducted this year. A corpus cell whose gift crosses the \
+             §170(b)(1)(G) 60%-of-AGI ceiling loses OTS as a witness, because OTS 2024 applies no \
+             such ceiling — so it would diverge for a reason that has nothing to do with the \
+             non-interaction under test.",
+            h.name
+        );
+        // ★★★ **AND THE CELL MUST BE DISCRIMINATING, WHICH IS A SEPARATE FACT FROM BEING PRESENT.**
+        //
+        // Form 8960 line 16 is *"Enter the smaller of line 12 or line 15"* — NII, or MAGI over the
+        // §1411 threshold. While NII is the smaller, a charitable term wrongly wired into MAGI can
+        // move line 13 without moving line 16, and the household reconciles against both oracles
+        // WITH THE DEFECT PRESENT. That is not hypothetical: the first steering of this cell had
+        // AGI $440,000 and NII $140,000, so MAGI-over-threshold was $190,000 — and the planted
+        // defect (charitable subtracted from the MAGI argument) changed nothing at all, because
+        // $440,000 − $50,000 − $250,000 is exactly $140,000. The cell existed, was admitted by both
+        // engines, and witnessed nothing.
+        //
+        // Re-steered to $380,000 of AGI, line 15 ($130,000) is the smaller and every dollar of MAGI
+        // reaches the tax. This assertion is what stops it drifting back.
+        assert!(
+            f8960.line15 < f8960.line12,
+            "{}: this cell must take Form 8960 line 16's EXCESS-MAGI leg (line 15 {} < line 12 {}), \
+             or a charitable term wired into MAGI moves no figure and the cell witnesses nothing \
+             while still reconciling against both oracles",
+            h.name,
+            f8960.line15,
+            f8960.line12
+        );
+        witnesses += 1;
+    }
+    assert!(
+        witnesses >= 1,
+        "no corpus household has BOTH a deducted charitable gift and a positive Form 8960 line 17. \
+         The charitable × NIIT non-interaction is then witnessed by btctax alone — which is the \
+         state N-6 recorded, and the reason `mfj_niit_with_a_large_charitable_gift` was added. \
+         Restore a cell; do not delete this assertion."
+    );
+}
+
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
 // KAT 2 — the two NIIT chains (N-8).
 // ══════════════════════════════════════════════════════════════════════════════════════════════════

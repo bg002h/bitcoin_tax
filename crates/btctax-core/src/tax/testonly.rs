@@ -674,6 +674,20 @@ pub struct GoldenInputs {
     /// Schedule A line 8a — mortgage interest reported on a Form 1098.
     #[serde(default)]
     pub mortgage_interest: f64,
+    /// **Schedule A line 11 — a §170(b)(1)(G) cash gift to a public charity** (the 60%-of-AGI class).
+    ///
+    /// ★ It exists so the corpus can witness a NON-interaction: charitable deductions appear on Form
+    /// 8960 only at line 18b, inside Part III's *Estates and Trusts* block, and §170 is not in Reg.
+    /// §1.1411-4(f)'s properly-allocable list — so a gift must move 1040 line 15 and NOT one line of
+    /// Form 8960. Until a corpus household combined a large gift with NIIT, neither engine had ever
+    /// been asked (N-6/N-7).
+    ///
+    /// ★★ **Keep it under the §170(b) 60%-of-AGI ceiling.** OTS 2024 applies no such ceiling, so a
+    /// household that crosses it loses an oracle — the fate that disqualified the Form 6251 fixture's
+    /// V2b. `gen_goldens.py` has no equivalent guard, so the constraint lives in the corpus cell's
+    /// own `why`.
+    #[serde(default)]
+    pub charitable_cash: f64,
 }
 
 pub fn golden_usd(v: f64) -> Usd {
@@ -778,6 +792,7 @@ pub fn build_golden_return(i: &GoldenInputs) -> (ReturnInputs, LedgerState) {
         || i.state_income_tax > 0.0
         || i.real_estate_tax > 0.0
         || i.mortgage_interest > 0.0
+        || i.charitable_cash > 0.0
     {
         ri.schedule_a = Some(ScheduleAInputs {
             // 5a, the income-tax path of §164(b)(5). The oracles get this as OTS's `A5a` /
@@ -785,8 +800,26 @@ pub fn build_golden_return(i: &GoldenInputs) -> (ReturnInputs, LedgerState) {
             salt_state_estimated_payments: golden_usd(i.state_income_tax),
             salt_real_estate: golden_usd(i.real_estate_tax),
             mortgage_interest_1098: golden_usd(i.itemized_deductions + i.mortgage_interest),
+            // Schedule A line 11 — OTS's `A11` (cash/check charity, NOT `A16` "other", which sails
+            // past Schedule A's own handling of the gift) and Tax-Calculator's `e19800`.
+            charitable: if i.charitable_cash > 0.0 {
+                vec![CharitableGift {
+                    class: CharitableClass::Cash60,
+                    amount: golden_usd(i.charitable_cash),
+                }]
+            } else {
+                Vec::new()
+            },
             ..Default::default()
         });
+    }
+    // ★ §170(f)(8) — an itemizing return claiming a gift of $250 or more must state whether it holds
+    //   a contemporaneous written acknowledgment, and P4 refuses one that has not. This household
+    //   HOLDS one; that is a fact about the fixture, stated rather than defaulted, and it is not
+    //   grease — a corpus cell that refused would simply be dropped by the admission loop and the
+    //   non-interaction would go on being unwitnessed.
+    if i.charitable_cash > 0.0 {
+        ri.charitable_cwa_obtained = Some(true);
     }
     if i.self_employment_income > 0.0 {
         ri.schedule_c = Some(ScheduleCInputs {

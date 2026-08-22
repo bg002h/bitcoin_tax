@@ -461,6 +461,10 @@ def evaluate(h: dict) -> dict[str, float | None]:
             base["A5a"] = h.get("state_income_tax", 0)   # state & local income tax
             base["A5b"] = h.get("real_estate_tax", 0)    # real estate tax
             base["A8a"] = h.get("mortgage_interest", 0)  # mortgage interest reported on a 1098
+            # A11 is cash/check charity — NOT A16 ("other"), which sails past Schedule A's own
+            # handling of the gift. OTS 2024 applies no §170(b) 60%-of-AGI ceiling, so a corpus cell
+            # must keep the gift under it or lose this oracle (the fate of the 6251 fixture's V2b).
+            base["A11"] = h.get("charitable_cash", 0)   # cash gift to a public charity (Sch A 11)
             base["A16"] = h.get("itemized_deductions", 0)  # the lump-sum household's "other"
             base["A18"] = "Yes"
 
