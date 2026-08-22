@@ -761,6 +761,28 @@ fn part_ii_overflow_message(tax_year: i32, overflow: &btctax_forms::PartIiOverfl
     )
 }
 
+/// P2a: the Form 8949 row-overflow refusal (FILING-READINESS-PLAN rank 3), phrased the way the two
+/// Form 8275 preflights are — name the year, name the capacity, name a remedy that exists **today**.
+///
+/// Three things this says that `FormsError::Overflow`'s Display cannot. (1) The tax year, so a filer
+/// with several years in one vault knows which export failed. (2) That this is a **btctax** limitation
+/// and not a defect in their ledger — the count is lot-driven, so an ordinary dollar-cost-averaging
+/// buyer trips it and would otherwise reasonably go looking for the mistake in their own data. (3) A
+/// remedy: the figures are all computable (`report --tax-year` exits 0 on exactly this vault) and
+/// `export-snapshot --tax-year` writes `form8949.csv` with one row per disposal leg — which is the
+/// input a hand-completed Form 8949 plus its continuation pages needs.
+fn form_8949_overflow_message(tax_year: i32, over: &[String], cap: usize) -> String {
+    format!(
+        "cannot export {tax_year}: the {tax_year} Form 8949 needs {needs}, but one page holds {cap} \
+         rows per part and btctax cannot yet paginate Form 8949 on the full-return packet \u{2014} so \
+         no form in the packet was written. Nothing is wrong with your ledger: the row count follows \
+         from how many LOTS the sale drew on, not from the dollar amounts. Every figure on this \
+         return still computes \u{2014} run `btctax report --tax-year {tax_year}` for the numbers, and \
+         `btctax export-snapshot --tax-year {tax_year} --out <dir>` to write form8949.csv with one row \
+         per disposal leg, which is what completing Form 8949 and its continuation pages by hand needs."
+    , needs = over.join(" and "))
+}
+
 /// Write `bytes` to `path` with owner-only (0o600) permissions, matching the CSV export path.
 fn write_bytes_owner_only(path: &Path, bytes: &[u8]) -> Result<(), CliError> {
     use std::io::Write;
@@ -906,6 +928,39 @@ fn export_full_return(
         {
             return Err(CliError::Usage(part_ii_overflow_message(
                 tax_year, &overflow,
+            )));
+        }
+    }
+
+    // ★ P2a (FILING-READINESS-PLAN rank 3) — the Form 8949 OVERFLOW preflight: the THIRD refusal of
+    // exactly the shape of the two Form 8275 ones above, and written by copying them. Form 8949 holds
+    // `rows_per_page` rows per part and this path does not paginate (P2b is the pagination build), so a
+    // filer with more disposal legs than that used to get a bare `FormsError::Overflow` display out of
+    // the all-or-nothing fill below — "16 rows exceed the 14-row capacity of a single Part II page":
+    // exit 2, output directory never created, EVERY form in the packet lost, from a message naming no
+    // tax year, no remedy, and never saying this is a BTCTAX limit rather than the filer's error. On the
+    // same vault `report --tax-year` exits 0 and prints every figure, so the filer has the numbers and
+    // cannot get the paper. This path was already BYTE-safe (the fill precedes `mkdir_out`); what it
+    // lacked was an honest, actionable refusal — which is worth shipping on its own, before pagination.
+    //
+    // ★ The overflow is LOT-COUNT-driven, not dollar-driven: a weekly dollar-cost-averaging buyer holds
+    // ~52 lots and any meaningful sale draws on more than 14 of them, while a single-lot whale with a
+    // $1M gain emits one row. The SMALL end of the dollar axis is the more exposed population.
+    if let Some(f8949) = &printed.forms.f8949 {
+        let cap = btctax_forms::Form8949Map::for_year(tax_year)?.rows_per_page;
+        // Both parts are checked, and an overflow in either is named in ONE message: the remedy is the
+        // same for both, and a filer who fixed nothing should not be refused twice for one export.
+        let over: Vec<String> = [
+            ("Part I (short-term)", f8949.short_term.len()),
+            ("Part II (long-term)", f8949.long_term.len()),
+        ]
+        .into_iter()
+        .filter(|(_, n)| *n > cap)
+        .map(|(part, n)| format!("{n} {part} row(s)"))
+        .collect();
+        if !over.is_empty() {
+            return Err(CliError::Usage(form_8949_overflow_message(
+                tax_year, &over, cap,
             )));
         }
     }

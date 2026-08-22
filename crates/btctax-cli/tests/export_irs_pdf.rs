@@ -1274,3 +1274,102 @@ fn an_above_threshold_reit_only_export_files_form_8995a() {
         "the SIMPLIFIED Form 8995 must not be filed above the threshold: {names:?}"
     );
 }
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// P2a — the Form 8949 overflow PREFLIGHT (FILING-READINESS-PLAN rank 3).
+//
+// Form 8949 holds 14 rows per part per page and the full-return path does not paginate. Before this
+// preflight, a filer with more disposal legs than that got `error: IRS form fill: 16 rows exceed the
+// 14-row capacity of a single Part II page` — exit 2, output directory never created, EVERY form in
+// the packet lost — from a message naming no tax year, no remedy, and never saying this is a btctax
+// limit rather than the filer's error. Meanwhile `report --tax-year` on the same vault exits 0 and
+// prints every figure: the filer has the numbers and cannot get the paper.
+//
+// ★ The overflow is LOT-COUNT-driven, not dollar-driven. A weekly dollar-cost-averaging buyer holds
+// ~52 lots and any meaningful sale draws on more than 14 of them, while a single-lot whale with a $1M
+// gain emits one row — so the SMALL end of the dollar axis is the more exposed population.
+
+/// A TY2024 ledger whose single sale draws on `lots` separate long-term lots ⇒ `lots` Form 8949
+/// Part II rows (`form_8949` emits one row per disposal LEG, never aggregating). The DCA shape: many
+/// small weekly buys in 2022, one sale in 2024.
+fn dca_events_2024(lots: usize) -> Vec<LedgerEvent> {
+    let mut evs: Vec<LedgerEvent> = (0..lots)
+        .map(|i| {
+            ev(
+                &format!("dca-buy-{i}"),
+                datetime!(2022-01-05 12:00 UTC) + time::Duration::days(i as i64 * 7),
+                EventPayload::Acquire(Acquire {
+                    sat: 100_000,
+                    usd_cost: dec!(50),
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            )
+        })
+        .collect();
+    evs.push(ev(
+        "dca-sell",
+        datetime!(2024-06-15 12:00 UTC),
+        EventPayload::Dispose(Dispose {
+            sat: 100_000 * lots as i64,
+            usd_proceeds: dec!(100) * rust_decimal::Decimal::from(lots as i64),
+            fee_usd: dec!(0),
+            kind: DisposeKind::Sell,
+        }),
+    ));
+    evs
+}
+
+/// ★ P2a. 16 long-term legs on the full-return path: the refusal must be OURS — `CliError::Usage`
+/// naming the tax year, the leg count, the per-page capacity, that this is a btctax limitation, and a
+/// remedy that exists today — NOT the raw `FormsError::Overflow`, which names none of those.
+///
+/// B1 planted defect = the 16-leg household itself; delete the preflight and this reds on the error
+/// variant (`CliError::FormFill`, "16 rows exceed the 14-row capacity of a single Part II page").
+#[test]
+fn a_full_return_with_more_8949_legs_than_a_page_holds_refuses_with_year_capacity_and_remedy() {
+    let (_d, vault, out) = full_return_vault(&dca_events_2024(16), |_ri| {});
+
+    let err = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
+        .expect_err("16 legs exceed the 14-row Form 8949 page and cannot be filled");
+
+    let msg = match &err {
+        CliError::Usage(m) => m.clone(),
+        other => panic!(
+            "the overflow must be OUR named refusal (CliError::Usage), not the raw forms error: \
+             {other:?}"
+        ),
+    };
+    assert!(msg.contains("2024"), "names the tax year: {msg}");
+    assert!(msg.contains("Form 8949"), "names the form: {msg}");
+    assert!(msg.contains("16"), "names how many legs there are: {msg}");
+    assert!(msg.contains("14"), "names the per-page capacity: {msg}");
+    assert!(
+        msg.contains("btctax cannot yet"),
+        "says this is a btctax limitation, not the filer's error: {msg}"
+    );
+    assert!(
+        msg.contains("report --tax-year 2024") && msg.contains("export-snapshot"),
+        "names a remedy that exists today — every figure via `report`, the per-leg rows via the \
+         form8949.csv `export-snapshot` writes: {msg}"
+    );
+    assert!(
+        wrote_nothing(out.path()),
+        "a refused export leaves out_dir untouched — the packet is all-or-nothing"
+    );
+}
+
+/// The other half of the B1 pair: 14 legs — exactly the page capacity — still EXPORTS. A preflight
+/// that refuses one leg too early would be as wrong as no preflight at all (`>` vs `>=` is the
+/// mutation this kills).
+#[test]
+fn a_full_return_with_exactly_a_full_8949_page_of_legs_still_exports() {
+    let (_d, vault, out) = full_return_vault(&dca_events_2024(14), |_ri| {});
+
+    cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
+        .expect("14 legs fit the page exactly and must still file");
+    assert!(
+        out.path().join("00_f1040.pdf").exists(),
+        "the packet writes on the boundary case"
+    );
+}
