@@ -300,7 +300,10 @@ pub struct Form8960Lines {
     pub line9d: Usd,
     /// L11 — total deductions and modifications = 9d + 10 ⇒ 0.
     pub line11: Usd,
-    /// L12 — net investment income = line 8 − line 11.
+    /// L12 — "Net investment income. Subtract Part II, line 11, from Part I, line 8. … **If zero or
+    /// less, enter -0-**." The floor is the form's own, and it is load-bearing: the form files on
+    /// MAGI (Who Must File), so a capital-loss year with MAGI over the threshold reaches line 16
+    /// through here.
     pub line12: Usd,
     /// L13 — modified AGI (= AGI; fail-closed, no §911/CFC/PFIC add-backs).
     pub line13: Usd,
@@ -319,10 +322,34 @@ pub struct Form8960Lines {
 /// Derive the printed Form 8960 chain. Arguments are exactly those of [`form_8960`] and must be the
 /// same values; `f` supplies nothing the chain re-derives, so it is not taken.
 ///
-/// Returns `None` when there is **no NIIT** — line 17 is zero, so the form is not required and is not
-/// produced. (Below the MAGI threshold, or with no net investment income, §1411 imposes no tax.) That
-/// also keeps the chain in its well-behaved region: whenever line 17 > 0, both line 12 and line 15 are
-/// strictly positive, so line 16's `min` cannot pick up a negative NII from a capital-loss year.
+/// ★★★ **WHEN THE FORM FILES — i8960's Who Must File, which is CATEGORICAL** (final whole-branch
+/// review, P3-1):
+///
+/// > *"Attach Form 8960 to your return if your modified adjusted gross income (MAGI) is greater than
+/// > the applicable threshold amount."* (`design/forms/extract/i8960--2024.txt:61-64`)
+///
+/// It says MAGI over the threshold. It does not say "and only if tax is due". So `None` here means
+/// exactly one thing: **line 15 is zero**, i.e. MAGI did not exceed the §1411(b) threshold.
+///
+/// ★★ **THIS USED TO KEY ON `line17 <= 0`, AND PHASE 3 MADE THAT WRONG.** The old predicate was sound
+/// while line 11 was structurally zero — line 17 could then only be zero because the form was not
+/// engaged. Phase 3 made line 11 a *collected deduction* (the filer's own 9b allocation), which
+/// creates a second way to reach line 17 = 0: a 9b large enough to swallow line 8. The bound on 9b is
+/// `min(5a, 5e)` and is never related to line 8, so e.g. line 8 = $6,000 of interest with a $10,000
+/// SALT bound accepts 9b = $7,000. The result was a return with MAGI over the threshold, real
+/// investment income, and total tax reduced by the whole former NIIT **by a sworn filer allocation
+/// that printed nowhere** — the form silently dropped from the packet. That is this repo's own
+/// "figure with no reader" class, and it is invisible to both oracles (§G-9: neither models a Part II
+/// deduction).
+///
+/// ★ **THE TAX FIGURE IS UNCHANGED** by the fix, deliberately. Line 12 now carries its own printed
+/// instruction — *"If zero or less, enter -0-"* (`f8960--2024.txt:47-48`) — which the old code never
+/// applied because the `line17 <= 0` early return hid every case where it mattered. With line 12
+/// floored, line 16 = `min(line12, line15)` is non-negative, so line 17 is the same number it always
+/// was; what changes is that the form now PRINTS, showing the filer's allocation on the paper that
+/// carries it. The doc's old claim that the early return "keeps the chain in its well-behaved region"
+/// was true and is now redundant: the form's own line-12 instruction does that job, which is where it
+/// belonged.
 pub fn form_8960_lines(
     status: FilingStatus,
     taxable_interest: Usd,
@@ -342,7 +369,10 @@ pub fn form_8960_lines(
     let line9b = line9b_collected.map(round_dollar);
     let line9d = line9b.unwrap_or(Usd::ZERO); // "Add lines 9a, 9b, and 9c" — 9a/9c unmodelled
     let line11 = line9d; // …+ line 10 (unmodelled), but the form adds it, so it prints
-    let line12 = line8 - line11;
+                         // ★ L12 — "Subtract Part II, line 11, from Part I, line 8. … If zero or less, enter -0-."
+                         //   The floor is the FORM's, transcribed. It is what keeps line 16 out of the negative
+                         //   region in a capital-loss year now that the form files on MAGI rather than on tax.
+    let line12 = (line8 - line11).max(Usd::ZERO);
 
     let line13 = round_dollar(agi);
     let line14 = niit_threshold(status);
@@ -350,8 +380,12 @@ pub fn form_8960_lines(
     let line16 = line12.min(line15);
     let line17 = round_dollar(NIIT_RATE * line16.max(Usd::ZERO));
 
-    if line17 <= Usd::ZERO {
-        return None; // no §1411 tax ⇒ no Form 8960
+    // i8960 Who Must File: MAGI over the threshold ⇒ ATTACH. Line 15 is exactly "MAGI − threshold,
+    // floored at zero", so `line15 > 0` IS "MAGI is greater than the applicable threshold amount".
+    // Not `line17 > 0`: a filer whose own 9b allocation zeroes the tax still files the form that
+    // carries the allocation.
+    if line15 <= Usd::ZERO {
+        return None; // MAGI at or below the §1411(b) threshold ⇒ the form is not required
     }
     Some(Form8960Lines {
         line1,
@@ -775,22 +809,36 @@ mod tests {
         assert_ne!(l.line14, f.line5, "the asymmetry is real and deliberate");
     }
 
-    /// No §1411 tax ⇒ no Form 8960 (below the threshold, or no net investment income).
+    /// ★★★ **WHO MUST FILE IS THE MAGI TEST, NOT THE TAX TEST** (final whole-branch review, P3-1).
+    ///
+    /// i8960 (`design/forms/extract/i8960--2024.txt:61-64`): *"Attach Form 8960 to your return if
+    /// your modified adjusted gross income (MAGI) is greater than the applicable threshold amount."*
+    /// Categorical. So the form is absent for exactly one reason — MAGI at or below the threshold —
+    /// and present whenever MAGI clears it, however the tax comes out.
+    ///
+    /// This test used to assert the opposite of its second half: that an over-threshold filer whose
+    /// NII was a net loss filed NO form. That was the `line17 <= 0` predicate speaking, and phase 3
+    /// turned it from "sound but oddly stated" into a hole — a collected 9b large enough to swallow
+    /// line 8 dropped the form off a return whose total tax it had just reduced.
     #[test]
-    fn form_8960_absent_when_no_niit_is_owed() {
-        // Below the MAGI threshold.
-        assert!(form_8960_lines(
-            FilingStatus::Single,
-            dec!(50000),
-            Usd::ZERO,
-            Usd::ZERO,
-            Usd::ZERO,
-            dec!(150000),
-            None,
-        )
-        .is_none());
-        // Over the threshold but NII is a net LOSS (a §1211-limited capital loss reduces NII).
-        assert!(form_8960_lines(
+    fn form_8960_files_on_the_magi_threshold_and_not_on_whether_tax_is_owed() {
+        // ── ABSENT: below the MAGI threshold. The one and only reason. ─────────────────────────────
+        assert!(
+            form_8960_lines(
+                FilingStatus::Single,
+                dec!(50000),
+                Usd::ZERO,
+                Usd::ZERO,
+                Usd::ZERO,
+                dec!(150000),
+                None,
+            )
+            .is_none(),
+            "MAGI $150,000 is under the $200,000 Single threshold — Who Must File is not met"
+        );
+
+        // ── PRESENT: over the threshold, NII a net LOSS, so the tax is $0 and the form still files. ─
+        let l = form_8960_lines(
             FilingStatus::Single,
             dec!(1000),
             Usd::ZERO,
@@ -799,7 +847,78 @@ mod tests {
             dec!(300000),
             None,
         )
-        .is_none());
+        .expect("★ MAGI $300,000 exceeds the $200,000 threshold ⇒ ATTACH, whatever the tax is");
+        assert_eq!(
+            l.line12,
+            Usd::ZERO,
+            "line 12 carries its own printed instruction — \"If zero or less, enter -0-\" — so a \
+             net investment LOSS prints as zero rather than as a negative NII"
+        );
+        assert_eq!(
+            l.line5a,
+            dec!(-3000),
+            "…while line 5a still shows the actual §1211-limited loss: the floor is line 12's, and \
+             transcribing it onto 5a as well would hide the loss the filer really had"
+        );
+        assert_eq!(
+            l.line16,
+            Usd::ZERO,
+            "the smaller of line 12 ($0) and line 15 ($100,000)"
+        );
+        assert_eq!(l.line17, Usd::ZERO, "…and NO §1411 tax, which is the point");
+
+        // ── PRESENT: over the threshold with a COLLECTED 9b that zeroes the tax. P3-1 itself. ──────
+        //
+        // Line 8 = $6,000 of interest; the 9b bound is min(5a, 5e) and is NEVER related to line 8,
+        // so a $7,000 allocation is accepted against a $10,000 SALT bound. Before this fix the form
+        // vanished from the packet while the allocation reduced total tax by the whole former NIIT.
+        let l = form_8960_lines(
+            FilingStatus::Single,
+            dec!(6000),
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(300000),
+            Some(dec!(7000)),
+        )
+        .expect(
+            "★★ a filer whose own 9b allocation zeroes the NIIT still files the form that CARRIES \
+             that allocation — otherwise a sworn entry moves the tax and prints nowhere",
+        );
+        assert_eq!(
+            l.line9b,
+            Some(dec!(7000)),
+            "the allocation must appear on the paper — that is the whole finding"
+        );
+        assert_eq!(l.line11, dec!(7000), "…and flow into total deductions");
+        assert_eq!(
+            l.line12,
+            Usd::ZERO,
+            "$6,000 − $7,000 floors at zero per line 12's own instruction"
+        );
+        assert_eq!(
+            l.line17,
+            Usd::ZERO,
+            "so no tax is due, and the form says so"
+        );
+
+        // ── The discriminating twin: the SAME filer without the allocation owes the tax. ───────────
+        let t = form_8960_lines(
+            FilingStatus::Single,
+            dec!(6000),
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(300000),
+            None,
+        )
+        .expect("still over the threshold");
+        assert_eq!(
+            t.line17,
+            dec!(228),
+            "3.8% × $6,000 — the allocation above is worth $228, which is exactly why it may not \
+             move the tax without printing"
+        );
     }
 
     /// The printed chain cross-foots, and every cell is a whole dollar.

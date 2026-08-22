@@ -759,3 +759,101 @@ fn the_amt_is_the_same_figure_on_form_6251_schedule_2_and_the_1040() {
          different tax than the form computed."
     );
 }
+
+/// ★★★ **A COLLECTED 9b THAT ZEROES THE TAX MUST NOT DELETE THE FORM THAT CARRIES IT** (P3-1).
+///
+/// `form_8960_lines` used to return `None` on `line17 <= 0`. That was sound while line 11 was
+/// structurally zero — line 17 could then only be zero because the form was not engaged. Phase 3 made
+/// line 11 a **collected deduction**, so a large enough 9b became a second route to line 17 = 0: the
+/// bound on 9b is `min(5a, 5e)` and is never related to line 8, so an allocation can exceed the whole
+/// of Part I and still pass the refusal.
+///
+/// The result was a return with MAGI over the threshold, real investment income, and total tax
+/// reduced by the entire former NIIT **by a sworn filer allocation that printed nowhere** — this
+/// repo's "figure with no reader", and invisible to both oracles (§G-9: neither models a Part II
+/// deduction). i8960's Who Must File is categorical: *"Attach Form 8960 to your return if your
+/// modified adjusted gross income (MAGI) is greater than the applicable threshold amount."*
+///
+/// This KAT reads the assembled PACKET, not the line struct, because §G-28 is the point: a
+/// value-check cannot see a missing form.
+///
+/// **Plant:** restore `if line17 <= Usd::ZERO { return None; }` in `form_8960_lines` ⇒ reds.
+#[test]
+fn a_line_9b_that_zeroes_the_niit_keeps_form_8960_in_the_packet() {
+    let mut i = zero_inputs("Single");
+    i.w2_income = 300_000.0; // MAGI far over the $200,000 Single threshold
+    i.taxable_interest = 6_000.0; // real net investment income
+    i.state_income_tax = 20_000.0; // 5a — puts the 9b bound at the $10,000 §164(b)(6) cap
+    i.mortgage_interest = 30_000.0; // …and makes the return itemize, or the bound is $0
+    let (mut ri, state) = build_golden_return(&i);
+    // The filer's own §1411(c)(1)(B) allocation — "any reasonable method" is theirs to choose, and
+    // $7,000 exceeds the whole of Part I ($6,000) while staying under the $10,000 SALT bound.
+    ri.form_8960_line9b = Some(dec!(7000));
+    answer_all_live_declarations(&mut ri);
+
+    let filed = file(&ri, &state);
+
+    // ── PREMISES, so the KAT cannot pass by never reaching the region. ─────────────────────────────
+    assert_eq!(
+        filed.ar.niit.tax,
+        Usd::ZERO,
+        "★ the premise: the filer's own allocation has zeroed the §1411 tax. If this is ever \
+         non-zero the fixture has drifted out of the region the finding is about."
+    );
+    assert!(
+        filed.ar.niit.magi > dec!(200000),
+        "…while MAGI is still OVER the $200,000 Single threshold, which is the whole of Who Must \
+         File. MAGI: {}",
+        filed.ar.niit.magi
+    );
+
+    // ── THE FORM IS ON THE PAPER. ─────────────────────────────────────────────────────────────────
+    let names = form_names(&filed.forms);
+    assert!(
+        names.contains("f8960"),
+        "★★ Form 8960 must be IN the packet: i8960's Who Must File turns on MAGI, not on tax due, \
+         and the allocation that zeroed the tax is testimony that has to appear somewhere. \
+         Packet: {names:?}"
+    );
+
+    // ── …AND IT CARRIES THE ALLOCATION, read back off the filled PDF. ─────────────────────────────
+    let f8960_cells = cells(&filed.forms, "f8960", F8960_MAP_2024);
+    assert_eq!(
+        f8960_cells.get("line9b").map(String::as_str),
+        Some("7000"),
+        "the sworn allocation must be on the paper — printing the tax it produces while hiding the \
+         entry that produced it is the defect. Cells: {f8960_cells:?}"
+    );
+    assert_eq!(
+        f8960_cells.get("line12").map(String::as_str),
+        Some("0"),
+        "line 12 carries its own instruction, \"If zero or less, enter -0-\" — $6,000 − $7,000 is \
+         not printed as a negative net investment income"
+    );
+
+    // ══ THE DISCRIMINATING TWIN: no allocation ⇒ the same filer OWES the tax. ═════════════════════
+    //
+    // Without this, "the form is present" is satisfied by an emitter that always files Form 8960.
+    let (mut ri_t, state_t) = build_golden_return(&i);
+    ri_t.form_8960_line9b = None;
+    answer_all_live_declarations(&mut ri_t);
+    let twin = file(&ri_t, &state_t);
+    assert_eq!(
+        twin.ar.niit.tax,
+        dec!(228),
+        "3.8% × $6,000 — the allocation is worth $228, which is exactly why it may not move the tax \
+         without printing"
+    );
+    assert!(
+        form_names(&twin.forms).contains("f8960"),
+        "the twin files the form too — the two differ in the FIGURES, not in whether the form exists"
+    );
+    let twin_cells = cells(&twin.forms, "f8960", F8960_MAP_2024);
+    assert_eq!(
+        twin_cells.get("line9b").map(String::as_str),
+        None,
+        "★ and with no allocation made, 9b is BLANK — never a computed zero. Two blanks look alike \
+         on paper; a printed 0 here would swear the filer allocated nothing when they were never \
+         asked. Cells: {twin_cells:?}"
+    );
+}

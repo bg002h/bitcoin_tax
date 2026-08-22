@@ -931,15 +931,24 @@ fn derive_form_set(i: &GoldenInputs) -> BTreeSet<&'static str> {
     if f8959 {
         set.insert("f8959");
     }
-    // Form 8960 (NIIT) — net investment income AND MAGI over the threshold.
+    // ★★★ Form 8960 (NIIT) — MAGI over the threshold, FULL STOP (final whole-branch review, P3-1).
+    //
+    // i8960's Who Must File is categorical: *"Attach Form 8960 to your return if your modified
+    // adjusted gross income (MAGI) is greater than the applicable threshold amount."* It says nothing
+    // about net investment income being positive, or about tax being due.
+    //
+    // This derivation used to carry `nii > 0.0 &&`, mirroring the production `line17 <= 0` early
+    // return. Two independent statements of the law agreeing is worth a great deal — but only when
+    // they are derived independently FROM THE LAW, and both of these had been derived from each
+    // other's behaviour instead. Phase 3 then made a collected 9b able to zero line 17 on a return
+    // with real investment income, dropping the form off the packet, and neither half objected.
     let net_cap_gain = (i.short_term_capital_gains + i.long_term_capital_gains).max(0.0);
-    let nii = i.taxable_interest + i.ordinary_dividends + net_cap_gain;
     let magi = i.w2_income
         + i.taxable_interest
         + i.ordinary_dividends
         + net_cap_gain
         + i.self_employment_income;
-    let f8960 = nii > 0.0 && magi > threshold;
+    let f8960 = magi > threshold;
     if f8960 {
         set.insert("f8960");
     }
@@ -1028,6 +1037,29 @@ fn derived_form_set_reproduces_the_twelve_anchors() {
         ),
         (
             "mfj_se_over_the_addl_medicare_threshold",
+            // ★★★ THE PINNED LAW WAS WRONG HERE, AND THIS IS THE ONE EDIT THE ASSERTION BELOW
+            // FORBIDS — so it is justified against the primary source, not against the code.
+            //
+            // This anchor gained **f8960** (final whole-branch review, P3-1). i8960's Who Must File
+            // (`design/forms/extract/i8960--2024.txt:61-64`) is unqualified:
+            //
+            //     "Attach Form 8960 to your return if your modified adjusted gross income (MAGI) is
+            //      greater than the applicable threshold amount."
+            //
+            // MEASURED, not hand-derived: this household's AGI is **$298,928.74** against the
+            // $250,000 MFJ threshold. It has no investment income at all, and the instruction does
+            // not care — it names MAGI and nothing else. §1411(a)(1) taxes the LESSER of NII and the
+            // MAGI excess, so the tax is $0 and the form is how the return says so.
+            //
+            // Both the hand-audited set and the production predicate carried an unwritten "and NII >
+            // 0" that no instruction supports, which is why neither objected when phase 3 made a
+            // collected 9b able to zero line 17 on a return WITH investment income and drop the form
+            // off the packet. Two statements of the law agreeing is worth nothing when each was
+            // derived from the other's behaviour instead of from the manual.
+            //
+            // ★ Attaching a required form is never a defect; omitting one is. Every cell here is a
+            //   computed zero over real figures, so this is not a fabricated entry — it is the form
+            //   the instructions require, reporting no tax.
             &[
                 "f1040",
                 "f1040s1",
@@ -1036,6 +1068,7 @@ fn derived_form_set_reproduces_the_twelve_anchors() {
                 "schedule_se",
                 "f8995",
                 "f8959",
+                "f8960",
             ][..],
         ),
     ]);
