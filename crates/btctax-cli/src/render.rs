@@ -1569,6 +1569,11 @@ pub fn render_dual_report(
     } else {
         let _ = writeln!(s, "  → AMOUNT OWED (L37):      {}", fmt_money(f.line37));
     }
+    // ★ P6 — the §170(d)(1) charitable carryover-out, printed here because this is the block a filer
+    // reads to see what their return did. Before this it reached no human at all.
+    if let Some(block) = render_charitable_carryover_out(year, &ar.charitable_carryover_out) {
+        s.push_str(&block);
+    }
     // §6: the two figures answer different questions and are NEVER reconciled.
     let delta_str = match delta {
         btctax_core::TaxOutcome::Computed(r) => fmt_money(r.total_federal_tax_attributable),
@@ -1595,6 +1600,89 @@ pub fn render_dual_report(
          reconcile to the dollar."
     );
     s
+}
+
+/// The §170(b) ceiling class, in the words the statute and Pub. 526 use.
+///
+/// ★ A `match`, not a lookup table, on purpose: adding a `CharitableClass` variant reds this
+/// exhaustively rather than printing a debug name at a filer.
+fn charitable_class_label(c: btctax_core::tax::return_inputs::CharitableClass) -> &'static str {
+    use btctax_core::tax::return_inputs::CharitableClass as C;
+    match c {
+        C::Cash60 => "cash to a 50% organization (60%-of-AGI ceiling)",
+        C::Cash30 => "cash to a non-50% organization (30%-of-AGI ceiling)",
+        C::CapGainProp30 => {
+            "capital-gain property at FMV to a 50% organization (30%-of-AGI ceiling)"
+        }
+        C::CapGainProp20 => "capital-gain property to a non-50% organization (20%-of-AGI ceiling)",
+        C::OrdinaryProp50 => {
+            "ordinary-income or basis property to a 50% organization (50%-of-AGI ceiling)"
+        }
+        C::OrdinaryProp30 => {
+            "ordinary-income or basis property to a non-50% organization (30%-of-AGI ceiling)"
+        }
+    }
+}
+
+/// ★ P6 (FILING-READINESS-PLAN rank 9) — **the §170(d)(1) charitable carryover-out, shown to a
+/// human.** `None` when nothing carries.
+///
+/// The value was computed on every full-return run, correct, and tested — and read by exactly one
+/// caller, `apply_carryover_writeback`, reachable only from `report --write-carryover`, which itself
+/// errors unless a year+1 row already exists. A filer whose gift exceeded its §170(b) ceiling was
+/// therefore never told a carryover existed: a deduction they had already paid for, silently
+/// forgone. Nothing here is computed — the number already exists on `AbsoluteReturn`; this is the
+/// reader it never had.
+///
+/// **Per class and per origin year**, because neither is decoration: each class has its own ceiling,
+/// so the classes cannot be summed into one figure a filer could use, and §170(d)(1) carries an
+/// excess for only the five succeeding years, so a vintage is the difference between a live
+/// deduction and an expired one. The last usable year is printed for the same reason.
+///
+/// ★ It is NOT a rich-filer line. The ceiling is a FRACTION of AGI, so the lower the income the
+/// lower the bar — at $0 AGI the ceiling is $0 and 100% of the gift carries.
+pub fn render_charitable_carryover_out(
+    year: i32,
+    items: &[btctax_core::tax::return_inputs::CharitableCarryItem],
+) -> Option<String> {
+    if items.is_empty() {
+        return None;
+    }
+    let mut s = String::new();
+    let _ = writeln!(
+        s,
+        "\n  ── §170(d)(1) Charitable carryover to {next} ──",
+        next = year + 1
+    );
+    // Oldest vintage first, then class — the order Pub. 526 consumes them in, so the list reads as
+    // the order they will be used.
+    let mut rows: Vec<_> = items.iter().collect();
+    rows.sort_by_key(|c| (c.origin_year, format!("{:?}", c.class)));
+    let total: Usd = rows.iter().map(|c| c.amount).sum();
+    for c in &rows {
+        let _ = writeln!(
+            s,
+            "  • {amount:>14}  from {origin} — {label}; usable through {last}",
+            amount = fmt_money(c.amount),
+            origin = c.origin_year,
+            label = charitable_class_label(c.class),
+            // §170(d)(1): expired once `year − origin > 5`, so `origin + 5` is the last live year.
+            last = c.origin_year + 5,
+        );
+    }
+    if rows.len() > 1 {
+        let _ = writeln!(s, "  • {:>14}  TOTAL", fmt_money(total));
+    }
+    let _ = writeln!(
+        s,
+        "  Your {year} gifts exceeded their §170(b) ceiling, so the excess is NOT deducted on this \
+         return —\n  it carries forward. This is deduction you have already paid for; it is lost if \
+         it is never claimed.\n  Roll it into next year's inputs with `btctax report --tax-year \
+         {year} --write-carryover` ({next}'s\n  full-return inputs must exist first), or enter it by \
+         hand on {next}'s row.",
+        next = year + 1
+    );
+    Some(s)
 }
 
 /// P2-B Task 3: render the RAW pre-netting Schedule D part totals (Part I ST, Part II LT) for

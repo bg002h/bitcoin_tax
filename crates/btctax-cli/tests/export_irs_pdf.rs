@@ -1274,3 +1274,281 @@ fn an_above_threshold_reit_only_export_files_form_8995a() {
         "the SIMPLIFIED Form 8995 must not be filed above the threshold: {names:?}"
     );
 }
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// P2a — the Form 8949 overflow PREFLIGHT (FILING-READINESS-PLAN rank 3).
+//
+// Form 8949 holds 14 rows per part per page and the full-return path does not paginate. Before this
+// preflight, a filer with more disposal legs than that got `error: IRS form fill: 16 rows exceed the
+// 14-row capacity of a single Part II page` — exit 2, output directory never created, EVERY form in
+// the packet lost — from a message naming no tax year, no remedy, and never saying this is a btctax
+// limit rather than the filer's error. Meanwhile `report --tax-year` on the same vault exits 0 and
+// prints every figure: the filer has the numbers and cannot get the paper.
+//
+// ★ The overflow is LOT-COUNT-driven, not dollar-driven. A weekly dollar-cost-averaging buyer holds
+// ~52 lots and any meaningful sale draws on more than 14 of them, while a single-lot whale with a $1M
+// gain emits one row — so the SMALL end of the dollar axis is the more exposed population.
+
+/// A TY2024 ledger whose single sale draws on `lots` separate long-term lots ⇒ `lots` Form 8949
+/// Part II rows (`form_8949` emits one row per disposal LEG, never aggregating). The DCA shape: many
+/// small weekly buys in 2022, one sale in 2024.
+fn dca_events_2024(lots: usize) -> Vec<LedgerEvent> {
+    let mut evs: Vec<LedgerEvent> = (0..lots)
+        .map(|i| {
+            ev(
+                &format!("dca-buy-{i}"),
+                datetime!(2022-01-05 12:00 UTC) + time::Duration::days(i as i64 * 7),
+                EventPayload::Acquire(Acquire {
+                    sat: 100_000,
+                    usd_cost: dec!(50),
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            )
+        })
+        .collect();
+    evs.push(ev(
+        "dca-sell",
+        datetime!(2024-06-15 12:00 UTC),
+        EventPayload::Dispose(Dispose {
+            sat: 100_000 * lots as i64,
+            usd_proceeds: dec!(100) * rust_decimal::Decimal::from(lots as i64),
+            fee_usd: dec!(0),
+            kind: DisposeKind::Sell,
+        }),
+    ));
+    evs
+}
+
+/// ★ P2a. 16 long-term legs on the full-return path: the refusal must be OURS — `CliError::Usage`
+/// naming the tax year, the leg count, the per-page capacity, that this is a btctax limitation, and a
+/// remedy that exists today — NOT the raw `FormsError::Overflow`, which names none of those.
+///
+/// B1 planted defect = the 16-leg household itself; delete the preflight and this reds on the error
+/// variant (`CliError::FormFill`, "16 rows exceed the 14-row capacity of a single Part II page").
+#[test]
+fn a_full_return_with_more_8949_legs_than_a_page_holds_refuses_with_year_capacity_and_remedy() {
+    let (_d, vault, out) = full_return_vault(&dca_events_2024(16), |_ri| {});
+
+    let err = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
+        .expect_err("16 legs exceed the 14-row Form 8949 page and cannot be filled");
+
+    let msg = match &err {
+        CliError::Usage(m) => m.clone(),
+        other => panic!(
+            "the overflow must be OUR named refusal (CliError::Usage), not the raw forms error: \
+             {other:?}"
+        ),
+    };
+    assert!(msg.contains("2024"), "names the tax year: {msg}");
+    assert!(msg.contains("Form 8949"), "names the form: {msg}");
+    assert!(msg.contains("16"), "names how many legs there are: {msg}");
+    assert!(msg.contains("14"), "names the per-page capacity: {msg}");
+    assert!(
+        msg.contains("btctax cannot yet"),
+        "says this is a btctax limitation, not the filer's error: {msg}"
+    );
+    assert!(
+        msg.contains("report --tax-year 2024") && msg.contains("export-snapshot"),
+        "names a remedy that exists today — every figure via `report`, the per-leg rows via the \
+         form8949.csv `export-snapshot` writes: {msg}"
+    );
+    assert!(
+        wrote_nothing(out.path()),
+        "a refused export leaves out_dir untouched — the packet is all-or-nothing"
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// P6 — the §170(d)(1) charitable carryover-out must reach a human on the EXPORT path too
+// (FILING-READINESS-PLAN rank 9). `report --tax-year` is not the only way a filer meets their
+// return; `export-irs-pdf` is the one that hands them a PDF to sign, and it prints the §170 warnings
+// already. A carryover the filer is never told about is a deduction they paid for and forfeit.
+
+/// A TY2024 full-return vault whose gift OVERFLOWS its §170(b) ceiling: $50,000 of wages against a
+/// $40,000 cash gift, so the 60%-of-AGI ceiling leaves an excess to carry into 2025.
+fn full_return_vault_with_a_gift_over_its_ceiling(
+) -> (tempfile::TempDir, PathBuf, tempfile::TempDir) {
+    use btctax_core::tax::return_inputs::{
+        CharitableClass, CharitableGift, Owner, ScheduleAInputs, W2,
+    };
+    full_return_vault(&real_events_2024(), |ri| {
+        ri.w2s = vec![W2 {
+            owner: Owner::Taxpayer,
+            employer: "ACME".into(),
+            box1_wages: dec!(50000),
+            box2_fed_withheld: dec!(5000),
+            box3_ss_wages: dec!(50000),
+            box5_medicare_wages: dec!(50000),
+            ..Default::default()
+        }];
+        ri.schedule_a = Some(ScheduleAInputs {
+            charitable: vec![CharitableGift {
+                class: CharitableClass::Cash60,
+                amount: dec!(40000),
+            }],
+            ..Default::default()
+        });
+    })
+}
+
+/// ★ P6, the report struct: the export path must CARRY the carryover out to its caller. Without this
+/// the value has no reader on this path at all.
+#[test]
+fn the_full_return_export_report_carries_the_charitable_carryover_out() {
+    let (_d, vault, out) = full_return_vault_with_a_gift_over_its_ceiling();
+    let rep = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
+        .expect("the packet exports");
+    assert!(
+        !rep.charitable_carryover_out.is_empty(),
+        "a gift over its §170(b) ceiling must carry its carryover out on the export report"
+    );
+    assert!(
+        rep.charitable_carryover_out
+            .iter()
+            .all(|c| c.origin_year == 2024 && c.amount > btctax_core::Usd::ZERO),
+        "…tagged with the origin year and a real amount: {:?}",
+        rep.charitable_carryover_out
+    );
+}
+
+/// ★ P6, the human: running the real binary, `export-irs-pdf` must NAME the carryover on stderr,
+/// beside the other §170 notes. Mutation: delete the block from main.rs and this reds — which is the
+/// only thing that pins the value reaches a person rather than a struct field.
+#[test]
+fn export_irs_pdf_tells_the_filer_about_the_charitable_carryover() {
+    let (_d, vault, out) = full_return_vault_with_a_gift_over_its_ceiling();
+    let bin = env!("CARGO_BIN_EXE_btctax");
+    let res = std::process::Command::new(bin)
+        .arg("--vault")
+        .arg(&vault)
+        .args(["export-irs-pdf", "--tax-year", "2024", "--out"])
+        .arg(out.path().join("packet"))
+        .env("BTCTAX_PASSPHRASE", "pw")
+        .output()
+        .expect("btctax binary must execute");
+    let stderr = String::from_utf8_lossy(&res.stderr).into_owned();
+    assert_eq!(res.status.code(), Some(0), "the export succeeds: {stderr}");
+    assert!(
+        stderr.contains("Charitable carryover to 2025"),
+        "the export must name the §170(d)(1) carryover on stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("--write-carryover"),
+        "…and how to roll it forward: {stderr}"
+    );
+}
+
+/// The other half of the B1 pair: 14 legs — exactly the page capacity — still EXPORTS. A preflight
+/// that refuses one leg too early would be as wrong as no preflight at all (`>` vs `>=` is the
+/// mutation this kills).
+#[test]
+fn a_full_return_with_exactly_a_full_8949_page_of_legs_still_exports() {
+    let (_d, vault, out) = full_return_vault(&dca_events_2024(14), |_ri| {});
+
+    cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
+        .expect("14 legs fit the page exactly and must still file");
+    assert!(
+        out.path().join("00_f1040.pdf").exists(),
+        "the packet writes on the boundary case"
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// N4 — the packet's UNSIGNALLED HAND-MARKS (FILING-READINESS-PLAN rank 14).
+//
+// A no-crypto packet leaves the Digital Asset question unmarked (btctax cannot swear "No" for a
+// ledger it was not given) and the line-7 "If not required, check here" box blank (it cannot
+// establish that Schedule D is NOT required). Both blanks are CORRECT — "an entry is testimony", and
+// btctax must never answer for the filer. What was wrong is that the filer was never TOLD: no
+// advisory named the digital-asset question, and manifest.txt was one line of stapling order. A
+// filer signed a return with a mandatory question unanswered and no instruction anywhere in the
+// product's output.
+//
+// ★ The fix adds the SIGNAL, never the answer. Owner decision 13 puts it in the manifest — the one
+// artifact the filer is told to follow while assembling paper.
+
+/// A TY2024 full-return vault with NO crypto activity at all: a plain wage earner. This is the L1
+/// household of the plan's low-end pass, and the population for both mark 1 and mark 2.
+fn no_crypto_full_return_vault() -> (tempfile::TempDir, PathBuf, tempfile::TempDir) {
+    use btctax_core::tax::return_inputs::{Owner, W2};
+    full_return_vault(&[], |ri| {
+        ri.w2s = vec![W2 {
+            owner: Owner::Taxpayer,
+            employer: "ACME".into(),
+            box1_wages: dec!(40000),
+            box2_fed_withheld: dec!(3000),
+            box3_ss_wages: dec!(40000),
+            box5_medicare_wages: dec!(40000),
+            ..Default::default()
+        }];
+    })
+}
+
+/// ★ N4. The no-crypto packet's manifest must ENUMERATE the marks btctax deliberately left for the
+/// filer — and must not answer any of them.
+///
+/// Mutation: delete the `hand_marks` block from the manifest and this reds.
+#[test]
+fn a_no_crypto_packet_names_the_marks_the_filer_must_make_by_hand() {
+    let (_d, vault, out) = no_crypto_full_return_vault();
+    let rep = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
+        .expect("a plain wage earner's packet exports");
+    let manifest = std::fs::read_to_string(out.path().join("manifest.txt")).unwrap();
+
+    assert!(
+        manifest.contains("COMPLETE BY HAND"),
+        "the manifest must carry a hand-marks section: {manifest}"
+    );
+    assert!(
+        manifest.contains("Digital Asset"),
+        "…naming the Digital Asset question, which is mandatory and unanswered: {manifest}"
+    );
+    assert!(
+        manifest.contains("line 7"),
+        "…the line-7 \"If not required, check here\" box, blank on a no-Schedule-D packet: {manifest}"
+    );
+    assert!(
+        manifest.contains("penalties of perjury") || manifest.contains("sign"),
+        "…and the signature block, which is every filer's: {manifest}"
+    );
+    // The signal, never the answer.
+    assert_eq!(
+        rep.hand_marks.len(),
+        3,
+        "exactly the three marks this packet leaves: {:?}",
+        rep.hand_marks
+    );
+}
+
+/// The other half of the B1 pair. A packet where btctax DID answer the Digital Asset question (there
+/// is crypto activity) and DID attach a Schedule D must not tell the filer to make either mark — a
+/// list that always says the same thing signals nothing, and instructing a filer to hand-mark a box
+/// on a correctly-filed form is worse than silence.
+#[test]
+fn a_crypto_packet_does_not_list_marks_btctax_already_made() {
+    let (_d, vault, out) = full_return_vault(&real_events_2024(), |_ri| {});
+    let rep = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
+        .expect("the crypto packet exports");
+    let manifest = std::fs::read_to_string(out.path().join("manifest.txt")).unwrap();
+
+    assert!(
+        !manifest.contains("Digital Asset"),
+        "btctax answered the Digital Asset question \"Yes\" — it is not the filer's to make: {manifest}"
+    );
+    assert!(
+        !manifest.contains("line 7"),
+        "a Schedule D IS attached, so the line-7 \"if not required\" box is not the filer's: {manifest}"
+    );
+    // The signature is always theirs, on every return.
+    assert_eq!(
+        rep.hand_marks.len(),
+        1,
+        "only the signature block remains: {:?}",
+        rep.hand_marks
+    );
+    assert!(
+        manifest.contains("COMPLETE BY HAND"),
+        "…and it is still announced: {manifest}"
+    );
+}

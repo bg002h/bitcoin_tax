@@ -2276,3 +2276,141 @@ fn pseudo_dual_report_absolute_totals_carry_pseudo_suffix() {
         "the Absolute TOTAL TAX line must be [PSEUDO]-suffixed under pseudo: {abs}"
     );
 }
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// P6 — the §170(d)(1) charitable carryover-out must reach a HUMAN (FILING-READINESS-PLAN rank 9).
+//
+// `charitable_carryover_out` is computed on every full-return run, is correct, and is tested — and
+// before this it had ZERO readers outside `apply_carryover_writeback`, which is reachable only from
+// `report --write-carryover`, which itself ERRORS unless a year+1 row already exists. So a filer
+// whose gift exceeded its §170(b) ceiling was never told a carryover existed at all.
+//
+// ★ This is not a rich-filer item. The ceiling is a FRACTION OF AGI, so the lower the income the
+// lower the bar: at $0 AGI the ceiling is $0 and 100% of the gift carries forward, invisibly.
+
+/// A 2024 full-return vault whose gift OVERFLOWS its §170(b)(1)(A) ceiling: $50,000 of wages plus a
+/// $10,000 long-term crypto gain (AGI $60,000, so the 60% cash ceiling is $36,000) against a $40,000
+/// cash gift ⇒ $4,000 carries to 2025. Same shape as
+/// `carryover_write_back_round_trips_and_respects_user_precedence`'s fixture.
+fn vault_with_a_gift_over_its_ceiling() -> (tempfile::TempDir, PathBuf) {
+    use btctax_core::tax::return_inputs::{
+        CharitableClass, CharitableGift, Owner, ReturnInputs, ScheduleAInputs, W2,
+    };
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2024(csv_dir.path());
+    let (dir, vault) = make_vault_with(&csv);
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::set(
+            s.conn(),
+            2024,
+            &btctax_core::tax::testonly::answered(ReturnInputs {
+                filing_status: FilingStatus::Single,
+                header: btctax_core::tax::testonly::not_a_dependent(),
+                w2s: vec![W2 {
+                    owner: Owner::Taxpayer,
+                    box1_wages: dec!(50000),
+                    box3_ss_wages: dec!(50000),
+                    box5_medicare_wages: dec!(50000),
+                    ..Default::default()
+                }],
+                schedule_a: Some(ScheduleAInputs {
+                    charitable: vec![CharitableGift {
+                        class: CharitableClass::Cash60,
+                        amount: dec!(40000),
+                    }],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+        s.save().unwrap();
+    }
+    // Keep the csv tempdir alive only as long as the import needed it; `dir` owns the vault.
+    drop(csv_dir);
+    (dir, vault)
+}
+
+/// ★ P6. `report --tax-year 2024` must PRINT the charitable carryover, per class and per origin
+/// year. Mutation: delete the `render_charitable_carryover_out` call from `render_dual_report` and
+/// this reds.
+#[test]
+fn a_gift_over_its_ceiling_prints_its_charitable_carryover_out_in_the_report() {
+    let (_dir, vault) = vault_with_a_gift_over_its_ceiling();
+    let dual = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0))
+        .unwrap()
+        .dual_report
+        .expect("a ReturnInputs-provenance year renders the §6 dual report");
+
+    assert!(
+        dual.contains("Charitable carryover to 2025"),
+        "the report must name the carryover and the year it lands in: {dual}"
+    );
+    assert!(
+        dual.contains("4000.00"),
+        "…with the amount ($60,000 AGI × 60% = $36,000 ceiling against a $40,000 gift): {dual}"
+    );
+    assert!(
+        dual.contains("2024"),
+        "…tagged by ORIGIN YEAR, because §170(d)(1) expires it after five: {dual}"
+    );
+    assert!(
+        dual.contains("60%"),
+        "…and by §170(b) CLASS, because each class has its own ceiling: {dual}"
+    );
+    assert!(
+        dual.contains("--write-carryover"),
+        "…and it must say how to roll it forward: {dual}"
+    );
+}
+
+/// The other half of the pair — a gift that fits UNDER its ceiling prints NO carryover block. A line
+/// that always appears tells the filer nothing, and a $0 carryover printed as a line is the
+/// fabricated-testimony shape this repo refuses everywhere else.
+#[test]
+fn a_gift_within_its_ceiling_prints_no_charitable_carryover_line() {
+    use btctax_core::tax::return_inputs::{
+        CharitableClass, CharitableGift, Owner, ReturnInputs, ScheduleAInputs, W2,
+    };
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2024(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::set(
+            s.conn(),
+            2024,
+            &btctax_core::tax::testonly::answered(ReturnInputs {
+                filing_status: FilingStatus::Single,
+                header: btctax_core::tax::testonly::not_a_dependent(),
+                w2s: vec![W2 {
+                    owner: Owner::Taxpayer,
+                    box1_wages: dec!(50000),
+                    box3_ss_wages: dec!(50000),
+                    box5_medicare_wages: dec!(50000),
+                    ..Default::default()
+                }],
+                schedule_a: Some(ScheduleAInputs {
+                    // $1,000 against a $36,000 ceiling — nothing carries.
+                    charitable: vec![CharitableGift {
+                        class: CharitableClass::Cash60,
+                        amount: dec!(1000),
+                    }],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+        s.save().unwrap();
+    }
+    let dual = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0))
+        .unwrap()
+        .dual_report
+        .expect("a ReturnInputs-provenance year renders the §6 dual report");
+    assert!(
+        !dual.contains("Charitable carryover"),
+        "a gift within its ceiling creates no carryover, so nothing may be printed: {dual}"
+    );
+}

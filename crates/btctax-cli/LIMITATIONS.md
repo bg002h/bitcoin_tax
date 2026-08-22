@@ -168,7 +168,7 @@ professional) before filing.
 
 | Omitted | What it would do | What to do |
 |---|---|---|
-| **Child Tax Credit / Credit for Other Dependents** (Schedule 8812) | Up to $2,000 per qualifying child; $500 per other dependent. 1040 line 19 is pinned to **$0**. | File Schedule 8812 yourself. Your tax is overstated by up to that amount. |
+| **Child Tax Credit / Credit for Other Dependents** (Schedule 8812) | Up to $2,000 per qualifying child; $500 per other dependent — **unless §24(b) has already phased it out at your income**, in which case the credit is $0 for any composition of dependents. Either way 1040 line 19 is **$0**. | **Your report's advisory says which case you are in — read it.** If it says the credit is *NOT AVAILABLE TO YOU*, line 19's $0 is the **correct** figure and there is no Schedule 8812 for you to file. Otherwise file Schedule 8812 yourself: your tax is **overstated** by up to that amount. |
 | **Earned Income Credit** | A refundable credit for lower-income working households. | Check EIC eligibility (Pub. 596) yourself. |
 | **Education credits** (AOTC / Lifetime Learning), **dependent-care** (Form 2441), **saver's**, **energy**, **adoption** credits | Various nonrefundable/refundable credits. | Claim separately if eligible. |
 | **Direct deposit** of a refund (1040 lines 35b–35d) | Faster refund. | Left blank — you will receive a **paper check**. |

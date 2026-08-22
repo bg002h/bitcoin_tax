@@ -315,6 +315,89 @@ pub struct IrsPdfReport {
     /// the one that hands them a PDF to sign, so it is the last place the omissions should be silent.
     /// Empty on the crypto-slice path, which computes no full return.
     pub advisories: Vec<btctax_core::tax::advisories::Advisory>,
+    /// ★ P6 (FILING-READINESS-PLAN rank 9) — the §170(d)(1) charitable carryover to next year, per
+    /// class and vintage, so the EXPORT path can tell the filer it exists.
+    ///
+    /// `AbsoluteReturn::charitable_carryover_out` is computed on every full-return run and was read by
+    /// exactly ONE caller — `apply_carryover_writeback`, reachable only from `report
+    /// --write-carryover`, which errors unless a year+1 row already exists. A filer whose gift
+    /// exceeded its §170(b) ceiling was therefore never told: a deduction already paid for, silently
+    /// forgone. This is not a rich-filer case — the ceiling is a FRACTION of AGI, so at $0 AGI the
+    /// ceiling is $0 and 100% of the gift carries.
+    ///
+    /// Empty on the crypto-slice path, which computes no full return and no Schedule A.
+    pub charitable_carryover_out: Vec<btctax_core::tax::return_inputs::CharitableCarryItem>,
+    /// ★ N4 (FILING-READINESS-PLAN rank 14) — the marks btctax deliberately did NOT make on this
+    /// packet, one string per mark. See [`hand_marks`].
+    ///
+    /// Carried out so the caller can say how many there are without re-deriving the list; the text
+    /// itself lives in the packet's `manifest.txt` (owner decision 13), which is the artifact the
+    /// filer is told to follow while assembling paper. Empty on the crypto-slice path, whose 1040 is
+    /// watermarked "WORKSHEET — NOT A COMPLETE FORM 1040" and is not signed or filed.
+    pub hand_marks: Vec<String>,
+}
+
+/// ★ N4 — **the marks btctax deliberately leaves for the filer**, in the order they appear on the
+/// form. One string per mark; empty is impossible (the signature is every filer's).
+///
+/// **The signal, never the answer.** Each of these is blank because it is the filer's to make, not
+/// because it is zero — "an entry is testimony," and a `0` or a checked box btctax cannot vouch for
+/// is fabricated testimony on a §6065-signed page. What was missing was not the mark; it was any
+/// statement anywhere in the product's output that the mark exists. A no-crypto filer signed a return
+/// with a mandatory question unanswered, and the packet's `manifest.txt` was one line of stapling
+/// order.
+///
+/// Each entry is CONDITIONED on the mark actually being blank in THIS packet, because a list that
+/// always says the same thing signals nothing — and telling a filer to hand-mark a box on a
+/// correctly-filed form is worse than silence.
+fn hand_marks(printed: &btctax_core::tax::packet::PrintedReturn) -> Vec<String> {
+    let mut marks = Vec::new();
+    if !printed.forms.f1040.digital_asset_yes {
+        marks.push(
+            "Form 1040 — the Digital Asset question (above line 1a): neither \"Yes\" nor \"No\" is \
+             marked. btctax found no digital-asset activity in this vault, but it will not swear \
+             \"No\" for a ledger it was never given — a wrong \"No\" here is sworn testimony under \
+             §6065. The question is MANDATORY: answer it yourself before you sign."
+                .to_string(),
+        );
+    }
+    if !printed.forms.sch_d.must_file() {
+        marks.push(
+            "Form 1040 line 7 — \"Attach Schedule D if required. If not required, check here\": the \
+             box is blank and no Schedule D is in this packet. btctax cannot establish that Schedule \
+             D is NOT required — it has no input for Schedule D lines 4, 5, 11 or 12 (Forms 6252, \
+             4684, 6781, 8824, 4797, 2439, or a K-1). Check the box only if you know none of those \
+             applies to you."
+                .to_string(),
+        );
+    }
+    marks.push(
+        "Form 1040 page 2 — the signature block: your signature, the date, your occupation, and the \
+         Identity Protection PIN if the IRS issued you one — and the same again for your spouse if \
+         you are filing jointly. A return is not filed until it is signed under penalties of perjury \
+         (§6065), and no software may sign it for you."
+            .to_string(),
+    );
+    marks
+}
+
+/// Render [`hand_marks`] as the packet manifest's closing section — the manifest is the artifact the
+/// filer is told to follow while assembling paper, which is why the marks live there (decision 13)
+/// rather than only on a stderr line that scrolls away.
+fn hand_marks_block(marks: &[String]) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::from(
+        "\n# ── COMPLETE BY HAND — marks btctax deliberately did NOT make ──\n\
+         #\n\
+         # These are blank because they are YOURS to make, not because they are zero. btctax does\n\
+         # not answer for the filer, and it will not sign.\n#\n",
+    );
+    for m in marks {
+        for line in crate::render::wrap_bulleted(m).lines() {
+            let _ = writeln!(s, "#{line}");
+        }
+    }
+    s
 }
 
 /// The **[I5]** broker-reporting advisory line, year-aware — or `None` when no disposition may have
@@ -715,8 +798,14 @@ pub(crate) fn export_irs_pdf_from_session(
         .filter(|b| b.kind.severity() == Severity::Hard)
         .count();
     Ok(IrsPdfReport {
-        // The crypto slice computes no full return, so there are no full-return advisories.
+        // The crypto slice computes no full return, so there are no full-return advisories — and no
+        // Schedule A, hence no §170(d)(1) carryover either.
         advisories: Vec::new(),
+        charitable_carryover_out: Vec::new(),
+        // N4 does not apply to the slice: its 1040 is a WORKSHEET (watermarked "NOT A COMPLETE FORM
+        // 1040"), it is never signed or filed, and the note printed for it already says every other
+        // line is the filer's.
+        hand_marks: Vec::new(),
         full_return_paths: Vec::new(),
         full_return_manifest: None,
         forms_ignored_full_return: false, // crypto-slice path honors --forms
@@ -759,6 +848,28 @@ fn part_ii_overflow_message(tax_year: i32, overflow: &btctax_forms::PartIiOverfl
         cap = overflow.capacity,
         chars = overflow.chars_fit,
     )
+}
+
+/// P2a: the Form 8949 row-overflow refusal (FILING-READINESS-PLAN rank 3), phrased the way the two
+/// Form 8275 preflights are — name the year, name the capacity, name a remedy that exists **today**.
+///
+/// Three things this says that `FormsError::Overflow`'s Display cannot. (1) The tax year, so a filer
+/// with several years in one vault knows which export failed. (2) That this is a **btctax** limitation
+/// and not a defect in their ledger — the count is lot-driven, so an ordinary dollar-cost-averaging
+/// buyer trips it and would otherwise reasonably go looking for the mistake in their own data. (3) A
+/// remedy: the figures are all computable (`report --tax-year` exits 0 on exactly this vault) and
+/// `export-snapshot --tax-year` writes `form8949.csv` with one row per disposal leg — which is the
+/// input a hand-completed Form 8949 plus its continuation pages needs.
+fn form_8949_overflow_message(tax_year: i32, over: &[String], cap: usize) -> String {
+    format!(
+        "cannot export {tax_year}: the {tax_year} Form 8949 needs {needs}, but one page holds {cap} \
+         rows per part and btctax cannot yet paginate Form 8949 on the full-return packet \u{2014} so \
+         no form in the packet was written. Nothing is wrong with your ledger: the row count follows \
+         from how many LOTS the sale drew on, not from the dollar amounts. Every figure on this \
+         return still computes \u{2014} run `btctax report --tax-year {tax_year}` for the numbers, and \
+         `btctax export-snapshot --tax-year {tax_year} --out <dir>` to write form8949.csv with one row \
+         per disposal leg, which is what completing Form 8949 and its continuation pages by hand needs."
+    , needs = over.join(" and "))
 }
 
 /// Write `bytes` to `path` with owner-only (0o600) permissions, matching the CSV export path.
@@ -910,6 +1021,39 @@ fn export_full_return(
         }
     }
 
+    // ★ P2a (FILING-READINESS-PLAN rank 3) — the Form 8949 OVERFLOW preflight: the THIRD refusal of
+    // exactly the shape of the two Form 8275 ones above, and written by copying them. Form 8949 holds
+    // `rows_per_page` rows per part and this path does not paginate (P2b is the pagination build), so a
+    // filer with more disposal legs than that used to get a bare `FormsError::Overflow` display out of
+    // the all-or-nothing fill below — "16 rows exceed the 14-row capacity of a single Part II page":
+    // exit 2, output directory never created, EVERY form in the packet lost, from a message naming no
+    // tax year, no remedy, and never saying this is a BTCTAX limit rather than the filer's error. On the
+    // same vault `report --tax-year` exits 0 and prints every figure, so the filer has the numbers and
+    // cannot get the paper. This path was already BYTE-safe (the fill precedes `mkdir_out`); what it
+    // lacked was an honest, actionable refusal — which is worth shipping on its own, before pagination.
+    //
+    // ★ The overflow is LOT-COUNT-driven, not dollar-driven: a weekly dollar-cost-averaging buyer holds
+    // ~52 lots and any meaningful sale draws on more than 14 of them, while a single-lot whale with a
+    // $1M gain emits one row. The SMALL end of the dollar axis is the more exposed population.
+    if let Some(f8949) = &printed.forms.f8949 {
+        let cap = btctax_forms::Form8949Map::for_year(tax_year)?.rows_per_page;
+        // Both parts are checked, and an overflow in either is named in ONE message: the remedy is the
+        // same for both, and a filer who fixed nothing should not be refused twice for one export.
+        let over: Vec<String> = [
+            ("Part I (short-term)", f8949.short_term.len()),
+            ("Part II (long-term)", f8949.long_term.len()),
+        ]
+        .into_iter()
+        .filter(|(_, n)| *n > cap)
+        .map(|(part, n)| format!("{n} {part} row(s)"))
+        .collect();
+        if !over.is_empty() {
+            return Err(CliError::Usage(form_8949_overflow_message(
+                tax_year, &over, cap,
+            )));
+        }
+    }
+
     // ★ ALL-OR-NOTHING: every form fills BEFORE anything is written.
     let packet = btctax_forms::fill_full_return(&printed, tax_year)?;
 
@@ -966,6 +1110,11 @@ fn export_full_return(
         let _ = writeln!(manifest, "  ATT  {}.txt  (attach to Form 1040)", st.name);
         paths.push(path);
     }
+    // ★ N4 — the marks btctax deliberately did NOT make, enumerated at the FOOT of the manifest: the
+    // filer reaches them having just assembled the paper, which is the moment they are actionable.
+    // Every one of these blanks is correct; what was missing was any statement that they exist.
+    let marks = hand_marks(&printed);
+    manifest.push_str(&hand_marks_block(&marks));
     let manifest_path = out_dir.join("manifest.txt");
     write_bytes_owner_only(&manifest_path, manifest.as_bytes())?;
 
@@ -976,6 +1125,12 @@ fn export_full_return(
         .count();
     Ok(IrsPdfReport {
         advisories,
+        // ★ P6 — the §170(d)(1) carryover rides out to the caller, which prints it beside the other
+        // §170 notes. Taken from the SAME `assemble_absolute` result the packet was printed from, so
+        // the figure on the filer's screen is the figure the return produced.
+        charitable_carryover_out: ar.charitable_carryover_out.clone(),
+        // ★ N4 — the SAME list the manifest rendered, so the stderr count and the paper cannot drift.
+        hand_marks: marks,
         watermarked,
         tax_year,
         unresolved_hard,
