@@ -442,3 +442,154 @@ fn the_same_shape_above_the_zero_percent_breakpoint_owes_tax() {
          would mean the 0%-band assertion in the previous KAT is vacuous"
     );
 }
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// P10 — the LIMITATIONS.md promise surface, held by assertions instead of by prose.
+//
+// `crates/btctax-cli/LIMITATIONS.md` is what a filer reads to decide whether they can rely on this
+// return. A stale row there is a false statement to them, and the phase 1-3 refusal work moved things
+// the document had to be rewritten around. Reviewing a document for whether it still describes the
+// code is the wrong instrument (`CLAUDE.md`); these are the assertions that keep it honest.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// ★★★ **THE §1211/§1212 EDGE HAS TWO SIDES AND THEY NOW BEHAVE DIFFERENTLY.**
+///
+/// The row this pins used to read *"the §1211/§1212 Capital Loss Carryover Worksheet edge is
+/// unmodeled"* — one sentence covering both directions, and after N1 it was false in one of them.
+/// What is true now:
+///
+///   * **OUT — modelled.** The §1212(b)(2)(B) worksheet computes the carryforward, correctly at the
+///     floor (`btctax-forms`'s `the_1211b_cap_and_the_1212b_carryforward_print_and_pair` holds the
+///     $17,000/$20,000 pair).
+///   * **IN — still refuses**, but not for want of the worksheet: it is *filing* this edge that has
+///     never been validated. A refusal that states a false reason is worse than a terse one.
+///   * **The carryover-out is NOT rolled forward** by `--write-carryover`, which stamps only the
+///     charitable and QBI-REIT/PTP carryovers. The filer must carry it by hand, and the document
+///     now says so — asserted here because it is the kind of promise that decays silently the day
+///     someone adds a third field to the write-back.
+#[test]
+fn the_limitations_row_for_the_1211_1212_edge_is_true_of_the_code() {
+    let params = ty2024_params();
+    let table = ty2024_table();
+
+    // ── IN side: taxable income $0 with a carryforward brought in ⇒ refuses. ────────────────────────
+    let (mut ri, state) = household(r#"{"filing_status":"Single","w2_income":10000}"#);
+    ri.capital_loss_carryforward_in = btctax_core::tax::types::Carryforward {
+        short: Usd::ZERO,
+        long: dec!(5000),
+    };
+    let ar = assemble_absolute(&ri, &state, &params, &table, 2024);
+    assert_eq!(
+        ar.taxable_income,
+        Usd::ZERO,
+        "the fixture must land taxable income on the floor, or the refusal under test is not reached"
+    );
+    let refusal = screen_absolute(&ri, &ar, &params, &state, 2024)
+        .expect("taxable income of $0 WITH a capital-loss carryforward-in must refuse");
+    assert_eq!(
+        format!("{:?}", refusal.reason),
+        "TaxableIncomeNonPositiveWithCarryforward"
+    );
+    assert!(
+        refusal.detail.contains("models the")
+            && refusal.detail.contains("has not yet validated FILING"),
+        "the refusal must say btctax MODELS the worksheet and has not validated filing this edge — \
+         the old detail said the worksheet was unmodeled, which N1 made false. A filer-facing \
+         refusal that states a false reason is worse than a terse one. Got: {}",
+        refusal.detail
+    );
+
+    // ── …and the same filer WITHOUT a carryforward-in files. ───────────────────────────────────────
+    let (ri, state) = household(r#"{"filing_status":"Single","w2_income":10000}"#);
+    let ar = assemble_absolute(&ri, &state, &params, &table, 2024);
+    assert!(
+        screen_absolute(&ri, &ar, &params, &state, 2024).is_none(),
+        "a refund-only filer with NO carryforward is not refused — the row says so, and it is the \
+         discriminating half: a refusal keyed only to taxable income would catch them too"
+    );
+
+    // ── The write-back rolls the charitable and QBI carryovers, and NOT the capital-loss one. ───────
+    let (ri, state) = household(r#"{"filing_status":"Single","long_term_capital_gains":-20000}"#);
+    let ar = assemble_absolute(&ri, &state, &params, &table, 2024);
+    assert_eq!(
+        ar.capital_loss_carryforward_out.long,
+        dec!(20000),
+        "the figure that is NOT rolled must first exist, or this asserts nothing"
+    );
+    let next = btctax_core::tax::return_1040::apply_carryover_writeback(
+        &ar,
+        &ri,
+        &state,
+        2024,
+        ReturnInputs::default(),
+        false,
+    )
+    .expect("the write-back succeeds over an empty next year");
+    assert_eq!(
+        next.capital_loss_carryforward_in,
+        btctax_core::tax::types::Carryforward::default(),
+        "`--write-carryover` does NOT roll the capital-loss carryover-out into next year — \
+         LIMITATIONS.md tells the filer to carry it by hand, and that instruction is only honest \
+         while this is true. If the write-back learns to roll it, the row must change in the same \
+         commit."
+    );
+}
+
+/// ★★★ **THE TWO HALVES OF THE §163(h)(3)(B) ROW ARE SCOPED DIFFERENTLY, AND THE ROW SAYS SO.**
+///
+/// A first draft of the LIMITATIONS row said the debt-limit question is "asked only on a return that
+/// actually deducts the interest — a standard-deduction filer is never asked." **That was false**, and
+/// this test is why it does not read that way now. `mortgage_question_live` is deliberately an INPUT
+/// predicate (`schedule_a.is_some() ∧ mortgage_interest_1098 > 0`) rather than "Schedule A files",
+/// because whether Schedule A wins is compute-dependent. So the question IS asked of a filer whose
+/// standard deduction ends up larger — while the ADVERSE answer refuses only when the return itemizes,
+/// since line 8a never prints otherwise.
+#[test]
+fn the_mortgage_debt_limit_question_is_asked_on_inputs_and_refuses_on_the_deduction() {
+    let params = ty2024_params();
+    let table = ty2024_table();
+
+    // A SMALL mortgage: Schedule A inputs carry Form 1098 interest, but the standard deduction wins.
+    let build =
+        || household(r#"{"filing_status":"Single","w2_income":60000,"mortgage_interest":4000}"#);
+
+    // ── ASKED: unanswered refuses at the INPUT screen even though this filer will not itemize. ──────
+    let (mut ri, state) = build();
+    ri.schedule_a.as_mut().unwrap().mortgage_within_debt_limit = None;
+    let refusal = screen_inputs(&ri, &table, &params)
+        .expect("a Schedule A reporting 1098 interest must be asked the §163(h)(3)(B) question");
+    assert_eq!(
+        format!("{:?}", refusal.reason),
+        "MortgageDebtLimitUnanswered"
+    );
+
+    // ── ANSWERED ADVERSELY: this filer still FILES, because the standard deduction wins. ────────────
+    let (mut ri, state2) = build();
+    ri.schedule_a.as_mut().unwrap().mortgage_within_debt_limit = Some(false);
+    assert!(
+        screen_inputs(&ri, &table, &params).is_none(),
+        "the ADVERSE answer is a deduction-level refusal, not an input-level one"
+    );
+    let ar = assemble_absolute(&ri, &state2, &params, &table, 2024);
+    assert!(
+        !ar.deduction_is_itemized,
+        "the fixture must lose to the standard deduction, or it tests the other branch"
+    );
+    assert!(
+        screen_absolute(&ri, &ar, &params, &state2, 2024).is_none(),
+        "an over-the-limit filer whose Schedule A LOSES to the standard deduction files normally: \
+         line 8a never prints, so the answer changes no figure. Refusing here is the misfire phase \
+         2's review C fixed."
+    );
+
+    // ── …and the ITEMIZING twin with the same answer REFUSES. ──────────────────────────────────────
+    let (mut ri, state3) =
+        household(r#"{"filing_status":"Single","w2_income":60000,"mortgage_interest":25000}"#);
+    ri.schedule_a.as_mut().unwrap().mortgage_within_debt_limit = Some(false);
+    let ar = assemble_absolute(&ri, &state3, &params, &table, 2024);
+    assert!(ar.deduction_is_itemized, "the twin must itemize");
+    let refusal = screen_absolute(&ri, &ar, &params, &state3, 2024)
+        .expect("an ITEMIZING return over the §163(h)(3)(B) limit must refuse");
+    assert_eq!(format!("{:?}", refusal.reason), "MortgageOverDebtLimit");
+    let _ = state;
+}
