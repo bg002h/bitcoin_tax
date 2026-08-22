@@ -637,6 +637,87 @@ fn the_limitations_row_for_the_1211_1212_edge_is_true_of_the_code() {
          while this is true. If the write-back learns to roll it, the row must change in the same \
          commit."
     );
+
+    // ★★★ …AND THE ROW NOW SAYS **THREE**, SO THE THREE ARE ASSERTED (final review 6 / phase-4 N-1).
+    //
+    // The bullet used to name "the charitable and QBI-REIT/PTP carryovers" — two, where the code
+    // writes three. The load-bearing claim (capital-loss is NOT among them) was true and held; the
+    // enumeration beside it was not held by anything, which is how it came to be short. A promise
+    // surface that lists what a command does needs the LIST pinned, not just the exclusion.
+    assert_eq!(
+        next.charitable_carryover_in_provenance,
+        btctax_core::tax::return_inputs::CarryProvenance::Computed,
+        "(1 of 3) the charitable carryover is stamped"
+    );
+    assert_eq!(
+        next.qbi.reit_ptp_carryforward_in_provenance,
+        btctax_core::tax::return_inputs::CarryProvenance::Computed,
+        "(2 of 3) the REIT/PTP carryforward — Form 8995 line 17"
+    );
+    assert_eq!(
+        next.qbi.qbi_carryforward_in_provenance,
+        btctax_core::tax::return_inputs::CarryProvenance::Computed,
+        "★ (3 of 3) the QUALIFIED-BUSINESS loss carryforward — Form 8995 line 16. This is the one \
+         the LIMITATIONS bullet omitted while the paragraph two sections above it counted correctly."
+    );
+}
+
+/// ★★★ **`Form4952Required` REACHES A STANDARD-DEDUCTION FILER, AND THE PROMISE SURFACE SAID IT
+/// COULD NOT** (final whole-branch review, finding 4).
+///
+/// LIMITATIONS.md carried *"Only ever raised on a return that itemizes — line 9 never prints
+/// otherwise."* That is true of the phase-2 **line-9 bound** leg, and FALSE of the `Some(true)` leg,
+/// which deliberately stayed in `screen_inputs`: answering "yes, I am filing Form 4952" answers
+/// Schedule D line 20 NO and routes the return to the Schedule D Tax Worksheet, which btctax does not
+/// fill. That routing is decided by Schedule D, not by Schedule A, so the §63(e) election has nothing
+/// to do with it — and the doc's own adjacent bullet described this leg without the qualifier, so the
+/// two bullets contradicted each other about which filers the reason code can reach.
+///
+/// A filer told by the promise surface that a refusal cannot reach them, and then refused, has been
+/// misled about the one thing that document exists to say.
+///
+/// **Plant:** add `ar.deduction_is_itemized &&` to the `filing_form_4952 == Some(true)` refusal in
+/// `screen_inputs` ⇒ half 1 reds.
+#[test]
+fn the_limitations_row_for_form_4952_is_true_of_both_of_its_legs() {
+    let params = ty2024_params();
+    let table = ty2024_table();
+
+    // ── Half 1: a RENTER with no Schedule A at all, answering YES, is refused. ────────────────────
+    let (mut ri, state) = household(r#"{"filing_status":"Single","w2_income":50000}"#);
+    ri.filing_form_4952 = Some(true);
+    assert!(
+        ri.schedule_a.is_none(),
+        "the fixture must have NO Schedule A — that is what makes the standard deduction certain, \
+         and it is stronger than merely losing the comparison"
+    );
+    let ar = assemble_absolute(&ri, &state, &params, &table, 2024);
+    assert!(
+        !ar.deduction_is_itemized,
+        "…so this return takes the STANDARD deduction"
+    );
+    let r = screen_inputs(&ri, &table, &params).expect(
+        "★ answering YES refuses on EVERY return — Schedule D line 20 routes the tax to a \
+                 worksheet btctax does not fill, whatever the §63(e) election",
+    );
+    assert_eq!(format!("{:?}", r.reason), "Form4952Required");
+    assert!(
+        r.detail.contains("SCHEDULE D TAX WORKSHEET"),
+        "…and it must say WHY, which is the routing and not the deduction. Got: {}",
+        r.detail
+    );
+
+    // ── Half 2: the same filer answering NO is not refused. The answer must SEPARATE. ─────────────
+    let (mut ri_no, state_no) = household(r#"{"filing_status":"Single","w2_income":50000}"#);
+    ri_no.filing_form_4952 = Some(false);
+    answer_all_live_declarations(&mut ri_no);
+    assert_eq!(
+        screen_inputs(&ri_no, &table, &params).map(|r| format!("{:?}", r.reason)),
+        None,
+        "a standard-deduction filer NOT filing Form 4952 computes normally — otherwise half 1 is \
+         satisfied by a refusal that catches everyone"
+    );
+    let _ = state_no;
 }
 
 /// ★★★ **THE TWO HALVES OF THE §163(h)(3)(B) ROW ARE SCOPED DIFFERENTLY, AND THE ROW SAYS SO.**
