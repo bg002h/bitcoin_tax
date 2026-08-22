@@ -2759,6 +2759,100 @@ fn the_8283_restriction_boxes_are_written_only_when_the_filer_answered_no() {
     }
 }
 
+/// ★★★ **P3 — Section B, Part I, column (i) is NOT the filer's cell.** The form face calls it
+/// "(i) Amount claimed as a deduction (see instructions)", and the instructions say, verbatim
+/// (`design/forms/extract/i8283--2024.txt:1185-1191`):
+///
+/// > "Column (i). Complete column (i), amount claimed as a deduction, if you are a pass-through
+/// > entity or a member of a pass-through entity. If you are a pass-through entity, enter your share
+/// > of the noncash charitable contribution. If you are a member, enter your share of the noncash
+/// > charitable contribution allocated to you by the pass-through entity."
+///
+/// An individual donating their own bitcoin is neither, so the cell is not asked of them — and btctax
+/// models no pass-through entity at all (the census says exactly that of the header entity-name/TIN
+/// cells and of the family-PTE box). It was nevertheless printing the PRE-CEILING `claimed_deduction`
+/// there: on the observed packet, $1,000,000 beside a Schedule A line 12 of $600,000 — an unrequested
+/// entry contradicting the return's own claimed deduction, on the highest-scrutiny line of the
+/// highest-scrutiny form, sworn to under §6065.
+///
+/// Section B starts at $5,000 of claimed noncash, so this reaches a $6,000 crypto donor at $60,000 of
+/// income identically; it is not a rich-band artifact.
+///
+/// **Planted defect / mutation:** restore the `if let Some(ded) = row.claimed_deduction { push_money(
+/// …&m.deduction…) }` writer in `form8283.rs` and all three rows red with the deduction printed.
+#[test]
+fn the_8283_section_b_column_i_is_blank_for_an_individual_filer() {
+    use btctax_core::forms::{Form8283HowAcquired, Form8283Row, Form8283Section};
+    use btctax_core::tax::printed::form_8283_printed;
+
+    // Three Section B rows, so all THREE grid rows' column-(i) cells are reachable — a one-row
+    // fixture would leave B and C blank for the wrong reason (nothing was written there anyway).
+    let row = |i: usize, carrier: bool| Form8283Row {
+        section: carrier.then_some(Form8283Section::B),
+        description: format!("{i}.00000000 BTC"),
+        how_acquired: Form8283HowAcquired::Purchased,
+        date_acquired: time::macros::date!(2021 - 03 - 01),
+        date_contributed: time::macros::date!(2024 - 07 - 04),
+        cost_basis: dec!(1200),
+        fmv: dec!(60000),
+        // Every row carries one, so the pre-fix writer had something to print in all three.
+        claimed_deduction: Some(dec!(60000)),
+        fmv_method: "qualified appraisal".into(),
+        donee: "Habitat".into(),
+        appraiser: "A. Praiser".into(),
+        needs_review: false,
+        details: None,
+    };
+    let printed = form_8283_printed(&[row(1, true), row(2, false), row(3, false)], Some(false))
+        .expect("there are donations");
+    let pdf = btctax_forms::fill_form_8283_full(&printed, &kitchen_sink_header(), 2024)
+        .unwrap()
+        .expect("a donation ⇒ an 8283");
+
+    for (fqn, row_letter) in [
+        (
+            "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3A[0].f1_56[0]",
+            "A",
+        ),
+        (
+            "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_62[0]",
+            "B",
+        ),
+        (
+            "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_68[0]",
+            "C",
+        ),
+    ] {
+        assert_eq!(
+            tv(&pdf, fqn),
+            None,
+            "★ Section B row {row_letter} column (i) must be BLANK — i8283 asks it only of a \
+             pass-through entity or a member of one, and btctax models neither"
+        );
+    }
+
+    // THE CONTROL — the cells the form DOES ask of this filer are filled, so the assertions above
+    // cannot be passing merely because nothing was written to the section at all.
+    assert_eq!(
+        tv(
+            &pdf,
+            "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Row3A[0].f1_44[0]"
+        )
+        .as_deref(),
+        Some("60000"),
+        "(c) appraised fair market value — asked of every Section B filer"
+    );
+    assert_eq!(
+        tv(
+            &pdf,
+            "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_65[0]"
+        )
+        .as_deref(),
+        Some("1200"),
+        "row C's (f) donor's cost or adjusted basis — so row C really was reached"
+    );
+}
+
 /// The full-return Form 8283 carries the FILER's identity ("Name(s) shown on your income tax return")
 /// and whole-dollar money columns. The crypto slice writes neither — its 8283 rides beside a return
 /// btctax did not produce — and that difference is exactly why the two paths stay separate.

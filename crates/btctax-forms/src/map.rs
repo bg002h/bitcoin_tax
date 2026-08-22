@@ -731,8 +731,27 @@ pub struct Section8283BRow {
     pub how: String,
     /// (f) Donor's cost or adjusted basis (money — a [`MoneyPair`] on the 2017 form).
     pub cost: MoneyCell,
-    /// (i)/(h) Amount claimed as a deduction (carrier row only; money — a [`MoneyPair`] on 2017).
-    pub deduction: MoneyCell,
+    /// ★★★ **P3 — "Amount claimed as a deduction": column (i) on the 2023/2025 revisions, column (h)
+    /// on the Rev. 12-2014. `None` on a revision whose instructions do not ask it of this filer, and
+    /// the cell is then CENSUSED rather than mapped.**
+    ///
+    /// i8283 (Rev. 12-2024 and 12-2025 alike), verbatim from the extracted text layer
+    /// (`design/forms/extract/i8283--2024.txt:1185-1191`): *"Column (i). Complete column (i), amount
+    /// claimed as a deduction, if you are a pass-through entity or a member of a pass-through
+    /// entity."* An individual donating their own bitcoin is neither, and btctax models no
+    /// pass-through entity at all — the same boundary the census records for the header
+    /// entity-name/TIN cells and the family-PTE box. So the 2024 and 2025 maps carry NO cell here,
+    /// and the filler cannot write one: a map entry means *"we fill this"*, and a
+    /// mapped-but-never-written cell is a claim nothing checks.
+    ///
+    /// ★ The **TY2017 (Rev. 12-2014) map keeps its cell, deliberately.** That revision predates the
+    /// pass-through-entity regime, has a different Section B column layout (no qualified-conservation
+    /// column at all), and **its instructions are not in this repository** — `design/forms/extract/`
+    /// holds i8283 for 2024 and 2025 only. Changing a shipped behavior on a revision whose authority
+    /// we do not hold would be inventing the rule rather than reading it, so TY2017 is left exactly
+    /// as it was until the Rev. 12-2014 instructions are archived and read.
+    #[serde(default)]
+    pub deduction: Option<MoneyCell>,
 }
 
 /// Form 8283 Section B (page 1/2, over-$5,000 property + page 2 identity) — up to 3 rows (2024/2025)
@@ -867,7 +886,12 @@ impl Form8283Map {
             v.extend([r.desc.as_str(), r.date_acq.as_str(), r.how.as_str()]);
             v.extend(r.fmv.fields());
             v.extend(r.cost.fields());
-            v.extend(r.deduction.fields());
+            // ★ Column (i) contributes only on a year whose map carries it. On 2024/2025 it is
+            //   absent, and keeping it out of the AUTHORISED set is the load-bearing half:
+            //   `verify::no_unmapped_filled` fails closed if anything ever writes it again.
+            if let Some(d) = &r.deduction {
+                v.extend(d.fields());
+            }
         }
         v
     }

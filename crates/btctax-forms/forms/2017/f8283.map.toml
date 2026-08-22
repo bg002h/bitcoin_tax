@@ -22,6 +22,14 @@ rows = [
 
 # ── Section B Part I — Over $5,000 (Line5A-5D, PAGE 2). (a) desc + (c) fmv under Pt1Ln5Table;
 #   (d)-(i) under Table4. fmv(c)/cost(f)/deduction(h) are dollars+cents pairs.
+# ★★★ P3 — this map KEEPS its `deduction` cell while the 2024/2025 maps dropped theirs. Not an
+#   oversight: i8283 (Rev. 12-2024/12-2025) restricts "amount claimed as a deduction" to a
+#   pass-through entity or a member of one, which is why those years now census the cell
+#   `unmodeled`. The Rev. 12-2014 form predates that regime and has a different Section B column
+#   layout, and its INSTRUCTIONS ARE NOT IN THIS REPOSITORY (design/forms/extract/ holds i8283 for
+#   2024 and 2025 only). Changing shipped behaviour on a revision whose authority we do not hold
+#   would be inventing the rule instead of reading it. Archive i8283 Rev. 12-2014, read column (h),
+#   then decide — and if it carries the same restriction, drop this key and census these 8 fields.
 # BTC property box = "j Other" (p1-cb4[8] /9) since Rev. 12-2014 has no digital-asset box.
 [section_b]
 k_digital_assets = { field = "topmostSubform[0].Page2[0].p1-cb4[8]", on = "9" }

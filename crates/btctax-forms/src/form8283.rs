@@ -433,8 +433,22 @@ fn fill_one(
                     ord,
                 );
                 push_money(&mut w, &mut p, &m.cost, row.cost_basis, 4, Some((4, ord)));
-                if let Some(ded) = row.claimed_deduction {
-                    push_money(&mut w, &mut p, &m.deduction, ded, 5, Some((5, ord)));
+                // ★★★ P3 — "Amount claimed as a deduction" is written ONLY on a revision whose map
+                // carries the cell, and since 2026-08-21 that is the Rev. 12-2014 (TY2017) map alone.
+                //
+                // i8283, verbatim: "Complete column (i), amount claimed as a deduction, if you are a
+                // pass-through entity or a member of a pass-through entity." An individual donating
+                // their own bitcoin is neither, and btctax models no pass-through entity at all — the
+                // header entity-name/TIN cells and the family-PTE box are censused `unmodeled` for
+                // that same reason, and the 2024 cells now join them.
+                //
+                // It used to print `row.claimed_deduction`, which is the PRE-CEILING figure: on the
+                // observed packet, $1,000,000 beside a Schedule A line 12 of $600,000. An entry the
+                // form did not ask for, contradicting the return's own claimed deduction, on the
+                // highest-scrutiny line of the highest-scrutiny form — and sworn to under §6065.
+                // A blank forgoes nothing: the deduction is claimed on Schedule A line 12, not here.
+                if let (Some(cell), Some(ded)) = (&m.deduction, row.claimed_deduction) {
+                    push_money(&mut w, &mut p, cell, ded, 5, Some((5, ord)));
                 }
             }
             // Part IV/III (appraiser) + Part V/IV (donee) IDENTITY — the copy's group identity,
