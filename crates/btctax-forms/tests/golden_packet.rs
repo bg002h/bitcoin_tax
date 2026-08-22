@@ -278,12 +278,22 @@ fn diff_household(h: &GoldenHousehold, wrong: &mut Vec<String>) {
     let sch_c = read("f1040sc", SCHEDULE_C_MAP_2024);
 
     // ── AGI L11 / taxable income L15 / QBI deduction L13 — held against BOTH oracles ─────────────────
+    //
+    // ★ **L11 IS A SIGNED LINE** (§6.3), and this reader was unsigned until the low-end corpus cell
+    //   `single_loss_year_taxable_income_at_the_floor` arrived. AGI = total income − adjustments, and
+    //   nothing floors it: a §1211(b)-capped loss year with no wages files a 1040 whose line 11 is
+    //   −3,000, printed with a leading minus (the same negative-cell convention as line 7 — `push_money`
+    //   writes a bare minus; line 11 pre-prints no parentheses). `paper_money` REFUSED it rather than
+    //   parsing it, which is the guard working: an unsigned reader never silently read a signed cell.
+    //   The gap was never in the reader — it was that no corpus household had ever had a negative AGI.
+    let agi_on_paper = on_paper_signed(&f1040, "line11", Sign::Leading)
+        .unwrap_or_else(|| panic!("{}: every return prints 1040 line 11", h.name));
     check_both(
         wrong,
         &h.name,
         "AGI (1040 L11)",
         &h.why,
-        paper_money(&f1040, "line11"),
+        usd(agi_on_paper as f64),
         round_dollar(a.ar.agi),
         e.adjusted_gross_income,
         t.adjusted_gross_income,

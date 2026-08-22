@@ -468,6 +468,7 @@ def main() -> None:
                     "corpus": (
                         "SPEC §5.1 variable-strength constrained COVERING ARRAY (scripts/oracle/corpus.py): "
                         "the 12 hand-written anchors (verbatim) + 2 bake-time-steered pinned liveness cells "
+                        "+ the hand-written LOW_END cells (shapes the axis tables cannot reach) "
                         "+ a generated array — full cartesian on the named triples {SE,LTCG,qual-div} and "
                         "{itemized,SALT-over-cap,high-income} (t=3 by construction), pairwise (t=2) "
                         "elsewhere, under the D-1/D-2/D-3 constraints. Every candidate is ADMITTED "

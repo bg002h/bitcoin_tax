@@ -536,6 +536,40 @@ PINNED_CELLS = [
 ]
 
 
+# ── The LOW-END hand-written cells (filing-readiness P9) ──────────────────────────────────────────
+# Households the axis tables above cannot reach, added because the low-end pass found real defects
+# there. They are NOT anchors — the anchor list is the historical twelve, preserved verbatim — but
+# they are hand-written rather than generated, so they carry non-`ca_` names and join the anchors in
+# the `make check` reconciliation sweeps (`smoke.rs`, `golden_packet::anchors_and_pinned`).
+#
+# ★ Why the covering array cannot produce this one: every generated loss cell is `CAP["loss"]`, a
+#   SHORT-term −18,000 paired with a wage position, and the wage axis's "none" leg never meets it in a
+#   cell whose taxable income lands at the §1211(b) floor. The defect N1 fixed lives exactly there —
+#   the §1212(b)(2)(B) carryover worksheet's line-3/line-5 branch, which only engages when 1040 line 15
+#   would have gone NEGATIVE.
+#
+# ★ D-1 stays intact: no dependents, and NO CREDIT ENGAGES. The EIC needs earned income
+#   (§32(c)(2)(A)) and this household has none, so neither oracle's credit take-up is in play — which
+#   is what makes it admissible today. See `design/direction/ORACLE-TRAP-credit-takeup.md`.
+#
+# ★ What the oracles DO and DO NOT witness here: they witness AGI (−3,000), taxable income (0), the
+#   1040 line-7 §1211(b) cap and a $0 total tax. They do NOT witness the carryforward LEVEL — no
+#   engine prints a carryover-OUT to next year — so that figure stays held by btctax's own KAT
+#   (`kat_attestation::the_1211b_1212b_pair_...`) and by `capital_loss_carryover.rs`'s worksheet
+#   transcription. The corpus entry is for the REST of the household, exactly as the plan says.
+LOW_END = [
+    {
+        "name": "single_loss_year_taxable_income_at_the_floor",
+        "why": "★ LOW-END — a loss year whose taxable income is AT THE FLOOR: no wages, one $20,000 "
+        "long-term capital loss. 1040 line 7 is the §1211(b) −$3,000 cap, AGI is −3,000 and line 15 is "
+        "0; the §1212(b)(2)(B) worksheet (N1) carries the FULL $20,000 forward because none of the "
+        "$3,000 was actually absorbed. No credit engages (the EIC needs earned income), so both "
+        "oracles witness the household even though neither prints a carryover-out.",
+        "inputs": {"filing_status": "Single", "long_term_capital_gains": -20_000},
+    },
+]
+
+
 def _inputs_key(inp):
     """Canonical dedup key for an `inputs` dict (order-independent; excludes the oracle-only
     `standard_or_itemized` hint, which does not change btctax's assembled return)."""
@@ -544,15 +578,17 @@ def _inputs_key(inp):
 
 def households():
     """The full candidate corpus: the 12 anchors (verbatim, first) + the 2 pinned liveness cells +
-    the generated covering array (Block A ∪ Block B ∪ Block P), DEDUPLICATED by inputs (M3).
+    the hand-written LOW_END cells + the generated covering array (Block A ∪ Block B ∪ Block P),
+    DEDUPLICATED by inputs (M3).
 
-    Anchors and pinned cells are kept whenever they appear; a generated row that duplicates one of
-    them (or another generated row) is dropped. Returns a list of `{name, why, inputs, ...}` dicts.
-    Admission (D-2 refusal-free + AMT/credit-free) is applied downstream in `gen_goldens.py`.
+    Anchors, pinned cells and low-end cells are kept whenever they appear; a generated row that
+    duplicates one of them (or another generated row) is dropped. Returns a list of
+    `{name, why, inputs, ...}` dicts. Admission (D-2 refusal-free + AMT/credit-free) is applied
+    downstream in `gen_goldens.py`.
     """
     out = []
     seen = set()
-    for h in ANCHORS + PINNED_CELLS + block_a() + block_b() + block_p():
+    for h in ANCHORS + PINNED_CELLS + LOW_END + block_a() + block_b() + block_p():
         key = _inputs_key(h["inputs"])
         if key in seen:
             continue
@@ -607,6 +643,13 @@ def _reconstruct_cell(inp):
         return None  # an anchor's off-grid Schedule-C profit
     se = "over" if sev >= SE["over"] else ("present" if sev > 0 else "none")
     div = "qual" if inp.get("qualified_dividends", 0) else "none"
+    # ★ A LONG-TERM loss is OFF-GRID: the `CAP` axis's only loss value is SHORT-term (−18,000), so
+    #   there is no label for this shape. Falling through to `cap="none"` (what this did before the
+    #   low-end cell existed) would have credited a LOSS household with the "no capital transaction"
+    #   cell's pairs — extra coverage claimed, none provided, which is exactly the no-op-cell failure
+    #   the SALT axis's own `selftest` exists to prevent one axis over.
+    if inp.get("long_term_capital_gains", 0) < 0:
+        return None
     if inp.get("long_term_capital_gains", 0) > 0:
         cap = "LT"
     elif inp.get("short_term_capital_gains", 0) > 0:
@@ -642,7 +685,10 @@ def assert_pairwise_t2_coverage(admitted):
 if __name__ == "__main__":  # a quick offline sanity dump (no oracles)
     selftest_salt_axis()
     hs = households()
-    print(f"candidates: {len(hs)} (anchors {len(ANCHORS)} + pinned {len(PINNED_CELLS)} + generated {len(hs) - len(ANCHORS) - len(PINNED_CELLS)})")
+    print(
+        f"candidates: {len(hs)} (anchors {len(ANCHORS)} + pinned {len(PINNED_CELLS)} + "
+        f"low-end {len(LOW_END)} + generated {len(hs) - len(ANCHORS) - len(PINNED_CELLS) - len(LOW_END)})"
+    )
     print(f"  block A {len(block_a())}, block B {len(block_b())}, block P {len(block_p())}")
     na, nb = assert_named_triple_coverage(hs)
     print(f"named-triple coverage OK on candidates: triple-A {na} combos, triple-B {nb} combos")
