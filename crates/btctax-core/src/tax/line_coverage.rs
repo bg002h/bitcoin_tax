@@ -1808,6 +1808,7 @@ pub fn cover_form8960lines(l: &crate::tax::other_taxes::Form8960Lines) -> Covera
         line5d,
         line7,
         line8,
+        line9b,
         line9d,
         line11,
         line12,
@@ -1866,6 +1867,18 @@ pub fn cover_form8960lines(l: &crate::tax::other_taxes::Form8960Lines) -> Covera
         "line8",
         Production::Combine,
         "Total investment income. Combine lines 1, 2, 3, 4c, 5d, 6, and 7",
+    );
+    // ★★ COLLECTED, and BLANK-CAPABLE. `Option<Usd>`: `None` = the filer never allocated any state
+    //    income tax to net investment income, and the emitter uses `push_money_opt`, so the cell is
+    //    left empty rather than swearing the allocation is zero. `Production::Collected` is exactly
+    //    *"(the filer supplies it) — blank exactly when not asked"*.
+    c.line(
+        line9b.unwrap_or(Usd::ZERO),
+        f,
+        "9b",
+        "line9b",
+        Production::Collected,
+        "State, local, and foreign income tax (see instructions)",
     );
     c.line(
         *line9d,
@@ -1930,6 +1943,7 @@ fn zero_form8960lines() -> crate::tax::other_taxes::Form8960Lines {
         line5d: Usd::ZERO,
         line7: Usd::ZERO,
         line8: Usd::ZERO,
+        line9b: None,
         line9d: Usd::ZERO,
         line11: Usd::ZERO,
         line12: Usd::ZERO,

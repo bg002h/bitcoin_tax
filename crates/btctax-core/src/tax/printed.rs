@@ -1668,6 +1668,7 @@ mod tests {
             // `capital_loss_limit` would silently disable the §1211(b) deduction).
             printed_inputs: crate::tax::return_1040::PrintedInputs {
                 filing_form_4952: Some(false),
+                form_8960_line9b: None, // claimed nothing on Form 8960 Part II ⇒ line 9b blank
                 medicare_wages: z,
                 medicare_withheld: z,
                 schedule_c_header: crate::tax::return_1040::ScheduleCHeader::default(),

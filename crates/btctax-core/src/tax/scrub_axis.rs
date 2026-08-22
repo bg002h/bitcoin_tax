@@ -363,6 +363,7 @@ pub fn maximal_sentinel() -> ReturnInputs {
         donations_had_restrictions: Some(false),
         charitable_cwa_obtained: Some(true),
         filing_form_4952: Some(false),
+        form_8960_line9b: Some(dec!(10)),
         dual_status_alien: Some(false),
         has_income_exclusion: Some(false),
         other_out_of_scope_income: Some(false),

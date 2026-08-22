@@ -601,6 +601,7 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
         donations_had_restrictions: _,
         charitable_cwa_obtained: _,
         filing_form_4952: _,
+        form_8960_line9b: _, // a money amount — carries no identity
         dual_status_alien: _,
         has_income_exclusion: _,
         other_out_of_scope_income: _,

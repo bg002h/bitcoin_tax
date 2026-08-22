@@ -207,8 +207,15 @@ pub fn form_8959_lines(
 /// Form 8960 — Net Investment Income Tax (§1411), the ABSOLUTE figure (rebuilt from line items).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Form8960 {
-    /// Line 8 — net investment income = 2b interest + 3b dividends + §1211-limited L7 + crypto lending
-    /// interest. May be reduced by a net capital LOSS (the §1211-limited amount, §1.1411-4(d)).
+    /// Line 12 — net investment income = (2b interest + 3b dividends + §1211-limited L7 + crypto
+    /// lending interest, i.e. line 8) **MINUS Part II line 11**. May be reduced by a net capital LOSS
+    /// (the §1211-limited amount, §1.1411-4(d)).
+    ///
+    /// ★ It became line 12 rather than line 8 when Part II line 9b was collected: while 9a–9c were all
+    /// unmodelled, line 11 was structurally zero and the two lines were the same number. They are not
+    /// any more, and the figure the 3.8% applies to is line 12 — so this and
+    /// [`Form8960Lines::line12`] must stay the same quantity or the filed form disagrees with the tax
+    /// it reports.
     pub nii: Usd,
     /// Line 13 — MAGI = AGI (fail-closed: no §911/CFC/PFIC add-backs are modeled).
     pub magi: Usd,
@@ -221,6 +228,12 @@ pub struct Form8960 {
 /// = Σ non-business crypto Interest (the L7/L8v NII modification, R3-M5, since it is not on 1040 2b).
 /// Schedule C business income is EXCLUDED (§1411(c)(6) active business), as are hobby mining/staking/reward
 /// (non-investment "other income"). MAGI = AGI (fail-closed).
+///
+/// `line9b` is the filer's own Part II line 9b allocation (`ReturnInputs::form_8960_line9b`), `None`
+/// when they never claimed one. ★★ It is threaded HERE as well as through [`form_8960_lines`] on
+/// purpose: this chain feeds `AbsoluteReturn::total_tax` while the printed chain feeds Schedule 2
+/// line 12, and a deduction applied to only one of them files a Form 8960 whose own line 17
+/// contradicts the tax on the 1040 (the "two chains, no reconciliation" shape, §N-8).
 pub fn form_8960(
     status: FilingStatus,
     taxable_interest: Usd,
@@ -228,8 +241,12 @@ pub fn form_8960(
     net_capital_gain: Usd,
     crypto_lending_interest: Usd,
     agi: Usd,
+    line9b: Option<Usd>,
 ) -> Form8960 {
-    let nii = taxable_interest + ordinary_dividends + net_capital_gain + crypto_lending_interest;
+    // L8 — total investment income; then L11 = L9d = L9b (9a/9c/10 unmodelled) and L12 = L8 − L11.
+    let investment_income =
+        taxable_interest + ordinary_dividends + net_capital_gain + crypto_lending_interest;
+    let nii = investment_income - line9b.unwrap_or(Usd::ZERO);
     let magi = agi;
     let thr = niit_threshold(status);
     let over = (magi - thr).max(Usd::ZERO);
@@ -247,9 +264,14 @@ pub fn form_8960(
 ///
 /// **Unmodeled lines are BLANK, not zero** (they have no field in this struct at all): line 3
 /// (annuities), lines 4a–4c (Schedule E — unrepresentable in v1), line 6 (CFC/PFIC adjustments —
-/// MAGI is fail-closed to AGI), lines 9a–9c and 10 (investment expenses and additional
-/// modifications — v1 models none), and Part III's estates-and-trusts branch (lines 18a–21), which
-/// must stay blank on an individual return.
+/// MAGI is fail-closed to AGI), lines 9a and 9c and 10 (investment interest expense, miscellaneous
+/// investment expenses and additional modifications — v1 models none), and Part III's
+/// estates-and-trusts branch (lines 18a–21), which must stay blank on an individual return.
+///
+/// **Line 9b is COLLECTED-OR-BLANK** — an [`Option<Usd>`], because a filer who never allocated any
+/// state income tax to net investment income has given no testimony about the line, and a printed `0`
+/// would swear the allocation IS zero (26 USC 6065). The emitter uses `push_money_opt`, so `None`
+/// writes nothing at all.
 ///
 /// The DERIVED totals are still printed, even at zero, because the form's arithmetic references
 /// them: line 9d (= 0), line 11 (= 0). A reader re-adding the column must find them.
@@ -268,7 +290,13 @@ pub struct Form8960Lines {
     pub line7: Usd,
     /// L8 — total investment income = 1 + 2 + 5d + 7 (3, 4c and 6 blank).
     pub line8: Usd,
-    /// L9d — add 9a/9b/9c. v1 models no investment expenses ⇒ 0, but the form adds it, so it prints.
+    /// L9b — "State, local, and foreign income tax (see instructions)". The filer's OWN allocation of
+    /// state/local income tax to net investment income (i8960: *"using any reasonable method"*),
+    /// collected on `ReturnInputs::form_8960_line9b` and bounded — never computed — by
+    /// `RefuseReason::Nii9bExceedsDeductedSalt`. `None` ⇒ the cell stays BLANK.
+    pub line9b: Option<Usd>,
+    /// L9d — add 9a/9b/9c. 9a and 9c are unmodelled ⇒ this is line 9b, or 0 when 9b is blank; the
+    /// form adds it, so it prints either way.
     pub line9d: Usd,
     /// L11 — total deductions and modifications = 9d + 10 ⇒ 0.
     pub line11: Usd,
@@ -302,6 +330,7 @@ pub fn form_8960_lines(
     net_capital_gain: Usd,
     crypto_lending_interest: Usd,
     agi: Usd,
+    line9b_collected: Option<Usd>,
 ) -> Option<Form8960Lines> {
     let line1 = round_dollar(taxable_interest);
     let line2 = round_dollar(ordinary_dividends);
@@ -309,8 +338,10 @@ pub fn form_8960_lines(
     let line5d = line5a; // 5b/5c unmodeled
     let line7 = round_dollar(crypto_lending_interest);
     let line8 = line1 + line2 + line5d + line7; // 3, 4c, 6 blank
-    let line9d = Usd::ZERO; // v1 models no investment expenses…
-    let line11 = line9d; // …so 9d + 10 is zero, but the form adds it
+                                                // ★ 9b is the filer's own allocation, BLANK when they made none — never a computed 0.
+    let line9b = line9b_collected.map(round_dollar);
+    let line9d = line9b.unwrap_or(Usd::ZERO); // "Add lines 9a, 9b, and 9c" — 9a/9c unmodelled
+    let line11 = line9d; // …+ line 10 (unmodelled), but the form adds it, so it prints
     let line12 = line8 - line11;
 
     let line13 = round_dollar(agi);
@@ -329,6 +360,7 @@ pub fn form_8960_lines(
         line5d,
         line7,
         line8,
+        line9b,
         line9d,
         line11,
         line12,
@@ -596,6 +628,7 @@ mod tests {
             dec!(20000),
             dec!(2000),
             dec!(300000),
+            None,
         );
         assert_eq!(f.nii, dec!(37000));
         assert_eq!(f.tax, dec!(1406.00)); // 3.8% × 37,000
@@ -612,6 +645,7 @@ mod tests {
             dec!(20000),
             dec!(2000),
             dec!(210000),
+            None,
         );
         assert_eq!(f.tax, dec!(380.00)); // 3.8% × 10,000
     }
@@ -626,6 +660,7 @@ mod tests {
             dec!(50000),
             Usd::ZERO,
             dec!(150000),
+            None,
         );
         assert_eq!(f.tax, Usd::ZERO);
     }
@@ -642,6 +677,7 @@ mod tests {
             dec!(-3000),
             Usd::ZERO,
             dec!(300000),
+            None,
         );
         assert_eq!(f.nii, dec!(2000));
         assert_eq!(f.tax, dec!(76.00));
@@ -653,6 +689,7 @@ mod tests {
             dec!(-10000),
             Usd::ZERO,
             dec!(300000),
+            None,
         );
         assert_eq!(neg.nii, dec!(-5000));
         assert_eq!(neg.tax, Usd::ZERO);
@@ -670,6 +707,7 @@ mod tests {
             dec!(20000),
             dec!(2000),
             dec!(300000),
+            None,
         )
         .unwrap();
         assert_eq!(l.line1, dec!(5000));
@@ -699,6 +737,7 @@ mod tests {
             Usd::ZERO,
             Usd::ZERO,
             dec!(210000),
+            None,
         )
         .unwrap();
         assert_eq!(l.line12, dec!(50000));
@@ -721,6 +760,7 @@ mod tests {
             Usd::ZERO,
             Usd::ZERO,
             dec!(300000),
+            None,
         )
         .unwrap();
         assert_eq!(l.line14, dec!(250000), "NIIT: QSS gets the JOINT threshold");
@@ -745,7 +785,8 @@ mod tests {
             Usd::ZERO,
             Usd::ZERO,
             Usd::ZERO,
-            dec!(150000)
+            dec!(150000),
+            None,
         )
         .is_none());
         // Over the threshold but NII is a net LOSS (a §1211-limited capital loss reduces NII).
@@ -755,7 +796,8 @@ mod tests {
             Usd::ZERO,
             dec!(-3000),
             Usd::ZERO,
-            dec!(300000)
+            dec!(300000),
+            None,
         )
         .is_none());
     }
@@ -798,7 +840,7 @@ mod tests {
                 dec!(300000.51),
             ),
         ] {
-            let l = form_8960_lines(status, int_, div, ncg, lend, agi).unwrap();
+            let l = form_8960_lines(status, int_, div, ncg, lend, agi, None).unwrap();
             assert_eq!(l.line5d, l.line5a, "L5d = 5a + 5b + 5c (5b/5c blank)");
             assert_eq!(
                 l.line8,

@@ -81,6 +81,14 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
             decl(QuestionId::FilingForm4952),
             Anchor::Field(FieldId::SaInvestmentInterest),
         ],
+        // ★ Form 8960 line 9b over its §164(b)(6) bound. The amount itself is correctable, and so are
+        //   the two Schedule A facts that can zero the bound — the sales-tax election, and the SALT
+        //   amounts that decide whether itemizing wins at all.
+        R::Nii9bExceedsDeductedSalt => vec![
+            Anchor::Field(FieldId::Nii8960Line9b),
+            Anchor::Field(FieldId::SaSaltUseSalesTax),
+            Anchor::Field(FieldId::SaSaltStateEst),
+        ],
         R::AmtNonQualifiedDwelling => vec![decl(QuestionId::AmtQualifiedDwelling)],
         R::AmtCarryoverDiverges => vec![decl(QuestionId::AmtCarryoverSameAsRegular)],
         R::AmtDepreciationDiverges => vec![decl(QuestionId::AmtDepreciationSameAsRegular)],

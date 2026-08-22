@@ -94,6 +94,11 @@ pub enum FieldId {
     SaMortgageWithinDebtLimit,
     /// Schedule A line 9 — investment interest (§163(d)).
     SaInvestmentInterest,
+    /// ★ Form 8960 line 9b — the state/local income tax the filer allocates to net investment income
+    /// (§1411(c)(1)(B)). It lives on `ReturnInputs`, not `ScheduleAInputs`, because it is a Form 8960
+    /// line; it is RENDERED here because every number that bounds it — line 5a, line 5e, the
+    /// §164(b)(5) election — is on the Schedule A immediately above it.
+    Nii8960Line9b,
     // Schedule A charitable (per row)
     CharClass,
     CharAmount,

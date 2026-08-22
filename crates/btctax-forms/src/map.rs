@@ -1256,7 +1256,10 @@ pub struct Form8960Map {
     pub line7: MoneyCell,
     /// L8 — total investment income, AMOUNT column.
     pub line8: MoneyCell,
-    /// L9d — add 9a/9b/9c (zero in v1), AMOUNT column.
+    /// L9b — state/local/foreign income tax allocable to NII, MID column. Written only when the filer
+    /// claimed an allocation; `push_money_opt` leaves the cell BLANK otherwise.
+    pub line9b: MoneyCell,
+    /// L9d — add 9a/9b/9c (= 9b; 9a and 9c unmodelled), AMOUNT column.
     pub line9d: MoneyCell,
     /// L11 — total deductions and modifications (zero in v1), AMOUNT column.
     pub line11: MoneyCell,
@@ -1290,8 +1293,11 @@ impl Form8960Map {
             _ => Err(FormsError::UnsupportedYear(year)),
         }
     }
-    /// The 14 filled cells in printed reading order (strictly descending y on page 1).
-    pub fn lines(&self) -> [&MoneyCell; 14] {
+    /// The 15 fillable cells in printed reading order (strictly descending y on page 1). ★ 9b is
+    /// *fillable*, not always *filled* — the emitter skips it when the filer claimed no allocation,
+    /// and `verify_flat`'s descent check compares only the placements actually written, so a skipped
+    /// ordinal leaves a gap rather than breaking the sequence.
+    pub fn lines(&self) -> [&MoneyCell; 15] {
         [
             &self.line1,
             &self.line2,
@@ -1299,6 +1305,7 @@ impl Form8960Map {
             &self.line5d,
             &self.line7,
             &self.line8,
+            &self.line9b,
             &self.line9d,
             &self.line11,
             &self.line12,

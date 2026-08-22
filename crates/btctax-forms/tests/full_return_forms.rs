@@ -168,6 +168,7 @@ fn f8960_fills_the_printed_chain_and_reads_back() {
         dec!(20000),
         dec!(2000),
         dec!(300000),
+        None,
     )
     .expect("NIIT is owed");
     let pdf = btctax_forms::fill_form_8960(&lines, &kitchen_sink_header(), 2024).unwrap();
@@ -216,6 +217,72 @@ fn f8960_fills_the_printed_chain_and_reads_back() {
         let fqn = format!("topmostSubform[0].Page1[0].{un}");
         assert_eq!(g(&fqn), None, "{fqn} (unmodeled) must be blank");
     }
+}
+
+/// ★★★ **P8 — Form 8960 line 9b: BLANK when unclaimed, PRINTED when claimed, both read back out of
+/// the serialized PDF.**
+///
+/// Two directions, because one would prove nothing. A test that only checked the blank case passes
+/// just as well against the old code, which had no line-9b field at all and could never write the
+/// cell; a test that only checked the printed case would not notice a `push_money` that swore a `0`
+/// on every return with no allocation. The pair is what distinguishes *"this filer entered nothing"*
+/// from *"this line does not exist"* — the two blanks that look identical on the printed page.
+///
+/// ★ It is also the geometry kill: `f1_17` is written through `verify_flat`, which re-parses the
+/// SERIALIZED bytes and rejects a cell whose center-x leaves the declared column cluster. Point
+/// `line9b` at the AMOUNT column and `fill_form_8960` fails closed.
+#[test]
+fn f8960_line9b_is_blank_when_unclaimed_and_printed_when_claimed() {
+    const L9B: &str = "topmostSubform[0].Page1[0].f1_17[0]";
+    const L9D: &str = "topmostSubform[0].Page1[0].f1_19[0]";
+    const L11: &str = "topmostSubform[0].Page1[0].f1_21[0]";
+    const L12: &str = "topmostSubform[0].Page1[0].f1_22[0]";
+    const L16: &str = "topmostSubform[0].Page1[0].f1_26[0]";
+    const L17: &str = "topmostSubform[0].Page1[0].f1_27[0]";
+
+    // Single, $60,000 of interest, MAGI $260,000 ⇒ line 15 = 60,000.
+    let of = |line9b| {
+        form_8960_lines(
+            FilingStatus::Single,
+            dec!(60000),
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(260000),
+            line9b,
+        )
+        .expect("NIIT is owed")
+    };
+
+    // (1) UNCLAIMED — the cell is not written at all.
+    let blank = of(None);
+    assert_eq!(blank.line9b, None);
+    let pdf = btctax_forms::fill_form_8960(&blank, &kitchen_sink_header(), 2024).unwrap();
+    assert_eq!(
+        tv(&pdf, L9B),
+        None,
+        "an unclaimed line 9b must be BLANK; a printed 0 would swear the allocable state income \
+         tax IS zero, which this filer never said"
+    );
+    // 9a and 9c stay unmodelled-blank either way; 9d and 11 are DERIVED totals the form adds.
+    for un in ["f1_16[0]", "f1_18[0]", "f1_20[0]"] {
+        let fqn = format!("topmostSubform[0].Page1[0].{un}");
+        assert_eq!(tv(&pdf, &fqn), None, "{fqn} (unmodeled) must be blank");
+    }
+    assert_eq!(tv(&pdf, L9D).as_deref(), Some("0"));
+    assert_eq!(tv(&pdf, L12).as_deref(), Some("60000"));
+    assert_eq!(tv(&pdf, L17).as_deref(), Some("2280")); // 3.8% × 60,000
+
+    // (2) CLAIMED — $10,000, the most §164(b)(6) can leave deductible.
+    let claimed = of(Some(dec!(10000)));
+    assert_eq!(claimed.line9b, Some(dec!(10000)));
+    let pdf = btctax_forms::fill_form_8960(&claimed, &kitchen_sink_header(), 2024).unwrap();
+    assert_eq!(tv(&pdf, L9B).as_deref(), Some("10000"));
+    assert_eq!(tv(&pdf, L9D).as_deref(), Some("10000"), "9d = 9a + 9b + 9c");
+    assert_eq!(tv(&pdf, L11).as_deref(), Some("10000"), "11 = 9d + 10");
+    assert_eq!(tv(&pdf, L12).as_deref(), Some("50000"), "12 = 8 − 11");
+    assert_eq!(tv(&pdf, L16).as_deref(), Some("50000"));
+    assert_eq!(tv(&pdf, L17).as_deref(), Some("1900")); // 3.8% × 50,000
 }
 
 // ─────────────────────────────────────── Form 8995 ────────────────────────────────────────────
@@ -361,6 +428,7 @@ fn f8960_same_column_swap_fails_closed_on_descent() {
         dec!(20000),
         dec!(2000),
         dec!(300000),
+        None,
     )
     .unwrap();
 
@@ -386,6 +454,7 @@ fn full_return_form_fills_are_byte_deterministic() {
         dec!(20000),
         dec!(2000),
         dec!(300000),
+        None,
     )
     .unwrap();
     let l95 = form_8995_lines(
