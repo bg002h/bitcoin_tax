@@ -549,9 +549,12 @@ fn the_all_zero_return_files_one_form_whose_every_money_line_is_zero_or_blank() 
     );
     assert!(
         vanished.is_empty(),
-        "the all-zero 1040 stopped printing {vanished:?}. Each is a line the form's arithmetic \
-         reaches — 'add lines …' with nothing to add is still a computed zero, and the cell is where \
-         a reader looks to see the return was completed rather than abandoned."
+        "the all-zero 1040 stopped printing {vanished:?}. These are of TWO kinds and both belong on \
+         the paper: the COMPUTED ones (1z, 9, 11, 14, 15, 18, 21, 22, 24, 25d, 32, 33) are lines the \
+         form's arithmetic reaches — 'add lines …' with nothing to add is still a computed zero — \
+         and the ENTRY ones (1a, 2a, 2b, 3a, 3b, 25a, 25b, 25c, 26) are lines this filer was asked \
+         about and answered with a zero. Either way the cell is where a reader looks to see the \
+         return was completed rather than abandoned."
     );
     assert!(
         changed.is_empty(),
@@ -591,8 +594,15 @@ fn the_all_zero_return_files_one_form_whose_every_money_line_is_zero_or_blank() 
 ///
 /// ★ A hand-written pairing is exactly what is under test here — the map says which AcroForm widget
 /// line N lives in, and this says which VALUE belongs in line N. Its completeness is not taken on
-/// trust: the test asserts the set of cells checked equals `Form6251Map::money_cells()`, so a line
-/// added to the form cannot be silently skipped.
+/// trust: the test asserts this list's LENGTH equals `Form6251Map::money_cells()`'s, so a line added
+/// to the form cannot be silently skipped.
+///
+/// ★★ It compares COUNTS, not sets, and that is adequate rather than sloppy — but only because of a
+/// second mechanism, so say which (phase-4 review N-2, an overclaim in this comment: it used to say
+/// "the set of cells checked equals"). `money_cells()` is built from an exhaustive
+/// `let Self { .. }` destructure, so a cell cannot be added to the map without the compiler
+/// demanding it there; the count then cannot match unless this list gained the same cell. Take the
+/// destructure away and the count check alone would admit a swap.
 fn expected_cells(f: &btctax_core::tax::form6251::Form6251) -> Vec<(&'static str, Usd)> {
     use btctax_core::tax::form6251::Form6251Line1;
     let line1 = match f.line1 {

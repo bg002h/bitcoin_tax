@@ -285,7 +285,45 @@ def main() -> int:
         #   regression guard above has ALREADY re-derived it from its own inputs and aborted on any
         #   drift) while letting the population grow.
         if vid in existing:
-            print(f"  [skip] {vid} already committed — re-derived by the regression guard above")
+            # ★★★ SKIP IS NOT "IGNORE" — CROSS-CHECK THE SPEC ROW FIRST (phase-4 review M-4).
+            #
+            # The regression guard above re-derives each committed vector from THE FIXTURE'S OWN
+            # `inputs`, never from the SPEC row. So it catches silent REWRITING and is blind to
+            # silent DIVERGENCE: edit a committed id's row here — change V13's wages, add a SALT
+            # column — and every check passes while the SPEC (this population's permanent record)
+            # and the fixture quietly disagree about what that vector IS. The `expect` routing dict
+            # and the §170(b)-ceiling ABORT were likewise never re-applied to committed vectors.
+            #
+            # Comparing the row's inputs to the committed ones closes it, and costs nothing.
+            committed = existing[vid]["inputs"]
+            spec_inputs = {
+                "filing_status": st, "wages": str(wages), "net_ltcg": str(ltcg),
+                "cash_gift": str(gift), "state_refund": str(refund),
+                "sch3_line1_ftc": str(ftc), "state_local_tax": str(salt),
+            }
+            drift = []
+            for k, want in spec_inputs.items():
+                if k == "filing_status":
+                    got = committed.get(k)
+                    same = got == want
+                else:
+                    # `state_local_tax` is absent from V1-V29, which predate G-6d; absent means
+                    # ZERO, the same reading the regression guard above already applies. Every
+                    # other key must be PRESENT — a missing one is drift, not a default.
+                    got = committed.get(k, "0" if k == "state_local_tax" else None)
+                    same = got is not None and D(got) == D(want)
+                if not same:
+                    drift.append((k, want, got))
+            if drift:
+                for k, want, got in drift:
+                    print(f"  DIVERGED {vid}.{k}: SPEC says {want}, fixture has {got}")
+                print(
+                    f"ABORT: {vid}'s SPEC row no longer matches the committed vector. A committed "
+                    "vector is never silently rewritten — but the SPEC must not silently diverge "
+                    "from it either. Fix the row, or regenerate the vector deliberately."
+                )
+                return 1
+            print(f"  [skip] {vid} already committed — inputs match SPEC; re-derived above")
             continue
         d, f = derive(st, D(wages), D(ltcg), D(gift), D(refund), D(ftc), D(salt))
         got = routing(st, f)
