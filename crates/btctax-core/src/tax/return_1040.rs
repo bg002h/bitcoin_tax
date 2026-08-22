@@ -2305,7 +2305,37 @@ pub fn screen_absolute(
     //         cannot know the election either. Indeterminate ⇒ refuse, which is what happens.
     //     The predicate answers the question "is the election determinate without the number btctax
     //     is missing?" — which is the actual question, and it answers it exactly.
+    //
+    // ★★★ …EXCEPT WHERE LINE 8a IS ALREADY A DISCLOSED ZERO (final whole-branch review, finding 3).
+    //
+    // A MIXED-USE mortgage (`mortgage_all_used_to_buy_build_improve == Some(false)`, §2.7, the base
+    // question tree) already zeroes 8a and CHECKS THE LINE-8 BOX — a disclosed conservative zero.
+    // For that filer both premises the refusal states above are FALSE:
+    //
+    //   * *"deducting the full Form 1098 figure would UNDERSTATE your tax"* — btctax would deduct
+    //     **$0**, not the full figure. The whole 1098 amount is already forgone.
+    //   * *"Schedule A has no box that would disclose such a zero"* — the box **IS** checked, and
+    //     truthfully, on this very return.
+    //
+    // And the over-limit fact moves nothing: the return btctax prints for them (8a = $0, box
+    // checked) is byte-identical to the one it prints when the same filer answers the debt-limit
+    // question YES. Reproduced across all four combinations before this scope was added — the
+    // mixed-use filer got `MortgageOverDebtLimit` on `Some(false)` and
+    // `MortgageDebtLimitUnanswered` on `None`, leaving `Some(true)` (false testimony under §6065)
+    // as the only route to a return btctax could already compute honestly.
+    //
+    // ★ THE SEAM, AND WHY NO EARLIER ROUND SAW IT. The mixed-use question belongs to the base tree;
+    //   the debt-limit refusal is phase 1, reviewed against its own population. `screen_inputs`'s
+    //   own comment ("unlike the mixed-use zero it has no line-8 checkbox disclosing it") shows the
+    //   author HELD the distinction and reasoned only about the non-mixed-use filer. No window
+    //   contained both.
+    //
+    // ★★ The refusal is unchanged for every OTHER over-limit itemizer — where 8a really would carry
+    //    the full 1098 figure with nothing on the form to disclose it, which is the case its text
+    //    describes and the case it exists for. Scoping it here also makes that text TRUE of everyone
+    //    who now sees it.
     if ar.deduction_is_itemized
+        && mixed_use_mortgage_forgone(ri).is_none()
         && crate::tax::questions::question_is_live(
             crate::tax::questions::QuestionId::MortgageWithinDebtLimit,
             ri,

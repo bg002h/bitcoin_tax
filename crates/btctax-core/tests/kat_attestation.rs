@@ -892,3 +892,136 @@ fn the_standard_deduction_deferral_donor_still_files_but_is_neither_told_nothing
          donations\" — so it needs no acknowledgment and must not be warned about or refused"
     );
 }
+
+/// ★★★ **MIXED-USE × OVER-LIMIT: THE INTERSECTION WHERE ALL THREE ANSWERS REFUSED.**
+///
+/// `MortgageAllUsedToBuyBuildImprove == Some(false)` (base question tree, §2.7) already zeroes
+/// Schedule A line 8a and CHECKS THE LINE-8 BOX — a disclosed conservative zero. The phase-1
+/// `MortgageOverDebtLimit` refusal fired independently on `mortgage_within_debt_limit == Some(false)`
+/// without checking whether 8a was already $0, so for that filer:
+///
+///   * `None`        ⇒ `MortgageDebtLimitUnanswered` (input screen)
+///   * `Some(false)` ⇒ `MortgageOverDebtLimit`
+///   * `Some(true)`  ⇒ false testimony under §6065
+///
+/// …no honest answer, on a return btctax can compute today. And both premises the refusal STATES are
+/// false for them: btctax would deduct $0 rather than the full 1098 figure, and the box that
+/// "does not exist" is checked on their own Schedule A.
+///
+/// ★★ **THE PROOF THAT THE ANSWER MOVES NOTHING** is the third assertion below: the return printed
+/// for the over-limit mixed-use filer is line-for-line the return printed when the same filer answers
+/// the debt-limit question YES. That is why scoping the refusal is not weakening it — there was
+/// nothing for it to protect here.
+///
+/// **Plant:** delete `&& mixed_use_mortgage_forgone(ri).is_none()` from the `MortgageOverDebtLimit`
+/// gate ⇒ the first half reds. Widen it to fire on every itemizer ⇒ the twin reds.
+#[test]
+fn a_mixed_use_mortgage_that_is_also_over_the_debt_limit_files_a_disclosed_zero() {
+    let params = ty2024_params();
+    let table = ty2024_table();
+    let base = r#"{"filing_status":"Single","w2_income":300000,"mortgage_interest":45000,
+                   "state_income_tax":12000,"charitable_cash":20000}"#;
+
+    let build = |mixed: Option<bool>, within: Option<bool>| {
+        let (mut ri, state) = household(base);
+        {
+            let a = ri.schedule_a.as_mut().expect("the fixture itemizes");
+            a.mortgage_all_used_to_buy_build_improve = mixed;
+            a.mortgage_within_debt_limit = within;
+        }
+        // §170(f)(8): a $20,000 cash gift on an ITEMIZING return trips the acknowledgment gate, which
+        // is a different statute entirely. Answer it so the mortgage question is the binding one.
+        ri.charitable_cwa_obtained = Some(true);
+        answer_all_live_declarations(&mut ri);
+        let ar = assemble_absolute(&ri, &state, &params, &table, 2024);
+        (ri, state, ar)
+    };
+
+    // ── THE FILER FROM THE FINDING: mixed-use AND over the limit. ──────────────────────────────────
+    let (ri, state, ar) = build(Some(false), Some(false));
+
+    // Premises first, so this KAT cannot pass by never reaching the intersection.
+    assert!(
+        ar.deduction_is_itemized,
+        "the fixture must ITEMIZE — the refusal under test is gated on the election, and a \
+         standard-deduction filer never reaches it"
+    );
+    let sa = ar
+        .schedule_a
+        .as_ref()
+        .expect("an itemizing return has a Schedule A");
+    assert_eq!(
+        sa.mortgage_8a,
+        Usd::ZERO,
+        "★ line 8a must ALREADY be zero — that is the whole premise: the mixed-use answer forgoes \
+         the entire 1098 amount before the debt limit is ever consulted"
+    );
+    assert!(
+        sa.mortgage_mixed_use_box,
+        "★ …and the line-8 box must be CHECKED, which is what makes the zero DISCLOSED rather than \
+         silent. The refusal's text says no such box exists; on this return it does."
+    );
+
+    assert_eq!(
+        screen_inputs(&ri, &table, &params),
+        None,
+        "nothing refuses at the input screen once the question is answered"
+    );
+    assert_eq!(
+        screen_absolute(&ri, &ar, &params, &state, 2024),
+        None,
+        "★★ AND THE RETURN FILES. Refusing here stopped a filer whose printed return btctax can \
+         compute honestly today, and offered them no honest answer: `None` refuses as unanswered, \
+         `Some(true)` is false testimony under §6065, and this was the third door."
+    );
+
+    // ── THE ANSWER MOVES NOTHING: the same filer answering YES prints the identical return. ────────
+    let (_, _, ar_yes) = build(Some(false), Some(true));
+    assert_eq!(
+        ar.schedule_a, ar_yes.schedule_a,
+        "★ the over-limit fact changes NO figure on this return — the whole 1098 amount is already \
+         forgone by the mixed-use answer, so 8a is $0 and the box is checked either way. A refusal \
+         defending a number that cannot move is defending nothing."
+    );
+    assert_eq!(
+        ar.taxable_income, ar_yes.taxable_income,
+        "…all the way down to taxable income"
+    );
+
+    // ══ TWIN 1: OVER-LIMIT WITHOUT MIXED-USE STILL REFUSES. ═══════════════════════════════════════
+    //
+    // Without this the scope above is satisfied by deleting the refusal outright. Here 8a really
+    // WOULD carry the full $45,000 with nothing on the form to disclose it — the case the refusal's
+    // text describes, and the case it exists for.
+    let (ri_x, state_x, ar_x) = build(Some(true), Some(false));
+    let sa_x = ar_x.schedule_a.as_ref().expect("itemizing");
+    assert_eq!(
+        sa_x.mortgage_8a,
+        dec!(45000),
+        "the twin must carry the FULL 1098 figure on 8a, or it is not the population the refusal \
+         protects"
+    );
+    assert!(
+        !sa_x.mortgage_mixed_use_box,
+        "…with the line-8 box UNCHECKED — the undisclosed zero problem the refusal's text names"
+    );
+    let r = screen_absolute(&ri_x, &ar_x, &params, &state_x, 2024)
+        .expect("★ an over-limit itemizer whose 8a is NOT already zeroed must still REFUSE");
+    assert_eq!(
+        format!("{:?}", r.reason),
+        "MortgageOverDebtLimit",
+        "…and for the debt limit specifically"
+    );
+
+    // ══ TWIN 2: MIXED-USE ALONE, NOT OVER THE LIMIT — the control. ════════════════════════════════
+    //
+    // Proves the first case files because of the SCOPE and not because the fixture stopped being
+    // over the limit: this filer prints the same disclosed zero and always could.
+    let (ri_m, state_m, ar_m) = build(Some(false), Some(true));
+    assert_eq!(
+        screen_absolute(&ri_m, &ar_m, &params, &state_m, 2024),
+        None,
+        "a mixed-use filer inside the debt limit files a disclosed zero — this was never in doubt, \
+         and it is the return the over-limit filer now gets too"
+    );
+}
