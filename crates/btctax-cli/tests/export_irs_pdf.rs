@@ -1359,6 +1359,86 @@ fn a_full_return_with_more_8949_legs_than_a_page_holds_refuses_with_year_capacit
     );
 }
 
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// P6 — the §170(d)(1) charitable carryover-out must reach a human on the EXPORT path too
+// (FILING-READINESS-PLAN rank 9). `report --tax-year` is not the only way a filer meets their
+// return; `export-irs-pdf` is the one that hands them a PDF to sign, and it prints the §170 warnings
+// already. A carryover the filer is never told about is a deduction they paid for and forfeit.
+
+/// A TY2024 full-return vault whose gift OVERFLOWS its §170(b) ceiling: $50,000 of wages against a
+/// $40,000 cash gift, so the 60%-of-AGI ceiling leaves an excess to carry into 2025.
+fn full_return_vault_with_a_gift_over_its_ceiling(
+) -> (tempfile::TempDir, PathBuf, tempfile::TempDir) {
+    use btctax_core::tax::return_inputs::{
+        CharitableClass, CharitableGift, Owner, ScheduleAInputs, W2,
+    };
+    full_return_vault(&real_events_2024(), |ri| {
+        ri.w2s = vec![W2 {
+            owner: Owner::Taxpayer,
+            employer: "ACME".into(),
+            box1_wages: dec!(50000),
+            box2_fed_withheld: dec!(5000),
+            box3_ss_wages: dec!(50000),
+            box5_medicare_wages: dec!(50000),
+            ..Default::default()
+        }];
+        ri.schedule_a = Some(ScheduleAInputs {
+            charitable: vec![CharitableGift {
+                class: CharitableClass::Cash60,
+                amount: dec!(40000),
+            }],
+            ..Default::default()
+        });
+    })
+}
+
+/// ★ P6, the report struct: the export path must CARRY the carryover out to its caller. Without this
+/// the value has no reader on this path at all.
+#[test]
+fn the_full_return_export_report_carries_the_charitable_carryover_out() {
+    let (_d, vault, out) = full_return_vault_with_a_gift_over_its_ceiling();
+    let rep = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
+        .expect("the packet exports");
+    assert!(
+        !rep.charitable_carryover_out.is_empty(),
+        "a gift over its §170(b) ceiling must carry its carryover out on the export report"
+    );
+    assert!(
+        rep.charitable_carryover_out
+            .iter()
+            .all(|c| c.origin_year == 2024 && c.amount > btctax_core::Usd::ZERO),
+        "…tagged with the origin year and a real amount: {:?}",
+        rep.charitable_carryover_out
+    );
+}
+
+/// ★ P6, the human: running the real binary, `export-irs-pdf` must NAME the carryover on stderr,
+/// beside the other §170 notes. Mutation: delete the block from main.rs and this reds — which is the
+/// only thing that pins the value reaches a person rather than a struct field.
+#[test]
+fn export_irs_pdf_tells_the_filer_about_the_charitable_carryover() {
+    let (_d, vault, out) = full_return_vault_with_a_gift_over_its_ceiling();
+    let bin = env!("CARGO_BIN_EXE_btctax");
+    let res = std::process::Command::new(bin)
+        .arg("--vault")
+        .arg(&vault)
+        .args(["export-irs-pdf", "--tax-year", "2024", "--out"])
+        .arg(out.path().join("packet"))
+        .env("BTCTAX_PASSPHRASE", "pw")
+        .output()
+        .expect("btctax binary must execute");
+    let stderr = String::from_utf8_lossy(&res.stderr).into_owned();
+    assert_eq!(res.status.code(), Some(0), "the export succeeds: {stderr}");
+    assert!(
+        stderr.contains("Charitable carryover to 2025"),
+        "the export must name the §170(d)(1) carryover on stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("--write-carryover"),
+        "…and how to roll it forward: {stderr}"
+    );
+}
+
 /// The other half of the B1 pair: 14 legs — exactly the page capacity — still EXPORTS. A preflight
 /// that refuses one leg too early would be as wrong as no preflight at all (`>` vs `>=` is the
 /// mutation this kills).

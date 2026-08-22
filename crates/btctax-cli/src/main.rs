@@ -844,6 +844,17 @@ fn run() -> Result<ExitCode, CliError> {
                          (appraiser) and Part V (donee acknowledgement) — obtain both before filing."
                     );
                 }
+                // ★ P6 — the §170(d)(1) charitable carryover, beside the other §170 notes above. The
+                // figure was computed on every run and read by nobody: `--write-carryover` is its only
+                // consumer and that command errors unless next year's row already exists, so a filer
+                // whose gift exceeded its ceiling was never told the carryover existed. Printed from
+                // the SAME renderer `report --tax-year` uses, so the two surfaces cannot drift.
+                if let Some(block) = render::render_charitable_carryover_out(
+                    report.tax_year,
+                    &report.charitable_carryover_out,
+                ) {
+                    eprint!("{block}");
+                }
                 // ★ §G-19d — the full return's ADVISORIES, on the path that hands the filer a PDF to
                 // sign. `advisories_for` used to have exactly one caller (`report --tax-year`), so a
                 // filer who only ever ran `export-irs-pdf` saw none of them: not the forgone §63(f)

@@ -315,6 +315,18 @@ pub struct IrsPdfReport {
     /// the one that hands them a PDF to sign, so it is the last place the omissions should be silent.
     /// Empty on the crypto-slice path, which computes no full return.
     pub advisories: Vec<btctax_core::tax::advisories::Advisory>,
+    /// ★ P6 (FILING-READINESS-PLAN rank 9) — the §170(d)(1) charitable carryover to next year, per
+    /// class and vintage, so the EXPORT path can tell the filer it exists.
+    ///
+    /// `AbsoluteReturn::charitable_carryover_out` is computed on every full-return run and was read by
+    /// exactly ONE caller — `apply_carryover_writeback`, reachable only from `report
+    /// --write-carryover`, which errors unless a year+1 row already exists. A filer whose gift
+    /// exceeded its §170(b) ceiling was therefore never told: a deduction already paid for, silently
+    /// forgone. This is not a rich-filer case — the ceiling is a FRACTION of AGI, so at $0 AGI the
+    /// ceiling is $0 and 100% of the gift carries.
+    ///
+    /// Empty on the crypto-slice path, which computes no full return and no Schedule A.
+    pub charitable_carryover_out: Vec<btctax_core::tax::return_inputs::CharitableCarryItem>,
 }
 
 /// The **[I5]** broker-reporting advisory line, year-aware — or `None` when no disposition may have
@@ -715,8 +727,10 @@ pub(crate) fn export_irs_pdf_from_session(
         .filter(|b| b.kind.severity() == Severity::Hard)
         .count();
     Ok(IrsPdfReport {
-        // The crypto slice computes no full return, so there are no full-return advisories.
+        // The crypto slice computes no full return, so there are no full-return advisories — and no
+        // Schedule A, hence no §170(d)(1) carryover either.
         advisories: Vec::new(),
+        charitable_carryover_out: Vec::new(),
         full_return_paths: Vec::new(),
         full_return_manifest: None,
         forms_ignored_full_return: false, // crypto-slice path honors --forms
@@ -1031,6 +1045,10 @@ fn export_full_return(
         .count();
     Ok(IrsPdfReport {
         advisories,
+        // ★ P6 — the §170(d)(1) carryover rides out to the caller, which prints it beside the other
+        // §170 notes. Taken from the SAME `assemble_absolute` result the packet was printed from, so
+        // the figure on the filer's screen is the figure the return produced.
+        charitable_carryover_out: ar.charitable_carryover_out.clone(),
         watermarked,
         tax_year,
         unresolved_hard,
