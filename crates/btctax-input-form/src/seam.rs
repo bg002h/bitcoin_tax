@@ -90,6 +90,8 @@ pub enum FieldId {
     SaMortgage1098,
     SaSaltUseSalesTax,
     SaMortgageAllUsed,
+    /// §163(h)(3)(B) — the acquisition-debt-ceiling declaration (`FORM_QUESTIONS` index 13).
+    SaMortgageWithinDebtLimit,
     // Schedule A charitable (per row)
     CharClass,
     CharAmount,

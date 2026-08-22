@@ -300,6 +300,7 @@ pub fn maximal_sentinel() -> ReturnInputs {
             salt_personal_property: dec!(5),
             mortgage_interest_1098: dec!(6),
             mortgage_all_used_to_buy_build_improve: Some(true),
+            mortgage_within_debt_limit: Some(true),
             mortgage_dwelling_is_amt_qualified: Some(true),
             charitable: vec![
                 CharitableGift {

@@ -534,6 +534,7 @@ fn classify_schedule_a(c: &mut Census, a: &ScheduleAInputs) {
         salt_personal_property: _,
         mortgage_interest_1098: _,
         mortgage_all_used_to_buy_build_improve,
+        mortgage_within_debt_limit,
         mortgage_dwelling_is_amt_qualified,
         charitable,
     } = a;
@@ -546,6 +547,10 @@ fn classify_schedule_a(c: &mut Census, a: &ScheduleAInputs) {
     c.declaration(
         mortgage_all_used_to_buy_build_improve,
         QuestionId::MortgageAllUsedToBuyBuildImprove,
+    );
+    c.declaration(
+        mortgage_within_debt_limit,
+        QuestionId::MortgageWithinDebtLimit,
     );
     c.declaration(
         mortgage_dwelling_is_amt_qualified,

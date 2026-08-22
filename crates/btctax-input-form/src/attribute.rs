@@ -40,6 +40,7 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::HsaActivityUnanswered => vec![decl(QuestionId::HsaActivity)],
         R::DualStatusAlienUnanswered => vec![decl(QuestionId::DualStatusAlien)],
         R::MixedUseMortgageUnanswered => vec![decl(QuestionId::MortgageAllUsedToBuyBuildImprove)],
+        R::MortgageDebtLimitUnanswered => vec![decl(QuestionId::MortgageWithinDebtLimit)],
         R::AmtQualifiedDwellingUnanswered => vec![decl(QuestionId::AmtQualifiedDwelling)],
         R::IncomeExclusionUnanswered => vec![decl(QuestionId::HasIncomeExclusion)],
         // §G-22/B11 — both legs point at the one declaration that decides them.
@@ -69,6 +70,10 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::DependentSpouseUnsupported => vec![decl(QuestionId::DependentSpouse)],
         // Form 6251's two ADVERSE answers: v1 models neither add-back, so each refuses at the same
         // field its unanswered twin anchors.
+        // ★ §163(h)(3)(B) answered ADVERSELY. It anchors at the same leaf as its unanswered twin —
+        //   the answer IS the input, and the return becomes fileable only by correcting it (or, once
+        //   FOLLOWUPS P9(a)/S2 lands, by entering the Pub. 936 worksheet result).
+        R::MortgageOverDebtLimit => vec![decl(QuestionId::MortgageWithinDebtLimit)],
         R::AmtNonQualifiedDwelling => vec![decl(QuestionId::AmtQualifiedDwelling)],
         R::AmtCarryoverDiverges => vec![decl(QuestionId::AmtCarryoverSameAsRegular)],
         R::AmtDepreciationDiverges => vec![decl(QuestionId::AmtDepreciationSameAsRegular)],

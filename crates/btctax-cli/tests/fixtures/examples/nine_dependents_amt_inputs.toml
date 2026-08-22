@@ -182,3 +182,6 @@ mortgage_all_used_to_buy_build_improve = true
 # i6251 line 3 — a principal residence IS an AMT-qualified dwelling, so there is no add-back.
 # ★ DELETING THIS LINE REFUSES THE RETURN (AmtQualifiedDwellingUnanswered). That is the point.
 mortgage_dwelling_is_amt_qualified = true
+# §163(h)(3)(B) — this filer is inside every i1040sca acquisition-debt ceiling, so Schedule A line 8a
+# keeps the whole $18,000. ★ DELETING THIS LINE ALSO REFUSES THE RETURN (MortgageDebtLimitUnanswered).
+mortgage_within_debt_limit = true

@@ -530,6 +530,34 @@ pub struct ScheduleAInputs {
     /// `Some(true)` ⇒ full 8a, box unchecked.
     #[serde(default)]
     pub mortgage_all_used_to_buy_build_improve: Option<bool>,
+    /// **§163(h)(3)(B) — the ACQUISITION-DEBT CEILING declaration.** i1040sca (2024), *Limits on home
+    /// mortgage interest*, transcribed rather than summarised because each limit is a separate test:
+    ///
+    /// - *"Your deduction for home mortgage interest is subject to a number of limits. If one or more of
+    ///   the following limits applies, see Pub. 936 to figure your deduction."*
+    /// - *"Limit on loans taken out on or before December 15, 2017. For qualifying debt taken out on or
+    ///   before December 15, 2017, you can only deduct home mortgage interest on up to $1,000,000
+    ///   ($500,000 if you are married filing separately) of that debt."*
+    /// - *"Limit on loans taken out after December 15, 2017. For qualifying debt taken out after
+    ///   December 15, 2017, you can only deduct home mortgage interest on up to $750,000 ($375,000 if
+    ///   you are married filing separately) of that debt. If you also have qualifying debt subject to
+    ///   the $1,000,000 limitation … the $750,000 limit for debt taken out after December 15, 2017, is
+    ///   reduced by the amount of your qualifying debt subject to the $1,000,000 limit."*
+    /// - *"Limit when loans exceed the fair market value of the home. If the total amount of all
+    ///   mortgages is more than the fair market value of the home, see Pub. 936 to figure your
+    ///   deduction."*
+    ///
+    /// A class-(A) DECLARATION, phrased so `true` — "I am inside every limit" — is the neutral answer
+    /// that leaves line 8a at the full Form 1098 amount. `None` = never asked ⇒ refuse
+    /// (`MortgageDebtLimitUnanswered`). `Some(false)` = "one of the limits bites" ⇒ ALSO refuse
+    /// (`MortgageOverDebtLimit`): i1040sca's Line 8a instruction is *"Only enter on line 8a the
+    /// deductible mortgage interest and points that were reported to you on Form 1098"*, a determinate
+    /// NONZERO output of Pub. 936's Deductible Home Mortgage Interest Worksheet that btctax does not
+    /// model. Deducting the full 1098 figure would UNDERSTATE the tax; printing $0 would OVERSTATE it by
+    /// the whole deductible portion, and — unlike the mixed-use zero, which the line-8 checkbox
+    /// discloses — Schedule A carries no box that could explain it.
+    #[serde(default)]
+    pub mortgage_within_debt_limit: Option<bool>,
     /// **Form 6251 line 3 — the AMT qualified-dwelling declaration.** i6251 p.8: "If you deducted home
     /// mortgage interest on Schedule A for a dwelling that isn't a principal residence (within the
     /// meaning of section 121) or qualified dwelling for AMT, include that deducted interest on line 3.

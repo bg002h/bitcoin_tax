@@ -82,6 +82,17 @@ pub enum RefuseReason {
     /// P9 §2.7 — the §163(h)(3)(F) mixed-use-mortgage DECLARATION is `None`, on a Schedule A carrying
     /// mortgage interest. Fail loud rather than print line 8a with the box in an unaffirmed state.
     MixedUseMortgageUnanswered,
+    /// **§163(h)(3)(B)** — the acquisition-debt-ceiling DECLARATION is `None`, on a Schedule A carrying
+    /// mortgage interest. i1040sca's *Limits on home mortgage interest* block states four limits and
+    /// btctax models only the mixed-use one; without the answer it would deduct 100% of the Form 1098
+    /// amount for a filer the statute caps, which UNDERSTATES the tax on a **filed** figure that neither
+    /// oracle can catch (both consume line 8a as an input — §G-9). Fail loud.
+    MortgageDebtLimitUnanswered,
+    /// **§163(h)(3)(B)** — answered ADVERSELY ("one of the debt limits bites"). See
+    /// [`ScheduleAInputs::mortgage_within_debt_limit`] for why neither available number is filable.
+    ///
+    /// [`ScheduleAInputs::mortgage_within_debt_limit`]: crate::tax::return_inputs::ScheduleAInputs::mortgage_within_debt_limit
+    MortgageOverDebtLimit,
     /// Form 6251 line 3 — the AMT qualified-dwelling question is live but unanswered.
     AmtQualifiedDwellingUnanswered,
     /// **§164(b)(7)(B)(iv) / Schedule 1-A Part I** — the §911/931/933 exclusion gate is unanswered on
@@ -549,6 +560,7 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             salt_personal_property,
             mortgage_interest_1098,
             mortgage_all_used_to_buy_build_improve: _,
+            mortgage_within_debt_limit: _, // a declaration, not money
             mortgage_dwelling_is_amt_qualified: _, // a declaration, not money
             charitable,
         } = a;
@@ -727,6 +739,42 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
     //   an exit-less brick on a return whose add-back is structurally $0 — the filer cannot clear an
     //   answer to a question that is no longer asked. (i6251 line 3 is itself conditioned on having
     //   **deducted** the interest, so the gate is faithful to the form, not just kind.)
+    // ★★★ §163(h)(3)(B) — the ACQUISITION-DEBT CEILING, answered adversely. Same shape as the three
+    //     Form 6251 declarations below: gated on the registry liveness so a stale `Some(false)` on a
+    //     Schedule A that no longer reports 1098 interest is not an exit-less brick.
+    //
+    // ★★ THE MESSAGE NAMES BOTH FAILURE DIRECTIONS ON PURPOSE. This branch exists because *neither*
+    //    number btctax can produce is filable, and a refusal that named only one of them would read as
+    //    an invitation to take the other. i1040sca Line 8a: *"Only enter on line 8a the deductible
+    //    mortgage interest and points that were reported to you on Form 1098"* — a determinate NONZERO
+    //    worksheet output. A printed $0 transcribes no instruction, and unlike the mixed-use zero it
+    //    has no line-8 checkbox disclosing it (see `ADJUDICATION-2026-08-21.md`, D3).
+    if crate::tax::questions::question_is_live(
+        crate::tax::questions::QuestionId::MortgageWithinDebtLimit,
+        ri,
+    ) && ri
+        .schedule_a
+        .as_ref()
+        .is_some_and(|a| a.mortgage_within_debt_limit == Some(false))
+    {
+        return refuse(
+            RefuseReason::MortgageOverDebtLimit,
+            "you declared that one of the §163(h)(3)(B) home-mortgage limits applies to you — the \
+             $750,000 ($375,000 married filing separately) ceiling on qualifying debt taken out after \
+             December 15, 2017, the $1,000,000 ($500,000 MFS) ceiling on debt taken out on or before \
+             that date, or the limit where the mortgages exceed the home's fair market value. \
+             i1040sca's own instruction for line 8a is \"Only enter on line 8a the deductible mortgage \
+             interest and points that were reported to you on Form 1098\", and btctax cannot figure \
+             that amount. NEITHER number it could print is your return: deducting the full Form 1098 \
+             figure would UNDERSTATE your tax, and entering $0 would OVERSTATE it by the whole \
+             deductible portion — and Schedule A has no box that would disclose such a zero (the \
+             line-8 checkbox is the mixed-use disclosure, not this one). The cure is the one the \
+             instructions prescribe: work Pub. 936's Deductible Home Mortgage Interest Worksheet, \
+             which produces the deductible amount for line 8a. btctax does not yet have a place to \
+             enter that result — the `mortgage_interest_deductible` input is filed as FOLLOWUPS P9(a)/S2 \
+             — so until it lands, file this year's Schedule A by hand. `btctax report` still runs",
+        );
+    }
     if crate::tax::questions::question_is_live(
         crate::tax::questions::QuestionId::AmtQualifiedDwelling,
         ri,
@@ -1218,7 +1266,9 @@ mod tests {
         match id {
             QuestionId::DependentSpouse => r.filing_status = FilingStatus::Mfj, // live with no spouse Person (P8a I1)
             QuestionId::MfsSpouseItemizes => r.filing_status = FilingStatus::Mfs,
-            QuestionId::MortgageAllUsedToBuyBuildImprove | QuestionId::AmtQualifiedDwelling => {
+            QuestionId::MortgageAllUsedToBuyBuildImprove
+            | QuestionId::AmtQualifiedDwelling
+            | QuestionId::MortgageWithinDebtLimit => {
                 r.schedule_a = Some(ScheduleAInputs {
                     mortgage_interest_1098: dec!(9000),
                     ..Default::default()
@@ -1313,6 +1363,9 @@ mod tests {
             // live (i6251 p.8). Answered AMT-neutral here so this test keeps testing the MIXED-USE
             // question rather than tripping on the new one.
             mortgage_dwelling_is_amt_qualified: Some(true),
+            // …and, since §163(h)(3)(B), the acquisition-debt-ceiling question too. Same reason:
+            // neutral, so the MIXED-USE branch is what this test still exercises.
+            mortgage_within_debt_limit: Some(true),
             ..Default::default()
         });
 
@@ -2307,6 +2360,114 @@ mod tests {
         );
     }
 
+    /// ★★★ **P1 / §163(h)(3)(B) — THE ACQUISITION-DEBT CEILING TERNARY.** unanswered ⇒ refuse,
+    /// ADVERSE ⇒ refuse with its OWN reason, neutral ⇒ compute.
+    ///
+    /// This is the branch that exists because btctax deducts 100% of the Form 1098 amount and the
+    /// statute caps qualifying debt at $750,000 ($375,000 MFS) post-2017 / $1,000,000 ($500,000 MFS)
+    /// pre-2018. **Neither oracle can catch the understatement** — both take Schedule A line 8a as an
+    /// INPUT (§G-9) — so this test is the only instrument that sees it.
+    ///
+    /// **B1 mutations, each observed RED before the fix landed:**
+    /// - delete the `MortgageWithinDebtLimit` entry from `FORM_QUESTIONS` ⇒ the `None` arm reds
+    ///   (the registry loop is what raises `MortgageDebtLimitUnanswered`);
+    /// - delete the `MortgageOverDebtLimit` block from `screen_inputs` ⇒ the `Some(false)` arm reds
+    ///   with `None`, i.e. the over-limit filer silently deducts 100% again.
+    #[test]
+    fn the_acquisition_debt_limit_refuses_unanswered_and_adverse_but_computes_when_neutral() {
+        use crate::tax::return_inputs::ScheduleAInputs;
+        let limit = |ans: Option<bool>| {
+            let mut r = ri();
+            r.schedule_a = Some(ScheduleAInputs {
+                mortgage_interest_1098: dec!(130000), // the [RAN] vector's notional $2,000,000 loan
+                mortgage_all_used_to_buy_build_improve: Some(true),
+                mortgage_dwelling_is_amt_qualified: Some(true),
+                mortgage_within_debt_limit: ans,
+                ..Default::default()
+            });
+            reason(&r)
+        };
+        assert_eq!(
+            limit(None),
+            Some(RefuseReason::MortgageDebtLimitUnanswered),
+            "unanswered ⇒ refuse: btctax collects the INTEREST, never the debt balance, so it cannot \
+             tell whether §163(h)(3)(B) caps this filer"
+        );
+        assert_eq!(
+            limit(Some(false)),
+            Some(RefuseReason::MortgageOverDebtLimit),
+            "ADVERSE ⇒ refuse: the Pub. 936 worksheet output is unmodelled, so the full 1098 amount \
+             would UNDERSTATE and a $0 would OVERSTATE — and neither is disclosable on Schedule A"
+        );
+        assert_eq!(limit(Some(true)), None, "neutral ⇒ compute at the full 8a");
+    }
+
+    /// ★★ **The over-limit refusal must carry BOTH failure directions and the cure.** A refusal that
+    /// named only one direction would read as an invitation to take the other — and taking the "full
+    /// 1098" direction is the understatement this whole item exists to stop. The message is the entire
+    /// remedy here (nothing computes from the answer), so the message is what the test pins.
+    ///
+    /// B1 mutation: drop any one of the pinned phrases from the `MortgageOverDebtLimit` detail and the
+    /// matching assertion reds by name.
+    #[test]
+    fn the_over_limit_refusal_states_both_directions_and_names_the_pub_936_worksheet() {
+        use crate::tax::return_inputs::ScheduleAInputs;
+        let mut r = ri();
+        r.schedule_a = Some(ScheduleAInputs {
+            mortgage_interest_1098: dec!(130000),
+            mortgage_all_used_to_buy_build_improve: Some(true),
+            mortgage_dwelling_is_amt_qualified: Some(true),
+            mortgage_within_debt_limit: Some(false),
+            ..Default::default()
+        });
+        let refusal = screen_inputs(&r, &tbl(), &params()).expect("over-limit refuses");
+        assert_eq!(refusal.reason, RefuseReason::MortgageOverDebtLimit);
+        let d = refusal.detail.to_ascii_lowercase();
+        for phrase in [
+            "understate", // deducting the full 1098 amount
+            "overstate",  // zeroing line 8a
+            "pub. 936",   // the cure the instructions prescribe
+            "deductible home mortgage interest worksheet",
+            "mortgage_interest_deductible", // the input that will close this branch
+            "$750,000",
+            "$1,000,000",
+            "fair market value",
+        ] {
+            assert!(
+                d.contains(phrase),
+                "the over-limit refusal must say {phrase:?}; got: {}",
+                refusal.detail
+            );
+        }
+    }
+
+    /// ★ REGRESSION twin of the line-3 one below — the debt-limit VALUE-refusal respects the SAME
+    /// liveness as its unanswered half, so a stale `Some(false)` on a Schedule A that no longer
+    /// reports 1098 interest is not an exit-less brick (there is no line 8a to be wrong).
+    ///
+    /// B1 mutation: drop the `question_is_live(MortgageWithinDebtLimit, ..)` conjunct and this reds.
+    #[test]
+    fn an_over_limit_answer_without_deducted_mortgage_interest_does_not_brick_the_return() {
+        use crate::tax::return_inputs::ScheduleAInputs;
+        let mut r = ri();
+        r.schedule_a = Some(ScheduleAInputs {
+            mortgage_interest_1098: Usd::ZERO, // nothing on line 8a to be capped
+            mortgage_within_debt_limit: Some(false), // …yet a stale adverse answer
+            salt_real_estate: dec!(4000),
+            ..Default::default()
+        });
+        assert_ne!(
+            reason(&r),
+            Some(RefuseReason::MortgageOverDebtLimit),
+            "no deducted mortgage interest ⇒ no line 8a to cap ⇒ no exit-less refusal"
+        );
+        assert_ne!(
+            reason(&r),
+            Some(RefuseReason::MortgageDebtLimitUnanswered),
+            "…and the unanswered half must agree: the question is not live either"
+        );
+    }
+
     /// ★ THE TERNARY for Form 6251's THREE declarations: unanswered ⇒ refuse, ADVERSE ⇒ refuse,
     /// neutral ⇒ compute. The adverse branch is the one a passing test would hide — computing with a
     /// missing line-3 / line-2k / line-2l add-back UNDERSTATES the tax, which is the one direction this
@@ -2324,6 +2485,9 @@ mod tests {
             r.schedule_a = Some(ScheduleAInputs {
                 mortgage_interest_1098: dec!(9000),
                 mortgage_all_used_to_buy_build_improve: Some(true),
+                // Reporting 1098 interest also makes the §163(h)(3)(B) debt-limit question live.
+                // Answered NEUTRAL here so this test keeps testing the Form 6251 declarations.
+                mortgage_within_debt_limit: Some(true),
                 mortgage_dwelling_is_amt_qualified: ans,
                 ..Default::default()
             });

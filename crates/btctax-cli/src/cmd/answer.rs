@@ -379,7 +379,9 @@ mod tests {
         match id {
             QuestionId::DependentSpouse => r.filing_status = FilingStatus::Mfj,
             QuestionId::MfsSpouseItemizes => r.filing_status = FilingStatus::Mfs,
-            QuestionId::MortgageAllUsedToBuyBuildImprove | QuestionId::AmtQualifiedDwelling => {
+            QuestionId::MortgageAllUsedToBuyBuildImprove
+            | QuestionId::AmtQualifiedDwelling
+            | QuestionId::MortgageWithinDebtLimit => {
                 r.schedule_a = Some(ScheduleAInputs {
                     mortgage_interest_1098: dec!(9000),
                     ..Default::default()

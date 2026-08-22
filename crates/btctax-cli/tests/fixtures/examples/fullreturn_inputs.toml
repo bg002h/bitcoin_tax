@@ -106,6 +106,10 @@ medical = "2000"
 mortgage_all_used_to_buy_build_improve = true
 mortgage_dwelling_is_amt_qualified = true
 mortgage_interest_1098 = "22000"
+# §163(h)(3)(B) — inside every i1040sca "Limits on home mortgage interest" ceiling, so line 8a keeps
+# the whole Form 1098 amount. ★ DELETING THIS LINE REFUSES THE RETURN (MortgageDebtLimitUnanswered),
+# and setting it `false` refuses it as MortgageOverDebtLimit. That is the point.
+mortgage_within_debt_limit = true
 salt_personal_property = "0"
 salt_prior_year_balance_paid = "0"
 salt_real_estate = "6000"

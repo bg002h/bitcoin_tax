@@ -846,6 +846,16 @@ const SCHEDULE_A_FIELDS: &[Field] = &[
             Err(SetError::NoSuchRow)
         }
     }),
+    // ★ Registry-driven — DELEGATES to `FORM_QUESTIONS::MortgageWithinDebtLimit` (index 13, appended
+    //   at the END of that array: `decl_tristate!` couples to the INDEX).
+    decl_tristate!(13, FieldId::SaMortgageWithinDebtLimit, |ri| {
+        if let Some(a) = ri.schedule_a.as_mut() {
+            a.mortgage_within_debt_limit = None;
+            Ok(())
+        } else {
+            Err(SetError::NoSuchRow)
+        }
+    }),
 ];
 
 pub(crate) const SCHEDULE_A: Section = Section {

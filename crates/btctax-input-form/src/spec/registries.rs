@@ -355,6 +355,7 @@ pub fn field_to_question(id: FieldId) -> Option<QuestionId> {
         FieldId::DeclHsaActivity => QuestionId::HsaActivity,
         FieldId::DeclDualStatusAlien => QuestionId::DualStatusAlien,
         FieldId::SaMortgageAllUsed => QuestionId::MortgageAllUsedToBuyBuildImprove,
+        FieldId::SaMortgageWithinDebtLimit => QuestionId::MortgageWithinDebtLimit,
         FieldId::DeclAmtQualifiedDwelling => QuestionId::AmtQualifiedDwelling,
         FieldId::DeclAmtCarryoverSame => QuestionId::AmtCarryoverSameAsRegular,
         FieldId::DeclAmtDepreciationSame => QuestionId::AmtDepreciationSameAsRegular,
@@ -376,6 +377,9 @@ pub fn question_to_field(id: QuestionId) -> FieldId {
         QuestionId::HsaActivity => FieldId::DeclHsaActivity,
         QuestionId::DualStatusAlien => FieldId::DeclDualStatusAlien,
         QuestionId::MortgageAllUsedToBuyBuildImprove => FieldId::SaMortgageAllUsed,
+        // ★ §163(h)(3)(B) — deduped to its own Schedule-A leaf, like the mixed-use box above: it is a
+        //   Schedule-A-owned answer that decides what line 8a may print.
+        QuestionId::MortgageWithinDebtLimit => FieldId::SaMortgageWithinDebtLimit,
         // Pure declarations: they carry Form 6251 lines 3, 2k and 2l and print on no Schedule-A line, so
         // they get their own Decl leaves rather than deduping to a Schedule-A field.
         QuestionId::AmtQualifiedDwelling => FieldId::DeclAmtQualifiedDwelling,
