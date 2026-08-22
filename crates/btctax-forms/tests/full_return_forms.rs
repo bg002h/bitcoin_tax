@@ -3375,3 +3375,174 @@ fn the_1040_line7_not_required_box_is_never_checked() {
          lines 4/5/11/12. Checking it is testimony the filer never gave."
     );
 }
+
+// ── P2b — the full-return Form 8949 PAGINATES (it used to refuse) ────────────────────────────────
+//
+// The crypto-slice path (`btctax_forms::fill_form_8949`) has chunked and merged since T2. The
+// full-return path called the single-copy filler directly, so a filer with more legs than the
+// revision's grid holds (14 on the TY2024 revision, 11 on 2025) got `FormsError::Overflow` and the
+// packet emitted ZERO bytes — every form lost, not just the 8949. The exposure is LOT-COUNT-driven,
+// not dollar-driven: a weekly dollar-cost-averager holds ~52 lots and any meaningful sale draws on
+// more than 14 of them.
+
+/// Every value whose fully-qualified name ends with `suffix`, across all merged copies. Pagination
+/// renames each copy's ROOT field, so a per-copy cell can no longer be read by an exact FQN.
+fn values_ending(pdf: &[u8], suffix: &str) -> Vec<String> {
+    let doc = load(pdf).unwrap();
+    let fields = collect_fields(&doc).unwrap();
+    fields
+        .iter()
+        .filter(|f| f.fqn.ends_with(suffix))
+        .filter_map(|f| text_value(&doc, f.id))
+        .collect()
+}
+
+/// `n` long-term legs: proceeds `100 × (i+1)`, basis 50, description `"{i}.00000000 BTC"`.
+fn lt_legs(n: u32) -> Vec<btctax_core::forms::Form8949Row> {
+    use btctax_core::forms::{Form8949Box, Form8949Part, Form8949Row};
+    use btctax_core::identity::WalletId;
+    (0..n)
+        .map(|i| {
+            let proceeds = dec!(100) * rust_decimal::Decimal::from(i + 1);
+            Form8949Row {
+                part: Form8949Part::LongTerm,
+                box_: Form8949Box::F,
+                box_needs_review: false,
+                description: format!("{i}.00000000 BTC"),
+                date_acquired: time::macros::date!(2020 - 01 - 02),
+                date_sold: time::macros::date!(2024 - 05 - 01),
+                proceeds,
+                cost_basis: dec!(50),
+                adjustment_code: String::new(),
+                adjustment_amount: Usd::ZERO,
+                gain: proceeds - dec!(50),
+                wallet: WalletId::SelfCustody { label: "w".into() },
+                disposition_kind: btctax_core::event::DisposeKind::Sell,
+            }
+        })
+        .collect()
+}
+
+/// ★★★ **P2b, half 1 of the B1 pair.** 15 long-term legs — ONE more than the TY2024 grid holds —
+/// must FILE, on two copies, with the 15th leg readable on copy 2 and each copy carrying its own
+/// "Name(s) shown on return" header on BOTH of its pages.
+///
+/// Mutation-verified: restoring the direct `fill_8949_parts_with_identity` call reds this at the
+/// `expect()` with `FormsError::Overflow { part: "Part II", rows: 15, capacity: 14 }`.
+#[test]
+fn the_full_return_8949_paginates_and_the_fifteenth_leg_lands_on_copy_two() {
+    use btctax_core::tax::printed::form_8949_printed;
+
+    let printed = form_8949_printed(&lt_legs(15)).expect("there are rows");
+    // The premise: this fixture really does exceed the grid. Without it the test proves nothing.
+    assert_eq!(
+        btctax_forms::Form8949Map::ty2024().rows_per_page,
+        14,
+        "the TY2024 revision's grid — the capacity 15 legs must exceed"
+    );
+
+    let pdf = btctax_forms::fill_8949_full(&printed, &kitchen_sink_header(), 2024)
+        .expect("★ 15 legs must FILE, not refuse");
+
+    let doc = load(&pdf).unwrap();
+    assert_eq!(doc.get_pages().len(), 4, "2 copies × 2 pages");
+
+    // Part II row 1, column (a) — one per copy, each showing that copy's FIRST leg. Copy 2's is leg
+    // 15 (`14.00000000 BTC`), which is the leg the old code could not print at all.
+    let mut row1_a = values_ending(&pdf, "Page2[0].Table_Line1[0].Row1[0].f2_3[0]");
+    row1_a.sort();
+    assert_eq!(
+        row1_a,
+        vec!["0.00000000 BTC".to_string(), "14.00000000 BTC".to_string()],
+        "★ the 15th leg reads back on copy 2"
+    );
+
+    // Every page of every copy carries its own identity header (each 8949 page is a filed page).
+    assert_eq!(
+        values_ending(&pdf, "Page1[0].f1_1[0]"),
+        vec!["John Doe & Jane Doe".to_string(); 2],
+        "both copies' page 1 is named"
+    );
+    assert_eq!(
+        values_ending(&pdf, "Page2[0].f2_1[0]"),
+        vec!["John Doe & Jane Doe".to_string(); 2],
+        "both copies' page 2 is named"
+    );
+    assert_eq!(
+        values_ending(&pdf, "Page2[0].f2_2[0]"),
+        vec!["123-45-6789".to_string(); 2],
+        "…and carries the SSN"
+    );
+}
+
+/// ★★★ **P2b, the CROSS-FOOT.** Schedule D line 10 is "Totals for all transactions reported on
+/// Form(s) 8949 with Box F checked" — **Form(s)**, plural. So the schedule cites the SUM of the
+/// per-copy totals, and `schedule_d_lines` must keep reading totals computed over ALL rows rather
+/// than re-deriving them per page. Read back out of two separately serialized PDFs.
+#[test]
+fn the_paginated_8949s_per_copy_totals_sum_to_schedule_d_line_10() {
+    use btctax_core::tax::printed::form_8949_printed;
+
+    let printed = form_8949_printed(&lt_legs(15)).expect("there are rows");
+    // Σ proceeds = 100 × (1..=15) = 12,000; copy 0 holds legs 1-14 (10,500), copy 1 leg 15 (1,500).
+    assert_eq!(printed.lt_totals.proceeds_d, dec!(12000));
+
+    let pdf_8949 = btctax_forms::fill_8949_full(&printed, &kitchen_sink_header(), 2024).unwrap();
+    let mut per_copy = values_ending(&pdf_8949, "Page2[0].f2_115[0]");
+    per_copy.sort();
+    assert_eq!(
+        per_copy,
+        vec!["10500".to_string(), "1500".to_string()],
+        "each copy totals its OWN legs (the form's line-2 \"Enter each total here\")"
+    );
+    let summed: i64 = per_copy.iter().map(|v| v.parse::<i64>().unwrap()).sum();
+    assert_eq!(summed, 12000, "Σ per-copy totals");
+
+    // …and the Schedule D that CITES them.
+    let mut lines = sd(
+        Usd::ZERO,
+        dec!(11250),
+        Usd::ZERO,
+        Usd::ZERO,
+        Usd::ZERO,
+        ScheduleDRouting::BothGains,
+    );
+    lines.line10_d = printed.lt_totals.proceeds_d;
+    lines.line10_e = printed.lt_totals.cost_e;
+    lines.line10_h = printed.lt_totals.gain_h;
+    let pdf_sd = btctax_forms::fill_schedule_d_full(&lines, &kitchen_sink_header(), 2024).unwrap();
+    let map_sd = btctax_forms::ScheduleDMap::ty2024();
+    let cell_sd = tv(&pdf_sd, &map_sd.line10.proceeds_d).expect("Schedule D line 10(d) is filled");
+
+    assert_eq!(
+        cell_sd,
+        summed.to_string(),
+        "★ Schedule D line 10(d) must equal the SUM of the 8949 copies' column-(d) totals — the \
+         schedule's own text says \"Form(s) 8949\", plural"
+    );
+}
+
+/// ★★★ **P2b, half 2 of the B1 pair — the PLANTED REGRESSION.** The single-copy filler is what the
+/// full-return path used to call directly. It must still fail closed on an over-capacity part, so a
+/// future edit that drops the chunking cannot silently truncate the grid instead: the leg that does
+/// not fit has nowhere to go, and a form whose printed rows do not add up to its own total is worse
+/// than a refusal.
+#[test]
+fn the_single_copy_8949_filler_still_refuses_an_over_capacity_part() {
+    let map = btctax_forms::Form8949Map::ty2024();
+    let legs = lt_legs(15);
+    let long_refs: Vec<&btctax_core::forms::Form8949Row> = legs.iter().collect();
+    let long = part_data(&long_refs).unwrap();
+    let short = part_data(&[]).unwrap();
+
+    let err = fill_8949_parts_with_identity(&short, &long, &map, &kitchen_sink_header())
+        .expect_err("15 rows do not fit a 14-row grid");
+    match err {
+        FormsError::Overflow {
+            part,
+            rows,
+            capacity,
+        } => assert_eq!((part, rows, capacity), ("Part II", 15, 14)),
+        other => panic!("expected Overflow, got {other:?}"),
+    }
+}

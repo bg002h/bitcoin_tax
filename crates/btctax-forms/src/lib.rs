@@ -428,7 +428,10 @@ pub mod testonly {
     // page. Exported here rather than reimplemented in xtask, because a second writer would be a
     // second truth — and the point of the proof render is that it exercises the SHIPPED path.
     pub use crate::cells::fmt_money_pair;
-    pub use crate::fill8949::{fill_8949_parts, part_data, pdf_has_xfa, split_parts, PartData};
+    pub use crate::fill8949::{
+        fill_8949_parts, fill_8949_parts_with_identity, part_data, pdf_has_xfa, split_parts,
+        PartData,
+    };
     pub use crate::fill8949_full::fill_8949_full_with_map;
     pub use crate::form1040::{fill_form_1040_capgains as fill_1040_with_map, Form1040Fill};
     pub use crate::form1040_full::fill_form_1040_full_with_map;
