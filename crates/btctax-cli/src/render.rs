@@ -1673,13 +1673,22 @@ pub fn render_charitable_carryover_out(
     if rows.len() > 1 {
         let _ = writeln!(s, "  • {:>14}  TOTAL", fmt_money(total));
     }
+    // ★ F5 (phase-1 seam review). This used to open "Your {year} gifts exceeded their §170(b)
+    //   ceiling" — an assertion of fact that is FALSE for a re-carried prior vintage. `apply_170b`'s
+    //   `carryover_out` includes unused, unexpired carryover-IN items under their ORIGINAL
+    //   `origin_year` (aging per Reg §1.170A-10(a)(2)), so a household whose {year} gifts fit under
+    //   the ceiling — or which made no gift at all this year — can still reach this block. Both of
+    //   lane B's fixtures used current-year-only gifts, so its B1 pair could not see it.
+    //   The per-item lines above already carry each vintage; the summary must not overwrite them
+    //   with a claim about one year.
     let _ = writeln!(
         s,
-        "  Your {year} gifts exceeded their §170(b) ceiling, so the excess is NOT deducted on this \
-         return —\n  it carries forward. This is deduction you have already paid for; it is lost if \
-         it is never claimed.\n  Roll it into next year's inputs with `btctax report --tax-year \
-         {year} --write-carryover` ({next}'s\n  full-return inputs must exist first), or enter it by \
-         hand on {next}'s row.",
+        "  This is unused charitable deduction carrying forward into {next}. It may be {year} gifts \
+         above\n  their §170(b) ceiling, an earlier year's carryover still unclaimed, or both — each \
+         line above\n  shows its own vintage. It is deduction you have already paid for; it is lost \
+         if it is never\n  claimed.\n  Roll it into next year's inputs with `btctax report \
+         --tax-year {year} --write-carryover` ({next}'s\n  full-return inputs must exist first), or \
+         enter it by hand on {next}'s row.",
         next = year + 1
     );
     Some(s)

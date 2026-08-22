@@ -247,9 +247,17 @@ pub enum RefuseReason {
     /// radius, so it is deferred to the Tier-2 bump (already breaking). See FOLLOWUPS G-7.
     AmtScreenTriggered,
     /// Taxable income ≤ 0 **with a capital-loss carryforward-in** — the §1211/§1212 Capital Loss Carryover
-    /// Worksheet (G22 edge) decides how much loss survives when it can't reduce an already-zero tax; v1
-    /// doesn't model it, so refuse rather than write a wrong next-year carryover. A refund-only TI≤0 filer
-    /// with NO carryforward is NOT refused (tax = 0, withholding refunded). Compute-dependent (needs L15).
+    /// Worksheet (G22 edge) decides how much loss survives when it can't reduce an already-zero tax. A
+    /// refund-only TI≤0 filer with NO carryforward is NOT refused (tax = 0, withholding refunded).
+    /// Compute-dependent (needs L15).
+    ///
+    /// ★ **The reason changed with N1, and the old one is no longer true.** This used to read "v1
+    /// doesn't model it". `capital_loss_carryover.rs` now transcribes all 13 worksheet lines, and a
+    /// carryforward-IN is handled correctly by construction (`cf.short`/`cf.long` enter `net_1222`
+    /// before Schedule D lines 7/15/16/21 are formed). What is still missing is not the arithmetic
+    /// but the DECISION: letting this edge file widens the filing surface on a §6065 return, so it
+    /// wants its own commit, review and KAT pair rather than riding along with the worksheet that
+    /// made it liftable. Refusing remains the fail-closed choice until that is taken.
     TaxableIncomeNonPositiveWithCarryforward,
 }
 

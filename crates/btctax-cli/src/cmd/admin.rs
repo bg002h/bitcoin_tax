@@ -371,6 +371,34 @@ fn hand_marks(printed: &btctax_core::tax::packet::PrintedReturn) -> Vec<String> 
                 .to_string(),
         );
     }
+    // ★★ F2 (phase-1 seam review). A Section B Form 8283 is NOT filing-ready without a signed Part IV
+    //    (appraiser) and Part V (donee acknowledgement), and those were named only on stderr — the
+    //    exact surface N4's own rationale rejects, since the manifest is the artifact the filer
+    //    follows while assembling paper and the one that does not scroll away. A filer working from
+    //    an 8283-bearing packet's manifest saw an authoritative-sounding closed list of "1 mark(s)"
+    //    that omitted the two signatures without which the form cannot be filed at all.
+    //
+    //    ★ These differ in kind from every other mark here: they are THIRD-PARTY signatures. The
+    //    others the filer can make at the kitchen table the moment they read this; these take
+    //    calendar time to obtain, which is precisely why burying them in scrolled-away stderr is
+    //    worse than burying a mark the filer could make on the spot.
+    //
+    //    The seam: lane B enumerated the marks from the 1040's view while lanes A and C were
+    //    changing what the packet's 8283 contains. Neither could see the other.
+    if printed.forms.f8283.as_ref().is_some_and(|r| {
+        r.rows()
+            .iter()
+            .any(|row| row.section == Some(btctax_core::Form8283Section::B))
+    }) {
+        marks.push(
+            "Form 8283 Section B — Part IV (Declaration of Appraiser) and Part V (Donee \
+             Acknowledgement): both are blank, and NEITHER is yours to sign. A Section B Form 8283 is \
+             not filing-ready without the qualified appraiser's signed declaration and the donee \
+             organization's acknowledgement. Both come from other people, so start early — this is \
+             the one item on this list you cannot finish at your desk tonight."
+                .to_string(),
+        );
+    }
     marks.push(
         "Form 1040 page 2 — the signature block: your signature, the date, your occupation, and the \
          Identity Protection PIN if the IRS issued you one — and the same again for your spouse if \

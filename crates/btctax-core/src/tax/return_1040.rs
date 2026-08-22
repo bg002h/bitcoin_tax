@@ -2391,10 +2391,20 @@ pub fn screen_absolute(
     // (c) Taxable income ≤ 0 with a capital-loss carryforward-in (the §1211/§1212 carryover-worksheet edge).
     let cf = ri.capital_loss_carryforward_in;
     if ar.taxable_income == Usd::ZERO && (cf.short > Usd::ZERO || cf.long > Usd::ZERO) {
+        // ★ N1 MODELLED THE WORKSHEET, so the old detail ("…is unmodeled in v1") became false the
+        //   moment `capital_loss_carryover.rs` landed, and a filer-facing refusal that states a
+        //   false reason is worse than a terse one. The REFUSAL still stands — but for a different
+        //   and narrower reason, stated here honestly: modelling the worksheet is not the same act
+        //   as blessing this edge to FILE. Letting a TI≤0-with-carryforward-in year file is a
+        //   widening of the filing surface on a return signed under §6065, and that is an owner
+        //   decision nobody has taken. See FOLLOWUPS (phase-1 residue): the refusal is now
+        //   mechanically liftable, which is precisely why lifting it needs its own review and KAT
+        //   pair rather than riding along with the worksheet that made it liftable.
         return refusal(
             RefuseReason::TaxableIncomeNonPositiveWithCarryforward,
-            "taxable income is zero or negative with a capital-loss carryforward — the §1211/§1212 Capital \
-             Loss Carryover Worksheet (which decides how much loss survives) is unmodeled in v1",
+            "taxable income is zero or negative with a capital-loss carryforward — btctax models the \
+             §1211/§1212 Capital Loss Carryover Worksheet but has not yet validated FILING this edge, \
+             so it refuses rather than emit a return it cannot stand behind",
         );
     }
 
@@ -2522,13 +2532,24 @@ pub fn apply_carryover_writeback(
     // prior year btctax itself computed.
     //
     // ★★★ r3 I-4 — THE CAPITAL-LOSS SIBLING IS DELIBERATELY ABSENT, and removing it was the fix.
-    // This stamped `capital_loss_carryforward_in_provenance = Computed` on a value it never writes:
-    // there is no capital-loss carryover-OUT on `AbsoluteReturn` to write, because the §1211/§1212
-    // Capital Loss Carryover Worksheet — the thing that decides how much loss survives — is UNMODELED
-    // in v1 (`screen_absolute` refuses its edge case outright). So the stamp asserted btctax had
-    // "derived it from a prior year it actually computed" when it had derived nothing, and next
-    // year's `BenefitCarryoversNotStated` fell silent about a carryover the filer may genuinely
-    // have. A provenance stamp is a claim of knowledge; do not make one the code cannot support.
+    // This stamped `capital_loss_carryforward_in_provenance = Computed` on a value it never writes.
+    // The stamp asserted btctax had "derived it from a prior year it actually computed" when it had
+    // derived nothing, and next year's `BenefitCarryoversNotStated` fell silent about a carryover the
+    // filer may genuinely have. A provenance stamp is a claim of knowledge; do not make one the code
+    // cannot support. THAT reasoning is unchanged and still governs.
+    //
+    // ★★ BUT ITS PREMISE IS NOW FALSE, and leaving that unsaid was the trap. This comment used to
+    // read "there is no capital-loss carryover-OUT on `AbsoluteReturn` to write, because the
+    // worksheet is UNMODELED in v1". N1 modelled it: `AbsoluteReturn::capital_loss_carryforward_out`
+    // EXISTS and carries the §1212(b)(2)(B) figure. A future reader who trusted the old sentence
+    // would conclude there is nothing to write and stop looking — which is exactly the stale-claim
+    // class three of this branch's own P10 items fixed.
+    //
+    // So the open question is no longer "is there a value?" but "should `--write-carryover` roll it,
+    // and with what provenance?" — a behaviour change to a filed-figure chain with owner-visible
+    // consequences. Filed as phase-1 residue, deliberately NOT taken here. Writing it would also
+    // have to answer what provenance means for a figure the FROZEN delta engine still reports
+    // differently (see the M4 authority fix in `cmd/tax.rs`).
     next_year.charitable_carryover_in_provenance = CarryProvenance::Computed;
     Ok(next_year)
 }
@@ -6967,8 +6988,11 @@ mod tests {
     /// ★★★ **r3 I-4 — a provenance stamp is a CLAIM OF KNOWLEDGE, and this one was unfounded.**
     ///
     /// `apply_carryover_writeback` stamped `capital_loss_carryforward_in_provenance = Computed`
-    /// without ever assigning the value — there is no capital-loss carryover-OUT on `AbsoluteReturn`
-    /// to assign, because the §1211/§1212 Capital Loss Carryover Worksheet is unmodeled in v1. The
+    /// without ever assigning the value. (At the time there was nothing to assign, because the
+    /// §1211/§1212 Capital Loss Carryover Worksheet was unmodeled — **no longer true since N1**:
+    /// `AbsoluteReturn::capital_loss_carryforward_out` now exists. The finding below is unaffected;
+    /// only its premise moved, and whether `--write-carryover` should roll the new value is filed as
+    /// phase-1 residue rather than answered here.) The
     /// field's own doc says `Computed` means btctax "derived it from a prior year it actually
     /// computed"; it had derived nothing. The damage was silence: `BenefitCarryoversNotStated`
     /// defines "unknown" as `zero && User`, so the false stamp made next year stop telling a filer

@@ -460,6 +460,15 @@ impl Advisory {
                         .to_string()
                 }
             }
+            // ★ F3 (phase-1 seam review). This said the flat figure was "printed above", which is
+            //   false on one surface and can be false on both. §G-19d prints this same advisory on
+            //   `export-irs-pdf` STDERR, where no carryforward figure is printed above it at all.
+            //   And `flat` here is `capital_net`'s full-return netting (broker 1099-B totals joined),
+            //   while the figure `report` actually prints is the delta engine's CRYPTO-ONLY
+            //   carryforward — so on a floor household with broker capital losses it pointed at a
+            //   number appearing nowhere on the page. An advisory must not tell a filer to compare
+            //   against something it cannot guarantee is in front of them; naming the RULE is true on
+            //   every surface. The bottom-line instruction (carry the worksheet figure) is unchanged.
             Advisory::CapitalLossCarryoverWorksheetIncreasesCarryover {
                 flat_short,
                 flat_long,
@@ -473,7 +482,7 @@ impl Advisory {
                  it. The §1211/§1212 Capital Loss Carryover Worksheet (2025 Schedule D instructions, \
                  \"Capital Loss Carryover Worksheet — Lines 6 and 14\") therefore carries {ws} into \
                  next year — short-term {ws_s}, long-term {ws_l} — where the flat \"loss minus \
-                 $3,000\" figure printed above says {flat}. ★ THE WORKSHEET FIGURE IS THE CORRECT ONE. \
+                 $3,000\" rule gives {flat}. ★ THE WORKSHEET FIGURE IS THE CORRECT ONE. \
                  Enter it on next year's Schedule D lines 6 and 14, and as next year's capital-loss \
                  carryover in `btctax income import`; the flat figure would forfeit {diff} of \
                  deductible loss permanently.",

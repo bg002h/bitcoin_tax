@@ -725,7 +725,7 @@ This feature is newer and less proven than the rest of btctax, and it was develo
   - a filed basis figure could be derived from a stale in-editor ledger image after a failed re-projection
 
 Check what this feature actually produced: open the Form 8275 PDF and confirm the Part II narrative renders whole, continuing onto Part IV on page 2, rather than stopping mid-sentence after about one line; confirm the basis in Form 8949 column (e) for each promoted lot equals the floor you consented to at promote time; and confirm the tranche quantity and acquisition window on the 8275 match what you declared.
-⚠ 1 mark(s) on this packet are YOURS to make by hand and are deliberately blank — see the "COMPLETE BY HAND" section at the foot of irs/manifest.txt.
+⚠ 2 mark(s) on this packet are YOURS to make by hand and are deliberately blank — see the "COMPLETE BY HAND" section at the foot of irs/manifest.txt.
 ⚠ a Section B Form 8283 is NOT filing-ready without a signed Part IV (appraiser) and Part V (donee acknowledgement) — obtain both before filing.
 
   ── ADVISORIES (10) ──
