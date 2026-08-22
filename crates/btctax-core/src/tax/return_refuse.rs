@@ -809,26 +809,15 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
              hand, or remove the investment interest if you are not in fact claiming it",
         );
     }
-    if ri.filing_form_4952 == Some(false) {
-        let investment_interest = ri
-            .schedule_a
-            .as_ref()
-            .map_or(Usd::ZERO, |a| a.investment_interest);
-        if investment_interest > Usd::ZERO {
-            // i4952's first exception condition: investment income from INTEREST and ORDINARY
-            // dividends, minus any QUALIFIED dividends. Transcribed, not approximated.
-            let interest: Usd = ri.int_1099.iter().map(|i| i.box1_interest).sum();
-            let ordinary_dividends: Usd = ri.div_1099.iter().map(|d| d.box1a_ordinary).sum();
-            let qualified_dividends: Usd = ri.div_1099.iter().map(|d| d.box1b_qualified).sum();
-            let ceiling = (interest + ordinary_dividends - qualified_dividends).max(Usd::ZERO);
-            if investment_interest > ceiling {
-                return refuse(
-                    RefuseReason::Form4952Required,
-                    "you answered that you are NOT filing Form 4952, but your Schedule A line 9                      investment interest is MORE than your investment income from interest and                      ordinary dividends minus qualified dividends — and that is the first of the                      three conditions of Form 4952's own no-filing exception. Above it, Form 4952 IS                      required: §163(d)(1) limits the deduction to your net investment income, a                      figure only that form computes, and btctax does not fill it. Deducting the whole                      amount on line 9 would UNDERSTATE your tax. File Form 4952 (and this return) by                      hand, or correct the line-9 amount",
-                );
-            }
-        }
-    }
+    // ★★★ THE LINE-9 i4952 BOUND USED TO STAND HERE AND WAS MOVED TO `screen_absolute` (phase-2
+    //     review R5a, Critical). It refuses on a Schedule A DEDUCTION being over-claimed, but
+    //     `screen_inputs` sees only inputs — it cannot see the §63(e) election, which
+    //     `assemble_absolute` computes. So it refused filers who take the STANDARD deduction, where
+    //     line 9 never prints and nothing is sworn. The population is not hypothetical: it is the
+    //     crypto-margin renter, this product's core audience — bitcoin yields no interest or
+    //     ordinary dividends, so the ceiling is ~$0 and ANY line-9 entry with a truthful "not filing
+    //     4952" was refused, including when SALT + margin interest lose to the standard deduction and
+    //     the correct return claims nothing at all. See `screen_absolute`.
 
     // ★★★ §163(h)(3)(B) — the ACQUISITION-DEBT CEILING, answered adversely. Same shape as the three
     //     Form 6251 declarations below: gated on the registry liveness so a stale `Some(false)` on a
@@ -840,32 +829,13 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
     //    mortgage interest and points that were reported to you on Form 1098"* — a determinate NONZERO
     //    worksheet output. A printed $0 transcribes no instruction, and unlike the mixed-use zero it
     //    has no line-8 checkbox disclosing it (see `ADJUDICATION-2026-08-21.md`, D3).
-    if crate::tax::questions::question_is_live(
-        crate::tax::questions::QuestionId::MortgageWithinDebtLimit,
-        ri,
-    ) && ri
-        .schedule_a
-        .as_ref()
-        .is_some_and(|a| a.mortgage_within_debt_limit == Some(false))
-    {
-        return refuse(
-            RefuseReason::MortgageOverDebtLimit,
-            "you declared that one of the §163(h)(3)(B) home-mortgage limits applies to you — the \
-             $750,000 ($375,000 married filing separately) ceiling on qualifying debt taken out after \
-             December 15, 2017, the $1,000,000 ($500,000 MFS) ceiling on debt taken out on or before \
-             that date, or the limit where the mortgages exceed the home's fair market value. \
-             i1040sca's own instruction for line 8a is \"Only enter on line 8a the deductible mortgage \
-             interest and points that were reported to you on Form 1098\", and btctax cannot figure \
-             that amount. NEITHER number it could print is your return: deducting the full Form 1098 \
-             figure would UNDERSTATE your tax, and entering $0 would OVERSTATE it by the whole \
-             deductible portion — and Schedule A has no box that would disclose such a zero (the \
-             line-8 checkbox is the mixed-use disclosure, not this one). The cure is the one the \
-             instructions prescribe: work Pub. 936's Deductible Home Mortgage Interest Worksheet, \
-             which produces the deductible amount for line 8a. btctax does not yet have a place to \
-             enter that result — the `mortgage_interest_deductible` input is filed as FOLLOWUPS P9(a)/S2 \
-             — so until it lands, file this year's Schedule A by hand. `btctax report` still runs",
-        );
-    }
+    // ★★★ THE §163(h)(3)(B) OVER-LIMIT REFUSAL USED TO STAND HERE AND WAS MOVED TO
+    //     `screen_absolute` (phase-2 review R2, Critical). Same root cause as the line-9 bound above:
+    //     it conditions a Schedule A DEDUCTION, but `screen_inputs` cannot see the §63(e) election.
+    //     It therefore refused the December-closing jumbo homebuyer — one month of 1098 interest on a
+    //     $1M post-2017 loan, itemized total under the MFJ standard deduction — for whom line 8a
+    //     never prints. That filer had NO honest answer: `None` refused as unanswered, `Some(false)`
+    //     refused here, and `Some(true)` would have been false testimony under §6065.
     if crate::tax::questions::question_is_live(
         crate::tax::questions::QuestionId::AmtQualifiedDwelling,
         ri,
@@ -1209,8 +1179,10 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tax::return_1040::assemble_absolute;
     use crate::tax::return_inputs::{Box12Entry, Form1099Div, Form1099Int, W2};
     use crate::tax::tables::SaltLimitation;
+    use crate::LedgerState;
 
     // A synthetic TY2024 FullReturnParams + a table with the real SS wage base for the excess-SS MAX.
     fn params() -> FullReturnParams {
@@ -1300,6 +1272,22 @@ mod tests {
     }
     fn reason(ri: &ReturnInputs) -> Option<RefuseReason> {
         screen_inputs(ri, &tbl(), &params()).map(|r| r.reason)
+    }
+
+    /// ★★★ The ABSOLUTE screen — the one that can see the §63(e) election. Two of the phase-2
+    /// refusals moved here from `screen_inputs` (phase-2 review R2/R5a, Critical): both condition a
+    /// SCHEDULE A DEDUCTION, and `screen_inputs` sees only inputs, so sitting there they refused
+    /// filers who take the STANDARD deduction and never print the line at all. Returns the election
+    /// alongside the reason so every fixture must state which side of it it is on — a fixture that
+    /// silently flipped to standard would otherwise "pass" by not being screened.
+    fn absolute_reason(r: &ReturnInputs) -> (bool, Option<RefuseReason>) {
+        let st = LedgerState::default();
+        let ar = assemble_absolute(r, &st, &params(), &tbl(), 2024);
+        (
+            ar.deduction_is_itemized,
+            crate::tax::return_1040::screen_absolute(r, &ar, &params(), &st, 2024)
+                .map(|x| x.reason),
+        )
     }
 
     /// ★ **D-8 — and this guard shipped, once, with no test at all.**
@@ -2514,61 +2502,121 @@ mod tests {
         use crate::tax::return_inputs::{Form1099Div, Form1099Int, ScheduleAInputs};
         // Investment income for the exception: $10,000 interest + $4,000 ordinary dividends − $1,000
         // qualified dividends = a $13,000 ceiling.
-        let with_interest = |amount: Usd| {
+        //
+        // ★ The fixture must ITEMIZE or it proves nothing: this refusal now lives behind
+        //   `deduction_is_itemized` (phase-2 review R5a), and $13,000 of investment interest alone
+        //   loses to the $14,600 standard deduction. $10,000 of real-estate tax carries it over.
+        let build = |amount: Usd, treasury: Usd, qualified: Usd| {
             let mut r = ri();
             r.filing_form_4952 = Some(false);
             r.int_1099 = vec![Form1099Int {
                 payer: "Bank".into(),
                 box1_interest: dec!(10000),
+                box3_treasury_interest: treasury,
                 ..Default::default()
             }];
             r.div_1099 = vec![Form1099Div {
                 payer: "Broker".into(),
                 box1a_ordinary: dec!(4000),
-                box1b_qualified: dec!(1000),
+                box1b_qualified: qualified,
                 ..Default::default()
             }];
             r.schedule_a = Some(ScheduleAInputs {
                 mortgage_interest_1098: Usd::ZERO,
                 investment_interest: amount,
+                salt_real_estate: dec!(10000),
                 ..Default::default()
             });
-            reason(&r)
+            r
         };
+        let at = |amount: Usd| {
+            let (itemized, reason) = absolute_reason(&build(amount, Usd::ZERO, dec!(1000)));
+            assert!(itemized, "fixture premise: this filer must ITEMIZE");
+            reason
+        };
+
         assert_eq!(
-            with_interest(dec!(13000)),
+            at(dec!(13000)),
             None,
             "exactly at the ceiling, i4952's exception still applies — no Form 4952 required"
         );
         assert_eq!(
-            with_interest(dec!(13000.01)),
+            at(dec!(13000.01)),
             Some(RefuseReason::Form4952Required),
             "a cent over and Form 4952 IS required: §163(d)(1) caps the deduction at net investment \
              income, which only that form computes"
         );
         // ★ And the ceiling really does SUBTRACT qualified dividends — raise them and the same
         //   $13,000 now breaks the exception. Without the subtraction this row passes.
-        let mut r = ri();
-        r.filing_form_4952 = Some(false);
-        r.int_1099 = vec![Form1099Int {
-            payer: "Bank".into(),
-            box1_interest: dec!(10000),
-            ..Default::default()
-        }];
-        r.div_1099 = vec![Form1099Div {
-            payer: "Broker".into(),
-            box1a_ordinary: dec!(4000),
-            box1b_qualified: dec!(4000), // ALL of the ordinary dividends are qualified
-            ..Default::default()
-        }];
-        r.schedule_a = Some(ScheduleAInputs {
-            investment_interest: dec!(11000), // > $10,000 ceiling once qualified are removed
+        let (_, raised) = absolute_reason(&build(dec!(13000), Usd::ZERO, dec!(2000)));
+        assert_eq!(
+            raised,
+            Some(RefuseReason::Form4952Required),
+            "qualified dividends must be SUBTRACTED from the ceiling"
+        );
+
+        // ★★ R5b — 1099-INT BOX 3 COUNTS. Treasury obligation interest is NOT a subset of box 1
+        //    (`sum_taxable_interest` says so in terms, and 1040 line 2b is box 1 + box 3), and it is
+        //    unambiguously "investment income from interest" under i4952's exception. Summing box 1
+        //    alone under-counted the ceiling and refused a T-bill ladder that plainly satisfies it.
+        //    MUTATION: drop `+ i.box3_treasury_interest` from the ceiling and this row reds.
+        let (itemized, with_treasury) =
+            absolute_reason(&build(dec!(20000), dec!(10000), dec!(1000)));
+        assert!(itemized, "fixture premise: this filer must ITEMIZE");
+        assert_eq!(
+            with_treasury, None,
+            "★ $10,000 of BOX 3 Treasury interest raises the ceiling to $23,000, so $20,000 of \
+             investment interest is within i4952's exception and must NOT refuse"
+        );
+
+        // ★★ R5c — THE MESSAGE, WHICH NO TEST PINNED. It shipped malformed: a string literal
+        //    missing its line continuations, so ~20-space runs printed mid-sentence to the filer.
+        //    Every other new refusal in this phase has a message test; this one did not, which is
+        //    exactly why the defect survived to review. The whitespace assertion is the kill-test
+        //    for the defect itself, not just for the content.
+        let st = LedgerState::default();
+        let over = build(dec!(13000.01), Usd::ZERO, dec!(1000));
+        let ar = assemble_absolute(&over, &st, &params(), &tbl(), 2024);
+        let detail = crate::tax::return_1040::screen_absolute(&over, &ar, &params(), &st, 2024)
+            .expect("over the ceiling refuses")
+            .detail;
+        assert!(
+            !detail.contains("   "),
+            "no run of 3+ spaces may reach the filer — that is the missing-continuation defect: \
+             {detail}"
+        );
+        let lower = detail.to_ascii_lowercase();
+        for phrase in [
+            "understate",         // the direction a full line-9 deduction fails in
+            "§163(d)(1)",         // the statute that caps it
+            "form 4952",          // the form that computes the cap
+            "standard deduction", // the scoping this refusal now carries
+        ] {
+            assert!(
+                lower.contains(phrase),
+                "the line-9 refusal must say {phrase:?}; got: {detail}"
+            );
+        }
+
+        // ★★★ THE CRITICAL'S NEGATIVE HALF (phase-2 review R5a). The crypto-margin renter — this
+        //     product's core audience. Bitcoin yields no interest and no ordinary dividends, so the
+        //     ceiling is $0 and ANY line-9 entry used to refuse. Here the whole Schedule A loses to
+        //     the standard deduction, line 9 never prints, and the return must compute.
+        let mut renter = ri();
+        renter.filing_form_4952 = Some(false);
+        renter.schedule_a = Some(ScheduleAInputs {
+            investment_interest: dec!(5000),
             ..Default::default()
         });
+        let (itemized, reason) = absolute_reason(&renter);
+        assert!(
+            !itemized,
+            "fixture premise: $5,000 of margin interest must LOSE to the $14,600 standard deduction"
+        );
         assert_eq!(
-            reason(&r),
-            Some(RefuseReason::Form4952Required),
-            "the exception's ceiling is interest + ORDINARY dividends MINUS qualified dividends"
+            reason, None,
+            "★ a STANDARD-deduction filer must COMPUTE even though their margin interest exceeds a \
+             $0 ceiling: line 9 never prints on their return, so nothing is over-deducted"
         );
     }
 
@@ -2588,19 +2636,22 @@ mod tests {
     #[test]
     fn the_acquisition_debt_limit_refuses_unanswered_and_adverse_but_computes_when_neutral() {
         use crate::tax::return_inputs::ScheduleAInputs;
-        let limit = |ans: Option<bool>| {
+        let sched = |interest: Usd, ans: Option<bool>| {
             let mut r = ri();
             r.schedule_a = Some(ScheduleAInputs {
-                mortgage_interest_1098: dec!(130000), // the [RAN] vector's notional $2,000,000 loan
+                mortgage_interest_1098: interest,
                 mortgage_all_used_to_buy_build_improve: Some(true),
                 mortgage_dwelling_is_amt_qualified: Some(true),
                 mortgage_within_debt_limit: ans,
                 ..Default::default()
             });
-            reason(&r)
+            r
         };
+        // The [RAN] vector's notional $2,000,000 loan — $130,000 of interest itemizes easily.
+        let limit = |ans: Option<bool>| absolute_reason(&sched(dec!(130000), ans)).1;
+
         assert_eq!(
-            limit(None),
+            reason(&sched(dec!(130000), None)),
             Some(RefuseReason::MortgageDebtLimitUnanswered),
             "unanswered ⇒ refuse: btctax collects the INTEREST, never the debt balance, so it cannot \
              tell whether §163(h)(3)(B) caps this filer"
@@ -2612,6 +2663,28 @@ mod tests {
              would UNDERSTATE and a $0 would OVERSTATE — and neither is disclosable on Schedule A"
         );
         assert_eq!(limit(Some(true)), None, "neutral ⇒ compute at the full 8a");
+
+        // ★★★ THE CRITICAL'S NEGATIVE HALF (phase-2 review R2). The December-closing jumbo
+        //     homebuyer: a $1M post-2017 loan closed late in the year yields ONE month of interest,
+        //     an itemized total under the $14,600 standard deduction, and therefore NO line 8a at
+        //     all. Nothing is sworn, and btctax can compute this return exactly.
+        //
+        //     Before the fix this filer had NO honest answer — `None` refused as unanswered,
+        //     `Some(false)` refused here, and `Some(true)` would have been false testimony under
+        //     §6065. That is the trap, and this row is what reds if the refusal ever migrates back
+        //     to `screen_inputs`.
+        let (itemized, r) = absolute_reason(&sched(dec!(5500), Some(false)));
+        assert!(
+            !itemized,
+            "fixture premise: $5,500 of interest must LOSE to the $14,600 standard deduction — if \
+             this trips, the fixture stopped testing the standard-deduction filer and the row below \
+             proves nothing"
+        );
+        assert_eq!(
+            r, None,
+            "★ a STANDARD-deduction filer who truthfully answers 'over the limit' must COMPUTE: \
+             line 8a never prints on their return, so there is no wrong number to swear to"
+        );
     }
 
     /// ★★ **The over-limit refusal must carry BOTH failure directions and the cure.** A refusal that
@@ -2632,7 +2705,14 @@ mod tests {
             mortgage_within_debt_limit: Some(false),
             ..Default::default()
         });
-        let refusal = screen_inputs(&r, &tbl(), &params()).expect("over-limit refuses");
+        let st = LedgerState::default();
+        let ar = assemble_absolute(&r, &st, &params(), &tbl(), 2024);
+        assert!(
+            ar.deduction_is_itemized,
+            "fixture premise: $130,000 of interest itemizes"
+        );
+        let refusal = crate::tax::return_1040::screen_absolute(&r, &ar, &params(), &st, 2024)
+            .expect("over-limit refuses on an ITEMIZING return");
         assert_eq!(refusal.reason, RefuseReason::MortgageOverDebtLimit);
         let d = refusal.detail.to_ascii_lowercase();
         for phrase in [

@@ -1125,10 +1125,15 @@ fn export_full_return(
     //    claims the property deduction (Schedule A line 12 > $0). A standard-deduction year, or one
     //    the §170(b) ceiling zeroes, claims nothing and gets the advisory without the manifest line.
     //    ★ Note what is NOT scoped: the $500,000 TEST itself stays the pre-ceiling claimed amount.
-    let claims_property_deduction = ar
-        .schedule_a
-        .as_ref()
-        .is_some_and(|a| a.charitable_noncash_12 > btctax_core::Usd::ZERO);
+    // ★ `deduction_is_itemized` is REQUIRED here (phase-2 review, merge Minor). `ScheduleAParts` is
+    //   built whenever Schedule A inputs exist, regardless of the §63(e) election — so testing
+    //   line 12 alone put the ATT line on a standard-deduction packet that claims nothing, which is
+    //   the exact instruction this block's own comment says it avoids.
+    let claims_property_deduction = ar.deduction_is_itemized
+        && ar
+            .schedule_a
+            .as_ref()
+            .is_some_and(|a| a.charitable_noncash_12 > btctax_core::Usd::ZERO);
     if let Some(claimed) = advisories
         .iter()
         .find_map(|a| match a {

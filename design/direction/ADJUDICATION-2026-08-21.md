@@ -33,6 +33,21 @@ The sharp line that keeps this from generalizing into gate-everything: **refuse 
 
 **WHAT WOULD MAKE THIS WRONG:** an owner product ruling that substantiation possession is out of software's domain wholesale (that ruling would have to unwind `donations_had_restrictions` too — they stand or fall together); or evidence that the liveness predicate misfires (e.g. gating a filer whose ≥$250 gift is excluded from the claimed deduction entirely).
 
+## ERRATUM (added 2026-08-22, after the phase-2 review)
+
+**D4's parenthetical mislabels its own referent.** The ruling says the input should mirror
+`donations_had_restrictions` "(`decl_tristate!`)" — but `donations_had_restrictions` is a
+**skippable**, built with `skippable_tristate!`. The two halves of that sentence contradict each
+other, and they are not interchangeable: `decl_tristate!` is always-live, so building it would have
+refused every standard-deduction filer at the registry loop — precisely what D4's operative text
+forbids ("a standard-deduction filer … is never asked", honored "structurally, by liveness").
+
+The implementer followed the ruling's REASONING over its LABEL and built the skippable. The phase-2
+reviewer independently ruled that correct and this text wrong. Recorded here rather than silently
+edited, because the ruling is the artifact under review and the correction is part of its history.
+
+★ Nothing else in D4 changes; the behaviour it mandates is exactly what shipped.
+
 ## D5 — Form 8960 line 9b
 
 **ANSWER: YES — line 9b is capped by §164(b)(6).** The sources settle it; no conservative-branch fallback is needed (though the settled answer *is* the conservative branch). Since decision 6 (collect-or-blank) already stands, the cap lands as a **validation bound on the collected value**, not a computation: reject a collected 9b exceeding the state/local income tax **actually deducted on the return after the cap** — on btctax's surface, min(the income-tax amount in line 5a, line 5e, $10,000/$5,000 MFS); if the filer elected general sales taxes on 5a, the bound is $0 (sales taxes are never deductible for NII — i8960 says so expressly). The prompt/advisory text states the allocable pool is the capped deducted amount and names i8960's own example (line 8 ÷ AGI ratio) as a reasonable allocation method applied to that pool.

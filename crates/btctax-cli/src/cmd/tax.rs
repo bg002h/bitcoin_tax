@@ -581,11 +581,25 @@ pub fn report_tax_year(
                             table,
                             year - 1,
                         );
-                        // A prior year whose ABSOLUTE return refuses has no worksheet figure to be
-                        // the authority — fall back rather than quoting a number off a refused return.
-                        btctax_core::screen_absolute(&ri_prev, &ar_prev, params, &state, year - 1)
+                        // A prior year whose return REFUSES has no worksheet figure to be the
+                        // authority — fall back rather than quoting a number off a refused return.
+                        //
+                        // ★ BOTH screens, not just the absolute one (phase-2 review, fold Minor).
+                        //   Checking only `screen_absolute` let an INPUT-refused prior year still
+                        //   supply "the authority" — e.g. an over-limit mortgage, whose overstated
+                        //   line 8a understates taxable income and therefore OVERSTATES the
+                        //   worksheet carryforward. That violated this fold's own stated rule.
+                        (btctax_core::tax::return_refuse::screen_inputs(&ri_prev, table, params)
                             .is_none()
-                            .then_some(ar_prev.capital_loss_carryforward_out)
+                            && btctax_core::screen_absolute(
+                                &ri_prev,
+                                &ar_prev,
+                                params,
+                                &state,
+                                year - 1,
+                            )
+                            .is_none())
+                        .then_some(ar_prev.capital_loss_carryforward_out)
                     }
                     _ => None,
                 };

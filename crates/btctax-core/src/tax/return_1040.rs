@@ -2230,6 +2230,112 @@ pub fn screen_absolute(
         }
     }
 
+    // ★★★ §163(h)(3)(B) — THE ACQUISITION-DEBT CEILING, ANSWERED ADVERSELY (P1 / adjudication D3).
+    //
+    // ★★ THIS LIVES HERE, NOT IN `screen_inputs`, AND THE MOVE WAS A CRITICAL FIX (phase-2 review R2).
+    //    The refusal conditions a Schedule A DEDUCTION, and `screen_inputs` cannot see the §63(e)
+    //    election — only `assemble_absolute` computes it. Sitting there, it refused the
+    //    December-closing jumbo homebuyer: one month of 1098 interest on a $1M post-2017 loan, an
+    //    itemized total under the MFJ standard deduction, line 8a never printed, nothing sworn — and
+    //    NO honest answer available, because `None` refused as unanswered, `Some(false)` refused
+    //    here, and `Some(true)` would have been false testimony under §6065.
+    //
+    // ★★★ WHY `deduction_is_itemized` IS EXACTLY THE RIGHT PREDICATE, and not merely a convenient one.
+    //     It is computed against the FULL (uncapped) Schedule A amounts. So:
+    //       - itemized-with-full-amount < standard  ⇒ the election is STANDARD under both hypotheses
+    //         (the true capped figure is smaller, which only widens the gap). Determinate ⇒ safe to
+    //         compute, and refusing would be wrong.
+    //       - itemized-with-full-amount ≥ standard  ⇒ btctax cannot know the capped figure, so it
+    //         cannot know the election either. Indeterminate ⇒ refuse, which is what happens.
+    //     The predicate answers the question "is the election determinate without the number btctax
+    //     is missing?" — which is the actual question, and it answers it exactly.
+    if ar.deduction_is_itemized
+        && crate::tax::questions::question_is_live(
+            crate::tax::questions::QuestionId::MortgageWithinDebtLimit,
+            ri,
+        )
+        && ri
+            .schedule_a
+            .as_ref()
+            .is_some_and(|a| a.mortgage_within_debt_limit == Some(false))
+    {
+        return refusal(
+            RefuseReason::MortgageOverDebtLimit,
+            "you declared that one of the §163(h)(3)(B) home-mortgage limits applies to you — the \
+             $750,000 ($375,000 married filing separately) ceiling on qualifying debt taken out after \
+             December 15, 2017, the $1,000,000 ($500,000 MFS) ceiling on debt taken out on or before \
+             that date, or the limit where the mortgages exceed the home's fair market value. \
+             i1040sca's own instruction for line 8a is \"Only enter on line 8a the deductible mortgage \
+             interest and points that were reported to you on Form 1098\", and btctax cannot figure \
+             that amount. NEITHER number it could print is your return: deducting the full Form 1098 \
+             figure would UNDERSTATE your tax, and entering $0 would OVERSTATE it by the whole \
+             deductible portion — and Schedule A has no box that would disclose such a zero (the \
+             line-8 checkbox is the mixed-use disclosure, not this one). The cure is the one the \
+             instructions prescribe: work Pub. 936's Deductible Home Mortgage Interest Worksheet, \
+             which produces the deductible amount for line 8a. btctax does not yet have a place to \
+             enter that result — the `mortgage_interest_deductible` input is filed as FOLLOWUPS P9(a)/S2 \
+             — so until it lands, file this year's Schedule A by hand. `btctax report` still runs. \
+             (This return itemizes; a return that takes the standard deduction is unaffected and \
+             computes normally, because line 8a never prints on it.)",
+        );
+    }
+
+    // ★★★ i4952's NO-FILING EXCEPTION — the Schedule A line-9 BOUND (P7).
+    //
+    // ★★ ALSO MOVED HERE FROM `screen_inputs` (phase-2 review R5a, the same Critical). Same root
+    //    cause, and a worse population: the crypto-margin renter is this product's CORE audience.
+    //    Bitcoin yields no interest and no ordinary dividends, so the ceiling is ~$0 and ANY line-9
+    //    entry with a truthful "not filing Form 4952" was refused — including when SALT plus margin
+    //    interest lose to the standard deduction and the correct return claims nothing at all.
+    //
+    // ★ NOTE the `Some(true)` leg is NOT here — it stays in `screen_inputs`, correctly. Filing Form
+    //   4952 sends Schedule D line 20 to NO and routes the tax through the Schedule D Tax Worksheet,
+    //   which is a CAPITAL-GAINS consequence and applies whether or not the filer itemizes.
+    if ar.deduction_is_itemized && ri.filing_form_4952 == Some(false) {
+        let investment_interest = ri
+            .schedule_a
+            .as_ref()
+            .map_or(Usd::ZERO, |a| a.investment_interest);
+        if investment_interest > Usd::ZERO {
+            // i4952's first exception condition: investment income from INTEREST and ORDINARY
+            // dividends, minus any QUALIFIED dividends. Transcribed, not approximated.
+            //
+            // ★★ box 1 + box 3 (phase-2 review R5b). Form 1099-INT box 3 is US Treasury obligation
+            //    interest and is NOT a subset of box 1 — `sum_taxable_interest` says so in terms, and
+            //    1040 line 2b is box 1 + box 3. Summing box 1 alone under-counted the ceiling and
+            //    refused a filer with a T-bill ladder who plainly satisfies the exception. Treasury
+            //    interest is unambiguously "investment income from interest".
+            //
+            // ★ Deliberately EXCLUDED: crypto lending interest. btctax treats it as interest-like for
+            //   §1411, but its character as "interest" under §163(d) is genuinely arguable, so leaving
+            //   it out of the ceiling is conservative in the over-refusing (not understating)
+            //   direction. Stated so the omission is not silent.
+            let interest: Usd = ri
+                .int_1099
+                .iter()
+                .map(|i| i.box1_interest + i.box3_treasury_interest)
+                .sum();
+            let ordinary_dividends: Usd = ri.div_1099.iter().map(|d| d.box1a_ordinary).sum();
+            let qualified_dividends: Usd = ri.div_1099.iter().map(|d| d.box1b_qualified).sum();
+            let ceiling = (interest + ordinary_dividends - qualified_dividends).max(Usd::ZERO);
+            if investment_interest > ceiling {
+                return refusal(
+                    RefuseReason::Form4952Required,
+                    "you answered that you are NOT filing Form 4952, but your Schedule A line 9 \
+                     investment interest is MORE than your investment income from interest and \
+                     ordinary dividends minus qualified dividends — the first of the three \
+                     conditions of Form 4952's own no-filing exception. Above it, Form 4952 IS \
+                     required: §163(d)(1) limits the deduction to your net investment income, a \
+                     figure only that form computes, and btctax does not fill it. Deducting the \
+                     whole amount on line 9 would UNDERSTATE your tax. File Form 4952 (and this \
+                     return) by hand, or correct the line-9 amount. (This return itemizes; a return \
+                     that takes the standard deduction is unaffected and computes normally, because \
+                     line 9 never prints on it.)",
+                );
+            }
+        }
+    }
+
     // ★★★ §170(f)(8) — THE CONTEMPORANEOUS WRITTEN ACKNOWLEDGMENT (P4 / adjudication D4).
     //
     // Two conditions, both required, and BOTH are things liveness cannot see — which is why this sits
@@ -2257,7 +2363,34 @@ pub fn screen_absolute(
     let cwa_claimed = ar.schedule_a.as_ref().map_or(Usd::ZERO, |a| {
         a.charitable_cash_11 + a.charitable_noncash_12
     });
-    if ar.deduction_is_itemized && cwa_claimed > Usd::ZERO {
+    // ★★★ A CEILING-ZEROED YEAR STILL NEEDS THE ACKNOWLEDGMENT (phase-2 review R3, Important).
+    //
+    // `cwa_claimed > 0` alone treated a §170(b)-ceiling-zeroed year as "nothing claimed, nothing to
+    // disallow". That conflates TWO ZEROS THAT DIFFER IN KIND:
+    //   - a §170(e)-reduced claim of $0 is EXTINGUISHED, forever. Nothing is ever deducted, so no
+    //     acknowledgment is needed. The per-item `claimed_deduction > 0` filter in
+    //     `max_single_donation_contribution` handles that one, correctly — it is D4's named misfire.
+    //   - a §170(b)-CEILING zero is DEFERRED, not denied. §170(d) carries the claim into the next
+    //     five years, this very function's `charitable_carryover_out` computes it, and P6 tells the
+    //     filer to roll it forward. The deduction WILL be taken — just later.
+    //
+    // And §170(f)(8)(C) fixes the acknowledgment deadline at the EARLIER of filing or the due date
+    // **of the contribution year**. So the cure dies at THIS filing while the claim lives on. Without
+    // this disjunct the low-AGI itemizer with a large crypto gift files unasked, loses the cure
+    // permanently (*Durden*), and then deducts across later years unsubstantiated — D4's prong (3),
+    // the silently lost right, reappearing on the gate built to close it.
+    //
+    // Scoped to THIS year's vintage: an older vintage's deadline passed with ITS return, which is the
+    // same scoping the line-13 exclusion above already applies.
+    let cwa_deferred_to_carryover: Usd = ar
+        .charitable_carryover_out
+        .iter()
+        .filter(|c| c.origin_year == year)
+        .map(|c| c.amount)
+        .sum();
+    if ar.deduction_is_itemized
+        && (cwa_claimed > Usd::ZERO || cwa_deferred_to_carryover > Usd::ZERO)
+    {
         let largest_gift = crate::forms::max_single_donation_contribution(state, year).max(
             ri.schedule_a
                 .as_ref()
@@ -6799,6 +6932,12 @@ mod tests {
             let ri = ReturnInputs {
                 filing_status: FilingStatus::Single,
                 donations_had_restrictions: answer,
+                // ★ Answered so this test isolates its SUBJECT — the restrictions gate. Since the
+                //   phase-2 review's R3 fold, a ceiling-zeroed year is inside the §170(f)(8) gate
+                //   too (the claim is DEFERRED under §170(d), not denied, while the acknowledgment
+                //   deadline still dies at this filing). Leaving it unanswered would make every row
+                //   below refuse for the other gate's reason and prove nothing about this one.
+                charitable_cwa_obtained: Some(true),
                 schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
                     mortgage_interest_1098: dec!(20000),
                     ..Default::default()
@@ -6992,8 +7131,7 @@ mod tests {
     ///   SINGLE contribution ⇒ row 2 reds — the exact defect the adjudication names;
     /// - drop the `cwa_claimed > 0` conjunct ⇒ row 3 reds.
     #[test]
-    fn the_cwa_question_is_never_posed_to_a_standard_deduction_or_small_gift_or_ceiling_zeroed_filer(
-    ) {
+    fn the_cwa_question_is_never_posed_to_a_standard_deduction_or_small_gift_filer() {
         let p = ty2024_params();
         let table = synthetic_table(2024);
         let run = |sched_a: Option<crate::tax::return_inputs::ScheduleAInputs>,
@@ -7062,8 +7200,22 @@ mod tests {
              them, so no CWA question exists"
         );
 
-        // (3) An ITEMIZER (on mortgage interest) whose §170(b) ceiling zeroes the charitable
-        //     deduction: $0 of AGI-based ceiling ⇒ lines 11 and 12 are both $0.
+        // ★★★ (3) THE CEILING-ZEROED ITEMIZER — THIS ROW WAS INVERTED BY THE PHASE-2 REVIEW (R3).
+        //
+        //     It used to assert `None`, on the reasoning that "the §170(b) ceiling allows $0, so
+        //     nothing is claimed and nothing can be disallowed". That conflates two zeros which
+        //     differ in kind:
+        //       - a §170(e)-reduced claim of $0 is EXTINGUISHED forever. No acknowledgment needed,
+        //         and the per-item `claimed_deduction > 0` filter still excuses it (case 4 below).
+        //       - a §170(b)-CEILING zero is DEFERRED. §170(d) carries the claim into the next five
+        //         years, this engine computes the carryover-out, and P6 tells the filer to roll it.
+        //         The deduction WILL be taken — just later.
+        //
+        //     Meanwhile §170(f)(8)(C) fixes the acknowledgment deadline at the earlier of filing or
+        //     the due date OF THE CONTRIBUTION YEAR. So the cure dies at THIS filing while the claim
+        //     lives on: this filer would file unasked, lose the acknowledgment permanently, and then
+        //     deduct $50,000 across later years unsubstantiated. That is D4's own prong (3) — the
+        //     silently lost right — reappearing on the gate built to close it.
         let zeroed = crate::tax::return_inputs::ScheduleAInputs {
             mortgage_interest_1098: dec!(20000),
             ..Default::default()
@@ -7074,8 +7226,11 @@ mod tests {
             "fixture 3 must itemize on the mortgage interest alone"
         );
         assert_eq!(
-            reason, None,
-            "the §170(b) ceiling allows $0, so nothing is claimed and nothing can be disallowed"
+            reason,
+            Some(RefuseReason::CharitableCwaUnresolved),
+            "★ a ceiling-zeroed year DEFERS the claim under §170(d) but the §170(f)(8)(C) deadline \
+             still dies at this filing — ask now or the cure is gone. MUTATION: drop the \
+             `cwa_deferred_to_carryover` disjunct in `screen_absolute` and this reds."
         );
     }
 
