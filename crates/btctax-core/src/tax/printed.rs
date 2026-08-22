@@ -1600,6 +1600,9 @@ mod tests {
             charitable_carryover_out: Vec::new(),
             qbi_reit_ptp_carryforward_out: z,
             qbi_carryforward_out: z,
+            // N1 — no capital loss on this fixture, so the §1211/§1212 worksheet does not apply.
+            capital_loss_carryover_worksheet: None,
+            capital_loss_carryforward_out: crate::tax::types::Carryforward::default(),
             regular_tax: z,
             se_tax_sch2_l4: z,
             schedule_2_other_taxes: z,

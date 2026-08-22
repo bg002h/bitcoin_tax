@@ -16,6 +16,9 @@
 use crate::conventions::{round_dollar, Usd};
 use crate::forms::schedule_d;
 use crate::state::{LedgerState, RemovalKind, Term};
+use crate::tax::capital_loss_carryover::{
+    CapitalLossCarryoverInputs, CapitalLossCarryoverWorksheet,
+};
 use crate::tax::charitable::apply_170b;
 use crate::tax::compute::{net_1222, CapNet};
 use crate::tax::method::qdcgt_line16;
@@ -28,7 +31,7 @@ use crate::tax::return_inputs::{
 use crate::tax::return_refuse::{Refusal, RefuseReason};
 use crate::tax::se::{compute_se_tax, se_net_income, SeTaxResult};
 use crate::tax::tables::{loss_limit, FullReturnParams, TaxTable, EMPLOYEE_OASDI_RATE};
-use crate::tax::types::{FilingStatus, TaxProfile};
+use crate::tax::types::{Carryforward, FilingStatus, TaxProfile};
 use crate::IncomeKind;
 use rust_decimal_macros::dec;
 use time::{Date, Month};
@@ -601,7 +604,15 @@ pub fn form_1099b_gains(ri: &ReturnInputs) -> (Usd, Usd) {
         })
 }
 
-fn capital_net(ri: &ReturnInputs, state: &LedgerState, year: i32, status: FilingStatus) -> CapNet {
+/// ★ N1 — `pub(crate)` so [`crate::tax::advisories`] can quote the FLAT `st_carry`/`lt_carry` the
+/// frozen delta engine prints beside the worksheet's answer, rather than re-deriving the flat rule and
+/// creating a second authority for it.
+pub(crate) fn capital_net(
+    ri: &ReturnInputs,
+    state: &LedgerState,
+    year: i32,
+    status: FilingStatus,
+) -> CapNet {
     let sd = schedule_d(state, year); // raw crypto ST/LT nets (traverses state.disposals)
     let cf = ri.capital_loss_carryforward_in;
     // ★★★ §G-28/B4 — the broker totals join the crypto nets HERE, at the §1222 within-character
@@ -1275,6 +1286,22 @@ pub struct AbsoluteReturn {
     /// ★ Form 8995 **line 16** — the qualified business (loss) carryforward to next year (magnitude).
     /// For the write-back. Zero unless a prior-year QBI loss exceeded this year's business income.
     pub qbi_carryforward_out: Usd,
+    /// ★★★ **N1** — the §1211/§1212 **Capital Loss Carryover Worksheet — Lines 6 and 14**, figured on
+    /// this return, or `None` when the worksheet's own applicability sentence says *"you don't have
+    /// any carryovers."* Every numbered line is on
+    /// [`crate::tax::capital_loss_carryover::CapitalLossCarryoverWorksheet`].
+    pub capital_loss_carryover_worksheet: Option<CapitalLossCarryoverWorksheet>,
+    /// ★★★ **N1** — the §1212(b) capital-loss carryforward INTO next year, by character: the
+    /// worksheet's lines 8 and 13.
+    ///
+    /// **This is NOT `TaxResult::carryforward_out`, and the difference is the defect.** The frozen
+    /// crypto-delta engine computes `carry = loss − min(loss, $3,000)` flat, with no taxable-income
+    /// term — exact whenever 1040 line 15 is ≥ 0, and understated by up to the whole §1211(b)
+    /// allowance when the loss wiped the year out. The engine *cannot* do better: its `TaxProfile`
+    /// carries `ordinary_taxable_income` already floored at zero, so the pre-floor line 15 the
+    /// worksheet's line 1 needs does not survive into it. The full return has it, so the worksheet
+    /// runs here.
+    pub capital_loss_carryforward_out: Carryforward,
     /// 1040 **L16** — the regular tax on taxable income (whole dollars): the Qualified Dividends & Capital
     /// Gain Tax Worksheet ([`qdcgt_line16`]) on the WITH-crypto L15 / L3a / preferential net LTCG. It
     /// reduces to the plain Tax Table / TCW when there is no preferential income, so it is correct across
@@ -1788,7 +1815,27 @@ pub fn assemble_absolute(
     );
     // L14 — "Add lines 12e, 13a, and 13b" (2025) / "Add lines 12 and 13" (2024).
     let total_deductions = deduction + qbi.deduction + schedule_1a_additional;
-    let taxable_income = (agi - total_deductions).max(Usd::ZERO); // L15
+    // ★★★ **N1** — 1040 L15, and the SIGNED figure the §1211/§1212 Capital Loss Carryover Worksheet's
+    //     line 1 asks for. The filed line is floored at zero; the worksheet explicitly wants the
+    //     amount that line "would have been … if you could enter a negative number on that line", and
+    //     computing the carryforward-out from the floored one understates the surviving loss by up to
+    //     the whole §1211(b) allowance. Both are kept, and the unfloored one is used ONLY here.
+    let taxable_income_signed = agi - total_deductions;
+    let taxable_income = taxable_income_signed.max(Usd::ZERO); // L15
+
+    // The worksheet reads five figures off the return, all of which now exist: the signed L15 above
+    // and four Schedule D lines already assembled from the same `cap` netting the printed form uses.
+    let capital_loss_carryover_worksheet =
+        CapitalLossCarryoverWorksheet::figure(CapitalLossCarryoverInputs {
+            form_1040_line15_signed: taxable_income_signed,
+            schedule_d_line7: schedule_d.st_net_7,
+            schedule_d_line15: schedule_d.lt_net_15,
+            schedule_d_line16: schedule_d.total_16,
+            schedule_d_line21_loss: schedule_d.loss_deduction_21,
+        });
+    let capital_loss_carryforward_out = capital_loss_carryover_worksheet
+        .map(|w| w.carryforward_out())
+        .unwrap_or_default();
 
     // ── L16 regular tax (SPEC §5 stage 4 / §7.2 Schedule-D routing) ──────────────────────────────────
     // The Qualified Dividends & Capital Gain Tax Worksheet on the WITH-crypto TI (L15), qualified
@@ -1936,6 +1983,8 @@ pub fn assemble_absolute(
         charitable_carryover_out: charitable.carryover_out,
         qbi_reit_ptp_carryforward_out: qbi.reit_ptp_carryforward_out,
         qbi_carryforward_out: qbi.qbi_carryforward_out,
+        capital_loss_carryover_worksheet,
+        capital_loss_carryforward_out,
         regular_tax,
         se_tax_sch2_l4,
         additional_medicare,
@@ -7110,5 +7159,209 @@ mod tests {
         assert!(
             apply_carryover_writeback(&ar, &plain_ri(), &empty_ledger(), 2024, ri, true).is_ok()
         );
+    }
+
+    // ── N1 — the §1212(b)(2)(B) Capital Loss Carryover Worksheet on the carryforward-OUT side ─────
+
+    /// **L4** — the plan's floor vector: Single, NO wages, one long-term crypto loss of $20,000
+    /// (bought $60,000, sold $40,000). AGI = −3,000; standard deduction $14,600 ⇒ 1040 line 15 would
+    /// be **−17,600** if the form let you write it, so the §1211(b) $3,000 was never actually
+    /// absorbed and the whole $20,000 survives into 2025.
+    fn l4_floor_loss_year() -> (ReturnInputs, LedgerState) {
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: crate::tax::testonly::not_a_dependent(),
+            ..Default::default()
+        };
+        let st = state_disposals(vec![disp_leg(Term::LongTerm, dec!(40000), dec!(60000))]);
+        (ri, st)
+    }
+
+    /// **L3** — the same $20,000 long-term loss against $40,000 of wages. Taxable income is POSITIVE
+    /// ($22,400), the $3,000 IS absorbed, and the flat rule's $17,000 is the worksheet's answer too.
+    fn l3_positive_ti_loss_year() -> (ReturnInputs, LedgerState) {
+        let mut ri = wages_single(dec!(40000));
+        ri.header = crate::tax::testonly::not_a_dependent();
+        let st = state_disposals(vec![disp_leg(Term::LongTerm, dec!(40000), dec!(60000))]);
+        (ri, st)
+    }
+
+    /// The frozen crypto-delta engine's carryforward-out for the same household — the figure
+    /// `report --tax-year` prints today, and the one that was measured at 17,000 on L4.
+    fn delta_engine_carryforward(ri: &ReturnInputs, st: &LedgerState) -> Carryforward {
+        let prof = derive_tax_profile(ri, &ty2024_params(), 2024);
+        match compute_tax_year(&[], st, 2024, Some(&prof), &tables_2024()) {
+            TaxOutcome::Computed(r) => r.carryforward_out,
+            TaxOutcome::NotComputable(b) => panic!("the fixture must compute: {b:?}"),
+        }
+    }
+
+    /// ★★★ **N1, the defect vector.** A loss year whose taxable income is at the floor carries the
+    /// WHOLE $20,000 forward, not $17,000 — the §1211(b) allowance was never absorbed, because there
+    /// was no income for it to offset.
+    ///
+    /// The old flat rule (`carry = loss − min(loss, $3,000)`) is not merely imprecise here: it hands
+    /// the filer a permanently smaller loss, and next year's M4 consistency check then *disputes the
+    /// correct figure* if they work the worksheet themselves. This assertion reds against the
+    /// pre-N1 tree at `left: 17000`.
+    #[test]
+    fn n1_a_loss_year_at_the_floor_carries_the_whole_loss() {
+        let (ri, st) = l4_floor_loss_year();
+        let ar = assemble_absolute(&ri, &st, &ty2024_params(), &real_2024_table(), 2024);
+
+        // The fixture must actually BE the floor case, or the test proves nothing.
+        assert_eq!(
+            ar.agi,
+            dec!(-3000),
+            "wages 0 + L7 −3,000 (§1211(b)-limited)"
+        );
+        assert_eq!(ar.taxable_income, Usd::ZERO, "1040 L15 is floored at zero…");
+        assert_eq!(
+            ar.agi - ar.total_deductions,
+            dec!(-17600),
+            "…and the worksheet's line 1 is the −17,600 the floor hides"
+        );
+        assert_eq!(ar.schedule_d.loss_deduction_21, dec!(3000));
+
+        let w = ar
+            .capital_loss_carryover_worksheet
+            .expect("line 21 is a loss and line 1 is below zero");
+        assert_eq!(w.line1, dec!(-17600));
+        assert_eq!(w.line3, Usd::ZERO, "combine 1 and 2 ⇒ below zero ⇒ -0-");
+        assert_eq!(w.line4, Usd::ZERO, "NOTHING of the $3,000 was absorbed");
+        assert_eq!(w.line13, Some(dec!(20000)));
+
+        assert_eq!(
+            ar.capital_loss_carryforward_out,
+            Carryforward {
+                short: Usd::ZERO,
+                long: dec!(20000),
+            },
+            "the §1212(b)(2)(B) worksheet carries the whole loss into 2025"
+        );
+
+        // ★ And the split that makes this worth stating out loud: the FROZEN delta engine still says
+        //   17,000, and structurally cannot say otherwise — `TaxProfile` hands it an
+        //   `ordinary_taxable_income` already floored at zero, so the worksheet's line 1 does not
+        //   survive into it. That is why the fix lives on the full return and why the advisory below
+        //   exists to reconcile the two numbers for the filer.
+        assert_eq!(
+            delta_engine_carryforward(&ri, &st).long,
+            dec!(17000),
+            "the frozen slice engine is unchanged — if this moves, `compute.rs` was edited"
+        );
+    }
+
+    /// ★★★ **N1's no-op half.** At POSITIVE taxable income the flat rule is exact, and the worksheet
+    /// must agree with it to the cent — on both characters, and with the frozen engine.
+    ///
+    /// Without this, a fix that simply carried the whole loss whenever a loss existed would pass the
+    /// vector above and overstate every ordinary loss year by $3,000.
+    #[test]
+    fn n1_at_positive_taxable_income_the_worksheet_is_a_no_op() {
+        let (ri, st) = l3_positive_ti_loss_year();
+        let ar = assemble_absolute(&ri, &st, &ty2024_params(), &real_2024_table(), 2024);
+
+        assert_eq!(ar.taxable_income, dec!(22400), "37,000 AGI − 14,600 std");
+        let w = ar.capital_loss_carryover_worksheet.expect("limb (a)");
+        assert_eq!(w.line4, dec!(3000), "the full allowance WAS absorbed");
+        assert_eq!(
+            ar.capital_loss_carryforward_out,
+            Carryforward {
+                short: Usd::ZERO,
+                long: dec!(17000),
+            }
+        );
+        assert_eq!(
+            ar.capital_loss_carryforward_out,
+            delta_engine_carryforward(&ri, &st),
+            "at positive TI the worksheet and the frozen flat rule are the SAME number"
+        );
+    }
+
+    /// A gain year has no worksheet and no carryforward — the applicability sentence's "Otherwise,
+    /// you don't have any carryovers", reached through the real assembly rather than in isolation.
+    #[test]
+    fn n1_a_gain_year_produces_no_worksheet_and_no_carryforward() {
+        let ri = wages_single(dec!(60000));
+        let st = state_disposals(vec![disp_leg(Term::LongTerm, dec!(50000), dec!(20000))]);
+        let ar = assemble_absolute(&ri, &st, &ty2024_params(), &real_2024_table(), 2024);
+        assert_eq!(ar.schedule_d.loss_deduction_21, Usd::ZERO);
+        assert_eq!(ar.capital_loss_carryover_worksheet, None);
+        assert_eq!(ar.capital_loss_carryforward_out, Carryforward::default());
+    }
+
+    /// ★★★ **N1's reader.** A computed figure nobody reads is not thereby correct, and the number the
+    /// `report` command prints comes from the FROZEN delta engine, which structurally cannot apply the
+    /// worksheet. So the worksheet's answer is delivered as an advisory that names BOTH numbers and
+    /// says which to carry — otherwise the fix would be invisible to the only person it is for.
+    ///
+    /// **B1 pair**: it fires on the floor vector, and it must NOT fire on the positive-TI vector,
+    /// which is the same assertion as "the worksheet is a no-op there" made through a second surface.
+    #[test]
+    fn n1_the_worksheet_result_reaches_the_filer_as_an_advisory() {
+        use crate::tax::advisories::{advisories_for, Advisory};
+        let p = ty2024_params();
+        let table = real_2024_table();
+
+        let (ri, st) = l4_floor_loss_year();
+        let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+        let advs = advisories_for(&ri, &st, &ar, &p, 2024);
+        let fired = advs
+            .iter()
+            .find(|a| {
+                matches!(
+                    a,
+                    Advisory::CapitalLossCarryoverWorksheetIncreasesCarryover { .. }
+                )
+            })
+            .expect("the floor vector must be told its carryover is $20,000, not $17,000");
+        assert_eq!(
+            *fired,
+            Advisory::CapitalLossCarryoverWorksheetIncreasesCarryover {
+                flat_short: Usd::ZERO,
+                flat_long: dec!(17000),
+                worksheet_short: Usd::ZERO,
+                worksheet_long: dec!(20000),
+                absorbed: Usd::ZERO,
+            }
+        );
+        let msg = fired.message();
+        assert!(msg.contains("$20,000"), "the CORRECT figure: {msg}");
+        assert!(
+            msg.contains("$17,000"),
+            "…and the one already printed: {msg}"
+        );
+        assert!(msg.contains("$3,000"), "…and what is at stake: {msg}");
+
+        // The negative half: an ordinary loss year, where the flat rule is exact, must stay silent.
+        let (ri3, st3) = l3_positive_ti_loss_year();
+        let ar3 = assemble_absolute(&ri3, &st3, &p, &table, 2024);
+        assert!(
+            !advisories_for(&ri3, &st3, &ar3, &p, 2024).iter().any(|a| {
+                matches!(
+                    a,
+                    Advisory::CapitalLossCarryoverWorksheetIncreasesCarryover { .. }
+                )
+            }),
+            "at positive taxable income there is nothing to reconcile — an advisory here would be \
+             noise on every loss year btctax already gets right"
+        );
+    }
+
+    /// ★ The N1 fix must not have moved the FILED return. Every printed figure on the floor vector —
+    /// 1040 line 7, taxable income, total tax — is what it was before the worksheet existed; the
+    /// worksheet decides only what survives into next year.
+    #[test]
+    fn n1_does_not_move_a_single_filed_figure() {
+        let (ri, st) = l4_floor_loss_year();
+        let ar = assemble_absolute(&ri, &st, &ty2024_params(), &real_2024_table(), 2024);
+        assert_eq!(ar.capital_gain, dec!(-3000), "1040 L7, leading minus");
+        assert_eq!(ar.total_income, dec!(-3000)); // L9
+        assert_eq!(ar.taxable_income, Usd::ZERO); // L15
+        assert_eq!(ar.regular_tax, Usd::ZERO); // L16
+        assert_eq!(ar.total_tax, Usd::ZERO); // L24
+        assert_eq!(ar.schedule_d.lt_net_15, dec!(-20000));
+        assert_eq!(ar.schedule_d.total_16, dec!(-20000));
     }
 }

@@ -3,6 +3,9 @@
 //! Tables and compute modules are added in Tasks 2–5.
 pub mod advisories;
 pub mod amt;
+/// The §1212(b)(2)(B) **Capital Loss Carryover Worksheet — Lines 6 and 14**, transcribed line by line
+/// from the 2025 Schedule D instructions (the sheet that figures a TY2024 return's carryover OUT).
+pub mod capital_loss_carryover;
 pub mod charitable;
 pub mod classifier;
 pub mod compute;

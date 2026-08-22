@@ -180,6 +180,35 @@ pub enum Advisory {
     /// `itemized` records which deduction the return took, so the text does not tell a standard-deduction
     /// filer their Schedule A "used" income taxes on a form they did not file (r3 MINOR-3, the r5 M-1 shape).
     SalesTaxElectionNotAsked { itemized: bool },
+    /// ★★★ **N1** — this year's capital loss was NOT absorbed by the §1211(b) allowance (in whole or
+    /// in part), because taxable income was already at or below zero. The §1211/§1212 **Capital Loss
+    /// Carryover Worksheet** therefore carries MORE loss into next year than the flat
+    /// `loss − $3,000` rule does, and the filer has to be given the right number.
+    ///
+    /// ★★ **It exists because two figures for one quantity now coexist, and only one of them is
+    /// right.** `report --tax-year` prints the frozen crypto-delta engine's `carryforward_out`, which
+    /// is the flat rule and cannot be anything else — `TaxProfile` hands that engine an
+    /// `ordinary_taxable_income` already floored at zero, so the worksheet's line 1 (1040 line 15
+    /// *before* the floor) does not survive into it. A silent second number would be the worst of
+    /// both worlds, so this advisory names BOTH and says which one to carry.
+    ///
+    /// ★ **Fires off the MECHANISM, not off a household list**: exactly when the worksheet's answer
+    /// differs from the flat rule on either character. At positive taxable income the two are
+    /// algebraically identical, so it cannot fire there — which is also what makes it a live test of
+    /// the no-op claim rather than a restatement of it.
+    CapitalLossCarryoverWorksheetIncreasesCarryover {
+        /// The flat `loss − min(loss, §1211(b) limit)` figure, short-term character.
+        flat_short: Usd,
+        /// The flat figure, long-term character.
+        flat_long: Usd,
+        /// Worksheet line 8 — the short-term carryover.
+        worksheet_short: Usd,
+        /// Worksheet line 13 — the long-term carryover.
+        worksheet_long: Usd,
+        /// Worksheet line 4 — how much of the §1211(b) allowance the year actually absorbed. Zero
+        /// when the loss did nothing at all for the filer this year.
+        absorbed: Usd,
+    },
 }
 
 /// Format a dollar amount for advisory prose: `$1,950` / `$1,234.56` — thousands-separated, and
@@ -431,6 +460,32 @@ impl Advisory {
                         .to_string()
                 }
             }
+            Advisory::CapitalLossCarryoverWorksheetIncreasesCarryover {
+                flat_short,
+                flat_long,
+                worksheet_short,
+                worksheet_long,
+                absorbed,
+            } => format!(
+                "CAPITAL-LOSS CARRYOVER — CARRY {ws}, NOT {flat}. Your taxable income (Form 1040 line \
+                 15) was already at or below zero, so the capital loss did not offset ordinary income \
+                 the way it does in a normal year: the §1211(b) allowance absorbed only {absorbed} of \
+                 it. The §1211/§1212 Capital Loss Carryover Worksheet (2025 Schedule D instructions, \
+                 \"Capital Loss Carryover Worksheet — Lines 6 and 14\") therefore carries {ws} into \
+                 next year — short-term {ws_s}, long-term {ws_l} — where the flat \"loss minus \
+                 $3,000\" figure printed above says {flat}. ★ THE WORKSHEET FIGURE IS THE CORRECT ONE. \
+                 Enter it on next year's Schedule D lines 6 and 14, and as next year's capital-loss \
+                 carryover in `btctax income import`; the flat figure would forfeit {diff} of \
+                 deductible loss permanently.",
+                ws = fmt_usd(*worksheet_short + *worksheet_long),
+                flat = fmt_usd(*flat_short + *flat_long),
+                ws_s = fmt_usd(*worksheet_short),
+                ws_l = fmt_usd(*worksheet_long),
+                absorbed = fmt_usd(*absorbed),
+                diff = fmt_usd(
+                    (*worksheet_short + *worksheet_long) - (*flat_short + *flat_long)
+                ),
+            ),
         }
     }
 }
@@ -700,6 +755,27 @@ pub fn advisories_for(
         year,
         ar.deduction_is_itemized,
     );
+    // ★★★ **N1** — the §1211/§1212 Capital Loss Carryover Worksheet moved the carryforward, so say so.
+    //
+    // Fires off the MECHANISM — "the worksheet and the flat rule disagree" — never off a list of
+    // households. At non-negative 1040 line 15 the two are algebraically the same number (pinned by
+    // `capital_loss_carryover::at_nonnegative_line1_the_worksheet_equals_the_frozen_flat_rule`), so
+    // this cannot fire on an ordinary loss year; it fires exactly on the floor region, which is
+    // precisely the region no corpus household and neither oracle can witness.
+    if let Some(w) = ar.capital_loss_carryover_worksheet {
+        let flat = crate::tax::return_1040::capital_net(ri, state, year, ri.filing_status);
+        let ws = w.carryforward_out();
+        if ws.short != flat.st_carry || ws.long != flat.lt_carry {
+            out.push(Advisory::CapitalLossCarryoverWorksheetIncreasesCarryover {
+                flat_short: flat.st_carry,
+                flat_long: flat.lt_carry,
+                worksheet_short: ws.short,
+                worksheet_long: ws.long,
+                absorbed: w.line4,
+            });
+        }
+    }
+
     // ★★★ §6413(c) — computed on the return (it needs the year's wage base, which the scalar form does
     // not carry), appended here so the filer is TOLD that money withheld above the cap by a SINGLE
     // employer is real, recoverable, and simply not claimable on this return.
