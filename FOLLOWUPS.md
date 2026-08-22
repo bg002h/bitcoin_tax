@@ -5336,3 +5336,100 @@ SURFACED — not walkthrough bugs):
   `available_lots_before`'s `Result`: an `Err` surfaces "Couldn't read the vault to list lots …" and stays
   on List, no longer masquerading as "No lots available". KAT `kat_sl_r2d_load_error_is_distinct_from_empty_
   pool` (drops the `events` table after the flow opens to force the read failure). — **DONE.**
+
+## FILING-READINESS branch — open residue (2026-08-22, owning phase per entry)
+
+_Filed from `feat/filing-readiness` (34 commits, 2667 → 2740 tests). Everything here was found and
+DELIBERATELY not built, with a reason — none of it is a gap someone forgot. Three independent
+reviews ran on the branch; two are persisted verbatim in `reviews/filing-readiness-phase{1,2}-review.md`._
+
+### Owned by a future btctax-core lane
+
+- **FR-1 — N3: 1040 line 19 prints `0` for families the credit belongs to.** NOT BUILT. The honest
+  fix needs three things that all live in `btctax-core` and never reach the forms crate:
+  `Form1040Lines::line19` must become `Option<Usd>`; `ctc_provably_zero` is private and needs
+  `ReturnInputs` + dependent count + AGI; lines 21/22 must treat blank as the form does.
+  ★ The forms lane REFUSED to build it and was right to: inventing a §24(b) predicate inside
+  `btctax-forms` would be a second divergent implementation of the rule and a *worse* answered-ness
+  violation than the one N3 describes — the emitter deciding for the filer. An unconditional blank
+  was also rejected: Schedule 8812 line 12-No literally instructs "-0-". The fill site is already a
+  one-liner (`push_money_opt`) **once the type carries the decision**.
+
+- **FR-12 — Form 8960 line 9d still prints `0` when 9b is blank.** Same class as the defect P8 fixed
+  one line up (an affirmative zero on a derived total nobody testified to). Out of scope for a
+  one-item phase; the map's committed rationale is untouched.
+
+- **FR-13 — Form 8960 line 9a is NEWLY derivable.** i8960 line 9a is *"interest expense … deducted
+  on Schedule A (Form 1040), line 9"*, and P7 landed Schedule A line 9 in this branch. A separate
+  line and a separate item — filed rather than folded in.
+
+### Owned by whoever holds the authority document
+
+- **FR-2 — TY2017 Form 8283 still writes Section B column (i).** Blanked for 2024/2025 (it is the
+  pass-through entity's cell, per i8283). TY2017 left alone because the Rev. 12-2014 revision
+  predates the pass-through regime, puts the amount in column **(h)**, and **its instructions are not
+  in this repo**. Changing shipped behaviour on a revision whose authority we do not hold is
+  inventing the rule, not reading it. **To close:** archive i8283 Rev. 12-2014, read column (h), drop
+  the key, census those 8 fields.
+
+- **FR-5 — L0's "you may not need to file at all" note.** Needs i1040 **Chart A** transcribed
+  (status, age, dependency, the MFS $5 rule, the $400 SE floor). A wrong "you may not need to file"
+  is a harmful false signal in the understatement direction. That is a transcription job, not a
+  signal — correctly refused rather than approximated.
+
+### Owner decisions — not an implementer's call
+
+- **FR-6 — is the TI≤0-with-carryforward-IN refusal now liftable?** Mechanically yes. Its stated
+  reason ("the worksheet is unmodeled in v1") is now FALSE — N1 modelled it, and a carryforward-in is
+  handled correctly by construction. The refusal's detail text was corrected to state the real,
+  narrower reason. Lifting it would let that year FILE instead of refusing: a **widening of the
+  filing surface on a §6065 return**, wanting its own commit, review and KAT pair.
+
+- **FR-8 — `--write-carryover` does not roll the capital-loss sibling.** The r3 I-4 comment saying
+  there is nothing to write is now false (the field exists); the comment was corrected. Whether to
+  roll it, and with what provenance, is a behaviour change to a filed-figure chain — and it must also
+  answer what provenance means for a figure the FROZEN delta engine still reports differently (see
+  the M4 authority fix in `cmd/tax.rs`).
+
+- **FR-7 — N1's slice-path guard (plan decision 12).** Unsettled, so unbuilt. The plan recommends
+  *warn* (the slice is a planning surface, not a filing one), naming the worksheet.
+
+- **FR-14 — P7 adds an ALWAYS-LIVE declaration.** Every filer now answers one more yes/no before any
+  return computes. Judged forced (Schedule D line 20 prints on every both-gains return and that
+  routing is a ledger fact liveness cannot see; the defect was measured on the $0-income household),
+  and the phase-2 review independently ruled the always-live choice correct — the answer is material
+  beyond line 20, since the QDCGT worksheet nets out Form 4952 line 4g. It is still the largest
+  friction increase in the branch and is worth a conscious yes.
+
+### Ownerless residue — batch when convenient
+
+- **FR-4 — the charitable carryover has no TUI reader.** P6 wired `report --tax-year` and the export
+  stderr; `crates/btctax-tui` was outside that lane. The figure reaches zero humans on that surface.
+- **FR-9 — no sweep for the GIT_DIR hazard outside xtask.** All three `xtask` spawn sites are fixed
+  and `scripts/pre-commit` scrubs the environment, but nobody swept the workspace for other
+  `Command::new("git")` calls without a scrub.
+- **FR-10 — the 2025 form map has no `[census]` section**, so three un-mapped column-(i) cells are
+  accounted for by no instrument (`field_census.rs` is hardcoded to 2024). The fix is extending the
+  census PROGRAM to 2025 — not nit-sized, and it must not be faked with a hand-list. The blank value
+  itself is pinned by an existing test.
+- **FR-11 — the Form 8283 hand-mark's positive kill-test is a GOLDEN.** It reds when the mark is
+  disabled (observed), and the negative half is a real test — but a golden can be "fixed" by
+  regenerating. A direct test (build a Section B donation vault via `reclassify_outflow`, assert the
+  manifest names Part IV and Part V) would be strictly better.
+- **FR-15 — `design/forms/FIELD_PROVENANCE.md` is a dated snapshot with no generator and no test.**
+  P8 moved f8960 from 16 mapped / 22 undecided to 17/21; the file was flagged rather than hand-edited,
+  because hand-editing a snapshot nothing regenerates is how it drifts.
+
+### The one that is a project, not an item
+
+- **FR-16 — EITC/ACTC (plan item N2).** Owner decision 11 put it IN SCOPE, and the plan itself says
+  it "is not a plan item at this scope — it is a project", to start at brainstorm. It needs Schedule
+  8812 and Schedule EIC (neither has a map), a refundable-credit path that does not exist, new
+  collected inputs (earned income, the §32(i) investment-income limit, qualifying-child residency),
+  and a two-oracle witness. **DELIBERATELY NOT STARTED in this branch.**
+  ★★ It is de-risked, though: `design/direction/ORACLE-TRAP-credit-takeup.md` records — machine-
+  verified — that Tax-Calculator's DEFAULTS report `EITC = $0` for a household owed $4,778.18, that
+  the zeroing is position-dependent (identical households differ by array index), and that it would
+  therefore have looked like a second oracle corroborating btctax's own wrong zero. That document
+  carries the binding protocol, including that the kill-test **must** run at row position 0 or it
+  passes with the fix removed.
