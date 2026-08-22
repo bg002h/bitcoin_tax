@@ -1334,9 +1334,18 @@ pub fn render_tax_outcome(
                 fmt_money(r.total_federal_tax_attributable),
                 pseudo.suffix()
             );
+            // ★★★ **LABELLED AS THE CRYPTO SLICE, because that is what it is.** This figure comes
+            //     from the FROZEN delta engine's flat `absorbed = min(loss, §1211(b) limit)` rule
+            //     (`compute::net_1222`), which has no taxable-income term — and it structurally
+            //     CANNOT SEE broker short-term losses: `derive_tax_profile` discards them and
+            //     `other_net_capital_gain` is long-term only. So on a household with a 1099-B
+            //     short-term loss it diverges from the return's §1212(b) figure with nothing on the
+            //     page to explain why. The fix is the LABEL and the second line, not the engine: the
+            //     delta figure is not wrong, it was described as something it is not.
             let _ = writeln!(
                 s,
-                "  §1211 loss deduction (level): {}   carryforward out: short {} / long {}",
+                "  §1211 loss deduction (crypto slice): {}   crypto-slice carryforward out: \
+                 short {} / long {}",
                 fmt_money(r.loss_deduction),
                 fmt_money(r.carryforward_out.short),
                 fmt_money(r.carryforward_out.long)
@@ -1579,6 +1588,18 @@ pub fn render_dual_report(
     {
         s.push_str(&block);
     }
+    // ★★★ …and the §1212(b) CAPITAL-LOSS carryover beside it, for the same reason and one more.
+    //
+    // The delta block prints a carryforward-out too, from the frozen crypto-slice engine, and the two
+    // can differ — on a floor household by up to the whole §1211(b) allowance, and on a household
+    // with a broker short-term loss by an amount the delta engine cannot even see. Two unlabelled
+    // figures for "your carryover" is worse than one: a filer who takes the smaller one forfeits
+    // deductible loss permanently. So this one is printed and named as THE RETURN'S, in whole
+    // dollars — the figure `--write-carryover` persists and next year's Schedule D lines 6 and 14
+    // will carry.
+    if let Some(block) = render_capital_loss_carryover_out(year, ar) {
+        s.push_str(&block);
+    }
     // §6: the two figures answer different questions and are NEVER reconciled.
     let delta_str = match delta {
         btctax_core::TaxOutcome::Computed(r) => fmt_money(r.total_federal_tax_attributable),
@@ -1651,6 +1672,43 @@ fn charitable_class_label(c: btctax_core::tax::return_inputs::CharitableClass) -
 /// acknowledgment behind it and the block says so. Passed IN rather than re-derived here so that this
 /// surface, `export-irs-pdf`'s, and `apply_carryover_writeback`'s refusal all read the SAME predicate
 /// (`cwa_unvouched_carryover`); three copies of a statutory test is how they come to disagree.
+/// The §1212(b) capital-loss carryover to next year, as the FILED page will carry it.
+///
+/// `None` when there is none — a filer with no surviving loss needs no line about one.
+///
+/// ★ WHOLE DOLLARS, matching what `--write-carryover` persists and what next year's Schedule D lines
+/// 6 and 14 will print. Showing cents here and storing dollars would give the filer two answers to
+/// one question, which is the failure this whole function exists to end.
+pub fn render_capital_loss_carryover_out(
+    year: i32,
+    ar: &btctax_core::tax::return_1040::AbsoluteReturn,
+) -> Option<String> {
+    use btctax_core::conventions::round_dollar;
+    let out = ar.capital_loss_carryforward_out;
+    let (short, long) = (round_dollar(out.short), round_dollar(out.long));
+    if short <= Usd::ZERO && long <= Usd::ZERO {
+        return None;
+    }
+    let mut s = String::new();
+    let _ = writeln!(
+        s,
+        "\n  ── §1212(b) Capital-loss carryover to {next} (THE RETURN'S figure — authoritative) ──",
+        next = year + 1
+    );
+    let _ = writeln!(
+        s,
+        "  short-term (Schedule D line 6): {}   long-term (line 14): {}",
+        fmt_money(short),
+        fmt_money(long)
+    );
+    let _ = writeln!(
+        s,
+        "  Figured on the Capital Loss Carryover Worksheet — Lines 6 and 14. Any carryforward figure \
+         in the crypto-DELTA block below is the crypto slice only and is NOT this number."
+    );
+    Some(s)
+}
+
 pub fn render_charitable_carryover_out(
     year: i32,
     items: &[btctax_core::tax::return_inputs::CharitableCarryItem],

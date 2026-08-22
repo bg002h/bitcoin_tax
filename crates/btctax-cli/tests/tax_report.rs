@@ -1577,6 +1577,140 @@ fn dual_report_renders_absolute_return_with_section_6_labels() {
     );
 }
 
+/// ★★★ **K12 — the report never shows two unlabelled carryforward-out figures.**
+///
+/// The dual report prints two carryover figures from two different engines. The delta block's comes
+/// from the FROZEN crypto-slice `net_1222`, a flat `min(loss, §1211(b) limit)` with no
+/// taxable-income term; the return's comes from the §1212(b) worksheet. They diverge on TWO
+/// independent axes, and a filer who takes the smaller one forfeits deductible loss permanently:
+///
+///   (i)  **the FLOOR** — a year that absorbs none of the allowance. The worksheet carries $20,000
+///        where the flat rule says $17,000.
+///   (ii) **A BROKER SHORT-TERM LOSS** — the axis the delta profile STRUCTURALLY CANNOT SEE.
+///        `derive_tax_profile` discards short-term broker losses and `other_net_capital_gain` is
+///        long-term only, so the delta engine reports a $0 carryforward on a household whose return
+///        carries a real one. A fix that only handled the floor axis passes (i) and fails here.
+///
+/// ★ **Composed exactly as `main.rs` composes it** — `render_tax_outcome` (the delta block) followed
+/// by `dual_report` (the return's). The claim is about what lands on ONE SCREEN; asserting on the two
+/// render functions in isolation proves nothing about whether a filer sees two numbers and cannot
+/// tell which is theirs, which is the entire finding.
+///
+/// Mutation that MUST red: revert the delta line to the unqualified
+/// `"§1211 loss deduction (level): …   carryforward out: …"` ⇒ BOTH households.
+#[test]
+fn the_report_never_shows_two_unlabelled_carryforward_out_figures() {
+    use btctax_core::tax::return_inputs::{Form1099B, Owner, ReturnInputs, W2};
+
+    /// EXACTLY what `main.rs` prints for `report --tax-year Y`: the crypto-delta block, then the
+    /// dual report. Both figures land here, one after the other, on one screen.
+    fn screen_for(vault: &std::path::Path, year: i32) -> String {
+        let TaxYearReport {
+            outcome,
+            advisory,
+            dual_report,
+            pseudo_contributed,
+            ..
+        } = cmd::tax::report_tax_year(vault, &pp(), year, dec!(0)).unwrap();
+        let mut out = btctax_cli::render::render_tax_outcome(
+            year,
+            &outcome,
+            advisory.as_deref(),
+            pseudo_contributed,
+        );
+        out.push_str(&dual_report.expect("a ReturnInputs year renders the dual report"));
+        out
+    }
+
+    let check = |label: &str, dual: &str| {
+        // The RETURN's figure is present and named authoritative.
+        assert!(
+            dual.contains("THE RETURN'S figure — authoritative"),
+            "[{label}] the return's §1212(b) carryover must be on the page and named as the \
+             authority:\n{dual}"
+        );
+        assert!(
+            dual.contains("Schedule D line 6") && dual.contains("line 14"),
+            "[{label}] …and tied to the lines it lands on:\n{dual}"
+        );
+        // The DELTA figure is named as the crypto slice, not as "your carryforward".
+        assert!(
+            dual.contains("crypto-slice carryforward out"),
+            "[{label}] ★ the delta engine's figure must be labelled the CRYPTO SLICE — it is not \
+             wrong, it was described as something it is not:\n{dual}"
+        );
+        assert!(
+            !dual.contains("  §1211 loss deduction (level):"),
+            "[{label}] ★ the old unqualified label must be gone:\n{dual}"
+        );
+    };
+
+    // ── Household (i): the FLOOR. No wages, a $20,000 long-term loss carried in. ──────────────────
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2024(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        let mut ri = ReturnInputs {
+            tax_year: 2024,
+            filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
+            ..Default::default()
+        };
+        ri.capital_loss_carryforward_in = btctax_core::tax::types::Carryforward {
+            short: rust_decimal::Decimal::ZERO,
+            long: dec!(20000),
+        };
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        btctax_cli::return_inputs::set(s.conn(), 2024, &ri).unwrap();
+        s.save().unwrap();
+    }
+    let dual = screen_for(&vault, 2024);
+    check("floor", &dual);
+
+    // ── Household (ii): POSITIVE taxable income, a $20,000 broker SHORT-TERM loss, no crypto. ─────
+    //
+    // The axis no existing test can see: the delta profile discards short-term broker losses, so its
+    // carryforward-out is $0 while the return's is real.
+    let csv_dir2 = tempfile::tempdir().unwrap();
+    let csv2 = write_lt_sell_2024(csv_dir2.path());
+    let (_dir2, vault2) = make_vault_with(&csv2);
+    {
+        let mut s = Session::open(&vault2, &pp()).unwrap();
+        let mut ri = ReturnInputs {
+            tax_year: 2024,
+            filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
+            w2s: vec![W2 {
+                owner: Owner::Taxpayer,
+                box1_wages: dec!(50000),
+                box3_ss_wages: dec!(50000),
+                box5_medicare_wages: dec!(50000),
+                ..Default::default()
+            }],
+            b_1099: vec![Form1099B {
+                payer: "Broker".into(),
+                short_term_proceeds: dec!(5000),
+                short_term_basis: dec!(25000),
+                basis_reported_and_no_adjustments: Some(true),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        btctax_cli::return_inputs::set(s.conn(), 2024, &ri).unwrap();
+        s.save().unwrap();
+    }
+    let dual2 = screen_for(&vault2, 2024);
+    // PREMISE: the two engines really do disagree on this household, or "two figures" is theoretical.
+    assert!(
+        dual2.contains("crypto-slice carryforward out: short 0.00"),
+        "premise: the delta engine must report ZERO short-term carryforward here — that blindness \
+         is the point of this household:\n{dual2}"
+    );
+    check("broker short-term loss", &dual2);
+}
+
 /// ★★★ **K9 — rolling a carryover must never leave next year unfilable IN SILENCE.**
 ///
 /// A nonzero capital-loss carryover-in makes three class-(A) declarations live on year Y+1 that were

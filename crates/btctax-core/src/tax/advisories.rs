@@ -552,9 +552,11 @@ impl Advisory {
                  \"Capital Loss Carryover Worksheet — Lines 6 and 14\") therefore carries {ws} into \
                  next year — short-term {ws_s}, long-term {ws_l} — where the flat \"loss minus \
                  $3,000\" rule gives {flat}. ★ THE WORKSHEET FIGURE IS THE CORRECT ONE. \
-                 Enter it on next year's Schedule D lines 6 and 14, and as next year's capital-loss \
-                 carryover in `btctax income import`; the flat figure would forfeit {diff} of \
-                 deductible loss permanently.",
+                 It belongs on next year's Schedule D lines 6 and 14. `report --write-carryover` \
+                 stamps it onto next year's inputs for you, rounded to whole dollars; enter it by \
+                 hand (`btctax income import`) only if you do not use that flag — and do not do \
+                 both, or your own entry and btctax's will collide. The flat figure would forfeit \
+                 {diff} of deductible loss permanently.",
                 ws = fmt_usd(*worksheet_short + *worksheet_long),
                 flat = fmt_usd(*flat_short + *flat_long),
                 ws_s = fmt_usd(*worksheet_short),
