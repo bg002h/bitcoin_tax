@@ -786,13 +786,15 @@ Check what this feature actually produced: open the Form 8275 PDF and confirm th
     20% ceiling at BASIS (which v1 refuses). Verify who you gave to.
   • FORM 8960 LINE 9B NOT CLAIMED — you owe net investment income tax (§1411), and Form 8960
     line 9b, "State, local, and foreign income tax", is BLANK. The state and local income
-    tax your Schedule A actually deducted is up to $10,000 after §164(b)(6)'s cap, and the
-    portion of it attributable to your investment income is deductible against that income —
-    so your tax is currently OVERSTATED. btctax will not pick the split for you: the
-    Instructions for Form 8960 say you may use "any reasonable method", and one they give
-    themselves is that amount times the ratio of Form 8960 line 8 (gross investment income)
-    to your AGI. Work out your own figure and enter it, or leave the line blank and claim
-    nothing.
+    tax your Schedule A actually deducted, after §164(b)(6)'s limit, is up to $10,000, and
+    the portion of it attributable to your investment income is deductible against that
+    income — so your tax is currently OVERSTATED by up to $198.25. (That is what allocating
+    the WHOLE of it would save; a smaller allocation saves less. Line 16 is the smaller of
+    line 12 and line 15, so once line 12 falls to line 15 no further allocation changes
+    anything.) btctax will not pick the split for you: the Instructions for Form 8960 say
+    you may use "any reasonable method", and one they give themselves is that amount times
+    the ratio of Form 8960 line 8 (gross investment income) to your AGI. Work out your own
+    figure and enter it, or leave the line blank and claim nothing.
   (Advisories never change a number and never fail the command. See `btctax limitations`.)
 ```
 

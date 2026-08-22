@@ -349,9 +349,16 @@ pub struct ScheduleAParts {
     pub salt_5d: Usd,
     /// L5e — the §164(b) SALT cap applied: min(line 5d, [`ScheduleAParts::salt_cap`]).
     pub salt_5e: Usd,
-    /// The §164(b) cap itself ($10,000; $5,000 MFS). Carried because the PRINTED line 5e must cap the
-    /// PRINTED line 5d — the printed chain cannot re-derive the cap without doing tax logic in the
-    /// forms crate, which is precisely what it must not do.
+    /// The APPLIED SALT limit — i.e. **line 5e itself** (`salt_cap = salt_5e`). Carried because the
+    /// PRINTED line 5e must cap the PRINTED line 5d, and the printed chain cannot re-derive the limit
+    /// without doing tax logic in the forms crate, which is precisely what it must not do. The
+    /// recomputation `min(5d, salt_cap)` is then idempotent, since 5e ≤ 5d always.
+    ///
+    /// ★★★ **IT IS NOT §164(b)(6)'s $10,000/$5,000-MFS CEILING**, and this doc used to say it was
+    /// (final whole-branch review, P3-2). Whenever 5d is under the statutory ceiling, `salt_cap` is
+    /// simply 5d — the filer's own SALT total. The false name leaked into a filer-facing refusal,
+    /// which told a filer with 5a = $4,000 and 5b = $3,000 that "§164(b)(6)'s cap" was **$7,000**.
+    /// The statute's cap is $10,000; $7,000 was their own line 5e.
     pub salt_cap: Usd,
     /// L8a — home-mortgage interest reported on Form 1098. ★ §2.7: **$0** when [`mortgage_mixed_use_box`]
     /// is set — a mixed-use mortgage's non-acquisition portion is non-deductible (§163(h)(3)(F)) and v1
@@ -414,9 +421,15 @@ pub struct ScheduleAParts {
 /// - **the §164(b)(5) general-sales-tax election** ⇒ `$0`. i8960, Line 9b: *"Sales taxes aren't
 ///   deductible in computing net investment income."* Line 5a is then sales tax, and 5e is a total
 ///   that includes it — so a bound built from 5e alone would launder sales tax into a §1411 deduction.
-/// - otherwise `min(line 5a, line 5e, the cap)`. 5a is the income-tax component; 5e is what survived
-///   the cap; the cap term is the statute's own ceiling (redundant while 5e ≤ cap, and transcribed
-///   anyway because it is the limit the statute imposes, not a consequence of another line).
+/// - otherwise `min(line 5a, line 5e, salt_cap)`. 5a is the income-tax component and 5e is what
+///   survived the §164(b)(6) limit, so the bound is the smaller of those two.
+///
+///   ★ **The third term is redundant BY CONSTRUCTION, not "while 5e ≤ cap"** (final whole-branch
+///   review, P3-2). `ScheduleAParts::salt_cap` is assigned `salt_5e` — it is the APPLIED limit, not
+///   §164(b)(6)'s $10,000/$5,000-MFS ceiling — so `.min(salt_cap)` is `.min(salt_5e)` and can never
+///   bind. It is kept because it is harmless and the printed chain reads the same field, but the doc
+///   that called it "the statute's own ceiling, transcribed anyway" was describing a term that is not
+///   there. The bound's VALUE was and is correct in every case; only this claim about it was wrong.
 ///
 /// ★ **Foreign income tax contributes nothing**, and not by omission: btctax's only foreign income
 /// tax (1099-INT box 6 / 1099-DIV box 7) is taken unconditionally as the §904(j) CREDIT, and
@@ -2478,11 +2491,26 @@ pub fn screen_absolute(
         && (cwa_claimed > Usd::ZERO || cwa_deferred_to_carryover > Usd::ZERO)
         && a_single_gift_reaches_the_cwa_threshold(ri, state, year)
     {
+        // ★★★ WHICH CLAIM THIS RETURN ACTUALLY MAKES (final whole-branch review, finding 2).
+        //
+        // "this return claims a charitable deduction" is FALSE on the §170(b)-ceiling-zeroed year the
+        // R3 fold added to this gate: lines 11 and 12 are $0 there and the whole claim is deferred.
+        // A refusal that opens with a statement the filer can see is untrue about their own return
+        // teaches them to distrust the rest of it — and the two arms below both depend on the filer
+        // believing the premise, because the `Some(false)` cure differs between the cases.
+        let what_is_claimed = if cwa_claimed > Usd::ZERO {
+            "this return claims a charitable deduction"
+        } else {
+            "this return's charitable gifts exceeded their §170(b) percentage-of-income ceiling, so \
+             none of the deduction is claimed THIS year — but §170(d)(1) carries it forward and you \
+             will deduct it in a later year"
+        };
         match ri.charitable_cwa_obtained {
             None => {
                 return refusal(
                     RefuseReason::CharitableCwaUnresolved,
-                    "this return claims a charitable deduction and at least one of your gifts was \
+                    &format!(
+                        "{what_is_claimed}, and at least one of your gifts was \
                      $250 or more, so Schedule A lines 11 and 12 send you to the instructions: \
                      \"You can deduct a gift of $250 or more only if you have a contemporaneous \
                      written acknowledgment from the charitable organization.\" §170(f)(8)(A) \
@@ -2491,15 +2519,32 @@ pub fn screen_absolute(
                      ★ YOU CAN STILL GET ONE — the acknowledgment counts as contemporaneous if \
                      you obtain it \"by the date you file your return or the due date (including \
                      extensions) for filing your return, whichever is earlier\", so ask the \
-                     charity now; don't attach it to the return, keep it for your records. Run \
-                     `btctax income answer`",
+                     charity now; don't attach it to the return, keep it for your records. \
+                     ★★ THE DEADLINE IS THIS RETURN EVEN FOR A CARRIED-FORWARD GIFT: §170(f)(8)(C) \
+                     runs from the return for the year of the CONTRIBUTION, not from the year you \
+                     finally deduct it, so filing this one without the acknowledgment extinguishes \
+                     the cure for every later year too. Run \
+                     `btctax income answer`"
+                    ),
                 );
             }
             Some(false) => {
+                // ★ The cure differs by case, and offering the wrong one is worse than offering
+                //   none: "remove that gift from the deduction" is meaningless to a filer whose
+                //   return deducts nothing this year.
+                let cure = if cwa_claimed > Usd::ZERO {
+                    "If a charity will not provide one, remove that gift from the deduction"
+                } else {
+                    "If a charity will not provide one, that gift is not deductible in any year — \
+                     §170(f)(8)(A) denies it outright — so it must not be carried forward either; \
+                     `--write-carryover` will refuse to persist it"
+                };
                 return refusal(
                     RefuseReason::CharitableCwaUnresolved,
-                    "you told btctax you do NOT hold a contemporaneous written acknowledgment for \
-                     every gift of $250 or more that this return deducts. §170(f)(8)(A): \"No \
+                    &format!(
+                        "you told btctax you do NOT hold a contemporaneous written acknowledgment for \
+                     every gift of $250 or more that this return deducts, now or in a later \
+                     carryover year. §170(f)(8)(A): \"No \
                      deduction shall be allowed … for any contribution of $250 or more unless the \
                      taxpayer substantiates the contribution by a contemporaneous written \
                      acknowledgment\" — so the deduction as computed is too large, and filing it \
@@ -2509,8 +2554,8 @@ pub fn screen_absolute(
                      for filing your return, whichever is earlier\". Ask each charity for one \
                      showing the amount of money and a description (but not the value) of any \
                      property, and whether it gave you goods or services in return. Then answer \
-                     yes and re-run. If a charity will not provide one, remove that gift from the \
-                     deduction",
+                     yes and re-run. {cure}"
+                    ),
                 );
             }
             Some(true) => {}
@@ -2534,7 +2579,11 @@ pub fn screen_absolute(
     if let Some(claimed_9b) = ri.form_8960_line9b {
         let bound = nii_line9b_bound(ar);
         if claimed_9b > bound {
-            let cap = ar.schedule_a.as_ref().map_or(Usd::ZERO, |a| a.salt_cap);
+            // ★★★ P3-2 — `salt_cap` IS line 5e, not §164(b)(6)'s ceiling, so it must not be labelled
+            //     as the statute's cap. A filer with 5a = $4,000 and 5b = $3,000 (5d = 5e = $7,000)
+            //     was told "§164(b)(6)'s $7,000 cap"; the statute's cap is $10,000 and $7,000 is
+            //     their own line 5e. The BOUND was right — only the name for it was wrong.
+            let salt_5e = ar.schedule_a.as_ref().map_or(Usd::ZERO, |a| a.salt_5e);
             let why = if !ar.deduction_is_itemized {
                 "this return takes the STANDARD deduction, so no state or local income tax was \
                  deducted on it at all and none of it is allocable"
@@ -2546,9 +2595,11 @@ pub fn screen_absolute(
                     .to_string()
             } else {
                 format!(
-                    "the most your return actually deducted in state and local INCOME tax, after \
-                     §164(b)(6)'s {} cap, is {}",
-                    crate::tax::advisories::fmt_usd(cap),
+                    "your Schedule A line 5e — the state and local taxes this return actually \
+                     deducted after applying §164(b)(6)'s $10,000 ($5,000 if married filing \
+                     separately) limit — is {}, and the state and local INCOME-tax portion of it, \
+                     which is all §1411 can allocate, is {}",
+                    crate::tax::advisories::fmt_usd(salt_5e),
                     crate::tax::advisories::fmt_usd(bound)
                 )
             };
@@ -7403,9 +7454,11 @@ mod tests {
                 ..Default::default()
             };
             let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+            let r = screen_absolute(&ri, &ar, &p, &st, 2024);
             (
                 ar.deduction_is_itemized,
-                screen_absolute(&ri, &ar, &p, &st, 2024).map(|r| r.reason),
+                r.as_ref().map(|r| r.reason.clone()),
+                r.map(|r| r.detail).unwrap_or_default(),
             )
         };
 
@@ -7425,7 +7478,8 @@ mod tests {
             }],
             ..Default::default()
         };
-        let (itemized, reason) = run(Some(loses_to_standard), dec!(200000), empty_ledger());
+        let (itemized, reason, _detail) =
+            run(Some(loses_to_standard), dec!(200000), empty_ledger());
         assert!(!itemized, "fixture 1 must take the standard deduction");
         assert_eq!(
             reason, None,
@@ -7449,7 +7503,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let (itemized, reason) = run(Some(small), dec!(200000), empty_ledger());
+        let (itemized, reason, _detail) = run(Some(small), dec!(200000), empty_ledger());
         assert!(itemized, "fixture 2 must itemize");
         assert_eq!(
             reason, None,
@@ -7477,7 +7531,7 @@ mod tests {
             mortgage_interest_1098: dec!(20000),
             ..Default::default()
         };
-        let (itemized, reason) = run(Some(zeroed), Usd::ZERO, donation_state(dec!(50000)));
+        let (itemized, reason, detail) = run(Some(zeroed), Usd::ZERO, donation_state(dec!(50000)));
         assert!(
             itemized,
             "fixture 3 must itemize on the mortgage interest alone"
@@ -7488,6 +7542,59 @@ mod tests {
             "★ a ceiling-zeroed year DEFERS the claim under §170(d) but the §170(f)(8)(C) deadline \
              still dies at this filing — ask now or the cure is gone. MUTATION: drop the \
              `cwa_deferred_to_carryover` disjunct in `screen_absolute` and this reds."
+        );
+        // ★★★ AND THE WORDS MATCH THE POPULATION (final whole-branch review, finding 2).
+        //
+        // The R3 fold widened the gate's FIRING CONDITION to deferred claims and left the text
+        // scoped to gifts "you are deducting this year". This filer's lines 11 and 12 are $0, so a
+        // refusal opening "this return claims a charitable deduction" states something they can see
+        // is untrue of their own return — and the same words in the QUESTION let them answer yes
+        // with perfect honesty while holding nothing, defeating the gate that had just stopped them.
+        assert!(
+            !detail.contains("this return claims a charitable deduction"),
+            "the refusal must not tell a ceiling-zeroed filer their return CLAIMS a deduction — \
+             lines 11 and 12 are $0. Got: {detail}"
+        );
+        assert!(
+            detail.contains("exceeded their §170(b)")
+                && detail.contains("carries it forward")
+                && detail.contains("you will deduct it in a later year"),
+            "…it must say what is actually true of them: the claim is DEFERRED, not absent. \
+             Got: {detail}"
+        );
+        assert!(
+            detail.contains("runs from the return for the year of the CONTRIBUTION"),
+            "…and name why the deadline is THIS return even though the deduction is later — that is \
+             the one fact a deferral filer has no way to guess. Got: {detail}"
+        );
+
+        // ── The `Some(false)` arm's CURE must differ too: "remove that gift from the deduction" is
+        //    meaningless to a filer whose return deducts nothing this year. ────────────────────────
+        let zeroed_no = crate::tax::return_inputs::ScheduleAInputs {
+            mortgage_interest_1098: dec!(20000),
+            ..Default::default()
+        };
+        let ri_no = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            donations_had_restrictions: Some(false),
+            charitable_cwa_obtained: Some(false),
+            schedule_a: Some(zeroed_no),
+            ..Default::default()
+        };
+        let st_no = donation_state(dec!(50000));
+        let ar_no = assemble_absolute(&ri_no, &st_no, &p, &table, 2024);
+        let d = screen_absolute(&ri_no, &ar_no, &p, &st_no, 2024)
+            .expect("answering NO on a deferred claim still refuses")
+            .detail;
+        assert!(
+            !d.contains("remove that gift from the deduction"),
+            "a filer deducting nothing this year has no deduction to remove — offering that cure is \
+             the defect, not a wording nit. Got: {d}"
+        );
+        assert!(
+            d.contains("not deductible in any year") && d.contains("must not be carried forward"),
+            "…the honest cure is that §170(f)(8)(A) denies the gift outright, so nothing carries. \
+             Got: {d}"
         );
     }
 
@@ -7707,15 +7814,18 @@ mod tests {
             crate::tax::advisories::advisories_for(ri, &empty_ledger(), &ar, &p, 2024)
                 .into_iter()
                 .find_map(|a| match a {
-                    Advisory::Form8960Line9bNotClaimed { bound } => Some(bound),
+                    Advisory::Form8960Line9bNotClaimed { bound, saving } => Some((bound, saving)),
                     _ => None,
                 })
         };
 
-        // (1) Blank 9b, NIIT owed, a real $10,000 pool ⇒ fires, naming the pool.
+        // (1) Blank 9b, NIIT owed, a real $10,000 pool ⇒ fires, naming the pool AND the saving.
+        //     This fixture is wages $200,000 + interest $60,000, so line 12 ($60,000) equals line 15
+        //     ($260,000 AGI − $200,000) and the whole $10,000 allocation moves line 16 dollar for
+        //     dollar: 3.8% × $10,000 = $380.
         assert_eq!(
             fires(&p8_return(dec!(30000), None, None)),
-            Some(dec!(10000))
+            Some((dec!(10000), dec!(380)))
         );
 
         // (2) The filer ANSWERED — nothing is forgone in silence, so nothing is said.
@@ -7733,11 +7843,65 @@ mod tests {
         no_niit.int_1099.clear();
         assert_eq!(fires(&no_niit), None);
 
-        // The text names the amount and the direction, and OFFERS the ratio without applying it.
-        let msg = Advisory::Form8960Line9bNotClaimed { bound: dec!(10000) }.message();
+        // ★★★ (5) LINE 15 BINDS ⇒ the allocation would change the tax by $0, so NOTHING IS SAID
+        //     (final whole-branch review, P3-3). Wages $150,000 + $100,000 of investment income:
+        //     AGI $250,000 ⇒ line 15 = $50,000, line 12 = $100,000, and line 16 = min(12, 15) takes
+        //     the line-15 leg. Allocating the whole $10,000 pool drops line 12 to $90,000 — still
+        //     above line 15 — so line 16 does not move and the tax does not change.
+        //
+        //     This is a COMMON btctax shape, not an edge: wages plus a big crypto gain. The advisory
+        //     used to tell this filer "your tax is currently OVERSTATED", which is false, and invite
+        //     a sworn §1411 allocation election worth nothing.
+        let mut binds = p8_return(dec!(30000), None, None);
+        binds.w2s = vec![w2(
+            Owner::Taxpayer,
+            dec!(150000),
+            dec!(150000),
+            dec!(150000),
+        )];
+        binds.int_1099 = vec![crate::tax::return_inputs::Form1099Int {
+            payer: "Bank".into(),
+            box1_interest: dec!(100000),
+            ..Default::default()
+        }];
+        {
+            // The premise, asserted: this fixture must really be in the line-15-binding region, or
+            // the row proves nothing. A fixture that merely lost its NIIT would also return `None`.
+            let ar = assemble_absolute(&binds, &empty_ledger(), &p, &table, 2024);
+            assert!(
+                ar.niit.tax > Usd::ZERO,
+                "row 5 must still OWE NIIT — otherwise it is row 4 again"
+            );
+            let l15 = ar.niit.magi - crate::tax::tables::niit_threshold(FilingStatus::Single);
+            assert!(
+                ar.niit.nii > l15,
+                "★ and line 12 ({}) must EXCEED line 15 ({l15}) — that is what makes line 15 the \
+                 binding leg of line 16's min",
+                ar.niit.nii
+            );
+            assert!(
+                crate::tax::return_1040::nii_line9b_bound(&ar) > Usd::ZERO,
+                "…while a real allocation pool still exists, so the OLD predicate would have fired"
+            );
+        }
+        assert_eq!(
+            fires(&binds),
+            None,
+            "★★ nothing is forgone, so nothing is said: line 16 is already the line-15 leg and no \
+             9b entry up to the bound changes the return by a cent"
+        );
+
+        // The text names the amount, the SAVING, and the direction, and OFFERS the ratio without
+        // applying it.
+        let msg = Advisory::Form8960Line9bNotClaimed {
+            bound: dec!(10000),
+            saving: dec!(380),
+        }
+        .message();
         for phrase in [
             "$10,000",
-            "OVERSTATED",
+            "$380",
+            "OVERSTATED by up to",
             "any reasonable method",
             "ratio of Form 8960 line 8",
         ] {

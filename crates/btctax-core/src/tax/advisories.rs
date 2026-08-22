@@ -210,7 +210,11 @@ pub enum Advisory {
     /// same number the `Nii9bExceedsDeductedSalt` refusal enforces, so the note and the gate can never
     /// name different figures. Fires only when `bound > 0`: a standard-deduction filer, or one who
     /// elected general sales taxes, forgoes nothing here and is never nagged.
-    Form8960Line9bNotClaimed { bound: Usd },
+    /// `bound` — the largest allocation §164(b)(6) leaves room for. `saving` — what claiming the
+    /// whole of it would actually take off the tax, computed through Form 8960 line 16's own `min`
+    /// (final whole-branch review, P3-3). The advisory is not emitted at all when `saving` is zero,
+    /// because line 15 then binds and no allocation moves the return.
+    Form8960Line9bNotClaimed { bound: Usd, saving: Usd },
     /// ★★★ **N1** — this year's capital loss was NOT absorbed by the §1211(b) allowance (in whole or
     /// in part), because taxable income was already at or below zero. The §1211/§1212 **Capital Loss
     /// Carryover Worksheet** therefore carries MORE loss into next year than the flat
@@ -509,17 +513,21 @@ impl Advisory {
             // ★ P8 — the pool is named, the METHOD is not applied. i8960's own example is offered as
             //   an example ("one reasonable method"), never as the answer, because "any reasonable
             //   method" is the filer's election and may differ from year to year.
-            Advisory::Form8960Line9bNotClaimed { bound } => format!(
+            Advisory::Form8960Line9bNotClaimed { bound, saving } => format!(
                 "FORM 8960 LINE 9B NOT CLAIMED — you owe net investment income tax (§1411), and \
                  Form 8960 line 9b, \"State, local, and foreign income tax\", is BLANK. The state \
-                 and local income tax your Schedule A actually deducted is up to {} after \
-                 §164(b)(6)'s cap, and the portion of it attributable to your investment income is \
-                 deductible against that income — so your tax is currently OVERSTATED. btctax will \
+                 and local income tax your Schedule A actually deducted, after §164(b)(6)'s limit, \
+                 is up to {}, and the portion of it attributable to your investment income is \
+                 deductible against that income — so your tax is currently OVERSTATED by up to {}. \
+                 (That is what allocating the WHOLE of it would save; a smaller allocation saves \
+                 less. Line 16 is the smaller of line 12 and line 15, so once line 12 falls to line \
+                 15 no further allocation changes anything.) btctax will \
                  not pick the split for you: the Instructions for Form 8960 say you may use \"any \
                  reasonable method\", and one they give themselves is that amount times the ratio of \
                  Form 8960 line 8 (gross investment income) to your AGI. Work out your own figure and \
                  enter it, or leave the line blank and claim nothing.",
-                fmt_usd(*bound)
+                fmt_usd(*bound),
+                fmt_usd(*saving)
             ),
             // ★ F3 (phase-1 seam review). This said the flat figure was "printed above", which is
             //   false on one surface and can be false on both. §G-19d prints this same advisory on
@@ -834,10 +842,33 @@ pub fn advisories_for(
     //   deduction (nothing was "properly deducted on your return") and the §164(b)(5) sales-tax
     //   election (i8960: "Sales taxes aren't deductible in computing net investment income"). Both
     //   are real branches of the same derivation the refusal uses, not exclusions bolted on here.
+    //
+    // ★★★ …AND GATED ON WHETHER IT WOULD ACTUALLY MOVE THE TAX (final whole-branch review, P3-3).
+    //
+    //     The text said "so your tax is currently OVERSTATED", unconditionally. That is FALSE
+    //     whenever LINE 15 BINDS. Form 8960 line 16 is `min(line 12, line 15)`, so when the
+    //     MAGI excess (line 15) is smaller than net investment income (line 12) — wages $150,000
+    //     plus $100,000 of crypto gains: excess $50,000 < NII $100,000, a COMMON btctax shape —
+    //     line 16 takes the line-15 leg and a 9b entry of any size up to the bound changes the tax
+    //     by exactly $0. The advisory told that filer they were overpaying when they were not, and
+    //     invited a sworn allocation election that buys them nothing.
+    //
+    //     So the benefit is COMPUTED from the form's own arithmetic rather than asserted:
+    //     `min(l12, l15) − min(max(l12 − bound, 0), l15)`, times the rate. Reducing line 12 first
+    //     eats the slack by which it exceeds line 15 and only then moves line 16 — which is the
+    //     mechanism, so it decides, and no filer shape has to be enumerated.
     if ri.form_8960_line9b.is_none() && ar.niit.tax > Usd::ZERO {
         let bound = crate::tax::return_1040::nii_line9b_bound(ar);
-        if bound > Usd::ZERO {
-            out.push(Advisory::Form8960Line9bNotClaimed { bound });
+        let l12 = ar.niit.nii;
+        let l15 =
+            (ar.niit.magi - crate::tax::tables::niit_threshold(ri.filing_status)).max(Usd::ZERO);
+        let l16_now = l12.min(l15);
+        let l16_after = (l12 - bound).max(Usd::ZERO).min(l15);
+        let saving = crate::conventions::round_cents(
+            crate::tax::tables::NIIT_RATE * (l16_now - l16_after).max(Usd::ZERO),
+        );
+        if bound > Usd::ZERO && saving > Usd::ZERO {
+            out.push(Advisory::Form8960Line9bNotClaimed { bound, saving });
         }
     }
 

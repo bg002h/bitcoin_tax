@@ -1200,7 +1200,17 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
     SkippableQuestion {
         id: SkippableId::CharitableCwaObtained,
         durability: Durability::PerYear,
-        prompt: "For EVERY charitable gift of $250 or more that you are deducting this year, do you \
+        // ★★★ THE WORDING COVERS THE DEFERRED CLAIM TOO (final whole-branch review, finding 2).
+        //
+        // This used to be scoped to gifts "you are deducting this year". Phase 2's R3 fold widened
+        // the GATE to §170(b)-ceiling-deferred claims but left these words alone — so a wholly
+        // deferred filer deducts nothing this year, reads the question literally, answers YES with
+        // perfect honesty while holding no acknowledgment, and the gate passes. The cure then dies at
+        // filing anyway. Mechanism and text were adjudicated in different rounds and nobody re-read
+        // the words after the population widened.
+        prompt: "For EVERY charitable gift of $250 or more that this return DEDUCTS — this year, or \
+                 in a later year because it exceeded its §170(b) percentage-of-income ceiling and is \
+                 carrying forward — do you \
                  already hold — or will you obtain before you file — a CONTEMPORANEOUS WRITTEN \
                  ACKNOWLEDGMENT from the charity showing (1) the amount of money and a description \
                  (but not the value) of any property donated, and (2) whether the organization gave \
@@ -1208,9 +1218,14 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
                  if it did? (Schedule A lines 11 and 12: \"If you made any gift of $250 or more, see \
                  instructions.\" In figuring whether a gift is $250 or more, don't combine separate \
                  donations — so answer YES if you made no single gift that large. Don't attach the \
-                 acknowledgment to your return; keep it for your records.)",
-        help: "Skipping is harmless if you claim no charitable deduction, or made no single gift of \
-               $250 or more. Where you DO claim one, it is MANDATORY: §170(f)(8)(A) says \"No \
+                 acknowledgment to your return; keep it for your records. \
+                 ★ ANSWER FOR THE CARRYOVER TOO: a gift held back by the ceiling is DEFERRED, not \
+                 denied, and §170(f)(8)(C)'s deadline still runs from THIS return — so \"I am \
+                 deducting nothing this year\" is not a reason to answer yes.)",
+        help: "Skipping is harmless if you claim no charitable deduction AND none of this year's \
+               gifts is carrying forward, or if you made no single gift of \
+               $250 or more. Where a deduction IS claimed — now or later — it is MANDATORY: \
+               §170(f)(8)(A) says \"No \
                deduction shall be allowed … for any contribution of $250 or more unless the taxpayer \
                substantiates the contribution by a contemporaneous written acknowledgment\" — a \
                precondition of the deduction itself, not a recordkeeping nicety. \
