@@ -359,6 +359,11 @@ pub struct ScheduleAParts {
     /// (`mortgage_all_used_to_buy_build_improve == Some(false)`) on a Schedule A that reports 1098 interest —
     /// see [`mixed_use_mortgage_forgone`], the single derivation this and [`mortgage_8a`] share.
     pub mortgage_mixed_use_box: bool,
+    /// **L9 — "Investment interest. Attach Form 4952 if required."** (§163(d)). Taken at the amount
+    /// the filer entered, which is sound ONLY because `RefuseReason::Form4952Required` stands in
+    /// front of it: it refuses when Form 4952 is being filed, and when the amount breaks i4952's
+    /// no-filing exception (the §163(d)(1) net-investment-income limit btctax does not compute).
+    pub investment_interest_9: Usd,
     /// L11 — current-year CASH charitable contributions allowed (§170(b)-limited).
     pub charitable_cash_11: Usd,
     /// L12 — current-year NONCASH contributions allowed, including crypto donations.
@@ -445,11 +450,17 @@ pub fn schedule_a_parts(
         salt_cap,
         mortgage_8a,
         mortgage_mixed_use_box,
+        investment_interest_9: a.investment_interest,
         charitable_cash_11: charitable.allowed_cash,
         charitable_noncash_12: charitable.allowed_noncash,
         charitable_carryover_13: charitable.allowed_carryover,
         charitable_14: charitable.allowed,
-        total_17: medical_allowed + salt_5e + mortgage_8a + charitable.allowed,
+        // L17 = 4 + 7 + 10 + 14, and line 10 is "add 8e and 9" — so line 9 belongs in the total.
+        total_17: medical_allowed
+            + salt_5e
+            + mortgage_8a
+            + a.investment_interest
+            + charitable.allowed,
     })
 }
 
@@ -1419,6 +1430,11 @@ pub struct PrintedInputs {
     /// Schedule SE **line 7** — the year's Social Security wage base (pre-printed on the form; line 9 is
     /// "subtract line 8d from line 7").
     pub ss_wage_base: Usd,
+    /// ★★★ Schedule D **line 20**'s second conjunct — *"and you are not filing Form 4952"* — as the
+    /// filer declared it, so the printed chain reads an ANSWER rather than a literal `true`.
+    /// `screen_inputs` refuses `None` and `Some(true)`, so a printed return always carries
+    /// `Some(false)` today; carrying it anyway is what makes the checkbox's provenance structural.
+    pub filing_form_4952: Option<bool>,
     /// Schedule D **line 21** — the §1211(b) capital-loss deduction CEILING ($3,000; $1,500 MFS). The
     /// printed line 21 caps the PRINTED line 16 against this, rather than re-rounding the exact
     /// deduction, so the filed Schedule D's own arithmetic holds.
@@ -1957,6 +1973,8 @@ pub fn assemble_absolute(
         amount_owed,
         // The printed chains read THESE — the same values the computed 8959/8960/8995 above were fed.
         printed_inputs: PrintedInputs {
+            // ★ Schedule D line 20's Form 4952 conjunct, carried from the FILER's answer.
+            filing_form_4952: ri.filing_form_4952,
             medicare_wages: w2_medicare_wages,
             medicare_withheld: w2_medicare_withheld,
             crypto_lending_interest: crypto.nonbusiness_lending_interest,

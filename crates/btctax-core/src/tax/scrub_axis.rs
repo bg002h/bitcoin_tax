@@ -302,6 +302,7 @@ pub fn maximal_sentinel() -> ReturnInputs {
             mortgage_all_used_to_buy_build_improve: Some(true),
             mortgage_within_debt_limit: Some(true),
             mortgage_dwelling_is_amt_qualified: Some(true),
+            investment_interest: dec!(9),
             charitable: vec![
                 CharitableGift {
                     class: CharitableClass::Cash60,
@@ -361,6 +362,7 @@ pub fn maximal_sentinel() -> ReturnInputs {
         fbar_filing_required: Some(true),
         donations_had_restrictions: Some(false),
         charitable_cwa_obtained: Some(true),
+        filing_form_4952: Some(false),
         dual_status_alien: Some(false),
         has_income_exclusion: Some(false),
         other_out_of_scope_income: Some(false),

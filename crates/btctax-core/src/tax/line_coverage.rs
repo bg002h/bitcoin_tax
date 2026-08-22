@@ -1066,6 +1066,7 @@ pub fn cover_schedulealines(l: &crate::tax::printed::ScheduleALines) -> Coverage
         line7,
         line8a,
         line8e,
+        line9,
         line10,
         line11,
         line12,
@@ -1166,6 +1167,14 @@ pub fn cover_schedulealines(l: &crate::tax::printed::ScheduleALines) -> Coverage
         "Add lines 8a through 8c",
     );
     c.line(
+        *line9,
+        f,
+        "9",
+        "line9",
+        Production::Collected,
+        "Investment interest. Attach Form 4952 if required. See instructions",
+    );
+    c.line(
         *line10,
         f,
         "10",
@@ -1233,6 +1242,7 @@ fn zero_schedulealines() -> crate::tax::printed::ScheduleALines {
         line7: Usd::ZERO,
         line8a: Usd::ZERO,
         line8e: Usd::ZERO,
+        line9: Usd::ZERO,
         line10: Usd::ZERO,
         line11: Usd::ZERO,
         line12: Usd::ZERO,
@@ -2073,7 +2083,7 @@ fn zero_scheduledlines() -> crate::tax::printed::ScheduleDLines {
         line14: Usd::ZERO,
         line15: Usd::ZERO,
         line16: Usd::ZERO,
-        routing: crate::tax::printed::ScheduleDRouting::BothGains,
+        routing: crate::tax::printed::ScheduleDRouting::BothGains { line20_yes: true },
     }
 }
 
@@ -2115,7 +2125,9 @@ pub fn cover_scheduledrouting(r: &crate::tax::printed::ScheduleDRouting) -> Cove
     use crate::tax::printed::ScheduleDRouting as R;
     let mut c = Coverage::default();
     match r {
-        R::BothGains => {}
+        // ★ `line20_yes` is a CHECKBOX, not money — the census covers money leaves. It is bound
+        //   rather than `..`-ignored so the next field added to this variant is a compile error here.
+        R::BothGains { line20_yes: _ } => {}
         R::ShortGainLongLoss { line22_yes: _ } => {}
         R::NetLoss {
             line21,

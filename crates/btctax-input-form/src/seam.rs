@@ -92,6 +92,8 @@ pub enum FieldId {
     SaMortgageAllUsed,
     /// §163(h)(3)(B) — the acquisition-debt-ceiling declaration (`FORM_QUESTIONS` index 13).
     SaMortgageWithinDebtLimit,
+    /// Schedule A line 9 — investment interest (§163(d)).
+    SaInvestmentInterest,
     // Schedule A charitable (per row)
     CharClass,
     CharAmount,
@@ -112,6 +114,8 @@ pub enum FieldId {
     DeclHasIncomeExclusion,
     /// §G-22/B11 — the scope attestation: income this tool never asked about.
     DeclOtherOutOfScopeIncome,
+    /// Schedule D line 20 / Schedule A line 9 — is the filer filing Form 4952? (`FORM_QUESTIONS` 14.)
+    DeclFilingForm4952,
     /// §G-28/B1b — Form 8995-A Part I column (b): is the business a specified service trade or business?
     ScheduleCIsSstb,
     /// §G-28/B1b — Form 8995-A Part I column (e): is the filer a patron of an agricultural or

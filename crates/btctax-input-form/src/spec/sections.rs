@@ -828,6 +828,14 @@ const SCHEDULE_A_FIELDS: &[Field] = &[
         "Sch A line 8a — mortgage interest reported on Form 1098.",
         mortgage_interest_1098
     ),
+    scha_money!(
+        FieldId::SaInvestmentInterest,
+        "Investment interest (§163(d))",
+        "Sch A line 9 — \"Investment interest. Attach Form 4952 if required.\" Interest on money you \
+         borrowed that is allocable to property held for investment. btctax fills no Form 4952, so \
+         this is deductible in full only under i4952's own exception; above it the return refuses.",
+        investment_interest
+    ),
     // ★ Registry-driven — DELEGATES to `SKIPPABLE_QUESTIONS::SalesTaxElection` (index 2). live = schedule_a.is_some().
     skippable_tristate!(2, FieldId::SaSaltUseSalesTax, |ri| {
         if let Some(a) = ri.schedule_a.as_mut() {

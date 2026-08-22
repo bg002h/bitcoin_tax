@@ -570,6 +570,21 @@ pub struct ScheduleAInputs {
     /// line-3 add-back, and computing without it would UNDERSTATE the tax.
     #[serde(default)]
     pub mortgage_dwelling_is_amt_qualified: Option<bool>,
+    /// **Schedule A line 9 — "Investment interest. Attach Form 4952 if required. See instructions"**
+    /// (§163(d)). The interest paid on money borrowed that is allocable to property held for
+    /// investment.
+    ///
+    /// ★ It was NEVER COLLECTED, and the census recorded that honestly (`f1040sa.map.toml`, line 9,
+    /// `rule = "unmodeled"`). The direction is safe — a forgone deduction only OVERSTATES tax — but a
+    /// filer paying six figures of margin interest against a bitcoin position got no signal at all,
+    /// and §163(d)(4)(B)(iii)'s election to treat net long-term capital gain as investment income is
+    /// aimed at exactly that household.
+    ///
+    /// ★★ btctax builds **no Form 4952**, so this is only deductible in full under i4952's own
+    /// exception — see [`ReturnInputs::filing_form_4952`], which carries the declaration and the
+    /// bound. Anything else refuses.
+    #[serde(default)]
+    pub investment_interest: Usd,
     #[serde(default)]
     pub charitable: Vec<CharitableGift>, // non-crypto; crypto flows from the ledger
 }
@@ -830,6 +845,32 @@ pub struct ReturnInputs {
     /// never asked — silence there forgoes nothing and asserts nothing.
     #[serde(default)]
     pub charitable_cwa_obtained: Option<bool>,
+    /// ★★★ **Schedule D line 20 / Schedule A line 9 — ARE YOU FILING FORM 4952?**
+    ///
+    /// Schedule D line 20 asks, verbatim: *"Are lines 18 and 19 both zero or blank **and you are not
+    /// filing Form 4952**? **Yes.** Complete the Qualified Dividends and Capital Gain Tax Worksheet
+    /// … **No.** Complete the Schedule D Tax Worksheet."*
+    ///
+    /// ★★★ btctax used to check **Yes** UNCONDITIONALLY on the both-gains branch. The lines-18/19 half
+    /// was sound — btctax refuses every return that could carry a §1250, §1202 or 28%-rate amount, and
+    /// the form itself says *"both zero **or blank**"* — but the Form 4952 conjunct had **no source at
+    /// all**: nothing on the return recorded it, and no question ever asked it. That is sworn
+    /// testimony under §6065 that btctax invented, and it is the answered-ness invariant in its purest
+    /// form. It reaches EVERY return whose Schedule D routes both-gains, including a $0-income
+    /// household — not a rich-band item.
+    ///
+    /// ★ The tax was almost always right (a filer with no margin borrowing is indeed not filing Form
+    /// 4952) — which is precisely why a value test could never find it. And when it is wrong it is
+    /// wrong in the UNDERSTATING direction: the Schedule D Tax Worksheet the "No" branch leads to
+    /// subtracts Form 4952 line 4g at its line 4.
+    ///
+    /// A class-(A) DECLARATION, `neutral: false` ("no, I am not filing one" is the answer that needs
+    /// no form btctax lacks). `None` ⇒ refuse; `Some(true)` ⇒ refuse (btctax fills neither Form 4952
+    /// nor the Schedule D Tax Worksheet); `Some(false)` ⇒ line 20 is checked **Yes** *because the
+    /// filer said so*, and [`ScheduleAInputs::investment_interest`] may be deducted in full on line 9
+    /// under i4952's exception — bounded by that exception's own first condition.
+    #[serde(default)]
+    pub filing_form_4952: Option<bool>,
     #[serde(default)]
     pub dual_status_alien: Option<bool>,
 
@@ -1005,6 +1046,8 @@ impl Default for ReturnInputs {
             // §170(f)(8) — `None` = never asked. On a return that claims a §170 deduction with a
             // ≥$250 gift that REFUSES (`screen_absolute`), and a default may not answer it.
             charitable_cwa_obtained: None,
+            // Schedule D line 20 / Schedule A line 9 — `None` = never asked, and that REFUSES.
+            filing_form_4952: None,
             dual_status_alien: None,
         }
     }

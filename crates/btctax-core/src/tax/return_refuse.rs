@@ -108,6 +108,16 @@ pub enum RefuseReason {
     ///
     /// [`ScheduleAInputs::mortgage_within_debt_limit`]: crate::tax::return_inputs::ScheduleAInputs::mortgage_within_debt_limit
     MortgageOverDebtLimit,
+    /// **Schedule D line 20 / Schedule A line 9** — the Form 4952 declaration is unanswered. Line 20
+    /// asserts *"you are not filing Form 4952"* on every both-gains return, and nothing on the return
+    /// recorded it: btctax was signing that clause for the filer under §6065.
+    Form4952DeclarationUnanswered,
+    /// **Schedule D line 20 / Schedule A line 9** — the filer IS filing Form 4952 (or their line-9
+    /// amount exceeds i4952's no-Form-4952 exception, which requires one). Line 20 is then **No**,
+    /// which routes to the **Schedule D Tax Worksheet** — and btctax fills neither that worksheet nor
+    /// Form 4952. The SDTW subtracts Form 4952 line 4g at its line 4, so answering Yes anyway
+    /// UNDERSTATES the tax.
+    Form4952Required,
     /// Form 6251 line 3 — the AMT qualified-dwelling question is live but unanswered.
     AmtQualifiedDwellingUnanswered,
     /// **§164(b)(7)(B)(iv) / Schedule 1-A Part I** — the §911/931/933 exclusion gate is unanswered on
@@ -346,6 +356,7 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         foreign_country_names: _,
         donations_had_restrictions: _, // Option<bool>, not an amount
         charitable_cwa_obtained: _,    // Option<bool>, not an amount
+        filing_form_4952: _,           // a declaration, not an amount
         dual_status_alien: _,
         // MAGI add-backs — refused at the worksheet's point of need, not here (D-11).
         has_income_exclusion: _, // refused at the worksheet's point of need (D-11), not here
@@ -578,6 +589,7 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             mortgage_all_used_to_buy_build_improve: _,
             mortgage_within_debt_limit: _, // a declaration, not money
             mortgage_dwelling_is_amt_qualified: _, // a declaration, not money
+            investment_interest,
             charitable,
         } = a;
         if neg(*medical) {
@@ -600,6 +612,9 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         }
         if neg(*mortgage_interest_1098) {
             return Some("Schedule A mortgage interest");
+        }
+        if neg(*investment_interest) {
+            return Some("Schedule A investment interest");
         }
         for gift in charitable {
             let CharitableGift { class: _, amount } = gift;
@@ -755,6 +770,58 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
     //   an exit-less brick on a return whose add-back is structurally $0 — the filer cannot clear an
     //   answer to a question that is no longer asked. (i6251 line 3 is itself conditioned on having
     //   **deducted** the interest, so the gate is faithful to the form, not just kind.)
+    // ★★★ SCHEDULE D LINE 20 / SCHEDULE A LINE 9 — the Form 4952 answer, and its BOUND.
+    //
+    // Two ways to land here, one refusal:
+    //
+    //   (a) the filer says they ARE filing Form 4952. Line 20 is then "No", which routes to the
+    //       SCHEDULE D TAX WORKSHEET — and btctax fills neither that worksheet nor Form 4952.
+    //       Checking "Yes" anyway would understate: the SDTW subtracts Form 4952 line 4g at line 4.
+    //
+    //   (b) the filer says they are NOT, but their Schedule A line 9 amount BREAKS i4952's own
+    //       exception — *"You don't have to file Form 4952 if … your investment interest expense is
+    //       not more than your investment income from interest and ordinary dividends minus any
+    //       qualified dividends"*. Above that, Form 4952 IS required whatever the filer answered, and
+    //       §163(d)(1) caps the deduction at net investment income, which btctax does not compute. A
+    //       BOUND on a collected value, not a computation — deducting the excess would UNDERSTATE.
+    //
+    // ★ Only the FIRST of i4952's three exception conditions is checkable here: the other two ("no
+    //   other deductible investment expenses", "no disallowed investment interest carried over") are
+    //   facts btctax never sees, which is why the PROMPT enumerates all three and defaults to Yes.
+    //   This bound catches the one a wrong answer would leave visible in the numbers.
+    if ri.filing_form_4952 == Some(true) {
+        return refuse(
+            RefuseReason::Form4952Required,
+            "you are filing Form 4952 (Investment Interest Expense Deduction), so Schedule D line 20 \
+             — \"Are lines 18 and 19 both zero or blank and you are not filing Form 4952?\" — is \
+             answered NO, which sends your tax to the SCHEDULE D TAX WORKSHEET. btctax fills neither \
+             Form 4952 nor that worksheet, and the worksheet is not a formatting difference: its \
+             line 4 subtracts Form 4952 line 4g, so computing the return on the Qualified Dividends \
+             and Capital Gain Tax Worksheet instead would UNDERSTATE your tax. File this year by \
+             hand, or remove the investment interest if you are not in fact claiming it",
+        );
+    }
+    if ri.filing_form_4952 == Some(false) {
+        let investment_interest = ri
+            .schedule_a
+            .as_ref()
+            .map_or(Usd::ZERO, |a| a.investment_interest);
+        if investment_interest > Usd::ZERO {
+            // i4952's first exception condition: investment income from INTEREST and ORDINARY
+            // dividends, minus any QUALIFIED dividends. Transcribed, not approximated.
+            let interest: Usd = ri.int_1099.iter().map(|i| i.box1_interest).sum();
+            let ordinary_dividends: Usd = ri.div_1099.iter().map(|d| d.box1a_ordinary).sum();
+            let qualified_dividends: Usd = ri.div_1099.iter().map(|d| d.box1b_qualified).sum();
+            let ceiling = (interest + ordinary_dividends - qualified_dividends).max(Usd::ZERO);
+            if investment_interest > ceiling {
+                return refuse(
+                    RefuseReason::Form4952Required,
+                    "you answered that you are NOT filing Form 4952, but your Schedule A line 9                      investment interest is MORE than your investment income from interest and                      ordinary dividends minus qualified dividends — and that is the first of the                      three conditions of Form 4952's own no-filing exception. Above it, Form 4952 IS                      required: §163(d)(1) limits the deduction to your net investment income, a                      figure only that form computes, and btctax does not fill it. Deducting the whole                      amount on line 9 would UNDERSTATE your tax. File Form 4952 (and this return) by                      hand, or correct the line-9 amount",
+                );
+            }
+        }
+    }
+
     // ★★★ §163(h)(3)(B) — the ACQUISITION-DEBT CEILING, answered adversely. Same shape as the three
     //     Form 6251 declarations below: gated on the registry liveness so a stale `Some(false)` on a
     //     Schedule A that no longer reports 1098 interest is not an exit-less brick.
@@ -1208,6 +1275,10 @@ mod tests {
         // §G-22/B11 — the scope attestation. ANSWERED here, never defaulted: `None` refuses, which is
         // the whole point, and a `Default` that supplied it would restore the silence it exists to break.
         ri.other_out_of_scope_income = Some(false);
+        // Schedule D line 20 / Schedule A line 9 — the Form 4952 declaration. Always live (line 20
+        // prints on every both-gains Schedule D, which liveness cannot see), so every computing
+        // fixture must state it; `false` = "not filing one", the answer that needs no form v1 lacks.
+        ri.filing_form_4952 = Some(false);
         // §G-28/B1b — answered whenever the fixture has a trade or business, since the SSTB question
         // is live exactly then. Set through the same path a filer would use.
         if let Some(c) = ri.schedule_c.as_mut() {
@@ -1263,6 +1334,7 @@ mod tests {
         r.foreign_trust = Some(false);
         r.sch1.hsa_activity = Some(false);
         r.dual_status_alien = Some(false);
+        r.filing_form_4952 = Some(false);
         r
     }
 
@@ -1889,6 +1961,7 @@ mod tests {
             r.dual_status_alien = Some(false);
             r.has_income_exclusion = Some(false);
             r.other_out_of_scope_income = Some(false); // §G-22/B11
+            r.filing_form_4952 = Some(false); // Schedule D line 20 / Schedule A line 9
             r.header.taxpayer_died_during_year = Some(false); // §G-9
             r
         };
@@ -2373,6 +2446,121 @@ mod tests {
             reason(&r),
             Some(RefuseReason::AmtQualifiedDwellingUnanswered),
             "the question is not live, so its unanswered refusal must not fire"
+        );
+    }
+
+    /// ★★★ **P7 / SCHEDULE D LINE 20 — THE TERNARY.** unanswered ⇒ refuse, "yes, filing 4952" ⇒
+    /// refuse, "no" ⇒ compute.
+    ///
+    /// The line reads *"Are lines 18 and 19 both zero or blank **and you are not filing Form 4952**?"*
+    /// btctax checked **Yes** unconditionally on every both-gains return — the lines-18/19 half it
+    /// could vouch for, the Form 4952 half it could not, because nothing on the return recorded it and
+    /// no question ever asked. That is testimony invented by software on a return signed under §6065.
+    ///
+    /// ★ It is a PROVENANCE defect, not usually a numeric one, which is why no value test could ever
+    /// have found it: a filer with no margin borrowing genuinely is not filing Form 4952. When it IS
+    /// wrong it is wrong in the understating direction — the Schedule D Tax Worksheet the "No" branch
+    /// leads to subtracts Form 4952 line 4g at its line 4.
+    ///
+    /// **B1 mutations, each observed RED before the fix landed:**
+    /// - delete the `FilingForm4952` entry's liveness (`live: |_| false`) ⇒ the `None` row reds;
+    /// - delete the `Some(true)` value-refusal ⇒ the filing-4952 row reds, i.e. btctax computes a
+    ///   return on the wrong worksheet.
+    #[test]
+    fn the_form_4952_declaration_refuses_unanswered_and_refuses_yes_but_computes_on_no() {
+        let f = |ans: Option<bool>| {
+            let mut r = ri();
+            r.filing_form_4952 = ans;
+            reason(&r)
+        };
+        assert_eq!(
+            f(None),
+            Some(RefuseReason::Form4952DeclarationUnanswered),
+            "unanswered ⇒ refuse: Schedule D line 20 would otherwise swear to a fact nobody asked"
+        );
+        assert_eq!(
+            f(Some(true)),
+            Some(RefuseReason::Form4952Required),
+            "filing Form 4952 ⇒ line 20 is NO ⇒ the Schedule D Tax Worksheet, which btctax does not \
+             fill; computing on the QDCGT worksheet instead would UNDERSTATE"
+        );
+        assert_eq!(f(Some(false)), None, "not filing one ⇒ compute");
+    }
+
+    /// ★★★ **P7 — THE SCHEDULE A LINE 9 BOUND.** btctax now collects §163(d) investment interest and
+    /// prints it on line 9, and it fills no Form 4952 — so the amount is deductible in full ONLY
+    /// under i4952's own exception: *"You don't have to file Form 4952 if … your investment interest
+    /// expense is not more than your investment income from interest and ordinary dividends minus any
+    /// qualified dividends."*
+    ///
+    /// Above that ceiling Form 4952 IS required whatever the filer answered, because §163(d)(1) caps
+    /// the deduction at net investment income — a figure only that form computes. Deducting the whole
+    /// amount would UNDERSTATE. This is a BOUND on a collected value, not a computation: btctax still
+    /// builds no Form 4952.
+    ///
+    /// **B1 mutations, each observed RED:**
+    /// - delete the bound ⇒ the over-ceiling row reds with `None` (the excess is silently deducted);
+    /// - subtract qualified dividends TWICE, or omit the subtraction ⇒ the boundary row reds.
+    #[test]
+    fn investment_interest_above_the_i4952_exception_ceiling_refuses() {
+        use crate::tax::return_inputs::{Form1099Div, Form1099Int, ScheduleAInputs};
+        // Investment income for the exception: $10,000 interest + $4,000 ordinary dividends − $1,000
+        // qualified dividends = a $13,000 ceiling.
+        let with_interest = |amount: Usd| {
+            let mut r = ri();
+            r.filing_form_4952 = Some(false);
+            r.int_1099 = vec![Form1099Int {
+                payer: "Bank".into(),
+                box1_interest: dec!(10000),
+                ..Default::default()
+            }];
+            r.div_1099 = vec![Form1099Div {
+                payer: "Broker".into(),
+                box1a_ordinary: dec!(4000),
+                box1b_qualified: dec!(1000),
+                ..Default::default()
+            }];
+            r.schedule_a = Some(ScheduleAInputs {
+                mortgage_interest_1098: Usd::ZERO,
+                investment_interest: amount,
+                ..Default::default()
+            });
+            reason(&r)
+        };
+        assert_eq!(
+            with_interest(dec!(13000)),
+            None,
+            "exactly at the ceiling, i4952's exception still applies — no Form 4952 required"
+        );
+        assert_eq!(
+            with_interest(dec!(13000.01)),
+            Some(RefuseReason::Form4952Required),
+            "a cent over and Form 4952 IS required: §163(d)(1) caps the deduction at net investment \
+             income, which only that form computes"
+        );
+        // ★ And the ceiling really does SUBTRACT qualified dividends — raise them and the same
+        //   $13,000 now breaks the exception. Without the subtraction this row passes.
+        let mut r = ri();
+        r.filing_form_4952 = Some(false);
+        r.int_1099 = vec![Form1099Int {
+            payer: "Bank".into(),
+            box1_interest: dec!(10000),
+            ..Default::default()
+        }];
+        r.div_1099 = vec![Form1099Div {
+            payer: "Broker".into(),
+            box1a_ordinary: dec!(4000),
+            box1b_qualified: dec!(4000), // ALL of the ordinary dividends are qualified
+            ..Default::default()
+        }];
+        r.schedule_a = Some(ScheduleAInputs {
+            investment_interest: dec!(11000), // > $10,000 ceiling once qualified are removed
+            ..Default::default()
+        });
+        assert_eq!(
+            reason(&r),
+            Some(RefuseReason::Form4952Required),
+            "the exception's ceiling is interest + ORDINARY dividends MINUS qualified dividends"
         );
     }
 

@@ -625,6 +625,9 @@ fn sch_a_lines() -> ScheduleALines {
         line5a_is_sales_tax: false,
         line18_elects_smaller: false,
         line8_mixed_use_box: false,
+        // ★ Schedule A line 9 (§163(d) investment interest) — a real, non-zero value so the new cell
+        //   is EXERCISED by the geometric verifier rather than merely present at $0.
+        line9: dec!(3000),
         line1: dec!(10000),
         line2: dec!(100000),
         line3: dec!(7500),
@@ -694,10 +697,19 @@ fn schedule_a_fills_the_printed_chain_and_reads_back() {
         None,
         "L8d is reserved/ReadOnly"
     );
-    // Unmodeled lines stay BLANK: 6 (other taxes), 8b/8c, 9 (investment interest), 15, 16.
-    for blank in [
-        "f1_14[0]", "f1_19[0]", "f1_20[0]", "f1_23[0]", "f1_29[0]", "f1_33[0]",
-    ] {
+    // ★ LINE 9 (f1_23) IS NOW MAPPED, and this is where its absence used to be asserted. §163(d)
+    //   investment interest is collected on `ScheduleAInputs::investment_interest` and printed here;
+    //   moving it out of the blank list and into a positive read-back is the whole P7 half of the
+    //   change, and leaving it below would have been a test asserting the defect.
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_23[0]").as_deref(),
+        Some("3000"),
+        "L9 (investment interest) must print the collected amount"
+    );
+    // (The line-10 = 8e + 9 DERIVATION is pinned in `printed.rs`, where `schedule_a_lines` computes
+    //  it; this fixture is a hand-built `ScheduleALines` literal, so it would only re-assert itself.)
+    // Unmodeled lines stay BLANK: 6 (other taxes), 8b/8c, 15, 16.
+    for blank in ["f1_14[0]", "f1_19[0]", "f1_20[0]", "f1_29[0]", "f1_33[0]"] {
         let fqn = format!("topmostSubform[0].Page1[0].{blank}");
         assert_eq!(g(&fqn), None, "{fqn} (unmodeled) must be blank");
     }
@@ -1173,7 +1185,7 @@ fn schedule_d_lines_1a_and_8a_write_through_the_geometric_verifier() {
         dec!(2000),
         dec!(500),
         dec!(3000),
-        ScheduleDRouting::BothGains,
+        ScheduleDRouting::BothGains { line20_yes: true },
     );
     // Deliberately DISTINCT figures per cell, so a transposition cannot hide behind equal values.
     lines.line1a_d = dec!(1050000);
@@ -1247,7 +1259,7 @@ fn schedule_d_lines_1a_and_8a_are_blank_without_a_1099b() {
         dec!(2000),
         dec!(500),
         dec!(3000),
-        ScheduleDRouting::BothGains,
+        ScheduleDRouting::BothGains { line20_yes: true },
     );
     let pdf = btctax_forms::fill_schedule_d_full(&lines, &kitchen_sink_header(), 2024).unwrap();
     for (fqn, what) in [
@@ -1303,7 +1315,7 @@ fn schedule_d_full_fills_the_lines_the_crypto_slice_omits() {
         dec!(2000), // line 6 — ST carryover
         dec!(500),  // line 14 — LT carryover
         dec!(3000), // line 13 — capital gain distributions
-        ScheduleDRouting::BothGains,
+        ScheduleDRouting::BothGains { line20_yes: true },
     );
     let pdf = btctax_forms::fill_schedule_d_full(&lines, &kitchen_sink_header(), 2024).unwrap();
     let g = |fqn: &str| tv(&pdf, fqn);
@@ -1346,7 +1358,7 @@ fn schedule_d_full_routing_both_gains() {
             Usd::ZERO,
             Usd::ZERO,
             Usd::ZERO,
-            ScheduleDRouting::BothGains,
+            ScheduleDRouting::BothGains { line20_yes: true },
         ),
         &kitchen_sink_header(),
         2024,
@@ -1562,7 +1574,7 @@ fn schedule_d_full_refuses_a_negative_in_a_parenthesized_cell() {
         dec!(2000),
         dec!(500),
         dec!(3000),
-        ScheduleDRouting::BothGains,
+        ScheduleDRouting::BothGains { line20_yes: true },
     );
     lines.line14 = dec!(-500);
     let err = fill_schedule_d_full_with_map(
@@ -2641,7 +2653,7 @@ fn schedule_d_line3_cell_text_equals_the_8949s_printed_column_total() {
         Usd::ZERO,
         Usd::ZERO,
         Usd::ZERO,
-        ScheduleDRouting::BothGains,
+        ScheduleDRouting::BothGains { line20_yes: true },
     );
     ar_sd.line3_d = printed.st_totals.proceeds_d;
     ar_sd.line3_e = printed.st_totals.cost_e;
@@ -3185,7 +3197,7 @@ fn the_full_return_schedule_d_answers_the_qof_question() {
         Usd::ZERO,
         Usd::ZERO,
         Usd::ZERO,
-        ScheduleDRouting::BothGains,
+        ScheduleDRouting::BothGains { line20_yes: true },
     );
     let pdf = btctax_forms::fill_schedule_d_full(&lines, &kitchen_sink_header(), 2024).unwrap();
 
@@ -3374,4 +3386,55 @@ fn the_1040_line7_not_required_box_is_never_checked() {
          is required — `must_file()` speaks only for its own model, which has no input for Schedule D \
          lines 4/5/11/12. Checking it is testimony the filer never gave."
     );
+}
+
+/// ★★★ **P7 — SCHEDULE D LINE 20 IS THE FILER'S ANSWER, NOT A LITERAL.**
+///
+/// The line reads *"Are lines 18 and 19 both zero or blank **and you are not filing Form 4952**?"*
+/// and `schedule_d_full.rs` checked **Yes** with a hardcoded `true`. The lines-18/19 half was sound
+/// (every amount that could sit there refuses upstream, and the form itself says *"both zero **or
+/// blank**"*); the Form 4952 half had NO SOURCE — no field carried it and no question asked it. A
+/// filed Schedule D therefore swore, under §6065, to a fact the filer had never been asked.
+///
+/// This drives the real fill twice and reads the two checkbox widgets back out of the PDF. It is the
+/// only place the emitted BOX is observed, and it is deliberately BOTH directions: a test that only
+/// pinned "Yes" would pass just as well against the literal it replaced.
+///
+/// **B1 mutation, observed RED before the fix landed:** restore `check(need(&map.line20, ..), true,
+/// ..)` — i.e. put the literal back — and the `line20_yes: false` leg reds, because the "No" box
+/// stays blank and the "Yes" box is checked on a return whose filer said they ARE filing Form 4952.
+#[test]
+fn schedule_d_line20_prints_the_filers_form_4952_answer_in_both_directions() {
+    const YES: &str = "topmostSubform[0].Page2[0].c2_2[0]";
+    const NO: &str = "topmostSubform[0].Page2[0].c2_2[1]";
+
+    for (line20_yes, want_yes, want_no) in [(true, true, false), (false, false, true)] {
+        let lines = sd(
+            dec!(20000),
+            dec!(30000),
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            ScheduleDRouting::BothGains { line20_yes },
+        );
+        let pdf = btctax_forms::fill_schedule_d_full(&lines, &kitchen_sink_header(), 2024)
+            .expect("a both-gains Schedule D fills");
+        let checked = |fqn: &str| box_on(&pdf, fqn);
+        assert_eq!(
+            checked(YES),
+            want_yes,
+            "line20_yes={line20_yes}: the YES box must be checked exactly when the filer is NOT \
+             filing Form 4952"
+        );
+        assert_eq!(
+            checked(NO),
+            want_no,
+            "line20_yes={line20_yes}: the NO box must be checked exactly when they ARE"
+        );
+        // …and the two are never both set, which is what a checkbox PAIR means on a filed form.
+        assert!(
+            checked(YES) != checked(NO),
+            "line20_yes={line20_yes}: exactly one of the line-20 boxes may be checked"
+        );
+    }
 }

@@ -257,6 +257,11 @@ pub fn kitchen_sink_household() -> (ReturnInputs, LedgerState) {
         // the ordinary case. ★ NOT covered by `answer_all_live_declarations`, which walks the
         // DECLARATION registry — this is a class-(B) skippable, mandatory only in `screen_absolute`.
         charitable_cwa_obtained: Some(true),
+        // Schedule D line 20 / Schedule A line 9 — not filing Form 4952, so line 20 is "Yes" and the
+        // tax routes to the Qualified Dividends and Capital Gain Tax Worksheet. `answered()` DOES
+        // cover this one (it is a class-(A) declaration), but it is stated explicitly because the
+        // kitchen sink is the oracle fixture: its answers must be visible, not inferred.
+        filing_form_4952: Some(false),
         // §G-22/B11 — the scope attestation. ANSWERED, never defaulted: `None` refuses, and a fixture
         // that let it default would be re-asserting the silence the question exists to break.
         other_out_of_scope_income: Some(false),

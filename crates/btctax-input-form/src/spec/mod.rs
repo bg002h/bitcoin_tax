@@ -118,8 +118,8 @@ mod tests {
             );
         }
         assert_eq!(
-            decl_count, 12,
-            "12 declarations are Decl* fields (the other two dedup to Schedule A)"
+            decl_count, 13,
+            "13 declarations are Decl* fields (the other two dedup to Schedule A)"
         );
         assert_eq!(
             deduped,
@@ -130,11 +130,11 @@ mod tests {
             "exactly the two Schedule-A-owned mortgage declarations dedup"
         );
 
-        // 12 delegating Decl* fields + the foreign_country_names Text field.
+        // 13 delegating Decl* fields + the foreign_country_names Text field.
         assert_eq!(
             decls.fields.len(),
-            13,
-            "11 declarations + foreign_country_names"
+            14,
+            "13 declarations + foreign_country_names"
         );
         assert!(decls
             .fields

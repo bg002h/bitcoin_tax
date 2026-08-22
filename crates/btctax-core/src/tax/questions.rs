@@ -100,6 +100,9 @@ pub enum QuestionId {
     /// i1040sca *"Limits on home mortgage interest"* ceiling? ★ APPENDED AT THE END: `decl_tristate!`
     /// couples to this array's INDEX, so a mid-array insert silently repoints every later question.
     MortgageWithinDebtLimit,
+    /// **Schedule D line 20 / Schedule A line 9** — is the filer filing Form 4952? ★ APPENDED AT THE
+    /// END, for the `decl_tristate!` array-index reason above.
+    FilingForm4952,
 }
 
 impl QuestionId {
@@ -118,6 +121,7 @@ impl QuestionId {
         QuestionId::HasIncomeExclusion,
         QuestionId::OtherOutOfScopeIncome,
         QuestionId::MortgageWithinDebtLimit,
+        QuestionId::FilingForm4952,
     ];
 }
 
@@ -627,6 +631,53 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         // so none is durable: last year's answer is not testimony for this one. Debt balances move.
         durability: Durability::PerYear,
         neutral: true, // "yes, inside every limit" ⇒ Schedule A line 8a stays the full 1098 amount
+    },
+    // ★★★ SCHEDULE D LINE 20 / SCHEDULE A LINE 9 — THE FORM 4952 DECLARATION. Index 14; appended at
+    //     the END for the array-index reason above.
+    //
+    // ★★★ ALWAYS LIVE, and it has to be. Line 20 prints on every return whose Schedule D routes
+    //     both-gains, and that routing comes from the LEDGER — which `live` (a `&ReturnInputs`
+    //     predicate) cannot see. Scoping it to `schedule_a.is_some()` would under-ask exactly the
+    //     population the plan measured: the $0-income, standard-deduction crypto household whose
+    //     Schedule D still prints the same sworn "Yes". A question that vanishes for the filer it was
+    //     written for is the shape §G-9 exists to kill.
+    //
+    // ★★ THE PROMPT ENUMERATES WHEN FORM 4952 IS REQUIRED and falls back to YES — which is the
+    //    fail-closed direction here, because YES refuses and refusals are recoverable. The list is
+    //    i4952's own exception, negated: you may answer NO only if every one of its three conditions
+    //    holds. A filer who is unsure answers YES and gets a refusal they can undo, rather than a
+    //    filed return whose line 20 they never saw.
+    FormQuestion {
+        id: QuestionId::FilingForm4952,
+        prompt: "Are you filing Form 4952 (Investment Interest Expense Deduction)? Answer NO only \
+                 if ALL THREE of these are true — they are Form 4952's own exception: (a) your \
+                 investment interest expense is not more than your investment income from interest \
+                 and ordinary dividends minus any qualified dividends; (b) you have no other \
+                 deductible investment expenses; and (c) you have no disallowed investment interest \
+                 expense carried over from last year. Answer YES if you borrowed to invest and any \
+                 of those fails, and answer YES if you are unsure: a YES refuses the return rather \
+                 than filing a Schedule D line 20 that swears you are not filing a form you are. \
+                 (Schedule D line 20 asks \"Are lines 18 and 19 both zero or blank and you are not \
+                 filing Form 4952?\"; Schedule A line 9 is \"Investment interest. Attach Form 4952 \
+                 if required.\")",
+        unanswered: RefuseReason::Form4952DeclarationUnanswered,
+        unanswered_detail:
+            "Schedule D line 20 asks whether lines 18 and 19 are both zero or blank AND you are not \
+             filing Form 4952 — and its answer decides which worksheet computes your tax. btctax \
+             checked \"Yes\" on every both-gains return without ever asking you, which is sworn \
+             testimony it invented. It will not do that: answer it and the return files (a \"No\" \
+             routes to the Schedule D Tax Worksheet, which btctax does not fill). The same answer \
+             governs Schedule A line 9, investment interest — run `btctax income answer`",
+        // ★ See the block comment above: it CANNOT be scoped by whether Schedule D files, because
+        //   that is a ledger fact and `live` receives only `ReturnInputs`.
+        live: |_ri| true,
+        get: |ri| ri.filing_form_4952,
+        set: |ri, v| ri.filing_form_4952 = Some(v),
+        // ★ §G-15 — PER-YEAR: whether you file Form 4952 is a fact about this tax year.
+        durability: Durability::PerYear,
+        // ★ NOT filing Form 4952 is the answer that needs no form btctax lacks: line 20 = Yes ⇒ the
+        //   Qualified Dividends and Capital Gain Tax Worksheet, which btctax does compute.
+        neutral: false,
     },
 ];
 
@@ -1211,6 +1262,7 @@ mod tests {
                 QuestionId::HasIncomeExclusion => 11,
                 QuestionId::OtherOutOfScopeIncome => 12,
                 QuestionId::MortgageWithinDebtLimit => 13,
+                QuestionId::FilingForm4952 => 14,
             };
             assert_eq!(idx, i, "QuestionId::ALL is out of order / missing {id:?}");
             assert_eq!(
@@ -1219,8 +1271,8 @@ mod tests {
                 "exactly one FORM_QUESTIONS entry for {id:?}"
             );
         }
-        assert_eq!(QuestionId::ALL.len(), 14, "there are 14 declarations");
-        assert_eq!(FORM_QUESTIONS.len(), 14, "one entry per declaration");
+        assert_eq!(QuestionId::ALL.len(), 15, "there are 15 declarations");
+        assert_eq!(FORM_QUESTIONS.len(), 15, "one entry per declaration");
     }
 
     /// ★★★ §G-6/ISO — THE OUT-OF-SCOPE QUESTION MUST NAME THE ISO EXERCISE, WHICH IS NOT INCOME.

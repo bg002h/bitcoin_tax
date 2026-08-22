@@ -600,6 +600,7 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
         fbar_filing_required: _,
         donations_had_restrictions: _,
         charitable_cwa_obtained: _,
+        filing_form_4952: _,
         dual_status_alien: _,
         has_income_exclusion: _,
         other_out_of_scope_income: _,

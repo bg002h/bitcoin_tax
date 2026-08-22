@@ -113,6 +113,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         foreign_country_names: _, // String — scalar
         donations_had_restrictions,
         charitable_cwa_obtained,
+        filing_form_4952,
         dual_status_alien,
         // §164(b)(7)(B)(iv) / Schedule 1-A Part I MAGI add-backs. Plain `Usd` scalar leaves, which the
         // `_` rule permits — their answered-ness lives in the `has_income_exclusion` GATE above, which
@@ -185,6 +186,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
          deduction filer, or one whose every gift is under $250, is never asked; `screen_absolute` \
          makes it mandatory where the deduction is actually claimed (§2.2)",
     );
+    c.declaration(filing_form_4952, QuestionId::FilingForm4952);
     c.declaration(dual_status_alien, QuestionId::DualStatusAlien);
     c.declaration(has_income_exclusion, QuestionId::HasIncomeExclusion);
     c.declaration(other_out_of_scope_income, QuestionId::OtherOutOfScopeIncome);
@@ -549,6 +551,7 @@ fn classify_schedule_a(c: &mut Census, a: &ScheduleAInputs) {
         mortgage_all_used_to_buy_build_improve,
         mortgage_within_debt_limit,
         mortgage_dwelling_is_amt_qualified,
+        investment_interest: _, // plain `Usd` — the `_` rule permits a money scalar
         charitable,
     } = a;
     c.exempt(

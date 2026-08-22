@@ -14,6 +14,10 @@ charitable_carryover_in_provenance = "user"
 # and so does setting it `false`: the crypto donation below is far over $250 and the return itemizes.
 charitable_cwa_obtained = true
 donations_had_restrictions = false
+# Schedule D line 20 / Schedule A line 9 — this household is not filing Form 4952, so line 20 is
+# checked "Yes" (the Qualified Dividends and Capital Gain Tax Worksheet). ★ DELETING THIS LINE
+# REFUSES THE RETURN (Form4952DeclarationUnanswered); `true` refuses it as Form4952Required.
+filing_form_4952 = false
 dual_status_alien = false
 excluded_puerto_rico_income = "0"
 filing_status = "Mfj"

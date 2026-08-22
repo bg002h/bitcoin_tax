@@ -41,6 +41,7 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::DualStatusAlienUnanswered => vec![decl(QuestionId::DualStatusAlien)],
         R::MixedUseMortgageUnanswered => vec![decl(QuestionId::MortgageAllUsedToBuyBuildImprove)],
         R::MortgageDebtLimitUnanswered => vec![decl(QuestionId::MortgageWithinDebtLimit)],
+        R::Form4952DeclarationUnanswered => vec![decl(QuestionId::FilingForm4952)],
         R::AmtQualifiedDwellingUnanswered => vec![decl(QuestionId::AmtQualifiedDwelling)],
         R::IncomeExclusionUnanswered => vec![decl(QuestionId::HasIncomeExclusion)],
         // §G-22/B11 — both legs point at the one declaration that decides them.
@@ -74,6 +75,12 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         //   the answer IS the input, and the return becomes fileable only by correcting it (or, once
         //   FOLLOWUPS P9(a)/S2 lands, by entering the Pub. 936 worksheet result).
         R::MortgageOverDebtLimit => vec![decl(QuestionId::MortgageWithinDebtLimit)],
+        // ★ §163(d) / Form 4952. Both routes to this refusal are correctable in the form — either the
+        //   declaration itself, or the Schedule A line-9 amount that broke i4952's exception.
+        R::Form4952Required => vec![
+            decl(QuestionId::FilingForm4952),
+            Anchor::Field(FieldId::SaInvestmentInterest),
+        ],
         R::AmtNonQualifiedDwelling => vec![decl(QuestionId::AmtQualifiedDwelling)],
         R::AmtCarryoverDiverges => vec![decl(QuestionId::AmtCarryoverSameAsRegular)],
         R::AmtDepreciationDiverges => vec![decl(QuestionId::AmtDepreciationSameAsRegular)],
