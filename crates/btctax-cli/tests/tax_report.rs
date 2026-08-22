@@ -1577,6 +1577,307 @@ fn dual_report_renders_absolute_return_with_section_6_labels() {
     );
 }
 
+/// ★★★ **K9 — rolling a carryover must never leave next year unfilable IN SILENCE.**
+///
+/// A nonzero capital-loss carryover-in makes three class-(A) declarations live on year Y+1 that were
+/// not live before it: Form 6251 line 2k, and the Capital Loss Carryover Worksheet's two header
+/// conditions. All three refuse when `None`. `--write-carryover` is therefore the ONLY write path in
+/// btctax that can leave a COMMITTED row in a state `input_form_store` would have refused to create —
+/// an invariant that held until (B) landed.
+///
+/// The command WARNS rather than refuses, and that is not softness: the row must exist for the answer
+/// to be givable at all. Refusing would leave the filer with a written row, a refusal, and no command
+/// that reaches it.
+///
+/// Mutations that MUST red:
+///   (a) delete the re-screen ⇒ the note vanishes;
+///   (b) point `carryforward_in_present` at `|_| false` ⇒ the fixture stops going unfilable, which
+///       is the check that this test reads the REAL liveness predicate and not a hand-copy of it.
+#[test]
+fn rolling_a_carryover_never_leaves_next_year_unfilable_in_silence() {
+    use btctax_core::tax::return_inputs::{Owner, ReturnInputs, W2};
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2024(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+
+    // 2024: $30,000 of wages and a $60,000 long-term loss carried in ⇒ a real carryover-out.
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        let mut y2024 = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
+            w2s: vec![W2 {
+                owner: Owner::Taxpayer,
+                box1_wages: dec!(30000),
+                box3_ss_wages: dec!(30000),
+                box5_medicare_wages: dec!(30000),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        y2024.capital_loss_carryforward_in = btctax_core::tax::types::Carryforward {
+            short: rust_decimal::Decimal::ZERO,
+            long: dec!(60000),
+        };
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut y2024);
+        btctax_cli::return_inputs::set(s.conn(), 2024, &y2024).unwrap();
+
+        // 2025: a plain Single row that screens CLEAN today.
+        // ★ It must STATE its tax year. `Default` gives 0, and a year-scoped question is correctly
+        //   NOT live without one — so `answered()` would leave it blank and the stored row would
+        //   already refuse, making the (before-clean, after-refusing) delta unreachable. The premise
+        //   assertion below is what turns that into a visible failure instead of a silent pass.
+        let y2025 = btctax_core::tax::testonly::answered(ReturnInputs {
+            tax_year: 2025,
+            filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
+            ..Default::default()
+        });
+        btctax_cli::return_inputs::set(s.conn(), 2025, &y2025).unwrap();
+        s.save().unwrap();
+    }
+
+    // PREMISE: the 2025 row screens CLEAN before the write, or the delta this test is about cannot
+    // be produced and a silent pass is indistinguishable from a working warning.
+    {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let stored = btctax_cli::return_inputs::get(s.conn(), 2025)
+            .unwrap()
+            .unwrap();
+        assert!(
+            btctax_core::tax::return_refuse::screen_inputs(
+                &stored,
+                &btctax_core::tax::testonly::ty2024_table(),
+                &btctax_core::tax::testonly::ty2024_params(),
+            )
+            .is_none(),
+            "premise: the 2025 row must be filable BEFORE the roll"
+        );
+    }
+
+    let summary = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap();
+
+    // PREMISE: a carryover really was written, or "it went unfilable" has no cause.
+    let next = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::get(s.conn(), 2025)
+            .unwrap()
+            .unwrap()
+    };
+    assert!(
+        next.capital_loss_carryforward_in.long > rust_decimal::Decimal::ZERO,
+        "premise: the roll must have put a nonzero carryover on the 2025 row: {:?}",
+        next.capital_loss_carryforward_in
+    );
+    assert_eq!(
+        next.carryover_includes_spouses_joint_loss, None,
+        "premise: …and the worksheet's header declarations are unanswered on that row, which is the \
+         state that makes it unfilable"
+    );
+
+    assert!(
+        summary.contains("now needs an answer it did not need before"),
+        "★ the filer must be TOLD: {summary}"
+    );
+    assert!(
+        summary.contains("btctax income answer"),
+        "★ …and told the command that fixes it: {summary}"
+    );
+    assert!(summary.contains("2025"), "★ …for the right year: {summary}");
+}
+
+/// ★★★ **K11 — the write-back summary names every carryover it wrote, and REDS ON AN ADDITION.**
+///
+/// The previous summary was a hand-written sentence naming two carryovers where the code wrote
+/// three. A checker that reds only when something is REMOVED is that same hand-list wearing a test:
+/// it cannot see the case that actually happened.
+///
+/// So the observed set is DERIVED — the year Y+1 row is serialized before and after the write-back and
+/// diffed at the leaf level (the mutate-and-diff technique `spec::coverage` uses) — and compared
+/// against a pinned table of `leaf path → the phrase the summary must carry`. A FIFTH assigned field
+/// then produces a leaf path the table does not have, and the equality reds on the ADDITION.
+///
+/// Mutations that MUST red:
+///   (a) assign a fifth field in `apply_carryover_writeback` without touching the summary ⇒ the
+///       derived path set gains an entry the table lacks;
+///   (b) drop any phrase from the summary ⇒ the second half.
+#[test]
+fn the_writeback_summary_names_every_carryover_it_wrote() {
+    use btctax_core::tax::return_inputs::{Owner, ReturnInputs, W2};
+    use std::collections::BTreeMap;
+
+    /// `leaf path → the substring the summary must carry for it`. PINNED; the observed set is not.
+    const EXPECTED: &[(&str, &str)] = &[
+        ("charitable_carryover_in", "charitable carryover item(s)"),
+        (
+            "charitable_carryover_in_provenance",
+            "charitable carryover item(s)",
+        ),
+        ("qbi.reit_ptp_carryforward_in", "QBI REIT/PTP carryforward"),
+        (
+            "qbi.reit_ptp_carryforward_in_provenance",
+            "QBI REIT/PTP carryforward",
+        ),
+        ("qbi.qbi_carryforward_in", "QBI business-loss carryforward"),
+        (
+            "qbi.qbi_carryforward_in_provenance",
+            "QBI business-loss carryforward",
+        ),
+        (
+            "capital_loss_carryforward_in",
+            "capital-loss carryover short",
+        ),
+        (
+            "capital_loss_carryforward_in_provenance",
+            "capital-loss carryover short",
+        ),
+    ];
+
+    fn leaves(ri: &ReturnInputs) -> BTreeMap<String, serde_json::Value> {
+        fn walk(
+            v: &serde_json::Value,
+            prefix: &str,
+            out: &mut BTreeMap<String, serde_json::Value>,
+        ) {
+            match v {
+                serde_json::Value::Object(m) => {
+                    for (k, child) in m {
+                        let p = if prefix.is_empty() {
+                            k.clone()
+                        } else {
+                            format!("{prefix}.{k}")
+                        };
+                        walk(child, &p, out);
+                    }
+                }
+                leaf => {
+                    out.insert(prefix.to_string(), leaf.clone());
+                }
+            }
+        }
+        let mut out = BTreeMap::new();
+        walk(&serde_json::to_value(ri).unwrap(), "", &mut out);
+        out
+    }
+
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2024(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+
+    // A 2024 return that produces ALL FOUR carryover-outs at once.
+    let y2025_before;
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        let mut y2024 = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
+            charitable_cwa_obtained: Some(true),
+            w2s: vec![W2 {
+                owner: Owner::Taxpayer,
+                box1_wages: dec!(50000),
+                box3_ss_wages: dec!(50000),
+                box5_medicare_wages: dec!(50000),
+                ..Default::default()
+            }],
+            schedule_a: Some(btctax_core::tax::return_inputs::ScheduleAInputs {
+                charitable: vec![btctax_core::tax::return_inputs::CharitableGift {
+                    class: btctax_core::tax::return_inputs::CharitableClass::Cash60,
+                    amount: dec!(40000),
+                }],
+                ..Default::default()
+            }),
+            qbi: btctax_core::tax::return_inputs::QbiInputs {
+                reit_ptp_carryforward_in: dec!(10000),
+                qbi_carryforward_in: dec!(8000),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        y2024.capital_loss_carryforward_in = btctax_core::tax::types::Carryforward {
+            short: rust_decimal::Decimal::ZERO,
+            long: dec!(60000),
+        };
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut y2024);
+        btctax_cli::return_inputs::set(s.conn(), 2024, &y2024).unwrap();
+
+        let seed = btctax_core::tax::testonly::answered(ReturnInputs {
+            tax_year: 2025,
+            filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
+            ..Default::default()
+        });
+        btctax_cli::return_inputs::set(s.conn(), 2025, &seed).unwrap();
+        s.save().unwrap();
+    }
+    // ★ Read the row back AS STORED. The persistence layer stamps `tax_year`, and diffing against
+    //   the in-memory seed would attribute that to the write-back — a checker reporting a mutation
+    //   its subject did not make gets widened until it is silent.
+    {
+        let s = Session::open(&vault, &pp()).unwrap();
+        y2025_before = btctax_cli::return_inputs::get(s.conn(), 2025)
+            .unwrap()
+            .unwrap();
+    }
+
+    let summary = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap();
+    let y2025_after = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::get(s.conn(), 2025)
+            .unwrap()
+            .unwrap()
+    };
+
+    // ── The OBSERVED set: which leaves the write-back actually moved. ──────────────────────────────
+    let before = leaves(&y2025_before);
+    let after = leaves(&y2025_after);
+    let mut changed: Vec<String> = after
+        .iter()
+        .filter(|(k, v)| before.get(*k) != Some(*v))
+        .map(|(k, _)| {
+            // A `Vec<Struct>` leaf reads as `charitable_carryover_in[0].amount`; collapse to the
+            // field so the table is about FIELDS, not about how many items happened to be written.
+            let base = k
+                .split_once('[')
+                .map(|(h, _)| h.to_string())
+                .unwrap_or_else(|| k.clone());
+            // …and a `Carryforward`'s two LIMBS are one field: which limb a given fixture happens
+            // to move is an accident of the fixture, and the table is about fields.
+            base.strip_suffix(".short")
+                .or_else(|| base.strip_suffix(".long"))
+                .map(str::to_string)
+                .unwrap_or(base)
+        })
+        .collect();
+    changed.sort();
+    changed.dedup();
+
+    assert!(
+        !changed.is_empty(),
+        "the write-back moved NOTHING — a derivation that observes nothing reports OK forever"
+    );
+    let expected: Vec<String> = {
+        let mut v: Vec<String> = EXPECTED.iter().map(|(p, _)| p.to_string()).collect();
+        v.sort();
+        v.dedup();
+        v
+    };
+    assert_eq!(
+        changed, expected,
+        "★★★ the set of fields the write-back ASSIGNS is derived, not declared. A field added to \
+         `apply_carryover_writeback` lands here as an unexpected path and reds THIS assertion — \
+         which is the half a deletion-only checker does not have, and the half that would have \
+         caught 'the charitable and QBI-REIT/PTP carryovers' being two where the code wrote three."
+    );
+
+    // ── …and every one of them is NAMED in what the filer is shown. ───────────────────────────────
+    for (path, phrase) in EXPECTED {
+        assert!(
+            summary.contains(phrase),
+            "the summary must name {path} (\\\"{phrase}\\\"); got: {summary}"
+        );
+    }
+}
+
 /// §4 R3-M6 carryover write-back (P4.9): `report --tax-year Y --write-carryover` persists year Y's
 /// computed charitable carryover-out as year (Y+1)'s carryover-in (stamped Computed), and refuses to
 /// overwrite a user-entered next-year carryover without `--force`.

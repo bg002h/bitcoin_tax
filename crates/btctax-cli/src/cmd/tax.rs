@@ -734,15 +734,67 @@ pub fn write_back_carryover(
             next = year + 1
         ))
     })?;
+    let next_original = next.clone();
     let updated = btctax_core::apply_carryover_writeback(&ar, &ri, &state, year, next, force)
         .map_err(CliError::Usage)?;
     crate::return_inputs::set(s.conn(), year + 1, &updated)?;
     s.save()?;
-    Ok(format!(
-        "carryover written back to {}: {} charitable carryover item(s); QBI REIT/PTP carryforward ${:.2}",
-        year + 1,
-        updated.charitable_carryover_in.len(),
+
+    // ★★★ **THE WRITE CAN MAKE NEXT YEAR UNFILABLE, AND IT MUST NOT DO SO IN SILENCE.**
+    //
+    // A nonzero capital-loss carryover-in makes THREE declarations live on year Y+1 that were not
+    // live before it: Form 6251 line 2k, and the Capital Loss Carryover Worksheet's two header
+    // conditions. All three are class-(A), so `None` REFUSES — and this is the only write path in
+    // btctax that can leave a COMMITTED row in a state `input_form_store` would have refused to
+    // create. That invariant held until `--write-carryover` learned to roll the capital loss.
+    //
+    // ★ WARN, never refuse. The row must EXIST for the answer to be givable at all: refusing here
+    //   would leave the filer with a written row, a refusal, and no command that reaches it.
+    //
+    // ★★ SCREENED WITH YEAR Y'S PARAMS AND TABLE, deliberately, and the reason is that this is a
+    //    DELTA. v1 has no full-return params for Y+1 (`full_return_for` is `None` by design), so
+    //    there is no year-Y+1 authority to screen against — but both sides of the comparison use the
+    //    same authority, so any difference between them is attributable to THE WRITE and to nothing
+    //    else. A refusal the row already had is not reported; only one this command created is.
+    let before = btctax_core::tax::return_refuse::screen_inputs(&next_original, table, params);
+    let after = btctax_core::tax::return_refuse::screen_inputs(&updated, table, params);
+    let newly_unfilable = match (&before, &after) {
+        (None, Some(r)) => Some(format!(
+            "\n★ NOTE: {next} now needs an answer it did not need before. Writing a capital-loss \
+             carryover onto that row makes declarations live that were not — [{:?}] {} \
+             \n  Run `btctax income answer --year {next}` before filing {next}.",
+            r.reason,
+            r.detail,
+            next = year + 1
+        )),
+        _ => None,
+    };
+
+    // ★ THE SUMMARY IS DERIVED FROM WHAT WAS ASSIGNED, never from a hand-list. The previous one named
+    //   two carryovers where the code wrote three, and the same drift bit `kat_attestation`'s
+    //   enumeration. Each line below reads the field the write-back actually set.
+    let mut wrote: Vec<String> = Vec::new();
+    wrote.push(format!(
+        "{} charitable carryover item(s)",
+        updated.charitable_carryover_in.len()
+    ));
+    wrote.push(format!(
+        "QBI REIT/PTP carryforward ${:.2}",
         updated.qbi.reit_ptp_carryforward_in
+    ));
+    wrote.push(format!(
+        "QBI business-loss carryforward ${:.2}",
+        updated.qbi.qbi_carryforward_in
+    ));
+    wrote.push(format!(
+        "capital-loss carryover short ${:.2} / long ${:.2}",
+        updated.capital_loss_carryforward_in.short, updated.capital_loss_carryforward_in.long
+    ));
+    Ok(format!(
+        "carryover written back to {}: {}{}",
+        year + 1,
+        wrote.join("; "),
+        newly_unfilable.unwrap_or_default()
     ))
 }
 
