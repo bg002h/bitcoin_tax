@@ -550,6 +550,38 @@ in-repo test that reds on regression.
 
 ## OWNER DECISIONS
 
+### ★★★ SETTLED 2026-08-21 — the product scope, and what it decides
+
+**Owner: *"We want to support a broad array of income and capital gains amounts."*** That is a
+population statement, and it answers two decisions outright without re-ranking anything — the plan
+already ranks by population within each tier, so a wider population changes what is IN, not what is
+first.
+
+- **Decision 2 — >14 disposal legs is a REAL population. P2b is LIVE, not latent.** The overflow is
+  **lot-count-driven, not dollar-driven**, so the exposure runs opposite to intuition: a filer
+  dollar-cost-averaging weekly holds ~52 lots and any meaningful sale draws on more than 14 of them,
+  while a single-lot whale with a $1M gain emits one row. Supporting a broad array of capital-gains
+  *amounts* therefore means supporting many-lot histories at the **small** end especially, and the
+  failure there is total — exit 2, zero bytes, every form in the packet lost.
+- **Decision 11 — EITC/ACTC is IN SCOPE. N2 unblocks.** A broad array of income includes the bottom,
+  which is exactly where the refundable credits live: ~$8,781 forfeited on MFJ/$40k/2 children,
+  ~22% of that household's income, oracle-verified. It is the largest dollar item in this plan and
+  it lands on the filers least able to absorb it.
+
+★ **What this does NOT change.** The ordering principle stands, and no item is re-tiered. P1 remains
+first because a silent understatement that FILES outranks a loud failure that produces no paper —
+a wrong number gets signed under §6065; a missing PDF does not. P1, P5 and P8 remain correctly
+scoped as top-of-axis: a broad product still serves that band, it is simply not the modal filer.
+
+★★ **What it does change about SEQUENCING.** N2 is not a plan item at this scope — it is a project.
+It needs Schedule 8812 and Schedule EIC (neither has a map), a refundable-credit path that does not
+exist, new collected inputs (earned income, the §32(i) investment-income limit, qualifying-child
+residency), and a two-oracle witness — noting taxcalc's default take-up simulation zeroes the EITC
+stochastically, so `eitc_claim_prob_scale` must be disabled or the oracle silently agrees with a
+wrong answer. It belongs in its own cycle starting at brainstorm, not as a line in this table.
+
+---
+
 Decisions 1–10 stand as written in the single-vector plan; restated compactly with any
 generalization delta, then the new ones.
 
