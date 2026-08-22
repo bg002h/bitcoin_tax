@@ -131,8 +131,9 @@ shortfall in btctax.
 - **A HoH/QSS qualifying person who is not one of your listed dependents** is not captured; that cell is left
   blank for you to complete.
 
-**Carryovers:** charitable (per class + vintage) and **both** QBI loss carryforwards — qualified business
-(Form 8995 line 16) and REIT/PTP (line 17) — are computed and can be written forward to next year with
+**Carryovers:** charitable (per class + vintage), **both** QBI loss carryforwards — qualified business
+(Form 8995 line 16) and REIT/PTP (line 17) — and the **§1212(b) capital-loss carryover** (Schedule D
+lines 6 and 14) are computed and can be written forward to next year with
 `btctax report --tax-year Y --write-carryover`. A carryover you typed in yourself is never silently
 overwritten (pass `--force` if you mean to).
 ★★ **Both QBI loss carryforwards are now ASKED**, in the TUI's "Carryforwards from last year" section —
@@ -141,13 +142,30 @@ lines 17 and 16 of *last* year's Form 8995. They REDUCE the deduction, so leavin
 deduction and **understates your tax** — the one direction btctax will not fail in silently. If btctax did
 not compute your prior year it cannot know, so it asks, and an advisory fires until you answer or it has a
 computed figure of its own. (You can still set them under `[qbi]` in the import TOML.)
-★ **The CAPITAL-LOSS carryover is computed but not rolled.** btctax models the §1212(b)(2)(B) *Capital
+★ **The CAPITAL-LOSS carryover is computed AND rolled.** btctax models the §1212(b)(2)(B) *Capital
 Loss Carryover Worksheet*, so your carryover-**out** is a real figure on this year's report — including
 the case a flat "lesser of the loss or $3,000" rule gets wrong, a loss year whose taxable income lands
-on the floor and therefore absorbs **none** of the $3,000 (see the §1211/§1212 bullet under REFUSALS).
-What `--write-carryover` does not do is stamp it into next year's inputs: only the charitable and the
-two QBI carryovers are written forward. Read it off the report and enter it next year yourself. Leaving
-it out costs *you*, not the Treasury, so nothing gates it — but check it if you have one.
+on the floor and therefore absorbs **none** of the $3,000. `--write-carryover` stamps it into next
+year's inputs alongside the other three, as **whole dollars** — the figure you will read off next
+year's Schedule D lines 6 and 14 and sign for.
+
+Four things are worth knowing about that:
+
+- **It is written only when btctax can vouch for it.** If this year was never asked about a carryover
+  *and* produced none of its own, nothing is stamped — writing a `$0` marked "computed" there would
+  silence next year's advisory about a carryover you may genuinely have.
+- **The whole write-back is one transaction.** If btctax refuses to persist the *charitable* carryover
+  (a restricted gift, or a missing §170(f)(8) acknowledgment), **nothing** is written — not the QBI
+  ones and not this one. That is deliberate rather than tidy: a deduction btctax cannot vouch for makes
+  worksheet line 1 more negative, line 4 smaller, and the surviving capital loss **larger**, so
+  persisting the capital-loss half alone would overstate it.
+- **It is validated against the FORM and nothing else.** Neither reference engine btctax reconciles
+  against witnesses a carryover level: one takes it as an *input*, the other emits no carryover at all.
+  The transcription of the worksheet and its tests are the whole of the evidence here.
+- **A "computed" stamp means the write-back ran once from a year that screened clean at the time.** It
+  is not a claim that the figure still agrees with that year — edit the prior year and re-run
+  `--write-carryover`. btctax's own consistency check re-derives the figure rather than trusting the
+  stamp.
 
 ---
 

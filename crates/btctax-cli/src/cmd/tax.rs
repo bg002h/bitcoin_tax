@@ -634,7 +634,8 @@ pub fn report_tax_year(
     })
 }
 
-/// §4 R3-M6 carryover write-back — persist year `year`'s computed charitable + QBI-REIT/PTP carryover-OUT
+/// §4 R3-M6 carryover write-back — persist year `year`'s computed charitable, QBI business-loss,
+/// QBI-REIT/PTP and §1212(b) capital-loss carryover-OUTs
 /// as year (`year+1`)'s carryover-IN in the side-table. Only for a `ReturnInputs`-provenance full-return
 /// year (else there is no absolute return). Errors if the absolute return refuses (`screen_absolute`) or if
 /// a user-entered next-year carryover would be overwritten without `force`. Returns a human summary.

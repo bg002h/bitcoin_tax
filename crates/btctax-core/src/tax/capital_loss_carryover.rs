@@ -532,6 +532,127 @@ mod tests {
         assert_eq!(w.line13, Some(dec!(18000)));
     }
 
+    /// ★★★ **K4 — a SKIPPED line is a `None`, and no value assertion in this file can see it.**
+    ///
+    /// The form sends the filer PAST two blocks of lines, and a skipped line is blank — not `-0-`.
+    /// The distinction survives into the type system, per the repo's blank-is-not-zero rule.
+    ///
+    /// ★★ **`carryforward_out()` reads the skipped lines through `unwrap_or(Usd::ZERO)`, so
+    /// `Some(0)` and `None` produce the IDENTICAL carryover.** Every value assertion in this module
+    /// is therefore blind to the difference, which is exactly why this test asserts the `Option`.
+    ///
+    /// Mutation that MUST red: change either skip arm's `(None, …)` to `(Some(z), …)`.
+    #[test]
+    fn a_skipped_worksheet_line_is_a_none_and_not_a_zero() {
+        // Schedule D line 7 is a GAIN ⇒ "enter -0- on line 5 and go to line 9" ⇒ 6/7/8 blank.
+        let w = CapitalLossCarryoverWorksheet::figure(CapitalLossCarryoverInputs {
+            form_1040_line15_signed: dec!(-5000),
+            schedule_d_line7: dec!(2000),
+            schedule_d_line15: dec!(-20000),
+            schedule_d_line16: dec!(-18000),
+            schedule_d_line21_loss: dec!(3000),
+        })
+        .expect("limb (b)");
+        assert_eq!(w.line6, None, "★ blank, not -0- — the form skipped it");
+        assert_eq!(w.line7, None);
+        assert_eq!(w.line8, None);
+        assert_eq!(
+            w.carryforward_out().short,
+            Usd::ZERO,
+            "…and the carryover reads the SAME as if it were `Some(0)`, which is the whole reason \
+             the assertions above are on the `Option` and not on a value"
+        );
+
+        // Schedule D line 15 is a GAIN ⇒ "skip lines 9 through 13".
+        let w = CapitalLossCarryoverWorksheet::figure(CapitalLossCarryoverInputs {
+            form_1040_line15_signed: dec!(-5000),
+            schedule_d_line7: dec!(-20000),
+            schedule_d_line15: dec!(2000),
+            schedule_d_line16: dec!(-18000),
+            schedule_d_line21_loss: dec!(3000),
+        })
+        .expect("limb (b)");
+        assert_eq!(w.line9, None, "★ blank, not -0-");
+        assert_eq!(w.line10, None);
+        assert_eq!(w.line11, None);
+        assert_eq!(w.line12, None);
+        assert_eq!(w.line13, None);
+        assert_eq!(w.carryforward_out().long, Usd::ZERO);
+    }
+
+    /// ★★★ **K5 — a carryforward-IN of the OPPOSITE character is absorbed by this year's gain.**
+    ///
+    /// §1212(b)(2) cross-netting, on the carryforward-IN path, at the floor — uncovered until now.
+    /// The loss brought in is netted against the CURRENT year's gain of the other character before
+    /// anything carries out: worksheet line 6 picks up a long-term gain against a short-term loss,
+    /// and line 10 does the mirror.
+    ///
+    /// ★ Mutation that MUST red: read line 6 from `schedule_d_line7` instead of `schedule_d_line15`
+    /// (`let l6 = i.schedule_d_line7.max(z)`). Line 6 then collapses to `-0-`, line 7 with it, and the
+    /// short-term carryover becomes the whole $50,000 — a $20,000 overstatement of the surviving loss
+    /// from a one-token transposition. This is the Form 6251 line-33 class exactly.
+    #[test]
+    fn a_carryforward_in_of_the_opposite_character_is_absorbed_by_this_years_gain() {
+        // $50,000 short-term brought in against a $20,000 long-term gain, at the floor.
+        let w = CapitalLossCarryoverWorksheet::figure(CapitalLossCarryoverInputs {
+            form_1040_line15_signed: dec!(-8000),
+            schedule_d_line7: dec!(-50000),
+            schedule_d_line15: dec!(20000),
+            schedule_d_line16: dec!(-30000),
+            schedule_d_line21_loss: dec!(3000),
+        })
+        .expect("limb (b): 1040 line 15 would be below zero");
+        assert_eq!(w.line4, Usd::ZERO, "at the floor nothing is absorbed");
+        assert_eq!(
+            w.line5,
+            dec!(50000),
+            "the short-term loss, as a positive amount"
+        );
+        assert_eq!(
+            w.line6,
+            Some(dec!(20000)),
+            "★ line 6 reads Schedule D line 15 — THIS year's long-term GAIN"
+        );
+        assert_eq!(w.line7, Some(dec!(20000)), "line 4 + line 6");
+        assert_eq!(w.line8, Some(dec!(30000)), "50,000 − 20,000 survives");
+        assert_eq!(w.line9, None, "line 15 is a gain ⇒ skip 9 through 13");
+        assert_eq!(
+            w.carryforward_out(),
+            Carryforward {
+                short: dec!(30000),
+                long: Usd::ZERO
+            }
+        );
+
+        // The MIRROR: $50,000 long-term brought in against a $20,000 short-term gain.
+        let w = CapitalLossCarryoverWorksheet::figure(CapitalLossCarryoverInputs {
+            form_1040_line15_signed: dec!(-8000),
+            schedule_d_line7: dec!(20000),
+            schedule_d_line15: dec!(-50000),
+            schedule_d_line16: dec!(-30000),
+            schedule_d_line21_loss: dec!(3000),
+        })
+        .expect("limb (b)");
+        assert_eq!(w.line5, Usd::ZERO, "line 7 is a gain ⇒ -0- on line 5");
+        assert_eq!(w.line8, None, "…and skip to line 9");
+        assert_eq!(w.line9, Some(dec!(50000)));
+        assert_eq!(
+            w.line10,
+            Some(dec!(20000)),
+            "★ line 10 reads Schedule D line 7 — THIS year's short-term GAIN"
+        );
+        assert_eq!(w.line11, Some(Usd::ZERO), "line 4 − line 5, floored");
+        assert_eq!(w.line12, Some(dec!(20000)));
+        assert_eq!(w.line13, Some(dec!(30000)));
+        assert_eq!(
+            w.carryforward_out(),
+            Carryforward {
+                short: Usd::ZERO,
+                long: dec!(30000)
+            }
+        );
+    }
+
     /// **MFS**: §1211(b)'s allowance halves to $1,500, and the worksheet inherits that through line 2
     /// without knowing anything about filing status — it reads Schedule D line 21, which already is
     /// the limited figure.

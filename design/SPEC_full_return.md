@@ -221,7 +221,8 @@ pub struct ReturnInputs {
 }
 ```
 **Carryover persistence (R3-M6):** at report time the computed carryover-*out* (charitable, per class/vintage;
-and QBI REIT/PTP) is written back as year **(Y+1)'s `*_carryover_in`** on that row — a single mechanism (no
+QBI business-loss, Form 8995 line 16; QBI REIT/PTP, line 17; and the §1212(b) **capital-loss** carryover,
+Schedule D lines 6 and 14, rounded to whole dollars) is written back as year **(Y+1)'s `*_carryover_in`** on that row — a single mechanism (no
 separate staging field). **Precedence:** a computed carryover-in overwrites a prior *computed* value but
 **refuses to silently overwrite a user-entered** one (warn + `--force`, mirroring §4.12); every carryover-in
 carries **provenance** (computed vs user).

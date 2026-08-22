@@ -2826,8 +2826,9 @@ pub fn screen_absolute(
     None
 }
 
-/// Apply the **§4 R3-M6 carryover write-back**: stamp the absolute return's computed charitable +
-/// QBI-REIT/PTP carryover-OUTs into `next_year`'s (year Y+1's) carryover-IN fields, provenance `Computed`.
+/// Apply the **§4 R3-M6 carryover write-back**: stamp the absolute return's computed charitable, QBI
+/// business-loss, QBI-REIT/PTP and **§1212(b) capital-loss** carryover-OUTs into `next_year`'s (year
+/// Y+1's) carryover-IN fields, provenance `Computed`.
 /// Returns the updated `next_year` to persist, or `Err(message)` when it would silently overwrite a
 /// **User**-provenance carryover (from `income import`) and `force` is false — never clobbers a user entry.
 /// Both conflicts are checked BEFORE either field is written (atomic — a QBI conflict doesn't leave a
@@ -2956,9 +2957,9 @@ pub fn apply_carryover_writeback(
                  market value, so the ${:.2} carryover it computed is too large. Writing it into \
                  {next}'s inputs would put an inflated figure beyond every check, because next year \
                  has no way to know the gift was restricted. Work the carryover out by hand. \
-                 ★ NOTE: this refuses the WHOLE write-back, so your QBI and REIT/PTP carryforwards \
-                 were not written either — nothing was persisted. Enter all three on {next}'s row by \
-                 hand (`btctax income import`).",
+                 ★ NOTE: this refuses the WHOLE write-back, so your QBI, REIT/PTP and \
+                 CAPITAL-LOSS carryforwards were not written either — nothing was persisted. Enter \
+                 all four on {next}'s row by hand (`btctax income import`).",
                 ar.charitable_carryover_out
                     .iter()
                     .map(|c| c.amount)
@@ -2974,8 +2975,9 @@ pub fn apply_carryover_writeback(
                  SECTION B, whose lines 5a, 5b and 5c ask whether any donated property carried a \
                  restriction — and the answer is not on file. The carryover btctax computed assumes \
                  full fair market value, so it cannot be persisted as {next}'s input without it. \
-                 ★ This refuses the WHOLE write-back — your QBI and REIT/PTP carryforwards were not \
-                 written either. Run `btctax income answer`, then re-run this and all three land.",
+                 ★ This refuses the WHOLE write-back — your QBI, REIT/PTP and CAPITAL-LOSS \
+                 carryforwards were not written either. Run `btctax income answer`, then re-run this \
+                 and all four land.",
                 next = year + 1
             ));
         }
@@ -3011,10 +3013,10 @@ pub fn apply_carryover_writeback(
              ★ This year's return itself was fine to file — it takes the STANDARD deduction and \
              claims no §170 deduction at all, which is why nothing refused at filing time. It is the \
              CARRYOVER that needs the acknowledgment. Run `btctax income answer`; if you hold one, \
-             answer yes and re-run and all three carryovers land. If you do not, the lawful outcome \
+             answer yes and re-run and all four carryovers land. If you do not, the lawful outcome \
              is that this carryover does not exist — do not enter it by hand. \
-             ★ NOTE: this refuses the WHOLE write-back, so your QBI and REIT/PTP carryforwards were \
-             not written either; nothing was persisted.",
+             ★ NOTE: this refuses the WHOLE write-back, so your QBI, REIT/PTP and CAPITAL-LOSS \
+             carryforwards were not written either; nothing was persisted.",
             next = year + 1
         ));
     }
@@ -3049,6 +3051,27 @@ pub fn apply_carryover_writeback(
                     .to_string(),
             );
         }
+        // ★★★ THE FOURTH GUARD — Schedule D lines 6 and 14, and it must PRECEDE every write below.
+        //
+        // The filer's own carryover is TESTIMONY: it lands on next year's Schedule D lines 6 and 14,
+        // which they sign under §6065. Overwriting it silently would put btctax's figure on a line
+        // the filer had already sworn to, with nothing to show it had changed.
+        //
+        // ★ VALUE-CONDITIONED, exactly like the other three, and that is load-bearing rather than
+        //   stylistic: a bare `provenance == User` arm would refuse every write into a FRESH next-year
+        //   row — `User` is the `CarryProvenance` default, so an untouched `{0,0}` row carries it —
+        //   and `writeback_into_fresh_next_year` reds. A zero the filer never entered is not their
+        //   testimony.
+        if (next_year.capital_loss_carryforward_in.short > Usd::ZERO
+            || next_year.capital_loss_carryforward_in.long > Usd::ZERO)
+            && next_year.capital_loss_carryforward_in_provenance == CarryProvenance::User
+        {
+            return Err(
+                "next year's capital-loss carryover was user-entered (`income import`) — pass \
+                 `--force` to overwrite it with the computed §1212(b) carryover"
+                    .to_string(),
+            );
+        }
     }
     next_year.charitable_carryover_in = ar
         .charitable_carryover_out
@@ -3062,29 +3085,46 @@ pub fn apply_carryover_writeback(
     next_year.qbi.reit_ptp_carryforward_in_provenance = CarryProvenance::Computed;
     next_year.qbi.qbi_carryforward_in = ar.qbi_carryforward_out;
     next_year.qbi.qbi_carryforward_in_provenance = CarryProvenance::Computed;
+    // ★★★ **THE §1212(b) CARRYOVER, ROLLED — r3 I-4 ANSWERED, NOT REVERSED.**
+    //
+    // r3 I-4 removed a stamp of `capital_loss_carryforward_in_provenance = Computed` on a value the
+    // write-back never wrote. Its reasoning — *"a provenance stamp is a CLAIM OF KNOWLEDGE; do not
+    // make one the code cannot support"* — is unchanged and still governs every line below. What
+    // moved is its PREMISE: N1 modelled the worksheet, so `AbsoluteReturn::
+    // capital_loss_carryforward_out` exists and there IS a value to write.
+    //
+    // So the stamp is founded only where the figure descends from something btctax actually knows,
+    // and groundedness is CHECKED rather than assumed:
+    //   * year Y's carryover-in was itself `Computed`   → the inductive step;
+    //   * year Y's carryover-in is a nonzero `User` one → the filer's own testimony, a real base case;
+    //   * year Y produced a nonzero carryover-OUT       → btctax computed this year's loss itself.
+    //
+    // ★★★ THE ONE EXCLUDED CASE is year Y that was never asked AND produced nothing. Writing
+    //     `{0,0}` + `Computed` there would silence next year's `BenefitCarryoversNotStated` about a
+    //     carryover the filer may genuinely have — which is verbatim the r3 I-4 damage. It stays
+    //     closed, and no VALUE assertion can see it: the stored amount is zero either way.
+    //
+    // ★★ ROUNDED TO WHOLE DOLLARS, deliberately. The persisted figure becomes next year's Schedule D
+    //    lines 6 and 14 — lines the filer READS OFF THE PAGE and swears to. The measured H9 vector is
+    //    $42,871.66 exact against $42,872 hand-worked off the filed page; rounding here ties the
+    //    stored value to the page. (Residual, accepted: the printed Schedule D re-derives lines 7/15/16
+    //    from per-row-rounded Form 8949 cells while the worksheet reads exact `CapNet`, so a reader
+    //    hand-working the page can still land ~$1/row off. Closing that means re-sourcing the
+    //    worksheet from the printed chain — a layering change, not this one.)
+    let ws_out = Carryforward {
+        short: round_dollar(ar.capital_loss_carryforward_out.short),
+        long: round_dollar(ar.capital_loss_carryforward_out.long),
+    };
+    let grounded = ri.capital_loss_carryforward_in_provenance == CarryProvenance::Computed
+        || ri.capital_loss_carryforward_in != Carryforward::default()
+        || ws_out != Carryforward::default();
+    if grounded {
+        next_year.capital_loss_carryforward_in = ws_out;
+        next_year.capital_loss_carryforward_in_provenance = CarryProvenance::Computed;
+    }
     // ★ §G-20a — the CHARITABLE carryover gets its provenance stamped too. Without this a computed
     // ZERO stays indistinguishable from an unasked one, and next year's advisory nags a filer whose
     // prior year btctax itself computed.
-    //
-    // ★★★ r3 I-4 — THE CAPITAL-LOSS SIBLING IS DELIBERATELY ABSENT, and removing it was the fix.
-    // This stamped `capital_loss_carryforward_in_provenance = Computed` on a value it never writes.
-    // The stamp asserted btctax had "derived it from a prior year it actually computed" when it had
-    // derived nothing, and next year's `BenefitCarryoversNotStated` fell silent about a carryover the
-    // filer may genuinely have. A provenance stamp is a claim of knowledge; do not make one the code
-    // cannot support. THAT reasoning is unchanged and still governs.
-    //
-    // ★★ BUT ITS PREMISE IS NOW FALSE, and leaving that unsaid was the trap. This comment used to
-    // read "there is no capital-loss carryover-OUT on `AbsoluteReturn` to write, because the
-    // worksheet is UNMODELED in v1". N1 modelled it: `AbsoluteReturn::capital_loss_carryforward_out`
-    // EXISTS and carries the §1212(b)(2)(B) figure. A future reader who trusted the old sentence
-    // would conclude there is nothing to write and stop looking — which is exactly the stale-claim
-    // class three of this branch's own P10 items fixed.
-    //
-    // So the open question is no longer "is there a value?" but "should `--write-carryover` roll it,
-    // and with what provenance?" — a behaviour change to a filed-figure chain with owner-visible
-    // consequences. Filed as phase-1 residue, deliberately NOT taken here. Writing it would also
-    // have to answer what provenance means for a figure the FROZEN delta engine still reports
-    // differently (see the M4 authority fix in `cmd/tax.rs`).
     next_year.charitable_carryover_in_provenance = CarryProvenance::Computed;
     Ok(next_year)
 }
@@ -5844,6 +5884,110 @@ mod tests {
         assert_eq!(pf.f1040.line15, pf_twin.f1040.line15, "…and 1040 L15");
     }
 
+    /// ★★★ **K3 — H9: the only newly-admitted household that OWES, and the only vector where
+    /// worksheet line 4 is STRICTLY BETWEEN zero and the §1211(b) allowance.**
+    ///
+    /// Schedule C gross $18,000, a $45,000 long-term capital loss carried in. The §1211(b) allowance
+    /// and the §164(f) half-SE deduction land taxable income just below zero, so the year absorbs
+    /// SOME of the allowance but not all of it — `line4 = line2.min(line3)` with both operands
+    /// distinct. Every other vector in this module sits at one end or the other, where a wrong
+    /// `line4` is invisible.
+    ///
+    /// ★ And it OWES: self-employment tax is not reduced by a capital loss, so a household with $0 of
+    /// taxable income still writes a cheque. The lift admits a filer who owes money, not only one who
+    /// is owed a refund — which is the shape that makes the widening consequential.
+    ///
+    /// ★★ The PERSISTED figure is the whole-dollar one. The exact worksheet line 13 is $42,871.66;
+    /// what is stored — and what next year's Schedule D lines 6 and 14 will carry — is $42,872.
+    ///
+    /// Mutations that MUST red, BOTH needed because each pins one side of the partial:
+    ///   (a) `line4 = line2` (the flat rule) ⇒ line 13 becomes 42,000;
+    ///   (b) `line4 = Usd::ZERO` (carry everything at the floor) ⇒ line 13 becomes 45,000.
+    #[test]
+    fn the_owing_household_at_the_floor_files_and_owes() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            schedule_c: Some(crate::tax::return_inputs::ScheduleCInputs {
+                owner: Owner::Taxpayer,
+                business_description: "Bitcoin mining".into(),
+                naics_code: "518210".into(),
+                other_gross_receipts: dec!(18000),
+                // Skippables — a trade or business makes both §199A questions live, and they are
+                // answered here so this test keeps testing the §1212(b) worksheet.
+                is_sstb: Some(false),
+                is_cooperative_patron: Some(false),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        ri.capital_loss_carryforward_in = Carryforward {
+            short: Usd::ZERO,
+            long: dec!(45000),
+        };
+        crate::tax::testonly::answer_all_live_declarations(&mut ri);
+
+        let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
+
+        // ── PREMISES. ─────────────────────────────────────────────────────────────────────────────
+        assert_eq!(
+            crate::tax::return_refuse::screen_inputs(&ri, &table, &p).map(|r| r.reason),
+            None
+        );
+        assert_eq!(
+            screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024).map(|r| r.reason),
+            None,
+            "premise: H9 FILES — before the lift this household was refused"
+        );
+        assert_eq!(ar.taxable_income, Usd::ZERO, "premise: it is AT the floor");
+
+        let w = ar
+            .capital_loss_carryover_worksheet
+            .expect("the worksheet applies: 1040 line 15 would be below zero");
+        // ── THE PARTIAL. ──────────────────────────────────────────────────────────────────────────
+        assert!(
+            w.line4 > Usd::ZERO && w.line4 < w.line2,
+            "★★★ THE POINT OF THIS VECTOR: line 4 is STRICTLY between zero and the §1211(b) \
+             allowance — {} against a line 2 of {}. A rule that carried everything at the floor and \
+             a rule that always absorbed the full allowance BOTH pass every other vector here.",
+            w.line4,
+            w.line2
+        );
+        assert_eq!(w.line1, dec!(-871.66), "1040 line 15, unfloored");
+        assert_eq!(w.line3, dec!(2128.34), "line 1 + line 2, floored at zero");
+        assert_eq!(w.line4, dec!(2128.34), "the smaller of line 2 and line 3");
+        assert_eq!(w.line11, Some(dec!(2128.34)), "line 4 − line 5");
+        assert_eq!(w.line13, Some(dec!(42871.66)), "45,000 − 2,128.34");
+
+        // ── IT OWES — self-employment tax, which no capital loss reduces. ─────────────────────────
+        assert!(
+            ar.total_tax > Usd::ZERO,
+            "★ a $0-taxable-income household that still writes a cheque: {}",
+            ar.total_tax
+        );
+
+        // ── AND THE PERSISTED FIGURE IS THE WHOLE-DOLLAR ONE. ────────────────────────────────────
+        let next = apply_carryover_writeback(
+            &ar,
+            &ri,
+            &empty_ledger(),
+            2024,
+            ReturnInputs::default(),
+            false,
+        )
+        .expect("the write-back succeeds");
+        assert_eq!(
+            next.capital_loss_carryforward_in,
+            Carryforward {
+                short: Usd::ZERO,
+                long: dec!(42872),
+            },
+            "★★ $42,871.66 exact becomes $42,872 stored — the figure the filer will read off next \
+             year's Schedule D line 14 and sign for"
+        );
+    }
+
     /// ★★★ **K2 — (A)'s CENTRAL SAFETY CLAIM: the lift moves no printed line.**
     ///
     /// Deleting a screen changes what is EMITTED, never what is COMPUTED — `screen_absolute` runs
@@ -8460,53 +8604,372 @@ mod tests {
         );
     }
 
-    /// ★★★ **r3 I-4 — a provenance stamp is a CLAIM OF KNOWLEDGE, and this one was unfounded.**
+    /// ★★★ **K6 — r3 I-4's KILL, RE-ARMED. A computed ZERO must never silence the advisory.**
     ///
-    /// `apply_carryover_writeback` stamped `capital_loss_carryforward_in_provenance = Computed`
-    /// without ever assigning the value. (At the time there was nothing to assign, because the
-    /// §1211/§1212 Capital Loss Carryover Worksheet was unmodeled — **no longer true since N1**:
-    /// `AbsoluteReturn::capital_loss_carryforward_out` now exists. The finding below is unaffected;
-    /// only its premise moved, and whether `--write-carryover` should roll the new value is filed as
-    /// phase-1 residue rather than answered here.) The
-    /// field's own doc says `Computed` means btctax "derived it from a prior year it actually
-    /// computed"; it had derived nothing. The damage was silence: `BenefitCarryoversNotStated`
-    /// defines "unknown" as `zero && User`, so the false stamp made next year stop telling a filer
-    /// that btctax has no capital-loss carryover on file — for a filer who may genuinely have one.
+    /// r3 I-4 found `apply_carryover_writeback` stamping `capital_loss_carryforward_in_provenance =
+    /// Computed` on a value it never assigned. The damage was SILENCE:
+    /// `BenefitCarryoversNotStated` defines "unknown" as `zero && User`, so the false stamp made next
+    /// year stop telling a filer that btctax has no capital-loss carryover on file — for a filer who
+    /// may genuinely have one.
     ///
-    /// Mutation-verified: restoring the stamp reds this test.
+    /// (B) writes the value now, so the finding cannot be re-run as "the stamp is unfounded because
+    /// nothing is written". Its reasoning is unchanged, and this is the case it still governs: year Y
+    /// was NEVER ASKED (`{0,0}` / `User`) **and** produced NO carryover-out. There is nothing to
+    /// descend from, so no stamp is founded — and the `grounded` predicate is the only thing standing
+    /// between that and the old defect.
+    ///
+    /// ★★★ **THE ADVISORY IS ASSERTED, NOT ONLY THE STAMP.** The stamp is a means; the advisory is
+    /// the harm. And NO VALUE ASSERTION CAN CATCH THIS — the stored amount is `{0,0}` whether the
+    /// stamp is written or not, which is exactly why r3 I-4 shipped in the first place.
+    ///
+    /// Mutation that MUST red: drop the `grounded` predicate (stamp unconditionally) ⇒ BOTH halves.
     #[test]
-    fn the_writeback_does_not_claim_to_have_computed_a_capital_loss_carryover() {
+    fn a_computed_zero_never_silences_the_benefit_carryover_advisory() {
+        use crate::tax::advisories::{advisories_for, Advisory};
+
+        // Year Y: no carryover in, nothing asked, and no loss of its own to carry out.
+        let ri = plain_ri();
         let ar = ar_with_carryovers();
+        assert_eq!(
+            ri.capital_loss_carryforward_in,
+            Carryforward::default(),
+            "premise: year Y was never asked"
+        );
+        assert_eq!(
+            ri.capital_loss_carryforward_in_provenance,
+            CarryProvenance::User,
+            "premise: …and carries the default provenance, which is what 'nobody said' looks like"
+        );
+        assert_eq!(
+            ar.capital_loss_carryforward_out,
+            Carryforward::default(),
+            "premise: year Y produced NO carryover-out either — with a carryover-out there would be \
+             something to descend from and the stamp would be founded"
+        );
+
         let next = apply_carryover_writeback(
             &ar,
-            &plain_ri(),
+            &ri,
             &empty_ledger(),
             2024,
             ReturnInputs::default(),
             false,
         )
         .unwrap();
-
         assert_eq!(
             next.capital_loss_carryforward_in,
             Carryforward::default(),
-            "nothing writes this — the §1211/§1212 worksheet is unmodeled"
+            "there is no figure to write"
         );
         assert_eq!(
             next.capital_loss_carryforward_in_provenance,
             CarryProvenance::User,
-            "★ so the provenance must stay at its default. Stamping `Computed` on a value the code \
-             never assigns is a false claim of knowledge, and it silences the advisory that tells \
-             the filer btctax has no carryover on file"
+            "★ …so the provenance must stay at its default. `Computed` here would be a claim that \
+             btctax derived the zero from a year it computed, and it derived nothing."
         );
 
-        // The CHARITABLE sibling is honest — the value IS written one line above the stamp — so the
-        // fix must not have removed it wholesale.
+        // ★ AND THE HARM ITSELF: next year still tells the filer btctax has no carryover on file.
+        let mut y1 = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2(Owner::Taxpayer, dec!(60000), dec!(60000), dec!(60000))],
+            ..next.clone()
+        };
+        crate::tax::testonly::answer_all_live_declarations(&mut y1);
+        let ar1 = assemble_absolute(
+            &y1,
+            &empty_ledger(),
+            &ty2024_params(),
+            &real_2024_table(),
+            2024,
+        );
+        let advs = advisories_for(&y1, &empty_ledger(), &ar1, &ty2024_params(), 2024);
+        assert!(
+            advs.iter().any(|a| matches!(
+                a,
+                Advisory::BenefitCarryoversNotStated {
+                    capital_loss: true,
+                    ..
+                }
+            )),
+            "★★★ THE r3 I-4 DAMAGE, asserted directly: next year must still say it has no \
+             capital-loss carryover on file. A false `Computed` stamp silences exactly this, and \
+             every value assertion above stays green while it does. Got: {advs:?}"
+        );
+
+        // The CHARITABLE sibling is honest — its value IS assigned one line above its stamp — so the
+        // `grounded` gate must not have been generalised into removing that.
         assert_eq!(
             next.charitable_carryover_in_provenance,
             CarryProvenance::Computed,
             "the charitable stamp is founded: `charitable_carryover_out` is real and is assigned"
         );
+    }
+
+    /// ★★★ **K7 — the stamp is founded ONLY because the value is assigned.**
+    ///
+    /// The positive half of r3 I-4. Year Y brings a real `User` carryover in and produces a real
+    /// carryover-out, so the figure descends from the filer's own testimony: btctax may say
+    /// `Computed`, because it computed it.
+    ///
+    /// Mutation that MUST red: remove the value assignment and keep the stamp ⇒ the VALUE assertion
+    /// reds. The test must be unable to pass on a stamp alone, which is the failure mode of the
+    /// version this replaces.
+    #[test]
+    fn the_writeback_stamps_computed_only_because_it_assigns_the_value() {
+        let p = ty2024_params();
+        let table = real_2024_table();
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2(Owner::Taxpayer, dec!(60000), dec!(60000), dec!(60000))],
+            donations_had_restrictions: Some(false),
+            ..Default::default()
+        };
+        ri.capital_loss_carryforward_in = Carryforward {
+            short: Usd::ZERO,
+            long: dec!(5000),
+        };
+        crate::tax::testonly::answer_all_live_declarations(&mut ri);
+        let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
+        assert!(
+            ar.capital_loss_carryforward_out.long > Usd::ZERO,
+            "premise: there must BE a carryover-out to roll, or this asserts nothing"
+        );
+
+        let next = apply_carryover_writeback(
+            &ar,
+            &ri,
+            &empty_ledger(),
+            2024,
+            ReturnInputs::default(),
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            next.capital_loss_carryforward_in,
+            Carryforward {
+                short: round_dollar(ar.capital_loss_carryforward_out.short),
+                long: round_dollar(ar.capital_loss_carryforward_out.long),
+            },
+            "★ the VALUE is written — and rounded to whole dollars, because it becomes next year's \
+             Schedule D lines 6 and 14, which the filer reads off the page and swears to"
+        );
+        assert_eq!(
+            next.capital_loss_carryforward_in_provenance,
+            CarryProvenance::Computed,
+            "…and only now is the stamp founded"
+        );
+    }
+
+    /// ★★★ **K16 — the write-back is ATOMIC, and the reason is a TAX mechanism, not tidiness.**
+    ///
+    /// It is tempting to let the capital-loss half survive a charitable refusal: the two carryovers
+    /// look independent. They are not. Worksheet line 1 is `agi − total_deductions`, so a charitable
+    /// deduction btctax cannot vouch for makes line 1 **more negative**, line 3 and line 4 **smaller**,
+    /// and the surviving capital loss **LARGER**. Persisting that half alone would overstate next
+    /// year's carryover using a deduction btctax has just refused to stand behind.
+    ///
+    /// ★★★ **THE ATOMICITY ITSELF IS STRUCTURAL, NOT TESTED — and saying so is the point.**
+    /// `apply_carryover_writeback` takes `next_year` **by value** and returns
+    /// `Result<ReturnInputs, String>`, so on the `Err` path the mutated copy is dropped and the caller
+    /// keeps its own. A partial application is not merely absent; it is unrepresentable, which is a
+    /// stronger guarantee than any assertion and the reason none is written for it. A test asserting
+    /// "nothing was applied" against a value the caller never receives would be theatre.
+    ///
+    /// So what IS asserted is what a filer can actually be harmed by:
+    ///   (a) the refusal TEXT names the capital-loss carryover among what was withheld. It enumerates
+    ///       what was not persisted so the filer can enter it by hand, and that enumeration has gone
+    ///       short once already (it said "all three" while the code wrote three and is now four);
+    ///   (b) the same household WITH a charitable deduction has a strictly LARGER capital-loss
+    ///       carryover-out than without it, which is the mechanism spelled out above, executed. This
+    ///       is what makes (a) a correctness rule and not housekeeping.
+    ///
+    /// Mutations that MUST red:
+    ///   (a) drop "CAPITAL-LOSS" from the §170(f)(8) refusal text ⇒ the enumeration half;
+    ///   (b) pass the FLOORED `taxable_income` as worksheet line 1 instead of the signed one ⇒ the
+    ///       second half, because at the floor the two deductions stop being distinguishable.
+    #[test]
+    fn an_unvouched_charitable_deduction_blocks_the_capital_loss_roll_too() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+
+        // An itemizing floor-ish household with a real capital loss of its own AND a $4,000 gift
+        // whose §170(f)(8) acknowledgment has not been declared.
+        // ★ The $18,000 of mortgage interest is not decoration: it is what makes BOTH households
+        //   itemize, so the charitable deduction actually reaches `total_deductions` and therefore
+        //   worksheet line 1. Without it the ceiling-limited gift loses to the standard deduction and
+        //   the second half compares two identical returns.
+        let sched_a = || {
+            Some(crate::tax::return_inputs::ScheduleAInputs {
+                mortgage_interest_1098: dec!(18000),
+                ..Default::default()
+            })
+        };
+        let build = |cwa: Option<bool>, gift: bool, itemize: bool| {
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                donations_had_restrictions: Some(false),
+                charitable_cwa_obtained: cwa,
+                schedule_a: if itemize { sched_a() } else { None },
+                w2s: vec![w2(Owner::Taxpayer, dec!(20000), dec!(20000), dec!(20000))],
+                ..Default::default()
+            };
+            ri.capital_loss_carryforward_in = Carryforward {
+                short: Usd::ZERO,
+                long: dec!(60000),
+            };
+            crate::tax::testonly::answer_all_live_declarations(&mut ri);
+            let st = if gift {
+                donation_state(dec!(20000))
+            } else {
+                LedgerState::default()
+            };
+            let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+            (ri, st, ar)
+        };
+
+        // ── (a) the refusal blocks everything, and SAYS SO. ──────────────────────────────────────
+        // ★ STANDARD DEDUCTION here, deliberately — this refusal only ever bites the
+        //   standard-deduction DEFERRAL donor in production: an itemizer with an unanswered
+        //   acknowledgment refuses at `screen_absolute` and never reaches the write-back at all. A
+        //   fixture that itemized would be exercising a state the product cannot get into.
+        let (ri, st, ar) = build(None, true, false);
+        assert!(
+            cwa_unvouched_carryover(&ri, &ar, &st, 2024).is_some(),
+            "premise: the §170(f)(8) gate must actually be armed on this fixture, or the atomicity \
+             claim below is never exercised"
+        );
+        assert!(
+            ar.capital_loss_carryforward_out.long > Usd::ZERO,
+            "premise: there must BE a capital-loss carryover to leak, or 'nothing was applied' is \
+             vacuously true"
+        );
+        let err = apply_carryover_writeback(&ar, &ri, &st, 2024, ReturnInputs::default(), false)
+            .expect_err("an unvouched §170(f)(8) carryover refuses the whole write-back");
+        assert!(
+            err.contains("CAPITAL-LOSS"),
+            "★ the refusal must TELL the filer the capital-loss carryover was not written either — \
+             the text enumerates what was withheld, and it went short once already. Got: {err}"
+        );
+
+        // ── (b) the MECHANISM: the charitable deduction makes the carryover-out LARGER. ────────────
+        //
+        // Same household, acknowledgment declared, so the write succeeds — and compare against the
+        // same household with no gift at all.
+        // ★ ITEMIZING here, equally deliberately: the mechanism under test is the charitable
+        //   deduction moving worksheet line 1, and a deduction that loses to the standard deduction
+        //   moves nothing. The acknowledgment is declared, so both returns are ones btctax will file.
+        let (_, _, ar_gift) = build(Some(true), true, true);
+        let (_, _, ar_no) = build(Some(true), false, true);
+
+        let w_gift = ar_gift
+            .capital_loss_carryover_worksheet
+            .expect("the gift household uses the worksheet");
+        let w_no = ar_no
+            .capital_loss_carryover_worksheet
+            .expect("the no-gift household uses the worksheet");
+        assert!(
+            w_gift.line1 < w_no.line1,
+            "★ the deduction makes worksheet line 1 MORE negative: {} vs {}",
+            w_gift.line1,
+            w_no.line1
+        );
+        assert!(
+            w_gift.line4 < w_no.line4,
+            "…so line 4 (what the year actually absorbed) is SMALLER: {} vs {}",
+            w_gift.line4,
+            w_no.line4
+        );
+        assert!(
+            ar_gift.capital_loss_carryforward_out.long > ar_no.capital_loss_carryforward_out.long,
+            "★★ …and the surviving loss is therefore strictly LARGER, which is exactly why the \
+             capital-loss half must not outlive a charitable refusal: {} vs {}",
+            ar_gift.capital_loss_carryforward_out.long,
+            ar_no.capital_loss_carryforward_out.long
+        );
+    }
+
+    /// ★★★ **K8 — a USER-ENTERED capital-loss carryover is never overwritten without `--force`.**
+    ///
+    /// The fourth `!force` guard. Next year's lines 6 and 14 are the filer's own testimony; btctax's
+    /// figure must not silently replace it.
+    ///
+    /// ★ **A test exercising only `force = true` would pass with the guard deleted and be worthless**,
+    /// so the `force = false` half is the one that carries the weight — and the refusal TEXT is
+    /// asserted, because several refusals can come out of this function and "it errored" is not
+    /// evidence that THIS one fired.
+    ///
+    /// ★★ The third case is the one a naive guard breaks: a FRESH `{0,0}` next-year row also carries
+    /// `User` (it is the `CarryProvenance` default), so a guard keyed on provenance alone would refuse
+    /// every first write. A zero nobody entered is not testimony.
+    ///
+    /// Mutation that MUST red: delete the fourth arm ⇒ the `force = false` half.
+    #[test]
+    fn a_user_entered_capital_loss_carryover_is_not_overwritten_without_force() {
+        let p = ty2024_params();
+        let table = real_2024_table();
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2(Owner::Taxpayer, dec!(60000), dec!(60000), dec!(60000))],
+            donations_had_restrictions: Some(false),
+            ..Default::default()
+        };
+        ri.capital_loss_carryforward_in = Carryforward {
+            short: Usd::ZERO,
+            long: dec!(5000),
+        };
+        crate::tax::testonly::answer_all_live_declarations(&mut ri);
+        let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
+        let computed = Carryforward {
+            short: round_dollar(ar.capital_loss_carryforward_out.short),
+            long: round_dollar(ar.capital_loss_carryforward_out.long),
+        };
+        assert_ne!(
+            computed,
+            Carryforward {
+                short: Usd::ZERO,
+                long: dec!(40000)
+            },
+            "premise: btctax's figure must DIFFER from the user's, or 'not overwritten' is unfalsifiable"
+        );
+
+        // The filer typed their own carryover onto next year's row.
+        let user_row = ReturnInputs {
+            capital_loss_carryforward_in: Carryforward {
+                short: Usd::ZERO,
+                long: dec!(40000),
+            },
+            capital_loss_carryforward_in_provenance: CarryProvenance::User,
+            ..Default::default()
+        };
+
+        let err =
+            apply_carryover_writeback(&ar, &ri, &empty_ledger(), 2024, user_row.clone(), false)
+                .expect_err("★ a user-entered carryover must not be silently overwritten");
+        assert!(
+            err.contains("capital-loss carryover was user-entered") && err.contains("--force"),
+            "the refusal must name THIS carryover and the way out — several refusals leave this \
+             function, so a bare `is_err()` proves nothing. Got: {err}"
+        );
+
+        // …and `--force` is the way out.
+        let forced =
+            apply_carryover_writeback(&ar, &ri, &empty_ledger(), 2024, user_row, true).unwrap();
+        assert_eq!(
+            forced.capital_loss_carryforward_in, computed,
+            "`--force` overwrites it with the computed §1212(b) figure"
+        );
+
+        // ★ A FRESH `{0,0}` / `User` row still writes without `--force`.
+        let fresh = apply_carryover_writeback(
+            &ar,
+            &ri,
+            &empty_ledger(),
+            2024,
+            ReturnInputs::default(),
+            false,
+        )
+        .expect("a fresh next-year row is not the filer's testimony and must not be wedged");
+        assert_eq!(fresh.capital_loss_carryforward_in, computed);
     }
 
     /// Write-back into a FRESH next year: the computed carryovers become next year's carryover-in, stamped

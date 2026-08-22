@@ -666,13 +666,18 @@ fn the_limitations_row_for_the_1211_1212_edge_is_true_of_the_code() {
         "the filer must be told both figures by name: {text}"
     );
 
-    // ── The write-back rolls the charitable and QBI carryovers, and NOT the capital-loss one. ───────
+    // ── The write-back rolls FOUR carryovers, and the capital-loss one is now among them. ─────────
+    //
+    // ★★★ THIS HALF USED TO ASSERT THE OPPOSITE, and its own message said what to do about it: *"If
+    //     the write-back learns to roll it, the row must change in the same commit."* It learned;
+    //     the row changed; this assertion is the flipped one. The trip wire worked — it went RED on
+    //     the write-back commit before a single word of LIMITATIONS.md had been touched.
     let (ri, state) = household(r#"{"filing_status":"Single","long_term_capital_gains":-20000}"#);
     let ar = assemble_absolute(&ri, &state, &params, &table, 2024);
     assert_eq!(
         ar.capital_loss_carryforward_out.long,
         dec!(20000),
-        "the figure that is NOT rolled must first exist, or this asserts nothing"
+        "the figure that is rolled must first exist, or this asserts nothing"
     );
     let next = btctax_core::tax::return_1040::apply_carryover_writeback(
         &ar,
@@ -685,19 +690,24 @@ fn the_limitations_row_for_the_1211_1212_edge_is_true_of_the_code() {
     .expect("the write-back succeeds over an empty next year");
     assert_eq!(
         next.capital_loss_carryforward_in,
-        btctax_core::tax::types::Carryforward::default(),
-        "`--write-carryover` does NOT roll the capital-loss carryover-out into next year — \
-         LIMITATIONS.md tells the filer to carry it by hand, and that instruction is only honest \
-         while this is true. If the write-back learns to roll it, the row must change in the same \
-         commit."
+        btctax_core::tax::types::Carryforward {
+            short: Usd::ZERO,
+            long: dec!(20000),
+        },
+        "★ `--write-carryover` NOW rolls the §1212(b) carryover-out into next year's Schedule D \
+         lines 6 and 14, as WHOLE DOLLARS — the figure the filer will read off the page"
+    );
+    assert_eq!(
+        next.capital_loss_carryforward_in_provenance,
+        btctax_core::tax::return_inputs::CarryProvenance::Computed,
+        "…and the stamp is founded, because year Y computed a real carryover-out of its own"
     );
 
-    // ★★★ …AND THE ROW NOW SAYS **THREE**, SO THE THREE ARE ASSERTED (final review 6 / phase-4 N-1).
+    // ★★★ …AND THE ROW NOW SAYS **FOUR**, SO THE FOUR ARE ASSERTED (final review 6 / phase-4 N-1).
     //
-    // The bullet used to name "the charitable and QBI-REIT/PTP carryovers" — two, where the code
-    // writes three. The load-bearing claim (capital-loss is NOT among them) was true and held; the
-    // enumeration beside it was not held by anything, which is how it came to be short. A promise
-    // surface that lists what a command does needs the LIST pinned, not just the exclusion.
+    // The bullet once named "the charitable and QBI-REIT/PTP carryovers" — two, where the code wrote
+    // three. The enumeration beside the load-bearing claim was held by nothing, which is how it came
+    // to be short. A promise surface that lists what a command does needs the LIST pinned.
     assert_eq!(
         next.charitable_carryover_in_provenance,
         btctax_core::tax::return_inputs::CarryProvenance::Computed,
@@ -711,8 +721,15 @@ fn the_limitations_row_for_the_1211_1212_edge_is_true_of_the_code() {
     assert_eq!(
         next.qbi.qbi_carryforward_in_provenance,
         btctax_core::tax::return_inputs::CarryProvenance::Computed,
-        "★ (3 of 3) the QUALIFIED-BUSINESS loss carryforward — Form 8995 line 16. This is the one \
+        "★ (3 of 4) the QUALIFIED-BUSINESS loss carryforward — Form 8995 line 16. This is the one \
          the LIMITATIONS bullet omitted while the paragraph two sections above it counted correctly."
+    );
+    assert_eq!(
+        next.capital_loss_carryforward_in_provenance,
+        btctax_core::tax::return_inputs::CarryProvenance::Computed,
+        "★ (4 of 4) the §1212(b) CAPITAL-LOSS carryover — Schedule D lines 6 and 14. Newly among \
+         them, and the reason every 'all three' in the write-back's own refusal texts had to become \
+         'all four' in the same commit: those texts tell a filer what was NOT persisted."
     );
 }
 
