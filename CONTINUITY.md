@@ -1,5 +1,109 @@
 # CONTINUITY — bitcoin_tax (TaxApp)
 
+_Last updated: **2026-08-22**. Written at a deliberate pause; safe to exit. **Read this file first.**_
+
+---
+
+# ★★★ RESUME POINT — machine-check two Important findings, then fold
+
+## Where things stand
+
+Branch **`feat/filing-readiness`** — 54 commits ahead of `main`, **2763 tests green**, clippy/fmt/
+pii-scan clean, **pushed** to `origin/feat/filing-readiness`.
+**`main` is UNTOUCHED at `3fc88497`.** Nothing merged, tagged, or published. That is the owner's call.
+
+Delivered: the whole filing-readiness plan (phases 1-4) plus **two owner-authorised widenings** —
+(A) a taxable-income<=0 year with a capital-loss carryforward-IN now FILES (refusal variant deleted),
+and (B) `--write-carryover` now ROLLS the §1212(b) capital-loss carryover, stamped `Computed`.
+
+**Five independent reviews are persisted VERBATIM in `reviews/`** (phase1, phase2, phase4, final,
+widening). Read those rather than re-deriving; every commit message carries its mutations with the
+verbatim RED output.
+
+## THE NEXT ACTION — do this first
+
+`reviews/filing-readiness-widening-review.md` (persisted at `02939632`, **NOT folded**) returned
+**needs-changes: 2 Important + 1 Minor**. (A) is SOUND, all nine fold commits are SOUND, the refusal
+surface coheres.
+
+★ **The reviewer named its own weak point, and the owner asked for it to be checked before any edit:**
+
+> *"If `wrote`/`grounded` interact somewhere I did not see — e.g. a caller that suppresses the summary
+> or re-stamps on the grounded=false path — then B-1/B-2 evaporate and the verdict is `sound`."*
+
+**MACHINE-CHECK BOTH BEFORE TOUCHING A LINE.** This session already caught one claimed-but-
+unreproducible finding (a mutation whose kill did not reproduce), so a fold on a code-reading is
+exactly the failure mode to avoid. Reproduce each as a failing test or a printed observation first;
+if one does not reproduce, say so and do NOT "fix" it.
+
+**B-1 (Important, reachable in v1 today).** The write-back summary claims authorship of a write the
+`grounded` gate deliberately skipped. The four `wrote.push` lines in
+`crates/btctax-cli/src/cmd/tax.rs` read the ROW FIELD, not the assignment, so a year with no
+capital-loss grounding still prints *"capital-loss carryover short $0.00 / long $0.00"* as written
+back — while nothing was stamped and next year's `BenefitCarryoversNotStated` stays live for exactly
+that carryover.
+★ It is the DUAL of the defect `K11` exists for: K11 checks observed ⊆ summary, never summary ⊆
+observed, and its fixture assigns all four carryovers, so it structurally cannot see this.
+**To reproduce:** year Y with a charitable/QBI carryover, no capital-loss activity, never asked
+(carryforward-in {0,0} `User`, worksheet returns `None`) → roll succeeds, summary lists the
+capital-loss line anyway.
+
+**B-2 (Important, owning phase = TY2025).** A `Computed` capital-loss stamp has NO retraction path,
+and the LIMITATIONS cure sentence fails on that branch: the re-roll skips (grounded=false, and
+`--force` does not reach it), and `income import` with an explicit zero is RESURRECTED by the T6 arm
+because TOML cannot distinguish an explicit zero from an absent key. The only escape is hand-writing
+the provenance in the TOML — which also means **the import surface can FORGE a `Computed` stamp**,
+silencing M4 via `m4_authority`'s `(None, Computed) -> None`.
+**Reviewer's suggestion:** on a grounded=false roll over an existing `Computed` value, clear-to-`User`
+or warn; normalize provenance to `User` at import parse.
+
+**Minor.** The canceled-debt refusal implies a cure the gate does not admit — the truthful answer
+stays YES for the exclusion year, so the return refuses again after the filer does the hand work.
+That sentence is true only of the FOLLOWING year's return. Reword to say btctax cannot file the
+exclusion year itself.
+
+**Then:** fold in its own commit (persist-then-fold is already half done — the report is committed),
+re-gate `make check` + `cargo fmt --all --check`, and re-review only if a fold is non-trivial.
+
+## ★★ STANDING CONSTRAINTS — owner-set, do not drift from these
+
+- **ONE AGENT AT A TIME. NO PARALLELISM. NO `Workflow`. Ultracode OFF.** Delegation is still fine;
+  fleet size and parallelism are not. When in doubt, do it inline.
+- If workflows ever return: **<=2.4M subagent tokens and <=20 agents** per run. Bound data-dependent
+  fan-out IN THE SCRIPT (a 45-agent/4.8M run came from one high-effort refuter per candidate break).
+- **DO NOT merge to `main`, tag, or publish.** Owner's call, and the last irreversible step here.
+- **Phase 5 (EITC/ACTC) is DEFERRED**, not cancelled — "we will get back to it someday". Fully scoped
+  as `FOLLOWUPS.md` **FR-16**, including the machine-verified oracle trap
+  (`design/direction/ORACLE-TRAP-credit-takeup.md`: taxcalc's DEFAULTS report EITC=$0 for a household
+  owed $4,778.18, position-dependently — it would have looked like a second oracle corroborating
+  btctax's own wrong zero). Do not start it without being asked.
+- **Neither oracle witnesses a carryover level** (taxcalc takes it as an INPUT; OTS emits none). That
+  is the §G-9 limit, not a gap — never propose an oracle check on it, and never add a corpus cell for
+  the newly-admitted household (the wage band is floored above the childless-EIC range on purpose, so
+  such a cell would be admitted only by an oracle that models the credit away — a false witness).
+
+## Repo hazards learned this session
+
+- **The pre-commit hook used to leak `GIT_DIR` into the test suite**, which re-inited the shared repo
+  as BARE and broke every `git add` with *"must be run in a work tree"*. Fixed at the hook
+  (`scripts/pre-commit`) and in the production path (`xtask harness_check`). If it ever recurs:
+  `git config core.bare false`.
+- **Worktree agents branch from `main`, not from the current branch.** Every delegated implementer
+  must run `git merge feat/filing-readiness --no-edit` FIRST and confirm the expected test count.
+  Phase 2 skipped this and cost a round of hand-resolved conflicts plus two compile breaks.
+- **The harness blocks subagents from writing report files.** Make delegated work durable through
+  COMMIT MESSAGES; the controller persists reviews verbatim in their own commit before folding.
+- Revert planted mutations with a **cp backup**, never `git checkout -- <file>`.
+- Assert a mutation's anchor matched **exactly once** before believing a result. That check caught
+  two bad plants this session.
+
+---
+
+<details>
+<summary>Superseded — the previous continuity document (v0.17.0 / income scrub), kept for history</summary>
+
+# CONTINUITY — bitcoin_tax (TaxApp)
+
 _Last updated: **2026-08-10** (v0.17.0 RELEASED and PUBLISHED — `income scrub` shipped). Written at a
 pause; safe to exit._
 
@@ -917,3 +1021,6 @@ consult should answer.
 | **§G-12** | btctax emits Form 8275 but **not 8275-R**, so a position contrary to a REGULATION cannot be disclosed — the duty is unrepresentable |
 | — | `AUTHORITY_CONFLICTS.md` is empty: we believe no reg governing our forms disagrees with the statute. **A statement about what we examined, not a guarantee.** |
 | — | **crates.io temp token still needs revoking** (from the v0.14.0 publish) |
+
+
+</details>
