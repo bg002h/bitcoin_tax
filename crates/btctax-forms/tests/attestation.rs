@@ -270,8 +270,20 @@ fn crypto_gift_5k() -> btctax_core::state::Removal {
 /// filer claims none, so gating them would be asking a question whose answer changes no figure and
 /// refusing a return that is already correct. This household never answers it, and files.
 ///
-/// ★★ Same for the P1 mortgage ceiling and the Form 4952 line-9 bound, which phase 2's review C
-/// re-scoped to returns that DEDUCT: this filer has neither, and must not be caught by either.
+/// ★★ **AND THE ELECTION IS THE ONLY THING SHUTTING THE GATE** — see the `state_income_tax` comment
+/// in the body. The gate is `deduction_is_itemized && (cwa_claimed > 0 || cwa_deferred > 0)`; this
+/// fixture makes the second conjunct TRUE ($5,000 on Schedule A line 12) so that the first is the
+/// binding one. Both premises are asserted below, so the KAT cannot pass by never reaching the gate.
+/// The first version of this KAT had no Schedule-A axis at all, which left every conjunct false — it
+/// was green under the very mutation its commit message claimed had killed it (phase-4 review I-1),
+/// and phase 2's own scoping test at `return_1040.rs:7268-7276` had already written down the trap.
+///
+/// ★ The P1 mortgage ceiling and the Form 4952 line-9 bound are NOT exercised here: this filer has
+/// neither a mortgage nor investment interest, so those two refusals are unreachable for reasons that
+/// have nothing to do with the election, and this KAT proves nothing about them. They are covered
+/// non-vacuously by `kat_attestation.rs`'s
+/// `the_mortgage_debt_limit_question_is_asked_on_inputs_and_refuses_on_the_deduction`, which is the
+/// model this KAT should have followed.
 ///
 /// **If this KAT ever shows L7 being asked the acknowledgment question, that is a P4 liveness defect
 /// — the KAT is not to be adjusted to accept it.**
@@ -279,6 +291,20 @@ fn crypto_gift_5k() -> btctax_core::state::Removal {
 fn a_five_thousand_dollar_gift_under_the_standard_deduction_files_no_schedule_a_and_no_8283() {
     let mut i = zero_inputs("Single");
     i.w2_income = 30_000.0;
+    // ★★★ THE $1,000 THAT MAKES THIS KAT NON-VACUOUS — do not delete it as an unused axis.
+    //
+    // Without a Schedule-A axis, `build_golden_return` leaves `ri.schedule_a` = `None`, so
+    // `ar.schedule_a` is `None` too and `cwa_claimed` is $0; the gift is under the CapGainProp30
+    // ceiling so `charitable_carryover_out` is empty and `cwa_deferred_to_carryover` is $0. ALL THREE
+    // conjuncts of the P4 gate would then be false, `deduction_is_itemized` would never be the
+    // BINDING one, and dropping it from the gate would leave this KAT green — which is exactly what
+    // happened (the phase-4 review re-ran the claimed kill and it did not reproduce).
+    //
+    // $1,000 of state income tax gives the return a Schedule A carrying `charitable_noncash_12` =
+    // $5,000, so `cwa_claimed` = $5,000 > 0 and the gift clears the $250 threshold — while $6,000 of
+    // itemized deductions still loses to the $14,600 standard deduction, so the ELECTION is
+    // unchanged. `deduction_is_itemized` is now the ONLY thing shutting the gate.
+    i.state_income_tax = 1_000.0;
     let (ri, mut state) = build_golden_return(&i);
     state.removals.push(crypto_gift_5k());
 
@@ -293,8 +319,30 @@ fn a_five_thousand_dollar_gift_under_the_standard_deduction_files_no_schedule_a_
 
     assert!(
         !filed.ar.deduction_is_itemized,
-        "this household must take the STANDARD deduction — a $5,000 gift does not clear $14,600, and \
-         if it ever did the whole KAT would be testing the other branch"
+        "this household must take the STANDARD deduction — $6,000 of itemized deductions does not \
+         clear $14,600, and if it ever did the whole KAT would be testing the other branch"
+    );
+    // ★★ THE PREMISE ASSERTIONS — each one names a conjunct that must be TRUE, so the gate can only
+    //    be shut by the election. A fixture that stopped reaching the gate would red HERE rather than
+    //    passing by never arriving.
+    assert!(
+        filed
+            .ar
+            .schedule_a
+            .as_ref()
+            .is_some_and(|a| a.charitable_noncash_12 == dec!(5000)),
+        "the return must CARRY the $5,000 gift on Schedule A line 12 — that is `cwa_claimed` > 0, \
+         the conjunct that makes `deduction_is_itemized` the binding one. Schedule A: {:?}",
+        filed
+            .ar
+            .schedule_a
+            .as_ref()
+            .map(|a| a.charitable_noncash_12)
+    );
+    assert!(
+        filed.ar.charitable_carryover_out.is_empty(),
+        "…and nothing defers: the $5,000 gift is under the CapGainProp30 ceiling, so the OTHER \
+         disjunct is genuinely $0 and the claimed-amount one is doing the work"
     );
     let names = form_names(&filed.forms);
     assert!(
