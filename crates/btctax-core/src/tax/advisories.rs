@@ -146,6 +146,21 @@ pub enum Advisory {
     /// The ledger classified crypto donations assuming a **public charity (50%-org)** donee. A private
     /// foundation is the 20%-ceiling / basis class (which v1 refuses), so the donee must be verified.
     CharitableDoneeAssumedPublicCharity { donations: usize },
+    /// ★★★ **§170(f)(11)(D) — the qualified appraisal must be ATTACHED TO THE RETURN.** Distinct from
+    /// §170(f)(11)(C)'s $5,000 rule, which requires the filer to *obtain* an appraisal and keep it:
+    /// over $500,000 the appraisal itself is a required attachment, and a return that omits it fails
+    /// the substantiation requirement for the whole claim.
+    ///
+    /// ★★ `claimed` is the **pre-ceiling** amount claimed for the property — post-§170(e) reduction,
+    /// aggregated across all similar items given in the year, and determined WITHOUT regard to the
+    /// §170(b) AGI ceiling or the §170(d) carryover split. NOT Schedule A line 12: keying it to the
+    /// post-ceiling line would make a statutory attachment depend on AGI, and Reg §1.170A-16(f)(3)
+    /// extends the same duty to *"the return for any carryover year"*, which only coheres if the
+    /// trigger follows the CLAIM across years rather than the annual allowed slice.
+    ///
+    /// ★ btctax cannot produce the appraisal — only the appraiser can — so this is an advisory with a
+    /// matching MANIFEST line, not a refusal: the packet tells the filer exactly what to staple to it.
+    QualifiedAppraisalMustBeAttached { claimed: Usd },
     /// §3.4 conservative omission (SPEC §1.2): the education, dependent-care, retirement-savings
     /// (saver's), residential-energy and adoption credits are not computed — Schedule 3 Part I is
     /// $0 apart from the foreign tax credit. Purely taxpayer-FAVORABLE, so it advises, never refuses.
@@ -364,6 +379,21 @@ impl Advisory {
                  PUBLIC CHARITY (50%-organization) donee: long-term gifts at fair market value under the \
                  30%-of-AGI ceiling. If the donee is a PRIVATE FOUNDATION, the correct treatment is the \
                  20% ceiling at BASIS (which v1 refuses). Verify who you gave to."
+            ),
+            Advisory::QualifiedAppraisalMustBeAttached { claimed } => format!(
+                "ATTACH THE QUALIFIED APPRAISAL — you are claiming {} of charitable deduction for \
+                 donated property, and §170(f)(11)(D) says that \"in the case of contributions of \
+                 property for which a deduction of more than $500,000 is claimed\", the substantiation \
+                 requirements are met only if you ATTACH a qualified appraisal to the return. This is \
+                 more than the $5,000 rule, which only asks you to obtain one and keep it: over \
+                 $500,000 the appraisal is part of the filed return, and without it the deduction can \
+                 be denied in full. btctax cannot write an appraisal — only a qualified appraiser \
+                 can — so obtain it and staple it to the return ON WHICH YOU CLAIM THE DEDUCTION \
+                 (manifest.txt lists it whenever this packet is that return). ★ The duty RECURS: \
+                 Reg §1.170A-16(f)(3) requires the appraisal attached to the return for any \
+                 §170(d) carryover year too, so attach a copy again in every year this gift carries \
+                 into.",
+                fmt_usd(*claimed)
             ),
             Advisory::OtherCreditsOmitted =>
                 "OTHER CREDITS NOT COMPUTED — v1 does not compute the education (Form 8863), \
@@ -963,6 +993,24 @@ pub fn advisories(
         out.push(Advisory::CharitableDoneeAssumedPublicCharity { donations });
     }
 
+    // ★★★ §170(f)(11)(D) — over $500,000 CLAIMED for the property, the qualified appraisal is an
+    //     ATTACHMENT to the return, not merely a record to keep.
+    //
+    // ★★ THE OPERAND IS `year_donation_deduction` — the pre-§170(b) claimed amount aggregated over
+    //    all similar items — and NOT Schedule A line 12. Wiring it to the post-ceiling line would
+    //    make a statutory attachment depend on AGI: the identical $700,000 gift would require an
+    //    appraisal for a $3M-AGI filer and not for a $1M-AGI one, whose year-1 Schedule A allows only
+    //    $300,000. Reg §1.170A-16(f)(3) settles it the other way by extending the duty to the
+    //    carryover years, which only coheres if the trigger follows the CLAIM.
+    //
+    // ★ Strict `>` — §170(f)(11)(D) says "more than $500,000" (contrast §170(f)(8)'s "$250 or more").
+    let claimed_for_property = crate::forms::year_donation_deduction(state, year);
+    if claimed_for_property > crate::tax::tables::APPRAISAL_ATTACHMENT_THRESHOLD {
+        out.push(Advisory::QualifiedAppraisalMustBeAttached {
+            claimed: claimed_for_property,
+        });
+    }
+
     out
 }
 
@@ -1007,6 +1055,167 @@ mod tests {
         let m = Advisory::CharitableDoneeAssumedPublicCharity { donations: 1 }.message();
         assert!(m.contains("PRIVATE FOUNDATION"));
         assert!(m.contains("BASIS"));
+    }
+
+    /// A 2024 §170 Donation of one leg with the given holding-period `term`, `basis` and `fmv`.
+    /// `claimed_deduction` is the §170(e) figure the fold computes — LT deducts FMV, ST deducts
+    /// `min(FMV, basis)` — so a fixture cannot accidentally state a claim the legs do not support.
+    fn donation_of(term: crate::state::Term, basis: Usd, fmv: Usd) -> LedgerState {
+        use crate::event::BasisSource;
+        use crate::identity::{EventId, LotId};
+        use crate::state::{Removal, RemovalKind, RemovalLeg};
+        let leg = RemovalLeg {
+            lot_id: LotId {
+                origin_event_id: EventId::decision(1),
+                split_sequence: 0,
+            },
+            sat: 100_000_000,
+            basis,
+            fmv_at_transfer: fmv,
+            term,
+            basis_source: BasisSource::ExchangeProvided,
+            acquired_at: time::macros::date!(2020 - 01 - 01),
+            pseudo: false,
+        };
+        let claimed = match term {
+            crate::state::Term::LongTerm => fmv,
+            crate::state::Term::ShortTerm => fmv.min(basis),
+        };
+        LedgerState {
+            removals: vec![Removal {
+                event: EventId::decision(1),
+                kind: RemovalKind::Donation,
+                removed_at: time::macros::date!(2024 - 06 - 01),
+                legs: vec![leg],
+                appraisal_required: false,
+                donor_acquired_at: None,
+                claimed_deduction: Some(claimed),
+                donee: None,
+            }],
+            ..Default::default()
+        }
+    }
+
+    /// ★★★ **P5 / §170(f)(11)(D) — THE ATTACH-THE-APPRAISAL GATE, on the adjudication's own two
+    /// vectors.** Both must hold, and they pull in opposite directions, which is why one of them
+    /// alone would be a green test that proves nothing.
+    ///
+    /// 1. **$700,000 gift, $1,000,000 AGI ⇒ the gate FIRES.** §170(b)'s 30% ceiling allows only
+    ///    $300,000 on this year's Schedule A line 12, and that is IRRELEVANT: §170(f)(11)(D) keys on
+    ///    the amount "claimed" for the property, which §170(f)(11)(F) and Reg §1.170A-16(f)(5)(ii)
+    ///    make a property-level, similar-items aggregate — determined without regard to the §170(b)
+    ///    ceiling or the §170(d) carryover split. Reg §1.170A-16(f)(3) confirms it by extending the
+    ///    attach duty to the CARRYOVER years, which only coheres if the trigger follows the claim.
+    ///    ★ The AGI-keyed reading is not merely different, it is absurd: the identical gift would
+    ///    require an appraisal from a $3M-AGI filer and not from a $1M-AGI one.
+    ///
+    /// 2. **Short-term crypto, FMV $700,000, §170(e) basis-limited claim $180,000 ⇒ it does NOT
+    ///    fire.** §170(e)(1)(A) reduces the deduction to basis for property whose sale would produce
+    ///    ordinary or short-term gain, so the amount CLAIMED is $180,000 and no attachment is owed.
+    ///    The operand is post-§170(e), pre-§170(b).
+    ///
+    /// **B1 mutations, each observed RED before the fix landed:**
+    /// - cap the operand at the §170(b) 30%-of-AGI ceiling (the "wired to Schedule A line 12"
+    ///   defect the adjudication names as the one to avoid) ⇒ vector 1 reds;
+    /// - key the operand to raw contributed FMV instead of the §170(e) claim ⇒ vector 2 reds;
+    /// - relax the threshold from `>` to `>=` ⇒ the exactly-$500,000 row reds.
+    #[test]
+    fn the_appraisal_attachment_gate_keys_on_the_pre_ceiling_claim_not_the_ceiling_or_the_fmv() {
+        use crate::state::Term;
+        let fired = |state: &LedgerState, agi: Usd| {
+            let ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                ..Default::default()
+            };
+            advisories(&ri, state, Usd::ZERO, agi, Usd::ZERO, &params(), 2024, true)
+                .into_iter()
+                .find_map(|a| match a {
+                    Advisory::QualifiedAppraisalMustBeAttached { claimed } => Some(claimed),
+                    _ => None,
+                })
+        };
+
+        // VECTOR 1 — $700,000 long-term gift against $1,000,000 of AGI. The 30% ceiling allows
+        // $300,000 this year; the gate fires on the $700,000 CLAIMED for the property regardless.
+        assert_eq!(
+            fired(
+                &donation_of(Term::LongTerm, dec!(100000), dec!(700000)),
+                dec!(1000000)
+            ),
+            Some(dec!(700000)),
+            "the §170(b) AGI ceiling does not decide a §170(f)(11)(D) attachment — keying it to \
+             Schedule A line 12 would make substantiation depend on AGI"
+        );
+
+        // …and the SAME gift at triple the AGI fires identically. If the operand were ceiling-limited
+        // these two rows would disagree, which is the absurdity in one assertion.
+        assert_eq!(
+            fired(
+                &donation_of(Term::LongTerm, dec!(100000), dec!(700000)),
+                dec!(3000000)
+            ),
+            Some(dec!(700000)),
+            "the identical property must owe the identical attachment at any AGI"
+        );
+
+        // VECTOR 2 — short-term crypto, FMV $700,000, basis $180,000. §170(e)(1)(A) limits the claim
+        // to basis, so $180,000 is claimed and NO attachment is owed.
+        assert_eq!(
+            fired(
+                &donation_of(Term::ShortTerm, dec!(180000), dec!(700000)),
+                dec!(1000000)
+            ),
+            None,
+            "the operand is the §170(e)-reduced CLAIM, not the fair market value contributed"
+        );
+
+        // THE BOUNDARY — §170(f)(11)(D) says "more than $500,000", so exactly $500,000 does not fire
+        // (contrast §170(f)(8)'s "$250 or more", which does at exactly $250).
+        assert_eq!(
+            fired(
+                &donation_of(Term::LongTerm, dec!(1), dec!(500000)),
+                dec!(1000000)
+            ),
+            None,
+            "exactly $500,000 is not MORE THAN $500,000"
+        );
+        assert_eq!(
+            fired(
+                &donation_of(Term::LongTerm, dec!(1), dec!(500000.01)),
+                dec!(1000000)
+            ),
+            Some(dec!(500000.01)),
+            "…and a cent over is"
+        );
+    }
+
+    /// ★★ **The §170(f)(11)(D) advisory must distinguish itself from the $5,000 rule and name the
+    /// carryover-year recurrence.** Both are "you need a qualified appraisal" to a skimming reader,
+    /// and only one of them makes the appraisal part of the FILED return — a filer who reads this as
+    /// "obtain and keep one" has done the wrong thing.
+    ///
+    /// B1 mutation: drop "ATTACH" or the Reg §1.170A-16(f)(3) sentence and the matching row reds.
+    #[test]
+    fn the_appraisal_attachment_advisory_says_attach_and_says_it_recurs() {
+        let m = Advisory::QualifiedAppraisalMustBeAttached {
+            claimed: dec!(700000),
+        }
+        .message();
+        for phrase in [
+            "ATTACH",
+            "$500,000",
+            "170(f)(11)(D)",
+            "1.170A-16(f)(3)",
+            "carryover",
+            "$700,000", // the triggering amount, so the filer can check it against their own figure
+        ] {
+            assert!(m.contains(phrase), "message must say {phrase:?}: {m}");
+        }
+        // …and it must NOT be mistakable for the $5,000 obtain-and-keep rule.
+        assert!(
+            m.contains("$5,000"),
+            "the message must say how this differs from the $5,000 rule: {m}"
+        );
     }
 
     fn params() -> FullReturnParams {
