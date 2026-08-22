@@ -1996,6 +1996,149 @@ fn carryover_write_back_round_trips_and_respects_user_precedence() {
         .all(|c| c.provenance == CarryProvenance::Computed));
 }
 
+/// ★★★ **K10 — `income import` must not silently drop a COMPUTED carryover, and the QBI half is a
+/// LIVE FAIL-OPEN AT HEAD.**
+///
+/// `income import` is a whole-blob upsert, so a re-import silently drops anything
+/// `--write-carryover` put on the row. The existing preservation block covers the charitable list
+/// and, nominally, QBI — but the QBI arm keys **entirely** on `reit_ptp_carryforward_in > 0` and then
+/// restores the WHOLE `qbi` struct. So a filer with a Form 8995 line-3 business-loss carryforward and
+/// **zero** REIT/PTP loses the computed `qbi_carryforward_in` on re-import.
+///
+/// ★★★ THAT DIRECTION IS FAIL-OPEN. `qbi.rs`'s line 4 is `(business_qbi − qbi_carryforward_in).max(0)`,
+/// so dropping the carryforward INFLATES the §199A deduction and **UNDERSTATES the tax** — the exact
+/// direction the block's own comment says it exists to prevent. It is not a defect this branch
+/// introduced; case (b) below was watched RED on the unmodified tree before the fix was written.
+///
+/// Three cases:
+///   (a) the CAPITAL-LOSS carryover survives, value AND provenance, and the note names it;
+///   (b) the QBI BUSINESS-LOSS carryforward survives with REIT/PTP at zero (the live defect);
+///   (c) the CHARITABLE provenance survives — it reverted to `User` even while the items survived.
+///
+/// ★ Keyed on the PROVENANCE TRANSITION, never on `is_zero()`: a computed zero is meaningful, and a
+///   test keyed to the value could not tell "the TOML said nothing" from "the TOML said zero".
+#[test]
+fn income_import_preserves_a_computed_capital_loss_carryover_and_the_qbi_business_loss_one() {
+    use btctax_core::tax::return_inputs::{CarryProvenance, Owner, QbiInputs, ReturnInputs, W2};
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2024(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        // 2024 produces a capital-loss carryover-out AND a QBI business-loss carryforward-out, with
+        // REIT/PTP deliberately at ZERO — the shape the existing arm cannot see.
+        let mut y2024 = ReturnInputs {
+            tax_year: 2024,
+            filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
+            w2s: vec![W2 {
+                owner: Owner::Taxpayer,
+                box1_wages: dec!(30000),
+                box3_ss_wages: dec!(30000),
+                box5_medicare_wages: dec!(30000),
+                ..Default::default()
+            }],
+            qbi: QbiInputs {
+                reit_ptp_carryforward_in: rust_decimal::Decimal::ZERO,
+                qbi_carryforward_in: dec!(30000),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        y2024.capital_loss_carryforward_in = btctax_core::tax::types::Carryforward {
+            short: rust_decimal::Decimal::ZERO,
+            long: dec!(60000),
+        };
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut y2024);
+        btctax_cli::return_inputs::set(s.conn(), 2024, &y2024).unwrap();
+
+        let y2025 = btctax_core::tax::testonly::answered(ReturnInputs {
+            tax_year: 2025,
+            filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
+            ..Default::default()
+        });
+        btctax_cli::return_inputs::set(s.conn(), 2025, &y2025).unwrap();
+        s.save().unwrap();
+    }
+    cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap();
+
+    // ── PREMISES: all three figures are really on the 2025 row, stamped Computed. ─────────────────
+    let rolled = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::get(s.conn(), 2025)
+            .unwrap()
+            .unwrap()
+    };
+    assert!(
+        rolled.capital_loss_carryforward_in.long > rust_decimal::Decimal::ZERO
+            && rolled.capital_loss_carryforward_in_provenance == CarryProvenance::Computed,
+        "premise: a computed capital-loss carryover must be ON the row, or (a) is vacuous: {:?}",
+        rolled.capital_loss_carryforward_in
+    );
+    assert!(
+        rolled.qbi.qbi_carryforward_in > rust_decimal::Decimal::ZERO
+            && rolled.qbi.reit_ptp_carryforward_in.is_zero(),
+        "premise: a business-loss carryforward with ZERO REIT/PTP is the exact shape the old arm \
+         could not see: {:?}",
+        rolled.qbi
+    );
+    assert_eq!(
+        rolled.charitable_carryover_in_provenance,
+        CarryProvenance::Computed,
+        "premise: the charitable provenance starts Computed"
+    );
+
+    // ── Re-import a TOML that supplies NO carryover at all. ───────────────────────────────────────
+    let toml = csv_dir.path().join("2025.toml");
+    std::fs::write(
+        &toml,
+        "filing_status = \"Single\"\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n",
+    )
+    .unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2025, &toml, false).unwrap();
+    let after = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::get(s.conn(), 2025)
+            .unwrap()
+            .unwrap()
+    };
+
+    // (a) the capital-loss carryover survives, VALUE and PROVENANCE.
+    assert_eq!(
+        after.capital_loss_carryforward_in, rolled.capital_loss_carryforward_in,
+        "★ (a) a computed capital-loss carryover must survive an import that supplies none — \
+         dropping it would understate next year's Schedule D lines 6 and 14"
+    );
+    assert_eq!(
+        after.capital_loss_carryforward_in_provenance,
+        CarryProvenance::Computed,
+        "★ (a) …and stay Computed, or the next write-back refuses to overwrite btctax's own figure"
+    );
+
+    // (b) THE LIVE FAIL-OPEN: the business-loss carryforward with REIT/PTP at zero.
+    assert_eq!(
+        after.qbi.qbi_carryforward_in, rolled.qbi.qbi_carryforward_in,
+        "★★★ (b) losing the Form 8995 line-3 business-loss carryforward INFLATES the §199A \
+         deduction and UNDERSTATES the tax — line 4 is `(business_qbi − qbi_carryforward_in).max(0)`. \
+         This half was watched RED on the unmodified tree: the old arm keyed entirely on \
+         `reit_ptp_carryforward_in > 0`, which is zero here."
+    );
+    assert_eq!(
+        after.qbi.qbi_carryforward_in_provenance,
+        CarryProvenance::Computed
+    );
+
+    // (c) the charitable PROVENANCE survives too — the items did, the stamp did not.
+    assert_eq!(
+        after.charitable_carryover_in_provenance,
+        CarryProvenance::Computed,
+        "★ (c) an empty charitable list has no per-item provenance, so the LIST-level stamp is the \
+         only thing that distinguishes 'no carryover' from 'never asked'. It reverted to `User`."
+    );
+}
+
 /// I2 (Fable P4.9 r1): re-importing year Y+1 must NOT silently drop the `Computed` carryover that
 /// `--write-carryover` put there. For QBI that drop would be a FAIL-OPEN (losing the REIT/PTP loss
 /// carryforward overstates the QBI deduction ⇒ understates tax). A TOML that supplies no carryover keeps

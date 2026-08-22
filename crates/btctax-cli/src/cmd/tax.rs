@@ -94,7 +94,21 @@ pub fn import_return_inputs(
                 preserved.push(format!("{} charitable carryover item(s)", computed.len()));
                 ri.charitable_carryover_in = computed;
             }
+            // ★ …and the LIST-LEVEL provenance with them. An empty vec has no per-item provenance,
+            //   so this stamp is the only thing that distinguishes "no carryover" from "never
+            //   asked"; it reverted to `User` on every re-import.
+            if existing.charitable_carryover_in_provenance == CarryProvenance::Computed {
+                ri.charitable_carryover_in_provenance = CarryProvenance::Computed;
+            }
         }
+        // ★★★ PER-FIELD, and the whole-struct version it replaces was a LIVE FAIL-OPEN.
+        //
+        // The old arm keyed entirely on `reit_ptp_carryforward_in > 0` and then restored the WHOLE
+        // `qbi` struct. A filer with a Form 8995 line-3 business-loss carryforward and ZERO REIT/PTP
+        // therefore lost the computed `qbi_carryforward_in` on re-import — and `qbi.rs`'s line 4 is
+        // `(business_qbi − qbi_carryforward_in).max(0)`, so losing it INFLATES the §199A deduction
+        // and UNDERSTATES the tax. That is the exact direction this block's own comment above says
+        // it exists to prevent. Two carryforwards, two conditions.
         if ri.qbi.reit_ptp_carryforward_in.is_zero()
             && existing.qbi.reit_ptp_carryforward_in > rust_decimal::Decimal::ZERO
             && existing.qbi.reit_ptp_carryforward_in_provenance == CarryProvenance::Computed
@@ -103,7 +117,36 @@ pub fn import_return_inputs(
                 "QBI REIT/PTP carryforward ${:.2}",
                 existing.qbi.reit_ptp_carryforward_in
             ));
-            ri.qbi = existing.qbi.clone();
+            ri.qbi.reit_ptp_carryforward_in = existing.qbi.reit_ptp_carryforward_in;
+            ri.qbi.reit_ptp_carryforward_in_provenance = CarryProvenance::Computed;
+        }
+        if ri.qbi.qbi_carryforward_in.is_zero()
+            && existing.qbi.qbi_carryforward_in > rust_decimal::Decimal::ZERO
+            && existing.qbi.qbi_carryforward_in_provenance == CarryProvenance::Computed
+        {
+            preserved.push(format!(
+                "QBI business-loss carryforward ${:.2}",
+                existing.qbi.qbi_carryforward_in
+            ));
+            ri.qbi.qbi_carryforward_in = existing.qbi.qbi_carryforward_in;
+            ri.qbi.qbi_carryforward_in_provenance = CarryProvenance::Computed;
+        }
+        // ★★ THE FOURTH ARM — the §1212(b) capital-loss carryover, keyed on the PROVENANCE
+        //    TRANSITION rather than on `is_zero()`. A computed ZERO is meaningful ("btctax worked
+        //    this year out and there is no carryover"), so a value test could not tell it from "the
+        //    TOML said nothing". What a fresh parse always yields is `User`; what the write-back
+        //    leaves is `Computed`. That transition is the signal.
+        if ri.capital_loss_carryforward_in == btctax_core::tax::types::Carryforward::default()
+            && ri.capital_loss_carryforward_in_provenance == CarryProvenance::User
+            && existing.capital_loss_carryforward_in_provenance == CarryProvenance::Computed
+        {
+            preserved.push(format!(
+                "capital-loss carryover short ${:.2} / long ${:.2}",
+                existing.capital_loss_carryforward_in.short,
+                existing.capital_loss_carryforward_in.long
+            ));
+            ri.capital_loss_carryforward_in = existing.capital_loss_carryforward_in;
+            ri.capital_loss_carryforward_in_provenance = CarryProvenance::Computed;
         }
         if !preserved.is_empty() {
             eprintln!(
