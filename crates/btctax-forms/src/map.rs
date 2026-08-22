@@ -464,10 +464,20 @@ pub struct Form1040HeaderCells {
     pub taxpayer_blind: CheckChoice,
     pub spouse_aged: CheckChoice,
     pub spouse_blind: CheckChoice,
-    /// "If more than four dependents, see instructions and check here" — v1 REFUSES instead (the
-    /// continuation statement is a synthetic page generator we do not have; same posture as Schedule
-    /// B's >14-payer refusal, SPEC §7.4 as amended). Mapped so the refusal can name the cell it will
-    /// not fill.
+    /// "If more than four dependents, see instructions and check here" — **CHECKED, and the
+    /// continuation statement is emitted with it.**
+    ///
+    /// ★ This comment used to say v1 "REFUSES instead … the continuation statement is a synthetic
+    /// page generator we do not have". Both halves are false and have been since §G-28/B2: the
+    /// generator is `btctax_core::tax::dependents_statement`, the box is written at
+    /// `form1040_full.rs`'s `check(w, p, &cells.more_than_four_dependents, !overflow.is_empty())`,
+    /// and `packet::fill_full_return` emits the statement from the SAME predicate — so "box checked,
+    /// no attachment" and "attachment, no box" are not expressible. Held by
+    /// `full_return_forms::the_checkbox_and_the_statement_are_the_same_decision`.
+    ///
+    /// A stale refusal claim is not a harmless comment: it is the shape that sends a future reader
+    /// looking for a refusal path that does not exist, or — worse — invites one to be re-added over
+    /// working behaviour.
     pub more_than_four_dependents: CheckChoice,
     /// The four dependents rows the form physically has.
     pub dependent_rows: Vec<DependentRowCells>,
