@@ -256,7 +256,9 @@ Non-blocking items deferred from the spec/plan review loop. Fold at plan time or
   the original P1 entry. The routing half (route optimize/what-if/export/TUI through the resolver) is DONE;
   provenance PRINTING split out to `p2-provenance-printing` (→ P4). Kept as a stub so the id resolves; the
   live status lives in the P2-section entry.
-- **p1-carryover-writeback-P3P4** (PARTIALLY RESOLVED in P4.9) — charitable + QBI carryover write-back +
+- **p1-carryover-writeback-P3P4** (✅ FULLY RESOLVED — P4.9 for charitable + QBI, and the filing-readiness
+  branch for the §1212(b) capital-loss sibling, which `--write-carryover` now rolls as whole dollars) —
+  charitable + QBI carryover write-back +
   R3-M6 precedence shipped (see `p3-carryover-writeback-P4`). **Capital-loss carryforward write-back → see
   `p4-9-capital-loss-writeback`** below (deferred; frozen-type constraint).
 - **p4-9-capital-loss-writeback** (DEFERRED — frozen-type constraint; non-fail-open) — the §1212

@@ -190,8 +190,9 @@ fn run() -> Result<ExitCode, CliError> {
                 if let Some(msg) = tranche_advisory {
                     println!("{msg}");
                 }
-                // §4 R3-M6 carryover write-back (opt-in; `report` is otherwise read-only). Persists this
-                // year's computed charitable + QBI carryover-out as next year's carryover-in.
+                // §4 R3-M6 carryover write-back (opt-in; `report` is otherwise read-only). Persists
+                // this year's computed charitable, QBI (business-loss + REIT/PTP) and §1212(b)
+                // capital-loss carryover-outs as next year's carryover-ins.
                 if write_carryover {
                     let summary = cmd::tax::write_back_carryover(vault, &pp, y, force)?;
                     println!("{summary}");
