@@ -426,13 +426,13 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(
-        field_count, 91,
-        "expected 91 Fields (one per §5.8 in-scope leaf)"
+        field_count, 93,
+        "expected 93 Fields (one per §5.8 in-scope leaf)"
     );
     assert_eq!(
         covered.len(),
-        91,
-        "expected 91 distinctly-covered in-scope leaves"
+        93,
+        "expected 93 distinctly-covered in-scope leaves"
     );
 
     // ── 5. ★ I-6: PIN the observed FieldId → leaf-path map against a literal (kills TRANSPOSITION). ──
@@ -596,6 +596,12 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
         "other_out_of_scope_income",
     ),
     (FieldId::DeclFilingForm4952, "filing_form_4952"),
+    // The Capital Loss Carryover Worksheet's two unnumbered header conditions.
+    (
+        FieldId::DeclCarryoverIncludesSpousesJointLoss,
+        "carryover_includes_spouses_joint_loss",
+    ),
+    (FieldId::DeclExcludedCanceledDebt, "excluded_canceled_debt"),
     (FieldId::ScheduleCIsSstb, "schedule_c.is_sstb"),
     (
         FieldId::ScheduleCIsCooperativePatron,

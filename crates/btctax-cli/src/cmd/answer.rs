@@ -393,7 +393,11 @@ mod tests {
                     ..Default::default()
                 });
             }
-            QuestionId::AmtCarryoverSameAsRegular => {
+            // ★ The three carryforward-conditioned declarations share ONE liveness predicate
+            //   (`questions::carryforward_in_present`), so they share one scenario.
+            QuestionId::AmtCarryoverSameAsRegular
+            | QuestionId::CarryoverIncludesSpousesJointLoss
+            | QuestionId::ExcludedCanceledDebt => {
                 r.capital_loss_carryforward_in = btctax_core::tax::types::Carryforward {
                     short: dec!(1000),
                     long: dec!(0),

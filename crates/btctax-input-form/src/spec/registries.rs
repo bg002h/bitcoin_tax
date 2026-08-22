@@ -217,6 +217,16 @@ const DECL_FIELDS: &[Field] = &[
         ri.filing_form_4952 = None;
         Ok(())
     }),
+    // Indices 15 and 16 — the Capital Loss Carryover Worksheet's two unnumbered header conditions.
+    // Appended at the END for the array-index reason above.
+    decl_tristate!(15, FieldId::DeclCarryoverIncludesSpousesJointLoss, |ri| {
+        ri.carryover_includes_spouses_joint_loss = None;
+        Ok(())
+    }),
+    decl_tristate!(16, FieldId::DeclExcludedCanceledDebt, |ri| {
+        ri.excluded_canceled_debt = None;
+        Ok(())
+    }),
     FOREIGN_COUNTRY_NAMES,
 ];
 
@@ -376,6 +386,10 @@ pub fn field_to_question(id: FieldId) -> Option<QuestionId> {
         FieldId::DeclAmtDepreciationSame => QuestionId::AmtDepreciationSameAsRegular,
         FieldId::DeclHasIncomeExclusion => QuestionId::HasIncomeExclusion,
         FieldId::DeclOtherOutOfScopeIncome => QuestionId::OtherOutOfScopeIncome,
+        FieldId::DeclCarryoverIncludesSpousesJointLoss => {
+            QuestionId::CarryoverIncludesSpousesJointLoss
+        }
+        FieldId::DeclExcludedCanceledDebt => QuestionId::ExcludedCanceledDebt,
         _ => return None,
     })
 }
@@ -405,6 +419,13 @@ pub fn question_to_field(id: QuestionId) -> FieldId {
         QuestionId::AmtDepreciationSameAsRegular => FieldId::DeclAmtDepreciationSame,
         QuestionId::HasIncomeExclusion => FieldId::DeclHasIncomeExclusion,
         QuestionId::OtherOutOfScopeIncome => FieldId::DeclOtherOutOfScopeIncome,
+        // ★ The Capital Loss Carryover Worksheet's two header conditions. NOT deduped anywhere: the
+        //   worksheet is "Keep for Your Records" and prints on no schedule, so like the Form 6251
+        //   declarations they get their own `Decl*` leaves.
+        QuestionId::CarryoverIncludesSpousesJointLoss => {
+            FieldId::DeclCarryoverIncludesSpousesJointLoss
+        }
+        QuestionId::ExcludedCanceledDebt => FieldId::DeclExcludedCanceledDebt,
     }
 }
 

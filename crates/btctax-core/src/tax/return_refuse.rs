@@ -318,6 +318,34 @@ pub enum RefuseReason {
     /// wants its own commit, review and KAT pair rather than riding along with the worksheet that
     /// made it liftable. Refusing remains the fail-closed choice until that is taken.
     TaxableIncomeNonPositiveWithCarryforward,
+    /// **Capital Loss Carryover Worksheet header / §1212(b)** — the joint-return sourcing declaration
+    /// was never answered. Raised by the registry loop.
+    ///
+    /// ★ A SEPARATE variant from its adverse twin below, because that separation is an invariant here:
+    /// `every_live_unanswered_declaration_refuses_with_its_own_reason` asserts that ANSWERING a
+    /// question clears its unanswered reason, so a single variant covering both states cannot exist.
+    /// The two are different facts anyway — "you have not told us" versus "you have told us, and it is
+    /// something btctax cannot compute".
+    JointReturnCarryoverDeclarationUnanswered,
+    /// **Capital Loss Carryover Worksheet header / §1212(b)** — *"any capital loss carryover from the
+    /// joint return can be deducted only on the return of the spouse who actually had the loss."*
+    /// answered ADVERSELY (`Some(true)`).
+    ///
+    /// btctax stores one `Carryforward` per return and cannot split it by spouse, so an affirmative
+    /// answer is not a gap in the question — it is a gap in the MODEL, and no input clears it: the
+    /// filer must work the split out from the joint year's Schedule D.
+    JointReturnCarryoverAttributionUnknown,
+    /// **Capital Loss Carryover Worksheet header / §108(b)(2)(G)** — the canceled-debt declaration was
+    /// never answered. Raised by the registry loop; see the sourcing sibling above for why the
+    /// unanswered and adverse states are separate variants.
+    ExcludedCanceledDebtDeclarationUnanswered,
+    /// **Capital Loss Carryover Worksheet header / §108(b)(2)(G)** — *"If you excluded canceled debt
+    /// from income in 2025, see Pub. 4681."* answered ADVERSELY (`Some(true)`).
+    ///
+    /// §108(b) requires tax ATTRIBUTE REDUCTION after an exclusion and §108(b)(2)(G) lists capital
+    /// loss carryovers among the attributes; btctax models none of it, so it refuses rather than
+    /// deduct and carry forward an unreduced figure.
+    ExcludedCanceledDebtAttributeReduction,
 }
 
 /// A fail-closed refusal: the reason + a human-readable detail (surfaced to the user).
@@ -377,8 +405,10 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         capital_loss_carryforward_in,
         capital_loss_carryforward_in_provenance: _, // CarryProvenance, not an amount
         charitable_carryover_in_provenance: _,
-        amt_carryover_same_as_regular: _, // a declaration, not money
-        amt_depreciation_same_as_regular: _, // a declaration, not money
+        carryover_includes_spouses_joint_loss: _, // a declaration, not money
+        excluded_canceled_debt: _,                // a declaration, not money
+        amt_carryover_same_as_regular: _,         // a declaration, not money
+        amt_depreciation_same_as_regular: _,      // a declaration, not money
         charitable_carryover_in,
         qbi,
         foreign_accounts: _,
@@ -790,6 +820,48 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
         if (q.live)(ri) && (q.get)(ri).is_none() {
             return refuse(q.unanswered.clone(), q.unanswered_detail);
         }
+    }
+
+    // ★★★ THE CAPITAL LOSS CARRYOVER WORKSHEET'S TWO HEADER CONDITIONS, ANSWERED ADVERSELY.
+    //     VALUE-refusals (`Some(true)`), disjoint from the unanswered loop above and gated on the
+    //     SAME registry liveness that half uses — a stale `Some(true)` on a return that no longer
+    //     carries a carryforward must not be an exit-less brick.
+    //
+    // ★ Neither is a question btctax could have answered for the filer, and neither is one it can
+    //   act on once answered YES: the first needs a per-spouse split of a single stored figure, the
+    //   second needs §108(b) attribute reduction. So the refusal is the whole remedy, and it names
+    //   the hand-work rather than pretending an input clears it.
+    if crate::tax::questions::question_is_live(
+        crate::tax::questions::QuestionId::CarryoverIncludesSpousesJointLoss,
+        ri,
+    ) && ri.carryover_includes_spouses_joint_loss == Some(true)
+    {
+        return refuse(
+            RefuseReason::JointReturnCarryoverAttributionUnknown,
+            "you declared that part of your capital-loss carryover came from a JOINT return for a \
+             year you are now filing separately from, and was your spouse's loss. The Capital Loss \
+             Carryover Worksheet's header is explicit: such a carryover \"can be deducted only on \
+             the return of the spouse who actually had the loss\" (§1212(b)). btctax stores ONE \
+             carryover figure per return and has no way to split it by spouse, so filing would \
+             deduct — and carry forward — a loss that may not be yours. Work the split out by hand \
+             from the joint year's Schedule D and enter only YOUR share",
+        );
+    }
+    if crate::tax::questions::question_is_live(
+        crate::tax::questions::QuestionId::ExcludedCanceledDebt,
+        ri,
+    ) && ri.excluded_canceled_debt == Some(true)
+    {
+        return refuse(
+            RefuseReason::ExcludedCanceledDebtAttributeReduction,
+            "you declared that you excluded cancelled or forgiven debt from income, and you are \
+             carrying a capital-loss carryforward. The Capital Loss Carryover Worksheet's header \
+             sends you to Pub. 4681, because §108(b) requires you to REDUCE tax attributes after \
+             such an exclusion and §108(b)(2)(G) lists capital loss carryovers among them. btctax \
+             models no part of §108(b), so the carryover it would deduct and carry forward is too \
+             large. Work the reduction out by hand (Pub. 4681, Form 982) and enter the reduced \
+             carryover",
+        );
     }
 
     // (c) foreign trust → Form 3520. VALUE-refusal (`Some(true)`); disjoint from the unanswered loop above.
@@ -1389,7 +1461,11 @@ mod tests {
                     ..Default::default()
                 });
             }
-            QuestionId::AmtCarryoverSameAsRegular => {
+            // ★ All three carryforward-conditioned declarations share ONE liveness predicate
+            //   (`questions::carryforward_in_present`), so they share one scenario.
+            QuestionId::AmtCarryoverSameAsRegular
+            | QuestionId::CarryoverIncludesSpousesJointLoss
+            | QuestionId::ExcludedCanceledDebt => {
                 r.capital_loss_carryforward_in = crate::tax::types::Carryforward {
                     short: dec!(1000),
                     long: Usd::ZERO,
@@ -2388,6 +2464,146 @@ mod tests {
         }
     }
 
+    /// ★★★ **K17 — the Capital Loss Carryover Worksheet's two HEADER conditions gate the return, in
+    /// both directions, and ONLY when a carryforward is actually brought in.**
+    ///
+    /// The two sentences the worksheet prints above line 1 are governing conditions, and neither was
+    /// transcribed anywhere: the conformance checker's completeness half reads only physical lines
+    /// beginning `N.`, so both were invisible to it and it stayed green. They became load-bearing when
+    /// `--write-carryover` learned to roll the §1212(b) figure — before that a mis-attributed or
+    /// unreduced carryover was the filer's own bad input; after it btctax re-emits the figure as its
+    /// OWN `Computed` value on next year's sworn Schedule D lines 6/14.
+    ///
+    /// **Each half asserts its own PREMISE before its outcome.** A fixture that quietly stopped
+    /// reaching the gate would otherwise "pass" by refusing for some other reason, or by not being
+    /// screened at all — which is how a vacuous KAT gets written.
+    ///
+    /// Mutations that MUST red:
+    ///   (a) default either declaration to `Some(false)` in `ReturnInputs::default` ⇒ the unanswered
+    ///       halves go green while the return files with a carryover btctax cannot vouch for;
+    ///   (b) narrow `carryforward_in_present` with a taxable-income term ⇒ the floor half escapes;
+    ///   (c) delete either value-refusal in `screen_inputs` ⇒ the `Some(true)` half reds.
+    #[test]
+    fn a_prior_joint_return_or_excluded_canceled_debt_refuses_when_unanswered() {
+        use crate::tax::questions::{question_is_live, QuestionId};
+        use crate::tax::types::Carryforward;
+
+        // A return that carries a loss IN, with every OTHER live declaration answered neutral.
+        // ★ Deliberately at POSITIVE taxable income ($60,000 of wages against a $14,600 standard
+        //   deduction), so that the floor half at the end is the only fixture a taxable-income-gated
+        //   liveness predicate would drop — that mutation then reds THERE and nowhere else.
+        let with_carryforward = || {
+            let mut r = ri();
+            r.w2s = vec![W2 {
+                box1_wages: dec!(60000),
+                ..Default::default()
+            }];
+            r.capital_loss_carryforward_in = Carryforward {
+                short: dec!(2000),
+                long: Usd::ZERO,
+            };
+            r.amt_carryover_same_as_regular = Some(true);
+            r
+        };
+
+        // ── PREMISE: both questions are LIVE exactly when a carryforward-in exists. ──
+        let none_in = ri();
+        assert_eq!(
+            none_in.capital_loss_carryforward_in,
+            Carryforward::default(),
+            "premise: the baseline fixture brings no loss in"
+        );
+        for q in [
+            QuestionId::CarryoverIncludesSpousesJointLoss,
+            QuestionId::ExcludedCanceledDebt,
+        ] {
+            assert!(
+                !question_is_live(q, &none_in),
+                "{q:?} must NOT be asked of a return with no carryforward-in"
+            );
+            assert!(
+                question_is_live(q, &with_carryforward()),
+                "{q:?} MUST be asked of a return that brings a loss in"
+            );
+        }
+        assert_eq!(
+            reason(&none_in),
+            None,
+            "premise: without a carryforward-in the baseline return screens clean, so any refusal \
+             below is caused by the carryforward and not by the fixture"
+        );
+
+        // ── UNANSWERED (`None`) ⇒ refuse, one reason each. ──
+        let mut r = with_carryforward();
+        r.excluded_canceled_debt = Some(false); // isolate the sourcing question
+        assert_eq!(
+            r.carryover_includes_spouses_joint_loss, None,
+            "premise: the sourcing declaration starts unanswered"
+        );
+        assert_eq!(
+            reason(&r),
+            Some(RefuseReason::JointReturnCarryoverDeclarationUnanswered)
+        );
+
+        let mut r = with_carryforward();
+        r.carryover_includes_spouses_joint_loss = Some(false); // isolate the canceled-debt question
+        assert_eq!(
+            r.excluded_canceled_debt, None,
+            "premise: the canceled-debt declaration starts unanswered"
+        );
+        assert_eq!(
+            reason(&r),
+            Some(RefuseReason::ExcludedCanceledDebtDeclarationUnanswered)
+        );
+
+        // ── ANSWERED NEUTRAL (`Some(false)`) ⇒ the return screens clean. ──
+        let mut r = with_carryforward();
+        r.carryover_includes_spouses_joint_loss = Some(false);
+        r.excluded_canceled_debt = Some(false);
+        assert_eq!(
+            reason(&r),
+            None,
+            "answering both neutrally must leave nothing behind — a gate with no exit is a brick"
+        );
+
+        // ── ANSWERED ADVERSELY (`Some(true)`) ⇒ refuse, with the ADVERSE reason, not the unanswered one. ──
+        let mut r = with_carryforward();
+        r.carryover_includes_spouses_joint_loss = Some(true);
+        r.excluded_canceled_debt = Some(false);
+        assert_eq!(
+            reason(&r),
+            Some(RefuseReason::JointReturnCarryoverAttributionUnknown),
+            "btctax stores ONE carryover per return and cannot split a joint one by spouse"
+        );
+
+        let mut r = with_carryforward();
+        r.carryover_includes_spouses_joint_loss = Some(false);
+        r.excluded_canceled_debt = Some(true);
+        assert_eq!(
+            reason(&r),
+            Some(RefuseReason::ExcludedCanceledDebtAttributeReduction),
+            "§108(b)(2)(G) reduces the carryover and btctax models none of §108(b)"
+        );
+
+        // ── THE FLOOR CASE — the household lift (A) admits — is gated too. ──
+        // ★ This is mutation (b)'s target: a liveness predicate narrowed with a taxable-income term
+        //   would let exactly this return through, and it is the one `--write-carryover` will roll.
+        let mut floor = with_carryforward();
+        floor.w2s = vec![W2 {
+            box1_wages: dec!(1000), // wiped out by the standard deduction ⇒ taxable income 0
+            ..Default::default()
+        }];
+        assert!(
+            question_is_live(QuestionId::CarryoverIncludesSpousesJointLoss, &floor),
+            "a wiped-out year with a loss brought in is EXACTLY the household the roll persists — \
+             the questions must not vanish for it"
+        );
+        assert_eq!(
+            reason(&floor),
+            Some(RefuseReason::JointReturnCarryoverDeclarationUnanswered)
+        );
+    }
+
     /// ★ ALL THREE Form 6251 VALUE-refusals must respect the liveness of their unanswered half.
     ///
     /// A `Some(false)` left over from a trigger that has since gone away — the mortgage paid off, the
@@ -2835,6 +3051,10 @@ mod tests {
                 short: dec!(1000),
                 long: Usd::ZERO,
             };
+            // A carryforward-in also makes the Capital Loss Carryover Worksheet's two header
+            // declarations live. Answered NEUTRAL here so this test keeps testing line 2k.
+            r.carryover_includes_spouses_joint_loss = Some(false);
+            r.excluded_canceled_debt = Some(false);
             r.amt_carryover_same_as_regular = ans;
             reason(&r)
         };

@@ -68,9 +68,9 @@ mod tests {
     use time::macros::date;
 
     /// ★ Step 1 (declarations, adjusted per the two-corrections brief). The `Declarations` section holds
-    /// **10** `Decl*` declarations (the 11th — the mortgage box — is deduped to its Schedule-A leaf) plus
+    /// **15** `Decl*` declarations (the two mortgage boxes are deduped to their Schedule-A leaves) plus
     /// the `foreign_country_names` Text field, each delegating to its `FORM_QUESTIONS` entry; and the
-    /// `FieldId ↔ QuestionId` map stays TOTAL over all 11 questions (the mortgage one →
+    /// `FieldId ↔ QuestionId` map stays TOTAL over all 17 questions (the mortgage one →
     /// `SaMortgageAllUsed`). Named without a number so the name cannot go stale again.
     #[test]
     fn declarations_section_delegates_every_decl_and_the_question_map_is_total() {
@@ -118,8 +118,8 @@ mod tests {
             );
         }
         assert_eq!(
-            decl_count, 13,
-            "13 declarations are Decl* fields (the other two dedup to Schedule A)"
+            decl_count, 15,
+            "15 declarations are Decl* fields (the other two dedup to Schedule A)"
         );
         assert_eq!(
             deduped,
@@ -130,18 +130,18 @@ mod tests {
             "exactly the two Schedule-A-owned mortgage declarations dedup"
         );
 
-        // 13 delegating Decl* fields + the foreign_country_names Text field.
+        // 15 delegating Decl* fields + the foreign_country_names Text field.
         assert_eq!(
             decls.fields.len(),
-            14,
-            "13 declarations + foreign_country_names"
+            16,
+            "15 declarations + foreign_country_names"
         );
         assert!(decls
             .fields
             .iter()
             .any(|f| f.id == FieldId::ForeignCountryNames));
 
-        // TOTAL, both directions, over all 11 QuestionIds — the mortgage one resolves to SaMortgageAllUsed.
+        // TOTAL, both directions, over all 17 QuestionIds — the mortgage one resolves to SaMortgageAllUsed.
         for q in QuestionId::ALL {
             assert_eq!(
                 field_to_question(question_to_field(*q)),

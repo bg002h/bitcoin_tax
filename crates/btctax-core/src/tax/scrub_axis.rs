@@ -333,6 +333,10 @@ pub fn maximal_sentinel() -> ReturnInputs {
             long: dec!(2),
         },
         capital_loss_carryforward_in_provenance: CarryProvenance::User,
+        // The worksheet's two header declarations. `Some(false)` — the NEUTRAL answer for both — so
+        // this maximal PII fixture stays a return that could file; neither carries any PII.
+        carryover_includes_spouses_joint_loss: Some(false),
+        excluded_canceled_debt: Some(false),
         amt_carryover_same_as_regular: Some(true),
         amt_depreciation_same_as_regular: Some(true),
         charitable_carryover_in: vec![

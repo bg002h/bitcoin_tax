@@ -5,25 +5,36 @@
 //! Does each doc comment match the instruction text? are ASSERTIONS, not opinions."* So this file
 //! asserts them, on every commit, rather than asking a reviewer to read a form.
 //!
-//! **Three checks, because each is satisfiable by a defect the others miss.**
+//! **Four checks, because each is satisfiable by a defect the others miss.**
 //!
-//! 1. **Verbatim** — every quote in `LINES` (plus the applicability sentence and the two interstitial
+//! 1. **Verbatim** — every quote in `LINES` (plus the header prose and the two interstitial
 //!    "go to line N" instructions) appears in the extract, modulo whitespace. Catches a paraphrase.
 //! 2. **Whole** — and each match must END where the form ends the instruction ([`Terminator`]).
 //!    ★★ Added because mutation caught check (1) **passing a truncation**: a shortened citation is a
 //!    substring of the real one, which is the Form 6251 line-33 defect class exactly.
-//! 3. **Complete** — the set of line numbers transcribed is exactly the set the **extract's own
-//!    worksheet block** enumerates. Catches an OMISSION, which (1) and (2) cannot: thirteen faithful
-//!    whole quotes are still wrong if the form has fourteen lines. ★ The expected set is read off the
-//!    form, never written by hand and never a `1..=N` range — the two ways this repo has already got
-//!    the same check wrong once each.
+//! 3. **Complete (numbered)** — the set of line numbers transcribed is exactly the set the **extract's
+//!    own worksheet block** enumerates. Catches an OMISSION, which (1) and (2) cannot: thirteen
+//!    faithful whole quotes are still wrong if the form has fourteen lines. ★ The expected set is read
+//!    off the form, never written by hand and never a `1..=N` range — the two ways this repo has
+//!    already got the same check wrong once each.
+//! 4. **Complete (UNNUMBERED)** — ★★★ and check (3) is *structurally blind* to everything that is not
+//!    numbered. [`line_numbers_in_the_form`] requires `N.` to parse as a `u8`, so a physical line
+//!    beginning *"If you and your spouse…"* is skipped before it can be counted. The worksheet header
+//!    carries two GOVERNING CONDITIONS in exactly that shape — the MFS-after-joint-return sourcing
+//!    rule and the §108(b)(2)(G) canceled-debt condition — and both were dropped from the
+//!    transcription while checks (1)–(3) all reported success, because none of them could see a
+//!    sentence that has no number. So the header is enumerated as **paragraphs read off the form**,
+//!    and every one must be *accounted for*: matched by a transcribed constant, or listed in
+//!    [`CARRIES_NO_DECISION`] with a reason. `CLAUDE.md`: *"A checker that cannot distinguish 'this
+//!    line encodes no decision' from 'we forgot this line' is not a conformance check."*
 //!
 //! **Why it lives in xtask.** It reads `design/forms/extract/`, outside every published crate; an
 //! `include_str!` reaching there from `btctax-core` ships a tarball that builds in the workspace and
 //! is broken for everyone else, with exit 0.
 
 use btctax_core::tax::capital_loss_carryover::{
-    APPLICABILITY, GOTO_LINE5_OR_LINE9, GOTO_LINE9_OR_SKIP, LINES, SOURCE_EXTRACT,
+    APPLICABILITY, CANCELED_DEBT_EXCLUSION, GOTO_LINE5_OR_LINE9, GOTO_LINE9_OR_SKIP,
+    JOINT_RETURN_SOURCING, LINES, OTHERWISE_NO_CARRYOVERS, SOURCE_EXTRACT,
 };
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -90,28 +101,154 @@ fn worksheet_block(raw: &str) -> String {
 /// them on their line.
 ///
 /// ★ This is the half that cannot be satisfied by a hand-written list: the answer comes from the form.
+///
+/// ★★★ **AND IT IS STRUCTURALLY BLIND TO EVERY UNNUMBERED CONDITION.** `N.` must parse as a `u8`, so a
+/// physical line beginning *"If you and your spouse…"* is discarded before it can be counted. That is
+/// not a bug in this function — a set of line *numbers* is what it is for — but it does mean this
+/// function's silence is NOT evidence that the header is transcribed. It was silent while both of the
+/// header's governing conditions were missing. [`unnumbered_conditions_in_the_form`] is the other half.
 fn line_numbers_in_the_form(block: &str) -> BTreeSet<u8> {
-    let mut out = BTreeSet::new();
+    block
+        .lines()
+        .filter_map(|raw_line| numbered_instruction(raw_line.trim_start()))
+        .collect()
+}
+
+/// ★★★ Every PARAGRAPH of the worksheet's HEADER — the prose above numbered line 1 — normalised.
+///
+/// This is check (4), and it exists because check (3) cannot exist here: [`line_numbers_in_the_form`]
+/// parses a leading `N.` as a `u8`, so *every* unnumbered sentence is skipped before it can be
+/// counted. The two governing conditions in the header were dropped from the transcription and no
+/// half of this file went red.
+///
+/// **Paragraphs, not sentences, and the boundary is read off the form's own layout** — `pdftotext
+/// -layout` wraps a paragraph across physical lines and terminates it with a full stop, so a run of
+/// physical lines ends at a blank line or at a line ending in `.`. Splitting on sentences instead
+/// would have to know that *"see Pub. 4681."* is one sentence and not two, which is a rule about
+/// English, not about this form.
+///
+/// ★ Bounded above by worksheet line 1, detected the same way [`line_numbers_in_the_form`] detects a
+/// numbered instruction — so the two halves cannot disagree about where the header stops.
+fn unnumbered_conditions_in_the_form(block: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut cur: Vec<&str> = Vec::new();
     for raw_line in block.lines() {
-        let line = raw_line.trim_start();
-        let Some(dot) = line.find('.') else { continue };
-        let Ok(n) = line[..dot].parse::<u8>() else {
-            continue;
-        };
-        if n == 0 {
+        let line = raw_line.trim();
+        // The header ends where the first NUMBERED instruction begins.
+        if is_numbered_instruction(line) {
+            break;
+        }
+        if line.is_empty() {
+            if !cur.is_empty() {
+                out.push(normalize(&cur.join(" ")));
+                cur.clear();
+            }
             continue;
         }
-        // `N.` alone is an answer-box label; `N. <word>` is an instruction.
-        if line[dot + 1..]
-            .trim_start()
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_alphabetic())
-        {
-            out.insert(n);
+        cur.push(line);
+        if line.ends_with('.') {
+            out.push(normalize(&cur.join(" ")));
+            cur.clear();
         }
     }
+    if !cur.is_empty() {
+        out.push(normalize(&cur.join(" ")));
+    }
     out
+}
+
+/// Whether a trimmed physical line is a numbered worksheet instruction (`N. <alphabetic>`).
+///
+/// Factored out of [`line_numbers_in_the_form`] so the header bound above and the numbered-line scan
+/// share ONE definition of "this line is a numbered instruction". Two copies would drift into a header
+/// that swallows line 1, or a line 1 that never terminates the header.
+fn is_numbered_instruction(line: &str) -> bool {
+    numbered_instruction(line).is_some()
+}
+
+/// The worksheet line number a trimmed physical line introduces, if it introduces one.
+fn numbered_instruction(line: &str) -> Option<u8> {
+    let dot = line.find('.')?;
+    let n = line[..dot].parse::<u8>().ok()?;
+    if n == 0 {
+        return None;
+    }
+    // `N.` alone is an answer-box label; `N. <word>` is an instruction.
+    line[dot + 1..]
+        .trim_start()
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_alphabetic())
+        .then_some(n)
+}
+
+/// Header paragraphs that encode NO instruction, each with the reason it encodes none.
+///
+/// ★★★ This is the half that separates *"this line carries no decision"* from *"we forgot this
+/// line"* — without it, check (4) would be a wall a future maintainer widens until it is silent. It is
+/// an explicit, reasoned excuse list and it is **short by construction**: everything the form states
+/// as a condition belongs in the transcription instead.
+const CARRIES_NO_DECISION: &[(&str, &str)] = &[
+    (
+        "Capital Loss Carryover Worksheet—Lines 6 and 14",
+        "the worksheet's TITLE — it names the sheet and the two Schedule D lines its results land on; \
+         both are already carried by LINES 8 and 13's own instruction text",
+    ),
+    (
+        "Keep for Your Records",
+        "the IRS retention notice: this sheet is not filed and reaches no printed line, so it \
+         conditions nothing btctax computes (see the module doc's note that no testimony is at stake)",
+    ),
+];
+
+/// Every header sentence btctax claims to have TRANSCRIBED, in the order the form prints them.
+fn transcribed_header_prose() -> Vec<&'static str> {
+    vec![
+        APPLICABILITY,
+        OTHERWISE_NO_CARRYOVERS,
+        JOINT_RETURN_SOURCING,
+        CANCELED_DEBT_EXCLUSION,
+    ]
+}
+
+/// Header paragraphs not fully accounted for by `accounted`, as human-readable errors.
+///
+/// A paragraph is accounted for when it can be consumed, front to back, by accounted strings: the
+/// applicability paragraph is the applicability sentence FOLLOWED BY "Otherwise, you don't have any
+/// carryovers.", and demanding a whole-paragraph match would force those two decisions to be
+/// transcribed as one string. Anything left over is reported verbatim, because the residue IS the
+/// finding.
+fn unaccounted_header_paragraphs(block: &str, accounted: &[&str]) -> Vec<String> {
+    let norm: Vec<String> = accounted.iter().map(|s| normalize(s)).collect();
+    let mut errs = Vec::new();
+    for para in unnumbered_conditions_in_the_form(block) {
+        let mut rest = para.as_str();
+        loop {
+            rest = rest.trim_start();
+            if rest.is_empty() {
+                break;
+            }
+            // Longest first: a short excuse must not shadow a longer transcription.
+            let best = norm
+                .iter()
+                .filter(|a| rest.starts_with(a.as_str()))
+                .max_by_key(|a| a.len());
+            match best {
+                Some(a) => rest = &rest[a.len()..],
+                None => {
+                    errs.push(format!(
+                        "{SOURCE_EXTRACT}: the worksheet HEADER states something nothing accounts \
+                         for — {rest:?}. Transcribe it as a constant (and raise the refusal it \
+                         implies), or list it in CARRIES_NO_DECISION with the reason it encodes no \
+                         decision. It is NOT enough that the numbered lines are complete: a leading \
+                         `N.` is what check (3) reads, so an unnumbered condition is invisible to it."
+                    ));
+                    break;
+                }
+            }
+        }
+    }
+    errs
 }
 
 /// How a quote's END is proved to be the instruction's end, not a place the citation stopped.
@@ -136,9 +273,16 @@ enum Terminator {
     /// begin with a capital or a digit — a truncation lands mid-clause, on a lowercase word.
     ///
     /// ★ **Weaker than [`Self::DotLeader`], and the limit is stated rather than hidden**: it would
-    /// accept a truncation that happened to fall on an internal sentence boundary. None of the three
-    /// quotes it guards has an internal full stop, so no such cut exists to make — but a future quote
-    /// that spans two sentences must not be given this terminator.
+    /// accept a truncation that happened to fall on an internal sentence boundary. A future quote that
+    /// spans two sentences must not be given this terminator.
+    ///
+    /// ★★ **The limit is now REACHED, and saying so is the point of stating it.** Six quotes carry
+    /// this terminator; five have no internal full stop, but [`CANCELED_DEBT_EXCLUSION`] ends *"see
+    /// Pub. 4681."* and the abbreviation's period is an internal full stop followed by a digit. A
+    /// citation truncated to *"…see Pub."* would therefore be ACCEPTED here. It is a one-sentence
+    /// quote whose remaining half is a publication number, so the truncation moves no figure and
+    /// changes no refusal — but the blind spot is real, is recorded rather than papered over, and is
+    /// the reason this variant's doc exists at all.
     SentenceEnd,
 }
 
@@ -161,6 +305,24 @@ fn quotes() -> Vec<(String, &'static str, Terminator)> {
     v.push((
         "the lines 9-13 interstitial".to_string(),
         GOTO_LINE9_OR_SKIP,
+        Terminator::SentenceEnd,
+    ));
+    // ★ The header prose. `APPLICABILITY` above is only the first HALF of the header's first
+    //   paragraph; the three below complete it, and the last two are the governing conditions
+    //   check (3) can never see.
+    v.push((
+        "the applicability closing sentence".to_string(),
+        OTHERWISE_NO_CARRYOVERS,
+        Terminator::SentenceEnd,
+    ));
+    v.push((
+        "the MFS-after-joint-return sourcing condition".to_string(),
+        JOINT_RETURN_SOURCING,
+        Terminator::SentenceEnd,
+    ));
+    v.push((
+        "the §108(b)(2)(G) canceled-debt condition".to_string(),
+        CANCELED_DEBT_EXCLUSION,
         Terminator::SentenceEnd,
     ));
     v
@@ -236,6 +398,121 @@ mod tests {
             "the worksheet's line set is decided by the FORM, not by us: missing {:?}, invented {:?}",
             from_form.difference(&transcribed).collect::<Vec<_>>(),
             transcribed.difference(&from_form).collect::<Vec<_>>(),
+        );
+    }
+
+    /// Half 4 — every paragraph of the worksheet HEADER is accounted for.
+    #[test]
+    fn the_worksheets_unnumbered_conditions_are_transcribed_and_checked() {
+        let block = worksheet_block(&extract_raw());
+        let paras = unnumbered_conditions_in_the_form(&block);
+        assert!(
+            paras.len() >= 3,
+            "the header enumerated {} paragraph(s) — a scan that reads nothing reports OK forever: \
+             {paras:?}",
+            paras.len()
+        );
+        assert!(
+            paras
+                .iter()
+                .any(|p| p.contains("the spouse who actually had the loss")),
+            "the MFS-after-joint-return condition must be ENUMERATED off the form: {paras:?}"
+        );
+        assert!(
+            paras.iter().any(|p| p.contains("Pub. 4681")),
+            "the §108(b)(2)(G) canceled-debt condition must be ENUMERATED off the form: {paras:?}"
+        );
+        assert!(
+            !paras
+                .iter()
+                .any(|p| p.starts_with("1. Enter the amount from your 2024 Form 1040")),
+            "the header must STOP at numbered line 1: {paras:?}"
+        );
+
+        let mut accounted = transcribed_header_prose();
+        accounted.extend(CARRIES_NO_DECISION.iter().map(|(s, _)| *s));
+        let errs = unaccounted_header_paragraphs(&block, &accounted);
+        assert!(errs.is_empty(), "{}", errs.join("\n"));
+
+        for (_, reason) in CARRIES_NO_DECISION {
+            assert!(
+                reason.len() > 30,
+                "an excuse without a REASON is the hand-list failure wearing a table: {reason:?}"
+            );
+        }
+    }
+
+    /// ★★★ **THE KILL TEST for check (4) — the half whose blindness is the reason it exists.**
+    ///
+    /// (a) **Delete a transcribed header condition.** The new enumeration must go RED — *and*
+    ///     [`the_transcribed_line_set_is_the_forms_own_line_set`]'s instrument must stay GREEN on the
+    ///     same defect. Asserting that the OLD half does not fire is what proves the new one is
+    ///     load-bearing rather than a second opinion: this is exactly how both conditions were dropped
+    ///     with the file green.
+    ///
+    /// (b) **Paraphrase it.** "the spouse who actually had the loss" → "either spouse" is a change of
+    ///     tax law, not of wording — it is the sourcing rule inverted. The verbatim half must reject
+    ///     it, and it is a DIFFERENT half: a paraphrase is still one accounted paragraph as far as (a)
+    ///     is concerned, provided the constant is edited to match.
+    ///
+    /// (c) **Excuse it instead of transcribing it.** A future maintainer silencing (a) by dropping the
+    ///     sentence into `CARRIES_NO_DECISION` is the failure mode of every excuse list in this repo,
+    ///     so the reason string is asserted to exist — and the verbatim half still holds the words.
+    #[test]
+    fn a_dropped_header_condition_is_caught_by_the_unnumbered_half_alone() {
+        let block = worksheet_block(&extract_raw());
+
+        // (a) plant: the joint-return condition is simply not transcribed.
+        let mut without_joint = transcribed_header_prose();
+        without_joint.retain(|s| *s != JOINT_RETURN_SOURCING);
+        let mut accounted = without_joint.clone();
+        accounted.extend(CARRIES_NO_DECISION.iter().map(|(s, _)| *s));
+        let errs = unaccounted_header_paragraphs(&block, &accounted);
+        assert_eq!(
+            errs.len(),
+            1,
+            "dropping the sourcing rule must be caught EXACTLY once: {errs:?}"
+        );
+        assert!(
+            errs[0].contains("the spouse who actually had the loss"),
+            "…and the residue reported must be the dropped sentence itself: {}",
+            errs[0]
+        );
+        // …and the NUMBERED half is blind to it, which is the whole finding.
+        let from_form = line_numbers_in_the_form(&block);
+        let transcribed: BTreeSet<u8> = LINES.iter().map(|(n, _)| *n).collect();
+        assert_eq!(
+            transcribed, from_form,
+            "★ check (3) must still report the transcription COMPLETE with a governing condition \
+             missing — if this ever fails, the claim that the two halves are disjoint has changed"
+        );
+
+        // (b) plant: a paraphrase that inverts the rule. Caught by the VERBATIM half, not by (a).
+        let hay = extract();
+        assert!(
+            occurs_and_terminates(
+                &hay,
+                &normalize(JOINT_RETURN_SOURCING),
+                Terminator::SentenceEnd
+            ),
+            "the real sourcing rule must pass — a checker that rejects everything proves nothing"
+        );
+        let paraphrase = "If you and your spouse once filed a joint return and are filing separate \
+                          returns for 2025, any capital loss carryover from the joint return can be \
+                          deducted only on the return of either spouse.";
+        assert!(
+            !occurs_and_terminates(&hay, &normalize(paraphrase), Terminator::SentenceEnd),
+            "★ \"either spouse\" is the sourcing rule INVERTED and must be REJECTED"
+        );
+
+        // (c) the truncation cut this terminator CANNOT make on the canceled-debt quote, recorded as
+        //     an executable statement of the blind spot rather than a comment claiming there is none.
+        let cut = normalize("If you excluded canceled debt from income in 2025, see Pub.");
+        assert!(
+            occurs_and_terminates(&hay, &cut, Terminator::SentenceEnd),
+            "★ documented limit of `SentenceEnd`: the abbreviation's period passes as a sentence \
+             end. If this ever fails, the terminator got stronger and the doc comment must be \
+             updated to say so."
         );
     }
 

@@ -129,6 +129,38 @@ pub const GOTO_LINE5_OR_LINE9: &str = "If line 7 of your 2024 Schedule D is a lo
 pub const GOTO_LINE9_OR_SKIP: &str = "If line 15 of your 2024 Schedule D is a loss, go to line 9; \
                                       otherwise, skip lines 9 through 13.";
 
+/// The sentence that CLOSES the applicability test — "**Otherwise, you don't have any carryovers.**"
+///
+/// [`CapitalLossCarryoverWorksheet::figure`] implements it as `return None`, and it was quoted only in
+/// a doc comment until the header-completeness half of the `xtask` checker demanded that every
+/// paragraph above worksheet line 1 be accounted for. It carries a real decision, so it is transcribed
+/// rather than excused. (The apostrophe is U+2019, as the extract prints it.)
+pub const OTHERWISE_NO_CARRYOVERS: &str = "Otherwise, you don’t have any carryovers.";
+
+/// ★★★ The worksheet header's **MFS-after-joint-return sourcing rule** (§1212(b); worksheet header).
+///
+/// btctax cannot split a joint carryover between spouses: it stores one `Carryforward` per return and
+/// knows nothing about which spouse realised which loss. So this sentence is not modelled — it is
+/// ASKED, and an affirmative answer refuses
+/// ([`RefuseReason::JointReturnCarryoverAttributionUnknown`](crate::tax::return_refuse::RefuseReason)).
+///
+/// ★ It was invisible to the conformance checker by construction until N1's follow-up: the
+/// completeness half read only physical lines beginning `N.`, so unnumbered header prose could not be
+/// counted, and both header conditions were dropped while the checker stayed green.
+pub const JOINT_RETURN_SOURCING: &str =
+    "If you and your spouse once filed a joint return and are filing separate returns for 2025, any \
+     capital loss carryover from the joint return can be deducted only on the return of the spouse \
+     who actually had the loss.";
+
+/// ★★★ The worksheet header's **§108(b)(2)(G) attribute-reduction condition** (worksheet header).
+///
+/// Pub. 4681 directs a filer who excluded canceled debt from income to REDUCE tax attributes —
+/// capital loss carryovers among them — before carrying them into the next year. btctax models no
+/// part of §108(b), so this too is asked rather than assumed
+/// ([`RefuseReason::ExcludedCanceledDebtAttributeReduction`](crate::tax::return_refuse::RefuseReason)).
+pub const CANCELED_DEBT_EXCLUSION: &str =
+    "If you excluded canceled debt from income in 2025, see Pub. 4681.";
+
 /// The extract every quote in this module is checked against, relative to the repo root.
 pub const SOURCE_EXTRACT: &str = "design/forms/extract/i1040sd--2025.txt";
 

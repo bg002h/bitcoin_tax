@@ -103,6 +103,13 @@ pub enum QuestionId {
     /// **Schedule D line 20 / Schedule A line 9** — is the filer filing Form 4952? ★ APPENDED AT THE
     /// END, for the `decl_tristate!` array-index reason above.
     FilingForm4952,
+    /// **Capital Loss Carryover Worksheet header / §1212(b)** — does the carryover-in include a loss
+    /// that was the SPOUSE'S, from a joint year now being filed separately? ★ APPENDED AT THE END,
+    /// for the `decl_tristate!` array-index reason above.
+    CarryoverIncludesSpousesJointLoss,
+    /// **Capital Loss Carryover Worksheet header / §108(b)(2)(G)** — did the filer exclude canceled
+    /// debt from income, requiring attribute reduction? ★ APPENDED AT THE END, same reason.
+    ExcludedCanceledDebt,
 }
 
 impl QuestionId {
@@ -122,6 +129,8 @@ impl QuestionId {
         QuestionId::OtherOutOfScopeIncome,
         QuestionId::MortgageWithinDebtLimit,
         QuestionId::FilingForm4952,
+        QuestionId::CarryoverIncludesSpousesJointLoss,
+        QuestionId::ExcludedCanceledDebt,
     ];
 }
 
@@ -177,10 +186,25 @@ pub fn question_is_live(id: QuestionId, ri: &ReturnInputs) -> bool {
         .is_some_and(|q| (q.live)(ri))
 }
 
-/// Whether an AMT capital-loss-carryover twin could exist — Form 6251 line 2k's liveness.
-fn amt_carryover_question_live(ri: &ReturnInputs) -> bool {
+/// ★★ Does this return bring a capital-loss carryforward IN at all?
+///
+/// The ONE predicate behind all three carryforward-conditioned declarations — Form 6251 line 2k, the
+/// Capital Loss Carryover Worksheet's joint-return sourcing rule, and its §108(b)(2)(G) canceled-debt
+/// condition. Factored out so a fourth cannot be written with a fourth copy of the same test.
+///
+/// ★★★ **It is deliberately NOT widened with a taxable-income term.** The tempting shape — "only ask
+/// when the year is at the floor, since that is where the carryover matters" — is the understatement
+/// direction: a positive-taxable-income year with a mis-attributed joint carryover still deducts a
+/// loss that is not the filer's, and still rolls it forward. `widening-an-exemption-is-never-the-safe-
+/// edit`: enumerate the YES-condition (a carryforward exists) and let every other case fail closed.
+pub fn carryforward_in_present(ri: &ReturnInputs) -> bool {
     let cf = ri.capital_loss_carryforward_in;
     cf.short > Usd::ZERO || cf.long > Usd::ZERO
+}
+
+/// Whether an AMT capital-loss-carryover twin could exist — Form 6251 line 2k's liveness.
+fn amt_carryover_question_live(ri: &ReturnInputs) -> bool {
+    carryforward_in_present(ri)
 }
 
 /// Whether a Form 6251 line 2l depreciation adjustment could be hiding inside the Schedule C expense
@@ -677,6 +701,75 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
         durability: Durability::PerYear,
         // ★ NOT filing Form 4952 is the answer that needs no form btctax lacks: line 20 = Yes ⇒ the
         //   Qualified Dividends and Capital Gain Tax Worksheet, which btctax does compute.
+        neutral: false,
+    },
+    // ★★★ THE CAPITAL LOSS CARRYOVER WORKSHEET'S TWO UNNUMBERED HEADER CONDITIONS. Indices 15 and 16;
+    //     appended at the END for the `decl_tristate!` array-index reason above.
+    //
+    // ★★★ WHY THEY EXIST AT ALL. The worksheet header states two governing conditions in prose, above
+    //     line 1 — and the conformance checker's completeness half reads only physical lines beginning
+    //     `N.`, so both were STRUCTURALLY INVISIBLE to it and were dropped while it stayed green
+    //     (`xtask::capital_loss_carryover_check::unnumbered_conditions_in_the_form` is the half that
+    //     now sees them). `CLAUDE.md`: *"If the form asks something our input surface cannot answer,
+    //     collect it. That is following instructions, not scope creep."*
+    //
+    // ★★★ AND WHY THEY BECAME LOAD-BEARING NOW. Before `--write-carryover` rolled the §1212(b)
+    //     figure, a mis-attributed or unreduced carryover was at worst the filer's own bad input.
+    //     After it, btctax re-emits that figure as its OWN `Computed` value on next year's Schedule D
+    //     lines 6 and 14 — sworn under §6065. That is the one edit that turns a user error into a
+    //     btctax assertion, so both questions fail CLOSED: `None` refuses, and so does `Some(true)`.
+    FormQuestion {
+        id: QuestionId::CarryoverIncludesSpousesJointLoss,
+        prompt: "Does any part of your capital-loss carryover come from a JOINT return for a year \
+                 you are now filing separately from, where the loss was your SPOUSE'S? (Capital Loss \
+                 Carryover Worksheet header: \"If you and your spouse once filed a joint return and \
+                 are filing separate returns for 2025, any capital loss carryover from the joint \
+                 return can be deducted only on the return of the spouse who actually had the \
+                 loss.\") Answer NO only if the whole carryover is your own loss — because you have \
+                 never filed jointly, or because you are still filing jointly with the same spouse, \
+                 or because every dollar of it was realized on property that was yours. Answer YES \
+                 if any part of it was your spouse's, and answer YES if you are unsure: a YES \
+                 refuses the return rather than deducting a loss that is not yours.",
+        unanswered: RefuseReason::JointReturnCarryoverDeclarationUnanswered,
+        unanswered_detail:
+            "this return carries a capital-loss carryforward, and the Capital Loss Carryover \
+             Worksheet's header says a carryover from a joint return \"can be deducted only on the \
+             return of the spouse who actually had the loss\" (§1212(b)). btctax stores ONE \
+             carryover per return and has no way to tell whose loss it was, so it cannot make that \
+             split for you — and with `--write-carryover` it would re-emit the figure as its own \
+             computed entry on next year's Schedule D lines 6 and 14. Run `btctax income answer`",
+        live: carryforward_in_present,
+        get: |ri| ri.carryover_includes_spouses_joint_loss,
+        set: |ri, v| ri.carryover_includes_spouses_joint_loss = Some(v),
+        // ★ §G-15 — PER-YEAR. Filing status changes; so does which spouse's loss is still running.
+        durability: Durability::PerYear,
+        // ★ NOT neutral at true: a YES is the ADVERSE answer here, and it refuses. `false` — "all of
+        //   it is mine" — is the answer that needs no split btctax cannot perform.
+        neutral: false,
+    },
+    FormQuestion {
+        id: QuestionId::ExcludedCanceledDebt,
+        prompt: "Did you exclude cancelled or forgiven debt from your income this year — for \
+                 example under the insolvency, bankruptcy, or qualified-principal-residence rules \
+                 (Form 982)? (Capital Loss Carryover Worksheet header: \"If you excluded canceled \
+                 debt from income in 2025, see Pub. 4681.\") Answer NO only if you excluded none. \
+                 Answer YES if you filed or should have filed Form 982, and answer YES if you are \
+                 unsure: a YES refuses the return rather than carrying forward a loss that \
+                 §108(b)(2)(G) requires you to reduce.",
+        unanswered: RefuseReason::ExcludedCanceledDebtDeclarationUnanswered,
+        unanswered_detail:
+            "this return carries a capital-loss carryforward, and the Capital Loss Carryover \
+             Worksheet's header sends a filer who excluded canceled debt to Pub. 4681 — because \
+             §108(b) then requires TAX ATTRIBUTE REDUCTION, and §108(b)(2)(G) puts capital loss \
+             carryovers on that list. btctax models no part of §108(b), so a carryover it has not \
+             been told to reduce is too large, and with `--write-carryover` it would persist that \
+             figure as next year's computed input. Run `btctax income answer`",
+        live: carryforward_in_present,
+        get: |ri| ri.excluded_canceled_debt,
+        set: |ri, v| ri.excluded_canceled_debt = Some(v),
+        // ★ §G-15 — PER-YEAR: a debt exclusion is an event of one tax year.
+        durability: Durability::PerYear,
+        // ★ NOT neutral at true: a YES is the ADVERSE answer and refuses.
         neutral: false,
     },
 ];
@@ -1278,6 +1371,8 @@ mod tests {
                 QuestionId::OtherOutOfScopeIncome => 12,
                 QuestionId::MortgageWithinDebtLimit => 13,
                 QuestionId::FilingForm4952 => 14,
+                QuestionId::CarryoverIncludesSpousesJointLoss => 15,
+                QuestionId::ExcludedCanceledDebt => 16,
             };
             assert_eq!(idx, i, "QuestionId::ALL is out of order / missing {id:?}");
             assert_eq!(
@@ -1286,8 +1381,8 @@ mod tests {
                 "exactly one FORM_QUESTIONS entry for {id:?}"
             );
         }
-        assert_eq!(QuestionId::ALL.len(), 15, "there are 15 declarations");
-        assert_eq!(FORM_QUESTIONS.len(), 15, "one entry per declaration");
+        assert_eq!(QuestionId::ALL.len(), 17, "there are 17 declarations");
+        assert_eq!(FORM_QUESTIONS.len(), 17, "one entry per declaration");
     }
 
     /// ★★★ §G-6/ISO — THE OUT-OF-SCOPE QUESTION MUST NAME THE ISO EXERCISE, WHICH IS NOT INCOME.

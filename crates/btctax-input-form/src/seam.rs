@@ -138,6 +138,12 @@ pub enum FieldId {
     DeclAmtCarryoverSame,
     /// Form 6251 line 2l — is the depreciation inside the Schedule C expense total the same for the AMT?
     DeclAmtDepreciationSame,
+    /// Capital Loss Carryover Worksheet header (§1212(b)) — does the carryover-in include a loss that
+    /// was the SPOUSE'S, from a joint year now filed separately? (`FORM_QUESTIONS` 15.)
+    DeclCarryoverIncludesSpousesJointLoss,
+    /// Capital Loss Carryover Worksheet header (§108(b)(2)(G)) — was cancelled debt excluded from
+    /// income, requiring tax-attribute reduction? (`FORM_QUESTIONS` 16.)
+    DeclExcludedCanceledDebt,
     ForeignCountryNames,
     // Skippables (from SKIPPABLE_QUESTIONS); SALT election = SaSaltUseSalesTax in Schedule A above
     BlindTaxpayer,

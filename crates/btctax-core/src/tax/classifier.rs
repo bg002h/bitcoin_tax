@@ -103,6 +103,8 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         capital_loss_carryforward_in,
         capital_loss_carryforward_in_provenance,
         charitable_carryover_in_provenance,
+        carryover_includes_spouses_joint_loss,
+        excluded_canceled_debt,
         amt_carryover_same_as_regular,
         amt_depreciation_same_as_regular,
         charitable_carryover_in,
@@ -208,6 +210,15 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         amt_carryover_same_as_regular,
         QuestionId::AmtCarryoverSameAsRegular,
     );
+    // ★ The Capital Loss Carryover Worksheet's two unnumbered header conditions. Class (A) like
+    //   their line-2k sibling above: each ASSERTS a fact about this year under §6065, each refuses
+    //   when `None`, and each refuses again at `Some(true)` — a YES names a computation btctax does
+    //   not perform (a per-spouse split; §108(b) attribute reduction), not a value it can absorb.
+    c.declaration(
+        carryover_includes_spouses_joint_loss,
+        QuestionId::CarryoverIncludesSpousesJointLoss,
+    );
+    c.declaration(excluded_canceled_debt, QuestionId::ExcludedCanceledDebt);
     c.declaration(
         amt_depreciation_same_as_regular,
         QuestionId::AmtDepreciationSameAsRegular,

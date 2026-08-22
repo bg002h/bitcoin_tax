@@ -727,6 +727,37 @@ pub struct ReturnInputs {
     /// year it actually computed; `User` (the default) means it is the filer's or nobody's.
     #[serde(default)]
     pub capital_loss_carryforward_in_provenance: CarryProvenance,
+    /// ★★★ **Capital Loss Carryover Worksheet header** — *"If you and your spouse once filed a joint
+    /// return and are filing separate returns for 2025, any capital loss carryover from the joint
+    /// return can be deducted only on the return of the spouse who actually had the loss."*
+    /// (`capital_loss_carryover::JOINT_RETURN_SOURCING`.)
+    ///
+    /// **Does any part of the carryover-in come from a JOINT return for a year you are now filing
+    /// separately from, where the loss was your SPOUSE'S?** btctax stores one `Carryforward` per
+    /// return and knows nothing about which spouse realised which loss, so it cannot perform the
+    /// split the form requires: `Some(true)` REFUSES.
+    ///
+    /// A class-(A) DECLARATION, so `None` refuses too — and it is phrased so `false` is the neutral
+    /// answer, per `widening-an-exemption-is-never-the-safe-edit`: the YES-condition is enumerated and
+    /// every omission fails closed.
+    ///
+    /// ★ Collected rather than approximated because the form asks it and our input surface could not
+    /// answer it. It became load-bearing when `--write-carryover` learned to roll §1212(b): before
+    /// that, a mis-attributed carryover was the filer's own bad input; after it, btctax re-emits the
+    /// figure as its OWN `Computed` value on next year's sworn Schedule D lines 6/14.
+    #[serde(default)]
+    pub carryover_includes_spouses_joint_loss: Option<bool>,
+    /// ★★★ **Capital Loss Carryover Worksheet header** — *"If you excluded canceled debt from income
+    /// in 2025, see Pub. 4681."* (`capital_loss_carryover::CANCELED_DEBT_EXCLUSION`; §108(b)(2)(G).)
+    ///
+    /// **Did you exclude cancelled or forgiven debt from income?** §108(b) then requires tax
+    /// ATTRIBUTE REDUCTION, and §108(b)(2)(G) puts capital loss carryovers on that list — so the
+    /// carryover surviving into next year is smaller than the worksheet alone says. btctax models no
+    /// part of §108(b), so `Some(true)` REFUSES rather than carrying an unreduced figure.
+    ///
+    /// A class-(A) DECLARATION: `None` refuses, `false` is neutral.
+    #[serde(default)]
+    pub excluded_canceled_debt: Option<bool>,
     /// **Form 6251 line 2k — the AMT capital-loss-carryover declaration.** Line 2k is "Disposition of
     /// property (difference between AMT and regular tax gain or loss)", and i6251 directs any Form
     /// 8949 / Schedule D / 4684 / 4797 adjustment for the activity there rather than to line 3.
@@ -1072,6 +1103,8 @@ impl Default for ReturnInputs {
             payments: Payments::default(),
             capital_loss_carryforward_in: Carryforward::default(),
             capital_loss_carryforward_in_provenance: CarryProvenance::default(),
+            carryover_includes_spouses_joint_loss: None,
+            excluded_canceled_debt: None,
             amt_carryover_same_as_regular: None,
             amt_depreciation_same_as_regular: None,
             charitable_carryover_in: Vec::new(),

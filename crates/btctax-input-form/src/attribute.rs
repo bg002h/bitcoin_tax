@@ -43,6 +43,23 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::MortgageDebtLimitUnanswered => vec![decl(QuestionId::MortgageWithinDebtLimit)],
         R::Form4952DeclarationUnanswered => vec![decl(QuestionId::FilingForm4952)],
         R::AmtQualifiedDwellingUnanswered => vec![decl(QuestionId::AmtQualifiedDwelling)],
+        // ★★ THE CAPITAL LOSS CARRYOVER WORKSHEET'S TWO HEADER CONDITIONS — unanswered and adverse,
+        //    all four anchored on the field that carries the answer.
+        //
+        // ★★★ **DELIBERATELY NOT `NotInForm`, including for the two ADVERSE ones**, and the reason is
+        //     recorded a few screens down on `QbiAboveThreshold`: an anchor saying a refusal has no
+        //     form field is a FALSEHOOD when one exists, and it leaves the filer with nowhere to go.
+        //     These are v1 form fields (`DECL_FIELDS` indices 15 and 16). A filer who answered YES by
+        //     mistake fixes it exactly here; one who answered YES truthfully is told so by the
+        //     refusal's TEXT, which names the hand-work — that is the refusal's job, not the anchor's.
+        R::JointReturnCarryoverDeclarationUnanswered
+        | R::JointReturnCarryoverAttributionUnknown => {
+            vec![decl(QuestionId::CarryoverIncludesSpousesJointLoss)]
+        }
+        R::ExcludedCanceledDebtDeclarationUnanswered
+        | R::ExcludedCanceledDebtAttributeReduction => {
+            vec![decl(QuestionId::ExcludedCanceledDebt)]
+        }
         R::IncomeExclusionUnanswered => vec![decl(QuestionId::HasIncomeExclusion)],
         // §G-22/B11 — both legs point at the one declaration that decides them.
         R::OtherIncomeUnanswered | R::OtherIncomeOutOfScope => {

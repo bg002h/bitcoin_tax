@@ -663,6 +663,8 @@ $ btctax --vault v.pgp income show --year 2024
     "long": "0"
   },
   "capital_loss_carryforward_in_provenance": "user",
+  "carryover_includes_spouses_joint_loss": null,
+  "excluded_canceled_debt": null,
   "amt_carryover_same_as_regular": null,
   "amt_depreciation_same_as_regular": true,
   "charitable_carryover_in": [],
