@@ -1453,3 +1453,102 @@ fn a_full_return_with_exactly_a_full_8949_page_of_legs_still_exports() {
         "the packet writes on the boundary case"
     );
 }
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// N4 — the packet's UNSIGNALLED HAND-MARKS (FILING-READINESS-PLAN rank 14).
+//
+// A no-crypto packet leaves the Digital Asset question unmarked (btctax cannot swear "No" for a
+// ledger it was not given) and the line-7 "If not required, check here" box blank (it cannot
+// establish that Schedule D is NOT required). Both blanks are CORRECT — "an entry is testimony", and
+// btctax must never answer for the filer. What was wrong is that the filer was never TOLD: no
+// advisory named the digital-asset question, and manifest.txt was one line of stapling order. A
+// filer signed a return with a mandatory question unanswered and no instruction anywhere in the
+// product's output.
+//
+// ★ The fix adds the SIGNAL, never the answer. Owner decision 13 puts it in the manifest — the one
+// artifact the filer is told to follow while assembling paper.
+
+/// A TY2024 full-return vault with NO crypto activity at all: a plain wage earner. This is the L1
+/// household of the plan's low-end pass, and the population for both mark 1 and mark 2.
+fn no_crypto_full_return_vault() -> (tempfile::TempDir, PathBuf, tempfile::TempDir) {
+    use btctax_core::tax::return_inputs::{Owner, W2};
+    full_return_vault(&[], |ri| {
+        ri.w2s = vec![W2 {
+            owner: Owner::Taxpayer,
+            employer: "ACME".into(),
+            box1_wages: dec!(40000),
+            box2_fed_withheld: dec!(3000),
+            box3_ss_wages: dec!(40000),
+            box5_medicare_wages: dec!(40000),
+            ..Default::default()
+        }];
+    })
+}
+
+/// ★ N4. The no-crypto packet's manifest must ENUMERATE the marks btctax deliberately left for the
+/// filer — and must not answer any of them.
+///
+/// Mutation: delete the `hand_marks` block from the manifest and this reds.
+#[test]
+fn a_no_crypto_packet_names_the_marks_the_filer_must_make_by_hand() {
+    let (_d, vault, out) = no_crypto_full_return_vault();
+    let rep = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
+        .expect("a plain wage earner's packet exports");
+    let manifest = std::fs::read_to_string(out.path().join("manifest.txt")).unwrap();
+
+    assert!(
+        manifest.contains("COMPLETE BY HAND"),
+        "the manifest must carry a hand-marks section: {manifest}"
+    );
+    assert!(
+        manifest.contains("Digital Asset"),
+        "…naming the Digital Asset question, which is mandatory and unanswered: {manifest}"
+    );
+    assert!(
+        manifest.contains("line 7"),
+        "…the line-7 \"If not required, check here\" box, blank on a no-Schedule-D packet: {manifest}"
+    );
+    assert!(
+        manifest.contains("penalties of perjury") || manifest.contains("sign"),
+        "…and the signature block, which is every filer's: {manifest}"
+    );
+    // The signal, never the answer.
+    assert_eq!(
+        rep.hand_marks.len(),
+        3,
+        "exactly the three marks this packet leaves: {:?}",
+        rep.hand_marks
+    );
+}
+
+/// The other half of the B1 pair. A packet where btctax DID answer the Digital Asset question (there
+/// is crypto activity) and DID attach a Schedule D must not tell the filer to make either mark — a
+/// list that always says the same thing signals nothing, and instructing a filer to hand-mark a box
+/// on a correctly-filed form is worse than silence.
+#[test]
+fn a_crypto_packet_does_not_list_marks_btctax_already_made() {
+    let (_d, vault, out) = full_return_vault(&real_events_2024(), |_ri| {});
+    let rep = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
+        .expect("the crypto packet exports");
+    let manifest = std::fs::read_to_string(out.path().join("manifest.txt")).unwrap();
+
+    assert!(
+        !manifest.contains("Digital Asset"),
+        "btctax answered the Digital Asset question \"Yes\" — it is not the filer's to make: {manifest}"
+    );
+    assert!(
+        !manifest.contains("line 7"),
+        "a Schedule D IS attached, so the line-7 \"if not required\" box is not the filer's: {manifest}"
+    );
+    // The signature is always theirs, on every return.
+    assert_eq!(
+        rep.hand_marks.len(),
+        1,
+        "only the signature block remains: {:?}",
+        rep.hand_marks
+    );
+    assert!(
+        manifest.contains("COMPLETE BY HAND"),
+        "…and it is still announced: {manifest}"
+    );
+}

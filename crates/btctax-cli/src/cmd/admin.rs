@@ -327,6 +327,77 @@ pub struct IrsPdfReport {
     ///
     /// Empty on the crypto-slice path, which computes no full return and no Schedule A.
     pub charitable_carryover_out: Vec<btctax_core::tax::return_inputs::CharitableCarryItem>,
+    /// ★ N4 (FILING-READINESS-PLAN rank 14) — the marks btctax deliberately did NOT make on this
+    /// packet, one string per mark. See [`hand_marks`].
+    ///
+    /// Carried out so the caller can say how many there are without re-deriving the list; the text
+    /// itself lives in the packet's `manifest.txt` (owner decision 13), which is the artifact the
+    /// filer is told to follow while assembling paper. Empty on the crypto-slice path, whose 1040 is
+    /// watermarked "WORKSHEET — NOT A COMPLETE FORM 1040" and is not signed or filed.
+    pub hand_marks: Vec<String>,
+}
+
+/// ★ N4 — **the marks btctax deliberately leaves for the filer**, in the order they appear on the
+/// form. One string per mark; empty is impossible (the signature is every filer's).
+///
+/// **The signal, never the answer.** Each of these is blank because it is the filer's to make, not
+/// because it is zero — "an entry is testimony," and a `0` or a checked box btctax cannot vouch for
+/// is fabricated testimony on a §6065-signed page. What was missing was not the mark; it was any
+/// statement anywhere in the product's output that the mark exists. A no-crypto filer signed a return
+/// with a mandatory question unanswered, and the packet's `manifest.txt` was one line of stapling
+/// order.
+///
+/// Each entry is CONDITIONED on the mark actually being blank in THIS packet, because a list that
+/// always says the same thing signals nothing — and telling a filer to hand-mark a box on a
+/// correctly-filed form is worse than silence.
+fn hand_marks(printed: &btctax_core::tax::packet::PrintedReturn) -> Vec<String> {
+    let mut marks = Vec::new();
+    if !printed.forms.f1040.digital_asset_yes {
+        marks.push(
+            "Form 1040 — the Digital Asset question (above line 1a): neither \"Yes\" nor \"No\" is \
+             marked. btctax found no digital-asset activity in this vault, but it will not swear \
+             \"No\" for a ledger it was never given — a wrong \"No\" here is sworn testimony under \
+             §6065. The question is MANDATORY: answer it yourself before you sign."
+                .to_string(),
+        );
+    }
+    if !printed.forms.sch_d.must_file() {
+        marks.push(
+            "Form 1040 line 7 — \"Attach Schedule D if required. If not required, check here\": the \
+             box is blank and no Schedule D is in this packet. btctax cannot establish that Schedule \
+             D is NOT required — it has no input for Schedule D lines 4, 5, 11 or 12 (Forms 6252, \
+             4684, 6781, 8824, 4797, 2439, or a K-1). Check the box only if you know none of those \
+             applies to you."
+                .to_string(),
+        );
+    }
+    marks.push(
+        "Form 1040 page 2 — the signature block: your signature, the date, your occupation, and the \
+         Identity Protection PIN if the IRS issued you one — and the same again for your spouse if \
+         you are filing jointly. A return is not filed until it is signed under penalties of perjury \
+         (§6065), and no software may sign it for you."
+            .to_string(),
+    );
+    marks
+}
+
+/// Render [`hand_marks`] as the packet manifest's closing section — the manifest is the artifact the
+/// filer is told to follow while assembling paper, which is why the marks live there (decision 13)
+/// rather than only on a stderr line that scrolls away.
+fn hand_marks_block(marks: &[String]) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::from(
+        "\n# ── COMPLETE BY HAND — marks btctax deliberately did NOT make ──\n\
+         #\n\
+         # These are blank because they are YOURS to make, not because they are zero. btctax does\n\
+         # not answer for the filer, and it will not sign.\n#\n",
+    );
+    for m in marks {
+        for line in crate::render::wrap_bulleted(m).lines() {
+            let _ = writeln!(s, "#{line}");
+        }
+    }
+    s
 }
 
 /// The **[I5]** broker-reporting advisory line, year-aware — or `None` when no disposition may have
@@ -731,6 +802,10 @@ pub(crate) fn export_irs_pdf_from_session(
         // Schedule A, hence no §170(d)(1) carryover either.
         advisories: Vec::new(),
         charitable_carryover_out: Vec::new(),
+        // N4 does not apply to the slice: its 1040 is a WORKSHEET (watermarked "NOT A COMPLETE FORM
+        // 1040"), it is never signed or filed, and the note printed for it already says every other
+        // line is the filer's.
+        hand_marks: Vec::new(),
         full_return_paths: Vec::new(),
         full_return_manifest: None,
         forms_ignored_full_return: false, // crypto-slice path honors --forms
@@ -1035,6 +1110,11 @@ fn export_full_return(
         let _ = writeln!(manifest, "  ATT  {}.txt  (attach to Form 1040)", st.name);
         paths.push(path);
     }
+    // ★ N4 — the marks btctax deliberately did NOT make, enumerated at the FOOT of the manifest: the
+    // filer reaches them having just assembled the paper, which is the moment they are actionable.
+    // Every one of these blanks is correct; what was missing was any statement that they exist.
+    let marks = hand_marks(&printed);
+    manifest.push_str(&hand_marks_block(&marks));
     let manifest_path = out_dir.join("manifest.txt");
     write_bytes_owner_only(&manifest_path, manifest.as_bytes())?;
 
@@ -1049,6 +1129,8 @@ fn export_full_return(
         // §170 notes. Taken from the SAME `assemble_absolute` result the packet was printed from, so
         // the figure on the filer's screen is the figure the return produced.
         charitable_carryover_out: ar.charitable_carryover_out.clone(),
+        // ★ N4 — the SAME list the manifest rendered, so the stderr count and the paper cannot drift.
+        hand_marks: marks,
         watermarked,
         tax_year,
         unresolved_hard,

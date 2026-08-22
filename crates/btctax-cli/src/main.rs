@@ -829,6 +829,20 @@ fn run() -> Result<ExitCode, CliError> {
                 }
                 if let Some(m) = &report.full_return_manifest {
                     println!("  {}  ← your stapling order", m.display());
+                    // ★ N4 — the packet leaves marks that are the FILER's to make (the Digital Asset
+                    // question on a no-crypto return, the line-7 "if not required" box, the signature
+                    // block). Each blank is correct — btctax must not answer for the filer — but until
+                    // now nothing in the product's output said they existed. The text lives in the
+                    // manifest (one source, decision 13); this is the pointer at it.
+                    if !report.hand_marks.is_empty() {
+                        eprintln!(
+                            "⚠ {n} mark(s) on this packet are YOURS to make by hand and are \
+                             deliberately blank — see the \"COMPLETE BY HAND\" section at the foot of \
+                             {m}.",
+                            n = report.hand_marks.len(),
+                            m = m.display()
+                        );
+                    }
                 }
                 if report.form_8283_needs_review {
                     eprintln!(
