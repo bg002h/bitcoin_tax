@@ -118,6 +118,29 @@ pub enum RefuseReason {
     /// Form 4952. The SDTW subtracts Form 4952 line 4g at its line 4, so answering Yes anyway
     /// UNDERSTATES the tax.
     Form4952Required,
+    /// ★★★ **Form 8960 line 9b** — the collected state/local income tax allocated to net investment
+    /// income EXCEEDS what §164(b)(6) let the filer deduct.
+    ///
+    /// §1411(c)(1)(B) reduces net investment income only by *"the deductions **allowed by this
+    /// subtitle** which are properly allocable"*, and §164(b)(6)(B) caps the SALT *"taken into
+    /// account"* at $10,000 ($5,000 MFS) — so a dollar of state income tax above the cap is not
+    /// allowed by subtitle A at all and there is nothing for §1411 to allocate. i8960's own allocation
+    /// block says the same: the allocable item is SALT *"if **properly deducted on your return** when
+    /// calculating your U.S. regular income tax."*
+    ///
+    /// Three ways to exceed the bound, one refusal (`ADJUDICATION-2026-08-21.md` D5):
+    ///
+    ///   (a) the amount is simply larger than min(line 5a, line 5e, the cap);
+    ///   (b) the filer took the **standard deduction**, so no state income tax was deducted at all
+    ///       and the bound is $0;
+    ///   (c) the filer made the §164(b)(5) **general-sales-tax election**, so Schedule A line 5a is
+    ///       sales tax — and i8960 is express: *"Sales taxes aren't deductible in computing net
+    ///       investment income."* The bound is $0 on that branch even for a large line 5e.
+    ///
+    /// ★ It REFUSES rather than clamping. A clamp would be btctax choosing the filer's allocation —
+    /// the one thing D5's build-shape guard forbids — and it would silently rewrite a figure signed
+    /// under 26 USC 6065.
+    Nii9bExceedsDeductedSalt,
     /// Form 6251 line 3 — the AMT qualified-dwelling question is live but unanswered.
     AmtQualifiedDwellingUnanswered,
     /// **§164(b)(7)(B)(iv) / Schedule 1-A Part I** — the §911/931/933 exclusion gate is unanswered on
@@ -365,6 +388,10 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         donations_had_restrictions: _, // Option<bool>, not an amount
         charitable_cwa_obtained: _,    // Option<bool>, not an amount
         filing_form_4952: _,           // a declaration, not an amount
+        // ★ Form 8960 line 9b — MONEY, and it is screened. A negative allocation would ADD to net
+        //   investment income (line 12 = line 8 − line 11), which the §164(b)(6) bound below cannot
+        //   see: that gate tests `> bound`, and every negative passes it.
+        form_8960_line9b,
         dual_status_alien: _,
         // MAGI add-backs — refused at the worksheet's point of need, not here (D-11).
         has_income_exclusion: _, // refused at the worksheet's point of need (D-11), not here
@@ -373,6 +400,10 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         form_2555_line50: _,
         form_4563_line15: _,
     } = ri;
+
+    if form_8960_line9b.is_some_and(neg) {
+        return Some("Form 8960 line 9b state/local income tax allocable to net investment income");
+    }
 
     for w in w2s {
         let W2 {

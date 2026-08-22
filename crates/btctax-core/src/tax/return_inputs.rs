@@ -871,6 +871,45 @@ pub struct ReturnInputs {
     /// under i4952's exception — bounded by that exception's own first condition.
     #[serde(default)]
     pub filing_form_4952: Option<bool>,
+    /// ★★★ **Form 8960 Part II line 9b — "State, local, and foreign income tax (see instructions)"**
+    /// (§1411(c)(1)(B)); the state/local income tax the filer allocates to net investment income.
+    ///
+    /// i8960 (2024), *Line 9b—State, Local, and Foreign Income Tax*, transcribed rather than
+    /// summarised because each sentence bounds a different thing:
+    ///
+    /// - *"Include state, local, and foreign income taxes you paid for the tax year that are
+    ///   attributable to net investment income."*
+    /// - *"Sales taxes aren't deductible in computing net investment income."*
+    /// - *"You may not take a deduction for any foreign income taxes paid for the tax year if you
+    ///   took a credit for any portion of them. See section 275(a)(4)."*
+    /// - *"You can determine the portion of your state, local, and foreign income taxes allocable to
+    ///   net investment income using any reasonable method."*
+    ///
+    /// ★★ **COLLECTED, never computed** (plan decision 6, `ADJUDICATION-2026-08-21.md` D5's build-shape
+    /// guard 1). "Any reasonable method" is the FILER'S election — i8960 even says *"the reasonable
+    /// method of allocation may differ from year to year"* — so btctax must not pick one for them.
+    /// `None` = never answered ⇒ Form 8960 line 9b prints **BLANK**, and the whole Part II deduction is
+    /// forgone, which can only OVERSTATE the tax (`Advisory::Form8960Line9bNotClaimed` says so, and
+    /// names i8960's own worked example — the line 8 ÷ AGI ratio — as *a* reasonable method).
+    /// `Some(x)` = the filer's own allocation, printed as entered.
+    ///
+    /// ★★★ **BOUNDED by §164(b)(6), and the bound is a VALIDATION, not a clamp.** §1411(c)(1)(B)
+    /// reduces net investment income only by *"the deductions **allowed by this subtitle** which are
+    /// properly allocable"*, and SALT above the §164(b)(6)(B) $10,000 / $5,000-MFS cap is not allowed
+    /// by subtitle A at all — so there is nothing for §1411 to allocate. i8960's own allocation block
+    /// agrees: the allocable item is *"State, local, and foreign income taxes **if properly deducted
+    /// on your return** when calculating your U.S. regular income tax."* `screen_absolute` REFUSES a
+    /// value above that bound rather than silently shrinking it, because a shrunk figure would be
+    /// btctax choosing the allocation after all. See [`RefuseReason::Nii9bExceedsDeductedSalt`].
+    ///
+    /// ★ **The foreign component is structurally $0 here.** btctax's only foreign income tax is
+    /// 1099-INT box 6 / 1099-DIV box 7, and it is taken UNCONDITIONALLY as the §904(j) foreign tax
+    /// CREDIT (`assemble_absolute`) — §275(a)(4) then denies the deduction, which is the third
+    /// sentence above. So the bound is the state/local income tax and nothing else.
+    ///
+    /// [`RefuseReason::Nii9bExceedsDeductedSalt`]: crate::tax::return_refuse::RefuseReason::Nii9bExceedsDeductedSalt
+    #[serde(default)]
+    pub form_8960_line9b: Option<Usd>,
     #[serde(default)]
     pub dual_status_alien: Option<bool>,
 
@@ -1048,6 +1087,9 @@ impl Default for ReturnInputs {
             charitable_cwa_obtained: None,
             // Schedule D line 20 / Schedule A line 9 — `None` = never asked, and that REFUSES.
             filing_form_4952: None,
+            // ★ Form 8960 line 9b — `None` = the filer allocated nothing, so the line prints BLANK.
+            //   A defaulted `Usd::ZERO` would swear on a signed return that the allocation IS zero.
+            form_8960_line9b: None,
             dual_status_alien: None,
         }
     }

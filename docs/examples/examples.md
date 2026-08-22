@@ -680,6 +680,7 @@ $ btctax --vault v.pgp income show --year 2024
   "donations_had_restrictions": false,
   "charitable_cwa_obtained": true,
   "filing_form_4952": false,
+  "form_8960_line9b": null,
   "dual_status_alien": false,
   "has_income_exclusion": null,
   "other_out_of_scope_income": false,
@@ -732,7 +733,7 @@ Check what this feature actually produced: open the Form 8275 PDF and confirm th
 ⚠ 2 mark(s) on this packet are YOURS to make by hand and are deliberately blank — see the "COMPLETE BY HAND" section at the foot of irs/manifest.txt.
 ⚠ a Section B Form 8283 is NOT filing-ready without a signed Part IV (appraiser) and Part V (donee acknowledgement) — obtain both before filing.
 
-  ── ADVISORIES (10) ──
+  ── ADVISORIES (11) ──
   • CTC/ODC NOT COMPUTED — you captured 1 dependent(s), but v1 does not compute the Child
     Tax Credit or the Credit for Other Dependents (1040 line 19 is $0). Your tax is
     OVERSTATED by up to $2,000 per qualifying child / $500 per other dependent. File
@@ -783,6 +784,15 @@ Check what this feature actually produced: open the Form 8275 PDF and confirm th
     CHARITY (50%-organization) donee: long-term gifts at fair market value under the
     30%-of-AGI ceiling. If the donee is a PRIVATE FOUNDATION, the correct treatment is the
     20% ceiling at BASIS (which v1 refuses). Verify who you gave to.
+  • FORM 8960 LINE 9B NOT CLAIMED — you owe net investment income tax (§1411), and Form 8960
+    line 9b, "State, local, and foreign income tax", is BLANK. The state and local income
+    tax your Schedule A actually deducted is up to $10,000 after §164(b)(6)'s cap, and the
+    portion of it attributable to your investment income is deductible against that income —
+    so your tax is currently OVERSTATED. btctax will not pick the split for you: the
+    Instructions for Form 8960 say you may use "any reasonable method", and one they give
+    themselves is that amount times the ratio of Form 8960 line 8 (gross investment income)
+    to your AGI. Work out your own figure and enter it, or leave the line blank and claim
+    nothing.
   (Advisories never change a number and never fail the command. See `btctax limitations`.)
 ```
 

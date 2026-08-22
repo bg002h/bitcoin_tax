@@ -195,6 +195,22 @@ pub enum Advisory {
     /// `itemized` records which deduction the return took, so the text does not tell a standard-deduction
     /// filer their Schedule A "used" income taxes on a form they did not file (r3 MINOR-3, the r5 M-1 shape).
     SalesTaxElectionNotAsked { itemized: bool },
+    /// ★★★ **§1411(c)(1)(B) / Form 8960 line 9b (P8, §3.4)** — the return owes net investment income
+    /// tax and claims NOTHING on Part II line 9b, while the Schedule A it filed did deduct state and
+    /// local income tax. The whole allocable deduction is forgone, which can only OVERSTATE the tax.
+    ///
+    /// ★★ It advises rather than computing, and that is the design (plan decision 6 /
+    /// `ADJUDICATION-2026-08-21.md` D5's build-shape guard 1). i8960: *"You can determine the portion
+    /// of your state, local, and foreign income taxes allocable to net investment income using **any
+    /// reasonable method**"*, and *"the reasonable method of allocation may differ from year to
+    /// year."* Choosing one is the filer's election; btctax states the POOL and offers the
+    /// instructions' own worked example, and lets them enter the result.
+    ///
+    /// `bound` is the §164(b)(6)-limited pool from [`crate::tax::return_1040::nii_line9b_bound`] — the
+    /// same number the `Nii9bExceedsDeductedSalt` refusal enforces, so the note and the gate can never
+    /// name different figures. Fires only when `bound > 0`: a standard-deduction filer, or one who
+    /// elected general sales taxes, forgoes nothing here and is never nagged.
+    Form8960Line9bNotClaimed { bound: Usd },
     /// ★★★ **N1** — this year's capital loss was NOT absorbed by the §1211(b) allowance (in whole or
     /// in part), because taxable income was already at or below zero. The §1211/§1212 **Capital Loss
     /// Carryover Worksheet** therefore carries MORE loss into next year than the flat
@@ -231,7 +247,7 @@ pub enum Advisory {
 /// which disagreed with the comma-separated house style every other printed figure uses. The CLI's
 /// `fmt_money` lives in `btctax-cli::render` and core cannot reach it, so this is the core-side
 /// equivalent — deliberately small, and used by every advisory that prints money.
-fn fmt_usd(v: Usd) -> String {
+pub(crate) fn fmt_usd(v: Usd) -> String {
     let cents = v.round_dp(2);
     let whole = cents.trunc().abs();
     let frac = (cents - cents.trunc()).abs();
@@ -490,6 +506,21 @@ impl Advisory {
                         .to_string()
                 }
             }
+            // ★ P8 — the pool is named, the METHOD is not applied. i8960's own example is offered as
+            //   an example ("one reasonable method"), never as the answer, because "any reasonable
+            //   method" is the filer's election and may differ from year to year.
+            Advisory::Form8960Line9bNotClaimed { bound } => format!(
+                "FORM 8960 LINE 9B NOT CLAIMED — you owe net investment income tax (§1411), and \
+                 Form 8960 line 9b, \"State, local, and foreign income tax\", is BLANK. The state \
+                 and local income tax your Schedule A actually deducted is up to {} after \
+                 §164(b)(6)'s cap, and the portion of it attributable to your investment income is \
+                 deductible against that income — so your tax is currently OVERSTATED. btctax will \
+                 not pick the split for you: the Instructions for Form 8960 say you may use \"any \
+                 reasonable method\", and one they give themselves is that amount times the ratio of \
+                 Form 8960 line 8 (gross investment income) to your AGI. Work out your own figure and \
+                 enter it, or leave the line blank and claim nothing.",
+                fmt_usd(*bound)
+            ),
             // ★ F3 (phase-1 seam review). This said the flat figure was "printed above", which is
             //   false on one surface and can be false on both. §G-19d prints this same advisory on
             //   `export-irs-pdf` STDERR, where no carryforward figure is printed above it at all.
@@ -794,6 +825,22 @@ pub fn advisories_for(
         year,
         ar.deduction_is_itemized,
     );
+    // ★★★ **P8 / §3.4** — Form 8960 Part II line 9b is blank on a return that OWES NIIT and did
+    //     deduct state income tax. Fires here rather than in `advisories`, because both halves of the
+    //     predicate need the COMPUTED return: whether §1411 tax is owed at all, and the §63(e)
+    //     election the bound depends on.
+    //
+    // ★ Gated on `bound > Usd::ZERO` so it stays silent where nothing is forgone — the standard
+    //   deduction (nothing was "properly deducted on your return") and the §164(b)(5) sales-tax
+    //   election (i8960: "Sales taxes aren't deductible in computing net investment income"). Both
+    //   are real branches of the same derivation the refusal uses, not exclusions bolted on here.
+    if ri.form_8960_line9b.is_none() && ar.niit.tax > Usd::ZERO {
+        let bound = crate::tax::return_1040::nii_line9b_bound(ar);
+        if bound > Usd::ZERO {
+            out.push(Advisory::Form8960Line9bNotClaimed { bound });
+        }
+    }
+
     // ★★★ **N1** — the §1211/§1212 Capital Loss Carryover Worksheet moved the carryforward, so say so.
     //
     // Fires off the MECHANISM — "the worksheet and the flat rule disagree" — never off a list of

@@ -393,6 +393,50 @@ pub struct ScheduleAParts {
 /// mixed-use question is LIVE (a `schedule_a` reporting 1098 interest > 0) and the filer answered
 /// `Some(false)`; `None` otherwise. v1 cannot compute the allocation, so it deducts none of it
 /// ($0 ≤ the true allocation, always ⇒ tax overstated, never understated).
+/// ★★★ **Form 8960 line 9b's §164(b)(6) BOUND** — the most state/local income tax this return could
+/// possibly allocate to net investment income. The ONE derivation, shared by the `screen_absolute`
+/// refusal that enforces it and the advisory that names it, so the gate and the note cannot disagree
+/// about the number (the r3 MINOR-1 lesson).
+///
+/// §1411(c)(1)(B) reduces net investment income only by *"the deductions **allowed by this
+/// subtitle**"*, and §164(b)(6)(B) caps the aggregate SALT *"taken into account"* at $10,000 ($5,000
+/// MFS) — so tax paid above the cap is not a deduction at all and there is nothing to allocate
+/// (`ADJUDICATION-2026-08-21.md` D5). i8960's allocation block names the same quantity from the other
+/// side: *"State, local, and foreign income taxes **if properly deducted on your return** when
+/// calculating your U.S. regular income tax."*
+///
+/// The three branches, each of which independently zeroes it:
+///
+/// - **no Schedule A / the standard deduction won** ⇒ `$0`. Nothing was deducted on the return, so
+///   nothing is allocable. This is the plain reading of "properly deducted on your return", and it is
+///   why the bound reads `deduction_is_itemized` (the computed §63(e) election) rather than merely
+///   `schedule_a.is_some()`.
+/// - **the §164(b)(5) general-sales-tax election** ⇒ `$0`. i8960, Line 9b: *"Sales taxes aren't
+///   deductible in computing net investment income."* Line 5a is then sales tax, and 5e is a total
+///   that includes it — so a bound built from 5e alone would launder sales tax into a §1411 deduction.
+/// - otherwise `min(line 5a, line 5e, the cap)`. 5a is the income-tax component; 5e is what survived
+///   the cap; the cap term is the statute's own ceiling (redundant while 5e ≤ cap, and transcribed
+///   anyway because it is the limit the statute imposes, not a consequence of another line).
+///
+/// ★ **Foreign income tax contributes nothing**, and not by omission: btctax's only foreign income
+/// tax (1099-INT box 6 / 1099-DIV box 7) is taken unconditionally as the §904(j) CREDIT, and
+/// §275(a)(4) — which i8960 cites on this very line — then denies the deduction.
+///
+/// ★★ It is a BOUND, never a value. btctax does not choose the filer's "reasonable method"; this only
+/// says how large the pool that method divides can be.
+pub fn nii_line9b_bound(ar: &AbsoluteReturn) -> Usd {
+    if !ar.deduction_is_itemized {
+        return Usd::ZERO;
+    }
+    let Some(a) = ar.schedule_a.as_ref() else {
+        return Usd::ZERO;
+    };
+    if a.salt_is_sales_tax {
+        return Usd::ZERO;
+    }
+    a.salt_5a.min(a.salt_5e).min(a.salt_cap)
+}
+
 pub fn mixed_use_mortgage_forgone(ri: &ReturnInputs) -> Option<Usd> {
     let a = ri.schedule_a.as_ref()?;
     (a.mortgage_all_used_to_buy_build_improve == Some(false)
@@ -1462,6 +1506,11 @@ pub struct PrintedInputs {
     /// `screen_inputs` refuses `None` and `Some(true)`, so a printed return always carries
     /// `Some(false)` today; carrying it anyway is what makes the checkbox's provenance structural.
     pub filing_form_4952: Option<bool>,
+    /// ★★ Form 8960 **line 9b** — *"State, local, and foreign income tax"* — as the FILER allocated it
+    /// (`ReturnInputs::form_8960_line9b`), or `None` when they allocated none. Carried rather than
+    /// re-read so the printed chain and the absolute `form_8960` cannot end up on different values;
+    /// `None` reaches `push_money_opt` and the cell prints BLANK.
+    pub form_8960_line9b: Option<Usd>,
     /// Schedule D **line 21** — the §1211(b) capital-loss deduction CEILING ($3,000; $1,500 MFS). The
     /// printed line 21 caps the PRINTED line 16 against this, rather than re-rounding the exact
     /// deduction, so the filed Schedule D's own arithmetic holds.
@@ -1885,6 +1934,10 @@ pub fn assemble_absolute(
         capital_gain,
         crypto.nonbusiness_lending_interest,
         agi,
+        // Part II line 9b — the filer's own §1411(c)(1)(B) allocation, `None` when they made none.
+        // Bounded by `screen_absolute` (`Nii9bExceedsDeductedSalt`), never clamped here: a silently
+        // shrunk figure would be btctax choosing the allocation method it must not choose.
+        ri.form_8960_line9b,
     );
 
     // ── Credits + total tax (SPEC §5 stages 5–7 tail) ───────────────────────────────────────────────
@@ -2024,6 +2077,9 @@ pub fn assemble_absolute(
         printed_inputs: PrintedInputs {
             // ★ Schedule D line 20's Form 4952 conjunct, carried from the FILER's answer.
             filing_form_4952: ri.filing_form_4952,
+            // ★ Form 8960 line 9b, likewise carried rather than derived — the same `Option<Usd>` the
+            //   absolute `form_8960` above was handed.
+            form_8960_line9b: ri.form_8960_line9b,
             medicare_wages: w2_medicare_wages,
             medicare_withheld: w2_medicare_withheld,
             crypto_lending_interest: crypto.nonbusiness_lending_interest,
@@ -2302,6 +2358,64 @@ pub fn screen_absolute(
                 }
                 Some(true) => {}
             }
+        }
+    }
+
+    // ★★★ **FORM 8960 LINE 9B — §164(b)(6)'s bound on the COLLECTED allocation** (D5).
+    //
+    // The value is the filer's own: i8960 lets them use "any reasonable method", and choosing one is
+    // their election, so btctax collects it and never computes it. What btctax CAN say is how large
+    // the pool that method divides is — §1411(c)(1)(B) allocates only "deductions allowed by this
+    // subtitle", and SALT above §164(b)(6)(B)'s $10,000/$5,000-MFS cap is not allowed at all.
+    //
+    // ★ It screens HERE, not in `screen_inputs`, for the same reason the two charitable gates do: the
+    //   bound turns on `deduction_is_itemized`, the COMPUTED §63(e) election, which no predicate over
+    //   `ReturnInputs` can see. A standard-deduction filer deducted no state income tax, so their
+    //   bound is $0 — and that is a real branch, not an edge case.
+    //
+    // ★★ REFUSES rather than clamping (D5's build-shape guard): shrinking the figure to fit would be
+    //    btctax picking the allocation after all, and would rewrite a number signed under §6065.
+    if let Some(claimed_9b) = ri.form_8960_line9b {
+        let bound = nii_line9b_bound(ar);
+        if claimed_9b > bound {
+            let cap = ar.schedule_a.as_ref().map_or(Usd::ZERO, |a| a.salt_cap);
+            let why = if !ar.deduction_is_itemized {
+                "this return takes the STANDARD deduction, so no state or local income tax was \
+                 deducted on it at all and none of it is allocable"
+                    .to_string()
+            } else if ar.schedule_a.as_ref().is_some_and(|a| a.salt_is_sales_tax) {
+                "you made the §164(b)(5) election to deduct general SALES taxes instead of income \
+                 taxes, and the Instructions for Form 8960 are express: \"Sales taxes aren't \
+                 deductible in computing net investment income\" — so the allocable amount is $0"
+                    .to_string()
+            } else {
+                format!(
+                    "the most your return actually deducted in state and local INCOME tax, after \
+                     §164(b)(6)'s {} cap, is {}",
+                    crate::tax::advisories::fmt_usd(cap),
+                    crate::tax::advisories::fmt_usd(bound)
+                )
+            };
+            return refusal(
+                RefuseReason::Nii9bExceedsDeductedSalt,
+                &format!(
+                    "Form 8960 line 9b claims {} of state and local income tax allocable to net \
+                     investment income, but {why}. §1411(c)(1)(B) reduces net investment income only \
+                     by \"the deductions allowed by this subtitle which are properly allocable\", and \
+                     §164(b)(6)(B) limits the state and local tax \"taken into account\" to $10,000 \
+                     ($5,000 if married filing separately) — a dollar above that cap is not a \
+                     deduction at all, so there is nothing for §1411 to allocate. The Instructions \
+                     for Form 8960 agree: the allocable item is state and local income tax \"if \
+                     properly deducted on your return when calculating your U.S. regular income \
+                     tax\". btctax will not shrink the figure for you, because choosing the \
+                     allocation is YOUR election (\"any reasonable method\") and it must not answer \
+                     it. Enter a line 9b of {} or less — one reasonable method the instructions \
+                     themselves give is that amount times the ratio of Form 8960 line 8 to your AGI \
+                     — or clear it to leave line 9b blank",
+                    crate::tax::advisories::fmt_usd(claimed_9b),
+                    crate::tax::advisories::fmt_usd(bound),
+                ),
+            );
         }
     }
 
@@ -7077,6 +7191,300 @@ mod tests {
             reason, None,
             "the §170(b) ceiling allows $0, so nothing is claimed and nothing can be disallowed"
         );
+    }
+
+    // ── P8 — Form 8960 Part II line 9b: collect-or-blank, bounded by §164(b)(6) ──────────────────
+
+    /// The P8 fixture: Single, $200,000 wages + `interest` of taxable interest, itemizing on
+    /// $20,000 of mortgage interest, with `salt` of state income tax paid as estimates. AGI clears
+    /// the $200,000 §1411 threshold, so a Form 8960 exists and line 9b is live.
+    fn p8_return(salt: Usd, sales_tax: Option<Usd>, line9b: Option<Usd>) -> ReturnInputs {
+        let mut a = crate::tax::return_inputs::ScheduleAInputs {
+            salt_state_estimated_payments: salt,
+            mortgage_interest_1098: dec!(20000),
+            mortgage_all_used_to_buy_build_improve: Some(true),
+            mortgage_within_debt_limit: Some(true),
+            mortgage_dwelling_is_amt_qualified: Some(true),
+            ..Default::default()
+        };
+        if let Some(amount) = sales_tax {
+            a.salt_use_sales_tax = Some(true);
+            a.salt_sales_tax_amount = amount;
+        } else {
+            a.salt_use_sales_tax = Some(false);
+        }
+        ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2(
+                Owner::Taxpayer,
+                dec!(200000),
+                dec!(168600),
+                dec!(200000),
+            )],
+            int_1099: vec![crate::tax::return_inputs::Form1099Int {
+                payer: "Bank".into(),
+                box1_interest: dec!(60000),
+                ..Default::default()
+            }],
+            schedule_a: Some(a),
+            form_8960_line9b: line9b,
+            ..Default::default()
+        }
+    }
+
+    /// ★★★ **B1 kill-test (a) — a collected Form 8960 line 9b ABOVE what §164(b)(6) let the return
+    /// deduct is REFUSED.**
+    ///
+    /// §1411(c)(1)(B) allocates only *"the deductions **allowed by this subtitle**"*, and
+    /// §164(b)(6)(B) caps the SALT taken into account at $10,000 — so of the $30,000 of state income
+    /// tax this filer PAID, only $10,000 is a deduction at all, and only that $10,000 is allocable.
+    /// A 9b of $10,001 has no source in the return.
+    ///
+    /// ★ The AT-THE-BOUND case is asserted in the same test on purpose: a gate that refused every
+    /// value would pass the over-cap half while being useless, and this is the pair that tells them
+    /// apart. Planting `if claimed_9b > bound` → `if false` (or deleting the block) reds the first
+    /// assertion; making it `>=` reds the second.
+    #[test]
+    fn a_line9b_above_the_salt_cap_is_refused_and_one_at_the_bound_is_accepted() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+
+        let over = p8_return(dec!(30000), None, Some(dec!(10001)));
+        let ar = assemble_absolute(&over, &empty_ledger(), &p, &table, 2024);
+        assert!(
+            ar.deduction_is_itemized,
+            "the fixture must ITEMIZE, else it proves the standard-deduction branch instead"
+        );
+        assert_eq!(
+            ar.schedule_a.as_ref().unwrap().salt_5a,
+            dec!(30000),
+            "line 5a must exceed the cap, else the cap binds on nothing and the test is vacuous"
+        );
+        assert_eq!(
+            nii_line9b_bound(&ar),
+            dec!(10000),
+            "the bound is min(5a, 5e, cap) = min(30,000, 10,000, 10,000)"
+        );
+        let r = screen_absolute(&over, &ar, &p, &empty_ledger(), 2024)
+            .expect("$10,001 exceeds the $10,000 the return actually deducted");
+        assert_eq!(r.reason, RefuseReason::Nii9bExceedsDeductedSalt);
+        for phrase in ["§1411(c)(1)(B)", "§164(b)(6)(B)", "$10,000"] {
+            assert!(
+                r.detail.contains(phrase),
+                "the refusal must cite {phrase:?}; got: {}",
+                r.detail
+            );
+        }
+
+        // …and a dollar less — exactly the pool the return deducted — files.
+        let at = p8_return(dec!(30000), None, Some(dec!(10000)));
+        let ar_at = assemble_absolute(&at, &empty_ledger(), &p, &table, 2024);
+        assert_eq!(
+            screen_absolute(&at, &ar_at, &p, &empty_ledger(), 2024).map(|r| r.reason),
+            None,
+            "a 9b AT the bound is the filer's own lawful allocation and must not be refused"
+        );
+    }
+
+    /// ★★★ **B1 kill-test (b) — the §164(b)(5) SALES-TAX election bounds line 9b to $0.**
+    ///
+    /// i8960, *Line 9b*: *"Sales taxes aren't deductible in computing net investment income."* This
+    /// is a SEPARATE mechanism from the cap, and the over-cap test above cannot cover it: under the
+    /// election Schedule A line 5e is still $10,000 (of sales tax), so a bound computed from 5e — or
+    /// from the cap — would happily admit $10,000 of a deduction §1411 does not allow at all. Only
+    /// the `salt_is_sales_tax` branch of `nii_line9b_bound` catches it, and deleting that branch reds
+    /// exactly here while leaving the over-cap test green.
+    #[test]
+    fn the_sales_tax_election_bounds_line9b_to_zero() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let ri = p8_return(dec!(30000), Some(dec!(30000)), Some(dec!(1)));
+        let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
+        let a = ar.schedule_a.as_ref().unwrap();
+        assert!(a.salt_is_sales_tax, "the fixture must make the election");
+        assert_eq!(
+            a.salt_5e,
+            dec!(10000),
+            "5e must still be a full $10,000 of SALES tax — that is what makes a 5e-based bound wrong"
+        );
+        assert_eq!(
+            nii_line9b_bound(&ar),
+            Usd::ZERO,
+            "sales taxes are never deductible in computing net investment income"
+        );
+        let r = screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024)
+            .expect("even $1 of line 9b is unallowable under the sales-tax election");
+        assert_eq!(r.reason, RefuseReason::Nii9bExceedsDeductedSalt);
+        assert!(
+            r.detail.contains("Sales taxes aren't deductible"),
+            "the refusal must quote i8960's own sentence; got: {}",
+            r.detail
+        );
+    }
+
+    /// ★★ The STANDARD-deduction branch: nothing was *"properly deducted on your return"*, so the
+    /// bound is $0 whatever the filer paid in state tax. Same Schedule A amounts, but with the
+    /// mortgage interest removed so the standard deduction wins.
+    #[test]
+    fn a_standard_deduction_return_may_allocate_no_state_tax_to_nii() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let mut ri = p8_return(dec!(30000), None, Some(dec!(1)));
+        ri.schedule_a.as_mut().unwrap().mortgage_interest_1098 = Usd::ZERO;
+        let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
+        assert!(
+            !ar.deduction_is_itemized,
+            "the fixture must take the STANDARD deduction ($10,000 SALT < $14,600), else it is the \
+             itemized branch again"
+        );
+        assert_eq!(nii_line9b_bound(&ar), Usd::ZERO);
+        let r = screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024)
+            .expect("a standard-deduction return deducted no state income tax to allocate");
+        assert_eq!(r.reason, RefuseReason::Nii9bExceedsDeductedSalt);
+        assert!(
+            r.detail.contains("STANDARD deduction"),
+            "the message must name the branch the filer is actually on; got: {}",
+            r.detail
+        );
+    }
+
+    /// ★★★ **BLANK STAYS BLANK, AND IT IS THE DEFAULT.** An unanswered line 9b must (a) never
+    /// refuse — this is collect-**or-blank**, not a declaration — and (b) reach the printed chain as
+    /// `None`, not as a computed zero. The two provenances are indistinguishable on the page, so the
+    /// only place the distinction can be held is the type.
+    ///
+    /// ★ It also pins the negative half of the answered-ness invariant: btctax must NOT compute the
+    /// allocation. If some future edit derived 9b from the ratio, `f8960.line9b` would arrive
+    /// `Some(..)` on a return where the filer said nothing, and this reds.
+    #[test]
+    fn an_unanswered_line9b_neither_refuses_nor_prints_a_zero() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let ri = p8_return(dec!(30000), None, None);
+        let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
+        assert!(
+            nii_line9b_bound(&ar) > Usd::ZERO,
+            "there IS a pool to forgo"
+        );
+        assert_eq!(
+            screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024),
+            None,
+            "collect-or-blank: silence claims nothing and must never gate the return"
+        );
+        assert_eq!(ar.printed_inputs.form_8960_line9b, None);
+        let f8960 = crate::tax::other_taxes::form_8960_lines(
+            FilingStatus::Single,
+            ar.taxable_interest,
+            ar.ordinary_dividends,
+            ar.capital_gain,
+            ar.printed_inputs.crypto_lending_interest,
+            ar.agi,
+            ar.printed_inputs.form_8960_line9b,
+        )
+        .expect("NIIT is owed");
+        assert_eq!(
+            f8960.line9b, None,
+            "line 9b must stay BLANK — a computed 0 would swear the allocable state tax IS zero"
+        );
+        assert_eq!(
+            f8960.line9d,
+            Usd::ZERO,
+            "9d = 9a + 9b + 9c over three blanks"
+        );
+    }
+
+    /// ★★ **SPEC §3.4 — the forgone Part II deduction gets a LOUD advisory, and only where something
+    /// is actually forgone.** The mandate is "never forgo a benefit in silence"; it is not "nag".
+    ///
+    /// Four cells, one predicate: fires on (blank 9b ∧ NIIT owed ∧ bound > 0), silent on each of the
+    /// three ways that fails. Dropping the `bound > Usd::ZERO` guard reds the sales-tax case;
+    /// dropping `is_none()` reds the answered case; dropping `niit.tax > 0` reds the no-NIIT case.
+    #[test]
+    fn the_forgone_line9b_deduction_is_advised_exactly_where_it_exists() {
+        use crate::tax::advisories::Advisory;
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let fires = |ri: &ReturnInputs| {
+            let ar = assemble_absolute(ri, &empty_ledger(), &p, &table, 2024);
+            crate::tax::advisories::advisories_for(ri, &empty_ledger(), &ar, &p, 2024)
+                .into_iter()
+                .find_map(|a| match a {
+                    Advisory::Form8960Line9bNotClaimed { bound } => Some(bound),
+                    _ => None,
+                })
+        };
+
+        // (1) Blank 9b, NIIT owed, a real $10,000 pool ⇒ fires, naming the pool.
+        assert_eq!(
+            fires(&p8_return(dec!(30000), None, None)),
+            Some(dec!(10000))
+        );
+
+        // (2) The filer ANSWERED — nothing is forgone in silence, so nothing is said.
+        assert_eq!(fires(&p8_return(dec!(30000), None, Some(dec!(4000)))), None);
+
+        // (3) The §164(b)(5) sales-tax election ⇒ the pool is $0 and there is nothing to forgo.
+        assert_eq!(
+            fires(&p8_return(dec!(30000), Some(dec!(30000)), None)),
+            None
+        );
+
+        // (4) No NIIT owed (drop the interest ⇒ MAGI under the $200,000 threshold) ⇒ no Form 8960,
+        //     so line 9b is not a line this return has.
+        let mut no_niit = p8_return(dec!(30000), None, None);
+        no_niit.int_1099.clear();
+        assert_eq!(fires(&no_niit), None);
+
+        // The text names the amount and the direction, and OFFERS the ratio without applying it.
+        let msg = Advisory::Form8960Line9bNotClaimed { bound: dec!(10000) }.message();
+        for phrase in [
+            "$10,000",
+            "OVERSTATED",
+            "any reasonable method",
+            "ratio of Form 8960 line 8",
+        ] {
+            assert!(msg.contains(phrase), "advisory must say {phrase:?}: {msg}");
+        }
+    }
+
+    /// ★★★ **THE TWO NIIT CHAINS MUST AGREE ONCE 9B EXISTS.** `form_8960` feeds
+    /// `AbsoluteReturn::total_tax`; `form_8960_lines` feeds the FILED Schedule 2 line 12. While
+    /// Part II was structurally zero the two could not diverge; a deduction threaded into only one
+    /// of them files a Form 8960 whose own line 17 contradicts the 1040 that carries it.
+    ///
+    /// Mutation: drop the `line9b` argument at either call site (`return_1040`'s `form_8960` or
+    /// `packet`'s `form_8960_lines`) and this reds by $380.
+    #[test]
+    fn the_absolute_and_printed_niit_chains_agree_on_the_line9b_deduction() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let ri = p8_return(dec!(30000), None, Some(dec!(10000)));
+        let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
+        let f8960 = crate::tax::other_taxes::form_8960_lines(
+            FilingStatus::Single,
+            ar.taxable_interest,
+            ar.ordinary_dividends,
+            ar.capital_gain,
+            ar.printed_inputs.crypto_lending_interest,
+            ar.agi,
+            ar.printed_inputs.form_8960_line9b,
+        )
+        .expect("NIIT is owed");
+        assert_eq!(f8960.line8, dec!(60000), "line 8 = the $60,000 of interest");
+        assert_eq!(f8960.line12, dec!(50000), "line 12 = line 8 − line 11");
+        assert_eq!(
+            ar.niit.nii,
+            dec!(50000),
+            "the absolute chain deducts it too"
+        );
+        assert_eq!(
+            ar.niit.tax, f8960.line17,
+            "the tax on the 1040 and the tax on the filed Form 8960 are one number"
+        );
+        // …and the deduction actually moved it: 3.8% × 60,000 = 2,280 without, 1,900 with.
+        let without = p8_return(dec!(30000), None, None);
+        let ar_none = assemble_absolute(&without, &empty_ledger(), &p, &table, 2024);
+        assert_eq!(ar_none.niit.tax - ar.niit.tax, dec!(380));
     }
 
     /// ★★ **P4 — the refusal must carry the DEADLINE, because the deadline is the whole reason this

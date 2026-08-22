@@ -836,6 +836,38 @@ const SCHEDULE_A_FIELDS: &[Field] = &[
          this is deductible in full only under i4952's own exception; above it the return refuses.",
         investment_interest
     ),
+    // ★★ Form 8960 line 9b. An `Option<Usd>` on `ReturnInputs` — NOT a `ScheduleAInputs` leaf — so it
+    //    needs its own `get`/`set` rather than `scha_money!`, and a dedicated `clear` for the same
+    //    reason `QbiW2Wages` has one: the generic un-answer path writes `Money(Usd::ZERO)`, which here
+    //    would turn "I claimed nothing" into the sworn statement "my allocable state income tax is
+    //    zero" — a printed 0 on a signed return instead of a blank line.
+    Field {
+        id: FieldId::Nii8960Line9b,
+        clear: Some(|ri, _| {
+            ri.form_8960_line9b = None;
+            Ok(())
+        }),
+        label: "State/local income tax allocable to investment income (Form 8960 line 9b)",
+        help: "\"State, local, and foreign income tax.\" If you owe the 3.8% net investment income tax \
+               (§1411), the part of the state and local income tax on your Schedule A that is \
+               attributable to your investment income is deductible against that income. YOU choose \
+               how to split it — the Instructions for Form 8960 say you may use \"any reasonable \
+               method\", and one they give is the deducted tax times the ratio of Form 8960 line 8 to \
+               your AGI. Leave it blank to claim nothing. The most you may enter is what your return \
+               actually deducted after the $10,000 ($5,000 married filing separately) §164(b)(6) cap; \
+               it is $0 if you took the standard deduction, and $0 if you elected general SALES taxes \
+               (they are never deductible against investment income).",
+        kind: FieldKind::Money,
+        live: |ri| ri.schedule_a.is_some(),
+        get: |ri, _| ri.form_8960_line9b.map(FieldValue::Money),
+        set: |ri, _, v| {
+            let FieldValue::Money(m) = v else {
+                return Err(SetError::WrongKind);
+            };
+            ri.form_8960_line9b = Some(m);
+            Ok(())
+        },
+    },
     // ★ Registry-driven — DELEGATES to `SKIPPABLE_QUESTIONS::SalesTaxElection` (index 2). live = schedule_a.is_some().
     skippable_tristate!(2, FieldId::SaSaltUseSalesTax, |ri| {
         if let Some(a) = ri.schedule_a.as_mut() {
@@ -1091,8 +1123,9 @@ const CARRYFORWARD_FIELDS: &[Field] = &[
 const QBI_LIMITATION_FIELDS: &[Field] = &[
     Field {
         id: FieldId::QbiW2Wages,
-        // ★★★ A DEDICATED `clear`, and it is load-bearing. These two are the ONLY `Option<Usd>` leaves
-        //     in `ReturnInputs`, so they are the only fields for which the generic un-answer path —
+        // ★★★ A DEDICATED `clear`, and it is load-bearing. These two — and `Nii8960Line9b`, which
+        //     carries its own `clear` for the same reason — are the `Option<Usd>` leaves in
+        //     `ReturnInputs`, the fields for which the generic un-answer path —
         //     `set(empty_for_kind)`, which for `FieldKind::Money` is `Money(Usd::ZERO)` — would write
         //     `Some($0)` instead of `None`. That is not "cleared": it is the answer "my business paid
         //     no wages", and it is EXACTLY the state `screen_absolute`'s `QbiAboveThreshold` refusal

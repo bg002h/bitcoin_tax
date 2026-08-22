@@ -16,7 +16,11 @@
 #   line 3   (f1_5)          annuities
 #   lines 4a-4c (f1_6..f1_8) Schedule E (rental/royalty/K-1) — UNREPRESENTABLE in v1
 #   line 6   (f1_13)         CFC/PFIC adjustments — MAGI is fail-closed to AGI
-#   lines 9a-9c (f1_16..f1_18) + line 10 (f1_20) — investment expenses / additional modifications
+#   lines 9a and 9c (f1_16, f1_18) + line 10 (f1_20) — investment interest expense, miscellaneous
+#                            investment expenses, additional modifications
+#   ★ line 9b (f1_17) is NO LONGER on this list — it is MAPPED below, and left blank by the EMITTER
+#     (`push_money_opt`) when the filer claimed no allocation. That is the difference between "we do
+#     not model this line" and "this filer entered nothing on it".
 #   lines 18a-21 (f1_28..f1_35) Part III ESTATES AND TRUSTS — must stay blank on an individual return
 #   the 3 Part I election checkboxes (§6013(g), §6013(h), §1.1411-10(g)) — v1 makes no election
 #
@@ -34,6 +38,10 @@ line7  = "topmostSubform[0].Page1[0].f1_14[0]"   # "Other modifications to inves
 line8  = "topmostSubform[0].Page1[0].f1_15[0]"   # "Total investment income. Combine lines 1, 2, 3, 4c, 5d, 6, and 7"
 
 # ── Part II — Investment Expenses Allocable to Investment Income and Modifications ──────────────
+# ★ 9b is COLLECTED (§1411(c)(1)(B) — the filer's own "reasonable method" allocation of the state and
+#   local income tax their Schedule A actually deducted, bounded by §164(b)(6)). BLANK when they
+#   claimed none: the emitter uses `push_money_opt`, so an unclaimed line writes nothing at all.
+line9b = "topmostSubform[0].Page1[0].f1_17[0]"   # "State, local, and foreign income tax (see instructions)"
 line9d = "topmostSubform[0].Page1[0].f1_19[0]"   # "Add lines 9a, 9b, and 9c"
 line11 = "topmostSubform[0].Page1[0].f1_21[0]"   # "Total deductions and modifications. Add lines 9d and 10"
 
@@ -76,7 +84,6 @@ ssn  = "topmostSubform[0].Page1[0].f1_2[0]"
 
 # ── Part II deductions btctax does not model ─────────────────────────────────────────────────────
 "topmostSubform[0].Page1[0].f1_16[0]" = { line = "9a", rule = "unmodeled", reason = "Investment interest expenses — a DEDUCTION against NII; forgoing it can only overstate the tax." }
-"topmostSubform[0].Page1[0].f1_17[0]" = { line = "9b", rule = "unmodeled", reason = "State/local/foreign income tax allocable to NII — not modelled." }
 "topmostSubform[0].Page1[0].f1_18[0]" = { line = "9c", rule = "unmodeled", reason = "Miscellaneous investment expenses — not modelled." }
 "topmostSubform[0].Page1[0].f1_20[0]" = { line = "10", rule = "unmodeled", reason = "Additional modifications — not modelled; line 11 therefore equals line 9d." }
 

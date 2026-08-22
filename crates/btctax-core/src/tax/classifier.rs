@@ -114,6 +114,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         donations_had_restrictions,
         charitable_cwa_obtained,
         filing_form_4952,
+        form_8960_line9b,
         dual_status_alien,
         // §164(b)(7)(B)(iv) / Schedule 1-A Part I MAGI add-backs. Plain `Usd` scalar leaves, which the
         // `_` rule permits — their answered-ness lives in the `has_income_exclusion` GATE above, which
@@ -187,6 +188,19 @@ pub fn classify(ri: &ReturnInputs) -> Census {
          makes it mandatory where the deduction is actually claimed (§2.2)",
     );
     c.declaration(filing_form_4952, QuestionId::FilingForm4952);
+    // ★★ Form 8960 line 9b — an `Option<Usd>`, the answered-ness shape for money, so the `_` rule
+    // forbids a bare binding and it must be classified. Class (B): §1411(c)(1)(B) allows the
+    // deduction, it does not impose it, so `None` CLAIMS NOTHING and is lawful — New Colonial Ice
+    // again. It is not class (A): btctax must not pick the filer's "reasonable method" of allocation,
+    // so there is no answer a refusal could demand, only an amount they may choose to enter.
+    c.exempt(
+        form_8960_line9b,
+        Class::BenefitClaim,
+        "Form 8960 line 9b (§1411(c)(1)(B)) — the state/local income tax the filer allocates to net \
+         investment income, by \"any reasonable method\" that is THEIR election (i8960). Silence \
+         forgoes the whole Part II deduction, which can only OVERSTATE the tax; \
+         `Advisory::Form8960Line9bNotClaimed` names the forgone amount and the bound (§2.2)",
+    );
     c.declaration(dual_status_alien, QuestionId::DualStatusAlien);
     c.declaration(has_income_exclusion, QuestionId::HasIncomeExclusion);
     c.declaration(other_out_of_scope_income, QuestionId::OtherOutOfScopeIncome);

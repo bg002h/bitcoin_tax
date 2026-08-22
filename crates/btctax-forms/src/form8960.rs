@@ -10,7 +10,7 @@
 //! file. Part III's estates-and-trusts branch (lines 18a–21) is never touched — on an individual
 //! return it must be blank.
 
-use crate::cells::{push_identity, push_money};
+use crate::cells::{push_identity, push_money_opt};
 use crate::error::FormsError;
 use crate::map::Form8960Map;
 use crate::pdf;
@@ -38,24 +38,32 @@ pub fn fill_form_8960_with_map(
     let mut placements: Vec<FlatPlacement> = Vec::new();
 
     // Parallel to `map.lines()` — printed reading order, strictly descending y on page 1.
-    let plan: [(Usd, usize); 14] = [
-        (lines.line1, F8960_COL_AMOUNT),  // 1  taxable interest
-        (lines.line2, F8960_COL_AMOUNT),  // 2  ordinary dividends
-        (lines.line5a, F8960_COL_MID),    // 5a net gain/loss on disposition
-        (lines.line5d, F8960_COL_AMOUNT), // 5d combine 5a-5c
-        (lines.line7, F8960_COL_AMOUNT),  // 7  other modifications
-        (lines.line8, F8960_COL_AMOUNT),  // 8  total investment income
-        (lines.line9d, F8960_COL_AMOUNT), // 9d add 9a-9c (zero, but the form adds it)
-        (lines.line11, F8960_COL_AMOUNT), // 11 total deductions/modifications
-        (lines.line12, F8960_COL_AMOUNT), // 12 net investment income
-        (lines.line13, F8960_COL_MID),    // 13 MAGI
-        (lines.line14, F8960_COL_MID),    // 14 threshold
-        (lines.line15, F8960_COL_MID),    // 15 13 - 14, floored
-        (lines.line16, F8960_COL_AMOUNT), // 16 smaller of 12 or 15
-        (lines.line17, F8960_COL_AMOUNT), // 17 3.8% x 16 -> Schedule 2 line 12
+    //
+    // ★★ EVERY cell is an `Option`, and line 9b is the one that is ever `None`. The uniform `Option`
+    //    is deliberate: it makes "there is no value here" expressible at every line, so a future
+    //    conditional entry cannot be added as a silent `push_money` that swears a zero (the §G-24
+    //    lesson `push_money_opt` exists for).
+    let plan: [(Option<Usd>, usize); 15] = [
+        (Some(lines.line1), F8960_COL_AMOUNT),  // 1  taxable interest
+        (Some(lines.line2), F8960_COL_AMOUNT),  // 2  ordinary dividends
+        (Some(lines.line5a), F8960_COL_MID),    // 5a net gain/loss on disposition
+        (Some(lines.line5d), F8960_COL_AMOUNT), // 5d combine 5a-5c
+        (Some(lines.line7), F8960_COL_AMOUNT),  // 7  other modifications
+        (Some(lines.line8), F8960_COL_AMOUNT),  // 8  total investment income
+        // 9b — the filer's own §1411(c)(1)(B) allocation. BLANK when they claimed none: a printed 0
+        // would swear the allocable state income tax IS zero, which they never said.
+        (lines.line9b, F8960_COL_MID),
+        (Some(lines.line9d), F8960_COL_AMOUNT), // 9d add 9a-9c (= 9b; 9a/9c unmodelled)
+        (Some(lines.line11), F8960_COL_AMOUNT), // 11 total deductions/modifications
+        (Some(lines.line12), F8960_COL_AMOUNT), // 12 net investment income
+        (Some(lines.line13), F8960_COL_MID),    // 13 MAGI
+        (Some(lines.line14), F8960_COL_MID),    // 14 threshold
+        (Some(lines.line15), F8960_COL_MID),    // 15 13 - 14, floored
+        (Some(lines.line16), F8960_COL_AMOUNT), // 16 smaller of 12 or 15
+        (Some(lines.line17), F8960_COL_AMOUNT), // 17 3.8% x 16 -> Schedule 2 line 12
     ];
     for (ord, (cell, (value, col))) in map.lines().iter().zip(plan).enumerate() {
-        push_money(
+        push_money_opt(
             &mut writes,
             &mut placements,
             cell,
