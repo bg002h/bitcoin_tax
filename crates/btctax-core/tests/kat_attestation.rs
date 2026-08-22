@@ -317,10 +317,30 @@ fn the_two_niit_chains_reconcile_on_every_household_that_files_form_8960() {
 /// ★★★ **THE FORM DEFINES LINE 20 BY REFERENCE, SO THE TEST IS THE REFERENCE.**
 ///
 /// i6251, line 20: *"Enter the amount from line 5 of the Qualified Dividends and Capital Gain Tax
-/// Worksheet … (as figured for the regular tax)."* Line 27 cites the same worksheet line. Neither is
+/// Worksheet … (as figured for the regular tax)."* Neither line is
 /// a formula btctax is free to choose — and today each is computed by a separate expression in
 /// `form6251_inputs_from_parts`, with the worksheet itself computed in `method::qdcgt_line16`. Nothing
 /// held the two together.
+///
+/// ★★★ **LINES 20 AND 27 ARE NOT THE SAME SENTENCE, AND THE ELLIPSIS ABOVE HID WHERE THEY PART**
+/// (phase-4 review M-6). From the committed text layer, `design/forms/extract/f6251--2024.txt:107`
+/// and `:125` — the two differ in exactly one clause:
+///
+///   * **L20** — *"…line 5 of the Qualified Dividends and Capital Gain Tax Worksheet **or the amount
+///     from line 14 of the Schedule D Tax Worksheet**, whichever applies…"*
+///   * **L27** — *"…line 5 of the Qualified Dividends and Capital Gain Tax Worksheet **or the amount
+///     from line 21 of the Schedule D Tax Worksheet**, whichever applies…"*
+///
+/// So "line 27 cites the same worksheet line" is true of the **QDCGTW alternative only**. The
+/// equality this KAT asserts holds because of a PRECONDITION, not because the form says so:
+/// **v1 refuses every route to the Schedule D Tax Worksheet** (`Form4952Required` /
+/// `Form4952DeclarationUnanswered`, with lines 18/19 refused upstream), so the SDTW alternative is
+/// unreachable and both lines collapse onto QDCGTW line 5.
+///
+/// ★ Naming that precondition is the point. If the SDTW path ever lands, lines 20 and 27 legitimately
+/// DIVERGE — 14 versus 21 — and this KAT's failure message ("a divergence means one of them was
+/// re-derived") would send the next reader hunting for a bug that is not there. Compression hiding
+/// the dropped term, in the one place this repo has been burned by it most.
 ///
 /// The worksheet's own arithmetic, transcribed from the Form 1040 instructions and not paraphrased:
 ///   L1 = 1040 line 15 (taxable income) · L2 = 1040 line 3a (qualified dividends) ·
@@ -387,8 +407,12 @@ fn form_6251_lines_20_and_27_are_the_qdcgt_worksheets_line_5() {
         );
         assert_eq!(
             ar.amt.line27, l5,
-            "{json}: Form 6251 line 27 cites the SAME worksheet line as line 20 — the two must be \
-             equal on every return, and a divergence means one of them was re-derived"
+            "{json}: lines 20 and 27 both resolve to QDCGT Worksheet line 5 on every return v1 can \
+             file, so they must be equal and a divergence means one of them was re-derived. \
+             ★ BUT CHECK THE PRECONDITION FIRST: the two sentences differ — line 20 offers Schedule \
+             D Tax Worksheet line 14 as its alternative, line 27 offers line 21. They coincide only \
+             because v1 refuses every route to the SDTW. If that path has landed, a divergence here \
+             may be CORRECT and this KAT is what needs changing."
         );
         // The printed struct must carry the same figure the engine computed: `Form6251::printed()`
         // is what reaches paper, and a rounding applied on one path only would show up here.

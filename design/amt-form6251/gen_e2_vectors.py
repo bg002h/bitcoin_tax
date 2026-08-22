@@ -215,8 +215,9 @@ SPEC = [
     #    line 5 is driven to zero, and Form 6251 lines 20 and 27 print $0 — the branch where line
     #    21 ("subtract line 20 from line 19") gets the whole 0% band.
     #
-    # ★ The gift stays far under the §170(b) 60%-of-AGI ceiling ($984,000 here), so OTS remains a
-    #   witness; the SALT is what is new, not the charitable branch.
+    # ★ The gift stays far under the §170(b) 60%-of-AGI ceiling ($1,224,000 here — 60% of V30's
+    #   $2,040,000 AGI), so OTS remains a witness; the SALT is what is new, not the charitable
+    #   branch.
     ("V30", "mfj",     40_000, 2_000_000, 50_000,      0,     0,
      "G-6d mfj — SCHEDULE A LINE 7 > 0 at last: $25,000 of state and local taxes capped by "
      "§164(b)(6) to $10,000, which is this filer's whole Form 6251 line 2a add-back. Also the "

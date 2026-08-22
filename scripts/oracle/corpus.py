@@ -574,7 +574,8 @@ NON_INTERACTION = [
         "and the deduction is below the line, so it cannot reach line 13's MAGI either. The gift must "
         "therefore move 1040 line 15 and NOT one line of Form 8960. Until this cell existed, NO "
         "corpus household combined a gift with NIIT and neither engine had ever been asked (N-6/N-7). "
-        "★ The gift is kept far under the §170(b)(1)(G) 60%-of-AGI ceiling ($264,000 here): OTS 2024 "
+        "★ The gift is kept far under the §170(b)(1)(G) 60%-of-AGI ceiling ($228,000 here — 60% of "
+        "this cell's $380,000 AGI): OTS 2024 "
         "applies no such ceiling, so a cell that crossed it would lose an oracle.",
         "inputs": {
             "filing_status": "Married/Joint",
@@ -642,8 +643,20 @@ def _triple_a_cell(inp):
 
 
 def _triple_b_cell(inp):
+    # ★ `charitable_cash` belongs in this list (phase-4 review M-5). `_reconstruct_cell` below carries
+    #   the IDENTICAL itemized-by-components `any()` and was fixed; this sibling was missed. A future
+    #   cell with a charitable gift and no explicit `standard_or_itemized` flag would be labelled
+    #   `itemized=False` here and credit triple-B coverage it does not provide. Unreachable today (the
+    #   only such cell carries the flag), which is exactly why it would have gone on being wrong.
     itemized = inp.get("standard_or_itemized") == "Itemized" or any(
-        inp.get(k, 0) for k in ("state_income_tax", "real_estate_tax", "mortgage_interest", "itemized_deductions")
+        inp.get(k, 0)
+        for k in (
+            "state_income_tax",
+            "real_estate_tax",
+            "mortgage_interest",
+            "itemized_deductions",
+            "charitable_cash",
+        )
     )
     salt_over = (inp.get("state_income_tax", 0) + inp.get("real_estate_tax", 0)) > 10_000
     high = inp.get("w2_income", 0) >= W2["high"]  # the "high-income" leg is W-2-driven (SE never reaches it)
