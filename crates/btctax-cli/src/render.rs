@@ -1464,6 +1464,8 @@ pub fn provenance_label(p: crate::resolve::Provenance) -> &'static str {
 ///
 /// The crypto-DELTA block below stays in exact cents: it is not a filed figure — it answers a different
 /// question (§6), and the frozen engine computes it in cents.
+/// `cwa_unvouched` — FINAL-REVIEW FINDING 1; see [`render_charitable_carryover_out`].
+#[allow(clippy::too_many_arguments)]
 pub fn render_dual_report(
     year: i32,
     ar: &btctax_core::AbsoluteReturn,
@@ -1471,6 +1473,7 @@ pub fn render_dual_report(
     delta: &btctax_core::TaxOutcome,
     provenance: crate::resolve::Provenance,
     pseudo: PseudoDisclosure,
+    cwa_unvouched: Option<Usd>,
 ) -> String {
     let f = &printed.f1040;
     let mut s = String::new();
@@ -1571,7 +1574,9 @@ pub fn render_dual_report(
     }
     // ★ P6 — the §170(d)(1) charitable carryover-out, printed here because this is the block a filer
     // reads to see what their return did. Before this it reached no human at all.
-    if let Some(block) = render_charitable_carryover_out(year, &ar.charitable_carryover_out) {
+    if let Some(block) =
+        render_charitable_carryover_out(year, &ar.charitable_carryover_out, cwa_unvouched)
+    {
         s.push_str(&block);
     }
     // §6: the two figures answer different questions and are NEVER reconciled.
@@ -1641,9 +1646,15 @@ fn charitable_class_label(c: btctax_core::tax::return_inputs::CharitableClass) -
 ///
 /// ★ It is NOT a rich-filer line. The ceiling is a FRACTION of AGI, so the lower the income the
 /// lower the bar — at $0 AGI the ceiling is $0 and 100% of the gift carries.
+///
+/// ★★★ `cwa_unvouched` — FINAL-REVIEW FINDING 1. When `Some`, this year's carryover has no §170(f)(8)
+/// acknowledgment behind it and the block says so. Passed IN rather than re-derived here so that this
+/// surface, `export-irs-pdf`'s, and `apply_carryover_writeback`'s refusal all read the SAME predicate
+/// (`cwa_unvouched_carryover`); three copies of a statutory test is how they come to disagree.
 pub fn render_charitable_carryover_out(
     year: i32,
     items: &[btctax_core::tax::return_inputs::CharitableCarryItem],
+    cwa_unvouched: Option<Usd>,
 ) -> Option<String> {
     if items.is_empty() {
         return None;
@@ -1691,6 +1702,37 @@ pub fn render_charitable_carryover_out(
          enter it by hand on {next}'s row.",
         next = year + 1
     );
+    // ★★★ FINAL-REVIEW FINDING 1 — THE SENTENCE THAT MAKES THE PARAGRAPH ABOVE HONEST.
+    //
+    // "It is deduction you have already paid for" is money-in-the-bank language, and for the
+    // STANDARD-DEDUCTION deferral donor it may be false: §170(f)(8)(A) disallows the contribution
+    // outright without a contemporaneous written acknowledgment, and nothing asked them, because the
+    // P4 refusal is gated on `deduction_is_itemized` and their return claims no §170 deduction.
+    //
+    // ★★ IT MUST BE SAID **HERE**, and not only at the write-back, because of the DEADLINE: the
+    //    write-back happens after filing, and §170(f)(8)(C) makes an acknowledgment contemporaneous
+    //    only if obtained by the earlier of filing or the due date. A gate that fires after the
+    //    return is filed protects next year's figure but cannot save the cure. This block prints on
+    //    every `report --tax-year` and on the export that hands over the PDF — both before filing.
+    if let Some(unvouched) = cwa_unvouched {
+        let _ = writeln!(
+            s,
+            "\n  ⚠ §170(f)(8) — {amount} of this carryover is NOT yet substantiated.\n  \
+             At least one {year} gift was $250 or more, and btctax has not been told you hold a \
+             contemporaneous\n  written acknowledgment from the charity. §170(f)(8)(A): \"No \
+             deduction shall be allowed …\n  unless the taxpayer substantiates the contribution by a \
+             contemporaneous written acknowledgment\"\n  — so without one this carryover does not \
+             exist, however many years it would otherwise run.\n  \
+             ★ THE DEADLINE IS THIS RETURN. §170(f)(8)(C) counts an acknowledgment as \
+             contemporaneous only\n  if you obtain it \"by the date you file your return or the due \
+             date (including extensions) for\n  filing your return, whichever is earlier\" — so ask \
+             the charity BEFORE you file {year}. Filing\n  first extinguishes the cure permanently, \
+             even though this year's return claims no charitable\n  deduction at all and is correct \
+             as it stands.\n  Then record it with `btctax income answer`; \
+             `--write-carryover` will refuse until you do.",
+            amount = fmt_money(unvouched),
+        );
+    }
     Some(s)
 }
 
@@ -4592,5 +4634,79 @@ mod defensive_status_tests {
         view.flagged_years.insert(2024);
         let out = render_defensive_status(&view);
         assert!(out.contains("Safe-harbor allocation: BLOCKED"), "{out}");
+    }
+}
+
+#[cfg(test)]
+mod cwa_carryover_warning_tests {
+    use super::*;
+    use btctax_core::tax::return_inputs::{CarryProvenance, CharitableCarryItem, CharitableClass};
+    use rust_decimal_macros::dec;
+
+    fn items() -> Vec<CharitableCarryItem> {
+        vec![CharitableCarryItem {
+            class: CharitableClass::CapGainProp30,
+            amount: dec!(13000),
+            origin_year: 2024,
+            provenance: CarryProvenance::Computed,
+        }]
+    }
+
+    /// ★★★ FINAL-REVIEW FINDING 1 — the "asked" half, and the ONLY surface that reaches the filer
+    /// while §170(f)(8)(C)'s cure is still alive.
+    ///
+    /// The write-back guard runs AFTER filing, so it protects next year's figure but cannot save the
+    /// acknowledgment deadline. This block prints on `report --tax-year` and on the export that hands
+    /// over the PDF — both before filing — which is why the sentence has to be here and not only
+    /// there.
+    ///
+    /// Plant: drop the `if let Some(unvouched)` block from `render_charitable_carryover_out` ⇒ reds.
+    #[test]
+    fn the_unvouched_carryover_block_names_the_statute_the_amount_and_the_deadline() {
+        let out = render_charitable_carryover_out(2024, &items(), Some(dec!(13000)))
+            .expect("a non-empty carryover always renders a block");
+
+        assert!(
+            out.contains("170(f)(8)"),
+            "the warning must name the statute that may deny the carryover outright: {out}"
+        );
+        assert!(
+            out.contains("13,000") || out.contains("13000"),
+            "…and the AMOUNT at risk, which is the deferred slice and not the whole gift: {out}"
+        );
+        assert!(
+            out.contains("whichever is earlier"),
+            "…and §170(f)(8)(C)'s deadline VERBATIM — the filer has to know the cure dies at filing, \
+             which is the whole reason this is said here and not at the write-back: {out}"
+        );
+        assert!(
+            out.contains("BEFORE you file"),
+            "…in the imperative, because the action is time-boxed: {out}"
+        );
+        assert!(
+            out.contains("correct as it stands"),
+            "…while saying the RETURN is fine, or the filer reads it as a refusal and goes looking \
+             for a figure to change: {out}"
+        );
+    }
+
+    /// The discriminating half. Without this the assertions above are satisfied by a block that warns
+    /// EVERY donor — including the one who holds the acknowledgment, and the one whose gifts are all
+    /// under §170(f)(8)(A)'s $250 threshold.
+    #[test]
+    fn a_vouched_for_carryover_prints_the_block_with_no_warning_at_all() {
+        let out = render_charitable_carryover_out(2024, &items(), None)
+            .expect("the carryover block itself still prints");
+
+        assert!(
+            out.contains("Charitable carryover to 2025"),
+            "the block is unchanged for a filer who is vouched for: {out}"
+        );
+        assert!(
+            !out.contains("170(f)(8)"),
+            "★ …and carries NO acknowledgment warning. A warning shown to everyone is not a warning, \
+             and this one tells a filer who already answered to go and do something they have done: \
+             {out}"
+        );
     }
 }

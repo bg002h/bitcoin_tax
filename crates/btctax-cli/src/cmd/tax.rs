@@ -459,6 +459,10 @@ pub fn report_tax_year(
                             &outcome,
                             provenance,
                             pseudo_contributed,
+                            // ★★★ FINAL-REVIEW FINDING 1 — §170(f)(8) behind the carryover, or not.
+                            btctax_core::tax::return_1040::cwa_unvouched_carryover(
+                                &ri, &ar, &state, year,
+                            ),
                         );
                         let advs = btctax_core::tax::advisories::advisories_for(
                             &ri, &state, &ar, params, year,

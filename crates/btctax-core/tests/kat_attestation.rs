@@ -673,3 +673,222 @@ fn the_mortgage_debt_limit_question_is_asked_on_inputs_and_refuses_on_the_deduct
     assert_eq!(format!("{:?}", refusal.reason), "MortgageOverDebtLimit");
     let _ = state;
 }
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// FINAL-REVIEW FINDING 1 — the STANDARD-DEDUCTION DEFERRAL DONOR.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// A long-term appreciated-BTC gift on the ledger, at `fmv`. Long-term ⇒ deductible at FMV with no
+/// §170(e) reduction, and it lands in the `CapGainProp30` class whose ceiling is 30% of AGI.
+fn ledger_gift(fmv: rust_decimal::Decimal) -> btctax_core::state::Removal {
+    use btctax_core::event::BasisSource;
+    use btctax_core::identity::{EventId, LotId};
+    use btctax_core::state::{Removal, RemovalKind, RemovalLeg, Term};
+    use time::macros::date;
+    Removal {
+        event: EventId::decision(91),
+        kind: RemovalKind::Donation,
+        removed_at: date!(2024 - 07 - 01),
+        legs: vec![RemovalLeg {
+            lot_id: LotId {
+                origin_event_id: EventId::decision(911),
+                split_sequence: 0,
+            },
+            sat: 100_000_000,
+            basis: dec!(1000),
+            fmv_at_transfer: fmv,
+            term: Term::LongTerm,
+            basis_source: BasisSource::ExchangeProvided,
+            acquired_at: date!(2020 - 01 - 01),
+            pseudo: false,
+        }],
+        appraisal_required: false,
+        donor_acquired_at: None,
+        claimed_deduction: Some(fmv),
+        donee: Some("ACME CHARITY".into()),
+    }
+}
+
+/// ★★★ **THE FILER THE §170(f)(8) GATE NEVER ASKS — AND THE TWO PLACES THAT NOW DO.**
+///
+/// Phase 2's R2 fold put `deduction_is_itemized` in front of the acknowledgment refusal; its R3 fold
+/// added the `cwa_deferred_to_carryover` disjunct BEHIND it. Both are individually right, and they
+/// collide on exactly one population: **standard deduction AND a gift that defers.** §170(d)(1)
+/// creates the carryover regardless of §63(e) — `apply_170b` runs unconditionally for that very
+/// reason — so R3's mechanism survives on the other branch of the election, where R2 had just
+/// declared everything safe.
+///
+/// Single renter, AGI $40,000, one $25,000 appreciated-BTC gift: the CapGainProp30 ceiling is 30% ×
+/// $40,000 = $12,000, so $13,000 defers; $12,000 of itemized deductions loses to the $14,600 standard
+/// deduction, so the election is standard and BOTH screens pass. That filer files, §170(f)(8)(C)'s
+/// cure dies with the filing (*Durden*), and next year's Schedule A line 13 — deliberately outside the
+/// gate — deducts $13,000 unsubstantiated.
+///
+/// ★★ **THE FIX IS NOT A WIDER REFUSAL, AND THAT IS THE DESIGN DECISION THIS KAT PINS.** The return
+/// itself is correct: it claims no §170 deduction, so §170(f)(8)(A) denies nothing on it. What was
+/// wrong was (1) btctax told the filer the carryover was *"deduction you have already paid for"*
+/// without mentioning §170(f)(8) at all, and (2) `--write-carryover` would have stamped it `Computed`
+/// into next year's inputs, past every gate. So the return still FILES; the roll-forward block warns
+/// while the cure is still alive; and the write-back refuses to persist what btctax cannot vouch for.
+///
+/// **Plant to re-run the kill (both halves):**
+///   * delete the `cwa_unvouched_carryover` guard from `apply_carryover_writeback` ⇒ the write-back
+///     assertion below reds;
+///   * make `cwa_unvouched_carryover` return `None` unconditionally ⇒ both halves red.
+#[test]
+fn the_standard_deduction_deferral_donor_still_files_but_is_neither_told_nothing_nor_written_back()
+{
+    use btctax_core::tax::return_1040::cwa_unvouched_carryover;
+
+    let params = ty2024_params();
+    let table = ty2024_table();
+    let (mut ri, mut state) = household(r#"{"filing_status":"Single","w2_income":40000}"#);
+    state.removals.push(ledger_gift(dec!(25000)));
+    // ★★ THE RESTRICTION QUESTION IS ANSWERED, DELIBERATELY. A $25,000 property gift is over the
+    //    §170(f)(11)(D) $5,000 appraisal threshold, so it files a Form 8283 SECTION B — and the I-2
+    //    sibling gate in `apply_carryover_writeback` refuses an UNANSWERED 5a/5b/5c before this one
+    //    is ever reached. Leaving it `None` would have produced a green test whose refusal came from
+    //    a completely different statute: the KAT-8 vacuity defect, one finding over. Answering it
+    //    `Some(false)` satisfies that gate and makes §170(f)(8) the BINDING reason, which is asserted
+    //    on the message below.
+    ri.donations_had_restrictions = Some(false);
+
+    // ── THE PREMISES. Each is asserted, so this KAT cannot pass by never reaching the population. ──
+    assert!(
+        ri.charitable_cwa_obtained.is_none(),
+        "the acknowledgment must be UNANSWERED, or there is nothing unvouched-for to find"
+    );
+    let ar = assemble_absolute(&ri, &state, &params, &table, 2024);
+    assert!(
+        !ar.deduction_is_itemized,
+        "the election must be STANDARD — $12,000 of allowed gift loses to the $14,600 standard \
+         deduction. This is the branch R2 declared safe."
+    );
+    let deferred: Usd = ar
+        .charitable_carryover_out
+        .iter()
+        .filter(|c| c.origin_year == 2024)
+        .map(|c| c.amount)
+        .sum();
+    assert_eq!(
+        deferred,
+        dec!(13000),
+        "…and the gift must DEFER: §170(b) CapGainProp30 ceiling = 30% × $40,000 = $12,000, so \
+         $13,000 of the $25,000 carries. This is the branch R3 was about."
+    );
+
+    // ── HALF 1: THE RETURN STILL FILES. Widening the refusal would have broken this. ───────────────
+    assert!(
+        screen_inputs(&ri, &table, &params).is_none(),
+        "nothing refuses at the input screen"
+    );
+    assert!(
+        screen_absolute(&ri, &ar, &params, &state, 2024).is_none(),
+        "★ and the RETURN IS STILL FILABLE. It claims no §170 deduction, so §170(f)(8)(A) — which \
+         conditions *a deduction* — denies nothing on it. If this ever refuses, the fix went in as a \
+         wider gate and the `Some(false)` cure (\"remove that gift from the deduction\") is now \
+         being offered to a filer with no deduction to remove."
+    );
+
+    // ── HALF 2: THE FILER IS TOLD, BEFORE FILING. ─────────────────────────────────────────────────
+    assert_eq!(
+        cwa_unvouched_carryover(&ri, &ar, &state, 2024),
+        Some(dec!(13000)),
+        "★ the roll-forward block's §170(f)(8) warning is keyed to this, and it must name the \
+         DEFERRED amount — the whole $25,000 is not carrying, $13,000 is"
+    );
+
+    // ── HALF 3: THE WRITE-BACK REFUSES TO LAUNDER IT INTO NEXT YEAR'S INPUTS. ─────────────────────
+    let err = btctax_core::tax::return_1040::apply_carryover_writeback(
+        &ar,
+        &ri,
+        &state,
+        2024,
+        ReturnInputs::default(),
+        false,
+    )
+    .expect_err(
+        "★ `--write-carryover` must REFUSE: stamping this `Computed` into 2025's inputs puts it \
+         beyond every check, because 2025's line-13 claim is deliberately outside the P4 gate",
+    );
+    assert!(
+        err.contains("contemporaneous written acknowledgment") && err.contains("170(f)(8)(A)"),
+        "the refusal must name the statute the filer has to satisfy. Got: {err}"
+    );
+    assert!(
+        err.contains("STANDARD deduction"),
+        "…and must explain why NOTHING refused at filing time, or the filer reads it as a \
+         contradiction of the return they just filed. Got: {err}"
+    );
+
+    // ── AND `--force` DOES NOT OPEN IT. Same as its I-2 sibling: force overwrites a USER figure. ──
+    assert!(
+        btctax_core::tax::return_1040::apply_carryover_writeback(
+            &ar,
+            &ri,
+            &state,
+            2024,
+            ReturnInputs::default(),
+            true,
+        )
+        .is_err(),
+        "`--force` overrides the user-provenance guard, never a vouch-for guard"
+    );
+
+    // ══ THE DISCRIMINATING TWIN: answer YES, and everything proceeds. ═════════════════════════════
+    //
+    // Without this, the three assertions above are satisfied by a guard that refuses EVERYONE with a
+    // carryover — the green-and-blind instrument. The ANSWER must separate.
+    let (mut ri_yes, mut state_yes) = household(r#"{"filing_status":"Single","w2_income":40000}"#);
+    state_yes.removals.push(ledger_gift(dec!(25000)));
+    ri_yes.donations_had_restrictions = Some(false); // same premise as above — one variable differs
+    ri_yes.charitable_cwa_obtained = Some(true);
+    let ar_yes = assemble_absolute(&ri_yes, &state_yes, &params, &table, 2024);
+    assert_eq!(
+        cwa_unvouched_carryover(&ri_yes, &ar_yes, &state_yes, 2024),
+        None,
+        "a filer who holds the acknowledgment is vouched-for and must NOT be warned"
+    );
+    let next = btctax_core::tax::return_1040::apply_carryover_writeback(
+        &ar_yes,
+        &ri_yes,
+        &state_yes,
+        2024,
+        ReturnInputs::default(),
+        false,
+    )
+    .expect("…and their write-back must SUCCEED — the same gift, the same year, one answer apart");
+    assert_eq!(
+        next.charitable_carryover_in
+            .iter()
+            .map(|c| c.amount)
+            .sum::<Usd>(),
+        dec!(13000),
+        "…rolling the identical $13,000 the refused filer was denied"
+    );
+
+    // ══ THE SECOND TWIN: a gift UNDER $250 is never in scope at all. ══════════════════════════════
+    //
+    // §170(f)(8)(A) is per contribution and starts at $250; a $200 gift needs no acknowledgment. A
+    // guard keyed to "has a carryover" rather than to the threshold would catch this filer too.
+    let (ri_small, mut state_small) = household(r#"{"filing_status":"Single","w2_income":200}"#);
+    state_small.removals.push(ledger_gift(dec!(200)));
+    let ar_small = assemble_absolute(&ri_small, &state_small, &params, &table, 2024);
+    let deferred_small: Usd = ar_small
+        .charitable_carryover_out
+        .iter()
+        .filter(|c| c.origin_year == 2024)
+        .map(|c| c.amount)
+        .sum();
+    assert!(
+        deferred_small > Usd::ZERO,
+        "the small-gift twin must ALSO defer (30% × $200 = $60 ceiling), or it discriminates the \
+         wrong variable — it has to differ from the case above ONLY in the $250 threshold"
+    );
+    assert_eq!(
+        cwa_unvouched_carryover(&ri_small, &ar_small, &state_small, 2024),
+        None,
+        "★ a $200 gift is under §170(f)(8)(A)'s $250 threshold — i1040sca: \"don't combine separate \
+         donations\" — so it needs no acknowledgment and must not be warned about or refused"
+    );
+}

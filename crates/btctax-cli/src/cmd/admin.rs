@@ -327,6 +327,13 @@ pub struct IrsPdfReport {
     ///
     /// Empty on the crypto-slice path, which computes no full return and no Schedule A.
     pub charitable_carryover_out: Vec<btctax_core::tax::return_inputs::CharitableCarryItem>,
+    /// ★★★ FINAL-REVIEW FINDING 1 — how much of [`charitable_carryover_out`] btctax cannot vouch for
+    /// under §170(f)(8), or `None` when it can.
+    ///
+    /// See [`btctax_core::tax::return_1040::cwa_unvouched_carryover`]. Carried out rather than
+    /// re-derived so this surface and `report --tax-year`'s cannot drift; `None` on the crypto-slice
+    /// path, which computes no full return.
+    pub charitable_carryover_cwa_unvouched: Option<btctax_core::conventions::Usd>,
     /// ★ N4 (FILING-READINESS-PLAN rank 14) — the marks btctax deliberately did NOT make on this
     /// packet, one string per mark. See [`hand_marks`].
     ///
@@ -830,6 +837,7 @@ pub(crate) fn export_irs_pdf_from_session(
         // Schedule A, hence no §170(d)(1) carryover either.
         advisories: Vec::new(),
         charitable_carryover_out: Vec::new(),
+        charitable_carryover_cwa_unvouched: None,
         // N4 does not apply to the slice: its 1040 is a WORKSHEET (watermarked "NOT A COMPLETE FORM
         // 1040"), it is never signed or filed, and the note printed for it already says every other
         // line is the filer's.
@@ -1178,6 +1186,12 @@ fn export_full_return(
         // §170 notes. Taken from the SAME `assemble_absolute` result the packet was printed from, so
         // the figure on the filer's screen is the figure the return produced.
         charitable_carryover_out: ar.charitable_carryover_out.clone(),
+        // ★★★ FINAL-REVIEW FINDING 1 — and whether §170(f)(8) stands behind it. The export path is
+        // the one that hands the filer a PDF to SIGN, so it is exactly where the acknowledgment
+        // deadline has to be named: §170(f)(8)(C) kills the cure at filing.
+        charitable_carryover_cwa_unvouched: btctax_core::tax::return_1040::cwa_unvouched_carryover(
+            &ri, &ar, state, tax_year,
+        ),
         // ★ N4 — the SAME list the manifest rendered, so the stderr count and the paper cannot drift.
         hand_marks: marks,
         watermarked,

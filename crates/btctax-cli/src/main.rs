@@ -866,6 +866,7 @@ fn run() -> Result<ExitCode, CliError> {
                 if let Some(block) = render::render_charitable_carryover_out(
                     report.tax_year,
                     &report.charitable_carryover_out,
+                    report.charitable_carryover_cwa_unvouched,
                 ) {
                     eprint!("{block}");
                 }

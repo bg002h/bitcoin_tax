@@ -2446,51 +2446,44 @@ pub fn screen_absolute(
         .sum();
     if ar.deduction_is_itemized
         && (cwa_claimed > Usd::ZERO || cwa_deferred_to_carryover > Usd::ZERO)
+        && a_single_gift_reaches_the_cwa_threshold(ri, state, year)
     {
-        let largest_gift = crate::forms::max_single_donation_contribution(state, year).max(
-            ri.schedule_a
-                .as_ref()
-                .and_then(|a| a.charitable.iter().map(|g| g.amount).max())
-                .unwrap_or(Usd::ZERO),
-        );
-        if largest_gift >= crate::tax::tables::CWA_SUBSTANTIATION_THRESHOLD {
-            match ri.charitable_cwa_obtained {
-                None => {
-                    return refusal(
-                        RefuseReason::CharitableCwaUnresolved,
-                        "this return claims a charitable deduction and at least one of your gifts was \
-                         $250 or more, so Schedule A lines 11 and 12 send you to the instructions: \
-                         \"You can deduct a gift of $250 or more only if you have a contemporaneous \
-                         written acknowledgment from the charitable organization.\" §170(f)(8)(A) \
-                         makes that a condition of the deduction itself, and btctax has not been told \
-                         whether you have one. It will not claim a deduction the statute may deny. \
-                         ★ YOU CAN STILL GET ONE — the acknowledgment counts as contemporaneous if \
-                         you obtain it \"by the date you file your return or the due date (including \
-                         extensions) for filing your return, whichever is earlier\", so ask the \
-                         charity now; don't attach it to the return, keep it for your records. Run \
-                         `btctax income answer`",
-                    );
-                }
-                Some(false) => {
-                    return refusal(
-                        RefuseReason::CharitableCwaUnresolved,
-                        "you told btctax you do NOT hold a contemporaneous written acknowledgment for \
-                         every gift of $250 or more that this return deducts. §170(f)(8)(A): \"No \
-                         deduction shall be allowed … for any contribution of $250 or more unless the \
-                         taxpayer substantiates the contribution by a contemporaneous written \
-                         acknowledgment\" — so the deduction as computed is too large, and filing it \
-                         would understate your tax. ★ THE CURE IS STILL OPEN, but only until you \
-                         file: §170(f)(8)(C) counts an acknowledgment as contemporaneous if you get \
-                         it \"by the date you file your return or the due date (including extensions) \
-                         for filing your return, whichever is earlier\". Ask each charity for one \
-                         showing the amount of money and a description (but not the value) of any \
-                         property, and whether it gave you goods or services in return. Then answer \
-                         yes and re-run. If a charity will not provide one, remove that gift from the \
-                         deduction",
-                    );
-                }
-                Some(true) => {}
+        match ri.charitable_cwa_obtained {
+            None => {
+                return refusal(
+                    RefuseReason::CharitableCwaUnresolved,
+                    "this return claims a charitable deduction and at least one of your gifts was \
+                     $250 or more, so Schedule A lines 11 and 12 send you to the instructions: \
+                     \"You can deduct a gift of $250 or more only if you have a contemporaneous \
+                     written acknowledgment from the charitable organization.\" §170(f)(8)(A) \
+                     makes that a condition of the deduction itself, and btctax has not been told \
+                     whether you have one. It will not claim a deduction the statute may deny. \
+                     ★ YOU CAN STILL GET ONE — the acknowledgment counts as contemporaneous if \
+                     you obtain it \"by the date you file your return or the due date (including \
+                     extensions) for filing your return, whichever is earlier\", so ask the \
+                     charity now; don't attach it to the return, keep it for your records. Run \
+                     `btctax income answer`",
+                );
             }
+            Some(false) => {
+                return refusal(
+                    RefuseReason::CharitableCwaUnresolved,
+                    "you told btctax you do NOT hold a contemporaneous written acknowledgment for \
+                     every gift of $250 or more that this return deducts. §170(f)(8)(A): \"No \
+                     deduction shall be allowed … for any contribution of $250 or more unless the \
+                     taxpayer substantiates the contribution by a contemporaneous written \
+                     acknowledgment\" — so the deduction as computed is too large, and filing it \
+                     would understate your tax. ★ THE CURE IS STILL OPEN, but only until you \
+                     file: §170(f)(8)(C) counts an acknowledgment as contemporaneous if you get \
+                     it \"by the date you file your return or the due date (including extensions) \
+                     for filing your return, whichever is earlier\". Ask each charity for one \
+                     showing the amount of money and a description (but not the value) of any \
+                     property, and whether it gave you goods or services in return. Then answer \
+                     yes and re-run. If a charity will not provide one, remove that gift from the \
+                     deduction",
+                );
+            }
+            Some(true) => {}
         }
     }
 
@@ -2757,6 +2750,88 @@ pub fn screen_absolute(
 /// **User**-provenance carryover (from `income import`) and `force` is false — never clobbers a user entry.
 /// Both conflicts are checked BEFORE either field is written (atomic — a QBI conflict doesn't leave a
 /// half-applied charitable write). A computed (or empty) existing carryover-in is overwritten silently.
+/// Whether at least ONE SINGLE contribution of `year` reaches §170(f)(8)(A)'s $250 threshold.
+///
+/// i1040sca: *"In figuring whether a gift is $250 or more, don't combine separate donations."* Per
+/// contribution, NEVER the year aggregate. Crypto donations come from the ledger (one `Removal` = one
+/// contribution, measured at the FMV contributed); non-crypto gifts are one `CharitableGift` each.
+///
+/// ★ Factored out of the P4 gate so the gate and [`cwa_unvouched_carryover`] cannot drift apart. They
+/// answer the same statutory question about the same year's gifts, and a threshold that meant one
+/// thing at the refusal and another at the write-back would be a laundering route in itself.
+pub fn a_single_gift_reaches_the_cwa_threshold(
+    ri: &ReturnInputs,
+    state: &LedgerState,
+    year: i32,
+) -> bool {
+    let largest_gift = crate::forms::max_single_donation_contribution(state, year).max(
+        ri.schedule_a
+            .as_ref()
+            .and_then(|a| a.charitable.iter().map(|g| g.amount).max())
+            .unwrap_or(Usd::ZERO),
+    );
+    largest_gift >= crate::tax::tables::CWA_SUBSTANTIATION_THRESHOLD
+}
+
+/// ★★★ **THE STANDARD-DEDUCTION DEFERRAL DONOR** (final whole-branch review, finding 1).
+///
+/// The amount of THIS year's §170(d)(1) carryover that btctax cannot vouch for under §170(f)(8) —
+/// `None` when there is nothing unvouched-for.
+///
+/// **THE SEAM.** Phase 2's R2 fold put `ar.deduction_is_itemized` in front of the §170(f)(8) refusal
+/// ("standard deduction ⇒ nothing sworn ⇒ safe"). Phase 2's R3 fold then added the
+/// `cwa_deferred_to_carryover` disjunct ("a §170(b)-ceiling zero is DEFERRED, not denied, and the
+/// cure dies at THIS filing"). Both are right; they were folded into one un-reviewed commit, and R3's
+/// disjunct landed BEHIND R2's conjunct. But **R3's reasoning does not depend on the election**:
+/// §170(d)(1) creates the carryover regardless of §63(e) — `apply_170b` runs unconditionally for
+/// exactly that reason — so the two rationales collide on the population where the election is
+/// standard AND the gift defers. Reproduced: Single renter, AGI $40,000, one $25,000 appreciated-BTC
+/// gift ⇒ `deduction_is_itemized` false, `charitable_carryover_out` = $13,000 of CapGainProp30 with
+/// `origin_year` 2024, and BOTH screens return `None`. The filer is never asked.
+///
+/// ★★ **AND THIS IS DELIBERATELY NOT A REFUSAL.** The return that filer prints is CORRECT: it claims
+/// no §170 deduction, so §170(f)(8)(A) — which conditions *"a deduction"* — denies nothing on it, and
+/// refusing it would be btctax refusing to file a correct return. Worse, the `Some(false)` refusal's
+/// cure is *"remove that gift from the deduction"*, which is incoherent for a filer with no deduction
+/// to remove — a refusal whose cure its own population cannot perform is finding 2's defect, and
+/// hard-refusing here would have recreated it one finding over.
+///
+/// What IS wrong is what btctax does with the number afterwards, and both halves are fixed:
+///
+///   1. **It told the filer the carryover was money in the bank** — *"deduction you have already paid
+///      for; it is lost if it is never claimed"* — without ever mentioning that §170(f)(8)(A) may
+///      have denied it outright. The P6 roll-forward block now says so, and says it BEFORE filing,
+///      while §170(f)(8)(C)'s cure is still alive. That is the "asked" half.
+///   2. **`--write-carryover` would stamp it `Computed` into next year's inputs**, past every gate:
+///      next year's line-13 claim is deliberately outside the P4 gate ("the carryover year's CWA
+///      deadline passed with that year's return"), so nothing downstream ever looks again. That is
+///      the laundering class the I-2 restriction gate in `apply_carryover_writeback` already guards
+///      against, arriving by a second route — and it is refused there now, on the same reasoning.
+///
+/// Scoped to THIS year's vintage, like the gate: an older vintage's deadline passed with ITS return.
+pub fn cwa_unvouched_carryover(
+    ri: &ReturnInputs,
+    ar: &AbsoluteReturn,
+    state: &LedgerState,
+    year: i32,
+) -> Option<Usd> {
+    // `Some(true)` is the filer's own testimony that they hold the acknowledgment; that is exactly
+    // what the gate accepts, and it is what btctax vouches on.
+    if ri.charitable_cwa_obtained == Some(true) {
+        return None;
+    }
+    let deferred: Usd = ar
+        .charitable_carryover_out
+        .iter()
+        .filter(|c| c.origin_year == year)
+        .map(|c| c.amount)
+        .sum();
+    if deferred <= Usd::ZERO || !a_single_gift_reaches_the_cwa_threshold(ri, state, year) {
+        return None;
+    }
+    Some(deferred)
+}
+
 pub fn apply_carryover_writeback(
     ar: &AbsoluteReturn,
     ri: &ReturnInputs,
@@ -2822,6 +2897,44 @@ pub fn apply_carryover_writeback(
                 next = year + 1
             ));
         }
+    }
+    // ★★★ FINAL-REVIEW FINDING 1 — THE SAME LAUNDERING CLASS, ARRIVING BY §170(f)(8).
+    //
+    // The gate above refuses to persist a carryover btctax cannot vouch for because the property was
+    // RESTRICTED. This one refuses to persist a carryover it cannot vouch for because the
+    // CONTRIBUTION MAY NOT BE DEDUCTIBLE AT ALL: §170(f)(8)(A) is *"No deduction shall be allowed …
+    // unless the taxpayer substantiates the contribution by a contemporaneous written
+    // acknowledgment"*, and a contribution the statute disallows carries nothing forward under
+    // §170(d)(1) either — there is no excess-over-ceiling of a deduction that does not exist.
+    //
+    // ★ It only ever bites the STANDARD-DEDUCTION deferral donor in practice: an itemizer reaching
+    //   this point already answered the P4 gate `Some(true)`, because `None` and `Some(false)` refuse
+    //   at `screen_absolute` and never produce a filed return to write back from. That asymmetry is
+    //   the finding — see `cwa_unvouched_carryover` for why it is fixed HERE and not by widening the
+    //   refusal.
+    //
+    // ★★ Like its sibling, `force` does NOT open this. That flag overwrites a figure the USER
+    //    entered; it is not a licence to write one btctax knows may be disallowed.
+    if let Some(unvouched) = cwa_unvouched_carryover(ri, ar, state, year) {
+        return Err(format!(
+            "carryover write-back REFUSED for {year}: btctax computed a ${unvouched:.2} §170(d)(1) \
+             charitable carryover from {year} gifts, but it has not been told you hold a \
+             contemporaneous written acknowledgment for the gift of $250 or more behind it. \
+             §170(f)(8)(A): \"No deduction shall be allowed … for any contribution of $250 or more \
+             unless the taxpayer substantiates the contribution by a contemporaneous written \
+             acknowledgment\" — a contribution the statute disallows outright carries nothing into \
+             {next} either. Writing it into {next}'s inputs would put it beyond every check: it \
+             would be stamped `Computed`, and {next}'s Schedule A line 13 is deliberately outside \
+             the acknowledgment gate, because a carryover year's deadline passed with ITS return. \
+             ★ This year's return itself was fine to file — it takes the STANDARD deduction and \
+             claims no §170 deduction at all, which is why nothing refused at filing time. It is the \
+             CARRYOVER that needs the acknowledgment. Run `btctax income answer`; if you hold one, \
+             answer yes and re-run and all three carryovers land. If you do not, the lawful outcome \
+             is that this carryover does not exist — do not enter it by hand. \
+             ★ NOTE: this refuses the WHOLE write-back, so your QBI and REIT/PTP carryforwards were \
+             not written either; nothing was persisted.",
+            next = year + 1
+        ));
     }
     if !force {
         if next_year
@@ -7719,10 +7832,20 @@ mod tests {
         // AGI $30,000 against a $50,000 long-term gift: §170(b)'s 30% ceiling allows $9,000, which
         // LOSES to the $14,600 standard deduction — so nothing is itemized and the year files clean,
         // while $41,000 of full-FMV carryover rolls out.
-        let build_wages = |answer: Option<bool>, claimed: Usd, wages: Usd| {
+        // ★★★ FINAL-REVIEW FINDING 1 — `cwa` IS NOW A FIXTURE AXIS, AND IT HAS TO BE.
+        //
+        // Every household in this test is the standard-deduction deferral donor: a gift over $250
+        // that rolls a carryover out of a year that itemizes nothing. That is precisely the
+        // population the new §170(f)(8) write-back guard refuses, so rows (3) and (4) — which assert
+        // the write-back SUCCEEDS — would now be refused for a reason that has nothing to do with
+        // the restriction question this test is about. Answering the acknowledgment `Some(true)`
+        // isolates the variable under test, and rows (5)/(6) below assert the new guard is real by
+        // flipping only this axis.
+        let build_wages = |answer: Option<bool>, claimed: Usd, wages: Usd, cwa: Option<bool>| {
             let ri = ReturnInputs {
                 filing_status: FilingStatus::Single,
                 donations_had_restrictions: answer,
+                charitable_cwa_obtained: cwa,
                 w2s: vec![w2(Owner::Taxpayer, wages, wages, wages)],
                 ..Default::default()
             };
@@ -7733,7 +7856,11 @@ mod tests {
             let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
             (ri, st, ar)
         };
-        let build = |answer: Option<bool>, claimed: Usd| build_wages(answer, claimed, dec!(30000));
+        // The default for these rows holds the acknowledgment, so §170(f)(8) is satisfied and the
+        // RESTRICTION question is the only thing that can move the outcome.
+        let build = |answer: Option<bool>, claimed: Usd| {
+            build_wages(answer, claimed, dec!(30000), Some(true))
+        };
 
         // The fixture must be the shape the finding describes, or the test proves nothing.
         let (ri, st, ar) = build(Some(true), dec!(50000));
@@ -7752,18 +7879,30 @@ mod tests {
         );
 
         // (1) DECLARED restriction ⇒ the carryover is known-inflated. Refuse to persist it.
+        //
+        // ★ The refusal's REASON is asserted, not merely its existence. There are now three gates in
+        //   `apply_carryover_writeback` that can refuse this household, so `is_err()` alone would go
+        //   on passing if the restriction arm were deleted outright — the vacuity shape KAT 8 was.
+        let e1 = apply_carryover_writeback(&ar, &ri, &st, 2024, ReturnInputs::default(), false)
+            .expect_err(
+                "★ a full-FMV carryover from a gift the filer said was restricted must not become \
+                 next year's input — next year has no gate that could catch it",
+            );
         assert!(
-            apply_carryover_writeback(&ar, &ri, &st, 2024, ReturnInputs::default(), false).is_err(),
-            "★ a full-FMV carryover from a gift the filer said was restricted must not become next \
-             year's input — next year has no gate that could catch it"
+            e1.contains("restriction or a retained right"),
+            "…and it must refuse for the RESTRICTION, not for something else. Got: {e1}"
         );
 
         // (2) DUE-BUT-UNANSWERED on a Section B year ⇒ btctax cannot vouch for the amount either.
         let (ri, st, ar) = build(None, dec!(50000));
+        let e2 = apply_carryover_writeback(&ar, &ri, &st, 2024, ReturnInputs::default(), false)
+            .expect_err(
+            "the form would have asked 5a/5b/5c; an unanswered Section B year cannot vouch for \
+                 the carryover's amount",
+        );
         assert!(
-            apply_carryover_writeback(&ar, &ri, &st, 2024, ReturnInputs::default(), false).is_err(),
-            "the form would have asked 5a/5b/5c; an unanswered Section B year cannot vouch for the \
-             carryover's amount"
+            e2.contains("lines 5a, 5b and 5c"),
+            "…and for the UNANSWERED Section B question specifically. Got: {e2}"
         );
 
         // (3) ANSWERED NO ⇒ the ordinary case, and it writes.
@@ -7776,7 +7915,7 @@ mod tests {
         // (4) SECTION A + unanswered ⇒ the form never poses the question, so silence forgoes nothing.
         //     $4,000 is under the $5,000 split, and $10,000 of wages puts the 30% ceiling at $3,000
         //     so a carryover still rolls out — otherwise this row would prove nothing.
-        let (ri, st, ar) = build_wages(None, dec!(4000), dec!(10000));
+        let (ri, st, ar) = build_wages(None, dec!(4000), dec!(10000), Some(true));
         assert!(
             !ar.charitable_carryover_out.is_empty(),
             "fixture must still carry over"
@@ -7785,6 +7924,40 @@ mod tests {
             apply_carryover_writeback(&ar, &ri, &st, 2024, ReturnInputs::default(), false).is_ok(),
             "a Section A year never prints 5a/5b/5c — do not block a small donor's carryover"
         );
+
+        // ══ FINAL-REVIEW FINDING 1 — THE §170(f)(8) ARM, ON THE SAME FIXTURES. ═══════════════════
+        //
+        // Rows (3) and (4) succeed ONLY because `cwa` is `Some(true)`. Flip that one axis and both
+        // must refuse — otherwise the acknowledgment answer above is grease rather than a premise,
+        // and the standard-deduction deferral donor is laundered into next year exactly as the
+        // final review described. Each asserts the §170(f)(8) reason by name, so it cannot be
+        // satisfied by the restriction arms above.
+        for (label, cwa) in [("unanswered", None), ("answered NO", Some(false))] {
+            // (3') row (3)'s household — Section B, restriction answered NO — only the CWA differs.
+            let (ri, st, ar) = build_wages(Some(false), dec!(50000), dec!(30000), cwa);
+            let e = apply_carryover_writeback(&ar, &ri, &st, 2024, ReturnInputs::default(), false)
+                .expect_err(&format!(
+                    "{label}: §170(f)(8)(A) disallows a $250-or-more contribution without a \
+                     contemporaneous written acknowledgment, so nothing carries into next year and \
+                     nothing may be persisted — row (3) succeeds only because it answers yes"
+                ));
+            assert!(
+                e.contains("contemporaneous written acknowledgment"),
+                "{label}: row (3) must refuse for §170(f)(8), not for the restriction. Got: {e}"
+            );
+
+            // (4') row (4)'s household — Section A, a $4,000 gift, still over the $250 threshold.
+            let (ri, st, ar) = build_wages(None, dec!(4000), dec!(10000), cwa);
+            let e = apply_carryover_writeback(&ar, &ri, &st, 2024, ReturnInputs::default(), false)
+                .expect_err(&format!(
+                    "{label}: the $250 threshold is §170(f)(8)(A)'s, NOT §170(f)(11)(D)'s $5,000 \
+                     appraisal split — a Section A gift of $4,000 still needs an acknowledgment"
+                ));
+            assert!(
+                e.contains("contemporaneous written acknowledgment"),
+                "{label}: row (4) must refuse for §170(f)(8). Got: {e}"
+            );
+        }
 
         // (5) ★ NO charitable carryover ⇒ nothing inflated to persist, so a declared restriction must
         //     NOT block the write-back — the QBI/REIT carryovers still need writing. Without this the
