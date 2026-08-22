@@ -25,6 +25,21 @@ set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
+# ★★ DESTRUCTIVE, observed 2026-08-21: git exports GIT_DIR (and friends) to its hooks, and git
+#    prefers an inherited GIT_DIR over a child process's working directory. `make check` runs the
+#    whole suite, which includes tests that build throwaway repos with `git init` / `git config` —
+#    and under an inherited GIT_DIR those retarget THIS repository. `git init` with GIT_DIR set and
+#    no GIT_WORK_TREE re-inits it as BARE: `core.bare=true` landed on the shared config and every
+#    `git add` in the main tree failed with "this operation must be run in a work tree", twice,
+#    until it was repaired by hand. The same inheritance let a test's `git config core.hooksPath`
+#    write to the real config — i.e. silently UNINSTALL the harness it exists to verify.
+#
+#    A test suite must never inherit the hook's git environment. This is defense in depth: the
+#    production path (`hooks_dir` in crates/xtask/src/harness_check.rs) scrubs these too, because
+#    `xtask harness-check` run from inside any hook had the identical blindness — it asked git about
+#    btctax instead of the repo it was handed, and reported a fresh uninstalled clone as fully wired.
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_PREFIX GIT_OBJECT_DIRECTORY
+
 echo "pre-commit: running the gates (make check + cargo fmt --all --check) …" >&2
 
 FAILED=0
