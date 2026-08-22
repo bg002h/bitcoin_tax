@@ -650,9 +650,40 @@ pub fn report_tax_year(
                     }
                     _ => None,
                 };
-                carryforward_consistency(
-                    Some(worksheet_out.as_ref().unwrap_or(&prev.carryforward_out)),
-                    &p.capital_loss_carryforward_in,
+                // ★★★ **M4 MUST NOT DISPUTE A FIGURE BTCTAX ITSELF WROTE AND STAMPED.**
+                //
+                // Two changes, and both exist because (B) made btctax an AUTHOR of this figure
+                // rather than only a reader of it.
+                //
+                // (1) ROUND BOTH SIDES. `carryforward_consistency`'s comparison is EXACT
+                //     (`compute.rs`, and it is frozen), while the persisted figure is now
+                //     whole-dollar and the worksheet authority is not. A filer carrying btctax's own
+                //     $42,872 against an authority of $42,871.66 would be audited by btctax for a
+                //     rounding it performed itself.
+                //
+                // (2) STAY SILENT rather than fall back to the FLAT figure, when the worksheet
+                //     authority is unavailable AND this year's carryover-in is btctax's own
+                //     `Computed` stamp. Year Y−1 can stop screening clean without a single edit to
+                //     it — a new ≥$250 donation Removal flips an itemizing year into
+                //     `CharitableCwaUnresolved` — and the flat figure is the crypto slice, which
+                //     on a floor household is up to the whole §1211(b) allowance smaller. Quoting
+                //     it to dispute a value btctax wrote is the F1 defect arriving from the other
+                //     side, and a filer who obeys the audit forfeits deductible loss permanently.
+                //     A `User` carryover-in is different: btctax did not write it, so the flat
+                //     figure remains the best cross-check it has.
+                // The PROVENANCE lives on `ReturnInputs`, not on the derived `TaxProfile` — a
+                // crypto-slice year has no row at all, and for it `User` (no btctax authorship) is
+                // the right reading.
+                let this_year_provenance = crate::return_inputs::get(s.conn(), year)?
+                    .map(|r| r.capital_loss_carryforward_in_provenance)
+                    .unwrap_or_default();
+                m4_authority(worksheet_out, this_year_provenance, prev.carryforward_out).and_then(
+                    |a| {
+                        carryforward_consistency(
+                            Some(&round_carryforward(a)),
+                            &round_carryforward(p.capital_loss_carryforward_in),
+                        )
+                    },
                 )
             } else {
                 None
@@ -675,6 +706,55 @@ pub fn report_tax_year(
         dual_report,
         pseudo_contributed,
     })
+}
+
+/// Whole-dollar both limbs of a carryforward, for a comparison against a figure that is stored in
+/// whole dollars.
+///
+/// `carryforward_consistency` compares EXACTLY (`compute.rs`, frozen), and since `--write-carryover`
+/// began persisting a rounded figure the two sides stopped being on the same scale: a filer carrying
+/// btctax's own $42,872 against an exact $42,871.66 authority would be audited by btctax for a
+/// rounding btctax performed itself.
+fn round_carryforward(
+    c: btctax_core::tax::types::Carryforward,
+) -> btctax_core::tax::types::Carryforward {
+    btctax_core::tax::types::Carryforward {
+        short: btctax_core::conventions::round_dollar(c.short),
+        long: btctax_core::conventions::round_dollar(c.long),
+    }
+}
+
+/// ★★★ WHICH figure is the authority on last year's capital-loss carryforward-out — or NONE.
+///
+/// Three cases, and the third is new with (B):
+///   * a WORKSHEET figure exists (year Y−1 has full-return inputs, params and a table, and screens
+///     clean) → it is the authority, always. This is the F1 fix.
+///   * no worksheet figure, and this year's carryover-in is the FILER's (`User`) → the crypto-slice
+///     flat figure is the best cross-check btctax has, and it fires.
+///   * no worksheet figure, and this year's carryover-in is btctax's OWN `Computed` stamp → **SAY
+///     NOTHING.** Quoting the flat figure to dispute a value btctax wrote and stamped is the F1
+///     defect arriving from the other side. On a floor household the flat figure is smaller by up to
+///     the whole §1211(b) allowance, and a filer who obeys the audit forfeits that permanently.
+///     Year Y−1 can stop screening clean with no edit to it at all — a new ≥$250 donation Removal
+///     flips an itemizing year into the §170(f)(8) gate — so this is not a hypothetical.
+///
+/// ★★ **EXTRACTED AS A FUNCTION BECAUSE THE THIRD CASE IS UNREACHABLE IN v1, AND AN UNTESTED GUARD
+/// IS THE SHAPE THIS REPO KEEPS SHIPPING DEFECTS IN.** Reaching it end-to-end needs year Y to carry
+/// a `ReturnInputs` row (so Y = 2024, the only full-return year v1 has) AND year Y−1 to have a tax
+/// table (2023 has none), so no CLI-level fixture can produce it. It becomes reachable the moment
+/// TY2025 full-return support lands — which is the same acceptance as "v1 cannot read the row it
+/// writes". Pulled out here so the DECISION can be exercised directly and watched go red.
+fn m4_authority(
+    worksheet_out: Option<btctax_core::tax::types::Carryforward>,
+    this_year_provenance: btctax_core::tax::return_inputs::CarryProvenance,
+    flat: btctax_core::tax::types::Carryforward,
+) -> Option<btctax_core::tax::types::Carryforward> {
+    use btctax_core::tax::return_inputs::CarryProvenance;
+    match (worksheet_out, this_year_provenance) {
+        (Some(w), _) => Some(w),
+        (None, CarryProvenance::Computed) => None,
+        (None, _) => Some(flat),
+    }
 }
 
 /// §4 R3-M6 carryover write-back — persist year `year`'s computed charitable, QBI business-loss,
@@ -847,6 +927,103 @@ mod tests {
     use btctax_core::tax::return_inputs::CharitableClass;
     use btctax_core::FilingStatus;
     use rust_decimal_macros::dec;
+
+    /// ★★★ **K13 — M4 never disputes a figure btctax itself wrote, and never audits its own
+    /// rounding.**
+    ///
+    /// Exercised on [`m4_authority`] and [`round_carryforward`] directly, and the reason is recorded
+    /// rather than glossed: **the silent case is UNREACHABLE end-to-end in v1.** It needs year Y to
+    /// carry a `ReturnInputs` row — so Y = 2024, the only full-return year v1 has — AND year Y−1
+    /// (2023) to have a tax table, which it does not. No CLI fixture can produce it. It becomes
+    /// reachable the moment TY2025 full-return support lands, which is the same acceptance as
+    /// "v1 cannot read the row it writes".
+    ///
+    /// ★ A guard that cannot be watched going red is exactly the shape this repo keeps shipping
+    /// defects in (harness B1), which is why the decision was pulled out of the `if` chain into a
+    /// function rather than left inline and untested. What is asserted is the DECISION; what the
+    /// CLI-level `the_prior_year_worksheet_figure_is_the_m4_authority_for_a_floor_year` asserts is
+    /// that the decision is wired to the report.
+    ///
+    /// Mutations that MUST red:
+    ///   (a) restore the bare `worksheet_out.unwrap_or(flat)` in `m4_authority`;
+    ///   (b) make `round_carryforward` the identity.
+    #[test]
+    fn m4_never_disputes_a_computed_figure_it_cannot_re_derive() {
+        use btctax_core::tax::return_inputs::CarryProvenance;
+        use btctax_core::tax::types::Carryforward;
+
+        let worksheet = Carryforward {
+            short: dec!(40000),
+            long: dec!(60000),
+        };
+        let flat = Carryforward {
+            short: dec!(37000),
+            long: dec!(60000),
+        };
+        assert_ne!(
+            worksheet, flat,
+            "premise: the two engines must DISAGREE, or 'which is the authority' is not a question"
+        );
+
+        // The worksheet figure wins whenever it exists — under either provenance (F1).
+        for prov in [CarryProvenance::User, CarryProvenance::Computed] {
+            assert_eq!(
+                m4_authority(Some(worksheet), prov, flat),
+                Some(worksheet),
+                "the prior year's WORKSHEET figure is the authority ({prov:?})"
+            );
+        }
+
+        // No worksheet + the FILER's own figure ⇒ the flat one is the best cross-check there is.
+        assert_eq!(
+            m4_authority(None, CarryProvenance::User, flat),
+            Some(flat),
+            "a User carryover-in is not btctax's, so it is still cross-checked"
+        );
+
+        // ★★★ No worksheet + BTCTAX'S OWN figure ⇒ SILENCE.
+        assert_eq!(
+            m4_authority(None, CarryProvenance::Computed, flat),
+            None,
+            "★★★ M4 must NOT quote the crypto-slice flat figure to dispute a value btctax itself \
+             wrote and stamped `Computed`. On a floor household the flat figure is smaller by up to \
+             the whole §1211(b) allowance, and a filer who obeys that audit forfeits it permanently."
+        );
+
+        // ── The ROUNDING half: btctax must not audit its own rounding. ────────────────────────────
+        let exact = Carryforward {
+            short: Usd::ZERO,
+            long: dec!(42871.66),
+        };
+        let stored = Carryforward {
+            short: Usd::ZERO,
+            long: dec!(42872),
+        };
+        assert_ne!(
+            exact, stored,
+            "premise: exact and stored differ, which is the whole reason both sides are rounded"
+        );
+        assert_eq!(
+            round_carryforward(exact),
+            round_carryforward(stored),
+            "★★ a filer's whole-dollar $42,872 against an exact $42,871.66 authority must NOT fire — \
+             btctax would be auditing a rounding it performed itself"
+        );
+        assert!(
+            carryforward_consistency(
+                Some(&round_carryforward(exact)),
+                &round_carryforward(stored)
+            )
+            .is_none(),
+            "…and the advisory it feeds must therefore stay silent"
+        );
+        // …while a REAL disagreement still fires.
+        assert!(
+            carryforward_consistency(Some(&round_carryforward(exact)), &round_carryforward(flat))
+                .is_some(),
+            "a genuine mismatch must still be reported — rounding both sides must not mute M4"
+        );
+    }
 
     /// Shared temp-vault fixture (mirrors `input_form_store.rs`'s helper, M-3): `create` + drop releases
     /// the store single-instance lock so a later `Session::open` (here, the one inside the command under

@@ -1577,6 +1577,96 @@ fn dual_report_renders_absolute_return_with_section_6_labels() {
     );
 }
 
+/// ★★★ **K14 — the PRIOR YEAR'S WORKSHEET figure is the M4 authority for a floor year.**
+///
+/// (A)'s side-effect, and it was IMPOSSIBLE to satisfy before the lift: year Y−1 at the floor with a
+/// carryover brought in REFUSED, so M4 fell back to the crypto-slice flat figure and told a filer
+/// carrying the correct worksheet amount that their prior return disagreed. Now Y−1 files, its
+/// worksheet figure is the authority, and a filer who carried it forward gets no advisory at all.
+///
+/// ★ Year Y is a stored-`TaxProfile` year, not a `ReturnInputs` one. That is forced rather than
+/// chosen: v1 has full-return params for TY2024 ONLY (`full_return_for(2025)` is `None` by design),
+/// so a 2025 `ReturnInputs` row makes the report refuse outright. The M4 path is reachable through
+/// the profile ladder, which is where a v1 filer actually plans next year.
+///
+/// Mutations that MUST red:
+///   (a) carry the FLAT figure forward instead ⇒ the advisory MUST fire (the second half below);
+///   (b) restore the deleted `screen_absolute` block ⇒ Y−1 refuses again, `worksheet_out` becomes
+///       `None`, M4 falls back to the flat figure and the primary assertion reds.
+#[test]
+fn the_prior_year_worksheet_figure_is_the_m4_authority_for_a_floor_year() {
+    use btctax_core::tax::return_inputs::{Owner, ReturnInputs, W2};
+
+    let build = |carry_in: Carryforward| {
+        let csv_dir = tempfile::tempdir().unwrap();
+        let csv = write_lt_sell_2025(csv_dir.path());
+        let (dir, vault) = make_vault_with(&csv);
+        {
+            let mut s = Session::open(&vault, &pp()).unwrap();
+            // Y−1 = 2024, AT THE FLOOR with $40,000 ST + $60,000 LT carried in. The worksheet gives
+            // 40,000 / 60,000; the crypto-slice flat rule gives 37,000 / 60,000.
+            let mut y2024 = ReturnInputs {
+                tax_year: 2024,
+                filing_status: FilingStatus::Single,
+                header: btctax_core::tax::testonly::not_a_dependent(),
+                w2s: vec![W2 {
+                    owner: Owner::Taxpayer,
+                    box1_wages: dec!(10000),
+                    box3_ss_wages: dec!(10000),
+                    box5_medicare_wages: dec!(10000),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+            y2024.capital_loss_carryforward_in = Carryforward {
+                short: dec!(40000),
+                long: dec!(60000),
+            };
+            btctax_core::tax::testonly::answer_all_live_declarations(&mut y2024);
+            btctax_cli::return_inputs::set(s.conn(), 2024, &y2024).unwrap();
+            s.save().unwrap();
+        }
+        // Y = 2025, as a stored TaxProfile (see the doc comment for why not ReturnInputs).
+        cmd::tax::set_profile(
+            &vault,
+            &pp(),
+            2025,
+            TaxProfile {
+                capital_loss_carryforward_in: carry_in,
+                ..single_40k_profile()
+            },
+            false,
+        )
+        .unwrap();
+        let TaxYearReport { advisory, .. } =
+            cmd::tax::report_tax_year(&vault, &pp(), 2025, dec!(0)).unwrap();
+        (dir, csv_dir, advisory)
+    };
+
+    // The WORKSHEET figure carried forward ⇒ SILENT.
+    let (_d, _c, advisory) = build(Carryforward {
+        short: dec!(40000),
+        long: dec!(60000),
+    });
+    assert!(
+        advisory.is_none(),
+        "★ the prior year's WORKSHEET figure is the authority — a filer who carried it forward must \
+         not be audited for it. Got: {advisory:?}"
+    );
+
+    // The crypto-slice FLAT figure carried forward ⇒ the advisory MUST fire, or the silence above
+    // proves nothing.
+    let (_d2, _c2, advisory2) = build(Carryforward {
+        short: dec!(37000),
+        long: dec!(60000),
+    });
+    assert!(
+        advisory2.is_some(),
+        "★★ the flat figure is NOT last year's carryforward-out on a floor household, and M4 must \
+         say so — otherwise the assertion above is vacuous"
+    );
+}
+
 /// ★★★ **K12 — the report never shows two unlabelled carryforward-out figures.**
 ///
 /// The dual report prints two carryover figures from two different engines. The delta block's comes

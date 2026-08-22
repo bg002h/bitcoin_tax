@@ -5379,17 +5379,32 @@ reviews ran on the branch; two are persisted verbatim in `reviews/filing-readine
 
 ### Owner decisions — not an implementer's call
 
-- **FR-6 — is the TI≤0-with-carryforward-IN refusal now liftable?** Mechanically yes. Its stated
-  reason ("the worksheet is unmodeled in v1") is now FALSE — N1 modelled it, and a carryforward-in is
-  handled correctly by construction. The refusal's detail text was corrected to state the real,
-  narrower reason. Lifting it would let that year FILE instead of refusing: a **widening of the
-  filing surface on a §6065 return**, wanting its own commit, review and KAT pair.
+- **FR-6 — ✅ CLOSED (owner authorised). The TI≤0-with-carryforward-IN refusal is LIFTED.**
+  `RefuseReason::TaxableIncomeNonPositiveWithCarryforward` is deleted, variant and all — the
+  identifier now appears in zero files under `crates/`, asserted by
+  `xtask::capital_loss_carryover_check::the_lifted_refusal_leaves_no_trace_in_the_tree`. No printed
+  line moved (pinned by `the_lift_moves_no_printed_line`, the whole 1040 and Schedule D as struct
+  literals). The household's Schedule D is now indistinguishable from that of a filer who realised
+  the identical loss this year, which is the asymmetry that made the refusal hard to defend.
+  Accepted adverse branches are stated in `LIMITATIONS.md` and in the commit message; the two that
+  matter are ZERO oracle coverage (permanent — §G-9) and an incomplete credit block for a population
+  now admitted by construction low-income.
 
-- **FR-8 — `--write-carryover` does not roll the capital-loss sibling.** The r3 I-4 comment saying
-  there is nothing to write is now false (the field exists); the comment was corrected. Whether to
-  roll it, and with what provenance, is a behaviour change to a filed-figure chain — and it must also
-  answer what provenance means for a figure the FROZEN delta engine still reports differently (see
-  the M4 authority fix in `cmd/tax.rs`).
+- **FR-8 — ✅ CLOSED (owner authorised). `--write-carryover` rolls the §1212(b) carryover.**
+  Written as WHOLE DOLLARS (the figure next year's Schedule D lines 6 and 14 will carry), stamped
+  `Computed` only when the figure descends from something btctax actually knows — r3 I-4's reasoning
+  is answered, not reversed, and its excluded case (a year never asked that produced nothing) stays
+  closed with `a_computed_zero_never_silences_the_benefit_carryover_advisory` holding it.
+  The provenance question FR-8 raised is answered at the M4 CALLER, not in the frozen engine:
+  `cmd::tax::m4_authority` stays SILENT rather than quote the crypto-slice flat figure against a
+  value btctax itself wrote.
+
+  ★ **Residue, filed rather than closed:** `m4_authority`'s silent branch is UNREACHABLE end-to-end
+  in v1 — it needs year Y to carry a `ReturnInputs` row (so Y = 2024) *and* year Y−1 (2023) to have a
+  tax table, which it does not. The decision is unit-tested and mutation-verified; the wiring is
+  covered by `the_prior_year_worksheet_figure_is_the_m4_authority_for_a_floor_year`. **Owning phase:
+  whichever phase lands TY2025 full-return support** — the same phase that makes "v1 cannot read the
+  row it writes" stop being true. Re-point the M4 KAT at a CLI-level fixture then.
 
 - **FR-7 — N1's slice-path guard (plan decision 12).** Unsettled, so unbuilt. The plan recommends
   *warn* (the slice is a planning surface, not a filing one), naming the worksheet.
