@@ -2802,26 +2802,27 @@ pub fn screen_absolute(
     //     question could never have caught it — and because the missing add-back also suppressed this
     //     very `must_attach()` test, the gap hid its own detection (FOLLOWUPS §G-6).
 
-    // (c) Taxable income ≤ 0 with a capital-loss carryforward-in (the §1211/§1212 carryover-worksheet edge).
-    let cf = ri.capital_loss_carryforward_in;
-    if ar.taxable_income == Usd::ZERO && (cf.short > Usd::ZERO || cf.long > Usd::ZERO) {
-        // ★ N1 MODELLED THE WORKSHEET, so the old detail ("…is unmodeled in v1") became false the
-        //   moment `capital_loss_carryover.rs` landed, and a filer-facing refusal that states a
-        //   false reason is worse than a terse one. The REFUSAL still stands — but for a different
-        //   and narrower reason, stated here honestly: modelling the worksheet is not the same act
-        //   as blessing this edge to FILE. Letting a TI≤0-with-carryforward-in year file is a
-        //   widening of the filing surface on a return signed under §6065, and that is an owner
-        //   decision nobody has taken. See FOLLOWUPS (phase-1 residue): the refusal is now
-        //   mechanically liftable, which is precisely why lifting it needs its own review and KAT
-        //   pair rather than riding along with the worksheet that made it liftable.
-        return refusal(
-            RefuseReason::TaxableIncomeNonPositiveWithCarryforward,
-            "taxable income is zero or negative with a capital-loss carryforward — btctax models the \
-             §1211/§1212 Capital Loss Carryover Worksheet but has not yet validated FILING this edge, \
-             so it refuses rather than emit a return it cannot stand behind",
-        );
-    }
-
+    // ★★★ (c) — THE TI≤0-WITH-A-CARRYFORWARD-IN REFUSAL WAS HERE, AND IT IS GONE (owner-authorised).
+    //
+    //     It read "btctax models the §1211/§1212 Capital Loss Carryover Worksheet but has not yet
+    //     validated FILING this edge". N1 modelled the worksheet; the remaining objection was never
+    //     arithmetic but a DECISION — letting a wiped-out year with a loss brought in emit a 1040 and
+    //     a Schedule D widens the filing surface on a return signed under §6065. The owner took that
+    //     decision, so the screen is deleted rather than kept as a dead variant: a gate whose
+    //     off-state is invisible is worse than no gate, and DELETING its `RefuseReason` variant is
+    //     what enumerated every consumer for free (E0599 across three crates). The variant's own
+    //     identifier is deliberately not written anywhere in `crates/` — including here — because
+    //     `xtask`'s `the_lifted_refusal_leaves_no_trace_in_the_tree` asserts exactly that, and a
+    //     surviving mention is indistinguishable from a surviving consumer to a grep.
+    //
+    // ★★ **NO PRINTED LINE MOVES.** This screen ran entirely after `assemble_absolute` and only
+    //    decided emission; deleting it changes what is EMITTED, never what is COMPUTED. If any filed
+    //    figure changes, the lift was implemented wrongly — e.g. by relaxing the `max(ZERO)` floor on
+    //    line 15 instead of deleting a screen — and `the_lift_moves_no_printed_line` exists to catch
+    //    exactly that.
+    //
+    // ★ It was the LAST check in this function, so nothing below it was shadowed and nothing above it
+    //   moved.
     None
 }
 
@@ -5696,12 +5697,13 @@ mod tests {
         );
     }
 
-    /// TI ≤ 0 WITH a capital-loss carryforward-in refuses (the §1211/§1212 carryover-worksheet edge);
-    /// the SAME zero-TI return with NO carryforward is a refund-only filer — NOT refused (r5-narrowed).
-    #[test]
-    fn taxable_income_nonpositive_with_carryforward_refuses() {
-        let p = ty2024_params();
-        let table = synthetic_table(2024);
+    /// **H1 — the household the lift admits.** Single, $5,000 of wages, a $2,000 SHORT-TERM capital
+    /// loss carried IN. AGI = 5,000 + (−2,000) = 3,000; the $14,600 standard deduction wipes it out,
+    /// so taxable income is $0 and there is a carryforward-in. That is precisely the pair that used to
+    /// refuse.
+    use crate::tax::printed::ScheduleDRouting;
+
+    fn h1_files_at_the_floor() -> ReturnInputs {
         let mut ri = ReturnInputs {
             filing_status: FilingStatus::Single,
             w2s: vec![w2(Owner::Taxpayer, dec!(5000), dec!(5000), dec!(5000))],
@@ -5711,21 +5713,256 @@ mod tests {
             short: dec!(2000),
             long: Usd::ZERO,
         };
+        crate::tax::testonly::answer_all_live_declarations(&mut ri);
+        ri
+    }
+
+    /// ★★★ **K1 — (A). A taxable-income-$0 year with a capital-loss carryover brought IN now FILES,
+    /// and its Schedule D is indistinguishable from its current-year-loss twin's.**
+    ///
+    /// This REPLACES `taxable_income_nonpositive_with_carryforward_refuses`, which asserted the
+    /// opposite. The refusal was never about arithmetic — `capital_loss_carryover.rs` transcribes all
+    /// thirteen worksheet lines and a carryforward-IN has always entered `net_1222` before Schedule D
+    /// lines 7/15/16/21 are formed. It was about a DECISION: emitting a 1040 for this household
+    /// widens the filing surface on a return signed under §6065. The owner took it.
+    ///
+    /// ★ **The twin comparison is the point.** A $2,000 loss carried in and a $2,000 loss realised
+    /// this year produce the SAME Schedule D Part III routing and the same §1211(b) line 21 — the
+    /// form does not distinguish them, and after the lift neither does btctax. A refusal keyed to one
+    /// of them was a distinction the form never made.
+    ///
+    /// Mutations that MUST red:
+    ///   (a) restore the deleted `screen_absolute` block ⇒ the files-half reds;
+    ///   (b) `st_carryover_6: Usd::ZERO` in `assemble_absolute` ⇒ the L6/L7/L16/L21 assertions red,
+    ///       which proves this test READS the carryover rather than merely the routing.
+    #[test]
+    fn a_ti_zero_carryforward_in_return_files_and_matches_its_current_year_twin() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let ri = h1_files_at_the_floor();
+
+        // ── PREMISE: the fixture really is at the floor WITH a carryover in. ───────────────────────
         let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
-        // AGI = 5,000 wages + L7(−2,000 §1211-limited carryforward loss) = 3,000; std 14,600 → TI = 0.
-        assert_eq!(ar.taxable_income, Usd::ZERO);
+        assert_eq!(
+            ar.taxable_income,
+            Usd::ZERO,
+            "premise: the household must sit ON the floor, or the lifted screen is never reached"
+        );
+        assert!(
+            ri.capital_loss_carryforward_in.short > Usd::ZERO,
+            "premise: it must bring a loss IN, or this is a plain refund-only filer"
+        );
+
+        // ── IT FILES — both screens. ──────────────────────────────────────────────────────────────
+        assert_eq!(
+            crate::tax::return_refuse::screen_inputs(&ri, &table, &p).map(|r| r.reason),
+            None,
+            "the worksheet's two header declarations are answered, so nothing at the input screen \
+             stands in the way"
+        );
         assert_eq!(
             screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024).map(|r| r.reason),
-            Some(RefuseReason::TaxableIncomeNonPositiveWithCarryforward)
+            None,
+            "★ (A): taxable income of $0 with a carryforward brought in FILES"
         );
-        // No carryforward → still TI = 0, but a refund-only filer is NOT refused.
-        let mut norf = ri.clone();
-        norf.capital_loss_carryforward_in = Carryforward::default();
-        let ar2 = assemble_absolute(&norf, &empty_ledger(), &p, &table, 2024);
-        assert_eq!(ar2.taxable_income, Usd::ZERO);
+
+        // ── Schedule D carries the loss the filer brought in. ──────────────────────────────────────
+        let pf = crate::tax::packet::assemble_printed_forms(
+            &ri,
+            &empty_ledger(),
+            &BTreeMap::new(),
+            &ar,
+            &table,
+            2024,
+            &[],
+        );
+        assert_eq!(pf.sch_d.line6, dec!(2000), "L6 — the carryover, paren box");
+        assert_eq!(pf.sch_d.line7, dec!(-2000), "L7 — net short-term");
+        assert_eq!(pf.sch_d.line16, dec!(-2000), "L16 — 7 and 15 combined");
         assert_eq!(
-            screen_absolute(&norf, &ar2, &p, &empty_ledger(), 2024),
-            None
+            pf.sch_d.routing,
+            ScheduleDRouting::NetLoss {
+                line21: dec!(2000),
+                line22_yes: false,
+            },
+            "L21 — the whole $2,000 is inside the §1211(b) $3,000 allowance"
+        );
+        assert_eq!(
+            ar.capital_loss_carryforward_out,
+            Carryforward {
+                short: dec!(2000),
+                long: Usd::ZERO,
+            },
+            "★ the worksheet: line 1 = −11,600 ⇒ line 3 = -0- ⇒ line 4 = -0-, so NOTHING was \
+             absorbed and the whole $2,000 survives. The flat rule would have said $0."
+        );
+        assert!(
+            pf.sch_d.must_file(),
+            "a Schedule D with a carryover must file"
+        );
+
+        // ── THE TWIN: the same $2,000 loss REALISED this year, no carryover. ──────────────────────
+        let mut twin = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2(Owner::Taxpayer, dec!(5000), dec!(5000), dec!(5000))],
+            b_1099: vec![crate::tax::return_inputs::Form1099B {
+                payer: "Broker".into(),
+                short_term_proceeds: dec!(1000),
+                short_term_basis: dec!(3000),
+                basis_reported_and_no_adjustments: Some(true),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        crate::tax::testonly::answer_all_live_declarations(&mut twin);
+        let ar_twin = assemble_absolute(&twin, &empty_ledger(), &p, &table, 2024);
+        assert_eq!(
+            ar_twin.taxable_income,
+            Usd::ZERO,
+            "premise: the twin is at the floor too"
+        );
+        assert_eq!(
+            screen_absolute(&twin, &ar_twin, &p, &empty_ledger(), 2024).map(|r| r.reason),
+            None,
+            "premise: the twin has ALWAYS filed — it is the asymmetry that was the finding"
+        );
+        let pf_twin = crate::tax::packet::assemble_printed_forms(
+            &twin,
+            &empty_ledger(),
+            &BTreeMap::new(),
+            &ar_twin,
+            &table,
+            2024,
+            &[],
+        );
+        assert_eq!(
+            pf.sch_d.routing, pf_twin.sch_d.routing,
+            "★ the two households route Part III identically — the form draws no line between a \
+             loss brought in and a loss realised, and neither does btctax now"
+        );
+        assert_eq!(pf.f1040.line7, pf_twin.f1040.line7, "1040 L7 agrees too");
+        assert_eq!(pf.f1040.line15, pf_twin.f1040.line15, "…and 1040 L15");
+    }
+
+    /// ★★★ **K2 — (A)'s CENTRAL SAFETY CLAIM: the lift moves no printed line.**
+    ///
+    /// Deleting a screen changes what is EMITTED, never what is COMPUTED — `screen_absolute` runs
+    /// after `assemble_absolute` and reads it. The way to get that wrong is to "lift" the refusal by
+    /// relaxing the thing that made taxable income zero, and the standing temptation is the
+    /// `max(Usd::ZERO)` floor on 1040 line 15: drop it and the household stops being at the floor, so
+    /// the screen stops firing — for entirely the wrong reason, and with a NEGATIVE line 15 on the
+    /// filed page.
+    ///
+    /// So the whole printed 1040 and the whole printed Schedule D are frozen, as STRUCT LITERALS: a
+    /// new field on either is then an `E0063` here, which forces a human to state its expected value
+    /// rather than letting it default into the pinned set.
+    ///
+    /// Mutation that MUST red: drop `.max(Usd::ZERO)` from `line15` in `printed::form_1040_lines`
+    /// ⇒ the printed page carries −11,600 and this reds, while
+    /// `a_ti_zero_carryforward_in_return_files_and_matches_its_current_year_twin` stays GREEN (both
+    /// households move together, so its twin comparison cannot see it). This test is the only one
+    /// that catches it.
+    ///
+    /// ★★ **TWO MUTATIONS WERE TRIED AND ONE DID NOT DISCRIMINATE — recorded, because a mutation
+    /// that passes is a fact about the code.** Dropping `.max(Usd::ZERO)` from `taxable_income` in
+    /// `assemble_absolute` leaves every printed line on this household UNCHANGED: the printed chain
+    /// re-derives line 15 from printed lines 11 and 14 **with its own floor**
+    /// (`printed.rs`), and the tax on a negative taxable income is zero either way. So the filed page
+    /// is floored twice, independently — good news, but it means the absolute-side floor is NOT what
+    /// this test guards, and claiming it was would have credited this KAT with a kill it does not
+    /// make.
+    ///
+    /// ★ The plan's other suggested mutation — flooring `form_1040_line15_signed` to `taxable_income`
+    /// — also does not belong here: it moves the worksheet's carryover-OUT, which is not a printed
+    /// line on any form. K1's `capital_loss_carryforward_out` assertion is what catches that one.
+    #[test]
+    fn the_lift_moves_no_printed_line() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let ri = h1_files_at_the_floor();
+        let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
+        let pf = crate::tax::packet::assemble_printed_forms(
+            &ri,
+            &empty_ledger(),
+            &BTreeMap::new(),
+            &ar,
+            &table,
+            2024,
+            &[],
+        );
+
+        let z = Usd::ZERO;
+        assert_eq!(
+            pf.sch_d,
+            crate::tax::printed::ScheduleDLines {
+                line1a_d: z,
+                line1a_e: z,
+                line1a_h: z,
+                line3_d: z,
+                line3_e: z,
+                line3_h: z,
+                line6: dec!(2000),
+                line7: dec!(-2000),
+                line8a_d: z,
+                line8a_e: z,
+                line8a_h: z,
+                line10_d: z,
+                line10_e: z,
+                line10_h: z,
+                line13: z,
+                line14: z,
+                line15: z,
+                line16: dec!(-2000),
+                routing: ScheduleDRouting::NetLoss {
+                    line21: dec!(2000),
+                    line22_yes: false,
+                },
+            },
+            "the printed Schedule D, line by line"
+        );
+
+        assert_eq!(
+            pf.f1040,
+            crate::tax::printed::Form1040Lines {
+                line1z: dec!(5000),
+                line1a: dec!(5000),
+                line2a: z,
+                line2b: z,
+                line3a: z,
+                line3b: z,
+                line7: dec!(-2000),
+                line8: z,
+                line9: dec!(3000),
+                line10: z,
+                line11: dec!(3000),
+                line12: dec!(14600),
+                line13: z,
+                line14: dec!(14600),
+                // ★★★ L15 — "Subtract line 14 from line 11. If zero or less, enter -0-." THE FLOOR.
+                //     A lift that relaxed it would print −11,600 here.
+                line15: z,
+                line16: z,
+                line17: z,
+                line18: z,
+                line19: z,
+                line20: z,
+                line21: z,
+                line22: z,
+                line23: z,
+                line24: z,
+                line25a: z,
+                line25b: z,
+                line25c: z,
+                line25d: z,
+                line26: z,
+                line31: z,
+                line32: z,
+                line33: z,
+                line34: z,
+                line37: z,
+                digital_asset_yes: false,
+            },
+            "the printed 1040, line by line"
         );
     }
 

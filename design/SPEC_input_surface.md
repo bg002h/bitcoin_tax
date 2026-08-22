@@ -230,7 +230,7 @@ meanwhile).
 There are **three** screens, not two: `screen_inputs` (input-only), `screen_compute_dependent` (needs the
 ledger — `ScheduleCLoss`, `KiddieTax`, `BusinessIncomeWithoutScheduleC`, `NonCryptoNoncashGift`,
 `BusinessInterestIncome`) and `screen_absolute` (needs the assembled return — `QbiAboveThreshold`,
-`AmtScreenTriggered`, `TaxableIncomeNonPositiveWithCarryforward`). Import can run only the first.
+`AmtScreenTriggered`). Import can run only the first.
 
 The success message names **the classes of checks not run**, never a hardcoded list — r1 of this spec
 hardcoded one and it was already wrong.

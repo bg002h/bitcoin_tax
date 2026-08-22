@@ -234,9 +234,6 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::AmtScreenTriggered => vec![Anchor::NotInForm {
             note: "the Form 6251 AMT screen is computed at `report`, not a v1 form field",
         }],
-        R::TaxableIncomeNonPositiveWithCarryforward => vec![Anchor::NotInForm {
-            note: "the §1211/§1212 capital-loss-carryover screen is computed at `report`, not a v1 form field",
-        }],
     }
 }
 
@@ -441,7 +438,6 @@ mod tests {
             RefuseReason::Form1099BNeedsForm8949,
             RefuseReason::KiddieTax,
             RefuseReason::AmtScreenTriggered,
-            RefuseReason::TaxableIncomeNonPositiveWithCarryforward,
             RefuseReason::NegativeAmount("W-2 box 1 wages".into()),
         ] {
             let anchors = attribute(&r);

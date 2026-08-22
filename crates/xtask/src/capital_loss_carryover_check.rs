@@ -251,6 +251,45 @@ fn unaccounted_header_paragraphs(block: &str, accounted: &[&str]) -> Vec<String>
     errs
 }
 
+/// ★★★ The identifier of the `RefuseReason` variant that refused a TI≤0 year with a capital-loss
+/// carryforward brought in, DELETED when the owner authorised that household to file.
+///
+/// ★ **Assembled from two halves at compile time, so the literal never appears in this file
+/// either.** The obvious spelling made the checker find ITSELF — and the fix must not be a
+/// path exclusion for this file, because an exclusion keyed to a path stops working the moment the
+/// file is moved and then silently passes forever. `concat!` leaves the whole identifier nowhere in
+/// the tree while still comparing against it exactly.
+///
+/// See [`tests::the_lifted_refusal_leaves_no_trace_in_the_tree`].
+const LIFTED_REFUSAL_IDENT: &str = concat!("TaxableIncomeNonPositive", "WithCarryforward");
+
+/// Every path under `dir` (recursively) whose text contains `needle`, relative to `dir`.
+///
+/// ★ Skips `target/` — a build directory holds compiler artifacts that quote source, and a checker
+/// that reports its own `.d` files is a checker nobody keeps.
+fn files_containing(dir: &Path, needle: &str) -> Vec<String> {
+    fn walk(dir: &Path, base: &Path, needle: &str, out: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                if p.file_name().is_some_and(|n| n == "target") {
+                    continue;
+                }
+                walk(&p, base, needle, out);
+            } else if std::fs::read_to_string(&p).is_ok_and(|t| t.contains(needle)) {
+                out.push(p.strip_prefix(base).unwrap_or(&p).display().to_string());
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, dir, needle, &mut out);
+    out.sort();
+    out
+}
+
 /// How a quote's END is proved to be the instruction's end, not a place the citation stopped.
 ///
 /// ★★★ **A bare `contains` is NOT a verbatim check, and mutation proved it here.** Planting the
@@ -398,6 +437,44 @@ mod tests {
             "the worksheet's line set is decided by the FORM, not by us: missing {:?}, invented {:?}",
             from_form.difference(&transcribed).collect::<Vec<_>>(),
             transcribed.difference(&from_form).collect::<Vec<_>>(),
+        );
+    }
+
+    /// ★★★ **K19 — the lifted refusal left NO trace, and the grep is the assertion.**
+    ///
+    /// (A) could have been implemented by keeping `RefuseReason::TaxableIncomeNonPositive-
+    /// WithCarryforward` and deleting only its emit site. Everything would compile; `attribute.rs`
+    /// would go on mapping an unreachable reason to an anchor; the SPEC lists would stay stale; and
+    /// no test in the workspace would red. Deleting the VARIANT is what closed that path — it
+    /// E0599'd across three crates and enumerated every consumer for free — and this is what proves
+    /// the deletion was total rather than partial.
+    ///
+    /// ★ The positive control is not decoration. A scanner that silently reads nothing (a wrong
+    /// root, an unreadable tree) reports "zero occurrences" forever, which is the exact shape of
+    /// every green-and-blind instrument this repo has shipped. So a string that MUST be present is
+    /// looked for first.
+    #[test]
+    fn the_lifted_refusal_leaves_no_trace_in_the_tree() {
+        let crates = repo_root().join("crates");
+
+        // Positive control — the scanner can find something that is really there.
+        let control = files_containing(&crates, "CapitalLossCarryoverWorksheet");
+        assert!(
+            control.len() >= 2,
+            "the scanner found {} file(s) containing a symbol that is definitely present — it is \
+             not reading the tree: {control:?}",
+            control.len()
+        );
+
+        let hits = files_containing(&crates, LIFTED_REFUSAL_IDENT);
+        assert!(
+            hits.is_empty(),
+            "★ the lifted TI≤0-with-carryforward refusal still appears in {} file(s) under \
+             crates/: {hits:?}. Deleting only the emit site and keeping the variant compiles \
+             cleanly and reds nothing — which is why the variant itself had to go. A doc comment, \
+             a SPEC list or an attribution-table entry naming it is the same stale claim wearing a \
+             different hat.",
+            hits.len()
         );
     }
 

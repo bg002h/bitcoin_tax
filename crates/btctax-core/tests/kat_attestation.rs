@@ -556,60 +556,114 @@ fn the_same_shape_above_the_zero_percent_breakpoint_owes_tax() {
 // code is the wrong instrument (`CLAUDE.md`); these are the assertions that keep it honest.
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
 
-/// ★★★ **THE §1211/§1212 EDGE HAS TWO SIDES AND THEY NOW BEHAVE DIFFERENTLY.**
+/// ★★★ **THE §1211/§1212 EDGE: THE IN SIDE NOW FILES, AND THE ADVISORY REACHES IT.**
 ///
-/// The row this pins used to read *"the §1211/§1212 Capital Loss Carryover Worksheet edge is
-/// unmodeled"* — one sentence covering both directions, and after N1 it was false in one of them.
-/// What is true now:
+/// This row used to read *"the §1211/§1212 Capital Loss Carryover Worksheet edge is unmodeled"* — one
+/// sentence covering both directions — and then, after N1, *"IN still refuses"*. Both are now false.
+/// What is true:
 ///
 ///   * **OUT — modelled.** The §1212(b)(2)(B) worksheet computes the carryforward, correctly at the
 ///     floor (`btctax-forms`'s `the_1211b_cap_and_the_1212b_carryforward_print_and_pair` holds the
 ///     $17,000/$20,000 pair).
-///   * **IN — still refuses**, but not for want of the worksheet: it is *filing* this edge that has
-///     never been validated. A refusal that states a false reason is worse than a terse one.
-///   * **The carryover-out is NOT rolled forward** by `--write-carryover`, which stamps only the
-///     charitable and QBI-REIT/PTP carryovers. The filer must carry it by hand, and the document
-///     now says so — asserted here because it is the kind of promise that decays silently the day
-///     someone adds a third field to the write-back.
+///   * **IN — FILES** (owner-authorised). The refusal was never about arithmetic; it was about
+///     emitting a return for this household at all.
+///   * **The advisory that tells the filer what to carry is only REACHABLE because of the lift.** On
+///     the `report` path advisories are built inside the `None` arm of the `screen_absolute` match
+///     (`cmd/tax.rs`), and the export path returns at `cmd/admin.rs` before
+///     `advisories_for` is called. So while the refusal stood, the household that most needed
+///     *"CARRY $100,000, NOT $97,000"* was the one household that could never be shown it.
+///
+/// ★ **This is K15, and the mutation is the lift itself**: restore the deleted `screen_absolute`
+/// block and the two "must file" assertions red — which is what proves the LIFT, not the advisory
+/// code, is what makes the figure reachable.
 #[test]
 fn the_limitations_row_for_the_1211_1212_edge_is_true_of_the_code() {
     let params = ty2024_params();
     let table = ty2024_table();
 
-    // ── IN side: taxable income $0 with a carryforward brought in ⇒ refuses. ────────────────────────
+    // ── IN side: taxable income $0 with a carryforward brought in ⇒ FILES. ─────────────────────────
     let (mut ri, state) = household(r#"{"filing_status":"Single","w2_income":10000}"#);
     ri.capital_loss_carryforward_in = btctax_core::tax::types::Carryforward {
         short: Usd::ZERO,
         long: dec!(5000),
     };
+    answer_all_live_declarations(&mut ri);
     let ar = assemble_absolute(&ri, &state, &params, &table, 2024);
     assert_eq!(
         ar.taxable_income,
         Usd::ZERO,
-        "the fixture must land taxable income on the floor, or the refusal under test is not reached"
-    );
-    let refusal = screen_absolute(&ri, &ar, &params, &state, 2024)
-        .expect("taxable income of $0 WITH a capital-loss carryforward-in must refuse");
-    assert_eq!(
-        format!("{:?}", refusal.reason),
-        "TaxableIncomeNonPositiveWithCarryforward"
+        "the fixture must land taxable income on the floor, or the lifted screen is never reached"
     );
     assert!(
-        refusal.detail.contains("models the")
-            && refusal.detail.contains("has not yet validated FILING"),
-        "the refusal must say btctax MODELS the worksheet and has not validated filing this edge — \
-         the old detail said the worksheet was unmodeled, which N1 made false. A filer-facing \
-         refusal that states a false reason is worse than a terse one. Got: {}",
-        refusal.detail
+        screen_inputs(&ri, &table, &params).is_none(),
+        "premise: the worksheet's two header declarations are answered, so the INPUT screen is clean"
+    );
+    assert_eq!(
+        screen_absolute(&ri, &ar, &params, &state, 2024),
+        None,
+        "★ taxable income of $0 WITH a capital-loss carryforward-in now FILES"
     );
 
-    // ── …and the same filer WITHOUT a carryforward-in files. ───────────────────────────────────────
-    let (ri, state) = household(r#"{"filing_status":"Single","w2_income":10000}"#);
-    let ar = assemble_absolute(&ri, &state, &params, &table, 2024);
+    // ── …and the same filer WITHOUT a carryforward-in still files. ────────────────────────────────
+    let (ri_no, state_no) = household(r#"{"filing_status":"Single","w2_income":10000}"#);
+    let ar_no = assemble_absolute(&ri_no, &state_no, &params, &table, 2024);
     assert!(
-        screen_absolute(&ri, &ar, &params, &state, 2024).is_none(),
-        "a refund-only filer with NO carryforward is not refused — the row says so, and it is the \
-         discriminating half: a refusal keyed only to taxable income would catch them too"
+        screen_absolute(&ri_no, &ar_no, &params, &state_no, 2024).is_none(),
+        "the refund-only filer with NO carryforward was never refused, and still is not"
+    );
+
+    // ── K15 — the advisory the lift makes reachable, with its four figures. ───────────────────────
+    //
+    // H3: $10,000 of wages, $40,000 short-term and $60,000 long-term carried in. 1040 line 7 shows
+    // the §1211(b) −$3,000 cap, but taxable income is already $0, so line 4 of the worksheet absorbs
+    // NOTHING and the whole $100,000 survives — where the flat "loss minus $3,000" rule would forfeit
+    // $3,000 of it permanently.
+    let (mut h3, h3_state) = household(r#"{"filing_status":"Single","w2_income":10000}"#);
+    h3.capital_loss_carryforward_in = btctax_core::tax::types::Carryforward {
+        short: dec!(40000),
+        long: dec!(60000),
+    };
+    answer_all_live_declarations(&mut h3);
+    let h3_ar = assemble_absolute(&h3, &h3_state, &params, &table, 2024);
+    assert!(
+        screen_inputs(&h3, &table, &params).is_none()
+            && screen_absolute(&h3, &h3_ar, &params, &h3_state, 2024).is_none(),
+        "★ H3 must FILE — while it refused, the `report` path never entered the arm that builds \
+         advisories and the export path returned before `advisories_for` was called, so the one \
+         household this advisory was written for could not be shown it"
+    );
+    let advs = btctax_core::tax::advisories::advisories_for(&h3, &h3_state, &h3_ar, &params, 2024);
+    let found = advs
+        .iter()
+        .find(|a| {
+            matches!(
+                a,
+                btctax_core::tax::advisories::Advisory::
+                    CapitalLossCarryoverWorksheetIncreasesCarryover { .. }
+            )
+        })
+        .expect("the worksheet advisory must reach a household that brought the loss IN");
+    assert_eq!(
+        *found,
+        btctax_core::tax::advisories::Advisory::CapitalLossCarryoverWorksheetIncreasesCarryover {
+            // ★ MEASURED, not transcribed. The plan predicted the flat rule would reduce the
+            //   LONG-term limb (40,000/57,000). It reduces the SHORT-term one, because §1212(b)(2)
+            //   absorbs short-term loss first and `net_1222` implements that faithfully. The TOTAL
+            //   is the same $97,000, so the advisory's headline is unaffected — but a KAT asserting
+            //   the predicted split would have been asserting a bug that is not there.
+            flat_short: dec!(37000),
+            flat_long: dec!(60000),
+            worksheet_short: dec!(40000),
+            worksheet_long: dec!(60000),
+            absorbed: Usd::ZERO,
+        },
+        "worksheet line 8 = $40,000 and line 13 = $60,000 against the flat rule's $97,000 — and \
+         line 4 is ZERO, which is the whole reason they differ"
+    );
+    let text = found.message();
+    assert!(
+        text.contains("$100,000") && text.contains("$97,000"),
+        "the filer must be told both figures by name: {text}"
     );
 
     // ── The write-back rolls the charitable and QBI carryovers, and NOT the capital-loss one. ───────
