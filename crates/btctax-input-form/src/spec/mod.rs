@@ -75,27 +75,34 @@ mod tests {
     #[test]
     fn declarations_section_delegates_every_decl_and_the_question_map_is_total() {
         let decls = section(SectionId::Declarations);
+        let sched_a = section(SectionId::ScheduleA);
 
-        // The mortgage declaration is a Schedule-A Field (Task 5), NOT a Declarations Field.
-        assert!(
-            !decls
-                .fields
-                .iter()
-                .any(|f| f.id == FieldId::SaMortgageAllUsed),
-            "the mortgage declaration is Schedule-A-owned, not a Declarations Field"
-        );
-
-        // Every FORM_QUESTIONS entry whose FieldId is a Decl* appears as exactly one Field here — that's 7.
+        // ★ The DEDUP set is DERIVED, never hand-listed. A declaration is deduped exactly when
+        //   `question_to_field` does not resolve to a Field of this section — so a third Schedule-A
+        //   dedup lands in the branch below automatically instead of silently failing the count. (It
+        //   was a hand-check on `SaMortgageAllUsed` alone, which went stale the moment §163(h)(3)(B)
+        //   added a second Schedule-A-owned declaration.)
         let mut decl_count = 0;
+        let mut deduped: Vec<QuestionId> = Vec::new();
         for q in FORM_QUESTIONS {
-            if question_to_field(q.id) == FieldId::SaMortgageAllUsed {
+            let fid = question_to_field(q.id);
+            if !decls.fields.iter().any(|f| f.id == fid) {
+                // A deduped declaration must be OWNED by the section that prints its line…
+                assert!(
+                    sched_a.fields.iter().any(|f| f.id == fid),
+                    "deduped declaration {:?} must be a Schedule-A Field",
+                    q.id
+                );
+                // …and must not ALSO appear here, or the filer would be asked it twice.
                 assert!(
                     !decls
                         .fields
                         .iter()
                         .any(|f| field_to_question(f.id) == Some(q.id)),
-                    "the deduped mortgage declaration must not appear in this section"
+                    "the deduped declaration {:?} must not appear in this section",
+                    q.id
                 );
+                deduped.push(q.id);
                 continue;
             }
             decl_count += 1;
@@ -111,15 +118,23 @@ mod tests {
             );
         }
         assert_eq!(
-            decl_count, 12,
-            "12 declarations are Decl* fields (the 13th is the mortgage dedup)"
+            decl_count, 13,
+            "13 declarations are Decl* fields (the other two dedup to Schedule A)"
+        );
+        assert_eq!(
+            deduped,
+            vec![
+                QuestionId::MortgageAllUsedToBuyBuildImprove,
+                QuestionId::MortgageWithinDebtLimit
+            ],
+            "exactly the two Schedule-A-owned mortgage declarations dedup"
         );
 
-        // 12 delegating Decl* fields + the foreign_country_names Text field.
+        // 13 delegating Decl* fields + the foreign_country_names Text field.
         assert_eq!(
             decls.fields.len(),
-            13,
-            "11 declarations + foreign_country_names"
+            14,
+            "13 declarations + foreign_country_names"
         );
         assert!(decls
             .fields
@@ -261,7 +276,7 @@ mod tests {
     /// entry; the `FieldId ↔ SkippableId` map stays TOTAL over all 5 skippables (SALT → `SaSaltUseSalesTax`);
     /// and the spouse-gated liveness edge holds.
     #[test]
-    fn skippables_section_delegates_fourteen_skippables_and_the_map_is_total() {
+    fn skippables_section_delegates_every_non_salt_skippable_and_the_map_is_total() {
         let skips = section(SectionId::Skippables);
 
         // SALT election is a Schedule-A Field (Task 5), NOT a Skippables Field.
@@ -273,13 +288,18 @@ mod tests {
             "the SALT election is Schedule-A-owned, not a Skippables Field"
         );
 
-        // Exactly the fourteen non-SALT skippables.
+        // ★ EXACTLY the non-SALT skippables — DERIVED from the registry, not a hand-count, so a new
+        //   `SKIPPABLE_QUESTIONS` entry that never reached this section fails HERE by name rather
+        //   than by an off-by-one on a literal somebody has to remember to bump.
         let ids: Vec<FieldId> = skips.fields.iter().map(|f| f.id).collect();
+        let expected_here: Vec<FieldId> = SKIPPABLE_QUESTIONS
+            .iter()
+            .map(|s| skippable_to_field(s.id))
+            .filter(|f| *f != FieldId::SaSaltUseSalesTax)
+            .collect();
         assert_eq!(
-            ids.len(),
-            14,
-            "blind ×2 + DOB ×2 + DOD ×2 + FBAR + the §G-9 death gates ×2 + Schedule C I/J + \
-             the §G-21 donation-restrictions universal + the §G-28 SSTB and patron checkboxes"
+            ids, expected_here,
+            "the Skippables section must hold exactly the non-SALT skippables, in registry order"
         );
         for expected in [
             FieldId::BlindTaxpayer,
@@ -296,6 +316,7 @@ mod tests {
             FieldId::DonationsHadRestrictions,
             FieldId::ScheduleCIsSstb,
             FieldId::ScheduleCIsCooperativePatron,
+            FieldId::CharitableCwaObtained,
         ] {
             assert!(
                 ids.contains(&expected),

@@ -635,7 +635,9 @@ $ btctax --vault v.pgp income show --year 2024
     "salt_personal_property": "0",
     "mortgage_interest_1098": "22000",
     "mortgage_all_used_to_buy_build_improve": true,
+    "mortgage_within_debt_limit": true,
     "mortgage_dwelling_is_amt_qualified": true,
+    "investment_interest": "0",
     "charitable": [
       {
         "class": "cash60",
@@ -676,6 +678,8 @@ $ btctax --vault v.pgp income show --year 2024
   "foreign_country_names": "",
   "fbar_filing_required": null,
   "donations_had_restrictions": false,
+  "charitable_cwa_obtained": true,
+  "filing_form_4952": false,
   "dual_status_alien": false,
   "has_income_exclusion": null,
   "other_out_of_scope_income": false,

@@ -1408,6 +1408,11 @@ fn full_return_vault_with_a_gift_over_its_ceiling(
             }],
             ..Default::default()
         });
+        // ★ P4 (phase 2) gates an itemizing return with any single gift >= $250 on the §170(f)(8)
+        //   contemporaneous written acknowledgment. This fixture's subject is the CARRYOVER, not
+        //   substantiation, so it answers the question rather than dodging it — a $40,000 gift with
+        //   no CWA is a deduction the statute denies, and the fixture must not model an unlawful one.
+        ri.charitable_cwa_obtained = Some(true);
     })
 }
 
@@ -1569,5 +1574,145 @@ fn a_crypto_packet_does_not_list_marks_btctax_already_made() {
     assert!(
         manifest.contains("COMPLETE BY HAND"),
         "…and it is still announced: {manifest}"
+    );
+}
+
+/// ★★★ **P5 / §170(f)(11)(D) — THE MANIFEST MUST NAME THE APPRAISAL, END TO END.**
+///
+/// Over $500,000 claimed for donated property the qualified appraisal is not a record to keep, it is
+/// an ATTACHMENT to the filed return. btctax cannot generate it — only an appraiser can — so the one
+/// thing it owes the filer is to put it in the stapling order. A required attachment that appears in
+/// no manifest is one nobody attaches, and the packet looks complete without it.
+///
+/// This runs the REAL `export-irs-pdf` path, not the advisory builder: a long-term BTC donation
+/// reclassified through `reclassify_outflow`, a full return that itemizes and claims it, and then
+/// `manifest.txt` read back off disk.
+///
+/// **B1 mutations, each observed RED before the fix landed:**
+/// - delete the manifest block from `export_irs_pdf` ⇒ the first assertion reds while the rest of
+///   the suite stays green (the advisory alone is stderr, and stderr is not the envelope);
+/// - relax the §170(f)(11)(D) threshold to §170(f)(11)(C)'s $5,000 ⇒ the second, small-donation
+///   assertion reds, i.e. every $5,001 donor is told to attach an appraisal to the return.
+#[test]
+fn the_manifest_names_the_qualified_appraisal_over_500k_and_stays_quiet_below_it() {
+    use btctax_cli::{return_inputs, Session};
+    use btctax_core::event::OutflowClass;
+    use btctax_core::tax::return_inputs::{Owner, Person, ReturnInputs, ScheduleAInputs, W2};
+    use btctax_core::tax::types::FilingStatus;
+
+    // A 2024 long-term donation of `fmv`: buy 1 BTC in 2020, Send it in 2024, reclassify as Donate.
+    // The lot is long-term, so §170(e) leaves the deduction at FMV — the claimed amount IS `fmv`.
+    let donation_vault = |fmv: &str| {
+        let evs = vec![
+            ev(
+                "buy-lt",
+                datetime!(2020-01-05 12:00 UTC),
+                EventPayload::Acquire(Acquire {
+                    sat: 100_000_000,
+                    usd_cost: dec!(10000),
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            ),
+            ev(
+                "send-donate",
+                datetime!(2024-06-01 12:00 UTC),
+                EventPayload::TransferOut(TransferOut {
+                    sat: 100_000_000,
+                    fee_sat: None,
+                    dest_addr: Some("bc1qsyntheticcharity".into()),
+                    txid: None,
+                }),
+            ),
+        ];
+        let (dir, vault) = make_vault(&evs);
+        let out_ref = {
+            let s = Session::open(&vault, &pp()).unwrap();
+            let (state, _) = s.project().unwrap();
+            state.pending_reconciliation[0].event.canonical()
+        };
+        cmd::reconcile::reclassify_outflow(
+            &vault,
+            &pp(),
+            &out_ref,
+            OutflowClass::Donate {
+                appraisal_required: false,
+            },
+            btctax_cli::eventref::parse_usd_arg(fmv).unwrap(),
+            None,
+            None,
+            datetime!(2026-01-01 12:00 UTC),
+        )
+        .unwrap();
+        // A full return that ITEMIZES and claims the property deduction. AGI is large enough that
+        // §170(b)'s 30% ceiling lets a real amount onto Schedule A line 12.
+        {
+            let mut s = Session::open(&vault, &pp()).unwrap();
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                header: btctax_core::tax::testonly::not_a_dependent(),
+                donations_had_restrictions: Some(false),
+                charitable_cwa_obtained: Some(true),
+                schedule_a: Some(ScheduleAInputs {
+                    salt_real_estate: dec!(10000),
+                    ..Default::default()
+                }),
+                w2s: vec![W2 {
+                    owner: Owner::Taxpayer,
+                    box1_wages: dec!(3000000),
+                    box3_ss_wages: dec!(168600),
+                    box5_medicare_wages: dec!(3000000),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+            ri.header.taxpayer = Person {
+                first_name: "Pat".into(),
+                last_name: "Filer".into(),
+                ssn: "123456789".into(),
+                ..Default::default()
+            };
+            btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+            return_inputs::set(s.conn(), 2024, &ri).unwrap();
+            s.save().unwrap();
+        }
+        (dir, vault)
+    };
+
+    // ── OVER the threshold: $700,000 claimed. The manifest must say to attach the appraisal. ──
+    let (_d1, big) = donation_vault("700000.00");
+    let out1 = tempfile::tempdir().unwrap();
+    cmd::admin::export_irs_pdf(&big, &pp(), out1.path(), 2024, &[], None)
+        .expect("the $700,000-donation full return exports");
+    let man = std::fs::read_to_string(out1.path().join("manifest.txt")).unwrap();
+    assert!(
+        man.contains("qualified appraisal")
+            && man.contains("170(f)(11)(D)")
+            && man.to_ascii_uppercase().contains("MUST SUPPLY"),
+        "the manifest must name the appraisal, cite §170(f)(11)(D), and say btctax cannot make \
+         it:\n{man}"
+    );
+    assert!(
+        man.contains("$700000.00"),
+        "…and carry the amount that triggered it, so the filer can check it:\n{man}"
+    );
+    assert!(
+        man.contains("1.170A-16(f)(3)"),
+        "…and say the duty recurs in every §170(d) carryover year:\n{man}"
+    );
+
+    // ── UNDER it: a $20,000 donation. Over §170(f)(11)(C)'s $5,000 (so an appraisal must be
+    //    OBTAINED and a Section B 8283 files) but far under §170(f)(11)(D)'s $500,000, so nothing is
+    //    ATTACHED and the manifest must not say otherwise. This is the row that separates the two
+    //    thresholds — without it, wiring the gate to $5,000 would go unnoticed.
+    let (_d2, small) = donation_vault("20000.00");
+    let out2 = tempfile::tempdir().unwrap();
+    cmd::admin::export_irs_pdf(&small, &pp(), out2.path(), 2024, &[], None)
+        .expect("the $20,000-donation full return exports");
+    let man2 = std::fs::read_to_string(out2.path().join("manifest.txt")).unwrap();
+    assert!(
+        !man2.contains("qualified appraisal"),
+        "a $20,000 donation owes no ATTACHED appraisal — §170(f)(11)(D) is 'more than \
+         $500,000':\n{man2}"
     );
 }

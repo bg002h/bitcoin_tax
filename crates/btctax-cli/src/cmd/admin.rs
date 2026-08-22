@@ -1110,9 +1110,53 @@ fn export_full_return(
         let _ = writeln!(manifest, "  ATT  {}.txt  (attach to Form 1040)", st.name);
         paths.push(path);
     }
+    // ★★★ §170(f)(11)(D) — THE APPRAISAL IS AN ATTACHMENT, so the stapling order has to name it.
+    //
+    // The advisory already tells the filer this on stderr; the manifest is what tells them what to
+    // PUT IN THE ENVELOPE, and a required attachment that appears in neither is one nobody attaches.
+    // btctax cannot generate the page — only a qualified appraiser can — so it is listed as a
+    // MISSING item the filer supplies, with the amount that triggered it. Derived from the same
+    // advisory list, so the two can never disagree about whether the duty exists.
+    //
+    // ★★ SCOPED TO THE PACKET THAT ACTUALLY CLAIMS IT. The ADVISORY is about the property and fires
+    //    in the year of the gift whatever election the filer makes — correct, because the duty
+    //    follows the claim across carryover years and the filer needs to know now. The MANIFEST is
+    //    this envelope's stapling order, so it may only say "attach this HERE" on a return that
+    //    claims the property deduction (Schedule A line 12 > $0). A standard-deduction year, or one
+    //    the §170(b) ceiling zeroes, claims nothing and gets the advisory without the manifest line.
+    //    ★ Note what is NOT scoped: the $500,000 TEST itself stays the pre-ceiling claimed amount.
+    let claims_property_deduction = ar
+        .schedule_a
+        .as_ref()
+        .is_some_and(|a| a.charitable_noncash_12 > btctax_core::Usd::ZERO);
+    if let Some(claimed) = advisories
+        .iter()
+        .find_map(|a| match a {
+            btctax_core::tax::advisories::Advisory::QualifiedAppraisalMustBeAttached {
+                claimed,
+            } => Some(*claimed),
+            _ => None,
+        })
+        .filter(|_| claims_property_deduction)
+    {
+        let _ = writeln!(
+            manifest,
+            "  ATT  qualified appraisal (§170(f)(11)(D) — YOU MUST SUPPLY THIS; btctax cannot \
+             generate it). More than $500,000 of charitable deduction is claimed for donated \
+             property (${claimed:.2}), so a qualified appraisal must be ATTACHED to this return. Attach a copy \
+             again in every §170(d) carryover year (Reg §1.170A-16(f)(3)).",
+        );
+    }
     // ★ N4 — the marks btctax deliberately did NOT make, enumerated at the FOOT of the manifest: the
     // filer reaches them having just assembled the paper, which is the moment they are actionable.
     // Every one of these blanks is correct; what was missing was any statement that they exist.
+    //
+    // ★★ MERGE NOTE (phase 1 × phase 2). Both phases append to this manifest and neither knew of the
+    // other; the resolution keeps both, in this order, because they are different CATEGORIES and the
+    // order encodes that. P5's line above is an ATTACHMENT — a page that goes in the envelope, so it
+    // belongs in the stapling list. N4's block below is a set of MARKS ON FORMS the filer must make
+    // by hand. The appraisal is deliberately NOT folded into the hand-marks list: it is not a mark,
+    // and it is not the filer's to write — only a qualified appraiser can produce it.
     let marks = hand_marks(&printed);
     manifest.push_str(&hand_marks_block(&marks));
     let manifest_path = out_dir.join("manifest.txt");

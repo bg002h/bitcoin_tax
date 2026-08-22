@@ -211,6 +211,12 @@ const DECL_FIELDS: &[Field] = &[
         ri.other_out_of_scope_income = None;
         Ok(())
     }),
+    // Index 14 — Schedule D line 20 / Schedule A line 9's Form 4952 declaration. Appended at the END
+    // for the array-index reason above. (Index 13, the §163(h)(3)(B) debt limit, is Schedule-A-owned.)
+    decl_tristate!(14, FieldId::DeclFilingForm4952, |ri| {
+        ri.filing_form_4952 = None;
+        Ok(())
+    }),
     FOREIGN_COUNTRY_NAMES,
 ];
 
@@ -332,6 +338,14 @@ const SKIPPABLE_FIELDS: &[Field] = &[
             Err(SetError::NoSuchRow)
         }
     }),
+    // ★ Index 15 — §170(f)(8)'s contemporaneous written acknowledgment, as one return-level
+    //   universal. Same shape as index 12 and for the same reason: no parent gate, because the
+    //   donations are in the LEDGER and the §63(e) itemize election is computed. `screen_absolute`
+    //   makes it mandatory where the return actually claims the deduction.
+    skippable_tristate!(15, FieldId::CharitableCwaObtained, |ri| {
+        ri.charitable_cwa_obtained = None;
+        Ok(())
+    }),
 ];
 
 pub(crate) const SKIPPABLES: Section = Section {
@@ -355,6 +369,8 @@ pub fn field_to_question(id: FieldId) -> Option<QuestionId> {
         FieldId::DeclHsaActivity => QuestionId::HsaActivity,
         FieldId::DeclDualStatusAlien => QuestionId::DualStatusAlien,
         FieldId::SaMortgageAllUsed => QuestionId::MortgageAllUsedToBuyBuildImprove,
+        FieldId::SaMortgageWithinDebtLimit => QuestionId::MortgageWithinDebtLimit,
+        FieldId::DeclFilingForm4952 => QuestionId::FilingForm4952,
         FieldId::DeclAmtQualifiedDwelling => QuestionId::AmtQualifiedDwelling,
         FieldId::DeclAmtCarryoverSame => QuestionId::AmtCarryoverSameAsRegular,
         FieldId::DeclAmtDepreciationSame => QuestionId::AmtDepreciationSameAsRegular,
@@ -376,6 +392,12 @@ pub fn question_to_field(id: QuestionId) -> FieldId {
         QuestionId::HsaActivity => FieldId::DeclHsaActivity,
         QuestionId::DualStatusAlien => FieldId::DeclDualStatusAlien,
         QuestionId::MortgageAllUsedToBuyBuildImprove => FieldId::SaMortgageAllUsed,
+        // ★ §163(h)(3)(B) — deduped to its own Schedule-A leaf, like the mixed-use box above: it is a
+        //   Schedule-A-owned answer that decides what line 8a may print.
+        QuestionId::MortgageWithinDebtLimit => FieldId::SaMortgageWithinDebtLimit,
+        // ★ NOT Schedule-A-deduped: the answer governs Schedule D line 20 as well as Schedule A
+        //   line 9, and it is live on returns that carry no Schedule A at all.
+        QuestionId::FilingForm4952 => FieldId::DeclFilingForm4952,
         // Pure declarations: they carry Form 6251 lines 3, 2k and 2l and print on no Schedule-A line, so
         // they get their own Decl leaves rather than deduping to a Schedule-A field.
         QuestionId::AmtQualifiedDwelling => FieldId::DeclAmtQualifiedDwelling,
@@ -402,6 +424,7 @@ pub fn field_to_skippable(id: FieldId) -> Option<SkippableId> {
         FieldId::ScheduleC1099Required => SkippableId::ScheduleC1099Required,
         FieldId::ScheduleC1099Filed => SkippableId::ScheduleC1099Filed,
         FieldId::DonationsHadRestrictions => SkippableId::DonationsHadRestrictions,
+        FieldId::CharitableCwaObtained => SkippableId::CharitableCwaObtained,
         FieldId::ScheduleCIsSstb => SkippableId::ScheduleCIsSstb,
         FieldId::ScheduleCIsCooperativePatron => SkippableId::ScheduleCIsCooperativePatron,
         _ => return None,
@@ -425,6 +448,7 @@ pub fn skippable_to_field(id: SkippableId) -> FieldId {
         SkippableId::ScheduleC1099Required => FieldId::ScheduleC1099Required,
         SkippableId::ScheduleC1099Filed => FieldId::ScheduleC1099Filed,
         SkippableId::DonationsHadRestrictions => FieldId::DonationsHadRestrictions,
+        SkippableId::CharitableCwaObtained => FieldId::CharitableCwaObtained,
         SkippableId::ScheduleCIsSstb => FieldId::ScheduleCIsSstb,
         SkippableId::ScheduleCIsCooperativePatron => FieldId::ScheduleCIsCooperativePatron,
     }

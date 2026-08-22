@@ -828,6 +828,14 @@ const SCHEDULE_A_FIELDS: &[Field] = &[
         "Sch A line 8a — mortgage interest reported on Form 1098.",
         mortgage_interest_1098
     ),
+    scha_money!(
+        FieldId::SaInvestmentInterest,
+        "Investment interest (§163(d))",
+        "Sch A line 9 — \"Investment interest. Attach Form 4952 if required.\" Interest on money you \
+         borrowed that is allocable to property held for investment. btctax fills no Form 4952, so \
+         this is deductible in full only under i4952's own exception; above it the return refuses.",
+        investment_interest
+    ),
     // ★ Registry-driven — DELEGATES to `SKIPPABLE_QUESTIONS::SalesTaxElection` (index 2). live = schedule_a.is_some().
     skippable_tristate!(2, FieldId::SaSaltUseSalesTax, |ri| {
         if let Some(a) = ri.schedule_a.as_mut() {
@@ -841,6 +849,16 @@ const SCHEDULE_A_FIELDS: &[Field] = &[
     decl_tristate!(7, FieldId::SaMortgageAllUsed, |ri| {
         if let Some(a) = ri.schedule_a.as_mut() {
             a.mortgage_all_used_to_buy_build_improve = None;
+            Ok(())
+        } else {
+            Err(SetError::NoSuchRow)
+        }
+    }),
+    // ★ Registry-driven — DELEGATES to `FORM_QUESTIONS::MortgageWithinDebtLimit` (index 13, appended
+    //   at the END of that array: `decl_tristate!` couples to the INDEX).
+    decl_tristate!(13, FieldId::SaMortgageWithinDebtLimit, |ri| {
+        if let Some(a) = ri.schedule_a.as_mut() {
+            a.mortgage_within_debt_limit = None;
             Ok(())
         } else {
             Err(SetError::NoSuchRow)

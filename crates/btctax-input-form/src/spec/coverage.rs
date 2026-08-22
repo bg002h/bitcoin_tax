@@ -426,13 +426,13 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(
-        field_count, 86,
-        "expected 86 Fields (one per §5.8 in-scope leaf)"
+        field_count, 90,
+        "expected 90 Fields (one per §5.8 in-scope leaf)"
     );
     assert_eq!(
         covered.len(),
-        86,
-        "expected 86 distinctly-covered in-scope leaves"
+        90,
+        "expected 90 distinctly-covered in-scope leaves"
     );
 
     // ── 5. ★ I-6: PIN the observed FieldId → leaf-path map against a literal (kills TRANSPOSITION). ──
@@ -556,10 +556,18 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
         "schedule_a.salt_sales_tax_amount",
     ),
     (FieldId::SaMortgage1098, "schedule_a.mortgage_interest_1098"),
+    (
+        FieldId::SaInvestmentInterest,
+        "schedule_a.investment_interest",
+    ),
     (FieldId::SaSaltUseSalesTax, "schedule_a.salt_use_sales_tax"),
     (
         FieldId::SaMortgageAllUsed,
         "schedule_a.mortgage_all_used_to_buy_build_improve",
+    ),
+    (
+        FieldId::SaMortgageWithinDebtLimit,
+        "schedule_a.mortgage_within_debt_limit",
     ),
     (FieldId::CharClass, "schedule_a.charitable[0].class"),
     (FieldId::CharAmount, "schedule_a.charitable[0].amount"),
@@ -586,6 +594,7 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
         FieldId::DeclOtherOutOfScopeIncome,
         "other_out_of_scope_income",
     ),
+    (FieldId::DeclFilingForm4952, "filing_form_4952"),
     (FieldId::ScheduleCIsSstb, "schedule_c.is_sstb"),
     (
         FieldId::ScheduleCIsCooperativePatron,
@@ -619,6 +628,7 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
         FieldId::DonationsHadRestrictions,
         "donations_had_restrictions",
     ),
+    (FieldId::CharitableCwaObtained, "charitable_cwa_obtained"),
     (FieldId::ExclPuertoRico, "excluded_puerto_rico_income"),
     (FieldId::Excl2555L45, "form_2555_line45"),
     (FieldId::Excl2555L50, "form_2555_line50"),

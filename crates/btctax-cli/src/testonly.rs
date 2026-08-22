@@ -117,6 +117,8 @@ dual_status_alien = false
 # ★ §G-21 — Form 8283 5a/5b/5c, asked once for the whole return. Harmless here (no donations); it is
 # MANDATORY only on a year that files a Section B, i.e. donations over $5,000.
 donations_had_restrictions = false
+# Schedule D line 20 / Schedule A line 9 — not filing Form 4952.
+filing_form_4952 = false
 has_income_exclusion = false
 other_out_of_scope_income = false
 itemize_election = "auto"

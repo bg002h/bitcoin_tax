@@ -5,7 +5,7 @@
 #
 # ★ THREE x-clusters, not two — Schedule A is the only form in this crate that needs a third:
 #     AGI-INLINE  x ≈ [331, 403]   line 2 ONLY (`f1_4`)
-#     MID         x ≈ [417, 489]   lines 1, 3, 5a-5e, 8a-8e, 11, 12, 13
+#     MID         x ≈ [417, 489]   lines 1, 3, 5a-5e, 8a-8e, 9, 11, 12, 13
 #     AMOUNT      x ≈ [504, 576]   lines 4, 7, 10, 14, 17
 #   Line 2 ("Enter amount from Form 1040 or 1040-SR, line 11") is NOT in the MID column: its box is
 #   inline with the printed sentence, 86pt to the LEFT of MID, and it is the same WIDTH as MID — so a
@@ -24,7 +24,6 @@
 # UNMAPPED ON PURPOSE — left BLANK, never a misleading 0:
 #   line 6  (f1_14 + desc f1_12/f1_13)  other taxes — no v1 input
 #   line 8b (f1_19), 8c (f1_20)          mortgage interest not on a 1098; points
-#   line 9  (f1_23)                      investment interest (Form 4952)
 #   line 15 (f1_29)                      casualty and theft losses (Form 4684)
 #   line 16 (f1_33 + desc f1_30..f1_32)  other itemized deductions
 #   line 5a sales-tax checkbox (c1_1), line 8 checkbox (c1_2), line 18 checkbox (c1_3)
@@ -56,6 +55,7 @@ line7  = "topmostSubform[0].Page1[0].f1_15[0]"   # "Add lines 5e and 6"         
 # ── Interest You Paid ───────────────────────────────────────────────────────────────────────────
 line8a = "topmostSubform[0].Page1[0].f1_16[0]"   # "Home mortgage interest and points reported to you on Form 1098"  MID
 line8e = "topmostSubform[0].Page1[0].f1_22[0]"   # "Add lines 8a through 8c"                              MID
+line9  = "topmostSubform[0].Page1[0].f1_23[0]"   # "Investment interest. Attach Form 4952 if required"    MID
 line10 = "topmostSubform[0].Page1[0].f1_24[0]"   # "Add lines 8e and 9"                                AMOUNT
 
 # ── Gifts to Charity ────────────────────────────────────────────────────────────────────────────
@@ -96,8 +96,11 @@ ssn  = "topmostSubform[0].Page1[0].f1_2[0]"
 # ── Line 8d: the FORM reserves it ────────────────────────────────────────────────────────────────
 "topmostSubform[0].Page1[0].f1_21[0]" = { line = "8d", rule = "artifact", reason = "The form's own text is \"Reserved for future use\" — the IRS ships a fillable box for a line it has explicitly reserved. No decision is encodable, by the form's own statement." }
 
-# ── Lines 9, 15, 16: deductions requiring forms btctax does not model ────────────────────────────
-"topmostSubform[0].Page1[0].f1_23[0]" = { line = "9",  rule = "unmodeled", reason = "\"Investment interest. Attach Form 4952 if required\" — btctax models no Form 4952, so line 10 equals line 8e." }
+# ── Lines 15, 16: deductions requiring forms btctax does not model ───────────────────────────────
+# ★ LINE 9 IS NO LONGER HERE. It is MAPPED (`line9 = f1_23`, above): btctax collects
+#   `schedule_a.investment_interest` and prints it, gated by the Schedule D line 20 / Form 4952
+#   declaration — `RefuseReason::Form4952Required` refuses the return when Form 4952 is actually
+#   required, so the amount printed is always one deductible in full under i4952's own exception.
 "topmostSubform[0].Page1[0].f1_29[0]" = { line = "15", rule = "unmodeled", reason = "\"Casualty and theft loss(es) from a federally declared disaster … Attach Form 4684\" — btctax models no Form 4684." }
 "topmostSubform[0].Page1[0].f1_30[0]" = { line = "16", rule = "unmodeled", reason = "\"Other—from list in instructions. List type and amount\" — write-in description. btctax offers no write-in itemized deduction." }
 "topmostSubform[0].Page1[0].f1_31[0]" = { line = "16", rule = "unmodeled", reason = "Second write-in description line for line 16 — same reason." }

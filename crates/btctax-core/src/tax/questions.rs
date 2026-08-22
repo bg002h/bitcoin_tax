@@ -96,6 +96,13 @@ pub enum QuestionId {
     HasIncomeExclusion,
     /// **§G-22 / B11** — the scope attestation: income this tool never asked about.
     OtherOutOfScopeIncome,
+    /// **§163(h)(3)(B) / Schedule A line 8a** — is the combined home-acquisition debt inside every
+    /// i1040sca *"Limits on home mortgage interest"* ceiling? ★ APPENDED AT THE END: `decl_tristate!`
+    /// couples to this array's INDEX, so a mid-array insert silently repoints every later question.
+    MortgageWithinDebtLimit,
+    /// **Schedule D line 20 / Schedule A line 9** — is the filer filing Form 4952? ★ APPENDED AT THE
+    /// END, for the `decl_tristate!` array-index reason above.
+    FilingForm4952,
 }
 
 impl QuestionId {
@@ -113,6 +120,8 @@ impl QuestionId {
         QuestionId::AmtDepreciationSameAsRegular,
         QuestionId::HasIncomeExclusion,
         QuestionId::OtherOutOfScopeIncome,
+        QuestionId::MortgageWithinDebtLimit,
+        QuestionId::FilingForm4952,
     ];
 }
 
@@ -572,6 +581,104 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
     // under "Death of a taxpayer" and once under "Death of spouse" — and each is a separate fact.
     //
 
+    // ★★★ §163(h)(3)(B) — THE ACQUISITION-DEBT CEILING. Index 13; APPENDED AT THE END for the
+    //     array-index reason stated on `QuestionId::MortgageWithinDebtLimit`.
+    //
+    // ★★ THE PROMPT ENUMERATES THE YES-CONDITIONS AND FALLS BACK TO NO, which is the whole shape of
+    //    it (`widening-an-exemption-is-never-the-safe-edit`). i1040sca states FOUR limits under
+    //    *"Limits on home mortgage interest"*; one of them — the mixed-use limit — is already its own
+    //    question (index 7), so the three AMOUNT limits are listed here individually. A vaguer
+    //    "were you within the limits?" would be laundered into three answers the filer never gave,
+    //    and each omission would fail OPEN into a full deduction the statute caps.
+    //
+    // ★ Same liveness as the other two mortgage questions — `mortgage_question_live`, the EXISTING
+    //   predicate, unchanged. A Schedule A that reports 1098 interest is exactly the return on which
+    //   line 8a can be wrong, and the limit is not derivable from anything btctax holds: it collects
+    //   the INTEREST, never the balance, the origination date, or the home's fair market value.
+    FormQuestion {
+        id: QuestionId::MortgageWithinDebtLimit,
+        prompt: "Schedule A line 8a — were you inside EVERY home-mortgage debt limit this year? \
+                 Answer YES only if all of these are true of your home mortgages counted together: \
+                 (a) qualifying debt taken out AFTER December 15, 2017 never exceeded $750,000 \
+                 ($375,000 if married filing separately); (b) qualifying debt taken out ON OR BEFORE \
+                 December 15, 2017 never exceeded $1,000,000 ($500,000 if married filing separately) \
+                 — and if you have both kinds, the $750,000 limit is REDUCED by the amount of the \
+                 older debt; and (c) the total of all your mortgages was never more than the home's \
+                 fair market value. Answer NO if any one of them was exceeded, and answer NO if you \
+                 are unsure: a NO refuses the return and sends you to Pub. 936's Deductible Home \
+                 Mortgage Interest Worksheet, rather than risking an understated tax.",
+        unanswered: RefuseReason::MortgageDebtLimitUnanswered,
+        unanswered_detail:
+            "this Schedule A reports mortgage interest, so it must state whether your combined home \
+             acquisition debt stayed inside the §163(h)(3)(B) limits (i1040sca, \"Limits on home \
+             mortgage interest\": $750,000/$375,000 for qualifying debt taken out after December 15, \
+             2017; $1,000,000/$500,000 for debt taken out on or before it; and the home's fair market \
+             value). btctax collects the INTEREST, never the balance — so left unasked it deducts the \
+             whole Form 1098 amount, which for a filer over the limit UNDERSTATES the tax. Neither \
+             oracle can catch that: both take line 8a as an INPUT (§G-9). Run `btctax income answer`",
+        live: mortgage_question_live,
+        get: |ri| {
+            ri.schedule_a
+                .as_ref()
+                .and_then(|a| a.mortgage_within_debt_limit)
+        },
+        set: |ri, v| {
+            if let Some(a) = ri.schedule_a.as_mut() {
+                a.mortgage_within_debt_limit = Some(v);
+            }
+        },
+        // ★ §G-15 — every class-(A) DECLARATION asserts about a TAX YEAR ("in this tax year, did…"),
+        // so none is durable: last year's answer is not testimony for this one. Debt balances move.
+        durability: Durability::PerYear,
+        neutral: true, // "yes, inside every limit" ⇒ Schedule A line 8a stays the full 1098 amount
+    },
+    // ★★★ SCHEDULE D LINE 20 / SCHEDULE A LINE 9 — THE FORM 4952 DECLARATION. Index 14; appended at
+    //     the END for the array-index reason above.
+    //
+    // ★★★ ALWAYS LIVE, and it has to be. Line 20 prints on every return whose Schedule D routes
+    //     both-gains, and that routing comes from the LEDGER — which `live` (a `&ReturnInputs`
+    //     predicate) cannot see. Scoping it to `schedule_a.is_some()` would under-ask exactly the
+    //     population the plan measured: the $0-income, standard-deduction crypto household whose
+    //     Schedule D still prints the same sworn "Yes". A question that vanishes for the filer it was
+    //     written for is the shape §G-9 exists to kill.
+    //
+    // ★★ THE PROMPT ENUMERATES WHEN FORM 4952 IS REQUIRED and falls back to YES — which is the
+    //    fail-closed direction here, because YES refuses and refusals are recoverable. The list is
+    //    i4952's own exception, negated: you may answer NO only if every one of its three conditions
+    //    holds. A filer who is unsure answers YES and gets a refusal they can undo, rather than a
+    //    filed return whose line 20 they never saw.
+    FormQuestion {
+        id: QuestionId::FilingForm4952,
+        prompt: "Are you filing Form 4952 (Investment Interest Expense Deduction)? Answer NO only \
+                 if ALL THREE of these are true — they are Form 4952's own exception: (a) your \
+                 investment interest expense is not more than your investment income from interest \
+                 and ordinary dividends minus any qualified dividends; (b) you have no other \
+                 deductible investment expenses; and (c) you have no disallowed investment interest \
+                 expense carried over from last year. Answer YES if you borrowed to invest and any \
+                 of those fails, and answer YES if you are unsure: a YES refuses the return rather \
+                 than filing a Schedule D line 20 that swears you are not filing a form you are. \
+                 (Schedule D line 20 asks \"Are lines 18 and 19 both zero or blank and you are not \
+                 filing Form 4952?\"; Schedule A line 9 is \"Investment interest. Attach Form 4952 \
+                 if required.\")",
+        unanswered: RefuseReason::Form4952DeclarationUnanswered,
+        unanswered_detail:
+            "Schedule D line 20 asks whether lines 18 and 19 are both zero or blank AND you are not \
+             filing Form 4952 — and its answer decides which worksheet computes your tax. btctax \
+             checked \"Yes\" on every both-gains return without ever asking you, which is sworn \
+             testimony it invented. It will not do that: answer it and the return files (a \"No\" \
+             routes to the Schedule D Tax Worksheet, which btctax does not fill). The same answer \
+             governs Schedule A line 9, investment interest — run `btctax income answer`",
+        // ★ See the block comment above: it CANNOT be scoped by whether Schedule D files, because
+        //   that is a ledger fact and `live` receives only `ReturnInputs`.
+        live: |_ri| true,
+        get: |ri| ri.filing_form_4952,
+        set: |ri, v| ri.filing_form_4952 = Some(v),
+        // ★ §G-15 — PER-YEAR: whether you file Form 4952 is a fact about this tax year.
+        durability: Durability::PerYear,
+        // ★ NOT filing Form 4952 is the answer that needs no form btctax lacks: line 20 = Yes ⇒ the
+        //   Qualified Dividends and Capital Gain Tax Worksheet, which btctax does compute.
+        neutral: false,
+    },
 ];
 
 /// The identity of each SKIPPABLE prompt (§2, class B) — the questions where silence is LAWFUL: a bare
@@ -681,6 +788,11 @@ pub enum SkippableId {
     /// cooperative? (§G-28/B1b.) Unlike every other question here this one decides **which form is
     /// filed**, at any level of income.
     ScheduleCIsCooperativePatron,
+    /// ★★★ **§170(f)(8) — the CONTEMPORANEOUS WRITTEN ACKNOWLEDGMENT**, Schedule A lines 11/12's own
+    /// *"If you made any gift of $250 or more, see instructions"*. Asked as one return-level
+    /// universal, exactly like [`Self::DonationsHadRestrictions`]; the MANDATORY half lives in
+    /// `screen_absolute`, which has the ledger AND the computed §63(e) itemize election.
+    CharitableCwaObtained,
 }
 
 /// The value shape of a [`SkippableQuestion`] — a yes/no answer, or a calendar date.
@@ -1076,6 +1188,48 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
         },
         get_date: |_ri| None,
         set_date: |_ri, _v| {},
+    },
+    // ★★★ §170(f)(8) — THE CONTEMPORANEOUS WRITTEN ACKNOWLEDGMENT. Index 15; appended at the END for
+    //     the array-index reason stated above.
+    //
+    // ★★ THE PROMPT MUST BE ANSWERABLE **YES** BY A FILER WITH NO ≥$250 GIFT. i1040sca: *"In figuring
+    //    whether a gift is $250 or more, don't combine separate donations"* — so a filer who gave $25
+    //    a week has no ≥$250 gift at all and answers yes vacuously. That matters because btctax holds
+    //    non-crypto gifts as one amount per entry, which may itself be a roll-up of small gifts: the
+    //    gate can over-ASK, but the question must never over-CLAIM.
+    SkippableQuestion {
+        id: SkippableId::CharitableCwaObtained,
+        durability: Durability::PerYear,
+        prompt: "For EVERY charitable gift of $250 or more that you are deducting this year, do you \
+                 already hold — or will you obtain before you file — a CONTEMPORANEOUS WRITTEN \
+                 ACKNOWLEDGMENT from the charity showing (1) the amount of money and a description \
+                 (but not the value) of any property donated, and (2) whether the organization gave \
+                 you any goods or services in return, with a description and estimate of their value \
+                 if it did? (Schedule A lines 11 and 12: \"If you made any gift of $250 or more, see \
+                 instructions.\" In figuring whether a gift is $250 or more, don't combine separate \
+                 donations — so answer YES if you made no single gift that large. Don't attach the \
+                 acknowledgment to your return; keep it for your records.)",
+        help: "Skipping is harmless if you claim no charitable deduction, or made no single gift of \
+               $250 or more. Where you DO claim one, it is MANDATORY: §170(f)(8)(A) says \"No \
+               deduction shall be allowed … for any contribution of $250 or more unless the taxpayer \
+               substantiates the contribution by a contemporaneous written acknowledgment\" — a \
+               precondition of the deduction itself, not a recordkeeping nicety. \
+               ★ THE DEADLINE IS WHY THIS IS ASKED NOW: §170(f)(8)(C) makes an acknowledgment \
+               contemporaneous only if you get it \"by the date you file your return or the due date \
+               (including extensions) for filing your return, whichever is earlier\". You can still \
+               get one — right up until you file. Once you file without it, the cure is gone.",
+        kind: SkippableKind::YesNo,
+        // ★ ALWAYS OFFERED — the `DonationsHadRestrictions` shape, and for the same two reasons:
+        //   `live` sees only `ReturnInputs`, so it can see neither the LEDGER (where the crypto
+        //   donations are) nor the computed §63(e) itemize election. Making this a live class-(A)
+        //   DECLARATION would refuse every return at every income level, including the standard-
+        //   deduction filers the adjudication says must never be asked. The mandatory half is in
+        //   `screen_absolute`, which can tell.
+        live: |_ri| true,
+        get_bool: |ri| ri.charitable_cwa_obtained,
+        set_bool: |ri, v| ri.charitable_cwa_obtained = Some(v),
+        get_date: |_ri| None,
+        set_date: |_ri, _v| {},
     }
 ];
 
@@ -1107,6 +1261,8 @@ mod tests {
                 QuestionId::AmtDepreciationSameAsRegular => 10,
                 QuestionId::HasIncomeExclusion => 11,
                 QuestionId::OtherOutOfScopeIncome => 12,
+                QuestionId::MortgageWithinDebtLimit => 13,
+                QuestionId::FilingForm4952 => 14,
             };
             assert_eq!(idx, i, "QuestionId::ALL is out of order / missing {id:?}");
             assert_eq!(
@@ -1115,8 +1271,8 @@ mod tests {
                 "exactly one FORM_QUESTIONS entry for {id:?}"
             );
         }
-        assert_eq!(QuestionId::ALL.len(), 13, "there are 13 declarations");
-        assert_eq!(FORM_QUESTIONS.len(), 13, "one entry per declaration");
+        assert_eq!(QuestionId::ALL.len(), 15, "there are 15 declarations");
+        assert_eq!(FORM_QUESTIONS.len(), 15, "one entry per declaration");
     }
 
     /// ★★★ §G-6/ISO — THE OUT-OF-SCOPE QUESTION MUST NAME THE ISO EXERCISE, WHICH IS NOT INCOME.
@@ -1177,9 +1333,9 @@ mod tests {
         use crate::tax::types::FilingStatus;
         assert_eq!(
             SKIPPABLE_QUESTIONS.len(),
-            15,
+            16,
             "blind ×2, SALT, DOB ×2, DOD ×2, FBAR, the §G-9 death pair, Schedule C I/J, 8283 5a/5b/5c, \
-             8995-A SSTB + patron"
+             8995-A SSTB + patron, §170(f)(8) CWA"
         );
         // SALT is live iff a schedule_a exists; spouse-blind iff a spouse Person exists.
         let salt = SKIPPABLE_QUESTIONS

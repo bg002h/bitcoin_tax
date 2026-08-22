@@ -234,7 +234,7 @@ pub fn fill_schedule_d_full_with_map(
     match lines.routing {
         // L16 > 0 and L15 > 0 — both gains. 17 = Yes; 18 = 19 = 0; 20 = Yes → QDCGT.
         // Lines 21 and 22 are NOT completed: the form says so in terms.
-        ScheduleDRouting::BothGains => {
+        ScheduleDRouting::BothGains { line20_yes } => {
             check(
                 need(&map.line17, "line17", y)?,
                 true,
@@ -276,9 +276,15 @@ pub fn fill_schedule_d_full_with_map(
                 COL_AMOUNT_H,
                 None,
             );
+            // ★★★ LINE 20 READS THE FILER'S ANSWER. It was `true`, hardcoded — and the line asks
+            //     *"Are lines 18 and 19 both zero or blank AND YOU ARE NOT FILING FORM 4952?"*, a
+            //     conjunction whose second half nothing on the return recorded. `ScheduleDRouting`
+            //     now carries it, sourced from `ReturnInputs::filing_form_4952`; core refuses both
+            //     the unanswered and the filing-4952 cases upstream, so the value here is `true`
+            //     today — but it is `true` BECAUSE THE FILER SAID SO, which a literal could not be.
             check(
                 need(&map.line20, "line20", y)?,
-                true,
+                line20_yes,
                 &mut writes,
                 &mut placements,
             );

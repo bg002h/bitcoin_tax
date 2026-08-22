@@ -112,6 +112,8 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         fbar_filing_required,
         foreign_country_names: _, // String — scalar
         donations_had_restrictions,
+        charitable_cwa_obtained,
+        filing_form_4952,
         dual_status_alien,
         // §164(b)(7)(B)(iv) / Schedule 1-A Part I MAGI add-backs. Plain `Usd` scalar leaves, which the
         // `_` rule permits — their answered-ness lives in the `has_income_exclusion` GATE above, which
@@ -172,6 +174,19 @@ pub fn classify(ri: &ReturnInputs) -> Census {
          blocked; on an itemizing year that claims the §170 deduction `screen_absolute` makes it \
           mandatory (§2.2)",
     );
+    // ★★ §170(f)(8)'s CWA, asked as ONE return-level universal (P4). Class (B) HERE for the SAME two
+    // reasons as its sibling above — the donations are in the ledger and the §63(e) itemize election
+    // is computed, neither of which liveness can see. The MANDATORY half is in `screen_absolute`: on
+    // an itemizing year that claims a §170 deduction with at least one single gift of $250 or more,
+    // an unanswered or `Some(false)` answer REFUSES.
+    c.exempt(
+        charitable_cwa_obtained,
+        Class::BenefitClaim,
+        "§170(f)(8) contemporaneous written acknowledgment — offered as a skippable so a standard-\
+         deduction filer, or one whose every gift is under $250, is never asked; `screen_absolute` \
+         makes it mandatory where the deduction is actually claimed (§2.2)",
+    );
+    c.declaration(filing_form_4952, QuestionId::FilingForm4952);
     c.declaration(dual_status_alien, QuestionId::DualStatusAlien);
     c.declaration(has_income_exclusion, QuestionId::HasIncomeExclusion);
     c.declaration(other_out_of_scope_income, QuestionId::OtherOutOfScopeIncome);
@@ -534,7 +549,9 @@ fn classify_schedule_a(c: &mut Census, a: &ScheduleAInputs) {
         salt_personal_property: _,
         mortgage_interest_1098: _,
         mortgage_all_used_to_buy_build_improve,
+        mortgage_within_debt_limit,
         mortgage_dwelling_is_amt_qualified,
+        investment_interest: _, // plain `Usd` — the `_` rule permits a money scalar
         charitable,
     } = a;
     c.exempt(
@@ -546,6 +563,10 @@ fn classify_schedule_a(c: &mut Census, a: &ScheduleAInputs) {
     c.declaration(
         mortgage_all_used_to_buy_build_improve,
         QuestionId::MortgageAllUsedToBuyBuildImprove,
+    );
+    c.declaration(
+        mortgage_within_debt_limit,
+        QuestionId::MortgageWithinDebtLimit,
     );
     c.declaration(
         mortgage_dwelling_is_amt_qualified,

@@ -670,7 +670,7 @@ fn report_tax_year_derives_and_computes_from_ty2024_return_inputs() {
     let toml = _dir.path().join("inputs.toml");
     std::fs::write(
         &toml,
-        "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"90000\"\nbox2_fed_withheld = \"12000\"\nbox5_medicare_wages = \"90000\"\n",
+        "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\nbox1_wages = \"90000\"\nbox2_fed_withheld = \"12000\"\nbox5_medicare_wages = \"90000\"\n",
     )
     .unwrap();
     // The CSV disposal is in 2025, but v1 full-return tables are TY2024-only; import for 2024 to exercise
@@ -721,7 +721,7 @@ fn report_tax_year_refuses_business_income_without_schedule_c() {
 
     // Full-return inputs for 2024 with NO Schedule C.
     let toml = _dir.path().join("inputs.toml");
-    std::fs::write(&toml, "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n").unwrap();
+    std::fs::write(&toml, "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\ndual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n[sch1]\nhsa_activity = false\n").unwrap();
     cmd::tax::import_return_inputs(&vault, &pp(), 2024, &toml, false).unwrap();
 
     let err = cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0)).unwrap_err();
@@ -1605,6 +1605,10 @@ fn carryover_write_back_round_trips_and_respects_user_precedence() {
                     box5_medicare_wages: dec!(50000),
                     ..Default::default()
                 }],
+                // §170(f)(8): this filer holds a contemporaneous written acknowledgment for the
+                // $40,000 gift. Not covered by `answered()`, which walks the DECLARATION registry;
+                // the CWA is a class-(B) skippable made mandatory by `screen_absolute`.
+                charitable_cwa_obtained: Some(true),
                 schedule_a: Some(ScheduleAInputs {
                     charitable: vec![CharitableGift {
                         class: CharitableClass::Cash60,
@@ -1719,6 +1723,10 @@ fn import_preserves_a_computed_carryover() {
                     box5_medicare_wages: dec!(50000),
                     ..Default::default()
                 }],
+                // §170(f)(8): this filer holds a contemporaneous written acknowledgment for the
+                // $40,000 gift. Not covered by `answered()`, which walks the DECLARATION registry;
+                // the CWA is a class-(B) skippable made mandatory by `screen_absolute`.
+                charitable_cwa_obtained: Some(true),
                 schedule_a: Some(ScheduleAInputs {
                     charitable: vec![CharitableGift {
                         class: CharitableClass::Cash60,
@@ -1862,7 +1870,7 @@ fn a_pre_d8_vault_refuses_until_answered_and_income_answer_is_the_way_out() {
     // (c) The user no longer has the TOML — they deleted it, as the plaintext-hygiene guidance says to.
     std::fs::remove_file(&toml).unwrap();
 
-    // (d) `income answer` is the way out. It asks SIX mandatory declarations in registry order
+    // (d) `income answer` is the way out. It asks SEVEN mandatory declarations in registry order
     // (dependent-taxpayer, foreign-accounts, foreign-trust, HSA-activity, dual-status, §911/931/933
     // income-exclusion gate) — "n" to each — then bare Enter to skip the always-live SKIPPABLES:
     // §63(f) blindness, the date of birth, the §G-9 taxpayer-death gate (2026-07-31: downgraded from a
@@ -1872,10 +1880,16 @@ fn a_pre_d8_vault_refuses_until_answered_and_income_answer_is_the_way_out() {
     // household is not). The §G-9 DATE of death is not among them: it is live only once its gate
     // is answered "y".
     //
-    // ★ Six "n" then bare Enters — the exact count is deliberate. A script that runs out fails with
+    // ★ 2026-08-21 — a SEVENTH mandatory declaration: Schedule D line 20 / Schedule A line 9's
+    // "are you filing Form 4952?" (always live, because line 20 prints on every both-gains Schedule D
+    // and that routing is a LEDGER fact liveness cannot see). And a FIFTH always-live skippable, the
+    // §170(f)(8) contemporaneous-written-acknowledgment universal — offered always for the same
+    // reason as the donation-restrictions one, mandatory only where a §170 deduction is claimed.
+    //
+    // ★ Seven "n" then bare Enters — the exact count is deliberate. A script that runs out fails with
     // "input ended before every question was answered", which is how this test noticed the interview
     // had grown at all.
-    let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\nn\n\n\n\n\n\n";
+    let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\nn\nn\n\n\n\n\n\n";
     let mut screen: Vec<u8> = Vec::new();
     cmd::answer::answer_return_inputs(&vault, &pp(), 2024, &mut keystrokes, &mut screen).unwrap();
     let screen = String::from_utf8(screen).unwrap();
@@ -1945,7 +1959,7 @@ fn answered_toml(dir: &Path) -> PathBuf {
     std::fs::write(
         &toml,
         "filing_status = \"Single\"\nforeign_accounts = false\nforeign_trust = false\n\
-         dual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n\
+         dual_status_alien = false\nhas_income_exclusion = false\nother_out_of_scope_income = false\nfiling_form_4952 = false\n\n[header]\ncan_be_claimed_as_dependent_taxpayer = false\ntaxpayer_died_during_year = false\n\n\
          [sch1]\nhsa_activity = false\n\n[[w2s]]\nowner = \"taxpayer\"\nemployer = \"ACME\"\n\
          box1_wages = \"50000\"\nbox2_fed_withheld = \"6000\"\nbox5_medicare_wages = \"50000\"\n",
     )
@@ -2052,6 +2066,10 @@ fn the_full_remedy_chain_restores_a_computed_carryover() {
                     box5_medicare_wages: dec!(50000),
                     ..Default::default()
                 }],
+                // §170(f)(8): this filer holds a contemporaneous written acknowledgment for the
+                // $40,000 gift. Not covered by `answered()`, which walks the DECLARATION registry;
+                // the CWA is a class-(B) skippable made mandatory by `screen_absolute`.
+                charitable_cwa_obtained: Some(true),
                 schedule_a: Some(ScheduleAInputs {
                     charitable: vec![CharitableGift {
                         class: CharitableClass::Cash60,
@@ -2118,6 +2136,10 @@ fn the_full_remedy_chain_restores_a_computed_carryover() {
                     box5_medicare_wages: dec!(50000),
                     ..Default::default()
                 }],
+                // §170(f)(8): this filer holds a contemporaneous written acknowledgment for the
+                // $40,000 gift. Not covered by `answered()`, which walks the DECLARATION registry;
+                // the CWA is a class-(B) skippable made mandatory by `screen_absolute`.
+                charitable_cwa_obtained: Some(true),
                 schedule_a: Some(ScheduleAInputs {
                     charitable: vec![CharitableGift {
                         class: CharitableClass::Cash60,
@@ -2171,6 +2193,10 @@ fn fr2024_writeback_vault_with_pseudo_trigger() -> (tempfile::TempDir, PathBuf) 
                 box5_medicare_wages: dec!(50000),
                 ..Default::default()
             }],
+            // §170(f)(8): this filer holds a contemporaneous written acknowledgment for the
+            // $40,000 gift. Not covered by `answered()`, which walks the DECLARATION registry;
+            // the CWA is a class-(B) skippable made mandatory by `screen_absolute`.
+            charitable_cwa_obtained: Some(true),
             schedule_a: Some(ScheduleAInputs {
                 charitable: vec![CharitableGift {
                     class: CharitableClass::Cash60,
@@ -2321,6 +2347,11 @@ fn vault_with_a_gift_over_its_ceiling() -> (tempfile::TempDir, PathBuf) {
                     }],
                     ..Default::default()
                 }),
+                // ★ P4 (phase 2): an itemizing return with a gift >= $250 must state whether it
+                //   holds the §170(f)(8) acknowledgment. The subject here is the CARRYOVER, not
+                //   substantiation, so answer it rather than dodge it — a $40,000 gift with no CWA
+                //   is a deduction the statute denies, and a fixture must not model an unlawful one.
+                charitable_cwa_obtained: Some(true),
                 ..Default::default()
             }),
         )

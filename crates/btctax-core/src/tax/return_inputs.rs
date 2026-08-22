@@ -530,6 +530,34 @@ pub struct ScheduleAInputs {
     /// `Some(true)` ⇒ full 8a, box unchecked.
     #[serde(default)]
     pub mortgage_all_used_to_buy_build_improve: Option<bool>,
+    /// **§163(h)(3)(B) — the ACQUISITION-DEBT CEILING declaration.** i1040sca (2024), *Limits on home
+    /// mortgage interest*, transcribed rather than summarised because each limit is a separate test:
+    ///
+    /// - *"Your deduction for home mortgage interest is subject to a number of limits. If one or more of
+    ///   the following limits applies, see Pub. 936 to figure your deduction."*
+    /// - *"Limit on loans taken out on or before December 15, 2017. For qualifying debt taken out on or
+    ///   before December 15, 2017, you can only deduct home mortgage interest on up to $1,000,000
+    ///   ($500,000 if you are married filing separately) of that debt."*
+    /// - *"Limit on loans taken out after December 15, 2017. For qualifying debt taken out after
+    ///   December 15, 2017, you can only deduct home mortgage interest on up to $750,000 ($375,000 if
+    ///   you are married filing separately) of that debt. If you also have qualifying debt subject to
+    ///   the $1,000,000 limitation … the $750,000 limit for debt taken out after December 15, 2017, is
+    ///   reduced by the amount of your qualifying debt subject to the $1,000,000 limit."*
+    /// - *"Limit when loans exceed the fair market value of the home. If the total amount of all
+    ///   mortgages is more than the fair market value of the home, see Pub. 936 to figure your
+    ///   deduction."*
+    ///
+    /// A class-(A) DECLARATION, phrased so `true` — "I am inside every limit" — is the neutral answer
+    /// that leaves line 8a at the full Form 1098 amount. `None` = never asked ⇒ refuse
+    /// (`MortgageDebtLimitUnanswered`). `Some(false)` = "one of the limits bites" ⇒ ALSO refuse
+    /// (`MortgageOverDebtLimit`): i1040sca's Line 8a instruction is *"Only enter on line 8a the
+    /// deductible mortgage interest and points that were reported to you on Form 1098"*, a determinate
+    /// NONZERO output of Pub. 936's Deductible Home Mortgage Interest Worksheet that btctax does not
+    /// model. Deducting the full 1098 figure would UNDERSTATE the tax; printing $0 would OVERSTATE it by
+    /// the whole deductible portion, and — unlike the mixed-use zero, which the line-8 checkbox
+    /// discloses — Schedule A carries no box that could explain it.
+    #[serde(default)]
+    pub mortgage_within_debt_limit: Option<bool>,
     /// **Form 6251 line 3 — the AMT qualified-dwelling declaration.** i6251 p.8: "If you deducted home
     /// mortgage interest on Schedule A for a dwelling that isn't a principal residence (within the
     /// meaning of section 121) or qualified dwelling for AMT, include that deducted interest on line 3.
@@ -542,6 +570,21 @@ pub struct ScheduleAInputs {
     /// line-3 add-back, and computing without it would UNDERSTATE the tax.
     #[serde(default)]
     pub mortgage_dwelling_is_amt_qualified: Option<bool>,
+    /// **Schedule A line 9 — "Investment interest. Attach Form 4952 if required. See instructions"**
+    /// (§163(d)). The interest paid on money borrowed that is allocable to property held for
+    /// investment.
+    ///
+    /// ★ It was NEVER COLLECTED, and the census recorded that honestly (`f1040sa.map.toml`, line 9,
+    /// `rule = "unmodeled"`). The direction is safe — a forgone deduction only OVERSTATES tax — but a
+    /// filer paying six figures of margin interest against a bitcoin position got no signal at all,
+    /// and §163(d)(4)(B)(iii)'s election to treat net long-term capital gain as investment income is
+    /// aimed at exactly that household.
+    ///
+    /// ★★ btctax builds **no Form 4952**, so this is only deductible in full under i4952's own
+    /// exception — see [`ReturnInputs::filing_form_4952`], which carries the declaration and the
+    /// bound. Anything else refuses.
+    #[serde(default)]
+    pub investment_interest: Usd,
     #[serde(default)]
     pub charitable: Vec<CharitableGift>, // non-crypto; crypto flows from the ledger
 }
@@ -766,6 +809,68 @@ pub struct ReturnInputs {
     /// gift's deduction, so the honest move is to send that year's 8283 to be completed by hand.
     #[serde(default)]
     pub donations_had_restrictions: Option<bool>,
+    /// ★★★ **§170(f)(8) — the CONTEMPORANEOUS WRITTEN ACKNOWLEDGMENT**, asked as one return-level
+    /// universal (the [`Self::donations_had_restrictions`] shape, and for the same structural reason).
+    ///
+    /// Schedule A lines 11 and 12 both print *"If you made any gift of $250 or more, see
+    /// instructions"* on the form's face, and the first thing those instructions say is:
+    ///
+    /// > *"Gifts of $250 or more. You can deduct a gift of $250 or more only if you have a
+    /// > contemporaneous written acknowledgment from the charitable organization showing the
+    /// > information in (1) and (2) next."*
+    /// >
+    /// > *"In figuring whether a gift is $250 or more, don't combine separate donations."*
+    /// >
+    /// > *"To be contemporaneous, you must get the written acknowledgment from the charitable
+    /// > organization by the date you file your return or the due date (including extensions) for
+    /// > filing your return, whichever is earlier. Don't attach the contemporaneous written
+    /// > acknowledgment to your return. Instead, keep it for your records."*
+    ///
+    /// §170(f)(8)(A) is a strict statutory precondition of ALLOWABILITY, not a recordkeeping nicety:
+    /// *"No deduction shall be allowed … for any contribution of $250 or more unless the taxpayer
+    /// substantiates the contribution by a contemporaneous written acknowledgment."*
+    ///
+    /// ★★ **FILING IS THE POINT OF NO RETURN**, which is what makes this a refusal rather than an
+    /// advisory. §170(f)(8)(C) defines contemporaneous by the **earlier of** filing or the due date,
+    /// so a filer who exports and files without a CWA has permanently extinguished the cure — a
+    /// post-filing acknowledgment fails (C) by its terms (*Durden v. Comm'r*, T.C. Memo. 2012-140).
+    /// The sharp line that keeps this from generalising: **refuse where filing itself extinguishes the
+    /// cure; advise where the record can be assembled later.** §170(f)(17) bank-record substantiation
+    /// for small cash gifts has no filing-linked deadline and is deliberately NOT gated.
+    ///
+    /// ★ Class (B) HERE and mandatory in [`crate::tax::return_1040::screen_absolute`], because
+    /// liveness sees only `ReturnInputs`: whether the return itemizes is the computed §63(e) election,
+    /// and the donations are in the LEDGER. `None` while live ⇒ refuse; `Some(false)` ⇒ refuse;
+    /// `Some(true)` ⇒ proceed. A standard-deduction filer, or one whose every gift is under $250, is
+    /// never asked — silence there forgoes nothing and asserts nothing.
+    #[serde(default)]
+    pub charitable_cwa_obtained: Option<bool>,
+    /// ★★★ **Schedule D line 20 / Schedule A line 9 — ARE YOU FILING FORM 4952?**
+    ///
+    /// Schedule D line 20 asks, verbatim: *"Are lines 18 and 19 both zero or blank **and you are not
+    /// filing Form 4952**? **Yes.** Complete the Qualified Dividends and Capital Gain Tax Worksheet
+    /// … **No.** Complete the Schedule D Tax Worksheet."*
+    ///
+    /// ★★★ btctax used to check **Yes** UNCONDITIONALLY on the both-gains branch. The lines-18/19 half
+    /// was sound — btctax refuses every return that could carry a §1250, §1202 or 28%-rate amount, and
+    /// the form itself says *"both zero **or blank**"* — but the Form 4952 conjunct had **no source at
+    /// all**: nothing on the return recorded it, and no question ever asked it. That is sworn
+    /// testimony under §6065 that btctax invented, and it is the answered-ness invariant in its purest
+    /// form. It reaches EVERY return whose Schedule D routes both-gains, including a $0-income
+    /// household — not a rich-band item.
+    ///
+    /// ★ The tax was almost always right (a filer with no margin borrowing is indeed not filing Form
+    /// 4952) — which is precisely why a value test could never find it. And when it is wrong it is
+    /// wrong in the UNDERSTATING direction: the Schedule D Tax Worksheet the "No" branch leads to
+    /// subtracts Form 4952 line 4g at its line 4.
+    ///
+    /// A class-(A) DECLARATION, `neutral: false` ("no, I am not filing one" is the answer that needs
+    /// no form btctax lacks). `None` ⇒ refuse; `Some(true)` ⇒ refuse (btctax fills neither Form 4952
+    /// nor the Schedule D Tax Worksheet); `Some(false)` ⇒ line 20 is checked **Yes** *because the
+    /// filer said so*, and [`ScheduleAInputs::investment_interest`] may be deducted in full on line 9
+    /// under i4952's exception — bounded by that exception's own first condition.
+    #[serde(default)]
+    pub filing_form_4952: Option<bool>,
     #[serde(default)]
     pub dual_status_alien: Option<bool>,
 
@@ -938,6 +1043,11 @@ impl Default for ReturnInputs {
             foreign_country_names: String::new(),
             fbar_filing_required: None,
             donations_had_restrictions: None,
+            // §170(f)(8) — `None` = never asked. On a return that claims a §170 deduction with a
+            // ≥$250 gift that REFUSES (`screen_absolute`), and a default may not answer it.
+            charitable_cwa_obtained: None,
+            // Schedule D line 20 / Schedule A line 9 — `None` = never asked, and that REFUSES.
+            filing_form_4952: None,
             dual_status_alien: None,
         }
     }

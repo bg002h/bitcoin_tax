@@ -189,6 +189,31 @@ pub fn se_addl_medicare_threshold(status: FilingStatus) -> Usd {
 /// Must never be placed in a `TaxTable`.
 pub const QUALIFIED_APPRAISAL_THRESHOLD: Usd = dec!(5000);
 
+/// §170(f)(8)(A): the contemporaneous-written-acknowledgment threshold — *"any contribution of $250
+/// or more"*. **STATUTORY** — 26 U.S.C. §170(f)(8)(A); fixed in the Code, NOT inflation-indexed.
+///
+/// ★ Tested with `>=`, not `>`: the statute says *"$250 **or more**"*, unlike §170(f)(11)(C)'s
+/// *"more than $5,000"* directly above — the two thresholds have opposite boundary conventions and
+/// sit five lines apart. Must never be placed in a `TaxTable`.
+pub const CWA_SUBSTANTIATION_THRESHOLD: Usd = dec!(250);
+
+/// §170(f)(11)(D): the threshold above which a **qualified appraisal must be ATTACHED to the return** —
+/// *"In the case of contributions of property for which a deduction of more than $500,000 is claimed,
+/// the requirements … are met … if [the taxpayer] attaches to the return for the taxable year a
+/// qualified appraisal."* **STATUTORY** — 26 U.S.C. §170(f)(11)(D); fixed in the Code, NOT indexed.
+///
+/// ★★ **The operand is the pre-ceiling amount CLAIMED for the property** — post-§170(e) reduction,
+/// aggregated across all similar items given in the year (§170(f)(11)(F); Reg §1.170A-16(f)(5)(ii)),
+/// determined WITHOUT regard to the §170(b) AGI ceiling / §170(d) carryover split. That is exactly
+/// [`crate::forms::year_donation_deduction`], and it is emphatically NOT Schedule A line 12: keying
+/// the gate to the post-ceiling line would make a statutory attachment depend on AGI (the same $700k
+/// gift would require an appraisal for a $3M-AGI filer and not for a $1M-AGI one), which
+/// Reg §1.170A-16(f)(3) contradicts by extending the duty to *"the return for any carryover year"*.
+///
+/// ★ Strict `>`: the statute says *"more than $500,000"*, like §170(f)(11)(C) and unlike
+/// [`CWA_SUBSTANTIATION_THRESHOLD`]. Must never be placed in a `TaxTable`.
+pub const APPRAISAL_ATTACHMENT_THRESHOLD: Usd = dec!(500000);
+
 /// §1411(b): MAGI threshold above which the NIIT applies.
 /// **STATUTORY** — 26 U.S.C. §1411(b)(1).  The dollar amounts are fixed in the Code and do
 /// NOT move year-over-year (unlike bracket thresholds which are adjusted under §1(f)(3)).

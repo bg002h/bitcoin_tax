@@ -40,6 +40,8 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::HsaActivityUnanswered => vec![decl(QuestionId::HsaActivity)],
         R::DualStatusAlienUnanswered => vec![decl(QuestionId::DualStatusAlien)],
         R::MixedUseMortgageUnanswered => vec![decl(QuestionId::MortgageAllUsedToBuyBuildImprove)],
+        R::MortgageDebtLimitUnanswered => vec![decl(QuestionId::MortgageWithinDebtLimit)],
+        R::Form4952DeclarationUnanswered => vec![decl(QuestionId::FilingForm4952)],
         R::AmtQualifiedDwellingUnanswered => vec![decl(QuestionId::AmtQualifiedDwelling)],
         R::IncomeExclusionUnanswered => vec![decl(QuestionId::HasIncomeExclusion)],
         // §G-22/B11 — both legs point at the one declaration that decides them.
@@ -69,6 +71,16 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::DependentSpouseUnsupported => vec![decl(QuestionId::DependentSpouse)],
         // Form 6251's two ADVERSE answers: v1 models neither add-back, so each refuses at the same
         // field its unanswered twin anchors.
+        // ★ §163(h)(3)(B) answered ADVERSELY. It anchors at the same leaf as its unanswered twin —
+        //   the answer IS the input, and the return becomes fileable only by correcting it (or, once
+        //   FOLLOWUPS P9(a)/S2 lands, by entering the Pub. 936 worksheet result).
+        R::MortgageOverDebtLimit => vec![decl(QuestionId::MortgageWithinDebtLimit)],
+        // ★ §163(d) / Form 4952. Both routes to this refusal are correctable in the form — either the
+        //   declaration itself, or the Schedule A line-9 amount that broke i4952's exception.
+        R::Form4952Required => vec![
+            decl(QuestionId::FilingForm4952),
+            Anchor::Field(FieldId::SaInvestmentInterest),
+        ],
         R::AmtNonQualifiedDwelling => vec![decl(QuestionId::AmtQualifiedDwelling)],
         R::AmtCarryoverDiverges => vec![decl(QuestionId::AmtCarryoverSameAsRegular)],
         R::AmtDepreciationDiverges => vec![decl(QuestionId::AmtDepreciationSameAsRegular)],
@@ -106,6 +118,12 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         ],
         R::DonationRestrictionsUnresolved => {
             vec![skip(btctax_core::tax::questions::SkippableId::DonationsHadRestrictions)]
+        }
+        // ★ §170(f)(8) — both legs (unanswered and "no, I don't hold one") point at the one
+        //   skippable that decides them. Same shape as §G-21 directly above: offered always,
+        //   mandatory only where `screen_absolute` can see the deduction is actually claimed.
+        R::CharitableCwaUnresolved => {
+            vec![skip(btctax_core::tax::questions::SkippableId::CharitableCwaObtained)]
         }
         R::NonCryptoNoncashGift => vec![Anchor::Section(SectionId::ScheduleACharitable)],
 

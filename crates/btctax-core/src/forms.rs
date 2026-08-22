@@ -364,6 +364,38 @@ pub fn year_donation_deduction(state: &LedgerState, year: i32) -> Usd {
         .sum()
 }
 
+/// ★★★ **§170(f)(8) — the largest SINGLE charitable contribution of crypto in `year`**, or
+/// `Usd::ZERO` if the year has none that is deducted at all.
+///
+/// ★★ **PER CONTRIBUTION, NEVER THE YEAR AGGREGATE**, which is the whole difference from
+/// [`year_donation_deduction`] directly above. i1040sca: *"In figuring whether a gift is $250 or
+/// more, **don't combine separate donations**. For example, if you gave your church $25 each week for
+/// a total of $1,300, treat each $25 payment as a separate gift."* One `Removal` is one contribution.
+///
+/// ★★ **The measure is the CONTRIBUTION amount (fair market value), not the §170(e)-reduced claim.**
+/// §170(f)(8)(A) conditions the deduction on substantiating *"any contribution of $250 or more"* — the
+/// contribution, not the claim. Short-term appreciated crypto is exactly where the two part company
+/// (`claimed_deduction` is `min(FMV, basis)` there), and taking the smaller one would drop the CWA
+/// requirement for a deduction the statute still denies without it — the understatement direction.
+///
+/// ★ **But only contributions the return actually DEDUCTS count.** A removal whose
+/// `claimed_deduction` is absent or zero yields no §170 deduction for the statute to disallow, so
+/// gating on it would be the over-ask the adjudication names as this predicate's one failure mode
+/// ("gating a filer whose ≥$250 gift is excluded from the claimed deduction entirely").
+///
+/// Non-crypto gifts live on `ScheduleAInputs::charitable`, not the ledger, and are tested at the call
+/// site — one `CharitableGift` entry is one gift there.
+pub fn max_single_donation_contribution(state: &LedgerState, year: i32) -> Usd {
+    state
+        .removals
+        .iter()
+        .filter(|r| r.kind == RemovalKind::Donation && r.removed_at.year() == year)
+        .filter(|r| r.claimed_deduction.is_some_and(|d| d > Usd::ZERO))
+        .map(|r| r.legs.iter().map(|l| l.fmv_at_transfer).sum::<Usd>())
+        .max()
+        .unwrap_or(Usd::ZERO)
+}
+
 /// Build the Form 8283 rows for tax year `year`: **one row per `RemovalLeg`** of a `Donation` whose
 /// `Removal.removed_at.year() == year`. Pure over `state.removals`. Gifts (`kind == Gift`) produce
 /// NO rows (a gift is not a charitable contribution; `claimed_deduction` is `None` and they are NOT

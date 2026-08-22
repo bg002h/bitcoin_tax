@@ -1681,6 +1681,8 @@ pub struct ScheduleAMap {
     pub line8a: MoneyCell,
     /// L8e — add 8a-8c, MID column.
     pub line8e: MoneyCell,
+    /// L9 — investment interest (§163(d) / Form 4952), MID column.
+    pub line9: MoneyCell,
     /// L10 — add 8e and 9, AMOUNT column.
     pub line10: MoneyCell,
     /// L11 — gifts by cash or check, MID column.
@@ -1711,8 +1713,8 @@ impl ScheduleAMap {
             _ => Err(FormsError::UnsupportedYear(year)),
         }
     }
-    /// The 18 filled cells in printed reading order (strictly descending y on page 1).
-    pub fn lines(&self) -> [&MoneyCell; 18] {
+    /// The 19 filled cells in printed reading order (strictly descending y on page 1).
+    pub fn lines(&self) -> [&MoneyCell; 19] {
         [
             &self.line1,
             &self.line2,
@@ -1726,6 +1728,7 @@ impl ScheduleAMap {
             &self.line7,
             &self.line8a,
             &self.line8e,
+            &self.line9,
             &self.line10,
             &self.line11,
             &self.line12,
