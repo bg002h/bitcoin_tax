@@ -4,13 +4,41 @@ _Last updated: **2026-08-22**. Written at a deliberate pause; safe to exit. **Re
 
 ---
 
-# ★★★ RESUME POINT — machine-check two Important findings, then fold
+# ★★★ RESUME POINT — the widening fold is IN. Next is ONE re-review of it, then the owner's call.
 
 ## Where things stand
 
-Branch **`feat/filing-readiness`** — 54 commits ahead of `main`, **2763 tests green**, clippy/fmt/
-pii-scan clean, **pushed** to `origin/feat/filing-readiness`.
+Branch **`feat/filing-readiness`** — 55 commits ahead of `main`, **2766 tests green**, clippy/fmt
+clean. The fold commit `9728e2ec` is **NOT yet pushed**.
 **`main` is UNTOUCHED at `3fc88497`.** Nothing merged, tagged, or published. That is the owner's call.
+
+## ★ THE NEXT ACTION — one independent re-review of the fold, scoped to `02939632..HEAD`
+
+A fold is authorship and re-earns the gate (`STANDARD_WORKFLOW.md` §2). This one is **not trivial**:
+it changed production behaviour on two filer-facing surfaces, added two `pub` fns to `btctax-core`,
+and rewrote a refusal's text. It has **not been reviewed**.
+
+★★ **Not dispatched, deliberately** — this session's harness carries a standing *"do not call the
+Agent tool unless the user requested it"*. The owner is the one who starts it. Brief to use:
+
+> Review ONLY `git diff 02939632..HEAD` on `feat/filing-readiness` — the fold responding to
+> `reviews/filing-readiness-widening-review.md`. Do NOT re-audit the branch; do NOT re-litigate
+> B-1/B-2, which were reproduced as printed observations before the fix (the commit message carries
+> the observations verbatim). **The one question: does the fold introduce a defect of its own?**
+> Settled, do not re-derive: the `grounded` predicate's three disjuncts; the whole-dollar rounding;
+> FR-17's owning phase (TY2025); FR-18's mechanism is deliberately NOT diagnosed.
+> Machine-verified already, so spend no budget there: 2766/2766 tests, clippy `-D warnings` exit 0,
+> `cargo fmt --check` clean, and 4 planted mutations killed (listed in the commit message, each with
+> its anchor asserted to match exactly once).
+> Pay attention instead to: (a) the new `★ NOT WRITTEN` text — is it TRUE on every branch that can
+> reach it, including a re-roll and a `--force`; (b) whether normalising all four provenances at
+> import can lose a stamp that mattered; (c) whether the reworded canceled-debt refusal states the
+> §108(b) timing correctly. Output `VERDICT: <sound | needs-changes>` then findings by severity.
+
+★ Model tier: **opus** (design-level, filer-facing, funds-adjacent) — not Fable; Fable is reserved
+for the single pass immediately before an irreversible action, which this is not.
+★ The harness **blocks subagents from writing report files**, so have it return the report verbatim
+and persist it yourself in `reviews/` in its OWN commit before folding anything.
 
 Delivered: the whole filing-readiness plan (phases 1-4) plus **two owner-authorised widenings** —
 (A) a taxable-income<=0 year with a capital-loss carryforward-IN now FILES (refusal variant deleted),
@@ -20,50 +48,42 @@ and (B) `--write-carryover` now ROLLS the §1212(b) capital-loss carryover, stam
 widening). Read those rather than re-deriving; every commit message carries its mutations with the
 verbatim RED output.
 
-## THE NEXT ACTION — do this first
+## ✅ THE WIDENING REVIEW IS FOLDED — `9728e2ec`. What the machine-check settled
 
-`reviews/filing-readiness-widening-review.md` (persisted at `02939632`, **NOT folded**) returned
-**needs-changes: 2 Important + 1 Minor**. (A) is SOUND, all nine fold commits are SOUND, the refusal
-surface coheres.
+`reviews/filing-readiness-widening-review.md` (report at `02939632`, fold at `9728e2ec` — the two
+commits are separate on purpose, so `git diff 02939632..HEAD` is exactly "what changed in response to
+what"). It returned **needs-changes: 2 Important + 1 Minor**; (A) was SOUND, all nine earlier fold
+commits SOUND, the refusal surface coherent.
 
-★ **The reviewer named its own weak point, and the owner asked for it to be checked before any edit:**
+★★★ **The owner's instruction was to machine-check before editing a line, and it paid.** The reviewer
+had named its own escape hatch — *"if a caller suppresses the summary or re-stamps on the
+grounded=false path, B-1/B-2 evaporate"*. Resolved against the tree: `write_back_carryover` has
+**exactly one** production caller (`main.rs:197`, which unconditionally prints), and the only stamp
+site outside the gate is the import preservation arm, which stamps only where `existing` was already
+`Computed`. **No such caller exists.** All four limbs then reproduced as printed observations:
 
-> *"If `wrote`/`grounded` interact somewhere I did not see — e.g. a caller that suppresses the summary
-> or re-stamps on the grounded=false path — then B-1/B-2 evaporate and the verdict is `sound`."*
+| limb | observed |
+|---|---|
+| B-1 | summary said *"capital-loss carryover short $0.00 / long $0.00"*; stored provenance `User` |
+| B-2 | roll → `long 34000 / Computed`; remove grounding; re-roll, `--force`, zeroing import all left it |
+| B-2(ii) | a TOML provenance key minted the stamp — `long 99000 / Computed`, exit 0 |
 
-**MACHINE-CHECK BOTH BEFORE TOUCHING A LINE.** This session already caught one claimed-but-
-unreproducible finding (a mutation whose kill did not reproduce), so a fold on a code-reading is
-exactly the failure mode to avoid. Reproduce each as a failing test or a printed observation first;
-if one does not reproduce, say so and do NOT "fix" it.
+★ **One limb was MY fixture's fault, not a finding**, and the distinction matters: the first forge
+probe put the key inside `[[w2s]]` (a bare key after a table header parses into it). Rebuilt with the
+key before the first table header; it then reproduced for real.
 
-**B-1 (Important, reachable in v1 today).** The write-back summary claims authorship of a write the
-`grounded` gate deliberately skipped. The four `wrote.push` lines in
-`crates/btctax-cli/src/cmd/tax.rs` read the ROW FIELD, not the assignment, so a year with no
-capital-loss grounding still prints *"capital-loss carryover short $0.00 / long $0.00"* as written
-back — while nothing was stamped and next year's `BenefitCarryoversNotStated` stays live for exactly
-that carryover.
-★ It is the DUAL of the defect `K11` exists for: K11 checks observed ⊆ summary, never summary ⊆
-observed, and its fixture assigns all four carryovers, so it structurally cannot see this.
-**To reproduce:** year Y with a charitable/QBI carryover, no capital-loss activity, never asked
-(carryforward-in {0,0} `User`, worksheet returns `None`) → roll succeeds, summary lists the
-capital-loss line anyway.
+**Fixed on the branch:** B-1 (one `capital_loss_roll_is_grounded` predicate read by both the writer
+and the message it prints; `★ NOT WRITTEN` names the carryover and any stale figure), B-2's forge
+half (`income import` normalises **all four** provenances plus the per-item charitable one — the whole
+class, since every one is `#[serde(default)]`), and the Minor.
+**Filed, not fixed:** **FR-17** (no retraction path for a `Computed` stamp — owning phase TY2025,
+same acceptance as FR-8's residue) and **FR-18** (`income scrub` loses the provenance; found by
+CONTROLLING for it, and its mechanism is deliberately not diagnosed).
 
-**B-2 (Important, owning phase = TY2025).** A `Computed` capital-loss stamp has NO retraction path,
-and the LIMITATIONS cure sentence fails on that branch: the re-roll skips (grounded=false, and
-`--force` does not reach it), and `income import` with an explicit zero is RESURRECTED by the T6 arm
-because TOML cannot distinguish an explicit zero from an absent key. The only escape is hand-writing
-the provenance in the TOML — which also means **the import surface can FORGE a `Computed` stamp**,
-silencing M4 via `m4_authority`'s `(None, Computed) -> None`.
-**Reviewer's suggestion:** on a grounded=false roll over an existing `Computed` value, clear-to-`User`
-or warn; normalize provenance to `User` at import parse.
-
-**Minor.** The canceled-debt refusal implies a cure the gate does not admit — the truthful answer
-stays YES for the exclusion year, so the return refuses again after the filer does the hand work.
-That sentence is true only of the FOLLOWING year's return. Reword to say btctax cannot file the
-exclusion year itself.
-
-**Then:** fold in its own commit (persist-then-fold is already half done — the report is committed),
-re-gate `make check` + `cargo fmt --all --check`, and re-review only if a fold is non-trivial.
+★★ **The transferable bit:** FR-18 exists because the check on *"did my fix break the scrub round
+trip?"* was run as a **control** — plant `Computed`, run with AND without the change — instead of
+just running the suite. Both reds looked identical, which is what proved the loss pre-existing. The
+suite alone said green, because `maximal_sentinel` pins every provenance field at the DEFAULT variant.
 
 ## ★★ STANDING CONSTRAINTS — owner-set, do not drift from these
 
