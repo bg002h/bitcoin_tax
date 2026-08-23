@@ -5441,6 +5441,47 @@ reviews ran on the branch; two are persisted verbatim in `reviews/filing-readine
 
 ### Ownerless residue — batch when convenient
 
+- **FR-19 — the `--force` guard promises an overwrite the `grounded` gate then refuses to perform.**
+  Fold re-review Minor 1, and **reproduced before filing** — one command, two contradictory
+  statements, verbatim:
+
+  ```
+  without --force: next year's capital-loss carryover was user-entered (`income import`) —
+                   pass `--force` to overwrite it with the computed §1212(b) carryover
+  with    --force: carryover written back to 2025: 1 charitable carryover item(s); …
+                   ★ NOT WRITTEN: the capital-loss carryover. 2024 was never asked about one
+                   and produced none of its own, … and stamps nothing.
+  ```
+
+  The fourth guard (`return_1040.rs:3065`) runs unconditionally, *before* and independently of
+  `capital_loss_roll_is_grounded`. On an ungrounded year there is no computed §1212(b) figure, so
+  `--force` overwrites nothing — it only unlocks the other three carryovers, which the guard was never
+  meant to hold. A filer who believes the first message may go and "correct" a Y+1 figure that was
+  right.
+  ★★ **This is the same class B-1 was** — a surface reasoning about the gated write without asking the
+  gate — and it is the one instance the fold left standing. B-1's lesson was *the message must ask the
+  gate*; this is *the guard must ask the gate*. Same predicate, three readers.
+  ★ **The fix is one conjunct** (`ar` and `ri` are both in scope at `return_1040.rs:2919`):
+  `if capital_loss_roll_is_grounded(ar, ri) && (next_year.capital_loss_carryforward_in.short > …)`.
+  It NARROWS a refusal, which normally earns the `widening-an-exemption-is-never-the-safe-edit`
+  scrutiny — but it is safe here for a specific reason worth stating: the conjunct is not a *proxy* for
+  when the write happens, it is the **exact predicate that decides it**, so the guard's condition comes
+  to match the action it guards. The three other carryovers keep their own guards.
+  **Owning phase: none — ready now.** Non-gating; the branch is 0C/0I with this open.
+
+- **FR-20 — *"btctax CANNOT FILE THIS YEAR"* is broader than what the code enforces.** Fold re-review
+  Minor 2, confirmed in source: the refusal is gated on `question_is_live(ExcludedCanceledDebt)`, i.e.
+  on `carryforward_in_present` (`questions.rs:200-203`) — a strictly-positive test on
+  `capital_loss_carryforward_in`. The Form 982 rationale the new sentence gives is gated on nothing of
+  the kind, so a filer who excluded canceled debt and holds **no** capital-loss carryforward is never
+  asked, never refused, and gets a return with no Form 982.
+  ★ The underlying scope gap is PRE-EXISTING and larger than the wording — **v1 collects no
+  canceled-debt income at all** — so the fold's sentence surfaced the mismatch rather than creating it.
+  Two ways out: narrow the clause to the carryover (*"…while you are carrying a capital-loss
+  carryforward"*), or keep it and file the Form-982 gap as its own scoped item. The second is the real
+  answer; the first is the honest stopgap.
+  **Owning phase: none — needs a decision, not a phase.**
+
 - **FR-18 — `income scrub` loses the carryover PROVENANCE, and its round-trip test is blind to it.**
   Found incidentally while checking that FR-17's import normalisation did not weaken the scrub round
   trip — it does not, and that is the measurement that found this. `scrub.rs:99` documents that scrub

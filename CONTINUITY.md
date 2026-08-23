@@ -4,41 +4,39 @@ _Last updated: **2026-08-22**. Written at a deliberate pause; safe to exit. **Re
 
 ---
 
-# ★★★ RESUME POINT — the widening fold is IN. Next is ONE re-review of it, then the owner's call.
+# ★★★ RESUME POINT — the branch is GREEN at 0C/0I. Everything left is the owner's call.
 
 ## Where things stand
 
-Branch **`feat/filing-readiness`** — 55 commits ahead of `main`, **2766 tests green**, clippy/fmt
-clean. The fold commit `9728e2ec` is **NOT yet pushed**.
+Branch **`feat/filing-readiness`** — 57 commits ahead of `main`, **2766 tests green**, clippy/fmt
+clean. **NOT pushed** since `9728e2ec`.
 **`main` is UNTOUCHED at `3fc88497`.** Nothing merged, tagged, or published. That is the owner's call.
 
-## ★ THE NEXT ACTION — one independent re-review of the fold, scoped to `02939632..HEAD`
+★★★ **The widening fold has been independently re-reviewed and came back `sound` — 0 Critical /
+0 Important.** Report persisted verbatim, agent-written (the harness did NOT block the write this
+time), in its own commit: `reviews/filing-readiness-fold-review.md` @ `f33d45b5`. **Nothing has been
+folded in response to it** — there is nothing gating to fold.
 
-A fold is authorship and re-earns the gate (`STANDARD_WORKFLOW.md` §2). This one is **not trivial**:
-it changed production behaviour on two filer-facing surfaces, added two `pub` fns to `btctax-core`,
-and rewrote a refusal's text. It has **not been reviewed**.
+The three questions the brief pointed it at all came back clean, and one is worth keeping: the
+reworded §108 refusal is not merely correct but a **tax improvement** over what it replaced — the old
+*"enter the reduced carryover"* pointed the reduced figure at the DISCHARGE year, which
+§108(b)(4)(A) says is the wrong year.
 
-★★ **Not dispatched, deliberately** — this session's harness carries a standing *"do not call the
-Agent tool unless the user requested it"*. The owner is the one who starts it. Brief to use:
+## ★ THE NEXT ACTION — nothing is gating. Three options, owner's pick
 
-> Review ONLY `git diff 02939632..HEAD` on `feat/filing-readiness` — the fold responding to
-> `reviews/filing-readiness-widening-review.md`. Do NOT re-audit the branch; do NOT re-litigate
-> B-1/B-2, which were reproduced as printed observations before the fix (the commit message carries
-> the observations verbatim). **The one question: does the fold introduce a defect of its own?**
-> Settled, do not re-derive: the `grounded` predicate's three disjuncts; the whole-dollar rounding;
-> FR-17's owning phase (TY2025); FR-18's mechanism is deliberately NOT diagnosed.
-> Machine-verified already, so spend no budget there: 2766/2766 tests, clippy `-D warnings` exit 0,
-> `cargo fmt --check` clean, and 4 planted mutations killed (listed in the commit message, each with
-> its anchor asserted to match exactly once).
-> Pay attention instead to: (a) the new `★ NOT WRITTEN` text — is it TRUE on every branch that can
-> reach it, including a re-roll and a `--force`; (b) whether normalising all four provenances at
-> import can lose a stamp that mattered; (c) whether the reworded canceled-debt refusal states the
-> §108(b) timing correctly. Output `VERDICT: <sound | needs-changes>` then findings by severity.
+1. **Fix FR-19** (~one conjunct + a test). Fold-review Minor 1, **reproduced here** — one command
+   emits two contradictory statements: without `--force`, *"pass `--force` to overwrite it with the
+   computed §1212(b) carryover"*; with `--force`, *"★ NOT WRITTEN … stamps nothing."* It is the same
+   class B-1 was and the one instance the fold left standing. Cheap, and this repo's B3 lesson is
+   exactly about a fix that existed in the branch and was never carried back.
+2. **Decide FR-20** — the canceled-debt refusal claims btctax cannot file the exclusion year, but it
+   only fires when a capital-loss carryforward is present; the underlying Form 982 / COD-income scope
+   gap is pre-existing and larger than the wording.
+3. **Ship** — push, and then the merge/tag/publish sequence, which is where the irreversible steps
+   start. See the standing constraints below; a Fable pass is warranted immediately before that step
+   and nowhere earlier.
 
-★ Model tier: **opus** (design-level, filer-facing, funds-adjacent) — not Fable; Fable is reserved
-for the single pass immediately before an irreversible action, which this is not.
-★ The harness **blocks subagents from writing report files**, so have it return the report verbatim
-and persist it yourself in `reviews/` in its OWN commit before folding anything.
+★ Either of 1 or 2 is authorship and re-earns the review gate. Neither is required to be green.
 
 Delivered: the whole filing-readiness plan (phases 1-4) plus **two owner-authorised widenings** —
 (A) a taxable-income<=0 year with a capital-loss carryforward-IN now FILES (refusal variant deleted),
