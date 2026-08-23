@@ -1925,10 +1925,66 @@ fn rolling_a_carryover_never_leaves_next_year_unfilable_in_silence() {
 ///   (a) assign a fifth field in `apply_carryover_writeback` without touching the summary ⇒ the
 ///       derived path set gains an entry the table lacks;
 ///   (b) drop any phrase from the summary ⇒ the second half.
+/// Every scalar leaf of a `ReturnInputs`, keyed by dotted path — the mutate-and-diff machinery K11
+/// and its dual both key their observations off. Shared so the two cannot drift apart.
+fn ri_leaves(
+    ri: &btctax_core::tax::return_inputs::ReturnInputs,
+) -> std::collections::BTreeMap<String, serde_json::Value> {
+    fn walk(
+        v: &serde_json::Value,
+        prefix: &str,
+        out: &mut std::collections::BTreeMap<String, serde_json::Value>,
+    ) {
+        match v {
+            serde_json::Value::Object(m) => {
+                for (k, child) in m {
+                    let p = if prefix.is_empty() {
+                        k.clone()
+                    } else {
+                        format!("{prefix}.{k}")
+                    };
+                    walk(child, &p, out);
+                }
+            }
+            leaf => {
+                out.insert(prefix.to_string(), leaf.clone());
+            }
+        }
+    }
+    let mut out = std::collections::BTreeMap::new();
+    walk(&serde_json::to_value(ri).unwrap(), "", &mut out);
+    out
+}
+
+/// The dotted leaf paths the write-back may assign, collapsed to FIELDS (a `Vec` index and a
+/// `Carryforward` limb are accidents of the fixture, not fields).
+fn assigned_fields(
+    before: &btctax_core::tax::return_inputs::ReturnInputs,
+    after: &btctax_core::tax::return_inputs::ReturnInputs,
+) -> Vec<String> {
+    let (b, a) = (ri_leaves(before), ri_leaves(after));
+    let mut changed: Vec<String> = a
+        .iter()
+        .filter(|(k, v)| b.get(*k) != Some(*v))
+        .map(|(k, _)| {
+            let base = k
+                .split_once('[')
+                .map(|(h, _)| h.to_string())
+                .unwrap_or_else(|| k.clone());
+            base.strip_suffix(".short")
+                .or_else(|| base.strip_suffix(".long"))
+                .map(str::to_string)
+                .unwrap_or(base)
+        })
+        .collect();
+    changed.sort();
+    changed.dedup();
+    changed
+}
+
 #[test]
 fn the_writeback_summary_names_every_carryover_it_wrote() {
     use btctax_core::tax::return_inputs::{Owner, ReturnInputs, W2};
-    use std::collections::BTreeMap;
 
     /// `leaf path → the substring the summary must carry for it`. PINNED; the observed set is not.
     const EXPECTED: &[(&str, &str)] = &[
@@ -1956,33 +2012,6 @@ fn the_writeback_summary_names_every_carryover_it_wrote() {
             "capital-loss carryover short",
         ),
     ];
-
-    fn leaves(ri: &ReturnInputs) -> BTreeMap<String, serde_json::Value> {
-        fn walk(
-            v: &serde_json::Value,
-            prefix: &str,
-            out: &mut BTreeMap<String, serde_json::Value>,
-        ) {
-            match v {
-                serde_json::Value::Object(m) => {
-                    for (k, child) in m {
-                        let p = if prefix.is_empty() {
-                            k.clone()
-                        } else {
-                            format!("{prefix}.{k}")
-                        };
-                        walk(child, &p, out);
-                    }
-                }
-                leaf => {
-                    out.insert(prefix.to_string(), leaf.clone());
-                }
-            }
-        }
-        let mut out = BTreeMap::new();
-        walk(&serde_json::to_value(ri).unwrap(), "", &mut out);
-        out
-    }
 
     let csv_dir = tempfile::tempdir().unwrap();
     let csv = write_lt_sell_2024(csv_dir.path());
@@ -2052,28 +2081,7 @@ fn the_writeback_summary_names_every_carryover_it_wrote() {
     };
 
     // ── The OBSERVED set: which leaves the write-back actually moved. ──────────────────────────────
-    let before = leaves(&y2025_before);
-    let after = leaves(&y2025_after);
-    let mut changed: Vec<String> = after
-        .iter()
-        .filter(|(k, v)| before.get(*k) != Some(*v))
-        .map(|(k, _)| {
-            // A `Vec<Struct>` leaf reads as `charitable_carryover_in[0].amount`; collapse to the
-            // field so the table is about FIELDS, not about how many items happened to be written.
-            let base = k
-                .split_once('[')
-                .map(|(h, _)| h.to_string())
-                .unwrap_or_else(|| k.clone());
-            // …and a `Carryforward`'s two LIMBS are one field: which limb a given fixture happens
-            // to move is an accident of the fixture, and the table is about fields.
-            base.strip_suffix(".short")
-                .or_else(|| base.strip_suffix(".long"))
-                .map(str::to_string)
-                .unwrap_or(base)
-        })
-        .collect();
-    changed.sort();
-    changed.dedup();
+    let changed = assigned_fields(&y2025_before, &y2025_after);
 
     assert!(
         !changed.is_empty(),
@@ -2100,6 +2108,117 @@ fn the_writeback_summary_names_every_carryover_it_wrote() {
             "the summary must name {path} (\\\"{phrase}\\\"); got: {summary}"
         );
     }
+}
+
+/// ★★★ **K11b — THE DUAL. The summary may not claim a write the `grounded` gate SKIPPED.**
+///
+/// K11 checks `observed ⊆ summary` and its fixture assigns all four carryovers, so it structurally
+/// cannot see the other direction. The widening review found it live: the four `wrote.push` lines
+/// read the ROW FIELD rather than the assignment, and only the capital-loss write is gated — so a
+/// year with a charitable carryover, no capital-loss activity and no answer on file printed
+/// *"capital-loss carryover short $0.00 / long $0.00"* as written back, while nothing was stamped
+/// and Y+1's `BenefitCarryoversNotStated` stayed live for exactly that carryover. Reproduced before
+/// the fix; this is the assertion that reds on it.
+///
+/// ★ Keyed on the ASSIGNED-FIELD DIFF, not on a phrase list — the same derivation K11 uses, so the
+///   two halves cannot drift apart and a fifth gated write is covered by construction.
+///
+/// Mutations that MUST red:
+///   (a) drop the `capital_loss_roll_is_grounded` conjunct in `write_back_carryover`'s summary
+///       (i.e. push the line unconditionally, the shipped defect) ⇒ half (2);
+///   (b) delete the `★ NOT WRITTEN` branch entirely ⇒ half (3).
+#[test]
+fn the_summary_does_not_claim_a_capital_loss_write_the_gate_skipped() {
+    use btctax_core::tax::return_inputs::{
+        CarryProvenance, CharitableClass, CharitableGift, Owner, ReturnInputs, ScheduleAInputs, W2,
+    };
+    let csv_dir = tempfile::tempdir().unwrap();
+    // ★ A GAIN year, deliberately: the worksheet produces no carryover-out, the row carries no
+    //   carryover-in, and nothing was ever asked — the one case `grounded` excludes.
+    let csv = write_lt_sell_2024(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::set(
+            s.conn(),
+            2024,
+            &btctax_core::tax::testonly::answered(ReturnInputs {
+                filing_status: FilingStatus::Single,
+                header: btctax_core::tax::testonly::not_a_dependent(),
+                charitable_cwa_obtained: Some(true),
+                w2s: vec![W2 {
+                    owner: Owner::Taxpayer,
+                    box1_wages: dec!(50000),
+                    box3_ss_wages: dec!(50000),
+                    box5_medicare_wages: dec!(50000),
+                    ..Default::default()
+                }],
+                // Overflows the 60%-of-AGI ceiling ⇒ a real CHARITABLE carryover-out, so the roll
+                // succeeds and there is a summary to be wrong.
+                schedule_a: Some(ScheduleAInputs {
+                    charitable: vec![CharitableGift {
+                        class: CharitableClass::Cash60,
+                        amount: dec!(40000),
+                    }],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+        btctax_cli::return_inputs::set(
+            s.conn(),
+            2025,
+            &btctax_core::tax::testonly::answered(ReturnInputs {
+                tax_year: 2025,
+                filing_status: FilingStatus::Single,
+                header: btctax_core::tax::testonly::not_a_dependent(),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+        s.save().unwrap();
+    }
+    let read_2025 = || {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::get(s.conn(), 2025)
+            .unwrap()
+            .unwrap()
+    };
+    let before = read_2025();
+    let summary = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap();
+    let after = read_2025();
+    let changed = assigned_fields(&before, &after);
+
+    // (1) POSITIVE CONTROL — the roll really ran, and really skipped only the capital-loss half.
+    assert!(
+        changed.iter().any(|f| f == "charitable_carryover_in"),
+        "the write-back must have DONE something, or halves (2)/(3) are vacuous: {changed:?}"
+    );
+    assert!(
+        !changed
+            .iter()
+            .any(|f| f.starts_with("capital_loss_carryforward_in")),
+        "★ the `grounded` gate must have skipped the capital-loss write on this fixture: {changed:?}"
+    );
+    assert_eq!(
+        after.capital_loss_carryforward_in_provenance,
+        CarryProvenance::User,
+        "★ …and left no stamp behind"
+    );
+
+    // (2) THE DEFECT: what was not assigned may not be reported as written.
+    assert!(
+        !summary.contains("capital-loss carryover short"),
+        "★★★ the summary claims a capital-loss write the gate skipped — the filer holds a success \
+         message that next year's BenefitCarryoversNotStated advisory contradicts: {summary}"
+    );
+
+    // (3) …and T9 still holds: all four carryovers are ACCOUNTED FOR, silence is not the fix.
+    assert!(
+        summary.contains("NOT WRITTEN: the capital-loss carryover"),
+        "★ the summary must still name the fourth carryover, and say it was not written: {summary}"
+    );
 }
 
 /// §4 R3-M6 carryover write-back (P4.9): `report --tax-year Y --write-carryover` persists year Y's
@@ -3228,5 +3347,221 @@ fn m4_still_disputes_a_carryforward_that_matches_neither_authority() {
     assert!(
         advisory.is_some_and(|a| a.contains("does not match")),
         "★ M4 must still fire on a figure that is neither the worksheet's nor the flat rule's"
+    );
+}
+
+/// ★★★ **`income import` cannot FORGE a `Computed` provenance stamp.**
+///
+/// Every provenance field is `#[serde(default)]`, so a hand-written TOML could simply assert
+/// `capital_loss_carryforward_in_provenance = "computed"`. Reproduced before the fix: a $99,000
+/// carryover btctax never derived, stored as `Computed`, exit 0.
+///
+/// `Computed` is btctax's signature on a figure, and three surfaces act on it — `m4_authority` goes
+/// silent rather than dispute a figure btctax wrote, `BenefitCarryoversNotStated` stops asking, and
+/// the write-back's `--force` guard stops protecting it. A forged stamp buys silence from all three.
+///
+/// ★ The VALUE is still the filer's to set: normalising the provenance must not drop the carryover.
+///   That is the half that separates "the import surface cannot sign for btctax" from "the import
+///   surface cannot supply a carryover", which is a different and wrong behaviour.
+///
+/// Mutation that MUST red: delete any one line of the normalisation block in `import_return_inputs`.
+#[test]
+fn income_import_cannot_forge_a_computed_provenance_stamp() {
+    use btctax_core::tax::return_inputs::CarryProvenance;
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2024(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+    let toml_dir = tempfile::tempdir().unwrap();
+    let base = std::fs::read_to_string(answered_toml(toml_dir.path())).unwrap();
+
+    // ★ The keys must precede the first table header, or TOML nests them inside `[[w2s]]`.
+    let forged = toml_dir.path().join("forged.toml");
+    std::fs::write(
+        &forged,
+        format!(
+            "capital_loss_carryforward_in_provenance = \"computed\"\n\
+             charitable_carryover_in_provenance = \"computed\"\n{base}\n\
+             [capital_loss_carryforward_in]\nshort = \"0\"\nlong = \"99000\"\n\n\
+             [qbi]\nreit_ptp_carryforward_in = \"5000\"\n\
+             reit_ptp_carryforward_in_provenance = \"computed\"\n\
+             qbi_carryforward_in = \"7000\"\nqbi_carryforward_in_provenance = \"computed\"\n"
+        ),
+    )
+    .unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2025, &forged, false).unwrap();
+    let stored = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::get(s.conn(), 2025)
+            .unwrap()
+            .unwrap()
+    };
+
+    for (what, got) in [
+        (
+            "capital-loss",
+            stored.capital_loss_carryforward_in_provenance,
+        ),
+        ("charitable", stored.charitable_carryover_in_provenance),
+        (
+            "QBI REIT/PTP",
+            stored.qbi.reit_ptp_carryforward_in_provenance,
+        ),
+        (
+            "QBI business-loss",
+            stored.qbi.qbi_carryforward_in_provenance,
+        ),
+    ] {
+        assert_eq!(
+            got,
+            CarryProvenance::User,
+            "★★★ a TOML minted btctax's own `Computed` stamp on the {what} carryover"
+        );
+    }
+    // …and the filer's FIGURES survived. Normalising the signature is not dropping the data.
+    assert_eq!(stored.capital_loss_carryforward_in.long, dec!(99000));
+    assert_eq!(stored.qbi.reit_ptp_carryforward_in, dec!(5000));
+    assert_eq!(stored.qbi.qbi_carryforward_in, dec!(7000));
+}
+
+/// ★★ **FR-17 — a `Computed` capital-loss stamp survives every command that ought to retract it.**
+///
+/// This test PINS AN ACCEPTED LIMITATION rather than a guarantee, which is why it asserts the stale
+/// figure is still there. Its job is to make the acceptance visible and to hold the two things that
+/// were fixed around it: the write-back must DISCLOSE the stale figure instead of reporting it as
+/// freshly written, and the one escape `LIMITATIONS.md` names must actually work.
+///
+/// Owning phase: whichever lands TY2025 full-return support. When the retraction is built, this test
+/// is the one that must be INVERTED — deliberately, not deleted.
+#[test]
+fn a_computed_capital_loss_stamp_survives_every_command_that_should_retract_it() {
+    use btctax_core::tax::return_inputs::{CarryProvenance, Owner, ReturnInputs, W2};
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_lt_sell_2024(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+
+    let y2024 = |cl: btctax_core::Carryforward| {
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: btctax_core::tax::testonly::not_a_dependent(),
+            w2s: vec![W2 {
+                owner: Owner::Taxpayer,
+                box1_wages: dec!(50000),
+                box3_ss_wages: dec!(50000),
+                box5_medicare_wages: dec!(50000),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        ri.capital_loss_carryforward_in = cl;
+        btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+        ri
+    };
+    let read_2025 = || {
+        let s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::get(s.conn(), 2025)
+            .unwrap()
+            .unwrap()
+    };
+
+    // ── A grounded roll: 2024 carries a $47,000 long carryforward-in of the filer's own. ──────────
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::set(
+            s.conn(),
+            2024,
+            &y2024(btctax_core::Carryforward {
+                short: rust_decimal::Decimal::ZERO,
+                long: dec!(47000),
+            }),
+        )
+        .unwrap();
+        btctax_cli::return_inputs::set(
+            s.conn(),
+            2025,
+            &btctax_core::tax::testonly::answered(ReturnInputs {
+                tax_year: 2025,
+                filing_status: FilingStatus::Single,
+                header: btctax_core::tax::testonly::not_a_dependent(),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+        s.save().unwrap();
+    }
+    cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap();
+    let rolled = read_2025().capital_loss_carryforward_in;
+    assert_eq!(
+        read_2025().capital_loss_carryforward_in_provenance,
+        CarryProvenance::Computed,
+        "the roll must actually stamp, or every assertion below is vacuous"
+    );
+    assert!(rolled.long > rust_decimal::Decimal::ZERO, "{rolled:?}");
+
+    // ── The loss was erroneous. Remove it from 2024 — the grounding is now gone. ──────────────────
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        btctax_cli::return_inputs::set(
+            s.conn(),
+            2024,
+            &y2024(btctax_core::Carryforward::default()),
+        )
+        .unwrap();
+        s.save().unwrap();
+    }
+    let reroll = cmd::tax::write_back_carryover(&vault, &pp(), 2024, false).unwrap();
+    assert_eq!(
+        read_2025().capital_loss_carryforward_in,
+        rolled,
+        "FR-17: the re-roll does not retract (accepted; owning phase = TY2025 full-return support)"
+    );
+    // ★ …but it must NOT report the stale figure as freshly written, and must NAME it.
+    assert!(
+        !reroll.contains("capital-loss carryover short"),
+        "★★★ the re-roll reported the STALE figure under \"written back\": {reroll}"
+    );
+    assert!(
+        reroll.contains("NOT WRITTEN: the capital-loss carryover")
+            && reroll.contains("EARLIER roll"),
+        "★ the stale stamp must be disclosed by name: {reroll}"
+    );
+
+    cmd::tax::write_back_carryover(&vault, &pp(), 2024, true).unwrap();
+    assert_eq!(
+        read_2025().capital_loss_carryforward_in,
+        rolled,
+        "FR-17: `--force` does not reach the `grounded` gate either — it exists to overwrite a \
+         figure the USER entered"
+    );
+
+    // ── An `income import` stating an EXPLICIT ZERO is resurrected: TOML cannot distinguish an ──
+    //    explicit zero from an absent key, and the preservation arm reads it as "supplied none".
+    let toml_dir = tempfile::tempdir().unwrap();
+    let base = std::fs::read_to_string(answered_toml(toml_dir.path())).unwrap();
+    let zeros = toml_dir.path().join("zeros.toml");
+    std::fs::write(
+        &zeros,
+        format!("{base}\n[capital_loss_carryforward_in]\nshort = \"0\"\nlong = \"0\"\n"),
+    )
+    .unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2025, &zeros, false).unwrap();
+    assert_eq!(
+        read_2025().capital_loss_carryforward_in,
+        rolled,
+        "FR-17: an explicit TOML zero is read as \"the file supplied none\" and resurrected"
+    );
+
+    // ── THE ONE ESCAPE `LIMITATIONS.md` NAMES must actually work: clear, then import. ─────────────
+    cmd::tax::clear_return_inputs(&vault, &pp(), 2025).unwrap();
+    cmd::tax::import_return_inputs(&vault, &pp(), 2025, &zeros, false).unwrap();
+    assert_eq!(
+        read_2025().capital_loss_carryforward_in,
+        btctax_core::Carryforward::default(),
+        "★ `income clear` + `income import` is the retraction path LIMITATIONS.md documents — if \
+         this reds, that document is making a promise btctax does not keep"
+    );
+    assert_eq!(
+        read_2025().capital_loss_carryforward_in_provenance,
+        CarryProvenance::User,
+        "★ …and the stamp is gone with it"
     );
 }

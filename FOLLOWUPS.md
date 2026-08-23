@@ -5406,6 +5406,29 @@ reviews ran on the branch; two are persisted verbatim in `reviews/filing-readine
   whichever phase lands TY2025 full-return support** — the same phase that makes "v1 cannot read the
   row it writes" stop being true. Re-point the M4 KAT at a CLI-level fixture then.
 
+- **FR-17 — a `Computed` capital-loss stamp has no RETRACTION path.** Widening review B-2, and the
+  half of it that is not fixed on this branch. Machine-checked end-to-end before it was filed
+  (`probe`-shaped run, then promoted to
+  `a_computed_capital_loss_stamp_survives_every_command_that_should_retract_it`): roll 2024→2025 with
+  a $47,000 loss ⇒ 2025 carries `long 34000 / Computed`; discover the loss was erroneous and remove
+  it from 2024; **the re-roll skips** (`capital_loss_roll_is_grounded` is false and `--force` does not
+  reach it), and **`income import` with an explicit `0` is resurrected** by the preservation arm,
+  because TOML cannot distinguish an explicit zero from an absent key. Observed: `long 34000 /
+  Computed` after all three of re-roll, `--force`, and a zeroing import.
+  **Owning phase: whichever phase lands TY2025 full-return support** — the same phase as FR-8's
+  residue, and for the same reason: v1 cannot read the row it writes, so the stale figure is
+  unreadable for filing today, which is what keeps this out of Critical.
+  ★ **What DID land here** (it is v1-reachable, so it was not deferred): the write-back no longer
+  claims the write — it prints `★ NOT WRITTEN` and NAMES the stale figure — and `income import` can
+  no longer FORGE a `Computed` stamp from a TOML provenance key (reproduced: a $99,000 carryover
+  btctax never derived, stored as `Computed`, exit 0). The escape that exists today is `income clear`
+  then `income import`, which is now stated in `LIMITATIONS.md` and held by a test.
+  ★★ **When it is built, the shape to prefer** is the reviewer's first suggestion — on a
+  grounded=false roll over an existing `Computed` value, clear it to `User` — because it puts the
+  retraction on the command the filer is already running. `--force` is the wrong lever: it exists to
+  overwrite a figure the USER entered, and widening it to reach btctax's own stamp would also let it
+  reach the r3 I-4 case the `grounded` gate is there to protect.
+
 - **FR-7 — N1's slice-path guard (plan decision 12).** Unsettled, so unbuilt. The plan recommends
   *warn* (the slice is a planning surface, not a filing one), naming the worksheet.
 
@@ -5417,6 +5440,26 @@ reviews ran on the branch; two are persisted verbatim in `reviews/filing-readine
   friction increase in the branch and is worth a conscious yes.
 
 ### Ownerless residue — batch when convenient
+
+- **FR-18 — `income scrub` loses the carryover PROVENANCE, and its round-trip test is blind to it.**
+  Found incidentally while checking that FR-17's import normalisation did not weaken the scrub round
+  trip — it does not, and that is the measurement that found this. `scrub.rs:99` documents that scrub
+  carries `capital_loss_carryforward_in` *"and its provenance verbatim"*. Planting
+  `CarryProvenance::Computed` into `scrub_axis::maximal_sentinel` reds
+  `the_scrubbed_toml_round_trips_back_through_import` with `sent = Computed` / `landed = User` —
+  **identically with and without the normalisation block**, so the loss is pre-existing and belongs
+  to scrub, not to the widening.
+  ★ **Why the test could not see it:** `maximal_sentinel` is the fixture whose whole job is "every
+  `Option` `Some`, every `Vec` with two elements" — and it pins every provenance field at the DEFAULT
+  variant (`User`), so a field that is dropped compares equal. Same shape as the `payments` drop that
+  fixture was built to catch. The mechanism (emitter vs. parse) is NOT yet established — do not
+  assume it; the divergence is measured, the cause is not.
+  ★ Consequence if real: a recipient reproducing the filer's return gets different ADVISORY
+  behaviour (M4 disputes a figure the original treated as btctax's own; the benefit advisory fires
+  where the original was silent) — the figures still match, which is why nothing else notices.
+  **Owning phase: none — ownerless residue**, since `income scrub` is shipped and this moves no filed
+  figure. Fix the fixture first (it is what makes the finding permanent), then decide whether scrub
+  should preserve the stamp or deliberately clear it.
 
 - **FR-4 — the charitable carryover has no TUI reader.** P6 wired `report --tax-year` and the export
   stderr; `crates/btctax-tui` was outside that lane. The figure reaches zero humans on that surface.

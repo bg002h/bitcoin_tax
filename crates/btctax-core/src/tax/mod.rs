@@ -42,8 +42,8 @@ pub mod testonly;
 pub mod types;
 
 pub use return_1040::{
-    apply_carryover_writeback, assemble_absolute, derive_tax_profile, screen_absolute,
-    AbsoluteReturn,
+    apply_carryover_writeback, assemble_absolute, capital_loss_roll_is_grounded,
+    derive_tax_profile, rounded_capital_loss_carryforward_out, screen_absolute, AbsoluteReturn,
 };
 
 pub use method::{

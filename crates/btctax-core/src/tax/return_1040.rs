@@ -3094,32 +3094,13 @@ pub fn apply_carryover_writeback(
     // capital_loss_carryforward_out` exists and there IS a value to write.
     //
     // So the stamp is founded only where the figure descends from something btctax actually knows,
-    // and groundedness is CHECKED rather than assumed:
-    //   * year Y's carryover-in was itself `Computed`   → the inductive step;
-    //   * year Y's carryover-in is a nonzero `User` one → the filer's own testimony, a real base case;
-    //   * year Y produced a nonzero carryover-OUT       → btctax computed this year's loss itself.
-    //
-    // ★★★ THE ONE EXCLUDED CASE is year Y that was never asked AND produced nothing. Writing
-    //     `{0,0}` + `Computed` there would silence next year's `BenefitCarryoversNotStated` about a
-    //     carryover the filer may genuinely have — which is verbatim the r3 I-4 damage. It stays
-    //     closed, and no VALUE assertion can see it: the stored amount is zero either way.
-    //
-    // ★★ ROUNDED TO WHOLE DOLLARS, deliberately. The persisted figure becomes next year's Schedule D
-    //    lines 6 and 14 — lines the filer READS OFF THE PAGE and swears to. The measured H9 vector is
-    //    $42,871.66 exact against $42,872 hand-worked off the filed page; rounding here ties the
-    //    stored value to the page. (Residual, accepted: the printed Schedule D re-derives lines 7/15/16
-    //    from per-row-rounded Form 8949 cells while the worksheet reads exact `CapNet`, so a reader
-    //    hand-working the page can still land ~$1/row off. Closing that means re-sourcing the
-    //    worksheet from the printed chain — a layering change, not this one.)
-    let ws_out = Carryforward {
-        short: round_dollar(ar.capital_loss_carryforward_out.short),
-        long: round_dollar(ar.capital_loss_carryforward_out.long),
-    };
-    let grounded = ri.capital_loss_carryforward_in_provenance == CarryProvenance::Computed
-        || ri.capital_loss_carryforward_in != Carryforward::default()
-        || ws_out != Carryforward::default();
-    if grounded {
-        next_year.capital_loss_carryforward_in = ws_out;
+    // and groundedness is CHECKED rather than assumed. The three grounds, the one excluded case, and
+    // the whole-dollar rounding each have exactly ONE home — [`capital_loss_roll_is_grounded`] and
+    // [`rounded_capital_loss_carryforward_out`] below. They are functions rather than inline code
+    // because the write-back's SUMMARY has to ask the same question, and a second copy of either
+    // would be the widening review's B-1 waiting to happen again.
+    if capital_loss_roll_is_grounded(ar, ri) {
+        next_year.capital_loss_carryforward_in = rounded_capital_loss_carryforward_out(ar);
         next_year.capital_loss_carryforward_in_provenance = CarryProvenance::Computed;
     }
     // ★ §G-20a — the CHARITABLE carryover gets its provenance stamped too. Without this a computed
@@ -3127,6 +3108,48 @@ pub fn apply_carryover_writeback(
     // prior year btctax itself computed.
     next_year.charitable_carryover_in_provenance = CarryProvenance::Computed;
     Ok(next_year)
+}
+
+/// The §1212(b) carryover-OUT as [`apply_carryover_writeback`] would PERSIST it.
+///
+/// ★★ ROUNDED TO WHOLE DOLLARS, deliberately. The persisted figure becomes next year's Schedule D
+///    lines 6 and 14 — lines the filer READS OFF THE PAGE and swears to. The measured H9 vector is
+///    $42,871.66 exact against $42,872 hand-worked off the filed page; rounding here ties the stored
+///    value to the page. (Residual, accepted: the printed Schedule D re-derives lines 7/15/16 from
+///    per-row-rounded Form 8949 cells while the worksheet reads exact `CapNet`, so a reader
+///    hand-working the page can still land ~$1/row off. Closing that means re-sourcing the worksheet
+///    from the printed chain — a layering change, not this one.)
+pub fn rounded_capital_loss_carryforward_out(ar: &AbsoluteReturn) -> Carryforward {
+    Carryforward {
+        short: round_dollar(ar.capital_loss_carryforward_out.short),
+        long: round_dollar(ar.capital_loss_carryforward_out.long),
+    }
+}
+
+/// ★★★ **Whether [`apply_carryover_writeback`] can VOUCH for a §1212(b) capital-loss roll.**
+///
+/// A provenance stamp is a CLAIM OF KNOWLEDGE (r3 I-4), so the roll happens only where the figure
+/// descends from something btctax actually knows. Three grounds, any one of which suffices:
+///   * year Y's carryover-in was itself `Computed`   → the inductive step;
+///   * year Y's carryover-in is a nonzero `User` one → the filer's own testimony, a real base case;
+///   * year Y produced a nonzero carryover-OUT       → btctax computed this year's loss itself.
+///
+/// ★★★ THE ONE EXCLUDED CASE is a year that was never asked AND produced nothing. Writing `{0,0}` +
+/// `Computed` there would silence next year's `BenefitCarryoversNotStated` about a carryover the
+/// filer may genuinely have — which is verbatim the r3 I-4 damage. It stays closed, and no VALUE
+/// assertion can see it: the stored amount is zero either way.
+///
+/// ★★ **ONE DEFINITION, TWO READERS — and that is exactly why it is a function.** The widening review
+/// found the write-back's own SUMMARY claiming this write on the branch where the gate skipped it:
+/// the summary read the row FIELD (which on an ungrounded roll is either an untouched `{0,0}` or a
+/// figure an EARLIER roll stamped) instead of asking whether anything had been assigned. A summary
+/// that re-derives the predicate inline would be the same defect one edit away, so the writer and the
+/// message it prints now read the same predicate. Reproduced before it was fixed; see
+/// `the_summary_does_not_claim_a_capital_loss_write_the_gate_skipped`.
+pub fn capital_loss_roll_is_grounded(ar: &AbsoluteReturn, ri: &ReturnInputs) -> bool {
+    ri.capital_loss_carryforward_in_provenance == CarryProvenance::Computed
+        || ri.capital_loss_carryforward_in != Carryforward::default()
+        || rounded_capital_loss_carryforward_out(ar) != Carryforward::default()
 }
 
 /// Schedule B §6012 / Form 1040 Schedule B filing threshold ($1,500 for interest and for dividends).

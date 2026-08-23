@@ -71,6 +71,44 @@ pub fn import_return_inputs(
         });
     }
     let mut ri = parse_return_inputs_toml(&text)?;
+    // ★★★ **`Computed` IS BTCTAX'S SIGNATURE, AND THE IMPORT SURFACE MUST NOT BE ABLE TO SIGN IT.**
+    //
+    // Every provenance field is `#[serde(default)]` on `ReturnInputs`, so until this line a
+    // hand-written TOML could simply say `capital_loss_carryforward_in_provenance = "computed"` and
+    // mint the stamp — reproduced end-to-end: a $99,000 carryover btctax never derived stored as
+    // `Computed`, exit 0. That is not a cosmetic mislabel. `Computed` is read as *"btctax derived
+    // this from a year it actually computed"*, and three surfaces act on it: `m4_authority` goes
+    // SILENT rather than dispute a figure btctax wrote, `BenefitCarryoversNotStated` stops asking,
+    // and the write-back's `--force` guard stops protecting it. A forged stamp buys silence from all
+    // three at once, on a figure with no derivation behind it.
+    //
+    // ★ THE WHOLE CLASS, not the one field the review named. All four carryovers carry a provenance
+    //   and every one of them is `#[serde(default)]`; fixing one would leave three doors open and
+    //   read as covered. The per-ITEM charitable stamp is normalised too — the preservation block
+    //   below filters `existing` items by exactly that field.
+    //
+    // ★★ NORMALISE, never REFUSE — the key is a legitimate part of the serialized shape, so
+    //    rejecting it would make import unable to read a file btctax itself could emit. This also
+    //    makes the block below's own comment TRUE — *"a carryover the TOML does supply is the user's
+    //    and wins (as `User`)"* — which it was not while the file could say otherwise. Placed BEFORE
+    //    the preservation block, which re-stamps `Computed` from the STORED row, where that is
+    //    genuinely btctax's own authorship.
+    //
+    // ★ MEASURED, not assumed, against the one round trip that runs through this function
+    //   (`the_scrubbed_toml_round_trips_back_through_import`): planting `Computed` in
+    //   `maximal_sentinel` reds it identically WITH and WITHOUT this block, so the stamp was already
+    //   being lost on that path before this change and nothing here made it worse. That pre-existing
+    //   divergence is filed as FR-18; it is not this branch's to fix.
+    {
+        use btctax_core::tax::return_inputs::CarryProvenance;
+        ri.capital_loss_carryforward_in_provenance = CarryProvenance::User;
+        ri.charitable_carryover_in_provenance = CarryProvenance::User;
+        ri.qbi.reit_ptp_carryforward_in_provenance = CarryProvenance::User;
+        ri.qbi.qbi_carryforward_in_provenance = CarryProvenance::User;
+        for item in &mut ri.charitable_carryover_in {
+            item.provenance = CarryProvenance::User;
+        }
+    }
     let mut s = Session::open(vault, pp)?;
     // ★ §6.2 (M-1): reconcile the crash-recovery draft BEFORE any committed-row read/write — clear a WIP
     // draft (regenerable) so it can't shadow this write, or refuse a parked one (its sole copy).
@@ -909,14 +947,59 @@ pub fn write_back_carryover(
         "QBI business-loss carryforward ${:.2}",
         updated.qbi.qbi_carryforward_in
     ));
-    wrote.push(format!(
-        "capital-loss carryover short ${:.2} / long ${:.2}",
-        updated.capital_loss_carryforward_in.short, updated.capital_loss_carryforward_in.long
-    ));
+    // ★★★ **AND "DERIVED" MEANS DERIVED FROM THE ASSIGNMENT, NOT FROM THE ROW FIELD.**
+    //
+    // The widening review's B-1: these lines read `updated.<field>`, so the capital-loss one printed
+    // on the branch where `apply_carryover_writeback`'s `grounded` gate DELIBERATELY skipped the
+    // write. The three above it are unconditional assignments, so field and assignment coincide;
+    // the capital-loss one is the only gated write, and for it they do not.
+    //
+    // Two shapes, both reproduced before this was written:
+    //   * a first roll from an ungrounded year printed *"short $0.00 / long $0.00"* as written back
+    //     while nothing was stamped — and next year's `BenefitCarryoversNotStated` stayed live for
+    //     exactly that carryover, so the filer held a success message the next advisory contradicts;
+    //   * a RE-roll after the grounding was edited away printed the STALE PRIOR FIGURE as written
+    //     back. (Observed: `long $34000.00`, unchanged, on a year that no longer has any loss.)
+    //
+    // ★ It reads `capital_loss_roll_is_grounded` rather than re-deriving the predicate here — one
+    //   definition, the writer and the message it prints. Re-deriving would put the same defect one
+    //   edit away.
+    //
+    // ★★ NAMED EITHER WAY, never merely omitted. T9's whole point is that the filer-facing surfaces
+    //    account for all four carryovers; a silent gap is a worse answer than a truthful "not this
+    //    one, and here is why". The stale case is called out by name because v1 cannot re-read the
+    //    row it writes, so nothing downstream will mention it (FR-17).
+    let capital_loss_note = if btctax_core::capital_loss_roll_is_grounded(&ar, &ri) {
+        wrote.push(format!(
+            "capital-loss carryover short ${:.2} / long ${:.2}",
+            updated.capital_loss_carryforward_in.short, updated.capital_loss_carryforward_in.long
+        ));
+        String::new()
+    } else {
+        let stale = if updated.capital_loss_carryforward_in_provenance
+            == btctax_core::tax::return_inputs::CarryProvenance::Computed
+        {
+            format!(
+                " {next} still carries short ${:.2} / long ${:.2} stamped \"computed\" by an EARLIER \
+                 roll, and this run did not re-derive it — check it before you file {next}.",
+                updated.capital_loss_carryforward_in.short,
+                updated.capital_loss_carryforward_in.long,
+                next = year + 1
+            )
+        } else {
+            String::new()
+        };
+        format!(
+            "\n★ NOT WRITTEN: the capital-loss carryover. {year} was never asked about one and \
+             produced none of its own, so btctax has no §1212(b) figure it can vouch for and stamps \
+             nothing.{stale}"
+        )
+    };
     Ok(format!(
-        "carryover written back to {}: {}{}",
+        "carryover written back to {}: {}{}{}",
         year + 1,
         wrote.join("; "),
+        capital_loss_note,
         newly_unfilable.unwrap_or_default()
     ))
 }

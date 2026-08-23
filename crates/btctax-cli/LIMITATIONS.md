@@ -151,9 +151,11 @@ year's Schedule D lines 6 and 14 and sign for.
 
 Four things are worth knowing about that:
 
-- **It is written only when btctax can vouch for it.** If this year was never asked about a carryover
-  *and* produced none of its own, nothing is stamped — writing a `$0` marked "computed" there would
-  silence next year's advisory about a carryover you may genuinely have.
+- **It is written only when btctax can vouch for it, and it TELLS you when it did not.** If this year
+  was never asked about a carryover *and* produced none of its own, nothing is stamped — writing a
+  `$0` marked "computed" there would silence next year's advisory about a carryover you may genuinely
+  have. The write-back then prints `★ NOT WRITTEN: the capital-loss carryover`, because a summary that
+  quietly listed the other three would read as though all four had been rolled.
 - **The whole write-back is one transaction.** If btctax refuses to persist the *charitable* carryover
   (a restricted gift, or a missing §170(f)(8) acknowledgment), **nothing** is written — not the QBI
   ones and not this one. That is deliberate rather than tidy: a deduction btctax cannot vouch for makes
@@ -163,9 +165,16 @@ Four things are worth knowing about that:
   against witnesses a carryover level: one takes it as an *input*, the other emits no carryover at all.
   The transcription of the worksheet and its tests are the whole of the evidence here.
 - **A "computed" stamp means the write-back ran once from a year that screened clean at the time.** It
-  is not a claim that the figure still agrees with that year — edit the prior year and re-run
-  `--write-carryover`. btctax's own consistency check re-derives the figure rather than trusting the
-  stamp.
+  is not a claim that the figure still agrees with that year. Edit the prior year and re-run
+  `--write-carryover` and the stamp is REPLACED — btctax's own consistency check re-derives the figure
+  rather than trusting the stamp, so a figure that has drifted gets disputed.
+  ★ **With one exception, and it is the case where your edit removes the last of the carryover.** A
+  re-run then has nothing to vouch for, so it writes nothing (and says so) and the earlier stamp stays
+  where it is; `income import` will not clear it either, because an omitted carryover and an explicit
+  `0` are the same bytes in TOML and both read as "the file did not supply one". Until btctax supports
+  full returns for the receiving year, retracting such a stamp means editing that year's stored row
+  directly — `income clear` then `income import`. The write-back names the stale figure in its output
+  so it cannot pass unnoticed. Tracked as **FR-17**.
 
 ---
 

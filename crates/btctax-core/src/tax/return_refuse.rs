@@ -332,6 +332,13 @@ pub enum RefuseReason {
     /// §108(b) requires tax ATTRIBUTE REDUCTION after an exclusion and §108(b)(2)(G) lists capital
     /// loss carryovers among the attributes; btctax models none of it, so it refuses rather than
     /// deduct and carry forward an unreduced figure.
+    ///
+    /// ★ **An honest DEAD END, and the detail says so.** It is the one refusal here with no cure on
+    /// this year's return: the declaration is a true statement about the exclusion year, so it stays
+    /// `Some(true)` however the carryover is edited, and the exclusion is reported on Form 982, which
+    /// btctax does not emit. The widening review's Minor was that the old wording ("enter the reduced
+    /// carryover") read as a cure and would send the filer back into the same refusal after the hand
+    /// work; the reduced figure belongs to the FOLLOWING year, which btctax can file.
     ExcludedCanceledDebtAttributeReduction,
 }
 
@@ -846,8 +853,12 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
              sends you to Pub. 4681, because §108(b) requires you to REDUCE tax attributes after \
              such an exclusion and §108(b)(2)(G) lists capital loss carryovers among them. btctax \
              models no part of §108(b), so the carryover it would deduct and carry forward is too \
-             large. Work the reduction out by hand (Pub. 4681, Form 982) and enter the reduced \
-             carryover",
+             large. btctax CANNOT FILE THIS YEAR for you — the answer above is a true statement \
+             about this year, so it stays Yes however you edit the carryover, and the exclusion \
+             itself is reported on Form 982, which btctax does not produce. Work this year out by \
+             hand (Pub. 4681, Form 982). The REDUCED carryover Pub. 4681 leaves you with is what \
+             carries into the following year, and btctax can file that year once its own answer here \
+             is No",
         );
     }
 
