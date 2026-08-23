@@ -5441,6 +5441,25 @@ reviews ran on the branch; two are persisted verbatim in `reviews/filing-readine
 
 ### Ownerless residue — batch when convenient
 
+- **FR-21 — ★★ `cite_check::plain_quotations` can be GUTTED and all three cite-check tests stay
+  green.** Found by mutation-verifying the clippy-1.98 fix, not by looking for it.
+  **Planted:** corrupt the span extraction so every span comes out empty
+  (`&line[close + 1..close + 1]`). Every span then fails the `len() < 12` filter, the function
+  returns `[]`, the pass has nothing to check, and it reports success. **Observed: `3 tests run:
+  3 passed`.** Reproduced on the ORIGINAL `chunks_exact` code as well as the `as_chunks` rewrite, so
+  it is **pre-existing** — the rewrite exposed it, did not cause it.
+  ★★★ **This is the SAME checker as F2/F4 in `CLAUDE.md`, blind again in a new place.** That entry
+  records `cite-check` reading only `*"…"*` spans, so the rounding-direction table it existed to
+  protect was never checked while it reported success. `plain_quotations` is the pass that was ADDED
+  to close that hole — and it now has the same property one layer down: **nothing reds when it stops
+  finding quotations.** The lesson is not "add a test", it is that this checker keeps failing the
+  same way and the fix must be structural: a **positive control** — a fixture whose known quotation
+  count the pass must return — so "found nothing" and "found everything" stop being the same result.
+  ★ Harness **B1** applies verbatim: the kill-test for this could not have been written without
+  discovering the blindness, which is the whole point of the rule. **Owning phase: none — ownerless,
+  dev tooling; it gates no filed figure.** Non-gating, but it is a checker this repo has already been
+  burned by twice.
+
 - **FR-19 — the `--force` guard promises an overwrite the `grounded` gate then refuses to perform.**
   Fold re-review Minor 1, and **reproduced before filing** — one command, two contradictory
   statements, verbatim:
