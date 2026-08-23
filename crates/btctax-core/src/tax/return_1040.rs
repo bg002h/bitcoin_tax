@@ -1261,9 +1261,10 @@ const SE_6017_FLOOR: Usd = dec!(400);
 /// other-taxes forms (Sch 2 L4 SE, Form 8959, absolute Form 8960), the §904(j) FTC + conservative-omission
 /// CTC (L19 = 0), **1040 total tax L24**, and **payments → refund/owed** (§6413(c) excess-SS, withholding
 /// L25, total payments L33, refund L35a / owed L37). The remaining P4 increment is the §6 dual report. The
-/// §4.10 compute-dependent refuses that need L12/L15/L16 (QBI-above-threshold, **Form 6251 Who Must
-/// File condition 1**, TI≤0-with-carryforward) are screened by [`screen_absolute`] after this
-/// (infallible) assembly.
+/// §4.10 compute-dependent refuses that need L12/L15/L16 — now **the QBI-above-threshold rows only**
+/// — are screened by [`screen_absolute`] after this (infallible) assembly. (The Form 6251 and
+/// TI≤0-with-carryforward rows this list used to name are both gone: §G-6 built the AMT emitter, and
+/// widening (A) lifted the carryforward refusal along with its variant.)
 ///
 /// Unlike the derivation, this reads the crypto ledger `state` directly (`capital_gain_line7`,
 /// `crypto_income`, `compute_se_tax`) and produces the with-crypto AGI (L11) — the §6 / Form 8960-MAGI /
@@ -2206,16 +2207,21 @@ pub(crate) fn form6251_inputs_from_parts(
 /// [`crate::tax::return_refuse::screen_inputs`] (input-screenable) and [`screen_compute_dependent`]
 /// (income/ledger-dependent). Returns the FIRST [`Refusal`], or `None`.
 ///
-/// Rows: (a) the §199A rows — an SSTB inside the phase-in range, and Form 8995-A lines 4/7 unstated
-/// above the threshold (§4.5); (b) taxable income ≤ 0 WITH a capital-loss carryforward-in (the G22
-/// §1211/§1212 Capital Loss Carryover Worksheet edge).
+/// Rows: **(a) the §199A rows only** — an SSTB inside the phase-in range, and Form 8995-A lines 4/7
+/// unstated above the threshold (§4.5).
 ///
-/// ★ There is NO LONGER an AMT row here. It read *"(b) Form 6251 Who Must File condition 1 — the form
-/// must be attached and v1 cannot yet file it"*; §G-6 built the emitter, so the form is filed and the
-/// row was deleted from this function's body. `RefuseReason::AmtScreenTriggered` survives as a dead
-/// variant pending its Tier-2 rename.
-/// A refund-only TI≤0 filer with NO carryforward is NOT refused (tax = 0, withholding refunded — the
-/// r5-narrowed rule).
+/// ★★ **The TI≤0-with-carryforward row is GONE** (widening (A)). It read *"(b) taxable income ≤ 0
+/// WITH a capital-loss carryforward-in — the G22 §1211/§1212 Capital Loss Carryover Worksheet
+/// edge"*, and it was deleted together with its `RefuseReason` variant, so no consumer maps it and
+/// no anchor names it. Such a year now **FILES**: `capital_loss_carryover` models the worksheet, so
+/// the carryover-out is a real figure rather than the flat rule that made the refusal honest.
+/// (The refund-only TI≤0 filer with NO carryforward was never refused either — tax = 0, withholding
+/// refunded, the r5-narrowed rule.)
+///
+/// ★ There is NO LONGER an AMT row here either. It read *"Form 6251 Who Must File condition 1 — the
+/// form must be attached and v1 cannot yet file it"*; §G-6 built the emitter, so the form is filed
+/// and the row was deleted from this function's body. `RefuseReason::AmtScreenTriggered` survives as
+/// a dead variant pending its Tier-2 rename.
 pub fn screen_absolute(
     ri: &ReturnInputs,
     ar: &AbsoluteReturn,
@@ -2826,13 +2832,6 @@ pub fn screen_absolute(
     None
 }
 
-/// Apply the **§4 R3-M6 carryover write-back**: stamp the absolute return's computed charitable, QBI
-/// business-loss, QBI-REIT/PTP and **§1212(b) capital-loss** carryover-OUTs into `next_year`'s (year
-/// Y+1's) carryover-IN fields, provenance `Computed`.
-/// Returns the updated `next_year` to persist, or `Err(message)` when it would silently overwrite a
-/// **User**-provenance carryover (from `income import`) and `force` is false — never clobbers a user entry.
-/// Both conflicts are checked BEFORE either field is written (atomic — a QBI conflict doesn't leave a
-/// half-applied charitable write). A computed (or empty) existing carryover-in is overwritten silently.
 /// Whether at least ONE SINGLE contribution of `year` reaches §170(f)(8)(A)'s $250 threshold.
 ///
 /// i1040sca: *"In figuring whether a gift is $250 or more, don't combine separate donations."* Per
@@ -2915,6 +2914,24 @@ pub fn cwa_unvouched_carryover(
     Some(deferred)
 }
 
+/// Apply the **§4 R3-M6 carryover write-back**: stamp the absolute return's computed charitable, QBI
+/// business-loss, QBI-REIT/PTP and **§1212(b) capital-loss** carryover-OUTs into `next_year`'s (year
+/// Y+1's) carryover-IN fields, provenance `Computed`.
+///
+/// Returns the updated `next_year` to persist, or `Err(message)` when it would silently overwrite a
+/// **User**-provenance carryover (from `income import`) and `force` is false — never clobbers a user
+/// entry. Every conflict is checked BEFORE any field is written (atomic — a QBI conflict does not
+/// leave a half-applied charitable write). A computed (or empty) existing carryover-in is overwritten
+/// silently.
+///
+/// ★★ **The capital-loss limb is the one GATED write**, and it is deliberately not symmetric with the
+/// other three: it lands only where [`capital_loss_roll_is_grounded`] holds, because a `Computed`
+/// stamp is a claim of knowledge. The write-back's caller reads that same predicate to decide what to
+/// tell the filer — see [`capital_loss_roll_is_grounded`] for why one definition rather than two.
+///
+/// ★ This doc comment was for a while attached to the WRONG function — spliced onto
+/// `a_single_gift_reaches_the_cwa_threshold` by two commits landing in the same region, leaving the
+/// function that authors the `Computed` stamp undocumented. Found by the pre-merge pass (O-1).
 pub fn apply_carryover_writeback(
     ar: &AbsoluteReturn,
     ri: &ReturnInputs,

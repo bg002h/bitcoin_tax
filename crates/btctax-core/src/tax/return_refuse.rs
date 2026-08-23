@@ -4,9 +4,12 @@
 //! return *wrong* (understate tax, misstate a figure, or require a mandatory attachment v1 can't produce)
 //! yields a [`Refusal`] — never a silent value. This module screens the **input-screenable** rows (those
 //! decidable from `ReturnInputs` + the year tables). The **compute-dependent** rows — Schedule C net < 0,
-//! Form 8615 kiddie tax (unearned income > threshold), taxable income ≤ 0 with a carryforward — and the
-//! **ledger-dependent** rows — ≥2 SE earners, business-flagged crypto interest, §1250/§1202/28% crypto —
-//! are screened in Phase 2/3 where the assembled income / ledger is available.
+//! Form 8615 kiddie tax (unearned income > threshold) — and the **ledger-dependent** rows — ≥2 SE
+//! earners, business-flagged crypto interest, §1250/§1202/28% crypto — are screened in Phase 2/3 where
+//! the assembled income / ledger is available.
+//!
+//! ★ This list USED TO name "taxable income ≤ 0 with a carryforward" among the compute-dependent rows.
+//! Widening (A) lifted that refusal and deleted its variant; such a year now files.
 //!
 //! Uses a NEW domain type (not the ledger's shared `state::BlockerKind`, which is exhaustively matched
 //! across the reconcile system) — additive, per SPEC §2. A `Refusal` maps to

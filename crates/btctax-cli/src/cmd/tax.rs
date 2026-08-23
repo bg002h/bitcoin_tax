@@ -502,8 +502,10 @@ pub fn report_tax_year(
     // delta above. Only meaningful for a `ReturnInputs`-provenance year — the input-screen + compute-
     // dependent screen have already passed inside the resolver (else we returned `Uncomputable`), and
     // TY2024 is the only year with `FullReturnParams` (so both `Option`s are `Some` here). The absolute
-    // path adds `screen_absolute` (QBI-over-threshold / AMT / TI≤0-with-carryforward), which — unlike the
-    // delta path — can refuse the ABSOLUTE return while the delta still computes; render that as a note.
+    // path adds `screen_absolute` (the QBI-over-threshold rows), which — unlike the delta path — can
+    // refuse the ABSOLUTE return while the delta still computes; render that as a note. (This comment
+    // used to list AMT and TI≤0-with-carryforward too; §G-6 built the AMT emitter and widening (A)
+    // lifted the carryforward refusal, so neither is a row any more.)
     let dual_report: Option<String> = if provenance == crate::resolve::Provenance::ReturnInputs {
         match (
             crate::return_inputs::get(s.conn(), year)?,

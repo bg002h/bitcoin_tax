@@ -5387,8 +5387,13 @@ reviews ran on the branch; two are persisted verbatim in `reviews/filing-readine
   literals). The household's Schedule D is now indistinguishable from that of a filer who realised
   the identical loss this year, which is the asymmetry that made the refusal hard to defend.
   Accepted adverse branches are stated in `LIMITATIONS.md` and in the commit message; the two that
-  matter are ZERO oracle coverage (permanent — §G-9) and an incomplete credit block for a population
-  now admitted by construction low-income.
+  matter are ZERO oracle coverage (permanent — §G-9) and an incomplete credit block for the newly
+  admitted population.
+  ★ **"By construction low-income" was an OVERCLAIM** (pre-merge review O-2) and is struck. TI≤0 is a
+  statement about taxable income after deductions, not about AGI: a high-AGI year with catastrophic
+  medical or casualty deductions lands at TI≤0 with a carryforward too. The credit-block gap is real
+  either way — the correction is that the admitted population is *wider* than the phrase implied, so
+  reasoning that leans on "these filers are all low-income" is unsound.
 
 - **FR-8 — ✅ CLOSED (owner authorised). `--write-carryover` rolls the §1212(b) carryover.**
   Written as WHOLE DOLLARS (the figure next year's Schedule D lines 6 and 14 will carry), stamped
@@ -5440,6 +5445,27 @@ reviews ran on the branch; two are persisted verbatim in `reviews/filing-readine
   friction increase in the branch and is worth a conscious yes.
 
 ### Ownerless residue — batch when convenient
+
+- **FR-22 — ★★ K19 greps an IDENTIFIER, so it cannot see the drift it was written to prevent.**
+  Pre-merge review S-1, verified: the lifted TI≤0-with-carryforward refusal survived in **present
+  tense on six surfaces** — including `screen_absolute`'s own contract doc, which contradicted its
+  own body, and **SPEC §4.10's refusal table**, which still *mandated* the refusal. All six are fixed
+  in the burndown commit; this entry is the INSTRUMENT half, which is not.
+  ★★★ **K19's own doc says it should have caught them:** *"A doc comment, a SPEC list or an
+  attribution-table entry naming it is the same stale claim wearing a different hat."* It greps
+  `LIFTED_REFUSAL_IDENT` under `crates/` — so it catches only prose that names the deleted
+  **identifier**, and T2 deliberately kept that identifier out of prose. The instrument and the drift
+  were designed past each other. It also never scans `design/`, so the SPEC was outside its reach
+  entirely.
+  ★ **Do NOT "fix" this with a phrase blocklist.** Grepping for "taxable income ≤ 0" and friends is
+  the growing-blocklist shape `cite_check` already warns against, and it would be green the day
+  someone rephrases. The two candidate structural fixes, neither cheap: (a) extend the scan root to
+  `design/` — real but partial, it only catches identifier-naming drift; (b) make the SPEC's refusal
+  table **generated from or checked against** the `RefuseReason` enum, so a deleted variant cannot
+  leave a live table row. (b) is the one that would actually have caught this.
+  ★ Harness **B1** binds whatever is built: it must be watched RED on a planted stale row first.
+  **Owning phase: none — ownerless.** Non-gating: no behaviour depended on the drift (the variant
+  deletion `E0599`'d every consumer, which is why this was Minor and not Critical).
 
 - **FR-21 — ★★ `cite_check::plain_quotations` can be GUTTED and all three cite-check tests stay
   green.** Found by mutation-verifying the clippy-1.98 fix, not by looking for it.

@@ -1,8 +1,12 @@
 //! **The §1212(b)(2)(B) Capital Loss Carryover Worksheet — Lines 6 and 14**, transcribed.
 //!
 //! ★★★ **WHY THIS EXISTS: the same worksheet was refused honestly on one side and silently
-//! misprinted on the other.** `return_1040::screen_absolute` refuses a return whose taxable income is
-//! ≤ 0 *with a capital-loss carryforward **in***, naming this worksheet as unmodeled. The
+//! misprinted on the other.** `return_1040::screen_absolute` USED TO REFUSE a return whose taxable
+//! income was ≤ 0 *with a capital-loss carryforward **in***, naming this worksheet as unmodeled —
+//! **that refusal is GONE** (widening (A); the variant itself was deleted, so nothing maps it). This
+//! module is what made the lift safe: modelling the worksheet removed the asymmetry rather than
+//! papering over it. The historical framing below is kept because it is the ARGUMENT for the
+//! transcription, not a live description of behaviour. The
 //! carryforward-**out** of the very same year was computed by a flat `absorbed = min(loss, $3,000)`
 //! with no taxable-income term anywhere in it — so a loss year that wiped the filer out printed a
 //! surviving loss up to the whole §1211(b) allowance too small, silently, forever. Measured on the
