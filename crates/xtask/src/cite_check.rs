@@ -269,8 +269,14 @@ fn plain_quotations(doc: &str) -> Vec<(usize, String)> {
         if !quotes.len().is_multiple_of(2) {
             continue; // unbalanced: part of a multi-line quotation, handled by `inline_quotations`
         }
-        for pair in quotes.chunks_exact(2) {
-            let span = &line[pair[0] + 1..pair[1]];
+        // ★ `as_chunks::<2>()`, not `chunks_exact(2)` — required by clippy 1.98
+        //   (`chunks_exact_to_as_chunks`), and strictly better here: the pair arrives as a fixed-size
+        //   `[usize; 2]`, so the two ends are DESTRUCTURED and named rather than reached by
+        //   bounds-checked index. The discarded `.1` remainder is provably empty — the
+        //   `is_multiple_of(2)` guard above already returned early on an odd count — which is what
+        //   makes that guard load-bearing rather than decorative.
+        for &[open, close] in quotes.as_chunks::<2>().0 {
+            let span = &line[open + 1..close];
             // Emphasis INSIDE the span is fine — `normalise` strips it, and S-1's rounding table marks
             // the load-bearing word bold ("the next **lower** whole number"), so excluding `*` here
             // skipped precisely the span this pass exists for. Inline CODE is ours, not the form's.
