@@ -9,8 +9,10 @@ _Last updated: **2026-08-22**. Written at a deliberate pause; safe to exit. **Re
 ## Where things stand
 
 Branch **`feat/filing-readiness`** — 57 commits ahead of `main`, **2766 tests green**, clippy/fmt
-clean. **NOT pushed** since `9728e2ec`.
-**`main` is UNTOUCHED at `3fc88497`.** Nothing merged, tagged, or published. That is the owner's call.
+clean. **PUSHED** 2026-08-23; local and `origin/feat/filing-readiness` are both at `985a67ae`. The
+pre-push PII scan ran ARMED (not bypassed) and reported clean on all four commits.
+**`main` is UNTOUCHED at `3fc88497`, local and remote.** Nothing merged, tagged, or published — and
+those three are the irreversible steps. That is the owner's call.
 
 ★★★ **The widening fold has been independently re-reviewed and came back `sound` — 0 Critical /
 0 Important.** Report persisted verbatim, agent-written (the harness did NOT block the write this
