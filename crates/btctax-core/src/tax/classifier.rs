@@ -103,6 +103,8 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         capital_loss_carryforward_in,
         capital_loss_carryforward_in_provenance,
         charitable_carryover_in_provenance,
+        carryover_includes_spouses_joint_loss,
+        excluded_canceled_debt,
         amt_carryover_same_as_regular,
         amt_depreciation_same_as_regular,
         charitable_carryover_in,
@@ -112,6 +114,9 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         fbar_filing_required,
         foreign_country_names: _, // String — scalar
         donations_had_restrictions,
+        charitable_cwa_obtained,
+        filing_form_4952,
+        form_8960_line9b,
         dual_status_alien,
         // §164(b)(7)(B)(iv) / Schedule 1-A Part I MAGI add-backs. Plain `Usd` scalar leaves, which the
         // `_` rule permits — their answered-ness lives in the `has_income_exclusion` GATE above, which
@@ -172,6 +177,32 @@ pub fn classify(ri: &ReturnInputs) -> Census {
          blocked; on an itemizing year that claims the §170 deduction `screen_absolute` makes it \
           mandatory (§2.2)",
     );
+    // ★★ §170(f)(8)'s CWA, asked as ONE return-level universal (P4). Class (B) HERE for the SAME two
+    // reasons as its sibling above — the donations are in the ledger and the §63(e) itemize election
+    // is computed, neither of which liveness can see. The MANDATORY half is in `screen_absolute`: on
+    // an itemizing year that claims a §170 deduction with at least one single gift of $250 or more,
+    // an unanswered or `Some(false)` answer REFUSES.
+    c.exempt(
+        charitable_cwa_obtained,
+        Class::BenefitClaim,
+        "§170(f)(8) contemporaneous written acknowledgment — offered as a skippable so a standard-\
+         deduction filer, or one whose every gift is under $250, is never asked; `screen_absolute` \
+         makes it mandatory where the deduction is actually claimed (§2.2)",
+    );
+    c.declaration(filing_form_4952, QuestionId::FilingForm4952);
+    // ★★ Form 8960 line 9b — an `Option<Usd>`, the answered-ness shape for money, so the `_` rule
+    // forbids a bare binding and it must be classified. Class (B): §1411(c)(1)(B) allows the
+    // deduction, it does not impose it, so `None` CLAIMS NOTHING and is lawful — New Colonial Ice
+    // again. It is not class (A): btctax must not pick the filer's "reasonable method" of allocation,
+    // so there is no answer a refusal could demand, only an amount they may choose to enter.
+    c.exempt(
+        form_8960_line9b,
+        Class::BenefitClaim,
+        "Form 8960 line 9b (§1411(c)(1)(B)) — the state/local income tax the filer allocates to net \
+         investment income, by \"any reasonable method\" that is THEIR election (i8960). Silence \
+         forgoes the whole Part II deduction, which can only OVERSTATE the tax; \
+         `Advisory::Form8960Line9bNotClaimed` names the forgone amount and the bound (§2.2)",
+    );
     c.declaration(dual_status_alien, QuestionId::DualStatusAlien);
     c.declaration(has_income_exclusion, QuestionId::HasIncomeExclusion);
     c.declaration(other_out_of_scope_income, QuestionId::OtherOutOfScopeIncome);
@@ -179,6 +210,15 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         amt_carryover_same_as_regular,
         QuestionId::AmtCarryoverSameAsRegular,
     );
+    // ★ The Capital Loss Carryover Worksheet's two unnumbered header conditions. Class (A) like
+    //   their line-2k sibling above: each ASSERTS a fact about this year under §6065, each refuses
+    //   when `None`, and each refuses again at `Some(true)` — a YES names a computation btctax does
+    //   not perform (a per-spouse split; §108(b) attribute reduction), not a value it can absorb.
+    c.declaration(
+        carryover_includes_spouses_joint_loss,
+        QuestionId::CarryoverIncludesSpousesJointLoss,
+    );
+    c.declaration(excluded_canceled_debt, QuestionId::ExcludedCanceledDebt);
     c.declaration(
         amt_depreciation_same_as_regular,
         QuestionId::AmtDepreciationSameAsRegular,
@@ -534,7 +574,9 @@ fn classify_schedule_a(c: &mut Census, a: &ScheduleAInputs) {
         salt_personal_property: _,
         mortgage_interest_1098: _,
         mortgage_all_used_to_buy_build_improve,
+        mortgage_within_debt_limit,
         mortgage_dwelling_is_amt_qualified,
+        investment_interest: _, // plain `Usd` — the `_` rule permits a money scalar
         charitable,
     } = a;
     c.exempt(
@@ -546,6 +588,10 @@ fn classify_schedule_a(c: &mut Census, a: &ScheduleAInputs) {
     c.declaration(
         mortgage_all_used_to_buy_build_improve,
         QuestionId::MortgageAllUsedToBuyBuildImprove,
+    );
+    c.declaration(
+        mortgage_within_debt_limit,
+        QuestionId::MortgageWithinDebtLimit,
     );
     c.declaration(
         mortgage_dwelling_is_amt_qualified,

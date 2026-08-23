@@ -428,7 +428,10 @@ pub mod testonly {
     // page. Exported here rather than reimplemented in xtask, because a second writer would be a
     // second truth — and the point of the proof render is that it exercises the SHIPPED path.
     pub use crate::cells::fmt_money_pair;
-    pub use crate::fill8949::{fill_8949_parts, part_data, pdf_has_xfa, split_parts, PartData};
+    pub use crate::fill8949::{
+        fill_8949_parts, fill_8949_parts_with_identity, part_data, pdf_has_xfa, split_parts,
+        PartData,
+    };
     pub use crate::fill8949_full::fill_8949_full_with_map;
     pub use crate::form1040::{fill_form_1040_capgains as fill_1040_with_map, Form1040Fill};
     pub use crate::form1040_full::fill_form_1040_full_with_map;
@@ -452,8 +455,8 @@ pub mod testonly {
         ScheduleCMap, ScheduleDMap, ScheduleSeMap,
     };
     pub use crate::map::{
-        F1040_MAP_2024, F8275_MAP_2024, F8283_MAP_2024, F8949_MAP_2024, F8959_MAP_2024,
-        F8960_MAP_2024, F8995_MAP_2024, SCHEDULE_1_MAP_2024, SCHEDULE_2_MAP_2024,
+        F1040_MAP_2024, F6251_MAP_2024, F8275_MAP_2024, F8283_MAP_2024, F8949_MAP_2024,
+        F8959_MAP_2024, F8960_MAP_2024, F8995_MAP_2024, SCHEDULE_1_MAP_2024, SCHEDULE_2_MAP_2024,
         SCHEDULE_3_MAP_2024, SCHEDULE_A_MAP_2024, SCHEDULE_B_MAP_2024, SCHEDULE_C_MAP_2024,
         SCHEDULE_D_MAP_2024, SCHEDULE_SE_MAP_2024,
     };

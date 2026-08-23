@@ -300,7 +300,9 @@ pub fn maximal_sentinel() -> ReturnInputs {
             salt_personal_property: dec!(5),
             mortgage_interest_1098: dec!(6),
             mortgage_all_used_to_buy_build_improve: Some(true),
+            mortgage_within_debt_limit: Some(true),
             mortgage_dwelling_is_amt_qualified: Some(true),
+            investment_interest: dec!(9),
             charitable: vec![
                 CharitableGift {
                     class: CharitableClass::Cash60,
@@ -331,6 +333,10 @@ pub fn maximal_sentinel() -> ReturnInputs {
             long: dec!(2),
         },
         capital_loss_carryforward_in_provenance: CarryProvenance::User,
+        // The worksheet's two header declarations. `Some(false)` — the NEUTRAL answer for both — so
+        // this maximal PII fixture stays a return that could file; neither carries any PII.
+        carryover_includes_spouses_joint_loss: Some(false),
+        excluded_canceled_debt: Some(false),
         amt_carryover_same_as_regular: Some(true),
         amt_depreciation_same_as_regular: Some(true),
         charitable_carryover_in: vec![
@@ -359,6 +365,9 @@ pub fn maximal_sentinel() -> ReturnInputs {
         foreign_country_names: "SENTINEL_countryA, SENTINEL_countryB".into(),
         fbar_filing_required: Some(true),
         donations_had_restrictions: Some(false),
+        charitable_cwa_obtained: Some(true),
+        filing_form_4952: Some(false),
+        form_8960_line9b: Some(dec!(10)),
         dual_status_alien: Some(false),
         has_income_exclusion: Some(false),
         other_out_of_scope_income: Some(false),

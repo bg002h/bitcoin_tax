@@ -10,34 +10,45 @@ use serde::{Deserialize, Serialize};
 /// `reconcile set-donation-details` command. Stored in the `donation_details` side-table
 /// (keyed by the donation's `EventId::canonical()`) — never enters the fold or projection.
 ///
+/// ★★★ **PART NUMBERING — P10.** Every field below used to cite the appraiser block as "Part III"
+/// and the donee block as "Part IV". Both were wrong for the form btctax actually files: on **Form
+/// 8283 (Rev. 12-2023)** — named as such by `crates/btctax-forms/forms/2024/f8283.map.toml` — and on
+/// the Rev. 12-2025 form, Section B reads **Part III = Taxpayer (Donor) Statement, Part IV =
+/// Declaration of Appraiser, Part V = Donee Acknowledgment** (read off `f8283--2025.txt:105/113/133`).
+/// So the old labels did not merely shift by one: "Part III" named a *different, real* part of the
+/// same section — the donor's own under-$500 statement — which is the kind of citation a reader
+/// checks once, believes, and then reasons from. The Rev. 12-2014 form (the 2017 map) does number
+/// them III/IV, which is why `btctax_forms::form8283` writes the dual "Part IV/III" comment at its
+/// fill site; the labels here follow the filed revision.
+///
 /// `donee_name` and `appraiser_name` are the only REQUIRED fields (enforced by the CLI).
 /// All other fields are optional (`#[serde(default)]`) for forward compatibility — a future
 /// vault written with extra fields round-trips cleanly on an older binary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DonationDetails {
-    /// Donee organization name (Part IV; required).
+    /// Donee organization name (Part **V**, Donee Acknowledgment; required).
     pub donee_name: String,
-    /// Donee organization mailing address (Part IV; optional).
+    /// Donee organization mailing address (Part **V**; optional).
     #[serde(default)]
     pub donee_address: Option<String>,
-    /// Donee EIN (Part IV; required for Section-B completeness).
+    /// Donee EIN (Part **V**; required for Section-B completeness).
     #[serde(default)]
     pub donee_ein: Option<String>,
-    /// Qualified appraiser name (Part III; required).
+    /// Qualified appraiser name (Part **IV**, Declaration of Appraiser; required).
     pub appraiser_name: String,
-    /// Appraiser mailing address (Part III; optional).
+    /// Appraiser mailing address (Part **IV**; optional).
     #[serde(default)]
     pub appraiser_address: Option<String>,
-    /// Appraiser TIN (SSN or EIN; Part III §6695A; required-or-PTIN for Section-B completeness).
+    /// Appraiser TIN (SSN or EIN; Part **IV** §6695A; required-or-PTIN for Section-B completeness).
     #[serde(default)]
     pub appraiser_tin: Option<String>,
-    /// Appraiser PTIN (Part III §6695A; satisfies the TIN-or-PTIN requirement).
+    /// Appraiser PTIN (Part **IV** §6695A; satisfies the TIN-or-PTIN requirement).
     #[serde(default)]
     pub appraiser_ptin: Option<String>,
     /// Appraiser qualifications declaration (§170(f)(11)(E); required for Section-B completeness).
     #[serde(default)]
     pub appraiser_qualifications: Option<String>,
-    /// Date the qualified appraisal was made (Part III; required for Section-B completeness).
+    /// Date the qualified appraisal was made (Part **IV**; required for Section-B completeness).
     #[serde(default)]
     pub appraisal_date: Option<TaxDate>,
     /// Optional user-supplied FMV determination method override.
@@ -57,7 +68,7 @@ impl DonationDetails {
     /// - `appraiser_tin` OR `appraiser_ptin` (§6695A appraiser identifier)
     /// - `appraisal_date`
     /// - `appraiser_qualifications` (§170(f)(11)(E))
-    /// - `donee_ein` (Part IV)
+    /// - `donee_ein` (Part V)
     ///
     /// A skeletal entry (only `donee_name` + `appraiser_name`) on a Section-B donation leaves
     /// `needs_review == true` — the appraiser declaration is incomplete. This upholds the
@@ -152,7 +163,7 @@ mod tests {
         assert!(d.is_review_complete(Form8283Section::B));
     }
 
-    /// Missing donee_ein → not complete (Part IV requires it for Section B).
+    /// Missing donee_ein → not complete (Part V requires it for Section B).
     #[test]
     fn section_b_missing_donee_ein_is_not_complete() {
         let mut d = full_section_b();

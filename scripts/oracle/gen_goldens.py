@@ -120,6 +120,55 @@ TAXCALC_MARS = {
     "Widow(er)": 5,
 }
 
+# ★★★ WHAT `households()` ACTUALLY ASSEMBLES — a CONSTANT, and checkable (phase-4 review N-4).
+#
+# This lived inline in the `_provenance` dict, was updated when the LOW_END cells landed, and was NOT
+# updated when the NON_INTERACTION cells landed one commit later. So the baked description named one
+# list fewer than the corpus contains — and nothing could notice, because the artifact's copy is only
+# rewritten by a full regeneration that needs BOTH oracles.
+#
+# Hoisting it out is what makes `assert_baked_provenance_is_current()` possible: the check compares
+# the committed golden against this string and runs with no oracle at all, so the two can no longer
+# drift for the length of an oracle-less development cycle.
+CORPUS_DESCRIPTION = (
+    "SPEC §5.1 variable-strength constrained COVERING ARRAY (scripts/oracle/corpus.py): "
+    "the 12 hand-written anchors (verbatim) + 2 bake-time-steered pinned liveness cells "
+    "+ the hand-written LOW_END cells (shapes the axis tables cannot reach) "
+    "+ the hand-written NON_INTERACTION cells (households that make a claimed "
+    "non-interaction observable — a guarantee 'X does not move Y' is invisible "
+    "to a corpus in which X and Y never co-occur) "
+    "+ a generated array — full cartesian on the named triples {SE,LTCG,qual-div} and "
+    "{itemized,SALT-over-cap,high-income} (t=3 by construction), pairwise (t=2) "
+    "elsewhere, under the D-1/D-2/D-3 constraints. Every candidate is ADMITTED "
+    "refusal-free and AMT/credit-free through the §9 oracle_harness binary before it is "
+    "baked, so a scenario btctax would refuse never enters this file."
+)
+
+GOLDEN_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "crates/btctax-core/tests/goldens/full_return_goldens.json"
+)
+
+
+def assert_baked_provenance_is_current() -> None:
+    """The committed golden's `_provenance.corpus` must be what this generator would write.
+
+    ★ Pure — no oracle, no network, no solver. That is the point: a full regeneration needs OTS and
+    Tax-Calculator, so between regenerations the description could drift from the corpus for months
+    with every run reporting fine. This is the cheap half that can run any time.
+
+    PLANT TO RE-RUN THE KILL: delete the NON_INTERACTION clause from `CORPUS_DESCRIPTION` ⇒ reds.
+    """
+    baked = json.loads(GOLDEN_PATH.read_text())["_provenance"]["corpus"]
+    if baked != CORPUS_DESCRIPTION:
+        raise AssertionError(
+            "the committed golden's _provenance.corpus is STALE — it no longer matches what "
+            "gen_goldens.py would write.\n"
+            f"  baked:     {baked}\n"
+            f"  generator: {CORPUS_DESCRIPTION}\n"
+            "This is N-4's exact failure: a corpus list was added and the description was not."
+        )
+
 
 def _mars(filing_status: str) -> int:
     """Tax-Calculator's `MARS` for one of `corpus.py`'s OTS-style status tokens. KeyErrors on an
@@ -172,6 +221,10 @@ def _taxcalc_row(n, i, year: int = 2024):
         "e18500": i.get("real_estate_tax", 0),            # real estate tax           (Sch A 5b)
         "e19200": i.get("itemized_deductions", 0)         # interest paid             (Sch A 8a)
         + i.get("mortgage_interest", 0),
+        # Cash gifts to public charities (Sch A 11). Present so the corpus can witness a
+        # NON-interaction: §170 is not in Reg. §1.1411-4(f)'s properly-allocable list, so this must
+        # move 1040 line 15 and not one line of Form 8960.
+        "e19800": i.get("charitable_cash", 0),
         "s006": 1.0,
     }
 
@@ -465,15 +518,7 @@ def main() -> None:
                     "tax_year": 2024,
                     "generated": date.today().isoformat(),
                     "generator": "scripts/oracle/gen_goldens.py",
-                    "corpus": (
-                        "SPEC §5.1 variable-strength constrained COVERING ARRAY (scripts/oracle/corpus.py): "
-                        "the 12 hand-written anchors (verbatim) + 2 bake-time-steered pinned liveness cells "
-                        "+ a generated array — full cartesian on the named triples {SE,LTCG,qual-div} and "
-                        "{itemized,SALT-over-cap,high-income} (t=3 by construction), pairwise (t=2) "
-                        "elsewhere, under the D-1/D-2/D-3 constraints. Every candidate is ADMITTED "
-                        "refusal-free and AMT/credit-free through the §9 oracle_harness binary before it is "
-                        "baked, so a scenario btctax would refuse never enters this file."
-                    ),
+                    "corpus": CORPUS_DESCRIPTION,
                     "regeneration": (
                         "★ ENGINE-VERSION-GATED (SPEC §11). These figures are computed by the EXTERNAL "
                         "engines pinned in oracle_1_version / oracle_2_version. Re-run the generator — and "

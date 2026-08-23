@@ -536,6 +536,74 @@ PINNED_CELLS = [
 ]
 
 
+# ── The LOW-END hand-written cells (filing-readiness P9) ──────────────────────────────────────────
+# Households the axis tables above cannot reach, added because the low-end pass found real defects
+# there. They are NOT anchors — the anchor list is the historical twelve, preserved verbatim — but
+# they are hand-written rather than generated, so they carry non-`ca_` names and join the anchors in
+# the `make check` reconciliation sweeps (`smoke.rs`, `golden_packet::anchors_and_pinned`).
+#
+# ★ Why the covering array cannot produce this one: every generated loss cell is `CAP["loss"]`, a
+#   SHORT-term −18,000 paired with a wage position, and the wage axis's "none" leg never meets it in a
+#   cell whose taxable income lands at the §1211(b) floor. The defect N1 fixed lives exactly there —
+#   the §1212(b)(2)(B) carryover worksheet's line-3/line-5 branch, which only engages when 1040 line 15
+#   would have gone NEGATIVE.
+#
+# ★ D-1 stays intact: no dependents, and NO CREDIT ENGAGES. The EIC needs earned income
+#   (§32(c)(2)(A)) and this household has none, so neither oracle's credit take-up is in play — which
+#   is what makes it admissible today. See `design/direction/ORACLE-TRAP-credit-takeup.md`.
+#
+# ★ What the oracles DO and DO NOT witness here: they witness AGI (−3,000), taxable income (0), the
+#   1040 line-7 §1211(b) cap and a $0 total tax. They do NOT witness the carryforward LEVEL — no
+#   engine prints a carryover-OUT to next year — so that figure stays held by btctax's own KAT
+#   (`kat_attestation::the_1211b_1212b_pair_...`) and by `capital_loss_carryover.rs`'s worksheet
+#   transcription. The corpus entry is for the REST of the household, exactly as the plan says.
+# ── The NON-INTERACTION cells ─────────────────────────────────────────────────────────────────────
+# Households that exist to make a claimed NON-interaction observable. A guarantee of the form "X does
+# not move Y" is invisible to a corpus in which X and Y never co-occur — the sweep reports OK and has
+# checked nothing.
+NON_INTERACTION = [
+    {
+        "name": "mfj_niit_with_a_large_charitable_gift",
+        "why": "★ NON-INTERACTION — §170 against §1411. A $50,000 cash gift to a public charity on a "
+        "household that OWES net investment income tax ($380,000 AGI, $140,000 of NII from interest "
+        "and a long-term gain). ★★ STEERED so Form 8960 line 16 takes the EXCESS-MAGI leg "
+        "(line 15 = MAGI - $250,000 = $130,000, under NII of $140,000), which is what makes the "
+        "cell DISCRIMINATING: while NII is the smaller of the two, a charitable term wired into "
+        "MAGI moves nothing and the household reconciles with the defect present. Charitable appears on Form 8960 only at line 18b, inside Part III's "
+        "ESTATES AND TRUSTS block, and §170 is not in Reg. §1.1411-4(f)'s properly-allocable list — "
+        "and the deduction is below the line, so it cannot reach line 13's MAGI either. The gift must "
+        "therefore move 1040 line 15 and NOT one line of Form 8960. Until this cell existed, NO "
+        "corpus household combined a gift with NIIT and neither engine had ever been asked (N-6/N-7). "
+        "★ The gift is kept far under the §170(b)(1)(G) 60%-of-AGI ceiling ($228,000 here — 60% of "
+        "this cell's $380,000 AGI): OTS 2024 "
+        "applies no such ceiling, so a cell that crossed it would lose an oracle.",
+        "inputs": {
+            "filing_status": "Married/Joint",
+            "w2_income": 240_000,
+            "taxable_interest": 40_000,
+            "long_term_capital_gains": 100_000,
+            "state_income_tax": 8_000,
+            "real_estate_tax": 9_000,
+            "mortgage_interest": 30_000,
+            "charitable_cash": 50_000,
+            "standard_or_itemized": "Itemized",
+        },
+    },
+]
+
+LOW_END = [
+    {
+        "name": "single_loss_year_taxable_income_at_the_floor",
+        "why": "★ LOW-END — a loss year whose taxable income is AT THE FLOOR: no wages, one $20,000 "
+        "long-term capital loss. 1040 line 7 is the §1211(b) −$3,000 cap, AGI is −3,000 and line 15 is "
+        "0; the §1212(b)(2)(B) worksheet (N1) carries the FULL $20,000 forward because none of the "
+        "$3,000 was actually absorbed. No credit engages (the EIC needs earned income), so both "
+        "oracles witness the household even though neither prints a carryover-out.",
+        "inputs": {"filing_status": "Single", "long_term_capital_gains": -20_000},
+    },
+]
+
+
 def _inputs_key(inp):
     """Canonical dedup key for an `inputs` dict (order-independent; excludes the oracle-only
     `standard_or_itemized` hint, which does not change btctax's assembled return)."""
@@ -544,15 +612,18 @@ def _inputs_key(inp):
 
 def households():
     """The full candidate corpus: the 12 anchors (verbatim, first) + the 2 pinned liveness cells +
-    the generated covering array (Block A ∪ Block B ∪ Block P), DEDUPLICATED by inputs (M3).
+    the hand-written LOW_END and NON_INTERACTION cells + the generated covering array (Block A ∪
+    Block B ∪ Block P),
+    DEDUPLICATED by inputs (M3).
 
-    Anchors and pinned cells are kept whenever they appear; a generated row that duplicates one of
-    them (or another generated row) is dropped. Returns a list of `{name, why, inputs, ...}` dicts.
-    Admission (D-2 refusal-free + AMT/credit-free) is applied downstream in `gen_goldens.py`.
+    Anchors, pinned cells and low-end cells are kept whenever they appear; a generated row that
+    duplicates one of them (or another generated row) is dropped. Returns a list of
+    `{name, why, inputs, ...}` dicts. Admission (D-2 refusal-free + AMT/credit-free) is applied
+    downstream in `gen_goldens.py`.
     """
     out = []
     seen = set()
-    for h in ANCHORS + PINNED_CELLS + block_a() + block_b() + block_p():
+    for h in ANCHORS + PINNED_CELLS + LOW_END + NON_INTERACTION + block_a() + block_b() + block_p():
         key = _inputs_key(h["inputs"])
         if key in seen:
             continue
@@ -572,8 +643,20 @@ def _triple_a_cell(inp):
 
 
 def _triple_b_cell(inp):
+    # ★ `charitable_cash` belongs in this list (phase-4 review M-5). `_reconstruct_cell` below carries
+    #   the IDENTICAL itemized-by-components `any()` and was fixed; this sibling was missed. A future
+    #   cell with a charitable gift and no explicit `standard_or_itemized` flag would be labelled
+    #   `itemized=False` here and credit triple-B coverage it does not provide. Unreachable today (the
+    #   only such cell carries the flag), which is exactly why it would have gone on being wrong.
     itemized = inp.get("standard_or_itemized") == "Itemized" or any(
-        inp.get(k, 0) for k in ("state_income_tax", "real_estate_tax", "mortgage_interest", "itemized_deductions")
+        inp.get(k, 0)
+        for k in (
+            "state_income_tax",
+            "real_estate_tax",
+            "mortgage_interest",
+            "itemized_deductions",
+            "charitable_cash",
+        )
     )
     salt_over = (inp.get("state_income_tax", 0) + inp.get("real_estate_tax", 0)) > 10_000
     high = inp.get("w2_income", 0) >= W2["high"]  # the "high-income" leg is W-2-driven (SE never reaches it)
@@ -607,6 +690,13 @@ def _reconstruct_cell(inp):
         return None  # an anchor's off-grid Schedule-C profit
     se = "over" if sev >= SE["over"] else ("present" if sev > 0 else "none")
     div = "qual" if inp.get("qualified_dividends", 0) else "none"
+    # ★ A LONG-TERM loss is OFF-GRID: the `CAP` axis's only loss value is SHORT-term (−18,000), so
+    #   there is no label for this shape. Falling through to `cap="none"` (what this did before the
+    #   low-end cell existed) would have credited a LOSS household with the "no capital transaction"
+    #   cell's pairs — extra coverage claimed, none provided, which is exactly the no-op-cell failure
+    #   the SALT axis's own `selftest` exists to prevent one axis over.
+    if inp.get("long_term_capital_gains", 0) < 0:
+        return None
     if inp.get("long_term_capital_gains", 0) > 0:
         cap = "LT"
     elif inp.get("short_term_capital_gains", 0) > 0:
@@ -617,7 +707,7 @@ def _reconstruct_cell(inp):
         cap = "none"
     if inp.get("standard_or_itemized") == "Itemized":
         dedsalt = "io" if (inp.get("state_income_tax", 0) + inp.get("real_estate_tax", 0)) > 10_000 else "iu"
-    elif any(inp.get(k, 0) for k in ("state_income_tax", "real_estate_tax", "mortgage_interest", "itemized_deductions")):
+    elif any(inp.get(k, 0) for k in ("state_income_tax", "real_estate_tax", "mortgage_interest", "itemized_deductions", "charitable_cash")):
         return None  # itemized-by-components without the Itemized flag (anchor lump) — not a grid cell
     else:
         dedsalt = "std"
@@ -642,7 +732,11 @@ def assert_pairwise_t2_coverage(admitted):
 if __name__ == "__main__":  # a quick offline sanity dump (no oracles)
     selftest_salt_axis()
     hs = households()
-    print(f"candidates: {len(hs)} (anchors {len(ANCHORS)} + pinned {len(PINNED_CELLS)} + generated {len(hs) - len(ANCHORS) - len(PINNED_CELLS)})")
+    print(
+        f"candidates: {len(hs)} (anchors {len(ANCHORS)} + pinned {len(PINNED_CELLS)} + "
+        f"low-end {len(LOW_END)} + non-interaction {len(NON_INTERACTION)} + "
+        f"generated {len(hs) - len(ANCHORS) - len(PINNED_CELLS) - len(LOW_END) - len(NON_INTERACTION)})"
+    )
     print(f"  block A {len(block_a())}, block B {len(block_b())}, block P {len(block_p())}")
     na, nb = assert_named_triple_coverage(hs)
     print(f"named-triple coverage OK on candidates: triple-A {na} combos, triple-B {nb} combos")

@@ -110,13 +110,30 @@ shortfall in btctax.
   `dependents_statement.txt` listing the rest with the same four columns Form 1040 uses. **Attach it** —
   the packet manifest says so. (The credit is a separate matter: v1 computes no CTC/ODC, and column 4 is
   blank on the page and in the statement alike.)
+- **Some marks are yours to make, and the packet manifest now NAMES them** (`manifest.txt`, under the
+  stapling order). btctax leaves a box blank rather than swear to something it was not told, and the
+  list is computed per packet rather than boilerplate — a mark btctax *did* make never appears on it:
+  - the **Digital Asset question** — listed only when your ledger shows no digital-asset activity, so
+    btctax will not answer "No" for a ledger it was never given;
+  - **Form 1040 line 7's "If not required, check here" box** — listed only when no Schedule D is in the
+    packet, because btctax has no input for Schedule D lines 4, 5, 11 or 12 and so cannot establish
+    that none is required;
+  - the **signature, date, occupation and Identity Protection PIN block** — always: a return is not
+    filed until it is signed;
+  - **Form 8283 Section B, Part IV (Declaration of Appraiser) and Part V (Donee Acknowledgement)** —
+    listed whenever the packet carries a Section B Form 8283. ★ These differ in kind from every other
+    mark above: they are **third-party signatures**, so neither is yours to make. A Section B Form
+    8283 is not filing-ready without the qualified appraiser's signed declaration and the donee
+    organization's acknowledgement, and both come from other people — **start early.** This is the
+    one item on the list you cannot finish at your desk tonight.
 - **The spouse's Identity Protection PIN is not captured** (yours is, and it prints). If your spouse has one,
   write it on the form.
 - **A HoH/QSS qualifying person who is not one of your listed dependents** is not captured; that cell is left
   blank for you to complete.
 
-**Carryovers:** charitable (per class + vintage) and **both** QBI loss carryforwards — qualified business
-(Form 8995 line 16) and REIT/PTP (line 17) — are computed and can be written forward to next year with
+**Carryovers:** charitable (per class + vintage), **both** QBI loss carryforwards — qualified business
+(Form 8995 line 16) and REIT/PTP (line 17) — and the **§1212(b) capital-loss carryover** (Schedule D
+lines 6 and 14) are computed and can be written forward to next year with
 `btctax report --tax-year Y --write-carryover`. A carryover you typed in yourself is never silently
 overwritten (pass `--force` if you mean to).
 ★★ **Both QBI loss carryforwards are now ASKED**, in the TUI's "Carryforwards from last year" section —
@@ -125,8 +142,39 @@ lines 17 and 16 of *last* year's Form 8995. They REDUCE the deduction, so leavin
 deduction and **understates your tax** — the one direction btctax will not fail in silently. If btctax did
 not compute your prior year it cannot know, so it asks, and an advisory fires until you answer or it has a
 computed figure of its own. (You can still set them under `[qbi]` in the import TOML.)
-★ The capital-loss and charitable carryovers are still import-only. Those go the other way — leaving one
-out costs *you*, not the Treasury — so they are not gated, but check them if you have any.
+★ **The CAPITAL-LOSS carryover is computed AND rolled.** btctax models the §1212(b)(2)(B) *Capital
+Loss Carryover Worksheet*, so your carryover-**out** is a real figure on this year's report — including
+the case a flat "lesser of the loss or $3,000" rule gets wrong, a loss year whose taxable income lands
+on the floor and therefore absorbs **none** of the $3,000. `--write-carryover` stamps it into next
+year's inputs alongside the other three, as **whole dollars** — the figure you will read off next
+year's Schedule D lines 6 and 14 and sign for.
+
+Four things are worth knowing about that:
+
+- **It is written only when btctax can vouch for it, and it TELLS you when it did not.** If this year
+  was never asked about a carryover *and* produced none of its own, nothing is stamped — writing a
+  `$0` marked "computed" there would silence next year's advisory about a carryover you may genuinely
+  have. The write-back then prints `★ NOT WRITTEN: the capital-loss carryover`, because a summary that
+  quietly listed the other three would read as though all four had been rolled.
+- **The whole write-back is one transaction.** If btctax refuses to persist the *charitable* carryover
+  (a restricted gift, or a missing §170(f)(8) acknowledgment), **nothing** is written — not the QBI
+  ones and not this one. That is deliberate rather than tidy: a deduction btctax cannot vouch for makes
+  worksheet line 1 more negative, line 4 smaller, and the surviving capital loss **larger**, so
+  persisting the capital-loss half alone would overstate it.
+- **It is validated against the FORM and nothing else.** Neither reference engine btctax reconciles
+  against witnesses a carryover level: one takes it as an *input*, the other emits no carryover at all.
+  The transcription of the worksheet and its tests are the whole of the evidence here.
+- **A "computed" stamp means the write-back ran once from a year that screened clean at the time.** It
+  is not a claim that the figure still agrees with that year. Edit the prior year and re-run
+  `--write-carryover` and the stamp is REPLACED — btctax's own consistency check re-derives the figure
+  rather than trusting the stamp, so a figure that has drifted gets disputed.
+  ★ **With one exception, and it is the case where your edit removes the last of the carryover.** A
+  re-run then has nothing to vouch for, so it writes nothing (and says so) and the earlier stamp stays
+  where it is; `income import` will not clear it either, because an omitted carryover and an explicit
+  `0` are the same bytes in TOML and both read as "the file did not supply one". Until btctax supports
+  full returns for the receiving year, retracting such a stamp means editing that year's stored row
+  directly — `income clear` then `income import`. The write-back names the stale figure in its output
+  so it cannot pass unnoticed. Tracked as **FR-17**.
 
 ---
 
@@ -168,7 +216,7 @@ professional) before filing.
 
 | Omitted | What it would do | What to do |
 |---|---|---|
-| **Child Tax Credit / Credit for Other Dependents** (Schedule 8812) | Up to $2,000 per qualifying child; $500 per other dependent. 1040 line 19 is pinned to **$0**. | File Schedule 8812 yourself. Your tax is overstated by up to that amount. |
+| **Child Tax Credit / Credit for Other Dependents** (Schedule 8812) | Up to $2,000 per qualifying child; $500 per other dependent — **unless §24(b) has already phased it out at your income**, in which case the credit is $0 for any composition of dependents. Either way 1040 line 19 is **$0**. | **Your report's advisory says which case you are in — read it.** If it says the credit is *NOT AVAILABLE TO YOU*, line 19's $0 is the **correct** figure and there is no Schedule 8812 for you to file. Otherwise file Schedule 8812 yourself: your tax is **overstated** by up to that amount. |
 | **Earned Income Credit** | A refundable credit for lower-income working households. | Check EIC eligibility (Pub. 596) yourself. |
 | **Education credits** (AOTC / Lifetime Learning), **dependent-care** (Form 2441), **saver's**, **energy**, **adoption** credits | Various nonrefundable/refundable credits. | Claim separately if eligible. |
 | **Direct deposit** of a refund (1040 lines 35b–35d) | Faster refund. | Left blank — you will receive a **paper check**. |
@@ -192,6 +240,10 @@ cannot model it correctly.
 - **A Schedule A sales-tax amount with the §164(b)(5) sales-tax election OFF** (a silent drop would hide an input error).
 - **The §164(b)(5) sales-tax election is ON but the sales-tax amount is $0** while you have state/local income taxes (W-2 box 17/19, estimates, prior-year balance) — the election would make Schedule A line 5a = $0 and silently drop your income taxes. Enter the sales-tax amount, or turn the election off.
 - **A Schedule A that reports mortgage interest, but you have not stated whether ALL the loan was used to buy, build, or improve the home** (§163(h)(3)(F), Schedule A line 8) — unanswered refuses. Answer with `btctax income answer`. (If you answer "no", see the mixed-use advisory below.)
+- **A Schedule A that reports mortgage interest, but you have not stated whether you were inside every home-mortgage DEBT limit** (§163(h)(3)(B), Schedule A line 8a) — unanswered refuses, and answering **no** also refuses. btctax collects the *interest* you paid, never the *balance*, the origination date, or the home's fair market value, so it cannot tell whether the $750,000 / $1,000,000 ceilings (halved for MFS) were exceeded — and left unasked it would deduct the whole Form 1098 amount, which for a filer over the limit **understates** your tax. Neither oracle catches that: both take line 8a as an input. Answer **yes** only if all three of the ceilings the prompt lists held; answer **no** if you are unsure, and complete Pub. 936's *Deductible Home Mortgage Interest Worksheet* by hand. ★ The two halves are scoped differently, deliberately: the question is **asked** whenever your Schedule A inputs report Form 1098 interest at all (that is an input fact, knowable before anything is computed), while answering **no** refuses only on a return that actually **itemizes** — if the standard deduction wins, Schedule A line 8a never prints and the over-limit answer changes no figure. `btctax income answer`.
+- **The Form 4952 question is unanswered** (`Form4952DeclarationUnanswered`) — and this one is asked on **every** return. Schedule D line 20 reads *"Are lines 18 and 19 both zero or blank and you are not filing Form 4952?"*, and its answer decides which worksheet computes your tax; btctax used to check "Yes" there without asking you, which is sworn testimony it invented. Answer **no** (not filing Form 4952) and the return computes through the Qualified Dividends and Capital Gain Tax Worksheet. Answer **yes** and it refuses, because a "Yes" routes to the *Schedule D Tax Worksheet*, which btctax does not fill. The prompt lists Form 4952's own three-part exception; if you are unsure, answer **yes** — a refusal is recoverable, a wrong return is not. The same answer governs **Schedule A line 9**, investment interest.
+- **Schedule A line 9 investment interest above Form 4952's exception ceiling** (`Form4952Required`) — if you said you are *not* filing Form 4952 but your line-9 investment interest exceeds your investment income from interest and ordinary dividends minus qualified dividends, Form 4952 **is** required: §163(d)(1) limits the deduction to net investment income, a figure only that form computes. Deducting the whole amount would understate your tax. ★ **This half is raised only on a return that itemizes** — line 9 never prints otherwise, so an over-limit line-9 amount cannot move a standard-deduction return. **The other half above is not so scoped:** answering **yes** (you *are* filing Form 4952) refuses on **every** return, standard deduction included, because it routes your tax to the Schedule D Tax Worksheet — which btctax does not fill — and that routing is decided by Schedule D line 20, not by Schedule A.
+- **A charitable deduction with a gift of $250 or more, and the acknowledgment question unanswered or answered "no"** (`CharitableCwaUnresolved`). §170(f)(8)(A) makes a *contemporaneous written acknowledgment* a condition of the deduction itself, and §170(f)(8)(C) counts one as contemporaneous only if you obtain it by the earlier of filing or the due date — **so filing extinguishes the cure**, which is why this refuses rather than advises. The $250 test is **per contribution**, never the year's total (i1040sca: *"In figuring whether a gift is $250 or more, don't combine separate donations."*). ★ Asked only on a return that actually **claims** the §170 deduction — a standard-deduction filer claims none and is never asked — but a year whose deduction is zeroed by the §170(b) AGI **ceiling** *is* asked, because §170(d) carries that claim into the next five years while this year's acknowledgment deadline passes. Get one from the charity and answer with `btctax income answer`; keep it, don't attach it.
 - **MFS without stating whether your spouse itemizes** (§63(c)(6) couples the choice) — the refusal message now names `btctax income answer` as the remedy (previously it gave no exit).
 - **A charitable contribution to a non-50% organization** (private foundation etc. — the Pub. 526 "special 30% limit" ordering is unmodeled).
 - **A claimable-as-dependent spouse** (it limits the joint standard deduction).
@@ -228,7 +280,12 @@ cannot model it correctly.
   class: §1202 small-business stock, §4952 investment interest, a net operating loss, a Form 8801 credit,
   and accelerated depreciation.
 - **A Form 6251 adjustment v1 cannot see, declared as present.** Three are handled by **declaration**: a non-AMT-qualified mortgaged dwelling (line 3), a divergent AMT capital-loss carryover (line 2k), and depreciation inside your Schedule C expense total whose AMT amount differs (line 2l). Each is asked only when it can apply — respectively a Schedule A carrying Form 1098 mortgage interest, a capital-loss carryforward, and Schedule C expenses above $0 — and must then be answered via `btctax income answer`. An adverse answer refuses, because computing without the add-back would understate your tax.
-- **Taxable income ≤ $0 with a capital-loss carryforward** — the §1211/§1212 Capital Loss Carryover Worksheet edge is unmodeled. (A refund-only filer with *no* carryforward is fine: tax = $0, withholding refunded.)
+- **Taxable income of $0 with a capital-loss carryforward you brought IN** — ★ **this used to refuse, and no longer does.** A wiped-out year that carries a capital loss in now files a 1040 and a Schedule D like any other. What changed is the DECISION, not the arithmetic: the §1211/§1212 worksheet was already modelled, and the objection was that emitting a return for this household widens the filing surface on a form you sign under penalties of perjury. That call has been taken.
+  - **Not one printed figure moved.** The screen ran after the return was computed and only decided whether to emit it, so the 1040 and Schedule D this household now files are the same ones btctax was already computing. Its Schedule D is indistinguishable from that of a filer who realised the identical loss *this* year — which is the asymmetry that made the refusal hard to defend, because the form draws no such line.
+  - **Carryforward OUT — modelled, and correct at the floor.** btctax transcribes the §1212(b)(2)(B) *Capital Loss Carryover Worksheet* from the 2025 Schedule D instructions (which is the sheet that figures a **2024** return's carryover into 2025). So a loss year whose taxable income lands **on the floor** carries the **full** loss forward: with no wages and a $20,000 long-term loss, 1040 line 7 shows the §1211(b) −$3,000 cap but **none of that $3,000 is actually absorbed**, and $20,000 — not $17,000 — survives to next year. At *positive* taxable income the allowance is absorbed and $17,000 survives. Both are computed; neither is a flat rule.
+  - **Two questions come with it, and both refuse if unanswered.** The worksheet's header states two conditions in prose, above line 1, and btctax collects both because it cannot answer either for you: (1) whether any part of the carryover came from a **joint return** for a year you now file separately from, where the loss was your spouse's — §1212(b) allows it "only on the return of the spouse who actually had the loss", and btctax stores one carryover per return with no way to split it; and (2) whether you **excluded cancelled debt** from income, which makes §108(b)(2)(G) reduce the carryover by an amount btctax does not compute. Answer both with `btctax income answer`. A *yes* to either refuses — the split and the reduction are hand work.
+  - **What is still true about the credit block.** This household is, by construction, low-income — and the refundable credits are exactly what decides its outcome. btctax claims **no** EIC and **no** additional child tax credit (see OMISSIONS): 1040 lines 27–30 stay blank, and an advisory names each one it left for you. That is a forgone claim, never a fabricated zero, but on this household it may be the whole refund. Check it.
+  - (A refund-only filer with *no* carryforward has always been fine: tax = $0, withholding refunded.)
 
 ## (iii) UNREPRESENTABLE — no input exists (would refuse if it did)
 
@@ -279,15 +336,17 @@ each one fits you:
 
 ## Conservative simplifications (they overstate, never understate)
 
-- **Form 8960 (NIIT), Part II — the state/local tax allocation is omitted.** Properly allocated state income tax attributable to net investment income would *reduce* NII. Omitting it can only make your NIIT **higher**.
+- **Form 8960 (NIIT), Part II — lines 9a, 9c and 10 are omitted.** Investment interest expense (9a), miscellaneous investment expenses (9c) and additional modifications (10) are not modelled. Each is a *deduction* against net investment income, so omitting them can only make your NIIT **higher**. ★ **Line 9b is no longer among them** — the state/local income tax allocable to NII is now collected and printed; see the advisory below.
 - **A `None` date of birth is treated as "not 65."** The §63(f) additional standard deduction ($1,550 / $1,950 per box) is forfeited rather than granted on an unsubstantiated birthdate. If you are 65+, enter your DOB.
 - **The crypto-delta figure's deduction is fixed at derivation time.** The "tax attributable to crypto" number and the absolute filed return answer **different questions** and are never reconciled to the dollar — see the §6 note the report prints.
 
 ## Advisories the report will show you
 
 - **FBAR / FinCEN.** Under FinCEN Notice 2020-2, accounts holding *only* virtual currency are (for now) outside the FBAR requirement — but this is under active reconsideration, and an account holding crypto **plus** fiat or securities may well be reportable. `btctax` **never auto-answers Schedule B Part III** for you — including the FBAR sub-question under 7a. It ASKS both and prints your answers. Line 7a itself is mandatory (it decides whether Schedule B files at all); the sub-question under it is **skippable** — nothing on the return reads it — and skipping it prints a genuine blank plus a second advisory quoting Schedule B's own Caution: *"If required, failure to file FinCEN Form 114 may result in substantial penalties."* That penalty is for not FILING the FBAR, an obligation this box neither creates nor removes. Decide, and answer, via `btctax income answer`.
+- **Form 8960 line 9b not claimed (§1411(c)(1)(B)).** If you owe net investment income tax and left line 9b blank, the portion of the state and local income tax on your Schedule A that is attributable to your investment income was **not** deducted, and your tax is overstated. btctax does **not** pick the split for you: the Instructions for Form 8960 let you use *“any reasonable method”*, and choosing one is your election — the advisory names the pool (what your return actually deducted after §164(b)(6)’s $10,000 / $5,000-MFS cap) and offers the instructions’ own example, the deducted tax times the ratio of Form 8960 line 8 to your AGI. Enter your figure with `btctax income answer`, or leave the line blank and claim nothing. The pool is **$0** if you took the standard deduction (nothing was deducted to allocate) or elected general **sales** taxes (i8960: *“Sales taxes aren’t deductible in computing net investment income”*), and a line 9b above the pool **refuses** rather than being silently shrunk.
 - **Charitable donee class.** The ledger classifies a crypto donation assuming a **public charity (50% organization)** donee — long-term gifts at FMV under the 30% ceiling. If your donee is a **private foundation**, the correct treatment is the 20% ceiling at *basis*, which v1 refuses. Verify who you gave to.
 - **Qualified appraisal.** A year's BTC donations totaling **more than $5,000** need a qualified appraisal and Form 8283 Section B (CCA 202302012: crypto does *not* get the readily-valued exception).
+- **Qualified appraisal ATTACHED (§170(f)(11)(D)).** Over **$500,000** claimed for donated property the statute asks something different in kind: the appraisal is no longer a document you keep but one you *attach to the return*, and omitting it can deny the whole deduction. The packet manifest lists it in the stapling order as an item **you must supply** — btctax cannot produce an appraisal, only a qualified appraiser can, so this advises rather than refuses. Two boundaries that are easy to conflate: §170(f)(11)(C)'s $5,000 (keep it) is *"more than"*, and so is §170(f)(11)(D)'s $500,000 (attach it) — while §170(f)(8)'s acknowledgment threshold is *"$250 **or more**"*. The $500,000 test is on the amount **claimed for the property** (post-§170(e), aggregated across similar items in the year) and deliberately **not** on Schedule A line 12: keying it to the post-ceiling line would make a statutory attachment depend on your AGI. Reg. §1.170A-16(f)(3) extends the duty to carryover years, so it can recur after the year of the gift.
 - **Age-65 box forgone (§63(f)).** The age-65 additional standard deduction has a carve-out: someone who *died during the year before reaching 65* does not get it. So if a date of birth on file would otherwise qualify you but you skipped the **"did you die during the tax year?"** question, the addition is **forfeited, never assumed** — your tax is overstated, and the advisory names the amount. It is one keystroke: `btctax income answer`. (Skipping is lawful and costs nothing at all if no date of birth on file would have qualified.)
 - **Blindness not declared (§63(f)).** If you never stated whether you (or your spouse — on a joint return always, and on married-filing-separately when i1040gi's three conditions are met: the spouse had no income, isn't filing a return, and can't be claimed as a dependent) are legally blind, the additional standard deduction for blindness ($1,550 married / $1,950 unmarried per box) is forfeited — never assumed. It STACKS with the age-65+ box. If blind, answer with `btctax income answer`; your tax is currently overstated.
 - **Sales-tax election not asked (§164(b)(5)).** If you have a Schedule A but were never asked whether to deduct general sales taxes instead of state/local income taxes, and sales taxes would be larger (a no-income-tax state, or a big-purchase year), your SALT deduction — and your tax — may be overstated. It can even flip a near-standard return into itemizing. Choose with `btctax income answer`.

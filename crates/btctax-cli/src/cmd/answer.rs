@@ -302,6 +302,12 @@ mod tests {
                 // it asks about. A liveness predicate could only guess whether the filer has some,
                 // which is the guess it exists to refuse to make.
                 QuestionId::OtherOutOfScopeIncome,
+                // ★★★ Schedule D line 20 / Schedule A line 9 — ALWAYS LIVE, for exactly the reason
+                // above. Line 20 prints on every both-gains Schedule D, and that routing comes from
+                // the LEDGER, which `live` cannot see; any narrower predicate would be a guess about
+                // whether the filer borrowed to invest. It reaches the $0-income household too, which
+                // is the population the plan measured this defect on.
+                QuestionId::FilingForm4952,
             ]
         );
         assert!(!has_spouse_dob(&single()), "no spouse ⇒ no spouse DOB");
@@ -379,13 +385,19 @@ mod tests {
         match id {
             QuestionId::DependentSpouse => r.filing_status = FilingStatus::Mfj,
             QuestionId::MfsSpouseItemizes => r.filing_status = FilingStatus::Mfs,
-            QuestionId::MortgageAllUsedToBuyBuildImprove | QuestionId::AmtQualifiedDwelling => {
+            QuestionId::MortgageAllUsedToBuyBuildImprove
+            | QuestionId::AmtQualifiedDwelling
+            | QuestionId::MortgageWithinDebtLimit => {
                 r.schedule_a = Some(ScheduleAInputs {
                     mortgage_interest_1098: dec!(9000),
                     ..Default::default()
                 });
             }
-            QuestionId::AmtCarryoverSameAsRegular => {
+            // ★ The three carryforward-conditioned declarations share ONE liveness predicate
+            //   (`questions::carryforward_in_present`), so they share one scenario.
+            QuestionId::AmtCarryoverSameAsRegular
+            | QuestionId::CarryoverIncludesSpousesJointLoss
+            | QuestionId::ExcludedCanceledDebt => {
                 r.capital_loss_carryforward_in = btctax_core::tax::types::Carryforward {
                     short: dec!(1000),
                     long: dec!(0),

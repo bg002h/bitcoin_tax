@@ -822,10 +822,24 @@ pub fn form_1040_lines(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScheduleDRouting {
     /// **L16 > 0 and L15 > 0** — gains in both characters. L17 = **Yes**; L18 = L19 = 0 (the 28%-rate
-    /// and unrecaptured-§1250 amounts, both refused upstream if they could ever be nonzero); L20 =
-    /// **Yes** → the Qualified Dividends and Capital Gain Tax Worksheet. Lines 21 and 22 are NOT
-    /// completed — the form says so in terms.
-    BothGains,
+    /// and unrecaptured-§1250 amounts, both refused upstream if they could ever be nonzero). Lines 21
+    /// and 22 are NOT completed — the form says so in terms.
+    ///
+    /// ★★★ **L20 IS NOW CARRIED, NOT ASSUMED.** The line reads *"Are lines 18 and 19 both zero or
+    /// blank **and you are not filing Form 4952**?"* — a CONJUNCTION, and btctax used to check "Yes"
+    /// unconditionally. The first half it could vouch for; the second half had no source anywhere on
+    /// the return, so the filed form swore, under §6065, to a fact nobody had been asked. It is now
+    /// the filer's own [`crate::tax::return_inputs::ReturnInputs::filing_form_4952`] answer, and
+    /// `screen_inputs` refuses both the unanswered and the filing-4952 cases — so the value reaching
+    /// here is always `true` TODAY, but it is true *because the filer said so*, which is the whole
+    /// difference. Making it a field rather than a literal is what keeps that so if a refusal is ever
+    /// lifted.
+    BothGains {
+        /// Schedule D line 20's answer. `true` ⇒ the Qualified Dividends and Capital Gain Tax
+        /// Worksheet; `false` ⇒ the Schedule D Tax Worksheet, which btctax does not fill (and which
+        /// `RefuseReason::Form4952Required` therefore refuses upstream).
+        line20_yes: bool,
+    },
     /// **L16 > 0 but L15 ≤ 0** — a short-term gain with a long-term loss. The common crypto year.
     /// L17 = **No** → skip 18 through 21 → L22. Tax routes to QDCGT iff there are qualified dividends.
     ShortGainLongLoss { line22_yes: bool },
@@ -1002,7 +1016,12 @@ pub fn schedule_d_lines(ar: &AbsoluteReturn, f8949: Option<&Printed8949>) -> Sch
     // 17's own answer comes from `schedule_d_line17`, the SINGLE definition the crypto-slice fill
     // also reads — the two paths cannot drift.
     let routing = match schedule_d_line17(line15, line16) {
-        Some(true) => ScheduleDRouting::BothGains,
+        // ★ Line 20's own words are a CONJUNCTION, and both halves are now sourced: lines 18/19 are
+        //   blank by construction (every amount that could sit there refuses upstream, and the form
+        //   says "both zero **or blank**"), and the Form 4952 clause is the filer's declaration.
+        Some(true) => ScheduleDRouting::BothGains {
+            line20_yes: ar.printed_inputs.filing_form_4952 == Some(false),
+        },
         // …line 16 a gain and line 15 ≤ 0: a short-term gain against a long-term loss.
         Some(false) => ScheduleDRouting::ShortGainLongLoss { line22_yes: has_qd },
         None if line16 < Usd::ZERO => ScheduleDRouting::NetLoss {
@@ -1311,13 +1330,25 @@ pub struct ScheduleALines {
     pub line8a: Usd,
     /// L8e — add 8a through 8c (8b/8c blank) ⇒ `= line8a`.
     pub line8e: Usd,
-    /// L10 — add 8e and 9 (9 blank) ⇒ `= line8e`.
+    /// L9 — "Investment interest. Attach Form 4952 if required. See instructions"
+    ///
+    /// ★ It was `rule = "unmodeled"` in the field census and line 10 was simply `= line8e`. The
+    /// direction was safe (a forgone deduction OVERSTATES tax), but a filer with margin interest got
+    /// no line to put it on and no signal that one existed.
+    pub line9: Usd,
+    /// L10 — "Add lines 8e and 9"
     pub line10: Usd,
-    /// L11 — gifts by cash or check.
+    /// L11 — "Gifts by cash or check. **If you made any gift of $250 or more, see instructions**"
+    ///
+    /// ★ The second sentence had been paraphrased away, and it is the whole §170(f)(8) gate: the
+    /// instruction it points at is *"You can deduct a gift of $250 or more only if you have a
+    /// contemporaneous written acknowledgment from the charitable organization"*. A line's text is
+    /// what tells the reader a question exists.
     pub line11: Usd,
-    /// L12 — gifts other than by cash or check (includes crypto donations; Form 8283 over $500).
+    /// L12 — "Other than by cash or check. **If you made any gift of $250 or more, see instructions.
+    /// You must attach Form 8283 if over $500**" (this is where crypto donations land)
     pub line12: Usd,
-    /// L13 — carryover from a prior year.
+    /// L13 — "Carryover from prior year"
     pub line13: Usd,
     /// L14 — add **printed** 11, 12 and 13.
     pub line14: Usd,
@@ -1367,7 +1398,11 @@ pub fn schedule_a_lines(ar: &AbsoluteReturn, line11_1040: Usd) -> Option<Schedul
     // Interest.
     let line8a = round_dollar(p.mortgage_8a);
     let line8e = line8a; // + 8b/8c, unmodeled ⇒ blank
-    let line10 = line8e; // + line 9 (investment interest), unmodeled ⇒ blank
+                         // ★ L9 is COLLECTED now (it was `unmodeled` and line 10 was simply `= line8e`). Sound at face
+                         //   value only because `RefuseReason::Form4952Required` stands in front of it — see
+                         //   `ScheduleAParts::investment_interest_9`.
+    let line9 = round_dollar(p.investment_interest_9);
+    let line10 = line8e + line9; // the form's own "Add lines 8e and 9", over the PRINTED cells
 
     // Charitable — the §170(b)-limited classes are already Schedule A's own lines 11/12/13.
     let line11 = round_dollar(p.charitable_cash_11);
@@ -1398,6 +1433,7 @@ pub fn schedule_a_lines(ar: &AbsoluteReturn, line11_1040: Usd) -> Option<Schedul
         line7,
         line8a,
         line8e,
+        line9,
         line10,
         line11,
         line12,
@@ -1600,6 +1636,9 @@ mod tests {
             charitable_carryover_out: Vec::new(),
             qbi_reit_ptp_carryforward_out: z,
             qbi_carryforward_out: z,
+            // N1 — no capital loss on this fixture, so the §1211/§1212 worksheet does not apply.
+            capital_loss_carryover_worksheet: None,
+            capital_loss_carryforward_out: crate::tax::types::Carryforward::default(),
             regular_tax: z,
             se_tax_sch2_l4: z,
             schedule_2_other_taxes: z,
@@ -1628,6 +1667,8 @@ mod tests {
             // Spelled out in full — `PrintedInputs` has no `Default` on purpose (a zeroed
             // `capital_loss_limit` would silently disable the §1211(b) deduction).
             printed_inputs: crate::tax::return_1040::PrintedInputs {
+                filing_form_4952: Some(false),
+                form_8960_line9b: None, // claimed nothing on Form 8960 Part II ⇒ line 9b blank
                 medicare_wages: z,
                 medicare_withheld: z,
                 schedule_c_header: crate::tax::return_1040::ScheduleCHeader::default(),
@@ -1659,6 +1700,7 @@ mod tests {
     fn sched_a_parts_sales_tax() -> crate::tax::return_1040::ScheduleAParts {
         crate::tax::return_1040::ScheduleAParts {
             salt_is_sales_tax: true,
+            investment_interest_9: Usd::ZERO,
             medical_expenses: Usd::ZERO,
             agi: dec!(50000),
             medical_floor: dec!(3750),
@@ -2027,7 +2069,7 @@ mod tests {
         let mut sd = schedule_d_lines(&ar, None);
         sd.line15 = dec!(5003);
         sd.line16 = dec!(5003);
-        sd.routing = ScheduleDRouting::BothGains;
+        sd.routing = ScheduleDRouting::BothGains { line20_yes: true };
 
         let income = form_1040_income_lines(&ar, None, None, &sd);
         assert_eq!(
@@ -2400,6 +2442,7 @@ mod tests {
         let medical_allowed = (medical - floor).max(Usd::ZERO);
         ScheduleAParts {
             salt_is_sales_tax: false,
+            investment_interest_9: Usd::ZERO,
             medical_expenses: medical,
             agi,
             medical_floor: floor,
@@ -2690,7 +2733,12 @@ mod tests {
         assert_eq!(l.line7, dec!(5000));
         assert_eq!(l.line15, dec!(20000));
         assert_eq!(l.line16, dec!(25000));
-        assert_eq!(l.routing, ScheduleDRouting::BothGains);
+        // ★ line 20 carries the FILER's Form 4952 answer, not a literal.
+        assert_eq!(
+            l.routing,
+            ScheduleDRouting::BothGains { line20_yes: true },
+            "line 20 = Yes BECAUSE the filer declared they are not filing Form 4952"
+        );
     }
 
     /// ★ **SPEC §7.2 path 2 — SHORT-TERM GAIN / LONG-TERM LOSS.** The common crypto year. L16 > 0 but

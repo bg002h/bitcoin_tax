@@ -503,7 +503,7 @@ fn form_8283_section_b_checks_digital_assets_box() {
         None,
         "f Securities must stay OFF"
     );
-    // Row data landed: description, appraised FMV, cost, deduction.
+    // Row data landed: description, appraised FMV, cost.
     assert_eq!(
         tv(
             &doc,
@@ -522,15 +522,19 @@ fn form_8283_section_b_checks_digital_assets_box() {
         .as_deref(),
         Some("60000")
     );
+    // ★★★ P3 — column (i) "Amount claimed as a deduction" is BLANK. This assertion used to demand
+    // Some("60000"); it was pinning a defect. i8283 (`design/forms/extract/i8283--2024.txt:1185`):
+    // "Complete column (i), amount claimed as a deduction, if you are a pass-through entity or a
+    // member of a pass-through entity." btctax models no pass-through entity, and an individual
+    // donating their own bitcoin is neither — so the cell is not this filer's to fill.
     assert_eq!(
         tv(
             &doc,
             &fields,
             "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3A[0].f1_56[0]"
-        )
-        .as_deref(),
-        Some("60000"),
-        "amount claimed as deduction"
+        ),
+        None,
+        "column (i) is the pass-through entity's cell, not this filer's"
     );
     // Part IV appraiser + Part V donee IDENTITY filled (page 2).
     assert_eq!(
@@ -730,7 +734,12 @@ fn form_8283_is_byte_deterministic() {
         "8283 fill changed — update golden"
     );
 }
-const GOLDEN_8283_SHA256: &str = "6832c7607ff2eb233bf9c95cdf36af5338c0636f86d2c053366a44325bd76e8d";
+// ★ Rolled 2026-08-21 for P3 (Section B column (i) no longer written): the emitted PDF really did
+//   change, so the hash must. The BEHAVIOUR is pinned by the value-level assertion in
+//   `form_8283_section_b_checks_digital_assets_box` (column (i) == None, with the reason), not by
+//   this digest — a golden cannot validate its own regeneration.
+//   was 6832c7607ff2eb233bf9c95cdf36af5338c0636f86d2c053366a44325bd76e8d
+const GOLDEN_8283_SHA256: &str = "70ba1b808372ffea4aa2821a1128aed610a4a7d9a8166a0b4bc0c4501be01d59";
 
 // ── Form 8283 multi-donee: one official 8283 per donee/appraiser identity ───────────────────────────
 //
@@ -1042,8 +1051,12 @@ fn form_8283_single_donee_unchanged() {
         "single-donee multi-lot 8283 changed — the common case must be byte-identical"
     );
 }
+// ★ Rolled 2026-08-21 for P3 — see the note on `GOLDEN_8283_SHA256`. The property this test owns
+//   (one physical copy, no `btctaxcopy` rename marker) is asserted structurally above and is
+//   unaffected; only the column-(i) cell left the document.
+//   was 27fb812d65ff29f8d8cedf225411d1cd4b16bbb35e9a1acaabddb19463a5aa6a
 const GOLDEN_8283_SINGLE_DONEE_MULTILOT: &str =
-    "27fb812d65ff29f8d8cedf225411d1cd4b16bbb35e9a1acaabddb19463a5aa6a";
+    "372fb1a3c793cd210e598d9bf71af2fa513bebbe6d23419943118179a69175c2";
 
 #[test]
 fn form_8283_one_donee_overflow_carries_identity_on_both_pages() {

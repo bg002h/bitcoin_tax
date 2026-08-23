@@ -534,7 +534,14 @@ const GOLDEN_2024_F8949: &str = "42fca4b11085c9181e40d1bd70046285c6254658438ccc2
 const GOLDEN_2024_SCHED_D: &str =
     "8f903457097e4eca1d3e11c3ebb008c4cb5b3502f37a6f7004bc886ced105969";
 const GOLDEN_2024_SE: &str = "d41317e29ebdf8bbf4391d0306d0d770cb7aec22d9cb7d339ca926aae1af19b1";
-const GOLDEN_2024_8283: &str = "9fef09fcc42d50c6989131cf3f173720dcaf5578b7b2a71ddb7033f7f5607f0e";
+// ★ Rolled 2026-08-21 for P3 — Section B column (i) ("Amount claimed as a deduction") is no longer
+//   written on the 2024/2025 revisions, so the emitted PDF changed and this digest must. The
+//   behaviour itself is pinned by value-level assertions (`sp2::form_8283_section_b_checks_digital_
+//   assets_box` and `full_return_forms::the_8283_section_b_column_i_is_blank_for_an_individual_filer`),
+//   never by this hash. ★ The TY2017 golden in `sp3b` is deliberately UNCHANGED: the Rev. 12-2014
+//   revision keeps its cell, because its instructions are not in this repository.
+//   was 9fef09fcc42d50c6989131cf3f173720dcaf5578b7b2a71ddb7033f7f5607f0e
+const GOLDEN_2024_8283: &str = "50172ecd61133c111ea22ae36369f1ddccb503f62706beaca56eeb3a0f486472";
 const GOLDEN_2024_1040: &str = "216f946bbde8557056700af2558a400461ad90d2da47b4efa0e5ad939ede758c";
 
 // ── helpers ──────────────────────────────────────────────────────────────────────────────────────

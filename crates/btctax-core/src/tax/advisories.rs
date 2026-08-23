@@ -146,6 +146,21 @@ pub enum Advisory {
     /// The ledger classified crypto donations assuming a **public charity (50%-org)** donee. A private
     /// foundation is the 20%-ceiling / basis class (which v1 refuses), so the donee must be verified.
     CharitableDoneeAssumedPublicCharity { donations: usize },
+    /// ★★★ **§170(f)(11)(D) — the qualified appraisal must be ATTACHED TO THE RETURN.** Distinct from
+    /// §170(f)(11)(C)'s $5,000 rule, which requires the filer to *obtain* an appraisal and keep it:
+    /// over $500,000 the appraisal itself is a required attachment, and a return that omits it fails
+    /// the substantiation requirement for the whole claim.
+    ///
+    /// ★★ `claimed` is the **pre-ceiling** amount claimed for the property — post-§170(e) reduction,
+    /// aggregated across all similar items given in the year, and determined WITHOUT regard to the
+    /// §170(b) AGI ceiling or the §170(d) carryover split. NOT Schedule A line 12: keying it to the
+    /// post-ceiling line would make a statutory attachment depend on AGI, and Reg §1.170A-16(f)(3)
+    /// extends the same duty to *"the return for any carryover year"*, which only coheres if the
+    /// trigger follows the CLAIM across years rather than the annual allowed slice.
+    ///
+    /// ★ btctax cannot produce the appraisal — only the appraiser can — so this is an advisory with a
+    /// matching MANIFEST line, not a refusal: the packet tells the filer exactly what to staple to it.
+    QualifiedAppraisalMustBeAttached { claimed: Usd },
     /// §3.4 conservative omission (SPEC §1.2): the education, dependent-care, retirement-savings
     /// (saver's), residential-energy and adoption credits are not computed — Schedule 3 Part I is
     /// $0 apart from the foreign tax credit. Purely taxpayer-FAVORABLE, so it advises, never refuses.
@@ -180,6 +195,55 @@ pub enum Advisory {
     /// `itemized` records which deduction the return took, so the text does not tell a standard-deduction
     /// filer their Schedule A "used" income taxes on a form they did not file (r3 MINOR-3, the r5 M-1 shape).
     SalesTaxElectionNotAsked { itemized: bool },
+    /// ★★★ **§1411(c)(1)(B) / Form 8960 line 9b (P8, §3.4)** — the return owes net investment income
+    /// tax and claims NOTHING on Part II line 9b, while the Schedule A it filed did deduct state and
+    /// local income tax. The whole allocable deduction is forgone, which can only OVERSTATE the tax.
+    ///
+    /// ★★ It advises rather than computing, and that is the design (plan decision 6 /
+    /// `ADJUDICATION-2026-08-21.md` D5's build-shape guard 1). i8960: *"You can determine the portion
+    /// of your state, local, and foreign income taxes allocable to net investment income using **any
+    /// reasonable method**"*, and *"the reasonable method of allocation may differ from year to
+    /// year."* Choosing one is the filer's election; btctax states the POOL and offers the
+    /// instructions' own worked example, and lets them enter the result.
+    ///
+    /// `bound` is the §164(b)(6)-limited pool from [`crate::tax::return_1040::nii_line9b_bound`] — the
+    /// same number the `Nii9bExceedsDeductedSalt` refusal enforces, so the note and the gate can never
+    /// name different figures. Fires only when `bound > 0`: a standard-deduction filer, or one who
+    /// elected general sales taxes, forgoes nothing here and is never nagged.
+    /// `bound` — the largest allocation §164(b)(6) leaves room for. `saving` — what claiming the
+    /// whole of it would actually take off the tax, computed through Form 8960 line 16's own `min`
+    /// (final whole-branch review, P3-3). The advisory is not emitted at all when `saving` is zero,
+    /// because line 15 then binds and no allocation moves the return.
+    Form8960Line9bNotClaimed { bound: Usd, saving: Usd },
+    /// ★★★ **N1** — this year's capital loss was NOT absorbed by the §1211(b) allowance (in whole or
+    /// in part), because taxable income was already at or below zero. The §1211/§1212 **Capital Loss
+    /// Carryover Worksheet** therefore carries MORE loss into next year than the flat
+    /// `loss − $3,000` rule does, and the filer has to be given the right number.
+    ///
+    /// ★★ **It exists because two figures for one quantity now coexist, and only one of them is
+    /// right.** `report --tax-year` prints the frozen crypto-delta engine's `carryforward_out`, which
+    /// is the flat rule and cannot be anything else — `TaxProfile` hands that engine an
+    /// `ordinary_taxable_income` already floored at zero, so the worksheet's line 1 (1040 line 15
+    /// *before* the floor) does not survive into it. A silent second number would be the worst of
+    /// both worlds, so this advisory names BOTH and says which one to carry.
+    ///
+    /// ★ **Fires off the MECHANISM, not off a household list**: exactly when the worksheet's answer
+    /// differs from the flat rule on either character. At positive taxable income the two are
+    /// algebraically identical, so it cannot fire there — which is also what makes it a live test of
+    /// the no-op claim rather than a restatement of it.
+    CapitalLossCarryoverWorksheetIncreasesCarryover {
+        /// The flat `loss − min(loss, §1211(b) limit)` figure, short-term character.
+        flat_short: Usd,
+        /// The flat figure, long-term character.
+        flat_long: Usd,
+        /// Worksheet line 8 — the short-term carryover.
+        worksheet_short: Usd,
+        /// Worksheet line 13 — the long-term carryover.
+        worksheet_long: Usd,
+        /// Worksheet line 4 — how much of the §1211(b) allowance the year actually absorbed. Zero
+        /// when the loss did nothing at all for the filer this year.
+        absorbed: Usd,
+    },
 }
 
 /// Format a dollar amount for advisory prose: `$1,950` / `$1,234.56` — thousands-separated, and
@@ -187,7 +251,7 @@ pub enum Advisory {
 /// which disagreed with the comma-separated house style every other printed figure uses. The CLI's
 /// `fmt_money` lives in `btctax-cli::render` and core cannot reach it, so this is the core-side
 /// equivalent — deliberately small, and used by every advisory that prints money.
-fn fmt_usd(v: Usd) -> String {
+pub(crate) fn fmt_usd(v: Usd) -> String {
     let cents = v.round_dp(2);
     let whole = cents.trunc().abs();
     let frac = (cents - cents.trunc()).abs();
@@ -365,6 +429,21 @@ impl Advisory {
                  30%-of-AGI ceiling. If the donee is a PRIVATE FOUNDATION, the correct treatment is the \
                  20% ceiling at BASIS (which v1 refuses). Verify who you gave to."
             ),
+            Advisory::QualifiedAppraisalMustBeAttached { claimed } => format!(
+                "ATTACH THE QUALIFIED APPRAISAL — you are claiming {} of charitable deduction for \
+                 donated property, and §170(f)(11)(D) says that \"in the case of contributions of \
+                 property for which a deduction of more than $500,000 is claimed\", the substantiation \
+                 requirements are met only if you ATTACH a qualified appraisal to the return. This is \
+                 more than the $5,000 rule, which only asks you to obtain one and keep it: over \
+                 $500,000 the appraisal is part of the filed return, and without it the deduction can \
+                 be denied in full. btctax cannot write an appraisal — only a qualified appraiser \
+                 can — so obtain it and staple it to the return ON WHICH YOU CLAIM THE DEDUCTION \
+                 (manifest.txt lists it whenever this packet is that return). ★ The duty RECURS: \
+                 Reg §1.170A-16(f)(3) requires the appraisal attached to the return for any \
+                 §170(d) carryover year too, so attach a copy again in every year this gift carries \
+                 into.",
+                fmt_usd(*claimed)
+            ),
             Advisory::OtherCreditsOmitted =>
                 "OTHER CREDITS NOT COMPUTED — v1 does not compute the education (Form 8863), \
                  dependent-care (Form 2441), retirement-savings/saver's (Form 8880), residential-energy \
@@ -431,6 +510,62 @@ impl Advisory {
                         .to_string()
                 }
             }
+            // ★ P8 — the pool is named, the METHOD is not applied. i8960's own example is offered as
+            //   an example ("one reasonable method"), never as the answer, because "any reasonable
+            //   method" is the filer's election and may differ from year to year.
+            Advisory::Form8960Line9bNotClaimed { bound, saving } => format!(
+                "FORM 8960 LINE 9B NOT CLAIMED — you owe net investment income tax (§1411), and \
+                 Form 8960 line 9b, \"State, local, and foreign income tax\", is BLANK. The state \
+                 and local income tax your Schedule A actually deducted, after §164(b)(6)'s limit, \
+                 is up to {}, and the portion of it attributable to your investment income is \
+                 deductible against that income — so your tax is currently OVERSTATED by up to {}. \
+                 (That is what allocating the WHOLE of it would save; a smaller allocation saves \
+                 less. Line 16 is the smaller of line 12 and line 15, so once line 12 falls to line \
+                 15 no further allocation changes anything.) btctax will \
+                 not pick the split for you: the Instructions for Form 8960 say you may use \"any \
+                 reasonable method\", and one they give themselves is that amount times the ratio of \
+                 Form 8960 line 8 (gross investment income) to your AGI. Work out your own figure and \
+                 enter it, or leave the line blank and claim nothing.",
+                fmt_usd(*bound),
+                fmt_usd(*saving)
+            ),
+            // ★ F3 (phase-1 seam review). This said the flat figure was "printed above", which is
+            //   false on one surface and can be false on both. §G-19d prints this same advisory on
+            //   `export-irs-pdf` STDERR, where no carryforward figure is printed above it at all.
+            //   And `flat` here is `capital_net`'s full-return netting (broker 1099-B totals joined),
+            //   while the figure `report` actually prints is the delta engine's CRYPTO-ONLY
+            //   carryforward — so on a floor household with broker capital losses it pointed at a
+            //   number appearing nowhere on the page. An advisory must not tell a filer to compare
+            //   against something it cannot guarantee is in front of them; naming the RULE is true on
+            //   every surface. The bottom-line instruction (carry the worksheet figure) is unchanged.
+            Advisory::CapitalLossCarryoverWorksheetIncreasesCarryover {
+                flat_short,
+                flat_long,
+                worksheet_short,
+                worksheet_long,
+                absorbed,
+            } => format!(
+                "CAPITAL-LOSS CARRYOVER — CARRY {ws}, NOT {flat}. Your taxable income (Form 1040 line \
+                 15) was already at or below zero, so the capital loss did not offset ordinary income \
+                 the way it does in a normal year: the §1211(b) allowance absorbed only {absorbed} of \
+                 it. The §1211/§1212 Capital Loss Carryover Worksheet (2025 Schedule D instructions, \
+                 \"Capital Loss Carryover Worksheet — Lines 6 and 14\") therefore carries {ws} into \
+                 next year — short-term {ws_s}, long-term {ws_l} — where the flat \"loss minus \
+                 $3,000\" rule gives {flat}. ★ THE WORKSHEET FIGURE IS THE CORRECT ONE. \
+                 It belongs on next year's Schedule D lines 6 and 14. `report --write-carryover` \
+                 stamps it onto next year's inputs for you, rounded to whole dollars; enter it by \
+                 hand (`btctax income import`) only if you do not use that flag — and do not do \
+                 both, or your own entry and btctax's will collide. The flat figure would forfeit \
+                 {diff} of deductible loss permanently.",
+                ws = fmt_usd(*worksheet_short + *worksheet_long),
+                flat = fmt_usd(*flat_short + *flat_long),
+                ws_s = fmt_usd(*worksheet_short),
+                ws_l = fmt_usd(*worksheet_long),
+                absorbed = fmt_usd(*absorbed),
+                diff = fmt_usd(
+                    (*worksheet_short + *worksheet_long) - (*flat_short + *flat_long)
+                ),
+            ),
         }
     }
 }
@@ -700,6 +835,66 @@ pub fn advisories_for(
         year,
         ar.deduction_is_itemized,
     );
+    // ★★★ **P8 / §3.4** — Form 8960 Part II line 9b is blank on a return that OWES NIIT and did
+    //     deduct state income tax. Fires here rather than in `advisories`, because both halves of the
+    //     predicate need the COMPUTED return: whether §1411 tax is owed at all, and the §63(e)
+    //     election the bound depends on.
+    //
+    // ★ Gated on `bound > Usd::ZERO` so it stays silent where nothing is forgone — the standard
+    //   deduction (nothing was "properly deducted on your return") and the §164(b)(5) sales-tax
+    //   election (i8960: "Sales taxes aren't deductible in computing net investment income"). Both
+    //   are real branches of the same derivation the refusal uses, not exclusions bolted on here.
+    //
+    // ★★★ …AND GATED ON WHETHER IT WOULD ACTUALLY MOVE THE TAX (final whole-branch review, P3-3).
+    //
+    //     The text said "so your tax is currently OVERSTATED", unconditionally. That is FALSE
+    //     whenever LINE 15 BINDS. Form 8960 line 16 is `min(line 12, line 15)`, so when the
+    //     MAGI excess (line 15) is smaller than net investment income (line 12) — wages $150,000
+    //     plus $100,000 of crypto gains: excess $50,000 < NII $100,000, a COMMON btctax shape —
+    //     line 16 takes the line-15 leg and a 9b entry of any size up to the bound changes the tax
+    //     by exactly $0. The advisory told that filer they were overpaying when they were not, and
+    //     invited a sworn allocation election that buys them nothing.
+    //
+    //     So the benefit is COMPUTED from the form's own arithmetic rather than asserted:
+    //     `min(l12, l15) − min(max(l12 − bound, 0), l15)`, times the rate. Reducing line 12 first
+    //     eats the slack by which it exceeds line 15 and only then moves line 16 — which is the
+    //     mechanism, so it decides, and no filer shape has to be enumerated.
+    if ri.form_8960_line9b.is_none() && ar.niit.tax > Usd::ZERO {
+        let bound = crate::tax::return_1040::nii_line9b_bound(ar);
+        let l12 = ar.niit.nii;
+        let l15 =
+            (ar.niit.magi - crate::tax::tables::niit_threshold(ri.filing_status)).max(Usd::ZERO);
+        let l16_now = l12.min(l15);
+        let l16_after = (l12 - bound).max(Usd::ZERO).min(l15);
+        let saving = crate::conventions::round_cents(
+            crate::tax::tables::NIIT_RATE * (l16_now - l16_after).max(Usd::ZERO),
+        );
+        if bound > Usd::ZERO && saving > Usd::ZERO {
+            out.push(Advisory::Form8960Line9bNotClaimed { bound, saving });
+        }
+    }
+
+    // ★★★ **N1** — the §1211/§1212 Capital Loss Carryover Worksheet moved the carryforward, so say so.
+    //
+    // Fires off the MECHANISM — "the worksheet and the flat rule disagree" — never off a list of
+    // households. At non-negative 1040 line 15 the two are algebraically the same number (pinned by
+    // `capital_loss_carryover::at_nonnegative_line1_the_worksheet_equals_the_frozen_flat_rule`), so
+    // this cannot fire on an ordinary loss year; it fires exactly on the floor region, which is
+    // precisely the region no corpus household and neither oracle can witness.
+    if let Some(w) = ar.capital_loss_carryover_worksheet {
+        let flat = crate::tax::return_1040::capital_net(ri, state, year, ri.filing_status);
+        let ws = w.carryforward_out();
+        if ws.short != flat.st_carry || ws.long != flat.lt_carry {
+            out.push(Advisory::CapitalLossCarryoverWorksheetIncreasesCarryover {
+                flat_short: flat.st_carry,
+                flat_long: flat.lt_carry,
+                worksheet_short: ws.short,
+                worksheet_long: ws.long,
+                absorbed: w.line4,
+            });
+        }
+    }
+
     // ★★★ §6413(c) — computed on the return (it needs the year's wage base, which the scalar form does
     // not carry), appended here so the filer is TOLD that money withheld above the cap by a SINGLE
     // employer is real, recoverable, and simply not claimable on this return.
@@ -963,6 +1158,24 @@ pub fn advisories(
         out.push(Advisory::CharitableDoneeAssumedPublicCharity { donations });
     }
 
+    // ★★★ §170(f)(11)(D) — over $500,000 CLAIMED for the property, the qualified appraisal is an
+    //     ATTACHMENT to the return, not merely a record to keep.
+    //
+    // ★★ THE OPERAND IS `year_donation_deduction` — the pre-§170(b) claimed amount aggregated over
+    //    all similar items — and NOT Schedule A line 12. Wiring it to the post-ceiling line would
+    //    make a statutory attachment depend on AGI: the identical $700,000 gift would require an
+    //    appraisal for a $3M-AGI filer and not for a $1M-AGI one, whose year-1 Schedule A allows only
+    //    $300,000. Reg §1.170A-16(f)(3) settles it the other way by extending the duty to the
+    //    carryover years, which only coheres if the trigger follows the CLAIM.
+    //
+    // ★ Strict `>` — §170(f)(11)(D) says "more than $500,000" (contrast §170(f)(8)'s "$250 or more").
+    let claimed_for_property = crate::forms::year_donation_deduction(state, year);
+    if claimed_for_property > crate::tax::tables::APPRAISAL_ATTACHMENT_THRESHOLD {
+        out.push(Advisory::QualifiedAppraisalMustBeAttached {
+            claimed: claimed_for_property,
+        });
+    }
+
     out
 }
 
@@ -1007,6 +1220,167 @@ mod tests {
         let m = Advisory::CharitableDoneeAssumedPublicCharity { donations: 1 }.message();
         assert!(m.contains("PRIVATE FOUNDATION"));
         assert!(m.contains("BASIS"));
+    }
+
+    /// A 2024 §170 Donation of one leg with the given holding-period `term`, `basis` and `fmv`.
+    /// `claimed_deduction` is the §170(e) figure the fold computes — LT deducts FMV, ST deducts
+    /// `min(FMV, basis)` — so a fixture cannot accidentally state a claim the legs do not support.
+    fn donation_of(term: crate::state::Term, basis: Usd, fmv: Usd) -> LedgerState {
+        use crate::event::BasisSource;
+        use crate::identity::{EventId, LotId};
+        use crate::state::{Removal, RemovalKind, RemovalLeg};
+        let leg = RemovalLeg {
+            lot_id: LotId {
+                origin_event_id: EventId::decision(1),
+                split_sequence: 0,
+            },
+            sat: 100_000_000,
+            basis,
+            fmv_at_transfer: fmv,
+            term,
+            basis_source: BasisSource::ExchangeProvided,
+            acquired_at: time::macros::date!(2020 - 01 - 01),
+            pseudo: false,
+        };
+        let claimed = match term {
+            crate::state::Term::LongTerm => fmv,
+            crate::state::Term::ShortTerm => fmv.min(basis),
+        };
+        LedgerState {
+            removals: vec![Removal {
+                event: EventId::decision(1),
+                kind: RemovalKind::Donation,
+                removed_at: time::macros::date!(2024 - 06 - 01),
+                legs: vec![leg],
+                appraisal_required: false,
+                donor_acquired_at: None,
+                claimed_deduction: Some(claimed),
+                donee: None,
+            }],
+            ..Default::default()
+        }
+    }
+
+    /// ★★★ **P5 / §170(f)(11)(D) — THE ATTACH-THE-APPRAISAL GATE, on the adjudication's own two
+    /// vectors.** Both must hold, and they pull in opposite directions, which is why one of them
+    /// alone would be a green test that proves nothing.
+    ///
+    /// 1. **$700,000 gift, $1,000,000 AGI ⇒ the gate FIRES.** §170(b)'s 30% ceiling allows only
+    ///    $300,000 on this year's Schedule A line 12, and that is IRRELEVANT: §170(f)(11)(D) keys on
+    ///    the amount "claimed" for the property, which §170(f)(11)(F) and Reg §1.170A-16(f)(5)(ii)
+    ///    make a property-level, similar-items aggregate — determined without regard to the §170(b)
+    ///    ceiling or the §170(d) carryover split. Reg §1.170A-16(f)(3) confirms it by extending the
+    ///    attach duty to the CARRYOVER years, which only coheres if the trigger follows the claim.
+    ///    ★ The AGI-keyed reading is not merely different, it is absurd: the identical gift would
+    ///    require an appraisal from a $3M-AGI filer and not from a $1M-AGI one.
+    ///
+    /// 2. **Short-term crypto, FMV $700,000, §170(e) basis-limited claim $180,000 ⇒ it does NOT
+    ///    fire.** §170(e)(1)(A) reduces the deduction to basis for property whose sale would produce
+    ///    ordinary or short-term gain, so the amount CLAIMED is $180,000 and no attachment is owed.
+    ///    The operand is post-§170(e), pre-§170(b).
+    ///
+    /// **B1 mutations, each observed RED before the fix landed:**
+    /// - cap the operand at the §170(b) 30%-of-AGI ceiling (the "wired to Schedule A line 12"
+    ///   defect the adjudication names as the one to avoid) ⇒ vector 1 reds;
+    /// - key the operand to raw contributed FMV instead of the §170(e) claim ⇒ vector 2 reds;
+    /// - relax the threshold from `>` to `>=` ⇒ the exactly-$500,000 row reds.
+    #[test]
+    fn the_appraisal_attachment_gate_keys_on_the_pre_ceiling_claim_not_the_ceiling_or_the_fmv() {
+        use crate::state::Term;
+        let fired = |state: &LedgerState, agi: Usd| {
+            let ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                ..Default::default()
+            };
+            advisories(&ri, state, Usd::ZERO, agi, Usd::ZERO, &params(), 2024, true)
+                .into_iter()
+                .find_map(|a| match a {
+                    Advisory::QualifiedAppraisalMustBeAttached { claimed } => Some(claimed),
+                    _ => None,
+                })
+        };
+
+        // VECTOR 1 — $700,000 long-term gift against $1,000,000 of AGI. The 30% ceiling allows
+        // $300,000 this year; the gate fires on the $700,000 CLAIMED for the property regardless.
+        assert_eq!(
+            fired(
+                &donation_of(Term::LongTerm, dec!(100000), dec!(700000)),
+                dec!(1000000)
+            ),
+            Some(dec!(700000)),
+            "the §170(b) AGI ceiling does not decide a §170(f)(11)(D) attachment — keying it to \
+             Schedule A line 12 would make substantiation depend on AGI"
+        );
+
+        // …and the SAME gift at triple the AGI fires identically. If the operand were ceiling-limited
+        // these two rows would disagree, which is the absurdity in one assertion.
+        assert_eq!(
+            fired(
+                &donation_of(Term::LongTerm, dec!(100000), dec!(700000)),
+                dec!(3000000)
+            ),
+            Some(dec!(700000)),
+            "the identical property must owe the identical attachment at any AGI"
+        );
+
+        // VECTOR 2 — short-term crypto, FMV $700,000, basis $180,000. §170(e)(1)(A) limits the claim
+        // to basis, so $180,000 is claimed and NO attachment is owed.
+        assert_eq!(
+            fired(
+                &donation_of(Term::ShortTerm, dec!(180000), dec!(700000)),
+                dec!(1000000)
+            ),
+            None,
+            "the operand is the §170(e)-reduced CLAIM, not the fair market value contributed"
+        );
+
+        // THE BOUNDARY — §170(f)(11)(D) says "more than $500,000", so exactly $500,000 does not fire
+        // (contrast §170(f)(8)'s "$250 or more", which does at exactly $250).
+        assert_eq!(
+            fired(
+                &donation_of(Term::LongTerm, dec!(1), dec!(500000)),
+                dec!(1000000)
+            ),
+            None,
+            "exactly $500,000 is not MORE THAN $500,000"
+        );
+        assert_eq!(
+            fired(
+                &donation_of(Term::LongTerm, dec!(1), dec!(500000.01)),
+                dec!(1000000)
+            ),
+            Some(dec!(500000.01)),
+            "…and a cent over is"
+        );
+    }
+
+    /// ★★ **The §170(f)(11)(D) advisory must distinguish itself from the $5,000 rule and name the
+    /// carryover-year recurrence.** Both are "you need a qualified appraisal" to a skimming reader,
+    /// and only one of them makes the appraisal part of the FILED return — a filer who reads this as
+    /// "obtain and keep one" has done the wrong thing.
+    ///
+    /// B1 mutation: drop "ATTACH" or the Reg §1.170A-16(f)(3) sentence and the matching row reds.
+    #[test]
+    fn the_appraisal_attachment_advisory_says_attach_and_says_it_recurs() {
+        let m = Advisory::QualifiedAppraisalMustBeAttached {
+            claimed: dec!(700000),
+        }
+        .message();
+        for phrase in [
+            "ATTACH",
+            "$500,000",
+            "170(f)(11)(D)",
+            "1.170A-16(f)(3)",
+            "carryover",
+            "$700,000", // the triggering amount, so the filer can check it against their own figure
+        ] {
+            assert!(m.contains(phrase), "message must say {phrase:?}: {m}");
+        }
+        // …and it must NOT be mistakable for the $5,000 obtain-and-keep rule.
+        assert!(
+            m.contains("$5,000"),
+            "the message must say how this differs from the $5,000 rule: {m}"
+        );
     }
 
     fn params() -> FullReturnParams {

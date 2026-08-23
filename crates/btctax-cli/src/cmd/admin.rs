@@ -315,6 +315,124 @@ pub struct IrsPdfReport {
     /// the one that hands them a PDF to sign, so it is the last place the omissions should be silent.
     /// Empty on the crypto-slice path, which computes no full return.
     pub advisories: Vec<btctax_core::tax::advisories::Advisory>,
+    /// ★ P6 (FILING-READINESS-PLAN rank 9) — the §170(d)(1) charitable carryover to next year, per
+    /// class and vintage, so the EXPORT path can tell the filer it exists.
+    ///
+    /// `AbsoluteReturn::charitable_carryover_out` is computed on every full-return run and was read by
+    /// exactly ONE caller — `apply_carryover_writeback`, reachable only from `report
+    /// --write-carryover`, which errors unless a year+1 row already exists. A filer whose gift
+    /// exceeded its §170(b) ceiling was therefore never told: a deduction already paid for, silently
+    /// forgone. This is not a rich-filer case — the ceiling is a FRACTION of AGI, so at $0 AGI the
+    /// ceiling is $0 and 100% of the gift carries.
+    ///
+    /// Empty on the crypto-slice path, which computes no full return and no Schedule A.
+    pub charitable_carryover_out: Vec<btctax_core::tax::return_inputs::CharitableCarryItem>,
+    /// ★★★ FINAL-REVIEW FINDING 1 — how much of [`charitable_carryover_out`] btctax cannot vouch for
+    /// under §170(f)(8), or `None` when it can.
+    ///
+    /// See [`btctax_core::tax::return_1040::cwa_unvouched_carryover`]. Carried out rather than
+    /// re-derived so this surface and `report --tax-year`'s cannot drift; `None` on the crypto-slice
+    /// path, which computes no full return.
+    pub charitable_carryover_cwa_unvouched: Option<btctax_core::conventions::Usd>,
+    /// ★ N4 (FILING-READINESS-PLAN rank 14) — the marks btctax deliberately did NOT make on this
+    /// packet, one string per mark. See [`hand_marks`].
+    ///
+    /// Carried out so the caller can say how many there are without re-deriving the list; the text
+    /// itself lives in the packet's `manifest.txt` (owner decision 13), which is the artifact the
+    /// filer is told to follow while assembling paper. Empty on the crypto-slice path, whose 1040 is
+    /// watermarked "WORKSHEET — NOT A COMPLETE FORM 1040" and is not signed or filed.
+    pub hand_marks: Vec<String>,
+}
+
+/// ★ N4 — **the marks btctax deliberately leaves for the filer**, in the order they appear on the
+/// form. One string per mark; empty is impossible (the signature is every filer's).
+///
+/// **The signal, never the answer.** Each of these is blank because it is the filer's to make, not
+/// because it is zero — "an entry is testimony," and a `0` or a checked box btctax cannot vouch for
+/// is fabricated testimony on a §6065-signed page. What was missing was not the mark; it was any
+/// statement anywhere in the product's output that the mark exists. A no-crypto filer signed a return
+/// with a mandatory question unanswered, and the packet's `manifest.txt` was one line of stapling
+/// order.
+///
+/// Each entry is CONDITIONED on the mark actually being blank in THIS packet, because a list that
+/// always says the same thing signals nothing — and telling a filer to hand-mark a box on a
+/// correctly-filed form is worse than silence.
+fn hand_marks(printed: &btctax_core::tax::packet::PrintedReturn) -> Vec<String> {
+    let mut marks = Vec::new();
+    if !printed.forms.f1040.digital_asset_yes {
+        marks.push(
+            "Form 1040 — the Digital Asset question (above line 1a): neither \"Yes\" nor \"No\" is \
+             marked. btctax found no digital-asset activity in this vault, but it will not swear \
+             \"No\" for a ledger it was never given — a wrong \"No\" here is sworn testimony under \
+             §6065. The question is MANDATORY: answer it yourself before you sign."
+                .to_string(),
+        );
+    }
+    if !printed.forms.sch_d.must_file() {
+        marks.push(
+            "Form 1040 line 7 — \"Attach Schedule D if required. If not required, check here\": the \
+             box is blank and no Schedule D is in this packet. btctax cannot establish that Schedule \
+             D is NOT required — it has no input for Schedule D lines 4, 5, 11 or 12 (Forms 6252, \
+             4684, 6781, 8824, 4797, 2439, or a K-1). Check the box only if you know none of those \
+             applies to you."
+                .to_string(),
+        );
+    }
+    // ★★ F2 (phase-1 seam review). A Section B Form 8283 is NOT filing-ready without a signed Part IV
+    //    (appraiser) and Part V (donee acknowledgement), and those were named only on stderr — the
+    //    exact surface N4's own rationale rejects, since the manifest is the artifact the filer
+    //    follows while assembling paper and the one that does not scroll away. A filer working from
+    //    an 8283-bearing packet's manifest saw an authoritative-sounding closed list of "1 mark(s)"
+    //    that omitted the two signatures without which the form cannot be filed at all.
+    //
+    //    ★ These differ in kind from every other mark here: they are THIRD-PARTY signatures. The
+    //    others the filer can make at the kitchen table the moment they read this; these take
+    //    calendar time to obtain, which is precisely why burying them in scrolled-away stderr is
+    //    worse than burying a mark the filer could make on the spot.
+    //
+    //    The seam: lane B enumerated the marks from the 1040's view while lanes A and C were
+    //    changing what the packet's 8283 contains. Neither could see the other.
+    if printed.forms.f8283.as_ref().is_some_and(|r| {
+        r.rows()
+            .iter()
+            .any(|row| row.section == Some(btctax_core::Form8283Section::B))
+    }) {
+        marks.push(
+            "Form 8283 Section B — Part IV (Declaration of Appraiser) and Part V (Donee \
+             Acknowledgement): both are blank, and NEITHER is yours to sign. A Section B Form 8283 is \
+             not filing-ready without the qualified appraiser's signed declaration and the donee \
+             organization's acknowledgement. Both come from other people, so start early — this is \
+             the one item on this list you cannot finish at your desk tonight."
+                .to_string(),
+        );
+    }
+    marks.push(
+        "Form 1040 page 2 — the signature block: your signature, the date, your occupation, and the \
+         Identity Protection PIN if the IRS issued you one — and the same again for your spouse if \
+         you are filing jointly. A return is not filed until it is signed under penalties of perjury \
+         (§6065), and no software may sign it for you."
+            .to_string(),
+    );
+    marks
+}
+
+/// Render [`hand_marks`] as the packet manifest's closing section — the manifest is the artifact the
+/// filer is told to follow while assembling paper, which is why the marks live there (decision 13)
+/// rather than only on a stderr line that scrolls away.
+fn hand_marks_block(marks: &[String]) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::from(
+        "\n# ── COMPLETE BY HAND — marks btctax deliberately did NOT make ──\n\
+         #\n\
+         # These are blank because they are YOURS to make, not because they are zero. btctax does\n\
+         # not answer for the filer, and it will not sign.\n#\n",
+    );
+    for m in marks {
+        for line in crate::render::wrap_bulleted(m).lines() {
+            let _ = writeln!(s, "#{line}");
+        }
+    }
+    s
 }
 
 /// The **[I5]** broker-reporting advisory line, year-aware — or `None` when no disposition may have
@@ -715,8 +833,15 @@ pub(crate) fn export_irs_pdf_from_session(
         .filter(|b| b.kind.severity() == Severity::Hard)
         .count();
     Ok(IrsPdfReport {
-        // The crypto slice computes no full return, so there are no full-return advisories.
+        // The crypto slice computes no full return, so there are no full-return advisories — and no
+        // Schedule A, hence no §170(d)(1) carryover either.
         advisories: Vec::new(),
+        charitable_carryover_out: Vec::new(),
+        charitable_carryover_cwa_unvouched: None,
+        // N4 does not apply to the slice: its 1040 is a WORKSHEET (watermarked "NOT A COMPLETE FORM
+        // 1040"), it is never signed or filed, and the note printed for it already says every other
+        // line is the filer's.
+        hand_marks: Vec::new(),
         full_return_paths: Vec::new(),
         full_return_manifest: None,
         forms_ignored_full_return: false, // crypto-slice path honors --forms
@@ -760,6 +885,13 @@ fn part_ii_overflow_message(tax_year: i32, overflow: &btctax_forms::PartIiOverfl
         chars = overflow.chars_fit,
     )
 }
+
+// ★ `form_8949_overflow_message` stood here and was DELETED with its preflight when P2b landed in the
+// same branch. It was the honest refusal for a full-return 8949 that overflowed one page; that path
+// now paginates without a ceiling, so the message described a state the code can no longer reach. A
+// refusal message for an unreachable branch is worse than none: it documents a limit that does not
+// exist, and the next reader budgets around it. The two Form 8275 messages above are unaffected —
+// those paths genuinely do not paginate.
 
 /// Write `bytes` to `path` with owner-only (0o600) permissions, matching the CSV export path.
 fn write_bytes_owner_only(path: &Path, bytes: &[u8]) -> Result<(), CliError> {
@@ -910,6 +1042,26 @@ fn export_full_return(
         }
     }
 
+    // ★★ P2a's Form 8949 overflow preflight USED TO STAND HERE, and was DELETED when P2b landed in the
+    // same branch. It refused any export whose Part I or Part II row count exceeded one page's grid,
+    // with an honest message naming the year, the capacity and a remedy. That was correct while the
+    // full-return path could not paginate. It is a FALSE REFUSAL now that it can: `fill_full_return`
+    // reaches `fill_8949_full_with_map` (packet.rs -> lib.rs `fill_8949_full`), which chunks into
+    // ⌈rows/grid⌉ page copies with NO ceiling, so there is no row count this path cannot fill.
+    //
+    // ★★★ WHY THIS IS RECORDED RATHER THAN SILENTLY REMOVED — it is the exact defect shape harness B3
+    // exists for, and it was invisible to every test in the branch. P2a (btctax-cli) and P2b
+    // (btctax-forms) were built in PARALLEL worktrees against the same base. Each shipped a passing
+    // kill-test, and the two tests asserted OPPOSITE things about the same 15-leg filer: the forms test
+    // asserted it PAGINATES, the CLI test asserted it REFUSES. Both suites were green at once, because
+    // each was scoped to one layer and neither could see the other. The product was broken in the seam:
+    // the CLI refused a packet the filler would have produced — reintroducing precisely the total loss
+    // (exit 2, zero bytes, every form gone) that P2b existed to end, for the DCA population P2a itself
+    // identified as the most exposed. The lesson is B3's: a per-range review is not a branch review, and
+    // a green suite per lane does not compose into a correct product.
+    //
+    // The Form 8275 preflights above are UNAFFECTED and stay: those paths genuinely do not paginate.
+
     // ★ ALL-OR-NOTHING: every form fills BEFORE anything is written.
     let packet = btctax_forms::fill_full_return(&printed, tax_year)?;
 
@@ -966,6 +1118,60 @@ fn export_full_return(
         let _ = writeln!(manifest, "  ATT  {}.txt  (attach to Form 1040)", st.name);
         paths.push(path);
     }
+    // ★★★ §170(f)(11)(D) — THE APPRAISAL IS AN ATTACHMENT, so the stapling order has to name it.
+    //
+    // The advisory already tells the filer this on stderr; the manifest is what tells them what to
+    // PUT IN THE ENVELOPE, and a required attachment that appears in neither is one nobody attaches.
+    // btctax cannot generate the page — only a qualified appraiser can — so it is listed as a
+    // MISSING item the filer supplies, with the amount that triggered it. Derived from the same
+    // advisory list, so the two can never disagree about whether the duty exists.
+    //
+    // ★★ SCOPED TO THE PACKET THAT ACTUALLY CLAIMS IT. The ADVISORY is about the property and fires
+    //    in the year of the gift whatever election the filer makes — correct, because the duty
+    //    follows the claim across carryover years and the filer needs to know now. The MANIFEST is
+    //    this envelope's stapling order, so it may only say "attach this HERE" on a return that
+    //    claims the property deduction (Schedule A line 12 > $0). A standard-deduction year, or one
+    //    the §170(b) ceiling zeroes, claims nothing and gets the advisory without the manifest line.
+    //    ★ Note what is NOT scoped: the $500,000 TEST itself stays the pre-ceiling claimed amount.
+    // ★ `deduction_is_itemized` is REQUIRED here (phase-2 review, merge Minor). `ScheduleAParts` is
+    //   built whenever Schedule A inputs exist, regardless of the §63(e) election — so testing
+    //   line 12 alone put the ATT line on a standard-deduction packet that claims nothing, which is
+    //   the exact instruction this block's own comment says it avoids.
+    let claims_property_deduction = ar.deduction_is_itemized
+        && ar
+            .schedule_a
+            .as_ref()
+            .is_some_and(|a| a.charitable_noncash_12 > btctax_core::Usd::ZERO);
+    if let Some(claimed) = advisories
+        .iter()
+        .find_map(|a| match a {
+            btctax_core::tax::advisories::Advisory::QualifiedAppraisalMustBeAttached {
+                claimed,
+            } => Some(*claimed),
+            _ => None,
+        })
+        .filter(|_| claims_property_deduction)
+    {
+        let _ = writeln!(
+            manifest,
+            "  ATT  qualified appraisal (§170(f)(11)(D) — YOU MUST SUPPLY THIS; btctax cannot \
+             generate it). More than $500,000 of charitable deduction is claimed for donated \
+             property (${claimed:.2}), so a qualified appraisal must be ATTACHED to this return. Attach a copy \
+             again in every §170(d) carryover year (Reg §1.170A-16(f)(3)).",
+        );
+    }
+    // ★ N4 — the marks btctax deliberately did NOT make, enumerated at the FOOT of the manifest: the
+    // filer reaches them having just assembled the paper, which is the moment they are actionable.
+    // Every one of these blanks is correct; what was missing was any statement that they exist.
+    //
+    // ★★ MERGE NOTE (phase 1 × phase 2). Both phases append to this manifest and neither knew of the
+    // other; the resolution keeps both, in this order, because they are different CATEGORIES and the
+    // order encodes that. P5's line above is an ATTACHMENT — a page that goes in the envelope, so it
+    // belongs in the stapling list. N4's block below is a set of MARKS ON FORMS the filer must make
+    // by hand. The appraisal is deliberately NOT folded into the hand-marks list: it is not a mark,
+    // and it is not the filer's to write — only a qualified appraiser can produce it.
+    let marks = hand_marks(&printed);
+    manifest.push_str(&hand_marks_block(&marks));
     let manifest_path = out_dir.join("manifest.txt");
     write_bytes_owner_only(&manifest_path, manifest.as_bytes())?;
 
@@ -976,6 +1182,18 @@ fn export_full_return(
         .count();
     Ok(IrsPdfReport {
         advisories,
+        // ★ P6 — the §170(d)(1) carryover rides out to the caller, which prints it beside the other
+        // §170 notes. Taken from the SAME `assemble_absolute` result the packet was printed from, so
+        // the figure on the filer's screen is the figure the return produced.
+        charitable_carryover_out: ar.charitable_carryover_out.clone(),
+        // ★★★ FINAL-REVIEW FINDING 1 — and whether §170(f)(8) stands behind it. The export path is
+        // the one that hands the filer a PDF to SIGN, so it is exactly where the acknowledgment
+        // deadline has to be named: §170(f)(8)(C) kills the cure at filing.
+        charitable_carryover_cwa_unvouched: btctax_core::tax::return_1040::cwa_unvouched_carryover(
+            &ri, &ar, state, tax_year,
+        ),
+        // ★ N4 — the SAME list the manifest rendered, so the stderr count and the paper cannot drift.
+        hand_marks: marks,
         watermarked,
         tax_year,
         unresolved_hard,

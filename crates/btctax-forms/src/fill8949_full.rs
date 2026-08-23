@@ -70,15 +70,57 @@ fn printed_part_data(rows: &[Printed8949Row]) -> PartData {
 
 /// Fill the full-return Form 8949 (whole dollars) from the core-derived printed chain.
 ///
-/// Both parts are emitted on one form; more rows than a page holds REFUSES
-/// ([`FormsError::Overflow`]) exactly as the slice does — the continuation-page pattern is a
-/// post-v1 item.
+/// **PAGINATES, exactly as the crypto slice does** ([`crate::fill_form_8949`]): more rows than the
+/// revision's grid holds (`map.rows_per_page` — 14 on 2024/2017, 11 on the 2025 digital-asset
+/// revision) are chunked into ⌈rows/grid⌉ page copies per part, each filled and geometry-verified on
+/// ORIGINAL field names, then merged with per-copy field renaming ([`crate::overflow::merge_copies`])
+/// so no two copies share a `/V`. Each copy carries the FILER's identity on **both** of its pages —
+/// every 8949 page is a filed page and the header is per-page (P6 r1 I3).
+///
+/// ★ **Per-copy totals; the grand total is Schedule D's, not this function's.** The form's line 2
+/// says "Enter each total here", so each copy totals only its own rows, and Σ per-copy totals ≡
+/// core's `st_totals`/`lt_totals` by associativity (the cells are already whole dollars, so no
+/// rounding survives to re-diverge). Schedule D lines 3 and 10 keep reading core's totals over ALL
+/// rows — the schedule's own text is "Totals for all transactions reported on **Form(s) 8949**",
+/// plural — so they must never be re-derived per page.
+///
+/// ★★ This used to REFUSE ([`FormsError::Overflow`]) with a comment claiming it behaved "exactly as
+/// the slice does" — which the slice had not done since T2. The consequence was total: the packet is
+/// all-or-nothing, so a filer with 15 disposal legs got ZERO bytes, every form lost. The exposure is
+/// LOT-COUNT-driven, not dollar-driven (P2b).
 pub fn fill_8949_full_with_map(
     printed: &Printed8949,
     header: &ReturnHeader,
     map: &Form8949Map,
 ) -> Result<Vec<u8>, FormsError> {
-    let short = printed_part_data(&printed.short_term);
-    let long = printed_part_data(&printed.long_term);
-    fill_8949_parts_with_identity(&short, &long, map, header)
+    let cap = map.rows_per_page;
+    let st = &printed.short_term;
+    let lt = &printed.long_term;
+    let n_copies = st.len().div_ceil(cap).max(lt.len().div_ceil(cap)).max(1);
+
+    if n_copies == 1 {
+        return fill_8949_parts_with_identity(
+            &printed_part_data(st),
+            &printed_part_data(lt),
+            map,
+            header,
+        );
+    }
+
+    let chunk = |rows: &[Printed8949Row], k: usize| -> PartData {
+        let lo = (k * cap).min(rows.len());
+        let hi = (lo + cap).min(rows.len());
+        printed_part_data(&rows[lo..hi])
+    };
+    let mut copies = Vec::with_capacity(n_copies);
+    for k in 0..n_copies {
+        // Each copy is filled on ORIGINAL names and geometry-verified there (fails closed).
+        copies.push(fill_8949_parts_with_identity(
+            &chunk(st, k),
+            &chunk(lt, k),
+            map,
+            header,
+        )?);
+    }
+    crate::overflow::merge_copies(&copies)
 }

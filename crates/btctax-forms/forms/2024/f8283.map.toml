@@ -25,7 +25,11 @@ rows = [
 
 # ── Section B Part I — Over $5,000. Column x-clusters (hand-pinned, same as 2025):
 #   desc(a) [59,258] c0 | fmv(c) [504,576] c1 | date_acq(d) [58,130] c2 | how(e) [131,287] c3
-#   cost(f) [288,359] c4 | deduction(i) [504,576] c5
+#   cost(f) [288,359] c4
+# ★★★ P3 — column (i) is NOT mapped. It was (c5, [504,576]) and printed the pre-ceiling
+#   `claimed_deduction`; i8283 asks it only of a pass-through entity or a member of one, and btctax
+#   models neither, so the three cells are CENSUSED `unmodeled` below instead. Un-mapping them is
+#   what makes `verify::no_unmapped_filled` fail closed if anything writes them again.
 # k Digital assets = Lines2i-l[0].c1_6[2] on-state /11 (MUST be checked for BTC) — same as 2025.
 [section_b]
 k_digital_assets = { field = "Form8283[0].Page1[0].Lines2i-l[0].c1_6[2]", on = "11" }
@@ -36,9 +40,9 @@ donee_name = "Form8283[0].Page2[0].f2_19[0]"
 donee_ein = "Form8283[0].Page2[0].f2_20[0]"
 donee_address = "Form8283[0].Page2[0].f2_21[0]"
 rows = [
-  { desc = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Row3A[0].f1_42[0]", fmv = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Row3A[0].f1_44[0]", date_acq = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3A[0].f1_51[0]", how = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3A[0].f1_52[0]", cost = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3A[0].f1_53[0]", deduction = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3A[0].f1_56[0]" },
-  { desc = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Line3B[0].f1_45[0]", fmv = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Line3B[0].f1_47[0]", date_acq = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_57[0]", how = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_58[0]", cost = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_59[0]", deduction = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_62[0]" },
-  { desc = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Line3C[0].f1_48[0]", fmv = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Line3C[0].f1_50[0]", date_acq = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_63[0]", how = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_64[0]", cost = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_65[0]", deduction = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_68[0]" },
+  { desc = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Row3A[0].f1_42[0]", fmv = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Row3A[0].f1_44[0]", date_acq = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3A[0].f1_51[0]", how = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3A[0].f1_52[0]", cost = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3A[0].f1_53[0]" },
+  { desc = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Line3B[0].f1_45[0]", fmv = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Line3B[0].f1_47[0]", date_acq = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_57[0]", how = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_58[0]", cost = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_59[0]" },
+  { desc = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Line3C[0].f1_48[0]", fmv = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Line3C[0].f1_50[0]", date_acq = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_63[0]", how = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_64[0]", cost = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_65[0]" },
 ]
 
 # ── The FILER's identity (P6.3a D7): "Name(s) shown on your income tax return" + identifying number.
@@ -146,6 +150,29 @@ ssn  = "Form8283[0].Page2[0].f2_02[0]"
 "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_61[0]"  = { line = "3.B(h)", rule = "unmodeled", reason = "Same — row B." }
 "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_66[0]"  = { line = "3.C(g)", rule = "unmodeled", reason = "Same — row C." }
 "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_67[0]"  = { line = "3.C(h)", rule = "unmodeled", reason = "Same — row C." }
+
+# ── ★★★ Section B line 3 column (i) — the pass-through-entity cell (P3, was MAPPED and WRONG) ────
+# The form face reads "(i) Amount claimed as a deduction (see instructions)", and the instructions
+# answer it in one sentence (`design/forms/extract/i8283--2024.txt:1185-1191`):
+#
+#   "Column (i). Complete column (i), amount claimed as a deduction, if you are a pass-through entity
+#    or a member of a pass-through entity. If you are a pass-through entity, enter your share of the
+#    noncash charitable contribution. If you are a member, enter your share of the noncash charitable
+#    contribution allocated to you by the pass-through entity."
+#
+# An individual donating their own bitcoin is neither, and btctax models no pass-through entity at
+# all — the SAME boundary already recorded above for the header entity name/TIN and the family-PTE
+# box. Until 2026-08-21 these three cells were mapped and filled from the PRE-CEILING
+# `claimed_deduction`: the observed packet printed $1,000,000 here beside a Schedule A line 12 of
+# $600,000 — an entry the form did not ask for, contradicting the return's own claimed deduction, on
+# a page signed under §6065.
+#
+# ★ `unmodeled`, not `gap`: a gap is a cell btctax CANNOT honestly account for. Here the form itself
+#   says the cell is not this filer's, so the blank is the correct return — the §170 deduction is
+#   claimed on Schedule A line 12, not on this line.
+"Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3A[0].f1_56[0]"  = { line = "3.A(i)", rule = "unmodeled", reason = "Amount claimed as a deduction — i8283: \"Complete column (i), amount claimed as a deduction, if you are a pass-through entity or a member of a pass-through entity.\" btctax models no pass-through entity; an individual donating their own bitcoin is neither." }
+"Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_62[0]"  = { line = "3.B(i)", rule = "unmodeled", reason = "Same — row B." }
+"Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_68[0]"  = { line = "3.C(i)", rule = "unmodeled", reason = "Same — row C." }
 
 # ── Section B Part II lines 4a-4e — partial interests ────────────────────────────────────────────
 # "Complete lines 4a through 4e if you gave less than an entire interest in a property listed in

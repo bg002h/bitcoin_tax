@@ -90,6 +90,15 @@ pub enum FieldId {
     SaMortgage1098,
     SaSaltUseSalesTax,
     SaMortgageAllUsed,
+    /// §163(h)(3)(B) — the acquisition-debt-ceiling declaration (`FORM_QUESTIONS` index 13).
+    SaMortgageWithinDebtLimit,
+    /// Schedule A line 9 — investment interest (§163(d)).
+    SaInvestmentInterest,
+    /// ★ Form 8960 line 9b — the state/local income tax the filer allocates to net investment income
+    /// (§1411(c)(1)(B)). It lives on `ReturnInputs`, not `ScheduleAInputs`, because it is a Form 8960
+    /// line; it is RENDERED here because every number that bounds it — line 5a, line 5e, the
+    /// §164(b)(5) election — is on the Schedule A immediately above it.
+    Nii8960Line9b,
     // Schedule A charitable (per row)
     CharClass,
     CharAmount,
@@ -110,6 +119,8 @@ pub enum FieldId {
     DeclHasIncomeExclusion,
     /// §G-22/B11 — the scope attestation: income this tool never asked about.
     DeclOtherOutOfScopeIncome,
+    /// Schedule D line 20 / Schedule A line 9 — is the filer filing Form 4952? (`FORM_QUESTIONS` 14.)
+    DeclFilingForm4952,
     /// §G-28/B1b — Form 8995-A Part I column (b): is the business a specified service trade or business?
     ScheduleCIsSstb,
     /// §G-28/B1b — Form 8995-A Part I column (e): is the filer a patron of an agricultural or
@@ -127,6 +138,12 @@ pub enum FieldId {
     DeclAmtCarryoverSame,
     /// Form 6251 line 2l — is the depreciation inside the Schedule C expense total the same for the AMT?
     DeclAmtDepreciationSame,
+    /// Capital Loss Carryover Worksheet header (§1212(b)) — does the carryover-in include a loss that
+    /// was the SPOUSE'S, from a joint year now filed separately? (`FORM_QUESTIONS` 15.)
+    DeclCarryoverIncludesSpousesJointLoss,
+    /// Capital Loss Carryover Worksheet header (§108(b)(2)(G)) — was cancelled debt excluded from
+    /// income, requiring tax-attribute reduction? (`FORM_QUESTIONS` 16.)
+    DeclExcludedCanceledDebt,
     ForeignCountryNames,
     // Skippables (from SKIPPABLE_QUESTIONS); SALT election = SaSaltUseSalesTax in Schedule A above
     BlindTaxpayer,
@@ -147,6 +164,8 @@ pub enum FieldId {
     ScheduleC1099Filed,
     /// Form 8283 5a/5b/5c, asked as ONE return-level universal (§G-21).
     DonationsHadRestrictions,
+    /// §170(f)(8) — the contemporaneous-written-acknowledgment universal (`SKIPPABLE_QUESTIONS` 15).
+    CharitableCwaObtained,
     // Carryforwards (§G-22) — Form 8995 lines 7 and 3. Both are prior-year LOSSES that REDUCE a
     // deduction, so omitting either UNDERSTATES tax. They were import-only until 2026-07-31.
     QbiReitPtpCarryforwardIn,

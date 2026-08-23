@@ -592,6 +592,9 @@ pub fn assemble_printed_forms(
         ar.capital_gain,
         pi.crypto_lending_interest,
         ar.agi,
+        // Part II line 9b — the filer's own allocation, carried through `PrintedInputs` so this chain
+        // and the absolute one at `return_1040.rs` read the SAME value (see `form_8960`'s doc).
+        pi.form_8960_line9b,
     );
     let f8995 = form_8995_lines(
         // Row 1i(a): the trade or business the §199A deduction is claimed for. Line 2's own text says

@@ -16,6 +16,9 @@
 use crate::conventions::{round_dollar, Usd};
 use crate::forms::schedule_d;
 use crate::state::{LedgerState, RemovalKind, Term};
+use crate::tax::capital_loss_carryover::{
+    CapitalLossCarryoverInputs, CapitalLossCarryoverWorksheet,
+};
 use crate::tax::charitable::apply_170b;
 use crate::tax::compute::{net_1222, CapNet};
 use crate::tax::method::qdcgt_line16;
@@ -28,7 +31,7 @@ use crate::tax::return_inputs::{
 use crate::tax::return_refuse::{Refusal, RefuseReason};
 use crate::tax::se::{compute_se_tax, se_net_income, SeTaxResult};
 use crate::tax::tables::{loss_limit, FullReturnParams, TaxTable, EMPLOYEE_OASDI_RATE};
-use crate::tax::types::{FilingStatus, TaxProfile};
+use crate::tax::types::{Carryforward, FilingStatus, TaxProfile};
 use crate::IncomeKind;
 use rust_decimal_macros::dec;
 use time::{Date, Month};
@@ -346,9 +349,16 @@ pub struct ScheduleAParts {
     pub salt_5d: Usd,
     /// L5e — the §164(b) SALT cap applied: min(line 5d, [`ScheduleAParts::salt_cap`]).
     pub salt_5e: Usd,
-    /// The §164(b) cap itself ($10,000; $5,000 MFS). Carried because the PRINTED line 5e must cap the
-    /// PRINTED line 5d — the printed chain cannot re-derive the cap without doing tax logic in the
-    /// forms crate, which is precisely what it must not do.
+    /// The APPLIED SALT limit — i.e. **line 5e itself** (`salt_cap = salt_5e`). Carried because the
+    /// PRINTED line 5e must cap the PRINTED line 5d, and the printed chain cannot re-derive the limit
+    /// without doing tax logic in the forms crate, which is precisely what it must not do. The
+    /// recomputation `min(5d, salt_cap)` is then idempotent, since 5e ≤ 5d always.
+    ///
+    /// ★★★ **IT IS NOT §164(b)(6)'s $10,000/$5,000-MFS CEILING**, and this doc used to say it was
+    /// (final whole-branch review, P3-2). Whenever 5d is under the statutory ceiling, `salt_cap` is
+    /// simply 5d — the filer's own SALT total. The false name leaked into a filer-facing refusal,
+    /// which told a filer with 5a = $4,000 and 5b = $3,000 that "§164(b)(6)'s cap" was **$7,000**.
+    /// The statute's cap is $10,000; $7,000 was their own line 5e.
     pub salt_cap: Usd,
     /// L8a — home-mortgage interest reported on Form 1098. ★ §2.7: **$0** when [`mortgage_mixed_use_box`]
     /// is set — a mixed-use mortgage's non-acquisition portion is non-deductible (§163(h)(3)(F)) and v1
@@ -359,6 +369,11 @@ pub struct ScheduleAParts {
     /// (`mortgage_all_used_to_buy_build_improve == Some(false)`) on a Schedule A that reports 1098 interest —
     /// see [`mixed_use_mortgage_forgone`], the single derivation this and [`mortgage_8a`] share.
     pub mortgage_mixed_use_box: bool,
+    /// **L9 — "Investment interest. Attach Form 4952 if required."** (§163(d)). Taken at the amount
+    /// the filer entered, which is sound ONLY because `RefuseReason::Form4952Required` stands in
+    /// front of it: it refuses when Form 4952 is being filed, and when the amount breaks i4952's
+    /// no-filing exception (the §163(d)(1) net-investment-income limit btctax does not compute).
+    pub investment_interest_9: Usd,
     /// L11 — current-year CASH charitable contributions allowed (§170(b)-limited).
     pub charitable_cash_11: Usd,
     /// L12 — current-year NONCASH contributions allowed, including crypto donations.
@@ -385,6 +400,56 @@ pub struct ScheduleAParts {
 /// mixed-use question is LIVE (a `schedule_a` reporting 1098 interest > 0) and the filer answered
 /// `Some(false)`; `None` otherwise. v1 cannot compute the allocation, so it deducts none of it
 /// ($0 ≤ the true allocation, always ⇒ tax overstated, never understated).
+/// ★★★ **Form 8960 line 9b's §164(b)(6) BOUND** — the most state/local income tax this return could
+/// possibly allocate to net investment income. The ONE derivation, shared by the `screen_absolute`
+/// refusal that enforces it and the advisory that names it, so the gate and the note cannot disagree
+/// about the number (the r3 MINOR-1 lesson).
+///
+/// §1411(c)(1)(B) reduces net investment income only by *"the deductions **allowed by this
+/// subtitle**"*, and §164(b)(6)(B) caps the aggregate SALT *"taken into account"* at $10,000 ($5,000
+/// MFS) — so tax paid above the cap is not a deduction at all and there is nothing to allocate
+/// (`ADJUDICATION-2026-08-21.md` D5). i8960's allocation block names the same quantity from the other
+/// side: *"State, local, and foreign income taxes **if properly deducted on your return** when
+/// calculating your U.S. regular income tax."*
+///
+/// The three branches, each of which independently zeroes it:
+///
+/// - **no Schedule A / the standard deduction won** ⇒ `$0`. Nothing was deducted on the return, so
+///   nothing is allocable. This is the plain reading of "properly deducted on your return", and it is
+///   why the bound reads `deduction_is_itemized` (the computed §63(e) election) rather than merely
+///   `schedule_a.is_some()`.
+/// - **the §164(b)(5) general-sales-tax election** ⇒ `$0`. i8960, Line 9b: *"Sales taxes aren't
+///   deductible in computing net investment income."* Line 5a is then sales tax, and 5e is a total
+///   that includes it — so a bound built from 5e alone would launder sales tax into a §1411 deduction.
+/// - otherwise `min(line 5a, line 5e, salt_cap)`. 5a is the income-tax component and 5e is what
+///   survived the §164(b)(6) limit, so the bound is the smaller of those two.
+///
+///   ★ **The third term is redundant BY CONSTRUCTION, not "while 5e ≤ cap"** (final whole-branch
+///   review, P3-2). `ScheduleAParts::salt_cap` is assigned `salt_5e` — it is the APPLIED limit, not
+///   §164(b)(6)'s $10,000/$5,000-MFS ceiling — so `.min(salt_cap)` is `.min(salt_5e)` and can never
+///   bind. It is kept because it is harmless and the printed chain reads the same field, but the doc
+///   that called it "the statute's own ceiling, transcribed anyway" was describing a term that is not
+///   there. The bound's VALUE was and is correct in every case; only this claim about it was wrong.
+///
+/// ★ **Foreign income tax contributes nothing**, and not by omission: btctax's only foreign income
+/// tax (1099-INT box 6 / 1099-DIV box 7) is taken unconditionally as the §904(j) CREDIT, and
+/// §275(a)(4) — which i8960 cites on this very line — then denies the deduction.
+///
+/// ★★ It is a BOUND, never a value. btctax does not choose the filer's "reasonable method"; this only
+/// says how large the pool that method divides can be.
+pub fn nii_line9b_bound(ar: &AbsoluteReturn) -> Usd {
+    if !ar.deduction_is_itemized {
+        return Usd::ZERO;
+    }
+    let Some(a) = ar.schedule_a.as_ref() else {
+        return Usd::ZERO;
+    };
+    if a.salt_is_sales_tax {
+        return Usd::ZERO;
+    }
+    a.salt_5a.min(a.salt_5e).min(a.salt_cap)
+}
+
 pub fn mixed_use_mortgage_forgone(ri: &ReturnInputs) -> Option<Usd> {
     let a = ri.schedule_a.as_ref()?;
     (a.mortgage_all_used_to_buy_build_improve == Some(false)
@@ -445,11 +510,17 @@ pub fn schedule_a_parts(
         salt_cap,
         mortgage_8a,
         mortgage_mixed_use_box,
+        investment_interest_9: a.investment_interest,
         charitable_cash_11: charitable.allowed_cash,
         charitable_noncash_12: charitable.allowed_noncash,
         charitable_carryover_13: charitable.allowed_carryover,
         charitable_14: charitable.allowed,
-        total_17: medical_allowed + salt_5e + mortgage_8a + charitable.allowed,
+        // L17 = 4 + 7 + 10 + 14, and line 10 is "add 8e and 9" — so line 9 belongs in the total.
+        total_17: medical_allowed
+            + salt_5e
+            + mortgage_8a
+            + a.investment_interest
+            + charitable.allowed,
     })
 }
 
@@ -601,7 +672,15 @@ pub fn form_1099b_gains(ri: &ReturnInputs) -> (Usd, Usd) {
         })
 }
 
-fn capital_net(ri: &ReturnInputs, state: &LedgerState, year: i32, status: FilingStatus) -> CapNet {
+/// ★ N1 — `pub(crate)` so [`crate::tax::advisories`] can quote the FLAT `st_carry`/`lt_carry` the
+/// frozen delta engine prints beside the worksheet's answer, rather than re-deriving the flat rule and
+/// creating a second authority for it.
+pub(crate) fn capital_net(
+    ri: &ReturnInputs,
+    state: &LedgerState,
+    year: i32,
+    status: FilingStatus,
+) -> CapNet {
     let sd = schedule_d(state, year); // raw crypto ST/LT nets (traverses state.disposals)
     let cf = ri.capital_loss_carryforward_in;
     // ★★★ §G-28/B4 — the broker totals join the crypto nets HERE, at the §1222 within-character
@@ -1182,9 +1261,10 @@ const SE_6017_FLOOR: Usd = dec!(400);
 /// other-taxes forms (Sch 2 L4 SE, Form 8959, absolute Form 8960), the §904(j) FTC + conservative-omission
 /// CTC (L19 = 0), **1040 total tax L24**, and **payments → refund/owed** (§6413(c) excess-SS, withholding
 /// L25, total payments L33, refund L35a / owed L37). The remaining P4 increment is the §6 dual report. The
-/// §4.10 compute-dependent refuses that need L12/L15/L16 (QBI-above-threshold, **Form 6251 Who Must
-/// File condition 1**, TI≤0-with-carryforward) are screened by [`screen_absolute`] after this
-/// (infallible) assembly.
+/// §4.10 compute-dependent refuses that need L12/L15/L16 — now **the QBI-above-threshold rows only**
+/// — are screened by [`screen_absolute`] after this (infallible) assembly. (The Form 6251 and
+/// TI≤0-with-carryforward rows this list used to name are both gone: §G-6 built the AMT emitter, and
+/// widening (A) lifted the carryforward refusal along with its variant.)
 ///
 /// Unlike the derivation, this reads the crypto ledger `state` directly (`capital_gain_line7`,
 /// `crypto_income`, `compute_se_tax`) and produces the with-crypto AGI (L11) — the §6 / Form 8960-MAGI /
@@ -1275,6 +1355,22 @@ pub struct AbsoluteReturn {
     /// ★ Form 8995 **line 16** — the qualified business (loss) carryforward to next year (magnitude).
     /// For the write-back. Zero unless a prior-year QBI loss exceeded this year's business income.
     pub qbi_carryforward_out: Usd,
+    /// ★★★ **N1** — the §1211/§1212 **Capital Loss Carryover Worksheet — Lines 6 and 14**, figured on
+    /// this return, or `None` when the worksheet's own applicability sentence says *"you don't have
+    /// any carryovers."* Every numbered line is on
+    /// [`crate::tax::capital_loss_carryover::CapitalLossCarryoverWorksheet`].
+    pub capital_loss_carryover_worksheet: Option<CapitalLossCarryoverWorksheet>,
+    /// ★★★ **N1** — the §1212(b) capital-loss carryforward INTO next year, by character: the
+    /// worksheet's lines 8 and 13.
+    ///
+    /// **This is NOT `TaxResult::carryforward_out`, and the difference is the defect.** The frozen
+    /// crypto-delta engine computes `carry = loss − min(loss, $3,000)` flat, with no taxable-income
+    /// term — exact whenever 1040 line 15 is ≥ 0, and understated by up to the whole §1211(b)
+    /// allowance when the loss wiped the year out. The engine *cannot* do better: its `TaxProfile`
+    /// carries `ordinary_taxable_income` already floored at zero, so the pre-floor line 15 the
+    /// worksheet's line 1 needs does not survive into it. The full return has it, so the worksheet
+    /// runs here.
+    pub capital_loss_carryforward_out: Carryforward,
     /// 1040 **L16** — the regular tax on taxable income (whole dollars): the Qualified Dividends & Capital
     /// Gain Tax Worksheet ([`qdcgt_line16`]) on the WITH-crypto L15 / L3a / preferential net LTCG. It
     /// reduces to the plain Tax Table / TCW when there is no preferential income, so it is correct across
@@ -1419,6 +1515,16 @@ pub struct PrintedInputs {
     /// Schedule SE **line 7** — the year's Social Security wage base (pre-printed on the form; line 9 is
     /// "subtract line 8d from line 7").
     pub ss_wage_base: Usd,
+    /// ★★★ Schedule D **line 20**'s second conjunct — *"and you are not filing Form 4952"* — as the
+    /// filer declared it, so the printed chain reads an ANSWER rather than a literal `true`.
+    /// `screen_inputs` refuses `None` and `Some(true)`, so a printed return always carries
+    /// `Some(false)` today; carrying it anyway is what makes the checkbox's provenance structural.
+    pub filing_form_4952: Option<bool>,
+    /// ★★ Form 8960 **line 9b** — *"State, local, and foreign income tax"* — as the FILER allocated it
+    /// (`ReturnInputs::form_8960_line9b`), or `None` when they allocated none. Carried rather than
+    /// re-read so the printed chain and the absolute `form_8960` cannot end up on different values;
+    /// `None` reaches `push_money_opt` and the cell prints BLANK.
+    pub form_8960_line9b: Option<Usd>,
     /// Schedule D **line 21** — the §1211(b) capital-loss deduction CEILING ($3,000; $1,500 MFS). The
     /// printed line 21 caps the PRINTED line 16 against this, rather than re-rounding the exact
     /// deduction, so the filed Schedule D's own arithmetic holds.
@@ -1788,7 +1894,27 @@ pub fn assemble_absolute(
     );
     // L14 — "Add lines 12e, 13a, and 13b" (2025) / "Add lines 12 and 13" (2024).
     let total_deductions = deduction + qbi.deduction + schedule_1a_additional;
-    let taxable_income = (agi - total_deductions).max(Usd::ZERO); // L15
+    // ★★★ **N1** — 1040 L15, and the SIGNED figure the §1211/§1212 Capital Loss Carryover Worksheet's
+    //     line 1 asks for. The filed line is floored at zero; the worksheet explicitly wants the
+    //     amount that line "would have been … if you could enter a negative number on that line", and
+    //     computing the carryforward-out from the floored one understates the surviving loss by up to
+    //     the whole §1211(b) allowance. Both are kept, and the unfloored one is used ONLY here.
+    let taxable_income_signed = agi - total_deductions;
+    let taxable_income = taxable_income_signed.max(Usd::ZERO); // L15
+
+    // The worksheet reads five figures off the return, all of which now exist: the signed L15 above
+    // and four Schedule D lines already assembled from the same `cap` netting the printed form uses.
+    let capital_loss_carryover_worksheet =
+        CapitalLossCarryoverWorksheet::figure(CapitalLossCarryoverInputs {
+            form_1040_line15_signed: taxable_income_signed,
+            schedule_d_line7: schedule_d.st_net_7,
+            schedule_d_line15: schedule_d.lt_net_15,
+            schedule_d_line16: schedule_d.total_16,
+            schedule_d_line21_loss: schedule_d.loss_deduction_21,
+        });
+    let capital_loss_carryforward_out = capital_loss_carryover_worksheet
+        .map(|w| w.carryforward_out())
+        .unwrap_or_default();
 
     // ── L16 regular tax (SPEC §5 stage 4 / §7.2 Schedule-D routing) ──────────────────────────────────
     // The Qualified Dividends & Capital Gain Tax Worksheet on the WITH-crypto TI (L15), qualified
@@ -1822,6 +1948,10 @@ pub fn assemble_absolute(
         capital_gain,
         crypto.nonbusiness_lending_interest,
         agi,
+        // Part II line 9b — the filer's own §1411(c)(1)(B) allocation, `None` when they made none.
+        // Bounded by `screen_absolute` (`Nii9bExceedsDeductedSalt`), never clamped here: a silently
+        // shrunk figure would be btctax choosing the allocation method it must not choose.
+        ri.form_8960_line9b,
     );
 
     // ── Credits + total tax (SPEC §5 stages 5–7 tail) ───────────────────────────────────────────────
@@ -1936,6 +2066,8 @@ pub fn assemble_absolute(
         charitable_carryover_out: charitable.carryover_out,
         qbi_reit_ptp_carryforward_out: qbi.reit_ptp_carryforward_out,
         qbi_carryforward_out: qbi.qbi_carryforward_out,
+        capital_loss_carryover_worksheet,
+        capital_loss_carryforward_out,
         regular_tax,
         se_tax_sch2_l4,
         additional_medicare,
@@ -1957,6 +2089,11 @@ pub fn assemble_absolute(
         amount_owed,
         // The printed chains read THESE — the same values the computed 8959/8960/8995 above were fed.
         printed_inputs: PrintedInputs {
+            // ★ Schedule D line 20's Form 4952 conjunct, carried from the FILER's answer.
+            filing_form_4952: ri.filing_form_4952,
+            // ★ Form 8960 line 9b, likewise carried rather than derived — the same `Option<Usd>` the
+            //   absolute `form_8960` above was handed.
+            form_8960_line9b: ri.form_8960_line9b,
             medicare_wages: w2_medicare_wages,
             medicare_withheld: w2_medicare_withheld,
             crypto_lending_interest: crypto.nonbusiness_lending_interest,
@@ -2070,16 +2207,21 @@ pub(crate) fn form6251_inputs_from_parts(
 /// [`crate::tax::return_refuse::screen_inputs`] (input-screenable) and [`screen_compute_dependent`]
 /// (income/ledger-dependent). Returns the FIRST [`Refusal`], or `None`.
 ///
-/// Rows: (a) the §199A rows — an SSTB inside the phase-in range, and Form 8995-A lines 4/7 unstated
-/// above the threshold (§4.5); (b) taxable income ≤ 0 WITH a capital-loss carryforward-in (the G22
-/// §1211/§1212 Capital Loss Carryover Worksheet edge).
+/// Rows: **(a) the §199A rows only** — an SSTB inside the phase-in range, and Form 8995-A lines 4/7
+/// unstated above the threshold (§4.5).
 ///
-/// ★ There is NO LONGER an AMT row here. It read *"(b) Form 6251 Who Must File condition 1 — the form
-/// must be attached and v1 cannot yet file it"*; §G-6 built the emitter, so the form is filed and the
-/// row was deleted from this function's body. `RefuseReason::AmtScreenTriggered` survives as a dead
-/// variant pending its Tier-2 rename.
-/// A refund-only TI≤0 filer with NO carryforward is NOT refused (tax = 0, withholding refunded — the
-/// r5-narrowed rule).
+/// ★★ **The TI≤0-with-carryforward row is GONE** (widening (A)). It read *"(b) taxable income ≤ 0
+/// WITH a capital-loss carryforward-in — the G22 §1211/§1212 Capital Loss Carryover Worksheet
+/// edge"*, and it was deleted together with its `RefuseReason` variant, so no consumer maps it and
+/// no anchor names it. Such a year now **FILES**: `capital_loss_carryover` models the worksheet, so
+/// the carryover-out is a real figure rather than the flat rule that made the refusal honest.
+/// (The refund-only TI≤0 filer with NO carryforward was never refused either — tax = 0, withholding
+/// refunded, the r5-narrowed rule.)
+///
+/// ★ There is NO LONGER an AMT row here either. It read *"Form 6251 Who Must File condition 1 — the
+/// form must be attached and v1 cannot yet file it"*; §G-6 built the emitter, so the form is filed
+/// and the row was deleted from this function's body. `RefuseReason::AmtScreenTriggered` survives as
+/// a dead variant pending its Tier-2 rename.
 pub fn screen_absolute(
     ri: &ReturnInputs,
     ar: &AbsoluteReturn,
@@ -2159,6 +2301,333 @@ pub fn screen_absolute(
                  A \"Yes\" to any of them reduces or denies the §170 deduction (Reg §1.170A-7), and \
                  btctax deducts at full fair market value — so it cannot file this return without \
                  the answer. Run `btctax income answer`",
+            );
+        }
+    }
+
+    // ★★★ §163(h)(3)(B) — THE ACQUISITION-DEBT CEILING, ANSWERED ADVERSELY (P1 / adjudication D3).
+    //
+    // ★★ THIS LIVES HERE, NOT IN `screen_inputs`, AND THE MOVE WAS A CRITICAL FIX (phase-2 review R2).
+    //    The refusal conditions a Schedule A DEDUCTION, and `screen_inputs` cannot see the §63(e)
+    //    election — only `assemble_absolute` computes it. Sitting there, it refused the
+    //    December-closing jumbo homebuyer: one month of 1098 interest on a $1M post-2017 loan, an
+    //    itemized total under the MFJ standard deduction, line 8a never printed, nothing sworn — and
+    //    NO honest answer available, because `None` refused as unanswered, `Some(false)` refused
+    //    here, and `Some(true)` would have been false testimony under §6065.
+    //
+    // ★★★ WHY `deduction_is_itemized` IS EXACTLY THE RIGHT PREDICATE, and not merely a convenient one.
+    //     It is computed against the FULL (uncapped) Schedule A amounts. So:
+    //       - itemized-with-full-amount < standard  ⇒ the election is STANDARD under both hypotheses
+    //         (the true capped figure is smaller, which only widens the gap). Determinate ⇒ safe to
+    //         compute, and refusing would be wrong.
+    //       - itemized-with-full-amount ≥ standard  ⇒ btctax cannot know the capped figure, so it
+    //         cannot know the election either. Indeterminate ⇒ refuse, which is what happens.
+    //     The predicate answers the question "is the election determinate without the number btctax
+    //     is missing?" — which is the actual question, and it answers it exactly.
+    //
+    // ★★★ …EXCEPT WHERE LINE 8a IS ALREADY A DISCLOSED ZERO (final whole-branch review, finding 3).
+    //
+    // A MIXED-USE mortgage (`mortgage_all_used_to_buy_build_improve == Some(false)`, §2.7, the base
+    // question tree) already zeroes 8a and CHECKS THE LINE-8 BOX — a disclosed conservative zero.
+    // For that filer both premises the refusal states above are FALSE:
+    //
+    //   * *"deducting the full Form 1098 figure would UNDERSTATE your tax"* — btctax would deduct
+    //     **$0**, not the full figure. The whole 1098 amount is already forgone.
+    //   * *"Schedule A has no box that would disclose such a zero"* — the box **IS** checked, and
+    //     truthfully, on this very return.
+    //
+    // And the over-limit fact moves nothing: the return btctax prints for them (8a = $0, box
+    // checked) is byte-identical to the one it prints when the same filer answers the debt-limit
+    // question YES. Reproduced across all four combinations before this scope was added — the
+    // mixed-use filer got `MortgageOverDebtLimit` on `Some(false)` and
+    // `MortgageDebtLimitUnanswered` on `None`, leaving `Some(true)` (false testimony under §6065)
+    // as the only route to a return btctax could already compute honestly.
+    //
+    // ★ THE SEAM, AND WHY NO EARLIER ROUND SAW IT. The mixed-use question belongs to the base tree;
+    //   the debt-limit refusal is phase 1, reviewed against its own population. `screen_inputs`'s
+    //   own comment ("unlike the mixed-use zero it has no line-8 checkbox disclosing it") shows the
+    //   author HELD the distinction and reasoned only about the non-mixed-use filer. No window
+    //   contained both.
+    //
+    // ★★ The refusal is unchanged for every OTHER over-limit itemizer — where 8a really would carry
+    //    the full 1098 figure with nothing on the form to disclose it, which is the case its text
+    //    describes and the case it exists for. Scoping it here also makes that text TRUE of everyone
+    //    who now sees it.
+    if ar.deduction_is_itemized
+        && mixed_use_mortgage_forgone(ri).is_none()
+        && crate::tax::questions::question_is_live(
+            crate::tax::questions::QuestionId::MortgageWithinDebtLimit,
+            ri,
+        )
+        && ri
+            .schedule_a
+            .as_ref()
+            .is_some_and(|a| a.mortgage_within_debt_limit == Some(false))
+    {
+        return refusal(
+            RefuseReason::MortgageOverDebtLimit,
+            "you declared that one of the §163(h)(3)(B) home-mortgage limits applies to you — the \
+             $750,000 ($375,000 married filing separately) ceiling on qualifying debt taken out after \
+             December 15, 2017, the $1,000,000 ($500,000 MFS) ceiling on debt taken out on or before \
+             that date, or the limit where the mortgages exceed the home's fair market value. \
+             i1040sca's own instruction for line 8a is \"Only enter on line 8a the deductible mortgage \
+             interest and points that were reported to you on Form 1098\", and btctax cannot figure \
+             that amount. NEITHER number it could print is your return: deducting the full Form 1098 \
+             figure would UNDERSTATE your tax, and entering $0 would OVERSTATE it by the whole \
+             deductible portion — and Schedule A has no box that would disclose such a zero (the \
+             line-8 checkbox is the mixed-use disclosure, not this one). The cure is the one the \
+             instructions prescribe: work Pub. 936's Deductible Home Mortgage Interest Worksheet, \
+             which produces the deductible amount for line 8a. btctax does not yet have a place to \
+             enter that result — the `mortgage_interest_deductible` input is filed as FOLLOWUPS P9(a)/S2 \
+             — so until it lands, file this year's Schedule A by hand. `btctax report` still runs. \
+             (This return itemizes; a return that takes the standard deduction is unaffected and \
+             computes normally, because line 8a never prints on it.)",
+        );
+    }
+
+    // ★★★ i4952's NO-FILING EXCEPTION — the Schedule A line-9 BOUND (P7).
+    //
+    // ★★ ALSO MOVED HERE FROM `screen_inputs` (phase-2 review R5a, the same Critical). Same root
+    //    cause, and a worse population: the crypto-margin renter is this product's CORE audience.
+    //    Bitcoin yields no interest and no ordinary dividends, so the ceiling is ~$0 and ANY line-9
+    //    entry with a truthful "not filing Form 4952" was refused — including when SALT plus margin
+    //    interest lose to the standard deduction and the correct return claims nothing at all.
+    //
+    // ★ NOTE the `Some(true)` leg is NOT here — it stays in `screen_inputs`, correctly. Filing Form
+    //   4952 sends Schedule D line 20 to NO and routes the tax through the Schedule D Tax Worksheet,
+    //   which is a CAPITAL-GAINS consequence and applies whether or not the filer itemizes.
+    if ar.deduction_is_itemized && ri.filing_form_4952 == Some(false) {
+        let investment_interest = ri
+            .schedule_a
+            .as_ref()
+            .map_or(Usd::ZERO, |a| a.investment_interest);
+        if investment_interest > Usd::ZERO {
+            // i4952's first exception condition: investment income from INTEREST and ORDINARY
+            // dividends, minus any QUALIFIED dividends. Transcribed, not approximated.
+            //
+            // ★★ box 1 + box 3 (phase-2 review R5b). Form 1099-INT box 3 is US Treasury obligation
+            //    interest and is NOT a subset of box 1 — `sum_taxable_interest` says so in terms, and
+            //    1040 line 2b is box 1 + box 3. Summing box 1 alone under-counted the ceiling and
+            //    refused a filer with a T-bill ladder who plainly satisfies the exception. Treasury
+            //    interest is unambiguously "investment income from interest".
+            //
+            // ★ Deliberately EXCLUDED: crypto lending interest. btctax treats it as interest-like for
+            //   §1411, but its character as "interest" under §163(d) is genuinely arguable, so leaving
+            //   it out of the ceiling is conservative in the over-refusing (not understating)
+            //   direction. Stated so the omission is not silent.
+            let interest: Usd = ri
+                .int_1099
+                .iter()
+                .map(|i| i.box1_interest + i.box3_treasury_interest)
+                .sum();
+            let ordinary_dividends: Usd = ri.div_1099.iter().map(|d| d.box1a_ordinary).sum();
+            let qualified_dividends: Usd = ri.div_1099.iter().map(|d| d.box1b_qualified).sum();
+            let ceiling = (interest + ordinary_dividends - qualified_dividends).max(Usd::ZERO);
+            if investment_interest > ceiling {
+                return refusal(
+                    RefuseReason::Form4952Required,
+                    "you answered that you are NOT filing Form 4952, but your Schedule A line 9 \
+                     investment interest is MORE than your investment income from interest and \
+                     ordinary dividends minus qualified dividends — the first of the three \
+                     conditions of Form 4952's own no-filing exception. Above it, Form 4952 IS \
+                     required: §163(d)(1) limits the deduction to your net investment income, a \
+                     figure only that form computes, and btctax does not fill it. Deducting the \
+                     whole amount on line 9 would UNDERSTATE your tax. File Form 4952 (and this \
+                     return) by hand, or correct the line-9 amount. (This return itemizes; a return \
+                     that takes the standard deduction is unaffected and computes normally, because \
+                     line 9 never prints on it.)",
+                );
+            }
+        }
+    }
+
+    // ★★★ §170(f)(8) — THE CONTEMPORANEOUS WRITTEN ACKNOWLEDGMENT (P4 / adjudication D4).
+    //
+    // Two conditions, both required, and BOTH are things liveness cannot see — which is why this sits
+    // here and not in the skippable registry:
+    //
+    //   (i)  the return actually CLAIMS a current-year charitable deduction. `deduction_is_itemized`
+    //        is the real §63(e) election (a standard-deduction filer claims no §170 deduction, so
+    //        §170(f)(8) conditions nothing for them), and lines 11 + 12 are the §170(b)-limited
+    //        amounts actually claimed — a ceiling-zeroed year claims nothing either. ★ Line 13, the
+    //        prior-year CARRYOVER, is deliberately EXCLUDED: this year's answer is about THIS year's
+    //        gifts, and the carryover year's CWA deadline passed with that year's return (the same
+    //        scoping `apply_carryover_writeback` already states).
+    //
+    //   (ii) at least one SINGLE contribution reaches $250. i1040sca: *"In figuring whether a gift is
+    //        $250 or more, don't combine separate donations."* Per contribution, NEVER the year
+    //        aggregate — a filer whose every gift is under $250 is never asked. Crypto donations come
+    //        from the ledger (one `Removal` = one contribution, measured at the FMV contributed);
+    //        non-crypto gifts are one `CharitableGift` entry each.
+    //
+    // ★★ WHY THIS REFUSES RATHER THAN ADVISES, and the line that stops it generalising:
+    //    §170(f)(8)(C) makes an acknowledgment contemporaneous only if obtained by the EARLIER of
+    //    filing or the due date, so **filing itself extinguishes the cure**. Refuse where filing
+    //    extinguishes the cure; advise where the record can be assembled later — which is why
+    //    §170(f)(17) bank-record substantiation for small cash gifts is NOT gated here by analogy.
+    let cwa_claimed = ar.schedule_a.as_ref().map_or(Usd::ZERO, |a| {
+        a.charitable_cash_11 + a.charitable_noncash_12
+    });
+    // ★★★ A CEILING-ZEROED YEAR STILL NEEDS THE ACKNOWLEDGMENT (phase-2 review R3, Important).
+    //
+    // `cwa_claimed > 0` alone treated a §170(b)-ceiling-zeroed year as "nothing claimed, nothing to
+    // disallow". That conflates TWO ZEROS THAT DIFFER IN KIND:
+    //   - a §170(e)-reduced claim of $0 is EXTINGUISHED, forever. Nothing is ever deducted, so no
+    //     acknowledgment is needed. The per-item `claimed_deduction > 0` filter in
+    //     `max_single_donation_contribution` handles that one, correctly — it is D4's named misfire.
+    //   - a §170(b)-CEILING zero is DEFERRED, not denied. §170(d) carries the claim into the next
+    //     five years, this very function's `charitable_carryover_out` computes it, and P6 tells the
+    //     filer to roll it forward. The deduction WILL be taken — just later.
+    //
+    // And §170(f)(8)(C) fixes the acknowledgment deadline at the EARLIER of filing or the due date
+    // **of the contribution year**. So the cure dies at THIS filing while the claim lives on. Without
+    // this disjunct the low-AGI itemizer with a large crypto gift files unasked, loses the cure
+    // permanently (*Durden*), and then deducts across later years unsubstantiated — D4's prong (3),
+    // the silently lost right, reappearing on the gate built to close it.
+    //
+    // Scoped to THIS year's vintage: an older vintage's deadline passed with ITS return, which is the
+    // same scoping the line-13 exclusion above already applies.
+    let cwa_deferred_to_carryover: Usd = ar
+        .charitable_carryover_out
+        .iter()
+        .filter(|c| c.origin_year == year)
+        .map(|c| c.amount)
+        .sum();
+    if ar.deduction_is_itemized
+        && (cwa_claimed > Usd::ZERO || cwa_deferred_to_carryover > Usd::ZERO)
+        && a_single_gift_reaches_the_cwa_threshold(ri, state, year)
+    {
+        // ★★★ WHICH CLAIM THIS RETURN ACTUALLY MAKES (final whole-branch review, finding 2).
+        //
+        // "this return claims a charitable deduction" is FALSE on the §170(b)-ceiling-zeroed year the
+        // R3 fold added to this gate: lines 11 and 12 are $0 there and the whole claim is deferred.
+        // A refusal that opens with a statement the filer can see is untrue about their own return
+        // teaches them to distrust the rest of it — and the two arms below both depend on the filer
+        // believing the premise, because the `Some(false)` cure differs between the cases.
+        let what_is_claimed = if cwa_claimed > Usd::ZERO {
+            "this return claims a charitable deduction"
+        } else {
+            "this return's charitable gifts exceeded their §170(b) percentage-of-income ceiling, so \
+             none of the deduction is claimed THIS year — but §170(d)(1) carries it forward and you \
+             will deduct it in a later year"
+        };
+        match ri.charitable_cwa_obtained {
+            None => {
+                return refusal(
+                    RefuseReason::CharitableCwaUnresolved,
+                    &format!(
+                        "{what_is_claimed}, and at least one of your gifts was \
+                     $250 or more, so Schedule A lines 11 and 12 send you to the instructions: \
+                     \"You can deduct a gift of $250 or more only if you have a contemporaneous \
+                     written acknowledgment from the charitable organization.\" §170(f)(8)(A) \
+                     makes that a condition of the deduction itself, and btctax has not been told \
+                     whether you have one. It will not claim a deduction the statute may deny. \
+                     ★ YOU CAN STILL GET ONE — the acknowledgment counts as contemporaneous if \
+                     you obtain it \"by the date you file your return or the due date (including \
+                     extensions) for filing your return, whichever is earlier\", so ask the \
+                     charity now; don't attach it to the return, keep it for your records. \
+                     ★★ THE DEADLINE IS THIS RETURN EVEN FOR A CARRIED-FORWARD GIFT: §170(f)(8)(C) \
+                     runs from the return for the year of the CONTRIBUTION, not from the year you \
+                     finally deduct it, so filing this one without the acknowledgment extinguishes \
+                     the cure for every later year too. Run \
+                     `btctax income answer`"
+                    ),
+                );
+            }
+            Some(false) => {
+                // ★ The cure differs by case, and offering the wrong one is worse than offering
+                //   none: "remove that gift from the deduction" is meaningless to a filer whose
+                //   return deducts nothing this year.
+                let cure = if cwa_claimed > Usd::ZERO {
+                    "If a charity will not provide one, remove that gift from the deduction"
+                } else {
+                    "If a charity will not provide one, that gift is not deductible in any year — \
+                     §170(f)(8)(A) denies it outright — so it must not be carried forward either; \
+                     `--write-carryover` will refuse to persist it"
+                };
+                return refusal(
+                    RefuseReason::CharitableCwaUnresolved,
+                    &format!(
+                        "you told btctax you do NOT hold a contemporaneous written acknowledgment for \
+                     every gift of $250 or more that this return deducts, now or in a later \
+                     carryover year. §170(f)(8)(A): \"No \
+                     deduction shall be allowed … for any contribution of $250 or more unless the \
+                     taxpayer substantiates the contribution by a contemporaneous written \
+                     acknowledgment\" — so the deduction as computed is too large, and filing it \
+                     would understate your tax. ★ THE CURE IS STILL OPEN, but only until you \
+                     file: §170(f)(8)(C) counts an acknowledgment as contemporaneous if you get \
+                     it \"by the date you file your return or the due date (including extensions) \
+                     for filing your return, whichever is earlier\". Ask each charity for one \
+                     showing the amount of money and a description (but not the value) of any \
+                     property, and whether it gave you goods or services in return. Then answer \
+                     yes and re-run. {cure}"
+                    ),
+                );
+            }
+            Some(true) => {}
+        }
+    }
+
+    // ★★★ **FORM 8960 LINE 9B — §164(b)(6)'s bound on the COLLECTED allocation** (D5).
+    //
+    // The value is the filer's own: i8960 lets them use "any reasonable method", and choosing one is
+    // their election, so btctax collects it and never computes it. What btctax CAN say is how large
+    // the pool that method divides is — §1411(c)(1)(B) allocates only "deductions allowed by this
+    // subtitle", and SALT above §164(b)(6)(B)'s $10,000/$5,000-MFS cap is not allowed at all.
+    //
+    // ★ It screens HERE, not in `screen_inputs`, for the same reason the two charitable gates do: the
+    //   bound turns on `deduction_is_itemized`, the COMPUTED §63(e) election, which no predicate over
+    //   `ReturnInputs` can see. A standard-deduction filer deducted no state income tax, so their
+    //   bound is $0 — and that is a real branch, not an edge case.
+    //
+    // ★★ REFUSES rather than clamping (D5's build-shape guard): shrinking the figure to fit would be
+    //    btctax picking the allocation after all, and would rewrite a number signed under §6065.
+    if let Some(claimed_9b) = ri.form_8960_line9b {
+        let bound = nii_line9b_bound(ar);
+        if claimed_9b > bound {
+            // ★★★ P3-2 — `salt_cap` IS line 5e, not §164(b)(6)'s ceiling, so it must not be labelled
+            //     as the statute's cap. A filer with 5a = $4,000 and 5b = $3,000 (5d = 5e = $7,000)
+            //     was told "§164(b)(6)'s $7,000 cap"; the statute's cap is $10,000 and $7,000 is
+            //     their own line 5e. The BOUND was right — only the name for it was wrong.
+            let salt_5e = ar.schedule_a.as_ref().map_or(Usd::ZERO, |a| a.salt_5e);
+            let why = if !ar.deduction_is_itemized {
+                "this return takes the STANDARD deduction, so no state or local income tax was \
+                 deducted on it at all and none of it is allocable"
+                    .to_string()
+            } else if ar.schedule_a.as_ref().is_some_and(|a| a.salt_is_sales_tax) {
+                "you made the §164(b)(5) election to deduct general SALES taxes instead of income \
+                 taxes, and the Instructions for Form 8960 are express: \"Sales taxes aren't \
+                 deductible in computing net investment income\" — so the allocable amount is $0"
+                    .to_string()
+            } else {
+                format!(
+                    "your Schedule A line 5e — the state and local taxes this return actually \
+                     deducted after applying §164(b)(6)'s $10,000 ($5,000 if married filing \
+                     separately) limit — is {}, and the state and local INCOME-tax portion of it, \
+                     which is all §1411 can allocate, is {}",
+                    crate::tax::advisories::fmt_usd(salt_5e),
+                    crate::tax::advisories::fmt_usd(bound)
+                )
+            };
+            return refusal(
+                RefuseReason::Nii9bExceedsDeductedSalt,
+                &format!(
+                    "Form 8960 line 9b claims {} of state and local income tax allocable to net \
+                     investment income, but {why}. §1411(c)(1)(B) reduces net investment income only \
+                     by \"the deductions allowed by this subtitle which are properly allocable\", and \
+                     §164(b)(6)(B) limits the state and local tax \"taken into account\" to $10,000 \
+                     ($5,000 if married filing separately) — a dollar above that cap is not a \
+                     deduction at all, so there is nothing for §1411 to allocate. The Instructions \
+                     for Form 8960 agree: the allocable item is state and local income tax \"if \
+                     properly deducted on your return when calculating your U.S. regular income \
+                     tax\". btctax will not shrink the figure for you, because choosing the \
+                     allocation is YOUR election (\"any reasonable method\") and it must not answer \
+                     it. Enter a line 9b of {} or less — one reasonable method the instructions \
+                     themselves give is that amount times the ratio of Form 8960 line 8 to your AGI \
+                     — or clear it to leave line 9b blank",
+                    crate::tax::advisories::fmt_usd(claimed_9b),
+                    crate::tax::advisories::fmt_usd(bound),
+                ),
             );
         }
     }
@@ -2339,25 +2808,130 @@ pub fn screen_absolute(
     //     question could never have caught it — and because the missing add-back also suppressed this
     //     very `must_attach()` test, the gap hid its own detection (FOLLOWUPS §G-6).
 
-    // (c) Taxable income ≤ 0 with a capital-loss carryforward-in (the §1211/§1212 carryover-worksheet edge).
-    let cf = ri.capital_loss_carryforward_in;
-    if ar.taxable_income == Usd::ZERO && (cf.short > Usd::ZERO || cf.long > Usd::ZERO) {
-        return refusal(
-            RefuseReason::TaxableIncomeNonPositiveWithCarryforward,
-            "taxable income is zero or negative with a capital-loss carryforward — the §1211/§1212 Capital \
-             Loss Carryover Worksheet (which decides how much loss survives) is unmodeled in v1",
-        );
-    }
-
+    // ★★★ (c) — THE TI≤0-WITH-A-CARRYFORWARD-IN REFUSAL WAS HERE, AND IT IS GONE (owner-authorised).
+    //
+    //     It read "btctax models the §1211/§1212 Capital Loss Carryover Worksheet but has not yet
+    //     validated FILING this edge". N1 modelled the worksheet; the remaining objection was never
+    //     arithmetic but a DECISION — letting a wiped-out year with a loss brought in emit a 1040 and
+    //     a Schedule D widens the filing surface on a return signed under §6065. The owner took that
+    //     decision, so the screen is deleted rather than kept as a dead variant: a gate whose
+    //     off-state is invisible is worse than no gate, and DELETING its `RefuseReason` variant is
+    //     what enumerated every consumer for free (E0599 across three crates). The variant's own
+    //     identifier is deliberately not written anywhere in `crates/` — including here — because
+    //     `xtask`'s `the_lifted_refusal_leaves_no_trace_in_the_tree` asserts exactly that, and a
+    //     surviving mention is indistinguishable from a surviving consumer to a grep.
+    //
+    // ★★ **NO PRINTED LINE MOVES.** This screen ran entirely after `assemble_absolute` and only
+    //    decided emission; deleting it changes what is EMITTED, never what is COMPUTED. If any filed
+    //    figure changes, the lift was implemented wrongly — e.g. by relaxing the `max(ZERO)` floor on
+    //    line 15 instead of deleting a screen — and `the_lift_moves_no_printed_line` exists to catch
+    //    exactly that.
+    //
+    // ★ It was the LAST check in this function, so nothing below it was shadowed and nothing above it
+    //   moved.
     None
 }
 
-/// Apply the **§4 R3-M6 carryover write-back**: stamp the absolute return's computed charitable +
-/// QBI-REIT/PTP carryover-OUTs into `next_year`'s (year Y+1's) carryover-IN fields, provenance `Computed`.
+/// Whether at least ONE SINGLE contribution of `year` reaches §170(f)(8)(A)'s $250 threshold.
+///
+/// i1040sca: *"In figuring whether a gift is $250 or more, don't combine separate donations."* Per
+/// contribution, NEVER the year aggregate. Crypto donations come from the ledger (one `Removal` = one
+/// contribution, measured at the FMV contributed); non-crypto gifts are one `CharitableGift` each.
+///
+/// ★ Factored out of the P4 gate so the gate and [`cwa_unvouched_carryover`] cannot drift apart. They
+/// answer the same statutory question about the same year's gifts, and a threshold that meant one
+/// thing at the refusal and another at the write-back would be a laundering route in itself.
+pub fn a_single_gift_reaches_the_cwa_threshold(
+    ri: &ReturnInputs,
+    state: &LedgerState,
+    year: i32,
+) -> bool {
+    let largest_gift = crate::forms::max_single_donation_contribution(state, year).max(
+        ri.schedule_a
+            .as_ref()
+            .and_then(|a| a.charitable.iter().map(|g| g.amount).max())
+            .unwrap_or(Usd::ZERO),
+    );
+    largest_gift >= crate::tax::tables::CWA_SUBSTANTIATION_THRESHOLD
+}
+
+/// ★★★ **THE STANDARD-DEDUCTION DEFERRAL DONOR** (final whole-branch review, finding 1).
+///
+/// The amount of THIS year's §170(d)(1) carryover that btctax cannot vouch for under §170(f)(8) —
+/// `None` when there is nothing unvouched-for.
+///
+/// **THE SEAM.** Phase 2's R2 fold put `ar.deduction_is_itemized` in front of the §170(f)(8) refusal
+/// ("standard deduction ⇒ nothing sworn ⇒ safe"). Phase 2's R3 fold then added the
+/// `cwa_deferred_to_carryover` disjunct ("a §170(b)-ceiling zero is DEFERRED, not denied, and the
+/// cure dies at THIS filing"). Both are right; they were folded into one un-reviewed commit, and R3's
+/// disjunct landed BEHIND R2's conjunct. But **R3's reasoning does not depend on the election**:
+/// §170(d)(1) creates the carryover regardless of §63(e) — `apply_170b` runs unconditionally for
+/// exactly that reason — so the two rationales collide on the population where the election is
+/// standard AND the gift defers. Reproduced: Single renter, AGI $40,000, one $25,000 appreciated-BTC
+/// gift ⇒ `deduction_is_itemized` false, `charitable_carryover_out` = $13,000 of CapGainProp30 with
+/// `origin_year` 2024, and BOTH screens return `None`. The filer is never asked.
+///
+/// ★★ **AND THIS IS DELIBERATELY NOT A REFUSAL.** The return that filer prints is CORRECT: it claims
+/// no §170 deduction, so §170(f)(8)(A) — which conditions *"a deduction"* — denies nothing on it, and
+/// refusing it would be btctax refusing to file a correct return. Worse, the `Some(false)` refusal's
+/// cure is *"remove that gift from the deduction"*, which is incoherent for a filer with no deduction
+/// to remove — a refusal whose cure its own population cannot perform is finding 2's defect, and
+/// hard-refusing here would have recreated it one finding over.
+///
+/// What IS wrong is what btctax does with the number afterwards, and both halves are fixed:
+///
+///   1. **It told the filer the carryover was money in the bank** — *"deduction you have already paid
+///      for; it is lost if it is never claimed"* — without ever mentioning that §170(f)(8)(A) may
+///      have denied it outright. The P6 roll-forward block now says so, and says it BEFORE filing,
+///      while §170(f)(8)(C)'s cure is still alive. That is the "asked" half.
+///   2. **`--write-carryover` would stamp it `Computed` into next year's inputs**, past every gate:
+///      next year's line-13 claim is deliberately outside the P4 gate ("the carryover year's CWA
+///      deadline passed with that year's return"), so nothing downstream ever looks again. That is
+///      the laundering class the I-2 restriction gate in `apply_carryover_writeback` already guards
+///      against, arriving by a second route — and it is refused there now, on the same reasoning.
+///
+/// Scoped to THIS year's vintage, like the gate: an older vintage's deadline passed with ITS return.
+pub fn cwa_unvouched_carryover(
+    ri: &ReturnInputs,
+    ar: &AbsoluteReturn,
+    state: &LedgerState,
+    year: i32,
+) -> Option<Usd> {
+    // `Some(true)` is the filer's own testimony that they hold the acknowledgment; that is exactly
+    // what the gate accepts, and it is what btctax vouches on.
+    if ri.charitable_cwa_obtained == Some(true) {
+        return None;
+    }
+    let deferred: Usd = ar
+        .charitable_carryover_out
+        .iter()
+        .filter(|c| c.origin_year == year)
+        .map(|c| c.amount)
+        .sum();
+    if deferred <= Usd::ZERO || !a_single_gift_reaches_the_cwa_threshold(ri, state, year) {
+        return None;
+    }
+    Some(deferred)
+}
+
+/// Apply the **§4 R3-M6 carryover write-back**: stamp the absolute return's computed charitable, QBI
+/// business-loss, QBI-REIT/PTP and **§1212(b) capital-loss** carryover-OUTs into `next_year`'s (year
+/// Y+1's) carryover-IN fields, provenance `Computed`.
+///
 /// Returns the updated `next_year` to persist, or `Err(message)` when it would silently overwrite a
-/// **User**-provenance carryover (from `income import`) and `force` is false — never clobbers a user entry.
-/// Both conflicts are checked BEFORE either field is written (atomic — a QBI conflict doesn't leave a
-/// half-applied charitable write). A computed (or empty) existing carryover-in is overwritten silently.
+/// **User**-provenance carryover (from `income import`) and `force` is false — never clobbers a user
+/// entry. Every conflict is checked BEFORE any field is written (atomic — a QBI conflict does not
+/// leave a half-applied charitable write). A computed (or empty) existing carryover-in is overwritten
+/// silently.
+///
+/// ★★ **The capital-loss limb is the one GATED write**, and it is deliberately not symmetric with the
+/// other three: it lands only where [`capital_loss_roll_is_grounded`] holds, because a `Computed`
+/// stamp is a claim of knowledge. The write-back's caller reads that same predicate to decide what to
+/// tell the filer — see [`capital_loss_roll_is_grounded`] for why one definition rather than two.
+///
+/// ★ This doc comment was for a while attached to the WRONG function — spliced onto
+/// `a_single_gift_reaches_the_cwa_threshold` by two commits landing in the same region, leaving the
+/// function that authors the `Computed` stamp undocumented. Found by the pre-merge pass (O-1).
 pub fn apply_carryover_writeback(
     ar: &AbsoluteReturn,
     ri: &ReturnInputs,
@@ -2400,9 +2974,9 @@ pub fn apply_carryover_writeback(
                  market value, so the ${:.2} carryover it computed is too large. Writing it into \
                  {next}'s inputs would put an inflated figure beyond every check, because next year \
                  has no way to know the gift was restricted. Work the carryover out by hand. \
-                 ★ NOTE: this refuses the WHOLE write-back, so your QBI and REIT/PTP carryforwards \
-                 were not written either — nothing was persisted. Enter all three on {next}'s row by \
-                 hand (`btctax income import`).",
+                 ★ NOTE: this refuses the WHOLE write-back, so your QBI, REIT/PTP and \
+                 CAPITAL-LOSS carryforwards were not written either — nothing was persisted. Enter \
+                 all four on {next}'s row by hand (`btctax income import`).",
                 ar.charitable_carryover_out
                     .iter()
                     .map(|c| c.amount)
@@ -2418,11 +2992,50 @@ pub fn apply_carryover_writeback(
                  SECTION B, whose lines 5a, 5b and 5c ask whether any donated property carried a \
                  restriction — and the answer is not on file. The carryover btctax computed assumes \
                  full fair market value, so it cannot be persisted as {next}'s input without it. \
-                 ★ This refuses the WHOLE write-back — your QBI and REIT/PTP carryforwards were not \
-                 written either. Run `btctax income answer`, then re-run this and all three land.",
+                 ★ This refuses the WHOLE write-back — your QBI, REIT/PTP and CAPITAL-LOSS \
+                 carryforwards were not written either. Run `btctax income answer`, then re-run this \
+                 and all four land.",
                 next = year + 1
             ));
         }
+    }
+    // ★★★ FINAL-REVIEW FINDING 1 — THE SAME LAUNDERING CLASS, ARRIVING BY §170(f)(8).
+    //
+    // The gate above refuses to persist a carryover btctax cannot vouch for because the property was
+    // RESTRICTED. This one refuses to persist a carryover it cannot vouch for because the
+    // CONTRIBUTION MAY NOT BE DEDUCTIBLE AT ALL: §170(f)(8)(A) is *"No deduction shall be allowed …
+    // unless the taxpayer substantiates the contribution by a contemporaneous written
+    // acknowledgment"*, and a contribution the statute disallows carries nothing forward under
+    // §170(d)(1) either — there is no excess-over-ceiling of a deduction that does not exist.
+    //
+    // ★ It only ever bites the STANDARD-DEDUCTION deferral donor in practice: an itemizer reaching
+    //   this point already answered the P4 gate `Some(true)`, because `None` and `Some(false)` refuse
+    //   at `screen_absolute` and never produce a filed return to write back from. That asymmetry is
+    //   the finding — see `cwa_unvouched_carryover` for why it is fixed HERE and not by widening the
+    //   refusal.
+    //
+    // ★★ Like its sibling, `force` does NOT open this. That flag overwrites a figure the USER
+    //    entered; it is not a licence to write one btctax knows may be disallowed.
+    if let Some(unvouched) = cwa_unvouched_carryover(ri, ar, state, year) {
+        return Err(format!(
+            "carryover write-back REFUSED for {year}: btctax computed a ${unvouched:.2} §170(d)(1) \
+             charitable carryover from {year} gifts, but it has not been told you hold a \
+             contemporaneous written acknowledgment for the gift of $250 or more behind it. \
+             §170(f)(8)(A): \"No deduction shall be allowed … for any contribution of $250 or more \
+             unless the taxpayer substantiates the contribution by a contemporaneous written \
+             acknowledgment\" — a contribution the statute disallows outright carries nothing into \
+             {next} either. Writing it into {next}'s inputs would put it beyond every check: it \
+             would be stamped `Computed`, and {next}'s Schedule A line 13 is deliberately outside \
+             the acknowledgment gate, because a carryover year's deadline passed with ITS return. \
+             ★ This year's return itself was fine to file — it takes the STANDARD deduction and \
+             claims no §170 deduction at all, which is why nothing refused at filing time. It is the \
+             CARRYOVER that needs the acknowledgment. Run `btctax income answer`; if you hold one, \
+             answer yes and re-run and all four carryovers land. If you do not, the lawful outcome \
+             is that this carryover does not exist — do not enter it by hand. \
+             ★ NOTE: this refuses the WHOLE write-back, so your QBI, REIT/PTP and CAPITAL-LOSS \
+             carryforwards were not written either; nothing was persisted.",
+            next = year + 1
+        ));
     }
     if !force {
         if next_year
@@ -2455,6 +3068,27 @@ pub fn apply_carryover_writeback(
                     .to_string(),
             );
         }
+        // ★★★ THE FOURTH GUARD — Schedule D lines 6 and 14, and it must PRECEDE every write below.
+        //
+        // The filer's own carryover is TESTIMONY: it lands on next year's Schedule D lines 6 and 14,
+        // which they sign under §6065. Overwriting it silently would put btctax's figure on a line
+        // the filer had already sworn to, with nothing to show it had changed.
+        //
+        // ★ VALUE-CONDITIONED, exactly like the other three, and that is load-bearing rather than
+        //   stylistic: a bare `provenance == User` arm would refuse every write into a FRESH next-year
+        //   row — `User` is the `CarryProvenance` default, so an untouched `{0,0}` row carries it —
+        //   and `writeback_into_fresh_next_year` reds. A zero the filer never entered is not their
+        //   testimony.
+        if (next_year.capital_loss_carryforward_in.short > Usd::ZERO
+            || next_year.capital_loss_carryforward_in.long > Usd::ZERO)
+            && next_year.capital_loss_carryforward_in_provenance == CarryProvenance::User
+        {
+            return Err(
+                "next year's capital-loss carryover was user-entered (`income import`) — pass \
+                 `--force` to overwrite it with the computed §1212(b) carryover"
+                    .to_string(),
+            );
+        }
     }
     next_year.charitable_carryover_in = ar
         .charitable_carryover_out
@@ -2468,20 +3102,71 @@ pub fn apply_carryover_writeback(
     next_year.qbi.reit_ptp_carryforward_in_provenance = CarryProvenance::Computed;
     next_year.qbi.qbi_carryforward_in = ar.qbi_carryforward_out;
     next_year.qbi.qbi_carryforward_in_provenance = CarryProvenance::Computed;
+    // ★★★ **THE §1212(b) CARRYOVER, ROLLED — r3 I-4 ANSWERED, NOT REVERSED.**
+    //
+    // r3 I-4 removed a stamp of `capital_loss_carryforward_in_provenance = Computed` on a value the
+    // write-back never wrote. Its reasoning — *"a provenance stamp is a CLAIM OF KNOWLEDGE; do not
+    // make one the code cannot support"* — is unchanged and still governs every line below. What
+    // moved is its PREMISE: N1 modelled the worksheet, so `AbsoluteReturn::
+    // capital_loss_carryforward_out` exists and there IS a value to write.
+    //
+    // So the stamp is founded only where the figure descends from something btctax actually knows,
+    // and groundedness is CHECKED rather than assumed. The three grounds, the one excluded case, and
+    // the whole-dollar rounding each have exactly ONE home — [`capital_loss_roll_is_grounded`] and
+    // [`rounded_capital_loss_carryforward_out`] below. They are functions rather than inline code
+    // because the write-back's SUMMARY has to ask the same question, and a second copy of either
+    // would be the widening review's B-1 waiting to happen again.
+    if capital_loss_roll_is_grounded(ar, ri) {
+        next_year.capital_loss_carryforward_in = rounded_capital_loss_carryforward_out(ar);
+        next_year.capital_loss_carryforward_in_provenance = CarryProvenance::Computed;
+    }
     // ★ §G-20a — the CHARITABLE carryover gets its provenance stamped too. Without this a computed
     // ZERO stays indistinguishable from an unasked one, and next year's advisory nags a filer whose
     // prior year btctax itself computed.
-    //
-    // ★★★ r3 I-4 — THE CAPITAL-LOSS SIBLING IS DELIBERATELY ABSENT, and removing it was the fix.
-    // This stamped `capital_loss_carryforward_in_provenance = Computed` on a value it never writes:
-    // there is no capital-loss carryover-OUT on `AbsoluteReturn` to write, because the §1211/§1212
-    // Capital Loss Carryover Worksheet — the thing that decides how much loss survives — is UNMODELED
-    // in v1 (`screen_absolute` refuses its edge case outright). So the stamp asserted btctax had
-    // "derived it from a prior year it actually computed" when it had derived nothing, and next
-    // year's `BenefitCarryoversNotStated` fell silent about a carryover the filer may genuinely
-    // have. A provenance stamp is a claim of knowledge; do not make one the code cannot support.
     next_year.charitable_carryover_in_provenance = CarryProvenance::Computed;
     Ok(next_year)
+}
+
+/// The §1212(b) carryover-OUT as [`apply_carryover_writeback`] would PERSIST it.
+///
+/// ★★ ROUNDED TO WHOLE DOLLARS, deliberately. The persisted figure becomes next year's Schedule D
+///    lines 6 and 14 — lines the filer READS OFF THE PAGE and swears to. The measured H9 vector is
+///    $42,871.66 exact against $42,872 hand-worked off the filed page; rounding here ties the stored
+///    value to the page. (Residual, accepted: the printed Schedule D re-derives lines 7/15/16 from
+///    per-row-rounded Form 8949 cells while the worksheet reads exact `CapNet`, so a reader
+///    hand-working the page can still land ~$1/row off. Closing that means re-sourcing the worksheet
+///    from the printed chain — a layering change, not this one.)
+pub fn rounded_capital_loss_carryforward_out(ar: &AbsoluteReturn) -> Carryforward {
+    Carryforward {
+        short: round_dollar(ar.capital_loss_carryforward_out.short),
+        long: round_dollar(ar.capital_loss_carryforward_out.long),
+    }
+}
+
+/// ★★★ **Whether [`apply_carryover_writeback`] can VOUCH for a §1212(b) capital-loss roll.**
+///
+/// A provenance stamp is a CLAIM OF KNOWLEDGE (r3 I-4), so the roll happens only where the figure
+/// descends from something btctax actually knows. Three grounds, any one of which suffices:
+///   * year Y's carryover-in was itself `Computed`   → the inductive step;
+///   * year Y's carryover-in is a nonzero `User` one → the filer's own testimony, a real base case;
+///   * year Y produced a nonzero carryover-OUT       → btctax computed this year's loss itself.
+///
+/// ★★★ THE ONE EXCLUDED CASE is a year that was never asked AND produced nothing. Writing `{0,0}` +
+/// `Computed` there would silence next year's `BenefitCarryoversNotStated` about a carryover the
+/// filer may genuinely have — which is verbatim the r3 I-4 damage. It stays closed, and no VALUE
+/// assertion can see it: the stored amount is zero either way.
+///
+/// ★★ **ONE DEFINITION, TWO READERS — and that is exactly why it is a function.** The widening review
+/// found the write-back's own SUMMARY claiming this write on the branch where the gate skipped it:
+/// the summary read the row FIELD (which on an ungrounded roll is either an untouched `{0,0}` or a
+/// figure an EARLIER roll stamped) instead of asking whether anything had been assigned. A summary
+/// that re-derives the predicate inline would be the same defect one edit away, so the writer and the
+/// message it prints now read the same predicate. Reproduced before it was fixed; see
+/// `the_summary_does_not_claim_a_capital_loss_write_the_gate_skipped`.
+pub fn capital_loss_roll_is_grounded(ar: &AbsoluteReturn, ri: &ReturnInputs) -> bool {
+    ri.capital_loss_carryforward_in_provenance == CarryProvenance::Computed
+        || ri.capital_loss_carryforward_in != Carryforward::default()
+        || rounded_capital_loss_carryforward_out(ar) != Carryforward::default()
 }
 
 /// Schedule B §6012 / Form 1040 Schedule B filing threshold ($1,500 for interest and for dividends).
@@ -2669,6 +3354,9 @@ mod tests {
             let ri = ReturnInputs {
                 filing_status: FilingStatus::Single,
                 donations_had_restrictions: answer,
+                // §170(f)(8) answered NEUTRAL so this test keeps testing the §G-21 RESTRICTION
+                // question. The donation here is well over $250, so the CWA gate is genuinely live.
+                charitable_cwa_obtained: Some(true),
                 // Force the itemized election so the §170 deduction is genuinely claimed.
                 schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
                     salt_state_estimated_payments: dec!(10000),
@@ -5089,12 +5777,13 @@ mod tests {
         );
     }
 
-    /// TI ≤ 0 WITH a capital-loss carryforward-in refuses (the §1211/§1212 carryover-worksheet edge);
-    /// the SAME zero-TI return with NO carryforward is a refund-only filer — NOT refused (r5-narrowed).
-    #[test]
-    fn taxable_income_nonpositive_with_carryforward_refuses() {
-        let p = ty2024_params();
-        let table = synthetic_table(2024);
+    /// **H1 — the household the lift admits.** Single, $5,000 of wages, a $2,000 SHORT-TERM capital
+    /// loss carried IN. AGI = 5,000 + (−2,000) = 3,000; the $14,600 standard deduction wipes it out,
+    /// so taxable income is $0 and there is a carryforward-in. That is precisely the pair that used to
+    /// refuse.
+    use crate::tax::printed::ScheduleDRouting;
+
+    fn h1_files_at_the_floor() -> ReturnInputs {
         let mut ri = ReturnInputs {
             filing_status: FilingStatus::Single,
             w2s: vec![w2(Owner::Taxpayer, dec!(5000), dec!(5000), dec!(5000))],
@@ -5104,21 +5793,360 @@ mod tests {
             short: dec!(2000),
             long: Usd::ZERO,
         };
+        crate::tax::testonly::answer_all_live_declarations(&mut ri);
+        ri
+    }
+
+    /// ★★★ **K1 — (A). A taxable-income-$0 year with a capital-loss carryover brought IN now FILES,
+    /// and its Schedule D is indistinguishable from its current-year-loss twin's.**
+    ///
+    /// This REPLACES `taxable_income_nonpositive_with_carryforward_refuses`, which asserted the
+    /// opposite. The refusal was never about arithmetic — `capital_loss_carryover.rs` transcribes all
+    /// thirteen worksheet lines and a carryforward-IN has always entered `net_1222` before Schedule D
+    /// lines 7/15/16/21 are formed. It was about a DECISION: emitting a 1040 for this household
+    /// widens the filing surface on a return signed under §6065. The owner took it.
+    ///
+    /// ★ **The twin comparison is the point.** A $2,000 loss carried in and a $2,000 loss realised
+    /// this year produce the SAME Schedule D Part III routing and the same §1211(b) line 21 — the
+    /// form does not distinguish them, and after the lift neither does btctax. A refusal keyed to one
+    /// of them was a distinction the form never made.
+    ///
+    /// Mutations that MUST red:
+    ///   (a) restore the deleted `screen_absolute` block ⇒ the files-half reds;
+    ///   (b) `st_carryover_6: Usd::ZERO` in `assemble_absolute` ⇒ the L6/L7/L16/L21 assertions red,
+    ///       which proves this test READS the carryover rather than merely the routing.
+    #[test]
+    fn a_ti_zero_carryforward_in_return_files_and_matches_its_current_year_twin() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let ri = h1_files_at_the_floor();
+
+        // ── PREMISE: the fixture really is at the floor WITH a carryover in. ───────────────────────
         let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
-        // AGI = 5,000 wages + L7(−2,000 §1211-limited carryforward loss) = 3,000; std 14,600 → TI = 0.
-        assert_eq!(ar.taxable_income, Usd::ZERO);
+        assert_eq!(
+            ar.taxable_income,
+            Usd::ZERO,
+            "premise: the household must sit ON the floor, or the lifted screen is never reached"
+        );
+        assert!(
+            ri.capital_loss_carryforward_in.short > Usd::ZERO,
+            "premise: it must bring a loss IN, or this is a plain refund-only filer"
+        );
+
+        // ── IT FILES — both screens. ──────────────────────────────────────────────────────────────
+        assert_eq!(
+            crate::tax::return_refuse::screen_inputs(&ri, &table, &p).map(|r| r.reason),
+            None,
+            "the worksheet's two header declarations are answered, so nothing at the input screen \
+             stands in the way"
+        );
         assert_eq!(
             screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024).map(|r| r.reason),
-            Some(RefuseReason::TaxableIncomeNonPositiveWithCarryforward)
+            None,
+            "★ (A): taxable income of $0 with a carryforward brought in FILES"
         );
-        // No carryforward → still TI = 0, but a refund-only filer is NOT refused.
-        let mut norf = ri.clone();
-        norf.capital_loss_carryforward_in = Carryforward::default();
-        let ar2 = assemble_absolute(&norf, &empty_ledger(), &p, &table, 2024);
-        assert_eq!(ar2.taxable_income, Usd::ZERO);
+
+        // ── Schedule D carries the loss the filer brought in. ──────────────────────────────────────
+        let pf = crate::tax::packet::assemble_printed_forms(
+            &ri,
+            &empty_ledger(),
+            &BTreeMap::new(),
+            &ar,
+            &table,
+            2024,
+            &[],
+        );
+        assert_eq!(pf.sch_d.line6, dec!(2000), "L6 — the carryover, paren box");
+        assert_eq!(pf.sch_d.line7, dec!(-2000), "L7 — net short-term");
+        assert_eq!(pf.sch_d.line16, dec!(-2000), "L16 — 7 and 15 combined");
         assert_eq!(
-            screen_absolute(&norf, &ar2, &p, &empty_ledger(), 2024),
+            pf.sch_d.routing,
+            ScheduleDRouting::NetLoss {
+                line21: dec!(2000),
+                line22_yes: false,
+            },
+            "L21 — the whole $2,000 is inside the §1211(b) $3,000 allowance"
+        );
+        assert_eq!(
+            ar.capital_loss_carryforward_out,
+            Carryforward {
+                short: dec!(2000),
+                long: Usd::ZERO,
+            },
+            "★ the worksheet: line 1 = −11,600 ⇒ line 3 = -0- ⇒ line 4 = -0-, so NOTHING was \
+             absorbed and the whole $2,000 survives. The flat rule would have said $0."
+        );
+        assert!(
+            pf.sch_d.must_file(),
+            "a Schedule D with a carryover must file"
+        );
+
+        // ── THE TWIN: the same $2,000 loss REALISED this year, no carryover. ──────────────────────
+        let mut twin = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2(Owner::Taxpayer, dec!(5000), dec!(5000), dec!(5000))],
+            b_1099: vec![crate::tax::return_inputs::Form1099B {
+                payer: "Broker".into(),
+                short_term_proceeds: dec!(1000),
+                short_term_basis: dec!(3000),
+                basis_reported_and_no_adjustments: Some(true),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        crate::tax::testonly::answer_all_live_declarations(&mut twin);
+        let ar_twin = assemble_absolute(&twin, &empty_ledger(), &p, &table, 2024);
+        assert_eq!(
+            ar_twin.taxable_income,
+            Usd::ZERO,
+            "premise: the twin is at the floor too"
+        );
+        assert_eq!(
+            screen_absolute(&twin, &ar_twin, &p, &empty_ledger(), 2024).map(|r| r.reason),
+            None,
+            "premise: the twin has ALWAYS filed — it is the asymmetry that was the finding"
+        );
+        let pf_twin = crate::tax::packet::assemble_printed_forms(
+            &twin,
+            &empty_ledger(),
+            &BTreeMap::new(),
+            &ar_twin,
+            &table,
+            2024,
+            &[],
+        );
+        assert_eq!(
+            pf.sch_d.routing, pf_twin.sch_d.routing,
+            "★ the two households route Part III identically — the form draws no line between a \
+             loss brought in and a loss realised, and neither does btctax now"
+        );
+        assert_eq!(pf.f1040.line7, pf_twin.f1040.line7, "1040 L7 agrees too");
+        assert_eq!(pf.f1040.line15, pf_twin.f1040.line15, "…and 1040 L15");
+    }
+
+    /// ★★★ **K3 — H9: the only newly-admitted household that OWES, and the only vector where
+    /// worksheet line 4 is STRICTLY BETWEEN zero and the §1211(b) allowance.**
+    ///
+    /// Schedule C gross $18,000, a $45,000 long-term capital loss carried in. The §1211(b) allowance
+    /// and the §164(f) half-SE deduction land taxable income just below zero, so the year absorbs
+    /// SOME of the allowance but not all of it — `line4 = line2.min(line3)` with both operands
+    /// distinct. Every other vector in this module sits at one end or the other, where a wrong
+    /// `line4` is invisible.
+    ///
+    /// ★ And it OWES: self-employment tax is not reduced by a capital loss, so a household with $0 of
+    /// taxable income still writes a cheque. The lift admits a filer who owes money, not only one who
+    /// is owed a refund — which is the shape that makes the widening consequential.
+    ///
+    /// ★★ The PERSISTED figure is the whole-dollar one. The exact worksheet line 13 is $42,871.66;
+    /// what is stored — and what next year's Schedule D lines 6 and 14 will carry — is $42,872.
+    ///
+    /// Mutations that MUST red, BOTH needed because each pins one side of the partial:
+    ///   (a) `line4 = line2` (the flat rule) ⇒ line 13 becomes 42,000;
+    ///   (b) `line4 = Usd::ZERO` (carry everything at the floor) ⇒ line 13 becomes 45,000.
+    #[test]
+    fn the_owing_household_at_the_floor_files_and_owes() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            schedule_c: Some(crate::tax::return_inputs::ScheduleCInputs {
+                owner: Owner::Taxpayer,
+                business_description: "Bitcoin mining".into(),
+                naics_code: "518210".into(),
+                other_gross_receipts: dec!(18000),
+                // Skippables — a trade or business makes both §199A questions live, and they are
+                // answered here so this test keeps testing the §1212(b) worksheet.
+                is_sstb: Some(false),
+                is_cooperative_patron: Some(false),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        ri.capital_loss_carryforward_in = Carryforward {
+            short: Usd::ZERO,
+            long: dec!(45000),
+        };
+        crate::tax::testonly::answer_all_live_declarations(&mut ri);
+
+        let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
+
+        // ── PREMISES. ─────────────────────────────────────────────────────────────────────────────
+        assert_eq!(
+            crate::tax::return_refuse::screen_inputs(&ri, &table, &p).map(|r| r.reason),
             None
+        );
+        assert_eq!(
+            screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024).map(|r| r.reason),
+            None,
+            "premise: H9 FILES — before the lift this household was refused"
+        );
+        assert_eq!(ar.taxable_income, Usd::ZERO, "premise: it is AT the floor");
+
+        let w = ar
+            .capital_loss_carryover_worksheet
+            .expect("the worksheet applies: 1040 line 15 would be below zero");
+        // ── THE PARTIAL. ──────────────────────────────────────────────────────────────────────────
+        assert!(
+            w.line4 > Usd::ZERO && w.line4 < w.line2,
+            "★★★ THE POINT OF THIS VECTOR: line 4 is STRICTLY between zero and the §1211(b) \
+             allowance — {} against a line 2 of {}. A rule that carried everything at the floor and \
+             a rule that always absorbed the full allowance BOTH pass every other vector here.",
+            w.line4,
+            w.line2
+        );
+        assert_eq!(w.line1, dec!(-871.66), "1040 line 15, unfloored");
+        assert_eq!(w.line3, dec!(2128.34), "line 1 + line 2, floored at zero");
+        assert_eq!(w.line4, dec!(2128.34), "the smaller of line 2 and line 3");
+        assert_eq!(w.line11, Some(dec!(2128.34)), "line 4 − line 5");
+        assert_eq!(w.line13, Some(dec!(42871.66)), "45,000 − 2,128.34");
+
+        // ── IT OWES — self-employment tax, which no capital loss reduces. ─────────────────────────
+        assert!(
+            ar.total_tax > Usd::ZERO,
+            "★ a $0-taxable-income household that still writes a cheque: {}",
+            ar.total_tax
+        );
+
+        // ── AND THE PERSISTED FIGURE IS THE WHOLE-DOLLAR ONE. ────────────────────────────────────
+        let next = apply_carryover_writeback(
+            &ar,
+            &ri,
+            &empty_ledger(),
+            2024,
+            ReturnInputs::default(),
+            false,
+        )
+        .expect("the write-back succeeds");
+        assert_eq!(
+            next.capital_loss_carryforward_in,
+            Carryforward {
+                short: Usd::ZERO,
+                long: dec!(42872),
+            },
+            "★★ $42,871.66 exact becomes $42,872 stored — the figure the filer will read off next \
+             year's Schedule D line 14 and sign for"
+        );
+    }
+
+    /// ★★★ **K2 — (A)'s CENTRAL SAFETY CLAIM: the lift moves no printed line.**
+    ///
+    /// Deleting a screen changes what is EMITTED, never what is COMPUTED — `screen_absolute` runs
+    /// after `assemble_absolute` and reads it. The way to get that wrong is to "lift" the refusal by
+    /// relaxing the thing that made taxable income zero, and the standing temptation is the
+    /// `max(Usd::ZERO)` floor on 1040 line 15: drop it and the household stops being at the floor, so
+    /// the screen stops firing — for entirely the wrong reason, and with a NEGATIVE line 15 on the
+    /// filed page.
+    ///
+    /// So the whole printed 1040 and the whole printed Schedule D are frozen, as STRUCT LITERALS: a
+    /// new field on either is then an `E0063` here, which forces a human to state its expected value
+    /// rather than letting it default into the pinned set.
+    ///
+    /// Mutation that MUST red: drop `.max(Usd::ZERO)` from `line15` in `printed::form_1040_lines`
+    /// ⇒ the printed page carries −11,600 and this reds, while
+    /// `a_ti_zero_carryforward_in_return_files_and_matches_its_current_year_twin` stays GREEN (both
+    /// households move together, so its twin comparison cannot see it). This test is the only one
+    /// that catches it.
+    ///
+    /// ★★ **TWO MUTATIONS WERE TRIED AND ONE DID NOT DISCRIMINATE — recorded, because a mutation
+    /// that passes is a fact about the code.** Dropping `.max(Usd::ZERO)` from `taxable_income` in
+    /// `assemble_absolute` leaves every printed line on this household UNCHANGED: the printed chain
+    /// re-derives line 15 from printed lines 11 and 14 **with its own floor**
+    /// (`printed.rs`), and the tax on a negative taxable income is zero either way. So the filed page
+    /// is floored twice, independently — good news, but it means the absolute-side floor is NOT what
+    /// this test guards, and claiming it was would have credited this KAT with a kill it does not
+    /// make.
+    ///
+    /// ★ The plan's other suggested mutation — flooring `form_1040_line15_signed` to `taxable_income`
+    /// — also does not belong here: it moves the worksheet's carryover-OUT, which is not a printed
+    /// line on any form. K1's `capital_loss_carryforward_out` assertion is what catches that one.
+    #[test]
+    fn the_lift_moves_no_printed_line() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let ri = h1_files_at_the_floor();
+        let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
+        let pf = crate::tax::packet::assemble_printed_forms(
+            &ri,
+            &empty_ledger(),
+            &BTreeMap::new(),
+            &ar,
+            &table,
+            2024,
+            &[],
+        );
+
+        let z = Usd::ZERO;
+        assert_eq!(
+            pf.sch_d,
+            crate::tax::printed::ScheduleDLines {
+                line1a_d: z,
+                line1a_e: z,
+                line1a_h: z,
+                line3_d: z,
+                line3_e: z,
+                line3_h: z,
+                line6: dec!(2000),
+                line7: dec!(-2000),
+                line8a_d: z,
+                line8a_e: z,
+                line8a_h: z,
+                line10_d: z,
+                line10_e: z,
+                line10_h: z,
+                line13: z,
+                line14: z,
+                line15: z,
+                line16: dec!(-2000),
+                routing: ScheduleDRouting::NetLoss {
+                    line21: dec!(2000),
+                    line22_yes: false,
+                },
+            },
+            "the printed Schedule D, line by line"
+        );
+
+        assert_eq!(
+            pf.f1040,
+            crate::tax::printed::Form1040Lines {
+                line1z: dec!(5000),
+                line1a: dec!(5000),
+                line2a: z,
+                line2b: z,
+                line3a: z,
+                line3b: z,
+                line7: dec!(-2000),
+                line8: z,
+                line9: dec!(3000),
+                line10: z,
+                line11: dec!(3000),
+                line12: dec!(14600),
+                line13: z,
+                line14: dec!(14600),
+                // ★★★ L15 — "Subtract line 14 from line 11. If zero or less, enter -0-." THE FLOOR.
+                //     A lift that relaxed it would print −11,600 here.
+                line15: z,
+                line16: z,
+                line17: z,
+                line18: z,
+                line19: z,
+                line20: z,
+                line21: z,
+                line22: z,
+                line23: z,
+                line24: z,
+                line25a: z,
+                line25b: z,
+                line25c: z,
+                line25d: z,
+                line26: z,
+                line31: z,
+                line32: z,
+                line33: z,
+                line34: z,
+                line37: z,
+                digital_asset_yes: false,
+            },
+            "the printed 1040, line by line"
         );
     }
 
@@ -5706,6 +6734,9 @@ mod tests {
                 }],
                 ..Default::default()
             }),
+            // §170(f)(8) neutral — a $30,000 gift is over $250, so the CWA gate is live on this
+            // itemizer. Answered so the assertion below still measures the AMT screen.
+            charitable_cwa_obtained: Some(true),
             ..Default::default()
         };
 
@@ -6630,6 +7661,12 @@ mod tests {
             let ri = ReturnInputs {
                 filing_status: FilingStatus::Single,
                 donations_had_restrictions: answer,
+                // ★ Answered so this test isolates its SUBJECT — the restrictions gate. Since the
+                //   phase-2 review's R3 fold, a ceiling-zeroed year is inside the §170(f)(8) gate
+                //   too (the claim is DEFERRED under §170(d), not denied, while the acknowledgment
+                //   deadline still dies at this filing). Leaving it unanswered would make every row
+                //   below refuse for the other gate's reason and prove nothing about this one.
+                charitable_cwa_obtained: Some(true),
                 schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
                     mortgage_interest_1098: dec!(20000),
                     ..Default::default()
@@ -6675,6 +7712,9 @@ mod tests {
             let ri = ReturnInputs {
                 filing_status: FilingStatus::Single,
                 donations_had_restrictions: answer,
+                // §170(f)(8) neutral — the $50,000 contribution is over $250, so the CWA gate IS
+                // live here; this test is about the §G-21 8283-attachment band, not about it.
+                charitable_cwa_obtained: Some(true),
                 schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
                     mortgage_interest_1098: dec!(20000),
                     ..Default::default()
@@ -6716,6 +7756,8 @@ mod tests {
             let ri = ReturnInputs {
                 filing_status: FilingStatus::Single,
                 donations_had_restrictions: answer,
+                // §170(f)(8) neutral — this test is about the §G-21 restriction question.
+                charitable_cwa_obtained: Some(true),
                 schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
                     mortgage_interest_1098: dec!(20000),
                     ..Default::default()
@@ -6749,6 +7791,633 @@ mod tests {
         );
     }
 
+    /// ★★★ **P4 / §170(f)(8) — THE CONTEMPORANEOUS WRITTEN ACKNOWLEDGMENT TERNARY.**
+    ///
+    /// unanswered ⇒ refuse, `Some(false)` ⇒ refuse, `Some(true)` ⇒ proceed — on a return that
+    /// itemizes and claims a §170 deduction with at least one single gift of $250 or more.
+    ///
+    /// **B1 mutations, each observed RED before the fix landed:**
+    /// - delete the `None` arm ⇒ the unanswered row reds with `None`: btctax silently claims a
+    ///   deduction §170(f)(8)(A) may deny, and the filer's chance to cure it dies at filing;
+    /// - delete the `Some(false)` arm ⇒ the "no acknowledgment" row reds the same way, which is the
+    ///   worse half — the filer TOLD us and we filed it anyway.
+    #[test]
+    fn the_cwa_question_refuses_unanswered_and_refuses_no_but_proceeds_on_yes() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let screened = |answer: Option<bool>| {
+            let ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                donations_had_restrictions: Some(false),
+                charitable_cwa_obtained: answer,
+                schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
+                    salt_state_estimated_payments: dec!(10000),
+                    mortgage_interest_1098: dec!(20000),
+                    ..Default::default()
+                }),
+                w2s: vec![w2(
+                    Owner::Taxpayer,
+                    dec!(200000),
+                    dec!(168600),
+                    dec!(200000),
+                )],
+                ..Default::default()
+            };
+            let st = donation_state(dec!(4000));
+            let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+            assert!(ar.deduction_is_itemized, "the fixture must itemize");
+            screen_absolute(&ri, &ar, &p, &st, 2024).map(|r| r.reason)
+        };
+        assert_eq!(
+            screened(None),
+            Some(RefuseReason::CharitableCwaUnresolved),
+            "unanswered ⇒ refuse: §170(f)(8)(A) conditions the deduction on the acknowledgment, and \
+             filing is the moment the cure expires"
+        );
+        assert_eq!(
+            screened(Some(false)),
+            Some(RefuseReason::CharitableCwaUnresolved),
+            "\"no, I don't hold one\" ⇒ refuse: the deduction as computed is disallowed by statute"
+        );
+        assert_eq!(screened(Some(true)), None, "holding one ⇒ file");
+    }
+
+    /// ★★★ **P4 — THE SCOPING, which is how the owner's \"too aggressive with refusals\" correction is
+    /// honoured STRUCTURALLY rather than by wording.** Three filers must NEVER be asked, and each
+    /// failing row is a real over-refusal a live filer would hit:
+    ///
+    /// 1. **the standard-deduction filer.** §170(f)(8) conditions a *deduction*; they claim none, so
+    ///    silence forgoes nothing and asserts nothing.
+    /// 2. **the filer whose every gift is under $250.** i1040sca: *"In figuring whether a gift is $250
+    ///    or more, don't combine separate donations."* PER CONTRIBUTION — a year AGGREGATE of $400
+    ///    across two $200 gifts poses no question.
+    /// 3. **the itemizer whose §170(b) ceiling zeroes the charitable deduction entirely** — they claim
+    ///    nothing either, so there is nothing for the statute to disallow.
+    ///
+    /// **B1 mutations, each observed RED:**
+    /// - drop the `deduction_is_itemized` conjunct ⇒ row 1 reds;
+    /// - key the threshold on the year AGGREGATE (`year_donation_deduction`) instead of the largest
+    ///   SINGLE contribution ⇒ row 2 reds — the exact defect the adjudication names;
+    /// - drop the `cwa_claimed > 0` conjunct ⇒ row 3 reds.
+    #[test]
+    fn the_cwa_question_is_never_posed_to_a_standard_deduction_or_small_gift_filer() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let run = |sched_a: Option<crate::tax::return_inputs::ScheduleAInputs>,
+                   wages: Usd,
+                   st: LedgerState| {
+            let ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                donations_had_restrictions: Some(false),
+                charitable_cwa_obtained: None, // NEVER ANSWERED — the whole point
+                schedule_a: sched_a,
+                w2s: vec![w2(Owner::Taxpayer, wages, wages, wages)],
+                ..Default::default()
+            };
+            let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+            let r = screen_absolute(&ri, &ar, &p, &st, 2024);
+            (
+                ar.deduction_is_itemized,
+                r.as_ref().map(|r| r.reason.clone()),
+                r.map(|r| r.detail).unwrap_or_default(),
+            )
+        };
+
+        // ★★★ (1) THE STANDARD-DEDUCTION FILER, and the fixture has to be built with care or it
+        //     proves nothing. A return with NO `schedule_a` at all leaves `ar.schedule_a` = `None`,
+        //     so lines 11/12 are $0 and the gate is already shut by the CLAIMED-amount conjunct —
+        //     dropping `deduction_is_itemized` would then survive, and did (B1 caught it). This
+        //     fixture therefore HAS a Schedule A carrying a $5,000 cash gift — so
+        //     `charitable_cash_11` is genuinely non-zero — but a $5,000 itemized total loses to the
+        //     $14,600 standard deduction, which makes `deduction_is_itemized` the ONLY thing
+        //     standing between this filer and a refusal.
+        use crate::tax::return_inputs::{CharitableClass, CharitableGift};
+        let loses_to_standard = crate::tax::return_inputs::ScheduleAInputs {
+            charitable: vec![CharitableGift {
+                class: CharitableClass::Cash60,
+                amount: dec!(5000),
+            }],
+            ..Default::default()
+        };
+        let (itemized, reason, _detail) =
+            run(Some(loses_to_standard), dec!(200000), empty_ledger());
+        assert!(!itemized, "fixture 1 must take the standard deduction");
+        assert_eq!(
+            reason, None,
+            "a standard-deduction filer claims no §170 deduction, so §170(f)(8) conditions nothing"
+        );
+
+        // (2) An ITEMIZER whose gifts are all under $250 — two $200 cash gifts, a $400 aggregate.
+        //     Per contribution, so the question is never posed.
+        let small = crate::tax::return_inputs::ScheduleAInputs {
+            salt_state_estimated_payments: dec!(10000),
+            mortgage_interest_1098: dec!(20000),
+            charitable: vec![
+                CharitableGift {
+                    class: CharitableClass::Cash60,
+                    amount: dec!(200),
+                },
+                CharitableGift {
+                    class: CharitableClass::Cash60,
+                    amount: dec!(200),
+                },
+            ],
+            ..Default::default()
+        };
+        let (itemized, reason, _detail) = run(Some(small), dec!(200000), empty_ledger());
+        assert!(itemized, "fixture 2 must itemize");
+        assert_eq!(
+            reason, None,
+            "two $200 gifts are two contributions, not one $400 one — i1040sca says not to combine \
+             them, so no CWA question exists"
+        );
+
+        // ★★★ (3) THE CEILING-ZEROED ITEMIZER — THIS ROW WAS INVERTED BY THE PHASE-2 REVIEW (R3).
+        //
+        //     It used to assert `None`, on the reasoning that "the §170(b) ceiling allows $0, so
+        //     nothing is claimed and nothing can be disallowed". That conflates two zeros which
+        //     differ in kind:
+        //       - a §170(e)-reduced claim of $0 is EXTINGUISHED forever. No acknowledgment needed,
+        //         and the per-item `claimed_deduction > 0` filter still excuses it (case 4 below).
+        //       - a §170(b)-CEILING zero is DEFERRED. §170(d) carries the claim into the next five
+        //         years, this engine computes the carryover-out, and P6 tells the filer to roll it.
+        //         The deduction WILL be taken — just later.
+        //
+        //     Meanwhile §170(f)(8)(C) fixes the acknowledgment deadline at the earlier of filing or
+        //     the due date OF THE CONTRIBUTION YEAR. So the cure dies at THIS filing while the claim
+        //     lives on: this filer would file unasked, lose the acknowledgment permanently, and then
+        //     deduct $50,000 across later years unsubstantiated. That is D4's own prong (3) — the
+        //     silently lost right — reappearing on the gate built to close it.
+        let zeroed = crate::tax::return_inputs::ScheduleAInputs {
+            mortgage_interest_1098: dec!(20000),
+            ..Default::default()
+        };
+        let (itemized, reason, detail) = run(Some(zeroed), Usd::ZERO, donation_state(dec!(50000)));
+        assert!(
+            itemized,
+            "fixture 3 must itemize on the mortgage interest alone"
+        );
+        assert_eq!(
+            reason,
+            Some(RefuseReason::CharitableCwaUnresolved),
+            "★ a ceiling-zeroed year DEFERS the claim under §170(d) but the §170(f)(8)(C) deadline \
+             still dies at this filing — ask now or the cure is gone. MUTATION: drop the \
+             `cwa_deferred_to_carryover` disjunct in `screen_absolute` and this reds."
+        );
+        // ★★★ AND THE WORDS MATCH THE POPULATION (final whole-branch review, finding 2).
+        //
+        // The R3 fold widened the gate's FIRING CONDITION to deferred claims and left the text
+        // scoped to gifts "you are deducting this year". This filer's lines 11 and 12 are $0, so a
+        // refusal opening "this return claims a charitable deduction" states something they can see
+        // is untrue of their own return — and the same words in the QUESTION let them answer yes
+        // with perfect honesty while holding nothing, defeating the gate that had just stopped them.
+        assert!(
+            !detail.contains("this return claims a charitable deduction"),
+            "the refusal must not tell a ceiling-zeroed filer their return CLAIMS a deduction — \
+             lines 11 and 12 are $0. Got: {detail}"
+        );
+        assert!(
+            detail.contains("exceeded their §170(b)")
+                && detail.contains("carries it forward")
+                && detail.contains("you will deduct it in a later year"),
+            "…it must say what is actually true of them: the claim is DEFERRED, not absent. \
+             Got: {detail}"
+        );
+        assert!(
+            detail.contains("runs from the return for the year of the CONTRIBUTION"),
+            "…and name why the deadline is THIS return even though the deduction is later — that is \
+             the one fact a deferral filer has no way to guess. Got: {detail}"
+        );
+
+        // ── The `Some(false)` arm's CURE must differ too: "remove that gift from the deduction" is
+        //    meaningless to a filer whose return deducts nothing this year. ────────────────────────
+        let zeroed_no = crate::tax::return_inputs::ScheduleAInputs {
+            mortgage_interest_1098: dec!(20000),
+            ..Default::default()
+        };
+        let ri_no = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            donations_had_restrictions: Some(false),
+            charitable_cwa_obtained: Some(false),
+            schedule_a: Some(zeroed_no),
+            ..Default::default()
+        };
+        let st_no = donation_state(dec!(50000));
+        let ar_no = assemble_absolute(&ri_no, &st_no, &p, &table, 2024);
+        let d = screen_absolute(&ri_no, &ar_no, &p, &st_no, 2024)
+            .expect("answering NO on a deferred claim still refuses")
+            .detail;
+        assert!(
+            !d.contains("remove that gift from the deduction"),
+            "a filer deducting nothing this year has no deduction to remove — offering that cure is \
+             the defect, not a wording nit. Got: {d}"
+        );
+        assert!(
+            d.contains("not deductible in any year") && d.contains("must not be carried forward"),
+            "…the honest cure is that §170(f)(8)(A) denies the gift outright, so nothing carries. \
+             Got: {d}"
+        );
+    }
+
+    // ── P8 — Form 8960 Part II line 9b: collect-or-blank, bounded by §164(b)(6) ──────────────────
+
+    /// The P8 fixture: Single, $200,000 wages + `interest` of taxable interest, itemizing on
+    /// $20,000 of mortgage interest, with `salt` of state income tax paid as estimates. AGI clears
+    /// the $200,000 §1411 threshold, so a Form 8960 exists and line 9b is live.
+    fn p8_return(salt: Usd, sales_tax: Option<Usd>, line9b: Option<Usd>) -> ReturnInputs {
+        let mut a = crate::tax::return_inputs::ScheduleAInputs {
+            salt_state_estimated_payments: salt,
+            mortgage_interest_1098: dec!(20000),
+            mortgage_all_used_to_buy_build_improve: Some(true),
+            mortgage_within_debt_limit: Some(true),
+            mortgage_dwelling_is_amt_qualified: Some(true),
+            ..Default::default()
+        };
+        if let Some(amount) = sales_tax {
+            a.salt_use_sales_tax = Some(true);
+            a.salt_sales_tax_amount = amount;
+        } else {
+            a.salt_use_sales_tax = Some(false);
+        }
+        ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2(
+                Owner::Taxpayer,
+                dec!(200000),
+                dec!(168600),
+                dec!(200000),
+            )],
+            int_1099: vec![crate::tax::return_inputs::Form1099Int {
+                payer: "Bank".into(),
+                box1_interest: dec!(60000),
+                ..Default::default()
+            }],
+            schedule_a: Some(a),
+            form_8960_line9b: line9b,
+            ..Default::default()
+        }
+    }
+
+    /// ★★★ **B1 kill-test (a) — a collected Form 8960 line 9b ABOVE what §164(b)(6) let the return
+    /// deduct is REFUSED.**
+    ///
+    /// §1411(c)(1)(B) allocates only *"the deductions **allowed by this subtitle**"*, and
+    /// §164(b)(6)(B) caps the SALT taken into account at $10,000 — so of the $30,000 of state income
+    /// tax this filer PAID, only $10,000 is a deduction at all, and only that $10,000 is allocable.
+    /// A 9b of $10,001 has no source in the return.
+    ///
+    /// ★ The AT-THE-BOUND case is asserted in the same test on purpose: a gate that refused every
+    /// value would pass the over-cap half while being useless, and this is the pair that tells them
+    /// apart. Planting `if claimed_9b > bound` → `if false` (or deleting the block) reds the first
+    /// assertion; making it `>=` reds the second.
+    #[test]
+    fn a_line9b_above_the_salt_cap_is_refused_and_one_at_the_bound_is_accepted() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+
+        let over = p8_return(dec!(30000), None, Some(dec!(10001)));
+        let ar = assemble_absolute(&over, &empty_ledger(), &p, &table, 2024);
+        assert!(
+            ar.deduction_is_itemized,
+            "the fixture must ITEMIZE, else it proves the standard-deduction branch instead"
+        );
+        assert_eq!(
+            ar.schedule_a.as_ref().unwrap().salt_5a,
+            dec!(30000),
+            "line 5a must exceed the cap, else the cap binds on nothing and the test is vacuous"
+        );
+        assert_eq!(
+            nii_line9b_bound(&ar),
+            dec!(10000),
+            "the bound is min(5a, 5e, cap) = min(30,000, 10,000, 10,000)"
+        );
+        let r = screen_absolute(&over, &ar, &p, &empty_ledger(), 2024)
+            .expect("$10,001 exceeds the $10,000 the return actually deducted");
+        assert_eq!(r.reason, RefuseReason::Nii9bExceedsDeductedSalt);
+        for phrase in ["§1411(c)(1)(B)", "§164(b)(6)(B)", "$10,000"] {
+            assert!(
+                r.detail.contains(phrase),
+                "the refusal must cite {phrase:?}; got: {}",
+                r.detail
+            );
+        }
+
+        // …and a dollar less — exactly the pool the return deducted — files.
+        let at = p8_return(dec!(30000), None, Some(dec!(10000)));
+        let ar_at = assemble_absolute(&at, &empty_ledger(), &p, &table, 2024);
+        assert_eq!(
+            screen_absolute(&at, &ar_at, &p, &empty_ledger(), 2024).map(|r| r.reason),
+            None,
+            "a 9b AT the bound is the filer's own lawful allocation and must not be refused"
+        );
+    }
+
+    /// ★★★ **B1 kill-test (b) — the §164(b)(5) SALES-TAX election bounds line 9b to $0.**
+    ///
+    /// i8960, *Line 9b*: *"Sales taxes aren't deductible in computing net investment income."* This
+    /// is a SEPARATE mechanism from the cap, and the over-cap test above cannot cover it: under the
+    /// election Schedule A line 5e is still $10,000 (of sales tax), so a bound computed from 5e — or
+    /// from the cap — would happily admit $10,000 of a deduction §1411 does not allow at all. Only
+    /// the `salt_is_sales_tax` branch of `nii_line9b_bound` catches it, and deleting that branch reds
+    /// exactly here while leaving the over-cap test green.
+    #[test]
+    fn the_sales_tax_election_bounds_line9b_to_zero() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let ri = p8_return(dec!(30000), Some(dec!(30000)), Some(dec!(1)));
+        let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
+        let a = ar.schedule_a.as_ref().unwrap();
+        assert!(a.salt_is_sales_tax, "the fixture must make the election");
+        assert_eq!(
+            a.salt_5e,
+            dec!(10000),
+            "5e must still be a full $10,000 of SALES tax — that is what makes a 5e-based bound wrong"
+        );
+        assert_eq!(
+            nii_line9b_bound(&ar),
+            Usd::ZERO,
+            "sales taxes are never deductible in computing net investment income"
+        );
+        let r = screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024)
+            .expect("even $1 of line 9b is unallowable under the sales-tax election");
+        assert_eq!(r.reason, RefuseReason::Nii9bExceedsDeductedSalt);
+        assert!(
+            r.detail.contains("Sales taxes aren't deductible"),
+            "the refusal must quote i8960's own sentence; got: {}",
+            r.detail
+        );
+    }
+
+    /// ★★ The STANDARD-deduction branch: nothing was *"properly deducted on your return"*, so the
+    /// bound is $0 whatever the filer paid in state tax. Same Schedule A amounts, but with the
+    /// mortgage interest removed so the standard deduction wins.
+    #[test]
+    fn a_standard_deduction_return_may_allocate_no_state_tax_to_nii() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let mut ri = p8_return(dec!(30000), None, Some(dec!(1)));
+        ri.schedule_a.as_mut().unwrap().mortgage_interest_1098 = Usd::ZERO;
+        let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
+        assert!(
+            !ar.deduction_is_itemized,
+            "the fixture must take the STANDARD deduction ($10,000 SALT < $14,600), else it is the \
+             itemized branch again"
+        );
+        assert_eq!(nii_line9b_bound(&ar), Usd::ZERO);
+        let r = screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024)
+            .expect("a standard-deduction return deducted no state income tax to allocate");
+        assert_eq!(r.reason, RefuseReason::Nii9bExceedsDeductedSalt);
+        assert!(
+            r.detail.contains("STANDARD deduction"),
+            "the message must name the branch the filer is actually on; got: {}",
+            r.detail
+        );
+    }
+
+    /// ★★★ **BLANK STAYS BLANK, AND IT IS THE DEFAULT.** An unanswered line 9b must (a) never
+    /// refuse — this is collect-**or-blank**, not a declaration — and (b) reach the printed chain as
+    /// `None`, not as a computed zero. The two provenances are indistinguishable on the page, so the
+    /// only place the distinction can be held is the type.
+    ///
+    /// ★ It also pins the negative half of the answered-ness invariant: btctax must NOT compute the
+    /// allocation. If some future edit derived 9b from the ratio, `f8960.line9b` would arrive
+    /// `Some(..)` on a return where the filer said nothing, and this reds.
+    #[test]
+    fn an_unanswered_line9b_neither_refuses_nor_prints_a_zero() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let ri = p8_return(dec!(30000), None, None);
+        let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
+        assert!(
+            nii_line9b_bound(&ar) > Usd::ZERO,
+            "there IS a pool to forgo"
+        );
+        assert_eq!(
+            screen_absolute(&ri, &ar, &p, &empty_ledger(), 2024),
+            None,
+            "collect-or-blank: silence claims nothing and must never gate the return"
+        );
+        assert_eq!(ar.printed_inputs.form_8960_line9b, None);
+        let f8960 = crate::tax::other_taxes::form_8960_lines(
+            FilingStatus::Single,
+            ar.taxable_interest,
+            ar.ordinary_dividends,
+            ar.capital_gain,
+            ar.printed_inputs.crypto_lending_interest,
+            ar.agi,
+            ar.printed_inputs.form_8960_line9b,
+        )
+        .expect("NIIT is owed");
+        assert_eq!(
+            f8960.line9b, None,
+            "line 9b must stay BLANK — a computed 0 would swear the allocable state tax IS zero"
+        );
+        assert_eq!(
+            f8960.line9d,
+            Usd::ZERO,
+            "9d = 9a + 9b + 9c over three blanks"
+        );
+    }
+
+    /// ★★ **SPEC §3.4 — the forgone Part II deduction gets a LOUD advisory, and only where something
+    /// is actually forgone.** The mandate is "never forgo a benefit in silence"; it is not "nag".
+    ///
+    /// Four cells, one predicate: fires on (blank 9b ∧ NIIT owed ∧ bound > 0), silent on each of the
+    /// three ways that fails. Dropping the `bound > Usd::ZERO` guard reds the sales-tax case;
+    /// dropping `is_none()` reds the answered case; dropping `niit.tax > 0` reds the no-NIIT case.
+    #[test]
+    fn the_forgone_line9b_deduction_is_advised_exactly_where_it_exists() {
+        use crate::tax::advisories::Advisory;
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let fires = |ri: &ReturnInputs| {
+            let ar = assemble_absolute(ri, &empty_ledger(), &p, &table, 2024);
+            crate::tax::advisories::advisories_for(ri, &empty_ledger(), &ar, &p, 2024)
+                .into_iter()
+                .find_map(|a| match a {
+                    Advisory::Form8960Line9bNotClaimed { bound, saving } => Some((bound, saving)),
+                    _ => None,
+                })
+        };
+
+        // (1) Blank 9b, NIIT owed, a real $10,000 pool ⇒ fires, naming the pool AND the saving.
+        //     This fixture is wages $200,000 + interest $60,000, so line 12 ($60,000) equals line 15
+        //     ($260,000 AGI − $200,000) and the whole $10,000 allocation moves line 16 dollar for
+        //     dollar: 3.8% × $10,000 = $380.
+        assert_eq!(
+            fires(&p8_return(dec!(30000), None, None)),
+            Some((dec!(10000), dec!(380)))
+        );
+
+        // (2) The filer ANSWERED — nothing is forgone in silence, so nothing is said.
+        assert_eq!(fires(&p8_return(dec!(30000), None, Some(dec!(4000)))), None);
+
+        // (3) The §164(b)(5) sales-tax election ⇒ the pool is $0 and there is nothing to forgo.
+        assert_eq!(
+            fires(&p8_return(dec!(30000), Some(dec!(30000)), None)),
+            None
+        );
+
+        // (4) No NIIT owed (drop the interest ⇒ MAGI under the $200,000 threshold) ⇒ no Form 8960,
+        //     so line 9b is not a line this return has.
+        let mut no_niit = p8_return(dec!(30000), None, None);
+        no_niit.int_1099.clear();
+        assert_eq!(fires(&no_niit), None);
+
+        // ★★★ (5) LINE 15 BINDS ⇒ the allocation would change the tax by $0, so NOTHING IS SAID
+        //     (final whole-branch review, P3-3). Wages $150,000 + $100,000 of investment income:
+        //     AGI $250,000 ⇒ line 15 = $50,000, line 12 = $100,000, and line 16 = min(12, 15) takes
+        //     the line-15 leg. Allocating the whole $10,000 pool drops line 12 to $90,000 — still
+        //     above line 15 — so line 16 does not move and the tax does not change.
+        //
+        //     This is a COMMON btctax shape, not an edge: wages plus a big crypto gain. The advisory
+        //     used to tell this filer "your tax is currently OVERSTATED", which is false, and invite
+        //     a sworn §1411 allocation election worth nothing.
+        let mut binds = p8_return(dec!(30000), None, None);
+        binds.w2s = vec![w2(
+            Owner::Taxpayer,
+            dec!(150000),
+            dec!(150000),
+            dec!(150000),
+        )];
+        binds.int_1099 = vec![crate::tax::return_inputs::Form1099Int {
+            payer: "Bank".into(),
+            box1_interest: dec!(100000),
+            ..Default::default()
+        }];
+        {
+            // The premise, asserted: this fixture must really be in the line-15-binding region, or
+            // the row proves nothing. A fixture that merely lost its NIIT would also return `None`.
+            let ar = assemble_absolute(&binds, &empty_ledger(), &p, &table, 2024);
+            assert!(
+                ar.niit.tax > Usd::ZERO,
+                "row 5 must still OWE NIIT — otherwise it is row 4 again"
+            );
+            let l15 = ar.niit.magi - crate::tax::tables::niit_threshold(FilingStatus::Single);
+            assert!(
+                ar.niit.nii > l15,
+                "★ and line 12 ({}) must EXCEED line 15 ({l15}) — that is what makes line 15 the \
+                 binding leg of line 16's min",
+                ar.niit.nii
+            );
+            assert!(
+                crate::tax::return_1040::nii_line9b_bound(&ar) > Usd::ZERO,
+                "…while a real allocation pool still exists, so the OLD predicate would have fired"
+            );
+        }
+        assert_eq!(
+            fires(&binds),
+            None,
+            "★★ nothing is forgone, so nothing is said: line 16 is already the line-15 leg and no \
+             9b entry up to the bound changes the return by a cent"
+        );
+
+        // The text names the amount, the SAVING, and the direction, and OFFERS the ratio without
+        // applying it.
+        let msg = Advisory::Form8960Line9bNotClaimed {
+            bound: dec!(10000),
+            saving: dec!(380),
+        }
+        .message();
+        for phrase in [
+            "$10,000",
+            "$380",
+            "OVERSTATED by up to",
+            "any reasonable method",
+            "ratio of Form 8960 line 8",
+        ] {
+            assert!(msg.contains(phrase), "advisory must say {phrase:?}: {msg}");
+        }
+    }
+
+    /// ★★★ **THE TWO NIIT CHAINS MUST AGREE ONCE 9B EXISTS.** `form_8960` feeds
+    /// `AbsoluteReturn::total_tax`; `form_8960_lines` feeds the FILED Schedule 2 line 12. While
+    /// Part II was structurally zero the two could not diverge; a deduction threaded into only one
+    /// of them files a Form 8960 whose own line 17 contradicts the 1040 that carries it.
+    ///
+    /// Mutation: drop the `line9b` argument at either call site (`return_1040`'s `form_8960` or
+    /// `packet`'s `form_8960_lines`) and this reds by $380.
+    #[test]
+    fn the_absolute_and_printed_niit_chains_agree_on_the_line9b_deduction() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        let ri = p8_return(dec!(30000), None, Some(dec!(10000)));
+        let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
+        let f8960 = crate::tax::other_taxes::form_8960_lines(
+            FilingStatus::Single,
+            ar.taxable_interest,
+            ar.ordinary_dividends,
+            ar.capital_gain,
+            ar.printed_inputs.crypto_lending_interest,
+            ar.agi,
+            ar.printed_inputs.form_8960_line9b,
+        )
+        .expect("NIIT is owed");
+        assert_eq!(f8960.line8, dec!(60000), "line 8 = the $60,000 of interest");
+        assert_eq!(f8960.line12, dec!(50000), "line 12 = line 8 − line 11");
+        assert_eq!(
+            ar.niit.nii,
+            dec!(50000),
+            "the absolute chain deducts it too"
+        );
+        assert_eq!(
+            ar.niit.tax, f8960.line17,
+            "the tax on the 1040 and the tax on the filed Form 8960 are one number"
+        );
+        // …and the deduction actually moved it: 3.8% × 60,000 = 2,280 without, 1,900 with.
+        let without = p8_return(dec!(30000), None, None);
+        let ar_none = assemble_absolute(&without, &empty_ledger(), &p, &table, 2024);
+        assert_eq!(ar_none.niit.tax - ar.niit.tax, dec!(380));
+    }
+
+    /// ★★ **P4 — the refusal must carry the DEADLINE, because the deadline is the whole reason this
+    /// is a gate and not an advisory.** A filer who reads "you need an acknowledgment" and files
+    /// anyway has destroyed the cure; a filer who reads "you can still get one, until you file" has
+    /// not. §170(f)(8)(C), quoted through i1040sca.
+    ///
+    /// B1 mutation: drop the "whichever is earlier" deadline sentence from either detail and the
+    /// matching assertion reds by name.
+    #[test]
+    fn both_cwa_refusals_quote_the_still_curable_deadline() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+        for answer in [None, Some(false)] {
+            let ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                donations_had_restrictions: Some(false),
+                charitable_cwa_obtained: answer,
+                schedule_a: Some(crate::tax::return_inputs::ScheduleAInputs {
+                    salt_state_estimated_payments: dec!(10000),
+                    mortgage_interest_1098: dec!(20000),
+                    ..Default::default()
+                }),
+                w2s: vec![w2(
+                    Owner::Taxpayer,
+                    dec!(200000),
+                    dec!(168600),
+                    dec!(200000),
+                )],
+                ..Default::default()
+            };
+            let st = donation_state(dec!(4000));
+            let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+            let r = screen_absolute(&ri, &ar, &p, &st, 2024)
+                .unwrap_or_else(|| panic!("{answer:?} must refuse"));
+            let d = r.detail.to_ascii_lowercase();
+            for phrase in [
+                "by the date you file your return or the due date (including extensions)",
+                "whichever is earlier",
+                "§170(f)(8)",
+            ] {
+                assert!(
+                    d.contains(phrase),
+                    "the {answer:?} refusal must quote {phrase:?}; got: {}",
+                    r.detail
+                );
+            }
+        }
+    }
+
     /// ★★★ **PRE-MERGE I-2 — a REGRESSION the r3 fold itself introduced, and a laundering path.**
     ///
     /// r3's I-3 fix correctly stopped refusing a STANDARD-DEDUCTION year that has a declared donation
@@ -6778,10 +8447,20 @@ mod tests {
         // AGI $30,000 against a $50,000 long-term gift: §170(b)'s 30% ceiling allows $9,000, which
         // LOSES to the $14,600 standard deduction — so nothing is itemized and the year files clean,
         // while $41,000 of full-FMV carryover rolls out.
-        let build_wages = |answer: Option<bool>, claimed: Usd, wages: Usd| {
+        // ★★★ FINAL-REVIEW FINDING 1 — `cwa` IS NOW A FIXTURE AXIS, AND IT HAS TO BE.
+        //
+        // Every household in this test is the standard-deduction deferral donor: a gift over $250
+        // that rolls a carryover out of a year that itemizes nothing. That is precisely the
+        // population the new §170(f)(8) write-back guard refuses, so rows (3) and (4) — which assert
+        // the write-back SUCCEEDS — would now be refused for a reason that has nothing to do with
+        // the restriction question this test is about. Answering the acknowledgment `Some(true)`
+        // isolates the variable under test, and rows (5)/(6) below assert the new guard is real by
+        // flipping only this axis.
+        let build_wages = |answer: Option<bool>, claimed: Usd, wages: Usd, cwa: Option<bool>| {
             let ri = ReturnInputs {
                 filing_status: FilingStatus::Single,
                 donations_had_restrictions: answer,
+                charitable_cwa_obtained: cwa,
                 w2s: vec![w2(Owner::Taxpayer, wages, wages, wages)],
                 ..Default::default()
             };
@@ -6792,7 +8471,11 @@ mod tests {
             let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
             (ri, st, ar)
         };
-        let build = |answer: Option<bool>, claimed: Usd| build_wages(answer, claimed, dec!(30000));
+        // The default for these rows holds the acknowledgment, so §170(f)(8) is satisfied and the
+        // RESTRICTION question is the only thing that can move the outcome.
+        let build = |answer: Option<bool>, claimed: Usd| {
+            build_wages(answer, claimed, dec!(30000), Some(true))
+        };
 
         // The fixture must be the shape the finding describes, or the test proves nothing.
         let (ri, st, ar) = build(Some(true), dec!(50000));
@@ -6811,18 +8494,30 @@ mod tests {
         );
 
         // (1) DECLARED restriction ⇒ the carryover is known-inflated. Refuse to persist it.
+        //
+        // ★ The refusal's REASON is asserted, not merely its existence. There are now three gates in
+        //   `apply_carryover_writeback` that can refuse this household, so `is_err()` alone would go
+        //   on passing if the restriction arm were deleted outright — the vacuity shape KAT 8 was.
+        let e1 = apply_carryover_writeback(&ar, &ri, &st, 2024, ReturnInputs::default(), false)
+            .expect_err(
+                "★ a full-FMV carryover from a gift the filer said was restricted must not become \
+                 next year's input — next year has no gate that could catch it",
+            );
         assert!(
-            apply_carryover_writeback(&ar, &ri, &st, 2024, ReturnInputs::default(), false).is_err(),
-            "★ a full-FMV carryover from a gift the filer said was restricted must not become next \
-             year's input — next year has no gate that could catch it"
+            e1.contains("restriction or a retained right"),
+            "…and it must refuse for the RESTRICTION, not for something else. Got: {e1}"
         );
 
         // (2) DUE-BUT-UNANSWERED on a Section B year ⇒ btctax cannot vouch for the amount either.
         let (ri, st, ar) = build(None, dec!(50000));
+        let e2 = apply_carryover_writeback(&ar, &ri, &st, 2024, ReturnInputs::default(), false)
+            .expect_err(
+            "the form would have asked 5a/5b/5c; an unanswered Section B year cannot vouch for \
+                 the carryover's amount",
+        );
         assert!(
-            apply_carryover_writeback(&ar, &ri, &st, 2024, ReturnInputs::default(), false).is_err(),
-            "the form would have asked 5a/5b/5c; an unanswered Section B year cannot vouch for the \
-             carryover's amount"
+            e2.contains("lines 5a, 5b and 5c"),
+            "…and for the UNANSWERED Section B question specifically. Got: {e2}"
         );
 
         // (3) ANSWERED NO ⇒ the ordinary case, and it writes.
@@ -6835,7 +8530,7 @@ mod tests {
         // (4) SECTION A + unanswered ⇒ the form never poses the question, so silence forgoes nothing.
         //     $4,000 is under the $5,000 split, and $10,000 of wages puts the 30% ceiling at $3,000
         //     so a carryover still rolls out — otherwise this row would prove nothing.
-        let (ri, st, ar) = build_wages(None, dec!(4000), dec!(10000));
+        let (ri, st, ar) = build_wages(None, dec!(4000), dec!(10000), Some(true));
         assert!(
             !ar.charitable_carryover_out.is_empty(),
             "fixture must still carry over"
@@ -6844,6 +8539,40 @@ mod tests {
             apply_carryover_writeback(&ar, &ri, &st, 2024, ReturnInputs::default(), false).is_ok(),
             "a Section A year never prints 5a/5b/5c — do not block a small donor's carryover"
         );
+
+        // ══ FINAL-REVIEW FINDING 1 — THE §170(f)(8) ARM, ON THE SAME FIXTURES. ═══════════════════
+        //
+        // Rows (3) and (4) succeed ONLY because `cwa` is `Some(true)`. Flip that one axis and both
+        // must refuse — otherwise the acknowledgment answer above is grease rather than a premise,
+        // and the standard-deduction deferral donor is laundered into next year exactly as the
+        // final review described. Each asserts the §170(f)(8) reason by name, so it cannot be
+        // satisfied by the restriction arms above.
+        for (label, cwa) in [("unanswered", None), ("answered NO", Some(false))] {
+            // (3') row (3)'s household — Section B, restriction answered NO — only the CWA differs.
+            let (ri, st, ar) = build_wages(Some(false), dec!(50000), dec!(30000), cwa);
+            let e = apply_carryover_writeback(&ar, &ri, &st, 2024, ReturnInputs::default(), false)
+                .expect_err(&format!(
+                    "{label}: §170(f)(8)(A) disallows a $250-or-more contribution without a \
+                     contemporaneous written acknowledgment, so nothing carries into next year and \
+                     nothing may be persisted — row (3) succeeds only because it answers yes"
+                ));
+            assert!(
+                e.contains("contemporaneous written acknowledgment"),
+                "{label}: row (3) must refuse for §170(f)(8), not for the restriction. Got: {e}"
+            );
+
+            // (4') row (4)'s household — Section A, a $4,000 gift, still over the $250 threshold.
+            let (ri, st, ar) = build_wages(None, dec!(4000), dec!(10000), cwa);
+            let e = apply_carryover_writeback(&ar, &ri, &st, 2024, ReturnInputs::default(), false)
+                .expect_err(&format!(
+                    "{label}: the $250 threshold is §170(f)(8)(A)'s, NOT §170(f)(11)(D)'s $5,000 \
+                     appraisal split — a Section A gift of $4,000 still needs an acknowledgment"
+                ));
+            assert!(
+                e.contains("contemporaneous written acknowledgment"),
+                "{label}: row (4) must refuse for §170(f)(8). Got: {e}"
+            );
+        }
 
         // (5) ★ NO charitable carryover ⇒ nothing inflated to persist, so a declared restriction must
         //     NOT block the write-back — the QBI/REIT carryovers still need writing. Without this the
@@ -6915,50 +8644,372 @@ mod tests {
         );
     }
 
-    /// ★★★ **r3 I-4 — a provenance stamp is a CLAIM OF KNOWLEDGE, and this one was unfounded.**
+    /// ★★★ **K6 — r3 I-4's KILL, RE-ARMED. A computed ZERO must never silence the advisory.**
     ///
-    /// `apply_carryover_writeback` stamped `capital_loss_carryforward_in_provenance = Computed`
-    /// without ever assigning the value — there is no capital-loss carryover-OUT on `AbsoluteReturn`
-    /// to assign, because the §1211/§1212 Capital Loss Carryover Worksheet is unmodeled in v1. The
-    /// field's own doc says `Computed` means btctax "derived it from a prior year it actually
-    /// computed"; it had derived nothing. The damage was silence: `BenefitCarryoversNotStated`
-    /// defines "unknown" as `zero && User`, so the false stamp made next year stop telling a filer
-    /// that btctax has no capital-loss carryover on file — for a filer who may genuinely have one.
+    /// r3 I-4 found `apply_carryover_writeback` stamping `capital_loss_carryforward_in_provenance =
+    /// Computed` on a value it never assigned. The damage was SILENCE:
+    /// `BenefitCarryoversNotStated` defines "unknown" as `zero && User`, so the false stamp made next
+    /// year stop telling a filer that btctax has no capital-loss carryover on file — for a filer who
+    /// may genuinely have one.
     ///
-    /// Mutation-verified: restoring the stamp reds this test.
+    /// (B) writes the value now, so the finding cannot be re-run as "the stamp is unfounded because
+    /// nothing is written". Its reasoning is unchanged, and this is the case it still governs: year Y
+    /// was NEVER ASKED (`{0,0}` / `User`) **and** produced NO carryover-out. There is nothing to
+    /// descend from, so no stamp is founded — and the `grounded` predicate is the only thing standing
+    /// between that and the old defect.
+    ///
+    /// ★★★ **THE ADVISORY IS ASSERTED, NOT ONLY THE STAMP.** The stamp is a means; the advisory is
+    /// the harm. And NO VALUE ASSERTION CAN CATCH THIS — the stored amount is `{0,0}` whether the
+    /// stamp is written or not, which is exactly why r3 I-4 shipped in the first place.
+    ///
+    /// Mutation that MUST red: drop the `grounded` predicate (stamp unconditionally) ⇒ BOTH halves.
     #[test]
-    fn the_writeback_does_not_claim_to_have_computed_a_capital_loss_carryover() {
+    fn a_computed_zero_never_silences_the_benefit_carryover_advisory() {
+        use crate::tax::advisories::{advisories_for, Advisory};
+
+        // Year Y: no carryover in, nothing asked, and no loss of its own to carry out.
+        let ri = plain_ri();
         let ar = ar_with_carryovers();
+        assert_eq!(
+            ri.capital_loss_carryforward_in,
+            Carryforward::default(),
+            "premise: year Y was never asked"
+        );
+        assert_eq!(
+            ri.capital_loss_carryforward_in_provenance,
+            CarryProvenance::User,
+            "premise: …and carries the default provenance, which is what 'nobody said' looks like"
+        );
+        assert_eq!(
+            ar.capital_loss_carryforward_out,
+            Carryforward::default(),
+            "premise: year Y produced NO carryover-out either — with a carryover-out there would be \
+             something to descend from and the stamp would be founded"
+        );
+
         let next = apply_carryover_writeback(
             &ar,
-            &plain_ri(),
+            &ri,
             &empty_ledger(),
             2024,
             ReturnInputs::default(),
             false,
         )
         .unwrap();
-
         assert_eq!(
             next.capital_loss_carryforward_in,
             Carryforward::default(),
-            "nothing writes this — the §1211/§1212 worksheet is unmodeled"
+            "there is no figure to write"
         );
         assert_eq!(
             next.capital_loss_carryforward_in_provenance,
             CarryProvenance::User,
-            "★ so the provenance must stay at its default. Stamping `Computed` on a value the code \
-             never assigns is a false claim of knowledge, and it silences the advisory that tells \
-             the filer btctax has no carryover on file"
+            "★ …so the provenance must stay at its default. `Computed` here would be a claim that \
+             btctax derived the zero from a year it computed, and it derived nothing."
         );
 
-        // The CHARITABLE sibling is honest — the value IS written one line above the stamp — so the
-        // fix must not have removed it wholesale.
+        // ★ AND THE HARM ITSELF: next year still tells the filer btctax has no carryover on file.
+        let mut y1 = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2(Owner::Taxpayer, dec!(60000), dec!(60000), dec!(60000))],
+            ..next.clone()
+        };
+        crate::tax::testonly::answer_all_live_declarations(&mut y1);
+        let ar1 = assemble_absolute(
+            &y1,
+            &empty_ledger(),
+            &ty2024_params(),
+            &real_2024_table(),
+            2024,
+        );
+        let advs = advisories_for(&y1, &empty_ledger(), &ar1, &ty2024_params(), 2024);
+        assert!(
+            advs.iter().any(|a| matches!(
+                a,
+                Advisory::BenefitCarryoversNotStated {
+                    capital_loss: true,
+                    ..
+                }
+            )),
+            "★★★ THE r3 I-4 DAMAGE, asserted directly: next year must still say it has no \
+             capital-loss carryover on file. A false `Computed` stamp silences exactly this, and \
+             every value assertion above stays green while it does. Got: {advs:?}"
+        );
+
+        // The CHARITABLE sibling is honest — its value IS assigned one line above its stamp — so the
+        // `grounded` gate must not have been generalised into removing that.
         assert_eq!(
             next.charitable_carryover_in_provenance,
             CarryProvenance::Computed,
             "the charitable stamp is founded: `charitable_carryover_out` is real and is assigned"
         );
+    }
+
+    /// ★★★ **K7 — the stamp is founded ONLY because the value is assigned.**
+    ///
+    /// The positive half of r3 I-4. Year Y brings a real `User` carryover in and produces a real
+    /// carryover-out, so the figure descends from the filer's own testimony: btctax may say
+    /// `Computed`, because it computed it.
+    ///
+    /// Mutation that MUST red: remove the value assignment and keep the stamp ⇒ the VALUE assertion
+    /// reds. The test must be unable to pass on a stamp alone, which is the failure mode of the
+    /// version this replaces.
+    #[test]
+    fn the_writeback_stamps_computed_only_because_it_assigns_the_value() {
+        let p = ty2024_params();
+        let table = real_2024_table();
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2(Owner::Taxpayer, dec!(60000), dec!(60000), dec!(60000))],
+            donations_had_restrictions: Some(false),
+            ..Default::default()
+        };
+        ri.capital_loss_carryforward_in = Carryforward {
+            short: Usd::ZERO,
+            long: dec!(5000),
+        };
+        crate::tax::testonly::answer_all_live_declarations(&mut ri);
+        let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
+        assert!(
+            ar.capital_loss_carryforward_out.long > Usd::ZERO,
+            "premise: there must BE a carryover-out to roll, or this asserts nothing"
+        );
+
+        let next = apply_carryover_writeback(
+            &ar,
+            &ri,
+            &empty_ledger(),
+            2024,
+            ReturnInputs::default(),
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            next.capital_loss_carryforward_in,
+            Carryforward {
+                short: round_dollar(ar.capital_loss_carryforward_out.short),
+                long: round_dollar(ar.capital_loss_carryforward_out.long),
+            },
+            "★ the VALUE is written — and rounded to whole dollars, because it becomes next year's \
+             Schedule D lines 6 and 14, which the filer reads off the page and swears to"
+        );
+        assert_eq!(
+            next.capital_loss_carryforward_in_provenance,
+            CarryProvenance::Computed,
+            "…and only now is the stamp founded"
+        );
+    }
+
+    /// ★★★ **K16 — the write-back is ATOMIC, and the reason is a TAX mechanism, not tidiness.**
+    ///
+    /// It is tempting to let the capital-loss half survive a charitable refusal: the two carryovers
+    /// look independent. They are not. Worksheet line 1 is `agi − total_deductions`, so a charitable
+    /// deduction btctax cannot vouch for makes line 1 **more negative**, line 3 and line 4 **smaller**,
+    /// and the surviving capital loss **LARGER**. Persisting that half alone would overstate next
+    /// year's carryover using a deduction btctax has just refused to stand behind.
+    ///
+    /// ★★★ **THE ATOMICITY ITSELF IS STRUCTURAL, NOT TESTED — and saying so is the point.**
+    /// `apply_carryover_writeback` takes `next_year` **by value** and returns
+    /// `Result<ReturnInputs, String>`, so on the `Err` path the mutated copy is dropped and the caller
+    /// keeps its own. A partial application is not merely absent; it is unrepresentable, which is a
+    /// stronger guarantee than any assertion and the reason none is written for it. A test asserting
+    /// "nothing was applied" against a value the caller never receives would be theatre.
+    ///
+    /// So what IS asserted is what a filer can actually be harmed by:
+    ///   (a) the refusal TEXT names the capital-loss carryover among what was withheld. It enumerates
+    ///       what was not persisted so the filer can enter it by hand, and that enumeration has gone
+    ///       short once already (it said "all three" while the code wrote three and is now four);
+    ///   (b) the same household WITH a charitable deduction has a strictly LARGER capital-loss
+    ///       carryover-out than without it, which is the mechanism spelled out above, executed. This
+    ///       is what makes (a) a correctness rule and not housekeeping.
+    ///
+    /// Mutations that MUST red:
+    ///   (a) drop "CAPITAL-LOSS" from the §170(f)(8) refusal text ⇒ the enumeration half;
+    ///   (b) pass the FLOORED `taxable_income` as worksheet line 1 instead of the signed one ⇒ the
+    ///       second half, because at the floor the two deductions stop being distinguishable.
+    #[test]
+    fn an_unvouched_charitable_deduction_blocks_the_capital_loss_roll_too() {
+        let p = ty2024_params();
+        let table = synthetic_table(2024);
+
+        // An itemizing floor-ish household with a real capital loss of its own AND a $4,000 gift
+        // whose §170(f)(8) acknowledgment has not been declared.
+        // ★ The $18,000 of mortgage interest is not decoration: it is what makes BOTH households
+        //   itemize, so the charitable deduction actually reaches `total_deductions` and therefore
+        //   worksheet line 1. Without it the ceiling-limited gift loses to the standard deduction and
+        //   the second half compares two identical returns.
+        let sched_a = || {
+            Some(crate::tax::return_inputs::ScheduleAInputs {
+                mortgage_interest_1098: dec!(18000),
+                ..Default::default()
+            })
+        };
+        let build = |cwa: Option<bool>, gift: bool, itemize: bool| {
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                donations_had_restrictions: Some(false),
+                charitable_cwa_obtained: cwa,
+                schedule_a: if itemize { sched_a() } else { None },
+                w2s: vec![w2(Owner::Taxpayer, dec!(20000), dec!(20000), dec!(20000))],
+                ..Default::default()
+            };
+            ri.capital_loss_carryforward_in = Carryforward {
+                short: Usd::ZERO,
+                long: dec!(60000),
+            };
+            crate::tax::testonly::answer_all_live_declarations(&mut ri);
+            let st = if gift {
+                donation_state(dec!(20000))
+            } else {
+                LedgerState::default()
+            };
+            let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+            (ri, st, ar)
+        };
+
+        // ── (a) the refusal blocks everything, and SAYS SO. ──────────────────────────────────────
+        // ★ STANDARD DEDUCTION here, deliberately — this refusal only ever bites the
+        //   standard-deduction DEFERRAL donor in production: an itemizer with an unanswered
+        //   acknowledgment refuses at `screen_absolute` and never reaches the write-back at all. A
+        //   fixture that itemized would be exercising a state the product cannot get into.
+        let (ri, st, ar) = build(None, true, false);
+        assert!(
+            cwa_unvouched_carryover(&ri, &ar, &st, 2024).is_some(),
+            "premise: the §170(f)(8) gate must actually be armed on this fixture, or the atomicity \
+             claim below is never exercised"
+        );
+        assert!(
+            ar.capital_loss_carryforward_out.long > Usd::ZERO,
+            "premise: there must BE a capital-loss carryover to leak, or 'nothing was applied' is \
+             vacuously true"
+        );
+        let err = apply_carryover_writeback(&ar, &ri, &st, 2024, ReturnInputs::default(), false)
+            .expect_err("an unvouched §170(f)(8) carryover refuses the whole write-back");
+        assert!(
+            err.contains("CAPITAL-LOSS"),
+            "★ the refusal must TELL the filer the capital-loss carryover was not written either — \
+             the text enumerates what was withheld, and it went short once already. Got: {err}"
+        );
+
+        // ── (b) the MECHANISM: the charitable deduction makes the carryover-out LARGER. ────────────
+        //
+        // Same household, acknowledgment declared, so the write succeeds — and compare against the
+        // same household with no gift at all.
+        // ★ ITEMIZING here, equally deliberately: the mechanism under test is the charitable
+        //   deduction moving worksheet line 1, and a deduction that loses to the standard deduction
+        //   moves nothing. The acknowledgment is declared, so both returns are ones btctax will file.
+        let (_, _, ar_gift) = build(Some(true), true, true);
+        let (_, _, ar_no) = build(Some(true), false, true);
+
+        let w_gift = ar_gift
+            .capital_loss_carryover_worksheet
+            .expect("the gift household uses the worksheet");
+        let w_no = ar_no
+            .capital_loss_carryover_worksheet
+            .expect("the no-gift household uses the worksheet");
+        assert!(
+            w_gift.line1 < w_no.line1,
+            "★ the deduction makes worksheet line 1 MORE negative: {} vs {}",
+            w_gift.line1,
+            w_no.line1
+        );
+        assert!(
+            w_gift.line4 < w_no.line4,
+            "…so line 4 (what the year actually absorbed) is SMALLER: {} vs {}",
+            w_gift.line4,
+            w_no.line4
+        );
+        assert!(
+            ar_gift.capital_loss_carryforward_out.long > ar_no.capital_loss_carryforward_out.long,
+            "★★ …and the surviving loss is therefore strictly LARGER, which is exactly why the \
+             capital-loss half must not outlive a charitable refusal: {} vs {}",
+            ar_gift.capital_loss_carryforward_out.long,
+            ar_no.capital_loss_carryforward_out.long
+        );
+    }
+
+    /// ★★★ **K8 — a USER-ENTERED capital-loss carryover is never overwritten without `--force`.**
+    ///
+    /// The fourth `!force` guard. Next year's lines 6 and 14 are the filer's own testimony; btctax's
+    /// figure must not silently replace it.
+    ///
+    /// ★ **A test exercising only `force = true` would pass with the guard deleted and be worthless**,
+    /// so the `force = false` half is the one that carries the weight — and the refusal TEXT is
+    /// asserted, because several refusals can come out of this function and "it errored" is not
+    /// evidence that THIS one fired.
+    ///
+    /// ★★ The third case is the one a naive guard breaks: a FRESH `{0,0}` next-year row also carries
+    /// `User` (it is the `CarryProvenance` default), so a guard keyed on provenance alone would refuse
+    /// every first write. A zero nobody entered is not testimony.
+    ///
+    /// Mutation that MUST red: delete the fourth arm ⇒ the `force = false` half.
+    #[test]
+    fn a_user_entered_capital_loss_carryover_is_not_overwritten_without_force() {
+        let p = ty2024_params();
+        let table = real_2024_table();
+        let mut ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2(Owner::Taxpayer, dec!(60000), dec!(60000), dec!(60000))],
+            donations_had_restrictions: Some(false),
+            ..Default::default()
+        };
+        ri.capital_loss_carryforward_in = Carryforward {
+            short: Usd::ZERO,
+            long: dec!(5000),
+        };
+        crate::tax::testonly::answer_all_live_declarations(&mut ri);
+        let ar = assemble_absolute(&ri, &empty_ledger(), &p, &table, 2024);
+        let computed = Carryforward {
+            short: round_dollar(ar.capital_loss_carryforward_out.short),
+            long: round_dollar(ar.capital_loss_carryforward_out.long),
+        };
+        assert_ne!(
+            computed,
+            Carryforward {
+                short: Usd::ZERO,
+                long: dec!(40000)
+            },
+            "premise: btctax's figure must DIFFER from the user's, or 'not overwritten' is unfalsifiable"
+        );
+
+        // The filer typed their own carryover onto next year's row.
+        let user_row = ReturnInputs {
+            capital_loss_carryforward_in: Carryforward {
+                short: Usd::ZERO,
+                long: dec!(40000),
+            },
+            capital_loss_carryforward_in_provenance: CarryProvenance::User,
+            ..Default::default()
+        };
+
+        let err =
+            apply_carryover_writeback(&ar, &ri, &empty_ledger(), 2024, user_row.clone(), false)
+                .expect_err("★ a user-entered carryover must not be silently overwritten");
+        assert!(
+            err.contains("capital-loss carryover was user-entered") && err.contains("--force"),
+            "the refusal must name THIS carryover and the way out — several refusals leave this \
+             function, so a bare `is_err()` proves nothing. Got: {err}"
+        );
+
+        // …and `--force` is the way out.
+        let forced =
+            apply_carryover_writeback(&ar, &ri, &empty_ledger(), 2024, user_row, true).unwrap();
+        assert_eq!(
+            forced.capital_loss_carryforward_in, computed,
+            "`--force` overwrites it with the computed §1212(b) figure"
+        );
+
+        // ★ A FRESH `{0,0}` / `User` row still writes without `--force`.
+        let fresh = apply_carryover_writeback(
+            &ar,
+            &ri,
+            &empty_ledger(),
+            2024,
+            ReturnInputs::default(),
+            false,
+        )
+        .expect("a fresh next-year row is not the filer's testimony and must not be wedged");
+        assert_eq!(fresh.capital_loss_carryforward_in, computed);
     }
 
     /// Write-back into a FRESH next year: the computed carryovers become next year's carryover-in, stamped
@@ -7110,5 +9161,209 @@ mod tests {
         assert!(
             apply_carryover_writeback(&ar, &plain_ri(), &empty_ledger(), 2024, ri, true).is_ok()
         );
+    }
+
+    // ── N1 — the §1212(b)(2)(B) Capital Loss Carryover Worksheet on the carryforward-OUT side ─────
+
+    /// **L4** — the plan's floor vector: Single, NO wages, one long-term crypto loss of $20,000
+    /// (bought $60,000, sold $40,000). AGI = −3,000; standard deduction $14,600 ⇒ 1040 line 15 would
+    /// be **−17,600** if the form let you write it, so the §1211(b) $3,000 was never actually
+    /// absorbed and the whole $20,000 survives into 2025.
+    fn l4_floor_loss_year() -> (ReturnInputs, LedgerState) {
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            header: crate::tax::testonly::not_a_dependent(),
+            ..Default::default()
+        };
+        let st = state_disposals(vec![disp_leg(Term::LongTerm, dec!(40000), dec!(60000))]);
+        (ri, st)
+    }
+
+    /// **L3** — the same $20,000 long-term loss against $40,000 of wages. Taxable income is POSITIVE
+    /// ($22,400), the $3,000 IS absorbed, and the flat rule's $17,000 is the worksheet's answer too.
+    fn l3_positive_ti_loss_year() -> (ReturnInputs, LedgerState) {
+        let mut ri = wages_single(dec!(40000));
+        ri.header = crate::tax::testonly::not_a_dependent();
+        let st = state_disposals(vec![disp_leg(Term::LongTerm, dec!(40000), dec!(60000))]);
+        (ri, st)
+    }
+
+    /// The frozen crypto-delta engine's carryforward-out for the same household — the figure
+    /// `report --tax-year` prints today, and the one that was measured at 17,000 on L4.
+    fn delta_engine_carryforward(ri: &ReturnInputs, st: &LedgerState) -> Carryforward {
+        let prof = derive_tax_profile(ri, &ty2024_params(), 2024);
+        match compute_tax_year(&[], st, 2024, Some(&prof), &tables_2024()) {
+            TaxOutcome::Computed(r) => r.carryforward_out,
+            TaxOutcome::NotComputable(b) => panic!("the fixture must compute: {b:?}"),
+        }
+    }
+
+    /// ★★★ **N1, the defect vector.** A loss year whose taxable income is at the floor carries the
+    /// WHOLE $20,000 forward, not $17,000 — the §1211(b) allowance was never absorbed, because there
+    /// was no income for it to offset.
+    ///
+    /// The old flat rule (`carry = loss − min(loss, $3,000)`) is not merely imprecise here: it hands
+    /// the filer a permanently smaller loss, and next year's M4 consistency check then *disputes the
+    /// correct figure* if they work the worksheet themselves. This assertion reds against the
+    /// pre-N1 tree at `left: 17000`.
+    #[test]
+    fn n1_a_loss_year_at_the_floor_carries_the_whole_loss() {
+        let (ri, st) = l4_floor_loss_year();
+        let ar = assemble_absolute(&ri, &st, &ty2024_params(), &real_2024_table(), 2024);
+
+        // The fixture must actually BE the floor case, or the test proves nothing.
+        assert_eq!(
+            ar.agi,
+            dec!(-3000),
+            "wages 0 + L7 −3,000 (§1211(b)-limited)"
+        );
+        assert_eq!(ar.taxable_income, Usd::ZERO, "1040 L15 is floored at zero…");
+        assert_eq!(
+            ar.agi - ar.total_deductions,
+            dec!(-17600),
+            "…and the worksheet's line 1 is the −17,600 the floor hides"
+        );
+        assert_eq!(ar.schedule_d.loss_deduction_21, dec!(3000));
+
+        let w = ar
+            .capital_loss_carryover_worksheet
+            .expect("line 21 is a loss and line 1 is below zero");
+        assert_eq!(w.line1, dec!(-17600));
+        assert_eq!(w.line3, Usd::ZERO, "combine 1 and 2 ⇒ below zero ⇒ -0-");
+        assert_eq!(w.line4, Usd::ZERO, "NOTHING of the $3,000 was absorbed");
+        assert_eq!(w.line13, Some(dec!(20000)));
+
+        assert_eq!(
+            ar.capital_loss_carryforward_out,
+            Carryforward {
+                short: Usd::ZERO,
+                long: dec!(20000),
+            },
+            "the §1212(b)(2)(B) worksheet carries the whole loss into 2025"
+        );
+
+        // ★ And the split that makes this worth stating out loud: the FROZEN delta engine still says
+        //   17,000, and structurally cannot say otherwise — `TaxProfile` hands it an
+        //   `ordinary_taxable_income` already floored at zero, so the worksheet's line 1 does not
+        //   survive into it. That is why the fix lives on the full return and why the advisory below
+        //   exists to reconcile the two numbers for the filer.
+        assert_eq!(
+            delta_engine_carryforward(&ri, &st).long,
+            dec!(17000),
+            "the frozen slice engine is unchanged — if this moves, `compute.rs` was edited"
+        );
+    }
+
+    /// ★★★ **N1's no-op half.** At POSITIVE taxable income the flat rule is exact, and the worksheet
+    /// must agree with it to the cent — on both characters, and with the frozen engine.
+    ///
+    /// Without this, a fix that simply carried the whole loss whenever a loss existed would pass the
+    /// vector above and overstate every ordinary loss year by $3,000.
+    #[test]
+    fn n1_at_positive_taxable_income_the_worksheet_is_a_no_op() {
+        let (ri, st) = l3_positive_ti_loss_year();
+        let ar = assemble_absolute(&ri, &st, &ty2024_params(), &real_2024_table(), 2024);
+
+        assert_eq!(ar.taxable_income, dec!(22400), "37,000 AGI − 14,600 std");
+        let w = ar.capital_loss_carryover_worksheet.expect("limb (a)");
+        assert_eq!(w.line4, dec!(3000), "the full allowance WAS absorbed");
+        assert_eq!(
+            ar.capital_loss_carryforward_out,
+            Carryforward {
+                short: Usd::ZERO,
+                long: dec!(17000),
+            }
+        );
+        assert_eq!(
+            ar.capital_loss_carryforward_out,
+            delta_engine_carryforward(&ri, &st),
+            "at positive TI the worksheet and the frozen flat rule are the SAME number"
+        );
+    }
+
+    /// A gain year has no worksheet and no carryforward — the applicability sentence's "Otherwise,
+    /// you don't have any carryovers", reached through the real assembly rather than in isolation.
+    #[test]
+    fn n1_a_gain_year_produces_no_worksheet_and_no_carryforward() {
+        let ri = wages_single(dec!(60000));
+        let st = state_disposals(vec![disp_leg(Term::LongTerm, dec!(50000), dec!(20000))]);
+        let ar = assemble_absolute(&ri, &st, &ty2024_params(), &real_2024_table(), 2024);
+        assert_eq!(ar.schedule_d.loss_deduction_21, Usd::ZERO);
+        assert_eq!(ar.capital_loss_carryover_worksheet, None);
+        assert_eq!(ar.capital_loss_carryforward_out, Carryforward::default());
+    }
+
+    /// ★★★ **N1's reader.** A computed figure nobody reads is not thereby correct, and the number the
+    /// `report` command prints comes from the FROZEN delta engine, which structurally cannot apply the
+    /// worksheet. So the worksheet's answer is delivered as an advisory that names BOTH numbers and
+    /// says which to carry — otherwise the fix would be invisible to the only person it is for.
+    ///
+    /// **B1 pair**: it fires on the floor vector, and it must NOT fire on the positive-TI vector,
+    /// which is the same assertion as "the worksheet is a no-op there" made through a second surface.
+    #[test]
+    fn n1_the_worksheet_result_reaches_the_filer_as_an_advisory() {
+        use crate::tax::advisories::{advisories_for, Advisory};
+        let p = ty2024_params();
+        let table = real_2024_table();
+
+        let (ri, st) = l4_floor_loss_year();
+        let ar = assemble_absolute(&ri, &st, &p, &table, 2024);
+        let advs = advisories_for(&ri, &st, &ar, &p, 2024);
+        let fired = advs
+            .iter()
+            .find(|a| {
+                matches!(
+                    a,
+                    Advisory::CapitalLossCarryoverWorksheetIncreasesCarryover { .. }
+                )
+            })
+            .expect("the floor vector must be told its carryover is $20,000, not $17,000");
+        assert_eq!(
+            *fired,
+            Advisory::CapitalLossCarryoverWorksheetIncreasesCarryover {
+                flat_short: Usd::ZERO,
+                flat_long: dec!(17000),
+                worksheet_short: Usd::ZERO,
+                worksheet_long: dec!(20000),
+                absorbed: Usd::ZERO,
+            }
+        );
+        let msg = fired.message();
+        assert!(msg.contains("$20,000"), "the CORRECT figure: {msg}");
+        assert!(
+            msg.contains("$17,000"),
+            "…and the one already printed: {msg}"
+        );
+        assert!(msg.contains("$3,000"), "…and what is at stake: {msg}");
+
+        // The negative half: an ordinary loss year, where the flat rule is exact, must stay silent.
+        let (ri3, st3) = l3_positive_ti_loss_year();
+        let ar3 = assemble_absolute(&ri3, &st3, &p, &table, 2024);
+        assert!(
+            !advisories_for(&ri3, &st3, &ar3, &p, 2024).iter().any(|a| {
+                matches!(
+                    a,
+                    Advisory::CapitalLossCarryoverWorksheetIncreasesCarryover { .. }
+                )
+            }),
+            "at positive taxable income there is nothing to reconcile — an advisory here would be \
+             noise on every loss year btctax already gets right"
+        );
+    }
+
+    /// ★ The N1 fix must not have moved the FILED return. Every printed figure on the floor vector —
+    /// 1040 line 7, taxable income, total tax — is what it was before the worksheet existed; the
+    /// worksheet decides only what survives into next year.
+    #[test]
+    fn n1_does_not_move_a_single_filed_figure() {
+        let (ri, st) = l4_floor_loss_year();
+        let ar = assemble_absolute(&ri, &st, &ty2024_params(), &real_2024_table(), 2024);
+        assert_eq!(ar.capital_gain, dec!(-3000), "1040 L7, leading minus");
+        assert_eq!(ar.total_income, dec!(-3000)); // L9
+        assert_eq!(ar.taxable_income, Usd::ZERO); // L15
+        assert_eq!(ar.regular_tax, Usd::ZERO); // L16
+        assert_eq!(ar.total_tax, Usd::ZERO); // L24
+        assert_eq!(ar.schedule_d.lt_net_15, dec!(-20000));
+        assert_eq!(ar.schedule_d.total_16, dec!(-20000));
     }
 }

@@ -95,3 +95,74 @@ fn limitations_carries_the_no_authorisation_notice() {
         "the licence grant must stay unrestricted — the NOTICE disclaims, it does not forbid"
     );
 }
+
+/// ★ P10 (FILING-READINESS-PLAN rank 15) — **the Schedule 8812 row must be CONDITIONAL**, and this
+/// is the kill-test that keeps it so. `grep "8812\|overstated" tests/limitations.rs` returned NOTHING
+/// before this: the doc's most consequential claim was pinned by no test at all.
+///
+/// The row used to say, flatly: *"1040 line 19 is pinned to **$0**. File Schedule 8812 yourself. Your
+/// tax is overstated by up to that amount."* That is precisely the claim `ctc_provably_zero` exists to
+/// stop an advisory making. A filer above the §24(b) phase-out reads it, prepares a Schedule 8812 that
+/// pays $0, and the doc has contradicted the advisory their own report printed — *"CTC/ODC NOT
+/// COMPUTED, AND NOT AVAILABLE TO YOU … there is no Schedule 8812 for you to file."* The filing trial
+/// that produced `ctc_provably_zero` found exactly this shape in the advisory (AGI $2,085,000, nine
+/// children, $18,000 of credit §24(b) had already removed); the fix never reached the document.
+///
+/// Two things are asserted, and the second is what makes this more than a spelling check: the doc must
+/// quote the phrase that **DISTINGUISHES** the advisory's two branches, and that phrase is checked
+/// against the live `Advisory::message()` for both branches — so it cannot be a phrase common to both,
+/// and it reds if either the advisory text or the doc drifts away from the other.
+#[test]
+fn the_schedule_8812_row_is_conditional_on_the_24b_phase_out() {
+    use btctax_core::tax::advisories::Advisory;
+
+    let doc = shipped_doc();
+    let row = doc
+        .lines()
+        .find(|l| l.starts_with("| **Child Tax Credit"))
+        .expect("the OMISSIONS table must still carry the Child Tax Credit row")
+        .to_string();
+
+    // The old, unconditional claim must be gone. Restoring it reds here.
+    assert!(
+        !row.contains("File Schedule 8812 yourself. Your tax is overstated by up to that amount."),
+        "the Schedule 8812 row must not assert overstatement unconditionally — that is false for \
+         every filer above the §24(b) phase-out, and it contradicts the advisory their own report \
+         printed: {row}"
+    );
+    // Both branches must be named, so a filer can tell which one they are in.
+    assert!(
+        row.contains("§24(b)"),
+        "the row must name the phase-out that makes the $0 correct: {row}"
+    );
+    assert!(
+        row.contains("correct") && row.contains("overstated"),
+        "the row must state BOTH outcomes — the $0 is the CORRECT figure above the phase-out, and \
+         the tax is OVERSTATED below it: {row}"
+    );
+
+    // ★ The doc must quote the phrase that discriminates the two advisory branches, and the phrase
+    //   must actually discriminate — checked against the live messages, not asserted by hand.
+    const QUOTED: &str = "NOT AVAILABLE TO YOU";
+    let provably_zero = Advisory::CtcOdcOmitted {
+        dependents: 1,
+        provably_zero: true,
+    }
+    .message();
+    let not_proven = Advisory::CtcOdcOmitted {
+        dependents: 1,
+        provably_zero: false,
+    }
+    .message();
+    assert!(
+        provably_zero.contains(QUOTED) && !not_proven.contains(QUOTED),
+        "{QUOTED:?} must be the phrase that DISTINGUISHES the two CtcOdcOmitted branches, or the doc \
+         is pointing the filer at something they cannot match:\n  zero: {provably_zero}\n  other: \
+         {not_proven}"
+    );
+    assert!(
+        row.contains(QUOTED),
+        "the row must quote the advisory's distinguishing phrase, so the filer can match the \
+         advisory they actually saw: {row}"
+    );
+}

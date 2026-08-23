@@ -40,7 +40,26 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::HsaActivityUnanswered => vec![decl(QuestionId::HsaActivity)],
         R::DualStatusAlienUnanswered => vec![decl(QuestionId::DualStatusAlien)],
         R::MixedUseMortgageUnanswered => vec![decl(QuestionId::MortgageAllUsedToBuyBuildImprove)],
+        R::MortgageDebtLimitUnanswered => vec![decl(QuestionId::MortgageWithinDebtLimit)],
+        R::Form4952DeclarationUnanswered => vec![decl(QuestionId::FilingForm4952)],
         R::AmtQualifiedDwellingUnanswered => vec![decl(QuestionId::AmtQualifiedDwelling)],
+        // ★★ THE CAPITAL LOSS CARRYOVER WORKSHEET'S TWO HEADER CONDITIONS — unanswered and adverse,
+        //    all four anchored on the field that carries the answer.
+        //
+        // ★★★ **DELIBERATELY NOT `NotInForm`, including for the two ADVERSE ones**, and the reason is
+        //     recorded a few screens down on `QbiAboveThreshold`: an anchor saying a refusal has no
+        //     form field is a FALSEHOOD when one exists, and it leaves the filer with nowhere to go.
+        //     These are v1 form fields (`DECL_FIELDS` indices 15 and 16). A filer who answered YES by
+        //     mistake fixes it exactly here; one who answered YES truthfully is told so by the
+        //     refusal's TEXT, which names the hand-work — that is the refusal's job, not the anchor's.
+        R::JointReturnCarryoverDeclarationUnanswered
+        | R::JointReturnCarryoverAttributionUnknown => {
+            vec![decl(QuestionId::CarryoverIncludesSpousesJointLoss)]
+        }
+        R::ExcludedCanceledDebtDeclarationUnanswered
+        | R::ExcludedCanceledDebtAttributeReduction => {
+            vec![decl(QuestionId::ExcludedCanceledDebt)]
+        }
         R::IncomeExclusionUnanswered => vec![decl(QuestionId::HasIncomeExclusion)],
         // §G-22/B11 — both legs point at the one declaration that decides them.
         R::OtherIncomeUnanswered | R::OtherIncomeOutOfScope => {
@@ -69,6 +88,24 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::DependentSpouseUnsupported => vec![decl(QuestionId::DependentSpouse)],
         // Form 6251's two ADVERSE answers: v1 models neither add-back, so each refuses at the same
         // field its unanswered twin anchors.
+        // ★ §163(h)(3)(B) answered ADVERSELY. It anchors at the same leaf as its unanswered twin —
+        //   the answer IS the input, and the return becomes fileable only by correcting it (or, once
+        //   FOLLOWUPS P9(a)/S2 lands, by entering the Pub. 936 worksheet result).
+        R::MortgageOverDebtLimit => vec![decl(QuestionId::MortgageWithinDebtLimit)],
+        // ★ §163(d) / Form 4952. Both routes to this refusal are correctable in the form — either the
+        //   declaration itself, or the Schedule A line-9 amount that broke i4952's exception.
+        R::Form4952Required => vec![
+            decl(QuestionId::FilingForm4952),
+            Anchor::Field(FieldId::SaInvestmentInterest),
+        ],
+        // ★ Form 8960 line 9b over its §164(b)(6) bound. The amount itself is correctable, and so are
+        //   the two Schedule A facts that can zero the bound — the sales-tax election, and the SALT
+        //   amounts that decide whether itemizing wins at all.
+        R::Nii9bExceedsDeductedSalt => vec![
+            Anchor::Field(FieldId::Nii8960Line9b),
+            Anchor::Field(FieldId::SaSaltUseSalesTax),
+            Anchor::Field(FieldId::SaSaltStateEst),
+        ],
         R::AmtNonQualifiedDwelling => vec![decl(QuestionId::AmtQualifiedDwelling)],
         R::AmtCarryoverDiverges => vec![decl(QuestionId::AmtCarryoverSameAsRegular)],
         R::AmtDepreciationDiverges => vec![decl(QuestionId::AmtDepreciationSameAsRegular)],
@@ -106,6 +143,12 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         ],
         R::DonationRestrictionsUnresolved => {
             vec![skip(btctax_core::tax::questions::SkippableId::DonationsHadRestrictions)]
+        }
+        // ★ §170(f)(8) — both legs (unanswered and "no, I don't hold one") point at the one
+        //   skippable that decides them. Same shape as §G-21 directly above: offered always,
+        //   mandatory only where `screen_absolute` can see the deduction is actually claimed.
+        R::CharitableCwaUnresolved => {
+            vec![skip(btctax_core::tax::questions::SkippableId::CharitableCwaObtained)]
         }
         R::NonCryptoNoncashGift => vec![Anchor::Section(SectionId::ScheduleACharitable)],
 
@@ -190,9 +233,6 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         ],
         R::AmtScreenTriggered => vec![Anchor::NotInForm {
             note: "the Form 6251 AMT screen is computed at `report`, not a v1 form field",
-        }],
-        R::TaxableIncomeNonPositiveWithCarryforward => vec![Anchor::NotInForm {
-            note: "the §1211/§1212 capital-loss-carryover screen is computed at `report`, not a v1 form field",
         }],
     }
 }
@@ -398,7 +438,6 @@ mod tests {
             RefuseReason::Form1099BNeedsForm8949,
             RefuseReason::KiddieTax,
             RefuseReason::AmtScreenTriggered,
-            RefuseReason::TaxableIncomeNonPositiveWithCarryforward,
             RefuseReason::NegativeAmount("W-2 box 1 wages".into()),
         ] {
             let anchors = attribute(&r);

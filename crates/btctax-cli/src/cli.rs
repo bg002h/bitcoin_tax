@@ -74,9 +74,10 @@ pub enum Command {
         /// $0 when omitted (the advisory discloses this assumption). Must not be negative.
         #[arg(long)]
         prior_taxable_gifts: Option<String>,
-        /// §4 R3-M6: persist this year's computed charitable + QBI carryover-OUT as next year's
-        /// carryover-IN (a full-return `--tax-year` ReturnInputs year only). `report` is otherwise
-        /// read-only; this flag opts into the vault write.
+        /// §4 R3-M6: persist this year's computed charitable, QBI (business-loss and REIT/PTP)
+        /// and §1212(b) capital-loss carryover-OUTs as next year's carryover-INs (a full-return
+        /// `--tax-year` ReturnInputs year only). `report` is otherwise read-only; this flag opts
+        /// into the vault write. A carryover you typed in yourself needs `--force` to overwrite.
         #[arg(long, default_value_t = false)]
         write_carryover: bool,
         /// With `--write-carryover`: overwrite a next-year carryover-in that was user-entered

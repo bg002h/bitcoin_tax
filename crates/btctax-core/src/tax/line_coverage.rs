@@ -1066,6 +1066,7 @@ pub fn cover_schedulealines(l: &crate::tax::printed::ScheduleALines) -> Coverage
         line7,
         line8a,
         line8e,
+        line9,
         line10,
         line11,
         line12,
@@ -1166,6 +1167,14 @@ pub fn cover_schedulealines(l: &crate::tax::printed::ScheduleALines) -> Coverage
         "Add lines 8a through 8c",
     );
     c.line(
+        *line9,
+        f,
+        "9",
+        "line9",
+        Production::Collected,
+        "Investment interest. Attach Form 4952 if required. See instructions",
+    );
+    c.line(
         *line10,
         f,
         "10",
@@ -1233,6 +1242,7 @@ fn zero_schedulealines() -> crate::tax::printed::ScheduleALines {
         line7: Usd::ZERO,
         line8a: Usd::ZERO,
         line8e: Usd::ZERO,
+        line9: Usd::ZERO,
         line10: Usd::ZERO,
         line11: Usd::ZERO,
         line12: Usd::ZERO,
@@ -1798,6 +1808,7 @@ pub fn cover_form8960lines(l: &crate::tax::other_taxes::Form8960Lines) -> Covera
         line5d,
         line7,
         line8,
+        line9b,
         line9d,
         line11,
         line12,
@@ -1856,6 +1867,18 @@ pub fn cover_form8960lines(l: &crate::tax::other_taxes::Form8960Lines) -> Covera
         "line8",
         Production::Combine,
         "Total investment income. Combine lines 1, 2, 3, 4c, 5d, 6, and 7",
+    );
+    // ★★ COLLECTED, and BLANK-CAPABLE. `Option<Usd>`: `None` = the filer never allocated any state
+    //    income tax to net investment income, and the emitter uses `push_money_opt`, so the cell is
+    //    left empty rather than swearing the allocation is zero. `Production::Collected` is exactly
+    //    *"(the filer supplies it) — blank exactly when not asked"*.
+    c.line(
+        line9b.unwrap_or(Usd::ZERO),
+        f,
+        "9b",
+        "line9b",
+        Production::Collected,
+        "State, local, and foreign income tax (see instructions)",
     );
     c.line(
         *line9d,
@@ -1920,6 +1943,7 @@ fn zero_form8960lines() -> crate::tax::other_taxes::Form8960Lines {
         line5d: Usd::ZERO,
         line7: Usd::ZERO,
         line8: Usd::ZERO,
+        line9b: None,
         line9d: Usd::ZERO,
         line11: Usd::ZERO,
         line12: Usd::ZERO,
@@ -2073,7 +2097,7 @@ fn zero_scheduledlines() -> crate::tax::printed::ScheduleDLines {
         line14: Usd::ZERO,
         line15: Usd::ZERO,
         line16: Usd::ZERO,
-        routing: crate::tax::printed::ScheduleDRouting::BothGains,
+        routing: crate::tax::printed::ScheduleDRouting::BothGains { line20_yes: true },
     }
 }
 
@@ -2115,7 +2139,9 @@ pub fn cover_scheduledrouting(r: &crate::tax::printed::ScheduleDRouting) -> Cove
     use crate::tax::printed::ScheduleDRouting as R;
     let mut c = Coverage::default();
     match r {
-        R::BothGains => {}
+        // ★ `line20_yes` is a CHECKBOX, not money — the census covers money leaves. It is bound
+        //   rather than `..`-ignored so the next field added to this variant is a compile error here.
+        R::BothGains { line20_yes: _ } => {}
         R::ShortGainLongLoss { line22_yes: _ } => {}
         R::NetLoss {
             line21,

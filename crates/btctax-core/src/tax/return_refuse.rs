@@ -4,9 +4,12 @@
 //! return *wrong* (understate tax, misstate a figure, or require a mandatory attachment v1 can't produce)
 //! yields a [`Refusal`] — never a silent value. This module screens the **input-screenable** rows (those
 //! decidable from `ReturnInputs` + the year tables). The **compute-dependent** rows — Schedule C net < 0,
-//! Form 8615 kiddie tax (unearned income > threshold), taxable income ≤ 0 with a carryforward — and the
-//! **ledger-dependent** rows — ≥2 SE earners, business-flagged crypto interest, §1250/§1202/28% crypto —
-//! are screened in Phase 2/3 where the assembled income / ledger is available.
+//! Form 8615 kiddie tax (unearned income > threshold) — and the **ledger-dependent** rows — ≥2 SE
+//! earners, business-flagged crypto interest, §1250/§1202/28% crypto — are screened in Phase 2/3 where
+//! the assembled income / ledger is available.
+//!
+//! ★ This list USED TO name "taxable income ≤ 0 with a carryforward" among the compute-dependent rows.
+//! Widening (A) lifted that refusal and deleted its variant; such a year now files.
 //!
 //! Uses a NEW domain type (not the ledger's shared `state::BlockerKind`, which is exhaustively matched
 //! across the reconcile system) — additive, per SPEC §2. A `Refusal` maps to
@@ -42,6 +45,21 @@ pub enum RefuseReason {
     /// large. Raised only for a year that actually files a **Section B** 8283 — see
     /// `screen_absolute`, which has the ledger AND the computed itemize election.
     DonationRestrictionsUnresolved,
+    /// ★★★ **§170(f)(8)** — the contemporaneous-written-acknowledgment question is unresolved on a
+    /// return that CLAIMS a charitable deduction and has at least one single contribution of $250 or
+    /// more: either unanswered, or answered **No**.
+    ///
+    /// §170(f)(8)(A): *"No deduction shall be allowed under subsection (a) for any contribution of
+    /// $250 or more unless the taxpayer substantiates the contribution by a contemporaneous written
+    /// acknowledgment."* It is a precondition of allowability, so proceeding on silence claims a
+    /// deduction the statute may deny — an understatement — while §170(f)(8)(C)'s *"earlier of"* rule
+    /// means **filing itself extinguishes the cure**. Both halves are required for a refusal; a
+    /// substantiation rule with no filing-linked deadline (§170(f)(17) bank records) gets an advisory,
+    /// not a gate.
+    ///
+    /// Raised only by `screen_absolute`, which has the ledger AND the computed §63(e) election — the
+    /// `DonationRestrictionsUnresolved` pattern exactly.
+    CharitableCwaUnresolved,
     /// A **non-crypto NONCASH** charitable gift whose total exceeds the $500 Form 8283 threshold. Those
     /// amounts reach Schedule A line 12, but btctax holds no property details for them (no description,
     /// no acquisition date, no appraiser), so it can produce no 8283 rows — the packet would attach a
@@ -82,6 +100,50 @@ pub enum RefuseReason {
     /// P9 §2.7 — the §163(h)(3)(F) mixed-use-mortgage DECLARATION is `None`, on a Schedule A carrying
     /// mortgage interest. Fail loud rather than print line 8a with the box in an unaffirmed state.
     MixedUseMortgageUnanswered,
+    /// **§163(h)(3)(B)** — the acquisition-debt-ceiling DECLARATION is `None`, on a Schedule A carrying
+    /// mortgage interest. i1040sca's *Limits on home mortgage interest* block states four limits and
+    /// btctax models only the mixed-use one; without the answer it would deduct 100% of the Form 1098
+    /// amount for a filer the statute caps, which UNDERSTATES the tax on a **filed** figure that neither
+    /// oracle can catch (both consume line 8a as an input — §G-9). Fail loud.
+    MortgageDebtLimitUnanswered,
+    /// **§163(h)(3)(B)** — answered ADVERSELY ("one of the debt limits bites"). See
+    /// [`ScheduleAInputs::mortgage_within_debt_limit`] for why neither available number is filable.
+    ///
+    /// [`ScheduleAInputs::mortgage_within_debt_limit`]: crate::tax::return_inputs::ScheduleAInputs::mortgage_within_debt_limit
+    MortgageOverDebtLimit,
+    /// **Schedule D line 20 / Schedule A line 9** — the Form 4952 declaration is unanswered. Line 20
+    /// asserts *"you are not filing Form 4952"* on every both-gains return, and nothing on the return
+    /// recorded it: btctax was signing that clause for the filer under §6065.
+    Form4952DeclarationUnanswered,
+    /// **Schedule D line 20 / Schedule A line 9** — the filer IS filing Form 4952 (or their line-9
+    /// amount exceeds i4952's no-Form-4952 exception, which requires one). Line 20 is then **No**,
+    /// which routes to the **Schedule D Tax Worksheet** — and btctax fills neither that worksheet nor
+    /// Form 4952. The SDTW subtracts Form 4952 line 4g at its line 4, so answering Yes anyway
+    /// UNDERSTATES the tax.
+    Form4952Required,
+    /// ★★★ **Form 8960 line 9b** — the collected state/local income tax allocated to net investment
+    /// income EXCEEDS what §164(b)(6) let the filer deduct.
+    ///
+    /// §1411(c)(1)(B) reduces net investment income only by *"the deductions **allowed by this
+    /// subtitle** which are properly allocable"*, and §164(b)(6)(B) caps the SALT *"taken into
+    /// account"* at $10,000 ($5,000 MFS) — so a dollar of state income tax above the cap is not
+    /// allowed by subtitle A at all and there is nothing for §1411 to allocate. i8960's own allocation
+    /// block says the same: the allocable item is SALT *"if **properly deducted on your return** when
+    /// calculating your U.S. regular income tax."*
+    ///
+    /// Three ways to exceed the bound, one refusal (`ADJUDICATION-2026-08-21.md` D5):
+    ///
+    ///   (a) the amount is simply larger than min(line 5a, line 5e, the cap);
+    ///   (b) the filer took the **standard deduction**, so no state income tax was deducted at all
+    ///       and the bound is $0;
+    ///   (c) the filer made the §164(b)(5) **general-sales-tax election**, so Schedule A line 5a is
+    ///       sales tax — and i8960 is express: *"Sales taxes aren't deductible in computing net
+    ///       investment income."* The bound is $0 on that branch even for a large line 5e.
+    ///
+    /// ★ It REFUSES rather than clamping. A clamp would be btctax choosing the filer's allocation —
+    /// the one thing D5's build-shape guard forbids — and it would silently rewrite a figure signed
+    /// under 26 USC 6065.
+    Nii9bExceedsDeductedSalt,
     /// Form 6251 line 3 — the AMT qualified-dwelling question is live but unanswered.
     AmtQualifiedDwellingUnanswered,
     /// **§164(b)(7)(B)(iv) / Schedule 1-A Part I** — the §911/931/933 exclusion gate is unanswered on
@@ -246,11 +308,41 @@ pub enum RefuseReason {
     /// worksheet, which now gates nothing. Renaming it reopens a cross-crate exhaustive-match blast
     /// radius, so it is deferred to the Tier-2 bump (already breaking). See FOLLOWUPS G-7.
     AmtScreenTriggered,
-    /// Taxable income ≤ 0 **with a capital-loss carryforward-in** — the §1211/§1212 Capital Loss Carryover
-    /// Worksheet (G22 edge) decides how much loss survives when it can't reduce an already-zero tax; v1
-    /// doesn't model it, so refuse rather than write a wrong next-year carryover. A refund-only TI≤0 filer
-    /// with NO carryforward is NOT refused (tax = 0, withholding refunded). Compute-dependent (needs L15).
-    TaxableIncomeNonPositiveWithCarryforward,
+    /// **Capital Loss Carryover Worksheet header / §1212(b)** — the joint-return sourcing declaration
+    /// was never answered. Raised by the registry loop.
+    ///
+    /// ★ A SEPARATE variant from its adverse twin below, because that separation is an invariant here:
+    /// `every_live_unanswered_declaration_refuses_with_its_own_reason` asserts that ANSWERING a
+    /// question clears its unanswered reason, so a single variant covering both states cannot exist.
+    /// The two are different facts anyway — "you have not told us" versus "you have told us, and it is
+    /// something btctax cannot compute".
+    JointReturnCarryoverDeclarationUnanswered,
+    /// **Capital Loss Carryover Worksheet header / §1212(b)** — *"any capital loss carryover from the
+    /// joint return can be deducted only on the return of the spouse who actually had the loss."*
+    /// answered ADVERSELY (`Some(true)`).
+    ///
+    /// btctax stores one `Carryforward` per return and cannot split it by spouse, so an affirmative
+    /// answer is not a gap in the question — it is a gap in the MODEL, and no input clears it: the
+    /// filer must work the split out from the joint year's Schedule D.
+    JointReturnCarryoverAttributionUnknown,
+    /// **Capital Loss Carryover Worksheet header / §108(b)(2)(G)** — the canceled-debt declaration was
+    /// never answered. Raised by the registry loop; see the sourcing sibling above for why the
+    /// unanswered and adverse states are separate variants.
+    ExcludedCanceledDebtDeclarationUnanswered,
+    /// **Capital Loss Carryover Worksheet header / §108(b)(2)(G)** — *"If you excluded canceled debt
+    /// from income in 2025, see Pub. 4681."* answered ADVERSELY (`Some(true)`).
+    ///
+    /// §108(b) requires tax ATTRIBUTE REDUCTION after an exclusion and §108(b)(2)(G) lists capital
+    /// loss carryovers among the attributes; btctax models none of it, so it refuses rather than
+    /// deduct and carry forward an unreduced figure.
+    ///
+    /// ★ **An honest DEAD END, and the detail says so.** It is the one refusal here with no cure on
+    /// this year's return: the declaration is a true statement about the exclusion year, so it stays
+    /// `Some(true)` however the carryover is edited, and the exclusion is reported on Form 982, which
+    /// btctax does not emit. The widening review's Minor was that the old wording ("enter the reduced
+    /// carryover") read as a cure and would send the filer back into the same refusal after the hand
+    /// work; the reduced figure belongs to the FOLLOWING year, which btctax can file.
+    ExcludedCanceledDebtAttributeReduction,
 }
 
 /// A fail-closed refusal: the reason + a human-readable detail (surfaced to the user).
@@ -310,8 +402,10 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         capital_loss_carryforward_in,
         capital_loss_carryforward_in_provenance: _, // CarryProvenance, not an amount
         charitable_carryover_in_provenance: _,
-        amt_carryover_same_as_regular: _, // a declaration, not money
-        amt_depreciation_same_as_regular: _, // a declaration, not money
+        carryover_includes_spouses_joint_loss: _, // a declaration, not money
+        excluded_canceled_debt: _,                // a declaration, not money
+        amt_carryover_same_as_regular: _,         // a declaration, not money
+        amt_depreciation_same_as_regular: _,      // a declaration, not money
         charitable_carryover_in,
         qbi,
         foreign_accounts: _,
@@ -319,6 +413,12 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         fbar_filing_required: _,
         foreign_country_names: _,
         donations_had_restrictions: _, // Option<bool>, not an amount
+        charitable_cwa_obtained: _,    // Option<bool>, not an amount
+        filing_form_4952: _,           // a declaration, not an amount
+        // ★ Form 8960 line 9b — MONEY, and it is screened. A negative allocation would ADD to net
+        //   investment income (line 12 = line 8 − line 11), which the §164(b)(6) bound below cannot
+        //   see: that gate tests `> bound`, and every negative passes it.
+        form_8960_line9b,
         dual_status_alien: _,
         // MAGI add-backs — refused at the worksheet's point of need, not here (D-11).
         has_income_exclusion: _, // refused at the worksheet's point of need (D-11), not here
@@ -327,6 +427,10 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         form_2555_line50: _,
         form_4563_line15: _,
     } = ri;
+
+    if form_8960_line9b.is_some_and(neg) {
+        return Some("Form 8960 line 9b state/local income tax allocable to net investment income");
+    }
 
     for w in w2s {
         let W2 {
@@ -549,7 +653,9 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             salt_personal_property,
             mortgage_interest_1098,
             mortgage_all_used_to_buy_build_improve: _,
+            mortgage_within_debt_limit: _, // a declaration, not money
             mortgage_dwelling_is_amt_qualified: _, // a declaration, not money
+            investment_interest,
             charitable,
         } = a;
         if neg(*medical) {
@@ -572,6 +678,9 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         }
         if neg(*mortgage_interest_1098) {
             return Some("Schedule A mortgage interest");
+        }
+        if neg(*investment_interest) {
+            return Some("Schedule A investment interest");
         }
         for gift in charitable {
             let CharitableGift { class: _, amount } = gift;
@@ -710,6 +819,52 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
         }
     }
 
+    // ★★★ THE CAPITAL LOSS CARRYOVER WORKSHEET'S TWO HEADER CONDITIONS, ANSWERED ADVERSELY.
+    //     VALUE-refusals (`Some(true)`), disjoint from the unanswered loop above and gated on the
+    //     SAME registry liveness that half uses — a stale `Some(true)` on a return that no longer
+    //     carries a carryforward must not be an exit-less brick.
+    //
+    // ★ Neither is a question btctax could have answered for the filer, and neither is one it can
+    //   act on once answered YES: the first needs a per-spouse split of a single stored figure, the
+    //   second needs §108(b) attribute reduction. So the refusal is the whole remedy, and it names
+    //   the hand-work rather than pretending an input clears it.
+    if crate::tax::questions::question_is_live(
+        crate::tax::questions::QuestionId::CarryoverIncludesSpousesJointLoss,
+        ri,
+    ) && ri.carryover_includes_spouses_joint_loss == Some(true)
+    {
+        return refuse(
+            RefuseReason::JointReturnCarryoverAttributionUnknown,
+            "you declared that part of your capital-loss carryover came from a JOINT return for a \
+             year you are now filing separately from, and was your spouse's loss. The Capital Loss \
+             Carryover Worksheet's header is explicit: such a carryover \"can be deducted only on \
+             the return of the spouse who actually had the loss\" (§1212(b)). btctax stores ONE \
+             carryover figure per return and has no way to split it by spouse, so filing would \
+             deduct — and carry forward — a loss that may not be yours. Work the split out by hand \
+             from the joint year's Schedule D and enter only YOUR share",
+        );
+    }
+    if crate::tax::questions::question_is_live(
+        crate::tax::questions::QuestionId::ExcludedCanceledDebt,
+        ri,
+    ) && ri.excluded_canceled_debt == Some(true)
+    {
+        return refuse(
+            RefuseReason::ExcludedCanceledDebtAttributeReduction,
+            "you declared that you excluded cancelled or forgiven debt from income, and you are \
+             carrying a capital-loss carryforward. The Capital Loss Carryover Worksheet's header \
+             sends you to Pub. 4681, because §108(b) requires you to REDUCE tax attributes after \
+             such an exclusion and §108(b)(2)(G) lists capital loss carryovers among them. btctax \
+             models no part of §108(b), so the carryover it would deduct and carry forward is too \
+             large. btctax CANNOT FILE THIS YEAR for you — the answer above is a true statement \
+             about this year, so it stays Yes however you edit the carryover, and the exclusion \
+             itself is reported on Form 982, which btctax does not produce. Work this year out by \
+             hand (Pub. 4681, Form 982). The REDUCED carryover Pub. 4681 leaves you with is what \
+             carries into the following year, and btctax can file that year once its own answer here \
+             is No",
+        );
+    }
+
     // (c) foreign trust → Form 3520. VALUE-refusal (`Some(true)`); disjoint from the unanswered loop above.
     if ri.foreign_trust == Some(true) {
         return refuse(
@@ -727,6 +882,64 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
     //   an exit-less brick on a return whose add-back is structurally $0 — the filer cannot clear an
     //   answer to a question that is no longer asked. (i6251 line 3 is itself conditioned on having
     //   **deducted** the interest, so the gate is faithful to the form, not just kind.)
+    // ★★★ SCHEDULE D LINE 20 / SCHEDULE A LINE 9 — the Form 4952 answer, and its BOUND.
+    //
+    // Two ways to land here, one refusal:
+    //
+    //   (a) the filer says they ARE filing Form 4952. Line 20 is then "No", which routes to the
+    //       SCHEDULE D TAX WORKSHEET — and btctax fills neither that worksheet nor Form 4952.
+    //       Checking "Yes" anyway would understate: the SDTW subtracts Form 4952 line 4g at line 4.
+    //
+    //   (b) the filer says they are NOT, but their Schedule A line 9 amount BREAKS i4952's own
+    //       exception — *"You don't have to file Form 4952 if … your investment interest expense is
+    //       not more than your investment income from interest and ordinary dividends minus any
+    //       qualified dividends"*. Above that, Form 4952 IS required whatever the filer answered, and
+    //       §163(d)(1) caps the deduction at net investment income, which btctax does not compute. A
+    //       BOUND on a collected value, not a computation — deducting the excess would UNDERSTATE.
+    //
+    // ★ Only the FIRST of i4952's three exception conditions is checkable here: the other two ("no
+    //   other deductible investment expenses", "no disallowed investment interest carried over") are
+    //   facts btctax never sees, which is why the PROMPT enumerates all three and defaults to Yes.
+    //   This bound catches the one a wrong answer would leave visible in the numbers.
+    if ri.filing_form_4952 == Some(true) {
+        return refuse(
+            RefuseReason::Form4952Required,
+            "you are filing Form 4952 (Investment Interest Expense Deduction), so Schedule D line 20 \
+             — \"Are lines 18 and 19 both zero or blank and you are not filing Form 4952?\" — is \
+             answered NO, which sends your tax to the SCHEDULE D TAX WORKSHEET. btctax fills neither \
+             Form 4952 nor that worksheet, and the worksheet is not a formatting difference: its \
+             line 4 subtracts Form 4952 line 4g, so computing the return on the Qualified Dividends \
+             and Capital Gain Tax Worksheet instead would UNDERSTATE your tax. File this year by \
+             hand, or remove the investment interest if you are not in fact claiming it",
+        );
+    }
+    // ★★★ THE LINE-9 i4952 BOUND USED TO STAND HERE AND WAS MOVED TO `screen_absolute` (phase-2
+    //     review R5a, Critical). It refuses on a Schedule A DEDUCTION being over-claimed, but
+    //     `screen_inputs` sees only inputs — it cannot see the §63(e) election, which
+    //     `assemble_absolute` computes. So it refused filers who take the STANDARD deduction, where
+    //     line 9 never prints and nothing is sworn. The population is not hypothetical: it is the
+    //     crypto-margin renter, this product's core audience — bitcoin yields no interest or
+    //     ordinary dividends, so the ceiling is ~$0 and ANY line-9 entry with a truthful "not filing
+    //     4952" was refused, including when SALT + margin interest lose to the standard deduction and
+    //     the correct return claims nothing at all. See `screen_absolute`.
+
+    // ★★★ §163(h)(3)(B) — the ACQUISITION-DEBT CEILING, answered adversely. Same shape as the three
+    //     Form 6251 declarations below: gated on the registry liveness so a stale `Some(false)` on a
+    //     Schedule A that no longer reports 1098 interest is not an exit-less brick.
+    //
+    // ★★ THE MESSAGE NAMES BOTH FAILURE DIRECTIONS ON PURPOSE. This branch exists because *neither*
+    //    number btctax can produce is filable, and a refusal that named only one of them would read as
+    //    an invitation to take the other. i1040sca Line 8a: *"Only enter on line 8a the deductible
+    //    mortgage interest and points that were reported to you on Form 1098"* — a determinate NONZERO
+    //    worksheet output. A printed $0 transcribes no instruction, and unlike the mixed-use zero it
+    //    has no line-8 checkbox disclosing it (see `ADJUDICATION-2026-08-21.md`, D3).
+    // ★★★ THE §163(h)(3)(B) OVER-LIMIT REFUSAL USED TO STAND HERE AND WAS MOVED TO
+    //     `screen_absolute` (phase-2 review R2, Critical). Same root cause as the line-9 bound above:
+    //     it conditions a Schedule A DEDUCTION, but `screen_inputs` cannot see the §63(e) election.
+    //     It therefore refused the December-closing jumbo homebuyer — one month of 1098 interest on a
+    //     $1M post-2017 loan, itemized total under the MFJ standard deduction — for whom line 8a
+    //     never prints. That filer had NO honest answer: `None` refused as unanswered, `Some(false)`
+    //     refused here, and `Some(true)` would have been false testimony under §6065.
     if crate::tax::questions::question_is_live(
         crate::tax::questions::QuestionId::AmtQualifiedDwelling,
         ri,
@@ -1070,8 +1283,10 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tax::return_1040::assemble_absolute;
     use crate::tax::return_inputs::{Box12Entry, Form1099Div, Form1099Int, W2};
     use crate::tax::tables::SaltLimitation;
+    use crate::LedgerState;
 
     // A synthetic TY2024 FullReturnParams + a table with the real SS wage base for the excess-SS MAX.
     fn params() -> FullReturnParams {
@@ -1144,6 +1359,10 @@ mod tests {
         // §G-22/B11 — the scope attestation. ANSWERED here, never defaulted: `None` refuses, which is
         // the whole point, and a `Default` that supplied it would restore the silence it exists to break.
         ri.other_out_of_scope_income = Some(false);
+        // Schedule D line 20 / Schedule A line 9 — the Form 4952 declaration. Always live (line 20
+        // prints on every both-gains Schedule D, which liveness cannot see), so every computing
+        // fixture must state it; `false` = "not filing one", the answer that needs no form v1 lacks.
+        ri.filing_form_4952 = Some(false);
         // §G-28/B1b — answered whenever the fixture has a trade or business, since the SSTB question
         // is live exactly then. Set through the same path a filer would use.
         if let Some(c) = ri.schedule_c.as_mut() {
@@ -1157,6 +1376,22 @@ mod tests {
     }
     fn reason(ri: &ReturnInputs) -> Option<RefuseReason> {
         screen_inputs(ri, &tbl(), &params()).map(|r| r.reason)
+    }
+
+    /// ★★★ The ABSOLUTE screen — the one that can see the §63(e) election. Two of the phase-2
+    /// refusals moved here from `screen_inputs` (phase-2 review R2/R5a, Critical): both condition a
+    /// SCHEDULE A DEDUCTION, and `screen_inputs` sees only inputs, so sitting there they refused
+    /// filers who take the STANDARD deduction and never print the line at all. Returns the election
+    /// alongside the reason so every fixture must state which side of it it is on — a fixture that
+    /// silently flipped to standard would otherwise "pass" by not being screened.
+    fn absolute_reason(r: &ReturnInputs) -> (bool, Option<RefuseReason>) {
+        let st = LedgerState::default();
+        let ar = assemble_absolute(r, &st, &params(), &tbl(), 2024);
+        (
+            ar.deduction_is_itemized,
+            crate::tax::return_1040::screen_absolute(r, &ar, &params(), &st, 2024)
+                .map(|x| x.reason),
+        )
     }
 
     /// ★ **D-8 — and this guard shipped, once, with no test at all.**
@@ -1199,6 +1434,7 @@ mod tests {
         r.foreign_trust = Some(false);
         r.sch1.hsa_activity = Some(false);
         r.dual_status_alien = Some(false);
+        r.filing_form_4952 = Some(false);
         r
     }
 
@@ -1218,13 +1454,19 @@ mod tests {
         match id {
             QuestionId::DependentSpouse => r.filing_status = FilingStatus::Mfj, // live with no spouse Person (P8a I1)
             QuestionId::MfsSpouseItemizes => r.filing_status = FilingStatus::Mfs,
-            QuestionId::MortgageAllUsedToBuyBuildImprove | QuestionId::AmtQualifiedDwelling => {
+            QuestionId::MortgageAllUsedToBuyBuildImprove
+            | QuestionId::AmtQualifiedDwelling
+            | QuestionId::MortgageWithinDebtLimit => {
                 r.schedule_a = Some(ScheduleAInputs {
                     mortgage_interest_1098: dec!(9000),
                     ..Default::default()
                 });
             }
-            QuestionId::AmtCarryoverSameAsRegular => {
+            // ★ All three carryforward-conditioned declarations share ONE liveness predicate
+            //   (`questions::carryforward_in_present`), so they share one scenario.
+            QuestionId::AmtCarryoverSameAsRegular
+            | QuestionId::CarryoverIncludesSpousesJointLoss
+            | QuestionId::ExcludedCanceledDebt => {
                 r.capital_loss_carryforward_in = crate::tax::types::Carryforward {
                     short: dec!(1000),
                     long: Usd::ZERO,
@@ -1313,6 +1555,9 @@ mod tests {
             // live (i6251 p.8). Answered AMT-neutral here so this test keeps testing the MIXED-USE
             // question rather than tripping on the new one.
             mortgage_dwelling_is_amt_qualified: Some(true),
+            // …and, since §163(h)(3)(B), the acquisition-debt-ceiling question too. Same reason:
+            // neutral, so the MIXED-USE branch is what this test still exercises.
+            mortgage_within_debt_limit: Some(true),
             ..Default::default()
         });
 
@@ -1820,6 +2065,7 @@ mod tests {
             r.dual_status_alien = Some(false);
             r.has_income_exclusion = Some(false);
             r.other_out_of_scope_income = Some(false); // §G-22/B11
+            r.filing_form_4952 = Some(false); // Schedule D line 20 / Schedule A line 9
             r.header.taxpayer_died_during_year = Some(false); // §G-9
             r
         };
@@ -2219,6 +2465,146 @@ mod tests {
         }
     }
 
+    /// ★★★ **K17 — the Capital Loss Carryover Worksheet's two HEADER conditions gate the return, in
+    /// both directions, and ONLY when a carryforward is actually brought in.**
+    ///
+    /// The two sentences the worksheet prints above line 1 are governing conditions, and neither was
+    /// transcribed anywhere: the conformance checker's completeness half reads only physical lines
+    /// beginning `N.`, so both were invisible to it and it stayed green. They became load-bearing when
+    /// `--write-carryover` learned to roll the §1212(b) figure — before that a mis-attributed or
+    /// unreduced carryover was the filer's own bad input; after it btctax re-emits the figure as its
+    /// OWN `Computed` value on next year's sworn Schedule D lines 6/14.
+    ///
+    /// **Each half asserts its own PREMISE before its outcome.** A fixture that quietly stopped
+    /// reaching the gate would otherwise "pass" by refusing for some other reason, or by not being
+    /// screened at all — which is how a vacuous KAT gets written.
+    ///
+    /// Mutations that MUST red:
+    ///   (a) default either declaration to `Some(false)` in `ReturnInputs::default` ⇒ the unanswered
+    ///       halves go green while the return files with a carryover btctax cannot vouch for;
+    ///   (b) narrow `carryforward_in_present` with a taxable-income term ⇒ the floor half escapes;
+    ///   (c) delete either value-refusal in `screen_inputs` ⇒ the `Some(true)` half reds.
+    #[test]
+    fn a_prior_joint_return_or_excluded_canceled_debt_refuses_when_unanswered() {
+        use crate::tax::questions::{question_is_live, QuestionId};
+        use crate::tax::types::Carryforward;
+
+        // A return that carries a loss IN, with every OTHER live declaration answered neutral.
+        // ★ Deliberately at POSITIVE taxable income ($60,000 of wages against a $14,600 standard
+        //   deduction), so that the floor half at the end is the only fixture a taxable-income-gated
+        //   liveness predicate would drop — that mutation then reds THERE and nowhere else.
+        let with_carryforward = || {
+            let mut r = ri();
+            r.w2s = vec![W2 {
+                box1_wages: dec!(60000),
+                ..Default::default()
+            }];
+            r.capital_loss_carryforward_in = Carryforward {
+                short: dec!(2000),
+                long: Usd::ZERO,
+            };
+            r.amt_carryover_same_as_regular = Some(true);
+            r
+        };
+
+        // ── PREMISE: both questions are LIVE exactly when a carryforward-in exists. ──
+        let none_in = ri();
+        assert_eq!(
+            none_in.capital_loss_carryforward_in,
+            Carryforward::default(),
+            "premise: the baseline fixture brings no loss in"
+        );
+        for q in [
+            QuestionId::CarryoverIncludesSpousesJointLoss,
+            QuestionId::ExcludedCanceledDebt,
+        ] {
+            assert!(
+                !question_is_live(q, &none_in),
+                "{q:?} must NOT be asked of a return with no carryforward-in"
+            );
+            assert!(
+                question_is_live(q, &with_carryforward()),
+                "{q:?} MUST be asked of a return that brings a loss in"
+            );
+        }
+        assert_eq!(
+            reason(&none_in),
+            None,
+            "premise: without a carryforward-in the baseline return screens clean, so any refusal \
+             below is caused by the carryforward and not by the fixture"
+        );
+
+        // ── UNANSWERED (`None`) ⇒ refuse, one reason each. ──
+        let mut r = with_carryforward();
+        r.excluded_canceled_debt = Some(false); // isolate the sourcing question
+        assert_eq!(
+            r.carryover_includes_spouses_joint_loss, None,
+            "premise: the sourcing declaration starts unanswered"
+        );
+        assert_eq!(
+            reason(&r),
+            Some(RefuseReason::JointReturnCarryoverDeclarationUnanswered)
+        );
+
+        let mut r = with_carryforward();
+        r.carryover_includes_spouses_joint_loss = Some(false); // isolate the canceled-debt question
+        assert_eq!(
+            r.excluded_canceled_debt, None,
+            "premise: the canceled-debt declaration starts unanswered"
+        );
+        assert_eq!(
+            reason(&r),
+            Some(RefuseReason::ExcludedCanceledDebtDeclarationUnanswered)
+        );
+
+        // ── ANSWERED NEUTRAL (`Some(false)`) ⇒ the return screens clean. ──
+        let mut r = with_carryforward();
+        r.carryover_includes_spouses_joint_loss = Some(false);
+        r.excluded_canceled_debt = Some(false);
+        assert_eq!(
+            reason(&r),
+            None,
+            "answering both neutrally must leave nothing behind — a gate with no exit is a brick"
+        );
+
+        // ── ANSWERED ADVERSELY (`Some(true)`) ⇒ refuse, with the ADVERSE reason, not the unanswered one. ──
+        let mut r = with_carryforward();
+        r.carryover_includes_spouses_joint_loss = Some(true);
+        r.excluded_canceled_debt = Some(false);
+        assert_eq!(
+            reason(&r),
+            Some(RefuseReason::JointReturnCarryoverAttributionUnknown),
+            "btctax stores ONE carryover per return and cannot split a joint one by spouse"
+        );
+
+        let mut r = with_carryforward();
+        r.carryover_includes_spouses_joint_loss = Some(false);
+        r.excluded_canceled_debt = Some(true);
+        assert_eq!(
+            reason(&r),
+            Some(RefuseReason::ExcludedCanceledDebtAttributeReduction),
+            "§108(b)(2)(G) reduces the carryover and btctax models none of §108(b)"
+        );
+
+        // ── THE FLOOR CASE — the household lift (A) admits — is gated too. ──
+        // ★ This is mutation (b)'s target: a liveness predicate narrowed with a taxable-income term
+        //   would let exactly this return through, and it is the one `--write-carryover` will roll.
+        let mut floor = with_carryforward();
+        floor.w2s = vec![W2 {
+            box1_wages: dec!(1000), // wiped out by the standard deduction ⇒ taxable income 0
+            ..Default::default()
+        }];
+        assert!(
+            question_is_live(QuestionId::CarryoverIncludesSpousesJointLoss, &floor),
+            "a wiped-out year with a loss brought in is EXACTLY the household the roll persists — \
+             the questions must not vanish for it"
+        );
+        assert_eq!(
+            reason(&floor),
+            Some(RefuseReason::JointReturnCarryoverDeclarationUnanswered)
+        );
+    }
+
     /// ★ ALL THREE Form 6251 VALUE-refusals must respect the liveness of their unanswered half.
     ///
     /// A `Some(false)` left over from a trigger that has since gone away — the mortgage paid off, the
@@ -2307,6 +2693,321 @@ mod tests {
         );
     }
 
+    /// ★★★ **P7 / SCHEDULE D LINE 20 — THE TERNARY.** unanswered ⇒ refuse, "yes, filing 4952" ⇒
+    /// refuse, "no" ⇒ compute.
+    ///
+    /// The line reads *"Are lines 18 and 19 both zero or blank **and you are not filing Form 4952**?"*
+    /// btctax checked **Yes** unconditionally on every both-gains return — the lines-18/19 half it
+    /// could vouch for, the Form 4952 half it could not, because nothing on the return recorded it and
+    /// no question ever asked. That is testimony invented by software on a return signed under §6065.
+    ///
+    /// ★ It is a PROVENANCE defect, not usually a numeric one, which is why no value test could ever
+    /// have found it: a filer with no margin borrowing genuinely is not filing Form 4952. When it IS
+    /// wrong it is wrong in the understating direction — the Schedule D Tax Worksheet the "No" branch
+    /// leads to subtracts Form 4952 line 4g at its line 4.
+    ///
+    /// **B1 mutations, each observed RED before the fix landed:**
+    /// - delete the `FilingForm4952` entry's liveness (`live: |_| false`) ⇒ the `None` row reds;
+    /// - delete the `Some(true)` value-refusal ⇒ the filing-4952 row reds, i.e. btctax computes a
+    ///   return on the wrong worksheet.
+    #[test]
+    fn the_form_4952_declaration_refuses_unanswered_and_refuses_yes_but_computes_on_no() {
+        let f = |ans: Option<bool>| {
+            let mut r = ri();
+            r.filing_form_4952 = ans;
+            reason(&r)
+        };
+        assert_eq!(
+            f(None),
+            Some(RefuseReason::Form4952DeclarationUnanswered),
+            "unanswered ⇒ refuse: Schedule D line 20 would otherwise swear to a fact nobody asked"
+        );
+        assert_eq!(
+            f(Some(true)),
+            Some(RefuseReason::Form4952Required),
+            "filing Form 4952 ⇒ line 20 is NO ⇒ the Schedule D Tax Worksheet, which btctax does not \
+             fill; computing on the QDCGT worksheet instead would UNDERSTATE"
+        );
+        assert_eq!(f(Some(false)), None, "not filing one ⇒ compute");
+    }
+
+    /// ★★★ **P7 — THE SCHEDULE A LINE 9 BOUND.** btctax now collects §163(d) investment interest and
+    /// prints it on line 9, and it fills no Form 4952 — so the amount is deductible in full ONLY
+    /// under i4952's own exception: *"You don't have to file Form 4952 if … your investment interest
+    /// expense is not more than your investment income from interest and ordinary dividends minus any
+    /// qualified dividends."*
+    ///
+    /// Above that ceiling Form 4952 IS required whatever the filer answered, because §163(d)(1) caps
+    /// the deduction at net investment income — a figure only that form computes. Deducting the whole
+    /// amount would UNDERSTATE. This is a BOUND on a collected value, not a computation: btctax still
+    /// builds no Form 4952.
+    ///
+    /// **B1 mutations, each observed RED:**
+    /// - delete the bound ⇒ the over-ceiling row reds with `None` (the excess is silently deducted);
+    /// - subtract qualified dividends TWICE, or omit the subtraction ⇒ the boundary row reds.
+    #[test]
+    fn investment_interest_above_the_i4952_exception_ceiling_refuses() {
+        use crate::tax::return_inputs::{Form1099Div, Form1099Int, ScheduleAInputs};
+        // Investment income for the exception: $10,000 interest + $4,000 ordinary dividends − $1,000
+        // qualified dividends = a $13,000 ceiling.
+        //
+        // ★ The fixture must ITEMIZE or it proves nothing: this refusal now lives behind
+        //   `deduction_is_itemized` (phase-2 review R5a), and $13,000 of investment interest alone
+        //   loses to the $14,600 standard deduction. $10,000 of real-estate tax carries it over.
+        let build = |amount: Usd, treasury: Usd, qualified: Usd| {
+            let mut r = ri();
+            r.filing_form_4952 = Some(false);
+            r.int_1099 = vec![Form1099Int {
+                payer: "Bank".into(),
+                box1_interest: dec!(10000),
+                box3_treasury_interest: treasury,
+                ..Default::default()
+            }];
+            r.div_1099 = vec![Form1099Div {
+                payer: "Broker".into(),
+                box1a_ordinary: dec!(4000),
+                box1b_qualified: qualified,
+                ..Default::default()
+            }];
+            r.schedule_a = Some(ScheduleAInputs {
+                mortgage_interest_1098: Usd::ZERO,
+                investment_interest: amount,
+                salt_real_estate: dec!(10000),
+                ..Default::default()
+            });
+            r
+        };
+        let at = |amount: Usd| {
+            let (itemized, reason) = absolute_reason(&build(amount, Usd::ZERO, dec!(1000)));
+            assert!(itemized, "fixture premise: this filer must ITEMIZE");
+            reason
+        };
+
+        assert_eq!(
+            at(dec!(13000)),
+            None,
+            "exactly at the ceiling, i4952's exception still applies — no Form 4952 required"
+        );
+        assert_eq!(
+            at(dec!(13000.01)),
+            Some(RefuseReason::Form4952Required),
+            "a cent over and Form 4952 IS required: §163(d)(1) caps the deduction at net investment \
+             income, which only that form computes"
+        );
+        // ★ And the ceiling really does SUBTRACT qualified dividends — raise them and the same
+        //   $13,000 now breaks the exception. Without the subtraction this row passes.
+        let (_, raised) = absolute_reason(&build(dec!(13000), Usd::ZERO, dec!(2000)));
+        assert_eq!(
+            raised,
+            Some(RefuseReason::Form4952Required),
+            "qualified dividends must be SUBTRACTED from the ceiling"
+        );
+
+        // ★★ R5b — 1099-INT BOX 3 COUNTS. Treasury obligation interest is NOT a subset of box 1
+        //    (`sum_taxable_interest` says so in terms, and 1040 line 2b is box 1 + box 3), and it is
+        //    unambiguously "investment income from interest" under i4952's exception. Summing box 1
+        //    alone under-counted the ceiling and refused a T-bill ladder that plainly satisfies it.
+        //    MUTATION: drop `+ i.box3_treasury_interest` from the ceiling and this row reds.
+        let (itemized, with_treasury) =
+            absolute_reason(&build(dec!(20000), dec!(10000), dec!(1000)));
+        assert!(itemized, "fixture premise: this filer must ITEMIZE");
+        assert_eq!(
+            with_treasury, None,
+            "★ $10,000 of BOX 3 Treasury interest raises the ceiling to $23,000, so $20,000 of \
+             investment interest is within i4952's exception and must NOT refuse"
+        );
+
+        // ★★ R5c — THE MESSAGE, WHICH NO TEST PINNED. It shipped malformed: a string literal
+        //    missing its line continuations, so ~20-space runs printed mid-sentence to the filer.
+        //    Every other new refusal in this phase has a message test; this one did not, which is
+        //    exactly why the defect survived to review. The whitespace assertion is the kill-test
+        //    for the defect itself, not just for the content.
+        let st = LedgerState::default();
+        let over = build(dec!(13000.01), Usd::ZERO, dec!(1000));
+        let ar = assemble_absolute(&over, &st, &params(), &tbl(), 2024);
+        let detail = crate::tax::return_1040::screen_absolute(&over, &ar, &params(), &st, 2024)
+            .expect("over the ceiling refuses")
+            .detail;
+        assert!(
+            !detail.contains("   "),
+            "no run of 3+ spaces may reach the filer — that is the missing-continuation defect: \
+             {detail}"
+        );
+        let lower = detail.to_ascii_lowercase();
+        for phrase in [
+            "understate",         // the direction a full line-9 deduction fails in
+            "§163(d)(1)",         // the statute that caps it
+            "form 4952",          // the form that computes the cap
+            "standard deduction", // the scoping this refusal now carries
+        ] {
+            assert!(
+                lower.contains(phrase),
+                "the line-9 refusal must say {phrase:?}; got: {detail}"
+            );
+        }
+
+        // ★★★ THE CRITICAL'S NEGATIVE HALF (phase-2 review R5a). The crypto-margin renter — this
+        //     product's core audience. Bitcoin yields no interest and no ordinary dividends, so the
+        //     ceiling is $0 and ANY line-9 entry used to refuse. Here the whole Schedule A loses to
+        //     the standard deduction, line 9 never prints, and the return must compute.
+        let mut renter = ri();
+        renter.filing_form_4952 = Some(false);
+        renter.schedule_a = Some(ScheduleAInputs {
+            investment_interest: dec!(5000),
+            ..Default::default()
+        });
+        let (itemized, reason) = absolute_reason(&renter);
+        assert!(
+            !itemized,
+            "fixture premise: $5,000 of margin interest must LOSE to the $14,600 standard deduction"
+        );
+        assert_eq!(
+            reason, None,
+            "★ a STANDARD-deduction filer must COMPUTE even though their margin interest exceeds a \
+             $0 ceiling: line 9 never prints on their return, so nothing is over-deducted"
+        );
+    }
+
+    /// ★★★ **P1 / §163(h)(3)(B) — THE ACQUISITION-DEBT CEILING TERNARY.** unanswered ⇒ refuse,
+    /// ADVERSE ⇒ refuse with its OWN reason, neutral ⇒ compute.
+    ///
+    /// This is the branch that exists because btctax deducts 100% of the Form 1098 amount and the
+    /// statute caps qualifying debt at $750,000 ($375,000 MFS) post-2017 / $1,000,000 ($500,000 MFS)
+    /// pre-2018. **Neither oracle can catch the understatement** — both take Schedule A line 8a as an
+    /// INPUT (§G-9) — so this test is the only instrument that sees it.
+    ///
+    /// **B1 mutations, each observed RED before the fix landed:**
+    /// - delete the `MortgageWithinDebtLimit` entry from `FORM_QUESTIONS` ⇒ the `None` arm reds
+    ///   (the registry loop is what raises `MortgageDebtLimitUnanswered`);
+    /// - delete the `MortgageOverDebtLimit` block from `screen_inputs` ⇒ the `Some(false)` arm reds
+    ///   with `None`, i.e. the over-limit filer silently deducts 100% again.
+    #[test]
+    fn the_acquisition_debt_limit_refuses_unanswered_and_adverse_but_computes_when_neutral() {
+        use crate::tax::return_inputs::ScheduleAInputs;
+        let sched = |interest: Usd, ans: Option<bool>| {
+            let mut r = ri();
+            r.schedule_a = Some(ScheduleAInputs {
+                mortgage_interest_1098: interest,
+                mortgage_all_used_to_buy_build_improve: Some(true),
+                mortgage_dwelling_is_amt_qualified: Some(true),
+                mortgage_within_debt_limit: ans,
+                ..Default::default()
+            });
+            r
+        };
+        // The [RAN] vector's notional $2,000,000 loan — $130,000 of interest itemizes easily.
+        let limit = |ans: Option<bool>| absolute_reason(&sched(dec!(130000), ans)).1;
+
+        assert_eq!(
+            reason(&sched(dec!(130000), None)),
+            Some(RefuseReason::MortgageDebtLimitUnanswered),
+            "unanswered ⇒ refuse: btctax collects the INTEREST, never the debt balance, so it cannot \
+             tell whether §163(h)(3)(B) caps this filer"
+        );
+        assert_eq!(
+            limit(Some(false)),
+            Some(RefuseReason::MortgageOverDebtLimit),
+            "ADVERSE ⇒ refuse: the Pub. 936 worksheet output is unmodelled, so the full 1098 amount \
+             would UNDERSTATE and a $0 would OVERSTATE — and neither is disclosable on Schedule A"
+        );
+        assert_eq!(limit(Some(true)), None, "neutral ⇒ compute at the full 8a");
+
+        // ★★★ THE CRITICAL'S NEGATIVE HALF (phase-2 review R2). The December-closing jumbo
+        //     homebuyer: a $1M post-2017 loan closed late in the year yields ONE month of interest,
+        //     an itemized total under the $14,600 standard deduction, and therefore NO line 8a at
+        //     all. Nothing is sworn, and btctax can compute this return exactly.
+        //
+        //     Before the fix this filer had NO honest answer — `None` refused as unanswered,
+        //     `Some(false)` refused here, and `Some(true)` would have been false testimony under
+        //     §6065. That is the trap, and this row is what reds if the refusal ever migrates back
+        //     to `screen_inputs`.
+        let (itemized, r) = absolute_reason(&sched(dec!(5500), Some(false)));
+        assert!(
+            !itemized,
+            "fixture premise: $5,500 of interest must LOSE to the $14,600 standard deduction — if \
+             this trips, the fixture stopped testing the standard-deduction filer and the row below \
+             proves nothing"
+        );
+        assert_eq!(
+            r, None,
+            "★ a STANDARD-deduction filer who truthfully answers 'over the limit' must COMPUTE: \
+             line 8a never prints on their return, so there is no wrong number to swear to"
+        );
+    }
+
+    /// ★★ **The over-limit refusal must carry BOTH failure directions and the cure.** A refusal that
+    /// named only one direction would read as an invitation to take the other — and taking the "full
+    /// 1098" direction is the understatement this whole item exists to stop. The message is the entire
+    /// remedy here (nothing computes from the answer), so the message is what the test pins.
+    ///
+    /// B1 mutation: drop any one of the pinned phrases from the `MortgageOverDebtLimit` detail and the
+    /// matching assertion reds by name.
+    #[test]
+    fn the_over_limit_refusal_states_both_directions_and_names_the_pub_936_worksheet() {
+        use crate::tax::return_inputs::ScheduleAInputs;
+        let mut r = ri();
+        r.schedule_a = Some(ScheduleAInputs {
+            mortgage_interest_1098: dec!(130000),
+            mortgage_all_used_to_buy_build_improve: Some(true),
+            mortgage_dwelling_is_amt_qualified: Some(true),
+            mortgage_within_debt_limit: Some(false),
+            ..Default::default()
+        });
+        let st = LedgerState::default();
+        let ar = assemble_absolute(&r, &st, &params(), &tbl(), 2024);
+        assert!(
+            ar.deduction_is_itemized,
+            "fixture premise: $130,000 of interest itemizes"
+        );
+        let refusal = crate::tax::return_1040::screen_absolute(&r, &ar, &params(), &st, 2024)
+            .expect("over-limit refuses on an ITEMIZING return");
+        assert_eq!(refusal.reason, RefuseReason::MortgageOverDebtLimit);
+        let d = refusal.detail.to_ascii_lowercase();
+        for phrase in [
+            "understate", // deducting the full 1098 amount
+            "overstate",  // zeroing line 8a
+            "pub. 936",   // the cure the instructions prescribe
+            "deductible home mortgage interest worksheet",
+            "mortgage_interest_deductible", // the input that will close this branch
+            "$750,000",
+            "$1,000,000",
+            "fair market value",
+        ] {
+            assert!(
+                d.contains(phrase),
+                "the over-limit refusal must say {phrase:?}; got: {}",
+                refusal.detail
+            );
+        }
+    }
+
+    /// ★ REGRESSION twin of the line-3 one below — the debt-limit VALUE-refusal respects the SAME
+    /// liveness as its unanswered half, so a stale `Some(false)` on a Schedule A that no longer
+    /// reports 1098 interest is not an exit-less brick (there is no line 8a to be wrong).
+    ///
+    /// B1 mutation: drop the `question_is_live(MortgageWithinDebtLimit, ..)` conjunct and this reds.
+    #[test]
+    fn an_over_limit_answer_without_deducted_mortgage_interest_does_not_brick_the_return() {
+        use crate::tax::return_inputs::ScheduleAInputs;
+        let mut r = ri();
+        r.schedule_a = Some(ScheduleAInputs {
+            mortgage_interest_1098: Usd::ZERO, // nothing on line 8a to be capped
+            mortgage_within_debt_limit: Some(false), // …yet a stale adverse answer
+            salt_real_estate: dec!(4000),
+            ..Default::default()
+        });
+        assert_ne!(
+            reason(&r),
+            Some(RefuseReason::MortgageOverDebtLimit),
+            "no deducted mortgage interest ⇒ no line 8a to cap ⇒ no exit-less refusal"
+        );
+        assert_ne!(
+            reason(&r),
+            Some(RefuseReason::MortgageDebtLimitUnanswered),
+            "…and the unanswered half must agree: the question is not live either"
+        );
+    }
+
     /// ★ THE TERNARY for Form 6251's THREE declarations: unanswered ⇒ refuse, ADVERSE ⇒ refuse,
     /// neutral ⇒ compute. The adverse branch is the one a passing test would hide — computing with a
     /// missing line-3 / line-2k / line-2l add-back UNDERSTATES the tax, which is the one direction this
@@ -2324,6 +3025,9 @@ mod tests {
             r.schedule_a = Some(ScheduleAInputs {
                 mortgage_interest_1098: dec!(9000),
                 mortgage_all_used_to_buy_build_improve: Some(true),
+                // Reporting 1098 interest also makes the §163(h)(3)(B) debt-limit question live.
+                // Answered NEUTRAL here so this test keeps testing the Form 6251 declarations.
+                mortgage_within_debt_limit: Some(true),
                 mortgage_dwelling_is_amt_qualified: ans,
                 ..Default::default()
             });
@@ -2348,6 +3052,10 @@ mod tests {
                 short: dec!(1000),
                 long: Usd::ZERO,
             };
+            // A carryforward-in also makes the Capital Loss Carryover Worksheet's two header
+            // declarations live. Answered NEUTRAL here so this test keeps testing line 2k.
+            r.carryover_includes_spouses_joint_loss = Some(false);
+            r.excluded_canceled_debt = Some(false);
             r.amt_carryover_same_as_regular = ans;
             reason(&r)
         };

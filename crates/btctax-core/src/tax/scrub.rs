@@ -589,6 +589,8 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
         payments: _,
         capital_loss_carryforward_in: _,
         capital_loss_carryforward_in_provenance: _,
+        carryover_includes_spouses_joint_loss: _,
+        excluded_canceled_debt: _,
         amt_carryover_same_as_regular: _,
         amt_depreciation_same_as_regular: _,
         charitable_carryover_in: _, // money + year only; no donee identity here
@@ -599,6 +601,9 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
         foreign_country_names, // ★ FREE TEXT and identifying — scrubbed below
         fbar_filing_required: _,
         donations_had_restrictions: _,
+        charitable_cwa_obtained: _,
+        filing_form_4952: _,
+        form_8960_line9b: _, // a money amount — carries no identity
         dual_status_alien: _,
         has_income_exclusion: _,
         other_out_of_scope_income: _,

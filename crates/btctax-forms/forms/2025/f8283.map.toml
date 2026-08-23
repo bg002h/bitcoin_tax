@@ -22,7 +22,13 @@ rows = [
 
 # ── Section B Part I — Over $5,000. Column x-clusters (hand-pinned):
 #   desc(a) [59,258] c0 | fmv(c) [504,576] c1 | date_acq(d) [58,130] c2 | how(e) [131,287] c3
-#   cost(f) [288,359] c4 | deduction(i) [504,576] c5
+#   cost(f) [288,359] c4
+# ★★★ P3 — column (i) is NOT mapped (it was c5, [504,576]). i8283: "Complete column (i), amount
+#   claimed as a deduction, if you are a pass-through entity or a member of a pass-through entity."
+#   btctax models neither, so the cell is not this filer's. Same decision as the 2024 map, where the
+#   three cells are recorded in that map's `[census]`. (This year has no `[census]` section yet.)
+#   The FQNs, kept here so the un-mapping is legible rather than a silent absence:
+#     Row3A f1_56[0] · Row3B f1_62[0] · Row3C f1_68[0]
 # k Digital assets = Lines2i-l[0].c1_6[2] on-state /11 (MUST be checked for BTC).
 [section_b]
 k_digital_assets = { field = "Form8283[0].Page1[0].Lines2i-l[0].c1_6[2]", on = "11" }
@@ -33,7 +39,7 @@ donee_name = "Form8283[0].Page2[0].f2_19[0]"
 donee_ein = "Form8283[0].Page2[0].f2_20[0]"
 donee_address = "Form8283[0].Page2[0].f2_21[0]"
 rows = [
-  { desc = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Row3A[0].f1_42[0]", fmv = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Row3A[0].f1_44[0]", date_acq = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3A[0].f1_51[0]", how = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3A[0].f1_52[0]", cost = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3A[0].f1_53[0]", deduction = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3A[0].f1_56[0]" },
-  { desc = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Line3B[0].f1_45[0]", fmv = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Line3B[0].f1_47[0]", date_acq = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_57[0]", how = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_58[0]", cost = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_59[0]", deduction = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_62[0]" },
-  { desc = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Line3C[0].f1_48[0]", fmv = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Line3C[0].f1_50[0]", date_acq = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_63[0]", how = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_64[0]", cost = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_65[0]", deduction = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_68[0]" },
+  { desc = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Row3A[0].f1_42[0]", fmv = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Row3A[0].f1_44[0]", date_acq = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3A[0].f1_51[0]", how = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3A[0].f1_52[0]", cost = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3A[0].f1_53[0]" },
+  { desc = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Line3B[0].f1_45[0]", fmv = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Line3B[0].f1_47[0]", date_acq = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_57[0]", how = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_58[0]", cost = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_59[0]" },
+  { desc = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Line3C[0].f1_48[0]", fmv = "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Line3C[0].f1_50[0]", date_acq = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_63[0]", how = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_64[0]", cost = "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_65[0]" },
 ]

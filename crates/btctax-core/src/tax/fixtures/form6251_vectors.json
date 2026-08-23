@@ -1922,6 +1922,72 @@
         "line11": "567.7500"
       },
       "attach_required_who_must_file_cond1": true
+    },
+    {
+      "id": "V30",
+      "why": "G-6d mfj \u2014 SCHEDULE A LINE 7 > 0 at last: $25,000 of state and local taxes capped by \u00a7164(b)(6) to $10,000, which is this filer's whole Form 6251 line 2a add-back. Also the first vector whose long-term gain EXCEEDS taxable income, so the QDCGT worksheet's line 5 is zero and lines 20/27 print $0",
+      "inputs": {
+        "filing_status": "mfj",
+        "wages": "40000",
+        "net_ltcg": "2000000",
+        "cash_gift": "50000",
+        "state_refund": "0",
+        "sch3_line1_ftc": "0",
+        "state_local_tax": "25000"
+      },
+      "derived": {
+        "agi_1040_L11": "2040000",
+        "deduction_1040_L14": "60000",
+        "itemized": true,
+        "charitable_allowed": "50000",
+        "taxable_income_1040_L15": "1980000",
+        "regular_tax_1040_L16": "352705.00",
+        "schedule_a_line7": "10000"
+      },
+      "form6251": {
+        "line1": "1980000",
+        "line2a": "10000",
+        "line2b": "0",
+        "line3": "0",
+        "line4": "1990000",
+        "line5": "0",
+        "line6": "1990000",
+        "line12": "1990000",
+        "line13": "2000000",
+        "line14": "0",
+        "line15": "2000000",
+        "line16": "1990000",
+        "line17": "0",
+        "line18": "0.00",
+        "line19": "94050",
+        "line20": "0",
+        "line21": "94050",
+        "line22": "1990000",
+        "line23": "94050",
+        "line24": "1895950",
+        "line25": "583750",
+        "line26": "94050",
+        "line27": "0",
+        "line28": "94050",
+        "line29": "489700",
+        "line30": "489700",
+        "line31": "73455.00",
+        "line32": "583750",
+        "line33": "1406250",
+        "line34": "281250.00",
+        "line35": "0",
+        "line36": "0",
+        "line37": "0",
+        "line38": "354705.00",
+        "line39": "552548.00",
+        "line40": "354705.00",
+        "line7": "354705.00",
+        "line10": "352705.00",
+        "line8": "0",
+        "line9": "354705.00",
+        "line11": "2000.00"
+      },
+      "attach_required_who_must_file_cond1": true
     }
   ]
 }

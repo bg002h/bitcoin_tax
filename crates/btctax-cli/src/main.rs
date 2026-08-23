@@ -190,8 +190,9 @@ fn run() -> Result<ExitCode, CliError> {
                 if let Some(msg) = tranche_advisory {
                     println!("{msg}");
                 }
-                // §4 R3-M6 carryover write-back (opt-in; `report` is otherwise read-only). Persists this
-                // year's computed charitable + QBI carryover-out as next year's carryover-in.
+                // §4 R3-M6 carryover write-back (opt-in; `report` is otherwise read-only). Persists
+                // this year's computed charitable, QBI (business-loss + REIT/PTP) and §1212(b)
+                // capital-loss carryover-outs as next year's carryover-ins.
                 if write_carryover {
                     let summary = cmd::tax::write_back_carryover(vault, &pp, y, force)?;
                     println!("{summary}");
@@ -829,6 +830,20 @@ fn run() -> Result<ExitCode, CliError> {
                 }
                 if let Some(m) = &report.full_return_manifest {
                     println!("  {}  ← your stapling order", m.display());
+                    // ★ N4 — the packet leaves marks that are the FILER's to make (the Digital Asset
+                    // question on a no-crypto return, the line-7 "if not required" box, the signature
+                    // block). Each blank is correct — btctax must not answer for the filer — but until
+                    // now nothing in the product's output said they existed. The text lives in the
+                    // manifest (one source, decision 13); this is the pointer at it.
+                    if !report.hand_marks.is_empty() {
+                        eprintln!(
+                            "⚠ {n} mark(s) on this packet are YOURS to make by hand and are \
+                             deliberately blank — see the \"COMPLETE BY HAND\" section at the foot of \
+                             {m}.",
+                            n = report.hand_marks.len(),
+                            m = m.display()
+                        );
+                    }
                 }
                 if report.form_8283_needs_review {
                     eprintln!(
@@ -843,6 +858,18 @@ fn run() -> Result<ExitCode, CliError> {
                         "⚠ a Section B Form 8283 is NOT filing-ready without a signed Part IV \
                          (appraiser) and Part V (donee acknowledgement) — obtain both before filing."
                     );
+                }
+                // ★ P6 — the §170(d)(1) charitable carryover, beside the other §170 notes above. The
+                // figure was computed on every run and read by nobody: `--write-carryover` is its only
+                // consumer and that command errors unless next year's row already exists, so a filer
+                // whose gift exceeded its ceiling was never told the carryover existed. Printed from
+                // the SAME renderer `report --tax-year` uses, so the two surfaces cannot drift.
+                if let Some(block) = render::render_charitable_carryover_out(
+                    report.tax_year,
+                    &report.charitable_carryover_out,
+                    report.charitable_carryover_cwa_unvouched,
+                ) {
+                    eprint!("{block}");
                 }
                 // ★ §G-19d — the full return's ADVISORIES, on the path that hands the filer a PDF to
                 // sign. `advisories_for` used to have exactly one caller (`report --tax-year`), so a

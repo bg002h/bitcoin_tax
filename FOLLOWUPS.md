@@ -738,13 +738,27 @@ TY2026 draft at its implied 50%. They turn five separately-typed MFS constants i
 catches its own transcription slips, which is what makes typing TY2025 in safe. Identity (i) is also
 *why* the MFS region has no TY2024 oracle: "exemption gone" and "kicker live" are one condition.
 
-**→ NEW: G-6d — no fixture vector has Schedule A line 7 > 0.** Every itemizing vector deducts a cash
-gift only, so the fixture drives line 2a's *itemizer* limb at zero throughout. The limb is not
-untested — the original shipped bug's regression KAT
+**→ ~~G-6d — no fixture vector has Schedule A line 7 > 0~~ CLOSED 2026-08-22 (filing-readiness P9).**
+Every itemizing vector deducted a cash gift only, so the fixture drove line 2a's *itemizer* limb at
+zero throughout. The limb was not untested — the original shipped bug's regression KAT
 (`amt::tests::itemizer_addback_is_schedule_a_line7_not_the_itemized_total`) exercises it with a
-nonzero SALT, and `return_1040.rs:1439` wires `salt_5e` in — but nothing carries a line-7-live
-household end to end through both oracles. Adding one means a SALT input in the vector surface plus
-`A5a/A5b` (OTS) and `e18400/e18500` (taxcalc). Owning phase: **Tier 2 · E4**.
+nonzero SALT — but nothing carried a line-7-live household end to end through both oracles.
+
+**V30 is that household.** MFJ, itemizing, $25,000 of state and local taxes capped by §164(b)(6) to
+**$10,000**, which is its entire Form 6251 line 2a add-back — and its entire alternative minimum tax:
+$2,000, exactly 20% of the add-back. Zeroing Schedule A line 7 takes the AMT to $0, so the oracle
+comparison on this vector is a comparison of that limb and nothing else
+(`form6251::tests::the_itemizer_limb_of_line_2a_is_exercised_by_a_vector` asserts the counterfactual).
+It is also the first vector whose long-term gain **exceeds** taxable income, so the QDCGT worksheet's
+line 5 is zero and lines 20/27 print $0 — a Part III routing no vector exercised.
+
+**BOTH oracles witness it**, which is what closes the finding rather than merely adding a vector: the
+raw pre-cap SALT goes to OTS as `A5a` and to taxcalc as `e18400`, so each engine applies its own
+§164(b)(6) and the cap is witnessed rather than assumed. `verify_f6251.py` now reports V30 under
+*"mfj 6 AMT-owing vector(s) agreed by BOTH oracles"*, with 759 lines compared against OTS (was 730),
+0 unexpected. Watched RED: dropping the itemizer limb from `f6251_reference.py` gives taxcalc
+*"★ UNEXPECTED DIVERGENCE · AMTI off by −10,000.00"* and OTS 15 unexpected lines including
+`line2a 10,000 vs 0` and `line11 2,000 vs 0`.
 
 ### G-9 — ★★★ ~~LIVE DEFECT IN SHIPPED CODE~~ **FIXED 2026-07-29**: the §63(f) aged box ignored the death carve-out
 
@@ -5322,3 +5336,244 @@ SURFACED — not walkthrough bugs):
   `available_lots_before`'s `Result`: an `Err` surfaces "Couldn't read the vault to list lots …" and stays
   on List, no longer masquerading as "No lots available". KAT `kat_sl_r2d_load_error_is_distinct_from_empty_
   pool` (drops the `events` table after the flow opens to force the read failure). — **DONE.**
+
+## FILING-READINESS branch — open residue (2026-08-22, owning phase per entry)
+
+_Filed from `feat/filing-readiness` (34 commits, 2667 → 2740 tests). Everything here was found and
+DELIBERATELY not built, with a reason — none of it is a gap someone forgot. Three independent
+reviews ran on the branch; two are persisted verbatim in `reviews/filing-readiness-phase{1,2}-review.md`._
+
+### Owned by a future btctax-core lane
+
+- **FR-1 — N3: 1040 line 19 prints `0` for families the credit belongs to.** NOT BUILT. The honest
+  fix needs three things that all live in `btctax-core` and never reach the forms crate:
+  `Form1040Lines::line19` must become `Option<Usd>`; `ctc_provably_zero` is private and needs
+  `ReturnInputs` + dependent count + AGI; lines 21/22 must treat blank as the form does.
+  ★ The forms lane REFUSED to build it and was right to: inventing a §24(b) predicate inside
+  `btctax-forms` would be a second divergent implementation of the rule and a *worse* answered-ness
+  violation than the one N3 describes — the emitter deciding for the filer. An unconditional blank
+  was also rejected: Schedule 8812 line 12-No literally instructs "-0-". The fill site is already a
+  one-liner (`push_money_opt`) **once the type carries the decision**.
+
+- **FR-12 — Form 8960 line 9d still prints `0` when 9b is blank.** Same class as the defect P8 fixed
+  one line up (an affirmative zero on a derived total nobody testified to). Out of scope for a
+  one-item phase; the map's committed rationale is untouched.
+
+- **FR-13 — Form 8960 line 9a is NEWLY derivable.** i8960 line 9a is *"interest expense … deducted
+  on Schedule A (Form 1040), line 9"*, and P7 landed Schedule A line 9 in this branch. A separate
+  line and a separate item — filed rather than folded in.
+
+### Owned by whoever holds the authority document
+
+- **FR-2 — TY2017 Form 8283 still writes Section B column (i).** Blanked for 2024/2025 (it is the
+  pass-through entity's cell, per i8283). TY2017 left alone because the Rev. 12-2014 revision
+  predates the pass-through regime, puts the amount in column **(h)**, and **its instructions are not
+  in this repo**. Changing shipped behaviour on a revision whose authority we do not hold is
+  inventing the rule, not reading it. **To close:** archive i8283 Rev. 12-2014, read column (h), drop
+  the key, census those 8 fields.
+
+- **FR-5 — L0's "you may not need to file at all" note.** Needs i1040 **Chart A** transcribed
+  (status, age, dependency, the MFS $5 rule, the $400 SE floor). A wrong "you may not need to file"
+  is a harmful false signal in the understatement direction. That is a transcription job, not a
+  signal — correctly refused rather than approximated.
+
+### Owner decisions — not an implementer's call
+
+- **FR-6 — ✅ CLOSED (owner authorised). The TI≤0-with-carryforward-IN refusal is LIFTED.**
+  `RefuseReason::TaxableIncomeNonPositiveWithCarryforward` is deleted, variant and all — the
+  identifier now appears in zero files under `crates/`, asserted by
+  `xtask::capital_loss_carryover_check::the_lifted_refusal_leaves_no_trace_in_the_tree`. No printed
+  line moved (pinned by `the_lift_moves_no_printed_line`, the whole 1040 and Schedule D as struct
+  literals). The household's Schedule D is now indistinguishable from that of a filer who realised
+  the identical loss this year, which is the asymmetry that made the refusal hard to defend.
+  Accepted adverse branches are stated in `LIMITATIONS.md` and in the commit message; the two that
+  matter are ZERO oracle coverage (permanent — §G-9) and an incomplete credit block for the newly
+  admitted population.
+  ★ **"By construction low-income" was an OVERCLAIM** (pre-merge review O-2) and is struck. TI≤0 is a
+  statement about taxable income after deductions, not about AGI: a high-AGI year with catastrophic
+  medical or casualty deductions lands at TI≤0 with a carryforward too. The credit-block gap is real
+  either way — the correction is that the admitted population is *wider* than the phrase implied, so
+  reasoning that leans on "these filers are all low-income" is unsound.
+
+- **FR-8 — ✅ CLOSED (owner authorised). `--write-carryover` rolls the §1212(b) carryover.**
+  Written as WHOLE DOLLARS (the figure next year's Schedule D lines 6 and 14 will carry), stamped
+  `Computed` only when the figure descends from something btctax actually knows — r3 I-4's reasoning
+  is answered, not reversed, and its excluded case (a year never asked that produced nothing) stays
+  closed with `a_computed_zero_never_silences_the_benefit_carryover_advisory` holding it.
+  The provenance question FR-8 raised is answered at the M4 CALLER, not in the frozen engine:
+  `cmd::tax::m4_authority` stays SILENT rather than quote the crypto-slice flat figure against a
+  value btctax itself wrote.
+
+  ★ **Residue, filed rather than closed:** `m4_authority`'s silent branch is UNREACHABLE end-to-end
+  in v1 — it needs year Y to carry a `ReturnInputs` row (so Y = 2024) *and* year Y−1 (2023) to have a
+  tax table, which it does not. The decision is unit-tested and mutation-verified; the wiring is
+  covered by `the_prior_year_worksheet_figure_is_the_m4_authority_for_a_floor_year`. **Owning phase:
+  whichever phase lands TY2025 full-return support** — the same phase that makes "v1 cannot read the
+  row it writes" stop being true. Re-point the M4 KAT at a CLI-level fixture then.
+
+- **FR-17 — a `Computed` capital-loss stamp has no RETRACTION path.** Widening review B-2, and the
+  half of it that is not fixed on this branch. Machine-checked end-to-end before it was filed
+  (`probe`-shaped run, then promoted to
+  `a_computed_capital_loss_stamp_survives_every_command_that_should_retract_it`): roll 2024→2025 with
+  a $47,000 loss ⇒ 2025 carries `long 34000 / Computed`; discover the loss was erroneous and remove
+  it from 2024; **the re-roll skips** (`capital_loss_roll_is_grounded` is false and `--force` does not
+  reach it), and **`income import` with an explicit `0` is resurrected** by the preservation arm,
+  because TOML cannot distinguish an explicit zero from an absent key. Observed: `long 34000 /
+  Computed` after all three of re-roll, `--force`, and a zeroing import.
+  **Owning phase: whichever phase lands TY2025 full-return support** — the same phase as FR-8's
+  residue, and for the same reason: v1 cannot read the row it writes, so the stale figure is
+  unreadable for filing today, which is what keeps this out of Critical.
+  ★ **What DID land here** (it is v1-reachable, so it was not deferred): the write-back no longer
+  claims the write — it prints `★ NOT WRITTEN` and NAMES the stale figure — and `income import` can
+  no longer FORGE a `Computed` stamp from a TOML provenance key (reproduced: a $99,000 carryover
+  btctax never derived, stored as `Computed`, exit 0). The escape that exists today is `income clear`
+  then `income import`, which is now stated in `LIMITATIONS.md` and held by a test.
+  ★★ **When it is built, the shape to prefer** is the reviewer's first suggestion — on a
+  grounded=false roll over an existing `Computed` value, clear it to `User` — because it puts the
+  retraction on the command the filer is already running. `--force` is the wrong lever: it exists to
+  overwrite a figure the USER entered, and widening it to reach btctax's own stamp would also let it
+  reach the r3 I-4 case the `grounded` gate is there to protect.
+
+- **FR-7 — N1's slice-path guard (plan decision 12).** Unsettled, so unbuilt. The plan recommends
+  *warn* (the slice is a planning surface, not a filing one), naming the worksheet.
+
+- **FR-14 — P7 adds an ALWAYS-LIVE declaration.** Every filer now answers one more yes/no before any
+  return computes. Judged forced (Schedule D line 20 prints on every both-gains return and that
+  routing is a ledger fact liveness cannot see; the defect was measured on the $0-income household),
+  and the phase-2 review independently ruled the always-live choice correct — the answer is material
+  beyond line 20, since the QDCGT worksheet nets out Form 4952 line 4g. It is still the largest
+  friction increase in the branch and is worth a conscious yes.
+
+### Ownerless residue — batch when convenient
+
+- **FR-22 — ★★ K19 greps an IDENTIFIER, so it cannot see the drift it was written to prevent.**
+  Pre-merge review S-1, verified: the lifted TI≤0-with-carryforward refusal survived in **present
+  tense on six surfaces** — including `screen_absolute`'s own contract doc, which contradicted its
+  own body, and **SPEC §4.10's refusal table**, which still *mandated* the refusal. All six are fixed
+  in the burndown commit; this entry is the INSTRUMENT half, which is not.
+  ★★★ **K19's own doc says it should have caught them:** *"A doc comment, a SPEC list or an
+  attribution-table entry naming it is the same stale claim wearing a different hat."* It greps
+  `LIFTED_REFUSAL_IDENT` under `crates/` — so it catches only prose that names the deleted
+  **identifier**, and T2 deliberately kept that identifier out of prose. The instrument and the drift
+  were designed past each other. It also never scans `design/`, so the SPEC was outside its reach
+  entirely.
+  ★ **Do NOT "fix" this with a phrase blocklist.** Grepping for "taxable income ≤ 0" and friends is
+  the growing-blocklist shape `cite_check` already warns against, and it would be green the day
+  someone rephrases. The two candidate structural fixes, neither cheap: (a) extend the scan root to
+  `design/` — real but partial, it only catches identifier-naming drift; (b) make the SPEC's refusal
+  table **generated from or checked against** the `RefuseReason` enum, so a deleted variant cannot
+  leave a live table row. (b) is the one that would actually have caught this.
+  ★ Harness **B1** binds whatever is built: it must be watched RED on a planted stale row first.
+  **Owning phase: none — ownerless.** Non-gating: no behaviour depended on the drift (the variant
+  deletion `E0599`'d every consumer, which is why this was Minor and not Critical).
+
+- **FR-21 — ★★ `cite_check::plain_quotations` can be GUTTED and all three cite-check tests stay
+  green.** Found by mutation-verifying the clippy-1.98 fix, not by looking for it.
+  **Planted:** corrupt the span extraction so every span comes out empty
+  (`&line[close + 1..close + 1]`). Every span then fails the `len() < 12` filter, the function
+  returns `[]`, the pass has nothing to check, and it reports success. **Observed: `3 tests run:
+  3 passed`.** Reproduced on the ORIGINAL `chunks_exact` code as well as the `as_chunks` rewrite, so
+  it is **pre-existing** — the rewrite exposed it, did not cause it.
+  ★★★ **This is the SAME checker as F2/F4 in `CLAUDE.md`, blind again in a new place.** That entry
+  records `cite-check` reading only `*"…"*` spans, so the rounding-direction table it existed to
+  protect was never checked while it reported success. `plain_quotations` is the pass that was ADDED
+  to close that hole — and it now has the same property one layer down: **nothing reds when it stops
+  finding quotations.** The lesson is not "add a test", it is that this checker keeps failing the
+  same way and the fix must be structural: a **positive control** — a fixture whose known quotation
+  count the pass must return — so "found nothing" and "found everything" stop being the same result.
+  ★ Harness **B1** applies verbatim: the kill-test for this could not have been written without
+  discovering the blindness, which is the whole point of the rule. **Owning phase: none — ownerless,
+  dev tooling; it gates no filed figure.** Non-gating, but it is a checker this repo has already been
+  burned by twice.
+
+- **FR-19 — the `--force` guard promises an overwrite the `grounded` gate then refuses to perform.**
+  Fold re-review Minor 1, and **reproduced before filing** — one command, two contradictory
+  statements, verbatim:
+
+  ```
+  without --force: next year's capital-loss carryover was user-entered (`income import`) —
+                   pass `--force` to overwrite it with the computed §1212(b) carryover
+  with    --force: carryover written back to 2025: 1 charitable carryover item(s); …
+                   ★ NOT WRITTEN: the capital-loss carryover. 2024 was never asked about one
+                   and produced none of its own, … and stamps nothing.
+  ```
+
+  The fourth guard (`return_1040.rs:3065`) runs unconditionally, *before* and independently of
+  `capital_loss_roll_is_grounded`. On an ungrounded year there is no computed §1212(b) figure, so
+  `--force` overwrites nothing — it only unlocks the other three carryovers, which the guard was never
+  meant to hold. A filer who believes the first message may go and "correct" a Y+1 figure that was
+  right.
+  ★★ **This is the same class B-1 was** — a surface reasoning about the gated write without asking the
+  gate — and it is the one instance the fold left standing. B-1's lesson was *the message must ask the
+  gate*; this is *the guard must ask the gate*. Same predicate, three readers.
+  ★ **The fix is one conjunct** (`ar` and `ri` are both in scope at `return_1040.rs:2919`):
+  `if capital_loss_roll_is_grounded(ar, ri) && (next_year.capital_loss_carryforward_in.short > …)`.
+  It NARROWS a refusal, which normally earns the `widening-an-exemption-is-never-the-safe-edit`
+  scrutiny — but it is safe here for a specific reason worth stating: the conjunct is not a *proxy* for
+  when the write happens, it is the **exact predicate that decides it**, so the guard's condition comes
+  to match the action it guards. The three other carryovers keep their own guards.
+  **Owning phase: none — ready now.** Non-gating; the branch is 0C/0I with this open.
+
+- **FR-20 — *"btctax CANNOT FILE THIS YEAR"* is broader than what the code enforces.** Fold re-review
+  Minor 2, confirmed in source: the refusal is gated on `question_is_live(ExcludedCanceledDebt)`, i.e.
+  on `carryforward_in_present` (`questions.rs:200-203`) — a strictly-positive test on
+  `capital_loss_carryforward_in`. The Form 982 rationale the new sentence gives is gated on nothing of
+  the kind, so a filer who excluded canceled debt and holds **no** capital-loss carryforward is never
+  asked, never refused, and gets a return with no Form 982.
+  ★ The underlying scope gap is PRE-EXISTING and larger than the wording — **v1 collects no
+  canceled-debt income at all** — so the fold's sentence surfaced the mismatch rather than creating it.
+  Two ways out: narrow the clause to the carryover (*"…while you are carrying a capital-loss
+  carryforward"*), or keep it and file the Form-982 gap as its own scoped item. The second is the real
+  answer; the first is the honest stopgap.
+  **Owning phase: none — needs a decision, not a phase.**
+
+- **FR-18 — `income scrub` loses the carryover PROVENANCE, and its round-trip test is blind to it.**
+  Found incidentally while checking that FR-17's import normalisation did not weaken the scrub round
+  trip — it does not, and that is the measurement that found this. `scrub.rs:99` documents that scrub
+  carries `capital_loss_carryforward_in` *"and its provenance verbatim"*. Planting
+  `CarryProvenance::Computed` into `scrub_axis::maximal_sentinel` reds
+  `the_scrubbed_toml_round_trips_back_through_import` with `sent = Computed` / `landed = User` —
+  **identically with and without the normalisation block**, so the loss is pre-existing and belongs
+  to scrub, not to the widening.
+  ★ **Why the test could not see it:** `maximal_sentinel` is the fixture whose whole job is "every
+  `Option` `Some`, every `Vec` with two elements" — and it pins every provenance field at the DEFAULT
+  variant (`User`), so a field that is dropped compares equal. Same shape as the `payments` drop that
+  fixture was built to catch. The mechanism (emitter vs. parse) is NOT yet established — do not
+  assume it; the divergence is measured, the cause is not.
+  ★ Consequence if real: a recipient reproducing the filer's return gets different ADVISORY
+  behaviour (M4 disputes a figure the original treated as btctax's own; the benefit advisory fires
+  where the original was silent) — the figures still match, which is why nothing else notices.
+  **Owning phase: none — ownerless residue**, since `income scrub` is shipped and this moves no filed
+  figure. Fix the fixture first (it is what makes the finding permanent), then decide whether scrub
+  should preserve the stamp or deliberately clear it.
+
+- **FR-4 — the charitable carryover has no TUI reader.** P6 wired `report --tax-year` and the export
+  stderr; `crates/btctax-tui` was outside that lane. The figure reaches zero humans on that surface.
+- **FR-9 — no sweep for the GIT_DIR hazard outside xtask.** All three `xtask` spawn sites are fixed
+  and `scripts/pre-commit` scrubs the environment, but nobody swept the workspace for other
+  `Command::new("git")` calls without a scrub.
+- **FR-10 — the 2025 form map has no `[census]` section**, so three un-mapped column-(i) cells are
+  accounted for by no instrument (`field_census.rs` is hardcoded to 2024). The fix is extending the
+  census PROGRAM to 2025 — not nit-sized, and it must not be faked with a hand-list. The blank value
+  itself is pinned by an existing test.
+- **FR-11 — the Form 8283 hand-mark's positive kill-test is a GOLDEN.** It reds when the mark is
+  disabled (observed), and the negative half is a real test — but a golden can be "fixed" by
+  regenerating. A direct test (build a Section B donation vault via `reclassify_outflow`, assert the
+  manifest names Part IV and Part V) would be strictly better.
+- **FR-15 — `design/forms/FIELD_PROVENANCE.md` is a dated snapshot with no generator and no test.**
+  P8 moved f8960 from 16 mapped / 22 undecided to 17/21; the file was flagged rather than hand-edited,
+  because hand-editing a snapshot nothing regenerates is how it drifts.
+
+### The one that is a project, not an item
+
+- **FR-16 — EITC/ACTC (plan item N2).** Owner decision 11 put it IN SCOPE, and the plan itself says
+  it "is not a plan item at this scope — it is a project", to start at brainstorm. It needs Schedule
+  8812 and Schedule EIC (neither has a map), a refundable-credit path that does not exist, new
+  collected inputs (earned income, the §32(i) investment-income limit, qualifying-child residency),
+  and a two-oracle witness. **DELIBERATELY NOT STARTED in this branch.**
+  ★★ It is de-risked, though: `design/direction/ORACLE-TRAP-credit-takeup.md` records — machine-
+  verified — that Tax-Calculator's DEFAULTS report `EITC = $0` for a household owed $4,778.18, that
+  the zeroing is position-dependent (identical households differ by array index), and that it would
+  therefore have looked like a second oracle corroborating btctax's own wrong zero. That document
+  carries the binding protocol, including that the kill-test **must** run at row position 0 or it
+  passes with the fix removed.

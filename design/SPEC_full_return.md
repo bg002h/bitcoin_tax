@@ -221,7 +221,8 @@ pub struct ReturnInputs {
 }
 ```
 **Carryover persistence (R3-M6):** at report time the computed carryover-*out* (charitable, per class/vintage;
-and QBI REIT/PTP) is written back as year **(Y+1)'s `*_carryover_in`** on that row — a single mechanism (no
+QBI business-loss, Form 8995 line 16; QBI REIT/PTP, line 17; and the §1212(b) **capital-loss** carryover,
+Schedule D lines 6 and 14, rounded to whole dollars) is written back as year **(Y+1)'s `*_carryover_in`** on that row — a single mechanism (no
 separate staging field). **Precedence:** a computed carryover-in overwrites a prior *computed* value but
 **refuses to silently overwrite a user-entered** one (warn + `--force`, mirroring §4.12); every carryover-in
 carries **provenance** (computed vs user).
@@ -396,7 +397,7 @@ person; **per person** (never pooled); → Sch 3 L11 → 1040 L31. RRTA out of s
 | `foreign_trust == Some(true)` | refuse | Form 3520 (R2-I3) |
 | single-employer excess SS withholding | refuse | not creditable (§4.9) |
 | Sch 1 L13 / L20-with-deduction | refuse | unmodeled worksheet |
-| taxable income ≤ 0 **with a capital-loss carryforward** | refuse | G22 carryover-worksheet edge (a refund-only TI≤0 filer with no carryforward is NOT refused — tax=0, withholding refunded) |
+| ~~taxable income ≤ 0 **with a capital-loss carryforward**~~ | ~~refuse~~ → **FILES** | **[AMENDED 2026-08-23 — widening (A), owner-authorised]** The refusal is **LIFTED** and its `RefuseReason` variant DELETED (so no consumer maps it and no anchor names it). Its warrant was that the carryover-**out** of such a year was computed by a flat `min(loss, $3,000)` with no taxable-income term, understating the surviving loss by up to the whole §1211(b) allowance. `tax::capital_loss_carryover` now transcribes the §1212(b)(2)(B) worksheet, so the figure is real and the year files. (A refund-only TI≤0 filer with no carryforward was never refused either — tax = 0, withholding refunded.) |
 
 ### 4.11 AMT screen (G13; M7)
 

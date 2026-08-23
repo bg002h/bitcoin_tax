@@ -464,10 +464,20 @@ pub struct Form1040HeaderCells {
     pub taxpayer_blind: CheckChoice,
     pub spouse_aged: CheckChoice,
     pub spouse_blind: CheckChoice,
-    /// "If more than four dependents, see instructions and check here" — v1 REFUSES instead (the
-    /// continuation statement is a synthetic page generator we do not have; same posture as Schedule
-    /// B's >14-payer refusal, SPEC §7.4 as amended). Mapped so the refusal can name the cell it will
-    /// not fill.
+    /// "If more than four dependents, see instructions and check here" — **CHECKED, and the
+    /// continuation statement is emitted with it.**
+    ///
+    /// ★ This comment used to say v1 "REFUSES instead … the continuation statement is a synthetic
+    /// page generator we do not have". Both halves are false and have been since §G-28/B2: the
+    /// generator is `btctax_core::tax::dependents_statement`, the box is written at
+    /// `form1040_full.rs`'s `check(w, p, &cells.more_than_four_dependents, !overflow.is_empty())`,
+    /// and `packet::fill_full_return` emits the statement from the SAME predicate — so "box checked,
+    /// no attachment" and "attachment, no box" are not expressible. Held by
+    /// `full_return_forms::the_checkbox_and_the_statement_are_the_same_decision`.
+    ///
+    /// A stale refusal claim is not a harmless comment: it is the shape that sends a future reader
+    /// looking for a refusal path that does not exist, or — worse — invites one to be re-added over
+    /// working behaviour.
     pub more_than_four_dependents: CheckChoice,
     /// The four dependents rows the form physically has.
     pub dependent_rows: Vec<DependentRowCells>,
@@ -731,8 +741,27 @@ pub struct Section8283BRow {
     pub how: String,
     /// (f) Donor's cost or adjusted basis (money — a [`MoneyPair`] on the 2017 form).
     pub cost: MoneyCell,
-    /// (i)/(h) Amount claimed as a deduction (carrier row only; money — a [`MoneyPair`] on 2017).
-    pub deduction: MoneyCell,
+    /// ★★★ **P3 — "Amount claimed as a deduction": column (i) on the 2023/2025 revisions, column (h)
+    /// on the Rev. 12-2014. `None` on a revision whose instructions do not ask it of this filer, and
+    /// the cell is then CENSUSED rather than mapped.**
+    ///
+    /// i8283 (Rev. 12-2024 and 12-2025 alike), verbatim from the extracted text layer
+    /// (`design/forms/extract/i8283--2024.txt:1185-1191`): *"Column (i). Complete column (i), amount
+    /// claimed as a deduction, if you are a pass-through entity or a member of a pass-through
+    /// entity."* An individual donating their own bitcoin is neither, and btctax models no
+    /// pass-through entity at all — the same boundary the census records for the header
+    /// entity-name/TIN cells and the family-PTE box. So the 2024 and 2025 maps carry NO cell here,
+    /// and the filler cannot write one: a map entry means *"we fill this"*, and a
+    /// mapped-but-never-written cell is a claim nothing checks.
+    ///
+    /// ★ The **TY2017 (Rev. 12-2014) map keeps its cell, deliberately.** That revision predates the
+    /// pass-through-entity regime, has a different Section B column layout (no qualified-conservation
+    /// column at all), and **its instructions are not in this repository** — `design/forms/extract/`
+    /// holds i8283 for 2024 and 2025 only. Changing a shipped behavior on a revision whose authority
+    /// we do not hold would be inventing the rule rather than reading it, so TY2017 is left exactly
+    /// as it was until the Rev. 12-2014 instructions are archived and read.
+    #[serde(default)]
+    pub deduction: Option<MoneyCell>,
 }
 
 /// Form 8283 Section B (page 1/2, over-$5,000 property + page 2 identity) — up to 3 rows (2024/2025)
@@ -867,7 +896,12 @@ impl Form8283Map {
             v.extend([r.desc.as_str(), r.date_acq.as_str(), r.how.as_str()]);
             v.extend(r.fmv.fields());
             v.extend(r.cost.fields());
-            v.extend(r.deduction.fields());
+            // ★ Column (i) contributes only on a year whose map carries it. On 2024/2025 it is
+            //   absent, and keeping it out of the AUTHORISED set is the load-bearing half:
+            //   `verify::no_unmapped_filled` fails closed if anything ever writes it again.
+            if let Some(d) = &r.deduction {
+                v.extend(d.fields());
+            }
         }
         v
     }
@@ -1222,7 +1256,10 @@ pub struct Form8960Map {
     pub line7: MoneyCell,
     /// L8 — total investment income, AMOUNT column.
     pub line8: MoneyCell,
-    /// L9d — add 9a/9b/9c (zero in v1), AMOUNT column.
+    /// L9b — state/local/foreign income tax allocable to NII, MID column. Written only when the filer
+    /// claimed an allocation; `push_money_opt` leaves the cell BLANK otherwise.
+    pub line9b: MoneyCell,
+    /// L9d — add 9a/9b/9c (= 9b; 9a and 9c unmodelled), AMOUNT column.
     pub line9d: MoneyCell,
     /// L11 — total deductions and modifications (zero in v1), AMOUNT column.
     pub line11: MoneyCell,
@@ -1256,8 +1293,11 @@ impl Form8960Map {
             _ => Err(FormsError::UnsupportedYear(year)),
         }
     }
-    /// The 14 filled cells in printed reading order (strictly descending y on page 1).
-    pub fn lines(&self) -> [&MoneyCell; 14] {
+    /// The 15 fillable cells in printed reading order (strictly descending y on page 1). ★ 9b is
+    /// *fillable*, not always *filled* — the emitter skips it when the filer claimed no allocation,
+    /// and `verify_flat`'s descent check compares only the placements actually written, so a skipped
+    /// ordinal leaves a gap rather than breaking the sequence.
+    pub fn lines(&self) -> [&MoneyCell; 15] {
         [
             &self.line1,
             &self.line2,
@@ -1265,6 +1305,7 @@ impl Form8960Map {
             &self.line5d,
             &self.line7,
             &self.line8,
+            &self.line9b,
             &self.line9d,
             &self.line11,
             &self.line12,
@@ -1647,6 +1688,8 @@ pub struct ScheduleAMap {
     pub line8a: MoneyCell,
     /// L8e — add 8a-8c, MID column.
     pub line8e: MoneyCell,
+    /// L9 — investment interest (§163(d) / Form 4952), MID column.
+    pub line9: MoneyCell,
     /// L10 — add 8e and 9, AMOUNT column.
     pub line10: MoneyCell,
     /// L11 — gifts by cash or check, MID column.
@@ -1677,8 +1720,8 @@ impl ScheduleAMap {
             _ => Err(FormsError::UnsupportedYear(year)),
         }
     }
-    /// The 18 filled cells in printed reading order (strictly descending y on page 1).
-    pub fn lines(&self) -> [&MoneyCell; 18] {
+    /// The 19 filled cells in printed reading order (strictly descending y on page 1).
+    pub fn lines(&self) -> [&MoneyCell; 19] {
         [
             &self.line1,
             &self.line2,
@@ -1692,6 +1735,7 @@ impl ScheduleAMap {
             &self.line7,
             &self.line8a,
             &self.line8e,
+            &self.line9,
             &self.line10,
             &self.line11,
             &self.line12,

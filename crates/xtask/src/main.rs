@@ -10,6 +10,14 @@
 mod archive_check;
 mod authority_conflicts;
 mod authority_manifest;
+/// N1 — asserts `btctax_core::tax::capital_loss_carryover` is verbatim and complete against the 2025
+/// Schedule D instructions' text layer.
+///
+/// `#[cfg(test)]` because it has no operator-facing mode: unlike `line_coverage_check`, whose `run()`
+/// prints a coverage REPORT worth reading, this one answers a yes/no question and the answer belongs
+/// in the suite, where `make check` asks it on every commit rather than when someone remembers to.
+#[cfg(test)]
+mod capital_loss_carryover_check;
 mod check_isolation;
 mod cite_check;
 mod docs;

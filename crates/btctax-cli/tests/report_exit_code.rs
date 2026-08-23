@@ -158,9 +158,15 @@ fn report_pseudo_active_exits_zero() {
 
 /// SPEC §3.5 non-trigger 2: a dual-report whose ABSOLUTE 1040 total is REFUSED (`screen_absolute`)
 /// but whose crypto DELTA still computes must exit 0 — the exit code keys on the delta `outcome`, not
-/// the absolute refusal. Setup: a TY2024 ReturnInputs return with $0 wages (taxable income clamps to
-/// 0) + a capital-loss carryforward trips screen_absolute (c) (§1211/§1212 worksheet unmodeled) → the
-/// ABSOLUTE is NOT COMPUTABLE; the delta (no 2024 disposal → zero crypto tax) Computes.
+/// the absolute refusal.
+///
+/// ★ **The fixture changed when the TI≤0-with-a-carryforward refusal was LIFTED.** It used to be a
+/// $0-wage return carrying a capital-loss carryforward in, which no longer refuses anything — that
+/// household now files. The contract under test is deliberately refusal-AGNOSTIC (it is about the
+/// exit code, not about which screen fired), so the setup is simply moved to another
+/// `screen_absolute` refusal: a Schedule A that forces itemizing and declares itself OVER the
+/// §163(h)(3)(B) acquisition-debt ceiling, which `screen_absolute` refuses because it — unlike
+/// `screen_inputs` — can see the §63(e) election that decides whether line 8a prints at all.
 #[test]
 fn report_dual_report_absolute_refused_delta_computed_exits_zero() {
     use btctax_cli::{return_inputs, Session};
@@ -172,15 +178,20 @@ fn report_dual_report_absolute_refused_delta_computed_exits_zero() {
     cmd::import::run(&vault, &pp(), &[write_buy_2024(dir.path())]).unwrap();
     {
         let mut s = Session::open(&vault, &pp()).unwrap();
-        let ri = btctax_core::tax::testonly::answered(ReturnInputs {
+        let mut ri = btctax_core::tax::testonly::answered(ReturnInputs {
             filing_status: FilingStatus::Single,
             header: btctax_core::tax::testonly::not_a_dependent(),
-            capital_loss_carryforward_in: Carryforward {
-                short: dec!(1000),
-                long: Usd::ZERO,
-            },
+            itemize_election: btctax_core::tax::return_inputs::ItemizeElection::ForceItemize,
+            schedule_a: Some(btctax_core::tax::return_inputs::ScheduleAInputs {
+                mortgage_interest_1098: dec!(50000),
+                ..Default::default()
+            }),
             ..Default::default()
         });
+        // Declared OVER the ceiling — the ADVERSE answer, which `screen_absolute` refuses.
+        if let Some(a) = ri.schedule_a.as_mut() {
+            a.mortgage_within_debt_limit = Some(false);
+        }
         return_inputs::set(s.conn(), 2024, &ri).unwrap();
         s.save().unwrap();
     }

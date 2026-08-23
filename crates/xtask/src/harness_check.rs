@@ -150,15 +150,46 @@ pub fn audit(hooks_dir: &Path) -> Vec<Finding> {
         .collect()
 }
 
+/// A `git` invocation that answers about the directory it is pointed at, and nothing else.
+///
+/// ★★ **The ambient git environment overrides `current_dir`, silently.** When git runs a hook it
+/// exports `GIT_DIR` (absolute, in a worktree), `GIT_INDEX_FILE` and friends into the hook's
+/// environment, and every child inherits them — so a plain `Command::new("git").current_dir(x)`
+/// answers about the OUTER repository while looking like it asked about `x`. Two consequences, both
+/// observed on 2026-08-21 when a commit was attempted from a `git worktree`:
+///
+/// - **[`hooks_dir`] resolved the wrong repo.** `git rev-parse --git-path hooks` on a throwaway
+///   tempdir returned this repo's absolute `core.hooksPath`, so the audit reported a *fresh, unwired*
+///   repo as fully installed — the exact false-PASS shape B1 exists to forbid, in the harness's own
+///   instrument. It is not hypothetical: `xtask harness-check` is reachable from inside a hook.
+/// - **The tests could have written to the real repo.** `git init` / `git config core.hooksPath …`
+///   spawned with an inherited `GIT_DIR` act on the outer repository — i.e. the harness's own
+///   regression test was one assertion away from disabling the harness for the whole checkout.
+///
+/// Clearing the redirect variables makes `current_dir` mean what it reads as. Nothing here needs the
+/// ambient environment: every caller passes the repository it means explicitly.
+fn git_pointed_at(dir: &Path) -> Command {
+    let mut c = Command::new("git");
+    c.current_dir(dir)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_COMMON_DIR")
+        .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_OBJECT_DIRECTORY");
+    c
+}
+
 /// The hooks directory git will actually use, honouring `core.hooksPath` and worktrees.
 ///
 /// ★ `git rev-parse --git-path hooks` resolves `core.hooksPath` itself (verified: it prints `scripts`
 /// under `-c core.hooksPath=scripts`). Parsing the config by hand would be a second, divergent
 /// implementation of a rule git already owns.
+///
+/// ★★ Spawned via [`git_pointed_at`] — an inherited `GIT_DIR` would otherwise make this answer about
+/// a different repository than `repo_root`.
 pub fn hooks_dir(repo_root: &Path) -> Option<PathBuf> {
-    let out = Command::new("git")
+    let out = git_pointed_at(repo_root)
         .args(["rev-parse", "--git-path", "hooks"])
-        .current_dir(repo_root)
         .output()
         .ok()?;
     if !out.status.success() {
@@ -358,6 +389,79 @@ mod tests {
         }
     }
 
+    /// ★★ **The B1 kill for [`git_pointed_at`]** — the ambient git environment must not be able to
+    /// redirect a `git` invocation that names its directory.
+    ///
+    /// Two halves, and the first is what makes the second worth asserting:
+    ///
+    /// 1. **The hazard is real, demonstrated on a live `git`.** A bare `Command` carrying `GIT_DIR`
+    ///    answers about *that* repo while pointed at another — so `hooks_dir` on a fresh, unwired
+    ///    tempdir would report the outer repo's installed `core.hooksPath` and the audit would pass a
+    ///    repo with no hooks at all. That is not a thought experiment: it was **observed** on
+    ///    2026-08-21, red, when a commit was attempted from a `git worktree` (whose hook environment
+    ///    exports an absolute `GIT_DIR`) — `hooks_dir_follows_core_hookspath_and_audit_reds_on_an_
+    ///    uninstalled_repo` failed on *"a fresh clone must report every required hook unwired"*, the
+    ///    instrument reporting a false PASS about the wrong repository.
+    /// 2. **The constructor removes exactly the variables that cause it.** Delete any `env_remove`
+    ///    from `git_pointed_at` and this reds; it is the assertion that keeps half 1 impossible.
+    #[test]
+    fn git_pointed_at_clears_the_ambient_repo_redirects() {
+        let outer = tempfile::tempdir().expect("tempdir");
+        let inner = tempfile::tempdir().expect("tempdir");
+        let run = |mut c: Command| -> String {
+            let out = c
+                .args(["rev-parse", "--git-path", "hooks"])
+                .output()
+                .expect("git");
+            assert!(out.status.success(), "git rev-parse failed");
+            String::from_utf8(out.stdout).expect("utf8").trim().into()
+        };
+        for r in [outer.path(), inner.path()] {
+            assert!(git_pointed_at(r)
+                .args(["init", "--quiet"])
+                .status()
+                .is_ok_and(|s| s.success()));
+        }
+        // A marker no `--git-path hooks` could produce by accident.
+        let marker = "/nowhere/ambient-hooks-marker";
+        assert!(git_pointed_at(outer.path())
+            .args(["config", "core.hooksPath", marker])
+            .status()
+            .is_ok_and(|s| s.success()));
+
+        // Half 1 — the hazard, live: pointed at `inner`, poisoned with `outer`'s GIT_DIR, git answers
+        // about OUTER. This is the false PASS the harness's own instrument was producing.
+        let mut poisoned = Command::new("git");
+        poisoned
+            .current_dir(inner.path())
+            .env("GIT_DIR", outer.path().join(".git"));
+        assert_eq!(
+            run(poisoned),
+            marker,
+            "the hazard must be real — if git ignored an ambient GIT_DIR there would be nothing to fix"
+        );
+
+        // Half 2 — the constructor names every variable that can redirect resolution, and removes it.
+        let hermetic = git_pointed_at(inner.path());
+        let cleared: Vec<&std::ffi::OsStr> = hermetic
+            .get_envs()
+            .filter(|(_, v)| v.is_none())
+            .map(|(k, _)| k)
+            .collect();
+        for var in [
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_COMMON_DIR",
+            "GIT_INDEX_FILE",
+            "GIT_OBJECT_DIRECTORY",
+        ] {
+            assert!(
+                cleared.iter().any(|k| *k == std::ffi::OsStr::new(var)),
+                "git_pointed_at must clear {var}; it clears {cleared:?}"
+            );
+        }
+    }
+
     /// ★★ **The resolution kill: `hooks_dir` must follow `core.hooksPath`, and `audit` must red on a
     /// repo that has not installed the harness.**
     ///
@@ -371,10 +475,13 @@ mod tests {
     fn hooks_dir_follows_core_hookspath_and_audit_reds_on_an_uninstalled_repo() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
+        // ★★ `git_pointed_at`, not a bare `Command::new("git")`: under an inherited `GIT_DIR` (which
+        //    is exactly what this test sees when it runs from inside the pre-commit hook of a
+        //    worktree) `git init` and `git config core.hooksPath myhooks` would act on the REAL
+        //    repository — the second of those disables the harness for the whole checkout.
         let git = |args: &[&str]| {
-            let ok = Command::new("git")
+            let ok = git_pointed_at(root)
                 .args(args)
-                .current_dir(root)
                 .output()
                 .is_ok_and(|o| o.status.success());
             assert!(ok, "git {args:?} failed");
@@ -734,9 +841,10 @@ mod tests {
         let state = tempfile::tempdir().expect("tempdir");
         let r = repo.path();
         assert!(
-            Command::new("git")
+            // `git_pointed_at`: an inherited `GIT_DIR` would make this `git init` re-initialise the
+            // REAL repository instead of the tempdir (see `git_pointed_at`'s note).
+            git_pointed_at(r)
                 .args(["init", "--quiet"])
-                .current_dir(r)
                 .status()
                 .is_ok_and(|s| s.success()),
             "git init"

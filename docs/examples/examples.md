@@ -102,7 +102,7 @@ Federal tax attributable to crypto — tax year 2025
   ordinary-rate tax (attributable): -77.00
   LTCG tax (attributable): 0.00   NIIT (attributable): 0.00
   TOTAL federal tax attributable to crypto (delta): -77.00   (= ordinary-rate + LTCG + NIIT attributable)
-  §1211 loss deduction (level): 350.00   carryforward out: short 0.00 / long 0.00
+  §1211 loss deduction (crypto slice): 350.00   crypto-slice carryforward out: short 0.00 / long 0.00
   marginal rates: ordinary 0.22 / LTCG 0.15 all-in (§1(h) 0.15 + §1411 0)
                   NIIT increased by crypto: no
   (incremental ceteris-paribus delta on the minimal profile; excludes AGI-driven SS/IRMAA/AMT/QBI/phaseout effects — I5. §1411 NIIT reduces NII by the §1211(b)-allowed net capital loss (≤ $3,000 / $1,500 MFS — Form 8960 line 5a / §1.1411-4(d)) and is floored at $0; crypto ordinary income (mining/staking/airdrops/rewards) is correctly excluded from NII; crypto-lending interest income (§1411(c)(1)(A)(i)) is INCLUDED in NII; mining/staking/airdrops/rewards remain excluded (SE income per §1411(c)(6) or non-NII other income).)
@@ -298,7 +298,7 @@ Federal tax attributable to crypto — tax year 2025
   ordinary-rate tax (attributable): 1721.16
   LTCG tax (attributable): 0.00   NIIT (attributable): 0.00
   TOTAL federal tax attributable to crypto (delta): 1721.16   (= ordinary-rate + LTCG + NIIT attributable)
-  §1211 loss deduction (level): 0.00   carryforward out: short 0.00 / long 0.00
+  §1211 loss deduction (crypto slice): 0.00   crypto-slice carryforward out: short 0.00 / long 0.00
   marginal rates: ordinary 0.24 / LTCG 0.15 all-in (§1(h) 0.15 + §1411 0)
                   NIIT increased by crypto: no
   (incremental ceteris-paribus delta on the minimal profile; excludes AGI-driven SS/IRMAA/AMT/QBI/phaseout effects — I5. §1411 NIIT reduces NII by the §1211(b)-allowed net capital loss (≤ $3,000 / $1,500 MFS — Form 8960 line 5a / §1.1411-4(d)) and is floored at $0; crypto ordinary income (mining/staking/airdrops/rewards) is correctly excluded from NII; crypto-lending interest income (§1411(c)(1)(A)(i)) is INCLUDED in NII; mining/staking/airdrops/rewards remain excluded (SE income per §1411(c)(6) or non-NII other income).)
@@ -635,7 +635,9 @@ $ btctax --vault v.pgp income show --year 2024
     "salt_personal_property": "0",
     "mortgage_interest_1098": "22000",
     "mortgage_all_used_to_buy_build_improve": true,
+    "mortgage_within_debt_limit": true,
     "mortgage_dwelling_is_amt_qualified": true,
+    "investment_interest": "0",
     "charitable": [
       {
         "class": "cash60",
@@ -661,6 +663,8 @@ $ btctax --vault v.pgp income show --year 2024
     "long": "0"
   },
   "capital_loss_carryforward_in_provenance": "user",
+  "carryover_includes_spouses_joint_loss": null,
+  "excluded_canceled_debt": null,
   "amt_carryover_same_as_regular": null,
   "amt_depreciation_same_as_regular": true,
   "charitable_carryover_in": [],
@@ -676,6 +680,9 @@ $ btctax --vault v.pgp income show --year 2024
   "foreign_country_names": "",
   "fbar_filing_required": null,
   "donations_had_restrictions": false,
+  "charitable_cwa_obtained": true,
+  "filing_form_4952": false,
+  "form_8960_line9b": null,
   "dual_status_alien": false,
   "has_income_exclusion": null,
   "other_out_of_scope_income": false,
@@ -725,9 +732,10 @@ This feature is newer and less proven than the rest of btctax, and it was develo
   - a filed basis figure could be derived from a stale in-editor ledger image after a failed re-projection
 
 Check what this feature actually produced: open the Form 8275 PDF and confirm the Part II narrative renders whole, continuing onto Part IV on page 2, rather than stopping mid-sentence after about one line; confirm the basis in Form 8949 column (e) for each promoted lot equals the floor you consented to at promote time; and confirm the tranche quantity and acquisition window on the 8275 match what you declared.
+⚠ 2 mark(s) on this packet are YOURS to make by hand and are deliberately blank — see the "COMPLETE BY HAND" section at the foot of irs/manifest.txt.
 ⚠ a Section B Form 8283 is NOT filing-ready without a signed Part IV (appraiser) and Part V (donee acknowledgement) — obtain both before filing.
 
-  ── ADVISORIES (10) ──
+  ── ADVISORIES (11) ──
   • CTC/ODC NOT COMPUTED — you captured 1 dependent(s), but v1 does not compute the Child
     Tax Credit or the Credit for Other Dependents (1040 line 19 is $0). Your tax is
     OVERSTATED by up to $2,000 per qualifying child / $500 per other dependent. File
@@ -778,6 +786,17 @@ Check what this feature actually produced: open the Form 8275 PDF and confirm th
     CHARITY (50%-organization) donee: long-term gifts at fair market value under the
     30%-of-AGI ceiling. If the donee is a PRIVATE FOUNDATION, the correct treatment is the
     20% ceiling at BASIS (which v1 refuses). Verify who you gave to.
+  • FORM 8960 LINE 9B NOT CLAIMED — you owe net investment income tax (§1411), and Form 8960
+    line 9b, "State, local, and foreign income tax", is BLANK. The state and local income
+    tax your Schedule A actually deducted, after §164(b)(6)'s limit, is up to $10,000, and
+    the portion of it attributable to your investment income is deductible against that
+    income — so your tax is currently OVERSTATED by up to $198.25. (That is what allocating
+    the WHOLE of it would save; a smaller allocation saves less. Line 16 is the smaller of
+    line 12 and line 15, so once line 12 falls to line 15 no further allocation changes
+    anything.) btctax will not pick the split for you: the Instructions for Form 8960 say
+    you may use "any reasonable method", and one they give themselves is that amount times
+    the ratio of Form 8960 line 8 (gross investment income) to your AGI. Work out your own
+    figure and enter it, or leave the line blank and claim nothing.
   (Advisories never change a number and never fail the command. See `btctax limitations`.)
 ```
 
@@ -852,7 +871,7 @@ Federal tax attributable to crypto — tax year 2024
   ordinary-rate tax (attributable): 726.00
   LTCG tax (attributable): 0.00   NIIT (attributable): 0.00
   TOTAL federal tax attributable to crypto (delta): 726.00   (= ordinary-rate + LTCG + NIIT attributable)
-  §1211 loss deduction (level): 0.00   carryforward out: short 0.00 / long 0.00
+  §1211 loss deduction (crypto slice): 0.00   crypto-slice carryforward out: short 0.00 / long 0.00
   marginal rates: ordinary 0.22 / LTCG 0.15 all-in (§1(h) 0.15 + §1411 0)
                   NIIT increased by crypto: no
   (incremental ceteris-paribus delta on the minimal profile; excludes AGI-driven SS/IRMAA/AMT/QBI/phaseout effects — I5. §1411 NIIT reduces NII by the §1211(b)-allowed net capital loss (≤ $3,000 / $1,500 MFS — Form 8960 line 5a / §1.1411-4(d)) and is floored at $0; crypto ordinary income (mining/staking/airdrops/rewards) is correctly excluded from NII; crypto-lending interest income (§1411(c)(1)(A)(i)) is INCLUDED in NII; mining/staking/airdrops/rewards remain excluded (SE income per §1411(c)(6) or non-NII other income).)
@@ -1025,7 +1044,7 @@ Federal tax attributable to crypto — tax year 2024
   ordinary-rate tax (attributable): 0.00
   LTCG tax (attributable): 30000.00   NIIT (attributable): 7600.00
   TOTAL federal tax attributable to crypto (delta): 37600.00   (= ordinary-rate + LTCG + NIIT attributable)
-  §1211 loss deduction (level): 0.00   carryforward out: short 0.00 / long 0.00
+  §1211 loss deduction (crypto slice): 0.00   crypto-slice carryforward out: short 0.00 / long 0.00
   marginal rates: ordinary 0.24 / LTCG 0.188 all-in (§1(h) 0.15 + §1411 0.038)
                   NIIT increased by crypto: yes
   (incremental ceteris-paribus delta on the minimal profile; excludes AGI-driven SS/IRMAA/AMT/QBI/phaseout effects — I5. §1411 NIIT reduces NII by the §1211(b)-allowed net capital loss (≤ $3,000 / $1,500 MFS — Form 8960 line 5a / §1.1411-4(d)) and is floored at $0; crypto ordinary income (mining/staking/airdrops/rewards) is correctly excluded from NII; crypto-lending interest income (§1411(c)(1)(A)(i)) is INCLUDED in NII; mining/staking/airdrops/rewards remain excluded (SE income per §1411(c)(6) or non-NII other income).)

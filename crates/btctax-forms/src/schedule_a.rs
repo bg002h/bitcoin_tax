@@ -41,7 +41,7 @@ pub fn fill_schedule_a_with_map(
     let mut placements: Vec<FlatPlacement> = Vec::new();
 
     // Parallel to `map.lines()` — printed reading order, strictly descending y on page 1.
-    let plan: [(Usd, usize); 18] = [
+    let plan: [(Usd, usize); 19] = [
         (lines.line1, COL_MID),        // 1  medical expenses
         (lines.line2, COL_AGI_INLINE), // 2  ★ AGI — its own column, not MID
         (lines.line3, COL_MID),        // 3  the 7.5% floor
@@ -54,6 +54,7 @@ pub fn fill_schedule_a_with_map(
         (lines.line7, COL_AMOUNT),     // 7  add 5e and 6
         (lines.line8a, COL_MID),       // 8a mortgage interest (Form 1098)
         (lines.line8e, COL_MID),       // 8e add 8a-8c
+        (lines.line9, COL_MID),        // 9  investment interest (§163(d))
         (lines.line10, COL_AMOUNT),    // 10 add 8e and 9
         (lines.line11, COL_MID),       // 11 gifts by cash or check
         (lines.line12, COL_MID),       // 12 gifts other than cash (incl. crypto)

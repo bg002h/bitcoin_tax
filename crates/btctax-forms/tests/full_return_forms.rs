@@ -168,6 +168,7 @@ fn f8960_fills_the_printed_chain_and_reads_back() {
         dec!(20000),
         dec!(2000),
         dec!(300000),
+        None,
     )
     .expect("NIIT is owed");
     let pdf = btctax_forms::fill_form_8960(&lines, &kitchen_sink_header(), 2024).unwrap();
@@ -216,6 +217,72 @@ fn f8960_fills_the_printed_chain_and_reads_back() {
         let fqn = format!("topmostSubform[0].Page1[0].{un}");
         assert_eq!(g(&fqn), None, "{fqn} (unmodeled) must be blank");
     }
+}
+
+/// ★★★ **P8 — Form 8960 line 9b: BLANK when unclaimed, PRINTED when claimed, both read back out of
+/// the serialized PDF.**
+///
+/// Two directions, because one would prove nothing. A test that only checked the blank case passes
+/// just as well against the old code, which had no line-9b field at all and could never write the
+/// cell; a test that only checked the printed case would not notice a `push_money` that swore a `0`
+/// on every return with no allocation. The pair is what distinguishes *"this filer entered nothing"*
+/// from *"this line does not exist"* — the two blanks that look identical on the printed page.
+///
+/// ★ It is also the geometry kill: `f1_17` is written through `verify_flat`, which re-parses the
+/// SERIALIZED bytes and rejects a cell whose center-x leaves the declared column cluster. Point
+/// `line9b` at the AMOUNT column and `fill_form_8960` fails closed.
+#[test]
+fn f8960_line9b_is_blank_when_unclaimed_and_printed_when_claimed() {
+    const L9B: &str = "topmostSubform[0].Page1[0].f1_17[0]";
+    const L9D: &str = "topmostSubform[0].Page1[0].f1_19[0]";
+    const L11: &str = "topmostSubform[0].Page1[0].f1_21[0]";
+    const L12: &str = "topmostSubform[0].Page1[0].f1_22[0]";
+    const L16: &str = "topmostSubform[0].Page1[0].f1_26[0]";
+    const L17: &str = "topmostSubform[0].Page1[0].f1_27[0]";
+
+    // Single, $60,000 of interest, MAGI $260,000 ⇒ line 15 = 60,000.
+    let of = |line9b| {
+        form_8960_lines(
+            FilingStatus::Single,
+            dec!(60000),
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            dec!(260000),
+            line9b,
+        )
+        .expect("NIIT is owed")
+    };
+
+    // (1) UNCLAIMED — the cell is not written at all.
+    let blank = of(None);
+    assert_eq!(blank.line9b, None);
+    let pdf = btctax_forms::fill_form_8960(&blank, &kitchen_sink_header(), 2024).unwrap();
+    assert_eq!(
+        tv(&pdf, L9B),
+        None,
+        "an unclaimed line 9b must be BLANK; a printed 0 would swear the allocable state income \
+         tax IS zero, which this filer never said"
+    );
+    // 9a and 9c stay unmodelled-blank either way; 9d and 11 are DERIVED totals the form adds.
+    for un in ["f1_16[0]", "f1_18[0]", "f1_20[0]"] {
+        let fqn = format!("topmostSubform[0].Page1[0].{un}");
+        assert_eq!(tv(&pdf, &fqn), None, "{fqn} (unmodeled) must be blank");
+    }
+    assert_eq!(tv(&pdf, L9D).as_deref(), Some("0"));
+    assert_eq!(tv(&pdf, L12).as_deref(), Some("60000"));
+    assert_eq!(tv(&pdf, L17).as_deref(), Some("2280")); // 3.8% × 60,000
+
+    // (2) CLAIMED — $10,000, the most §164(b)(6) can leave deductible.
+    let claimed = of(Some(dec!(10000)));
+    assert_eq!(claimed.line9b, Some(dec!(10000)));
+    let pdf = btctax_forms::fill_form_8960(&claimed, &kitchen_sink_header(), 2024).unwrap();
+    assert_eq!(tv(&pdf, L9B).as_deref(), Some("10000"));
+    assert_eq!(tv(&pdf, L9D).as_deref(), Some("10000"), "9d = 9a + 9b + 9c");
+    assert_eq!(tv(&pdf, L11).as_deref(), Some("10000"), "11 = 9d + 10");
+    assert_eq!(tv(&pdf, L12).as_deref(), Some("50000"), "12 = 8 − 11");
+    assert_eq!(tv(&pdf, L16).as_deref(), Some("50000"));
+    assert_eq!(tv(&pdf, L17).as_deref(), Some("1900")); // 3.8% × 50,000
 }
 
 // ─────────────────────────────────────── Form 8995 ────────────────────────────────────────────
@@ -361,6 +428,7 @@ fn f8960_same_column_swap_fails_closed_on_descent() {
         dec!(20000),
         dec!(2000),
         dec!(300000),
+        None,
     )
     .unwrap();
 
@@ -386,6 +454,7 @@ fn full_return_form_fills_are_byte_deterministic() {
         dec!(20000),
         dec!(2000),
         dec!(300000),
+        None,
     )
     .unwrap();
     let l95 = form_8995_lines(
@@ -625,6 +694,9 @@ fn sch_a_lines() -> ScheduleALines {
         line5a_is_sales_tax: false,
         line18_elects_smaller: false,
         line8_mixed_use_box: false,
+        // ★ Schedule A line 9 (§163(d) investment interest) — a real, non-zero value so the new cell
+        //   is EXERCISED by the geometric verifier rather than merely present at $0.
+        line9: dec!(3000),
         line1: dec!(10000),
         line2: dec!(100000),
         line3: dec!(7500),
@@ -694,10 +766,19 @@ fn schedule_a_fills_the_printed_chain_and_reads_back() {
         None,
         "L8d is reserved/ReadOnly"
     );
-    // Unmodeled lines stay BLANK: 6 (other taxes), 8b/8c, 9 (investment interest), 15, 16.
-    for blank in [
-        "f1_14[0]", "f1_19[0]", "f1_20[0]", "f1_23[0]", "f1_29[0]", "f1_33[0]",
-    ] {
+    // ★ LINE 9 (f1_23) IS NOW MAPPED, and this is where its absence used to be asserted. §163(d)
+    //   investment interest is collected on `ScheduleAInputs::investment_interest` and printed here;
+    //   moving it out of the blank list and into a positive read-back is the whole P7 half of the
+    //   change, and leaving it below would have been a test asserting the defect.
+    assert_eq!(
+        g("topmostSubform[0].Page1[0].f1_23[0]").as_deref(),
+        Some("3000"),
+        "L9 (investment interest) must print the collected amount"
+    );
+    // (The line-10 = 8e + 9 DERIVATION is pinned in `printed.rs`, where `schedule_a_lines` computes
+    //  it; this fixture is a hand-built `ScheduleALines` literal, so it would only re-assert itself.)
+    // Unmodeled lines stay BLANK: 6 (other taxes), 8b/8c, 15, 16.
+    for blank in ["f1_14[0]", "f1_19[0]", "f1_20[0]", "f1_29[0]", "f1_33[0]"] {
         let fqn = format!("topmostSubform[0].Page1[0].{blank}");
         assert_eq!(g(&fqn), None, "{fqn} (unmodeled) must be blank");
     }
@@ -1173,7 +1254,7 @@ fn schedule_d_lines_1a_and_8a_write_through_the_geometric_verifier() {
         dec!(2000),
         dec!(500),
         dec!(3000),
-        ScheduleDRouting::BothGains,
+        ScheduleDRouting::BothGains { line20_yes: true },
     );
     // Deliberately DISTINCT figures per cell, so a transposition cannot hide behind equal values.
     lines.line1a_d = dec!(1050000);
@@ -1247,7 +1328,7 @@ fn schedule_d_lines_1a_and_8a_are_blank_without_a_1099b() {
         dec!(2000),
         dec!(500),
         dec!(3000),
-        ScheduleDRouting::BothGains,
+        ScheduleDRouting::BothGains { line20_yes: true },
     );
     let pdf = btctax_forms::fill_schedule_d_full(&lines, &kitchen_sink_header(), 2024).unwrap();
     for (fqn, what) in [
@@ -1303,7 +1384,7 @@ fn schedule_d_full_fills_the_lines_the_crypto_slice_omits() {
         dec!(2000), // line 6 — ST carryover
         dec!(500),  // line 14 — LT carryover
         dec!(3000), // line 13 — capital gain distributions
-        ScheduleDRouting::BothGains,
+        ScheduleDRouting::BothGains { line20_yes: true },
     );
     let pdf = btctax_forms::fill_schedule_d_full(&lines, &kitchen_sink_header(), 2024).unwrap();
     let g = |fqn: &str| tv(&pdf, fqn);
@@ -1346,7 +1427,7 @@ fn schedule_d_full_routing_both_gains() {
             Usd::ZERO,
             Usd::ZERO,
             Usd::ZERO,
-            ScheduleDRouting::BothGains,
+            ScheduleDRouting::BothGains { line20_yes: true },
         ),
         &kitchen_sink_header(),
         2024,
@@ -1562,7 +1643,7 @@ fn schedule_d_full_refuses_a_negative_in_a_parenthesized_cell() {
         dec!(2000),
         dec!(500),
         dec!(3000),
-        ScheduleDRouting::BothGains,
+        ScheduleDRouting::BothGains { line20_yes: true },
     );
     lines.line14 = dec!(-500);
     let err = fill_schedule_d_full_with_map(
@@ -2641,7 +2722,7 @@ fn schedule_d_line3_cell_text_equals_the_8949s_printed_column_total() {
         Usd::ZERO,
         Usd::ZERO,
         Usd::ZERO,
-        ScheduleDRouting::BothGains,
+        ScheduleDRouting::BothGains { line20_yes: true },
     );
     ar_sd.line3_d = printed.st_totals.proceeds_d;
     ar_sd.line3_e = printed.st_totals.cost_e;
@@ -2757,6 +2838,100 @@ fn the_8283_restriction_boxes_are_written_only_when_the_filer_answered_no() {
             "{fqn} is BLANK when unanswered — a blank is no testimony, a \"No\" is testimony"
         );
     }
+}
+
+/// ★★★ **P3 — Section B, Part I, column (i) is NOT the filer's cell.** The form face calls it
+/// "(i) Amount claimed as a deduction (see instructions)", and the instructions say, verbatim
+/// (`design/forms/extract/i8283--2024.txt:1185-1191`):
+///
+/// > "Column (i). Complete column (i), amount claimed as a deduction, if you are a pass-through
+/// > entity or a member of a pass-through entity. If you are a pass-through entity, enter your share
+/// > of the noncash charitable contribution. If you are a member, enter your share of the noncash
+/// > charitable contribution allocated to you by the pass-through entity."
+///
+/// An individual donating their own bitcoin is neither, so the cell is not asked of them — and btctax
+/// models no pass-through entity at all (the census says exactly that of the header entity-name/TIN
+/// cells and of the family-PTE box). It was nevertheless printing the PRE-CEILING `claimed_deduction`
+/// there: on the observed packet, $1,000,000 beside a Schedule A line 12 of $600,000 — an unrequested
+/// entry contradicting the return's own claimed deduction, on the highest-scrutiny line of the
+/// highest-scrutiny form, sworn to under §6065.
+///
+/// Section B starts at $5,000 of claimed noncash, so this reaches a $6,000 crypto donor at $60,000 of
+/// income identically; it is not a rich-band artifact.
+///
+/// **Planted defect / mutation:** restore the `if let Some(ded) = row.claimed_deduction { push_money(
+/// …&m.deduction…) }` writer in `form8283.rs` and all three rows red with the deduction printed.
+#[test]
+fn the_8283_section_b_column_i_is_blank_for_an_individual_filer() {
+    use btctax_core::forms::{Form8283HowAcquired, Form8283Row, Form8283Section};
+    use btctax_core::tax::printed::form_8283_printed;
+
+    // Three Section B rows, so all THREE grid rows' column-(i) cells are reachable — a one-row
+    // fixture would leave B and C blank for the wrong reason (nothing was written there anyway).
+    let row = |i: usize, carrier: bool| Form8283Row {
+        section: carrier.then_some(Form8283Section::B),
+        description: format!("{i}.00000000 BTC"),
+        how_acquired: Form8283HowAcquired::Purchased,
+        date_acquired: time::macros::date!(2021 - 03 - 01),
+        date_contributed: time::macros::date!(2024 - 07 - 04),
+        cost_basis: dec!(1200),
+        fmv: dec!(60000),
+        // Every row carries one, so the pre-fix writer had something to print in all three.
+        claimed_deduction: Some(dec!(60000)),
+        fmv_method: "qualified appraisal".into(),
+        donee: "Habitat".into(),
+        appraiser: "A. Praiser".into(),
+        needs_review: false,
+        details: None,
+    };
+    let printed = form_8283_printed(&[row(1, true), row(2, false), row(3, false)], Some(false))
+        .expect("there are donations");
+    let pdf = btctax_forms::fill_form_8283_full(&printed, &kitchen_sink_header(), 2024)
+        .unwrap()
+        .expect("a donation ⇒ an 8283");
+
+    for (fqn, row_letter) in [
+        (
+            "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3A[0].f1_56[0]",
+            "A",
+        ),
+        (
+            "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3B[0].f1_62[0]",
+            "B",
+        ),
+        (
+            "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_68[0]",
+            "C",
+        ),
+    ] {
+        assert_eq!(
+            tv(&pdf, fqn),
+            None,
+            "★ Section B row {row_letter} column (i) must be BLANK — i8283 asks it only of a \
+             pass-through entity or a member of one, and btctax models neither"
+        );
+    }
+
+    // THE CONTROL — the cells the form DOES ask of this filer are filled, so the assertions above
+    // cannot be passing merely because nothing was written to the section at all.
+    assert_eq!(
+        tv(
+            &pdf,
+            "Form8283[0].Page1[0].Table_Line3_ColsA-C[0].Row3A[0].f1_44[0]"
+        )
+        .as_deref(),
+        Some("60000"),
+        "(c) appraised fair market value — asked of every Section B filer"
+    );
+    assert_eq!(
+        tv(
+            &pdf,
+            "Form8283[0].Page1[0].Table_Line3_ColsD-I[0].Row3C[0].f1_65[0]"
+        )
+        .as_deref(),
+        Some("1200"),
+        "row C's (f) donor's cost or adjusted basis — so row C really was reached"
+    );
 }
 
 /// The full-return Form 8283 carries the FILER's identity ("Name(s) shown on your income tax return")
@@ -3185,7 +3360,7 @@ fn the_full_return_schedule_d_answers_the_qof_question() {
         Usd::ZERO,
         Usd::ZERO,
         Usd::ZERO,
-        ScheduleDRouting::BothGains,
+        ScheduleDRouting::BothGains { line20_yes: true },
     );
     let pdf = btctax_forms::fill_schedule_d_full(&lines, &kitchen_sink_header(), 2024).unwrap();
 
@@ -3374,4 +3549,231 @@ fn the_1040_line7_not_required_box_is_never_checked() {
          is required — `must_file()` speaks only for its own model, which has no input for Schedule D \
          lines 4/5/11/12. Checking it is testimony the filer never gave."
     );
+}
+
+// ── P2b — the full-return Form 8949 PAGINATES (it used to refuse) ────────────────────────────────
+//
+// The crypto-slice path (`btctax_forms::fill_form_8949`) has chunked and merged since T2. The
+// full-return path called the single-copy filler directly, so a filer with more legs than the
+// revision's grid holds (14 on the TY2024 revision, 11 on 2025) got `FormsError::Overflow` and the
+// packet emitted ZERO bytes — every form lost, not just the 8949. The exposure is LOT-COUNT-driven,
+// not dollar-driven: a weekly dollar-cost-averager holds ~52 lots and any meaningful sale draws on
+// more than 14 of them.
+
+/// Every value whose fully-qualified name ends with `suffix`, across all merged copies. Pagination
+/// renames each copy's ROOT field, so a per-copy cell can no longer be read by an exact FQN.
+fn values_ending(pdf: &[u8], suffix: &str) -> Vec<String> {
+    let doc = load(pdf).unwrap();
+    let fields = collect_fields(&doc).unwrap();
+    fields
+        .iter()
+        .filter(|f| f.fqn.ends_with(suffix))
+        .filter_map(|f| text_value(&doc, f.id))
+        .collect()
+}
+
+/// `n` long-term legs: proceeds `100 × (i+1)`, basis 50, description `"{i}.00000000 BTC"`.
+fn lt_legs(n: u32) -> Vec<btctax_core::forms::Form8949Row> {
+    use btctax_core::forms::{Form8949Box, Form8949Part, Form8949Row};
+    use btctax_core::identity::WalletId;
+    (0..n)
+        .map(|i| {
+            let proceeds = dec!(100) * rust_decimal::Decimal::from(i + 1);
+            Form8949Row {
+                part: Form8949Part::LongTerm,
+                box_: Form8949Box::F,
+                box_needs_review: false,
+                description: format!("{i}.00000000 BTC"),
+                date_acquired: time::macros::date!(2020 - 01 - 02),
+                date_sold: time::macros::date!(2024 - 05 - 01),
+                proceeds,
+                cost_basis: dec!(50),
+                adjustment_code: String::new(),
+                adjustment_amount: Usd::ZERO,
+                gain: proceeds - dec!(50),
+                wallet: WalletId::SelfCustody { label: "w".into() },
+                disposition_kind: btctax_core::event::DisposeKind::Sell,
+            }
+        })
+        .collect()
+}
+
+/// ★★★ **P2b, half 1 of the B1 pair.** 15 long-term legs — ONE more than the TY2024 grid holds —
+/// must FILE, on two copies, with the 15th leg readable on copy 2 and each copy carrying its own
+/// "Name(s) shown on return" header on BOTH of its pages.
+///
+/// Mutation-verified: restoring the direct `fill_8949_parts_with_identity` call reds this at the
+/// `expect()` with `FormsError::Overflow { part: "Part II", rows: 15, capacity: 14 }`.
+#[test]
+fn the_full_return_8949_paginates_and_the_fifteenth_leg_lands_on_copy_two() {
+    use btctax_core::tax::printed::form_8949_printed;
+
+    let printed = form_8949_printed(&lt_legs(15)).expect("there are rows");
+    // The premise: this fixture really does exceed the grid. Without it the test proves nothing.
+    assert_eq!(
+        btctax_forms::Form8949Map::ty2024().rows_per_page,
+        14,
+        "the TY2024 revision's grid — the capacity 15 legs must exceed"
+    );
+
+    let pdf = btctax_forms::fill_8949_full(&printed, &kitchen_sink_header(), 2024)
+        .expect("★ 15 legs must FILE, not refuse");
+
+    let doc = load(&pdf).unwrap();
+    assert_eq!(doc.get_pages().len(), 4, "2 copies × 2 pages");
+
+    // Part II row 1, column (a) — one per copy, each showing that copy's FIRST leg. Copy 2's is leg
+    // 15 (`14.00000000 BTC`), which is the leg the old code could not print at all.
+    let mut row1_a = values_ending(&pdf, "Page2[0].Table_Line1[0].Row1[0].f2_3[0]");
+    row1_a.sort();
+    assert_eq!(
+        row1_a,
+        vec!["0.00000000 BTC".to_string(), "14.00000000 BTC".to_string()],
+        "★ the 15th leg reads back on copy 2"
+    );
+
+    // Every page of every copy carries its own identity header (each 8949 page is a filed page).
+    assert_eq!(
+        values_ending(&pdf, "Page1[0].f1_1[0]"),
+        vec!["John Doe & Jane Doe".to_string(); 2],
+        "both copies' page 1 is named"
+    );
+    assert_eq!(
+        values_ending(&pdf, "Page2[0].f2_1[0]"),
+        vec!["John Doe & Jane Doe".to_string(); 2],
+        "both copies' page 2 is named"
+    );
+    assert_eq!(
+        values_ending(&pdf, "Page2[0].f2_2[0]"),
+        vec!["123-45-6789".to_string(); 2],
+        "…and carries the SSN"
+    );
+}
+
+/// ★★★ **P2b, the CROSS-FOOT.** Schedule D line 10 is "Totals for all transactions reported on
+/// Form(s) 8949 with Box F checked" — **Form(s)**, plural. So the schedule cites the SUM of the
+/// per-copy totals, and `schedule_d_lines` must keep reading totals computed over ALL rows rather
+/// than re-deriving them per page. Read back out of two separately serialized PDFs.
+#[test]
+fn the_paginated_8949s_per_copy_totals_sum_to_schedule_d_line_10() {
+    use btctax_core::tax::printed::form_8949_printed;
+
+    let printed = form_8949_printed(&lt_legs(15)).expect("there are rows");
+    // Σ proceeds = 100 × (1..=15) = 12,000; copy 0 holds legs 1-14 (10,500), copy 1 leg 15 (1,500).
+    assert_eq!(printed.lt_totals.proceeds_d, dec!(12000));
+
+    let pdf_8949 = btctax_forms::fill_8949_full(&printed, &kitchen_sink_header(), 2024).unwrap();
+    let mut per_copy = values_ending(&pdf_8949, "Page2[0].f2_115[0]");
+    per_copy.sort();
+    assert_eq!(
+        per_copy,
+        vec!["10500".to_string(), "1500".to_string()],
+        "each copy totals its OWN legs (the form's line-2 \"Enter each total here\")"
+    );
+    let summed: i64 = per_copy.iter().map(|v| v.parse::<i64>().unwrap()).sum();
+    assert_eq!(summed, 12000, "Σ per-copy totals");
+
+    // …and the Schedule D that CITES them.
+    let mut lines = sd(
+        Usd::ZERO,
+        dec!(11250),
+        Usd::ZERO,
+        Usd::ZERO,
+        Usd::ZERO,
+        // ★ Merge artifact, phase 1 × phase 2: P7 turned `BothGains` into a struct variant carrying
+        //   the filer's Schedule D line-20 answer, and this P2b test did not exist in P7's branch to
+        //   be updated. `true` matches every other call site and is correct for this fixture — lines
+        //   18/19 are zero and no Form 4952 is filed, which is exactly what line 20 asks. Nothing
+        //   here depends on line 20; the subject is the 8949 cross-foot.
+        ScheduleDRouting::BothGains { line20_yes: true },
+    );
+    lines.line10_d = printed.lt_totals.proceeds_d;
+    lines.line10_e = printed.lt_totals.cost_e;
+    lines.line10_h = printed.lt_totals.gain_h;
+    let pdf_sd = btctax_forms::fill_schedule_d_full(&lines, &kitchen_sink_header(), 2024).unwrap();
+    let map_sd = btctax_forms::ScheduleDMap::ty2024();
+    let cell_sd = tv(&pdf_sd, &map_sd.line10.proceeds_d).expect("Schedule D line 10(d) is filled");
+
+    assert_eq!(
+        cell_sd,
+        summed.to_string(),
+        "★ Schedule D line 10(d) must equal the SUM of the 8949 copies' column-(d) totals — the \
+         schedule's own text says \"Form(s) 8949\", plural"
+    );
+}
+
+/// ★★★ **P2b, half 2 of the B1 pair — the PLANTED REGRESSION.** The single-copy filler is what the
+/// full-return path used to call directly. It must still fail closed on an over-capacity part, so a
+/// future edit that drops the chunking cannot silently truncate the grid instead: the leg that does
+/// not fit has nowhere to go, and a form whose printed rows do not add up to its own total is worse
+/// than a refusal.
+#[test]
+fn the_single_copy_8949_filler_still_refuses_an_over_capacity_part() {
+    let map = btctax_forms::Form8949Map::ty2024();
+    let legs = lt_legs(15);
+    let long_refs: Vec<&btctax_core::forms::Form8949Row> = legs.iter().collect();
+    let long = part_data(&long_refs).unwrap();
+    let short = part_data(&[]).unwrap();
+
+    let err = fill_8949_parts_with_identity(&short, &long, &map, &kitchen_sink_header())
+        .expect_err("15 rows do not fit a 14-row grid");
+    match err {
+        FormsError::Overflow {
+            part,
+            rows,
+            capacity,
+        } => assert_eq!((part, rows, capacity), ("Part II", 15, 14)),
+        other => panic!("expected Overflow, got {other:?}"),
+    }
+}
+
+/// ★★★ **P7 — SCHEDULE D LINE 20 IS THE FILER'S ANSWER, NOT A LITERAL.**
+///
+/// The line reads *"Are lines 18 and 19 both zero or blank **and you are not filing Form 4952**?"*
+/// and `schedule_d_full.rs` checked **Yes** with a hardcoded `true`. The lines-18/19 half was sound
+/// (every amount that could sit there refuses upstream, and the form itself says *"both zero **or
+/// blank**"*); the Form 4952 half had NO SOURCE — no field carried it and no question asked it. A
+/// filed Schedule D therefore swore, under §6065, to a fact the filer had never been asked.
+///
+/// This drives the real fill twice and reads the two checkbox widgets back out of the PDF. It is the
+/// only place the emitted BOX is observed, and it is deliberately BOTH directions: a test that only
+/// pinned "Yes" would pass just as well against the literal it replaced.
+///
+/// **B1 mutation, observed RED before the fix landed:** restore `check(need(&map.line20, ..), true,
+/// ..)` — i.e. put the literal back — and the `line20_yes: false` leg reds, because the "No" box
+/// stays blank and the "Yes" box is checked on a return whose filer said they ARE filing Form 4952.
+#[test]
+fn schedule_d_line20_prints_the_filers_form_4952_answer_in_both_directions() {
+    const YES: &str = "topmostSubform[0].Page2[0].c2_2[0]";
+    const NO: &str = "topmostSubform[0].Page2[0].c2_2[1]";
+
+    for (line20_yes, want_yes, want_no) in [(true, true, false), (false, false, true)] {
+        let lines = sd(
+            dec!(20000),
+            dec!(30000),
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            ScheduleDRouting::BothGains { line20_yes },
+        );
+        let pdf = btctax_forms::fill_schedule_d_full(&lines, &kitchen_sink_header(), 2024)
+            .expect("a both-gains Schedule D fills");
+        let checked = |fqn: &str| box_on(&pdf, fqn);
+        assert_eq!(
+            checked(YES),
+            want_yes,
+            "line20_yes={line20_yes}: the YES box must be checked exactly when the filer is NOT \
+             filing Form 4952"
+        );
+        assert_eq!(
+            checked(NO),
+            want_no,
+            "line20_yes={line20_yes}: the NO box must be checked exactly when they ARE"
+        );
+        // …and the two are never both set, which is what a checkbox PAIR means on a filed form.
+        assert!(
+            checked(YES) != checked(NO),
+            "line20_yes={line20_yes}: exactly one of the line-20 boxes may be checked"
+        );
+    }
 }

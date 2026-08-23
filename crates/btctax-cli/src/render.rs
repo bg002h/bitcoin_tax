@@ -1334,9 +1334,18 @@ pub fn render_tax_outcome(
                 fmt_money(r.total_federal_tax_attributable),
                 pseudo.suffix()
             );
+            // ★★★ **LABELLED AS THE CRYPTO SLICE, because that is what it is.** This figure comes
+            //     from the FROZEN delta engine's flat `absorbed = min(loss, §1211(b) limit)` rule
+            //     (`compute::net_1222`), which has no taxable-income term — and it structurally
+            //     CANNOT SEE broker short-term losses: `derive_tax_profile` discards them and
+            //     `other_net_capital_gain` is long-term only. So on a household with a 1099-B
+            //     short-term loss it diverges from the return's §1212(b) figure with nothing on the
+            //     page to explain why. The fix is the LABEL and the second line, not the engine: the
+            //     delta figure is not wrong, it was described as something it is not.
             let _ = writeln!(
                 s,
-                "  §1211 loss deduction (level): {}   carryforward out: short {} / long {}",
+                "  §1211 loss deduction (crypto slice): {}   crypto-slice carryforward out: \
+                 short {} / long {}",
                 fmt_money(r.loss_deduction),
                 fmt_money(r.carryforward_out.short),
                 fmt_money(r.carryforward_out.long)
@@ -1464,6 +1473,8 @@ pub fn provenance_label(p: crate::resolve::Provenance) -> &'static str {
 ///
 /// The crypto-DELTA block below stays in exact cents: it is not a filed figure — it answers a different
 /// question (§6), and the frozen engine computes it in cents.
+/// `cwa_unvouched` — FINAL-REVIEW FINDING 1; see [`render_charitable_carryover_out`].
+#[allow(clippy::too_many_arguments)]
 pub fn render_dual_report(
     year: i32,
     ar: &btctax_core::AbsoluteReturn,
@@ -1471,6 +1482,7 @@ pub fn render_dual_report(
     delta: &btctax_core::TaxOutcome,
     provenance: crate::resolve::Provenance,
     pseudo: PseudoDisclosure,
+    cwa_unvouched: Option<Usd>,
 ) -> String {
     let f = &printed.f1040;
     let mut s = String::new();
@@ -1569,6 +1581,25 @@ pub fn render_dual_report(
     } else {
         let _ = writeln!(s, "  → AMOUNT OWED (L37):      {}", fmt_money(f.line37));
     }
+    // ★ P6 — the §170(d)(1) charitable carryover-out, printed here because this is the block a filer
+    // reads to see what their return did. Before this it reached no human at all.
+    if let Some(block) =
+        render_charitable_carryover_out(year, &ar.charitable_carryover_out, cwa_unvouched)
+    {
+        s.push_str(&block);
+    }
+    // ★★★ …and the §1212(b) CAPITAL-LOSS carryover beside it, for the same reason and one more.
+    //
+    // The delta block prints a carryforward-out too, from the frozen crypto-slice engine, and the two
+    // can differ — on a floor household by up to the whole §1211(b) allowance, and on a household
+    // with a broker short-term loss by an amount the delta engine cannot even see. Two unlabelled
+    // figures for "your carryover" is worse than one: a filer who takes the smaller one forfeits
+    // deductible loss permanently. So this one is printed and named as THE RETURN'S, in whole
+    // dollars — the figure `--write-carryover` persists and next year's Schedule D lines 6 and 14
+    // will carry.
+    if let Some(block) = render_capital_loss_carryover_out(year, ar) {
+        s.push_str(&block);
+    }
     // §6: the two figures answer different questions and are NEVER reconciled.
     let delta_str = match delta {
         btctax_core::TaxOutcome::Computed(r) => fmt_money(r.total_federal_tax_attributable),
@@ -1595,6 +1626,172 @@ pub fn render_dual_report(
          reconcile to the dollar."
     );
     s
+}
+
+/// The §170(b) ceiling class, in the words the statute and Pub. 526 use.
+///
+/// ★ A `match`, not a lookup table, on purpose: adding a `CharitableClass` variant reds this
+/// exhaustively rather than printing a debug name at a filer.
+fn charitable_class_label(c: btctax_core::tax::return_inputs::CharitableClass) -> &'static str {
+    use btctax_core::tax::return_inputs::CharitableClass as C;
+    match c {
+        C::Cash60 => "cash to a 50% organization (60%-of-AGI ceiling)",
+        C::Cash30 => "cash to a non-50% organization (30%-of-AGI ceiling)",
+        C::CapGainProp30 => {
+            "capital-gain property at FMV to a 50% organization (30%-of-AGI ceiling)"
+        }
+        C::CapGainProp20 => "capital-gain property to a non-50% organization (20%-of-AGI ceiling)",
+        C::OrdinaryProp50 => {
+            "ordinary-income or basis property to a 50% organization (50%-of-AGI ceiling)"
+        }
+        C::OrdinaryProp30 => {
+            "ordinary-income or basis property to a non-50% organization (30%-of-AGI ceiling)"
+        }
+    }
+}
+
+/// ★ P6 (FILING-READINESS-PLAN rank 9) — **the §170(d)(1) charitable carryover-out, shown to a
+/// human.** `None` when nothing carries.
+///
+/// The value was computed on every full-return run, correct, and tested — and read by exactly one
+/// caller, `apply_carryover_writeback`, reachable only from `report --write-carryover`, which itself
+/// errors unless a year+1 row already exists. A filer whose gift exceeded its §170(b) ceiling was
+/// therefore never told a carryover existed: a deduction they had already paid for, silently
+/// forgone. Nothing here is computed — the number already exists on `AbsoluteReturn`; this is the
+/// reader it never had.
+///
+/// **Per class and per origin year**, because neither is decoration: each class has its own ceiling,
+/// so the classes cannot be summed into one figure a filer could use, and §170(d)(1) carries an
+/// excess for only the five succeeding years, so a vintage is the difference between a live
+/// deduction and an expired one. The last usable year is printed for the same reason.
+///
+/// ★ It is NOT a rich-filer line. The ceiling is a FRACTION of AGI, so the lower the income the
+/// lower the bar — at $0 AGI the ceiling is $0 and 100% of the gift carries.
+///
+/// ★★★ `cwa_unvouched` — FINAL-REVIEW FINDING 1. When `Some`, this year's carryover has no §170(f)(8)
+/// acknowledgment behind it and the block says so. Passed IN rather than re-derived here so that this
+/// surface, `export-irs-pdf`'s, and `apply_carryover_writeback`'s refusal all read the SAME predicate
+/// (`cwa_unvouched_carryover`); three copies of a statutory test is how they come to disagree.
+/// The §1212(b) capital-loss carryover to next year, as the FILED page will carry it.
+///
+/// `None` when there is none — a filer with no surviving loss needs no line about one.
+///
+/// ★ WHOLE DOLLARS, matching what `--write-carryover` persists and what next year's Schedule D lines
+/// 6 and 14 will print. Showing cents here and storing dollars would give the filer two answers to
+/// one question, which is the failure this whole function exists to end.
+pub fn render_capital_loss_carryover_out(
+    year: i32,
+    ar: &btctax_core::tax::return_1040::AbsoluteReturn,
+) -> Option<String> {
+    use btctax_core::conventions::round_dollar;
+    let out = ar.capital_loss_carryforward_out;
+    let (short, long) = (round_dollar(out.short), round_dollar(out.long));
+    if short <= Usd::ZERO && long <= Usd::ZERO {
+        return None;
+    }
+    let mut s = String::new();
+    let _ = writeln!(
+        s,
+        "\n  ── §1212(b) Capital-loss carryover to {next} (THE RETURN'S figure — authoritative) ──",
+        next = year + 1
+    );
+    let _ = writeln!(
+        s,
+        "  short-term (Schedule D line 6): {}   long-term (line 14): {}",
+        fmt_money(short),
+        fmt_money(long)
+    );
+    let _ = writeln!(
+        s,
+        "  Figured on the Capital Loss Carryover Worksheet — Lines 6 and 14. Any carryforward figure \
+         in the crypto-DELTA block below is the crypto slice only and is NOT this number."
+    );
+    Some(s)
+}
+
+pub fn render_charitable_carryover_out(
+    year: i32,
+    items: &[btctax_core::tax::return_inputs::CharitableCarryItem],
+    cwa_unvouched: Option<Usd>,
+) -> Option<String> {
+    if items.is_empty() {
+        return None;
+    }
+    let mut s = String::new();
+    let _ = writeln!(
+        s,
+        "\n  ── §170(d)(1) Charitable carryover to {next} ──",
+        next = year + 1
+    );
+    // Oldest vintage first, then class — the order Pub. 526 consumes them in, so the list reads as
+    // the order they will be used.
+    let mut rows: Vec<_> = items.iter().collect();
+    rows.sort_by_key(|c| (c.origin_year, format!("{:?}", c.class)));
+    let total: Usd = rows.iter().map(|c| c.amount).sum();
+    for c in &rows {
+        let _ = writeln!(
+            s,
+            "  • {amount:>14}  from {origin} — {label}; usable through {last}",
+            amount = fmt_money(c.amount),
+            origin = c.origin_year,
+            label = charitable_class_label(c.class),
+            // §170(d)(1): expired once `year − origin > 5`, so `origin + 5` is the last live year.
+            last = c.origin_year + 5,
+        );
+    }
+    if rows.len() > 1 {
+        let _ = writeln!(s, "  • {:>14}  TOTAL", fmt_money(total));
+    }
+    // ★ F5 (phase-1 seam review). This used to open "Your {year} gifts exceeded their §170(b)
+    //   ceiling" — an assertion of fact that is FALSE for a re-carried prior vintage. `apply_170b`'s
+    //   `carryover_out` includes unused, unexpired carryover-IN items under their ORIGINAL
+    //   `origin_year` (aging per Reg §1.170A-10(a)(2)), so a household whose {year} gifts fit under
+    //   the ceiling — or which made no gift at all this year — can still reach this block. Both of
+    //   lane B's fixtures used current-year-only gifts, so its B1 pair could not see it.
+    //   The per-item lines above already carry each vintage; the summary must not overwrite them
+    //   with a claim about one year.
+    let _ = writeln!(
+        s,
+        "  This is unused charitable deduction carrying forward into {next}. It may be {year} gifts \
+         above\n  their §170(b) ceiling, an earlier year's carryover still unclaimed, or both — each \
+         line above\n  shows its own vintage. It is deduction you have already paid for; it is lost \
+         if it is never\n  claimed.\n  Roll it into next year's inputs with `btctax report \
+         --tax-year {year} --write-carryover` ({next}'s\n  full-return inputs must exist first), or \
+         enter it by hand on {next}'s row.",
+        next = year + 1
+    );
+    // ★★★ FINAL-REVIEW FINDING 1 — THE SENTENCE THAT MAKES THE PARAGRAPH ABOVE HONEST.
+    //
+    // "It is deduction you have already paid for" is money-in-the-bank language, and for the
+    // STANDARD-DEDUCTION deferral donor it may be false: §170(f)(8)(A) disallows the contribution
+    // outright without a contemporaneous written acknowledgment, and nothing asked them, because the
+    // P4 refusal is gated on `deduction_is_itemized` and their return claims no §170 deduction.
+    //
+    // ★★ IT MUST BE SAID **HERE**, and not only at the write-back, because of the DEADLINE: the
+    //    write-back happens after filing, and §170(f)(8)(C) makes an acknowledgment contemporaneous
+    //    only if obtained by the earlier of filing or the due date. A gate that fires after the
+    //    return is filed protects next year's figure but cannot save the cure. This block prints on
+    //    every `report --tax-year` and on the export that hands over the PDF — both before filing.
+    if let Some(unvouched) = cwa_unvouched {
+        let _ = writeln!(
+            s,
+            "\n  ⚠ §170(f)(8) — {amount} of this carryover is NOT yet substantiated.\n  \
+             At least one {year} gift was $250 or more, and btctax has not been told you hold a \
+             contemporaneous\n  written acknowledgment from the charity. §170(f)(8)(A): \"No \
+             deduction shall be allowed …\n  unless the taxpayer substantiates the contribution by a \
+             contemporaneous written acknowledgment\"\n  — so without one this carryover does not \
+             exist, however many years it would otherwise run.\n  \
+             ★ THE DEADLINE IS THIS RETURN. §170(f)(8)(C) counts an acknowledgment as \
+             contemporaneous only\n  if you obtain it \"by the date you file your return or the due \
+             date (including extensions) for\n  filing your return, whichever is earlier\" — so ask \
+             the charity BEFORE you file {year}. Filing\n  first extinguishes the cure permanently, \
+             even though this year's return claims no charitable\n  deduction at all and is correct \
+             as it stands.\n  Then record it with `btctax income answer`; \
+             `--write-carryover` will refuse until you do.",
+            amount = fmt_money(unvouched),
+        );
+    }
+    Some(s)
 }
 
 /// P2-B Task 3: render the RAW pre-netting Schedule D part totals (Part I ST, Part II LT) for
@@ -4495,5 +4692,79 @@ mod defensive_status_tests {
         view.flagged_years.insert(2024);
         let out = render_defensive_status(&view);
         assert!(out.contains("Safe-harbor allocation: BLOCKED"), "{out}");
+    }
+}
+
+#[cfg(test)]
+mod cwa_carryover_warning_tests {
+    use super::*;
+    use btctax_core::tax::return_inputs::{CarryProvenance, CharitableCarryItem, CharitableClass};
+    use rust_decimal_macros::dec;
+
+    fn items() -> Vec<CharitableCarryItem> {
+        vec![CharitableCarryItem {
+            class: CharitableClass::CapGainProp30,
+            amount: dec!(13000),
+            origin_year: 2024,
+            provenance: CarryProvenance::Computed,
+        }]
+    }
+
+    /// ★★★ FINAL-REVIEW FINDING 1 — the "asked" half, and the ONLY surface that reaches the filer
+    /// while §170(f)(8)(C)'s cure is still alive.
+    ///
+    /// The write-back guard runs AFTER filing, so it protects next year's figure but cannot save the
+    /// acknowledgment deadline. This block prints on `report --tax-year` and on the export that hands
+    /// over the PDF — both before filing — which is why the sentence has to be here and not only
+    /// there.
+    ///
+    /// Plant: drop the `if let Some(unvouched)` block from `render_charitable_carryover_out` ⇒ reds.
+    #[test]
+    fn the_unvouched_carryover_block_names_the_statute_the_amount_and_the_deadline() {
+        let out = render_charitable_carryover_out(2024, &items(), Some(dec!(13000)))
+            .expect("a non-empty carryover always renders a block");
+
+        assert!(
+            out.contains("170(f)(8)"),
+            "the warning must name the statute that may deny the carryover outright: {out}"
+        );
+        assert!(
+            out.contains("13,000") || out.contains("13000"),
+            "…and the AMOUNT at risk, which is the deferred slice and not the whole gift: {out}"
+        );
+        assert!(
+            out.contains("whichever is earlier"),
+            "…and §170(f)(8)(C)'s deadline VERBATIM — the filer has to know the cure dies at filing, \
+             which is the whole reason this is said here and not at the write-back: {out}"
+        );
+        assert!(
+            out.contains("BEFORE you file"),
+            "…in the imperative, because the action is time-boxed: {out}"
+        );
+        assert!(
+            out.contains("correct as it stands"),
+            "…while saying the RETURN is fine, or the filer reads it as a refusal and goes looking \
+             for a figure to change: {out}"
+        );
+    }
+
+    /// The discriminating half. Without this the assertions above are satisfied by a block that warns
+    /// EVERY donor — including the one who holds the acknowledgment, and the one whose gifts are all
+    /// under §170(f)(8)(A)'s $250 threshold.
+    #[test]
+    fn a_vouched_for_carryover_prints_the_block_with_no_warning_at_all() {
+        let out = render_charitable_carryover_out(2024, &items(), None)
+            .expect("the carryover block itself still prints");
+
+        assert!(
+            out.contains("Charitable carryover to 2025"),
+            "the block is unchanged for a filer who is vouched for: {out}"
+        );
+        assert!(
+            !out.contains("170(f)(8)"),
+            "★ …and carries NO acknowledgment warning. A warning shown to everyone is not a warning, \
+             and this one tells a filer who already answered to go and do something they have done: \
+             {out}"
+        );
     }
 }

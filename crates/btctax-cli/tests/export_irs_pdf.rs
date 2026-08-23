@@ -1274,3 +1274,445 @@ fn an_above_threshold_reit_only_export_files_form_8995a() {
         "the SIMPLIFIED Form 8995 must not be filed above the threshold: {names:?}"
     );
 }
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// P2a — the Form 8949 overflow PREFLIGHT (FILING-READINESS-PLAN rank 3).
+//
+// Form 8949 holds 14 rows per part per page and the full-return path does not paginate. Before this
+// preflight, a filer with more disposal legs than that got `error: IRS form fill: 16 rows exceed the
+// 14-row capacity of a single Part II page` — exit 2, output directory never created, EVERY form in
+// the packet lost — from a message naming no tax year, no remedy, and never saying this is a btctax
+// limit rather than the filer's error. Meanwhile `report --tax-year` on the same vault exits 0 and
+// prints every figure: the filer has the numbers and cannot get the paper.
+//
+// ★ The overflow is LOT-COUNT-driven, not dollar-driven. A weekly dollar-cost-averaging buyer holds
+// ~52 lots and any meaningful sale draws on more than 14 of them, while a single-lot whale with a $1M
+// gain emits one row — so the SMALL end of the dollar axis is the more exposed population.
+
+/// A TY2024 ledger whose single sale draws on `lots` separate long-term lots ⇒ `lots` Form 8949
+/// Part II rows (`form_8949` emits one row per disposal LEG, never aggregating). The DCA shape: many
+/// small weekly buys in 2022, one sale in 2024.
+fn dca_events_2024(lots: usize) -> Vec<LedgerEvent> {
+    let mut evs: Vec<LedgerEvent> = (0..lots)
+        .map(|i| {
+            ev(
+                &format!("dca-buy-{i}"),
+                datetime!(2022-01-05 12:00 UTC) + time::Duration::days(i as i64 * 7),
+                EventPayload::Acquire(Acquire {
+                    sat: 100_000,
+                    usd_cost: dec!(50),
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            )
+        })
+        .collect();
+    evs.push(ev(
+        "dca-sell",
+        datetime!(2024-06-15 12:00 UTC),
+        EventPayload::Dispose(Dispose {
+            sat: 100_000 * lots as i64,
+            usd_proceeds: dec!(100) * rust_decimal::Decimal::from(lots as i64),
+            fee_usd: dec!(0),
+            kind: DisposeKind::Sell,
+        }),
+    ));
+    evs
+}
+
+/// ★★ **This test asserted the OPPOSITE until P2b landed, and the inversion is the point.**
+///
+/// P2a shipped an honest overflow refusal here — correct while the full-return path could not
+/// paginate. P2b then made it paginate (`fill_full_return` → `fill_8949_full_with_map`, chunking into
+/// ⌈rows/grid⌉ copies with no ceiling), which turned that refusal into a FALSE one: the CLI rejected a
+/// packet the filler would have produced, reintroducing the exact total loss — exit 2, zero bytes,
+/// every form in the packet gone — that P2b existed to end, for the DCA population P2a itself named as
+/// the most exposed.
+///
+/// ★★★ **B3, demonstrated.** P2a (btctax-cli) and P2b (btctax-forms) were built in PARALLEL worktrees
+/// off one base. Each shipped a passing kill-test, and the two asserted contradictory things about
+/// this same 16-leg filer: the forms test that it PAGINATES, this one that it REFUSES. Both suites
+/// were green simultaneously, because each was scoped to one layer and neither could see the other.
+/// A per-range review is not a branch review, and a green suite per lane does not compose into a
+/// correct product.
+///
+/// B1 planted defect: restore the deleted preflight in `export_irs_pdf` and this reds at the
+/// `expect()` with `CliError::Usage`.
+#[test]
+fn a_full_return_with_more_8949_legs_than_a_page_holds_now_files_on_multiple_copies() {
+    let (_d, vault, out) = full_return_vault(&dca_events_2024(16), |_ri| {});
+
+    // The premise: this fixture really does exceed one page's grid. Without it the test proves
+    // nothing — it would pass on a 1-leg household that never reaches the pagination path at all.
+    assert_eq!(
+        btctax_forms::Form8949Map::ty2024().rows_per_page,
+        14,
+        "the TY2024 grid — the capacity 16 legs must exceed"
+    );
+
+    cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
+        .expect("★ 16 legs must FILE now that the full-return 8949 paginates (P2b)");
+
+    // ★ The full-return packet writes SEQUENCE-PREFIXED names (`12A_f8949.pdf`) so a slice run and a
+    // packet run into one directory cannot interleave; find it by stem rather than pinning the
+    // prefix, which is the attachment sequence and not this test's subject.
+    let f8949_path = std::fs::read_dir(out.path())
+        .expect("out_dir exists")
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .find(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.ends_with("_f8949.pdf"))
+        })
+        .expect("the packet must contain a Form 8949, not be lost to a false refusal");
+    let f8949 = std::fs::read(&f8949_path).unwrap();
+    assert!(f8949.starts_with(b"%PDF"));
+
+    use btctax_forms::testonly::*;
+    let doc = load(&f8949).unwrap();
+    assert_eq!(
+        doc.get_pages().len(),
+        4,
+        "16 legs ⇒ 2 copies × 2 pages — the 15th and 16th legs have somewhere to print"
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// P6 — the §170(d)(1) charitable carryover-out must reach a human on the EXPORT path too
+// (FILING-READINESS-PLAN rank 9). `report --tax-year` is not the only way a filer meets their
+// return; `export-irs-pdf` is the one that hands them a PDF to sign, and it prints the §170 warnings
+// already. A carryover the filer is never told about is a deduction they paid for and forfeit.
+
+/// A TY2024 full-return vault whose gift OVERFLOWS its §170(b) ceiling: $50,000 of wages against a
+/// $40,000 cash gift, so the 60%-of-AGI ceiling leaves an excess to carry into 2025.
+fn full_return_vault_with_a_gift_over_its_ceiling(
+) -> (tempfile::TempDir, PathBuf, tempfile::TempDir) {
+    use btctax_core::tax::return_inputs::{
+        CharitableClass, CharitableGift, Owner, ScheduleAInputs, W2,
+    };
+    full_return_vault(&real_events_2024(), |ri| {
+        ri.w2s = vec![W2 {
+            owner: Owner::Taxpayer,
+            employer: "ACME".into(),
+            box1_wages: dec!(50000),
+            box2_fed_withheld: dec!(5000),
+            box3_ss_wages: dec!(50000),
+            box5_medicare_wages: dec!(50000),
+            ..Default::default()
+        }];
+        ri.schedule_a = Some(ScheduleAInputs {
+            charitable: vec![CharitableGift {
+                class: CharitableClass::Cash60,
+                amount: dec!(40000),
+            }],
+            ..Default::default()
+        });
+        // ★ P4 (phase 2) gates an itemizing return with any single gift >= $250 on the §170(f)(8)
+        //   contemporaneous written acknowledgment. This fixture's subject is the CARRYOVER, not
+        //   substantiation, so it answers the question rather than dodging it — a $40,000 gift with
+        //   no CWA is a deduction the statute denies, and the fixture must not model an unlawful one.
+        ri.charitable_cwa_obtained = Some(true);
+    })
+}
+
+/// ★ P6, the report struct: the export path must CARRY the carryover out to its caller. Without this
+/// the value has no reader on this path at all.
+#[test]
+fn the_full_return_export_report_carries_the_charitable_carryover_out() {
+    let (_d, vault, out) = full_return_vault_with_a_gift_over_its_ceiling();
+    let rep = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
+        .expect("the packet exports");
+    assert!(
+        !rep.charitable_carryover_out.is_empty(),
+        "a gift over its §170(b) ceiling must carry its carryover out on the export report"
+    );
+    assert!(
+        rep.charitable_carryover_out
+            .iter()
+            .all(|c| c.origin_year == 2024 && c.amount > btctax_core::Usd::ZERO),
+        "…tagged with the origin year and a real amount: {:?}",
+        rep.charitable_carryover_out
+    );
+}
+
+/// ★ P6, the human: running the real binary, `export-irs-pdf` must NAME the carryover on stderr,
+/// beside the other §170 notes. Mutation: delete the block from main.rs and this reds — which is the
+/// only thing that pins the value reaches a person rather than a struct field.
+#[test]
+fn export_irs_pdf_tells_the_filer_about_the_charitable_carryover() {
+    let (_d, vault, out) = full_return_vault_with_a_gift_over_its_ceiling();
+    let bin = env!("CARGO_BIN_EXE_btctax");
+    let res = std::process::Command::new(bin)
+        .arg("--vault")
+        .arg(&vault)
+        .args(["export-irs-pdf", "--tax-year", "2024", "--out"])
+        .arg(out.path().join("packet"))
+        .env("BTCTAX_PASSPHRASE", "pw")
+        .output()
+        .expect("btctax binary must execute");
+    let stderr = String::from_utf8_lossy(&res.stderr).into_owned();
+    assert_eq!(res.status.code(), Some(0), "the export succeeds: {stderr}");
+    assert!(
+        stderr.contains("Charitable carryover to 2025"),
+        "the export must name the §170(d)(1) carryover on stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("--write-carryover"),
+        "…and how to roll it forward: {stderr}"
+    );
+}
+
+/// The other half of the B1 pair: 14 legs — exactly the page capacity — still EXPORTS. A preflight
+/// that refuses one leg too early would be as wrong as no preflight at all (`>` vs `>=` is the
+/// mutation this kills).
+#[test]
+fn a_full_return_with_exactly_a_full_8949_page_of_legs_still_exports() {
+    let (_d, vault, out) = full_return_vault(&dca_events_2024(14), |_ri| {});
+
+    cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
+        .expect("14 legs fit the page exactly and must still file");
+    assert!(
+        out.path().join("00_f1040.pdf").exists(),
+        "the packet writes on the boundary case"
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// N4 — the packet's UNSIGNALLED HAND-MARKS (FILING-READINESS-PLAN rank 14).
+//
+// A no-crypto packet leaves the Digital Asset question unmarked (btctax cannot swear "No" for a
+// ledger it was not given) and the line-7 "If not required, check here" box blank (it cannot
+// establish that Schedule D is NOT required). Both blanks are CORRECT — "an entry is testimony", and
+// btctax must never answer for the filer. What was wrong is that the filer was never TOLD: no
+// advisory named the digital-asset question, and manifest.txt was one line of stapling order. A
+// filer signed a return with a mandatory question unanswered and no instruction anywhere in the
+// product's output.
+//
+// ★ The fix adds the SIGNAL, never the answer. Owner decision 13 puts it in the manifest — the one
+// artifact the filer is told to follow while assembling paper.
+
+/// A TY2024 full-return vault with NO crypto activity at all: a plain wage earner. This is the L1
+/// household of the plan's low-end pass, and the population for both mark 1 and mark 2.
+fn no_crypto_full_return_vault() -> (tempfile::TempDir, PathBuf, tempfile::TempDir) {
+    use btctax_core::tax::return_inputs::{Owner, W2};
+    full_return_vault(&[], |ri| {
+        ri.w2s = vec![W2 {
+            owner: Owner::Taxpayer,
+            employer: "ACME".into(),
+            box1_wages: dec!(40000),
+            box2_fed_withheld: dec!(3000),
+            box3_ss_wages: dec!(40000),
+            box5_medicare_wages: dec!(40000),
+            ..Default::default()
+        }];
+    })
+}
+
+/// ★ N4. The no-crypto packet's manifest must ENUMERATE the marks btctax deliberately left for the
+/// filer — and must not answer any of them.
+///
+/// Mutation: delete the `hand_marks` block from the manifest and this reds.
+#[test]
+fn a_no_crypto_packet_names_the_marks_the_filer_must_make_by_hand() {
+    let (_d, vault, out) = no_crypto_full_return_vault();
+    let rep = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
+        .expect("a plain wage earner's packet exports");
+    let manifest = std::fs::read_to_string(out.path().join("manifest.txt")).unwrap();
+
+    assert!(
+        manifest.contains("COMPLETE BY HAND"),
+        "the manifest must carry a hand-marks section: {manifest}"
+    );
+    assert!(
+        manifest.contains("Digital Asset"),
+        "…naming the Digital Asset question, which is mandatory and unanswered: {manifest}"
+    );
+    assert!(
+        manifest.contains("line 7"),
+        "…the line-7 \"If not required, check here\" box, blank on a no-Schedule-D packet: {manifest}"
+    );
+    assert!(
+        manifest.contains("penalties of perjury") || manifest.contains("sign"),
+        "…and the signature block, which is every filer's: {manifest}"
+    );
+    // The signal, never the answer.
+    assert_eq!(
+        rep.hand_marks.len(),
+        3,
+        "exactly the three marks this packet leaves: {:?}",
+        rep.hand_marks
+    );
+}
+
+/// The other half of the B1 pair. A packet where btctax DID answer the Digital Asset question (there
+/// is crypto activity) and DID attach a Schedule D must not tell the filer to make either mark — a
+/// list that always says the same thing signals nothing, and instructing a filer to hand-mark a box
+/// on a correctly-filed form is worse than silence.
+#[test]
+fn a_crypto_packet_does_not_list_marks_btctax_already_made() {
+    let (_d, vault, out) = full_return_vault(&real_events_2024(), |_ri| {});
+    let rep = cmd::admin::export_irs_pdf(&vault, &pp(), out.path(), 2024, &[], None)
+        .expect("the crypto packet exports");
+    let manifest = std::fs::read_to_string(out.path().join("manifest.txt")).unwrap();
+
+    assert!(
+        !manifest.contains("Digital Asset"),
+        "btctax answered the Digital Asset question \"Yes\" — it is not the filer's to make: {manifest}"
+    );
+    assert!(
+        !manifest.contains("line 7"),
+        "a Schedule D IS attached, so the line-7 \"if not required\" box is not the filer's: {manifest}"
+    );
+    // The signature is always theirs, on every return.
+    assert_eq!(
+        rep.hand_marks.len(),
+        1,
+        "only the signature block remains: {:?}",
+        rep.hand_marks
+    );
+    assert!(
+        manifest.contains("COMPLETE BY HAND"),
+        "…and it is still announced: {manifest}"
+    );
+}
+
+/// ★★★ **P5 / §170(f)(11)(D) — THE MANIFEST MUST NAME THE APPRAISAL, END TO END.**
+///
+/// Over $500,000 claimed for donated property the qualified appraisal is not a record to keep, it is
+/// an ATTACHMENT to the filed return. btctax cannot generate it — only an appraiser can — so the one
+/// thing it owes the filer is to put it in the stapling order. A required attachment that appears in
+/// no manifest is one nobody attaches, and the packet looks complete without it.
+///
+/// This runs the REAL `export-irs-pdf` path, not the advisory builder: a long-term BTC donation
+/// reclassified through `reclassify_outflow`, a full return that itemizes and claims it, and then
+/// `manifest.txt` read back off disk.
+///
+/// **B1 mutations, each observed RED before the fix landed:**
+/// - delete the manifest block from `export_irs_pdf` ⇒ the first assertion reds while the rest of
+///   the suite stays green (the advisory alone is stderr, and stderr is not the envelope);
+/// - relax the §170(f)(11)(D) threshold to §170(f)(11)(C)'s $5,000 ⇒ the second, small-donation
+///   assertion reds, i.e. every $5,001 donor is told to attach an appraisal to the return.
+#[test]
+fn the_manifest_names_the_qualified_appraisal_over_500k_and_stays_quiet_below_it() {
+    use btctax_cli::{return_inputs, Session};
+    use btctax_core::event::OutflowClass;
+    use btctax_core::tax::return_inputs::{Owner, Person, ReturnInputs, ScheduleAInputs, W2};
+    use btctax_core::tax::types::FilingStatus;
+
+    // A 2024 long-term donation of `fmv`: buy 1 BTC in 2020, Send it in 2024, reclassify as Donate.
+    // The lot is long-term, so §170(e) leaves the deduction at FMV — the claimed amount IS `fmv`.
+    let donation_vault = |fmv: &str| {
+        let evs = vec![
+            ev(
+                "buy-lt",
+                datetime!(2020-01-05 12:00 UTC),
+                EventPayload::Acquire(Acquire {
+                    sat: 100_000_000,
+                    usd_cost: dec!(10000),
+                    fee_usd: dec!(0),
+                    basis_source: BasisSource::ExchangeProvided,
+                }),
+            ),
+            ev(
+                "send-donate",
+                datetime!(2024-06-01 12:00 UTC),
+                EventPayload::TransferOut(TransferOut {
+                    sat: 100_000_000,
+                    fee_sat: None,
+                    dest_addr: Some("bc1qsyntheticcharity".into()),
+                    txid: None,
+                }),
+            ),
+        ];
+        let (dir, vault) = make_vault(&evs);
+        let out_ref = {
+            let s = Session::open(&vault, &pp()).unwrap();
+            let (state, _) = s.project().unwrap();
+            state.pending_reconciliation[0].event.canonical()
+        };
+        cmd::reconcile::reclassify_outflow(
+            &vault,
+            &pp(),
+            &out_ref,
+            OutflowClass::Donate {
+                appraisal_required: false,
+            },
+            btctax_cli::eventref::parse_usd_arg(fmv).unwrap(),
+            None,
+            None,
+            datetime!(2026-01-01 12:00 UTC),
+        )
+        .unwrap();
+        // A full return that ITEMIZES and claims the property deduction. AGI is large enough that
+        // §170(b)'s 30% ceiling lets a real amount onto Schedule A line 12.
+        {
+            let mut s = Session::open(&vault, &pp()).unwrap();
+            let mut ri = ReturnInputs {
+                filing_status: FilingStatus::Single,
+                header: btctax_core::tax::testonly::not_a_dependent(),
+                donations_had_restrictions: Some(false),
+                charitable_cwa_obtained: Some(true),
+                schedule_a: Some(ScheduleAInputs {
+                    salt_real_estate: dec!(10000),
+                    ..Default::default()
+                }),
+                w2s: vec![W2 {
+                    owner: Owner::Taxpayer,
+                    box1_wages: dec!(3000000),
+                    box3_ss_wages: dec!(168600),
+                    box5_medicare_wages: dec!(3000000),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+            ri.header.taxpayer = Person {
+                first_name: "Pat".into(),
+                last_name: "Filer".into(),
+                ssn: "123456789".into(),
+                ..Default::default()
+            };
+            btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
+            return_inputs::set(s.conn(), 2024, &ri).unwrap();
+            s.save().unwrap();
+        }
+        (dir, vault)
+    };
+
+    // ── OVER the threshold: $700,000 claimed. The manifest must say to attach the appraisal. ──
+    let (_d1, big) = donation_vault("700000.00");
+    let out1 = tempfile::tempdir().unwrap();
+    cmd::admin::export_irs_pdf(&big, &pp(), out1.path(), 2024, &[], None)
+        .expect("the $700,000-donation full return exports");
+    let man = std::fs::read_to_string(out1.path().join("manifest.txt")).unwrap();
+    assert!(
+        man.contains("qualified appraisal")
+            && man.contains("170(f)(11)(D)")
+            && man.to_ascii_uppercase().contains("MUST SUPPLY"),
+        "the manifest must name the appraisal, cite §170(f)(11)(D), and say btctax cannot make \
+         it:\n{man}"
+    );
+    assert!(
+        man.contains("$700000.00"),
+        "…and carry the amount that triggered it, so the filer can check it:\n{man}"
+    );
+    assert!(
+        man.contains("1.170A-16(f)(3)"),
+        "…and say the duty recurs in every §170(d) carryover year:\n{man}"
+    );
+
+    // ── UNDER it: a $20,000 donation. Over §170(f)(11)(C)'s $5,000 (so an appraisal must be
+    //    OBTAINED and a Section B 8283 files) but far under §170(f)(11)(D)'s $500,000, so nothing is
+    //    ATTACHED and the manifest must not say otherwise. This is the row that separates the two
+    //    thresholds — without it, wiring the gate to $5,000 would go unnoticed.
+    let (_d2, small) = donation_vault("20000.00");
+    let out2 = tempfile::tempdir().unwrap();
+    cmd::admin::export_irs_pdf(&small, &pp(), out2.path(), 2024, &[], None)
+        .expect("the $20,000-donation full return exports");
+    let man2 = std::fs::read_to_string(out2.path().join("manifest.txt")).unwrap();
+    assert!(
+        !man2.contains("qualified appraisal"),
+        "a $20,000 donation owes no ATTACHED appraisal — §170(f)(11)(D) is 'more than \
+         $500,000':\n{man2}"
+    );
+}

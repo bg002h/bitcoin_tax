@@ -41,8 +41,9 @@ pub use project::{
 };
 pub use state::*;
 pub use tax::{
-    apply_carryover_writeback, assemble_absolute, carryforward_consistency, compute_se_tax,
-    compute_tax_year, loss_limit, niit_threshold, screen_absolute, se_addl_medicare_threshold,
+    apply_carryover_writeback, assemble_absolute, capital_loss_roll_is_grounded,
+    carryforward_consistency, compute_se_tax, compute_tax_year, loss_limit, niit_threshold,
+    rounded_capital_loss_carryforward_out, screen_absolute, se_addl_medicare_threshold,
     se_net_income, AbsoluteReturn, Carryforward, FilingStatus, LtcgBreakpoints, MarginalRates,
     OrdinaryBracket, OrdinarySchedule, PrefSplit, SeTaxResult, TaxOutcome, TaxProfile, TaxResult,
     TaxTable, TaxTables, NIIT_RATE, QUALIFIED_APPRAISAL_THRESHOLD, SE_NET_EARNINGS_FACTOR,

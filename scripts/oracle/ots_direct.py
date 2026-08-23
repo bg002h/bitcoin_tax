@@ -268,8 +268,19 @@ def _ots_amt_disqualified(
         )
     cash_gift = float(h.get("charitable_cash", 0) or 0)
     agi = final.get("L11", 0.0)
+    # ★★★ `cash_gift > 0` IS LOAD-BEARING, not defensive (phase-4 review M-3).
+    #
+    # Without it, a household with NO GIFT AT ALL is disqualified the moment AGI goes negative:
+    # `0 > 0.60 * -3,000` is `0 > -1,800`, which is TRUE. That is exactly what happened to the new
+    # `single_loss_year_taxable_income_at_the_floor` cell — a loss year with no charitable gift on
+    # it anywhere — and OTS silently stopped witnessing its AMT while the run printed OK, for a
+    # stated reason ("gift 0 exceeds 60% of AGI -3,000") that is absurd on its face.
+    #
+    # The defect this leg models is "OTS deducts a cash gift the §170(b) ceiling should have capped".
+    # No gift, nothing to over-deduct — so the mechanism itself says the guard belongs here.
     if (
         year in OTS_YEARS_WITHOUT_CASH_CEILING
+        and cash_gift > 0
         and cash_gift > OTS_2024_CASH_CEILING_FRACTION * agi
     ):
         return (
@@ -309,6 +320,29 @@ def selftest_defect_years() -> None:
     assert _ots_amt_disqualified("Married/Joint", over_ceiling, final, six, year=2025) is None, (
         "OTS 2025 caps cash gifts at 60% of AGI (taxsolve_US_1040_2025.c:2424) and must NOT be gated"
     )
+
+    # ★★★ NEGATIVE AGI WITH NO GIFT — the row this selftest did not have (phase-4 review M-3).
+    #
+    # `single_loss_year_taxable_income_at_the_floor` has AGI of −3,000 and no charitable gift of any
+    # kind. Without the `cash_gift > 0` guard, `0 > 0.60 * -3,000` is TRUE and OTS was disqualified
+    # from witnessing that household's AMT — quietly, on the FIRST household of a new shape, with a
+    # reason ("gift 0 exceeds 60% of AGI -3,000") that reads as nonsense. Both engines compute AMT $0
+    # there so nothing was mis-filed, but an instrument went dark and every run printed OK.
+    #
+    # PLANT TO RE-RUN THE KILL: delete `cash_gift > 0` from `_ots_amt_disqualified` ⇒ this reds.
+    loss_year = {"L11": -3_000.0}
+    six_zero = {"line4": 0.0, "line11": 0.0}
+    for y in (2024, 2025):
+        assert (
+            _ots_amt_disqualified("Single", {}, loss_year, six_zero, year=y) is None
+        ), (
+            f"({y}) a household with NO GIFT must not be disqualified by the cash-ceiling leg just "
+            "because its AGI is negative — 0 > 0.60 * -3,000 is true and means nothing"
+        )
+    # …and the leg still bites when there IS a gift over the ceiling, negative AGI or not.
+    assert _ots_amt_disqualified(
+        "Single", {"charitable_cash": 5_000.0}, loss_year, six_zero, year=2024
+    ), "a REAL gift against negative AGI is over any 60% ceiling and OTS 2024 must still be gated"
 
     # Fail-closed is not year-scoped: no printed form is never a witness, in any year.
     for y in (2024, 2025):
@@ -461,6 +495,10 @@ def evaluate(h: dict) -> dict[str, float | None]:
             base["A5a"] = h.get("state_income_tax", 0)   # state & local income tax
             base["A5b"] = h.get("real_estate_tax", 0)    # real estate tax
             base["A8a"] = h.get("mortgage_interest", 0)  # mortgage interest reported on a 1098
+            # A11 is cash/check charity — NOT A16 ("other"), which sails past Schedule A's own
+            # handling of the gift. OTS 2024 applies no §170(b) 60%-of-AGI ceiling, so a corpus cell
+            # must keep the gift under it or lose this oracle (the fate of the 6251 fixture's V2b).
+            base["A11"] = h.get("charitable_cash", 0)   # cash gift to a public charity (Sch A 11)
             base["A16"] = h.get("itemized_deductions", 0)  # the lump-sum household's "other"
             base["A18"] = "Yes"
 
