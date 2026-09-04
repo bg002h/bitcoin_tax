@@ -183,6 +183,7 @@ pub const KNOWN_ARCHIVES: &[(&str, &str)] = &[
 /// | # | from | to | date | who | why |
 /// |---|---|---|---|---|---|
 /// | 1 | 2026-08-13 | 2026-08-28 | 2026-08-20 | owner | The gate fired as designed and blocked all commits (pre-commit runs `make check`). The owner deferred the reconciliation itself to a window when **model usage is expected to be more available** — the remaining work is two genuine decisions, not cleanup, and neither should ride along behind other work. Nothing about the duplication changed; only when it is decided. |
+/// | 2 | 2026-08-28 | 2026-09-11 | 2026-09-04 | owner | **DECIDED, not deferred — and the last entry.** Both residual groups resolve and the tickle retires with them. Group A: retire `design/forms/periodic/` — no code resolves through it, its notes name a text layer that does not exist (`extract/f8275.txt`), its `irs-pdf/` URLs are the moving ones, and the year directory already holds a revision it cannot (`extract/f8283--2024.txt` = Rev. 12-2023 vs `periodic/f8283.pdf` = Rev. 12-2025). Group B: delete (B)'s five `irs-forms/` form copies per the hybrid rule (forms are note+sha256 in (A)); the only reader of `legal/text/irs-forms/` is MANIFEST.json's own `extract` field, regenerated here, and its instruction extracts are `-layout` column-interleaved — the wrong text layer to transcribe from. What changed since #1: the window it waited for has arrived (nothing in flight since the 2026-08-30 push). This date is the EXECUTION deadline for landing that diff; when it lands, `DUPLICATE_SOURCE_GROUPS` is 0 and this constant, its test and the `run()` branch are deleted, leaving this table as the record. There is no #3. |
 ///
 /// ★ What is still owed, unchanged: the **two** remaining duplicate groups (`DUPLICATE_SOURCE_GROUPS`
 /// = 7 across them). Group A — `design/forms/{year}/{f8275,i8275,f8283}` aliasing
@@ -190,7 +191,7 @@ pub const KNOWN_ARCHIVES: &[(&str, &str)] = &[
 /// `periodic/`. Group B — `design/forms/2025/*` vs `legal/primary-sources/irs-forms/*` — is the
 /// genuine (A)/(B) overlap, and under the hybrid rule (B)'s copies are the redundant ones, so it is a
 /// DELETION decision about committed binaries, not a tidy-up.
-pub const ARCHIVE_RECONCILIATION_REVIEW_BY: &str = "2026-08-28";
+pub const ARCHIVE_RECONCILIATION_REVIEW_BY: &str = "2026-09-11";
 
 /// Trees that legitimately hold form-shaped files that are **not** an archive.
 pub const NOT_AN_ARCHIVE: &[(&str, &str)] = &[
