@@ -80,10 +80,18 @@ fn irs_guidance(name: &str) -> bool {
         .any(|p| u.starts_with(p))
 }
 
-/// `Form_8949.pdf`, `Instructions_Schedule_D.pdf`, `Schedule_D_1040.pdf` — the human-readable
-/// convention `legal/primary-sources/` uses, which is exactly why shape-matching needs more than the
-/// IRS stem: the two archives name the SAME documents differently, and a detector that knew only one
+/// `Form_1099-DA.pdf`, `Instructions_1099-DA.pdf` — the human-readable convention
+/// `legal/primary-sources/` uses, which is exactly why shape-matching needs more than the IRS stem:
+/// the two archives name the SAME documents differently, and a detector that knew only one
 /// convention would see only one archive.
+///
+/// ★★ **These examples must be documents the repo actually HOLDS.** They used to read
+/// `Form_8949.pdf` / `Instructions_Schedule_D.pdf` / `Schedule_D_1040.pdf`, all three of which were
+/// deleted in the 2026-09-04 reconciliation — leaving the shape's own illustration pointing at
+/// nothing, in the instrument whose failure message is "the detector has gone blind".
+/// ★ `FR-23` schedules the two 1099-DA files for retirement too. When that lands, this shape has no
+/// subject left in the tree and the honest move is to retire the shape with it — NOT to leave a
+/// witness that only proves a string literal matches a string matcher.
 fn human_readable_form(name: &str) -> bool {
     if !ext_is_document(name) {
         return false;
@@ -113,7 +121,9 @@ pub const SHAPES: &[Shape] = &[
     Shape {
         name: "human-readable-form",
         matches: human_readable_form,
-        witness: "Form_8949.pdf",
+        // ★ Must be a file the repo still HOLDS — see the shape's doc comment. `Form_8949.pdf`
+        //   was the witness until 2026-09-04 deleted it.
+        witness: "Form_1099-DA.pdf",
     },
 ];
 
@@ -197,6 +207,10 @@ pub const KNOWN_ARCHIVES: &[(&str, &str)] = &[
 // | 1 | 2026-08-13 | 2026-08-28 | 2026-08-20 | owner | The gate fired as designed and blocked all commits (pre-commit runs `make check`). The owner deferred the reconciliation itself to a window when **model usage is expected to be more available** — the remaining work is two genuine decisions, not cleanup, and neither should ride along behind other work. Nothing about the duplication changed; only when it is decided. |
 // | 2 | 2026-08-28 | 2026-09-11 | 2026-09-04 | owner | **DECIDED, not deferred — and the last entry.** Both residual groups resolve and the tickle retires with them. Group A: retire `design/forms/periodic/` — no code resolves through it, its notes name a text layer that does not exist (`extract/f8275.txt`), its `irs-pdf/` URLs are the moving ones, and the year directory already holds a revision it cannot (`extract/f8283--2024.txt` = Rev. 12-2023 vs `periodic/f8283.pdf` = Rev. 12-2025). Group B: delete (B)'s five `irs-forms/` form copies per the hybrid rule (forms are note+sha256 in (A)); the only reader of `legal/text/irs-forms/` is MANIFEST.json's own `extract` field, regenerated here, and its instruction extracts are `-layout` column-interleaved — the wrong text layer to transcribe from. What changed since #1: the window it waited for has arrived (nothing in flight since the 2026-08-30 push). This date is the EXECUTION deadline for landing that diff; when it lands, `DUPLICATE_SOURCE_GROUPS` is 0 and this constant, its test and the `run()` branch are deleted, leaving this table as the record. There is no #3. |
 //
+//
+// ★★ **ROW 2 IS DISCHARGED.** It is written in the future tense because it was written before the
+// work; everything it promised did happen, on 2026-09-04, four commits later and seven days
+// before its own deadline. Read it as the record of a decision taken, not a plan outstanding.
 //
 // ★ What the two extensions bought, settled: Group A retired `design/forms/periodic/`; Group B
 // deleted (B)'s five `irs-forms/` form copies (905,833 bytes) per the hybrid rule. The full
@@ -499,6 +513,13 @@ mod tests {
     /// two siblings (`the_two_lists_partition_every_form`, the duplicate-group pin) already do.
     #[test]
     fn the_archive_count_may_only_shrink() {
+        // ★ Two assertions here, versus the single one in
+        //   `authority_manifest::duplicate_source_groups_may_only_shrink`. Both are deliberate and
+        //   the difference is the PIN, not taste: this one pins 3, where a rise and a fall are both
+        //   representable, so the pair buys two tailored messages at no cost in vacuity. That one
+        //   pins 0, where `usize` makes a fall unrepresentable — so a `<=` half there is
+        //   always-true and was removed as dead weight. Read them together; neither is the "right"
+        //   convention on its own.
         assert!(
             KNOWN_ARCHIVES.len() <= 3,
             "KNOWN_ARCHIVES has grown to {} — a NEW archive is exactly what A3 exists to prevent. \

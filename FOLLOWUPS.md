@@ -5609,8 +5609,25 @@ become furniture — which is precisely what the tickle existed to prevent.
   **Reproduction:** overwrite any `*.pdf.txt` note with arbitrary text, run `make check` → green;
   then `cargo run -p xtask -- authority-manifest --regen` → the entry's `url` blanks and
   `url_coverage_may_only_improve` reds.
-  **The fix is a freshness test** (regen into a temp dir, assert byte-equality with the committed
-  file), and per B1 it lands with a planted-defect kill. Deliberately NOT built in this branch —
-  Fable's plan introduced no new checker, and adding one unreviewed is the scope creep the workflow
-  forbids. ★ This is the [a golden cannot validate its own regeneration] shape: the artifact and its
-  own validator were the same file. **Owning phase: next harness change.**
+  ★★★ **RE-SCOPED 2026-09-04 by the B3 review — as first filed this was pointed the WRONG WAY, and
+  its proposed fix was a trap.** It named the hazard as *staleness* (the committed manifest drifting
+  behind a regen). The live hazard is the **opposite**: a fresh `--regen` DESTROYS the committed
+  manifest. `collect_sources` walks the filesystem for binaries, and the 60 (A) PDFs are gitignored,
+  so on a fresh clone or in CI they are not collected. Measured: with them absent, `--regen` rewrote
+  `MANIFEST.json` **102 → 42 entries** while `cargo nextest run -p xtask` passed 66/66,
+  `authority-manifest` printed *"OK — every entry resolves and every source is listed"* and
+  `archive-check` was green. The only thing that had ever caught it was accidental — a pin of 7
+  reddening on a 0-duplicate manifest — and taking the pin to 0 retired that side effect.
+  **That half is now FIXED**: `regen` refuses when a note's binary is absent, held by
+  `regen_refuses_to_delete_a_document_whose_binary_is_missing` (B1: seen red on the planted defect).
+  ★ The originally proposed fix — *"regen into a temp dir, assert byte-equality with the committed
+  file"* — must NOT be built as written: it is non-hermetic, reds on every machine that has not
+  fetched all 60 gitignored PDFs, and the obvious way to make it pass is to commit the 42-entry
+  manifest. That is precisely the [a golden cannot validate its own regeneration] trap this entry
+  cites. **What remains owed** is the narrower, still-real gap: nothing compares a note-storage
+  entry's `sha256`/`url` against the note that is supposed to be its source of truth (`verify()`'s
+  `Storage::Note` arm checks only that the note EXISTS), and `regen`'s note-parsing fallback looks
+  for `sha256:` or a bare 64-hex line while every real note writes `# sha256  <hash>` — so it has
+  never once fired. Either fix the parse and let notes be the source of truth, or delete the dead
+  fallback; do not leave code that pretends to a capability it lacks. **Owning phase: next harness
+  change.**

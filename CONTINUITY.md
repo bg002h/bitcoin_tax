@@ -1,10 +1,15 @@
 # CONTINUITY — bitcoin_tax (TaxApp)
 
-_Last updated: **2026-08-30**. Written at a deliberate pause; safe to exit. **Read this file first.**_
+_Last updated: **2026-09-04**. Written at a deliberate pause; safe to exit. **Read this file first.**_
 
 ---
 
-# ★★★ RESUME POINT — filing-readiness is MERGED AND PUSHED to `main`. Nothing is in flight.
+# ★★★ RESUME POINT — `chore/archive-reconciliation` is GREEN and awaiting the owner's merge call.
+
+★ **In flight:** the archive reconciliation branch. It resolved the duplicate residue (7 → 0),
+retired the dated archive tickle with its subject, and closed a whole-branch B3 review. `main` is
+still `945d1ac2` and still RED on CI — the tickle's last firing — until this merges. Nothing is
+tagged or published; the crates.io token from v0.17.0 is still unrevoked.
 
 ## Where things stand
 
@@ -421,7 +426,7 @@ ready outranks blocked-on-a-decision; cheap hazard-removal outranks large projec
 | ~~1~~ | ~~Schedule C line G → Form 8960 line 4a~~ | — | ❌ **DEAD — REFUTED.** Would have DOUBLE-TAXED SE income. §1411(c)(6) shelters it. See the ACTIVE WORK correction above. |
 | ~~2~~ | ~~**Form 8995 line 3**~~ | days | ✅ **DONE 2026-07-30** (`3d09552`) — see remaining-list item 4 above. |
 | ~~3~~ | ~~**Crypto-slice export trio**~~ | hours | ✅ **DONE 2026-07-30** — see the box below. **(b) shipped line 17 ONLY; line 20 was REFUSED on inspection.** |
-| ~~4~~ | ~~`ARCHIVE_RECONCILIATION_REVIEW_BY`~~ — ~~re-decide the residual archive duplication or reset the date with a written reason~~ | hours | ✅ **CLOSED 2026-09-04.** Reset row 2 recorded the decision, both duplicate groups were resolved (`DUPLICATE_SOURCE_GROUPS` 7 → 0) and the constant, its test and the `run()` branch were retired **with their subject**. The RESET LOG is kept in `archive_check.rs`. The row's two sub-items also landed: `the_archive_count_may_only_shrink` got its `assert_eq!` companion, and the four-archive doc comment was corrected. See RESUME POINT §0 step 5. |
+| ~~4~~ | ~~`ARCHIVE_RECONCILIATION_REVIEW_BY`~~ — ~~re-decide the residual archive duplication or reset the date with a written reason~~ | hours | ✅ **CLOSED 2026-09-04.** Reset row 2 recorded the decision, both duplicate groups were resolved (`DUPLICATE_SOURCE_GROUPS` 7 → 0) and the constant, its test and the `run()` branch were retired **with their subject**. The RESET LOG is kept in `archive_check.rs`. The row's two sub-items also landed: `the_archive_count_may_only_shrink` got its `assert_eq!` companion, and the four-archive doc comment was corrected. See “⬜ WHAT IS OPEN NOW” row 5, and §0 step ③. |
 | ~~5~~ | ~~**§G-9a** — the §63(f) BLIND box~~ | hours | ✅ **CLOSED 2026-07-30 as "no change needed"** (`1fa75a1`), the outcome this row predicted. i1040gi names ONE box in the carve-out, and the mechanism says why: age is a DURATION test the year can straddle, blindness a POINT-IN-TIME test whose anchor a decedent's short year satisfies. Pinned by a test on i1040gi's own worked example. ★ Surfaced **§G-20** in the same passage: the MFS spouse's aged/blind boxes are forgone, and the code recorded that as THE RULE when it is a conservative omission. |
 | **6** | **Schedule 1-A plan r3 was NEVER independently reviewed** — the doc reads "Status: r3" but `design/ty2025/reviews/` holds only `…-opus-r1.md`; r2→r3 folded a 13-agent census (`c92cb9b`) that added T3a wholesale. Not green under this repo's own re-review-after-every-fold rule. Then build B3 T2 | hours + days | ⬜ Only if B3 is the chosen track. Owner decision. |
 | ~~7~~ | ~~Batch the remaining §G-13 declarations~~ | — | ⚠️ **SUPERSEDED by the refusal review.** Its premise (ask them all) is what the owner corrected. Use the decision table above instead: SE line A and Sch C G/H are DON'T-ASK and done; FBAR is built and pending REVERSAL; only Sch C I/J (skippable) and 8283 5a/5b/5c (refusal-on-Yes) remain. |

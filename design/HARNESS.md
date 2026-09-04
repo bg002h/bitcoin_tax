@@ -166,8 +166,12 @@ each (`AUTHORITY_NOT_YET_ARCHIVED` is the in-repo model): a **fifth** archive re
 retiring one reds the stale entry so the list must tighten. The reconciliation stays real work, is
 still recorded as ③ in `CONTINUITY.md` §0, and is now *tickled* rather than remembered.
 
-★★ **UPDATE 2026-09-04 — the tickle fired twice, then discharged.** It reset once (2026-08-13 →
-2026-08-28) and fired again on 2026-08-29, holding every commit and reddening `main`'s CI. That
+★★ **UPDATE 2026-09-04 — the tickle fired twice and reset TWICE, then discharged.** It reset first
+2026-08-13 → 2026-08-28 (deferring the work), fired again on 2026-08-29 holding every commit and
+reddening `main`'s CI, and reset a second time 2026-08-28 → 2026-09-11 — that one recording a
+DECISION rather than a deferral. ★ The count matters in one direction only: the log's own standard
+is *"two entries is a decision; five is the gate being routed around"*, so under-reporting resets is
+the single thing that standard cannot tolerate. That
 second firing was answered by doing the work rather than by a third date: both residual duplicate
 groups were resolved (`DUPLICATE_SOURCE_GROUPS` 7 → 0) and the constant, its test and the `run()`
 branch were retired **with their subject**. The guard that remains is stronger than the date it

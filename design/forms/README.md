@@ -51,8 +51,9 @@ to make impossible to miss.
 
 Archived ≠ extracted ≠ conformance-tested. These PDFs are step 1 of three:
 
-1. **archived** — done: 66 documents recorded (57 here + the 9 in the older `design/amt-form6251/`),
-   each as a URL note plus its extracted text.
+1. **archived** — done: **60** documents recorded, all in `design/forms/` (measured
+   `design/forms/*/*.pdf.txt`), each as a URL note plus its extracted text. ★ The older
+   `design/amt-form6251/` holds **no** notes — it was retired as an archive on 2026-07-30.
 2. **extracted** — text layer committed as an in-crate fixture (`xtask extract-schedule-1a` is the model;
    `-layout` for a form, plain `pdftotext -f N -l M` for 3-column instruction pages). Done for
    Schedule 1-A only.

@@ -532,7 +532,92 @@ fn extract_for(root: &Path, rel: &str) -> String {
 /// manifest is exactly the enumeration-from-a-hand-list failure (F2) that produced the four-archive
 /// mess in the first place. Storage is read from `git check-ignore` rather than assumed, so the
 /// manifest records what git actually does with each file.
+/// ★★★ **Every note whose binary is absent — the documents a `--regen` here would DELETE.**
+///
+/// `collect_sources` walks the FILESYSTEM for binaries, so a document whose PDF is not on disk is
+/// not collected and simply vanishes from the regenerated manifest. The (A) PDFs are gitignored, so
+/// on a fresh clone or in CI that is **all sixty of them**.
+pub fn notes_without_binaries(root: &Path) -> Vec<String> {
+    let mut orphans = Vec::new();
+    for (tree, _) in crate::archive_check::KNOWN_ARCHIVES {
+        let mut notes = Vec::new();
+        collect_notes(&root.join(tree), root, &mut notes);
+        for note_rel in notes {
+            let source_rel = note_rel.trim_end_matches(".txt").to_string();
+            if !root.join(&source_rel).exists() {
+                orphans.push(source_rel);
+            }
+        }
+    }
+    orphans.sort();
+    orphans.dedup();
+    orphans
+}
+
+/// Companion to [`collect_sources`]: the `<source>.txt` provenance notes, whichever tree they are in.
+fn collect_notes(dir: &Path, root: &Path, out: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let p = e.path();
+        let name = e.file_name().to_string_lossy().to_string();
+        if p.is_dir() {
+            if name != "__pycache__" && name != "reviews" {
+                collect_notes(&p, root, out);
+            }
+            continue;
+        }
+        let Some(stem) = name.strip_suffix(".txt") else {
+            continue;
+        };
+        // Only a note for something that IS a primary source; the extract trees are not notes.
+        let Ok(rel) = p.strip_prefix(root) else {
+            continue;
+        };
+        let rel_s = rel.to_string_lossy().replace('\\', "/");
+        if EXTRACT_TREES.iter().any(|t| rel_s.starts_with(t)) {
+            continue;
+        }
+        if crate::archive_check::classify(stem).is_some() {
+            out.push(rel_s);
+        }
+    }
+}
+
 pub fn regen(root: &Path) -> Result<usize, String> {
+    // ★★★ **REFUSE rather than silently delete.** Measured 2026-09-04, and it is why this guard
+    // exists: with the 60 gitignored (A) PDFs absent — a fresh clone, or CI — this function
+    // rewrote MANIFEST.json from **102 entries to 42**, and the whole xtask suite still passed
+    // while `authority-manifest` printed "OK — every entry resolves and every source is listed".
+    // The legal-defense index for sixty documents was destroyed with every instrument green.
+    //
+    // ★★ The only thing that had ever caught it was ACCIDENTAL: `DUPLICATE_SOURCE_GROUPS` pinned
+    // at 7 reds on a manifest with 0 duplicate groups. Reconciling the archives to 0 retired that
+    // side effect along with the duplication, which is how a real tripwire went dormant inside a
+    // commit whose message called the replacement "a STRONGER guard". A guarantee that survives
+    // only as a side effect of an unrelated number is not a guarantee — so it is stated here.
+    let orphans = notes_without_binaries(root);
+    if !orphans.is_empty() {
+        return Err(format!(
+            "REFUSING to regenerate: {} document(s) have a provenance note but NO binary on disk, \
+             and regenerating would delete them from the manifest without a word:\n{}\n  \
+             The (A) PDFs are gitignored — fetch them first (each note's line 1 is the URL, and \
+             its sha256 is the check), then re-run. `xtask authority-manifest` alone is read-only \
+             and always safe.",
+            orphans.len(),
+            orphans
+                .iter()
+                .take(10)
+                .map(|o| format!("    {o}\n"))
+                .chain(
+                    (orphans.len() > 10)
+                        .then(|| { format!("    … and {} more\n", orphans.len() - 10) })
+                )
+                .collect::<String>(),
+        ));
+    }
+
     let urls = harvested_urls(root);
     let mut sources = Vec::new();
     for (tree, _) in crate::archive_check::KNOWN_ARCHIVES {
@@ -781,6 +866,53 @@ mod tests {
         }
     }
 
+    /// ★★★ **B1 KILL for the regen refusal — the defect it exists to catch, planted.**
+    ///
+    /// The defect is not hypothetical and was not imagined: on 2026-09-04, with the 60 gitignored
+    /// (A) PDFs absent, `--regen` rewrote the real manifest from **102 entries to 42** and every
+    /// instrument in the repo still reported OK. This plants the same shape — a provenance note
+    /// whose binary is not on disk — and asserts `regen` REFUSES instead of quietly dropping it.
+    ///
+    /// ★ The positive half matters as much: with the binary present the same tree must NOT refuse,
+    /// or the guard would simply block every regen and get deleted the first time it was in the way.
+    #[test]
+    fn regen_refuses_to_delete_a_document_whose_binary_is_missing() {
+        use std::fs;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        let forms = root.join("design/forms/2025");
+        fs::create_dir_all(&forms).expect("mkdir");
+        fs::write(
+            forms.join("f8949--2025.pdf.txt"),
+            "https://www.irs.gov/pub/irs-prior/f8949--2025.pdf\n# sha256  abc\n# bytes 1\n",
+        )
+        .expect("write note");
+
+        // ── The defect: a note, no binary. ──
+        assert_eq!(
+            notes_without_binaries(root),
+            vec!["design/forms/2025/f8949--2025.pdf".to_string()],
+            "a note whose binary is absent must be reported — it is what regen would delete"
+        );
+        let err = regen(root).expect_err(
+            "regen MUST refuse when a documented source is missing from disk; silently dropping it \
+             is how 60 entries vanished with the suite green",
+        );
+        assert!(
+            err.contains("REFUSING to regenerate") && err.contains("f8949--2025.pdf"),
+            "the refusal must name what it is protecting; got: {err}"
+        );
+
+        // ── The control: binary present, no refusal, and the entry survives. ──
+        fs::write(forms.join("f8949--2025.pdf"), b"%PDF-1.4 fake").expect("write pdf");
+        assert!(
+            notes_without_binaries(root).is_empty(),
+            "with the binary on disk nothing is orphaned"
+        );
+        let n = regen(root).expect("regen must succeed once the source is present");
+        assert_eq!(n, 1, "the one document must be in the regenerated manifest");
+    }
+
     /// ★★★ **The duplication countdown, now DISCHARGED — and the standing guard in its place.**
     ///
     /// Fifteen documents were archived twice; the hybrid decision unified the *conventions* and
@@ -788,14 +920,39 @@ mod tests {
     /// than filenames — the two trees name the same document differently, so a name-based check
     /// would cheerfully report zero in a repo full of duplicates.
     ///
-    /// ★★ **A REDUNDANT assertion was removed here, not a guarantee.** The old shape paired
+    /// ★★ **A REDUNDANT assertion was removed here.** The old shape paired
     /// `assert!(dups.len() <= PIN)` with the `assert_eq!` below it; at a pin of 0 the `assert!` half
-    /// became vacuous (`usize::MIN`) and clippy said so. ★ **Correction, from the 2026-09-04 review:**
-    /// the first write-up of this called it "a green instrument that had stopped discriminating."
-    /// That overstates it. The `assert_eq!` predates the change and already reds on a rise *and* on
-    /// a fall the pin has not tracked, so the guarantee was **never weakened at any pin** — the
-    /// `assert!` was already dead weight, and 0 only made that visible. Recorded because this
-    /// harness's value depends on its own defect record being accurate.
+    /// became vacuous (`usize::MIN`) and clippy said so.
+    ///
+    /// ★★★ **TWO CORRECTIONS, both to earlier claims of mine, both from review. Read them: the
+    /// wording here was wrong twice in the same week, in opposite directions.**
+    ///
+    /// 1. The first write-up called the removal "a green instrument that had stopped
+    ///    discriminating." A 2026-09-04 review showed that overstates it — the `assert_eq!`
+    ///    predates the change and the `assert!` was already dead weight.
+    /// 2. The correction then overshot: it said the guarantee was "never weakened **at any pin**"
+    ///    and called this "ONE two-sided assertion." **That is false at 0.** `dups.len()` is
+    ///    `usize`, so a fall below 0 is unrepresentable and the `else` arm is UNREACHABLE — the
+    ///    same `usize::MIN` vacuity, reintroduced in the message of the very assertion that
+    ///    replaced it. At this pin the test is **one-sided**: it catches a rise, nothing else.
+    ///    The sibling `archive_check::the_archive_count_may_only_shrink` pins 3, where both
+    ///    directions really are live; that contrast is the proof.
+    ///
+    /// ★★ **And the fall arm was not decorative at 7.** It was the only thing that reddened when
+    /// `--regen` silently dropped 60 of 102 entries on a tree without the gitignored PDFs. Going
+    /// 7 → 0 retired that tripwire as a side effect. It is replaced deliberately, not accidentally,
+    /// by [`regen`]'s refusal and `regen_refuses_to_delete_a_document_whose_binary_is_missing`.
+    /// **A guarantee that survives only as a side effect of an unrelated constant is not a
+    /// guarantee** — which is the whole lesson of these two corrections.
+    ///
+    /// ★ **Seen red 2026-09-04 (B1), rise arm**, on THIS assertion: the same document planted at
+    /// `design/forms/2026/f8949--2026.pdf` (PDF + note copied from the 2025 pair) →
+    /// *"duplicate archived documents: 1, pinned 0. A duplicate APPEARED"*, naming the pair; then
+    /// reverted, manifest byte-identical. The fall arm was observed red only by raising the pin to
+    /// 1 with no duplicates present — i.e. it cannot be triggered by the tree at pin 0, which is
+    /// finding 2 above. ★★ An earlier attempt planted at `design/forms/2024/f8949--2024.pdf`
+    /// **collided with a real tracked note and destroyed it** (restored: `dcd2d7ff…`, 129,683
+    /// bytes). Do not reproduce it at that path.
     ///
     /// ★ **Seen red 2026-09-04 (B1).** The same document was planted under a second path
     /// (`design/forms/2024/f8949--2024.pdf` copied from the 2025 note) and this test failed with
@@ -804,9 +961,11 @@ mod tests {
     fn duplicate_source_groups_may_only_shrink() {
         let entries = load(&root()).expect("manifest loads");
         let dups = duplicates(&entries);
-        // ★ ONE two-sided assertion, deliberately. A rise is a new duplicate; a fall the pin has
+        // ★ One assertion carrying both directions. A rise is a new duplicate; a fall the pin has
         // not tracked is progress the ratchet cannot see, which is how a pin rots into a number
-        // nobody revisits. Both are failures, and the message says which and names the documents.
+        // nobody revisits. ★★ At the CURRENT pin of 0 only the rise arm is reachable (`usize`), so
+        // the `else` branch below is dormant, not live — see the corrections in the doc comment.
+        // It becomes live again the moment this pin is ever raised.
         assert_eq!(
             dups.len(),
             DUPLICATE_SOURCE_GROUPS,
