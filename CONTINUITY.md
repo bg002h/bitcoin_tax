@@ -772,8 +772,8 @@ legacy strays:
 
 | | binaries | text layer | provenance |
 |---|---|---|---|
-| **(A) `design/forms/`** | PDFs **gitignored**; each has a `.pdf.txt` URL + sha256 note | `design/forms/extract/` — **57 committed** extracts (what tests read) | hashes + `MANIFEST.json`, machine-checked by `xtask cite-check`; a changed hash means the IRS REVISED it |
-| **(B) `legal/primary-sources/`** | **47 binaries COMMITTED** | `legal/text/` — **25 committed** extracts | `legal/_scripts/fetch_*.sh`; **no hashes, no manifest, no revision detection** |
+| **(A) `design/forms/`** | PDFs **gitignored**; each has a `.pdf.txt` URL + sha256 note | `design/forms/extract/` — **60 committed** extracts (what tests read) | hashes + `MANIFEST.json`, machine-checked by `xtask cite-check`; a changed hash means the IRS REVISED it |
+| **(B) `legal/primary-sources/`** | **42 binaries COMMITTED** (was 47; −5 form PDFs retired to (A) 2026-09-04) | `legal/text/` — **20 committed** extracts (was 25) | `legal/SHA256SUMS` + `legal/SOURCES.md`; also covered by `MANIFEST.json` since the hybrid decision |
 | strays | `design/amt-form6251/` — 8 duplicate notes, **2 unique** (`f6251--2026-DRAFT`) | — | older, terser note template |
 
 ★★ **The `.pdf.txt` files were never extracts** — they are provenance notes. They "diverged" only
