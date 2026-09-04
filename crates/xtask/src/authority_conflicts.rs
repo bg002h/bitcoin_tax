@@ -122,7 +122,7 @@ pub fn parse(md: &str) -> Result<Vec<Conflict>, String> {
 ///
 /// ★ `pub(crate)` because `archive_check` tickles the archive reconciliation on the same mechanism.
 /// One implementation of "what day is it", not two that can drift.
-pub(crate) fn today() -> String {
+fn today() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)

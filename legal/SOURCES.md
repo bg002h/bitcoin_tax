@@ -5,13 +5,14 @@ with provenance so the legal basis of every calculation is **defensible** even i
 reorganize or change. This is the legal-defense index.
 
 - **Retrieved:** 2026-06-28 (UTC). IRS forms/pubs/guidance batch ~20:48Z; statute/regs/FR batch ~21:03Z.
-- **Files:** 47 documents, ~15 MB, under `primary-sources/` (44 archived 2026-06-28 + 3 added by the
-  open-questions verification pass: §1223, §61, CCA 202302012).
+- **Files:** 42 documents, ~14 MB, under `primary-sources/` (44 archived 2026-06-28 + 3 added by the
+  open-questions verification pass: §1223, §61, CCA 202302012; **−5 form PDFs retired 2026-09-04**
+  to `design/forms/` under the hybrid rule — see the Forms table below).
 - **All sources are official government hosts** (irs.gov, govinfo.gov, ecfr.gov) — no secondary mirrors
   were needed; every fetch returned HTTP 200.
 - **Integrity:** full SHA-256 for every file is in [`SHA256SUMS`](./SHA256SUMS). Re-verify anytime:
   ```
-  cd /scratch/code/bitcoin_tax/legal && sha256sum -c SHA256SUMS      # expect: 47 OK
+  cd /scratch/code/bitcoin_tax/legal && sha256sum -c SHA256SUMS      # expect: 42 OK
   ```
   Raw fetch log (status/bytes/hash/content-type/url): [`_provenance/fetch_log.tsv`](./_provenance/fetch_log.tsv).
   Re-runnable fetch scripts: [`_scripts/`](./_scripts/).
@@ -52,18 +53,31 @@ URL base `https://www.irs.gov/pub/irs-pdf/`.
 | **Pub. 526** Charitable Contributions | `Pub526_Charitable_Contributions.pdf` | `607011d9065a` | Crypto donations FMV deduction (Open Q4) |
 | **Pub. 561** Determining Value of Donated Property | `Pub561_Value_of_Donated_Property.pdf` | `c51b97c8d89b` | Qualified-appraisal threshold (Open Q4) |
 
-## 3. IRS Forms & Instructions — `primary-sources/irs-forms/`
-URL base `https://www.irs.gov/pub/irs-pdf/`.
+## 3. IRS Forms & Instructions
+
+★ **Split across two trees since 2026-09-04, and the hashes are unchanged either way.** Under the
+hybrid storage rule a *form* is archived in `design/forms/` as a `.pdf.txt` note (URL + sha256 +
+size) with its committed text layer in `design/forms/extract/`, **not** as a committed binary. The
+five form PDFs that lived here were byte-identical to their `design/forms/2025/` counterparts, so
+they were retired; the rows below keep their citations and point at the surviving copy. The SHA-256
+column is the same document either way — that is what makes the move safe.
+
+Retained here (not duplicated in (A)): URL base `https://www.irs.gov/pub/irs-pdf/`.
 
 | Citation | File | SHA-256 (short) | Relevance to app |
 |---|---|---|---|
-| **Form 8949** | `Form_8949.pdf` | `274513891e4e` | Disposition reporting form |
-| **Instructions for Form 8949** | `Instructions_8949.pdf` | `f077991c83b0` | Digital-asset boxes G–L; adjustment codes (Finding 10) |
-| **Schedule D (1040)** | `Schedule_D_1040.pdf` | `90564c8b7e49` | Capital gain/loss summary |
-| **Instructions for Schedule D** | `Instructions_Schedule_D.pdf` | `650643a68637` | Loss limitation/carryforward mechanics (Open Q3) |
-| **Form 1099-DA** | `Form_1099-DA.pdf` | `e6f397924211` | Broker digital-asset return (Finding 9) |
-| **Instructions for Form 1099-DA** | `Instructions_1099-DA.pdf` | `1ae3947a4b57` | What brokers report & when (Finding 9) |
-| **Form 8283** Noncash Charitable Contributions | `Form_8283_Noncash_Charitable.pdf` | `389ab1b7c01b` | Donations >$5k appraisal reporting (Open Q4) |
+| **Form 1099-DA** | `primary-sources/irs-forms/Form_1099-DA.pdf` | `e6f397924211` | Broker digital-asset return (Finding 9) |
+| **Instructions for Form 1099-DA** | `primary-sources/irs-forms/Instructions_1099-DA.pdf` | `1ae3947a4b57` | What brokers report & when (Finding 9) |
+
+Retired to (A) on 2026-09-04 — resolve via the note, which carries the fetch URL and this hash:
+
+| Citation | Note (authority) | Text layer (what tests read) | SHA-256 (short) | Relevance to app |
+|---|---|---|---|---|
+| **Form 8949** | `design/forms/2025/f8949--2025.pdf.txt` | `design/forms/extract/f8949--2025.txt` | `274513891e4e` | Disposition reporting form |
+| **Instructions for Form 8949** | `design/forms/2025/i8949--2025.pdf.txt` | `design/forms/extract/i8949--2025.txt` | `f077991c83b0` | Digital-asset boxes G–L; adjustment codes (Finding 10) |
+| **Schedule D (1040)** | `design/forms/2025/f1040sd--2025.pdf.txt` | `design/forms/extract/f1040sd--2025.txt` | `90564c8b7e49` | Capital gain/loss summary |
+| **Instructions for Schedule D** | `design/forms/2025/i1040sd--2025.pdf.txt` | `design/forms/extract/i1040sd--2025.txt` | `650643a68637` | Loss limitation/carryforward mechanics (Open Q3) |
+| **Form 8283** Noncash Charitable Contributions | `design/forms/2025/f8283--2025.pdf.txt` | `design/forms/extract/f8283--2025.txt` | `389ab1b7c01b` | Donations >$5k appraisal reporting (Open Q4) |
 
 ## 4. Statute — Internal Revenue Code (26 U.S.C.) — `primary-sources/statute-irc/`
 Official per-section HTML granules, **govinfo USCODE-2024 edition**. URL base

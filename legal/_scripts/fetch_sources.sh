@@ -45,13 +45,13 @@ dl https://www.irs.gov/pub/irs-pdf/p526.pdf irs-publications/Pub526_Charitable_C
 dl https://www.irs.gov/pub/irs-pdf/p561.pdf irs-publications/Pub561_Value_of_Donated_Property.pdf
 
 # ---- IRS Forms & instructions ----
-dl https://www.irs.gov/pub/irs-pdf/f8949.pdf   irs-forms/Form_8949.pdf
-dl https://www.irs.gov/pub/irs-pdf/i8949.pdf   irs-forms/Instructions_8949.pdf
-dl https://www.irs.gov/pub/irs-pdf/f1040sd.pdf irs-forms/Schedule_D_1040.pdf
-dl https://www.irs.gov/pub/irs-pdf/i1040sd.pdf irs-forms/Instructions_Schedule_D.pdf
+# RETIRED 2026-09-04 → design/forms/2025/f8949--2025.pdf.txt (hybrid rule: forms are note+sha256 in (A))
+# RETIRED 2026-09-04 → design/forms/2025/i8949--2025.pdf.txt
+# RETIRED 2026-09-04 → design/forms/2025/f1040sd--2025.pdf.txt
+# RETIRED 2026-09-04 → design/forms/2025/i1040sd--2025.pdf.txt
 dl https://www.irs.gov/pub/irs-pdf/f1099da.pdf irs-forms/Form_1099-DA.pdf
 dl https://www.irs.gov/pub/irs-pdf/i1099da.pdf irs-forms/Instructions_1099-DA.pdf
-dl https://www.irs.gov/pub/irs-pdf/f8283.pdf   irs-forms/Form_8283_Noncash_Charitable.pdf
+# RETIRED 2026-09-04 → design/forms/2025/f8283--2025.pdf.txt
 
 echo "RETRIEVED_UTC=$RETRIEVED"
 echo "=== file types ==="

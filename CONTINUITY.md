@@ -1,44 +1,78 @@
 # CONTINUITY — bitcoin_tax (TaxApp)
 
-_Last updated: **2026-08-22**. Written at a deliberate pause; safe to exit. **Read this file first.**_
+_Last updated: **2026-08-30**. Written at a deliberate pause; safe to exit. **Read this file first.**_
 
 ---
 
-# ★★★ RESUME POINT — the branch is GREEN at 0C/0I. Everything left is the owner's call.
+# ★★★ RESUME POINT — filing-readiness is MERGED AND PUSHED to `main`. Nothing is in flight.
 
 ## Where things stand
 
-Branch **`feat/filing-readiness`** — 57 commits ahead of `main`, **2766 tests green**, clippy/fmt
-clean. **PUSHED** 2026-08-23; local and `origin/feat/filing-readiness` are both at `985a67ae`. The
-pre-push PII scan ran ARMED (not bypassed) and reported clean on all four commits.
-**`main` is UNTOUCHED at `3fc88497`, local and remote.** Nothing merged, tagged, or published — and
-those three are the irreversible steps. That is the owner's call.
+**`main` is `945d1ac2`, local and remote IN SYNC.** The `feat/filing-readiness` branch was merged
+**`--no-ff`** on 2026-08-23 (65 commits, 92 files, +15,106/−981) and `main` was pushed 2026-08-30.
+The merge commit's two parents are `3fc88497` (old main) and `3d01b5e3` (branch tip), and its tree is
+**byte-identical to the branch tip** — verified, so the merge introduced no content of its own.
 
-★★★ **The widening fold has been independently re-reviewed and came back `sound` — 0 Critical /
-0 Important.** Report persisted verbatim, agent-written (the harness did NOT block the write this
-time), in its own commit: `reviews/filing-readiness-fold-review.md` @ `f33d45b5`. **Nothing has been
-folded in response to it** — there is nothing gating to fold.
+**NOT tagged. NOT published.** Both remain open decisions, and publishing is the genuinely
+irreversible one (crates.io is immutable). ★ **The crates.io temp token from the v0.17.0 publish is
+STILL UNREVOKED** — deal with that BEFORE another publish, not after.
 
-The three questions the brief pointed it at all came back clean, and one is worth keeping: the
-reworded §108 refusal is not merely correct but a **tax improvement** over what it replaced — the old
-*"enter the reduced carryover"* pointed the reduced figure at the DISCHARGE year, which
-§108(b)(4)(A) says is the wrong year.
+## What shipped, in one paragraph
 
-## ★ THE NEXT ACTION — nothing is gating. Three options, owner's pick
+The filing-readiness plan (phases 1–4) plus two owner-authorised widenings, both of which make btctax
+do MORE rather than refuse: **(A)** a taxable-income≤0 year carrying a capital-loss carryforward-IN
+now FILES (the refusal AND its `RefuseReason` variant deleted, so every consumer `E0599`'d rather
+than leaving an unreachable arm), and **(B)** `--write-carryover` ROLLS the §1212(b) carryover into
+next year's inputs stamped `Computed` — btctax became an **author** of a figure it previously only
+read. (A) was safe to lift only because `tax::capital_loss_carryover` transcribes the §1212(b)(2)(B)
+worksheet; the old flat `min(loss, $3,000)` had no taxable-income term and understated the surviving
+loss by up to the whole §1211(b) allowance.
 
-1. **Fix FR-19** (~one conjunct + a test). Fold-review Minor 1, **reproduced here** — one command
-   emits two contradictory statements: without `--force`, *"pass `--force` to overwrite it with the
-   computed §1212(b) carryover"*; with `--force`, *"★ NOT WRITTEN … stamps nothing."* It is the same
-   class B-1 was and the one instance the fold left standing. Cheap, and this repo's B3 lesson is
-   exactly about a fix that existed in the branch and was never carried back.
-2. **Decide FR-20** — the canceled-debt refusal claims btctax cannot file the exclusion year, but it
-   only fires when a capital-loss carryforward is present; the underlying Form 982 / COD-income scope
-   gap is pre-existing and larger than the wording.
-3. **Ship** — push, and then the merge/tag/publish sequence, which is where the irreversible steps
-   start. See the standing constraints below; a Fable pass is warranted immediately before that step
-   and nowhere earlier.
+## ★★★ Seven independent reviews, all persisted VERBATIM in `reviews/`
 
-★ Either of 1 or 2 is authorship and re-earns the review gate. Neither is required to be green.
+phase1 · phase2 · phase4 · final (first 36 commits) · widening (2I+1M, folded) · fold re-review
+(`sound` 0C/0I) · **pre-merge B3, scoped `main..HEAD`** (`merge` 0C/0I).
+
+**The pre-merge pass earned its cost, and this is the lesson to carry.** The six earlier rounds were
+all RANGE-scoped and their windows did not add up to the branch: `99628341` is where the last
+whole-branch review's window closed, and **34 files were edited on both sides of it**. Pointed at that
+seam, it found the lifted (A) refusal still described in **present tense on six surfaces** — including
+`screen_absolute`'s own contract doc contradicting its body, and **SPEC §4.10's refusal table, which
+still MANDATED the refusal**. Doc drift, not behaviour; all six fixed before the merge, so `main`
+never carried a spec contradicting its own code.
+
+★★ **K19 existed to prevent exactly that drift and saw none of it** — it greps the deleted
+IDENTIFIER, which was deliberately kept out of prose, and it never scanned `design/` at all. Filed as
+**FR-22**, with a phrase blocklist explicitly rejected as the growing-blocklist shape this repo
+already warns against.
+
+## ★★ A TRAP THAT COST A WEEK OF RED CI — read before trusting a green `make check`
+
+CI was **red on `main` itself** (`3fc88497`, run 32550151114) and on every branch push, for a lint
+neither the branch nor `make check` could see: `clippy::chunks_exact_to_as_chunks` at
+`cite_check.rs:272` — a line **present on `main` and untouched by all 65 commits**. CI's `stable` had
+moved to **1.98.0**; local `stable` AND the default nightly were both **1.97**.
+
+★★★ **`make check` runs clippy on the DEFAULT toolchain, so a lint added in a newer stable is
+invisible to it no matter how green it looks.** This is the documented "make check is NOT CI" trap
+arriving by a NEW route — not a missing JOB this time, but a **stale TOOLCHAIN running a job we do
+have**. The fix was `rustup update stable` + CI's exact command with `--keep-going` (so a first error
+could not mask later ones): exactly one lint workspace-wide.
+★ **Local `stable` is now 1.98.0; the default toolchain is untouched (nightly), so `make check`
+behaves exactly as before.** The durable fix — pin a toolchain, or make the local gate use `+stable`
+— was deliberately NOT done: it changes how every future session validates, and that is a decision.
+
+## ★ THE NEXT ACTION — nothing is gating. Owner's pick.
+
+1. **Tag + publish** (irreversible; revoke the stale crates.io token first).
+2. **Fix FR-19** — one conjunct. Reproduced: one command emits two contradictory statements; without
+   `--force`, *"pass `--force` to overwrite it with the computed §1212(b) carryover"*, with `--force`,
+   *"★ NOT WRITTEN … stamps nothing."* Same class as the widening review's B-1.
+3. **Decide FR-20** — the canceled-debt refusal's Form 982 claim is broader than what it enforces;
+   the underlying COD-income scope gap is pre-existing and larger than the wording.
+4. **FR-21 / FR-22** — two checkers proven blind, each filed with its structural fix named.
+
+★ Any of 2–4 is authorship and re-earns the review gate.
 
 Delivered: the whole filing-readiness plan (phases 1-4) plus **two owner-authorised widenings** —
 (A) a taxable-income<=0 year with a capital-loss carryforward-IN now FILES (refusal variant deleted),
@@ -446,7 +480,7 @@ visible in one line of the form's own extracted text.
 | ~~2~~ | ~~**§G-21**~~ | ✅ **DONE 2026-07-31.** The owner dissolved the blocker: a **return-level universal** ("did any donation have strings attached?") is stronger than three per-gift answers, fits the existing registry, and costs one prompt. ★ **`GAPS` 6 → 0 — the census gap surface is CLOSED.** |
 | ~~3~~ | ~~**§G-20a**~~ | ✅ **DONE** (`c7f3942`) — both benefit carryovers got sibling provenance scalars (NOT inside `Carryforward`, which is frozen) and an advisory that MIRRORS the QBI one's direction. ★ Spawned **§G-20b**: the advisory list now has TWO unconditional members; a third means the surface is the problem. |
 | ~~4~~ | ~~**§G-20 remainder**~~ | ✅ **DONE** (`fd9c15f`) — the boxes are claimable on MFS and the gate FAILS CLOSED (7 forgo cases pinned). ★ The coupling was resolved by making it ONE predicate shared by the deduction and the question liveness, not by keeping two in step. |
-| 5 | **archive review-by `2026-08-13`** — reds the WHOLE suite when it passes. The mechanical half is done (`1fc9867`); the DATE is a conscious decision and resetting it silently is what the gate exists to prevent | **owner** |
+| 5 | ~~**archive review-by**~~ — **✅ CLOSED 2026-09-04.** Reset row 2 recorded the decision, both duplicate groups were resolved, and the constant + its test were retired with their subject. The RESET LOG is kept in `archive_check.rs`. | **owner** |
 | 6 | **§G-11** — the emitter cannot express "no testimony". Largest architectural item; needs its own spec | needs a spec |
 | 7 | **§G-12** — no Form 8275-R, so a position contrary to a REGULATION is unrepresentable | ⛔ **an ASSET the assistant cannot obtain** — `f8275r.pdf` is unarchived, there is no network, and harness A3 denies new archive paths at `Write` time. The unblock is one `curl` (the exact command is in the §G-12 entry). ★ My 2026-07-31 table wrongly showed NO blocker here; corrected. |
 | 8 | **B3 T2 / Schedule 1-A** — and its plan r3 was never independently reviewed (`design/ty2025/reviews/` holds only r1) | **owner: is B3 the track?** |
@@ -485,7 +519,7 @@ queue** — there is nothing here left to start.
 |---|---|---|
 | **①** | ~~Fable consult on the HARNESS~~ | **✅ DONE** — verdict `needs-changes`; it *did* change what we built. Verbatim: `reviews/harness-design-fable-r1.md`. See §0a. |
 | **②** | ~~Build the harness: A1 → A2 → A3, then B1/B2~~ | **✅ DONE** — `design/HARNESS.md` r2. ★ It fired on its own author twice: it blocked a `core.hooksPath --unset`, and it exposed that A4 had **never run** because `mkdir -p` in Bash bypassed the Write-tool hook. Both holes are closed (`scripts/hooks/`). |
-| **③** | ~~Reconcile the archives~~ | **✅ DONE** — owner chose **hybrid**: storage differs by document kind, provenance does not. One manifest spans both trees (`xtask authority-manifest`). Residue: duplicate documents, pinned and shrink-only, with a review-by date that **reds the suite when it passes** (`ARCHIVE_RECONCILIATION_REVIEW_BY`). |
+| **③** | ~~Reconcile the archives~~ | **✅ DONE** — owner chose **hybrid**: storage differs by document kind, provenance does not. One manifest spans both trees (`xtask authority-manifest`). Residue **RESOLVED 2026-09-04** (7 → 0): `periodic/` retired, (B)'s five form copies deleted. The review-by tickle retired with its subject; the standing guard is `DUPLICATE_SOURCE_GROUPS = 0`, which reds on any duplicate with no date to renew. |
 | **④** | ~~Fable consult on the PARSING STRATEGY~~ | **✅ DONE** — `reviews/label-reader-strategy-fable-r1.md`. ★ One cited measurement was **fabricated** (a phantom `f1_02` name gap); verified false, the *conclusion* kept on principle, the *evidence* discarded. |
 | **⑤** | ~~The label reader~~ | **increment 1 BUILT** (`form_geometry.rs`, `label_reader.rs`); increment 2 redirected into the census. See §5. |
 | **⑥** | ~~Fable consult on FIELD PROVENANCE~~ | **✅ DONE** — `reviews/field-provenance-fable-r1.md`, plus `shred-and-year-fable-r2.md` and `resumability-vs-discovery-opus-r1.md`. Built out into the §G-13 census, now complete. |
@@ -791,15 +825,16 @@ walk showed only **8** were strays.
   (same sha256, same text). That also repaired the two provenance lines without hand-editing either.
 - The 2 unique files (`f6251--2026-DRAFT`) moved to `design/forms/2026/`.
 
-**Remaining 7 — two different things, neither a stray, both DECISIONS rather than cleanup:**
+**~~Remaining 7~~ — RESOLVED 2026-09-04, both groups, 7 → 0:**
 
-| # | groups | what it is |
+| # | groups | resolution |
 |---|---|---|
-| **3** | `design/forms/{year}/{f8275,i8275,f8283}` == `design/forms/periodic/*` | **By design.** These forms are "Rev. Month Year" with no tax-year edition, so the year-named path is an alias. Retiring means deciding whether year-indexed lookup may resolve through `periodic/`. |
-| **4** | `design/forms/2025/*` == `legal/primary-sources/irs-forms/*` | The genuine **(A)/(B) overlap** — Form 8949, Schedule D + their instructions, under both conventions. Under the hybrid rule *forms* belong in (A) as note+hash, so (B)'s copies are the redundant ones — but they are **committed binaries with extracts in `legal/text/`**, so this is a deletion decision, not a tidy-up. |
+| **3** | `design/forms/{year}/{f8275,i8275,f8283}` == `design/forms/periodic/*` | **`periodic/` RETIRED.** No code resolved through it; its 3 notes cited a text layer that never existed (`extract/f8275.txt`; the file is `f8275--periodic.txt`); its URLs were the moving `irs-pdf/` ones. The 3 surviving year notes were round-tripped against `irs-prior/` first — HTTP 200, hash-exact, all three. |
+| **4** | `design/forms/2025/*` == `legal/primary-sources/irs-forms/*` | **(B)'s five form copies DELETED** (905,833 bytes). `legal/SOURCES.md` keeps every citation, repointed at the surviving note + extract with the same hashes. `Form_1099-DA` / `Instructions_1099-DA` stayed — not duplicated. |
 
-`DUPLICATE_SOURCE_GROUPS = 7` pins it; the test reds if it rises **or** if it falls without the
-constant coming down. **Neither remainder blocks ④.**
+`DUPLICATE_SOURCE_GROUPS = 0` now pins it, and the test still reds in **both** directions. The dated
+tickle was retired in the same commit — its subject is gone, and a pin at 0 is the stronger guard:
+it reds the instant a duplicate appears, with no date for anyone to push out.
 
 ★ ~~`design/amt-form6251/` is a **design directory**, not an archive~~ — **done, see the countdown
 above.** Original note: retire its form-notes, keep

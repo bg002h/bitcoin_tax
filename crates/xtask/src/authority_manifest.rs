@@ -120,23 +120,28 @@ pub const URL_NOT_RECOVERABLE: &[&str] = &[
     // paraphrase presented as a quotation.
 ];
 
-/// ★★★ **The residual duplication, as a NUMBER that may only go down. 15 → 7 on 2026-07-30.**
+/// ★★★ **The residual duplication, as a NUMBER that may only go down. 15 → 7 → 0.**
 ///
-/// ★ **CORRECTION.** The first version of this comment said "every one is a `design/amt-form6251/`
-/// note shadowing `design/forms/2025/`". That was wrong, and wrong the same way F2 is always wrong —
-/// it generalised from the four groups that happened to be looked at. A full walk showed only 8 of
-/// the 15 were strays. Those 8 are now retired; the remaining 7 are two different things, and
-/// neither is a stray:
+/// ★★ **EMPTIED 2026-09-04.** Both remaining groups were resolved, and with them the dated tickle
+/// that existed to keep them visible (`archive_check::ARCHIVE_RECONCILIATION_REVIEW_BY`, retired in
+/// the same commit — see its RESET LOG, which is kept). What the 7 were, and which way each went:
 ///
-/// | # | groups | what it is |
+/// | # | groups | resolution |
 /// |---|---|---|
-/// | 3 | `design/forms/{year}/f8275,i8275,f8283` == `design/forms/periodic/*` | **BY DESIGN.** Forms 8275/8283 are "Rev. Month Year" with no tax-year edition, so the year-named path is an alias of the periodic one. Retiring these means deciding whether year-indexed lookup may resolve through `periodic/`. |
-/// | 4 | `design/forms/2025/*` == `legal/primary-sources/irs-forms/*` | **The genuine (A)/(B) overlap** — Form 8949, Schedule D and their instructions, archived under both conventions. Under the hybrid rule *forms* belong in (A) as note+hash, so (B)'s copies are the redundant ones — but they are COMMITTED binaries with extracts in `legal/text/`, so retiring them is a deletion decision, not a cleanup. |
+/// | 3 | `design/forms/{year}/{f8275,i8275,f8283}` == `design/forms/periodic/*` | **`periodic/` RETIRED.** No code resolved through it; its three notes named a text layer that did not exist (`extract/f8275.txt`; the file is `f8275--periodic.txt`); its URLs were the moving `irs-pdf/{stem}.pdf` ones the hybrid rationale rejects for forms; and the year directory already holds a revision it could not (`extract/f8283--2024.txt` is Rev. 12-2023 from the bundled asset, `periodic/f8283.pdf` was Rev. 12-2025). The three surviving year-named notes were round-tripped against `irs-prior/` first — HTTP 200 and hash-exact on all three. |
+/// | 4 | `design/forms/2025/*` == `legal/primary-sources/irs-forms/*` | **(B)'s five form copies DELETED** (905,833 bytes). Under the hybrid rule a form is a note+sha256 in (A), not a committed binary. `legal/SOURCES.md` keeps every citation and points at the surviving note; `Form_1099-DA` and `Instructions_1099-DA` stayed — they are not duplicated. |
 ///
-/// ★ Neither remainder is a defect that a test can resolve on its own; both are decisions. What the
-/// pin guarantees is that they stay *visible* and can only shrink — which is the whole difference
-/// between a known issue and a forgotten one.
-pub const DUPLICATE_SOURCE_GROUPS: usize = 7;
+/// ★★★ **A pin at 0 is a STRONGER guard than the date it replaced.** The tickle needed a human to
+/// renew it and blocked every commit repo-wide when it lapsed; this reds on *any* duplicate, the
+/// moment one appears, with nothing to push out. That is why retiring the tickle is not a mute: its
+/// subject is gone, and what remains fails closed. Same shape as [`URL_NOT_RECOVERABLE`] above —
+/// emptied, kept in place, with the note explaining what it held.
+///
+/// ★ **Known shape that will red this legitimately**, when it arrives: an unrevised periodic form
+/// archived under two tax years (`2025/f8275--2025` byte-equal to `2024/f8275--2024`). That is the
+/// moment to teach `duplicates()` the alias mechanism — same tree, same stem, different year — with
+/// a planted-defect test, per B1. Not before: the harness grows from observed failures.
+pub const DUPLICATE_SOURCE_GROUPS: usize = 0;
 
 /// The committed **text layers** — the extracted-text counterpart each tree keeps beside its
 /// sources. These are derived artifacts, never authorities, so they are neither manifest entries nor
@@ -630,7 +635,7 @@ pub fn run() -> Result<(), String> {
     let dups = duplicates(&entries);
     println!(
         "authority-manifest: {} document(s) archived under more than one path (pinned \
-         {DUPLICATE_SOURCE_GROUPS}, may only shrink — CONTINUITY.md §0 step ③)",
+         {DUPLICATE_SOURCE_GROUPS} — the archives were reconciled 2026-09-04; any duplicate reds)",
         dups.len()
     );
     if problems.is_empty() {
@@ -774,32 +779,42 @@ mod tests {
         }
     }
 
-    /// ★★★ **The duplication countdown — step ③'s remaining work, as a test.**
+    /// ★★★ **The duplication countdown, now DISCHARGED — and the standing guard in its place.**
     ///
-    /// Fifteen documents are archived twice. The hybrid decision unified the *conventions*; these are
-    /// the leftover copies. The number may only go DOWN, and it is measured on content hashes rather
+    /// Fifteen documents were archived twice; the hybrid decision unified the *conventions* and
+    /// 2026-09-04 retired the leftover copies (15 → 7 → **0**). Measured on content hashes rather
     /// than filenames — the two trees name the same document differently, so a name-based check
-    /// would cheerfully report zero.
+    /// would cheerfully report zero in a repo full of duplicates.
+    ///
+    /// ★★ **At a pin of 0 the old two-assert shape went BLIND, and clippy caught it.**
+    /// `dups.len() <= 0` is `usize::MIN`, so that half could never fail again — a green instrument
+    /// that had stopped discriminating, which is the exact defect class this harness exists for.
+    /// `assert_eq!` alone is strictly stronger: it reds on a rise *and* on a fall the pin has not
+    /// tracked, so both directions stay live at every value including zero.
+    ///
+    /// ★ **Seen red 2026-09-04 (B1).** The same document was planted under a second path
+    /// (`design/forms/2024/f8949--2024.pdf` copied from the 2025 note) and this test failed with
+    /// `duplicate archived documents: 1, pinned 0`, naming the pair. Then reverted, and green.
     #[test]
     fn duplicate_source_groups_may_only_shrink() {
         let entries = load(&root()).expect("manifest loads");
         let dups = duplicates(&entries);
-        assert!(
-            dups.len() <= DUPLICATE_SOURCE_GROUPS,
-            "duplicate archived documents rose to {} (pinned {DUPLICATE_SOURCE_GROUPS}):\n{}",
-            dups.len(),
-            dups.iter()
-                .map(|(_, v)| format!("    {}\n", v.join("  ==  ")))
-                .collect::<String>()
-        );
-        // ★ And when they are retired, this reds so the constant must come down with them —
-        // otherwise the pin rots into a number nobody revisits, which is the excuse-list failure.
+        // ★ ONE two-sided assertion, deliberately. A rise is a new duplicate; a fall the pin has
+        // not tracked is progress the ratchet cannot see, which is how a pin rots into a number
+        // nobody revisits. Both are failures, and the message says which and names the documents.
         assert_eq!(
             dups.len(),
             DUPLICATE_SOURCE_GROUPS,
-            "duplicates fell to {} — lower DUPLICATE_SOURCE_GROUPS to match; the pin must track \
-             reality, not sit above it",
-            dups.len()
+            "duplicate archived documents: {}, pinned {DUPLICATE_SOURCE_GROUPS}.\n{}\n{}",
+            dups.len(),
+            if dups.len() > DUPLICATE_SOURCE_GROUPS {
+                "A duplicate APPEARED — archive the document once, or record why two paths are right."
+            } else {
+                "Duplicates were RETIRED — lower DUPLICATE_SOURCE_GROUPS to match in the same commit."
+            },
+            dups.iter()
+                .map(|(_, v)| format!("    {}\n", v.join("  ==  ")))
+                .collect::<String>()
         );
     }
 

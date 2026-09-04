@@ -166,6 +166,16 @@ each (`AUTHORITY_NOT_YET_ARCHIVED` is the in-repo model): a **fifth** archive re
 retiring one reds the stale entry so the list must tighten. The reconciliation stays real work, is
 still recorded as ③ in `CONTINUITY.md` §0, and is now *tickled* rather than remembered.
 
+★★ **UPDATE 2026-09-04 — the tickle fired twice, then discharged.** It reset once (2026-08-13 →
+2026-08-28) and fired again on 2026-08-29, holding every commit and reddening `main`'s CI. That
+second firing was answered by doing the work rather than by a third date: both residual duplicate
+groups were resolved (`DUPLICATE_SOURCE_GROUPS` 7 → 0) and the constant, its test and the `run()`
+branch were retired **with their subject**. The guard that remains is stronger than the date it
+replaced — a pin at 0 reds on any duplicate immediately, with nothing to renew — and the RESET LOG
+is kept verbatim in `archive_check.rs` so both extensions stay readable without git history. The r1
+instinct ("this should simply RED today") was right about the *pressure* and wrong about the
+*mechanism*: what worked was a deadline that forced a decision, not a permanent red.
+
 ★ The r1 draft had the hook fire on **new top-level paths**. That **provably would not have caught F1**:
 `design/forms/` is depth-2 under a `design/` dating to 2026-06-28. The trigger sees no new top-level path
 and walks straight past the incident it was designed for.

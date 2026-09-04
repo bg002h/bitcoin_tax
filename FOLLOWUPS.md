@@ -1294,7 +1294,7 @@ the filer never sees how much is left. `live_questions` already enumerates; noth
 > edition) and follows the documented pattern in `design/forms/README.md`:
 >
 > ```sh
-> curl -sSL -o design/forms/periodic/f8275r.pdf https://www.irs.gov/pub/irs-pdf/f8275r.pdf
+> curl -sSL -o design/forms/2025/f8275r--2025.pdf https://www.irs.gov/pub/irs-pdf/f8275r.pdf
 > # then the same for the instructions if they are separate, and:
 > cargo run -p xtask -- forms extract      # writes the committed text layer
 > ```
@@ -5577,3 +5577,37 @@ reviews ran on the branch; two are persisted verbatim in `reviews/filing-readine
   therefore have looked like a second oracle corroborating btctax's own wrong zero. That document
   carries the binding protocol, including that the kill-test **must** run at row position 0 or it
   passes with the fix removed.
+
+### From the 2026-09-04 archive reconciliation (`chore/archive-reconciliation`)
+
+The reconciliation closed the two duplicate groups and retired the dated tickle with them
+(`DUPLICATE_SOURCE_GROUPS` 7 → 0). The residue below is **not** duplication, so the pin at 0 cannot
+see it, and it lost the tickle's dated pressure when the tickle went. Filed here so it does not
+become furniture — which is precisely what the tickle existed to prevent.
+
+- **FR-23 — `Form_1099-DA.pdf` and `Instructions_1099-DA.pdf` are still COMMITTED binaries in (B),**
+  contrary to the hybrid storage rule that a *form* lives in (A) as note+sha256. They survived the
+  2026-09-04 deletion only because they are not duplicated — no (A) copy exists to fall back on.
+  The fix is to archive them under `design/forms/{TY}/` as notes with a committed text layer, then
+  delete the binaries. **Owning phase: whenever 1099-DA reporting is next touched.** Not urgent —
+  they are correctly hashed in `legal/SHA256SUMS` and cited in `legal/SOURCES.md`.
+- **FR-24 — `design/forms/extract/f8283--2024.txt` has no manifest subject.** Its source is the
+  *bundled runtime asset* (`crates/btctax-forms/forms/2024/f8283.pdf`, Rev. 12-2023), not an
+  archived authority, so `authority-manifest` lists no entry it belongs to. That is arguably right —
+  a runtime asset is not an authority — but it means one committed extract is provenance-orphaned,
+  and the two Form 8283 revisions in this repo (Rev. 12-2023 bundled, Rev. 12-2025 archived) are a
+  standing trap for anyone transcribing. **Owning phase: the next Form 8283 change.**
+- **FR-25 — nothing asserts the committed `MANIFEST.json` still matches a fresh `--regen`,** and
+  that gap actively hid a defect. `design/forms/2024/f1040s1--2024.pdf.txt` held the PDF's extracted
+  TEXT instead of a provenance note from `4fe5ce4b` until 2026-09-04 — but the committed manifest
+  still carried the URL harvested *before* the corruption, so `url_coverage_may_only_improve` saw a
+  populated `url` field and passed. The blank appeared only on the next regen, i.e. the checker was
+  reading the stale artifact rather than the source of truth.
+  **Reproduction:** overwrite any `*.pdf.txt` note with arbitrary text, run `make check` → green;
+  then `cargo run -p xtask -- authority-manifest --regen` → the entry's `url` blanks and
+  `url_coverage_may_only_improve` reds.
+  **The fix is a freshness test** (regen into a temp dir, assert byte-equality with the committed
+  file), and per B1 it lands with a planted-defect kill. Deliberately NOT built in this branch —
+  Fable's plan introduced no new checker, and adding one unreviewed is the scope creep the workflow
+  forbids. ★ This is the [a golden cannot validate its own regeneration] shape: the artifact and its
+  own validator were the same file. **Owning phase: next harness change.**

@@ -37,7 +37,7 @@ economic-substance caution for instantaneous sell/rebuy.
   (`26USC_s1.html`). **Breakpoints are inflation-adjusted annually**: the statute is a formula; the actual
   TY2025/2026 dollar thresholds come from the annual Rev. Proc. inflation adjustments (NOT separately
   archived) and are embedded in the **Schedule D Tax Worksheet** in the archived Sch D instructions
-  (`irs-forms/Instructions_Schedule_D.pdf`). Short-term gains → ordinary rates (§1(a)–(d)).
+  (`design/forms/extract/i1040sd--2025.txt`). Short-term gains → ordinary rates (§1(a)–(d)).
 - **NIIT 3.8%** — §1411 imposes 3.8% on the lesser of net investment income or MAGI over a **threshold**:
   **$250,000** (MFJ/surviving spouse), **$200,000** (single/HoH), **$125,000** (MFS) — statutory, **not**
   inflation-adjusted (`26USC_s1411.html`).
@@ -87,7 +87,7 @@ mining-as-business for SE tax (Schedule SE — adjacent regime).
   ("capital gain property"); crypto held **≤1 year** (or ordinary-income property) → deduction limited to
   **basis**. Donating appreciated >1-yr crypto yields an FMV deduction **and** no capital-gain recognition.
 - **Substantiation/appraisal:** §170(f)(11)(C) — property donations **>$5,000** require a **qualified
-  appraisal** + Form 8283 Section B (`irs-forms/Form_8283_Noncash_Charitable.pdf`; Pub 526/561); **>$500,000**
+  appraisal** + Form 8283 Section B (`design/forms/extract/f8283--2025.txt`; Pub 526/561); **>$500,000**
   must attach the appraisal. **CCA 202302012** (`text/irs-guidance/CCA_202302012.txt`): crypto donations
   **require a qualified appraisal** — the "readily-valued/publicly-traded securities" exception of
   §170(f)(11)(A) does **not** apply because crypto is **not a security**.
