@@ -1294,6 +1294,9 @@ the filer never sees how much is left. `live_questions` already enumerates; noth
 > edition) and follows the documented pattern in `design/forms/README.md`:
 >
 > ```sh
+> # ★ The MOVING url, deliberately: irs-prior/f8275r--2025.pdf is 404 and irs-pdf/f8275r.pdf is
+> #   200 (checked 2026-09-04). That is case 3 of design/forms/README.md's sourcing order, so
+> #   the note must record that this URL is not year-pinned.
 > curl -sSL -o design/forms/2025/f8275r--2025.pdf https://www.irs.gov/pub/irs-pdf/f8275r.pdf
 > # then the same for the instructions if they are separate, and:
 > cargo run -p xtask -- forms extract      # writes the committed text layer

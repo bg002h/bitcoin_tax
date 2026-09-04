@@ -120,8 +120,9 @@ pub fn parse(md: &str) -> Result<Vec<Conflict>, String> {
 /// Today as `YYYY-MM-DD`, from the system clock. Deliberately real: this mechanism's whole value is that
 /// it fires on a date nobody chose to be reminded on.
 ///
-/// ★ `pub(crate)` because `archive_check` tickles the archive reconciliation on the same mechanism.
-/// One implementation of "what day is it", not two that can drift.
+/// ★ Private since 2026-09-04. It was `pub(crate)` for `archive_check`'s archive-reconciliation
+/// tickle, which was retired with its subject; `AUTHORITY_CONFLICTS.md`'s review-by is now the only
+/// caller.
 fn today() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

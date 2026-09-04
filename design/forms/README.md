@@ -17,7 +17,7 @@ distinction is structural rather than incidental:
 | cadence | where it lives | example |
 |---|---|---|
 | **annual** — one revision per tax year | `https://www.irs.gov/pub/irs-prior/{stem}--{year}.pdf` | `f6251--2025.pdf` |
-| **periodic** — revised every few years, "Rev. Month Year" on the face | archived under **the tax year its revision governs**, `{TY}/{stem}--{TY}.pdf.txt`, sourced from `irs-prior/{stem}--{TY}.pdf` when the IRS holds that edition, else from the bundled runtime asset (the `extract/f8283--2024.txt` model) | `f8275`, `f8283` |
+| **periodic** — revised every few years, "Rev. Month Year" on the face | archived under **the tax year its revision governs**, `{TY}/{stem}--{TY}.pdf.txt`, sourced in this order: `irs-prior/{stem}--{TY}.pdf` when the IRS holds that edition; else the bundled runtime asset (the `extract/f8283--2024.txt` model); else the **current** `irs-pdf/{stem}.pdf`, hashed at fetch time, with the note recording that the URL is a moving one. ★ The third case is real, not theoretical: `irs-prior/f8275r--2025.pdf` is **404** while `irs-pdf/f8275r.pdf` is **200** (checked 2026-09-04), which is the situation §G-12's unblock command lands in | `f8275`, `f8283` |
 
 Instructions follow the **identically-numbered** convention: form `fNNNN` has instructions `iNNNN`
 (`f6251`→`i6251`, `f1040sa`→`i1040sca`), with `i1040gi` carrying the 1040-family schedules that get no

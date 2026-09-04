@@ -771,7 +771,9 @@ mod tests {
             ("design/forms/2025/f6251--2025.pdf", Kind::Form),
             ("design/forms/2025/i1040gi--2025.pdf", Kind::Instructions),
             (
-                "legal/primary-sources/irs-forms/Instructions_8949.pdf",
+                // ★ Must be a path that still EXISTS — the doc comment above claims these are real
+                //   repo paths, and Instructions_8949.pdf was retired to (A) on 2026-09-04.
+                "legal/primary-sources/irs-forms/Instructions_1099-DA.pdf",
                 Kind::Instructions,
             ),
         ] {
@@ -786,11 +788,14 @@ mod tests {
     /// than filenames — the two trees name the same document differently, so a name-based check
     /// would cheerfully report zero in a repo full of duplicates.
     ///
-    /// ★★ **At a pin of 0 the old two-assert shape went BLIND, and clippy caught it.**
-    /// `dups.len() <= 0` is `usize::MIN`, so that half could never fail again — a green instrument
-    /// that had stopped discriminating, which is the exact defect class this harness exists for.
-    /// `assert_eq!` alone is strictly stronger: it reds on a rise *and* on a fall the pin has not
-    /// tracked, so both directions stay live at every value including zero.
+    /// ★★ **A REDUNDANT assertion was removed here, not a guarantee.** The old shape paired
+    /// `assert!(dups.len() <= PIN)` with the `assert_eq!` below it; at a pin of 0 the `assert!` half
+    /// became vacuous (`usize::MIN`) and clippy said so. ★ **Correction, from the 2026-09-04 review:**
+    /// the first write-up of this called it "a green instrument that had stopped discriminating."
+    /// That overstates it. The `assert_eq!` predates the change and already reds on a rise *and* on
+    /// a fall the pin has not tracked, so the guarantee was **never weakened at any pin** — the
+    /// `assert!` was already dead weight, and 0 only made that visible. Recorded because this
+    /// harness's value depends on its own defect record being accurate.
     ///
     /// ★ **Seen red 2026-09-04 (B1).** The same document was planted under a second path
     /// (`design/forms/2024/f8949--2024.pdf` copied from the 2025 note) and this test failed with
