@@ -365,7 +365,7 @@ Carried over from TY2024 unchanged; each is a line btctax leaves **blank**, neve
 |---|---|
 | 6 — other taxes | `unmodeled`. Only the enumerated SALT categories 5a–5c are collected. Line 7 therefore equals line 5e. |
 | 8b, 8c — mortgage interest / points not on a Form 1098 | `unmodeled`. `mortgage_interest_1098` is the only collected figure. |
-| 8d — "Reserved for future use" | `artifact`. The form's own text says it encodes no decision. **Never written** (it is a live, grey, ReadOnly widget). |
+| 8d — "Reserved for future use" | `artifact`. The form's own text says it encodes no decision. **Never written.** ★ The TY2024 map records this widget as `ReadOnly`; **that flag is unverified for the rebuilt TY2025 PDF** — `dump-fields` does not surface `/Ff`, so the claim cannot be carried over. Measure it at implementation, or state the census reason without it. |
 | 15 — casualty and theft losses | `unmodeled`. No Form 4684. |
 | 16 — other itemized deductions | `unmodeled`. No write-in surface. |
 | the §164(b) worksheet itself | **not a filed form.** No fields, no map entry, no emitted page. Its sole output is line 5e. |
@@ -407,7 +407,7 @@ mixed-use mortgage declaration, §163(h)(3)(F)) · `Line18_ReadOrder[0].c1_3[0]`
 
 **Census (9), each with the reason carried over from the TY2024 map:**
 `f1_12[0]` (6 write-in) · `f1_13[0]` (6 amount) · `Line8b_ReadOrder[0].f1_16[0]` (8b write-in) ·
-`f1_17[0]` (8b amount) · `f1_18[0]` (8c) · `f1_19[0]` (**8d — `rule = "artifact"`**) · `f1_27[0]` (15) ·
+`f1_17[0]` (8b amount) · `f1_18[0]` (8c) · `f1_19[0]` (**8d — `rule = "artifact"`**; ReadOnly unverified, see §5.2) · `f1_27[0]` (15) ·
 `f1_28[0]` (16 write-in) · `f1_29[0]` (16 amount).
 
 > The TY2024 map's census has **13** entries for the same nine *lines*, because 2024 spread the three
@@ -416,7 +416,7 @@ mixed-use mortgage declaration, §163(h)(3)(F)) · `Line18_ReadOrder[0].c1_3[0]`
 
 The map's header prose must record, in this order: the root is `form1[0]`; the three x-clusters with
 TY2025 coordinates; **8b's amount is `f1_17`, the write-in `f1_16`** (inverted from TY2024); 8d is a
-ReadOnly reserved widget; and the §5.2 blank list.
+ReadOnly reserved widget; and the §5.2 blank list. It must **not** repeat the TY2024 "ReadOnly" assertion about 8d unless that flag has been measured on the TY2025 PDF.
 
 ### 5.4 What must be collected from the filer
 

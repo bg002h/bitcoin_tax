@@ -279,7 +279,7 @@ the omission can cost the filer something:
 | **Form 1040-V** | a filer who owes (P0 owes) needs the voucher to have the payment credited correctly; no filler exists and it is not even named as an exclusion | **BUILD** — one AcroForm, no logic |
 | **mailing address** | state-dependent AND payment-dependent, six service centers, and the IRS corrected the 1040-ES addresses mid-2026 (recon-efile §5) | **BUILD as a link + the two facts**, not a bundled table that rots |
 | **attachment order + what to physically staple** | W-2s/1099s with withholding on the front; schedules in attachment-sequence order | **BUILD** — extend `hand_marks` (`crates/btctax-cli/src/cmd/admin.rs:360`), which already exists and is already conditioned |
-| **spouse IP PIN** | a named capture gap; *"a return omitting an issued spouse IP PIN is rejected"* (`forms/2024/f1040.map.toml:267-276`); the taxpayer's is modelled (`packet.rs:159-183`) — the asymmetry is the defect | **BUILD** — *"closing it is one optional field on `ReturnInputs`"* |
+| **spouse IP PIN** | a named capture gap; *"a return omitting an issued spouse IP PIN is rejected"* (`crates/btctax-forms/forms/2024/f1040.map.toml:267-276`); the taxpayer's is modelled (`packet.rs:159-183`) — the asymmetry is the defect | **BUILD** — *"closing it is one optional field on `ReturnInputs`"* |
 | **record retention** | crypto basis traces back years, so the window that matters is holding period + 3 years, not the generic 3 | **DOCUMENT** in the manifest; `export-snapshot` already produces the artifact, unprompted |
 | **Form 1040-ES** | P0's shape (large one-off gains) is the population most likely to owe an estimated-tax penalty *next* year | **ADVISE ONLY** — no quarterly-income model exists, and building one is a project |
 | Form 2210 / line 38 · direct deposit · Form 8888 · line 36 · third-party designee | blank is the instructed default, or a considered omission | **DO NOT BUILD** (§7.4) |
@@ -318,6 +318,7 @@ penalty.
 | **R12** | EITC/ACTC not computed (FR-16) — $8,781 forfeited on the repo's own MFJ/$40k/2-child measurement | money forfeited | overstates | **P6, deferred (★ D-G)** |
 | **R13** | retirement income 4a–6b unmodelled; caught only by the catch-all scope attestation (`questions.rs:546-556`) | refusal, fragile | fail-closed | **P6 (★ D-C)** |
 | **R14** | FR-15 — the field-provenance census is a hand-run snapshot with no generator and no test | instrument decay | none | **P5** |
+| **R14a** | **FR-27** — 1040 line 20 prints `0` for a Schedule 3 that was never filed (`crates/btctax-core/src/tax/printed.rs:768`, filed 2026-09-04) | fabricated testimony | **overstates** (safe direction) | **P4**, batched with FR-12/13 |
 | **R15** | FR-12/13 (8960 9a/9d), FR-4 (TUI carryover reader), G-12 (8275-R), G-13 residue (8283 5a/5b/5c), FR-2 (TY2017 8283), FR-5 (Chart A) | narrow / cosmetic | mixed | **batched, ownerless** |
 
 ★★ **R2 closed while this plan was being written, and WHY it mattered is worth keeping.** For P0 —
@@ -328,7 +329,10 @@ was `$0` and correct; the ADVICE was not."* So on P0's return FR-1 was a **prove
 dollars defect — the zero was right, but it was a hardcoded zero indistinguishable from a computed one.
 **On a P0 year without the outsized gain, nine children make it a dollars defect**, which is exactly why
 the `Option<Usd>` type — not a value — is what separates the two years. This is the shape to look for in
-the rest of the table: R9 is the same defect on Schedule 1-A lines 5 and 14b, unbuilt.
+the rest of the table: **R9** is the same defect on Schedule 1-A lines 5 and 14b (unbuilt), and **R14a**
+(FR-27, filed hours after FR-1 closed) is the same defect on 1040 line 20. §G-11's class is not a list of
+defects to close one at a time — it is a **survey the emitter still owes**, and Phase 2 is when it is
+cheapest to run, because every new map re-poses the question per box.
 
 ★ **R4 deserves its rank despite Tier 1 having shipped.** E4 is a correctness gap on the population
 Form 6251 *already serves today*, not on Tier 2's — a correct computation can still file through a
@@ -515,7 +519,7 @@ paper channel serves P0 and P1 completely.**
 
 ### 7.2 State returns — **DO NOT BUILD**
 
-Already disclosed four times over (`LIMITATIONS.md:3`, `:302`, `SPEC_full_return.md:79`, `:578`). It is
+Already disclosed four times over (`LIMITATIONS.md:3`, `:302`, `design/SPEC_full_return.md:79`, `:578`). It is
 a different product: 40+ jurisdictions, per-state conformity to federal capital-gains treatment,
 community-property allocation. ★ Honest caveat worth carrying into the docs rather than the code: the
 practical burden on a crypto filer is **larger than "federal only" reads**, because crypto-heavy income
@@ -530,7 +534,7 @@ than the one N3 describes — the emitter deciding for the filer."*
 ### 7.4 The last-mile items that are correctly absent — **DO NOT BUILD**
 
 **Form 2210 / line 38** — blank is the i1040 instructions' own default and the IRS bills the penalty
-(`forms/2024/f1040.map.toml:253`). **Direct deposit / Form 8888** — a paper check is the disclosed
+(`crates/btctax-forms/forms/2024/f1040.map.toml:253`). **Direct deposit / Form 8888** — a paper check is the disclosed
 consequence and bank details are PII the return does not need. **Line 36 (apply to next year)** —
 no election is offered. **Third-party designee** — an authorization the filer may not want. **Phone /
 email** — the email omission is a considered privacy choice.
