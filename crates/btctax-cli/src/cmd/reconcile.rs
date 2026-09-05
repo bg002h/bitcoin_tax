@@ -108,11 +108,81 @@ pub fn classify_inbound(
         }
     }
 
+    // FR-37: collect the sats-vs-dollars advisory inputs for every basis-bearing USD figure this
+    // classification carries — `(flag, what, amount, date-to-price-at)` — BEFORE `class` moves into
+    // `payload` below. `date-to-price-at` is `None` when the semantically correct date (the coins'
+    // OWN acquisition, not the receipt) was not supplied; the caller falls back to the receipt date
+    // (see `sats_as_dollars_advisory`'s doc comment on why an approximate anchor still catches the
+    // real mistake).
+    let advisories_needed: Vec<(&'static str, &'static str, Usd, Option<TaxDate>)> = match &class {
+        InboundClass::Income { fmv: Some(v), .. } => vec![(
+            "--fmv",
+            "USD FMV at receipt (becomes the acquired lot's cost basis)",
+            *v,
+            None,
+        )],
+        InboundClass::Income { fmv: None, .. } => Vec::new(),
+        InboundClass::GiftReceived {
+            donor_basis,
+            donor_acquired_at,
+            fmv_at_gift,
+        } => {
+            let mut v = vec![(
+                "--fmv-at-gift",
+                "USD FMV at the gift date (the \u{a7}1015(a) dual-basis LOSS reference)",
+                *fmv_at_gift,
+                None,
+            )];
+            if let Some(db) = donor_basis {
+                v.push((
+                    "--donor-basis",
+                    "donor's USD cost basis (the \u{a7}1015(a) GAIN-basis carryover)",
+                    *db,
+                    *donor_acquired_at,
+                ));
+            }
+            v
+        }
+        InboundClass::SelfTransferMine {
+            basis: Some(b),
+            acquired_at,
+        } => vec![(
+            "--basis",
+            "USD cost basis of the returning coins",
+            *b,
+            *acquired_at,
+        )],
+        InboundClass::SelfTransferMine { basis: None, .. } => Vec::new(),
+    };
+
     let payload = EventPayload::ClassifyInbound(ClassifyInbound {
-        transfer_in_event,
+        transfer_in_event: transfer_in_event.clone(),
         as_: class,
     });
     guard_decision_conflict(&session, &payload, now)?;
+
+    // UX-P4-4(d) / FR-37: print each advisory (if any) AFTER the conflict guard, mirroring
+    // reclassify_outflow's ordering — a refused decision never prints an advisory for a decision
+    // that is then never recorded.
+    if !advisories_needed.is_empty() {
+        let events = load_all(session.conn())?;
+        if let Some(ev) = events.iter().find(|e| e.id == transfer_in_event) {
+            if let EventPayload::TransferIn(inn) = &ev.payload {
+                let receipt = tax_date(ev.utc_timestamp, ev.original_tz);
+                let btc = Usd::from(inn.sat) / Usd::from(100_000_000);
+                for (field, what, amount, at) in advisories_needed {
+                    let at = at.unwrap_or(receipt);
+                    let market_value = btctax_core::price::fmv_of(session.prices(), at, inn.sat);
+                    if let Some(line) =
+                        sats_as_dollars_advisory(field, what, amount, market_value, btc, at)
+                    {
+                        eprintln!("{line}");
+                    }
+                }
+            }
+        }
+    }
+
     append_and_save(&mut session, payload, now)
 }
 
@@ -170,7 +240,14 @@ pub fn reclassify_outflow(
                 let date = tax_date(ev.utc_timestamp, ev.original_tz);
                 let market_value = btctax_core::price::fmv_of(session.prices(), date, out.sat);
                 let btc = Usd::from(out.sat) / Usd::from(100_000_000);
-                if let Some(line) = amount_fmv_advisory(principal, market_value, btc, date) {
+                if let Some(line) = sats_as_dollars_advisory(
+                    "--amount",
+                    "USD proceeds/FMV",
+                    principal,
+                    market_value,
+                    btc,
+                    date,
+                ) {
                     eprintln!("{line}");
                 }
             }
@@ -180,11 +257,25 @@ pub fn reclassify_outflow(
     append_and_save(&mut session, payload, now)
 }
 
-/// UX-P4-4(d): the stderr line (if any) for the `--amount` FMV sanity check. `market_value` is
-/// `fmv_of(prices, event_date, out_sats)` — the USD value of the disposed BTC at the event-date
-/// close (`None` when that date has no price). The FMV of donated BTC is its value AT the
-/// contribution date (26 CFR 1.170A-1(c)(1)), so the yardstick is that close, NOT cost basis — a
-/// $0/low-basis long-held gift is the common case, and a basis threshold would false-warn on it.
+/// UX-P4-4(d) / FR-37: the stderr line (if any) for a sats-vs-dollars sanity check on a filer-typed
+/// USD figure that should approximate the market value of a KNOWN BTC quantity on a KNOWN date.
+/// `market_value` is `fmv_of(prices, date, sat)` — the USD value of that BTC at the `date` close
+/// (`None` when that date has no price). The FMV of donated BTC is its value AT the contribution
+/// date (26 CFR 1.170A-1(c)(1)), so the yardstick is that close, NOT cost basis — a $0/low-basis
+/// long-held gift is the common case, and a basis threshold would false-warn on it.
+///
+/// ONE predicate, many call sites (`field`/`what` name the flag + what it represents in the
+/// message): `--amount` (a disposal's proceeds/FMV — the original UX-P4-4(d) case, where the
+/// mistake OVERSTATES tax), and the FR-37 basis-bearing extension — `--basis` /`--donor-basis`
+/// (direct cost basis), `--fmv-at-gift` (the §1015(a) dual-basis LOSS reference), and `--fmv` on
+/// both `classify-inbound-income` and `set-fmv` (becomes the acquired lot's basis via
+/// `BasisSource::FmvAtIncome`) — where the mistake UNDERSTATES tax (a bigger basis ⇒ a smaller
+/// future gain), the direction this project treats as worst. A basis figure is necessarily
+/// historical (the coins' ORIGINAL acquisition, not `date`), but the classic sats/dollar mixup is
+/// off by `sat/1e8` vs `sat·price/1e8` — a ratio of `1e8/price`, which is >>100 at every BTC price
+/// this app has ever priced (even 2013's ~$1000/BTC gives 1e8/1000 = 100,000) — so an APPROXIMATE
+/// anchor (the best date each caller has in hand) still reliably catches the true mistake without
+/// false-warning a legitimate historical low basis (that direction is invisible to a `>` check).
 ///
 /// - `amount` exceeding **100x** a positive market value is almost certainly the sats count typed
 ///   into a dollars field (`sat ≈ 1e8·BTC` vs. `value ≈ BTC·close`, a ratio ≈ `1e8/close`): WARN.
@@ -193,7 +284,9 @@ pub fn reclassify_outflow(
 /// - no price for the date: the check cannot run — emit a NOTE, so the guard never dies silently.
 ///
 /// Pure (all I/O — price lookup, stderr — is the caller's) so the decision is unit-testable.
-fn amount_fmv_advisory(
+fn sats_as_dollars_advisory(
+    field: &str,
+    what: &str,
     amount: Usd,
     market_value: Option<Usd>,
     btc: Usd,
@@ -201,13 +294,13 @@ fn amount_fmv_advisory(
 ) -> Option<String> {
     match market_value {
         Some(mv) if mv > Usd::ZERO && amount > mv * Usd::from(100) => Some(format!(
-            "warning: --amount ${amount} is more than 100x the ${mv} market value of {btc} BTC at \
-             the {date} close — did you enter the sats amount as dollars? --amount is the USD \
-             proceeds/FMV; recording it as entered (not fatal)."
+            "warning: {field} ${amount} is more than 100x the ${mv} market value of {btc} BTC at \
+             the {date} close — did you enter the sats amount as dollars? {field} is the {what}; \
+             recording it as entered (not fatal)."
         )),
         Some(_) => None, // plausible amount, or dust whose market value rounds to $0
         None => Some(format!(
-            "note: no BTC price for {date}; skipping the --amount FMV sanity check."
+            "note: no BTC price for {date}; skipping the {field} FMV sanity check."
         )),
     }
 }
@@ -226,8 +319,39 @@ pub fn set_fmv(
     // an FMV is a sanctioned correction, so the resolver raises no conflict on a second one) but STILL
     // gets existence/type validation. `would_conflict` gives exactly this for free: a `set-fmv` on an
     // unknown or non-Income target IS a new DecisionConflict the resolver excludes → refused here.
-    let payload = EventPayload::ManualFmv(ManualFmv { event, usd_fmv });
+    let payload = EventPayload::ManualFmv(ManualFmv {
+        event: event.clone(),
+        usd_fmv,
+    });
     guard_decision_conflict(&session, &payload, now)?;
+
+    // FR-37: the same sats-vs-dollars advisory as `--fmv` on `classify-inbound-income` — `usd_fmv`
+    // becomes the target Income event's basis (`BasisSource::FmvAtIncome`). The guard above already
+    // proved the target's EFFECTIVE payload is `Income` (else it refused as "targets non-Income
+    // event"), so this lookup either finds an `Income` payload or the target was voided/changed
+    // between the guard and here — silently skip in that (untestable, TOCTOU-shaped) case rather
+    // than re-deriving the projection's own resolution logic here.
+    {
+        let events = load_all(session.conn())?;
+        if let Some(ev) = events.iter().find(|e| e.id == event) {
+            if let EventPayload::Income(inc) = &ev.payload {
+                let date = tax_date(ev.utc_timestamp, ev.original_tz);
+                let market_value = btctax_core::price::fmv_of(session.prices(), date, inc.sat);
+                let btc = Usd::from(inc.sat) / Usd::from(100_000_000);
+                if let Some(line) = sats_as_dollars_advisory(
+                    "--fmv",
+                    "USD FMV override (becomes the acquired lot's cost basis)",
+                    usd_fmv,
+                    market_value,
+                    btc,
+                    date,
+                ) {
+                    eprintln!("{line}");
+                }
+            }
+        }
+    }
+
     append_and_save(&mut session, payload, now)
 }
 
@@ -1451,6 +1575,26 @@ mod tests {
 
     fn pp() -> Passphrase {
         Passphrase::new("test-pass".into())
+    }
+
+    /// Thin test-only wrapper preserving the ORIGINAL 4-arg `amount_fmv_advisory` shape for the
+    /// `--amount`-specific tests below, delegating to the now-generalized `sats_as_dollars_advisory`
+    /// (FR-37) with `--amount` / "USD proceeds/FMV" fixed — the SAME predicate every other call
+    /// site uses, not a second copy.
+    fn amount_fmv_advisory(
+        amount: Usd,
+        market_value: Option<Usd>,
+        btc: Usd,
+        date: TaxDate,
+    ) -> Option<String> {
+        sats_as_dollars_advisory(
+            "--amount",
+            "USD proceeds/FMV",
+            amount,
+            market_value,
+            btc,
+            date,
+        )
     }
 
     // ── UX-P4-4(d): the --amount FMV sanity advisory (pure decision; mutation-proven) ──
