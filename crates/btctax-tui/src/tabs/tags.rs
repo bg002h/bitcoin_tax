@@ -101,3 +101,59 @@ pub(super) fn compliance_status_tag(cs: &ComplianceStatus) -> String {
         ComplianceStatus::NonCompliant => "non_compliant".into(),
     }
 }
+
+#[cfg(test)]
+mod fr45_parity_tests {
+    use super::basis_source_tag;
+    use btctax_core::BasisSource;
+
+    /// ★ **FR-45 M-3.** `basis_source_tag` in this module carried a comment claiming byte parity
+    /// with the CLI's tag — a guarantee no test held, which by this repo's own rule means it did
+    /// not exist. The CLI's function IS the CSV contract; this one is display. A silent divergence
+    /// is a UI/CSV split, where the screen and the exported file disagree about what a lot is.
+    ///
+    /// The list is derived from an exhaustive `match`, so a new variant cannot be omitted: adding
+    /// one reds this test with `E0004` rather than passing while unchecked.
+    #[test]
+    fn every_basis_source_tag_matches_the_cli_csv_contract_byte_for_byte() {
+        const ALL: [BasisSource; 11] = [
+            BasisSource::ExchangeProvided,
+            BasisSource::ComputedFromCost,
+            BasisSource::FmvAtIncome,
+            BasisSource::CarriedFromTransfer,
+            BasisSource::GiftCarryover,
+            BasisSource::GiftFmvFallback,
+            BasisSource::SafeHarborAllocated,
+            BasisSource::ReconstructedPerWallet,
+            BasisSource::SelfTransferInbound,
+            BasisSource::EstimatedConservative,
+            BasisSource::CardRewardRebate,
+        ];
+        // Exhaustive by construction: this match cannot compile while ignoring a new variant, so
+        // ALL above cannot silently fall behind the enum.
+        fn assert_covered(bs: BasisSource) {
+            match bs {
+                BasisSource::ExchangeProvided
+                | BasisSource::ComputedFromCost
+                | BasisSource::FmvAtIncome
+                | BasisSource::CarriedFromTransfer
+                | BasisSource::GiftCarryover
+                | BasisSource::GiftFmvFallback
+                | BasisSource::SafeHarborAllocated
+                | BasisSource::ReconstructedPerWallet
+                | BasisSource::SelfTransferInbound
+                | BasisSource::EstimatedConservative
+                | BasisSource::CardRewardRebate => {}
+            }
+        }
+        for bs in ALL {
+            assert_covered(bs);
+            assert_eq!(
+                basis_source_tag(bs),
+                btctax_cli::render::basis_source_tag(bs),
+                "TUI display tag and CLI CSV tag diverged for {bs:?} — the screen and the exported \
+                 file would disagree about what this lot is"
+            );
+        }
+    }
+}

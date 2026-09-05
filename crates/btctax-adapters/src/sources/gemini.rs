@@ -120,6 +120,14 @@ impl Adapter for Gemini {
             let ttype = row.get(SRC, cols::TYPE)?;
             let (utc, tz) = parse_timestamp_flex(SRC, row.line, row.get(SRC, cols::DATE)?)?;
             let txid = row.opt(cols::TX_HASH).map(|s| s.to_string());
+            // ★ FR-45 M-1 — `sat` above is unconditionally `.abs()`ed (file-wide, pre-existing), so
+            //   the SIGN has to be captured from the raw cell or it is gone by the time any arm
+            //   runs. A negative reward credit is a reversal/clawback, and turning one into a
+            //   positive acquisition would put real basis in the pool that the filer never
+            //   received — the UNDERSTATEMENT direction, which is the worse one here.
+            let btc_is_negative = row
+                .opt(cols::BTC_AMOUNT)
+                .is_some_and(|s| s.trim_start().starts_with('-'));
             // I-2: abs-normalize fee magnitude at parse time — Type fixes the field's role
             // (fee is always a cost regardless of Gemini's sign convention). Applied only in
             // this Gemini parser; `parse_usd` is unchanged.
@@ -214,14 +222,34 @@ impl Adapter for Gemini {
                 //   substituting a different fabricated basis would not be a fix.
                 "credit" if is_card_reward(row.opt(cols::SPECIFICATION)) => {
                     let date = tax_date(utc, tz);
-                    match resolve_fmv(None, date, sat, prices) {
+                    // M-4 / FR3 precedence: prefer the export's OWN stated USD over the dataset
+                    // close. Measured blank on every reward row of a real export, so this is dormant today —
+                    // but the alternative is discarding the exchange's own figure if it ever
+                    // appears, and FR3 says the export wins.
+                    let export_usd = match row.opt(cols::USD_AMOUNT) {
+                        Some(v) => Some(parse_usd(SRC, row.line, "USD Amount USD", v)?.abs()),
+                        None => None,
+                    };
+                    match resolve_fmv(export_usd, date, sat, prices) {
+                        // M-1: a negative reward credit is a reversal, not an acquisition. Refuse
+                        // rather than inherit the file-wide `.abs()` and mint basis from a clawback.
+                        _ if btc_is_negative => {
+                            out.unclassified += 1;
+                            (
+                                Direction::In,
+                                EventPayload::Unclassified(Unclassified { raw: raw_of(row) }),
+                            )
+                        }
                         (Some(fmv), _) => (
                             Direction::In,
                             EventPayload::Acquire(Acquire {
                                 sat,
                                 usd_cost: fmv,
-                                // A reward payout carries no fee; measured every reward row blank.
-                                fee_usd: Usd::ZERO,
+                                // I-2: CARRY the stated fee. Measured blank on every reward row of a real
+                                // export, so this is normally zero — but hardcoding the zero
+                                // discarded a real figure, and a discarded acquisition fee
+                                // understates basis and overstates the later gain.
+                                fee_usd: fee,
                                 basis_source: BasisSource::CardRewardRebate,
                             }),
                         ),
@@ -235,8 +263,19 @@ impl Adapter for Gemini {
                         }
                     }
                 }
-                // Credit(BTC) is an inbound on-chain transfer (§9.1 confirmed) → TransferIn.
-                "credit" => (
+                // ★★ FR-45 I-1 — a Credit is a TransferIn only on POSITIVE on-chain EVIDENCE.
+                //
+                //   `row.opt` returns `None` for a column that is absent OR blank, so the reward
+                //   guard above cannot distinguish "not a reward" from "the Specification column is
+                //   missing entirely". Falling through to TransferIn in the second case silently
+                //   restored the exact zero-basis defect FR-45 exists to remove — no error, no
+                //   counter, no test. An adversarial review proved it by execution.
+                //
+                //   A `Tx Hash` or a `Deposit Destination` is affirmative evidence that coins
+                //   arrived on-chain; without either, this row could be a reward, a rebate, an
+                //   administrative credit or a deposit, and guessing "deposit" is what assigns zero
+                //   basis. So: evidence ⇒ TransferIn, no evidence ⇒ Unclassified, never a guess.
+                "credit" if txid.is_some() || row.opt(cols::DEPOSIT_DEST).is_some() => (
                     Direction::In,
                     EventPayload::TransferIn(TransferIn {
                         sat,
@@ -244,6 +283,15 @@ impl Adapter for Gemini {
                         txid: txid.clone(),
                     }),
                 ),
+                // I-1 fall-through: a BTC Credit with neither a reward specification nor any
+                // on-chain marker. Its character is genuinely unknown — refuse, do not default.
+                "credit" => {
+                    out.unclassified += 1;
+                    (
+                        Direction::In,
+                        EventPayload::Unclassified(Unclassified { raw: raw_of(row) }),
+                    )
+                }
                 // Any unknown/future BTC-side type → Unclassified (never guess).
                 _ => {
                     out.unclassified += 1;

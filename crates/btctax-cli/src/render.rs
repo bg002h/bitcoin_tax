@@ -45,7 +45,9 @@ fn fmt_money(d: btctax_core::conventions::Usd) -> String {
 // These are free functions (not inherent methods) because the CLI crate cannot add methods to
 // core types. Values are human-readable and STABLE — changing them breaks the CSV contract.
 
-fn basis_source_tag(bs: BasisSource) -> &'static str {
+/// ★ `pub` so the TUI can assert byte parity against it (FR-45 M-3). This function IS the CSV
+/// contract; the TUI's copy is display only, and a divergence is a UI/CSV split.
+pub fn basis_source_tag(bs: BasisSource) -> &'static str {
     match bs {
         BasisSource::ExchangeProvided => "exchange",
         BasisSource::ComputedFromCost => "cost",

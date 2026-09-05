@@ -616,7 +616,7 @@ fn write_reward_fixture(path: &std::path::Path) {
     // Every row is Type=Credit. ONLY `Specification` tells them apart — which is the whole finding.
     // ★ Rewards carry NO Tx Hash and NO Deposit Destination; the on-chain deposit carries both.
     //   That asymmetry is real, measured on a live export, not invented for the fixture.
-    let rows: [[&str; 10]; 4] = [
+    let rows: [[&str; 10]; 8] = [
         // (1) reward on a day the bundled dataset CAN price → Acquire at FMV.
         [
             "2025-03-02 11:00:00",
@@ -670,6 +670,58 @@ fn write_reward_fixture(path: &std::path::Path) {
             "feedface",
             "bc1qdp",
         ],
+        // (5) I-2 — a reward that DOES state a fee. The fee must be carried, not discarded.
+        [
+            "2025-03-02 14:00:00",
+            "2025-03-02 14:00:00",
+            "Credit",
+            "BTC",
+            "Deposit (Gemini Credit Card Reward Payout BTC)",
+            "0.00100000",
+            "",
+            "0.25",
+            "",
+            "",
+        ],
+        // (6) M-1 — a NEGATIVE reward credit: a reversal/clawback, never an acquisition.
+        [
+            "2025-03-02 15:00:00",
+            "2025-03-02 15:00:00",
+            "Credit",
+            "BTC",
+            "Gemini Credit Card Reward Payout Reversal",
+            "-0.00100000",
+            "",
+            "",
+            "",
+            "",
+        ],
+        // (7) I-1 — a Credit with a BLANK Specification and NO on-chain marker. Character unknown.
+        [
+            "2025-03-02 16:00:00",
+            "2025-03-02 16:00:00",
+            "Credit",
+            "BTC",
+            "",
+            "0.00100000",
+            "",
+            "",
+            "",
+            "",
+        ],
+        // (8) M-4 — a reward that states its OWN USD value; FR3 says the export beats the dataset.
+        [
+            "2025-03-02 17:00:00",
+            "2025-03-02 17:00:00",
+            "Credit",
+            "BTC",
+            "Deposit (Gemini Credit Card Reward Payout BTC)",
+            "0.00100000",
+            "100.00",
+            "",
+            "",
+            "",
+        ],
     ];
     for (r, row) in rows.iter().enumerate() {
         for (c, v) in row.iter().enumerate() {
@@ -716,8 +768,8 @@ fn a_credit_card_reward_is_an_acquire_at_fmv_not_a_zero_basis_transfer() {
         .collect();
     assert_eq!(
         acquires.len(),
-        2,
-        "both priced reward rows must become Acquires, got payloads: {ps:?}"
+        4,
+        "every priced, positive reward row must become an Acquire, got payloads: {ps:?}"
     );
 
     for a in &acquires {
@@ -728,14 +780,14 @@ fn a_credit_card_reward_is_an_acquire_at_fmv_not_a_zero_basis_transfer() {
         );
         // 0.001 BTC × the 2025-03-02 bundled close of 88,710.78 = 88.71078, which `fmv_of`
         // rounds to whole CENTS — 88.71. The rounding is the money type's, not a fudge here:
-        // a basis is a USD amount and USD has two places.
-        assert_eq!(
-            a.usd_cost,
-            dec!(88.71),
-            "basis must be the FMV at receipt, read off the price dataset"
+        // a basis is a USD amount and USD has two places. Row (8) states its own USD (100.00),
+        // which FR3 prefers over the dataset — so the set is {88.71, 100.00}, never a zero.
+        assert!(
+            a.usd_cost == dec!(88.71) || a.usd_cost == dec!(100.00),
+            "basis must be the FMV at receipt (dataset 88.71, or the export's own 100.00), got {}",
+            a.usd_cost
         );
         assert_ne!(a.usd_cost, Usd::ZERO, "the defect was a ZERO-basis lot");
-        assert_eq!(a.fee_usd, Usd::ZERO, "a reward payout carries no fee");
     }
 
     // And the reward must NOT have become income: a rebate is not gross income at receipt.
@@ -758,7 +810,7 @@ fn the_reward_predicate_ignores_the_decoration_around_the_phrase() {
         })
         .count();
     assert_eq!(
-        n, 2,
+        n, 4,
         "`Deposit (… Payout BTC)` and a bare `Gemini Credit Card Reward Payout` are the same event"
     );
 }
@@ -774,8 +826,8 @@ fn a_reward_with_no_price_for_the_day_refuses_instead_of_inventing_a_basis() {
         ps.iter()
             .filter(|p| matches!(p, EventPayload::Unclassified(_)))
             .count(),
-        1,
-        "the 2026-08-01 reward is beyond the bundled dataset and must be Unclassified: {ps:?}"
+        3,
+        "unpriced (row 3), negative (row 6) and character-unknown (row 7) must all refuse: {ps:?}"
     );
     // The specific failure that must never happen: an unpriced reward booked at $0.
     assert!(
@@ -800,5 +852,93 @@ fn a_genuine_on_chain_credit_is_still_a_transfer_in() {
         1,
         "`Deposit (Pre-Credited BTC)` carries a Tx Hash and a Deposit Destination — it IS a \
          transfer and must stay one: {ps:?}"
+    );
+}
+
+// ── FR-45 review fold: one test per finding ──────────────────────────────────────────────────────
+
+/// ★★★ **I-1.** `row.opt` returns `None` for a column that is absent OR blank, so the reward guard
+/// cannot tell "not a reward" from "no `Specification` at all". Falling through to `TransferIn` in
+/// the second case silently restored the zero-basis defect — no error, no counter, no test. A Credit
+/// is now a transfer only on POSITIVE on-chain evidence (`Tx Hash` or `Deposit Destination`).
+#[test]
+fn a_credit_with_no_specification_and_no_on_chain_marker_refuses_instead_of_assuming_a_transfer() {
+    let ps = reward_payloads();
+    // Row (7): Type=Credit, blank Specification, no Tx Hash, no Deposit Destination.
+    assert_eq!(
+        ps.iter()
+            .filter(|p| matches!(p, EventPayload::TransferIn(_)))
+            .count(),
+        1,
+        "only the row carrying on-chain markers may be a TransferIn — a character-unknown credit \
+         must NOT default into the zero-basis path: {ps:?}"
+    );
+}
+
+/// ★★ **I-2.** `fee_usd` was hardcoded to zero, and the test that "pinned" it asserted the hardcode,
+/// so it could never fail. A discarded acquisition fee understates basis and overstates the later
+/// gain. Row (5) states a fee; it must arrive.
+#[test]
+fn a_reward_that_states_a_fee_carries_it_rather_than_discarding_it() {
+    let fees: Vec<_> = reward_payloads()
+        .into_iter()
+        .filter_map(|p| match p {
+            EventPayload::Acquire(a) if a.basis_source == BasisSource::CardRewardRebate => {
+                Some(a.fee_usd)
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(
+        fees.contains(&dec!(0.25)),
+        "the stated 0.25 fee must reach the lot, not be replaced by a hardcoded zero: {fees:?}"
+    );
+}
+
+/// ★★ **M-1.** `sat` is `.abs()`ed file-wide, so a NEGATIVE reward credit — a reversal or clawback —
+/// would become a positive acquisition carrying real basis the filer never received. That is the
+/// UNDERSTATEMENT direction, which this project treats as the worse one. It must refuse.
+#[test]
+fn a_negative_reward_credit_is_a_reversal_and_never_mints_basis() {
+    let ps = reward_payloads();
+    // Row (6) is -0.00100000 on a day the dataset CAN price, so nothing but the sign check stops
+    // it. The discriminating count is the number of reward LOTS: rows (1), (2), (5) and (8) mint
+    // one each and row (6) must not — so removing the sign check reads 5, not 4.
+    let reward_lots = ps
+        .iter()
+        .filter(|p| {
+            matches!(p, EventPayload::Acquire(a) if a.basis_source == BasisSource::CardRewardRebate)
+        })
+        .count();
+    assert_eq!(
+        reward_lots, 4,
+        "a negative reward credit is a reversal and must refuse, not mint a 5th lot: {ps:?}"
+    );
+    // …and it must land in the refusal bucket rather than vanishing silently.
+    assert_eq!(
+        ps.iter()
+            .filter(|p| matches!(p, EventPayload::Unclassified(_)))
+            .count(),
+        3,
+        "unpriced (3), negative (6) and character-unknown (7) must all be refusals: {ps:?}"
+    );
+}
+
+/// **M-4 / FR3.** The export's own stated USD beats the bundled dataset close. Row (8) states
+/// 100.00 on a day whose close would give 88.71, so the two are distinguishable.
+#[test]
+fn a_reward_that_states_its_own_usd_value_uses_it_over_the_dataset_close() {
+    let costs: Vec<_> = reward_payloads()
+        .into_iter()
+        .filter_map(|p| match p {
+            EventPayload::Acquire(a) if a.basis_source == BasisSource::CardRewardRebate => {
+                Some(a.usd_cost)
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(
+        costs.contains(&dec!(100.00)),
+        "FR3 prefers the export's own USD over the dataset close (88.71 that day): {costs:?}"
     );
 }

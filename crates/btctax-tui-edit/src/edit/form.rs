@@ -4104,12 +4104,32 @@ mod tests {
     /// every on-ring variant and asserts it closes, so a dropped entry cannot pass.
     #[test]
     fn every_on_ring_basis_source_is_reachable_and_the_ring_closes() {
-        // Off-ring by design: system-assigned, with a documented one-Tab defensive exit.
-        const OFF_RING: [BasisSource; 2] = [
-            BasisSource::SelfTransferInbound,
-            BasisSource::EstimatedConservative,
-        ];
-        const ON_RING: [BasisSource; 9] = [
+        // ★★ The expected set is DERIVED, never hand-listed. A hand-list is exactly the failure
+        //    this test exists to prevent: add an 11th variant, wire it off-ring, and a hand-list
+        //    stays green while the filer silently cannot select it. The exhaustive `match` below
+        //    makes the COMPILER (E0004) force a decision on every future variant instead.
+        fn placement(bs: BasisSource) -> bool {
+            match bs {
+                // on-ring — user-selectable in classify-raw
+                BasisSource::ExchangeProvided
+                | BasisSource::ComputedFromCost
+                | BasisSource::FmvAtIncome
+                | BasisSource::CarriedFromTransfer
+                | BasisSource::GiftCarryover
+                | BasisSource::GiftFmvFallback
+                | BasisSource::SafeHarborAllocated
+                | BasisSource::ReconstructedPerWallet
+                | BasisSource::CardRewardRebate => true,
+                // off-ring — system-assigned, with a documented one-Tab defensive exit
+                BasisSource::SelfTransferInbound | BasisSource::EstimatedConservative => false,
+            }
+        }
+
+        // The enumeration itself still has to be written down once (Rust has no variant
+        // reflection), but `placement` is what decides membership, and it cannot compile while
+        // ignoring a new variant. A variant missing from ALL_VARIANTS is caught by the count
+        // assertion below against the ring walk.
+        const ALL_VARIANTS: [BasisSource; 11] = [
             BasisSource::ExchangeProvided,
             BasisSource::ComputedFromCost,
             BasisSource::FmvAtIncome,
@@ -4118,15 +4138,23 @@ mod tests {
             BasisSource::GiftFmvFallback,
             BasisSource::SafeHarborAllocated,
             BasisSource::ReconstructedPerWallet,
+            BasisSource::SelfTransferInbound,
+            BasisSource::EstimatedConservative,
             BasisSource::CardRewardRebate,
         ];
+        let on_ring: Vec<BasisSource> =
+            ALL_VARIANTS.into_iter().filter(|b| placement(*b)).collect();
+        let off_ring: Vec<BasisSource> = ALL_VARIANTS
+            .into_iter()
+            .filter(|b| !placement(*b))
+            .collect();
 
         // Walking the ring from any on-ring variant must visit EVERY on-ring variant exactly once
         // and return to the start. That fails if an entry is dropped, duplicated, or short-circuits.
-        for start in ON_RING {
+        for &start in &on_ring {
             let mut seen = Vec::new();
             let mut cur = start;
-            for _ in 0..ON_RING.len() {
+            for _ in 0..on_ring.len() {
                 seen.push(cur);
                 cur = cycle_basis_source(cur);
             }
@@ -4136,19 +4164,19 @@ mod tests {
             sorted.dedup();
             assert_eq!(
                 sorted.len(),
-                ON_RING.len(),
+                on_ring.len(),
                 "starting at {start:?} the walk repeated a variant: {seen:?}"
             );
-            for want in ON_RING {
+            for &want in &on_ring {
                 assert!(seen.contains(&want), "{want:?} unreachable from {start:?}");
             }
         }
 
         // The off-ring pair keeps its documented defensive exit, and must NOT be reachable.
-        for off in OFF_RING {
+        for &off in &off_ring {
             assert_eq!(cycle_basis_source(off), BasisSource::ExchangeProvided);
             assert!(
-                !ON_RING.iter().any(|on| cycle_basis_source(*on) == off),
+                !on_ring.iter().any(|on| cycle_basis_source(*on) == off),
                 "{off:?} is system-assigned and must stay off the selectable ring"
             );
         }

@@ -6080,4 +6080,29 @@ self-transfer policy was audited for CONFORMANCE, not relitigated.
   lots; the other `Credit` specifications (`Administrative Credit`, and the general rule that a
   credit with no `Tx Hash` cannot be a self-transfer); and re-importing any vault that already stored
   these rows as `TransferIn` — the fix changes classification at import, not retroactively.
+  ★★ **REVIEW + FOLD (2026-09-05).** An independent adversarial review of the build returned
+  **0C / 2I / 3M / 1 Nit** (`design/agent-reports/2026-09-05-fr45-review.md`, persisted verbatim
+  before folding). Both Importants were real and both were in the fix, not the original defect:
+  (I-1) `row.opt` returns `None` for a column that is absent OR blank, so the reward guard could not
+  tell *"not a reward"* from *"no `Specification` column at all"* — and the fall-through restored the
+  zero-basis defect **silently**, which the reviewer proved by execution; (I-2) `fee_usd` was
+  hardcoded to zero and its test asserted the hardcode, so it could never fail.
+  ★ I-1's fix is the structural discriminator this entry had already described and the build had not
+  implemented: a `Credit` is a `TransferIn` only on **positive on-chain evidence** (`Tx Hash` or
+  `Deposit Destination`); with neither, and no reward specification, the character is unknown and it
+  **refuses**. Measured on a real export, that moved one credit out of the zero-basis path.
+  ★ Also folded: **M-1** (a NEGATIVE reward credit inherited the file-wide `.abs()` and would mint a
+  basis-bearing lot from a clawback — the *understatement* direction, so fixed despite its Minor
+  label), **M-2** (the ring test's expected set was a hand-list, which this repo has a standing rule
+  against — now derived from an exhaustive `match`, so a future variant reds `E0004`), **M-3** (the
+  TUI tag claimed byte parity with the CLI's CSV contract and no test held it — the CLI function is
+  now `pub` and a parity test asserts it), and **M-4** (FR3 precedence: the export's own stated USD
+  now beats the dataset close).
+  ★ Fold mutation-verified six ways, each reddening exactly its own test. ★ One of those mutations
+  was initially INVALID — it patched the buy/sell arm instead of the reward arm, and the tell was
+  that the new fee test did not red; re-run against the right line it reds alone.
+  ★ **N-1, recorded not fixed:** `fmv_of` rounds to cents, so a reward under half a cent yields a
+  correctly-rounded `$0.00` basis on a *priced* day. Those lots are legitimate, bounded at half a
+  cent each. Noted so a future reader finding a zero-basis `CardRewardRebate` lot does not conclude
+  the fix regressed.
   **Owning phase: CLOSED.** The residue above stays with the next adapter cycle, with FR-42/FR-43.
