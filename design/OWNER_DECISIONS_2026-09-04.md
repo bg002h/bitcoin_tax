@@ -312,3 +312,42 @@ audit — in flight.
 **One thing to watch in the understatement audit when it lands:** if it re-ranks §4 (plan `:156`), the
 only re-ranking that changes this document is a new understatement path on P0's own line set — that
 would enter Phase 1 ahead of T2, the way C-I3/C-I4 did.
+
+---
+
+## OWNER RULINGS, 2026-09-05 — answering the five open items
+
+**D-A — the tax year. ★ THE DEADLINE IS GONE.** Owner, verbatim: *"My taxes were
+finished before I started this project."* So the TY2025 return was filed and paid
+independently of btctax. §6651(a)(1) exposure on the $382,710 Scenario A figure
+is **nil** — the base is reduced by tax paid on time, and there is no unpaid tax.
+⇒ The 2026-10-15 date carries no consequence for this owner, Fable's D-A option
+(B) is moot, and **TY2025 is built properly on the product's own schedule.** This
+retires the only genuinely time-boxed item in the plan.
+
+**OQ-5 — the protection-order filer. RULED: do NOT widen.** Owner, verbatim:
+*"just refer user for tas and tell them good luck."* ⇒ The self-certification
+path stays gated on the *uncompletable-form* dead end (parents unknown) and is
+**not** extended by a disjunctive second limb for filers who know their parents
+but are barred from contacting them. Those filers get a refusal that names the
+Taxpayer Advocate Service and is honest that btctax cannot carry them further.
+★ This is the conservative ruling and it protects the fix: a disjunction is how
+an exemption widens, which is the exact mechanism FR-29 was.
+★ TAS's qualifying limb is `i1040gi--2025.txt:153-154` — the third limb of the
+introductory sentence, NOT the three bullets at `:155-166`, which do not cover
+this filer. Verified by the r2 fold; cite that line and nothing beyond it.
+
+**Merge to `main` — APPROVED.** ("3) yes")
+
+**D-F — tag / publish / crates.io token — APPROVED, "do it all".**
+★ Recorded with two facts the owner should hold while it happens, stated once
+and not as an objection: (i) revoking the crates.io token is an action on the
+owner's own crates.io account and the assistant cannot perform it; (ii) a publish
+today ships FR-29 (the kiddie-tax gate, a live Critical understatement path,
+specced but NOT built) and FR-34 (ComplianceStatus unread — gain $5 where $45 is
+owed on the repo's own KAT). crates.io permits yanking, never deletion.
+
+**FR-34…FR-37 — build all four, starting with Schedule 1-A T2.** ("5) do all of
+them, but start with schedule 1-a t2")
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
