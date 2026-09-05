@@ -19799,12 +19799,20 @@ mod tests {
         let (lot_a_id, lot_b_id, to_id) = seed_two_lot_sell_vault(&vault, &key, pp_str);
 
         let mut app = open_app(&vault, pp_str);
-        // FR-33 / §1.1012-1(j)(2): the selection's made-date is `app.clock.now()`, and the seeded sale
-        // is 2025-05-23. Pin the clock TO THE DAY OF THE SALE so this KAT keeps testing what it was
-        // written for — the select-lots flow end to end — under a TIMELY identification. The late case
-        // is `kat_e2e_sl_post_hoc_selection_is_ignored` below.
+        // FR-33 / §1.1012-1(j)(2): the selection's made-time is `app.clock.now()`. Pin it BEFORE the
+        // seeded sale so this KAT keeps testing what it was written for — the select-lots flow end to
+        // end — under a TIMELY identification. The late case is
+        // `kat_e2e_sl_post_hoc_selection_is_ignored` below.
+        //
+        // ★★ **FR-35 (2026-09-05): this pin used to be 12:00:00 and that was 27 minutes TOO LATE.**
+        // The seeded sale is unix 1_748_000_000 = 2025-05-23 **11:33:20** UTC. The comment said "pin
+        // to the DAY of the sale", which was sufficient while the timeliness comparison was
+        // date-granular; §1.1012-1(j)(2) requires "no later than the date and TIME of the sale", so
+        // same-day-but-after is late. The author's INTENT — a timely identification, so the KAT
+        // exercises the flow rather than the timeliness rule — is preserved by moving the pin
+        // earlier; only the mechanism changed.
         app.clock =
-            btctax_tui::clock::Clock::Pinned(time::macros::datetime!(2025 - 05 - 23 12:00:00 UTC));
+            btctax_tui::clock::Clock::Pinned(time::macros::datetime!(2025 - 05 - 23 11:00:00 UTC));
 
         // 1. Confirm disposal is in projected state.
         let snap = app.snapshot.as_ref().unwrap();

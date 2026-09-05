@@ -601,9 +601,18 @@ fn attested_post_hoc_selection_still_governs() {
     );
 }
 
-/// FR-33 boundary — §1.1012-1(j)(2) says "no later than", so a selection made ON the day of the sale
-/// is TIMELY. Reg. §1.1012-1(j)(5)(i)(A) Example 1 is exactly this fact pattern: a notation in the
-/// taxpayer's records on the date of sale, prior to the sale, identifies the units.
+/// FR-33 boundary — §1.1012-1(j)(2) says "no later than", so a selection made on the day of the sale
+/// and **prior to it** is TIMELY. Reg. §1.1012-1(j)(5)(i)(A) Example 1 is exactly this fact pattern:
+/// a notation in the taxpayer's records on the date of sale, PRIOR TO THE SALE, identifies the units.
+///
+/// ★★ **FIXTURE CORRECTED 2026-09-05 (FR-35), and the correction is the interesting part.** This
+/// test used to sell at `00:00:00` and record the selection at `23:59:59` — i.e. AFTER the sale —
+/// while its own doc comment cited an Example whose facts are "prior to the sale". Under the
+/// date-granular comparison the two compared equal, so the contradiction was invisible and the test
+/// passed. Making the comparison instant-granular exposed it. The fixture now matches the authority
+/// it cites: the identification precedes the disposition on the same day.
+/// ★ The AFTER-the-sale case it was accidentally asserting is now its own test,
+/// `a_selection_made_later_the_same_day_as_the_sale_is_dropped`, with the opposite expectation.
 #[test]
 fn selection_made_the_day_of_the_sale_is_timely() {
     let mut evs = three_post2025();
@@ -615,13 +624,13 @@ fn selection_made_the_day_of_the_sale_is_timely() {
     ));
     evs.push(sell(
         "D",
-        datetime!(2025-07-01 00:00:00 UTC),
+        datetime!(2025-07-01 14:00:00 UTC),
         100_000,
         dec!(95.00),
     ));
     evs.push(lot_selection(
         2,
-        datetime!(2025-07-01 23:59:59 UTC), // same tax-date as the sale
+        datetime!(2025-07-01 09:00:00 UTC), // same day, and PRIOR to the 14:00 sale
         "D",
         vec![LotPick {
             lot: pid("B"),
@@ -633,8 +642,9 @@ fn selection_made_the_day_of_the_sale_is_timely() {
     assert!(!has(&st, BlockerKind::LotSelectionPostHoc));
 }
 
-/// FR-33 boundary — the very next day is already too late. (The comparison is DATE-granular today;
-/// §1.1012-1(j)(2) says "date and time", which is FOLLOWUPS FR-35, a separate open Important.)
+/// FR-33 boundary — the very next day is already too late. (The comparison became INSTANT-granular
+/// on 2026-09-05 when FR-35 landed, so "too late" now begins the moment after the sale rather than
+/// the following midnight; this test is unaffected because a day later is late either way.)
 #[test]
 fn selection_made_the_day_after_the_sale_is_dropped() {
     let mut evs = three_post2025();
@@ -737,4 +747,53 @@ fn dropping_a_post_hoc_selection_conserves() {
     );
     let consumed: i64 = st.disposals[0].legs.iter().map(|l| l.sat).sum();
     assert_eq!(consumed, 100_000);
+}
+
+/// ★★★ **FR-35 — §1.1012-1(j)(2) says "date and time", and the comparison was DATE-granular.**
+///
+/// The archived reg (`legal/primary-sources/regulations-cfr/26CFR_1.1012-1_basis.xml`) requires the
+/// identification "no later than the **date and time** of the sale, disposition, or transfer". The
+/// blocker raised by the timeliness pass QUOTED that sentence while comparing two `TaxDate`s — so a
+/// selection recorded at 17:00 on the day of a 10:00 sale compared EQUAL and passed as timely,
+/// seven hours late. A late selection is a post-hoc cherry-pick, which lowers the reported gain:
+/// understatement, the direction this project treats as worst.
+///
+/// ★ Both timestamps were already in hand — `Eff::utc` and the decision's `utc_timestamp` — so this
+/// was never a data problem, only a narrowing one.
+#[test]
+fn a_selection_made_later_the_same_day_as_the_sale_is_dropped() {
+    let mut evs = three_post2025();
+    evs.push(election(
+        1,
+        datetime!(2025-01-02 00:00:00 UTC),
+        date!(2025 - 01 - 02),
+        LotMethod::Fifo,
+    ));
+    evs.push(sell(
+        "D",
+        datetime!(2025-07-01 10:00:00 UTC), // the sale happens at 10:00
+        100_000,
+        dec!(95.00),
+    ));
+    evs.push(lot_selection(
+        2,
+        datetime!(2025-07-01 17:00:00 UTC), // ...and the "identification" seven hours LATER
+        "D",
+        vec![LotPick {
+            lot: pid("B"),
+            sat: 100_000,
+        }],
+    ));
+    let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
+    assert!(
+        has(&st, BlockerKind::LotSelectionPostHoc),
+        "a selection recorded AFTER the sale is not a specific identification, even on the same \
+         calendar day — §1.1012-1(j)(2) says 'no later than the date and TIME of the sale'"
+    );
+    assert_eq!(
+        st.disposals[0].legs[0].basis,
+        dec!(50.00),
+        "and the disposal must fall back to the FIFO order in force (§1.1012-1(j)(1)), which RAISES \
+         the reported gain — not the $90 lot the late selection cherry-picked"
+    );
 }

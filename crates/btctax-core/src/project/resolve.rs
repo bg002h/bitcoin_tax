@@ -1524,7 +1524,14 @@ pub fn resolve(
     // identification drives a reported basis/gain, and a self-transfer recognizes none. (The reg's
     // (j)(1)/(j)(2) text does reach "transfers"; widening the guard to lot ROUTING between the filer's
     // own wallets is a distinct behavioural change and is recorded as a follow-up, not smuggled here.)
-    let identification_deadline: BTreeMap<EventId, TaxDate> = timeline
+    // ★★★ FR-35: the deadline is the sale's INSTANT, not its calendar day. §1.1012-1(j)(2) requires
+    //     the identification "no later than the date and TIME of the sale, disposition, or transfer"
+    //     (archived: legal/primary-sources/regulations-cfr/26CFR_1.1012-1_basis.xml). Comparing
+    //     `TaxDate`s let a selection recorded at 17:00 on the day of a 10:00 sale compare EQUAL and
+    //     pass as timely — seven hours late, and a late selection is a cherry-pick that LOWERS the
+    //     reported gain. The eligibility test below stays DATE-granular on purpose: §1.1012-1(j)(6)
+    //     scopes paragraph (j) to dispositions on or after 2025-01-01, which is a date, not a moment.
+    let identification_deadline: BTreeMap<EventId, OffsetDateTime> = timeline
         .iter()
         .filter(|e| {
             matches!(
@@ -1532,14 +1539,15 @@ pub fn resolve(
                 Op::Dispose { .. } | Op::GiftOut { .. } | Op::Donate { .. }
             ) && e.date() >= TRANSITION_DATE
         })
-        .map(|e| (e.id.clone(), e.date()))
+        .map(|e| (e.id.clone(), e.utc))
         .collect();
 
     let mut selections: BTreeMap<EventId, Vec<crate::event::LotPick>> = BTreeMap::new();
     let mut seen: BTreeSet<EventId> = BTreeSet::new(); // disposal_events already claimed (dup detection)
     let mut dup: BTreeSet<EventId> = BTreeSet::new();
     // FR-33: disposal_event → (made-date, attested) of its single non-duplicate selection.
-    let mut made_at: BTreeMap<EventId, (TaxDate, bool)> = BTreeMap::new();
+    // FR-35: the INSTANT the selection was recorded, not its calendar day.
+    let mut made_at: BTreeMap<EventId, (OffsetDateTime, bool)> = BTreeMap::new();
     for (_seq, d) in &decisions {
         if voided.contains(&d.id) {
             continue;
@@ -1558,10 +1566,7 @@ pub fn resolve(
         }
         // FR-33: record the made-date + attestation of the selection that WILL apply, for the
         // timeliness pass below (run AFTER the Hard validations so an Advisory can never pre-empt one).
-        made_at.insert(
-            ls.disposal_event.clone(),
-            (tax_date(d.utc_timestamp, d.original_tz), ls.attested),
-        );
+        made_at.insert(ls.disposal_event.clone(), (d.utc_timestamp, ls.attested));
         selections.insert(ls.disposal_event.clone(), ls.lots.clone());
     }
     for id in &dup {
