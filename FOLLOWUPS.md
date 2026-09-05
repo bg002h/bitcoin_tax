@@ -5975,6 +5975,11 @@ self-transfer policy was audited for CONFORMANCE, not relitigated.
   correction in another. ★ The refuse-never-repair rule (FR-38) says Gemini should stop repairing
   and refuse like its siblings; that is a behaviour change to an adapter with its own reasoning
   comment, which is why it is filed rather than folded. **Owning phase: the next adapter cycle.**
+  ★ **NOT the credit-card-rewards question** (asked 2026-09-05, checked against a real export).
+  This `.abs()` is on `USD Amount USD` for a **BTCUSD Buy/Sell**, where the sign redundantly
+  encodes direction and the `Type` column already fixes the field's role — which is exactly what
+  the written rationale says. Rewards arrive on a different row shape entirely and are **FR-45**.
+  The two are unrelated; FR-42 stands as filed.
 
 - **FR-43 — a refused import names the FIELD but not the CSV ROW.** FR-38's refusal fires at
   `persistence::insert`, which has the payload and not the file, the line number, or the source ref.
@@ -5996,3 +6001,38 @@ self-transfer policy was audited for CONFORMANCE, not relitigated.
   So the refusal is structural and the advisory is merely *covered*, on one surface. The TUI holds
   all three inputs at its record surfaces; wiring it there is surface work.
   **Owning phase: the next TUI cycle.**
+
+- **FR-45 — Gemini credit-card REWARD payouts are booked as inbound self-transfers, at ZERO basis.**
+  Found 2026-09-05 by reading a **real** Gemini XLSX export rather than a fixture, after the owner
+  asked whether FR-42's negative-USD case was crypto-back rewards. It was not — but the question
+  landed on something larger one column over.
+  ★ **The export's `Specification` column carries `Deposit (Gemini Credit Card Reward Payout BTC)`,
+  and it is the single most common row type in the file** — more numerous than `Buy`, `Sell`, `Debit`
+  and every other `Credit` specification combined. This is not an edge case; for a Gemini-card holder
+  it is the bulk of the ledger.
+  **The defect.** The adapter matches on `Type` ALONE and never reads `Specification` (the `"credit"`
+  arm in `sources/gemini.rs`). Every BTC-side `Credit` becomes a `TransferIn` — an inbound
+  **self-transfer** — which takes the standing conservative policy: zero basis, non-taxable, never
+  gates. Half of that is accidentally right and half is wrong. A card reward earned by SPENDING is a
+  purchase-price rebate, so "not income at receipt" happens to match; but basis is **FMV at receipt**,
+  not zero. At zero basis the entire proceeds become gain on a later sale.
+  ★ Direction: taxpayer-**ADVERSE** (overstates gain, overstates tax), so it fails safe on the
+  understatement axis and is not a §6065 liability. It is still a wrong figure on signed testimony, it
+  costs the filer real money, and it is **silent** — once a reward is a `TransferIn`, nothing on the
+  paper or in the vault distinguishes it from a deposit.
+  ★★ **Two structural discriminators exist in the export and the adapter uses neither.** The
+  `Specification` string is explicit; and a reward row has **no `Tx Hash` and no `Deposit
+  Destination`**, whereas a genuine on-chain deposit (`Deposit (Pre-Credited BTC)`) carries both. A
+  `Credit` with no txid is not an on-chain transfer and therefore cannot be a self-transfer — the
+  adapter is asserting a provenance the row itself contradicts.
+  **Sibling coverage** says this is Gemini's gap alone: River models it (`Income` → `IncomeKind::
+  Reward`), and Coinbase deliberately routes an unrecognised type to `Unclassified` ("never guess",
+  `coinbase.rs:209`). Gemini's `credit` arm is the one that swallows it.
+  **Recommended fix:** read `Specification`. A `Credit` naming a reward payout becomes an acquisition
+  carrying FMV-at-receipt basis; a `Credit` with no `Tx Hash` and an unrecognised specification
+  becomes `Unclassified`, **not** `TransferIn`. `TransferIn` should require the on-chain markers it
+  claims to represent.
+  ★ **It cannot be a blanket constant.** A sign-up bonus with no spending requirement is income,
+  unlike a spending rebate, so the filer must be able to say which — this is a collect-it question in
+  the sense of the transcription rule, not a default.
+  **Owning phase: the next adapter cycle, AHEAD of FR-42 and FR-43** (both cosmetic beside this).
