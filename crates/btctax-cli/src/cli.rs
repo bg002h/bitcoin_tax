@@ -604,8 +604,16 @@ pub enum Reconcile {
     /// Confirm a self-transfer (TransferLink).
     LinkTransfer {
         out: String,
+        /// The destination `TransferIn` event this outflow arrived as. PREFER THIS whenever the
+        /// arrival is in the ledger: it consumes that deposit, so the coins are relocated exactly
+        /// once.
         #[arg(long, conflicts_with = "to_wallet")]
         to_event: Option<String>,
+        /// The destination WALLET, when its arrival was never imported. This form names no
+        /// in-event, so it cannot consume one: if a deposit at this wallet turns out to be the
+        /// other leg, btctax raises a hard "self-transfer double-booking" blocker naming both —
+        /// booking both legs would relocate the coins AND mint a fresh lot for them, doubling the
+        /// basis. Resolve it with `--to-event` or `reconcile match-self-transfers`.
         #[arg(long)]
         to_wallet: Option<String>,
     },
@@ -795,7 +803,10 @@ pub enum Reconcile {
     /// Bulk-confirm self-transfers: link every PENDING outbound transfer in a time frame to one
     /// destination wallet (non-taxable). Shows a preview + requires --yes (or interactive y/N).
     BulkLinkTransfer {
-        /// Destination wallet every selected outflow links to.
+        /// Destination wallet every selected outflow links to. Bulk can write only this form (it
+        /// names no in-event), so any selected outflow whose other leg is ALREADY an unreconciled
+        /// deposit at this wallet is held back and listed rather than linked — linking it would
+        /// book the same coins twice. Confirm those pairings with `reconcile match-self-transfers`.
         #[arg(long)]
         to_wallet: String,
         /// Restrict to a single tax year (mutually exclusive with --from/--to).

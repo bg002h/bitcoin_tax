@@ -272,10 +272,9 @@ pub fn render_file_reports(reports: &[FileReport], import: &ImportReport) -> Str
 
 /// `exchange:provider:account` | `self:label` (the same grammar `eventref::parse_wallet_id` accepts).
 pub fn wallet_label(w: &WalletId) -> String {
-    match w {
-        WalletId::Exchange { provider, account } => format!("exchange:{provider}:{account}"),
-        WalletId::SelfCustody { label } => format!("self:{label}"),
-    }
+    // Delegates to the core definition — the FR-31 refusal in `resolve` renders wallets into a
+    // copy-pasteable command too, and two spellings of this grammar would be two sources of truth.
+    w.label()
 }
 
 /// UX-P4-9: the shared "insufficient balance" message for a `what-if sell`/`harvest` whose wallet

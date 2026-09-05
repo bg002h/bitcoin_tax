@@ -75,6 +75,21 @@ pub enum BlockerKind {
     /// interim export-refusal guard (sub-2) until the sub-3 typed-attest gate ships.
     /// **Advisory** — never gates `compute_tax_year` (the mode's whole point is to PRESENT a number).
     PseudoReconcileActive,
+    /// FR-31: a live `TransferLink` naming a destination WALLET (`--to-wallet`) coexists with an
+    /// inbound `TransferIn` AT that wallet which is plausibly the SAME movement (amount within the
+    /// pairing tolerance, arrival inside the ±2-day relocation window, or a matching txid) and which
+    /// is not consumed by any link. The link RELOCATES the real lot into the destination; the
+    /// inbound, if classified, books a fresh ORIGIN lot for the coins that just arrived there — the
+    /// same coins twice, doubling the pool AND the basis, which UNDERSTATES tax. FR9 conservation is
+    /// sat-only and cannot see it: the phantom lot bumps `sigma_in` and `sigma_held` equally.
+    ///
+    /// This is a REFUSAL, never a repair. `--to-wallet` names a destination, not an in-event, so
+    /// which in-leg it meant is the filer's testimony, not software's inference — the owner's
+    /// self-transfer policy is "matched pairs are CONFIRMED, not auto". The blocker names both legs
+    /// and points at the precise form (`link-transfer --to-event` / `match-self-transfers`).
+    /// `event` is the INBOUND leg (so a bulk-classify plan can exclude it by id); the out-leg and
+    /// the link decision are named in `detail`. Hard — an open one gates every year.
+    SelfTransferDoubleBooked,
 }
 impl BlockerKind {
     pub fn severity(self) -> Severity {
@@ -92,7 +107,8 @@ impl BlockerKind {
             | Pre2025MethodConflictsAllocation
             | TaxYearNotComputable
             | TaxProfileMissing
-            | TaxTableMissing => Severity::Hard,
+            | TaxTableMissing
+            | SelfTransferDoubleBooked => Severity::Hard,
             SafeHarborTimebar
             | UnmatchedOutflows
             | Pre2025MethodNote
