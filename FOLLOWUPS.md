@@ -5649,4 +5649,13 @@ become furniture — which is precisely what the tickle existed to prevent.
   named in the refusal message once it exists. **Minor by the journey rule** — a blocked regen with
   an explanation is far better than the silent 102 → 42 it replaced. ★ Do not build it as a test
   fixture: it needs the network, and every conformance test reads the committed extract precisely
-  so it needs neither PDF nor network. **Owning phase: next harness change.**
+  so it needs neither PDF nor network.
+  ★★★ **AND THE TEMPTING SHORTCUT IS NOW GUARDED, on purpose.** The obvious way to stop this pain
+  without building the fetcher is *"the (A) PDFs are gitignored, of course they're missing — only
+  guard the committed entries"*, i.e. filtering `regen_would_drop` to `Storage::Committed`. That
+  re-opens the exact 102 → 42 silent loss the guard exists to prevent. On 2026-09-04 that mutation
+  passed the whole xtask suite **67/67**, because the test fixture was a bare tempdir where
+  `git check-ignore` fails and every entry is labelled `Committed`. The fixture is now a real git
+  repo and asserts it holds one entry of EACH storage class, so that edit reds immediately.
+  **If you come here to relieve the fresh-clone pain: build the fetcher, do not narrow the guard.**
+  **Owning phase: next harness change.**
