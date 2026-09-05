@@ -374,6 +374,39 @@ pub enum RefuseReason {
     /// carryover") read as a cure and would send the filer back into the same refusal after the hand
     /// work; the reduced figure belongs to the FOLLOWING year, which btctax can file.
     ExcludedCanceledDebtAttributeReduction,
+    /// ★★★ **T3a — Schedule 1-A line 5 has NO INPUT PATH, and a printed `0` would be fabricated
+    /// testimony.**
+    ///
+    /// Line 5 is *"Qualified tip amount included in Form 1099-NEC, box 1; Form 1099-MISC, box 3; or
+    /// Form 1099-K, box 1a."* `ReturnInputs` carries `w2s`, `int_1099`, `div_1099`, `g_1099` and
+    /// `b_1099` — **there is no 1099-NEC, 1099-MISC or 1099-K struct anywhere in the input model**.
+    /// So the line would be blank *because nothing can populate it*, which on the printed page is
+    /// indistinguishable from a filer who truly had none. Under §G-11 a printed `0` is an
+    /// affirmative sworn statement that the amount IS zero, so btctax's three lawful moves are
+    /// collect, refuse, or genuinely blank — and "silently zero" is none of them.
+    ///
+    /// ★★ **The predicate is a CONJUNCTION and both limbs matter.** Not `schedule_c.is_some()`
+    /// alone: a Schedule C IS the mining household, btctax's core case, so refusing on its presence
+    /// would refuse every TY2025 mining return on a part the filer was told not to complete. Not the
+    /// Part II claim gate alone either: lines 4a–4c are tips *"received as an employee"* while line 5
+    /// is tips *"received in the course of a trade or business"*, so a W-2-only tipped employee — the
+    /// form's own worked example — has no trade or business, line 5's predicate is determinately
+    /// FALSE, and blank is simply correct. Gating on the part would leave Part II unreachable.
+    ///
+    /// ★ The backstop keeping that blank honest is `other_out_of_scope_income`, which is always live
+    /// and refuses on both `None` and `Some(true)`.
+    Schedule1aTipsFromTradeOrBusiness,
+    /// ★★★ **T3a — Schedule 1-A line 14b has NO INPUT PATH**, the same shape one part down.
+    ///
+    /// Line 14b is *"Qualified overtime compensation included in Form 1099-NEC, box 1, or Form
+    /// 1099-MISC, box 3."* Same conjunction, and ★ note WHICH guard holds WHICH half: the conjunct
+    /// is the live guard on the **1099-NEC box 1** side, because nonemployee compensation *is*
+    /// trade-or-business income and with no Schedule C there is nothing on that side to claim. The
+    /// **1099-MISC box 3** side is Other Income on Schedule 1 line 8z, not Schedule C, and is held
+    /// instead by `other_out_of_scope_income` — which a filer with no Schedule C must answer
+    /// `Some(false)` for a return to be produced at all, so they have affirmatively sworn there was
+    /// no such income and 14b is genuinely blank rather than laundered.
+    Schedule1aOvertimeFromTradeOrBusiness,
 }
 
 /// A fail-closed refusal: the reason + a human-readable detail (surfaced to the user).
@@ -834,6 +867,29 @@ pub fn screen_inputs(ri: &ReturnInputs, tbl: &TaxTable, p: &FullReturnParams) ->
     //
     //     ★ Gated on the row carrying an AMOUNT: an all-zero 1099-B row asserts nothing and reports
     //       nothing, so demanding a confirmation for it would be a refusal with no purpose.
+    // ★★★ T3a — Schedule 1-A lines 5 and 14b read 1099-NEC / 1099-MISC / 1099-K, and btctax has no
+    //     struct for any of them. Where the line's own predicate could be TRUE, refuse rather than
+    //     print a zero nobody swore to. Both are CONJUNCTIONS: the part must be claimed AND the
+    //     filer must have a trade or business, because a W-2-only tipped employee has no trade or
+    //     business and blank is then simply correct. See the RefuseReason docs for why neither limb
+    //     alone is right — each was tried and each refused a population it should not have.
+    if ri.schedule_c.is_some() {
+        if ri.schedule_1a.tips.is_some() {
+            return refuse(
+                RefuseReason::Schedule1aTipsFromTradeOrBusiness,
+                "Schedule 1-A line 5 asks for qualified tips reported on Form 1099-NEC box 1,                  1099-MISC box 3 or 1099-K box 1a. btctax has no input for those forms, and this                  return has a trade or business, so the amount cannot be established. Entering                  nothing would look identical to having none."
+                    .to_string(),
+            );
+        }
+        if ri.schedule_1a.overtime.is_some() {
+            return refuse(
+                RefuseReason::Schedule1aOvertimeFromTradeOrBusiness,
+                "Schedule 1-A line 14b asks for qualified overtime reported on Form 1099-NEC box 1                  or 1099-MISC box 3. btctax has no input for those forms, and this return has a                  trade or business, so the amount cannot be established."
+                    .to_string(),
+            );
+        }
+    }
+
     for b in &ri.b_1099 {
         let carries_totals = b.short_term_proceeds > Usd::ZERO
             || b.short_term_basis > Usd::ZERO
@@ -1347,6 +1403,9 @@ mod tests {
     use super::*;
     use crate::tax::return_1040::assemble_absolute;
     use crate::tax::return_inputs::{Box12Entry, Form1099Div, Form1099Int, W2};
+    use crate::tax::return_inputs::{
+        Schedule1aOvertime, Schedule1aTips, Schedule1aVehicle, ScheduleCInputs,
+    };
     use crate::tax::tables::SaltLimitation;
     use crate::LedgerState;
 
@@ -3372,5 +3431,140 @@ mod tests {
         assert_eq!(reason(&r), Some(RefuseReason::DependentSpouseUnsupported));
         r.header.can_be_claimed_as_dependent_spouse = Some(false);
         assert_eq!(reason(&r), None);
+    }
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+    // T3a — Schedule 1-A lines 5 and 14b: the CONJUNCTION, and why neither limb alone is right
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+    fn claiming_tips() -> Schedule1aTips {
+        Schedule1aTips {
+            qualified_tips_reported: dec!(3000),
+            occupation_on_treasury_list: true,
+            treasury_occupation_code: Some("TIP-001".into()),
+            excludes_unlisted_occupation_tips: true,
+            meets_qualified_tip_criteria: true,
+        }
+    }
+
+    /// ★★★ **The KAT that reds against BOTH wrong predicates.** Line 5 refuses only when the part is
+    /// CLAIMED *and* the filer has a trade or business. Each limb alone was tried in an earlier round
+    /// and each refused a population it should not have:
+    ///
+    /// * `schedule_c.is_some()` alone refuses **every TY2025 mining return** — btctax's core case —
+    ///   on a part whose own Caution tells the filer not to complete it.
+    /// * the claim gate alone refuses **100% of Part II's population**, leaving the part unreachable
+    ///   and unexercisable against the per-part oracle census.
+    #[test]
+    fn schedule_1a_line5_refuses_only_on_the_conjunction() {
+        let table = tbl();
+        let params = params();
+
+        // (1) A W-2-only tipped employee — the form's own worked example. Claims Part II, has NO
+        //     trade or business, so line 5's predicate is determinately FALSE and blank is correct.
+        //     This case reds if the predicate is ever widened to the claim gate alone.
+        let mut employee = ri();
+        employee.schedule_1a.tips = Some(claiming_tips());
+        assert!(
+            screen_inputs(&employee, &table, &params).is_none(),
+            "a W-2-only tipped employee with no Schedule C must NOT be refused — line 5 is tips \
+             received in the course of a trade or business, and they have none"
+        );
+
+        // (2) A Schedule C household that does NOT claim Part II. Reds if the predicate is ever
+        //     narrowed to `schedule_c.is_some()` alone — which would refuse every mining return.
+        let mut miner = ri();
+        miner.schedule_c = Some(ScheduleCInputs::default());
+        assert!(
+            !matches!(
+                screen_inputs(&miner, &table, &params).map(|r| r.reason),
+                Some(RefuseReason::Schedule1aTipsFromTradeOrBusiness)
+            ),
+            "a Schedule C household that never claimed Part II must not be refused for line 5"
+        );
+
+        // (3) BOTH limbs true ⇒ the amount cannot be established and a printed 0 would be sworn.
+        let mut both = ri();
+        both.schedule_c = Some(ScheduleCInputs::default());
+        both.schedule_1a.tips = Some(claiming_tips());
+        assert!(
+            matches!(
+                screen_inputs(&both, &table, &params).map(|r| r.reason),
+                Some(RefuseReason::Schedule1aTipsFromTradeOrBusiness)
+            ),
+            "Part II claimed WITH a trade or business must refuse: line 5 reads 1099-NEC/MISC/K and \
+             btctax has no input for any of them"
+        );
+    }
+
+    /// Line 14b, the same shape one part down.
+    #[test]
+    fn schedule_1a_line14b_refuses_only_on_the_conjunction() {
+        let table = tbl();
+        let params = params();
+
+        let mut employee = ri();
+        employee.schedule_1a.overtime = Some(Schedule1aOvertime {
+            qualified_overtime_reported: dec!(2000),
+            is_flsa_premium_half_only: true,
+            entitlement_arises_under_flsa: true,
+            excludes_amounts_counted_as_tips: true,
+        });
+        assert!(
+            screen_inputs(&employee, &table, &params).is_none(),
+            "an FLSA employee with no Schedule C must NOT be refused for line 14b"
+        );
+
+        let mut both = ri();
+        both.schedule_c = Some(ScheduleCInputs::default());
+        both.schedule_1a.overtime = Some(Schedule1aOvertime {
+            qualified_overtime_reported: dec!(2000),
+            is_flsa_premium_half_only: true,
+            entitlement_arises_under_flsa: true,
+            excludes_amounts_counted_as_tips: true,
+        });
+        assert!(
+            matches!(
+                screen_inputs(&both, &table, &params).map(|r| r.reason),
+                Some(RefuseReason::Schedule1aOvertimeFromTradeOrBusiness)
+            ),
+            "Part III claimed WITH a trade or business must refuse for line 14b"
+        );
+    }
+
+    /// The negative-money screen reaches all three Schedule 1-A leaves. An unscreened money field is
+    /// a silent fail-open, and these three are new.
+    #[test]
+    fn schedule_1a_money_leaves_are_negative_screened() {
+        for (what, mutate) in [
+            (
+                "Schedule 1-A qualified tips",
+                (|r: &mut ReturnInputs| {
+                    r.schedule_1a.tips = Some(Schedule1aTips {
+                        qualified_tips_reported: dec!(-1),
+                        ..Default::default()
+                    });
+                }) as fn(&mut ReturnInputs),
+            ),
+            ("Schedule 1-A qualified overtime", |r: &mut ReturnInputs| {
+                r.schedule_1a.overtime = Some(Schedule1aOvertime {
+                    qualified_overtime_reported: dec!(-1),
+                    ..Default::default()
+                });
+            }),
+            ("Schedule 1-A car loan interest", |r: &mut ReturnInputs| {
+                r.schedule_1a.vehicles = vec![Schedule1aVehicle {
+                    interest_paid: dec!(-1),
+                    ..Default::default()
+                }];
+            }),
+        ] {
+            let mut r = ri();
+            mutate(&mut r);
+            let got = screen_inputs(&r, &tbl(), &params()).map(|x| x.reason);
+            assert!(
+                matches!(got, Some(RefuseReason::NegativeAmount(ref f)) if f == what),
+                "{what} must be negative-screened, got {got:?}"
+            );
+        }
     }
 }

@@ -233,6 +233,17 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::Form1099BNeedsForm8949 => vec![Anchor::NotInForm {
             note: "Form 1099-B rows are entered via TOML import — set `basis_reported_and_no_adjustments` on the row",
         }],
+        // ★★ T3a — Schedule 1-A lines 5 and 14b. `NotInForm` for a reason that will EXPIRE: the
+        //    Sch 1-A form section is not built yet (coverage EXEMPT_PREFIXES says so and why), and
+        //    even once it is, the cure for these two is not a Sch 1-A field at all — it is a
+        //    1099-NEC / 1099-MISC / 1099-K input surface btctax does not have. Anchoring them at a
+        //    field that cannot fix them would be worse than saying plainly where the gap is.
+        R::Schedule1aTipsFromTradeOrBusiness => vec![Anchor::NotInForm {
+            note: "Schedule 1-A line 5 needs a 1099-NEC / 1099-MISC / 1099-K input surface, which btctax does not have; remove the Schedule C or do not claim Part II",
+        }],
+        R::Schedule1aOvertimeFromTradeOrBusiness => vec![Anchor::NotInForm {
+            note: "Schedule 1-A line 14b needs a 1099-NEC / 1099-MISC input surface, which btctax does not have; remove the Schedule C or do not claim Part III",
+        }],
         R::KiddieTax => vec![Anchor::NotInForm {
             note: "the §1(g) kiddie-tax screen is computed at `report`, not a v1 form field",
         }],
