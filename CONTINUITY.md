@@ -798,9 +798,15 @@ as-of-a-date**, should be frozen in the repo, and their non-IRS URLs are less st
 is now *identical* across both trees is the thing that was actually broken: a single manifest and a
 single checker.
 
-- **`cargo run -p xtask -- authority-manifest`** — **113 entries** (47 committed + 66 note-only;
-  16 statute, 6 regulation, 33 instructions, 40 form, 12 guidance, 6 publication), each with kind,
-  storage, sha256, URL and extract. `--regen` **derives** it from the trees — never hand-listed.
+- **`cargo run -p xtask -- authority-manifest`** — **102 entries** (42 committed + 60 note-only;
+  16 statute, 6 regulation, 28 instructions, 34 form, 12 guidance, 6 publication — measured
+  2026-09-04, not recalled), each with kind, storage, sha256, URL and extract. `--regen`
+  **derives** it from the trees — never hand-listed.
+  ★★ **`--regen` REFUSES on a tree that is missing any listed document**, since 2026-09-04. It
+  walks the filesystem, so on a fresh clone (where the 60 (A) PDFs are gitignored and unfetched)
+  it would otherwise rewrite the manifest 102 → 42 with every instrument still green — measured.
+  Fetch the PDFs from their notes first, or `git restore` a missing committed file. Plain
+  `authority-manifest` with no flag is read-only and always safe.
 - **Two directions, because one is not enough.** *verify*: every entry resolves and every committed
   file still hashes true (a changed hash means the source was **REVISED** — review, never absorb).
   *census*: every primary source in an accounted tree **is in the manifest** — the shape detector

@@ -5618,8 +5618,16 @@ become furniture — which is precisely what the tickle existed to prevent.
   `authority-manifest` printed *"OK — every entry resolves and every source is listed"* and
   `archive-check` was green. The only thing that had ever caught it was accidental — a pin of 7
   reddening on a 0-duplicate manifest — and taking the pin to 0 retired that side effect.
-  **That half is now FIXED**: `regen` refuses when a note's binary is absent, held by
-  `regen_refuses_to_delete_a_document_whose_binary_is_missing` (B1: seen red on the planted defect).
+  **That half is now FIXED** — and the first fix for it was wrong twice, which is worth recording.
+  (i) The guard was keyed on *"does every provenance note have its binary?"*, covering the 60
+  note-backed (A) documents and **blind to the other 42** — all of `legal/primary-sources/`, which
+  has no notes; deleting a committed statute and regenerating dropped it silently. It is now keyed
+  on the manifest itself — *"no path currently listed may disappear"* (`regen_would_drop`) — which
+  subsumes both storage classes. (ii) Its kill test asserted only that `regen` returned `Err`, so
+  moving the guard below `fs::write` left the manifest **destroyed and the test still passing** — a
+  false PASS in the instrument holding the guarantee. It now byte-compares the manifest after the
+  refusal, mutation-verified red against three breakages (refusal removed; guard moved below the
+  write; guard re-keyed on notes only).
   ★ The originally proposed fix — *"regen into a temp dir, assert byte-equality with the committed
   file"* — must NOT be built as written: it is non-hermetic, reds on every machine that has not
   fetched all 60 gitignored PDFs, and the obvious way to make it pass is to commit the 42-entry
@@ -5631,3 +5639,14 @@ become furniture — which is precisely what the tickle existed to prevent.
   never once fired. Either fix the parse and let notes be the source of truth, or delete the dead
   fallback; do not leave code that pretends to a capability it lacks. **Owning phase: next harness
   change.**
+
+- **FR-26 — `--regen`'s refusal names a remedy the repo has no tool for.** When it fires on a fresh
+  clone it lists the missing documents and says to restore them from their notes; there is no
+  actuator. `legal/_scripts/` fetches the **(B)** tree only, there is no `make` target, and nothing
+  under `scripts/` walks `design/forms/**/*.pdf.txt`. The maintainer's next move is 60 hand-issued
+  `curl`s. Fail-closed is right and this is explicitly **not** a request for a `--force`; what is
+  missing is one `legal/_scripts/`-style loop (URL is line 1, the check is the `# sha256` line),
+  named in the refusal message once it exists. **Minor by the journey rule** — a blocked regen with
+  an explanation is far better than the silent 102 → 42 it replaced. ★ Do not build it as a test
+  fixture: it needs the network, and every conformance test reads the committed extract precisely
+  so it needs neither PDF nor network. **Owning phase: next harness change.**

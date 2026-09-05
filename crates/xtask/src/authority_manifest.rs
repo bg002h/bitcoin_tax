@@ -526,17 +526,35 @@ fn extract_for(root: &Path, rel: &str) -> String {
     String::new()
 }
 
-/// `cargo run -p xtask -- authority-manifest --regen`
+/// ★★★ **Every path the committed manifest lists that a regen here would DROP.**
 ///
-/// ★★ **Derived from the trees, never hand-listed.** That is not a convenience — a hand-written
-/// manifest is exactly the enumeration-from-a-hand-list failure (F2) that produced the four-archive
-/// mess in the first place. Storage is read from `git check-ignore` rather than assumed, so the
-/// manifest records what git actually does with each file.
-/// ★★★ **Every note whose binary is absent — the documents a `--regen` here would DELETE.**
+/// ★★ **Keyed on the MANIFEST, not on notes — and that distinction is a defect this replaced.**
+/// The first version of this guard asked *"does every provenance note have its binary?"*, which
+/// covered the 60 (A) documents (gitignored, note-backed) and was **blind to the other 42** — all
+/// of `legal/primary-sources/`, which by convention has no notes at all. Measured at the time: 102
+/// entries, 60 with a sibling note, 42 without, every one of the 42 `committed`. Deleting one of
+/// those and regenerating dropped it silently, which is the identical failure one storage class
+/// over. The invariant that actually holds is *"no path currently listed may disappear"*, and it
+/// subsumes the note case without a second tree walk.
 ///
-/// `collect_sources` walks the FILESYSTEM for binaries, so a document whose PDF is not on disk is
-/// not collected and simply vanishes from the regenerated manifest. The (A) PDFs are gitignored, so
-/// on a fresh clone or in CI that is **all sixty of them**.
+/// Returns an empty vec when no manifest exists yet — a first-ever regen has nothing to lose.
+pub fn regen_would_drop(root: &Path, sources: &[String]) -> Vec<String> {
+    let Ok(existing) = load(root) else {
+        return Vec::new();
+    };
+    let fresh: std::collections::BTreeSet<&str> = sources.iter().map(String::as_str).collect();
+    let mut dropped: Vec<String> = existing
+        .iter()
+        .map(|e| e.path.clone())
+        .filter(|p| !fresh.contains(p.as_str()))
+        .collect();
+    dropped.sort();
+    dropped.dedup();
+    dropped
+}
+
+/// Of [`regen_would_drop`]'s paths, those that have a provenance note — i.e. the ones a fetch can
+/// restore, as opposed to the committed files that want `git restore`.
 pub fn notes_without_binaries(root: &Path) -> Vec<String> {
     let mut orphans = Vec::new();
     for (tree, _) in crate::archive_check::KNOWN_ARCHIVES {
@@ -585,6 +603,14 @@ fn collect_notes(dir: &Path, root: &Path, out: &mut Vec<String>) {
     }
 }
 
+/// `cargo run -p xtask -- authority-manifest --regen`
+///
+/// ★★ **Derived from the trees, never hand-listed.** That is not a convenience — a hand-written
+/// manifest is exactly the enumeration-from-a-hand-list failure (F2) that produced the four-archive
+/// mess in the first place. Storage is read from `git check-ignore` rather than assumed, so the
+/// manifest records what git actually does with each file.
+///
+/// ★★★ **It REFUSES rather than silently shrinking the manifest** — see [`regen_would_drop`].
 pub fn regen(root: &Path) -> Result<usize, String> {
     // ★★★ **REFUSE rather than silently delete.** Measured 2026-09-04, and it is why this guard
     // exists: with the 60 gitignored (A) PDFs absent — a fresh clone, or CI — this function
@@ -597,27 +623,12 @@ pub fn regen(root: &Path) -> Result<usize, String> {
     // side effect along with the duplication, which is how a real tripwire went dormant inside a
     // commit whose message called the replacement "a STRONGER guard". A guarantee that survives
     // only as a side effect of an unrelated number is not a guarantee — so it is stated here.
-    let orphans = notes_without_binaries(root);
-    if !orphans.is_empty() {
-        return Err(format!(
-            "REFUSING to regenerate: {} document(s) have a provenance note but NO binary on disk, \
-             and regenerating would delete them from the manifest without a word:\n{}\n  \
-             The (A) PDFs are gitignored — fetch them first (each note's line 1 is the URL, and \
-             its sha256 is the check), then re-run. `xtask authority-manifest` alone is read-only \
-             and always safe.",
-            orphans.len(),
-            orphans
-                .iter()
-                .take(10)
-                .map(|o| format!("    {o}\n"))
-                .chain(
-                    (orphans.len() > 10)
-                        .then(|| { format!("    … and {} more\n", orphans.len() - 10) })
-                )
-                .collect::<String>(),
-        ));
-    }
-
+    //
+    // ★★★ **THE CHECK MUST PRECEDE THE WRITE, and the test must assert THAT** — the first version
+    // of this guard was held by a test asserting only that `regen` returned `Err`. Moving the guard
+    // below `fs::write` left the manifest destroyed and that test still PASSING: a false PASS in the
+    // instrument holding the guarantee, which is exactly the class B1 exists for. See
+    // `regen_refuses_to_delete_a_document_whose_binary_is_missing`, which now pins the FILE.
     let urls = harvested_urls(root);
     let mut sources = Vec::new();
     for (tree, _) in crate::archive_check::KNOWN_ARCHIVES {
@@ -625,6 +636,44 @@ pub fn regen(root: &Path) -> Result<usize, String> {
     }
     sources.sort();
     sources.dedup();
+
+    let dropped = regen_would_drop(root, &sources);
+    if !dropped.is_empty() {
+        let notes: std::collections::BTreeSet<String> =
+            notes_without_binaries(root).into_iter().collect();
+        let (fetchable, committed): (Vec<&String>, Vec<&String>) =
+            dropped.iter().partition(|p| notes.contains(*p));
+        let mut hint = String::new();
+        if !fetchable.is_empty() {
+            hint.push_str(&format!(
+                "\n  {} have a provenance note — gitignored, and simply not fetched in this tree. \
+                 Restore them from each note (line 1 is the URL, the `# sha256` line is the check).",
+                fetchable.len()
+            ));
+        }
+        if !committed.is_empty() {
+            hint.push_str(&format!(
+                "\n  {} are COMMITTED files missing from the working tree — `git restore` them. A \
+                 regen must never be how a committed authority leaves the manifest.",
+                committed.len()
+            ));
+        }
+        return Err(format!(
+            "REFUSING to regenerate: it would drop {} document(s) from MANIFEST.json without a \
+             word.\n{}{}\n  `xtask authority-manifest` alone is read-only and always safe.",
+            dropped.len(),
+            dropped
+                .iter()
+                .take(10)
+                .map(|d| format!("    {d}\n"))
+                .chain(
+                    (dropped.len() > 10)
+                        .then(|| format!("    … and {} more\n", dropped.len() - 10))
+                )
+                .collect::<String>(),
+            hint,
+        ));
+    }
 
     let mut entries = Vec::new();
     for rel in sources {
@@ -866,51 +915,96 @@ mod tests {
         }
     }
 
-    /// ★★★ **B1 KILL for the regen refusal — the defect it exists to catch, planted.**
+    /// ★★★ **B1 KILL for the regen refusal — and it pins the FILE, not the return value.**
     ///
-    /// The defect is not hypothetical and was not imagined: on 2026-09-04, with the 60 gitignored
-    /// (A) PDFs absent, `--regen` rewrote the real manifest from **102 entries to 42** and every
-    /// instrument in the repo still reported OK. This plants the same shape — a provenance note
-    /// whose binary is not on disk — and asserts `regen` REFUSES instead of quietly dropping it.
+    /// The defect is not hypothetical: on 2026-09-04, with the 60 gitignored (A) PDFs absent,
+    /// `--regen` rewrote the real manifest from **102 entries to 42** and every instrument in the
+    /// repo still reported OK.
     ///
-    /// ★ The positive half matters as much: with the binary present the same tree must NOT refuse,
-    /// or the guard would simply block every regen and get deleted the first time it was in the way.
+    /// ★★★ **This test was itself a FALSE PASS on its first version, and that is why it is shaped
+    /// like this.** It asserted only that `regen` returned `Err`. Moving the guard below
+    /// `fs::write` — an ordinary refactor — left `regen` destroying the manifest and *then*
+    /// refusing, and the test still passed. The guarantee is that **the manifest survives**, so
+    /// that is what is asserted: a sentinel file, byte-compared after the refusal. Asserting the
+    /// error type alone is how an instrument keeps its green while the thing it guards is gone.
+    ///
+    /// ★★ **Both storage classes.** The first guard asked "does every note have its binary?", which
+    /// was blind to the 42 committed `legal/` entries that have no notes at all. This plants one of
+    /// each — a note-backed form and a committed statute — because one arm passing proved nothing
+    /// about the other.
     #[test]
     fn regen_refuses_to_delete_a_document_whose_binary_is_missing() {
         use std::fs;
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         let forms = root.join("design/forms/2025");
+        let statutes = root.join("legal/primary-sources/statute-irc");
         fs::create_dir_all(&forms).expect("mkdir");
+        fs::create_dir_all(&statutes).expect("mkdir");
         fs::write(
             forms.join("f8949--2025.pdf.txt"),
             "https://www.irs.gov/pub/irs-prior/f8949--2025.pdf\n# sha256  abc\n# bytes 1\n",
         )
-        .expect("write note");
+        .expect("note");
+        fs::write(forms.join("f8949--2025.pdf"), b"%PDF-1.4 fake").expect("pdf");
+        // ★ No note, by convention — this is the (B) shape the first guard could not see.
+        fs::write(statutes.join("26USC_s1.html"), b"<html>26 USC 1</html>").expect("statute");
 
-        // ── The defect: a note, no binary. ──
+        // Baseline: both documents make it into the manifest.
         assert_eq!(
-            notes_without_binaries(root),
-            vec!["design/forms/2025/f8949--2025.pdf".to_string()],
-            "a note whose binary is absent must be reported — it is what regen would delete"
+            regen(root).expect("baseline regen"),
+            2,
+            "both must be listed"
         );
-        let err = regen(root).expect_err(
-            "regen MUST refuse when a documented source is missing from disk; silently dropping it \
-             is how 60 entries vanished with the suite green",
-        );
-        assert!(
-            err.contains("REFUSING to regenerate") && err.contains("f8949--2025.pdf"),
-            "the refusal must name what it is protecting; got: {err}"
-        );
+        let manifest = manifest_path(root);
+        let pristine = fs::read(&manifest).expect("manifest written");
 
-        // ── The control: binary present, no refusal, and the entry survives. ──
-        fs::write(forms.join("f8949--2025.pdf"), b"%PDF-1.4 fake").expect("write pdf");
-        assert!(
-            notes_without_binaries(root).is_empty(),
-            "with the binary on disk nothing is orphaned"
+        // ── Each storage class, one at a time. Removing EITHER must refuse, and must not write. ──
+        for victim in [
+            forms.join("f8949--2025.pdf"), // note-backed, gitignored in the real repo
+            statutes.join("26USC_s1.html"), // committed, NO note — the I-2 blind spot
+        ] {
+            let saved = fs::read(&victim).expect("read victim");
+            fs::remove_file(&victim).expect("remove victim");
+
+            let err = regen(root).expect_err(
+                "regen MUST refuse when a listed document is missing; silently dropping it is how \
+                 60 entries vanished with the whole suite green",
+            );
+            assert!(
+                err.contains("REFUSING to regenerate"),
+                "the refusal must say so; got: {err}"
+            );
+            // ★★★ THE ASSERTION THAT MATTERS. Without it, a guard placed after the write passes.
+            assert_eq!(
+                fs::read(&manifest).expect("manifest still there"),
+                pristine,
+                "the manifest must be BYTE-IDENTICAL after a refusal — refusing *after* writing is \
+                 not refusing, and asserting only the Err lets that through"
+            );
+
+            fs::write(&victim, &saved).expect("restore victim");
+            assert!(
+                regen_would_drop(root, &{
+                    let mut v = Vec::new();
+                    for (tree, _) in crate::archive_check::KNOWN_ARCHIVES {
+                        collect_sources(&root.join(tree), root, &mut v);
+                    }
+                    v.sort();
+                    v
+                })
+                .is_empty(),
+                "restoring the document must clear the refusal"
+            );
+        }
+
+        // ── Control: with everything present, regen proceeds and is idempotent. ──
+        assert_eq!(regen(root).expect("regen must succeed"), 2);
+        assert_eq!(
+            fs::read(&manifest).expect("manifest"),
+            pristine,
+            "a regen over an unchanged tree must be byte-stable"
         );
-        let n = regen(root).expect("regen must succeed once the source is present");
-        assert_eq!(n, 1, "the one document must be in the regenerated manifest");
     }
 
     /// ★★★ **The duplication countdown, now DISCHARGED — and the standing guard in its place.**
@@ -954,9 +1048,6 @@ mod tests {
     /// **collided with a real tracked note and destroyed it** (restored: `dcd2d7ff…`, 129,683
     /// bytes). Do not reproduce it at that path.
     ///
-    /// ★ **Seen red 2026-09-04 (B1).** The same document was planted under a second path
-    /// (`design/forms/2024/f8949--2024.pdf` copied from the 2025 note) and this test failed with
-    /// `duplicate archived documents: 1, pinned 0`, naming the pair. Then reverted, and green.
     #[test]
     fn duplicate_source_groups_may_only_shrink() {
         let entries = load(&root()).expect("manifest loads");

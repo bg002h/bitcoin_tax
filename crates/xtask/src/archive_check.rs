@@ -45,8 +45,13 @@ fn ext_is_document(n: &str) -> bool {
         .any(|e| n.ends_with(e))
 }
 
-/// `f1040--2024.pdf`, `i1040gi--2024.pdf.txt`, `f8949.pdf`, `p550.pdf` — the IRS's own stem
+/// `f1040--2024.pdf`, `i1040gi--2024.pdf.txt`, `f8949--2025.pdf` — the IRS's own stem
 /// convention: `f`/`i`/`p` + at least three digits.
+///
+/// ★ Same standard as `human_readable_form` below: these must be files the repo actually HOLDS.
+/// `f8949.pdf` and `p550.pdf` used to be listed here and are in no tree — note that the `p`
+/// arm is still load-bearing for the *shape* (it matches `Pub525_…` style stems only via
+/// `irs_guidance`'s `PUB` prefix, not here), so it is kept, not pruned.
 fn irs_stem(name: &str) -> bool {
     if !ext_is_document(name) {
         return false;
