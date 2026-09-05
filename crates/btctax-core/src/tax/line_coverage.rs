@@ -45,7 +45,13 @@
 
 use crate::conventions::Usd;
 
-/// The year every currently-covered form is quoted from. A TY2025+ form sets its own.
+/// The year a row is quoted from when the collector has not been told otherwise.
+///
+/// ★★ This constant's doc used to read *"A TY2025+ form sets its own"* — and until 2026-09-05 there
+/// was **no API by which it could**. Both constructors hardcoded it, so a TY2025 row would have
+/// claimed a TY2024 quotation and `cite-check` would have gone looking for
+/// `f1040s1a--2024.txt`, which does not exist. Use [`Coverage::quoting_year`] to set it; the claim
+/// is now true.
 pub const DEFAULT_ROW_YEAR: &str = "2024";
 
 /// Which sentence-shape of the IRS instruction language this line transcribes.
@@ -121,10 +127,23 @@ pub struct LineCoverage {
 
 /// Accumulator. [`Self::line`] takes the money value itself so `#![deny(unused_variables)]` bites on
 /// any field the destructure names but does not classify.
-#[derive(Debug, Default)]
-pub struct Coverage(pub Vec<LineCoverage>);
+#[derive(Debug)]
+pub struct Coverage(pub Vec<LineCoverage>, &'static str);
+
+impl Default for Coverage {
+    fn default() -> Self {
+        Coverage(Vec::new(), DEFAULT_ROW_YEAR)
+    }
+}
 
 impl Coverage {
+    /// Quote subsequent rows from `year` rather than [`DEFAULT_ROW_YEAR`].
+    ///
+    /// ★ The year is per-ROW, not per-collector-lifetime: a packet legitimately spans forms from
+    /// different years, so this sets the year for rows pushed *after* it and can be called again.
+    pub fn quoting_year(&mut self, year: &'static str) {
+        self.1 = year;
+    }
     /// Record one money line. `_value` exists to be CONSUMED — that is the compile-time guarantee.
     ///
     /// ★ `impl Into<Option<Usd>>` accepts a `Usd` and an `Option<Usd>` alike (std's
@@ -145,7 +164,7 @@ impl Coverage {
     ) {
         self.0.push(LineCoverage {
             form,
-            year: DEFAULT_ROW_YEAR,
+            year: self.1,
             line: line.to_string(),
             field,
             production,
@@ -156,9 +175,16 @@ impl Coverage {
 
     /// Record a line that fits no production. The reason is mandatory and is checked.
     #[allow(clippy::too_many_arguments)]
+    /// ★★ **Widened 2026-09-05 to match [`Self::line`].** It took a bare `Usd`, which made a
+    /// not-completed line inexpressible on the exception path — and the r4 fold's own C-I2
+    /// resolution requires exactly that on Schedule 1-A lines 10/18/27/33, where a Caution says to
+    /// skip the part. The r4 fold recorded this as "✅ FIXED IN CODE"; a 2026-09-05 review measured
+    /// it as two-thirds fixed, this being the missing third. Same reasoning as the sibling: the
+    /// census records a line's PRODUCTION, never its value, so widening costs nothing and narrowing
+    /// forces an `unwrap_or` that reads like a claim about the figure.
     pub fn exception(
         &mut self,
-        _value: Usd,
+        _value: impl Into<Option<Usd>>,
         form: &'static str,
         line: &str,
         field: &'static str,
@@ -167,7 +193,7 @@ impl Coverage {
     ) {
         self.0.push(LineCoverage {
             form,
-            year: DEFAULT_ROW_YEAR,
+            year: self.1,
             line: line.to_string(),
             field,
             production: Production::Exception,
@@ -2884,4 +2910,73 @@ pub fn all() -> Coverage {
         .0,
     );
     c
+}
+
+#[cfg(test)]
+mod year_and_blank_tests {
+    use super::*;
+
+    /// ★★★ **B1 for `quoting_year`.** Before 2026-09-05 this constant's doc claimed *"A TY2025+ form
+    /// sets its own"* while both constructors hardcoded [`DEFAULT_ROW_YEAR`] — a capability asserted
+    /// in prose and absent from the code, which is the defect class this repo keeps finding. A
+    /// TY2025 row would have claimed a TY2024 quotation and sent `cite-check` looking for
+    /// `f1040s1a--2024.txt`, which does not exist.
+    ///
+    /// ★ The year is per-ROW, so this also pins that rows pushed BEFORE the call keep the old year —
+    /// a packet legitimately spans forms from different years, and a setter that retroactively
+    /// rewrote earlier rows would silently re-attribute their quotations.
+    #[test]
+    fn quoting_year_sets_the_year_for_later_rows_only() {
+        let mut c = Coverage::default();
+        c.line(
+            Usd::ZERO,
+            "f1040",
+            "1a",
+            "line1a",
+            Production::Carry,
+            "Total amount from Form(s) W-2, box 1",
+        );
+        c.quoting_year("2025");
+        c.line(
+            Usd::ZERO,
+            "f1040s1a",
+            "3",
+            "line3",
+            Production::Carry,
+            "Enter the amount from line 2f",
+        );
+
+        assert_eq!(
+            c.0[0].year, "2024",
+            "a row pushed BEFORE the call keeps 2024"
+        );
+        assert_eq!(
+            c.0[1].year, "2025",
+            "a row pushed AFTER the call must carry 2025 — if this reads 2024 the setter is inert \
+             and the constant's doc is a claim the code does not honour"
+        );
+    }
+
+    /// ★★ **B1 for the widened `exception`.** It took a bare `Usd`, so a line the form says to SKIP
+    /// could not be recorded as blank on the exception path — and C-I2's own resolution needs
+    /// exactly that on Schedule 1-A lines 10/18/27/33. This is a COMPILE-time guarantee: if the
+    /// parameter narrows back to `Usd`, `None` stops compiling and this file fails to build.
+    #[test]
+    fn exception_records_a_line_the_form_says_to_skip() {
+        let mut c = Coverage::default();
+        c.exception(
+            None::<Usd>,
+            "f1040s1a",
+            "10",
+            "line10",
+            "Caution: skip this part if ...",
+            "the part's Caution is unmet, so the line is not completed",
+        );
+        assert_eq!(c.0.len(), 1);
+        assert_eq!(c.0[0].production, Production::Exception);
+        assert_eq!(
+            c.0[0].reason,
+            Some("the part's Caution is unmet, so the line is not completed")
+        );
+    }
 }
