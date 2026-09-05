@@ -5966,7 +5966,8 @@ self-transfer policy was audited for CONFORMANCE, not relitigated.
   no migration: no format change, no digest change, and no fixture carried a negative. 35 new tests,
   mutation-verified per door (21 red with the guard removed).
 
-- **FR-42 — the CSV adapters diverge on USD sign, and Gemini LAUNDERS it.** Surfaced by the FR-38
+- **FR-42 — ✅ CLOSED as NOT-A-DEFECT (2026-09-05). The premise was a false equivalence.**
+  ~~the CSV adapters diverge on USD sign, and Gemini LAUNDERS it~~ Surfaced by the FR-38
   recon and left alone deliberately. Gemini `.abs()`es `usd_cost`/`usd_proceeds`
   (`sources/gemini.rs:147/157`, with a written rationale); Coinbase (`:153`/`:162`), Swan
   (`:194`/`:248`) and River (`:139`) do not. Since FR-38 the three *refuse* an impossible figure at
@@ -5979,9 +5980,24 @@ self-transfer policy was audited for CONFORMANCE, not relitigated.
   This `.abs()` is on `USD Amount USD` for a **BTCUSD Buy/Sell**, where the sign redundantly
   encodes direction and the `Type` column already fixes the field's role — which is exactly what
   the written rationale says. Rewards arrive on a different row shape entirely and are **FR-45**.
-  The two are unrelated; FR-42 stands as filed.
+  The two are unrelated; rewards were FR-45.
+  ★★ **AND THEN THE PREMISE ITSELF FAILED, measured.** Gemini's `USD Amount USD` is a SINGLE
+  BIDIRECTIONAL column whose sign encodes direction. On a real export **every Buy row is negative
+  and every Sell row positive**, fees negative throughout. The `Type` column already fixes the
+  field's role, so the sign is redundant and `.abs()` is a lossless FORMAT normalisation that cannot
+  move a figure. Coinbase, Swan and River encode direction in COLUMN NAMES (`Subtotal`,
+  `Sent`/`Received`), so their amounts are magnitudes and a negative there really is impossible —
+  refusing is right FOR THEM. **One policy, two formats. There was never a divergence.**
+  ★★★ The filed remedy — *"Gemini should stop repairing and refuse like its siblings"* — would have
+  **rejected every Buy row in a real Gemini export.** This item was a trap, and the way a trap is
+  closed is a test that reds when someone walks into it: `gemini_negative_usd_normalized_to_positive`
+  already does (verified by mutation — turning the `.abs()` into a refusal reds it), and the
+  reasoning now sits at the `.abs()` site so the next reader does not re-derive it.
+  ★ The lesson is the shape, not the adapter: FR-42 compared a **format normalisation** against a
+  **value guard** and called them the same policy. An adapter's job is to convert its own format
+  into a valid payload; only the payload has invariants.
 
-- **FR-43 — a refused import names the FIELD but not the CSV ROW.** FR-38's refusal fires at
+- **FR-43 — ✅ CLOSED (built 2026-09-05). A refused import named the FIELD but not the ROW.** FR-38's refusal fires at
   `persistence::insert`, which has the payload and not the file, the line number, or the source ref.
   `append_import_batch` is atomic, so one impossible cell rolls a 10,000-row statement back with a
   message that says `Acquire.usd_cost = -1234.56` and nothing about *where*. Adding a second,
@@ -5989,8 +6005,17 @@ self-transfer policy was audited for CONFORMANCE, not relitigated.
   exists to remove, and it is how the four adapters got out of step in the first place. The right
   lever is error CONTEXT, not a second check: carry the `AdapterError`-style `{line, field, value}`
   the adapters already build alongside the event, and attach it when `append_import_batch` returns.
-  Cosmetic only — no impossible value reaches the vault either way. **Owning phase: the next adapter
-  cycle, with FR-39.**
+  Cosmetic only — no impossible value reaches the vault either way.
+  ★★ **BUILT, and smaller than filed.** The entry proposed carrying an `{line, field, value}` tuple
+  from the adapters; that plumbing was unnecessary. `append_import_batch`'s loop already binds
+  `source` and `source_ref` two lines above the `insert` call, and the **source_ref is how a filer
+  finds the row** — it is the Trade/Order id or the semantic key, which is more useful than a line
+  number after a re-export. So the fix wraps the one call site and adds nothing else.
+  ★ The rejected design stayed rejected: no second guard was added to any adapter. This is error
+  CONTEXT on the single guard, which is what FR-38 asked for.
+  ★ Held by `a_refusal_names_the_row_it_came_from_not_only_the_field`, which asserts the message
+  keeps naming the FIELD *and* now names the row and the import, and that the batch is still atomic.
+  Mutation-verified: stripping the context reds it alone. **Owning phase: CLOSED.**
 
 - **FR-44 — `sats_as_dollars_advisory` still has ZERO TUI call sites.** FR-37 closed the CLI half of
   its own finding; the TUI half was never opened (grep for the name or for `"did you enter the sats
@@ -6076,10 +6101,20 @@ self-transfer policy was audited for CONFORMANCE, not relitigated.
   ★ Mutation-verified four ways (`--no-fail-fast`, so the counts are real): revert the predicate ⇒ 4
   red; tighten it to a byte-exact string ⇒ 3 red; invent a `$0` basis on an unpriced day ⇒ 3 red;
   drop the variant off the ring ⇒ 1 red.
-  ★ **NOT done here, and still open:** the Form 8949 **aggregation** question for hundreds of dust
-  lots; the other `Credit` specifications (`Administrative Credit`, and the general rule that a
-  credit with no `Tx Hash` cannot be a self-transfer); and re-importing any vault that already stored
-  these rows as `TransferIn` — the fix changes classification at import, not retroactively.
+  ★ **RESIDUE, RESOLVED in the 2026-09-05 adapter cycle:**
+  • **Form 8949 volume is NOT a defect and never was** — this entry's own framing ("against a PDF
+    emitter with a documented 14-row page overflow") was misleading. `fill8949_full.rs:125` already
+    chunks rows across fresh template copies and merges them via `overflow::merge_copies`, with
+    per-copy totals riding along and Schedule D aggregating the grand totals; the path is tested by
+    `tests/overflow.rs` and `tests/field_census_slice.rs`. Hundreds of lots produce many pages, and
+    that is paper volume, not a wrong number. Summary reporting would be a FEATURE, not a fix.
+  • **The general rule was already built** — I-1 of the review fold made a `Credit` a `TransferIn`
+    only on positive on-chain evidence, so "a credit with no `Tx Hash` cannot be a self-transfer" is
+    implemented, not pending.
+  • **`Administrative Credit`** — owner ruling 2026-09-05: out of scope, a decade-old dust credit.
+    It refuses (Unclassified), which is the correct resting state for an unknown character.
+  • **Re-import** of a vault that already stored these rows as `TransferIn` remains true and
+    unautomated: the fix changes classification at import, not retroactively.
   ★★ **REVIEW + FOLD (2026-09-05).** An independent adversarial review of the build returned
   **0C / 2I / 3M / 1 Nit** (`design/agent-reports/2026-09-05-fr45-review.md`, persisted verbatim
   before folding). Both Importants were real and both were in the fix, not the original defect:

@@ -141,6 +141,23 @@ impl Adapter for Gemini {
             let lower = ttype.to_ascii_lowercase();
             let (dir, payload): (Direction, EventPayload) = match lower.as_str() {
                 "buy" | "sell" => {
+                    // ★★ FR-42 — CLOSED as not-a-defect, and this comment is the reason why.
+                    //
+                    //   Gemini's `USD Amount USD` is a SINGLE BIDIRECTIONAL column whose sign encodes
+                    //   direction: dollars leave on a Buy, arrive on a Sell. Measured on a real export,
+                    //   every Buy row is negative and every Sell row positive, fees negative throughout.
+                    //   The `Type` column already fixes the field's role, so the sign is pure redundancy
+                    //   and `.abs()` is a lossless FORMAT normalisation — it cannot change a figure.
+                    //
+                    //   ★ FR-42 read this as "Gemini launders an impossible value while its siblings
+                    //   refuse one", and that was a FALSE EQUIVALENCE. Coinbase, Swan and River encode
+                    //   direction in COLUMN NAMES (`Subtotal`, `Sent`/`Received`), so their amounts are
+                    //   magnitudes and a negative there IS impossible — refusing is right FOR THEM.
+                    //   Gemini is the only adapter whose format signs, so normalising is right FOR IT.
+                    //   One policy, two formats; there was never a divergence to reconcile.
+                    //
+                    //   ★★ DO NOT "fix" this into a refusal — it would reject EVERY Buy row in a real
+                    //   Gemini export. `gemini_negative_usd_normalized_to_positive` reds if anyone tries.
                     // I-1: gate Acquire/Dispose on a USD-quoted BTCUSD trade.
                     // A BTC-quoted pair (e.g. ETHBTC, BCHBTC) disposes BTC in the opposite
                     // direction from a naive Type=Buy read, and carries no USD amount → falling

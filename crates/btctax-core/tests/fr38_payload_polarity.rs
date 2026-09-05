@@ -496,3 +496,42 @@ fn load_all_still_reads_a_pre_existing_impossible_row() {
         "a record-time gate must never make an existing vault unloadable"
     );
 }
+
+// ── FR-43 — the refusal must say WHERE, not only WHAT ────────────────────────────────────────────
+
+/// ★★ **FR-43.** `check_payload_polarity` names the field and the value, and knows nothing about
+/// the row. `append_import_batch` is ATOMIC, so one impossible cell rolls back a whole statement —
+/// and a message reading only `Acquire.usd_cost = -1.00` gives the filer nothing to act on when the
+/// statement had thousands of rows.
+///
+/// The provenance was already in hand at the seam (`source` and `source_ref` are bound in the
+/// batch loop), so this is error CONTEXT, not a second checker — adding an earlier guard per
+/// adapter is the divergent-copy shape FR-38 exists to remove.
+///
+/// This test is the guarantee: it fails if the context is dropped, and it is deliberately written
+/// against the source_ref the filer would actually search for.
+#[test]
+fn a_refusal_names_the_row_it_came_from_not_only_the_field() {
+    let c = conn();
+    let err = persistence::append_import_batch(&c, &[imported("TRADE-4711", acquire(dec!(-1.00)))])
+        .expect_err("a negative usd_cost must be refused at the persistence boundary");
+    let s = err.to_string();
+
+    // WHAT — retained, so this does not trade one half of the message for the other.
+    assert!(s.contains("usd_cost"), "must still name the field: {s}");
+
+    // WHERE — the new half. The source_ref is how a filer finds the row in the export.
+    assert!(
+        s.contains("TRADE-4711"),
+        "the refusal must name the offending event's source_ref so the row can be found: {s}"
+    );
+    assert!(
+        s.contains("import"),
+        "the refusal must name which import it came from: {s}"
+    );
+
+    assert!(
+        persistence::load_all(&c).unwrap().is_empty(),
+        "still atomic — a refused batch persists nothing"
+    );
+}

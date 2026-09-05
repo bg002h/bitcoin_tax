@@ -203,7 +203,23 @@ pub fn append_import_batch(
             .optional()?;
         match existing_fp {
             None => {
-                insert(&tx, ev, KIND_IMPORT, Some(&fp))?;
+                // ★ FR-43 — a refusal must say WHERE. `check_payload_polarity` inside `insert`
+                //   names the field and the value (`Acquire.usd_cost = -1234.56`) but knows
+                //   nothing about the row it came from, and `append_import_batch` is ATOMIC — so
+                //   one impossible cell rolls back a whole statement with a message the filer
+                //   cannot act on. The provenance is already in hand: `source` and `source_ref`
+                //   are bound just above, and the source_ref IS how a filer finds the row.
+                //   ★ Deliberately NOT a second guard in each adapter — that is the divergent-copy
+                //   shape FR-38 exists to remove, and how the four adapters got out of step in the
+                //   first place. This adds CONTEXT to the one guard; it does not add a checker.
+                insert(&tx, ev, KIND_IMPORT, Some(&fp)).map_err(|e| {
+                    CoreError::Persistence(format!(
+                        "{e} — in the {} import, event {} (timestamp {})",
+                        source.tag(),
+                        source_ref.0,
+                        ev.utc_timestamp
+                    ))
+                })?;
                 report.appended += 1;
             }
             Some(prev) if prev == fp.0 => {
