@@ -5871,3 +5871,15 @@ proceeds netting, `Σ picks == principal`, cross-account identification, §1222/
 claim is at the strength the authority supports), the 8949 boxes and adjustment codes, §1012 fee
 capitalisation across all four adapters, and conformance of BOTH owner-mandated policies. The
 self-transfer policy was audited for CONFORMANCE, not relitigated.
+
+- **FR-38 — `classify-raw`'s embedded `usd_cost` JSON has NO validation at all.** Found by the FR-37
+  agent while enumerating the parsing entry points, and deliberately not absorbed into that fix. Every
+  other USD-bearing input now runs `sats_as_dollars_advisory` (FR-37 wired five of them), and the
+  sign check exists on the named flags — but a `usd_cost` arriving inside a `classify-raw` JSON
+  payload is neither sign-checked nor advised. That is a **wider gap than FR-37 was**: it bypasses
+  the whole flag-level validation surface, so it also escapes any future check wired the same way.
+  ★ Direction: an inflated `usd_cost` inflates basis, which shrinks gain — **understates tax**.
+  ★★ The right fix is probably not another call site but moving validation to where the value is
+  *parsed* rather than where the flag is read, so a new entry point cannot skip it by construction —
+  the same reasoning that made FR-37 one predicate with six references instead of six copies.
+  **Owning phase: with the FR-12/FR-27 answered-ness sweep.**
