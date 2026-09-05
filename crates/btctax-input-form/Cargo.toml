@@ -1,6 +1,6 @@
 [package]
 name = "btctax-input-form"
-version = "0.17.0"
+version = "0.18.0"
 edition.workspace = true
 license.workspace = true
 description = "UI-agnostic form engine (FormSpec + Edit seam) for authoring btctax ReturnInputs."
@@ -10,7 +10,7 @@ keywords.workspace = true
 categories = ["finance"]
 
 [dependencies]
-btctax-core = { path = "../btctax-core", version = "0.17.0" }
+btctax-core = { path = "../btctax-core", version = "0.18.0" }
 rust_decimal = { version = "1.36", default-features = false, features = ["serde-str", "std"] }
 time = { version = "0.3", features = ["serde-well-known", "macros", "parsing", "formatting"] }
 serde = { version = "1", features = ["derive"] }
@@ -18,6 +18,6 @@ serde = { version = "1", features = ["derive"] }
 [dev-dependencies]
 # ★ FR-29 — the polarity test needs a REAL `FullReturnParams` (the §1(g) threshold), and the
 #   bundled tables live in adapters. Dev-only, and no cycle: adapters depends on core alone.
-btctax-adapters = { path = "../btctax-adapters", version = "0.17.0" }
+btctax-adapters = { path = "../btctax-adapters", version = "0.18.0" }
 serde_json = { version = "1", features = ["preserve_order"] }
 rust_decimal_macros = "1.36"

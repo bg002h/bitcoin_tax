@@ -297,11 +297,11 @@ dependencies = [
 
 [[package]]
 name = "btctax"
-version = "0.17.0"
+version = "0.18.0"
 
 [[package]]
 name = "btctax-adapters"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "btctax-core",
  "calamine",
@@ -316,7 +316,7 @@ dependencies = [
 
 [[package]]
 name = "btctax-cli"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "btctax-adapters",
  "btctax-core",
@@ -339,7 +339,7 @@ dependencies = [
 
 [[package]]
 name = "btctax-core"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "proptest",
  "rusqlite",
@@ -354,7 +354,7 @@ dependencies = [
 
 [[package]]
 name = "btctax-forms"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "btctax-core",
  "lopdf",
@@ -369,7 +369,7 @@ dependencies = [
 
 [[package]]
 name = "btctax-input-form"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "btctax-adapters",
  "btctax-core",
@@ -382,7 +382,7 @@ dependencies = [
 
 [[package]]
 name = "btctax-oracle-harness"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "btctax-core",
  "btctax-forms",
@@ -391,7 +391,7 @@ dependencies = [
 
 [[package]]
 name = "btctax-store"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "anyhow",
  "fs2",
@@ -406,7 +406,7 @@ dependencies = [
 
 [[package]]
 name = "btctax-tui"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "btctax-adapters",
  "btctax-cli",
@@ -422,7 +422,7 @@ dependencies = [
 
 [[package]]
 name = "btctax-tui-edit"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "btctax-adapters",
  "btctax-cli",
@@ -441,7 +441,7 @@ dependencies = [
 
 [[package]]
 name = "btctax-update-prices"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "btctax-adapters",
  "clap",
@@ -3760,7 +3760,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "btctax-cli",
  "btctax-core",
