@@ -737,9 +737,9 @@ Check what this feature actually produced: open the Form 8275 PDF and confirm th
 
   ── ADVISORIES (11) ──
   • CTC/ODC NOT COMPUTED — you captured 1 dependent(s), but v1 does not compute the Child
-    Tax Credit or the Credit for Other Dependents (1040 line 19 is $0). Your tax is
-    OVERSTATED by up to $2,000 per qualifying child / $500 per other dependent. File
-    Schedule 8812 yourself to claim it.
+    Tax Credit or the Credit for Other Dependents, so 1040 line 19 is LEFT BLANK for you to
+    fill in. Your tax is OVERSTATED by up to $2,000 per qualifying child / $500 per other
+    dependent. File Schedule 8812 yourself and carry its line 14 to line 19.
   • OTHER CREDITS NOT COMPUTED — v1 does not compute the education (Form 8863),
     dependent-care (Form 2441), retirement-savings/saver's (Form 8880), residential-energy
     (Form 5695) or adoption (Form 8839) credits: Schedule 3 Part I is $0 apart from the

@@ -1677,7 +1677,9 @@ fn f1040() -> Form1040Lines {
         line16: dec!(26000),
         line17: Usd::ZERO,
         line18: dec!(26000),
-        line19: Usd::ZERO,
+        // ★ FR-1 — line 19 BLANK: this household's §24 credit was never figured. "Add lines 19 and
+        //   20" then carries line 20 alone, which is what line 21 already said.
+        line19: None,
         line20: dec!(287),
         line21: dec!(287),
         line22: dec!(25713),
@@ -1920,6 +1922,41 @@ fn form_1040_full_fills_every_line_and_reads_back() {
         let fqn = format!("topmostSubform[0].Page2[0].{omitted}");
         assert_eq!(g(&fqn), None, "{fqn} (conservative omission) must be blank");
     }
+
+    // ★★★ FR-1 — LINE 19 IS THE SAME CLASS, AND IT USED TO PRINT `0`.
+    //
+    // "Child tax credit or credit for other dependents from Schedule 8812" is a CARRY, and this
+    // fixture's `line19` is `None` — btctax figured no §24 credit for this household. The emitter must
+    // decline to write, exactly as it does for 27-30, rather than swear a $0 credit under §6065.
+    // Line 21 still prints: "Add lines 19 and 20" with a blank operand is line 20 alone.
+    assert_eq!(
+        g("topmostSubform[0].Page2[0].f2_05[0]"),
+        None,
+        "1040 line 19 must be BLANK when core hands the emitter `None`"
+    );
+    assert_eq!(
+        g("topmostSubform[0].Page2[0].f2_07[0]").as_deref(),
+        Some("287"),
+        "…and line 21 still prints, carrying line 20 alone"
+    );
+
+    // ★ …and the OTHER side of Schedule 8812 line 12: a provable "No" instructs "-0-" on line 14,
+    //   which line 14 routes to 1040 line 19. `Some(0)` must therefore reach the paper as `0`.
+    //   Without this leg, an unconditional blank would pass the assertion above.
+    let mut zeroed = f1040();
+    zeroed.line19 = Some(Usd::ZERO);
+    let pdf0 = btctax_forms::fill_form_1040_full(
+        &zeroed,
+        &kitchen_sink_header(),
+        FilingStatus::Single,
+        2024,
+    )
+    .unwrap();
+    assert_eq!(
+        tv(&pdf0, "topmostSubform[0].Page2[0].f2_05[0]").as_deref(),
+        Some("0"),
+        "1040 line 19 must PRINT -0- when Schedule 8812 line 12 answers No"
+    );
 
     // The Digital-Asset question is answered YES; "No" is never checked.
     let doc = load(&pdf).unwrap();

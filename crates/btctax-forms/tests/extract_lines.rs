@@ -186,7 +186,9 @@ fn f1040() -> Form1040Lines {
         line16: dec!(26000),
         line17: Usd::ZERO,
         line18: dec!(26000),
-        line19: Usd::ZERO,
+        // ★ FR-1 — line 19 BLANK: this household's §24 credit was never figured, and "Add lines 19
+        //   and 20" then carries line 20 alone, which is what line 21 already said.
+        line19: None,
         line20: dec!(287),
         line21: dec!(287),
         line22: dec!(25713),

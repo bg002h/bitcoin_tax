@@ -126,10 +126,17 @@ pub struct Coverage(pub Vec<LineCoverage>);
 
 impl Coverage {
     /// Record one money line. `_value` exists to be CONSUMED — that is the compile-time guarantee.
+    ///
+    /// ★ `impl Into<Option<Usd>>` accepts a `Usd` and an `Option<Usd>` alike (std's
+    /// `impl<T> From<T> for Option<T>`), so a line the form leaves BLANK — 1040 line 19, FR-1 — is
+    /// consumed by the same call and still trips `deny(unused_variables)` if it is dropped from the
+    /// destructure. The census records a line's PRODUCTION, never its value; widening the parameter
+    /// costs it nothing, and narrowing it to `Usd` would have forced an `unwrap_or` that reads like a
+    /// claim about the figure.
     #[allow(clippy::too_many_arguments)]
     pub fn line(
         &mut self,
-        _value: Usd,
+        _value: impl Into<Option<Usd>>,
         form: &'static str,
         line: &str,
         field: &'static str,
@@ -2483,7 +2490,7 @@ fn zero_form1040lines() -> crate::tax::printed::Form1040Lines {
         line16: Usd::ZERO,
         line17: Usd::ZERO,
         line18: Usd::ZERO,
-        line19: Usd::ZERO,
+        line19: None,
         line20: Usd::ZERO,
         line21: Usd::ZERO,
         line22: Usd::ZERO,
