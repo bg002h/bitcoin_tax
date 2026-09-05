@@ -180,6 +180,34 @@ fn classify_inbound_self_transfer_with_basis_and_acquired_has_no_advisory() {
     );
 }
 
+/// FR-37: `--basis` gets only the `>= 0` sign check today (UX-P4-4a) — it has NO sats-vs-dollars
+/// advisory, unlike `--amount` on `reclassify-outflow` (UX-P4-4(d)). The fixture receives 0.05 BTC at
+/// the bundled 2025-03-01 close of $84,000 (market value $4,200); typing the SATS count (5,000,000)
+/// into `--basis` is >100x that market value — the exact same shape of mistake `--amount` already
+/// catches, just recorded silently here because a basis-bearing field understates tax (a bigger
+/// basis ⇒ a smaller future gain) rather than overstating it. (★ fault-inject: remove the `--basis`
+/// call site from `classify_inbound`'s advisory block and this goes RED.)
+#[test]
+fn classify_inbound_self_transfer_large_basis_is_flagged_as_likely_sats() {
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, in_ref) = vault_with(dir.path(), coinbase_receive_csv(dir.path()), true);
+
+    let (code, stderr) = run_self_transfer(&vault, &[&in_ref, "--basis", "5000000"]);
+    assert_eq!(code, 0, "an advisory is non-fatal; stderr: {stderr}");
+    assert!(
+        stderr.contains("warning")
+            && stderr.contains("--basis")
+            && stderr.to_lowercase().contains("sats"),
+        "a sats-shaped --basis must warn, naming --basis + the sats mistake: {stderr}"
+    );
+
+    // Non-fatal: the basis is still recorded AS ENTERED, not silently corrected.
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    assert_eq!(state.lots.len(), 1);
+    assert_eq!(state.lots[0].usd_basis, rust_decimal_macros::dec!(5000000));
+}
+
 /// UX-P4-4a: the `--basis=-N` clap `=`-form bypass is CLOSED at record time. `--basis -5000` (space form)
 /// is rejected by clap as an unknown flag, but `--basis=-5000` slips past clap's `-`-prefix detection — the
 /// value guard must catch it and refuse (nonzero, naming the flag) before anything is recorded, else a

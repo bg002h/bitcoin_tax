@@ -5845,9 +5845,20 @@ deemed-FIFO consequence exists in **three doc comments and no code**.
     repo's own spec both say *"date **and time** of the sale"*; both timestamps are already in hand.
   - **FR-36 (Important)** — an unclassified outflow removes sats, reports no disposition, and is only
     Advisory, while a *partially* covered disposal is Hard. No export surface mentions it.
-  - **FR-37 (Important)** — the "sats typed into a dollars field" advisory has ONE call site,
-    `--amount`, where the error overstates tax. `--basis` and `--donor-basis` get only a sign check,
-    so `--basis 5000000` on 0.05 BTC records silently — the direction that understates.
+  - **FR-37 — ✅ CLOSED (built 2026-09-05, `fix/fr37-sats-in-basis-field`).** The "sats typed into a
+    dollars field" advisory (`sats_as_dollars_advisory`, generalized from the `--amount`-only
+    `amount_fmv_advisory`) now also fires on the FIVE basis-bearing call sites a grep of every
+    `parse_nonneg_usd_arg` site turned up: `--basis` (self-transfer) and `--donor-basis` /
+    `--fmv-at-gift` (gift, both named — the latter feeds the §1015(a) dual-basis LOSS reference
+    alongside `--donor-basis`'s GAIN carryover, so leaving it unchecked on the same decision would
+    have been a half-fix), plus `--fmv` on `classify-inbound-income` and its later-correction path
+    `set-fmv` (both become the acquired lot's basis via `BasisSource::FmvAtIncome`, one indirection
+    from a self-transfer's `--basis`). All five ship with an independent binary-level CLI test that
+    is mutation-verified RED with its call site removed (B1). Deliberately NOT wired: `--fee`
+    (reduces proceeds, not basis — a different shape) and the non-persisted `what-if`/`consult`
+    calculators (nothing is ever filed) are noted as candidates, not fixed; `classify-raw`'s embedded
+    `usd_cost` JSON field has NO validation at all (not even the `>= 0` sign check), a strictly wider
+    gap than FR-37's — flag for a follow-up, out of this fix's scope.
 
 ★ **The next instrument, named by the disposition agent itself:** a mechanical sweep of every
 consumer of `ComplianceStatus`, `BlockerKind` and `pending_reconciliation` asking *"does this change
