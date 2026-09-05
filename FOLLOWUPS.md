@@ -6032,9 +6032,18 @@ self-transfer policy was audited for CONFORMANCE, not relitigated.
   carrying FMV-at-receipt basis; a `Credit` with no `Tx Hash` and an unrecognised specification
   becomes `Unclassified`, **not** `TransferIn`. `TransferIn` should require the on-chain markers it
   claims to represent.
-  ★ **It cannot be a blanket constant.** A sign-up bonus with no spending requirement is income,
-  unlike a spending rebate, so the filer must be able to say which — this is a collect-it question in
-  the sense of the transcription rule, not a default.
+  ★★ **OWNER DETERMINATION (2026-09-05): "These are credit card rewards for sure."** So for this
+  corpus the character is settled — spending rebates, not gross income at receipt, basis = FMV at
+  receipt. Two consequences. (a) The adapter is NOT guessing: the export's own `Specification` string
+  says `Deposit (Gemini Credit Card Reward Payout BTC)`, so keying on it reads a source document
+  rather than inferring a tax character, which is what "never guess" actually asks for. (b) The
+  filer question does not disappear for OTHER users — a sign-up or referral bonus with no spending
+  requirement IS income and could plausibly carry the same specification — so the default may be the
+  rebate treatment, but it must stay overridable rather than becoming a constant.
+  ★ **TIMING — this barely touches the year now being filed.** The payouts begin 2025-12-03, so only
+  a two-figure basis originates in **TY2025**; the rest is TY2026. The fix therefore has roughly a
+  year of runway and does not gate a TY2025 return, which is the opposite of what "the most common
+  row type" suggested.
   ★★ **MAGNITUDE, measured — and it CALIBRATES DOWN from what "most common row type" implies.**
   The payouts are dust: a median in the low thousands of satoshis, a smallest of **twelve satoshis**
   (a fraction of one cent), and a **four-figure** total basis across **hundreds of lots in seven
