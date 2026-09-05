@@ -81,7 +81,10 @@ pub(super) fn income_kind_tag(kind: IncomeKind) -> &'static str {
 /// private). Matches the CLI's `compliance_status_tag` output exactly.
 ///
 /// - `standing_order:<date>` — in-force standing order effective from `<date>`.
-/// - `contemporaneous`       — `LotSelection` recorded on or before the day of sale.
+/// - `contemporaneous`       — `LotSelection` recorded no later than the date AND TIME of the sale
+///   (§1.1012-1(j)(2)). ★ This line said "on or before the DAY of sale" until I-1; the code
+///   applied that standard at only one of the rule's three sites, and a selection made at 17:00
+///   on the day of a 10:00 sale is not one — the fold rejects it.
 /// - `attested_recording`    — Mode-1-persisted selection backed by contemporaneous-ID attestation.
 /// - `non_compliant`         — no adequate identification.
 pub(super) fn compliance_status_tag(cs: &ComplianceStatus) -> String {

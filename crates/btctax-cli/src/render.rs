@@ -227,7 +227,10 @@ fn form8283_how_acquired_tag(h: Form8283HowAcquired) -> &'static str {
 ///
 /// Values:
 /// - `standing_order:<date>` — in-force standing order effective from `<date>` (YYYY-MM-DD).
-/// - `contemporaneous`       — `LotSelection` recorded on or before the day of sale.
+/// - `contemporaneous`       — `LotSelection` recorded no later than the date AND TIME of the sale
+///   (§1.1012-1(j)(2)). ★ This line said "on or before the DAY of sale" until I-1; the code
+///   applied that standard at only one of the rule's three sites, and a selection made at 17:00
+///   on the day of a 10:00 sale is not one — the fold rejects it.
 /// - `attested_recording`    — Mode-1-persisted selection backed by contemporaneous-ID attestation (§C.2).
 /// - `non_compliant`         — no adequate identification; FIFO is the defensible filing position.
 fn compliance_status_tag(cs: &ComplianceStatus) -> String {

@@ -165,8 +165,10 @@ fn method_election(seq: u64, ts: time::OffsetDateTime, method: LotMethod) -> Led
 fn cfg() -> ProjectionConfig {
     ProjectionConfig::default() // FIFO default, TreatmentC
 }
-fn made() -> time::Date {
-    time::macros::date!(2026 - 07 - 01)
+/// I-1: an INSTANT — `optimize_year` judges the §1.1012-1(j)(2) deadline to the second. Midnight
+/// UTC on 2026-07-01, which is after every 2026 sale in these KATs either way.
+fn made() -> time::OffsetDateTime {
+    time::macros::datetime!(2026-07-01 00:00:00 UTC)
 }
 fn no_attest() -> BTreeSet<EventId> {
     BTreeSet::new()

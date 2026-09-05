@@ -23,12 +23,13 @@ use crate::project::fold::{fold, pools_before, state_as_of};
 use crate::project::pools::{pool_key, PoolKey};
 use crate::project::resolve::{resolve, Eff, Op};
 use crate::project::{
-    disposal_compliance, evaluate_disposal, project, CandidateDisposal, ComplianceStatus,
-    DisposalCompliance, EvaluateError, ProjectionConfig,
+    disposal_compliance, evaluate_disposal, identification_is_timely, project, CandidateDisposal,
+    ComplianceStatus, DisposalCompliance, DispositionMoment, EvaluateError, ProjectionConfig,
 };
 use crate::state::{Blocker, LedgerState, Lot};
 use crate::tax::{compute_tax_year, MarginalRates, TaxOutcome, TaxProfile, TaxResult, TaxTables};
 use std::collections::{BTreeMap, BTreeSet};
+use time::OffsetDateTime;
 
 /// The `accept`-gate verdict for one disposal (computed in core; enforced by the CLI, Task 10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -459,28 +460,37 @@ fn is_broker(w: &WalletId) -> bool {
 /// The §C.2 `accept`-gate verdict for one disposal (computed in core; enforced by the CLI, Task 10).
 ///
 /// **The 2027+ broker envelope is AUTHORITATIVE and tested FIRST**, taking precedence over the
-/// `made ≤ sale` (contemporaneous) lever: for a 2027+ broker-held lot own-books identification is
+/// timeliness (contemporaneous) lever: for a 2027+ broker-held lot own-books identification is
 /// INSUFFICIENT (Notices 2025-07/2026-20 own-books relief ENDS in 2026; broker-communicated
-/// specific-ID is required 2027+), so even a genuinely contemporaneous (`made ≤ sale`) own-books pick
+/// specific-ID is required 2027+), so even a genuinely contemporaneous own-books pick
 /// CANNOT rescue it — it is NEVER `ContemporaneousNow`. This mirrors `proposed_compliance_status`,
 /// which likewise judges 2027+ broker → `NonCompliant` ahead of the contemporaneous branch (the two
 /// functions MUST agree — see the FOLLOWUPS Task-4 asymmetry, now closed). Order:
-/// - 2027+ broker-held (ANY timing, incl. made ≤ sale) → `ForbiddenBroker2027` (NEVER persist; no
+/// - 2027+ broker-held (ANY timing, incl. a timely pick) → `ForbiddenBroker2027` (NEVER persist; no
 ///   attestation can cure it).
-/// - else made-date ≤ sale → §A.5(b) `Contemporaneous` lever; persist freely (`ContemporaneousNow`).
-/// - else already-executed (made > sale; self-custody any year, or broker-held 2025–2026) →
+/// - else timely (§1.1012-1(j)(2)) → §A.5(b) `Contemporaneous` lever; persist freely
+///   (`ContemporaneousNow`).
+/// - else already-executed (post-hoc; self-custody any year, or broker-held 2025–2026) →
 ///   `NeedsAttestation`.
+///
+/// ★★ **I-1 — this gate is not advice, it is a WRITE.** `optimize accept` reads `ContemporaneousNow`
+/// and persists an UNATTESTED `LotSelection`. While this compared `TaxDate`s and `resolve`'s §A.4 pass
+/// compared instants, a filer who sold at 10:00 and ran `optimize` that afternoon was told the pick
+/// was "persistable now" — and the very next projection dropped what `accept` had just written as
+/// `LotSelectionPostHoc`. The tool's claim and its own next action disagreed. Both sides are instants
+/// now, through the one shared predicate. `sale.date` still decides the broker envelope, because
+/// §6045 broker reporting is a year test and not a moment.
 pub fn persistability(
     wallet: &WalletId,
-    sale_date: TaxDate,
-    selection_made: TaxDate,
+    sale: DispositionMoment,
+    selection_made: OffsetDateTime,
 ) -> Persistability {
     // §1.1012-1(j): the 2027+ broker envelope is authoritative — it precedes the contemporaneous
-    // branch because own-books ID (even made ≤ sale) is insufficient for a 2027+ broker lot. So such a
+    // branch because own-books ID (even a timely one) is insufficient for a 2027+ broker lot. So such a
     // lot is categorically ForbiddenBroker2027, never ContemporaneousNow (mirrors proposed_compliance_status).
-    if is_broker(wallet) && sale_date.year() >= 2027 {
+    if is_broker(wallet) && sale.date.year() >= 2027 {
         Persistability::ForbiddenBroker2027
-    } else if selection_made <= sale_date {
+    } else if identification_is_timely(selection_made, sale.at) {
         Persistability::ContemporaneousNow
     } else {
         Persistability::NeedsAttestation
@@ -493,13 +503,18 @@ pub fn persistability(
 /// divergent post-hoc cherry-pick as `StandingOrder` (FORBIDDEN — §1.1012-1(j)). So this judges it directly:
 /// - `proposed == current` (no change): keep `baseline_status` — adopting an identical pick binds nothing
 ///   new (`accept` skips it). **This is the ONLY path that may report `StandingOrder`.**
-/// - diverges: 2027+ broker → `NonCompliant`; else `made ≤ sale` → `Contemporaneous`; else (post-hoc) →
-///   `NonCompliant`. The overlay may later upgrade a post-hoc `NonCompliant` → `AttestedRecording` ONLY
-///   when attested AND within the own-books envelope AND unchanged.
+/// - diverges: 2027+ broker → `NonCompliant`; else timely (§1.1012-1(j)(2)) → `Contemporaneous`; else
+///   (post-hoc) → `NonCompliant`. The overlay may later upgrade a post-hoc `NonCompliant` →
+///   `AttestedRecording` ONLY when attested AND within the own-books envelope AND unchanged.
+///
+/// ★ **I-1 — `made` and `sale.at` are instants.** This is what `optimize` PRINTS, and the SPEC's
+/// load-bearing cross-cutting rule ("no artifact, command, or doc may describe post-hoc selection as
+/// compliant") binds a printed status exactly as it binds a filed figure. Comparing dates printed
+/// `Contemporaneous` for a proposal made hours after the sale it names.
 pub fn proposed_compliance_status(
     wallet: &WalletId,
-    sale_date: TaxDate,
-    made: TaxDate,
+    sale: DispositionMoment,
+    made: OffsetDateTime,
     proposed: &[LotPick],
     current: &[LotPick],
     baseline_status: &ComplianceStatus,
@@ -507,10 +522,10 @@ pub fn proposed_compliance_status(
     if proposed == current {
         return baseline_status.clone(); // no divergence ⇒ the real, already-established status stands
     }
-    if is_broker(wallet) && sale_date.year() >= 2027 {
+    if is_broker(wallet) && sale.date.year() >= 2027 {
         return ComplianceStatus::NonCompliant;
     }
-    if made <= sale_date {
+    if identification_is_timely(made, sale.at) {
         ComplianceStatus::Contemporaneous
     } else {
         ComplianceStatus::NonCompliant // divergent post-hoc cherry-pick — NEVER StandingOrder
@@ -549,6 +564,17 @@ pub fn compliance_overlay(
 /// per-disposal-independent generation and the proposal is flagged `ContentionUnenumerated`.
 const GROUP_COMBO_BOUND: usize = 4_096;
 
+/// One optimizable disposal: `(disposal event, wallet, sale DATE, sale INSTANT, principal sat)`.
+///
+/// ★ **I-1 — the date and the instant are BOTH carried, and neither is derivable from the other.**
+/// The date drives pool keys, the year filter, the §6045 broker envelope and the joint-enumeration
+/// TIME order (all calendar rules, and the order is left date-granular deliberately: refining it to
+/// instants would change which candidate assignments the optimizer enumerates, which is not this
+/// fix's business). The instant is the §1.1012-1(j)(2) identification deadline the compliance and
+/// persistability gates compare against. It rides in the tuple rather than in a side map so that a
+/// target cannot exist without its moment — the omission does not compile.
+type Target = (EventId, WalletId, TaxDate, OffsetDateTime, Sat);
+
 /// Partition the year's `targets` into contention groups: disposals sharing one `PoolKey::Wallet` pool
 /// whose `available_lots_before` (baseline) lot-id sets OVERLAP are one group; a non-overlapping disposal
 /// is its own singleton group. Deterministic (NFR4): union-find over pre-sorted `targets` (EventId order),
@@ -557,13 +583,13 @@ fn contention_groups(
     events: &[LedgerEvent],
     prices: &dyn PriceProvider,
     config: &ProjectionConfig,
-    targets: &[(EventId, WalletId, TaxDate, Sat)],
+    targets: &[Target],
 ) -> Vec<Vec<usize>> {
     let n = targets.len();
     // Per-target (pool key, available-lot-id set) under the baseline consumption.
     let infos: Vec<(PoolKey, BTreeSet<LotId>)> = targets
         .iter()
-        .map(|(id, wallet, date, _need)| {
+        .map(|(id, wallet, date, _at, _need)| {
             let lots = available_lots_before(events, prices, config, id, *date, wallet);
             let ids: BTreeSet<LotId> = lots.into_iter().map(|l| l.lot_id).collect();
             (pool_key(*date, wallet), ids)
@@ -606,8 +632,17 @@ fn contention_groups(
 type JointMaps = (Vec<BTreeMap<EventId, Vec<LotPick>>>, Option<usize>);
 
 /// Per-disposal proposal-row metadata threaded between the status pass and the final `DisposalProposal`
-/// build: `(disposal, wallet, sale date, current picks, proposed picks)`.
-type RowMeta = (EventId, WalletId, TaxDate, Vec<LotPick>, Vec<LotPick>);
+/// build: `(disposal, wallet, sale moment, current picks, proposed picks)`. I-1: the SALE MOMENT, not
+/// just its date — the `persistability` gate at the far end of this thread is the §1.1012-1(j)(2)
+/// deadline test, and narrowing here is what let `optimize accept` write a selection the very next
+/// projection dropped.
+type RowMeta = (
+    EventId,
+    WalletId,
+    DispositionMoment,
+    Vec<LotPick>,
+    Vec<LotPick>,
+);
 
 /// Joint candidate assignments for ONE contention group, generated by NESTING `candidate_selections` in
 /// canonical (time, then EventId) order: the earliest disposal draws from the pre-group pool; each later
@@ -620,7 +655,7 @@ fn group_candidate_assignments(
     events: &[LedgerEvent],
     prices: &dyn PriceProvider,
     config: &ProjectionConfig,
-    group: &[(EventId, WalletId, TaxDate, Sat)],
+    group: &[Target],
 ) -> Option<JointMaps> {
     // TIME order (then EventId) so the pool evolution is correct: earlier disposals consume first; later
     // disposals see the remaining pool PLUS lots acquired between them.
@@ -635,7 +670,7 @@ fn group_candidate_assignments(
     let mut partials: Vec<BTreeMap<EventId, Vec<LotPick>>> = vec![BTreeMap::new()];
     let mut max_heur: Option<usize> = None;
     for &mi in &order {
-        let (id, wallet, date, need) = &group[mi];
+        let (id, wallet, date, _at, need) = &group[mi];
         let mut next: Vec<BTreeMap<EventId, Vec<LotPick>>> = Vec::new();
         for partial in &partials {
             let lots =
@@ -669,10 +704,10 @@ fn independent_group_maps(
     prices: &dyn PriceProvider,
     config: &ProjectionConfig,
     baseline_state: &LedgerState,
-    group: &[(EventId, WalletId, TaxDate, Sat)],
+    group: &[Target],
 ) -> Vec<BTreeMap<EventId, Vec<LotPick>>> {
     let mut maps: Vec<BTreeMap<EventId, Vec<LotPick>>> = vec![BTreeMap::new()];
-    for (id, wallet, date, need) in group {
+    for (id, wallet, date, _at, need) in group {
         let lots = available_lots_before(events, prices, config, id, *date, wallet);
         let (mut cands, _heuristic) = candidate_selections(&lots, *need);
         if cands.is_empty() {
@@ -717,9 +752,13 @@ const MAX_COMBOS: usize = 50_000;
 /// `NotComputable` year → `YearNotComputable` (I6); a year with no method-honoring disposals → `NoDisposals`.
 /// Side-effect-free: computes a proposal; appends NOTHING.
 ///
-/// `proposal_made` is the proposed picks' made-date threaded from the CLI seam (core stays clock-free,
-/// NFR4); it drives each row's HONEST compliance + persistability. `attested` is the CLI-supplied attested
-/// disposal set (empty for pure what-if).
+/// `proposal_made` is the proposed picks' made-INSTANT threaded from the CLI seam (core stays
+/// clock-free, NFR4); it drives each row's HONEST compliance + persistability. ★ I-1: an INSTANT,
+/// because §1.1012-1(j)(2)'s deadline is "the date and time of the sale" and the CLI has always had
+/// the instant in hand (`now: OffsetDateTime`) — it was narrowing it to a `TaxDate` on the way in,
+/// which made every same-day proposal look timely and `optimize accept` write a selection the very
+/// next projection dropped. `attested` is the CLI-supplied attested disposal set (empty for pure
+/// what-if).
 #[allow(clippy::too_many_arguments)]
 pub fn optimize_year(
     events: &[LedgerEvent],
@@ -729,7 +768,7 @@ pub fn optimize_year(
     profile: Option<&TaxProfile>,
     tables: &dyn TaxTables,
     attested: &BTreeSet<EventId>,
-    proposal_made: TaxDate,
+    proposal_made: OffsetDateTime,
 ) -> Result<OptimizeProposal, OptimizeError> {
     if year < TRANSITION_DATE.year() {
         return Err(OptimizeError::PreTransitionYear(year));
@@ -742,17 +781,24 @@ pub fn optimize_year(
     };
 
     // The year's method-honoring disposals (Disposal records for `year`), in EventId order (NFR4).
-    let mut targets: Vec<(EventId, WalletId, TaxDate, Sat)> = baseline_state
+    // I-1: the sale's INSTANT comes from the SAME import event that supplies the wallet — the field
+    // `resolve` reads into `Eff::utc` for the fold's §A.4 timeliness drop — so the gates below judge
+    // a proposal against exactly the deadline the fold will judge the written selection against.
+    let mut targets: Vec<Target> = baseline_state
         .disposals
         .iter()
         .filter(|d| !d.fee_mini_disposition && d.disposed_at.year() == year)
         .filter_map(|d| {
-            let wallet = events
-                .iter()
-                .find(|e| e.id == d.event)
-                .and_then(|e| e.wallet.clone())?;
+            let ev = events.iter().find(|e| e.id == d.event)?;
+            let wallet = ev.wallet.clone()?;
             let sat: Sat = d.legs.iter().map(|l| l.sat).sum();
-            Some((d.event.clone(), wallet, d.disposed_at, sat))
+            Some((
+                d.event.clone(),
+                wallet,
+                d.disposed_at,
+                ev.utc_timestamp,
+                sat,
+            ))
         })
         .collect();
     targets.sort_by(|a, b| a.0.cmp(&b.0));
@@ -771,10 +817,9 @@ pub fn optimize_year(
     // R2-C1: the largest pool that used the `> LOT_ENUM_BOUND` heuristic (INCOMPLETE) branch.
     let mut pool_heuristic_lots: Option<usize> = None;
     for g in &groups {
-        let members: Vec<(EventId, WalletId, TaxDate, Sat)> =
-            g.iter().map(|&i| targets[i].clone()).collect();
+        let members: Vec<Target> = g.iter().map(|&i| targets[i].clone()).collect();
         let maps: Vec<BTreeMap<EventId, Vec<LotPick>>> = if members.len() == 1 {
-            let (id, wallet, date, need) = &members[0]; // singleton: today's independent path
+            let (id, wallet, date, _at, need) = &members[0]; // singleton: today's independent path
             let lots = available_lots_before(events, prices, config, id, *date, wallet);
             let (mut cands, heuristic) = candidate_selections(&lots, *need);
             if heuristic {
@@ -884,7 +929,11 @@ pub fn optimize_year(
     let base_comp = disposal_compliance(events, &baseline_state);
     let mut rows: Vec<DisposalCompliance> = Vec::new();
     let mut row_meta: Vec<RowMeta> = Vec::new();
-    for (id, wallet, date, _need) in &targets {
+    for (id, wallet, date, at, _need) in &targets {
+        let sale = DispositionMoment {
+            date: *date,
+            at: *at,
+        };
         let current = baseline_selection(&baseline_state, id);
         let proposed = best.get(id).cloned().unwrap_or_else(|| current.clone());
         let baseline_status = base_comp
@@ -894,7 +943,7 @@ pub fn optimize_year(
             .unwrap_or(ComplianceStatus::NonCompliant);
         let status = proposed_compliance_status(
             wallet,
-            *date,
+            sale,
             proposal_made,
             &proposed,
             &current,
@@ -906,7 +955,7 @@ pub fn optimize_year(
             date: *date,
             status,
         });
-        row_meta.push((id.clone(), wallet.clone(), *date, current, proposed));
+        row_meta.push((id.clone(), wallet.clone(), sale, current, proposed));
     }
     // Task-5 overlay: NonCompliant + attested + within envelope + proposed==current → AttestedRecording.
     let unchanged: BTreeSet<EventId> = row_meta
@@ -920,16 +969,16 @@ pub fn optimize_year(
         .into_iter()
         .zip(rows)
         .map(
-            |((id, wallet, date, current, proposed), row)| DisposalProposal {
+            |((id, wallet, sale, current, proposed), row)| DisposalProposal {
                 disposal: id,
                 wallet: wallet.clone(),
-                date,
+                date: sale.date,
                 current_selection: current,
                 proposed_selection: proposed,
                 status: row.status,
-                // R0-C2/N2: the REAL made-date governs persistability — only genuinely-contemporaneous
-                // picks (made ≤ sale) are persistable; 2027+ broker NEVER.
-                persistable: persistability(&wallet, date, proposal_made),
+                // R0-C2/N2: the REAL made-instant governs persistability — only genuinely-timely
+                // picks (§1.1012-1(j)(2)) are persistable; 2027+ broker NEVER.
+                persistable: persistability(&wallet, sale, proposal_made),
             },
         )
         .collect();
@@ -2072,8 +2121,20 @@ mod candidate_tests {
         ];
         let prices = StaticPrices::default();
         let mut targets = vec![
-            (eid("D1"), cold(), date!(2026 - 06 - 01), LOT),
-            (eid("D2"), cold(), date!(2026 - 06 - 20), LOT),
+            (
+                eid("D1"),
+                cold(),
+                date!(2026 - 06 - 01),
+                datetime!(2026-06-01 00:00:00 UTC),
+                LOT,
+            ),
+            (
+                eid("D2"),
+                cold(),
+                date!(2026 - 06 - 20),
+                datetime!(2026-06-20 00:00:00 UTC),
+                LOT,
+            ),
         ];
         targets.sort_by(|a, b| a.0.cmp(&b.0));
 
@@ -2145,8 +2206,20 @@ mod candidate_tests {
         ];
         let prices = StaticPrices::default();
         let mut targets = vec![
-            (eid("DC"), cold(), date!(2026 - 06 - 01), LOT),
-            (eid("DH"), hot(), date!(2026 - 06 - 01), LOT),
+            (
+                eid("DC"),
+                cold(),
+                date!(2026 - 06 - 01),
+                datetime!(2026-06-01 00:00:00 UTC),
+                LOT,
+            ),
+            (
+                eid("DH"),
+                hot(),
+                date!(2026 - 06 - 01),
+                datetime!(2026-06-01 00:00:00 UTC),
+                LOT,
+            ),
         ];
         targets.sort_by(|a, b| a.0.cmp(&b.0));
         let groups = contention_groups(&events, &prices, &cfg(), &targets);
@@ -2186,7 +2259,15 @@ mod candidate_tests {
         }
         let prices = StaticPrices::default();
         let members: Vec<_> = (0..4)
-            .map(|k| (eid(&format!("D{k}")), cold(), dates[k], LOT))
+            .map(|k| {
+                (
+                    eid(&format!("D{k}")),
+                    cold(),
+                    dates[k],
+                    datetime!(2026-06-01 00:00:00 UTC).replace_date(dates[k]),
+                    LOT,
+                )
+            })
             .collect();
         let res = group_candidate_assignments(&events, &prices, &cfg(), &members);
         assert!(res.is_none(), "joint count 5040 > GROUP_COMBO_BOUND ⇒ None");

@@ -10,6 +10,7 @@ use crate::optimize::{persistability, Persistability};
 use crate::price::PriceProvider;
 use crate::project::fold::fold;
 use crate::project::resolve::{resolve, Op};
+use crate::project::DispositionMoment;
 use crate::project::{in_force_methods, project, ProjectionConfig};
 use crate::state::{Disposal, LedgerState, Removal, RemovalKind, Term};
 use crate::tax::{compute_tax_year, Carryforward, TaxOutcome, TaxProfile, TaxTables};
@@ -275,12 +276,27 @@ pub fn window_reference(
 /// `ForbiddenBroker2027` branch ignores it (the broker envelope precedes the contemporaneous lever),
 /// but threading it means this advisory inherits any future change to that gate's semantics rather than
 /// re-deriving the predicate. Provenance-neutral (never asserts "purchase"/"bought").
+///
+/// ★ **I-1 — the ONE place a date is widened to an instant, stated here rather than left implicit.**
+/// `persistability` now takes instants, because the §1.1012-1(j)(2) deadline is a moment. This
+/// advisory has no moment to give: its only caller reads `LedgerState::Disposal`, which records
+/// `disposed_at: TaxDate` and no timestamp, and it deliberately passes the sale's own date as
+/// `selection_made` (there is no selection here — the warning is prospective). So BOTH sides are
+/// widened at UTC midnight, which is not a loss of precision: there is no instant here to lose, the
+/// two sides stay equal under every granularity, and a made-date one day later still widens to a
+/// later midnight and is still correctly late. The parameters stay `TaxDate` because dates are
+/// genuinely all this advisory knows — an `OffsetDateTime` in this signature would be a fiction the
+/// caller had to invent.
 pub fn tranche_broker_specific_id_advisory(
     wallet: &WalletId,
     sale_date: TaxDate,
     selection_made: TaxDate,
 ) -> Option<String> {
-    match persistability(wallet, sale_date, selection_made) {
+    let sale = DispositionMoment {
+        date: sale_date,
+        at: sale_date.midnight().assume_utc(),
+    };
+    match persistability(wallet, sale, selection_made.midnight().assume_utc()) {
         Persistability::ForbiddenBroker2027 => Some(format!(
             "Broker specific-ID warning — this {year} disposal draws undocumented BTC held at an \
              exchange (broker). From 2027, own-books specific identification is INSUFFICIENT at a \

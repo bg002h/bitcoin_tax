@@ -9,11 +9,70 @@ use crate::identity::{EventId, WalletId};
 use crate::project::resolve::{method_election_is_forward, resolve_election, ElectionRec};
 use crate::state::LedgerState;
 use std::collections::{BTreeMap, BTreeSet};
+use time::OffsetDateTime;
+
+/// ★★★ **THE §1.1012-1(j)(2) timeliness rule — ONE predicate, and this is it.**
+///
+/// > "…the taxpayer specifies the particular units … **no later than the date and time of the sale,
+/// > disposition, or transfer**…"
+/// > (archived: `legal/primary-sources/regulations-cfr/26CFR_1.1012-1_basis.xml`)
+///
+/// "No later than" is inclusive, so the comparison is `<=` and an identification made at the exact
+/// instant of the sale is timely.
+///
+/// **Why a two-line function has a doc comment this long (I-1, 2026-09-05).** This rule was written
+/// out at THREE sites and FR-35 narrowed only one of them from `TaxDate` to `OffsetDateTime`. For
+/// seven hours of every sale day the three then disagreed about the same disposal: the fold DROPPED a
+/// 17:00 selection against a 10:00 sale and filed the method-order basis, while `verify` and
+/// `optimize` printed `Contemporaneous` for it. Nothing on a filed form was wrong — the drop moves
+/// the number conservatively — but the tool contradicted itself, and
+/// `design/SPEC_lot_optimization_program.md:218` forbids ANY artifact, command or doc describing
+/// post-hoc selection as compliant.
+///
+/// So: every site that asks "was this identification in time?" calls THIS. There are four callers and
+/// no other `<=` between an identification instant and a disposition instant anywhere in the tree:
+///
+/// | caller | what it decides |
+/// |---|---|
+/// | `resolve`'s §A.4 timeliness `retain` | whether the fold APPLIES the selection — the filed number |
+/// | `identification_made` (below) | the §A.5 verdict `verify` prints, and the fold's FR-34 advisory |
+/// | `optimize::persistability` | whether `optimize accept` may write without an attestation |
+/// | `optimize::proposed_compliance_status` | the status `optimize` prints for a proposed pick |
+///
+/// **BOTH arguments are instants on purpose.** Truncating either to a calendar date re-opens I-1 at
+/// that caller alone, which is why each caller carries its own same-day-late test
+/// (`crates/btctax-core/tests/timeliness_one_predicate.rs`) rather than trusting this one function to
+/// hold them all: a site can still narrow on its way IN.
+pub fn identification_is_timely(made: OffsetDateTime, disposition: OffsetDateTime) -> bool {
+    made <= disposition
+}
+
+/// The two facts about one disposition that the §A.5 gates need — carried together because they are
+/// at DIFFERENT granularities and the difference is load-bearing (I-1).
+///
+/// It is a struct rather than two parameters for a mechanical reason: `persistability` and
+/// `proposed_compliance_status` also take the identification's made-INSTANT, and three bare time
+/// arguments (one `TaxDate`, two `OffsetDateTime`) let a caller transpose the sale instant and the
+/// made instant with no type error at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DispositionMoment {
+    /// The tax DATE of the disposition. Decides the CALENDAR rules: the §6045 broker-communication
+    /// envelope (`year >= 2027`) and the §1.1012-1(j)(6) applicability window (on or after
+    /// 2025-01-01). Both are stated in the authorities as dates, not moments, so this is not a
+    /// narrowing — it is the granularity those rules are written at.
+    pub date: TaxDate,
+    /// The INSTANT of the disposition. The §1.1012-1(j)(2) identification deadline, and the ONLY
+    /// thing `identification_is_timely` may be handed. Never derive this from `date`.
+    pub at: OffsetDateTime,
+}
 
 /// Per-disposal identification compliance status (§A.5).
 ///
 /// - `StandingOrder`      — a dated `MethodElection` was in-force at the time of sale (§A.5(a)).
-/// - `Contemporaneous`    — a `LotSelection` was recorded on or before the day of sale (§A.5(b)).
+/// - `Contemporaneous`    — a `LotSelection` was recorded no later than the date **and time** of the
+///   sale (§A.5(b) / §1.1012-1(j)(2)). ★ This variant said "on or before the DAY of sale" until
+///   I-1 (2026-09-05); that was the standard the code applied at only one of its three sites, and
+///   a selection made at 17:00 on the day of a 10:00 sale is not one.
 /// - `AttestedRecording`  — reserved; conferred by Sub-project C (§C.2).
 /// - `NonCompliant`       — none of the above apply (no post-hoc identification, §1.1012-1(j)).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,7 +93,7 @@ pub struct DisposalCompliance {
 }
 
 /// The §A.5 identification verdict for ONE disposition, computed from the only two facts that decide
-/// it: the made-date of a `LotSelection` applied to it (`None` = none applied), and the
+/// it: the made-INSTANT of a `LotSelection` applied to it (`None` = none applied), and the
 /// `effective_from` of the `MethodElection` in force for its wallet (`None` = none in force, which is
 /// where the fold falls through to its default method).
 ///
@@ -45,10 +104,20 @@ pub struct DisposalCompliance {
 /// while this classifier called that same disposal `NonCompliant`, and the row reached only `verify`.
 /// One function means the reported verdict and the filed number can never diverge.
 ///
+/// ★ **That sentence was FALSE for one day (I-1).** FR-34 shared the classifier while handing it
+/// `TaxDate`s, thirty minutes after FR-35 had moved the fold's own timeliness pass to instants — so
+/// the two "one computation" halves compared different things for seven hours of every sale day.
+/// `disposition` and `selection_made` are `OffsetDateTime` now, and the comparison itself is
+/// `identification_is_timely`, which every other site calls too.
+///
+/// `election_from` stays a `TaxDate` and is NOT a leftover narrowing: a `MethodElection` is a standing
+/// order *effective from a date* (§A.5(a)), it is resolved date-wise by `resolve_election`, and no
+/// comparison against the disposition's instant is made with it here.
+///
 /// Priority, per §A.5 and the load-bearing cross-cutting SPEC rule ("no artifact, command, or doc may
 /// describe post-hoc selection as compliant"):
 ///   1. A `LotSelection` applied to this disposal drives the reported basis, so the selection's OWN
-///      timeliness governs: made ≤ sale → `Contemporaneous`, else `NonCompliant`. A standing order may
+///      timeliness governs: timely → `Contemporaneous`, else `NonCompliant`. A standing order may
 ///      NEVER rescue a post-hoc selection.
 ///   2. Only when NO selection applied: an in-force `MethodElection` → `StandingOrder`.
 ///      §1.1012-1(j)(3)(ii): "A standing order or instruction for the specific identification of
@@ -60,12 +129,12 @@ pub struct DisposalCompliance {
 /// The §1.1012-1(j)(3) broker-communication envelope is NOT applied here — it is an overlay on a
 /// verdict, not a fact about what the filer identified, and it is applied by `disposal_compliance`.
 pub(crate) fn identification_made(
-    date: TaxDate,
-    selection_made: Option<TaxDate>,
+    disposition: OffsetDateTime,
+    selection_made: Option<OffsetDateTime>,
     election_from: Option<TaxDate>,
 ) -> ComplianceStatus {
     if let Some(made) = selection_made {
-        if made <= date {
+        if identification_is_timely(made, disposition) {
             return ComplianceStatus::Contemporaneous;
         }
         return ComplianceStatus::NonCompliant;
@@ -151,7 +220,18 @@ pub fn disposal_compliance(events: &[LedgerEvent], state: &LedgerState) -> Vec<D
         .filter_map(|e| e.wallet.clone().map(|w| (e.id.clone(), w)))
         .collect();
 
-    // ── 4. Build sel_made: disposal_event → made-date of the covering LotSelection ──────────────
+    // ── 3b. Index disposal-event → its INSTANT (I-1) ────────────────────────────────────────────
+    // The §1.1012-1(j)(2) deadline is the moment of the sale, and `LedgerState::Disposal` carries
+    // only `disposed_at: TaxDate`. The instant is right here in `events` — it is the same
+    // `utc_timestamp` `resolve` reads into `Eff::utc` for the fold's own timeliness pass
+    // (`resolve.rs`, `identification_deadline`), so the reporting side and the filing side are
+    // reading ONE fact. This lookup is why they cannot drift apart again.
+    let instant_of: BTreeMap<EventId, OffsetDateTime> = events
+        .iter()
+        .map(|e| (e.id.clone(), e.utc_timestamp))
+        .collect();
+
+    // ── 4. Build sel_made: disposal_event → made-INSTANT of the covering LotSelection ───────────
     // NFR4 (M1): iterate decisions in ascending `decision_seq` order so the last write (highest
     // seq) wins; deterministic regardless of the slice order in `events`.
     let mut selections: Vec<(u64, &LedgerEvent)> = events
@@ -166,14 +246,13 @@ pub fn disposal_compliance(events: &[LedgerEvent], state: &LedgerState) -> Vec<D
         .collect();
     selections.sort_by_key(|(s, _)| *s); // ascending seq → last write wins
 
-    let mut sel_made: BTreeMap<EventId, TaxDate> = BTreeMap::new();
+    let mut sel_made: BTreeMap<EventId, OffsetDateTime> = BTreeMap::new();
     for (_seq, e) in &selections {
         if let EventPayload::LotSelection(ls) = &e.payload {
             // insert/overwrite: ascending iteration → highest seq is the final value.
-            sel_made.insert(
-                ls.disposal_event.clone(),
-                tax_date(e.utc_timestamp, e.original_tz),
-            );
+            // I-1: the decision's raw INSTANT, not `tax_date(..)` of it. `resolve`'s §A.4 pass reads
+            // exactly this field (`d.utc_timestamp`) for the drop that decides the filed number.
+            sel_made.insert(ls.disposal_event.clone(), e.utc_timestamp);
         }
     }
 
@@ -182,11 +261,19 @@ pub fn disposal_compliance(events: &[LedgerEvent], state: &LedgerState) -> Vec<D
     // artifact, command, or doc may describe post-hoc selection as compliant"):
     //   1. 2027+ broker-communication envelope → NonCompliant.
     //   2. A `LotSelection` APPLIED to this disposal drives the reported basis/gain, so the
-    //      selection's OWN timeliness governs: made-date ≤ sale → Contemporaneous, else →
-    //      NonCompliant. A standing order may NEVER rescue a post-hoc selection.
+    //      selection's OWN timeliness governs: made no later than the date AND TIME of the sale →
+    //      Contemporaneous, else → NonCompliant. A standing order may NEVER rescue a post-hoc
+    //      selection.
     //   3. Only when NO selection was applied: an in-force `MethodElection` → StandingOrder.
     //   4. Otherwise → NonCompliant.
-    let classify = |disposal: &EventId, wallet: &WalletId, date: TaxDate| -> ComplianceStatus {
+    //
+    // I-1: `date` and `at` are BOTH passed and they are not interchangeable — `date` decides the
+    // calendar rule in (1) (broker reporting is a year test), `at` decides the (j)(2) deadline in (2).
+    let classify = |disposal: &EventId,
+                    wallet: &WalletId,
+                    date: TaxDate,
+                    at: OffsetDateTime|
+     -> ComplianceStatus {
         // (1) Broker-communication envelope (2027+): own-books identification is insufficient for
         // broker-custodied units — the broker side must communicate the basis. `AttestedRecording`
         // (§C.2) is the C gate; A cannot confer it here.
@@ -202,7 +289,7 @@ pub fn disposal_compliance(events: &[LedgerEvent], state: &LedgerState) -> Vec<D
         // independent tiers (scoped, then global) [R0-I1/R0-M2]; a scoped election on a DIFFERENT
         // wallet never taints this disposal (tier 1 empty, tier 2 global empty ⇒ None ⇒ NonCompliant).
         identification_made(
-            date,
+            at,
             sel_made.get(disposal).copied(),
             resolve_election(date, wallet, &elections).map(|e| e.effective_from),
         )
@@ -216,12 +303,16 @@ pub fn disposal_compliance(events: &[LedgerEvent], state: &LedgerState) -> Vec<D
         if d.fee_mini_disposition || d.disposed_at < TRANSITION_DATE {
             continue;
         }
-        if let Some(w) = wallet_of.get(&d.event) {
+        // I-1: both the wallet and the instant come from the SAME import event. A disposal whose
+        // import event is missing already emitted no row (the `wallet_of` guard has always been
+        // there); requiring the instant too cannot silently drop one, because `instant_of` is keyed
+        // over every event and `wallet_of` is a subset of it.
+        if let (Some(w), Some(&at)) = (wallet_of.get(&d.event), instant_of.get(&d.event)) {
             out.push(DisposalCompliance {
                 disposal: d.event.clone(),
                 wallet: w.clone(),
                 date: d.disposed_at,
-                status: classify(&d.event, w, d.disposed_at),
+                status: classify(&d.event, w, d.disposed_at, at),
             });
         }
     }
@@ -230,12 +321,12 @@ pub fn disposal_compliance(events: &[LedgerEvent], state: &LedgerState) -> Vec<D
         if r.removed_at < TRANSITION_DATE {
             continue;
         }
-        if let Some(w) = wallet_of.get(&r.event) {
+        if let (Some(w), Some(&at)) = (wallet_of.get(&r.event), instant_of.get(&r.event)) {
             out.push(DisposalCompliance {
                 disposal: r.event.clone(),
                 wallet: w.clone(),
                 date: r.removed_at,
-                status: classify(&r.event, w, r.removed_at),
+                status: classify(&r.event, w, r.removed_at, at),
             });
         }
     }
