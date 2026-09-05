@@ -1905,6 +1905,74 @@ fn cold() -> WalletId {
     }
 }
 
+/// FR-31 — the BULK path structurally cannot consume an in-leg: `bulk-link-transfer` writes only
+/// `TransferTarget::Wallet(dest)`, which names no in-event. So when an unreconciled deposit AT
+/// `dest` is plausibly an outflow's other leg, linking it in bulk would leave BOTH legs booked —
+/// the lot relocated into `dest` AND a fresh origin lot minted there once the deposit is classified
+/// — doubling the pool and the basis, which understates tax. The plan holds those rows back in
+/// `skipped_would_double_book` and leaves every other row alone.
+#[test]
+fn bulk_plan_holds_back_an_outflow_whose_other_leg_is_already_in_the_ledger() {
+    use btctax_cli::{BulkFilter, Frame};
+    use btctax_core::event::TransferIn;
+    use btctax_core::persistence::append_import_batch;
+    use btctax_core::LedgerEvent;
+    use time::macros::datetime;
+    use time::UtcOffset;
+
+    let dir = tempfile::tempdir().unwrap();
+    let (vault, [o1, o2, _o3, _o4, o5]) = bulk_fixture(dir.path());
+
+    // A deposit at `cold` of exactly o1's size, arriving the same day: o1's other leg.
+    {
+        let mut s = Session::open(&vault, &pp()).unwrap();
+        append_import_batch(
+            s.conn(),
+            &[LedgerEvent {
+                id: EventId::import(Source::Coinbase, SourceRef::new("in-for-o1")),
+                utc_timestamp: datetime!(2025-03-01 13:00:00 UTC),
+                original_tz: UtcOffset::UTC,
+                wallet: Some(cold()),
+                payload: EventPayload::TransferIn(TransferIn {
+                    sat: 100_000,
+                    src_addr: None,
+                    txid: None,
+                }),
+            }],
+        )
+        .unwrap();
+        s.save().unwrap();
+    }
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let plan = s
+        .bulk_link_transfer_plan(
+            BulkFilter {
+                frame: Frame::Year(2025),
+                from_wallet: None,
+            },
+            cold(),
+        )
+        .unwrap();
+
+    let held: Vec<_> = plan
+        .skipped_would_double_book
+        .iter()
+        .map(|r| r.out_event.clone())
+        .collect();
+    assert_eq!(held, vec![o1.clone()], "only o1 matches the deposit");
+
+    let included: Vec<_> = plan.included.iter().map(|r| r.out_event.clone()).collect();
+    assert!(
+        !included.contains(&o1),
+        "the colliding row must NOT be written by the bulk form"
+    );
+    // Every other in-frame outflow is untouched: this is a targeted hold-back, not a blanket refusal
+    // to use `--to-wallet` on a wallet that happens to have deposits.
+    assert!(included.contains(&o5) && included.contains(&o2));
+    assert_eq!(plan.total_sat, 30_000 + 40_000 + 50_000);
+}
+
 /// The plan selects pending outs in-frame, applies the from_wallet filter, and routes same-wallet
 /// rows to `skipped_same_wallet` (never `included`).
 #[test]
@@ -2217,6 +2285,132 @@ fn bulk_sti_plan_selects_unknown_inbounds_in_frame() {
         included2,
         vec![i1, i2],
         "wallet filter keeps only wallet-A inbounds"
+    );
+}
+
+/// FR-31 — the ROUTING half. An unconsumed deposit that is the other leg of a `--to-wallet` link
+/// keeps a Hard `UnknownBasisInbound`, which is this plan's own selection key. Classifying it
+/// `SelfTransferMine` is exactly the double-booking the engine refuses, so the tool must not offer
+/// it: an offer to make the ledger worse is not a neutral offer. It is EXCLUDED, while an unrelated
+/// deposit at the same wallet stays selectable.
+#[test]
+fn bulk_sti_plan_excludes_a_deposit_that_is_a_wallet_links_other_leg() {
+    use btctax_cli::{BulkStiFilter, Frame};
+    use btctax_core::event::{Acquire, BasisSource, TransferIn, TransferOut};
+    use btctax_core::persistence::append_import_batch;
+    use btctax_core::LedgerEvent;
+    use time::UtcOffset;
+
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("sti-fr31.pgp");
+    let mut session = Session::create(&vault, &pp()).unwrap();
+
+    let mkid = |r: &str| EventId::import(Source::Coinbase, SourceRef::new(r));
+    let out1 = mkid("fr31-out1");
+    let paired_in = mkid("fr31-in-paired");
+    let unrelated_in = mkid("fr31-in-unrelated");
+    let batch = vec![
+        LedgerEvent {
+            id: mkid("fr31-acq"),
+            utc_timestamp: datetime!(2025-01-05 12:00:00 UTC),
+            original_tz: UtcOffset::UTC,
+            wallet: Some(wallet_a()),
+            payload: EventPayload::Acquire(Acquire {
+                sat: 1_000_000,
+                usd_cost: dec!(50000),
+                fee_usd: dec!(0),
+                basis_source: BasisSource::ComputedFromCost,
+            }),
+        },
+        LedgerEvent {
+            id: out1.clone(),
+            utc_timestamp: datetime!(2025-03-01 12:00:00 UTC),
+            original_tz: UtcOffset::UTC,
+            wallet: Some(wallet_a()),
+            payload: EventPayload::TransferOut(TransferOut {
+                sat: 100_000,
+                fee_sat: None,
+                dest_addr: None,
+                txid: None,
+            }),
+        },
+        // Same size, same day, at the destination — out1's other leg.
+        LedgerEvent {
+            id: paired_in.clone(),
+            utc_timestamp: datetime!(2025-03-01 13:00:00 UTC),
+            original_tz: UtcOffset::UTC,
+            wallet: Some(cold()),
+            payload: EventPayload::TransferIn(TransferIn {
+                sat: 100_000,
+                src_addr: None,
+                txid: None,
+            }),
+        },
+        // A genuinely separate arrival at the same wallet months later.
+        LedgerEvent {
+            id: unrelated_in.clone(),
+            utc_timestamp: datetime!(2025-09-01 12:00:00 UTC),
+            original_tz: UtcOffset::UTC,
+            wallet: Some(cold()),
+            payload: EventPayload::TransferIn(TransferIn {
+                sat: 250_000,
+                src_addr: None,
+                txid: None,
+            }),
+        },
+    ];
+    append_import_batch(session.conn(), &batch).unwrap();
+    session.save().unwrap();
+    drop(session);
+
+    // Both deposits are offered while no link exists.
+    {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let plan = s
+            .bulk_self_transfer_in_plan(BulkStiFilter {
+                frame: Frame::All,
+                wallet: None,
+            })
+            .unwrap();
+        let sel: std::collections::BTreeSet<_> =
+            plan.included.iter().map(|r| r.in_event.clone()).collect();
+        assert!(
+            sel.contains(&paired_in) && sel.contains(&unrelated_in),
+            "baseline: both deposits selectable before the link exists"
+        );
+    }
+
+    // The `--to-wallet` link goes in. Now the paired deposit must disappear from the offer.
+    cmd::reconcile::link_transfer(
+        &vault,
+        &pp(),
+        &out1.canonical(),
+        TransferTarget::Wallet(cold()),
+        now(),
+    )
+    .unwrap();
+
+    let s = Session::open(&vault, &pp()).unwrap();
+    let (state, _) = s.project().unwrap();
+    assert!(
+        state
+            .blockers
+            .iter()
+            .any(|b| b.kind == BlockerKind::SelfTransferDoubleBooked),
+        "the engine refuses first: {:?}",
+        state.blockers
+    );
+    let plan = s
+        .bulk_self_transfer_in_plan(BulkStiFilter {
+            frame: Frame::All,
+            wallet: None,
+        })
+        .unwrap();
+    let sel: Vec<_> = plan.included.iter().map(|r| r.in_event.clone()).collect();
+    assert_eq!(
+        sel,
+        vec![unrelated_in],
+        "the paired deposit is withdrawn from the offer; the unrelated one is not"
     );
 }
 

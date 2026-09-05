@@ -5793,6 +5793,26 @@ controller against the code before filing.** Reports:
   ★★ And the tool ROUTES the filer into it: the unconsumed in-leg keeps `UnknownBasisInbound`, the
   exact selection key of `bulk-classify-inbound-self-transfer` (`session.rs:839`). Two keystrokes.
   **Owning phase: BEFORE any first filing.**
+  **FIXED** on `fix/fr31-transfer-double-basis` — report `design/agent-reports/2026-09-05-fr31-fix.md`.
+  A new Hard `BlockerKind::SelfTransferDoubleBooked` in `resolve` REFUSES (never repairs, never
+  auto-matches: the owner's "matched pairs are confirmed, not auto" is untouched) when a live
+  `TransferLink{Wallet(w)}` coexists with an un-consumed deposit at `w` that could be its other leg,
+  naming both events and the precise form. The pairing predicate moved to
+  `btctax-core/src/project/pairing.rs` and is now the SINGLE definition shared with
+  `match-self-transfers`. The routing half is closed too: `bulk_self_transfer_in_plan` withdraws a
+  flagged deposit from the offer, and `bulk_link_transfer_plan` holds back (and lists) any outflow
+  whose other leg is already an unreconciled deposit at the destination.
+  ★ **Limb (3) is REJECTED as specified, with a demonstration.** A Σbasis conservation identity in
+  `conservation.rs` is structurally blind to this defect for the *same* reason the sat identity is:
+  the phantom origin lot increments the "in" side and the "held" side by the same basis, so it
+  balances. `self_transfer_double_book.rs::variant_d_wallet_link_plus_stated_basis_is_refused`
+  asserts `conservation_report(&st).balanced` is STILL true after the doubling, so the reasoning is
+  pinned by a test rather than a comment. Building that invariant would have shipped a green, blind
+  instrument (B1). The detection has to be the pairing check, and it lives in `resolve`.
+  ★ Residue (non-blocking, no owning phase): a `--to-wallet` link to a wallet that has BOTH an
+  unrelated same-size arrival within the window AND an unimported real arrival is a false positive
+  with no in-event to name; the filer must void the link. No "these are distinct" confirmation
+  decision exists. Fail-closed, and it cannot move a filed number.
 
 - **FR-32 ★★★ CRITICAL — §1015(a)'s loss cap is skipped when donor basis is RECONSTRUCTED.**
   `crates/btctax-core/src/project/fold.rs:1085-1087` returns `None` for `dual_loss_basis` on the

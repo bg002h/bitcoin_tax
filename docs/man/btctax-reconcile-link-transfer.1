@@ -10,10 +10,10 @@ Confirm a self\-transfer (TransferLink)
 .SH OPTIONS
 .TP
 \fB\-\-to\-event\fR \fI<TO_EVENT>\fR
-
+The destination `TransferIn` event this outflow arrived as. PREFER THIS whenever the arrival is in the ledger: it consumes that deposit, so the coins are relocated exactly once
 .TP
 \fB\-\-to\-wallet\fR \fI<TO_WALLET>\fR
-
+The destination WALLET, when its arrival was never imported. This form names no in\-event, so it cannot consume one: if a deposit at this wallet turns out to be the other leg, btctax raises a hard "self\-transfer double\-booking" blocker naming both — booking both legs would relocate the coins AND mint a fresh lot for them, doubling the basis. Resolve it with `\-\-to\-event` or `reconcile match\-self\-transfers`
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print help

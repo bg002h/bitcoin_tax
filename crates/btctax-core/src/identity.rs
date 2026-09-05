@@ -111,6 +111,17 @@ pub enum WalletId {
     Exchange { provider: String, account: String },
     SelfCustody { label: String },
 }
+impl WalletId {
+    /// `exchange:PROVIDER:ACCOUNT` | `self:LABEL` — the SAME grammar `eventref::parse_wallet_id`
+    /// accepts, so anything rendered with this is copy-pasteable straight back into a command.
+    /// `btctax_cli::render::wallet_label` delegates here; this is the single definition.
+    pub fn label(&self) -> String {
+        match self {
+            WalletId::Exchange { provider, account } => format!("exchange:{provider}:{account}"),
+            WalletId::SelfCustody { label } => format!("self:{label}"),
+        }
+    }
+}
 
 /// Lot identity (§6.2): origin event + a per-origin split sequence, assigned deterministically as lots split.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

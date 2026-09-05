@@ -1527,6 +1527,25 @@ fn dispatch_reconcile(
                 render::wallet_label(&dest),
                 plan.skipped_same_wallet.len()
             );
+            // FR-31: never silent. A row held back here is a movement whose OTHER LEG is already in
+            // the ledger — bulk can only write `--to-wallet`, which cannot consume it, so writing
+            // one would book the same coins twice (doubled pool, doubled basis, understated tax).
+            if !plan.skipped_would_double_book.is_empty() {
+                println!(
+                    "{} NOT linked — an unreconciled deposit at {} looks like the other leg of \
+                     each. Confirm those pairings one at a time (the bulk form names no in-event):",
+                    plan.skipped_would_double_book.len(),
+                    render::wallet_label(&dest)
+                );
+                for r in &plan.skipped_would_double_book {
+                    println!(
+                        "  reconcile match-self-transfers <in> {}   # {}, {} sat",
+                        r.out_event.canonical(),
+                        r.date,
+                        r.principal_sat
+                    );
+                }
+            }
             return Ok(());
         }
         Reconcile::BulkClassifyInboundSelfTransfer {
@@ -2089,12 +2108,26 @@ fn render_bulk_link_preview(plan: &btctax_cli::BulkLinkPlan) {
         )
     };
     println!(
-        "included {} | {} sat | total USD reclassified non-taxable {} | skipped (same wallet) {}",
+        "included {} | {} sat | total USD reclassified non-taxable {} | skipped (same wallet) {} \
+         | skipped (would double-book) {}",
         plan.included.len(),
         plan.total_sat,
         total,
-        plan.skipped_same_wallet.len()
+        plan.skipped_same_wallet.len(),
+        plan.skipped_would_double_book.len()
     );
+    // FR-31: name the held-back rows in the DRY RUN too, so `--dry-run` and the apply agree.
+    for r in &plan.skipped_would_double_book {
+        println!(
+            "  would double-book: {} ({}, {} sat) — an unreconciled deposit at {} looks like its \
+             other leg; confirm with `reconcile match-self-transfers <in> {}`",
+            r.out_event.canonical(),
+            r.date,
+            r.principal_sat,
+            render::wallet_label(&plan.dest),
+            r.out_event.canonical()
+        );
+    }
 }
 
 /// Render the bulk classify-inbound-self-transfer preview table + totals footer
