@@ -1275,3 +1275,92 @@ impl Schedule1aPartVI {
         Self { line38 }
     }
 }
+
+impl Schedule1aPartI {
+    /// **Lines 1–3 — modified AGI.**
+    ///
+    /// Line 1 is *"the amount from Form 1040 … line 11b"*; lines 2a–2d are the §911/§931/§933
+    /// exclusions (Puerto Rico, Form 2555 lines 45 and 50, Form 4563 line 15) and line 2e adds them;
+    /// line 3 is *"Add lines 1 and 2e"*.
+    ///
+    /// ★★ btctax models none of those four exclusions and has no Form 2555 or Form 4563 input, so
+    /// they are **not** silently zeroed here: `has_income_exclusion` is a live declaration, and a
+    /// filer answering YES is refused at the worksheet's point of need (D-11). This function is
+    /// therefore reached only on a return that has affirmatively sworn there is no such exclusion,
+    /// which is what makes lines 2a–2e genuinely blank rather than laundered — the §G-11 distinction.
+    pub fn compute(agi_line11b: Usd) -> Self {
+        Self {
+            line1: Some(agi_line11b),
+            // 2a-2d: no input surface, and the filer has sworn there is no exclusion. BLANK, not 0.
+            line2a: None,
+            line2b: None,
+            line2c: None,
+            line2d: None,
+            // 2e is a `Combine` over four blanks ⇒ blank (FR-39).
+            line2e: None,
+            // L3 "Add lines 1 and 2e" — a blank operand adds nothing.
+            line3: Some(agi_line11b),
+        }
+    }
+}
+
+impl Schedule1A {
+    /// ★★★ The whole schedule, for a year that HAS one. Returns `None` for a year with no Schedule
+    /// 1-A — TY2024 and earlier, and TY2029+ after the four provisions sunset — which is why the
+    /// caller cannot accidentally add a TY2024 line 13b: there is no schedule to add.
+    pub fn compute(
+        year: i32,
+        agi_line11b: Usd,
+        status: crate::tax::types::FilingStatus,
+        inputs: &crate::tax::return_inputs::Schedule1aInputs,
+        taxpayer_qualifies_as_senior: bool,
+        spouse_qualifies_as_senior: bool,
+    ) -> Option<Self> {
+        let p = crate::tax::tables::schedule_1a_params(year)?;
+        let part1 = Schedule1aPartI::compute(agi_line11b);
+        let f = Schedule1aFacts {
+            magi: part1.line3.unwrap_or(agi_line11b),
+            status,
+            taxpayer_qualifies_as_senior,
+            spouse_qualifies_as_senior,
+        };
+        // Part II line 4c and Part III line 14c come from the collected employee figures. Line 5 and
+        // line 14b have NO input path and REFUSE upstream (T3a), so they are blank here.
+        let line4c = inputs.tips.as_ref().and_then(|t| {
+            (t.qualified_tips_reported > Usd::ZERO).then_some(t.qualified_tips_reported)
+        });
+        let line14c = inputs.overtime.as_ref().and_then(|o| {
+            (o.qualified_overtime_reported > Usd::ZERO).then_some(o.qualified_overtime_reported)
+        });
+        // ★★ Part IV sums only the vehicles that pass EVERY §163(h)(4) condition. A vehicle failing
+        //    one bar contributes nothing — that is the whole point of collecting them.
+        let qualifying: Usd = inputs
+            .vehicles
+            .iter()
+            .filter(|v| v.qualifies())
+            .map(|v| v.interest_paid)
+            .sum();
+        let line23 = (qualifying > Usd::ZERO).then_some(qualifying);
+
+        let part2 = Schedule1aPartII::compute(&p, &f, line4c, None);
+        let part3 = Schedule1aPartIII::compute(&p, &f, line14c);
+        let part4 = Schedule1aPartIV::compute(&p, &f, line23);
+        let part5 = Schedule1aPartV::compute(&p, &f);
+        let part6 = Schedule1aPartVI::compute(&part2, &part3, &part4, &part5);
+        Some(Self {
+            part1,
+            part2,
+            part3,
+            part4,
+            part5,
+            part6,
+        })
+    }
+
+    /// **1040 line 13b** — *"Additional deductions from Schedule 1-A, line 38"*. `Usd::ZERO` when the
+    /// year has no such schedule, which is a REAL zero (the form has no line), not a laundered one.
+    #[must_use]
+    pub fn line_13b(this: Option<&Self>) -> Usd {
+        this.and_then(|s| s.part6.line38).unwrap_or(Usd::ZERO)
+    }
+}

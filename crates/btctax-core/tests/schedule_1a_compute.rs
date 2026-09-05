@@ -189,3 +189,134 @@ fn line38_is_blank_when_every_part_is_blank_and_sums_when_any_is_live() {
         "L38 = add lines 13, 21, 30 and 37"
     );
 }
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// T5 — the wiring, and the invariant a COMMENT used to carry
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+use btctax_core::tax::return_inputs::{Schedule1aInputs, Schedule1aVehicle};
+use btctax_core::tax::schedule_1a::Schedule1A;
+
+fn one_qualifying_vehicle(interest: Usd) -> Schedule1aInputs {
+    Schedule1aInputs {
+        vehicles: vec![Schedule1aVehicle {
+            description: "truck".into(),
+            interest_paid: interest,
+            loan_originated_after_2024: true,
+            loan_originated_by_you: true,
+            proceeds_used_to_purchase: true,
+            personal_use: true,
+            secured_by_first_lien: true,
+            original_use_starts_with_you: true,
+            is_applicable_vehicle_class_under_14000_lbs: true,
+            final_assembly_in_us: true,
+            excludes_negative_equity: true,
+        }],
+        ..Default::default()
+    }
+}
+
+/// ★★★ **Census F-6 — the invariant a COMMENT used to carry, made real.**
+///
+/// `return_1040.rs` held `let schedule_1a_additional = Usd::ZERO;` under a comment reading *"the 2024
+/// form has no such line, so zero is the RIGHT value there, not a stub."* True for TY2024 and FALSE
+/// the moment TY2025 landed — and **a comment cannot red**. It is §G-11's shape in miniature: a
+/// correct blank and a laundered one sharing one code path, told apart only by prose.
+///
+/// Now the YEAR decides, and this test is what holds it: TY2024 yields zero because there is no
+/// schedule to compute, not because a literal says so.
+#[test]
+fn a_year_with_no_schedule_1a_yields_a_zero_line_13b_because_no_schedule_exists() {
+    let inputs = one_qualifying_vehicle(dec!(3000));
+
+    for year_without in [2023, 2024, 2029, 2030] {
+        let s = Schedule1A::compute(
+            year_without,
+            dec!(80000),
+            FilingStatus::Single,
+            &inputs,
+            false,
+            false,
+        );
+        assert!(
+            s.is_none(),
+            "TY{year_without} has no Schedule 1-A — the four provisions did not exist or have \
+             sunset, so there must be no schedule to compute"
+        );
+        assert_eq!(
+            Schedule1A::line_13b(s.as_ref()),
+            Usd::ZERO,
+            "…and 1040 line 13b is therefore a REAL zero, not a stub"
+        );
+    }
+
+    // TY2025 has one, and the same inputs now produce a deduction. Without this half the assertion
+    // above would pass for a build in which Schedule 1-A never computes at all.
+    let live = Schedule1A::compute(
+        2025,
+        dec!(80000),
+        FilingStatus::Single,
+        &inputs,
+        false,
+        false,
+    )
+    .expect("TY2025 HAS a Schedule 1-A");
+    assert_eq!(
+        Schedule1A::line_13b(Some(&live)),
+        dec!(3000),
+        "TY2025 must actually carry the deduction to line 13b"
+    );
+}
+
+/// ★★ Part IV sums only vehicles that pass EVERY §163(h)(4) condition. A vehicle failing one bar
+/// contributes NOTHING — which is the entire reason the conditions are collected. This is the test
+/// that would have caught the original defect at the schedule level rather than the struct level.
+#[test]
+fn part_iv_sums_only_vehicles_that_pass_every_condition() {
+    let mut inputs = one_qualifying_vehicle(dec!(2000));
+    // A second vehicle, identical except that it is leased.
+    let mut leased = inputs.vehicles[0].clone();
+    leased.description = "leased sedan".into();
+    leased.interest_paid = dec!(5000);
+    leased.proceeds_used_to_purchase = false;
+    inputs.vehicles.push(leased);
+
+    let s = Schedule1A::compute(
+        2025,
+        dec!(80000),
+        FilingStatus::Single,
+        &inputs,
+        false,
+        false,
+    )
+    .unwrap();
+    assert_eq!(
+        s.part4.line30,
+        Some(dec!(2000)),
+        "only the qualifying truck's interest may be deducted — \"lease payments do not qualify\", \
+         and a household with one of each must be able to say so"
+    );
+}
+
+/// A filer who claims nothing leaves the whole schedule blank — line 38 included (FR-39).
+#[test]
+fn a_filer_claiming_nothing_produces_a_blank_line_38() {
+    let s = Schedule1A::compute(
+        2025,
+        dec!(80000),
+        FilingStatus::Single,
+        &Schedule1aInputs::default(),
+        false,
+        false,
+    )
+    .unwrap();
+    assert_eq!(
+        s.part6.line38, None,
+        "a printed 0 would swear the filer worked all four parts and they came to nothing"
+    );
+    assert_eq!(
+        Schedule1A::line_13b(Some(&s)),
+        Usd::ZERO,
+        "and 1040 13b adds a blank as nothing"
+    );
+}

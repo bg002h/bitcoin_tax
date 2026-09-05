@@ -2046,12 +2046,35 @@ pub fn assemble_absolute(
     // OVERSTATED a miner's tax by ~20% of their business income. The P7 independent-oracle cross-check
     // found it (the PSL Tax-Calculator applies the deduction and btctax did not), and it confirms this
     // exact rule to the dollar: $60,000 profit − $4,239 half-SE = $55,761 of QBI ⇒ an $11,152 deduction.
-    // 1040 L13b — "Additional deductions from Schedule 1-A, line 38". Zero until Schedule 1-A lands
-    // (design/ty2025 B3); the 2024 form has no such line, so zero is the RIGHT value there, not a stub.
+    // ★★★ 1040 L13b — "Additional deductions from Schedule 1-A, line 38".
+    //
+    //     ★ THE COMMENT THAT USED TO SIT HERE HAS BEEN DELETED, and its deletion is the point
+    //       (census F-6). It read: "Zero until Schedule 1-A lands; the 2024 form has no such line,
+    //       so zero is the RIGHT value there, not a stub." True for TY2024 and FALSE the moment
+    //       TY2025 landed — and a comment cannot red. That is §G-11's shape in miniature: a correct
+    //       blank and a laundered one sharing one code path, distinguished only by prose.
+    //
+    //     Now the year decides. `Schedule1A::compute` returns `None` for a year with no such
+    //     schedule — TY2024 and earlier, and TY2029+ once the four provisions sunset — so a TY2024
+    //     return yields zero BECAUSE THE FORM HAS NO LINE, not because a literal says so. There is
+    //     no path by which a TY2024 return grows a 13b term.
     //
     // ★ Defined HERE rather than beside line 14 below, because TI-before-QBI subtracts it and the
     //   §199A regime is decided from TI-before-QBI — the ordering is load-bearing, not cosmetic.
-    let schedule_1a_additional = Usd::ZERO;
+    let schedule_1a = crate::tax::schedule_1a::Schedule1A::compute(
+        // ★ THE FUNCTION'S OWN `year`, not `ri.tax_year`. Every other year-dependent decision in
+        //   `assemble_absolute` reads this parameter, and taking the year from two places is the
+        //   second-copy-of-the-truth shape §G-15 warns about — one of them would eventually be the
+        //   stale one. A first draft of this wiring used `ri.tax_year` and a mutation caught it.
+        year,
+        agi,
+        ri.filing_status,
+        &ri.schedule_1a,
+        false, // Part V seniors are wired with the age seam in T5b; not inferred here
+        false,
+    );
+    let schedule_1a_additional =
+        crate::tax::schedule_1a::Schedule1A::line_13b(schedule_1a.as_ref());
 
     // ★★★ TAXABLE INCOME BEFORE THE QBI DEDUCTION — defined ONCE, here, and read by everything.
     //
@@ -10598,5 +10621,95 @@ mod tests {
         assert_eq!(ar.total_tax, Usd::ZERO); // L24
         assert_eq!(ar.schedule_d.lt_net_15, dec!(-20000));
         assert_eq!(ar.schedule_d.total_16, dec!(-20000));
+    }
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+    // T5 — the 1040 line 13b WIRING itself
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// ★★★ **The wiring, not the schedule.** `Schedule1A::compute` is tested directly in
+    /// `tests/schedule_1a_compute.rs`, and those tests pass whether or not `assemble_absolute`
+    /// actually reads line 38 — measured: reverting 13b to a hardcoded `Usd::ZERO` killed **nothing**.
+    ///
+    /// That is exactly the debt B2 booked to B3. The existing composition test carries a doc comment
+    /// calling itself *"DELIBERATELY WEAK … both assertions below are trivial identities … It records
+    /// the SHAPE so B3 has something to make real."* This makes it real with a NONZERO 13b, and it
+    /// dies to the hardcode mutation.
+    ///
+    /// Direction, from B2's own note: omitting 13b OVERSTATES `ti_before_qbi`, which inflates the
+    /// §199A deduction and therefore **UNDERSTATES tax** — and fires `qbi_over_threshold` too early.
+    #[test]
+    fn a_ty2025_schedule_1a_deduction_actually_reaches_1040_line_13b_and_moves_taxable_income() {
+        use crate::tax::return_inputs::{Schedule1aInputs, Schedule1aVehicle};
+        let table = crate::tax::tables::synthetic_table(2025);
+        let p = ty2024_params();
+        let st = LedgerState::default();
+
+        let vehicle = Schedule1aVehicle {
+            description: "truck".into(),
+            interest_paid: dec!(4000),
+            loan_originated_after_2024: true,
+            loan_originated_by_you: true,
+            proceeds_used_to_purchase: true,
+            personal_use: true,
+            secured_by_first_lien: true,
+            original_use_starts_with_you: true,
+            is_applicable_vehicle_class_under_14000_lbs: true,
+            final_assembly_in_us: true,
+            excludes_negative_equity: true,
+        };
+
+        let without = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2(Owner::Taxpayer, dec!(90000), dec!(90000), dec!(90000))],
+            ..Default::default()
+        };
+        let mut with = without.clone();
+        with.schedule_1a = Schedule1aInputs {
+            vehicles: vec![vehicle],
+            ..Default::default()
+        };
+
+        let a = assemble_absolute(&without, &st, &p, &table, 2025);
+        let b = assemble_absolute(&with, &st, &p, &table, 2025);
+
+        // ── The seam itself ────────────────────────────────────────────────────────────────────
+        assert_eq!(a.schedule_1a_additional, Usd::ZERO, "no vehicle ⇒ no 13b");
+        assert_eq!(
+            b.schedule_1a_additional,
+            dec!(4000),
+            "a qualifying vehicle's interest must REACH 1040 line 13b"
+        );
+
+        // ── MUST MOVE, by exactly line 38 ──────────────────────────────────────────────────────
+        assert_eq!(
+            a.taxable_income - b.taxable_income,
+            dec!(4000),
+            "taxable income must fall by exactly the Schedule 1-A deduction; if it does not, the \
+             filer loses a deduction they qualified for"
+        );
+
+        // ── MUST NOT MOVE — Schedule 1-A is BELOW the line. AGI is line 11 and 13b is subtracted
+        //    after it, so every AGI-keyed quantity (NIIT MAGI, the 7.5% medical floor, the §164(b)
+        //    SALT phase-down, the IRA/student-loan phase-outs) is untouched by construction. ─────
+        assert_eq!(
+            a.agi, b.agi,
+            "AGI must be byte-identical — an ABOVE-the-line reading of Schedule 1-A would move \
+             every AGI-keyed threshold on the return"
+        );
+
+        // ── And TY2024 with the SAME inputs stays at zero, because the form has no such line. ───
+        let ty2024 = assemble_absolute(
+            &with,
+            &st,
+            &p,
+            &crate::tax::tables::synthetic_table(2024),
+            2024,
+        );
+        assert_eq!(
+            ty2024.schedule_1a_additional,
+            Usd::ZERO,
+            "TY2024 has no Schedule 1-A, so identical inputs must produce NO 13b term — this is the \
+             census F-6 invariant that used to live only in a comment"
+        );
     }
 }
