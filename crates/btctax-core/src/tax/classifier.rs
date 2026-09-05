@@ -36,7 +36,8 @@ use crate::tax::questions::QuestionId;
 use crate::tax::return_inputs::{
     Box12Entry, CharitableCarryItem, CharitableGift, Dependent, Form1099Div, Form1099G,
     Form1099Int, HouseholdHeader, Payments, Person, QbiInputs, ReturnInputs, Schedule1Inputs,
-    ScheduleAInputs, ScheduleCInputs, W2,
+    Schedule1aInputs, Schedule1aOvertime, Schedule1aTips, Schedule1aVehicle, ScheduleAInputs,
+    ScheduleCInputs, W2,
 };
 use crate::tax::types::Carryforward;
 
@@ -99,6 +100,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
         itemize_election,
         mfs_spouse_itemizes,
         sch1,
+        schedule_1a,
         payments,
         capital_loss_carryforward_in,
         capital_loss_carryforward_in_provenance,
@@ -248,6 +250,7 @@ pub fn classify(ri: &ReturnInputs) -> Census {
     if let Some(sc) = schedule_c {
         classify_schedule_c(&mut c, sc);
     }
+    classify_schedule_1a(&mut c, schedule_1a);
     if let Some(a) = schedule_a {
         classify_schedule_a(&mut c, a);
     }
@@ -504,6 +507,124 @@ fn classify_1099b(c: &mut Census, b: &crate::tax::return_inputs::Form1099B) {
          and \"you have no adjustments\". Not a default: `None` and `Some(false)` both REFUSE, because \
          anything else belongs on Form 8949 with per-transaction detail",
     );
+}
+
+/// ★★★ Schedule 1-A (TY2025) — every eligibility declaration is class **(B) BENEFIT CLAIM**.
+///
+/// *New Colonial Ice*: the burden to CLAIM a deduction is the filer's, so `false` is lawful and
+/// cannot overstate — it forgoes. That is precisely why the whole surface defaults to `false`: an
+/// omission fails closed. The forgone-benefit direction is what an advisory is for, not a refusal.
+///
+/// ★ The money leaves are `Usd`, not `Option<Usd>`, and carry no answered-ness of their own: they are
+/// unreachable unless the filer opted into the part (`Option<…>` / a non-empty vehicle list), so a
+/// defaulted zero inside an un-claimed part is never printed. `return_refuse` screens them for sign.
+fn classify_schedule_1a(c: &mut Census, s1a: &Schedule1aInputs) {
+    let Schedule1aInputs {
+        tips,
+        overtime,
+        vehicles,
+    } = s1a;
+    if let Some(t) = tips {
+        let Schedule1aTips {
+            qualified_tips_reported: _,
+            occupation_on_treasury_list,
+            treasury_occupation_code: _, // a Treasury code the filer states — data, not an answer
+            excludes_unlisted_occupation_tips,
+            meets_qualified_tip_criteria,
+        } = t;
+        c.exempt(
+            occupation_on_treasury_list,
+            Class::BenefitClaim,
+            "§224 / Sch 1-A Part II Caution — tips must be received in an occupation listed at              IRS.gov/TippedOccupations; `false` forgoes the deduction and cannot overstate it",
+        );
+        c.exempt(
+            excludes_unlisted_occupation_tips,
+            Class::BenefitClaim,
+            "i1040s1a Part II — \"Do not include tips received in occupations that are not              included on this list in line 4a, 4b, or 4c\"",
+        );
+        c.exempt(
+            meets_qualified_tip_criteria,
+            Class::BenefitClaim,
+            "§224(d) — cash medium, voluntary, unnegotiated, customer-determined; service charges              and automatic gratuities are not qualified tips",
+        );
+    }
+    if let Some(o) = overtime {
+        let Schedule1aOvertime {
+            qualified_overtime_reported: _,
+            is_flsa_premium_half_only,
+            entitlement_arises_under_flsa,
+            excludes_amounts_counted_as_tips,
+        } = o;
+        c.exempt(
+            is_flsa_premium_half_only,
+            Class::BenefitClaim,
+            "§225 — only the FLSA premium HALF qualifies, not double-time's second half nor              holiday/weekend premiums paid absent >40 hours",
+        );
+        c.exempt(
+            entitlement_arises_under_flsa,
+            Class::BenefitClaim,
+            "§225 — the entitlement must arise under FLSA §7; state-law-only overtime paid to an              FLSA-ineligible employee does not qualify",
+        );
+        c.exempt(
+            excludes_amounts_counted_as_tips,
+            Class::BenefitClaim,
+            "§225 — excludes any amount received as a qualified tip; the same dollars must not be              deducted under Part II and Part III both",
+        );
+    }
+    for v in vehicles {
+        let Schedule1aVehicle {
+            description: _, // free text, scrubbed in `scrub.rs`; carries no tax direction
+            interest_paid: _,
+            loan_originated_after_2024,
+            loan_originated_by_you,
+            proceeds_used_to_purchase,
+            personal_use,
+            secured_by_first_lien,
+            original_use_starts_with_you,
+            is_applicable_vehicle_class_under_14000_lbs,
+            final_assembly_in_us,
+            excludes_negative_equity,
+        } = v;
+        // ★★ All nine are one statutory test (§163(h)(4)) and share a reason. Listing them
+        //    individually rather than looping is deliberate: the destructure above is what makes a
+        //    tenth condition a compile error, and a loop over a hand-built array would not be.
+        for (leaf, why) in [
+            (
+                loan_originated_after_2024,
+                "loan originated after 2024-12-31",
+            ),
+            (loan_originated_by_you, "loan originated by the filer"),
+            (
+                proceeds_used_to_purchase,
+                "proceeds used to PURCHASE; lease payments do not qualify",
+            ),
+            (personal_use, "the APV is for personal use"),
+            (
+                secured_by_first_lien,
+                "secured by a first lien on the purchased APV",
+            ),
+            (
+                original_use_starts_with_you,
+                "original use starts with the filer; a used vehicle does not qualify",
+            ),
+            (
+                is_applicable_vehicle_class_under_14000_lbs,
+                "applicable vehicle class, GVWR under 14,000 lb",
+            ),
+            (final_assembly_in_us, "final assembly in the United States"),
+            (
+                excludes_negative_equity,
+                "excludes traded-in negative equity, which is not eligible",
+            ),
+        ] {
+            let _ = why;
+            c.exempt(
+                leaf,
+                Class::BenefitClaim,
+                "§163(h)(4) / Sch 1-A Part IV — a stated eligibility condition; `false` forgoes the                  deduction. An earlier round shipped this part with NO eligibility at all and handed                  every filer who typed a figure up to $10,000, which UNDERSTATES tax.",
+            );
+        }
+    }
 }
 
 fn classify_schedule_c(c: &mut Census, sc: &ScheduleCInputs) {

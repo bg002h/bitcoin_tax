@@ -593,7 +593,10 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
         div_1099: _,
         g_1099: _,
         b_1099: _,
-        schedule_c,    // ★ business_description is FREE TEXT — scrubbed below
+        schedule_c, // ★ business_description is FREE TEXT — scrubbed below
+        // ★★ Sch 1-A: `vehicles[].description` is FREE TEXT — a filer writes "Dad's truck" or a
+        //    plate. Scrubbed below. The eligibility bools and money carry no identity.
+        schedule_1a,
         schedule_a: _, // money only
         itemize_election: _,
         mfs_spouse_itemizes: _,
@@ -662,6 +665,22 @@ pub fn scrub_pii(ri: &ReturnInputs) -> ReturnInputs {
         // ★ `naics_code` is KEPT: a six-digit federal industry taxonomy shared by thousands of
         //   businesses is not a personal identifier, and it is printed on Schedule C line B, so a
         //   reproducer wants the real one. Recorded as a decision rather than an oversight.
+    }
+
+    // ★★ Schedule 1-A Part IV — one free-text field per vehicle, and it is the kind a filer fills
+    //    in their own words ("Dad's truck", a nickname, sometimes a plate). Trim-emptiness is
+    //    preserved for the same reason as everywhere else in this module: a blank stays blank so a
+    //    scrubbed copy cannot differ from the original in whether a refusal fires.
+    //    ★ `treasury_occupation_code` is KEPT — a published Treasury taxonomy code shared by every
+    //      worker in that occupation is not a personal identifier, and a reproducer needs the real
+    //      one. Recorded as a decision, not an oversight, exactly as `naics_code` is above.
+    for (v_out, v) in out
+        .schedule_1a
+        .vehicles
+        .iter_mut()
+        .zip(schedule_1a.vehicles.iter())
+    {
+        v_out.description = replace_preserving_emptiness(&v.description, "Example vehicle".into());
     }
 
     // ★★ W-2 employers: the NAME is free to replace, the EIN is not — only its sameness matters.

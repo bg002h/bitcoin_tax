@@ -17,8 +17,8 @@
 use crate::conventions::Usd;
 use crate::tax::return_inputs::{
     Box12Entry, CharitableCarryItem, CharitableClass, CharitableGift, Form1099Div, Form1099G,
-    Form1099Int, Owner, Payments, QbiInputs, ReturnInputs, Schedule1Inputs, ScheduleAInputs,
-    ScheduleCInputs, W2,
+    Form1099Int, Owner, Payments, QbiInputs, ReturnInputs, Schedule1Inputs, Schedule1aInputs,
+    ScheduleAInputs, ScheduleCInputs, W2,
 };
 use crate::tax::tables::{FullReturnParams, TaxTable, EMPLOYEE_OASDI_RATE};
 use crate::tax::types::{Carryforward, FilingStatus};
@@ -429,6 +429,9 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
         itemize_election: _,
         mfs_spouse_itemizes: _,
         sch1,
+        // ★ Sch 1-A carries three money leaves (tips, overtime, per-vehicle interest); all three
+        //   are screened below. The eligibility bools are declarations, not money.
+        schedule_1a,
         payments,
         capital_loss_carryforward_in,
         capital_loss_carryforward_in_provenance: _, // CarryProvenance, not an amount
@@ -731,6 +734,34 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
             return Some("charitable carryover amount");
         }
     }
+    // ★★ Schedule 1-A's three money leaves. Negative amounts here are impossible on their face —
+    //    a negative tip, a negative overtime figure, a negative interest payment — and every one of
+    //    them INCREASES an above-the-line deduction's operand set in a direction the form never
+    //    contemplates. Screened for the same reason as everything else in this function: an
+    //    unscreened money field is a silent fail-open.
+    {
+        let Schedule1aInputs {
+            tips,
+            overtime,
+            vehicles,
+        } = schedule_1a;
+        if let Some(t) = tips {
+            if neg(t.qualified_tips_reported) {
+                return Some("Schedule 1-A qualified tips");
+            }
+        }
+        if let Some(o) = overtime {
+            if neg(o.qualified_overtime_reported) {
+                return Some("Schedule 1-A qualified overtime");
+            }
+        }
+        for v in vehicles {
+            if neg(v.interest_paid) {
+                return Some("Schedule 1-A car loan interest");
+            }
+        }
+    }
+
     let Schedule1Inputs {
         state_refund_taxable,
         student_loan_interest_paid,

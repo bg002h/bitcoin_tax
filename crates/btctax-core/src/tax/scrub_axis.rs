@@ -251,6 +251,15 @@ pub fn maximal_sentinel() -> ReturnInputs {
     };
 
     ReturnInputs {
+        // ★ Sch 1-A carries a free-text vehicle description, so the axis fixture must exercise it
+        //   or the scrub guarantee is asserted over a field nothing populates.
+        schedule_1a: crate::tax::return_inputs::Schedule1aInputs {
+            vehicles: vec![crate::tax::return_inputs::Schedule1aVehicle {
+                description: "SENTINEL_vehicle".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
         tax_year: 2024,
         filing_status: FilingStatus::Mfj,
         header: HouseholdHeader {
@@ -846,6 +855,20 @@ mod matrix {
                 Fixture(|r| {
                     if let Some(c) = r.schedule_c.as_mut() {
                         c.business_description = "   ".into();
+                    }
+                }),
+                NoSuchState(NO_READER),
+            ),
+            (
+                // ★ Schedule 1-A Part IV — one free-text field per vehicle, and the filer writes it
+                //   in their own words. Same class as `business_description`: replaced, but
+                //   trim-emptiness preserved so a scrubbed copy cannot differ from the original in
+                //   whether a downstream refusal fires.
+                "schedule_1a.vehicles[].description",
+                Fixture(|r| r.schedule_1a.vehicles.clear()),
+                Fixture(|r| {
+                    if let Some(v) = r.schedule_1a.vehicles.first_mut() {
+                        v.description = "   ".into();
                     }
                 }),
                 NoSuchState(NO_READER),

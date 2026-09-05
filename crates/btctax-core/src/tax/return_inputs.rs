@@ -747,6 +747,166 @@ pub enum ItemizeElection {
     ForceItemize,
 }
 
+/// **Schedule 1-A (TY2025) — the filer's own answers.** New for TY2025 under Pub. L. 119-21.
+///
+/// ★★★ **Every eligibility field here is a YES-condition that defaults to `false`.** That shape is
+/// the whole point and it is not stylistic. An earlier review round found the danger twice, and both
+/// Criticals were **missing eligibility, never wrong arithmetic**: a filer who merely typed a
+/// car-loan interest figure was handed up to $10,000 of deduction — on a lease, a used car, a
+/// non-US-assembled car, a pre-2025 loan, or negative equity. That UNDERSTATES tax. Enumerating the
+/// YES-conditions and defaulting to NO is what makes every omission fail closed
+/// (`widening-an-exemption-is-never-the-safe-edit`).
+///
+/// ★ These are DECLARATIONS, not derivations: none is visible to btctax from a W-2, a 1099 or the
+/// ledger. The form and its instructions state each one flatly, so they are transcribed and asked.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Schedule1aInputs {
+    /// Part II — qualified tips. `None` ⇒ the filer is not claiming Part II at all, which is the
+    /// form's own default: *"Fill out Part II only if you received qualified tips."*
+    #[serde(default)]
+    pub tips: Option<Schedule1aTips>,
+    /// Part III — qualified overtime. `None` ⇒ not claiming Part III.
+    #[serde(default)]
+    pub overtime: Option<Schedule1aOvertime>,
+    /// Part IV — car loan interest, collected **per vehicle**. Empty ⇒ not claiming Part IV.
+    /// ★ Per vehicle rather than per return because every condition below is a fact about ONE
+    /// vehicle and ONE loan; a household with a qualifying truck and a disqualified leased sedan
+    /// must be able to say so, and a single set of answers cannot express that.
+    #[serde(default)]
+    pub vehicles: Vec<Schedule1aVehicle>,
+}
+
+/// Part II — qualified tips (§224). Every bool is a YES-condition defaulting to `false`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Schedule1aTips {
+    /// L4a — qualified tips reported to the employer.
+    ///
+    /// ★ W-2 box 7 is a STARTING POINT, not this figure. The 2025 information returns *"were not
+    /// updated to separately identify tips that may qualify"*, so box 7 can include tips this
+    /// deduction excludes. The filer states the qualified subset.
+    #[serde(default)]
+    pub qualified_tips_reported: Usd,
+    /// ★★ **THE GATING CONDITION, printed on the form itself:** *"These tips must have been received
+    /// in an occupation listed at IRS.gov/TippedOccupations."* An occupation qualifies only if it
+    /// *"customarily and regularly received tips on or before December 31, 2024."*
+    #[serde(default)]
+    pub occupation_on_treasury_list: bool,
+    /// The Treasury occupation code the filer identified. Recorded, never inferred.
+    #[serde(default)]
+    pub treasury_occupation_code: Option<String>,
+    /// The multi-occupation carve-out: *"If you received tips as an employee in more than one
+    /// occupation for the same employer, only those tips that were received in an occupation on the
+    /// list … are considered qualified tips. **Do not include tips received in occupations that are
+    /// not included on this list in line 4a, 4b, or 4c.**"* `true` ⇒ the filer confirms the figure
+    /// above already excludes unlisted-occupation tips.
+    #[serde(default)]
+    pub excludes_unlisted_occupation_tips: bool,
+    /// The qualified-tip criteria: cash medium, paid voluntarily, not negotiated, and
+    /// customer-determined. *"Qualified tips do not include service charges, automatic gratuities,
+    /// or any other mandatory amounts automatically added to a customer's bill"* — the instructions'
+    /// own example is an 18% automatic gratuity, which *"is not a qualified tip and may not be
+    /// deducted"* — nor *"Event tickets, Meals, Services"*.
+    #[serde(default)]
+    pub meets_qualified_tip_criteria: bool,
+}
+
+/// Part III — qualified overtime (§225). The three traps, each a YES-condition defaulting to `false`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Schedule1aOvertime {
+    /// L13 — qualified overtime compensation reported by the employer.
+    #[serde(default)]
+    pub qualified_overtime_reported: Usd,
+    /// ★ The FLSA **premium half only** — the excess over the regular rate. NOT double-time's second
+    /// half, and NOT holiday or weekend premiums paid absent more than 40 hours in a workweek.
+    #[serde(default)]
+    pub is_flsa_premium_half_only: bool,
+    /// ★ The entitlement must arise under **FLSA §7**. State-law-only overtime paid to an
+    /// FLSA-ineligible employee does not qualify, however it was labelled on the pay stub.
+    #[serde(default)]
+    pub entitlement_arises_under_flsa: bool,
+    /// ★★ No double-dip with Part II: the figure *"excludes any amount received as a qualified
+    /// tip"*. The same dollars must not be deducted twice, so the surface asks rather than assuming.
+    #[serde(default)]
+    pub excludes_amounts_counted_as_tips: bool,
+}
+
+/// Part IV — one vehicle and one loan (§163(h)(4)). **Nine YES-conditions, all defaulting to
+/// `false`,** because an earlier round shipped this part with NO eligibility declarations at all and
+/// handed every filer who typed a figure up to $10,000 of deduction.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Schedule1aVehicle {
+    /// A label the filer recognises (VIN capture is deferred; this is for their own disambiguation).
+    #[serde(default)]
+    pub description: String,
+    /// Interest paid or accrued on this loan in the tax year.
+    #[serde(default)]
+    pub interest_paid: Usd,
+    /// *"Your loan was originated **after December 31, 2024**."*
+    #[serde(default)]
+    pub loan_originated_after_2024: bool,
+    /// *"The loan was originated **by you**."*
+    #[serde(default)]
+    pub loan_originated_by_you: bool,
+    /// *"The proceeds from your loan were used to **purchase** an APV (**lease payments do not
+    /// qualify**)."*
+    #[serde(default)]
+    pub proceeds_used_to_purchase: bool,
+    /// *"Your APV is for **personal use**."*
+    #[serde(default)]
+    pub personal_use: bool,
+    /// *"Your loan is secured by a **first lien** on the purchased APV."*
+    #[serde(default)]
+    pub secured_by_first_lien: bool,
+    /// *"The **original use** of the vehicle starts with you (**a used vehicle does not qualify**)."*
+    #[serde(default)]
+    pub original_use_starts_with_you: bool,
+    /// *"The vehicle is a car, minivan, van, SUV, pickup truck, or motorcycle, and has a **gross
+    /// vehicle weight rating of less than 14,000 pounds**."*
+    #[serde(default)]
+    pub is_applicable_vehicle_class_under_14000_lbs: bool,
+    /// *"The vehicle has undergone **final assembly in the United States**."*
+    #[serde(default)]
+    pub final_assembly_in_us: bool,
+    /// *"amounts representing debt on a vehicle traded in as part of the purchase transaction for the
+    /// APV (so-called negative equity), **is not eligible** for the deduction."* `true` ⇒ the
+    /// interest figure above already excludes any negative-equity portion.
+    #[serde(default)]
+    pub excludes_negative_equity: bool,
+}
+
+impl Schedule1aVehicle {
+    /// Every §163(h)(4) condition the instructions state, ANDed. One `false` disqualifies.
+    ///
+    /// ★ Written as an exhaustive destructure rather than a chain of field reads, so adding a
+    /// condition to the struct fails to compile here instead of being silently ignored — which is
+    /// exactly how this part shipped with no eligibility at all the first time.
+    #[must_use]
+    pub fn qualifies(&self) -> bool {
+        let Self {
+            description: _,
+            interest_paid: _,
+            loan_originated_after_2024,
+            loan_originated_by_you,
+            proceeds_used_to_purchase,
+            personal_use,
+            secured_by_first_lien,
+            original_use_starts_with_you,
+            is_applicable_vehicle_class_under_14000_lbs,
+            final_assembly_in_us,
+            excludes_negative_equity,
+        } = self;
+        *loan_originated_after_2024
+            && *loan_originated_by_you
+            && *proceeds_used_to_purchase
+            && *personal_use
+            && *secured_by_first_lien
+            && *original_use_starts_with_you
+            && *is_applicable_vehicle_class_under_14000_lbs
+            && *final_assembly_in_us
+            && *excludes_negative_equity
+    }
+}
+
 /// The full-return household inputs for one tax year — persisted as JSON in the `return_inputs`
 /// side-table (year PRIMARY KEY). SPEC_full_return §4.
 ///
@@ -798,6 +958,14 @@ pub struct ReturnInputs {
     pub mfs_spouse_itemizes: Option<bool>,
     #[serde(default)]
     pub sch1: Schedule1Inputs,
+    /// **Schedule 1-A (TY2025+)** — the four new above-the-line deductions (Pub. L. 119-21).
+    ///
+    /// ★★ Scoped by `tax_year`, not always-live: asking a TY2024 filer about a deduction that did
+    /// not exist in 2024 is asking a question with no TY2024 legal meaning. `Default` is an empty
+    /// surface claiming nothing, which is the correct return for the overwhelming majority of
+    /// filers and cannot overstate a deduction.
+    #[serde(default)]
+    pub schedule_1a: Schedule1aInputs,
     #[serde(default)]
     pub payments: Payments,
     #[serde(default)]
@@ -1187,6 +1355,8 @@ impl Default for ReturnInputs {
             itemize_election: ItemizeElection::Auto,
             mfs_spouse_itemizes: None,
             sch1: Schedule1Inputs::default(),
+            // TY2025+ only; an empty surface claims nothing, which is the correct default.
+            schedule_1a: Schedule1aInputs::default(),
             payments: Payments::default(),
             capital_loss_carryforward_in: Carryforward::default(),
             capital_loss_carryforward_in_provenance: CarryProvenance::default(),

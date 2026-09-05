@@ -319,6 +319,27 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
         "b_1099",
         "capital_loss_carryforward_in",
         "charitable_carryover_in",
+        // ★★★ **Schedule 1-A (TY2025) — EXEMPTED DELIBERATELY, AND THIS IS A KNOWN GAP, NOT A
+        //     JUDGEMENT THAT IT DOES NOT BELONG HERE.**
+        //
+        //     Unlike every other prefix above, this is NOT an information-return import surface. It
+        //     is ~19 filer DECLARATIONS plus three money leaves, and declarations are exactly what
+        //     an interactive form is for. The core landed first (struct, answered-ness classifier,
+        //     negative-money screen, PII scrub) because those are compiler-enforced and cannot be
+        //     half-done; the form section is ~22 Fields plus per-vehicle repeating-row addressing
+        //     across four files.
+        //
+        //     ★ It is held back rather than rushed because the implementation plan is explicit that
+        //     **prompt wording is the deliverable here, not plumbing** — "a wrong prompt is a wrong
+        //     return that every test passes". Every prompt has to state the condition that permits a
+        //     YES and default to the answer that cannot overstate the deduction. Writing 22 of those
+        //     quickly is how the two Criticals in an earlier round happened.
+        //
+        //     ★ Nothing is reachable through the gap today: TY2025 full returns are fail-closed
+        //     (`ty2025_full_return_must_stay_fail_closed_until_complete`), so Schedule 1-A cannot be
+        //     emitted by any path, and the TOML import surface still carries these fields.
+        //     REMOVE THIS PREFIX when the section lands — the coverage KAT will then police it.
+        "schedule_1a",
     ];
     const EXEMPT_LEAVES: &[&str] = &[
         // ★★ §G-15 — `tax_year` is the SCOPE the form is filled in, not a value the filer types into

@@ -656,6 +656,11 @@ $ btctax --vault v.pgp income show --year 2024
     "ira_deduction_claimed": "0",
     "hsa_activity": false
   },
+  "schedule_1a": {
+    "tips": null,
+    "overtime": null,
+    "vehicles": []
+  },
   "payments": {
     "estimated_tax_payments": "1000",
     "extension_payment": "500",
