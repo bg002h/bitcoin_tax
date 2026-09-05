@@ -5667,3 +5667,21 @@ become furniture — which is precisely what the tickle existed to prevent.
   repo and asserts it holds one entry of EACH storage class, so that edit reds immediately.
   **If you come here to relieve the fresh-clone pain: build the fetcher, do not narrow the guard.**
   **Owning phase: next harness change.**
+
+- **FR-27 — 1040 line 20 swears `0` about a Schedule 3 that was never filed.** Same class as FR-1,
+  found by the FR-1 agent while it was in the neighbourhood and deliberately NOT fixed there (scope).
+  `crates/btctax-core/src/tax/printed.rs:768` — `let line20 = sch_3.map_or(Usd::ZERO, |s| s.line8);`
+  with `pub line20: Usd` at `:554`. The form's own words for that line
+  (`design/forms/extract/f1040--2025.txt:112`) are **"Amount from Schedule 3, line 8"**. When no
+  Schedule 3 exists, there is no Schedule 3 line 8, and printing `0` asserts a figure from a form
+  that was never filed — testimony about a document that does not exist.
+  ★ **Direction is the SAFE one**, which is why this is not urgent: line 20 carries *nonrefundable
+  credits*, so a fabricated `0` can only forgo a credit and OVERSTATE tax. It is an answered-ness
+  defect, not a funds-safety one.
+  ★★ But note the honest difficulty, which is why it is filed rather than fixed by reflex: a `0`
+  here is *arithmetically* right whenever the filer genuinely has no Schedule 3 items. The question
+  is whether btctax omitted Schedule 3 because the FILER has none (correct `0`) or because btctax
+  **does not model** the item (fabricated `0`) — and those are indistinguishable on the printed
+  page. The fix is the FR-1 shape: `Option<Usd>` carried on `PrintedInputs`, with the decision made
+  in core where the modelling gap is knowable. Do NOT let the emitter decide.
+  **Owning phase: with FR-12, as one answered-ness sweep.**
