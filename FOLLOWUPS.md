@@ -6035,4 +6035,16 @@ self-transfer policy was audited for CONFORMANCE, not relitigated.
   ★ **It cannot be a blanket constant.** A sign-up bonus with no spending requirement is income,
   unlike a spending rebate, so the filer must be able to say which — this is a collect-it question in
   the sense of the transcription rule, not a default.
-  **Owning phase: the next adapter cycle, AHEAD of FR-42 and FR-43** (both cosmetic beside this).
+  ★★ **MAGNITUDE, measured — and it CALIBRATES DOWN from what "most common row type" implies.**
+  The payouts are dust: a median in the low thousands of satoshis, a smallest of **twelve satoshis**
+  (a fraction of one cent), and a **four-figure** total basis across **hundreds of lots in seven
+  months** — roughly three new lots a day, growing daily. So the dollars at stake are small; a filer
+  who disposed of the whole reward stack would overstate gain by about the price of a used laptop.
+  **The real cost is the LOT COUNT, not the money.** Every payout is a separate acquisition with its
+  own date and basis, so a later disposal wants a Form 8949 row apiece — against a PDF emitter with a
+  documented 14-row page overflow. Any fix must think about aggregation, not just classification.
+  ★ This magnitude note exists so a future reader does not read "the most common row type in the
+  file" as "the largest exposure in the file". It is the most FREQUENT and among the least VALUABLE,
+  and those two facts point at different fixes.
+  **Owning phase: the next adapter cycle, ahead of FR-42 and FR-43** (both cosmetic beside this, but
+  none of the three is urgent).
