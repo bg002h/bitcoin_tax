@@ -371,6 +371,7 @@ dependencies = [
 name = "btctax-input-form"
 version = "0.17.0"
 dependencies = [
+ "btctax-adapters",
  "btctax-core",
  "rust_decimal",
  "rust_decimal_macros",

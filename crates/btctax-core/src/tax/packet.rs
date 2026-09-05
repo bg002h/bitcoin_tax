@@ -671,11 +671,25 @@ pub fn assemble_printed_forms(
             )
         });
 
-    // Form 8275 (Task 16) — `Some` iff a promoted-basis DISPOSAL leg files in `year`; the printed
-    // (whole-dollar-rounded Part I) content of `crate::tax::form8275::disclosure_8275`, whose own
-    // scoping already omits a promoted REMOVAL-only year (BG-D11).
-    let f8275 =
-        crate::tax::form8275::disclosure_8275(events, state, year).map(|d| printed_8275(&d));
+    // Form 8275 (Task 16) — `Some` iff a promoted-basis DISPOSAL leg files in `year`, OR the return
+    // computes on FR-29's §1(g) no-path certification; the printed (whole-dollar-rounded Part I)
+    // content of `crate::tax::form8275::disclosure_8275`, whose own scoping already omits a promoted
+    // REMOVAL-only year (BG-D11).
+    //
+    // ★★★ FR-29 / SPEC §6.3.3 — the certification is the ONE outcome of the Form 8615 ladder that is
+    //     not a refusal: the return computes and files. It must not file SILENTLY, so the §1(g)
+    //     position rides Part I here. `ar.form8615_certification` was decided once in
+    //     `assemble_absolute`; nothing re-derives it. Column (f) is 1040 line 16 AS FILED, which is
+    //     `ar.regular_tax` — the tax computed WITHOUT §1(g), i.e. exactly the position disclosed.
+    let section_1g = ar
+        .form8615_certification
+        .map(|c| crate::tax::form8275::Section1gPosition {
+            unearned: c.unearned,
+            threshold: c.threshold,
+            tax_line16: ar.regular_tax,
+        });
+    let f8275 = crate::tax::form8275::disclosure_8275(events, state, year, section_1g.as_ref())
+        .map(|d| printed_8275(&d));
 
     let f1040 = form_1040_lines(
         ar,

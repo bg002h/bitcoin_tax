@@ -146,6 +146,11 @@ fn sentinel(f: &Field) -> FieldValue {
                 FieldId::ItemizeElection => "ForceItemize", // fixture is Auto
                 FieldId::W2Owner => "Spouse",               // fixture default is Taxpayer
                 FieldId::CharClass => "OrdinaryProp50",     // fixture is Cash60
+                // ★ FR-29 — Form 8615 condition 4. The fixture leaves it UNANSWERED (`None`), which
+                //   is not a variant at all, so every token differs; `CannotKnow` is chosen because it
+                //   is the one whose meaning is *"answered, and not yes or no"* — the distinction the
+                //   whole three-valued type exists for.
+                FieldId::Form8615Condition4ParentAlive => "CannotKnow",
                 other => panic!("no Enum sentinel for {other:?} — add a distinct real choice"),
             };
             FieldValue::Choice(choice.to_string())
@@ -190,6 +195,15 @@ fn fixture_for(field: &Field, base: &ReturnInputs) -> ReturnInputs {
         // ★ The FBAR sub-question is live only under a Schedule B 7a "Yes"; a set on a non-live
         //   question correctly refuses with `NoSuchRow`, so the fixture must make it live.
         FieldId::FbarFilingRequired => ri.foreign_accounts = Some(true),
+        // ★★★ FR-29 — the SPEC §6.3 dead-end fact is live ONLY once condition 4 is answered CANNOT
+        //     KNOW. That is the owner ruling's first constraint discharged in the liveness predicate,
+        //     so it is structural exactly like the §G-9 dates of death above: one fixture cannot both
+        //     cover condition 4 and satisfy this gate, because covering condition 4 requires the
+        //     fixture to hold something OTHER than this field's primer.
+        FieldId::Form8615ParentIdentityUnobtainable => {
+            ri.header.form8615_condition4_parent_alive =
+                Some(btctax_core::tax::return_inputs::ParentAliveAnswer::CannotKnow);
+        }
         _ => {}
     }
     ri
@@ -426,13 +440,13 @@ fn every_in_scope_leaf_is_covered_by_exactly_one_field_or_exempt() {
     // change happened to keep the sets balanced.
     let field_count: usize = form_spec().iter().map(|s| s.fields.len()).sum();
     assert_eq!(
-        field_count, 93,
-        "expected 93 Fields (one per §5.8 in-scope leaf)"
+        field_count, 96,
+        "expected 96 Fields (one per §5.8 in-scope leaf) — 93 + FR-29's Form 8615 trio"
     );
     assert_eq!(
         covered.len(),
-        93,
-        "expected 93 distinctly-covered in-scope leaves"
+        96,
+        "expected 96 distinctly-covered in-scope leaves — 93 + FR-29's Form 8615 trio"
     );
 
     // ── 5. ★ I-6: PIN the observed FieldId → leaf-path map against a literal (kills TRANSPOSITION). ──
@@ -636,6 +650,19 @@ const EXPECTED_LEAF_PATHS: &[(FieldId, &str)] = &[
         "donations_had_restrictions",
     ),
     (FieldId::CharitableCwaObtained, "charitable_cwa_obtained"),
+    // ★★★ FR-29 — Form 8615's trio.
+    (
+        FieldId::Form8615Condition3AgeSupport,
+        "header.form8615_condition3_age_support",
+    ),
+    (
+        FieldId::Form8615Condition4ParentAlive,
+        "header.form8615_condition4_parent_alive",
+    ),
+    (
+        FieldId::Form8615ParentIdentityUnobtainable,
+        "header.form8615_parent_identity_unobtainable",
+    ),
     (FieldId::ExclPuertoRico, "excluded_puerto_rico_income"),
     (FieldId::Excl2555L45, "form_2555_line45"),
     (FieldId::Excl2555L50, "form_2555_line50"),

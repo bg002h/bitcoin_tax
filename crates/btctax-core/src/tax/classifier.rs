@@ -279,6 +279,9 @@ fn classify_header(c: &mut Census, h: &HouseholdHeader) {
         taxpayer_died_during_year,
         spouse_died_during_year,
         ip_pin: _, // Option<String> — scalar
+        form8615_condition3_age_support,
+        form8615_condition4_parent_alive,
+        form8615_parent_identity_unobtainable,
     } = h;
     c.declaration(
         can_be_claimed_as_dependent_taxpayer,
@@ -332,6 +335,36 @@ fn classify_header(c: &mut Census, h: &HouseholdHeader) {
         "§63(f)/§G-9 death carve-out (spouse) — same reasoning; the box is counted exactly when \
          `spouse_63f_boxes_count` says so (MFJ, or a qualifying MFS), which is the same predicate \
          that gates the prompt (§2.2)",
+    );
+    // ★★★ FR-29 — Form 8615's three leaves. NONE is a `declaration` (that is reserved for
+    // `FORM_QUESTIONS`) and none is a `BenefitClaim` — no benefit is claimed by answering. They take
+    // the `Class::NoTaxDirection` idiom `qbi_w2_wages` / `qbi_ubia` already established: refused
+    // where they are needed, unread where they are not, so they default in NEITHER direction.
+    c.exempt(
+        form8615_condition3_age_support,
+        Class::NoTaxDirection,
+        "Form 8615 condition 3 (i1040gi:3932-3940) — `None` is REFUSED by screen_compute_dependent \
+         wherever conditions 1 and 5 hold and age 24+ is not provable, and is unread everywhere else, \
+         so it defaults in neither direction",
+    );
+    // ★★ `CannotKnow` is an ANSWER, not a blank — answered-ness is about whether the filer SPOKE,
+    // never about which way. It is why this leaf is `Option<ParentAliveAnswer>` and not
+    // `Option<bool>`: `None` refuses (Form8615ParentAliveUnanswered) while `Some(CannotKnow)` opens
+    // the SPEC §6.3 dead-end path. The classifier cannot assert that — `exempt` discards the leaf —
+    // so the gate is where it is provable, and `cannot_know_is_answered_and_none_is_not` proves it.
+    c.exempt(
+        form8615_condition4_parent_alive,
+        Class::NoTaxDirection,
+        "Form 8615 condition 4 (i1040gi:3941-3942) — `None` is REFUSED by screen_compute_dependent \
+         wherever condition 3 is answered YES, and is unread everywhere else, so it defaults in \
+         neither direction; `Some(CannotKnow)` is an ANSWER, not a blank",
+    );
+    c.exempt(
+        form8615_parent_identity_unobtainable,
+        Class::NoTaxDirection,
+        "the §6.3 dead-end fact — `None` and `Some(false)` are the SAME outcome (Form8615ParentUnidentifiable \
+         refuses), so silence defaults in neither direction; only the filer's own `Some(true)`, and only \
+         after they answered condition 4 CannotKnow, opens the certification path",
     );
     classify_person(c, taxpayer);
     if let Some(sp) = spouse {

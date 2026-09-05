@@ -16,5 +16,8 @@ time = { version = "0.3", features = ["serde-well-known", "macros", "parsing", "
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
+# ★ FR-29 — the polarity test needs a REAL `FullReturnParams` (the §1(g) threshold), and the
+#   bundled tables live in adapters. Dev-only, and no cycle: adapters depends on core alone.
+btctax-adapters = { path = "../btctax-adapters", version = "0.17.0" }
 serde_json = { version = "1", features = ["preserve_order"] }
 rust_decimal_macros = "1.36"

@@ -270,6 +270,13 @@ pub fn maximal_sentinel() -> ReturnInputs {
             taxpayer_died_during_year: Some(false),
             spouse_died_during_year: Some(false),
             ip_pin: Some("654321".into()), // ★ VALID (six digits) — the baseline must be clean
+            // ★ FR-29 — MAXIMAL means non-default: a leaf left `None` on both sides produces no
+            //   differing path and drops out of the derived axis entirely (see the module doc), so
+            //   each of Form 8615's three leaves carries a value here, and condition 4 carries the
+            //   variant that is NOT the serde default of anything.
+            form8615_condition3_age_support: Some(true),
+            form8615_condition4_parent_alive: Some(ParentAliveAnswer::CannotKnow),
+            form8615_parent_identity_unobtainable: Some(true),
         },
         w2s: vec![w2("one", "11-1111111"), w2("two", "22-2222222")],
         int_1099: vec![int_1099("one"), int_1099("two")],

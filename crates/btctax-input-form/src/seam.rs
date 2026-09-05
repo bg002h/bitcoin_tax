@@ -166,6 +166,14 @@ pub enum FieldId {
     DonationsHadRestrictions,
     /// §170(f)(8) — the contemporaneous-written-acknowledgment universal (`SKIPPABLE_QUESTIONS` 15).
     CharitableCwaObtained,
+    /// FR-29 — Form 8615 condition 3, the age + earned-income-support test (`SKIPPABLE_QUESTIONS` 16).
+    Form8615Condition3AgeSupport,
+    /// FR-29 — Form 8615 condition 4, "at least one of your parents was alive" (`SKIPPABLE_QUESTIONS`
+    /// 17). The one `FieldKind::Enum` skippable: "CannotKnow" is a third ANSWER, not a blank.
+    Form8615Condition4ParentAlive,
+    /// FR-29 — the SPEC §6.3 dead-end fact (`SKIPPABLE_QUESTIONS` 18). ★ Its registry accessors
+    /// INVERT: the label asks what the filer CAN supply, the leaf records what they cannot.
+    Form8615ParentIdentityUnobtainable,
     // Carryforwards (§G-22) — Form 8995 lines 7 and 3. Both are prior-year LOSSES that REDUCE a
     // deduction, so omitting either UNDERSTATES tax. They were import-only until 2026-07-31.
     QbiReitPtpCarryforwardIn,

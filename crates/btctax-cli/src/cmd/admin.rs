@@ -100,7 +100,10 @@ pub fn promote_export_gate(
     for y in years {
         // `disclosure_8275` is `Some` iff a promoted DISPOSAL leg files in `y`; refuse when its Part II is
         // empty/incomplete (the `incomplete` flag T13 exposes for exactly this gate).
-        if let Some(disc) = btctax_core::tax::form8275::disclosure_8275(events, state, y) {
+        // ★ FR-29: `None`. This gate exists to refuse a PROMOTED leg whose Part II narrative the
+        //   filer never recorded. A §1(g) no-path item carries a Part II btctax writes itself
+        //   (`section_1g_part_ii`), so it can never be incomplete and has nothing to gate.
+        if let Some(disc) = btctax_core::tax::form8275::disclosure_8275(events, state, y, None) {
             if disc.incomplete {
                 return Err(CliError::Usage(format!(
                     "refusing to export a packet with a promoted-basis leg but no complete Form 8275 \
@@ -197,7 +200,8 @@ pub fn export_snapshot(
     // promoted leg in the exported range carries a complete Part II.
     match tax_year {
         Some(y) => {
-            crate::render::write_form_8275_txt(out_dir, &state, &events, y)
+            // ★ FR-29: `None` — this is the CSV snapshot, which produces no Form 1040.
+            crate::render::write_form_8275_txt(out_dir, &state, &events, y, None)
                 .map_err(|e| crate::cli_io_with_path(e, out_dir, crate::EXPORT_OUT_HINT))?;
         }
         None => {
@@ -223,6 +227,7 @@ pub fn export_snapshot(
                     &events,
                     y,
                     &format!("form_8275_{y}.txt"),
+                    None, // ★ FR-29: the CSV snapshot produces no Form 1040 (see above).
                 )
                 .map_err(|e| crate::cli_io_with_path(e, out_dir, crate::EXPORT_OUT_HINT))?;
             }
@@ -614,7 +619,11 @@ pub(crate) fn export_irs_pdf_from_session(
     // Form 8275 (Disclosure Statement) — Task 16: `Some` iff a promoted-basis disposal leg files in
     // `tax_year` (the same `disclosure_8275` scoping `promote_export_gate` above already used to confirm
     // completeness).
-    let printed_8275 = btctax_core::tax::form8275::disclosure_8275(events, state, tax_year)
+    // ★ FR-29: `None`. `export-irs-pdf` fills Form 8949 + Schedule D, never a Form 1040 — and the
+    //   §1(g) no-path position is a position on 1040 line 16. Disclosing it beside a packet that
+    //   carries no 1040 would disclose a position this artifact does not take. The full-return
+    //   export (`export_full_return`) is where it belongs, and it passes it.
+    let printed_8275 = btctax_core::tax::form8275::disclosure_8275(events, state, tax_year, None)
         .map(|d| btctax_core::tax::printed::printed_8275(&d));
     // Task 16 / ADD-2 (mirrors `export_full_return`'s pre-check below): v1 does not paginate Form 8275 —
     // refuse HERE, before `mkdir_out`, so an overflowing year (> 6 promoted disposal legs) names the year
@@ -680,7 +689,8 @@ pub(crate) fn export_irs_pdf_from_session(
     crate::render::write_basis_methodology_txt(out_dir, state, tax_year)?;
     // BG-D8: the Form 8275 disclosure rides the packet by its OWN name. The gate above guaranteed a
     // promoted leg reaching here has a complete Part II. Writes nothing for a no-promoted-leg year.
-    crate::render::write_form_8275_txt(out_dir, state, events, tax_year)?;
+    // ★ FR-29: `None` — this path fills Form 8949 + Schedule D, not a Form 1040 (see above).
+    crate::render::write_form_8275_txt(out_dir, state, events, tax_year, None)?;
     // Approach-B experimental disclosure (`design/approach-b-experimental-notice`): an INTERFACE-only
     // signal for main.rs's stderr notice — deliberately NEVER written to `out_dir` (the export directory
     // is what the filer mails/hands to a preparer; the notice belongs on stderr/TUI/NOTICE only).
@@ -1069,8 +1079,18 @@ fn export_full_return(
     // I-3 (D-4): the MANDATORY methodology disclosure rides the full-return packet too (see export_irs_pdf).
     crate::render::write_basis_methodology_txt(out_dir, state, tax_year)?;
     // BG-D8: the Form 8275 disclosure rides the full-return packet by its OWN name (gate above guaranteed
-    // a complete Part II). Writes nothing for a no-promoted-leg year.
-    crate::render::write_form_8275_txt(out_dir, state, events, tax_year)?;
+    // a complete Part II). Writes nothing for a no-promoted-leg, non-§1(g) year.
+    // ★★★ FR-29 / SPEC §6.3.3 — THIS is the export that files a Form 1040, so this is the one that
+    //     carries the §1(g) no-path position. `ar.form8615_certification` was decided once in
+    //     `assemble_absolute`; column (f) is 1040 line 16 as filed (`ar.regular_tax`).
+    let section_1g =
+        ar.form8615_certification
+            .map(|c| btctax_core::tax::form8275::Section1gPosition {
+                unearned: c.unearned,
+                threshold: c.threshold,
+                tax_line16: ar.regular_tax,
+            });
+    crate::render::write_form_8275_txt(out_dir, state, events, tax_year, section_1g.as_ref())?;
     // Approach-B experimental disclosure (`design/approach-b-experimental-notice`): an INTERFACE-only
     // signal for main.rs's stderr notice — deliberately NEVER written to `out_dir` (the export directory
     // is what the filer mails/hands to a preparer; the notice belongs on stderr/TUI/NOTICE only).

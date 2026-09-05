@@ -8,6 +8,7 @@ use btctax_core::defensive::{
     Advisory, DefensiveFilingView, PoolShort, SavingFlavor, TrancheRow, TrancheStatus,
 };
 use btctax_core::persistence::ImportReport;
+use btctax_core::tax::form8275::Section1gPosition;
 use btctax_core::DonationDetails;
 use btctax_core::{
     conservation_report, disposal_compliance, form_8283, form_8949, schedule_d,
@@ -949,13 +950,20 @@ pub fn write_form_csvs(
 /// AND the TUI export path (`btctax-tui::export::do_export`, Approach-B Task 17) emit it at their
 /// `write_basis_methodology_txt` call sites — the TUI reaches it via `btctax_cli::render::…` (no `cmd::`
 /// token, so its KAT-E10 source gate stays green).
+///
+/// ★★★ FR-29 — `section_1g` carries the SPEC §6.3 no-path position when the year's return computes on
+/// the certification path, so the emitted `.txt` states it. `None` on a path that produces no Form
+/// 1040 line 16 to disclose against (the CSV dumps and the 8949/Schedule-D PDF export) — the §1(g)
+/// position is a position on a **1040**, and disclosing one beside a packet that carries no 1040
+/// would be disclosing a position the exported artifact does not take.
 pub fn write_form_8275_txt(
     out_dir: &Path,
     state: &LedgerState,
     events: &[LedgerEvent],
     year: i32,
+    section_1g: Option<&Section1gPosition>,
 ) -> Result<(), crate::CliError> {
-    write_form_8275_txt_named(out_dir, state, events, year, "form_8275.txt")
+    write_form_8275_txt_named(out_dir, state, events, year, "form_8275.txt", section_1g)
 }
 
 /// The `write_form_8275_txt` write, under an explicit `filename`. Task 16 / M2: the all-years
@@ -969,9 +977,11 @@ pub(crate) fn write_form_8275_txt_named(
     events: &[LedgerEvent],
     year: i32,
     filename: &str,
+    section_1g: Option<&Section1gPosition>,
 ) -> Result<(), crate::CliError> {
     use std::io::Write as _;
-    if let Some(disc) = btctax_core::tax::form8275::disclosure_8275(events, state, year) {
+    if let Some(disc) = btctax_core::tax::form8275::disclosure_8275(events, state, year, section_1g)
+    {
         let mut file = fsperms::open_owner_only(&out_dir.join(filename))?;
         // `render()` already terminates with a newline — write, don't writeln (no trailing blank line).
         write!(file, "{}", disc.render())?;

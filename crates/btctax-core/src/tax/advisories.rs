@@ -244,6 +244,27 @@ pub enum Advisory {
         /// when the loss did nothing at all for the filer this year.
         absorbed: Usd,
     },
+    /// ★★★ **FR-29 / SPEC §6.3.4 — THE THREE MANDATORY WARNINGS ON THE NO-PATH CERTIFICATION.**
+    ///
+    /// Fires exactly when [`crate::tax::return_1040::AbsoluteReturn::form8615_certification`] is
+    /// `Some`: the filer testified that they cannot know whether either parent was alive AND that
+    /// they cannot give the IRS either parent's name and address, so the return files WITHOUT Form
+    /// 8615 and WITH a Form 8275 disclosure.
+    ///
+    /// **This is not decoration and it is not softenable.** The certification is the one outcome of
+    /// the Form 8615 ladder that is not a refusal, so it is the one place where a filer receives a
+    /// computed number on a disclosed position — and W-1/W-2/W-3 are what stop that from reading as
+    /// a ruling in their favour. Surfaced at `report` AND at `export`, before the filer has a PDF in
+    /// hand, because after that it is too late to be a warning.
+    ///
+    /// ★ W-3 is the OWNER'S OWN SENTENCE and ships verbatim
+    /// (`design/ty2025/DECISION_form8615_no_path_self_certification.md`). Do not rewrite it.
+    Form8615NoPathCertified {
+        /// The filer's unearned income for the year.
+        unearned: Usd,
+        /// The §1(g) threshold it exceeded.
+        threshold: Usd,
+    },
 }
 
 /// Format a dollar amount for advisory prose: `$1,950` / `$1,234.56` — thousands-separated, and
@@ -569,6 +590,55 @@ impl Advisory {
                     (*worksheet_short + *worksheet_long) - (*flat_short + *flat_long)
                 ),
             ),
+            // ★★★ FR-29 / SPEC §6.3.4 — W-1, W-2 and W-3, in that order, plus the §6.3.5 TAS
+            //     pointer. All three are MANDATORY and none is softenable: this is the one place a
+            //     filer receives a computed number on a disclosed position, so the text has to say
+            //     what a disclosure does and does not buy.
+            //
+            // ★ W-1 quotes `design/forms/extract/i8275--2024.txt:202-214` rather than paraphrasing
+            //   it, because the whole point is that "reasonable basis" is a real standard and btctax
+            //   does NOT tell the filer their position clears it.
+            // ★ W-3 is the OWNER'S sentence, verbatim. Do not rewrite it.
+            Advisory::Form8615NoPathCertified {
+                unearned,
+                threshold,
+            } => format!(
+                "FORM 8615 NOT FILED — A DISCLOSED POSITION, NOT A RULING IN YOUR FAVOUR. Your \
+                 unearned income was {u}, above the §1(g) threshold of {t}, and you answered that \
+                 you cannot find out whether either of your parents was alive and cannot give the \
+                 IRS either parent's name and address. Form 8615 cannot be completed without a \
+                 parent's name, SSN and filing status, and §1(g)(3) cannot be computed without the \
+                 parent's taxable income; the IRS's own remedy for a child who cannot get that \
+                 information requires the parent's name and address, which you do not have. So this \
+                 return is figured WITHOUT §1(g), and a Form 8275 disclosure saying so is attached. \
+                 Read it before you file. Three things you must know:\n\
+                 (1) A DISCLOSURE IS NOT A SHIELD. The Instructions for Form 8275 say \"you can \
+                 avoid the disregard of rules and substantial understatement portions of the \
+                 accuracy-related penalty if the position is adequately disclosed and the position \
+                 has at least a reasonable basis\", and that \"Reasonable basis is a relatively high \
+                 standard of tax reporting that is significantly higher than not frivolous or not \
+                 patently improper. The reasonable basis standard isn't satisfied by a return \
+                 position that is merely arguable.\" btctax does NOT tell you your position clears \
+                 that bar. It tells you the standard exists and that the disclosure is conditional \
+                 on it.\n\
+                 (2) THERE IS NO AUTHORITY HOLDING THIS. btctax is aware of NO authority holding \
+                 §1(g) invalid as applied to you. The argument being made is an IMPOSSIBILITY \
+                 argument — the predicate cannot be established, and the government's own remedy \
+                 excludes you by its own required contents. That is materially stronger than a \
+                 constitutional argument, and it is nonetheless untested.\n\
+                 (3) THE COST OF BEING RIGHT. Often the process is the punishment when it comes to \
+                 not allowing government to treat you unlawfully. Being correct does not prevent an \
+                 examination, correspondence, or the time and expense of answering one.\n\
+                 If you want help: the Instructions for Form 1040 say \"The Taxpayer Advocate \
+                 Service (TAS) is an independent organization within the Internal Revenue Service \
+                 (IRS) that helps taxpayers and protects taxpayer rights\", and that \"TAS can help \
+                 you if your tax problem is causing a financial difficulty, you've tried and been \
+                 unable to resolve your issue with the IRS, or you believe an IRS system, process, \
+                 or procedure just isn't working as it should\". Go to \
+                 TaxpayerAdvocate.IRS.gov/Contact-Us, or call 877-777-4778.",
+                u = fmt_usd(*unearned),
+                t = fmt_usd(*threshold),
+            ),
         }
     }
 }
@@ -875,6 +945,18 @@ pub fn advisories_for(
         year,
         ar.deduction_is_itemized,
     );
+    // ★★★ FR-29 / SPEC §6.3.4 — the three mandatory warnings on the no-path certification. Fires off
+    //     `ar.form8615_certification`, which `assemble_absolute` decided from the gate itself, so the
+    //     warnings and the Form 8275 disclosure can never disagree about whether the position was
+    //     taken. It rides `advisories_for` (not `advisories`) because the predicate needs the
+    //     COMPUTED return, and because this is the list BOTH `report` and `export` surface — §8.1
+    //     requires the filer to see it before they have a PDF in hand.
+    if let Some(c) = ar.form8615_certification {
+        out.push(Advisory::Form8615NoPathCertified {
+            unearned: c.unearned,
+            threshold: c.threshold,
+        });
+    }
     // ★★★ **P8 / §3.4** — Form 8960 Part II line 9b is blank on a return that OWES NIIT and did
     //     deduct state income tax. Fires here rather than in `advisories`, because both halves of the
     //     predicate need the COMPUTED return: whether §1411 tax is owed at all, and the §63(e)

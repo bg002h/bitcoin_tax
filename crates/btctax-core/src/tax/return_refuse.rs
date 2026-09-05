@@ -261,16 +261,40 @@ pub enum RefuseReason {
     /// unrefused, the filer files a Schedule C with a blank line A and a Form 8995 whose non-zero line 2
     /// totals an EMPTY column (c) — a deduction claimed for a business the return never names.
     ScheduleCNoBusinessDescription,
-    /// A filer with unearned income over the §1(g) kiddie-tax threshold → Form 8615.
+    /// A filer who meets all five of Form 8615's conditions → §1(g), the parent's-rate tax.
     ///
-    /// ★★★ **FR-29: the SCREEN that raises this is gated on dependency, and Form 8615 is not.** Its
-    /// conditions are age + an earned-income support test + a living parent + not filing jointly
-    /// (`design/forms/extract/i1040gi--2025.txt:3927-3941`); dependency appears nowhere in them. So
-    /// this refusal is UNDER-raised: a self-supporting student escapes it and is taxed at their own
-    /// rates, which §1(g)(1) ("the greater of") makes an understatement. Do not read the wording
-    /// below as the rule — it is the current gate, and the gate is wrong.
-    /// (the child's-rate `qdcgt_line16` would understate; the parent's rate is required — C1/F2).
+    /// ★★★ **FR-29 IS FIXED (SPEC `design/ty2025/SPEC_form8615_kiddie_tax.md`, ladder step 7).**
+    /// The screen no longer reads `can_be_claimed_as_dependent_taxpayer` at all, because the IRS says
+    /// dependency is not one of the conditions — `design/forms/extract/i8615--2025.txt:58-61`:
+    ///
+    /// > *"These rules apply whether or not the child is a dependent. These rules don't apply if
+    /// > neither of the child's parents were living at the end of the year."*
+    ///
+    /// The five conditions are unearned income over the threshold, a filing requirement, an AGE +
+    /// earned-income-support test, at least one parent alive, and a return that is not joint
+    /// (`i1040gi--2025.txt:3927-3944`). btctax computes 1, 2 (assumed TRUE — SPEC §5.4) and 5, and
+    /// COLLECTS 3 and 4. ★ Condition 2 is assumed, so this refusal's detail discloses the assumption
+    /// rather than telling the filer they met it.
     KiddieTax,
+    /// ★ **FR-29 R-1 (ladder step 3)** — Form 8615's condition 3 is UNANSWERED on a return where it
+    /// decides the number: unearned income is over the §1(g) threshold, the return is not joint, and
+    /// no date of birth proves the filer was 24 or older at year end. Cleared by
+    /// [`crate::tax::questions::SkippableId::Form8615Condition3AgeSupport`] — or by a date of birth.
+    Form8615AgeSupportUnanswered,
+    /// ★ **FR-29 R-2 (ladder step 4)** — condition 3 is answered YES and condition 4 ("At least one of
+    /// your parents was alive at the end of the year") is UNANSWERED. `None` only: `Some(CannotKnow)`
+    /// is an ANSWER and reaches [`Self::Form8615ParentUnidentifiable`] instead.
+    Form8615ParentAliveUnanswered,
+    /// ★★★ **FR-29 R-4 (ladder step 6)** — the filer answered condition 4 *"cannot know"*, and has not
+    /// attested that they cannot give the IRS a parent's name and address. Two different filers land
+    /// here: one who has not yet been offered the second question (it becomes live only once condition
+    /// 4 is answered), and one who answered that they CAN supply a name and address, for whom the
+    /// IRS-request route is open and this refusal is correct and final until they use it.
+    ///
+    /// ★ OQ-5 is RULED (`design/OWNER_DECISIONS_2026-09-04.md`, *"OWNER RULINGS, 2026-09-05"*): the
+    /// certification is NOT widened for a filer who knows their parents but is barred from contacting
+    /// them. They are refused here, and the detail names the Taxpayer Advocate Service.
+    Form8615ParentUnidentifiable,
     /// QBI present (REIT §199A dividends or a REIT/PTP carryforward) with taxable-income-before-QBI ABOVE
     /// the §199A(e)(2) threshold — the simplified Form 8995 no longer applies and the 8995-A phase-in is
     /// unmodeled in v1 (SPEC §4.5). Compute-dependent (needs L12 → TI-before-QBI).

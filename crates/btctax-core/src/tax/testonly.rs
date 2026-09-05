@@ -746,6 +746,24 @@ pub fn build_golden_return(i: &GoldenInputs) -> (ReturnInputs, LedgerState) {
     };
     // Nobody can claim a golden household — but it must SAY so (D-8: unanswered refuses).
     ri.header.can_be_claimed_as_dependent_taxpayer = Some(false);
+    // ★★★ **FR-29 (SPEC §7 / G10) — every golden household is an ADULT, and it must SAY so too.**
+    //
+    // Four of the sweep's households carry capital gains over the §1(g) threshold, and with no date
+    // of birth on file Form 8615's condition 3 is UNKNOWN — so the corpus started refusing them
+    // rather than reconciling. **The floor was not relaxed and no answer was invented:** a date of
+    // birth proves condition 3 FALSE by arithmetic (§5.1), which is what an adult household's date
+    // of birth actually does.
+    //
+    // ★ The band is `[year - 63, year - 24]` and 1980 is inside it for BOTH supported years
+    //   (2024 ⇒ [1961, 2000], 2025 ⇒ [1962, 2001]), so it can neither leave the filer under 24 (the
+    //   question comes back) nor reach §63(f)'s age-65 addition (which would move the standard
+    //   deduction and every golden built on it). It is therefore invisible to both oracles: neither
+    //   `GoldenInputs` nor either engine models age at all.
+    //
+    // ★★ THE HAZARD, NAMED: if the corpus ever gains a genuinely-under-24 household, this line would
+    //    exempt it from §1(g) by fiat. `GoldenInputs` carries no age today, so the day it does, this
+    //    line must read it instead of assuming.
+    ri.header.taxpayer.date_of_birth = Some(time::macros::date!(1980 - 05 - 05));
     if status == FilingStatus::Mfj {
         ri.header.spouse = Some(crate::tax::return_inputs::Person {
             first_name: "Golden".into(),

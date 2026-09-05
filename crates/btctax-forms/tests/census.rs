@@ -66,6 +66,9 @@ fn injected_8283_row() -> Form8283Row {
 fn injected_8275() -> Printed8275 {
     Printed8275 {
         part_i: vec![Part1Item {
+            // FR-29: a promoted-basis leg is contrary to no NAMED rule, so (a)/(b) stay blank.
+            rule: None,
+            item_name: None,
             form: "8949".to_string(),
             line: "Part I \u{2014} column (e)".to_string(),
             description: "basis estimated at the minimum daily closing price over the attested \

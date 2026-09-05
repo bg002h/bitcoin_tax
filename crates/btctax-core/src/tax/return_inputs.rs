@@ -306,6 +306,93 @@ pub struct HouseholdHeader {
     pub spouse_died_during_year: Option<bool>,
     #[serde(default)]
     pub ip_pin: Option<String>,
+    /// **Form 8615, condition 3** (`design/forms/extract/i1040gi--2025.txt:3932-3940`), verbatim:
+    /// "3. You were either:
+    ///     a. Under age 18 at the end of 2025,
+    ///     b. Age 18 at the end of 2025 and didn’t have earned income that was more than half of your
+    ///        support, or
+    ///     c. A full-time student at least age 19 but under age 24 at the end of 2025 and didn’t have
+    ///        earned income that was more than half of your support."
+    ///
+    /// ONE leaf, because the form states ONE numbered condition with three alternatives and asks the
+    /// filer for the disjunction ("You were either: a…, b…, or c…"). Splitting it into three would be
+    /// the compression this repo's rule forbids, in reverse: it would require btctax to re-derive the
+    /// disjunction the form already writes.
+    ///
+    /// `None` ⇒ REFUSED by [`crate::tax::return_1040::screen_compute_dependent`] wherever the answer
+    /// changes the number, and unread everywhere else. It never defaults in either direction. See
+    /// [`Self::form8615_condition4_parent_alive`].
+    #[serde(default)]
+    pub form8615_condition3_age_support: Option<bool>,
+    /// **Form 8615, condition 4** (`design/forms/extract/i1040gi--2025.txt:3941-3942`), verbatim:
+    /// "4. At least one of your parents was alive at the end of 2025."
+    ///
+    /// `None` ⇒ REFUSED, on the same terms as [`Self::form8615_condition3_age_support`], and
+    /// additionally only once condition 3 is answered YES — the form reaches condition 4 no other way.
+    ///
+    /// ★★★ **NOT `Option<bool>`. "I cannot know" is a THIRD ANSWER, and it is not the same thing as
+    /// UNANSWERED** — the distinction is the whole of the owner ruling
+    /// (`design/ty2025/DECISION_form8615_no_path_self_certification.md`). Unanswered still refuses;
+    /// unknowable opens the SPEC §6.3 dead-end path and nothing else. Collapsing the two would either
+    /// re-arm FR-29 (silence becomes an exit) or close the only path out (unknowable becomes a refusal
+    /// with no remedy).
+    #[serde(default)]
+    pub form8615_condition4_parent_alive: Option<ParentAliveAnswer>,
+    /// **The SPEC §6.3 dead-end FACT** — not a condition of Form 8615, and deliberately not phrased as
+    /// one.
+    ///
+    /// Form 8615's face requires the parent's name, SSN and filing status on lines A, B and C
+    /// (`design/forms/extract/f8615--2025.txt:17-20`); none carries an "if known". The one
+    /// administrative remedy is to request the data from the IRS, and its required contents include,
+    /// verbatim (`design/forms/extract/i8615--2025.txt:193-195`):
+    /// "The name, address, social security number (SSN) (if known), and filing status (if known) of the
+    ///  parent whose information is to be shown on Form 8615."
+    /// SSN and filing status tolerate ignorance. **Name and address do not.** So a filer who cannot
+    /// supply a name and an address has no route to Form 8615 at all — and this leaf records that FACT,
+    /// in the filer's own testimony, never the legal conclusion drawn from it.
+    ///
+    /// `Some(true)` is the ONLY value that opens anything. `None` and `Some(false)` both leave the §6.3
+    /// refusal standing, which is the *widening an exemption is never the safe edit* rule discharged:
+    /// the YES-condition is enumerated and every omission fails closed.
+    ///
+    /// ★★★ **The registry accessors for this leaf INVERT, and they are the only inverting pair in
+    /// [`crate::tax::questions::SKIPPABLE_QUESTIONS`].** The prompt asks "Can you give the IRS your
+    /// parent's name and address?", so the filer's NO is this field's `Some(true)`; `get_bool` /
+    /// `set_bool` carry the `!`. A straight-through pair certifies the filer who answered YES — an
+    /// understatement path, and the one the polarity row of
+    /// `the_certification_is_unreachable_without_the_dead_end` exists to kill.
+    #[serde(default)]
+    pub form8615_parent_identity_unobtainable: Option<bool>,
+}
+
+/// Form 8615 condition 4's answer — **three-valued**.
+///
+/// ★ Why an enum and not a second `Option<bool>` pair: a pair admits the incoherent state
+/// (`alive = Some(true)`, `unknowable = Some(true)`), and every consumer would then need a rule for
+/// it. Three variants make the incoherent state unrepresentable, and the `match` in
+/// [`crate::tax::return_1040::screen_compute_dependent`] is exhaustive, so a fourth variant added
+/// later reds every site.
+///
+/// ★ `Serialize`/`Deserialize` with the default (externally-tagged unit-variant) representation, so a
+/// vault stores `"Yes"` / `"No"` / `"CannotKnow"`. A vault written before this change has the field
+/// absent ⇒ `None` ⇒ unanswered ⇒ refuse. **No serde default may name a variant**, and there is no
+/// `#[serde(other)]` fallback: an unknown string must fail the parse rather than silently become an
+/// answer — the `SerdeRequired` reasoning at [`crate::tax::classifier::Class::SerdeRequired`] applied
+/// to a value instead of to a field's presence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ParentAliveAnswer {
+    /// "At least one of your parents was alive at the end of 2025."
+    /// (`design/forms/extract/i1040gi--2025.txt:3941-3942`)
+    Yes,
+    /// Neither parent was alive at the end of the year. i8615 states the consequence directly
+    /// (`design/forms/extract/i8615--2025.txt:60-61`): "These rules don’t apply if neither of the
+    /// child’s parents were living at the end of the year."
+    No,
+    /// ★★★ **THE THIRD ANSWER.** The filer cannot know, because they cannot identify their parents.
+    /// Distinct from `None` (never asked). Unlocks the SPEC §6.3 certification and nothing else — on
+    /// its own it still refuses, because the certification also requires
+    /// [`HouseholdHeader::form8615_parent_identity_unobtainable`] `== Some(true)`.
+    CannotKnow,
 }
 
 /// Schedule C line F accounting method (SPEC §4.4a).

@@ -22,6 +22,32 @@ use rust_decimal_macros::dec;
 use std::path::{Path, PathBuf};
 use time::macros::{date, datetime};
 
+/// ★★★ **FR-29 (SPEC `design/ty2025/SPEC_form8615_kiddie_tax.md` §7) — an ADULT filer's header.**
+///
+/// `testonly::not_a_dependent()` leaves `date_of_birth` at `None`, and a return with more than the
+/// §1(g) threshold of unearned income and no date of birth is now REFUSED
+/// (`Form8615AgeSupportUnanswered`): btctax cannot prove the filer was 24 or older, and it will not
+/// answer Form 8615's condition 3 for them. Every fixture in this file is an adult with capital
+/// gains, so the migration is to make them realistic rather than to silence the gate — and a date of
+/// birth also exercises §5.1's suppression path.
+///
+/// **The band is `[year - 63, year - 24]`, and both ends are exact.** `year - 24` is the last
+/// calendar year every date in which yields a considered age of at least 24 (§5.1), so anything
+/// later can be under 24 and the question comes back. And `born_early_enough` is
+/// `dob <= Date(year - 64, January 1)`, so a January-1 birth in `year - 64` IS 65 or older — at or
+/// before that the §63(f) aged standard deduction switches on and moves every golden in this file.
+/// For 2024 the band is `[1961, 2000]`; 1980 is mid-band.
+///
+/// ★ Deliberately a FILE-LOCAL helper, not an addition to `testonly::not_a_dependent()`: a date of
+/// birth in the shared builder would green every future fixture by arithmetic, which is the same
+/// hazard §7 names for a blanket `Some(false)` — it would destroy the gate's ability to catch this
+/// class again.
+fn adult_filer_header() -> btctax_core::tax::return_inputs::HouseholdHeader {
+    let mut h = btctax_core::tax::testonly::not_a_dependent();
+    h.taxpayer.date_of_birth = Some(time::macros::date!(1980 - 05 - 05));
+    h
+}
+
 fn pp() -> Passphrase {
     Passphrase::new("pw".into())
 }
@@ -1523,7 +1549,7 @@ fn dual_report_renders_absolute_return_with_section_6_labels() {
             2024,
             &btctax_core::tax::testonly::answered(ReturnInputs {
                 filing_status: FilingStatus::Single,
-                header: btctax_core::tax::testonly::not_a_dependent(),
+                header: adult_filer_header(),
                 w2s: vec![W2 {
                     owner: Owner::Taxpayer,
                     box1_wages: dec!(80000),
@@ -1608,7 +1634,7 @@ fn the_prior_year_worksheet_figure_is_the_m4_authority_for_a_floor_year() {
             let mut y2024 = ReturnInputs {
                 tax_year: 2024,
                 filing_status: FilingStatus::Single,
-                header: btctax_core::tax::testonly::not_a_dependent(),
+                header: adult_filer_header(),
                 w2s: vec![W2 {
                     owner: Owner::Taxpayer,
                     box1_wages: dec!(10000),
@@ -1744,7 +1770,7 @@ fn the_report_never_shows_two_unlabelled_carryforward_out_figures() {
         let mut ri = ReturnInputs {
             tax_year: 2024,
             filing_status: FilingStatus::Single,
-            header: btctax_core::tax::testonly::not_a_dependent(),
+            header: adult_filer_header(),
             ..Default::default()
         };
         ri.capital_loss_carryforward_in = btctax_core::tax::types::Carryforward {
@@ -1770,7 +1796,7 @@ fn the_report_never_shows_two_unlabelled_carryforward_out_figures() {
         let mut ri = ReturnInputs {
             tax_year: 2024,
             filing_status: FilingStatus::Single,
-            header: btctax_core::tax::testonly::not_a_dependent(),
+            header: adult_filer_header(),
             w2s: vec![W2 {
                 owner: Owner::Taxpayer,
                 box1_wages: dec!(50000),
@@ -1829,7 +1855,7 @@ fn rolling_a_carryover_never_leaves_next_year_unfilable_in_silence() {
         let mut s = Session::open(&vault, &pp()).unwrap();
         let mut y2024 = ReturnInputs {
             filing_status: FilingStatus::Single,
-            header: btctax_core::tax::testonly::not_a_dependent(),
+            header: adult_filer_header(),
             w2s: vec![W2 {
                 owner: Owner::Taxpayer,
                 box1_wages: dec!(30000),
@@ -1854,7 +1880,7 @@ fn rolling_a_carryover_never_leaves_next_year_unfilable_in_silence() {
         let y2025 = btctax_core::tax::testonly::answered(ReturnInputs {
             tax_year: 2025,
             filing_status: FilingStatus::Single,
-            header: btctax_core::tax::testonly::not_a_dependent(),
+            header: adult_filer_header(),
             ..Default::default()
         });
         btctax_cli::return_inputs::set(s.conn(), 2025, &y2025).unwrap();
@@ -2023,7 +2049,7 @@ fn the_writeback_summary_names_every_carryover_it_wrote() {
         let mut s = Session::open(&vault, &pp()).unwrap();
         let mut y2024 = ReturnInputs {
             filing_status: FilingStatus::Single,
-            header: btctax_core::tax::testonly::not_a_dependent(),
+            header: adult_filer_header(),
             charitable_cwa_obtained: Some(true),
             w2s: vec![W2 {
                 owner: Owner::Taxpayer,
@@ -2056,7 +2082,7 @@ fn the_writeback_summary_names_every_carryover_it_wrote() {
         let seed = btctax_core::tax::testonly::answered(ReturnInputs {
             tax_year: 2025,
             filing_status: FilingStatus::Single,
-            header: btctax_core::tax::testonly::not_a_dependent(),
+            header: adult_filer_header(),
             ..Default::default()
         });
         btctax_cli::return_inputs::set(s.conn(), 2025, &seed).unwrap();
@@ -2144,7 +2170,7 @@ fn the_summary_does_not_claim_a_capital_loss_write_the_gate_skipped() {
             2024,
             &btctax_core::tax::testonly::answered(ReturnInputs {
                 filing_status: FilingStatus::Single,
-                header: btctax_core::tax::testonly::not_a_dependent(),
+                header: adult_filer_header(),
                 charitable_cwa_obtained: Some(true),
                 w2s: vec![W2 {
                     owner: Owner::Taxpayer,
@@ -2172,7 +2198,7 @@ fn the_summary_does_not_claim_a_capital_loss_write_the_gate_skipped() {
             &btctax_core::tax::testonly::answered(ReturnInputs {
                 tax_year: 2025,
                 filing_status: FilingStatus::Single,
-                header: btctax_core::tax::testonly::not_a_dependent(),
+                header: adult_filer_header(),
                 ..Default::default()
             }),
         )
@@ -2241,7 +2267,7 @@ fn carryover_write_back_round_trips_and_respects_user_precedence() {
             2024,
             &btctax_core::tax::testonly::answered(ReturnInputs {
                 filing_status: FilingStatus::Single,
-                header: btctax_core::tax::testonly::not_a_dependent(),
+                header: adult_filer_header(),
                 w2s: vec![W2 {
                     owner: Owner::Taxpayer,
                     box1_wages: dec!(50000),
@@ -2281,7 +2307,7 @@ fn carryover_write_back_round_trips_and_respects_user_precedence() {
             2025,
             &btctax_core::tax::testonly::answered(ReturnInputs {
                 filing_status: FilingStatus::Single,
-                header: btctax_core::tax::testonly::not_a_dependent(),
+                header: adult_filer_header(),
                 ..Default::default()
             }),
         )
@@ -2308,7 +2334,7 @@ fn carryover_write_back_round_trips_and_respects_user_precedence() {
         let mut s = Session::open(&vault, &pp()).unwrap();
         let mut y2025 = ReturnInputs {
             filing_status: FilingStatus::Single,
-            header: btctax_core::tax::testonly::not_a_dependent(),
+            header: adult_filer_header(),
             ..Default::default()
         };
         y2025.charitable_carryover_in = vec![CharitableCarryItem {
@@ -2374,7 +2400,7 @@ fn income_import_preserves_a_computed_capital_loss_carryover_and_the_qbi_busines
         let mut y2024 = ReturnInputs {
             tax_year: 2024,
             filing_status: FilingStatus::Single,
-            header: btctax_core::tax::testonly::not_a_dependent(),
+            header: adult_filer_header(),
             w2s: vec![W2 {
                 owner: Owner::Taxpayer,
                 box1_wages: dec!(30000),
@@ -2399,7 +2425,7 @@ fn income_import_preserves_a_computed_capital_loss_carryover_and_the_qbi_busines
         let y2025 = btctax_core::tax::testonly::answered(ReturnInputs {
             tax_year: 2025,
             filing_status: FilingStatus::Single,
-            header: btctax_core::tax::testonly::not_a_dependent(),
+            header: adult_filer_header(),
             ..Default::default()
         });
         btctax_cli::return_inputs::set(s.conn(), 2025, &y2025).unwrap();
@@ -2502,7 +2528,7 @@ fn import_preserves_a_computed_carryover() {
             2024,
             &btctax_core::tax::testonly::answered(ReturnInputs {
                 filing_status: FilingStatus::Single,
-                header: btctax_core::tax::testonly::not_a_dependent(),
+                header: adult_filer_header(),
                 w2s: vec![W2 {
                     owner: Owner::Taxpayer,
                     box1_wages: dec!(50000),
@@ -2531,7 +2557,7 @@ fn import_preserves_a_computed_carryover() {
             2025,
             &btctax_core::tax::testonly::answered(ReturnInputs {
                 filing_status: FilingStatus::Single,
-                header: btctax_core::tax::testonly::not_a_dependent(),
+                header: adult_filer_header(),
                 ..Default::default()
             }),
         )
@@ -2577,6 +2603,12 @@ fn full_return_report_surfaces_conservative_omission_advisories() {
         let mut s = Session::open(&vault, &pp()).unwrap();
         let mut ri = ReturnInputs {
             filing_status: FilingStatus::Single,
+            // ★ NOT `adult_filer_header()`: this fixture is ABOUT the missing date of birth (it
+            //   asserts "DATE OF BIRTH NOT ON FILE" below), so it cannot have one — and without one
+            //   FR-29's condition 3 is UNKNOWN on a return with $10,000 of LTCG. The filer answers it
+            //   instead, which is what a 40-something with a W-2 would truthfully say. That is the
+            //   §7 migration for a fixture a date of birth cannot fix: make the ANSWER realistic,
+            //   never silence the gate.
             header: btctax_core::tax::testonly::not_a_dependent(),
             w2s: vec![W2 {
                 owner: Owner::Taxpayer,
@@ -2592,6 +2624,9 @@ fn full_return_report_surfaces_conservative_omission_advisories() {
         };
         ri.header.dependents = vec![Dependent::default()]; // → CTC/ODC omission
                                                            // taxpayer.date_of_birth stays None → the §63(f) aged box is forfeited
+                                                           // ★ FR-29: "no, I was not under 24 at the end of the year" — the filer's own answer, which is
+                                                           //   ladder step 2 and proceeds. Condition 4 is then never asked.
+        ri.header.form8615_condition3_age_support = Some(false);
         btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
         btctax_cli::return_inputs::set(s.conn(), 2024, &ri).unwrap();
         s.save().unwrap();
@@ -2673,10 +2708,22 @@ fn a_pre_d8_vault_refuses_until_answered_and_income_answer_is_the_way_out() {
     // §170(f)(8) contemporaneous-written-acknowledgment universal — offered always for the same
     // reason as the donation-restrictions one, mandatory only where a §170 deduction is claimed.
     //
+    // ★★★ 2026-09-05 (FR-29) — TWO MORE always-live skippables, and this script is how the growth was
+    // measured. Form 8615's condition 3 (the age + earned-income-support test) and its condition 4
+    // ("at least one of your parents was alive") are both live for a Single filer with no date of
+    // birth, because liveness cannot see the LEDGER and so cannot know whether condition 1 holds
+    // (SPEC §3.1). The §6.3 dead-end fact is NOT among them: it becomes live only once condition 4 is
+    // answered CANNOT KNOW, which is the owner ruling's first constraint discharged in the predicate.
+    //
+    // ★ Skipping both is safe HERE and the reason matters: this household's $90,000 is W-2 WAGES,
+    //   which are EARNED, so its unearned income is $0 and Form 8615's condition 1 is proved false at
+    //   ladder step 1 — the two answers are never demanded. A household with the same money in
+    //   capital gains would refuse until they were given.
+    //
     // ★ Seven "n" then bare Enters — the exact count is deliberate. A script that runs out fails with
     // "input ended before every question was answered", which is how this test noticed the interview
     // had grown at all.
-    let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\nn\nn\n\n\n\n\n\n";
+    let mut keystrokes: &[u8] = b"n\nn\nn\nn\nn\nn\nn\n\n\n\n\n\n\n\n";
     let mut screen: Vec<u8> = Vec::new();
     cmd::answer::answer_return_inputs(&vault, &pp(), 2024, &mut keystrokes, &mut screen).unwrap();
     let screen = String::from_utf8(screen).unwrap();
@@ -2847,7 +2894,7 @@ fn the_full_remedy_chain_restores_a_computed_carryover() {
             2024,
             &btctax_core::tax::testonly::answered(ReturnInputs {
                 filing_status: FilingStatus::Single,
-                header: btctax_core::tax::testonly::not_a_dependent(),
+                header: adult_filer_header(),
                 w2s: vec![W2 {
                     box1_wages: dec!(50000),
                     box5_medicare_wages: dec!(50000),
@@ -2874,7 +2921,7 @@ fn the_full_remedy_chain_restores_a_computed_carryover() {
             2025,
             &btctax_core::tax::testonly::answered(ReturnInputs {
                 filing_status: FilingStatus::Single,
-                header: btctax_core::tax::testonly::not_a_dependent(),
+                header: adult_filer_header(),
                 ..Default::default()
             }),
         )
@@ -2917,7 +2964,7 @@ fn the_full_remedy_chain_restores_a_computed_carryover() {
             2024,
             &btctax_core::tax::testonly::answered(ReturnInputs {
                 filing_status: FilingStatus::Single,
-                header: btctax_core::tax::testonly::not_a_dependent(),
+                header: adult_filer_header(),
                 w2s: vec![W2 {
                     box1_wages: dec!(50000),
                     box5_medicare_wages: dec!(50000),
@@ -2972,7 +3019,7 @@ fn fr2024_writeback_vault_with_pseudo_trigger() -> (tempfile::TempDir, PathBuf) 
         2024,
         &btctax_core::tax::testonly::answered(ReturnInputs {
             filing_status: FilingStatus::Single,
-            header: btctax_core::tax::testonly::not_a_dependent(),
+            header: adult_filer_header(),
             w2s: vec![W2 {
                 owner: Owner::Taxpayer,
                 box1_wages: dec!(50000),
@@ -3000,7 +3047,7 @@ fn fr2024_writeback_vault_with_pseudo_trigger() -> (tempfile::TempDir, PathBuf) 
         2025,
         &btctax_core::tax::testonly::answered(ReturnInputs {
             filing_status: FilingStatus::Single,
-            header: btctax_core::tax::testonly::not_a_dependent(),
+            header: adult_filer_header(),
             ..Default::default()
         }),
     )
@@ -3119,7 +3166,7 @@ fn vault_with_a_gift_over_its_ceiling() -> (tempfile::TempDir, PathBuf) {
             2024,
             &btctax_core::tax::testonly::answered(ReturnInputs {
                 filing_status: FilingStatus::Single,
-                header: btctax_core::tax::testonly::not_a_dependent(),
+                header: adult_filer_header(),
                 w2s: vec![W2 {
                     owner: Owner::Taxpayer,
                     box1_wages: dec!(50000),
@@ -3201,7 +3248,7 @@ fn a_gift_within_its_ceiling_prints_no_charitable_carryover_line() {
             2024,
             &btctax_core::tax::testonly::answered(ReturnInputs {
                 filing_status: FilingStatus::Single,
-                header: btctax_core::tax::testonly::not_a_dependent(),
+                header: adult_filer_header(),
                 w2s: vec![W2 {
                     owner: Owner::Taxpayer,
                     box1_wages: dec!(50000),
@@ -3274,7 +3321,7 @@ fn f1_advisory_for_declared_carryforward(declared: rust_decimal::Decimal) -> Opt
             2024,
             &btctax_core::tax::testonly::answered(ReturnInputs {
                 filing_status: FilingStatus::Single,
-                header: btctax_core::tax::testonly::not_a_dependent(),
+                header: adult_filer_header(),
                 ..Default::default() // no wages — this is what puts TI at the floor
             }),
         )
@@ -3442,7 +3489,7 @@ fn a_computed_capital_loss_stamp_survives_every_command_that_should_retract_it()
     let y2024 = |cl: btctax_core::Carryforward| {
         let mut ri = ReturnInputs {
             filing_status: FilingStatus::Single,
-            header: btctax_core::tax::testonly::not_a_dependent(),
+            header: adult_filer_header(),
             w2s: vec![W2 {
                 owner: Owner::Taxpayer,
                 box1_wages: dec!(50000),
@@ -3481,7 +3528,7 @@ fn a_computed_capital_loss_stamp_survives_every_command_that_should_retract_it()
             &btctax_core::tax::testonly::answered(ReturnInputs {
                 tax_year: 2025,
                 filing_status: FilingStatus::Single,
-                header: btctax_core::tax::testonly::not_a_dependent(),
+                header: adult_filer_header(),
                 ..Default::default()
             }),
         )
