@@ -4,7 +4,7 @@
 the calendar); this file is its **progress ledger** and is updated on every task that closes. Read
 this first, then the plan for the reasoning behind a phase.
 
-Last updated: **2026-09-05**.
+Last updated: **2026-09-05**. See also `design/TY2026_PORT_REPORT.md` for carrying this forward a year.
 
 ---
 
@@ -40,8 +40,8 @@ parallel or later.
 | T3a | lines 4b / 5 / 14b, which have no input path | **done** — 5 and 14b refuse |
 | T4 | compute, transcribed line by line | **done** — all four jump branches pinned |
 | T5 | wiring: L38 → 1040 line 13b; L37 → Form 6251 line 1a | **done** |
-| T6 | worked examples, five filing statuses, mutation-verify every guard | **in progress** |
-| T7 | the two-oracle census, per part | **not started** |
+| T6 | worked examples, five filing statuses, mutation-verify every guard | **done** |
+| T7 | the two-oracle census, per part | **done** — and it found D-8 by mechanism |
 
 **Held back deliberately, marked in code:** the **input-form section** for Schedule 1-A (~22 Fields
 plus per-vehicle repeating-row addressing across four files). `schedule_1a` sits in the coverage KAT's
@@ -49,6 +49,14 @@ plus per-vehicle repeating-row addressing across four files). `schedule_1a` sits
 there, which are information-return import surfaces. The plan is explicit that **prompt wording is the
 deliverable, not plumbing**: *"a wrong prompt is a wrong return that every test passes."* Nothing is
 reachable through the gap while TY2025 is fail-closed.
+
+★ **T7's measured result.** `scripts/oracle/verify_schedule_1a.py` checks each part against taxcalc
+6.7.2, deriving every disqualification from the defect's own mechanism rather than a list of vector
+names. Parts II, III and V agree on every parameter — caps, both thresholds including the MFJ
+doubling, step size and rate. Part IV agrees on all four parameters **but taxcalc gives QSS the MFJ
+$200,000 threshold**, which the form contradicts (*"Married filing jointly—$200,000. All other filing
+statuses—$100,000"*), so **taxcalc is disqualified as a QSS witness for Part IV** — exactly the D-8
+defect, found by measurement rather than assertion.
 
 ### P2 — the filing assets
 
