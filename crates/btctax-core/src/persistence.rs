@@ -134,6 +134,12 @@ fn insert(
     kind: &str,
     fp: Option<&Fingerprint>,
 ) -> Result<(), CoreError> {
+    // FR-38: THE seam. This is the workspace's only `INSERT INTO events`, so a structurally
+    // impossible value (negative basis/FMV/proceeds/fee, negative sat) cannot become a row from
+    // ANY door — CSV import, CLI `classify-raw`, the TUI form, or `accept-conflict`, which has no
+    // validation code of its own. Refuses; never normalises (an `.abs()` would change the
+    // `fingerprint` below and therefore conflict `EventId`s). See `payload_polarity` module docs.
+    crate::payload_polarity::check_payload_polarity(&ev.payload)?;
     let (source, source_ref, seq) = match &ev.id {
         EventId::Import { source, source_ref } => (
             Some(source.tag().to_string()),

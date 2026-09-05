@@ -5883,3 +5883,52 @@ self-transfer policy was audited for CONFORMANCE, not relitigated.
   *parsed* rather than where the flag is read, so a new entry point cannot skip it by construction —
   the same reasoning that made FR-37 one predicate with six references instead of six copies.
   **Owning phase: with the FR-12/FR-27 answered-ness sweep.**
+
+  **— CLOSED 2026-09-05, on `fix/fr38-persistence-sign-guard`.** The design recon is
+  `design/agent-reports/2026-09-05-recon-fr38-validation-seam.md`; the build report is
+  `design/agent-reports/2026-09-05-fr38-build.md`. The follow-up as filed was **too narrow**: the CSV
+  import path (three of four adapters, and `parse_usd` actively producing negatives from accounting
+  parentheses) was the biggest door, the TUI's own `classify-raw` form was a second, and
+  `accept-conflict` a third that has no code of its own. The fix is therefore NOT another call site:
+  `btctax_core::payload_polarity::check_payload_polarity` runs at
+  `btctax_core::persistence::insert`, the workspace's only `INSERT INTO events` (grep-verified), so
+  every present and future door is covered at once. It is an exhaustive destructure with **no `..`**
+  and no `_` arm — machine-verified: a planted `Usd` field on `Acquire` is an **E0027** and a planted
+  `EventPayload` variant an **E0004**, both pointing at `payload_polarity.rs`. Per `[G-I5]` the
+  policy is per FIELD: `ConsentTerm`'s four delta fields are legitimately signed and are routed
+  through an explicit `signed_by_design` whitelist that a test holds. `sat` travelled with it (a
+  count cannot be negative, and nothing in core refused one). REFUSES, never normalises — an
+  `.abs()` at that seam would change `fingerprint` and therefore conflict `EventId`s — so there is
+  no migration: no format change, no digest change, and no fixture carried a negative. 35 new tests,
+  mutation-verified per door (21 red with the guard removed).
+
+- **FR-39 — the CSV adapters diverge on USD sign, and Gemini LAUNDERS it.** Surfaced by the FR-38
+  recon and left alone deliberately. Gemini `.abs()`es `usd_cost`/`usd_proceeds`
+  (`sources/gemini.rs:147/157`, with a written rationale); Coinbase (`:153`/`:162`), Swan
+  (`:194`/`:248`) and River (`:139`) do not. Since FR-38 the three *refuse* an impossible figure at
+  the persistence seam — the right outcome — while the same data from Gemini is silently
+  **normalised** and recorded. So a negative Subtotal is an error in one file format and a
+  correction in another. ★ The refuse-never-repair rule (FR-38) says Gemini should stop repairing
+  and refuse like its siblings; that is a behaviour change to an adapter with its own reasoning
+  comment, which is why it is filed rather than folded. **Owning phase: the next adapter cycle.**
+
+- **FR-40 — a refused import names the FIELD but not the CSV ROW.** FR-38's refusal fires at
+  `persistence::insert`, which has the payload and not the file, the line number, or the source ref.
+  `append_import_batch` is atomic, so one impossible cell rolls a 10,000-row statement back with a
+  message that says `Acquire.usd_cost = -1234.56` and nothing about *where*. Adding a second,
+  earlier guard in each adapter is explicitly **rejected** — that is the divergent-copy shape FR-38
+  exists to remove, and it is how the four adapters got out of step in the first place. The right
+  lever is error CONTEXT, not a second check: carry the `AdapterError`-style `{line, field, value}`
+  the adapters already build alongside the event, and attach it when `append_import_batch` returns.
+  Cosmetic only — no impossible value reaches the vault either way. **Owning phase: the next adapter
+  cycle, with FR-39.**
+
+- **FR-41 — `sats_as_dollars_advisory` still has ZERO TUI call sites.** FR-37 closed the CLI half of
+  its own finding; the TUI half was never opened (grep for the name or for `"did you enter the sats
+  amount as dollars"` returns exactly one file, `cmd/reconcile.rs`). FR-38 deliberately did NOT move
+  it: the advisory is a 100× heuristic against a market price and needs the satoshi quantity, the
+  *target event's* tax date and a price provider — and `append_decision` has none of the three, since
+  a decision's `utc_timestamp` is the decision's creation time, not the anchor date FR-37 requires.
+  So the refusal is structural and the advisory is merely *covered*, on one surface. The TUI holds
+  all three inputs at its record surfaces; wiring it there is surface work.
+  **Owning phase: the next TUI cycle.**

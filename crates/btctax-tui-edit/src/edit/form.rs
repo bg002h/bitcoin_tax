@@ -1843,12 +1843,22 @@ pub struct ClassifyRawModalState {
 }
 
 /// Parse a REQUIRED sat field: empty (len==0) → "name is required"; else parse i64.
+///
+/// FR-38: also refuses a NEGATIVE count. A satoshi quantity is a count of indivisible units and
+/// cannot be negative; before this, both classify-raw doors (here and the CLI's `--payload-json`)
+/// admitted one, and nothing in `btctax-core` refused it on a payload either. Zero stays allowed
+/// (a fee-only or dust row is not an error). The structural backstop is
+/// `btctax_core::persistence::insert`; this is the field-level message.
 fn parse_required_sat(buf: &FieldBuffer, name: &str) -> Result<Sat, String> {
     if buf.is_empty() {
         return Err(format!("{name} is required"));
     }
     let t = buf.buf.trim();
-    t.parse::<i64>().map_err(|_| format!("bad sat {t:?}"))
+    let v = t.parse::<i64>().map_err(|_| format!("bad sat {t:?}"))?;
+    if v < 0 {
+        return Err(format!("{name} must be >= 0 (got {v})"));
+    }
+    Ok(v)
 }
 
 /// Validate the classify-raw Acquire form → `EventPayload::Acquire(…)` built DIRECTLY (NOT via
@@ -1856,6 +1866,11 @@ fn parse_required_sat(buf: &FieldBuffer, name: &str) -> Result<Sat, String> {
 ///
 /// `sat`/`usd_cost` REQUIRED; `fee_usd` optional → $0; `basis_source` is the required PICK.
 /// NO acquired-at field — the effective event keeps the TARGET's timestamp (resolve.rs) [R0-I1].
+///
+/// FR-38: `usd_cost`/`fee_usd` go through the SAME `parse_nonneg_usd` the seven other money fields
+/// in this file use. They previously used a bare `Usd::from_str` — the guarded helper already sat
+/// 1,100 lines above and was simply never carried across (the B3 field-of-view shape), so a
+/// negative cost basis recorded silently from this form.
 pub fn validate_classify_raw_acquire(
     sat_buf: &FieldBuffer,
     usd_cost_buf: &FieldBuffer,
@@ -1866,13 +1881,11 @@ pub fn validate_classify_raw_acquire(
     if usd_cost_buf.is_empty() {
         return Err("usd-cost is required".to_string());
     }
-    let uc = usd_cost_buf.buf.trim();
-    let usd_cost = Usd::from_str(uc).map_err(|_| format!("bad USD {uc:?}"))?;
+    let usd_cost = parse_nonneg_usd("usd-cost", usd_cost_buf.buf.trim())?;
     let fee_usd = if fee_buf.is_empty() {
         Usd::ZERO
     } else {
-        let t = fee_buf.buf.trim();
-        Usd::from_str(t).map_err(|_| format!("bad USD {t:?}"))?
+        parse_nonneg_usd("fee", fee_buf.buf.trim())?
     };
     Ok(btctax_core::EventPayload::Acquire(
         btctax_core::event::Acquire {
@@ -1890,6 +1903,10 @@ pub fn validate_classify_raw_acquire(
 /// `sat` REQUIRED; `usd_fmv` optional: typed → `Some` + `fmv_status=ManualEntry`, empty → `None` +
 /// `fmv_status=Missing` (resolve.rs discards `usd_fmv` when `Missing`; the empty case fires a
 /// `FmvMissing` blocker surfaced by status arm 3). `kind` PICK; `business` toggle.
+///
+/// FR-38: `usd_fmv` goes through `parse_nonneg_usd`, as on every other money field in this file.
+/// An income FMV becomes the acquired lot's cost basis (`BasisSource::FmvAtIncome`), so a negative
+/// one is basis-bearing.
 pub fn validate_classify_raw_income(
     sat_buf: &FieldBuffer,
     fmv_buf: &FieldBuffer,
@@ -1900,8 +1917,7 @@ pub fn validate_classify_raw_income(
     let (usd_fmv, fmv_status) = if fmv_buf.is_empty() {
         (None, FmvStatus::Missing)
     } else {
-        let t = fmv_buf.buf.trim();
-        let v = Usd::from_str(t).map_err(|_| format!("bad USD {t:?}"))?;
+        let v = parse_nonneg_usd("usd-fmv", fmv_buf.buf.trim())?;
         (Some(v), FmvStatus::ManualEntry)
     };
     Ok(btctax_core::EventPayload::Income(
@@ -3143,6 +3159,99 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("fee") && err.contains(">= 0"), "got: {err}");
+    }
+
+    // ── FR-38 — the TUI classify-raw door ────────────────────────────────────────────────────
+    // The 2026-09-05 recon found FR-38 wider than filed: these two validators built their payload
+    // with the RAW `Usd::from_str` / `str::parse::<i64>` while the guarded `parse_nonneg_usd` sat
+    // in this same file, used by seven other call sites. That is the B3 shape — the fix already
+    // existed in the file and was never carried across — so they now call the same helper. The
+    // structural backstop is `btctax_core::persistence::insert`; this is the field-level message.
+    // Each dies under mutation (put `Usd::from_str` / bare `parse::<i64>` back).
+
+    /// FR-38 — classify-raw Acquire: `usd-cost < 0` and `fee < 0` refused at the form.
+    #[test]
+    fn fr38_classify_raw_acquire_negative_money_refused() {
+        let mut sat = FieldBuffer::new();
+        sat.set("2000000");
+        let mut neg = FieldBuffer::new();
+        neg.set("-1680");
+        let mut good = FieldBuffer::new();
+        good.set("1680");
+        let err = validate_classify_raw_acquire(
+            &sat,
+            &neg,
+            &FieldBuffer::new(),
+            BasisSource::ExchangeProvided,
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("usd-cost") && err.contains(">= 0"),
+            "got: {err}"
+        );
+        let err = validate_classify_raw_acquire(&sat, &good, &neg, BasisSource::ExchangeProvided)
+            .unwrap_err();
+        assert!(err.contains("fee") && err.contains(">= 0"), "got: {err}");
+    }
+
+    /// FR-38 — classify-raw Income: `usd-fmv < 0` refused at the form.
+    #[test]
+    fn fr38_classify_raw_income_negative_fmv_refused() {
+        let mut sat = FieldBuffer::new();
+        sat.set("100000");
+        let mut neg = FieldBuffer::new();
+        neg.set("-84");
+        let err = validate_classify_raw_income(&sat, &neg, IncomeKind::Reward, false).unwrap_err();
+        assert!(
+            err.contains("usd-fmv") && err.contains(">= 0"),
+            "got: {err}"
+        );
+    }
+
+    /// FR-38 — `sat` was unguarded on this door too (a bare `t.parse::<i64>()`), and nothing in
+    /// core refused a negative `sat` on a payload either. A satoshi count cannot be negative.
+    #[test]
+    fn fr38_classify_raw_negative_sat_refused_zero_allowed() {
+        let mut neg = FieldBuffer::new();
+        neg.set("-2000000");
+        let mut usd = FieldBuffer::new();
+        usd.set("1680");
+        let err = validate_classify_raw_acquire(
+            &neg,
+            &usd,
+            &FieldBuffer::new(),
+            BasisSource::ExchangeProvided,
+        )
+        .unwrap_err();
+        assert!(err.contains("sat") && err.contains(">= 0"), "got: {err}");
+        let err =
+            validate_classify_raw_income(&neg, &FieldBuffer::new(), IncomeKind::Reward, false)
+                .unwrap_err();
+        assert!(err.contains("sat") && err.contains(">= 0"), "got: {err}");
+    }
+
+    /// The not-over-refusing control: a $0 basis is this application's conservative default, and a
+    /// blank fee means $0 — both must still build.
+    #[test]
+    fn fr38_classify_raw_zero_money_still_builds() {
+        let mut sat = FieldBuffer::new();
+        sat.set("2000000");
+        let mut zero = FieldBuffer::new();
+        zero.set("0");
+        assert!(
+            validate_classify_raw_acquire(
+                &sat,
+                &zero,
+                &FieldBuffer::new(),
+                BasisSource::ExchangeProvided
+            )
+            .is_ok(),
+            "a $0 basis with a blank fee must still build"
+        );
+        assert!(
+            validate_classify_raw_income(&sat, &zero, IncomeKind::Reward, false).is_ok(),
+            "a $0 income FMV must still build"
+        );
     }
 
     /// I1 — set-fmv `usd-fmv < 0` refused.
