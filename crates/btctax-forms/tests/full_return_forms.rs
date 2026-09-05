@@ -278,11 +278,15 @@ fn f8960_line9b_is_blank_when_unclaimed_and_printed_when_claimed() {
         "9d is a sum with no operands: 9a and 9c are unmodelled and 9b was never allocated. A `0` \
          swears this filer worked Part II and it came to nothing (26 USC §6065)."
     );
-    // ★ Line 11 STILL PRINTS its zero, and that is filed rather than decided — **FR-39**. It is the
-    //   same `Combine` shape one line down ("Add lines 9d and 10" over two blanks), paired with 1040
-    //   line 21, which FR-1 settled explicitly. This assertion is the pin: whichever way FR-39 is
-    //   decided, it and `ALL_ZERO_1040_PAPER`'s `line21` row move together, and neither moves alone.
-    assert_eq!(tv(&pdf, L11).as_deref(), Some("0"));
+    // ★ FR-39 — RESOLVED: line 11 is BLANK on the paper too. Same `Combine` shape one line down
+    //   ("Add lines 9d and 10" over two blanks), and it moved together with 1040 line 21 as the
+    //   filing said it must. A `0` here would swear this filer worked Part II and it came to
+    //   nothing (26 USC §6065); no figure moves, because line 12 subtracts a blank as nothing.
+    assert_eq!(
+        tv(&pdf, L11).as_deref(),
+        None,
+        "11 = 9d + 10, and every operand is blank"
+    );
     assert_eq!(tv(&pdf, L12).as_deref(), Some("60000"));
     assert_eq!(tv(&pdf, L17).as_deref(), Some("2280")); // 3.8% × 60,000
 
@@ -1696,7 +1700,8 @@ fn f1040() -> Form1040Lines {
         // ★ FR-27 — line 20 is `Some`: this household HAS a Schedule 3 ($287 foreign tax credit),
         //   so "Amount from Schedule 3, line 8" names a page that is in the packet.
         line20: Some(dec!(287)),
-        line21: dec!(287),
+        // ★ FR-39 — line 20 is live, so the total is a real figure, not a blank.
+        line21: Some(dec!(287)),
         line22: dec!(25713),
         line23: dec!(1406),
         line24: dec!(27119),

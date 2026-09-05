@@ -7359,8 +7359,9 @@ mod tests {
                 // ★ FR-27 — and line 20 is BLANK for the same reason one line down: this household
                 //   files no Schedule 3 (line 31 is z and there is no credit), so "Amount from
                 //   Schedule 3, line 8" names a page the packet does not contain.
+                // ★ FR-39 — 19 and 20 are both blank, so the TOTAL is blank too.
                 line20: None,
-                line21: z,
+                line21: None,
                 line22: z,
                 line23: z,
                 line24: z,

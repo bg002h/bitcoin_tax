@@ -315,13 +315,12 @@ pub struct Form8960Lines {
     /// L11 — *"Total deductions and modifications. Add lines 9d and 10"* ⇒ `= line9d`, and PRINTED
     /// even when 9d is blank.
     ///
-    /// ★★ **That is the same question FR-12 answered one line up, and it is deliberately NOT answered
-    /// here.** Line 11 and 1040 line 21 (*"Add lines 19 and 20"*) are one shape: a `Combine` whose
-    /// operands all became blank-capable in the same sweep. FR-1 decided line 21 explicitly — *"a
-    /// blank operand contributes nothing to the sum … so L21 stays a `Usd` and stays printed"* — five
-    /// commits before this one, and an implementer does not silently reverse a reviewed decision on a
-    /// line it was not sent to fix. The pair is filed as FR-39; whatever is decided there binds both.
-    pub line11: Usd,
+    /// ★★ **FR-39 — RESOLVED (owner ruling 2026-09-05): BLANK when every operand is blank**, the
+    /// same answer FR-12 gave one line up. Line 11 and 1040 line 21 were filed as one question and
+    /// are answered together. Line 10 is unmodelled and 9d is blank-capable, so this line simply IS
+    /// 9d — never `unwrap_or(ZERO)`, which is the affirmative zero the pair existed to stop. **No
+    /// figure moves:** line 12 subtracts a blank as nothing.
+    pub line11: Option<Usd>,
     /// L12 — "Net investment income. Subtract Part II, line 11, from Part I, line 8. … **If zero or
     /// less, enter -0-**." The floor is the form's own, and it is load-bearing: the form files on
     /// MAGI (Who Must File), so a capital-loss year with MAGI over the threshold reaches line 16
@@ -393,12 +392,12 @@ pub fn form_8960_lines(
     //   unmodelled (no field exists), so the sum IS 9b — and when 9b is blank the sum has no operands
     //   and no figure. Never `unwrap_or(ZERO)`: that is the affirmative zero this line existed to stop.
     let line9d = line9b;
-    // …+ line 10 (unmodelled). Line 11 stays PRINTED — see its field doc; that half is FR-39.
-    let line11 = line9d.unwrap_or(Usd::ZERO);
+    // ★ FR-39 — "Add lines 9d and 10" with 10 unmodelled, so the sum IS 9d, blank and all.
+    let line11 = line9d;
     // ★ L12 — "Subtract Part II, line 11, from Part I, line 8. … If zero or less, enter -0-."
     //   The floor is the FORM's, transcribed. It is what keeps line 16 out of the negative
     //   region in a capital-loss year now that the form files on MAGI rather than on tax.
-    let line12 = (line8 - line11).max(Usd::ZERO);
+    let line12 = (line8 - line11.unwrap_or(Usd::ZERO)).max(Usd::ZERO);
 
     let line13 = round_dollar(agi);
     let line14 = niit_threshold(status);
@@ -776,10 +775,10 @@ mod tests {
         assert_eq!(l.line5d, dec!(20000));
         assert_eq!(l.line7, dec!(2000));
         assert_eq!(l.line8, dec!(37000));
-        // ★ FR-12 — 9d is BLANK: "Add lines 9a, 9b, and 9c" over three empty cells. Line 11 still
-        //   prints (its own doc says why that half is filed, not decided).
+        // ★ FR-12/FR-39 — 9d is BLANK ("Add lines 9a, 9b, and 9c" over three empty cells), and
+        //   since line 10 is unmodelled, line 11 is blank with it. Both halves now answered.
         assert_eq!(l.line9d, None);
-        assert_eq!(l.line11, Usd::ZERO);
+        assert_eq!(l.line11, None);
         assert_eq!(l.line12, dec!(37000));
         assert_eq!(l.line13, dec!(300000));
         assert_eq!(l.line14, dec!(200000));
@@ -918,7 +917,11 @@ mod tests {
             Some(dec!(7000)),
             "the allocation must appear on the paper — that is the whole finding"
         );
-        assert_eq!(l.line11, dec!(7000), "…and flow into total deductions");
+        assert_eq!(
+            l.line11,
+            Some(dec!(7000)),
+            "…and flow into total deductions"
+        );
         assert_eq!(
             l.line12,
             Usd::ZERO,
@@ -994,12 +997,18 @@ mod tests {
                 l.line1 + l.line2 + l.line5d + l.line7,
                 "L8 = 1+2+5d+7"
             );
+            // ★ FR-39 — line 10 is unmodelled, so L11 simply IS 9d, blank and all. Comparing the
+            //   `Option`s directly is the assertion: `unwrap_or(ZERO)` on either side would let a
+            //   fabricated zero satisfy it.
             assert_eq!(
-                l.line11,
-                l.line9d.unwrap_or(Usd::ZERO),
-                "L11 = 9d + 10 (10 blank; a blank 9d adds nothing)"
+                l.line11, l.line9d,
+                "L11 = 9d + 10 (10 unmodelled, so L11 IS 9d)"
             );
-            assert_eq!(l.line12, l.line8 - l.line11, "L12 = 8 − 11");
+            assert_eq!(
+                l.line12,
+                l.line8 - l.line11.unwrap_or(Usd::ZERO),
+                "L12 = 8 − 11 (a blank 11 subtracts as nothing)"
+            );
             assert_eq!(
                 l.line15,
                 (l.line13 - l.line14).max(Usd::ZERO),
@@ -1015,11 +1024,12 @@ mod tests {
                 round_dollar(NIIT_RATE * l.line16.max(Usd::ZERO)),
                 "L17 = 3.8% × 16"
             );
-            // ★ 9d is `Option`: a blank cell has no fraction to check, and flattening it with
-            //   `unwrap_or(ZERO)` here would quietly re-admit the FR-12 zero into the invariant.
+            // ★ 9d and 11 are `Option`: a blank cell has no fraction to check, and flattening
+            //   either with `unwrap_or(ZERO)` here would quietly re-admit the FR-12/FR-39 zero
+            //   into the invariant.
             for cell in [
-                l.line1, l.line2, l.line5a, l.line5d, l.line7, l.line8, l.line11, l.line12,
-                l.line13, l.line14, l.line15, l.line16, l.line17,
+                l.line1, l.line2, l.line5a, l.line5d, l.line7, l.line8, l.line12, l.line13,
+                l.line14, l.line15, l.line16, l.line17,
             ]
             .into_iter()
             .chain(l.line9d)

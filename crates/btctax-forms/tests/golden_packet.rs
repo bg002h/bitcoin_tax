@@ -67,7 +67,10 @@ use std::collections::{BTreeMap, BTreeSet};
 // live in the shared `tests/common/mod.rs` — ONE builder, so the P7 round-trip and the oracle-sweep
 // read-back fill the SAME households, never a drifting copy.
 mod common;
-use common::{cell_or_zero, form, full_return, on_paper_signed, packet, Blank, Sign};
+use common::{
+    cell_or_zero, combine_total_is_zero_or_blank, form, full_return, on_paper_signed, packet,
+    Blank, Sign,
+};
 
 fn usd(v: f64) -> Usd {
     Usd::try_from(v).expect("the oracles emit finite figures")
@@ -430,13 +433,16 @@ fn diff_household(h: &GoldenHousehold, wrong: &mut Vec<String>) {
     //    is read OFF THE PAPER: lines 17 and 21 must be PRESENT-and-"0" (a dropped line fails loudly) —
     //    else the formula would understate the total. ─────────────────────────────────────────────────
     let _ = cell_or_zero(&f1040, "line17", Blank::PresentZero); // Sch 2 L3 (AMT / excess APTC)
-    let _ = cell_or_zero(&f1040, "line21", Blank::PresentZero); // L19 + L20 (nonrefundable credits)
-                                                                // The L16 leg is btctax's OWN printed L16 (`l16_paper`, read off the form above) — the value btctax
-                                                                // actually summed into L24 — NOT the oracle's L16. The L16 VALUE is separately adjudicated by the
-                                                                // two-part comparison above (with its provenance/methodology class), so L24 witnesses btctax's
-                                                                // cross-foot arithmetic + the SE-L12 / 8959-L18 / NIIT legs against OTS, and stays green on the §5.1
-                                                                // pinned OTS-provenance cell (whose L16 legitimately differs from OTS's by the Tax-Table bin the L16
-                                                                // class absorbs) while still reddening on any real btctax cross-foot / Sch-2-leg / L16 bug.
+                                                                // ★ FR-39 — line 21 is a `Combine`, so it is legitimately BLANK when 19 and 20 both are.
+                                                                //   `PresentZero` REQUIRED the fabricated zero; this reads the rule instead and still fails
+                                                                //   loudly on a dropped line, on a fabricated total, and on a real credit.
+    let _ = combine_total_is_zero_or_blank(&f1040, "line21", &["line19", "line20"]);
+    // The L16 leg is btctax's OWN printed L16 (`l16_paper`, read off the form above) — the value btctax
+    // actually summed into L24 — NOT the oracle's L16. The L16 VALUE is separately adjudicated by the
+    // two-part comparison above (with its provenance/methodology class), so L24 witnesses btctax's
+    // cross-foot arithmetic + the SE-L12 / 8959-L18 / NIIT legs against OTS, and stays green on the §5.1
+    // pinned OTS-provenance cell (whose L16 legitimately differs from OTS's by the Tax-Table bin the L16
+    // class absorbs) while still reddening on any real btctax cross-foot / Sch-2-leg / L16 bug.
     check_ots(
         wrong,
         &h.name,
@@ -1600,4 +1606,71 @@ fn readback_reads_the_pdf_not_the_struct() {
         "read-back fault-injection: the on-paper L16 came off the PDF via extract_lines, so a perturbed \
          cell fails the oracle comparison — the differential does NOT silently read btctax's struct"
     );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// B1 kill — `combine_total_is_zero_or_blank` (FR-39)
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// ★ **B1 — seen-red-once.** `combine_total_is_zero_or_blank` replaced `Blank::PresentZero` on line
+/// 21, and a checker does not exist here until it has been watched going RED on the exact defects it
+/// claims to catch. The regime it replaced could only see the first of these three; the second is the
+/// FR-39 defect itself, which `PresentZero` did not merely miss but actively **required**.
+///
+/// This test is also the answer to *"which test reds if the guard is removed?"* — delete the three
+/// `expect_red` calls' subject and the two accepted cases still pass, which is why the reds are here.
+#[test]
+fn the_combine_guard_reds_on_a_dropped_line_a_fabricated_total_and_a_real_credit() {
+    use std::collections::BTreeMap;
+
+    fn cells(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect()
+    }
+    let ops = &["line19", "line20"][..];
+    let run = |c: BTreeMap<String, String>| {
+        std::panic::catch_unwind(|| combine_total_is_zero_or_blank(&c, "line21", ops))
+    };
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {})); // the three reds below are expected; keep output clean
+
+    // ── ACCEPTED (1): every operand blank ⇒ the total is blank. This is exactly what FR-39 decided,
+    //    and under the old `PresentZero` regime this case PANICKED.
+    assert_eq!(
+        run(cells(&[])).unwrap(),
+        0,
+        "all-blank ⇒ blank total is legal"
+    );
+
+    // ── ACCEPTED (2): an operand is live, so the total is a real printed zero.
+    assert_eq!(
+        run(cells(&[("line20", "0"), ("line21", "0")])).unwrap(),
+        0,
+        "a live operand with a zero total is legal"
+    );
+
+    // ── RED (1) — DROPPED LINE. An operand is present and the total vanished. This is the case
+    //    `Blank::PresentZero` existed for, and it must survive the replacement.
+    assert!(
+        run(cells(&[("line20", "0")])).is_err(),
+        "a present operand with an absent total is a DROPPED line and must panic"
+    );
+
+    // ── RED (2) — FABRICATED TOTAL. Every operand is blank, yet the total prints `0`. This is the
+    //    FR-39 defect, and it is the shipped behaviour this change removed.
+    assert!(
+        run(cells(&[("line21", "0")])).is_err(),
+        "a printed total over an all-blank operand set is FABRICATED and must panic"
+    );
+
+    // ── RED (3) — REAL CREDIT. The caller's precondition ("no credit reduced this return") is false,
+    //    so the L24 cross-foot that follows would understate the total tax.
+    assert!(
+        run(cells(&[("line20", "287"), ("line21", "287")])).is_err(),
+        "a non-zero total breaks the no-credit precondition and must panic"
+    );
+
+    std::panic::set_hook(prev);
 }

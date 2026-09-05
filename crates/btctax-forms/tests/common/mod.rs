@@ -243,6 +243,53 @@ pub enum Blank {
     AbsentIsZero,
 }
 
+/// A `Combine` TOTAL read under the census's own transcribed rule — *"blank iff every operand is
+/// blank"* (**FR-39**). Returns 0 in every accepted case: callers use it as a PRECONDITION ("no
+/// credit reduced this return"), never as a value.
+///
+/// It PANICS on each of the three ways the rule can break, and is strictly stronger than the
+/// [`Blank::PresentZero`] it replaced — that regime could only see the first:
+///
+/// * total ABSENT while an operand is PRESENT — a **dropped line**, and the formula that follows
+///   would understate;
+/// * total PRESENT while every operand is ABSENT — a **fabricated zero**, the defect FR-39 was
+///   filed against, which `PresentZero` actively required;
+/// * total present and NON-ZERO — a real credit, which breaks the caller's precondition outright.
+pub fn combine_total_is_zero_or_blank(
+    cells: &BTreeMap<String, String>,
+    total: &str,
+    operands: &[&str],
+) -> i64 {
+    let live: Vec<&str> = operands
+        .iter()
+        .copied()
+        .filter(|k| cells.contains_key(*k))
+        .collect();
+    match cells.get(total) {
+        None => {
+            assert!(
+                live.is_empty(),
+                "combine_total_is_zero_or_blank: {total:?} is ABSENT but its operands {live:?} are \
+                 present — a Combine is blank only when EVERY operand is blank, so this is a \
+                 dropped line, not a blank one"
+            );
+            0
+        }
+        Some(raw) => {
+            assert!(
+                !live.is_empty(),
+                "combine_total_is_zero_or_blank: {total:?} is PRESENT as {raw:?} while every \
+                 operand {operands:?} is blank — that is a fabricated total (FR-39)"
+            );
+            assert_eq!(
+                raw, "0",
+                "combine_total_is_zero_or_blank: {total:?} must be \"0\" for this precondition"
+            );
+            0
+        }
+    }
+}
+
 /// Read a cell that is expected to be blank/zero, under an explicit `Blank` regime.
 pub fn cell_or_zero(cells: &BTreeMap<String, String>, key: &str, regime: Blank) -> i64 {
     match regime {

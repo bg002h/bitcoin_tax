@@ -175,7 +175,7 @@ pub fn fill_form_1040_full_with_map(
         // 20 — "Amount from Schedule 3, line 8", `None` when no Schedule 3 was filed. Core decides
         //      (FR-27); this crate transcribes the `Option` it is handed and reasons about nothing.
         (need(&map.line20, "line20", y)?, lines.line20),
-        (need(&map.line21, "line21", y)?, Some(lines.line21)),
+        (need(&map.line21, "line21", y)?, lines.line21),
         (need(&map.line22, "line22", y)?, Some(lines.line22)),
         (need(&map.line23, "line23", y)?, Some(lines.line23)),
         (need(&map.line24, "line24", y)?, Some(lines.line24)),

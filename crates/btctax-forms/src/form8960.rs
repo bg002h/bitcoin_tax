@@ -56,11 +56,11 @@ pub fn fill_form_8960_with_map(
         // 9d — "Add lines 9a, 9b, and 9c" over three cells that are all blank when the filer
         // allocated nothing. Core decides (FR-12); this crate transcribes the `Option` it is handed.
         (lines.line9d, F8960_COL_AMOUNT),
-        (Some(lines.line11), F8960_COL_AMOUNT), // 11 total deductions/modifications
+        (lines.line11, F8960_COL_AMOUNT), // 11 total deductions/modifications (FR-39: blank-capable)
         (Some(lines.line12), F8960_COL_AMOUNT), // 12 net investment income
-        (Some(lines.line13), F8960_COL_MID),    // 13 MAGI
-        (Some(lines.line14), F8960_COL_MID),    // 14 threshold
-        (Some(lines.line15), F8960_COL_MID),    // 15 13 - 14, floored
+        (Some(lines.line13), F8960_COL_MID), // 13 MAGI
+        (Some(lines.line14), F8960_COL_MID), // 14 threshold
+        (Some(lines.line15), F8960_COL_MID), // 15 13 - 14, floored
         (Some(lines.line16), F8960_COL_AMOUNT), // 16 smaller of 12 or 15
         (Some(lines.line17), F8960_COL_AMOUNT), // 17 3.8% x 16 -> Schedule 2 line 12
     ];

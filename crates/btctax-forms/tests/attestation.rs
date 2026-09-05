@@ -462,12 +462,13 @@ fn the_same_gift_on_an_itemizing_return_refuses_until_the_acknowledgment_is_answ
 /// FR-27). Because `spurious`/`vanished` above make this table an EQUALITY, a row here is what would
 /// make a printed zero mandatory; the row is the bug, not the omission.
 ///
-/// ★ **Line 21 IS still in the table**, and that is a decision rather than an oversight. *"Add lines
-/// 19 and 20"* now has two blank operands on this return, which under the census's own `Combine` rule
-/// (*"blank iff every operand is blank"*) argues it should go blank too — as should Form 8960 line
-/// 11, the identical shape. FR-1 decided line 21 explicitly in `5094bfc5`, before line 20 could be
-/// pair is filed as **FR-39** rather than reversed in passing. When it is decided, this row and the
-/// 8960 one move together or not at all.
+/// ★★ **LINE 21 IS ABSENT TOO, as of FR-39 (owner ruling 2026-09-05)** — and its `!contains_key`
+/// assertion sits with the other two at the foot of the test. *"Add lines 19 and 20"* has two blank
+/// operands on this return, and the census's own `Combine` rule is *"blank iff every operand is
+/// blank"*, so the row this table used to carry was the code contradicting the rule. FR-1's decision
+/// in `5094bfc5` was sound while line 20 was unconditionally present — it stopped being complete
+/// when FR-27 made line 20 blank-capable, not wrong. Form 8960 line 11 is the identical shape and
+/// moved in the same commit, as this comment always said it must.
 const ALL_ZERO_1040_PAPER: &[(&str, &str)] = &[
     ("line1a", "0"),     // "Total amount from Form(s) W-2, box 1" — no W-2
     ("line1z", "0"),     // "Add lines 1a through 1h"
@@ -487,7 +488,6 @@ const ALL_ZERO_1040_PAPER: &[(&str, &str)] = &[
     ("line16", "0"),     // tax
     ("line17", "0"),     // Schedule 2 line 3
     ("line18", "0"),     // add 16 and 17
-    ("line21", "0"),     // add 19 and 20 — both operands blank; see FR-39 in the doc above
     ("line22", "0"),     // subtract 21 from 18
     ("line23", "0"),     // Schedule 2 line 21
     ("line24", "0"),     // TOTAL TAX
@@ -621,6 +621,21 @@ fn the_all_zero_return_files_one_form_whose_every_money_line_is_zero_or_blank() 
         "1040 line 20 must be BLANK, not zero. It reads \"Amount from Schedule 3, line 8\" and this \
          packet contains no Schedule 3; a `0` is a figure sworn to have been read off a page that \
          does not exist. Paper: {got:?}"
+    );
+
+    // ★★★ FR-39 — AND SO IS LINE 21, because it is the SUM of the two blanks above.
+    //
+    // "Add lines 19 and 20" is a `Combine`, whose transcribed rule in this repo's own census is
+    // "blank iff every operand is blank" — and on this return both operands are blank, for the two
+    // distinct reasons argued above. The owner put it plainly: the sum of two lines that each do not
+    // require an answer does not require an answer either. No figure moves, because line 22
+    // subtracts a blank as nothing; what changes is only that the paper stops swearing to a total
+    // the filer never worked.
+    assert!(
+        !got.contains_key("line21"),
+        "1040 line 21 must be BLANK, not zero. It is \"Add lines 19 and 20\" and BOTH operands are \
+         blank on this return; a `0` swears to a total computed from two figures that were never \
+         established. Paper: {got:?}"
     );
 }
 

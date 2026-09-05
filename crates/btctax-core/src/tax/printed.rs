@@ -576,14 +576,16 @@ pub struct Form1040Lines {
     /// blank means in an addition on this form — so L21 stays a `Usd` and stays printed: line 22
     /// subtracts it unconditionally (*"Subtract line 21 from line 18. If zero or less, enter -0-"*).
     ///
-    /// ★★ **FR-27 made BOTH operands blank-capable, which reopens that decision — and does not settle
-    /// it here.** FR-1 wrote the rule above when line 20 was unconditionally present, so line 21
-    /// always had one live operand; it no longer always does. Under the census's own `Combine` rule
-    /// (*"blank iff every operand is blank"*) this line and Form 8960's line 11 should both go blank
-    /// in that case. They are one question, line 21 was decided explicitly in `5094bfc5` (FR-1), and an
-    /// implementer sent to fix line 20 does not silently reverse a reviewed decision on line 21.
-    /// Filed as **FR-39**; whatever is decided there binds this line and 8960 line 11 together.
-    pub line21: Usd,
+    /// ★★ **FR-39 — RESOLVED (owner ruling 2026-09-05): this line goes BLANK when both operands are
+    /// blank.** The owner's words were *"the sum of two lines that each don't require an answer
+    /// probably also does not require an answer, so why are we asking the question?"* — which is the
+    /// census's own `Combine` rule (*"blank iff every operand is blank"*) restated, and this line was
+    /// code contradicting it. FR-1's reasoning in `5094bfc5` was sound when line 20 was
+    /// unconditionally present and line 21 therefore always had one live operand; FR-27 removed that,
+    /// making it incomplete rather than wrong. **No figure moves:** line 22 subtracts a blank as
+    /// nothing, exactly as FR-1 said. Form 8960 line 11 is the same shape and moved in the same
+    /// commit — the two were filed as one question and are answered as one.
+    pub line21: Option<Usd>,
     /// L22 — printed 18 − printed 21, floored at 0.
     pub line22: Usd,
     /// L23 — **Schedule 2's printed line 21** (other taxes).
@@ -801,8 +803,16 @@ pub fn form_1040_lines(
     // "Add lines 19 and 20" — a blank operand adds nothing. The sum still prints (line 22 subtracts it
     // unconditionally), so a blank line 19 or 20 moves no figure on the return; it removes an
     // assertion. ★ Both operands are now blank-capable — see `Form1040Lines::line21` and FR-39.
-    let line21 = line19.unwrap_or(Usd::ZERO) + line20.unwrap_or(Usd::ZERO);
-    let line22 = (line18 - line21).max(Usd::ZERO);
+    // ★ FR-39 — "Add lines 19 and 20" over two blank-capable cells. `Combine` is blank iff EVERY
+    //   operand is blank; with either one live the sum is a real figure and a blank operand adds
+    //   nothing (FR-1's rule, kept). Never `unwrap_or(ZERO)` on the RESULT — that is the fabricated
+    //   zero this line existed to stop.
+    let line21 = match (line19, line20) {
+        (None, None) => None,
+        _ => Some(line19.unwrap_or(Usd::ZERO) + line20.unwrap_or(Usd::ZERO)),
+    };
+    // L22 subtracts a blank as nothing — so NO figure moves when 21 goes blank.
+    let line22 = (line18 - line21.unwrap_or(Usd::ZERO)).max(Usd::ZERO);
     let line23 = sch_2.map_or(Usd::ZERO, |s| s.line21);
     let line24 = line22 + line23; // ★ TOTAL TAX, from the PRINTED lines
 
@@ -3029,17 +3039,20 @@ mod tests {
             "TI = 11 − 14, floored"
         );
         assert_eq!(l.line18, l.line16 + l.line17, "L18 = 16 + 17");
-        // "Add lines 19 and 20" — a BLANK operand adds nothing, which is what a blank means in an
-        // addition on this form (FR-1, FR-27). The sum itself is never blank: line 22 subtracts it.
+        // "Add lines 19 and 20" — a BLANK operand adds nothing (FR-1, FR-27), and when BOTH are
+        // blank the sum itself is blank (FR-39: `Combine` is blank iff every operand is blank).
         assert_eq!(
             l.line21,
-            l.line19.unwrap_or(Usd::ZERO) + l.line20.unwrap_or(Usd::ZERO),
-            "L21 = 19 + 20"
+            match (l.line19, l.line20) {
+                (None, None) => None,
+                _ => Some(l.line19.unwrap_or(Usd::ZERO) + l.line20.unwrap_or(Usd::ZERO)),
+            },
+            "L21 = 19 + 20, blank iff both blank"
         );
         assert_eq!(
             l.line22,
-            (l.line18 - l.line21).max(Usd::ZERO),
-            "L22 = 18 − 21, floored"
+            (l.line18 - l.line21.unwrap_or(Usd::ZERO)).max(Usd::ZERO),
+            "L22 = 18 − 21, floored (a blank 21 subtracts as nothing)"
         );
         assert_eq!(l.line24, l.line22 + l.line23, "TOTAL TAX = 22 + 23");
         assert_eq!(
@@ -3072,8 +3085,8 @@ mod tests {
 
         for cell in [
             l.line1z, l.line2b, l.line3a, l.line3b, l.line7, l.line8, l.line9, l.line10, l.line11,
-            l.line12, l.line13, l.line14, l.line15, l.line16, l.line18, l.line21, l.line22,
-            l.line24, l.line25a, l.line25b, l.line25c, l.line25d, l.line26, l.line33,
+            l.line12, l.line13, l.line14, l.line15, l.line16, l.line18, l.line22, l.line24,
+            l.line25a, l.line25b, l.line25c, l.line25d, l.line26, l.line33,
         ] {
             assert_eq!(
                 cell.fract(),

@@ -1985,7 +1985,7 @@ fn zero_form8960lines() -> crate::tax::other_taxes::Form8960Lines {
         line8: Usd::ZERO,
         line9b: None,
         line9d: None,
-        line11: Usd::ZERO,
+        line11: None, // FR-39 — every operand blank in this fixture, so the total is blank
         line12: Usd::ZERO,
         line13: Usd::ZERO,
         line14: Usd::ZERO,
@@ -2527,7 +2527,7 @@ fn zero_form1040lines() -> crate::tax::printed::Form1040Lines {
         line18: Usd::ZERO,
         line19: None,
         line20: None,
-        line21: Usd::ZERO,
+        line21: None, // FR-39 — 19 and 20 are both blank here, so the total is blank
         line22: Usd::ZERO,
         line23: Usd::ZERO,
         line24: Usd::ZERO,
