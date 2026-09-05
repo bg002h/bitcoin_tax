@@ -42,7 +42,7 @@ line8  = "topmostSubform[0].Page1[0].f1_15[0]"   # "Total investment income. Com
 #   local income tax their Schedule A actually deducted, bounded by §164(b)(6)). BLANK when they
 #   claimed none: the emitter uses `push_money_opt`, so an unclaimed line writes nothing at all.
 line9b = "topmostSubform[0].Page1[0].f1_17[0]"   # "State, local, and foreign income tax (see instructions)"
-line9d = "topmostSubform[0].Page1[0].f1_19[0]"   # "Add lines 9a, 9b, and 9c"
+line9d = "topmostSubform[0].Page1[0].f1_19[0]"   # "Add lines 9a, 9b, and 9c"; BLANK when all three are (FR-12)
 line11 = "topmostSubform[0].Page1[0].f1_21[0]"   # "Total deductions and modifications. Add lines 9d and 10"
 
 # ── Part III — Tax Computation (INDIVIDUALS; the estates/trusts branch stays blank) ─────────────

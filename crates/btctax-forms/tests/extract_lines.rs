@@ -189,7 +189,9 @@ fn f1040() -> Form1040Lines {
         // ★ FR-1 — line 19 BLANK: this household's §24 credit was never figured, and "Add lines 19
         //   and 20" then carries line 20 alone, which is what line 21 already said.
         line19: None,
-        line20: dec!(287),
+        // ★ FR-27 — line 20 is `Some`: this household HAS a Schedule 3 ($287 foreign tax credit),
+        //   so "Amount from Schedule 3, line 8" names a page that is in the packet.
+        line20: Some(dec!(287)),
         line21: dec!(287),
         line22: dec!(25713),
         line23: dec!(1406),

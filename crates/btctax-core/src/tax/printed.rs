@@ -550,11 +550,39 @@ pub struct Form1040Lines {
     /// filer's cell to fill. It shipped as a hardcoded `Usd::ZERO`, which swore the second case was
     /// the first on every family's return and overstated their tax by up to $2,000 a child.
     pub line19: Option<Usd>,
-    /// L20 — **Schedule 3's printed line 8** (nonrefundable credits: the FTC).
-    pub line20: Usd,
-    /// L21 — *"Add lines 19 and 20."* A blank line 19 contributes nothing to the sum, which is what a
+    /// L20 — *"Amount from Schedule 3, line 8"* — **Schedule 3's printed line 8** (nonrefundable
+    /// credits: the FTC), or **BLANK when no Schedule 3 was filed** (FR-27).
+    ///
+    /// ★★★ **`Option` because an amount from a form that does not exist is not zero — it is
+    /// nothing.** Like line 19 beside it, this line carries no *"enter -0-"* clause of its own; it is
+    /// a `Production::Carry`, *"blank when the source line is blank"*. It shipped as
+    /// `sch_3.map_or(Usd::ZERO, |s| s.line8)`, which put a figure on the paper sworn (26 USC §6065)
+    /// to have been read off a page the packet does not contain.
+    ///
+    /// ★★ **And btctax can never prove the absence.** Schedule 3 line 8 is *"Add lines 1 through 4,
+    /// 5a, 5b, and 7"* and v1 models exactly one of those operands — line 1, the foreign tax credit.
+    /// Dependent-care, education, saver's, both residential-energy credits and every §6a–6z other
+    /// credit are §3.4 conservative omissions, which is why
+    /// [`crate::tax::advisories::Advisory::OtherCreditsOmitted`] fires UNCONDITIONALLY: v1 captures no
+    /// input that could establish eligibility, so it knows only that it did not try. "The filer has
+    /// no nonrefundable credits" and "btctax does not model this filer's credit" are the same blank
+    /// page, and only the type can hold them apart.
+    ///
+    /// ★ `Some` is a real branch, not a formality: a filer who paid with a Form 4868 extension files
+    /// Schedule 3 for Part II alone. The schedule then exists, its line 8 prints `0`, and this is a
+    /// true carry of a figure a reader can check against the attached page.
+    pub line20: Option<Usd>,
+    /// L21 — *"Add lines 19 and 20."* A blank operand contributes nothing to the sum, which is what a
     /// blank means in an addition on this form — so L21 stays a `Usd` and stays printed: line 22
     /// subtracts it unconditionally (*"Subtract line 21 from line 18. If zero or less, enter -0-"*).
+    ///
+    /// ★★ **FR-27 made BOTH operands blank-capable, which reopens that decision — and does not settle
+    /// it here.** FR-1 wrote the rule above when line 20 was unconditionally present, so line 21
+    /// always had one live operand; it no longer always does. Under the census's own `Combine` rule
+    /// (*"blank iff every operand is blank"*) this line and Form 8960's line 11 should both go blank
+    /// in that case. They are one question, line 21 was decided explicitly in `5094bfc5` (FR-1), and an
+    /// implementer sent to fix line 20 does not silently reverse a reviewed decision on line 21.
+    /// Filed as **FR-39**; whatever is decided there binds this line and 8960 line 11 together.
     pub line21: Usd,
     /// L22 — printed 18 − printed 21, floored at 0.
     pub line22: Usd,
@@ -765,10 +793,15 @@ pub fn form_1040_lines(
     //     re-derived: this function holds no `ReturnInputs`, and a §24(b) predicate written a second
     //     time in the printed lane (or, worse, in the emitter) is the emitter deciding for the filer.
     let line19 = ar.printed_inputs.ctc_odc_line19;
-    let line20 = sch_3.map_or(Usd::ZERO, |s| s.line8);
+    // ★★★ FR-27 — "Amount from Schedule 3, line 8". With no Schedule 3 in the packet there is no line
+    //     8 to name, and `map_or(Usd::ZERO, …)` swore to an amount read off a page that does not
+    //     exist. The absence is UNPROVEN, never established: six of Schedule 3 line 8's seven
+    //     operands are credits v1 does not model (hence the unconditional `OtherCreditsOmitted`).
+    let line20 = sch_3.map(|s| s.line8);
     // "Add lines 19 and 20" — a blank operand adds nothing. The sum still prints (line 22 subtracts it
-    // unconditionally), so a blank line 19 moves no figure on the return; it removes an assertion.
-    let line21 = line19.unwrap_or(Usd::ZERO) + line20;
+    // unconditionally), so a blank line 19 or 20 moves no figure on the return; it removes an
+    // assertion. ★ Both operands are now blank-capable — see `Form1040Lines::line21` and FR-39.
+    let line21 = line19.unwrap_or(Usd::ZERO) + line20.unwrap_or(Usd::ZERO);
     let line22 = (line18 - line21).max(Usd::ZERO);
     let line23 = sch_2.map_or(Usd::ZERO, |s| s.line21);
     let line24 = line22 + line23; // ★ TOTAL TAX, from the PRINTED lines
@@ -2994,11 +3027,11 @@ mod tests {
             "TI = 11 − 14, floored"
         );
         assert_eq!(l.line18, l.line16 + l.line17, "L18 = 16 + 17");
-        // "Add lines 19 and 20" — a BLANK line 19 adds nothing, which is what a blank means in an
-        // addition on this form (FR-1). The sum itself is never blank: line 22 subtracts it.
+        // "Add lines 19 and 20" — a BLANK operand adds nothing, which is what a blank means in an
+        // addition on this form (FR-1, FR-27). The sum itself is never blank: line 22 subtracts it.
         assert_eq!(
             l.line21,
-            l.line19.unwrap_or(Usd::ZERO) + l.line20,
+            l.line19.unwrap_or(Usd::ZERO) + l.line20.unwrap_or(Usd::ZERO),
             "L21 = 19 + 20"
         );
         assert_eq!(
@@ -3025,8 +3058,9 @@ mod tests {
             "cannot both owe and be refunded"
         );
 
-        // Schedule 3's printed L8/L15 land on 1040 L20/L31.
-        assert_eq!(l.line20, s3.line8);
+        // Schedule 3's printed L8/L15 land on 1040 L20/L31. ★ FR-27 — this fixture FILES a Schedule
+        // 3 ($287.40 of foreign tax credit), so line 20 is `Some`: the carry has a source page.
+        assert_eq!(l.line20, Some(s3.line8));
         assert_eq!(l.line31, s3.line15);
         // ★★★ FR-1 — L19 is BLANK on this fixture, and blank is a different cell from zero. This
         //     household has no dependents, so Schedule 8812 line 12 is not provably "No"; btctax

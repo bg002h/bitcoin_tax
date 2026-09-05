@@ -5366,9 +5366,25 @@ reviews ran on the branch; two are persisted verbatim in `reviews/filing-readine
   `None` (2 red), emitter writing the blank as a zero (3 red). `LIMITATIONS.md`'s CTC row, the
   advisory text and the examples golden were corrected in the same pass.
 
-- **FR-12 — Form 8960 line 9d still prints `0` when 9b is blank.** Same class as the defect P8 fixed
-  one line up (an affirmative zero on a derived total nobody testified to). Out of scope for a
-  one-item phase; the map's committed rationale is untouched.
+- **FR-12 — ✅ CLOSED (built 2026-09-05, `fix/fr12-fr27-fabricated-zeros`, with FR-27 as one
+  answered-ness sweep). Form 8960 line 9d no longer prints `0` over three blank operands.**
+  `Form8960Lines::line9d` is `Option<Usd>` and is simply `= line9b`: *"Add lines 9a, 9b, and 9c"*
+  carries no *"-0-"* clause (Part II has none anywhere — the first on the form is line 12's), 9a and
+  9c are unmodelled and have no field in the struct at all, and 9b is blank whenever the filer
+  allocated nothing. The census already said so — `Production::Combine` is defined as *"blank iff
+  every operand is blank"* — so this was **code contradicting its own census entry**, which records
+  production and never checks a value.
+  ★ The emitter change is `(lines.line9d, F8960_COL_AMOUNT)`: `btctax-forms` transcribes the `Option`
+  and reasons about nothing. The mirror defect is rejected too — with 9b allocated, 9d prints.
+  ★★ **Two assertions ENCODED the defect** and are the interesting part of the diff:
+  `return_1040.rs::an_unanswered_line9b_neither_refuses_nor_prints_a_zero` asserted
+  `f8960.line9d == Usd::ZERO`, and `full_return_forms.rs` asserted the cell reads `Some("0")` off the
+  serialized PDF. Both read like checks on the line and were holding the fabricated zero in place.
+  Mutation-verified three ways (shipped hardcode ⇒ 4 red; unconditional blank ⇒ 5 red; emitter
+  flattening the blank ⇒ 2 red), and **none of the three reds FR-27's KAT** — the two guarantees are
+  held separately. The map comment was corrected; its committed *rationale* — *"the derived totals
+  are still printed … a reader re-adding the column must find them"* — is the sentence this item was
+  filed against and is now struck for 9d.
 
 - **FR-13 — Form 8960 line 9a is NEWLY derivable.** i8960 line 9a is *"interest expense … deducted
   on Schedule A (Form 1040), line 9"*, and P7 landed Schedule A line 9 in this branch. A separate
@@ -5668,23 +5684,54 @@ become furniture — which is precisely what the tickle existed to prevent.
   **If you come here to relieve the fresh-clone pain: build the fetcher, do not narrow the guard.**
   **Owning phase: next harness change.**
 
-- **FR-27 — 1040 line 20 swears `0` about a Schedule 3 that was never filed.** Same class as FR-1,
-  found by the FR-1 agent while it was in the neighbourhood and deliberately NOT fixed there (scope).
-  `crates/btctax-core/src/tax/printed.rs:768` — `let line20 = sch_3.map_or(Usd::ZERO, |s| s.line8);`
-  with `pub line20: Usd` at `:554`. The form's own words for that line
-  (`design/forms/extract/f1040--2025.txt:112`) are **"Amount from Schedule 3, line 8"**. When no
-  Schedule 3 exists, there is no Schedule 3 line 8, and printing `0` asserts a figure from a form
-  that was never filed — testimony about a document that does not exist.
-  ★ **Direction is the SAFE one**, which is why this is not urgent: line 20 carries *nonrefundable
-  credits*, so a fabricated `0` can only forgo a credit and OVERSTATE tax. It is an answered-ness
-  defect, not a funds-safety one.
-  ★★ But note the honest difficulty, which is why it is filed rather than fixed by reflex: a `0`
-  here is *arithmetically* right whenever the filer genuinely has no Schedule 3 items. The question
-  is whether btctax omitted Schedule 3 because the FILER has none (correct `0`) or because btctax
-  **does not model** the item (fabricated `0`) — and those are indistinguishable on the printed
-  page. The fix is the FR-1 shape: `Option<Usd>` carried on `PrintedInputs`, with the decision made
-  in core where the modelling gap is knowable. Do NOT let the emitter decide.
-  **Owning phase: with FR-12, as one answered-ness sweep.**
+- **FR-27 — ✅ CLOSED (built 2026-09-05, `fix/fr12-fr27-fabricated-zeros`, with FR-12 as one
+  answered-ness sweep). 1040 line 20 no longer swears `0` about a Schedule 3 that was never filed.**
+  `Form1040Lines::line20` is `Option<Usd>` and the site is `sch_3.map(|s| s.line8)`. Line 20 is
+  *"Amount from Schedule 3, line 8"* — a `Production::Carry`, *"blank when the source line is
+  blank"*, with no *"-0-"* clause of its own — and with no Schedule 3 in the packet there is no line
+  8 to name.
+  ★ **The honest difficulty the entry named is answered, not dodged.** btctax can never PROVE the
+  absence: Schedule 3 line 8 is *"Add lines 1 through 4, 5a, 5b, and 7"* and v1 models exactly ONE
+  of those operands (line 1, the foreign tax credit). Dependent-care, education, saver's, both
+  residential-energy credits and every §6a–6z other credit are §3.4 conservative omissions — which
+  is precisely why `OtherCreditsOmitted` fires UNCONDITIONALLY (*"v1 captures no input that could
+  establish eligibility, so it cannot know whether this filer qualifies, only that it did not try"*).
+  So the predicate is *"was a Schedule 3 actually filed?"*, decided in `printed.rs`; the emitter
+  transcribes the `Option` and holds no credit reasoning.
+  ★★ **`Some` is a real branch, which is what makes the unconditional blank fail.** A filer who paid
+  with a Form 4868 extension files Schedule 3 for Part II alone; the schedule then exists, its line 8
+  prints `0`, and line 20 is a true carry. The KAT reads BOTH forms and asserts line 20 against the
+  Schedule 3 line-8 cell, so the two cannot drift. Mutation-verified three ways (shipped hardcode ⇒
+  3 red; unconditional blank ⇒ 3 red; emitter flattening the blank ⇒ 2 red), and **none of the three
+  reds FR-12's KAT**.
+  ★ `ALL_ZERO_1040_PAPER`'s `("line20", "0")` row was the bug, not the omission — that table is an
+  EQUALITY, so a row in it is what made the printed zero mandatory. Removed, and replaced by an
+  explicit `!contains_key("line20")` carrying the reason, exactly as FR-1 did for line 19.
+  ★ `Advisory::OtherCreditsOmitted` said *"Schedule 3 Part I is $0 apart from the foreign tax
+  credit"* — a live falsehood once no Schedule 3 is filed. Now *"the foreign tax credit is the only
+  nonrefundable credit that ever reaches Schedule 3 Part I."* `docs/examples/examples.md` regenerated;
+  the diff was inspected before installing (the "a golden cannot validate its own regeneration" trap)
+  and is exactly those three lines of that one paragraph, twice, and nothing else.
+
+- **FR-39 — the two `Combine` TOTALS one line below FR-12 and FR-27 now have all-blank operands.**
+  Filed by the FR-12/FR-27 sweep rather than decided by it. **1040 line 21** is *"Add lines 19 and
+  20"* and **Form 8960 line 11** is *"Total deductions and modifications. Add lines 9d and 10"*.
+  Both are `Production::Combine`, whose transcribed rule in this repo's own census is *"blank iff
+  every operand is blank"* — and after this sweep both can reach exactly that state: line 21 with a
+  blank 19 (FR-1) and a blank 20 (FR-27), line 11 with a blank 9d (FR-12) and an unmodelled 10. They
+  print `0` anyway, so the emitted paper now shows a figure on a total whose every operand is empty.
+  ★ **Why it was not folded into the sweep.** FR-1 decided line 21 EXPLICITLY, in `5094bfc5` —
+  *"a blank operand contributes nothing to the sum … so L21 stays a `Usd` and stays printed: line 22
+  subtracts it unconditionally"* — and that reasoning was sound when line 20 was unconditionally
+  present. It is now incomplete rather than wrong, and an implementer sent to fix line 20 does not
+  silently reverse a reviewed decision on line 21. The two lines are one shape and must move together
+  or not at all.
+  ★ Direction: same as its parents — a `0` on a credit/deduction total can only forgo and OVERSTATE
+  tax; no figure moves either way, since lines 22 and 12 subtract a blank as nothing. Both cells are
+  currently PINNED as `0` by tests (`ALL_ZERO_1040_PAPER`'s `line21` row and `full_return_forms.rs`'s
+  `assert_eq!(tv(&pdf, L11), Some("0"))`), each carrying a comment pointing here, so whichever way it
+  is decided the change is one grep.
+  **Owning phase: an owner ruling, then the next answered-ness lane.**
 
 ### From the 2026-09-04 label-reader column fix (`fix/label-reader-drops-1a`)
 
@@ -5882,4 +5929,7 @@ self-transfer policy was audited for CONFORMANCE, not relitigated.
   ★★ The right fix is probably not another call site but moving validation to where the value is
   *parsed* rather than where the flag is read, so a new entry point cannot skip it by construction —
   the same reasoning that made FR-37 one predicate with six references instead of six copies.
-  **Owning phase: with the FR-12/FR-27 answered-ness sweep.**
+  **Owning phase: with the FR-12/FR-27 answered-ness sweep.** ★ **Correction (2026-09-05):** that
+  sweep ran and did NOT take this item — FR-38 was under separate recon and the sweep's brief scoped
+  it out explicitly. It is therefore **unowned and overdue**, not deferred; re-schedule it rather
+  than letting it inherit a phase that has already closed.
