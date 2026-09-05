@@ -4,12 +4,70 @@ _Last updated: **2026-09-04**. Written at a deliberate pause; safe to exit. **Re
 
 ---
 
-# ★★★ RESUME POINT — `chore/archive-reconciliation` is GREEN and awaiting the owner's merge call.
+# ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
-★ **In flight:** the archive reconciliation branch. It resolved the duplicate residue (7 → 0),
-retired the dated archive tickle with its subject, and closed a whole-branch B3 review. `main` is
-still `945d1ac2` and still RED on CI — the tickle's last firing — until this merges. Nothing is
-tagged or published; the crates.io token from v0.17.0 is still unrevoked.
+## ① READ THIS FIRST — the goal changed scope
+
+The owner's goal is **filing a COMPLETE US federal return**, not the bitcoin slice. A four-agent
+recon on 2026-09-04 established what actually blocks that, and it is not what the day was spent on:
+
+- **TY2025 — the year being filed NOW — has no full-return path.** 17 bundled AcroForm templates for
+  TY2024, **5** for TY2025, 0 for TY2026. `full_return_for(2025)` is a deliberate, tested `None`
+  whose unblock condition is written down: **Schedule 1-A complete, all six parts**.
+- **E-file is closed to this product as built.** MeF is gated to Authorized e-file Providers;
+  Direct File shut for FS2026; Free File Fillable Forms is manual entry. **Paper is the channel** —
+  so prior-year AGI and Self-Select PIN are correctly N/A, not gaps.
+- **Year-porting is cheap for 8 of 12 remaining forms and NOT for Schedule A / Form 6251**, both
+  restructured by Pub. L. 119-21. Form 8275's TY2025 edition is byte-identical to TY2024.
+- Recon reports: `design/agent-reports/2026-09-04-recon-*.md`, `design/ty2025/recon-year-port-delta.md`.
+- Memory: `ty2025-is-the-blocker.md`.
+
+## ② DONE THIS SESSION
+
+- **`main` = `2b34c13c`, pushed, CI-green-by-construction.** `chore/archive-reconciliation` merged
+  `--no-ff` at `13be9a79` (tree byte-identical to branch tip). Five review rounds; the branch caught
+  a REAL REGRESSION I introduced (pin 7→0 disarmed the only tripwire on a manifest wipe) and two
+  false-PASS instruments. `regen` now refuses to shrink the manifest; mutation-verified × 6.
+- **An UNDERSTATEMENT path fixed** (`feat/schedule-1a-ty2025`): the scope attestation never named
+  pension / IRA / Social Security while btctax models no 1040 line 4a–6b at all. Now names the FORM
+  NUMBERS; five terms pinned by test; mutation-verified.
+
+## ③ IN FLIGHT — branch `feat/schedule-1a-ty2025`
+
+Seven agents + one workflow, all dispatched 2026-09-04. **Each persists its own report; recover from
+the file, never from a transcript.**
+
+| what | lands at |
+|---|---|
+| review of the Schedule 1-A plan's **r4 fold** (gates T2) | `design/ty2025/reviews/PLAN_schedule_1a-r4fold-review.md` |
+| **long-range plan** to a filed return | `design/LONG_RANGE_PLAN_filing.md` |
+| **SPEC Schedule A TY2025** (restructured) | `design/ty2025/SPEC_schedule_a_ty2025.md` |
+| **SPEC Form 6251 TY2025** (restructured) | `design/ty2025/SPEC_form6251_ty2025.md` |
+| **SPEC retirement income 4a–6b** ✅ landed | `design/ty2025/SPEC_retirement_income.md` |
+| **FR-1 build** (CTC line 19 → `Option<Usd>`) | worktree, branch `fix/fr1-ctc-line19` |
+| **label-reader fix** (drops Form 6251 line 1a) | worktree, branch `fix/label-reader-drops-1a` |
+| **understatement audit** (workflow, 6 lenses + adversarial verify) | `design/agent-reports/2026-09-04-understatement-audit.md` |
+
+★★ **T2 of Schedule 1-A is GATED on two things**: the r4-fold review clearing, and the label reader
+being trustworthy — its KAT is specified to be DRIVEN BY that reader, and the reader currently drops
+a line while reporting "0 without a box".
+
+## ④ NEXT ACTIONS, in order
+
+1. Fold each report as it lands: verify claims independently, persist verbatim in its own commit,
+   fold in a second, gate output in the message.
+2. Merge the two worktree branches after review. ★ `authority-manifest --regen` REFUSES in a fresh
+   worktree by design (the 60 gitignored PDFs are absent) — regen in the SHARED tree only.
+3. Build Schedule 1-A **T2** once ① the r4 fold clears and ② the label reader is fixed.
+4. Then T3–T7, then the TY2025 form set (8 cheap, 2 structural), then retirement income, then FR-1
+   if not already merged, then 1040-ES.
+
+## ⑤ STANDING CONSTRAINTS
+
+- **NOT authorized: tag, publish, or the crates.io token** (still unrevoked from v0.17.0).
+- Owner asleep; **do not block on questions** — decide, record the decision, proceed.
+- Fable is authorised for this stretch ("consult fable if needed").
+- One owner per artifact; anything writing code gets a worktree.
 
 ## Where things stand
 
