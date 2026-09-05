@@ -1,0 +1,225 @@
+# Form 6251 (Alternative Minimum Tax—Individuals), TY2025 — logical line → PDF field name.
+#
+# Extracted with `./target/debug/xtask dump-fields design/forms/2025/f6251--2025.pdf`
+# (62 AcroForm fields: 2 identity + 60 numbered money boxes) and correlated against
+# `design/forms/extract/f6251--2025.txt`.
+#
+# Template: `crates/btctax-forms/forms/2025/f6251.pdf`, byte-identical to the archived authority
+# `design/forms/2025/f6251--2025.pdf`, sha256 6995bfd29c6fe1b80fdc396c9c4796c7cef58a966070db0346721eae815fea3f
+# (104,434 bytes; matches `design/forms/2025/f6251--2025.pdf.txt` and the extract's own header).
+#
+# ★★★ THIS IS NOT THE TY2024 MAP WITH THE YEAR BUMPED. Line 1 SPLIT into 1a/1b for TY2025, so page 1
+# gained one widget and EVERY page-1 field name from `f1_4` onward means a DIFFERENT LINE than it did
+# in TY2024. `f1_4` was line 2a; it is now line **1b**. Porting the TY2024 assignment unchanged puts
+# 2a's figure in 1b's box and shifts all of 2a..11 down one, ending with line 11 (the AMT itself, the
+# figure that carries to Schedule 2 line 2) written into line 10's box and `f1_33` left blank on a
+# filed return. Page 2 is untouched: `f2_1..f2_29` are identical in NAME and RECT to TY2024.
+#
+# ★★★ HOW THE ASSIGNMENT WAS CORROBORATED, rather than zipped in order — four independent checks:
+#   1. PER-PAGE COUNTS. Page 1 carries exactly 31 money widgets (`f1_3`..`f1_33`) and Part I+II is
+#      exactly 31 numbered boxes (1a, 1b, 2a-2t, 3, 4, 5-11); page 2 carries 29 and Part III is 29
+#      (12-40). The label census reads 60 labels against 62 boxes — the 2 unlabelled are name + SSN.
+#   2. THE INSET TRIO. Exactly three page-1 widgets are narrower than the rest — `f1_6`, `f1_10`,
+#      `f1_23` at x=[508,572] (w=64) against every other money box at [504,576] (w=72). The form
+#      prints exactly three PARENTHESISED boxes: 2b, 2f, 2s (extract rows 24, 28, 41). Under this
+#      assignment the two sets coincide exactly, which no other offset achieves. ★ These are NOT the
+#      TY2024 widgets: there the inset trio was `f1_5`/`f1_9`/`f1_22`. A 2025 conformance check that
+#      keeps TY2024's hardcoded list will red on a correct map.
+#   3. THE 1a INSET COLUMN. `f1_3` is the only money widget not in the right-hand amount column — it
+#      sits at x=[410.4,481.6], y=[648,660]. The form prints 1a's box in the inner column (extract
+#      row 19 puts "1a" well left of row 21's "1b"), because 1a is a sub-total feeding 1b. No other
+#      line on this form has that geometry, so `f1_3` = 1a is pinned by position alone.
+#   4. MONOTONIC y, WITH THE GAPS. Widget y descends strictly as the line number ascends on both
+#      pages, and every gap larger than 12 lands on a line the extract prints across multiple rows
+#      (4, 5, 6, 7, 10 on page 1; 13, 15, 18, 19, 20, 25, 26, 27, 33, 35, 39, 40 on page 2).
+#   ★ Independently reproduced end-to-end by the geometric label reader:
+#     `./target/debug/xtask label-boxes f6251--2025` emits exactly this field→label assignment, and
+#     `label-census f6251--2025` reports "60 entry line(s), 0 without a box". Two methods, one answer.
+#
+# ★★ TWO SIGN CONVENTIONS ON ONE FORM, and they are not interchangeable:
+#   · The three PARENTHESISED boxes (2b, 2f, 2s) have the minus printed for them, so the digits
+#     written must be a POSITIVE MAGNITUDE. `Form6251::line2b` is stored NEGATIVE (i6251 line 2b:
+#     "Enter the total as a negative amount"), so writing it raw renders `(-500)` — a positive number
+#     on a filed form.
+#   · Other lines are ALSO entered as negative amounts but print NO parentheses — those take a
+#     literal minus sign. Measured from `design/forms/extract/i6251--2025.txt` by attributing each
+#     "negative amount" directive to its own `Line NN—` section heading, the TY2025 set is:
+#     1b, 2b, 2c, 2d, 2f, 2k, 2l, 2m, 2n, 2q, 2s, 3 — of which only 2b, 2f and 2s are parenthesised.
+#     ★ The same measurement over `i6251--2024.txt` yields 2b, 2c, 2d, 2f, 2k, 2l, 2n, 2p, 2q, 2s, 3,
+#       which does NOT reproduce the TY2024 map's hand-written list (that list names 2o and 2r and
+#       omits 2m). The emitter's sign handling should be re-derived from this measurement rather than
+#       from either prose list; only the parenthesised trio affects THIS file.
+#
+# ★★ THE MFS LINE-4 KICKER MOVED, and its two constants are ONE NUMBER APART FROM COLLIDING with the
+# zero-exemption threshold — the §55(d)(3) coincidence that has cost this repo two oracles at once.
+# i6251--2025 "Line 4—Alternative Minimum Taxable Income", verbatim: *"If your filing status is
+# married filing separately and line 4 is more than $900,350, you must include an additional amount on
+# line 4. If line 4 is $1,174,350 or more, include an additional $68,500. Otherwise, include 25% of
+# the excess of the amount on line 4 over $900,350."* And the Exemption Worksheet's own note puts the
+# MFS zero-exemption point at *"$900,350 if married filing separately"* — the SAME $900,350. TY2024's
+# pair was $875,950 / $66,650. There is no widget for the kicker: it is folded into line 4's own box,
+# which is why no field map can catch it being dropped.
+#
+# ★ SCOPE. btctax models 42 of the 60 numbered boxes. Lines 2c-2t are censused, not mapped — see the
+# census at the foot of this file.
+
+form = "f6251"
+year = 2025
+
+# ── Part I — Alternative Minimum Taxable Income ─────────────────────────────────────────────────
+# 1a "Subtract Schedule 1-A (Form 1040), line 37, from Form 1040, 1040-SR, or 1040-NR, line 14"
+#    ★ NEW FOR TY2025 (Pub. L. 119-21). Modelled as `Form6251Line1::Y2025 { line1a, .. }`.
+line1a = "topmostSubform[0].Page1[0].f1_3[0]"
+# 1b "Subtract line 1a from Form 1040, 1040-SR, or 1040-NR, line 11b (if less than zero, enter as a negative amount)"
+#    ★ 1b, NOT 1a, is what line 4 combines. Not parenthesised: a negative 1b takes a literal minus.
+line1b = "topmostSubform[0].Page1[0].f1_4[0]"
+# 2a "If filing Schedule A (Form 1040), enter the taxes from Schedule A, line 7; otherwise, enter the amount from Form 1040 or 1040-SR, line 12e"
+#    ★ CROSS-REFERENCE MOVED: TY2024 said 1040 "line 12"; TY2025 says "line 12e" (1040 exploded
+#      line 12 into 12a-12e). Same box, different source line.
+line2a = "topmostSubform[0].Page1[0].f1_5[0]"
+# 2b "Tax refund from Schedule 1 (Form 1040), line 1 or line 8z"  — PARENTHESISED: write the MAGNITUDE
+line2b = "topmostSubform[0].Page1[0].f1_6[0]"
+# 3 "Other adjustments, including income-based related adjustments"
+line3 = "topmostSubform[0].Page1[0].f1_25[0]"
+# 4 "Alternative minimum taxable income. Combine lines 1b through 3. (If married filing separately and line 4 is more than $900,350, see instructions.)"
+#    ★ "lines 1b through 3", not "lines 1 through 3" — 1a is EXCLUDED from the combine.
+line4 = "topmostSubform[0].Page1[0].f1_26[0]"
+# ── Part II — Alternative Minimum Tax (AMT) ─────────────────────────────────────────────────────
+# 5 "Exemption."
+#   TY2025 table, verbatim from the extract: single or head of household $626,350 → $88,100; married
+#   filing jointly or qualifying surviving spouse $1,252,700 → $137,000; married filing separately
+#   $626,350 → $68,500. (TY2024: 609,350/85,700; 1,218,700/133,300; 609,350/66,650.)
+line5 = "topmostSubform[0].Page1[0].f1_27[0]"
+# 6 "Subtract line 5 from line 4. If more than zero, go to line 7. If zero or less, enter -0- here and on lines 7, 9, and 11, and go to line 10"
+#   ★ SPLIT across extract rows 57 and 63 by five brace-glyph rows — the survey's trap #1, unchanged
+#     from TY2024. A row-wise reader stops at "lines 7, 9," and silently drops 11 from the zero-out set.
+line6 = "topmostSubform[0].Page1[0].f1_28[0]"
+# 7 "All others: If line 6 is $239,100 or less ($119,550 or less if married filing separately), multiply line 6 by 26% (0.26). Otherwise, multiply line 6 by 28% (0.28) and subtract $4,782 ($2,391 if married filing separately) from the result."
+#   ★ All four constants moved from TY2024's 232,600 / 116,300 / 4,652 / 2,326.
+line7 = "topmostSubform[0].Page1[0].f1_29[0]"
+# 8 "Alternative minimum tax foreign tax credit (see instructions)"
+line8 = "topmostSubform[0].Page1[0].f1_30[0]"
+# 9 "Tentative minimum tax. Subtract line 8 from line 7"
+line9 = "topmostSubform[0].Page1[0].f1_31[0]"
+# 10 "Add Form 1040 or 1040-SR, line 16 (minus any tax from Form 4972), and Schedule 2 (Form 1040), line 1z. Subtract from the result Schedule 3 (Form 1040), line 1 and any negative amount reported on Form 8978, line 14 (treated as a positive number). If zero or less, enter -0-. If you used Schedule J to figure your tax on Form 1040 or 1040-SR, line 16, refigure that tax without using Schedule J before completing this line. See instructions"
+line10 = "topmostSubform[0].Page1[0].f1_32[0]"
+# 11 "AMT. Subtract line 10 from line 9. If zero or less, enter -0-. Enter here and on Schedule 2 (Form 1040), line 2"
+line11 = "topmostSubform[0].Page1[0].f1_33[0]"
+# ── Part III — Tax Computation Using Maximum Capital Gains Rates ────────────────────────────────
+#
+# ★ Page 2 is UNCHANGED from TY2024 in field name and rect; only the bracket constants on lines 18,
+#   19, 25 and 39 moved. Every quote below was re-read from the TY2025 extract regardless.
+# 12 "Enter the amount from Form 6251, line 6. If you are filing Form 2555, enter the amount from line 3 of the worksheet in the instructions for line 7"
+line12 = "topmostSubform[0].Page2[0].f2_1[0]"
+# 13 "Enter the amount from line 4 of the Qualified Dividends and Capital Gain Tax Worksheet in the Instructions for Form 1040 or the amount from line 13 of the Schedule D Tax Worksheet in the Instructions for Schedule D (Form 1040), whichever applies (as refigured for the AMT, if necessary). See instructions. If you are filing Form 2555, see instructions for the amount to enter"
+line13 = "topmostSubform[0].Page2[0].f2_2[0]"
+# 14 "Enter the amount from Schedule D (Form 1040), line 19 (as refigured for the AMT, if necessary). See instructions. If you are filing Form 2555, see instructions for the amount to enter"
+line14 = "topmostSubform[0].Page2[0].f2_3[0]"
+# 15 "If you did not complete a Schedule D Tax Worksheet for the regular tax or the AMT, enter the amount from line 13. Otherwise, add lines 13 and 14, and enter the smaller of that result or the amount from line 10 of the Schedule D Tax Worksheet (as refigured for the AMT, if necessary). If you are filing Form 2555, see instructions for the amount to enter"
+line15 = "topmostSubform[0].Page2[0].f2_4[0]"
+# 16 "Enter the smaller of line 12 or line 15"
+line16 = "topmostSubform[0].Page2[0].f2_5[0]"
+# 17 "Subtract line 16 from line 12"
+line17 = "topmostSubform[0].Page2[0].f2_6[0]"
+# 18 "If line 17 is $239,100 or less ($119,550 or less if married filing separately), multiply line 17 by 26% (0.26). Otherwise, multiply line 17 by 28% (0.28) and subtract $4,782 ($2,391 if married filing separately) from the result"
+line18 = "topmostSubform[0].Page2[0].f2_7[0]"
+# 19 "Enter: • $96,700 if married filing jointly or qualifying surviving spouse, • $48,350 if single or married filing separately, or • $64,750 if head of household."
+line19 = "topmostSubform[0].Page2[0].f2_8[0]"
+# 20 "Enter the amount from line 5 of the Qualified Dividends and Capital Gain Tax Worksheet or the amount from line 14 of the Schedule D Tax Worksheet, whichever applies (as figured for the regular tax). If you did not complete either worksheet for the regular tax, enter the amount from Form 1040 or 1040-SR, line 15; if zero or less, enter -0-. If you are filing Form 2555, see instructions for the amount to enter"
+line20 = "topmostSubform[0].Page2[0].f2_9[0]"
+# 21 "Subtract line 20 from line 19. If zero or less, enter -0-"
+line21 = "topmostSubform[0].Page2[0].f2_10[0]"
+# 22 "Enter the smaller of line 12 or line 13"
+line22 = "topmostSubform[0].Page2[0].f2_11[0]"
+# 23 "Enter the smaller of line 21 or line 22. This amount is taxed at 0%"
+line23 = "topmostSubform[0].Page2[0].f2_12[0]"
+# 24 "Subtract line 23 from line 22"
+line24 = "topmostSubform[0].Page2[0].f2_13[0]"
+# 25 "Enter: • $533,400 if single, • $300,000 if married filing separately, • $600,050 if married filing jointly or qualifying surviving spouse, or • $566,700 if head of household."
+line25 = "topmostSubform[0].Page2[0].f2_14[0]"
+# 26 "Enter the amount from line 21"
+line26 = "topmostSubform[0].Page2[0].f2_15[0]"
+# 27 "Enter the amount from line 5 of the Qualified Dividends and Capital Gain Tax Worksheet or the amount from line 21 of the Schedule D Tax Worksheet, whichever applies (as figured for the regular tax). If you did not complete either worksheet for the regular tax, enter the amount from Form 1040 or 1040-SR, line 15; if zero or less, enter -0-. If you are filing Form 2555, see instructions for the amount to enter"
+line27 = "topmostSubform[0].Page2[0].f2_16[0]"
+# 28 "Add line 26 and line 27"
+line28 = "topmostSubform[0].Page2[0].f2_17[0]"
+# 29 "Subtract line 28 from line 25. If zero or less, enter -0-"
+line29 = "topmostSubform[0].Page2[0].f2_18[0]"
+# 30 "Enter the smaller of line 24 or line 29"
+line30 = "topmostSubform[0].Page2[0].f2_19[0]"
+# 31 "Multiply line 30 by 15% (0.15)"
+line31 = "topmostSubform[0].Page2[0].f2_20[0]"
+# 32 "Add lines 23 and 30"
+line32 = "topmostSubform[0].Page2[0].f2_21[0]"
+# 33 "Subtract line 32 from line 22"
+#    ★★★ FROM LINE **22**. Line 36 four rows below reads "Subtract line 35 from line 12" — same verb,
+#        two-digit operands that differ by a few pixels on a rendered page. Transcribing this line
+#        from the image once produced "from line 12", taxing the ordinary slice twice and inflating
+#        the tentative minimum tax by $200,000 on one vector. Both quotes re-read from the TEXT LAYER.
+line33 = "topmostSubform[0].Page2[0].f2_22[0]"
+# 34 "Multiply line 33 by 20% (0.20)"
+line34 = "topmostSubform[0].Page2[0].f2_23[0]"
+# 35 "Add lines 17, 32, and 33"
+line35 = "topmostSubform[0].Page2[0].f2_24[0]"
+# 36 "Subtract line 35 from line 12"
+line36 = "topmostSubform[0].Page2[0].f2_25[0]"
+# 37 "Multiply line 36 by 25% (0.25)"
+line37 = "topmostSubform[0].Page2[0].f2_26[0]"
+# 38 "Add lines 18, 31, 34, and 37"
+line38 = "topmostSubform[0].Page2[0].f2_27[0]"
+# 39 "If line 12 is $239,100 or less ($119,550 or less if married filing separately), multiply line 12 by 26% (0.26). Otherwise, multiply line 12 by 28% (0.28) and subtract $4,782 ($2,391 if married filing separately) from the result"
+line39 = "topmostSubform[0].Page2[0].f2_28[0]"
+# 40 "Enter the smaller of line 38 or line 39 here and on line 7. If you are filing Form 2555, do not enter this amount on line 7. Instead, enter it on line 4 of the worksheet in the instructions for line 7"
+line40 = "topmostSubform[0].Page2[0].f2_29[0]"
+
+# ── Header ───────────────────────────────────────────────────────────────────────────────────────
+#
+# ★ LAST on purpose. TOML binds every bare key after a table header INTO that table, so an `[identity]`
+#   block above the `lineNN` keys silently swallows all FORTY-TWO of them and the parse then fails with
+#   "missing field `line1a`", which reads like a typo and is really a layout error.
+[identity]
+name = "topmostSubform[0].Page1[0].f1_1[0]"
+ssn  = "topmostSubform[0].Page1[0].f1_2[0]"
+
+# ── The census: all 62 AcroForm fields are accounted for (2 identity + 42 mapped + 18 here) ──────
+#
+# ★★★ Lines 2c-2t are Part I add-backs `crates/btctax-core/src/tax/form6251.rs` does not model. They
+# are `gap`, NOT `unmodeled`: `unmodeled` means the filer FORGOES A BENEFIT, and every one of these is
+# an ADD-BACK — the filer forgoes a LIABILITY. A filer who has one and files anyway understates tax on
+# a return signed under 26 USC §6065.
+#
+# ★★ They are reachable only through a REFUSAL, not through a blank: the `OtherOutOfScopeIncome`
+# out-of-scope declaration (`crates/btctax-core/src/tax/questions.rs`) names limb (b) "You EXERCISED
+# AN INCENTIVE STOCK OPTION (ISO) and still held the stock at the end of the year — you would have a
+# Form 3921" and limb (c) "any other item this tool never asked about that changes your ALTERNATIVE
+# MINIMUM TAX — depletion, a tax-shelter farm activity, a passive activity, or research and
+# experimental costs", and a `yes` refuses. That was necessary because an ISO exercise is NOT INCOME
+# for the regular tax (i6251 line 2i's own first sentence), so the income half of that question could
+# never have caught it — and because the missing add-back also suppressed `must_attach()`, the gap hid
+# its own detection. See FOLLOWUPS §G-6. The declaration is year-independent, so this census carries
+# from TY2024 unchanged in SUBSTANCE — only the widget names shifted by one.
+#
+# ★ EVERY CENSUS FIELD NAME BELOW MOVED. TY2024 censused `f1_6`..`f1_23`; TY2025 censuses
+#   `f1_7`..`f1_24`, because line 1's split pushed page 1 down one widget. `f1_6` is now line 2b,
+#   which is MAPPED — copying the TY2024 census would both censure a mapped box and leave `f1_24`
+#   (line 2t) unaccounted for.
+
+[census]
+"topmostSubform[0].Page1[0].f1_7[0]" = { line = "2c", rule = "unmodeled", reason = "A Part I add-back `form6251.rs` does not model. It is an ADD-BACK, so silence UNDERSTATES tax — the filer is REFUSED through the OtherOutOfScopeIncome out-of-scope declaration (limb (c) names the AMT items) rather than filed with a laundered zero." }
+"topmostSubform[0].Page1[0].f1_8[0]" = { line = "2d", rule = "unmodeled", reason = "A Part I add-back `form6251.rs` does not model. It is an ADD-BACK, so silence UNDERSTATES tax — the filer is REFUSED through the OtherOutOfScopeIncome out-of-scope declaration (limb (c) names the AMT items) rather than filed with a laundered zero." }
+"topmostSubform[0].Page1[0].f1_9[0]" = { line = "2e", rule = "unmodeled", reason = "A Part I add-back `form6251.rs` does not model. It is an ADD-BACK, so silence UNDERSTATES tax — the filer is REFUSED through the OtherOutOfScopeIncome out-of-scope declaration (limb (c) names the AMT items) rather than filed with a laundered zero." }
+"topmostSubform[0].Page1[0].f1_10[0]" = { line = "2f", rule = "unmodeled", reason = "A Part I add-back `form6251.rs` does not model. It is an ADD-BACK, so silence UNDERSTATES tax — the filer is REFUSED through the OtherOutOfScopeIncome out-of-scope declaration (limb (c) names the AMT items) rather than filed with a laundered zero. PARENTHESISED on the face (w=64 inset), so if it is ever modelled it takes a POSITIVE MAGNITUDE." }
+"topmostSubform[0].Page1[0].f1_11[0]" = { line = "2g", rule = "unmodeled", reason = "A Part I add-back `form6251.rs` does not model. It is an ADD-BACK, so silence UNDERSTATES tax — the filer is REFUSED through the OtherOutOfScopeIncome out-of-scope declaration (limb (c) names the AMT items) rather than filed with a laundered zero." }
+"topmostSubform[0].Page1[0].f1_12[0]" = { line = "2h", rule = "unmodeled", reason = "A Part I add-back `form6251.rs` does not model. It is an ADD-BACK, so silence UNDERSTATES tax — the filer is REFUSED through the OtherOutOfScopeIncome out-of-scope declaration (limb (c) names the AMT items) rather than filed with a laundered zero." }
+"topmostSubform[0].Page1[0].f1_13[0]" = { line = "2i", rule = "unmodeled", reason = "THE gap, and the standing example of this whole class. 'Exercise of incentive stock options (excess of AMT income over regular tax income)' — post-TCJA the dominant real reason an individual owes AMT. Needs Form 3921 boxes 3/4/5 plus the same-year-disposition and forfeiture-risk questions. Refused via the OtherOutOfScopeIncome limb (b) until those exist. ★ Its widget moved from f1_12 (TY2024) to f1_13 (TY2025)." }
+"topmostSubform[0].Page1[0].f1_14[0]" = { line = "2j", rule = "unmodeled", reason = "A Part I add-back `form6251.rs` does not model. It is an ADD-BACK, so silence UNDERSTATES tax — the filer is REFUSED through the OtherOutOfScopeIncome out-of-scope declaration (limb (c) names the AMT items) rather than filed with a laundered zero." }
+"topmostSubform[0].Page1[0].f1_15[0]" = { line = "2k", rule = "unmodeled", reason = "A Part I add-back `form6251.rs` does not model. It is an ADD-BACK, so silence UNDERSTATES tax — the filer is REFUSED through the OtherOutOfScopeIncome out-of-scope declaration (limb (c) names the AMT items) rather than filed with a laundered zero." }
+"topmostSubform[0].Page1[0].f1_16[0]" = { line = "2l", rule = "unmodeled", reason = "A Part I add-back `form6251.rs` does not model. It is an ADD-BACK, so silence UNDERSTATES tax — the filer is REFUSED through the OtherOutOfScopeIncome out-of-scope declaration (limb (c) names the AMT items) rather than filed with a laundered zero." }
+"topmostSubform[0].Page1[0].f1_17[0]" = { line = "2m", rule = "unmodeled", reason = "A Part I add-back `form6251.rs` does not model. It is an ADD-BACK, so silence UNDERSTATES tax — the filer is REFUSED through the OtherOutOfScopeIncome out-of-scope declaration (limb (c) names the AMT items, including a passive activity) rather than filed with a laundered zero." }
+"topmostSubform[0].Page1[0].f1_18[0]" = { line = "2n", rule = "unmodeled", reason = "A Part I add-back `form6251.rs` does not model. It is an ADD-BACK, so silence UNDERSTATES tax — the filer is REFUSED through the OtherOutOfScopeIncome out-of-scope declaration (limb (c) names the AMT items) rather than filed with a laundered zero." }
+"topmostSubform[0].Page1[0].f1_19[0]" = { line = "2o", rule = "unmodeled", reason = "A Part I add-back `form6251.rs` does not model. It is an ADD-BACK, so silence UNDERSTATES tax — the filer is REFUSED through the OtherOutOfScopeIncome out-of-scope declaration (limb (c) names the AMT items) rather than filed with a laundered zero." }
+"topmostSubform[0].Page1[0].f1_20[0]" = { line = "2p", rule = "unmodeled", reason = "A Part I add-back `form6251.rs` does not model. It is an ADD-BACK, so silence UNDERSTATES tax — the filer is REFUSED through the OtherOutOfScopeIncome out-of-scope declaration (limb (c) names the AMT items) rather than filed with a laundered zero." }
+"topmostSubform[0].Page1[0].f1_21[0]" = { line = "2q", rule = "unmodeled", reason = "A Part I add-back `form6251.rs` does not model. It is an ADD-BACK, so silence UNDERSTATES tax — the filer is REFUSED through the OtherOutOfScopeIncome out-of-scope declaration (limb (c) names the AMT items) rather than filed with a laundered zero." }
+"topmostSubform[0].Page1[0].f1_22[0]" = { line = "2r", rule = "unmodeled", reason = "A Part I add-back `form6251.rs` does not model. It is an ADD-BACK, so silence UNDERSTATES tax — the filer is REFUSED through the OtherOutOfScopeIncome out-of-scope declaration (limb (c) names research and experimental costs explicitly) rather than filed with a laundered zero." }
+"topmostSubform[0].Page1[0].f1_23[0]" = { line = "2s", rule = "unmodeled", reason = "A Part I add-back `form6251.rs` does not model. It is an ADD-BACK, so silence UNDERSTATES tax — the filer is REFUSED through the OtherOutOfScopeIncome out-of-scope declaration (limb (c) names the AMT items) rather than filed with a laundered zero. PARENTHESISED on the face (w=64 inset), so if it is ever modelled it takes a POSITIVE MAGNITUDE." }
+"topmostSubform[0].Page1[0].f1_24[0]" = { line = "2t", rule = "unmodeled", reason = "A Part I add-back `form6251.rs` does not model. It is an ADD-BACK, so silence UNDERSTATES tax — the filer is REFUSED through the OtherOutOfScopeIncome out-of-scope declaration (limb (c) names the AMT items) rather than filed with a laundered zero." }

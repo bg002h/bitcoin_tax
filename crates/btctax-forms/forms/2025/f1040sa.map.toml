@@ -1,0 +1,180 @@
+# Schedule A (Itemized Deductions), Form 1040, TY2025 — logical line → PDF field name.
+#
+# Authority: design/forms/2025/f1040sa--2025.pdf
+#            sha256 c14acf3478f4c33f27ac6e8ecd9f94b6fb25b16745b341728bd27847d2ef56bb, 79008 bytes
+#            (the bundled f1040sa.pdf beside this file is a byte copy — both hashes verified equal,
+#             and the same hash the committed text layer design/forms/extract/f1040sa--2025.txt
+#             carries in its own header, so map and text layer describe ONE document).
+# Face: "Schedule A (Form 1040) 2025 Created 11/20/25", Cat. No. 17145C.
+#
+# Every field name below was read from `xtask dump-fields design/forms/2025/f1040sa--2025.pdf`
+# (33 fields), and every line→field assignment was corroborated a second, independent way by
+# `xtask label-boxes f1040sa--2025`, which derives field→printed-label geometrically from the
+# committed text layer. The two agree on all 33. Line texts quoted below are from the TEXT LAYER,
+# never from the rendered page.
+#
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
+# ★★★ THIS IS A PORT OF THE TY2024 MAP AND EVERY SINGLE FIELD NAME CHANGED. Read this block.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
+#
+# 1. ★★ ROOT SUBFORM RENAMED: TY2024's topmostSubform → TY2025's form1. Not one FQN survives the
+#    year. A port that copied the 2024 file and bumped `year` would name 37 fields that do not
+#    exist. (Schedule 2 uses form1 in BOTH years, so this is a per-PDF authoring artifact — it must
+#    be checked per form, never assumed to be a TY2025 convention.)
+#
+# 2. ★★★ THE SALT LIMITATION CHANGED, AND THE MAP CANNOT CARRY THE CHANGE. Line 5e's own text:
+#      2024: "Enter the smaller of line 5d or $10,000 ($5,000 if married filing separately)."
+#      2025: "Enter the smaller of line 5d or $40,000 ($20,000 if married filing
+#             separately). If Form 1040 or 1040-SR, line 11b is more than $500,000
+#             ($250,000 if married filing separately), or if you completed Form 2555,
+#             Form 4563, or excluded income from Puerto Rico, see instructions ."
+#    The cap rose AND a MAGI phase-down appeared (Pub. L. 119-21; the instructions'
+#    "State and Local Tax Deduction Worksheet", i1040sca--2025 extract line 862). The 5e BOX is at
+#    the same place on the page and takes the same kind of value, so **this map looks complete
+#    while the number written into it can still be a TY2024 answer.** The worksheet is engine work,
+#    transcribed at design/ty2025/SPEC.md §5.5 and NOT built as of this map. Until it is,
+#    `ScheduleAMap::for_year(2025)` must stay unreachable behind the existing fail-closed gate
+#    (`tax_tables.rs::ty2025_full_return_must_stay_fail_closed_until_complete`, which names
+#    "a scalar salt_cap against a §164(b) phase-down" as one of its blockers). A correct field map
+#    is a NECESSARY and NOT a sufficient condition for filing this schedule for TY2025.
+#
+# 3. TWO CROSS-REFERENCES MOVED, because Form 1040 itself restructured for TY2025:
+#      line 2  "Enter amount from Form 1040 or 1040-SR, line 11"  → "line 11b"
+#      line 17 "…enter this amount on Form 1040 or 1040-SR, line 12" → "line 12e"
+#    Nothing in this file encodes those, but anything upstream that sources L2 or consumes L17 does.
+#
+# 4. FOUR FIELDS DISAPPEARED (37 → 33) and none of them is a line. The three write-in continuation
+#    blocks each collapsed from several single-row boxes into ONE multi-row box (h=24pt):
+#      line 6  description   2 boxes → 1     line 8b payee block  2 boxes → 1
+#      line 16 description   3 boxes → 1
+#    4 boxes lost, 37 − 4 = 33. All three are censused below; btctax fills none of them.
+#
+# 5. TWO NEW READ-ORDER SUBFORMS: line 2's box is now nested under Line2_ReadOrder, and line 8b's
+#    payee block under Line8b_ReadOrder. TY2024 had only Line8_ReadOrder and Line18_ReadOrder
+#    (both still present). Nesting is part of the FQN — a flat f1_4 does not resolve here.
+#
+# 6. Otherwise the printed text is UNCHANGED line for line: lines 1, 3, 4, 5a–5d, 6, 7, 8, 8a–8e,
+#    9–16 and 18 differ from TY2024 only by reflow. The line 5 HEADING gained "(SALT)".
+#    The label set is identical in both years: 28 labels, 27 entry lines, 5 the lone heading.
+#
+# ── The three x-clusters. ALL THREE MOVED, and the mid column moved by only 7.2pt ──────────────
+#     AGI-INLINE  x = [316.8, 388.0]   line 2 ONLY   (2024: [331.2, 402.5])
+#     MID         x = [410.4, 481.6]   lines 1, 3, 5a-5e, 6, 8a-8e, 9, 11, 12, 13
+#                                                    (2024: [417.6, 488.9])
+#     AMOUNT      x = [504.0, 576.0]   lines 4, 7, 10, 14, 15, 16, 17   (2024: identical)
+#   Line 2 is still NOT in the MID column: its box is inline with the printed sentence, 93.6pt to
+#   the LEFT of MID and the SAME WIDTH as MID (71.2 vs 71.2) — so a width-based check would not
+#   catch a mis-map. It gets its own cluster, exactly as in TY2024.
+#   The write-in blocks are wider and taller than any of these: x = [122.4, 381.6] h=24 (lines 6,
+#   8b) and x = [122.4, 475.2] h=24 (line 16). Writing a dollar amount into one prints it in the
+#   description space.
+#
+# ★ NON-SEQUENTIAL SUFFIX — one, and it is the same trap in a new costume. Reading DOWN the page
+#   from 8a (f1_15, y=366) the next box is f1_17 (y=324) = the 8b AMOUNT, and only BELOW it sits
+#   f1_16 (y=300) = 8b's payee free-text block. The IRS numbered the text field before the amount
+#   while printing it after. So f1_16 is NOT line 8a-plus-one and f1_17 is not the free text.
+#   (TY2024 had the identical inversion with different numbers: 8b amount was f1_19, above the
+#   free-text rows f1_17/f1_18.) Anything that walks suffixes in order trips on this.
+#
+# ★ LINE 8d (f1_19) IS A LIVE "Reserved for future use" WIDGET. The form prints
+#   "d Reserved for future use", and the IRS still ships a fillable box for it, consuming a suffix
+#   number (f1_18 = 8c, f1_19 = 8d reserved, f1_20 = 8e). Never write to it.
+#
+# UNMAPPED ON PURPOSE — left BLANK, never a misleading 0. Full reasons in [census] at the foot:
+#   line 6  (amount f1_13 + description f1_12)   other taxes — no btctax input
+#   line 8b (amount f1_17 + payee block f1_16), line 8c (f1_18)   interest/points not on a 1098
+#   line 8d (f1_19)                              the form reserves it
+#   line 15 (f1_27)                              casualty and theft losses (Form 4684)
+#   line 16 (amount f1_29 + description f1_28)   other itemized deductions
+form = "f1040sa"
+year = 2025
+
+# ── The three declaration/election checkboxes. Each on-state is "1", read from dump-fields; none is
+#    a Yes/No pair. c1_1 (y=560) is line 5a's "check this box" and is the only one NOT nested in a
+#    read-order subform; the line-8 button (y=392) and the line-18 button (y=38.2) each name
+#    themselves. Elections core honours in the ARITHMETIC that the filed form never showed
+#    (P6.3a Q7); the line-8 box is the P9 §2.7 mixed-use-mortgage DECLARATION.
+check_5a_sales_tax      = { field = "form1[0].Page1[0].c1_1[0]", on = "1" }
+check_8_mixed_use       = { field = "form1[0].Page1[0].Line8_ReadOrder[0].c1_2[0]", on = "1" }
+check_18_elects_smaller = { field = "form1[0].Page1[0].Line18_ReadOrder[0].c1_3[0]", on = "1" }
+
+# ── Medical and Dental Expenses ─────────────────────────────────────────────────────────────────
+line1  = "form1[0].Page1[0].f1_3[0]"                      # "Medical and dental expenses (see instructions)"        MID
+line2  = "form1[0].Page1[0].Line2_ReadOrder[0].f1_4[0]"   # "Enter amount from Form 1040 or 1040-SR, line 11b" ★ AGI-INLINE
+line3  = "form1[0].Page1[0].f1_5[0]"                      # "Multiply line 2 by 7.5% (0.075)"  ← §213(a) floor     MID
+line4  = "form1[0].Page1[0].f1_6[0]"                      # "Subtract line 3 from line 1. If line 3 is more than line 1, enter -0-"  AMOUNT
+
+# ── Taxes You Paid ──────────────────────────────────────────────────────────────────────────────
+#    (line 5 itself is a HEADING — "State and local taxes (SALT)." — and has no box.)
+line5a = "form1[0].Page1[0].f1_7[0]"     # "State and local income taxes or general sales taxes…"     MID
+line5b = "form1[0].Page1[0].f1_8[0]"     # "State and local real estate taxes (see instructions)"     MID
+line5c = "form1[0].Page1[0].f1_9[0]"     # "State and local personal property taxes"                  MID
+line5d = "form1[0].Page1[0].f1_10[0]"    # "Add lines 5a through 5c"                                  MID
+line5e = "form1[0].Page1[0].f1_11[0]"    # ★★★ "Enter the smaller of line 5d or $40,000 ($20,000 if married filing
+                                         #     separately). If Form 1040 or 1040-SR, line 11b is more than $500,000
+                                         #     ($250,000 if married filing separately), or if you completed Form 2555,
+                                         #     Form 4563, or excluded income from Puerto Rico, see instructions"   MID
+                                         #     ← §164(b) as amended. SEE THE HEADER, ITEM 2: the box is the box, but
+                                         #       the VALUE needs the worksheet, which is not built.
+line7  = "form1[0].Page1[0].f1_14[0]"    # "Add lines 5e and 6"                                    AMOUNT
+
+# ── Interest You Paid ───────────────────────────────────────────────────────────────────────────
+line8a = "form1[0].Page1[0].f1_15[0]"    # "Home mortgage interest and points reported to you on Form 1098. See instructions if limited"  MID
+line8e = "form1[0].Page1[0].f1_20[0]"    # "Add lines 8a through 8c"                                  MID
+line9  = "form1[0].Page1[0].f1_21[0]"    # "Investment interest. Attach Form 4952 if required. See instructions"  MID
+line10 = "form1[0].Page1[0].f1_22[0]"    # "Add lines 8e and 9"                                    AMOUNT
+
+# ── Gifts to Charity ────────────────────────────────────────────────────────────────────────────
+line11 = "form1[0].Page1[0].f1_23[0]"    # "Gifts by cash or check. If you made any gift of $250 or more, see instructions"  MID
+line12 = "form1[0].Page1[0].f1_24[0]"    # "Other than by cash or check… You must attach Form 8283 if over $500"  MID
+line13 = "form1[0].Page1[0].f1_25[0]"    # "Carryover from prior year"                                MID
+line14 = "form1[0].Page1[0].f1_26[0]"    # "Add lines 11 through 13"                               AMOUNT
+
+# ── Total Itemized Deductions ───────────────────────────────────────────────────────────────────
+line17 = "form1[0].Page1[0].f1_30[0]"    # "Add the amounts in the far right column for lines 4 through 16. Also, enter
+                                         #  this amount on Form 1040 or 1040-SR, line 12e"   AMOUNT   ★ 2024 said line 12
+
+# ── Identity header (P6.2). Dumped and correlated against the printed form: f1_1 spans
+#    x=[36.0, 474.5] under "Name(s) shown on Form 1040 or 1040-SR", f1_2 spans x=[475.2, 576.0]
+#    under "Your social security number". The SSN cell declares /MaxLen 11 — unchanged from
+#    TY2024 — so it takes the HYPHENATED form (the 1040's own SSN cells are /MaxLen 9 and take
+#    bare digits; the forms genuinely differ, so `push_identity` reads each cell's capacity).
+[identity]
+name = "form1[0].Page1[0].f1_1[0]"
+ssn  = "form1[0].Page1[0].f1_2[0]"
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# ★★★ THE FIELD CENSUS (§G-13). See f8959.map.toml for the rule vocabulary.
+#
+# 33 AcroForm fields: 24 mapped above (2 identity + 3 checkboxes + 19 money lines), 9 recorded here.
+# The set below is exactly the TY2024 census MINUS the four consolidated write-in boxes (see header
+# item 4) — no line changed its disposition between the years, only the boxes that carry it.
+#
+# btctax itemizes MEDICAL (line 1), SALT (5a–5e), MORTGAGE INTEREST reported on Form 1098 (8a) and
+# CHARITABLE gifts (11–14). Everything below is a deduction the filer FORGOES by using btctax — the
+# safe direction: omitting a deduction can only OVERSTATE tax, never understate it.
+[census]
+
+# ── Line 6: other taxes (write-in) ───────────────────────────────────────────────────────────────
+"form1[0].Page1[0].f1_12[0]" = { line = "6", rule = "unmodeled", reason = "\"Other taxes. List type and amount:\" — the write-in DESCRIPTION block, one 24pt-tall box in 2025 where TY2024 had two single rows. btctax collects only the enumerated SALT categories, lines 5a through 5c." }
+"form1[0].Page1[0].f1_13[0]" = { line = "6", rule = "unmodeled", reason = "Line 6 amount — same reason; line 7 therefore equals line 5e." }
+
+# ── Line 8b: mortgage interest NOT reported on a Form 1098, and its payee block ──────────────────
+# ★ Note the inversion recorded in the header: the AMOUNT (f1_17) sits ABOVE the payee block (f1_16).
+"form1[0].Page1[0].f1_17[0]" = { line = "8b", rule = "unmodeled", reason = "Line 8b AMOUNT — \"Home mortgage interest not reported to you on Form 1098.\" btctax collects mortgage_interest_1098 only, i.e. interest that IS on a 1098." }
+"form1[0].Page1[0].Line8b_ReadOrder[0].f1_16[0]" = { line = "8b", rule = "unmodeled", reason = "The 8b payee block — \"If paid to the person from whom you bought the home, see instructions and show that person's name, identifying no., and address.\" Free text, one 24pt-tall box in 2025 where TY2024 had two single rows. Nothing to write while 8b itself is unmodeled." }
+
+# ── Line 8c: points not reported on a Form 1098 ──────────────────────────────────────────────────
+"form1[0].Page1[0].f1_18[0]" = { line = "8c", rule = "unmodeled", reason = "\"Points not reported to you on Form 1098. See instructions for special rules.\" Not collected." }
+
+# ── Line 8d: the FORM reserves it ────────────────────────────────────────────────────────────────
+"form1[0].Page1[0].f1_19[0]" = { line = "8d", rule = "artifact", reason = "The form's own text is \"Reserved for future use\" — the IRS ships a live fillable box for a line it has explicitly reserved. No decision is encodable, by the form's own statement." }
+
+# ── Lines 15, 16: deductions requiring forms btctax does not model ───────────────────────────────
+# ★ LINE 9 IS NOT HERE. It is MAPPED (line9 = f1_21, above): btctax collects
+#   schedule_a.investment_interest and prints it, gated by the Schedule D line 20 / Form 4952
+#   declaration — RefuseReason::Form4952Required refuses the return when Form 4952 is actually
+#   required, so the amount printed is always one deductible in full under i4952's own exception.
+"form1[0].Page1[0].f1_27[0]" = { line = "15", rule = "unmodeled", reason = "\"Casualty and theft loss(es) from a federally declared disaster (other than net qualified disaster losses). Attach Form 4684 and enter the amount from line 18 of that form.\" btctax models no Form 4684. Text unchanged from TY2024." }
+"form1[0].Page1[0].f1_28[0]" = { line = "16", rule = "unmodeled", reason = "\"Other—from list in instructions. List type and amount:\" — the write-in DESCRIPTION block, one 24pt-tall box in 2025 where TY2024 had three single rows. btctax offers no write-in itemized deduction." }
+"form1[0].Page1[0].f1_29[0]" = { line = "16", rule = "unmodeled", reason = "Line 16 amount — same reason." }

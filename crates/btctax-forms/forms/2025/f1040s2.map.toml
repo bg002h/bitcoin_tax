@@ -1,0 +1,254 @@
+# Schedule 2 (Additional Taxes), Form 1040, TY2025 — logical line → PDF field name.
+#
+# Template  crates/btctax-forms/forms/2025/f1040s2.pdf
+#           = design/forms/2025/f1040s2--2025.pdf verbatim
+#           sha256 64d867b683334cfc533993e37ccb0d143449ec29428a78206be2e4de333941e8, 96526 bytes
+# Inventory `xtask dump-fields design/forms/2025/f1040s2--2025.pdf` → **63 AcroForm fields**
+#           (TY2024: 60). Every FQN below is pasted from that dump, not carried over from the
+#           TY2024 map.
+# Labels    `xtask label-census f1040s2--2025` reads design/forms/extract/f1040s2--2025.txt and
+#           enumerates **47 printed labels — 45 entry lines + 2 headings** (line 1 and line 17,
+#           each of which heads its lettered sub-rows and owns no box of its own). The line set
+#           below is that list, taken FROM the form's text layer, never from a numeric range.
+# Join      `xtask label-boxes f1040s2--2025` gives the field→label join used throughout; each
+#           line's identification was then re-read against the extracted text, never a rendered
+#           page.
+#
+# ⚠️ ROOT SUBFORM IS `form1[0]` — re-verified on the TY2025 PDF, not assumed. Schedule 1 and
+# Schedule 2 use `form1[0]`; Schedule 3, the 1040, Schedule SE and most other forms in this crate
+# use `topmostSubform[0]`, and Schedule A CHANGED convention between 2024 and 2025. A shared prefix
+# constant would silently mis-resolve. Do not "unify" it.
+#
+# ⚠️ LINE 21 IS ON PAGE 2 (`f2_24`). The descent oracle therefore groups by PAGE, not one group for
+# the whole form — page 2's y-coordinates are not comparable with page 1's.
+#
+# Column x-clusters (code-side oracle, `schedule23.rs::SCH_CLUSTERS`): MID x = [410,482],
+# AMOUNT x = [504,576]. All six mapped money cells sit at exactly x 504.0–576.0 in the TY2025 PDF
+# (dumped, not assumed), and descend strictly within their page: p1 372 > 354 > 312 > 174 > 156;
+# p2 198 alone. Note lines 5, 6 and 20 are money lines that sit in the MID column (5 and 6 feed the
+# line-7 subtotal; 20 is informational and is NOT summed into line 21) — a "top-level numbered line
+# ⇒ AMOUNT" assumption is wrong on this form. v1 fills none of them.
+#
+# ────────────────────────────────────────────────────────────────────────────────────────────────
+# ★★★ WHAT CHANGED FROM TY2024 — THE FIELD NAMES SHIFTED. A NAIVE PORT IS SILENTLY WRONG.
+#
+# The TY2024 map would PARSE against this PDF and fill four cells on the wrong lines. Both dumps
+# were run and diffed; the causes are three structural edits to the form:
+#
+#   1. LINE 4 GAINED AN EXEMPTION BLOCK. The printed line is now "Self-employment tax. Attach
+#      Schedule SE. Check if any exemption from (see instructions): 1 ☐ 4361  2 ☐ 4029  3 ☐ ____".
+#      That is three new /Btn widgets (`Line4_ReadOrder[0].c1_3[0]`, `c1_4[0]`, `c1_5[0]`) plus a
+#      new write-in text cell (`Line4_ReadOrder[0].f1_14[0]`, x 252.0–324.0). The write-in TOOK THE
+#      NAME `f1_14`, so **every page-1 text field from line 4 onward shifted up by one**:
+#
+#        line   TY2024 field            TY2025 field
+#        4      f1_14                   f1_15          ← TY2024's f1_14 is now the box-3 write-in
+#        5      Line5_ReadOrder.f1_15   f1_16          ← the `Line5_ReadOrder` wrapper is GONE
+#        6      f1_16                   f1_17
+#        7      f1_17                   f1_18
+#        8      f1_18                   f1_19
+#        8 ☐    Line8_ReadOrder.c1_3    Line8_ReadOrder.c1_6   ← renumbered by line 4's new boxes
+#        9      f1_19                   f1_20
+#        10     f1_20                   f1_21
+#        11     f1_21                   f1_22
+#        12     f1_22                   f1_23
+#        13     f1_23                   f1_24
+#        14     f1_24                   f1_25
+#        15     f1_25                   f1_26
+#        16     f1_26                   f1_27
+#
+#      Ported blindly, TY2024's `line4 = f1_14` would print the SE tax into the box-3 exemption
+#      write-in (MID column, x 252–324), `line11 = f1_21` would print the Additional Medicare Tax on
+#      the RESERVED line 10, and `line12 = f1_22` would print the NIIT on line 11. Three wrong lines,
+#      each an amount landing where the IRS reads a different tax.
+#
+#   2. LINE 10 IS RETIRED. TY2024 printed "Repayment of first-time homebuyer credit. Attach Form
+#      5405 if required"; TY2025 prints **"Reserved for future use."** Same line number, no numeric
+#      signal, only visible by reading the line text. Its widget survives and is censused `artifact`.
+#
+#   3. LINE 17z's DESCRIPTION CELL WAS CONSOLIDATED. TY2024 had two write-in description fields
+#      (`Line17z_ReadOrder.f2_19` x 222.8–381.6 and `Line17z_ReadOrder.f2_20` x 64.8–381.6); TY2025
+#      has ONE 24pt-tall cell (`Line17z_ReadOrder.f2_19`, x 64.8–381.6, y 282–306) spanning both
+#      rows. So **every page-2 field from 17z's amount onward shifted DOWN by one**:
+#
+#        line       TY2024 field              TY2025 field
+#        17z amt    f2_21                     f2_20
+#        18         f2_22                     f2_21
+#        19         f2_23                     f2_22
+#        20         Line20_ReadOrder.f2_24    f2_23          ← the `Line20_ReadOrder` wrapper is GONE
+#        21         f2_25                     f2_24
+#
+#      Ported blindly, TY2024's `line21 = f2_25` names a field that does not exist on this PDF —
+#      which at least fails loudly. The three shifts on page 1 do not.
+#
+#   Cosmetic, no field effect: lines 1e/1f dropped the ", column (n)" / ", column (o)" qualifiers
+#   from their four source references; 17b's comma became a period; line 21's "line 23, or Form
+#   1040-NR" became "line 23; or Form 1040-NR".
+#
+# ★ NOT wired into `Schedule2Map::for_year` by this file — that match arm is still TY2024-only, and
+#   TY2025 full-return support remains fail-closed on the Schedule 1-A / Form 6251 / SALT work named
+#   by `tax_tables.rs::ty2025_full_return_must_stay_fail_closed_until_complete`. This is the field
+#   map; enabling the year is a separate gate.
+# ────────────────────────────────────────────────────────────────────────────────────────────────
+form = "f1040s2"
+year = 2025
+
+# 2 "Alternative minimum tax. Attach Form 6251" — the AMT, from Form 6251's own printed line 11.
+#   ★ NOT "$0 by construction". The TY2024 map carried that claim as a census reason and it was
+#     already false: §G-6 built the Form 6251 emitter, `screen_absolute`'s AMT refusal row was
+#     DELETED (see its doc comment: "There is NO LONGER an AMT row here either"), and
+#     `packet.rs:656` now emits the form — `ar.amt.must_attach().then(|| ar.amt.clone())`. A return
+#     that owes AMT files the form and this line carries the figure. `RefuseReason::AmtScreenTriggered`
+#     survives only as a dead variant pending its Tier-2 rename.
+line2  = "form1[0].Page1[0].f1_12[0]"
+# 3 "Add lines 1z and 2. Enter here and on Form 1040, 1040-SR, or 1040-NR, line 17"
+line3  = "form1[0].Page1[0].f1_13[0]"
+# 4 "Self-employment tax. Attach Schedule SE. Check if any exemption from (see instructions):"
+#   The AMOUNT cell only (x 504.0–576.0). SS + regular Medicare; the exemption block is censused.
+line4  = "form1[0].Page1[0].f1_15[0]"
+# 11 "Additional Medicare Tax. Attach Form 8959"    (Form 8959's own printed line 18)
+line11 = "form1[0].Page1[0].f1_22[0]"
+# 12 "Net investment income tax. Attach Form 8960"  (Form 8960's own printed line 17)
+line12 = "form1[0].Page1[0].f1_23[0]"
+# 21 "Add lines 4, 7 through 16, 18, and 19. These are your total other taxes. Enter here and on
+#     Form 1040 or 1040-SR, line 23; or Form 1040-NR, line 23b"   ★ PAGE 2
+line21 = "form1[0].Page2[0].f2_24[0]"
+
+# ── Identity header (P6.2). Dumped + correlated against the printed form; the SSN cell declares
+#    /MaxLen 11 on the TY2025 PDF too (re-dumped, not carried over), so it takes the HYPHENATED
+#    form — the 1040's own SSN cells are /MaxLen 9 and take bare digits. The forms genuinely differ,
+#    so `push_identity` reads each cell's capacity rather than assuming one.
+[identity]
+name = "form1[0].Page1[0].f1_01[0]"
+ssn  = "form1[0].Page1[0].f1_02[0]"
+
+# ── §G-13 FIELD-PROVENANCE CENSUS ────────────────────────────────────────────────────────────────
+# Every AcroForm field on this PDF the map above does not fill, with the decision that leaves it
+# blank. 8 mapped + 55 censused = 63, the dumped total.
+#
+# `unmodeled` = btctax models no input that could reach the line; `artifact` = not an entry the
+# filer makes; `gap` = the line IS reachable and nothing populates it (a defect). No `gap` here.
+#
+# ★★ DIRECTION — THIS FORM IS THE DANGEROUS ONE. Schedule 2 is ADDITIONAL TAXES: unlike Schedule 3
+#    (credits, where a blank only ever overstates), every amount line here INCREASES what is owed,
+#    so a blank that should have carried a number is an UNDERSTATEMENT. "Not modelled" is therefore
+#    not by itself an adequate provenance on this form — the question is whether a filer btctax
+#    SERVES could owe the line and have it silently print blank.
+#
+#    Three such lines exist, and all three are fail-CLOSED by an actual refusal, verified in current
+#    source while writing this census rather than copied from the TY2024 prose:
+#
+#      line 5  (Form 4137)    W-2 box 8 allocated tips > 0 refuses — `return_refuse.rs:1208`,
+#                             `RefuseReason::AllocatedTips`, "W-2 box 8 allocated tips require
+#                             Form 4137".
+#      line 13 (W-2 box 12)   codes A/B/M/N are uncollected SS/Medicare tax and feed this line.
+#                             `return_refuse.rs:29` `INERT_BOX12_CODES` is a fail-closed ALLOWLIST
+#                             (D,E,F,G,H,S,AA,BB,EE,DD); every other code, A/B/M/N included, refuses
+#                             with `UnsupportedBox12Code`. Deliberately not silently ignored.
+#      line 2  (AMT)          NOT in this class any more, and the change is load-bearing: it is now
+#                             MAPPED and populated, so nothing is silently blank. See its note above.
+#
+#    The NEW line-4 exemption block runs the OTHER way and is safe by construction: checking box 1,
+#    2 or 3 asserts an EXEMPTION from self-employment tax. btctax has no exemption input, computes
+#    Schedule SE in full, and leaves the boxes blank — which OVERSTATES the tax for an exempt filer
+#    and can never understate it for anyone.
+#
+#    Everything else on this form is a tax on income or an account btctax does not model at all, so
+#    there is no value it could have carried.
+[census]
+
+# ── Part I lines 1a-1f: additions to tax from forms btctax does not emit ─────────────────────────
+"form1[0].Page1[0].Line1a_ReadOrder[0].f1_03[0]" = { line = "1a", rule = "unmodeled", reason = "\"Excess advance premium tax credit repayment. Attach Form 8962\" — btctax collects no Form 1095-A, so no marketplace APTC can exist to repay." }
+"form1[0].Page1[0].f1_04[0]" = { line = "1b", rule = "unmodeled", reason = "\"Repayment of new clean vehicle credit(s) transferred to a registered dealer from Schedule A (Form 8936), Part II\" — no vehicle credits modelled." }
+"form1[0].Page1[0].f1_05[0]" = { line = "1c", rule = "unmodeled", reason = "\"Repayment of previously owned clean vehicle credit(s) transferred to a registered dealer from Schedule A (Form 8936), Part IV\" — same." }
+"form1[0].Page1[0].f1_06[0]" = { line = "1d", rule = "unmodeled", reason = "\"Recapture of net EPE from Form 4255, line 2a, column (l)\" — btctax emits no Form 4255 (elective payment / credit transfer)." }
+
+# Line 1e — "Excessive payments (EPs) on gross EPE from Form 4255. Check applicable box and enter
+# amount. See instructions." The four checkboxes are (i) Line 1a, (ii) Line 1c, (iii) Line 1d,
+# (iv) Line 2a — printed two per row, upper row (i)/(ii) then lower row (iii)/(iv), which is why the
+# on-states run 1..4 down the pairs. Verified against the word geometry, not assumed: (i) prints at
+# x 64.8 with its box at 86.4 and (ii) at x 180.0 with its box at 201.6, both on the upper row
+# (y 494-502); (iii)/(iv) repeat the pattern on the lower row (y 482-490).
+# ★ TY2025 dropped the ", column (n)" qualifier each of these four references carried in TY2024.
+"form1[0].Page1[0].Line1e_ReadOrder[0].c1_1[0]" = { line = "1e(i)",   rule = "unmodeled", reason = "Form 4255 excessive-payment source checkbox, (i) Line 1a — no Form 4255 is modelled, so no box can be checked." }
+"form1[0].Page1[0].Line1e_ReadOrder[0].c1_1[1]" = { line = "1e(ii)",  rule = "unmodeled", reason = "Same — (ii) Line 1c." }
+"form1[0].Page1[0].Line1e_ReadOrder[0].c1_1[2]" = { line = "1e(iii)", rule = "unmodeled", reason = "Same — (iii) Line 1d." }
+"form1[0].Page1[0].Line1e_ReadOrder[0].c1_1[3]" = { line = "1e(iv)",  rule = "unmodeled", reason = "Same — (iv) Line 2a." }
+"form1[0].Page1[0].f1_07[0]"                    = { line = "1e",      rule = "unmodeled", reason = "Excessive-payments amount — no Form 4255." }
+"form1[0].Page1[0].Line1f_ReadOrder[0].c1_2[0]" = { line = "1f(i)",   rule = "unmodeled", reason = "\"20% EP from Form 4255\" source checkbox, (i) Line 1a — no Form 4255." }
+"form1[0].Page1[0].Line1f_ReadOrder[0].c1_2[1]" = { line = "1f(ii)",  rule = "unmodeled", reason = "Same — (ii) Line 1c." }
+"form1[0].Page1[0].Line1f_ReadOrder[0].c1_2[2]" = { line = "1f(iii)", rule = "unmodeled", reason = "Same — (iii) Line 1d." }
+"form1[0].Page1[0].Line1f_ReadOrder[0].c1_2[3]" = { line = "1f(iv)",  rule = "unmodeled", reason = "Same — (iv) Line 2a." }
+"form1[0].Page1[0].f1_08[0]"                    = { line = "1f",      rule = "unmodeled", reason = "20% excessive-payment amount — no Form 4255." }
+
+# Line 1y is a write-in. btctax asserts no free-text additional tax, for the same reason it writes no
+# free-text credit on Schedule 3: an unnamed, uncomputed amount is testimony it cannot substantiate.
+"form1[0].Page1[0].f1_09[0]" = { line = "1y type",   rule = "unmodeled", reason = "\"Other additions to tax (see instructions)\" free-text description cell (x 230.4-381.6) — btctax writes no write-in taxes." }
+"form1[0].Page1[0].f1_10[0]" = { line = "1y amount", rule = "unmodeled", reason = "Amount for the 1y write-in (MID column, x 410.4-481.6) — same." }
+"form1[0].Page1[0].f1_11[0]" = { line = "1z",        rule = "unmodeled", reason = "\"Add lines 1a through 1y\" — dead with every line 1 item blank." }
+
+# ── Line 2 — Alternative minimum tax ★ MAPPED above, and populated. Not censused. ────────────────
+
+# ── Line 4's NEW exemption block (TY2025) ────────────────────────────────────────────────────────
+# i1040gi--2025, "Line 4 / Self-employment Tax", verbatim: "If you filed Form 4361, received IRS
+# approval, and had no other income subject to self-employment tax, check box 1 on line 4." — "If
+# you filed Form 4029 and received IRS approval, check box 2 on line 4." — and box 3 is the
+# entry-space case: a U.S. citizen or resident alien abroad whose SE income is covered by a foreign
+# system ("EAS"), a non-carrying spouse's community income ("ECI"), or notary-public fees ("EN"),
+# each written on "the entry space next to box 3".
+#
+# ★ DIRECTION IS SAFE, and this is why these are `unmodeled` rather than `gap`: every one of these
+#   boxes claims an EXEMPTION from self-employment tax. btctax collects no exemption input and
+#   computes Schedule SE in full, so an exempt filer is OVERCHARGED, never undercharged. The same
+#   reasoning already stands on Schedule SE line A, whose census entry records clergy
+#   self-employment as out of scope — corroborated in `crates/btctax-cli/LIMITATIONS.md:321`,
+#   "Clergy self-employment is OUT OF SCOPE ... Use a preparer."
+"form1[0].Page1[0].Line4_ReadOrder[0].c1_3[0]" = { line = "4 box 1", rule = "unmodeled", reason = "\"Check if any exemption from ... 1 ☐ 4361\" — the approved Form 4361 minister / religious-order / Christian Science practitioner exemption. btctax models no clergy concept at all (no Form 4361 input, no way to print the required notation), matching Schedule SE line A's census entry and LIMITATIONS.md. Leaving it blank charges the full SE tax, which overstates rather than understates." }
+"form1[0].Page1[0].Line4_ReadOrder[0].c1_4[0]" = { line = "4 box 2", rule = "unmodeled", reason = "\"2 ☐ 4029\" — the approved Form 4029 religious-sect exemption (i1040gi 2025, Line 4: \"If you filed Form 4029 and received IRS approval, check box 2\"). Same out-of-scope archetype, same safe direction." }
+"form1[0].Page1[0].Line4_ReadOrder[0].c1_5[0]" = { line = "4 box 3", rule = "unmodeled", reason = "\"3 ☐\" — the write-in exemption case: EAS (citizen abroad covered by a foreign social-security system), ECI (community income the filer did not earn), or EN (notary-public fees). btctax collects none of these facts; computing SE tax in full overstates for such a filer." }
+"form1[0].Page1[0].Line4_ReadOrder[0].f1_14[0]" = { line = "4 box 3 entry", rule = "unmodeled", reason = "The entry space next to box 3 (x 252.0-324.0, MID-left of the amount column) where i1040gi 2025 directs the filer to write \"EAS\", \"ECI\" or \"EN\" (and, for a notary with $400+ of other SE earnings, the Schedule C net profit). Dead while box 3 is unchecked. ★ THIS FIELD IS `f1_14`, the name TY2024 used for line 4's AMOUNT — see the header note." }
+
+# ── Part II lines 5-10: other taxes ──────────────────────────────────────────────────────────────
+# ★ TY2024 called this cell `Line5_ReadOrder[0].f1_15[0]` — wrapper gone, name shifted.
+"form1[0].Page1[0].f1_16[0]" = { line = "5",  rule = "unmodeled", reason = "\"Social security and Medicare tax on unreported tip income. Attach Form 4137\". btctax collects W-2 box 7 (tips already reported to the employer) and REFUSES on box 8 allocated tips (`return_refuse.rs:1208`, RefuseReason::AllocatedTips); it never asks about tips withheld from the employer, and models no Form 4137. ★ The filer-facing question lives on Form 1040 line 1c (tip income not reported on line 1a) — see that form's census. ★ TY2024 named this field Line5_ReadOrder.f1_15 (see the comment above); the wrapper subform is gone and the name is now bare f1_16." }
+"form1[0].Page1[0].f1_17[0]" = { line = "6",  rule = "unmodeled", reason = "\"Uncollected social security and Medicare tax on wages. Attach Form 8919\" — the worker-misclassification case, which turns on an SS-8 determination btctax cannot make. ★ Direction is safe: such income reaches btctax as self-employment income and pays BOTH halves through Schedule SE (line 4), so not filing Form 8919 overstates rather than understates." }
+"form1[0].Page1[0].f1_18[0]" = { line = "7",  rule = "unmodeled", reason = "\"Total additional social security and Medicare tax. Add lines 5 and 6\" — dead with both blank." }
+"form1[0].Page1[0].f1_19[0]" = { line = "8",  rule = "unmodeled", reason = "\"Additional tax on IRAs or other tax-favored accounts. Attach Form 5329 if required\" — btctax models no IRA, HSA, MSA, Coverdell or ABLE account." }
+# ★ TY2024 called this widget `Line8_ReadOrder[0].c1_3[0]` — line 4 took c1_3/c1_4/c1_5.
+"form1[0].Page1[0].Line8_ReadOrder[0].c1_6[0]" = { line = "8 checkbox", rule = "unmodeled", reason = "\"If not required, check here\" — the checkbox presupposes an amount on line 8, which is structurally blank. Checking it would assert a tax-favored-account distribution the filer never reported. ★ TY2024 named this widget Line8_ReadOrder.c1_3 (see the comment above); line 4's three new boxes took c1_3/c1_4/c1_5, so it is now c1_6." }
+"form1[0].Page1[0].f1_20[0]" = { line = "9",  rule = "unmodeled", reason = "\"Household employment taxes. Attach Schedule H\" — btctax models no household employees." }
+"form1[0].Page1[0].f1_21[0]" = { line = "10", rule = "artifact",  reason = "The form's own text is \"Reserved for future use.\" — TY2025 RETIRED this line; TY2024 printed \"Repayment of first-time homebuyer credit. Attach Form 5405 if required\" in the same position. The IRS still ships a widget for a line that now takes no entry from anyone, so no decision is encodable, by the form's own statement. Same shape as Schedule 3 line 6e, Form 1040 line 30 and Schedule 1 line 22. Line 21 sums \"lines 4, 7 through 16\", so a blank line 10 contributes nothing." }
+
+# ── Part II lines 13-16 ──────────────────────────────────────────────────────────────────────────
+"form1[0].Page1[0].f1_24[0]" = { line = "13", rule = "unmodeled", reason = "\"Uncollected social security and Medicare or RRTA tax on tips or group-term life insurance from Form W-2, box 12.\" ★ FAIL-CLOSED: box 12 codes A/B/M/N are absent from `INERT_BOX12_CODES` (`return_refuse.rs:29`), so a W-2 carrying one refuses the return (UnsupportedBox12Code) rather than printing this line blank." }
+"form1[0].Page1[0].f1_25[0]" = { line = "14", rule = "unmodeled", reason = "\"Interest on tax due on installment income from the sale of certain residential lots and timeshares\" — no installment sales modelled." }
+"form1[0].Page1[0].f1_26[0]" = { line = "15", rule = "unmodeled", reason = "\"Interest on the deferred tax on gain from certain installment sales with a sales price over $150,000\" — same." }
+"form1[0].Page1[0].f1_27[0]" = { line = "16", rule = "unmodeled", reason = "\"Recapture of low-income housing credit. Attach Form 8611\" — not modelled." }
+
+# ── Page 2, lines 17a-17z: the other-additional-tax menu ─────────────────────────────────────────
+"form1[0].Page2[0].Line17a_ReadOrder[0].Line17_ReadOrder[0].f2_01[0]" = { line = "17a type",   rule = "unmodeled", reason = "\"Recapture of other credits. List type, form number, and amount\" — btctax claims no credit that could be recaptured, and writes no write-in taxes." }
+"form1[0].Page2[0].Line17a_ReadOrder[0].f2_02[0]"                     = { line = "17a amount", rule = "unmodeled", reason = "Amount for the 17a write-in — same." }
+"form1[0].Page2[0].f2_03[0]" = { line = "17b", rule = "unmodeled", reason = "\"Recapture of federal mortgage subsidy. If you sold your home, see instructions\" — btctax models no home sale or subsidised mortgage." }
+"form1[0].Page2[0].f2_04[0]" = { line = "17c", rule = "unmodeled", reason = "\"Additional tax on HSA distributions. Attach Form 8889\" — no HSA modelled." }
+"form1[0].Page2[0].f2_05[0]" = { line = "17d", rule = "unmodeled", reason = "\"Additional tax on an HSA because you didn't remain an eligible individual. Attach Form 8889\" — same." }
+"form1[0].Page2[0].f2_06[0]" = { line = "17e", rule = "unmodeled", reason = "\"Additional tax on Archer MSA distributions. Attach Form 8853\" — no MSA modelled." }
+"form1[0].Page2[0].f2_07[0]" = { line = "17f", rule = "unmodeled", reason = "\"Additional tax on Medicare Advantage MSA distributions. Attach Form 8853\" — same." }
+"form1[0].Page2[0].f2_08[0]" = { line = "17g", rule = "unmodeled", reason = "\"Recapture of a charitable contribution deduction related to a fractional interest in tangible personal property.\" ★ btctax DOES model charitable gifts, but only of BTC and cash — a fractional interest in tangible personal property is a different §170(o) regime it neither collects nor deducts, so there is no prior deduction of this kind to recapture." }
+"form1[0].Page2[0].f2_09[0]" = { line = "17h", rule = "unmodeled", reason = "\"Income you received from a nonqualified deferred compensation plan that fails to meet the requirements of section 409A\" — not modelled (and would arrive in W-2 box 12 code Z, which the allowlist refuses)." }
+"form1[0].Page2[0].f2_10[0]" = { line = "17i", rule = "unmodeled", reason = "\"Compensation you received from a nonqualified deferred compensation plan described in section 457A\" — not modelled." }
+"form1[0].Page2[0].f2_11[0]" = { line = "17j", rule = "unmodeled", reason = "\"Section 72(m)(5) excess benefits tax\" — no qualified plan modelled." }
+"form1[0].Page2[0].f2_12[0]" = { line = "17k", rule = "unmodeled", reason = "\"Golden parachute payments\" — not modelled (would arrive in W-2 box 12 code K, refused by the allowlist)." }
+"form1[0].Page2[0].f2_13[0]" = { line = "17l", rule = "unmodeled", reason = "\"Tax on accumulation distribution of trusts\" (Form 4970) — btctax models no trusts." }
+"form1[0].Page2[0].f2_14[0]" = { line = "17m", rule = "unmodeled", reason = "\"Excise tax on insider stock compensation from an expatriated corporation\" — not modelled." }
+"form1[0].Page2[0].f2_15[0]" = { line = "17n", rule = "unmodeled", reason = "\"Look-back interest under section 167(g) or 460(b) from Form 8697 or 8866\" — no long-term contracts modelled." }
+"form1[0].Page2[0].f2_16[0]" = { line = "17o", rule = "unmodeled", reason = "\"Tax on non-effectively connected income for any part of the year you were a nonresident alien from Form 1040-NR\" — btctax emits a Form 1040 for a full-year resident filer only." }
+"form1[0].Page2[0].f2_17[0]" = { line = "17p", rule = "unmodeled", reason = "\"Any interest from Form 8621, line 16f, relating to distributions from, and dispositions of, stock of a section 1291 fund\" — btctax models no PFIC, matching Form 8960's §1411-10(g) census entry." }
+"form1[0].Page2[0].f2_18[0]" = { line = "17q", rule = "unmodeled", reason = "\"Any interest from Form 8621, line 24\" — same." }
+"form1[0].Page2[0].Line17z_ReadOrder[0].f2_19[0]" = { line = "17z type",   rule = "unmodeled", reason = "\"Any other taxes. List type and amount\" free-text description — btctax writes no write-in taxes. ★ TY2025 CONSOLIDATED TY2024's two description cells (f2_19 + f2_20) into this one 24pt-tall cell (x 64.8-381.6, y 282-306); everything after it on page 2 shifted down one name." }
+"form1[0].Page2[0].f2_20[0]"                      = { line = "17z amount", rule = "unmodeled", reason = "Amount for the 17z write-in (MID column) — same. ★ TY2024 called this cell `f2_21`." }
+
+# ── Page 2 totals and the remaining Part II lines ────────────────────────────────────────────────
+"form1[0].Page2[0].f2_21[0]" = { line = "18", rule = "unmodeled", reason = "\"Total additional taxes. Add lines 17a through 17z\" — dead with all of line 17 blank. Line 21 (mapped) sums lines 4, 7 through 16, 18 and 19, so a blank line 18 contributes nothing. ★ TY2024 called this cell `f2_22`." }
+"form1[0].Page2[0].f2_22[0]" = { line = "19", rule = "unmodeled", reason = "\"Recapture of net EPE from Form 4255, line 1d, column (l)\" — no Form 4255 modelled. ★ TY2024 called this cell `f2_23`." }
+# ★ TY2024 called this cell `Line20_ReadOrder[0].f2_24[0]` — wrapper gone, name shifted down one.
+"form1[0].Page2[0].f2_23[0]" = { line = "20", rule = "unmodeled", reason = "\"Section 965 net tax liability installment from Form 965-A\" — no §965 transition tax modelled. ★ Note line 20 is informational and is NOT summed into line 21, so it sits in the MID column (x 410.4-481.6), not the amount column. ★ TY2024 called this cell Line20_ReadOrder.f2_24 (see the comment above); the wrapper subform is gone." }

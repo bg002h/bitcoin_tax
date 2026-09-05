@@ -1,0 +1,137 @@
+# Form 8959 (Additional Medicare Tax), tax year 2025 — logical line → fully-qualified PDF field name.
+#
+# PORTED from `forms/2024/f8959.map.toml`, but NOT trusted from it. Everything below was re-derived
+# from the TY2025 authority in this pass:
+#
+#   bundled PDF   crates/btctax-forms/forms/2025/f8959.pdf
+#                 sha256:13e64004948331d2b708c80b1b664bf69675028edd0b84f2de6e3ca9afaa996d, 71969 bytes
+#                 — a byte-for-byte copy of design/forms/2025/f8959--2025.pdf, whose `.pdf.txt` note
+#                 records the same hash against https://www.irs.gov/pub/irs-prior/f8959--2025.pdf
+#   inventory     `xtask dump-fields design/forms/2025/f8959--2025.pdf` → 26 AcroForm fields, all text,
+#                 all on page 1. Diffed against the same command on the bundled TY2024 PDF: IDENTICAL
+#                 in field name AND widget rect, every field, zero differences.
+#   printed text  design/forms/extract/f8959--2025.txt (`pdftotext -layout`) — the doc comments below
+#                 are transcribed from THAT, never from the rendered page and never from the 2024 map.
+#                 `diff -b` of the 2024 and 2025 extracts: only the year stamps (2024→2025), one
+#                 whitespace reflow in the line-9 MFJ row, and a "Created 4/30/25" footer. No line
+#                 number moved, no line's text changed, and the §1401(b)(2) thresholds are statutory
+#                 and unindexed — still $250,000 / $125,000 / $200,000.
+#
+# ★ THE LINE SET IS ENUMERATED FROM THE EXTRACT, not from a range: scanning the committed text layer
+#   for its printed line labels yields exactly ["1".."24"] — 24 numbered lines, no sub-lettered lines
+#   anywhere on this form. 24 numbered lines + name + SSN = the 26 fields the PDF carries.
+#
+# ★★ THE LINE→FIELD JOIN WAS RE-DERIVED GEOMETRICALLY, by two independent witnesses over
+#    `pdftotext -bbox` words joined to the dumped widget rects. Both agree, on all 26 fields:
+#      witness 1 — "the last printed label at or above the box's centre" (the label-reader's own rule)
+#      witness 2 — "the word the form prints immediately to the box's left on the same row"
+#    Both yield f1_(N+2) → line N for every N in 1..=24, with no gaps, and leave f1_1/f1_2 unlabelled
+#    because they are the header row (the captions "Name(s) shown on return" @x=36 and "Your social
+#    security number" @x=450 sit directly above them, matching their x-origins 36.0 and 446.4).
+#    Witness 2 matters where witness 1 alone would be ambiguous: lines 5, 9 and 15 are three-row
+#    filing-status blocks whose entry box sits at the BOTTOM of the block, so its row-tail reads
+#    "spouse . . . $200,000 5" — the label is printed beside the box, and that is what pins it.
+#
+# Column x-clusters (dumped, not assumed; the map-independent geometric oracle lives in form8959.rs,
+# never here): MID x = [410.4, 481.6] (lines 1, 4, 5, 8, 9, 10, 11, 19, 20, 21) and AMOUNT x =
+# [504.0, 576.0] (lines 6, 7, 12, 13, 18, 22, 24) — unchanged from TY2024, to the tenth of a point.
+#
+# UNMAPPED ON PURPOSE — see the [census] at the foot of this file, which names every one with the rule
+# that says why. In one line: lines 2/3 (Form 4137 tips, Form 8919 wages) and the whole of Part III
+# plus line 23 (RRTA) are unmodeled, which is exactly why line 4 = line 1, line 18 = 7 + 13, and
+# line 24 = line 22.
+form = "f8959"
+year = 2025
+
+# ── Part I — Additional Medicare Tax on Medicare Wages ──────────────────────────────────────────
+# L1 — "Medicare wages and tips from Form W-2, box 5. If you have more than one Form W-2, enter the
+#       total of the amounts from box 5"
+line1  = "topmostSubform[0].Page1[0].f1_3[0]"
+# L4 — "Add lines 1 through 3"
+line4  = "topmostSubform[0].Page1[0].f1_6[0]"
+# L5 — "Enter the following amount for your filing status:
+#       Married filing jointly $250,000
+#       Married filing separately $125,000
+#       Single, Head of household, or Qualifying surviving spouse $200,000"
+#       (three printed rows; the entry box sits on the last of them)
+line5  = "topmostSubform[0].Page1[0].f1_7[0]"
+# L6 — "Subtract line 5 from line 4. If zero or less, enter -0-"
+line6  = "topmostSubform[0].Page1[0].f1_8[0]"
+# L7 — "Additional Medicare Tax on Medicare wages. Multiply line 6 by 0.9% (0.009). Enter here and go
+#       to Part II"
+line7  = "topmostSubform[0].Page1[0].f1_9[0]"
+
+# ── Part II — Additional Medicare Tax on Self-Employment Income ─────────────────────────────────
+# L8 — "Self-employment income from Schedule SE (Form 1040), Part I, line 6. If you had a loss,
+#       enter -0-"
+line8  = "topmostSubform[0].Page1[0].f1_10[0]"
+# L9 — "Enter the following amount for your filing status:
+#       Married filing jointly $250,000
+#       Married filing separately $125,000
+#       Single, Head of household, or Qualifying surviving spouse $200,000"
+#       (the same three printed rows as line 5, repeated for Part II)
+line9  = "topmostSubform[0].Page1[0].f1_11[0]"
+# L10 — "Enter the amount from line 4"
+line10 = "topmostSubform[0].Page1[0].f1_12[0]"
+# L11 — "Subtract line 10 from line 9. If zero or less, enter -0-"
+line11 = "topmostSubform[0].Page1[0].f1_13[0]"
+# L12 — "Subtract line 11 from line 8. If zero or less, enter -0-"
+line12 = "topmostSubform[0].Page1[0].f1_14[0]"
+# L13 — "Additional Medicare Tax on self-employment income. Multiply line 12 by 0.9% (0.009). Enter
+#        here and go to Part III"
+line13 = "topmostSubform[0].Page1[0].f1_15[0]"
+
+# ── Part IV — Total Additional Medicare Tax ─────────────────────────────────────────────────────
+# L18 — "Add lines 7, 13, and 17. Also include this amount on Schedule 2 (Form 1040), line 11 (Form
+#        1040-SS filers, see instructions), and go to Part V"
+line18 = "topmostSubform[0].Page1[0].f1_20[0]"
+
+# ── Part V — Withholding Reconciliation ─────────────────────────────────────────────────────────
+# L19 — "Medicare tax withheld from Form W-2, box 6. If you have more than one Form W-2, enter the
+#        total of the amounts from box 6"
+line19 = "topmostSubform[0].Page1[0].f1_21[0]"
+# L20 — "Enter the amount from line 1"
+line20 = "topmostSubform[0].Page1[0].f1_22[0]"
+# L21 — "Multiply line 20 by 1.45% (0.0145). This is your regular Medicare tax withholding on Medicare
+#        wages"
+line21 = "topmostSubform[0].Page1[0].f1_23[0]"
+# L22 — "Subtract line 21 from line 19. If zero or less, enter -0-. This is your Additional Medicare
+#        Tax withholding on Medicare wages"
+line22 = "topmostSubform[0].Page1[0].f1_24[0]"
+# L24 — "Total Additional Medicare Tax withholding. Add lines 22 and 23. Also include this amount with
+#        federal income tax withholding on Form 1040, 1040-SR, or 1040-NR, line 25c (Form 1040-SS
+#        filers, see instructions)"
+line24 = "topmostSubform[0].Page1[0].f1_26[0]"
+
+# ── Identity header (P6.2). Dumped + correlated against the printed form: the caption "Name(s) shown
+#    on return" begins at x=36.0 above f1_1 (x0=36.0) and "Your social security number" at x=450.4
+#    above f1_2 (x0=446.4). The SSN cell declares /MaxLen 11 in the TY2025 PDF too (dumped, not
+#    carried over), so it takes the HYPHENATED form — the 1040's own SSN cells are /MaxLen 9 and take
+#    bare digits, and `push_identity` reads each cell's capacity rather than assuming a house style.
+[identity]
+name = "topmostSubform[0].Page1[0].f1_1[0]"
+ssn  = "topmostSubform[0].Page1[0].f1_2[0]"
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# ★★★ THE FIELD CENSUS (§G-13). Every AcroForm field this form has must be accounted for EXACTLY
+# ONCE: either it is mapped above (we fill it), or it is named here with the rule that says why we do
+# not. `census_accounts_for_every_field` asserts (map ∪ census) == the PDF's field set, so a field in
+# neither is a hard failure — that is the "we forgot this line" defect made visible.
+#
+# 26 fields = 19 mapped (17 money lines + name + SSN) + 7 censused. No field appears twice.
+#
+# rule = "unmodeled"  a benefit or situation outside btctax's scope. Using btctax FORGOES it, so the
+#                     reason must name what is given up.
+#
+# ★ Every entry below is CARRIED FORWARD UNCHANGED from TY2024 on purpose: the TY2025 form prints the
+#   identical seven lines with identical text (verified by `diff -b` of the two committed extracts),
+#   and btctax's coverage of Form 4137, Form 8919 and RRTA did not change either. Nothing here was
+#   re-decided; the field names were re-dumped and the line texts re-read before it was kept.
+[census]
+"topmostSubform[0].Page1[0].f1_4[0]"  = { line = "2",  rule = "unmodeled", reason = "Unreported tips from Form 4137, line 6 — btctax does not model Form 4137 tip income, so this stays blank and the line-4 sum is line 1 alone." }
+"topmostSubform[0].Page1[0].f1_5[0]"  = { line = "3",  rule = "unmodeled", reason = "Wages from Form 8919, line 6 — btctax does not model Form 8919 (uncollected SS/Medicare on wages), so this stays blank." }
+"topmostSubform[0].Page1[0].f1_16[0]" = { line = "14", rule = "unmodeled", reason = "Railroad retirement (RRTA) compensation and tips from Form(s) W-2, box 14 — btctax models no RRTA, so all of Part III stays blank." }
+"topmostSubform[0].Page1[0].f1_17[0]" = { line = "15", rule = "unmodeled", reason = "RRTA filing-status threshold — dead with line 14 blank." }
+"topmostSubform[0].Page1[0].f1_18[0]" = { line = "16", rule = "unmodeled", reason = "RRTA excess (line 14 − line 15, floored at 0) — dead with line 14 blank." }
+"topmostSubform[0].Page1[0].f1_19[0]" = { line = "17", rule = "unmodeled", reason = "Additional Medicare Tax on RRTA compensation (line 16 × 0.9%) — dead with line 14 blank, which is why line 18 = line 7 + line 13." }
+"topmostSubform[0].Page1[0].f1_25[0]" = { line = "23", rule = "unmodeled", reason = "Additional Medicare Tax withholding on RRTA compensation from Form W-2, box 14 — dead with no RRTA, which is why line 24 = line 22." }

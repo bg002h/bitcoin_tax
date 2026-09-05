@@ -1,0 +1,221 @@
+# Schedule 1-A (Additional Deductions), Form 1040, TY2025 — logical cell → PDF field name.
+#
+# ★★ NEW FOR TY2025 — THERE IS NOTHING TO PORT. Schedule 1-A was created by Pub. L. 119-21 and has no
+# TY2024 counterpart: `crates/btctax-forms/forms/2024/` holds no `f1040s1a.map.toml` and
+# `design/forms/extract/` holds no `f1040s1a--2024.txt` (this is stated in `design/forms/README.md`
+# too). So every field name below was read from the blank itself, and every line's text from the
+# committed text layer — nothing here descends from a prior year's map.
+#
+# Authority : design/forms/2025/f1040s1a--2025.pdf
+#             sha256 64f97b38ff4218e2f188fd55a8aab7043556687487c82bbefe0b6dd1a956ecd4  (94,224 bytes)
+#             https://www.irs.gov/pub/irs-prior/f1040s1a--2025.pdf
+#   The bundled `forms/2025/f1040s1a.pdf` is a BYTE COPY of that file (same sha256), and
+#   `design/forms/geometry/f1040s1a--2025.json` — the fixture the label witnesses read — records the
+#   same sha256, so the map, the geometry and the archived authority are the same document.
+# Text layer: design/forms/extract/f1040s1a--2025.txt   ("Created 11/4/25" in the page footer)
+# Fields    : `./target/debug/xtask dump-fields design/forms/2025/f1040s1a--2025.pdf` → **54 fields,
+#             every one of type `text`. No checkboxes, no radio groups, no ReadOnly widget.**
+#
+# ⚠️ ROOT SUBFORM IS `form1[0]` — as on Schedules 1 and 2, NOT the `topmostSubform[0]` of Schedule 3,
+# Schedule A, Schedule B, the 1040 and the 8995s. Read per form; never assumed.
+#
+# ⚠️ TWO PAGES — Parts I-III are page 1, Parts IV-VI page 2, so descent is grouped BY PAGE.
+#
+# ── The line set, enumerated FROM THE FORM (never from a range or a hand-list) ────────────────────
+#
+# `./target/debug/xtask label-census f1040s1a--2025` reads the committed text layer + geometry and
+# reports **50 printed labels, of which 48 take an entry** and 2 are box-less headings:
+#
+#     Part I    1  2a 2b 2c 2d 2e  3                                    (7 entry lines)
+#     Part II   4* 4a 4b 4c 5 6 7 8 9 10 11 12 13                      (12 entry lines, 4 is a heading)
+#     Part III  14a 14b 14c 15 16 17 18 19 20 21                       (10 entry lines)
+#     Part IV   22* 22a 22b 23 24 25 26 27 28 29 30                    (10 entry lines, 22 is a heading)
+#     Part V    31 32 33 34 35 36a 36b 37                               (8 entry lines)
+#     Part VI   38                                                      (1 entry line)
+#
+# ★★ A LINE IS NOT A CELL. Lines 22a and 22b are three-column rows — the form itself addresses them by
+# column (*"Add lines 22a and 22b, column (iii)"*) — so the 48 entry LINES are **52 entry CELLS**:
+#
+#     48 entry lines − 2 grid rows + 6 grid cells = 52 cells
+#     52 entry cells + 2 identity cells (name, SSN) = **54 = the `dump-fields` count, exactly.**
+#
+# That equality is what makes "every field is accounted for" checkable here, and it is why the census
+# below is EMPTY rather than unwritten: there is no field on this PDF that this map does not name.
+# `crates/btctax-core/src/tax/schedule_1a.rs::Schedule1A::leaves()` independently enumerates the same
+# **52 leaves over 48 labels**, tied to its struct by the compiler.
+#
+# ★ THE TWO BOX-LESS LABELS, with their reasons (the census question, one level up — a label with no
+#   field must carry a reason, or "we forgot this line" is indistinguishable from "this line has no
+#   box"):
+#     4  — heads its own sub-rows 4a/4b/4c. Its text is instruction only ("…enter -0- on lines 4a and
+#          4b and see the instructions to determine the amount to enter on line 4c"); the amounts are
+#          on the sub-rows. Verified: no widget's row span contains label 4.
+#     22 — heads the applicable-passenger-vehicle table and carries the (i)/(ii)/(iii) column headers.
+#          Its entries are rows 22a and 22b, mapped below.
+#
+# ── Column x-clusters (read from the widgets' own /Rect, `dump-fields`) ───────────────────────────
+#
+#     AMOUNT       x = [504.0, 576.0]   40 cells
+#     MID          x = [410.4, 481.6]    8 cells — 2a 2b 2c 2d, 4a 4b, 14a 14b
+#     line 22 (ii) x = [432.0, 503.2]    2 cells — a THIRD money band unique to this form
+#     line 22 (i)  x = [108.0, 380.0]    2 cells — the VIN comb (see below)
+#     identity     name x = [36.0, 445.6], SSN x = [447.4, 576.0]
+#
+#   40 + 8 + 2 + 2 + 2 = 54. ★ NO INSET/PARENTHESIZED BOXES ON THIS FORM: every AMOUNT widget is
+#   exactly [504.0,576.0] and every MID widget exactly [410.4,481.6] — unlike Schedule 1 (8a/8d/8s),
+#   Schedule D and Form 8995, this schedule prints no `(   )` cell, so no positive-magnitude sign
+#   convention is needed anywhere on it. Every line here is ≥ 0 by construction ("If zero or less,
+#   enter -0-").
+#
+# ★★ LINES 11, 19 AND 28 ARE **STEPS, NOT MONEY** — a whole-number quotient ("Divide line 10 by
+#   $1,000 … decrease the result to the next lower whole number"). Formatting one as currency, or
+#   applying whole-dollar rounding to it, is a category error; the key names carry `_steps` so the
+#   emitter cannot silently treat them as dollars, mirroring `Schedule1aPartII::line11_steps` in
+#   btctax-core. (Form 8995-A line 24 is this repo's precedent for a non-money printed line.)
+#   ★ AND THE THREE DO NOT ROUND THE SAME WAY: 11 and 19 say *decrease* to the next lower whole
+#   number; **28 says *increase* to the next higher** one. A shared helper that floors all three
+#   overstates the car-loan deduction — the understatement-of-tax direction.
+#
+# ★★ DIRECTION — THIS FORM'S BLANKS CUT BOTH WAYS, which is unusual and is why every cell is mapped:
+#   Schedule 1-A is a deduction schedule, so a wrongly-blank *deduction* line (4a-6, 14a-14c, 22a/22b
+#   col (iii), 23) only forgoes a benefit and OVERSTATES tax. But the phase-out machinery runs the
+#   other way: a wrongly-blank MAGI line (1, 2a-2e, 3, 8, 16, 25, 31) or reduction line (10-12, 18-20,
+#   27-29, 33-34) shrinks the phase-out and INFLATES the deduction — an UNDERSTATEMENT of tax, the
+#   direction that matters. There is no cell on this schedule that may be left unaddressable.
+#
+# ★ LINE 22 ARITY IS TWO ROWS + A REFUSAL, decided in btctax-core (`Line22Row`), not here: the form
+#   prints rows a and b only and says *"If more than two VINs, see instructions"*, whose instruction is
+#   to attach a statement btctax does not emit. A third vehicle is a refusal upstream; this map is the
+#   form's own arity and must never grow a row 22c that the PDF does not have.
+#
+# ★ THE VIN COMB TAKES BARE CHARACTERS. `VIN-1_Comb[0].f2_01[0]` / `VIN-2_Comb[0].f2_04[0]` declare
+#   **/MaxLen 17** and are drawn as 17 per-character cells. A VIN is exactly 17 characters with no
+#   separators, so a correct VIN fits exactly — but anything padded, spaced or hyphenated is SILENTLY
+#   TRUNCATED, the same defect this crate already hit with a /MaxLen 9 SSN comb fed a hyphenated
+#   value. Column (i) is the only non-money cell on the schedule.
+#
+# ── Cross-form seams (each quoted from the text layer of the form that states it) ─────────────────
+#   Schedule 1-A line 1  ← Form 1040, 1040-SR or 1040-NR **line 11b**.
+#   Schedule 1-A line 38 → Form 1040 or 1040-SR **line 13b**, or Form 1040-NR **line 13c**.
+#   Schedule 1-A line 37 → Form 6251 line 1a (*"Subtract Schedule 1-A (Form 1040), line 37, from Form
+#                          1040, 1040-SR, or 1040-NR, line 14"*) — it is line **37**, the senior
+#                          subtotal, that reaches the AMT, NOT line 38.
+form = "f1040s1a"
+year = 2025
+
+# ── Part I — Modified Adjusted Gross Income (MAGI) Amount (page 1) ───────────────────────────────
+line1  = "form1[0].Page1[0].f1_03[0]"   # "Enter the amount from Form 1040, 1040-SR, or 1040-NR, line 11b"   AMOUNT
+line2a = "form1[0].Page1[0].f1_04[0]"   # "Enter any income from Puerto Rico that you excluded"              MID
+line2b = "form1[0].Page1[0].f1_05[0]"   # "Enter the amount from Form 2555, line 45"                         MID
+line2c = "form1[0].Page1[0].f1_06[0]"   # "Enter the amount from Form 2555, line 50"                         MID
+line2d = "form1[0].Page1[0].f1_07[0]"   # "Enter the amount from Form 4563, line 15"                         MID
+line2e = "form1[0].Page1[0].f1_08[0]"   # "Add lines 2a, 2b, 2c, and 2d"                                     AMOUNT
+line3  = "form1[0].Page1[0].f1_09[0]"   # "Add lines 1 and 2e"                                               AMOUNT
+
+# ── Part II — No Tax on Tips (page 1) ────────────────────────────────────────────────────────────
+# Line 4 itself is a HEADING (no box) — see the note above.
+line4a = "form1[0].Page1[0].f1_10[0]"   # "Enter qualified tips included on Form W-2, box 7, but see the instructions if Form W-2, box 5 is more than $176,100 or you received tips that are not subject to social security and Medicare taxes"   MID
+line4b = "form1[0].Page1[0].f1_11[0]"   # "Qualified tips included on Form 4137, line 1, row A, column (c). If Form 4137 is not filed, enter -0-"   MID
+line4c = "form1[0].Page1[0].f1_12[0]"   # "If you only received qualified tips as an employee with respect to employment with one employer, enter the larger of line 4a or line 4b. Otherwise, see the instructions to determine the amount to enter on line 4c. If you received tips as an employee in more than one occupation, see the instructions"   AMOUNT
+line5  = "form1[0].Page1[0].f1_13[0]"   # "Qualified tips received in the course of a trade or business. Qualified tip amount included in Form 1099-NEC, box 1; Form 1099-MISC, box 3; or Form 1099-K, box 1a. Do not enter more than the net profit from the trade or business. If you received qualified tips in the course of more than one trade or business or in more than one occupation, see instructions"   AMOUNT
+line6  = "form1[0].Page1[0].f1_14[0]"   # "Add lines 4c and 5"                                               AMOUNT
+line7  = "form1[0].Page1[0].f1_15[0]"   # "Enter the smaller of the amount on line 6 or $25,000"             AMOUNT
+line8  = "form1[0].Page1[0].f1_16[0]"   # "Enter the amount from line 3"                                     AMOUNT
+line9  = "form1[0].Page1[0].f1_17[0]"   # "Enter $150,000 ($300,000 if married filing jointly)"              AMOUNT
+line10 = "form1[0].Page1[0].f1_18[0]"   # "Subtract line 9 from line 8. If zero or less, enter the amount from line 7 on line 13"   AMOUNT
+line11_steps = "form1[0].Page1[0].f1_19[0]"   # "Divide line 10 by $1,000. If the resulting number isn’t a whole number, decrease the result to the next lower whole number. (For example, decrease 1.5 to 1, and decrease 0.05 to 0.)"   AMOUNT column, ★ STEPS not money — FLOOR
+line12 = "form1[0].Page1[0].f1_20[0]"   # "Multiply line 11 by $100"                                         AMOUNT
+line13 = "form1[0].Page1[0].f1_21[0]"   # "Qualified tips deduction. Subtract line 12 from line 7. If zero or less, enter -0-"   AMOUNT → line 38
+
+# ── Part III — No Tax on Overtime (page 1) ───────────────────────────────────────────────────────
+# ★ There is no box-less "14" heading: the text layer merges `14` and `a` on one printed row (they
+#   share a y), so 14a is a real entry line. The two headings on this schedule are 4 and 22.
+line14a = "form1[0].Page1[0].f1_22[0]"  # "Qualified overtime compensation included in Form W-2, box 1. If you received qualified overtime compensation not reported on Form W-2, box 1, see instructions"   MID
+line14b = "form1[0].Page1[0].f1_23[0]"  # "Qualified overtime compensation included in Form 1099-NEC, box 1, or Form 1099-MISC, box 3 (see instructions)"   MID
+line14c = "form1[0].Page1[0].f1_24[0]"  # "Add lines 14a and 14b"                                            AMOUNT
+line15  = "form1[0].Page1[0].f1_25[0]"  # "Enter the smaller of the amount on line 14c or $12,500 ($25,000 if married filing jointly)"   AMOUNT
+line16  = "form1[0].Page1[0].f1_26[0]"  # "Enter the amount from line 3"                                     AMOUNT
+line17  = "form1[0].Page1[0].f1_27[0]"  # "Enter $150,000 ($300,000 if married filing jointly)"              AMOUNT
+line18  = "form1[0].Page1[0].f1_28[0]"  # "Subtract line 17 from line 16. If zero or less, enter the amount from line 15 on line 21"   AMOUNT
+line19_steps = "form1[0].Page1[0].f1_29[0]"  # "Divide line 18 by $1,000. If the resulting number isn’t a whole number, decrease the result to the next lower whole number. (For example, decrease 1.5 to 1, and decrease 0.05 to 0.)"   AMOUNT column, ★ STEPS not money — FLOOR
+line20  = "form1[0].Page1[0].f1_30[0]"  # "Multiply line 19 by $100"                                         AMOUNT
+line21  = "form1[0].Page1[0].f1_31[0]"  # "Qualified overtime compensation deduction. Subtract line 20 from line 15. If zero or less, enter -0-"   AMOUNT → line 38
+
+# ── Part IV — No Tax on Car Loan Interest (page 2) ───────────────────────────────────────────────
+# Line 22 itself is a HEADING (no box): "Applicable passenger vehicle (see instructions). If more than
+# two VINs, see instructions." Its rows are [line22a] / [line22b] below (after the root scalars — TOML
+# binds a bare key to the LAST table once one is opened).
+line23 = "form1[0].Page2[0].f2_07[0]"   # "Add lines 22a and 22b, column (iii)"                              AMOUNT
+line24 = "form1[0].Page2[0].f2_08[0]"   # "Enter the smaller of the amount on line 23 or $10,000"            AMOUNT
+line25 = "form1[0].Page2[0].f2_09[0]"   # "Enter the amount from line 3"                                     AMOUNT
+line26 = "form1[0].Page2[0].f2_10[0]"   # "Enter $100,000 ($200,000 if married filing jointly)"              AMOUNT
+line27 = "form1[0].Page2[0].f2_11[0]"   # "Subtract line 26 from line 25. If zero or less, enter the amount from line 24 on line 30"   AMOUNT
+line28_steps = "form1[0].Page2[0].f2_12[0]"   # "Divide line 27 by $1,000. If the resulting number isn’t a whole number, increase the result to the next higher whole number. (For example, increase 1.5 to 2, and increase 0.05 to 1.)"   AMOUNT column, ★ STEPS not money — ★★ CEIL, the one part that rounds the other way
+line29 = "form1[0].Page2[0].f2_13[0]"   # "Multiply line 28 by $200"                                         AMOUNT
+line30 = "form1[0].Page2[0].f2_14[0]"   # "Qualified passenger vehicle loan interest deduction. Subtract line 29 from line 24. If zero or less, enter -0-"   AMOUNT → line 38
+
+# ── Part V — Enhanced Deduction for Seniors (page 2) ─────────────────────────────────────────────
+line31 = "form1[0].Page2[0].f2_15[0]"   # "Enter the amount from line 3"                                     AMOUNT
+line32 = "form1[0].Page2[0].f2_16[0]"   # "Enter $75,000 ($150,000 if married filing jointly)"               AMOUNT
+line33 = "form1[0].Page2[0].f2_17[0]"   # "Subtract line 32 from line 31. If zero or less, enter $6,000 on line 35"   AMOUNT ★ the jump writes a NONZERO constant into line 35 — not "-0-"
+line34 = "form1[0].Page2[0].f2_18[0]"   # "Multiply line 33 by 6% (0.06)"                                    AMOUNT
+line35 = "form1[0].Page2[0].f2_19[0]"   # "Subtract line 34 from $6,000. If zero or less, enter -0-"         AMOUNT
+line36a = "form1[0].Page2[0].f2_20[0]"  # "If you have a valid social security number (see instructions) and were born before January 2, 1961, enter the amount from line 35"   AMOUNT
+line36b = "form1[0].Page2[0].f2_21[0]"  # "If you are married filing jointly, your spouse has a valid social security number (see instructions), and your spouse was born before January 2, 1961, enter the amount from line 35"   AMOUNT
+line37  = "form1[0].Page2[0].f2_22[0]"  # "Enhanced deduction for seniors. Add lines 36a and 36b"            AMOUNT → line 38 AND → Form 6251 line 1a
+
+# ── Part VI — Total Additional Deductions (page 2) ───────────────────────────────────────────────
+line38 = "form1[0].Page2[0].f2_23[0]"   # "Add lines 13, 21, 30, and 37. Enter here and on Form 1040 or 1040-SR, line 13b, or on Form 1040-NR, line 13c"   AMOUNT
+
+# ── Identity header (P6.2). Printed labels read off the page's own words, not assumed: the name cell
+#    sits under "Name(s) shown on Form 1040, 1040-SR, or 1040-NR" (x=36) and the SSN cell under "Your
+#    social security number" (x=450). The SSN cell declares /MaxLen 11, so it takes the HYPHENATED
+#    form — as on every other schedule, and unlike the 1040's own /MaxLen 9 cells, which take bare
+#    digits. `push_identity` reads each cell's capacity rather than assuming either.
+[identity]
+name = "form1[0].Page1[0].f1_01[0]"
+ssn  = "form1[0].Page1[0].f1_02[0]"
+
+# ── Line 22 — the applicable-passenger-vehicle table. TWO ROWS, THREE COLUMNS EACH. ──────────────
+# The column headers are printed once, above the rows, and the form addresses cells by column:
+#   (i)   "Vehicle identification number (VIN)"                     x=[108.0,380.0], /MaxLen 17 comb
+#   (ii)  "Deducted on Schedule C, Schedule E, or Schedule F"       x=[432.0,503.2]
+#         ★ The text layer transposes this three-column header block, so the longest contiguous run it
+#           preserves is "(ii) Deducted on" — the same class `line_coverage_check` records for Form
+#           8949's header. The full header is on the page; the quotable fragment is the short one.
+#   (iii) "Schedule 1-A"                                            x=[504.0,576.0]
+#         Defined by Part IV's own Caution: "Column (iii) is the total QPVLI paid in 2025 less the
+#         amounts reported in column (ii)." Line 23 adds THIS column across both rows.
+# Row a's widgets sit at ytop 159/162, row b's at 177/180, matching the margin letters `a` (161.7) and
+# `b` (179.7) — measured, not inferred.
+[line22a]
+col_i_vin                 = "form1[0].Page2[0].Table_Line22[0].Line22a[0].VIN-1_Comb[0].f2_01[0]"
+col_ii_deducted_elsewhere = "form1[0].Page2[0].Table_Line22[0].Line22a[0].f2_02[0]"
+col_iii_schedule_1a       = "form1[0].Page2[0].Table_Line22[0].Line22a[0].f2_03[0]"
+
+[line22b]
+col_i_vin                 = "form1[0].Page2[0].Table_Line22[0].Line22b[0].VIN-2_Comb[0].f2_04[0]"
+col_ii_deducted_elsewhere = "form1[0].Page2[0].Table_Line22[0].Line22b[0].f2_05[0]"
+col_iii_schedule_1a       = "form1[0].Page2[0].Table_Line22[0].Line22b[0].f2_06[0]"
+
+# ── §G-13 FIELD-PROVENANCE CENSUS ────────────────────────────────────────────────────────────────
+# Every AcroForm field on this PDF that the map above does not fill, with the decision that leaves it
+# blank. `unmodeled` = btctax models no input that could reach the cell; `artifact` = not an entry the
+# filer makes; `gap` = the cell IS reachable and nothing populates it (a defect).
+#
+# ★★ THIS TABLE IS EMPTY, AND THAT IS A MEASURED RESULT, NOT AN OMISSION. `dump-fields` reports 54
+# fields; the map above names 54 (2 identity + 52 entry cells) and the two sets are equal — checked by
+# extracting every quoted FQN from this file and diffing it against the `dump-fields` inventory, in
+# both directions. There is no field left to dispose of.
+#
+# ★ Why this form maps 100% while Schedule 1 maps 10 of 50: Schedule 1-A is transcribed END TO END in
+#   `btctax-core::tax::schedule_1a` (`Schedule1A::leaves()` — 52 leaves over 48 labels, every one an
+#   `Option`), so every cell has a determinate provenance and a place to come from. Blankness is
+#   decided upstream by the `Option`, never by the absence of an address here: a cell this map did not
+#   name would be one the emitter physically could not print, and per the DIRECTION note above, on
+#   this schedule several of those are the understatement direction.
+#
+# ★ The two labels with NO field (headings 4 and 22) are dispositioned in the header block above —
+#   they cannot be census keys, because a census key is a field FQN and these have none. Inventing a
+#   key for them would break the very bijection this section asserts.
+[census]

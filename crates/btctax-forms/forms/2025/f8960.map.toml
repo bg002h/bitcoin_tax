@@ -1,0 +1,140 @@
+# Form 8960 (Net Investment Income Tax, §1411), tax year 2025 — logical line → PDF field name.
+#
+# PORTED from `forms/2024/f8960.map.toml`, and re-verified against the TY2025 authority rather than
+# assumed. Provenance of this file, every step run in the porting session (2026-09-05):
+#
+#   authority PDF   design/forms/2025/f8960--2025.pdf
+#                   sha256:9b323b7166b5845a776f781b8c82eef94ccd998354e88fc33a1051c3b3789731
+#                   (matches design/forms/MANIFEST.json; the bundled forms/2025/f8960.pdf beside this
+#                   file is a byte copy — same sha256)
+#   text layer      design/forms/extract/f8960--2025.txt
+#   field inventory `xtask dump-fields design/forms/2025/f8960--2025.pdf` → **38 AcroForm fields**
+#                   (2 identity text + 3 checkboxes + 33 money cells). Every FQN below was pasted
+#                   from that dump, never copied forward from the TY2024 map on faith.
+#
+# ★★ THE TY2024→TY2025 DELTA IS ZERO ON BOTH AXES, MEASURED, NOT ASSUMED.
+#   · `dump-fields` on this PDF and on forms/2024/f8960.pdf differ in **nothing but the file-path
+#     header line** — identical field NAMES, identical /Rect geometry, identical checkbox on-states,
+#     identical maxlen. 38 → 38, zero diff.
+#   · `diff -b` of the two committed text layers differs in **exactly three places**: the two extract
+#     header lines (path + sha256), the "2024"→"2025" year stamp, and the footer
+#     "Form 8960 (2024)" → "Form 8960 (2025) Created 8/19/25".
+#   No line was renumbered, no line changed meaning, no line was retired, nothing was added. Contrast
+#   Schedule C (27a/27b traded content under the same letters) and Schedule 2 (line 10 retired to
+#   "Reserved for future use") — the traps this note exists to say did NOT happen here.
+#
+# LINE↔FIELD CORRELATION — geometric, from the text layer, not from the rendered page and not
+# inherited. For every one of the 33 money cells, the printed label immediately LEFT of the box on
+# the box's own row was read out of `pdftotext -bbox-layout` and compared to the entry below; the
+# margin column (with its bare sub-letters `b`/`c`/`d` resolved to their numeric parent) was read
+# independently and agrees on all 33. The printed entry-line set enumerated FROM the extract —
+#   1 2 3 4a 4b 4c 5a 5b 5c 5d 6 7 8 9a 9b 9c 9d 10 11 12 13 14 15 16 17 18a 18b 18c 19a 19b 19c 20 21
+# — is **33 labels against 33 boxes, a bijection**: no box without a label, no label without a box,
+# no sequence gap. That set is what `[census]` below is closed against, and it was derived by
+# enumerating the form, never from a numeric range or a hand-written list.
+#
+# Column x-clusters (the code-side oracle lives in form8960.rs, never here): MID x ≈ [410.4, 481.6],
+# AMOUNT x ≈ [504, 576] — measured on THIS PDF, and the same two as Schedule SE / Form 8959.
+#
+# ★ NOTE the suffix offset is NOT a simple `line + k`: it holds only for lines 1–3, then the lettered
+# sub-lines (4a–4c, 5a–5d, 9a–9d) make the printed number and the suffix diverge permanently. Every
+# entry below was pinned against its printed label, never extrapolated.
+#
+# UNMAPPED ON PURPOSE — left BLANK on the filed form because v1 does not model them, and a map entry
+# would invite a future filler to write a misleading 0. Each is named in `[census]` with its reason:
+#   line 3 (f1_5) annuities · lines 4a–4c (f1_6..f1_8) Schedule E · line 5b/5c (f1_10, f1_11) ·
+#   line 6 (f1_13) CFC/PFIC · lines 9a/9c (f1_16, f1_18) and line 10 (f1_20) investment expenses and
+#   additional modifications · lines 18a–21 (f1_28..f1_35) Part III ESTATES AND TRUSTS · the 3 Part I
+#   election checkboxes.
+#   ★ line 9b (f1_17) is NOT on that list — it is MAPPED below and left blank by the EMITTER
+#     (`push_money_opt`) when the filer claimed no allocation. That is the difference between "we do
+#     not model this line" and "this filer entered nothing on it".
+#
+# ★★ 9d AND 11 ARE BLANK-CAPABLE, NOT "FILLED AT ZERO". The TY2024 map's header still says they
+# "ARE filled, at zero"; that sentence was overtaken by FR-12 (closed 2026-09-05) and stands corrected
+# here rather than carried forward. `Form8960Lines::line9d` and `::line11` are `Option<Usd>`:
+# *"Add lines 9a, 9b, and 9c"* and *"Total deductions and modifications. Add lines 9d and 10"* are
+# both `Production::Combine`, whose rule in this repo's own census is **blank iff every operand is
+# blank** — and neither line carries a *"-0-"* clause (Part II has none anywhere; the form's first is
+# line 12's). With 9a/9c/10 unmodelled and 9b unallocated, every operand is blank and the cells print
+# nothing. They remain MAPPED because the emitter must be able to write them the moment 9b is
+# allocated; mapped ≠ populated. FR-39 tracks line 11's half of that pair.
+form = "f8960"
+year = 2025
+
+# ── Part I — Investment Income ──────────────────────────────────────────────────────────────────
+line1  = "topmostSubform[0].Page1[0].f1_3[0]"    # "Taxable interest (see instructions)"
+line2  = "topmostSubform[0].Page1[0].f1_4[0]"    # "Ordinary dividends (see instructions)"
+line5a = "topmostSubform[0].Page1[0].f1_9[0]"    # "Net gain or loss from disposition of property (see instructions)"
+line5d = "topmostSubform[0].Page1[0].f1_12[0]"   # "Combine lines 5a through 5c"
+line7  = "topmostSubform[0].Page1[0].f1_14[0]"   # "Other modifications to investment income (see instructions)"
+line8  = "topmostSubform[0].Page1[0].f1_15[0]"   # "Total investment income. Combine lines 1, 2, 3, 4c, 5d, 6, and 7"
+
+# ── Part II — Investment Expenses Allocable to Investment Income and Modifications ──────────────
+# ★ 9b is COLLECTED (§1411(c)(1)(B) — the filer's own "reasonable method" allocation of the state and
+#   local income tax their Schedule A actually deducted, bounded by §164(b)(6)). BLANK when they
+#   claimed none: the emitter uses `push_money_opt`, so an unclaimed line writes nothing at all.
+line9b = "topmostSubform[0].Page1[0].f1_17[0]"   # "State, local, and foreign income tax (see instructions)"
+line9d = "topmostSubform[0].Page1[0].f1_19[0]"   # "Add lines 9a, 9b, and 9c"; BLANK when all three are (FR-12)
+line11 = "topmostSubform[0].Page1[0].f1_21[0]"   # "Total deductions and modifications. Add lines 9d and 10"; BLANK when 9d and 10 both are (FR-39)
+
+# ── Part III — Tax Computation (INDIVIDUALS; the estates/trusts branch stays blank) ─────────────
+line12 = "topmostSubform[0].Page1[0].f1_22[0]"   # "Net investment income. Subtract Part II, line 11, from Part I, line 8"
+line13 = "topmostSubform[0].Page1[0].f1_23[0]"   # "Modified adjusted gross income (see instructions)"
+line14 = "topmostSubform[0].Page1[0].f1_24[0]"   # "Threshold based on filing status (see instructions)" — FILLABLE, not pre-printed
+line15 = "topmostSubform[0].Page1[0].f1_25[0]"   # "Subtract line 14 from line 13. If zero or less, enter -0-"
+line16 = "topmostSubform[0].Page1[0].f1_26[0]"   # "Enter the smaller of line 12 or line 15"
+line17 = "topmostSubform[0].Page1[0].f1_27[0]"   # "Multiply line 16 by 3.8% (0.038)" → Schedule 2 line 12
+
+# ── Identity header (P6.2). Dumped + correlated against the printed form; the SSN cell declares
+#    /MaxLen 11 on the TY2025 blank too (re-read from this PDF's dump, not assumed), so it takes the
+#    HYPHENATED form — the 1040's own SSN cells are /MaxLen 9 and take bare digits, so the forms
+#    genuinely differ and `push_identity` reads each cell's capacity.
+[identity]
+name = "topmostSubform[0].Page1[0].f1_1[0]"
+ssn  = "topmostSubform[0].Page1[0].f1_2[0]"
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# ★★★ THE FIELD CENSUS (§G-13). See f8959.map.toml for the rule vocabulary.
+#
+#   rule = "unmodeled"  a benefit or situation outside btctax's scope. Using btctax FORGOES it, so the
+#                       reason must name what is given up.
+#
+# btctax computes NIIT for an INDIVIDUAL from interest (1), dividends (2), and gain on disposition
+# (5a/5d), then lines 7–17. Everything below is income, a deduction, or an election it does not model
+# — each one FORGONE, which for income lines means the tax can only be OVERSTATED, never understated.
+#
+# 38 fields = 15 mapped money cells + 2 [identity] + 21 censused (3 checkboxes + 18 money cells).
+[census]
+
+# ── Part I elections btctax does not offer ───────────────────────────────────────────────────────
+"topmostSubform[0].Page1[0].PartI[0].c1_1[0]" = { line = "6013(g)", rule = "unmodeled", reason = "\"Section 6013(g) election (see instructions)\" — nonresident-alien spouse treated as a resident. btctax offers no such election, so the box stays unchecked. Checkbox, on-state \"1\" (read from this PDF's dump)." }
+"topmostSubform[0].Page1[0].PartI[0].c1_2[0]" = { line = "6013(h)", rule = "unmodeled", reason = "\"Section 6013(h) election (see instructions)\" — same class; not offered. Checkbox, on-state \"1\"." }
+"topmostSubform[0].Page1[0].PartI[0].c1_3[0]" = { line = "1.1411-10(g)", rule = "unmodeled", reason = "\"Regulations section 1.1411-10(g) election (see instructions)\" — a CFC/PFIC election; btctax models no CFCs or PFICs. Checkbox, on-state \"1\"." }
+
+# ── Investment income btctax does not model ──────────────────────────────────────────────────────
+"topmostSubform[0].Page1[0].f1_5[0]"  = { line = "3",  rule = "unmodeled", reason = "\"Annuities (see instructions)\" — not modelled; omitting income can only overstate the tax." }
+"topmostSubform[0].Page1[0].f1_6[0]"  = { line = "4a", rule = "unmodeled", reason = "\"Rental real estate, royalties, partnerships, S corporations, trusts, trades or businesses, etc. (see instructions)\" — ★ note the \"trades or businesses\" clause. ★★ TWICE-CORRECTED 2026-07-30 and carried forward verbatim, because both wrong readings are re-derivable. Draft 1 said \"none modelled\" (wrong: btctax DOES model a Schedule C trade or business). Draft 2 then said Schedule C income belongs here when the business is passive and called that an understatement — also wrong, and it is the reading that produced the bogus Schedule C line-G gap. The truth: btctax's Schedule C income is DERIVED as the SE base (return_1040.rs), so §1411(c)(6) excludes it from NII regardless of passivity; on the form it would enter 4a and leave again on 4b, netting 4c = 0. Blank here is arithmetically identical and correct. The rentals and pass-throughs named on this line remain genuinely unmodelled." }
+"topmostSubform[0].Page1[0].f1_7[0]"  = { line = "4b", rule = "unmodeled", reason = "Printed caption, reconstructed across the form's own hyphen line-break (\"...of a non-\" / \"section 1411...\"): \"Adjustment for net income or loss derived in the ordinary course of a non-section 1411 trade or business (see instructions)\". ★ READ THE INSTRUCTION BODY, NOT THE PRINTED CAPTION — an earlier version of this entry said \"dead with line 4a blank\" from the caption alone. i8960's line 4b body lists FOUR bulleted back-outs, one of which is \"Net income or loss from a section 1411 trade or business that’s taken into account in determining self-employment income.\" (design/forms/extract/i8960--2025.txt, under \"Line 4b—Adjustment for Net Income or Loss Derived in the Ordinary Course of a Non-Section 1411 Trade or Business or Otherwise Excepted\") — i.e. it also removes a PASSIVE trade or business whose income is SE income. Those same instructions state the statutory basis outright: \"Income taken into account in determining self-employment income subject to tax under section 1401(b) is specifically excluded from NIIT under section 1411(c)(6).\" That is why btctax's unconditional exclusion of Schedule C income from NII is correct. Blank because line 4a is blank and there is nothing to adjust." }
+"topmostSubform[0].Page1[0].f1_8[0]"  = { line = "4c", rule = "unmodeled", reason = "\"Combine lines 4a and 4b\" — a Combine total whose every operand is blank, so it is blank too (the same rule that makes 9d and 11 blank-capable). Line 8's sum therefore omits 4c with nothing lost." }
+"topmostSubform[0].Page1[0].f1_10[0]" = { line = "5b", rule = "unmodeled", reason = "\"Net gain or loss from disposition of property that is not subject to net investment income tax (see instructions)\" — btctax's dispositions are all §1411 property, so there is nothing to back out." }
+"topmostSubform[0].Page1[0].f1_11[0]" = { line = "5c", rule = "unmodeled", reason = "\"Adjustment from disposition of partnership interest or S corporation stock (see instructions)\" — btctax models no partnership interests or S-corp stock." }
+"topmostSubform[0].Page1[0].f1_13[0]" = { line = "6",  rule = "unmodeled", reason = "\"Adjustments to investment income for certain CFCs and PFICs (see instructions)\" — not modelled; MAGI is fail-closed to AGI." }
+
+# ── Part II deductions btctax does not model ─────────────────────────────────────────────────────
+"topmostSubform[0].Page1[0].f1_16[0]" = { line = "9a", rule = "unmodeled", reason = "\"Investment interest expenses (see instructions)\" — a DEDUCTION against NII; forgoing it can only overstate the tax, never understate it." }
+"topmostSubform[0].Page1[0].f1_18[0]" = { line = "9c", rule = "unmodeled", reason = "\"Miscellaneous investment expenses (see instructions)\" — not modelled; another forgone deduction." }
+"topmostSubform[0].Page1[0].f1_20[0]" = { line = "10", rule = "unmodeled", reason = "\"Additional modifications (see instructions)\" — not modelled. With 10 blank, line 11 (\"Add lines 9d and 10\") equals 9d, and is blank whenever 9d is." }
+
+# ── Part III: ESTATES AND TRUSTS — a filer type btctax never serves ──────────────────────────────
+# btctax emits a Form 1040 (individual). It has no Form 1041 path at all, so every line of the
+# estates-and-trusts branch is structurally UNREACHABLE, not merely unmodelled — and line 12 itself
+# routes past it: "Individuals, complete lines 13–17. Estates and trusts, complete lines 18a–21."
+"topmostSubform[0].Page1[0].f1_28[0]" = { line = "18a", rule = "unmodeled", reason = "\"Net investment income (line 12 above)\" — estates and trusts only. btctax emits an individual Form 1040 and has no Form 1041 path, so all of this branch is unreachable." }
+"topmostSubform[0].Page1[0].f1_29[0]" = { line = "18b", rule = "unmodeled", reason = "\"Deductions for distributions of net investment income and charitable deductions (see instructions)\" — estates/trusts branch, unreachable." }
+"topmostSubform[0].Page1[0].f1_30[0]" = { line = "18c", rule = "unmodeled", reason = "\"Undistributed net investment income. Subtract line 18b from line 18a (see instructions). If zero or less, enter -0-\" — estates/trusts branch, unreachable." }
+"topmostSubform[0].Page1[0].f1_31[0]" = { line = "19a", rule = "unmodeled", reason = "\"Adjusted gross income (see instructions)\" — estates/trusts branch, unreachable." }
+"topmostSubform[0].Page1[0].f1_32[0]" = { line = "19b", rule = "unmodeled", reason = "\"Highest tax bracket for estates and trusts for the year (see instructions)\" — estates/trusts branch, unreachable." }
+"topmostSubform[0].Page1[0].f1_33[0]" = { line = "19c", rule = "unmodeled", reason = "\"Subtract line 19b from line 19a. If zero or less, enter -0-\" — estates/trusts branch, unreachable." }
+"topmostSubform[0].Page1[0].f1_34[0]" = { line = "20",  rule = "unmodeled", reason = "\"Enter the smaller of line 18c or line 19c\" — estates/trusts branch, unreachable." }
+"topmostSubform[0].Page1[0].f1_35[0]" = { line = "21",  rule = "unmodeled", reason = "\"Net investment income tax for estates and trusts. Multiply line 20 by 3.8% (0.038). Enter here and include on your tax return (see instructions)\" — estates/trusts branch, unreachable. The individual's counterpart is line 17, which IS mapped." }

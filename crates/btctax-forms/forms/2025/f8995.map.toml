@@ -1,0 +1,139 @@
+# Form 8995 (Qualified Business Income Deduction, Simplified), TY2025 — logical line → PDF field name.
+#
+# Ported from `forms/2024/f8995.map.toml`. ★ EVERY field name below was re-read from the TY2025 blank
+# with `./target/debug/xtask dump-fields crates/btctax-forms/forms/2025/f8995.pdf` (33 text fields, no
+# checkboxes, sha256:55380ad230303e15… — byte-identical to design/forms/2025/f8995--2025.pdf), and NOT
+# copied from the TY2024 map. That mattered: **the IRS renamed 21 of the 33 fields for TY2025** while
+# the printed form did not change at all (§ "What changed vs TY2024" below). A port that kept the 2024
+# spellings would have parsed, looked right, and written to fields that do not exist.
+#
+# Line labels were enumerated FROM the committed text layer `design/forms/extract/f8995--2025.txt`
+# (margin column, right-aligned at x2≈50.40 per design/forms/LABEL_READER.md), not from a range:
+#   ["1", "i", "ii", "iii", "iv", "v", "2", "3", … "17"] — 22 labels, identical to TY2024.
+# Label "1" heads the table and takes no box of its own; "i".."v" are its five rows (3 cells each).
+# So 5×3 table cells + 16 numbered-line boxes (lines 2-17) + 2 identity cells = 33. That equals the
+# `dump-fields` count exactly, which is what makes "every field is accounted for" checkable here.
+#
+# Column x-clusters (the code-side oracle lives in form8995.rs): MID x ≈ [410,482], AMOUNT x ≈ [504,576].
+#
+# ★ **The parenthesized boxes.** Lines 3, 7, 16 and 17 are printed INSIDE literal `(   )` on the form,
+# and their widgets are inset from the ordinary column: MID-paren [413.4,479.4] vs MID [410.4,481.6];
+# AMOUNT-paren [507.0,573.0] vs AMOUNT [504.0,576.0]. (TY2024's insets were 1pt tighter — [414.4,478.4]
+# and [508.0,572.0]. The x-CENTRES are unchanged: 446.4 and 540.0.) They need NO separate cluster here,
+# because the geometric oracle bands the widget's x-centre and the inset boxes share their column's
+# centre. What they DO need is a sign convention: **the parentheses supply the minus sign, so the value
+# written must be a POSITIVE MAGNITUDE.** Writing `-1234` renders as `(-1,234)` — a positive number on a
+# filed return. `qbi::Form8995Lines` stores every one of these as a magnitude ≥ 0 for exactly that reason.
+#
+# ★ PART I ROW 1i — the trade or business.
+#   Line 2's own text is "Total qualified business income or (loss). Combine lines 1i through 1v,
+#   column (c)". Leaving the table blank while line 2 is non-zero would file a form that totals a column
+#   with no rows, claiming a deduction for a business it never names. Row 1i carries it.
+#
+#   The row is a horizontal triple at y≈[552,576], so its three cells share a y and CANNOT join the
+#   ordinal-y descent group. Their check is the column band instead, and the bands are TIGHT for a
+#   reason: row1_qbi's x-centre is 529.2, which sits INSIDE the ordinary AMOUNT cluster [504,576]
+#   (centre 540). A loose band would accept a cell mis-mapped between the two. row1_qbi is additionally
+#   pinned as descent ordinal 0, which asserts the row really does sit ABOVE line 2.
+#
+#   row1_tin has /MaxLen = 11 → the HYPHENATED SSN. A sole proprietor's TIN is their own SSN; btctax
+#   has no EIN input.
+row1_business = "topmostSubform[0].Page1[0].Table[0].Row1i[0].f1_03[0]"  # (a) trade/business name
+row1_tin      = "topmostSubform[0].Page1[0].Table[0].Row1i[0].f1_04[0]"  # (b) TIN  (maxlen 11)
+row1_qbi      = "topmostSubform[0].Page1[0].Table[0].Row1i[0].f1_05[0]"  # (c) this business's QBI
+
+# UNMAPPED ON PURPOSE:
+#   line 1 rows ii-v (Row1ii..Row1v) — v1 has exactly ONE trade or business (the crypto Schedule C), so
+#     only row 1i can ever be filled. A second business would need a second Schedule C, which the input
+#     model does not have. Each of the 12 cells is named individually in [census] below.
+form = "f8995"
+year = 2025
+
+# ── Part I — Trade, Business, or Aggregation Information ─────────────────────────────────────────
+line2  = "topmostSubform[0].Page1[0].Line2_ReadOrder[0].f1_18[0]"  # "Total qualified business income or (loss). Combine lines 1i through 1v, column (c)"
+# ★ PAREN box (x=[413.4,479.4], the MID-paren inset — same band as line 7). Positive MAGNITUDE only.
+line3  = "topmostSubform[0].Page1[0].f1_19[0]"   # "Qualified business net (loss) carryforward from the prior year"
+line4  = "topmostSubform[0].Page1[0].f1_20[0]"   # "Total qualified business income. Combine lines 2 and 3. If zero or less, enter -0-"
+line5  = "topmostSubform[0].Page1[0].f1_21[0]"   # "Qualified business income component. Multiply line 4 by 20% (0.20)"
+
+# ── Part I (cont.) — the REIT/PTP component ──────────────────────────────────────────────────────
+line6  = "topmostSubform[0].Page1[0].Line6_ReadOrder[0].f1_22[0]"   # "Qualified REIT dividends and publicly traded partnership (PTP) income or (loss) (see instructions)"
+line7  = "topmostSubform[0].Page1[0].f1_23[0]"   # "Qualified REIT dividends and qualified PTP (loss) carryforward from the prior year"  ★ PAREN — positive magnitude
+line8  = "topmostSubform[0].Page1[0].f1_24[0]"   # "Total qualified REIT dividends and PTP income. Combine lines 6 and 7. If zero or less, enter -0-"
+line9  = "topmostSubform[0].Page1[0].f1_25[0]"   # "REIT and PTP component. Multiply line 8 by 20% (0.20)"
+line10 = "topmostSubform[0].Page1[0].f1_26[0]"   # "Qualified business income deduction before the income limitation. Add lines 5 and 9"
+
+# ── Part II — the taxable-income limitation ──────────────────────────────────────────────────────
+line11 = "topmostSubform[0].Page1[0].f1_27[0]"   # "Taxable income before qualified business income deduction (see instructions)"
+line12 = "topmostSubform[0].Page1[0].f1_28[0]"   # "Enter your net capital gain, if any, increased by any qualified dividends (see instructions)"
+line13 = "topmostSubform[0].Page1[0].f1_29[0]"   # "Subtract line 12 from line 11. If zero or less, enter -0-"
+line14 = "topmostSubform[0].Page1[0].f1_30[0]"   # "Income limitation. Multiply line 13 by 20% (0.20)"
+line15 = "topmostSubform[0].Page1[0].f1_31[0]"   # "Qualified business income deduction. Enter the smaller of line 10 or line 14. Also enter this amount on the applicable line of your return (see instructions)" → 1040 L13a
+line16 = "topmostSubform[0].Page1[0].f1_32[0]"   # "Total qualified business (loss) carryforward. Combine lines 2 and 3. If greater than zero, enter -0-"      ★ PAREN — positive magnitude
+line17 = "topmostSubform[0].Page1[0].f1_33[0]"   # "Total qualified REIT dividends and PTP (loss) carryforward. Combine lines 6 and 7. If greater than zero, enter -0-"  ★ PAREN — positive magnitude
+
+# ── Identity header (P6.2). The TY2025 header prints "Name(s) shown on return" and "Your taxpayer
+#    identification number". The TIN cell declares /MaxLen 11, so it takes the HYPHENATED form (the
+#    1040's own SSN cells are /MaxLen 9 and take bare digits — the forms genuinely differ, so
+#    `push_identity` reads each cell's capacity). ★ Renamed for TY2025: f1_1/f1_2 → f1_01/f1_02.
+[identity]
+name = "topmostSubform[0].Page1[0].f1_01[0]"
+ssn  = "topmostSubform[0].Page1[0].f1_02[0]"
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# ★★★ THE FIELD CENSUS (§G-13). See f8959.map.toml for the rule vocabulary (`unmodeled`, `artifact`,
+# `gap`). Every AcroForm field must be accounted for EXACTLY ONCE: mapped above, or named here with
+# the rule that says why we do not fill it. 21 mapped + 12 censused = 33 = the `dump-fields` count.
+#
+# ★ There are **no `gap` entries** on this form, and that is a fact about TY2025 too, not an
+# inheritance: line 3 (the prior-year qualified business net (loss) carryforward, SUBTRACTED at line 4
+# and therefore the one field here whose omission would UNDERSTATE tax) is an INPUT and is MAPPED —
+# `qbi::form_8995_lines` takes `qbi_carryforward_in` and prints it. The 2026-07-30 closure recorded in
+# `tests/field_census.rs::recorded_gaps_may_only_shrink` therefore carries forward intact.
+[census]
+
+# ── Line 1 rows ii–v: btctax models ONE trade or business ────────────────────────────────────────
+# `ReturnInputs.schedule_c` is a single `Option<ScheduleCInputs>`, so a second business is not
+# representable — rows ii–v can never be reached. Row i (f1_03/04/05) IS mapped.
+#
+# ★ These are the fields the TY2025 rename touched hardest: the row subforms went
+# `Ln1B_Row2`→`Row1ii`, `Ln1C_Row3`→`Row1iii`, `Ln1D_Row4`→`Row1iv`, `Ln1E_Row5`→`Row1v`, and the
+# single-digit leaves f1_6..f1_9 gained a zero pad. Names below are the TY2025 spellings, verified
+# against `dump-fields`; the row↔numeral binding was confirmed geometrically (Row1ii's cells sit at
+# y=[528,552], and the printed "ii" has y-centre 533.95 — see the per-row table in the agent report).
+"topmostSubform[0].Page1[0].Table[0].Row1ii[0].f1_06[0]"  = { line = "1(a)ii",  rule = "unmodeled", reason = "Trade/business name, row ii. btctax models a single Schedule C business, so rows ii–v are unreachable." }
+"topmostSubform[0].Page1[0].Table[0].Row1ii[0].f1_07[0]"  = { line = "1(b)ii",  rule = "unmodeled", reason = "TIN, row ii — same reason." }
+"topmostSubform[0].Page1[0].Table[0].Row1ii[0].f1_08[0]"  = { line = "1(c)ii",  rule = "unmodeled", reason = "QBI amount, row ii — same reason." }
+"topmostSubform[0].Page1[0].Table[0].Row1iii[0].f1_09[0]" = { line = "1(a)iii", rule = "unmodeled", reason = "Trade/business name, row iii — same reason." }
+"topmostSubform[0].Page1[0].Table[0].Row1iii[0].f1_10[0]" = { line = "1(b)iii", rule = "unmodeled", reason = "TIN, row iii — same reason." }
+"topmostSubform[0].Page1[0].Table[0].Row1iii[0].f1_11[0]" = { line = "1(c)iii", rule = "unmodeled", reason = "QBI amount, row iii — same reason." }
+"topmostSubform[0].Page1[0].Table[0].Row1iv[0].f1_12[0]"  = { line = "1(a)iv",  rule = "unmodeled", reason = "Trade/business name, row iv — same reason." }
+"topmostSubform[0].Page1[0].Table[0].Row1iv[0].f1_13[0]"  = { line = "1(b)iv",  rule = "unmodeled", reason = "TIN, row iv — same reason." }
+"topmostSubform[0].Page1[0].Table[0].Row1iv[0].f1_14[0]"  = { line = "1(c)iv",  rule = "unmodeled", reason = "QBI amount, row iv — same reason." }
+"topmostSubform[0].Page1[0].Table[0].Row1v[0].f1_15[0]"   = { line = "1(a)v",   rule = "unmodeled", reason = "Trade/business name, row v — same reason." }
+"topmostSubform[0].Page1[0].Table[0].Row1v[0].f1_16[0]"   = { line = "1(b)v",   rule = "unmodeled", reason = "TIN, row v — same reason." }
+"topmostSubform[0].Page1[0].Table[0].Row1v[0].f1_17[0]"   = { line = "1(c)v",   rule = "unmodeled", reason = "QBI amount, row v — same reason." }
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# ★ WHAT CHANGED vs TY2024 — measured, not assumed.
+#
+# PRINTED FORM: `diff -b design/forms/extract/f8995--{2024,2025}.txt` is 5 hunks, and NONE of them is
+# a line. Same 22 labels, same 17 numbered lines, same cross-references (line 4 combines 2 and 3;
+# line 13 subtracts 12 from 11; line 15 is the smaller of 10 or 14; lines 16/17 combine 2+3 and 6+7).
+# The hunks are: the year stamp 2024→2025; OMB No. 1545-2294→1545-0074; the "use this form if"
+# threshold $191,950/$383,900 → **$197,300/$394,600**; a dot-leader reflow on line 3; and a
+# "Created 9/12/25" footer stamp. ★ The threshold is a `tax_tables.rs` constant, NOT a map concern —
+# no field on this form prints it.
+#
+# ACROFORM: 33 fields in both years, same geometry to ≤1pt, but **21 of the 33 were RENAMED**:
+#   f1_1  → f1_01, f1_2 → f1_02                       (identity, zero-padded)
+#   f1_3 .. f1_9 → f1_03 .. f1_09                     (table leaves, zero-padded)
+#   Ln1A_Row1 → Row1i,  Ln1B_Row2 → Row1ii,           (row subforms renamed to the printed numeral;
+#   Ln1C_Row3 → Row1iii, Ln1D_Row4 → Row1iv,           the 2024 names carried BOTH a letter and a
+#   Ln1E_Row5 → Row1v                                  1-based index, the 2025 ones neither)
+#   ReadOrderSubForm[0] → Line2_ReadOrder[0]          (the line-2 read-order wrapper)
+# Unchanged: `Line6_ReadOrder[0].f1_22[0]` and the bare `Page1[0]` leaves f1_19..f1_33.
+#
+# ★★ This is the whole risk of this port. The printed form is identical, so a reviewer comparing the
+# two map files against the FORM would find nothing wrong — the 2024 spellings describe the right
+# lines. They simply are not the names in the TY2025 PDF.
