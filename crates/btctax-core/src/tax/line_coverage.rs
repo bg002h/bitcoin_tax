@@ -2872,6 +2872,436 @@ fn zero_setaxresult() -> crate::tax::se::SeTaxResult {
     }
 }
 
+/// §B3 — **Schedule 1-A (Form 1040)**, Additional Deductions, **TY2025**. 48 line labels, 50 money
+/// rows (line 22 contributes two money columns on each of its two rows; column (i) is a VIN and is
+/// not money, so it carries no row here — the conformance KAT accounts for it as a non-money leaf).
+///
+/// ★★★ **THE FIRST TY2025 ROWS IN THIS TABLE, and that is why [`Coverage::quoting_year`] exists.**
+/// Every other form here is quoted from a TY2024 extract. Schedule 1-A exists only for TY2025+, so a
+/// row left at [`DEFAULT_ROW_YEAR`] would send `xtask line-coverage` looking for
+/// `f1040s1a--2024.txt`, which does not exist and has no map either — the checker's hard-error branch,
+/// reporting that the form NAME is wrong and misdiagnosing itself.
+///
+/// ★★ **The rows are built in their OWN `Coverage` and handed back whole.** The setter is
+/// forward-sticky and has no reset: calling it on a shared collector would silently re-date every form
+/// pushed after Schedule 1-A. That failure is a silent pass, not a red, which is exactly why the year
+/// is confined to this function.
+///
+/// ★★ **Lines 10, 18, 27 and 33 are `Exception`s, and the reason is the same one four times: they are
+/// JUMPS, not clamps.** *"If zero or less, enter the amount from line 7 on line 13"* routes PAST the
+/// phase-out; *"If zero or less, enter $6,000 on line 35"* writes a NONZERO constant into a later
+/// line. Transcribing any of them as `-0-` loses the whole deduction for every filer under the
+/// threshold — most of them. They are also the four lines that must be able to say *not completed*,
+/// which is what [`Coverage::exception`]'s widened `_value` is for: the `Option<Usd>` goes straight
+/// through, and an `.unwrap_or(Usd::ZERO)` at any of these sites is the defect that widening prevents.
+pub fn cover_schedule1a(s: &crate::tax::schedule_1a::Schedule1A) -> Coverage {
+    use crate::tax::schedule_1a::{
+        Line22Row, Schedule1A, Schedule1aPartI, Schedule1aPartII, Schedule1aPartIII,
+        Schedule1aPartIV, Schedule1aPartV, Schedule1aPartVI,
+    };
+    let Schedule1A {
+        part1,
+        part2,
+        part3,
+        part4,
+        part5,
+        part6,
+    } = s;
+    let Schedule1aPartI {
+        line1,
+        line2a,
+        line2b,
+        line2c,
+        line2d,
+        line2e,
+        line3,
+    } = part1;
+    let Schedule1aPartII {
+        line4a,
+        line4b,
+        line4c,
+        line5,
+        line6,
+        line7,
+        line8,
+        line9,
+        line10,
+        line11_steps,
+        line12,
+        line13,
+    } = part2;
+    let Schedule1aPartIII {
+        line14a,
+        line14b,
+        line14c,
+        line15,
+        line16,
+        line17,
+        line18,
+        line19_steps,
+        line20,
+        line21,
+    } = part3;
+    let Schedule1aPartIV {
+        line22a,
+        line22b,
+        line23,
+        line24,
+        line25,
+        line26,
+        line27,
+        line28_steps,
+        line29,
+        line30,
+    } = part4;
+    let Line22Row {
+        col_i_vin: vin_a,
+        col_ii_deducted_elsewhere: ded_a,
+        col_iii_schedule_1a: sch_a,
+    } = line22a;
+    let Line22Row {
+        col_i_vin: vin_b,
+        col_ii_deducted_elsewhere: ded_b,
+        col_iii_schedule_1a: sch_b,
+    } = line22b;
+    // ★★ The two VIN cells are the only NON-MONEY leaves on the schedule, so they are named by the
+    //    destructure (which has no `..`) and deliberately push no row: this table is the money census,
+    //    and the conformance KAT is what accounts for them, as `Leaf::Text` with a recorded reason.
+    //    ★ The type annotation is load-bearing, not decoration — retyping either VIN as money fails to
+    //    compile HERE, which is what stops a money field slipping in behind a `_`.
+    let _non_money_vin_cells: (&Option<String>, &Option<String>) = (vin_a, vin_b);
+    let Schedule1aPartV {
+        line31,
+        line32,
+        line33,
+        line34,
+        line35,
+        line36a,
+        line36b,
+        line37,
+    } = part5;
+    let Schedule1aPartVI { line38 } = part6;
+
+    let f = "f1040s1a";
+    let mut c = Coverage::default();
+    c.quoting_year("2025");
+
+    // ── Part I — MAGI ────────────────────────────────────────────────────────────────────────
+    c.line(
+        *line1,
+        f,
+        "1",
+        "line1",
+        Production::Carry,
+        "Enter the amount from Form 1040, 1040-SR, or 1040-NR, line 11b",
+    );
+    c.line(
+        *line2a,
+        f,
+        "2a",
+        "line2a",
+        Production::Collected,
+        "Enter any income from Puerto Rico that you excluded",
+    );
+    c.line(
+        *line2b,
+        f,
+        "2b",
+        "line2b",
+        Production::Carry,
+        "Enter the amount from Form 2555, line 45",
+    );
+    c.line(
+        *line2c,
+        f,
+        "2c",
+        "line2c",
+        Production::Carry,
+        "Enter the amount from Form 2555, line 50",
+    );
+    c.line(
+        *line2d,
+        f,
+        "2d",
+        "line2d",
+        Production::Carry,
+        "Enter the amount from Form 4563, line 15",
+    );
+    c.line(
+        *line2e,
+        f,
+        "2e",
+        "line2e",
+        Production::Combine,
+        "Add lines 2a, 2b, 2c, and 2d",
+    );
+    c.line(
+        *line3,
+        f,
+        "3",
+        "line3",
+        Production::Combine,
+        "Add lines 1 and 2e",
+    );
+
+    // ── Part II — No Tax on Tips ─────────────────────────────────────────────────────────────
+    c.line(*line4a, f, "4a", "line4a", Production::Collected,
+        "Enter qualified tips included on Form W-2, box 7, but see the instructions if Form W-2, box 5 is more than $176,100 or you received tips that are not subject to social security and Medicare taxes");
+    c.exception(*line4b, f, "4b", "line4b",
+        "Qualified tips included on Form 4137, line 1, row A, column (c). If Form 4137 is not filed, enter -0-",
+        "TWO BRANCHES AND BOTH ENTER — a carry from Form 4137 when one is filed, and a form-directed constant when it is not. `Collected`'s blank rule (blank when not asked) is contradicted by the form's own `-0-`, and `Clamped` requires a clause about the RESULT's sign, which this is not. Same shape as f1040sse:4a. ★ btctax emits no Form 4137 on any return, so the `-0-` branch is true of every return it produces; that is a fact about our output, not a claim about the filer.");
+    c.exception(*line4c, f, "4c", "line4c",
+        "If you only received qualified tips as an employee with respect to employment with one employer, enter the larger of line 4a or line 4b. Otherwise, see the instructions to determine the amount to enter on line 4c",
+        "\"The LARGER of\" — there is no larger-of production (`Bounded` is \"Enter the smaller of\"), and the \"Otherwise\" branch is the Qualified Tips From More Than One Employer Worksheet, which no production names. Same shape as f1040:12, filed for the same reason.");
+    c.line(*line5, f, "5", "line5", Production::Collected,
+        "Qualified tips received in the course of a trade or business. Qualified tip amount included in Form 1099-NEC, box 1; Form 1099-MISC, box 3; or Form 1099-K, box 1a. Do not enter more than the net profit from the trade or business");
+    c.line(
+        *line6,
+        f,
+        "6",
+        "line6",
+        Production::Combine,
+        "Add lines 4c and 5",
+    );
+    c.line(
+        *line7,
+        f,
+        "7",
+        "line7",
+        Production::Bounded,
+        "Enter the smaller of the amount on line 6 or $25,000",
+    );
+    c.line(
+        *line8,
+        f,
+        "8",
+        "line8",
+        Production::Carry,
+        "Enter the amount from line 3",
+    );
+    c.line(
+        *line9,
+        f,
+        "9",
+        "line9",
+        Production::Constant,
+        "Enter $150,000 ($300,000 if married filing jointly)",
+    );
+    c.exception(*line10, f, "10", "line10",
+        "Subtract line 9 from line 8. If zero or less, enter the amount from line 7 on line 13",
+        "A JUMP PAST THE PHASE-OUT, not a clamp: the conditional writes line 7 onto line 13 and leaves this line and lines 11-12 NOT COMPLETED. `Clamped` would print -0- here and zero the whole tips deduction for every filer under the threshold. The class the ratchet already records for f1040:34 — a condition with no \"-0-\" clause.");
+    c.exception(*line11_steps, f, "11", "line11_steps",
+        "Divide line 10 by $1,000. If the resulting number isn’t a whole number, decrease the result to the next lower whole number",
+        "A NON-MONEY LINE: the whole-number quotient of a division, not dollars. There is no Divide production, and whole-dollar rounding would be a category error. Precedent f8995a:24, the only other non-money printed line in this table. ★ The FLOOR direction is not asserted here — it is read off this printed sentence and compared to `schedule_1a_params` by `tables.rs::each_phase_out_rounds_the_way_its_own_printed_line_says_to`.");
+    c.line(
+        *line12,
+        f,
+        "12",
+        "line12",
+        Production::Scaled,
+        "Multiply line 11 by $100",
+    );
+    c.line(
+        *line13,
+        f,
+        "13",
+        "line13",
+        Production::Clamped(Polarity::FloorAtZero),
+        "Qualified tips deduction. Subtract line 12 from line 7. If zero or less, enter -0-",
+    );
+
+    // ── Part III — No Tax on Overtime ────────────────────────────────────────────────────────
+    c.line(*line14a, f, "14a", "line14a", Production::Collected,
+        "Qualified overtime compensation included in Form W-2, box 1. If you received qualified overtime compensation not reported on Form W-2, box 1, see instructions");
+    c.line(*line14b, f, "14b", "line14b", Production::Collected,
+        "Qualified overtime compensation included in Form 1099-NEC, box 1, or Form 1099-MISC, box 3 (see instructions)");
+    c.line(
+        *line14c,
+        f,
+        "14c",
+        "line14c",
+        Production::Combine,
+        "Add lines 14a and 14b",
+    );
+    c.line(*line15, f, "15", "line15", Production::Bounded,
+        "Enter the smaller of the amount on line 14c or $12,500 ($25,000 if married filing jointly)");
+    c.line(
+        *line16,
+        f,
+        "16",
+        "line16",
+        Production::Carry,
+        "Enter the amount from line 3",
+    );
+    c.line(
+        *line17,
+        f,
+        "17",
+        "line17",
+        Production::Constant,
+        "Enter $150,000 ($300,000 if married filing jointly)",
+    );
+    c.exception(*line18, f, "18", "line18",
+        "Subtract line 17 from line 16. If zero or less, enter the amount from line 15 on line 21",
+        "The same JUMP as line 10, one part along: it writes line 15 onto line 21 and leaves lines 18-20 not completed. Quoted as the form prints it rather than as one bracketed composite, because a synthesized quotation is not a citation.");
+    c.exception(*line19_steps, f, "19", "line19_steps",
+        "Divide line 18 by $1,000. If the resulting number isn’t a whole number, decrease the result to the next lower whole number",
+        "The same non-money quotient as line 11. Floors, like Part II and unlike Part IV; the direction is read off the printed line, never hand-assigned.");
+    c.line(
+        *line20,
+        f,
+        "20",
+        "line20",
+        Production::Scaled,
+        "Multiply line 19 by $100",
+    );
+    c.line(*line21, f, "21", "line21", Production::Clamped(Polarity::FloorAtZero),
+        "Qualified overtime compensation deduction. Subtract line 20 from line 15. If zero or less, enter -0-");
+
+    // ── Part IV — No Tax on Car Loan Interest ────────────────────────────────────────────────
+    // ★ Line 22's own label is a HEADING with no amount box; its entry rows are 22a and 22b, and each
+    //   carries two money columns. The column labels follow Form 8949's `line(col)` convention.
+    c.line(
+        *ded_a,
+        f,
+        "22a(ii)",
+        "line22a.col_ii_deducted_elsewhere",
+        Production::Collected,
+        "(ii) Deducted on",
+    );
+    c.line(
+        *sch_a,
+        f,
+        "22a(iii)",
+        "line22a.col_iii_schedule_1a",
+        Production::Collected,
+        "(iii) Schedule 1-A",
+    );
+    c.line(
+        *ded_b,
+        f,
+        "22b(ii)",
+        "line22b.col_ii_deducted_elsewhere",
+        Production::Collected,
+        "(ii) Deducted on",
+    );
+    c.line(
+        *sch_b,
+        f,
+        "22b(iii)",
+        "line22b.col_iii_schedule_1a",
+        Production::Collected,
+        "(iii) Schedule 1-A",
+    );
+    c.line(
+        *line23,
+        f,
+        "23",
+        "line23",
+        Production::Combine,
+        "Add lines 22a and 22b, column (iii)",
+    );
+    c.line(
+        *line24,
+        f,
+        "24",
+        "line24",
+        Production::Bounded,
+        "Enter the smaller of the amount on line 23 or $10,000",
+    );
+    c.line(
+        *line25,
+        f,
+        "25",
+        "line25",
+        Production::Carry,
+        "Enter the amount from line 3",
+    );
+    c.line(
+        *line26,
+        f,
+        "26",
+        "line26",
+        Production::Constant,
+        "Enter $100,000 ($200,000 if married filing jointly)",
+    );
+    c.exception(
+        *line27,
+        f,
+        "27",
+        "line27",
+        "Subtract line 26 from line 25. If zero or less, enter the amount from line 24 on line 30",
+        "The same JUMP a third time: line 24 onto line 30, lines 27-29 not completed.",
+    );
+    c.exception(*line28_steps, f, "28", "line28_steps",
+        "Divide line 27 by $1,000. If the resulting number isn’t a whole number, increase the result to the next higher whole number",
+        "The same non-money quotient as lines 11 and 19 — but this one CEILS, and that is the single most dangerous fact on this form. A shared phase-out helper with one direction is silently wrong on one side by exactly $100 and $200, and the deduction exhausts at +$49,001 rather than +$50,000. The direction is read off this printed sentence, never hand-assigned.");
+    c.line(
+        *line29,
+        f,
+        "29",
+        "line29",
+        Production::Scaled,
+        "Multiply line 28 by $200",
+    );
+    c.line(*line30, f, "30", "line30", Production::Clamped(Polarity::FloorAtZero),
+        "Qualified passenger vehicle loan interest deduction. Subtract line 29 from line 24. If zero or less, enter -0-");
+
+    // ── Part V — Enhanced Deduction for Seniors ──────────────────────────────────────────────
+    c.line(
+        *line31,
+        f,
+        "31",
+        "line31",
+        Production::Carry,
+        "Enter the amount from line 3",
+    );
+    c.line(
+        *line32,
+        f,
+        "32",
+        "line32",
+        Production::Constant,
+        "Enter $75,000 ($150,000 if married filing jointly)",
+    );
+    c.exception(*line33, f, "33", "line33",
+        "Subtract line 32 from line 31. If zero or less, enter $6,000 on line 35",
+        "A JUMP THAT WRITES A NONZERO CONSTANT into a later line. Transcribing it as -0- yields $0 instead of $6,000 — the whole senior deduction lost for every filer under the threshold. It agrees with max(0, …) only because 6% x 0 = 0, so a max(0, …) transcription passes for the wrong reason and breaks the moment the rate moves.");
+    c.line(
+        *line34,
+        f,
+        "34",
+        "line34",
+        Production::Scaled,
+        "Multiply line 33 by 6% (0.06)",
+    );
+    c.line(
+        *line35,
+        f,
+        "35",
+        "line35",
+        Production::Clamped(Polarity::FloorAtZero),
+        "Subtract line 34 from $6,000. If zero or less, enter -0-",
+    );
+    c.line(*line36a, f, "36a", "line36a", Production::Carry,
+        "If you have a valid social security number (see instructions) and were born before January 2, 1961, enter the amount from line 35");
+    c.line(*line36b, f, "36b", "line36b", Production::Carry,
+        "If you are married filing jointly, your spouse has a valid social security number (see instructions), and your spouse was born before January 2, 1961, enter the amount from line 35");
+    c.line(
+        *line37,
+        f,
+        "37",
+        "line37",
+        Production::Combine,
+        "Enhanced deduction for seniors. Add lines 36a and 36b",
+    );
+
+    // ── Part VI — Total ──────────────────────────────────────────────────────────────────────
+    c.line(*line38, f, "38", "line38", Production::Combine,
+        "Add lines 13, 21, 30, and 37. Enter here and on Form 1040 or 1040-SR, line 13b, or on Form 1040-NR, line 13c");
+    c
+}
+
 /// Every covered form, in one place. Grows one entry per form as coverage lands.
 ///
 /// ★ The values are irrelevant — only the TABLE is extracted. The instances exist so the exhaustive
@@ -2904,6 +3334,10 @@ pub fn all() -> Coverage {
     c.0.extend(cover_form8959lines(&zero_form8959lines()).0);
     c.0.extend(cover_form8960lines(&zero_form8960lines()).0);
     c.0.extend(cover_scheduledlines(&zero_scheduledlines()).0);
+    // ★★★ TY2025 — the FIRST rows in this table quoted from a year other than 2024. `cover_schedule1a`
+    //     sets its own `quoting_year` internally and returns its own `Coverage`, so the year cannot
+    //     leak forward onto anything appended after it.
+    c.0.extend(cover_schedule1a(&crate::tax::schedule_1a::Schedule1A::default()).0);
     // ★ The routing enum's money lives in one variant; cover that variant explicitly.
     c.0.extend(
         cover_scheduledrouting(&crate::tax::printed::ScheduleDRouting::NetLoss {

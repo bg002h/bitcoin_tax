@@ -27,6 +27,13 @@ mod form_geometry;
 mod harness_check;
 mod label_reader;
 mod line_coverage_check;
+/// Half 1a of the Schedule 1-A conformance KAT — the 48 entry labels, adjudicated by `label_reader`'s
+/// two witnesses over the committed geometry and compared to `Schedule1A`'s own leaves.
+///
+/// `#[cfg(test)]` because it has no operator-facing mode, exactly like `capital_loss_carryover_check`:
+/// it answers a yes/no question, and the answer belongs in the suite.
+#[cfg(test)]
+mod schedule_1a_membership;
 mod verdict_reach;
 
 fn main() {

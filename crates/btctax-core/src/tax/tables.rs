@@ -1354,27 +1354,101 @@ const SCHEDULE_1A_FORM_TEXT: &str = include_str!("fixtures/schedule_1a_2025_form
 mod schedule_1a_conformance {
     use super::*;
 
-    /// The printed text of numbered line `label`: the line that begins with it, plus every continuation
-    /// line up to the next numbered label. Returns `None` if the label is absent — which is itself a
-    /// finding, so callers `expect` it rather than defaulting.
-    fn printed_line(label: &str) -> Option<String> {
-        let mut lines = SCHEDULE_1A_FORM_TEXT.lines();
-        let first_word = |l: &str| l.split_whitespace().next().map(str::to_string);
-        let starts_a_label = |l: &str| {
-            first_word(l).is_some_and(|w| w.chars().next().is_some_and(|c| c.is_ascii_digit()))
-        };
-        let first = lines
-            .by_ref()
-            .find(|l| first_word(l).is_some_and(|w| w == label))?;
-        let mut out = first.trim().to_string();
-        for l in lines {
-            if starts_a_label(l) || l.trim().is_empty() {
-                break;
+    /// The Schedule 1-A **instructions** (`i1040gi--2025.pdf` pp. 101-110), as `pdftotext -layout`
+    /// extracts them. **IN-CRATE deliberately**, exactly like [`SCHEDULE_1A_FORM_TEXT`]: an
+    /// `include_str!` reaching outside the crate ships a broken tarball with exit 0.
+    ///
+    /// ★★ The four worksheets exist ONLY here. `grep -c "Keep for Your Records"` on the FORM extract is
+    /// **0**, which is why a census driven off the form alone could never red on a worksheet omission —
+    /// it would have passed by finding nothing.
+    const SCHEDULE_1A_INSTRUCTIONS_TEXT: &str =
+        include_str!("fixtures/schedule_1a_2025_instructions.txt");
+
+    /// The struct under test, read as SOURCE TEXT because doc comments do not exist at runtime.
+    ///
+    /// ★ In-crate only, and that is the second independent reason this half of the KAT lives in
+    /// `btctax-core` rather than in `xtask`. The one in-tree precedent is `classifier.rs`, which
+    /// `include_str!`s `return_inputs.rs` and itself for the same reason.
+    const SCHEDULE_1A_SOURCE: &str = include_str!("schedule_1a.rs");
+
+    /// Whitespace-normalized, because `pdftotext -layout` wraps clauses mid-sentence.
+    fn norm(s: &str) -> String {
+        s.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// The rightmost column a MARGIN label may start at.
+    ///
+    /// ★★★ **This is the one number in the reader, and it is what keeps a body-text digit out.** The
+    /// form prints each line number in the margin AND again in the gutter beside its amount box, and it
+    /// also prints label-shaped tokens inside prose — line 4's own text wraps onto a line that BEGINS
+    /// `"4b and see the instructions…"` at column 10. Indentation is the text layer's proxy for x, and
+    /// every genuine margin label on this form starts at column 6 or less while every continuation that
+    /// begins label-shaped starts further right. ★ The number is not trusted on its own: the reader's
+    /// output is asserted to be exactly the **50** labels that `xtask`'s two geometry witnesses derive
+    /// from the AcroForm by a completely independent route, so a mis-parse cannot pass quietly.
+    const MARGIN_COLUMN: usize = 6;
+
+    fn is_numeric_label(t: &str) -> bool {
+        let d = t.trim_end_matches(|c: char| c.is_ascii_lowercase());
+        !d.is_empty() && d.len() <= 2 && d.chars().all(|c| c.is_ascii_digit()) && t.len() <= 3
+    }
+
+    fn is_bare_letter(t: &str) -> bool {
+        t.len() == 1 && t.chars().all(|c| c.is_ascii_lowercase())
+    }
+
+    /// Every label the form prints, mapped to its own printed text.
+    ///
+    /// A physical line OPENS a label when its first token is label-shaped and starts at or before
+    /// [`MARGIN_COLUMN`]; a bare letter continues the current numeric stem (`b` under `2a` is `2b`),
+    /// which is how the form abbreviates its sub-rows. A line indented four columns or more that opens
+    /// nothing CONTINUES the open span; a blank line or a line at the left edge closes it — the left
+    /// edge is where the part headers, the Cautions and the page furniture print.
+    fn spans() -> BTreeMap<String, String> {
+        let mut out: BTreeMap<String, String> = BTreeMap::new();
+        let mut open: Option<String> = None;
+        let mut stem = String::new();
+        for raw in SCHEDULE_1A_FORM_TEXT.lines() {
+            if raw.trim().is_empty() {
+                open = None;
+                continue;
             }
-            out.push(' ');
-            out.push_str(l.trim());
+            let indent = raw.len() - raw.trim_start().len();
+            let tok = raw.split_whitespace().next().unwrap_or("");
+            if indent <= MARGIN_COLUMN && (is_numeric_label(tok) || is_bare_letter(tok)) {
+                let label = if is_numeric_label(tok) {
+                    stem = tok.chars().take_while(char::is_ascii_digit).collect();
+                    tok.to_string()
+                } else {
+                    format!("{stem}{tok}")
+                };
+                let rest = raw.trim_start()[tok.len()..].trim().to_string();
+                assert!(
+                    out.insert(label.clone(), rest).is_none(),
+                    "label {label:?} is opened twice — the reader has mis-parsed the margin, and a \
+                     silently overwritten span would make every quotation check read the wrong line"
+                );
+                open = Some(label);
+            } else if indent >= 4 {
+                if let Some(l) = &open {
+                    let e = out.get_mut(l).expect("an open span is in the map");
+                    if !e.is_empty() {
+                        e.push(' ');
+                    }
+                    e.push_str(raw.trim());
+                }
+            } else {
+                open = None;
+            }
         }
-        Some(out)
+        out
+    }
+
+    /// The printed text of numbered line `label`: the line the form prints it on in the margin, plus
+    /// every continuation line. Returns `None` if the label is absent — which is itself a finding, so
+    /// callers `expect` it rather than defaulting.
+    fn printed_line(label: &str) -> Option<String> {
+        spans().remove(label)
     }
 
     /// ★★ **THE ROUNDING DIRECTION IS READ OFF THE FORM, NOT HAND-ASSIGNED.**
@@ -1485,5 +1559,741 @@ mod schedule_1a_conformance {
             printed_line("999").is_none(),
             "a missing label must be None, not a default"
         );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+    //  THE SCHEDULE 1-A CONFORMANCE KAT — halves 1b, 2, 3 and 4.
+    //
+    //  ★★★ Half 1a — MEMBERSHIP against the form's 48 printed labels — is NOT here. It is
+    //  `xtask::schedule_1a_membership`, because its instrument is `label_reader`'s two geometry
+    //  witnesses over `design/forms/geometry/f1040s1a--2025.json`, a repo-root fixture this crate
+    //  deliberately cannot reach. Membership is the one half that splits across the crate line, and
+    //  only because its two sources differ: the FORM has an AcroForm the box witness can read, and the
+    //  INSTRUCTIONS (where the four worksheets live) have none at all.
+    //
+    //  ★★ Every half below is a PURE FUNCTION over its inputs, called twice: once on the real
+    //  artifact, which must be clean, and once on a planted defect, which must be caught. A checker
+    //  that can only read the real file cannot be watched going red, and B1's reviewable question —
+    //  *"which test reds when this checker is removed?"* — then has the answer "none".
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+    use crate::tax::line_coverage::{cover_schedule1a, LineCoverage, Production};
+    use crate::tax::schedule_1a::{
+        self, Leaf, Schedule1A, Schedule1aCompletion, WorksheetShape, NON_MONEY_LEAVES,
+    };
+    use std::collections::BTreeSet;
+
+    // ───────────────────────── half 1b — the four worksheets ─────────────────────────
+
+    /// One worksheet as the INSTRUCTIONS print it: title, the Schedule 1-A line its total feeds, its
+    /// lettered columns and its lettered rows, all read off the text layer.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct PrintedWorksheet {
+        title: String,
+        target_line: String,
+        columns: Vec<String>,
+        rows: Vec<String>,
+        /// The whole block, normalized — the haystack a column header must appear in.
+        window: String,
+    }
+
+    /// The worksheets the instructions actually print, found by their own anchor.
+    ///
+    /// ★★ **THE ANCHOR COUNT IS PINNED, and that is the difference between this and a checker that
+    /// passes by finding nothing.** Every one of the four sheets ends its title with
+    /// `— Keep for Your Records`; if a fixture regeneration ever drops the anchor, this returns an
+    /// error rather than an empty list that would make the whole half vacuous.
+    fn printed_worksheets(fixture: &str) -> Result<Vec<PrintedWorksheet>, String> {
+        const ANCHOR: &str = "— Keep for Your Records";
+        let lines: Vec<&str> = fixture.lines().collect();
+        let at: Vec<usize> = lines
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.contains(ANCHOR))
+            .map(|(i, _)| i)
+            .collect();
+        if at.len() != 4 {
+            return Err(format!(
+                "expected 4 `{ANCHOR}` anchors in the Schedule 1-A instructions, found {} — a reader \
+                 that finds nothing must FAIL, never pass by having nothing to check",
+                at.len()
+            ));
+        }
+        let mut out = Vec::new();
+        for (k, &i) in at.iter().enumerate() {
+            let end = at.get(k + 1).copied().unwrap_or(lines.len());
+            let title = norm(&lines[i].replace(ANCHOR, ""))
+                .trim_matches(|c: char| c.is_control())
+                .trim()
+                .to_string();
+            let block = norm(&lines[i..end].join(" "));
+            // The sheet ends where it says where its total goes.
+            let needle = "Schedule 1-A, line ";
+            let cut = block
+                .find(needle)
+                .ok_or_else(|| format!("worksheet {title:?} never names its Schedule 1-A line"))?;
+            let target: String = block[cut + needle.len()..]
+                .chars()
+                .take_while(|c| c.is_ascii_digit() || c.is_ascii_lowercase())
+                .collect();
+            let window = block[..cut + needle.len() + target.len()].to_string();
+            let mut columns = Vec::new();
+            let bytes: Vec<char> = window.chars().collect();
+            for (n, w) in bytes.windows(3).enumerate() {
+                if w[0] == '('
+                    && w[1].is_ascii_lowercase()
+                    && w[2] == ')'
+                    && (n == 0 || !bytes[n - 1].is_alphanumeric())
+                {
+                    let c = w[1].to_string();
+                    if !columns.contains(&c) {
+                        columns.push(c);
+                    }
+                }
+            }
+            let rows: Vec<String> = ["A", "B", "C", "D", "E"]
+                .into_iter()
+                .filter(|r| window.split(' ').any(|w| w == *r))
+                .map(str::to_string)
+                .collect();
+            out.push(PrintedWorksheet {
+                title,
+                target_line: target,
+                columns,
+                rows,
+                window,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Does the transcription match what the instructions print? Pure, so it can be watched going red.
+    ///
+    /// ★ **The two headers the text layer cannot bind are COUNTED, not waved through.** The *Multiple
+    /// Trades or Businesses* sheet's (a) and (b) headers are interleaved by the two-column reflow —
+    /// the block reads `"(a) Name of (b) Net your business profit of business from Schedule C…"` — so
+    /// no contiguous run of either header survives. Those two are checked as an in-order SUBSEQUENCE
+    /// of the block instead, which still rejects a paraphrase or a reordering, and the number of them
+    /// is pinned so a third cannot appear silently.
+    fn worksheet_violations(
+        shapes: &[WorksheetShape<'_>],
+        printed: &[PrintedWorksheet],
+    ) -> Vec<String> {
+        let mut errs = Vec::new();
+        if shapes.len() != printed.len() {
+            errs.push(format!(
+                "{} worksheets are transcribed but the instructions print {}",
+                shapes.len(),
+                printed.len()
+            ));
+            return errs;
+        }
+        let mut unbindable = Vec::new();
+        for p in printed {
+            let Some(s) = shapes.iter().find(|s| s.title == p.title) else {
+                errs.push(format!(
+                    "the instructions print a worksheet nothing transcribes: {:?}",
+                    p.title
+                ));
+                continue;
+            };
+            if s.target_line != p.target_line {
+                errs.push(format!(
+                    "{:?} enters its total on Schedule 1-A line {:?}, transcribed as {:?}",
+                    p.title, p.target_line, s.target_line
+                ));
+            }
+            let have: Vec<String> = s.columns.iter().map(|(l, _, _)| l.to_string()).collect();
+            if have != p.columns {
+                errs.push(format!(
+                    "{:?} prints columns {:?}, transcribed as {:?}",
+                    p.title, p.columns, have
+                ));
+            }
+            let rows: Vec<String> = s.rows.iter().map(|r| r.to_string()).collect();
+            if rows != p.rows {
+                errs.push(format!(
+                    "{:?} prints rows {:?}, transcribed as {:?}",
+                    p.title, p.rows, rows
+                ));
+            }
+            for (letter, header, _) in &s.columns {
+                let want = norm(header);
+                if p.window.contains(&want) {
+                    continue;
+                }
+                if is_ordered_subsequence(&want, &p.window) {
+                    unbindable.push(format!("{}({letter})", p.title));
+                } else {
+                    errs.push(format!(
+                        "{:?} column ({letter}): the transcribed header is neither printed verbatim \
+                         nor present in order — {want:?}",
+                        p.title
+                    ));
+                }
+            }
+        }
+        if unbindable.len() != 2 {
+            errs.push(format!(
+                "{} column header(s) could not be bound verbatim; exactly 2 are expected (the \
+                 Multiple Trades or Businesses sheet's (a) and (b), interleaved by the two-column \
+                 reflow): {unbindable:?}",
+                unbindable.len()
+            ));
+        }
+        errs
+    }
+
+    /// Do `needle`'s words appear in `haystack` in order (not necessarily adjacently)?
+    fn is_ordered_subsequence(needle: &str, haystack: &str) -> bool {
+        let mut hay = haystack.split(' ');
+        needle.split(' ').all(|w| hay.any(|h| h == w))
+    }
+
+    /// ★★★ **HALF 1b — the four worksheets, driven off the instructions' own anchors.**
+    #[test]
+    fn the_four_worksheets_are_transcribed_as_the_instructions_print_them() {
+        let printed =
+            printed_worksheets(SCHEDULE_1A_INSTRUCTIONS_TEXT).expect("four anchored worksheets");
+        let ws = schedule_1a::Schedule1aWorksheets::default();
+        let errs = worksheet_violations(&ws.shapes(), &printed);
+        assert!(errs.is_empty(), "{errs:#?}");
+        // The four targets, stated so a silent re-pointing is visible in the diff as well as in the run.
+        let targets: Vec<&str> = printed.iter().map(|p| p.target_line.as_str()).collect();
+        assert_eq!(targets, ["4c", "5", "14a", "14b"]);
+    }
+
+    /// ★★★ **B1 for half 1b — the plant the r6 fold left this half without.**
+    #[test]
+    fn a_dropped_worksheet_row_or_column_or_sheet_is_caught_and_a_fixture_with_no_anchors_errors() {
+        let printed =
+            printed_worksheets(SCHEDULE_1A_INSTRUCTIONS_TEXT).expect("four anchored worksheets");
+        let ws = schedule_1a::Schedule1aWorksheets::default();
+        let good = ws.shapes();
+        assert!(
+            worksheet_violations(&good, &printed).is_empty(),
+            "the control must PASS, or every plant below passes for the wrong reason"
+        );
+
+        // (1) A DROPPED COLUMN — the shape a `min()` in the emitter would have hidden entirely.
+        let mut one_column_short = good.clone();
+        one_column_short[0].columns.pop();
+        assert!(
+            worksheet_violations(&one_column_short, &printed)
+                .iter()
+                .any(|e| e.contains("prints columns")),
+            "dropping column (d) from the tips worksheet must red"
+        );
+
+        // (2) A DROPPED ROW — the sheets print A through E, and four rows is a quietly smaller sheet.
+        let mut one_row_short = good.clone();
+        one_row_short[1].rows.pop();
+        assert!(
+            worksheet_violations(&one_row_short, &printed)
+                .iter()
+                .any(|e| e.contains("prints rows")),
+            "dropping row E must red"
+        );
+
+        // (3) A WHOLE SHEET — the r1 defect, which collapsed the two overtime worksheets into one.
+        let three: Vec<WorksheetShape<'_>> = good[..3].to_vec();
+        assert!(
+            !worksheet_violations(&three, &printed).is_empty(),
+            "transcribing three of four worksheets must red"
+        );
+
+        // (4) A PARAPHRASED HEADER.
+        let mut paraphrased = good.clone();
+        paraphrased[0].columns[0].1 = "The employer's name";
+        assert!(
+            worksheet_violations(&paraphrased, &printed)
+                .iter()
+                .any(|e| e.contains("neither printed verbatim")),
+            "a paraphrased column header must red"
+        );
+
+        // (5) ★★ AND THE READER ITSELF: no anchors must be an ERROR, never an empty list. This is the
+        //     census-F-4 failure in miniature — a checker that passes by finding nothing.
+        assert!(
+            printed_worksheets("no worksheets here at all\n").is_err(),
+            "a fixture with no anchors must FAIL, not silently check zero worksheets"
+        );
+    }
+
+    // ───────────────────────── half 2 — per-line quotation ─────────────────────────
+
+    /// Every `**Line <label>** — "<quote>"` marker in a source file.
+    ///
+    /// ★ Pure over the source text, which is what makes the plant below possible at all.
+    fn doc_quotes(src: &str) -> Vec<(String, String)> {
+        let mut doc = String::new();
+        for l in src.lines() {
+            if let Some(rest) = l.trim_start().strip_prefix("///") {
+                doc.push(' ');
+                doc.push_str(rest.trim());
+            }
+        }
+        let mut out = Vec::new();
+        let mut rest = doc.as_str();
+        while let Some(i) = rest.find("**Line ") {
+            rest = &rest[i + "**Line ".len()..];
+            let Some(j) = rest.find("** — \"") else {
+                continue;
+            };
+            // ★ A LABEL IS SHORT. Without this the scanner runs from a `**Line …**` that opens no
+            //   quotation all the way to the next one that does, and reports a sentence as a label —
+            //   a legible failure beats a confusing one, and the set comparison reds either way.
+            if j > 12 {
+                continue;
+            }
+            let label = rest[..j].trim().to_string();
+            let after = &rest[j + "** — \"".len()..];
+            let Some(k) = after.find('"') else {
+                continue;
+            };
+            out.push((label, norm(&after[..k])));
+            rest = &after[k..];
+        }
+        out
+    }
+
+    /// The doc-comment marker a leaf label is quoted under. Line 22's two rows share one Rust type, so
+    /// their three columns are quoted once, against the heading whose span carries the column headers.
+    fn marker_of(leaf_label: &str) -> String {
+        match leaf_label.find('(') {
+            Some(i) => {
+                let stem: String = leaf_label[..i]
+                    .chars()
+                    .take_while(char::is_ascii_digit)
+                    .collect();
+                format!("{stem} {}", &leaf_label[i..])
+            }
+            None => leaf_label.to_string(),
+        }
+    }
+
+    /// Is every quoted instruction printed as **that line's own text**?
+    ///
+    /// ★★★ **THIS IS THE HALF THAT IS NOT `cite-check`.** A citation checker proves a quotation is the
+    /// FORM's words; it does not prove they are THAT LINE's words. Line 28's *"increase the result to
+    /// the next higher whole number"* sitting on line 11 survives citation checking — and that swap
+    /// inverts the rounding for Parts II and III, which is the most dangerous single fact on this form.
+    fn quotation_violations(src: &str, expected: &BTreeSet<String>) -> Vec<String> {
+        let mut errs = Vec::new();
+        let quotes = doc_quotes(src);
+        let found: BTreeSet<String> = quotes.iter().map(|(l, _)| l.clone()).collect();
+        for missing in expected.difference(&found) {
+            errs.push(format!(
+                "no doc comment quotes line {missing:?} — a field with no instruction text is a line \
+                 nobody transcribed"
+            ));
+        }
+        for extra in found.difference(expected) {
+            errs.push(format!(
+                "a doc comment quotes line {extra:?}, which is not a leaf of the struct"
+            ));
+        }
+        for (label, quote) in &quotes {
+            if !expected.contains(label) {
+                continue;
+            }
+            let line = label.split(' ').next().unwrap_or(label);
+            let Some(span) = printed_line(line) else {
+                errs.push(format!("line {line:?} is not printed on the form at all"));
+                continue;
+            };
+            if !norm(&span).contains(quote) {
+                errs.push(format!(
+                    "line {label}'s doc comment quotes text that is NOT printed as line {line}'s own \
+                     text:\n      {quote:?}\n    printed: {:?}",
+                    norm(&span)
+                ));
+            }
+        }
+        errs
+    }
+
+    /// The doc-comment markers the struct's own leaves require, derived from [`Schedule1A::leaves`].
+    fn expected_markers() -> BTreeSet<String> {
+        Schedule1A::default()
+            .leaves()
+            .iter()
+            .map(|(l, _)| marker_of(l))
+            .collect()
+    }
+
+    /// ★★★ **HALF 2 — every field's doc comment carries its own line's printed instruction.**
+    #[test]
+    fn every_field_doc_comment_quotes_its_own_printed_line() {
+        let errs = quotation_violations(SCHEDULE_1A_SOURCE, &expected_markers());
+        assert!(errs.is_empty(), "{errs:#?}");
+        // 52 leaves collapse to 49 markers, because line 22's two rows share one Rust type.
+        assert_eq!(Schedule1A::default().leaves().len(), 52);
+        assert_eq!(expected_markers().len(), 49);
+    }
+
+    /// ★★★ **B1 for half 2 — the swap that inverts the rounding, planted and caught.**
+    #[test]
+    fn a_quotation_moved_onto_the_wrong_line_is_rejected() {
+        let expected: BTreeSet<String> = ["11", "28"].iter().map(|s| s.to_string()).collect();
+        let honest = "\
+    /// **Line 11** — \"decrease the result to the next lower whole number\"
+    pub line11_steps: Option<Usd>,
+    /// **Line 28** — \"increase the result to the next higher whole number\"
+    pub line28_steps: Option<Usd>,
+";
+        assert!(
+            quotation_violations(honest, &expected).is_empty(),
+            "the control must PASS"
+        );
+
+        // THE DEFECT: line 28's ceiling sentence moved onto line 11. Verbatim from the form, on the
+        // wrong line — which is exactly what `cite-check` cannot see.
+        let swapped = honest.replace(
+            "**Line 11** — \"decrease the result to the next lower whole number\"",
+            "**Line 11** — \"increase the result to the next higher whole number\"",
+        );
+        let errs = quotation_violations(&swapped, &expected);
+        assert!(
+            errs.iter().any(|e| e.contains("line 11")),
+            "the rounding swap must red: {errs:#?}"
+        );
+
+        // …and a field whose quote is simply gone must red too, or the check only catches swaps.
+        let dropped = honest.replace("**Line 28** — ", "Line 28: ");
+        assert!(
+            quotation_violations(&dropped, &expected)
+                .iter()
+                .any(|e| e.contains("no doc comment quotes line \"28\"")),
+            "a field with no quoted instruction must red"
+        );
+    }
+
+    // ───────────────────────── half 3 — provenance ─────────────────────────
+
+    /// Does every leaf have a determinate PROVENANCE?
+    ///
+    /// ★★★ **NOT "is every line populated" — most of this schedule is blank on a correct return.** The
+    /// invariant is that each leaf is accounted for: a money leaf carries a `Production` (or an
+    /// `Exception` with a written reason) in the coverage table, and a non-money leaf is recorded as
+    /// carrying none, **with a reason**. Two blanks look identical on the printed page and are not the
+    /// same thing; a checker that cannot tell *"this line encodes no decision"* from *"we forgot this
+    /// line"* is not a conformance check.
+    fn provenance_violations(
+        rows: &[LineCoverage],
+        leaves: &[(&str, Leaf<'_>)],
+        non_money: &[(&str, &str)],
+    ) -> Vec<String> {
+        let mut errs = Vec::new();
+        let covered: BTreeSet<&str> = rows.iter().map(|r| r.line.as_str()).collect();
+        let recorded: BTreeSet<&str> = non_money.iter().map(|(l, _)| *l).collect();
+        for (label, leaf) in leaves {
+            let money = matches!(leaf, Leaf::Money(_) | Leaf::Steps(_));
+            match (money, covered.contains(label), recorded.contains(label)) {
+                (true, true, false) => {}
+                (false, false, true) => {}
+                (true, false, _) => errs.push(format!(
+                    "leaf {label:?} is money and has NO production — declared, doc-commented and \
+                     never assigned is exactly the \"present but never populated\" case"
+                )),
+                (false, true, _) => errs.push(format!(
+                    "leaf {label:?} is not money yet carries a money-census row"
+                )),
+                (false, false, false) => errs.push(format!(
+                    "leaf {label:?} carries no production and no recorded REASON for carrying none"
+                )),
+                (true, true, true) => errs.push(format!(
+                    "leaf {label:?} is recorded as non-money and also carries a money row"
+                )),
+            }
+        }
+        let leaf_labels: BTreeSet<&str> = leaves.iter().map(|(l, _)| *l).collect();
+        for row in rows {
+            if !leaf_labels.contains(row.line.as_str()) {
+                errs.push(format!(
+                    "the coverage table carries {:?}, which is not a leaf of the struct",
+                    row.line
+                ));
+            }
+        }
+        for (label, reason) in non_money {
+            if reason.trim().is_empty() {
+                errs.push(format!("{label:?} is recorded as non-money with no reason"));
+            }
+            if !leaf_labels.contains(label) {
+                errs.push(format!(
+                    "{label:?} is recorded as non-money but is not a leaf"
+                ));
+            }
+        }
+        errs
+    }
+
+    /// ★★★ **HALF 3 — every leaf is accounted for, and every Exception has a written reason.**
+    #[test]
+    fn every_leaf_has_a_determinate_provenance() {
+        let s = Schedule1A::default();
+        let cov = cover_schedule1a(&s);
+        let errs = provenance_violations(&cov.0, &s.leaves(), &NON_MONEY_LEAVES);
+        assert!(errs.is_empty(), "{errs:#?}");
+
+        // The rows are quoted from the 2025 extract, not 2024 — the `quoting_year` call is what makes
+        // that true, and a row that lost it would send `cite-check` to a file that does not exist.
+        assert!(
+            cov.0
+                .iter()
+                .all(|r| r.year == "2025" && r.form == "f1040s1a"),
+            "every Schedule 1-A row is quoted from f1040s1a--2025"
+        );
+        // Every Exception carries a reason. `xtask line-coverage` enforces this over the whole table;
+        // asserted here too, because during B3 this KAT is the only guard that can see this form.
+        for r in cov
+            .0
+            .iter()
+            .filter(|r| r.production == Production::Exception)
+        {
+            assert!(
+                r.reason.is_some_and(|x| x.len() > 40),
+                "{}:{} is an Exception with no substantive reason",
+                r.form,
+                r.line
+            );
+        }
+    }
+
+    /// ★★★ **B1 for half 3 — a field declared and never given a production.**
+    #[test]
+    fn a_leaf_with_no_production_is_rejected() {
+        let s = Schedule1A::default();
+        let cov = cover_schedule1a(&s);
+        let leaves = s.leaves();
+        assert!(
+            provenance_violations(&cov.0, &leaves, &NON_MONEY_LEAVES).is_empty(),
+            "the control must PASS"
+        );
+
+        // THE DEFECT: line 13 — the qualified tips deduction itself — loses its row.
+        let gutted: Vec<LineCoverage> = cov.0.iter().filter(|r| r.line != "13").cloned().collect();
+        assert!(
+            provenance_violations(&gutted, &leaves, &NON_MONEY_LEAVES)
+                .iter()
+                .any(|e| e.contains("\"13\"") && e.contains("NO production")),
+            "a money leaf with no production must red"
+        );
+
+        // …and the mirror: a VIN quietly recorded as money.
+        let vin_as_money: Vec<(&str, Leaf<'_>)> = leaves
+            .iter()
+            .map(|(l, leaf)| {
+                if *l == "22a(i)" {
+                    (*l, Leaf::Money(None))
+                } else {
+                    (*l, *leaf)
+                }
+            })
+            .collect();
+        assert!(
+            !provenance_violations(&cov.0, &vin_as_money, &NON_MONEY_LEAVES).is_empty(),
+            "a non-money leaf reclassified as money, with no row to back it, must red"
+        );
+
+        // …and a non-money leaf with no recorded reason — the case that distinguishes a blank that
+        // encodes no decision from a blank nobody looked at.
+        assert!(
+            !provenance_violations(&cov.0, &leaves, &[]).is_empty(),
+            "an unrecorded non-money leaf must red"
+        );
+    }
+
+    // ───────────────────────── half 4 — completion ─────────────────────────
+
+    /// Is each line completed exactly when the form (or, for Parts I and V, the instructions) says?
+    fn completion_violations(
+        predicate: impl Fn(&str) -> Option<bool>,
+        expected: &[(&str, bool)],
+    ) -> Vec<String> {
+        let mut errs = Vec::new();
+        for (label, want) in expected {
+            match predicate(label) {
+                Some(got) if got == *want => {}
+                Some(got) => errs.push(format!("line {label}: completed = {got}, expected {want}")),
+                None => errs.push(format!("line {label} has no completion rule at all")),
+            }
+        }
+        errs
+    }
+
+    /// ★★★ **HALF 4 — completion is a PER-LINE decision, and an unmet condition leaves a line NOT
+    /// COMPLETED rather than zero.**
+    #[test]
+    fn completion_is_per_line_and_an_unmet_condition_leaves_the_line_blank() {
+        let lines: Vec<String> = Schedule1A::default()
+            .leaves()
+            .iter()
+            .map(|(l, _)| schedule_1a::line_label_of(l).to_string())
+            .collect();
+        let all_labels: BTreeSet<&str> = lines.iter().map(String::as_str).collect();
+        assert_eq!(all_labels.len(), 48, "48 entry lines: {all_labels:?}");
+
+        // (1) The COMMON FILER — no tips, no overtime, no car loan, not a senior, no excluded income.
+        //     Three lines are completed and forty-five are blank, and that is the CORRECT return.
+        let plain = Schedule1aCompletion::default();
+        let completed: BTreeSet<&str> = all_labels
+            .iter()
+            .filter(|l| schedule_1a::is_completed(l, &plain) == Some(true))
+            .copied()
+            .collect();
+        assert_eq!(
+            completed,
+            ["1", "3", "38"].into_iter().collect::<BTreeSet<&str>>(),
+            "lines 1 and 3 are ALWAYS entered — a part-scoped Part I predicate would blank line 3, \
+             the MAGI that lines 8, 16, 25 and 31 each read — and line 38 is the total"
+        );
+
+        // (2) THE C-I2 CASE: a filer with tips who is NOT a senior. Part V must not be completed, so
+        //     line 35 cannot print $6,000 for a non-senior.
+        let tipped_non_senior = Schedule1aCompletion {
+            part2_received_qualified_tips: true,
+            ..Schedule1aCompletion::default()
+        };
+        let errs = completion_violations(
+            |l| schedule_1a::is_completed(l, &tipped_non_senior),
+            &[
+                ("3", true),
+                ("2a", false),
+                ("4a", true),
+                ("13", true),
+                ("21", false),
+                ("30", false),
+                ("35", false),
+                ("37", false),
+                ("38", true),
+            ],
+        );
+        assert!(errs.is_empty(), "{errs:#?}");
+
+        // (3) A SENIOR completes Part V and nothing else.
+        let senior = Schedule1aCompletion {
+            part5_born_before_january_2_1961: true,
+            ..Schedule1aCompletion::default()
+        };
+        let errs = completion_violations(
+            |l| schedule_1a::is_completed(l, &senior),
+            &[("31", true), ("35", true), ("37", true), ("13", false)],
+        );
+        assert!(errs.is_empty(), "{errs:#?}");
+
+        // (4) A label that is not on the form has no rule — the check is closed at that end too.
+        assert!(schedule_1a::is_completed("39", &plain).is_none());
+    }
+
+    /// ★★★ **THE SOURCE IS NAMED PER PART, AND PART V's IS NOT ITS CAUTION.** This is the r5 I-1
+    /// finding, pinned mechanically: the form's Part V Caution is an ELIGIBILITY bar with no birth date
+    /// anywhere in it, and the completion condition is instructions-only. A transcription that read the
+    /// Caution alone would let a non-senior complete Part V, and line 35 would print $6,000 — with the
+    /// KAT green and blind to it.
+    #[test]
+    fn part_vs_caution_is_an_eligibility_bar_and_the_birth_date_is_instructions_only() {
+        let caution = part_caution("V").expect("Part V prints a Caution");
+        assert!(
+            caution.contains("valid social security number")
+                && caution.contains("you must file jointly"),
+            "Part V's Caution drifted: {caution:?}"
+        );
+        assert!(
+            !caution.contains("born before"),
+            "★ Part V's Caution must NOT carry the birth date — if the form ever adds it, the \
+             instructions-only reading must be revisited rather than silently kept: {caution:?}"
+        );
+        let ins = norm(SCHEDULE_1A_INSTRUCTIONS_TEXT);
+        assert!(ins.contains("Fill out Schedule 1-A, Part V, only if:"));
+        assert!(ins.contains("were born before January 2, 1961."));
+        // …and Part I prints no Caution at all, which is why its source is the instructions too.
+        assert!(
+            part_caution("I").is_none(),
+            "Part I prints no Caution; inventing a part-level predicate for it blanks line 3"
+        );
+        // ★ The recorded source for EVERY part is checked against the form, not just Part V's —
+        //   a table keyed to the one case that was got wrong reds on nothing when a second appears.
+        for (part, source, why) in schedule_1a::COMPLETION_SOURCES {
+            assert!(!why.trim().is_empty(), "part {part} records no source text");
+            let printed = part_caution(part);
+            match source {
+                schedule_1a::CompletionSource::FormCaution => assert!(
+                    printed.as_deref().is_some_and(|c| c.contains("only if")),
+                    "part {part} names the form's Caution as its completion source, but the form \
+                     prints no Caution stating the condition: {printed:?}"
+                ),
+                schedule_1a::CompletionSource::InstructionsOnly => assert!(
+                    printed.as_deref().is_none_or(|c| !c.contains("only if")),
+                    "part {part} is recorded as instructions-only, yet its printed Caution DOES \
+                     state the condition — re-read it before keeping this classification: {printed:?}"
+                ),
+                schedule_1a::CompletionSource::Unconditional => assert!(
+                    printed.is_none(),
+                    "part {part} is recorded as unconditional but prints a Caution: {printed:?}"
+                ),
+            }
+        }
+    }
+
+    /// ★★★ **B1 for half 4 — the r4 reading, planted: complete Part V on the Caution alone.**
+    #[test]
+    fn completing_a_part_whose_predicate_is_false_is_rejected() {
+        let non_senior = Schedule1aCompletion::default();
+        let expect = [("35", false), ("37", false)];
+        assert!(
+            completion_violations(|l| schedule_1a::is_completed(l, &non_senior), &expect)
+                .is_empty(),
+            "the control must PASS"
+        );
+
+        // THE DEFECT: Part V's predicate reduced to its Caution (a valid SSN, filing jointly), which a
+        // non-senior satisfies. Lines 31-35 are computed and line 35 prints $6,000 for a non-senior.
+        let caution_only = |l: &str| match l {
+            "31" | "32" | "33" | "34" | "35" | "36a" | "36b" | "37" => Some(true),
+            other => schedule_1a::is_completed(other, &non_senior),
+        };
+        let errs = completion_violations(caution_only, &expect);
+        assert!(
+            errs.iter().any(|e| e.contains("line 35")),
+            "a non-senior reaching line 35 must red: {errs:#?}"
+        );
+
+        // …and a line with no rule at all must red rather than defaulting either way.
+        assert!(!completion_violations(|_| None, &expect).is_empty());
+    }
+
+    /// The Caution the form prints under a part heading, if it prints one.
+    ///
+    /// ★ The part is matched as a WHOLE TOKEN. `starts_with("Part I")` also matches `Part II`,
+    /// `Part III` and `Part IV`, which would have handed Part I someone else's Caution — and Part I's
+    /// whole point here is that it has none.
+    fn part_caution(roman: &str) -> Option<String> {
+        let mut lines = SCHEDULE_1A_FORM_TEXT.lines();
+        lines.by_ref().find(|l| {
+            let mut t = l.split_whitespace();
+            t.next() == Some("Part") && t.next() == Some(roman)
+        })?;
+        let mut out = String::new();
+        for l in lines {
+            let t = l.trim();
+            if t.is_empty() {
+                break;
+            }
+            let indent = l.len() - l.trim_start().len();
+            let tok = t.split_whitespace().next().unwrap_or("");
+            if indent <= MARGIN_COLUMN && (is_numeric_label(tok) || is_bare_letter(tok)) {
+                break;
+            }
+            if out.is_empty() && !t.starts_with("Caution:") {
+                continue;
+            }
+            if !out.is_empty() {
+                out.push(' ');
+            }
+            out.push_str(t);
+        }
+        (!out.is_empty()).then_some(norm(&out))
     }
 }

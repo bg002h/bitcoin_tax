@@ -152,7 +152,27 @@ const CEIL_IDIOMS: &[(&str, &str)] = &[
 /// ★★ A `Carry` here would have been a lie in the direction this repo cares about: it asserts the line
 /// always holds a figure, and the figure on a no-AMT return would be a sworn `0` on a form that is not
 /// attached (§G-11 — *an entry is testimony*). The exception exists to say the blank is a DECISION.
-const MAX_EXCEPTIONS: usize = 15;
+/// **RAISED 15 → 24 on 2026-09-05 (B3/T2), for the NINE Schedule 1-A lines that fit no production.**
+/// Measured, not estimated: `cargo run -p xtask -- line-coverage` reported *"24 exceptions, ratchet is
+/// 15"* on a table carrying 50 new rows, so the delta is exactly the nine below and nothing else.
+/// They are three RECURRING SHAPES, not nine judgments — Schedule 1-A prints the same phase-out block
+/// three times, and each block contributes two:
+///
+///   * **the JUMP — `f1040s1a:10`, `:18`, `:27`, `:33`.** *"Subtract line 9 from line 8. If zero or
+///     less, enter the amount from line 7 on line 13"* routes PAST the phase-out; it does not clamp.
+///     `Clamped` would print `-0-` and zero the whole deduction for every filer under the threshold,
+///     which is most of them. Line 33 is the same shape writing a **nonzero** constant — *"If zero or
+///     less, enter $6,000 on line 35"* — where a `-0-` transcription costs the whole senior deduction.
+///     Same class as `f1040:34`: a condition with no `-0-` clause is not a clamp.
+///   * **the non-money QUOTIENT — `f1040s1a:11`, `:19`, `:28`.** *"Divide line 10 by $1,000 … decrease
+///     the result to the next lower whole number"* is a step COUNT, not dollars, and there is no
+///     `Divide` production; whole-dollar rounding would be a category error. Precedent `f8995a:24`,
+///     the only other non-money printed line in this table.
+///   * **`f1040s1a:4b` and `:4c`.** 4b has two branches that BOTH enter (a carry from Form 4137, or
+///     the form's own `-0-` when none is filed) — `f1040sse:4a`'s shape. 4c is *"enter the **larger**
+///     of line 4a or line 4b"*, and there is no larger-of production (`Bounded` is *"the smaller
+///     of"*) — `f1040:12`'s shape, filed for the same reason.
+const MAX_EXCEPTIONS: usize = 24;
 // ★ RAISED 11 → 12 for Form 8995-A **line 38** (§G-28/B1a). The DPAD line is a CONDITIONAL entry with
 //   no "-0-" clause — "DPAD under section 199A(g) allocated from an agricultural or horticultural
 //   cooperative. Don't enter more than line 33 minus line 37" presumes an allocation from a Schedule D
@@ -161,7 +181,18 @@ const MAX_EXCEPTIONS: usize = 15;
 //   an Exception is for.
 
 /// See the block comment at its use site in [`check`].
-const MAX_UNLOCATABLE: usize = 8;
+const MAX_UNLOCATABLE: usize = 12;
+// ★ RAISED 8 → 12 on 2026-09-05 (B3/T2) for Schedule 1-A line 22's four money COLUMNS —
+//   `f1040s1a:22a(ii)`, `22a(iii)`, `22b(ii)`, `22b(iii)`. Measured, not estimated: the run named
+//   exactly those four and no other new row. Line 22 is a heading whose entry rows print a bare `a`
+//   and `b` with NO text of their own, so a column cell's only quotable text is its column HEADER —
+//   and `pdftotext -layout` TRANSPOSES that three-column header block, interleaving "(ii) Deducted
+//   on", "(i) Vehicle identification number (VIN)", "Schedule C,", "(iii) Schedule 1-A", "Schedule E,
+//   or", "Schedule F". No adjacency to the row's label survives, which is the identical mechanism
+//   already recorded for Form 8949 line 1's column headers. ★ These are COUNTED, not accused: the
+//   rows are real, their quotes ARE verbatim on the form (rule 2 passes), and only rule (2b)'s
+//   label-adjacency cannot reach them.
+
 // ★ RAISED 9 → 11 when the CRYPTO-SLICE Schedule SE (`SeTaxResult`) landed — a form shape the derived
 //   scope predicate found and no hand-list contained, because the full-return path uses a DIFFERENT
 //   type that was already covered. Two shapes of one form; one was invisible.

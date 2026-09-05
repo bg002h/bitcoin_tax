@@ -31,6 +31,11 @@ pub mod questions;
 pub mod return_1040;
 pub mod return_inputs;
 pub mod return_refuse;
+/// **Schedule 1-A (Form 1040) — Additional Deductions, TY2025**, transcribed line by line: 48 line
+/// labels over 52 leaves, plus the four *Keep for Your Records* worksheets the instructions print.
+/// Its conformance KAT is split across `tables.rs::schedule_1a_conformance` and
+/// `xtask::schedule_1a_membership`. See module doc.
+pub mod schedule_1a;
 pub mod scrub;
 pub mod scrub_axis;
 pub mod se;
