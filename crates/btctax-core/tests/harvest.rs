@@ -1307,3 +1307,65 @@ fn harvest_writes_nothing() {
     );
     assert_eq!(proj_before.disposals.len(), proj_after.disposals.len());
 }
+
+/// ★★★ **FR-32 — §1015(a)'s loss cap must apply when the donor's basis is RECONSTRUCTED, not only
+/// when it is known.** Found 2026-09-05 by the crypto basis audit; the statute is archived in-repo
+/// at `legal/primary-sources/statute-irc/26USC_s1015.html` and settles it in two sentences:
+///
+/// > "...if such basis ... is greater than the fair market value of the property at the time of the
+/// > gift, then **for the purpose of determining loss the basis shall be such fair market value**."
+///
+/// and, decisively for THIS case, the subsection's last sentence blesses the reconstruction itself:
+///
+/// > "If the Secretary finds it impossible to obtain such facts, **the basis in the hands of such
+/// > donor** ... shall be the fair market value of such property ... as of the date ... at which
+/// > ... such property was acquired by such donor."
+///
+/// So a reconstructed value IS "such basis", and the loss cap in the first sentence is stated in
+/// terms of "such basis". The cap therefore applies identically on both paths.
+///
+/// ★★ `fold.rs` Case 2 (donor basis KNOWN, FMV < basis) returned `Some(fmv_at_gift)`; Case 3
+/// (donor basis RECONSTRUCTED from the price at the donor's acquisition date) returned `None` — so
+/// identical economics gave a capped loss on one path and an UNCAPPED, fabricated loss on the
+/// other. Understatement direction.
+///
+/// ★ The pre-existing dual-basis KAT (`harvest_dual_basis_ngnl_zero_slope`) passes
+/// `donor_basis: Some(..)`, i.e. Case 2 — which is why no test could ever have caught this.
+#[test]
+fn section_1015_loss_cap_applies_to_a_reconstructed_donor_basis() {
+    // Donor acquired at $100,000/BTC; the gift was made when BTC was worth $60,000.
+    // Reconstructed donor basis = $100,000 > FMV at gift = $60,000 ⇒ §1015(a) dual basis.
+    let mut prices = StaticPrices::default();
+    prices.0.insert(date!(2024 - 01 - 01), dec!(100000));
+
+    let events = gift_lot(
+        "GIFT",
+        0,
+        cold(),
+        LOT,                   // one whole BTC
+        None,                  // ★ donor basis UNKNOWN ⇒ Case 3, the reconstructed path
+        date!(2024 - 01 - 01), // donor acquisition date, priced above
+        dec!(60000),           // FMV at gift
+        datetime!(2024-06-01 00:00:00 UTC),
+    );
+
+    let st = project(&events, &prices, &cfg());
+    let lot = st
+        .lots
+        .iter()
+        .find(|l| l.basis_source == BasisSource::GiftFmvFallback)
+        .expect("the reconstructed-basis gift lot exists");
+
+    assert_eq!(
+        lot.usd_basis,
+        dec!(100000),
+        "gain basis is the reconstructed donor basis"
+    );
+    assert_eq!(
+        lot.dual_loss_basis,
+        Some(dec!(60000)),
+        "§1015(a): the donor's basis ($100,000, reconstructed) exceeds FMV at the gift ($60,000), \
+         so FOR DETERMINING LOSS the basis is that fair market value. `None` here means the cap is \
+         not applied and a $40,000 loss the statute disallows can be claimed — an understatement."
+    );
+}
