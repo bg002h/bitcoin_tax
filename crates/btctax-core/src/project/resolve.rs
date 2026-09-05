@@ -1625,7 +1625,11 @@ pub fn resolve(
         let Some(&deadline) = identification_deadline.get(disposal) else {
             return true;
         };
-        if made <= deadline {
+        // I-1: the comparison itself lives in `compliance::identification_is_timely`, which is also
+        // what `identification_made` (the §A.5 verdict) and `optimize`'s two gates call. This pass
+        // decides the FILED NUMBER and those decide what the tool PRINTS about it; they were three
+        // separate `<=`s and FR-35 widened only this one.
+        if crate::project::compliance::identification_is_timely(made, deadline) {
             return true;
         }
         blockers.push(Blocker {

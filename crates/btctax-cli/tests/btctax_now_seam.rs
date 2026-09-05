@@ -248,4 +248,28 @@ fn backdated_vs_postdated_now_moves_the_attestation_classification() {
         "backdated vs postdated BTCTAX_NOW must change the attestation classification wording;\n\
          backdated:\n{back}\npostdated:\n{post}"
     );
+
+    // ★★★ **I-1 — the SAME-DAY arm, and it is the only thing on this seam that can see a narrowing.**
+    //
+    // Both pins above differ from the fixture's 12:00 sale by whole days, so a `tax_date(now, UTC)`
+    // anywhere between the clock and `optimize_year` was invisible to them — and that is exactly where
+    // one sat. `optimize accept` at 18:00 on the day of a 12:00 sale is post-hoc: it must be
+    // attest-gated. At 09:00 the same day it is §1.1012-1(j)(5)(i)(A) Example 1 — an identification on
+    // the day of the sale and prior to it — and it persists.
+    //
+    // Before I-1 BOTH persisted, unattested, and the very next `verify` reported the 18:00 one as
+    // `LotSelectionPostHoc` and fell back to method order: the tool undoing its own write.
+    let same_day_late = accept_under("2025-06-01T18:00:00Z");
+    let same_day_early = accept_under("2025-06-01T09:00:00Z");
+    assert!(
+        same_day_late.contains("0 persisted") && same_day_late.contains("already executed"),
+        "a selection recorded SIX HOURS AFTER the same day's sale must be attest-gated, not \
+         persisted unattested for the next projection to drop:\n{same_day_late}"
+    );
+    assert!(
+        same_day_early.contains("[Contemporaneous]") && same_day_early.contains("1 persisted"),
+        "a selection recorded three hours BEFORE the same day's sale is timely and persists \
+         freely — the fix must not have made the tool stricter than §1.1012-1(j)(2):\n\
+         {same_day_early}"
+    );
 }

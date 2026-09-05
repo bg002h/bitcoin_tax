@@ -91,6 +91,7 @@ fn consume_principal(
     key: &PoolKey,
     need: Sat,
     date: TaxDate,
+    at: time::OffsetDateTime,
     wallet: &crate::identity::WalletId,
     ctx: &FoldCtx,
     st: &mut LedgerState,
@@ -101,21 +102,23 @@ fn consume_principal(
     let selection = ctx.selections.get(ev).map(|v| v.as_slice());
 
     // FR-34 §1.1012-1(j)(6): paragraph (j) reaches only dispositions on or after 2025-01-01, and only
-    // the TAXABLE ones bear an identification obligation.
+    // the TAXABLE ones bear an identification obligation. `date` answers that (a calendar rule); `at`
+    // is the §1.1012-1(j)(2) deadline the classifier compares against (I-1 — the two are separate
+    // parameters because they are separate granularities, and conflating them is the bug I-1 fixed).
     //
-    // ★ `selection.map(|_| date)` is the honest made-date to hand the classifier HERE: FR-33's §A.4
+    // ★ `selection.map(|_| at)` is the honest made-instant to hand the classifier HERE: FR-33's §A.4
     // timeliness pass (resolve.rs) already DROPPED every unattested selection made after the
     // disposition, so a selection still present in `ctx.selections` is timely-or-attested by
     // construction — never late. Presence therefore means `Contemporaneous`, and absence means the
     // election tier decides. (An attested late recording is the §C.2 owner-sanctioned path: the filer
     // swore a genuine contemporaneous identification exists in their books, so it identifies too.)
+    // ★★ That argument is only sound because the drop and this classifier now share ONE predicate.
+    // While they did not (I-1), a 17:00 selection against a 10:00 sale was dropped there and called
+    // `Contemporaneous` here, and this branch — the FR-34 advisory — went silent on it.
     let deemed = if scope == IdScope::TaxableDisposition
         && date >= TRANSITION_DATE
-        && crate::project::compliance::identification_made(
-            date,
-            selection.map(|_| date),
-            election_from,
-        ) == ComplianceStatus::NonCompliant
+        && crate::project::compliance::identification_made(at, selection.map(|_| at), election_from)
+            == ComplianceStatus::NonCompliant
     {
         // Peek BEFORE consuming — `consume` mutates the pool.
         Some(pools.peek_consumption(key, need, LotMethod::Fifo))
@@ -851,6 +854,7 @@ pub(crate) fn fold_event(
                 &key,
                 *sat,
                 date,
+                eff.utc,
                 &wallet,
                 ctx,
                 st,
@@ -1045,6 +1049,7 @@ pub(crate) fn fold_event(
                 &key,
                 *sat,
                 date,
+                eff.utc,
                 &wallet,
                 ctx,
                 st,
@@ -1411,6 +1416,7 @@ pub(crate) fn fold_event(
                 &key,
                 *sat,
                 date,
+                eff.utc,
                 &wallet,
                 ctx,
                 st,
@@ -1507,6 +1513,7 @@ pub(crate) fn fold_event(
                 &key,
                 *sat,
                 date,
+                eff.utc,
                 &wallet,
                 ctx,
                 st,

@@ -684,7 +684,8 @@ impl Session {
         let tables = BundledTaxTables::load();
         let profile = self.resolve_screened_profile(&state, year, &tables)?;
         let attested = self.optimize_attested_set()?;
-        let proposal_made = tax_date(now, time::UtcOffset::UTC);
+        // I-1: `now` goes through whole. The §1.1012-1(j)(2) deadline the proposal is judged against
+        // is a moment, and truncating here made every same-day proposal look timely.
         btctax_core::optimize_year(
             &events,
             prices,
@@ -693,7 +694,7 @@ impl Session {
             profile.as_ref(),
             &tables,
             &attested,
-            proposal_made,
+            now,
         )
         .map_err(crate::cmd::optimize::map_opt_err)
     }

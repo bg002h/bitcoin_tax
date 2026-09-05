@@ -342,6 +342,96 @@ fn optimize_run_needs_attestation_when_now_after_sale() {
     );
 }
 
+/// ★★★ **I-1 — `optimize run` on the DAY of the sale, and this is the only test on this seam that
+/// can see a `TaxDate` narrowing.**
+///
+/// The two tests above pin `now` a whole year either side of the 2025-06-01 12:00 sale, so a
+/// `tax_date(now, UTC)` anywhere between the clock and `optimize_year` was invisible to them. One sat
+/// in `cmd::optimize::run`.
+///
+/// `optimize run` is one of the two commands the I-1 finding names. It PRINTS, and the SPEC's
+/// load-bearing cross-cutting rule ("no artifact, command, or doc may describe post-hoc selection as
+/// compliant") binds a printed status exactly as it binds a filed figure — so at 18:00 on the day of a
+/// 12:00 sale it must offer the attestation, and at 09:00 it must not.
+#[test]
+fn optimize_run_reads_the_time_of_day_not_just_the_date_of_the_sale() {
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_tax_saving_csv(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile(), false).unwrap();
+
+    // SIX HOURS AFTER the 12:00 sale — post-hoc (§1.1012-1(j)(2) is "date and TIME").
+    let late = render::render_optimize_proposal(
+        &cmd::optimize::run(&vault, &pp(), 2025, datetime!(2025-06-01 18:00:00 UTC)).unwrap(),
+    );
+    assert!(
+        late.contains("already executed"),
+        "a proposal made at 18:00 on the day of a 12:00 sale is post-hoc and must be \
+         attest-gated:\n{late}"
+    );
+    assert!(
+        !late.contains("made \u{2264} sale \u{2192} Contemporaneous"),
+        "...and must NOT be offered as freely persistable:\n{late}"
+    );
+
+    // THREE HOURS BEFORE it — the reg's own Example 1, and still freely persistable.
+    let early = render::render_optimize_proposal(
+        &cmd::optimize::run(&vault, &pp(), 2025, datetime!(2025-06-01 09:00:00 UTC)).unwrap(),
+    );
+    assert!(
+        early.contains("Contemporaneous"),
+        "a proposal made three hours BEFORE the same day's sale identifies, and the I-1 fix must \
+         not have made the tool stricter than (j)(2):\n{early}"
+    );
+    assert!(
+        !early.contains("already executed"),
+        "...so it must not be attest-gated:\n{early}"
+    );
+}
+
+/// ★★ **I-1 at the THIRD clock seam — `Session::optimize_proposal`, the one the TUI uses.**
+///
+/// `cmd::optimize::run` and `cmd::optimize::accept` are not the only doors into `optimize_year`;
+/// `Session::optimize_proposal` is a third, and it is what the TUI's select-lots flow reads. It was
+/// narrowing `now` to a `TaxDate` exactly as the other two were, and the CLI tests above cannot see
+/// it because they do not go through it.
+///
+/// Asserted on `Persistability` directly rather than on rendered text: this seam has no renderer of
+/// its own, and the value is what the TUI branches on.
+#[test]
+fn the_tui_session_seam_reads_the_time_of_day_too() {
+    use btctax_core::optimize::Persistability;
+
+    let csv_dir = tempfile::tempdir().unwrap();
+    let csv = write_tax_saving_csv(csv_dir.path());
+    let (_dir, vault) = make_vault_with(&csv);
+    cmd::tax::set_profile(&vault, &pp(), 2025, single_100k_profile(), false).unwrap();
+
+    // The changed row's persistability, as this seam reports it, at one instant.
+    let at = |now: OffsetDateTime| -> Persistability {
+        let s = btctax_cli::Session::open(&vault, &pp()).unwrap();
+        let p = s.optimize_proposal(2025, now).unwrap();
+        let row = p
+            .per_disposal
+            .iter()
+            .find(|d| d.proposed_selection != d.current_selection)
+            .expect("the fixture must produce a changed row, or nothing is being judged");
+        row.persistable
+    };
+
+    // Sale is 2025-06-01 12:00 UTC.
+    assert_eq!(
+        at(datetime!(2025-06-01 18:00:00 UTC)),
+        Persistability::NeedsAttestation,
+        "six hours after the sale is post-hoc"
+    );
+    assert_eq!(
+        at(datetime!(2025-06-01 09:00:00 UTC)),
+        Persistability::ContemporaneousNow,
+        "three hours before it is timely"
+    );
+}
+
 // ── Tests: R2-M1 no-change row ────────────────────────────────────────────────────────────────────
 
 /// When the optimizer cannot improve a disposal (single lot → proposed == current), the render must

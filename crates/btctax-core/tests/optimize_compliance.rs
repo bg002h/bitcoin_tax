@@ -18,7 +18,9 @@ use btctax_core::optimize::{
     compliance_overlay, optimize_year, persistability, proposed_compliance_status, Persistability,
 };
 use btctax_core::price::StaticPrices;
-use btctax_core::project::{ComplianceStatus, DisposalCompliance, LotMethod, ProjectionConfig};
+use btctax_core::project::{
+    ComplianceStatus, DisposalCompliance, DispositionMoment, LotMethod, ProjectionConfig,
+};
 use btctax_core::tax::tables::{
     LtcgBreakpoints, OrdinaryBracket, OrdinarySchedule, TaxTable, TaxTables,
 };
@@ -206,9 +208,28 @@ fn cfg() -> ProjectionConfig {
     ProjectionConfig::default() // FIFO default, TreatmentC
 }
 
-/// `proposal_made` = 2026-07-01 (AFTER all 2026 disposal sale dates in these KATs → post-hoc).
-fn made() -> time::Date {
-    date!(2026 - 07 - 01)
+/// `proposal_made` = 2026-07-01 00:00 UTC (AFTER all 2026 disposal sale dates in these KATs →
+/// post-hoc). I-1: an INSTANT now — `optimize_year` judges the §1.1012-1(j)(2) deadline to the second.
+fn made() -> time::OffsetDateTime {
+    datetime!(2026-07-01 00:00:00 UTC)
+}
+
+/// I-1: a `DispositionMoment` for a bare sale DATE, at UTC midnight.
+///
+/// Every KAT below that used to pass two `TaxDate`s keeps its exact meaning through this: both sides
+/// widen to midnight, so a made-date before/equal/after the sale date stays before/equal/after.
+/// The tests that specifically pin the new INSTANT granularity build their moments by hand, with a
+/// real time of day — see `..._same_day_late_...`.
+fn sale_on(d: time::Date) -> DispositionMoment {
+    DispositionMoment {
+        date: d,
+        at: d.midnight().assume_utc(),
+    }
+}
+
+/// The made-instant for a bare made-DATE, at UTC midnight (see `sale_on`).
+fn made_on(d: time::Date) -> time::OffsetDateTime {
+    d.midnight().assume_utc()
 }
 
 fn no_attest() -> BTreeSet<EventId> {
@@ -240,12 +261,20 @@ fn dc(
 fn persistability_self_custody_contemporaneous() {
     // Same-day: made == sale → contemporaneous
     assert_eq!(
-        persistability(&cold(), date!(2026 - 06 - 01), date!(2026 - 06 - 01)),
+        persistability(
+            &cold(),
+            sale_on(date!(2026 - 06 - 01)),
+            made_on(date!(2026 - 06 - 01))
+        ),
         Persistability::ContemporaneousNow
     );
     // Made strictly before sale → still contemporaneous
     assert_eq!(
-        persistability(&cold(), date!(2027 - 03 - 15), date!(2026 - 12 - 01)),
+        persistability(
+            &cold(),
+            sale_on(date!(2027 - 03 - 15)),
+            made_on(date!(2026 - 12 - 01))
+        ),
         Persistability::ContemporaneousNow
     );
 }
@@ -254,13 +283,21 @@ fn persistability_self_custody_contemporaneous() {
 #[test]
 fn persistability_self_custody_needs_attestation() {
     assert_eq!(
-        persistability(&cold(), date!(2026 - 06 - 01), date!(2026 - 07 - 01)),
+        persistability(
+            &cold(),
+            sale_on(date!(2026 - 06 - 01)),
+            made_on(date!(2026 - 07 - 01))
+        ),
         Persistability::NeedsAttestation
     );
     // Still NeedsAttestation even in 2028 for self-custody (the 2027+ envelope only forbids
     // BROKER-held; self-custody is always within own-books).
     assert_eq!(
-        persistability(&cold(), date!(2028 - 01 - 01), date!(2028 - 02 - 01)),
+        persistability(
+            &cold(),
+            sale_on(date!(2028 - 01 - 01)),
+            made_on(date!(2028 - 02 - 01))
+        ),
         Persistability::NeedsAttestation
     );
 }
@@ -269,7 +306,11 @@ fn persistability_self_custody_needs_attestation() {
 #[test]
 fn persistability_broker_pre_2027_needs_attestation() {
     assert_eq!(
-        persistability(&exchange(), date!(2026 - 06 - 01), date!(2026 - 07 - 01)),
+        persistability(
+            &exchange(),
+            sale_on(date!(2026 - 06 - 01)),
+            made_on(date!(2026 - 07 - 01))
+        ),
         Persistability::NeedsAttestation
     );
 }
@@ -278,12 +319,20 @@ fn persistability_broker_pre_2027_needs_attestation() {
 #[test]
 fn persistability_broker_2027_forbidden() {
     assert_eq!(
-        persistability(&exchange(), date!(2027 - 06 - 01), date!(2027 - 07 - 01)),
+        persistability(
+            &exchange(),
+            sale_on(date!(2027 - 06 - 01)),
+            made_on(date!(2027 - 07 - 01))
+        ),
         Persistability::ForbiddenBroker2027
     );
     // 2028 is also forbidden (≥2027 envelope).
     assert_eq!(
-        persistability(&exchange(), date!(2028 - 03 - 15), date!(2028 - 04 - 01)),
+        persistability(
+            &exchange(),
+            sale_on(date!(2028 - 03 - 15)),
+            made_on(date!(2028 - 04 - 01))
+        ),
         Persistability::ForbiddenBroker2027
     );
 }
@@ -299,23 +348,35 @@ fn persistability_broker_2027_forbidden() {
 fn persistability_broker_2027_contemporaneous_is_forbidden() {
     // made == sale (contemporaneous timing) — still forbidden for a 2027+ broker lot.
     assert_eq!(
-        persistability(&exchange(), date!(2027 - 06 - 01), date!(2027 - 06 - 01)),
+        persistability(&exchange(), sale_on(date!(2027 - 06 - 01)), made_on(date!(2027 - 06 - 01))),
         Persistability::ForbiddenBroker2027,
         "2027+ broker, made == sale: own-books contemporaneous ID is insufficient → ForbiddenBroker2027"
     );
     // made strictly BEFORE sale (contemporaneous timing) — also forbidden (envelope is authoritative).
     assert_eq!(
-        persistability(&exchange(), date!(2027 - 06 - 01), date!(2027 - 05 - 01)),
+        persistability(
+            &exchange(),
+            sale_on(date!(2027 - 06 - 01)),
+            made_on(date!(2027 - 05 - 01))
+        ),
         Persistability::ForbiddenBroker2027
     );
     // 2028 made ≤ sale — also forbidden (≥2027 envelope).
     assert_eq!(
-        persistability(&exchange(), date!(2028 - 06 - 01), date!(2028 - 06 - 01)),
+        persistability(
+            &exchange(),
+            sale_on(date!(2028 - 06 - 01)),
+            made_on(date!(2028 - 06 - 01))
+        ),
         Persistability::ForbiddenBroker2027
     );
     // Anti-regression: the broker-envelope precedence means it is NEVER ContemporaneousNow.
     assert_ne!(
-        persistability(&exchange(), date!(2027 - 06 - 01), date!(2027 - 06 - 01)),
+        persistability(
+            &exchange(),
+            sale_on(date!(2027 - 06 - 01)),
+            made_on(date!(2027 - 06 - 01))
+        ),
         Persistability::ContemporaneousNow,
         "anti-regression: the old made≤sale-first ordering must not surface ContemporaneousNow"
     );
@@ -328,12 +389,20 @@ fn persistability_broker_2027_contemporaneous_is_forbidden() {
 #[test]
 fn persistability_broker_pre_2027_contemporaneous() {
     assert_eq!(
-        persistability(&exchange(), date!(2026 - 06 - 01), date!(2026 - 06 - 01)),
+        persistability(
+            &exchange(),
+            sale_on(date!(2026 - 06 - 01)),
+            made_on(date!(2026 - 06 - 01))
+        ),
         Persistability::ContemporaneousNow
     );
     // made strictly before the 2026 sale → still ContemporaneousNow.
     assert_eq!(
-        persistability(&exchange(), date!(2026 - 12 - 01), date!(2026 - 03 - 15)),
+        persistability(
+            &exchange(),
+            sale_on(date!(2026 - 12 - 01)),
+            made_on(date!(2026 - 03 - 15))
+        ),
         Persistability::ContemporaneousNow
     );
 }
@@ -469,8 +538,8 @@ fn proposed_status_unchanged_preserves_standing_order() {
     };
     let status = proposed_compliance_status(
         &cold(),
-        date!(2026 - 06 - 01),
-        date!(2026 - 07 - 01),
+        sale_on(date!(2026 - 06 - 01)),
+        made_on(date!(2026 - 07 - 01)),
         &p1,
         &p1, // current == proposed → no divergence
         &baseline,
@@ -493,10 +562,10 @@ fn proposed_status_divergent_post_hoc_noncompliant() {
     };
     let status = proposed_compliance_status(
         &cold(),
-        date!(2026 - 06 - 01), // sale
-        date!(2026 - 07 - 01), // made AFTER sale → post-hoc
-        &[pick("B", LOT)],     // proposed (divergent)
-        &[pick("A", LOT)],     // current (different → diverges)
+        sale_on(date!(2026 - 06 - 01)), // sale
+        made_on(date!(2026 - 07 - 01)), // made AFTER sale → post-hoc
+        &[pick("B", LOT)],              // proposed (divergent)
+        &[pick("A", LOT)],              // current (different → diverges)
         &baseline,
     );
     assert_eq!(
@@ -512,8 +581,8 @@ fn proposed_status_divergent_post_hoc_noncompliant() {
 fn proposed_status_divergent_contemporaneous() {
     let status = proposed_compliance_status(
         &cold(),
-        date!(2026 - 06 - 01), // sale
-        date!(2026 - 06 - 01), // made == sale → contemporaneous
+        sale_on(date!(2026 - 06 - 01)), // sale
+        made_on(date!(2026 - 06 - 01)), // made == sale → contemporaneous
         &[pick("B", LOT)],
         &[pick("A", LOT)],
         &ComplianceStatus::NonCompliant,
@@ -528,8 +597,8 @@ fn proposed_status_divergent_broker_2027_noncompliant() {
     // Divergent + made BEFORE sale (contemporaneous timing) — still NonCompliant for broker 2027+.
     let status_before = proposed_compliance_status(
         &exchange(),
-        date!(2027 - 06 - 01), // sale ≥2027
-        date!(2027 - 05 - 01), // made < sale (contemporaneous timing)
+        sale_on(date!(2027 - 06 - 01)), // sale ≥2027
+        made_on(date!(2027 - 05 - 01)), // made < sale (contemporaneous timing)
         &[pick("B", LOT)],
         &[pick("A", LOT)],
         &ComplianceStatus::Contemporaneous,
@@ -543,8 +612,8 @@ fn proposed_status_divergent_broker_2027_noncompliant() {
     // Divergent + made AFTER sale (post-hoc) — also NonCompliant.
     let status_after = proposed_compliance_status(
         &exchange(),
-        date!(2027 - 06 - 01), // sale ≥2027
-        date!(2027 - 07 - 01), // made > sale (post-hoc)
+        sale_on(date!(2027 - 06 - 01)), // sale ≥2027
+        made_on(date!(2027 - 07 - 01)), // made > sale (post-hoc)
         &[pick("B", LOT)],
         &[pick("A", LOT)],
         &ComplianceStatus::NonCompliant,
@@ -661,6 +730,157 @@ fn e2e_divergent_posthoc_pick_is_noncompliant() {
             d.disposal.canonical()
         );
     }
+}
+
+/// ★★★ **I-1 end-to-end — the SAME DAY as the sale, seven hours later.**
+///
+/// The pure-unit kills for the two gates live in `tests/timeliness_one_predicate.rs`; this one exists
+/// because neither of them can see `optimize_year`'s THREADING. Two narrowings are invisible to a
+/// pure test and visible here: the sale instant that `targets` carries out of the import event, and
+/// the `proposal_made` instant the CLI seam hands in. Truncate either to a `TaxDate` and the row below
+/// goes back to `Contemporaneous` / `ContemporaneousNow`.
+///
+/// Identical fixture to `e2e_divergent_posthoc_pick_is_noncompliant` above, with one change: the sale
+/// is at **10:00** and the proposal is made at **17:00 THE SAME DAY**, instead of a month later. Under
+/// the old date-granular comparison `made == sale` and the whole row read as compliant — while
+/// `resolve`'s §A.4 pass would have dropped exactly that selection had `accept` written it.
+#[test]
+fn e2e_a_proposal_made_hours_after_the_sale_is_not_contemporaneous() {
+    let events = vec![
+        method_election(1, datetime!(2025 - 01 - 01 00:00:00 UTC), LotMethod::Hifo),
+        buy(
+            "LT_LB",
+            datetime!(2025 - 01 - 02 00:00:00 UTC),
+            cold(),
+            LOT,
+            dec!(9000),
+        ),
+        buy(
+            "ST_HB",
+            datetime!(2026 - 05 - 01 00:00:00 UTC),
+            cold(),
+            LOT,
+            dec!(9500),
+        ),
+        sell(
+            "D",
+            datetime!(2026 - 06 - 01 10:00:00 UTC), // the sale happens at 10:00
+            cold(),
+            LOT,
+            dec!(10000),
+        ),
+    ];
+    let prices = StaticPrices::default();
+    let tables = synth(2026);
+    let prof = profile(dec!(100000));
+
+    let p = optimize_year(
+        &events,
+        &prices,
+        &cfg(),
+        2026,
+        Some(&prof),
+        &tables,
+        &no_attest(),
+        datetime!(2026-06-01 17:00:00 UTC), // ...and the filer runs `optimize` that afternoon
+    )
+    .expect("computable");
+
+    let row = p
+        .per_disposal
+        .iter()
+        .find(|d| d.disposal == eid("D"))
+        .expect("disposal D in proposal");
+    assert_ne!(
+        row.proposed_selection, row.current_selection,
+        "precondition: the optimizer proposes a DIVERGENT pick, so the timeliness lever is reached"
+    );
+    assert_eq!(
+        row.status,
+        ComplianceStatus::NonCompliant,
+        "a pick proposed seven hours after the sale is post-hoc — `optimize` must not print \
+         `contemporaneous` for it (SPEC §Cross-cutting)"
+    );
+    assert_eq!(
+        row.persistable,
+        Persistability::NeedsAttestation,
+        "and `accept` must demand the §C.2 attestation rather than write a selection that the very \
+         next projection drops as LotSelectionPostHoc"
+    );
+}
+
+/// ★★★ **I-1 end-to-end, the OTHER direction — and the only test that kills a narrowed SALE.**
+///
+/// Same fixture, but the filer runs `optimize` at **09:00**, an hour BEFORE the 10:00 sale. This is
+/// the §1.1012-1(j)(5)(i)(A) Example-1 shape — an identification on the day of the sale and prior to
+/// it — and it must stay freely persistable.
+///
+/// It is not merely a symmetry control. `optimize_year` reads the sale's instant out of the import
+/// event into `targets`; truncate THAT to midnight and the late-proposal test above still passes
+/// (17:00 is after midnight either way) while this one reds, because 09:00 would then fall after a
+/// 00:00 "sale". The two tests together bracket the threading from both ends.
+#[test]
+fn e2e_a_proposal_made_hours_before_the_same_day_sale_is_contemporaneous() {
+    let events = vec![
+        method_election(1, datetime!(2025 - 01 - 01 00:00:00 UTC), LotMethod::Hifo),
+        buy(
+            "LT_LB",
+            datetime!(2025 - 01 - 02 00:00:00 UTC),
+            cold(),
+            LOT,
+            dec!(9000),
+        ),
+        buy(
+            "ST_HB",
+            datetime!(2026 - 05 - 01 00:00:00 UTC),
+            cold(),
+            LOT,
+            dec!(9500),
+        ),
+        sell(
+            "D",
+            datetime!(2026 - 06 - 01 10:00:00 UTC),
+            cold(),
+            LOT,
+            dec!(10000),
+        ),
+    ];
+    let prices = StaticPrices::default();
+    let tables = synth(2026);
+    let prof = profile(dec!(100000));
+
+    let p = optimize_year(
+        &events,
+        &prices,
+        &cfg(),
+        2026,
+        Some(&prof),
+        &tables,
+        &no_attest(),
+        datetime!(2026-06-01 09:00:00 UTC), // an hour BEFORE the sale
+    )
+    .expect("computable");
+
+    let row = p
+        .per_disposal
+        .iter()
+        .find(|d| d.disposal == eid("D"))
+        .expect("disposal D in proposal");
+    assert_ne!(
+        row.proposed_selection, row.current_selection,
+        "precondition: the pick diverges, so the timeliness lever is reached"
+    );
+    assert_eq!(
+        row.status,
+        ComplianceStatus::Contemporaneous,
+        "an identification made on the day of the sale and PRIOR to it is exactly the reg's own \
+         Example 1 — it identifies, and I-1's fix must not have made the tool stricter than (j)(2)"
+    );
+    assert_eq!(
+        row.persistable,
+        Persistability::ContemporaneousNow,
+        "and it persists freely, with no attestation to swear"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════

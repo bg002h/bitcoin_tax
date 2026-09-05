@@ -233,7 +233,8 @@ fn loss_lot_freely_selectable_no_wash_sale_bar() {
     let prices = StaticPrices::default();
     let tables = synth(2025);
     let prof = profile(dec!(80000));
-    let made = time::macros::date!(2026 - 01 - 15);
+    // I-1: `optimize_year` takes the made-INSTANT (§1.1012-1(j)(2) is "date and time").
+    let made = time::macros::datetime!(2026-01-15 00:00:00 UTC);
 
     let p = optimize_year(
         &events,

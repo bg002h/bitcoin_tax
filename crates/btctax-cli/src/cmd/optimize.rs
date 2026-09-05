@@ -45,7 +45,9 @@ pub fn run(
     // Single resolver + fail-closed screening (SPEC §4.12): pick up a ReturnInputs-derived profile too.
     let profile = s.resolve_screened_profile(&state, year, &tables)?;
     let attested = s.optimize_attested_set()?;
-    let proposal_made = tax_date(now, UtcOffset::UTC); // R0-C2: real made-date threaded into core
+    // R0-C2: the real made-INSTANT threaded into core. I-1: `now` is handed over whole — narrowing it
+    // to `tax_date(now, UTC)` here is what made every same-day proposal look timely to the compliance
+    // and persistability gates while `resolve`'s §A.4 pass judged the same selection to the second.
     let p = optimize_year(
         &events,
         prices,
@@ -54,7 +56,7 @@ pub fn run(
         profile.as_ref(),
         &tables,
         &attested,
-        proposal_made,
+        now,
     )
     .map_err(map_opt_err)?;
     // R0-C1: core has no logger — log the cap/why HERE (CLI seam) when the result is approximate.
@@ -180,7 +182,9 @@ pub fn accept_with_tables(
     let profile = session.resolve_screened_profile(&state, year, tables)?;
     let prices = session.prices();
     let attested = session.optimize_attested_set()?;
-    let made = tax_date(now, UtcOffset::UTC); // the LotSelection's made-date (decisions are UTC)
+    // The LotSelection's made-DATE, still needed for the §C.2 attestation record and the human-facing
+    // outcome lines. I-1: it is NOT what the persistability gate is judged on any more — `now` is.
+    let made = tax_date(now, UtcOffset::UTC);
     let only_id = only.map(crate::eventref::parse_event_id).transpose()?;
 
     // R2-M5/R0-M5: validate the --attest/--disposal precondition BEFORE recomputing or appending
@@ -195,7 +199,8 @@ pub fn accept_with_tables(
     }
 
     // RECOMPUTE the same deterministic optimum (NFR4) — never trust a stale proposal. R0-C2: judge the
-    // proposal against the REAL made-date (`made`) so `run` and `accept` agree on persistability.
+    // proposal against the REAL made-INSTANT (`now`) so `run` and `accept` agree on persistability —
+    // and so that what `accept` writes is what the next projection will accept (I-1).
     let proposal = optimize_year(
         &events,
         prices,
@@ -204,7 +209,7 @@ pub fn accept_with_tables(
         profile.as_ref(),
         tables,
         &attested,
-        made,
+        now,
     )
     .map_err(map_opt_err)?;
 
@@ -226,8 +231,9 @@ pub fn accept_with_tables(
             ));
             continue;
         }
-        // The §C.2 gate. `d.persistable` was computed by `optimize_year` against the SAME `made`
-        // (== `persistability(&d.wallet, d.date, made)`), so it is the per-disposal verdict here.
+        // The §C.2 gate. `d.persistable` was computed by `optimize_year` against the SAME `now`
+        // (== `persistability(&d.wallet, that disposal's moment, now)`), so it is the per-disposal
+        // verdict here.
         match d.persistable {
             Persistability::ForbiddenBroker2027 => {
                 // NEVER persist — own-books is insufficient for 2027+ broker-held units, and no
