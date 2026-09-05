@@ -834,19 +834,31 @@ mod tests {
     /// 2. **the add-back threshold IS the zero-exemption point** — clause (i), which is
     ///    `phase-out start + exemption / phase-out rate`.
     ///
-    /// Both are definitional, so they hold whatever the constants are. Verified across three
-    /// regimes: TY2024 (609,350 + 66,650/0.25 = 875,950 ✓, cap 66,650 ✓), TY2025 (626,350 +
-    /// 68,500/0.25 = 900,350 ✓, cap 68,500 ✓), and even the TY2026 draft at its implied 50% rate
-    /// (500,000 + 70,100/0.5 = 640,200 ✓). **Identity 2 is also why the MFS region has no TY2024
-    /// oracle**: "exemption gone" and "kicker live" are the same condition, and that is exactly
-    /// where OTS 2024 carries stale constants and taxcalc models nothing.
+    /// Both are definitional, so they hold whatever the constants are.
+    ///
+    /// ★★★ **WHAT THIS TEST EXECUTES, versus what it merely ASSERTS.** The loop runs over BUNDLED
+    /// years, and `full_return_for` returns `Some` for **TY2024 alone** today — so exactly ONE
+    /// regime is machine-verified here. The doc said "verified across three regimes" until
+    /// 2026-09-04, when a Form 6251 TY2025 spec noticed it. The other two are hand-worked and
+    /// UNEXECUTED until their params land:
+    ///   - TY2024 — 609,350 + 66,650/0.25 = 875,950 ✓, cap 66,650 ✓   **EXECUTED**
+    ///   - TY2025 — 626,350 + 68,500/0.25 = 900,350 ✓, cap 68,500 ✓   *hand-worked, NOT executed*
+    ///   - TY2026 draft, implied 50% rate — 500,000 + 70,100/0.5 = 640,200 ✓  *hand-worked*
+    ///
+    /// The assertion below now names the years actually covered, so the gap cannot silently
+    /// reopen: when TY2025 params land, that list changes and the test says so.
+    ///
+    /// **Identity 2 is also why the MFS region has no TY2024 oracle**: "exemption gone" and
+    /// "kicker live" are the same condition, and that is exactly where OTS 2024 carries stale
+    /// constants and taxcalc models nothing. ★ TY2025 improves this — OTS 2025 implements the
+    /// collision correctly, so the three previously unwitnessed vectors gain a witness.
     ///
     /// ★ Looped over every bundled year rather than written per-year, so a year added later is
     /// covered without anyone remembering to extend this.
     #[test]
     fn mfs_kicker_constants_satisfy_the_two_section_55d3_identities() {
         let t = BundledFullReturnTables::load();
-        let mut checked = 0;
+        let mut covered: Vec<i32> = Vec::new();
         for year in 2015..=2035 {
             let Some(p) = t.full_return_for(year) else {
                 continue;
@@ -875,9 +887,22 @@ mod tests {
                 amt.exemption_phaseout_rate,
                 amt.mfs_kicker_start
             );
-            checked += 1;
+            covered.push(year);
         }
-        assert!(checked > 0, "no bundled year carried full-return params");
+        // ★ Name the years actually covered. `> 0` alone cannot distinguish "verified three
+        //   regimes" from "verified one and hand-waved two" — exactly the overclaim the doc
+        //   comment above carried until 2026-09-04.
+        assert!(
+            !covered.is_empty(),
+            "no bundled year carried full-return params — this test verified NOTHING"
+        );
+        assert_eq!(
+            covered,
+            vec![2024],
+            "the years this test actually executes have changed: {covered:?}. Update the doc \
+             comment's EXECUTED/hand-worked split in the same commit — a paragraph claiming \
+             more regimes than the loop reaches is how this drifted before."
+        );
     }
 
     /// ★ TY2026 FAILS CLOSED BY DECISION, and this is the decision — not an oversight, and not a
