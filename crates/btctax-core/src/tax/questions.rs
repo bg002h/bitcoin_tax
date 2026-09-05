@@ -554,7 +554,12 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
                  EXERCISED AN INCENTIVE STOCK OPTION (ISO) and still held the stock at the end of the \
                  year — you would have a Form 3921. (c) You had any other item this tool never asked \
                  about that changes your ALTERNATIVE MINIMUM TAX — depletion, a tax-shelter farm \
-                 activity, a passive activity, or research and experimental costs.",
+                 activity, a passive activity, or research and experimental costs. (d) You owe an \
+                 ADDITION TO TAX that is not income tax on income — an additional tax on an IRA or \
+                 other tax-favored account (Form 5329), HOUSEHOLD EMPLOYMENT TAXES for someone you \
+                 paid to work in your home (Schedule H), repayment of an excess advance premium tax \
+                 credit from a Marketplace health plan (Form 8962), or recapture of a federal \
+                 mortgage subsidy.",
         unanswered: RefuseReason::OtherIncomeUnanswered,
         unanswered_detail:
             "btctax asks about HSA activity, dual-status alien status and foreign accounts, and a \
@@ -1444,6 +1449,22 @@ mod tests {
                 "the prompt must name retirement income and the form the filer already holds — \
                  `{limb}` is missing, and a retiree who answers No on the strength of this list \
                  files omitting §61/§86 income: {}",
+                q.prompt
+            );
+        }
+        // ★★★ **ADDITIONS TO TAX, added 2026-09-05 (FR-30).** The prompt asked about income
+        //     received, an ISO, and AMT items. An ADDITION TO TAX is none of the three, so a filer
+        //     owing Schedule 2 Part II tax could answer every question truthfully and file without
+        //     it. Verified against the form (`design/forms/extract/f1040s2--2025.txt`): line 8
+        //     "Additional tax on IRAs or other tax-favored accounts. Attach Form 5329", line 9
+        //     "Household employment taxes. Attach Schedule H", line 17b "Recapture of federal
+        //     mortgage subsidy". Grep confirms btctax models NONE of them.
+        //     ★ Naming the FORM is the point — the filer is holding the paper, not the statute.
+        for limb in ["form 5329", "schedule h", "8962", "mortgage subsidy"] {
+            assert!(
+                p.contains(limb),
+                "the prompt must name the additions to tax and the form each arrives on — `{limb}` \
+                 is missing, and a filer owing Schedule 2 Part II tax can answer No and omit it: {}",
                 q.prompt
             );
         }
