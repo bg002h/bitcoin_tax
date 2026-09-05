@@ -538,9 +538,26 @@ fn extract_for(root: &Path, rel: &str) -> String {
 /// subsumes the note case without a second tree walk.
 ///
 /// Returns an empty vec when no manifest exists yet — a first-ever regen has nothing to lose.
-pub fn regen_would_drop(root: &Path, sources: &[String]) -> Vec<String> {
-    let Ok(existing) = load(root) else {
-        return Vec::new();
+pub fn regen_would_drop(root: &Path, sources: &[String]) -> Result<Vec<String>, String> {
+    // ★★★ **"Absent" and "unreadable" are NOT the same, and conflating them reopened the hole.**
+    // The first version was `let Ok(existing) = load(root) else { return Vec::new() }` — so a
+    // manifest that existed but would not parse was treated as "nothing to lose", and the refusal
+    // was bypassed entirely. Measured 2026-09-04: corrupt MANIFEST.json + the 60 PDFs absent →
+    // `--regen` rewrote it to 42 entries with no refusal, the identical data loss the guard exists
+    // to stop, reachable by any truncated write or botched merge conflict.
+    // A file that is there but unreadable is the case where we know LEAST about what we would
+    // destroy, so it must fail closed, not open.
+    let existing = match load(root) {
+        Ok(e) => e,
+        Err(e) if manifest_path(root).exists() => {
+            return Err(format!(
+                "REFUSING to regenerate: MANIFEST.json exists but cannot be read ({e}). A regen \
+                 would overwrite it, and nothing can say what it listed. Repair it (or `git \
+                 restore` it) first — do not let a regen be how a corrupt index becomes a short one."
+            ));
+        }
+        // Genuinely no manifest yet: a first-ever regen has nothing to lose.
+        Err(_) => return Ok(Vec::new()),
     };
     let fresh: std::collections::BTreeSet<&str> = sources.iter().map(String::as_str).collect();
     let mut dropped: Vec<String> = existing
@@ -550,7 +567,7 @@ pub fn regen_would_drop(root: &Path, sources: &[String]) -> Vec<String> {
         .collect();
     dropped.sort();
     dropped.dedup();
-    dropped
+    Ok(dropped)
 }
 
 /// Of [`regen_would_drop`]'s paths, those that have a provenance note — i.e. the ones a fetch can
@@ -637,7 +654,7 @@ pub fn regen(root: &Path) -> Result<usize, String> {
     sources.sort();
     sources.dedup();
 
-    let dropped = regen_would_drop(root, &sources);
+    let dropped = regen_would_drop(root, &sources)?;
     if !dropped.is_empty() {
         let notes: std::collections::BTreeSet<String> =
             notes_without_binaries(root).into_iter().collect();
@@ -984,16 +1001,15 @@ mod tests {
             );
 
             fs::write(&victim, &saved).expect("restore victim");
+            let mut v = Vec::new();
+            for (tree, _) in crate::archive_check::KNOWN_ARCHIVES {
+                collect_sources(&root.join(tree), root, &mut v);
+            }
+            v.sort();
             assert!(
-                regen_would_drop(root, &{
-                    let mut v = Vec::new();
-                    for (tree, _) in crate::archive_check::KNOWN_ARCHIVES {
-                        collect_sources(&root.join(tree), root, &mut v);
-                    }
-                    v.sort();
-                    v
-                })
-                .is_empty(),
+                regen_would_drop(root, &v)
+                    .expect("manifest readable")
+                    .is_empty(),
                 "restoring the document must clear the refusal"
             );
         }
@@ -1004,6 +1020,32 @@ mod tests {
             fs::read(&manifest).expect("manifest"),
             pristine,
             "a regen over an unchanged tree must be byte-stable"
+        );
+
+        // ★★★ **CORRUPT ≠ ABSENT.** A manifest that exists but will not parse is the case where we
+        // know LEAST about what a regen would destroy, so it must fail closed. Treating it as
+        // "nothing to lose" bypassed the whole guard: measured on the real repo, a corrupt
+        // MANIFEST.json plus the 60 gitignored PDFs absent regenerated to 42 entries in silence.
+        fs::remove_file(forms.join("f8949--2025.pdf")).expect("remove");
+        fs::write(&manifest, b"not json at all").expect("corrupt the manifest");
+        let err = regen(root).expect_err("a corrupt manifest must NOT be treated as empty");
+        assert!(
+            err.contains("cannot be read"),
+            "the refusal must name the real reason; got: {err}"
+        );
+        assert_eq!(
+            fs::read(&manifest).expect("manifest"),
+            b"not json at all",
+            "the corrupt manifest must be left exactly as found, not overwritten"
+        );
+
+        // ★ And an ABSENT manifest is the opposite case: a first-ever regen has nothing to lose.
+        fs::remove_file(&manifest).expect("remove manifest");
+        fs::write(forms.join("f8949--2025.pdf"), b"%PDF-1.4 fake").expect("pdf");
+        assert_eq!(
+            regen(root).expect("a first regen with no manifest must succeed"),
+            2,
+            "absent must not be conflated with corrupt in the other direction either"
         );
     }
 
