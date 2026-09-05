@@ -72,16 +72,6 @@ pub const FILING_PATH: &[(&str, &str)] = &[
 /// type stops existing, so a closed gap cannot silently reopen.
 pub const ADVISORY_ONLY: &[(&str, &str)] = &[
     (
-        "ComplianceStatus",
-        "★★★ NOT ADVISORY — THIS IS THE DEFECT (FOLLOWUPS.md FR-34). It is listed here ONLY so the \
-         gate is not permanently red, which `design/HARNESS.md` says is noise that gets muted. The \
-         engine computes a per-disposal identification verdict under Reg. §1.1012-1(j) and files \
-         the return anyway: a no-election disposal computes at HIFO while `disposal_compliance` \
-         calls that same disposal NonCompliant, and the row reaches only `verify`. The repo's own \
-         KAT measures it — a $95 sale, gain $5 under HIFO versus $45 under FIFO. DELETE THIS ENTRY \
-         when FR-34 lands; do not let it become furniture.",
-    ),
-    (
         "ApproxReason",
         "Optimizer diagnostics — why a search was approximate. Advisory by construction: nothing \
          in `optimize.rs` becomes a filed artifact without passing through `optimize accept`, \
@@ -104,10 +94,19 @@ pub const ADVISORY_ONLY: &[(&str, &str)] = &[
     ),
 ];
 
-/// ★★ **The count may only go DOWN.** Four of the five entries above are advisory by design; the
-/// fifth is a recorded defect. A NEW verdict with no reader is exactly what this instrument exists
-/// to stop, so growth is the one direction that must not happen silently.
-pub const UNREACHED_PIN: usize = 5;
+/// ★★ **The count may only go DOWN, and on 2026-09-05 it did: 5 → 4.** Every entry above is now
+/// advisory by design. The fifth was `ComplianceStatus`, listed as a recorded DEFECT (FR-34) rather
+/// than a design choice — a no-election disposal computed at the HIFO default while
+/// `disposal_compliance` called that same disposal `NonCompliant`, and the row reached only
+/// `verify`. FR-34 gave the verdict a reader: `fold::consume_principal` now asks
+/// `compliance::identification_made` — the SAME classifier `disposal_compliance` reports with —
+/// while it builds the basis, and raises `BlockerKind::IdentificationDefaulted` when the units it is
+/// charging were identified by nothing at all. The exemption was deleted rather than reworded,
+/// exactly as its own note demanded.
+///
+/// A NEW verdict with no reader is what this instrument exists to stop, so growth is the one
+/// direction that must not happen silently.
+pub const UNREACHED_PIN: usize = 4;
 
 /// A verdict enum, and where it is defined.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -394,22 +393,29 @@ mod tests {
         }
     }
 
-    /// ★★★ **The instrument must still catch the defect it was BUILT for.** `ComplianceStatus` is
-    /// exempted only to keep the gate off permanent red — it is FR-34, not a design choice. If it
-    /// silently stopped being flagged as unreached, the exemption would have become furniture and
-    /// nobody would notice. This asserts the underlying condition, beneath the exemption.
+    /// ★★★ **INVERTED 2026-09-05, when FR-34 landed** — this is the same assertion, now pointing the
+    /// other way, as the pre-fix version's own failure message instructed.
+    ///
+    /// Before FR-34 this test asserted that `ComplianceStatus` did NOT reach the filing path, because
+    /// the exemption above hid a real defect and something had to notice if the defect quietly
+    /// changed shape. FR-34 fixed it: `fold::consume_principal` now branches on the verdict while it
+    /// builds a disposal's basis. So the assertion flips, and it is not decoration — it is the thing
+    /// that reds if a future refactor severs the verdict from the number again, which is precisely
+    /// the regression FR-34 was. `this_repo_has_no_unreached_verdict` would NOT catch that: it would
+    /// just report one more unreached verdict and invite a new exemption.
     #[test]
-    fn compliance_status_is_still_unread_on_the_filing_path() {
+    fn compliance_status_now_reads_on_the_filing_path() {
         let root = repo_root();
         let cs = verdicts(&root)
             .into_iter()
             .find(|v| v.name == "ComplianceStatus")
             .expect("ComplianceStatus is still defined");
         assert!(
-            !reaches_filing_path(&root, &cs),
-            "ComplianceStatus now READS on the filing path — FR-34 may be fixed. If so, delete its \
-             ADVISORY_ONLY entry, lower UNREACHED_PIN, and INVERT this test. Do not leave an \
-             exemption standing for a defect that no longer exists."
+            reaches_filing_path(&root, &cs),
+            "ComplianceStatus has STOPPED reading on the filing path — FR-34 has regressed. The \
+             engine would again compute a per-disposal §1.1012-1(j) identification verdict and file \
+             the return without it. Restore the reader (fold.rs `consume_principal` asks \
+             `compliance::identification_made`); do NOT re-add an ADVISORY_ONLY exemption."
         );
     }
 

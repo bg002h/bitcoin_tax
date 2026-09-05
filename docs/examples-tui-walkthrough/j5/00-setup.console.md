@@ -15,7 +15,8 @@ Conservation (FR9): BALANCED
 2025 transition: Path A (actual per-wallet reconstruction; default, no election)
 Pending reconciliation: 0 transfer(s); unknown-basis inbounds: 0
 Hard blockers (gate tax computation): 0
-Advisory blockers: 0
+Advisory blockers: 1
+  [IdentificationDefaulted] import|coinbase|trade|opt-sell :: no specific identification was made for this disposition — no LotSelection covers it and no MethodElection is in force for this wallet — so btctax applied its DEFAULT method HIFO, consuming $80000.00 of lot basis. §1.1012-1(j)(1) / (j)(3)(i) treat units with no adequate identification as sold in order of acquisition (earliest first), which on this pool draws $30000.00: the default takes $50000.00 MORE basis than the deemed order, so this return reports $50000.00 LESS GAIN than §1.1012-1(j) gives. A standing order IS an adequate identification (§1.1012-1(j)(3)(ii)): record one with `btctax config --set-forward-method <fifo|lifo|hifo>` so later sales rest on your identification rather than this default. It cannot be back-dated, so for THIS disposition only a contemporaneous identification already in your own books supports HIFO
 Pre-2025 method (attested historical fact): HIFO (attested: false)
 Standing orders (MethodElection): 0
 Lot selections recorded: 0

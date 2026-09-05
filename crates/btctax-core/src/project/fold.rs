@@ -6,6 +6,7 @@ use crate::conventions::{
 use crate::event::{BasisSource, DisposeKind};
 use crate::identity::{EventId, LotId};
 use crate::price::{fmv_of, PriceProvider};
+use crate::project::compliance::ComplianceStatus;
 use crate::project::pools::{pool_key, Consumed, PoolKey, PoolSet};
 use crate::project::resolve::{sort_canonical, Eff, ElectionRec, Op, Resolution};
 use crate::project::transition;
@@ -30,30 +31,60 @@ pub(crate) struct FoldCtx<'a> {
     pub promotes: PromoteSet,
 }
 
-/// The lot-identification method applicable to a disposal on `wallet` at `date`:
+/// The lot-identification method applicable to a disposal on `wallet` at `date`, AND the
+/// `effective_from` of the standing order it came from (`None` ⇒ no election was in force and the
+/// method below is btctax's default, not the filer's choice — FR-34 reads exactly this).
+///
 /// pre-2025 (Universal pool) → the declared `pre2025_method`; post-2025 (Wallet pool) → the SHARED
 /// wallet-aware resolver `resolve::resolve_election` (§A.5(a), two independent tiers: latest in-force
 /// election SCOPED to `wallet`, else latest in-force GLOBAL election, else the HIFO default).
 /// `None ⇒ Hifo` here — the app's realistic no-election default (most elected method; §reconcile-defaults).
 /// This is the ONLY method-resolution path in the fold; `disposal_compliance` calls the same resolver.
+///
+/// ★ The pre-2025 arm returns `None` for the election date because §A.5(a) elections do not reach
+/// before `TRANSITION_DATE` at all — that period is `Pre2025MethodNote`'s (§7.4), and the FR-34
+/// disclosure below is scoped away from it, matching §1.1012-1(j)(6).
 fn applicable_method(
     date: TaxDate,
     wallet: &crate::identity::WalletId,
     ctx: &FoldCtx,
-) -> LotMethod {
+) -> (LotMethod, Option<TaxDate>) {
     if date < TRANSITION_DATE {
-        ctx.config.pre2025_method
+        (ctx.config.pre2025_method, None)
     } else {
-        crate::project::resolve::resolve_election(date, wallet, ctx.elections)
-            .map(|e| e.method)
-            .unwrap_or(LotMethod::Hifo)
+        match crate::project::resolve::resolve_election(date, wallet, ctx.elections) {
+            Some(e) => (e.method, Some(e.effective_from)),
+            None => (LotMethod::Hifo, None),
+        }
     }
+}
+
+/// FR-34: which consumptions carry a §1.1012-1(j) identification obligation. Passed EXPLICITLY at
+/// every `consume_principal` call site rather than inferred, so the compiler (E0061) forces a new
+/// call site to answer the question instead of acquiring the exemption by omission — the discipline
+/// FR-33 used for `persist_selection`'s `attested` parameter.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IdScope {
+    /// A taxable disposition (Dispose / GiftOut / Donate). §1.1012-1(j) governs which units are
+    /// treated as sold, and the answer changes the reported basis. Same scope as `disposal_compliance`,
+    /// which emits one row per `Disposal`/`Removal`.
+    TaxableDisposition,
+    /// Non-taxable routing between the filer's own wallets. No gain is recognized, so no identification
+    /// obligation attaches at the move itself — the boundary `disposal_compliance` draws by iterating
+    /// only `disposals`/`removals`, and the one FR-33 deliberately declined to widen.
+    SelfTransferRouting,
 }
 
 /// Consume a method-honoring op's principal: the applicable method plus any `LotSelection` for `ev`.
 /// On a selection-validation failure → hard `LotSelectionInvalid` (carrying the disposal id + reason);
 /// consumption falls back to method order so Σsat conservation holds and the hard blocker gates tax.
-/// (Selections are an empty map this task; the fallback path is exercised once Task 4 populates them.)
+///
+/// FR-34 — the §A.5 verdict finally reads on the filing path. Before consuming, the SAME classifier
+/// `disposal_compliance` reports with (`compliance::identification_made`) is asked what identification
+/// this disposition rests on. `NonCompliant` here means the filer identified nothing at all, so the
+/// `method` above is btctax's default rather than their choice, and §1.1012-1(j)(1)/(j)(3)(i) would
+/// treat the units as sold in acquisition order instead. That is disclosed with both basis figures
+/// MEASURED off the same pool — never estimated, never merely described.
 #[allow(clippy::too_many_arguments)]
 fn consume_principal(
     pools: &mut PoolSet,
@@ -64,12 +95,114 @@ fn consume_principal(
     ctx: &FoldCtx,
     st: &mut LedgerState,
     ev: &EventId,
+    scope: IdScope,
 ) -> (Vec<Consumed>, Sat) {
-    let method = applicable_method(date, wallet, ctx);
+    let (method, election_from) = applicable_method(date, wallet, ctx);
     let selection = ctx.selections.get(ev).map(|v| v.as_slice());
+
+    // FR-34 §1.1012-1(j)(6): paragraph (j) reaches only dispositions on or after 2025-01-01, and only
+    // the TAXABLE ones bear an identification obligation.
+    //
+    // ★ `selection.map(|_| date)` is the honest made-date to hand the classifier HERE: FR-33's §A.4
+    // timeliness pass (resolve.rs) already DROPPED every unattested selection made after the
+    // disposition, so a selection still present in `ctx.selections` is timely-or-attested by
+    // construction — never late. Presence therefore means `Contemporaneous`, and absence means the
+    // election tier decides. (An attested late recording is the §C.2 owner-sanctioned path: the filer
+    // swore a genuine contemporaneous identification exists in their books, so it identifies too.)
+    let deemed = if scope == IdScope::TaxableDisposition
+        && date >= TRANSITION_DATE
+        && crate::project::compliance::identification_made(
+            date,
+            selection.map(|_| date),
+            election_from,
+        ) == ComplianceStatus::NonCompliant
+    {
+        // Peek BEFORE consuming — `consume` mutates the pool.
+        Some(pools.peek_consumption(key, need, LotMethod::Fifo))
+    } else {
+        None
+    };
+
     let r = pools.consume(key, need, method, selection);
     if let Some(reason) = r.selection_error {
         st.add_blocker(BlockerKind::LotSelectionInvalid, Some(ev.clone()), reason);
+    }
+    if let Some(deemed) = deemed {
+        // ★ FIRE ONLY WHEN THE DEEMED ORDER WOULD TAKE DIFFERENT UNITS. §1.1012-1(j)(1) prescribes an
+        // OUTCOME — "the basis AND HOLDING PERIOD ... are determined by treating the units as sold in
+        // order of time from the earliest date" — not a formality. When the applied consumption draws
+        // the identical fragments, the return already IS the outcome the reg prescribes and the filer
+        // has no exposure to disclose; a single-lot pool is the common case, where every method
+        // coincides. Warning there would fire on nearly every disposal in an un-elected vault and
+        // train the filer to ignore the one that matters.
+        //
+        // The comparison is over (lot, sat) fragments and is ORDER-INSENSITIVE — both halves matter.
+        //
+        // Order-insensitive, because the two consumptions list the SAME units in different sequences
+        // whenever both draw a pool dry: FIFO returns [older, dearer] where HIFO returns
+        // [dearer, older]. The legs, their bases and their terms are identical, so the tax is
+        // identical; a pairwise comparison would have fired an advisory on a disposal with no
+        // exposure at all. (Killed by `..._is_silent_when_the_deemed_order_takes_the_same_units_in_a_
+        // different_order`.)
+        //
+        // Fragments rather than Σbasis, because §1.1012-1(j)(1) determines "the basis AND HOLDING
+        // PERIOD" — different units at an equal total still move the term, and so the rate. ★ HONEST
+        // LIMIT: no test can currently distinguish the two predicates, and none is claimed to.
+        // `hifo_cmp` breaks a per-sat tie by acquisition date ASC, which is FIFO's own primary key, so
+        // while the default is HIFO an equal total IMPLIES the identical set. The stricter predicate
+        // is kept because it is the one the reg states, and it is what stops this from silently
+        // becoming wrong if the no-election default ever moves off HIFO.
+        let units_of = |v: &[Consumed]| -> Vec<(LotId, Sat)> {
+            let mut u: Vec<(LotId, Sat)> = v.iter().map(|c| (c.lot_id.clone(), c.sat)).collect();
+            u.sort();
+            u
+        };
+        let same_units = units_of(&deemed) == units_of(&r.consumed);
+        if !same_units {
+            let sum = |v: &[Consumed]| -> Usd { v.iter().map(|c| c.gain_basis).sum() };
+            let used = sum(&r.consumed);
+            let deemed_basis = sum(&deemed);
+            let m = match method {
+                LotMethod::Fifo => "FIFO",
+                LotMethod::Lifo => "LIFO",
+                LotMethod::Hifo => "HIFO",
+            };
+            // ★ TWO branches, not three, and the second one says explicitly what it does NOT know.
+            // Under today's HIFO default the first is the only reachable case — HIFO is greedy on
+            // basis-per-sat, so for a fixed sat draw it takes at least as much basis as acquisition
+            // order can, and at equal per-sat basis `hifo_cmp` ties to acquisition date and picks the
+            // SAME units (caught by `same_units` above). The fallback exists for a future default that
+            // is not HIFO, and for an equal-total/different-units draw where only the holding period
+            // moves; it asserts no direction, because neither direction has been demonstrated here. A
+            // third branch claiming "MORE gain" would be a sentence no test can ever red.
+            let effect = if used > deemed_basis {
+                let gap = used - deemed_basis;
+                format!(
+                    "${gap} MORE basis than the deemed order, so this return reports ${gap} LESS GAIN \
+                     than §1.1012-1(j) gives"
+                )
+            } else {
+                "different units than the deemed order, so the reported basis, the holding period, or \
+                 both differ from what §1.1012-1(j) gives"
+                    .into()
+            };
+            st.add_blocker(
+                BlockerKind::IdentificationDefaulted,
+                Some(ev.clone()),
+                format!(
+                    "no specific identification was made for this disposition — no LotSelection covers \
+                     it and no MethodElection is in force for this wallet — so btctax applied its \
+                     DEFAULT method {m}, consuming ${used} of lot basis. §1.1012-1(j)(1) / (j)(3)(i) \
+                     treat units with no adequate identification as sold in order of acquisition \
+                     (earliest first), which on this pool draws ${deemed_basis}: the default takes \
+                     {effect}. A standing order IS an adequate identification (§1.1012-1(j)(3)(ii)): \
+                     record one with `btctax config --set-forward-method <fifo|lifo|hifo>` so later \
+                     sales rest on your identification rather than this default. It cannot be \
+                     back-dated, so for THIS disposition only a contemporaneous identification already \
+                     in your own books supports {m}"
+                ),
+            );
+        }
     }
     (r.consumed, r.shortfall)
 }
@@ -713,8 +846,17 @@ pub(crate) fn fold_event(
                 ctx.config.pre2025_method,
                 ctx.config.pre2025_method_attested,
             ); // §7.4: pre-2025 disposal advisory (once)
-            let (consumed, shortfall) =
-                consume_principal(pools, &key, *sat, date, &wallet, ctx, st, &eff.id);
+            let (consumed, shortfall) = consume_principal(
+                pools,
+                &key,
+                *sat,
+                date,
+                &wallet,
+                ctx,
+                st,
+                &eff.id,
+                IdScope::TaxableDisposition,
+            );
             if shortfall > 0 {
                 st.add_blocker(
                     BlockerKind::UncoveredDisposal,
@@ -898,8 +1040,17 @@ pub(crate) fn fold_event(
                 }
             };
             let key = pool_key(date, &wallet);
-            let (consumed, shortfall) =
-                consume_principal(pools, &key, *sat, date, &wallet, ctx, st, &eff.id);
+            let (consumed, shortfall) = consume_principal(
+                pools,
+                &key,
+                *sat,
+                date,
+                &wallet,
+                ctx,
+                st,
+                &eff.id,
+                IdScope::SelfTransferRouting,
+            );
             if shortfall > 0 {
                 st.add_blocker(
                     BlockerKind::UncoveredDisposal,
@@ -1255,8 +1406,17 @@ pub(crate) fn fold_event(
                 ctx.config.pre2025_method,
                 ctx.config.pre2025_method_attested,
             ); // §7.4: pre-2025 removal advisory (once)
-            let (consumed, shortfall) =
-                consume_principal(pools, &key, *sat, date, &wallet, ctx, st, &eff.id);
+            let (consumed, shortfall) = consume_principal(
+                pools,
+                &key,
+                *sat,
+                date,
+                &wallet,
+                ctx,
+                st,
+                &eff.id,
+                IdScope::TaxableDisposition,
+            );
             if shortfall > 0 {
                 st.add_blocker(
                     BlockerKind::UncoveredDisposal,
@@ -1342,8 +1502,17 @@ pub(crate) fn fold_event(
                 ctx.config.pre2025_method,
                 ctx.config.pre2025_method_attested,
             ); // §7.4: pre-2025 removal advisory (once)
-            let (consumed, shortfall) =
-                consume_principal(pools, &key, *sat, date, &wallet, ctx, st, &eff.id);
+            let (consumed, shortfall) = consume_principal(
+                pools,
+                &key,
+                *sat,
+                date,
+                &wallet,
+                ctx,
+                st,
+                &eff.id,
+                IdScope::TaxableDisposition,
+            );
             if shortfall > 0 {
                 st.add_blocker(
                     BlockerKind::UncoveredDisposal,

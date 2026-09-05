@@ -64,6 +64,25 @@ impl PoolSet {
         (r.consumed, r.shortfall)
     }
 
+    /// Read-only counterfactual (FR-34): the fragments a `method`-ordered consumption of `need` sat
+    /// from `key` WOULD take — without mutating anything.
+    ///
+    /// Used by the `IdentificationDefaulted` advisory to answer §1.1012-1(j)(1)'s question — which
+    /// units are treated as sold when the filer identified none — with the engine's own arithmetic
+    /// rather than a description. It runs the SAME `consume` the fold runs, over a copy of the ONE
+    /// pool being consumed, so it cannot drift from the real consumption: re-implementing the ordering
+    /// and the pro-rata split here to produce an advisory number would be a defect factory.
+    ///
+    /// A pool that cannot cover `need` simply contributes what it has; the shortfall is reported by
+    /// the real consumption, not here.
+    pub fn peek_consumption(&self, key: &PoolKey, need: Sat, method: LotMethod) -> Vec<Consumed> {
+        let mut probe = PoolSet::default();
+        if let Some(lots) = self.pools.get(key) {
+            probe.pools.insert(key.clone(), lots.clone());
+        }
+        probe.consume(key, need, method, None).consumed
+    }
+
     /// General pool consumption (§A.4): by `method` total-order (FIFO/LIFO/HIFO), or by an explicit
     /// named-lot `selection`. A `selection` that is infeasible *within this pool* (unknown lot,
     /// cross-wallet lot, or insufficient remaining) falls back to `method` order and reports the
