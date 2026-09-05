@@ -1012,6 +1012,20 @@ mod tests {
             assert!(ok, "fixture git {args:?} failed");
         };
         git(&["init", "-q"]);
+        // ★★★ **Neutralise the DEVELOPER's global ignore rules, repo-locally.** `regen` runs its own
+        // `git check-ignore` inside this fixture, and git reads the user's global
+        // `core.excludesFile` there too — so a developer who globally ignores `*.html` (or `*.pdf`)
+        // silently flips this fixture's storage classes and reds the test on their machine only.
+        // Measured 2026-09-04 with a global `*.html` rule: "got 2 note / 0 committed".
+        // Repo-local config wins over global, and pointing it at a path that does not exist is the
+        // portable way to say "no global excludes" — `/dev/null` is not portable to Windows CI.
+        git(&[
+            "config",
+            "core.excludesFile",
+            root.join("no-such-global-excludes")
+                .to_str()
+                .expect("utf-8 path"),
+        ]);
         // The same pattern the real repo uses for the (A) tree.
         fs::write(root.join(".gitignore"), "design/forms/**/*.pdf\n").expect("gitignore");
 
