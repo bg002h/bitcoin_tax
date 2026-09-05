@@ -1507,6 +1507,9 @@ pub fn resolve(
     //   - principal conservation (§A.4(a)): Σ picked sat MUST equal the disposal's principal sat. The
     //     on-chain `fee_sat` is excluded and consumes FIFO from the post-selection remainder. NOTE
     //     (from Task 2): the pool's `consume_picks` returns shortfall=0, so this Σ check MUST live here.
+    //   - TIMELINESS (FR-33, §1.1012-1(j)(2)): an UNATTESTED selection whose made-date is AFTER the
+    //     named disposition's tax-date is not an identification at all → advisory `LotSelectionPostHoc`.
+    //     This is the §A.4 sibling of the `MethodElectionBackdated` guard forty lines above.
     // Existence / per-wallet / over-draw are surfaced in the fold (the pool's `selection_error` raises
     // `LotSelectionInvalid`). Every rejection DROPS the selection so the fold falls back to method
     // order — Σsat/Σbasis stay conserved on every path.
@@ -1514,10 +1517,29 @@ pub fn resolve(
         .iter()
         .filter_map(|e| honoring_principal(&e.op).map(|s| (e.id.clone(), s)))
         .collect();
+    // FR-33 timeliness scope. §1.1012-1(j)(6) makes paragraph (j) applicable only to dispositions on
+    // or after 2025-01-01, so pre-`TRANSITION_DATE` disposals are OUT (they are also a closed year the
+    // optimizer already refuses to restate). `SelfTransfer` is OUT for the same reason
+    // `disposal_compliance` excludes it: the guard is scoped to the TAXABLE dispositions whose
+    // identification drives a reported basis/gain, and a self-transfer recognizes none. (The reg's
+    // (j)(1)/(j)(2) text does reach "transfers"; widening the guard to lot ROUTING between the filer's
+    // own wallets is a distinct behavioural change and is recorded as a follow-up, not smuggled here.)
+    let identification_deadline: BTreeMap<EventId, TaxDate> = timeline
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.op,
+                Op::Dispose { .. } | Op::GiftOut { .. } | Op::Donate { .. }
+            ) && e.date() >= TRANSITION_DATE
+        })
+        .map(|e| (e.id.clone(), e.date()))
+        .collect();
 
     let mut selections: BTreeMap<EventId, Vec<crate::event::LotPick>> = BTreeMap::new();
     let mut seen: BTreeSet<EventId> = BTreeSet::new(); // disposal_events already claimed (dup detection)
     let mut dup: BTreeSet<EventId> = BTreeSet::new();
+    // FR-33: disposal_event → (made-date, attested) of its single non-duplicate selection.
+    let mut made_at: BTreeMap<EventId, (TaxDate, bool)> = BTreeMap::new();
     for (_seq, d) in &decisions {
         if voided.contains(&d.id) {
             continue;
@@ -1534,6 +1556,12 @@ pub fn resolve(
             dup.insert(ls.disposal_event.clone());
             continue;
         }
+        // FR-33: record the made-date + attestation of the selection that WILL apply, for the
+        // timeliness pass below (run AFTER the Hard validations so an Advisory can never pre-empt one).
+        made_at.insert(
+            ls.disposal_event.clone(),
+            (tax_date(d.utc_timestamp, d.original_tz), ls.attested),
+        );
         selections.insert(ls.disposal_event.clone(), ls.lots.clone());
     }
     for id in &dup {
@@ -1562,6 +1590,53 @@ pub fn resolve(
                 true
             }
         }
+    });
+    // FR-33 / §1.1012-1(j)(2) TIMELINESS — deliberately the LAST §A.4 filter.
+    //
+    // A specific identification is made only if it exists "no later than the date and time of the
+    // sale, disposition, or transfer" (§1.1012-1(j)(2)). A LATE one is therefore no identification at
+    // all, and §1.1012-1(j)(1) supplies the consequence — the units are treated as sold in acquisition
+    // order — so we DROP it and the fold consumes by the method in force, exactly as every other §A.4
+    // rejection does. This is the reg's own remedy, NOT an invented refusal: it can only RAISE the
+    // reported gain (the cherry-pick is removed), never lower it, which is why the blocker is Advisory
+    // and the year still computes. `attested` is the §C.2 owner-sanctioned exception, where the filer
+    // swore a genuine contemporaneous identification exists in their books and this merely transcribes
+    // it (`optimize accept` with a narrow per-disposal attestation).
+    //
+    // ORDER IS LOAD-BEARING: this runs after the targeting + principal-conservation retain above, so a
+    // selection that is BOTH malformed and late still raises the HARD `LotSelectionInvalid` and gates
+    // the year. An Advisory must never pre-empt a Hard. (A late selection that would additionally fail
+    // a FOLD-level check — existence / per-wallet / over-draw — surfaces only this advisory, because
+    // the fold never sees a dropped selection; that is already true of every resolve-level rejection.)
+    selections.retain(|disposal, _picks| {
+        let Some(&(made, attested)) = made_at.get(disposal) else {
+            return true; // no recorded made-date (unreachable: every entry is inserted with one)
+        };
+        if attested {
+            return true;
+        }
+        // §1.1012-1(j)(6): paragraph (j) reaches only dispositions on or after 2025-01-01, and only
+        // the TAXABLE dispositions are in `identification_deadline` (see its construction above).
+        let Some(&deadline) = identification_deadline.get(disposal) else {
+            return true;
+        };
+        if made <= deadline {
+            return true;
+        }
+        blockers.push(Blocker {
+            kind: BlockerKind::LotSelectionPostHoc,
+            event: Some(disposal.clone()),
+            detail: format!(
+                "LotSelection was recorded {made} — AFTER the {deadline} disposition it names — and \
+                 carries no attestation, so it is not a specific identification (§1.1012-1(j)(2) \
+                 requires one no later than the date and time of the sale). It is IGNORED and this \
+                 disposal falls back to the method in force (§1.1012-1(j)(1)), which RAISES the \
+                 reported gain. To record a genuine contemporaneous identification made outside this \
+                 tool, use `optimize accept` with a narrow per-disposal attestation; otherwise \
+                 `reconcile void` the selection to clear this advisory"
+            ),
+        });
+        false
     });
 
     // ── 3. §7.4 / TP6 transition effectiveness ───────────────────────────────────────────────────

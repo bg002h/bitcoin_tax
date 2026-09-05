@@ -359,6 +359,7 @@ fn lot_selection_still_overrides_scoped_election() {
         datetime!(2025-06-15 00:00:00 UTC),
         EventPayload::LotSelection(LotSelection {
             disposal_event: EventId::import(Source::Coinbase, SourceRef::new("cbD")),
+            attested: false, // made 2025-06-15, sale 2025-07-01 → timely (FR-33 guard not engaged)
             lots: vec![LotPick {
                 lot: LotId {
                     origin_event_id: EventId::import(Source::Coinbase, SourceRef::new("cbC")),

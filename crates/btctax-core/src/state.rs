@@ -37,6 +37,19 @@ pub enum BlockerKind {
     /// §A.4: a `LotSelection` that fails validation (unknown/cross-wallet/over-drawn lot, or principal
     /// mismatch). Hard — the named identification is unusable so the disposal's tax is gated.
     LotSelectionInvalid,
+    /// §1.1012-1(j)(2) / FR-33: an UNATTESTED `LotSelection` whose made-date is AFTER the tax-date of
+    /// the disposition it names. Under §1.1012-1(j)(2) an identification is made only if it exists
+    /// "no later than the date and time of the sale, disposition, or transfer", so a late one is not
+    /// an identification at all; §1.1012-1(j)(1) supplies the consequence — the units are treated as
+    /// sold in acquisition order. The resolver therefore DROPS the selection and consumption falls
+    /// back to the method in force (the established §A.4 rejection semantics).
+    ///
+    /// **Advisory** — never gates `compute_tax_year`. The reg prescribes a CONSEQUENCE, not a
+    /// refusal, and the consequence can only RAISE the reported gain (the cherry-pick is removed),
+    /// never lower it. But dropping a selection changes a filed number silently, so the advisory is
+    /// the disclosure that it happened. An ATTESTED late recording (`optimize accept --attest`,
+    /// `LotSelection::attested`) is the owner-sanctioned path and never fires this.
+    LotSelectionPostHoc,
     /// §A.7 / §7.4: the live `pre2025_method` config differs from the GOVERNING (effective) allocation's
     /// recorded `pre2025_method`. The allocation conserves under ITS recorded method, so this is a method
     /// drift — NOT bad data (never `SafeHarborUnconservable`). Hard: a post-attestation method change would
@@ -115,7 +128,8 @@ impl BlockerKind {
             | QualifiedAppraisalNote
             | SelfTransferInboundZeroBasis
             | SelfTransferInboundDefaultedAcquired
-            | PseudoReconcileActive => Severity::Advisory,
+            | PseudoReconcileActive
+            | LotSelectionPostHoc => Severity::Advisory,
         }
     }
 }

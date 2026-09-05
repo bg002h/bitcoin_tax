@@ -316,6 +316,24 @@ pub struct SelfTransferPassthrough {
 pub struct LotSelection {
     pub disposal_event: EventId,
     pub lots: Vec<LotPick>,
+    /// FR-33 / §1.1012-1(j)(2): the filer's sworn assertion that a genuine specific identification
+    /// of exactly these `lots` existed in their books and records **no later than the date and time
+    /// of the sale**, and that this decision merely TRANSCRIBES it. Set ONLY by
+    /// `optimize accept --disposal <ref> --attest "<statement>"` (the §C.2 gate — which also
+    /// co-persists the attestation TEXT in the `optimize_attestation` side-table); every other
+    /// producer records `false`, because none of them collects such a statement.
+    ///
+    /// It is on the EVENT, not read from the side-table, because §7.1 makes the projection a pure
+    /// function of the event log: a filed number that depended on a CLI-side sqlite table would
+    /// differ between `btctax report` and the TUI (which deliberately never loads it —
+    /// `btctax-tui/src/unlock.rs` [R0-M3]).
+    ///
+    /// When `false` AND the made-date is after the named disposition's tax-date, `resolve` DROPS the
+    /// selection (advisory `LotSelectionPostHoc`) and consumption falls back to the method in force.
+    /// `#[serde(default)]` ⇒ a record written before this field deserializes to `false`, which is the
+    /// fail-closed direction (the cherry-pick is dropped; the reported gain can only rise).
+    #[serde(default)]
+    pub attested: bool,
 }
 
 /// Approach-B: the ONE method by which a promoted tranche's filed-basis floor is computed (BG-D2 —
@@ -628,6 +646,7 @@ mod tests {
             }),
             EventPayload::LotSelection(LotSelection {
                 disposal_event: EventId::import(Source::Coinbase, SourceRef::new("P")),
+                attested: false,
                 lots: vec![
                     LotPick {
                         lot: LotId {
@@ -809,6 +828,7 @@ mod tests {
         // Global Constraints (§0): new decision events carry `fingerprint = None`.
         let ls = EventPayload::LotSelection(LotSelection {
             disposal_event: EventId::import(Source::Coinbase, SourceRef::new("P")),
+            attested: false,
             lots: vec![LotPick {
                 lot: LotId {
                     origin_event_id: EventId::import(Source::Coinbase, SourceRef::new("O")),
