@@ -5659,3 +5659,29 @@ become furniture — which is precisely what the tickle existed to prevent.
   repo and asserts it holds one entry of EACH storage class, so that edit reds immediately.
   **If you come here to relieve the fresh-clone pain: build the fetcher, do not narrow the guard.**
   **Owning phase: next harness change.**
+
+### From the 2026-09-04 label-reader column fix (`fix/label-reader-drops-1a`)
+
+`witness_text` now picks its label column by *how many labels the column yields* rather than by how
+many tokens it contains, which recovered Form 6251 line **1a** (the Schedule 1-A seam) and 86 other
+labels across the archived forms. Report: `design/agent-reports/2026-09-04-label-reader-1a-fix.md`.
+The residue below is what a **single**-column reader structurally cannot reach.
+
+- **FR-27 — a second entry printed on the SAME ROW is still invisible to the reader.** Form 1040
+  puts two lines on one row in two money columns — `2a Tax-exempt interest … 2a [box]   b Taxable
+  interest … 2b [box]` — and the margin prints only `2a`. The `b` is mid-row, at no column at all.
+  So `f1040--2024` now reports 54 labels including `2a`–`6a` and is missing `2b`, `3b`, `4b`, `5b`,
+  `6b`; before the fix it reported 39, had those five, and was missing nineteen others. Strictly
+  better, still incomplete, and **silent about it** — which is the same shape as the defect just
+  fixed, one level down.
+  ★ The obvious fix is **measured wrong and must not be built as written**: taking the UNION of every
+  candidate column injects prose numerals as phantom labels — on `f1040s1a--2025` (the anchor, whose
+  truth is 48 entry lines) the union adds `45` and `50`, on a 38-line form; on `f6251--2025` it adds
+  `5a`, `10a`, `12e`. Nor can a bare mid-row `b` simply be admitted: the English article *"a"* is a
+  bare lowercase word on nearly every row of every form.
+  What is actually owed is a **row model** — a row may carry more than one labelled entry, and the
+  second one's sub-letter is the bare letter that immediately precedes a second amount box on the
+  same row. That is a design change to W1, not a bug fix, and it wants the box witness (W2) in the
+  loop, because *"a bare letter with a box to its right"* is the signal that distinguishes it from
+  prose. **Owning phase: whenever the census is next pointed at Form 1040 itself.** Not urgent for
+  Schedule 1-A or Form 6251, neither of which has a two-entry row.
