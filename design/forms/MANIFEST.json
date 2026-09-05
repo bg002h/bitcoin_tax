@@ -387,6 +387,15 @@
     "extract": "design/forms/extract/f8283--2025.txt"
   },
   {
+    "path": "design/forms/2025/f8615--2025.pdf",
+    "kind": "form",
+    "storage": "note",
+    "sha256": "f1a9ce61a62faa917fd9a565805de69bf132313a6070010dfd77cfb2ca3bcb57",
+    "bytes": 79087,
+    "url": "https://www.irs.gov/pub/irs-prior/f8615--2025.pdf",
+    "extract": "design/forms/extract/f8615--2025.txt"
+  },
+  {
     "path": "design/forms/2025/f8949--2025.pdf",
     "kind": "form",
     "storage": "note",
@@ -493,6 +502,15 @@
     "bytes": 214214,
     "url": "https://www.irs.gov/pub/irs-prior/i8283--2025.pdf",
     "extract": "design/forms/extract/i8283--2025.txt"
+  },
+  {
+    "path": "design/forms/2025/i8615--2025.pdf",
+    "kind": "instructions",
+    "storage": "note",
+    "sha256": "902ca736f1205e726e80211c40630178c88fa5d57ca9b9bbdbb89189166fc780",
+    "bytes": 224742,
+    "url": "https://www.irs.gov/pub/irs-prior/i8615--2025.pdf",
+    "extract": "design/forms/extract/i8615--2025.txt"
   },
   {
     "path": "design/forms/2025/i8949--2025.pdf",
