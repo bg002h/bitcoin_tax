@@ -1,7 +1,9 @@
 use btctax_adapters::adapter::{Adapter, FileGroup, SourceFile};
 use btctax_adapters::price::BundledPrices;
 use btctax_adapters::sources::gemini::Gemini;
-use btctax_core::{DisposeKind, EventPayload, Source};
+use btctax_core::conventions::Usd;
+use btctax_core::{BasisSource, DisposeKind, EventPayload, Source};
+use rust_decimal_macros::dec;
 use rust_xlsxwriter::Workbook;
 
 // SYNTHETIC Gemini XLSX: the REAL §9.1 header names (a subset of the 30 cols — the parser reads only
@@ -584,4 +586,219 @@ fn gemini_subsatoshi_btc_amount_rounds_and_imports() {
             other => panic!("unexpected payload: {other:?}"),
         }
     }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// FR-45 — Gemini credit-card REWARD payouts
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// A second fixture carrying the `Specification` column, which the §9.1 fixture above does not have.
+/// Kept separate on purpose: the older fixture asserts exact row/ref counts, and widening it would
+/// make every FR-45 assertion a change to an unrelated test.
+fn write_reward_fixture(path: &std::path::Path) {
+    let mut wb = Workbook::new();
+    let ws = wb.add_worksheet();
+    let header = [
+        "Date",
+        "Time (UTC)",
+        "Type",
+        "Symbol",
+        "Specification",
+        "BTC Amount BTC",
+        "USD Amount USD",
+        "Fee (USD) USD",
+        "Tx Hash",
+        "Deposit Destination",
+    ];
+    for (c, h) in header.iter().enumerate() {
+        ws.write_string(0, c as u16, *h).unwrap();
+    }
+    // Every row is Type=Credit. ONLY `Specification` tells them apart — which is the whole finding.
+    // ★ Rewards carry NO Tx Hash and NO Deposit Destination; the on-chain deposit carries both.
+    //   That asymmetry is real, measured on a live export, not invented for the fixture.
+    let rows: [[&str; 10]; 4] = [
+        // (1) reward on a day the bundled dataset CAN price → Acquire at FMV.
+        [
+            "2025-03-02 11:00:00",
+            "2025-03-02 11:00:00",
+            "Credit",
+            "BTC",
+            "Deposit (Gemini Credit Card Reward Payout BTC)",
+            "0.00100000",
+            "",
+            "",
+            "",
+            "",
+        ],
+        // (2) the SAME thing under a differently-decorated specification. If the predicate ever
+        //     tightens to a byte-exact match, this row silently reverts to the zero-basis defect.
+        [
+            "2025-03-02 11:30:00",
+            "2025-03-02 11:30:00",
+            "Credit",
+            "BTC",
+            "Gemini Credit Card Reward Payout",
+            "0.00100000",
+            "",
+            "",
+            "",
+            "",
+        ],
+        // (3) reward on a day BEYOND the bundled dataset → no defensible basis → Unclassified.
+        [
+            "2026-08-01 11:00:00",
+            "2026-08-01 11:00:00",
+            "Credit",
+            "BTC",
+            "Deposit (Gemini Credit Card Reward Payout BTC)",
+            "0.00100000",
+            "",
+            "",
+            "",
+            "",
+        ],
+        // (4) a GENUINE on-chain deposit — must still be a TransferIn. The regression guard.
+        [
+            "2025-03-02 13:00:00",
+            "2025-03-02 13:00:00",
+            "Credit",
+            "BTC",
+            "Deposit (Pre-Credited BTC)",
+            "0.00100000",
+            "",
+            "",
+            "feedface",
+            "bc1qdp",
+        ],
+    ];
+    for (r, row) in rows.iter().enumerate() {
+        for (c, v) in row.iter().enumerate() {
+            ws.write_string((r + 1) as u32, c as u16, *v).unwrap();
+        }
+    }
+    wb.save(path).unwrap();
+}
+
+fn reward_payloads() -> Vec<EventPayload> {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("gemini_rewards.xlsx");
+    write_reward_fixture(&path);
+    let prices = BundledPrices::load().unwrap();
+    let gm = Gemini;
+    let g = FileGroup {
+        source: Source::Gemini,
+        label: "gemini".into(),
+        files: vec![SourceFile::new(path)],
+    };
+    let rows = gm.parse(&g).unwrap();
+    gm.normalize(&g, rows, &prices)
+        .unwrap()
+        .events
+        .into_iter()
+        .map(|e| e.payload)
+        .collect()
+}
+
+/// ★★★ **FR-45, the headline.** A Gemini credit-card reward is a purchase-price REBATE: not gross
+/// income at receipt, and the coins take basis = FMV at receipt. Before this, `Type=Credit` alone
+/// routed it to `TransferIn`, it took the inbound self-transfer path, and it landed at **zero
+/// basis** — overstating the gain on every later disposal.
+#[test]
+fn a_credit_card_reward_is_an_acquire_at_fmv_not_a_zero_basis_transfer() {
+    let ps = reward_payloads();
+
+    let acquires: Vec<_> = ps
+        .iter()
+        .filter_map(|p| match p {
+            EventPayload::Acquire(a) => Some(a),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        acquires.len(),
+        2,
+        "both priced reward rows must become Acquires, got payloads: {ps:?}"
+    );
+
+    for a in &acquires {
+        assert_eq!(
+            a.basis_source,
+            BasisSource::CardRewardRebate,
+            "a reward is a rebate, NOT ExchangeProvided and NOT FmvAtIncome"
+        );
+        // 0.001 BTC × the 2025-03-02 bundled close of 88,710.78 = 88.71078, which `fmv_of`
+        // rounds to whole CENTS — 88.71. The rounding is the money type's, not a fudge here:
+        // a basis is a USD amount and USD has two places.
+        assert_eq!(
+            a.usd_cost,
+            dec!(88.71),
+            "basis must be the FMV at receipt, read off the price dataset"
+        );
+        assert_ne!(a.usd_cost, Usd::ZERO, "the defect was a ZERO-basis lot");
+        assert_eq!(a.fee_usd, Usd::ZERO, "a reward payout carries no fee");
+    }
+
+    // And the reward must NOT have become income: a rebate is not gross income at receipt.
+    assert!(
+        !ps.iter().any(|p| matches!(p, EventPayload::Income(_))),
+        "a card reward is a REBATE — booking it as Income would tax it. Got: {ps:?}"
+    );
+}
+
+/// The predicate matches the PHRASE, not the whole decorated string. Gemini already varies the
+/// trailing asset token, and a byte-exact match would fail OPEN — straight back into the zero-basis
+/// TransferIn path, silently. This test is what makes that rationale enforceable.
+#[test]
+fn the_reward_predicate_ignores_the_decoration_around_the_phrase() {
+    let ps = reward_payloads();
+    let n = ps
+        .iter()
+        .filter(|p| {
+            matches!(p, EventPayload::Acquire(a) if a.basis_source == BasisSource::CardRewardRebate)
+        })
+        .count();
+    assert_eq!(
+        n, 2,
+        "`Deposit (… Payout BTC)` and a bare `Gemini Credit Card Reward Payout` are the same event"
+    );
+}
+
+/// ★★ **The refusal.** Gemini states no USD value on a reward row (measured blank on every reward row of a real export), so
+/// the basis can only come from the price dataset. When the dataset cannot price the day, this must
+/// REFUSE rather than substitute a number. Fabricating a basis is the defect FR-45 is about;
+/// fabricating a *different* basis would not be a fix.
+#[test]
+fn a_reward_with_no_price_for_the_day_refuses_instead_of_inventing_a_basis() {
+    let ps = reward_payloads();
+    assert_eq!(
+        ps.iter()
+            .filter(|p| matches!(p, EventPayload::Unclassified(_)))
+            .count(),
+        1,
+        "the 2026-08-01 reward is beyond the bundled dataset and must be Unclassified: {ps:?}"
+    );
+    // The specific failure that must never happen: an unpriced reward booked at $0.
+    assert!(
+        !ps.iter().any(|p| matches!(
+            p,
+            EventPayload::Acquire(a)
+                if a.basis_source == BasisSource::CardRewardRebate && a.usd_cost == Usd::ZERO
+        )),
+        "an unpriced reward must never become a zero-basis lot — that is the original defect"
+    );
+}
+
+/// The regression guard. FR-45 narrows the `Credit` arm; a genuine on-chain deposit must be
+/// untouched by it.
+#[test]
+fn a_genuine_on_chain_credit_is_still_a_transfer_in() {
+    let ps = reward_payloads();
+    assert_eq!(
+        ps.iter()
+            .filter(|p| matches!(p, EventPayload::TransferIn(_)))
+            .count(),
+        1,
+        "`Deposit (Pre-Credited BTC)` carries a Tx Hash and a Deposit Destination — it IS a \
+         transfer and must stay one: {ps:?}"
+    );
 }

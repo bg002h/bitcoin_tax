@@ -57,6 +57,9 @@ fn basis_source_tag(bs: BasisSource) -> &'static str {
         BasisSource::ReconstructedPerWallet => "reconstructed",
         BasisSource::SelfTransferInbound => "self_transfer_in",
         BasisSource::EstimatedConservative => "estimated_conservative",
+        // FR-45 — a purchase-price rebate (card reward). Distinct from `income_fmv`: same kind of
+        // figure, opposite answer on whether it was ever income.
+        BasisSource::CardRewardRebate => "card_reward_rebate",
     }
 }
 

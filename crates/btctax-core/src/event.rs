@@ -34,6 +34,24 @@ pub enum BasisSource {
     /// (a `>$0` estimate). The tag is exempt from both `basis_source` overwrite sites so it reaches every
     /// disposal leg it serves and drives the P3 dip / P7 mandatory-disclosure layer. See SPEC D-1/D-8.
     EstimatedConservative,
+    /// **FR-45** — property received as a *purchase-price rebate*, basis = **FMV at receipt**.
+    ///
+    /// The standing case is a credit-card reward paid in BTC. A reward earned by SPENDING is a
+    /// rebate on what you bought, not gross income at receipt — so it produces no income line, and
+    /// the coins it delivers take a basis equal to their fair market value when received. That is
+    /// why this is an [`Acquire`] whose `usd_cost` is an FMV, and NOT an [`Income`]: booking it as
+    /// income would tax a rebate, and booking it as a transfer (the pre-FR-45 behaviour) gave the
+    /// coins ZERO basis and overstated the gain on every later disposal.
+    ///
+    /// ★ The tag is distinct from [`BasisSource::FmvAtIncome`] on purpose. Both carry an FMV, but
+    /// they answer different questions: `FmvAtIncome` means *"this WAS income and the FMV is what
+    /// was included"*; this means *"this was NOT income, and the FMV is the rebate's measure"*. A
+    /// disclosure layer that conflated them would misstate the character, not just the label.
+    ///
+    /// ★ It is NOT a blanket rule for anything an exchange labels a reward. A sign-up or referral
+    /// bonus carrying no spending requirement IS income; this tag records the rebate case only, and
+    /// stays overridable by the filer.
+    CardRewardRebate,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

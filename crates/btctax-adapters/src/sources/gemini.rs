@@ -11,10 +11,11 @@
 //! sender's address. Plan-4 address-matching must account for this: `TransferIn.src_addr` for a
 //! Gemini Credit identifies the receiving-end (Gemini) address, not the true on-chain source wallet.
 use crate::adapter::{Adapter, FileGroup, GroupOutput, SourceFile};
-use crate::normalize::{exchange_wallet, raw_of, Direction, SourceRefMint};
+use crate::normalize::{exchange_wallet, raw_of, resolve_fmv, Direction, SourceRefMint};
 use crate::parse::{parse_btc_to_sat, parse_timestamp_flex, parse_usd};
 use crate::read::{read_table, RawRow, ReadOpts, TableRole};
 use crate::AdapterError;
+use btctax_core::conventions::tax_date;
 use btctax_core::{
     Acquire, BasisSource, Dispose, DisposeKind, EventId, EventPayload, LedgerEvent, PriceProvider,
     Source, TransferIn, TransferOut, Unclassified, Usd,
@@ -27,6 +28,9 @@ mod cols {
     pub const TYPE: &str = "Type";
     pub const DATE: &str = "Date"; // Excel serial (Time (UTC) carries the same instant)
     pub const SYMBOL: &str = "Symbol"; // trading pair (e.g. "BTCUSD", "ETHBTC") — I-1 gate
+                                       // FR-45: the row's own account of WHAT it is. `Type` says only Credit/Debit/Buy/Sell; the
+                                       // character (card reward vs ACH deposit vs on-chain deposit) lives here and nowhere else.
+    pub const SPECIFICATION: &str = "Specification";
     pub const BTC_AMOUNT: &str = "BTC Amount BTC"; // BTC leg amount + presence test
     pub const USD_AMOUNT: &str = "USD Amount USD";
     pub const FEE_USD: &str = "Fee (USD) USD";
@@ -37,6 +41,22 @@ mod cols {
     pub const WITHDRAWAL_DEST: &str = "Withdrawal Destination";
     #[allow(dead_code)] // reconciliation/verify data (FR9, CLI) — captured by the reader, not folded here
     pub const BTC_BALANCE: &str = "BTC Balance BTC";
+}
+
+/// FR-45 — does this row's `Specification` name a **credit-card reward payout**?
+///
+/// The confirmed vocabulary in a real export is
+/// `Deposit (Gemini Credit Card Reward Payout BTC)`, alongside `Deposit (Instant ACH Transfer)`,
+/// `Deposit (ACH Transfer)`, `Deposit (Pre-Credited BTC)` and `Administrative Credit`.
+///
+/// ★ The match is deliberately on **"credit card reward"** rather than on the full string. Gemini
+/// has already varied the trailing asset token (`… Payout BTC`), and a byte-exact match would fall
+/// back to the zero-basis TransferIn path — SILENTLY — the first time it varies again. Failing open
+/// into the old defect is the outcome this predicate exists to prevent, so it matches the phrase
+/// that carries the meaning and ignores the decoration around it.
+fn is_card_reward(spec: Option<&str>) -> bool {
+    spec.map(str::to_ascii_lowercase)
+        .is_some_and(|s| s.contains("credit card reward"))
 }
 
 pub struct Gemini;
@@ -80,7 +100,7 @@ impl Adapter for Gemini {
         &self,
         _group: &FileGroup,
         rows: Vec<RawRow>,
-        _prices: &dyn PriceProvider,
+        prices: &dyn PriceProvider,
     ) -> Result<GroupOutput, AdapterError> {
         let mut mint = SourceRefMint::default();
         let mut out = GroupOutput {
@@ -171,6 +191,50 @@ impl Adapter for Gemini {
                         txid: txid.clone(),
                     }),
                 ),
+                // ★ FR-45 — a Gemini CREDIT CARD REWARD payout, which is NOT an inbound transfer.
+                //
+                //   `Type` alone cannot tell these apart: every one of them says "Credit". The row's
+                //   own `Specification` says which, and until FR-45 this adapter never read that
+                //   column — so a reward became a TransferIn, took the inbound self-transfer path,
+                //   and landed at ZERO basis. Two structural facts contradict that reading and both
+                //   are on the row: a reward carries NO `Tx Hash` and NO `Deposit Destination`,
+                //   while a genuine on-chain deposit carries both. A credit with no txid is not an
+                //   on-chain transfer and cannot be "my own coins returning".
+                //
+                //   TREATMENT (owner determination 2026-09-05, and the general rule for a reward
+                //   earned by SPENDING): a card reward is a purchase-price REBATE — not gross income
+                //   at receipt — and the coins take basis = FMV at receipt. So it is an `Acquire`
+                //   whose `usd_cost` IS that FMV, tagged `CardRewardRebate`. Booking it as `Income`
+                //   would tax a rebate; leaving it a `TransferIn` gives it no basis at all.
+                //
+                //   ★ Gemini states NO USD value on these rows (measured: EVERY reward row in a real export has an empty
+                //   `USD Amount USD`), so the FMV can only come from the price dataset — and when
+                //   the dataset cannot price the day, this REFUSES to guess and emits Unclassified
+                //   for the filer to classify. A fabricated basis is the defect this item is about;
+                //   substituting a different fabricated basis would not be a fix.
+                "credit" if is_card_reward(row.opt(cols::SPECIFICATION)) => {
+                    let date = tax_date(utc, tz);
+                    match resolve_fmv(None, date, sat, prices) {
+                        (Some(fmv), _) => (
+                            Direction::In,
+                            EventPayload::Acquire(Acquire {
+                                sat,
+                                usd_cost: fmv,
+                                // A reward payout carries no fee; measured every reward row blank.
+                                fee_usd: Usd::ZERO,
+                                basis_source: BasisSource::CardRewardRebate,
+                            }),
+                        ),
+                        (None, _) => {
+                            // No price for the day ⇒ no defensible basis. Never guess.
+                            out.unclassified += 1;
+                            (
+                                Direction::In,
+                                EventPayload::Unclassified(Unclassified { raw: raw_of(row) }),
+                            )
+                        }
+                    }
+                }
                 // Credit(BTC) is an inbound on-chain transfer (§9.1 confirmed) → TransferIn.
                 "credit" => (
                     Direction::In,

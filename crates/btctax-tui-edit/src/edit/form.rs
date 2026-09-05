@@ -1758,10 +1758,16 @@ pub fn cycle_classify_raw_variant(v: ClassifyRawVariant) -> ClassifyRawVariant {
     }
 }
 
-/// Cycle through the 8 user-selectable `BasisSource` variants in declaration order (event.rs:16-26).
+/// Cycle through the 9 user-selectable `BasisSource` variants in declaration order.
 /// `SelfTransferInbound` is a system-assigned source (the inbound self-transfer fold), NOT a manual
 /// classify-raw choice, so it is deliberately OUTSIDE the ring: it never appears as a cycle output, and
 /// if an edited lot somehow carries it, one Tab exits to `ExchangeProvided`.
+///
+/// ★ **FR-45 put `CardRewardRebate` ON the ring, and that is load-bearing rather than cosmetic.**
+/// The Gemini adapter emits a card-reward row as `Unclassified` whenever the price dataset cannot
+/// value the day — refusing to invent a basis. `classify-raw` is then the ONLY way that row becomes
+/// a lot, so if this source were off-ring the filer could not record what the row actually is, and
+/// the honest refusal would dead-end into a wrong classification. A refusal needs a path out.
 pub fn cycle_basis_source(bs: BasisSource) -> BasisSource {
     match bs {
         BasisSource::ExchangeProvided => BasisSource::ComputedFromCost,
@@ -1771,7 +1777,8 @@ pub fn cycle_basis_source(bs: BasisSource) -> BasisSource {
         BasisSource::GiftCarryover => BasisSource::GiftFmvFallback,
         BasisSource::GiftFmvFallback => BasisSource::SafeHarborAllocated,
         BasisSource::SafeHarborAllocated => BasisSource::ReconstructedPerWallet,
-        BasisSource::ReconstructedPerWallet => BasisSource::ExchangeProvided,
+        BasisSource::ReconstructedPerWallet => BasisSource::CardRewardRebate,
+        BasisSource::CardRewardRebate => BasisSource::ExchangeProvided,
         BasisSource::SelfTransferInbound => BasisSource::ExchangeProvided, // off-ring defensive exit
         BasisSource::EstimatedConservative => BasisSource::ExchangeProvided, // off-ring (system-assigned tranche tag)
     }
@@ -1790,6 +1797,7 @@ pub fn basis_source_display(bs: BasisSource) -> &'static str {
         BasisSource::ReconstructedPerWallet => "reconstructed-per-wallet",
         BasisSource::SelfTransferInbound => "self-transfer-inbound",
         BasisSource::EstimatedConservative => "estimated-conservative",
+        BasisSource::CardRewardRebate => "card-reward-rebate",
     }
 }
 
@@ -4081,5 +4089,68 @@ mod tests {
             optimize_basis_label(e_item.persistable),
             "AttestedRecording"
         );
+    }
+
+    /// ★ **FR-45 — the ring is a REACHABILITY guarantee, and nothing tested it.**
+    ///
+    /// `cycle_basis_source` is the only way a filer selects a basis source in `classify-raw`, so a
+    /// variant that is off-ring is a variant the filer cannot choose. That matters concretely: the
+    /// Gemini adapter emits a card-reward row as `Unclassified` when the price dataset cannot value
+    /// the day, and `classify-raw` is then the only path by which that row becomes a lot. If
+    /// `CardRewardRebate` fell off the ring, an honest refusal would dead-end.
+    ///
+    /// This test did not exist before FR-45 — the ring went from 8 entries to 9 and the whole suite
+    /// stayed green, which is exactly the "green because it never ran" shape. It walks the ring from
+    /// every on-ring variant and asserts it closes, so a dropped entry cannot pass.
+    #[test]
+    fn every_on_ring_basis_source_is_reachable_and_the_ring_closes() {
+        // Off-ring by design: system-assigned, with a documented one-Tab defensive exit.
+        const OFF_RING: [BasisSource; 2] = [
+            BasisSource::SelfTransferInbound,
+            BasisSource::EstimatedConservative,
+        ];
+        const ON_RING: [BasisSource; 9] = [
+            BasisSource::ExchangeProvided,
+            BasisSource::ComputedFromCost,
+            BasisSource::FmvAtIncome,
+            BasisSource::CarriedFromTransfer,
+            BasisSource::GiftCarryover,
+            BasisSource::GiftFmvFallback,
+            BasisSource::SafeHarborAllocated,
+            BasisSource::ReconstructedPerWallet,
+            BasisSource::CardRewardRebate,
+        ];
+
+        // Walking the ring from any on-ring variant must visit EVERY on-ring variant exactly once
+        // and return to the start. That fails if an entry is dropped, duplicated, or short-circuits.
+        for start in ON_RING {
+            let mut seen = Vec::new();
+            let mut cur = start;
+            for _ in 0..ON_RING.len() {
+                seen.push(cur);
+                cur = cycle_basis_source(cur);
+            }
+            assert_eq!(cur, start, "the ring must close when started at {start:?}");
+            let mut sorted = seen.clone();
+            sorted.sort_by_key(|b| format!("{b:?}"));
+            sorted.dedup();
+            assert_eq!(
+                sorted.len(),
+                ON_RING.len(),
+                "starting at {start:?} the walk repeated a variant: {seen:?}"
+            );
+            for want in ON_RING {
+                assert!(seen.contains(&want), "{want:?} unreachable from {start:?}");
+            }
+        }
+
+        // The off-ring pair keeps its documented defensive exit, and must NOT be reachable.
+        for off in OFF_RING {
+            assert_eq!(cycle_basis_source(off), BasisSource::ExchangeProvided);
+            assert!(
+                !ON_RING.iter().any(|on| cycle_basis_source(*on) == off),
+                "{off:?} is system-assigned and must stay off the selectable ring"
+            );
+        }
     }
 }

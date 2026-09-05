@@ -38,6 +38,8 @@ pub(super) fn basis_source_rank(src: BasisSource) -> u8 {
         BasisSource::ReconstructedPerWallet => 7,
         BasisSource::SelfTransferInbound => 8,
         BasisSource::EstimatedConservative => 9,
+        // FR-45 — declaration order, so it sorts last as the newest variant.
+        BasisSource::CardRewardRebate => 10,
     }
 }
 
@@ -64,6 +66,8 @@ pub(super) fn basis_source_tag(src: BasisSource) -> &'static str {
         BasisSource::ReconstructedPerWallet => "reconstructed",
         BasisSource::SelfTransferInbound => "self_transfer_in",
         BasisSource::EstimatedConservative => "estimated_conservative",
+        // FR-45 — must MATCH the CLI tag byte-for-byte; a divergence here is a UI/CSV split.
+        BasisSource::CardRewardRebate => "card_reward_rebate",
     }
 }
 

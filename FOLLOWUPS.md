@@ -6002,7 +6002,7 @@ self-transfer policy was audited for CONFORMANCE, not relitigated.
   all three inputs at its record surfaces; wiring it there is surface work.
   **Owning phase: the next TUI cycle.**
 
-- **FR-45 — Gemini credit-card REWARD payouts are booked as inbound self-transfers, at ZERO basis.**
+- **FR-45 — ✅ CLOSED (built 2026-09-05). Gemini credit-card REWARD payouts were booked as inbound self-transfers, at ZERO basis.**
   Found 2026-09-05 by reading a **real** Gemini XLSX export rather than a fixture, after the owner
   asked whether FR-42's negative-USD case was crypto-back rewards. It was not — but the question
   landed on something larger one column over.
@@ -6055,5 +6055,29 @@ self-transfer policy was audited for CONFORMANCE, not relitigated.
   ★ This magnitude note exists so a future reader does not read "the most common row type in the
   file" as "the largest exposure in the file". It is the most FREQUENT and among the least VALUABLE,
   and those two facts point at different fixes.
-  **Owning phase: the next adapter cycle, ahead of FR-42 and FR-43** (both cosmetic beside this, but
-  none of the three is urgent).
+  ★★ **BUILT.** The `Credit` arm now reads `Specification`. A card reward becomes an
+  `Acquire { usd_cost: <FMV at receipt>, fee_usd: 0, basis_source: CardRewardRebate }` — an
+  acquisition, not income (a rebate is not gross income at receipt) and not a transfer (which is what
+  gave it zero basis). `BasisSource::CardRewardRebate` is a NEW variant, deliberately distinct from
+  `FmvAtIncome`: both carry an FMV, but they answer opposite questions about whether it was ever
+  income, and a disclosure layer that conflated them would misstate character rather than just a
+  label. On Form 8283's donor field the two do share `Other` — that mapping is descriptive and drives
+  no deduction math, and the doc says so.
+  ★ **The refusal.** Gemini states no USD on a reward row, so the basis can only come from the price
+  dataset; when the dataset cannot price the day the adapter emits `Unclassified` rather than
+  substituting a number. Fabricating a basis is the defect this item is about, and a *different*
+  fabricated basis would not be a fix.
+  ★ **The refusal needed a path out, and that found a second gap.** `classify-raw`'s
+  `cycle_basis_source` ring is the only way a filer selects a basis source, so an off-ring variant is
+  one they cannot choose — which would dead-end every unpriced reward. `CardRewardRebate` went ON the
+  ring, taking it from 8 entries to 9 **and the entire suite stayed green**, because nothing had ever
+  tested the ring. That is the "green because it never ran" shape, in a reachability guarantee. Now
+  held by `every_on_ring_basis_source_is_reachable_and_the_ring_closes`.
+  ★ Mutation-verified four ways (`--no-fail-fast`, so the counts are real): revert the predicate ⇒ 4
+  red; tighten it to a byte-exact string ⇒ 3 red; invent a `$0` basis on an unpriced day ⇒ 3 red;
+  drop the variant off the ring ⇒ 1 red.
+  ★ **NOT done here, and still open:** the Form 8949 **aggregation** question for hundreds of dust
+  lots; the other `Credit` specifications (`Administrative Credit`, and the general rule that a
+  credit with no `Tx Hash` cannot be a self-transfer); and re-importing any vault that already stored
+  these rows as `TransferIn` — the fix changes classification at import, not retroactively.
+  **Owning phase: CLOSED.** The residue above stays with the next adapter cycle, with FR-42/FR-43.

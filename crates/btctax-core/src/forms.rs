@@ -255,7 +255,11 @@ pub enum Form8283HowAcquired {
     Purchased,
     /// Gift (a received-gift lot with carryover / FMV-fallback basis).
     Gift,
-    /// Other (income-recognized basis — mining/staking/airdrops/rewards).
+    /// Other — acquired neither by purchase nor by gift. Two provenances land here and they are
+    /// NOT the same thing: an income-recognized basis (mining/staking/airdrops/income rewards), and
+    /// **FR-45**'s purchase-price rebate (a card reward, whose basis is an FMV that was never
+    /// income). Both are honestly "other" on the donor field; neither is a purchase of THIS
+    /// property, and neither has a lost origin, so `Review` would overstate the uncertainty.
     Other,
     /// Review — the acquisition origin was lost (transferred/safe-harbor/reconstructed basis).
     Review,
@@ -272,7 +276,11 @@ pub fn how_acquired_from(bs: BasisSource) -> Form8283HowAcquired {
     match bs {
         BasisSource::ExchangeProvided | BasisSource::ComputedFromCost => H::Purchased,
         BasisSource::GiftCarryover | BasisSource::GiftFmvFallback => H::Gift,
-        BasisSource::FmvAtIncome => H::Other,
+        // ★ FR-45 — the rebate joins `FmvAtIncome` here on the DONOR FIELD only. The two are
+        //   deliberately separate `BasisSource`s (one was income, one was not) and this mapping is
+        //   descriptive: Form 8283 (d) asks how the donor acquired the property, and "not by
+        //   purchase, not by gift" is the true answer for both. It drives no deduction math.
+        BasisSource::FmvAtIncome | BasisSource::CardRewardRebate => H::Other,
         BasisSource::CarriedFromTransfer
         | BasisSource::SafeHarborAllocated
         | BasisSource::ReconstructedPerWallet
