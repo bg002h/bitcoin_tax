@@ -546,9 +546,11 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
     FormQuestion {
         id: QuestionId::OtherOutOfScopeIncome,
         prompt: "In this tax year, did ANY of these happen? (a) You received income other than what \
-                 you have entered here — rent or royalties, a farm, a partnership, S corporation, \
-                 estate or trust (any Schedule K-1), unreported tips, gambling winnings, alimony, a \
-                 business this tool did not capture, or anything else it never asked about. (b) You \
+                 you have entered here — a PENSION, ANNUITY or IRA DISTRIBUTION (Form 1099-R), \
+                 SOCIAL SECURITY or railroad retirement benefits (Form SSA-1099 or RRB-1099), rent \
+                 or royalties, a farm, a partnership, S corporation, estate or trust (any Schedule \
+                 K-1), unreported tips, gambling winnings, alimony, a business this tool did not \
+                 capture, or anything else it never asked about. (b) You \
                  EXERCISED AN INCENTIVE STOCK OPTION (ISO) and still held the stock at the end of the \
                  year — you would have a Form 3921. (c) You had any other item this tool never asked \
                  about that changes your ALTERNATIVE MINIMUM TAX — depletion, a tax-shelter farm \
@@ -1420,6 +1422,31 @@ mod tests {
             "…and must name the AMT category, since lines 2c-2t are all silently zero: {}",
             q.prompt
         );
+        // ★★★ **RETIREMENT INCOME, added 2026-09-04, and the reason is an UNDERSTATEMENT path.**
+        //     This enumeration primes the filer: someone holding a 1099-R and an SSA-1099 who reads
+        //     "rent or royalties, a farm, a partnership…" and finds nothing resembling their pension
+        //     can answer a truthful-feeling **No** on the strength of the list, even though the
+        //     trailing "or anything else it never asked about" formally covers it. §61 and §86 income
+        //     then leaves the return silently. btctax models no line 4a-6b at all, so the ONLY thing
+        //     standing between a retiree and an understated return is this sentence naming their
+        //     forms. Name the FORM NUMBERS, not just the category — the filer is holding the paper.
+        //     ★ Removing any of these must red: that is the whole guarantee, since nothing computes
+        //     from this prompt. See design/ty2025/SPEC_retirement_income.md (OQ-1).
+        for limb in [
+            "pension",
+            "annuity",
+            "1099-r",
+            "social security",
+            "ssa-1099",
+        ] {
+            assert!(
+                p.contains(limb),
+                "the prompt must name retirement income and the form the filer already holds — \
+                 `{limb}` is missing, and a retiree who answers No on the strength of this list \
+                 files omitting §61/§86 income: {}",
+                q.prompt
+            );
+        }
         // ★ The income limbs must SURVIVE the widening — this question's original job is unchanged.
         for limb in ["rent", "royalt", "k-1", "alimony", "gambling"] {
             assert!(
