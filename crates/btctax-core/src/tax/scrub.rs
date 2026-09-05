@@ -490,6 +490,9 @@ fn scrub_header(h: &HouseholdHeader) -> HouseholdHeader {
         taxpayer_died_during_year,
         spouse_died_during_year,
         ip_pin,
+        form8615_condition3_age_support,
+        form8615_condition4_parent_alive,
+        form8615_parent_identity_unobtainable,
     } = h;
     HouseholdHeader {
         taxpayer: scrub_person(taxpayer, "Taxpayer", 1),
@@ -532,6 +535,15 @@ fn scrub_header(h: &HouseholdHeader) -> HouseholdHeader {
         //     ★★ This is a DELIBERATE EXCEPTION to §3.2's blanket "malformed → SYNTHETIC-malformed,
         //        valid → synthetic-valid", and it is the only one.
         ip_pin: ip_pin.as_deref().and_then(scrub_ip_pin),
+        // ★★ FR-29 — Form 8615's three leaves are KEPT, on the same ground as the declarations
+        //    above: each is a fail-loud answer that moves the return (SPEC §6's ladder refuses on
+        //    every `None`), and none is identifying. Condition 3 and condition 4 are facts about the
+        //    filer's own age, support and parents' survival; the dead-end fact records what the
+        //    filer can obtain. Dropping any of them would make a scrubbed file COMPUTE where the
+        //    filer's own refuses — the direction §3.3 forbids.
+        form8615_condition3_age_support: *form8615_condition3_age_support,
+        form8615_condition4_parent_alive: *form8615_condition4_parent_alive,
+        form8615_parent_identity_unobtainable: *form8615_parent_identity_unobtainable,
     }
 }
 

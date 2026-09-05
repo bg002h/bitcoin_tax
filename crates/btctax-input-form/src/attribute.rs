@@ -65,6 +65,21 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::OtherIncomeUnanswered | R::OtherIncomeOutOfScope => {
             vec![decl(QuestionId::OtherOutOfScopeIncome)]
         }
+        // ★★★ FR-29 — Form 8615's three refusals. SKIPPABLES, on the `CooperativePatronUnanswered`
+        //     precedent: offered always, mandatory only where the answer changes the number.
+        //
+        //     ★ NONE of them is `NotInForm`. An input DOES clear each one, and an anchor saying
+        //       otherwise is the `QbiAboveThreshold` falsehood recorded below — it leaves the filer
+        //       with nowhere to go, and a green test pinned it last time.
+        R::Form8615AgeSupportUnanswered => vec![skip(
+            btctax_core::tax::questions::SkippableId::Form8615Condition3AgeSupport,
+        )],
+        R::Form8615ParentAliveUnanswered => vec![skip(
+            btctax_core::tax::questions::SkippableId::Form8615Condition4ParentAlive,
+        )],
+        R::Form8615ParentUnidentifiable => vec![skip(
+            btctax_core::tax::questions::SkippableId::Form8615ParentIdentityUnobtainable,
+        )],
         // §G-28/B1b — SKIPPABLES, offered always and mandatory only where the answer changes the form.
         R::SstbUnanswered => vec![skip(btctax_core::tax::questions::SkippableId::ScheduleCIsSstb)],
         R::CooperativePatronUnanswered => vec![skip(

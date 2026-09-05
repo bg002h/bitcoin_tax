@@ -78,6 +78,28 @@ pub fn parse_yes_no(line: &str, default: Option<bool>) -> Option<bool> {
     }
 }
 
+/// ★★★ FR-29 — parse one reply to a [`SkippableKind::Choice`] question, into one of `options`.
+///
+/// **Accepted, case-insensitively and after trimming:** `y` / `yes` ⇒ `Yes`; `n` / `no` ⇒ `No`;
+/// `?` / `cannot know` / `cannotknow` / `cant know` / `unknown` ⇒ `CannotKnow`. Anything else is
+/// `None`, and the caller re-asks — the same three-way behaviour [`parse_yes_no`] already has,
+/// extended by one variant rather than replaced.
+///
+/// ★ The returned token is taken from `options` itself, never minted here, so a token the registry
+/// does not offer can never be stored — the direction is fail-closed in both halves.
+pub fn parse_parent_alive_choice(
+    line: &str,
+    options: &'static [&'static str],
+) -> Option<&'static str> {
+    let want = match line.trim().to_ascii_lowercase().as_str() {
+        "y" | "yes" => "Yes",
+        "n" | "no" => "No",
+        "?" | "cannot know" | "cannotknow" | "cant know" | "can't know" | "unknown" => "CannotKnow",
+        _ => return None,
+    };
+    options.iter().copied().find(|o| *o == want)
+}
+
 /// Parse one date reply. `Ok(None)` = the user SKIPPED (a bare Enter) — a legitimate outcome for a DOB.
 pub fn parse_date(line: &str) -> Result<Option<time::Date>, String> {
     let t = line.trim();
@@ -202,6 +224,48 @@ pub fn answer_return_inputs(
                                 break;
                             }
                             None => writeln!(out, "  please answer y or n, or Enter to skip")?,
+                        }
+                    }
+                }
+                // ★★★ FR-29 — the THIRD-ANSWER arm. `parse_enum`
+                //     (`btctax-input-form/src/parse.rs`) is an exact `options.contains(&raw)` with no
+                //     trimming and no case-folding, because there the options are stable tokens a
+                //     renderer presents as a closed choice. At the keyboard they are not: the prompt
+                //     tells the filer *"Answer YES, NO, or CANNOT KNOW"*, which is not the token
+                //     `"CannotKnow"`. **The parser accommodates the filer's words, never the other way
+                //     round** — the prompt's wording comes from the form and from plain English.
+                SkippableKind::Choice(options) => {
+                    let cur = (sk.get_choice)(&ri);
+                    loop {
+                        let shown = cur.unwrap_or("unanswered");
+                        write!(
+                            out,
+                            "{} [{}; currently {shown}; Enter to skip]: ",
+                            sk.prompt,
+                            options.join("/")
+                        )?;
+                        out.flush()?;
+                        let mut line = String::new();
+                        if input.read_line(&mut line)? == 0 {
+                            return Err(CliError::Usage(
+                                "input ended before every question was answered — nothing was stored".into(),
+                            ));
+                        }
+                        // A bare Enter KEEPS whatever is on file (which may be `None` ⇒ still skipped).
+                        if line.trim().is_empty() {
+                            break;
+                        }
+                        match parse_parent_alive_choice(&line, options) {
+                            Some(tok) => {
+                                (sk.set_choice)(&mut ri, tok);
+                                break;
+                            }
+                            // ★ Fail-closed: an unmatched string cannot become an answer, so the worst
+                            //   case is a filer who is asked again.
+                            None => writeln!(
+                                out,
+                                "  please answer yes, no, or \"cannot know\", or Enter to skip"
+                            )?,
                         }
                     }
                 }

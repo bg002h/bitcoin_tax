@@ -54,7 +54,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Repo root, from this crate's manifest directory.
-fn repo_root() -> PathBuf {
+pub(crate) fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(Path::parent)
@@ -68,7 +68,7 @@ fn repo_root() -> PathBuf {
 ///
 /// ★ This is deliberately lossy in exactly the ways a PDF text layer is noisy, and **not** lossy about
 /// digits, dollar amounts, or line numbers — the things a misreading gets wrong.
-fn normalise(s: &str) -> String {
+pub(crate) fn normalise(s: &str) -> String {
     let mut t = s.to_string();
     for (from, to) in [
         ('\u{2019}', '\''),

@@ -5719,6 +5719,18 @@ Report: `design/agent-reports/2026-09-04-understatement-audit.md`. Both entries 
 being filed. Verdict of that audit, verbatim: *"Yes — btctax can currently emit a signed 1040 that
 understates tax with no refusal."*
 
+- **FR-29 ★★★ CRITICAL — ✅ FIXED 2026-09-05 on `fix/fr29-form8615-gate`** (spec
+  `design/ty2025/SPEC_form8615_kiddie_tax.md` r3; build report
+  `design/agent-reports/2026-09-05-fr29-build.md`). The gate no longer reads
+  `can_be_claimed_as_dependent_taxpayer` at all — the identifier is GONE from the screen, so no
+  refactor can restore the old behaviour without someone writing the reference back in. btctax now
+  COLLECTS Form 8615's conditions 3 and 4 (plus the §6.3 dead-end fact), computes 1, 2 and 5, and
+  refuses rather than answer for the filer. The IRS states the holding outright and it is now the
+  load-bearing citation (`design/forms/extract/i8615--2025.txt:58-61`): *"These rules apply whether
+  or not the child is a dependent."* The green test that pinned the defect was **inverted, not
+  deleted** (`form8615_screens_a_filer_who_is_nobodys_dependent`), and every guarantee was observed
+  RED on its named mutation. **The original entry follows, unedited, for the record.**
+
 - **FR-29 ★★★ CRITICAL — the Form 8615 (kiddie tax) screen is gated on DEPENDENCY, which is not one
   of Form 8615's conditions.** `crates/btctax-core/src/tax/return_1040.rs:989` reads
   `if ri.header.can_be_claimed_as_dependent_taxpayer != Some(false)`. The five conditions

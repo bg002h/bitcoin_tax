@@ -537,7 +537,10 @@ $ btctax --vault v.pgp income show --year 2024
     "presidential_fund_spouse": false,
     "taxpayer_died_during_year": null,
     "spouse_died_during_year": null,
-    "ip_pin": null
+    "ip_pin": null,
+    "form8615_condition3_age_support": null,
+    "form8615_condition4_parent_alive": null,
+    "form8615_parent_identity_unobtainable": null
   },
   "w2s": [
     {

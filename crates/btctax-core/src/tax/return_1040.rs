@@ -26,7 +26,8 @@ use crate::tax::other_taxes::{form_8959, form_8960, sch2_line4_se, Form8959, For
 use crate::tax::qbi::{compute_8995, has_qbi};
 use crate::tax::qbi_a::{qbi_after_sstb_exclusion, Qbi199aRegime};
 use crate::tax::return_inputs::{
-    CarryProvenance, CharitableCarryItem, CharitableClass, CharitableGift, Owner, ReturnInputs,
+    CarryProvenance, CharitableCarryItem, CharitableClass, CharitableGift, Owner,
+    ParentAliveAnswer, ReturnInputs,
 };
 use crate::tax::return_refuse::{Refusal, RefuseReason};
 use crate::tax::se::{compute_se_tax, se_net_income, SeTaxResult};
@@ -976,33 +977,288 @@ pub fn screen_compute_dependent(
         }
     };
 
-    // §1(g) Form 8615 kiddie tax: a claimable-as-dependent filer with unearned income over the threshold.
-    // unearned = gross income − earned income (wages + Schedule C net) — SPEC F2. This component-sum OMITS
-    // the Sch-1 adjustments (early-withdrawal penalty, student-loan deduction) that Form 8615's true
-    // `AGI − earned` would net out, so `unearned` here can only be TOO HIGH ⇒ it can only OVER-refuse
-    // (conservative / fail-closed — review M4). Do NOT "fix" by subtracting the adjustments without
-    // preserving that direction: an under-count would let a real kiddie return slip through at the child's
-    // rate (an understatement). A capital LOSS correctly lowers unearned (`capital_gain_line7` is the
-    // §1211-limited L7, which the Form 8615 worksheet also uses) — that is not an under-refuse.
-    // `!= Some(false)`: an unknown flag RUNS the kiddie-tax screen rather than skipping it (fail-closed —
-    // skipping can only under-refuse). Unreachable past `screen_inputs`; see `standard_deduction`.
-    if ri.header.can_be_claimed_as_dependent_taxpayer != Some(false) {
-        let unearned = sum_taxable_interest(ri)
-            + sum_ordinary_dividends(ri)
-            + capital_gain_line7(ri, state, year, ri.filing_status)
-            + ri.sch1.state_refund_taxable
-            + sum_unemployment(ri)
-            + crypto.nonbusiness_ordinary;
-        let _ = sch_c_net; // earned income (wages + sch_c_net) is excluded from `unearned` by construction
-        if unearned > params.kiddie_unearned_threshold {
-            return refusal(
-                RefuseReason::KiddieTax,
-                "a claimable-as-dependent filer with unearned income over the §1(g) threshold needs Form 8615 (parent's-rate tax) — out of scope for v1",
-            );
-        }
+    // §1(g) Form 8615 kiddie tax — SPEC `design/ty2025/SPEC_form8615_kiddie_tax.md` §6.
+    //
+    // ★★★ FR-29: `can_be_claimed_as_dependent_taxpayer` IS NOT READ HERE, AND ITS DELETION IS THE FIX.
+    //     The IRS states the holding outright (`design/forms/extract/i8615--2025.txt:58-61`): "These
+    //     rules apply whether or not the child is a dependent." Because the identifier is gone, no
+    //     refactor can quietly restore the old behaviour without re-introducing a reference someone
+    //     must write down.
+    let _ = sch_c_net; // earned income (wages + sch_c_net) is excluded from `unearned` by construction
+    match form8615_screen(ri, state, year, params) {
+        Form8615Screen::Refuse(reason, detail) => return Some(Refusal { reason, detail }),
+        // Both proceed. `Certified` additionally attaches the §6.3 Form 8275 disclosure and surfaces
+        // the three warnings — see `form8615_certified`, which reads THIS function so the two cannot
+        // drift.
+        Form8615Screen::NotRequired | Form8615Screen::Certified => {}
     }
 
     None
+}
+
+/// SPEC §5.1 — the age a person born on `dob` is CONSIDERED to be at the end of `year`, i.e. their age
+/// on January 1 of `year + 1`.
+///
+/// This is the IRS's own convention, stated as three worked examples at
+/// `design/forms/extract/i1040gi--2025.txt:3945-3951`: *"A child born on January 1, 2008, is
+/// considered to be age 18 at the end of 2025; a child born on January 1, 2007, is considered to be
+/// age 19 at the end of 2025; and a child born on January 1, 2002, is considered to be age 24 at the
+/// end of 2025."*
+///
+/// ★ **Why an age at a fixed boundary and not a date, unlike [`reaches_65_on`].** That helper
+/// constructs a *date* and therefore needs a February-29 fallback (`replace_year` fails on a leap
+/// day). This constructs no date, so no leap-day branch exists — February 29 is never January 1.
+/// `considered_age_matches_i1040gi_january_first_examples` pins a leap-day vector anyway, because
+/// "no branch is needed" is a claim, not a guarantee.
+pub(crate) fn considered_age_at_year_end(dob: Date, year: i32) -> i32 {
+    year - dob.year() + i32::from(dob.month() == Month::January && dob.day() == 1)
+}
+
+/// SPEC §5.1 — Form 8615's condition 3 is FALSE by arithmetic, **for a KNOWN date of birth only**.
+///
+/// All three limbs bound the filer below 24 — *"Under age 18"*, *"Age 18"*, *"at least age 19 but
+/// under age 24"* (`i1040gi--2025.txt:3933-3940`) — so condition 3 cannot be true at 24. That is an
+/// equivalence, not a heuristic, and the IRS prints the suppression itself: the January-1-2002 row of
+/// i8615's chart carries the footnote *"*** Don't use Form 8615 for this child."*
+/// (`i8615--2025.txt:98`).
+///
+/// ★ The equivalence is exact for a correct date of birth and breaks on a WRONG one, in the
+/// suppressing direction. That exposure is not new — the same field already decides the §63(f) age-65
+/// addition ([`born_early_enough`]) — and it is bounded to filers who volunteered a DOB. `None` never
+/// suppresses.
+pub(crate) fn provably_24_or_older(ri: &ReturnInputs, year: i32) -> bool {
+    ri.header
+        .taxpayer
+        .date_of_birth
+        .is_some_and(|d| considered_age_at_year_end(d, year) >= 24)
+}
+
+/// SPEC §5.2 — the component sum Form 8615's **condition 1** is tested against.
+///
+/// Unchanged from the pre-FR-29 gate, direction argument included: it OMITS the Schedule 1
+/// adjustments (early-withdrawal penalty, student-loan deduction) that Form 8615's true
+/// `AGI − earned` would net out, so it can only be **too high** ⇒ it can only OVER-refuse
+/// (conservative / fail-closed). **Do not "fix" that without preserving the direction:** an
+/// under-count lets a real kiddie return slip through at the child's rate, which is an
+/// understatement. A capital LOSS correctly lowers it (`capital_gain_line7` is the §1211-limited L7,
+/// which the Form 8615 worksheet also uses) — that is not an under-refuse.
+///
+/// ★★ **The direction claim has a NAMED dependency in another module, and it is not self-evident.**
+/// i8615's own enumeration (`i8615--2025.txt:28-35`) also counts rents, royalties, pension and
+/// annuity income, taxable scholarship and fellowship grants not reported on Form W-2, alimony, the
+/// taxable part of social security, and trust-beneficiary income. None of those is in this sum. They
+/// are unreachable only because [`crate::tax::questions::QuestionId::OtherOutOfScopeIncome`] names
+/// them and refuses — `Some(true)` hard-refuses `OtherIncomeOutOfScope`, `None` refuses
+/// `OtherIncomeUnanswered` at `screen_inputs`. Delete that refusal and this sum becomes too LOW for a
+/// filer with rental or K-1 income, and a too-low sum UNDER-refuses.
+/// `the_unearned_sum_is_only_conservative_because_out_of_scope_income_refuses` pins it.
+pub(crate) fn form8615_unearned(ri: &ReturnInputs, state: &LedgerState, year: i32) -> Usd {
+    sum_taxable_interest(ri)
+        + sum_ordinary_dividends(ri)
+        + capital_gain_line7(ri, state, year, ri.filing_status)
+        + ri.sch1.state_refund_taxable
+        + sum_unemployment(ri)
+        + crypto_income(state, year).nonbusiness_ordinary
+}
+
+/// SPEC §6 — the outcome of the Form 8615 ladder, evaluated ONCE.
+///
+/// Both the compute-time screen and the §6.3 certification path read [`form8615_screen`], so the
+/// refusal and the disclosure cannot drift apart.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Form8615Screen {
+    /// The conjunction cannot hold (condition 1 or 5 is proved false, or condition 3 is), or the
+    /// filer's own NO cleared it — proceed, with nothing attached.
+    NotRequired,
+    /// One of SPEC §8's refusals, with its detail already `format!`ed at the year in scope.
+    Refuse(RefuseReason, String),
+    /// SPEC §6.3 — the no-path certification: proceed, with a Form 8275 disclosure and the three
+    /// mandatory warnings.
+    Certified,
+}
+
+/// SPEC §6 — the ladder, in the spec's own order.
+///
+/// | condition | source | value when unknown |
+/// |---|---|---|
+/// | 1 — unearned over the threshold | computed ([`form8615_unearned`]) | never unknown |
+/// | 2 — required to file | **assumed `true`** (SPEC §5.4) | n/a |
+/// | 3 — age/support | `false` if [`provably_24_or_older`]; else collected | UNKNOWN |
+/// | 4 — a parent alive | collected, and **three-valued** | UNKNOWN (≠ `CannotKnow`) |
+/// | 5 — not a joint return | `ri.filing_status != Mfj` | never unknown |
+///
+/// ★★ **Condition 2 is ASSUMED TRUE and the refusal says so.** btctax cannot compute it without
+/// transcribing Charts A, B and C, and assuming a conjunct TRUE can only make the conjunction more
+/// often true ⇒ only ever refuse MORE (fail-closed). The named over-refusal branch —
+/// `condition_two_is_assumed_and_this_is_the_filer_it_over_refuses` — is the KAT that keeps the
+/// assumption visible.
+///
+/// ★★★ **Steps 4–7 are ONE exhaustive `match` over `Option<ParentAliveAnswer>` with four arms and no
+/// `_`**, so a fourth variant added later is a compile error here rather than a silent fall-through
+/// into whichever arm happens to be last.
+pub fn form8615_screen(
+    ri: &ReturnInputs,
+    state: &LedgerState,
+    year: i32,
+    params: &FullReturnParams,
+) -> Form8615Screen {
+    let threshold = params.kiddie_unearned_threshold;
+    // Ladder step 1 — one of the two computed conditions is proved FALSE, so the conjunction cannot
+    // hold. Condition 1 is strictly greater than the threshold, because the form says "MORE THAN
+    // $2,700".
+    if form8615_unearned(ri, state, year) <= threshold || ri.filing_status == FilingStatus::Mfj {
+        return Form8615Screen::NotRequired;
+    }
+    // Ladder step 2, computed half — a date of birth showing 24 or older at year end proves condition
+    // 3 false (SPEC §5.1).
+    if provably_24_or_older(ri, year) {
+        return Form8615Screen::NotRequired;
+    }
+    match ri.header.form8615_condition3_age_support {
+        // Ladder step 3 — R-1. Silence is not a No.
+        None => Form8615Screen::Refuse(
+            RefuseReason::Form8615AgeSupportUnanswered,
+            format!(
+                "your unearned income is over the §1(g) threshold of ${threshold}, so Form 8615 may be \
+                 required — and its condition 3 asks whether, at the end of {year}, you were (a) under \
+                 age 18, (b) age 18 and didn’t have earned income that was more than half of your \
+                 support, or (c) a full-time student at least age 19 but under age 24 and didn’t have \
+                 earned income that was more than half of your support. btctax will not answer that for \
+                 you: §1(g)(1) takes the GREATER of your own rate and the parent's-rate figure, so a \
+                 wrong \"no\" can only understate your tax. Run `btctax income answer` — answering \
+                 \"no\" clears this, and so does entering your date of birth there if you were 24 or \
+                 older at the end of {year}."
+            ),
+        ),
+        // Ladder step 2, collected half — the FILER said No.
+        Some(false) => Form8615Screen::NotRequired,
+        Some(true) => match ri.header.form8615_condition4_parent_alive {
+            // Ladder step 4 — R-2. `None` ONLY: `Some(CannotKnow)` is an ANSWER and never reaches here.
+            None => Form8615Screen::Refuse(
+                RefuseReason::Form8615ParentAliveUnanswered,
+                format!(
+                    "you answered YES to Form 8615's condition 3, so whether Form 8615 is required now \
+                     turns on its condition 4 — \"At least one of your parents was alive at the end of \
+                     {year}.\" btctax will not answer that for you; a wrong \"no\" understates your tax \
+                     by the whole §1(g) difference. Run `btctax income answer`. If you cannot find out \
+                     because you do not know who your parents are, answer CANNOT KNOW — that is a \
+                     different answer from leaving it blank, and it is not the same as \"no\"."
+                ),
+            ),
+            // Ladder step 5 — i8615 states the consequence directly (`i8615--2025.txt:60-61`).
+            Some(ParentAliveAnswer::No) => Form8615Screen::NotRequired,
+            // Ladder step 6 — the §6.3 dead end.
+            Some(ParentAliveAnswer::CannotKnow) => {
+                if ri.header.form8615_parent_identity_unobtainable == Some(true) {
+                    Form8615Screen::Certified
+                } else {
+                    Form8615Screen::Refuse(
+                        RefuseReason::Form8615ParentUnidentifiable,
+                        form8615_parent_unidentifiable_detail(year),
+                    )
+                }
+            }
+            // Ladder step 7 — all five conditions hold.
+            Some(ParentAliveAnswer::Yes) => Form8615Screen::Refuse(
+                RefuseReason::KiddieTax,
+                format!(
+                    "you meet Form 8615's conditions for {year}: more than ${threshold} of unearned \
+                     income, the condition-3 age and earned-income-support test, at least one parent \
+                     alive at the end of the year, and a return that is not joint. btctax also ASSUMES \
+                     you are required to file a return (Form 8615's condition 2) — it does not compute \
+                     that. If your gross income is below the Chart A or Chart B threshold for your \
+                     filing status, you may not be required to file at all, and then Form 8615 is not \
+                     required either; check those charts in the Instructions for Form 1040 before \
+                     acting on this. Otherwise: §1(g) taxes part of your unearned income at your \
+                     parent's rate — Form 8615 computes the greater of that and your own — and btctax \
+                     does not fill Form 8615, because it needs your parent's taxable income and any \
+                     siblings' §1(g) amounts, which btctax never sees. Complete Form 8615 by hand. \
+                     (A parent may instead be able to elect to report your interest, ordinary \
+                     dividends and capital gain distributions on their own return on Form 8814, in \
+                     which case you would not have to file Form 8615 — that is the parent's election \
+                     on the parent's return, which btctax never sees, and the Instructions for Form \
+                     8615 warn the tax \"may be higher if this election is made\".)"
+                ),
+            ),
+        },
+    }
+}
+
+/// SPEC §8 R-4's detail — **two different filers read it**, and it must serve both.
+///
+/// ★★★ The TAS paragraph is the OWNER'S RULING on OQ-5 (`design/OWNER_DECISIONS_2026-09-04.md`,
+/// *"OWNER RULINGS, 2026-09-05"*, `92014cd1`): *"just refer user for tas and tell them good luck."*
+/// The protection-order filer — who CAN name their parent but is barred from making the contact
+/// i8615's request requires — is still REFUSED. A referral is not a path: no predicate moves, no leaf
+/// is added, and `the_protection_order_filer_is_refused_and_told_about_tas` asserts both halves at
+/// once so a later edit cannot drop the referral or convert it into a second limb.
+///
+/// ★ Sourcing: the quoted TAS limb is the **third in the introductory sentence** at
+/// `design/forms/extract/i1040gi--2025.txt:153-154`, not the three bullets at `:157-159` — none of
+/// which describes a filer who has not yet contacted the IRS. What TAS *is* comes from `:149-150`,
+/// and the contacts are the ones the same page prints (`:162`, `:166`). Nothing beyond that page is
+/// asserted: no claim about how TAS will treat the case, no timeline, no outcome.
+fn form8615_parent_unidentifiable_detail(year: i32) -> String {
+    format!(
+        "you answered that you cannot find out whether either of your parents was alive at the end of \
+         {year}. Form 8615 cannot be completed without a parent's name, SSN and filing status (lines A, \
+         B and C), and the tax on it cannot be computed without that parent's taxable income — so \
+         btctax needs to know one more thing: can you give the IRS your parent's name and address? Run \
+         `btctax income answer` again; the question is only offered now that you have answered \
+         condition 4.\n\
+         If you CAN: the Instructions for Form 8615 let you request your parent's return information \
+         from the IRS, and that request requires the parent's name and address (the SSN and filing \
+         status may be unknown). Use that route — btctax cannot file Form 8615 for you either way.\n\
+         If you can name and locate a parent but cannot contact them — for example, a protection order \
+         forbids it — that route is closed to you as well, because the request must also state that you \
+         \"have tried to get the information from the parent\". btctax has no path for you and will not \
+         pretend otherwise. The Instructions for Form 1040 say \"The Taxpayer Advocate Service (TAS) is \
+         an independent organization within the Internal Revenue Service (IRS) that helps taxpayers and \
+         protects taxpayer rights\", and that \"TAS can help you if your tax problem is causing a \
+         financial difficulty, you’ve tried and been unable to resolve your issue with the IRS, or you \
+         believe an IRS system, process, or procedure just isn’t working as it should\". Go to \
+         TaxpayerAdvocate.IRS.gov/Contact-Us, or call 877-777-4778. Good luck.\n\
+         If you CANNOT give the IRS a name and an address for either parent, answer \"no\" and btctax \
+         will file your return without Form 8615 and attach a Form 8275 disclosure explaining why. Read \
+         that disclosure before you file: it is a disclosed position, not a ruling in your favour."
+    )
+}
+
+/// SPEC §6.3 — `Some` iff this return computes on the no-path certification, and therefore MUST carry
+/// a Form 8275 disclosure and the three warnings before the filer has a PDF in hand.
+///
+/// Reads [`form8615_screen`], never a re-derived conjunction: a second copy of the gate is exactly how
+/// a disclosure and a refusal drift apart. Carried on [`AbsoluteReturn::form8615_certification`],
+/// because `assemble_absolute` is the one place that holds both the §1(g) threshold and the ledger —
+/// every downstream reader already has the `AbsoluteReturn`, so nothing re-decides this.
+pub fn form8615_certification(
+    ri: &ReturnInputs,
+    state: &LedgerState,
+    year: i32,
+    params: &FullReturnParams,
+) -> Option<Form8615Certification> {
+    match form8615_screen(ri, state, year, params) {
+        Form8615Screen::Certified => Some(Form8615Certification {
+            unearned: form8615_unearned(ri, state, year),
+            threshold: params.kiddie_unearned_threshold,
+        }),
+        Form8615Screen::NotRequired | Form8615Screen::Refuse(..) => None,
+    }
+}
+
+/// SPEC §6.3 — the two figures the Form 8275 disclosure and the §6.3.4 warnings need, present exactly
+/// when the certification path was taken.
+///
+/// ★ Deliberately NOT a bare `bool`: the disclosure has to state the amount of unearned income and the
+/// threshold it exceeded (`i8275--2024.txt:378-388` requires Part II to apprise the IRS of *"the
+/// identity of the item, its amount, and the nature of the controversy"*), and re-deriving those
+/// downstream would be a second chain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Form8615Certification {
+    /// SPEC §5.2's component sum — the filer's unearned income for the year.
+    pub unearned: Usd,
+    /// The §1(g) threshold it exceeded, from that year's params (never a literal).
+    pub threshold: Usd,
 }
 
 /// §221 student-loan-interest deduction (Sch 1 L21): `min(paid, $2,500)` phased out linearly over the
@@ -1377,6 +1633,14 @@ pub struct AbsoluteReturn {
     /// all four Schedule-D routing paths (SPEC §7.2). The QDCGT `min(L1, qd+ltcg)` cap (the
     /// `p2-pref-over-ti-clamp` fix) is built into the worksheet, so the absolute L16 never overstates.
     pub regular_tax: Usd,
+    /// ★★★ **FR-29 / SPEC §6.3** — `Some` iff this return computes on the Form 8615 no-path
+    /// certification, in which case it MUST file a Form 8275 disclosure and surface W-1/W-2/W-3.
+    ///
+    /// Decided ONCE, here, because [`assemble_absolute`] is the only place holding both the §1(g)
+    /// threshold and the ledger; `assemble_printed_forms` and the advisory chain read this field
+    /// rather than re-deriving the conjunction. A second derivation is exactly how a disclosure and
+    /// a refusal drift apart.
+    pub form8615_certification: Option<Form8615Certification>,
     /// Schedule 2 **line 4** — self-employment tax = §1401(a) SS + §1401(b)(1) Medicare (the §1401(b)(2)
     /// 0.9% is unbundled to `additional_medicare` Part II, deep/02 C5). 0 when there is no SE tax.
     pub se_tax_sch2_l4: Usd,
@@ -2048,6 +2312,11 @@ pub fn assemble_absolute(
     let amount_owed = (total_tax - total_payments).max(Usd::ZERO);
 
     AbsoluteReturn {
+        // ★★★ FR-29 / SPEC §6.3 — decided HERE, once, where the §1(g) threshold and the ledger are
+        //     both in scope. `assemble_absolute` runs only after `screen_compute_dependent` has
+        //     passed, so a `Some` here means the ladder reached step 6's first arm: the filer
+        //     testified to the dead end AND attested that they cannot supply a name and address.
+        form8615_certification: form8615_certification(ri, state, year, params),
         schedule_1a_additional,
         amt,
         wages,
@@ -4401,8 +4670,15 @@ mod tests {
             Some(RefuseReason::BusinessInterestIncome)
         );
         // The SAME interest as NON-business (hobby lending) does NOT refuse — it lands on Sch 1 L8v.
+        // ★ FR-29: $5,000 of HOBBY interest is unearned income over the §1(g) threshold, so this half
+        //   of the fixture is now inside Form 8615's reach and must answer condition 3. It answers NO
+        //   — a plain adult lender is not under 24 — which is ladder step 2 and proceeds. Before FR-29
+        //   the fixture escaped only because it was not claimable as a dependent, which is exactly the
+        //   escape this cycle closed.
+        let mut adult = single();
+        adult.header.form8615_condition3_age_support = Some(false);
         let hobby = state_income(vec![income(IncomeKind::Interest, false, dec!(5000))]);
-        assert_eq!(screened(&single(), &hobby), None);
+        assert_eq!(screened(&adult, &hobby), None);
     }
 
     /// SE-eligible business crypto income with no Schedule C ⇒ fail loud (owner/description unknowable).
@@ -4435,13 +4711,25 @@ mod tests {
         assert_eq!(screened(&with_sc(dec!(10000)), &st), None);
     }
 
-    /// §1(g) kiddie tax: a claimable-as-dependent filer with unearned income (interest + hobby crypto)
-    /// over the $2,600 threshold ⇒ refuse; below threshold, or non-dependent, ⇒ no refusal.
+    /// §1(g) kiddie tax: unearned income (interest + hobby crypto) over the $2,600 threshold, with
+    /// Form 8615's conditions 3 and 4 answered YES ⇒ refuse; below the threshold ⇒ no refusal.
+    ///
+    /// ★★★ **FR-29 — THE DEPENDENCY ASSERTION IS INVERTED HERE, NOT DELETED.** This test used to
+    /// assert that a filer who is nobody's dependent is NEVER kiddie-screened, above a comment that
+    /// said the assertion pinned a Critical understatement path and was *"kept RED-ADJACENT on
+    /// purpose"*. It is now the opposite claim, held by
+    /// `form8615_screens_a_filer_who_is_nobodys_dependent` (G1), so `git diff` shows a claim being
+    /// CORRECTED rather than a test quietly disappearing.
     #[test]
     fn kiddie_tax_refuses_dependent_over_threshold() {
+        // ★ Every fixture here answers Form 8615's conditions 3 and 4, because they are what the gate
+        //   now reads. The dependency flag is set on some of them purely to prove it no longer
+        //   matters — the gate does not read it, in either direction.
         let dependent = |interest: Usd| {
             let mut ri = single();
             ri.header.can_be_claimed_as_dependent_taxpayer = Some(true);
+            ri.header.form8615_condition3_age_support = Some(true);
+            ri.header.form8615_condition4_parent_alive = Some(ParentAliveAnswer::Yes);
             ri.int_1099 = vec![Form1099Int {
                 box1_interest: interest,
                 ..Default::default()
@@ -4454,7 +4742,8 @@ mod tests {
             screened(&dependent(dec!(3000)), &empty),
             Some(RefuseReason::KiddieTax)
         );
-        // $2,000 interest ≤ $2,600 → no refusal.
+        // $2,000 interest ≤ $2,600 → no refusal. Condition 1 is proved FALSE, so the ladder stops at
+        // step 1 and conditions 3/4 are never consulted.
         assert_eq!(screened(&dependent(dec!(2000)), &empty), None);
         // Non-business (hobby) crypto reward counts as unearned too: $2,000 interest + $1,000 reward > $2,600.
         let hobby = state_income(vec![income(IncomeKind::Reward, false, dec!(1000))]);
@@ -4462,29 +4751,944 @@ mod tests {
             screened(&dependent(dec!(2000)), &hobby),
             Some(RefuseReason::KiddieTax)
         );
-        // ★★★ **FR-29 — THIS ASSERTION PINS A CRITICAL DEFECT. It is kept RED-ADJACENT on purpose:
-        //     it documents today's behaviour, NOT the law.** Form 8615's five conditions
-        //     (`i1040gi--2025.txt:3927-3941`) are unearned income, a filing requirement, an AGE +
-        //     earned-income-support test, a living parent, and not filing jointly. **Dependency is
-        //     not among them.** A self-supporting student whose support comes from unearned income —
-        //     this product's own user — truthfully answers "No" here, skips §1(g), and is taxed at
-        //     their own rates. §1(g)(1) is "the greater of", so it can ONLY understate.
-        //     When FR-29 is fixed this assertion must be INVERTED, not deleted.
+        // ★★★ **THE FR-29 INVERSION.** `design/forms/extract/i8615--2025.txt:58-61`: "These rules
+        //     apply whether or not the child is a dependent." A filer who is NOBODY'S dependent and
+        //     meets the five conditions is screened exactly like one who is. The old assertion here
+        //     was `assert_eq!(screened(&not_dep, &empty), None)`.
         let mut not_dep = dependent(dec!(9000));
         not_dep.header.can_be_claimed_as_dependent_taxpayer = Some(false);
-        assert_eq!(screened(&not_dep, &empty), None);
+        assert_eq!(
+            screened(&not_dep, &empty),
+            Some(RefuseReason::KiddieTax),
+            "dependency is not one of Form 8615's conditions — a self-supporting filer is screened too"
+        );
 
-        // ★ D-8, fail-closed. An UNANSWERED flag must still RUN this screen, not skip it. `screen_inputs`
-        // refuses `None` long before compute, so this is defense-in-depth — but its direction is the whole
-        // point: skipping can only UNDER-refuse (a real kiddie return slips through at the child's rate),
-        // while running it can only over-refuse. `unwrap_or(false)` here skips. `!= Some(false)` runs.
+        // ★ …and an UNANSWERED dependency flag is likewise irrelevant now. It used to be the whole
+        //   gate (`!= Some(false)` ran the screen, fail-closed); the screen no longer reads it at
+        //   all, so all three values of that flag give the same answer on identical Form 8615 facts.
         let mut unknown = dependent(dec!(9000));
         unknown.header.can_be_claimed_as_dependent_taxpayer = None;
         assert_eq!(
             screened(&unknown, &empty),
             Some(RefuseReason::KiddieTax),
-            "an unknown dependent flag must not silently skip the §1(g) screen"
+            "the §1(g) screen no longer reads the dependency flag, in any of its three states"
         );
+    }
+
+    // ── FR-29 / SPEC `design/ty2025/SPEC_form8615_kiddie_tax.md` §9 — the Form 8615 guarantees ─────
+    //
+    // Every one names the mutation that must make it RED (harness rule B1). "Red" means the named
+    // test fails, not that some test somewhere fails.
+
+    /// A filer INSIDE Form 8615's reach and nobody's dependent: single, no date of birth (so
+    /// condition 3 is not provable either way), $9,000 of unearned income. Every Form 8615 leaf is
+    /// UNANSWERED — each test below changes exactly what it is about.
+    fn f8615() -> ReturnInputs {
+        let mut ri = single();
+        ri.int_1099 = vec![Form1099Int {
+            box1_interest: dec!(9000),
+            ..Default::default()
+        }];
+        ri
+    }
+
+    /// The full answered chain: condition 3 = YES, condition 4 = the given answer.
+    fn f8615_with(c4: Option<ParentAliveAnswer>) -> ReturnInputs {
+        let mut ri = f8615();
+        ri.header.form8615_condition3_age_support = Some(true);
+        ri.header.form8615_condition4_parent_alive = c4;
+        ri
+    }
+
+    /// ★★★ **G1 — DEPENDENCY IS NOT ONE OF FORM 8615'S CONDITIONS.**
+    ///
+    /// `design/forms/extract/i8615--2025.txt:58-61`: *"These rules apply whether or not the child is
+    /// a dependent."* A self-supporting student living on crypto gains is nobody's dependent, answers
+    /// "No" truthfully, and — before this fix — skipped §1(g) entirely. §1(g)(1) is *"the greater
+    /// of"*, so that can only UNDERSTATE.
+    ///
+    /// **Mutation:** re-introduce `if ri.header.can_be_claimed_as_dependent_taxpayer != Some(false)`
+    /// around the gate ⇒ red.
+    #[test]
+    fn form8615_screens_a_filer_who_is_nobodys_dependent() {
+        let ri = f8615_with(Some(ParentAliveAnswer::Yes));
+        assert_eq!(
+            ri.header.can_be_claimed_as_dependent_taxpayer,
+            Some(false),
+            "the fixture is the filer FR-29 loses: nobody can claim them"
+        );
+        assert_eq!(
+            screened(&ri, &LedgerState::default()),
+            Some(RefuseReason::KiddieTax),
+            "a filer who is nobody's dependent still meets Form 8615's five conditions"
+        );
+    }
+
+    /// ★★★ **G2 — SILENCE NEVER PROCEEDS.** The nine rows of SPEC §6.1, in order, with condition 1
+    /// and condition 5 both true (the only region where anything is demanded).
+    ///
+    /// **Mutations:** change any `None` arm of the ladder to proceed ⇒ red on that row. Change
+    /// `c3 == Some(false)` to `c3 != Some(true)` ⇒ red on the `None` row. Change the certification
+    /// gate from `== Some(true)` to `!= Some(false)` ⇒ red on the `Some(CannotKnow)`/`None` row,
+    /// because silence would then certify.
+    #[test]
+    fn form8615_unknown_conditions_fail_closed() {
+        use ParentAliveAnswer as P;
+        let empty = LedgerState::default();
+        // (dob_24_plus, c3, c4, cert, expected, why it is safe)
+        type Row = (
+            bool,
+            Option<bool>,
+            Option<ParentAliveAnswer>,
+            Option<bool>,
+            Option<RefuseReason>,
+            &'static str,
+        );
+        let rows: Vec<Row> = vec![
+            (
+                true,
+                None,
+                None,
+                None,
+                None,
+                "condition 3 is PROVED false by the date of birth — not assumed",
+            ),
+            (
+                false,
+                None,
+                None,
+                None,
+                Some(RefuseReason::Form8615AgeSupportUnanswered),
+                "silence is not a No",
+            ),
+            (
+                false,
+                Some(false),
+                None,
+                None,
+                None,
+                "the FILER said No to condition 3",
+            ),
+            (
+                false,
+                Some(true),
+                None,
+                None,
+                Some(RefuseReason::Form8615ParentAliveUnanswered),
+                "silence is not a No",
+            ),
+            (
+                false,
+                Some(true),
+                Some(P::No),
+                None,
+                None,
+                "the FILER said No to condition 4",
+            ),
+            (
+                false,
+                Some(true),
+                Some(P::CannotKnow),
+                None,
+                Some(RefuseReason::Form8615ParentUnidentifiable),
+                "silence is not an attestation",
+            ),
+            (
+                false,
+                Some(true),
+                Some(P::CannotKnow),
+                Some(false),
+                Some(RefuseReason::Form8615ParentUnidentifiable),
+                "the filer said the IRS route is OPEN — use it",
+            ),
+            (
+                false,
+                Some(true),
+                Some(P::CannotKnow),
+                Some(true),
+                None,
+                "TWO affirmative answers plus a Form 8275 disclosure",
+            ),
+            (
+                false,
+                Some(true),
+                Some(P::Yes),
+                None,
+                Some(RefuseReason::KiddieTax),
+                "all five conditions hold",
+            ),
+        ];
+        for (dob24, c3, c4, cert, want, why) in rows {
+            let mut ri = f8615();
+            if dob24 {
+                // Considered age 30 at the end of 2024 — well clear of both §1(g)'s 24 and §63(f)'s 65.
+                ri.header.taxpayer.date_of_birth = Some(date!(1994 - 06 - 15));
+            }
+            ri.header.form8615_condition3_age_support = c3;
+            ri.header.form8615_condition4_parent_alive = c4;
+            ri.header.form8615_parent_identity_unobtainable = cert;
+            assert_eq!(
+                screened(&ri, &empty),
+                want,
+                "row (dob24={dob24}, c3={c3:?}, c4={c4:?}, cert={cert:?}) — {why}"
+            );
+        }
+    }
+
+    /// ★★★ **G3 — THE AGE ARITHMETIC IS THE FORM'S.** The three worked examples the IRS prints at
+    /// `design/forms/extract/i1040gi--2025.txt:3945-3951`, evaluated for TY2025, plus the neighbours
+    /// either side of the boundary and a leap-day vector.
+    ///
+    /// **Mutations:** drop the `January && day == 1` term ⇒ the `2002-01-01` row flips to 23 ⇒ red.
+    /// `>= 24` → `> 24` ⇒ the `2002-01-01` filer is asked ⇒ red. `year - dob.year()` →
+    /// `year - dob.year() - 1` ⇒ every row shifts ⇒ red.
+    #[test]
+    fn considered_age_matches_i1040gi_january_first_examples() {
+        // "A child born on January 1, 2008, is considered to be age 18 at the end of 2025; a child
+        //  born on January 1, 2007, is considered to be age 19 at the end of 2025; and a child born
+        //  on January 1, 2002, is considered to be age 24 at the end of 2025."
+        assert_eq!(considered_age_at_year_end(date!(2008 - 01 - 01), 2025), 18);
+        assert_eq!(considered_age_at_year_end(date!(2007 - 01 - 01), 2025), 19);
+        assert_eq!(considered_age_at_year_end(date!(2002 - 01 - 01), 2025), 24);
+        // The neighbour one day later is 23 — the January-1 term is what separates them.
+        assert_eq!(considered_age_at_year_end(date!(2002 - 01 - 02), 2025), 23);
+        // ★ A leap-day birth needs no branch here, because February 29 is never January 1. The
+        //   vector exists because "no branch is needed" is a claim, not a guarantee.
+        assert_eq!(considered_age_at_year_end(date!(2004 - 02 - 29), 2025), 21);
+
+        // …and the suppression the IRS itself prints (`i8615--2025.txt:98`, "*** Don't use Form 8615
+        // for this child") is the >= 24 boundary: the 2002-01-01 filer is never asked and never
+        // refused, the 2002-01-02 filer is asked.
+        let at = |dob: time::Date| {
+            let mut ri = f8615();
+            ri.tax_year = 2025;
+            ri.header.taxpayer.date_of_birth = Some(dob);
+            ri
+        };
+        assert!(provably_24_or_older(&at(date!(2002 - 01 - 01)), 2025));
+        assert!(!provably_24_or_older(&at(date!(2002 - 01 - 02)), 2025));
+        // ★ And `None` NEVER suppresses — an absent date of birth cannot prove anything.
+        assert!(!provably_24_or_older(&f8615(), 2025));
+    }
+
+    /// ★★ **G4 — CONDITION 5.** *"You don't file a joint return"* — MFJ is exempt; **QSS is not**.
+    ///
+    /// §5.3 calls QSS out by name and §1(g)(2)(C) excludes only a child who *"does not file a joint
+    /// return"*. A qualifying surviving spouse files a return of their own, not a joint one.
+    ///
+    /// **Mutations:** delete the `!= Mfj` term ⇒ red on the MFJ row. Widen it to `!= Mfj && != Qss`
+    /// ⇒ red on the QSS row.
+    #[test]
+    fn a_joint_return_is_never_screened_for_form_8615() {
+        let empty = LedgerState::default();
+        let mut mfj = f8615_with(Some(ParentAliveAnswer::Yes));
+        mfj.filing_status = FilingStatus::Mfj;
+        assert_eq!(
+            screened(&mfj, &empty),
+            None,
+            "condition 5 is proved false — a joint filer is outside Form 8615"
+        );
+        let mut qss = f8615_with(Some(ParentAliveAnswer::Yes));
+        qss.filing_status = FilingStatus::Qss;
+        assert_eq!(
+            screened(&qss, &empty),
+            Some(RefuseReason::KiddieTax),
+            "a QSS return is NOT a joint return, so condition 5 holds and Form 8615 is required"
+        );
+    }
+
+    /// ★★ **G5 — CONDITION 1 IS STRICT, AND ITS THRESHOLD COMES FROM THE PARAMS.** The form says
+    /// *"MORE THAN $2,700"*, and the figure is a per-year parameter, never a literal.
+    ///
+    /// **Mutations:** `>` → `>=` ⇒ red. A literal `dec!(2600)` in place of the param ⇒ red on the
+    /// third assertion.
+    #[test]
+    fn the_threshold_is_strict_and_comes_from_the_params() {
+        let empty = LedgerState::default();
+        let params = ty2024_params();
+        let at = |interest: Usd| {
+            let mut ri = f8615_with(Some(ParentAliveAnswer::Yes));
+            ri.int_1099 = vec![Form1099Int {
+                box1_interest: interest,
+                ..Default::default()
+            }];
+            ri
+        };
+        let t = params.kiddie_unearned_threshold;
+        assert_eq!(
+            screen_compute_dependent(&at(t), &empty, 2024, &params).map(|r| r.reason),
+            None,
+            "EXACTLY the threshold is not MORE THAN the threshold"
+        );
+        assert_eq!(
+            screen_compute_dependent(&at(t + dec!(0.01)), &empty, 2024, &params).map(|r| r.reason),
+            Some(RefuseReason::KiddieTax),
+            "one cent more IS more than the threshold"
+        );
+        // ★ Move the PARAM and the boundary moves with it — this is the assertion a hardcoded
+        //   `dec!(2600)` fails.
+        let mut moved = params.clone();
+        moved.kiddie_unearned_threshold = t + dec!(100);
+        assert_eq!(
+            screen_compute_dependent(&at(t + dec!(0.01)), &empty, 2024, &moved).map(|r| r.reason),
+            None,
+            "the boundary is the PARAMS value, not a literal"
+        );
+    }
+
+    /// ★★ **G6 — THE NAMED OVER-REFUSAL BRANCH OF CONDITION 2** (SPEC §5.4).
+    ///
+    /// Condition 2 (*"You are required to file a tax return"*) is ASSUMED TRUE, because btctax cannot
+    /// compute it without transcribing Charts A, B and C. This test exists to make that assumption
+    /// **visible and deliberate**: it is the KAT `CLAUDE.md` requires alongside a derived form's
+    /// equivalence proof.
+    ///
+    /// **Mutation:** implement condition 2 without updating this test ⇒ red, and the test is then
+    /// rewritten rather than deleted.
+    #[test]
+    fn condition_two_is_assumed_and_this_is_the_filer_it_over_refuses() {
+        let empty = LedgerState::default();
+        // (1) A NON-DEPENDENT single filer below Chart A's threshold. `i1040gi--2025.txt:634-639`:
+        //     single, under 65 ⇒ $15,750. $9,000 of unearned income is over the §1(g) threshold and
+        //     under Chart A's, so the form would NOT require a return — and therefore would not
+        //     require Form 8615 either.
+        let ri = f8615_with(Some(ParentAliveAnswer::Yes));
+        assert_eq!(
+            screened(&ri, &empty),
+            Some(RefuseReason::KiddieTax),
+            "OVER-REFUSAL, and it is deliberate: gross income of $9,000 is below Chart A's $15,750 \
+             (i1040gi--2025.txt:634-639) for a single filer under 65, so this filer is not required \
+             to file at all and Form 8615's condition 2 is FALSE for them. btctax ASSUMES condition \
+             2, because computing it needs Charts A/B/C (SPEC OQ-2, deliberately deferred). The \
+             direction is over-refusal, never under-refusal, and R-3's detail discloses the \
+             assumption to the filer."
+        );
+        // (2) A BLIND DEPENDENT under 24. Chart B's "Yes" branch raises the unearned bullet to
+        //     "$3,350 ($5,350 if 65 or older and blind)" (`i1040gi--2025.txt:705`), which is above
+        //     the §1(g) threshold — so between the two there is genuinely no filing requirement.
+        let mut blind = f8615_with(Some(ParentAliveAnswer::Yes));
+        blind.header.can_be_claimed_as_dependent_taxpayer = Some(true);
+        blind.header.taxpayer.blind = Some(true);
+        blind.int_1099 = vec![Form1099Int {
+            box1_interest: dec!(3000),
+            ..Default::default()
+        }];
+        assert_eq!(
+            screened(&blind, &empty),
+            Some(RefuseReason::KiddieTax),
+            "the same over-refusal for the second named population: a blind dependent under 24 with \
+             unearned income between the §1(g) threshold and Chart B's $3,350 (i1040gi:705)"
+        );
+    }
+
+    /// ★★ **G8 — THE DEMANDED SET IS INSIDE THE LIVE SET (the anti-brick invariant).**
+    ///
+    /// Whenever the gate returns R-1, R-2 or R-4, the corresponding `SkippableQuestion::live` must be
+    /// `true` for the same `ReturnInputs` — otherwise `btctax income answer` never offers the question
+    /// the refusal demands, and the filer is bricked. That is the shipped circular-liveness bug of
+    /// `questions.rs:344-345` in a new costume, and it is why SPEC §3.1 chose this shape.
+    ///
+    /// **Mutations:** add any income-dependent term to any liveness predicate ⇒ red on the
+    /// crypto-only fixture. (Dropping `== Some(CannotKnow)` from the dead-end fact's liveness in
+    /// favour of `!= Some(Yes)` is NOT red here — the live set only grows — which is why
+    /// `the_certification_is_unreachable_without_the_dead_end` carries the opposite half.)
+    ///
+    /// ★★ The `tax_year != year` rows replace a prose claim. An earlier draft argued the divergence
+    /// was one-directional because `Default` is `tax_year: 0`; that holds for `0` and not in general,
+    /// since a hand-built `tax_year > year` inflates the computed age, suppresses the question and
+    /// bricks the filer. The assertion is the INVARIANT, over rows where the two years disagree in
+    /// both directions.
+    #[test]
+    fn every_form8615_refusal_names_a_question_the_interview_would_have_offered() {
+        use crate::tax::questions::{SkippableId, SKIPPABLE_QUESTIONS};
+        let params = ty2024_params();
+        const YEAR: i32 = 2024;
+        let anchor = |r: RefuseReason| match r {
+            RefuseReason::Form8615AgeSupportUnanswered => {
+                Some(SkippableId::Form8615Condition3AgeSupport)
+            }
+            RefuseReason::Form8615ParentAliveUnanswered => {
+                Some(SkippableId::Form8615Condition4ParentAlive)
+            }
+            RefuseReason::Form8615ParentUnidentifiable => {
+                Some(SkippableId::Form8615ParentIdentityUnobtainable)
+            }
+            _ => None,
+        };
+        let mut demanded = 0usize;
+        for dob in [
+            None,
+            Some(date!(2004 - 06 - 15)), // 20 at the end of 2024
+            Some(date!(1994 - 06 - 15)), // 30 at the end of 2024
+        ] {
+            for status in [
+                FilingStatus::Single,
+                FilingStatus::Mfj,
+                FilingStatus::Mfs,
+                FilingStatus::Qss,
+            ] {
+                for source in 0..3 {
+                    for answers in [
+                        (None, None, None),
+                        (
+                            Some(true),
+                            Some(ParentAliveAnswer::CannotKnow),
+                            None::<bool>,
+                        ),
+                    ] {
+                        for tax_year in [YEAR, YEAR + 5, 0] {
+                            let mut ri = single();
+                            ri.tax_year = tax_year;
+                            ri.filing_status = status;
+                            ri.header.taxpayer.date_of_birth = dob;
+                            ri.header.form8615_condition3_age_support = answers.0;
+                            ri.header.form8615_condition4_parent_alive = answers.1;
+                            ri.header.form8615_parent_identity_unobtainable = answers.2;
+                            // Three sources of the SAME unearned income — wages are EARNED and must
+                            // never reach it, interest is visible to `ReturnInputs`, and crypto is
+                            // visible only to the LEDGER (the case a liveness predicate cannot see).
+                            let mut st = LedgerState::default();
+                            match source {
+                                0 => {
+                                    ri.w2s = vec![w2(
+                                        Owner::Taxpayer,
+                                        dec!(9000),
+                                        dec!(9000),
+                                        dec!(9000),
+                                    )]
+                                }
+                                1 => {
+                                    ri.int_1099 = vec![Form1099Int {
+                                        box1_interest: dec!(9000),
+                                        ..Default::default()
+                                    }]
+                                }
+                                _ => {
+                                    st = state_income(vec![income(
+                                        IncomeKind::Reward,
+                                        false,
+                                        dec!(9000),
+                                    )])
+                                }
+                            }
+                            let Some(refusal) = screen_compute_dependent(&ri, &st, YEAR, &params)
+                            else {
+                                continue;
+                            };
+                            let reason = format!("{:?}", refusal.reason);
+                            let Some(id) = anchor(refusal.reason) else {
+                                continue;
+                            };
+                            demanded += 1;
+                            let q = SKIPPABLE_QUESTIONS
+                                .iter()
+                                .find(|s| s.id == id)
+                                .expect("the refusal's question is in the registry");
+                            if (q.live)(&ri) {
+                                continue;
+                            }
+                            // ★★★ THE ONE PERMITTED DIVERGENCE, AND THE TEST NAMES ITS MECHANISM
+                            //     RATHER THAN EXCUSING THE ROW.
+                            //
+                            //     The gate is handed the AUTHORITATIVE `year`; liveness has only
+                            //     `ri.tax_year`. They are equal for everything the product produces
+                            //     — `btctax-cli/src/return_inputs.rs` stamps `ri.tax_year = year` on
+                            //     load and ERRORS on a stored disagreement — so this can be reached
+                            //     only by a hand-built fixture, which is what these rows are.
+                            //
+                            //     ★ The escape is keyed to the MECHANISM, never to a row list: the
+                            //     ONLY way a demanded question may be dead is that the two years
+                            //     disagree about `provably_24_or_older`. Add an income-dependent
+                            //     term to any liveness predicate — the mutation this test exists to
+                            //     kill — and the crypto-only fixture goes dead with both years
+                            //     agreeing, so this assertion fires.
+                            assert_ne!(
+                                provably_24_or_older(&ri, ri.tax_year),
+                                provably_24_or_older(&ri, YEAR),
+                                "BRICK: {reason} demands {id:?}, but the interview would not have \
+                                 offered it (dob={dob:?}, status={status:?}, source={source}, \
+                                 answers={answers:?}, tax_year={tax_year}) — and the two years AGREE \
+                                 about the age suppression, so this is not the documented \
+                                 `tax_year != year` divergence. It is a real brick."
+                            );
+                            assert_ne!(
+                                tax_year, YEAR,
+                                "…and a `tax_year == year` row may never diverge at all"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        // ★ Anti-vacuity: a grid that demanded nothing would pass without asserting anything.
+        assert!(
+            demanded >= 12,
+            "the grid must actually reach the Form 8615 refusals — it reached {demanded}"
+        );
+    }
+
+    /// ★★ **G11 — §5.2's DIRECTION CLAIM HAS A NAMED DEPENDENCY, AND IT IS PINNED.**
+    ///
+    /// `form8615_unearned` omits seven of i8615's own unearned categories (`i8615--2025.txt:28-35`).
+    /// The omission is safe ONLY because `QuestionId::OtherOutOfScopeIncome` names them and refuses:
+    /// `Some(true)` hard-refuses `OtherIncomeOutOfScope`, `None` refuses `OtherIncomeUnanswered` at
+    /// `screen_inputs`. Delete that refusal and the sum becomes too LOW for a filer with rental or
+    /// K-1 income — and a too-low sum UNDER-refuses, which is the FR-29 direction.
+    ///
+    /// **Mutation:** delete the `other_out_of_scope_income == Some(true)` refusal ⇒ red.
+    #[test]
+    fn the_unearned_sum_is_only_conservative_because_out_of_scope_income_refuses() {
+        use crate::tax::return_refuse::screen_inputs;
+        let params = ty2024_params();
+        let table = synthetic_table(2024);
+        for (declared, want) in [
+            (Some(true), RefuseReason::OtherIncomeOutOfScope),
+            (None, RefuseReason::OtherIncomeUnanswered),
+        ] {
+            let mut ri = f8615_with(Some(ParentAliveAnswer::No));
+            // Every OTHER live declaration is answered, so the refusal this test reads is the one it
+            // is about and not whichever class-(A) question happens to screen first.
+            crate::tax::testonly::answer_all_live_declarations(&mut ri);
+            ri.other_out_of_scope_income = declared;
+            assert_eq!(
+                screen_inputs(&ri, &table, &params).map(|r| r.reason),
+                Some(want),
+                "a filer carrying rents, royalties, pension/annuity income, a taxable scholarship \
+                 not on a Form W-2, alimony, taxable social security or trust-beneficiary income \
+                 cannot reach a computed return. WITHOUT this refusal `form8615_unearned` is too \
+                 LOW for them, and a too-low unearned figure UNDER-refuses — the FR-29 direction."
+            );
+        }
+    }
+
+    /// ★ **G12 — THE CONDITION-3 HELP'S SIMPLIFICATIONS ONLY OVER-REFUSE.**
+    ///
+    /// The help is the only filer-facing text that explains the support / earned-income test, and its
+    /// definitions come from i8615 (which writes them FOR THIS FORM), not from Chart B (whose own
+    /// scope line is the filing-requirement test, and which counts scholarships the opposite way).
+    ///
+    /// **Mutation:** drop the scholarship carve-out ⇒ red; drop the 30% allowance ⇒ red.
+    #[test]
+    fn the_condition_three_help_never_narrows_the_support_test() {
+        use crate::tax::questions::{SkippableId, SKIPPABLE_QUESTIONS};
+        let help = SKIPPABLE_QUESTIONS
+            .iter()
+            .find(|s| s.id == SkippableId::Form8615Condition3AgeSupport)
+            .expect("condition 3 is in the registry")
+            .help;
+        // Both remaining simplifications push the SAME way — toward answering YES to condition 3,
+        // i.e. toward refusal, never away from it.
+        assert!(
+            help.contains("not counted as support if you are a full-time student"),
+            "the scholarship carve-out SHRINKS support (i8615:68-70), which makes a YES more likely"
+        );
+        assert!(
+            help.contains("30% of your share of the net profits"),
+            "the sole-proprietor allowance ENLARGES earned income (i8615:268-281)"
+        );
+        assert!(
+            help.contains("Income from investments, crypto or a trust is not earned income."),
+            "the one sentence that makes the independence trap falsifiable for a crypto filer"
+        );
+        // ★ And nothing in it EXCLUDES a category the form counts as support — an exclusion would
+        //   shrink the denominator, make a NO more likely, and under-refuse.
+        for narrowing in [
+            "only counts",
+            "does not include lodging",
+            "excluding education",
+        ] {
+            assert!(
+                !help.contains(narrowing),
+                "the help must never NARROW what counts as support: {narrowing:?}"
+            );
+        }
+    }
+
+    /// ★★ **G13 — `CannotKnow` IS AN ANSWER, AND THE GATE IS WHERE THAT IS PROVABLE.**
+    ///
+    /// The classifier cannot assert it (`exempt` discards the leaf, and `declaration` is typed
+    /// `&Option<bool>`), so the guarantee is stated where it has teeth: `Some(CannotKnow)` and `None`
+    /// produce DIFFERENT outcomes. Without this the third answer collapses into silence and the
+    /// spec's central case becomes a refusal with no remedy.
+    ///
+    /// **Mutation:** map `CannotKnow` to the unanswered arm at the gate ⇒ red.
+    #[test]
+    fn cannot_know_is_answered_and_none_is_not() {
+        let empty = LedgerState::default();
+        assert_eq!(
+            screened(&f8615_with(None), &empty),
+            Some(RefuseReason::Form8615ParentAliveUnanswered),
+            "UNANSWERED still refuses, and it refuses for not having been answered"
+        );
+        assert_eq!(
+            screened(&f8615_with(Some(ParentAliveAnswer::CannotKnow)), &empty),
+            Some(RefuseReason::Form8615ParentUnidentifiable),
+            "CANNOT KNOW is an ANSWER: it opens the §6.3 dead-end path, which is a different refusal \
+             with a different remedy"
+        );
+    }
+
+    /// ★★★ **G14(a) — THE CERTIFICATION IS UNREACHABLE WITHOUT THE DEAD END.**
+    ///
+    /// Over every combination of the three leaves, the return computes ONLY on
+    /// `condition 4 == Some(CannotKnow)` ∧ `parent_identity_unobtainable == Some(true)`; and the
+    /// dead-end fact is not even OFFERED outside the dead end.
+    ///
+    /// **Mutations:** `== Some(true)` → `!= Some(false)` at the certification gate ⇒ red.
+    /// `== Some(CannotKnow)` → `!= Some(Yes)` in the liveness predicate ⇒ red on the not-offered half.
+    ///
+    /// ★★★ **And one row that does NOT go through the field, because the defect it catches is in the
+    /// ACCESSOR.** `TriState(Some(true))` is the filer answering **YES** to *"Can you give the IRS
+    /// your parent's name and address?"*, so the correct outcome is the refusal that sends them to
+    /// the IRS route.
+    ///
+    /// **Mutation — and it is the whole point of the row:** write the accessors straight through
+    /// (`get_bool: |ri| ri.header.form8615_parent_identity_unobtainable`,
+    /// `set_bool: |ri, v| ri.header.form8615_parent_identity_unobtainable = Some(v)`) ⇒ **red**,
+    /// because a YES then certifies. That mutation is the *obvious* transcription — every other
+    /// registry entry is written that way — and no other test in the repo reds on it: the rows above
+    /// and G2 and G8 all set the FIELD VALUE, and the registry delegation test round-trips through
+    /// the pair, so it passes on a consistently-inverted pair and on a straight-through pair alike.
+    #[test]
+    fn the_certification_is_unreachable_without_the_dead_end() {
+        use crate::tax::questions::{SkippableId, SKIPPABLE_QUESTIONS};
+        use ParentAliveAnswer as P;
+        let empty = LedgerState::default();
+        let mut computed = 0usize;
+        for c3 in [None, Some(false), Some(true)] {
+            for c4 in [None, Some(P::Yes), Some(P::No), Some(P::CannotKnow)] {
+                for cert in [None, Some(false), Some(true)] {
+                    let mut ri = f8615();
+                    ri.header.form8615_condition3_age_support = c3;
+                    ri.header.form8615_condition4_parent_alive = c4;
+                    ri.header.form8615_parent_identity_unobtainable = cert;
+                    let certified =
+                        c3 == Some(true) && c4 == Some(P::CannotKnow) && cert == Some(true);
+                    // The certification is the ONLY combination in which a Form-8615-eligible filer
+                    // computes on an ANSWERED condition 3 = YES.
+                    if certified {
+                        computed += 1;
+                        assert_eq!(
+                            screened(&ri, &empty),
+                            None,
+                            "the certification path computes (c3={c3:?}, c4={c4:?}, cert={cert:?})"
+                        );
+                        assert!(
+                            crate::tax::return_1040::form8615_certification(
+                                &ri,
+                                &empty,
+                                2024,
+                                &ty2024_params()
+                            )
+                            .is_some(),
+                            "…and it is RECORDED as certified, so the disclosure rides with it"
+                        );
+                    } else {
+                        // ★ `c4 == Some(No)` is ladder step 5 and correctly PROCEEDS — i8615 says the
+                        //   rules "don't apply if neither of the child's parents were living". Same
+                        //   for `c3 == Some(false)`, ladder step 2. Both are the FILER's own NO, not
+                        //   a certification, and neither attaches a disclosure. Every remaining
+                        //   combination refuses.
+                        if c3 == Some(true) && c4 != Some(P::No) {
+                            assert!(
+                                screened(&ri, &empty).is_some(),
+                                "every other combination REFUSES (c3={c3:?}, c4={c4:?}, cert={cert:?})"
+                            );
+                        }
+                        assert!(
+                            crate::tax::return_1040::form8615_certification(
+                                &ri,
+                                &empty,
+                                2024,
+                                &ty2024_params()
+                            )
+                            .is_none(),
+                            "…and none of them is recorded as certified — in particular neither of                              the two PROCEED rows that are the filer's own NO, which take no                              position and attach no disclosure"
+                        );
+                    }
+                    // The dead-end fact is not even OFFERED unless condition 4 is CANNOT KNOW.
+                    let q = SKIPPABLE_QUESTIONS
+                        .iter()
+                        .find(|s| s.id == SkippableId::Form8615ParentIdentityUnobtainable)
+                        .expect("the dead-end fact is in the registry");
+                    assert_eq!(
+                        (q.live)(&ri),
+                        c3 != Some(false) && c4 == Some(P::CannotKnow),
+                        "the dead-end question is offered ONLY inside the dead end \
+                         (c3={c3:?}, c4={c4:?}) — a general opt-out would rebuild FR-29 behind a \
+                         nicer interface"
+                    );
+                }
+            }
+        }
+        assert_eq!(computed, 1, "exactly one combination may compute");
+
+        // ★★★ THE POLARITY ROW lives in `btctax-input-form`, because it must go in through the
+        //     `Field` (the way the interview does) and that crate DEPENDS on this one, so this crate
+        //     cannot reach `form_spec()`. See
+        //     `btctax_input_form::spec::tests::the_dead_end_accessors_invert_so_a_yes_is_still_refused`
+        //     — the only test in the repo that reds on a straight-through accessor pair.
+    }
+
+    /// ★★★ **G14(b) — A CERTIFIED RETURN CARRIES THE DISCLOSURE AND ALL THREE WARNINGS.**
+    ///
+    /// The §6.3 row is the ONE outcome of the Form 8615 ladder that is not a refusal: the return
+    /// computes and files. So it must not file silently. This asserts that a return produced on that
+    /// path emits a Form 8275 disclosure whose Part I names `IRC section 1(g)` and whose Part II
+    /// LEADS with the impossibility argument, plus W-1, W-2 and W-3 — W-3 **verbatim**, because it is
+    /// the owner's own sentence.
+    ///
+    /// **Mutation:** delete any of the three warnings, or the disclosure ⇒ red. This is the assertion
+    /// that stops the certification from decaying into a silent exit — which would be strictly worse
+    /// than the refusal it replaced.
+    #[test]
+    fn a_certified_return_carries_the_disclosure_and_all_three_warnings() {
+        let params = ty2024_params();
+        let table = synthetic_table(2024);
+        let state = LedgerState::default();
+        let mut ri = f8615_with(Some(ParentAliveAnswer::CannotKnow));
+        ri.tax_year = 2024;
+        // The filer's NO to "can you give the IRS your parent's name and address?" — the leaf records
+        // the negation (the accessors invert; see `HouseholdHeader`).
+        ri.header.form8615_parent_identity_unobtainable = Some(true);
+        assert_eq!(
+            screened(&ri, &state),
+            None,
+            "precondition: this fixture computes, on the certification path"
+        );
+
+        let ar = assemble_absolute(&ri, &state, &params, &table, 2024);
+        let cert = ar
+            .form8615_certification
+            .expect("the computed return records that it took the §1(g) position");
+        assert_eq!(cert.threshold, params.kiddie_unearned_threshold);
+        assert_eq!(cert.unearned, dec!(9000));
+
+        // ── The disclosure ────────────────────────────────────────────────────────────────────────
+        let forms = crate::tax::packet::assemble_printed_forms(
+            &ri,
+            &state,
+            &std::collections::BTreeMap::new(),
+            &ar,
+            &table,
+            2024,
+            &[],
+        );
+        let f8275 = forms.f8275.as_ref().expect(
+            "a certified return FILES a Form 8275 — a silent undisclosed position would be \
+                     strictly worse than the refusal it replaced",
+        );
+        let row = f8275
+            .part_i
+            .iter()
+            .find(|i| i.rule.as_deref() == Some("IRC section 1(g)"))
+            .expect(
+                "Part I column (a) must identify the RULE the position is contrary to \
+                     (i8275--2024.txt:352-354)",
+            );
+        assert_eq!(
+            row.item_name.as_deref(),
+            Some("Tax on unearned income of a child — Form 8615 not filed"),
+            "column (b) identifies the item BY NAME (i8275--2024.txt:355)"
+        );
+        assert_eq!(row.form, "1040");
+        assert_eq!(row.line, "16");
+        assert_eq!(
+            row.amount,
+            crate::conventions::round_dollar(ar.regular_tax),
+            "column (f) is the tax AS FILED — computed WITHOUT §1(g), which is the position disclosed"
+        );
+
+        // ★ Part II LEADS with the impossibility argument (the owner ruling directs it), and carries
+        //   NO constitutional argument — the ruling records that btctax is aware of no authority
+        //   holding §1(g) invalid as applied here, so a constitutional theory would be WEAKER.
+        let facts = f8275
+            .part_ii
+            .find("cannot identify either parent")
+            .expect("Part II states the facts the filer gave");
+        let impossibility = f8275
+            .part_ii
+            .find("Form 8615 cannot be completed")
+            .expect("Part II makes the impossibility argument");
+        let did_and_not = f8275
+            .part_ii
+            .find("The return reports all of the taxpayer's income")
+            .expect("Part II says what was and was not done");
+        assert!(
+            facts < impossibility && impossibility < did_and_not,
+            "the three paragraphs must run facts → IMPOSSIBILITY → what was done; the ruling directs \
+             that the impossibility argument LEAD"
+        );
+        for constitutional in [
+            "constitution",
+            "due process",
+            "unconstitutional",
+            "Fifth Amendment",
+        ] {
+            assert!(
+                !f8275
+                    .part_ii
+                    .to_ascii_lowercase()
+                    .contains(&constitutional.to_ascii_lowercase()),
+                "no constitutional argument may appear in the disclosure ({constitutional:?})"
+            );
+        }
+
+        // ── The three warnings ────────────────────────────────────────────────────────────────────
+        let advisories = crate::tax::advisories::advisories_for(&ri, &state, &ar, &params, 2024);
+        let msg = advisories
+            .iter()
+            .find_map(|a| match a {
+                crate::tax::advisories::Advisory::Form8615NoPathCertified { .. } => {
+                    Some(a.message())
+                }
+                _ => None,
+            })
+            .expect(
+                "the three warnings are surfaced at report AND at export, before the filer has \
+                     a PDF in hand",
+            );
+        // W-1 — a disclosure is not a shield, quoted from i8275--2024.txt:202-214.
+        assert!(
+            msg.contains("Reasonable basis is a relatively high standard of tax reporting"),
+            "W-1: the filer must be told that adequate disclosure protects only if the position has \
+             a REASONABLE BASIS, and that btctax does not tell them theirs clears that bar"
+        );
+        // W-2 — there is no authority holding this.
+        assert!(
+            msg.contains("NO authority holding")
+                && msg.contains("IMPOSSIBILITY"),
+            "W-2: the argument is an impossibility argument, stronger than a constitutional one, and \
+             nonetheless untested"
+        );
+        // W-3 — the owner's own sentence, VERBATIM.
+        assert!(
+            msg.contains(
+                "Often the process is the punishment when it comes to not allowing government to \
+                 treat you unlawfully."
+            ),
+            "W-3 ships as written (design/ty2025/DECISION_form8615_no_path_self_certification.md)"
+        );
+        // …and the §6.3.5 TAS pointer, verified against i1040gi--2025.txt:147-166.
+        assert!(
+            msg.contains("Taxpayer Advocate Service")
+                && msg.contains("TaxpayerAdvocate.IRS.gov/Contact-Us")
+                && msg.contains("877-777-4778")
+        );
+
+        // ★ ANTI-VACUITY: none of this fires on a return that did NOT take the position.
+        let mut no_position = ri.clone();
+        no_position.header.form8615_condition4_parent_alive = Some(ParentAliveAnswer::No);
+        let ar2 = assemble_absolute(&no_position, &state, &params, &table, 2024);
+        assert!(ar2.form8615_certification.is_none());
+        assert!(
+            !crate::tax::advisories::advisories_for(&no_position, &state, &ar2, &params, 2024)
+                .iter()
+                .any(|a| matches!(
+                    a,
+                    crate::tax::advisories::Advisory::Form8615NoPathCertified { .. }
+                )),
+            "a filer whose parents were both dead takes NO position and gets no warning"
+        );
+        assert!(
+            crate::tax::packet::assemble_printed_forms(
+                &no_position,
+                &state,
+                &std::collections::BTreeMap::new(),
+                &ar2,
+                &table,
+                2024,
+                &[],
+            )
+            .f8275
+            .is_none(),
+            "…and files no Form 8275"
+        );
+    }
+
+    /// ★★★ **G14(c) — NO FILER-FACING STRING ASKS FOR A LEGAL CONCLUSION.**
+    ///
+    /// The filer attests to FACTS. *"I do not know who my parents are"* is testimony they can
+    /// truthfully give; *"§1(g) does not apply to me"* is a legal POSITION, and a return is signed
+    /// under §6065 — putting a conclusion in the filer's mouth would fabricate testimony. The
+    /// conclusion is btctax's, and it goes on Form 8275 in btctax's voice.
+    ///
+    /// **Mutation:** reword the dead-end prompt to *"do you agree §1(g) does not apply to you?"* ⇒ red.
+    #[test]
+    fn no_filer_facing_string_asks_for_a_legal_conclusion() {
+        use crate::tax::questions::{SkippableId, SKIPPABLE_QUESTIONS};
+        let ours = [
+            SkippableId::Form8615Condition3AgeSupport,
+            SkippableId::Form8615Condition4ParentAlive,
+            SkippableId::Form8615ParentIdentityUnobtainable,
+        ];
+        // Phrases that would put a CONCLUSION in the filer's mouth. Each is a thing a prompt could
+        // plausibly drift into, not a strawman.
+        let conclusions = [
+            "does not apply to you",
+            "does not apply to me",
+            "you are exempt",
+            "i am exempt",
+            "do you agree",
+            "form 8615 is not required",
+            "certify that",
+        ];
+        for id in ours {
+            let q = SKIPPABLE_QUESTIONS
+                .iter()
+                .find(|s| s.id == id)
+                .expect("in the registry");
+            for text in [q.prompt, q.help] {
+                let lower = text.to_ascii_lowercase();
+                for c in conclusions {
+                    assert!(
+                        !lower.contains(c),
+                        "{id:?} asks the filer to affirm a legal conclusion ({c:?}). The filer \
+                         attests to FACTS only; the conclusion is btctax's and belongs on Form 8275."
+                    );
+                }
+            }
+        }
+    }
+
+    /// ★★★ **G15 — OQ-5'S RULING, BOTH HALVES AT ONCE.**
+    ///
+    /// A filer in the dead end who answers the §4.1 dead-end question **YES** (they *can* supply a
+    /// name and address) — the protection-order filer's shape — must get **both** (a) the refusal,
+    /// i.e. the conjunction was not widened into a disjunction, **and** (b) a detail naming the
+    /// Taxpayer Advocate Service with its contacts.
+    ///
+    /// **Mutations:** delete the TAS paragraph from R-4's detail ⇒ red on (b). Add a disjunctive
+    /// second limb to §6.3's gate for this filer ⇒ red on (a).
+    ///
+    /// ★ The two halves are asserted in ONE test on ONE fixture deliberately: they are the two halves
+    /// of a single owner ruling (`92014cd1`), and splitting them lets a later edit satisfy one while
+    /// breaking the other.
+    ///
+    /// ★★ (b) is a PRESENCE assertion: it pins that the string is there, not that TAS will help.
+    #[test]
+    fn the_protection_order_filer_is_refused_and_told_about_tas() {
+        let empty = LedgerState::default();
+        let mut ri = f8615_with(Some(ParentAliveAnswer::CannotKnow));
+        // "I CAN give the IRS a name and address" — the leaf records the negation (see the accessor
+        // note on `HouseholdHeader::form8615_parent_identity_unobtainable`).
+        ri.header.form8615_parent_identity_unobtainable = Some(false);
+        let refusal = screen_compute_dependent(&ri, &empty, 2024, &ty2024_params())
+            .expect("(a) the filer is still REFUSED — the conjunction was not widened");
+        assert_eq!(refusal.reason, RefuseReason::Form8615ParentUnidentifiable);
+        for needle in [
+            "Taxpayer Advocate Service",
+            "TaxpayerAdvocate.IRS.gov/Contact-Us",
+            "877-777-4778",
+        ] {
+            assert!(
+                refusal.detail.contains(needle),
+                "(b) the refusal must name {needle:?} — the owner ruled \"just refer user for tas \
+                 and tell them good luck\", and this refusal's detail is the only text this filer \
+                 ever reads. A referral is NOT a path: no predicate moved and the filer is still \
+                 refused."
+            );
+        }
     }
 
     /// Wages (earned) do NOT count toward the kiddie unearned threshold — a working dependent with big

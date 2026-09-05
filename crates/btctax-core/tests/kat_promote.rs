@@ -2679,14 +2679,14 @@ fn disclosure_is_some_iff_a_promoted_leg_is_filed_this_year() {
     let events = promoted_disposal_events();
     let state = promoted_state();
     assert!(
-        disclosure_8275(&events, &state, 2024).is_some(),
+        disclosure_8275(&events, &state, 2024, None).is_some(),
         "a promoted disposal leg filed this year yields a disclosure"
     );
 
     let unpromoted = unpromoted_below_low_tranche();
     let unpromoted_state = project(&unpromoted, &prices(), &cfg());
     assert!(
-        disclosure_8275(&unpromoted, &unpromoted_state, 2024).is_none(),
+        disclosure_8275(&unpromoted, &unpromoted_state, 2024, None).is_none(),
         "an UNPROMOTED tranche (still filed at $0) takes no estimated position — nothing to disclose"
     );
 }
@@ -2700,8 +2700,8 @@ fn disclosure_is_some_iff_a_promoted_leg_is_filed_this_year() {
 fn disclosure_part_ii_carries_the_narrative_verbatim_and_is_complete() {
     let events = promoted_disposal_events();
     let state = promoted_state();
-    let d =
-        disclosure_8275(&events, &state, 2024).expect("a promoted disposal leg files this year");
+    let d = disclosure_8275(&events, &state, 2024, None)
+        .expect("a promoted disposal leg files this year");
     assert_eq!(
         d.part_ii, "cash P2P purchase, no records; window bounded on-chain",
         "Part II carries the fixture's OWN recorded narrative verbatim"
@@ -2719,7 +2719,7 @@ fn disclosure_part_ii_carries_the_narrative_verbatim_and_is_complete() {
 fn disclosure_copy_names_the_underpayment_penalty_base_never_safe_harbor() {
     let events = promoted_disposal_events();
     let state = promoted_state();
-    let d = disclosure_8275(&events, &state, 2024).unwrap();
+    let d = disclosure_8275(&events, &state, 2024, None).unwrap();
     let text = d.render();
     assert!(
         !text.to_lowercase().contains("safe harbor"),
@@ -2765,8 +2765,8 @@ fn promote_sold_below_floor_events() -> Vec<LedgerEvent> {
 fn a_clamped_leg_disclosure_adds_the_no_loss_sentence_and_files_the_clamped_amount() {
     let events = promote_sold_below_floor_events();
     let state = project(&events, &prices(), &cfg());
-    let d =
-        disclosure_8275(&events, &state, 2024).expect("a promoted disposal leg files this year");
+    let d = disclosure_8275(&events, &state, 2024, None)
+        .expect("a promoted disposal leg files this year");
     let text = d.render();
     assert!(
         text.contains("limited so as not to report a loss from the estimate"),
@@ -2820,8 +2820,8 @@ fn an_above_floor_promoted_sale_files_positive_gain_and_no_no_loss_suffix() {
     let leg = only_disposal_leg(&state);
     assert!(leg.gain > dec!(0), "sold above the floor ⇒ positive gain");
     assert_eq!(leg.basis, dec!(5_000), "the full floor is filed (no clamp)");
-    let d =
-        disclosure_8275(&events, &state, 2024).expect("a promoted disposal leg files this year");
+    let d = disclosure_8275(&events, &state, 2024, None)
+        .expect("a promoted disposal leg files this year");
     assert!(
         !d.part_i[0]
             .description
@@ -2845,7 +2845,7 @@ fn removal_donation_legs_are_absent_from_part_i() {
         datetime!(2024-06-01 00:00 UTC),
     );
     let state = project(&events, &prices(), &cfg());
-    let d = disclosure_8275(&events, &state, 2024);
+    let d = disclosure_8275(&events, &state, 2024, None);
     assert!(
         d.as_ref()
             .is_none_or(|d| d.part_i.iter().all(|i| i.form == "8949")),
@@ -2859,7 +2859,7 @@ fn removal_donation_legs_are_absent_from_part_i() {
 fn printed_8275_rounds_part_i_amounts_to_whole_dollars() {
     let events = promoted_disposal_events();
     let state = promoted_state();
-    let mut d = disclosure_8275(&events, &state, 2024).unwrap();
+    let mut d = disclosure_8275(&events, &state, 2024, None).unwrap();
     d.part_i[0].amount = dec!(12_000.50);
     let printed = btctax_core::tax::printed::printed_8275(&d);
     assert_eq!(

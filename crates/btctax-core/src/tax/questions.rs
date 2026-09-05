@@ -893,13 +893,40 @@ pub enum SkippableId {
     /// universal, exactly like [`Self::DonationsHadRestrictions`]; the MANDATORY half lives in
     /// `screen_absolute`, which has the ledger AND the computed §63(e) itemize election.
     CharitableCwaObtained,
+    /// ★★★ **Form 8615, condition 3** (FR-29) — *"You were either: a. Under age 18 …, b. Age 18 …
+    /// and didn't have earned income that was more than half of your support, or c. A full-time
+    /// student at least age 19 but under age 24 … and didn't have earned income that was more than
+    /// half of your support."* (`design/forms/extract/i1040gi--2025.txt:3932-3940`.)
+    ///
+    /// Class-(A) SEMANTICS in the class-(B) registry, deliberately (SPEC §3.1): condition 1 needs the
+    /// LEDGER, which `live` cannot see, so a class-(A) declaration would either refuse every DOB-less
+    /// return or brick a crypto-only filer whose question is never offered. Liveness is broad; the
+    /// MANDATORY half is `screen_compute_dependent`, which can see what the input screen cannot.
+    Form8615Condition3AgeSupport,
+    /// ★★★ **Form 8615, condition 4** — *"At least one of your parents was alive at the end of
+    /// 2025."* (`i1040gi--2025.txt:3941-3942`.) The registry's ONLY
+    /// [`SkippableKind::Choice`]: *"I cannot know"* is a THIRD ANSWER, distinct from unanswered.
+    Form8615Condition4ParentAlive,
+    /// ★★★ **The SPEC §6.3 dead-end FACT** — *"Can you give the IRS your parent's name and address?"*
+    /// Live ONLY once condition 4 is answered `CannotKnow`, so the certification is unreachable until
+    /// the filer has testified to the dead end. A general opt-out would rebuild FR-29 behind a nicer
+    /// interface.
+    ///
+    /// ★★ **This is the registry's only POLARITY-INVERTING entry**: the prompt asks what the filer
+    /// CAN do and the leaf records what they cannot, so `get_bool`/`set_bool` carry a `!`.
+    Form8615ParentIdentityUnobtainable,
 }
 
-/// The value shape of a [`SkippableQuestion`] — a yes/no answer, or a calendar date.
+/// The value shape of a [`SkippableQuestion`] — a yes/no answer, a calendar date, or a fixed set of
+/// named answers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SkippableKind {
     YesNo,
     Date,
+    /// ★ A fixed set of named answers, for a question whose third answer is not "unanswered". The
+    /// only member today is Form 8615's condition 4
+    /// ([`crate::tax::return_inputs::ParentAliveAnswer`]).
+    Choice(&'static [&'static str]),
 }
 
 /// A SKIPPABLE prompt (§2.2, class B). The same fn-pointer shape as [`FormQuestion`], but silence is a
@@ -931,6 +958,12 @@ pub struct SkippableQuestion {
     pub get_date: fn(&ReturnInputs) -> Option<Date>,
     /// Record a date (a no-op for the `YesNo` kinds, or when the target row is absent).
     pub set_date: fn(&mut ReturnInputs, Date),
+    /// The named answer on file (`None` for every kind but [`SkippableKind::Choice`], and `None` on a
+    /// `Choice` question the filer has not answered).
+    pub get_choice: fn(&ReturnInputs) -> Option<&'static str>,
+    /// Record a named answer (a no-op for every kind but [`SkippableKind::Choice`], and a no-op on a
+    /// string outside that kind's option list — the caller parses, this only stores).
+    pub set_choice: fn(&mut ReturnInputs, &'static str),
 }
 
 /// ★ THE SKIPPABLE REGISTRY. Thirteen prompts — SEPARATE from [`FORM_QUESTIONS`] (spec §5.3). The
@@ -961,6 +994,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
         live: |_ri| true,
         get_bool: |ri| ri.header.taxpayer.blind,
         set_bool: |ri, v| ri.header.taxpayer.blind = Some(v),
+        get_choice: |_ri| None,
+        set_choice: |_ri, _v| {},
         get_date: |_ri| None,
         set_date: |_ri, _v| {},
     },
@@ -979,6 +1014,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
                 sp.blind = Some(v);
             }
         },
+        get_choice: |_ri| None,
+        set_choice: |_ri, _v| {},
         get_date: |_ri| None,
         set_date: |_ri, _v| {},
     },
@@ -997,6 +1034,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
                 a.salt_use_sales_tax = Some(v);
             }
         },
+        get_choice: |_ri| None,
+        set_choice: |_ri, _v| {},
         get_date: |_ri| None,
         set_date: |_ri, _v| {},
     },
@@ -1013,6 +1052,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
         live: |_ri| true,
         get_bool: |_ri| None,
         set_bool: |_ri, _v| {},
+        get_choice: |_ri| None,
+        set_choice: |_ri, _v| {},
         get_date: |ri| ri.header.taxpayer.date_of_birth,
         set_date: |ri, v| ri.header.taxpayer.date_of_birth = Some(v),
     },
@@ -1029,6 +1070,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
         live: |ri| ri.header.spouse.is_some(),
         get_bool: |_ri| None,
         set_bool: |_ri, _v| {},
+        get_choice: |_ri| None,
+        set_choice: |_ri, _v| {},
         get_date: |ri| ri.header.spouse.as_ref().and_then(|s| s.date_of_birth),
         set_date: |ri, v| {
             if let Some(sp) = ri.header.spouse.as_mut() {
@@ -1049,6 +1092,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
         live: |ri| ri.header.taxpayer_died_during_year == Some(true),
         get_bool: |_ri| None,
         set_bool: |_ri, _v| {},
+        get_choice: |_ri| None,
+        set_choice: |_ri, _v| {},
         get_date: |ri| ri.header.taxpayer.date_of_death,
         set_date: |ri, v| ri.header.taxpayer.date_of_death = Some(v),
     },
@@ -1068,6 +1113,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
         live: |ri| spouse_63f_boxes_count(ri) && ri.header.spouse_died_during_year == Some(true),
         get_bool: |_ri| None,
         set_bool: |_ri, _v| {},
+        get_choice: |_ri| None,
+        set_choice: |_ri, _v| {},
         get_date: |ri| ri.header.spouse.as_ref().and_then(|s| s.date_of_death),
         set_date: |ri, v| {
             if let Some(sp) = ri.header.spouse.as_mut() {
@@ -1095,6 +1142,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
         live: |ri| ri.foreign_accounts == Some(true),
         get_bool: |ri| ri.fbar_filing_required,
         set_bool: |ri, v| ri.fbar_filing_required = Some(v),
+        get_choice: |_ri| None,
+        set_choice: |_ri, _v| {},
         get_date: |_ri| None,
         set_date: |_ri, _v| {},
     },
@@ -1128,6 +1177,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
         live: |_ri| true,
         get_bool: |ri| ri.header.taxpayer_died_during_year,
         set_bool: |ri, v| ri.header.taxpayer_died_during_year = Some(v),
+        get_choice: |_ri| None,
+        set_choice: |_ri, _v| {},
         get_date: |_ri| None,
         set_date: |_ri, _v| {},
     },
@@ -1146,6 +1197,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
         live: spouse_63f_boxes_count,
         get_bool: |ri| ri.header.spouse_died_during_year,
         set_bool: |ri, v| ri.header.spouse_died_during_year = Some(v),
+        get_choice: |_ri| None,
+        set_choice: |_ri, _v| {},
         get_date: |_ri| None,
         set_date: |_ri, _v| {},
     },
@@ -1172,6 +1225,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
                 c.payments_requiring_1099 = Some(v);
             }
         },
+        get_choice: |_ri| None,
+        set_choice: |_ri, _v| {},
         get_date: |_ri| None,
         set_date: |_ri, _v| {},
     },
@@ -1194,6 +1249,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
                 c.will_file_required_1099 = Some(v);
             }
         },
+        get_choice: |_ri| None,
+        set_choice: |_ri, _v| {},
         get_date: |_ri| None,
         set_date: |_ri, _v| {},
     },
@@ -1223,6 +1280,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
         live: |_ri| true,
         get_bool: |ri| ri.donations_had_restrictions,
         set_bool: |ri, v| ri.donations_had_restrictions = Some(v),
+        get_choice: |_ri| None,
+        set_choice: |_ri, _v| {},
         get_date: |_ri| None,
         set_date: |_ri, _v| {},
     },
@@ -1258,6 +1317,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
                 c.is_sstb = Some(v);
             }
         },
+        get_choice: |_ri| None,
+        set_choice: |_ri, _v| {},
         get_date: |_ri| None,
         set_date: |_ri, _v| {},
     },
@@ -1286,6 +1347,8 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
                 c.is_cooperative_patron = Some(v);
             }
         },
+        get_choice: |_ri| None,
+        set_choice: |_ri, _v| {},
         get_date: |_ri| None,
         set_date: |_ri, _v| {},
     },
@@ -1343,10 +1406,204 @@ pub const SKIPPABLE_QUESTIONS: &[SkippableQuestion] = &[
         live: |_ri| true,
         get_bool: |ri| ri.charitable_cwa_obtained,
         set_bool: |ri, v| ri.charitable_cwa_obtained = Some(v),
+        get_choice: |_ri| None,
+        set_choice: |_ri, _v| {},
+        get_date: |_ri| None,
+        set_date: |_ri, _v| {},
+    },
+    // ★★★ FR-29 — Form 8615's condition 3. **Index 16; APPENDED at the END, and the reason is that
+    //     the array-index hazard is REAL here, not that it isn't.** `skippable_tristate!`
+    //     (`btctax-input-form/src/spec/registries.rs`) reads `SKIPPABLE_QUESTIONS[$idx]` for its
+    //     `label`, `help`, `live`, `get` AND `set` while taking its `id` from a separate argument, and
+    //     the call sites pass LITERAL indices — so a mid-array insert repoints every later entry's
+    //     prompt, liveness and accessors. It is not silent (the delegation loop reads back through the
+    //     `Field`), but it is not free either.
+    SkippableQuestion {
+        id: SkippableId::Form8615Condition3AgeSupport,
+        // ★ §G-15 — PER-YEAR: age and support both change between years.
+        durability: Durability::PerYear,
+        // ★ Year-free, because `prompt` is `&'static str`. The four departures from
+        //   `i1040gi--2025.txt:3932-3940` are deliberate and enumerated in SPEC §4.1: the year
+        //   qualifier is generalised and hoisted, four clause openings are recased by the hoist and
+        //   the interrogative, and one sentence is appended because the form states the disjunction
+        //   STRUCTURALLY ("You were either:") and a flat prompt cannot.
+        prompt: "Form 8615, condition 3 — at the end of the tax year, were you either: (a) under age 18, \
+                 (b) age 18 and didn’t have earned income that was more than half of your support, or \
+                 (c) a full-time student at least age 19 but under age 24 and didn’t have earned income \
+                 that was more than half of your support? Answer YES if any one of (a), (b) or (c) is \
+                 true.",
+        // ★★ The definitions come from i8615, which writes them FOR THIS FORM — not from Chart B,
+        //    whose own scope line is the filing-requirement test and which counts scholarships the
+        //    opposite way. Both remaining simplifications push toward answering YES — toward refusal,
+        //    never away from it (`the_condition_three_help_never_narrows_the_support_test`).
+        help: "Form 8615 taxes part of a child's unearned income at the parent's rate (§1(g)). The \
+               Instructions for Form 8615 say: \"These rules apply whether or not the child is a \
+               dependent.\" Being nobody's dependent, or supporting yourself, does not put you outside \
+               them. Skipping is harmless if your unearned income is at or below the §1(g) threshold \
+               for the year, or if btctax can already see from your date of birth that you were 24 or \
+               older at the end of the year — condition 3 cannot be true at 24. Where it does matter, \
+               btctax refuses rather than answer for you: §1(g)(1) takes the GREATER of your own rate \
+               and the parent's-rate figure, so a wrong \"no\" can only understate your tax.\n\
+               Your SUPPORT is all amounts spent to provide you with food, lodging, clothing, \
+               education, medical and dental care, recreation, transportation, and similar necessities, \
+               counted from every source — you, your parents and anyone else. A scholarship you \
+               received is not counted as support if you are a full-time student.\n\
+               EARNED INCOME is wages, tips, and other payments received for personal services \
+               performed. If you are a sole proprietor or a partner it can also include a reasonable \
+               allowance for your personal services, capped at 30% of your share of the net profits; \
+               and it includes any taxable distribution from a qualified disability trust. Income from \
+               investments, crypto or a trust is not earned income. The test is whether your EARNED \
+               income covered more than half of your support.",
+        kind: SkippableKind::YesNo,
+        // ★ `!= Mfj` is condition 5, computed. `!provably_24_or_older` is the computed half of
+        //   condition 3 — which is what keeps the interview from asking a 60-year-old about full-time
+        //   student status. **Condition 1 is deliberately NOT here** (it needs the ledger, SPEC §3.1),
+        //   so the live set is a strict SUPERSET of the demanded set.
+        live: |ri| {
+            ri.filing_status != FilingStatus::Mfj
+                && !crate::tax::return_1040::provably_24_or_older(ri, ri.tax_year)
+        },
+        get_bool: |ri| ri.header.form8615_condition3_age_support,
+        set_bool: |ri, v| ri.header.form8615_condition3_age_support = Some(v),
+        get_choice: |_ri| None,
+        set_choice: |_ri, _v| {},
+        get_date: |_ri| None,
+        set_date: |_ri, _v| {},
+    },
+    // ★★★ FR-29 — Form 8615's condition 4. Index 17, and the registry's ONLY `Choice`.
+    SkippableQuestion {
+        id: SkippableId::Form8615Condition4ParentAlive,
+        // ★ §G-15 — PER-YEAR: a parent's survival, and what the filer can find out about it, both
+        //   change between years.
+        durability: Durability::PerYear,
+        // ★★ DECLARATIVE, not interrogative: the form's own words "at least one of your parents was
+        //    alive" survive only in the declarative, and a three-answer question fits a proposition
+        //    better than an inverted verb anyway.
+        prompt: "Form 8615, condition 4 — is this true of you: \"at least one of your parents was alive \
+                 at the end of the tax year\"? Answer YES, NO, or CANNOT KNOW. Choose CANNOT KNOW only \
+                 if you are unable to find out — for example, you do not know who your parents are.",
+        help: "Form 8615's condition 4. It is one of five conditions, all of which must hold before \
+               Form 8615 is required; btctax asks it only after you answered YES to condition 3, \
+               because that is the order the form asks them in. Skipping is harmless if condition 3 is \
+               \"no\", or if your unearned income is at or below the §1(g) threshold for the year; \
+               otherwise btctax refuses rather than answer for you.\n\
+               If neither of your parents was living at the end of the year, answer NO — these rules do \
+               not apply to you. If you cannot find out because you do not know who your parents are, \
+               answer CANNOT KNOW: that is a different answer from leaving this blank, and btctax will \
+               then ask you one further question and explain what it can and cannot do.",
+        kind: SkippableKind::Choice(PARENT_ALIVE_CHOICES),
+        // ★ Additionally requires condition 3 not to be a definite "no". `None` keeps it live, so both
+        //   are offered together on a first run rather than one per pass.
+        live: |ri| {
+            ri.filing_status != FilingStatus::Mfj
+                && !crate::tax::return_1040::provably_24_or_older(ri, ri.tax_year)
+                && ri.header.form8615_condition3_age_support != Some(false)
+        },
+        get_bool: |_ri| None,
+        set_bool: |_ri, _v| {},
+        get_choice: |ri| {
+            ri.header
+                .form8615_condition4_parent_alive
+                .map(parent_alive_token)
+        },
+        set_choice: |ri, v| {
+            // ★ An unlisted string is a NO-OP, never an answer: the caller parses, this only stores.
+            if let Some(a) = parent_alive_from_token(v) {
+                ri.header.form8615_condition4_parent_alive = Some(a);
+            }
+        },
+        get_date: |_ri| None,
+        set_date: |_ri, _v| {},
+    },
+    // ★★★ FR-29 — the SPEC §6.3 dead-end FACT. Index 18.
+    SkippableQuestion {
+        id: SkippableId::Form8615ParentIdentityUnobtainable,
+        // ★ §G-15 — PER-YEAR, and here it is more than bookkeeping: an attested dead end is testimony
+        //   about ONE tax year, and carrying it forward silently would re-file last year's
+        //   certification without asking.
+        durability: Durability::PerYear,
+        // ★ Phrased in the POSITIVE — *can you* — and the certification unlocks on NO. It asks the
+        //   filer what they CAN do, which is a fact they can answer without reading anything into it,
+        //   rather than inviting them to affirm a conclusion.
+        prompt: "Can you give the IRS your parent's name and address? Form 8615 asks for your parent's \
+                 name, social security number and filing status, and the only way to get those from the \
+                 IRS requires you to supply your parent's name and address. Answer YES if you can \
+                 supply both for either parent. Answer NO only if you can supply neither.",
+        help: "btctax asks this only because you said you cannot know whether a parent was alive. Form \
+               8615 cannot be completed without your parent's name, social security number and filing \
+               status (lines A, B and C), and the tax on it cannot be computed without your parent's \
+               taxable income. The IRS will send you that information if you ask — but the request must \
+               contain \"The name, address, social security number (SSN) (if known), and filing status \
+               (if known) of the parent whose information is to be shown on Form 8615\". The SSN and \
+               the filing status may be unknown. The name and the address may not.\n\
+               If you can supply a name and an address, answer YES: the route is open, and btctax will \
+               tell you to use it. If you can supply neither, answer NO, and btctax will attach a \
+               disclosure explaining why your return does not include Form 8615. Read that explanation \
+               before you file — it is not a ruling in your favour, and it is not free of risk.",
+        kind: SkippableKind::YesNo,
+        // ★★★ LIVE ONLY ON `Some(CannotKnow)` — this is the owner ruling's first constraint discharged
+        //     in the liveness predicate. A filer must FIRST testify that they cannot know before btctax
+        //     will even ask the second question. **A general opt-out would rebuild FR-29 behind a nicer
+        //     interface**, and the place that cannot happen is here: a question that is never live is
+        //     never asked and its `None` never clears anything. Unlike conditions 3 and 4 this depends
+        //     on another answer's EXACT value — `!= Some(Yes)` would make it live for an unanswered
+        //     condition 4, which is one keystroke from an opt-out.
+        live: |ri| {
+            ri.filing_status != FilingStatus::Mfj
+                && !crate::tax::return_1040::provably_24_or_older(ri, ri.tax_year)
+                && ri.header.form8615_condition3_age_support != Some(false)
+                && ri.header.form8615_condition4_parent_alive
+                    == Some(crate::tax::return_inputs::ParentAliveAnswer::CannotKnow)
+        },
+        // ★★★ **THE ONLY INVERTING PAIR IN THIS REGISTRY.** The argument and the return are ANSWERS TO
+        //     THE PROMPT ("can you supply a name and address?"), which is the negation of the leaf.
+        //     Both consumers hand the filer's own boolean straight to `set_bool` and render `get_bool`
+        //     straight back as the current answer, so the inversion has to live HERE. Written straight
+        //     through, a filer who answered YES — the one for whom the IRS route is open — would be
+        //     stored as `unobtainable = Some(true)`, reach ladder step 6's first arm and receive a
+        //     computed return with no Form 8615. That is FR-29 rebuilt inside the fix for FR-29, and
+        //     `the_certification_is_unreachable_without_the_dead_end`'s polarity row is what kills it.
+        get_bool: |ri| ri.header.form8615_parent_identity_unobtainable.map(|v| !v),
+        set_bool: |ri, can_supply| {
+            ri.header.form8615_parent_identity_unobtainable = Some(!can_supply);
+        },
+        get_choice: |_ri| None,
+        set_choice: |_ri, _v| {},
         get_date: |_ri| None,
         set_date: |_ri, _v| {},
     }
 ];
+
+/// The stable tokens [`SkippableId::Form8615Condition4ParentAlive`] stores and a renderer presents —
+/// the `ParentAliveAnswer` variant names, which is what serde writes into a vault.
+///
+/// ★ ONE definition, consumed by the registry entry's `kind`, by both accessors and by the input-form
+/// `FieldKind::Enum`, so a renderer's option list and the parser can never disagree.
+pub const PARENT_ALIVE_CHOICES: &[&str] = &["Yes", "No", "CannotKnow"];
+
+/// [`crate::tax::return_inputs::ParentAliveAnswer`] → its stable token.
+pub fn parent_alive_token(a: crate::tax::return_inputs::ParentAliveAnswer) -> &'static str {
+    use crate::tax::return_inputs::ParentAliveAnswer as P;
+    match a {
+        P::Yes => "Yes",
+        P::No => "No",
+        P::CannotKnow => "CannotKnow",
+    }
+}
+
+/// A stable token → its variant, or `None` for anything else.
+///
+/// ★ There is no fallback variant and no `#[serde(other)]`: an unknown string must fail rather than
+/// silently become an answer.
+pub fn parent_alive_from_token(t: &str) -> Option<crate::tax::return_inputs::ParentAliveAnswer> {
+    use crate::tax::return_inputs::ParentAliveAnswer as P;
+    match t {
+        "Yes" => Some(P::Yes),
+        "No" => Some(P::No),
+        "CannotKnow" => Some(P::CannotKnow),
+        _ => None,
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -1487,13 +1744,14 @@ mod tests {
     }
 
     #[test]
-    fn skippable_registry_is_separate_and_has_five_entries_with_correct_liveness() {
+    fn the_skippable_registry_is_separate_and_has_nineteen_entries_with_correct_liveness() {
         use crate::tax::types::FilingStatus;
         assert_eq!(
             SKIPPABLE_QUESTIONS.len(),
-            16,
+            19,
             "blind ×2, SALT, DOB ×2, DOD ×2, FBAR, the §G-9 death pair, Schedule C I/J, 8283 5a/5b/5c, \
-             8995-A SSTB + patron, §170(f)(8) CWA"
+             8995-A SSTB + patron, §170(f)(8) CWA, and FR-29's Form 8615 trio (condition 3, condition 4 \
+             and the §6.3 dead-end fact)"
         );
         // SALT is live iff a schedule_a exists; spouse-blind iff a spouse Person exists.
         let salt = SKIPPABLE_QUESTIONS

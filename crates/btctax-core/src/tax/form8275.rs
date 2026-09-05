@@ -48,9 +48,21 @@ const RISK_PARAGRAPH: &str = "Penalty exposure — if an exam determines a diffe
      against the \u{00a7}6662(e)/(h) valuation-misstatement penalty (Woods v. Commissioner); for \
      charitable-deduction property, \u{00a7}6664(c)(2) removes the reasonable-cause defense.";
 
-/// One Part I line item: a position taken on a filed form that rests on the estimate.
+/// One Part I line item: a position taken on a filed form.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Part1Item {
+    /// **Column (a) — "Rev. rul., rev. proc., etc."** `i8275--2024.txt:352-354`: *"If you are
+    /// disclosing a position contrary to a rule (such as a statutory provision or IRS revenue ruling),
+    /// you must identify the rule in column (a)."*
+    ///
+    /// ★ `None` for a promoted-basis leg, and that is not an omission: a Cohan estimate is a
+    /// *valuation* position, contrary to no named rule. It is `Some("IRC section 1(g)")` for the
+    /// FR-29 no-path position, which IS contrary to a statutory provision.
+    pub rule: Option<String>,
+    /// **Column (b) — "Item or group of items"** (`i8275--2024.txt:355`: *"Identify the item by
+    /// name."*). `None` for a promoted-basis leg, whose identity is column (c)'s description plus the
+    /// form/line in (d)/(e).
+    pub item_name: Option<String>,
     /// The filed form this position is taken on — always `"8949"` here (BG-D11: a removal leg never
     /// contributes a Part I item; see module doc).
     pub form: String,
@@ -109,6 +121,7 @@ pub fn disclosure_8275(
     events: &[LedgerEvent],
     state: &LedgerState,
     year: i32,
+    section_1g: Option<&Section1gPosition>,
 ) -> Option<Disclosure8275> {
     let mut part_i: Vec<Part1Item> = Vec::new();
     let mut targets: BTreeSet<EventId> = BTreeSet::new();
@@ -141,6 +154,10 @@ pub fn disclosure_8275(
             }
             .to_string();
             part_i.push(Part1Item {
+                // ★ A Cohan basis estimate is contrary to no NAMED rule, so columns (a) and (b) stay
+                //   blank — the position is identified by (c)/(d)/(e). See `Part1Item::rule`.
+                rule: None,
+                item_name: None,
                 form: "8949".to_string(),
                 line,
                 description,
@@ -148,20 +165,115 @@ pub fn disclosure_8275(
             });
         }
     }
-    if part_i.is_empty() {
-        return None;
-    }
-    let part_ii = targets
+    let mut part_ii = targets
         .iter()
         .filter_map(|t| part_ii_narrative_for(events, t))
         .collect::<Vec<_>>()
         .join("\n\n");
+    // ★★★ FR-29 / SPEC §6.3.3 — THE SECOND PART I ITEM SOURCE. A return that computes on the no-path
+    //     certification takes a position contrary to a STATUTE, and it must not file silently: an
+    //     undisclosed position here would be strictly worse than the refusal it replaced.
+    //
+    //     ★ Note what this changes about the `None` below: `disclosure_8275` used to return `None`
+    //       whenever `part_i` was empty, i.e. whenever no promoted disposal leg filed. A §1(g)-only
+    //       year has no promoted leg at all, so leaving that early return in place would have dropped
+    //       the disclosure entirely. It is now keyed on the WHOLE of Part I.
+    if let Some(pos) = section_1g {
+        part_i.push(section_1g_part_i(pos));
+        if !part_ii.trim().is_empty() {
+            part_ii.push_str("\n\n");
+        }
+        part_ii.push_str(&section_1g_part_ii(pos));
+    }
+    if part_i.is_empty() {
+        return None;
+    }
     let incomplete = part_ii.trim().is_empty();
     Some(Disclosure8275 {
         part_i,
         part_ii,
         incomplete,
     })
+}
+
+/// SPEC §6.3.3 — the facts a §1(g) no-path disclosure states. Built by
+/// [`crate::tax::return_1040::assemble_absolute`], which is the one place that holds both the §1(g)
+/// threshold and the ledger, so the disclosure and the gate cannot disagree about whether the position
+/// was taken.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Section1gPosition {
+    /// The filer's unearned income for the year (SPEC §5.2's component sum).
+    pub unearned: Usd,
+    /// The §1(g) threshold that year's params carry.
+    pub threshold: Usd,
+    /// **Form 1040 line 16 AS FILED** — the tax computed WITHOUT regard to §1(g). Part I column (f).
+    pub tax_line16: Usd,
+}
+
+/// SPEC §6.3.3 — Part I, one row, mapped to Form 8275's own columns
+/// (`design/forms/extract/i8275--2024.txt:352-374`).
+pub fn section_1g_part_i(pos: &Section1gPosition) -> Part1Item {
+    Part1Item {
+        rule: Some("IRC section 1(g)".to_string()),
+        item_name: Some("Tax on unearned income of a child — Form 8615 not filed".to_string()),
+        form: "1040".to_string(),
+        line: "16".to_string(),
+        description: "The taxpayer's tax was figured without regard to section 1(g). The taxpayer \
+             cannot identify either parent and therefore cannot supply the parent's name, SSN or \
+             filing status required by Form 8615 lines A, B and C, cannot obtain the parent's taxable \
+             income required by section 1(g)(3), and cannot make the request described in the \
+             Instructions for Form 8615 under \"Parent's return information unavailable\", which \
+             requires the parent's name and address."
+            .to_string(),
+        // ★ Column (f) is the amount AS FILED — the tax on Form 1040 line 16 computed WITHOUT §1(g),
+        //   which is exactly the position being disclosed. Never a hypothetical §1(g) figure: btctax
+        //   cannot compute one, and disclosing a number the return does not carry would recreate the
+        //   examiner mismatch an 8275 exists to prevent.
+        amount: pos.tax_line16,
+    }
+}
+
+/// SPEC §6.3.3 — Part II, three paragraphs in this order.
+///
+/// `i8275--2024.txt:378-388` requires Part II to *"include information that can reasonably be expected
+/// to apprise the IRS of the identity of the item, its amount, and the nature of the controversy or
+/// potential controversy"*, and says it *"can include a description of the legal issues presented by
+/// the facts"*.
+///
+/// ★★★ **The IMPOSSIBILITY argument LEADS**, per the owner ruling: the predicate cannot be established,
+/// and the government's own remedy excludes the filer by its own required contents. That is materially
+/// stronger than a constitutional one. **No constitutional argument appears anywhere in this
+/// disclosure, and none may be added** — the ruling records that the controller is aware of NO authority
+/// holding §1(g) invalid as applied here, and a disclosure that led with a constitutional theory would
+/// be weaker, not stronger.
+///
+/// ★ Every sentence here is in BTCTAX's voice, never the filer's. The filer's own testimony is the two
+/// facts recited in paragraph 1; the legal CONCLUSION is btctax's, because a return is signed under
+/// §6065 and putting a conclusion in the filer's mouth would fabricate testimony.
+pub fn section_1g_part_ii(pos: &Section1gPosition) -> String {
+    let Section1gPosition {
+        unearned,
+        threshold,
+        ..
+    } = pos;
+    format!(
+        "Section 1(g) — tax on the unearned income of a child. The taxpayer states that they cannot \
+         identify either parent, and that they cannot supply either parent's name and address. The \
+         taxpayer's unearned income for the year was ${unearned}, above the section 1(g) threshold of \
+         ${threshold}.\n\n\
+         Form 8615 cannot be completed and section 1(g)(3) cannot be computed on these facts: lines A, \
+         B and C of Form 8615 require the parent's name, social security number and filing status, and \
+         the allocable parental tax is figured on the parent's taxable income. The sole administrative \
+         remedy the Internal Revenue Service provides for a child who cannot obtain the parent's \
+         information is a written request to the Service, and that remedy is unavailable to this \
+         taxpayer because its own required contents include the parent's name and address — the very \
+         facts the taxpayer lacks. The social security number and the filing status are expressly \
+         qualified \"(if known)\"; the name and the address are not. Section 1(g) is therefore not \
+         established on this return.\n\n\
+         The return reports all of the taxpayer's income. The position is limited to the RATE at which \
+         the unearned portion is taxed; no exclusion, deduction or credit is claimed on account of it. \
+         The taxpayer will complete Form 8615 if the parent's information later becomes available."
+    )
 }
 
 impl Disclosure8275 {

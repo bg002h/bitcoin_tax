@@ -1590,6 +1590,8 @@ mod tests {
         use crate::tax::other_taxes::{Form8959, Form8960};
         let z = Usd::ZERO;
         AbsoluteReturn {
+            // FR-29 — this fixture is not on the §6.3 certification path.
+            form8615_certification: None,
             schedule_1a_additional: Usd::ZERO,
             excess_ss_not_creditable: Vec::new(),
             uses_8995a: false,

@@ -209,7 +209,9 @@ pub fn do_export(
     // does (cmd/admin.rs::export_snapshot). Self-gates on `disclosure_8275` — writes `form_8275.txt`
     // iff a promoted disposal leg files in `year`, nothing otherwise. The gate at the top of this fn
     // already guaranteed any promoted leg reaching here carries a complete Part II.
-    btctax_cli::render::write_form_8275_txt(&state.out_dir, &snap.state, &snap.events, year)?;
+    // ★ FR-29: `None` — this is the CSV export path (it mirrors `cmd/admin.rs::export_snapshot`) and
+    //   produces no Form 1040, so there is no line-16 position to disclose against.
+    btctax_cli::render::write_form_8275_txt(&state.out_dir, &snap.state, &snap.events, year, None)?;
 
     Ok(state.out_dir.clone())
 }

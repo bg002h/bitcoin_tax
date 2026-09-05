@@ -27,6 +27,7 @@ mod form_geometry;
 mod harness_check;
 mod label_reader;
 mod line_coverage_check;
+mod prompt_check;
 /// Half 1a of the Schedule 1-A conformance KAT — the 48 entry labels, adjudicated by `label_reader`'s
 /// two witnesses over the committed geometry and compared to `Schedule1A`'s own leaves.
 ///
@@ -60,6 +61,14 @@ fn main() {
         Some("authority-conflicts") => {
             if let Err(e) = authority_conflicts::run() {
                 eprintln!("xtask authority-conflicts: {e}");
+                std::process::exit(1);
+            }
+        }
+        // ★★★ FR-29 / SPEC §9 G7 — the Form 8615 prompts and help strings against the extracts they
+        //     are transcribed from, both directions. See `prompt_check`'s module doc.
+        Some("prompt-check") => {
+            if let Err(e) = prompt_check::run() {
+                eprintln!("xtask prompt-check: a prompt no longer matches the form:\n{e}");
                 std::process::exit(1);
             }
         }
@@ -198,7 +207,7 @@ fn main() {
         _ => {
             eprintln!(
                 "usage: cargo run -p xtask -- <docs [--pdf] | examples | subcommand-coverage | \
-                 check-isolation | line-coverage | cite-check | authority-conflicts | harness-check | archive-check | authority-manifest [--regen] | extract-geometry <stem> | label-census <stem> | label-proof <stem> | label-boxes <stem> | \
+                 check-isolation | line-coverage | cite-check | prompt-check | authority-conflicts | harness-check | archive-check | authority-manifest [--regen] | extract-geometry <stem> | label-census <stem> | label-proof <stem> | label-boxes <stem> | \
                  classify-path <path> | \
                  extract-schedule-1a | dump-fields <pdf>>"
             );

@@ -963,6 +963,12 @@ fn plant_full_return_ri(vault: &Path, year: i32) {
         ssn: "222-33-4444".into(),
         ..Default::default()
     };
+    // ★ FR-29 (SPEC §7) — an ADULT filer, so Form 8615's condition 3 is proved FALSE by arithmetic
+    //   and no answer is demanded. The calendar year must sit in `[year - 63, year - 24]`: below
+    //   `year - 24` the filer could be under 24 (condition 3 becomes UNKNOWN and the return refuses),
+    //   and at or before `year - 64` §63(f)'s aged standard deduction switches on and moves the
+    //   golden. 1980 is mid-band for 2024.
+    ri.header.taxpayer.date_of_birth = Some(time::macros::date!(1980 - 05 - 05));
     btctax_core::tax::testonly::answer_all_live_declarations(&mut ri);
     return_inputs::set(s.conn(), year, &ri).unwrap();
     s.save().unwrap();

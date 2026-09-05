@@ -16,7 +16,9 @@
 use crate::seam::{
     Field, FieldId, FieldKind, FieldValue, Section, SectionId, SectionKind, SetError,
 };
-use btctax_core::tax::questions::{QuestionId, SkippableId, FORM_QUESTIONS, SKIPPABLE_QUESTIONS};
+use btctax_core::tax::questions::{
+    QuestionId, SkippableId, FORM_QUESTIONS, PARENT_ALIVE_CHOICES, SKIPPABLE_QUESTIONS,
+};
 
 // ── The delegating-Field generators ──────────────────────────────────────────────────────────────────────
 // Each expands to a `Field` whose accessors are NON-CAPTURING closures (a `const` registry path + a literal
@@ -118,6 +120,52 @@ macro_rules! skippable_date {
                     return Err(SetError::WrongKind);
                 };
                 (SKIPPABLE_QUESTIONS[$idx].set_date)(ri, d);
+                Ok(())
+            },
+            clear: Some(|$ri, _| $clear),
+        }
+    };
+}
+
+/// A class-(B) `Choice` skippable → an `Enum` `Field` over `SKIPPABLE_QUESTIONS[$idx]`.
+///
+/// ★★★ FR-29 — the ONE question in this registry whose third answer is not "unanswered". `None` still
+/// means UNANSWERED (and still refuses); `Some("CannotKnow")` is an ANSWER that opens the SPEC §6.3
+/// dead-end path. The two must never collapse, so this macro carries no default and no fallback
+/// variant: `set_choice` is a no-op on a string outside the kind's option list, so an unlisted value
+/// cannot become an answer.
+macro_rules! skippable_choice {
+    ($idx:literal, $fid:expr, $options:expr, |$ri:ident| $clear:expr) => {
+        Field {
+            id: $fid,
+            label: SKIPPABLE_QUESTIONS[$idx].prompt,
+            help: SKIPPABLE_QUESTIONS[$idx].help,
+            kind: FieldKind::Enum($options),
+            live: SKIPPABLE_QUESTIONS[$idx].live,
+            // ★ A non-live question reads as `None` — absent, distinct from live-but-unanswered.
+            //   A live-but-unanswered `Choice` has no `FieldValue` to show either, because
+            //   `FieldValue::Choice` is a `String` with no "unanswered" inhabitant; the renderer
+            //   distinguishes the two by asking `live` (the same shape `Money` fields already have).
+            get: |ri, _| {
+                if !(SKIPPABLE_QUESTIONS[$idx].live)(ri) {
+                    return None;
+                }
+                (SKIPPABLE_QUESTIONS[$idx].get_choice)(ri)
+                    .map(|c| FieldValue::Choice(c.to_string()))
+            },
+            set: |ri, _, v| {
+                if !(SKIPPABLE_QUESTIONS[$idx].live)(ri) {
+                    return Err(SetError::NoSuchRow);
+                }
+                let FieldValue::Choice(c) = v else {
+                    return Err(SetError::WrongKind);
+                };
+                // ★ An unlisted string is `WrongKind`, never a silent no-op that reports `Ok` — the
+                //   caller must see that nothing was stored.
+                let Some(opt) = $options.iter().find(|o| **o == c.as_str()) else {
+                    return Err(SetError::WrongKind);
+                };
+                (SKIPPABLE_QUESTIONS[$idx].set_choice)(ri, opt);
                 Ok(())
             },
             clear: Some(|$ri, _| $clear),
@@ -356,6 +404,31 @@ const SKIPPABLE_FIELDS: &[Field] = &[
         ri.charitable_cwa_obtained = None;
         Ok(())
     }),
+    // ★★★ FR-29 — Form 8615's trio, indices 16–18, appended at the END for the array-index reason
+    //     stated above. `skippable_to_field` is exhaustive over `SkippableId`, so the three VARIANTS
+    //     are compile-forced; the three literal indices here are the one piece of this change's
+    //     bookkeeping the compiler cannot check, which is why the delegation test reads each `Field`
+    //     back through its registry entry.
+    skippable_tristate!(16, FieldId::Form8615Condition3AgeSupport, |ri| {
+        ri.header.form8615_condition3_age_support = None;
+        Ok(())
+    }),
+    skippable_choice!(
+        17,
+        FieldId::Form8615Condition4ParentAlive,
+        PARENT_ALIVE_CHOICES,
+        |ri| {
+            ri.header.form8615_condition4_parent_alive = None;
+            Ok(())
+        }
+    ),
+    // ★★★ The label asks "can you…?" and the leaf records "…unobtainable", so the registry entry's
+    //     accessors INVERT. Nothing here re-inverts them: this `Field` delegates, and a second `!`
+    //     anywhere on the path would cancel the first.
+    skippable_tristate!(18, FieldId::Form8615ParentIdentityUnobtainable, |ri| {
+        ri.header.form8615_parent_identity_unobtainable = None;
+        Ok(())
+    }),
 ];
 
 pub(crate) const SKIPPABLES: Section = Section {
@@ -448,6 +521,11 @@ pub fn field_to_skippable(id: FieldId) -> Option<SkippableId> {
         FieldId::CharitableCwaObtained => SkippableId::CharitableCwaObtained,
         FieldId::ScheduleCIsSstb => SkippableId::ScheduleCIsSstb,
         FieldId::ScheduleCIsCooperativePatron => SkippableId::ScheduleCIsCooperativePatron,
+        FieldId::Form8615Condition3AgeSupport => SkippableId::Form8615Condition3AgeSupport,
+        FieldId::Form8615Condition4ParentAlive => SkippableId::Form8615Condition4ParentAlive,
+        FieldId::Form8615ParentIdentityUnobtainable => {
+            SkippableId::Form8615ParentIdentityUnobtainable
+        }
         _ => return None,
     })
 }
@@ -472,5 +550,10 @@ pub fn skippable_to_field(id: SkippableId) -> FieldId {
         SkippableId::CharitableCwaObtained => FieldId::CharitableCwaObtained,
         SkippableId::ScheduleCIsSstb => FieldId::ScheduleCIsSstb,
         SkippableId::ScheduleCIsCooperativePatron => FieldId::ScheduleCIsCooperativePatron,
+        SkippableId::Form8615Condition3AgeSupport => FieldId::Form8615Condition3AgeSupport,
+        SkippableId::Form8615Condition4ParentAlive => FieldId::Form8615Condition4ParentAlive,
+        SkippableId::Form8615ParentIdentityUnobtainable => {
+            FieldId::Form8615ParentIdentityUnobtainable
+        }
     }
 }

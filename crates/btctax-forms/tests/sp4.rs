@@ -48,6 +48,9 @@ fn sample_printed() -> Printed8275 {
     Printed8275 {
         part_i: vec![
             Part1Item {
+                // FR-29: a promoted-basis leg is contrary to no NAMED rule, so (a)/(b) stay blank.
+                rule: None,
+                item_name: None,
                 form: "8949".into(),
                 line: "Part I \u{2014} column (e)".into(),
                 description:
@@ -57,6 +60,9 @@ fn sample_printed() -> Printed8275 {
                 amount: dec!(12345),
             },
             Part1Item {
+                // FR-29: a promoted-basis leg is contrary to no NAMED rule, so (a)/(b) stay blank.
+                rule: None,
+                item_name: None,
                 form: "8949".into(),
                 line: "Part II \u{2014} column (e)".into(),
                 description:
@@ -198,12 +204,18 @@ fn form_8275_lands_each_part_i_field_in_its_own_widget_no_swap() {
     let printed = Printed8275 {
         part_i: vec![
             Part1Item {
+                // FR-29: a promoted-basis leg is contrary to no NAMED rule, so (a)/(b) stay blank.
+                rule: None,
+                item_name: None,
                 form: "R1FORM".into(),
                 line: "R1ITEM".into(),
                 description: "R1DESC".into(),
                 amount: dec!(11111),
             },
             Part1Item {
+                // FR-29: a promoted-basis leg is contrary to no NAMED rule, so (a)/(b) stay blank.
+                rule: None,
+                item_name: None,
                 form: "R2FORM".into(),
                 line: "R2ITEM".into(),
                 description: "R2DESC".into(),
