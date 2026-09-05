@@ -45,8 +45,13 @@ fn ext_is_document(n: &str) -> bool {
         .any(|e| n.ends_with(e))
 }
 
-/// `f1040--2024.pdf`, `i1040gi--2024.pdf.txt`, `f8949.pdf`, `p550.pdf` — the IRS's own stem
+/// `f1040--2024.pdf`, `i1040gi--2024.pdf.txt`, `f8949--2025.pdf` — the IRS's own stem
 /// convention: `f`/`i`/`p` + at least three digits.
+///
+/// ★ Same standard as `human_readable_form` below: these must be files the repo actually HOLDS.
+/// `f8949.pdf` and `p550.pdf` used to be listed here and are in no tree — note that the `p`
+/// arm is still load-bearing for the *shape* (it matches `Pub525_…` style stems only via
+/// `irs_guidance`'s `PUB` prefix, not here), so it is kept, not pruned.
 fn irs_stem(name: &str) -> bool {
     if !ext_is_document(name) {
         return false;
@@ -80,10 +85,18 @@ fn irs_guidance(name: &str) -> bool {
         .any(|p| u.starts_with(p))
 }
 
-/// `Form_8949.pdf`, `Instructions_Schedule_D.pdf`, `Schedule_D_1040.pdf` — the human-readable
-/// convention `legal/primary-sources/` uses, which is exactly why shape-matching needs more than the
-/// IRS stem: the two archives name the SAME documents differently, and a detector that knew only one
+/// `Form_1099-DA.pdf`, `Instructions_1099-DA.pdf` — the human-readable convention
+/// `legal/primary-sources/` uses, which is exactly why shape-matching needs more than the IRS stem:
+/// the two archives name the SAME documents differently, and a detector that knew only one
 /// convention would see only one archive.
+///
+/// ★★ **These examples must be documents the repo actually HOLDS.** They used to read
+/// `Form_8949.pdf` / `Instructions_Schedule_D.pdf` / `Schedule_D_1040.pdf`, all three of which were
+/// deleted in the 2026-09-04 reconciliation — leaving the shape's own illustration pointing at
+/// nothing, in the instrument whose failure message is "the detector has gone blind".
+/// ★ `FR-23` schedules the two 1099-DA files for retirement too. When that lands, this shape has no
+/// subject left in the tree and the honest move is to retire the shape with it — NOT to leave a
+/// witness that only proves a string literal matches a string matcher.
 fn human_readable_form(name: &str) -> bool {
     if !ext_is_document(name) {
         return false;
@@ -113,7 +126,9 @@ pub const SHAPES: &[Shape] = &[
     Shape {
         name: "human-readable-form",
         matches: human_readable_form,
-        witness: "Form_8949.pdf",
+        // ★ Must be a file the repo still HOLDS — see the shape's doc comment. `Form_8949.pdf`
+        //   was the witness until 2026-09-04 deleted it.
+        witness: "Form_1099-DA.pdf",
     },
 ];
 
@@ -150,47 +165,62 @@ pub const KNOWN_ARCHIVES: &[(&str, &str)] = &[
     ),
     (
         "legal/primary-sources",
-        "Convention (B): 47 binaries COMMITTED (not gitignored), no manifest, no hashes, fetched by \
+        "Convention (B): 42 binaries COMMITTED (not gitignored), no manifest, no hashes, fetched by \
          legal/_scripts/. Holds the rungs design/forms lacks — 16 × 26 USC (rung 4, THE LAW) and \
          6 × 26 CFR (rung 3) — so it CANNOT simply be deleted.",
     ),
     (
         "legal/text",
-        "The TEXT LAYER of legal/primary-sources — 25 real extracts (pdftotext output, ~10 KB each), \
+        "The TEXT LAYER of legal/primary-sources — 20 real extracts (pdftotext output, ~10 KB each), \
          100% overlap, zero unique documents. Not a separate archive: it is (B)'s equivalent of \
          design/forms/extract/, kept in a parallel tree instead of beside its sources.",
     ),
 ];
 
-/// ★★★ **The date the four-archive duplication must be re-decided by.**
-///
-/// The ratchet stops a FIFTH archive; this stops the existing four from becoming permanent furniture.
-/// Past this date `the_archive_reconciliation_is_not_past_its_review_by` fails the suite — the same
-/// mechanism `AUTHORITY_CONFLICTS.md` uses, for the same reason: a known defect with no deadline is
-/// indistinguishable from a forgotten one.
-///
-/// Set 2026-08-13 (two weeks after the four were discovered on 2026-07-30). Reconciliation is step ③
-/// in `CONTINUITY.md` §0, i.e. the very next piece of work after this harness.
-///
-/// ## ★★★ RESET LOG — every extension, who decided it, and why
-///
-/// **The log exists because a date nobody records re-pushing is not a deadline, it is furniture.**
-/// The gate's whole claim is that the four archives cannot become permanent by inattention; a reset
-/// is a legitimate move, but an *unlogged* reset defeats it silently and the next reader cannot tell
-/// a considered deferral from a reflex. Two entries here is a decision; five is the gate being
-/// routed around, and that must be visible without reading git history.
-///
-/// | # | from | to | date | who | why |
-/// |---|---|---|---|---|---|
-/// | 1 | 2026-08-13 | 2026-08-28 | 2026-08-20 | owner | The gate fired as designed and blocked all commits (pre-commit runs `make check`). The owner deferred the reconciliation itself to a window when **model usage is expected to be more available** — the remaining work is two genuine decisions, not cleanup, and neither should ride along behind other work. Nothing about the duplication changed; only when it is decided. |
-///
-/// ★ What is still owed, unchanged: the **two** remaining duplicate groups (`DUPLICATE_SOURCE_GROUPS`
-/// = 7 across them). Group A — `design/forms/{year}/{f8275,i8275,f8283}` aliasing
-/// `design/forms/periodic/*` — is a question about whether year-indexed lookup may resolve through
-/// `periodic/`. Group B — `design/forms/2025/*` vs `legal/primary-sources/irs-forms/*` — is the
-/// genuine (A)/(B) overlap, and under the hybrid rule (B)'s copies are the redundant ones, so it is a
-/// DELETION decision about committed binaries, not a tidy-up.
-pub const ARCHIVE_RECONCILIATION_REVIEW_BY: &str = "2026-08-28";
+// ★★★ **RETIRED 2026-09-04 — `ARCHIVE_RECONCILIATION_REVIEW_BY` and its test are gone, because
+// their SUBJECT is gone.** This block is the record; it documents no item because there is no
+// longer an item to document.
+//
+// The constant carried a date by which the archive duplication had to be re-decided, and past it
+// `the_archive_reconciliation_is_not_past_its_review_by` failed the suite — the same mechanism
+// `AUTHORITY_CONFLICTS.md` uses, for the same reason: a known defect with no deadline is
+// indistinguishable from a forgotten one. Set 2026-08-13, reset twice, discharged 2026-09-04 when
+// both residual duplicate groups were resolved (`DUPLICATE_SOURCE_GROUPS` 7 → 0).
+//
+// ★★ **Why deleting it is not the mute the doc warned against.** The warning was against pushing
+// the DATE out while the duplication stood — converting a deadline into decoration. Here the
+// duplication was retired first, and the guard that replaces the date is strictly stronger:
+// `authority_manifest::duplicate_source_groups_may_only_shrink` is pinned at **0** and reds on any
+// duplicate the instant one appears, with no date for anyone to renew; `strays()` plus
+// `the_archive_count_may_only_shrink` still red on a new tree. A dated test whose subject no longer
+// exists is itself the decoration — so retiring it applies the rule rather than evading it.
+//
+// ★ The RESET LOG is kept verbatim below. Its whole point was visibility without reading git
+// history, and that is worth more now than it was while the gate was live: it is the only place the
+// two extensions, and the reason each was granted, can be read at a glance.
+//
+// ## ★★★ RESET LOG — every extension, who decided it, and why
+//
+// **The log exists because a date nobody records re-pushing is not a deadline, it is furniture.**
+// The gate's whole claim is that the four archives cannot become permanent by inattention; a reset
+// is a legitimate move, but an *unlogged* reset defeats it silently and the next reader cannot tell
+// a considered deferral from a reflex. Two entries here is a decision; five is the gate being
+// routed around, and that must be visible without reading git history.
+//
+// | # | from | to | date | who | why |
+// |---|---|---|---|---|---|
+// | 1 | 2026-08-13 | 2026-08-28 | 2026-08-20 | owner | The gate fired as designed and blocked all commits (pre-commit runs `make check`). The owner deferred the reconciliation itself to a window when **model usage is expected to be more available** — the remaining work is two genuine decisions, not cleanup, and neither should ride along behind other work. Nothing about the duplication changed; only when it is decided. |
+// | 2 | 2026-08-28 | 2026-09-11 | 2026-09-04 | owner | **DECIDED, not deferred — and the last entry.** Both residual groups resolve and the tickle retires with them. Group A: retire `design/forms/periodic/` — no code resolves through it, its notes name a text layer that does not exist (`extract/f8275.txt`), its `irs-pdf/` URLs are the moving ones, and the year directory already holds a revision it cannot (`extract/f8283--2024.txt` = Rev. 12-2023 vs `periodic/f8283.pdf` = Rev. 12-2025). Group B: delete (B)'s five `irs-forms/` form copies per the hybrid rule (forms are note+sha256 in (A)); the only reader of `legal/text/irs-forms/` is MANIFEST.json's own `extract` field, regenerated here, and its instruction extracts are `-layout` column-interleaved — the wrong text layer to transcribe from. What changed since #1: the window it waited for has arrived (nothing in flight since the 2026-08-30 push). This date is the EXECUTION deadline for landing that diff; when it lands, `DUPLICATE_SOURCE_GROUPS` is 0 and this constant, its test and the `run()` branch are deleted, leaving this table as the record. There is no #3. |
+//
+//
+// ★★ **ROW 2 IS DISCHARGED.** It is written in the future tense because it was written before the
+// work; everything it promised did happen, on 2026-09-04, four commits later and seven days
+// before its own deadline. Read it as the record of a decision taken, not a plan outstanding.
+//
+// ★ What the two extensions bought, settled: Group A retired `design/forms/periodic/`; Group B
+// deleted (B)'s five `irs-forms/` form copies (905,833 bytes) per the hybrid rule. The full
+// reasoning, and the shape that will legitimately red the pin one day, is on
+// `authority_manifest::DUPLICATE_SOURCE_GROUPS`.
 
 /// Trees that legitimately hold form-shaped files that are **not** an archive.
 pub const NOT_AN_ARCHIVE: &[(&str, &str)] = &[
@@ -315,32 +345,22 @@ pub fn report(strays: &[Stray]) -> String {
 
 /// `cargo run -p xtask -- archive-check`
 ///
-/// Reports both halves of the gate: **no NEW archive** (the ratchet) and **the existing four are not
-/// past their review-by** (the tickle). The second is what stops "recorded" from quietly meaning
-/// "permanent".
+/// Reports the ratchet: **no NEW archive**. The tickle that once formed its second half was retired
+/// 2026-09-04 with its subject — duplicates are now pinned at 0 by `authority-manifest`, which reds
+/// on any duplicate immediately rather than on a date somebody must renew.
 pub fn run() -> Result<(), String> {
     let found = strays(&repo_root());
     if !found.is_empty() {
         return Err(report(&found));
     }
 
-    let now = crate::authority_conflicts::today();
-    let overdue = ARCHIVE_RECONCILIATION_REVIEW_BY < now.as_str();
     println!(
         "archive-check: no primary source outside the {} accounted-for tree(s)\n\
-         archive-check: {} archive(s) pending reconciliation (CONTINUITY.md §0 step ③), \
-         review-by {ARCHIVE_RECONCILIATION_REVIEW_BY}{}",
+         archive-check: {} accounted-for archive(s) — hybrid, decided 2026-07-30; duplicates \
+         reconciled 2026-09-04 and pinned at 0 by `authority-manifest`",
         KNOWN_ARCHIVES.len() + NOT_AN_ARCHIVE.len(),
         KNOWN_ARCHIVES.len(),
-        if overdue { "  ** OVERDUE **" } else { "" }
     );
-    if overdue {
-        return Err(format!(
-            "the four-archive reconciliation is PAST its review-by \
-             ({ARCHIVE_RECONCILIATION_REVIEW_BY}, today {now}). Re-decide it — retire a tree, or set \
-             a new date with a reason. Do NOT simply push the date out."
-        ));
-    }
     Ok(())
 }
 
@@ -480,37 +500,6 @@ mod tests {
         }
     }
 
-    /// ★★★ **THE TICKLE — the answer to "does the ratchet neuter the gate?"**
-    ///
-    /// It partly does, and this is the part that puts the pressure back. `design/HARNESS.md` r1 said
-    /// this check should stand RED until the archives were reconciled. Turning it green behind a
-    /// ratchet keeps a **new** archive impossible — proven, a fifth one reds `strays()` and the Write
-    /// hook denies it — but it removes all pressure on the **four that already exist**, and a recorded
-    /// defect with no deadline is how step ③ sits untouched for a month.
-    ///
-    /// So the duplication carries a **date**, on the same mechanism `AUTHORITY_CONFLICTS.md` uses for
-    /// a believed statute/reg disagreement: past `review-by`, **the suite fails**. Neglecting the
-    /// reconciliation stays a legitimate choice — it is real work and the owner may have better uses
-    /// for the time — but it must be *a choice*, dated and revisited, never an omission nobody made.
-    ///
-    /// ★ **Do not simply push the date out.** That converts the tickle into the decoration it exists
-    /// to prevent. Re-decide, and record what changed.
-    #[test]
-    fn the_archive_reconciliation_is_not_past_its_review_by() {
-        let now = crate::authority_conflicts::today();
-        assert!(
-            ARCHIVE_RECONCILIATION_REVIEW_BY >= now.as_str(),
-            "The four-archive reconciliation (CONTINUITY.md §0 step ③) is PAST its review-by \
-             ({ARCHIVE_RECONCILIATION_REVIEW_BY}, today {now}).\n\n{}\n\
-             Re-decide it: retire a tree, or set a new date WITH a reason. The whole value of the \
-             date is that it is not silently extended.",
-            KNOWN_ARCHIVES
-                .iter()
-                .map(|(t, w)| format!("    {t}/ — {w}\n"))
-                .collect::<String>()
-        );
-    }
-
     /// ★★ **The duplication is RECORDED, not forgotten — and the recorded number is MEASURED.**
     ///
     /// **THREE** archives is the post-reconciliation state (A `design/forms/` + B
@@ -529,6 +518,13 @@ mod tests {
     /// two siblings (`the_two_lists_partition_every_form`, the duplicate-group pin) already do.
     #[test]
     fn the_archive_count_may_only_shrink() {
+        // ★ Two assertions here, versus the single one in
+        //   `authority_manifest::duplicate_source_groups_may_only_shrink`. Both are deliberate and
+        //   the difference is the PIN, not taste: this one pins 3, where a rise and a fall are both
+        //   representable, so the pair buys two tailored messages at no cost in vacuity. That one
+        //   pins 0, where `usize` makes a fall unrepresentable — so a `<=` half there is
+        //   always-true and was removed as dead weight. Read them together; neither is the "right"
+        //   convention on its own.
         assert!(
             KNOWN_ARCHIVES.len() <= 3,
             "KNOWN_ARCHIVES has grown to {} — a NEW archive is exactly what A3 exists to prevent. \

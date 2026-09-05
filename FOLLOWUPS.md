@@ -1294,7 +1294,10 @@ the filer never sees how much is left. `live_questions` already enumerates; noth
 > edition) and follows the documented pattern in `design/forms/README.md`:
 >
 > ```sh
-> curl -sSL -o design/forms/periodic/f8275r.pdf https://www.irs.gov/pub/irs-pdf/f8275r.pdf
+> # ★ The MOVING url, deliberately: irs-prior/f8275r--2025.pdf is 404 and irs-pdf/f8275r.pdf is
+> #   200 (checked 2026-09-04). That is case 3 of design/forms/README.md's sourcing order, so
+> #   the note must record that this URL is not year-pinned.
+> curl -sSL -o design/forms/2025/f8275r--2025.pdf https://www.irs.gov/pub/irs-pdf/f8275r.pdf
 > # then the same for the instructions if they are separate, and:
 > cargo run -p xtask -- forms extract      # writes the committed text layer
 > ```
@@ -5577,3 +5580,82 @@ reviews ran on the branch; two are persisted verbatim in `reviews/filing-readine
   therefore have looked like a second oracle corroborating btctax's own wrong zero. That document
   carries the binding protocol, including that the kill-test **must** run at row position 0 or it
   passes with the fix removed.
+
+### From the 2026-09-04 archive reconciliation (`chore/archive-reconciliation`)
+
+The reconciliation closed the two duplicate groups and retired the dated tickle with them
+(`DUPLICATE_SOURCE_GROUPS` 7 → 0). The residue below is **not** duplication, so the pin at 0 cannot
+see it, and it lost the tickle's dated pressure when the tickle went. Filed here so it does not
+become furniture — which is precisely what the tickle existed to prevent.
+
+- **FR-23 — `Form_1099-DA.pdf` and `Instructions_1099-DA.pdf` are still COMMITTED binaries in (B),**
+  contrary to the hybrid storage rule that a *form* lives in (A) as note+sha256. They survived the
+  2026-09-04 deletion only because they are not duplicated — no (A) copy exists to fall back on.
+  The fix is to archive them under `design/forms/{TY}/` as notes with a committed text layer, then
+  delete the binaries. **Owning phase: whenever 1099-DA reporting is next touched.** Not urgent —
+  they are correctly hashed in `legal/SHA256SUMS` and cited in `legal/SOURCES.md`.
+- **FR-24 — `design/forms/extract/f8283--2024.txt` has no manifest subject.** Its source is the
+  *bundled runtime asset* (`crates/btctax-forms/forms/2024/f8283.pdf`, Rev. 12-2023), not an
+  archived authority, so `authority-manifest` lists no entry it belongs to. That is arguably right —
+  a runtime asset is not an authority — but it means one committed extract is provenance-orphaned,
+  and the two Form 8283 revisions in this repo (Rev. 12-2023 bundled, Rev. 12-2025 archived) are a
+  standing trap for anyone transcribing. **Owning phase: the next Form 8283 change.**
+- **FR-25 — nothing asserts the committed `MANIFEST.json` still matches a fresh `--regen`,** and
+  that gap actively hid a defect. `design/forms/2024/f1040s1--2024.pdf.txt` held the PDF's extracted
+  TEXT instead of a provenance note from `4fe5ce4b` until 2026-09-04 — but the committed manifest
+  still carried the URL harvested *before* the corruption, so `url_coverage_may_only_improve` saw a
+  populated `url` field and passed. The blank appeared only on the next regen, i.e. the checker was
+  reading the stale artifact rather than the source of truth.
+  **Reproduction:** overwrite any `*.pdf.txt` note with arbitrary text, run `make check` → green;
+  then `cargo run -p xtask -- authority-manifest --regen` → the entry's `url` blanks and
+  `url_coverage_may_only_improve` reds.
+  ★★★ **RE-SCOPED 2026-09-04 by the B3 review — as first filed this was pointed the WRONG WAY, and
+  its proposed fix was a trap.** It named the hazard as *staleness* (the committed manifest drifting
+  behind a regen). The live hazard is the **opposite**: a fresh `--regen` DESTROYS the committed
+  manifest. `collect_sources` walks the filesystem for binaries, and the 60 (A) PDFs are gitignored,
+  so on a fresh clone or in CI they are not collected. Measured: with them absent, `--regen` rewrote
+  `MANIFEST.json` **102 → 42 entries** while `cargo nextest run -p xtask` passed 66/66,
+  `authority-manifest` printed *"OK — every entry resolves and every source is listed"* and
+  `archive-check` was green. The only thing that had ever caught it was accidental — a pin of 7
+  reddening on a 0-duplicate manifest — and taking the pin to 0 retired that side effect.
+  **That half is now FIXED** — and the first fix for it was wrong twice, which is worth recording.
+  (i) The guard was keyed on *"does every provenance note have its binary?"*, covering the 60
+  note-backed (A) documents and **blind to the other 42** — all of `legal/primary-sources/`, which
+  has no notes; deleting a committed statute and regenerating dropped it silently. It is now keyed
+  on the manifest itself — *"no path currently listed may disappear"* (`regen_would_drop`) — which
+  subsumes both storage classes. (ii) Its kill test asserted only that `regen` returned `Err`, so
+  moving the guard below `fs::write` left the manifest **destroyed and the test still passing** — a
+  false PASS in the instrument holding the guarantee. It now byte-compares the manifest after the
+  refusal, mutation-verified red against three breakages (refusal removed; guard moved below the
+  write; guard re-keyed on notes only).
+  ★ The originally proposed fix — *"regen into a temp dir, assert byte-equality with the committed
+  file"* — must NOT be built as written: it is non-hermetic, reds on every machine that has not
+  fetched all 60 gitignored PDFs, and the obvious way to make it pass is to commit the 42-entry
+  manifest. That is precisely the [a golden cannot validate its own regeneration] trap this entry
+  cites. **What remains owed** is the narrower, still-real gap: nothing compares a note-storage
+  entry's `sha256`/`url` against the note that is supposed to be its source of truth (`verify()`'s
+  `Storage::Note` arm checks only that the note EXISTS), and `regen`'s note-parsing fallback looks
+  for `sha256:` or a bare 64-hex line while every real note writes `# sha256  <hash>` — so it has
+  never once fired. Either fix the parse and let notes be the source of truth, or delete the dead
+  fallback; do not leave code that pretends to a capability it lacks. **Owning phase: next harness
+  change.**
+
+- **FR-26 — `--regen`'s refusal names a remedy the repo has no tool for.** When it fires on a fresh
+  clone it lists the missing documents and says to restore them from their notes; there is no
+  actuator. `legal/_scripts/` fetches the **(B)** tree only, there is no `make` target, and nothing
+  under `scripts/` walks `design/forms/**/*.pdf.txt`. The maintainer's next move is 60 hand-issued
+  `curl`s. Fail-closed is right and this is explicitly **not** a request for a `--force`; what is
+  missing is one `legal/_scripts/`-style loop (URL is line 1, the check is the `# sha256` line),
+  named in the refusal message once it exists. **Minor by the journey rule** — a blocked regen with
+  an explanation is far better than the silent 102 → 42 it replaced. ★ Do not build it as a test
+  fixture: it needs the network, and every conformance test reads the committed extract precisely
+  so it needs neither PDF nor network.
+  ★★★ **AND THE TEMPTING SHORTCUT IS NOW GUARDED, on purpose.** The obvious way to stop this pain
+  without building the fetcher is *"the (A) PDFs are gitignored, of course they're missing — only
+  guard the committed entries"*, i.e. filtering `regen_would_drop` to `Storage::Committed`. That
+  re-opens the exact 102 → 42 silent loss the guard exists to prevent. On 2026-09-04 that mutation
+  passed the whole xtask suite **67/67**, because the test fixture was a bare tempdir where
+  `git check-ignore` fails and every entry is labelled `Committed`. The fixture is now a real git
+  repo and asserts it holds one entry of EACH storage class, so that edit reds immediately.
+  **If you come here to relieve the fresh-clone pain: build the fetcher, do not narrow the guard.**
+  **Owning phase: next harness change.**

@@ -80,8 +80,8 @@ ssn  = "Form8283[0].Page2[0].f2_02[0]"
 # `unmodeled` = btctax models no input that could reach the cell; `artifact` = not an entry the FILER
 # makes; `gap` = the cell IS reachable and nothing populates it (a defect).
 #
-# ★ THE BUNDLED ASSET IS Rev. December 2023. `design/forms/periodic/f8283.pdf` is Rev. December 2025
-#   and its sha256 does NOT match this crate's copy, so `design/forms/extract/f8283--periodic.txt` is
+# ★ THE BUNDLED ASSET IS Rev. December 2023. `design/forms/2025/f8283--2025.pdf` is Rev. December 2025
+#   and its sha256 does NOT match this crate's copy, so `design/forms/extract/f8283--2025.txt` is
 #   the wrong revision to transcribe from. The text behind this census was extracted from the bundled
 #   PDF itself (`crates/btctax-forms/forms/2024/f8283.pdf`), which is the file the gate reads.
 #

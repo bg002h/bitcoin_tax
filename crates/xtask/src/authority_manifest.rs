@@ -120,23 +120,28 @@ pub const URL_NOT_RECOVERABLE: &[&str] = &[
     // paraphrase presented as a quotation.
 ];
 
-/// ★★★ **The residual duplication, as a NUMBER that may only go down. 15 → 7 on 2026-07-30.**
+/// ★★★ **The residual duplication, as a NUMBER that may only go down. 15 → 7 → 0.**
 ///
-/// ★ **CORRECTION.** The first version of this comment said "every one is a `design/amt-form6251/`
-/// note shadowing `design/forms/2025/`". That was wrong, and wrong the same way F2 is always wrong —
-/// it generalised from the four groups that happened to be looked at. A full walk showed only 8 of
-/// the 15 were strays. Those 8 are now retired; the remaining 7 are two different things, and
-/// neither is a stray:
+/// ★★ **EMPTIED 2026-09-04.** Both remaining groups were resolved, and with them the dated tickle
+/// that existed to keep them visible (`archive_check::ARCHIVE_RECONCILIATION_REVIEW_BY`, retired in
+/// the same commit — see its RESET LOG, which is kept). What the 7 were, and which way each went:
 ///
-/// | # | groups | what it is |
+/// | # | groups | resolution |
 /// |---|---|---|
-/// | 3 | `design/forms/{year}/f8275,i8275,f8283` == `design/forms/periodic/*` | **BY DESIGN.** Forms 8275/8283 are "Rev. Month Year" with no tax-year edition, so the year-named path is an alias of the periodic one. Retiring these means deciding whether year-indexed lookup may resolve through `periodic/`. |
-/// | 4 | `design/forms/2025/*` == `legal/primary-sources/irs-forms/*` | **The genuine (A)/(B) overlap** — Form 8949, Schedule D and their instructions, archived under both conventions. Under the hybrid rule *forms* belong in (A) as note+hash, so (B)'s copies are the redundant ones — but they are COMMITTED binaries with extracts in `legal/text/`, so retiring them is a deletion decision, not a cleanup. |
+/// | 3 | `design/forms/{year}/{f8275,i8275,f8283}` == `design/forms/periodic/*` | **`periodic/` RETIRED.** No code resolved through it; its three notes named a text layer that did not exist (`extract/f8275.txt`; the file is `f8275--periodic.txt`); its URLs were the moving `irs-pdf/{stem}.pdf` ones the hybrid rationale rejects for forms; and the year directory already holds a revision it could not (`extract/f8283--2024.txt` is Rev. 12-2023 from the bundled asset, `periodic/f8283.pdf` was Rev. 12-2025). The three surviving year-named notes were round-tripped against `irs-prior/` first — HTTP 200 and hash-exact on all three. |
+/// | 4 | `design/forms/2025/*` == `legal/primary-sources/irs-forms/*` | **(B)'s five form copies DELETED** (905,833 bytes). Under the hybrid rule a form is a note+sha256 in (A), not a committed binary. `legal/SOURCES.md` keeps every citation and points at the surviving note; `Form_1099-DA` and `Instructions_1099-DA` stayed — they are not duplicated. |
 ///
-/// ★ Neither remainder is a defect that a test can resolve on its own; both are decisions. What the
-/// pin guarantees is that they stay *visible* and can only shrink — which is the whole difference
-/// between a known issue and a forgotten one.
-pub const DUPLICATE_SOURCE_GROUPS: usize = 7;
+/// ★★★ **A pin at 0 is a STRONGER guard than the date it replaced.** The tickle needed a human to
+/// renew it and blocked every commit repo-wide when it lapsed; this reds on *any* duplicate, the
+/// moment one appears, with nothing to push out. That is why retiring the tickle is not a mute: its
+/// subject is gone, and what remains fails closed. Same shape as [`URL_NOT_RECOVERABLE`] above —
+/// emptied, kept in place, with the note explaining what it held.
+///
+/// ★ **Known shape that will red this legitimately**, when it arrives: an unrevised periodic form
+/// archived under two tax years (`2025/f8275--2025` byte-equal to `2024/f8275--2024`). That is the
+/// moment to teach `duplicates()` the alias mechanism — same tree, same stem, different year — with
+/// a planted-defect test, per B1. Not before: the harness grows from observed failures.
+pub const DUPLICATE_SOURCE_GROUPS: usize = 0;
 
 /// The committed **text layers** — the extracted-text counterpart each tree keeps beside its
 /// sources. These are derived artifacts, never authorities, so they are neither manifest entries nor
@@ -521,13 +526,126 @@ fn extract_for(root: &Path, rel: &str) -> String {
     String::new()
 }
 
+/// ★★★ **Every path the committed manifest lists that a regen here would DROP.**
+///
+/// ★★ **Keyed on the MANIFEST, not on notes — and that distinction is a defect this replaced.**
+/// The first version of this guard asked *"does every provenance note have its binary?"*, which
+/// covered the 60 (A) documents (gitignored, note-backed) and was **blind to the other 42** — all
+/// of `legal/primary-sources/`, which by convention has no notes at all. Measured at the time: 102
+/// entries, 60 with a sibling note, 42 without, every one of the 42 `committed`. Deleting one of
+/// those and regenerating dropped it silently, which is the identical failure one storage class
+/// over. The invariant that actually holds is *"no path currently listed may disappear"*, and it
+/// subsumes the note case without a second tree walk.
+///
+/// Returns an empty vec when no manifest exists yet — a first-ever regen has nothing to lose.
+pub fn regen_would_drop(root: &Path, sources: &[String]) -> Result<Vec<String>, String> {
+    // ★★★ **"Absent" and "unreadable" are NOT the same, and conflating them reopened the hole.**
+    // The first version was `let Ok(existing) = load(root) else { return Vec::new() }` — so a
+    // manifest that existed but would not parse was treated as "nothing to lose", and the refusal
+    // was bypassed entirely. Measured 2026-09-04: corrupt MANIFEST.json + the 60 PDFs absent →
+    // `--regen` rewrote it to 42 entries with no refusal, the identical data loss the guard exists
+    // to stop, reachable by any truncated write or botched merge conflict.
+    // A file that is there but unreadable is the case where we know LEAST about what we would
+    // destroy, so it must fail closed, not open.
+    let existing = match load(root) {
+        Ok(e) => e,
+        Err(e) if manifest_path(root).exists() => {
+            return Err(format!(
+                "REFUSING to regenerate: MANIFEST.json exists but cannot be read ({e}). A regen \
+                 would overwrite it, and nothing can say what it listed. Repair it (or `git \
+                 restore` it) first — do not let a regen be how a corrupt index becomes a short one."
+            ));
+        }
+        // Genuinely no manifest yet: a first-ever regen has nothing to lose.
+        Err(_) => return Ok(Vec::new()),
+    };
+    let fresh: std::collections::BTreeSet<&str> = sources.iter().map(String::as_str).collect();
+    let mut dropped: Vec<String> = existing
+        .iter()
+        .map(|e| e.path.clone())
+        .filter(|p| !fresh.contains(p.as_str()))
+        .collect();
+    dropped.sort();
+    dropped.dedup();
+    Ok(dropped)
+}
+
+/// Of [`regen_would_drop`]'s paths, those that have a provenance note — i.e. the ones a fetch can
+/// restore, as opposed to the committed files that want `git restore`.
+pub fn notes_without_binaries(root: &Path) -> Vec<String> {
+    let mut orphans = Vec::new();
+    for (tree, _) in crate::archive_check::KNOWN_ARCHIVES {
+        let mut notes = Vec::new();
+        collect_notes(&root.join(tree), root, &mut notes);
+        for note_rel in notes {
+            let source_rel = note_rel.trim_end_matches(".txt").to_string();
+            if !root.join(&source_rel).exists() {
+                orphans.push(source_rel);
+            }
+        }
+    }
+    orphans.sort();
+    orphans.dedup();
+    orphans
+}
+
+/// Companion to [`collect_sources`]: the `<source>.txt` provenance notes, whichever tree they are in.
+fn collect_notes(dir: &Path, root: &Path, out: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let p = e.path();
+        let name = e.file_name().to_string_lossy().to_string();
+        if p.is_dir() {
+            if name != "__pycache__" && name != "reviews" {
+                collect_notes(&p, root, out);
+            }
+            continue;
+        }
+        let Some(stem) = name.strip_suffix(".txt") else {
+            continue;
+        };
+        // Only a note for something that IS a primary source; the extract trees are not notes.
+        let Ok(rel) = p.strip_prefix(root) else {
+            continue;
+        };
+        let rel_s = rel.to_string_lossy().replace('\\', "/");
+        if EXTRACT_TREES.iter().any(|t| rel_s.starts_with(t)) {
+            continue;
+        }
+        if crate::archive_check::classify(stem).is_some() {
+            out.push(rel_s);
+        }
+    }
+}
+
 /// `cargo run -p xtask -- authority-manifest --regen`
 ///
 /// ★★ **Derived from the trees, never hand-listed.** That is not a convenience — a hand-written
 /// manifest is exactly the enumeration-from-a-hand-list failure (F2) that produced the four-archive
 /// mess in the first place. Storage is read from `git check-ignore` rather than assumed, so the
 /// manifest records what git actually does with each file.
+///
+/// ★★★ **It REFUSES rather than silently shrinking the manifest** — see [`regen_would_drop`].
 pub fn regen(root: &Path) -> Result<usize, String> {
+    // ★★★ **REFUSE rather than silently delete.** Measured 2026-09-04, and it is why this guard
+    // exists: with the 60 gitignored (A) PDFs absent — a fresh clone, or CI — this function
+    // rewrote MANIFEST.json from **102 entries to 42**, and the whole xtask suite still passed
+    // while `authority-manifest` printed "OK — every entry resolves and every source is listed".
+    // The legal-defense index for sixty documents was destroyed with every instrument green.
+    //
+    // ★★ The only thing that had ever caught it was ACCIDENTAL: `DUPLICATE_SOURCE_GROUPS` pinned
+    // at 7 reds on a manifest with 0 duplicate groups. Reconciling the archives to 0 retired that
+    // side effect along with the duplication, which is how a real tripwire went dormant inside a
+    // commit whose message called the replacement "a STRONGER guard". A guarantee that survives
+    // only as a side effect of an unrelated number is not a guarantee — so it is stated here.
+    //
+    // ★★★ **THE CHECK MUST PRECEDE THE WRITE, and the test must assert THAT** — the first version
+    // of this guard was held by a test asserting only that `regen` returned `Err`. Moving the guard
+    // below `fs::write` left the manifest destroyed and that test still PASSING: a false PASS in the
+    // instrument holding the guarantee, which is exactly the class B1 exists for. See
+    // `regen_refuses_to_delete_a_document_whose_binary_is_missing`, which now pins the FILE.
     let urls = harvested_urls(root);
     let mut sources = Vec::new();
     for (tree, _) in crate::archive_check::KNOWN_ARCHIVES {
@@ -536,15 +654,68 @@ pub fn regen(root: &Path) -> Result<usize, String> {
     sources.sort();
     sources.dedup();
 
+    let dropped = regen_would_drop(root, &sources)?;
+    if !dropped.is_empty() {
+        let notes: std::collections::BTreeSet<String> =
+            notes_without_binaries(root).into_iter().collect();
+        let (fetchable, committed): (Vec<&String>, Vec<&String>) =
+            dropped.iter().partition(|p| notes.contains(*p));
+        let mut hint = String::new();
+        if !fetchable.is_empty() {
+            hint.push_str(&format!(
+                "\n  {} have a provenance note — gitignored, and simply not fetched in this tree. \
+                 Restore them from each note (line 1 is the URL, the `# sha256` line is the check).",
+                fetchable.len()
+            ));
+        }
+        if !committed.is_empty() {
+            hint.push_str(&format!(
+                "\n  {} are COMMITTED files missing from the working tree — `git restore` them. A \
+                 regen must never be how a committed authority leaves the manifest.",
+                committed.len()
+            ));
+        }
+        return Err(format!(
+            "REFUSING to regenerate: it would drop {} document(s) from MANIFEST.json without a \
+             word.\n{}{}\n  `xtask authority-manifest` alone is read-only and always safe.",
+            dropped.len(),
+            dropped
+                .iter()
+                .take(10)
+                .map(|d| format!("    {d}\n"))
+                .chain(
+                    (dropped.len() > 10)
+                        .then(|| format!("    … and {} more\n", dropped.len() - 10))
+                )
+                .collect::<String>(),
+            hint,
+        ));
+    }
+
     let mut entries = Vec::new();
     for rel in sources {
         let abs = root.join(&rel);
-        let ignored = std::process::Command::new("git")
+        // ★★ **Scrub git's inherited environment**, via the ONE canonical helper.
+        //   `current_dir(root)` is not enough: git prefers an inherited `GIT_DIR` over the child's
+        //   working directory, so under `git bisect run make check`, `git rebase --exec`, or any
+        //   future hook that forgets to unset it, this would answer about btctax rather than about
+        //   `root`. (`scripts/pre-commit` already unsets the six, so that path is covered — it is
+        //   the others that need this.) The same inheritance once re-inited a throwaway repo ON TOP
+        //   of this one as BARE; the note in `scripts/pre-commit` records it.
+        //   ★★★ Deliberately NOT a local copy of the list: a second copy drifts, and a 2026-09-04
+        //   review found three copies here with three different lengths. `git_pointed_at` is the
+        //   pinned one, and `git_pointed_at_clears_the_ambient_repo_redirects` is its B1 kill.
+        let ignored = crate::harness_check::git_pointed_at(root)
             .args(["check-ignore", "-q", &rel])
-            .current_dir(root)
             .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
+            .map_err(|e| {
+                format!(
+                    "cannot run `git check-ignore` in {}: {e}. Storage is READ from git, never \
+                     assumed — guessing here would mislabel every entry in the manifest.",
+                    root.display()
+                )
+            })?
+            .success();
         let storage = if ignored {
             Storage::Note
         } else {
@@ -630,7 +801,7 @@ pub fn run() -> Result<(), String> {
     let dups = duplicates(&entries);
     println!(
         "authority-manifest: {} document(s) archived under more than one path (pinned \
-         {DUPLICATE_SOURCE_GROUPS}, may only shrink — CONTINUITY.md §0 step ③)",
+         {DUPLICATE_SOURCE_GROUPS} — the archives were reconciled 2026-09-04; any duplicate reds)",
         dups.len()
     );
     if problems.is_empty() {
@@ -766,7 +937,9 @@ mod tests {
             ("design/forms/2025/f6251--2025.pdf", Kind::Form),
             ("design/forms/2025/i1040gi--2025.pdf", Kind::Instructions),
             (
-                "legal/primary-sources/irs-forms/Instructions_8949.pdf",
+                // ★ Must be a path that still EXISTS — the doc comment above claims these are real
+                //   repo paths, and Instructions_8949.pdf was retired to (A) on 2026-09-04.
+                "legal/primary-sources/irs-forms/Instructions_1099-DA.pdf",
                 Kind::Instructions,
             ),
         ] {
@@ -774,32 +947,276 @@ mod tests {
         }
     }
 
-    /// ★★★ **The duplication countdown — step ③'s remaining work, as a test.**
+    /// ★★★ **B1 KILL for the regen refusal — and it pins the FILE, not the return value.**
     ///
-    /// Fifteen documents are archived twice. The hybrid decision unified the *conventions*; these are
-    /// the leftover copies. The number may only go DOWN, and it is measured on content hashes rather
+    /// The defect is not hypothetical: on 2026-09-04, with the 60 gitignored (A) PDFs absent,
+    /// `--regen` rewrote the real manifest from **102 entries to 42** and every instrument in the
+    /// repo still reported OK.
+    ///
+    /// ★★★ **This test was itself a FALSE PASS on its first version, and that is why it is shaped
+    /// like this.** It asserted only that `regen` returned `Err`. Moving the guard below
+    /// `fs::write` — an ordinary refactor — left `regen` destroying the manifest and *then*
+    /// refusing, and the test still passed. The guarantee is that **the manifest survives**, so
+    /// that is what is asserted: a sentinel file, byte-compared after the refusal. Asserting the
+    /// error type alone is how an instrument keeps its green while the thing it guards is gone.
+    ///
+    /// ★★ **Both storage classes — and the fixture ASSERTS that before relying on it.** The first
+    /// guard asked "does every note have its binary?", which was blind to the 42 committed `legal/`
+    /// entries that have no notes at all. This plants one of each — a note-backed form and a
+    /// committed statute — because one arm passing proved nothing about the other.
+    ///
+    /// ★★★ **That claim was FALSE for a day, and the shape is worth keeping.** The fixture ran in a
+    /// bare `tempdir`, so `git check-ignore` exited 128, `.unwrap_or(false)` made **every** entry
+    /// `Committed`, and the `Storage` axis this doc advertised did not exist. Restricting
+    /// `regen_would_drop` to `Storage::Committed` — the natural response to FR-26's fresh-clone
+    /// pain, and a change that re-opens the 102 → 42 loss — passed the whole suite 67/67. The
+    /// fixture is now a real git repo with the repo's own ignore pattern, and it **asserts one
+    /// note-storage and one committed entry** before going further, so the claim cannot rot back
+    /// into decoration: if git stops working there, the test reds instead of quietly narrowing.
+    #[test]
+    fn regen_refuses_to_delete_a_document_whose_binary_is_missing() {
+        use std::fs;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        let forms = root.join("design/forms/2025");
+        let statutes = root.join("legal/primary-sources/statute-irc");
+        fs::create_dir_all(&forms).expect("mkdir");
+        fs::create_dir_all(&statutes).expect("mkdir");
+
+        // ★★★ **The fixture must be a REAL git repo, or `Storage` is a constant here.**
+        // `regen` derives storage from `git check-ignore`; in a plain tempdir that command exits
+        // 128 — a real git answering "not a repository" — which reads as "not ignored" and so makes
+        // EVERY entry `Committed`. (The `.unwrap_or(false)` that used to sit there is gone; a git
+        // that cannot be RUN at all is now an error.) The test then cannot see the
+        // `Storage` axis at all — proved 2026-09-04 by planting
+        // `.filter(|e| e.storage == Storage::Committed)` in `regen_would_drop`: the whole suite
+        // passed 67/67, while the same filter on `Storage::Note` failed instantly. That mutation is
+        // the natural response to FR-26's fresh-clone pain, and it re-opens the 102 → 42 loss.
+        //
+        // ★★ Scrub git's env on every fixture call: git prefers an inherited `GIT_DIR` over
+        //    `current_dir`, and a test's `git init` under one has re-inited THIS repository as BARE
+        //    before now (see the note in `scripts/pre-commit`). Never run git in a fixture without it.
+        let git = |args: &[&str]| {
+            // ★ Same canonical helper `regen` uses — see its B1 kill in `harness_check`. It also
+            //   clears GIT_TEMPLATE_DIR and GIT_CONFIG_COUNT, which is what stops a hostile
+            //   template or command-level config from outranking the repo-local settings below.
+            match crate::harness_check::git_pointed_at(root)
+                .args(args)
+                .status()
+            {
+                // ★ N-4: distinguish "git is not installed" from "git said no". The first is an
+                //   environment problem and the message must say so, or a maintainer without git
+                //   spends the afternoon reading this fixture.
+                Err(e) => panic!("cannot run `git {args:?}` — is git installed? ({e})"),
+                Ok(st) => assert!(st.success(), "fixture git {args:?} failed: {st}"),
+            }
+        };
+        // ★ `--template=` with an EMPTY dir closes the last ambient channel: a global
+        //   `init.templateDir` (or `GIT_TEMPLATE_DIR`, already scrubbed) seeds
+        //   `$GIT_DIR/info/exclude`, which OUTRANKS the repo-local `core.excludesFile` set below.
+        //   Measured 2026-09-04: without this, a hostile `~/.gitconfig` reds this test.
+        let empty_template = root.join("empty-git-template");
+        fs::create_dir_all(&empty_template).expect("template dir");
+        git(&[
+            "init",
+            "-q",
+            &format!(
+                "--template={}",
+                empty_template.to_str().expect("utf-8 path")
+            ),
+        ]);
+        // ★★★ **Neutralise the DEVELOPER's global ignore rules, repo-locally.** `regen` runs its own
+        // `git check-ignore` inside this fixture, and git reads the user's global
+        // `core.excludesFile` there too — so a developer who globally ignores `*.html` (or `*.pdf`)
+        // silently flips this fixture's storage classes and reds the test on their machine only.
+        // Measured 2026-09-04 with a global `*.html` rule: "got 2 note / 0 committed".
+        // Repo-local config wins over global, and pointing it at a path that does not exist is the
+        // portable way to say "no global excludes" — `/dev/null` is not portable to Windows CI.
+        git(&[
+            "config",
+            "core.excludesFile",
+            root.join("no-such-global-excludes")
+                .to_str()
+                .expect("utf-8 path"),
+        ]);
+        // The same pattern the real repo uses for the (A) tree.
+        fs::write(root.join(".gitignore"), "design/forms/**/*.pdf\n").expect("gitignore");
+
+        fs::write(
+            forms.join("f8949--2025.pdf.txt"),
+            "https://www.irs.gov/pub/irs-prior/f8949--2025.pdf\n# sha256  abc\n# bytes 1\n",
+        )
+        .expect("note");
+        fs::write(forms.join("f8949--2025.pdf"), b"%PDF-1.4 fake").expect("pdf");
+        // ★ No note, by convention — this is the (B) shape the first guard could not see.
+        fs::write(statutes.join("26USC_s1.html"), b"<html>26 USC 1</html>").expect("statute");
+
+        // Baseline: both documents make it into the manifest.
+        assert_eq!(
+            regen(root).expect("baseline regen"),
+            2,
+            "both must be listed"
+        );
+
+        // ★★★ **Prove the fixture spans the axis before claiming to test it.** Without this, the
+        // "both storage classes" claim below is decoration: a tempdir that is not a git repo makes
+        // every entry `Committed`, and a guard restricted to committed entries sails through the
+        // whole suite (measured 2026-09-04: 67/67 green under exactly that mutation).
+        let listed = load(root).expect("load");
+        let notes = listed.iter().filter(|e| e.storage == Storage::Note).count();
+        let committed = listed
+            .iter()
+            .filter(|e| e.storage == Storage::Committed)
+            .count();
+        assert!(
+            notes == 1 && committed == 1,
+            "the fixture must contain exactly one note-storage and one committed entry — got \
+             {notes} note / {committed} committed.\n  \
+             If you ADDED a fixture document, update this count deliberately.\n  \
+             Otherwise `git check-ignore` is not working here — an ambient template, \
+             GIT_CONFIG_COUNT, or a system excludesFile can do it — and in that case every \
+             Storage-axis claim in this test is vacuous, which is the state this assertion exists \
+             to make impossible."
+        );
+        let manifest = manifest_path(root);
+        let pristine = fs::read(&manifest).expect("manifest written");
+
+        // ── Each storage class, one at a time. Removing EITHER must refuse, and must not write. ──
+        for victim in [
+            forms.join("f8949--2025.pdf"), // note-backed, gitignored in the real repo
+            statutes.join("26USC_s1.html"), // committed, NO note — the I-2 blind spot
+        ] {
+            let saved = fs::read(&victim).expect("read victim");
+            fs::remove_file(&victim).expect("remove victim");
+
+            let err = regen(root).expect_err(
+                "regen MUST refuse when a listed document is missing; silently dropping it is how \
+                 60 entries vanished with the whole suite green",
+            );
+            assert!(
+                err.contains("REFUSING to regenerate"),
+                "the refusal must say so; got: {err}"
+            );
+            // ★★★ THE ASSERTION THAT MATTERS. Without it, a guard placed after the write passes.
+            assert_eq!(
+                fs::read(&manifest).expect("manifest still there"),
+                pristine,
+                "the manifest must be BYTE-IDENTICAL after a refusal — refusing *after* writing is \
+                 not refusing, and asserting only the Err lets that through"
+            );
+
+            fs::write(&victim, &saved).expect("restore victim");
+            let mut v = Vec::new();
+            for (tree, _) in crate::archive_check::KNOWN_ARCHIVES {
+                collect_sources(&root.join(tree), root, &mut v);
+            }
+            v.sort();
+            assert!(
+                regen_would_drop(root, &v)
+                    .expect("manifest readable")
+                    .is_empty(),
+                "restoring the document must clear the refusal"
+            );
+        }
+
+        // ── Control: with everything present, regen proceeds and is idempotent. ──
+        assert_eq!(regen(root).expect("regen must succeed"), 2);
+        assert_eq!(
+            fs::read(&manifest).expect("manifest"),
+            pristine,
+            "a regen over an unchanged tree must be byte-stable"
+        );
+
+        // ★★★ **CORRUPT ≠ ABSENT.** A manifest that exists but will not parse is the case where we
+        // know LEAST about what a regen would destroy, so it must fail closed. Treating it as
+        // "nothing to lose" bypassed the whole guard: measured on the real repo, a corrupt
+        // MANIFEST.json plus the 60 gitignored PDFs absent regenerated to 42 entries in silence.
+        fs::remove_file(forms.join("f8949--2025.pdf")).expect("remove");
+        fs::write(&manifest, b"not json at all").expect("corrupt the manifest");
+        let err = regen(root).expect_err("a corrupt manifest must NOT be treated as empty");
+        assert!(
+            err.contains("cannot be read"),
+            "the refusal must name the real reason; got: {err}"
+        );
+        assert_eq!(
+            fs::read(&manifest).expect("manifest"),
+            b"not json at all",
+            "the corrupt manifest must be left exactly as found, not overwritten"
+        );
+
+        // ★ And an ABSENT manifest is the opposite case: a first-ever regen has nothing to lose.
+        fs::remove_file(&manifest).expect("remove manifest");
+        fs::write(forms.join("f8949--2025.pdf"), b"%PDF-1.4 fake").expect("pdf");
+        assert_eq!(
+            regen(root).expect("a first regen with no manifest must succeed"),
+            2,
+            "absent must not be conflated with corrupt in the other direction either"
+        );
+    }
+
+    /// ★★★ **The duplication countdown, now DISCHARGED — and the standing guard in its place.**
+    ///
+    /// Fifteen documents were archived twice; the hybrid decision unified the *conventions* and
+    /// 2026-09-04 retired the leftover copies (15 → 7 → **0**). Measured on content hashes rather
     /// than filenames — the two trees name the same document differently, so a name-based check
-    /// would cheerfully report zero.
+    /// would cheerfully report zero in a repo full of duplicates.
+    ///
+    /// ★★ **A REDUNDANT assertion was removed here.** The old shape paired
+    /// `assert!(dups.len() <= PIN)` with the `assert_eq!` below it; at a pin of 0 the `assert!` half
+    /// became vacuous (`usize::MIN`) and clippy said so.
+    ///
+    /// ★★★ **TWO CORRECTIONS, both to earlier claims of mine, both from review. Read them: the
+    /// wording here was wrong twice in the same week, in opposite directions.**
+    ///
+    /// 1. The first write-up called the removal "a green instrument that had stopped
+    ///    discriminating." A 2026-09-04 review showed that overstates it — the `assert_eq!`
+    ///    predates the change and the `assert!` was already dead weight.
+    /// 2. The correction then overshot: it said the guarantee was "never weakened **at any pin**"
+    ///    and called this "ONE two-sided assertion." **That is false at 0.** `dups.len()` is
+    ///    `usize`, so a fall below 0 is unrepresentable and the `else` arm is UNREACHABLE — the
+    ///    same `usize::MIN` vacuity, reintroduced in the message of the very assertion that
+    ///    replaced it. At this pin the test is **one-sided**: it catches a rise, nothing else.
+    ///    The sibling `archive_check::the_archive_count_may_only_shrink` pins 3, where both
+    ///    directions really are live; that contrast is the proof.
+    ///
+    /// ★★ **And the fall arm was not decorative at 7.** It was the only thing that reddened when
+    /// `--regen` silently dropped 60 of 102 entries on a tree without the gitignored PDFs. Going
+    /// 7 → 0 retired that tripwire as a side effect. It is replaced deliberately, not accidentally,
+    /// by [`regen`]'s refusal and `regen_refuses_to_delete_a_document_whose_binary_is_missing`.
+    /// **A guarantee that survives only as a side effect of an unrelated constant is not a
+    /// guarantee** — which is the whole lesson of these two corrections.
+    ///
+    /// ★ **Seen red 2026-09-04 (B1), rise arm**, on THIS assertion: the same document planted at
+    /// `design/forms/2026/f8949--2026.pdf` (PDF + note copied from the 2025 pair) →
+    /// *"duplicate archived documents: 1, pinned 0. A duplicate APPEARED"*, naming the pair; then
+    /// reverted, manifest byte-identical. The fall arm was observed red only by raising the pin to
+    /// 1 with no duplicates present — i.e. it cannot be triggered by the tree at pin 0, which is
+    /// finding 2 above. ★★ An earlier attempt planted at `design/forms/2024/f8949--2024.pdf`
+    /// **collided with a real tracked note and destroyed it** (restored: `dcd2d7ff…`, 129,683
+    /// bytes). Do not reproduce it at that path.
+    ///
     #[test]
     fn duplicate_source_groups_may_only_shrink() {
         let entries = load(&root()).expect("manifest loads");
         let dups = duplicates(&entries);
-        assert!(
-            dups.len() <= DUPLICATE_SOURCE_GROUPS,
-            "duplicate archived documents rose to {} (pinned {DUPLICATE_SOURCE_GROUPS}):\n{}",
-            dups.len(),
-            dups.iter()
-                .map(|(_, v)| format!("    {}\n", v.join("  ==  ")))
-                .collect::<String>()
-        );
-        // ★ And when they are retired, this reds so the constant must come down with them —
-        // otherwise the pin rots into a number nobody revisits, which is the excuse-list failure.
+        // ★ One assertion carrying both directions. A rise is a new duplicate; a fall the pin has
+        // not tracked is progress the ratchet cannot see, which is how a pin rots into a number
+        // nobody revisits. ★★ At the CURRENT pin of 0 only the rise arm is reachable (`usize`), so
+        // the `else` branch below is dormant, not live — see the corrections in the doc comment.
+        // It becomes live again the moment this pin is ever raised.
         assert_eq!(
             dups.len(),
             DUPLICATE_SOURCE_GROUPS,
-            "duplicates fell to {} — lower DUPLICATE_SOURCE_GROUPS to match; the pin must track \
-             reality, not sit above it",
-            dups.len()
+            "duplicate archived documents: {}, pinned {DUPLICATE_SOURCE_GROUPS}.\n{}\n{}",
+            dups.len(),
+            if dups.len() > DUPLICATE_SOURCE_GROUPS {
+                "A duplicate APPEARED — archive the document once, or record why two paths are right."
+            } else {
+                "Duplicates were RETIRED — lower DUPLICATE_SOURCE_GROUPS to match in the same commit."
+            },
+            dups.iter()
+                .map(|(_, v)| format!("    {}\n", v.join("  ==  ")))
+                .collect::<String>()
         );
     }
 

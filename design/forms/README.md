@@ -17,7 +17,7 @@ distinction is structural rather than incidental:
 | cadence | where it lives | example |
 |---|---|---|
 | **annual** — one revision per tax year | `https://www.irs.gov/pub/irs-prior/{stem}--{year}.pdf` | `f6251--2025.pdf` |
-| **periodic** — revised every few years, "Rev. Month Year" on the face | `https://www.irs.gov/pub/irs-pdf/{stem}.pdf` (no year edition exists) | `f8275`, `f8283` |
+| **periodic** — revised every few years, "Rev. Month Year" on the face | archived under **the tax year its revision governs**, `{TY}/{stem}--{TY}.pdf.txt`, sourced in this order: `irs-prior/{stem}--{TY}.pdf` when the IRS holds that edition; else the bundled runtime asset (the `extract/f8283--2024.txt` model); else the **current** `irs-pdf/{stem}.pdf`, hashed at fetch time, with the note recording that the URL is a moving one. ★ The third case is real, not theoretical: `irs-prior/f8275r--2025.pdf` is **404** while `irs-pdf/f8275r.pdf` is **200** (checked 2026-09-04), which is the situation §G-12's unblock command lands in | `f8275`, `f8283` |
 
 Instructions follow the **identically-numbered** convention: form `fNNNN` has instructions `iNNNN`
 (`f6251`→`i6251`, `f1040sa`→`i1040sca`), with `i1040gi` carrying the 1040-family schedules that get no
@@ -34,12 +34,13 @@ and size, and the **committed text layer** lives in `design/forms/extract/`.
 
 That is what makes it work: **the conformance tests read the extract, so they need no PDF and no
 network.** The PDF is only needed to *re-extract*, and the note is sufficient to reproduce it —
-verified by round-trip (fetch `f8995--2025.pdf`, hash it, compare to the note: match).
+verified by round-trip (fetch `f8995--2025.pdf`, hash it, compare to the note: match; and on
+2026-09-04 `f8275--2024`, `i8275--2024`, `f8283--2025`, all three HTTP 200 and hash-exact,
+when `periodic/` was retired into the year directories).
 
     design/forms/MANIFEST.json     every document: source URL, sha256, size  (the provenance record)
     design/forms/2024/*.pdf.txt    TY2024 notes — what btctax ships today
     design/forms/2025/*.pdf.txt    TY2025 notes — the B3 target
-    design/forms/periodic/*.pdf.txt  non-annual revisions
     design/forms/extract/*.txt     ★ THE COMMITTED TEXT LAYER — what everything actually reads
 
 ★★ **A different hash is not a corrupt download — it means the IRS REVISED the document.** That is a
@@ -50,8 +51,9 @@ to make impossible to miss.
 
 Archived ≠ extracted ≠ conformance-tested. These PDFs are step 1 of three:
 
-1. **archived** — done: 66 documents recorded (57 here + the 9 in the older `design/amt-form6251/`),
-   each as a URL note plus its extracted text.
+1. **archived** — done: **60** documents recorded, all in `design/forms/` (measured
+   `design/forms/*/*.pdf.txt`), each as a URL note plus its extracted text. ★ The older
+   `design/amt-form6251/` holds **no** notes — it was retired as an archive on 2026-07-30.
 2. **extracted** — text layer committed as an in-crate fixture (`xtask extract-schedule-1a` is the model;
    `-layout` for a form, plain `pdftotext -f N -l M` for 3-column instruction pages). Done for
    Schedule 1-A only.
