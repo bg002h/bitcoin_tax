@@ -5711,3 +5711,60 @@ The residue below is what a **single**-column reader structurally cannot reach.
   loop, because *"a bare letter with a box to its right"* is the signal that distinguishes it from
   prose. **Owning phase: whenever the census is next pointed at Form 1040 itself.** Not urgent for
   Schedule 1-A or Form 6251, neither of which has a two-entry row.
+
+### ★★★ CRITICAL — from the 2026-09-04 understatement audit (23 agents, 6 lenses, adversarial verify)
+
+Report: `design/agent-reports/2026-09-04-understatement-audit.md`. Both entries below were
+**independently re-verified by the controller** against the code and the IRS instruction text before
+being filed. Verdict of that audit, verbatim: *"Yes — btctax can currently emit a signed 1040 that
+understates tax with no refusal."*
+
+- **FR-29 ★★★ CRITICAL — the Form 8615 (kiddie tax) screen is gated on DEPENDENCY, which is not one
+  of Form 8615's conditions.** `crates/btctax-core/src/tax/return_1040.rs:989` reads
+  `if ri.header.can_be_claimed_as_dependent_taxpayer != Some(false)`. The five conditions
+  (`design/forms/extract/i1040gi--2025.txt:3927-3941`) are, verbatim: (1) more than $2,700 unearned
+  income, (2) required to file, (3) *"either (a) Under age 18 …, (b) Age 18 … and didn't have earned
+  income that was more than half of your support, or (c) A full-time student at least age 19 but
+  under age 24 … and didn't have earned income that was more than half of your support"*, (4) at
+  least one parent alive, (5) not filing jointly. **Dependency appears nowhere.**
+  ⇒ A self-supporting minor or student whose support comes from *unearned* income — which is
+  precisely this product's user — truthfully answers "No" to the dependency question, skips §1(g)
+  entirely, and is taxed at their own rates. §1(g)(1) is *"the greater of"*, so this can **only
+  understate**.
+  ★★ **A GREEN TEST PINS THE DEFECT** at `:4467` — `// NOT claimable as a dependent ⇒ never kiddie,
+  even with high unearned income.` That comment is false against the form. `RefuseReason::KiddieTax`
+  carries the same paraphrase at `return_refuse.rs:264`. Both corrected in this commit so the
+  paraphrase stops reading as settled law; the GATE itself is untouched and still wrong.
+  ★ **Why the gate was not fixed here.** The honest fix needs inputs btctax does not collect — the
+  §1(g) support test and whether a parent is alive. Age is derivable (`Person::date_of_birth`), but
+  exempting only provable non-children would refuse every filer with no DOB on file, which is most
+  test fixtures and many real returns. Per the repo's own rule — *"if the form asks something our
+  input surface cannot answer, COLLECT it"* — this wants a spec, not a 2am patch.
+  **Owning phase: BEFORE any first filing. This is a blocking defect, not a follow-up in the usual
+  sense.**
+
+- **FR-30 ★★★ CRITICAL — Schedule 2 *additions to tax* fall outside every limb of the scope
+  attestation.** `crates/btctax-core/src/tax/questions.rs:548` asks about (a) income received,
+  (b) an ISO exercise, (c) an AMT item. An *addition to tax* is none of those. Verified instances a
+  filer can hit while answering every question truthfully: excess advance-PTC repayment (Sch 2 line
+  1a), the §4973 excise on an excess Roth contribution (line 8), Schedule H household-employment tax
+  (line 9), plus lines 10 and 17b. Each raises tax; omitting it understates.
+  ★ `crates/btctax-core/src/tax/printed.rs:306` states line 1a *"would REFUSE if it did"* — a
+  refusal predicated on an input that does not exist. And the census completeness claim at
+  `crates/btctax-forms/forms/2024/f1040s2.map.toml:75` is falsified by lines 1a and 9.
+  **Owning phase: with FR-29, before any first filing.**
+
+★ Also from that audit, filed together and NOT re-verified individually by the controller (the
+adversarial pass cleared them, but they are Important rather than Critical): I3 the SSTB prompt
+omits *Trading* and *Dealing*, the two i8995-A bullets that name a crypto dealer; I4 the §402(g)
+limit uses the SIMPLE-only $16,500 rather than $23,500; I5 §108(b)(2)(G) liveness is keyed to the
+carryover coming *in* rather than the discharge year, so an unreduced carryover is stamped
+`Computed` into the next year; I6 §221 ignores the collected dependency answer; I7 Roth codes; I8
+five refusals appear in no test at all.
+★★ **Two corrections the audit made to its own inputs, worth keeping:** the §402(g) Roth fix as
+first proposed is WRONG — `i1040gi:2318` says Roth deferrals count toward the limit but their excess
+must NOT go on line 1h, so widening `ELECTIVE_DEFERRAL_CODES` in place conflates two sums; and the
+crypto-slice fail-open at `admin.rs:712` is **CLEARED** — the `se_income_without_profile` note at
+`:731` does reach the user at `main.rs:938`.
+★ Top gap named for the next round: **the crypto engine (~9,000 LOC) was audited by no lens**, and
+it is structurally invisible to both oracles — they are handed basis, never derive it.

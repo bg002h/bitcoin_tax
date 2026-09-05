@@ -4462,7 +4462,14 @@ mod tests {
             screened(&dependent(dec!(2000)), &hobby),
             Some(RefuseReason::KiddieTax)
         );
-        // NOT claimable as a dependent ⇒ never kiddie, even with high unearned income.
+        // ★★★ **FR-29 — THIS ASSERTION PINS A CRITICAL DEFECT. It is kept RED-ADJACENT on purpose:
+        //     it documents today's behaviour, NOT the law.** Form 8615's five conditions
+        //     (`i1040gi--2025.txt:3927-3941`) are unearned income, a filing requirement, an AGE +
+        //     earned-income-support test, a living parent, and not filing jointly. **Dependency is
+        //     not among them.** A self-supporting student whose support comes from unearned income —
+        //     this product's own user — truthfully answers "No" here, skips §1(g), and is taxed at
+        //     their own rates. §1(g)(1) is "the greater of", so it can ONLY understate.
+        //     When FR-29 is fixed this assertion must be INVERTED, not deleted.
         let mut not_dep = dependent(dec!(9000));
         not_dep.header.can_be_claimed_as_dependent_taxpayer = Some(false);
         assert_eq!(screened(&not_dep, &empty), None);
