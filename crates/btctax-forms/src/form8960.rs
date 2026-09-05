@@ -39,7 +39,7 @@ pub fn fill_form_8960_with_map(
 
     // Parallel to `map.lines()` — printed reading order, strictly descending y on page 1.
     //
-    // ★★ EVERY cell is an `Option`, and line 9b is the one that is ever `None`. The uniform `Option`
+    // ★★ EVERY cell is an `Option`, and lines 9b and 9d are the ones that are ever `None`. The uniform `Option`
     //    is deliberate: it makes "there is no value here" expressible at every line, so a future
     //    conditional entry cannot be added as a silent `push_money` that swears a zero (the §G-24
     //    lesson `push_money_opt` exists for).
@@ -53,7 +53,9 @@ pub fn fill_form_8960_with_map(
         // 9b — the filer's own §1411(c)(1)(B) allocation. BLANK when they claimed none: a printed 0
         // would swear the allocable state income tax IS zero, which they never said.
         (lines.line9b, F8960_COL_MID),
-        (Some(lines.line9d), F8960_COL_AMOUNT), // 9d add 9a-9c (= 9b; 9a/9c unmodelled)
+        // 9d — "Add lines 9a, 9b, and 9c" over three cells that are all blank when the filer
+        // allocated nothing. Core decides (FR-12); this crate transcribes the `Option` it is handed.
+        (lines.line9d, F8960_COL_AMOUNT),
         (Some(lines.line11), F8960_COL_AMOUNT), // 11 total deductions/modifications
         (Some(lines.line12), F8960_COL_AMOUNT), // 12 net investment income
         (Some(lines.line13), F8960_COL_MID),    // 13 MAGI

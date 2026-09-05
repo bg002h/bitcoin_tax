@@ -264,12 +264,25 @@ fn f8960_line9b_is_blank_when_unclaimed_and_printed_when_claimed() {
         "an unclaimed line 9b must be BLANK; a printed 0 would swear the allocable state income \
          tax IS zero, which this filer never said"
     );
-    // 9a and 9c stay unmodelled-blank either way; 9d and 11 are DERIVED totals the form adds.
+    // 9a and 9c stay unmodelled-blank either way, and 10 with them.
     for un in ["f1_16[0]", "f1_18[0]", "f1_20[0]"] {
         let fqn = format!("topmostSubform[0].Page1[0].{un}");
         assert_eq!(tv(&pdf, &fqn), None, "{fqn} (unmodeled) must be blank");
     }
-    assert_eq!(tv(&pdf, L9D).as_deref(), Some("0"));
+    // ★★★ FR-12 — …AND SO IS 9d, which is *"Add lines 9a, 9b, and 9c"* over exactly those three
+    //     blanks. This assertion read `Some("0")` for two releases: it ENCODED the defect, holding
+    //     the fabricated zero on the paper while reading like a check on it.
+    assert_eq!(
+        tv(&pdf, L9D),
+        None,
+        "9d is a sum with no operands: 9a and 9c are unmodelled and 9b was never allocated. A `0` \
+         swears this filer worked Part II and it came to nothing (26 USC §6065)."
+    );
+    // ★ Line 11 STILL PRINTS its zero, and that is filed rather than decided — **FR-39**. It is the
+    //   same `Combine` shape one line down ("Add lines 9d and 10" over two blanks), paired with 1040
+    //   line 21, which FR-1 settled explicitly. This assertion is the pin: whichever way FR-39 is
+    //   decided, it and `ALL_ZERO_1040_PAPER`'s `line21` row move together, and neither moves alone.
+    assert_eq!(tv(&pdf, L11).as_deref(), Some("0"));
     assert_eq!(tv(&pdf, L12).as_deref(), Some("60000"));
     assert_eq!(tv(&pdf, L17).as_deref(), Some("2280")); // 3.8% × 60,000
 
@@ -1680,7 +1693,9 @@ fn f1040() -> Form1040Lines {
         // ★ FR-1 — line 19 BLANK: this household's §24 credit was never figured. "Add lines 19 and
         //   20" then carries line 20 alone, which is what line 21 already said.
         line19: None,
-        line20: dec!(287),
+        // ★ FR-27 — line 20 is `Some`: this household HAS a Schedule 3 ($287 foreign tax credit),
+        //   so "Amount from Schedule 3, line 8" names a page that is in the packet.
+        line20: Some(dec!(287)),
         line21: dec!(287),
         line22: dec!(25713),
         line23: dec!(1406),

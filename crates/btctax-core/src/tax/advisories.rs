@@ -450,9 +450,9 @@ impl Advisory {
             Advisory::OtherCreditsOmitted =>
                 "OTHER CREDITS NOT COMPUTED — v1 does not compute the education (Form 8863), \
                  dependent-care (Form 2441), retirement-savings/saver's (Form 8880), residential-energy \
-                 (Form 5695) or adoption (Form 8839) credits: Schedule 3 Part I is $0 apart from the \
-                 foreign tax credit. If you qualify for any of them your tax is OVERSTATED — claim them \
-                 yourself."
+                 (Form 5695) or adoption (Form 8839) credits: the foreign tax credit is the only \
+                 nonrefundable credit that ever reaches Schedule 3 Part I. If you qualify for any of \
+                 them your tax is OVERSTATED — claim them yourself."
                     .to_string(),
             Advisory::RefundByPaperCheck { refund } => format!(
                 "REFUND BY PAPER CHECK — your return is due a refund of {}, but v1 never fills the \

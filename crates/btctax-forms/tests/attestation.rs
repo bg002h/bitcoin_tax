@@ -457,10 +457,17 @@ fn the_same_gift_on_an_itemizing_return_refuses_until_the_acknowledgment_is_answ
 /// on the line whose own instruction says to drop it, and not one line earlier. A `0` on line 12
 /// would be a different return: it would say this filer claimed no standard deduction.
 ///
-/// ★★ **LINE 19 IS ABSENT FROM THIS TABLE ON PURPOSE** — it is BLANK on the paper, and the assertion
-/// that holds it blank is the `!contains_key("line19")` at the foot of the test (FR-1). Because
-/// `spurious`/`vanished` above make this table an EQUALITY, a row here is what would make a printed
-/// zero mandatory; the row is the bug, not the omission.
+/// ★★ **LINES 19 AND 20 ARE ABSENT FROM THIS TABLE ON PURPOSE** — they are BLANK on the paper, and
+/// the assertions that hold them blank are the `!contains_key` pair at the foot of the test (FR-1,
+/// FR-27). Because `spurious`/`vanished` above make this table an EQUALITY, a row here is what would
+/// make a printed zero mandatory; the row is the bug, not the omission.
+///
+/// ★ **Line 21 IS still in the table**, and that is a decision rather than an oversight. *"Add lines
+/// 19 and 20"* now has two blank operands on this return, which under the census's own `Combine` rule
+/// (*"blank iff every operand is blank"*) argues it should go blank too — as should Form 8960 line
+/// 11, the identical shape. FR-1 decided line 21 explicitly in `5094bfc5`, before line 20 could be
+/// pair is filed as **FR-39** rather than reversed in passing. When it is decided, this row and the
+/// 8960 one move together or not at all.
 const ALL_ZERO_1040_PAPER: &[(&str, &str)] = &[
     ("line1a", "0"),     // "Total amount from Form(s) W-2, box 1" — no W-2
     ("line1z", "0"),     // "Add lines 1a through 1h"
@@ -480,8 +487,7 @@ const ALL_ZERO_1040_PAPER: &[(&str, &str)] = &[
     ("line16", "0"),     // tax
     ("line17", "0"),     // Schedule 2 line 3
     ("line18", "0"),     // add 16 and 17
-    ("line20", "0"),     // Schedule 3 line 8
-    ("line21", "0"),     // add 19 and 20
+    ("line21", "0"),     // add 19 and 20 — both operands blank; see FR-39 in the doc above
     ("line22", "0"),     // subtract 21 from 18
     ("line23", "0"),     // Schedule 2 line 21
     ("line24", "0"),     // TOTAL TAX
@@ -601,6 +607,20 @@ fn the_all_zero_return_files_one_form_whose_every_money_line_is_zero_or_blank() 
         !got.contains_key("line19"),
         "1040 line 19 must be BLANK, not zero. It carries Schedule 8812 line 14, which btctax never \
          figures; a `0` swears the filer worked that schedule and it came to nothing. Paper: {got:?}"
+    );
+
+    // ★★★ FR-27 — AND SO IS LINE 20, for the same reason and about a different absent document.
+    //
+    // "Amount from Schedule 3, line 8". This packet is ONE form; there is no Schedule 3 in it, so
+    // there is no line 8 to name. And btctax could not swear to the absence even if it wanted to:
+    // six of Schedule 3 line 8's seven operands are credits v1 does not model, which is why
+    // `OtherCreditsOmitted` fires on every return. The cell printed `0` in every release up to this
+    // one — the same shape as line 19, one line down, about a page rather than a credit.
+    assert!(
+        !got.contains_key("line20"),
+        "1040 line 20 must be BLANK, not zero. It reads \"Amount from Schedule 3, line 8\" and this \
+         packet contains no Schedule 3; a `0` is a figure sworn to have been read off a page that \
+         does not exist. Paper: {got:?}"
     );
 }
 
@@ -971,5 +991,165 @@ fn a_line_9b_that_zeroes_the_niit_keeps_form_8960_in_the_packet() {
         "★ and with no allocation made, 9b is BLANK — never a computed zero. Two blanks look alike \
          on paper; a printed 0 here would swear the filer allocated nothing when they were never \
          asked. Cells: {twin_cells:?}"
+    );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// KAT 11 — FR-12: Form 8960 line 9d, a total added over three blank lines.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// ★★★ **FR-12 — THE PART II TOTAL THAT SWORE A ZERO ITS OWN OPERANDS NEVER SAID.**
+///
+/// Form 8960 line 9d is *"Add lines 9a, 9b, and 9c"* (`design/forms/extract/f8960--2024.txt:42`).
+/// It carries **no** *"enter -0-"* clause — Part II has none anywhere; the first one on the form is
+/// line 12's. So it is a [`Production::Combine`] in this repo's own census, whose transcribed rule is
+/// *"Blank iff every operand is blank."*
+///
+/// And on a btctax return all three operands can be blank at once. 9a (investment interest expense)
+/// and 9c (miscellaneous investment expenses) are **unmodelled — they have no field in
+/// `Form8960Lines` at all**, so they are blank on every packet this program has ever emitted. 9b is
+/// the filer's own §1411(c)(1)(B) allocation, `Option<Usd>`, and P8 made it blank-when-unasked for
+/// exactly this reason. The total then printed `0` over three empty cells: sworn testimony (26 USC
+/// §6065) that this filer worked Part II and it came to nothing.
+///
+/// ★★ **An unconditional blank is the mirror defect and this KAT rejects it too.** When the filer
+/// DOES allocate, 9d is the figure the form asks for and it must print — the same shape as FR-1,
+/// where Schedule 8812 line 12-No instructs `-0-` in as many words. The two households below are the
+/// two sides of that one instruction, read off the emitted PDF.
+///
+/// ★ The fixture is the P3-1 pair, reused deliberately: `a_line_9b_that_zeroes_the_niit_keeps_form_
+/// 8960_in_the_packet` already establishes that BOTH of these households file Form 8960, so a failure
+/// here can only be about the figure on line 9d.
+///
+/// **Plant:** `let line9d = Some(line9b.unwrap_or(Usd::ZERO));` (the shipped hardcode) ⇒ the first
+/// household reds; `let line9d = None;` ⇒ the second reds. Both were watched.
+#[test]
+fn form_8960_line_9d_is_blank_unless_the_filer_allocated_something_to_part_ii() {
+    let mut i = zero_inputs("Single");
+    i.w2_income = 300_000.0; // MAGI far over the $200,000 Single threshold ⇒ the form files
+    i.taxable_interest = 6_000.0; // real net investment income
+    i.state_income_tax = 20_000.0; // 5a — puts the 9b bound at the $10,000 §164(b)(6) cap
+    i.mortgage_interest = 30_000.0; // …and makes the return itemize, or the bound is $0
+
+    // ── A filer who allocated NOTHING to Part II. 9a, 9b and 9c are all blank, so their sum is not
+    //    a figure this return contains.
+    let (mut ri, state) = build_golden_return(&i);
+    ri.form_8960_line9b = None;
+    answer_all_live_declarations(&mut ri);
+    let filed = file(&ri, &state);
+    let paper = cells(&filed.forms, "f8960", F8960_MAP_2024);
+    assert_eq!(
+        paper.get("line9b").map(String::as_str),
+        None,
+        "premise: 9b is blank (P8). If this ever prints, the fixture has left the region."
+    );
+    assert!(
+        !paper.contains_key("line9d"),
+        "Form 8960 line 9d must be BLANK when 9a, 9b and 9c all are. \"Add lines 9a, 9b, and 9c\" \
+         carries no \"-0-\" clause, and a sum over three empty cells is not a figure the filer \
+         supplied — printing 0 swears they worked Part II and allocated nothing. Paper: {:?}",
+        paper.get("line9d")
+    );
+
+    // ── The same filer, having allocated $7,000 of state income tax. Now 9b is on the paper, so
+    //    "Add lines 9a, 9b, and 9c" has an operand and the total is the form's own arithmetic.
+    let (mut ri, state) = build_golden_return(&i);
+    ri.form_8960_line9b = Some(dec!(7000));
+    answer_all_live_declarations(&mut ri);
+    let filed = file(&ri, &state);
+    let paper = cells(&filed.forms, "f8960", F8960_MAP_2024);
+    assert_eq!(
+        paper.get("line9d").map(String::as_str),
+        Some("7000"),
+        "…and it must PRINT the total once any operand exists: 9a and 9c are unmodelled (blank), so \
+         9d is 9b. Blanking it unconditionally would decline a figure the form asks for — the mirror \
+         defect. Paper: {paper:?}"
+    );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// KAT 12 — FR-27: 1040 line 20, an amount carried from a schedule that was never filed.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// ★★★ **FR-27 — THE CARRY FROM A FORM THAT DOES NOT EXIST.**
+///
+/// 1040 line 20 is *"Amount from Schedule 3, line 8"* (`design/forms/extract/f1040--2025.txt:112`).
+/// A [`Production::Carry`] — *"blank when the source line is blank"* — and, like line 19 beside it,
+/// carrying no *"enter -0-"* clause of its own. When btctax files no Schedule 3, there is no
+/// Schedule 3 line 8, and a `0` on line 20 is an amount transcribed from a document that was never
+/// written.
+///
+/// ★★ **The honest difficulty, and why the answer is still blank.** A `0` here is *arithmetically*
+/// right whenever the filer genuinely has no nonrefundable credits. The question is whether btctax
+/// omitted Schedule 3 because the FILER has none or because btctax **does not model** the credit —
+/// and those are indistinguishable on the page. Schedule 3 line 8 is *"Add lines 1 through 4, 5a, 5b,
+/// and 7"*, and of those seven operands btctax models exactly one: line 1, the foreign tax credit.
+/// Dependent-care (2441), education (8863), saver's (8880), residential clean energy and energy
+/// efficient home improvement (5695) and every §6a–6z other credit are §3.4 conservative omissions —
+/// which is why `Advisory::OtherCreditsOmitted` fires **unconditionally**: *"v1 captures no input
+/// that could establish eligibility, so it cannot know whether this filer qualifies, only that it
+/// did not try."* An absence btctax can never prove is not an absence it may swear to.
+///
+/// ★ **An unconditional blank is wrong too**, and the second household is the proof: a filer who paid
+/// with a Form 4868 extension files Schedule 3 for Part II alone. The schedule then EXISTS, its line
+/// 8 prints `0`, and line 20 is a true carry of a figure a reader can go and check. This KAT reads
+/// both forms and asserts the carry against the source cell, so the two cannot drift apart.
+///
+/// **Plant:** `let line20 = Some(sch_3.map_or(Usd::ZERO, |s| s.line8));` (the shipped hardcode) ⇒ the
+/// first household reds; `let line20 = None;` ⇒ the second reds. Both were watched.
+#[test]
+fn form_1040_line_20_is_blank_unless_a_schedule_3_was_actually_filed() {
+    // ── No foreign tax credit, no excess Social Security, no extension payment ⇒ no Schedule 3.
+    let (mut ri, state) = build_golden_return(&GoldenInputs {
+        w2_income: 60_000.0,
+        ..zero_inputs("Single")
+    });
+    answer_all_live_declarations(&mut ri);
+    let filed = file(&ri, &state);
+    let names = form_names(&filed.forms);
+    assert!(
+        !names.contains("f1040s3"),
+        "premise: this household files NO Schedule 3. Packet: {names:?}"
+    );
+    let paper = cells(&filed.forms, "f1040", F1040_MAP_2024);
+    assert!(
+        !paper.contains_key("line20"),
+        "1040 line 20 must be BLANK when no Schedule 3 was filed. It reads \"Amount from Schedule 3, \
+         line 8\"; with no Schedule 3 there is no line 8, and a `0` is an amount sworn (26 USC \
+         §6065) to have been read off a form that does not exist. Six of Schedule 3 line 8's seven \
+         operands are credits btctax never models, so its absence is UNPROVEN, not established. \
+         Paper: {:?}",
+        paper.get("line20")
+    );
+
+    // ── The same household, having paid $1,000 with a Form 4868 extension. Schedule 3 Part II now
+    //    has something to say, so the schedule FILES — and its line 8 is on the paper to be carried.
+    let (mut ri, state) = build_golden_return(&GoldenInputs {
+        w2_income: 60_000.0,
+        ..zero_inputs("Single")
+    });
+    ri.payments.extension_payment = dec!(1000);
+    answer_all_live_declarations(&mut ri);
+    let filed = file(&ri, &state);
+    assert!(
+        form_names(&filed.forms).contains("f1040s3"),
+        "premise: an extension payment files Schedule 3 for Part II alone. Packet: {:?}",
+        form_names(&filed.forms)
+    );
+    let sch3 = cells(&filed.forms, "f1040s3", SCHEDULE_3_MAP_2024);
+    assert_eq!(
+        sch3.get("line8").map(String::as_str),
+        Some("0"),
+        "the SOURCE cell: Schedule 3 line 8 is on this filer's paper and reads 0. Cells: {sch3:?}"
+    );
+    let paper = cells(&filed.forms, "f1040", F1040_MAP_2024);
+    assert_eq!(
+        paper.get("line20").map(String::as_str),
+        sch3.get("line8").map(String::as_str),
+        "…so 1040 line 20 must carry it. \"Amount from Schedule 3, line 8\" is a transcription when \
+         the schedule exists, and blanking it unconditionally would decline a figure a reader can \
+         verify against the attached page. 1040: {:?}, Sch 3 line 8: {:?}",
+        paper.get("line20"),
+        sch3.get("line8")
     );
 }

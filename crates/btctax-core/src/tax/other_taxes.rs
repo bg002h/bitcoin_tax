@@ -273,8 +273,12 @@ pub fn form_8960(
 /// would swear the allocation IS zero (26 USC 6065). The emitter uses `push_money_opt`, so `None`
 /// writes nothing at all.
 ///
-/// The DERIVED totals are still printed, even at zero, because the form's arithmetic references
-/// them: line 9d (= 0), line 11 (= 0). A reader re-adding the column must find them.
+/// ★★★ **AND SO IS LINE 9d, SINCE FR-12** — the doc here used to read *"The DERIVED totals are still
+/// printed, even at zero, because the form's arithmetic references them: line 9d (= 0), line 11 (= 0).
+/// A reader re-adding the column must find them."* That was the rationale FR-12 was filed against.
+/// A reader re-adding *"Add lines 9a, 9b, and 9c"* over three blank cells arrives at nothing, not at
+/// zero; the printed 0 was an answer to a question this filer was never asked. Line 11 still prints —
+/// see its own field doc for why that half is filed rather than decided.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Form8960Lines {
     /// L1 — taxable interest (1040 line 2b).
@@ -295,10 +299,28 @@ pub struct Form8960Lines {
     /// collected on `ReturnInputs::form_8960_line9b` and bounded — never computed — by
     /// `RefuseReason::Nii9bExceedsDeductedSalt`. `None` ⇒ the cell stays BLANK.
     pub line9b: Option<Usd>,
-    /// L9d — add 9a/9b/9c. 9a and 9c are unmodelled ⇒ this is line 9b, or 0 when 9b is blank; the
-    /// form adds it, so it prints either way.
-    pub line9d: Usd,
-    /// L11 — total deductions and modifications = 9d + 10 ⇒ 0.
+    /// L9d — *"Add lines 9a, 9b, and 9c"*. **BLANK when all three operands are** (FR-12).
+    ///
+    /// ★★★ Part II carries no *"enter -0-"* clause anywhere — the first on the whole form is line
+    /// 12's — so this is a `Production::Combine`, whose transcribed rule is *"blank iff every operand
+    /// is blank"*. And all three CAN be blank at once here: 9a (investment interest expense) and 9c
+    /// (miscellaneous investment expenses) are unmodelled and have no field in this struct at all, and
+    /// 9b is [`Self::line9b`], blank whenever the filer allocated nothing. A `0` over three empty
+    /// cells is not the form's arithmetic; it is testimony (26 USC §6065) that Part II was worked and
+    /// came to nothing, from a filer who was asked one of its three questions and answered none.
+    ///
+    /// ★ The mirror defect is rejected too: once 9b carries an allocation, 9d is the figure the form
+    /// asks for and it prints. `= line9b`, because 9a and 9c are structurally blank.
+    pub line9d: Option<Usd>,
+    /// L11 — *"Total deductions and modifications. Add lines 9d and 10"* ⇒ `= line9d`, and PRINTED
+    /// even when 9d is blank.
+    ///
+    /// ★★ **That is the same question FR-12 answered one line up, and it is deliberately NOT answered
+    /// here.** Line 11 and 1040 line 21 (*"Add lines 19 and 20"*) are one shape: a `Combine` whose
+    /// operands all became blank-capable in the same sweep. FR-1 decided line 21 explicitly — *"a
+    /// blank operand contributes nothing to the sum … so L21 stays a `Usd` and stays printed"* — five
+    /// commits before this one, and an implementer does not silently reverse a reviewed decision on a
+    /// line it was not sent to fix. The pair is filed as FR-39; whatever is decided there binds both.
     pub line11: Usd,
     /// L12 — "Net investment income. Subtract Part II, line 11, from Part I, line 8. … **If zero or
     /// less, enter -0-**." The floor is the form's own, and it is load-bearing: the form files on
@@ -367,11 +389,15 @@ pub fn form_8960_lines(
     let line8 = line1 + line2 + line5d + line7; // 3, 4c, 6 blank
                                                 // ★ 9b is the filer's own allocation, BLANK when they made none — never a computed 0.
     let line9b = line9b_collected.map(round_dollar);
-    let line9d = line9b.unwrap_or(Usd::ZERO); // "Add lines 9a, 9b, and 9c" — 9a/9c unmodelled
-    let line11 = line9d; // …+ line 10 (unmodelled), but the form adds it, so it prints
-                         // ★ L12 — "Subtract Part II, line 11, from Part I, line 8. … If zero or less, enter -0-."
-                         //   The floor is the FORM's, transcribed. It is what keeps line 16 out of the negative
-                         //   region in a capital-loss year now that the form files on MAGI rather than on tax.
+    // ★ FR-12 — "Add lines 9a, 9b, and 9c" over three cells that can all be blank. 9a and 9c are
+    //   unmodelled (no field exists), so the sum IS 9b — and when 9b is blank the sum has no operands
+    //   and no figure. Never `unwrap_or(ZERO)`: that is the affirmative zero this line existed to stop.
+    let line9d = line9b;
+    // …+ line 10 (unmodelled). Line 11 stays PRINTED — see its field doc; that half is FR-39.
+    let line11 = line9d.unwrap_or(Usd::ZERO);
+    // ★ L12 — "Subtract Part II, line 11, from Part I, line 8. … If zero or less, enter -0-."
+    //   The floor is the FORM's, transcribed. It is what keeps line 16 out of the negative
+    //   region in a capital-loss year now that the form files on MAGI rather than on tax.
     let line12 = (line8 - line11).max(Usd::ZERO);
 
     let line13 = round_dollar(agi);
@@ -750,7 +776,9 @@ mod tests {
         assert_eq!(l.line5d, dec!(20000));
         assert_eq!(l.line7, dec!(2000));
         assert_eq!(l.line8, dec!(37000));
-        assert_eq!(l.line9d, Usd::ZERO); // printed, not blank: the form adds it
+        // ★ FR-12 — 9d is BLANK: "Add lines 9a, 9b, and 9c" over three empty cells. Line 11 still
+        //   prints (its own doc says why that half is filed, not decided).
+        assert_eq!(l.line9d, None);
         assert_eq!(l.line11, Usd::ZERO);
         assert_eq!(l.line12, dec!(37000));
         assert_eq!(l.line13, dec!(300000));
@@ -966,7 +994,11 @@ mod tests {
                 l.line1 + l.line2 + l.line5d + l.line7,
                 "L8 = 1+2+5d+7"
             );
-            assert_eq!(l.line11, l.line9d, "L11 = 9d + 10 (10 blank)");
+            assert_eq!(
+                l.line11,
+                l.line9d.unwrap_or(Usd::ZERO),
+                "L11 = 9d + 10 (10 blank; a blank 9d adds nothing)"
+            );
             assert_eq!(l.line12, l.line8 - l.line11, "L12 = 8 − 11");
             assert_eq!(
                 l.line15,
@@ -983,10 +1015,15 @@ mod tests {
                 round_dollar(NIIT_RATE * l.line16.max(Usd::ZERO)),
                 "L17 = 3.8% × 16"
             );
+            // ★ 9d is `Option`: a blank cell has no fraction to check, and flattening it with
+            //   `unwrap_or(ZERO)` here would quietly re-admit the FR-12 zero into the invariant.
             for cell in [
-                l.line1, l.line2, l.line5a, l.line5d, l.line7, l.line8, l.line9d, l.line11,
-                l.line12, l.line13, l.line14, l.line15, l.line16, l.line17,
-            ] {
+                l.line1, l.line2, l.line5a, l.line5d, l.line7, l.line8, l.line11, l.line12,
+                l.line13, l.line14, l.line15, l.line16, l.line17,
+            ]
+            .into_iter()
+            .chain(l.line9d)
+            {
                 assert_eq!(
                     cell.fract(),
                     Usd::ZERO,

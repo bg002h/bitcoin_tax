@@ -742,9 +742,9 @@ Check what this feature actually produced: open the Form 8275 PDF and confirm th
     dependent. File Schedule 8812 yourself and carry its line 14 to line 19.
   • OTHER CREDITS NOT COMPUTED — v1 does not compute the education (Form 8863),
     dependent-care (Form 2441), retirement-savings/saver's (Form 8880), residential-energy
-    (Form 5695) or adoption (Form 8839) credits: Schedule 3 Part I is $0 apart from the
-    foreign tax credit. If you qualify for any of them your tax is OVERSTATED — claim them
-    yourself.
+    (Form 5695) or adoption (Form 8839) credits: the foreign tax credit is the only
+    nonrefundable credit that ever reaches Schedule 3 Part I. If you qualify for any of them
+    your tax is OVERSTATED — claim them yourself.
   • REFUND BY PAPER CHECK — your return is due a refund of $8,954.20, but v1 never fills the
     direct-deposit block (1040 lines 35b–35d). As filed, the IRS will mail a check. Add your
     routing and account numbers by hand if you want it deposited.
@@ -1079,9 +1079,9 @@ Schedule D (raw pre-netting part totals) — tax year 2024
   ── ADVISORIES (4) ──
   • OTHER CREDITS NOT COMPUTED — v1 does not compute the education (Form 8863),
     dependent-care (Form 2441), retirement-savings/saver's (Form 8880), residential-energy
-    (Form 5695) or adoption (Form 8839) credits: Schedule 3 Part I is $0 apart from the
-    foreign tax credit. If you qualify for any of them your tax is OVERSTATED — claim them
-    yourself.
+    (Form 5695) or adoption (Form 8839) credits: the foreign tax credit is the only
+    nonrefundable credit that ever reaches Schedule 3 Part I. If you qualify for any of them
+    your tax is OVERSTATED — claim them yourself.
   • DATE OF BIRTH NOT ON FILE — the §63(f) additional standard deduction for age 65+ ($1,550
     per box) was NOT granted, because v1 never assumes a birthdate. If you (or your spouse)
     are 65 or older, enter the date of birth and re-run: your tax is currently OVERSTATED.

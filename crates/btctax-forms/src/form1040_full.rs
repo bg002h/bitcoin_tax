@@ -155,12 +155,15 @@ pub fn fill_form_1040_full_with_map(
 
     // ── Page 2, AMOUNT column. ──────────────────────────────────────────────────────────────────
     //
-    // ★★★ FR-1 — the values are `Option<Usd>` so that line 19 can be BLANK, and every OTHER line keeps
-    //     saying `Some(..)` in one place where a reader can see it. Which of the two line 19 is gets
-    //     decided in `btctax-core` (`advisories::ctc_odc_line19`); this crate must never make that
-    //     call itself — a §24(b) predicate in the emitter is the emitter answering 8812 for the filer.
+    // ★★★ FR-1 / FR-27 — the values are `Option<Usd>` so that lines 19 and 20 can be BLANK, and every
+    //     OTHER line keeps saying `Some(..)` in one place where a reader can see it. Which of the two
+    //     each blank-capable line is gets decided in `btctax-core` — line 19 by
+    //     `advisories::ctc_odc_line19`, line 20 by whether `printed::schedule_3_lines` produced a
+    //     schedule at all. This crate must never make either call itself: a §24(b) predicate in the
+    //     emitter is the emitter answering Schedule 8812 for the filer, and a "does this household
+    //     have any nonrefundable credit?" predicate here is the emitter answering Schedule 3.
     //
-    // ★ Line 19 stays IN the array, keeping its descent ordinal, rather than moving to a conditional
+    // ★ Both stay IN the array, keeping their descent ordinals, rather than moving to a conditional
     //   push: the group's ordinals are what `verify_flat` checks the printed rows descend by, and an
     //   optional line hoisted out of the sequence would renumber every line below it on the blank
     //   return and not on the phased-out one.
@@ -169,7 +172,9 @@ pub fn fill_form_1040_full_with_map(
         (need(&map.line17, "line17", y)?, Some(lines.line17)),
         (need(&map.line18, "line18", y)?, Some(lines.line18)),
         (need(&map.line19, "line19", y)?, lines.line19),
-        (need(&map.line20, "line20", y)?, Some(lines.line20)),
+        // 20 — "Amount from Schedule 3, line 8", `None` when no Schedule 3 was filed. Core decides
+        //      (FR-27); this crate transcribes the `Option` it is handed and reasons about nothing.
+        (need(&map.line20, "line20", y)?, lines.line20),
         (need(&map.line21, "line21", y)?, Some(lines.line21)),
         (need(&map.line22, "line22", y)?, Some(lines.line22)),
         (need(&map.line23, "line23", y)?, Some(lines.line23)),

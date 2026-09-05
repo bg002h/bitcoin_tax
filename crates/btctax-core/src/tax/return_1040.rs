@@ -6152,7 +6152,10 @@ mod tests {
                 // ★ FR-1 — no dependents on this fixture, so Schedule 8812 line 12 is not
                 //   provably "No" and 1040 line 19 is BLANK, not a sworn $0.
                 line19: None,
-                line20: z,
+                // ★ FR-27 — and line 20 is BLANK for the same reason one line down: this household
+                //   files no Schedule 3 (line 31 is z and there is no credit), so "Amount from
+                //   Schedule 3, line 8" names a page the packet does not contain.
+                line20: None,
                 line21: z,
                 line22: z,
                 line23: z,
@@ -8235,10 +8238,12 @@ mod tests {
             f8960.line9b, None,
             "line 9b must stay BLANK — a computed 0 would swear the allocable state tax IS zero"
         );
+        // ★★★ FR-12 — and 9d, which is "Add lines 9a, 9b, and 9c" over those same three blanks. This
+        //     line asserted `Usd::ZERO` for two releases: the assertion ENCODED the defect, holding
+        //     the fabricated zero in place while reading like a check on it.
         assert_eq!(
-            f8960.line9d,
-            Usd::ZERO,
-            "9d = 9a + 9b + 9c over three blanks"
+            f8960.line9d, None,
+            "9d = 9a + 9b + 9c over three blanks — a sum with no operands is not a figure"
         );
     }
 

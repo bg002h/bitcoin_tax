@@ -1913,6 +1913,10 @@ pub fn cover_form8960lines(l: &crate::tax::other_taxes::Form8960Lines) -> Covera
         Production::Collected,
         "State, local, and foreign income tax (see instructions)",
     );
+    // ★★ BLANK-CAPABLE, and this is the census entry the code used to contradict (FR-12).
+    //    `Production::Combine` is defined three lines from where it was written as *"blank iff every
+    //    operand is blank"*, and 9a/9c are unmodelled while 9b is `Option` — so all three operands
+    //    can be blank at once, and the line printed `0` anyway.
     c.line(
         *line9d,
         f,
@@ -1977,7 +1981,7 @@ fn zero_form8960lines() -> crate::tax::other_taxes::Form8960Lines {
         line7: Usd::ZERO,
         line8: Usd::ZERO,
         line9b: None,
-        line9d: Usd::ZERO,
+        line9d: None,
         line11: Usd::ZERO,
         line12: Usd::ZERO,
         line13: Usd::ZERO,
@@ -2378,6 +2382,8 @@ pub fn cover_form1040lines(l: &crate::tax::printed::Form1040Lines) -> Coverage {
         Production::Carry,
         "Child tax credit or credit for other dependents from Schedule 8812",
     );
+    // ★★ BLANK-CAPABLE since FR-27. `Production::Carry` is defined as *"blank when the source line is
+    //    blank"*, and with no Schedule 3 in the packet the source line does not exist at all.
     c.line(
         *line20,
         "f1040",
@@ -2517,7 +2523,7 @@ fn zero_form1040lines() -> crate::tax::printed::Form1040Lines {
         line17: Usd::ZERO,
         line18: Usd::ZERO,
         line19: None,
-        line20: Usd::ZERO,
+        line20: None,
         line21: Usd::ZERO,
         line22: Usd::ZERO,
         line23: Usd::ZERO,
