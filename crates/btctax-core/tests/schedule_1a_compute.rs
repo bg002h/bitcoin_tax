@@ -320,3 +320,179 @@ fn a_filer_claiming_nothing_produces_a_blank_line_38() {
         "and 1040 13b adds a blank as nothing"
     );
 }
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// T6 — the worked examples, all five filing statuses, and the aggregate slope
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// ★★★ **The recon's two-senior worked example, and the 12¢-per-$1 aggregate slope.**
+///
+/// MFJ at MAGI $200,000: the senior threshold is $150,000, so line 33 is $50,000, line 34 is 6% of
+/// that = $3,000, and line 35 is $6,000 − $3,000 = **$3,000**. Line 35 is computed ONCE and lines
+/// 36a and 36b EACH enter it, so a two-senior couple's line 37 is **$6,000** — $3,000 each.
+///
+/// ★ That is why the couple loses **12¢ per $1** of MAGI in the band while each of them loses 6¢:
+/// the phase-out is per-person on a per-return excess. A design that computed line 35 twice, or that
+/// halved it, would be wrong in opposite directions and both would look plausible.
+#[test]
+fn two_seniors_mfj_at_200k_each_enter_3000_for_a_line37_of_6000() {
+    let p = p();
+    let f = Schedule1aFacts {
+        magi: dec!(200000),
+        status: FilingStatus::Mfj,
+        taxpayer_qualifies_as_senior: true,
+        spouse_qualifies_as_senior: true,
+    };
+    let v = Schedule1aPartV::compute(&p, &f);
+
+    assert_eq!(v.line33, Some(dec!(50000)), "L33 = 200,000 − 150,000");
+    assert_eq!(v.line34, Some(dec!(3000)), "L34 = 6% × 50,000");
+    assert_eq!(
+        v.line35,
+        Some(dec!(3000)),
+        "L35 = 6,000 − 3,000, computed ONCE"
+    );
+    assert_eq!(v.line36a, Some(dec!(3000)), "the taxpayer enters line 35");
+    assert_eq!(
+        v.line36b,
+        Some(dec!(3000)),
+        "and the spouse enters the SAME line 35"
+    );
+    assert_eq!(v.line37, Some(dec!(6000)), "L37 = 36a + 36b");
+
+    // The slope, stated as a property rather than a second literal: one more dollar of MAGI costs
+    // the couple 12¢ and each of them 6¢.
+    let f2 = Schedule1aFacts {
+        magi: dec!(201000),
+        ..f
+    };
+    let v2 = Schedule1aPartV::compute(&p, &f2);
+    assert_eq!(
+        v.line37.unwrap() - v2.line37.unwrap(),
+        dec!(120),
+        "$1,000 more MAGI costs a two-senior couple $120 — 6% of 1,000 = $60 PER PERSON, twice. \
+         That is the 12¢-per-$1 aggregate slope, and it is why line 35 is computed once and \
+         entered twice rather than being halved."
+    );
+}
+
+/// ★★ **All five filing statuses.** S-3's caps and S-5's MFS bar are status-dependent, and three of
+/// the five statuses are neither MFJ nor MFS — a test that only checks the MFJ/MFS poles would miss
+/// that Single, HoH and QSS all take the BASE threshold, which is what the Part IV instructions say
+/// in exactly those words: *"Married filing jointly—$200,000. All other filing statuses—$100,000."*
+#[test]
+fn every_filing_status_takes_the_right_threshold_and_cap() {
+    let p = p();
+    for status in [
+        FilingStatus::Single,
+        FilingStatus::HoH,
+        FilingStatus::Qss,
+        FilingStatus::Mfj,
+        FilingStatus::Mfs,
+    ] {
+        let want_qpvli = if matches!(status, FilingStatus::Mfj) {
+            dec!(200000)
+        } else {
+            dec!(100000)
+        };
+        assert_eq!(
+            p.qpvli_phase_out.threshold_for(status),
+            want_qpvli,
+            "Part IV threshold for {status:?}"
+        );
+
+        // The tips cap does NOT vary by status — the instructions say so twice, including
+        // "regardless of your filing status" — while the overtime cap DOES double for MFJ.
+        let f = facts(dec!(50000), status);
+        let ii = Schedule1aPartII::compute(&p, &f, Some(dec!(99999)), None);
+        let iii = Schedule1aPartIII::compute(&p, &f, Some(dec!(99999)));
+        if matches!(status, FilingStatus::Mfs) {
+            assert_eq!(ii.line7, None, "MFS is barred from Part II entirely");
+            assert_eq!(iii.line15, None, "…and Part III");
+        } else {
+            assert_eq!(
+                ii.line7,
+                Some(p.tips_cap),
+                "the tips cap is per RETURN for {status:?}"
+            );
+            let want_ot = if matches!(status, FilingStatus::Mfj) {
+                p.overtime_cap_mfj
+            } else {
+                p.overtime_cap
+            };
+            assert_eq!(iii.line15, Some(want_ot), "overtime cap for {status:?}");
+        }
+    }
+}
+
+/// ★ **Filing is gated on `L38 > 0`.** A schedule computed but empty must not be attached: an
+/// attached page of blanks is a claim that the filer worked it.
+#[test]
+fn the_schedule_is_filed_only_when_line_38_is_positive() {
+    let none_claimed = Schedule1A::compute(
+        2025,
+        dec!(80000),
+        FilingStatus::Single,
+        &Schedule1aInputs::default(),
+        false,
+        false,
+    )
+    .unwrap();
+    assert_eq!(
+        none_claimed.part6.line38, None,
+        "nothing claimed ⇒ nothing to file"
+    );
+
+    let claimed = Schedule1A::compute(
+        2025,
+        dec!(80000),
+        FilingStatus::Single,
+        &one_qualifying_vehicle(dec!(1)),
+        false,
+        false,
+    )
+    .unwrap();
+    assert_eq!(
+        claimed.part6.line38,
+        Some(dec!(1)),
+        "even a $1 qualifying deduction is a filed schedule — the gate is `> 0`, not a threshold"
+    );
+}
+
+/// ★★ **Line 37 — the SENIOR SUBTOTAL — is what reaches Form 6251 line 1a, NOT line 38.**
+///
+/// The AMT add-back is the §151(d)(5) senior deduction alone; the other three parts are not added
+/// back. Wiring line 38 there would add tips, overtime and car-loan interest to alternative minimum
+/// taxable income, overstating AMT for every filer who claims any of them.
+#[test]
+fn form_6251_takes_the_senior_subtotal_line_37_not_the_total_line_38() {
+    let p = p();
+    let f = Schedule1aFacts {
+        magi: dec!(80000),
+        status: FilingStatus::Single,
+        taxpayer_qualifies_as_senior: true,
+        spouse_qualifies_as_senior: false,
+    };
+    let v = Schedule1aPartV::compute(&p, &f);
+    let s = Schedule1A::compute(
+        2025,
+        dec!(80000),
+        FilingStatus::Single,
+        &one_qualifying_vehicle(dec!(4000)),
+        true,
+        false,
+    )
+    .unwrap();
+
+    assert_eq!(s.part5.line37, v.line37, "Part V is unaffected by Part IV");
+    assert_ne!(
+        s.part6.line38, s.part5.line37,
+        "the fixture must make the two DIFFER, or this test cannot discriminate"
+    );
+    assert_eq!(
+        s.part6.line38,
+        Some(v.line37.unwrap() + dec!(4000)),
+        "line 38 adds the car-loan deduction; line 37 does not — so a Form 6251 add-back reading \
+         line 38 would inflate AMTI by the other three parts"
+    );
+}

@@ -6,6 +6,16 @@ _Last updated: **2026-09-04**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
+> ## ★★★ THE LIVE ROADMAP TRACKER IS `design/ROADMAP_STATUS.md`
+> **Read that first.** It is the progress ledger for `design/LONG_RANGE_PLAN_filing.md` and is updated
+> on every task that closes — P1's T1–T7, P2's per-form artifacts, and what still blocks P3. This
+> section below is the 2026-09-04 snapshot and is **historical**; where the two disagree, the tracker
+> is current.
+>
+> As of **2026-09-05**: P1 has T1–T5 done (Schedule 1-A computes end to end and reaches 1040 line
+> 13b), T6 is in progress, T7 is not started. P2 went from **5 to 15** of 17 TY2025 bundled form
+> artifacts. P3 is untouched — the TY2025 fail-closed gate stays until `FullReturnParams` land.
+
 ## ① READ THIS FIRST — the goal changed scope
 
 The owner's goal is **filing a COMPLETE US federal return**, not the bitcoin slice. A four-agent
