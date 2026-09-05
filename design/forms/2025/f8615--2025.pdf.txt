@@ -1,0 +1,14 @@
+https://www.irs.gov/pub/irs-prior/f8615--2025.pdf
+
+# f8615--2025.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  f1a9ce61a62faa917fd9a565805de69bf132313a6070010dfd77cfb2ca3bcb57
+# bytes   79087
+#
+# Fetch:    curl -sL -o f8615--2025.pdf https://www.irs.gov/pub/irs-prior/f8615--2025.pdf
+# Verify:   sha256sum f8615--2025.pdf   # must equal the sha256 above
+#
+# ★ A DIFFERENT hash does not mean a corrupt download — it means the IRS REVISED this
+# document. That is a change to the authority: review it, never silently absorb it.
+#
+# The committed text layer is design/forms/extract/f8615--2025.txt — that is what the
+# conformance tests read, so they run with no PDF and no network.

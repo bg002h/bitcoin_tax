@@ -1083,8 +1083,36 @@ pub(crate) fn fold_event(
                 None => match donor_acquired_at {
                     Some(d) => {
                         // Case 3: GiftFmvFallback — derive basis from BTC price at donor's acquisition date.
+                        //
+                        // ★★★ FR-32: the §1015(a) LOSS CAP applies here exactly as in Case 2. The
+                        // statute (archived: legal/primary-sources/statute-irc/26USC_s1015.html)
+                        // blesses this very reconstruction — "If the Secretary finds it impossible
+                        // to obtain such facts, THE BASIS IN THE HANDS OF SUCH DONOR ... shall be
+                        // the fair market value ... as of the date ... such property was acquired
+                        // by such donor" — so the reconstructed figure IS "such basis", and the
+                        // first sentence's cap is stated in terms of "such basis": "if such basis
+                        // ... is greater than the fair market value of the property at the time of
+                        // the gift, then for the purpose of determining loss the basis shall be
+                        // such fair market value."
+                        // Until 2026-09-05 this arm returned `None` for the dual basis, so
+                        // identical economics gave a capped loss when the donor's basis was KNOWN
+                        // and an uncapped, statute-barred loss when it was RECONSTRUCTED. That
+                        // understates tax.
                         match fmv_of(prices, *d, *sat) {
-                            Some(fmv) => (fmv, None, BasisSource::GiftFmvFallback, false),
+                            Some(reconstructed) if *fmv_at_gift >= reconstructed => {
+                                // FMV at gift ≥ basis — single carryover, no dual. (Case 1's shape.)
+                                (reconstructed, None, BasisSource::GiftFmvFallback, false)
+                            }
+                            Some(reconstructed) => {
+                                // FMV at gift < basis — dual: gain basis = donor basis, loss basis
+                                // = FMV at gift. (Case 2's shape.)
+                                (
+                                    reconstructed,
+                                    Some(*fmv_at_gift),
+                                    BasisSource::GiftFmvFallback,
+                                    false,
+                                )
+                            }
                             None => {
                                 // Price unavailable at donor acquisition date → basis indeterminate.
                                 st.add_blocker(

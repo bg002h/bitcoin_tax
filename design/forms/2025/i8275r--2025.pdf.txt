@@ -1,0 +1,13 @@
+https://www.irs.gov/pub/irs-pdf/i8275r.pdf
+
+# i8275r--2025.pdf — IRS primary source, NOT committed (publicly available; keeps the repo small).
+# sha256  0e8fc129510766bf34432880b673c7c18b3c69b6256f13118ee829808bb23b07
+# bytes   151763
+#
+# ★ CASE 3 of design/forms/README.md sourcing: 8275-R is a PERIODIC form ("Rev. Month Year"),
+# and irs-prior holds no year-pinned edition — so this note records the MOVING irs-pdf URL
+# deliberately. A changed hash means the IRS revised it; review, never silently absorb.
+#
+# Verify:   sha256sum i8275r--2025.pdf   # must equal the sha256 above
+#
+# The committed text layer is design/forms/extract/i8275r--2025.txt.

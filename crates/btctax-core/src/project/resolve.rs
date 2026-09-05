@@ -3,7 +3,7 @@ use crate::conventions::{tax_date, Sat, TaxDate, Usd, TRANSITION_DATE, TY2025_RE
 use crate::event::*;
 use crate::identity::{EventId, LotId, SourceRef, WalletId};
 use crate::price::{fmv_of, PriceProvider};
-use crate::project::{FeeTreatment, LotMethod, ProjectionConfig};
+use crate::project::{pairing, FeeTreatment, LotMethod, ProjectionConfig};
 use crate::state::{Blocker, BlockerKind, Lot};
 use std::collections::{BTreeMap, BTreeSet};
 use time::{OffsetDateTime, UtcOffset};
@@ -819,6 +819,11 @@ pub fn resolve(
     // AFTER every pass-1e map is built (below the loop).
     let mut passthrough_skip: BTreeSet<EventId> = BTreeSet::new();
     let mut passthroughs: Vec<(EventId, EventId, EventId)> = Vec::new();
+    // [FR-31] Accepted `--to-wallet` links: (decision id, out_event, destination wallet). `links`
+    // alone cannot serve — it is keyed by out_event and drops the decision id the refusal must name.
+    // The FR-31 double-booking guard runs BELOW, after every pass-1e map is built (a ClassifyInbound
+    // may be appended AFTER the link, so the check cannot live in the collector arm).
+    let mut wallet_links: Vec<(EventId, EventId, WalletId)> = Vec::new();
 
     for (_seq, d) in &decisions {
         if voided.contains(&d.id) {
@@ -859,6 +864,9 @@ pub fn resolve(
                         }
                     }
                     if link_ok {
+                        if let TransferTarget::Wallet(w) = &tl.in_event_or_wallet {
+                            wallet_links.push((d.id.clone(), tl.out_event.clone(), w.clone()));
+                        }
                         links.insert(tl.out_event.clone(), tl.in_event_or_wallet.clone());
                     }
                 }
@@ -1109,6 +1117,118 @@ pub fn resolve(
             // (duplicate detection above), so this never disturbs another passthrough's membership.
             passthrough_skip.remove(in_ev);
             passthrough_skip.remove(out_ev);
+        }
+    }
+
+    // ── 1e-FR31. [FR-31] self-transfer DOUBLE-BOOKING guard (Critical understatement path) ───────
+    // `--to-wallet` names a DESTINATION, not an in-event, so the `consumed_ins` block above (which is
+    // reachable only on the `InEvent` arm) never marks the arriving deposit consumed. The link then
+    // RELOCATES the real lot into `w` (`Op::SelfTransfer`) while the deposit at `w`, once classified,
+    // mints a FRESH ORIGIN lot for the very same coins (`Op::SelfTransferInbound` / `IncomeInbound` /
+    // `GiftReceived`) — pool doubled, basis doubled, tax UNDERSTATED. FR9 conservation is sat-only and
+    // is structurally blind to it: the phantom lot bumps `sigma_in` and `sigma_held` by the same
+    // amount, so `balanced` stays true. Measured: 1 BTC bought for $50,000, moved once → 2 lots,
+    // 2 BTC held, $100,000 basis, `balanced: true`, ZERO blockers.
+    //
+    // This REFUSES; it never repairs. Which in-leg a `--to-wallet` link meant is the filer's
+    // testimony, and the owner's self-transfer policy is "matched pairs are CONFIRMED, not auto" — so
+    // no decision is excluded and no pairing is applied here. A Hard blocker gates every year
+    // (`compute_tax_year` step (1)), which is the fail-closed answer: the filer names the pairing with
+    // `link-transfer --to-event` / `match-self-transfers`, or voids whichever decision is wrong.
+    //
+    // The pairing predicate is `project::pairing` — the SAME definition `match-self-transfers` uses to
+    // PROPOSE pairs, so the tool cannot propose a pairing here that it refuses to notice there.
+    // An UNCLASSIFIED matching deposit is included deliberately: it doubles nothing yet, but it carries
+    // a Hard `UnknownBasisInbound`, which is the exact selection key of
+    // `bulk-classify-inbound-self-transfer` — the tool's own blocker routes the filer into the doubling.
+    //
+    // Indexed by destination wallet so the scan is O(links + deposits), not O(links x events): a
+    // ledger with hundreds of `--to-wallet` links and tens of thousands of imported rows would
+    // otherwise pay a quadratic sweep on every projection.
+    let mut ins_by_wallet: BTreeMap<&WalletId, Vec<(&EventId, &LedgerEvent)>> = BTreeMap::new();
+    if !wallet_links.is_empty() {
+        for (in_ev, in_raw) in &by_id {
+            let Some(w) = in_raw.wallet.as_ref() else {
+                continue;
+            };
+            if !matches!(
+                applied.get(in_ev).unwrap_or(&in_raw.payload),
+                EventPayload::TransferIn(_)
+            ) {
+                continue;
+            }
+            ins_by_wallet.entry(w).or_default().push((in_ev, in_raw));
+        }
+    }
+    for (dec_id, out_ev, dest) in &wallet_links {
+        // A link only relocates when its out_event really is a TransferOut — `build_op` consults
+        // `links` in the TransferOut arm alone. Read the EFFECTIVE payload (so a ClassifyRaw'd row
+        // that BECAME a TransferOut is covered, and one that stopped being one is not).
+        let Some(out_raw) = by_id.get(out_ev) else {
+            continue;
+        };
+        let out_payload = applied.get(out_ev).unwrap_or(&out_raw.payload);
+        let EventPayload::TransferOut(out_t) = out_payload else {
+            continue;
+        };
+        let out_leg = pairing::OutLeg {
+            principal_sat: out_t.sat,
+            fee_sat: out_t.fee_sat,
+            txid: out_t.txid.as_deref(),
+            date: tax_date(out_raw.utc_timestamp, out_raw.original_tz),
+        };
+        // Same wallet on both ends ⇒ passthrough topology (the deposit precedes the withdrawal);
+        // otherwise a relocation (the withdrawal precedes the arrival). A wallet-less out-leg cannot
+        // equal `dest`, so it takes the relocation window — the ordinary case.
+        let topology = if out_raw.wallet.as_ref() == Some(dest) {
+            pairing::PairTopology::Passthrough
+        } else {
+            pairing::PairTopology::Relocation
+        };
+        // Only deposits AT the wallet this link relocates into can be its other leg.
+        for (in_ev, in_raw) in ins_by_wallet.get(dest).map(Vec::as_slice).unwrap_or(&[]) {
+            let in_payload = applied.get(*in_ev).unwrap_or(&in_raw.payload);
+            let EventPayload::TransferIn(in_t) = in_payload else {
+                continue;
+            };
+            // Consumed by some link (`Op::Skip` — the lots are relocated ONTO it) or dropped by an
+            // accepted passthrough (`Op::Skip`): either way it mints no origin lot, so there is
+            // nothing booked twice.
+            if consumed_ins.contains(in_ev) || passthrough_skip.contains(in_ev) {
+                continue;
+            }
+            let in_leg = pairing::InLeg {
+                sat: in_t.sat,
+                txid: in_t.txid.as_deref(),
+                date: tax_date(in_raw.utc_timestamp, in_raw.original_tz),
+            };
+            if !pairing::legs_could_be_one_movement(&in_leg, &out_leg, topology) {
+                continue;
+            }
+            blockers.push(Blocker {
+                kind: BlockerKind::SelfTransferDoubleBooked,
+                event: Some((*in_ev).clone()),
+                detail: format!(
+                    "self-transfer double-booking: decision {dec} links outflow {out} to \
+                     DESTINATION WALLET {wallet} (`--to-wallet` names no in-event), and deposit \
+                     {in_} at that wallet ({in_sat} sat on {in_date}, against {out_sat} sat on \
+                     {out_date}) is plausibly the SAME movement and is consumed by no link. \
+                     Booking both relocates the coins INTO {wallet} and ALSO mints a fresh origin \
+                     lot for them there — the same coins twice, doubling the pool and the basis, \
+                     which UNDERSTATES tax. btctax will not guess which deposit the link meant. \
+                     Name the pairing: `reconcile void {dec}`, then `reconcile link-transfer {out} \
+                     --to-event {in_}` (or `reconcile match-self-transfers {in_} {out}`). If they \
+                     are genuinely different movements, void whichever decision is wrong",
+                    dec = dec_id.canonical(),
+                    out = out_ev.canonical(),
+                    in_ = in_ev.canonical(),
+                    wallet = dest.label(),
+                    in_sat = in_leg.sat,
+                    in_date = in_leg.date,
+                    out_sat = out_leg.principal_sat,
+                    out_date = out_leg.date,
+                ),
+            });
         }
     }
 
@@ -1387,6 +1507,9 @@ pub fn resolve(
     //   - principal conservation (§A.4(a)): Σ picked sat MUST equal the disposal's principal sat. The
     //     on-chain `fee_sat` is excluded and consumes FIFO from the post-selection remainder. NOTE
     //     (from Task 2): the pool's `consume_picks` returns shortfall=0, so this Σ check MUST live here.
+    //   - TIMELINESS (FR-33, §1.1012-1(j)(2)): an UNATTESTED selection whose made-date is AFTER the
+    //     named disposition's tax-date is not an identification at all → advisory `LotSelectionPostHoc`.
+    //     This is the §A.4 sibling of the `MethodElectionBackdated` guard forty lines above.
     // Existence / per-wallet / over-draw are surfaced in the fold (the pool's `selection_error` raises
     // `LotSelectionInvalid`). Every rejection DROPS the selection so the fold falls back to method
     // order — Σsat/Σbasis stay conserved on every path.
@@ -1394,10 +1517,29 @@ pub fn resolve(
         .iter()
         .filter_map(|e| honoring_principal(&e.op).map(|s| (e.id.clone(), s)))
         .collect();
+    // FR-33 timeliness scope. §1.1012-1(j)(6) makes paragraph (j) applicable only to dispositions on
+    // or after 2025-01-01, so pre-`TRANSITION_DATE` disposals are OUT (they are also a closed year the
+    // optimizer already refuses to restate). `SelfTransfer` is OUT for the same reason
+    // `disposal_compliance` excludes it: the guard is scoped to the TAXABLE dispositions whose
+    // identification drives a reported basis/gain, and a self-transfer recognizes none. (The reg's
+    // (j)(1)/(j)(2) text does reach "transfers"; widening the guard to lot ROUTING between the filer's
+    // own wallets is a distinct behavioural change and is recorded as a follow-up, not smuggled here.)
+    let identification_deadline: BTreeMap<EventId, TaxDate> = timeline
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.op,
+                Op::Dispose { .. } | Op::GiftOut { .. } | Op::Donate { .. }
+            ) && e.date() >= TRANSITION_DATE
+        })
+        .map(|e| (e.id.clone(), e.date()))
+        .collect();
 
     let mut selections: BTreeMap<EventId, Vec<crate::event::LotPick>> = BTreeMap::new();
     let mut seen: BTreeSet<EventId> = BTreeSet::new(); // disposal_events already claimed (dup detection)
     let mut dup: BTreeSet<EventId> = BTreeSet::new();
+    // FR-33: disposal_event → (made-date, attested) of its single non-duplicate selection.
+    let mut made_at: BTreeMap<EventId, (TaxDate, bool)> = BTreeMap::new();
     for (_seq, d) in &decisions {
         if voided.contains(&d.id) {
             continue;
@@ -1414,6 +1556,12 @@ pub fn resolve(
             dup.insert(ls.disposal_event.clone());
             continue;
         }
+        // FR-33: record the made-date + attestation of the selection that WILL apply, for the
+        // timeliness pass below (run AFTER the Hard validations so an Advisory can never pre-empt one).
+        made_at.insert(
+            ls.disposal_event.clone(),
+            (tax_date(d.utc_timestamp, d.original_tz), ls.attested),
+        );
         selections.insert(ls.disposal_event.clone(), ls.lots.clone());
     }
     for id in &dup {
@@ -1442,6 +1590,53 @@ pub fn resolve(
                 true
             }
         }
+    });
+    // FR-33 / §1.1012-1(j)(2) TIMELINESS — deliberately the LAST §A.4 filter.
+    //
+    // A specific identification is made only if it exists "no later than the date and time of the
+    // sale, disposition, or transfer" (§1.1012-1(j)(2)). A LATE one is therefore no identification at
+    // all, and §1.1012-1(j)(1) supplies the consequence — the units are treated as sold in acquisition
+    // order — so we DROP it and the fold consumes by the method in force, exactly as every other §A.4
+    // rejection does. This is the reg's own remedy, NOT an invented refusal: it can only RAISE the
+    // reported gain (the cherry-pick is removed), never lower it, which is why the blocker is Advisory
+    // and the year still computes. `attested` is the §C.2 owner-sanctioned exception, where the filer
+    // swore a genuine contemporaneous identification exists in their books and this merely transcribes
+    // it (`optimize accept` with a narrow per-disposal attestation).
+    //
+    // ORDER IS LOAD-BEARING: this runs after the targeting + principal-conservation retain above, so a
+    // selection that is BOTH malformed and late still raises the HARD `LotSelectionInvalid` and gates
+    // the year. An Advisory must never pre-empt a Hard. (A late selection that would additionally fail
+    // a FOLD-level check — existence / per-wallet / over-draw — surfaces only this advisory, because
+    // the fold never sees a dropped selection; that is already true of every resolve-level rejection.)
+    selections.retain(|disposal, _picks| {
+        let Some(&(made, attested)) = made_at.get(disposal) else {
+            return true; // no recorded made-date (unreachable: every entry is inserted with one)
+        };
+        if attested {
+            return true;
+        }
+        // §1.1012-1(j)(6): paragraph (j) reaches only dispositions on or after 2025-01-01, and only
+        // the TAXABLE dispositions are in `identification_deadline` (see its construction above).
+        let Some(&deadline) = identification_deadline.get(disposal) else {
+            return true;
+        };
+        if made <= deadline {
+            return true;
+        }
+        blockers.push(Blocker {
+            kind: BlockerKind::LotSelectionPostHoc,
+            event: Some(disposal.clone()),
+            detail: format!(
+                "LotSelection was recorded {made} — AFTER the {deadline} disposition it names — and \
+                 carries no attestation, so it is not a specific identification (§1.1012-1(j)(2) \
+                 requires one no later than the date and time of the sale). It is IGNORED and this \
+                 disposal falls back to the method in force (§1.1012-1(j)(1)), which RAISES the \
+                 reported gain. To record a genuine contemporaneous identification made outside this \
+                 tool, use `optimize accept` with a narrow per-disposal attestation; otherwise \
+                 `reconcile void` the selection to clear this advisory"
+            ),
+        });
+        false
     });
 
     // ── 3. §7.4 / TP6 transition effectiveness ───────────────────────────────────────────────────

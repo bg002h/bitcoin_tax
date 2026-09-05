@@ -261,7 +261,14 @@ pub enum RefuseReason {
     /// unrefused, the filer files a Schedule C with a blank line A and a Form 8995 whose non-zero line 2
     /// totals an EMPTY column (c) — a deduction claimed for a business the return never names.
     ScheduleCNoBusinessDescription,
-    /// A claimable-as-dependent filer with unearned income over the §1(g) kiddie-tax threshold → Form 8615
+    /// A filer with unearned income over the §1(g) kiddie-tax threshold → Form 8615.
+    ///
+    /// ★★★ **FR-29: the SCREEN that raises this is gated on dependency, and Form 8615 is not.** Its
+    /// conditions are age + an earned-income support test + a living parent + not filing jointly
+    /// (`design/forms/extract/i1040gi--2025.txt:3927-3941`); dependency appears nowhere in them. So
+    /// this refusal is UNDER-raised: a self-supporting student escapes it and is taxed at their own
+    /// rates, which §1(g)(1) ("the greater of") makes an understatement. Do not read the wording
+    /// below as the rule — it is the current gate, and the gate is wrong.
     /// (the child's-rate `qdcgt_line16` would understate; the parent's rate is required — C1/F2).
     KiddieTax,
     /// QBI present (REIT §199A dividends or a REIT/PTP carryforward) with taxable-income-before-QBI ABOVE

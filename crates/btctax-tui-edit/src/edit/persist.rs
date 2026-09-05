@@ -975,10 +975,16 @@ pub fn persist_optimize_accept(
     use btctax_core::event::LotSelection;
     use btctax_core::EventPayload;
 
+    // FR-33: the §C.2 attestation rides the LEDGER EVENT, not only the side-table, so the projection
+    // stays a pure function of the event log (§7.1) and the resolver's §1.1012-1(j)(2) timeliness guard
+    // does not drop the owner-sanctioned attested recording. Derived from the SAME `attestation` the
+    // side-table row is written from, so the two can never disagree.
+    let attested = attestation.is_some();
     let pre = session.snapshot()?;
     let payload = EventPayload::LotSelection(LotSelection {
         disposal_event: disposal.clone(),
         lots: picks,
+        attested,
     });
     let id = btctax_core::persistence::append_decision(
         session.conn(),
@@ -2517,6 +2523,7 @@ mod tests {
 
             let ls_payload = EventPayload::LotSelection(LotSelection {
                 disposal_event: disposal_id.clone(),
+                attested: false,
                 lots: vec![LotPick {
                     lot: LotId {
                         origin_event_id: lot_origin,
@@ -2679,6 +2686,7 @@ mod tests {
             let t0 = OffsetDateTime::from_unix_timestamp(1_748_000_000).unwrap();
             let ls_payload = EventPayload::LotSelection(LotSelection {
                 disposal_event: disposal_id.clone(),
+                attested: false,
                 lots: vec![LotPick {
                     lot: LotId {
                         origin_event_id: lot_origin,
@@ -2814,6 +2822,7 @@ mod tests {
             let mk_ls = |disposal: &EventId| {
                 EventPayload::LotSelection(LotSelection {
                     disposal_event: disposal.clone(),
+                    attested: false,
                     lots: vec![LotPick {
                         lot: LotId {
                             origin_event_id: lot_origin.clone(),
@@ -3359,6 +3368,7 @@ mod tests {
         // Build LotSelection payload.
         let payload = EventPayload::LotSelection(LotSelection {
             disposal_event: out_id.clone(),
+            attested: false,
             lots: vec![LotPick {
                 lot: lot_id.clone(),
                 sat: 500_000,
@@ -4168,6 +4178,15 @@ mod tests {
             EventPayload::LotSelection(ls) => {
                 assert_eq!(ls.disposal_event, disposal, "targets the disposal");
                 assert_eq!(ls.lots, vec![pick.clone()], "picks round-trip");
+                // FR-33 / §1.1012-1(j)(2): the attestation must ride the LEDGER EVENT, not only the
+                // side-table. `made` here (2026-07-03) is after any plausible sale date, so without
+                // this stamp `resolve` would DROP the selection and the editor's owner-sanctioned
+                // attested path would be silently inert — the number would revert to method order
+                // while the UI still reported success.
+                assert!(
+                    ls.attested,
+                    "an attested optimize-accept MUST stamp LotSelection::attested"
+                );
             }
             other => panic!("expected LotSelection, got {other:?}"),
         }
@@ -4214,6 +4233,17 @@ mod tests {
         // No attestation row for the contemporaneous path.
         let att = btctax_cli::optimize_attest::get(session.conn(), &disposal).unwrap();
         assert_eq!(att, None, "contemporaneous path writes NO attest row");
+        // FR-33: and NO ledger stamp either — the exemption is never handed out by default. (The
+        // §1.1012-1(j)(2) guard is inert here anyway: this branch means made <= sale.)
+        let stored: btctax_core::event::EventPayload =
+            serde_json::from_str(&post[pre.len()].payload_json).expect("tail must deserialise");
+        match &stored {
+            btctax_core::event::EventPayload::LotSelection(ls) => assert!(
+                !ls.attested,
+                "the contemporaneous path must NOT stamp an attestation it never collected"
+            ),
+            other => panic!("expected LotSelection, got {other:?}"),
+        }
     }
 
     // ── save-rollback: persist_optimize_accept reverts BOTH the append AND the attest set ──

@@ -10,7 +10,7 @@ Bulk\-confirm self\-transfers: link every PENDING outbound transfer in a time fr
 .SH OPTIONS
 .TP
 \fB\-\-to\-wallet\fR \fI<TO_WALLET>\fR
-Destination wallet every selected outflow links to
+Destination wallet every selected outflow links to. Bulk can write only this form (it names no in\-event), so any selected outflow whose other leg is ALREADY an unreconciled deposit at this wallet is held back and listed rather than linked — linking it would book the same coins twice. Confirm those pairings with `reconcile match\-self\-transfers`
 .TP
 \fB\-\-year\fR \fI<YEAR>\fR
 Restrict to a single tax year (mutually exclusive with \-\-from/\-\-to)

@@ -27,6 +27,7 @@ mod form_geometry;
 mod harness_check;
 mod label_reader;
 mod line_coverage_check;
+mod verdict_reach;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -70,6 +71,12 @@ fn main() {
         Some("archive-check") => {
             if let Err(e) = archive_check::run() {
                 eprintln!("xtask archive-check: {e}");
+                std::process::exit(1);
+            }
+        }
+        Some("verdict-reach") => {
+            if let Err(e) = verdict_reach::run() {
+                eprintln!("xtask verdict-reach: {e}");
                 std::process::exit(1);
             }
         }

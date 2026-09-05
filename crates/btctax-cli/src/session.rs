@@ -10,6 +10,7 @@ use crate::{return_inputs, tax_profile};
 use btctax_adapters::{BundledFullReturnTables, BundledTaxTables};
 use btctax_core::conventions::{round_cents, tax_date, TRANSITION_DATE};
 use btctax_core::persistence::{init_schema, load_all};
+use btctax_core::project::pairing::{legs_could_be_one_movement, InLeg, OutLeg, PairTopology};
 use btctax_core::tax::tables::FullReturnTables;
 use btctax_core::{project, LedgerEvent, LedgerState, PriceProvider, ProjectionConfig, TaxTables};
 use btctax_core::{
@@ -62,10 +63,18 @@ pub struct BulkLinkRow {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BulkLinkPlan {
     pub dest: WalletId,
-    /// Eligible + in-frame + passes `from_wallet` + source != dest. Sorted by `date`.
+    /// Eligible + in-frame + passes `from_wallet` + source != dest + would not double-book.
+    /// Sorted by `date`.
     pub included: Vec<BulkLinkRow>,
     /// Source wallet == dest → cannot self-link to itself.
     pub skipped_same_wallet: Vec<BulkLinkRow>,
+    /// FR-31: an unreconciled deposit at `dest` is plausibly this outflow's OTHER LEG. Bulk can only
+    /// write the `--to-wallet` form, which names no in-event and therefore CANNOT consume that
+    /// deposit — writing it here would leave both legs booked (relocated lot + fresh origin lot),
+    /// doubling the pool and the basis. Excluded from the write and reported, so the filer confirms
+    /// the pairing with `reconcile match-self-transfers <in> <out>` (or `link-transfer --to-event`),
+    /// which is the precise form. Sorted by `date`.
+    pub skipped_would_double_book: Vec<BulkLinkRow>,
     pub total_sat: Sat,
     /// [R0-I2] Σ of the priced `usd_value`s — a FLOOR, always a real number.
     pub total_usd_value_floor: Usd,
@@ -793,8 +802,37 @@ impl Session {
             Frame::Range { from, to } => *from <= date && date <= *to,
         };
 
+        // FR-31 candidate in-legs: deposits AT `dest` that are still unreconciled. Sourced from the
+        // `UnknownBasisInbound` blocker set, which is exactly the un-consumed population — a deposit
+        // consumed by a `TransferLink{InEvent}` folds to `Op::Skip` and raises no blocker at all, so
+        // this can never exclude a row whose pairing the filer has already named. (A deposit that is
+        // classified but unlinked is not here; the engine's `SelfTransferDoubleBooked` guard covers
+        // that case, and it is a REFUSAL rather than something bulk should quietly route around.)
+        struct DestIn<'a> {
+            sat: Sat,
+            txid: Option<&'a str>,
+            date: TaxDate,
+        }
+        let dest_ins: Vec<DestIn<'_>> = state
+            .blockers
+            .iter()
+            .filter(|b| b.kind == BlockerKind::UnknownBasisInbound)
+            .filter_map(|b| b.event.as_ref())
+            .filter_map(|id| index.get(id).copied())
+            .filter(|ev| ev.wallet.as_ref() == Some(&dest))
+            .filter_map(|ev| match &ev.payload {
+                EventPayload::TransferIn(ti) => Some(DestIn {
+                    sat: ti.sat,
+                    txid: ti.txid.as_deref(),
+                    date: tax_date(ev.utc_timestamp, ev.original_tz),
+                }),
+                _ => None,
+            })
+            .collect();
+
         let mut included: Vec<BulkLinkRow> = Vec::new();
         let mut skipped_same_wallet: Vec<BulkLinkRow> = Vec::new();
+        let mut skipped_would_double_book: Vec<BulkLinkRow> = Vec::new();
         for pt in &state.pending_reconciliation {
             let row = enrich(pt);
             if !in_frame(row.date) {
@@ -808,11 +846,37 @@ impl Session {
             // Same-wallet guard: a self-link to the SAME wallet is meaningless — report, never link.
             if row.source_wallet.as_ref() == Some(&dest) {
                 skipped_same_wallet.push(row);
+                continue;
+            }
+            // FR-31: source != dest here, so the topology is always a relocation.
+            let out_leg = OutLeg {
+                principal_sat: row.principal_sat,
+                fee_sat: pt.fee_sat,
+                txid: index.get(&pt.event).and_then(|ev| match &ev.payload {
+                    EventPayload::TransferOut(t) => t.txid.as_deref(),
+                    _ => None,
+                }),
+                date: row.date,
+            };
+            let collides = dest_ins.iter().any(|d| {
+                legs_could_be_one_movement(
+                    &InLeg {
+                        sat: d.sat,
+                        txid: d.txid,
+                        date: d.date,
+                    },
+                    &out_leg,
+                    PairTopology::Relocation,
+                )
+            });
+            if collides {
+                skipped_would_double_book.push(row);
             } else {
                 included.push(row);
             }
         }
         included.sort_by_key(|r| r.date);
+        skipped_would_double_book.sort_by_key(|r| r.date);
 
         let total_sat: Sat = included.iter().map(|r| r.principal_sat).sum();
         let total_usd_value_floor: Usd = included.iter().filter_map(|r| r.usd_value).sum();
@@ -823,6 +887,7 @@ impl Session {
             dest,
             included,
             skipped_same_wallet,
+            skipped_would_double_book,
             total_sat,
             total_usd_value_floor,
             missing_price_count,
@@ -878,12 +943,28 @@ impl Session {
             Frame::Range { from, to } => *from <= date && date <= *to,
         };
 
+        // FR-31: the deposits the engine has already flagged as plausibly the OTHER LEG of a live
+        // `--to-wallet` link. Classifying one of these as `SelfTransferMine` is exactly the
+        // double-booking the guard exists to stop — and this plan is selected by
+        // `UnknownBasisInbound`, which is the blocker such a deposit carries, so without this filter
+        // the tool's own hard blocker walks the filer straight into it. EXCLUDED here, not merely
+        // blocked afterwards: an offer to make the ledger worse is not a neutral offer.
+        let double_booked: std::collections::BTreeSet<EventId> = state
+            .blockers
+            .iter()
+            .filter(|b| b.kind == BlockerKind::SelfTransferDoubleBooked)
+            .filter_map(|b| b.event.clone())
+            .collect();
+
         let mut included: Vec<BulkStiRow> = Vec::new();
         for b in &state.blockers {
             if b.kind != BlockerKind::UnknownBasisInbound {
                 continue;
             }
             let Some(id) = &b.event else { continue };
+            if double_booked.contains(id) {
+                continue;
+            }
             // [R0-I1] EXCLUDE any inbound that already carries a live ClassifyInbound (else the bulk
             // append duplicates it → Hard DecisionConflict blocks compute_tax_year).
             if already_classified.contains(id) {
@@ -1297,34 +1378,30 @@ impl Session {
                 } else {
                     MatchAction::Relocate
                 };
-                // Amount: tol = max(fee, ceil(0.005 × principal)). ceil(p/200) = (p + 199) / 200 (p ≥ 0).
-                let slack = if co.principal > 0 {
-                    (co.principal + 199) / 200
-                } else {
-                    0
+                // FR-31: the amount tolerance and the ±2-day directional window now live in
+                // `btctax_core::project::pairing` — the SAME predicate the engine's double-booking
+                // guard uses to REFUSE a `--to-wallet` link that collides with a deposit. Two
+                // spellings would let this surface propose a pairing the engine never notices, or
+                // let the engine refuse one this surface will not offer to confirm.
+                let topology = match action {
+                    MatchAction::Drop => PairTopology::Passthrough,
+                    MatchAction::Relocate => PairTopology::Relocation,
                 };
-                let tol = co.fee.unwrap_or(0).max(slack);
+                let in_leg = InLeg {
+                    sat: ci.sat,
+                    txid: ci.txid.as_deref(),
+                    date: ci.date,
+                };
+                let out_leg = OutLeg {
+                    principal_sat: co.principal,
+                    fee_sat: co.fee,
+                    txid: co.txid.as_deref(),
+                    date: co.date,
+                };
+                if !legs_could_be_one_movement(&in_leg, &out_leg, topology) {
+                    continue;
+                }
                 let txid_match = ci.txid.is_some() && ci.txid == co.txid;
-                let amount_ok = txid_match || (ci.sat - co.principal).abs() <= tol;
-                if !amount_ok {
-                    continue;
-                }
-                // ±2-day window, direction keyed to the topology (exchange timestamp drift tolerated).
-                let window_ok = match action {
-                    // Passthrough: the deposit precedes the withdrawal (in on/before out).
-                    MatchAction::Drop => {
-                        let d = (co.date - ci.date).whole_days();
-                        (0..=2).contains(&d)
-                    }
-                    // Relocate: the withdrawal precedes the arrival (in on/after out).
-                    MatchAction::Relocate => {
-                        let d = (ci.date - co.date).whole_days();
-                        (0..=2).contains(&d)
-                    }
-                };
-                if !window_ok {
-                    continue;
-                }
                 passing.push((i, j, action, txid_match));
             }
         }

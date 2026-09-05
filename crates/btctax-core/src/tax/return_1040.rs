@@ -1525,6 +1525,16 @@ pub struct PrintedInputs {
     /// re-read so the printed chain and the absolute `form_8960` cannot end up on different values;
     /// `None` reaches `push_money_opt` and the cell prints BLANK.
     pub form_8960_line9b: Option<Usd>,
+    /// ★★★ **1040 line 19** — *"Child tax credit or credit for other dependents from Schedule 8812"*,
+    /// as [`crate::tax::advisories::ctc_odc_line19`] decides it: `Some(0)` only where Schedule 8812
+    /// line 12 provably answers **No** (its own instruction is *"Enter -0- on lines 14 and 27"*, and
+    /// line 14 routes that figure to this line), `None` everywhere else, where btctax figures no §24
+    /// credit and the cell is the FILER's to fill. `None` reaches `push_money_opt` and prints BLANK.
+    ///
+    /// ★★ Carried rather than re-derived in `printed.rs`, for the same reason as `form_8960_line9b`
+    /// above and one more: `form_1040_lines` holds no `ReturnInputs`, and giving the printed lane its
+    /// own §24(b) predicate would be a second divergent implementation of the rule. FR-1.
+    pub ctc_odc_line19: Option<Usd>,
     /// Schedule D **line 21** — the §1211(b) capital-loss deduction CEILING ($3,000; $1,500 MFS). The
     /// printed line 21 caps the PRINTED line 16 against this, rather than re-rounding the exact
     /// deduction, so the filed Schedule D's own arithmetic holds.
@@ -2094,6 +2104,10 @@ pub fn assemble_absolute(
             // ★ Form 8960 line 9b, likewise carried rather than derived — the same `Option<Usd>` the
             //   absolute `form_8960` above was handed.
             form_8960_line9b: ri.form_8960_line9b,
+            // ★★★ FR-1 — 1040 line 19. Decided HERE because this is where `ri` and the AGI meet, and
+            //     decided by the same call `advisories_for` makes with the same `agi`, so the printed
+            //     cell and the `CtcOdcOmitted` advisory cannot contradict each other on one packet.
+            ctc_odc_line19: crate::tax::advisories::ctc_odc_line19(ri, agi),
             medicare_wages: w2_medicare_wages,
             medicare_withheld: w2_medicare_withheld,
             crypto_lending_interest: crypto.nonbusiness_lending_interest,
@@ -4448,7 +4462,14 @@ mod tests {
             screened(&dependent(dec!(2000)), &hobby),
             Some(RefuseReason::KiddieTax)
         );
-        // NOT claimable as a dependent ⇒ never kiddie, even with high unearned income.
+        // ★★★ **FR-29 — THIS ASSERTION PINS A CRITICAL DEFECT. It is kept RED-ADJACENT on purpose:
+        //     it documents today's behaviour, NOT the law.** Form 8615's five conditions
+        //     (`i1040gi--2025.txt:3927-3941`) are unearned income, a filing requirement, an AGE +
+        //     earned-income-support test, a living parent, and not filing jointly. **Dependency is
+        //     not among them.** A self-supporting student whose support comes from unearned income —
+        //     this product's own user — truthfully answers "No" here, skips §1(g), and is taxed at
+        //     their own rates. §1(g)(1) is "the greater of", so it can ONLY understate.
+        //     When FR-29 is fixed this assertion must be INVERTED, not deleted.
         let mut not_dep = dependent(dec!(9000));
         not_dep.header.can_be_claimed_as_dependent_taxpayer = Some(false);
         assert_eq!(screened(&not_dep, &empty), None);
@@ -6128,7 +6149,9 @@ mod tests {
                 line16: z,
                 line17: z,
                 line18: z,
-                line19: z,
+                // ★ FR-1 — no dependents on this fixture, so Schedule 8812 line 12 is not
+                //   provably "No" and 1040 line 19 is BLANK, not a sworn $0.
+                line19: None,
                 line20: z,
                 line21: z,
                 line22: z,

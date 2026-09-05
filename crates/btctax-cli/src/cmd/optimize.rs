@@ -241,7 +241,15 @@ pub fn accept_with_tables(
             }
             Persistability::ContemporaneousNow => {
                 // Made ≤ sale → genuinely contemporaneous; persist freely (no attestation needed).
-                let id = persist_selection(&mut session, &d.disposal, &d.proposed_selection, now)?;
+                // FR-33: `attested = false` is correct AND safe here — made ≤ sale, so the
+                // §1.1012-1(j)(2) timeliness guard in `resolve` never engages for this selection.
+                let id = persist_selection(
+                    &mut session,
+                    &d.disposal,
+                    &d.proposed_selection,
+                    now,
+                    false,
+                )?;
                 out.persisted
                     .push((d.disposal.clone(), id, "Contemporaneous"));
             }
@@ -262,7 +270,16 @@ pub fn accept_with_tables(
                 // Co-persist the LotSelection decision AND the attestation row ATOMICALLY: both land in
                 // the same in-memory DB and are flushed together by the single `session.save()` below,
                 // so the persisted selection == the attested selection == the new baseline.
-                let id = persist_selection(&mut session, &d.disposal, &d.proposed_selection, now)?;
+                // FR-33: this is the ONE producer that stamps `attested = true` on the ledger event.
+                // The made-date is after the sale by construction (that is what `NeedsAttestation`
+                // means), so without the stamp the resolver would DROP this selection and the
+                // owner-sanctioned §C.2 path would be inert. The stamp rides the EVENT, not the
+                // side-table, because §7.1 makes the projection a pure function of the event log —
+                // a filed number keyed to a CLI sqlite table would differ in the TUI, which never
+                // loads it (`btctax-tui/src/unlock.rs` [R0-M3]). The attestation TEXT still lands in
+                // the side-table in the same atomic save (R2-I1 binds the exact picks).
+                let id =
+                    persist_selection(&mut session, &d.disposal, &d.proposed_selection, now, true)?;
                 crate::optimize_attest::set(session.conn(), &d.disposal, att, &made.to_string())?;
                 out.persisted
                     .push((d.disposal.clone(), id, "AttestedRecording"));
@@ -276,15 +293,21 @@ pub fn accept_with_tables(
 /// Append the `LotSelection` decision for one disposal (no save; the caller batches the single save so
 /// the decision + any attestation row are flushed atomically). `fingerprint = None`, consistent with
 /// all decisions (`append_decision` passes `None`).
+///
+/// `attested` (FR-33) stamps `LotSelection::attested`: `true` ONLY on the `NeedsAttestation` branch,
+/// where the caller has a narrow per-disposal `--attest` statement in hand. It is a required parameter
+/// rather than a defaulted field so a future third call site cannot acquire the exemption by omission.
 fn persist_selection(
     session: &mut Session,
     disposal: &EventId,
     picks: &[LotPick],
     now: OffsetDateTime,
+    attested: bool,
 ) -> Result<EventId, CliError> {
     let payload = EventPayload::LotSelection(LotSelection {
         disposal_event: disposal.clone(),
         lots: picks.to_vec(),
+        attested,
     });
     Ok(append_decision(
         session.conn(),

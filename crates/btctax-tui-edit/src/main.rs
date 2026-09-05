@@ -4048,6 +4048,7 @@ fn handle_select_lots_modal_key(app: &mut EditorApp, key: KeyEvent) {
                 btctax_core::EventPayload::LotSelection(btctax_core::event::LotSelection {
                     disposal_event: disposal_event.clone(),
                     lots: picks,
+                    attested: false, // FR-33: select-lots collects no attestation.
                 });
             let now = app.clock.now();
 
@@ -19798,6 +19799,12 @@ mod tests {
         let (lot_a_id, lot_b_id, to_id) = seed_two_lot_sell_vault(&vault, &key, pp_str);
 
         let mut app = open_app(&vault, pp_str);
+        // FR-33 / §1.1012-1(j)(2): the selection's made-date is `app.clock.now()`, and the seeded sale
+        // is 2025-05-23. Pin the clock TO THE DAY OF THE SALE so this KAT keeps testing what it was
+        // written for — the select-lots flow end to end — under a TIMELY identification. The late case
+        // is `kat_e2e_sl_post_hoc_selection_is_ignored` below.
+        app.clock =
+            btctax_tui::clock::Clock::Pinned(time::macros::datetime!(2025 - 05 - 23 12:00:00 UTC));
 
         // 1. Confirm disposal is in projected state.
         let snap = app.snapshot.as_ref().unwrap();
@@ -19918,6 +19925,61 @@ mod tests {
         assert!(
             app.status.is_some(),
             "E2E-SL: status must be set when no eligible disposals"
+        );
+    }
+
+    // ── KAT-E2E-SL-POSTHOC — FR-33: the editor's select-lots is one of the two producers that
+    //    collects NO attestation, so a selection it records after the sale is a §1.1012-1(j)(2)
+    //    nullity. Same seed, same keystrokes, only the clock differs from the KAT above.
+
+    #[test]
+    fn kat_e2e_sl_post_hoc_selection_is_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("vault.pgp");
+        let key = dir.path().join("key.asc");
+        let pp_str = "kat-e2e-sl-posthoc-pass";
+
+        let (lot_a_id, lot_b_id, to_id) = seed_two_lot_sell_vault(&vault, &key, pp_str);
+
+        let mut app = open_app(&vault, pp_str);
+        // Nearly a year AFTER the seeded 2025-05-23 sale — return-preparation season.
+        app.clock =
+            btctax_tui::clock::Clock::Pinned(time::macros::datetime!(2026 - 04 - 01 12:00:00 UTC));
+
+        // Same keystrokes as the happy path: 'S' → Enter → Down (lot B) → "500000" → Enter → Enter.
+        handle_key(&mut app, press(KeyCode::Char('S')));
+        handle_key(&mut app, press(KeyCode::Enter));
+        handle_key(&mut app, press(KeyCode::Down));
+        for c in "500000".chars() {
+            handle_key(&mut app, press(KeyCode::Char(c)));
+        }
+        handle_key(&mut app, press(KeyCode::Enter));
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(
+            app.select_lots_flow.is_none(),
+            "E2E-SL-POSTHOC: the decision is still RECORDED (the ledger is append-only) — only the \
+             projection declines to apply it"
+        );
+
+        let snap = app.snapshot.as_ref().unwrap();
+        assert!(
+            snap.state.disposals.iter().any(|d| {
+                d.event == to_id && d.legs.iter().any(|l| l.lot_id.origin_event_id == lot_a_id)
+            }),
+            "E2E-SL-POSTHOC: the disposal must fall back to the in-force FIFO order (lot A)"
+        );
+        assert!(
+            !snap.state.disposals.iter().any(|d| {
+                d.event == to_id && d.legs.iter().any(|l| l.lot_id.origin_event_id == lot_b_id)
+            }),
+            "E2E-SL-POSTHOC: the post-hoc cherry-pick of lot B must NOT lower the reported gain"
+        );
+        assert!(
+            snap.state
+                .blockers
+                .iter()
+                .any(|b| b.kind == BlockerKind::LotSelectionPostHoc),
+            "E2E-SL-POSTHOC: and the advisory must disclose that a filed number changed"
         );
     }
 

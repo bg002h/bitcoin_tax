@@ -1064,6 +1064,12 @@ pub fn safe_harbor_allocate(
 /// validates completeness (Σsat == disposal principal) and lot existence in the fold; this function
 /// only appends the decision — it does NOT attempt to validate up-front (that would require a full
 /// projection, which the engine always does). Identification must exist by the time of sale (§1.1012-1(j)).
+///
+/// FR-33: the decision is recorded `attested: false`, because `select-lots` collects no attestation.
+/// If its made-date lands after the disposition it names, the resolver DROPS it (advisory
+/// `LotSelectionPostHoc`) and the disposal falls back to the method in force — §1.1012-1(j)(1)'s own
+/// consequence. The sanctioned way to record a genuinely contemporaneous identification made outside
+/// this tool is `optimize accept --disposal <ref> --attest "<statement>"`.
 pub fn select_lots(
     vault_path: &Path,
     pp: &Passphrase,
@@ -1083,6 +1089,7 @@ pub fn select_lots(
         EventPayload::LotSelection(LotSelection {
             disposal_event,
             lots: picks,
+            attested: false, // FR-33: `select-lots` collects no attestation (see the doc comment).
         }),
         now,
     )
@@ -1157,6 +1164,7 @@ pub fn import_selections(
             EventPayload::LotSelection(LotSelection {
                 disposal_event,
                 lots,
+                attested: false, // FR-33: a CSV import collects no attestation either.
             }),
             now,
             UtcOffset::UTC,

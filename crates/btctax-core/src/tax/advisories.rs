@@ -289,11 +289,14 @@ impl Advisory {
                  the most line 8 could be). 1040 line 19 is $0 and that is the correct figure — there \
                  is no Schedule 8812 for you to file."
             ),
+            // ★ FR-1 — this used to say "(1040 line 19 is $0)", and it was describing the defect: the
+            //   return swore a figure it had not worked out. The cell is BLANK now, and the text has to
+            //   say so, because the filer's next act is to look at line 19 and fill it in.
             Advisory::CtcOdcOmitted { dependents, .. } => format!(
                 "CTC/ODC NOT COMPUTED — you captured {dependents} dependent(s), but v1 does not compute the \
-                 Child Tax Credit or the Credit for Other Dependents (1040 line 19 is $0). Your tax is \
-                 OVERSTATED by up to $2,000 per qualifying child / $500 per other dependent. File Schedule \
-                 8812 yourself to claim it."
+                 Child Tax Credit or the Credit for Other Dependents, so 1040 line 19 is LEFT BLANK for \
+                 you to fill in. Your tax is OVERSTATED by up to $2,000 per qualifying child / $500 per \
+                 other dependent. File Schedule 8812 yourself and carry its line 14 to line 19."
             ),
             Advisory::EicOmitted =>
                 "EIC NOT COMPUTED — your income is low enough that you may qualify for the Earned Income \
@@ -649,6 +652,43 @@ fn ctc_provably_zero(ri: &ReturnInputs, dependents: usize, agi: Usd) -> bool {
     l8_ceiling <= l11
 }
 
+/// **1040 line 19** — *"Child tax credit or credit for other dependents from Schedule 8812"* — as this
+/// return's own testimony, or `None` when btctax has none to give.
+///
+/// ★★★ **FR-1.** The line is a CARRY from Schedule 8812 line 14, and btctax emits no Schedule 8812 and
+/// computes no §24 credit. It shipped as a hardcoded `Usd::ZERO`, which put a sworn `0` (26 USC §6065)
+/// on the return of every family the credit belongs to — taxpayer-ADVERSE by up to $2,000 a child, and
+/// a figure the filer never gave. Neither an unconditional zero nor an unconditional blank is right;
+/// **Schedule 8812 Part I says which is which**, and this function is that instruction and nothing else:
+///
+/// ```text
+/// 12  Is the amount on line 8 more than the amount on line 11?
+///       No. STOP. You cannot take the child tax credit, credit for other dependents, or additional
+///           child tax credit. Skip Parts II-A and II-B. Enter -0- on lines 14 and 27.
+///       Yes. Subtract line 11 from line 8. Enter the result.
+/// 14  Enter the smaller of line 12 or line 13. This is your child tax credit and credit for other
+///     dependents … Enter this amount on Form 1040, 1040-SR, or 1040-NR, line 19.
+/// ```
+///
+/// * **Line 12 provably "No"** ⇒ line 14 is `-0-` and line 14 routes it here: `Some(0)`. The form
+///   instructs the figure, so blanking it would be the mirror defect.
+/// * **Anything else** ⇒ btctax does not know line 14, and the cell is the filer's to fill: `None`.
+///   `CtcOdcOmitted` fires and says so.
+///
+/// ★★ **`dependents == 0` is `None`, not a proof.** `HouseholdHeader::dependents` is a
+/// `#[serde(default)] Vec`, so EMPTY and NEVER-ASKED are the same value — the answered-ness trap. On an
+/// unasked list the line-8 ceiling this predicate computes is not a ceiling at all, so the proof is
+/// unsound in the filer-adverse direction. That is also exactly the gate `advisories` already applies
+/// (`if dependents > 0`), which is why this can be the ONE predicate both lanes read.
+///
+/// ★ There is deliberately no second §24(b) implementation anywhere: `btctax-forms` receives this
+/// `Option` and calls `push_money_opt`. An emitter that decided this for itself would be a worse
+/// answered-ness violation than the hardcode it replaced.
+pub fn ctc_odc_line19(ri: &ReturnInputs, agi: Usd) -> Option<Usd> {
+    let dependents = ri.header.dependents.len();
+    (dependents > 0 && ctc_provably_zero(ri, dependents, agi)).then_some(Usd::ZERO)
+}
+
 #[cfg(test)]
 mod ctc_phaseout_tests {
     use super::*;
@@ -928,12 +968,18 @@ pub fn advisories(
 ) -> Vec<Advisory> {
     let mut out = Vec::new();
 
-    // §3.4 — CTC/ODC: captured dependents, but line 19 is $0.
+    // §3.4 — CTC/ODC: captured dependents, but btctax figures no §24 credit.
+    //
+    // ★ FR-1 — `provably_zero` reads [`ctc_odc_line19`], the SAME call the printed 1040 line 19 makes,
+    //   rather than `ctc_provably_zero` beside it. The advisory and the cell are two statements about
+    //   one fact ("is the credit provably gone?"), and one predicate is what stops them disagreeing on
+    //   paper. Equivalent to the old call by construction: this arm already gates `dependents > 0`,
+    //   which is the only condition `ctc_odc_line19` adds.
     let dependents = ri.header.dependents.len();
     if dependents > 0 {
         out.push(Advisory::CtcOdcOmitted {
             dependents,
-            provably_zero: ctc_provably_zero(ri, dependents, agi),
+            provably_zero: ctc_odc_line19(ri, agi).is_some(),
         });
     }
 

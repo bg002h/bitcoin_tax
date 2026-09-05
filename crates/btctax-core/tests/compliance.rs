@@ -110,6 +110,9 @@ fn lot_selection(
         EventPayload::LotSelection(LotSelection {
             disposal_event: EventId::import(Source::Coinbase, SourceRef::new(disposal_ref)),
             lots: picks,
+            // FR-33: unattested — these KATs exercise `disposal_compliance`, whose post-hoc verdict
+            // is unchanged by the resolver's new drop (see the FR-33 report's "what was NOT changed").
+            attested: false,
         }),
     )
 }

@@ -541,12 +541,20 @@ pub struct Form1040Lines {
     pub line17: Usd,
     /// L18 — add **printed** 16 and 17.
     pub line18: Usd,
-    /// L19 — CTC / credit for other dependents. **Always 0** (a §3.4 conservative omission; the
-    /// `CtcOdcOmitted` advisory tells the filer their tax is overstated).
-    pub line19: Usd,
+    /// L19 — *"Child tax credit or credit for other dependents from Schedule 8812"*, carried from
+    /// [`crate::tax::return_1040::PrintedInputs::ctc_odc_line19`].
+    ///
+    /// ★★★ **FR-1 — `Option` because the form has two answers here and they are not the same cell.**
+    /// `Some(0)` is Schedule 8812 line 12 answering **No** (*"Enter -0- on lines 14 and 27"*, routed
+    /// here by line 14). `None` is btctax figuring no §24 credit at all — the ordinary case, and the
+    /// filer's cell to fill. It shipped as a hardcoded `Usd::ZERO`, which swore the second case was
+    /// the first on every family's return and overstated their tax by up to $2,000 a child.
+    pub line19: Option<Usd>,
     /// L20 — **Schedule 3's printed line 8** (nonrefundable credits: the FTC).
     pub line20: Usd,
-    /// L21 — add **printed** 19 and 20.
+    /// L21 — *"Add lines 19 and 20."* A blank line 19 contributes nothing to the sum, which is what a
+    /// blank means in an addition on this form — so L21 stays a `Usd` and stays printed: line 22
+    /// subtracts it unconditionally (*"Subtract line 21 from line 18. If zero or less, enter -0-"*).
     pub line21: Usd,
     /// L22 — printed 18 − printed 21, floored at 0.
     pub line22: Usd,
@@ -752,9 +760,15 @@ pub fn form_1040_lines(
     //     assessed. Same shape as the 1040-vs-Form-8995-A pair, same direction (understating).
     let line17 = sch_2.map_or(Usd::ZERO, |s| s.line3);
     let line18 = line16 + line17;
-    let line19 = Usd::ZERO; // ★ CTC/ODC — a §3.4 conservative omission (advisory fires)
+    // ★★★ FR-1 — L19 is DECIDED IN `assemble_absolute_return`, from `ReturnInputs` and the AGI, by the
+    //     same `advisories::ctc_odc_line19` the `CtcOdcOmitted` advisory reads. It is carried here, not
+    //     re-derived: this function holds no `ReturnInputs`, and a §24(b) predicate written a second
+    //     time in the printed lane (or, worse, in the emitter) is the emitter deciding for the filer.
+    let line19 = ar.printed_inputs.ctc_odc_line19;
     let line20 = sch_3.map_or(Usd::ZERO, |s| s.line8);
-    let line21 = line19 + line20;
+    // "Add lines 19 and 20" — a blank operand adds nothing. The sum still prints (line 22 subtracts it
+    // unconditionally), so a blank line 19 moves no figure on the return; it removes an assertion.
+    let line21 = line19.unwrap_or(Usd::ZERO) + line20;
     let line22 = (line18 - line21).max(Usd::ZERO);
     let line23 = sch_2.map_or(Usd::ZERO, |s| s.line21);
     let line24 = line22 + line23; // ★ TOTAL TAX, from the PRINTED lines
@@ -1669,6 +1683,9 @@ mod tests {
             printed_inputs: crate::tax::return_1040::PrintedInputs {
                 filing_form_4952: Some(false),
                 form_8960_line9b: None, // claimed nothing on Form 8960 Part II ⇒ line 9b blank
+                // ★ No dependents on this fixture, so Schedule 8812 line 12 is not provably "No" and
+                //   1040 line 19 is the filer's blank — see `advisories::ctc_odc_line19` (FR-1).
+                ctc_odc_line19: None,
                 medicare_wages: z,
                 medicare_withheld: z,
                 schedule_c_header: crate::tax::return_1040::ScheduleCHeader::default(),
@@ -2977,7 +2994,13 @@ mod tests {
             "TI = 11 − 14, floored"
         );
         assert_eq!(l.line18, l.line16 + l.line17, "L18 = 16 + 17");
-        assert_eq!(l.line21, l.line19 + l.line20, "L21 = 19 + 20");
+        // "Add lines 19 and 20" — a BLANK line 19 adds nothing, which is what a blank means in an
+        // addition on this form (FR-1). The sum itself is never blank: line 22 subtracts it.
+        assert_eq!(
+            l.line21,
+            l.line19.unwrap_or(Usd::ZERO) + l.line20,
+            "L21 = 19 + 20"
+        );
         assert_eq!(
             l.line22,
             (l.line18 - l.line21).max(Usd::ZERO),
@@ -3005,8 +3028,11 @@ mod tests {
         // Schedule 3's printed L8/L15 land on 1040 L20/L31.
         assert_eq!(l.line20, s3.line8);
         assert_eq!(l.line31, s3.line15);
-        // L19 is the CTC/ODC conservative omission — pinned to 0 (the advisory carries the news).
-        assert_eq!(l.line19, Usd::ZERO);
+        // ★★★ FR-1 — L19 is BLANK on this fixture, and blank is a different cell from zero. This
+        //     household has no dependents, so Schedule 8812 line 12 is not provably "No"; btctax
+        //     figures no §24 credit, and the `CtcOdcOmitted` advisory carries the news instead of the
+        //     return swearing to a figure nobody gave. `Some(Usd::ZERO)` here would be the shipped bug.
+        assert_eq!(l.line19, None);
 
         for cell in [
             l.line1z, l.line2b, l.line3a, l.line3b, l.line7, l.line8, l.line9, l.line10, l.line11,

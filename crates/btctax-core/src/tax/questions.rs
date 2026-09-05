@@ -546,13 +546,20 @@ pub const FORM_QUESTIONS: &[FormQuestion] = &[
     FormQuestion {
         id: QuestionId::OtherOutOfScopeIncome,
         prompt: "In this tax year, did ANY of these happen? (a) You received income other than what \
-                 you have entered here — rent or royalties, a farm, a partnership, S corporation, \
-                 estate or trust (any Schedule K-1), unreported tips, gambling winnings, alimony, a \
-                 business this tool did not capture, or anything else it never asked about. (b) You \
+                 you have entered here — a PENSION, ANNUITY or IRA DISTRIBUTION (Form 1099-R), \
+                 SOCIAL SECURITY or railroad retirement benefits (Form SSA-1099 or RRB-1099), rent \
+                 or royalties, a farm, a partnership, S corporation, estate or trust (any Schedule \
+                 K-1), unreported tips, gambling winnings, alimony, a business this tool did not \
+                 capture, or anything else it never asked about. (b) You \
                  EXERCISED AN INCENTIVE STOCK OPTION (ISO) and still held the stock at the end of the \
                  year — you would have a Form 3921. (c) You had any other item this tool never asked \
                  about that changes your ALTERNATIVE MINIMUM TAX — depletion, a tax-shelter farm \
-                 activity, a passive activity, or research and experimental costs.",
+                 activity, a passive activity, or research and experimental costs. (d) You owe an \
+                 ADDITION TO TAX that is not income tax on income — an additional tax on an IRA or \
+                 other tax-favored account (Form 5329), HOUSEHOLD EMPLOYMENT TAXES for someone you \
+                 paid to work in your home (Schedule H), repayment of an excess advance premium tax \
+                 credit from a Marketplace health plan (Form 8962), or recapture of a federal \
+                 mortgage subsidy.",
         unanswered: RefuseReason::OtherIncomeUnanswered,
         unanswered_detail:
             "btctax asks about HSA activity, dual-status alien status and foreign accounts, and a \
@@ -1420,6 +1427,47 @@ mod tests {
             "…and must name the AMT category, since lines 2c-2t are all silently zero: {}",
             q.prompt
         );
+        // ★★★ **RETIREMENT INCOME, added 2026-09-04, and the reason is an UNDERSTATEMENT path.**
+        //     This enumeration primes the filer: someone holding a 1099-R and an SSA-1099 who reads
+        //     "rent or royalties, a farm, a partnership…" and finds nothing resembling their pension
+        //     can answer a truthful-feeling **No** on the strength of the list, even though the
+        //     trailing "or anything else it never asked about" formally covers it. §61 and §86 income
+        //     then leaves the return silently. btctax models no line 4a-6b at all, so the ONLY thing
+        //     standing between a retiree and an understated return is this sentence naming their
+        //     forms. Name the FORM NUMBERS, not just the category — the filer is holding the paper.
+        //     ★ Removing any of these must red: that is the whole guarantee, since nothing computes
+        //     from this prompt. See design/ty2025/SPEC_retirement_income.md (OQ-1).
+        for limb in [
+            "pension",
+            "annuity",
+            "1099-r",
+            "social security",
+            "ssa-1099",
+        ] {
+            assert!(
+                p.contains(limb),
+                "the prompt must name retirement income and the form the filer already holds — \
+                 `{limb}` is missing, and a retiree who answers No on the strength of this list \
+                 files omitting §61/§86 income: {}",
+                q.prompt
+            );
+        }
+        // ★★★ **ADDITIONS TO TAX, added 2026-09-05 (FR-30).** The prompt asked about income
+        //     received, an ISO, and AMT items. An ADDITION TO TAX is none of the three, so a filer
+        //     owing Schedule 2 Part II tax could answer every question truthfully and file without
+        //     it. Verified against the form (`design/forms/extract/f1040s2--2025.txt`): line 8
+        //     "Additional tax on IRAs or other tax-favored accounts. Attach Form 5329", line 9
+        //     "Household employment taxes. Attach Schedule H", line 17b "Recapture of federal
+        //     mortgage subsidy". Grep confirms btctax models NONE of them.
+        //     ★ Naming the FORM is the point — the filer is holding the paper, not the statute.
+        for limb in ["form 5329", "schedule h", "8962", "mortgage subsidy"] {
+            assert!(
+                p.contains(limb),
+                "the prompt must name the additions to tax and the form each arrives on — `{limb}` \
+                 is missing, and a filer owing Schedule 2 Part II tax can answer No and omit it: {}",
+                q.prompt
+            );
+        }
         // ★ The income limbs must SURVIVE the widening — this question's original job is unchanged.
         for limb in ["rent", "royalt", "k-1", "alimony", "gambling"] {
             assert!(

@@ -5348,15 +5348,23 @@ reviews ran on the branch; two are persisted verbatim in `reviews/filing-readine
 
 ### Owned by a future btctax-core lane
 
-- **FR-1 — N3: 1040 line 19 prints `0` for families the credit belongs to.** NOT BUILT. The honest
-  fix needs three things that all live in `btctax-core` and never reach the forms crate:
-  `Form1040Lines::line19` must become `Option<Usd>`; `ctc_provably_zero` is private and needs
-  `ReturnInputs` + dependent count + AGI; lines 21/22 must treat blank as the form does.
-  ★ The forms lane REFUSED to build it and was right to: inventing a §24(b) predicate inside
-  `btctax-forms` would be a second divergent implementation of the rule and a *worse* answered-ness
-  violation than the one N3 describes — the emitter deciding for the filer. An unconditional blank
-  was also rejected: Schedule 8812 line 12-No literally instructs "-0-". The fill site is already a
-  one-liner (`push_money_opt`) **once the type carries the decision**.
+- **FR-1 — ✅ CLOSED (built 2026-09-04, `fix/fr1-ctc-line19`). 1040 line 19 no longer swears `0` for
+  families the credit belongs to.** The diagnosis held on all three points and the fix is exactly it:
+  `Form1040Lines::line19` is `Option<Usd>`; the §24(b) predicate is exposed ONCE as
+  `advisories::ctc_odc_line19(ri, agi) -> Option<Usd>`; line 21 adds a blank operand as nothing, which
+  moves no figure on the return (line 22's own clamp is untouched, and so is total tax).
+  ★ The refusal to build it in `btctax-forms` is honoured, not worked around: the decision is carried
+  on `PrintedInputs::ctc_odc_line19` — the `form_8960_line9b` pattern — and the fill site is the
+  one-liner `push_money_opt`. `btctax-forms` contains no §24(b) reasoning.
+  ★★ The rejection of an unconditional blank is honoured too. Schedule 8812 line 12-No instructs
+  *"Enter -0- on lines 14 and 27"* and line 14 routes that figure to 1040 line 19, so a **provable**
+  phase-out still prints `0`. `dependents == 0` is deliberately NOT a proof: `dependents` is a
+  `#[serde(default)] Vec`, so empty and never-asked are one value, and the line-8 ceiling the
+  predicate computes is not a ceiling on an unasked list.
+  ★ The advisory reads the same call (`.is_some()`), so the cell and the advice cannot contradict each
+  other on one packet. Mutation-verified three ways — hardcode `Some(0)` (5 tests red), hardcode
+  `None` (2 red), emitter writing the blank as a zero (3 red). `LIMITATIONS.md`'s CTC row, the
+  advisory text and the examples golden were corrected in the same pass.
 
 - **FR-12 — Form 8960 line 9d still prints `0` when 9b is blank.** Same class as the defect P8 fixed
   one line up (an affirmative zero on a derived total nobody testified to). Out of scope for a
@@ -5659,3 +5667,196 @@ become furniture — which is precisely what the tickle existed to prevent.
   repo and asserts it holds one entry of EACH storage class, so that edit reds immediately.
   **If you come here to relieve the fresh-clone pain: build the fetcher, do not narrow the guard.**
   **Owning phase: next harness change.**
+
+- **FR-27 — 1040 line 20 swears `0` about a Schedule 3 that was never filed.** Same class as FR-1,
+  found by the FR-1 agent while it was in the neighbourhood and deliberately NOT fixed there (scope).
+  `crates/btctax-core/src/tax/printed.rs:768` — `let line20 = sch_3.map_or(Usd::ZERO, |s| s.line8);`
+  with `pub line20: Usd` at `:554`. The form's own words for that line
+  (`design/forms/extract/f1040--2025.txt:112`) are **"Amount from Schedule 3, line 8"**. When no
+  Schedule 3 exists, there is no Schedule 3 line 8, and printing `0` asserts a figure from a form
+  that was never filed — testimony about a document that does not exist.
+  ★ **Direction is the SAFE one**, which is why this is not urgent: line 20 carries *nonrefundable
+  credits*, so a fabricated `0` can only forgo a credit and OVERSTATE tax. It is an answered-ness
+  defect, not a funds-safety one.
+  ★★ But note the honest difficulty, which is why it is filed rather than fixed by reflex: a `0`
+  here is *arithmetically* right whenever the filer genuinely has no Schedule 3 items. The question
+  is whether btctax omitted Schedule 3 because the FILER has none (correct `0`) or because btctax
+  **does not model** the item (fabricated `0`) — and those are indistinguishable on the printed
+  page. The fix is the FR-1 shape: `Option<Usd>` carried on `PrintedInputs`, with the decision made
+  in core where the modelling gap is knowable. Do NOT let the emitter decide.
+  **Owning phase: with FR-12, as one answered-ness sweep.**
+
+### From the 2026-09-04 label-reader column fix (`fix/label-reader-drops-1a`)
+
+`witness_text` now picks its label column by *how many labels the column yields* rather than by how
+many tokens it contains, which recovered Form 6251 line **1a** (the Schedule 1-A seam) and 86 other
+labels across the archived forms. Report: `design/agent-reports/2026-09-04-label-reader-1a-fix.md`.
+The residue below is what a **single**-column reader structurally cannot reach.
+
+- **FR-28 — a second entry printed on the SAME ROW is still invisible to the reader.** Form 1040
+  puts two lines on one row in two money columns — `2a Tax-exempt interest … 2a [box]   b Taxable
+  interest … 2b [box]` — and the margin prints only `2a`. The `b` is mid-row, at no column at all.
+  So `f1040--2024` now reports 54 labels including `2a`–`6a` and is missing `2b`, `3b`, `4b`, `5b`,
+  `6b`; before the fix it reported 39, had those five, and was missing nineteen others. Strictly
+  better, still incomplete, and **silent about it** — which is the same shape as the defect just
+  fixed, one level down.
+  ★ The obvious fix is **measured wrong and must not be built as written**: taking the UNION of every
+  candidate column injects prose numerals as phantom labels — on `f1040s1a--2025` (the anchor, whose
+  truth is 48 entry lines) the union adds `45` and `50`, on a 38-line form; on `f6251--2025` it adds
+  `5a`, `10a`, `12e`. Nor can a bare mid-row `b` simply be admitted: the English article *"a"* is a
+  bare lowercase word on nearly every row of every form.
+  What is actually owed is a **row model** — a row may carry more than one labelled entry, and the
+  second one's sub-letter is the bare letter that immediately precedes a second amount box on the
+  same row. That is a design change to W1, not a bug fix, and it wants the box witness (W2) in the
+  loop, because *"a bare letter with a box to its right"* is the signal that distinguishes it from
+  prose. **Owning phase: whenever the census is next pointed at Form 1040 itself.** Not urgent for
+  Schedule 1-A or Form 6251, neither of which has a two-entry row.
+
+### ★★★ CRITICAL — from the 2026-09-04 understatement audit (23 agents, 6 lenses, adversarial verify)
+
+Report: `design/agent-reports/2026-09-04-understatement-audit.md`. Both entries below were
+**independently re-verified by the controller** against the code and the IRS instruction text before
+being filed. Verdict of that audit, verbatim: *"Yes — btctax can currently emit a signed 1040 that
+understates tax with no refusal."*
+
+- **FR-29 ★★★ CRITICAL — the Form 8615 (kiddie tax) screen is gated on DEPENDENCY, which is not one
+  of Form 8615's conditions.** `crates/btctax-core/src/tax/return_1040.rs:989` reads
+  `if ri.header.can_be_claimed_as_dependent_taxpayer != Some(false)`. The five conditions
+  (`design/forms/extract/i1040gi--2025.txt:3927-3941`) are, verbatim: (1) more than $2,700 unearned
+  income, (2) required to file, (3) *"either (a) Under age 18 …, (b) Age 18 … and didn't have earned
+  income that was more than half of your support, or (c) A full-time student at least age 19 but
+  under age 24 … and didn't have earned income that was more than half of your support"*, (4) at
+  least one parent alive, (5) not filing jointly. **Dependency appears nowhere.**
+  ⇒ A self-supporting minor or student whose support comes from *unearned* income — which is
+  precisely this product's user — truthfully answers "No" to the dependency question, skips §1(g)
+  entirely, and is taxed at their own rates. §1(g)(1) is *"the greater of"*, so this can **only
+  understate**.
+  ★★ **A GREEN TEST PINS THE DEFECT** at `:4467` — `// NOT claimable as a dependent ⇒ never kiddie,
+  even with high unearned income.` That comment is false against the form. `RefuseReason::KiddieTax`
+  carries the same paraphrase at `return_refuse.rs:264`. Both corrected in this commit so the
+  paraphrase stops reading as settled law; the GATE itself is untouched and still wrong.
+  ★ **Why the gate was not fixed here.** The honest fix needs inputs btctax does not collect — the
+  §1(g) support test and whether a parent is alive. Age is derivable (`Person::date_of_birth`), but
+  exempting only provable non-children would refuse every filer with no DOB on file, which is most
+  test fixtures and many real returns. Per the repo's own rule — *"if the form asks something our
+  input surface cannot answer, COLLECT it"* — this wants a spec, not a 2am patch.
+  **Owning phase: BEFORE any first filing. This is a blocking defect, not a follow-up in the usual
+  sense.**
+
+- **FR-30 ★★★ CRITICAL — Schedule 2 *additions to tax* fall outside every limb of the scope
+  attestation.** `crates/btctax-core/src/tax/questions.rs:548` asks about (a) income received,
+  (b) an ISO exercise, (c) an AMT item. An *addition to tax* is none of those. Verified instances a
+  filer can hit while answering every question truthfully: excess advance-PTC repayment (Sch 2 line
+  1a), the §4973 excise on an excess Roth contribution (line 8), Schedule H household-employment tax
+  (line 9), plus lines 10 and 17b. Each raises tax; omitting it understates.
+  ★ `crates/btctax-core/src/tax/printed.rs:306` states line 1a *"would REFUSE if it did"* — a
+  refusal predicated on an input that does not exist. And the census completeness claim at
+  `crates/btctax-forms/forms/2024/f1040s2.map.toml:75` is falsified by lines 1a and 9.
+  **Owning phase: with FR-29, before any first filing.**
+
+★ Also from that audit, filed together and NOT re-verified individually by the controller (the
+adversarial pass cleared them, but they are Important rather than Critical): I3 the SSTB prompt
+omits *Trading* and *Dealing*, the two i8995-A bullets that name a crypto dealer; I4 the §402(g)
+limit uses the SIMPLE-only $16,500 rather than $23,500; I5 §108(b)(2)(G) liveness is keyed to the
+carryover coming *in* rather than the discharge year, so an unreduced carryover is stamped
+`Computed` into the next year; I6 §221 ignores the collected dependency answer; I7 Roth codes; I8
+five refusals appear in no test at all.
+★★ **Two corrections the audit made to its own inputs, worth keeping:** the §402(g) Roth fix as
+first proposed is WRONG — `i1040gi:2318` says Roth deferrals count toward the limit but their excess
+must NOT go on line 1h, so widening `ELECTIVE_DEFERRAL_CODES` in place conflates two sums; and the
+crypto-slice fail-open at `admin.rs:712` is **CLEARED** — the `se_income_without_profile` note at
+`:731` does reach the user at `main.rs:938`.
+★ Top gap named for the next round: **the crypto engine (~9,000 LOC) was audited by no lens**, and
+it is structurally invisible to both oracles — they are handed basis, never derive it.
+
+### ★★★ CRITICAL — the crypto engine, audited 2026-09-05 (two agents, acquisition + disposition)
+
+The understatement workflow's completeness critic named this surface: ~9,000 LOC audited by no lens
+and **structurally invisible to both oracles, which are handed basis and gain rather than deriving
+them** (§G-9). Three Criticals were found. **Every one was independently re-verified by the
+controller against the code before filing.** Reports:
+`design/agent-reports/2026-09-05-crypto-audit-basis.md` and `-disposition.md`.
+
+- **FR-31 ★★★ CRITICAL — moving coins between your own wallets can book them TWICE, doubling basis.**
+  Three verified limbs: (1) `crates/btctax-core/src/project/resolve.rs:836` — the entire
+  `consumed_ins` block is inside `if let TransferTarget::InEvent(in_id) = &tl.in_event_or_wallet`,
+  so the `--to-wallet` form (`TransferTarget::Wallet`) NEVER marks the matching in-leg consumed.
+  (2) `crates/btctax-cli/src/cmd/reconcile.rs:594` — `bulk-link-transfer` hardcodes
+  `TransferTarget::Wallet(dest.clone())` and offers no `--to-event` form, so the BULK path
+  structurally cannot consume an in-leg. (3) `crates/btctax-core/src/project/conservation.rs:61` —
+  `balanced` compares SATOSHIS only (`sigma_in == sigma_disposed + sigma_removed + sigma_held +
+  sigma_fee_sats + sigma_pending`); a phantom lot increments `sigma_in` and `sigma_held` equally, so
+  it still balances. **There is no Σbasis invariant at this level.**
+  Measured by the agent: 1 BTC bought for $50,000, moved once → 2 lots, 2 BTC held, **$100,000
+  basis**, `balanced: true`, zero blockers. Doubled basis shrinks gain ⇒ **understates tax**, on the
+  most common operation a bitcoin holder performs.
+  ★★ And the tool ROUTES the filer into it: the unconsumed in-leg keeps `UnknownBasisInbound`, the
+  exact selection key of `bulk-classify-inbound-self-transfer` (`session.rs:839`). Two keystrokes.
+  **Owning phase: BEFORE any first filing.**
+  **FIXED** on `fix/fr31-transfer-double-basis` — report `design/agent-reports/2026-09-05-fr31-fix.md`.
+  A new Hard `BlockerKind::SelfTransferDoubleBooked` in `resolve` REFUSES (never repairs, never
+  auto-matches: the owner's "matched pairs are confirmed, not auto" is untouched) when a live
+  `TransferLink{Wallet(w)}` coexists with an un-consumed deposit at `w` that could be its other leg,
+  naming both events and the precise form. The pairing predicate moved to
+  `btctax-core/src/project/pairing.rs` and is now the SINGLE definition shared with
+  `match-self-transfers`. The routing half is closed too: `bulk_self_transfer_in_plan` withdraws a
+  flagged deposit from the offer, and `bulk_link_transfer_plan` holds back (and lists) any outflow
+  whose other leg is already an unreconciled deposit at the destination.
+  ★ **Limb (3) is REJECTED as specified, with a demonstration.** A Σbasis conservation identity in
+  `conservation.rs` is structurally blind to this defect for the *same* reason the sat identity is:
+  the phantom origin lot increments the "in" side and the "held" side by the same basis, so it
+  balances. `self_transfer_double_book.rs::variant_d_wallet_link_plus_stated_basis_is_refused`
+  asserts `conservation_report(&st).balanced` is STILL true after the doubling, so the reasoning is
+  pinned by a test rather than a comment. Building that invariant would have shipped a green, blind
+  instrument (B1). The detection has to be the pairing check, and it lives in `resolve`.
+  ★ Residue (non-blocking, no owning phase): a `--to-wallet` link to a wallet that has BOTH an
+  unrelated same-size arrival within the window AND an unimported real arrival is a false positive
+  with no in-event to name; the filer must void the link. No "these are distinct" confirmation
+  decision exists. Fail-closed, and it cannot move a filed number.
+
+- **FR-32 ★★★ CRITICAL — §1015(a)'s loss cap is skipped when donor basis is RECONSTRUCTED.**
+  `crates/btctax-core/src/project/fold.rs:1085-1087` returns `None` for `dual_loss_basis` on the
+  reconstructed-basis path, where the known-basis path at `:1080` returns `Some(fmv_at_gift)`.
+  Identical facts, two paths: gain **$0** versus a **fabricated $27,000 loss**. The statute is
+  archived in-repo and explicit. ★ The single KAT uses an APPRECIATED gift, where the cap is inert —
+  so no test could ever have caught it. **Owning phase: before any first filing.**
+
+- **FR-33 ★★★ CRITICAL — a post-hoc `LotSelection` is applied with no made-date guard.**
+  `crates/btctax-core/src/project/resolve.rs:1405-1445` (the §A.4 LotSelection block) contains no
+  reference to a made-date. Forty lines above, the `MethodElection` block does exactly the opposite:
+  `let made = tax_date(d.utc_timestamp, d.original_tz); if !method_election_is_forward(me, made)` →
+  blocker, *"a standing order cannot be back-dated"*. So a lot selection created AFTER the sale is
+  applied to the reported basis unchecked. `optimize accept` gates this act behind an attestation;
+  `reconcile select-lots` does not. Post-hoc cherry-picking lowers gain ⇒ **understates tax**.
+  **Owning phase: before any first filing.**
+
+★★ **THE UNIFYING MECHANISM, and it is the shape this repo has a memory named after — "a figure
+with no reader".** The engine computes a per-disposal identification verdict (`ComplianceStatus`)
+and never lets it change a filed number or gate a filed artifact. Verified by grep: it occurs only
+in `optimize.rs` and its own definition — no fold, no report, no export. §1.1012-1(j)(3)'s
+deemed-FIFO consequence exists in **three doc comments and no code**.
+  - **FR-34 (Important) — no-election disposals compute at HIFO** (`fold.rs:49`) while
+    `disposal_compliance` calls that same disposal `NonCompliant`, and that row reaches only
+    `verify` — never `report --tax-year`, never an export. The repo's own KAT quantifies it: a $95
+    sale, basis $90 under HIFO versus $50 under FIFO ⇒ **gain $5 versus $45**. ★ The owner mandate
+    covering this cites `attested: false`, which is a **pre-2025-only** flag, so the mandate no
+    longer reaches the case.
+  - **FR-35 (Important)** — the identification timeliness test compares DATES where the reg and this
+    repo's own spec both say *"date **and time** of the sale"*; both timestamps are already in hand.
+  - **FR-36 (Important)** — an unclassified outflow removes sats, reports no disposition, and is only
+    Advisory, while a *partially* covered disposal is Hard. No export surface mentions it.
+  - **FR-37 (Important)** — the "sats typed into a dollars field" advisory has ONE call site,
+    `--amount`, where the error overstates tax. `--basis` and `--donor-basis` get only a sign check,
+    so `--basis 5000000` on 0.05 BTC records silently — the direction that understates.
+
+★ **The next instrument, named by the disposition agent itself:** a mechanical sweep of every
+consumer of `ComplianceStatus`, `BlockerKind` and `pending_reconciliation` asking *"does this change
+a filed number or gate a filed artifact?"* would have found three of the four in minutes. Build that
+before auditing anything else by hand.
+
+★ **CLEARED and worth recording** (11 items): the holding-period boundary including the leap-day
+case (opened as a suspected bug — it is correct), §1223 tacking, the §1015 four-zone dual basis,
+proceeds netting, `Σ picks == principal`, cross-account identification, §1222/§1211/§1212, §1091 (the
+claim is at the strength the authority supports), the 8949 boxes and adjustment codes, §1012 fee
+capitalisation across all four adapters, and conformance of BOTH owner-mandated policies. The
+self-transfer policy was audited for CONFORMANCE, not relitigated.

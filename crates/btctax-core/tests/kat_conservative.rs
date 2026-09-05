@@ -1254,11 +1254,16 @@ fn tp8c_fee_sat_basis_can_land_on_the_last_tranche_leg_corner_b() {
     };
     let select = LedgerEvent {
         id: EventId::decision(3),
-        utc_timestamp: datetime!(2025-08-01 00:00 UTC),
+        // FR-33: dated the DAY OF the 2025-07-01 outflow, so this fixture exercises what it was
+        // written for (TP8(c) fee-sat re-homing) and not the new §1.1012-1(j)(2) timeliness drop.
+        // Decision ORDER is `decision_seq`, never the timestamp (resolve.rs sorts by seq), so seq 3
+        // still resolves after the seq-2 reclassify.
+        utc_timestamp: datetime!(2025-07-01 00:00 UTC),
         original_tz: offset!(+00:00),
         wallet: None,
         payload: EventPayload::LotSelection(LotSelection {
             disposal_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+            attested: false,
             lots: vec![LotPick {
                 lot: LotId {
                     origin_event_id: EventId::decision(1),
@@ -1325,11 +1330,16 @@ fn basis_methodology_names_documented_fee_not_cohan_estimate_for_a_non_promoted_
     };
     let select = LedgerEvent {
         id: EventId::decision(3),
-        utc_timestamp: datetime!(2025-08-01 00:00 UTC),
+        // FR-33: dated the DAY OF the 2025-07-01 outflow, so this fixture exercises what it was
+        // written for (TP8(c) fee-sat re-homing) and not the new §1.1012-1(j)(2) timeliness drop.
+        // Decision ORDER is `decision_seq`, never the timestamp (resolve.rs sorts by seq), so seq 3
+        // still resolves after the seq-2 reclassify.
+        utc_timestamp: datetime!(2025-07-01 00:00 UTC),
         original_tz: offset!(+00:00),
         wallet: None,
         payload: EventPayload::LotSelection(LotSelection {
             disposal_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+            attested: false,
             lots: vec![LotPick {
                 lot: LotId {
                     origin_event_id: EventId::decision(1),
