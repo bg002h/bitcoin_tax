@@ -23,6 +23,35 @@
 > been visible on a form whose truth we had not established by hand — which is the argument for the
 > anchor form, made concrete.
 >
+> ### ★★★ A THIRD such fact, found 2026-09-04 — and this one had already shipped a silent drop
+>
+> 3. **There is more than one label column, and "the" column was being chosen wrong.** A form prints
+>    each line number at least twice: in the margin, and again in the gutter beside the amount box.
+>    Both climb down the page, so *monotonicity* — the original discriminator — cannot separate them,
+>    and the tie was falling to whichever held more TOKENS. That systematically favours the gutter,
+>    because the margin abbreviates sub-rows to a bare `b`, `c`, `d` where the gutter spells out
+>    `2a`…`2t`. Compounding it, the margin was under-counted by fact 2 in reverse: bucketing on the
+>    right edge puts the suffixed token `1a` (x2=55.28) outside its own column's bucket (`2`, `3`…
+>    end at 50.40).
+>
+>    Measured on `f6251--2025`: margin 39 tokens, gutter 58 — the gutter won, and the gutter is
+>    **structurally incomplete**. A heading has no box and so can never appear in any gutter, and a
+>    form with two money columns puts some gutter labels ~95pt further left. The census printed 59
+>    labels beginning at `1b`, `0 without a box`, no complaint — and the line it dropped was **1a,
+>    the seam to Schedule 1-A** (*"Subtract Schedule 1-A (Form 1040), line 37, from Form 1040,
+>    1040-SR, or 1040-NR, line 14"*).
+>
+>    ★★ The fix is to score a column by **the labels it yields**, not the tokens it holds — the
+>    quantity the reader exists to produce, and immune to both distortions. Measured over all 32
+>    archived forms: **net +87 labels** on the seven that produced a count both before and after
+>    (`f1040s1--2024` 35→64, `f1040s3--2024` 19→35, `f6251--2025` 59→60), plus `f1040--2025` going
+>    from a hard error to 66 — and the anchor untouched at 50 labels / 48 entry lines.
+>
+>    ★ **A union over all candidate columns was measured and is WRONG** — it injects prose numerals
+>    as phantom labels: `45` and `50` on Schedule 1-A, a 38-line form. The residual (a second entry
+>    printed on the same row, as `f1040`'s `2a`/`2b` pair) is filed as `FOLLOWUPS.md` FR-27 and needs
+>    a row model, not a wider net.
+>
 > ### ★★★ 50 vs 48 — RESOLVED by opening the PDF. Both counts were right.
 >
 > | | |
