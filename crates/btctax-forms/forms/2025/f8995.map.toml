@@ -3,7 +3,7 @@
 # Ported from `forms/2024/f8995.map.toml`. ★ EVERY field name below was re-read from the TY2025 blank
 # with `./target/debug/xtask dump-fields crates/btctax-forms/forms/2025/f8995.pdf` (33 text fields, no
 # checkboxes, sha256:55380ad230303e15… — byte-identical to design/forms/2025/f8995--2025.pdf), and NOT
-# copied from the TY2024 map. That mattered: **the IRS renamed 21 of the 33 fields for TY2025** while
+# copied from the TY2024 map. That mattered: **the IRS renamed 18 of the 33 fields for TY2025 (33 fields each year, 15 spellings identical, 18 changed — counted from `dump-fields` on both PDFs, not estimated)** while
 # the printed form did not change at all (§ "What changed vs TY2024" below). A port that kept the 2024
 # spellings would have parsed, looked right, and written to fields that do not exist.
 #

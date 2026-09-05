@@ -176,7 +176,9 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<FiledPacket, Fo
             crate::form6251::fill_form_6251_with_map(
                 amt,
                 header,
-                &crate::map::Form6251Map::ty2024(),
+                // FR/audit I-1: select by YEAR. A hardcoded 2024 map on a 2025 PDF writes the
+                // AMT into line 10's box — wrong number, right-looking paper.
+                &crate::map::Form6251Map::for_year(year)?,
             )?,
         );
     }
@@ -195,7 +197,7 @@ pub fn fill_full_return(pr: &PrintedReturn, year: i32) -> Result<FiledPacket, Fo
                 &p4.part_iv,
                 p4.parts_i_to_iii.as_ref(),
                 header,
-                &crate::map::Form8995AMap::ty2024(),
+                &crate::map::Form8995AMap::for_year(year)?,
             )?,
         );
     }

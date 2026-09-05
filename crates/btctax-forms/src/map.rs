@@ -168,6 +168,27 @@ impl Form6251Map {
     pub fn ty2024() -> Self {
         Self::parse(F6251_MAP_2024).expect("bundled f6251 2024 map parses")
     }
+
+    /// ★★★ Select the map by YEAR, refusing a year this build has no map for.
+    ///
+    /// The audit of the TY2025 map batch found `packet.rs` hardcoding `ty2024()` while `year` was
+    /// already in scope two lines away. That is not a missing feature, it is a **wrong-number path
+    /// waiting to be reached**: TY2025 split Form 6251 line 1 into 1a/1b and shifted the page-1
+    /// field names, so filling a TY2025 PDF through the TY2024 map does not fail — it writes 2a
+    /// into 1b's box and walks everything below down one, landing **line 11, the AMT itself**, in
+    /// line 10's box. The figure would be wrong and the paper would look right.
+    ///
+    /// A hardcode cannot express "no map for this year". This can, and it fails CLOSED: an
+    /// unmapped year is a refusal, never a silent substitution of a neighbouring year's geometry.
+    /// ★ TY2025's map file is committed and field-verified but deliberately NOT wired here — its
+    /// 1a/1b split needs `Form6251Map` and the fill logic to change together, which is a build task
+    /// and not a review fold. Until then 2025 refuses, which is the honest state.
+    pub fn for_year(year: i32) -> Result<Self, crate::FormsError> {
+        match year {
+            2024 => Ok(Self::ty2024()),
+            other => Err(crate::FormsError::UnsupportedYear(other)),
+        }
+    }
     fn parse(s: &str) -> Result<Self, toml::de::Error> {
         toml::from_str(s)
     }
@@ -1423,6 +1444,15 @@ pub struct Form8995APartIiiCells {
 }
 
 impl Form8995AMap {
+    /// ★ Year dispatch, for the same reason as [`Form6251Map::for_year`] — `packet.rs` hardcoded
+    /// `ty2024()` here too, with `year` in scope. Fails closed on an unmapped year.
+    pub fn for_year(year: i32) -> Result<Self, crate::FormsError> {
+        match year {
+            2024 => Ok(Self::ty2024()),
+            other => Err(crate::FormsError::UnsupportedYear(other)),
+        }
+    }
+
     /// The bundled TY2024 map.
     pub fn ty2024() -> Self {
         Self::parse(F8995A_MAP_2024).expect("bundled f8995a 2024 map parses")

@@ -133,10 +133,13 @@ ssn  = "topmostSubform[0].Page1[0].f1_2[0]"
 #     which is why they are `unmodeled` and not `gap` — but the design weakness is recorded here
 #     rather than left implicit across twenty near-identical reasons.
 #
-# ★★ TWO GAPS on this form (4 fields) — lines G and H are `unmodeled` (see their entries); lines I
-#    and J are MAPPED above, having been closed in TY2024 by collecting the answer. The four `gap`
-#    fields TY2024 recorded for I/J are therefore not here either — this file records ZERO `gap`
-#    entries, and that is the same posture the TY2024 map ended at.
+# ★★ NO GAPS on this form — and how the TY2024 four were closed. Lines G and H are `unmodeled`
+#    (see their entries); lines I and J are MAPPED above, closed in TY2024 by collecting the answer.
+#    The four `gap` fields TY2024 recorded for I/J are therefore absent here: this file records
+#    ZERO `gap` entries, which is the posture the TY2024 map ended at.
+#    ★ The heading previously read "TWO GAPS on this form (4 fields)" and then said three lines
+#      later that the file records zero — leftover TY2024 framing contradicting its own body, and
+#      a census whose summary disagrees with its entries is worse than none.
 [census]
 
 # ── Header lines C, D, E, F(3) ───────────────────────────────────────────────────────────────────
