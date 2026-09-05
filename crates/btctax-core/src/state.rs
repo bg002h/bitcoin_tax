@@ -50,6 +50,27 @@ pub enum BlockerKind {
     /// the disclosure that it happened. An ATTESTED late recording (`optimize accept --attest`,
     /// `LotSelection::attested`) is the owner-sanctioned path and never fires this.
     LotSelectionPostHoc,
+    /// §1.1012-1(j)(1) / (j)(3)(i) / FR-34: a post-2025 TAXABLE disposition whose lots were chosen by
+    /// btctax's DEFAULT method because the filer identified nothing — no `LotSelection` covers the
+    /// disposal and no `MethodElection` is in force for its wallet. The fold's §A.5 verdict for such a
+    /// disposal is `ComplianceStatus::NonCompliant`, and until FR-34 that verdict reached only
+    /// `verify`: it changed no filed number and gated no filed artifact, so a return could report a
+    /// basis btctax picked while the engine itself called the pick inadequate.
+    ///
+    /// The default is HIFO and FR-34 does NOT change it — that is an owner mandate
+    /// (`design/SPEC_reconcile_defaults.md` Change 1, pinned by `method_election::default_method_is_hifo`).
+    /// What changes is that the assumption is now DISCLOSED, per disposal, with the dollar consequence
+    /// MEASURED: the detail names the lot basis actually consumed and the lot basis
+    /// §1.1012-1(j)(1)'s deemed acquisition order would have consumed instead.
+    ///
+    /// **Advisory** — never gates `compute_tax_year`, and the reason is structural rather than a
+    /// preference. §1.1012-1(j)(3)(ii) makes a standing order an adequate identification, so the fix
+    /// is `btctax config --set-forward-method <m>`; but an election can never be back-dated
+    /// (`MethodElectionBackdated`), so a filer whose PAST sales rest on the default has no action that
+    /// clears them. A Hard gate would be unclearable — it would refuse those returns forever, which is
+    /// worse than telling the filer nothing. This is also the calibration §7.4 already chose for the
+    /// identical question on the pre-2025 side (`Pre2025MethodNote`, Advisory even unattested).
+    IdentificationDefaulted,
     /// §A.7 / §7.4: the live `pre2025_method` config differs from the GOVERNING (effective) allocation's
     /// recorded `pre2025_method`. The allocation conserves under ITS recorded method, so this is a method
     /// drift — NOT bad data (never `SafeHarborUnconservable`). Hard: a post-attestation method change would
@@ -129,7 +150,8 @@ impl BlockerKind {
             | SelfTransferInboundZeroBasis
             | SelfTransferInboundDefaultedAcquired
             | PseudoReconcileActive
-            | LotSelectionPostHoc => Severity::Advisory,
+            | LotSelectionPostHoc
+            | IdentificationDefaulted => Severity::Advisory,
         }
     }
 }

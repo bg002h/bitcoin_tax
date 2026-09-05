@@ -33,6 +33,49 @@ pub struct DisposalCompliance {
     pub status: ComplianceStatus,
 }
 
+/// The §A.5 identification verdict for ONE disposition, computed from the only two facts that decide
+/// it: the made-date of a `LotSelection` applied to it (`None` = none applied), and the
+/// `effective_from` of the `MethodElection` in force for its wallet (`None` = none in force, which is
+/// where the fold falls through to its default method).
+///
+/// ★★ **SHARED, and that is the point (FR-34).** `disposal_compliance` calls it to REPORT a verdict
+/// after the fold, and `fold::consume_principal` calls it to decide, WHILE the basis is being built,
+/// whether the units it is about to charge were identified by the filer at all. Before FR-34 the
+/// verdict had no reader on the filing path: a no-election disposal computed at the HIFO default
+/// while this classifier called that same disposal `NonCompliant`, and the row reached only `verify`.
+/// One function means the reported verdict and the filed number can never diverge.
+///
+/// Priority, per §A.5 and the load-bearing cross-cutting SPEC rule ("no artifact, command, or doc may
+/// describe post-hoc selection as compliant"):
+///   1. A `LotSelection` applied to this disposal drives the reported basis, so the selection's OWN
+///      timeliness governs: made ≤ sale → `Contemporaneous`, else `NonCompliant`. A standing order may
+///      NEVER rescue a post-hoc selection.
+///   2. Only when NO selection applied: an in-force `MethodElection` → `StandingOrder`.
+///      §1.1012-1(j)(3)(ii): "A standing order or instruction for the specific identification of
+///      digital assets is treated as an adequate identification made at the time of sale."
+///   3. Otherwise → `NonCompliant`: nothing identified these units. §1.1012-1(j)(1) / (j)(3)(i) answer
+///      that case with the deemed acquisition order, and FR-34 is the disclosure that btctax's default
+///      is not that order.
+///
+/// The §1.1012-1(j)(3) broker-communication envelope is NOT applied here — it is an overlay on a
+/// verdict, not a fact about what the filer identified, and it is applied by `disposal_compliance`.
+pub(crate) fn identification_made(
+    date: TaxDate,
+    selection_made: Option<TaxDate>,
+    election_from: Option<TaxDate>,
+) -> ComplianceStatus {
+    if let Some(made) = selection_made {
+        if made <= date {
+            return ComplianceStatus::Contemporaneous;
+        }
+        return ComplianceStatus::NonCompliant;
+    }
+    match election_from {
+        Some(effective_from) => ComplianceStatus::StandingOrder { effective_from },
+        None => ComplianceStatus::NonCompliant,
+    }
+}
+
 /// Collect all non-voided, non-backdated `MethodElection` decisions that are on or after
 /// `TRANSITION_DATE` and whose `effective_from` ≥ their made-date (the backdating guard) into
 /// `ElectionRec`s — CARRYING THE PER-WALLET SCOPE — so the SHARED `resolve_election` resolver
@@ -152,29 +195,17 @@ pub fn disposal_compliance(events: &[LedgerEvent], state: &LedgerState) -> Vec<D
             return ComplianceStatus::NonCompliant;
         }
 
-        // (2) §A.5(b): a `LotSelection` applied to this disposal drove the reported result, so the
-        // selection's own timeliness governs. A post-hoc selection (made-date AFTER the sale) is
-        // NonCompliant and must NOT fall through to the standing-order check — a standing order
-        // would never produce a cherry-picked post-hoc set, so labeling it StandingOrder would
-        // present a forbidden post-hoc identification as compliant (§1.1012-1(j)).
-        if let Some(made) = sel_made.get(disposal) {
-            if *made <= date {
-                return ComplianceStatus::Contemporaneous;
-            }
-            return ComplianceStatus::NonCompliant;
-        }
-
-        // (3) §A.5(a) standing order — only reachable when NO selection was applied: the SHARED
-        // wallet-aware `resolve_election` (the SAME resolver the fold uses) selects the in-force
-        // election for THIS wallet via two independent tiers (scoped, then global) [R0-I1/R0-M2]. Its
-        // `effective_from` becomes the StandingOrder date. A scoped election on a DIFFERENT wallet
-        // never taints this disposal (tier 1 empty, tier 2 global empty ⇒ None ⇒ NonCompliant).
-        if let Some(ef) = resolve_election(date, wallet, &elections).map(|e| e.effective_from) {
-            return ComplianceStatus::StandingOrder { effective_from: ef };
-        }
-
-        // (4) No envelope hit, no applied selection, no in-force election.
-        ComplianceStatus::NonCompliant
+        // (2)–(4) What the filer actually identified. Delegated to `identification_made` — the SAME
+        // function `fold::consume_principal` calls while it builds the basis (FR-34), so the verdict
+        // reported here and the verdict that governs the filed number are one computation. The
+        // wallet-aware `resolve_election` is likewise the SAME resolver the fold uses, applying the two
+        // independent tiers (scoped, then global) [R0-I1/R0-M2]; a scoped election on a DIFFERENT
+        // wallet never taints this disposal (tier 1 empty, tier 2 global empty ⇒ None ⇒ NonCompliant).
+        identification_made(
+            date,
+            sel_made.get(disposal).copied(),
+            resolve_election(date, wallet, &elections).map(|e| e.effective_from),
+        )
     };
 
     // ── 6. Emit one row per post-2025 disposal / removal ───────────────────────────────────────
