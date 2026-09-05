@@ -10,6 +10,7 @@ pub mod experimental;
 pub mod forms;
 pub mod identity;
 pub mod optimize;
+pub mod payload_polarity;
 pub mod persistence;
 pub mod price;
 pub mod project;
@@ -63,4 +64,14 @@ pub enum CoreError {
     Serde(#[from] serde_json::Error),
     #[error("persistence: {0}")]
     Persistence(String),
+    /// FR-38: a structurally-impossible value was refused at the persistence boundary
+    /// (`persistence::insert` → `payload_polarity::check_payload_polarity`) — a negative cost
+    /// basis / FMV / proceeds / fee, or a negative satoshi count. REFUSED, never normalised: an
+    /// `.abs()` here would change `fingerprint`, hence conflict `EventId`s.
+    #[error("refused: {field} = {value} — {reason}")]
+    ImpossibleValue {
+        field: String,
+        value: String,
+        reason: &'static str,
+    },
 }
