@@ -90,12 +90,25 @@ fn lot_selection(
     disposal_ref: &str,
     picks: Vec<LotPick>,
 ) -> LedgerEvent {
+    lot_selection_att(seq, ts, disposal_ref, picks, false)
+}
+
+/// FR-33: as `lot_selection`, with the §C.2 attestation flag the `optimize accept --attest` path
+/// stamps (the filer swears a genuine contemporaneous identification existed in their books).
+fn lot_selection_att(
+    seq: u64,
+    ts: time::OffsetDateTime,
+    disposal_ref: &str,
+    picks: Vec<LotPick>,
+    attested: bool,
+) -> LedgerEvent {
     dec_ev(
         seq,
         ts,
         EventPayload::LotSelection(LotSelection {
             disposal_event: EventId::import(Source::Coinbase, SourceRef::new(disposal_ref)),
             lots: picks,
+            attested,
         }),
     )
 }
@@ -483,4 +496,245 @@ fn determinism_with_elections_and_selections_is_load_order_independent() {
     let s2 = project(&b, &StaticPrices::default(), &ProjectionConfig::default());
     assert_eq!(s1.disposals, s2.disposals);
     assert_eq!(s1.lots, s2.lots);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// FR-33 — §1.1012-1(j)(2) TIMELINESS of a per-disposal specific identification.
+//
+// Reg. §1.1012-1(j)(2) (archived: `legal/primary-sources/regulations-cfr/26CFR_1.1012-1_basis.xml`):
+//   "A specific identification of the units of a digital asset sold, disposed of, or transferred is
+//    made if, NO LATER THAN THE DATE AND TIME of the sale, disposition, or transfer, the taxpayer
+//    identifies on its books and records the particular units to be sold..."
+// and §1.1012-1(j)(1), the consequence:
+//   "If a specific identification is not made, the basis and holding period of the units sold ... are
+//    determined by treating the units ... as sold ... in order of time from the earliest date on which
+//    units of the same digital asset ... were acquired by the taxpayer."
+// §1.1012-1(j)(6): "This paragraph (j) is applicable to all acquisitions and dispositions of digital
+// assets on or after January 1, 2025."
+//
+// So a LATE selection is not an identification at all — it is IGNORED, and consumption falls back to
+// the method in force (the established §A.4 rejection semantics). The only sanctioned late recording
+// is an ATTESTED one (`optimize accept --disposal <ref> --attest`), where the filer swears a genuine
+// contemporaneous identification existed in their books and this is a transcription of it.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+/// FR-33 REPRO — the Critical. A `LotSelection` typed in NINE MONTHS AFTER the sale cherry-picks the
+/// high-basis lot B ($90) over the in-force FIFO order's lot A ($50): reported gain $5 instead of $45.
+/// Post-hoc cherry-picking lowers the reported gain ⇒ understates tax.
+#[test]
+fn post_hoc_selection_is_ignored_and_the_disposal_falls_back_to_method_order() {
+    let mut evs = three_post2025();
+    // A forward (valid) standing order: FIFO from 2025-01-02 → lot A, basis $50.
+    evs.push(election(
+        1,
+        datetime!(2025-01-02 00:00:00 UTC),
+        date!(2025 - 01 - 02),
+        LotMethod::Fifo,
+    ));
+    evs.push(sell(
+        "D",
+        datetime!(2025-07-01 00:00:00 UTC),
+        100_000,
+        dec!(95.00),
+    ));
+    // The cherry-pick, recorded 2026-04-01 — nine months AFTER the 2025-07-01 sale.
+    evs.push(lot_selection(
+        2,
+        datetime!(2026-04-01 00:00:00 UTC),
+        "D",
+        vec![LotPick {
+            lot: pid("B"),
+            sat: 100_000,
+        }],
+    ));
+    let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
+    assert_eq!(
+        st.disposals[0].legs[0].basis,
+        dec!(50.00),
+        "a post-hoc LotSelection is not a §1.1012-1(j)(2) identification: it must be IGNORED and the \
+         disposal must fall back to the method in force (FIFO → lot A, $50), not report lot B's $90"
+    );
+    assert!(
+        has(&st, BlockerKind::LotSelectionPostHoc),
+        "dropping a selection changes a filed number silently — an advisory MUST say so"
+    );
+}
+
+/// FR-33 — the OWNER-SANCTIONED path must survive the fix. `optimize accept` with a narrow
+/// per-disposal attestation persists a `LotSelection` whose made-date is after the sale BY
+/// CONSTRUCTION (that is what `Persistability::NeedsAttestation` means), stamped `attested: true`.
+/// Identical facts to the repro above; only the attestation differs. It must still GOVERN.
+#[test]
+fn attested_post_hoc_selection_still_governs() {
+    let mut evs = three_post2025();
+    evs.push(election(
+        1,
+        datetime!(2025-01-02 00:00:00 UTC),
+        date!(2025 - 01 - 02),
+        LotMethod::Fifo,
+    ));
+    evs.push(sell(
+        "D",
+        datetime!(2025-07-01 00:00:00 UTC),
+        100_000,
+        dec!(95.00),
+    ));
+    evs.push(lot_selection_att(
+        2,
+        datetime!(2026-04-01 00:00:00 UTC),
+        "D",
+        vec![LotPick {
+            lot: pid("B"),
+            sat: 100_000,
+        }],
+        true,
+    ));
+    let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
+    assert_eq!(
+        st.disposals[0].legs[0].basis,
+        dec!(90.00),
+        "an ATTESTED late recording is the §C.2 owner-sanctioned path — it must still govern"
+    );
+    assert!(
+        !has(&st, BlockerKind::LotSelectionPostHoc),
+        "and it must not raise the post-hoc advisory"
+    );
+}
+
+/// FR-33 boundary — §1.1012-1(j)(2) says "no later than", so a selection made ON the day of the sale
+/// is TIMELY. Reg. §1.1012-1(j)(5)(i)(A) Example 1 is exactly this fact pattern: a notation in the
+/// taxpayer's records on the date of sale, prior to the sale, identifies the units.
+#[test]
+fn selection_made_the_day_of_the_sale_is_timely() {
+    let mut evs = three_post2025();
+    evs.push(election(
+        1,
+        datetime!(2025-01-02 00:00:00 UTC),
+        date!(2025 - 01 - 02),
+        LotMethod::Fifo,
+    ));
+    evs.push(sell(
+        "D",
+        datetime!(2025-07-01 00:00:00 UTC),
+        100_000,
+        dec!(95.00),
+    ));
+    evs.push(lot_selection(
+        2,
+        datetime!(2025-07-01 23:59:59 UTC), // same tax-date as the sale
+        "D",
+        vec![LotPick {
+            lot: pid("B"),
+            sat: 100_000,
+        }],
+    ));
+    let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
+    assert_eq!(st.disposals[0].legs[0].basis, dec!(90.00));
+    assert!(!has(&st, BlockerKind::LotSelectionPostHoc));
+}
+
+/// FR-33 boundary — the very next day is already too late. (The comparison is DATE-granular today;
+/// §1.1012-1(j)(2) says "date and time", which is FOLLOWUPS FR-35, a separate open Important.)
+#[test]
+fn selection_made_the_day_after_the_sale_is_dropped() {
+    let mut evs = three_post2025();
+    evs.push(election(
+        1,
+        datetime!(2025-01-02 00:00:00 UTC),
+        date!(2025 - 01 - 02),
+        LotMethod::Fifo,
+    ));
+    evs.push(sell(
+        "D",
+        datetime!(2025-07-01 00:00:00 UTC),
+        100_000,
+        dec!(95.00),
+    ));
+    evs.push(lot_selection(
+        2,
+        datetime!(2025-07-02 00:00:00 UTC),
+        "D",
+        vec![LotPick {
+            lot: pid("B"),
+            sat: 100_000,
+        }],
+    ));
+    let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
+    assert_eq!(st.disposals[0].legs[0].basis, dec!(50.00));
+    assert!(has(&st, BlockerKind::LotSelectionPostHoc));
+}
+
+/// FR-33 scope — §1.1012-1(j)(6): "This paragraph (j) is applicable to all acquisitions and
+/// dispositions of digital assets on or after January 1, 2025." A 2024 disposition is governed by
+/// the prior regime, so the guard must NOT reach it.
+#[test]
+fn pre_2025_disposition_is_outside_paragraph_j() {
+    let evs = vec![
+        buy(
+            "A",
+            datetime!(2024-02-01 00:00:00 UTC),
+            100_000,
+            dec!(50.00),
+        ),
+        buy(
+            "B",
+            datetime!(2024-03-01 00:00:00 UTC),
+            100_000,
+            dec!(90.00),
+        ),
+        sell(
+            "D",
+            datetime!(2024-09-01 00:00:00 UTC),
+            100_000,
+            dec!(95.00),
+        ),
+        // Recorded 18 months after the 2024 sale — late, but paragraph (j) does not reach 2024.
+        lot_selection(
+            1,
+            datetime!(2026-03-01 00:00:00 UTC),
+            "D",
+            vec![LotPick {
+                lot: pid("B"),
+                sat: 100_000,
+            }],
+        ),
+    ];
+    let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
+    assert!(!has(&st, BlockerKind::LotSelectionPostHoc));
+    assert_eq!(st.disposals[0].legs[0].basis, dec!(90.00));
+}
+
+/// FR-33 — Σsat / Σbasis conservation survives the drop. Dropping a selection must fall back to
+/// method order, never leave sats unconsumed (the §A.4 invariant every other rejection path holds).
+#[test]
+fn dropping_a_post_hoc_selection_conserves() {
+    let mut evs = three_post2025();
+    evs.push(election(
+        1,
+        datetime!(2025-01-02 00:00:00 UTC),
+        date!(2025 - 01 - 02),
+        LotMethod::Fifo,
+    ));
+    evs.push(sell(
+        "D",
+        datetime!(2025-07-01 00:00:00 UTC),
+        100_000,
+        dec!(95.00),
+    ));
+    evs.push(lot_selection(
+        2,
+        datetime!(2026-04-01 00:00:00 UTC),
+        "D",
+        vec![LotPick {
+            lot: pid("C"),
+            sat: 100_000,
+        }],
+    ));
+    let st = project(&evs, &StaticPrices::default(), &ProjectionConfig::default());
+    assert!(
+        btctax_core::conservation_report(&st).balanced,
+        "the drop path must conserve like every other §A.4 rejection"
+    );
+    let consumed: i64 = st.disposals[0].legs.iter().map(|l| l.sat).sum();
+    assert_eq!(consumed, 100_000);
 }

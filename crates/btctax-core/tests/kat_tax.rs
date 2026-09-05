@@ -3384,6 +3384,7 @@ fn self_transfer_in_is_outside_fifo_but_sellable() {
         datetime!(2026-01-02 00:00:00 UTC),
         EventPayload::LotSelection(LotSelection {
             disposal_event: EventId::import(Source::Coinbase, SourceRef::new("IN")),
+            attested: false, // targets a NON-honoring event → LotSelectionInvalid, not the FR-33 guard
             lots: vec![LotPick {
                 lot: LotId {
                     origin_event_id: EventId::import(Source::Coinbase, SourceRef::new("IN")),
@@ -4091,6 +4092,7 @@ fn passthrough_leg_is_not_lot_selectable() {
         datetime!(2026-01-02 00:00:00 UTC),
         EventPayload::LotSelection(LotSelection {
             disposal_event: EventId::import(Source::Coinbase, SourceRef::new("OUT")),
+            attested: false, // targets a NON-honoring passthrough leg → LotSelectionInvalid
             lots: vec![LotPick {
                 lot: LotId {
                     origin_event_id: EventId::import(Source::Coinbase, SourceRef::new("BUY")),

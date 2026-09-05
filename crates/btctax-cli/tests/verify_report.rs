@@ -328,8 +328,11 @@ fn verify_lists_election_history_and_selection_count_and_compliance() {
         now(),
     )
     .unwrap();
-    // Read the 2025 disposal eventref + the lot/sat its single leg consumes; record a
-    // contemporaneous selection.
+    // Read the 2025 disposal eventref + the lot/sat its single leg consumes; record a selection.
+    // FR-33: `now()` is 2026-02-01 and the disposal is in 2025, so this selection is POST-HOC — the
+    // resolver drops it (advisory `LotSelectionPostHoc`). `selection_count` counts DECISIONS in the
+    // log, not applied selections, so it is 1 either way; the drop is asserted in
+    // `verify_surfaces_the_post_hoc_selection_advisory` below.
     let (disposal_ref, lot_ref, principal) = {
         let s = Session::open(&vault, &pp()).unwrap();
         let (state, _) = s.project().unwrap();
@@ -407,6 +410,79 @@ fn verify_partitions_lot_selection_invalid_as_hard() {
         report.has_hard_blockers(),
         "has_hard_blockers() must be true → non-zero exit (FR9)"
     );
+}
+
+/// FR-33 — the advisory must reach a READER, and it must not gate. `reconcile select-lots` records
+/// no attestation, so a selection typed at return-preparation time (2026-02-01) for a 2025 sale is a
+/// §1.1012-1(j)(2) nullity: `resolve` drops it, `verify` prints it under "Advisory blockers", and the
+/// year still computes. This is the half of FR-33's "a figure with no reader" that a value assertion
+/// cannot cover — a correct number nobody is told about is how the defect stayed invisible.
+#[test]
+fn verify_surfaces_the_post_hoc_selection_advisory_and_does_not_gate() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    cmd::import::run(
+        &vault,
+        &pp(),
+        &[fixtures::coinbase_buy_sell_send(dir.path())],
+    )
+    .unwrap();
+    let (disposal_ref, lot_ref, principal) = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (state, _) = s.project().unwrap();
+        let leg = &state.disposals[0].legs[0];
+        (
+            state.disposals[0].event.canonical(),
+            format!(
+                "{}#{}",
+                leg.lot_id.origin_event_id.canonical(),
+                leg.lot_id.split_sequence
+            ),
+            leg.sat,
+        )
+    };
+    // A VALID selection (principal conserved) recorded on 2026-02-01, long after the 2025 sale.
+    let picks =
+        vec![btctax_cli::eventref::parse_lot_pick(&format!("{lot_ref}:{principal}")).unwrap()];
+    cmd::reconcile::select_lots(&vault, &pp(), &disposal_ref, picks, now()).unwrap();
+
+    let report = cmd::inspect::verify(&vault, &pp()).unwrap();
+    let posthoc: Vec<_> = report
+        .advisory
+        .iter()
+        .filter(|b| b.kind == btctax_core::BlockerKind::LotSelectionPostHoc)
+        .collect();
+    assert_eq!(
+        posthoc.len(),
+        1,
+        "exactly one post-hoc advisory expected; advisory blockers: {:?}",
+        report.advisory
+    );
+    assert!(
+        !report
+            .hard
+            .iter()
+            .any(|b| b.kind == btctax_core::BlockerKind::LotSelectionPostHoc)
+            && !report.has_hard_blockers(),
+        "§1.1012-1(j)(1) prescribes a CONSEQUENCE, not a refusal — the year must still compute"
+    );
+    // The rendered text a filer actually reads must name the reg, both dates, and both remedies.
+    let text = btctax_cli::render::render_verify(&report);
+    assert!(text.contains("LotSelectionPostHoc"), "kind must render");
+    for needle in [
+        "1.1012-1(j)(2)",
+        "1.1012-1(j)(1)",
+        "IGNORED",
+        "RAISES the reported gain",
+        "attestation",
+        "reconcile void",
+    ] {
+        assert!(
+            text.contains(needle),
+            "render_verify must tell the filer {needle:?}; got:\n{text}"
+        );
+    }
 }
 
 #[test]

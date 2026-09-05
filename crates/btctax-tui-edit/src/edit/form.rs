@@ -1381,6 +1381,11 @@ pub fn validate_select_lots(
         btctax_core::event::LotSelection {
             disposal_event: item.disposal_event.clone(),
             lots: picks,
+            // FR-33: the editor's select-lots flow collects no attestation, so a selection recorded
+            // after the disposition it names is DROPPED by `resolve` (advisory `LotSelectionPostHoc`)
+            // and the disposal falls back to the method in force. The attested path is the editor's
+            // optimize-accept flow (`persist_optimize_accept`).
+            attested: false,
         },
     ))
 }

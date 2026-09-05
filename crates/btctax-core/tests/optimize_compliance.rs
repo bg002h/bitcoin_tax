@@ -197,6 +197,7 @@ fn lot_selection_decision(
         payload: EventPayload::LotSelection(LotSelection {
             disposal_event: eid(disposal_rf),
             lots: picks,
+            attested: false, // FR-33: these KATs drive `disposal_compliance`/`compliance_overlay`.
         }),
     }
 }
