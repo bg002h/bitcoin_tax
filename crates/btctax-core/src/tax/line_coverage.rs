@@ -174,7 +174,7 @@ impl Coverage {
     }
 
     /// Record a line that fits no production. The reason is mandatory and is checked.
-    #[allow(clippy::too_many_arguments)]
+    ///
     /// ★★ **Widened 2026-09-05 to match [`Self::line`].** It took a bare `Usd`, which made a
     /// not-completed line inexpressible on the exception path — and the r4 fold's own C-I2
     /// resolution requires exactly that on Schedule 1-A lines 10/18/27/33, where a Caution says to
@@ -182,6 +182,9 @@ impl Coverage {
     /// it as two-thirds fixed, this being the missing third. Same reasoning as the sibling: the
     /// census records a line's PRODUCTION, never its value, so widening costs nothing and narrowing
     /// forces an `unwrap_or` that reads like a claim about the figure.
+    // ★ r6 N-2: the attribute used to sit BETWEEN the two halves of this doc comment. `fmt` and clippy
+    //   were both green on it; it is placed last here, matching the sibling `line`.
+    #[allow(clippy::too_many_arguments)]
     pub fn exception(
         &mut self,
         _value: impl Into<Option<Usd>>,

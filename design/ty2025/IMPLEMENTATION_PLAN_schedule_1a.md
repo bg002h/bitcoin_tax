@@ -1,6 +1,11 @@
 # Schedule 1-A (TY2025) — IMPLEMENTATION PLAN
 
-**Status: r5** — lineage: r1 → r2 → r3 (the provenance census) → **r4 fold** (two lenses, 0C/9I) →
+**Status: r7 — 0 Critical / 0 Important, BUILD T2.** The first clean verdict in seven rounds
+(`reviews/PLAN_schedule_1a-r6fold-review.md`, 0C/0I/4M/2Nit, reviewing the r6 fold); all four Minors
+and both Nits are folded below, tagged **r6 M-n** / **r6 N-n** at the point of change.
+★ The status line has now been wrong twice on this document — it read *r3* while carrying an r4 fold,
+and *r5* while carrying an r6 one — which is the citation drift r5 N-1 measures, in the one field a
+reader trusts first. Lineage: r1 → r2 → r3 (the provenance census) → **r4 fold** (two lenses, 0C/9I) →
 **r5 fold** (this document, 2026-09-05: the r4 FOLD ITSELF reviewed — **0 Critical / 4 Important /
 4 Minor / 1 Nit**, one lens, persisted verbatim at `reviews/PLAN_schedule_1a-r4fold-review.md`; see the
 **r5 FOLD** block below). ★ This header read *r3* while already carrying an r4 fold, which is the same
@@ -21,7 +26,7 @@ rule that says re-review after every fold. Reviews persisted verbatim at
 | C-I3 | ★ the **refinance balance cap** was LOST in the r1 fold, and the prose states the rule BACKWARDS | see T3 below — added as a per-vehicle condition; **understates tax** without it |
 | C-I4 | Part II's *"not qualified tips"* list has **three** bullets; the table carries one | add the illegal-service exclusion, worded on the IRS's own matched examples |
 | B-I1 | the KAT has CLAUDE.md's half (a) and **not half (b)** — no per-line provenance, so "present but never populated" passes | every line carries a `Production` (or an `Exception` with a reason); build the actual set as `(label, got.lineN)` pairs so the compiler ties names to the struct |
-| B-I2 | `line_coverage` was structurally blind to a new `schedule_1a.rs` | ⚠ **TWO-THIRDS FIXED IN CODE** (r5 I-2 corrected the r4 ✅). **Landed:** scope is derived from the emitter (`crates/xtask/src/line_coverage_check.rs:471-484`) and `Option<Usd>` counts as money (`crates/xtask/src/line_coverage_check.rs:883-888`). **Not landed:** `LineCoverage.year` is per-row but **no constructor can set it**, and `Coverage::exception` was never widened to `Option<Usd>` — the exact type CORRECTION 4 needs on lines 10/18/27/33. Both are §T2 items below. |
+| B-I2 | `line_coverage` was structurally blind to a new `schedule_1a.rs` | ⚠ **TWO-THIRDS FIXED IN CODE** (r5 I-2 corrected the r4 ✅). **Landed:** scope is derived from the emitter (`crates/xtask/src/line_coverage_check.rs:471-484`) and `Option<Usd>` counts as money (`crates/xtask/src/line_coverage_check.rs:883-888`). ★ **AND THE REST LANDED TOO** (r6 M-3 — the "two-thirds" reading is stale at HEAD). `ff839ce7` added `Coverage::quoting_year` (`crates/btctax-core/src/tax/line_coverage.rs:144`), which sets the per-row year, and widened `Coverage::exception` (`:185`) to `impl Into<Option<Usd>>` exactly like `Coverage::line` (`:156`) — the type CORRECTION 4 needs on lines 10/18/27/33. Both constructors now write `year: self.1` (`:167`, `:196`). §T2 item 8 is therefore a **USE** item, not an ADD item. |
 | B-I3 | T2's doc-comment gate is `cite-check` semantics: it proves a quotation is *the form's* words, not *that line's* | use `tables.rs::printed_line(label)` — which **T1, in this same plan, already built for exactly this**, whose own doc says *"The fix is not more citation checking"* |
 | B-I4 | T3a refuses on `schedule_c.is_some()` | ✅ corrected in T3a below — gate on the CLAIM |
 | B-I5 | line **4b** (Form 4137) is a third line of the T3a shape with no recorded disposition | ✅ added to the T3a table |
@@ -55,7 +60,7 @@ below was re-verified against the primary source before folding; none was overtu
 | # | what the review claimed | what I verified, and how | what changed here |
 |---|---|---|---|
 | **I-1** | C-I2's mechanism (*transcribe each part's Caution*) closes **neither** case C-I2 names — Part V's Caution is an eligibility bar, so line 35 still prints $6,000 for a non-senior; Part I has no Caution and its predicate is line-scoped, so a part-scoped reading blanks **line 3** | **Confirmed, both halves.** `design/forms/extract/f1040s1a--2025.txt:97-98` is Part V's whole Caution — SSN and joint filing only, **no birth date**; the form puts *born before January 2, 1961* on lines 36a/36b (`:104-107`), which gate line 37, not the completion of 31–35. The condition is instructions-only (`design/forms/extract/i1040gi--2025.txt:44609-44617`). Part I (`design/forms/extract/f1040s1a--2025.txt:15-22`) prints **no Caution**, and the instructions' predicate (`design/forms/extract/i1040gi--2025.txt:43275-43285`) is scoped to lines 2a–2e. Form lines 8, 16, 25 and 31 each read line 3 | §T2 CORRECTION 4 rewritten: a per-part **source table**, the predicate scoped **per line**, and the two named cases spelled out. The C-I2 row records that its r4 resolution was superseded |
-| **I-2** | B-I2's ✅ FIXED IN CODE is two-thirds landed — no constructor can set `LineCoverage.year`, and `Coverage::exception` still takes `Usd` | **Confirmed.** `crates/btctax-core/src/tax/line_coverage.rs` has exactly two constructors, `line` (`:137`) and `exception` (`:159`), and both write `year: DEFAULT_ROW_YEAR` (`:148`, `:170`) where that const is `"2024"` (`:49`). `exception`'s `_value` is `Usd` (`:161`); `line`'s is `impl Into<Option<Usd>>` (`:139`). `design/forms/extract/` holds `f1040s1a--2025.txt` and no `--2024`, and `crates/btctax-forms/forms/2024/` holds no `f1040s1a.map.toml` ⇒ the hard-error branch at `crates/xtask/src/line_coverage_check.rs:530-560`. The two halves that DID land are real (`:471-484`, `:883-888`) | The B-I2 row now reads **two-thirds fixed** and names both residues; §T2 item 8 carries them as work. ★ The **code** fix is the controller's, deliberately not this fold's — no `.rs` file is touched here |
+| **I-2** | B-I2's ✅ FIXED IN CODE is two-thirds landed — no constructor can set `LineCoverage.year`, and `Coverage::exception` still takes `Usd` | **Confirmed.** `crates/btctax-core/src/tax/line_coverage.rs` has exactly two constructors, `line` (`:137`) and `exception` (`:159`), and both write `year: DEFAULT_ROW_YEAR` (`:148`, `:170`) where that const is `"2024"` (`:49`). `exception`'s `_value` is `Usd` (`:161`); `line`'s is `impl Into<Option<Usd>>` (`:139`). `design/forms/extract/` holds `f1040s1a--2025.txt` and no `--2024`, and `crates/btctax-forms/forms/2024/` holds no `f1040s1a.map.toml` ⇒ the hard-error branch at `crates/xtask/src/line_coverage_check.rs:530-560`. The two halves that DID land are real (`:471-484`, `:883-888`) | The B-I2 row now reads **two-thirds fixed** and names both residues; §T2 item 8 carries them as work. ★ The **code** fix is the controller's, deliberately not this fold's — no `.rs` file is touched here. ★★ **SUPERSEDED by r6 M-3:** `ff839ce7` landed BOTH residues 22 minutes after this fold was written, so every address in the column to the left has decayed by ~19 lines at the top of the file and ~26 lines lower down. The current addresses are in the B-I2 row above and in §T2 item 8 |
 | **I-3** | Part II holds two independently-claimable things and got one gate, so T3a refuses every W-2-only tipped employee and Part II is unreachable in B3 | **Confirmed.** The form separates them: 4a–4c are tips *received as an employee* (`design/forms/extract/f1040s1a--2025.txt:27-38`), line 5 is tips *received in the course of a trade or business* (`:39-42`). `schedule_c: Option<ScheduleCInputs>` (`crates/btctax-core/src/tax/return_inputs.rs:704`) is the only trade-or-business surface — no Schedule E, Schedule F or line 8z field exists. `other_out_of_scope_income` (`:994`) is always live (`crates/btctax-core/src/tax/questions.rs:597`) and refuses on `Some(true)` (`crates/btctax-core/src/tax/return_refuse.rs:995`), so the backstop the review names is real | T3a's lines 5 and 14b refuse on the **conjunction**, with the no-trade-or-business case recorded as genuinely blank, the backstop named, and the KAT that reds against the r4 wording written down |
 | **I-4** | C-I3 restored the refinance cap and dropped the same paragraph's precondition (*your prior loan that had QPVLI*), laundering a pre-2025 vehicle into eligibility | **Confirmed, and it understates tax.** `design/forms/extract/i1040gi--2025.txt:44486-44494` opens the *Refinanced loan* paragraph with exactly that condition; requirement 1 sits at `:44447-44448` and requirement 3 at `:44450-44452`, and a refinance satisfies neither on its own terms — which is why the paragraph exists. A 2023 vehicle refinanced in 2025 answers *yes* to every YES-condition the r4 row collects | §T3's r4 CONFORMANCE (1) gains a **second** YES-condition defaulting to NO, plus one sentence fixing which loan requirement 1 binds |
 
@@ -64,7 +69,9 @@ below was re-verified against the primary source before folding; none was overtu
 - **M-1** — C-I1's resolution sits across a crate boundary. Verified: `label_reader` is
   `crates/xtask/src/label_reader.rs`; `crates/xtask/Cargo.toml:20` depends on `btctax-core` and
   `crates/btctax-core/Cargo.toml` names no `xtask`, so the dependency is one-way. ⇒ §T2 item 5 **says
-  which**: the KAT moves to `xtask`, the struct stays in `btctax-core`.
+  which**: the KAT moves to `xtask`, the struct stays in `btctax-core`. ★ **(Superseded by r6 — see
+  item 5, which SPLITS the KAT along the crate line. This bullet is r5 round-log, kept as history;
+  item 5 is the operative placement.)**
 - **M-2** — the KAT has four halves and B1 wants a planted defect per half. ⇒ §T2 item 6 names the four.
 - **M-3** — rule (4b) cannot reach Schedule 1-A during B3. Verified:
   `grep -rnE 'Schedule1a|schedule_1a|f1040s1a' crates/btctax-forms/src/ crates/btctax-forms/forms/`
@@ -95,7 +102,8 @@ below was re-verified against the primary source before folding; none was overtu
   carry their crate path wherever a line number is attached, so `sed -n '<line>p' <file>` resolves.
 
 ★ **Nothing was overturned, and nothing was widened.** No task was added, no form entered scope, and
-the one place the review offered a choice (M-1's KAT placement) is answered rather than deferred.
+the one place the review offered a choice (M-1's KAT placement) is answered rather than deferred
+— *answered wholly for `xtask`, which r6 I-1/I-2 then corrected to a SPLIT; see §T2 item 5.*
 
 **Branch:** `feat/amt-e2-vector-population` (current; B1 + B2 already on it).
 
@@ -343,14 +351,40 @@ residues.**
      set from `label_reader`, whose box witness needs an AcroForm; the instructions PDF has none and
      there is no `design/forms/geometry/i1040gi--2025.json`. That is census F-4's own measured
      blindness, not a gap to paper over.
-   ⇒ **Membership** (the 48 form labels, from `label_reader`) stays in `crates/xtask/`.
-   **Per-line quotation and the four worksheets** go in `btctax-core`'s existing
-   `schedule_1a_conformance` module, where `printed_line` and the in-crate fixture already live —
-   `crates/btctax-core/src/tax/fixtures/schedule_1a_2025_instructions.txt` carries all four worksheet
-   headers, verified at `:427`, `:556`, `:1049`, `:1066`. No new code and no new fixture is required
-   by this split; it is a placement decision, not work.
+   ⇒ **EVERY PIECE GETS A CRATE, and this table is the one item 6 plants against** (r6 M-1 — item 5
+   named three pieces where item 6 named four halves, so two halves had no home and the worksheets had
+   no kill):
+
+   | KAT half | instrument | crate |
+   |---|---|---|
+   | **1a membership — the form's 48 labels** | `label_reader`'s two witnesses over the committed geometry | `crates/xtask/` |
+   | **1b membership — the four worksheets** | the in-crate instructions fixture's `— Keep for Your Records` anchors | `btctax-core` |
+   | **2 per-line quotation** | `tables.rs::printed_line` + the struct's own doc comments | `btctax-core` |
+   | **3 provenance** | `line_coverage::cover_schedule1a`'s `Production` per line | `btctax-core` |
+   | **4 completion** | CORRECTION 4's per-LINE completion predicate | `btctax-core` |
+
+   Membership is the one half that is split, and only because its two sources differ: the FORM has an
+   AcroForm the box witness can read, and the INSTRUCTIONS have none at all (census F-4, and there is
+   no `design/forms/geometry/i1040gi--2025.json`). The other three halves are wholly in `btctax-core`:
+   `printed_line` is `cfg(test)`-in-module, the instructions fixture is in-crate
+   (`crates/btctax-core/src/tax/fixtures/schedule_1a_2025_instructions.txt`, worksheet headers verified
+   at `:427`, `:556`, `:1049`, `:1066`), and every ingredient halves 3 and 4 need is already `pub`
+   there (`Production` `:64`, `LineCoverage` `:105`, `Coverage` `:131`).
+   ★★ **And half 2 has a SECOND, independent reason to be in-crate that the r6 fold did not state**
+   (r7): it must read the struct's **doc comments as source text**, and doc comments do not exist at
+   runtime — the only in-tree precedent is `classifier.rs:736-737`
+   (`include_str!("return_inputs.rs")`), which works in-crate only. From `xtask` it would be the
+   escaping `include_str!` this item condemns two paragraphs below.
    ★ The struct stays in `btctax-core` either way, and B-I1's `(label, got.lineN)` tuple form still
    ties the compiler to it from both sides.
+
+   ★ **"A placement decision, not work" is true of the SPLIT and false of the HALF** (r6 N-1). The
+   placement itself is free, but `btctax-core` does not read the instructions fixture today:
+   `tables.rs:1351` `include_str!`s only `SCHEDULE_1A_FORM_TEXT`, and the instructions file is read
+   **only** by `crates/xtask/src/cite_check.rs:414`, at runtime, through a repo-root path. So half 1b
+   adds one in-crate `include_str!` and its own reader — `printed_line` reads the FORM extract and
+   cannot serve a worksheet row. No tarball risk (the file is inside the crate); just do not read that
+   sentence as *"the worksheet half already exists."*
 
    *(Superseded r5 reasoning, kept because the crate-direction argument still holds and is why
    membership stays in `xtask`:)* `label_reader` is `crates/xtask/src/label_reader.rs`, and `xtask`
@@ -359,25 +393,31 @@ residues.**
    out of `btctax-core`, whose tests deliberately use in-crate fixtures — an escaping `include_str!`
    has shipped a broken tarball from this repo before.
 
-   *(Original r5 text follows.)* **The conformance KAT lives in `crates/xtask/`, not in `btctax-core`** (r5 M-1 — *say which*).
-   `label_reader` is `crates/xtask/src/label_reader.rs`, and `xtask` depends on `btctax-core`
-   (`crates/xtask/Cargo.toml:20`) while `btctax-core`'s manifest names no `xtask` — the reverse would
-   be a cycle. CORRECTION 3 drives the expected set from `label_reader`, which is therefore unreachable
-   from `crates/btctax-core/src/tax/schedule_1a.rs` where r4 put both. ★ The **struct stays in
-   `btctax-core`**; only the KAT moves. B-I1's `(label, got.lineN)` tuple form still ties the compiler
-   to the struct, because `xtask` can see `btctax_core::tax::schedule_1a::*`. It also keeps
-   `label_reader`'s repo-root fixture loading out of `btctax-core`, whose tests deliberately use
-   in-crate fixtures — an escaping `include_str!` has shipped a broken tarball from this repo before.
-6. **B1: this KAT has FOUR halves, and each needs its own planted defect** (r5 M-2). Exit criterion 5's
-   generic *mutation-verify every guard* is not enough here, because CLAUDE.md B1 is scoped by name to
-   a conformance check and a mutation that kills one half leaves the other three green. Name and plant:
-   1. **membership** — drop a line from the struct;
-   2. **per-line quotation** — move line 28's *"increase the result to the next higher whole number"*
-      onto line 11 (the swap `printed_line` exists to catch, and the one that inverts the rounding for
-      Parts II/III);
-   3. **provenance** — declare a field and never assign it;
-   4. **completion** — complete a part whose predicate is false (CORRECTION 4's Part V case: a
-      non-senior reaching line 35).
+   *(The verbatim r5 block that stood here — "**The conformance KAT lives in `crates/xtask/`, not in
+   `btctax-core`**" — was DELETED by this fold (r6 M-2). It asserted the superseded placement in bold
+   INSIDE the operative item, and it was diffed against the kept paragraph above before removal: the
+   only content unique to it was r4 placement history plus "`xtask` can see
+   `btctax_core::tax::schedule_1a::*`", which the ⇒ table's last line already states. Nothing was
+   lost; the contradictory directive is gone.)*
+6. **B1: FOUR halves, FIVE instruments, and each instrument needs its own planted defect** (r5 M-2,
+   corrected by r6 M-1). Exit criterion 5's generic *mutation-verify every guard* is not enough here,
+   because CLAUDE.md B1 is scoped by name to a conformance check and a mutation that kills one half
+   leaves the others green. ★★ Membership carries **two** instruments because item 5 splits it across
+   the crate line, and the worksheet instrument is exactly the one census F-4 says a form-driven census
+   *"could never red on… It would have passed by finding nothing."* Name and plant — the crate for
+   each is item 5's table:
+   1. **1a membership, the form's labels** (`crates/xtask/`) — drop a line from the struct: `got.lineN`
+      fails to compile (`E0609`); delete the tuple entry too and the closed-at-both-ends comparison
+      against `label_reader`'s 48 reds;
+   2. **1b membership, the worksheets** (`btctax-core`) — delete one worksheet row (or a whole
+      worksheet) from the struct, and **pin the anchor count at 4**, so a reader that finds nothing
+      reds instead of passing;
+   3. **2 per-line quotation** (`btctax-core`) — move line 28's *"increase the result to the next
+      higher whole number"* onto line 11 (the swap `printed_line` exists to catch, and the one that
+      inverts the rounding for Parts II/III);
+   4. **3 provenance** (`btctax-core`) — declare a field and never give it a `Production`;
+   5. **4 completion** (`btctax-core`) — complete a part whose predicate is false (CORRECTION 4's
+      Part V case: a non-senior reaching line 35).
 7. **Rule (4b) is STRUCTURALLY BLIND to Schedule 1-A for the whole of B3** (r5 M-3), so during B3 the
    `Production` requirement is held by **this KAT alone**. B-I2's fix replaced a three-file hand-list
    with a derived predicate — a type is in scope iff the emitter crate names it in real code — and §3
@@ -385,20 +425,36 @@ residues.**
    `grep -rnE 'Schedule1a|schedule_1a|f1040s1a' crates/btctax-forms/src/ crates/btctax-forms/forms/`
    returns **0** and the checker contributes zero Schedule 1-A rows while reporting OK. Nobody may read
    the B-I2 row as cover for a checker that structurally cannot see this form yet.
-8. **Two `line_coverage` residues land here, because T2 is where the first TY2025 rows exist** (r5 I-2):
-   - `LineCoverage.year` is per-row (`crates/btctax-core/src/tax/line_coverage.rs:106`) and **no
-     constructor can set it**. `Coverage::line` (`:137`) and `Coverage::exception` (`:159`) are the only
-     two, and both write `year: DEFAULT_ROW_YEAR` (`:148`, `:170`), which is `"2024"` (`:49`) — even
-     though that const's own doc says a TY2025+ form sets its own. A Schedule 1-A row built the ordinary
-     way therefore resolves to stem `f1040s1a--2024`; that extract does not exist and neither does
+   ★ **The paired measurement, so a true premise is not mistaken for a defect** (r6 M-4):
+   `grep -rn 'quoting_year' crates/ --include='*.rs'` finds **zero production call sites** at HEAD —
+   its only caller is its own B1 test (`line_coverage.rs:2939`). That is true and EXPECTED until this
+   task calls it, and it is why a row left at `DEFAULT_ROW_YEAR` cannot mis-resolve while B3 is open:
+   there are no Schedule 1-A rows yet to mis-resolve. **T2 is what makes it non-zero** — so the guard
+   for that is item 8's clause, not this one.
+8. **USE the two `line_coverage` capabilities `ff839ce7` landed — do not re-add them** (r5 I-2, as
+   corrected by r6 M-3, which measured that the r5 text and all six of its addresses went stale ~22
+   minutes after the r5 fold was written). Both capabilities exist at HEAD; T2 is where the first
+   TY2025 rows exist, which is what makes them reachable at all:
+   - **`Coverage::quoting_year`** (`crates/btctax-core/src/tax/line_coverage.rs:144`) sets the per-row
+     year, and both constructors now write `year: self.1` (`:167`, `:196`) instead of
+     `DEFAULT_ROW_YEAR` (`:55`, still `"2024"`); `LineCoverage.year` is at `:112`. ⇒ **call
+     `c.quoting_year("2025")` before pushing any Schedule 1-A row.** Without it a row resolves to stem
+     `f1040s1a--2024`; that extract does not exist and neither does
      `crates/btctax-forms/forms/2024/f1040s1a.map.toml`, so the checker takes its **hard-error** branch
-     (`crates/xtask/src/line_coverage_check.rs:530-560`) and reports that the form name is wrong —
-     misdiagnosing itself. Add a year-carrying path.
-   - `Coverage::exception` takes `_value: Usd` (`crates/btctax-core/src/tax/line_coverage.rs:161`) while
-     `Coverage::line` takes `impl Into<Option<Usd>>` (`:139`). Lines **10/18/27/33** are `Exception`s
-     (CORRECTION 1) *and* must express *not completed* (CORRECTION 4), so as it stands an implementer
-     writes `.unwrap_or(Usd::ZERO)` — which is precisely what `line`'s own doc says its widening exists
-     to prevent. Widen `exception` the same way.
+     (`crates/xtask/src/line_coverage_check.rs:540-561`) and reports that the form name is wrong —
+     misdiagnosing itself.
+     ★★ **The setter is forward-sticky and has no reset** (r5 M-2 → r6 M-4): it sets the year for rows
+     pushed *after* it and never for rows pushed before — deliberate, because a packet spans years, but
+     it means a Schedule 1-A `cover_*` that set the year on a SHARED collector would silently re-date
+     every later form's quotation. ⇒ build the Schedule 1-A rows in their **own** `Coverage` and extend
+     `all()` with them, so the year cannot escape the function. **That failure is a silent pass, not a
+     red.**
+   - **`Coverage::exception`** (`:185`) now takes `_value: impl Into<Option<Usd>>`, exactly like
+     `Coverage::line` (`:156`). Lines **10/18/27/33** are `Exception`s (CORRECTION 1) *and* must express
+     *not completed* (CORRECTION 4) ⇒ pass the `Option<Usd>` straight through. An
+     `.unwrap_or(Usd::ZERO)` at any of those four sites is the defect the widening exists to prevent,
+     and `line_coverage.rs`'s own B1 test (`exception_records_a_line_the_form_says_to_skip`) is what
+     holds the parameter open.
 
 ### T3 — the input surface, landed whole
 
