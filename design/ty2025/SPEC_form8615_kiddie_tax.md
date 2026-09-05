@@ -1,8 +1,8 @@
 # Form 8615 (kiddie tax) — the screen, its inputs, and its refusals — SPEC
 
-**Status: r2 — the r1 review folded (1C/4I/5M/3Nit, all confirmed or corrected below) and one OWNER
-RULING folded. NOT YET RE-REVIEWED ⇒ DO NOT BUILD.** (r1 written 2026-09-05; r2 folded 2026-09-05;
-branch `feat/schedule-1a-ty2025`.) Fixes `FOLLOWUPS.md` FR-29 (`FOLLOWUPS.md:5722-5744`), a
+**Status: r3 — the r2 review folded (1C/2I/4M/1Nit, all confirmed below) and the OWNER RULING of
+2026-09-05 on OQ-5 folded. NOT YET RE-REVIEWED ⇒ DO NOT BUILD.** (r1 written 2026-09-05; r2 folded
+2026-09-05; r3 folded 2026-09-05; branch `main`.) Fixes `FOLLOWUPS.md` FR-29 (`FOLLOWUPS.md:5722-5744`), a
 **★★★ CRITICAL understatement path** whose owning phase is *"BEFORE any first filing"*.
 
 Passes an independent review loop to **0 Critical / 0 Important** before an implementation plan. A
@@ -15,6 +15,61 @@ conditions ask, refusing when it is, and (r2, per the owner ruling) the one narr
 dead end where the tax system itself provides none. **Filling Form 8615 is out of scope** and stays
 out: the form needs the parent's taxable income and every sibling's §1(g) amount, none of which
 btctax ever sees.
+
+---
+
+## r3 FOLD (2026-09-05) — 1 Critical / 2 Important / 4 Minor / 1 Nit, one lens, plus the OQ-5 RULING
+
+**Review persisted verbatim at `design/ty2025/reviews/SPEC_form8615-review-r2.md`.** Every claim was
+re-verified against the primary source or by running it before folding. **Nothing was corrected —
+all eight findings held.** The r2 fold below is left as written except for its *addresses*, which
+were re-resolved with everything else (C-1); its prose record of what r2 verified is untouched.
+
+★★★ **C-1 IS MINE, NOT THE SPEC'S, AND IT IS AN ADDRESS FAILURE — NOT A TRANSCRIPTION FAILURE.**
+`c7819f8c` (*"fix(extracts): I broke the repo's own extraction convention on both instruction
+booklets"*) landed **one commit after the r2 fold** and regenerated `i8615--2025.txt` from 712 to 1307
+lines: I had extracted a two-column instruction **booklet** with `pdftotext -layout`, which splices
+the right column into the middle of left-column sentences, where `design/forms/README.md:58` says
+plain `pdftotext` for a booklet and `-layout` only for a **form**. `f8615--2025.txt` gained a four-line
+provenance header (59 → 63). Nothing about the spec's reading of the form was wrong, and **every
+quotation in this document was and is verbatim** — what moved was where each sentence lives.
+**Say that plainly so the next reader does not re-audit the transcription.**
+
+| # | what was claimed | what I verified, and how | what changed |
+|---|---|---|---|
+| **C-1(a)** | 24 of the 27 `i8615`/`f8615` citation sites resolve to unrelated text | **Confirmed and re-resolved, machine, not by eye.** A script pulled every `(i8615\|f8615\|i8275\|f8275\|i1040gi)--YYYY.txt:a[-b]` in this file and printed the text at each range in the CURRENT extracts; each cited *content* was then located with `grep -n`. `i8275--2024.txt` / `f8275--2024.txt` were **not** in `c7819f8c` (`git log -1` ⇒ `583f7213`) and all eight of their ranges still resolve (`i8275:202-214`, `:352-374`, `:355`, `:361-362`, `:371-374`, `:378-388`, `f8275:6`, `:9`); `i1040gi--2025.txt` likewise — every range this file cites was printed and read, and all are exact | every i8615/f8615 range re-resolved throughout, **including the r1/r2 fold tables** — an address is a pointer, and the content it names did not move. §1's authority table now records 1307/63 lines and `c7819f8c` as the extract of record |
+| **C-1(b)** | every "left column" / "right column" annotation is now a false statement about the artifact | **Confirmed.** Plain `pdftotext` reads the columns in order. §1's own example was doubly wrong: `:139-141` is a page footer, and the two contents it named are 73 lines apart (`:193-195` and `:266-267`) | **every column annotation deleted**, and §1's ★★ two-column warning replaced by a note saying the extract is in reading order |
+| **C-1(c)** | **P-2a must be DELETED, not re-scoped** — it builds a column-aware extractor for a defect `c7819f8c` already eliminated | **Confirmed by re-running the measurement**, with `cite_check`'s own `quoted_spans` / `fragments` / `normalise` over this document against the five extracts, **no column splitting**: `110 checkable fragments, FAILING 20` — and 40 against the archived `-layout` extracts, so the regeneration alone did what the column split was for. All 20 residuals are self-citations (our prose, this spec's own prompt/help strings, a `questions.rs` prompt, the r1 draft, the owner ruling, the statute); **zero form quotations fail** | **P-2a deleted** and replaced by the measured record, with the archived-vs-current table. ★ Its B1 pairing could no longer be written honestly either: it existed to prove a *correct* quotation passes where the raw extract made every correct one fail |
+| **C-1(d)** | §9's *"P-2a is a hard prerequisite of G7"* is false | **Confirmed by running G7 itself.** All eight clauses through `cite_check::normalise`, against the **raw** current extracts and against the §4.1 string each belongs to: **8/8 and 8/8**; the three structural counts on the condition-3 prompt come out 2 / 1 / 1 / 1, the exact values §9 claims | §9's prerequisite paragraph struck and replaced with the measurement; the per-clause source column **kept**, for the reason §1.1 gives (i8615's *"and under age 24"* vs i1040gi's *"but under age 24"*) |
+| **C-1(e)** | §1's authority-table metadata (712 / 59 lines, both attributed to `29e47a0b`) is stale | Confirmed: `wc -l` ⇒ 1307 and 63; `git log -1` ⇒ `c7819f8c` for both | rows rewritten, with the extraction flag recorded per file |
+| **I-1** | the dead-end leaf's polarity is **inverted** between prompt and field, the spec never says which side inverts, and nothing reds if it is written straight through | **Confirmed, on both consumers.** `skippable_tristate!` destructures `FieldValue::TriState(Some(b))` and calls `set_bool(ri, b)` (`crates/btctax-input-form/src/spec/registries.rs:83-91`); `answer.rs`'s `YesNo` branch calls `(sk.set_bool)(&mut ri, v)` on `parse_yes_no`'s value (`crates/btctax-cli/src/cmd/answer.rs:178-201`). **No accessor in `SKIPPABLE_QUESTIONS` contains a `!` today** — `grep` over all 16 entries — so the aligned pair is the obvious transcription, and it certifies the filer who answered **YES**. The delegation test (`crates/btctax-input-form/src/spec/mod.rs:368-393`) round-trips through the pair, so it passes on a consistently-inverted pair *and* on a straight-through one | §4.1 **writes both accessors out** with the reason; the §4 doc comment cross-references it; **§9 G14(a) gains a polarity row** driven through `(f.set)(…, TriState(Some(true)))` and asserting the return still REFUSES, whose named mutation is the straight-through pair itself |
+| **I-2** | the 2026-09-05 OQ-5 ruling is only half folded — R-4 never names TAS, and §13 still says it *"needs an owner ruling"* | **Confirmed against the ruling**, `design/OWNER_DECISIONS_2026-09-04.md` *"OWNER RULINGS, 2026-09-05"* (`92014cd1`): *"just refer user for tas and tell them good luck."* The non-widening half **is** fully discharged (the §6.3 conjunction, §4.2's liveness on `Some(CannotKnow)`, §13's refusal of the disjunct) — only the referral was missing. ★ **The spec's TAS sourcing is CORRECT and I re-read the page to confirm it**: the three bullets are at `i1040gi--2025.txt:157-159` and cover a filer who has already contacted the IRS; the limb that covers this one is the third of the introductory sentence at `:153-154`; the contacts are at `:162` and `:166`. The ruling's own *"`:155-166`"* is the loose range, and **nothing here was "fixed"** | R-4's detail gains the TAS paragraph on the *"if you CAN"* branch; §13 restated as **RULED**, not open; **new §9 G15** asserts both halves on one fixture — still refused **and** the detail names TAS |
+| **M-1** | G13's first half describes a capability `classify` does not have | Confirmed by reading it: `Census` (`classifier.rs:64-67`) holds only `declarations` and `exemptions`; `exempt<T>` **discards the leaf** (`:75-77`); `declaration` is typed `&Option<bool>` (`:71-73`). The classifier makes answered-ness structural by the type and the no-`..` destructure — it never scores a value | G13's scoring clause **deleted**; the gate clause kept, with the compile named as the actual protection |
+| **M-2** | the CLI's input grammar for the third answer is unspecified, and the obvious parser rejects the phrasing the prompt gives the filer | Confirmed: `parse_enum` (`parse.rs:87-92`) is an exact `options.contains(&raw)`, and `answer.rs`'s skippable loop (`:155-208`) uses `parse_yes_no` / `parse_date` and never calls it. The prompt says *"Answer YES, NO, or CANNOT KNOW"*; `"CANNOT KNOW"` is not `"CannotKnow"` | §4.1 now specifies what the `Choice` arm accepts, case-insensitively, with the prompt left alone and the parser accommodating it |
+| **M-3** | §1.2's reason for quoting *support* as two spans is no longer true | Confirmed: the interruption is the page footer `Oct 22, 2025` and a blank line at `:66-67`, not a column break. The quotation structure survives | the reason corrected in §1.2 and in §1's ★ multi-source note |
+| **M-4** | the fold's *"cite-check OK with 52 quotations"* does not describe this document | **Confirmed by running it**: 7 from `SPEC_schedule_1a.md`, 45 from `IMPLEMENTATION_PLAN_schedule_1a.md`, and `grep 8615 crates/xtask/src/cite_check.rs` is empty. There is no line-numbered-citation checker in `xtask` at all | §1 says so plainly, with the command's output pasted, and names the address half as §G-10's residue that P-1 does not close |
+| **N-1** | `i8615:44-63` for *"the five conditions"* is loose | Confirmed: the conditions end at `:57`; `:58-61` is the holding (cited separately) and `:62-63` starts *Support* | tightened to `:44-57` at both sites |
+
+**What did NOT change, deliberately.** The gate, the ladder, the three-valued type, the §6.3
+certification and its conjunction, the Form 8275 content, the three warnings, and §6.3.5's TAS
+sourcing. C-1 is a re-sourcing pass, I-1 adds two `fn` pointers and a test row, I-2 adds a paragraph
+to one refusal and a test. **No refusal was relaxed and no exemption was widened.**
+
+**Gate, at `b3f28563`.** The one executable fragment this fold adds — §4.1's two accessors — was
+extracted, compiled with `rustc` against the real `SkippableQuestion` fn-pointer signatures
+(`questions.rs:926-933`) and **run**, asserting that the filer's YES stores `Some(false)` and their
+NO stores `Some(true)`. `cargo run -p xtask -- cite-check` ⇒ **OK — 51 quotations, all verbatim**,
+exit 0 (all 51 Schedule 1-A's; this document is still not registered — M-4). `make check` ⇒
+**2836 tests run: 2836 passed, 12 skipped**, exit 0.
+
+★ **Read that 2836 against 2815, not as a change this fold made.** This fold touches **no `.rs` file
+at all** — `git status` is one modified markdown file. `main` advanced three times underneath it
+while it was being written (`edeb70b5` → `b83b3c7e` → `da877c47` → `b3f28563`: the FR-38 recon, the
+FR-34 merge, and the Schedule 1-A T2 build), which is where both the +21 tests and the 52 → 51
+cite-check total come from. **All 174 `file:line` citations in this document were re-resolved against
+the tree at the final HEAD, 0 unresolved**, and the citations into the two files those merges did
+change (`tables.rs:470` and `tax_tables.rs:134`, `:814-820`) were re-read line by line, not just
+range-checked.
 
 ---
 
@@ -32,9 +87,9 @@ terms, and it states FR-29's holding in one sentence this spec had been *derivin
 
 | # | what was claimed | what I verified, and how | what changed |
 |---|---|---|---|
-| **C-1** | §1's sourcing of record is false at HEAD; i8615 states the FR-29 holding outright, defines *support* / *earned income* / *unearned income* **for this form**, and the spec borrowed Chart B's definitions, which disagree with i8615 on scholarships in **opposite directions** | **Confirmed, every limb.** `design/forms/extract/i8615--2025.txt` (712 lines) and `f8615--2025.txt` (59 lines) exist; `git log -1 --format=%h -- design/forms/extract/i8615--2025.txt` ⇒ `29e47a0b`. The holding is at `i8615--2025.txt:66-68`; *support* at `:69-72` continuing at `:4-6` (two-column layout); *earned income* at `:139-140`; *unearned income* at `:27-36`. The scholarship split is real: `i1040gi--2025.txt:695` counts *"taxable scholarship and fellowship grants"* as **earned**, `i8615--2025.txt:31-32` counts them *"not reported on Form W-2"* as **unearned** | §1 rewritten around **four** authorities; §1.1 now carries i8615's own statement of the five conditions beside i1040gi's; **new §1.2** transcribes the three definitions; §2, §4.1 help and §8 R-3 requote from i8615; P-1 rewritten |
+| **C-1** | §1's sourcing of record is false at HEAD; i8615 states the FR-29 holding outright, defines *support* / *earned income* / *unearned income* **for this form**, and the spec borrowed Chart B's definitions, which disagree with i8615 on scholarships in **opposite directions** | **Confirmed, every limb.** `design/forms/extract/i8615--2025.txt` and `f8615--2025.txt` exist (712 and 59 lines as archived by `29e47a0b`; **regenerated to 1307 and 63 lines by `c7819f8c`, so every address in this row is the r3-re-resolved one** — see the r3 fold). The holding is at `i8615--2025.txt:58-61`; *support* at `:62-65` continuing at `:68-70`; *earned income* at `:266-267`; *unearned income* at `:28-35`. The scholarship split is real: `i1040gi--2025.txt:695` counts *"taxable scholarship and fellowship grants"* as **earned**, `i8615--2025.txt:32-33` counts them *"not reported on Form W-2"* as **unearned** | §1 rewritten around **four** authorities; §1.1 now carries i8615's own statement of the five conditions beside i1040gi's; **new §1.2** transcribes the three definitions; §2, §4.1 help and §8 R-3 requote from i8615; P-1 rewritten |
 | **C-1(d)** | `return_1040.rs:990-995`'s component sum "omits **every** bolded category", and §5.2's direction claim survives only because of an uncited `OtherOutOfScopeIncome` refusal | **★ CORRECTED, and the correction matters.** The sum at `:990-995` **includes `sum_unemployment(ri)`** (`:994`) and `ri.sch1.state_refund_taxable` (`:993`), so "omits every category" is false — unemployment compensation is captured. The **load-bearing half is confirmed**: the remaining i8615 categories (rents, royalties, pension/annuity, scholarships not on a W-2, alimony, the taxable part of social security, trust-beneficiary income) are unreachable only because `QuestionId::OtherOutOfScopeIncome` (`questions.rs:546-563`) names them and its catch-all *"or anything else it never asked about"*, and `Some(true)` hard-refuses at `return_refuse.rs:995-997` | §5.2 now **cites and pins** that dependency (new G11), with the unemployment correction stated so the next reader does not re-derive it |
-| **I-1** | the condition-3 *help* is the only filer-facing text that paraphrases the support/earned-income test, and it paraphrases the **wrong document** | Confirmed. Direction is over-refusal in every branch, as the review says — but by accident of which terms were dropped, not by design | §4.1's help requoted from `i8615--2025.txt:69-72`+`:4-6` and `:139-140`, scholarship carve-out included, and the review's "redeeming sentence" kept verbatim |
+| **I-1** | the condition-3 *help* is the only filer-facing text that paraphrases the support/earned-income test, and it paraphrases the **wrong document** | Confirmed. Direction is over-refusal in every branch, as the review says — but by accident of which terms were dropped, not by design | §4.1's help requoted from `i8615--2025.txt:62-65`+`:68-70` and `:266-267` (r3-re-resolved addresses), scholarship carve-out included, and the review's "redeeming sentence" kept verbatim |
 | **I-2** | §4.1's index-hazard reassurance is **false** — `skippable_tristate!` reads `SKIPPABLE_QUESTIONS[$idx]` for label/help/live/get/set — and G9 never names `registries.rs` | **Confirmed by reading the macro.** `crates/btctax-input-form/src/spec/registries.rs:67-95`; the fifteen literal call sites run `skippable_tristate!(0, …)` at `:254` through `(15, …)` at `:355` (index 2 is absent — SALT is deduped). `skippable_to_field` at `:457-477` is exhaustive over `SkippableId`, so the **variants** are compile-forced and the **indices** are not | §4.1's ★ note rewritten to state the hazard truthfully; G9 gains `registries.rs` |
 | **I-3** | G7 cannot pass as written — three of five clauses differ in case, three span newlines, and "normalised" is never defined, so the cheapest repair is to gut the clause list | **Confirmed, and the definition already exists in-repo.** `crates/xtask/src/cite_check.rs:71-136` (`normalise`) folds Unicode punctuation, strips markdown, de-hyphenates across line breaks, replaces non-alphanumerics with spaces, collapses whitespace **and lowercases** — i.e. exactly case-insensitive + whitespace-collapsing | G7 now **names that function** as the definition rather than inventing a second one |
 | **I-4** | R-3 tells the filer they meet *"all five"* conditions including *"a filing requirement"*, which §5.4 knows is false for two enumerated populations, and `KiddieTax` is a refusal no input can clear | Confirmed against `i1040gi--2025.txt:634-639` (Chart A single under 65, `$15,750`) and `:705` (blind dependent, `$3,350`) | §8 R-3 reworded to **disclose the assumption**; G6 gains the assertion |
@@ -55,10 +110,10 @@ required contents* — **the filer may SELF-CERTIFY, with warnings**, and btctax
 
 | the ruling's claim | primary source | verdict |
 |---|---|---|
-| the form's face requires the parent's name, SSN and filing status, none optional | `design/forms/extract/f8615--2025.txt:13-16` | **confirmed** — ★ the ruling cited `:8-11`; the correct address is `:13-16` |
+| the form's face requires the parent's name, SSN and filing status, none optional | `design/forms/extract/f8615--2025.txt:17-20` | **confirmed** — ★ the ruling cited `:8-11`; the correct address is `:17-20` |
 | §1(g)(3) cannot be computed without the parent's taxable income | `legal/primary-sources/statute-irc/26USC_s1.html`, §1(g)(3)(A)(i) | **confirmed** |
-| the IRS-request remedy requires the parent's **name and address** with no *"if known"*, and a statement that the child *"tried to get the information from the parent"* | `design/forms/extract/i8615--2025.txt:131-133` and `:139-141` | **confirmed** — SSN and filing status carry *"(if known)"*; name and address do not |
-| the *"neither parent living"* exclusion is no more establishable than condition 4 | `design/forms/extract/i8615--2025.txt:67-68` | **confirmed** |
+| the IRS-request remedy requires the parent's **name and address** with no *"if known"*, and a statement that the child *"tried to get the information from the parent"* | `design/forms/extract/i8615--2025.txt:185-187` and `:193-195` | **confirmed** — SSN and filing status carry *"(if known)"*; name and address do not |
+| the *"neither parent living"* exclusion is no more establishable than condition 4 | `design/forms/extract/i8615--2025.txt:60-61` | **confirmed** |
 
 Both attached constraints are folded **structurally**, not as prose:
 
@@ -100,15 +155,15 @@ never from a rendered page.
 
 | authority | extract of record | what it holds for this spec |
 |---|---|---|
-| **`i8615--2025.pdf`** (`29e47a0b`) | `design/forms/extract/i8615--2025.txt` (712 lines) | the five conditions in the form's own voice (`:44-63`), **the FR-29 holding** (`:66-68`), *support* (`:69-72` + `:4-6`), *earned income* (`:139-140`), *unearned income* (`:27-36`), the January-1 chart with its `***` footnote (`:12-24`), the Form 8814 parental election (`:33-41`), and the **IRS-request remedy and its required contents** (`:120-144`) |
-| **`f8615--2025.pdf`** (`29e47a0b`) | `design/forms/extract/f8615--2025.txt` (59 lines) | the form face — lines **A/B/C** (`:13-16`), which are what §6.3's dead end is a dead end *against* |
+| **`i8615--2025.pdf`** (archived `29e47a0b`, **extract of record `c7819f8c`**) | `design/forms/extract/i8615--2025.txt` (1307 lines, `pdftotext` no flags) | the five conditions in the form's own voice (`:44-57`), **the FR-29 holding** (`:58-61`), *support* (`:62-65` + `:68-70`), *earned income* (`:266-267`), *unearned income* (`:28-35`), the January-1 chart with its `***` footnote (`:71-98`), the Form 8814 parental election (`:100-106`), and the **IRS-request remedy and its required contents** (`:176-198`) |
+| **`f8615--2025.pdf`** (archived `29e47a0b`, extract of record `c7819f8c`) | `design/forms/extract/f8615--2025.txt` (63 lines, `pdftotext -layout` — it is a FORM) | the form face — lines **A/B/C** (`:17-20`), which are what §6.3's dead end is a dead end *against* |
 | `i1040gi--2025.pdf` (`482e9c48`, `design/ty2025/SPEC.md:70`) | `design/forms/extract/i1040gi--2025.txt` | the five conditions addressed to the filer as *"you"* (`:3927-3944`) — the wording §4.1's prompts transcribe; the January-1 examples (`:3945-3951`); Chart A (`:625-666`), Chart B (`:691-728`), Chart C (`:732-733`); and the Taxpayer Advocate Service (`:147-166`) |
 | `26 U.S.C. §1` | `legal/primary-sources/statute-irc/26USC_s1.html` | §1(g)(1) *the greater of*; §1(g)(2)'s three conditions, in which dependency likewise does not appear; §1(g)(3), which needs the **parent's** taxable income |
 | `f8275--2024` / `i8275--2024` | `design/forms/extract/f8275--2024.txt`, `design/forms/extract/i8275--2024.txt` | the disclosure instrument §6.3 uses: Part I columns (`i8275--2024.txt:352-374`), Part II's content requirement (`:378-388`), and *adequate disclosure* / *reasonable basis* (`:202-214`) |
 
 **Which document is quoted where, and why.** The **prompts** (§4.1) transcribe i1040gi, because that
 is where the conditions are addressed to the filer in the second person (*"You were either…"*); i8615
-states the same conditions about *"the child"* (`:44-63`), which a prompt cannot use without
+states the same conditions about *"the child"* (`:44-57`), which a prompt cannot use without
 rewriting. The **definitions** (§1.2), the **holding** (§2) and the filer-facing **help** transcribe
 i8615, because those are §1(g)-scoped and i1040gi's are not. §9 G7 checks each clause against the
 extract it is actually sourced from, named per clause.
@@ -138,35 +193,60 @@ haystacks, and extend `FOREIGN_SOURCES` for this document's non-form citations. 
 `cargo run -p xtask -- cite-check` reports **0 unverified spans over this file**, and the plan records
 the checked-span count so a later drop is visible.
 
-★★★ **P-2a (plan task, and the reason P-1 cannot land alone) — `i8615--2025.txt` is TWO-COLUMN, and
-normalised containment cannot see a quotation in it.** `normalise` operates on the extract as one
-string, and every physical line of a two-column page carries **both** columns, so a quotation that
-runs over two lines of the left column is interrupted in the haystack by whatever was on the right.
-This was measured, not reasoned: a replica of `cite_check`'s own `quoted_spans` / `fragments` /
-`normalise` pipeline over this document reports **110 checkable fragments**, of which **40 fail**
-against the extracts as archived; splitting `i8615--2025.txt` into its two columns before normalising
-drops that to **20**, and **every one of the remaining 20 is a self-citation** — our own prose, this
-spec's own prompt and help strings, an earlier draft of it, the r1 review, the owner ruling, a prompt
-string quoted out of `questions.rs`, or the statute. That is exactly the `FOREIGN_SOURCES` class
-above, and **zero form quotations remain unverified once the columns are separated.**
-**So a `cite-check` run that registered this document against the raw i8615 extract would fail on
-every i8615 transcription in it, and the tempting repair is to delete the quotations.** That is the
-F2/F4 shape harness rule **B1** exists to prevent, arriving through the haystack rather than through
-the checker.
+★★ **r3 (M-4) — THIS DOCUMENT IS NOT UNDER `cite-check` TODAY, and no number quoted anywhere in this
+spec describes it.** `cargo run -p xtask -- cite-check` reports exactly two documents —
+`design/ty2025/SPEC_schedule_1a.md` and `design/ty2025/IMPLEMENTATION_PLAN_schedule_1a.md` — because
+those are the only two `schedule_1a_docs()` names (`crates/xtask/src/cite_check.rs:405-417`, two
+documents and two Schedule 1-A fixtures). **This spec is not among them and neither is any 8615
+extract**: `grep 8615 crates/xtask/src/cite_check.rs` is empty. So the r2 fold's *"cite-check OK with
+52 quotations verbatim"* was a true statement about **Schedule 1-A** and said nothing whatever about
+this file — and the total is not even stable, since it tracks whatever those two documents currently
+quote (it was 52 and is 51 as this fold is written, because the Schedule 1-A plan changed underneath).
+★★ Worse, and this is the part that matters: **`xtask` contains no line-numbered-citation checker at
+all.** Nothing anywhere verifies that a `file:line` in any design document points at what it claims —
+which is precisely the gap C-1 fell into twice — and **P-1 does not close it either.** P-1 registers
+the *quotations*; the *addresses* are the misattribution class `cite_check.rs`'s own module doc names
+and defers (*"Attributing a real sentence to the wrong line is the residual gap, and it is tracked as
+`FOLLOWUPS.md` §G-10"*, `crates/xtask/src/cite_check.rs:32-33`). Until an address checker exists,
+every measurement over this document is an out-of-tree replica and is labelled as one.
 
-P-2a therefore lands a **column-aware extract** for two-column authorities — a new derived file
-beside the existing extract, or a `--columns` mode on `cargo run -p xtask -- forms extract` (neither
-exists yet; the name is the plan's to choose), and its own
-B1 pairing: a test that plants a paraphrase in an i8615-sourced quotation and asserts the check goes
-RED. ★ Note what the pairing must prove — not merely that a wrong quotation fails, but that a
-**correct** one passes, because against the raw extract every correct quotation already fails and a
-checker that rejects everything is indistinguishable from one that works.
+★★★ **P-2a IS DELETED (r3, C-1). It was a plan task to build a column-aware extractor for a defect
+that `c7819f8c` had already eliminated, and P-1 does not depend on it.** The r2 draft specified a
+`--columns` mode (or a derived per-column file) plus its own B1 pairing, and called it *"the reason
+P-1 cannot land alone"*. That premise died with the `-layout` extract itself: the r2 measurement —
+110 checkable fragments, 40 failing raw, 20 after a column split, all 20 self-citations — was taken
+against the **spliced** archive. Re-measured with `cite_check`'s own `quoted_spans` / `fragments` /
+`normalise` over **this document as r2 left it** against the five extracts, once against each
+version of the i8615/f8615 pair and **with no column splitting either time**:
 
-★ **Two spans in this document are irreducibly multi-source and are written accordingly**, rather than
-being left for P-2a to fail on: i8615's *support* definition runs off the bottom of the left column
-and resumes at the top of the right (§1.2 quotes it as the two spans it physically is), and Form
-8275's face sentence is interrupted by the OMB number in the text layer (§6.3.3 quotes it with an
-elision, which `fragments` (`cite_check.rs:362-374`) splits on).
+```
+              archived (-layout) extracts          extract of record (c7819f8c)
+fragments     110                                  110
+FAILING        40                                   20   ← all 20 are self-citations
+```
+
+★ The fragment count is a property of the *document*, so it moves as this document is edited (the r3
+fold's own quotations of r2 and of the owner ruling take it to 122/32, all 32 likewise
+self-citations). **The comparison that matters is the column, not the row:** same document, same
+pipeline, two extracts, 40 → 20.
+
+**That is P-2a's target state, reached by regenerating the extract instead of by building an
+instrument.** The residual 20 are our own prose, this spec's own prompt and help strings, a
+`questions.rs` prompt, the r1 draft, the owner ruling and the statute — i.e. exactly the
+`FOREIGN_SOURCES` class P-1 already has to extend for; **zero form quotations fail.** Building P-2a
+now would add a derived artifact and a B1 pairing for a condition that cannot occur, and the B1
+pairing itself could no longer be written honestly: its whole point was that a *correct* quotation
+must pass where the raw extract makes every correct quotation fail, and correct quotations now pass.
+**Do not resurrect it. If a genuinely `-layout` two-column authority is ever archived again, the fix
+is the extraction convention (`design/forms/README.md:58`), not a second haystack.**
+
+★ **Two spans in this document are irreducibly multi-source and are written accordingly:** i8615's
+*support* definition is interrupted by the page footer `Oct 22, 2025` and a blank line at `:66-67`,
+so §1.2 quotes it as the two spans it physically is (`:62-65` and `:68-70`); and Form 8275's face
+sentence is interrupted by the OMB number in the text layer (§6.3.3 quotes it with an elision, which
+`fragments` (`cite_check.rs:362-374`) splits on). ★ **r3 (M-3):** the r2 text gave the first one's
+reason as a column break. It is a footer. The quotation structure is unchanged; only its stated
+reason was false.
 
 **No oracle can adjudicate this.** Neither engine derives Form 8615's applicability: `grep 8615`
 over `scripts/oracle/*.py` is empty, and Tax-Calculator models only the *different* §59(j) kiddie-AMT
@@ -175,14 +255,20 @@ exemption cap (`.venv/lib/python3.12/site-packages/taxcalc/calcfunctions.py:2431
 there is no witness** — so every guarantee below is held by a KAT against the extract, not by
 agreement.
 
-★★ **`i8615--2025.txt` is a TWO-COLUMN extract, so a line number alone can be ambiguous.** The same
-physical line carries different sentences in the left and right columns — `:139-141` is the
-IRS-request bullet in the **left** column and the *Earned income* definition in the **right**. Every
-i8615 citation below names its column wherever the two collide.
+★★ **r3 (C-1) — `i8615--2025.txt` is in READING ORDER, and no citation in this document names a
+column.** The r2 draft warned that the extract was two-column, that *"a line number alone can be
+ambiguous"*, and that `:139-141` was the IRS-request bullet in the left column and the *Earned
+income* definition in the right. `c7819f8c` re-extracted it with plain `pdftotext`, which reads the
+columns in order; `:139-141` is now a page footer, and the two contents that warning named are 73
+lines apart (`:193-195` and `:266-267`). **Every "left column" / "right column" annotation is
+deleted**, because each is a false statement about the artifact — not a stale one, a false one — and
+they were scattered across §1.1, §1.2, §2, §4, §5.1, §5.2, §6, §6.3.1, §8, §9 G7, §11, §12 and §13,
+i.e. through every section that transcribes anything. `grep -c "column" ` over this file is the
+check, and the residue is Form 8275's Part I **columns (a)-(f)**, which are the form's own.
 
 ### 1.1 The five conditions, verbatim — from BOTH documents
 
-**i8615, the form's own instructions** (`design/forms/extract/i8615--2025.txt:44-63`, left column) —
+**i8615, the form's own instructions** (`design/forms/extract/i8615--2025.txt:44-57`) —
 stated about *"the child"*:
 
 > *"Form 8615 must be filed for any child who meets all of the following conditions."*
@@ -225,9 +311,9 @@ And the age convention (`:3945-3951`):
 > January 1, 2007, is considered to be age 19 at the end of 2025; and a child born on January 1,
 > 2002, is considered to be age 24 at the end of 2025."*
 
-i8615 prints the same convention as a **chart** (`i8615--2025.txt:12-24`, right column) with three
+i8615 prints the same convention as a **chart** (`i8615--2025.txt:71-98`) with three
 footnotes, the third of which is the 24-or-older suppression §5.1 computes, printed by the IRS itself
-(`:29`, right column):
+(`:98`):
 
 > *"*** Don’t use Form 8615 for this child."*
 
@@ -241,17 +327,17 @@ because i8615 says so (§2).
 (or someone else) can claim you as a dependent, use this chart to see if you must file a return."*
 (`:692`). The two documents genuinely disagree: Chart B counts *"taxable scholarship and fellowship
 grants"* as **earned** (`:695`); i8615 counts them, *"not reported on Form W-2"*, as **unearned**
-(`:31-32`). Importing one scope's definition into the other's test is the compression `CLAUDE.md`
+(`:32-33`). Importing one scope's definition into the other's test is the compression `CLAUDE.md`
 forbids, and here it points the opposite way. **These are the governing definitions.**
 
-**Support** — the definition runs off the bottom of the **left** column and resumes at the top of the
-**right**, so it is quoted as the two spans it physically is (`i8615--2025.txt:69-72`, left column):
+**Support** — the definition is interrupted by the page footer `Oct 22, 2025` and a blank line
+(`:66-67`), so it is quoted as the two spans it physically is (`i8615--2025.txt:62-65`):
 
 > *"Support. Your support includes all amounts spent to provide the child with food, lodging,
 > clothing, education, medical and dental care, recreation, transportation, and similar necessities.
 > To figure your child’s support, count support provided by you, your child, and"*
 
-continuing at `i8615--2025.txt:4-6`, right column:
+continuing at `i8615--2025.txt:68-70`:
 
 > *"others. However, a scholarship received by your child isn’t considered support if your child is a
 > full-time student. For details, see Pub. 501, Dependents, Standard Deduction, and Filing
@@ -260,7 +346,7 @@ continuing at `i8615--2025.txt:4-6`, right column:
 ★ The scholarship carve-out is scoped to **full-time students** — i.e. exactly condition 3(c)'s
 population — and the r1 help dropped it.
 
-**Earned income** (`i8615--2025.txt:139-140`, **right** column):
+**Earned income** (`i8615--2025.txt:266-267`):
 
 > *"Earned income. Earned income includes wages, tips, and other payments received for personal
 > services performed."*
@@ -268,12 +354,12 @@ population — and the r1 help dropped it.
 i8615 then adds enlargements the r1 help did not have: the sole-proprietor/partner allowance capped at
 *"30% of the child’s share of the net profits"*, and the case where capital is not an income-producing
 factor, in which *"all of the child’s gross income from the trade or business is considered earned
-income"* (`:141-155`, right column); plus any *"taxable distribution from a qualified disability
-trust"* (`:157-159`, right column — §1(g)(4)(C) in the statute says the same). Every one of them
+income"* (`:268-281`); plus any *"taxable distribution from a qualified disability
+trust"* (`:282-284` — §1(g)(4)(C) in the statute says the same). Every one of them
 **enlarges** earned income, so omitting them pushes a filer toward answering YES to condition 3 —
 toward refusal. That direction is now stated rather than accidental (§4.1).
 
-**Unearned income** (`i8615--2025.txt:27-36`, left column):
+**Unearned income** (`i8615--2025.txt:28-35`):
 
 > *"Unearned income is generally all income other than salaries, wages, and other amounts received as
 > pay for work actually performed (earned income). It includes taxable interest, dividends, capital
@@ -290,7 +376,7 @@ makes the gap unreachable.
 ## 2. The defect, measured
 
 ★★★ **The IRS states the holding; btctax does not have to derive it.**
-`design/forms/extract/i8615--2025.txt:65-68` (left column):
+`design/forms/extract/i8615--2025.txt:58-61`:
 
 > *"For these rules, the term “child” includes a legally adopted child and a stepchild. These rules
 > apply whether or not the child is a dependent. These rules don’t apply if neither of the child’s
@@ -431,9 +517,9 @@ pub form8615_condition4_parent_alive: Option<ParentAliveAnswer>,
 /// **The §6.3 dead-end FACT** — not a condition of Form 8615, and deliberately not phrased as one.
 ///
 /// Form 8615's face requires the parent's name, SSN and filing status on lines A, B and C
-/// (`design/forms/extract/f8615--2025.txt:13-16`); none carries an "if known". The one
+/// (`design/forms/extract/f8615--2025.txt:17-20`); none carries an "if known". The one
 /// administrative remedy is to request the data from the IRS, and its required contents include,
-/// verbatim (`design/forms/extract/i8615--2025.txt:139-141`, left column):
+/// verbatim (`design/forms/extract/i8615--2025.txt:193-195`):
 /// "The name, address, social security number (SSN) (if known), and filing status (if known) of the
 ///  parent whose information is to be shown on Form 8615."
 /// SSN and filing status tolerate ignorance. **Name and address do not.** So a filer who cannot
@@ -443,6 +529,12 @@ pub form8615_condition4_parent_alive: Option<ParentAliveAnswer>,
 /// `Some(true)` is the ONLY value that opens anything. `None` and `Some(false)` both leave the §6.3
 /// refusal standing, which is the *widening an exemption is never the safe edit* rule discharged:
 /// the YES-condition is enumerated and every omission fails closed.
+///
+/// ★★★ **The registry accessors for this leaf INVERT, and they are the only inverting pair in
+/// `SKIPPABLE_QUESTIONS`.** The prompt asks "Can you give the IRS your parent's name and address?",
+/// so the filer's NO is this field's `Some(true)`; `get_bool` / `set_bool` carry the `!`, and §4.1
+/// writes both out. A straight-through pair certifies the filer who answered YES — an
+/// understatement path, and the one §9 G14(a)'s polarity row exists to kill.
 #[serde(default)]
 pub form8615_parent_identity_unobtainable: Option<bool>,
 ```
@@ -463,7 +555,7 @@ pub enum ParentAliveAnswer {
     /// (`design/forms/extract/i1040gi--2025.txt:3941-3942`)
     Yes,
     /// Neither parent was alive at the end of the year. i8615 states the consequence directly
-    /// (`design/forms/extract/i8615--2025.txt:67-68`, left column): "These rules don’t apply if
+    /// (`design/forms/extract/i8615--2025.txt:60-61`): "These rules don’t apply if
     /// neither of the child’s parents were living at the end of the year."
     No,
     /// ★★★ **THE THIRD ANSWER.** The filer cannot know, because they cannot identify their parents.
@@ -531,6 +623,27 @@ radius this repo prefers: the exhaustive `match SkippableKind` sites are
 `FieldKind::Enum(&["Yes", "No", "CannotKnow"])` field, and `parse_enum`
 (`crates/btctax-input-form/src/parse.rs:28`, `:89`) already rejects an unlisted string.
 
+★★ **r3 (M-2) — WHAT THE CLI ACCEPTS AT THE KEYBOARD IS SPECIFIED HERE, not improvised at the compile
+error.** The two paths do **not** share a parser. The input-form path uses `parse_enum`
+(`crates/btctax-input-form/src/parse.rs:87-92`), which is an exact match —
+`if options.contains(&raw) { … } else { Err(ParseError::NotAChoice) }`, no trimming and no
+case-folding, because the options are stable tokens a renderer presents as a closed choice. The CLI
+path is `btctax income answer`, whose `match sk.kind` (`crates/btctax-cli/src/cmd/answer.rs:155-208`)
+uses `parse_yes_no` and `parse_date` and **never calls `parse_enum`** — so the new `Choice` arm must
+bring its own reader, and the condition-4 prompt tells the filer *"Answer YES, NO, or CANNOT KNOW"*,
+which is not the token `"CannotKnow"`.
+
+**The `Choice` arm in `answer.rs` accepts, case-insensitively and after trimming:** `y` / `yes` ⇒
+`Yes`; `n` / `no` ⇒ `No`; `?` / `cannot know` / `cannotknow` / `cant know` / `unknown` ⇒ `CannotKnow`.
+Anything else **re-asks**, and a bare Enter keeps what is on file — the same three-way behaviour
+`parse_yes_no` already has (`answer.rs:72-79`), extended by one variant rather than replaced.
+★ Direction is fail-closed: an unmatched string cannot become an answer, so the worst case is a filer
+who is asked again. That is why this is a Minor and not a defect — but leaving it unwritten means the
+implementer meets it as a compile error with the prompt's own wording in front of them, and the
+cheapest thing to type there is an exact `"CannotKnow"` match that the prompt's own instructions
+fail. ★★ The prompt is **not** reworded to say `CannotKnow`: the words the filer reads come from the
+form and from plain English, and the parser accommodates them, never the other way round.
+
 All three are `Durability::PerYear`. Age, a parent's survival and what the filer can find out about
 their parents all change between years, and the durability test at `questions.rs:1587-1598` asserts
 that *exactly* the two dates of birth are `Durable` — so `PerYear` is required, not merely preferred.
@@ -588,13 +701,13 @@ The test is whether your EARNED income covered more than half of your support.
 ```
 
 ★ The two sentences carrying the most weight are transcribed, not paraphrased: *"These rules apply
-whether or not the child is a dependent."* (`i8615--2025.txt:66-67`, left column) is the FR-29
+whether or not the child is a dependent."* (`i8615--2025.txt:59-60`) is the FR-29
 inoculation, and *"Income from investments, crypto or a trust is not earned income."* is kept verbatim
 from r1 — the r1 review named it as the one sentence that made the independence trap unfalsifiable
 for the filer, and it survives unchanged.
 
 **Direction, now stated rather than accidental.** Both remaining simplifications push the same way:
-the help still omits the capital-not-a-material-factor rule (`i8615--2025.txt:150-155`, right column),
+the help still omits the capital-not-a-material-factor rule (`i8615--2025.txt:276-281`),
 which would **enlarge** earned income, and it states the scholarship carve-out, which **shrinks**
 support. Both make a filer more likely to answer YES to condition 3 — toward refusal, never away from
 it. §9 G12 pins that.
@@ -641,6 +754,51 @@ if you can supply neither.
 ★ The prompt is phrased in the **positive** — *can you* — and the certification unlocks on `NO`. That
 is deliberate: it asks the filer what they **can** do, which is a fact they can answer without
 reading anything into it, rather than inviting them to affirm a conclusion.
+
+★★★ **r3 (I-1) — THE ACCESSORS FOR THIS LEAF INVERT, AND THE SPEC SAYS SO HERE RATHER THAN LEAVING IT
+TO BE INFERRED.** The prompt asks *can you*, the field is named `…_unobtainable`, and `Some(true)` is
+the only value that opens anything (§4) — so **the filer's NO is the field's `Some(true)`**. The
+inversion has to live in the two `fn` pointers, because both consumers hand the filer's own boolean
+straight to `set_bool` and render `get_bool` straight back as the current answer to the prompt:
+`skippable_tristate!` destructures `FieldValue::TriState(Some(b))` and calls
+`(SKIPPABLE_QUESTIONS[$idx].set_bool)(ri, b)`
+(`crates/btctax-input-form/src/spec/registries.rs:83-91`), and `answer.rs`'s `YesNo` branch calls
+`(sk.set_bool)(&mut ri, v)` on `parse_yes_no`'s value while showing `(sk.get_bool)(&ri)` as
+*"currently y"* / *"currently n"* (`crates/btctax-cli/src/cmd/answer.rs:178-201`). **Write them
+exactly like this:**
+
+```rust
+// The argument and the return are ANSWERS TO THE PROMPT ("can you supply a name and address?"),
+// which is the negation of the leaf. This is the ONLY inverting pair in SKIPPABLE_QUESTIONS.
+get_bool: |ri| ri.header.form8615_parent_identity_unobtainable.map(|v| !v),
+set_bool: |ri, can_supply| {
+    ri.header.form8615_parent_identity_unobtainable = Some(!can_supply);
+},
+```
+
+★ **The snippet is machine-checked, not eyeballed.** It was extracted, given the real fn-pointer
+signatures from `SkippableQuestion` (`questions.rs:926-933`) and a stand-in for the not-yet-added
+field, compiled with `rustc`, and run: `set_bool(…, true)` (the filer's **YES**) writes
+`Some(false)`, `set_bool(…, false)` (their **NO**) writes `Some(true)`, and `get_bool` reads each
+back as the filer's own answer. That is the whole of the fix, and it is the one executable fragment
+this fold adds.
+
+★★ **Why this is called out and not left as an implementation detail: every other entry in
+`SKIPPABLE_QUESTIONS` is polarity-ALIGNED** (`"Are YOU legally blind?"` → `taxpayer.blind`;
+`questions.rs:962-963`, and there is no `!` in any accessor in the registry today), so the obvious
+transcription is a straight-through pair — and a straight-through pair is an **understatement path**.
+A filer who answers **YES** — *I can give the IRS my parent's name and address*, the filer for whom
+the IRS route is open and R-4 is meant to be final — would be stored as `unobtainable = Some(true)`,
+reach §6 ladder step 6's first arm, and **receive a computed return with no Form 8615.** That is
+owner-ruling constraint 1 broken, in the FR-29 direction, rebuilt inside the fix for FR-29.
+
+★★ **And nothing existing reds on it**, which is why §9 gains a guarantee of its own (G14(a)'s new
+row). G14(a), G2 and G8 all drive the gate from **field values**, so they never see the keystroke;
+and the registry delegation test (`crates/btctax-input-form/src/spec/mod.rs:368-393`) round-trips
+`(entry.set_bool)(…, true)` back through `(f.get)`, which a **consistently** inverted pair passes and
+a **straight-through** pair passes — it detects a get/set *mismatch*, which is not this defect. The
+only test that can distinguish them is one that goes in through the `Field` and asserts on the
+**refusal**, and that is what G14(a) now carries.
 
 **The dead-end fact — help:**
 ```text
@@ -730,9 +888,9 @@ computation this spec permits to *suppress* a question.
 
 The IRS's own convention is that a person attains an age on the day before their birthday, which
 `i1040gi:3945-3951` states as three worked examples. ★ **r2 (C-1(e)) — and i8615 prints the
-suppression itself.** The same three birth dates appear as a chart at `i8615--2025.txt:12-24` (right
-column), and the January-1-2002 row carries the footnote *"*** Don’t use Form 8615 for this child."*
-(`:29`, right column). So `provably_24_or_older` is not an equivalence btctax derived from three
+suppression itself.** The same three birth dates appear as a chart at `i8615--2025.txt:71-98`,
+and the January-1-2002 row carries the footnote *"*** Don’t use Form 8615 for this child."*
+(`:98`). So `provably_24_or_older` is not an equivalence btctax derived from three
 examples — it is a rule the IRS prints, and the derivation below merely computes the same boundary for
 every birth date rather than the three the chart happens to list. Encode it as an age at a fixed
 boundary rather than as a date:
@@ -777,7 +935,7 @@ without preserving the direction.** The comparison stays strictly greater than
 was uncited.** §1.2 quotes i8615's unearned-income enumeration. Against the component sum at
 `return_1040.rs:990-995`:
 
-| i8615 category (`:27-36`, left column) | in the sum? |
+| i8615 category (`:28-35`) | in the sum? |
 |---|---|
 | taxable interest, dividends, capital gains (incl. capital gain distributions) | **yes** — `sum_taxable_interest`, `sum_ordinary_dividends`, `capital_gain_line7` (`:990-992`) |
 | unemployment compensation | **yes** — `sum_unemployment(ri)` (`:994`) |
@@ -864,7 +1022,7 @@ Ladder, in order:
 3. `c3 == UNKNOWN` → **refuse `Form8615AgeSupportUnanswered`.**
 4. `c4 == None` → **refuse `Form8615ParentAliveUnanswered`.** (Reached only with `c3 == true`.)
    ★ `None` only. `Some(CannotKnow)` is an **answer** and does not reach this step.
-5. `c4 == Some(No)` → **proceed.** i8615 states the consequence directly (`:67-68`, left column).
+5. `c4 == Some(No)` → **proceed.** i8615 states the consequence directly (`:60-61`).
 6. `c4 == Some(CannotKnow)` → the §6.3 dead end:
    - `form8615_parent_identity_unobtainable == Some(true)` → **proceed, with the §6.3 disclosure
      attached and the three warnings surfaced.**
@@ -972,10 +1130,10 @@ from the archive, not reasoned:
 
 | the wall | primary source | why it is a wall |
 |---|---|---|
-| the form's face | `design/forms/extract/f8615--2025.txt:13-16` — line **A** "Parent’s name (first, initial, and last)", **B** "Parent’s social security number", **C** "Parent’s filing status (check one):" | three structural fields, none marked optional |
+| the form's face | `design/forms/extract/f8615--2025.txt:17-20` — line **A** "Parent’s name (first, initial, and last)", **B** "Parent’s social security number", **C** "Parent’s filing status (check one):" | three structural fields, none marked optional |
 | the computation | `legal/primary-sources/statute-irc/26USC_s1.html`, §1(g)(3)(A)(i) — the allocable parental tax is figured on "the parent's taxable income" | Part II cannot begin without a figure only the parent has |
-| the administrative remedy | `design/forms/extract/i8615--2025.txt:120-123` and `:130-141` (left column) | the request "must contain all of the following", including "The name, address, social security number (SSN) (if known), and filing status (if known) of the parent". **SSN and filing status tolerate ignorance; name and address do not.** It also requires "A statement that you are making the request to comply with section 1(g) of the Internal Revenue Code and that you have tried to get the information from the parent" (`:131-133`) |
-| the statutory escape | `design/forms/extract/i8615--2025.txt:67-68` (left column) — the rules "don’t apply if neither of the child’s parents were living at the end of the year" | requires establishing a fact about parents the filer cannot identify — no easier than condition 4 itself |
+| the administrative remedy | `design/forms/extract/i8615--2025.txt:184` and `:193-195` | the request "must contain all of the following", including "The name, address, social security number (SSN) (if known), and filing status (if known) of the parent". **SSN and filing status tolerate ignorance; name and address do not.** It also requires "A statement that you are making the request to comply with section 1(g) of the Internal Revenue Code and that you have tried to get the information from the parent" (`:185-187`) |
+| the statutory escape | `design/forms/extract/i8615--2025.txt:60-61` — the rules "don’t apply if neither of the child’s parents were living at the end of the year" | requires establishing a fact about parents the filer cannot identify — no easier than condition 4 itself |
 
 **This is a gap in the tax system, not in btctax.** No amount of collection closes it, because the
 missing input is held by a person the filer cannot name.
@@ -1224,10 +1382,34 @@ again; the question is only offered now that you have answered condition 4.
 If you CAN: the Instructions for Form 8615 let you request your parent's return information from the
 IRS, and that request requires the parent's name and address (the SSN and filing status may be
 unknown). Use that route — btctax cannot file Form 8615 for you either way.
+If you can name and locate a parent but cannot contact them — for example, a protection order
+forbids it — that route is closed to you as well, because the request must also state that you
+"have tried to get the information from the parent". btctax has no path for you and will not pretend
+otherwise. The Instructions for Form 1040 say "The Taxpayer Advocate Service (TAS) is an independent
+organization within the Internal Revenue Service (IRS) that helps taxpayers and protects taxpayer
+rights", and that "TAS can help you if your tax problem is causing a financial difficulty, you’ve
+tried and been unable to resolve your issue with the IRS, or you believe an IRS system, process, or
+procedure just isn’t working as it should". Go to TaxpayerAdvocate.IRS.gov/Contact-Us, or call
+877-777-4778. Good luck.
 If you CANNOT give the IRS a name and an address for either parent, answer "no" and btctax will file
 your return without Form 8615 and attach a Form 8275 disclosure explaining why. Read that disclosure
 before you file: it is a disclosed position, not a ruling in your favour.
 ```
+
+★★★ **r3 (I-2) — the TAS paragraph is the OWNER'S RULING on OQ-5, discharged where the ruled filer
+actually lands.** `design/OWNER_DECISIONS_2026-09-04.md`, *"OWNER RULINGS, 2026-09-05"* (`92014cd1`),
+owner verbatim: *"just refer user for tas and tell them good luck."* ⇒ the protection-order filer gets
+**a refusal that names the Taxpayer Advocate Service** and is honest that btctax cannot carry them
+further. §13 already refuses that filer and explains why the certification is **not** widened to reach
+them; what was missing was the referral, and R-4's detail is the only text that filer ever reads.
+★ Sourcing, and it does not move: the quoted limb is the **third in the introductory sentence** at
+`i1040gi--2025.txt:153-154`, not the three bullets at `:157-159` — none of which describes a filer who
+has not yet contacted the IRS. What TAS *is* is transcribed from `:149-150` rather than described in
+btctax's words, and the contacts are the ones the same page prints, `:162` and `:166`.
+**Nothing beyond that page is asserted**: no claim about how TAS will treat the case, no timeline, no
+outcome. ★★ And note what this paragraph is **not**: it is not a second limb of the §6.3 gate. It
+changes no predicate, adds no leaf and opens no path — the filer is still refused. §9 **G15** pins
+that both halves stay true together.
 
 **Anchor:** `vec![skip(SkippableId::Form8615ParentIdentityUnobtainable)]` — the same shape as R-1 and
 R-2, and the reason it must **not** be `NotInForm`: an input *does* clear this one, and an anchor
@@ -1264,8 +1446,8 @@ taxable income and any siblings' §1(g) amounts, which btctax never sees. Comple
 **Doc comment** at `return_refuse.rs:264-273`: the FR-29 warning block is **deleted and replaced** with
 the corrected reading and a pointer to this spec. Leaving the warning in place after the fix would be
 its own defect — a doc telling a future maintainer the gate is wrong when it is right. ★ **r2 (C-1(a)):
-the replacement quotes i8615 rather than arguing from an absence** — `i8615--2025.txt:66-67` (left
-column), *"These rules apply whether or not the child is a dependent."* The doc comment today reasons
+the replacement quotes i8615 rather than arguing from an absence** — `i8615--2025.txt:59-60`,
+*"These rules apply whether or not the child is a dependent."* The doc comment today reasons
 that dependency *"appears nowhere in"* the five conditions; that is true and weaker than the IRS
 saying so, and this is the one sentence most likely to stop FR-29 recurring.
 
@@ -1379,9 +1561,9 @@ document):
 | 3 | condition 3 | `"didn’t have earned income that was more than half of your support"` | `i1040gi--2025.txt:3935-3936` |
 | 4 | condition 3 | `"a full-time student at least age 19 but under age 24"` | `i1040gi--2025.txt:3937-3938` |
 | 5 | condition 4 | `"at least one of your parents was alive"` | `i1040gi--2025.txt:3941-3942` |
-| 6 | condition 3 help | `"these rules apply whether or not the child is a dependent"` | `i8615--2025.txt:66-67`, left column |
-| 7 | condition 3 help | `"wages, tips, and other payments received for personal services performed"` | `i8615--2025.txt:139-140`, **right** column |
-| 8 | the dead-end fact help | `"the name, address, social security number (SSN) (if known), and filing status (if known) of the parent"` | `i8615--2025.txt:139-141`, **left** column |
+| 6 | condition 3 help | `"these rules apply whether or not the child is a dependent"` | `i8615--2025.txt:59-60` |
+| 7 | condition 3 help | `"wages, tips, and other payments received for personal services performed"` | `i8615--2025.txt:266-267` |
+| 8 | the dead-end fact help | `"the name, address, social security number (SSN) (if known), and filing status (if known) of the parent"` | `i8615--2025.txt:193-195` |
 
 **All eight were machine-checked against both halves before this table was written** — each clause,
 normalised with `cite_check::normalise`, is contained in its named extract **and** in the §4.1 string
@@ -1389,10 +1571,24 @@ it belongs to. Clauses 5 and 6 failed on the first run and are why §4.1's condi
 declarative and its condition-3 help quotes i8615 directly rather than rewriting it into the second
 person. **Do not "simplify" either string back**; the check is what holds them.
 
-★ Clauses 6–8 are the r2 additions, and they are why the table carries a per-clause source: two of
-them cite `i8615--2025.txt:139-…` in **different columns of the same physical lines** (§1). They also
-make **P-2a a hard prerequisite of G7**, not only of P-1 — against the raw two-column extract, clauses
-6 and 7 cannot pass, because each spans two lines of one column and the haystack interleaves the other.
+★★ **r3 (C-1(d)) — G7 IS BUILDABLE TODAY, and the r2 claim that it had a prerequisite was false.**
+The r2 text said clauses 6–8 cited *"different columns of the same physical lines"* and that this made
+**P-2a a hard prerequisite of G7** — *"against the raw two-column extract, clauses 6 and 7 cannot pass,
+because each spans two lines of one column and the haystack interleaves the other."* Re-measured at
+HEAD, all eight clauses through `cite_check::normalise` against the **raw** current extracts and
+against the §4.1 string each belongs to:
+
+```
+=== G7 clause vs EXTRACT (current, raw, no column split) ===   === G7 clause vs PROMPT/HELP (§4.1) ===
+  clause 1..8: PASS  (8/8)                                       clause 1..8: PASS  (8/8)
+=== G7 structural counts on the condition-3 prompt ===
+  clause 3 occurrences (want 2): 2
+  'a under age 18' (want 1): 1   'b age 18 and didn t have' (want 1): 1   'c a full time student' (want 1): 1
+```
+
+**Nothing about G7 is blocked, and the per-clause source column stays** — not because of columns, but
+for the reason §1.1 gives: i8615 says *"and under age 24"* where i1040gi says *"but under age 24"*, so
+a single-extract table would silently check a prompt against the wrong document.
 
 ★★ **Clause 2 is WEAK, and G7 must not pretend otherwise.** `"age 18"` is a substring of `"under age
 18"`, so clause 1 satisfies it and **deleting limb (b) from the prompt would not red anything.** Limb
@@ -1421,7 +1617,9 @@ satisfied performatively"*.
 modelled on `cite_check.rs::a_paraphrase_is_rejected_and_the_real_sentence_is_accepted`, planting
 *"more than half of your support"* → *"most of your support"* and asserting red — **and asserting that
 the unmutated clause passes**, because a checker that reds on everything is indistinguishable from one
-that works (§1's P-2a note).
+that works. ★ **r3:** that half is now *measurable* rather than aspirational — §1 records 8/8 clauses
+passing against the raw extracts at HEAD, so the "accepts the real one" assertion is known to be
+satisfiable before the test is written.
 
 **G8 — the demanded set is inside the live set (the anti-brick invariant).**
 `every_form8615_refusal_names_a_question_the_interview_would_have_offered`: over a fixture grid that
@@ -1481,12 +1679,25 @@ category the form counts as support. Paired with G7 clauses 6–8, which pin the
 **Mutation:** drop the scholarship carve-out ⇒ red; reword *"more than half"* to *"most"* ⇒ red via
 G7's B1 pairing.
 
-**G13 — `CannotKnow` is an ANSWER to the census, not a blank (r2).**
-`cannot_know_is_answered_and_none_is_not`: for `form8615_condition4_parent_alive`, assert the
-classifier scores `Some(CannotKnow)` as answered and `None` as unanswered, and that the two produce
-**different** outcomes at the gate (`Form8615ParentAliveUnanswered` vs R-4).
-**Mutation:** map `CannotKnow` to the unanswered arm ⇒ red. Without this, a census would report this
-spec's central case as a hole and invite someone to "fix" it by defaulting the field.
+**G13 — `CannotKnow` is an ANSWER, and the gate is where that is provable (r2; ★ r3, M-1).**
+`cannot_know_is_answered_and_none_is_not`: for `form8615_condition4_parent_alive`, assert that
+`Some(CannotKnow)` and `None` produce **different** outcomes at the gate
+(`Form8615ParentAliveUnanswered` vs R-4).
+**Mutation:** map `CannotKnow` to the unanswered arm at the gate ⇒ red. Without this, the third
+answer collapses into silence and this spec's central case becomes a refusal with no remedy.
+
+★★ **r3 (M-1) — the r2 clause *"assert the classifier scores `Some(CannotKnow)` as answered and
+`None` as unanswered"* is DELETED, because `classify` has no such capability and a guarantee that
+cannot be written is worse than no guarantee.** `Census`
+(`crates/btctax-core/src/tax/classifier.rs:64-67`) carries only `declarations: Vec<QuestionId>` and
+`exemptions: Vec<(Class, &'static str)>`; `exempt<T>(&mut self, _leaf: &T, …)` (`:75-77`) **discards
+the leaf entirely**, and `declaration` is typed `&Option<bool>` (`:71-73`). The classifier makes
+answered-ness structural **by the type and by the no-`..` destructure** — it never inspects a value,
+so there is no score to assert against. What actually protects the leaf is the compile: `classify`
+destructures `HouseholdHeader` with no `..` (`classifier.rs:264-285`), so the new field cannot be
+forgotten, and §6.2's `Class::NoTaxDirection` reason string is where *"`CannotKnow` is an answer"* is
+recorded for a human. ★ This is the *green-and-blind* shape caught before it shipped: a test asserting
+a capability the instrument does not have would have been written as something weaker that passed.
 
 **G14 — the certification is gated, disclosed, and never asks for a conclusion (r2, the owner ruling).**
 Three assertions, because the ruling has three parts and each fails differently:
@@ -1497,6 +1708,23 @@ Three assertions, because the ruling has three parts and each fails differently:
     it is never even offered outside the dead end.
     **Mutations:** `== Some(true)` → `!= Some(false)` ⇒ red. `== Some(CannotKnow)` → `!= Some(Yes)` in
     the liveness predicate ⇒ red on the *not-offered* half.
+    ★★★ **r3 (I-1) — and one row that does NOT go through the field, because the defect it catches is
+    in the accessor.** Drive the dead-end leaf through the `Field` the way the interview does —
+    condition 3 `Some(true)`, condition 4 `Some(CannotKnow)`, then
+    `(f.set)(&mut ri, &RowAddr::default(), FieldValue::TriState(Some(true)))` for
+    `FieldId::Form8615ParentIdentityUnobtainable` — and assert the return **still refuses**
+    `Form8615ParentUnidentifiable`. `TriState(Some(true))` is the filer answering **YES** to *"Can you
+    give the IRS your parent's name and address?"*, so the correct outcome is the refusal that sends
+    them to the IRS route.
+    **Mutation — and it is the whole point of the row:** write the accessors straight through
+    (`get_bool: |ri| ri.header.form8615_parent_identity_unobtainable`,
+    `set_bool: |ri, v| ri.header.form8615_parent_identity_unobtainable = Some(v)`) ⇒ **red**, because
+    a YES then certifies. That mutation is the *obvious* transcription (§4.1), every other registry
+    entry is written that way, and no test in the repo today reds on it: G14(a)'s other rows, G2 and
+    G8 all set the **field value**, and the registry delegation test round-trips through the pair and
+    so passes on a consistently-inverted pair and on a straight-through pair alike
+    (`crates/btctax-input-form/src/spec/mod.rs:368-393`). ★ This row is the only place the *keystroke*
+    is asserted, so it is the guarantee that must not be "simplified" into another field-value row.
 (b) `a_certified_return_carries_the_disclosure_and_all_three_warnings` — a return produced on the
     §6.3 path emits a Form 8275 disclosure whose Part I names `IRC section 1(g)` and whose Part II
     leads with the impossibility argument, plus W-1, W-2 and W-3, with W-3 asserted **verbatim**.
@@ -1506,6 +1734,21 @@ Three assertions, because the ruling has three parts and each fails differently:
     string this spec adds, assert none asks the filer to affirm that §1(g) does not apply, that they
     are exempt, or that Form 8615 is not required. The conclusion is btctax's alone (§6.3.2).
     **Mutation:** reword the dead-end prompt to *"do you agree §1(g) does not apply to you?"* ⇒ red.
+
+**G15 — OQ-5's ruling, both halves at once (r3, I-2).**
+`the_protection_order_filer_is_refused_and_told_about_tas`: a fixture in the dead end who answers the
+§4.1 dead-end question **YES** (they *can* supply a name and address) asserts **both**
+(a) the return still refuses `Form8615ParentUnidentifiable` — no computed return, no Form 8275, no
+    certification, i.e. the conjunction was not widened into a disjunction; **and**
+(b) that refusal's detail names *"Taxpayer Advocate Service"* and carries the contacts
+    `TaxpayerAdvocate.IRS.gov/Contact-Us` and `877-777-4778`.
+**Mutations:** delete the TAS paragraph from R-4's detail ⇒ red on (b). Add a disjunctive second limb
+to §6.3's gate for this filer (`|| forbidden_to_contact`) ⇒ red on (a).
+★ The two halves are asserted **in one test on one fixture** deliberately: they are the two halves of
+a single owner ruling (`92014cd1`), and splitting them lets a later edit satisfy one while breaking
+the other. ★★ Note that (b) is a **prompt-only** assertion in G7's sense — it pins that the string is
+present, not that TAS will help — and its message must say so, because a checker that looks like it
+validates the advice is the green-and-blind instrument §9 exists to avoid.
 
 ---
 
@@ -1600,7 +1843,7 @@ here, and the number is not re-stated as if it were.** What can be said precisel
 - **A date of birth in the future, or after the tax year.** `considered_age_at_year_end` returns a
   negative age, `provably_24_or_older` is false, and the filer is asked — fail-closed, so it is a
   Minor. File it; do not gate on it.
-- ★ **The Form 8814 parental election** (r2, C-1(e)) — `i8615--2025.txt:33-41` (right column):
+- ★ **The Form 8814 parental election** (r2, C-1(e)) — `i8615--2025.txt:100-106`:
   *"The parent may be able to elect to report the child’s interest, ordinary dividends, and capital
   gain distributions on the parent’s return. If the parent makes this election, the child won’t have
   to file a return or Form 8615."* That is a **real exit** for the filer R-3 refuses, and r1 did not
@@ -1658,28 +1901,39 @@ understating them.
 alternatives and asks the filer for the disjunction; splitting it would make btctax re-derive what the
 form writes out, which is the compression `CLAUDE.md` forbids. ★ C-1 strengthens this rather than
 weakening it: i8615's January-1 chart resolves the limbs **together** per birth date, with one
-footnote per row (`i8615--2025.txt:12-29`, right column) — the IRS itself treats the three as one
+footnote per row (`i8615--2025.txt:71-98`) — the IRS itself treats the three as one
 question about a person, not three independent facts. One leaf, as specced.
 
 ---
 
-## 13. The one open question r2 ADDS
+## 13. OQ-5 — raised by r2, RULED by the owner
 
-**OQ-5 (deliberately NOT widened, and it needs an owner ruling, not a review).** The owner ruling's
+**OQ-5 (deliberately NOT widened — ★★★ r3: the owner has RULED, `92014cd1`, and the ruling is
+folded).** Owner, verbatim: *"just refer user for tas and tell them good luck."* ⇒ **do not widen the
+certification, and give these filers a refusal that names the Taxpayer Advocate Service and is honest
+that btctax cannot carry them further** (`design/OWNER_DECISIONS_2026-09-04.md`, *"OWNER RULINGS,
+2026-09-05"*). Both halves are discharged below: the non-widening in §6.3's gate, which is unchanged,
+and the referral in §8 R-4's detail, pinned by §9 G15. **This is no longer an open item, and it is not
+a review's to reopen.** The owner ruling's
 evidence names a **second** dead end in passing: i8615's IRS-request remedy requires *"A statement
 that you are making the request to comply with section 1(g) of the Internal Revenue Code and that you
-have tried to get the information from the parent"* (`i8615--2025.txt:131-133`, left column) — and a
+have tried to get the information from the parent"* (`i8615--2025.txt:185-187`) — and a
 protection order forbids exactly that contact. Such a filer **can** name and locate their parent, so
 they answer §4.1's dead-end question YES and R-4 refuses them, correctly under this spec and wrongly
 under the ruling's own principle.
 
-**It is not folded, and that is a decision, not an omission.** The ruling is scoped to the filer who
-cannot identify their parents; §6.3's gate is a **conjunction** of two facts, and admitting the
-protection-order case means adding a **disjunctive** second path. *Widening an exemption is never the
-safe edit* — a disjunction is precisely how an exemption widens, and the fact that would gate it
-(*"I am forbidden to contact my parent"*) is one a filer might reach for far more loosely than
-*"I do not know who my parents are"*. That is a judgment about how much §1(g) exposure to open, which
-belongs to the owner.
+**The certification is not widened, and that is now the owner's decision as well as this spec's.** The
+self-certification is scoped to the filer who cannot identify their parents; §6.3's gate is a
+**conjunction** of two facts, and admitting the protection-order case means adding a **disjunctive**
+second path. *Widening an exemption is never the safe edit* — a disjunction is precisely how an
+exemption widens, and the fact that would gate it (*"I am forbidden to contact my parent"*) is one a
+filer might reach for far more loosely than *"I do not know who my parents are"*. The owner's ruling
+says the same thing and says why: *"This is the conservative ruling and it protects the fix: a
+disjunction is how an exemption widens, which is the exact mechanism FR-29 was."*
 
-★ Recorded here so it is not rediscovered as a gap: **the case is real, the spec refuses it today, and
-the refusal is deliberate.**
+★★ **What the ruling DID change, and it is the half r2 left undone.** These filers are refused, but
+they are not left with nothing: R-4's detail now names the Taxpayer Advocate Service, cites the limb
+of `i1040gi--2025.txt:153-154` that covers them, gives the two contacts the same page prints
+(`:162`, `:166`), and asserts nothing beyond it. **A referral is not a path** — no predicate moves, no
+leaf is added, the return still refuses — and §9 G15 asserts both halves at once, so a later edit
+cannot drop the referral or convert it into a second limb without going red.
