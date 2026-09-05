@@ -168,14 +168,24 @@ pub fn audit(hooks_dir: &Path) -> Vec<Finding> {
 ///
 /// Clearing the redirect variables makes `current_dir` mean what it reads as. Nothing here needs the
 /// ambient environment: every caller passes the repository it means explicitly.
-fn git_pointed_at(dir: &Path) -> Command {
+pub(crate) fn git_pointed_at(dir: &Path) -> Command {
     let mut c = Command::new("git");
     c.current_dir(dir)
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
         .env_remove("GIT_COMMON_DIR")
         .env_remove("GIT_INDEX_FILE")
-        .env_remove("GIT_OBJECT_DIRECTORY");
+        .env_remove("GIT_PREFIX")
+        .env_remove("GIT_OBJECT_DIRECTORY")
+        // ★★ Added 2026-09-04 after a review found three channels that route around a repo-local
+        //    `core.excludesFile`. `GIT_TEMPLATE_DIR` seeds `$GIT_DIR/info/exclude` at `git init`,
+        //    which outranks `core.excludesFile`; `GIT_CONFIG_COUNT` gates the whole
+        //    `GIT_CONFIG_KEY_n`/`VALUE_n` family, which outranks repo-local config (measured:
+        //    dropping COUNT alone disables it, so the numbered vars need no enumeration).
+        .env_remove("GIT_TEMPLATE_DIR")
+        .env_remove("GIT_CONFIG_COUNT")
+        .env_remove("GIT_CONFIG_GLOBAL")
+        .env_remove("GIT_CONFIG_SYSTEM");
     c
 }
 

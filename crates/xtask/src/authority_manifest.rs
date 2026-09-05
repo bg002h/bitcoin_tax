@@ -695,20 +695,18 @@ pub fn regen(root: &Path) -> Result<usize, String> {
     let mut entries = Vec::new();
     for rel in sources {
         let abs = root.join(&rel);
-        // ★★ **Scrub git's inherited environment.** `current_dir(root)` is NOT enough: git prefers
-        //   an inherited `GIT_DIR` over the child's working directory, so run from inside a hook
-        //   (the pre-commit hook runs the whole suite) this would answer about btctax rather than
-        //   about `root`. The same inheritance once re-inited a test's throwaway repo ON TOP of this
-        //   one as BARE — see the note in `scripts/pre-commit`. Ask about the tree we were handed.
-        let ignored = std::process::Command::new("git")
+        // ★★ **Scrub git's inherited environment**, via the ONE canonical helper.
+        //   `current_dir(root)` is not enough: git prefers an inherited `GIT_DIR` over the child's
+        //   working directory, so under `git bisect run make check`, `git rebase --exec`, or any
+        //   future hook that forgets to unset it, this would answer about btctax rather than about
+        //   `root`. (`scripts/pre-commit` already unsets the six, so that path is covered — it is
+        //   the others that need this.) The same inheritance once re-inited a throwaway repo ON TOP
+        //   of this one as BARE; the note in `scripts/pre-commit` records it.
+        //   ★★★ Deliberately NOT a local copy of the list: a second copy drifts, and a 2026-09-04
+        //   review found three copies here with three different lengths. `git_pointed_at` is the
+        //   pinned one, and `git_pointed_at_clears_the_ambient_repo_redirects` is its B1 kill.
+        let ignored = crate::harness_check::git_pointed_at(root)
             .args(["check-ignore", "-q", &rel])
-            .current_dir(root)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_COMMON_DIR")
-            .env_remove("GIT_INDEX_FILE")
-            .env_remove("GIT_PREFIX")
-            .env_remove("GIT_OBJECT_DIRECTORY")
             .status()
             .map_err(|e| {
                 format!(
@@ -987,7 +985,9 @@ mod tests {
 
         // ★★★ **The fixture must be a REAL git repo, or `Storage` is a constant here.**
         // `regen` derives storage from `git check-ignore`; in a plain tempdir that command exits
-        // 128 and `.unwrap_or(false)` makes EVERY entry `Committed`. The test then cannot see the
+        // 128 — a real git answering "not a repository" — which reads as "not ignored" and so makes
+        // EVERY entry `Committed`. (The `.unwrap_or(false)` that used to sit there is gone; a git
+        // that cannot be RUN at all is now an error.) The test then cannot see the
         // `Storage` axis at all — proved 2026-09-04 by planting
         // `.filter(|e| e.storage == Storage::Committed)` in `regen_would_drop`: the whole suite
         // passed 67/67, while the same filter on `Storage::Note` failed instantly. That mutation is
@@ -997,21 +997,34 @@ mod tests {
         //    `current_dir`, and a test's `git init` under one has re-inited THIS repository as BARE
         //    before now (see the note in `scripts/pre-commit`). Never run git in a fixture without it.
         let git = |args: &[&str]| {
-            let ok = std::process::Command::new("git")
+            // ★ Same canonical helper `regen` uses — see its B1 kill in `harness_check`. It also
+            //   clears GIT_TEMPLATE_DIR and GIT_CONFIG_COUNT, which is what stops a hostile
+            //   template or command-level config from outranking the repo-local settings below.
+            match crate::harness_check::git_pointed_at(root)
                 .args(args)
-                .current_dir(root)
-                .env_remove("GIT_DIR")
-                .env_remove("GIT_WORK_TREE")
-                .env_remove("GIT_COMMON_DIR")
-                .env_remove("GIT_INDEX_FILE")
-                .env_remove("GIT_PREFIX")
-                .env_remove("GIT_OBJECT_DIRECTORY")
                 .status()
-                .map(|s| s.success())
-                .unwrap_or(false);
-            assert!(ok, "fixture git {args:?} failed");
+            {
+                // ★ N-4: distinguish "git is not installed" from "git said no". The first is an
+                //   environment problem and the message must say so, or a maintainer without git
+                //   spends the afternoon reading this fixture.
+                Err(e) => panic!("cannot run `git {args:?}` — is git installed? ({e})"),
+                Ok(st) => assert!(st.success(), "fixture git {args:?} failed: {st}"),
+            }
         };
-        git(&["init", "-q"]);
+        // ★ `--template=` with an EMPTY dir closes the last ambient channel: a global
+        //   `init.templateDir` (or `GIT_TEMPLATE_DIR`, already scrubbed) seeds
+        //   `$GIT_DIR/info/exclude`, which OUTRANKS the repo-local `core.excludesFile` set below.
+        //   Measured 2026-09-04: without this, a hostile `~/.gitconfig` reds this test.
+        let empty_template = root.join("empty-git-template");
+        fs::create_dir_all(&empty_template).expect("template dir");
+        git(&[
+            "init",
+            "-q",
+            &format!(
+                "--template={}",
+                empty_template.to_str().expect("utf-8 path")
+            ),
+        ]);
         // ★★★ **Neutralise the DEVELOPER's global ignore rules, repo-locally.** `regen` runs its own
         // `git check-ignore` inside this fixture, and git reads the user's global
         // `core.excludesFile` there too — so a developer who globally ignores `*.html` (or `*.pdf`)
@@ -1058,8 +1071,12 @@ mod tests {
         assert!(
             notes == 1 && committed == 1,
             "the fixture must contain exactly one note-storage and one committed entry — got \
-             {notes} note / {committed} committed. If this fires, `git check-ignore` is not working \
-             in the fixture and every Storage-axis claim in this test is vacuous."
+             {notes} note / {committed} committed.\n  \
+             If you ADDED a fixture document, update this count deliberately.\n  \
+             Otherwise `git check-ignore` is not working here — an ambient template, \
+             GIT_CONFIG_COUNT, or a system excludesFile can do it — and in that case every \
+             Storage-axis claim in this test is vacuous, which is the state this assertion exists \
+             to make impossible."
         );
         let manifest = manifest_path(root);
         let pristine = fs::read(&manifest).expect("manifest written");
