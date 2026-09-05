@@ -1049,3 +1049,229 @@ impl Schedule1aWorksheets {
         ]
     }
 }
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// T4 — COMPUTE, transcribed line by line
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// What Parts II–VI need that is not on Schedule 1-A itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Schedule1aFacts {
+    /// Line 3 — modified AGI, produced by Part I.
+    pub magi: Usd,
+    pub status: crate::tax::types::FilingStatus,
+    /// Line 36a — *"you have a valid social security number … and were born before January 2, 1961"*.
+    pub taxpayer_qualifies_as_senior: bool,
+    /// Line 36b — the same two conditions for the spouse, and MFJ only.
+    pub spouse_qualifies_as_senior: bool,
+}
+
+/// ★★★ **The routing at lines 10, 18 and 27 is a JUMP PAST THE PHASE-OUT, not a clamp to zero.**
+///
+/// *"Subtract line 9 from line 8. If zero or less, enter the amount from line 7 on line 13."*
+/// Transcribing that as *"enter -0-"* zeroes the whole deduction for every filer **under** the
+/// threshold — which is most of them. Returns the excess when the phase-out runs, and `None` when the
+/// form jumps.
+fn phase_out_excess(magi_line: Usd, threshold: Usd) -> Option<Usd> {
+    let excess = magi_line - threshold;
+    if excess <= Usd::ZERO {
+        None // the form's own routing: skip the phase-out, carry the capped figure straight down
+    } else {
+        Some(excess)
+    }
+}
+
+/// ★★ Parts II, III and V print *"If married, you must file jointly to claim this deduction."*
+/// Part IV prints **no such caution**, and is therefore allowed for MFS — adjudicated against the
+/// FORM, over an oracle that bars all four. An oracle is a witness; the form is the authority.
+fn barred_for_mfs(status: crate::tax::types::FilingStatus) -> bool {
+    matches!(status, crate::tax::types::FilingStatus::Mfs)
+}
+
+impl Schedule1aPartII {
+    /// Lines 6–13 from the collected figures. Lines 4a–4c and 5 are set by the caller (5 refuses;
+    /// see `return_refuse`), so this takes them as already-decided.
+    pub fn compute(
+        p: &crate::tax::tables::Schedule1aParams,
+        f: &Schedule1aFacts,
+        line4c: Option<Usd>,
+        line5: Option<Usd>,
+    ) -> Self {
+        let mut out = Self {
+            line4c,
+            line5,
+            ..Default::default()
+        };
+        if barred_for_mfs(f.status) {
+            return out; // "If married, you must file jointly to claim this deduction."
+        }
+        let six = line4c.unwrap_or(Usd::ZERO) + line5.unwrap_or(Usd::ZERO);
+        if six <= Usd::ZERO {
+            return out; // nothing claimed; every line below stays blank, not zero
+        }
+        out.line6 = Some(six);
+        let cap = six.min(p.tips_cap); // L7 "smaller of line 6 or $25,000"
+        out.line7 = Some(cap);
+        out.line8 = Some(f.magi); // L8 "Enter the amount from line 3"
+        let threshold = p.tips_phase_out.threshold_for(f.status);
+        out.line9 = Some(threshold);
+        match phase_out_excess(f.magi, threshold) {
+            // ★ THE JUMP: lines 10, 11 and 12 stay BLANK and line 13 takes line 7 whole.
+            None => out.line13 = Some(cap),
+            Some(excess) => {
+                out.line10 = Some(excess);
+                let reduction = p.tips_phase_out.reduction(excess);
+                out.line11_steps = Some(excess / p.tips_phase_out.step);
+                out.line12 = Some(reduction);
+                // L13 "Subtract line 12 from line 7. If zero or less, enter -0-" — the form's floor.
+                out.line13 = Some((cap - reduction).max(Usd::ZERO));
+            }
+        }
+        out
+    }
+}
+
+impl Schedule1aPartIII {
+    pub fn compute(
+        p: &crate::tax::tables::Schedule1aParams,
+        f: &Schedule1aFacts,
+        line14c: Option<Usd>,
+    ) -> Self {
+        let mut out = Self {
+            line14c,
+            ..Default::default()
+        };
+        if barred_for_mfs(f.status) {
+            return out;
+        }
+        let claimed = line14c.unwrap_or(Usd::ZERO);
+        if claimed <= Usd::ZERO {
+            return out;
+        }
+        // L15 "smaller of line 14c or $12,500 ($25,000 if married filing jointly)" — unlike the tips
+        // cap, this one DOES double for MFJ, and the form prints the parenthesised figure.
+        let cap_for_status = if matches!(f.status, crate::tax::types::FilingStatus::Mfj) {
+            p.overtime_cap_mfj
+        } else {
+            p.overtime_cap
+        };
+        let cap = claimed.min(cap_for_status);
+        out.line15 = Some(cap);
+        out.line16 = Some(f.magi);
+        let threshold = p.overtime_phase_out.threshold_for(f.status);
+        out.line17 = Some(threshold);
+        match phase_out_excess(f.magi, threshold) {
+            None => out.line21 = Some(cap), // the jump: "enter the amount from line 15 on line 21"
+            Some(excess) => {
+                out.line18 = Some(excess);
+                let reduction = p.overtime_phase_out.reduction(excess);
+                out.line19_steps = Some(excess / p.overtime_phase_out.step);
+                out.line20 = Some(reduction);
+                out.line21 = Some((cap - reduction).max(Usd::ZERO));
+            }
+        }
+        out
+    }
+}
+
+impl Schedule1aPartIV {
+    /// ★ **Allowed for MFS.** Part IV prints no *"must file jointly"* caution, so barring it would
+    /// deny a deduction §163(h)(4) allows.
+    pub fn compute(
+        p: &crate::tax::tables::Schedule1aParams,
+        f: &Schedule1aFacts,
+        line23: Option<Usd>,
+    ) -> Self {
+        let mut out = Self {
+            line23,
+            ..Default::default()
+        };
+        let claimed = line23.unwrap_or(Usd::ZERO);
+        if claimed <= Usd::ZERO {
+            return out;
+        }
+        let cap = claimed.min(p.qpvli_cap);
+        out.line24 = Some(cap);
+        out.line25 = Some(f.magi);
+        let threshold = p.qpvli_phase_out.threshold_for(f.status);
+        out.line26 = Some(threshold);
+        match phase_out_excess(f.magi, threshold) {
+            None => out.line30 = Some(cap), // "enter the amount from line 24 on line 30"
+            Some(excess) => {
+                out.line27 = Some(excess);
+                // ★★ This part CEILS: §163(h)(4)(B)(iii) says "or portion thereof", so any part of a
+                //    step counts whole. `reduction` carries the direction; do not re-derive it here.
+                let reduction = p.qpvli_phase_out.reduction(excess);
+                out.line28_steps = Some((excess / p.qpvli_phase_out.step).ceil());
+                out.line29 = Some(reduction);
+                out.line30 = Some((cap - reduction).max(Usd::ZERO));
+            }
+        }
+        out
+    }
+}
+
+impl Schedule1aPartV {
+    /// ★★★ **Line 33's jump writes a NONZERO CONSTANT into a later line.**
+    ///
+    /// *"Subtract line 32 from line 31. If zero or less, enter $6,000 on line 35."* Transcribing that
+    /// as *"enter -0-"* yields **$0 instead of $6,000** — the entire senior deduction lost for every
+    /// filer under the threshold, which is most of them. It agrees with `max(0, …)` only because
+    /// 6% × 0 = 0, so a `max(0, …)` transcription passes for the wrong reason and breaks the moment
+    /// the rate moves. The branch itself is pinned, not the arithmetic that shadows it.
+    pub fn compute(p: &crate::tax::tables::Schedule1aParams, f: &Schedule1aFacts) -> Self {
+        let mut out = Self::default();
+        if barred_for_mfs(f.status) {
+            return out;
+        }
+        if !f.taxpayer_qualifies_as_senior && !f.spouse_qualifies_as_senior {
+            return out; // neither person meets line 36a/36b; the part is not reached
+        }
+        out.line31 = Some(f.magi);
+        let threshold = p.senior_threshold_for(f.status);
+        out.line32 = Some(threshold);
+        let per_person = p.senior_per_person;
+        let line35 = match phase_out_excess(f.magi, threshold) {
+            // ★ THE JUMP: lines 33 and 34 stay blank and line 35 takes the CONSTANT.
+            None => per_person,
+            Some(excess) => {
+                out.line33 = Some(excess);
+                // L34 "Multiply line 33 by 6% (0.06)" — its own printed dollar line, so it rounds.
+                let l34 = crate::conventions::round_dollar(p.senior_rate * excess);
+                out.line34 = Some(l34);
+                // L35 "Subtract line 34 from $6,000. If zero or less, enter -0-". ★ Subtract the
+                // PRINTED line 34, not the unrounded product: the two differ by $1 whenever
+                // 0.06 × L33 lands on a half-dollar, and "round the difference" understates tax.
+                (per_person - l34).max(Usd::ZERO)
+            }
+        };
+        out.line35 = Some(line35);
+        if f.taxpayer_qualifies_as_senior {
+            out.line36a = Some(line35);
+        }
+        if f.spouse_qualifies_as_senior {
+            out.line36b = Some(line35);
+        }
+        out.line37 = Some(out.line36a.unwrap_or(Usd::ZERO) + out.line36b.unwrap_or(Usd::ZERO));
+        out
+    }
+}
+
+impl Schedule1aPartVI {
+    /// **Line 38** — *"Add lines 13, 21, 30, and 37."* A `Combine`, so it is BLANK when every
+    /// operand is blank (FR-39), not a fabricated zero.
+    pub fn compute(
+        p2: &Schedule1aPartII,
+        p3: &Schedule1aPartIII,
+        p4: &Schedule1aPartIV,
+        p5: &Schedule1aPartV,
+    ) -> Self {
+        let operands = [p2.line13, p3.line21, p4.line30, p5.line37];
+        let line38 = if operands.iter().all(Option::is_none) {
+            None
+        } else {
+            Some(operands.iter().flatten().copied().sum::<Usd>())
+        };
+        Self { line38 }
+    }
+}
