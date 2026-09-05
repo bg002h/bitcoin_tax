@@ -330,7 +330,36 @@ finding nothing, which is the exact false-completeness this plan warns about eve
 ★★ **r5 ADDITIONS TO THIS TASK — where the KAT lives, what it must red on, and two `line_coverage`
 residues.**
 
-5. **The conformance KAT lives in `crates/xtask/`, not in `btctax-core`** (r5 M-1 — *say which*).
+5. **The conformance KAT is SPLIT ALONG THE CRATE LINE — membership in `crates/xtask/`, quotation
+   and worksheets in `btctax-core`** (r5 M-1, corrected by r6 I-1 and I-2). ★★ The r5 fold moved the
+   whole KAT to `xtask` and did not re-check what it could still reach from there. Two things it
+   cannot:
+   - **`printed_line` does not exist outside `btctax-core`'s own test build.** It is
+     `crates/btctax-core/src/tax/tables.rs:1360`, a bare `fn` inside the `#[cfg(test)]` module that
+     opens at `:1353` — so when `btctax-core` is compiled as `xtask`'s *dependency* the item is not
+     generated at all. CORRECTION 2 orders half 2 of the KAT to call it, so half 2 **and its B1
+     kill would not compile**. Verified 2026-09-05.
+   - **The four worksheets have no mechanical source in `xtask`.** CORRECTION 3 drives the expected
+     set from `label_reader`, whose box witness needs an AcroForm; the instructions PDF has none and
+     there is no `design/forms/geometry/i1040gi--2025.json`. That is census F-4's own measured
+     blindness, not a gap to paper over.
+   ⇒ **Membership** (the 48 form labels, from `label_reader`) stays in `crates/xtask/`.
+   **Per-line quotation and the four worksheets** go in `btctax-core`'s existing
+   `schedule_1a_conformance` module, where `printed_line` and the in-crate fixture already live —
+   `crates/btctax-core/src/tax/fixtures/schedule_1a_2025_instructions.txt` carries all four worksheet
+   headers, verified at `:427`, `:556`, `:1049`, `:1066`. No new code and no new fixture is required
+   by this split; it is a placement decision, not work.
+   ★ The struct stays in `btctax-core` either way, and B-I1's `(label, got.lineN)` tuple form still
+   ties the compiler to it from both sides.
+
+   *(Superseded r5 reasoning, kept because the crate-direction argument still holds and is why
+   membership stays in `xtask`:)* `label_reader` is `crates/xtask/src/label_reader.rs`, and `xtask`
+   depends on `btctax-core` (`crates/xtask/Cargo.toml:20`) while `btctax-core`'s manifest names no
+   `xtask` — the reverse would be a cycle. It also keeps `label_reader`'s repo-root fixture loading
+   out of `btctax-core`, whose tests deliberately use in-crate fixtures — an escaping `include_str!`
+   has shipped a broken tarball from this repo before.
+
+   *(Original r5 text follows.)* **The conformance KAT lives in `crates/xtask/`, not in `btctax-core`** (r5 M-1 — *say which*).
    `label_reader` is `crates/xtask/src/label_reader.rs`, and `xtask` depends on `btctax-core`
    (`crates/xtask/Cargo.toml:20`) while `btctax-core`'s manifest names no `xtask` — the reverse would
    be a cycle. CORRECTION 3 drives the expected set from `label_reader`, which is therefore unreachable
