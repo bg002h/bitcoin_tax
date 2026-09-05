@@ -695,12 +695,29 @@ pub fn regen(root: &Path) -> Result<usize, String> {
     let mut entries = Vec::new();
     for rel in sources {
         let abs = root.join(&rel);
+        // ★★ **Scrub git's inherited environment.** `current_dir(root)` is NOT enough: git prefers
+        //   an inherited `GIT_DIR` over the child's working directory, so run from inside a hook
+        //   (the pre-commit hook runs the whole suite) this would answer about btctax rather than
+        //   about `root`. The same inheritance once re-inited a test's throwaway repo ON TOP of this
+        //   one as BARE — see the note in `scripts/pre-commit`. Ask about the tree we were handed.
         let ignored = std::process::Command::new("git")
             .args(["check-ignore", "-q", &rel])
             .current_dir(root)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_COMMON_DIR")
+            .env_remove("GIT_INDEX_FILE")
+            .env_remove("GIT_PREFIX")
+            .env_remove("GIT_OBJECT_DIRECTORY")
             .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
+            .map_err(|e| {
+                format!(
+                    "cannot run `git check-ignore` in {}: {e}. Storage is READ from git, never \
+                     assumed — guessing here would mislabel every entry in the manifest.",
+                    root.display()
+                )
+            })?
+            .success();
         let storage = if ignored {
             Storage::Note
         } else {
@@ -945,10 +962,19 @@ mod tests {
     /// that is what is asserted: a sentinel file, byte-compared after the refusal. Asserting the
     /// error type alone is how an instrument keeps its green while the thing it guards is gone.
     ///
-    /// ★★ **Both storage classes.** The first guard asked "does every note have its binary?", which
-    /// was blind to the 42 committed `legal/` entries that have no notes at all. This plants one of
-    /// each — a note-backed form and a committed statute — because one arm passing proved nothing
-    /// about the other.
+    /// ★★ **Both storage classes — and the fixture ASSERTS that before relying on it.** The first
+    /// guard asked "does every note have its binary?", which was blind to the 42 committed `legal/`
+    /// entries that have no notes at all. This plants one of each — a note-backed form and a
+    /// committed statute — because one arm passing proved nothing about the other.
+    ///
+    /// ★★★ **That claim was FALSE for a day, and the shape is worth keeping.** The fixture ran in a
+    /// bare `tempdir`, so `git check-ignore` exited 128, `.unwrap_or(false)` made **every** entry
+    /// `Committed`, and the `Storage` axis this doc advertised did not exist. Restricting
+    /// `regen_would_drop` to `Storage::Committed` — the natural response to FR-26's fresh-clone
+    /// pain, and a change that re-opens the 102 → 42 loss — passed the whole suite 67/67. The
+    /// fixture is now a real git repo with the repo's own ignore pattern, and it **asserts one
+    /// note-storage and one committed entry** before going further, so the claim cannot rot back
+    /// into decoration: if git stops working there, the test reds instead of quietly narrowing.
     #[test]
     fn regen_refuses_to_delete_a_document_whose_binary_is_missing() {
         use std::fs;
@@ -958,6 +984,37 @@ mod tests {
         let statutes = root.join("legal/primary-sources/statute-irc");
         fs::create_dir_all(&forms).expect("mkdir");
         fs::create_dir_all(&statutes).expect("mkdir");
+
+        // ★★★ **The fixture must be a REAL git repo, or `Storage` is a constant here.**
+        // `regen` derives storage from `git check-ignore`; in a plain tempdir that command exits
+        // 128 and `.unwrap_or(false)` makes EVERY entry `Committed`. The test then cannot see the
+        // `Storage` axis at all — proved 2026-09-04 by planting
+        // `.filter(|e| e.storage == Storage::Committed)` in `regen_would_drop`: the whole suite
+        // passed 67/67, while the same filter on `Storage::Note` failed instantly. That mutation is
+        // the natural response to FR-26's fresh-clone pain, and it re-opens the 102 → 42 loss.
+        //
+        // ★★ Scrub git's env on every fixture call: git prefers an inherited `GIT_DIR` over
+        //    `current_dir`, and a test's `git init` under one has re-inited THIS repository as BARE
+        //    before now (see the note in `scripts/pre-commit`). Never run git in a fixture without it.
+        let git = |args: &[&str]| {
+            let ok = std::process::Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env_remove("GIT_COMMON_DIR")
+                .env_remove("GIT_INDEX_FILE")
+                .env_remove("GIT_PREFIX")
+                .env_remove("GIT_OBJECT_DIRECTORY")
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            assert!(ok, "fixture git {args:?} failed");
+        };
+        git(&["init", "-q"]);
+        // The same pattern the real repo uses for the (A) tree.
+        fs::write(root.join(".gitignore"), "design/forms/**/*.pdf\n").expect("gitignore");
+
         fs::write(
             forms.join("f8949--2025.pdf.txt"),
             "https://www.irs.gov/pub/irs-prior/f8949--2025.pdf\n# sha256  abc\n# bytes 1\n",
@@ -972,6 +1029,23 @@ mod tests {
             regen(root).expect("baseline regen"),
             2,
             "both must be listed"
+        );
+
+        // ★★★ **Prove the fixture spans the axis before claiming to test it.** Without this, the
+        // "both storage classes" claim below is decoration: a tempdir that is not a git repo makes
+        // every entry `Committed`, and a guard restricted to committed entries sails through the
+        // whole suite (measured 2026-09-04: 67/67 green under exactly that mutation).
+        let listed = load(root).expect("load");
+        let notes = listed.iter().filter(|e| e.storage == Storage::Note).count();
+        let committed = listed
+            .iter()
+            .filter(|e| e.storage == Storage::Committed)
+            .count();
+        assert!(
+            notes == 1 && committed == 1,
+            "the fixture must contain exactly one note-storage and one committed entry — got \
+             {notes} note / {committed} committed. If this fires, `git check-ignore` is not working \
+             in the fixture and every Storage-axis claim in this test is vacuous."
         );
         let manifest = manifest_path(root);
         let pristine = fs::read(&manifest).expect("manifest written");
