@@ -25,7 +25,7 @@
 //!
 //! **Line 7 is signed with a LEADING MINUS** (SPEC §3.2), unlike Schedule D's parenthesized boxes.
 
-use crate::cells::{page_of, push_money, render_ssn};
+use crate::cells::{page_of, push_money, push_money_opt, render_ssn};
 use crate::error::FormsError;
 use crate::map::{CheckChoice, Form1040HeaderCells, Form1040Map, MoneyCell};
 use crate::pdf;
@@ -154,23 +154,33 @@ pub fn fill_form_1040_full_with_map(
     );
 
     // ── Page 2, AMOUNT column. ──────────────────────────────────────────────────────────────────
-    let p2_amount: [(&MoneyCell, Usd); 13] = [
-        (need(&map.line16, "line16", y)?, lines.line16),
-        (need(&map.line17, "line17", y)?, lines.line17),
-        (need(&map.line18, "line18", y)?, lines.line18),
+    //
+    // ★★★ FR-1 — the values are `Option<Usd>` so that line 19 can be BLANK, and every OTHER line keeps
+    //     saying `Some(..)` in one place where a reader can see it. Which of the two line 19 is gets
+    //     decided in `btctax-core` (`advisories::ctc_odc_line19`); this crate must never make that
+    //     call itself — a §24(b) predicate in the emitter is the emitter answering 8812 for the filer.
+    //
+    // ★ Line 19 stays IN the array, keeping its descent ordinal, rather than moving to a conditional
+    //   push: the group's ordinals are what `verify_flat` checks the printed rows descend by, and an
+    //   optional line hoisted out of the sequence would renumber every line below it on the blank
+    //   return and not on the phased-out one.
+    let p2_amount: [(&MoneyCell, Option<Usd>); 13] = [
+        (need(&map.line16, "line16", y)?, Some(lines.line16)),
+        (need(&map.line17, "line17", y)?, Some(lines.line17)),
+        (need(&map.line18, "line18", y)?, Some(lines.line18)),
         (need(&map.line19, "line19", y)?, lines.line19),
-        (need(&map.line20, "line20", y)?, lines.line20),
-        (need(&map.line21, "line21", y)?, lines.line21),
-        (need(&map.line22, "line22", y)?, lines.line22),
-        (need(&map.line23, "line23", y)?, lines.line23),
-        (need(&map.line24, "line24", y)?, lines.line24),
-        (need(&map.line25d, "line25d", y)?, lines.line25d),
-        (need(&map.line26, "line26", y)?, lines.line26),
-        (need(&map.line32, "line32", y)?, lines.line32),
-        (need(&map.line33, "line33", y)?, lines.line33),
+        (need(&map.line20, "line20", y)?, Some(lines.line20)),
+        (need(&map.line21, "line21", y)?, Some(lines.line21)),
+        (need(&map.line22, "line22", y)?, Some(lines.line22)),
+        (need(&map.line23, "line23", y)?, Some(lines.line23)),
+        (need(&map.line24, "line24", y)?, Some(lines.line24)),
+        (need(&map.line25d, "line25d", y)?, Some(lines.line25d)),
+        (need(&map.line26, "line26", y)?, Some(lines.line26)),
+        (need(&map.line32, "line32", y)?, Some(lines.line32)),
+        (need(&map.line33, "line33", y)?, Some(lines.line33)),
     ];
     for (ord, (cell, value)) in p2_amount.iter().enumerate() {
-        push_money(
+        push_money_opt(
             &mut writes,
             &mut placements,
             cell,

@@ -456,6 +456,11 @@ fn the_same_gift_on_an_itemizing_return_refuses_until_the_acknowledgment_is_answ
 /// floors at zero (*"If zero or less, enter -0-"*), which is where the excess deduction disappears —
 /// on the line whose own instruction says to drop it, and not one line earlier. A `0` on line 12
 /// would be a different return: it would say this filer claimed no standard deduction.
+///
+/// ★★ **LINE 19 IS ABSENT FROM THIS TABLE ON PURPOSE** — it is BLANK on the paper, and the assertion
+/// that holds it blank is the `!contains_key("line19")` at the foot of the test (FR-1). Because
+/// `spurious`/`vanished` above make this table an EQUALITY, a row here is what would make a printed
+/// zero mandatory; the row is the bug, not the omission.
 const ALL_ZERO_1040_PAPER: &[(&str, &str)] = &[
     ("line1a", "0"),     // "Total amount from Form(s) W-2, box 1" — no W-2
     ("line1z", "0"),     // "Add lines 1a through 1h"
@@ -475,7 +480,6 @@ const ALL_ZERO_1040_PAPER: &[(&str, &str)] = &[
     ("line16", "0"),     // tax
     ("line17", "0"),     // Schedule 2 line 3
     ("line18", "0"),     // add 16 and 17
-    ("line19", "0"),     // CTC / credit for other dependents
     ("line20", "0"),     // Schedule 3 line 8
     ("line21", "0"),     // add 19 and 20
     ("line22", "0"),     // subtract 21 from 18
@@ -583,6 +587,108 @@ fn the_all_zero_return_files_one_form_whose_every_money_line_is_zero_or_blank() 
         "the refund block must be BLANK, not zero: line 33 does not exceed line 24, so the form's \
          'If line 33 is more than line 24' never fires. A `0` there asserts a computed $0 refund \
          rather than the absence of an overpayment. Paper: {got:?}"
+    );
+
+    // ★★★ FR-1 — AND LINE 19 IS BLANK, which is the third kind of absence on this paper.
+    //
+    // Lines 34/35a above are blank because the form's own CONDITION never fired. Line 19 is blank for
+    // a different reason: it is a CARRY from Schedule 8812 line 14, and btctax figures no §24 credit,
+    // so there is no source figure to carry. This filer has no dependents on file — and an empty
+    // `#[serde(default)] dependents` cannot be told from a question never asked, so btctax cannot
+    // prove Schedule 8812 line 12 answers "No" either. Neither branch of the form's instruction is
+    // established; the cell belongs to the filer. It printed `0` in every release up to this one.
+    assert!(
+        !got.contains_key("line19"),
+        "1040 line 19 must be BLANK, not zero. It carries Schedule 8812 line 14, which btctax never \
+         figures; a `0` swears the filer worked that schedule and it came to nothing. Paper: {got:?}"
+    );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// KAT 10 — FR-1: 1040 line 19, the child tax credit btctax does not figure.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+/// Hang `deps` children on an otherwise-golden household.
+///
+/// ★ Real SSNs, because the packet refuses a malformed one at `ReturnHeader::build` — a dependent's
+///   just as surely as the taxpayer's (`return_refuse.rs`'s SSN sweep pins all three).
+fn with_dependents(mut ri: ReturnInputs, deps: usize) -> ReturnInputs {
+    for i in 0..deps {
+        ri.header
+            .dependents
+            .push(btctax_core::tax::return_inputs::Dependent {
+                name: format!("Golden Child {i}"),
+                ssn: format!("40000000{i}"),
+                relationship: "Daughter".into(),
+                date_of_birth: None,
+            });
+    }
+    ri
+}
+
+/// ★★★ **FR-1 — THE CELL THAT SWORE A FAMILY'S CHILD TAX CREDIT WAS ZERO.**
+///
+/// 1040 line 19 is *"Child tax credit or credit for other dependents from Schedule 8812"*
+/// (`design/forms/extract/f1040--2025.txt`). It is a **carry**: the figure comes from Schedule 8812
+/// line 14, and btctax emits no Schedule 8812 and computes no §24 credit. Printing `0` there is not a
+/// conservative omission — it is testimony, under 26 USC §6065, that this filer worked Schedule 8812
+/// and it came to nothing. For a household with children and income under the §24(b) threshold that
+/// testimony is FALSE and taxpayer-ADVERSE: the return overstates tax by up to $2,000 a child.
+///
+/// ★★ **But an unconditional blank is wrong too, and Schedule 8812 says so in as many words**
+/// (`design/forms/extract/f1040s8--2024.txt`):
+///
+/// ```text
+/// 12  Is the amount on line 8 more than the amount on line 11?
+///       No. STOP. You cannot take the child tax credit, credit for other dependents, or additional
+///           child tax credit. Skip Parts II-A and II-B. Enter -0- on lines 14 and 27.
+///       Yes. Subtract line 11 from line 8. Enter the result.
+/// 14  Enter the smaller of line 12 or line 13. This is your child tax credit and credit for other
+///     dependents … Enter this amount on Form 1040, 1040-SR, or 1040-NR, line 19.
+/// ```
+///
+/// So when the §24(b) phase-out provably kills the credit, the form itself instructs `-0-` on line 14
+/// and line 14 routes that figure to 1040 line 19. Blank there would be the mirror defect — declining
+/// a figure the form asks for.
+///
+/// **The two households below are the two sides of that one instruction, read off the paper.**
+///
+/// ★ B1 kill: pin `ctc_odc_line19` to `Some(Usd::ZERO)` (the shipped hardcode) and the first
+///   household reds; pin it to `None` and the second reds. Both were watched.
+#[test]
+fn form_1040_line_19_is_blank_unless_schedule_8812_provably_says_minus_zero() {
+    // ── A family the credit BELONGS to: two children, $60,000 of wages, nowhere near §24(b)'s
+    //    $200,000 threshold. btctax cannot figure their credit, so it must not answer for them.
+    let (ri, state) = build_golden_return(&GoldenInputs {
+        w2_income: 60_000.0,
+        ..zero_inputs("Single")
+    });
+    let filed = file(&with_dependents(ri, 2), &state);
+    let paper = cells(&filed.forms, "f1040", F1040_MAP_2024);
+    assert!(
+        !paper.contains_key("line19"),
+        "1040 line 19 must be BLANK for a family whose child tax credit btctax never figured. A `0` \
+         here is sworn testimony (26 USC §6065) that Schedule 8812 was worked and came to nothing — \
+         for this household it is false AND it overstates their tax by up to $4,000. Paper: {:?}",
+        paper.get("line19")
+    );
+
+    // ── A family §24(b) has provably wiped out: MFJ, NINE children, $2,085,000 of wages. Schedule
+    //    8812 line 9 = $400,000, line 10 = $1,685,000, line 11 = $84,250 — and the CEILING of line 8
+    //    (9 × $2,000 = $18,000, every dependent counted as a qualifying child) loses. Line 12 is
+    //    "No", which instructs -0- on line 14, which line 14 routes to 1040 line 19.
+    let (ri, state) = build_golden_return(&GoldenInputs {
+        w2_income: 2_085_000.0,
+        ..zero_inputs("Married/Joint")
+    });
+    let filed = file(&with_dependents(ri, 9), &state);
+    let paper = cells(&filed.forms, "f1040", F1040_MAP_2024);
+    assert_eq!(
+        paper.get("line19").map(String::as_str),
+        Some("0"),
+        "1040 line 19 must print -0- when Schedule 8812 line 12 answers NO. The form does not leave \
+         this blank: line 12-No says \"Enter -0- on lines 14 and 27\" and line 14 says \"Enter this \
+         amount on Form 1040 … line 19\". Paper: {paper:?}"
     );
 }
 

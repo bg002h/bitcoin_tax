@@ -1525,6 +1525,16 @@ pub struct PrintedInputs {
     /// re-read so the printed chain and the absolute `form_8960` cannot end up on different values;
     /// `None` reaches `push_money_opt` and the cell prints BLANK.
     pub form_8960_line9b: Option<Usd>,
+    /// ★★★ **1040 line 19** — *"Child tax credit or credit for other dependents from Schedule 8812"*,
+    /// as [`crate::tax::advisories::ctc_odc_line19`] decides it: `Some(0)` only where Schedule 8812
+    /// line 12 provably answers **No** (its own instruction is *"Enter -0- on lines 14 and 27"*, and
+    /// line 14 routes that figure to this line), `None` everywhere else, where btctax figures no §24
+    /// credit and the cell is the FILER's to fill. `None` reaches `push_money_opt` and prints BLANK.
+    ///
+    /// ★★ Carried rather than re-derived in `printed.rs`, for the same reason as `form_8960_line9b`
+    /// above and one more: `form_1040_lines` holds no `ReturnInputs`, and giving the printed lane its
+    /// own §24(b) predicate would be a second divergent implementation of the rule. FR-1.
+    pub ctc_odc_line19: Option<Usd>,
     /// Schedule D **line 21** — the §1211(b) capital-loss deduction CEILING ($3,000; $1,500 MFS). The
     /// printed line 21 caps the PRINTED line 16 against this, rather than re-rounding the exact
     /// deduction, so the filed Schedule D's own arithmetic holds.
@@ -2094,6 +2104,10 @@ pub fn assemble_absolute(
             // ★ Form 8960 line 9b, likewise carried rather than derived — the same `Option<Usd>` the
             //   absolute `form_8960` above was handed.
             form_8960_line9b: ri.form_8960_line9b,
+            // ★★★ FR-1 — 1040 line 19. Decided HERE because this is where `ri` and the AGI meet, and
+            //     decided by the same call `advisories_for` makes with the same `agi`, so the printed
+            //     cell and the `CtcOdcOmitted` advisory cannot contradict each other on one packet.
+            ctc_odc_line19: crate::tax::advisories::ctc_odc_line19(ri, agi),
             medicare_wages: w2_medicare_wages,
             medicare_withheld: w2_medicare_withheld,
             crypto_lending_interest: crypto.nonbusiness_lending_interest,
@@ -6128,7 +6142,9 @@ mod tests {
                 line16: z,
                 line17: z,
                 line18: z,
-                line19: z,
+                // ★ FR-1 — no dependents on this fixture, so Schedule 8812 line 12 is not
+                //   provably "No" and 1040 line 19 is BLANK, not a sworn $0.
+                line19: None,
                 line20: z,
                 line21: z,
                 line22: z,

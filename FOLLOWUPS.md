@@ -5348,15 +5348,23 @@ reviews ran on the branch; two are persisted verbatim in `reviews/filing-readine
 
 ### Owned by a future btctax-core lane
 
-- **FR-1 — N3: 1040 line 19 prints `0` for families the credit belongs to.** NOT BUILT. The honest
-  fix needs three things that all live in `btctax-core` and never reach the forms crate:
-  `Form1040Lines::line19` must become `Option<Usd>`; `ctc_provably_zero` is private and needs
-  `ReturnInputs` + dependent count + AGI; lines 21/22 must treat blank as the form does.
-  ★ The forms lane REFUSED to build it and was right to: inventing a §24(b) predicate inside
-  `btctax-forms` would be a second divergent implementation of the rule and a *worse* answered-ness
-  violation than the one N3 describes — the emitter deciding for the filer. An unconditional blank
-  was also rejected: Schedule 8812 line 12-No literally instructs "-0-". The fill site is already a
-  one-liner (`push_money_opt`) **once the type carries the decision**.
+- **FR-1 — ✅ CLOSED (built 2026-09-04, `fix/fr1-ctc-line19`). 1040 line 19 no longer swears `0` for
+  families the credit belongs to.** The diagnosis held on all three points and the fix is exactly it:
+  `Form1040Lines::line19` is `Option<Usd>`; the §24(b) predicate is exposed ONCE as
+  `advisories::ctc_odc_line19(ri, agi) -> Option<Usd>`; line 21 adds a blank operand as nothing, which
+  moves no figure on the return (line 22's own clamp is untouched, and so is total tax).
+  ★ The refusal to build it in `btctax-forms` is honoured, not worked around: the decision is carried
+  on `PrintedInputs::ctc_odc_line19` — the `form_8960_line9b` pattern — and the fill site is the
+  one-liner `push_money_opt`. `btctax-forms` contains no §24(b) reasoning.
+  ★★ The rejection of an unconditional blank is honoured too. Schedule 8812 line 12-No instructs
+  *"Enter -0- on lines 14 and 27"* and line 14 routes that figure to 1040 line 19, so a **provable**
+  phase-out still prints `0`. `dependents == 0` is deliberately NOT a proof: `dependents` is a
+  `#[serde(default)] Vec`, so empty and never-asked are one value, and the line-8 ceiling the
+  predicate computes is not a ceiling on an unasked list.
+  ★ The advisory reads the same call (`.is_some()`), so the cell and the advice cannot contradict each
+  other on one packet. Mutation-verified three ways — hardcode `Some(0)` (5 tests red), hardcode
+  `None` (2 red), emitter writing the blank as a zero (3 red). `LIMITATIONS.md`'s CTC row, the
+  advisory text and the examples golden were corrected in the same pass.
 
 - **FR-12 — Form 8960 line 9d still prints `0` when 9b is blank.** Same class as the defect P8 fixed
   one line up (an affirmative zero on a derived total nobody testified to). Out of scope for a
