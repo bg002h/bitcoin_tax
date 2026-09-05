@@ -5768,3 +5768,75 @@ crypto-slice fail-open at `admin.rs:712` is **CLEARED** — the `se_income_witho
 `:731` does reach the user at `main.rs:938`.
 ★ Top gap named for the next round: **the crypto engine (~9,000 LOC) was audited by no lens**, and
 it is structurally invisible to both oracles — they are handed basis, never derive it.
+
+### ★★★ CRITICAL — the crypto engine, audited 2026-09-05 (two agents, acquisition + disposition)
+
+The understatement workflow's completeness critic named this surface: ~9,000 LOC audited by no lens
+and **structurally invisible to both oracles, which are handed basis and gain rather than deriving
+them** (§G-9). Three Criticals were found. **Every one was independently re-verified by the
+controller against the code before filing.** Reports:
+`design/agent-reports/2026-09-05-crypto-audit-basis.md` and `-disposition.md`.
+
+- **FR-31 ★★★ CRITICAL — moving coins between your own wallets can book them TWICE, doubling basis.**
+  Three verified limbs: (1) `crates/btctax-core/src/project/resolve.rs:836` — the entire
+  `consumed_ins` block is inside `if let TransferTarget::InEvent(in_id) = &tl.in_event_or_wallet`,
+  so the `--to-wallet` form (`TransferTarget::Wallet`) NEVER marks the matching in-leg consumed.
+  (2) `crates/btctax-cli/src/cmd/reconcile.rs:594` — `bulk-link-transfer` hardcodes
+  `TransferTarget::Wallet(dest.clone())` and offers no `--to-event` form, so the BULK path
+  structurally cannot consume an in-leg. (3) `crates/btctax-core/src/project/conservation.rs:61` —
+  `balanced` compares SATOSHIS only (`sigma_in == sigma_disposed + sigma_removed + sigma_held +
+  sigma_fee_sats + sigma_pending`); a phantom lot increments `sigma_in` and `sigma_held` equally, so
+  it still balances. **There is no Σbasis invariant at this level.**
+  Measured by the agent: 1 BTC bought for $50,000, moved once → 2 lots, 2 BTC held, **$100,000
+  basis**, `balanced: true`, zero blockers. Doubled basis shrinks gain ⇒ **understates tax**, on the
+  most common operation a bitcoin holder performs.
+  ★★ And the tool ROUTES the filer into it: the unconsumed in-leg keeps `UnknownBasisInbound`, the
+  exact selection key of `bulk-classify-inbound-self-transfer` (`session.rs:839`). Two keystrokes.
+  **Owning phase: BEFORE any first filing.**
+
+- **FR-32 ★★★ CRITICAL — §1015(a)'s loss cap is skipped when donor basis is RECONSTRUCTED.**
+  `crates/btctax-core/src/project/fold.rs:1085-1087` returns `None` for `dual_loss_basis` on the
+  reconstructed-basis path, where the known-basis path at `:1080` returns `Some(fmv_at_gift)`.
+  Identical facts, two paths: gain **$0** versus a **fabricated $27,000 loss**. The statute is
+  archived in-repo and explicit. ★ The single KAT uses an APPRECIATED gift, where the cap is inert —
+  so no test could ever have caught it. **Owning phase: before any first filing.**
+
+- **FR-33 ★★★ CRITICAL — a post-hoc `LotSelection` is applied with no made-date guard.**
+  `crates/btctax-core/src/project/resolve.rs:1405-1445` (the §A.4 LotSelection block) contains no
+  reference to a made-date. Forty lines above, the `MethodElection` block does exactly the opposite:
+  `let made = tax_date(d.utc_timestamp, d.original_tz); if !method_election_is_forward(me, made)` →
+  blocker, *"a standing order cannot be back-dated"*. So a lot selection created AFTER the sale is
+  applied to the reported basis unchecked. `optimize accept` gates this act behind an attestation;
+  `reconcile select-lots` does not. Post-hoc cherry-picking lowers gain ⇒ **understates tax**.
+  **Owning phase: before any first filing.**
+
+★★ **THE UNIFYING MECHANISM, and it is the shape this repo has a memory named after — "a figure
+with no reader".** The engine computes a per-disposal identification verdict (`ComplianceStatus`)
+and never lets it change a filed number or gate a filed artifact. Verified by grep: it occurs only
+in `optimize.rs` and its own definition — no fold, no report, no export. §1.1012-1(j)(3)'s
+deemed-FIFO consequence exists in **three doc comments and no code**.
+  - **FR-34 (Important) — no-election disposals compute at HIFO** (`fold.rs:49`) while
+    `disposal_compliance` calls that same disposal `NonCompliant`, and that row reaches only
+    `verify` — never `report --tax-year`, never an export. The repo's own KAT quantifies it: a $95
+    sale, basis $90 under HIFO versus $50 under FIFO ⇒ **gain $5 versus $45**. ★ The owner mandate
+    covering this cites `attested: false`, which is a **pre-2025-only** flag, so the mandate no
+    longer reaches the case.
+  - **FR-35 (Important)** — the identification timeliness test compares DATES where the reg and this
+    repo's own spec both say *"date **and time** of the sale"*; both timestamps are already in hand.
+  - **FR-36 (Important)** — an unclassified outflow removes sats, reports no disposition, and is only
+    Advisory, while a *partially* covered disposal is Hard. No export surface mentions it.
+  - **FR-37 (Important)** — the "sats typed into a dollars field" advisory has ONE call site,
+    `--amount`, where the error overstates tax. `--basis` and `--donor-basis` get only a sign check,
+    so `--basis 5000000` on 0.05 BTC records silently — the direction that understates.
+
+★ **The next instrument, named by the disposition agent itself:** a mechanical sweep of every
+consumer of `ComplianceStatus`, `BlockerKind` and `pending_reconciliation` asking *"does this change
+a filed number or gate a filed artifact?"* would have found three of the four in minutes. Build that
+before auditing anything else by hand.
+
+★ **CLEARED and worth recording** (11 items): the holding-period boundary including the leap-day
+case (opened as a suspected bug — it is correct), §1223 tacking, the §1015 four-zone dual basis,
+proceeds netting, `Σ picks == principal`, cross-account identification, §1222/§1211/§1212, §1091 (the
+claim is at the strength the authority supports), the 8949 boxes and adjustment codes, §1012 fee
+capitalisation across all four adapters, and conformance of BOTH owner-mandated policies. The
+self-transfer policy was audited for CONFORMANCE, not relitigated.
