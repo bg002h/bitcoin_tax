@@ -12,9 +12,21 @@ _Last updated: **2026-09-04**. Written at a deliberate pause; safe to exit. **Re
 > section below is the 2026-09-04 snapshot and is **historical**; where the two disagree, the tracker
 > is current.
 >
-> As of **2026-09-05**: P1 has T1–T5 done (Schedule 1-A computes end to end and reaches 1040 line
-> 13b), T6 is in progress, T7 is not started. P2 went from **5 to 15** of 17 TY2025 bundled form
-> artifacts. P3 is untouched — the TY2025 fail-closed gate stays until `FullReturnParams` land.
+> As of **2026-09-05**: **Phase 1 is T1–T7 COMPLETE** — Schedule 1-A computes end to end, reaches
+> 1040 line 13b, and has a per-part two-oracle census. P2 went from **5 to 15** of 17 TY2025 bundled
+> form artifacts. P3 is untouched — the TY2025 fail-closed gate stays until `FullReturnParams` land.
+>
+> ## ★★★ NEXT YEAR: `design/TY2026_PORT_REPORT.md`
+> A six-lens recon fan-out (reports: `design/agent-reports/2026-09-05-ty2026-port-*.md`) answered what
+> it takes to carry this work to TY2026. **27 wrong-number risks, 3 Critical**, each classified
+> REFUSES / DORMANT / UNGUARDED / LIVE rather than as a binary "fails closed".
+>
+> Its headline is the useful surprise: **TY2026's NUMBERS are largely published already** (Rev. Proc.
+> 2025-32 plus the OBBBA statute), and `btctax report --tax-year 2026` computes today. What waits on
+> the IRS is the **FORMS** — and therefore everything that must be *transcribed from* a form rather
+> than looked up. **One item needs an owner ruling**, not more recon: §6 rule 1 forbids encoding the
+> draft-derived TY2026 constants even though two lenses show them arithmetically forced; the schedule
+> shortens materially if the owner disagrees.
 
 ## ① READ THIS FIRST — the goal changed scope
 

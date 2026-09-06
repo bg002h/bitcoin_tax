@@ -896,3 +896,219 @@ mod tests {
         assert!(has("22a") && has("22b"), "the VIN grid rows carry boxes");
     }
 }
+
+/// FQN → the printed line label beside that box, for one archived form. The same join `boxes_tsv`
+/// prints, returned instead of printed so a conformance check can consume it.
+///
+/// ★★★ **This exists because "the field name is present" is NOT the check.** Measured on the real
+/// artifacts: applying the TY2024 Form 6251 map to the TY2025 PDF leaves **0 of 61 field names
+/// absent** — every existence check passes — while TY2025 *added* one field on page 1 and walked
+/// everything below it down, with **zero renames**. TY2024's `line11`, the AMT itself, then prints
+/// in the TY2025 form's **line-10 box**. A wrong number on signed testimony, and the exists-check is
+/// structurally blind to it, because a rename is not what happened.
+#[cfg(test)]
+pub fn label_join(stem: &str) -> Result<std::collections::BTreeMap<String, String>, String> {
+    let g = crate::form_geometry::load(&crate::form_geometry::repo_root(), stem)?;
+    let labels = witness_text(&g)?;
+    let boxes = witness_boxes(&g);
+    let mut out = std::collections::BTreeMap::new();
+    for (bp, top, bottom, name) in &boxes {
+        let centre = (top + bottom) / 2.0;
+        let label = labels
+            .iter()
+            .filter(|(_, lp, ly)| lp == bp && *ly <= centre + 2.0)
+            .max_by(|(_, _, a), (_, _, b)| a.total_cmp(b))
+            .map(|(l, _, _)| l.as_str())
+            .unwrap_or("?");
+        out.insert(name.clone(), label.to_string());
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod map_label_join_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
+    fn forms_root() -> PathBuf {
+        crate::form_geometry::repo_root().join("crates/btctax-forms/forms")
+    }
+
+    /// `lineN = "<FQN>"` bindings from a committed map. Only the plain per-line ones — repeating
+    /// grids address rows positionally and carry no single printed label.
+    fn line_bindings(path: &std::path::Path) -> BTreeMap<String, String> {
+        let text = std::fs::read_to_string(path).unwrap();
+        let mut out = BTreeMap::new();
+        for l in text.lines() {
+            let l = l.trim();
+            if l.starts_with('#') {
+                continue;
+            }
+            if let Some((lhs, rhs)) = l.split_once('=') {
+                let key = lhs.trim();
+                if !key.starts_with("line") {
+                    continue;
+                }
+                if let Some(v) = rhs
+                    .trim()
+                    .strip_prefix('"')
+                    .and_then(|s| s.strip_suffix('"'))
+                {
+                    if v.contains('[') && v.contains('.') {
+                        out.insert(key["line".len()..].to_string(), v.to_string());
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Does a map key's line part name the same line the form printed beside the box?
+    ///
+    /// Exact match is the rule. Two NARROW normalisations are allowed, each because the schema and
+    /// the printed page legitimately disagree about granularity — not to make failures go away:
+    ///
+    /// * a `_suffix` on the key (`7b_countries`) is btctax naming two cells of one printed line;
+    /// * a trailing LETTER on the key where the form prints only the number (`7a` vs `7`) is the
+    ///   1040's capital-gain line, printed once and modelled as a sub-line.
+    ///
+    /// ★ Only a trailing *letter* is stripped, never a digit — `line11` must not be accepted
+    /// against a printed `1`, which is precisely the off-by-one this check exists to catch.
+    fn label_matches(key: &str, printed: &str) -> bool {
+        let base = key.split('_').next().unwrap_or(key);
+        if base == printed {
+            return true;
+        }
+        let trimmed = base.trim_end_matches(|c: char| c.is_ascii_alphabetic());
+        !trimmed.is_empty() && trimmed != base && trimmed == printed
+    }
+
+    /// Every `(form, year, map path, geometry stem)` on disk. Derived by walking the filesystem —
+    /// never a hand-list, so a map committed tomorrow is covered with nobody remembering.
+    fn every_map() -> Vec<(String, String, PathBuf, String)> {
+        let mut out = Vec::new();
+        let mut years: Vec<_> = std::fs::read_dir(forms_root())
+            .expect("forms/ exists")
+            .filter_map(Result::ok)
+            .filter(|e| e.path().is_dir())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        years.sort();
+        for y in years {
+            let dir = forms_root().join(&y);
+            let mut maps: Vec<_> = std::fs::read_dir(&dir)
+                .unwrap()
+                .filter_map(Result::ok)
+                .map(|e| e.path())
+                .filter(|p| p.to_string_lossy().ends_with(".map.toml"))
+                .collect();
+            maps.sort();
+            for m in maps {
+                let form = m
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .trim_end_matches(".map.toml")
+                    .to_string();
+                let stem = format!("{form}--{y}");
+                out.push((form, y.clone(), m, stem));
+            }
+        }
+        out
+    }
+
+    /// ★★★ **A mapped line must land on the box the form prints that line's number beside.**
+    ///
+    /// The existence check in `btctax-forms/tests/map_pdf_conformance.rs` is necessary and NOT
+    /// sufficient, and the gap is not hypothetical — it is measured on the committed artifacts:
+    /// applying the TY2024 Form 6251 map to the TY2025 PDF leaves **0 of 61 field names absent**,
+    /// so every existence assertion passes, while **12 of 41 mapped lines land on the wrong printed
+    /// label** — TY2024's `line11`, the AMT itself, in the TY2025 form's **line-10 box**. TY2025
+    /// added one field on page 1 and walked everything below it down, with **zero renames**. A
+    /// rename check cannot see a renumber.
+    ///
+    /// ★ Forms with no geometry fixture are reported by name rather than silently skipped: a
+    /// checker that quietly covers less than it appears to is this repo's dominant defect shape.
+    #[test]
+    fn every_mapped_line_lands_on_its_own_printed_label() {
+        let mut wrong: Vec<String> = Vec::new();
+        let mut unwitnessed: Vec<String> = Vec::new();
+        let mut checked = 0usize;
+
+        for (form, year, path, stem) in every_map() {
+            let Ok(join) = label_join(&stem) else {
+                unwitnessed.push(format!("{year}/{form} (no geometry fixture {stem})"));
+                continue;
+            };
+            for (line, fqn) in line_bindings(&path) {
+                let Some(got) = join.get(&fqn) else { continue };
+                if got == "?" {
+                    continue; // the reader could not witness a label for this box
+                }
+                checked += 1;
+                if !label_matches(&line, got) {
+                    wrong.push(format!(
+                        "{year}/{form}: map says line {line} -> {fqn}, but the form prints \"{got}\" beside that box"
+                    ));
+                }
+            }
+        }
+
+        assert!(
+            checked >= 67,
+            "only {checked} line->label joins checked (measured floor: 67); the walk is not \
+             reaching the maps, or geometry fixtures have been deleted"
+        );
+        assert!(
+            wrong.is_empty(),
+            "{} mapped line(s) land on a box the form labels differently — a filled value would \
+             print on the WRONG LINE of a signed return:\n  {}",
+            wrong.len(),
+            wrong.join("\n  ")
+        );
+        eprintln!("checked {checked} line->label joins");
+        if !unwitnessed.is_empty() {
+            eprintln!(
+                "NOT WITNESSED ({} form-years have no geometry fixture, so this check cannot reach \
+                 them — generate with `xtask extract-geometry <stem>`):\n  {}",
+                unwitnessed.len(),
+                unwitnessed.join("\n  ")
+            );
+        }
+    }
+
+    /// ★★ **B1 — the kill test, and its planted defect is REAL HISTORY rather than an invention.**
+    ///
+    /// The exact near-miss the check above exists to prevent: the TY2024 Form 6251 map against the
+    /// TY2025 form. Every field name still exists, so an existence check is green; the join is not.
+    /// If this ever stops reporting wrong bindings, the join check has gone blind.
+    #[test]
+    fn the_join_check_reds_on_a_wrong_year_map_that_an_existence_check_would_pass() {
+        let join = label_join("f6251--2025").expect("TY2025 Form 6251 geometry fixture");
+        let m2024 = line_bindings(&forms_root().join("2024/f6251.map.toml"));
+        let m2025 = line_bindings(&forms_root().join("2025/f6251.map.toml"));
+
+        let count_wrong = |m: &BTreeMap<String, String>| {
+            m.iter()
+                .filter(|(line, fqn)| {
+                    join.get(*fqn)
+                        .is_some_and(|g| g != "?" && !label_matches(line, g))
+                })
+                .count()
+        };
+
+        assert_eq!(
+            count_wrong(&m2025),
+            0,
+            "the COMMITTED TY2025 map must land every line on its own label, or the check is \
+             calibrated wrong and its red below means nothing"
+        );
+        assert!(
+            count_wrong(&m2024) >= 10,
+            "the TY2024 map applied to the TY2025 form must be caught landing lines on the wrong \
+             labels (measured: 12 of 41). If this is now 0, the join check has gone blind — and an \
+             existence check passes on this exact input, with 0 of 61 field names absent."
+        );
+    }
+}
