@@ -6,6 +6,24 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
+> ## ★★★ RESUME 2026-09-06 (later) — 1099-DA build GREEN and closed; 4868/1040-V build: T1+T5 LANDED `dc9941d5` (3109 tests), T2–T4 being dispatched to one opus agent. Read this block first.
+>
+> **Commits since the block below:** `c25f7489` fold of the T3–T6 review; `a0e90f1b` process;
+> `dc9941d5` 4868 T1+T5 (the rows, the maps, the year records, the row gates, the reader walk's grid
+> bucket; report `…build-4868-T1-T5-implementation.md` — `instr_pages` measured [1,4]/[1,2], the
+> label floors carried +16/year of pre-existing drift plus +5 for the 4868, the cite-check excuse list
+> gained the four pairs like 36 of 37 others); `a939ada9` the r2 verification persisted (9/9
+> RESOLVED); `38564385` FR-46 CLOSED in FOLLOWUPS, roadmap S10 line carries the chain.
+>
+> **NEXT:** T2–T4 (fillers, `btctax extension`, the `--pay-by-check` voucher hook) — brief
+> `design/agent-reports/BRIEF-build-4868-T2-T4.md`, ONE opus agent, no commit by the agent; then T6
+> (surfaces: `report` names the paths; help text; readiness sentence unchanged); then ONE independent
+> opus review of T1–T6 scoped to the seams (map ↔ filler ↔ command ↔ export hook ↔ manifest), persist
+> → ledger → fold → sonnet re-verify → 0C/0I. Residue to carry into T2/T4: `btctax_forms::
+> attachment_sequence` returns None for the new stems via its catch-all — make it an explicit arm.
+> Then: the 09-15 real-data run (S5) needs the owner's 2026 exports; owner decisions S1/S2/S6/S7/S9/
+> S10/T7 untouched; nothing pushed (origin is ~180 commits behind).
+
 > ## ★★★ RESUME 2026-09-06 (late) — the 1099-DA build is GREEN (T3–T6 review folded `c25f7489`, re-verified 0C/0I 9/9); the 4868 T1+T5 implementer (opus) is IN FLIGHT in the main tree. Read this block first.
 >
 > **Pending commits once the implementer returns (do NOT commit while its edits are half-done):**
