@@ -215,6 +215,16 @@ pub fn sha256_of(p: &Path) -> std::io::Result<(String, u64)> {
     Ok((format!("{:x}", h.finalize()), bytes.len() as u64))
 }
 
+/// sha256 of in-memory bytes as lowercase hex (the manifest's spelling). Test-only: the live
+/// checkers hash files through `sha256_of`; this hashes a blob `git show` handed back.
+#[cfg(test)]
+fn hex_sha256(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(bytes);
+    format!("{:x}", h.finalize())
+}
+
 pub fn load(root: &Path) -> Result<Vec<Entry>, String> {
     let p = manifest_path(root);
     let text =
@@ -1069,6 +1079,49 @@ mod tests {
         let entries = load(&crate::form_geometry::repo_root()).expect("manifest loads");
         let problems = verify(&root(), &entries);
         assert!(problems.is_empty(), "{}", report(&problems));
+    }
+
+    /// ★★★ **THE LIVE GATE, direction 1, over the COMMITTED bytes.** `verify` hashes the working
+    /// copy; a checkout transformation (`.gitattributes` `text=auto eol=lf` stripping a stray CR from a
+    /// fetched HTML page) can leave the working copy equal to the manifest while the committed blob is
+    /// not — so every fresh clone and every reviewer's worktree reds the census and the main tree stays
+    /// green (F-1 of the 4868 r2 verification, 2026-09-06: `26USC_s55_OLRC-prelim.html`, one CR byte).
+    /// This hashes the INDEX blob (`git show :<path>`) for every committed entry instead — the bytes a
+    /// checkout receives, equal to HEAD's once committed, and already renormalized in the commit that
+    /// fixes such a drift (hashing `HEAD:` would red the fix's own pre-commit gate). Skipped only for
+    /// entries not under version control.
+    #[test]
+    fn every_committed_entry_hashes_true_in_the_committed_blob_too() {
+        let root = crate::form_geometry::repo_root();
+        let entries = load(&root).expect("manifest loads");
+        let mut checked = 0usize;
+        let mut wrong: Vec<String> = Vec::new();
+        for e in entries.iter().filter(|e| e.storage == Storage::Committed) {
+            let out = std::process::Command::new("git")
+                .args(["show", &format!(":{}", e.path)])
+                .current_dir(&root)
+                .output()
+                .expect("git runs");
+            if !out.status.success() {
+                continue; // not tracked (e.g. a gitignored source) — `verify` covers the working copy
+            }
+            checked += 1;
+            let got = hex_sha256(&out.stdout);
+            if got != e.sha256 {
+                wrong.push(format!(
+                    "{}: manifest sha256 {} but the COMMITTED blob hashes {} — a checkout \
+                     transformation (see .gitattributes) or a revised source; a fresh clone reds",
+                    e.path,
+                    &e.sha256[..16],
+                    &got[..16]
+                ));
+            }
+        }
+        assert!(
+            checked >= 40,
+            "only {checked} committed entries were tracked — the walk is broken"
+        );
+        assert!(wrong.is_empty(), "{}", wrong.join("\n"));
     }
 
     /// ★★ **THE LIVE GATE, direction 2.** Every primary source in an accounted-for tree is listed.

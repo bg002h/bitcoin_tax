@@ -4,3 +4,9 @@
 # tests. `text=auto` lets git auto-detect binary (NUL-bearing) files (e.g. the tracked
 # PDFs) and leave them untouched; `eol=lf` forces LF for everything detected as text.
 * text=auto eol=lf
+
+# Primary sources are archived VERBATIM — the manifest pins the sha256 of the fetched bytes, so no
+# line-ending normalization may touch them (a fetched HTML page carried one stray CR; `text=auto`
+# stripped it from the blob while the working copy kept it, and every fresh checkout redded the
+# hash census — 4868 r2 verification F-1, 2026-09-06).
+legal/primary-sources/** -text
