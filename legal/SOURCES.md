@@ -38,6 +38,8 @@ Notices, Revenue Rulings, a Revenue Procedure, and a Chief Counsel memo. URL bas
 | **Notice 2024-56** | `Notice_2024-56.pdf` | `c80173f55281` | Broker transition/penalty relief, 2025 (Finding 9) |
 | **Notice 2024-57** | `Notice_2024-57.pdf` | `1bff7c80e6b6` | Broker reporting relief, certain transactions |
 | **Notice 2026-20** | `Notice_2026-20.pdf` | `37ff4019430d` | Broker specific-ID transition relief (Finding 7) |
+| **Notice 2023-75** — 2024 retirement-plan limits | `Notice_2023-75.pdf`; text `legal/text/irs-guidance/Notice_2023-75.txt` | `dbe86eb16e2c` | §402(g)(1) elective-deferral limit **$23,000** (TY2024, `FullReturnParams::elective_deferral_limit`). ★ NOT in the inflation Rev. Proc.; set by this annual notice. Added 2026-09-05 (FR-47) so the existing TY2024 citation resolves to a held document. |
+| **Notice 2025-67** — 2026 retirement-plan limits | `Notice_2025-67.pdf`; text `legal/text/irs-guidance/Notice_2025-67.txt` | `1eea8f141b0c` | §402(g)(1) elective-deferral limit **$24,500** (TY2026; "increased from $23,500 to $24,500"). Added 2026-09-05 (FR-47). |
 | **CCA 202124008** | `CCA_202124008.pdf` | `334a22f1de94` | Crypto decline-in-value / wash-sale context (Q1, TLH) |
 | **CCA 202302012** | `CCA_202302012.pdf` | `42b763510df2` | Crypto charitable donation requires qualified appraisal (Q4) |
 

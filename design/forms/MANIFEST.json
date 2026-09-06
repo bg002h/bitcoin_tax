@@ -801,6 +801,15 @@
     "extract": "legal/text/irs-guidance/Notice_2023-34.txt"
   },
   {
+    "path": "legal/primary-sources/irs-guidance/Notice_2023-75.pdf",
+    "kind": "guidance",
+    "storage": "committed",
+    "sha256": "dbe86eb16e2c19cd1cd61fb33bae82f0c9276edc2ab9c23e82b0c698eab593ad",
+    "bytes": 128390,
+    "url": "https://www.irs.gov/pub/irs-drop/n-23-75.pdf",
+    "extract": "legal/text/irs-guidance/Notice_2023-75.txt"
+  },
+  {
     "path": "legal/primary-sources/irs-guidance/Notice_2024-56.pdf",
     "kind": "guidance",
     "storage": "committed",
@@ -826,6 +835,15 @@
     "bytes": 103310,
     "url": "https://www.irs.gov/pub/irs-drop/n-25-07.pdf",
     "extract": "legal/text/irs-guidance/Notice_2025-07.txt"
+  },
+  {
+    "path": "legal/primary-sources/irs-guidance/Notice_2025-67.pdf",
+    "kind": "guidance",
+    "storage": "committed",
+    "sha256": "1eea8f141b0cddd182f9f09b3bc8ffad683d27ceb806dfc6da126811dc0a1f8d",
+    "bytes": 133701,
+    "url": "https://www.irs.gov/pub/irs-drop/n-25-67.pdf",
+    "extract": "legal/text/irs-guidance/Notice_2025-67.txt"
   },
   {
     "path": "legal/primary-sources/irs-guidance/Notice_2026-20.pdf",

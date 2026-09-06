@@ -57,3 +57,6 @@ status	bytes	sha256	content_type	path	url
 200	71057	c17459905d8964ec3bfd75074877bd8392306b4619f4b81875f276a2a2d9b762	text/html	statute-irc/26USC_s55.html	https://www.govinfo.gov/content/pkg/USCODE-2024-title26/html/USCODE-2024-title26-subtitleA-chap1-subchapA-partVI-sec55.htm
 200	968588	42f86c3d408bccb1a663c11a51a90d207b3dbc25e689240da51726154be51c8b	application/pdf	statute-irc/PLAW-119publ21_OBBBA.pdf	https://www.govinfo.gov/content/pkg/PLAW-119publ21/pdf/PLAW-119publ21.pdf
 200	271787	bddb1231ebb70afd2703ce1632f9020e5574e3593548e709f1d9043e394a441d	text/html;charset=UTF-8	statute-irc/26USC_s55_OLRC-prelim.html	https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title26-section55&num=0&edition=prelim
+# --- §402(g) retirement-limit notices fetched 2026-09-06T05:24:08Z ---
+200	128390	dbe86eb16e2c19cd1cd61fb33bae82f0c9276edc2ab9c23e82b0c698eab593ad	application/pdf	irs-guidance/Notice_2023-75.pdf	https://www.irs.gov/pub/irs-drop/n-23-75.pdf
+200	133701	1eea8f141b0cddd182f9f09b3bc8ffad683d27ceb806dfc6da126811dc0a1f8d	application/pdf	irs-guidance/Notice_2025-67.pdf	https://www.irs.gov/pub/irs-drop/n-25-67.pdf

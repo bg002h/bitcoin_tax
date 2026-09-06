@@ -165,6 +165,103 @@ fn ty2024_full_return() -> FullReturnParams {
     }
 }
 
+/// TY2026 full-return parameters — TRANSCRIBED, every cell from a document held under `legal/`
+/// (FR-47, 2026-09-05). **Deliberately NOT inserted into `by_year`**: `full_return_for(2026)` stays
+/// `None` because the two reasons that keep the gate closed are still true — the 2026 Form 6251 was
+/// restructured (line 1 → 1a/1b around Schedule 1-A) and needs a re-transcription, and no OTS 2026
+/// exists (see `ty2026_full_return_must_stay_fail_closed`). What this function settles is the
+/// CONSTANTS, which the first edition of §6 rule 1 wrongly put on the post-finals critical path
+/// (Fable plan review I4): they are statute and Rev. Proc., not form.
+///
+/// Sources, by field:
+/// - Standard deduction, dependent floor/add-on, aged/blind: **Rev. Proc. 2025-32 §2.14(1)–(3)**
+///   (`legal/text/irs-guidance/RevProc_2025-32.txt`); the base amounts are §63(c)(7) as amended by
+///   **Pub. L. 119-21 §70102** ($15,750 / $23,625 for 2025, indexed).
+/// - SALT: **§164(b)(6)–(7) as added by Pub. L. 119-21 §70120** (139 Stat. 169–170,
+///   `legal/text/statute-irc/PLAW-119publ21_OBBBA.txt`): applicable limitation amount **$40,400** for
+///   2026 (half for MFS), reduced by **30%** of MAGI over **$505,000** (half for MFS), never below
+///   **$10,000**. The 2026 Schedule A DRAFT line 5e prints "$40,400 ($20,200 if married filing
+///   separately)" — evidence only, never the source. Encoded on the `Worksheet2025` instrument
+///   because the statute's shape is unchanged from 2025; the 2026 booklet's worksheet line numbers
+///   are confirmed AFTER FINALS.
+/// - Kiddie: **§2.02** — $1,350 is the §1(g)(4)(A)(ii)(I) amount and the §63(c)(5)(A) floor; the
+///   threshold this field holds is the §1(g)(4)(A)(ii) sum, 2 × $1,350 (TY2024 was 2 × $1,300).
+/// - Elective deferral: **Notice 2025-67** ("increased from $23,500 to $24,500";
+///   `legal/text/irs-guidance/Notice_2025-67.txt`). Not in any Rev. Proc.
+/// - FTC ceiling: §904(j), unindexed statute.
+/// - QBI: **§2.26** thresholds $201,750 / $403,500 (MFS is **$201,775** — R27: this struct has no MFS
+///   slot, the `unmarried` figure is used, a $25 understatement of the MFS threshold, filed); the
+///   phase-in RANGE widths are **Pub. L. 119-21 §70105(a)** ($75,000 / $150,000) and equal §2.26's
+///   printed range-end minus threshold (276,750 − 201,750; 553,500 − 403,500). ★ §70105(b)'s new
+///   $400 minimum deduction is a Form 8995 line-16/17 instrument change, not a parameter here.
+/// - Student loan: **§2.29** — $85,000–$100,000; $175,000–$205,000 joint.
+/// - AMT: **§2.10** exemptions, phase-out thresholds AND complete-phaseout amounts, 28% breakpoints;
+///   the phase-out RATE is **Pub. L. 119-21 §70107(c)** ("by substituting '50 percent' for '25
+///   percent'", effective TY beginning after 2025-12-31) and is corroborated by §2.10's own
+///   arithmetic — `(complete − threshold) × 0.50 == exemption` for all three statuses, pinned below.
+///   The MFS line-4 kicker: start = the MFS complete-phaseout AMTI ($640,200, §2.10; TY2024's
+///   $875,950 = $609,350 + $66,650 / 0.25 by the same mechanism), cap = the MFS exemption ($70,100;
+///   TY2024's cap was $66,650 = that year's MFS exemption), rate 25% — §55(d)(3)'s flush sentence,
+///   which §70107 did not touch. ★ D8: the 2026 Form 6251 instructions will print these two; until
+///   they do, this is the statutory reading, KAT-pinned, to be confirmed AFTER FINALS.
+/// - 26%/28% rates: §55(b)(1)(A)–(B); the 28%-bracket subtrahend is 2% of the breakpoint by the
+///   form's own arithmetic (TY2024: $4,652 = 0.02 × $232,600).
+pub fn ty2026_full_return() -> FullReturnParams {
+    let mut std_deduction = BTreeMap::new();
+    std_deduction.insert(FilingStatus::Single, dec!(16100));
+    std_deduction.insert(FilingStatus::Mfj, dec!(32200));
+    std_deduction.insert(FilingStatus::Mfs, dec!(16100));
+    std_deduction.insert(FilingStatus::HoH, dec!(24150));
+    FullReturnParams {
+        year: 2026,
+        std_deduction,
+        std_aged_blind_married: dec!(1650), // §63(f), Rev. Proc. 2025-32 §2.14(3)
+        std_aged_blind_unmarried: dec!(2050),
+        dependent_std_floor: dec!(1350), // §63(c)(5), Rev. Proc. 2025-32 §2.14(2)
+        dependent_std_earned_addon: dec!(450),
+        // §164(b)(7) per Pub. L. 119-21 §70120: $40,400 (2026), −30% of MAGI over $505,000, floor $10,000.
+        salt: SaltLimitation::Worksheet2025 {
+            line1_cap: dec!(40400),
+            line5_threshold: dec!(505000),
+            line5_threshold_mfs: dec!(252500),
+            line7_rate: dec!(0.30),
+            line9_floor: dec!(10000),
+            line1_trigger: dec!(10000),
+            line1_trigger_mfs: dec!(5000),
+            line_10_mfs_halves: true,
+        },
+        kiddie_unearned_threshold: dec!(2700), // 2 × $1,350, §1(g)(4)(A)(ii), Rev. Proc. 2025-32 §2.02
+        elective_deferral_limit: dec!(24500),  // §402(g)(1), Notice 2025-67
+        ftc_ceiling: dec!(300),                // §904(j) (MFJ = $600 at the use site)
+        // §199A(e)(2) thresholds (Rev. Proc. 2025-32 §2.26); phase-in widths Pub. L. 119-21 §70105(a).
+        qbi_ti_threshold_unmarried: dec!(201750),
+        qbi_ti_threshold_married: dec!(403500),
+        qbi_phase_in_range_unmarried: dec!(75000),
+        qbi_phase_in_range_married: dec!(150000),
+        // §221(b)(2)(B) (Rev. Proc. 2025-32 §2.29).
+        student_loan_phaseout_unmarried: (dec!(85000), dec!(100000)),
+        student_loan_phaseout_married: (dec!(175000), dec!(205000)),
+        // §55(d)/§55(b)(1) (Rev. Proc. 2025-32 §2.10) + Pub. L. 119-21 §70107(c) for the 0.50 rate.
+        amt: AmtParams {
+            exemption_single_hoh: dec!(90100),
+            exemption_mfj_qss: dec!(140200),
+            exemption_mfs: dec!(70100),
+            phaseout_start_single_hoh_mfs: dec!(500000),
+            phaseout_start_mfj_qss: dec!(1000000),
+            breakpoint_28pct: dec!(244500),
+            breakpoint_28pct_mfs: dec!(122250),
+            mfs_kicker_start: dec!(640200),
+            mfs_kicker_max: dec!(70100),
+            exemption_phaseout_rate: dec!(0.50),
+            mfs_kicker_rate: dec!(0.25),
+            rate_26: dec!(0.26),
+            rate_28: dec!(0.28),
+            rate_28_subtrahend: dec!(4890),
+            rate_28_subtrahend_mfs: dec!(2445),
+        },
+    }
+}
+
 /// Construct an `OrdinaryBracket` from a (lower, rate) pair.
 fn br(lower: Usd, rate: Usd) -> OrdinaryBracket {
     OrdinaryBracket { lower, rate }
@@ -797,6 +894,110 @@ mod tests {
         ty2026_full_return_must_stay_fail_closed(&t);
     }
 
+    /// FR-47 — every TY2026 cell against its held source (Rev. Proc. 2025-32 §2.02/§2.10/§2.14/
+    /// §2.26/§2.29; Pub. L. 119-21 §70105/§70107/§70120; Notice 2025-67). Read the function
+    /// directly: it is deliberately NOT in `by_year` (the gate test above holds that).
+    #[test]
+    fn ty2026_full_return_params_match_their_sources() {
+        let p = ty2026_full_return();
+        assert_eq!(p.year, 2026);
+        assert_eq!(p.std_deduction_for(FilingStatus::Single), dec!(16100)); // §2.14(1)
+        assert_eq!(p.std_deduction_for(FilingStatus::Mfj), dec!(32200));
+        assert_eq!(p.std_deduction_for(FilingStatus::Mfs), dec!(16100));
+        assert_eq!(p.std_deduction_for(FilingStatus::HoH), dec!(24150));
+        assert_eq!(p.std_deduction_for(FilingStatus::Qss), dec!(32200)); // Qss→Mfj
+        assert_eq!(p.std_aged_blind_married, dec!(1650)); // §2.14(3)
+        assert_eq!(p.std_aged_blind_unmarried, dec!(2050));
+        assert_eq!(p.dependent_std_floor, dec!(1350)); // §2.14(2)
+        assert_eq!(p.dependent_std_earned_addon, dec!(450));
+        assert_eq!(
+            p.salt,
+            SaltLimitation::Worksheet2025 {
+                line1_cap: dec!(40400),        // §164(b)(7)(A)(ii)
+                line5_threshold: dec!(505000), // §164(b)(7)(B)(ii)(II)
+                line5_threshold_mfs: dec!(252500),
+                line7_rate: dec!(0.30),   // §164(b)(7)(B)(i)
+                line9_floor: dec!(10000), // §164(b)(7)(B)(iii)
+                line1_trigger: dec!(10000),
+                line1_trigger_mfs: dec!(5000),
+                line_10_mfs_halves: true,
+            }
+        );
+        assert_eq!(p.kiddie_unearned_threshold, dec!(2700)); // 2 × $1,350, §2.02
+        assert_eq!(p.elective_deferral_limit, dec!(24500)); // Notice 2025-67
+        assert_eq!(p.ftc_ceiling, dec!(300));
+        assert_eq!(p.qbi_ti_threshold_unmarried, dec!(201750)); // §2.26
+        assert_eq!(p.qbi_ti_threshold_married, dec!(403500));
+        // §2.26 prints the phase-in RANGE END; §70105(a) states the width. Both must agree.
+        assert_eq!(p.qbi_phase_in_range_unmarried, dec!(276750) - dec!(201750));
+        assert_eq!(p.qbi_phase_in_range_married, dec!(553500) - dec!(403500));
+        assert_eq!(p.qbi_phase_in_range_unmarried, dec!(75000));
+        assert_eq!(p.qbi_phase_in_range_married, dec!(150000));
+        assert_eq!(
+            p.student_loan_phaseout_unmarried,
+            (dec!(85000), dec!(100000))
+        ); // §2.29
+        assert_eq!(
+            p.student_loan_phaseout_married,
+            (dec!(175000), dec!(205000))
+        );
+        // §2.10 — exemptions, thresholds, 28% breakpoints.
+        assert_eq!(p.amt.exemption(FilingStatus::Single), dec!(90100));
+        assert_eq!(p.amt.exemption(FilingStatus::HoH), dec!(90100));
+        assert_eq!(p.amt.exemption(FilingStatus::Mfj), dec!(140200));
+        assert_eq!(p.amt.exemption(FilingStatus::Qss), dec!(140200));
+        assert_eq!(p.amt.exemption(FilingStatus::Mfs), dec!(70100));
+        assert_eq!(p.amt.phaseout_start(FilingStatus::Single), dec!(500000));
+        assert_eq!(p.amt.phaseout_start(FilingStatus::Mfs), dec!(500000));
+        assert_eq!(p.amt.phaseout_start(FilingStatus::Mfj), dec!(1000000));
+        assert_eq!(p.amt.breakpoint_28pct(FilingStatus::Single), dec!(244500));
+        assert_eq!(p.amt.breakpoint_28pct(FilingStatus::Mfs), dec!(122250));
+        assert_eq!(p.amt.rate_28_subtrahend, dec!(0.02) * dec!(244500));
+        assert_eq!(p.amt.rate_28_subtrahend_mfs, dec!(0.02) * dec!(122250));
+    }
+
+    /// ★★ THE EQUIVALENCE PROOF for the derived 0.50 rate, pinned (CLAUDE.md: a derived constant needs
+    /// a written proof AND a KAT). Rev. Proc. 2025-32 §2.10 prints, per status, the threshold AND the
+    /// complete-phaseout amount: MFJ/QSS $1,000,000 → $1,280,400; single $500,000 → $680,200; MFS
+    /// $500,000 → $640,200. The exemption is fully phased out when `rate × (AMTI − threshold) ==
+    /// exemption`, so `threshold + exemption / rate` must land exactly on the printed
+    /// complete-phaseout amount for EVERY status — which it does only at 0.50 (at TY2024's 0.25 the
+    /// MFJ figure would be $1,560,800). Pub. L. 119-21 §70107(c) states the rate directly; this test
+    /// is what makes the Rev. Proc. corroborate it rather than merely not contradict it.
+    #[test]
+    fn ty2026_amt_phaseout_rate_is_forced_by_rev_proc_2025_32_complete_phaseout_amounts() {
+        let a = ty2026_full_return().amt;
+        let complete = |start: Usd, exemption: Usd| start + exemption / a.exemption_phaseout_rate;
+        assert_eq!(
+            complete(dec!(1000000), dec!(140200)),
+            dec!(1280400),
+            "MFJ / QSS"
+        );
+        assert_eq!(
+            complete(dec!(500000), dec!(90100)),
+            dec!(680200),
+            "single / HoH"
+        );
+        assert_eq!(complete(dec!(500000), dec!(70100)), dec!(640200), "MFS");
+        // …and the MFS line-4 kicker starts exactly where the MFS exemption reaches zero, with a cap
+        // equal to the MFS exemption — the same mechanism that gave TY2024 $875,950 / $66,650.
+        assert_eq!(a.mfs_kicker_start, complete(dec!(500000), dec!(70100)));
+        assert_eq!(a.mfs_kicker_max, a.exemption_mfs);
+        // The two rates are DIFFERENT fields for a reason (split 2026-07-29): TY2026 is the first year
+        // they differ. A merge of the two would red here.
+        assert_eq!(a.exemption_phaseout_rate, dec!(0.50));
+        assert_eq!(a.mfs_kicker_rate, dec!(0.25));
+        assert_ne!(a.exemption_phaseout_rate, a.mfs_kicker_rate);
+    }
+
+    /// The TY2024 params must NOT satisfy the TY2026 identity — a KAT that cannot fail is not one.
+    #[test]
+    fn the_ty2026_phaseout_identity_reds_on_ty2024_params() {
+        let a = ty2024_full_return().amt;
+        let complete = |start: Usd, exemption: Usd| start + exemption / a.exemption_phaseout_rate;
+        assert_ne!(complete(dec!(1000000), dec!(140200)), dec!(1280400));
+    }
+
     /// ★★ TY2025 FAILS CLOSED UNTIL IT IS **COMPLETE** — and this is the gate that makes adding it
     /// safe to do in stages. It is scheduled to be deleted; it is not scheduled to be deleted *early*.
     ///
@@ -944,9 +1145,10 @@ mod tests {
     fn ty2026_full_return_must_stay_fail_closed(t: &BundledFullReturnTables) {
         assert!(
             t.full_return_for(2026).is_none(),
-            "TY2026 full-return params appeared. The 2026 Form 6251 instructions were unpublished \
-             as of 2026-07-29, the form restructured Part I around a new Schedule 1-A, and no \
-             oracle covers 2026 — see this function's doc comment before removing it."
+            "TY2026 full-return params appeared in `by_year`. The CONSTANTS exist and are pinned \
+             (`ty2026_full_return()`, FR-47) — that is not what this gate holds. It holds because \
+             the 2026 Form 6251 restructured Part I around Schedule 1-A and needs a re-transcription, \
+             and no OTS 2026 exists — see this function's doc comment before removing it."
         );
     }
 
