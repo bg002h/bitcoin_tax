@@ -85,7 +85,11 @@ FR-49) are folded into §3's NOW bucket below and re-owned in `FOLLOWUPS.md`.
   the ledger) or `income import`. What it does not change: TY2026 prints nothing until its Form 8949
   and Schedule D finals are bundled (Nov 2026 – Jan 2027; both unchanged in shape per the work list)
   — but that is earlier than, and independent of, `FullReturnParams` TY2026 and the i1040gi / OTS-2026
-  critical path. FR-62; one design-review round on R6, then the build.
+  critical path. FR-62 — R6 went through five review rounds (each of r1–r4 found one blocking
+  defect in the controller's own fold; the loop closed at r4 by rule) and is BUILT `fb5e7fc3` (3178
+  tests): `export-irs-pdf` on a params-less year files the slice from the stored answers, every
+  surface reads one answer set, Schedule D carries the per-box lines from the routed rows. Its seam
+  review is in flight.
   ★ The spec (`design/SPEC_1099da_broker_reporting.md`) is **GREEN r6** (five review rounds, 0C/0I at
   r5). **Build T0–T6 LANDED 2026-09-06** (`e4b80fda` T0 … `249d37ad` C … `d9863909` T3 … `2feb53d0`
   T4 … `ab0c98f8` T5 … `17753789`/`bb6d140d` T6; the T0–C build review 0C/3I/3M/3N folded `18d1332b`,

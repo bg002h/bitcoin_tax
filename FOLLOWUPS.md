@@ -6200,10 +6200,19 @@ build, each with an owning phase.
   refusal naming the input form as the exit. No new vault table. **Owning phase: NOW.** r1 design review 2C/5I/6M/2N (`cd7cfbd9`, ledger 8/8 HOLD)
   FOLDED into R6 (`92179086`): build tasks T8 (the slice's Schedule D per box, from the routed rows)
   and T9 (commit the broker answers on a params-less year, I-11 untouched), the form-level gate, the
-  arm-(2) screen list, `report` in state (2), the TUI ordering, price coverage. r2 review next, then
-  the build. Note for the
+  arm-(2) screen list, `report` in state (2), the TUI ordering, price coverage. r2 (`4ed35a03`), r3
+  (`5f03b965`) and r4 (`76d8eb9a`) each found one blocking defect in the controller's own fold; the loop
+  closed at r4 by the rule recorded in CONTINUITY, and the BUILD landed `fb5e7fc3` (3178 tests, 21 kills
+  seen red; report `…build-1099da-R6-implementation.md`). Its seam review is in flight; FR-62 closes at
+  0C/0I. Residue → FR-63. Note for the
   calendar: TY2026 still prints nothing until its Form 8949 / Schedule D finals are bundled
   (Nov 2026 – Jan 2027), which R6 makes the ONLY gate for a TY2026 crypto-slice filing.
+- **FR-63 — the TUI commit modal's slice clause (R6 D-1).** R6 says the input form's commit modal,
+  on a params-less year, tells the filer the answers are held in the draft and that the crypto slice
+  reads them. Not built: the `NoTables` status line is a tested ≤104-char no-wrap NOTICE (r1-M1) and
+  the shortest wording measured 120 chars. Needs a second NOTICE line or a modal-body slot (a TUI
+  layout change). The fact reaches the filer today through `import_note`, `uncomputable_sentence` and
+  the export's attachment-set note. **Owning phase: the next TUI pass (ownerless otherwise).**
 - **FR-47 — `AmtParams` / `FullReturnParams` TY2026 is a NOW item, not a post-finals one.**
   Transcribe from Rev. Proc. 2025-32 §2.10: exemptions (MFJ $140,200 / single $90,100 / MFS
   $70,100 / trusts $31,400), 28% breakpoints ($122,250 MFS / $244,500 others), and per status BOTH

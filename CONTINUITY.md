@@ -6,6 +6,15 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
+> ## ★★★ RESUME 2026-09-06 (night 2) — R6 BUILT (`fb5e7fc3`, 3178 tests) after the spec loop closed at r4 (`76d8eb9a` 0C/2I folded `6ac51769`); its SEAM REVIEW is IN FLIGHT (opus, worktree at `a2f71ea6`). Read this block first.
+>
+> When the review returns: copy from the worktree, persist, ledger, fold via one opus agent under a
+> brief (or inline if tiny), commit, sonnet re-verify, close FR-62 in FOLLOWUPS + roadmap §0a S10.
+> The reviewer was told to adjudicate the implementer's §7 edge (a committed row with EMPTY answers on
+> a params-less year now falls to arm (3)). Then the S9 drop (FR-61, brief on disk). Residue filed:
+> FR-63 (the TUI commit modal's slice clause). Owner-facing: TY2026 still prints nothing until its
+> 2026 Form 8949 / Schedule D finals are bundled — R6 made that the only gate for a TY2026 slice.
+
 > ## ★★★ RESUME 2026-09-06 (evening 5) — R6 r3 review (`5f03b965`: 7/11 + NEW 1C/4I/3M/1N; ledger `ab2710d8`) FOLDED (`22dfc5cc`); the CLOSING r4 review is IN FLIGHT (opus, worktree at `620ac55f`). Read this block first.
 >
 > r3's Critical was mine again (committed-over-draft precedence would file a superseded answer);
