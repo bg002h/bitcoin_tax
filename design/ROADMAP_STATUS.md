@@ -70,6 +70,12 @@ FR-49) are folded into §3's NOW bucket below and re-owned in `FOLLOWUPS.md`.
 
 ---
 
+- **S10 (spec 1099-DA r3, 2026-09-06) — the crypto-slice `export-irs-pdf` is CLOSED on a year whose
+  regime reports basis (TY2026+).** The Form 1099-DA answers live on `ReturnInputs`, and the slice arm
+  runs only when none is stored, so on such a year it refuses before any byte and names the exit
+  (`income import` → the full return). Reversing this means a `broker_reporting` vault table both
+  arms read. Default if unanswered: closed (no users; the full return is the product).
+
 ## 0b. The one-line answer (TY2025 context, retained)
 
 **TY2025 is the only blocker.** The bitcoin engine is not what stands between btctax and a filed
