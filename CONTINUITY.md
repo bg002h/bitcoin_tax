@@ -6,6 +6,16 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
+> ## ★★★ RESUME 2026-09-06 (evening 3) — R6 r1 review (2C/5I/6M/2N, `cd7cfbd9`, ledger `c2905579`) FOLDED into the spec (`92179086`); the scoped r2 review is IN FLIGHT (opus, worktree at `9caab9d9`). Read this block first.
+>
+> The two Criticals were mine: the slice's Schedule D had no box dimension (→ task T8: per-box
+> aggregation from the ROUTED rows, line 3 blank kill) and the TUI cannot commit on a params-less
+> year (→ task T9: commit JUST the broker answers onto the row; I-11 untouched — the r2 brief asks
+> whether a default ReturnInputs row fabricates testimony; expect that answer to shape T9). When r2
+> returns: copy, persist, ledger, fold residue into R6, then BUILD R6 (T8, T9, the three-way dispatch,
+> the arm-(2) screens, `report` in state (2), the TUI ordering, price coverage, the notes) by one opus
+> agent under a brief written from the folded R6; then its seam review; then the S9 drop (FR-61).
+
 > ## ★★★ RESUME 2026-09-06 (evening 2) — owner RULED S9 (drop TY2017) and S10 (REVERSED: the slice must file TY2026 with crypto sales); spec R6 written (`d63a971a`); its one-round opus design review is IN FLIGHT. Read this block first.
 >
 > **Queue (one opus agent at a time):** (1) the R6 review returns → copy from the worktree, persist,
