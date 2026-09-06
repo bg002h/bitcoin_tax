@@ -106,6 +106,37 @@ pub struct Entry {
     pub extract: String,
 }
 
+impl Entry {
+    /// ★★★ **Is this document a DRAFT rather than IRS-final authority?**
+    ///
+    /// Until this existed, a draft and a final were **byte-identical in shape** in the manifest:
+    /// both `kind: "form"`, both `storage: "note"`, same key set. Only the FILENAME said DRAFT — and
+    /// a filename is not a type. A conformance check keyed on a stem would happily read a draft's
+    /// line numbering as authority, which is a live hazard rather than a theoretical one: the TY2026
+    /// Schedule 1-A draft was revised **2026-09-04**, and drafts are replaced IN PLACE.
+    ///
+    /// ★ This is what makes working ahead on a draft SAFE rather than forbidden. `SPEC.md` classes a
+    /// draft *"evidence only, never transcribe"*, and the distinction that rule needs is between
+    /// **reading a draft for structure** — how it renumbers, which forms are new — and **encoding a
+    /// draft-derived figure or line number** into something a return computes from. The first is how
+    /// the TY2026 recon found that Form 6251 line 46 cites Schedule 1-A line 43 where TY2025 cites
+    /// 37. The second is what must not happen. A discriminator is what lets a consumer tell which it
+    /// is holding, instead of trusting a naming convention.
+    ///
+    /// ★ Derived from BOTH signals the IRS gives, because either alone has been wrong: the `-DRAFT`
+    /// filename marker this repo adds, and the `irs-dft` URL path the IRS serves drafts from.
+    #[must_use]
+    pub fn is_draft(&self) -> bool {
+        self.path.contains("-DRAFT") || self.url.contains("/irs-dft/")
+    }
+
+    /// The document is IRS-final authority: safe to transcribe a figure or a line number FROM.
+    #[must_use]
+    pub fn is_authority(&self) -> bool {
+        !self.is_draft()
+    }
+}
+
 /// ★ Sources whose original URL is not recoverable from the repo — the `legal/` tree predates the
 /// note convention and its fetch scripts do not cover every file. **Shrink-only**: re-deriving a URL
 /// removes an entry, and the test below reds if one is listed that in fact has a URL.
@@ -785,11 +816,40 @@ pub fn run() -> Result<(), String> {
         .iter()
         .filter(|e| e.storage == Storage::Committed)
         .count();
+    // ★★★ R20 — DRAFTS ARE COUNTED SEPARATELY, and this is the discriminator's production reader.
+    //     A draft and a final were byte-identical in this manifest until `is_draft` existed: same
+    //     kind, same storage, same key set, with only the FILENAME saying DRAFT. A conformance check
+    //     keyed on a stem would read draft line numbering as authority, and drafts are replaced IN
+    //     PLACE — the TY2026 Schedule 1-A draft was revised 2026-09-04.
+    //
+    //     ★ This is what makes working ahead on a draft SAFE rather than forbidden. Reading a draft
+    //       for STRUCTURE is how the TY2026 recon found that Form 6251 line 46 cites Schedule 1-A
+    //       line 43 where TY2025 cites 37. TRANSCRIBING a draft figure or line number into
+    //       something a return computes from is what must not happen. A count that never separates
+    //       the two invites the second while permitting the first.
+    let drafts: Vec<&Entry> = entries.iter().filter(|e| e.is_draft()).collect();
+    // ★ Counted INDEPENDENTLY rather than by subtraction, so the two predicates must agree: if
+    //   they ever disagree the totals stop summing, which is a louder failure than a silent
+    //   miscount in a document that decides what may be transcribed.
+    let authority = entries.iter().filter(|e| e.is_authority()).count();
+    debug_assert_eq!(
+        authority + drafts.len(),
+        entries.len(),
+        "is_draft and is_authority disagree — every entry must be exactly one of the two"
+    );
     println!(
         "authority-manifest: {} entries — {committed} committed, {} note-only",
         entries.len(),
         entries.len() - committed
     );
+    println!(
+        "authority-manifest: {authority} AUTHORITY (final, transcribable) + {} DRAFT (evidence \
+         only, never transcribe)",
+        drafts.len()
+    );
+    for d in &drafts {
+        println!("    draft: {}", d.path);
+    }
     println!(
         "authority-manifest: by kind — {}",
         by_kind
@@ -1272,5 +1332,99 @@ mod tests {
                  authority manifest that omits the statute is not an authority manifest."
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod draft_discriminator_tests {
+    use super::*;
+
+    fn entry(path: &str, url: &str) -> Entry {
+        Entry {
+            path: path.into(),
+            kind: Kind::Form,
+            storage: Storage::Note,
+            sha256: "0".repeat(64),
+            bytes: 1,
+            url: url.into(),
+            extract: String::new(),
+        }
+    }
+
+    /// ★★★ **R20 — a draft must be distinguishable from a final by TYPE, not by filename.**
+    ///
+    /// Measured before this landed: the TY2026 Form 6251 draft and the TY2025 final carried the
+    /// IDENTICAL key set in `MANIFEST.json` — same `kind`, same `storage`, same fields. Only the
+    /// filename differed. A conformance check keyed on a stem would read draft line numbering as
+    /// authority, and drafts change: the TY2026 Schedule 1-A draft was revised 2026-09-04.
+    #[test]
+    fn a_draft_is_distinguishable_from_a_final_by_more_than_its_filename() {
+        let draft_by_name = entry(
+            "design/forms/2026/f6251--2026-DRAFT.pdf",
+            "https://www.irs.gov/pub/irs-pdf/f6251.pdf",
+        );
+        let draft_by_url = entry(
+            "design/forms/2026/f1040s1a--2026.pdf",
+            "https://www.irs.gov/pub/irs-dft/f1040s1a--dft.pdf",
+        );
+        let final_doc = entry(
+            "design/forms/2025/f6251--2025.pdf",
+            "https://www.irs.gov/pub/irs-pdf/f6251.pdf",
+        );
+
+        assert!(
+            draft_by_name.is_draft(),
+            "the -DRAFT filename marker must be honoured"
+        );
+        assert!(
+            draft_by_url.is_draft(),
+            "an irs-dft URL is a draft even when the archived filename is clean — the IRS serves \
+             drafts from that path, and a clean stem is exactly how a draft gets mistaken for \
+             authority"
+        );
+        assert!(
+            final_doc.is_authority(),
+            "a published final must remain transcribable"
+        );
+        assert!(!final_doc.is_draft());
+    }
+
+    /// ★★ **The committed manifest must not contain a draft that claims to be authority.**
+    ///
+    /// Derived from the manifest on disk, never a hand-list, so a draft archived tomorrow under a
+    /// clean stem is caught the moment it lands.
+    #[test]
+    fn every_draft_in_the_committed_manifest_is_recognised_as_one() {
+        let root = crate::form_geometry::repo_root();
+        let entries = load(&root).expect("MANIFEST.json loads");
+        assert!(
+            entries.len() > 50,
+            "manifest is suspiciously small: {}",
+            entries.len()
+        );
+
+        // Anything whose PATH or URL betrays a draft must be classified as one. The two signals are
+        // independent, so this catches a draft that carries only one of them.
+        let misfiled: Vec<&str> = entries
+            .iter()
+            .filter(|e| (e.path.contains("DRAFT") || e.url.contains("/irs-dft/")) && !e.is_draft())
+            .map(|e| e.path.as_str())
+            .collect();
+        assert!(
+            misfiled.is_empty(),
+            "these entries look like drafts but classify as authority: {misfiled:?}"
+        );
+
+        let drafts: Vec<&str> = entries
+            .iter()
+            .filter(|e| e.is_draft())
+            .map(|e| e.path.as_str())
+            .collect();
+        eprintln!("drafts in the manifest ({}): {drafts:?}", drafts.len());
+        assert!(
+            !drafts.is_empty(),
+            "the TY2026 Form 6251 draft is archived, so at least one draft must be recognised — if \
+             this is empty the discriminator has gone blind, which is worse than not having one"
+        );
     }
 }
