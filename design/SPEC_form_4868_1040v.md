@@ -1,16 +1,14 @@
 # SPEC — Form 4868 (extension) and Form 1040-V (payment voucher) fillers (FR-49 / strategy review S8)
 
-**Status: DRAFT r2 (2026-09-06), for review to 0C/0I before build.** r1 review
-(`design/agent-reports/2026-09-06-spec-4868-1040v-review.md`, 2C/8I/13M/3N; ledger
-`…-VERIFICATION.md` 17/17 TRUE) folded: the extension payment ALREADY exists on the return (C-1),
-both emitters carry the pseudo-reconciled attestation gate and the DRAFT watermark (C-2), the spouse
-boxes are conditioned on a JOINT return (I-1), the filler takes the printed return (I-2), the three row
-gates the new rows red are named and widened (I-3), the label reader learns the row-band form rather
-than moving a ratchet (I-4), the due date comes from the year record and shifts for line 8 (I-5), a
-recorded payment is the default rather than a refusal (I-6), `--pay-by-check` refuses on a slice year
-(I-7), and the TY2024 revisions are bundled so the success path is reachable (I-8). Owning phase: NOW
-— the physical rehearsal (S1, an owner decision) and the first filed year (TY2026, due 2027-04-15)
-both walk the extension and the payment envelope; today btctax can print neither.
+**Status: DRAFT r3 (2026-09-06), for review to 0C/0I before build.** r1 review (2C/8I/13M/3N,
+`design/agent-reports/2026-09-06-spec-4868-1040v-review.md`) and r2 review (0C/2I/7M/1N,
+`…-review-r2.md`; ledgers 17/17 and 10/10) folded. r3 settles the label reader honestly: the 4868 is the
+corpus's first TWO-COLUMN form and the reader mis-joins its Part I today (`f1_4` → "5", the two SSN
+boxes → "9"), so T5 teaches it columns with that kill; the 1040-V's four numbered labels are cell
+CAPTIONS, not line labels, so its cells are bound by name and the map is a recorded grid (N-I1, N-I2);
+the seven Minors and the Nit are folded. Owning phase: NOW — the physical rehearsal (S1, an owner
+decision) and the first filed year (TY2026, due 2027-04-15) both walk the extension and the payment
+envelope; today btctax can print neither.
 
 ## Why this exists
 
@@ -39,11 +37,11 @@ fixture by the r1 review (32/32):
 | — `f1_5` | *"Address (see instructions)"* | `ReturnHeader.address_street` |
 | — `f1_6` / `f1_7` (maxlen 2) / `f1_8` (maxlen 10) | *"City, town, or post office"* / *"State"* / *"ZIP code"* | `address_city` / `address_state` / `address_zip` |
 | 2 `f1_9` (maxlen 11) | *"Your social security number"* | `taxpayer.ssn`, rendered from the cell's own `/MaxLen` (`map.rs:21-23`, `cells::push_identity`: 11 ⇒ hyphenated) |
-| 3 `f1_10` (maxlen 11) | *"Spouse’s social security number"* — instructions: *"If you plan to file a joint return, enter on line 2 the social security"* … *"the other SSN to be shown on the joint return"* | `spouse.ssn` **only when `filing_status == Mfj`**; blank for every other status including MFS (`ReturnHeader.spouse` is present for MFS too — I-1) |
+| 3 `f1_10` (maxlen 11) | *"Spouse’s social security number"* — instructions: *"If you plan to file a joint return, enter on line 2 the social security"* … *"the other SSN to be shown on the joint return"* | `spouse.ssn` **only when `pr.filing_status == FilingStatus::Mfj`**; blank for every other status including MFS (`ReturnHeader.spouse` is present for MFS too — I-1) |
 | 4 `f1_11` | *"Estimate of total tax liability for 2025"* — instructions: *"Enter on line 4 the total tax liability you expect to report on your"* … *"Form 1040, 1040-SR, or 1040-NR, line 24"*; *"If you expect this amount to be zero, enter -0-."* | **computed**: the year's return as it stands today, Form 1040 line 24; printed as an explicit `0` when zero (the form says so). A year whose return cannot be computed has no estimate → refuse (R2) |
-| 5 `f1_12` | *"Total 2025 payments"* — *"Enter on line 5 the total payments you expect to report on your"* … *"Form 1040, 1040-SR, or 1040-NR, line 33 (excluding Schedule 3,"* *"line 10); or"*; *"Don’t include on line 5 the amount you’re paying with this"* *"Form 4868."* | **computed**: Form 1040 line 33 − Schedule 3 line 10 (`Schedule3Lines.line10`, which prints `payments.extension_payment` — C-1); blank when zero (no -0- clause) |
+| 5 `f1_12` | *"Total 2025 payments"* — *"Enter on line 5 the total payments you expect to report on your"* … *"Form 1040, 1040-SR, or 1040-NR, line 33 (excluding Schedule 3,"* *"line 10); or"*; *"Don’t include on line 5 the amount you’re paying with this"* *"Form 4868."* | **computed**: Form 1040 line 33 − Schedule 3 line 10 (`Schedule3Lines.line10`, which prints `payments.extension_payment` — C-1; `PrintedForms.sch_3 = None`, the common case, ⇒ subtract 0); blank when zero (no -0- clause) |
 | 6 `f1_13` | *"Balance due. Subtract line 5 from line 4."* — *"If line 5 is more than line 4, enter -0-."* | **computed**: `max(0, L4 − L5)`; printed as an explicit `0` when zero or negative (the form says so) |
-| 7 `f1_14` | *"Amount you’re paying (see instructions)"* — *"If you find you can’t pay the amount shown on line 6, you can still"* *"get the extension. But you should pay as much as you can to limit"* *"the amount of interest you’ll owe."* | **collected**: `--pay <whole dollars>`; default = the recorded `payments.extension_payment` when > 0 (with a note), else line 6. Above line 6 allowed (paying ahead of an estimate is the filer's choice); negative refused; cents refused (the form's rounding rule is all-or-nothing and lines 4–6 are whole dollars). Blank when zero |
+| 7 `f1_14` | *"Amount you’re paying (see instructions)"* — *"If you find you can’t pay the amount shown on line 6, you can still"* *"get the extension. But you should pay as much as you can to limit"* *"the amount of interest you’ll owe."* | **collected**: `--pay <whole dollars>`; default = the PRINTED Schedule 3 line 10 (`Schedule3Lines.line10`, already `round_dollar`; `sch_3 = None` ⇒ 0) when > 0 (with a note), else line 6 — never the raw `Usd` input, which can carry cents. Above line 6 allowed (paying ahead of an estimate is the filer's choice); negative refused; cents refused (the form's rounding rule is all-or-nothing and lines 4–6 are whole dollars). Blank when zero |
 | 8 `c1_1` | *"Check here if you’re “out of the country” and a U.S. citizen or"* *"resident. See instructions"* | **collected**: `--out-of-country`, default unchecked. Silence FORGOES the two extra months; it asserts nothing (the answered-ness sharp test) |
 | 9 `c1_2` | *"Check here if you file Form 1040-NR and didn’t receive wages"* *"as an employee subject to U.S. income tax withholding"* | **never, recorded**: btctax produces no Form 1040-NR |
 | page 3 `Col4.f3_1` | *"Enter confirmation number here:"* (the electronic-payment confirmation, on the instruction page) | **never, recorded**: the filer's private record, not part of the filing |
@@ -74,7 +72,15 @@ hash — `instructions = "<irs_stem>"` with `instr_pages` naming the instruction
 own instructions document and is archived; the IRS publishes no `i4868`/`i1040v`), `line_set =
 "f4868/2025"` etc., **no** `attachment_sequence`) plus its bindings as **top-level keys** (like every
 committed map; a `[bindings]` table would be a parse refusal under `deny_unknown_fields`) and its
-`[census]` (every one of the 17 / 15 boxes mapped or `no` with the reason in the table). `LineSet`
+`[census]` (every one of the 17 / 15 boxes mapped or `no` with the reason in the table). **Naming:**
+the 4868's nine numbered lines are bound as `line1`…`line9` in the form's numbering (the address cells
+by name), so the line→label witness holds all nine — which the reader cannot do today (N-I1, T5); the
+1040-V's four numbered boxes are bound by NAME (`box1_ssn`, `box2_spouse_ssn`, `box3_amount`,
+`box4_first_name`, the rest by name), because its labels are cell CAPTIONS printed ~21pt above and, for
+box 3, 130pt left of their fields — not line labels beside them (N-I2) — and the map is listed in
+`GRID_MAPS` for both years with that measured reason. **The fourth row gate** the new rows meet, beside
+the three of I-3: `every_mapped_line_lands_on_its_own_printed_label`, which today would red a
+conformant 4868 map three times per year (`f1_4` → "5", `f1_9`/`f1_10` → "9"). `LineSet`
 gains the four revisions; `Schema` gains `Form4868Map` and `Form1040VMap`; every exhaustive `match`
 on `Stem` reds until each site decides. TY2017 records both as absent (*"fillers begin at TY2024"*);
 `forms/2024/YEAR.toml` expected 17 → 19, `forms/2025/YEAR.toml` 15 → 17. **The three row gates the
@@ -88,22 +94,28 @@ new rows red, edited by T1 (I-3):** `map_rows.rs:298-302` (sequence-less ⇔ `f1
 group today and none is invented) writes `f4868.pdf` (owner-only, like `export-irs-pdf`) and prints
 what it filled, line by line, followed by the form's own sentence *"Don’t attach a copy of Form 4868
 to your return."* Refusals, in order:
-- the year has no stored return inputs, or its return is not computable → the same message
-  `export_full_return` already formats (`admin.rs:993-1012`: *"the {year} return is not computable
-  [{reason}]: {detail} — no forms were written"*); the `YearReadiness` sentence only for the
-  no-params case (no estimate exists; the instructions demand one *"as accurate as you can"*);
+- `export_full_return`'s three refusals, reused as they stand and in its order (`admin.rs:984`,
+  `:990`, `:995`): no bundled params → *"no full-return tables for {tax_year} — …"*; no stored inputs →
+  *"no return_inputs stored for {tax_year}"*; a screen refuses → *"the {tax_year} return is not
+  computable [{reason}]: {detail} — no forms were written"* (no estimate exists; the instructions
+  demand one *"as accurate as you can"*);
 - `--out` already holds a `manifest.txt` (the return's envelope directory) → refuse: the 4868 is
   mailed separately, and an unlabelled copy in the envelope is what the form forbids;
 - `--pay` negative or with cents → refuse; above line 6 → allowed.
 - **the pseudo-reconciled gate (C-2)**: when `state.pseudo_active()`, `require_attestation` first
   (no bytes on refusal) and `stamp_draft_watermark` on every page — the same guarantee `cli.rs:199-200`
   states for `export-irs-pdf`, and a form money is attached to may not be the exception.
-  `promote_export_gate` is **not** required: the 4868 discloses no position (decision, not gap).
+  `promote_export_gate` is **not** required for the 4868: a promoted tranche does lower line 24 and so
+  lines 4/6, but the §1.6662-4(f) disclosure obligation attaches to the RETURN Form 8275 is filed with,
+  not to the extension application; the 1040-V rides the packet path, which runs the gate first
+  (`admin.rs:621`), so it inherits it (decision, not gap).
 Warning: the clock (`BTCTAX_NOW`) is past the year's due date — `YearRecord::for_year(y).return_due`
-(TY2017's is 2018-04-17, so no month/day is hardcoded), **shifted two months when `--out-of-country`
-is passed** (the form's own page 2: *"If you’re out of the country and file a calendar year income tax
+(TY2017's is 2018-04-17, so no month/day is hardcoded), **replaced by June 15 of the following year, shifted by §7503 like any other due
+date, when `--out-of-country` is passed** (NOT `return_due + 2 months`: TY2017's April date was itself
+shifted to 04-17, and 04-17 + 2 months is 06-17 against the real 06-15 — pinned in T3; Treas. Reg.
+§1.6081-5 is not archived in `legal/`, so the rule rests on the form's own sentence and §7503) (the form's own page 2: *"If you’re out of the country"* *"and file a calendar year income tax
 return, you can pay the tax and"* *"file your return or this form by June 15, 2026."*) — printed, not
-refused (a useless form is not worse than silence). A recorded `payments.extension_payment` > 0 is
+refused (a useless form is not worse than silence). A recorded extension payment (as PRINTED on Schedule 3 line 10, whole dollars) is
 **the default for `--pay`** with the note *"$N is already recorded on the return as paid with the
 extension; --pay overrides it"* — never a refusal (I-6: the field records a payment, not a filing, and
 a filer who records first and prints second is doing it in the natural order).
@@ -161,8 +173,11 @@ port runbook as two more rows. Nothing here is year-specific except the archived
   row-gate edits of R1 with their widened predicates. Kills: the census accounts for 17 + 15 boxes per
   year; a dropped `[census]` entry reds; a row with an `attachment_sequence` whose extract prints none
   reds; `instr_pages` holds every row that declares pages.
-- **T2 — `Form4868Map` + `fill_form_4868(&PrintedReturn, &ReturnHeader, choices)`.** Lines 4–7 as the
-  table says (line 5 = line 33 − `Schedule3Lines.line10` — the printed return carries both; I-2).
+- **T2 — `Form4868Map` + `fill_form_4868(&PrintedReturn, choices)`.** The printed return carries the
+  header (`PrintedReturn.header`), the filing status (`pr.filing_status == FilingStatus::Mfj` — it is
+  NOT on `ReturnHeader`), `Form1040Lines` and `Option<Schedule3Lines>`, exactly as `fill_full_return`
+  takes it (`packet.rs:100`); passing the header twice would let the two diverge. Lines 4–7 as the
+  table says (line 5 = line 33 − `Schedule3Lines.line10`, 0 when `sch_3` is `None`; I-2).
   Kills: L5 > L4 → line 6 prints `0`; line 4 zero prints `0`; line 5 zero prints blank; default line 7
   = line 6, or the recorded payment when > 0; `--pay` negative or with cents → refuse; an excess-SS
   credit with no extension payment ⇒ line 5 = line 33, and with both ⇒ line 5 excludes only the
@@ -179,18 +194,28 @@ port runbook as two more rows. Nothing here is year-specific except the archived
   → no file, the note; line 37 = 0 → no file; MFS ⇒ box 2 and `f1_7`/`f1_8` blank; `--pay` > line 37 or
   negative → refuse; slice year → refusal naming the reason; pseudo gate + watermark; no test or
   code path passes either stem to `stapled`; a TY2024 end-to-end KAT.
-- **T5 — the label reader (I-4, M-9).** Measured today: `f4868--2025` → 7 labels, 17 boxes; 6 entry
-  lines (4–9), lines 1–3 do not join and a spurious `9a` heading needs a recorded reason;
-  `f1040v--2025` → *"no numbered label column found"* (its four labels print inline in one row band).
-  The reader gains the **row-band** form — when no label column exists but ≥ 3 numeric labels sit in
-  one row band, the x-aware in-row rule alone joins them — with the kill on `f1040v--2025` (4 joins).
-  No allowance moves (the 2025 `max_unwitnessed: 0` ratchet stays); the floors rise by whatever joins
-  (the 4868's 6, the 1040-V's 4, and their TY2024 twins), measured then written.
+- **T5 — the label reader: the two-column form (N-I1) and the caption form (N-I2).** Measured today:
+  `xtask label-boxes f4868--2025` joins Part I's boxes to Part II's labels — `f1_4` → "5", `f1_5` → "6",
+  `f1_6` → "8", `f1_9` → "9", `f1_10` → "9" — because `witness_text` keeps exactly ONE label column
+  and Part II's margin wins it 7 labels to 3; `f1040v--2025` → *"no numbered label column found"*, and
+  the in-row predicate replayed over its fixture joins 0 of 15 boxes (the captions sit above the cells,
+  outside the ±2pt / 12pt window). So: (i) the reader keeps EVERY scored label column and resolves a
+  box against the column whose x-range contains the box's left edge, falling back to the in-row rule
+  — kill on `f4868--2025`: `f1_4` → "1", `f1_9` → "2", `f1_10` → "3", and lines 4–9 unchanged; the
+  37 committed maps' joins must not move (261/215, 0 wrong); (ii) the 1040-V is NOT taught to the
+  reader: its cells are named keys, `("2024", "f1040v", …)` and `("2025", "f1040v", …)` are `GRID_MAPS`
+  entries with the caption reason, and `numbered_line_keys` sees 0 keys, so `map_reach_problem` is the
+  recorded blank. Ratchets: NEITHER moves — 2024's `max_unwitnessed: 1` (spent on `f8283`) and 2025's
+  `0` both stay, because the 4868 is witnessed once (i) lands and the 1040-V is a grid, not an
+  unwitnessed map. Floors: the 4868 contributes its nine numbered lines per year — expected
+  261 → 270 (2024) and 215 → 224 (2025), CONFIRMED by the T5 run and written into the ratchet comments
+  with this cause; the spurious `9a` heading on the 4868 gets a recorded reason.
 - **T6 — the surfaces.** `report` names the extension and voucher paths; `YearReadiness::sentence`
   unchanged; the help text names both `--pay` flags with their different ceilings and defaults.
 
 ## Out of scope
 
+- Teaching the label reader the caption form (the 1040-V is a recorded grid instead).
 - Electronic payment (Direct Pay / EFTPS) and the confirmation number; estimated-tax vouchers
   (Form 1040-ES); state extensions; Form 2350; a second extension beyond the line-8 box.
 - `payments.extension_payment` becoming `Option<Usd>` (FR-59); `cite-check` over specs (FR-60).

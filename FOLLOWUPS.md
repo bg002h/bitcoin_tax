@@ -6295,9 +6295,13 @@ build, each with an owning phase.
   extension was filed** (spec 4868/1040-V r1 review C-1). The field exists, is collected on both
   surfaces and prints (`return_inputs.rs:708`, `return_1040.rs:2338`, `printed.rs:1543`); the open
   question is whether it becomes `Option<Usd>` so an unasked line 10 is a blank rather than testimony.
-  Blast radius ~10 sites: `return_1040.rs:2338`, `:2451`, `printed.rs:1543`, `classifier.rs:782`,
-  `return_refuse.rs:815`, `sections.rs:1043-1048`, `coverage.rs:611`, `scrub_axis.rs:344`,
-  `testonly.rs:361`, two fixtures. **Owning phase: the answered-ness sweep (G-11 class), not the 4868
+  Blast radius: **26 mentions in 15 files** (`grep -rn extension_payment crates/ docs/`), hinging on
+  `return_1040.rs:1809` `pub extension_payment: Usd` on `PrintedInputs` (the declaration a retype must
+  change for a blank to survive to `printed.rs:1543`), plus `return_1040.rs:2338`, `:2451`, `:8544`,
+  `printed.rs:1543`, `:1755`, `classifier.rs:782`, `return_refuse.rs:815`, `sections.rs:1043-1048`,
+  `coverage.rs:611`, `scrub_axis.rs:344`, `testonly.rs:361`, `btctax-cli/src/testonly.rs:157`,
+  `btctax-forms/tests/attestation.rs:1210`, `full_return_forms.rs:671`, the
+  `nine_dependents_amt_inputs.toml:103` fixture and `docs/examples/examples.md:668`. **Owning phase: the answered-ness sweep (G-11 class), not the 4868
   build.**
 - **FR-60 — `xtask cite-check` covers two documents; every `design/SPEC_*.md` that quotes an archived
   extract is unchecked** (spec 4868/1040-V r1 review M-1: four spans in one spec deviated, none
