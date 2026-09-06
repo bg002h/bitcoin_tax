@@ -2309,6 +2309,292 @@ fn pay_by_check_on_a_crypto_slice_year_refuses_naming_the_reason() {
     );
 }
 
+/// ★★★ KILL (seam review I-1) — **every `--pay` refusal is PRE-BYTE: `--out` is untouched.**
+///
+/// The refusals themselves were already tested; what was NOT tested is *when* they fire. They ran
+/// inside `write_payment_voucher`, i.e. after every packet PDF was on disk and before `manifest.txt`
+/// was written — so a refused `--pay 100.25` left the return's forms in `--out` with no manifest
+/// beside them. `btctax extension` decides "is this the return's envelope directory?" by the
+/// presence of `manifest.txt` ALONE, so it read that directory as empty ground and wrote `f4868.pdf`
+/// into it: the one outcome that guard exists to prevent, reached by an ordinary filer typo.
+///
+/// A FRESH `--out` per refusal, because `wrote_nothing` cannot distinguish "wrote nothing" from
+/// "wrote nothing new". The four cases are the whole `--pay` match; the second half of the test
+/// proves the same directory still accepts a legitimate run, so a command that refused everything
+/// could not pass.
+#[test]
+fn every_pay_refusal_is_pre_byte_and_leaves_the_out_directory_untouched() {
+    let (_d, vault, _out) = owing_vault();
+    let refuse = |pay: btctax_core::Usd, needle: &str| {
+        let dir = tempfile::tempdir().unwrap();
+        let err = cmd::admin::export_irs_pdf(
+            &vault,
+            &pp(),
+            dir.path(),
+            2024,
+            &[],
+            None,
+            btctax_cli::cmd::admin::VoucherChoice {
+                pay_by_check: true,
+                pay: Some(pay),
+            },
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains(needle), "expected {needle:?} in: {msg}");
+        assert!(
+            matches!(err, btctax_cli::CliError::Usage(_)),
+            "a flag error is a USAGE error, not a FormFill one: {err:?}"
+        );
+        // ★ THE POINT: not merely "no manifest" but NOTHING — the directory is as the filer left it.
+        assert!(
+            wrote_nothing(dir.path()),
+            "★ a refused --pay must leave --out untouched; found {:?}",
+            std::fs::read_dir(dir.path())
+                .unwrap()
+                .filter_map(Result::ok)
+                .map(|e| e.file_name())
+                .collect::<Vec<_>>()
+        );
+    };
+
+    refuse(dec!(-1), "--pay must be >= 0");
+    refuse(dec!(100.25), "WHOLE DOLLARS");
+    refuse(dec!(99_999_999), "is more than the");
+    // ★ M-2: `--pay 0 --pay-by-check` on a return that OWES. It used to reach `fill_form_1040v` and
+    //   surface that filler's own refusal — "a return that owes nothing needs no Form 1040-V", a
+    //   sentence describing the wrong state, in a class that does not read as a flag error.
+    refuse(dec!(0), "--pay $0 writes no voucher");
+
+    // …and the identical call with a legitimate amount WRITES, so the test cannot be passed by a
+    // command that refuses everything.
+    let ok_dir = tempfile::tempdir().unwrap();
+    let rep = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        ok_dir.path(),
+        2024,
+        &[],
+        None,
+        btctax_cli::cmd::admin::VoucherChoice {
+            pay_by_check: true,
+            pay: Some(dec!(1000)),
+        },
+    )
+    .expect("a whole-dollar partial payment below line 37 is legitimate");
+    assert!(rep.form_1040v_path.is_some());
+    assert!(ok_dir.path().join("manifest.txt").exists());
+}
+
+/// ★★★ KILL (seam review I-1, the CONSEQUENCE) — after a refused `--pay`, `btctax extension` writing
+/// into that same directory must not be walking into a half-written packet.
+///
+/// This is the defect stated as the filer sees it rather than as a directory listing: the refusal
+/// and the extension guard are in different commands, and the seam between them is what broke. With
+/// the refusal pre-byte the directory is genuinely empty, so the extension is written on clean
+/// ground — and the assertion that makes it a kill is that NO packet form is in there beside it.
+#[test]
+fn a_refused_pay_does_not_leave_a_packet_the_extension_guard_reads_as_empty_ground() {
+    let (_d, vault, out) = owing_vault();
+    let err = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        btctax_cli::cmd::admin::VoucherChoice {
+            pay_by_check: true,
+            pay: Some(dec!(100.25)),
+        },
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("WHOLE DOLLARS"), "{err}");
+
+    let rep = cmd::admin::extension(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        None,
+        false,
+        None,
+        time::macros::datetime!(2026-02-01 12:00 UTC),
+    )
+    .expect("the directory is clean, so the extension is legitimately written here");
+    assert!(rep.path.exists());
+
+    let left: Vec<String> = std::fs::read_dir(out.path())
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        left,
+        vec!["f4868.pdf".to_string()],
+        "★ the extension application is ALONE — a return form beside it is the defect"
+    );
+}
+
+/// ★★★ KILL (seam review I-2) — the MIRROR of `extension`'s refusal (4): a `--out` that already holds
+/// `f4868.pdf` refuses the return packet, before any byte, on BOTH pipelines.
+///
+/// The guard was one-directional and the unguarded direction is the one that happens FIRST in time:
+/// `extension` in April, `export-irs-pdf` in October, one `--out` for the year. The packet was
+/// written AROUND the extension application with no refusal, no warning, and a manifest that never
+/// mentions it — so a filer collating the directory by filename would attach the one page whose own
+/// page 2 says *"Don't attach a copy of Form 4868 to your return."*
+#[test]
+fn a_directory_already_holding_an_f4868_refuses_the_return_packet_on_both_pipelines() {
+    let seed = |dir: &std::path::Path| {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(
+            dir.join("f4868.pdf"),
+            b"%PDF-1.7
+",
+        )
+        .unwrap();
+    };
+    let check = |err: btctax_cli::CliError, dir: &std::path::Path| {
+        let msg = err.to_string();
+        assert!(
+            msg.contains("f4868.pdf") && msg.contains("Don't attach a copy of Form 4868"),
+            "the refusal names what it saw and quotes the form: {msg}"
+        );
+        let left: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            left,
+            vec!["f4868.pdf".to_string()],
+            "★ no packet file appeared — the extension application is untouched"
+        );
+    };
+
+    // (a) the FULL-RETURN pipeline.
+    let (_d, vault, out) = owing_vault();
+    seed(out.path());
+    let err = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        btctax_cli::cmd::admin::VoucherChoice {
+            pay_by_check: true,
+            pay: None,
+        },
+    )
+    .expect_err("the extension's directory is not where the return goes");
+    check(err, out.path());
+
+    // (b) the CRYPTO-SLICE pipeline — same guard, same message, above the dispatch so it cannot
+    //     drift between the two.
+    let (_dir2, vault2) = make_vault(&real_events_2024());
+    let out2 = tempfile::tempdir().unwrap();
+    seed(out2.path());
+    let err = cmd::admin::export_irs_pdf(
+        &vault2,
+        &pp(),
+        out2.path(),
+        2024,
+        &[],
+        None,
+        Default::default(),
+    )
+    .expect_err("the slice may not be written on top of an extension either");
+    check(err, out2.path());
+}
+
+/// ★ KILL (seam review M-1) — `--pay` WITHOUT `--pay-by-check` is noted on the CRYPTO-SLICE arm too.
+///
+/// The full-return path already said so ("--pay $N was IGNORED"), but that clause is built inside
+/// `write_payment_voucher`, which the slice arm never reaches — so on a crypto-slice year the amount
+/// the filer typed vanished with no message at all. Same filer slip, same class, same answer: a
+/// note, never a refusal.
+#[test]
+fn a_pay_without_the_flag_is_noted_on_the_crypto_slice_arm_too() {
+    let (_dir, vault) = make_vault(&real_events_2024());
+    let out = tempfile::tempdir().unwrap();
+    let rep = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        &[],
+        None,
+        btctax_cli::cmd::admin::VoucherChoice {
+            pay_by_check: false,
+            pay: Some(dec!(500)),
+        },
+    )
+    .expect("an inapplicable flag may not cost the filer every form");
+    assert!(
+        rep.full_return_manifest.is_none(),
+        "premise: this is the CRYPTO-SLICE arm"
+    );
+    assert!(rep.form_1040v_path.is_none(), "no voucher on a slice year");
+    let note = rep
+        .form_1040v_note
+        .expect("a discarded --pay is never silent, on either pipeline");
+    assert!(
+        note.contains("--pay $500 was IGNORED") && note.contains("no full-return inputs"),
+        "the note names the flag it dropped and why: {note}"
+    );
+
+    // ★★ …and it REACHES THE FILER. The note was printed inside the full-return arm of `main.rs`,
+    //    which the slice dispatch never enters — so a note computed here and read by nobody would
+    //    satisfy every assertion above while changing nothing on the filer's screen.
+    let out_cli = tempfile::tempdir().unwrap();
+    let run = std::process::Command::new(env!("CARGO_BIN_EXE_btctax"))
+        .args([
+            "--vault",
+            vault.to_str().unwrap(),
+            "export-irs-pdf",
+            "--out",
+            out_cli.path().to_str().unwrap(),
+            "--tax-year",
+            "2024",
+            "--pay",
+            "500",
+        ])
+        .env("BTCTAX_PASSPHRASE", "pw")
+        .output()
+        .expect("the btctax binary must execute");
+    let stderr =
+        String::from_utf8_lossy(&run.stdout).into_owned() + &String::from_utf8_lossy(&run.stderr);
+    assert!(
+        run.status.success(),
+        "the export itself still succeeds: {stderr}"
+    );
+    assert!(
+        stderr.contains("--pay $500 was IGNORED"),
+        "★ the note must reach the filer's screen on the slice arm, not just the report struct: \
+         {stderr}"
+    );
+
+    // …and a run with no --pay at all is SILENT here: the note is about the flag, not about the year.
+    let out2 = tempfile::tempdir().unwrap();
+    let quiet = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        out2.path(),
+        2024,
+        &[],
+        None,
+        Default::default(),
+    )
+    .unwrap();
+    assert!(
+        quiet.form_1040v_note.is_none(),
+        "no --pay ⇒ nothing to report as discarded: {:?}",
+        quiet.form_1040v_note
+    );
+}
+
 /// ★ KILL — a pseudo-reconciled voucher is attestation-gated and DRAFT-watermarked, exactly like the
 /// packet it rides with (spec C-2). A page with a CHEQUE attached may not be the exception.
 #[test]
@@ -2393,6 +2679,16 @@ fn no_code_path_pushes_the_4868_or_the_voucher_into_the_stapled_packet() {
     // `fill_full_return` is the ONLY producer of the `Vec<NamedForm>` that reaches `stapled`, and it
     // destructures `PrintedForms` with no `..` — so a form can only get in there by being pushed by
     // name inside this file. Neither stem is.
+    //
+    // ★ (seam review M-5) WHAT THIS LEG CANNOT SEE, stated so a future reader does not mistake it
+    //   for the whole gate: it is a STRING-LITERAL grep over everything after the `fn` header (not
+    //   the function body), so a push built from `Stem::F1040v.file_stem()` would evade it, and a
+    //   future `#[cfg(test)]` case in `packet.rs` naming either stem would red it spuriously. The
+    //   guarantee is really held by
+    //   `pay_by_check_writes_a_voucher_beside_the_packet_with_line_37_in_box_3`, which reads the
+    //   MANIFEST btctax actually wrote and asserts the voucher is absent from the stapling list —
+    //   an outcome check that no spelling of the push can slip past. This leg is the cheap early
+    //   warning beside it.
     let body = packet_src
         .split("pub fn fill_full_return")
         .nth(1)

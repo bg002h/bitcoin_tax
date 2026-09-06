@@ -785,6 +785,16 @@ fn run() -> Result<ExitCode, CliError> {
             //   this tool produced — and this one is handed to them with a cheque attached. One
             //   constant, two arms, so the two can never drift.
             eprintln!("\n⚠ {}", btctax_cli::NOT_AUTHORISED_FOR_FILING);
+            // ★★★ (seam review I-3) …and the Approach-B experimental disclosure, printed exactly as
+            //   the two export arms print it. `btctax extension` IS an export report, and its
+            //   dependence on Approach-B is direct: a live promoted tranche raises basis, lowering
+            //   the capital gain, lowering Form 1040 line 24 — which IS Form 4868 line 4, hence
+            //   line 6 and the default line 7. The filer writes a CHEQUE for that figure, so the
+            //   notice whose own text says defects affecting what gets FILED have shipped may not be
+            //   the thing that is missing here. INTERFACE-only (stderr), never written to `--out`.
+            if report.experimental_notice_active {
+                eprint!("\n⚠ {}", btctax_core::experimental::NOTICE.plain_text());
+            }
         }
         Command::ExportIrsPdf {
             out,
@@ -959,12 +969,6 @@ fn run() -> Result<ExitCode, CliError> {
                 if !report.advisories.is_empty() {
                     eprint!("{}", render::render_advisories(&report.advisories));
                 }
-                // ★ The voucher NOTE: the return owes but no --pay-by-check was passed, the flag was
-                //   passed on a return that owes nothing, or a PARTIAL payment leaves interest
-                //   running. Silence about a balance due is the one answer a tax tool may not give.
-                if let Some(note) = &report.form_1040v_note {
-                    eprintln!("note: {note}");
-                }
             } else {
                 // The crypto slice only: Schedule D Part III is answered as far as the printed page
                 // allows. Line 17 reads lines 15 and 16, both printed above it, so btctax answers it;
@@ -976,6 +980,17 @@ fn run() -> Result<ExitCode, CliError> {
                      not because they are zero; 20 also asks whether you are filing Form 4952; 21 is \
                      the §1211 loss limit; 22 needs Form 1040 line 3a (qualified dividends)."
                 );
+            }
+            // ★ The voucher NOTE: the return owes but no --pay-by-check was passed, the flag was
+            //   passed on a return that owes nothing, a PARTIAL payment leaves interest running, or
+            //   — seam review M-1 — a `--pay` was given on a CRYPTO-SLICE year, where there is no
+            //   Form 1040 line 37 for box 3 to carry and the amount goes nowhere. Silence about a
+            //   balance due, or about a payment the filer typed and did not get, is the one answer a
+            //   tax tool may not give. Printed OUTSIDE the dispatch branch so BOTH pipelines reach
+            //   it: inside the full-return arm it was structurally unreachable from the slice. The
+            //   full-return arm's output order is unchanged — this was the last line of that arm.
+            if let Some(note) = &report.form_1040v_note {
+                eprintln!("note: {note}");
             }
             // [I5] loud advisory: rows that MAY belong on a separate broker-reported 8949. The box
             // pairing is year-aware (1099-B / A/B/D/E / C/F pre-2025; 1099-DA / G/H/J/K / I/L from

@@ -235,7 +235,9 @@ port runbook as two more rows. Nothing here is year-specific except the archived
   "unreadable" and "declared grid" indistinguishable. Floors: `+N per year, measured by the T5 run and
   pasted into the ratchet comment with this cause` (expected 5 per year — lines 4–8 — but written only
   after the run); the spurious `9a` heading on the 4868 gets a recorded reason.
-- **T6 — the surfaces.** `report` names the extension and voucher paths; `YearReadiness::sentence`
+- **T6 — the surfaces.** Each command's own report names its path (`extension` prints the `f4868.pdf`
+  it wrote; `export-irs-pdf` lists `f1040v.pdf` separately from the stapled packet), and `report`'s
+  AMOUNT OWED line points at both commands by name; `YearReadiness::sentence`
   unchanged; the help text names both `--pay` flags with their different ceilings and defaults.
 
 ## Out of scope

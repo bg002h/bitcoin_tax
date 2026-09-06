@@ -668,6 +668,99 @@ fn full_return_export_notice_reaches_stderr_not_stdout() {
     );
 }
 
+/// ★★★ (seam review I-3) `btctax extension` emits the notice on stderr, never stdout — and does NOT
+/// emit it for a filer whose Approach-B events are all voided.
+///
+/// The extension IS an export report, and its dependence on Approach-B is direct: a live promoted
+/// tranche raises basis, lowering the capital gain, lowering Form 1040 line 24 — which IS Form 4868
+/// line 4, hence line 6 and the default line 7. The filer writes a CHEQUE for that figure. The
+/// no-authorisation notice was carried to this arm and this one was not; the pair below is what
+/// makes the fix mean something, since an arm that always printed it would pass the first half alone.
+#[test]
+fn extension_notice_reaches_stderr_not_stdout_and_not_at_all_when_voided() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = build_promoted_vault(dir.path());
+    give_full_return_inputs(&vault, 2024);
+
+    let out = dir.path().join("out");
+    let (code, stdout, stderr) = run_btctax(
+        &vault,
+        &[
+            "extension",
+            "--year",
+            "2024",
+            "--out",
+            out.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert!(
+        out.join("f4868.pdf").exists(),
+        "premise: the extension was actually written"
+    );
+    assert!(
+        stderr.contains(NOTICE_MARK) && stderr.contains(NOTICE_FACT),
+        "the notice must reach stderr on the extension: {stderr:?}"
+    );
+    assert!(
+        !stdout.contains(NOTICE_MARK),
+        "the notice must never reach stdout: {stdout:?}"
+    );
+    // …and it is INTERFACE-only: nothing of it rides into the directory the filer mails.
+    let written = std::fs::read(out.join("f4868.pdf")).unwrap();
+    assert!(
+        !String::from_utf8_lossy(&written).contains(NOTICE_MARK),
+        "the notice may never be written into the export directory"
+    );
+
+    // The other half: a tranche DECLARED and then VOIDED leaves Approach-B unused, so the same
+    // command on the same year prints nothing.
+    let dir2 = tempfile::tempdir().unwrap();
+    let vault2 = dir2.path().join("vault.pgp");
+    cmd::init::run(&vault2, &pp(), &dir2.path().join("k.asc")).unwrap();
+    let tranche_id = {
+        let mut s = Session::open(&vault2, &pp()).unwrap();
+        let id = append_decision(
+            s.conn(),
+            EventPayload::DeclareTranche(DeclareTranche {
+                sat: 10_000_000,
+                wallet: wallet(),
+                window_start: date!(2020 - 01 - 01),
+                window_end: date!(2020 - 12 - 31),
+            }),
+            now(),
+            UtcOffset::UTC,
+            None,
+        )
+        .unwrap();
+        s.save().unwrap();
+        id
+    };
+    cmd::reconcile::void(&vault2, &pp(), &tranche_id.canonical(), now()).unwrap();
+    give_full_return_inputs(&vault2, 2024);
+
+    let out2 = dir2.path().join("out");
+    let (code2, _stdout2, stderr2) = run_btctax(
+        &vault2,
+        &[
+            "extension",
+            "--year",
+            "2024",
+            "--out",
+            out2.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(code2, 0, "stderr: {stderr2}");
+    assert!(
+        out2.join("f4868.pdf").exists(),
+        "premise: this run wrote its form too, so the difference is the NOTICE"
+    );
+    assert!(
+        !stderr2.contains(NOTICE_MARK),
+        "★ a voided-only tranche must not trigger the notice on the extension either: {stderr2:?}"
+    );
+}
+
 /// The guard, restated for the full-return dispatch: the notice appears in NOTHING the export
 /// directory produces — every `full_return_paths` PDF (byte scan; the exact sequence prefix is a
 /// map/year detail this test does not need to know), the manifest, `form_8275.txt`, and

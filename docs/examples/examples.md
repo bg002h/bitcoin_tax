@@ -1084,6 +1084,8 @@ Schedule D (raw pre-netting part totals) — tax year 2024
   TOTAL TAX (L24):          114027.00
   Total payments (L33):     97350.00
   → AMOUNT OWED (L37):      16677.00
+    -> btctax export-irs-pdf --tax-year 2024 --pay-by-check   (Form 1040-V, the payment voucher)
+    -> btctax extension --year 2024 --out <dir>                (Form 4868, if you need more time to FILE — it never extends the time to PAY)
 
   ── Two DIFFERENT questions — NOT reconciled (SPEC §6) ──
   • Absolute TOTAL TAX (this filed return, WITH crypto): 114027.00

@@ -1603,6 +1603,79 @@ fn dual_report_renders_absolute_return_with_section_6_labels() {
     );
 }
 
+/// ★ KILL (seam review M-3) — the AMOUNT OWED line NAMES the two instruments a balance due has.
+///
+/// `btctax report --tax-year` is where a filer learns they owe, and it mentioned neither Form 4868
+/// nor Form 1040-V anywhere — so a filer who has not read `btctax --help` learned that they owe and
+/// not that btctax can print either. Both halves here, because a pointer printed unconditionally
+/// would be worse than none: a REFUND year must not be told to write a cheque.
+#[test]
+fn an_owing_year_names_the_voucher_and_the_extension_and_a_refund_year_does_not() {
+    use btctax_core::tax::return_inputs::{Owner, ReturnInputs, W2};
+
+    let render = |withheld: btctax_core::Usd| -> String {
+        let csv_dir = tempfile::tempdir().unwrap();
+        let csv = write_lt_sell_2024(csv_dir.path());
+        let (_dir, vault) = make_vault_with(&csv);
+        {
+            let mut s = Session::open(&vault, &pp()).unwrap();
+            btctax_cli::return_inputs::set(
+                s.conn(),
+                2024,
+                &btctax_core::tax::testonly::answered(ReturnInputs {
+                    filing_status: FilingStatus::Single,
+                    header: adult_filer_header(),
+                    w2s: vec![W2 {
+                        owner: Owner::Taxpayer,
+                        box1_wages: dec!(80000),
+                        box2_fed_withheld: withheld,
+                        box3_ss_wages: dec!(80000),
+                        box5_medicare_wages: dec!(80000),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }),
+            )
+            .unwrap();
+            s.save().unwrap();
+        }
+        cmd::tax::report_tax_year(&vault, &pp(), 2024, dec!(0))
+            .unwrap()
+            .dual_report
+            .expect("a ReturnInputs-provenance year renders the dual report")
+    };
+
+    // No withholding on $80k of wages ⇒ the return OWES.
+    let owing = render(dec!(0));
+    assert!(
+        owing.contains("AMOUNT OWED (L37)"),
+        "premise: this return owes:\n{owing}"
+    );
+    assert!(
+        owing.contains("btctax export-irs-pdf --tax-year 2024 --pay-by-check"),
+        "the payment voucher must be named, with the flag that writes it:\n{owing}"
+    );
+    assert!(
+        owing.contains("btctax extension --year 2024"),
+        "…and the extension application, with its year:\n{owing}"
+    );
+    assert!(
+        owing.contains("never extends the time to PAY"),
+        "…and the one thing a filer must not misread about an extension:\n{owing}"
+    );
+
+    // Withholding far above the tax ⇒ a REFUND, and neither instrument applies.
+    let refund = render(dec!(50000));
+    assert!(
+        refund.contains("REFUND (L35a)"),
+        "premise: this return refunds:\n{refund}"
+    );
+    assert!(
+        !refund.contains("--pay-by-check") && !refund.contains("btctax extension"),
+        "★ a refund year must not be pointed at a payment voucher:\n{refund}"
+    );
+}
+
 /// ★★★ **K14 — the PRIOR YEAR'S WORKSHEET figure is the M4 authority for a floor year.**
 ///
 /// (A)'s side-effect, and it was IMPOSSIBLE to satisfy before the lift: year Y−1 at the floor with a

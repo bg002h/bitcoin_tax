@@ -297,23 +297,42 @@ fn every_committed_map_has_a_row_that_parses_and_all_four_kills_are_green() {
             r.year,
             r.form
         );
-        // ★ R1 / spec I-3: this used to read `is_none() == (form == "f1040")`, which was a
-        //   HAND-LIST of one wearing an equality. The predicate that actually holds the value is
-        //   kill 4 above — every row's `attachment_sequence` is compared against
-        //   `printed_sequence(<that year's archived extract>)`, so a wrong number, a missing one and
-        //   an invented one are all caught from the FORM. What survives here is the shape assertion:
-        //   the set of rows whose extract prints no sequence number may only be these three forms,
-        //   so a fourth stem quietly losing its number still reds even before the extract is read.
-        assert_eq!(
-            r.attachment_sequence.is_none(),
-            matches!(r.form.as_str(), "f1040" | "f4868" | "f1040v"),
-            "{}/{}: the sequence number is absent exactly on the rows whose extract prints none — \
-             the 1040 itself, Form 4868 (mailed separately: \"Don\u{2019}t attach a copy of Form 4868 \
-             to your return.\") and Form 1040-V (\"Do not staple or attach this voucher to your \
-             payment or return.\")",
-            r.year,
-            r.form
-        );
+        // ★ R1 / spec I-3, then seam review N-1: this read `is_none() == (form == "f1040")` — a
+        //   HAND-LIST of one wearing an equality — and then a hand-list of three. Both spellings
+        //   ENUMERATED the outcome someone happened to see. The predicate is now COMPUTED from the
+        //   same archived extract kill 4 reads: `attachment_sequence` is absent exactly when the
+        //   form's own printed page carries no sequence number. A fourth stem quietly losing its
+        //   number reds from the FORM, with no list to remember to extend.
+        //
+        //   Rows whose extract does not exist at all (the five TY2017 templates — `design/forms/`
+        //   has no 2017 archive) have nothing here to check against. They are skipped by NAME from
+        //   `SEQUENCE_UNVERIFIABLE`, whose membership is itself asserted above and is shrink-only —
+        //   never by "the read failed", which would let a wrong path turn this into a check that
+        //   silently never runs.
+        let extract = ws
+            .join("design/forms/extract")
+            .join(format!("{}--{}.txt", r.irs_stem, r.year));
+        if !SEQUENCE_UNVERIFIABLE.contains(&(r.year, r.form.as_str())) {
+            let text = std::fs::read_to_string(&extract).unwrap_or_else(|e| {
+                panic!(
+                    "{}/{}: its archived extract must be READABLE at {} — the sequence shape is \
+                     computed from the form, never skipped: {e}",
+                    r.year,
+                    r.form,
+                    extract.display()
+                )
+            });
+            assert_eq!(
+                r.attachment_sequence.is_none(),
+                printed_sequence(&text).is_none(),
+                "{}/{}: the sequence number is absent exactly on the rows whose extract prints none — \
+                 the 1040 itself, Form 4868 (mailed separately: \"Don\u{2019}t attach a copy of Form 4868 \
+                 to your return.\") and Form 1040-V (\"Do not staple or attach this voucher to your \
+                 payment or return.\")",
+                r.year,
+                r.form
+            );
+        }
         // irs_stem: the two aliases and nothing else.
         let expected_irs = match r.form.as_str() {
             "schedule_d" => "f1040sd",

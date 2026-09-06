@@ -649,6 +649,24 @@ pub(crate) fn export_irs_pdf_from_session(
     attest: Option<&str>,
     voucher: VoucherChoice,
 ) -> Result<IrsPdfReport, CliError> {
+    // ★★★ (seam review I-2) The MIRROR of `extension`'s refusal (4), and the direction that happens
+    // FIRST in time: April's `btctax extension` writes `f4868.pdf`, October's `export-irs-pdf` reuses
+    // the same `--out`, and the whole packet lands AROUND the extension application — no refusal, no
+    // warning, and a manifest that does not mention it, so a filer collating that directory by
+    // filename would attach the one page the form forbids attaching ("Don't attach a copy of Form
+    // 4868 to your return.", page 2). The guard was one-directional; this is the other direction, in
+    // both pipelines, before any byte. It costs the filer a `--out` argument.
+    if out_dir.join("f4868.pdf").exists() {
+        return Err(CliError::Usage(format!(
+            "{} already holds f4868.pdf — that is an EXTENSION application, and Form 4868 is MAILED \
+             SEPARATELY, weeks before the return exists. The form's own page 2 says \"Don't attach a \
+             copy of Form 4868 to your return.\", so the return packet may not be written on top of \
+             it: a filer collating this directory by filename would put it in the envelope. Write \
+             the return to its own --out directory.",
+            out_dir.display()
+        )));
+    }
+
     // ★ THE DISPATCH (P6.5). Exactly one function decides which pipeline runs, and the two write
     // NON-OVERLAPPING filenames, so artifacts from two runs can never be collated into a chimera
     // return: the full packet writes `f1040.pdf`, `f1040s1.pdf`, … + a manifest; the crypto slice
@@ -959,9 +977,19 @@ pub(crate) fn export_irs_pdf_from_session(
         // line is the filer's.
         hand_marks: Vec::new(),
         // The crypto slice never reaches a Form 1040 line 37, and `--pay-by-check` already refused
-        // above — so there is neither a voucher nor a note to give.
+        // above — so there is no voucher to write.
         form_1040v_path: None,
-        form_1040v_note: None,
+        // ★ (seam review M-1) …but a `--pay` given WITHOUT `--pay-by-check` may not VANISH here
+        //   either. The full-return path already says so outright (the "was IGNORED" clause in
+        //   `write_payment_voucher`); this arm never reaches that function, so the same filer slip
+        //   was silent on a crypto-slice year. Same class, same answer: a note, never a refusal.
+        form_1040v_note: voucher.pay.map(|p| {
+            format!(
+                "--pay ${p} was IGNORED: it sets Form 1040-V box 3, and no voucher was written — \
+                 {tax_year} has no full-return inputs, so there is no Form 1040 line 37 for box 3 to \
+                 carry (see `income import`)."
+            )
+        }),
         full_return_paths: Vec::new(),
         full_return_manifest: None,
         forms_ignored_full_return: false, // crypto-slice path honors --forms
@@ -1004,10 +1032,13 @@ pub const ENCLOSE_LOOSE_LINE: &str = "ENCLOSE LOOSE — do not staple: f1040v.pd
 /// | `0`   | yes | NO file, and a note saying the return owes nothing |
 /// | `0`   | no  | nothing at all — there is nothing to say |
 ///
-/// `--pay` (a partial payment) is refused above line 37 or below zero. That ceiling is the
-/// asymmetry with `btctax extension --pay`, which has none: the voucher pays a COMPUTED balance, so
-/// more than it is a filer error; the 4868's line 7 pays against an ESTIMATE, which a filer may
-/// deliberately overshoot to limit interest.
+/// `--pay` (a partial payment) is refused above line 37, below zero, at zero, or with cents — but
+/// NOT HERE: all four refusals run PRE-BYTE in [`export_full_return`], immediately after
+/// `assemble_printed_return` (seam review I-1). By the time this function runs the packet is already
+/// on disk and `manifest.txt` is not, which is a state `btctax extension`'s own guard cannot
+/// distinguish from an empty directory. That ceiling is the asymmetry with `btctax extension --pay`,
+/// which has none: the voucher pays a COMPUTED balance, so more than it is a filer error; the 4868's
+/// line 7 pays against an ESTIMATE, which a filer may deliberately overshoot to limit interest.
 fn write_payment_voucher(
     printed: &btctax_core::tax::packet::PrintedReturn,
     out_dir: &Path,
@@ -1057,31 +1088,17 @@ fn write_payment_voucher(
     }
 
     // The amount: line 37 as printed, or the partial payment the filer chose.
-    let amount = match voucher.pay {
-        None => owed,
-        Some(p) if p < Usd::ZERO => {
-            return Err(CliError::Usage(format!(
-                "--pay must be >= 0 (got {p}) — a negative payment is not a payment"
-            )))
-        }
-        Some(p) if p > owed => {
-            return Err(CliError::Usage(format!(
-                "--pay ${p} is more than the ${owed} this return owes (Form 1040 line 37). The \
-                 voucher pays a COMPUTED balance, so paying above it is a slip rather than a choice \
-                 the form names — drop --pay to pay the whole ${owed}, or lower it for a partial \
-                 payment. (`btctax extension --pay` has no such ceiling: line 7 there pays against an \
-                 ESTIMATE, which you may deliberately overshoot to limit interest.)"
-            )))
-        }
-        Some(p) if p != p.trunc() => {
-            return Err(CliError::Usage(format!(
-                "--pay must be WHOLE DOLLARS (got {p}). The return is printed in whole dollars, so a \
-                 voucher carrying cents would disagree with the Form 1040 it accompanies about what \
-                 is being paid."
-            )))
-        }
-        Some(p) => p,
-    };
+    //
+    // ★★★ (seam review I-1) EVERY `--pay` REFUSAL WAS HOISTED OUT OF HERE. This function runs with
+    // the packet already on disk and `manifest.txt` not yet written, so a refusal at this point left
+    // a directory that `btctax extension`'s guard reads as empty ground. All four now run in
+    // `export_full_return` right after `assemble_printed_return`, under the SAME
+    // `pay_by_check && owed > 0` guard this match sat behind. Nothing may be added back here.
+    let amount = voucher.pay.unwrap_or(owed);
+    debug_assert!(
+        amount > Usd::ZERO && amount <= owed && amount == amount.trunc(),
+        "--pay is validated PRE-BYTE upstream; {amount} reached the voucher writer against ${owed}"
+    );
 
     let bytes = btctax_forms::fill_form_1040v(printed, tax_year, amount)?;
     let bytes = if watermarked {
@@ -1306,6 +1323,65 @@ fn export_full_return(
         // declaration, or an MFJ return with no spouse) — no longer always "fix the identity" (P9 §3.2).
         CliError::Usage(format!("the {tax_year} return cannot be printed: {e}"))
     })?;
+
+    // ★★★ (seam review I-1 + M-2) EVERY `--pay` REFUSAL, hoisted out of `write_payment_voucher` to
+    // HERE — the first moment Form 1040 line 37 exists, and still well before `fill_full_return` /
+    // `mkdir_out`, so a refusal leaves `--out` exactly as it found it.
+    //
+    // ★ WHY IT MOVED. Down in the voucher writer these ran AFTER every packet PDF was on disk and
+    // BEFORE `manifest.txt` was written. So `--pay 100.25` (a plausible typo) or `--pay <above line
+    // 37>` (an ordinary slip) refused with the return's PDFs sitting in `--out` and no manifest
+    // beside them — and `btctax extension` decides "is this the return's envelope directory?" by the
+    // presence of `manifest.txt` ALONE. It read that directory as empty ground and wrote `f4868.pdf`
+    // into it: precisely the outcome that guard exists to prevent. The unsound assumption was
+    // `manifest.txt present ⟺ packet directory`, and a refused export falsifies it.
+    //
+    // ★ The GUARD is the old reachability, exactly: `write_payment_voucher` reached this match only
+    // when `--pay-by-check` was given AND the return owed something. Nothing becomes a refusal that
+    // was not one — a `--pay` given without `--pay-by-check` is still a NOTE (refusing the whole
+    // packet over an inapplicable flag would cost the filer every form to make a point about one),
+    // and a return that owes nothing still gets its note. Only the MOMENT changed.
+    if voucher.pay_by_check && printed.forms.f1040.line37 > Usd::ZERO {
+        let owed = printed.forms.f1040.line37;
+        match voucher.pay {
+            None => {}
+            Some(p) if p < Usd::ZERO => {
+                return Err(CliError::Usage(format!(
+                    "--pay must be >= 0 (got {p}) — a negative payment is not a payment"
+                )))
+            }
+            Some(p) if p > owed => {
+                return Err(CliError::Usage(format!(
+                    "--pay ${p} is more than the ${owed} this return owes (Form 1040 line 37). The \
+                     voucher pays a COMPUTED balance, so paying above it is a slip rather than a \
+                     choice the form names — drop --pay to pay the whole ${owed}, or lower it for a \
+                     partial payment. (`btctax extension --pay` has no such ceiling: line 7 there \
+                     pays against an ESTIMATE, which you may deliberately overshoot to limit \
+                     interest.)"
+                )))
+            }
+            Some(p) if p != p.trunc() => {
+                return Err(CliError::Usage(format!(
+                    "--pay must be WHOLE DOLLARS (got {p}). The return is printed in whole dollars, \
+                     so a voucher carrying cents would disagree with the Form 1040 it accompanies \
+                     about what is being paid."
+                )))
+            }
+            // ★ M-2: `--pay 0 --pay-by-check` on a return that OWES used to reach `fill_form_1040v`,
+            //   which refused as `FormFill` with "a return that owes nothing needs no Form 1040-V" —
+            //   a sentence describing the WRONG state (this return owes ${owed}; the filer typed a
+            //   zero) in a class that does not read as a flag error. It also shared the partial-write
+            //   shape above.
+            Some(p) if p == Usd::ZERO => {
+                return Err(CliError::Usage(format!(
+                    "--pay $0 writes no voucher — a voucher for $0 is not a payment, and this return \
+                     owes ${owed} (Form 1040 line 37). Drop --pay-by-check if you are not paying by \
+                     check, or name the amount you are paying."
+                )))
+            }
+            Some(_) => {}
+        }
+    }
 
     // Task 16 / ADD-2: Form 8275 v1 does not paginate (unlike Form 8283's `overflow::merge_copies`) — a
     // promoted year with more than the revision's Part I row capacity (6 rows) cannot be filled at all.
@@ -1595,6 +1671,17 @@ pub struct ExtensionReport {
     /// Not a refusal — the field records a payment, not a filing, and recording first and printing
     /// second is the natural order.
     pub recorded_extension_payment: Option<Usd>,
+    /// ★ (seam review I-3) A live (non-voided) `DeclareTranche`/`PromoteTranche` is on file, so the
+    /// caller prints the Approach-B experimental notice — the SAME field, from the SAME
+    /// `uses_approach_b(events)` call, the two export reports carry.
+    ///
+    /// `btctax_core::experimental`'s own module docs name this class: the notice is correct on
+    /// surfaces that merely REFLECT Approach-B, "the export reports (`export-irs-pdf`,
+    /// `export-snapshot`, the full-return export)". The dependence here is direct — a live promote
+    /// raises basis, lowering the capital gain, lowering Form 1040 line 24, which IS Form 4868
+    /// line 4, and therefore line 6 and the default line 7. This is the one form the filer attaches
+    /// MONEY to, so it may not be the exception.
+    pub experimental_notice_active: bool,
 }
 
 /// The date Form 4868 is due, given the year's committed `return_due` and the line-8 choice.
@@ -1775,6 +1862,7 @@ pub(crate) fn extension_from_session(
             .sch_3
             .map(|s| s.line10)
             .filter(|v| *v > Usd::ZERO),
+        experimental_notice_active: btctax_core::experimental::uses_approach_b(events),
     })
 }
 

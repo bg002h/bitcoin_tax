@@ -335,6 +335,32 @@ fn a_pseudo_ledger_is_refused_without_the_phrase_and_watermarked_with_it() {
         contains_bytes(&bytes, b"NOT FOR FILING"),
         "★ …and the PAGE says so — read back out of the written PDF, not from the report struct"
     );
+
+    // ★★ (seam review M-4) EVERY page, not merely the file. Form 4868 is the corpus's first
+    //    FOUR-page form, and a whole-file byte scan passes with page 1 alone stamped — so the one
+    //    guarantee this build newly stresses (C-2: `stamp_draft_watermark` on EVERY page) had no
+    //    test that would red on a page-1-only stamp. Read the marker out of each page's own decoded
+    //    content stream, with the page count asserted as a PREMISE: if the revision ever stops being
+    //    four pages this test says so rather than silently checking fewer.
+    let doc = btctax_forms::testonly::load(&bytes).expect("the written 4868 parses as a PDF");
+    let pages = doc.get_pages();
+    assert_eq!(
+        pages.len(),
+        4,
+        "premise: the TY2024 Form 4868 revision is FOUR pages — a whole-file scan would pass with \
+         one of them stamped"
+    );
+    for (n, pid) in &pages {
+        let content = doc
+            .get_page_content(*pid)
+            .unwrap_or_else(|e| panic!("page {n} content stream must decode: {e}"));
+        assert!(
+            contains_bytes(&content, b"NOT FOR FILING"),
+            "★ page {n} of {} carries no DRAFT watermark — a fictional estimate may not have an \
+             unmarked page",
+            pages.len()
+        );
+    }
 }
 
 // ── The due date ────────────────────────────────────────────────────────────────────────────────
@@ -499,6 +525,101 @@ fn a_ty2024_run_writes_a_real_4868_owner_only_with_the_recorded_payment_on_line_
         "the form's own closing sentence: {text}"
     );
     assert!(text.contains("PASSED"), "the due-date warning: {text}");
+}
+
+/// ★★★ KILL (seam review I-4) — **the journey row's closing note.**
+///
+/// The spec's journey table gives the row *"files, pays, then exports without recording
+/// `extension_payment`"* the entry **"the closing note is the only guard"** — and there was no such
+/// note. `render_extension`'s only closing sentence is the form's *"Don't attach a copy…"*, and the
+/// recorded-payment note fires in the OPPOSITE case, so in exactly the case the row describes the
+/// build said nothing.
+///
+/// The money is real and btctax holds both halves: the filer posts a cheque for line 7, October's
+/// Schedule 3 line 10 is blank, 1040 line 33 is short by the payment, line 37 is high by it, and
+/// `--pay-by-check` prints a Form 1040-V asking for the same money again.
+///
+/// Three states in one test, because any one of them alone is satisfiable by a broken renderer: the
+/// note PRESENT when a payment is being made and nothing records it, ABSENT when the return already
+/// records it (the other note fires instead), and ABSENT when line 7 is blank (there is no payment
+/// to record, so the sentence would be a nag about nothing).
+#[test]
+fn a_payment_the_return_does_not_yet_record_gets_the_closing_note_and_nothing_else_does() {
+    const MARK: &str = "is NOT yet on your 2024 return";
+
+    // (a) paying, and the return records nothing — the row's own case.
+    let (_d, vault, out) = full_return_vault(&real_events_2024(), |ri| {
+        ri.payments = Default::default();
+    });
+    let rep = cmd::admin::extension(
+        &vault,
+        &pp(),
+        out.path(),
+        2024,
+        Some(dec!(500)),
+        false,
+        None,
+        late(),
+    )
+    .unwrap();
+    assert_eq!(
+        rep.recorded_extension_payment, None,
+        "premise: the return records no extension payment"
+    );
+    assert_eq!(rep.lines.line7, Some(dec!(500)), "premise: line 7 is paid");
+    let text = btctax_cli::render::render_extension(&rep);
+    assert!(
+        text.contains(MARK),
+        "the closing note must be there: {text}"
+    );
+    assert!(
+        text.contains("Schedule 3 \nline 10") || text.contains("Schedule 3 line 10"),
+        "it must name the line the filer has to fill: {text}"
+    );
+    assert!(
+        text.contains("payments.extension_payment") && text.contains("income import"),
+        "…and the field, the way the input surface names it: {text}"
+    );
+    assert!(
+        text.contains("a second time"),
+        "…and WHY: the 1040-V would ask for the same money again: {text}"
+    );
+
+    // (b) the return already records it ⇒ the I-6 note fires and this one does NOT.
+    let (_d2, vault2, out2) = full_return_vault(&real_events_2024(), |ri| {
+        ri.payments.extension_payment = dec!(500);
+    });
+    let recorded =
+        cmd::admin::extension(&vault2, &pp(), out2.path(), 2024, None, false, None, late())
+            .unwrap();
+    assert_eq!(recorded.recorded_extension_payment, Some(dec!(500)));
+    let text2 = btctax_cli::render::render_extension(&recorded);
+    assert!(
+        !text2.contains(MARK),
+        "★ a payment the return already carries must NOT be nagged about: {text2}"
+    );
+    assert!(
+        text2.contains("is already recorded on the return"),
+        "the I-6 note is what belongs here: {text2}"
+    );
+
+    // (c) line 7 is BLANK (payments cover the estimate, so there is nothing to pay) ⇒ silence. A
+    //     note about recording a payment that is not being made would be a nag about nothing.
+    let (_d3, vault3, out3) = full_return_vault(&real_events_2024(), |ri| {
+        ri.payments.estimated_tax_payments = dec!(500_000);
+    });
+    let nothing_owed =
+        cmd::admin::extension(&vault3, &pp(), out3.path(), 2024, None, false, None, late())
+            .unwrap();
+    assert_eq!(
+        nothing_owed.lines.line7, None,
+        "premise: line 7 is blank on this return"
+    );
+    let text3 = btctax_cli::render::render_extension(&nothing_owed);
+    assert!(
+        !text3.contains(MARK),
+        "★ no payment ⇒ nothing to record ⇒ no note: {text3}"
+    );
 }
 
 /// ★ A line the form leaves BLANK is rendered `(blank)`, never `0`. On a return signed under 26 USC

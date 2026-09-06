@@ -1647,6 +1647,18 @@ pub fn render_dual_report(
         let _ = writeln!(s, "  → REFUND (L35a):          {}", fmt_money(f.line34));
     } else {
         let _ = writeln!(s, "  → AMOUNT OWED (L37):      {}", fmt_money(f.line37));
+        // ★ (seam review M-3) …and the two instruments that exist for a balance due, NAMED. This is
+        //   the line on which a filer learns they owe, and until now nothing on this surface
+        //   mentioned either Form 4868 or Form 1040-V — a filer who has not read `btctax --help`
+        //   learned from `report` that they owe and not that btctax can print the extension
+        //   application or the payment voucher. One pointer, beside the figure that prompts it.
+        let _ = writeln!(
+            s,
+            "    -> btctax export-irs-pdf --tax-year {year} --pay-by-check   (Form 1040-V, the \
+             payment voucher)\n    \
+             -> btctax extension --year {year} --out <dir>                (Form 4868, if you need \
+             more time to FILE — it never extends the time to PAY)"
+        );
     }
     // ★ P6 — the §170(d)(1) charitable carryover-out, printed here because this is the block a filer
     // reads to see what their return did. Before this it reached no human at all.
@@ -5210,6 +5222,32 @@ pub fn render_extension(r: &crate::cmd::admin::ExtensionReport) -> String {
             s,
             "\nnote: ${n} is already recorded on the return as paid with the extension; --pay \
              overrides it"
+        );
+    } else if let Some(paying) = r.lines.line7.filter(|p| *p > Usd::ZERO) {
+        // ★★★ (seam review I-4) THE JOURNEY ROW'S CLOSING NOTE — spec §"Journey walk", the row
+        //   *"files, pays, then exports without recording `extension_payment`"*, whose whole entry
+        //   reads **"the closing note is the only guard"**. It did not exist: the arm above fires
+        //   only when the payment IS already recorded, so in exactly the case the row describes the
+        //   build said nothing at all.
+        //
+        //   The cost is real money and btctax holds both halves of it. The filer posts a cheque for
+        //   line 7 and nothing tells them the RETURN must be told; in October Schedule 3 line 10 is
+        //   blank, 1040 line 33 is short by the payment, line 37 is high by it, and `--pay-by-check`
+        //   prints a Form 1040-V asking for the same money a second time. Every figure is
+        //   arithmetically correct given the stored inputs — the defect is the silence at the seam.
+        //
+        //   Named the way the input surface names it, so the sentence is followable: `income
+        //   import`'s `payments.extension_payment`, the TUI input form's Payments section, and the
+        //   line it lands on.
+        let _ = writeln!(
+            s,
+            "\nnote: the ${paying} on line 7 is NOT yet on your {year} return. Record it as the \
+             extension payment — \"Amount paid with a Form 4868 extension request\" → Schedule 3 \
+             line 10 (`payments.extension_payment` in `btctax income import`, or the Payments \
+             section of the TUI input form) — or October's Form 1040 line 33 will be ${paying} \
+             short, line 37 that much too high, and the Form 1040-V printed from it will ask you \
+             for the same ${paying} a second time.",
+            year = r.tax_year
         );
     }
     if r.past_due {
