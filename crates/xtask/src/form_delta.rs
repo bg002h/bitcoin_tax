@@ -634,13 +634,14 @@ mod tests {
         let mut shrunk = surface.clone();
         assert!(shrunk.remove("f6251"));
         let partial = rows(&super::port_status_over(&shrunk, "2025", "2026-DRAFT").unwrap());
+        let partial_keys: std::collections::BTreeSet<_> = partial.keys().cloned().collect();
         assert_ne!(
-            partial
-                .keys()
-                .cloned()
-                .collect::<std::collections::BTreeSet<_>>(),
-            surface,
+            partial_keys, surface,
             "a printer that dropped a stem must fail the surface equality"
+        );
+        assert_eq!(
+            partial_keys, shrunk,
+            "…and it printed exactly the surface it was given (port-status r2 N2)"
         );
         // and a FINAL tag names the third state
         let final_tag = super::port_status_over(&shrunk, "2025", "2026").unwrap();
@@ -679,7 +680,7 @@ mod tests {
             1,
             "an excused row whose pair EXISTS: {wrong:?}"
         );
-        // ★ isolates the `claims_no_draft` conjunct (r3 R2): the pair does not compute (no prior
+        // ★ isolates the `claims_no_new` conjunct (r3 R2): the pair does not compute (no prior
         //   PDF), the prior claim is true, and ONLY the draft-on-disk conjunct can red it.
         let (_, _, wrong) = check_work_list(
             "| `f8995a` | yes | **NO PRIOR SIDE** | **NO DRAFT** — planted | — |\n",
@@ -703,6 +704,36 @@ mod tests {
             wrong.len(),
             1,
             "a row that claims neither side is not an excuse: {wrong:?}"
+        );
+        // ★ the NO FINAL half of the claim (port-status r2 N1), both directions: a true claim on a
+        //   stem with no final on disk is excused; a NO FINAL claim is FALSE once a `--2026` PDF exists
+        let (_, excused, wrong) = check_work_list(
+            "| `zzz-not-a-form` | yes | **NO PRIOR SIDE** | **NO FINAL** — synthetic | — |\n",
+        );
+        assert!(
+            wrong.is_empty() && excused == ["zzz-not-a-form"],
+            "a true NO FINAL excuse: {wrong:?}"
+        );
+        assert!(
+            super::pdf_for("f8995a--2026-DRAFT").is_some()
+                && super::pdf_for("f8995a--2026").is_none(),
+            "the plant below assumes f8995a has a draft and no final"
+        );
+        let (_, excused, wrong) = check_work_list(
+            "| `f8995a` | yes | **NO PRIOR SIDE** | **NO FINAL** — planted | — |\n",
+        );
+        assert!(
+            wrong.is_empty() && excused == ["f8995a"],
+            "NO FINAL is TRUE for f8995a today (a draft is not a final): {wrong:?}"
+        );
+        // and the false direction, on the archive itself: a NO DRAFT claim while the draft exists
+        let (_, _, wrong) = check_work_list(
+            "| `f8995a` | yes | **NO PRIOR SIDE** | **NO DRAFT** — planted | — |\n",
+        );
+        assert_eq!(
+            wrong.len(),
+            1,
+            "NO DRAFT is FALSE for f8995a (the draft is archived): {wrong:?}"
         );
         // the control tests the PREDICATE on a stem that can never be archived (r3 R5) — the
         // inventory coupling belongs to the_committed_work_list_matches_form_delta_at_head
@@ -773,14 +804,22 @@ mod tests {
                 // NO DRAFT means no `<form>--2026-DRAFT` fixture. Every claim made is checked, and
                 // a row that makes neither is not an excuse.
                 (None, Err(_)) => {
-                    let draft = archived(&format!("{form}--2026-DRAFT"));
+                    // the claim names WHICH new side is missing: NO FINAL is about `<form>--2026`,
+                    // NO DRAFT about `<form>--2026-DRAFT` (port-status r2 N1 caught the draft being
+                    // checked for both)
+                    let new_stem = if ty2026_cell.contains("NO FINAL") {
+                        format!("{form}--2026")
+                    } else {
+                        format!("{form}--2026-DRAFT")
+                    };
+                    let draft = archived(&new_stem);
                     let prior = archived(&format!("{form}--2025"));
                     let claims_no_prior = prior_cell.contains("NO PRIOR SIDE");
-                    let claims_no_draft =
+                    let claims_no_new =
                         ty2026_cell.contains("NO DRAFT") || ty2026_cell.contains("NO FINAL");
-                    let ok = (claims_no_prior || claims_no_draft)
+                    let ok = (claims_no_prior || claims_no_new)
                         && (!claims_no_prior || !prior)
-                        && (!claims_no_draft || !draft);
+                        && (!claims_no_new || !draft);
                     if ok {
                         excused.push(form.clone());
                     } else {
