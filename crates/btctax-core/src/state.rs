@@ -208,6 +208,13 @@ pub struct DisposalLeg {
     /// does NOT tack); in all other zones it is `gain_hp_start` (tacked donor date for gifts,
     /// acquisition date otherwise). Must never contradict `leg.term`. [R0-C1]
     pub acquired_at: TaxDate,
+    /// ★ The consumed LOT's own acquisition date (`Consumed.acquired_at` = `lot.acquired_at`), carried
+    /// on the leg because a sold-out lot leaves `LedgerState.lots` and the state holds no event log
+    /// (spec 1099-DA R1/T2; the precedent is `promoted_origins`). Distinct from `acquired_at` above,
+    /// the zone-aware HOLDING-PERIOD start that column (b) prints: the two coincide on every
+    /// non-gift row today, but that equivalence breaks the day a non-gift basis source tacks a holding
+    /// period, so the Form 1099-DA cohort reads THIS field and nothing else.
+    pub lot_acquired_at: TaxDate,
     /// The wallet that held the consumed lot at disposal time — the ONLY sound source (D1 [R0-I1]).
     pub wallet: WalletId,
     /// Pseudo-reconcile taint (sub-project 2, [R0-C1]): `true` when this leg's basis/existence traces to

@@ -2749,6 +2749,7 @@ fn schedule_d_line3_cell_text_equals_the_8949s_printed_column_total() {
         part: Form8949Part::ShortTerm,
         box_: Form8949Box::C,
         box_needs_review: false,
+        cohort: btctax_core::forms::Cohort::Noncovered, // fixture default (spec 1099-DA T2)
         description: "1.00000000 BTC".into(),
         date_acquired: time::macros::date!(2024 - 01 - 02),
         date_sold: time::macros::date!(2024 - 05 - 01),
@@ -3375,6 +3376,7 @@ fn the_full_return_8949_is_named_on_both_pages() {
             Form8949Box::F
         },
         box_needs_review: false,
+        cohort: btctax_core::forms::Cohort::Noncovered, // fixture default (spec 1099-DA T2)
         description: "1.00000000 BTC".into(),
         date_acquired: time::macros::date!(2020 - 01 - 02),
         date_sold: time::macros::date!(2024 - 05 - 01),
@@ -3647,6 +3649,7 @@ fn lt_legs(n: u32) -> Vec<btctax_core::forms::Form8949Row> {
                 part: Form8949Part::LongTerm,
                 box_: Form8949Box::F,
                 box_needs_review: false,
+                cohort: btctax_core::forms::Cohort::Noncovered, // fixture default (spec 1099-DA T2)
                 description: format!("{i}.00000000 BTC"),
                 date_acquired: time::macros::date!(2020 - 01 - 02),
                 date_sold: time::macros::date!(2024 - 05 - 01),

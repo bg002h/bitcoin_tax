@@ -404,6 +404,7 @@ fn make_disposal(
             basis_source: BasisSource::ExchangeProvided,
             gift_zone: None,
             acquired_at: make_date(disposed_year - 2, 1, 1),
+            lot_acquired_at: make_date(disposed_year - 2, 1, 1), // = the lot's own date in these fixtures (spec 1099-DA T2)
             wallet: make_wallet(),
             pseudo: false,
         }],
@@ -434,6 +435,7 @@ fn make_disposal_tagged(
             basis_source: BasisSource::ExchangeProvided,
             gift_zone: None,
             acquired_at: make_date(disposed_year - 2, 1, 1),
+            lot_acquired_at: make_date(disposed_year - 2, 1, 1), // = the lot's own date in these fixtures (spec 1099-DA T2)
             wallet: make_wallet(),
             pseudo: false,
         }],
@@ -1410,6 +1412,7 @@ fn make_lt_disposal(year: i32) -> Disposal {
             basis_source: BasisSource::ExchangeProvided,
             gift_zone: None,
             acquired_at: make_date(year - 2, 1, 1), // > 1 year before disposal
+            lot_acquired_at: make_date(year - 2, 1, 1), // = the lot's own date in these fixtures (spec 1099-DA T2)
             wallet: make_wallet(),
             pseudo: false,
         }],

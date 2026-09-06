@@ -1604,6 +1604,7 @@ mod tests {
             basis_source: BasisSource::ExchangeProvided,
             gift_zone: None,
             acquired_at: date!(2024 - 01 - 01),
+            lot_acquired_at: date!(2024 - 01 - 01), // = the lot's own date in these fixtures (spec 1099-DA T2)
             wallet: WalletId::Exchange {
                 provider: "cb".into(),
                 account: "m".into(),

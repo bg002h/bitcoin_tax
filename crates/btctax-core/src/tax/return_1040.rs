@@ -7600,6 +7600,7 @@ mod tests {
             basis_source: BasisSource::ExchangeProvided,
             gift_zone: None,
             acquired_at: date!(2020 - 01 - 01),
+            lot_acquired_at: date!(2020 - 01 - 01), // = the lot's own date in these fixtures (spec 1099-DA T2)
             wallet: crate::identity::WalletId::SelfCustody { label: "w".into() },
             pseudo: false,
         }

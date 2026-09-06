@@ -126,6 +126,7 @@ fn leg(gain: Usd, term: Term) -> DisposalLeg {
         basis_source: BasisSource::ExchangeProvided,
         gift_zone: None,
         acquired_at: date!(2025 - 01 - 01), // synthetic; compute_tax_year does not read acquired_at
+        lot_acquired_at: date!(2025 - 01 - 01), // = the lot's own date in this fixture (spec 1099-DA T2)
         wallet: WalletId::Exchange {
             provider: "cb".into(),
             account: "m".into(),

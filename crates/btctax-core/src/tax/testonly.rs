@@ -395,6 +395,7 @@ pub fn kitchen_sink_household() -> (ReturnInputs, LedgerState) {
                 basis_source: BasisSource::ExchangeProvided,
                 gift_zone: None,
                 acquired_at: date!(2020 - 01 - 01),
+                lot_acquired_at: date!(2020 - 01 - 01), // = the lot's own date in these fixtures (spec 1099-DA T2)
                 wallet: WalletId::SelfCustody {
                     label: "cold".into(),
                 },
@@ -885,6 +886,11 @@ pub fn build_golden_return(i: &GoldenInputs) -> (ReturnInputs, LedgerState) {
                 } else {
                     date!(2024 - 01 - 02)
                 },
+                lot_acquired_at: if term == Term::LongTerm {
+                    date!(2020 - 01 - 01)
+                } else {
+                    date!(2024 - 01 - 02)
+                }, // = the lot's own date in this fixture (spec 1099-DA T2)
                 wallet: WalletId::SelfCustody {
                     label: "cold".into(),
                 },

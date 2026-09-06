@@ -195,6 +195,7 @@ fn overflow_copies_rename_fields_so_an_emitted_census_must_normalise() {
             Form8949Box::F
         },
         box_needs_review: false,
+        cohort: btctax_core::forms::Cohort::Noncovered, // fixture default (spec 1099-DA T2)
         description: "1.00000000 BTC".into(),
         date_acquired: time::macros::date!(2020 - 01 - 02),
         date_sold: time::macros::date!(2024 - 05 - 01),

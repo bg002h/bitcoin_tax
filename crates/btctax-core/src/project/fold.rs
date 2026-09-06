@@ -367,6 +367,7 @@ fn make_disposal_legs(
             basis_source: c.basis_source,
             gift_zone,
             acquired_at,
+            lot_acquired_at: c.acquired_at,
             wallet: c.wallet.clone(),
             // [R0-C1] leg is [PSEUDO] if its BASIS traces to a pseudo lot (`c.pseudo`) OR the disposal
             // event itself is synthetic (`ev_pseudo`). A REAL Sell on a pseudo $0-basis lot ⇒ flagged.

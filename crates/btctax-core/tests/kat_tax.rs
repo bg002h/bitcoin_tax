@@ -909,6 +909,19 @@ fn tp11_unknown_donor_basis_uses_fmv_at_donor_acquisition_date() {
         st.disposals[0].legs[0].basis_source,
         BasisSource::GiftFmvFallback
     );
+    // ★ spec 1099-DA T2 — the leg carries TWO dates and they differ here: `acquired_at` is the
+    //   zone-aware holding-period start (the donor's date, tacked), `lot_acquired_at` is the LOT's
+    //   own date (the day the gift was received). The Form 1099-DA cohort reads the second.
+    assert_eq!(
+        st.disposals[0].legs[0].acquired_at,
+        time::macros::date!(2023 - 03 - 15),
+        "column (b): the tacked donor date"
+    );
+    assert_eq!(
+        st.disposals[0].legs[0].lot_acquired_at,
+        time::macros::date!(2025 - 06 - 01),
+        "the lot's own date: the gift's receipt"
+    );
 }
 
 /// TP11 unknown basis + unknown date: both indeterminate → UnknownBasisInbound blocker;

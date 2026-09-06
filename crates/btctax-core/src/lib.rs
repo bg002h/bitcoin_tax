@@ -24,9 +24,10 @@ pub use conventions::{Sat, TaxDate, Usd};
 pub use donation::DonationDetails;
 pub use event::*;
 pub use forms::{
-    form_8283, form_8949, schedule_d, year_donation_deduction, Form8283HowAcquired, Form8283Row,
-    Form8283Section, Form8949Box, Form8949Part, Form8949Row, InformationReturnRegime,
-    ScheduleDPart, ScheduleDTotals, DIGITAL_ASSET_8949_FIRST_YEAR,
+    cohort_of, form_8283, form_8949, schedule_d, year_donation_deduction, BrokerReported,
+    BrokerReporting, Cohort, CohortAnswers, Form8283HowAcquired, Form8283Row, Form8283Section,
+    Form8949Box, Form8949Part, Form8949Row, InformationReturnRegime, ScheduleDPart,
+    ScheduleDTotals, COVERED_ACQUISITION_START, DIGITAL_ASSET_8949_FIRST_YEAR,
 };
 pub use identity::{EventId, Fingerprint, LotId, Source, SourceRef, WalletId};
 pub use optimize::{

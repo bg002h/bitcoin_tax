@@ -68,6 +68,7 @@ pub fn row(
             Form8949Box::F
         },
         box_needs_review: exchange,
+        cohort: btctax_core::forms::Cohort::Noncovered, // fixture default (spec 1099-DA T2)
         description: desc.to_string(),
         date_acquired: date!(2024 - 02 - 03),
         date_sold: date!(2025 - 06 - 15),

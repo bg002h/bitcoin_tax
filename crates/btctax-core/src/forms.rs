@@ -14,6 +14,7 @@ use crate::identity::{EventId, LotId, WalletId};
 use crate::state::{LedgerState, RemovalKind, RemovalLeg, Term};
 use crate::tax::tables::QUALIFIED_APPRAISAL_THRESHOLD;
 use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Which Form 8949 part / holding-period a row belongs to. **Part I = short-term** (held ≤ 1 yr);
@@ -70,6 +71,105 @@ pub struct InformationReturnRegime {
     pub basis: bool,
 }
 
+/// ★ The first day a digital asset bought INTO a custodial broker's account is a COVERED security —
+/// Treas. Reg. §1.6045-1(a)(15)(i)(J): *"acquired in a customer's account by a broker providing
+/// custodial services for such specified security on or after January 1, 2026, in exchange for cash,
+/// stored-value cards, different digital assets, or any other property or services described in
+/// paragraph (a)(9)(ii)(B) or (C)"*.
+pub const COVERED_ACQUISITION_START: TaxDate = time::macros::date!(2026 - 01 - 01);
+
+/// ★ Which of a broker's two kinds of Form 1099-DA a row is EXPECTED to fall under (spec 1099-DA
+/// R1). The broker's own lot identification decides the real answer; this is the partition the filer
+/// answers OVER, and [`BrokerReported::Mixed`] is the answer when the forms in a partition disagree.
+/// Derived by MECHANISM — [`cohort_of`] — never refused: a lot in the "wrong" bucket still receives
+/// the answer its own form supports, and a bucket whose forms disagree refuses as `Mixed`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Cohort {
+    /// A direct purchase INTO this exchange wallet on/after [`COVERED_ACQUISITION_START`] — the
+    /// broker must report basis (box 2 checked).
+    Covered,
+    /// Everything else: acquired before 2026; arrived by transfer or reconstruction (no §1.6045A-1
+    /// statement comes from the filer's own wallet); or credited as a reward/rebate (not acquired
+    /// "in exchange for" cash or a broker's (a)(9)(ii)(B)/(C) property or services — §1.6045-1(a)(16);
+    /// the 1099-DA instructions: *"Do not report rewards and staking payments"*).
+    Noncovered,
+}
+
+/// The cohort of a disposed lot, by mechanism (spec 1099-DA R1, the table). `wallet` is the wallet
+/// that held the lot at disposal; `lot_acquired_at` is [`crate::state::DisposalLeg::lot_acquired_at`].
+pub fn cohort_of(basis_source: BasisSource, wallet: &WalletId, lot_acquired_at: TaxDate) -> Cohort {
+    let bought_on_the_venue = matches!(
+        basis_source,
+        BasisSource::ExchangeProvided | BasisSource::ComputedFromCost
+    );
+    if bought_on_the_venue
+        && matches!(wallet, WalletId::Exchange { .. })
+        && lot_acquired_at >= COVERED_ACQUISITION_START
+    {
+        Cohort::Covered
+    } else {
+        Cohort::Noncovered
+    }
+}
+
+/// What the Form 1099-DA(s) for one (provider, cohort) key SHOW — read off the physical forms by the
+/// filer, for the rows btctax lists under that key (spec 1099-DA R1). Every variant is testimony the
+/// filer gives; the tool never assumes one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrokerReported {
+    /// No 1099-DA (or substitute statement) lists any of these dispositions → box I / L.
+    NotReported,
+    /// Every one is listed with box 2 NOT checked (proceeds only) → box H / K.
+    ProceedsOnly,
+    /// Every one is listed with box 2 checked, and box 1g equals btctax's column (e) on each
+    /// → box G / J, columns (f)/(g) blank.
+    BasisMatches,
+    /// Every one is listed with box 2 checked, and at least one box 1g differs from btctax's (e)
+    /// → REFUSE: the row needs the broker's figure in (e) and the correction in (g), which only a
+    /// per-lot 1099-DA import can supply.
+    BasisDiffers,
+    /// The forms for these dispositions do NOT all say the same thing → REFUSE: no single box is
+    /// true of the set; the per-lot import is the exit.
+    Mixed,
+}
+
+/// One provider's answers, one slot per cohort. An absent provider, or an absent slot for a cohort
+/// that has rows, is UNANSWERED (spec 1099-DA R1: answered-ness lives in the key set).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CohortAnswers {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub covered: Option<BrokerReported>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub noncovered: Option<BrokerReported>,
+}
+
+impl CohortAnswers {
+    /// The answer for one cohort, if given.
+    pub fn get(&self, cohort: Cohort) -> Option<BrokerReported> {
+        match cohort {
+            Cohort::Covered => self.covered,
+            Cohort::Noncovered => self.noncovered,
+        }
+    }
+}
+
+/// The filer's Form 1099-DA answers for a tax year, keyed by provider (`Source::tag()` — the
+/// disposing `WalletId::Exchange { provider, .. }`; single-account today). Transparent, so the TOML
+/// reads `[broker_reporting.coinbase] covered = "basis_matches"` and JSON round-trips with string
+/// keys; `Default` = empty = nothing answered.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct BrokerReporting(pub BTreeMap<String, CohortAnswers>);
+
+impl BrokerReporting {
+    /// The answer for `(provider, cohort)`, if the filer gave one.
+    pub fn answer(&self, provider: &str, cohort: Cohort) -> Option<BrokerReported> {
+        self.0.get(provider).and_then(|c| c.get(cohort))
+    }
+}
+
 /// One Form 8949 row = one `DisposalLeg` disposed in the tax year. A pure projection of the leg;
 /// no gain/basis/term math is performed here (all of it is already on the leg from the fold).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,6 +187,10 @@ pub struct Form8949Row {
     /// 1099-DA was issued. Direct match on `leg.wallet` (D4/[R0-M2]) — never the private
     /// `optimize.rs::is_broker`.
     pub box_needs_review: bool,
+    /// ★ The Form 1099-DA cohort this row is EXPECTED under ([`cohort_of`] over the leg's
+    /// `basis_source`, `wallet` and `lot_acquired_at`) — the half of the (provider, cohort) key the
+    /// engine supplies; the filer answers over the rows each key lists (spec 1099-DA R1).
+    pub cohort: Cohort,
     /// Column (a): the BTC amount, 8dp + `" BTC"` (e.g. `"0.53000000 BTC"`). Computed as EXACT
     /// `Decimal` (`Decimal::from(sat) / SATS_PER_BTC`) — NEVER `sat as f64 / 1e8` [R0-M5].
     pub description: String,
@@ -163,6 +267,7 @@ pub fn form_8949(state: &LedgerState, year: i32) -> Vec<Form8949Row> {
                 part,
                 box_,
                 box_needs_review: matches!(leg.wallet, WalletId::Exchange { .. }),
+                cohort: cohort_of(leg.basis_source, &leg.wallet, leg.lot_acquired_at),
                 description: btc_amount_description(leg.sat),
                 date_acquired: leg.acquired_at,
                 date_sold: d.disposed_at,
@@ -539,6 +644,113 @@ pub fn form_8283(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ★ spec 1099-DA R1 — the cohort table, one assertion per row, by MECHANISM.
+    #[test]
+    fn the_cohort_table_by_mechanism() {
+        use time::macros::date;
+        let ex = WalletId::Exchange {
+            provider: "coinbase".into(),
+            account: "default".into(),
+        };
+        let cold = WalletId::SelfCustody {
+            label: "cold".into(),
+        };
+        let d2026 = date!(2026 - 03 - 01);
+        let d2025 = date!(2025 - 12 - 31);
+        for bs in [BasisSource::ExchangeProvided, BasisSource::ComputedFromCost] {
+            assert_eq!(
+                cohort_of(bs, &ex, d2026),
+                Cohort::Covered,
+                "{bs:?} bought on the venue in 2026"
+            );
+            assert_eq!(
+                cohort_of(bs, &ex, date!(2026 - 01 - 01)),
+                Cohort::Covered,
+                "{bs:?} on the first day"
+            );
+            assert_eq!(
+                cohort_of(bs, &ex, d2025),
+                Cohort::Noncovered,
+                "{bs:?} bought before 2026"
+            );
+            assert_eq!(
+                cohort_of(bs, &cold, d2026),
+                Cohort::Noncovered,
+                "{bs:?} not an exchange wallet"
+            );
+        }
+        for bs in [
+            BasisSource::CarriedFromTransfer,
+            BasisSource::SelfTransferInbound,
+            BasisSource::GiftCarryover,
+            BasisSource::GiftFmvFallback,
+            BasisSource::SafeHarborAllocated,
+            BasisSource::ReconstructedPerWallet,
+            BasisSource::EstimatedConservative,
+            BasisSource::FmvAtIncome,
+            BasisSource::CardRewardRebate,
+        ] {
+            assert_eq!(
+                cohort_of(bs, &ex, d2026),
+                Cohort::Noncovered,
+                "{bs:?} is never covered (any date)"
+            );
+            assert_eq!(
+                cohort_of(bs, &ex, d2025),
+                Cohort::Noncovered,
+                "{bs:?} is never covered (any date)"
+            );
+        }
+    }
+
+    /// ★ spec 1099-DA R1 / r4 N-1 — the answers round-trip through JSON (the vault) and TOML
+    /// (`income import`) with string keys; absent = unanswered; the transparent newtype is the TOML
+    /// path `[broker_reporting.coinbase] covered = "…"`.
+    #[test]
+    fn broker_reporting_round_trips_with_string_keys() {
+        let mut br = BrokerReporting::default();
+        br.0.insert(
+            "coinbase".into(),
+            CohortAnswers {
+                covered: Some(BrokerReported::BasisMatches),
+                noncovered: None,
+            },
+        );
+        let json = serde_json::to_string(&br).unwrap();
+        assert_eq!(json, r#"{"coinbase":{"covered":"basis_matches"}}"#);
+        assert_eq!(serde_json::from_str::<BrokerReporting>(&json).unwrap(), br);
+        // (the TOML path `[broker_reporting.coinbase] covered = "…"` is held where `toml` lives:
+        //  btctax-cli's income-import tests, spec T6)
+        assert_eq!(
+            br.answer("coinbase", Cohort::Covered),
+            Some(BrokerReported::BasisMatches)
+        );
+        assert_eq!(
+            br.answer("coinbase", Cohort::Noncovered),
+            None,
+            "an absent slot is unanswered"
+        );
+        assert_eq!(
+            br.answer("gemini", Cohort::Covered),
+            None,
+            "an absent provider is unanswered"
+        );
+        for v in [
+            BrokerReported::NotReported,
+            BrokerReported::ProceedsOnly,
+            BrokerReported::BasisMatches,
+            BrokerReported::BasisDiffers,
+            BrokerReported::Mixed,
+        ] {
+            let j = serde_json::to_string(&v).unwrap();
+            assert_eq!(serde_json::from_str::<BrokerReported>(&j).unwrap(), v);
+        }
+        assert!(
+            serde_json::from_str::<BrokerReported>("\"covered\"").is_err(),
+            "an unknown answer is refused, never defaulted"
+        );
+    }
 
     #[test]
     fn description_is_exact_decimal_8dp() {

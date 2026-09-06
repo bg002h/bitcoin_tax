@@ -190,6 +190,7 @@ fn full_return_packet_emits_8275_iff_a_promoted_leg_is_filed() {
             basis_source: BasisSource::ExchangeProvided,
             gift_zone: None,
             acquired_at: date!(2024 - 01 - 01),
+            lot_acquired_at: date!(2024 - 01 - 01), // = the lot's own date in these fixtures (spec 1099-DA T2)
             wallet: WalletId::SelfCustody {
                 label: "cold".into(),
             },

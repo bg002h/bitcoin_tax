@@ -663,6 +663,7 @@ mod tests {
             basis_source: BasisSource::EstimatedConservative,
             gift_zone: None,
             acquired_at: date!(2016 - 03 - 31),
+            lot_acquired_at: date!(2016 - 03 - 31), // = the lot's own date in these fixtures (spec 1099-DA T2)
             wallet: wallet(),
             pseudo: false,
         }

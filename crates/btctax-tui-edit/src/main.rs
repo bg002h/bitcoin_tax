@@ -12354,6 +12354,7 @@ mod tests {
             basis_source: BasisSource::ExchangeProvided,
             gift_zone: None,
             acquired_at: time::Date::from_calendar_date(2023, time::Month::January, 1).unwrap(),
+            lot_acquired_at: time::Date::from_calendar_date(2023, time::Month::January, 1).unwrap(), // = the lot's own date in these fixtures (spec 1099-DA T2)
             wallet: wallet.clone(),
             pseudo: false,
         };

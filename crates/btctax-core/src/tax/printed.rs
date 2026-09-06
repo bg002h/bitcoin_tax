@@ -2246,6 +2246,7 @@ mod tests {
             part,
             box_: Form8949Box::C,
             box_needs_review: false,
+            cohort: crate::forms::Cohort::Noncovered, // fixture default (spec 1099-DA T2)
             description: "1.00000000 BTC".into(),
             date_acquired: date!(2020 - 01 - 01),
             date_sold: date!(2024 - 05 - 01),

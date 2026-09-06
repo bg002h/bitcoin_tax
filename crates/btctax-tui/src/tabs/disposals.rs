@@ -247,6 +247,7 @@ mod sort_tests {
             basis_source: BasisSource::ExchangeProvided,
             gift_zone: None,
             acquired_at: date(acq.0, acq.1, acq.2),
+            lot_acquired_at: date(acq.0, acq.1, acq.2), // = the lot's own date in these fixtures (spec 1099-DA T2)
             wallet: WalletId::Exchange {
                 provider: "coinbase".into(),
                 account: "main".into(),

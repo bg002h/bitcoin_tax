@@ -8,6 +8,7 @@
 //! under test. PRIVACY: synthetic values only; no real user file is read (NFR).
 use btctax_core::conventions::{TaxDate, Usd};
 use btctax_core::event::{BasisSource, DisposeKind};
+use btctax_core::forms::Cohort;
 use btctax_core::forms::{
     form_8283, form_8949, schedule_d, Form8283HowAcquired, Form8283Section, Form8949Box,
     Form8949Part,
@@ -52,6 +53,7 @@ fn base_leg() -> DisposalLeg {
         basis_source: BasisSource::ComputedFromCost,
         gift_zone: None,
         acquired_at: date!(2025 - 01 - 01),
+        lot_acquired_at: date!(2025 - 01 - 01), // = the lot's own date in these fixtures (spec 1099-DA T2)
         wallet: exch(),
         pseudo: false,
     }
@@ -206,6 +208,80 @@ fn description_is_exact_btc_amount_8dp() {
 }
 
 /// Dates / proceeds / basis / gain on the row match the leg (and the disposal's disposed_at).
+/// ★ spec 1099-DA T2 — every row carries the cohort the ENGINE expects it under, from the leg's
+/// basis source, wallet and the LOT's own date (never the holding-period start): a 2026 purchase on
+/// the venue is Covered; a self-transfer in, a pre-2026 purchase and a reward are Noncovered.
+#[test]
+fn rows_carry_the_cohort_by_mechanism() {
+    let sold = date!(2026 - 06 - 01);
+    let bought_2026 = DisposalLeg {
+        lot_id: lot(1, 0),
+        basis_source: BasisSource::ExchangeProvided,
+        acquired_at: date!(2026 - 02 - 01),
+        lot_acquired_at: date!(2026 - 02 - 01),
+        ..base_leg()
+    };
+    let transferred_in = DisposalLeg {
+        lot_id: lot(2, 0),
+        basis_source: BasisSource::SelfTransferInbound,
+        acquired_at: date!(2026 - 02 - 01),
+        lot_acquired_at: date!(2026 - 02 - 01),
+        ..base_leg()
+    };
+    let bought_2025 = DisposalLeg {
+        lot_id: lot(3, 0),
+        basis_source: BasisSource::ComputedFromCost,
+        acquired_at: date!(2025 - 06 - 01),
+        lot_acquired_at: date!(2025 - 06 - 01),
+        ..base_leg()
+    };
+    let reward = DisposalLeg {
+        lot_id: lot(4, 0),
+        basis_source: BasisSource::FmvAtIncome,
+        acquired_at: date!(2026 - 02 - 01),
+        lot_acquired_at: date!(2026 - 02 - 01),
+        ..base_leg()
+    };
+    // ★ the HP start says 2020 but the LOT was bought in 2026 (a tacked holding period): the cohort
+    //   reads the lot's date, column (b) reads the HP start
+    let tacked = DisposalLeg {
+        lot_id: lot(5, 0),
+        basis_source: BasisSource::ExchangeProvided,
+        acquired_at: date!(2020 - 01 - 01),
+        lot_acquired_at: date!(2026 - 02 - 01),
+        term: Term::LongTerm,
+        ..base_leg()
+    };
+    let st = state(vec![disposal(
+        10,
+        sold,
+        DisposeKind::Sell,
+        vec![bought_2026, transferred_in, bought_2025, reward, tacked],
+    )]);
+    let rows = form_8949(&st, 2026);
+    let by_lot: Vec<(u64, Cohort, TaxDate)> = rows
+        .iter()
+        .map(|r| (0, r.cohort, r.date_acquired))
+        .collect();
+    let cohorts: Vec<Cohort> = rows.iter().map(|r| r.cohort).collect();
+    assert_eq!(
+        cohorts,
+        [
+            Cohort::Covered,
+            Cohort::Noncovered,
+            Cohort::Noncovered,
+            Cohort::Noncovered,
+            Cohort::Covered
+        ],
+        "{by_lot:?}"
+    );
+    assert_eq!(
+        rows[4].date_acquired,
+        date!(2020 - 01 - 01),
+        "column (b) keeps the holding-period start"
+    );
+}
+
 #[test]
 fn row_fields_match_the_leg() {
     let st = state(vec![disposal(
