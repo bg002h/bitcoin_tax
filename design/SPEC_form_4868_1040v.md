@@ -1,13 +1,10 @@
 # SPEC — Form 4868 (extension) and Form 1040-V (payment voucher) fillers (FR-49 / strategy review S8)
 
-**Status: DRAFT r5 (2026-09-06), for review to 0C/0I before build.** Reviews r1 (2C/8I/13M/3N),
-r2 (0C/2I/7M/1N), r3 (0C/2I/6M/2N) and r4 (0C/2I/2M/4N,
-`design/agent-reports/2026-09-06-spec-4868-1040v-review-r4.md`; ledgers 17/17, 10/10, 10/10, 8/8)
-folded. r5: the grid branch sits AFTER the geometry join and BEFORE `label_join`, with the kill that a
-declared grid losing its fixture still reds its year (R4-I1); the line-8 checkbox — the form's one
-filer-collected assertion — gets its kill (R4-I2); the Part I naming is recorded as a DEVIATION from
-the transcription rule's naming clause and logged under §G-5 (R4-M2); the corpus's cell names are used
-(R4-N3). Owning phase: NOW — the physical rehearsal (S1, an owner decision) and the first filed year
+**Status: GREEN r6 (2026-09-06) — 0 Critical / 0 Important at r5; build may proceed.** Reviews r1
+(2C/8I/13M/3N), r2 (0C/2I/7M/1N), r3 (0C/2I/6M/2N), r4 (0C/2I/2M/4N) and r5 (0C/0I/1M/2N,
+`design/agent-reports/2026-09-06-spec-4868-1040v-review-r5.md`; ledgers 17/17, 10/10, 10/10, 8/8)
+folded; r6 fixes r5's residue inline (the `name_line` citation, the grid-fixture population, a dangling
+clause). Owning phase: NOW — the physical rehearsal (S1, an owner decision) and the first filed year
 (TY2026, due 2027-04-15) both walk the extension and the payment envelope; today btctax can print
 neither.
 
@@ -78,9 +75,10 @@ the 4868's Part II lines 4–8 are bound as `line4`…`line8` in the form's numb
 witnesses them today: `f1_11` → "4" … `c1_1` → "8"); line 9 is a `[census]` `never` entry, not a key;
 its Part I cells — lines 1–3, the address — are CAPTIONS (the labels `1`, `2`, `3` never form a label
 column: `candidate_columns` needs ≥ 3 tokens in one x2 bucket, and Part I offers `1`/`2` at one x and
-`3` alone at another — r3 N3-I1) and are bound by NAME with the corpus's own cell names (`name_line`, `address_street`,
-`address_city`, `address_state`, `address_zip`, `taxpayer_ssn`, `spouse_ssn` — `forms/2024/
-f1040.map.toml:117-127` spells the same cells so), with the printed line number in each doc comment.
+`3` alone at another — r3 N3-I1) and are bound by NAME with the corpus's own cell names (`address_street`, `address_city`,
+`address_state`, `address_zip`, `taxpayer_ssn`, `spouse_ssn` — `forms/2024/f1040.map.toml:117-127`
+spells those cells so; the name cell is `name_line`, after the Rust field `ReturnHeader.name_line`
+it is filled from), with the printed line number in each doc comment.
 ★ **This is a recorded DEVIATION from the transcription rule's naming clause** ("one field per numbered
 line, named for the line"): Form 4868 is the first form in the corpus that NUMBERS its identity cells,
 and binding them `line1`…`line3` would red the row gate three times per year on labels the reader
@@ -230,7 +228,8 @@ port runbook as two more rows. Nothing here is year-specific except the archived
   form)`, the map goes to a third printed bucket — *"grid — {reason}"* — and the label join is skipped,
   neither witnessed nor unwitnessed, while a declared grid that has LOST its geometry fixture is still
   counted unwitnessed by the join above it (kill: deleting a declared grid's fixture must still red its
-  year — the six grid maps are the population); every undeclared keyless map still meets `map_reach_problem`'s
+  year — the four declared grids that HAVE a fixture today, 2024/2025 `f8949` and 2025 `f8283`, are the
+  population; the two TY2017 grids have none); every undeclared keyless map still meets `map_reach_problem`'s
   `(false, 0, …)` red, and a keyless map NOT in `GRID_MAPS` whose form has no label column is the kill
   (it must still red). **Neither `max_unwitnessed` moves** — raising one is the option that makes
   "unreadable" and "declared grid" indistinguishable. Floors: `+N per year, measured by the T5 run and
