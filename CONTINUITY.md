@@ -6,41 +6,40 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
-> ## ★★★ RESUME 2026-09-06 (morning) — three reviews in flight; nothing is gating. Read this block first.
+> ## ★★★ RESUME 2026-09-06 (midday) — BOTH specs GREEN; the 1099-DA build is in progress. Read this block first.
 >
-> **Owner asleep; autonomous.** Everything below is committed on `main` (not pushed). Owner decisions
-> S1/S2/S6/S7/S9 and **S10** (`ROADMAP_STATUS.md` §0a: the crypto slice closes on a LIVE basis-regime
-> year) are NOT actioned.
+> **Owner asleep; autonomous.** Everything is committed on `main` (not pushed). Owner decisions
+> S1/S2/S6/S7/S9/**S10** (`ROADMAP_STATUS.md` §0a) are NOT actioned.
 >
-> **Done today (each review persisted VERBATIM → VERIFICATION ledger → fold, three commits):**
-> - TY2024 goldens regenerated under taxcalc 6.8.2, every moved field explained (`22a4c0c4`).
-> - **Spec 1099-DA** r1→r5 through four Opus reviews (4C/3I/8M → 1C/5I/8M → 0C/4I/6M → 0C/1I/6M/6N;
->   folds `3b0a35a2`, `64676905`, `08dd6006`, `41a060e1`). r5 (sonnet verification) IN REVIEW →
->   `…/2026-09-06-spec-1099da-review-r5.md`. r4's Important: reward-credited lots are NONCOVERED
->   ((J)'s services limb is a broker's own services; the 1099-DA instructions say so at :41-57, :364-366).
-> - **Label-join instrument** through three fold reviews (0C/4I/4M → 0C/2I/4M/3N → 0C/1I/5M/3N, gate
->   TRUSTED; folds `91070215`, `fab4f2fa`, `3070a797`): `Word::y2`, inline tables, `[lineN]` sections
->   and `[[lineN…]]` arrays all parsed+counted, floors 261/215, `map_reach_problem` planted, the work
->   list held by `the_committed_work_list_matches_form_delta_at_head`. r4 verification 0C/0I/0M/0N —
->   **TRACK GREEN at `3070a797`** (`0e623ce7`, `af096a4c`).
-> - **Spec 4868/1040-V** r1 (2C/8I/13M/3N) → r2 (`ddd0df68`). IN REVIEW → `…/2026-09-06-spec-4868-1040v-review-r2.md`.
-> - **FR-50 CLOSED:** Schedule 1's TY2025 final archived (`933efdca`); `xtask port-status <prior> <new>`
->   prints the work list's two tables from the emitting surface and the doc is held to it (`bb37c352`;
->   sonnet verification IN REVIEW → `…/2026-09-06-port-status-review.md`). **FR-53 CLOSED** (`2699ea22`).
->   FOLLOWUPS FR-56..FR-60 filed.
+> **GREEN artifacts (each review persisted VERBATIM → VERIFICATION ledger → fold, separate commits):**
+> - `design/SPEC_1099da_broker_reporting.md` **r6 GREEN** — five Opus/sonnet rounds (4C/3I/8M → … →
+>   0C/0I/1M/2N). Key rulings: per-(provider, cohort) answers; `Mixed`/`BasisDiffers` refuse; reward
+>   lots NONCOVERED; Notice 2026-20 books-and-records governs the blind spot; the crypto slice CLOSED
+>   on a LIVE year (S10); the lot's own date travels on the leg.
+> - `design/SPEC_form_4868_1040v.md` **r6 GREEN** — five rounds (2C/8I/13M/3N → … → 0C/0I/1M/2N).
+>   Key rulings: the payment already exists (`payments.extension_payment`); pseudo gate + watermark on
+>   both emitters; MFJ-conditioned spouse boxes; Part I bound by NAME (a recorded G-5 deviation); the
+>   grid decided between the geometry join and the label join; TY2024 revisions bundled too.
+> - Label-join instrument GREEN (four rounds); `xtask port-status` (FR-50) through five verifications —
+>   the work list declares its tags, the checker computes with them, NO FINAL planted load-bearing.
 >
-> **NEXT, in order:** persist → ledger → fold each landing review until 0C/0I; when 1099-DA is green,
-> build T0–T7 (T0 = `forms/2026/YEAR.toml` + the regime value + `DisposalLeg.acquisition_at`; note
-> `default_year()` → 2026 moves both TUIs); when 4868/1040-V is green, build T1–T6 (archive the TY2024
-> revisions first). Then: Schedule 1-A T2–T7 is GATED ON S1 (do not start); f6251/2025 1a/1b (do once
-> for TY2026); FR-53's runbook step; FR-50's `forms port-status` command; FR-51/52/54 after finals.
+> **1099-DA BUILD (spec T-plan), commits so far:** T0 `e4b80fda` (forms/2026/YEAR.toml preparing;
+> `InformationReturnRegime` value + `regime_for` join + kills; `default_year()` → 2026;
+> `SUPPORTED_YEARS` = TEMPLATE_YEARS; the unlock's latest_year now reads removals); T2-a `ee02e503`
+> (`DisposalLeg.lot_acquired_at`; `Cohort`/`cohort_of`; rows carry cohort; the answer types); T1-a
+> `36d83f13` (`ReturnInputs.broker_reporting`; census class; refuse reasons; kills).
+> **NEXT = step C:** `Form8949Box::{G,H,J,K}` + `route_8949_boxes`; `screen_absolute` gains `regime`
+> and the broker screen (unanswered live key / answer with no rows / answer on a non-live year / basis
+> answer under basis=false / Mixed / BasisDiffers); `assemble_printed_forms` routes after the screen;
+> `export_full_return` passes `regime_for(year)`; the slice arm refuses on a LIVE year before bytes
+> (three directions). Then T3 (map boxes + per-(part, box) pages), T4 (Schedule D 1b/2/8b/9), T5
+> ((f)/(g) blank + advisory box 1g/1f), T6 (surfaces, input-form block re-points the NotInForm anchors),
+> T7 (owner action, Notice 2026-20). Then the 4868/1040-V build T1–T6.
 >
-> **Traps hit today:** `git commit -m` with backticks eats words — use `-F -` + a quoted heredoc
-> (memory `commit-messages-via-dash-f`); a downloaded PDF under `design/forms/` without its `.pdf.txt`
-> provenance note reds the manifest tests (the note's first line is the URL the regen harvests);
-> rustfmt reflows anchors — patch by regex span, assert before writing; a staged file rides into the
-> next commit — `git reset -q` before grouping commits; `xtask cite-check` does NOT cover
-> `design/SPEC_*.md` (FR-60); ugrep chokes on `[^<]{0,n}` — use python.
+> **Traps:** the harness's bypass guard string-matches ` -n` — never put `sed -n` in a Bash call that
+> also commits; a staged file from a BLOCKED commit rides into the next commit — `git status` before
+> grouping; `git commit -m` with backticks eats words — `-F -` + quoted heredoc; rustfmt reflows
+> anchors — patch by span/regex, assert before writing.
 
 > ## ★★★ RESUME 2026-09-05 (late) — the Fable plan review is being FOLDED. Read this block first.
 >
