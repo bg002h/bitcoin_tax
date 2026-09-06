@@ -1,14 +1,15 @@
 # SPEC — Form 1099-DA broker reporting on the input surface (FR-46 / port report R28)
 
-**Status: DRAFT r3 (2026-09-06), for review to 0C/0I before build.** r1 review
-(`design/agent-reports/2026-09-06-spec-1099da-review.md`, 4C/3I/8M) and r2 review
-(`…-review-r2.md`, 1C/5I/8M; ledgers `…-VERIFICATION.md` 15/15 and 15/15 TRUE) folded. r3 adds the
-`Mixed` answer that refuses (C-1), enumerates each key's rows so the declaration is about a set the
-filer can see, nests the map so it serialises (N-1), moves the screen to the site that holds the ledger
-(N-2), declares the crypto slice CLOSED on a basis-regime year (N-3), restores the "answer on a
-non-live year refuses" rule and kill (N-4), and gives the cohort a three-way mechanism with a real
-`Unknown` (N-5). Owning phase: NOW (by end of September 2026 — strategy review S3; the forms arrive
-~2027-02-16, inside the season window).
+**Status: DRAFT r4 (2026-09-06), for review to 0C/0I before build.** Reviews r1 (4C/3I/8M), r2
+(1C/5I/8M) and r3 (`design/agent-reports/2026-09-06-spec-1099da-review-r3.md`, 0C/4I/6M; ledger
+`…-r3-VERIFICATION.md` 10/10 TRUE) folded. r4: the cohort's date travels ON the `DisposalLeg`, set in
+the fold where the lot is in scope (I-1); a self-custody row routes I/L by mechanism (I-2); the
+`Unknown` refusal is gone — reward-credited lots are grouped and the filer's reading of the form plus
+`Mixed` governs (I-3); the blind-spot paragraph cites §1.1012-1(j)(3) and **Notice 2026-20**, under
+which a standing order on the taxpayer's own books governs regardless of what the broker reports
+(I-4); the serde shape, the third `default_year` caller, S10's wording, the holding-period limb, and
+the belt-and-braces rules (M-1..M-6). Owning phase: NOW (by end of September 2026 — strategy review
+S3; the forms arrive ~2027-02-16, inside the season window).
 
 ## Why this exists
 
@@ -72,7 +73,7 @@ round-trips through JSON (the vault) and TOML (`income import`), and both requir
 /// (§1.6045-1(a)(15)(i)(J)/(G), (a)(16)). The broker's own lot identification decides the real
 /// answer; this is the partition the filer answers OVER, and `Mixed` is the answer when the forms
 /// in a partition disagree.
-pub enum Cohort { Covered, Noncovered }
+pub enum Cohort { Covered, Noncovered } // two-way; derived by mechanism, never refused
 /// What the 1099-DA(s) for one key SHOW — read off the physical forms by the filer, for the rows
 /// btctax lists under that key (R1 enumerates them).
 pub enum BrokerReported {
@@ -95,7 +96,8 @@ pub enum BrokerReported {
 /// One provider's answers, one slot per cohort. An absent provider, or an absent slot for a cohort
 /// that has rows, is UNANSWERED.
 pub struct CohortAnswers { pub covered: Option<BrokerReported>, pub noncovered: Option<BrokerReported> }
-pub struct BrokerReporting { pub by_provider: BTreeMap<String, CohortAnswers> }
+#[serde(transparent)]
+pub struct BrokerReporting(pub BTreeMap<String, CohortAnswers>); // TOML: [broker_reporting.coinbase] covered = "…"
 ```
 
 - **The cohort is derived by the engine, per row, at row construction** (`form_8949`, which has the
@@ -107,12 +109,23 @@ pub struct BrokerReporting { pub by_provider: BTreeMap<String, CohortAnswers> }
   | `ExchangeProvided`, `ComputedFromCost` (a purchase or exchange on the venue) | yes | **Covered** — §1.6045-1(a)(15)(i)(J) |
   | the same | no (pre-2026, or not an exchange wallet) | Noncovered |
   | `CarriedFromTransfer`, `SelfTransferInbound`, `GiftCarryover`, `GiftFmvFallback`, `SafeHarborAllocated`, `ReconstructedPerWallet`, `EstimatedConservative` | any | Noncovered — arrived by transfer or reconstruction; no §1.6045A-1 statement comes from the filer's own wallet or from a reconstruction |
-  | `FmvAtIncome`, `CardRewardRebate` | yes | **Unknown → `RefuseReason::BrokerCohortUnknown`** — (J) covers acquisition "in exchange for … services", so an exchange-credited 2026 reward may be covered; the broker decides, not the engine |
+  | `FmvAtIncome`, `CardRewardRebate` (credited INTO the exchange account — staking, interest, a card rebate; FR-45) | yes | **Covered** — (J) covers acquisition "in exchange for … services", and the broker holds the acquisition record; if the broker treats the lot as noncovered, its form disagrees with its neighbours' and the key answers `Mixed` (R2) |
   | the same | no | Noncovered |
 
-  The date is the lot's **acquisition event date** (via `lot_id` → the lot's origin event), NOT
-  `DisposalLeg::acquired_at`, which is the zone-aware holding-period start (`state.rs:208-212`).
-  Under a regime with `basis = false` every row is `Noncovered`. The row carries `cohort: Cohort`.
+  There is no `Unknown` outcome and no `BrokerCohortUnknown` refusal (r3 I-3): the cohort is only a
+  GROUPING the filer answers over, each key's rows are enumerated, and a lot in the "wrong" bucket
+  still receives the answer its own form supports — or the bucket refuses as `Mixed`. A refusal here
+  would block a filer whose truthful ledger holds a shipped provenance, with no exit but deleting it.
+
+  The date is the lot's **acquisition date as the lot records it**, NOT `DisposalLeg::acquired_at`
+  (the zone-aware holding-period start, `state.rs:208-212`). ★ It is not reachable at `form_8949`
+  (r3 I-1): a lot sold out by the disposal leaves `LedgerState.lots` (`fold.rs:1644-1650` keeps only
+  `remaining_sat > 0`) and the state carries no event log. So the fold — where the `Lot` IS in scope
+  — sets `DisposalLeg.acquisition_at: TaxDate` from the lot (the precedent is `promoted_origins`,
+  `state.rs:345-352`, a fact "indistinguishable from the leg alone" carried forward for the same
+  reason), and every `DisposalLeg` literal reds until it is supplied. `form_8949` derives `cohort`
+  from `(basis_source, wallet kind, acquisition_at)` and nothing else. Under a regime with
+  `basis = false` every row is `Noncovered`. The row carries `cohort: Cohort`.
 - **What the declaration is about, and what it cannot see.** The answer quantifies over a row set
   the engine derived, so the tool MUST show it: `report` and the TUI prompt enumerate each key's
   rows (date sold, amount, proceeds, btctax's column (e)) before the answer is taken (T6). The
@@ -124,10 +137,20 @@ pub struct BrokerReporting { pub by_provider: BTreeMap<String, CohortAnswers> }
   a key whose forms disagree among themselves (`Mixed`), and a covered form whose basis differs
   (`BasisDiffers`). One does NOT surface: a proceeds-only form (no basis to compare) listing a sale
   the broker matched to a different lot than the engine did — box H/K and the engine's basis print,
-  and the gain differs from what the broker's lot would give. That is the specific-ID question
-  (Rev. Proc. 2024-28; §1.1012-1(j)) the owner action T7 exists for — a standing lot-identification
-  instruction to each exchange is what makes the two partitions coincide — and the per-lot import is
-  what would detect it. Stated here so the blind spot is chosen, not discovered.
+  and the gain, the holding period, and therefore possibly the PART (I vs II) and box set differ
+  from what the broker's lot would give. ★ Whether that makes the return WRONG is the identification
+  rule, §1.1012-1(j)(3), and for TY2026 the governing text is **Notice 2026-20**
+  (`legal/text/irs-guidance/Notice_2026-20.txt`: *"EXTENSION OF TEMPORARY RELIEF UNDER SECTION
+  1.1012-1(j)(3)(ii)"*, relief period *"beginning on January 1, 2025, and ending on December 31,
+  2026"*): an adequate identification includes *"Recording a standing order on the taxpayer's books
+  and records"* before the units are sold (§4.02(2)), and the units so identified govern
+  *"regardless of whether the information reported by the broker to the taxpayer matches the
+  taxpayer's books and records"* (§4.05). So on a books-and-records standing order the engine's lot
+  IS the lot sold and the broker's differing form is a reconciliation matter, not an error; without
+  one, the broker's default identification governs and the row is wrong. That is what the owner
+  action T7 secures, and the per-lot import is what would detect the divergence. (Rev. Proc. 2024-28
+  is the §1012(c)(1) per-wallet basis safe harbor, not the identification rule — r3 I-4.) Stated here
+  so the blind spot is chosen, not discovered.
 - **Key on `provider`** (= `Source::tag()`), not `(provider, account)`, because `exchange_wallet`
   (`crates/btctax-adapters/src/normalize.rs:64`) always sets `account = "default"` — single-account
   today; a 1099-DA is per account, so the key widens when accounts do.
@@ -152,11 +175,14 @@ pub struct BrokerReporting { pub by_provider: BTreeMap<String, CohortAnswers> }
   rule 18). **Any answer on a key with NO rows, or on a year where the question is not live, →
   `Refusal`** (a declaration about nothing is fabricated; a declaration the tool would not read is
   testimony silently discarded). **`BasisMatches`/`BasisDiffers` under a regime with `basis = false`
-  → `Refusal`** (the broker cannot have reported basis) — the r1 kill, restored.
+  → `Refusal`** (the broker cannot have reported basis) — the r1 kill, restored. The second rule is
+  subsumed by the first while liveness is gated on `basis`; both are kept deliberately (belt and
+  braces), so the two kills are not duplicates by accident but by design (r3 M-6).
 - **The crypto slice is CLOSED on a basis-regime year (N-3).** `export_irs_pdf_from_session`
   (`admin.rs:594`) runs the crypto slice iff no `ReturnInputs` is stored, and the answers live on
-  `ReturnInputs`; so for a live year the slice arm refuses **before any byte**, unconditionally, and
-  the refusal names the exit: *"TY2026 Form 8949 needs the Form 1099-DA answers, which live on the
+  `ReturnInputs`; so for a LIVE year (basis regime AND ≥1 exchange disposition — a TY2026 vault with only
+  self-custody dispositions still fills) the slice arm refuses **before any byte**, unconditionally,
+  and the refusal names the exit: *"TY2026 Form 8949 needs the Form 1099-DA answers, which live on the
   return inputs — `income import` / the TUI input form, then export the full return."* Kills, both
   directions: TY2026 + one exchange disposition on the slice arm → refusal, no `f8949.pdf`; TY2025
   same inputs → fills as today. This retires the slice as a product surface for TY2026+ (btctax has
@@ -172,8 +198,9 @@ pub struct BrokerReporting { pub by_provider: BTreeMap<String, CohortAnswers> }
   with reasons, regime `{ proceeds = true, basis = true }` — so the CLI join has a 2026 record and
   the TY2026 kills have something to read (`build.rs:81` enters a year per file, so `YEAR.toml` alone
   bundles it). ★ Consequences, stated so they are chosen: `default_year()` (newest bundled) becomes
-  **2026**, and its only callers are the two TUIs (`tui/src/app.rs:195`, `tui-edit/src/editor.rs:300`),
-  so **both TUIs open on a year with zero bundled forms** — the readiness sentence says so on the
+  **2026**, and its callers are the two TUIs (`tui/src/app.rs:195`, `tui-edit/src/editor.rs:300`) plus the
+  unlock screen's FALLBACK behind a ledger-derived year (`tui/src/unlock.rs:234`), so **both TUIs
+  open on a year with zero bundled forms** (the unlock screen only when the ledger names none) — the readiness sentence says so on the
   unlock screen. Four test sites red and are updated by name in T0: `year_readiness.rs:317`,
   `tui-edit/src/main.rs:15459`, `tests/year_record.rs:55` (`bundled_years() == [2017, 2024, 2025]`)
   and its `expected_count` `other => panic!` arm. The 2026 record flips to `filable` in the same
@@ -183,7 +210,10 @@ pub struct BrokerReporting { pub by_provider: BTreeMap<String, CohortAnswers> }
 **R2 — routing.** Per row, `(term, answer for the row's key)` → box: ST `NotReported→I`,
 `ProceedsOnly→H`, `BasisMatches→G`; LT `→L`, `→K`, `→J`; `BasisDiffers` and `Mixed` → **refuse**
 (`RefuseReason::BrokerBasisDiffers { provider, cohort }` / `BrokerReportingMixed { provider, cohort }`,
-each naming the per-lot import as the exit); `Unknown` cohort → refuse (R1). A `BasisMatches`/
+each naming the per-lot import as the exit). **A row whose wallet is not an `Exchange` has no key,
+and no 1099-DA can exist for it** (a peer-to-peer sale, a spend, a non-broker venue): it routes
+`NotReported` → I/L **by mechanism, not by default** — the rule is written, the kill holds it (T2), and
+it never refuses (r3 I-2). A `BasisMatches`/
 `BasisDiffers` answer on a `Noncovered` key is allowed (voluntary basis reporting, 1099-DA instr
 `:548-551`) — the filer reads it off the form. Pre-2025 revisions have no digital-asset boxes at all;
 this spec makes no pre-2025 change.
@@ -225,7 +255,7 @@ runbook gains the row). TY2024's map keeps C/F only.
 |---|---|---|
 | box chosen | `crates/btctax-core/src/forms.rs:136-147` (`form_8949`) | `da ? I : C` / `da ? L : F` from `term` and year |
 | the flag | `Form8949Row.box_needs_review` (`forms.rs:73`, set `:149`) | `matches!(leg.wallet, Exchange{..})` → advisory only |
-| the provenance | `DisposalLeg { basis_source, lot_id, wallet, acquired_at }` (`state.rs:197-217`); `BasisSource` (`event.rs:17-29`) | in scope at row construction; `acquired_at` is the HP start, not the acquisition date |
+| the provenance | `DisposalLeg { basis_source, lot_id, wallet, acquired_at }` (`state.rs:197-217`); `BasisSource` (`event.rs:17-29`); the `Lot` in the fold (`fold.rs:1644-1650` drops sold-out lots) | `acquired_at` is the HP start; the lot's own date reaches the row only if the fold carries it (T2) |
 | the advisory | `crates/btctax-cli/src/cmd/admin.rs:467` `broker_reporting_advisory` | fires on both export arms since `118b070b` |
 | the two arms | `admin.rs:573-600` `export_irs_pdf_from_session` | full return via `ReturnInputs`; slice via `form_8949` + `fill_form_8949` (`:631`, `:716`) |
 | the filler | `crates/btctax-forms/src/fill8949.rs:259` `split_parts` (by PART), `:78` `place_part` (one box per page); `lib.rs:119-137` pairs ST chunk *k* with LT chunk *k* | no per-box grouping |
@@ -245,18 +275,18 @@ runbook gains the row). TY2024's map keeps C/F only.
   with the four tests updated by name.
 - **T1 — the declaration.** `BrokerReporting` on `ReturnInputs` (nested map); the `screen_absolute`
   arm and its `regime` argument; the classifier class; `RefuseReason::{BrokerReportingUnanswered,
-  BrokerReportingMixed, BrokerBasisDiffers, BrokerCohortUnknown}` (an exhaustive cross-crate match
-  reds). Kills: TY2026 + one exchange disposition + no answer → refuse; TY2025 same inputs → not
+  BrokerReportingMixed, BrokerBasisDiffers}` (an exhaustive cross-crate match reds). Kills: TY2026 + one exchange disposition + no answer → refuse; TY2025 same inputs → not
   refused, I/L; TY2024 → not asked; an answer for a key with no rows → `Refusal`; any answer on a
   non-live year → `Refusal`; `BasisMatches` under `basis = false` → `Refusal`;
   `answer_all_live_declarations` leaves it unanswered; the slice arm: TY2026 → refusal before any
   byte naming the exit, TY2025 → fills.
-- **T2 — cohort + routing.** `form_8949` derives `cohort` per row from the table in R1 (by
-  `BasisSource`, wallet kind, and the lot's acquisition event date) and takes the answers; the
+- **T2 — cohort + routing.** `DisposalLeg.acquisition_at` set in the fold from the lot (every leg
+  literal reds); `form_8949` derives `cohort` per row from the table in R1 and takes the answers; the
   routing table `(term, answer) → box | refuse` under test for every cell; `FmvAtIncome` in an
-  exchange wallet dated 2026 → `BrokerCohortUnknown` (the kill now has an input). Kills: one
-  provider, two cohorts, two different answers → two Part I page-sets with different boxes (S4); a
-  `Mixed` answer → refusal naming the import (C-1).
+  exchange wallet dated 2026 → `Covered`. Kills: one provider, two cohorts, two different answers →
+  two Part I page-sets with different boxes (S4); a `Mixed` answer → refusal naming the import (C-1);
+  a sold-out lot's row still carries its acquisition date (I-1); TY2026, one self-custody disposition
+  and one answered exchange disposition → the self-custody row prints I/L and nothing refuses (I-2).
 - **T3 — the map + per-(part, box) pages.** six FQNs; `split_parts` → by (part, box); the
   concatenate-then-zip rule of R3. Kill: G+I ST with a single J LT → 2 copies, boxes as R3 states; a
   golden packet for it.
@@ -270,10 +300,13 @@ runbook gains the row). TY2024's map keeps C/F only.
   the answer; `report` lists the keys, their rows, and the answers; `YearReadiness::sentence` gains
   "1099-DA regime: proceeds+basis"; the advisory at `admin.rs:471` and the TUI forms tab
   (`tabs/forms.rs:174`) read the regime, not the constant.
-- **T7 — the owner action (not code).** A standing specific-ID instruction to each exchange before
-  further 2026 sales, and a check of what each will put in **box 1g** (strategy review S3 — which
-  says "box 1e"; that report is verbatim and is corrected here, not there) — recorded in
-  `ROADMAP_STATUS.md` §0a as an owner item with a date.
+- **T7 — the owner action (not code).** Under Notice 2026-20 §4.02(2): **record the standing
+  lot-identification order (the method election, HIFO) on the filer's own books before further 2026
+  sales** — btctax's per-year method-election record, timestamped in the vault, is a candidate for
+  that record and T6 states whether it qualifies as written — **and/or** instruct each exchange; then
+  check what each will put in **box 1g** (strategy review S3 — which says "box 1e"; that report is
+  verbatim and is corrected here, not there). Recorded in `ROADMAP_STATUS.md` §0a as an owner item
+  with a date, citing the notice.
 
 ## Out of scope (filed separately)
 

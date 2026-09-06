@@ -70,8 +70,9 @@ FR-49) are folded into §3's NOW bucket below and re-owned in `FOLLOWUPS.md`.
 
 ---
 
-- **S10 (spec 1099-DA r3, 2026-09-06) — the crypto-slice `export-irs-pdf` is CLOSED on a year whose
-  regime reports basis (TY2026+).** The Form 1099-DA answers live on `ReturnInputs`, and the slice arm
+- **S10 (spec 1099-DA r3/r4, 2026-09-06) — the crypto-slice `export-irs-pdf` is CLOSED on a LIVE
+  year: a basis regime (TY2026+) AND ≥1 exchange disposition** (a vault with only self-custody
+  dispositions still fills). The Form 1099-DA answers live on `ReturnInputs`, and the slice arm
   runs only when none is stored, so on such a year it refuses before any byte and names the exit
   (`income import` → the full return). Reversing this means a `broker_reporting` vault table both
   arms read. Default if unanswered: closed (no users; the full return is the product).
