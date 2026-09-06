@@ -1,12 +1,11 @@
 # SPEC — Form 1099-DA broker reporting on the input surface (FR-46 / port report R28)
 
-**Status: DRAFT r5 (2026-09-06), for review to 0C/0I before build.** Reviews r1 (4C/3I/8M,
-`design/agent-reports/2026-09-06-spec-1099da-review.md`), r2 (1C/5I/8M, `…-review-r2.md`), r3
-(0C/4I/6M, `…-review-r3.md`) and r4 (0C/1I/6M/6N, `…-review-r4.md`; ledgers `…-VERIFICATION.md`
-15/15, 15/15, 10/10, 11/11 TRUE) folded. r5 moves reward-credited lots to **Noncovered** — (J)'s
-"services" limb is bounded to services a BROKER renders, and the 1099-DA instructions say so in one
-sentence (I-new-1) — and folds the six Minors and six Nits. Owning phase: NOW (by end of September
-2026 — strategy review S3; the forms arrive ~2027-02-16, inside the season window).
+**Status: GREEN r6 (2026-09-06) — 0 Critical / 0 Important at r5; build may proceed.** Reviews r1
+(4C/3I/8M, `design/agent-reports/2026-09-06-spec-1099da-review.md`), r2 (1C/5I/8M, `…-review-r2.md`),
+r3 (0C/4I/6M, `…-review-r3.md`), r4 (0C/1I/6M/6N, `…-review-r4.md`) and r5 (0C/0I/1M/2N,
+`…-review-r5.md`; ledgers 15/15, 15/15, 10/10, 11/11 TRUE) folded; r6 fixes r5's three residue items
+inline (the literal count, and two kills mirrored into the task lists). Owning phase: NOW (by end of
+September 2026 — strategy review S3; the forms arrive ~2027-02-16, inside the season window).
 
 ## Why this exists
 
@@ -130,8 +129,8 @@ pub struct BrokerReporting(pub BTreeMap<String, CohortAnswers>); // TOML: [broke
   (`fold.rs:360`) from **`Consumed.acquired_at`** (`pools.rs:321`, assigned `lot.acquired_at` at
   `:243` for both pool kinds — the `Lot` itself is not in scope there, the `Consumed` is; the
   precedent is `promoted_origins`, `state.rs:345-352`, a fact carried forward because the leg alone
-  cannot show it). Every `DisposalLeg` literal reds until it is supplied (23 full literals; the 27
-  `..base_leg()` struct-update sites inherit from them). `form_8949` derives `cohort` from
+  cannot show it). Every `DisposalLeg` literal reds until it is supplied (15 full literals; the 26
+  `..base_leg()` struct-update sites inherit from them — r5 NEW-1, counted by brace depth). `form_8949` derives `cohort` from
   `(basis_source, wallet kind, lot_acquired_at)` and nothing else; **column (b) keeps
   `leg.acquired_at`** (`forms.rs:151`) — only the cohort reads the new field. Why not
   `leg.acquired_at` itself: today the two are equal on every row whose cohort consults a date
@@ -299,8 +298,8 @@ runbook gains the row). TY2024's map keeps C/F only.
   BrokerReportingMixed, BrokerBasisDiffers}` (an exhaustive cross-crate match reds). Kills: TY2026 + one exchange disposition + no answer → refuse; TY2025 same inputs → not
   refused, I/L; TY2024 → not asked; an answer for a key with no rows → `Refusal`; any answer on a
   non-live year → `Refusal`; `BasisMatches` under `basis = false` → `Refusal`;
-  `answer_all_live_declarations` leaves it unanswered; the slice arm: TY2026 → refusal before any
-  byte naming the exit, TY2025 → fills.
+  `answer_all_live_declarations` leaves it unanswered; the slice arm: TY2026 + one exchange disposition → refusal before any byte naming the exit;
+  TY2025 → fills; TY2026 + zero exchange dispositions → fills, no refusal (r5 NEW-2).
 - **T2 — cohort + routing.** `DisposalLeg.lot_acquired_at` set at the leg literal from `Consumed.acquired_at`
   (every full literal reds); `form_8949` derives `cohort` per row from the table in R1 and takes the answers; the
   routing table `(term, answer) → box | refuse` under test for every cell; `FmvAtIncome` in an
@@ -320,7 +319,9 @@ runbook gains the row). TY2024's map keeps C/F only.
   noncovered = "…"`); the TUI input form's new block, which ENUMERATES each key's rows before taking
   the answer; `report` lists the keys, their rows, and the answers; `YearReadiness::sentence` gains
   "1099-DA regime: proceeds+basis"; the advisory at `admin.rs:471` and the TUI forms tab
-  (`tabs/forms.rs:174`) read the regime, not the constant.
+  (`tabs/forms.rs:174`) read the regime, not the constant, and on a live year the advisory states once
+  that a custodial venue outside the four adapters must be recorded as `exchange:PROVIDER:ACCOUNT` to
+  get a 1099-DA key (r5 NEW-3).
 - **T7 — the owner action (not code).** Under Notice 2026-20 §4.02(2): **record the standing
   lot-identification order (the method election, HIFO) on the filer's own books before further 2026
   sales** — btctax's per-year method-election record, timestamped in the vault, is a candidate for

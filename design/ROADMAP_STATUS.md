@@ -76,6 +76,8 @@ FR-49) are folded into §3's NOW bucket below and re-owned in `FOLLOWUPS.md`.
   runs only when none is stored, so on such a year it refuses before any byte and names the exit
   (`income import` → the full return). Reversing this means a `broker_reporting` vault table both
   arms read. Default if unanswered: closed (no users; the full return is the product).
+  ★ The spec (`design/SPEC_1099da_broker_reporting.md`) is **GREEN r6** (five review rounds, 0C/0I at
+  r5); the build T0–T7 starts 2026-09-06.
 
 ## 0b. The one-line answer (TY2025 context, retained)
 
