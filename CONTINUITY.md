@@ -6,6 +6,16 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
+> ## ★★★ RESUME 2026-09-06 (last) — the 4868/1040-V seam review is FOLDED (`7eb93c27`, 3152 tests); its sonnet re-verification (worktree) is IN FLIGHT. Read this block first.
+>
+> Chain: review persisted `17e180bf` (0C/4I/5M/2N), ledger `7c6fe99f` (6/6 HOLD), fold brief
+> `e423b44e`, fold `7eb93c27` (I-1 every --pay refusal before any byte; I-2 the envelope guard in
+> both directions; I-3 the experimental notice on `extension`; I-4 the record-your-payment note; M-1..
+> M-5, N-1; spec T6 reworded; examples golden +2 pointer lines). When the r2 report returns: copy it
+> from the worktree, persist (own commit), ledger if it has new findings, fold any residue via one opus
+> agent, else CLOSE FR-49 in FOLLOWUPS + roadmap and refresh the progress page. Then the calendar
+> (09-15 real-data run needs the owner's 2026 exports; S1/S2/S6/S7/S9/S10/T7 untouched; nothing pushed).
+
 > ## ★★★ RESUME 2026-09-06 (latest) — the 4868/1040-V build is LANDED through T4 (`a51b8c53`, 3145 tests); its independent SEAM review (opus, worktree) is IN FLIGHT. Read this block first.
 >
 > When the review returns: copy its report from `.claude/worktrees/agent-*/design/agent-reports/
