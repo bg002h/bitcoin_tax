@@ -284,14 +284,16 @@ DISPATCH (P6.5)") becomes three-way. The predicate is a function call, never a d
 1. **inputs stored AND `full_return_for(year)` is `Some`** → the full-return packet, unchanged. The
    `exists` branch keeps its early `return` ONLY in this case (M-2).
 2. **the ANSWERS are stored AND `full_return_for(year).is_none()`** → the CRYPTO SLICE, reached by NOT
-   returning early. "Stored" is ONE accessor (T9): `input_form_store::broker_answers(conn, year)` —
-   the committed row's `broker_reporting` if a committed row exists, else the DRAFT row's — and the
-   predicate is that it is `Some` and non-empty. The boxes are ROUTED from those answers through
+   returning early. "Stored" is ONE accessor (T9): `input_form_store::broker_answers(conn, year)`, which
+   resolves the year's working return through `input_form_store::load` — the §6.1 precedence every
+   other reader uses, **a draft shadows the committed row** — and returns its `broker_reporting`;
+   the predicate is that it is `Some` and non-empty. The boxes are ROUTED from those answers through
    exactly the screen and router the full return uses (`screen_broker_reporting` then
    `route_8949_boxes`). Before any byte, in this order (I-5): the promote gate; the form-level gate
-   (I-1/I-7) — EVERY map this export can reach must resolve: `Form8949Map`, `ScheduleDMap` and
-   `Form1040Map` unconditionally, plus `Form8283Map` / `ScheduleSeMap` / `Form8275Map` when this
-   year's data will reach them — naming the first missing stem, so a partially ported year writes
+   (I-1/I-7) — EVERY map the SELECTED forms can reach must resolve (`--forms` narrows the set through
+   `wants()`): `Form8949Map` and `ScheduleDMap` always, `Form1040Map` when the capital-gains page
+   is selected, plus `Form8283Map` / `ScheduleSeMap` / `Form8275Map` when this year's data will
+   reach them — naming the first missing stem, so a partially ported year writes
    nothing (`SUPPORTED_YEARS` is a year-level answer and is not this gate); the pseudo-
    attestation gate; `screen_broker_reporting` (an unanswered, `mixed` or `basis_differs` key, or a
    stored answer no row reads, refuses with the SAME `Refusal` reason/detail in the SLICE's own
@@ -299,7 +301,9 @@ DISPATCH (P6.5)") becomes three-way. The predicate is a function call, never a d
    restriction row in its slice form — `ri.donations_had_restrictions == Some(true)` AND the year
    emits an 8283 → refuse, no `form_8283.pdf`. It does NOT run `screen_inputs` or
    `screen_compute_dependent`: neither reaches a figure the slice prints. The `--forms full-return`
-   and `--pay-by-check` refusals stand on this arm (there is no Form 1040 line 37).
+   and `--pay-by-check` refusals stand on this arm (there is no Form 1040 line 37), RE-WORDED for it:
+   both name the real reason — the year's full-return parameters are not bundled in this build — never
+   "no full-return inputs … author them first", which a filer on this arm has already done (M-10).
    **The slice's Schedule D carries the per-box lines from the ROUTED rows (T8, below).** The export
    report carries one note, printed after the file list (M-6): *"TY{y}: full-return parameters are not
    bundled in this build — this is the crypto slice, an ATTACHMENT SET (Form 8949, Schedule D, …) with
@@ -313,9 +317,14 @@ DISPATCH (P6.5)") becomes three-way. The predicate is a function call, never a d
 
 **`report` in state (2) (I-3, C-3).** `resolve.rs` is UNTOUCHED. State (2) has two sub-states:
 (2a) the answers live in the DRAFT row only (the TUI path — no committed row exists) → `report`
-resolves the stored `tax_profile` exactly as before (a draft never shadows it), renders the crypto-
-delta report, and adds the Form 1099-DA answers block (the row enumeration R1 mandates) read through
-the T9 accessor, exiting 0; (2b) a committed row exists with no params (only `income import` can
+resolves on the unchanged ladder: WITH a stored `tax_profile` it renders the crypto-delta report and
+the Form 1099-DA answers block (the row enumeration R1 mandates, read through the T9 accessor) and
+exits 0; WITHOUT one it is `NotComputable [TaxProfileMissing]` and exits 1 exactly as today — the
+answers block still prints (it is built after the resolve), and the NOT-COMPUTABLE line gains the
+clause *"`export-irs-pdf --tax-year {y}` still prints the crypto slice from these answers"* so the
+filer is not told the year is dead. A draft never shadows a `tax_profile`, so (2a) never LOSES a
+figure it had. Kills: one per sub-state, naming the expected exit code (0 with a profile, 1
+without); (2b) a committed row exists with no params (only `income import` can
 create it on such a year) → the outcome is unchanged — uncomputable, the inputs kept — and both
 `uncomputable_sentence` and `import_note` (I-4) gain the clause *"`export-irs-pdf --tax-year {y}`
 still prints the crypto slice from these inputs"*, `import_note` no longer saying `report` will
@@ -343,7 +352,8 @@ and is not evidence the gap is closed (M-4). No new vault table: the answers sta
 
 **New build tasks (from the r1 review's Criticals).**
 - **T8 — the slice's Schedule D, per box.** `btctax_core::forms::schedule_d_by_box(rows: &[Form8949Row])
-  -> BTreeMap<(Form8949Part, Form8949Box), ScheduleDPart>` aggregated from the ROUTED rows (never re-
+  -> BTreeMap<Form8949Box, ScheduleDPart>` (the box determines the part — A/B/C/G/H/I are Part I,
+  D/E/F/J/K/L Part II — so the key is the box alone; `Form8949Part` carries no `Ord`) aggregated from the ROUTED rows (never re-
   derived from `state`, so the page-set and the schedule cannot disagree). It maps each box to the
   line the form's own text gives it — 1b = A|G, 2 = B|H, **3 = C|I**, 8b = D|J, 9 = E|K,
   **10 = F|L** — the same pairing `printed::schedule_d_lines` already encodes (`&[B::I, B::C]` /
@@ -351,34 +361,51 @@ and is not evidence the gap is closed (M-4). No new vault table: the answers sta
   its whole Part I total on line 3 (I-6). Signature (M-8): `fill_schedule_d_totals(totals, by_box,
   map)` and its public wrapper `fill_schedule_d(&totals, &by_box, year)`; the routed rows reach the
   filler from the arm that routed them (the slice arm in `admin.rs`, `write_form_csvs`); the twelve
-  call sites (`admin.rs:833`, `kats.rs` ×6, `sp3.rs` ×2, `sp3b.rs` ×3 — the last three go with the S9
-  drop) are updated, the compiler listing them. A box group with no rows writes nothing; **a box group
+  `fill_schedule_d` call sites (`admin.rs:833`, `kats.rs` ×6, `sp3.rs` ×2, `sp3b.rs` ×3 — the last
+  three go with the S9 drop) AND the three direct `fill_schedule_d_totals` sites — `kats.rs:471` and
+  `:488` (the two halves of `a_swapped_yes_no_map_fails_closed_instead_of_rendering_a_blank_box`, a B1
+  kill) and `sp3b.rs:603` — are updated as transcription, the compiler listing them; none of the
+  three B1 kills is relaxed. A box group with no rows writes nothing; **a box group
   with rows and an UNBOUND map row REFUSES (`need`), as `fill_schedule_d_full` does — never drops the
   total** (I-8). `schedule_d.csv` gains a `box` column and one row per (part, box) group, so the CSV
-  and the PDF carry the same partition; `schedule_d_totals_match_form8949_and_csv` is re-scoped to
-  compare each box group's PDF line against its CSV row and against that box's 8949 page-set
-  totals, and keeps asserting the part total as the sum of the groups (I-9). Kills: a live-regime
+  and the PDF carry the same partition. The three-artifact cross-check lives where the CSV is written:
+  in `btctax-cli` beside `write_form_csvs` (which holds the routed rows), reading the written
+  `schedule_d.csv` from a tempdir — each box group's CSV row must equal that box's Schedule D PDF
+  line and that box's Form 8949 page-set total, and the part total must equal the sum of the groups;
+  `kats.rs::schedule_d_totals_match_form8949_and_csv` stays in `btctax-forms` as the PDF-vs-8949
+  half, re-scoped per box group, renamed so it no longer claims to read a CSV (I-9, I-13). Kills: a live-regime
   `basis_matches` slice → `f8949.pdf` carries a G page-set, Schedule D line 1b carries the G total
   AND line 3 is BLANK; on a G+I mix each total lands on its own line and `1b_d + 3_d` cross-foots to
   the part total (M-3); a TY2024 slice → line 3 still carries the whole Part I total and 1b is BLANK;
   a map with `line1b` removed and a routed G group present → `FormsError`, zero bytes, the same map
-  with no G rows → fills clean; the re-scoped three-artifact KAT on a G+I fixture reds if any drifts.
-- **T9 — read the answers without committing a return (C-2, C-3).** A dedicated accessor
-  `input_form_store::broker_answers(conn, year) -> Option<BrokerReporting>` reads the committed row's
-  `broker_reporting` if a committed row exists, else the DRAFT row's (the TUI already flushes the
-  working return — block included — to `return_inputs_draft` on a params-less year). Arm (2)'s
-  predicate is that accessor, NOT `return_inputs::exists`. NO row is created and `ReturnInputs::
-  default()` is never persisted — it carries `filing_status: Single`, which is testimony the filer
-  never gave and which `classify()`'s own exemption reason ("no default to launder") forbids; `resolve.rs`
-  is untouched, so a draft cannot shadow a `tax_profile`, and I-11 is not merely preserved but never
-  approached. `income import` reaches arm (2) only with a file that carries `filing_status` (the one
-  field with no `#[serde(default)]`, on purpose); the TUI block is the primary authoring surface on a
-  params-less year, and its commit modal says the answers are held in the draft and that the slice
-  reads them. Kills: TY2026 + a TUI-saved 1099-DA block → the draft holds the answers,
-  `return_inputs::exists(2026)` is FALSE, and `export-irs-pdf --tax-year 2026` reaches arm (2); the
-  same vault with a stored `tax_profile` for 2026 → `report --tax-year 2026` still resolves
-  `StoredProfile` and exits 0 (the kill that reds on any create-a-row design); TY2026 + a params-less
-  commit of the FULL return → still `NoTables` + draft (I-11 unmoved).
+  with no G rows → fills clean; the cli-side three-artifact check on a G+I fixture reds when the CSV writer is reverted to two part
+  rows (B1), and the forms-side half reds when a PDF line moves.
+- **T9 — read the answers without committing a return (C-2, C-3, C-4, I-10).** A dedicated accessor
+  `input_form_store::broker_answers(conn, year) -> Result<Option<BrokerReporting>, CliError>` resolves
+  the year's working return through `input_form_store::load` — the §6.1 precedence every other reader
+  uses, **a draft shadows the committed row** — and returns its `broker_reporting`. It never
+  introduces a second precedence: the answers the export files are the answers the TUI shows. Because
+  it goes through `load`, the §6.3 stale split holds unchanged — a stale WIP draft is discarded (and
+  the export surfaces the `StaleNote`), a stale parked draft REFUSES (`StaleParkedDraft`) before any
+  byte — and a **parked** draft (`parked = 1`, a return switched back to the tax-profile) carries no
+  live answers: the accessor returns `None` for it, so arm (2) falls to arm (3) rather than filing
+  withdrawn testimony. Arm (2)'s predicate is that accessor, NOT `return_inputs::exists`. NO row is
+  created and `ReturnInputs::default()` is never persisted — it carries `filing_status: Single`,
+  testimony the filer never gave, which `classify()`'s own exemption reason ("no default to launder")
+  forbids; `resolve.rs` is untouched, so a draft cannot shadow a `tax_profile`, and I-11 is not merely
+  preserved but never approached. `income import` reaches arm (2) only with a file that carries
+  `filing_status` (the one field with no `#[serde(default)]`, on purpose); the TUI block is the
+  primary authoring surface on a params-less year, and its commit modal says the answers are held in
+  the draft and that the slice reads them. Kills: TY2026 + a TUI-saved 1099-DA block → the draft
+  holds the answers, `return_inputs::exists(2026)` is FALSE, and `export-irs-pdf --tax-year 2026`
+  reaches arm (2); the same vault with a stored `tax_profile` for 2026 → `report --tax-year 2026`
+  still resolves `StoredProfile` and exits 0 (the kill that reds any create-a-row design); a
+  params-less year with a committed row answering `basis_matches` AND a draft answering
+  `proceeds_only` → the export writes box **I** (the draft wins), and the same vector with the two
+  swapped writes **G**; a draft at `SCHEMA_VERSION - 1` with `parked = 1` → the export refuses,
+  `out_dir` absent; the same at `parked = 0` → the stale row is discarded and the export takes arm
+  (3); a current `parked = 1` draft → arm (3); TY2026 + a params-less commit of the FULL return →
+  still `NoTables` + draft (I-11 unmoved).
 
 **Kills (the build lands each with its own):** TY2025 (templates, no params) + stored answers
 (committed row via `income import`, and separately a DRAFT-only vault) → the slice PRINTS (today a
@@ -392,7 +419,7 @@ restriction refusal and its `false` twin; the TUI export's two states (refusal �
 answered → `form8949.csv` box G); `report` in state (2) exits 0 with the answers block and the note;
 the two exit sentences; the price-coverage refusal on an exported year whose dataset ends early.
 
-## Current state — hook points (recon @ c76adf6b, cites re-resolved @ 2aa4ea98)
+## Current state — hook points (recon @ c76adf6b, cites re-resolved @ 5f03b965)
 
 | what | where | today |
 |---|---|---|
@@ -400,7 +427,7 @@ the two exit sentences; the price-coverage refusal on an exported year whose dat
 | the flag | `Form8949Row.box_needs_review` (`forms.rs:73`, set `:149`) | `matches!(leg.wallet, Exchange{..})` → advisory only |
 | the provenance | `DisposalLeg { basis_source, lot_id, wallet, acquired_at }` (`state.rs:197-217`); `BasisSource` (`event.rs:17-29`); the `Lot` in the fold (`fold.rs:1644-1650` drops sold-out lots) | `acquired_at` is the HP start; the lot's own date reaches the row only if the fold carries it (T2) |
 | the advisory | `crates/btctax-cli/src/cmd/admin.rs:526` `broker_reporting_advisory` | fires on both export arms since `118b070b` |
-| the two arms | `admin.rs:642` (THE DISPATCH at `:670`) `export_irs_pdf_from_session` | full return via `ReturnInputs`; slice via `form_8949` + `fill_form_8949` (`:631`, `:716`) |
+| the two arms | `admin.rs:642` (THE DISPATCH at `:670`) `export_irs_pdf_from_session` | full return via `ReturnInputs`; slice via `form_8949` + `fill_form_8949` (`:732`, `:825`) |
 | the filler | `crates/btctax-forms/src/fill8949.rs:259` `split_parts` (by PART), `:78` `place_part` (one box per page); `lib.rs:119-137` pairs ST chunk *k* with LT chunk *k* | no per-box grouping |
 | the map | `crates/btctax-forms/forms/2025/f8949.map.toml:18-19, 38-39` | one box per part |
 | Schedule D | `printed.rs:935-972` `ScheduleDLines` (18 `lineNN`) | no 1b/2/8b/9 lines exist |
