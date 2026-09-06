@@ -879,6 +879,51 @@ fn first_negative_amount(ri: &ReturnInputs) -> Option<&'static str> {
     None
 }
 
+/// Which row of the Form 8283 restriction gate fired (see [`donation_restriction_gate`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DonationRestrictionGate {
+    /// The filer answered **Yes** to Form 8283 line 5a, 5b or 5c — a restriction or a retained right.
+    Declared,
+    /// The question is UNANSWERED and the year files a Section B Form 8283, i.e. one whose lines
+    /// 5a/5b/5c actually print.
+    UnansweredSectionB,
+}
+
+/// ★★★ spec 1099-DA R6 fold (C-1 / M-3) — THE FORM 8283 RESTRICTION GATE, in one place.
+///
+/// Reg §1.170A-7: a restriction or a retained right REDUCES or DENIES the §170 deduction, and btctax
+/// values every donation at full fair market value. Two rows, in this order:
+///
+/// - `Some(true)` — a DECLARED restriction blocks wherever an 8283 attaches, at **any** amount.
+/// - `None` — an UNANSWERED question blocks only where lines 5a/5b/5c actually PRINT, i.e. a Section
+///   B year. Below that the questions are never posed, so silence forgoes nothing and asserts
+///   nothing (an entry is testimony; a blank is none).
+///
+/// **Why the premises are parameters.** The full return and the crypto slice see different things,
+/// and only the *decision* is shared. The full return keys `attaches_8283` on Schedule A **line 12**
+/// — the CLAIMED deduction Form 8283's own text keys on — and `section_b` on that plus the
+/// §170(f)(11)(C) year aggregate over $5,000. The slice has no Schedule A at all, so it keys
+/// `attaches_8283` on the year EMITTING an 8283 and `section_b` on the section its printed rows
+/// carry (`forms::form_8283` splits on the same year aggregate). Sharing the decision is what stops
+/// the two paths disagreeing about whether a restriction blocks a filing — the C-1 defect was
+/// exactly that disagreement, with the slice's half scoped to one of its two arms.
+pub fn donation_restriction_gate(
+    answer: Option<bool>,
+    attaches_8283: bool,
+    section_b: bool,
+) -> Option<DonationRestrictionGate> {
+    if !attaches_8283 {
+        return None;
+    }
+    if answer == Some(true) {
+        return Some(DonationRestrictionGate::Declared);
+    }
+    if answer.is_none() && section_b {
+        return Some(DonationRestrictionGate::UnansweredSectionB);
+    }
+    None
+}
+
 /// ★ spec 1099-DA R1 — the Form 1099-DA screen, at the site that holds the LEDGER (called from
 /// `screen_absolute`). Liveness = the regime reports basis AND ≥ 1 exchange disposition this year.
 /// Live: every (provider, cohort) key with rows must be answered, and `Mixed`/`BasisDiffers` refuse

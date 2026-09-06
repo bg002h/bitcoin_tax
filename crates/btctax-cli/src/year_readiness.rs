@@ -163,21 +163,56 @@ impl YearReadiness {
     }
 }
 
+/// ★★★ spec 1099-DA R6 fold (I-1) — can `export-irs-pdf --tax-year {year}` print the crypto slice
+/// AT ALL, template-wise?
+///
+/// `full_return_for(year).is_none()` is what makes the slice the *right* artifact for a year; it is
+/// not what makes the slice *printable*. Printing needs the year's own form templates bundled, which
+/// `slice_map_gate` and the `SUPPORTED_YEARS` refusal enforce at export time. **TY2026 is exactly
+/// the year where the two diverge** — `forms/2026/` holds only `YEAR.toml`, so no full return
+/// computes (the slice clause fired) while `Form8949Map::for_year(2026)` fails (the export refused).
+/// The one year the whole feature exists for was being promised an artifact it could not get.
+///
+/// Form 8949 and Schedule D are the two forms the slice ALWAYS writes (`wants()` defaults to every
+/// applicable form), so they are the right two to probe: if either map is missing, nothing prints.
+pub fn slice_can_print(year: i32) -> bool {
+    btctax_forms::Form8949Map::for_year(year).is_ok()
+        && btctax_forms::ScheduleDMap::for_year(year).is_ok()
+}
+
+/// ★ spec 1099-DA R6 fold (I-1 + M-4) — the slice clause the two readiness sentences carry, with the
+/// predicate the EXPORT actually applies: the answers are stored AND the year's templates are
+/// bundled. Empty when either half fails — saying nothing beats promising an artifact that refuses.
+fn slice_clause(year: i32, answers_stored: bool) -> String {
+    if answers_stored && slice_can_print(year) {
+        format!(
+            "`export-irs-pdf --tax-year {year}` still prints the crypto slice from the stored answers. "
+        )
+    } else {
+        String::new()
+    }
+}
+
 /// ★ FR-48 / port report §2.5 — the `report --tax-year` sentence for a year that HOLDS full-return
 /// inputs but cannot compute them, built from readiness instead of a year literal. It says what is
 /// missing, that the inputs are KEPT (a computed carryover written onto a not-yet-ready year is a
 /// legitimate row), and names `income clear` only as the way to fall back to a raw tax-profile —
 /// with its cost — never as "the" remedy. The previous text said "v1 supports TY2024" and prescribed
 /// `income clear` outright, which deletes the filer's W-2s.
-pub fn uncomputable_sentence(year: i32) -> String {
+///
+/// `answers_stored`: does the year's working `ReturnInputs` carry a non-empty `broker_reporting`?
+/// The slice clause is CONDITIONAL on it (M-4) and on the year's templates (I-1) — see
+/// [`slice_clause`]. Both terms were missing: the sentence asserted "from the stored answers"
+/// unconditionally, on years holding none and on years that cannot print.
+pub fn uncomputable_sentence(year: i32, answers_stored: bool) -> String {
     let r = YearReadiness::bundled(year);
     format!(
         "tax year {year} has full-return inputs, but full-return computation is not available for it \
          in this build — {}. The inputs are KEPT and will compute when the year's package is bundled. \
-         `export-irs-pdf --tax-year {year}` still prints the crypto slice from the stored answers. \
-         To fall back to a raw `tax-profile` for {year} instead, run `income clear --year {year}` \
+         {}To fall back to a raw `tax-profile` for {year} instead, run `income clear --year {year}` \
          (this DISCARDS the stored inputs, including any computed carryover on them).",
-        r.sentence()
+        r.sentence(),
+        slice_clause(year, answers_stored)
     )
 }
 
@@ -185,7 +220,10 @@ pub fn uncomputable_sentence(year: i32) -> String {
 /// return cannot compute yet. It stores rather than refuses: `report --tax-year N-1 --write-carryover`
 /// legitimately writes onto year N before N's package exists, and the TUI keeps the same thing as a
 /// draft. `None` when the year is ready (nothing to say).
-pub fn import_note(year: i32) -> Option<String> {
+///
+/// `answers_stored`: does the `ReturnInputs` being imported carry a non-empty `broker_reporting`?
+/// Same conditional slice clause as [`uncomputable_sentence`] (R6 fold I-1 + M-4).
+pub fn import_note(year: i32, answers_stored: bool) -> Option<String> {
     let r = YearReadiness::bundled(year);
     if r.params {
         return None;
@@ -193,9 +231,9 @@ pub fn import_note(year: i32) -> Option<String> {
     Some(format!(
         "note: {} — these inputs are stored now; `report --tax-year {year}` computes the crypto delta \
          on a stored `tax-profile` and reports the full return as NOT COMPUTABLE (keeping the inputs) \
-         until full-return parameters for {year} are bundled. `export-irs-pdf --tax-year {year}` still \
-         prints the crypto slice from the stored answers.",
-        r.sentence()
+         until full-return parameters for {year} are bundled. {}",
+        r.sentence(),
+        slice_clause(year, answers_stored).trim_end()
     ))
 }
 
@@ -444,7 +482,7 @@ mod tests {
     /// as the fallback with its cost — no year literal.
     #[test]
     fn the_uncomputable_sentence_is_built_from_readiness_and_keeps_the_inputs() {
-        let s = uncomputable_sentence(2025);
+        let s = uncomputable_sentence(2025, true);
         assert!(s.contains("full-return"), "{s}");
         assert!(s.contains("preparing"), "{s}");
         assert!(s.contains("inputs are KEPT"), "{s}");
@@ -453,20 +491,20 @@ mod tests {
             !s.contains("v1 supports"),
             "the stale literal must be gone: {s}"
         );
-        let s = uncomputable_sentence(2031);
+        let s = uncomputable_sentence(2031, true);
         assert!(s.contains("not bundled"), "{s}");
     }
 
     /// FR-48: import warns for a not-ready year and says nothing for a ready one.
     #[test]
     fn the_import_note_fires_only_for_a_year_without_params() {
-        assert!(import_note(2024).is_none());
-        let n = import_note(2025).unwrap();
+        assert!(import_note(2024, true).is_none());
+        let n = import_note(2025, true).unwrap();
         assert!(
             n.contains("stored now") && n.contains("report --tax-year 2025"),
             "{n}"
         );
-        assert!(import_note(2031).unwrap().contains("not bundled"));
+        assert!(import_note(2031, true).unwrap().contains("not bundled"));
     }
 
     /// FR-48: export-snapshot stamps the year and its readiness; it does not refuse (a data export

@@ -457,6 +457,54 @@ fn sp2_forms_filter_selects_subset() {
     assert!(!out.path().join("schedule_d.pdf").exists());
 }
 
+/// ★★★ spec 1099-DA R6 fold (N-1) KILL — `--forms schedule-d` WITHOUT `f8949` is refused, and
+/// nothing is written.
+///
+/// Since T8 the slice's Schedule D carries per-box lines (1b/2/3, 8b/9/10) whose own captions read
+/// "Totals for all transactions reported on Form(s) 8949 with Box … checked". Written alone into an
+/// export directory the filer mails, that schedule states totals for a page-set the packet does not
+/// contain. R6's uniform `wants()` probing let it through; the fold fails closed.
+///
+/// Both directions, because a refusal that fired on any narrowing would be no better: `--forms
+/// f8949` alone still exports (an 8949 cites no attachment of its own), and `f8949,schedule-d`
+/// together — the pairing `docs/examples/examples.md` prints — exports both.
+#[test]
+fn schedule_d_selected_without_form_8949_is_refused_and_writes_nothing() {
+    let (_dir, vault) = make_vault(&real_events());
+    let out = tempfile::tempdir().unwrap();
+    let dir = out.path().join("slice");
+    let err = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        &dir,
+        2025,
+        &[FormArg::ScheduleD],
+        None,
+        Default::default(),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        err.contains("`schedule-d` without `f8949`") && err.contains("No forms were written"),
+        "the refusal names the missing form and that nothing was written: {err}"
+    );
+    assert!(!dir.exists(), "…and the export directory was never created");
+
+    // The pairing the docs print still works.
+    let both = out.path().join("both");
+    let report = cmd::admin::export_irs_pdf(
+        &vault,
+        &pp(),
+        &both,
+        2025,
+        &[FormArg::F8949, FormArg::ScheduleD],
+        None,
+        Default::default(),
+    )
+    .expect("f8949 + schedule-d together is exactly the honored narrowing");
+    assert!(report.f8949_path.is_some() && report.schedule_d_path.is_some());
+}
+
 #[test]
 fn unsupported_year_is_refused() {
     let (_dir, vault) = make_vault(&real_events());

@@ -101,6 +101,70 @@ fn need<'a>(
     })
 }
 
+// ★★★ spec 1099-DA R6 fold (M-1) — THE SIX BOX GROUPS, WRITTEN ONCE.
+//
+// They are shared by [`partition_or_refuse`] and by the fill below, so a box dropped from a group
+// cannot be dropped from only one of the two and go unnoticed.
+//
+// The form's captions name TWELVE boxes (1b = "Box A or Box G", 2 = "Box B or Box H", 8b = "Box D or
+// Box J", 9 = "Box E or Box K") but `Form8949Box` has only EIGHT variants: A, B, D and E are the
+// 1099-B **securities** boxes, which btctax never emits (`btctax_core::Form8949Box`'s own doc: "We
+// NEVER auto-assign the 1099-reported boxes") and which therefore have no variant to group. So the
+// six groups are exhaustive over the type — which `partition_or_refuse` PROVES on every fill rather
+// than assuming, since a box in no group would be aggregated by `schedule_d_by_box` and then dropped
+// off the filed page, invisibly (a missing Schedule D line is a normal blank).
+const G_LINE1B: &[Form8949Box] = &[Form8949Box::G];
+const G_LINE2: &[Form8949Box] = &[Form8949Box::H];
+const G_LINE3: &[Form8949Box] = &[Form8949Box::C, Form8949Box::I];
+const G_LINE8B: &[Form8949Box] = &[Form8949Box::J];
+const G_LINE9: &[Form8949Box] = &[Form8949Box::K];
+const G_LINE10: &[Form8949Box] = &[Form8949Box::F, Form8949Box::L];
+const BOX_GROUPS: [(&str, &[Form8949Box]); 6] = [
+    ("line1b", G_LINE1B),
+    ("line2", G_LINE2),
+    ("line3", G_LINE3),
+    ("line8b", G_LINE8B),
+    ("line9", G_LINE9),
+    ("line10", G_LINE10),
+];
+
+/// ★ spec 1099-DA R6 fold (M-1) — every box WITH ROWS lands on exactly one Schedule D line.
+///
+/// `btctax_core::schedule_d_by_box` keys on whatever `row.box_` holds, so a box carried by NO group
+/// would be summed and then silently dropped, and a box carried by TWO would print its total twice.
+/// Both refuse here, naming the box — never a wrong or a vanished figure on a filed page.
+///
+/// Split out from [`fill_schedule_d_totals`] — the same shape as the CLI's `first_unresolved_map`
+/// kill pattern — so a negative test can plant a group list with a box missing, which the real
+/// `BOX_GROUPS` never is.
+fn partition_or_refuse(
+    by_box: &BTreeMap<Form8949Box, ScheduleDPart>,
+    groups: &[(&str, &[Form8949Box])],
+    year: i32,
+) -> Result<(), FormsError> {
+    for b in by_box.keys() {
+        let lines: Vec<&str> = groups
+            .iter()
+            .filter(|(_, g)| g.contains(b))
+            .map(|(line, _)| *line)
+            .collect();
+        if lines.len() != 1 {
+            return Err(FormsError::Geometry(format!(
+                "the TY{year} Schedule D box→line table carries Form 8949 Box {b:?} on {n} of its six \
+                 lines ({lines:?}), not exactly one — this year's rows include that box, so its total \
+                 would be {verb} the filed page. Fix the box groups (spec 1099-DA T8).",
+                n = lines.len(),
+                verb = if lines.is_empty() {
+                    "dropped off"
+                } else {
+                    "printed twice on"
+                },
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Fill Schedule D from the year's part totals and the ROUTED rows' per-box totals, and return the
 /// serialized bytes, read back through a geometric + no-unmapped verifier (a mis-mapped amount
 /// column fails closed).
@@ -127,7 +191,6 @@ pub fn fill_schedule_d_totals(
     by_box: &BTreeMap<Form8949Box, ScheduleDPart>,
     map: &ScheduleDMap,
 ) -> Result<Vec<u8>, FormsError> {
-    use Form8949Box as B;
     let mut writes: Vec<(String, pdf::FieldValue)> = Vec::new();
     let mut placements: Vec<Placement> = Vec::new();
     // These are just amount-column bands checks, so reuse Geo::Data{row:0} (row band is ignored for
@@ -137,10 +200,13 @@ pub fn fill_schedule_d_totals(
     let lt_active = active(&totals.lt);
     let y = map.year;
 
+    // ★ M-1 — before a single cell is written: every box these rows carry has exactly one line.
+    partition_or_refuse(by_box, &BOX_GROUPS, y)?;
+
     // ── Part I, top to bottom: 1b (A|G), 2 (B|H), 3 (C|I), then the net on line 7. ──
     for (cell, line, boxes, label) in [
-        (&map.line1b, "line1b", &[B::G][..], "Box A/G"),
-        (&map.line2, "line2", &[B::H][..], "Box B/H"),
+        (&map.line1b, "line1b", G_LINE1B, "Box A/G"),
+        (&map.line2, "line2", G_LINE2, "Box B/H"),
     ] {
         let g = box_group(by_box, boxes);
         if !active(&g) {
@@ -156,7 +222,7 @@ pub fn fill_schedule_d_totals(
         );
     }
     // Line 3 (Box C **or Box I**) — the map binds it on every revision, so no `need` here.
-    let st_not_reported = box_group(by_box, &[B::C, B::I]);
+    let st_not_reported = box_group(by_box, G_LINE3);
     if active(&st_not_reported) {
         push_amount_line(
             &map.line3,
@@ -179,8 +245,8 @@ pub fn fill_schedule_d_totals(
 
     // ── Part II: 8b (D|J), 9 (E|K), 10 (F|L), then the net on line 15. ──
     for (cell, line, boxes, label) in [
-        (&map.line8b, "line8b", &[B::J][..], "Box D/J"),
-        (&map.line9, "line9", &[B::K][..], "Box E/K"),
+        (&map.line8b, "line8b", G_LINE8B, "Box D/J"),
+        (&map.line9, "line9", G_LINE9, "Box E/K"),
     ] {
         let g = box_group(by_box, boxes);
         if !active(&g) {
@@ -195,7 +261,7 @@ pub fn fill_schedule_d_totals(
             &mut placements,
         );
     }
-    let lt_not_reported = box_group(by_box, &[B::F, B::L]);
+    let lt_not_reported = box_group(by_box, G_LINE10);
     if active(&lt_not_reported) {
         push_amount_line(
             &map.line10,
@@ -327,4 +393,111 @@ pub fn verify_schedule_d(
         }
     }
     no_unmapped_filled(doc, fields, placements)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_decimal_macros::dec;
+
+    /// Every `Form8949Box` variant. Its completeness is not asserted from a hand-written list (which
+    /// goes stale silently) but from [`box_index`]'s EXHAUSTIVE match plus the permutation check in
+    /// [`all_boxes_is_every_variant`]: a new variant does not compile until it is given an index, and
+    /// a variant missing from this array shows up as a gap in the sorted indices.
+    const ALL_BOXES: [Form8949Box; 8] = [
+        Form8949Box::C,
+        Form8949Box::F,
+        Form8949Box::I,
+        Form8949Box::L,
+        Form8949Box::G,
+        Form8949Box::H,
+        Form8949Box::J,
+        Form8949Box::K,
+    ];
+
+    fn box_index(b: Form8949Box) -> usize {
+        use Form8949Box as B;
+        match b {
+            B::C => 0,
+            B::F => 1,
+            B::I => 2,
+            B::L => 3,
+            B::G => 4,
+            B::H => 5,
+            B::J => 6,
+            B::K => 7,
+        }
+    }
+
+    #[test]
+    fn all_boxes_is_every_variant() {
+        let mut seen: Vec<usize> = ALL_BOXES.iter().map(|b| box_index(*b)).collect();
+        seen.sort_unstable();
+        assert_eq!(
+            seen,
+            (0..ALL_BOXES.len()).collect::<Vec<_>>(),
+            "ALL_BOXES must hold each `Form8949Box` exactly once — otherwise the partition test \
+             below silently stops covering a box"
+        );
+    }
+
+    fn part() -> ScheduleDPart {
+        ScheduleDPart {
+            proceeds: dec!(100),
+            cost_basis: dec!(60),
+            gain: dec!(40),
+        }
+    }
+
+    /// ★ spec 1099-DA R6 fold (M-1) KILL — a box carried by NO group refuses, naming it; a box
+    /// carried by TWO refuses too; and the REAL [`BOX_GROUPS`] accept **every** variant.
+    ///
+    /// All three halves are the test. Without the last, a guard that refused everything would pass
+    /// the first two; without the first two, the guard could be a no-op and still pass the last.
+    #[test]
+    fn a_box_in_no_group_refuses_and_the_real_groups_partition_every_box() {
+        // The plant: line 3's group has lost Box C (exactly the R6 review's PLANT B).
+        let dropped: [(&str, &[Form8949Box]); 6] = [
+            ("line1b", G_LINE1B),
+            ("line2", G_LINE2),
+            ("line3", &[Form8949Box::I]),
+            ("line8b", G_LINE8B),
+            ("line9", G_LINE9),
+            ("line10", G_LINE10),
+        ];
+        let c_rows = BTreeMap::from([(Form8949Box::C, part())]);
+        let err = partition_or_refuse(&c_rows, &dropped, 2024)
+            .expect_err("a box in no group must REFUSE, never be dropped off the page");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Box C") && msg.contains("dropped off"),
+            "the refusal names the box and the harm: {msg}"
+        );
+
+        // …and a box in TWO groups is refused as well (it would print its total twice).
+        // (spelled out, not `G_LINE3`, so this half stays a two-line plant even when the real
+        //  group is mutated — the third half below is what a mutated `G_LINE3` must red.)
+        let doubled: [(&str, &[Form8949Box]); 6] = [
+            ("line1b", G_LINE1B),
+            ("line2", G_LINE2),
+            ("line3", &[Form8949Box::C, Form8949Box::I]),
+            ("line8b", G_LINE8B),
+            ("line9", G_LINE9),
+            ("line10", &[Form8949Box::F, Form8949Box::L, Form8949Box::C]),
+        ];
+        let msg = partition_or_refuse(&c_rows, &doubled, 2024)
+            .expect_err("a box on two lines must REFUSE")
+            .to_string();
+        assert!(
+            msg.contains("Box C") && msg.contains("printed twice on"),
+            "the refusal names the box and the harm: {msg}"
+        );
+
+        // The real table: every variant lands on exactly one line.
+        for b in ALL_BOXES {
+            partition_or_refuse(&BTreeMap::from([(b, part())]), &BOX_GROUPS, 2024).unwrap_or_else(
+                |e| panic!("the real BOX_GROUPS must carry {b:?} on exactly one line — {e}"),
+            );
+        }
+    }
 }

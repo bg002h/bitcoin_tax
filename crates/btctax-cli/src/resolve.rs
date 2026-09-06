@@ -179,10 +179,15 @@ pub fn resolve_and_screen(
     // and hands them back so the compute-dependent screen runs on the SAME bytes (M3), with no second copy
     // of the precedence logic (N2).
     let (resolved, ri) = resolve_core(conn, year, pseudo_reconcile, full_return, tax_table)?;
+    // ★ R6 fold (M-4): the slice clause's answers term, read off the SAME `ReturnInputs` the
+    //   precedence ladder fetched — never a second lookup that could see a different row.
+    let answers_stored = ri
+        .as_ref()
+        .is_some_and(|r| !r.broker_reporting.0.is_empty());
     // Input-screenable refusal / unsupported year (resolve_core already screened those).
     if resolved.is_return_inputs_uncomputable() {
         return Ok(ProfileOutcome::Uncomputable {
-            detail: uncomputable_detail(year, resolved.refusal.as_ref()),
+            detail: uncomputable_detail(year, resolved.refusal.as_ref(), answers_stored),
         });
     }
     // Compute-dependent refuse rows (need `state`) — on the SAME ReturnInputs `resolve_core` fetched.
@@ -193,12 +198,12 @@ pub fn resolve_and_screen(
         // skip the compute-dependent screen and hand back a number (review M-r3-3).
         let (Some(ri), Some(params)) = (ri.as_ref(), full_return) else {
             return Ok(ProfileOutcome::Uncomputable {
-                detail: uncomputable_detail(year, None),
+                detail: uncomputable_detail(year, None, answers_stored),
             });
         };
         if let Some(refusal) = screen_compute_dependent(ri, state, year, params) {
             return Ok(ProfileOutcome::Uncomputable {
-                detail: uncomputable_detail(year, Some(&refusal)),
+                detail: uncomputable_detail(year, Some(&refusal), answers_stored),
             });
         }
     }
@@ -211,7 +216,11 @@ pub fn resolve_and_screen(
 /// The user-facing message for a `ReturnInputs` year that cannot be computed — a refusal (with its reason,
 /// pointing at the `income clear` recovery) or a year whose package is not ready (built from
 /// `YearReadiness`; the inputs are kept).
-fn uncomputable_detail(year: i32, refusal: Option<&Refusal>) -> String {
+///
+/// `answers_stored` (spec 1099-DA R6 fold M-4): does the year's `ReturnInputs` carry Form 1099-DA
+/// answers? The readiness sentence's slice clause is conditional on it — a params-less year holding
+/// NO answers was being told the slice prints "from the stored answers" it does not have.
+fn uncomputable_detail(year: i32, refusal: Option<&Refusal>, answers_stored: bool) -> String {
     match refusal {
         Some(r) => format!(
             "tax year {year} cannot be computed from its full-return inputs: {}; run \
@@ -220,7 +229,7 @@ fn uncomputable_detail(year: i32, refusal: Option<&Refusal>) -> String {
         ),
         // ★ FR-48: built from the year's READINESS, never a year literal; keeps the inputs; names
         //   `income clear` as the fallback with its cost, not as the remedy (port report §2.5).
-        None => crate::year_readiness::uncomputable_sentence(year),
+        None => crate::year_readiness::uncomputable_sentence(year, answers_stored),
     }
 }
 

@@ -955,6 +955,63 @@ fn params_bundled_with_a_draft_only_return_names_committing_as_the_exit() {
     assert!(wrote_nothing(&dir));
 }
 
+/// The 2025 donation fixture behind the Form 8283 gates: one provider's 2025 round-trip plus a 2020
+/// long-term acquisition sent out in 2025, which the caller reclassifies as a `Donate` at its own
+/// claimed amount (over $5,000 ⇒ Section B, under ⇒ Section A).
+fn donation_events() -> Vec<LedgerEvent> {
+    let mut evs = one_provider();
+    evs.push(ev(
+        "cb",
+        "buy-lt",
+        datetime!(2020-01-05 12:00 UTC),
+        EventPayload::Acquire(Acquire {
+            sat: 100_000_000,
+            usd_cost: dec!(10000),
+            fee_usd: dec!(0),
+            basis_source: BasisSource::ExchangeProvided,
+        }),
+    ));
+    evs.push(ev(
+        "cb",
+        "send-donate",
+        datetime!(2025-06-01 12:00 UTC),
+        EventPayload::TransferOut(TransferOut {
+            sat: 100_000_000,
+            fee_sat: None,
+            dest_addr: Some("bc1qsyntheticcharity".into()),
+            txid: None,
+        }),
+    ));
+    evs
+}
+
+/// A FRESH vault holding [`donation_events`] with the 2025 outflow reclassified as a `Donate`
+/// claiming `claimed` dollars. Fresh per cell on purpose: a draft row written for one cell of the
+/// C-1 sweep would shadow the committed row of the next (§6.1 precedence), and the sweep would then
+/// silently exercise arm (2) four times.
+fn donation_vault(claimed: &str) -> (tempfile::TempDir, PathBuf) {
+    let (d, vault) = make_vault(&donation_events());
+    let out_ref = {
+        let s = Session::open(&vault, &pp()).unwrap();
+        let (state, _) = s.project().unwrap();
+        state.pending_reconciliation[0].event.canonical()
+    };
+    cmd::reconcile::reclassify_outflow(
+        &vault,
+        &pp(),
+        &out_ref,
+        btctax_core::event::OutflowClass::Donate {
+            appraisal_required: false,
+        },
+        btctax_cli::eventref::parse_usd_arg(claimed).unwrap(),
+        None,
+        None,
+        datetime!(2026-01-01 12:00 UTC),
+    )
+    .unwrap();
+    (d, vault)
+}
+
 /// ★ THE FORM 8283 RESTRICTION ROW, in its SLICE form — a declared restriction refuses the export
 /// and no `form_8283.pdf` is written; the `false` twin exports one. Both halves, because a gate
 /// that refused every donation year would pass the first assertion alone.
@@ -965,51 +1022,112 @@ fn params_bundled_with_a_draft_only_return_names_committing_as_the_exit() {
 #[test]
 fn a_declared_donation_restriction_refuses_the_slice_and_writes_no_8283() {
     for restricted in [true, false] {
-        let mut evs = one_provider();
-        evs.push(ev(
-            "cb",
-            "buy-lt",
-            datetime!(2020-01-05 12:00 UTC),
-            EventPayload::Acquire(Acquire {
-                sat: 100_000_000,
-                usd_cost: dec!(10000),
-                fee_usd: dec!(0),
-                basis_source: BasisSource::ExchangeProvided,
-            }),
-        ));
-        evs.push(ev(
-            "cb",
-            "send-donate",
-            datetime!(2025-06-01 12:00 UTC),
-            EventPayload::TransferOut(TransferOut {
-                sat: 100_000_000,
-                fee_sat: None,
-                dest_addr: Some("bc1qsyntheticcharity".into()),
-                txid: None,
-            }),
-        ));
-        let (_d, vault) = make_vault(&evs);
-        let out_ref = {
-            let s = Session::open(&vault, &pp()).unwrap();
-            let (state, _) = s.project().unwrap();
-            state.pending_reconciliation[0].event.canonical()
-        };
-        cmd::reconcile::reclassify_outflow(
-            &vault,
-            &pp(),
-            &out_ref,
-            btctax_core::event::OutflowClass::Donate {
-                appraisal_required: false,
-            },
-            btctax_cli::eventref::parse_usd_arg("20000.00").unwrap(),
-            None,
-            None,
-            datetime!(2026-01-01 12:00 UTC),
-        )
-        .unwrap();
+        // ★★★ spec 1099-DA R6 fold (C-1) — THE 2×2 SWEEP. The gate reads the year's WORKING
+        //     return, never the answers, so it must fire on every cell of
+        //     {draft row, committed row} × {answers stored, no answers}. The `no answers` column
+        //     lands on arm (3): R6 narrowed the dispatch to `params_bundled && return_inputs::exists`,
+        //     which let a COMMITTED row on a params-less year fall through with the declared
+        //     restriction PRESENT and UNREAD, and `form_8283.pdf` — written from the same
+        //     `rows_8283` on both arms — printed the gift at full fair market value.
+        //     (committed, no answers) is the cell that printed it on the build as it stood; an empty
+        //     `[broker_reporting]` is the NORMAL shape of a TY2025 import, since the 1099-DA
+        //     question is not live for a proceeds-only year.
+        for committed in [false, true] {
+            for with_answers in [false, true] {
+                let (_d, vault) = donation_vault("20000.00");
+                let mut ri = if with_answers {
+                    answers(&[("cb", BrokerReported::BasisMatches)])
+                } else {
+                    ReturnInputs::default()
+                };
+                ri.donations_had_restrictions = Some(restricted);
+                if committed {
+                    save_committed(&vault, 2025, &ri);
+                } else {
+                    save_draft(&vault, 2025, &ri);
+                }
+                let cell = format!("committed={committed} with_answers={with_answers}");
+
+                let out = tempfile::tempdir().unwrap();
+                let dir = out.path().join("slice");
+                // ★ The PRODUCTION path, on TY2025's REAL declared regime (proceeds only), not the
+                //   injected LIVE one: that is what makes the `no answers` column land on arm (3)
+                //   and RUN — `broker_question_is_live` is false for a proceeds-only year, so R1's
+                //   refusal does not fire and the 8283 gate is the only thing between the filer and
+                //   an overstated form. It is also the shape of the defect: an empty
+                //   `[broker_reporting]` is the normal TY2025 import.
+                let r = cmd::admin::export_irs_pdf(
+                    &vault,
+                    &pp(),
+                    &dir,
+                    2025,
+                    &[],
+                    None,
+                    Default::default(),
+                );
+                if restricted {
+                    let msg = r
+                        .expect_err("a declared restriction must refuse")
+                        .to_string();
+                    assert!(
+                        msg.contains("1.170A-7") && msg.contains("overstates the gift"),
+                        "{cell}: the refusal names the regulation and the harm: {msg}"
+                    );
+                    assert!(
+                        !dir.join("form_8283.pdf").exists() && wrote_nothing(&dir),
+                        "{cell}: …and no Form 8283 (nor anything else) is written"
+                    );
+                } else if with_answers {
+                    // ★ Arm (2) on a year whose 1099-DA question is not live: R1 refuses the
+                    //   UNREAD answers. What this half proves is WHICH refusal — not the §1.170A-7
+                    //   one. A hoisted gate that fired on every donation year would be
+                    //   indistinguishable from the correct one in the `restricted` half alone.
+                    let msg = r
+                        .expect_err(
+                            "stored answers on a proceeds-only year are unread — R1 refuses",
+                        )
+                        .to_string();
+                    assert!(
+                        !msg.contains("1.170A-7"),
+                        "{cell}: the `Some(false)` twin is never stopped by the restriction gate: {msg}"
+                    );
+                    assert!(wrote_nothing(&dir), "{cell}: …and nothing is written");
+                } else {
+                    // ★★★ THE CONTROL CELL, and the one C-1 lived in: arm (3), nothing refuses, and
+                    //     the Form 8283 PRINTS. Flip `donations_had_restrictions` to `Some(true)`
+                    //     here — the `restricted` half above — and the very same path must refuse.
+                    r.unwrap_or_else(|e| {
+                        panic!("{cell}: no restriction ⇒ the slice exports — {e}")
+                    });
+                    assert!(
+                        dir.join("form_8283.pdf").exists(),
+                        "{cell}: the `Some(false)` twin DOES print the 8283 — a gate that refused \
+                         everything would pass the restricted half on its own"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// ★★★ spec 1099-DA R6 fold (M-3) KILL — the gate's SECOND row on the slice: an UNANSWERED
+/// restriction question refuses when, and only when, the year files a **Section B** Form 8283.
+///
+/// The full return has carried both rows since §G-21 (`return_1040::assemble_absolute`); R6
+/// specified and built only the first on the slice. The decision now lives in one place
+/// (`return_refuse::donation_restriction_gate`), and the slice supplies the premises it can see: an
+/// 8283 attaches iff the year emits one, and the section is the one the printed rows carry
+/// (`forms::form_8283` splits on the §170(f)(11)(C) year aggregate over $5,000).
+///
+/// Both halves are the test: a Section **A**-sized gift still prints with the question unanswered,
+/// because below $5,000 lines 5a/5b/5c are never posed and silence forgoes nothing.
+#[test]
+fn an_unanswered_restriction_refuses_a_section_b_8283_and_prints_a_section_a_one() {
+    for (claimed, section_b) in [("20000.00", true), ("2000.00", false)] {
+        let (_d, vault) = donation_vault(claimed);
 
         let mut ri = answers(&[("cb", BrokerReported::BasisMatches)]);
-        ri.donations_had_restrictions = Some(restricted);
+        ri.donations_had_restrictions = None; // never asked, never answered
         save_draft(&vault, 2025, &ri);
 
         let out = tempfile::tempdir().unwrap();
@@ -1024,24 +1142,23 @@ fn a_declared_donation_restriction_refuses_the_slice_and_writes_no_8283() {
             Default::default(),
             LIVE,
         );
-        if restricted {
+        if section_b {
             let msg = r
-                .expect_err("a declared restriction must refuse")
+                .expect_err("an unanswered Section B restriction question must refuse")
                 .to_string();
             assert!(
-                msg.contains("1.170A-7") && msg.contains("overstates the gift"),
-                "the refusal names the regulation and the harm: {msg}"
+                msg.contains("SECTION B") && msg.contains("1.170A-7"),
+                "the refusal names the section and the regulation: {msg}"
             );
             assert!(
                 !dir.join("form_8283.pdf").exists() && wrote_nothing(&dir),
-                "…and no Form 8283 (nor anything else) is written"
+                "…and nothing is written"
             );
         } else {
-            r.expect("no restriction ⇒ the slice exports");
+            r.expect("a Section A gift asks no restriction question ⇒ the slice exports");
             assert!(
                 dir.join("form_8283.pdf").exists(),
-                "the `false` twin DOES print the 8283 — a gate that refused everything would pass \
-                 the restricted half on its own"
+                "…and the Section A Form 8283 prints, with 5a/5b/5c blank"
             );
         }
     }
@@ -1187,13 +1304,14 @@ fn the_slice_clause_is_absent_when_no_answers_are_stored() {
 /// uncomputable and the inputs are kept, and BOTH sentences a filer meets there now name the slice.
 #[test]
 fn state_2b_is_unchanged_and_both_sentences_name_the_slice() {
-    let sentence = btctax_cli::year_readiness::uncomputable_sentence(2025);
+    let sentence = btctax_cli::year_readiness::uncomputable_sentence(2025, true);
     assert!(
         sentence.contains("The inputs are KEPT")
             && sentence.contains("`export-irs-pdf --tax-year 2025` still prints the crypto slice"),
         "the uncomputable sentence keeps the inputs AND names the slice: {sentence}"
     );
-    let note = btctax_cli::year_readiness::import_note(2025).expect("TY2025 has no parameters");
+    let note =
+        btctax_cli::year_readiness::import_note(2025, true).expect("TY2025 has no parameters");
     assert!(
         note.contains("`export-irs-pdf --tax-year 2025` still prints the crypto slice"),
         "the import note names the slice: {note}"
@@ -1203,5 +1321,91 @@ fn state_2b_is_unchanged_and_both_sentences_name_the_slice() {
         "…and no longer says `report` will refuse when a tax-profile is stored: {note}"
     );
     // A params-BUNDLED year has nothing to say — the full return computes there.
-    assert!(btctax_cli::year_readiness::import_note(2024).is_none());
+    assert!(btctax_cli::year_readiness::import_note(2024, true).is_none());
+}
+
+/// ★★★ spec 1099-DA R6 fold (I-1 + M-4) KILL — the slice clause is conditioned on the predicate the
+/// EXPORT applies, not on `full_return_for(year).is_none()` alone.
+///
+/// Three cells, and the first is the one that was wrong on the headline year: **TY2026** has no
+/// bundled `Form8949Map`/`ScheduleDMap` at all, so `export-irs-pdf --tax-year 2026` refuses and
+/// writes nothing — while both sentences promised it "still prints the crypto slice from the stored
+/// answers". The third cell is M-4: with NO answers stored there is nothing to file a slice from,
+/// and neither sentence carried even that term.
+#[test]
+fn the_slice_clause_is_conditioned_on_the_years_templates_and_on_answers_being_stored() {
+    const CLAUSE: &str = "still prints the crypto slice";
+    // TY2026 + answers — no templates ⇒ the sentence must NOT promise the slice.
+    let s = btctax_cli::year_readiness::uncomputable_sentence(2026, true);
+    assert!(
+        !s.contains(CLAUSE),
+        "TY2026 bundles no Form 8949 / Schedule D map — the export refuses, so the sentence must \
+         not promise a slice: {s}"
+    );
+    let n = btctax_cli::year_readiness::import_note(2026, true).expect("TY2026 has no parameters");
+    assert!(
+        !n.contains(CLAUSE),
+        "…and neither does the import note: {n}"
+    );
+    // TY2025 + answers — templates bundled, answers stored ⇒ it DOES promise the slice. (Without
+    // this half, a `slice_can_print` that returned `false` for every year would pass the others.)
+    assert!(btctax_cli::year_readiness::uncomputable_sentence(2025, true).contains(CLAUSE));
+    assert!(btctax_cli::year_readiness::import_note(2025, true)
+        .unwrap()
+        .contains(CLAUSE));
+    // TY2025 + NO answers — nothing to file a slice FROM (M-4).
+    let s = btctax_cli::year_readiness::uncomputable_sentence(2025, false);
+    assert!(
+        !s.contains(CLAUSE),
+        "no stored answers ⇒ no \"from the stored answers\" promise: {s}"
+    );
+    let n = btctax_cli::year_readiness::import_note(2025, false).unwrap();
+    assert!(
+        !n.contains(CLAUSE),
+        "…and neither does the import note: {n}"
+    );
+    // …and the sentences keep everything else they said in every cell.
+    for (year, answers) in [(2025, true), (2025, false), (2026, true), (2026, false)] {
+        let s = btctax_cli::year_readiness::uncomputable_sentence(year, answers);
+        assert!(
+            s.contains("The inputs are KEPT") && s.contains(&format!("income clear --year {year}")),
+            "TY{year} answers={answers}: {s}"
+        );
+    }
+}
+
+/// ★★★ spec 1099-DA R6 fold (I-1) KILL, at the `report` surface — the same divergence, one layer up.
+/// TY2026 holds answers and no bundled parameters, so R6's two-term predicate said the slice prints;
+/// the export refuses for want of templates. `stored_answers_reach_the_slice` now carries the third
+/// term, so `report` no longer prints a clause the export contradicts.
+#[test]
+fn report_does_not_promise_the_slice_on_a_year_with_no_bundled_templates() {
+    let (_d, vault) = make_vault(&one_provider());
+    save_draft(
+        &vault,
+        2026,
+        &answers(&[("cb", BrokerReported::NotReported)]),
+    );
+    let rep = cmd::tax::report_tax_year(&vault, &pp(), 2026, dec!(0))
+        .expect("a params-less year never turns `report` into an error");
+    assert!(
+        !rep.slice_prints_from_answers,
+        "TY2026 bundles no Form 8949 / Schedule D map — the slice cannot print, whatever is stored"
+    );
+    let rendered = btctax_cli::render::render_tax_outcome(
+        2026,
+        &rep.outcome,
+        rep.advisory.as_deref(),
+        rep.pseudo_contributed,
+        rep.slice_prints_from_answers,
+    );
+    assert!(
+        !rendered.contains("still prints the crypto slice"),
+        "{rendered}"
+    );
+    // …and the answers themselves are still read and shown (the clause is what changed, not the block).
+    assert!(
+        rep.broker_answers.is_some_and(|b| b.contains("cb")),
+        "the Form 1099-DA answers block still prints from the draft"
+    );
 }

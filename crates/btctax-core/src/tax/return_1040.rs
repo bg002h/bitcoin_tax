@@ -2662,9 +2662,23 @@ pub fn screen_absolute(
         .as_ref()
         .map_or(Usd::ZERO, |a| a.charitable_noncash_12);
     let donated = crate::forms::year_donation_deduction(state, year);
-    if claimed_noncash > Usd::ZERO {
-        // A DECLARED restriction shrinks or denies the deduction at ANY amount.
-        if ri.donations_had_restrictions == Some(true) {
+    // ★ spec 1099-DA R6 fold (M-3) — the DECISION is `return_refuse::donation_restriction_gate`,
+    //   shared with the crypto slice (`cmd::admin::export_irs_pdf_from_session_with_regime`) so the
+    //   two paths cannot disagree about when a restriction blocks a filing. Only the premises are
+    //   local, because only this path has a Schedule A:
+    //     - an 8283 ATTACHES iff line 12 is over $0 (a DECLARED restriction shrinks or denies the
+    //       deduction at any amount);
+    //     - 5a/5b/5c actually PRINT only when the 8283 attaches at over $500 (`packet.rs` filters on
+    //       line 12) **and** the year is a Section B one (`forms.rs` splits on the year aggregate
+    //       over $5,000). Both terms, or the UNANSWERED message asserts a form the packet does not
+    //       write.
+    match crate::tax::return_refuse::donation_restriction_gate(
+        ri.donations_had_restrictions,
+        claimed_noncash > Usd::ZERO,
+        claimed_noncash > crate::tax::printed::FORM_8283_THRESHOLD
+            && donated > crate::tax::tables::QUALIFIED_APPRAISAL_THRESHOLD,
+    ) {
+        Some(crate::tax::return_refuse::DonationRestrictionGate::Declared) => {
             return refusal(
                 RefuseReason::DonationRestrictionsUnresolved,
                 "you declared that at least one donated property had a restriction or a retained \
@@ -2675,15 +2689,7 @@ pub fn screen_absolute(
                  donation by hand, with the reduced amount",
             );
         }
-        // UNANSWERED refuses only when the form actually PRINTS 5a/5b/5c — i.e. a Section B year.
-        // Below that the questions are never posed, so silence forgoes nothing and asserts nothing.
-        // ★ 5a/5b/5c are printed only when an 8283 ACTUALLY ATTACHES (`packet.rs` filters on line 12
-        //   over $500) **and** the year is a Section B one (`forms.rs` splits on the year aggregate
-        //   over $5,000). Both terms, or the message asserts a form the packet does not write.
-        if ri.donations_had_restrictions.is_none()
-            && claimed_noncash > crate::tax::printed::FORM_8283_THRESHOLD
-            && donated > crate::tax::tables::QUALIFIED_APPRAISAL_THRESHOLD
-        {
+        Some(crate::tax::return_refuse::DonationRestrictionGate::UnansweredSectionB) => {
             return refusal(
                 RefuseReason::DonationRestrictionsUnresolved,
                 "this year files a Form 8283 SECTION B (donations over $5,000), whose lines 5a, 5b \
@@ -2693,6 +2699,7 @@ pub fn screen_absolute(
                  the answer. Run `btctax income answer`",
             );
         }
+        None => {}
     }
 
     // ★★★ §163(h)(3)(B) — THE ACQUISITION-DEBT CEILING, ANSWERED ADVERSELY (P1 / adjudication D3).

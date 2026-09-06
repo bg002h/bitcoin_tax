@@ -7,7 +7,7 @@
 mod common;
 use common::*;
 
-use btctax_core::{Form8949Part, ScheduleDPart, ScheduleDTotals};
+use btctax_core::{Form8949Box, Form8949Part, ScheduleDPart, ScheduleDTotals};
 use btctax_forms::testonly::*;
 use btctax_forms::FormsError;
 use sha2::{Digest, Sha256};
@@ -691,12 +691,29 @@ fn a_basis_matches_slice_puts_the_g_total_on_line_1b_and_leaves_line_3_blank() {
     );
 }
 
-/// ★ spec 1099-DA T8 KILL — a **TY2024** slice still puts its whole Part I total on line 3 and
-/// leaves 1b blank. The pre-2025 revisions have no digital-asset boxes at all (every row is C/F),
-/// and line 3 reads *"Box C checked"* there (I-6).
+/// ★ spec 1099-DA T8 KILL — a **TY2024** slice still puts its whole Part I total on line 3 and its
+/// whole Part II total on line 10, and leaves 1b blank. The pre-2025 revisions have no digital-asset
+/// boxes at all (every row is C/F), and line 3 reads *"Box C checked"* there (I-6).
+///
+/// ★★ The fixture is RE-BOXED to **C/F**, not `mixed_rows()`'s TY2025 I/L defaults, and that is the
+/// whole point of the test (R6 build review **I-2**). With I/L rows the `2024` argument selects only
+/// the map REVISION, so this test proved the 2024 map binds line 3 — never that a TY2024 slice's Box
+/// **C** total reaches it. Both pre-2025 halves of the pairing were consequently unkilled: deleting
+/// `B::C` from line 3's group, and separately `B::F` from line 10's, each left the whole suite green.
 #[test]
 fn a_pre_2025_slice_keeps_the_whole_part_i_total_on_line_3() {
-    let rows = mixed_rows(); // I/L fixtures — line 3 is "Box C **or Box I**" on every revision
+    // The pre-2025 not-reported boxes: C (short-term) and F (long-term).
+    let rows: Vec<_> = mixed_rows()
+        .into_iter()
+        .map(|mut r| {
+            r.box_ = if r.part == Form8949Part::ShortTerm {
+                Form8949Box::C
+            } else {
+                Form8949Box::F
+            };
+            r
+        })
+        .collect();
     let totals = totals_for(&rows);
     let by_box = btctax_core::schedule_d_by_box(&rows);
     let sd = btctax_forms::fill_schedule_d(&totals, &by_box, 2024).unwrap();
@@ -706,7 +723,12 @@ fn a_pre_2025_slice_keeps_the_whole_part_i_total_on_line_3() {
     assert_eq!(
         text_value(&doc, idx[map.line3.proceeds_d.as_str()].id).as_deref(),
         Some(totals.st.proceeds.to_string().as_str()),
-        "the WHOLE Part I total on line 3"
+        "the WHOLE Part I total (Box C) on line 3"
+    );
+    assert_eq!(
+        text_value(&doc, idx[map.line10.proceeds_d.as_str()].id).as_deref(),
+        Some(totals.lt.proceeds.to_string().as_str()),
+        "the WHOLE Part II total (Box F) on line 10"
     );
     assert_eq!(
         text_value(

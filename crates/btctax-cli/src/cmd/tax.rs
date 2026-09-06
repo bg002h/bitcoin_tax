@@ -200,7 +200,8 @@ pub fn import_return_inputs(
     //   `report --tax-year N-1 --write-carryover` legitimately writes onto year N before N's package
     //   exists, and the TUI keeps the same row as a draft; refusing here would break that chain. What
     //   was harmful was `report` then prescribing `income clear` — fixed in `uncomputable_sentence`.
-    if let Some(note) = crate::year_readiness::import_note(year) {
+    if let Some(note) = crate::year_readiness::import_note(year, !ri.broker_reporting.0.is_empty())
+    {
         eprintln!("{note}");
     }
     return_inputs::set(s.conn(), year, &ri)?;
@@ -477,6 +478,12 @@ fn stored_answers_reach_the_slice(
     fr: &dyn btctax_core::tax::tables::FullReturnTables,
 ) -> Result<bool, CliError> {
     if fr.full_return_for(year).is_some() {
+        return Ok(false);
+    }
+    // ★ spec 1099-DA R6 fold (I-1) — the THIRD term: the year's Form 8949 / Schedule D templates
+    //   have to be bundled or the export refuses and writes nothing. TY2026 satisfies both of the
+    //   other two and cannot print a page.
+    if !crate::year_readiness::slice_can_print(year) {
         return Ok(false);
     }
     Ok(crate::input_form_store::broker_answers(s.conn(), year)?.is_some_and(|b| !b.0.is_empty()))

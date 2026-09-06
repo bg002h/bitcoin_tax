@@ -198,7 +198,16 @@ impl Printed8283Rows {
 pub fn form_8283_printed(
     rows: &[crate::forms::Form8283Row],
     // ★ §G-21 — the filer's own answer to lines 5a/5b/5c. `Some(false)` prints all three as No; `None`
-    // leaves them blank. `Some(true)` cannot arrive: the year refuses upstream.
+    // leaves them blank.
+    // ★★ `Some(true)` cannot arrive, and this is WHERE that is enforced: one decision,
+    // [`crate::tax::return_refuse::donation_restriction_gate`], called before any byte on BOTH paths
+    // that can print an 8283 — the full return in `return_1040::assemble_absolute` (refusing the year
+    // with `DonationRestrictionsUnresolved`) and the crypto slice in
+    // `btctax_cli::cmd::admin::export_irs_pdf_from_session_with_regime`, on BOTH of its arms.
+    // The slice's half used to sit INSIDE its arm-(2) block, so a committed `ReturnInputs` row on a
+    // params-less year with empty 1099-DA answers fell to arm (3) with the declared restriction
+    // present and unread, and printed the 8283 at full fair market value — this comment asserting an
+    // invariant the code no longer held (R6 build review C-1).
     no_donation_restrictions: Option<bool>,
 ) -> Option<Printed8283Rows> {
     if rows.is_empty() {

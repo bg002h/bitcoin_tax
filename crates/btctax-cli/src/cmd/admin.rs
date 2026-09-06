@@ -776,11 +776,14 @@ pub(crate) fn export_irs_pdf_from_session_with_regime(
     let details = session.donation_details()?;
     let rows_8283 = btctax_core::form_8283(state, tax_year, &details);
 
-    // ★★★ spec 1099-DA R6 (I-1/I-7) — THE FORM-LEVEL GATE. On arm (2) a partially ported year must
-    //     write NOTHING: every map the SELECTED forms can reach has to resolve first, and the
-    //     refusal names the FIRST missing stem. (`SUPPORTED_YEARS` is a YEAR-level answer — "does
-    //     any form of this year fill" — and is a different question, checked below.)
-    if files_from_answers {
+    // ★★★ spec 1099-DA R6 (I-1/I-7) — THE FORM-LEVEL GATE. A partially ported year must write
+    //     NOTHING: every map the SELECTED forms can reach has to resolve first, and the refusal
+    //     names the FIRST missing stem. (`SUPPORTED_YEARS` is a YEAR-level answer — "does any form
+    //     of this year fill" — and is a different question, checked below.)
+    // ★ R6 fold (M-2) — it is NOT scoped to arm (2): the gate reads only the year and the selected
+    //   forms, never the answers, and "write nothing" is a guarantee of the export, not of one arm.
+    //   [`form_level_gate_runs`] holds the one condition it does keep.
+    if form_level_gate_runs(files_from_answers, tax_year) {
         slice_map_gate(
             tax_year,
             forms,
@@ -803,6 +806,54 @@ pub(crate) fn export_irs_pdf_from_session_with_regime(
         Some(r) => r,
         None => crate::year_readiness::regime_or_refuse(tax_year)?,
     };
+    // ★★★ spec 1099-DA R6 fold (C-1 + M-3) — THE FORM 8283 RESTRICTION GATE, ON BOTH ARMS, before
+    //     any byte. It reads the year's WORKING return, never the answers, so scoping it to arm (2)
+    //     was a fail-OPEN: R6 widened the dispatch to `params_bundled && return_inputs::exists(…)`,
+    //     and a COMMITTED row on a params-less year whose `broker_reporting` is empty — the normal
+    //     shape of a TY2025 import, since the 1099-DA question is not live there — then fell to arm
+    //     (3) with the row PRESENT and UNREAD. `donations_had_restrictions == Some(true)` was never
+    //     consulted and `form_8283.pdf`, written from the same `rows_8283` on both arms, printed the
+    //     gift at full fair market value: an overstated claimed deduction on a form the filer signs.
+    // ★★ The DECISION is `return_refuse::donation_restriction_gate`, shared with the full return, so
+    //    the slice and the full return cannot disagree about when a restriction blocks a filing.
+    //    Only the premises are the slice's own, because it has no Schedule A to condition on: an
+    //    8283 attaches iff the year EMITS one, and the year is Section B iff the printed rows say so
+    //    (`forms::form_8283` splits on the §170(f)(11)(C) year aggregate over $5,000 — the same term
+    //    the full return reads).
+    if let Some(ri) = working.as_ref() {
+        use btctax_core::tax::return_refuse::DonationRestrictionGate as Gate;
+        let section_b = rows_8283
+            .iter()
+            .any(|r| r.section == Some(btctax_core::Form8283Section::B));
+        match btctax_core::tax::return_refuse::donation_restriction_gate(
+            ri.donations_had_restrictions,
+            !rows_8283.is_empty(),
+            section_b,
+        ) {
+            Some(Gate::Declared) => {
+                return Err(CliError::Usage(format!(
+                    "TY{tax_year}: you declared that at least one donated property had a restriction or a \
+                     retained right (Form 8283 line 5a, 5b or 5c). Under Reg §1.170A-7 that REDUCES or \
+                     DENIES the §170 deduction, and btctax values every donation at full fair market \
+                     value — so the Form 8283 it would print for {tax_year} overstates the gift. It \
+                     cannot tell which gift is affected: complete Form 8283 for the restricted donation \
+                     by hand, with the reduced amount. No forms were written."
+                )));
+            }
+            Some(Gate::UnansweredSectionB) => {
+                return Err(CliError::Usage(format!(
+                    "TY{tax_year}: this year files a Form 8283 SECTION B (donations over $5,000), whose \
+                     lines 5a, 5b and 5c ask whether any donated property carried a restriction or a \
+                     retained right. A \"Yes\" to any of them reduces or denies the §170 deduction \
+                     (Reg §1.170A-7), and btctax values every donation at full fair market value — so it \
+                     cannot print the form without the answer. Answer it (`btctax income answer`, or the \
+                     TUI's input form) and re-export. No forms were written."
+                )));
+            }
+            None => {}
+        }
+    }
+
     if files_from_answers {
         // ★ ARM (2). The boxes are ROUTED from the stored answers through EXACTLY the screen and the
         //   router the full return uses — one screen, one router, so a filer's slice and their full
@@ -819,21 +870,7 @@ pub(crate) fn export_irs_pdf_from_session_with_regime(
                 r.reason, r.detail
             )));
         }
-        // ★ The Form 8283 restriction row, in its SLICE form. A declared restriction reduces or
-        //   denies the §170 deduction (Reg §1.170A-7) and btctax values every donation at full fair
-        //   market value, so the 8283 it would print overstates the gift. The full return refuses
-        //   the whole year for this (`DonationRestrictionsUnresolved`); the slice has no Schedule A
-        //   to condition on, so the predicate is the one the slice can see — the year EMITS an 8283.
-        if ri.donations_had_restrictions == Some(true) && !rows_8283.is_empty() {
-            return Err(CliError::Usage(format!(
-                "TY{tax_year}: you declared that at least one donated property had a restriction or a \
-                 retained right (Form 8283 line 5a, 5b or 5c). Under Reg §1.170A-7 that REDUCES or \
-                 DENIES the §170 deduction, and btctax values every donation at full fair market \
-                 value — so the Form 8283 it would print for {tax_year} overstates the gift. It \
-                 cannot tell which gift is affected: complete Form 8283 for the restricted donation \
-                 by hand, with the reduced amount. No forms were written."
-            )));
-        }
+        // ★ The Form 8283 restriction gate ran ABOVE, on both arms (R6 fold C-1/M-3).
         btctax_core::route_8949_boxes(&mut rows, regime, &ri.broker_reporting).map_err(|e| {
             CliError::Usage(format!(
                 "TY{tax_year}: the stored Form 1099-DA answers do not settle every Form 8949 row ({e}). No forms were written."
@@ -896,6 +933,26 @@ pub(crate) fn export_irs_pdf_from_session_with_regime(
                  follows when the year's package is bundled."
             ))
         });
+    }
+
+    // ★★ spec 1099-DA R6 fold (N-1) — a `--forms` narrowing that keeps Schedule D but DROPS Form
+    //    8949 must REFUSE, and the refusal is the answer rather than probing both maps.
+    //    Since T8 the Schedule D this path writes carries PER-BOX lines (1b/2/3, 8b/9/10) whose own
+    //    captions read "Totals for all transactions reported on Form(s) 8949 with Box … checked" —
+    //    they cite a page-set by name. Written into a directory that holds no `f8949.pdf`, the
+    //    schedule states totals for an attachment the packet does not contain, and the filer mails
+    //    the directory. Fail closed: the narrowing is refused with the missing form named, so the
+    //    filer either adds `f8949` or exports the two separately, deliberately. (The converse is
+    //    fine and stays allowed — an 8949 without its Schedule D cites nothing.)
+    if !forms.is_empty() && forms.contains(&FormArg::ScheduleD) && !forms.contains(&FormArg::F8949)
+    {
+        return Err(CliError::Usage(format!(
+            "--forms selects `schedule-d` without `f8949`, and TY{tax_year}'s Schedule D cites it by \
+             name: its per-box lines are captioned \"Totals for all transactions reported on Form(s) \
+             8949 with Box … checked\", so the schedule would state totals for a page-set this export \
+             directory does not contain. Add `f8949` to --forms (or drop --forms for the whole crypto \
+             slice). No forms were written."
+        )));
     }
 
     let totals = btctax_core::schedule_d(state, tax_year);
@@ -2265,6 +2322,22 @@ fn slice_map_gate(
     first_unresolved_map(tax_year, &probes)
 }
 
+/// ★ spec 1099-DA R6 fold (M-2) — WHEN the form-level map gate runs on the crypto-slice path.
+///
+/// R6 built it as `if files_from_answers`, i.e. arm (2) only, so a partially ported year reached on
+/// arm (3) got no "write nothing" guarantee at all. The gate reads only the year and the selected
+/// forms — nothing about the answers — so the arm is the wrong axis, and it now runs on both.
+///
+/// The one condition it keeps: on arm (3) a WHOLLY unported year (no bundled template at all) still
+/// gets the YEAR-level answer instead — the typed `FormsError::UnsupportedYear` refusal raised
+/// further down, which `export_irs_pdf::unsupported_year_is_refused` pins. That is a different
+/// question from "which of the forms you selected cannot fill", and only the second one is R6's; on
+/// arm (2) R6 mandates the form-level message for such a year (TY2026), so the gate is unconditional
+/// there.
+fn form_level_gate_runs(files_from_answers: bool, tax_year: i32) -> bool {
+    files_from_answers || btctax_forms::SUPPORTED_YEARS.contains(&tax_year)
+}
+
 /// The pure half of [`slice_map_gate`]: the FIRST probe whose map did not resolve, as the refusal a
 /// filer reads. Split out so a kill can plant a partially ported year — a probe list with one map
 /// bound and the next missing — which no BUNDLED year is.
@@ -2400,6 +2473,33 @@ mod slice_broker_tests {
             slice_map_gate(*year, &[], true, true, true)
                 .unwrap_or_else(|e| panic!("TY{year} must pass its own form-level gate: {e}"));
         }
+    }
+
+    /// ★★★ spec 1099-DA R6 fold (M-2) KILL — the form-level map gate is NOT scoped to arm (2).
+    ///
+    /// R6 built the call site as `if files_from_answers`, so a partially ported year reached on arm
+    /// (3) — no stored answers — got none of R6's "write nothing" guarantee. The gate reads the year
+    /// and the selected forms only, so the arm was never the right axis. Reverting the condition to
+    /// `files_from_answers` reds the two arm-(3) assertions below.
+    ///
+    /// The one condition kept is the last pair: on arm (3) a WHOLLY unported year keeps its
+    /// YEAR-level typed refusal (`FormsError::UnsupportedYear`, pinned by
+    /// `export_irs_pdf::unsupported_year_is_refused`) rather than a form-level one, while on arm (2)
+    /// R6 mandates the form-level message even there.
+    #[test]
+    fn the_form_level_gate_runs_on_arm_3_too() {
+        for year in btctax_forms::SUPPORTED_YEARS {
+            assert!(
+                form_level_gate_runs(false, *year),
+                "TY{year} is a bundled slice year: arm (3) must get the form-level gate too"
+            );
+        }
+        // arm (2) is unchanged — the gate runs whatever the year.
+        assert!(form_level_gate_runs(true, 2026));
+        assert!(form_level_gate_runs(true, 2023));
+        // …and on arm (3) a wholly unported year is answered at the YEAR level instead.
+        assert!(!form_level_gate_runs(false, 2026));
+        assert!(!form_level_gate_runs(false, 2023));
     }
 
     /// ★ the three directions the spec names: a live year refuses before any byte and names the
