@@ -291,8 +291,8 @@ DISPATCH (P6.5)") becomes three-way. The predicate is a function call, never a d
    exactly the screen and router the full return uses (`screen_broker_reporting` then
    `route_8949_boxes`). Before any byte, in this order (I-5): the promote gate; the form-level gate
    (I-1/I-7) — EVERY map the SELECTED forms can reach must resolve (`--forms` narrows the set through
-   `wants()`): `Form8949Map` and `ScheduleDMap` always, `Form1040Map` when the capital-gains page
-   is selected, plus `Form8283Map` / `ScheduleSeMap` / `Form8275Map` when this year's data will
+   `wants()`): `Form8949Map` and `ScheduleDMap` (the slice always selects them — the same principle,
+   not an exemption), `Form1040Map` when the capital-gains page is selected, plus `Form8283Map` / `ScheduleSeMap` / `Form8275Map` when this year's data will
    reach them — naming the first missing stem, so a partially ported year writes
    nothing (`SUPPORTED_YEARS` is a year-level answer and is not this gate); the pseudo-
    attestation gate; `screen_broker_reporting` (an unanswered, `mixed` or `basis_differs` key, or a
@@ -311,7 +311,11 @@ DISPATCH (P6.5)") becomes three-way. The predicate is a function call, never a d
    `form_1040_capgains.pdf` is a worksheet, not a return. The full return follows when the year's
    package is bundled."*
 3. **no answers stored** → the slice as today: a live year with ≥1 exchange disposition refuses before
-   any byte and names the exit; the exit sentence becomes *"… answer them in the TUI input form (the
+   any byte and names the exit. **Answers stored with the year's parameters bundled and NO committed
+   row is also arm (3)** (M-13), and its refusal names the exit that state actually has — *commit the
+   return in the TUI input form (the commit succeeds once the year's parameters are bundled), then
+   export the full return* (kill: a params-bundled year, DRAFT-only answers, no committed row → the
+   refusal names committing, not answering). Otherwise the exit sentence becomes *"… answer them in the TUI input form (the
    Form 1099-DA block lists your venues) or via `income import`, then export again — the crypto slice
    fills from the answers; a full return is not required."*
 
@@ -322,13 +326,16 @@ the Form 1099-DA answers block (the row enumeration R1 mandates, read through th
 exits 0; WITHOUT one it is `NotComputable [TaxProfileMissing]` and exits 1 exactly as today — the
 answers block still prints (it is built after the resolve), and the NOT-COMPUTABLE line gains the
 clause *"`export-irs-pdf --tax-year {y}` still prints the crypto slice from these answers"* so the
-filer is not told the year is dead. A draft never shadows a `tax_profile`, so (2a) never LOSES a
+filer is not told the year is dead — printed only when the T9 accessor returned answers AND
+`full_return_for(year).is_none()`; `report_tax_year` computes both and passes the flag to
+`render_tax_outcome` (M-15). A draft never shadows a `tax_profile`, so (2a) never LOSES a
 figure it had. Kills: one per sub-state, naming the expected exit code (0 with a profile, 1
 without); (2b) a committed row exists with no params (only `income import` can
 create it on such a year) → the outcome is unchanged — uncomputable, the inputs kept — and both
 `uncomputable_sentence` and `import_note` (I-4) gain the clause *"`export-irs-pdf --tax-year {y}`
-still prints the crypto slice from these inputs"*, `import_note` no longer saying `report` will
-refuse when a `tax_profile` is stored. The TUI draft is the RECOMMENDED authoring path for a
+still prints the crypto slice from the stored answers"* (the slice reads the working return, which
+may be the draft — N-6), `import_note` no longer saying `report` will refuse when a `tax_profile` is
+stored. The TUI draft is the RECOMMENDED authoring path for a
 params-less year precisely because it leaves `report`, `optimize` and `what-if` on the profile.
 
 **The TUI export (I-2).** It is CSV-only and has no full-return arm: it passes
@@ -380,11 +387,22 @@ and is not evidence the gap is closed (M-4). No new vault table: the answers sta
   a map with `line1b` removed and a routed G group present → `FormsError`, zero bytes, the same map
   with no G rows → fills clean; the cli-side three-artifact check on a G+I fixture reds when the CSV writer is reverted to two part
   rows (B1), and the forms-side half reds when a PDF line moves.
-- **T9 — read the answers without committing a return (C-2, C-3, C-4, I-10).** A dedicated accessor
-  `input_form_store::broker_answers(conn, year) -> Result<Option<BrokerReporting>, CliError>` resolves
-  the year's working return through `input_form_store::load` — the §6.1 precedence every other reader
-  uses, **a draft shadows the committed row** — and returns its `broker_reporting`. It never
-  introduces a second precedence: the answers the export files are the answers the TUI shows. Because
+- **T9 — read the answers without committing a return (C-2, C-3, C-4, I-10, I-14, I-15).** A dedicated
+  accessor `input_form_store::working_return(conn, year) -> Result<(Option<ReturnInputs>, Option<StaleNote>), CliError>`
+  resolves the year's WHOLE working `ReturnInputs` through `input_form_store::load` — the §6.1
+  precedence every other reader uses, **a draft shadows the committed row** — and
+  `broker_answers(conn, year)` is the projection of it (`.broker_reporting`) that arm (2)'s predicate
+  reads. **Every arm-(2) gate that reads a `ReturnInputs` field — `screen_broker_reporting(ri, …)` and
+  the Form 8283 restriction row — reads that same resolution, never `return_inputs::get`**, so no gate
+  can see a different return than the one the answers came from and nobody synthesises a default. The
+  accessor is called only after arm (1) is ruled out (N-7). The export prints the `StaleNote` the way
+  `scrub` does, before the file list (M-14). It never
+  introduces a second precedence: **every reader of `broker_reporting` on every surface goes through
+  this resolution** — `Snapshot.broker_answers` (`Session::broker_reporting_answers` enumerates the
+  union of `return_inputs::years` and the draft table and resolves each year through `load`), so the
+  viewer's Box column, the TUI export, `btctax export --csv` and the CLI export show and file ONE
+  answer set. The one deliberate exception: the full return (arm (1)) files from the COMMITTED row —
+  committing is possible on a params-bundled year — and nobody re-points arm (1) at the accessor. Because
   it goes through `load`, the §6.3 stale split holds unchanged — a stale WIP draft is discarded (and
   the export surfaces the `StaleNote`), a stale parked draft REFUSES (`StaleParkedDraft`) before any
   byte — and a **parked** draft (`parked = 1`, a return switched back to the tax-profile) carries no
@@ -396,13 +414,16 @@ and is not evidence the gap is closed (M-4). No new vault table: the answers sta
   preserved but never approached. `income import` reaches arm (2) only with a file that carries
   `filing_status` (the one field with no `#[serde(default)]`, on purpose); the TUI block is the
   primary authoring surface on a params-less year, and its commit modal says the answers are held in
-  the draft and that the slice reads them. Kills: TY2026 + a TUI-saved 1099-DA block → the draft
-  holds the answers, `return_inputs::exists(2026)` is FALSE, and `export-irs-pdf --tax-year 2026`
-  reaches arm (2); the same vault with a stored `tax_profile` for 2026 → `report --tax-year 2026`
+  the draft and that the slice reads them. Kills (run on TY2025's templates with the LIVE regime injected, the T-tests' pattern — TY2026 has
+  no templates, so nothing is observable there, N-5): a TUI-saved 1099-DA block → the draft holds the
+  answers, `return_inputs::exists` is FALSE, and the export reaches arm (2); the same vault with a stored `tax_profile` for 2026 → `report --tax-year 2026`
   still resolves `StoredProfile` and exits 0 (the kill that reds any create-a-row design); a
   params-less year with a committed row answering `basis_matches` AND a draft answering
   `proceeds_only` → the export writes box **I** (the draft wins), and the same vector with the two
-  swapped writes **G**; a draft at `SCHEMA_VERSION - 1` with `parked = 1` → the export refuses,
+  swapped writes **G** — asserted on the CLI export, `export --csv` AND the TUI export's CSV (I-15);
+  a params-less live year, DRAFT-only, `donations_had_restrictions = Some(true)` and a donation that
+  emits an 8283 → the export refuses and `form_8283.pdf` is absent (the test that reds on a
+  `return_inputs::get` implementation, I-14); a draft at `SCHEMA_VERSION - 1` with `parked = 1` → the export refuses,
   `out_dir` absent; the same at `parked = 0` → the stale row is discarded and the export takes arm
   (3); a current `parked = 1` draft → arm (3); TY2026 + a params-less commit of the FULL return →
   still `NoTables` + draft (I-11 unmoved).
@@ -416,7 +437,8 @@ unanswered → refusal in the slice's sentence, no byte (`wrote_nothing`); a sto
 refusal; the partially-ported-year refusal (a fixture year with one bundled template and no f8949
 map → refusal, `out_dir` absent; the f8949 map alone → still refused, naming `schedule_d`); the 8283
 restriction refusal and its `false` twin; the TUI export's two states (refusal → no directory;
-answered → `form8949.csv` box G); `report` in state (2) exits 0 with the answers block and the note;
+answered → `form8949.csv` box G); `report` in state (2a) exits 0 with the answers block and the note when a `tax_profile` is stored,
+and exits 1 with the answers block and the slice clause when none is; state (2b) is unchanged;
 the two exit sentences; the price-coverage refusal on an exported year whose dataset ends early.
 
 ## Current state — hook points (recon @ c76adf6b, cites re-resolved @ 5f03b965)
