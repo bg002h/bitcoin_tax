@@ -801,6 +801,24 @@
     "extract": "legal/text/irs-guidance/Notice_2026-20.txt"
   },
   {
+    "path": "legal/primary-sources/irs-guidance/RevProc_2016-55.pdf",
+    "kind": "guidance",
+    "storage": "committed",
+    "sha256": "d3bfcdd4182b3ed4ebd7a65f35ed921ee6b813ac2310e9be3806175e97e4c721",
+    "bytes": 190598,
+    "url": "https://www.irs.gov/pub/irs-drop/rp-16-55.pdf",
+    "extract": "legal/text/irs-guidance/RevProc_2016-55.txt"
+  },
+  {
+    "path": "legal/primary-sources/irs-guidance/RevProc_2023-34.pdf",
+    "kind": "guidance",
+    "storage": "committed",
+    "sha256": "544ba41c7ba64f77da521e0d174a7b7394dc72b5c7c73d10adb19952d5aaae57",
+    "bytes": 255987,
+    "url": "https://www.irs.gov/pub/irs-drop/rp-23-34.pdf",
+    "extract": "legal/text/irs-guidance/RevProc_2023-34.txt"
+  },
+  {
     "path": "legal/primary-sources/irs-guidance/RevProc_2024-28.pdf",
     "kind": "guidance",
     "storage": "committed",
@@ -808,6 +826,24 @@
     "bytes": 131619,
     "url": "https://www.irs.gov/pub/irs-drop/rp-24-28.pdf",
     "extract": "legal/text/irs-guidance/RevProc_2024-28.txt"
+  },
+  {
+    "path": "legal/primary-sources/irs-guidance/RevProc_2024-40.pdf",
+    "kind": "guidance",
+    "storage": "committed",
+    "sha256": "4de9db6b6662b5c305a59100a027051628823b42fd5817ea4e383ad4c302af1f",
+    "bytes": 249076,
+    "url": "https://www.irs.gov/pub/irs-drop/rp-24-40.pdf",
+    "extract": "legal/text/irs-guidance/RevProc_2024-40.txt"
+  },
+  {
+    "path": "legal/primary-sources/irs-guidance/RevProc_2025-32.pdf",
+    "kind": "guidance",
+    "storage": "committed",
+    "sha256": "e9ada115fb43a4af5ea326ca91edd40ab0bf29b9be01d2c13d7b8fa96214635b",
+    "bytes": 260406,
+    "url": "https://www.irs.gov/pub/irs-drop/rp-25-32.pdf",
+    "extract": "legal/text/irs-guidance/RevProc_2025-32.txt"
   },
   {
     "path": "legal/primary-sources/irs-guidance/RevRul_2019-24.pdf",

@@ -1,0 +1,1300 @@
+26 CFR 601.602: Tax forms and instructions.
+(Also Part I, §§ 1, 23, 25A, 32, 36B, 42, 45R, 55, 59, 62, 63, 68, 125, 132(f),135, 137,
+146, 147, 148, 151, 179, 213, 220, 221, 512, 513, 831, 877, 877A, 911, 2010, 2032A,
+2503, 2523, 4161, 4261, 5000A, 6033, 6039F, 6323, 6334, 6601, 6651, 6652, 6695,
+6698, 6699, 6721, 6722, 7345, 7430, 7702B; 1.148-5.)
+
+
+
+
+Rev. Proc. 2016-55
+
+
+Table of Contents
+
+SECTION 1. PURPOSE
+
+SECTION 2. CHANGES
+
+SECTION 3. 2017 ADJUSTED ITEMS
+
+                                                                           Code Section
+
+ .01 Tax Rate Tables                                                       1(a)-(e)
+
+  .02 Unearned Income of Minor Children Taxed as if Parent’s               1(g)
+Income ("Kiddie Tax").
+
+ .03 Adoption Credit                                                       23
+
+ .04 Lifetime Learning Credit                                              25A
+
+ .05 Earned Income Credit                                                  32
+
+ .06 Refundable Credit for Coverage Under a Qualified Health Plan          36B(f)(2)(B)
+
+ .07 Rehabilitation Expenditures Treated as Separate New Building          42(e)
+
+ .08 Low-Income Housing Credit                                             42(h)
+
+ .09 Employee Health Insurance Expense of Small Employers                  45R
+                                         -2-
+
+ .10 Exemption Amounts for Alternative Minimum Tax                     55
+
+  .11 Alternative Minimum Tax Exemption for a Child Subject to the     59(j)
+“Kiddie Tax”
+
+ .12 Certain Expenses of Elementary and Secondary                      62(a)(2)(D)
+School Teachers
+
+ .13 Transportation Mainline Pipeline Construction Industry Optional   62(c)
+Expense Substantiation Rules for Payments to Employees under
+Accountable Plans
+
+ .14 Standard Deduction                                                63
+
+ .15 Overall Limitation on Itemized Deductions                         68
+
+ .16 Cafeteria Plans                                                   125
+
+ .17 Qualified Transportation Fringe Benefit                           132(f)
+
+ .18 Income from United States Savings Bonds for Taxpayers Who         135
+Pay Qualified Higher Education Expenses
+
+ .19 Adoption Assistance Programs                                      137
+
+ .20 Private Activity Bonds Volume Cap                                 146(d)
+
+ .21 Loan Limits on Agricultural Bonds                                 147(c)(2)
+
+ .22 General Arbitrage Rebate Rules                                    148(f)
+
+  .23 Safe Harbor Rules for Broker Commissions on Guaranteed           148
+Investment Contracts or Investments Purchased for a Yield
+Restricted Defeasance Escrow
+
+ .24 Personal Exemption                                                151
+
+ .25 Election to Expense Certain Depreciable Assets                    179
+
+ .26 Eligible Long-Term Care Premiums                                  213(d)(10)
+
+ .27 Medical Savings Accounts                                          220
+
+ .28 Interest on Education Loans                                       221
+                                            -3-
+
+ .29 Treatment of Dues Paid to Agricultural or Horticultural           512(d)
+Organizations
+
+ .30 Insubstantial Benefit Limitations for Contributions Associated    513(h)
+With Charitable Fund-Raising Campaigns
+
+  .31 Tax on Insurance Companies Other than Life                       831
+Insurance Companies
+
+ .32 Expatriation to Avoid Tax                                         877
+
+ .33 Tax Responsibilities of Expatriation                              877A
+
+ .34 Foreign Earned Income Exclusion                                   911
+
+ .35 Unified Credit Against Estate Tax                                 2010
+
+ .36 Valuation of Qualified Real Property in Decedent's Gross Estate   2032A
+
+ .37 Annual Exclusion for Gifts                                        2503; 2523
+
+ .38 Tax on Arrow Shafts                                               4161
+
+ .39 Passenger Air Transportation Excise Tax                           4261
+
+ .40 Requirement to Maintain Minimum Essential Coverage                5000A
+
+ .41 Reporting Exception for Certain Exempt Organizations with         6033(e)(3)
+Nondeductible Lobbying Expenditures
+
+ .42 Notice of Large Gifts Received from Foreign Persons               6039F
+
+ .43 Persons Against Whom a Federal Tax Lien Is Not Valid              6323
+
+ .44 Property Exempt from Levy                                         6334
+
+  .45 Interest on a Certain Portion of the Estate Tax Payable in       6601(j)
+Installments
+
+ .46 Failure to File Tax Return                                        6651
+
+ .47 Failure to File Certain Information Returns, Registration         6652
+Statements, etc.
+                                            -4-
+
+ .48 Other Assessable Penalties With Respect to the                       6695
+Preparation of Tax Returns for Other Persons
+
+ .49 Failure to File Partnership Return                                   6698
+
+ .50 Failure to File S Corporation Return                                 6699
+
+ .51 Failure to File Correct Information Returns                          6721
+
+ .52 Failure to Furnish Correct Payee Statements                          6722
+
+ .53 Revocation or Denial of Passport in Case of Certain                  7345
+Tax Delinquencies
+
+ .54 Attorney Fee Awards                                                  7430
+
+  .55 Periodic Payments Received under Qualified Long-Term Care           7702B(d)
+Insurance Contracts or under Certain Life Insurance Contracts
+
+SECTION 4. EFFECTIVE DATE
+
+SECTION 5. DRAFTING INFORMATION
+
+
+
+SECTION 1. PURPOSE
+
+   This revenue procedure sets forth inflation-adjusted items for 2017.
+
+SECTION 2. CHANGES
+
+ .01 Section 101 of the Protecting Americans from Tax Hikes Act (PATH Act) of 2015,
+
+enacted as part of the Consolidated Appropriations Act, 2016, Pub. L. 114-113, div. Q,
+
+made permanent the earned income threshold of $3,000 used in § 24(d)(1)(B)(i) to
+
+determine the refundable portion of the child tax credit under § 24.
+
+ .02 Section 102 of the PATH Act made permanent the enhanced American
+
+Opportunity Tax Credit under § 25A(i). The Hope Scholarship Credit under § 25A(b)(1),
+
+as increased under § 25A(i) (the American Opportunity Tax Credit), is an amount equal
+                                           -5-
+
+to 100 percent of qualified tuition and related expenses not in excess of $2,000, plus 25
+
+percent of those expenses in excess of $2,000, but not in excess of $4,000.
+
+Accordingly, the maximum Hope Scholarship Credit allowable under § 25A(b)(1) is
+
+$2,500.
+
+  .03 Section 103 of the PATH Act made permanent under § 32 the enhanced earned
+
+income tax credit percentage for an eligible individual with 3 or more qualifying children
+
+and the phaseout percentages. The PATH Act also made permanent an increase of
+
+$5,000 in the phaseout amount to reduce the marriage penalty and the indexing of this
+
+amount for inflation.
+
+ .04 Section 333 of the PATH Act modifies the § 831(b) eligibility rules for a property
+
+and casualty insurance company to elect to be taxed only on taxable investment
+
+income. The provision increases the amount of the limit on net written premiums or
+
+direct written premiums (whichever is greater) from $1,200,000 to $2,200,000 and
+
+indexes this amount for inflation effective for tax years beginning after December 31,
+
+2016.
+
+ .05 Section 202 of the Airport and Airways Extension Act of 2015, Pub. L. 114-55,
+
+amended § 4261(k)(1)(A)(ii) of the Internal Revenue Code (which governs the period of
+
+applicability of § 4261(a), 4261(b)(1), (c)(1), and (c)(3)). The effect of this amendment
+
+was to temporarily extend the passenger air transportation excise taxes of 7.5% on the
+
+amount paid for taxable transportation, $3.00 for each domestic segment of taxable
+
+transportation, $12.00 for amounts paid for any transportation beginning or ending in the
+
+United States (i.e., international travel), and $6.00 for each domestic segment beginning
+                                            -6-
+
+or ending in Alaska or Hawaii. These excise taxes applied to transportation that began
+
+during the period ending March 31, 2016. Section 202 of the Airport and Airway
+
+Extension Act of 2016, Pub. L. 114-141, extended these excise taxes through July 15,
+
+2016, and Section 1202 of FAA Extension, Safety, and Security Act of 2016, Pub. L.
+
+114-190, extended these excise taxes through September 30, 2017.
+
+  .06 The Patient Protection and Affordable Care Act, Pub. L. 111-148, and the Health
+
+Care and Education Reconciliation Act of 2010, Pub. L. 111-152 (collectively, the
+
+Affordable Car Act) enacted § 5000A, Requirement to Maintain Minimum Essential
+
+Coverage. For taxable years beginning in 2014, most individuals are subject to a
+
+penalty for each month for which they fail to have minimum essential health coverage
+
+for themselves or their dependents. For calendar years beginning after 2016, the
+
+applicable dollar amount used to determine the penalty under § 5000A(c) for failure to
+
+maintain minimum essential coverage is adjusted for inflation.
+
+  .07 Section 921 of the Trade Facilitation and Trade Enforcement Act of 2015, Pub. L.
+
+114-125, increased the amount of the additional tax under § 6651(a) for failure to file a
+
+tax return within 60 days of the due date of such return (determined with regard to any
+
+extensions of time for filing). For returns required to be filed in calendar years after
+
+2015, the amount of the addition tax shall not be less than the lesser of $205 (increased
+
+from $135) or 100 percent of the amount required to shown as tax on such returns.
+
+  .08 Section 32101 of the Fixing America’s Surface Transportation Act (FAST Act) of
+
+2015, Pub. L. 114-94, added § 7345, Revocation of Denial of Passport in Case of
+
+Certain Tax Delinquencies, to the Internal Revenue Code. The provision applies to a
+                                            -7-
+
+seriously delinquent tax debt, which generally includes any outstanding Federal tax
+
+liability (including interest and any penalties) in excess of $50,000 (adjusted for inflation
+
+for a calendar year beginning after 2016) for which a notice of lien or notice of levy has
+
+been filed.
+
+SECTION 3. 2017 ADJUSTED ITEMS
+
+  .01 Tax Rate Tables. For taxable years beginning in 2017, the tax rate tables under
+
+§ 1 are as follows:
+
+TABLE 1 - Section 1(a) - Married Individuals Filing Joint Returns and Surviving
+Spouses
+
+If Taxable Income Is:               The Tax Is:
+
+Not over $18,650                    10% of the taxable income
+
+Over $18,650 but                    $1,865 plus 15% of
+not over $75,900                    the excess over $18,650
+
+Over $75,900 but                    $10,452.50 plus 25% of
+not over $153,100                   the excess over $75,900
+
+Over $153,100 but                   $29,752.50 plus 28% of
+not over $233,350                   the excess over $153,100
+
+Over $233,350 but                   $52,222.50 plus 33% of
+not over $416,700                   the excess over $233,350
+
+Over $416,700 but                   $112,728 plus 35% of
+not over $470,700                   the excess over $416,700
+
+Over $470,700                       $131,628 plus 39.6% of
+                                    the excess over $470,700
+
+TABLE 2 - Section 1(b) – Heads of Households
+
+If Taxable Income Is:               The Tax Is:
+
+Not over $13,350                    10% of the taxable income
+                                         -8-
+
+Over $13,350 but                 $1,335 plus 15% of
+not over $50,800                 the excess over $13,350
+
+Over $50,800 but                 $6,952.50 plus 25% of
+not over $131,200                the excess over $50,800
+
+Over $131,200 but                $27,052.50 plus 28% of
+not over $212,500                the excess over $131,200
+
+Over $212,500 but                $49,816.50 plus 33% of
+not over $416,700                the excess over $212,500
+
+Over $416,700                    $117,202.50 plus 35% of
+not over $444,550                the excess over $416,700
+
+Over $444,550                    $126,950 plus 39.6% of
+                                 the excess over $444,550
+
+TABLE 3 - Section 1(c) – Unmarried Individuals (other than Surviving Spouses and
+Heads of Households)
+
+If Taxable Income Is:            The Tax Is:
+
+Not over $9,325                  10% of the taxable income
+
+Over $9,325 but                  $932.50 plus 15% of
+not over $37,950                 the excess over $9,325
+
+Over $37,950 but                 $5,226.25 plus 25% of
+not over $91,900                 the excess over $37,950
+
+Over $91,900 but                 $18,713.75 plus 28% of
+not over $191,650                the excess over $91,900
+
+Over $191,650 but                $46,643.75 plus 33% of
+not over $416,700                the excess over $191,650
+
+Over $416,700                    $120,910.25 plus 35% of
+not over $418,400                the excess over $416,700
+
+Over $418,400                    $121,505.25 plus 39.6% of
+                                 the excess over $418,400
+
+TABLE 4 - Section 1(d) – Married Individuals Filing Separate Returns
+                                           -9-
+
+If Taxable Income Is:             The Tax Is:
+
+Not over $9,325                   10% of the taxable income
+
+Over $9,325 but                   $932.50 plus 15% of
+not over $37,950                  the excess over $9,325
+
+Over $37,950 but                  $5,226.25 plus 25% of
+not over $76,550                  the excess over $37,950
+
+Over $76,550 but                  $14,876.25 plus 28% of
+not over $116,675                 the excess over $76,550
+
+Over $116,675 but                 $26,111.25 plus 33% of
+not over $208,350                 the excess over $116,675
+
+Over $208,350                     $56,364 plus 35% of
+not over $235,350                 the excess over $208,350
+
+Over $235,350                     $65,814 plus 39.6% of
+                                  the excess over $235,350
+
+TABLE 5 - Section 1(e) – Estates and Trusts
+
+If Taxable Income Is:              The Tax Is:
+
+Not over $2,550                   15% of the taxable income
+
+Over $2,550 but                   $382.50 plus 25% of
+not over $6,000                   the excess over $2,550
+
+Over $6,000 but                   $1,245 plus 28% of
+not over $9,150                   the excess over $6,000
+
+Over $9,150 but                   $2,127 plus 33% of
+not over $12,500                  the excess over $9,150
+
+Over $12,500                      $3,232.50 plus 39.6% of
+                                  the excess over $12,500
+
+   .02 Unearned Income of Minor Children Taxed as if Parent's Income (the "Kiddie
+
+Tax"). For taxable years beginning in 2017, the amount in § 1(g)(4)(A)(ii)(I), which is
+                                           - 10 -
+
+used to reduce the net unearned income reported on the child's return that is subject to
+
+the "kiddie tax," is $1,050. This $1,050 amount is the same as the amount provided in
+
+§ 63(c)(5)(A), as adjusted for inflation. The same $1,050 amount is used for purposes
+
+of § 1(g)(7) (that is, to determine whether a parent may elect to include a child's gross
+
+income in the parent's gross income and to calculate the "kiddie tax"). For example,
+
+one of the requirements for the parental election is that a child's gross income is more
+
+than the amount referenced in § 1(g)(4)(A)(ii)(I) but less than 10 times that amount;
+
+thus, a child's gross income for 2017 must be more than $1,050 but less than $10,500.
+
+ .03 Adoption Credit. For taxable years beginning in 2017, under § 23(a)(3) the credit
+
+allowed for an adoption of a child with special needs is $13,570. For taxable years
+
+beginning in 2017, under § 23(b)(1) the maximum credit allowed for other adoptions is
+
+the amount of qualified adoption expenses up to $13,570. The available adoption credit
+
+begins to phase out under § 23(b)(2)(A) for taxpayers with modified adjusted gross
+
+income in excess of $203,540 and is completely phased out for taxpayers with modified
+
+adjusted gross income of $243,540 or more. (See section 3.19 of this revenue
+
+procedure for the adjusted items relating to adoption assistance programs.)
+
+ .04 Lifetime Learning Credit. For taxable years beginning in 2017, a taxpayer's
+
+modified adjusted gross income in excess of $56,000 ($112,000 for a joint return) is
+
+used to determine the reduction under § 25A(d)(2) in the amount of the Lifetime
+
+Learning Credit otherwise allowable under § 25A(a)(2).
+
+ .05 Earned Income Credit.
+                                           - 11 -
+
+   (1) In general. For taxable years beginning in 2017, the following amounts are used
+
+to determine the earned income credit under § 32(b). The "earned income amount" is
+
+the amount of earned income at or above which the maximum amount of the earned
+
+income credit is allowed. The "threshold phaseout amount" is the amount of adjusted
+
+gross income (or, if greater, earned income) above which the maximum amount of the
+
+credit begins to phase out. The "completed phaseout amount" is the amount of
+
+adjusted gross income (or, if greater, earned income) at or above which no credit is
+
+allowed. The threshold phaseout amounts and the completed phaseout amounts
+
+shown in the table below for married taxpayers filing a joint return include the increase
+
+provided in § 32(b)(3)(B)(i), as adjusted for inflation for taxable years beginning in 2017.
+
+                                          Number of Qualifying Children
+
+Item                       One            Two               Three or More     None
+
+Earned Income
+Amount                     $10,000        $14,040           $14,040           $6,670
+
+Maximum Amount
+of Credit                  $3,400         $5,616            $6,318            $510
+
+Threshold Phaseout         $18,340        $18,340           $18,340           $8,340
+Amount (Single,
+Surviving Spouse, or
+Head of Household)
+
+Completed Phaseout         $39,617        $45,007           $48,340           $15,010
+Amount (Single,
+Surviving Spouse, or
+Head of Household)
+
+Threshold Phaseout         $23,930        $23,930           $23,930           $13,930
+Amount (Married Filing
+Jointly)
+                                          - 12 -
+
+Completed Phaseout         $45,207        $50,597          $53,930            $20,600
+Amount (Married Filing
+Jointly)
+
+
+The instructions for the Form 1040 series provide tables showing the amount of the
+
+earned income credit for each type of taxpayer.
+
+   (2) Excessive Investment Income. For taxable years beginning in 2017, the earned
+
+income tax credit is not allowed under § 32(i)(1) if the aggregate amount of certain
+
+investment income exceeds $3,450.
+
+ .06 Refundable Credit for Coverage Under a Qualified Health Plan. For taxable years
+
+beginning in 2017, the limitation on tax imposed under § 36B(f)(2)(B) for excess
+
+advance credit payments is determined using the following table:
+
+
+If the household income      The limitation amount for     The limitation amount for
+(expressed as a percent      unmarried individuals         all other taxpayers is:
+of poverty line) is:         (other than surviving
+                             spouses and heads of
+                             household) is:
+Less than 200%                       $300                            $600
+At least 200% but less
+  than 300%                           $750                           $1,500
+At least 300% but less
+  than 400%                           $1,275                         $2,550
+
+
+ .07 Rehabilitation Expenditures Treated as Separate New Building. For calendar year
+
+2017, the per low-income unit qualified basis amount under § 42(e)(3)(A)(ii)(II) is
+
+$6,700.
+                                           - 13 -
+
+  .08 Low-Income Housing Credit. For calendar year 2017, the amount used under
+
+§ 42(h)(3)(C)(ii) to calculate the State housing credit ceiling for the low-income housing
+
+credit is the greater of (1) $2.35 multiplied by the State population, or (2) $2,710,000.
+
+  .09 Employee Health Insurance Expense of Small Employers. For taxable years
+
+beginning in 2017, the dollar amount in effect under § 45R(d)(3)(B) is $26,200. This
+
+amount is used under § 45R(c) for limiting the small employer health insurance credit
+
+and under § 45R(d)(1)(B) for determining who is an eligible small employer for purposes
+
+of the credit.
+
+  .10 Exemption Amounts for Alternative Minimum Tax. For taxable years beginning in
+
+2017, the exemption amounts under § 55(d)(1) are:
+
+   Joint Returns or                                 $84,500
+   Surviving Spouses
+
+   Unmarried Individuals (other than                $54,300
+   Surviving Spouses)
+
+   Married Individuals Filing Separate              $42,250
+   Returns
+
+   Estates and Trusts                               $24,100
+
+For taxable years beginning in 2017, under § 55(b)(1), the excess taxable income
+
+above which the 28 percent tax rate applies is:
+
+   Married Individuals Filing Separate Returns             $93,900
+
+   Joint Returns, Unmarried Individuals (other
+   than surviving spouses), and Estates and Trusts         $187,800
+
+
+For taxable years beginning in 2017, the amounts used under § 55(d)(3) to determine
+
+the phaseout of the exemption amounts are:
+                                           - 14 -
+
+   Joint Returns or                                 $160,900
+   Surviving Spouses
+
+   Unmarried Individuals (other than                $120,700
+   Surviving Spouses)
+
+   Married Individuals Filing Separate              $80,450
+   Returns and Estates and Trusts
+
+ .11 Alternative Minimum Tax Exemption for a Child Subject to the "Kiddie Tax." For
+
+taxable years beginning in 2017, for a child to whom the § 1(g) "kiddie tax" applies, the
+
+exemption amount under §§ 55 and 59(j) for purposes of the alternative minimum tax
+
+under § 55 may not exceed the sum of (1) the child's earned income for the taxable
+
+year, plus (2) $7,500.
+
+ .12 Certain Expenses of Elementary and Secondary School Teachers. For taxable
+
+years beginning in 2017, under § 62(a)(2)(D) the amount of the deduction allowed under
+
+§ 162 which consists of expenses paid or incurred by an eligible educator in connection
+
+with books, supplies (other than nonathletic supplies for courses of instruction in health
+
+or physical education), computer equipment (including related software and services)
+
+and other equipment, and supplementary materials used by the eligible educator in the
+
+classroom is $250.
+
+ .13 Transportation Mainline Pipeline Construction Industry Optional Expense
+
+Substantiation Rules for Payments to Employees under Accountable Plans. For
+
+calendar year 2017, an eligible employer may pay certain welders and heavy equipment
+
+mechanics an amount of up to $17 per hour for rig-related expenses that are deemed
+
+substantiated under an accountable plan if paid in accordance with Rev. Proc. 2002-41,
+                                           - 15 -
+
+2002-1 C.B. 1098. If the employer provides fuel or otherwise reimburses fuel expenses,
+
+up to $11 per hour is deemed substantiated if paid under Rev. Proc. 2002-41.
+
+ .14 Standard Deduction.
+
+   (1) In general. For taxable years beginning in 2017, the standard deduction
+
+amounts under § 63(c)(2) are as follows:
+
+Filing Status                                                Standard Deduction
+
+Married Individuals Filing Joint Returns                     $12,700
+and Surviving Spouses (§ 1(a))
+
+Heads of Households (§ 1(b))                                 $9,350
+
+Unmarried Individuals (other than Surviving Spouses          $6,350
+and Heads of Households) (§ 1(c))
+
+Married Individuals Filing Separate                          $6,350
+Returns (§ 1(d))
+
+   (2) Dependent. For taxable years beginning in 2017, the standard deduction
+
+amount under § 63(c)(5) for an individual who may be claimed as a dependent by
+
+another taxpayer cannot exceed the greater of (1) $1,050, or (2) the sum of $350 and
+
+the individual's earned income.
+
+   (3) Aged or blind. For taxable years beginning in 2017, the additional standard
+
+deduction amount under § 63(f) for the aged or the blind is $1,250. The additional
+
+standard deduction amount is increased to $1,550 if the individual is also unmarried and
+
+not a surviving spouse.
+
+ .15 Overall Limitation on Itemized Deductions. For taxable years beginning in 2017,
+
+the applicable amounts under § 68(b) are $313,800 in the case of a joint return or a
+
+surviving spouse, $287,650 in the case of a head of household, $261,500 in the case of
+                                          - 16 -
+
+an individual who is not married and who is not a surviving spouse or head of
+
+household, and $156,900 in the case of a married individual filing a separate return.
+
+ .16 Cafeteria Plans. For the taxable years beginning in 2017, the dollar limitation
+
+under § 125(i) on voluntary employee salary reductions for contributions to health
+
+flexible spending arrangements is $2,600.
+
+ .17 Qualified Transportation Fringe Benefit. For taxable years beginning in 2017, the
+
+monthly limitation under § 132(f)(2)(A) regarding the aggregate fringe benefit exclusion
+
+amount for transportation in a commuter highway vehicle and any transit pass is $255.
+
+The monthly limitation under § 132(f)(2)(B) regarding the fringe benefit exclusion
+
+amount for qualified parking is $255.
+
+ .18 Income from United States Savings Bonds for Taxpayers Who Pay Qualified
+
+Higher Education Expenses. For taxable years beginning in 2017, the exclusion under
+
+§ 135, regarding income from United States savings bonds for taxpayers who pay
+
+qualified higher education expenses, begins to phase out for modified adjusted gross
+
+income above $117,250 for joint returns and $78,150 for all other returns. The
+
+exclusion is completely phased out for modified adjusted gross income of $147,250 or
+
+more for joint returns and $93,150 or more for all other returns.
+
+ .19 Adoption Assistance Programs. For taxable years beginning in 2017, under
+
+§ 137(a)(2), the amount that can be excluded from an employee’s gross income for the
+
+adoption of a child with special needs is $13,570. For taxable years beginning in 2017,
+
+under § 137(b)(1) the maximum amount that can be excluded from an employee’s gross
+
+income for the amounts paid or expenses incurred by an employer for qualified adoption
+                                           - 17 -
+
+expenses furnished pursuant to an adoption assistance program for other adoptions by
+
+the employee is $13,570. The amount excludable from an employee’s gross income
+
+begins to phase out under § 137(b)(2)(A) for taxpayers with modified adjusted gross
+
+income in excess of $203,540 and is completely phased out for taxpayers with modified
+
+adjusted gross income of $243,540 or more. (See section 3.03 of this revenue
+
+procedure for the adjusted items relating to the adoption credit.)
+
+  .20 Private Activity Bonds Volume Cap. For calendar year 2017, the amounts used
+
+under § 146(d) to calculate the State ceiling for the volume cap for private activity bonds
+
+is the greater of (1) $100 multiplied by the State population, or (2) $305,315,000.
+
+  .21 Loan Limits on Agricultural Bonds. For calendar year 2017, the loan limit amount
+
+on agricultural bonds under § 147(c)(2)(A) for first-time farmers is $524,200.
+
+  .22 General Arbitrage Rebate Rules. For bond years ending in 2017, the amount of
+
+the computation credit determined under the permission to rely on § 1.148-3(d)(4) of the
+
+proposed Income Tax Regulations is $1,670.
+
+  .23 Safe Harbor Rules for Broker Commissions on Guaranteed Investment Contracts
+
+or Investments Purchased for a Yield Restricted Defeasance Escrow. For calendar
+
+year 2017, under § 1.148-5(e)(2)(iii)(B)(1), a broker’s commission or similar fee for the
+
+acquisition of a guaranteed investment contract or investments purchased for a yield
+
+restricted defeasance escrow is reasonable if (1) the amount of the fee that the issuer
+
+treats as a qualified administrative cost does not exceed the lesser of (A) $39,000, and
+
+(B) 0.2 percent of the computational base (as defined in § 1.148-5(e)(2)(iii)(B)(2)) or, if
+
+more, $4,000; and (2) the issuer does not treat more than $111,000 in brokers’
+                                          - 18 -
+
+commissions or similar fees as qualified administrative costs for all guaranteed
+
+investment contracts and investments for yield restricted defeasance escrows
+
+purchased with gross proceeds of the issue.
+
+ .24 Personal Exemption.
+
+   (1) For taxable years beginning in 2017, the personal exemption amount under
+
+      § 151(d) is $4,050.
+
+   (2) Phaseout. For taxable years beginning in 2017, the personal exemption phases
+
+      out for taxpayers with the following adjusted gross income amounts:
+
+                                                   AGI – Beginning     AGI – Completed
+   Filing Status                                   of Phaseout         Phaseout
+
+   Married Individuals Filing Joint Returns and $313,800               $436,300
+   Surviving Spouses (§ 1(a))
+
+   Heads of Households (§ 1(b))                    $287,650            $410,150
+
+   Unmarried Individuals (other than Surviving $261,500                $384,000
+   Spouses and Heads of Households) (§ 1(c))
+
+   Married Individuals Filing Separate             $156,900            $218,150
+   Returns (§ 1(d))
+
+ .25 Election to Expense Certain Depreciable Assets. For taxable years beginning in
+
+2017, under § 179(b)(1), the aggregate cost of any § 179 property that a taxpayer elects
+
+to treat as an expense cannot exceed $510,000. Under § 179(b)(2), the $510,000
+
+limitation is reduced (but not below zero) by the amount the cost of § 179 property
+
+placed in service during the 2017 taxable year exceeds $2,030,000.
+                                           - 19 -
+
+ .26 Eligible Long-Term Care Premiums. For taxable years beginning in 2017, the
+
+limitations under § 213(d)(10), regarding eligible long-term care premiums includible in
+
+the term "medical care," are as follows:
+
+Attained Age Before the Close of the Taxable Year      Limitation on Premiums
+
+40 or less                                             $410
+
+More than 40 but not more than 50                      $770
+
+More than 50 but not more than 60                      $1,530
+
+More than 60 but not more than 70                      $4,090
+
+More than 70                                           $5,110
+
+ .27 Medical Savings Accounts.
+
+   (1) Self-only coverage. For taxable years beginning in 2017, the term "high
+
+deductible health plan" as defined in § 220(c)(2)(A) means, for self-only coverage, a
+
+health plan that has an annual deductible that is not less than $2,250 and not more than
+
+$3,350, and under which the annual out-of-pocket expenses required to be paid (other
+
+than for premiums) for covered benefits do not exceed $4,500.
+
+   (2) Family coverage. For taxable years beginning in 2017, the term "high deductible
+
+health plan" means, for family coverage, a health plan that has an annual deductible
+
+that is not less than $4,500 and not more than $6,750, and under which the annual out-
+
+of-pocket expenses required to be paid (other than for premiums) for covered benefits
+
+do not exceed $8,250.
+
+ .28 Interest on Education Loans. For taxable years beginning in 2017, the $2,500
+
+maximum deduction for interest paid on qualified education loans under § 221 begins to
+                                             - 20 -
+
+phase out under § 221(b)(2)(B) for taxpayers with modified adjusted gross income in
+
+excess of $65,000 ($135,000 for joint returns), and is completely phased out for
+
+taxpayers with modified adjusted gross income of $80,000 or more ($165,000 or more
+
+for joint returns).
+
+  .29 Treatment of Dues Paid to Agricultural or Horticultural Organizations. For taxable
+
+years beginning in 2017, the limitation under § 512(d)(1), regarding the exemption of
+
+annual dues required to be paid by a member to an agricultural or horticultural
+
+organization, is $162.
+
+  .30 Insubstantial Benefit Limitations for Contributions Associated with Charitable
+
+Fund-Raising Campaigns.
+
+   (1) Low cost article. For taxable years beginning in 2017, for purposes of defining
+
+the term “unrelated trade or business” for certain exempt organizations under
+
+§ 513(h)(2), “low cost articles” are articles costing $10.70 or less.
+
+   (2) Other insubstantial benefits. For taxable years beginning in 2017, under § 170,
+
+the $5, $25, and $50 guidelines in section 3 of Rev. Proc. 90-12, 1990-1 C.B. 471 (as
+
+amplified by Rev. Proc. 92-49, 1992-1 C.B. 987, and modified by Rev. Proc. 92-102,
+
+1992-2 C.B. 579), for the value of insubstantial benefits that may be received by a donor
+
+in return for a contribution, without causing the contribution to fail to be fully deductible,
+
+are $10.70, $53.50, and $107, respectively.
+
+  .31 Tax on Insurance Companies Other than Life Insurance Companies. For taxable
+
+years beginning in 2017, under § 831(b)(2)(A)(i) the amount of the limit on net written
+
+premiums or direct written premiums (whichever is greater) is $2,250,000 to elect the
+                                          - 21 -
+
+alternative tax for certain small companies under § 831(b)(1) to be taxed only on taxable
+
+investment income.
+
+ .32 Expatriation to Avoid Tax. For calendar year 2017, under § 877A(g)(1)(A), unless
+
+an exception under § 877A(g)(1)(B) applies, an individual is a covered expatriate if the
+
+individual’s “average annual net income tax” under § 877(a)(2)(A) for the five taxable
+
+years ending before the expatriation date is more than $162,000.
+
+ .33 Tax Responsibilities of Expatriation. For taxable years beginning in 2017, the
+
+amount that would be includible in the gross income of a covered expatriate by reason
+
+of § 877A(a)(1) is reduced (but not below zero) by $699,000.
+
+ .34 Foreign Earned Income Exclusion. For taxable years beginning in 2017, the
+
+foreign earned income exclusion amount under § 911(b)(2)(D)(i) is $102,100.
+
+ .35 Unified Credit Against Estate Tax. For an estate of any decedent dying in
+
+calendar year 2017, the basic exclusion amount is $5,490,000 for determining the
+
+amount of the unified credit against estate tax under § 2010.
+
+ .36 Valuation of Qualified Real Property in Decedent's Gross Estate. For an estate of
+
+a decedent dying in calendar year 2017, if the executor elects to use the special use
+
+valuation method under § 2032A for qualified real property, the aggregate decrease in
+
+the value of qualified real property resulting from electing to use § 2032A for purposes
+
+of the estate tax cannot exceed $1,120,000.
+
+ .37 Annual Exclusion for Gifts.
+                                            - 22 -
+
+    (1) For calendar year 2017, the first $14,000 of gifts to any person (other than gifts
+
+of future interests in property) are not included in the total amount of taxable gifts under
+
+§ 2503 made during that year.
+
+    (2) For calendar year 2017, the first $149,000 of gifts to a spouse who is not a
+
+citizen of the United States (other than gifts of future interests in property) are not
+
+included in the total amount of taxable gifts under §§ 2503 and 2523(i)(2) made during
+
+that year.
+
+  .38 Tax on Arrow Shafts. For calendar year 2017, the tax imposed under
+
+§ 4161(b)(2)(A) on the first sale by the manufacturer, producer, or importer of any shaft
+
+of a type used in the manufacture of certain arrows is $0.50 per shaft.
+
+  .39 Passenger Air Transportation Excise Tax. For calendar year 2017, the tax under
+
+§ 4261(b)(1) on the amount paid for each domestic segment of taxable air
+
+transportation is $4.10. For calendar year 2017, the tax under § 4261(c)(1) on any
+
+amount paid (whether within or without the United States) for any international air
+
+transportation, if the transportation begins or ends in the United States, generally is $18.
+
+Under § 4261(c)(3), however, a lower amount applies under § 4261(c)(1) to a domestic
+
+segment beginning or ending in Alaska or Hawaii, and the tax applies only to
+
+departures. For calendar year 2017, the rate is $9.
+
+  .40 Requirement to Maintain Minimum Essential Coverage. For calendar year 2017,
+
+the applicable dollar amount used to determine the penalty under § 5000A(c) for failure
+
+to maintain minimum essential coverage is $695.
+                                           - 23 -
+
+  .41 Reporting Exception for Certain Exempt Organizations with Nondeductible
+
+Lobbying Expenditures. For taxable years beginning in 2017, the annual per person,
+
+family, or entity dues limitation to qualify for the reporting exception under § 6033(e)(3)
+
+(and section 5.05 of Rev. Proc. 98-19, 1998-1 C.B. 547), regarding certain exempt
+
+organizations with nondeductible lobbying expenditures, is $113 or less.
+
+  .42 Notice of Large Gifts Received from Foreign Persons. For taxable years
+
+beginning in 2017, § 6039F authorizes the Treasury Department and the Internal
+
+Revenue Service to require recipients of gifts from certain foreign persons to report
+
+these gifts if the aggregate value of gifts received in the taxable year exceeds $15,797.
+
+  .43 Persons Against Whom a Federal Tax Lien Is Not Valid. For calendar year 2017,
+
+a federal tax lien is not valid against (1) certain purchasers under § 6323(b)(4) who
+
+purchased personal property in a casual sale for less than $1,540, or (2) a mechanic's
+
+lienor under § 6323(b)(7) who repaired or improved certain residential property if the
+
+contract price with the owner is not more than $7,690.
+
+  .44 Property Exempt from Levy. For calendar year 2017, the value of property
+
+exempt from levy under § 6334(a)(2) (fuel, provisions, furniture, and other household
+
+personal effects, as well as arms for personal use, livestock, and poultry) cannot exceed
+
+$9,200. The value of property exempt from levy under § 6334(a)(3) (books and tools
+
+necessary for the trade, business, or profession of the taxpayer) cannot exceed $4,600.
+
+  .45 Interest on a Certain Portion of the Estate Tax Payable in Installments. For an
+
+estate of a decedent dying in calendar year 2017, the dollar amount used to determine
+                                            - 24 -
+
+the "2-percent portion" (for purposes of calculating interest under § 6601(j)) of the estate
+
+tax extended as provided in § 6166 is $1,490,000.
+
+  .46 Failure to File Tax Return. For tax years beginning in 2017, the amount of the
+
+additional tax under § 6651(a) for failure to file a tax return within 60 days of the due
+
+date of such return (determined with regard to any extensions of time for filing) shall not
+
+be less than the lesser of $210 or 100 percent of the amount required to shown as tax
+
+on such returns.
+
+  .47 Failure to File Certain Information Returns, Registration Statements, etc. For tax
+
+years beginning in 2017, the penalty amounts under § 6652(c) are:
+
+       (1) for failure to file a return required under § 6033(a)(1) (relating to returns by
+
+exempt organization) or § 6012(a)(6) (relating to returns by political organizations):
+
+Scenario                                                 Daily         Maximum Penalty
+                                                         Penalty
+Organization (§ 6652(c)(1)(A))                           $20          Lessor of $10,000 or
+                                                                      5% of gross receipts
+                                                                      of the organization for
+                                                                      the year.
+Organization with gross receipts exceeding
+$1,028,500 (§ 6652(c)(1)(A))                             $100         $51,000
+Managers (§ 6652(c)(1)(B))                               $10          $5,000
+Public inspection of annual returns and reports          $20          $10,000
+(§ 6652(c)(1)(C))
+Public inspection of applications for exemption and      $20          No Limits
+notice of status (§ 6652(c)(1)(D))
+
+
+       (2) for failure to file a return required under § 6034 (relating to returns by certain
+
+trust) or § 6043(b) (relating to terminations, etc., of exempt organizations):
+
+Scenario                                                     Daily Penalty Maximum
+                                                                           Penalty
+Organization or trust (§ 6652(c)(2)(A))                      $10           $5,000
+                                            - 25 -
+
+Managers (§ 6652(c)(2)(B))                                  $10            $5,000
+Split-Interest Trust (§ 6652(c)(2)(C)(ii))                  $20            $10,000
+Any trust with gross receipts exceeding $257,000
+(§ 6652(c)(2)(C)(ii))                                       $100           $51,000
+
+
+       (3) for failure to file a disclosure required under § 6033(a)(2):
+
+Scenario                                                    Daily Penalty Maximum
+                                                                          Penalty
+Tax–exempt entity (§ 6652(c)(3)(A))                         $100          $51,000
+Failure to comply with written demand                       $100          $10,000
+(§ 6652(c)(3)(B)(ii))
+
+
+  .48 Other Assessable Penalties With Respect to the Preparation of Tax Returns for
+
+Other Persons. For tax years beginning in 2017, the penalty amounts under § 6695
+
+are:
+
+Scenario                                                  Per Return or        Maximum
+                                                          Claim for Refund     Penalty
+Failure to furnish copy to taxpayer (§ 6695(a))           $50                  $25,500
+Failure to sign return (§ 6695(b))                        $50                  $25,500
+Failure to furnish identifying number (§ 6695(c))         $50                  $25,500
+Failure to retain copy or list (§ 6695(d))                $50                  $25,500
+Failure to file correct information returns (§ 6695(e))   $50 per return and   $25,500
+                                                              item in return
+Negotiation of check (§ 6695(f))                          $510 per check       No limit
+Failure to be diligent in determining eligibility for     $510 per return      No limit
+child tax credit, American opportunity tax credit, and
+earned income credit (§ 6695(g))
+
+
+  .49 Failure to File Partnership Return. For tax years beginning in 2017, the dollar
+
+amount used to determine amount of the penalty under § 6698(b)(1) is $200.
+
+  .50 Failure to File S Corporation Return. For tax years beginning in 2017, the dollar
+
+amount used to determine amount of the penalty under § 6699(b)(1) is $200.
+                                            - 26 -
+
+  .51 Failure to File Correct Information Returns. For tax years beginning in 2017, the
+
+penalty amounts under § 6721 are:
+
+       (1) for persons with average annual gross receipts for the most recent three
+
+taxable years of more than $5,000,000, for failure to file correct information returns are:
+
+Scenario                                             Penalty Per Return       Calendar Year
+                                                                              Maximum
+General Rule (§ 6721(a)(1))                          $260                     $3,218,500
+Corrected on or before 30 days after required
+filing date (§ 6721(b)(1))                           $50                      $536,000
+Corrected after 30th day but on or before
+August 1 (§ 6721(b)(2))                              $100                     $1,609,000
+
+
+       (2) for persons with average annual gross receipts for the most recent three
+
+taxable years of $5,000,000 or less, for failure to file correct information returns are:
+
+Scenario                                             Penalty Per Return       Calendar Year
+                                                                              Maximum
+General Rule (§ 6721(d)(1)(A))                       $260                     $1,072,500
+Corrected on or before 30 days after required
+filing date (§ 6721(d)(1)(B))                        $50                      $187,500
+Corrected after 30th day but on or before
+August 1 (§ 6721(d)(1)(C))                           $100                     $536,000
+
+
+       (3) for failure to file correct information returns due to intentional disregard of the
+
+filing requirement (or the correct information reporting requirement) are:
+
+Scenario                                             Penalty Per Return       Calendar Year
+                                                                              Maximum
+Return other than a return required to be filed      Greater of (i) $530,     No limit
+under §§ 6045(a), 6041A(b), 6050H, 6050I,            or (ii) 10% of
+6050J, 6050K, or 6050L (§ 6721(e)(2)(A))             aggregate amount of
+                                                     items required to be
+                                                     reported correctly
+Return required to be filed under §§ 6045(a),        Greater of (i) $530,     No limit
+6050K, or 6050L (§ 6721(e)(2)(B))                    or (ii) 5% of
+                                                     aggregate amount of
+                                            - 27 -
+
+                                                     items required to be
+                                                     reported correctly
+
+Return required to be filed under § 6050I(a)         Greater of (i)          No limit
+(§ 6721(e)(2)(C))                                    $26,820, or (ii)
+                                                     amount of cash
+                                                     received up to
+                                                     $107,000
+Return required to be filed under § 6050V            Greater of (i) $530,    No limit
+(§ 6721(e)(2)(D))                                    or (ii) 10% of the
+                                                     value of the benefit of
+                                                     any contract with
+                                                     respect to which
+                                                     information is
+                                                     required to be
+                                                     included on the
+                                                     return
+
+
+
+  .52 Failure to Furnish Correct Payee Statements. For tax years beginning in 2017,
+
+the penalty amounts under § 6722 are:
+
+(1) for persons with average annual gross receipts for the most recent three taxable
+
+years of more than $5,000,000, for failure to file correct information returns are:
+
+Scenario                                             Penalty Per Return      Calendar Year
+                                                                             Maximum
+General Rule (§ 6722(a)(1))                          $260                    $3,218,500
+Corrected on or before 30 days after required
+filing date (§ 6722(b)(1))                           $50                     $536,000
+Corrected after 30th day but on or before
+August 1 (§ 6722(b)(2))                              $100                    $1,609,000
+
+
+       (2) for persons with average annual gross receipts for the most recent 3 taxable
+
+years of $5,000,000 or less, for failure to file correct information returns are:
+
+Scenario                                             Penalty Per Return      Calendar Year
+                                                                             Maximum
+General Rule (§ 6722(d)(1)(A))                       $260                    $1,072,500
+                                           - 28 -
+
+Corrected on or before 30 days after required
+filing date (§ 6722(d)(1)(B))                       $50                     $187,500
+Corrected after 30th day but on or before
+August 1 (§ 6722(d)(1)(C))                          $100                    $536,000
+
+
+       (3) for failure to file correct payee statements due to intentional disregard of the
+
+requirement to furnish a payee statement (or the correct information reporting
+
+requirement) are:
+
+Scenario                                            Penalty Per Return      Calendar Year
+                                                                            Maximum
+Statement other than a statement required           Greater of (i) $530,    No limit
+under §§ 6045(b), 6041A(e) (in respect of a         or (ii) 10% of
+return required under § 6041A(b)), 6050H(d),        aggregate amount of
+6050J(e), 6050K(b), or 6050L(c)                     items required to be
+(§ 6722(e)(2)(A))                                   reported correctly
+Payee statement required under §§ 6045(b),          Greater of (i) $530,    No limit
+6050K(b), or 6050L(c) (§ 6722(e)(2)(B))             or (ii) 5% of
+                                                    aggregate amount of
+                                                    items required to be
+                                                    reported correctly
+
+
+
+ .53 Revocation or Denial of Passport in Case of Certain Tax Delinquencies. For
+
+calendar year 2017, the amount of a serious delinquent tax debt under § 7345 is
+
+$50,000.
+
+ .54 Attorney Fee Awards. For fees incurred in calendar year 2017, the attorney fee
+
+award limitation under § 7430(c)(1)(B)(iii) is $200 per hour.
+
+ .55 Periodic Payments Received under Qualified Long-Term Care Insurance
+
+Contracts or under Certain Life Insurance Contracts. For calendar year 2017, the
+
+stated dollar amount of the per diem limitation under § 7702B(d)(4), regarding periodic
+
+payments received under a qualified long-term care insurance contract or periodic
+                                             - 29 -
+
+payments received under a life insurance contract that are treated as paid by reason of
+
+the death of a chronically ill individual, is $360.
+
+SECTION 4. EFFECTIVE DATE
+
+  .01 General Rule. Except as provided in section 4.02, this revenue procedure applies
+
+to taxable years beginning in 2017.
+
+  .02 Calendar Year Rule. This revenue procedure applies to transactions or events
+
+occurring in calendar year 2017 for purposes of sections 3.07 (rehabilitation
+
+expenditures treated as separate new building), 3.08 (low-income housing credit), 3.13
+
+(transportation mainline pipeline construction industry optional expense substantiation
+
+rules for payments to employees under accountable plans), 3.20 (private activity bonds
+
+volume cap), 3.21 (loan limits on agricultural bonds), 3.22 (general arbitrage rebate
+
+rules), 3.23 (safe harbor rules for broker commissions on guaranteed investment
+
+contracts or investments purchased for a yield restricted defeasance escrow), 3.32
+
+(expatriation to avoid taxes), 3.35 (unified credit against estate tax), 3.36 (valuation of
+
+qualified real property in decedent's gross estate), 3.37 (annual exclusion for gifts), 3.38
+
+(tax on arrow shafts), 3.39 (passenger air transportation excise tax), 3.40 (requirement
+
+to maintain minimum essential coverage), 3.43 (persons against whom a federal tax lien
+
+is not valid), 3.44 (property exempt from levy), 3.45 (interest on a certain portion of the
+
+estate tax payable in installments), 3.53 (revocation or denial of passport in case of
+
+certain tax delinquencies), 3.54 (attorney fee awards), and 3.55 (periodic payments
+
+received under qualified long-term care insurance contracts or under certain life
+
+insurance contracts).
+                                          - 30 -
+
+SECTION 5. DRAFTING INFORMATION
+
+   The principal author of this revenue procedure is William Ruane of the Office of
+
+Associate Chief Counsel (Income Tax & Accounting). For further information regarding
+
+this revenue procedure, contact Mr. Ruane at (202) 317-4718 (not a toll-free call).
+
