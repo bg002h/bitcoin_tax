@@ -146,16 +146,31 @@ pub fn export_snapshot(
     if state.pseudo_active() {
         require_attestation(attest)?;
     }
+    //  3. ★ FR-48 / port report §2.5: `export-snapshot` was unstamped — TY2026's and TY2099's
+    //     `form8949.csv` were byte-identical. The year and its readiness are stamped into the export
+    //     directory below (`TAX_YEAR.txt`). NOT gated: this is a data export, valid for any year the
+    //     ledger holds (a filed-tranche TY2020 exports with no table bundled) — see `export_stamp`.
+    let stamp = match tax_year {
+        Some(y) => crate::year_readiness::export_stamp(y),
+        None => format!(
+            "all promoted filing years; this build bundles {}",
+            btctax_forms::bundled::years_sentence()
+        ),
+    };
     // UX-P4-8: name the --out path (and hint) when the export directory cannot be created (a
     // colliding file / missing parent / permission problem), instead of a bare `io: File exists`.
     let sqlite = session
         .vault()
         .export_snapshot(out_dir)
         .map_err(|e| crate::store_io_with_path(e, out_dir, crate::EXPORT_OUT_HINT))?; // writes out_dir/snapshot.sqlite
-                                                                                      // P2-D: standalone Schedule SE §1401 figure for the year-scoped export. Needs the year's filing
-                                                                                      // status (profile) + the year's ss_wage_base (bundled table); `None` when either is absent or
-                                                                                      // there is no business SE income. The "present but no table" note is a text-report concern
-                                                                                      // (render_schedule_se) — the CSV carries the computed figure only.
+    write_bytes_owner_only(
+        &out_dir.join("TAX_YEAR.txt"),
+        format!("{stamp}\n").as_bytes(),
+    )?;
+    // P2-D: standalone Schedule SE §1401 figure for the year-scoped export. Needs the year's filing
+    // status (profile) + the year's ss_wage_base (bundled table); `None` when either is absent or
+    // there is no business SE income. The "present but no table" note is a text-report concern
+    // (render_schedule_se) — the CSV carries the computed figure only.
     let se_result = match tax_year {
         Some(y) => {
             let tables = BundledTaxTables::load();

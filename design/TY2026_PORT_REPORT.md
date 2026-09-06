@@ -608,8 +608,14 @@ Adjudicated per the refusal lens, from this repo's own doctrine rather than tast
 - **`income import`: REFUSE the committed write.** Writing a committed full-return row for a year
   with no `FullReturnParams` is the poisoning `input_form_store.rs:295` says must never happen; the
   TUI already refuses the identical act and keeps a draft. This is the one place refusal is right and
-  missing.
-- **`export-snapshot`: gate it, and stamp the year into the artifact.** A file named `form8949.csv`
+  missing. **★ Amended 2026-09-06 (FR-48):** it STORES and WARNS instead — `report --tax-year N-1
+  --write-carryover` writes a computed carryover onto year N before N's package exists, so a row for
+  a not-ready year is legitimate (the TUI's draft is the same thing); what poisoned `resolve` was
+  never the row but `report`'s message prescribing `income clear`, which is now built from
+  `YearReadiness` and keeps the inputs.
+- **`export-snapshot`: gate it, and stamp the year into the artifact.** (★ 2026-09-06: STAMPED
+  (`TAX_YEAR.txt`, the year and its readiness), NOT gated — it is a data export, valid for any year
+  the ledger holds events for, e.g. a filed-tranche TY2020 with no table bundled.) A file named `form8949.csv`
   is a filing artifact in everything but format, and today TY2026's and TY2099's are byte-identical.
 - **The open product ruling, for the owner:** *may a table-only year emit a file named
   `form8949.csv` at all?* That is a product decision, not a code question.

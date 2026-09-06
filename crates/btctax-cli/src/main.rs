@@ -155,6 +155,12 @@ fn run() -> Result<ExitCode, CliError> {
                     dual_report,
                     pseudo_contributed,
                 } = cmd::tax::report_tax_year(vault, &pp, y, ptg_raw)?;
+                // ★ FR-48 / design r2 §6: the year's readiness, rendered on the number-bearing
+                //   surface — declared status, forms bound, TaxTable and full-return params.
+                println!(
+                    "{}",
+                    btctax_cli::year_readiness::YearReadiness::bundled(y).sentence()
+                );
                 print!(
                     "{}",
                     render::render_tax_outcome(

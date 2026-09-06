@@ -538,6 +538,13 @@ fn filed_tranche_year_exports_clean() {
     let out = dir.path().join("export_out");
     cmd::admin::export_snapshot(&vault, &pp(), &out, Some(2020), None)
         .expect("a filed-tranche year must export clean with NO attestation (not pseudo, D-5)");
+    // ★ FR-48: the export is STAMPED with its year and readiness — and a year this build bundles
+    //   no table for still exports (it is a data export), saying so in the stamp.
+    let stamp = std::fs::read_to_string(out.join("TAX_YEAR.txt")).expect("TAX_YEAR.txt is written");
+    assert!(
+        stamp.starts_with("TY2020 — not bundled"),
+        "the stamp names the year and its readiness: {stamp}"
+    );
 }
 
 /// (review r1 Minor) The CLI `safe_harbor_attest` ATTEST-site guard is exercised: with a pre-2025

@@ -61,6 +61,10 @@ _Last updated: **2026-09-04**. Written at a deliberate pause; safe to exit. **Re
 >   review of steps 4–5 + that fold is RUNNING** → `design/agent-reports/2026-09-05-r2-step4-review.md`
 >   (★ the first attempt died on an API rate limit — HTTP 429, session limit — before writing
 >   anything; re-dispatched 2026-09-06. If the report is absent, that is why: re-dispatch it).
+> - **FR-48 (build-order 1b) DONE** (the commit after 9e81a9b0): `report --tax-year` prints the
+>   readiness line; its refusal for a not-ready year is built from readiness and KEEPS the inputs;
+>   `income import` stores + warns (not refuses — the carryover chain needs the row); `export-snapshot`
+>   stamps `TAX_YEAR.txt` (not gated — data export); the third TUI literal (`unlock.rs`) derived.
 > - **Step 5 ◐ — eight of ten TY2025 maps WIRED — `162739e8`**: verified by the label
 >   join + census + parse; `line_set_wiring.rs` pins wired ⇔ parses (plant observed red). Two stay
 >   `Unwired` on purpose: `f6251/2025` (1a/1b rebuild — do once for TY2026) and `f1040s1a/2025` (no

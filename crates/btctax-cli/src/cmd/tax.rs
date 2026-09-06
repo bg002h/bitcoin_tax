@@ -196,6 +196,13 @@ pub fn import_return_inputs(
             );
         }
     }
+    // ★ FR-48: a year whose full return cannot compute yet is STORED, with a note — not refused.
+    //   `report --tax-year N-1 --write-carryover` legitimately writes onto year N before N's package
+    //   exists, and the TUI keeps the same row as a draft; refusing here would break that chain. What
+    //   was harmful was `report` then prescribing `income clear` — fixed in `uncomputable_sentence`.
+    if let Some(note) = crate::year_readiness::import_note(year) {
+        eprintln!("{note}");
+    }
     return_inputs::set(s.conn(), year, &ri)?;
     s.save()
 }

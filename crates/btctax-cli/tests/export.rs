@@ -136,6 +136,9 @@ fn export_writes_year_scoped_form8949_and_schedule_d() {
     // With None: the year-scoped filing artifacts are NOT written.
     let out_none = dir.path().join("export_none");
     cmd::admin::export_snapshot(&vault, &pp(), &out_none, None, None).unwrap();
+    // ★ FR-48: every export is stamped with its year scope and readiness (`TAX_YEAR.txt`).
+    let stamp = std::fs::read_to_string(out_none.join("TAX_YEAR.txt")).unwrap();
+    assert!(stamp.starts_with("all promoted filing years"), "{stamp}");
     assert!(
         !out_none.join("form8949.csv").exists(),
         "form8949.csv must be omitted without --tax-year"
@@ -145,6 +148,11 @@ fn export_writes_year_scoped_form8949_and_schedule_d() {
     // With Some(2025): both are written, year-scoped.
     let out = dir.path().join("export_2025");
     cmd::admin::export_snapshot(&vault, &pp(), &out, Some(2025), None).unwrap();
+    let stamp = std::fs::read_to_string(out.join("TAX_YEAR.txt")).unwrap();
+    assert!(
+        stamp.starts_with("TY2025 — preparing"),
+        "the stamp names the year AND that this build cannot compute its full return: {stamp}"
+    );
 
     let f8949 = out.join("form8949.csv");
     let schedd = out.join("schedule_d.csv");

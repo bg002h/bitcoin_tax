@@ -6193,6 +6193,17 @@ build, each with an owning phase.
   ungated and unstamped. One type, declared (`YEAR.toml`) vs actual, every refusal string built from
   it; `income import` refuses the committed write (mirror `CommitOutcome::NoTables`). B1: add 2026 to
   one set only → red. **Owning phase: build-order 1b, i.e. before the port machine.**
+  ✅ **DONE 2026-09-06 (design r2 step 4 + FR-48), with two deviations stated:** `YearReadiness` is
+  the one type (declared `YEAR.toml` vs table/params/forms/prices); `report --tax-year` PRINTS its
+  sentence; the `report` refusal for a year without params is built from it — the inputs are KEPT,
+  `income clear` is named only as the raw-profile fallback with its cost (the "v1 supports TY2024"
+  literal and the deletion-as-remedy are gone); both TUIs' `selected_year: 2025` and the TUI unlock's
+  `.unwrap_or(2025)` read `default_year()` from the glob. (1) `income import` STORES and WARNS for a
+  not-ready year rather than refusing: `report --tax-year N-1 --write-carryover` legitimately writes
+  onto year N before N's package exists (seven tests depend on it), and the TUI keeps the same row as
+  a draft — refusing would break the carryover chain. (2) `export-snapshot` is STAMPED
+  (`TAX_YEAR.txt`: the year and its readiness) but NOT gated: it is a data export, valid for any
+  year the ledger holds — a filed-tranche TY2020 must export with no table bundled.
 - **FR-49 — Form 4868 + 1040-V join P4; the extension is the default plan.** File-by-2027-10-15 with
   payment by 2027-04-15 is the sequencing that keeps every gate hard under April pressure. One
   AcroForm plus an estimate. **Owning phase — re-owned 2026-09-05 (strategy review S8): NOW, both

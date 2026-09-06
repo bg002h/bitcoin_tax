@@ -208,8 +208,9 @@ pub fn resolve_and_screen(
     })
 }
 
-/// The user-facing message for a `ReturnInputs` year that cannot be computed — a refusal (with its reason)
-/// or an unsupported year — both pointing at the `income clear` recovery.
+/// The user-facing message for a `ReturnInputs` year that cannot be computed — a refusal (with its reason,
+/// pointing at the `income clear` recovery) or a year whose package is not ready (built from
+/// `YearReadiness`; the inputs are kept).
 fn uncomputable_detail(year: i32, refusal: Option<&Refusal>) -> String {
     match refusal {
         Some(r) => format!(
@@ -217,11 +218,9 @@ fn uncomputable_detail(year: i32, refusal: Option<&Refusal>) -> String {
              `income clear --year {year}` to remove them and use a raw `tax-profile`",
             r.detail
         ),
-        None => format!(
-            "tax year {year} has full-return inputs, but full-return computation is not supported for \
-             {year} in this version (v1 supports TY2024); run `income clear --year {year}` to remove \
-             them and use a raw `tax-profile`"
-        ),
+        // ★ FR-48: built from the year's READINESS, never a year literal; keeps the inputs; names
+        //   `income clear` as the fallback with its cost, not as the remedy (port report §2.5).
+        None => crate::year_readiness::uncomputable_sentence(year),
     }
 }
 

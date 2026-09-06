@@ -226,7 +226,12 @@ pub fn latest_year(state: &LedgerState) -> i32 {
         .income_recognized
         .iter()
         .map(|r| r.recognized_at.year());
-    from_disposals.chain(from_income).max().unwrap_or(2025)
+    // ★ Derived, not a literal (FR-48 / port report §2.5 #27): an empty vault opens on the newest
+    //   bundled year, whatever this build bundles.
+    from_disposals
+        .chain(from_income)
+        .max()
+        .unwrap_or_else(btctax_cli::year_readiness::default_year)
 }
 
 /// Map a [`CliError`] to a user-facing message for the Unlock screen error line.

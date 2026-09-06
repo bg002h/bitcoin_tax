@@ -128,6 +128,70 @@ impl YearReadiness {
     }
 }
 
+impl YearReadiness {
+    /// Assemble from the BUNDLED registries (what this binary ships). The price dataset is optional:
+    /// a build whose dataset fails to load still answers the table/params questions honestly, with
+    /// `prices_max_date = None`.
+    pub fn bundled(year: i32) -> Self {
+        use btctax_adapters::tax_tables::{BundledFullReturnTables, BundledTaxTables};
+        let tables = BundledTaxTables::load();
+        let full = BundledFullReturnTables::load();
+        Self {
+            year,
+            declared: YearRecord::for_year(year),
+            table: tables.table_for(year).is_some(),
+            params: full.full_return_for(year).is_some(),
+            forms_bundled: BUNDLED.iter().filter(|(_, y)| *y == year).count(),
+            prices_max_date: BundledPrices::load().ok().and_then(|p| p.max_date()),
+        }
+    }
+}
+
+/// ★ FR-48 / port report §2.5 — the `report --tax-year` sentence for a year that HOLDS full-return
+/// inputs but cannot compute them, built from readiness instead of a year literal. It says what is
+/// missing, that the inputs are KEPT (a computed carryover written onto a not-yet-ready year is a
+/// legitimate row), and names `income clear` only as the way to fall back to a raw tax-profile —
+/// with its cost — never as "the" remedy. The previous text said "v1 supports TY2024" and prescribed
+/// `income clear` outright, which deletes the filer's W-2s.
+pub fn uncomputable_sentence(year: i32) -> String {
+    let r = YearReadiness::bundled(year);
+    format!(
+        "tax year {year} has full-return inputs, but full-return computation is not available for it \
+         in this build — {}. The inputs are KEPT and will compute when the year's package is bundled. \
+         To fall back to a raw `tax-profile` for {year} instead, run `income clear --year {year}` \
+         (this DISCARDS the stored inputs, including any computed carryover on them).",
+        r.sentence()
+    )
+}
+
+/// ★ FR-48 — the note `income import` prints (stderr) when it stores inputs for a year whose full
+/// return cannot compute yet. It stores rather than refuses: `report --tax-year N-1 --write-carryover`
+/// legitimately writes onto year N before N's package exists, and the TUI keeps the same thing as a
+/// draft. `None` when the year is ready (nothing to say).
+pub fn import_note(year: i32) -> Option<String> {
+    let r = YearReadiness::bundled(year);
+    if r.params {
+        return None;
+    }
+    Some(format!(
+        "note: {} — these inputs are stored now; `report --tax-year {year}` will refuse (keeping them) \
+         until full-return parameters for {year} are bundled.",
+        r.sentence()
+    ))
+}
+
+/// ★ FR-48 — the `export-snapshot --tax-year` STAMP, written into the export directory so a
+/// `form8949.csv` can no longer be byte-identical across years with nothing saying which year it is.
+///
+/// Deliberately NOT a gate (port report D7 asked for "gate it and stamp it"): `export-snapshot` is a
+/// DATA export — lots, disposals, the 8949 rows, the promoted-tranche disclosure — and it is valid
+/// for any year the ledger holds events for, including a filed-tranche year like TY2020 that this
+/// build bundles no table for (`declare_tranche_cli::filed_tranche_year_exports_clean`). What the
+/// stamp adds is the readiness sentence beside the data: whether this build could COMPUTE the year.
+pub fn export_stamp(year: i32) -> String {
+    YearReadiness::bundled(year).sentence()
+}
+
 /// The year a fresh interactive surface opens on: the NEWEST bundled year — derived from the glob,
 /// never a literal. (The TUIs edit any bundled year; "newest" is where a new return starts.)
 pub fn default_year() -> i32 {
@@ -193,6 +257,45 @@ mod tests {
             .problems()
             .iter()
             .any(|m| m.contains("declare it filable or unbundle them")));
+    }
+
+    /// FR-48: the report sentence names readiness, keeps the inputs, and names `income clear` only
+    /// as the fallback with its cost — no year literal.
+    #[test]
+    fn the_uncomputable_sentence_is_built_from_readiness_and_keeps_the_inputs() {
+        let s = uncomputable_sentence(2025);
+        assert!(s.contains("full-return"), "{s}");
+        assert!(s.contains("preparing"), "{s}");
+        assert!(s.contains("inputs are KEPT"), "{s}");
+        assert!(s.contains("income clear --year 2025"), "{s}");
+        assert!(
+            !s.contains("v1 supports"),
+            "the stale literal must be gone: {s}"
+        );
+        let s = uncomputable_sentence(2031);
+        assert!(s.contains("not bundled"), "{s}");
+    }
+
+    /// FR-48: import warns for a not-ready year and says nothing for a ready one.
+    #[test]
+    fn the_import_note_fires_only_for_a_year_without_params() {
+        assert!(import_note(2024).is_none());
+        let n = import_note(2025).unwrap();
+        assert!(
+            n.contains("stored now") && n.contains("report --tax-year 2025"),
+            "{n}"
+        );
+        assert!(import_note(2031).unwrap().contains("not bundled"));
+    }
+
+    /// FR-48: export-snapshot stamps the year and its readiness; it does not refuse (a data export
+    /// for a filed-tranche year with no table is legitimate).
+    #[test]
+    fn the_export_stamp_names_the_year_and_its_readiness_for_any_year() {
+        assert!(export_stamp(2024).starts_with("TY2024 — filable"));
+        assert!(export_stamp(2025).starts_with("TY2025 — preparing"));
+        let s = export_stamp(2020);
+        assert!(s.starts_with("TY2020 — not bundled"), "{s}");
     }
 
     #[test]
