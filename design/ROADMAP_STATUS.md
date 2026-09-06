@@ -48,6 +48,26 @@ now is preparation against drafts, which is why `form-delta` and the draft discr
 Nothing can be transcribed from a draft; what CAN be done is every code-shape change that stops
 assuming TY2025, so the finals become a diff.
 
+### ★★★ OWNER DECISIONS PENDING — raised by the Fable strategy review (2026-09-05)
+
+`design/agent-reports/2026-09-05-fable-strategy-review.md` (persisted `297ab7db`; ledger
+`c0eb7f32`). Its verdict: this files TY2026 **on the extension**, and only if the Sep–Dec slack goes
+to the owner's real data rather than the port generator. Five of its nine improvements are the
+owner's to rule on, not an implementer's; they are listed here so they are not lost, and NOTHING
+below is actioned until ruled:
+
+| # | decision | what it changes | the review's case |
+|---|---|---|---|
+| **S1** | **Un-pause a TY2025 REHEARSAL slice** — never mailed: encode `FullReturnParams` TY2025 beside TY2026's, wire the ten orphaned maps, delete the TY2025 gate, drive the owner's real 2025 exports + W-2 to a packet, **diff every line against the return actually filed**, shred it | §0a pauses TY2025; this re-opens exactly the slice that is a rehearsal, with a diff report (not a green packet) as the exit | the filed TY2025 return is the only oracle that is (a) this filer's profile, (b) signed, (c) available before January; the lived journey has never happened in 14 months and is otherwise scheduled for February 2027 |
+| **S2** | **Two answers:** (1) every income type / venue / deduction on the real 2026 return (W-2s? Sch C? interest/dividends > $1,500? charitable BTC and size — Section B / appraisal above $5,000 is an owner action with a before-filing deadline; car-loan interest; tips/overtime: none?); (2) state of residence | `YEAR.toml forms_expected` for 2026 becomes the OWNER's set; forms outside it become refusals with kills instead of transcriptions (Sch C/SE/8995/8995-A, 1-A Parts II/III) | "done" is currently defined against a P0 stress scenario a delegate ruled on; a W-2 filer's critical path is ~6 forms after finals, not 17 |
+| **S6** | **Right-size ceremony for a one-person autumn**: one review round per document then execute; fan-outs ≤ 6 lenses; no new instrument without a named consumer on the owner's path. KEEP every compute/emitter/provenance gate, B1 kills, the two-oracle census, the single B3 pre-mail review | `STANDARD_WORKFLOW.md`'s "review to 0C/0I" on prose artifacts | measured: 1,233 commits in July, 180 in August; five review rounds on one plan; the test is whether one person can repeat the autumn in 2027 |
+| **S7** | **Pre-rule the oracle fallback**: *if OTS 2026 is absent or disqualified on a line by 2027-03-15 → extension; by 2027-09-15 the evidence for signing without it is taxcalc 6.8.2 + the S1 rehearsal diff + the owner's hand-worked Form 6251 and Schedule 1-A on the official worksheets* | the two-oracle rule stays absolute for "validated"; this names what suffices to SIGN | OTS 2026 arrives ~2027-01-27 and carries known AMT defects; without a September ruling the argument happens in April |
+| **S9** | **Drop TY2017** | delete five wired forms + their rows in every glob-walking gate; keep the tax table if the 2017 crypto slice is wanted | zero evidence behind it (no authority, notes, geometry or census); under design r2 it is a row in every gate forever |
+
+The four non-owner items (S3 1099-DA input NOW; S4 machinery hard stop 2026-10-31 then a hand port;
+S5 real-data runs at the 2026-09-15 and 2027-01-15 estimate dates; S8 a physical print rehearsal +
+FR-49) are folded into §3's NOW bucket below and re-owned in `FOLLOWUPS.md`.
+
 ---
 
 ## 0b. The one-line answer (TY2025 context, retained)
@@ -154,7 +174,7 @@ forms-in-January / oracle-in-late-January gap, so the partition below is the sta
 
 | bucket | waits on | items |
 |---|---|---|
-| **NOW** | nothing — statute / Rev. Proc. / regime already in the tree | `FullReturnParams` TY2026 incl. `AmtParams` (Rev. Proc. 2025-32 §2.10; archive the statute); `YEAR.toml` + `YearReadiness` (build-order 1b); the year-package table (design r2, sequencing §10); the Form 8995 line-16/17 and Schedule A instrument variants; the 1099-DA input surface; the price dataset through 2026-12-31; the port machine; Form 4868 + 1040-V |
+| **NOW** | nothing — statute / Rev. Proc. / regime already in the tree | `FullReturnParams` TY2026 incl. `AmtParams` (Rev. Proc. 2025-32 §2.10; **statute archived `58200a59`** — Pub. L. 119-21 §70107(c) is the authority for 0.50); **the 1099-DA input surface (FR-46 b/c) — by end of September, and the owner's broker specific-ID instruction to each exchange before further 2026 sales (strategy S3)**; `YEAR.toml` + `YearReadiness` (build-order 1b); **the year-package table, design r2 §10 steps 1–5 only, hard stop 2026-10-31 — the `forms port` generator and Layer-4 codegen wait until one TY2026 form has been ported by hand (S4)**; the Form 8995 line-16/17 and Schedule A instrument variants; **two real-data runs of `report --tax-year 2026` on the owner's 2026 exports, for the 2026-09-15 and 2027-01-15 estimates (S5)**; the price dataset through 2026-12-31 (FR-53; a 2027-01-02 task); **taxcalc → 6.8.2 (available on PyPI; port report §6 rule 12 says what to do if `_amti_verdict` reds) and the `AMT_em_pe` 639,200-vs-$640,200 cell recorded as a mechanism-computed excuse**; **Form 4868 + 1040-V (FR-49) and a physical print rehearsal — assemble by attachment sequence, sign block, envelope, payment — done once on a packet before the season (S8)** |
 | **AFTER FINALS** | `irs-prior/<stem>--2026.pdf` | maps, censuses, label tables, doc comments, worksheet transcriptions, Schedule 1-A Parts II/III rebuild, Form 6251's confirmed kicker |
 | **AFTER OTS 2026** | `taxsolve_US_1040_2026.c` read | the two-oracle census, goldens, "validated" on any figure |
 

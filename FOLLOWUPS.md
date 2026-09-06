@@ -6156,8 +6156,12 @@ build, each with an owning phase.
   proceeds, basis } }` (design r2 §6); (b) a per-disposition-source filer answer `broker_reported:
   none | proceeds | basis` routing G/H/I (ST) and J/K/L (LT); (c) a §6 rule — *never ship a TY2026
   8949 whose box was chosen without a 1099-DA answer*; (d) register it as **R28, LIVE/CRITICAL** in
-  `TY2026_PORT_REPORT.md` §5. **Owning phase: the year-package table build, step 4 (`YEAR.toml`)
-  for (a); the TY2026 input surface for (b)–(c); the next port-report edition for (d).**
+  `TY2026_PORT_REPORT.md` §5. **Owning phase — re-owned 2026-09-05 (strategy review S3): NOW, by end of September, for
+  (b)–(c) — the forms arrive ~2027-02-16 inside the window and this is the one TY2026 change that
+  hits the owner's own rows; (a) with `YEAR.toml` (table build step 4); (d) DONE — R28 registered
+  in the port report §5 and rule 18 in §6 (`18027b03`).** Owner action alongside: a standing
+  specific-identification instruction to each exchange (the engine's method) before further 2026
+  sales, and a check of what each of Coinbase / Gemini / River / Swan will put in 1099-DA box 1e.
 - **FR-47 — `AmtParams` / `FullReturnParams` TY2026 is a NOW item, not a post-finals one.**
   Transcribe from Rev. Proc. 2025-32 §2.10: exemptions (MFJ $140,200 / single $90,100 / MFS
   $70,100 / trusts $31,400), 28% breakpoints ($122,250 MFS / $244,500 others), and per status BOTH
@@ -6184,7 +6188,11 @@ build, each with an owning phase.
   one set only → red. **Owning phase: build-order 1b, i.e. before the port machine.**
 - **FR-49 — Form 4868 + 1040-V join P4; the extension is the default plan.** File-by-2027-10-15 with
   payment by 2027-04-15 is the sequencing that keeps every gate hard under April pressure. One
-  AcroForm plus an estimate. **Owning phase: P4.**
+  AcroForm plus an estimate. **Owning phase — re-owned 2026-09-05 (strategy review S8): NOW, both
+  are year-agnostic AcroForms; build them with the physical print rehearsal (print, assemble by
+  attachment sequence, check every field lands in its box on paper, sign block, envelope from the
+  IRS page, 1040-V or Direct Pay, certified-mail receipt into the vault's record set) — done once
+  before the season and again in March 2027 on the real packet.**
 - **FR-50 — `forms port-status <year>`** enumerates from the emitting surface (`Stem` × year) and
   prints `NO PRIOR SIDE` / `NO DRAFT` / `NO FINAL` per cell instead of omitting the row. Two forms
   fell out of the computed work list today (`f1040s1`, `f8283`), plus `f8995a`. Archive
