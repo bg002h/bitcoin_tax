@@ -7,7 +7,7 @@
 use crate::app::{App, Snapshot};
 use btctax_core::{
     form_8283, form_8949, schedule_d, Form8283Section, Form8949Box, Form8949Part,
-    DIGITAL_ASSET_8949_FIRST_YEAR,
+    InformationReturnRegime,
 };
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -59,6 +59,26 @@ fn form8283_section_tag(s: Form8283Section) -> &'static str {
 ///
 /// Layout: upper portion = Form 8949 scrollable table; lower portion = Schedule D totals +
 /// Form 8283 rows + standing footnotes.
+/// ★ spec 1099-DA T6 — the box-review footnote follows the year's Form 1099-DA REGIME, joined from
+/// its record, never the box-revision constant: no proceeds reporting → the securities pairing
+/// (C/F ↔ A/B/D/E, 1099-B); proceeds only → review I/L against G/H/J/K; proceeds AND basis → the
+/// boxes were CHOSEN from the filer's answers, so the note says what to compare them with (R4);
+/// a year with no record says so rather than guessing a pairing.
+pub fn broker_box_note(year: i32, regime: Option<InformationReturnRegime>) -> String {
+    match regime {
+        None => format!(
+            "NOTE: TY{year} has no year record in this build — review the broker-reported boxes by hand."
+        ),
+        Some(r) if r.basis => "NOTE: boxes G/H/J/K follow your Form 1099-DA answers (`report` lists the keys) — \
+                               compare column (e) of every G/J row with box 1g, and (d) with box 1f."
+            .to_string(),
+        Some(r) if r.proceeds => {
+            "NOTE: Review box I/L — exchange disposals may require G/H/J/K (1099-DA).".to_string()
+        }
+        Some(_) => "NOTE: Review box C/F — exchange disposals may require A/B/D/E (1099-B).".to_string(),
+    }
+}
+
 pub fn render(
     frame: &mut Frame,
     area: Rect,
@@ -172,21 +192,12 @@ pub fn render(
         bottom,
         "NOTE: the Section (A/B) is set by the §170(f)(11)(F) year-aggregate of similar donated items, not per donation."
     );
-    // Year-aware box-review caveat, mirroring the core box predicate: pre-TY2025 the securities
-    // boxes (C/F ↔ A/B/D/E, 1099-B); from TY2025 the digital-asset boxes (I/L ↔ G/H/J/K, 1099-DA).
-    // The securities boxes are forbidden for digital assets on the 2025 revision, so never steer a
-    // 2025 filer to A/B/D/E.
-    if year >= DIGITAL_ASSET_8949_FIRST_YEAR {
-        let _ = writeln!(
-            bottom,
-            "NOTE: Review box I/L — exchange disposals may require G/H/J/K (1099-DA)."
-        );
-    } else {
-        let _ = writeln!(
-            bottom,
-            "NOTE: Review box C/F — exchange disposals may require A/B/D/E (1099-B)."
-        );
-    }
+    // spec 1099-DA T6 — the box-review caveat follows the year's REGIME (its record), not the constant
+    let _ = writeln!(
+        bottom,
+        "{}",
+        broker_box_note(year, btctax_cli::year_readiness::regime_for(year))
+    );
 
     let p = Paragraph::new(bottom)
         .block(
@@ -213,4 +224,32 @@ pub(crate) fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
 
     let year = app.selected_year;
     render(frame, area, snap, year, &mut app.forms_state);
+}
+
+#[cfg(test)]
+mod broker_note_tests {
+    use super::broker_box_note;
+    use btctax_core::InformationReturnRegime as R;
+
+    /// spec 1099-DA T6 — one note per regime, the two pre-live wordings byte-identical to the
+    /// walkthrough goldens (j6 TY2024, j2 TY2025), the live one naming 1g/1f, and no record → say so.
+    #[test]
+    fn the_note_follows_the_regime() {
+        assert_eq!(
+            broker_box_note(2024, Some(R::NONE)),
+            "NOTE: Review box C/F — exchange disposals may require A/B/D/E (1099-B)."
+        );
+        assert_eq!(
+            broker_box_note(2025, Some(R::PROCEEDS_ONLY)),
+            "NOTE: Review box I/L — exchange disposals may require G/H/J/K (1099-DA)."
+        );
+        let live = broker_box_note(2026, Some(R::PROCEEDS_AND_BASIS));
+        assert!(live.contains("box 1g") && live.contains("box 1f"), "{live}");
+        assert!(!live.contains("Review box I/L"), "{live}");
+        let none = broker_box_note(2031, None);
+        assert!(
+            none.contains("no year record") && none.contains("2031"),
+            "{none}"
+        );
+    }
 }

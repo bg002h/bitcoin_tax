@@ -443,6 +443,11 @@ pub struct TaxYearReport {
     /// every number-bearing surface (delta report, dual-report absolute totals, TUI Tax tab) and the
     /// fail-closed `--write-carryover` gate; `None` when the figures are not pseudo-contributed.
     pub pseudo_contributed: crate::render::PseudoDisclosure,
+    /// ★ spec 1099-DA T6 — the (provider, cohort) keys the year's Form 8949 rows carry, their row
+    /// counts, and the answers on file with the box each chooses. `Some` only when the question is
+    /// live (a basis regime and ≥1 keyed row) or an unread answer is stored; printed after the
+    /// readiness line, before the figures, so the filer sees what is asked before what was computed.
+    pub broker_answers: Option<String>,
 }
 
 /// Task 9 (B.5) + Task 10 (M4) + P2-D Task 2 + Chunk-1 D2 + Chunk-3a: load events + project once,
@@ -513,6 +518,20 @@ pub fn report_tax_year(
     // refuse the ABSOLUTE return while the delta still computes; render that as a note. (This comment
     // used to list AMT and TI≤0-with-carryforward too; §G-6 built the AMT emitter and widening (A)
     // lifted the carryforward refusal, so neither is a row any more.)
+    // ★ spec 1099-DA T6 — the keys the ledger needs answered, beside the answers on file. Pure
+    //   render over the census and the stored map; the regime is the year's record (None → no block
+    //   unless an unread answer is stored, which the block then explains).
+    let broker_answers = {
+        let rows = btctax_core::form_8949(&state, year);
+        let census = btctax_core::forms::broker_key_census(&rows);
+        let stored = crate::return_inputs::get(s.conn(), year)?;
+        crate::render::render_broker_answers(
+            year,
+            crate::year_readiness::regime_for(year),
+            &census,
+            stored.as_ref().map(|ri| &ri.broker_reporting),
+        )
+    };
     let dual_report: Option<String> = if provenance == crate::resolve::Provenance::ReturnInputs {
         match (
             crate::return_inputs::get(s.conn(), year)?,
@@ -757,6 +776,7 @@ pub fn report_tax_year(
         tranche_advisory,
         dual_report,
         pseudo_contributed,
+        broker_answers,
     })
 }
 

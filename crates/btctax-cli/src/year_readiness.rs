@@ -120,7 +120,7 @@ impl YearReadiness {
                 btctax_forms::bundled::years_sentence()
             ),
             Some(d) => format!(
-                "TY{} — {} ({} forms; TaxTable {}; full-return params {})",
+                "TY{} — {} ({} forms; TaxTable {}; full-return params {}; 1099-DA {})",
                 self.year,
                 match d.status {
                     YearStatus::Preparing => "preparing",
@@ -130,6 +130,15 @@ impl YearReadiness {
                 self.forms_bundled,
                 if self.table { "yes" } else { "no" },
                 if self.params { "yes" } else { "no" },
+                // spec 1099-DA T6 — the year's information-return regime, from its record
+                match (
+                    d.information_returns.f1099da.proceeds,
+                    d.information_returns.f1099da.basis,
+                ) {
+                    (false, _) => "none",
+                    (true, false) => "proceeds",
+                    (true, true) => "proceeds+basis",
+                },
             ),
         }
     }
@@ -411,6 +420,18 @@ mod tests {
                 btctax_forms::FormsError::UnsupportedYear(2027)
             ))
         ));
+    }
+
+    /// spec 1099-DA T6 — the readiness sentence names the year's Form 1099-DA regime, so the
+    /// `report` header and the export stamp say which information-return world the year is in.
+    #[test]
+    fn the_sentence_names_the_1099da_regime() {
+        let s24 = YearReadiness::bundled(2024).sentence();
+        let s25 = YearReadiness::bundled(2025).sentence();
+        let s26 = YearReadiness::bundled(2026).sentence();
+        assert!(s24.contains("1099-DA none)"), "{s24}");
+        assert!(s25.contains("1099-DA proceeds)"), "{s25}");
+        assert!(s26.contains("1099-DA proceeds+basis)"), "{s26}");
     }
 
     /// ★ build review r2 NEW-3 — `report`'s prior-year regime join (`regime_or_refuse(year - 1)`)

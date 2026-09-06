@@ -154,6 +154,7 @@ fn run() -> Result<ExitCode, CliError> {
                     tranche_advisory,
                     dual_report,
                     pseudo_contributed,
+                    broker_answers,
                 } = cmd::tax::report_tax_year(vault, &pp, y, ptg_raw)?;
                 // ★ FR-48 / design r2 §6: the year's readiness, rendered on the number-bearing
                 //   surface — declared status, forms bound, TaxTable and full-return params.
@@ -161,6 +162,10 @@ fn run() -> Result<ExitCode, CliError> {
                     "{}",
                     btctax_cli::year_readiness::YearReadiness::bundled(y).sentence()
                 );
+                // spec 1099-DA T6 — what the year asks the filer, before what it computed
+                if let Some(block) = broker_answers {
+                    print!("{block}");
+                }
                 print!(
                     "{}",
                     render::render_tax_outcome(

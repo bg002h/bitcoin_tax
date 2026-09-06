@@ -1858,6 +1858,91 @@ pub fn render_charitable_carryover_out(
     Some(s)
 }
 
+/// ★ spec 1099-DA T6 — the `report` block that lists every (provider, cohort) key the ledger's
+/// Form 8949 rows carry, the rows under each, and the answer on file with the box it chooses.
+/// `None` unless the question is LIVE (a basis regime and ≥1 keyed row) or an answer is stored that
+/// no row reads (which refuses as unread, and the filer should see why). The census and the answers
+/// are passed in, so this is a pure render.
+pub fn render_broker_answers(
+    year: i32,
+    regime: Option<btctax_core::InformationReturnRegime>,
+    census: &std::collections::BTreeMap<(String, btctax_core::forms::Cohort), usize>,
+    answers: Option<&btctax_core::forms::BrokerReporting>,
+) -> Option<String> {
+    use btctax_core::forms::{BrokerReported, Cohort};
+    use std::collections::BTreeSet;
+    let live = regime.is_some_and(|r| r.basis) && !census.is_empty();
+    // every key the ledger lists, plus every key an answer is stored for
+    let mut keys: BTreeSet<(String, Cohort)> = census.keys().cloned().collect();
+    if let Some(a) = answers {
+        for (provider, c) in &a.0 {
+            if c.covered.is_some() {
+                keys.insert((provider.clone(), Cohort::Covered));
+            }
+            if c.noncovered.is_some() {
+                keys.insert((provider.clone(), Cohort::Noncovered));
+            }
+        }
+    }
+    let stored_unread = keys.iter().any(|k| !census.contains_key(k));
+    if !live && !stored_unread {
+        return None;
+    }
+    let regime_word = match regime {
+        None => "no year record",
+        Some(r) if r.basis => "proceeds+basis",
+        Some(r) if r.proceeds => "proceeds only",
+        Some(_) => "none",
+    };
+    let mut s = format!(
+        "\n═══ Form 1099-DA answers — tax year {year} (regime: {regime_word}) ═══\n  \
+         Each (provider, cohort) key below needs ONE answer in `income import`'s \
+         `[broker_reporting.<provider>]` table (covered / noncovered = not_reported | proceeds_only | \
+         basis_matches | basis_differs | mixed); the answer chooses the Form 8949 box.\n  \
+         {:<14}{:<12}{:>5}  {:<16}{}\n",
+        "provider", "cohort", "rows", "answer", "box"
+    );
+    for (provider, cohort) in &keys {
+        let rows = census
+            .get(&(provider.clone(), *cohort))
+            .copied()
+            .unwrap_or(0);
+        let answer = answers.and_then(|a| a.answer(provider, *cohort));
+        let (answer_word, box_word) = match (rows, answer) {
+            (0, Some(a)) => (
+                a.toml_name().to_string(),
+                "— no row carries this key: REFUSES as unread (delete the answer)".to_string(),
+            ),
+            (_, None) => (
+                "(unanswered)".to_string(),
+                "— refuses until answered".to_string(),
+            ),
+            (_, Some(a)) => (
+                a.toml_name().to_string(),
+                match a {
+                    BrokerReported::NotReported => "I / L".to_string(),
+                    BrokerReported::ProceedsOnly => "H / K".to_string(),
+                    BrokerReported::BasisMatches => "G / J".to_string(),
+                    BrokerReported::BasisDiffers => {
+                        "— refuses: needs the broker's figure in (e) and the correction in (g) (per-lot 1099-DA import)".to_string()
+                    }
+                    BrokerReported::Mixed => "— refuses: no single box (split the key by form)".to_string(),
+                },
+            ),
+        };
+        let _ = writeln!(
+            s,
+            "  {:<14}{:<12}{:>5}  {:<16}{}",
+            provider,
+            cohort.slot_name(),
+            rows,
+            answer_word,
+            box_word
+        );
+    }
+    Some(s)
+}
+
 /// P2-B Task 3: render the RAW pre-netting Schedule D part totals (Part I ST, Part II LT) for
 /// `year`, mirroring `render_tax_outcome`. These are the Form 8949/Schedule D part totals BEFORE
 /// §1222/§1211/§1212 netting + carryforward — that netting is applied in the tax computation
@@ -4830,5 +4915,96 @@ mod cwa_carryover_warning_tests {
              and this one tells a filer who already answered to go and do something they have done: \
              {out}"
         );
+    }
+}
+
+#[cfg(test)]
+mod broker_answers_tests {
+    use super::render_broker_answers;
+    use btctax_core::forms::{BrokerReported, BrokerReporting, Cohort, CohortAnswers};
+    use btctax_core::InformationReturnRegime as R;
+    use std::collections::BTreeMap;
+
+    fn census(entries: &[(&str, Cohort, usize)]) -> BTreeMap<(String, Cohort), usize> {
+        entries
+            .iter()
+            .map(|(p, c, n)| ((p.to_string(), *c), *n))
+            .collect()
+    }
+
+    fn answers(entries: &[(&str, Cohort, BrokerReported)]) -> BrokerReporting {
+        let mut a = BrokerReporting::default();
+        for (p, c, v) in entries {
+            let e =
+                a.0.entry(p.to_string())
+                    .or_insert_with(CohortAnswers::default);
+            match c {
+                Cohort::Covered => e.covered = Some(*v),
+                Cohort::Noncovered => e.noncovered = Some(*v),
+            }
+        }
+        a
+    }
+
+    /// spec 1099-DA T6 — every key the ledger lists is printed with its row count, the answer on
+    /// file and the box it chooses; an unanswered key says it refuses; the block is absent when the
+    /// question is not live.
+    #[test]
+    fn the_block_lists_keys_rows_answers_and_boxes() {
+        let c = census(&[
+            ("coinbase", Cohort::Covered, 3),
+            ("coinbase", Cohort::Noncovered, 1),
+            ("gemini", Cohort::Noncovered, 2),
+        ]);
+        let a = answers(&[
+            ("coinbase", Cohort::Covered, BrokerReported::BasisMatches),
+            ("gemini", Cohort::Noncovered, BrokerReported::ProceedsOnly),
+        ]);
+        let s = render_broker_answers(2026, Some(R::PROCEEDS_AND_BASIS), &c, Some(&a)).unwrap();
+        assert!(s.contains("tax year 2026 (regime: proceeds+basis)"), "{s}");
+        let lines: Vec<&str> = s.lines().collect();
+        let row = |p: &str, c: &str| {
+            lines
+                .iter()
+                .find(|l| l.trim_start().starts_with(p) && l.contains(c))
+                .copied()
+                .unwrap_or_else(|| panic!("no row for {p}/{c}:\n{s}"))
+        };
+        let r = row("coinbase", "covered");
+        assert!(
+            r.contains("    3  basis_matches") && r.contains("G / J"),
+            "{r}"
+        );
+        let r = row("coinbase", "noncovered");
+        assert!(
+            r.contains("    1  (unanswered)") && r.contains("refuses until answered"),
+            "{r}"
+        );
+        let r = row("gemini", "noncovered");
+        assert!(
+            r.contains("    2  proceeds_only") && r.contains("H / K"),
+            "{r}"
+        );
+        // not live: proceeds-only year, or a live year with no keyed rows and nothing stored
+        assert!(render_broker_answers(2025, Some(R::PROCEEDS_ONLY), &c, Some(&a)).is_none());
+        assert!(
+            render_broker_answers(2026, Some(R::PROCEEDS_AND_BASIS), &census(&[]), None).is_none()
+        );
+    }
+
+    /// An answer stored for a key no row carries is shown as the unread refusal it will cause —
+    /// even on a year where the question is otherwise not live.
+    #[test]
+    fn a_stored_answer_no_row_reads_is_shown_as_unread() {
+        let a = answers(&[("river", Cohort::Covered, BrokerReported::NotReported)]);
+        let s = render_broker_answers(2026, Some(R::PROCEEDS_AND_BASIS), &census(&[]), Some(&a))
+            .expect("shown");
+        assert!(
+            s.contains("river") && s.contains("REFUSES as unread"),
+            "{s}"
+        );
+        let s25 = render_broker_answers(2025, Some(R::PROCEEDS_ONLY), &census(&[]), Some(&a))
+            .expect("shown on 2025 too — the refusal fires there as well");
+        assert!(s25.contains("REFUSES as unread"), "{s25}");
     }
 }

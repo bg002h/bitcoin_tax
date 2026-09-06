@@ -604,3 +604,36 @@ fn the_g_total_lands_on_line_1b_not_3() {
     assert_eq!(f.lt_by_box[&Form8949Box::K].proceeds_d, d.line9_d);
     assert_eq!(f.lt_by_box[&Form8949Box::L].proceeds_d, d.line10_d);
 }
+
+// ── T6: the surfaces ──────────────────────────────────────────────────────────────────────────────
+
+/// The census `report` prints: every keyed row counted under its (provider, cohort), self-custody
+/// rows carrying no key, and the names the surfaces print being the serde spellings.
+#[test]
+fn the_key_census_counts_every_keyed_row_and_no_self_custody_row() {
+    use btctax_core::forms::{broker_key, broker_key_census};
+    let st = owner_like(2026);
+    let rows = btctax_core::form_8949(&st, 2026);
+    let census = broker_key_census(&rows);
+    let keyed = rows.iter().filter(|r| broker_key(r).is_some()).count();
+    assert!(
+        keyed > 0 && keyed < rows.len(),
+        "the fixture mixes keyed and self-custody rows"
+    );
+    assert_eq!(census.values().sum::<usize>(), keyed);
+    assert!(census.contains_key(&("coinbase".to_string(), Cohort::Covered)));
+    assert!(census.contains_key(&("coinbase".to_string(), Cohort::Noncovered)));
+    assert_eq!(Cohort::Covered.slot_name(), "covered");
+    assert_eq!(BrokerReported::BasisMatches.toml_name(), "basis_matches");
+    // the TOML spelling round-trips through serde, so what `report` prints is what `income import` reads
+    for a in [
+        BrokerReported::NotReported,
+        BrokerReported::ProceedsOnly,
+        BrokerReported::BasisMatches,
+        BrokerReported::BasisDiffers,
+        BrokerReported::Mixed,
+    ] {
+        let json = serde_json::to_string(&a).unwrap();
+        assert_eq!(json, format!("\"{}\"", a.toml_name()));
+    }
+}

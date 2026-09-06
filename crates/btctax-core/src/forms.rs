@@ -84,6 +84,19 @@ pub fn broker_key(row: &Form8949Row) -> Option<(String, Cohort)> {
     }
 }
 
+/// ★ spec 1099-DA T6 — the (provider, cohort) keys these rows list, each with its row count: what
+/// `report` shows the filer beside the answers on file. Self-custody rows carry no key and are not
+/// counted; the map is ordered by provider then cohort, which is the order the surfaces print.
+pub fn broker_key_census(rows: &[Form8949Row]) -> BTreeMap<(String, Cohort), usize> {
+    let mut out: BTreeMap<(String, Cohort), usize> = BTreeMap::new();
+    for r in rows {
+        if let Some(k) = broker_key(r) {
+            *out.entry(k).or_insert(0) += 1;
+        }
+    }
+    out
+}
+
 /// Is the Form 1099-DA question LIVE for these rows under this regime (spec 1099-DA R1): the year's
 /// regime reports BASIS and at least one row was disposed on an exchange.
 pub fn broker_question_is_live(rows: &[Form8949Row], regime: InformationReturnRegime) -> bool {
@@ -252,6 +265,30 @@ pub struct CohortAnswers {
     pub covered: Option<BrokerReported>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub noncovered: Option<BrokerReported>,
+}
+
+impl Cohort {
+    /// The slot's name in `income import`'s `[broker_reporting.<provider>]` table — the serde name,
+    /// which is what a refusal and `report` print so the filer can type it back.
+    pub fn slot_name(self) -> &'static str {
+        match self {
+            Cohort::Covered => "covered",
+            Cohort::Noncovered => "noncovered",
+        }
+    }
+}
+
+impl BrokerReported {
+    /// The answer's TOML spelling (its serde name).
+    pub fn toml_name(self) -> &'static str {
+        match self {
+            BrokerReported::NotReported => "not_reported",
+            BrokerReported::ProceedsOnly => "proceeds_only",
+            BrokerReported::BasisMatches => "basis_matches",
+            BrokerReported::BasisDiffers => "basis_differs",
+            BrokerReported::Mixed => "mixed",
+        }
+    }
 }
 
 impl CohortAnswers {

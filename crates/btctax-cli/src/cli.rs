@@ -397,6 +397,14 @@ pub enum Optimize {
 #[derive(Subcommand)]
 pub enum IncomeCmd {
     /// Import full-return inputs from an offline TOML file into the vault for a tax year.
+    ///
+    /// From TY2026 (a Form 1099-DA basis-reporting year) the file also carries the broker-reporting
+    /// answers: one table per exchange provider, one slot per cohort —
+    /// `[broker_reporting.coinbase]` with `covered = "basis_matches"` and `noncovered = "not_reported"`
+    /// (an answer is one of `not_reported`, `proceeds_only`, `basis_matches`, `basis_differs`,
+    /// `mixed`). `report --tax-year` lists the keys the ledger needs answered and the rows under each;
+    /// an answer stored for a key no row carries is refused as unread, and a missing one refuses the
+    /// return until given. Earlier years neither ask nor accept them.
     Import {
         /// The tax year (e.g. 2024).
         #[arg(long)]
