@@ -923,13 +923,14 @@ mod tests {
     /// TY2025 support is planned and will remove the `2025` assertion above. **2026 must survive
     /// that change**, for three independent reasons established from primary sources (2026-07-29):
     ///
-    /// 1. **The 2026 instructions are not published.** The draft Form 6251's line 4 says "more than
-    ///    $640,200, **see instructions**", and `irs.gov/pub/irs-dft/i6251--dft.pdf` is still the
-    ///    *2025* instructions. So the §55(d)(3) phase-out RATE, the zero-exemption thresholds, and
-    ///    the MFS kicker's rate and cap are all unknown. They can be *inferred* from the published
-    ///    thresholds — 500,000 + 2 × 70,100 = 640,200 implies a 50% phase-out, up from 25% — but an
-    ///    inferred constant is exactly what `CLAUDE.md` forbids encoding without a written
-    ///    equivalence proof and a KAT.
+    /// 1. ~~The 2026 instructions are not published, so the phase-out rate and thresholds are
+    ///    unknown.~~ **STALE as of 2026-09-05 (Fable plan review I4) — retained struck through so
+    ///    nobody re-derives it.** Rev. Proc. 2025-32 §2.10 (archived: `legal/text/irs-guidance/`)
+    ///    publishes the TY2026 §55(d)(1) exemptions AND, per filing status, both the §55(d)(2)
+    ///    threshold and the complete-phaseout amount, so the 0.50 rate is forced by two transcribed
+    ///    cells of one primary source for every status. `AmtParams` TY2026 is therefore ENCODABLE
+    ///    now and is a filed NOW item; this reason no longer holds the gate. What is still open is
+    ///    only the MFS §55(d)(3) kicker's cap as the 2026 instructions will print it.
     /// 2. **The form was restructured, not re-parameterized.** 2026 splits line 1 into `1a`/`1b`,
     ///    where 1a subtracts **Schedule 1-A line 43** — a new OBBBA schedule btctax has no surface
     ///    for — and line 4 reads "Combine lines **1b** through 3". `Form6251` transcribes the 2024

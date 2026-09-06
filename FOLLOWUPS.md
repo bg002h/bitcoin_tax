@@ -6141,3 +6141,66 @@ self-transfer policy was audited for CONFORMANCE, not relitigated.
   cent each. Noted so a future reader finding a zero-basis `CardRewardRebate` lot does not conclude
   the fix regressed.
   **Owning phase: CLOSED.** The residue above stays with the next adapter cycle, with FR-42/FR-43.
+
+
+### From the Fable plan review of the long-term plan (2026-09-05, `2026-09-05-fable-plan-review.md`)
+
+Review 1C/8I/4M, persisted `3f279d64`; ledger `…VERIFICATION.md` `f74d605f`; C1 fixed `118b070b`;
+documents folded in the commit that adds this section. Everything below is what the fold did NOT
+build, each with an owning phase.
+
+- **FR-46 — C1 residue: the 1099-DA regime has a slot but no input.** TY2026 is the first year
+  brokers report BASIS on Form 1099-DA (TD 10000, 2026-01-01), and every TY2025 8949 row is boxed
+  I/L ("not reported to you on Form 1099-DA") unconditionally. Fold 1 made the [I5] advisory fire
+  on the full-return export; what remains: (a) `YEAR.toml` `information_returns = { f1099da = {
+  proceeds, basis } }` (design r2 §6); (b) a per-disposition-source filer answer `broker_reported:
+  none | proceeds | basis` routing G/H/I (ST) and J/K/L (LT); (c) a §6 rule — *never ship a TY2026
+  8949 whose box was chosen without a 1099-DA answer*; (d) register it as **R28, LIVE/CRITICAL** in
+  `TY2026_PORT_REPORT.md` §5. **Owning phase: the year-package table build, step 4 (`YEAR.toml`)
+  for (a); the TY2026 input surface for (b)–(c); the next port-report edition for (d).**
+- **FR-47 — `AmtParams` / `FullReturnParams` TY2026 is a NOW item, not a post-finals one.**
+  Transcribe from Rev. Proc. 2025-32 §2.10: exemptions (MFJ $140,200 / single $90,100 / MFS
+  $70,100 / trusts $31,400), 28% breakpoints ($122,250 MFS / $244,500 others), and per status BOTH
+  the phase-out threshold and the complete-phaseout amount; KAT the identity `(complete − threshold)
+  × 0.50 == exemption` for all three statuses as the equivalence proof `CLAUDE.md` requires for a
+  derived rate. Two-oracle-check against taxcalc's `AMT_em_*` now; OTS 2026 later. The one open
+  cell stays open (D8: MFS §55(d)(3) kicker cap). **Prerequisite in parallel: archive the statute**
+  — nothing under `legal/text/` is a statute today (four dirs: federal-register, irs-forms,
+  irs-guidance, irs-publications). Fetch 26 USC §55(d) as amended and Pub. L. 119-21 §70107 into
+  `legal/text/statute/` via a `legal/_scripts/fetch_statute_*.sh` sibling of
+  `fetch_inflation_revprocs.sh`, so the 0.50 rate is a transcription, not only a derivation.
+  **Owning phase: NOW (ROADMAP_STATUS §3).** Rewrite `ty2026_full_return_must_stay_fail_closed`'s
+  doc to reasons 2 and 3 only when the params land (reason 1 is struck through today).
+- **FR-48 — `YearReadiness` + the three LIVE refusal-surface defects** (port report §2.5, D7):
+  `income import --year 2026` commits a write and then `report` exits 2 prescribing `income clear`,
+  which deletes the filer's W-2s; `selected_year: 2025` literal in two TUIs; `export-snapshot`
+  ungated and unstamped. One type, declared (`YEAR.toml`) vs actual, every refusal string built from
+  it; `income import` refuses the committed write (mirror `CommitOutcome::NoTables`). B1: add 2026 to
+  one set only → red. **Owning phase: build-order 1b, i.e. before the port machine.**
+- **FR-49 — Form 4868 + 1040-V join P4; the extension is the default plan.** File-by-2027-10-15 with
+  payment by 2027-04-15 is the sequencing that keeps every gate hard under April pressure. One
+  AcroForm plus an estimate. **Owning phase: P4.**
+- **FR-50 — `forms port-status <year>`** enumerates from the emitting surface (`Stem` × year) and
+  prints `NO PRIOR SIDE` / `NO DRAFT` / `NO FINAL` per cell instead of omitting the row. Two forms
+  fell out of the computed work list today (`f1040s1`, `f8283`), plus `f8995a`. Archive
+  `f1040s1--2025` (it is the prior side of an emitted form's delta; §5d's "moot" is withdrawn).
+  **Owning phase: the port machine, before its first regeneration of the work list.**
+- **FR-51 — widen `LineCoverage` to unquoted instruction predicates** (I6): who-must-file tests,
+  worksheet definitions, thresholds that live only in the booklet — so `Coverage::quoting(year)`
+  re-verifies them too and step 24's residual shrinks to nothing. Do NOT build a separate "meaning"
+  tool. **Owning phase: the TY2026 instructions port (AFTER FINALS).**
+- **FR-52 — M1/M4, the fetch side:** (a) the "year printed ≠ year requested" refusal is wrong for
+  PERIODIC forms (`f8275` Rev. 10-2024, `f8283` Rev. 12-2025), whose face carries a revision date —
+  the discriminator is the `versioning` header field (design r2 §4), not the year; (b) `forms fetch`
+  should record which URL form it used, and the manifest should treat an `irs-pdf/` (moving) URL as
+  re-verify-on-next-fetch for EVERY form, not only the two periodic notes (R19); (c) which revision
+  to ship when the IRS re-issues a final mid-season is a recorded decision, in the map header.
+  **Owning phase: the port machine's fetch step.**
+- **FR-53 — M3, the price dataset is a per-year artifact.** `BundledPrices` ends **2026-06-03**; a
+  TY2026 return valuing a December-2026 card reward has no bundled close. `YEAR.toml prices_through
+  = 2026-12-31` + a `YearReadiness` kill (`status = "filable"` with `max_date() < prices_through` →
+  red) + a runbook step "refresh the dataset through 12-31 before declaring the year filable".
+  **Owning phase: `YEAR.toml` (table build step 4) for the field; the pre-season checklist for the
+  refresh.**
+- **Owner decision, unchanged and still open:** whether TY2017 ships at all (five wired forms, zero
+  evidence behind them). Not an implementer's call.

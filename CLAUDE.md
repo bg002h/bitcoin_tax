@@ -34,7 +34,12 @@ amount from", "enter the smaller of", "if X, skip to Y".
 
 **The rule.** When implementing or reviewing an IRS form, schedule, **or worksheet**: one field per
 numbered line, named for the line, in the form's own numbering, carrying the official instruction text
-verbatim as its doc comment.
+verbatim as its doc comment. **Scope (amended 2026-09-05, Fable plan review I2):** fields are named for
+the line *within a transcription struct* — the thing that says what one revision of one document
+prints, and is therefore per line-set revision (`Form6251Map`, `Schedule1A`, the worksheets). A
+*cross-year quantity* that the 1040 consumes (`AbsoluteReturn`) is semantic, and that is not a
+violation. Do not red a transcription struct for line names, and do not red a quantity struct for
+semantic ones.
 
 **Transcribe from the TEXT LAYER (`pdftotext -layout`), never from the rendered page.** A rendered `12`
 and `22` differ by a few pixels. Transcribing Form 6251 line 33 from the image produced "Subtract line 32

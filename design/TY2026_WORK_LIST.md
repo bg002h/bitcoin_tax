@@ -34,7 +34,19 @@ lands** — the handoff is a diff, not a rebuild from memory.
 | `f8960` | 38 | 0 | 0 | 0 | unchanged |
 | `f8995` | 22 | 14 | 11 | 8 | port |
 
-## Not listed
+## Not listed — stated PER CELL, never omitted (Fable plan review I8)
 
-`f8275` and `f8283` have **no TY2026 draft** — the IRS draft URL served a 2024 and a 2025
-document, and `scripts/archive_drafts.py` REFUSED both. Re-run the archiver when they post.
+The table above enumerates from available fixture **pairs**. That is the wrong denominator: a form
+the packet emits with no pair silently has no row — the same "clean verdict from zero comparisons"
+shape the cover-sheet correction was about, one level up. Until `forms port-status <year>` exists
+(it must enumerate from the emitting surface, `Stem` × year), the cells it would print are:
+
+| form | emitted? | prior side (`--2025` final) | TY2026 side | cell |
+|---|---|---|---|---|
+| `f1040s1` | **yes** — `packet.rs:104`, whenever Schedule 1 has content (crypto ordinary income lands there) | **NO PRIOR SIDE** — bundled for 2024 only; no `f1040s1--2025` authority archived | draft archived (`f1040s1--2026-DRAFT`) | **NO PRIOR SIDE** → archive `f1040s1--2025`, then diff |
+| `f8283` | yes — `packet.rs:223` | `f8283--2025` (Rev. 12-2025, periodic) | **NO DRAFT** — the draft URL served a 2025 document; archiver refused | **NO DRAFT** |
+| `f8275` | yes — `packet.rs:218` | `f8275--2024` (Rev. 10-2024, periodic; aliased by hash for 2025) | **NO DRAFT** — the draft URL served a 2024 document; archiver refused | **NO DRAFT** — periodic; a new revision would be a hash change, not a year |
+| `f8995a` | yes — `packet.rs:194` | **NO PRIOR SIDE** — bundled for 2024 only; no `f8995a--2025` authority or extract archived (the port report §5d's "keep" was a to-do, not a fact) | draft archived (`f8995a--2026-DRAFT`) | **NO PRIOR SIDE** → archive `f8995a--2025` + `i8995a--2025`, then diff |
+
+Re-run the archiver when the two periodic forms post a 2026 revision; regenerate this list from the
+emitting surface, not from `design/forms/geometry/` pairs.

@@ -22,7 +22,7 @@ _Last updated: **2026-09-04**. Written at a deliberate pause; safe to exit. **Re
 > the slice arm counts `1` on — observed red (rc=100) with the literal planted back. The examples
 > golden gained exactly one line (the advisory on J6), inspected before regenerating.
 >
-> **Fold 2 — IN FLIGHT (documents).** In this order, one commit, gate in the message:
+> **Fold 2 — DONE (documents), the commit after `a50a3a62`.** What it did, in order:
 > 1. `design/FORM_AUTHORITY_TABLE_DESIGN.md` rewritten to the review's shape, which my draft's §5
 >    had argued against and which the ledger shows is compatible: the ROW is the `.map.toml`
 >    HEADER (judgments `versioning`/`line_set`/`instructions` written by the human there), the row
@@ -47,8 +47,10 @@ _Last updated: **2026-09-04**. Written at a deliberate pause; safe to exit. **Re
 > 7. The Fable reminder in `ROADMAP_STATUS.md` §5 and the memory file: DISCHARGED — the switch
 >    happened and the review ran.
 >
-> Then the build starts at the design's sequencing step 1 (the glob-derived row set + header
-> parse + two-way test, nothing consuming it yet). The owner's open decision is unchanged: whether
+> **NEXT: the build starts at design r2 §10 step 1** — header fields on the 37 existing maps,
+> required-field parse, `glob == emitted_form_years()` both ways, each §4 kill planted first;
+> nothing consumes it yet. Red on any disagreement is the deliverable. In parallel (NOW bucket):
+> FR-47 `AmtParams` TY2026 + archive the statute. The owner's open decision is unchanged: whether
 > TY2017 ships at all.
 
 

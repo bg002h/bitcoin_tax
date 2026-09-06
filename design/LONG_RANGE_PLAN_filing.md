@@ -469,10 +469,14 @@ So the choice is not "file with btctax or never" — it is:
 | **C.** Skip TY2025; target TY2026 only | TY2025 is filed entirely outside btctax, and the P0 car-loan-interest deduction is hand-computed | ~all of Phase 1/2 still has to be built for TY2026 anyway — **TY2026 needs Schedule 1-A too**. This option saves nothing. |
 | **D — REJECTED.** Ship a partial TY2025 by deleting the gate | plausible wrong numbers on signed testimony | the one thing this project refuses |
 
-★ **Option C is the trap worth naming.** "Give up on TY2025 and aim at TY2026" *feels* like the
-schedule-respecting choice and buys nothing: Schedule 1-A, the SALT worksheet and the restructured Form
-6251 are all TY2026 requirements too. **The TY2025 build IS the TY2026 build.** The only real question
-is which year gets filed with it first.
+★ **Option C is the trap worth naming — and the owner chose it, correctly (2026-09-05).** "Give up
+on TY2025 and aim at TY2026" *feels* like the schedule-respecting choice and buys nothing *on the
+build*: Schedule 1-A, the SALT worksheet and the restructured Form 6251 are all TY2026 requirements
+too. **The TY2025 build IS the TY2026 build.** That same fact is exactly why choosing C costs nothing
+either: the owner's TY2025 return was completed outside this project, so a late TY2025 filing with
+btctax would have bought nothing, while the build proceeds unchanged with TY2026 as the first filed
+year and the year-to-year machinery as the deliverable (`ROADMAP_STATUS.md` §0a). Read this
+section as "C saves no work", not "C is wrong" (Fable plan review M2).
 
 ★★ **A fact the plan rests on but cannot cite from this repo:** the failure-to-file penalty is computed
 on *unpaid* tax, so a filer who paid by 2026-04-15 and files late faces materially less exposure than

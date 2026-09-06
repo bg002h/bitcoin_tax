@@ -259,15 +259,17 @@ nature, manual today (no committed command does it). **H** = someone must read t
 | 21 | **Write the `[census]`** — `rule` + `reason` for every unmapped field | **H** | measured volume: **551 reasons / 125,331 B** at TY2024; **242 / 55,329 B** at TY2025 |
 | 22 | Emit the five code bindings | **M\*** | `include_bytes!`, `*_pdf` arm, `include_str!`, `tyYYYY()`, `for_year` arm — **85 hand-edits for a 17-form year** |
 | 23 | Run the gates: map ⊆ PDF, census union, doc ⊆ extract, geometry-sha = manifest-sha, `*_pdf`/`for_year` year-sets identical | **M** | **1 of 5 is year-generic today** (`map_pdf_conformance.rs`) |
-| 24 | **Decide whether a line's MEANING changed while its number did not**, and whether that puts the year out of scope | **H** | no delta tool reports this axis, and it is the one that silently produces a wrong number |
+| 24 | **Decide whether a line's MEANING changed while its number did not**, and whether that puts the year out of scope | **M** for form text (pass P3's `diff -b` of each line's printed text) and for every quoted instruction sentence (`Coverage::quoting(year)` re-verifies each `LineCoverage.instruction` against the new extract and REDS on a carried-forward sentence); **H** only for the residual — instruction-booklet predicates no row quotes yet (who-must-file tests, worksheet definitions, thresholds that live only in the booklet) | the residual is narrower than "a meaning axis" and the build-order item is to widen `LineCoverage` rows to those predicates, not to build a separate meaning tool (Fable plan review I6) |
 
 **The honest ceiling: 8 of 24 steps require someone to read a form** (1, 5, 16, 17, 19, 20, 21, 24),
 and they are load-bearing — steps 16, 17 and 24 are precisely where this repo's year-port defects
 have actually come from. **Two structural changes turn most of the rest into data:** (a) make the
-year package a **table**, one `FormAuthority`-shaped row per `(stem, year)` carrying crate-stem,
-instructions stem, page range and the census/geometry paths, and derive `pdf.rs`, `map.rs`,
-`CENSUS_KEYS` and `EMITTED_FORMS` from it instead of four hand-lists; (b) make every gate walk that
-table rather than a literal, starting at `field_census.rs:105`.
+year package a **table whose row SET is the glob of `forms/<year>/*.map.toml` and whose row FACTS are
+each map's header** (instructions stem, page range, versioning, template hash, `line_set`), with a
+`build.rs` emitting the binding — NOT a hand-written `const` of `(stem, year)` rows, which would put
+back the F2 hand-list that `emitted_form_years()`, `field_census.rs` and the cross-product test were
+just fixed out of (Fable plan review I1; the shape is `design/FORM_AUTHORITY_TABLE_DESIGN.md` r2);
+(b) make every gate walk that glob rather than a literal, starting at `field_census.rs:105`.
 
 **The registry to grow is already in the tree, holding one row** — `cite_check.rs:651-672`
 `FormAuthority { form, year, instructions, instr_pages, extract_stem }`, the only year-as-a-**field**
@@ -309,6 +311,9 @@ surface changed → per-year struct for that part only** (Schedule 1-A Parts II/
 field-name churn and label drift; neither can answer *"is this the same sentence?"*. **A third axis —
 whitespace-normalised instruction-text equality on corresponding lines — is what separates a
 renumber from a rebuild, and every classification in this section had to be computed by hand.**
+(Corrected per Fable plan review I6: two partial instruments exist — P3's text diff and
+`Coverage::quoting` — and together they cover the form face and every quoted sentence. What remains
+by hand is the unquoted instruction predicates, which `LineCoverage` should grow to hold.)
 
 ---
 
@@ -359,6 +364,14 @@ One namespace, `xtask forms`, because **58 of 64 committed extracts already name
 ### Build order, and why it is this order
 
 1. **`forms wire --check`** — reds today on 10 stems, before the thing it guards exists (B1).
+1b. **`YearReadiness`** (D7) as one type computed from declared (`forms/<year>/YEAR.toml`) versus
+   actual (glob, tables, params, prices), rendered on every number-bearing surface and used to build
+   every refusal string; `income import` REFUSES the committed write for a year with no
+   `FullReturnParams` (mirroring the TUI's `CommitOutcome::NoTables`); the TUI default year is derived
+   from readiness, retiring both `selected_year: 2025` literals (`tui-edit/src/editor.rs:298`,
+   `tui/src/app.rs:193`). These are the first three things a February-2027 user touches, before any
+   form; §2.5 names them LIVE and this list had no slot for them (Fable plan review I7). B1: add 2026
+   to one set only, and a test reds.
 2. **The geometry page fix** (§2.1 #1) **paired with a kill-test that prepends a blank page to a
    known fixture and asserts the label join goes RED.** The planted defect is already on disk: the
    measurement is `label-census f8959--2026-DRAFT` yielding 24 `Amount` rows, not 24 `Heading` rows.
@@ -440,7 +453,7 @@ LIVE · **MOOT** (the risk was real and is retired by the pause — recorded, no
 | **Fix `Form6251Map` `line1` → `line1a`/`line1b`; add `Schedule1AMap`** (old #13) | TY2025's f6251 map had no deserialization target | **MOOT for TY2025, LIVE for TY2026** — and the *general* defect (no `deny_unknown_fields`, §2.2 #11) is unchanged and is the reason it was silent |
 | **Build the Schedule 1-A emitter** (old #14) | TY2025 computed Schedule 1-A and could not print it | **MOOT as TY2025 work; REQUIRED for TY2026** — and it must now be built against the **part-level** decomposition of §3, not the TY2025 whole-form shape |
 | **Carry `f1040s1`, `f8275`, `f8995a` to TY2025** (old #15) | *"makes TY2026 a one-year hop"* | **MOOT for f1040s1 and f8275. NOT moot for `f8995a--2025`** — its extract is the prior side of a TY2026 delta and does not exist |
-| **Archive the three missing TY2025 authorities** (old #16) | completeness of the TY2025 package | **PARTLY MOOT.** `f8995a--2025` + `i8995a--2025`: keep, per above. `f1040s1--2025`: moot unless the form is emitted |
+| **Archive the three missing TY2025 authorities** (old #16) | completeness of the TY2025 package | **PARTLY MOOT.** `f8995a--2025` + `i8995a--2025`: keep, per above. `f1040s1--2025`: **NOT moot — withdrawn.** Schedule 1 IS emitted (`packet.rs:104` pushes it whenever `sch_1` is `Some`; it is where non-rebate crypto ordinary income lands), is bundled for 2024 only, and has a 2026 draft in the manifest — so `f1040s1--2025` is the prior side of an emitted form's delta and the work list had NO ROW for it because `form-delta` had no pair (Fable plan review I8; the same "clean verdict from zero comparisons" shape as §2.1 #2). Archive it. |
 | **The TY2025 oracle port** (old #21) | *"a TY2025 two-oracle baseline is what TY2026 gets diffed against"* | **DEMOTED, not moot.** OTS 2026 does not exist until ~2027-01-27, so **TY2025 is the only year where the harness's year axis can be exercised end to end with two live engines.** Do it as a *scaffolding* exercise — the deliverable is the parameterisation (I-7), not a TY2025 golden |
 | **"Do NOT start TY2026 `FullReturnParams` before TY2025's"** (old §6 rule 10) | no gate skipped TY2025 | **REVERSED by the ruling.** Replaced in §6 |
 | **The 330 unaccounted TY2025 census boxes** (old critical-path step 6) | TY2025 exact cover | **MOOT as a gate.** 330 human readings for a year nobody files. They become the reason `field_census` de-pins onto **wired** years (§7 D6) |
@@ -450,10 +463,22 @@ LIVE · **MOOT** (the risk was real and is retired by the pause — recorded, no
 
 ## 6. What should NOT be built
 
-1. **Do NOT encode any TY2026 figure from a draft.** Not the §55(d) resets, not `$640,200`, not the
-   0.50 phase-out rate, not the Schedule 1-A amounts. Drafts are replaced in place and the TY2026
-   Schedule 1-A draft was revised 2026-09-04. The encodable sources are Rev. Proc. 2025-32 §55(d),
-   the amended statute, and the final form. **Knowable ≠ encodable.**
+1. **Do NOT encode any figure whose ONLY source is a draft.** Drafts are replaced in place (the
+   TY2026 Schedule 1-A draft was revised 2026-09-04) and are evidence of STRUCTURE, never a
+   transcription source. **But a figure with a statutory or Rev. Proc. source is encoded from that
+   source when it publishes**, with the draft as a corroborating KAT and the final form as a later
+   confirmation test. The first edition of this rule forbade "the §55(d) resets, `$640,200`, the
+   0.50 phase-out rate, the Schedule 1-A amounts" — and three of those four are in the tree today:
+   Rev. Proc. 2025-32 §2.10 publishes the TY2026 §55(d)(1) exemption amounts AND, for each filing
+   status, both the §55(d)(2) threshold and the **complete-phaseout amount** (MFJ $1,000,000 →
+   $1,280,400; single $500,000 → $680,200; MFS $500,000 → $640,200), so the 0.50 rate is
+   arithmetically forced by two transcribed cells of one primary source — `(complete − threshold) ×
+   rate = exemption` for all three — and `schedule_1a_params` already returns the statutory
+   Schedule 1-A amounts. The rule as first written conflated "never from a draft" (right) with
+   "never before the final form" (wrong), and would have put every TY2026 `FullReturnParams` cell on
+   the post-finals critical path for no reason (Fable plan review I4). The genuinely open cell is
+   D8's: the MFS §55(d)(3) kicker's cap in the 2026 instructions — and the statute text itself is
+   NOT yet archived under `legal/text/`, which is its own NOW item (`FOLLOWUPS.md`).
 2. **Do NOT build a port machine that emits only `.map.toml`.** That reproduces exactly today's
    state — ten committed, correct, and loaded by nothing. The five wiring edits per `(stem, year)`
    are a pure function of the pair; generate them, and ship `forms wire --check` first.
@@ -585,9 +610,13 @@ model is one crate away: `btctax-forms/tests/census.rs:419`.
   qualified twice:** one of the sixteen archived drafts is a TY2025 document (§2.1 #7), and all
   sixteen geometry fixtures are off by a page (§2.1 #1). *"Passes 1 and 2 can be exercised months
   early"* is true **after** those two fixes and not before.
-- *Is the 0.50 phase-out rate encodable today?* **Knowable, not encodable.** The compute lens derived
-  it independently (70,100 / (640,200 − 500,000)); that is corroboration, not authority. Encode from
-  Rev. Proc. 2025-32 §55(d) or the final form.
+- *Is the 0.50 phase-out rate encodable today?* **Yes — corrected 2026-09-05 (Fable plan review
+  I4).** Rev. Proc. 2025-32 §2.10 prints, per filing status, the exemption, the phase-out threshold
+  AND the complete-phaseout amount; the rate is forced by those three transcribed cells for every
+  status (70,100 / (640,200 − 500,000) = 90,100 / (680,200 − 500,000) = 140,200 / (1,280,400 −
+  1,000,000) = 0.50). That is a derived constant WITH the written equivalence proof and the KAT
+  `CLAUDE.md` requires. The amended statute (Pub. L. 119-21 §70107) states the rate directly and
+  should be archived so the citation is a transcription rather than a derivation.
 - *The label-join count, 130 vs 177.* **Not a contradiction** — different denominators (mapped money
   lines across 9 forms vs `lineN` bindings across 10), both zero disagreements, both watched red on a
   planted defect. Recorded so nobody chases it.
