@@ -6,6 +6,18 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
+> ## ★★★ RESUME 2026-09-06 (latest) — the 4868/1040-V build is LANDED through T4 (`a51b8c53`, 3145 tests); its independent SEAM review (opus, worktree) is IN FLIGHT. Read this block first.
+>
+> When the review returns: copy its report from `.claude/worktrees/agent-*/design/agent-reports/
+> 2026-09-06-build-4868-T1-T6-review.md` into the main tree, persist it in its own commit, machine-check
+> every checkable claim into `…-review-VERIFICATION.md` (own commit), then fold Criticals/Importants
+> (+ cheap Minors) via ONE opus agent under a brief, commit the fold with the gate output, sonnet
+> re-verify in a worktree, persist → ledger → close FR-49 at 0C/0I. Remove the reviewer's worktree
+> (`git worktree remove --force` + `git branch -D`) after copying. Then: the calendar — the 09-15
+> real-data run (S5) needs the owner's 2026 exports; owner decisions S1/S2/S6/S7/S9/S10/T7 untouched;
+> nothing pushed. The overnight progress page can be refreshed with today's closures:
+> https://claude.ai/code/artifact/ff1208a5-0353-4b33-9810-96e0bca8b59b
+
 > ## ★★★ RESUME 2026-09-06 (later) — 1099-DA build GREEN and closed; 4868/1040-V build: T1+T5 LANDED `dc9941d5` (3109 tests), T2–T4 being dispatched to one opus agent. Read this block first.
 >
 > **Commits since the block below:** `c25f7489` fold of the T3–T6 review; `a0e90f1b` process;

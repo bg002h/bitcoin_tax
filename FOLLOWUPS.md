@@ -6239,6 +6239,12 @@ build, each with an owning phase.
   attachment sequence, check every field lands in its box on paper, sign block, envelope from the
   IRS page, 1040-V or Direct Pay, certified-mail receipt into the vault's record set) — done once
   before the season and again in March 2027 on the real packet.**
+  **★ BUILD LANDED 2026-09-06** (spec GREEN r6; archive `b60c600c`, T1+T5 `dc9941d5`, T2–T4 `a51b8c53`;
+  3145 tests): `btctax extension` and `export-irs-pdf --pay-by-check` exist, with the §7503 weekend
+  shifter (DC holidays deliberately unmodelled — recorded in `year_record.rs`). The T1–T6 seam review
+  is in flight; FR-49 closes when it reaches 0C/0I. Residue filed by the build: the cite-check excuse
+  list gained the four (stem, year) pairs like 36 of 37 others — closing them is a `FORMS` row plus a
+  cite-check extract per pair.
 - **FR-50 — `forms port-status <year>`** enumerates from the emitting surface (`Stem` × year) and
   prints `NO PRIOR SIDE` / `NO DRAFT` / `NO FINAL` per cell instead of omitting the row. Two forms
   fell out of the computed work list today (`f1040s1`, `f8283`), plus `f8995a`. Archive

@@ -83,7 +83,11 @@ FR-49) are folded into §3's NOW bucket below and re-owned in `FOLLOWUPS.md`.
   ledger `e13fa24b`) folded `c25f7489` and re-verified **0C/0I/0M/0N, 9/9 resolved** —
   `…T3-T6-review-r2.md`). **The 1099-DA build is GREEN.** T7 is the owner item below.
   ★ The spec `design/SPEC_form_4868_1040v.md` (FR-49, S8) is **GREEN r6** (five review rounds, 0C/0I at
-  r5); its build T1–T6 follows the 1099-DA build.
+  r5). **Build LANDED 2026-09-06:** the TY2024 archive `b60c600c`; T1+T5 `dc9941d5` (rows, maps,
+  year records, row gates, the reader walk's grid bucket); T2–T4 `a51b8c53` (`fill_form_4868`,
+  `fill_form_1040v`, `btctax extension`, `export-irs-pdf --pay-by-check`), each by one opus agent
+  under a persisted brief; 3145 tests. The independent SEAM review of T1–T6 is in flight
+  (`BRIEF-review-4868-T1-T6.md`); T6's `report`-naming residue is adjudicated there.
 
 - **T7 (spec 1099-DA, recorded 2026-09-06) — the OWNER ACTION under Notice 2026-20 §4.02(2). Dated:
   before the next 2026 sale on a custodial venue, and no later than 2026-09-30 (strategy S3's month).**
