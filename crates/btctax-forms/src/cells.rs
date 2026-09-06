@@ -1,7 +1,9 @@
 //! Money-cell emission shared by the flat forms (Schedule SE / Form 1040 / Form 8283).
 //!
-//! A [`MoneyCell`] is either a single field (2024/2025) carrying the whole `fmt_money` string, or a
-//! **dollars+cents [`MoneyPair`]** (the 2017 forms). For a pair the geometric oracle treats the two
+//! A [`MoneyCell`] is either a single field (every bundled map today) carrying the whole `fmt_money`
+//! string, or a **dollars+cents [`MoneyPair`]** — the shape the older, pre-TCJA revisions used, and
+//! still a supported map shape though the S9 drop of the TY2017 package (owner ruling 2026-09-06)
+//! left no bundled map using it. For a pair the geometric oracle treats the two
 //! widgets as ONE logical cell at the **dollars-field** geometry: the dollars field is the
 //! column-x-/descent-checked [`FlatPlacement::cell`]/[`FlatPlacement::col_only`]; the cents field
 //! rides along as an authorized-but-geometry-exempt [`FlatPlacement::free`] write. A map that swaps
@@ -17,8 +19,8 @@ use btctax_core::tax::packet::Ssn;
 use btctax_core::Usd;
 use rust_decimal_macros::dec;
 
-/// 0-based page index a field lives on (page 2 = the 2017 §B long Schedule SE / the Rev. 12-2014
-/// Section B tables; page 1 otherwise). Derived from the fully-qualified name, exactly as the
+/// 0-based page index a field lives on (page 2 = a two-page form's second page, e.g. the Rev.
+/// 12-2014 Form 8283 Section B tables; page 1 otherwise). Derived from the fully-qualified name, exactly as the
 /// verifier's own `page_of` — so a placement's page always agrees with its widget.
 pub fn page_of(fqn: &str) -> usize {
     if fqn.contains("Page2") {
@@ -178,4 +180,28 @@ pub fn push_identity(
     ));
     p.push(FlatPlacement::free(cells.ssn.clone(), page_of(&cells.ssn)));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// ★ The REAL 2-decimal/zero-pad formatter (not raw `Decimal::to_string`).
+    ///
+    /// Carried over from `tests/sp3b.rs::money_pair_splits_dollars_and_cents` when S9 (owner ruling
+    /// 2026-09-06) dropped the TY2017 form package: that test's second half filled a 2017 Schedule
+    /// SE and died with the package, but these assertions are about the FORMATTER, not the year, so
+    /// they move here beside it. [`MoneyCell::Pair`] stays a supported map shape — no bundled map
+    /// uses it today, and the day one does this is the pin that says what it must print.
+    #[test]
+    fn money_pair_splits_dollars_and_cents() {
+        assert_eq!(fmt_money_pair(dec!(127200)), ("127200".into(), "00".into()));
+        assert_eq!(
+            fmt_money_pair(dec!(45500.50)),
+            ("45500".into(), "50".into())
+        );
+        assert_eq!(fmt_money_pair(dec!(100.05)), ("100".into(), "05".into()));
+        assert_eq!(fmt_money_pair(dec!(11451.4)), ("11451".into(), "40".into()));
+        assert_eq!(fmt_money_pair(dec!(0)), ("0".into(), "00".into()));
+    }
 }

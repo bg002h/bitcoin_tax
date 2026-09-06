@@ -10,13 +10,19 @@
 //!   year the build cannot fill), and
 //! - a year could be BUNDLED on disk and never listed (its assets compile in, unreachable).
 //!
-//! **What TY2017 turned out to be.** Measured by this file: TY2017 is genuinely wired — five forms,
-//! five maps, bound by `build.rs` and served by `Schema` arms in all five map types — so a TY2017 fill
-//! really does emit a filled IRS PDF. What it has **none** of is the authority chain every other
-//! shipped year has: **0** provenance notes, **0** `MANIFEST.json` entries, **0** committed extracts,
-//! **0** geometry fixtures and **0** `[census]` sections. Nothing hash-pins the five bundled PDFs to
-//! an irs.gov document, nothing can re-derive them, and no gate asks whether the TY2017 maps account
-//! for every field on the TY2017 pages. **TY2017 is supported in fill, unsupported in evidence.**
+//! **What TY2017 turned out to be, and what was done about it.** Measured by this file: TY2017 was
+//! genuinely wired — five forms, five maps, bound by `build.rs` and served by `Schema` arms in all
+//! five map types — so a TY2017 fill really did emit a filled IRS PDF. What it had **none** of was
+//! the authority chain every other shipped year has: **0** provenance notes, **0** `MANIFEST.json`
+//! entries, **0** committed extracts, **0** geometry fixtures and **0** `[census]` sections. Nothing
+//! hash-pinned the five bundled PDFs to an irs.gov document, nothing could re-derive them, and no
+//! gate asked whether the TY2017 maps accounted for every field on the TY2017 pages. **TY2017 was
+//! supported in fill, unsupported in evidence** — and this file is the instrument that measured it.
+//!
+//! ★★ **On 2026-09-06 the owner ruled "S9 drop"** (`design/ROADMAP_STATUS.md` §0a, `FOLLOWUPS.md`
+//! FR-61): the TY2017 form package was deleted rather than evidenced. That is the OTHER legal way to
+//! close a row of this matrix, and the one this file always named — see the paragraph on narrowing
+//! below.
 //!
 //! ## Both axes are DERIVED, never hand-listed
 //!
@@ -32,16 +38,21 @@
 //! ## The record is a RATCHET, and it is deliberately not green-by-narrowing
 //!
 //! 21 of the 37 bundled (year, form) cells were missing at least one supporting artifact when this
-//! was written, 54 obligations unmet in total; the four Form 4868 / Form 1040-V cells added
-//! 2026-09-06 are complete on all eight and add no row. Those are recorded in [`KNOWN_GAPS`] **cell by cell, artifact by
+//! was written, 54 obligations unmet in total. Since then the four Form 4868 / Form 1040-V cells
+//! (2026-09-06) landed complete on all eight and added no row, and the five TY2017 cells left the
+//! same day with their package (S9). **Measured at that commit: 8 of the 36 bundled cells carry a
+//! gap, 11 obligations unmet** — down from 13 cells / 36 obligations, i.e. exactly the five TY2017
+//! rows and their 25. Those are recorded in [`KNOWN_GAPS`] **cell by cell, artifact by
 //! artifact** — measured, never estimated. A gap that appears anywhere else fails. A gap that *closes*
 //! also fails, with instructions to delete the line: an excuse register that may be edited in either
 //! direction records nothing.
 //!
-//! ★ **Removing a year from `SUPPORTED_YEARS` cannot make this file green.** Drop 2017 and its rows
-//! stop matching a bundled cell (this file fails) *and* `forms/2017/` becomes a bundled-but-unsupported
-//! directory ([`supported_years_and_bundled_year_directories_agree`] fails). The only way out is to
-//! record it, in the open.
+//! ★ **Narrowing `SUPPORTED_YEARS` cannot make this file green — only deleting the PACKAGE can.**
+//! Dropping 2017 from `SUPPORTED_YEARS` alone leaves its rows unmatched by a bundled cell (this file
+//! fails) *and* makes `forms/2017/` a bundled-but-unsupported directory
+//! ([`supported_years_and_bundled_year_directories_agree`] fails). The two legal exits are to record
+//! the gap in the open, or to remove the year's files entirely — which is what S9 did on
+//! 2026-09-06. Both are visible in the diff; neither is a quiet edit to a list.
 
 use btctax_forms::testonly::{
     Form1040Map, Form1040VMap, Form4868Map, Form6251Map, Form8275Map, Form8283Map, Form8949Map,
@@ -78,39 +89,16 @@ const OBLIGATIONS: [&str; 8] = [
 /// ★ **The honest matrix.** Every bundled (year, form) cell that is missing at least one obligation,
 /// with the exact set. Measured — `git log -1` the file that produced these, not a hand count.
 ///
-/// Reading it: **TY2017 has no authority chain at all** (5 cells × 5 artifacts); TY2024 is complete
+/// Reading it: TY2024 is complete
 /// but for Form 8283, whose bundled Rev. 12-2023 asset matches **no** committed note — its
 /// `design/forms/extract/f8283--2024.txt` exists with nothing pinning it to the bytes we ship; TY2025
 /// has 15 committed forms of which **10 are unreachable** (asset and map committed, never included,
 /// never dispatched — the inverse defect: a *prepared* year refused) and 5 more that are reachable but
 /// carry no `[census]`.
 const KNOWN_GAPS: &[(i32, &str, &[&str])] = &[
-    // ── TY2017 — wired and fillable, with zero evidence behind it. ──────────────────────────────
-    (
-        2017,
-        "f1040",
-        &["note", "manifest", "extract", "geometry", "census"],
-    ),
-    (
-        2017,
-        "f8283",
-        &["note", "manifest", "extract", "geometry", "census"],
-    ),
-    (
-        2017,
-        "f8949",
-        &["note", "manifest", "extract", "geometry", "census"],
-    ),
-    (
-        2017,
-        "schedule_d",
-        &["note", "manifest", "extract", "geometry", "census"],
-    ),
-    (
-        2017,
-        "schedule_se",
-        &["note", "manifest", "extract", "geometry", "census"],
-    ),
+    // The five TY2017 rows (13 cells / 36 obligations → 8 / 11 — the whole authority chain, 25
+    // obligations) were removed 2026-09-06 when S9 dropped the TY2017 form package: the cells they
+    // excused no longer exist. Counts MEASURED off this list at that commit, not derived.
     // ── TY2024 — the reference year; one asset stands outside the archive. ──────────────────────
     (2024, "f8283", &["note", "manifest", "extract", "geometry"]),
     // ── TY2025 — step 5 (2026-09-05) wired eight of the ten; two remain bound but not DISPATCHED
@@ -136,7 +124,7 @@ const KNOWN_GAPS: &[(i32, &str, &[&str])] = &[
 /// records is indistinguishable from a year silently borrowing a neighbouring year's geometry,
 /// which is the exact failure `Form6251Map`'s doc comment exists to describe — and because a NEW
 /// bundled year with no 8275 of its own will appear here, loudly, the day it is added.
-const KNOWN_ALIASES: &[(i32, &str)] = &[(2017, "f8275"), (2025, "f8275")];
+const KNOWN_ALIASES: &[(i32, &str)] = &[(2025, "f8275")]; // (2017, "f8275") dropped with the TY2017 package (S9, 2026-09-06)
 
 /// Bundled year directories that `SUPPORTED_YEARS` does not list. Since spec 1099-DA T0 this is
 /// exactly the `preparing` years with a record and no template (TY2026): `SUPPORTED_YEARS` is
@@ -152,8 +140,8 @@ const BUNDLED_BUT_NOT_SUPPORTED: &[i32] = &[2026]; // TY2026: a `preparing` reco
 /// How many forms each supported year bundles. Pinned so that **deleting** an asset is as loud as
 /// adding one — a cell with no recorded gap vanishing from the matrix would otherwise be silent.
 // 2026-09-06: 2024 17 → 19 and 2025 15 → 17 — the Form 4868 and Form 1040-V rows (spec 4868/1040-V
-// T1). TY2017 bundles neither: the fillers begin at TY2024 and no 2017 authority is archived.
-const BUNDLED_FORMS_PER_YEAR: &[(i32, usize)] = &[(2017, 5), (2024, 19), (2025, 17)];
+// T1). The `(2017, 5)` row was removed the same day: S9 dropped the TY2017 package (owner ruling).
+const BUNDLED_FORMS_PER_YEAR: &[(i32, usize)] = &[(2024, 19), (2025, 17)];
 
 /// Bundled stems for which this build ships **no map type at all**, so nothing can parse the
 /// committed `*.map.toml`. Recorded rather than skipped (`CLAUDE.md`: *skipping is not passing*).
@@ -320,8 +308,9 @@ fn measure() -> BTreeMap<(i32, String), CellState> {
     // Liveness (steps-2/3 review Q6): the `wired` reader consults the generated bindings; a build
     // that bound nothing would measure every cell unwired and this file would report a defect that
     // is really a blind instrument. The old reader asserted `include_bytes!` appeared in src/.
+    // 41 → 36 on 2026-09-06: S9 dropped the five TY2017 (pdf, map) pairs.
     assert!(
-        btctax_forms::bundled::BUNDLED.len() >= 41,
+        btctax_forms::bundled::BUNDLED.len() >= 36,
         "the generated bindings hold {} pairs — the reader has gone blind",
         btctax_forms::bundled::BUNDLED.len()
     );

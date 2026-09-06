@@ -345,9 +345,13 @@ fn schedule_d_fills_3_7_10_15_16_and_qof() {
 /// two cases the form's own routing skips it (line 16 a loss; line 16 zero).
 ///
 /// ★★ **The on-states are DUMPED, not assumed, and they DIFFER between revisions**: 2024/2025 use
-/// `"1"`/`"2"` while **2017 uses `"Yes"`/`"No"`**. Asserting the literal per-year on-state here is what
+/// `"1"`/`"2"` — while the TY2017 Rev. used **`"Yes"`/`"No"`**, which is the measurement that proved
+/// the divergence is real (that package was dropped 2026-09-06, owner ruling S9, so the two bundled
+/// revisions now happen to agree). Asserting the literal per-year on-state here is what
 /// makes an on-state copied by analogy fail — a wrong on-state writes an OFF box, i.e. an unanswered
-/// line 17 that looks filled to any test that only checks "some value was written".
+/// line 17 that looks filled to any test that only checks "some value was written". The match below
+/// therefore stays a per-year ENUMERATION with no wildcard: a new revision must be dumped, never
+/// inherited.
 ///
 /// ★ Lines 18-22 are deliberately NOT answered, and that is asserted too: line 20's *"…and you are
 /// not filing Form 4952?"* is a fact no btctax input carries, so a Yes there would be testimony the
@@ -399,14 +403,18 @@ fn schedule_d_line17_is_derived_on_every_revision() {
     // The per-revision Yes/No on-states, DUMPED from each bundled PDF with `xtask dump-fields`.
     let expected_on = |year: i32, yes: bool| -> &'static str {
         match (year, yes) {
-            (2017, true) => "Yes",
-            (2017, false) => "No",
-            (_, true) => "1",
-            (_, false) => "2",
+            (2024 | 2025, true) => "1",
+            (2024 | 2025, false) => "2",
+            (other, _) => panic!(
+                "no Schedule D line-17 on-state dumped for TY{other}. Run `xtask dump-fields` \
+                 on that year's blank PDF and add the arm — the TY2017 Rev. used \"Yes\"/\"No\" \
+                 where 2024/2025 use \"1\"/\"2\", so inheriting a neighbour's on-state writes an \
+                 OFF box that reads back as checked."
+            ),
         }
     };
 
-    for year in [2017, 2024, 2025] {
+    for year in [2024, 2025] {
         let map = ScheduleDMap::for_year(year).unwrap();
         let pair = map
             .line17
@@ -469,7 +477,7 @@ fn schedule_d_line17_is_derived_on_every_revision() {
 fn a_swapped_yes_no_map_fails_closed_instead_of_rendering_a_blank_box() {
     let totals = totals_for(&mixed_rows()); // both gains ⇒ line 17 is answered
     let by_box = btctax_core::schedule_d_by_box(&mixed_rows());
-    for year in [2017, 2024, 2025] {
+    for year in [2024, 2025] {
         let mut map = ScheduleDMap::for_year(year).unwrap();
         let pair = map.line17.as_mut().unwrap();
         // Swap ONLY the field names. Each on-state stays with its original index, so "Yes" is now
@@ -491,7 +499,7 @@ fn a_swapped_yes_no_map_fails_closed_instead_of_rendering_a_blank_box() {
 
     // ★ The other half of the guarantee: the UNSWAPPED map still fills. A guard that rejected
     // everything would also pass the assertions above.
-    for year in [2017, 2024, 2025] {
+    for year in [2024, 2025] {
         let map = ScheduleDMap::for_year(year).unwrap();
         fill_schedule_d_totals(&totals, &by_box, &map)
             .unwrap_or_else(|e| panic!("{year}: the correct map must still fill — {e}"));
@@ -504,7 +512,7 @@ fn a_swapped_yes_no_map_fails_closed_instead_of_rendering_a_blank_box() {
 #[test]
 fn schedule_d_crypto_slice_leaves_lines_18_through_22_blank() {
     let totals = totals_for(&mixed_rows()); // both gains — the branch that reaches line 18
-    for year in [2017, 2024, 2025] {
+    for year in [2024, 2025] {
         let bytes = btctax_forms::fill_schedule_d(
             &totals,
             &btctax_core::schedule_d_by_box(&mixed_rows()),

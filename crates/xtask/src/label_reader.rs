@@ -1137,11 +1137,6 @@ mod map_label_join_tests {
     /// a map NOT here without one, is a red: the two blanks must never look alike (L5).
     const GRID_MAPS: &[(&str, &str, &str)] = &[
         (
-            "2017",
-            "f8949",
-            "positional transaction rows (`[[part1_rows]]`); no numbered line",
-        ),
-        (
             "2024",
             "f8949",
             "positional transaction rows; no numbered line",
@@ -1155,11 +1150,6 @@ mod map_label_join_tests {
             "2024",
             "f8275",
             "Form 8275's disclosure items are positional rows; no numbered line",
-        ),
-        (
-            "2017",
-            "f8283",
-            "positional property rows; the Rev. 12-2014 map binds no Section B question line (unreachable: no TY2017 geometry; listed so the ledger is total, r3 R1)",
         ),
         (
             "2025",
@@ -1426,7 +1416,8 @@ mod map_label_join_tests {
     /// copy of design/forms/2025/f8959--2025.pdf"*) and which nothing checked. A revised PDF
     /// bundled under an unchanged name now reports itself instead of joining to stale geometry.
     /// Measured 2026-09-05: of the 37 bundled map PDFs, 31 match exactly one fixture and none
-    /// matches two; the 6 that match none are TY2017's five and `2024/f8283.pdf`, all named below.
+    /// matches two; the 6 that matched none were TY2017's five and `2024/f8283.pdf`. Since S9
+    /// dropped the TY2017 package (2026-09-06) `2024/f8283.pdf` is the only one left, named below.
     ///
     /// ★ A map with no match is carried as an `Err` reason and gated in
     /// [`every_mapped_line_lands_on_its_own_printed_label`], never dropped.
@@ -1541,14 +1532,9 @@ mod map_label_join_tests {
 
     /// ★ RATCHETS. Raise them when coverage grows; never lower one to make a red go away.
     const YEAR_FLOORS: &[YearFloor] = &[
-        YearFloor {
-            year: "2017",
-            min_joins: 0,
-            max_unwitnessed: 5,
-            why: "TY2017 is the historical corpus year. None of its five forms is archived under \
-                  design/forms/2017/, so no geometry fixture can be generated and no line->label \
-                  join is reachable. Nothing emits a TY2017 return.",
-        },
+        // The TY2017 floor (min_joins 0, max_unwitnessed 5) was removed 2026-09-06 when S9 dropped
+        // the TY2017 form package — the five unwitnessed maps it tolerated no longer exist. It was
+        // this table's only zero-join year.
         YearFloor {
             year: "2024",
             // 99 → 235 on 2026-09-06: the binding parser dropped every `line = "…" # comment` (R2),

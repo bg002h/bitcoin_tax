@@ -24,9 +24,13 @@ use btctax_core::{DonationDetails, Form8283HowAcquired, Form8283Row, Form8283Sec
 use time::macros::format_description;
 
 /// Section A column x-clusters (hand-pinned), **per form revision**: donee(a), desc(c), date_contrib(d),
-/// date_acq(e), how(f), cost(g), fmv(h), method(i). On the 2017 Rev. 12-2014 form the (g)/(h) money
-/// columns are dollars+cents pairs, so their clusters EXCLUDE the narrow cents widget (dollars cx:
-/// cost≈317, fmv≈403; cents cx≈360/446) — a dollars↔cents swap fails closed.
+/// date_acq(e), how(f), cost(g), fmv(h), method(i).
+///
+/// ★ The `SEC_A_CLUSTERS_2017` / `SEC_B_CLUSTERS_2017` bands were dropped 2026-09-06 with the TY2017
+/// form package (owner ruling S9). On that Rev. 12-2014 form the money columns were dollars+cents
+/// pairs whose clusters had to EXCLUDE the narrow cents widget (Section A dollars cx: cost≈317,
+/// fmv≈403, cents cx≈360/446; Section B dollars cx: fmv≈526, cost≈266, deduction≈439, cents
+/// cx≈569/309/482) — the recorded evidence for why the panic below refuses to widen to a wildcard.
 const SEC_A_CLUSTERS_2023: &[(f32, f32)] = &[
     (58.0, 230.0),
     (404.0, 576.0),
@@ -37,19 +41,8 @@ const SEC_A_CLUSTERS_2023: &[(f32, f32)] = &[
     (353.0, 424.0),
     (426.0, 576.0),
 ];
-const SEC_A_CLUSTERS_2017: &[(f32, f32)] = &[
-    (50.0, 235.0),
-    (400.0, 580.0),
-    (50.0, 125.0),
-    (118.0, 190.0),
-    (183.0, 285.0),
-    (278.0, 356.0),
-    (364.0, 442.0),
-    (450.0, 580.0),
-];
 /// Section B column x-clusters (hand-pinned), **per form revision**: desc(a), fmv(c), date_acq(d),
-/// how(e), cost(f), deduction(i). On the 2017 form fmv/cost/deduction are dollars+cents pairs (dollars
-/// cx: fmv≈526, cost≈266, deduction≈439; cents cx≈569/309/482 — excluded from the clusters).
+/// how(e), cost(f), deduction(i).
 const SEC_B_CLUSTERS_2023: &[(f32, f32)] = &[
     (59.0, 258.0),
     (504.0, 576.0),
@@ -58,19 +51,9 @@ const SEC_B_CLUSTERS_2023: &[(f32, f32)] = &[
     (288.0, 359.0),
     (504.0, 576.0),
 ];
-const SEC_B_CLUSTERS_2017: &[(f32, f32)] = &[
-    (46.0, 248.0),
-    (487.0, 565.0),
-    (46.0, 125.0),
-    (118.0, 233.0),
-    (227.0, 305.0),
-    (400.0, 478.0),
-];
 
 fn sec_clusters(year: i32, section: Form8283Section) -> &'static [(f32, f32)] {
     match (year, section) {
-        (2017, Form8283Section::A) => SEC_A_CLUSTERS_2017,
-        (2017, Form8283Section::B) => SEC_B_CLUSTERS_2017,
         // ★★★ **THE THIRD WILDCARD, and it was found by a reviewer holding all three at once.**
         //
         //     `form1040.rs` and `schedule_se.rs` had byte-for-byte this defect and both were fixed
@@ -422,8 +405,11 @@ fn fill_one(
             for (i, row) in rows.iter().enumerate() {
                 let m = &b.rows[i];
                 let ord = i as u32;
-                // 2017: "j Other" gives no category, so identify the digital-asset nature by a printed
-                // note prepended to the FIRST row's (a) description.
+                // A revision with no "k Digital assets" box (the Rev. 12-2014 form, where BTC went
+                // under "j Other") gives no category, so the map carries a printed note prepended to
+                // the FIRST row's (a) description. NO bundled map sets `btc_property_note` since S9
+                // dropped the TY2017 package (2026-09-06) — the branch is the map's to switch on,
+                // and stays because an older revision is exactly what it is for.
                 let desc = match (i, &b.btc_property_note) {
                     (0, Some(note)) => format!("{note}: {}", row.description),
                     _ => row.description.clone(),
@@ -448,7 +434,9 @@ fn fill_one(
                 );
                 push_money(&mut w, &mut p, &m.cost, row.cost_basis, 4, Some((4, ord)));
                 // ★★★ P3 — "Amount claimed as a deduction" is written ONLY on a revision whose map
-                // carries the cell, and since 2026-08-21 that is the Rev. 12-2014 (TY2017) map alone.
+                // carries the cell. From 2026-08-21 that was the Rev. 12-2014 (TY2017) map alone, and
+                // since S9 dropped that package (2026-09-06) it is NO bundled map: nothing writes
+                // column (i) today. The condition stays because it is the map's to make.
                 //
                 // i8283, verbatim: "Complete column (i), amount claimed as a deduction, if you are a
                 // pass-through entity or a member of a pass-through entity." An individual donating

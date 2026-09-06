@@ -509,7 +509,7 @@ fn schedule_d_selected_without_form_8949_is_refused_and_writes_nothing() {
 fn unsupported_year_is_refused() {
     let (_dir, vault) = make_vault(&real_events());
     let out = tempfile::tempdir().unwrap();
-    // This build bundles TY2017 + TY2024 + TY2025; 2023 is refused.
+    // This build bundles TY2024 + TY2025 (TY2026 is record-only); 2023 is refused.
     let err = cmd::admin::export_irs_pdf(
         &vault,
         &pp(),
@@ -525,7 +525,7 @@ fn unsupported_year_is_refused() {
             err,
             CliError::FormFill(btctax_forms::FormsError::UnsupportedYear(2023))
         ),
-        "only 2017/2024/2025 are bundled, got {err:?}"
+        "only 2024/2025 are bundled, got {err:?}"
     );
     // ★ whole-branch tax M-2: the refusal writes ZERO bytes. Before the pre-`mkdir_out` year check, the
     // slice pipeline had already created the directory and written `basis_methodology.txt` +
@@ -603,6 +603,10 @@ fn ty2024_real_ledger_fills_box_c_f_and_line7_and_da() {
     // Form 1040: line 7 (Line4a-11 f1_52) = gain $300; DA question (c1_5[0]) = YES.
     let f1040 = std::fs::read(out.path().join("form_1040_capgains.pdf")).unwrap();
     let doc = load(&f1040).unwrap();
+    // ★ Carried over from the deleted TY2017 twin (S9, 2026-09-06): XFA must be dropped from the
+    // 1040 too, not only from the 8949 asserted above — an XFA-bearing 1040 renders blank in the
+    // reader the filer is most likely to open it in.
+    assert!(!pdf_has_xfa(&doc).unwrap(), "XFA must be dropped");
     let idx = index(&collect_fields(&doc).unwrap());
     assert_eq!(
         text_value(
@@ -618,83 +622,55 @@ fn ty2024_real_ledger_fills_box_c_f_and_line7_and_da() {
         Some("1"),
         "Digital-Asset question = YES (2024 c1_5, adjacency-selected)"
     );
+    // ★ Also carried over from the deleted TY2017 twin: the REPORT says the capital-gain line was
+    // filled, so a caller that never opens the PDF still learns it.
+    assert!(
+        report.form_1040_filled_7a,
+        "line 7 filled (active gain) — the report must say so"
+    );
 }
 
-/// A REAL short-term round-trip in 2017: buy 0.01 BTC @ $200, sell it @ $500 (gain $300).
-fn real_events_2017() -> Vec<LedgerEvent> {
-    vec![
-        ev(
-            "buy-1",
-            datetime!(2017-01-05 12:00 UTC),
-            EventPayload::Acquire(Acquire {
-                sat: 1_000_000,
-                usd_cost: dec!(200),
-                fee_usd: dec!(0),
-                basis_source: BasisSource::ExchangeProvided,
-            }),
-        ),
-        ev(
-            "sell-1",
-            datetime!(2017-06-15 12:00 UTC),
-            EventPayload::Dispose(Dispose {
-                sat: 1_000_000,
-                usd_proceeds: dec!(500),
-                fee_usd: dec!(0),
-                kind: DisposeKind::Sell,
-            }),
-        ),
-    ]
-}
-
+/// ★★ **S9 KILL — `export-irs-pdf --tax-year 2017` is now a REFUSAL, and it names the years that
+/// remain.**
+///
+/// Until 2026-09-06 this year exported a full crypto-slice packet off five bundled TY2017 PDFs; the
+/// owner's S9 ruling (`design/ROADMAP_STATUS.md` §0a, `FOLLOWUPS.md` FR-61) deleted that package
+/// because it had no archived authority behind it. The user-visible consequence is exactly this
+/// refusal, so it is pinned where a filer would meet it — at the command, not at
+/// `btctax_forms::SUPPORTED_YEARS`.
+///
+/// Two halves, and the second is the one that rots: the error must be `UnsupportedYear(2017)`, and
+/// its message must name the years this build DOES bundle, so the filer is sent somewhere. The
+/// years in that sentence are derived (`bundled::years_sentence`), and
+/// `supported_years_cross_product.rs::the_unsupported_year_refusal_names_exactly_the_supported_years`
+/// holds the sentence to the constant; here we only assert the filer is told, and that a refusal
+/// writes no bytes.
 #[test]
-fn ty2017_real_ledger_fills_box_c_f_and_line13_no_da() {
-    // ★ End-to-end SP3b: a 2017 export fills the OFFICIAL 2017 PDFs — clean, XFA dropped, Box C checked
-    // (NOT Box I), the 1040 capital gain on LINE 13 (dollars f1-_51 + cents f1_52), and NO Digital-Asset
-    // question anywhere.
-    let (_dir, vault) = make_vault(&real_events_2017());
-    let out = tempfile::tempdir().unwrap();
-    let report = cmd::admin::export_irs_pdf(
-        &vault,
-        &pp(),
-        out.path(),
-        2017,
-        &[],
-        None,
-        Default::default(),
-    )
-    .expect("2017 real-ledger export must succeed");
-    assert!(!report.watermarked);
-
-    use btctax_forms::testonly::*;
-    // Form 8949: Box C (short-term) = c1_1[2] on /3; XFA dropped.
-    let f8949 = std::fs::read(out.path().join("f8949.pdf")).unwrap();
-    assert!(f8949.starts_with(b"%PDF"));
-    let doc = load(&f8949).unwrap();
-    assert!(!pdf_has_xfa(&doc).unwrap(), "XFA must be dropped");
-    let idx = index(&collect_fields(&doc).unwrap());
-    assert_eq!(
-        checkbox_on(&doc, idx["topmostSubform[0].Page1[0].c1_1[2]"].id).as_deref(),
-        Some("3"),
-        "Box C checked for short-term BTC on the 2017 form"
+fn ty2017_is_refused_by_the_export_and_the_refusal_names_the_bundled_years() {
+    let (_dir, vault) = make_vault(&real_events_2024());
+    let tmp = tempfile::tempdir().unwrap();
+    let out = tmp.path().join("slice-2017");
+    let err = cmd::admin::export_irs_pdf(&vault, &pp(), &out, 2017, &[], None, Default::default())
+        .expect_err("TY2017 has no bundled forms since S9 — the export must refuse");
+    assert!(
+        matches!(
+            err,
+            CliError::FormFill(btctax_forms::FormsError::UnsupportedYear(2017))
+        ),
+        "expected UnsupportedYear(2017), got {err:?}"
     );
-
-    // Form 1040: capital gain on LINE 13 (dollars f1-_51 = 300, cents f1_52 = 00); NO DA question.
-    let f1040 = std::fs::read(out.path().join("form_1040_capgains.pdf")).unwrap();
-    let doc = load(&f1040).unwrap();
-    assert!(!pdf_has_xfa(&doc).unwrap());
-    let idx = index(&collect_fields(&doc).unwrap());
-    assert_eq!(
-        text_value(&doc, idx["topmostSubform[0].Page1[0].f1-_51[0]"].id).as_deref(),
-        Some("300"),
-        "1040 line 13 dollars = Schedule D line 16"
+    let msg = err.to_string();
+    for year in btctax_forms::SUPPORTED_YEARS {
+        assert!(
+            msg.contains(&year.to_string()),
+            "the refusal must send the filer to TY{year}, which this build does bundle: {msg}"
+        );
+    }
+    assert!(
+        !msg.contains("2017 "),
+        "the refusal must not offer 2017 as a destination: {msg}"
     );
-    assert_eq!(
-        text_value(&doc, idx["topmostSubform[0].Page1[0].f1_52[0]"].id).as_deref(),
-        Some("00"),
-        "1040 line 13 cents"
-    );
-    // No Digital-Asset {/1,/2} pair is ANSWERED on the 2017 1040 (the form has no such question).
-    assert!(report.form_1040_filled_7a, "line 13 filled (active gain)");
+    assert!(!out.exists(), "a refused export writes NO bytes");
 }
 
 /// ★ THE DISPATCH, direction 1 (P6.5) — a year WITH full-return inputs gets the **full packet**, not the
@@ -1165,6 +1141,35 @@ fn a_full_return_without_an_ssn_refuses_and_writes_no_bytes() {
     );
 }
 
+/// A REAL short-term round-trip in **2025**, for the slice arm of
+/// [`the_two_pipelines_cannot_overwrite_each_others_files`]: buy 0.02 BTC @ $400, sell @ $900. The
+/// source refs differ from every other fixture in this file, so it composes with `real_events_2024()`
+/// without colliding on `EventId` and without either year's lots reaching the other.
+fn real_events_2025_for_the_slice_arm() -> Vec<LedgerEvent> {
+    vec![
+        ev(
+            "slice-buy-2025",
+            datetime!(2025-01-05 12:00 UTC),
+            EventPayload::Acquire(Acquire {
+                sat: 2_000_000,
+                usd_cost: dec!(400),
+                fee_usd: dec!(0),
+                basis_source: BasisSource::ExchangeProvided,
+            }),
+        ),
+        ev(
+            "slice-sell-2025",
+            datetime!(2025-06-15 12:00 UTC),
+            EventPayload::Dispose(Dispose {
+                sat: 2_000_000,
+                usd_proceeds: dec!(900),
+                fee_usd: dec!(0),
+                kind: DisposeKind::Sell,
+            }),
+        ),
+    ]
+}
+
 /// ★ **I7 / r2 NEW-I3 — the two pipelines cannot clobber each other, and this KAT FAILS if they can.**
 ///
 /// The r1 version of this test was VACUOUS: its key assertion (`for name in after − before { assert!(
@@ -1189,7 +1194,14 @@ fn the_two_pipelines_cannot_overwrite_each_others_files() {
     // ★ The ledger's crypto activity must be in 2024, so the PACKET actually contains the forms that
     // collide (here: Schedule D + Form 8949). With a crypto-less 2024 the packet is a lone 1040 and the
     // test cannot fail even with the fix reverted — which is precisely how the r1 version was vacuous.
-    let (_dir, vault) = make_vault(&real_events_2024());
+    //
+    // ★ And the SLICE year needs its own crypto too, for the same reason: a slice that writes no
+    // f8949/schedule_d cannot clobber anything. The slice year was 2017 until S9 dropped that
+    // package (2026-09-06); it is TY2025 now, so the ledger carries a round-trip in BOTH years —
+    // distinct source refs, distinct lots, so neither year's figures move.
+    let mut evs = real_events_2024();
+    evs.extend(real_events_2025_for_the_slice_arm());
+    let (_dir, vault) = make_vault(&evs);
     let out = tempfile::tempdir().unwrap();
     {
         let mut s = Session::open(&vault, &pp()).unwrap();
@@ -1247,12 +1259,19 @@ fn the_two_pipelines_cannot_overwrite_each_others_files() {
         &vault,
         &pp(),
         out.path(),
-        2017,
+        2025,
         &[],
         None,
         Default::default(),
     )
     .unwrap();
+    // The slice really wrote the colliding names, or step (2) proves nothing about clobbering.
+    for name in ["f8949.pdf", "schedule_d.pdf"] {
+        assert!(
+            out.path().join(name).exists(),
+            "the TY2025 slice must have written {name}, or the collision never happened"
+        );
+    }
 
     // ★ Every packet file must still be byte-for-byte what the packet wrote.
     for (name, bytes) in &snapshot {

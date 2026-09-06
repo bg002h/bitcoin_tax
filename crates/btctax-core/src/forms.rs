@@ -204,7 +204,8 @@ pub struct InformationReturnRegime {
 }
 
 impl InformationReturnRegime {
-    /// No Form 1099-DA at all (TY2017, TY2024). For FIXTURES; production joins `YEAR.toml` via the CLI.
+    /// No Form 1099-DA at all (TY2024 and every earlier year). For FIXTURES; production joins
+    /// `YEAR.toml` via the CLI.
     pub const NONE: Self = Self {
         proceeds: false,
         basis: false,

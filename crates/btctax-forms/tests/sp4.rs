@@ -8,8 +8,8 @@
 //! a wide free-text cell (like the Cohan description) at it overflows and fails closed.
 //!
 //! ★ Year coverage (arch r1 I-6 / tax r1 M-7): Form 8275 is REVISION-versioned, not tax-year-versioned
-//! — the ONE bundled Rev. 10-2024 asset + map is aliased to EVERY `SUPPORTED_YEAR` (2017/2024/2025).
-//! The per-year fill KAT below pins this for both non-2024 years.
+//! — the ONE bundled Rev. 10-2024 asset + map is aliased to EVERY `SUPPORTED_YEAR` (2024/2025 since
+//! S9 dropped TY2017 on 2026-09-06). The per-year fill KAT below pins this for the non-2024 year.
 
 use btctax_core::tax::form8275::Part1Item;
 use btctax_core::tax::printed::Printed8275;
@@ -319,8 +319,10 @@ const GOLDEN_8275_SHA256: &str = "c0b6fe3c12ed1aef74a9f5ee8c4f205a3546d508962b59
 #[test]
 fn form_8275_fills_for_every_supported_non_2024_year() {
     // ★ arch r1 I-6 / tax r1 M-7: Form 8275 is REVISION-versioned, not tax-year-versioned — the SAME
-    // bundled asset + map is aliased to 2017 AND 2025 (not just 2024), so a promoted disposal filed in
-    // either year still gets a real fillable disclosure.
+    // bundled asset + map serves 2025 as well as 2024, so a promoted disposal filed in either year
+    // still gets a real fillable disclosure. The 2017 arm went with the TY2017 package (S9,
+    // 2026-09-06); `for_year_answers_exactly_what_the_bundled_asset_registry_answers` below is the
+    // year-general half and needs no year list at all.
     let printed = sample_printed();
     let header = kitchen_sink_header();
     let pdf_2024 = btctax_forms::fill_form_8275(&printed, &header, 2024)
@@ -329,25 +331,18 @@ fn form_8275_fills_for_every_supported_non_2024_year() {
     let pdf_2025 = btctax_forms::fill_form_8275(&printed, &header, 2025)
         .unwrap()
         .expect("2025 must also produce a filled 8275 (aliased revision)");
-    let pdf_2017 = btctax_forms::fill_form_8275(&printed, &header, 2017)
-        .unwrap()
-        .expect("2017 must also produce a filled 8275 (aliased revision)");
 
-    // Since the SAME underlying asset/map content is used for all three years (only the map's `year`
+    // Since the SAME underlying asset/map content is used for both years (only the map's `year`
     // metadata tag differs, which is never itself written to the PDF), the output must be BYTE
-    // IDENTICAL across all three — the strongest possible pin of "aliased to every year".
+    // IDENTICAL — the strongest possible pin of "aliased to every year".
     assert_eq!(
         pdf_2024, pdf_2025,
         "2024 and 2025 fills must be byte-identical"
     );
-    assert_eq!(
-        pdf_2024, pdf_2017,
-        "2024 and 2017 fills must be byte-identical"
-    );
 
-    // Spot-check 2025 and 2017 actually carry the data (not just "didn't error").
-    for pdf in [&pdf_2025, &pdf_2017] {
-        let (doc, fields) = fields_of(pdf);
+    // Spot-check 2025 actually carries the data (not just "didn't error").
+    {
+        let (doc, fields) = fields_of(&pdf_2025);
         assert_eq!(tv(&doc, &fields, ROW1_AMOUNT).as_deref(), Some("12345"));
         assert_eq!(
             tv(&doc, &fields, IDENTITY_NAME).as_deref(),
@@ -1013,17 +1008,43 @@ fn the_census_block_is_parsed_not_ignored() {
 /// `#[serde(untagged)]`, and serde does not accept the attribute there. MEASURED here rather than
 /// assumed — the table *variant* (`MoneyPair`) carries it, and an untagged enum whose every variant
 /// fails is an error rather than a default, so an extra key inside an inline money-pair table is loud
-/// too. (TY2017's Schedule SE is the committed map that still uses dollars/cents pairs.)
+/// too.
+///
+/// ★ Re-pointed 2026-09-06 (S9): this read `forms/2017/schedule_se.map.toml`, the only committed map
+/// that used dollars/cents pairs, and that package is gone. NO bundled map uses a `MoneyPair` today
+/// — so the pair is now BUILT here, by rewriting one single-field money line of the committed TY2025
+/// Schedule SE map into the table form. That keeps the kill on the live `MoneyCell` code rather than
+/// deleting it with the last map that happened to exercise it, and the positive control below is
+/// what proves the constructed pair is a shape serde really accepts.
 #[test]
 fn an_unknown_key_inside_an_inline_money_pair_is_refused_too() {
     let path =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("forms/2017/schedule_se.map.toml");
-    let src = std::fs::read_to_string(&path).expect("the TY2017 Schedule SE map is committed");
-    ScheduleSeMap::parse(&src).expect("the committed TY2017 Schedule SE map parses");
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("forms/2025/schedule_se.map.toml");
+    let committed =
+        std::fs::read_to_string(&path).expect("the TY2025 Schedule SE map is committed");
+    ScheduleSeMap::parse(&committed).expect("the committed TY2025 Schedule SE map parses");
+
+    // Turn line 2's single money field into a dollars+cents PAIR. The cents field is a real widget
+    // on the same page; nothing here is filled, so only the parse shape matters.
+    const SINGLE: &str = "line2  = \"topmostSubform[0].Page1[0].f1_5[0]\"";
+    assert!(
+        committed.contains(SINGLE),
+        "the TY2025 Schedule SE map no longer spells line 2 as a single money field — re-point this \
+         plant at whichever line still does, or the pair below is not built from a real map"
+    );
+    let src = committed.replacen(
+        SINGLE,
+        "line2  = { dollars_field = \"topmostSubform[0].Page1[0].f1_5[0]\", \
+         cents_field = \"topmostSubform[0].Page1[0].f1_6[0]\" }",
+        1,
+    );
+    // Positive control: the PAIR itself parses. Without this the refusal below could be caused by
+    // the pair being unparseable for any reason at all, and the test would prove nothing.
+    ScheduleSeMap::parse(&src).expect("a well-formed inline money pair must still parse");
 
     let doctored = src.replacen(
         "{ dollars_field = ",
-        "{ pennies_field = \"topmostSubform[0].Page2[0].f2_99[0]\", dollars_field = ",
+        "{ pennies_field = \"topmostSubform[0].Page1[0].f1_99[0]\", dollars_field = ",
         1,
     );
     assert_ne!(doctored, src, "the money-pair plant did not apply");

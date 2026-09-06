@@ -1946,12 +1946,13 @@ pub struct ExtensionReport {
 /// itself names (*"If you're out of the country"* *"and file a calendar year income tax return, you
 /// can pay the tax and"* *"file your return or this form by June 15, 2026."*) — and NOT
 /// `return_due + 2 months`. The two differ whenever the April date was itself shifted: TY2017's
-/// committed `return_due` is **2018-04-17** (the Emancipation Day shift), and 04-17 + 2 months is
+/// `return_due` was **2018-04-17** (the Emancipation Day shift), and 04-17 + 2 months is
 /// 06-17 against the real **2018-06-15**. Pinned by test in both directions.
 ///
-/// Pure, and deliberately takes the record's date rather than reading it, so a TY2017-shaped record
-/// can be exercised on a path TY2017 itself cannot reach (it has no full-return tables, so the
-/// command refuses long before the warning).
+/// Pure, and deliberately takes the record's date rather than reading it, so a TY2017-SHAPED record
+/// can be exercised on a path TY2017 itself could never reach (it has no full-return tables, so the
+/// command refuses long before the warning). The test now CONSTRUCTS that record: S9 dropped the
+/// TY2017 form package on 2026-09-06, `forms/2017/YEAR.toml` with it — the dates are unchanged.
 pub fn extension_due_date(
     tax_year: i32,
     return_due: time::Date,
@@ -2149,9 +2150,9 @@ mod tests {
         );
     }
 
-    /// [I5] r2/NEW-IMPORTANT-1: pre-TY2025 (the securities-box revisions — TY2024/TY2017 are shipped
-    /// export years) the advisory must cite the 1099-B and the securities boxes (A/B, D/E separate,
-    /// C/F filed) — boxes G–L do not exist on those form revisions.
+    /// [I5] r2/NEW-IMPORTANT-1: pre-TY2025 (the securities-box revisions — TY2024 is the shipped
+    /// export year, TY2017 having been dropped by S9) the advisory must cite the 1099-B and the
+    /// securities boxes (A/B, D/E separate, C/F filed) — boxes G–L do not exist on those revisions.
     #[test]
     fn broker_advisory_pre_2025_cites_1099b_and_securities_boxes() {
         let msg =
@@ -2438,7 +2439,7 @@ mod slice_broker_tests {
     }
 
     /// ★★★ spec 1099-DA R6 (I-1/I-7) KILL — **the partially ported year.** No BUNDLED year is one
-    /// (2017/2024/2025 each carry every map their slice can reach), so the fixture is a probe list:
+    /// (2024/2025 each carry every map their slice can reach), so the fixture is a probe list:
     /// one map bound, the next missing. The gate names the FIRST missing stem in packet order, and
     /// a fully bound list passes — without which a gate that refused everything would look right.
     #[test]

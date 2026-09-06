@@ -10,9 +10,9 @@
 //!
 //! **★ Year coverage is MANDATORY, not conditional (arch r1 I-6 / tax r1 M-7).** Form 8275 is
 //! REVISION-versioned, not tax-year-versioned: `Form8275Map::for_year` and `pdf::f8275_pdf` both alias
-//! the single bundled Rev. 10-2024 asset to EVERY `SUPPORTED_YEAR` (2017/2024/2025), so a promoted
+//! the single bundled Rev. 10-2024 asset to EVERY `SUPPORTED_YEAR` (2024/2025), so a promoted
 //! disposal filed in any supported year gets a real fillable disclosure — this is what keeps T16's
-//! re-pointed BG-D8 gate from PERMANENTLY refusing a promoted 2025 (or 2017) export, the dominant
+//! re-pointed BG-D8 gate from PERMANENTLY refusing a promoted 2025 export, the dominant
 //! current-year flow.
 //!
 //! **★ Part II is WRAPPED, never truncated (T-f8275-part-ii-overflow).** The filer's Part II narrative

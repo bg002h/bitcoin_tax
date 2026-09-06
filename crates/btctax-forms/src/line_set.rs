@@ -21,22 +21,12 @@
 //! those revisions, which is step 5's criterion — `parse()` succeeding is not it.
 //!
 //! Many-to-one by design: several revisions may parse into one struct (`Form1040Map` absorbs
-//! 2017/2024/2025 with `Option` lines today).
+//! 2024/2025 with `Option` lines today).
 
-/// The closed set of line-set revisions this build knows. Generated 2026-09-05 from the 37 rows; the four `f4868`/`f1040v` revisions added 2026-09-06 (spec 4868/1040-V R1) make 41.
+/// The closed set of line-set revisions this build knows. Generated 2026-09-05 from the 37 rows; the four `f4868`/`f1040v` revisions added 2026-09-06 (spec 4868/1040-V R1) made 41, and the S9 drop of the TY2017 form package (owner ruling 2026-09-06) removed its five, leaving 36.
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum LineSet {
-    /// `"f1040/2017"`.
-    F1040_2017,
-    /// `"f8283/2017"`.
-    F8283_2017,
-    /// `"f8949/2017"`.
-    F8949_2017,
-    /// `"schedule_d/2017"`.
-    ScheduleD_2017,
-    /// `"schedule_se/2017"`.
-    ScheduleSe_2017,
     /// `"f1040/2024"`.
     F1040_2024,
     /// `"f1040s1/2024"`.
@@ -115,11 +105,6 @@ impl LineSet {
     /// Parse a row's `line_set` string. `None` is a revision this build does not know — a refusal.
     pub fn parse(s: &str) -> Option<LineSet> {
         match s {
-            "f1040/2017" => Some(LineSet::F1040_2017),
-            "f8283/2017" => Some(LineSet::F8283_2017),
-            "f8949/2017" => Some(LineSet::F8949_2017),
-            "schedule_d/2017" => Some(LineSet::ScheduleD_2017),
-            "schedule_se/2017" => Some(LineSet::ScheduleSe_2017),
             "f1040/2024" => Some(LineSet::F1040_2024),
             "f1040s1/2024" => Some(LineSet::F1040s1_2024),
             "f1040s2/2024" => Some(LineSet::F1040s2_2024),
@@ -163,11 +148,6 @@ impl LineSet {
     /// The row string this variant names.
     pub fn as_str(self) -> &'static str {
         match self {
-            LineSet::F1040_2017 => "f1040/2017",
-            LineSet::F8283_2017 => "f8283/2017",
-            LineSet::F8949_2017 => "f8949/2017",
-            LineSet::ScheduleD_2017 => "schedule_d/2017",
-            LineSet::ScheduleSe_2017 => "schedule_se/2017",
             LineSet::F1040_2024 => "f1040/2024",
             LineSet::F1040s1_2024 => "f1040s1/2024",
             LineSet::F1040s2_2024 => "f1040s2/2024",
@@ -209,11 +189,6 @@ impl LineSet {
 
     /// Every variant, for the tests that hold this set to the rows on disk.
     pub const ALL: &'static [LineSet] = &[
-        LineSet::F1040_2017,
-        LineSet::F8283_2017,
-        LineSet::F8949_2017,
-        LineSet::ScheduleD_2017,
-        LineSet::ScheduleSe_2017,
         LineSet::F1040_2024,
         LineSet::F1040s1_2024,
         LineSet::F1040s2_2024,
@@ -303,11 +278,6 @@ pub enum Schema {
 /// ★ THE MATCH. Exhaustive over [`LineSet`]: a new revision without an arm is a compile error.
 pub fn schema(ls: LineSet) -> Schema {
     match ls {
-        LineSet::F1040_2017 => Schema::Form1040Map,
-        LineSet::F8283_2017 => Schema::Form8283Map,
-        LineSet::F8949_2017 => Schema::Form8949Map,
-        LineSet::ScheduleD_2017 => Schema::ScheduleDMap,
-        LineSet::ScheduleSe_2017 => Schema::ScheduleSeMap,
         LineSet::F1040_2024 => Schema::Form1040Map,
         LineSet::F1040s1_2024 => Schema::Schedule1Map,
         LineSet::F1040s2_2024 => Schema::Schedule2Map,
@@ -357,8 +327,12 @@ mod tests {
             assert_eq!(LineSet::parse(ls.as_str()), Some(*ls));
         }
         assert_eq!(LineSet::parse("f6251/1999"), None);
-        // 37 → 41 on 2026-09-06: the four Form 4868 / Form 1040-V revisions (spec 4868/1040-V R1).
-        assert_eq!(LineSet::ALL.len(), 41);
+        // A revision this build no longer bundles does not parse — the five TY2017 revisions were
+        // dropped by S9 (owner ruling 2026-09-06) and must not survive as a parseable string.
+        assert_eq!(LineSet::parse("f1040/2017"), None);
+        // 37 → 41 on 2026-09-06 (the four Form 4868 / Form 1040-V revisions, spec 4868/1040-V R1),
+        // then 41 → 36 the same day: S9 dropped the five TY2017 revisions with their form package.
+        assert_eq!(LineSet::ALL.len(), 36);
     }
 
     /// The Unwired set is EXACTLY the two that step 5 could not wire — a shrink-only pin: wiring

@@ -461,9 +461,31 @@ mod tests {
             .problems()
             .iter()
             .any(|m| m.contains("before prices_through")));
-        // …a `slice` year with no table (R11)…
-        let mut r = YearReadiness::for_year(2017, &tables, &full, &prices);
-        assert!(r.problems().is_empty(), "TY2017 has its table");
+        // …a `slice` year with no table (R11). ★ Re-pointed 2026-09-06: TY2017 was the only
+        // bundled `slice` year and S9 dropped its package, so the declaration is CONSTRUCTED here
+        // from TY2025's committed record rather than deleted with the year that happened to carry
+        // it — the branch is live code and a future partial year is exactly what it is for.
+        let slice_record = btctax_forms::year_record::YearRecord::parse(
+            &btctax_forms::bundled::year_record_text(2025)
+                .expect("TY2025 has a committed record")
+                .replace(
+                    "status         = \"preparing\"",
+                    "status         = \"slice\"",
+                ),
+        )
+        .expect("the re-declared record parses");
+        assert_eq!(
+            slice_record.status,
+            btctax_forms::year_record::YearStatus::Slice,
+            "the plant must actually change the declared status, or this kill proves nothing"
+        );
+        let mut r = YearReadiness::for_year(2025, &tables, &full, &prices);
+        r.declared = Some(slice_record);
+        assert!(
+            r.problems().is_empty(),
+            "a slice year WITH its table is clean: {:?}",
+            r.problems()
+        );
         r.table = false;
         assert!(r
             .problems()
@@ -522,13 +544,6 @@ mod tests {
     fn the_regime_is_joined_from_the_year_record() {
         use btctax_core::InformationReturnRegime;
         let r = |y| regime_for(y).unwrap();
-        assert_eq!(
-            r(2017),
-            InformationReturnRegime {
-                proceeds: false,
-                basis: false
-            }
-        );
         assert_eq!(
             r(2024),
             InformationReturnRegime {

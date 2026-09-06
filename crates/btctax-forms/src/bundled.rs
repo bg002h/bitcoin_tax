@@ -136,7 +136,7 @@ pub fn bundled_years() -> &'static [i32] {
     BUNDLED_YEARS
 }
 
-/// The years a form can be FILLED, as English for a refusal message — `"2017, 2024 and 2025"` — so
+/// The years a form can be FILLED, as English for a refusal message — `"2024 and 2025"` — so
 /// no message ever carries a year literal again. Built from `TEMPLATE_YEARS`, not `BUNDLED_YEARS`:
 /// a `preparing` year with only its record (TY2026 since spec 1099-DA T0) is bundled but cannot fill
 /// anything, and a refusal that named it would send the filer to a year with zero forms.
@@ -213,7 +213,9 @@ mod tests {
     #[test]
     fn the_generated_bindings_are_the_files_on_disk_both_ways() {
         let disk = on_disk();
-        assert!(disk.len() >= 37, "walk found {}", disk.len());
+        // 37 → 41 on 2026-09-06 (the four Form 4868 / Form 1040-V maps), then 41 → 36 the same day:
+        // S9 (owner ruling) dropped the five TY2017 maps with their form package.
+        assert!(disk.len() >= 36, "walk found {}", disk.len());
         let mut bound: Vec<(String, i32)> = BUNDLED
             .iter()
             .map(|(s, y)| (s.file_stem().to_string(), *y))
@@ -250,9 +252,15 @@ mod tests {
                 "{year}/{stem_s}.map.toml"
             );
         }
-        // A pair the glob did not find is None, never a stale binding.
-        assert_eq!(template(Stem::F6251, 2017), None);
+        // A pair the glob did not find is None, never a stale binding. `(F6251, 2026)` is a
+        // BUNDLED year (its `YEAR.toml` alone) with no template of its own; `(F1040s1a, 2024)` is a
+        // stem that exists in another year. Both were `(F6251, 2017)`-shaped probes before S9
+        // dropped that package — a probe against a year the glob no longer knows would be
+        // vacuously true and prove nothing.
+        assert_eq!(template(Stem::F6251, 2026), None);
         assert_eq!(map_text(Stem::F1040s1a, 2024), None);
+        // And a year the glob has never known at all.
+        assert_eq!(template(Stem::F1040, 2017), None);
     }
 
     #[test]
@@ -265,10 +273,11 @@ mod tests {
             .collect();
         dirs.sort();
         assert_eq!(bundled_years(), dirs.as_slice());
+        // 2017 dropped 2026-09-06 (owner ruling S9) — its whole form package went with it.
         assert_eq!(
             bundled_years(),
-            &[2017, 2024, 2025, 2026],
-            "four years on disk today (2026 is a record-only preparing year)"
+            &[2024, 2025, 2026],
+            "three years on disk today (2026 is a record-only preparing year)"
         );
     }
 

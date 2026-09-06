@@ -27,12 +27,9 @@ use rust_decimal_macros::dec;
 const SE_COL_MID: usize = 0;
 const SE_COL_AMOUNT: usize = 1;
 /// Hand-pinned column-x clusters (measured from the blank PDF), **per form revision**. On the 2024/
-/// 2025 unified SE the amount fields sit at x ≈ [504,576] / MID ≈ [410,482]; on the OLD 2017 §B long
-/// form the (dollars) fields sit further left and each cluster must EXCLUDE its narrow cents widget so
-/// a dollars↔cents swap fails closed (2017 dollars: MID cx ≈ 392, AMOUNT cx ≈ 514; cents cx ≈ 443 /
-/// 566). These are the geometry ORACLE — deliberately code-side, never taken from the (distrusted) map.
+/// 2025 unified SE the amount fields sit at x ≈ [504,576] / MID ≈ [410,482]. These are the geometry
+/// ORACLE — deliberately code-side, never taken from the (distrusted) map.
 const SE_CLUSTERS_UNIFIED: &[(f32, f32)] = &[(410.0, 482.0), (504.0, 576.0)];
-const SE_CLUSTERS_2017: &[(f32, f32)] = &[(350.0, 433.0), (476.0, 554.0)];
 
 fn se_clusters(year: i32) -> &'static [(f32, f32)] {
     // ★★★ **ENUMERATED, not a wildcard.** This was `_ => SE_CLUSTERS_UNIFIED`, which handed
@@ -41,11 +38,12 @@ fn se_clusters(year: i32) -> &'static [(f32, f32)] {
     //     against, so a wildcard makes the instrument built to catch a mis-mapped cell the one thing
     //     that was never told the year changed.
     //
-    //     ★ **What a wildcard actually costs, measured on the one revision pair this repo holds
-    //       both sides of.** Centre-x read off the bundled blank PDF
-    //       (`./target/debug/xtask dump-fields crates/btctax-forms/forms/2017/schedule_se.pdf`),
-    //       membership decided by the same `verify::in_band` the oracle uses. BOTH columns lose the
-    //       guard, and the MID column additionally rejects the real cell:
+    //     ★ **What a wildcard actually costs — MEASURED, on the one revision pair this repo used
+    //       to hold both sides of.** Centre-x read off the then-bundled blank
+    //       `forms/2017/schedule_se.pdf` (`xtask dump-fields`), membership decided by the same
+    //       `verify::in_band` the oracle uses, against the bands then recorded for TY2017
+    //       (`SE_CLUSTERS_2017 = [(350,433), (476,554)]`). BOTH columns lose the guard, and the MID
+    //       column additionally rejects the real cell:
     //
     //         line 8a dollars (MID)     cx 392.4  IN     SE_CLUSTERS_2017[MID]    [350,433]
     //         line 8a cents   (MID)     cx 442.8  NOT IN SE_CLUSTERS_2017[MID]    [350,433]
@@ -58,12 +56,16 @@ fn se_clusters(year: i32) -> &'static [(f32, f32)] {
     //       Run 2024/2025's bands over the 2017 §B long form and each cents widget passes AS its
     //       dollars cell. A wildcard does not merely skip a check here; it disarms the dollars/cents
     //       guard the bands exist to be.
-    //       `the_2017_bands_exclude_the_cents_widgets_the_unified_bands_admit` below re-derives
-    //       every one of these numbers from the PDF and the map on every run.
     //
-    //       ★ Stated honestly: TY2017 has its OWN arm, so this is not a live path — it is the only
-    //         cross-revision measurement this repo can make, and it measures exactly the thing a
-    //         wildcard assumes away, that one revision's x-bands still mean what they meant.
+    //     ★★ **This measurement is now HISTORY, not a live check** (2026-09-06, owner ruling S9).
+    //       Dropping the TY2017 form package took `forms/2017/schedule_se.pdf`, its map, the
+    //       `SE_CLUSTERS_2017` bands and the test
+    //       `the_2017_bands_exclude_the_cents_widgets_the_unified_bands_admit` that re-derived
+    //       every number above from the PDF and the map on every run. The numbers were true when
+    //       measured and are kept as the recorded evidence for the panic below; they can no longer
+    //       be re-derived in-suite. What SURVIVES is
+    //       `geometry_is_recorded_for_exactly_the_supported_years`, which still reds in both
+    //       directions if the wildcard comes back.
     //
     //     ★ **"The names still resolve" is evidence of nothing.**
     //       `./target/debug/xtask form-delta f6251--2024 f6251--2025` — the calibration pair, both
@@ -85,14 +87,13 @@ fn se_clusters(year: i32) -> &'static [(f32, f32)] {
     //     ★ A new year must be added HERE, deliberately, after someone has compared the form. The
     //       panic is the point: silently reusing last year's x-bands is how a wrong cell passes.
     match year {
-        2017 => SE_CLUSTERS_2017,
         2024 | 2025 => SE_CLUSTERS_UNIFIED,
         other => panic!(
             "se_clusters: no geometry recorded for TY{other}. The unified bands cover TY2024-2025 \
              only; add an arm after measuring the year's MID + AMOUNT columns off its blank PDF \
-             (xtask dump-fields), never widen this to a wildcard — the unified bands admit BOTH of \
-             the TY2017 form's cents widgets (cx 442.8 and 566.2), so a wildcard turns the \
-             dollars/cents guard off."
+             (xtask dump-fields), never widen this to a wildcard — the unified bands admitted BOTH \
+             of the TY2017 form's cents widgets (cx 442.8 and 566.2; measured before the S9 drop, \
+             see the comment above), so a wildcard turns the dollars/cents guard off."
         ),
     }
 }
@@ -184,8 +185,6 @@ pub fn fill_schedule_se_with_map(
 #[cfg(test)]
 mod cluster_year_guard {
     use super::*;
-    use crate::map::{MoneyCell, ScheduleSeMap};
-    use crate::verify::in_band;
 
     /// Run the lookup with panic output silenced, restoring the previous hook. Nothing here asserts
     /// on a panic *message*, so swallowing it costs nothing and keeps a passing run readable.
@@ -225,65 +224,6 @@ mod cluster_year_guard {
                     "an unsupported year must NOT inherit another revision's x-bands; the wildcard \
                      is back"
                 }
-            );
-        }
-    }
-
-    /// ★★★ **Why the wildcard is not merely "unchecked" but WRONG — measured, not asserted.**
-    ///
-    /// A band's job is that a map whose `dollars_field` actually names the narrow cents widget fails
-    /// the column check. On the TY2017 §B long form BOTH logical columns lose that property under
-    /// the unified bands, and the MID column additionally stops admitting its own dollars field.
-    /// Every centre-x is read from the bundled blank TY2017 PDF and the committed TY2017 map, so
-    /// this is the comment above re-derived rather than repeated.
-    ///
-    /// **Planted-defect check (B1), observed:** set `SE_CLUSTERS_2017 = SE_CLUSTERS_UNIFIED` (what
-    /// the wildcard did) and this reds on the MID column's FIRST assertion — "TY2017 line-8a
-    /// dollars cx 392.4 is outside its own band (410.0, 482.0)". The unified MID band does not even
-    /// contain the 2017 dollars field, so it fails before reaching the cents case; the cents
-    /// assertions are what red on a band that merely widened.
-    #[test]
-    fn the_2017_bands_exclude_the_cents_widgets_the_unified_bands_admit() {
-        let map = ScheduleSeMap::for_year(2017).expect("TY2017 schedule_se map");
-        let doc = pdf::load(pdf::schedule_se_pdf(2017).expect("TY2017 SE PDF")).expect("parse");
-        let fields = pdf::collect_fields(&doc).expect("fields");
-        let cx = |fqn: &str| {
-            fields
-                .iter()
-                .find(|f| f.fqn == fqn)
-                .unwrap_or_else(|| panic!("{fqn} not in the bundled TY2017 PDF"))
-                .cx()
-                .unwrap_or_else(|| panic!("{fqn} has no widget rect"))
-        };
-
-        // One cell per logical column, named by the line the form prints: 8a is the MID column,
-        // 2 is the AMOUNT column (see the `SE_COL_*` constants).
-        for (line, cell, col) in [
-            ("8a", &map.line8a, SE_COL_MID),
-            ("2", &map.line2, SE_COL_AMOUNT),
-        ] {
-            let MoneyCell::Pair(pair) = cell else {
-                panic!("TY2017 line {line} is a dollars+cents pair — the whole point of this test");
-            };
-            let (dollars, cents) = (cx(&pair.dollars_field), cx(&pair.cents_field));
-            let own = SE_CLUSTERS_2017[col];
-            let unified = SE_CLUSTERS_UNIFIED[col];
-
-            assert!(
-                in_band(dollars, own),
-                "TY2017 line-{line} dollars cx {dollars:.1} is outside its own band {own:?}"
-            );
-            assert!(
-                !in_band(cents, own),
-                "TY2017 line-{line} cents widget cx {cents:.1} is INSIDE the band recorded for \
-                 TY2017 {own:?} — a map that swapped dollars and cents would pass the column check"
-            );
-            assert!(
-                in_band(cents, unified),
-                "the premise of the panic has changed: the unified band {unified:?} no longer \
-                 admits the TY2017 line-{line} cents widget at cx {cents:.1}, so reusing it across \
-                 revisions is no longer demonstrably unsafe — re-measure before rewriting the \
-                 comment above"
             );
         }
     }

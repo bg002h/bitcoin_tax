@@ -136,6 +136,105 @@ lt-sell,2024-06-15 12:00:00 UTC,Sell,BTC,1.00000000,USD,40000.00,40000.00,40000.
     p
 }
 
+/// ★★ **S9 — the TY2017 fixture, moved here from `export_irs_pdf.rs` when its packet KAT died.**
+///
+/// A REAL short-term round-trip in 2017: buy 0.01 BTC @ $200 (2017-01-05), sell it @ $500
+/// (2017-06-15) → a $300 SHORT-term gain. Verbatim from the export test that used it to fill the
+/// five TY2017 PDFs, which is exactly the thing the owner's S9 ruling deleted (2026-09-06). The
+/// EVENTS are unchanged, because what S9 dropped is the FORM package and not the tax year.
+fn real_events_2017() -> Vec<btctax_core::event::LedgerEvent> {
+    use btctax_core::event::*;
+    use btctax_core::identity::*;
+    let ev = |rf: &str, ts: time::OffsetDateTime, payload: EventPayload| LedgerEvent {
+        id: EventId::import(Source::Coinbase, SourceRef::new(rf)),
+        utc_timestamp: ts,
+        original_tz: time::UtcOffset::UTC,
+        wallet: Some(WalletId::Exchange {
+            provider: "cb".into(),
+            account: "m".into(),
+        }),
+        payload,
+    };
+    vec![
+        ev(
+            "buy-1",
+            datetime!(2017-01-05 12:00 UTC),
+            EventPayload::Acquire(Acquire {
+                sat: 1_000_000,
+                usd_cost: dec!(200),
+                fee_usd: dec!(0),
+                basis_source: BasisSource::ExchangeProvided,
+            }),
+        ),
+        ev(
+            "sell-1",
+            datetime!(2017-06-15 12:00 UTC),
+            EventPayload::Dispose(Dispose {
+                sat: 1_000_000,
+                usd_proceeds: dec!(500),
+                fee_usd: dec!(0),
+                kind: DisposeKind::Sell,
+            }),
+        ),
+    ]
+}
+
+/// Init vault + append events directly (no CSV round trip).
+fn make_vault_from_events(evs: &[btctax_core::event::LedgerEvent]) -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault.pgp");
+    cmd::init::run(&vault, &pp(), &dir.path().join("k.asc")).unwrap();
+    let mut s = Session::open(&vault, &pp()).unwrap();
+    btctax_core::persistence::append_import_batch(s.conn(), evs).unwrap();
+    s.save().unwrap();
+    (dir, vault)
+}
+
+/// ★★★ **S9 KILL — dropping the TY2017 FORM package did not drop the TY2017 TAX YEAR.**
+///
+/// The owner's 2026-09-06 ruling (`design/ROADMAP_STATUS.md` §0a S9, `FOLLOWUPS.md` FR-61) deleted
+/// `crates/btctax-forms/forms/2017/` — five PDFs and five maps with no archived authority behind
+/// them — and deliberately KEPT `btctax-adapters::tax_tables::ty2017` (Rev. Proc. 2016-55, pinned by
+/// `ty2017_table_matches_rev_proc_2016_55`). Those are two different things, and conflating them is
+/// the obvious way for this ruling to be over-applied: a filer with 2017 events can still ask what
+/// the crypto delta was, they just cannot get a filled 2017 PDF out of it
+/// (`export_irs_pdf.rs::ty2017_is_refused_by_the_export_and_the_refusal_names_the_bundled_years` is
+/// the other half of the pair).
+///
+/// The gain is SHORT-term ($500 − $200 = $300, five months held), so the delta is ordinary-rate and
+/// depends on the TY2017 table being present — a missing table would show up as `NotComputable`
+/// rather than as a wrong number.
+#[test]
+fn report_tax_year_2017_still_computes_after_the_form_package_was_dropped() {
+    let (_dir, vault) = make_vault_from_events(&real_events_2017());
+    cmd::tax::set_profile(&vault, &pp(), 2017, single_40k_profile(), false).unwrap();
+
+    let TaxYearReport {
+        outcome,
+        schedule_d: sched_d,
+        ..
+    } = cmd::tax::report_tax_year(&vault, &pp(), 2017, dec!(0)).unwrap();
+
+    // The raw Schedule D projection carries the round trip: $500 proceeds, $200 basis, $300 SHORT.
+    assert_eq!(sched_d.st.proceeds, dec!(500));
+    assert_eq!(sched_d.st.cost_basis, dec!(200));
+    assert_eq!(sched_d.st.gain, dec!(300));
+    assert_eq!(sched_d.lt.gain, dec!(0));
+
+    // And the year COMPUTES — not `NotComputable`, which is what a missing TY2017 TaxTable looks
+    // like. The rendered report is the surface a filer reads, so assert on that too.
+    let rendered =
+        render::render_tax_outcome(2017, &outcome, None, render::PseudoDisclosure::None, false);
+    assert!(
+        !rendered.contains("NOT COMPUTABLE"),
+        "TY2017 must still compute — its TaxTable was KEPT by the S9 ruling:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("TOTAL federal tax attributable to crypto (delta):"),
+        "the report must print a delta for TY2017:\n{rendered}"
+    );
+}
+
 /// Init vault + import one CSV file; return `(tempdir, vault_path)`.
 fn make_vault_with(csv: &Path) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();

@@ -17,9 +17,10 @@ use serde::{Deserialize, Serialize};
 /// Declaration of Appraiser, Part V = Donee Acknowledgment** (read off `f8283--2025.txt:105/113/133`).
 /// So the old labels did not merely shift by one: "Part III" named a *different, real* part of the
 /// same section — the donor's own under-$500 statement — which is the kind of citation a reader
-/// checks once, believes, and then reasons from. The Rev. 12-2014 form (the 2017 map) does number
-/// them III/IV, which is why `btctax_forms::form8283` writes the dual "Part IV/III" comment at its
-/// fill site; the labels here follow the filed revision.
+/// checks once, believes, and then reasons from. The Rev. 12-2014 form does number them III/IV,
+/// which is why `btctax_forms::form8283` writes the dual "Part IV/III" comment at its fill site; the
+/// labels here follow the filed revision. (That older revision was btctax's TY2017 map until S9
+/// dropped the package on 2026-09-06; every revision this build now files numbers them III/IV/V.)
 ///
 /// `donee_name` and `appraiser_name` are the only REQUIRED fields (enforced by the CLI).
 /// All other fields are optional (`#[serde(default)]`) for forward compatibility — a future

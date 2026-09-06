@@ -41,7 +41,7 @@ fn every_bundled_year_has_a_record_that_partitions_the_closed_set_and_matches_th
         //   `glob_problems` compares it against the same glob, so a record regenerated to match a
         //   directory that lost a file would pass both. These counts do not come from the glob.
         let expected_count = match year {
-            2017 => 5,
+            // TY2017's `5` was removed 2026-09-06 with its form package (owner ruling S9).
             // 2026-09-06: 17 → 19 and 15 → 17 — Form 4868 and Form 1040-V (spec 4868/1040-V T1).
             2024 => 19,
             2025 => 17,
@@ -54,17 +54,27 @@ fn every_bundled_year_has_a_record_that_partitions_the_closed_set_and_matches_th
             "TY{year}: the expected set shrank or grew"
         );
     }
-    assert_eq!(bundled_years(), &[2017, 2024, 2025, 2026]);
+    assert_eq!(bundled_years(), &[2024, 2025, 2026]);
 }
 
 /// The declared status against what the build bundles: only a year whose declaration is `filable`
-/// may say so with every form present; `slice` is TY2017's crypto-slice-only package.
+/// may say so with every form present.
+///
+/// ★ `YearStatus::Slice` — a crypto-slice-only package — was TY2017's, and NO bundled year carries
+/// it since S9 dropped that package (owner ruling 2026-09-06). The variant stays: it is the honest
+/// declaration for any future partial year, and its absence here is asserted rather than left
+/// implicit, so a year that quietly declares `slice` reds.
 #[test]
 fn the_declared_statuses_are_the_measured_ones() {
     let s = |y| YearRecord::for_year(y).unwrap().status;
-    assert_eq!(s(2017), YearStatus::Slice);
     assert_eq!(s(2024), YearStatus::Filable);
     assert_eq!(s(2025), YearStatus::Preparing);
+    assert!(
+        bundled_years()
+            .iter()
+            .all(|&y| YearRecord::for_year(y).unwrap().status != YearStatus::Slice),
+        "no bundled year declares `slice` since the TY2017 package was dropped (S9)"
+    );
     // A `filable` year has NO absent forms except a periodic one served by hash.
     let r = YearRecord::for_year(2024).unwrap();
     for absent in r.forms_absent.keys() {
@@ -97,7 +107,6 @@ fn the_declared_ty2025_due_date_is_the_core_constant() {
 #[test]
 fn the_information_return_regime_is_declared_per_year() {
     let da = |y| YearRecord::for_year(y).unwrap().information_returns.f1099da;
-    assert!(!da(2017).proceeds && !da(2017).basis);
     assert!(!da(2024).proceeds && !da(2024).basis);
     assert!(da(2025).proceeds && !da(2025).basis);
     assert!(da(2026).proceeds && da(2026).basis); // the year the question goes live

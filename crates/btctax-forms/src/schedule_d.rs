@@ -24,9 +24,11 @@
 //! On the 2025 revision Schedule D line 3 reads "Box C **or Box I**" and line 10 "Box F **or Box L**",
 //! so the digital-asset Box I/L totals from Form 8949 flow straight onto these lines; on the pre-2025
 //! revisions the same lines read "Box C checked" / "Box F checked" and carry the securities-box
-//! totals. This module fills all three revisions (2017/2024/2025) — and the TY2017 map binds no
-//! 1b/2/8b/9 rows at all, which is correct: no pre-2025 revision has them, and a pre-2025 slice
-//! routes every row to C/F.
+//! totals. This module fills both bundled revisions (2024/2025).
+//!
+//! ★ It filled a THIRD until 2026-09-06: the TY2017 Rev., whose map bound no 1b/2/8b/9 rows at all.
+//! S9 (owner ruling) dropped that package — see `tests/s9_ty2017_package_is_gone.rs` — so every
+//! revision this module now serves is one with an archived primary source behind it.
 
 use crate::error::FormsError;
 use crate::map::{AmountCols, ScheduleDMap};
@@ -175,7 +177,7 @@ fn partition_or_refuse(
 ///   checked"* (A is a securities box btctax never emits; G is the digital-asset one it does)
 /// - line **2** — *"… with Box B or Box H checked"*
 /// - line **3** — *"… with Box C or Box I checked"* — the not-reported box: **C** before TY2025 and
-///   **I** from TY2025, so a TY2017/TY2024 slice keeps its WHOLE Part I total on line 3
+///   **I** from TY2025, so a pre-TY2025 slice keeps its WHOLE Part I total on line 3
 /// - line **8b** — *"… Box D or Box J"*, **9** — *"… Box E or Box K"*, **10** — *"… Box F or Box L"*
 ///
 /// The same pairing `btctax_core::tax::printed::schedule_d_lines` encodes for the FULL return
@@ -292,7 +294,7 @@ pub fn fill_schedule_d_totals(
         );
         // Line 17 — "Are lines 15 and 16 both gains?", read off the two lines just printed. `None`
         // means the form's OWN routing skips line 17 (line 16 a loss, or zero), so it stays blank.
-        // The 2017/2024/2025 maps all carry the pair; a map without it simply does not answer.
+        // Both bundled maps (2024/2025) carry the pair; a map without it simply does not answer.
         if let (Some(answer), Some(pair)) = (
             btctax_core::tax::printed::schedule_d_line17(totals.lt.gain, total),
             &map.line17,
@@ -310,8 +312,9 @@ pub fn fill_schedule_d_totals(
             });
         }
     }
-    // Answer the QOF question — No — on years that HAVE one (2024/2025). The 2017 Schedule D predates
-    // Qualified Opportunity Funds (2019), so its map omits the field and nothing is written.
+    // Answer the QOF question — No — on years that HAVE one (2024/2025). A revision predating
+    // Qualified Opportunity Funds (2019) has no such field, its map omits it, and nothing is
+    // written; the TY2017 Schedule D was that case until S9 dropped it (2026-09-06).
     if let Some(qof_no) = &map.qof_no {
         writes.push((
             qof_no.field.clone(),

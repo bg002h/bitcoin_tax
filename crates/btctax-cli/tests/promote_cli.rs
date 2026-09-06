@@ -678,9 +678,9 @@ fn a_wide_window_promote_prints_the_trivial_floor_caution() {
 // basis_methodology.txt pattern; on SUCCESS the disclosure is emitted by its OWN name (form_8275.txt).
 // ════════════════════════════════════════════════════════════════════════════════════════════════
 
-/// The tax year both Task-14 fixtures dispose in — a SHIPPED IRS-PDF year (this build bundles 2017/2024/
-/// 2025) so the CLEAN export actually fills a packet; the tranche is declared pre-2025 so a promote is
-/// meaningful.
+/// The tax year both Task-14 fixtures dispose in — a SHIPPED IRS-PDF year (this build bundles
+/// 2024/2025) so the CLEAN export actually fills a packet; the tranche is declared pre-2025 so a
+/// promote is meaningful.
 const T14_YEAR: i32 = 2024;
 
 /// A 2024 sell of exactly 0.4 BTC in `wallet()` — drains the 0.4-BTC tranche (its only lot), so the
@@ -1078,7 +1078,7 @@ fn export_snapshot_writes_form_8275_txt_by_name() {
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════
 // Task 16 — wiring the OFFICIAL Form 8275 fillable PDF into the export paths; BG-D8's gate re-pointed
-// at it. Four KATs: year-2025/2017 end-to-end (arch r1 I-6 — the year-aliasing must reach the export
+// at it. Four KATs: a non-2024 year end-to-end (arch r1 I-6 — the year-aliasing must reach the export
 // layer, not just `fill_form_8275` itself, which `sp4.rs` already pins), the completeness gate still
 // refuses before ANY byte (including the new PDF) when Part II is incomplete, a > 6-leg promoted year
 // refuses CLEANLY (no panic, no half-written packet), and the all-years `export_snapshot` dump still
@@ -1086,7 +1086,7 @@ fn export_snapshot_writes_form_8275_txt_by_name() {
 // ════════════════════════════════════════════════════════════════════════════════════════════════
 
 /// Generalizes `vault_with_promoted_disposal_via_cli` (T14, fixed to 2024) to an ARBITRARY supported
-/// `year` — T16's KAT needs 2025 and 2017, since Form 8275's bundled asset aliases every
+/// `year` — T16's KAT needs 2025, since Form 8275's bundled asset aliases every
 /// `SUPPORTED_YEAR`. Same shape: one declared+promoted tranche (a Q1 `year` window), drained by a
 /// single Q3 `year` sell — a promoted DISPOSAL leg filed in `year` with a COMPLETE Form 8275.
 fn vault_with_promoted_disposal_via_cli_year(dir: &Path, year: i32) -> PathBuf {
@@ -1136,14 +1136,21 @@ fn vault_with_promoted_disposal_via_cli_year(dir: &Path, year: i32) -> PathBuf {
 }
 
 /// ★ T16 KAT 1 (plan Step-1; arch r1 I-6 — the most important). A promoted disposal filed in a
-/// NON-2024 supported year (2025, then 2017) exports the OFFICIAL Form 8275 PDF via the crypto-slice
-/// `export_irs_pdf` — proving the bundled 8275 asset's year-aliasing ({2017, 2024, 2025}) works
+/// NON-2024 supported year (2025) exports the OFFICIAL Form 8275 PDF via the crypto-slice
+/// `export_irs_pdf` — proving the bundled 8275 asset's year-aliasing ({2024, 2025}) works
 /// END-TO-END at the export layer (`sp4.rs` already pins the aliasing inside `fill_form_8275` itself;
 /// this is the wiring on top of it). A promoted CURRENT-year (2025) export must never be permanently
 /// refused for want of a "2025 revision" that does not exist.
+///
+/// ★ The loop ran `[2025, 2017]` until S9 dropped the TY2017 package (2026-09-06). TY2025 is the
+/// only non-2024 fillable year left; the aliasing itself is held year-generally by `sp4.rs`'s
+/// `for_year_answers_exactly_what_the_bundled_asset_registry_answers`, which needs no year list.
 #[test]
 fn a_promoted_2025_export_fills_the_8275_and_the_gate_passes() {
-    for year in [2025, 2017] {
+    {
+        // Was `for year in [2025, 2017]`; a one-element loop is a clippy lint, so the surviving
+        // year is bound directly and every message below still names it.
+        let year = 2025;
         let dir = tempfile::tempdir().unwrap();
         let vault = vault_with_promoted_disposal_via_cli_year(dir.path(), year);
         let out = dir.path().join("export_out");
@@ -1404,7 +1411,9 @@ fn vault_with_two_promoted_years(dir: &Path, year_a: i32, year_b: i32) -> PathBu
 #[test]
 fn all_years_snapshot_writes_one_8275_txt_per_promoted_year() {
     let dir = tempfile::tempdir().unwrap();
-    let vault = vault_with_two_promoted_years(dir.path(), 2024, 2017);
+    // 2017 → 2025 on 2026-09-06 (S9): the second year only has to be a DIFFERENT promoted year, and
+    // naming a year this build no longer bundles would read as a supported-year claim.
+    let vault = vault_with_two_promoted_years(dir.path(), 2024, 2025);
     let out = dir.path().join("export_out");
 
     cmd::admin::export_snapshot(&vault, &pp(), &out, None, None)
@@ -1415,8 +1424,8 @@ fn all_years_snapshot_writes_one_8275_txt_per_promoted_year() {
         "the 2024 promoted year's disclosure is co-emitted"
     );
     assert!(
-        out.join("form_8275_2017.txt").exists(),
-        "the 2017 promoted year's disclosure is co-emitted"
+        out.join("form_8275_2025.txt").exists(),
+        "the 2025 promoted year's disclosure is co-emitted"
     );
     assert!(
         !out.join("form_8275.txt").exists(),

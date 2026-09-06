@@ -133,8 +133,9 @@ pub struct MapRow {
     /// sha256 of the bundled PDF beside this map. Joined BY CONTENT to `design/forms/MANIFEST.json`,
     /// whose entry must be an authority (`is_authority()`), never a draft.
     pub template_sha256: String,
-    /// OPTIONAL. The ONLY excuse the manifest join accepts: `"not-yet-archived: <reason>"`. Six rows
-    /// today (all five TY2017 templates + `forms/2024/f8283.pdf`); the count may only shrink.
+    /// OPTIONAL. The ONLY excuse the manifest join accepts: `"not-yet-archived: <reason>"`. ONE row
+    /// today — `forms/2024/f8283.pdf` — down from six when S9 dropped the five TY2017 templates that
+    /// also carried it (2026-09-06); the count may only shrink.
     #[serde(default)]
     pub authority: Option<String>,
     /// OPTIONAL. Only while a second extract root exists (`f1040s1a/2025` reads
@@ -568,11 +569,6 @@ impl Form8949Map {
         Self::for_year(2024).expect("the bundled TY2024 map is wired and parses")
     }
 
-    /// The TY2017 map (pre-1099-DA: Box C/F, `/3`; field-identical grid to 2024).
-    pub fn ty2017() -> Self {
-        Self::for_year(2017).expect("the bundled TY2017 map is wired and parses")
-    }
-
     /// The map for a supported tax year.
     /// The map for a tax year — design r2 §10 step 3: the file comes from the glob
     /// (`bundled::map_text`), the revision from its ROW, and the ONE exhaustive
@@ -960,11 +956,6 @@ impl Form1040Map {
         Self::for_year(2024).expect("the bundled TY2024 map is wired and parses")
     }
 
-    /// The TY2017 map (capital gain on line 13; NO Digital-Asset question).
-    pub fn ty2017() -> Self {
-        Self::for_year(2017).expect("the bundled TY2017 map is wired and parses")
-    }
-
     /// The map for a supported tax year.
     /// The map for a tax year — design r2 §10 step 3: the file comes from the glob
     /// (`bundled::map_text`), the revision from its ROW, and the ONE exhaustive
@@ -1057,12 +1048,14 @@ pub struct Section8283BRow {
     /// and the filler cannot write one: a map entry means *"we fill this"*, and a
     /// mapped-but-never-written cell is a claim nothing checks.
     ///
-    /// ★ The **TY2017 (Rev. 12-2014) map keeps its cell, deliberately.** That revision predates the
-    /// pass-through-entity regime, has a different Section B column layout (no qualified-conservation
-    /// column at all), and **its instructions are not in this repository** — `design/forms/extract/`
-    /// holds i8283 for 2024 and 2025 only. Changing a shipped behavior on a revision whose authority
-    /// we do not hold would be inventing the rule rather than reading it, so TY2017 is left exactly
-    /// as it was until the Rev. 12-2014 instructions are archived and read.
+    /// ★ The **TY2017 (Rev. 12-2014) map kept its cell, deliberately** — and went with its package
+    /// when S9 dropped TY2017 (2026-09-06), so **no bundled map carries this cell today** and
+    /// nothing writes column (i). The reasoning is kept because it is the standing rule for any
+    /// older revision that returns: that Rev. predates the pass-through-entity regime, has a
+    /// different Section B column layout (no qualified-conservation column at all), and **its
+    /// instructions are not in this repository** — `design/forms/extract/` holds i8283 for 2024 and
+    /// 2025 only. Changing a shipped behavior on a revision whose authority we do not hold is
+    /// inventing the rule rather than reading it.
     #[serde(default)]
     pub deduction: Option<MoneyCell>,
 }
@@ -1181,11 +1174,6 @@ impl Form8283Map {
     /// The TY2024 map (Form 8283 Rev. 12-2023).
     pub fn ty2024() -> Self {
         Self::for_year(2024).expect("the bundled TY2024 map is wired and parses")
-    }
-
-    /// The TY2017 map (Form 8283 Rev. 12-2014 — "j Other", no DA box, 5/4 rows, ¢-pairs).
-    pub fn ty2017() -> Self {
-        Self::for_year(2017).expect("the bundled TY2017 map is wired and parses")
     }
 
     /// The map for a supported tax year.
@@ -1605,11 +1593,6 @@ impl ScheduleDMap {
     /// The TY2024 map.
     pub fn ty2024() -> Self {
         Self::for_year(2024).expect("the bundled TY2024 map is wired and parses")
-    }
-
-    /// The TY2017 map (grid token `TablePartI`; NO QOF question).
-    pub fn ty2017() -> Self {
-        Self::for_year(2017).expect("the bundled TY2017 map is wired and parses")
     }
 
     /// The map for a supported tax year.
@@ -3474,11 +3457,6 @@ impl ScheduleSeMap {
     /// The TY2024 map (field-name-identical to 2025; only the wage base differs).
     pub fn ty2024() -> Self {
         Self::for_year(2024).expect("the bundled TY2024 map is wired and parses")
-    }
-
-    /// The TY2017 map (OLD §B long form: dollars+cents pairs; pre-filled line 7/14 exempt).
-    pub fn ty2017() -> Self {
-        Self::for_year(2017).expect("the bundled TY2017 map is wired and parses")
     }
 
     /// The map for a supported tax year.

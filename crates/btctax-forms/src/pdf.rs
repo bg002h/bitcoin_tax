@@ -101,8 +101,8 @@ pub fn f8283_pdf(year: i32) -> Result<&'static [u8], FormsError> {
 
 /// The bundled Form 8275 PDF bytes for a supported tax year. ★ Form 8275 is REVISION-versioned, not
 /// tax-year-versioned: the single bundled Rev. 10-2024 asset is returned for EVERY `SUPPORTED_YEAR`
-/// (2017/2024/2025) — never `UnsupportedYear` for those three, unlike every other form here that
-/// bundles a distinct PDF per year. This is what lets a promoted 2025 (or 2017) disposal attach a real
+/// (2024/2025) — never `UnsupportedYear` for those, unlike every other form here that
+/// bundles a distinct PDF per year. This is what lets a promoted 2025 disposal attach a real
 /// Form 8275 rather than being permanently refused for want of a "2025 revision" that does not exist.
 pub fn f8275_pdf(year: i32) -> Result<&'static [u8], FormsError> {
     // Periodic (Rev. 10-2024): a year with no file of its own is served by the newest bundled

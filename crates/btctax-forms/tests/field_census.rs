@@ -17,8 +17,8 @@
 //! neither is the "we forgot this line" defect; a field in both is a contradiction.
 //!
 //! ★★★ **THE YEAR PIN, and why it was the worse half of the same defect (2026-09-05).** This file's
-//! own gate ran `let year = 2024;` while the build bundles **three** years (`SUPPORTED_YEARS =
-//! &[2017, 2024, 2025]`) and a fourth is being ported. It therefore re-checked the one year that was
+//! own gate ran `let year = 2024;` while the build bundled **three** years (`SUPPORTED_YEARS =
+//! &[2017, 2024, 2025]` at the time) and a fourth was being ported. It therefore re-checked the one year that was
 //! already exact, found it exact, and **reported success** — the shape `TY2026_PORT_REPORT.md` §2
 //! names *"the product fails CLOSED, the instruments fail OPEN"* (row 12, R15).
 //!
@@ -33,9 +33,14 @@
 //!
 //! | year | maps | censused | **fields with NO recorded decision** |
 //! |---|---|---|---|
-//! | 2017 | 5 | **0** | **403** |
+//! | ~~2017~~ | ~~5~~ | ~~**0**~~ | ~~**403**~~ — package DROPPED 2026-09-06 (S9) |
 //! | 2024 | 17 | 17 | 0 |
 //! | 2025 | 15 | 10 | **330** |
+//!
+//! ★ TY2017's 403 left the register on 2026-09-06 by DELETION of the year, not by burndown: the
+//! owner's S9 ruling dropped the TY2017 form package. That is a legitimate way for a shrink-only
+//! register to shrink — the fields it named no longer exist to have a decision recorded about — and
+//! it is called out here so the drop from 713 is never read as census work that was done.
 //!
 //! That is the honest state and it is the finding, so it is **recorded**, not excluded:
 //! [`UNCENSUSED`] names every `(year, stem)` whose map carries no `[census]` section together with
@@ -46,8 +51,8 @@
 //!
 //! ★ Per `TY2026_PORT_REPORT.md` §7 D6 the alternative was to de-pin only onto *wired* years, so the
 //! gate would not red on paused TY2025 work. A register does strictly better: it fails closed on a new
-//! year exactly the same way, and it also carries TY2017's 403 and TY2025's 310 as **numbers in the
-//! suite** rather than as prose in a report nobody executes.
+//! year exactly the same way, and it also carries TY2025's 310 (and, until S9, TY2017's 403) as
+//! **numbers in the suite** rather than as prose in a report nobody executes.
 
 use btctax_forms::testonly::{collect_fields, load};
 use std::collections::BTreeSet;
@@ -68,15 +73,9 @@ mod common;
 /// the line is the partial-progress case and is equally legal. Raising one, or adding a line, is the
 /// defect this register exists to make loud.
 const UNCENSUSED: &[(i32, &str, usize)] = &[
-    // TY2017 — a fully wired, shipped year (`SUPPORTED_YEARS`) with ZERO census coverage. Its maps
-    // are deliberate crypto-slice partials (2017 f1040 maps the line-13 dollars+cents pair and
-    // nothing else), but "deliberately partial" and "nobody recorded a decision" are indistinguishable
-    // on the printed page — which is the entire premise of this file.
-    (2017, "f1040", 254),
-    (2017, "f8283", 62),
-    (2017, "f8949", 8),
-    (2017, "schedule_d", 40),
-    (2017, "schedule_se", 39),
+    // The five TY2017 entries (403 fields) were removed on 2026-09-06 when S9 dropped the TY2017
+    // form package — the maps they named no longer exist, so the orphan check below would red on
+    // them. Removed by deletion of the year, NOT by census work.
     // TY2025 — ten of fifteen maps DO carry a census and account for 100%. These five do not.
     (2025, "f1040", 196),
     (2025, "f8283", 63),
@@ -86,9 +85,12 @@ const UNCENSUSED: &[(i32, &str, usize)] = &[
 ];
 
 /// The register's own totals, pinned so that a single edited line is visible as a changed number.
-/// 5 + 5 entries; 403 + 330 fields.
-const UNCENSUSED_ENTRIES: usize = 10;
-const UNCENSUSED_FIELDS: usize = 713;
+/// 5 entries; 310 fields — all TY2025.
+///
+/// 10 → 5 and 713 → 310 on 2026-09-06: S9 dropped the TY2017 form package, taking its five register
+/// entries (403 fields) with it.
+const UNCENSUSED_ENTRIES: usize = 5;
+const UNCENSUSED_FIELDS: usize = 310;
 
 // ★ Design r2 §10 step 4: the per-year ABSENT list is no longer a hand-list here — it is each year's
 //   `forms/<year>/YEAR.toml` `[forms_absent]` (with the reason beside each), read through
@@ -491,6 +493,8 @@ fn recorded_gaps_may_only_shrink() {
     // 2026-09-05: still 0, now measured over ALL bundled years (2017/2024/2025 = 37 maps), not
     // TY2024's 17. The widened scan added nothing, which is itself a measurement: the uncensused
     // years have no `gap` records because they have no census records at all.
+    // 2026-09-06 (S9): the TY2017 package was dropped, so the scan is over 2024/2025 = 36 maps.
+    // Still 0 — TY2017 contributed no `gap` records to lose.
     //
     // ★ Zero is not the end of the census — it is the ratchet at rest. `<` is still the only legal
     // direction, and every field must still be accounted for, so a NEW gap can be added (that is what
@@ -550,8 +554,8 @@ fn the_uncensused_register_may_only_shrink() {
     assert_eq!(
         total, UNCENSUSED_FIELDS,
         "the register totals {total} unaccounted fields, pinned {UNCENSUSED_FIELDS}. This number is \
-         the census's outstanding debt across every bundled year — TY2017's 403 and TY2025's 310 — \
-         and DOWN is the only legal direction"
+         the census's outstanding debt across every bundled year — TY2025's 310, since S9 dropped \
+         TY2017's 403 with its package — and DOWN is the only legal direction"
     );
 
     // ★ A register line naming a `(year, stem)` that is not on disk is an excuse for nothing: it

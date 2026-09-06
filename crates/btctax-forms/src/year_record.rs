@@ -25,7 +25,11 @@ pub enum YearStatus {
     /// Assets are being assembled; nothing about this year may be filed.
     Preparing,
     /// The crypto SLICE only (Form 8949 / Schedule D / Schedule SE / Form 8283 / 1040 cap-gains
-    /// figures) — no full return. TY2017.
+    /// figures) — no full return. TY2017 was the one year that declared this, and S9 dropped its
+    /// package (2026-09-06), so NO bundled year carries it today — asserted by
+    /// `tests/year_record.rs::the_declared_statuses_are_the_measured_ones`. The variant stays: it is
+    /// the honest declaration for a future partial year, and `btctax-cli`'s `YearReadiness` still
+    /// checks it (a `slice` year with no `TaxTable` is a reported problem).
     Slice,
     /// The full return may be produced: every expected form present, params bundled, oracles read.
     Filable,
@@ -54,7 +58,7 @@ pub struct InformationReturns {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Oracles {
-    /// OpenTaxSolver release, or why none (`"none"` for TY2017).
+    /// OpenTaxSolver release, or why none (the literal `"none"`).
     pub ots: String,
     /// Tax-Calculator version floor.
     pub taxcalc: String,
@@ -184,9 +188,9 @@ impl YearRecord {
 ///
 /// This models the WEEKEND half only, and that is a decision rather than an oversight. §7503's
 /// holiday half turns on District of Columbia legal holidays (the reason a return due April 15 moves
-/// when DC's Emancipation Day, April 16, falls beside it — TY2017's committed `return_due` of
-/// **2018-04-17** is exactly that shift, already applied), and this build does not carry a DC holiday
-/// calendar.
+/// when DC's Emancipation Day, April 16, falls beside it — TY2017's `return_due` of **2018-04-17**
+/// was exactly that shift, already applied, back when this build committed a TY2017 record), and
+/// this build does not carry a DC holiday calendar.
 ///
 /// ★ Its ONE caller is safe against that gap by construction, not by luck: it shifts **June 15**, the
 /// out-of-country extension date the form itself names. No District of Columbia legal holiday falls

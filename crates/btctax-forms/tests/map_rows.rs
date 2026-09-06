@@ -6,8 +6,8 @@
 //! 1. the row parses with its required keys (and a map missing one is REFUSED — kill 1);
 //! 2. `template_sha256` is the sha256 of the bundled PDF beside it (kill 2);
 //! 3. that hash joins `design/forms/MANIFEST.json` on an AUTHORITY entry — or the row carries
-//!    `authority = "not-yet-archived: …"`, the ONLY excuse, on exactly the six rows the design names
-//!    and no seventh (kill 3);
+//!    `authority = "not-yet-archived: …"`, the ONLY excuse, on exactly the one row the design names
+//!    and no second (kill 3);
 //! 4. `attachment_sequence` equals the "Attachment Sequence No." printed on the archived extract,
 //!    absent exactly on the rows whose extract prints none (kill 4) — and
 //!    `btctax_forms::attachment_sequence` (the packet's stapling order) agrees with every row, which
@@ -139,7 +139,9 @@ enum RowProblem {
     },
     /// No archived extract exists to read the printed number from — the value is held only by the row
     /// agreeing with `packet::attachment_sequence`. Named separately (step-1 review P1) rather than
-    /// laundered through the MANIFEST excuse: five TY2017 rows today, pinned shrink-only.
+    /// laundered through the MANIFEST excuse: NO committed row today (the five TY2017 rows that
+    /// carried it went with the S9 drop of the TY2017 package, owner ruling 2026-09-06), pinned
+    /// shrink-only. `a_row_with_no_extract_is_reported_as_unverifiable` keeps the branch observed.
     SequenceUnverifiable {
         year: i32,
         stem: String,
@@ -217,24 +219,18 @@ fn check_rows(
     (rows, problems)
 }
 
-/// The six rows the design names (r2 §4, §10 step 1) — a shrink-only pin. A seventh excuse reds;
+/// The rows the design names (r2 §4, §10 step 1) — a shrink-only pin. A new excuse reds;
 /// removing one means an authority was archived and the row's `authority` key must go.
-const SEQUENCE_UNVERIFIABLE: &[(i32, &str)] = &[
-    (2017, "f1040"),
-    (2017, "f8283"),
-    (2017, "f8949"),
-    (2017, "schedule_d"),
-    (2017, "schedule_se"),
-];
+///
+/// **EMPTY since 2026-09-06** (S9, owner ruling): the five entries here were the five TY2017
+/// templates, and `design/forms/` never carried a 2017 archive to verify them against. Dropping the
+/// TY2017 form package took the rows with it, so every committed row's sequence number is now read
+/// off an archived extract. The strongest possible state of a shrink-only pin — and it can only
+/// grow again by someone editing this list, which is the point.
+const SEQUENCE_UNVERIFIABLE: &[(i32, &str)] = &[];
 
-const EXCUSED: &[(i32, &str)] = &[
-    (2017, "f1040"),
-    (2017, "f8283"),
-    (2017, "f8949"),
-    (2017, "schedule_d"),
-    (2017, "schedule_se"),
-    (2024, "f8283"),
-];
+/// 6 → 1 on 2026-09-06 (S9): the five TY2017 rows carried the manifest excuse and are gone.
+const EXCUSED: &[(i32, &str)] = &[(2024, "f8283")];
 
 #[test]
 fn every_committed_map_has_a_row_that_parses_and_all_four_kills_are_green() {
@@ -244,10 +240,10 @@ fn every_committed_map_has_a_row_that_parses_and_all_four_kills_are_green() {
         &manifest_authority_hashes(&ws),
         &ws.join("design/forms/extract"),
     );
-    // 37 → 41 on 2026-09-06: the four Form 4868 / Form 1040-V rows (spec 4868/1040-V T1).
-    assert!(rows.len() >= 41, "the walk found only {} rows", rows.len());
-    // The rows whose sequence number NO extract can verify — exactly the five TY2017 templates
-    // (`design/forms/` has no 2017 archive). Shrink-only: archiving one removes it here.
+    // 37 → 41 on 2026-09-06 (the four Form 4868 / Form 1040-V rows, spec 4868/1040-V T1), then
+    // 41 → 36 the same day: S9 dropped the five TY2017 rows with their form package.
+    assert!(rows.len() >= 36, "the walk found only {} rows", rows.len());
+    // The rows whose sequence number NO extract can verify — none, since S9. Shrink-only.
     let unverifiable: Vec<(i32, String)> = problems
         .iter()
         .filter_map(|p| match p {
@@ -261,7 +257,7 @@ fn every_committed_map_has_a_row_that_parses_and_all_four_kills_are_green() {
             .iter()
             .map(|(y, s)| (*y, s.to_string()))
             .collect::<Vec<_>>(),
-        "the sequence-unverifiable set is exactly the five TY2017 rows; archive an authority to shrink it"
+        "the sequence-unverifiable set must stay EMPTY; archive an authority to shrink it"
     );
     let problems: Vec<&RowProblem> = problems
         .iter()
@@ -278,7 +274,7 @@ fn every_committed_map_has_a_row_that_parses_and_all_four_kills_are_green() {
         EXCUSED.iter().map(|(y, s)| (*y, s.to_string())).collect();
     assert_eq!(
         excused, expected,
-        "the `authority = \"not-yet-archived\"` excuse may only SHRINK, and only these six carry it"
+        "the `authority = \"not-yet-archived\"` excuse may only SHRINK, and only this one carries it"
     );
     for r in &rows {
         assert!(
@@ -304,11 +300,11 @@ fn every_committed_map_has_a_row_that_parses_and_all_four_kills_are_green() {
         //   form's own printed page carries no sequence number. A fourth stem quietly losing its
         //   number reds from the FORM, with no list to remember to extend.
         //
-        //   Rows whose extract does not exist at all (the five TY2017 templates — `design/forms/`
-        //   has no 2017 archive) have nothing here to check against. They are skipped by NAME from
-        //   `SEQUENCE_UNVERIFIABLE`, whose membership is itself asserted above and is shrink-only —
-        //   never by "the read failed", which would let a wrong path turn this into a check that
-        //   silently never runs.
+        //   A row whose extract does not exist at all has nothing here to check against. Such rows
+        //   are skipped by NAME from `SEQUENCE_UNVERIFIABLE`, whose membership is itself asserted
+        //   above and is shrink-only — never by "the read failed", which would let a wrong path turn
+        //   this into a check that silently never runs. That list is EMPTY since S9 dropped the five
+        //   TY2017 rows, so today this branch runs on every committed row.
         let extract = ws
             .join("design/forms/extract")
             .join(format!("{}--{}.txt", r.irs_stem, r.year));
@@ -530,20 +526,67 @@ fn a_planted_wrong_sequence_number_is_reported_even_on_a_manifest_excused_row() 
     );
 }
 
+/// Copy one committed map into a tempdir under a DIFFERENT year, rewriting the `year` and `line_set`
+/// keys so `check_rows`'s "the row's `year` must be its directory" assertion still holds. This is how
+/// a defect is planted on a (year, stem) pair that has **no archived extract** now that every
+/// committed row has one — before S9 the test below planted `2017/f8949`, which had no 2017 archive
+/// only because the TY2017 package happened to ship unarchived.
+fn plant_as(
+    src_year: i32,
+    dst_year: i32,
+    stem: &str,
+    edit: impl Fn(String) -> String,
+) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    let src = crate_root().join(format!("forms/{src_year}"));
+    let dst = dir.path().join(format!("{dst_year}"));
+    std::fs::create_dir_all(&dst).unwrap();
+    std::fs::copy(
+        src.join(format!("{stem}.pdf")),
+        dst.join(format!("{stem}.pdf")),
+    )
+    .unwrap();
+    let raw = std::fs::read_to_string(src.join(format!("{stem}.map.toml"))).unwrap();
+    let year_line = raw
+        .lines()
+        .find(|l| l.trim_start().starts_with("year") && l.contains(&src_year.to_string()))
+        .unwrap_or_else(|| panic!("{src_year}/{stem}.map.toml has no `year` key"))
+        .to_string();
+    let text = raw
+        .replace(
+            &year_line,
+            &year_line.replace(&src_year.to_string(), &dst_year.to_string()),
+        )
+        .replace(&format!("{stem}/{src_year}"), &format!("{stem}/{dst_year}"));
+    std::fs::write(dst.join(format!("{stem}.map.toml")), edit(text)).unwrap();
+    dir
+}
+
 /// B1 — a row with NO extract is reported as unverifiable, not silently passed (P1).
+///
+/// Re-pointed 2026-09-06 (S9): this planted `2017/f8949` because `design/forms/` carried no 2017
+/// archive. With the TY2017 package dropped, EVERY committed row has an extract, so the kill plants
+/// a real map at a year that has none — the mechanism, not a year that happened to be unarchived.
 #[test]
 fn a_row_with_no_extract_is_reported_as_unverifiable() {
     let ws = workspace_root();
-    let dir = plant(2017, "f8949", |t| t);
+    let dir = plant_as(2025, 1999, "f8949", |t| t);
+    assert!(
+        !ws.join("design/forms/extract/f8949--1999.txt").exists(),
+        "the planted year must have NO archived extract, or this kill proves nothing"
+    );
     let (_, problems) = check_rows(
         dir.path(),
         &manifest_authority_hashes(&ws),
         &ws.join("design/forms/extract"),
     );
-    assert!(problems.contains(&RowProblem::SequenceUnverifiable {
-        year: 2017,
-        stem: "f8949".into()
-    }));
+    assert!(
+        problems.contains(&RowProblem::SequenceUnverifiable {
+            year: 1999,
+            stem: "f8949".into()
+        }),
+        "{problems:?}"
+    );
 }
 
 /// P5 — `AnnualTag`'s stated guarantee: a typo is a parse refusal, not a free string.

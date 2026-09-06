@@ -796,8 +796,10 @@ pub fn irs_basename(stem: &str) -> Result<&str, String> {
 ///
 /// ★ Measured 2026-09-05, and the reason this is a function and not a `const`: the hand-written
 /// `EMITTED_FORMS` it replaces listed **16** form basenames. The real surface was **18 stems / 37
-/// (form, year) pairs** then, and is **20 stems / 41** since the Form 4868 and Form 1040-V rows
-/// landed (2026-09-06). The hand-list omitted `f1040s1` and `f8995a` outright — both of which
+/// (form, year) pairs** then, went to **20 stems / 41** when the Form 4868 and Form 1040-V rows
+/// landed (2026-09-06), and is **20 stems / 36** since S9 dropped the five TY2017 pairs the same
+/// day (no stem was lost: all five have a 2024 and/or 2025 revision). The hand-list omitted
+/// `f1040s1` and `f8995a` outright — both of which
 /// `btctax-forms/src/packet.rs` pushes into the filed packet — so the ratchet passed on those two
 /// forms by finding nothing to check.
 pub fn emitted_form_years() -> Result<BTreeSet<FormYear>, String> {
@@ -882,15 +884,15 @@ pub fn emitted_form_years() -> Result<BTreeSet<FormYear>, String> {
 /// ★ Years are the ones with a template on disk, not a range — e.g. `f8275` and `f8995a` are TY2024
 /// only, `f1040s1a` is TY2025 only (and is the one pair that IS archived, so it does not appear here).
 pub const AUTHORITY_NOT_YET_ARCHIVED: &[(&str, &[i32])] = &[
-    ("f1040", &[2017, 2024, 2025]),
+    ("f1040", &[2024, 2025]),
     ("f1040s1", &[2024]),
     ("f1040s2", &[2024, 2025]),
     ("f1040s3", &[2024, 2025]),
     ("f1040sa", &[2024, 2025]),
     ("f1040sb", &[2024, 2025]),
     ("f1040sc", &[2024, 2025]),
-    ("f1040sd", &[2017, 2024, 2025]),
-    ("f1040sse", &[2017, 2024, 2025]),
+    ("f1040sd", &[2024, 2025]),
+    ("f1040sse", &[2024, 2025]),
     // ★ 2026-09-06, spec 4868/1040-V T1. Both revisions of each ARE archived under design/forms/ —
     //   note, MANIFEST entry, `-layout` extract and geometry fixture — which is what the map rows'
     //   `template_sha256` joins and what the label walk reads. What is NOT yet on disk is the pair
@@ -902,8 +904,8 @@ pub const AUTHORITY_NOT_YET_ARCHIVED: &[(&str, &[i32])] = &[
     ("f4868", &[2024, 2025]),
     ("f6251", &[2024, 2025]),
     ("f8275", &[2024]),
-    ("f8283", &[2017, 2024, 2025]),
-    ("f8949", &[2017, 2024, 2025]),
+    ("f8283", &[2024, 2025]),
+    ("f8949", &[2024, 2025]),
     ("f8959", &[2024, 2025]),
     ("f8960", &[2024, 2025]),
     ("f8995", &[2024, 2025]),
@@ -1147,8 +1149,9 @@ mod tests {
     }
 
     /// ★★ **R16 — the hand-list omitted forms btctax really prints.** `EMITTED_FORMS` listed 16 form
-    /// basenames; the emitting surface is 20 stems / 41 `(form, year)` pairs (18 / 37 when this was
-    /// written; the Form 4868 and Form 1040-V rows landed 2026-09-06). `f8995a` and `f1040s1`
+    /// basenames; the emitting surface is 20 stems / 36 `(form, year)` pairs (18 / 37 when this was
+    /// written; the Form 4868 and Form 1040-V rows landed 2026-09-06 and the five TY2017 rows left
+    /// the same day, S9). `f8995a` and `f1040s1`
     /// were both absent, and `packet.rs` pushes both into the filed packet — so the ratchet passed on
     /// them by finding nothing, and no instrument checked either transcription.
     ///
@@ -1349,9 +1352,10 @@ mod map_row_tests {
         );
         assert_eq!(
             from_rows.len(),
-            41,
-            "41 rows on disk today (37 → 41 on 2026-09-06: the four Form 4868 / Form 1040-V rows, \
-             spec 4868/1040-V T1); a new year adds files, not a list"
+            36,
+            "36 rows on disk today (37 → 41 on 2026-09-06 for the four Form 4868 / Form 1040-V \
+             rows, spec 4868/1040-V T1, then 41 → 36 the same day when S9 dropped the five TY2017 \
+             rows); a new year adds files, not a list"
         );
     }
 
@@ -1383,9 +1387,10 @@ mod map_row_tests {
     }
 
     /// P6 — the row's `instructions` names a document the archive HOLDS: for every row of an archived
-    /// year, `design/forms/<year>/<instructions>--<year>.pdf` is a manifest entry. (TY2017 has no
-    /// archive; those five rows are the `authority = "not-yet-archived"` rows and are skipped here
-    /// for the same reason.)
+    /// year, `design/forms/<year>/<instructions>--<year>.pdf` is a manifest entry. (Rows carrying
+    /// `authority = "not-yet-archived"` are skipped: their template is not in the manifest either.
+    /// Until S9 dropped it on 2026-09-06 that was TY2017's five rows plus `2024/f8283`; it is now
+    /// `2024/f8283` alone.)
     #[test]
     fn every_archived_rows_instructions_stem_is_a_manifest_entry() {
         let manifest = std::fs::read_to_string(

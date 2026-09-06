@@ -7,10 +7,13 @@
 //! 1. **A refusal must write NO bytes**, and that is checked against the DIRECTORY rather than a
 //!    hand-list of filenames that would rot. A signed-ready extension application produced by a year
 //!    that refuses is the worst outcome available here.
-//! 2. **The due date is never a hardcoded month/day.** TY2017's committed `return_due` is
-//!    **2018-04-17** (the Emancipation Day shift), so any test that pinned `04-15` would be asserting
-//!    a bug. The pure `extension_due_date` is exercised on a TY2017-shaped record precisely because
-//!    TY2017 itself cannot reach this command (no full-return tables) — the refusal comes first.
+//! 2. **The due date is never a hardcoded month/day.** TY2017's `return_due` was **2018-04-17**
+//!    (the Emancipation Day shift), so any test that pinned `04-15` would be asserting a bug. The
+//!    pure `extension_due_date` is exercised on a TY2017-SHAPED record precisely because TY2017
+//!    itself could never reach this command (no full-return tables) — the refusal comes first. Since
+//!    S9 dropped the TY2017 package (2026-09-06) that record is BUILT here, from the committed
+//!    TY2024 text with the year and the shifted date substituted, so the shape is still a parsed
+//!    `YearRecord` and the dates are still the real ones.
 //!
 //! The clock arrives as an ARGUMENT (`now`), which is what `main.rs` fills from the `BTCTAX_NOW`
 //! seam. Passing it directly keeps these tests off a process-wide environment variable that parallel
@@ -397,21 +400,30 @@ fn the_section_7503_shifter_moves_a_weekend_to_monday_and_leaves_a_weekday_alone
 /// ★★ KILL — a TY2017-shaped record never yields `04-15`, and its out-of-country date is
 /// **2018-06-15**, not `return_due + 2 months` = 06-17.
 ///
-/// This is the whole reason `extension_due_date` is a pure function taking the record's date: TY2017
-/// cannot reach the command at all (it has no full-return tables, so the refusal comes first), and a
-/// rule that only ever ran on TY2024 — whose April date happens NOT to be shifted — would never
-/// discriminate. TY2017's committed `return_due` is 2018-04-17 because Emancipation Day moved it;
-/// two months later is 06-17, and the real out-of-country date is 06-15.
+/// This is the whole reason `extension_due_date` is a pure function taking the record's date: a rule
+/// that only ever ran on TY2024 — whose April date happens NOT to be shifted — would never
+/// discriminate. TY2017's `return_due` was 2018-04-17 because Emancipation Day moved it; two months
+/// later is 06-17, and the real out-of-country date is 06-15.
+///
+/// ★ The record is CONSTRUCTED (2026-09-06, S9): `forms/2017/YEAR.toml` was deleted with the TY2017
+/// form package, so the shifted date is substituted into the committed TY2024 record text and parsed
+/// back through the real `YearRecord`. The dates are unchanged and still the real ones; what is gone
+/// is only the file they used to be read from. TY2017 could never reach this command in any case (no
+/// full-return tables — the refusal came first), which is why a *shaped* record was always the point.
 #[test]
 fn a_ty2017_shaped_record_never_prints_04_15_and_its_june_date_is_the_15th() {
     use btctax_cli::cmd::admin::extension_due_date;
-    let ty2017_return_due = btctax_forms::year_record::YearRecord::for_year(2017)
-        .expect("TY2017 has a committed year record")
+    let text = btctax_forms::bundled::year_record_text(2024)
+        .expect("TY2024 has a committed year record")
+        .replace("year           = 2024", "year           = 2017")
+        .replace("return_due     = 2025-04-15", "return_due     = 2018-04-17");
+    let ty2017_return_due = btctax_forms::year_record::YearRecord::parse(&text)
+        .expect("the TY2017-shaped record parses")
         .return_due;
     assert_eq!(
         ty2017_return_due,
         date!(2018 - 04 - 17),
-        "premise: the committed record already carries the Emancipation Day shift"
+        "premise: the shaped record carries the Emancipation Day shift, not April 15"
     );
 
     let plain = extension_due_date(2017, ty2017_return_due, false);

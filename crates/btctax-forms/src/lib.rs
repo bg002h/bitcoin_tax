@@ -82,10 +82,13 @@ use time::macros::format_description;
 /// is where the honest per-year state is written down. Read it before adding a year: three of the
 /// facts it pins are counter-intuitive.
 ///
-/// - **TY2017 is fillable and unevidenced.** Five forms, five maps, five `Schema` arms — and
-///   **zero** provenance notes, `MANIFEST.json` entries, committed extracts, geometry fixtures and
-///   `[census]` sections. Nothing hash-pins those five bundled PDFs to an irs.gov document (the rows
-///   say so: `authority = "not-yet-archived: …"`).
+/// - **TY2017 WAS fillable and unevidenced, and was DROPPED for it** (owner ruling S9,
+///   2026-09-06 — `design/ROADMAP_STATUS.md` §0a, `FOLLOWUPS.md` FR-61). Five forms, five maps,
+///   five `Schema` arms — and **zero** provenance notes, `MANIFEST.json` entries, committed
+///   extracts, geometry fixtures and `[census]` sections. Nothing hash-pinned those five bundled
+///   PDFs to an irs.gov document, and the ruling was to delete the package rather than archive an
+///   authority chain for a year nobody files. The TY2017 `TaxTable` is KEPT, so
+///   `report --tax-year 2017` still computes; only the FORMS are gone.
 /// - **TY2025 is listed and 10 of its 15 committed forms are unreachable** — asset and map bound by
 ///   `build.rs` like every other file, and `for_year(2025)` refusing as `UnwiredLineSet` until their
 ///   line-set revisions are verified (design r2 §10 step 5). The inverse of the usual defect: a
@@ -113,7 +116,7 @@ pub(crate) fn fmt_money(d: Usd) -> String {
 /// Fill **Form 8949** (Part I + Part II) for `year` from the projection rows and return the PDF
 /// bytes. The box is year-aware: Bitcoin is filed under the digital-asset Box I/L from TY2025, and
 /// the securities Box C/F on the pre-2025 revisions. Parts that overflow the revision's grid (11 rows
-/// per part on the 2025 form, 14 on 2024/2017) paginate: ⌈rows/grid⌉ page copies per part, each with
+/// per part on the 2025 form, 14 on 2024) paginate: ⌈rows/grid⌉ page copies per part, each with
 /// its own totals; the copies are merged with per-copy field renaming so no two share a value. Every
 /// copy is geometry-verified before merge.
 pub fn fill_form_8949(rows: &[Form8949Row], year: i32) -> Result<Vec<u8>, FormsError> {
@@ -348,8 +351,9 @@ pub fn fill_schedule_d_full(
 ///
 /// Year coverage is MANDATORY, not conditional: Form 8275 is REVISION-versioned, not
 /// tax-year-versioned, so the single bundled Rev. 10-2024 asset is aliased to EVERY `SUPPORTED_YEAR`
-/// (2017/2024/2025) — a promoted disposal filed in any supported year gets a real fillable
-/// disclosure, never a permanent refusal for want of a "2025 revision" that does not exist.
+/// (2024/2025) — a promoted disposal filed in any supported year gets a real fillable
+/// disclosure, never a permanent refusal for want of a "2025 revision" that does not exist. The
+/// aliasing is year-general (`bundled::periodic_template`), not a year list.
 pub fn fill_form_8275(
     printed: &btctax_core::tax::printed::Printed8275,
     header: &btctax_core::tax::packet::ReturnHeader,
