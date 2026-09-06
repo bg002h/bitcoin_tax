@@ -33,12 +33,44 @@ const F1040_CLUSTERS_2017: &[(f32, f32)] = &[(482.0, 555.0)];
 
 fn f1040_clusters(year: i32) -> &'static [(f32, f32)] {
     // ★★★ **ENUMERATED, not a wildcard.** This was `_ => F1040_CLUSTERS_UNIFIED`, which handed
-    //     2024/2025 geometry to ANY year — including a year whose form nobody has looked at.
-    //     These clusters are the MAP-INDEPENDENT geometry oracle that `verify_flat` checks a filled
-    //     form against, so a wildcard makes the instrument built to catch a mis-mapped cell the one
-    //     thing that was never told the year changed. Measured on the TY2026 drafts: Form 1040
-    //     keeps all 199 field names and moves 31 printed line bindings, so "the names still
-    //     resolve" is no evidence at all that the geometry did not move.
+    //     2024/2025 geometry to ANY year — including a year whose form nobody has looked at. These
+    //     clusters are the MAP-INDEPENDENT geometry oracle that `verify_flat` checks a filled form
+    //     against, so a wildcard makes the instrument built to catch a mis-mapped cell the one thing
+    //     that was never told the year changed.
+    //
+    //     ★ **What a wildcard actually costs, measured on the one revision pair this repo holds
+    //       both sides of.** Centre-x read off the bundled blank PDF
+    //       (`./target/debug/xtask dump-fields crates/btctax-forms/forms/2017/f1040.pdf`),
+    //       membership decided by the same `verify::in_band` the oracle uses:
+    //
+    //         TY2017 line-13 dollars  cx 518.1  IN     F1040_CLUSTERS_2017     [482,555]  <- real cell
+    //         TY2017 line-13 cents    cx 565.2  NOT IN F1040_CLUSTERS_2017     [482,555]  <- swap fails closed
+    //         TY2017 line-13 cents    cx 565.2  IN     F1040_CLUSTERS_UNIFIED  [504,576]  ★
+    //
+    //       Run 2024/2025's band over the 2017 form and the cents widget passes AS the dollars cell.
+    //       A wildcard does not merely skip a check here; it disarms the dollars/cents guard the
+    //       band exists to be. `the_2017_band_excludes_a_cents_widget_the_unified_band_admits`
+    //       below re-derives all three numbers from the PDF on every run.
+    //
+    //       ★ Stated honestly: TY2017 has its OWN arm, so this is not a live path — it is the only
+    //         cross-revision measurement this repo can make, and it measures exactly the thing a
+    //         wildcard assumes away, that one revision's x-band still means what it meant.
+    //
+    //     ★ **"The names still resolve" is evidence of nothing.**
+    //       `./target/debug/xtask form-delta f6251--2024 f6251--2025` — the calibration pair, both
+    //       sides real finals: 61 common fields, 1 added, **0 removed and 0 renamed** — and **30**
+    //       of the **59** fields whose printed label resolves on BOTH sides now sit beside a
+    //       different line.
+    //
+    //     ★ **Retracted — do not re-cite.** This comment previously read *"the 2026 drafts move 31
+    //       line bindings while renaming nothing."* That 31 was an artifact of a page off-by-one
+    //       introduced by the drafts' IRS cover sheet, not a property of the forms. Post-correction:
+    //       `form-delta f6251--2025 f6251--2026-DRAFT` → 0 renamed, **1** moved (`f1_5`: line 2a → 2).
+    //       For Form 1040 there is **no TY2026 measurement at all**: the archived
+    //       `design/forms/2026/f1040--2026-DRAFT.pdf` is the TY2025 form (its own text layer reads
+    //       "Form 1040 (2025) Created 9/5/25"), so the "no field changed" that
+    //       `form-delta f1040--2025 f1040--2026-DRAFT` prints is TY2025 compared with itself.
+    //       The panic below stands on the TY2017 measurement above, which needs no draft.
     //
     //     ★ A new year must be added HERE, deliberately, after someone has compared the form. The
     //       panic is the point: silently reusing last year's x-bands is how a wrong cell passes.
@@ -47,8 +79,9 @@ fn f1040_clusters(year: i32) -> &'static [(f32, f32)] {
         2024 | 2025 => F1040_CLUSTERS_UNIFIED,
         other => panic!(
             "f1040_clusters: no geometry recorded for TY{other}. The unified bands cover TY2024-2025 \
-             only; add an arm after comparing the form (xtask form-delta), never widen this to a \
-             wildcard — the 2026 drafts move 31 line bindings while renaming nothing."
+             only; add an arm after measuring the year's amount column off its blank PDF (xtask \
+             dump-fields), never widen this to a wildcard — the unified band [504,576] admits the \
+             TY2017 cents widget at cx 565.2, so a wildcard turns the dollars/cents guard off."
         ),
     }
 }
@@ -190,4 +223,99 @@ pub fn fill_form_1040_capgains(
         active_zero,
         loss,
     }))
+}
+
+#[cfg(test)]
+mod cluster_year_guard {
+    use super::*;
+    use crate::map::{Form1040Map, MoneyCell};
+    use crate::verify::in_band;
+
+    /// Run `f` with panic output silenced, restoring the previous hook. Nothing here asserts on a
+    /// panic *message*, so swallowing it costs nothing and keeps a passing run readable.
+    fn resolves(year: i32) -> bool {
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let ok = std::panic::catch_unwind(|| f1040_clusters(year)).is_ok();
+        std::panic::set_hook(prev);
+        ok
+    }
+
+    /// ★★★ **The enumeration IS the guard, and the expected answer is DERIVED.**
+    ///
+    /// The probe below is a domain to sweep, never an expected set: for each year the answer comes
+    /// from [`crate::SUPPORTED_YEARS`], so this reds in BOTH directions —
+    ///
+    /// * a year wired into the product with no amount-column band measured for it, and
+    /// * a band handed to a year the product does not support (i.e. the wildcard is back).
+    ///
+    /// **Planted-defect check (B1):** restore `other => F1040_CLUSTERS_UNIFIED` and this test reds
+    /// on the first unsupported probe year with "TY2010 is NOT in SUPPORTED_YEARS yet
+    /// f1040_clusters answered".
+    #[test]
+    fn geometry_is_recorded_for_exactly_the_supported_years() {
+        for year in 2010..=2040 {
+            let supported = crate::SUPPORTED_YEARS.contains(&year);
+            let answered = resolves(year);
+            assert_eq!(
+                answered,
+                supported,
+                "TY{year}: SUPPORTED_YEARS.contains = {supported} but f1040_clusters {} — {}",
+                if answered { "answered" } else { "panicked" },
+                if supported {
+                    "a supported year with no band recorded: measure the amount column off the \
+                     year's blank PDF (xtask dump-fields) and add the arm"
+                } else {
+                    "an unsupported year must NOT inherit another revision's x-band; the wildcard \
+                     is back"
+                }
+            );
+        }
+    }
+
+    /// ★★★ **Why the wildcard is not merely "unchecked" but WRONG — measured, not asserted.**
+    ///
+    /// The band's job is that a map whose `dollars_field` actually names the narrow cents widget
+    /// fails the column check. Every centre-x below is read from the bundled blank TY2017 PDF and
+    /// the committed TY2017 map, so this is the comment above re-derived rather than repeated.
+    ///
+    /// **Planted-defect check (B1):** set `F1040_CLUSTERS_2017 = F1040_CLUSTERS_UNIFIED` (what the
+    /// wildcard did) and the middle assertion reds: "TY2017 cents widget cx 565.2 is INSIDE the
+    /// band recorded for TY2017".
+    #[test]
+    fn the_2017_band_excludes_a_cents_widget_the_unified_band_admits() {
+        let map = Form1040Map::for_year(2017).expect("TY2017 f1040 map");
+        let MoneyCell::Pair(pair) = &map.line7a else {
+            panic!("TY2017 line 13 is a dollars+cents pair — the whole point of this test");
+        };
+        let doc = pdf::load(pdf::f1040_pdf(2017).expect("TY2017 f1040 PDF")).expect("parse");
+        let fields = pdf::collect_fields(&doc).expect("fields");
+        let cx = |fqn: &str| {
+            fields
+                .iter()
+                .find(|f| f.fqn == fqn)
+                .unwrap_or_else(|| panic!("{fqn} not in the bundled TY2017 PDF"))
+                .cx()
+                .unwrap_or_else(|| panic!("{fqn} has no widget rect"))
+        };
+        let (dollars, cents) = (cx(&pair.dollars_field), cx(&pair.cents_field));
+        let own = F1040_CLUSTERS_2017[F1040_COL_AMOUNT];
+        let unified = F1040_CLUSTERS_UNIFIED[F1040_COL_AMOUNT];
+
+        assert!(
+            in_band(dollars, own),
+            "TY2017 line-13 dollars cx {dollars:.1} is outside its own band {own:?}"
+        );
+        assert!(
+            !in_band(cents, own),
+            "TY2017 cents widget cx {cents:.1} is INSIDE the band recorded for TY2017 {own:?} — a \
+             map that swapped dollars and cents would pass the column check"
+        );
+        assert!(
+            in_band(cents, unified),
+            "the premise of the panic has changed: the unified band {unified:?} no longer admits \
+             the TY2017 cents widget at cx {cents:.1}, so reusing it across revisions is no longer \
+             demonstrably unsafe — re-measure before rewriting the comment above"
+        );
+    }
 }

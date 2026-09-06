@@ -45,13 +45,28 @@
 
 use crate::conventions::Usd;
 
-/// The year a row is quoted from when the collector has not been told otherwise.
+/// The year [`Coverage::default()`] stamps on a row — **compatibility scaffolding for synthetic
+/// checker rows, and nothing else.**
 ///
-/// ★★ This constant's doc used to read *"A TY2025+ form sets its own"* — and until 2026-09-05 there
-/// was **no API by which it could**. Both constructors hardcoded it, so a TY2025 row would have
-/// claimed a TY2024 quotation and `cite-check` would have gone looking for
-/// `f1040s1a--2024.txt`, which does not exist. Use [`Coverage::quoting_year`] to set it; the claim
-/// is now true.
+/// ★★★ **IT USED TO BIND THE PRODUCTION TABLE, and that is the defect this constant now records.**
+/// Measured 2026-09-05 on the committed table: **279 of 329** rows reached
+/// `xtask line-coverage` carrying this year because their collector was built with
+/// `Coverage::default()` and never said otherwise — of the file's 24 `cover_*` collectors exactly
+/// one (`cover_schedule1a`) named a year, and the other 23 inherited TY2024 by silence. The checker resolves the
+/// authority as `design/forms/extract/<form>--<year>.txt`, so those 279 rows re-asserted the TY2024
+/// booklet no matter which tax year the product was being ported to: **the product fails closed on an
+/// unenumerated year, this instrument re-passed 2024 and printed OK.**
+///
+/// ★★ It is not a hypothetical. btctax already emits TY2025 maps for f1040, f6251, f1040sa, f1040sd,
+/// f1040sse, f1040s2, f1040s3, f1040sb, f1040sc, f8949, f8959, f8960 and f8995 — and of the 230
+/// defaulted rows on forms that have a `--2025` extract, **34 quote a sentence that does not occur in
+/// the TY2025 text at all** (Form 6251's four indexed thresholds, 1040 line 26's *"2024 estimated tax
+/// payments … from 2023 return"*, Schedule D's nine `1a/3/8a/10` column totals, …). Nothing reds,
+/// because no row ever asks the TY2025 file a question.
+///
+/// **So the year is now a required argument** — [`Coverage::quoting`] — and [`all`] REFUSES a
+/// collector that never named one. This constant survives only so `xtask`'s synthetic rows keep
+/// resolving; deleting it is a two-line edit there (see `design/agent-reports/2026-09-05-scafffix-coverage.md`).
 pub const DEFAULT_ROW_YEAR: &str = "2024";
 
 /// Which sentence-shape of the IRS instruction language this line transcribes.
@@ -125,24 +140,69 @@ pub struct LineCoverage {
     pub reason: Option<&'static str>,
 }
 
+/// Which extract a collector's rows are quoted from — **a decision, or the absence of one.**
+///
+/// ★★ The two states are not the same fact wearing different clothes, and that is the whole point:
+/// `Decided("2024")` says *a human read `f1040--2024.txt`*, while `Undecided` says *nobody said*. Both
+/// used to produce the identical row, indistinguishable downstream — the same shape as this repo's
+/// standing blank-vs-blank rule, one form-year up: a defaulted year and a transcribed year look alike
+/// on the row and are not the same thing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RowYear {
+    /// A caller named the extract: [`Coverage::quoting`] or [`Coverage::quoting_year`].
+    Decided(&'static str),
+    /// Nobody named one. Rows still carry [`DEFAULT_ROW_YEAR`] so `xtask`'s synthetic checker rows
+    /// keep resolving, and [`all`] refuses such a collector outright.
+    Undecided,
+}
+
+impl RowYear {
+    fn stamp(self) -> &'static str {
+        match self {
+            RowYear::Decided(y) => y,
+            RowYear::Undecided => DEFAULT_ROW_YEAR,
+        }
+    }
+}
+
 /// Accumulator. [`Self::line`] takes the money value itself so `#![deny(unused_variables)]` bites on
 /// any field the destructure names but does not classify.
+///
+/// ★ Field `.1` is the quoting year; `.2` records whether any row was pushed **before** a year was
+/// decided. `.2` is sticky on purpose — a later [`Self::quoting_year`] re-dates the rows that follow
+/// it, never the ones already pushed, so clearing the mark would launder exactly the rows nobody
+/// decided.
 #[derive(Debug)]
-pub struct Coverage(pub Vec<LineCoverage>, &'static str);
+pub struct Coverage(pub Vec<LineCoverage>, RowYear, bool);
 
+/// ★★ **`default()` no longer names a year, and no `cover_*` may use it.** It exists for `xtask`'s
+/// synthetic single-row collectors, which quote real TY2024 text at the checker; every collector in
+/// this module is built with [`Coverage::quoting`], and [`all`] panics on one that is not.
 impl Default for Coverage {
     fn default() -> Self {
-        Coverage(Vec::new(), DEFAULT_ROW_YEAR)
+        Coverage(Vec::new(), RowYear::Undecided, false)
     }
 }
 
 impl Coverage {
-    /// Quote subsequent rows from `year` rather than [`DEFAULT_ROW_YEAR`].
+    /// Start a collector whose rows are quoted from `year`'s extract. **The year is an argument
+    /// because it is a decision** — `<form>--<year>.txt` is the authority `xtask line-coverage`
+    /// opens, so a wrong year is a citation to a booklet nobody read.
+    ///
+    /// ★ This is also the port lever: transcribing a form for a new year and naming that year sends
+    /// every one of its quotes at the new extract, so a sentence carried forward unchanged from the
+    /// old booklet REDS instead of passing. With the year defaulted, the same paste passed silently.
+    pub fn quoting(year: &'static str) -> Self {
+        Coverage(Vec::new(), RowYear::Decided(year), false)
+    }
+
+    /// Quote subsequent rows from `year`.
     ///
     /// ★ The year is per-ROW, not per-collector-lifetime: a packet legitimately spans forms from
     /// different years, so this sets the year for rows pushed *after* it and can be called again.
+    /// It cannot un-default rows already pushed — see `Coverage.2`.
     pub fn quoting_year(&mut self, year: &'static str) {
-        self.1 = year;
+        self.1 = RowYear::Decided(year);
     }
     /// Record one money line. `_value` exists to be CONSUMED — that is the compile-time guarantee.
     ///
@@ -162,9 +222,10 @@ impl Coverage {
         production: Production,
         instruction: &'static str,
     ) {
+        self.2 |= self.1 == RowYear::Undecided;
         self.0.push(LineCoverage {
             form,
-            year: self.1,
+            year: self.1.stamp(),
             line: line.to_string(),
             field,
             production,
@@ -194,9 +255,10 @@ impl Coverage {
         instruction: &'static str,
         reason: &'static str,
     ) {
+        self.2 |= self.1 == RowYear::Undecided;
         self.0.push(LineCoverage {
             form,
-            year: self.1,
+            year: self.1.stamp(),
             line: line.to_string(),
             field,
             production: Production::Exception,
@@ -262,8 +324,10 @@ pub fn cover_form6251(p: &crate::tax::form6251::Form6251) -> Coverage {
         part_iii_completed: _,
     } = p;
     let f = "f6251";
-    let mut c = Coverage::default();
-    c.0.extend(cover_form6251line1(line1).0);
+    let mut c = Coverage::quoting("2024");
+    // ★ Nested collectors go through `dated` too: a sub-form that never named its year would
+    //   otherwise reach the table pre-stamped with the default and pass this gate invisibly.
+    c.0.extend(dated(cover_form6251line1(line1)));
     c.line(*line2a, f, "2a", "line2a", Production::Collected,
         "If filing Schedule A (Form 1040), enter the taxes from Schedule A, line 7; otherwise, enter the amount from Form 1040 or 1040-SR, line 12");
     c.line(
@@ -498,7 +562,7 @@ pub fn cover_form6251(p: &crate::tax::form6251::Form6251) -> Coverage {
 /// §G-6 — Form 6251 **line 1**, which is year-shaped: TY2024 prints one box, TY2025 splits it into
 /// 1a/1b. Its own `cover_*` because the enum is a money-bearing type in its own right.
 pub fn cover_form6251line1(p: &crate::tax::form6251::Form6251Line1) -> Coverage {
-    let mut c = Coverage::default();
+    let mut c = Coverage::quoting("2024");
     let f = "f6251";
     // ★ TY2025's 1a/1b are a DIFFERENT form revision with 60 boxes; they get their own rows when that
     //   year's map lands, and the emitter refuses them against the TY2024 map today. `if let` rather
@@ -543,7 +607,7 @@ pub fn cover_form8995apartii(p: &crate::tax::qbi_a::Form8995APartIi) -> Coverage
         line16,
     } = p;
     let f = "f8995a";
-    let mut c = Coverage::default();
+    let mut c = Coverage::quoting("2024");
     c.line(
         *line2,
         f,
@@ -664,7 +728,7 @@ pub fn cover_form8995apartiii(p: &crate::tax::qbi_a::Form8995APartIii) -> Covera
         line26,
     } = p;
     let f = "f8995a";
-    let mut c = Coverage::default();
+    let mut c = Coverage::quoting("2024");
     c.line(
         *line17,
         f,
@@ -762,7 +826,7 @@ pub fn cover_form8995apartiv(p: &crate::tax::qbi_a::Form8995APartIv) -> Coverage
         line40,
     } = p;
     let f = "f8995a";
-    let mut c = Coverage::default();
+    let mut c = Coverage::quoting("2024");
     c.line(*line27, f, "27", "line27", Production::Carry,
         "Total qualified business income component from all qualified trades, businesses, or aggregations. Enter the amount from line 16");
     c.line(*line28, f, "28", "line28", Production::Collected,
@@ -866,7 +930,7 @@ pub fn cover_form8995lines(l: &crate::tax::qbi::Form8995Lines) -> Coverage {
         line17,
     } = l;
     let f = "f8995";
-    let mut c = Coverage::default();
+    let mut c = Coverage::quoting("2024");
     c.line(
         *line2,
         f,
@@ -1023,23 +1087,20 @@ pub fn cover_scheduleblines(l: &crate::tax::printed::ScheduleBLines) -> Coverage
         fbar_filing_required: _,
     } = l;
     let f = "f1040sb";
-    let mut c = Coverage::default();
+    let mut c = Coverage::quoting("2024");
     // ★ NESTED MONEY. `ScheduleBRow.amount` is a printed figure on a type one level down, and the
     //   same type serves TWO different form lines — Part I line 1 (interest) and Part II line 5
     //   (dividends) — so the context travels as a parameter rather than being baked into the type.
     //   `zero_schedulebLines()` seeds one row in each Vec so this is never vacuous.
     for r in part1_rows {
-        c.0.extend(
-            cover_schedulebrow(
-                r,
-                "1",
-                "List name of payer. If any interest is from a seller-financed mortgage and the",
-            )
-            .0,
-        );
+        c.0.extend(dated(cover_schedulebrow(
+            r,
+            "1",
+            "List name of payer. If any interest is from a seller-financed mortgage and the",
+        )));
     }
     for r in part2_rows {
-        c.0.extend(cover_schedulebrow(r, "5", "List name of payer").0);
+        c.0.extend(dated(cover_schedulebrow(r, "5", "List name of payer")));
     }
     c.line(
         *line2,
@@ -1111,7 +1172,7 @@ pub fn cover_schedulealines(l: &crate::tax::printed::ScheduleALines) -> Coverage
         line17,
     } = l;
     let f = "f1040sa";
-    let mut c = Coverage::default();
+    let mut c = Coverage::quoting("2024");
     c.line(
         *line1,
         f,
@@ -1305,7 +1366,7 @@ pub fn cover_scheduleclines(l: &crate::tax::printed::ScheduleCLines) -> Coverage
         line31,
     } = l;
     let f = "f1040sc";
-    let mut c = Coverage::default();
+    let mut c = Coverage::quoting("2024");
     c.line(*line1, f, "1", "line1", Production::Collected,
         "Gross receipts or sales. See instructions for line 1 and check the box if this income was reported to you on Form W-2 and the “Statutory employee” box on that form was checked");
     c.line(
@@ -1393,7 +1454,7 @@ pub fn cover_scheduleselines(l: &crate::tax::printed::ScheduleSeLines) -> Covera
         line13,
     } = l;
     let f = "f1040sse";
-    let mut c = Coverage::default();
+    let mut c = Coverage::quoting("2024");
     c.line(*line2, f, "2", "line2", Production::Carry,
         "Net profit or (loss) from Schedule C, line 31; and Schedule K-1 (Form 1065), box 14, code A (other than farming). See instructions for other income to report or if you are a minister or member of a religious order");
     c.line(
@@ -1480,7 +1541,7 @@ pub fn cover_schedule1lines(l: &crate::tax::printed::Schedule1Lines) -> Coverage
         line26,
     } = l;
     let f = "f1040s1";
-    let mut c = Coverage::default();
+    let mut c = Coverage::quoting("2024");
     c.line(
         *line1,
         f,
@@ -1585,7 +1646,7 @@ pub fn cover_schedule2lines(l: &crate::tax::printed::Schedule2Lines) -> Coverage
         line21,
     } = l;
     let f = "f1040s2";
-    let mut c = Coverage::default();
+    let mut c = Coverage::quoting("2024");
     // §G-6 — the AMT reaches the return here, and line 3 carries it to 1040 line 17.
     // ★★ CONDITIONAL — "Attach Form 6251". BLANK when no Form 6251 is in the packet, because a `0`
     //    would swear the filer figured an AMT on a form that is not there (§G-11).
@@ -1656,7 +1717,7 @@ pub fn cover_schedule3lines(l: &crate::tax::printed::Schedule3Lines) -> Coverage
         line15,
     } = l;
     let f = "f1040s3";
-    let mut c = Coverage::default();
+    let mut c = Coverage::quoting("2024");
     c.line(
         *line1,
         f,
@@ -1727,7 +1788,7 @@ pub fn cover_form8959lines(l: &crate::tax::other_taxes::Form8959Lines) -> Covera
         line24,
     } = l;
     let f = "f8959";
-    let mut c = Coverage::default();
+    let mut c = Coverage::quoting("2024");
     c.line(*line1, f, "1", "line1", Production::Collected,
         "Medicare wages and tips from Form W-2, box 5. If you have more than one Form W-2, enter the total of the amounts from box 5");
     c.line(
@@ -1855,7 +1916,7 @@ pub fn cover_form8960lines(l: &crate::tax::other_taxes::Form8960Lines) -> Covera
         line17,
     } = l;
     let f = "f8960";
-    let mut c = Coverage::default();
+    let mut c = Coverage::quoting("2024");
     c.line(
         *line1,
         f,
@@ -2019,7 +2080,7 @@ pub fn cover_scheduledlines(l: &crate::tax::printed::ScheduleDLines) -> Coverage
         routing: _,
     } = l;
     let f = "f1040sd";
-    let mut c = Coverage::default();
+    let mut c = Coverage::quoting("2024");
     // §G-28/B4 — Schedule D's own totals-without-Form-8949 lines.
     c.line(*line1a_d, f, "1a(d)", "line1a_d", Production::Collected, "Totals for all short-term transactions reported on Form 1099-B for which basis was reported to the IRS and for which you have no adjustments (see instructions). However, if you choose to report all these transactions on Form 8949, leave this line blank and go to line 1b");
     c.line(*line1a_e, f, "1a(e)", "line1a_e", Production::Collected, "Totals for all short-term transactions reported on Form 1099-B for which basis was reported to the IRS and for which you have no adjustments (see instructions). However, if you choose to report all these transactions on Form 8949, leave this line blank and go to line 1b");
@@ -2152,7 +2213,7 @@ pub fn cover_schedulebrow(
         payer: _, // not money
         amount,
     } = r;
-    let mut c = Coverage::default();
+    let mut c = Coverage::quoting("2024");
     c.line(
         *amount,
         "f1040sb",
@@ -2177,7 +2238,7 @@ fn zero_schedulebrow() -> crate::tax::printed::ScheduleBRow {
 /// COMPILE ERROR. Same guarantee as the struct destructures, one type-constructor over.
 pub fn cover_scheduledrouting(r: &crate::tax::printed::ScheduleDRouting) -> Coverage {
     use crate::tax::printed::ScheduleDRouting as R;
-    let mut c = Coverage::default();
+    let mut c = Coverage::quoting("2024");
     match r {
         // ★ `line20_yes` is a CHECKBOX, not money — the census covers money leaves. It is bound
         //   rather than `..`-ignored so the next field added to this variant is a compile error here.
@@ -2242,7 +2303,7 @@ pub fn cover_form1040lines(l: &crate::tax::printed::Form1040Lines) -> Coverage {
         line37,
         digital_asset_yes: _,
     } = l;
-    let mut c = Coverage::default();
+    let mut c = Coverage::quoting("2024");
     c.line(
         *line1z,
         "f1040",
@@ -2565,7 +2626,7 @@ pub fn cover_form1040income(l: &crate::tax::printed::Form1040Income) -> Coverage
         line10,
         line11,
     } = l;
-    let mut c = Coverage::default();
+    let mut c = Coverage::quoting("2024");
     c.exception(*qdcgt_net_capital_gain, "i1040gi", "QDCGT Worksheet, 3", "Form1040Income.qdcgt_net_capital_gain",
         "Yes. Enter the smaller of line 15 or line 16 of Schedule D. If either line 15 or line 16 is blank or a loss, enter -0-.",
         "A COMPOSITION whose clamp idiom the checker does not know. The operand is Bounded (\"the smaller of line 15 or line 16 of Schedule D\") and the result is then clamped by \"If either line 15 or line 16 is blank or a loss, enter -0-\" — a phrasing in neither FLOOR_IDIOMS nor CEIL_IDIOMS, so declaring Clamped(FloorAtZero) would assert a polarity the quote does not say and rule (3) would reject it. It is also a two-branch worksheet line (the \"No\" branch enters Form 1040 line 7), and this worksheet is never emitted: the value is a worksheet OPERAND that reaches no filed page. Same shape as the f1040sse:10 exception.");
@@ -2698,7 +2759,7 @@ pub fn cover_printed8949row(r: &crate::tax::printed::Printed8949Row, part: &str)
         cost_e,
         gain_h,
     } = r;
-    let mut c = Coverage::default();
+    let mut c = Coverage::quoting("2024");
     c.line(
         *proceeds_d,
         "f8949",
@@ -2733,7 +2794,7 @@ pub fn cover_printed8949totals(t: &crate::tax::printed::Printed8949Totals, part:
         cost_e,
         gain_h,
     } = t;
-    let mut c = Coverage::default();
+    let mut c = Coverage::quoting("2024");
     c.line(*proceeds_d, "f8949", &fmt_part(part, "2", "d"), "proceeds_d", Production::Combine,
         "Totals. Add the amounts in columns (d), (e), (g), and (h) (subtract negative amounts). Enter each total here and include on your");
     c.line(*cost_e, "f8949", &fmt_part(part, "2", "e"), "cost_e", Production::Combine,
@@ -2787,7 +2848,7 @@ pub fn cover_setaxresult(r: &crate::tax::se::SeTaxResult) -> Coverage {
         deductible_half,
     } = r;
     let f = "f1040sse";
-    let mut c = Coverage::default();
+    let mut c = Coverage::quoting("2024");
     c.line(*net_se, f, "2", "net_se", Production::Collected,
         "Net profit or (loss) from Schedule C, line 31; and Schedule K-1 (Form 1065), box 14, code A");
     c.line(
@@ -2989,8 +3050,11 @@ pub fn cover_schedule1a(s: &crate::tax::schedule_1a::Schedule1A) -> Coverage {
     let Schedule1aPartVI { line38 } = part6;
 
     let f = "f1040s1a";
-    let mut c = Coverage::default();
-    c.quoting_year("2025");
+    // ★★ The year is named HERE, at construction, and it is the reason this function was for a while
+    //    the only one in the file that named one at all. It used to be a `quoting_year("2025")` call
+    //    on a `Coverage::default()`; the setter still exists for a collector that legitimately spans
+    //    two extracts mid-way, but a form transcribed from one booklet says so in its constructor.
+    let mut c = Coverage::quoting("2025");
 
     // ── Part I — MAGI ────────────────────────────────────────────────────────────────────────
     c.line(
@@ -3308,51 +3372,99 @@ pub fn cover_schedule1a(s: &crate::tax::schedule_1a::Schedule1A) -> Coverage {
     c
 }
 
+/// One form's rows, ready for the table — **or a refusal, loudly, if nobody said which booklet they
+/// were read from.**
+///
+/// ★★★ This is the enforcement point for the year, and it is a panic rather than a count because a
+/// row quoting an unnamed year is a citation to a document nobody opened. Until 2026-09-05 the same
+/// omission was a silent TY2024 stamp on 279 of 329 rows: `xtask line-coverage` then re-read the
+/// TY2024 booklet, found every quote, and printed OK — for whatever tax year the port was aimed at.
+///
+/// ★ Both states are refused, and the second is the subtle one: `.2` says rows were pushed BEFORE any
+/// year was decided, which a later `quoting_year` re-dates for its successors and cannot repair for
+/// them. A collector that ends `Decided` is not thereby a collector whose rows were all decided.
+fn dated(c: Coverage) -> Vec<LineCoverage> {
+    let form = c.0.first().map_or("(no rows)", |r| r.form);
+    assert!(
+        c.1 != RowYear::Undecided,
+        "line_coverage: the collector for {form:?} ({} row(s)) never named the year its quotes are \
+         read from, so every one of them would claim `{form}--{DEFAULT_ROW_YEAR}.txt` by default. \
+         Build it with `Coverage::quoting(<year>)` — the extract is the authority `xtask \
+         line-coverage` opens, and defaulting it is how an instrument re-passes last year's booklet \
+         under this year's heading.",
+        c.0.len()
+    );
+    assert!(
+        !c.2,
+        "line_coverage: the collector for {form:?} pushed row(s) BEFORE its year was decided; those \
+         rows carry `{DEFAULT_ROW_YEAR}` by default and a later `quoting_year` did not re-date them."
+    );
+    c.0
+}
+
 /// Every covered form, in one place. Grows one entry per form as coverage lands.
 ///
 /// ★ The values are irrelevant — only the TABLE is extracted. The instances exist so the exhaustive
 /// destructures run, which is where the compile-time guarantee lives.
+///
+/// ★★ **Every row arrives through [`dated`]**, so a `cover_*` that forgets to name its year cannot
+/// reach the table at all. The aggregate itself is built as a bare `Vec`, not as a collector: it
+/// quotes nothing, so it has no year to name, and giving it one would be the defaulting this
+/// function exists to refuse.
 pub fn all() -> Coverage {
-    let mut c = Coverage::default();
-    c.0.extend(cover_form8995lines(&zero_form8995lines()).0);
-    c.0.extend(cover_form8995apartiv(&crate::tax::qbi_a::Form8995APartIv::default()).0);
+    let mut rows: Vec<LineCoverage> = Vec::new();
+    rows.extend(dated(cover_form8995lines(&zero_form8995lines())));
+    rows.extend(dated(cover_form8995apartiv(
+        &crate::tax::qbi_a::Form8995APartIv::default(),
+    )));
     // §G-28/B1b — Parts II and III. ★ A NEW STRUCT produces no compile error here, unlike a new FIELD
     // on an existing one, so these two lines are the only thing standing between 25 printed money
     // lines and no instruction-text check at all. They shipped missing once.
-    c.0.extend(cover_form6251(&crate::tax::form6251::Form6251::default()).0);
-    c.0.extend(cover_form8995apartii(&crate::tax::qbi_a::Form8995APartIi::default()).0);
-    c.0.extend(cover_form8995apartiii(&crate::tax::qbi_a::Form8995APartIii::default()).0);
-    c.0.extend(cover_setaxresult(&zero_setaxresult()).0);
-    c.0.extend(cover_form1040lines(&zero_form1040lines()).0);
-    c.0.extend(cover_form1040income(&zero_form1040income()).0);
+    rows.extend(dated(cover_form6251(
+        &crate::tax::form6251::Form6251::default(),
+    )));
+    rows.extend(dated(cover_form8995apartii(
+        &crate::tax::qbi_a::Form8995APartIi::default(),
+    )));
+    rows.extend(dated(cover_form8995apartiii(
+        &crate::tax::qbi_a::Form8995APartIii::default(),
+    )));
+    rows.extend(dated(cover_setaxresult(&zero_setaxresult())));
+    rows.extend(dated(cover_form1040lines(&zero_form1040lines())));
+    rows.extend(dated(cover_form1040income(&zero_form1040income())));
     // ★ Both 8949 parts, because one type serves Part I and Part II.
     for part in ["I", "II"] {
-        c.0.extend(cover_printed8949row(&zero_printed8949row(), part).0);
-        c.0.extend(cover_printed8949totals(&zero_printed8949totals(), part).0);
+        rows.extend(dated(cover_printed8949row(&zero_printed8949row(), part)));
+        rows.extend(dated(cover_printed8949totals(
+            &zero_printed8949totals(),
+            part,
+        )));
     }
-    c.0.extend(cover_scheduleblines(&zero_scheduleblines()).0);
-    c.0.extend(cover_schedulealines(&zero_schedulealines()).0);
-    c.0.extend(cover_scheduleclines(&zero_scheduleclines()).0);
-    c.0.extend(cover_scheduleselines(&zero_scheduleselines()).0);
-    c.0.extend(cover_schedule1lines(&zero_schedule1lines()).0);
-    c.0.extend(cover_schedule2lines(&zero_schedule2lines()).0);
-    c.0.extend(cover_schedule3lines(&zero_schedule3lines()).0);
-    c.0.extend(cover_form8959lines(&zero_form8959lines()).0);
-    c.0.extend(cover_form8960lines(&zero_form8960lines()).0);
-    c.0.extend(cover_scheduledlines(&zero_scheduledlines()).0);
-    // ★★★ TY2025 — the FIRST rows in this table quoted from a year other than 2024. `cover_schedule1a`
-    //     sets its own `quoting_year` internally and returns its own `Coverage`, so the year cannot
-    //     leak forward onto anything appended after it.
-    c.0.extend(cover_schedule1a(&crate::tax::schedule_1a::Schedule1A::default()).0);
+    rows.extend(dated(cover_scheduleblines(&zero_scheduleblines())));
+    rows.extend(dated(cover_schedulealines(&zero_schedulealines())));
+    rows.extend(dated(cover_scheduleclines(&zero_scheduleclines())));
+    rows.extend(dated(cover_scheduleselines(&zero_scheduleselines())));
+    rows.extend(dated(cover_schedule1lines(&zero_schedule1lines())));
+    rows.extend(dated(cover_schedule2lines(&zero_schedule2lines())));
+    rows.extend(dated(cover_schedule3lines(&zero_schedule3lines())));
+    rows.extend(dated(cover_form8959lines(&zero_form8959lines())));
+    rows.extend(dated(cover_form8960lines(&zero_form8960lines())));
+    rows.extend(dated(cover_scheduledlines(&zero_scheduledlines())));
+    // ★★★ TY2025 — the FIRST rows in this table quoted from a year other than 2024, and for a while
+    //     the ONLY ones whose year anybody chose. `cover_schedule1a` names 2025 in its own
+    //     constructor and returns its own `Coverage`, so the year cannot leak forward onto anything
+    //     absorbed after it.
+    rows.extend(dated(cover_schedule1a(
+        &crate::tax::schedule_1a::Schedule1A::default(),
+    )));
     // ★ The routing enum's money lives in one variant; cover that variant explicitly.
-    c.0.extend(
-        cover_scheduledrouting(&crate::tax::printed::ScheduleDRouting::NetLoss {
+    rows.extend(dated(cover_scheduledrouting(
+        &crate::tax::printed::ScheduleDRouting::NetLoss {
             line21: Usd::ZERO,
             line22_yes: false,
-        })
-        .0,
-    );
-    c
+        },
+    )));
+    Coverage(rows, RowYear::Undecided, false)
 }
 
 #[cfg(test)]
@@ -3370,7 +3482,7 @@ mod year_and_blank_tests {
     /// rewrote earlier rows would silently re-attribute their quotations.
     #[test]
     fn quoting_year_sets_the_year_for_later_rows_only() {
-        let mut c = Coverage::default();
+        let mut c = Coverage::quoting("2024");
         c.line(
             Usd::ZERO,
             "f1040",
@@ -3391,7 +3503,7 @@ mod year_and_blank_tests {
 
         assert_eq!(
             c.0[0].year, "2024",
-            "a row pushed BEFORE the call keeps 2024"
+            "a row pushed BEFORE the call keeps the constructor's year"
         );
         assert_eq!(
             c.0[1].year, "2025",
@@ -3406,7 +3518,7 @@ mod year_and_blank_tests {
     /// parameter narrows back to `Usd`, `None` stops compiling and this file fails to build.
     #[test]
     fn exception_records_a_line_the_form_says_to_skip() {
-        let mut c = Coverage::default();
+        let mut c = Coverage::quoting("2025");
         c.exception(
             None::<Usd>,
             "f1040s1a",
@@ -3421,5 +3533,83 @@ mod year_and_blank_tests {
             c.0[0].reason,
             Some("the part's Caution is unmet, so the line is not completed")
         );
+    }
+
+    /// ★★★ **Every row in the shipped table names the extract it was read from.**
+    ///
+    /// Measured before this landed: **279 of 329** rows carried `DEFAULT_ROW_YEAR` because 23 of the
+    /// file's 24 `cover_*` collectors were built with `Coverage::default()` and never said a year. The rows looked
+    /// identical to the one form that had decided — `xtask line-coverage` opened
+    /// `<form>--2024.txt` for all of them and printed OK, which is what a port to a new tax year
+    /// would have kept doing.
+    ///
+    /// ★★ The shape is checked, never a list of accepted years: a hand-list is the failure mode this
+    /// repo keeps paying for, and it would have to be edited by the very port it exists to catch.
+    /// `all()` itself is the year gate — it refuses an undecided collector — so calling it is half
+    /// the assertion.
+    #[test]
+    fn every_row_in_the_table_names_the_extract_it_is_quoted_from() {
+        let c = all();
+        assert!(
+            !c.0.is_empty(),
+            "an empty table would make every assertion below vacuous"
+        );
+        let bad: Vec<String> =
+            c.0.iter()
+                .filter(|r| r.year.len() != 4 || !r.year.chars().all(|ch| ch.is_ascii_digit()))
+                .map(|r| format!("{}:{} carries year {:?}", r.form, r.line, r.year))
+                .collect();
+        assert!(
+            bad.is_empty(),
+            "a row's year is the extract stem `<form>--<year>.txt` opened by `xtask \
+             line-coverage`, so it must be a four-digit tax year: {bad:#?}"
+        );
+    }
+
+    /// ★★★ **B1 for the year gate — the plant is the omission itself.** A collector that never named
+    /// a year is refused by [`dated`], so the 24-collector default cannot come back silently.
+    ///
+    /// ★ The other half of this test is not written here but performed: reverting any one `cover_*`
+    /// to `Coverage::default()` makes `every_row_in_the_table_names_the_extract_it_is_quoted_from`
+    /// fail, because `all()` panics naming the form. Both directions were watched red on
+    /// 2026-09-05 (`design/agent-reports/2026-09-05-scafffix-coverage.md`).
+    #[test]
+    #[should_panic(expected = "never named the year")]
+    fn a_collector_that_never_named_its_year_is_refused() {
+        let mut c = Coverage::default();
+        c.line(
+            Usd::ZERO,
+            "f1040",
+            "1a",
+            "line1a",
+            Production::Carry,
+            "Total amount from Form(s) W-2, box 1",
+        );
+        let mut rows = Vec::new();
+        rows.extend(dated(c));
+    }
+
+    /// ★★★ **A collector that ENDS decided is not a collector whose rows were all decided.**
+    ///
+    /// `quoting_year` is forward-sticky by design — it re-dates the rows that follow it and must
+    /// never re-date the ones already pushed. So a collector that pushes first and decides second has
+    /// produced exactly the rows nobody decided, while its final state looks clean. Without the
+    /// sticky mark this row would reach the table stamped `DEFAULT_ROW_YEAR`, indistinguishable from
+    /// a transcription.
+    #[test]
+    #[should_panic(expected = "BEFORE its year was decided")]
+    fn a_row_pushed_before_the_year_was_decided_is_refused() {
+        let mut c = Coverage::default();
+        c.line(
+            Usd::ZERO,
+            "f1040",
+            "1a",
+            "line1a",
+            Production::Carry,
+            "Total amount from Form(s) W-2, box 1",
+        );
+        c.quoting_year("2025");
+        let mut rows = Vec::new();
+        rows.extend(dated(c));
     }
 }

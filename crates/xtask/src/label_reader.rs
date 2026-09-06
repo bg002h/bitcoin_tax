@@ -410,6 +410,43 @@ pub fn run(stem: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The DIRECTORY year for a form stem: `f6251--2025` → `2025`, `f6251--2026-DRAFT` → `2026`.
+///
+/// ★★ **`-DRAFT` is stripped for the DIRECTORY and kept everywhere else.** The marker stays in the
+/// FILENAME on purpose — it is one of the three signals `authority_manifest::Entry::is_draft` reads,
+/// and R20 is precisely that a draft under a clean stem is indistinguishable from a final. The year
+/// directory is the YEAR: `design/forms/2026/` exists, `design/forms/2026-DRAFT/` never has.
+///
+/// ★★★ **This existed in `form_geometry::extract` and NOT here, and the asymmetry was the whole
+/// defect.** [`proof`] parsed its own year with a bare `rsplit("--")`, so every archived draft
+/// resolved to a directory that does not exist. Measured 2026-09-05 over the 16 committed
+/// `*-DRAFT` geometry fixtures: `label-proof` was **OK=0 FAILED=16**, 15 of them looking in
+/// `design/forms/2026-DRAFT/` and blaming *"not present (gitignored; re-fetch…)"* on a PDF that is
+/// on disk — a message that sends the reader to re-download a file they already have. This is the
+/// human-in-the-loop instrument whose own banner reads *"a defect the machines could not see"*, so
+/// it was the one instrument a machine could not cover for.
+///
+/// ★★ **And there is no fallback year, where there used to be one that could not fire.** The old
+/// expression was `stem.rsplit("--").next().unwrap_or("2025")`, but `rsplit` always yields at least
+/// one item — `"f1040".rsplit("--").next()` is `Some("f1040")` — so `"2025"` was DEAD code reading
+/// as a deliberate fallback-to-2025 policy, in one of the two sites most likely to be copied when a
+/// new stem-consuming command is added (the other is `form_geometry.rs:194`, still to fix). A stem
+/// that is not `<form>--<year>` is now a REFUSAL that names the shape it wanted.
+pub(crate) fn stem_year(stem: &str) -> Result<&str, String> {
+    let bad = || {
+        format!(
+            "`{stem}` is not a form stem: expected `<form>--<year>`, e.g. `f6251--2025` or \
+             `f6251--2026-DRAFT`"
+        )
+    };
+    let (form, year) = stem.rsplit_once("--").ok_or_else(bad)?;
+    let year = year.trim_end_matches("-DRAFT");
+    if form.is_empty() || year.is_empty() {
+        return Err(bad());
+    }
+    Ok(year)
+}
+
 /// `cargo run -p xtask -- label-proof <stem>` — **the human-readable proof of the label→box join.**
 ///
 /// ★★★ **Owner's idea, 2026-07-30, and it closes the residual risk the ④ consult named:** *"a
@@ -433,6 +470,8 @@ pub fn run(stem: &str) -> Result<(), String> {
 pub fn proof(stem: &str, out_path: &str) -> Result<(), String> {
     use btctax_forms::testonly as bf;
 
+    // ★ First, before anything else can fail on a malformed stem with a less useful message.
+    let year = stem_year(stem)?;
     let root = crate::form_geometry::repo_root();
     let g = crate::form_geometry::load(&root, stem)?;
     let labels = witness_text(&g)?;
@@ -453,7 +492,6 @@ pub fn proof(stem: &str, out_path: &str) -> Result<(), String> {
         );
     }
 
-    let year = stem.rsplit("--").next().unwrap_or("2025");
     let pdf = root.join(format!("design/forms/{year}/{stem}.pdf"));
     let bytes = std::fs::read(&pdf).map_err(|e| {
         format!(
@@ -895,6 +933,76 @@ mod tests {
         );
         assert!(has("22a") && has("22b"), "the VIN grid rows carry boxes");
     }
+
+    /// ★★ **B1 — the planted defect is the one that shipped.** Delete `.trim_end_matches("-DRAFT")`
+    /// from [`stem_year`] and this reds on the first `*-DRAFT` fixture it reads; delete the refusal
+    /// and the last three assertions red. The stems are READ OFF `design/forms/geometry/`, never
+    /// listed here, so a fixture committed tomorrow is covered with nobody remembering.
+    ///
+    /// ★ It asserts the DIRECTORY, not the PDF: `design/forms/**/*.pdf` is gitignored, so a test
+    /// that reached for the file itself would be red in CI and green here — the exact shape this
+    /// repo keeps finding.
+    #[test]
+    fn every_committed_geometry_stem_resolves_to_a_year_directory_that_exists() {
+        let root = crate::form_geometry::repo_root();
+        let mut drafts = 0usize;
+        let mut seen = 0usize;
+        for e in std::fs::read_dir(root.join("design/forms/geometry")).expect("geometry fixtures") {
+            let f = e
+                .expect("dir entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned();
+            let Some(stem) = f.strip_suffix(".json") else {
+                continue;
+            };
+            seen += 1;
+            let year = stem_year(stem)
+                .unwrap_or_else(|e| panic!("committed fixture `{stem}` is not a form stem: {e}"));
+            assert!(
+                year.len() == 4 && year.chars().all(|c| c.is_ascii_digit()),
+                "`{stem}` resolved to year directory `{year}` — `-DRAFT` belongs to the FILENAME, \
+                 never to the directory"
+            );
+            assert!(
+                root.join(format!("design/forms/{year}")).is_dir(),
+                "`{stem}` resolves to design/forms/{year}/, which is not a directory"
+            );
+            if stem.ends_with("-DRAFT") {
+                drafts += 1;
+            }
+        }
+        // ★ NON-VACUITY, not a count ratchet. What must hold is that the `-DRAFT` strip is
+        //   exercised by a real committed fixture; the fixture population itself moves whenever a
+        //   form is archived or re-extracted, and a hard count here would red on that instead of on
+        //   the defect. (Measured 2026-09-05: 47 fixtures, 15 of them drafts.)
+        assert!(
+            drafts >= 1 && seen >= drafts,
+            "{seen} geometry fixture(s), {drafts} of them `-DRAFT`. With no draft fixture this test \
+             exercises the `-DRAFT` strip on nothing and witnesses nothing."
+        );
+        assert!(
+            !root.join("design/forms/2026-DRAFT").exists(),
+            "design/forms/2026-DRAFT/ exists, so the pre-fix `rsplit(\"--\")` would now resolve to \
+             a real directory and this test would stop witnessing anything"
+        );
+
+        // The refusal that replaced a fallback which could never fire.
+        assert!(
+            stem_year("f1040").is_err(),
+            "a stem with no `--` must REFUSE"
+        );
+        assert!(
+            stem_year("--2025").is_err(),
+            "an empty form part must REFUSE"
+        );
+        assert!(
+            stem_year("f1040--").is_err(),
+            "an empty year part must REFUSE"
+        );
+        assert_eq!(stem_year("f6251--2026-DRAFT").as_deref(), Ok("2026"));
+        assert_eq!(stem_year("f6251--2025").as_deref(), Ok("2025"));
+    }
 }
 
 /// FQN → the printed line label beside that box, for one archived form. The same join `boxes_tsv`
@@ -983,9 +1091,83 @@ mod map_label_join_tests {
         !trimmed.is_empty() && trimmed != base && trimmed == printed
     }
 
-    /// Every `(form, year, map path, geometry stem)` on disk. Derived by walking the filesystem —
-    /// never a hand-list, so a map committed tomorrow is covered with nobody remembering.
-    fn every_map() -> Vec<(String, String, PathBuf, String)> {
+    /// sha256 of a byte slice, lowercase hex.
+    fn sha256_hex(bytes: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(bytes);
+        h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    /// The `pdf_sha256` a committed geometry fixture records, without parsing its megabyte of words.
+    ///
+    /// ★ It VALIDATES the field it lifts (64 hex characters) and errors by name otherwise, rather
+    /// than returning an empty string that would silently match nothing.
+    fn fixture_pdf_sha256(path: &std::path::Path) -> Result<String, String> {
+        let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let v = text
+            .split("\"pdf_sha256\":\"")
+            .nth(1)
+            .and_then(|s| s.split('"').next())
+            .ok_or_else(|| format!("{} records no pdf_sha256", path.display()))?;
+        if v.len() != 64 || !v.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(format!("{} records a malformed pdf_sha256", path.display()));
+        }
+        Ok(v.to_string())
+    }
+
+    /// One map on disk, and the geometry fixture that observed **the very PDF it was written
+    /// against** — or the reason there is none.
+    struct MapOnDisk {
+        form: String,
+        year: String,
+        path: PathBuf,
+        /// `Ok(stem)`, or `Err(reason)` — never a silently-absent join.
+        stem: Result<String, String>,
+    }
+
+    /// Every map on disk, paired to its geometry by the **sha256 of the bundled PDF**, never by name.
+    ///
+    /// ★★★ **The name join was wrong, and it hid Schedule D.** This built the stem as
+    /// `format!("{form}--{year}")` using the MAP's spelling, while the fixtures are committed under
+    /// the IRS's: the maps are `schedule_d` and `schedule_se`, the fixtures are `f1040sd--2024` and
+    /// `f1040sse--2025`. `crate::form_geometry::load` then failed on a fixture that does not exist,
+    /// the map was counted as *unwitnessed*, and the count was `eprintln!`'d. Measured 2026-09-05:
+    /// **30 line→label joins whose fixtures were on disk the whole time** — and **Schedule D is
+    /// where btctax's capital gain lands**, so no committed test joined any of its lines to its
+    /// printed label, in any year.
+    ///
+    /// ★★ **Hashing is not a workaround for the name — it is a stronger join.** A name match pairs
+    /// a map with *a* fixture for that year; the hash pairs it with the fixture observed from
+    /// **byte-identical bytes**, which is the claim the map's own header makes (*"a byte-for-byte
+    /// copy of design/forms/2025/f8959--2025.pdf"*) and which nothing checked. A revised PDF
+    /// bundled under an unchanged name now reports itself instead of joining to stale geometry.
+    /// Measured 2026-09-05: of the 37 bundled map PDFs, 31 match exactly one fixture and none
+    /// matches two; the 6 that match none are TY2017's five and `2024/f8283.pdf`, all named below.
+    ///
+    /// ★ A map with no match is carried as an `Err` reason and gated in
+    /// [`every_mapped_line_lands_on_its_own_printed_label`], never dropped.
+    fn every_map() -> Vec<MapOnDisk> {
+        // sha256 → fixture stems observed from that PDF.
+        let mut by_hash: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let geom_dir = crate::form_geometry::repo_root().join("design/forms/geometry");
+        let mut fixtures: Vec<PathBuf> = std::fs::read_dir(&geom_dir)
+            .expect("design/forms/geometry exists")
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "json"))
+            .collect();
+        fixtures.sort();
+        for f in &fixtures {
+            let stem = f
+                .file_stem()
+                .expect("a .json has a stem")
+                .to_string_lossy()
+                .into_owned();
+            let h = fixture_pdf_sha256(f).unwrap_or_else(|e| panic!("{e}"));
+            by_hash.entry(h).or_default().push(stem);
+        }
+
         let mut out = Vec::new();
         let mut years: Vec<_> = std::fs::read_dir(forms_root())
             .expect("forms/ exists")
@@ -1010,11 +1192,142 @@ mod map_label_join_tests {
                     .to_string_lossy()
                     .trim_end_matches(".map.toml")
                     .to_string();
-                let stem = format!("{form}--{y}");
-                out.push((form, y.clone(), m, stem));
+                let pdf = dir.join(format!("{form}.pdf"));
+                let stem = match std::fs::read(&pdf) {
+                    Err(e) => Err(format!("no bundled PDF at {}: {e}", pdf.display())),
+                    Ok(bytes) => {
+                        let h = sha256_hex(&bytes);
+                        match by_hash.get(&h).map(Vec::as_slice) {
+                            None => Err(format!(
+                                "no geometry fixture was observed from {} (sha256:{}…) — generate \
+                                 one with `xtask extract-geometry <stem>`",
+                                pdf.display(),
+                                &h[..12]
+                            )),
+                            Some([one]) => Ok(one.clone()),
+                            Some(many) => Err(format!(
+                                "{} matches {} fixtures ({many:?}); the join is ambiguous",
+                                pdf.display(),
+                                many.len()
+                            )),
+                        }
+                    }
+                };
+                out.push(MapOnDisk {
+                    form,
+                    year: y.clone(),
+                    path: m,
+                    stem,
+                });
             }
         }
         out
+    }
+
+    /// What one year's maps actually got checked, MEASURED — never assumed from the year existing.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct YearReach {
+        year: String,
+        maps: usize,
+        /// `<form> — <why>`, one per map this check could not reach. Named, never counted.
+        unwitnessed: Vec<String>,
+        /// line→label joins actually compared for this year.
+        joins: usize,
+    }
+
+    /// The recorded reach floor for ONE tax year.
+    ///
+    /// ★★★ **The years are NOT enumerated here.** They are read off the maps directory, and the
+    /// audit runs in BOTH directions: a year on disk with no entry below fails ("a new tax year
+    /// arrived with no recorded floor"), and an entry below with no maps on disk fails ("the year
+    /// this floor guards has vanished"). A one-directional check keyed to a list reds on nothing
+    /// when an item is dropped — that exact defect has shipped in this repo.
+    struct YearFloor {
+        year: &'static str,
+        min_joins: usize,
+        max_unwitnessed: usize,
+        /// Why a permissive floor is the right one. Required whenever this floor tolerates zero
+        /// joins or an unreachable map — a recorded "no" needs a reason, or it is just an omission.
+        why: &'static str,
+    }
+
+    /// ★ RATCHETS. Raise them when coverage grows; never lower one to make a red go away.
+    const YEAR_FLOORS: &[YearFloor] = &[
+        YearFloor {
+            year: "2017",
+            min_joins: 0,
+            max_unwitnessed: 5,
+            why: "TY2017 is the historical corpus year. None of its five forms is archived under \
+                  design/forms/2017/, so no geometry fixture can be generated and no line->label \
+                  join is reachable. Nothing emits a TY2017 return.",
+        },
+        YearFloor {
+            year: "2024",
+            min_joins: 99,
+            max_unwitnessed: 1,
+            why: "f8283 — design/forms/ holds i8283--2024 (the instructions) but not the form, so \
+                  there is no PDF to extract geometry from.",
+        },
+        YearFloor {
+            year: "2025",
+            min_joins: 82,
+            max_unwitnessed: 0,
+            why: "",
+        },
+    ];
+
+    /// Both directions, and every failure names what it is about.
+    fn audit_year_reach(observed: &[YearReach], floors: &[YearFloor]) -> Result<(), String> {
+        let mut bad: Vec<String> = Vec::new();
+        for o in observed {
+            match floors.iter().find(|f| f.year == o.year) {
+                None => bad.push(format!(
+                    "{}: {} map(s) on disk and {} join(s) checked, but NO coverage floor is \
+                     recorded. A new tax year must not arrive silently — record a floor with the \
+                     measured numbers, or with 0 and the reason 0 is right.",
+                    o.year, o.maps, o.joins
+                )),
+                Some(f) => {
+                    if o.joins < f.min_joins {
+                        bad.push(format!(
+                            "{}: only {} line->label join(s) checked, floor is {}. Coverage for \
+                             this year FELL — a geometry fixture or a map binding has gone missing.",
+                            o.year, o.joins, f.min_joins
+                        ));
+                    }
+                    if o.unwitnessed.len() > f.max_unwitnessed {
+                        bad.push(format!(
+                            "{}: {} map(s) this check cannot reach, allowance is {}:\n      {}",
+                            o.year,
+                            o.unwitnessed.len(),
+                            f.max_unwitnessed,
+                            o.unwitnessed.join("\n      ")
+                        ));
+                    }
+                }
+            }
+        }
+        for f in floors {
+            if !observed.iter().any(|o| o.year == f.year) {
+                bad.push(format!(
+                    "{}: a coverage floor is recorded, but no maps for that year are on disk. \
+                     Either the year was deleted (and this floor with it), or forms_root() is \
+                     pointing somewhere else.",
+                    f.year
+                ));
+            }
+            if (f.min_joins == 0 || f.max_unwitnessed > 0) && f.why.trim().is_empty() {
+                bad.push(format!(
+                    "{}: a floor that tolerates zero joins or an unreachable map must record WHY.",
+                    f.year
+                ));
+            }
+        }
+        if bad.is_empty() {
+            Ok(())
+        } else {
+            Err(bad.join("\n  "))
+        }
     }
 
     /// ★★★ **A mapped line must land on the box the form prints that line's number beside.**
@@ -1027,39 +1340,76 @@ mod map_label_join_tests {
     /// added one field on page 1 and walked everything below it down, with **zero renames**. A
     /// rename check cannot see a renumber.
     ///
-    /// ★ Forms with no geometry fixture are reported by name rather than silently skipped: a
-    /// checker that quietly covers less than it appears to is this repo's dominant defect shape.
+    /// ★★★ **Coverage is asserted PER YEAR, and that is the whole point of this rewrite.** It used
+    /// to be one global `checked >= 151` across every year at once, with the unreachable maps
+    /// `eprintln!`'d and never asserted. A TY2026 whose geometry was never generated then
+    /// contributes **0 joins** and the gate stays green on 2024+2025 coverage — the product fails
+    /// closed, the instrument failed open. Per-year floors plus the both-directions year audit make
+    /// a new year's arrival, and an old year's disappearance, both failures.
     #[test]
     fn every_mapped_line_lands_on_its_own_printed_label() {
         let mut wrong: Vec<String> = Vec::new();
-        let mut unwitnessed: Vec<String> = Vec::new();
-        let mut checked = 0usize;
+        let mut reach: Vec<YearReach> = Vec::new();
+        let mut unlabelled = 0usize;
 
-        for (form, year, path, stem) in every_map() {
-            let Ok(join) = label_join(&stem) else {
-                unwitnessed.push(format!("{year}/{form} (no geometry fixture {stem})"));
-                continue;
+        for m in every_map() {
+            if reach.last().map(|r| r.year.as_str()) != Some(m.year.as_str()) {
+                reach.push(YearReach {
+                    year: m.year.clone(),
+                    maps: 0,
+                    unwitnessed: Vec::new(),
+                    joins: 0,
+                });
+            }
+            let r = reach.last_mut().expect("just pushed");
+            r.maps += 1;
+            let stem = match &m.stem {
+                Ok(s) => s.clone(),
+                Err(why) => {
+                    r.unwitnessed.push(format!("{} — {why}", m.form));
+                    continue;
+                }
             };
-            for (line, fqn) in line_bindings(&path) {
+            let join = match label_join(&stem) {
+                Ok(j) => j,
+                Err(why) => {
+                    r.unwitnessed.push(format!("{} — {stem}: {why}", m.form));
+                    continue;
+                }
+            };
+            for (line, fqn) in line_bindings(&m.path) {
                 let Some(got) = join.get(&fqn) else { continue };
                 if got == "?" {
+                    unlabelled += 1;
                     continue; // the reader could not witness a label for this box
                 }
-                checked += 1;
+                r.joins += 1;
                 if !label_matches(&line, got) {
                     wrong.push(format!(
-                        "{year}/{form}: map says line {line} -> {fqn}, but the form prints \"{got}\" beside that box"
+                        "{}/{}: map says line {line} -> {fqn}, but the form prints \"{got}\" beside that box",
+                        m.year, m.form
                     ));
                 }
             }
         }
 
-        assert!(
-            checked >= 151,
-            "only {checked} line->label joins checked (measured floor: 151); the walk is not \
-             reaching the maps, or geometry fixtures have been deleted. This floor is a RATCHET — \
-             raise it when coverage grows, never lower it to make a red go away."
-        );
+        // ★ The unreachable maps are printed BY NAME on every run, not only on failure. A count
+        //   is what the old `eprintln!` gave, and a count is exactly what cannot distinguish "this
+        //   form has no archived PDF" from "we forgot to extract its geometry".
+        for r in &reach {
+            eprintln!(
+                "{}: {} map(s), {} join(s) checked, {} unreachable",
+                r.year,
+                r.maps,
+                r.joins,
+                r.unwitnessed.len()
+            );
+            for u in &r.unwitnessed {
+                eprintln!("      NOT WITNESSED {u}");
+            }
+        }
+        eprintln!("{unlabelled} binding(s) landed on a box the reader could not label (`?`)");
+
         assert!(
             wrong.is_empty(),
             "{} mapped line(s) land on a box the form labels differently — a filled value would \
@@ -1067,15 +1417,137 @@ mod map_label_join_tests {
             wrong.len(),
             wrong.join("\n  ")
         );
-        eprintln!("checked {checked} line->label joins");
-        if !unwitnessed.is_empty() {
-            eprintln!(
-                "NOT WITNESSED ({} form-years have no geometry fixture, so this check cannot reach \
-                 them — generate with `xtask extract-geometry <stem>`):\n  {}",
-                unwitnessed.len(),
-                unwitnessed.join("\n  ")
-            );
+        if let Err(e) = audit_year_reach(&reach, YEAR_FLOORS) {
+            panic!("per-year coverage of the line->label join is not what was recorded:\n  {e}");
         }
+    }
+
+    /// ★★ **B1 for the per-year audit — the planted defects are synthetic, and deliberately so.**
+    ///
+    /// [`audit_year_reach`] is a pure function over a measured census precisely so its kill test can
+    /// plant the four failures without mutating the shared tree: a new year's maps landing with no
+    /// floor, a recorded year vanishing, coverage falling, and a geometry fixture going missing. A
+    /// manual one-off mutation proves it once; this proves it on every run, forever.
+    #[test]
+    fn the_per_year_audit_reds_on_a_new_year_a_lost_year_lost_coverage_and_a_lost_fixture() {
+        let floors = &[YearFloor {
+            year: "2025",
+            min_joins: 100,
+            max_unwitnessed: 0,
+            why: "",
+        }];
+        let good = |joins: usize, unwitnessed: Vec<String>| YearReach {
+            year: "2025".to_string(),
+            maps: 15,
+            unwitnessed,
+            joins,
+        };
+        audit_year_reach(&[good(100, vec![])], floors).expect("the calibrated case must PASS");
+
+        // (1) TY2026's maps land, its geometry was never generated: 0 joins, no floor.
+        let e = audit_year_reach(
+            &[
+                good(100, vec![]),
+                YearReach {
+                    year: "2026".to_string(),
+                    maps: 12,
+                    unwitnessed: vec!["f6251 — no geometry fixture".to_string()],
+                    joins: 0,
+                },
+            ],
+            floors,
+        )
+        .expect_err("a year with maps and no recorded floor must FAIL");
+        assert!(e.contains("2026") && e.contains("NO coverage floor"), "{e}");
+
+        // (2) the guarded year disappears — the direction a per-year list is blind to.
+        let e = audit_year_reach(&[], floors).expect_err("a vanished year must FAIL");
+        assert!(
+            e.contains("2025") && e.contains("no maps for that year"),
+            "{e}"
+        );
+
+        // (3) coverage falls below the recorded floor.
+        let e = audit_year_reach(&[good(99, vec![])], floors)
+            .expect_err("coverage below the floor must FAIL");
+        assert!(e.contains("Coverage for this year FELL"), "{e}");
+
+        // (4) a geometry fixture goes missing, so a map stops being checked.
+        let e = audit_year_reach(&[good(100, vec!["schedule_d — gone".to_string()])], floors)
+            .expect_err("an unreachable map must FAIL");
+        assert!(
+            e.contains("cannot reach") && e.contains("schedule_d"),
+            "{e}"
+        );
+
+        // (5) a permissive floor with no recorded reason.
+        let e = audit_year_reach(
+            &[good(100, vec![])],
+            &[YearFloor {
+                year: "2025",
+                min_joins: 0,
+                max_unwitnessed: 0,
+                why: "  ",
+            }],
+        )
+        .expect_err("a zero floor with no reason must FAIL");
+        assert!(e.contains("must record WHY"), "{e}");
+    }
+
+    /// ★★★ **B1 for the hash join — Schedule D, by name, in the test that was blind to it.**
+    ///
+    /// The planted defect is the shipped one: build the stem from the MAP's spelling. This asserts
+    /// that the fixture the old code looked for **does not exist** (so the old path reached
+    /// nothing), that the hash join finds the IRS-spelled fixture instead, and that Schedule D's
+    /// bindings actually join — the form btctax's capital gain lands on.
+    #[test]
+    fn schedule_d_joins_through_the_pdf_hash_because_its_map_name_is_not_its_irs_stem() {
+        let root = crate::form_geometry::repo_root();
+        let maps = every_map();
+        let mut checked = 0usize;
+        for form in ["schedule_d", "schedule_se"] {
+            for year in ["2024", "2025"] {
+                let m = maps
+                    .iter()
+                    .find(|m| m.form == form && m.year == year)
+                    .unwrap_or_else(|| panic!("{year}/{form}.map.toml is on disk"));
+                let stem = m
+                    .stem
+                    .as_ref()
+                    .unwrap_or_else(|e| panic!("{year}/{form} must join to a fixture: {e}"));
+                assert_ne!(
+                    stem,
+                    &format!("{form}--{year}"),
+                    "the map spelling must not be the fixture spelling, or this test proves nothing"
+                );
+                assert!(
+                    !crate::form_geometry::geometry_path(&root, &format!("{form}--{year}"))
+                        .exists(),
+                    "design/forms/geometry/{form}--{year}.json exists, so the OLD name join would \
+                     have worked and this test no longer witnesses the defect"
+                );
+                let join = label_join(stem).expect("the hash-joined fixture loads");
+                let bound = line_bindings(&m.path);
+                assert!(!bound.is_empty(), "{year}/{form} binds no plain lines");
+                for (line, fqn) in bound {
+                    if let Some(got) = join.get(&fqn) {
+                        if got != "?" {
+                            checked += 1;
+                            assert!(
+                                label_matches(&line, got),
+                                "{year}/{form}: map says line {line} -> {fqn}, but the form prints \
+                                 \"{got}\" beside that box"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            checked >= 30,
+            "measured 2026-09-05: 30 Schedule D / Schedule SE line->label joins were unreachable \
+             under the name join and are reachable under the hash join; only {checked} arrived"
+        );
     }
 
     /// ★★ **B1 — the kill test, and its planted defect is REAL HISTORY rather than an invention.**

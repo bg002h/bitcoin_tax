@@ -567,15 +567,6 @@
     "extract": "design/forms/extract/i8995--2025.txt"
   },
   {
-    "path": "design/forms/2026/f1040--2026-DRAFT.pdf",
-    "kind": "form",
-    "storage": "note",
-    "sha256": "d57f1ee32a374ec628906a346cd6de1213fdc169d83f8d4eaf48912f41b02e6d",
-    "bytes": 307729,
-    "url": "https://www.irs.gov/pub/irs-dft/f1040--dft.pdf",
-    "extract": ""
-  },
-  {
     "path": "design/forms/2026/f1040s1--2026-DRAFT.pdf",
     "kind": "form",
     "storage": "note",

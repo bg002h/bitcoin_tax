@@ -148,3 +148,22 @@ The owner's direction is to do as much on drafts as possible so draft→final is
 
 **Nothing is transcribed from a draft.** `Entry::is_draft` and the AUTHORITY/DRAFT split in
 `xtask authority-manifest` are what make that enforceable rather than a promise.
+
+
+---
+
+## 5. ★ Owed to the owner: a model-escalation reminder
+
+The owner asked (2026-09-05) to be **reminded to switch to Fable when appropriate**. The trigger is
+the **year-package table redesign** (`TY2026_PORT_REPORT.md` §3): one `FormAuthority`-shaped row per
+`(stem, year)`, with `pdf.rs`, `map.rs`, `CENSUS_KEYS` and `EMITTED_FORMS` derived from it and every
+gate walking it instead of a literal.
+
+**Why that one:** it touches every crate, it is what turns ~85 hand-edits per tax year into a data
+change, and a wrong shape is expensive to unwind — the "design review across a whole system" case,
+and a single review before a costly action rather than one per round.
+
+**Why not the routine work:** every real defect found on 2026-09-05 came from RUNNING something, not
+from reasoning harder (the draft cover-sheet offset, `f1040--2026-DRAFT.pdf` being the TY2025 form, a
+guard that silently skipped unparseable fixtures, `regen` blanking URLs). The reminder fires on
+design shape, not on volume.

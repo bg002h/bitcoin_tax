@@ -2276,10 +2276,17 @@ pub fn assemble_absolute(
     let amt = crate::tax::form6251::compute_6251(
         form6251_inputs_from_parts(
             ri,
+            // ★ THE FUNCTION'S OWN `year`, not `ri.tax_year` — same rule as `Schedule1A::compute`
+            //   above. This argument is what closed the `Form6251Line1Rule::Y2024` hardcode: the
+            //   callee had no year and could not select Part I's per-year rule.
+            year,
             agi,
             taxable_income,
             deduction,
-            qbi.deduction,
+            // 1040 L14 in full — "Add lines 12e, 13a, and 13b" — the SAME `total_deductions` that
+            // L15 is figured from above, not a second derivation that could drift from it.
+            total_deductions,
+            schedule_1a.as_ref(),
             deduction_is_itemized,
             schedule_a.as_ref(),
             qualified_dividends,
@@ -2467,18 +2474,78 @@ pub(crate) fn digital_asset_activity(state: &LedgerState, year: i32) -> bool {
         || state.removals.iter().any(|r| r.removed_at.year() == year)
 }
 
+/// **Which year's Form 6251 Part I line-1 rule applies** — `None` for a year whose Part I this build
+/// has never transcribed.
+///
+/// ★★★ THE ARMS ARE THE YEARS WHOSE FORM 6251 PART I HAS ACTUALLY BEEN READ, and the `_` arm
+/// REFUSES. It must never become `_ => Y2024`: TY2024's line 1 and TY2025's line 1b are DIFFERENT
+/// QUANTITIES — 1b adds Schedule 1-A line 37 (the enhanced senior deduction) back into AMTI — so a
+/// fallback does not merely mislabel a line, it **understates** AMTI by the senior deduction and
+/// prints a `line 1` where the form has `1a`/`1b`. `Form6251Line1::amount_entering_line4` is what
+/// carries the difference into line 4, and from there into the tentative minimum tax and 1040
+/// L17/L24.
+///
+/// ★★ A REFUSAL HERE IS A PANIC AT THE CALLER, and that is deliberate. [`assemble_absolute`] is
+/// infallible by construction, and the only production path into it is gated on
+/// `FullReturnTables::full_return_for(year) -> Some` — so this can only fire when someone adds a
+/// year's `FullReturnParams` **without** transcribing that year's Form 6251 Part I. Stopping loudly
+/// at that moment is the point; the alternative is a signed return carrying last year's Part I.
+///
+/// ★ The end state (`design/TY2026_PORT_REPORT.md` §5 R1) is to carry the selector on
+/// `FullReturnParams` the way `SaltLimitation` already is, so the compiler — not this `match` —
+/// forces the decision when a year is added. That edit is in `tables.rs`; this one is not.
+///
+/// TY2026 is expected to REUSE the `Y2025` shape rather than gain a variant (§7 D3: Form 6251 does
+/// not renumber for TY2026; only the cited Schedule 1-A line moves, 37 → 43). Adding the `2026 =>`
+/// arm is therefore a one-line edit **once the final form has been read**, and not before.
+fn form6251_line1_rule(
+    year: i32,
+    form_1040_l11b: Usd,
+    form_1040_l14: Usd,
+    schedule_1a: Option<&crate::tax::schedule_1a::Schedule1A>,
+) -> Option<crate::tax::form6251::Form6251Line1Rule> {
+    use crate::tax::form6251::Form6251Line1Rule;
+    match year {
+        2024 => Some(Form6251Line1Rule::Y2024),
+        2025 => Some(Form6251Line1Rule::Y2025 {
+            form_1040_l11b,
+            form_1040_l14,
+            // Line 1a subtracts Schedule 1-A line **37**, not line 38's total. A year with no
+            // Schedule 1-A has no line 37 — but no such year reaches this arm, because 2025 has one.
+            schedule_1a_l37: schedule_1a
+                .and_then(|s| s.part5.line37)
+                .unwrap_or(Usd::ZERO),
+        }),
+        _ => None,
+    }
+}
+
 /// Build [`crate::tax::form6251::Form6251Inputs`] from the pieces `assemble_absolute` holds before it
 /// has an `AbsoluteReturn` to hand.
 ///
 /// ★ Lines 2a and 1 cite DIFFERENT 1040 lines — 12 and 14 — so both are passed. `qdcgt_line5_regular`
 /// is the QDCGT Worksheet's line 5 **as figured for the regular tax** (Form 6251 lines 20 and 27).
+///
+/// ★★★ `year` IS A PARAMETER, and that is the whole point of this signature. It used to hardcode
+/// `Form6251Line1Rule::Y2024` under a comment reading *"the year lives at THIS call site, which is
+/// the one place that knows it"* — a claim the signature itself made false, because the function had
+/// no year and could not know it. The caller had `year: i32` in scope and passed `&params.amt` two
+/// lines later. See [`form6251_line1_rule`] for why the unenumerated year refuses.
+///
+/// ★★ `total_deductions_l14` REPLACES the old `qbi_deduction` argument, because 1040 line 14 is a
+/// THREE-term sum from TY2025 on — *"Add lines 12e, 13a, and 13b"* — and the old
+/// `deduction + qbi_deduction` dropped 13b (Schedule 1-A). It is a no-op for TY2024, where there is
+/// no Schedule 1-A and therefore no third term, and it is the same quantity `printed.rs` prints as
+/// line 14, taken from `assemble_absolute`'s own `total_deductions` rather than re-derived here.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn form6251_inputs_from_parts(
     ri: &ReturnInputs,
+    year: i32,
     agi: Usd,
     taxable_income: Usd,
     deduction: Usd,
-    qbi_deduction: Usd,
+    total_deductions_l14: Usd,
+    schedule_1a: Option<&crate::tax::schedule_1a::Schedule1A>,
     itemized: bool,
     schedule_a: Option<&ScheduleAParts>,
     qualified_dividends: Usd,
@@ -2488,14 +2555,24 @@ pub(crate) fn form6251_inputs_from_parts(
 ) -> crate::tax::form6251::Form6251Inputs {
     let pref = (qualified_dividends + net_ltcg).max(Usd::ZERO);
     crate::tax::form6251::Form6251Inputs {
-        // TY2024's Part I. TY2025 passes `Y2025 { .. }` here; the year lives at THIS call site,
-        // which is the one place that knows it (D-4).
-        line1_rule: crate::tax::form6251::Form6251Line1Rule::Y2024,
+        // Part I is PER-YEAR (D-4), so the year decides — it is not a literal, and an unenumerated
+        // year does not fall back to TY2024's Part I.
+        line1_rule: form6251_line1_rule(year, agi, total_deductions_l14, schedule_1a)
+            .unwrap_or_else(|| {
+                panic!(
+                    "Form 6251 Part I has never been transcribed for TY{year}, so there is no \
+                     line-1 rule to apply. REFUSING rather than filing TY2024's Part I under a \
+                     TY{year} heading — line 1 (2024) and line 1b (2025) are different quantities, \
+                     and the 2024 rule understates AMTI by Schedule 1-A line 37. Fix: read Form \
+                     6251 for TY{year} from its text layer and add the arm to \
+                     `form6251_line1_rule` (see design/TY2026_PORT_REPORT.md §7 D3)."
+                )
+            }),
         status: ri.filing_status,
         taxable_income_l15: taxable_income,
         agi_l11: agi,
         deduction_l12: deduction,
-        deduction_l14: deduction + qbi_deduction,
+        deduction_l14: total_deductions_l14,
         schedule_a_line7: schedule_a.map_or(Usd::ZERO, |p| p.salt_5e),
         itemized,
         state_refund_sch1_l1: ri.sch1.state_refund_taxable,
@@ -10710,6 +10787,250 @@ mod tests {
             Usd::ZERO,
             "TY2024 has no Schedule 1-A, so identical inputs must produce NO 13b term — this is the \
              census F-6 invariant that used to live only in a comment"
+        );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+    // T6 — Form 6251 Part I is PER-YEAR, and the year is a PARAMETER
+    //
+    // The defect these three replace: `form6251_inputs_from_parts` wrote
+    // `line1_rule: Form6251Line1Rule::Y2024` as a literal, in a function whose signature had no
+    // `year`, under a comment claiming *"the year lives at THIS call site, which is the one place
+    // that knows it"*. Nothing in `crates/*/tests/` mentioned `line1_rule` (measured: 0 hits).
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// ★★★ **THE SHAPE KILL, on the production path.** A TY2025 return must carry Form 6251's
+    /// TY2025 Part I — lines **1a** and **1b** — not TY2024's single line 1.
+    ///
+    /// ★ This fixture has NO senior, so `Schedule 1-A` line 37 is zero and the two rules agree on
+    /// the NUMBER entering line 4. That is exactly why the assertion is on the VARIANT: with the
+    /// hardcode in place a TY2025 filer signs a form printing a `line 1` the 2025 form does not
+    /// have, and the arithmetic kill (`the_2025_rule_adds_schedule_1a_line_37_back_into_amti`
+    /// below) is dormant only until a senior return reaches it.
+    #[test]
+    fn a_ty2025_return_carries_form_6251s_2025_part_i_not_2024s() {
+        use crate::tax::form6251::Form6251Line1;
+        use crate::tax::return_inputs::{Schedule1aInputs, Schedule1aVehicle};
+        let p = ty2024_params();
+        let st = LedgerState::default();
+
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            w2s: vec![w2(Owner::Taxpayer, dec!(90000), dec!(90000), dec!(90000))],
+            schedule_1a: Schedule1aInputs {
+                vehicles: vec![Schedule1aVehicle {
+                    description: "truck".into(),
+                    interest_paid: dec!(4000),
+                    loan_originated_after_2024: true,
+                    loan_originated_by_you: true,
+                    proceeds_used_to_purchase: true,
+                    personal_use: true,
+                    secured_by_first_lien: true,
+                    original_use_starts_with_you: true,
+                    is_applicable_vehicle_class_under_14000_lbs: true,
+                    final_assembly_in_us: true,
+                    excludes_negative_equity: true,
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let ty2025 = assemble_absolute(&ri, &st, &p, &synthetic_table(2025), 2025);
+        // The seam the fixture depends on: 1040 L13b is really nonzero, so L14 really is a
+        // three-term sum here. If this ever goes to zero the rest of the test proves less.
+        assert_eq!(ty2025.schedule_1a_additional, dec!(4000), "1040 L13b");
+
+        match ty2025.amt.line1 {
+            Form6251Line1::Y2025 { line1a, line1b } => {
+                // 1a — "Subtract Schedule 1-A, line 37, from Form 1040 … line 14."
+                //      L14 = 12e + 13a + 13b = 14,600 + 0 + 4,000; L37 = 0 (no senior).
+                assert_eq!(line1a, dec!(18600), "Form 6251 line 1a");
+                // 1b — "Subtract line 1a from Form 1040 … line 11b." 90,000 − 18,600.
+                assert_eq!(line1b, dec!(71400), "Form 6251 line 1b");
+            }
+            other => panic!(
+                "a TY2025 return must fill the TY2025 Part I (lines 1a/1b); got {other:?} — this is \
+                 the `Form6251Line1Rule::Y2024` hardcode, which files last year's Part I"
+            ),
+        }
+
+        // …and TY2024 must still be TY2024's single line 1. A "fix" that flipped every year to the
+        // 2025 shape would pass the assertion above and break every filed TY2024 return.
+        let ty2024 = assemble_absolute(&ri, &st, &p, &synthetic_table(2024), 2024);
+        assert_eq!(
+            ty2024.schedule_1a_additional,
+            Usd::ZERO,
+            "TY2024 has no Schedule 1-A"
+        );
+        match ty2024.amt.line1 {
+            Form6251Line1::Y2024 { line1 } => assert_eq!(
+                line1,
+                dec!(75400), // L15 = 90,000 − 14,600, and it is > 0 so the else-branch is not taken
+                "Form 6251 line 1 (2024)"
+            ),
+            other => panic!("a TY2024 return must fill TY2024's Part I; got {other:?}"),
+        }
+    }
+
+    /// ★★★ **THE ARITHMETIC KILL.** TY2025 line 1b adds Schedule 1-A line **37** — the enhanced
+    /// senior deduction — back into AMTI, while TY2024's line 1 does not. So the hardcode
+    /// **UNDERSTATES AMTI by the whole senior deduction** on any return that claims one.
+    ///
+    /// ★★ It is driven through [`form6251_inputs_from_parts`] rather than `assemble_absolute`
+    /// because `assemble_absolute` still passes `false, false` for senior qualification
+    /// (`design/TY2026_PORT_REPORT.md` R13), so line 37 is unreachable from there today and a test
+    /// routed that way would assert `0 == 0` and survive every mutation. **That is the measurement,
+    /// not an excuse:** this arms the moment R13 lands, and the test is written so it will already
+    /// be holding the wire when it does.
+    #[test]
+    fn the_2025_rule_adds_schedule_1a_line_37_back_into_amti() {
+        use crate::tax::form6251::{compute_6251, Form6251Line1, Form6251Line1Rule};
+        use crate::tax::return_inputs::Schedule1aInputs;
+        use crate::tax::schedule_1a::Schedule1A;
+
+        let p = ty2024_params();
+        let table = synthetic_table(2025);
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+
+        // MAGI exactly at the line-32 threshold ⇒ the form's own jump: lines 33/34 stay blank and
+        // line 35 takes the $6,000 constant.
+        let agi = dec!(75000);
+        let sch1a = Schedule1A::compute(
+            2025,
+            agi,
+            FilingStatus::Single,
+            &Schedule1aInputs::default(),
+            true, // taxpayer qualifies as a senior
+            false,
+        )
+        .expect("TY2025 has a Schedule 1-A");
+        assert_eq!(
+            sch1a.part5.line37,
+            Some(dec!(6000)),
+            "the fixture must actually produce a line 37; a zero here makes the rest vacuous"
+        );
+
+        let deduction = dec!(14600); // L12e
+        let l13b = Schedule1A::line_13b(Some(&sch1a)); // = line 38
+        assert_eq!(l13b, dec!(6000), "1040 L13b");
+        let l14 = deduction + Usd::ZERO + l13b; // "Add lines 12e, 13a, and 13b"
+        let taxable_income = agi - l14; // L15 = 54,400, > 0
+
+        let build = || {
+            form6251_inputs_from_parts(
+                &ri,
+                2025,
+                agi,
+                taxable_income,
+                deduction,
+                l14,
+                Some(&sch1a),
+                false,
+                None,
+                Usd::ZERO,
+                Usd::ZERO,
+                dec!(6000), // an L16 figure; Part I does not read it
+                Usd::ZERO,
+            )
+        };
+
+        let inputs = build();
+        let Form6251Line1Rule::Y2025 {
+            form_1040_l11b,
+            form_1040_l14,
+            schedule_1a_l37,
+        } = inputs.line1_rule
+        else {
+            panic!("TY2025 must select the TY2025 line-1 rule");
+        };
+        assert_eq!(form_1040_l11b, agi, "1040 line 11b is AGI");
+        assert_eq!(form_1040_l14, l14, "1040 line 14 = 12e + 13a + 13b");
+        assert_eq!(schedule_1a_l37, dec!(6000), "Schedule 1-A line 37");
+        // 1040 L14 must be the THREE-term sum here too — the old signature took `qbi_deduction`
+        // and built `deduction + qbi_deduction`, which drops 13b.
+        assert_eq!(
+            inputs.deduction_l14, l14,
+            "Form 6251's own view of 1040 L14"
+        );
+
+        let correct = compute_6251(inputs, &p.amt, table.ltcg_for(FilingStatus::Single));
+        // The plant, made explicit: the shipped hardcode, on the same inputs.
+        let mut hardcoded = build();
+        hardcoded.line1_rule = Form6251Line1Rule::Y2024;
+        let wrong = compute_6251(hardcoded, &p.amt, table.ltcg_for(FilingStatus::Single));
+
+        assert_eq!(
+            correct.line1,
+            Form6251Line1::Y2025 {
+                line1a: dec!(14600), // 20,600 − 6,000
+                line1b: dec!(60400), // 75,000 − 14,600
+            }
+        );
+        assert_eq!(correct.line4 - wrong.line4, dec!(6000));
+        assert!(
+            correct.line4 > wrong.line4,
+            "the senior deduction is ADDED BACK for the AMT, so TY2024's rule UNDERSTATES AMTI by \
+             it — correct {} vs hardcoded {}",
+            correct.line4,
+            wrong.line4
+        );
+    }
+
+    /// ★★★ **THE REFUSAL.** The supported set is read OFF THE FUNCTION over a wide sweep, not
+    /// asserted from a hand-list of years, so a `_ => Some(Y2024)` fallback shows up as the whole
+    /// sweep being "supported" rather than as a year someone forgot to add to a list.
+    #[test]
+    fn form6251_part_i_refuses_every_year_it_has_not_transcribed() {
+        use crate::tax::form6251::Form6251Line1Rule;
+        let transcribed: Vec<i32> = (1990..=2060)
+            .filter(|&y| form6251_line1_rule(y, dec!(100000), dec!(20000), None).is_some())
+            .collect();
+        assert_eq!(
+            transcribed,
+            vec![2024, 2025],
+            "exactly the years whose Form 6251 Part I has been read from the form. A LONGER list \
+             means a year was enumerated without opening the PDF; the WHOLE sweep means the `_` \
+             arm fell back and every unprepared year now files TY2024's Part I"
+        );
+        assert!(matches!(
+            form6251_line1_rule(2024, dec!(100000), dec!(20000), None),
+            Some(Form6251Line1Rule::Y2024)
+        ));
+        assert!(matches!(
+            form6251_line1_rule(2025, dec!(100000), dec!(20000), None),
+            Some(Form6251Line1Rule::Y2025 { .. })
+        ));
+    }
+
+    /// The refusal reaches the caller as a PANIC naming the fix — `assemble_absolute` is infallible,
+    /// so there is nowhere to return an `Err`. Unreachable in production today (`full_return_for`
+    /// gates entry and holds TY2024 alone); it fires the instant a year's `FullReturnParams` land
+    /// without that year's Form 6251 Part I, which is precisely the moment worth stopping.
+    #[test]
+    #[should_panic(expected = "never been transcribed for TY2026")]
+    fn an_unenumerated_year_panics_rather_than_filing_last_years_part_i() {
+        let ri = ReturnInputs {
+            filing_status: FilingStatus::Single,
+            ..Default::default()
+        };
+        let _ = form6251_inputs_from_parts(
+            &ri,
+            2026,
+            dec!(100000),
+            dec!(80000),
+            dec!(20000),
+            dec!(20000),
+            None,
+            false,
+            None,
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
+            Usd::ZERO,
         );
     }
 }

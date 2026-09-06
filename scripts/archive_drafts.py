@@ -7,8 +7,39 @@ current — which is not necessarily the year you wanted. Measured 2026-09-05: e
 a TY2026 draft except Form 1040, whose draft URL still served a 2025 document. A pipeline that
 trusted the URL would have archived a 2025 form as TY2026 authority-adjacent evidence.
 
-So each fetch is checked against the year printed ON the document, and a mismatch is REFUSED with
-the year actually found. That refusal is the feature.
+★★★ AND THE FIRST VERSION OF THAT CHECK DID NOT MAKE THAT REFUSAL. It read
+
+    years = re.findall(r"\\b20(?:1[5-9]|2[0-9])\\b", pages_1_to_3); return max(years)
+
+— the LARGEST year mentioned anywhere on the first three pages. Every Form 1040 ever printed carries
+line 36, *"Amount of line 34 you want applied to your 2026 estimated tax"*, so a TY2025 Form 1040
+contains the token "2026" and `max()` returned 2026. `design/forms/2026/f1040--2026-DRAFT.pdf` was
+therefore archived as TY2026 evidence while its masthead read *"1040 U.S. Individual Income Tax
+Return 2025"* and all three of its footers read *"Form 1040 (2025)"*, and the docstring above went on
+crediting a refusal that never happened. Two lens reports then built a TY2025-vs-TY2025 port
+work-list on top of it. The instrument was green because it was blind — the house's dominant defect
+shape, and the reason for the rule that no checker exists until it has been watched going RED.
+
+So the year is now read from the two places where the form declares its OWN identity, and they must
+AGREE with each other and with the year asked for:
+
+  * the MASTHEAD — the bare year token printed in the year box at the top of the form's first page.
+    Measured over the 82 PDFs committed under `design/forms/`: it is set 2.2x-3.2x the page's median
+    word height (25.2pt against a 9.3pt median on Form 1040) and sits in the top 6% of the page,
+    while every prose and revision-date occurrence is body-sized AND carries adjacent punctuation
+    (`2025,` `2025.` `2024)`), so it never tokenises as a bare year. Size, position and bareness are
+    three independent reasons the same token wins; a tie between two different years REFUSES.
+  * the FOOTER STAMP — `Form 1040 (2025)`, `Schedule SE (Form 1040) 2026`,
+    `Schedule 1-A (Form 1040) (2026)`. The IRS prints it on every page. All occurrences must agree.
+
+A year in a line's prose is not a declaration and is never read. `--self-test` runs both readers over
+every committed form and asserts each file's document agrees with the year in its own name; it goes
+RED on the `max()` reader, because `design/forms/2025/f1040--2025.pdf` carries the same line 36.
+
+★ Non-annual forms exist and are not a failure. Form 8275 and Form 8283 are REVISION-dated
+(`(Rev. October 2024)`, `(Rev. December 2025)`) and carry no tax-year masthead at all. They are
+refused with that diagnosis rather than "the URL served a different year", because a refusal that
+reports the wrong reason still costs someone an afternoon.
 
 ★ Everything archived here is a DRAFT: `-DRAFT` in the stored filename and an `irs-dft` URL, the two
 signals `authority_manifest::Entry::is_draft` reads. Drafts are EVIDENCE ONLY, never transcribed —
@@ -16,17 +47,19 @@ see design/ty2025/SPEC.md. What they are FOR is structure: which forms exist, ho
 what a port must change. That is how Critical R2 (Schedule 1-A line 37 -> 43) was found.
 
 Usage:  .venv/bin/python scripts/archive_drafts.py 2026 [--dry-run]
+        .venv/bin/python scripts/archive_drafts.py --self-test
 """
 
 import hashlib
-import json
 import pathlib
 import re
+import statistics
 import subprocess
 import sys
 import urllib.request
+from collections import Counter
 
-UA = "btctax-archiver/0.18 (US federal tax form archival; +https://github.com/bg002h/bitcoin_tax)"
+UA = "btctax-archiver/0.19 (US federal tax form archival; +https://github.com/bg002h/bitcoin_tax)"
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 # The stems btctax emits or reads, in IRS draft-URL spelling.
@@ -35,6 +68,34 @@ STEMS = [
     "f1040sa", "f1040sb", "f1040sc", "f1040sd", "f1040sse",
     "f6251", "f8275", "f8283", "f8949", "f8959", "f8960", "f8995", "f8995a",
 ]
+
+# A BARE year token — no comma, no period, no closing paren. That is what the masthead year box
+# contains and what nothing else on an IRS form does; see the module docstring.
+BARE_YEAR = re.compile(r"^20(?:1[5-9]|2[0-9])$")
+
+# pdftotext -bbox-layout geometry. y grows downward from the top of the page.
+_WORD = re.compile(
+    r'<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">([^<]*)</word>'
+)
+_PAGE = re.compile(r'<page width="([\d.]+)" height="([\d.]+)"')
+
+# The IRS identity stamp printed at the foot of every page of a form.
+#   Form 1040 (2025) · Form 8995-A (2026) · Schedule SE (Form 1040) 2026
+#   Schedule 1-A (Form 1040) (2026)
+# A reference to another form in prose ("Schedule K-1 (Form 1041)", "Schedule A (Form 8936), Part II")
+# carries no year and so cannot match.
+_STAMP = re.compile(
+    r"(?:Form\s+([0-9][0-9A-Za-z\-]*)\s*\((20\d\d)\)"
+    r"|Schedule\s+([0-9A-Z][0-9A-Za-z\-]*)\s+\(Form\s+[0-9][0-9A-Za-z\-]*\)\s+\(?(20\d\d)\)?)"
+)
+
+# A revision-dated (non-annual) form: "(Rev. October 2024)". These have no tax year to check.
+_REV = re.compile(r"\(Rev\.\s+([A-Z][a-z]+\s+20\d\d)\)")
+
+# The masthead year box sits at the very top of the page. Measured maximum over the 82 committed
+# PDFs: yMin = 49pt on a 792pt page (6.2%). The window is deliberately far looser than the
+# measurement, and falling outside it produces a NAMED REFUSAL, never a silent pass.
+TOP_OF_PAGE = 0.20
 
 
 def fetch(url: str) -> bytes | None:
@@ -56,6 +117,16 @@ def _text(pdf: pathlib.Path, first: int, last: int) -> str:
         return ""
 
 
+def _bbox(pdf: pathlib.Path, page: int) -> str:
+    try:
+        return subprocess.run(
+            ["pdftotext", "-bbox-layout", "-f", str(page), "-l", str(page), str(pdf), "-"],
+            capture_output=True, text=True, timeout=120,
+        ).stdout
+    except Exception:
+        return ""
+
+
 def says_draft(pdf: pathlib.Path) -> bool:
     """Does the DOCUMENT say it is a draft?
 
@@ -69,24 +140,355 @@ def says_draft(pdf: pathlib.Path) -> bool:
     return "DRAFT" in head and "NOT FOR FILING" in head
 
 
-def printed_year(pdf: pathlib.Path) -> int | None:
-    """The tax year printed ON the form, read from the TEXT LAYER.
+def first_form_page(pdf: pathlib.Path) -> int | None:
+    """The first page that is the FORM rather than a draft cover sheet.
 
-    ★ Never from the filename and never from the URL: the whole point is that those lie. The IRS
-    serves drafts from ONE unversioned path and replaces them in place.
-
-    ★★ Pages 1-3, not page 1. A first draft of this read only page 1 and returned None for all 18
-    forms — because page 1 is the DRAFT COVER SHEET and carries no year. It refused everything,
-    which was the right DIRECTION and the wrong DIAGNOSIS: "the URL served another year" when the
-    truth was "my reader was looking at the wrong page". A fail-closed check that reports the wrong
-    reason still costs someone an afternoon.
+    ★ DERIVED, not assumed to be 2. "NOT FOR FILING" appears on the cover and on no form page —
+    measured on `f1040--2026-DRAFT.pdf`: page 1 yes, pages 2 and 3 no. A final served from a
+    non-draft path has no cover and answers 1. If every page looks like a cover, we return None and
+    the caller refuses by name.
     """
-    out = _text(pdf, 1, 3)
-    years = [int(y) for y in re.findall(r"\b20(?:1[5-9]|2[0-9])\b", out)]
-    return max(years) if years else None
+    for n in range(1, 5):
+        page = _text(pdf, n, n)
+        if not page.strip():
+            break
+        if "NOT FOR FILING" not in page.upper():
+            return n
+    return None
+
+
+def pick_masthead(words, page_height: float) -> tuple[int | None, str]:
+    """Choose the masthead year from a page's laid-out words. Pure, so it can be killed directly.
+
+    `words` is an iterable of `(height_pt, text, y_top)`. A candidate must be all three of:
+
+      (a) a BARE year — prose and revision dates always carry adjacent punctuation and so tokenise
+          as `2025,` `2025.` `2024)`, never as `2025`;
+      (b) in the top fifth of the page — that is where a masthead is;
+      (c) set larger than the page's median word height — a year box is display type, not body type.
+
+    Of the survivors the TALLEST wins; if two survivors are tied at the top and disagree about the
+    year, we refuse rather than pick. Each conjunct has its own kill row in `_reader_kills`.
+    """
+    words = list(words)
+    if not words:
+        return None, "no-text-layer"
+    median_h = statistics.median(h for h, _, _ in words)
+    cands = [
+        (h, w) for h, w, y in words
+        if BARE_YEAR.match(w) and y < page_height * TOP_OF_PAGE and h > median_h
+    ]
+    if not cands:
+        return None, f"no-masthead-year-box (median word height {median_h:.1f}pt)"
+    tallest = max(h for h, _ in cands)
+    winners = {w for h, w in cands if h >= tallest - 0.5}
+    if len(winners) != 1:
+        return None, f"ambiguous-masthead {sorted(winners)} tied at {tallest:.1f}pt"
+    return int(winners.pop()), f"{tallest:.1f}pt vs {median_h:.1f}pt median"
+
+
+def masthead_year(pdf: pathlib.Path, page: int) -> tuple[int | None, str]:
+    """`pick_masthead` over the real geometry of `page`. Returns (year, note)."""
+    out = _bbox(pdf, page)
+    words = [
+        (float(m.group(4)) - float(m.group(2)), m.group(5), float(m.group(2)))
+        for m in _WORD.finditer(out)
+    ]
+    pm = _PAGE.search(out)
+    return pick_masthead(words, float(pm.group(2)) if pm else 792.0)
+
+
+def stamp_years(pdf: pathlib.Path, first_page: int) -> Counter:
+    """Every `Form N (YYYY)` / `Schedule X (Form 1040) YYYY` identity stamp, counted."""
+    return Counter(
+        (m.group(1) or ("Schedule " + m.group(3)), int(m.group(2) or m.group(4)))
+        for m in _STAMP.finditer(_text(pdf, first_page, 99))
+    )
+
+
+def revision_date(pdf: pathlib.Path, page: int) -> str | None:
+    """`(Rev. October 2024)` if the form is revision-dated rather than annual."""
+    m = _REV.search(_text(pdf, page, page))
+    return m.group(1) if m else None
+
+
+def adjudicate(masthead, masthead_note, stamps, want, *, require_stamp=True):
+    """The DECISION, separated from the readers so it can be killed without a PDF.
+
+    Returns `(accepted, code, detail)`. The CODE is what the kill table asserts on: a row that
+    checked only accepted/rejected could pass on a branch it was not testing, and one of them
+    silently did — see `_decision_kills`. Every rejection names its own cause; there is no path on
+    which an unreadable or ambiguous document is treated as fine. `require_stamp=False` is for
+    auditing instruction booklets, whose footers do not always carry the stamp; the archiver never
+    uses it.
+    """
+    stamp_years_seen = sorted({y for (_, y) in stamps})
+    if masthead is None:
+        return False, "no-masthead", f"no tax year in the masthead — {masthead_note}"
+    if len(stamp_years_seen) > 1:
+        return False, "stamps-disagree", (
+            f"the footer stamps disagree with each other: {stamp_years_seen}")
+    if not stamp_years_seen:
+        if require_stamp:
+            return False, "no-stamp", "no `Form N (YYYY)` footer stamp anywhere in the document"
+    else:
+        stamped = stamp_years_seen[0]
+        if stamped != masthead:
+            return False, "masthead-vs-footer", (
+                f"the masthead says {masthead} but the footer stamp says {stamped} — "
+                f"the document contradicts itself")
+    if want is not None and masthead != want:
+        return False, "wrong-year", f"the document declares {masthead}, not {want}"
+    return True, "ok", (
+        f"declares {masthead} (masthead {masthead_note}; stamps {sorted(stamps.items())})")
+
+
+def declared_year(pdf: pathlib.Path, want: int | None, *, require_stamp=True):
+    """Read the document's own declared tax year and adjudicate it against `want`."""
+    page = first_form_page(pdf)
+    if page is None:
+        return False, None, "every page carries the DRAFT cover marker — no form page found"
+    mast, note = masthead_year(pdf, page)
+    stamps = stamp_years(pdf, page)
+    if mast is None and not stamps:
+        rev = revision_date(pdf, page)
+        if rev:
+            return False, None, (f"revision-dated, not annual: (Rev. {rev}) — this form has no tax "
+                                 f"year to check")
+    ok, _code, why = adjudicate(mast, note, stamps, want, require_stamp=require_stamp)
+    return ok, mast, why
+
+
+# --------------------------------------------------------------------------------------------
+# --self-test — the checker is not trusted until it has been watched going RED (CLAUDE.md B1).
+# --------------------------------------------------------------------------------------------
+
+def classify_form_pdf(p: pathlib.Path):
+    """Classify ONE archived form PDF as `declares` / `excused` / `PROBLEM`, with a reason.
+
+    ★★ SKIPPING IS NOT PASSING. There are exactly three outcomes and no silent fourth: a form
+    either declares the tax year its filename claims, or is demonstrably revision-dated (a
+    `(Rev. Month Year)` marker AND no year box — the excuse must BE the mechanism, not a shrug),
+    or it is a PROBLEM. A document whose text layer cannot be read is a PROBLEM, never an excuse —
+    "I could not check this" and "this is fine" must never produce the same output.
+
+    One implementation, two call sites: the corpus audit runs it over the committed archive, and
+    `_negative_fixture_kill` runs it over deliberately broken files in a temp directory. That is
+    what makes the excuse path killable — the committed archive is clean, so no mutation of this
+    function can be witnessed against it alone.
+    """
+    m = re.search(r"--(\d{4})", p.name)
+    if not m:
+        return "PROBLEM", "filename declares no year"
+    want = int(m.group(1))
+    ok, _mast, why = declared_year(p, want)
+    if ok:
+        return "declares", why
+    page = first_form_page(p) or 1
+    if masthead_year(p, page)[0] is None and revision_date(p, page):
+        return "excused", f"revision-dated: (Rev. {revision_date(p, page)})"
+    return "PROBLEM", f"filename says {want} but {why}"
+
+
+def _negative_fixture_kill() -> list[str]:
+    """Drive `classify_form_pdf` with files that are deliberately wrong.
+
+    Nothing here touches `design/forms/` — the fixtures are copies in a temp directory under
+    different names, because manufacturing a mislabelled document inside the authority archive is
+    the very thing this script exists to prevent.
+    """
+    import shutil
+    import tempfile
+    annual = ROOT / "design/forms/2025/f1040--2025.pdf"
+    periodic = ROOT / "design/forms/2025/f8283--2025.pdf"
+    for src in (annual, periodic):
+        if not src.is_file():
+            return [f"negative fixtures: {src.name} is absent, so the kill cannot run — FAIL"]
+    fails = []
+    with tempfile.TemporaryDirectory() as d:
+        d = pathlib.Path(d)
+        # (1) A real annual form offered under a year it does not declare must be a PROBLEM.
+        mislabelled = d / "f1040--2099.pdf"
+        shutil.copyfile(annual, mislabelled)
+        v, why = classify_form_pdf(mislabelled)
+        if v != "PROBLEM":
+            fails.append(f"negative fixture: a TY2025 Form 1040 named `--2099` classified as "
+                         f"'{v}' ({why}) — it must be a PROBLEM")
+        # (2) A genuinely revision-dated form is excused — the excuse must still work.
+        rev = d / "f8283--2099.pdf"
+        shutil.copyfile(periodic, rev)
+        v, why = classify_form_pdf(rev)
+        if v != "excused":
+            fails.append(f"negative fixture: revision-dated Form 8283 classified as '{v}' ({why}) "
+                         f"— the `(Rev. ...)` excuse stopped working")
+        # (3) A file whose text layer cannot be read is a PROBLEM, NOT an excuse. This is the row
+        #     that dies when the excuse is widened from "revision-dated" to "no masthead found".
+        unreadable = d / "f9999--2026.pdf"
+        unreadable.write_bytes(b"%PDF-1.4\n% not a real pdf\n")
+        v, why = classify_form_pdf(unreadable)
+        if v != "PROBLEM":
+            fails.append(f"negative fixture: an unreadable PDF classified as '{v}' ({why}) — "
+                         f"'I could not check this' was treated as 'this is fine'")
+    return fails
+
+
+def _corpus_audit() -> list[str]:
+    """Every committed FORM must declare the year its own filename claims.
+
+    The file set is enumerated FROM THE FILESYSTEM (`design/forms/*/f*.pdf`), never from a list, so
+    a form added tomorrow is audited without editing this script. A file that declares no tax year
+    passes only if it is demonstrably revision-dated; "could not read it" is a FAILURE, not a skip.
+    """
+    fails, excused, checked = [], [], []
+    pdfs = sorted(ROOT.glob("design/forms/[0-9][0-9][0-9][0-9]/f*.pdf"))
+    if len(pdfs) < 30:
+        fails.append(f"corpus audit found only {len(pdfs)} form PDFs — the glob is not finding them")
+    for p in pdfs:
+        verdict, detail = classify_form_pdf(p)
+        if verdict == "declares":
+            checked.append(p.name)
+        elif verdict == "excused":
+            excused.append(p.name)  # non-annual form — excused BY NAME, never silently
+        else:
+            fails.append(f"{p.relative_to(ROOT)}: {detail}")
+    if len(checked) + len(excused) + len(fails) != len(pdfs):
+        fails.append(f"{len(pdfs)} form PDFs globbed but {len(checked)} checked + {len(excused)} "
+                     f"excused + {len(fails)} failed does not account for all of them")
+    return fails, excused, checked
+
+
+def _decision_kills() -> list[str]:
+    """The adjudicator's own kill table. Each row is a defect this check exists to catch."""
+    S = Counter({("1040", 2026): 3})
+    cases = [
+        # ★★ Each row asserts the REASON CODE, not just accept/reject. Two rows here were measured
+        # passing on the wrong branch when their mechanism was deleted:
+        #   * this first row originally used masthead=2025/want=2026, so removing the
+        #     masthead-vs-footer check left `wrong-year` to refuse it and the row stayed GREEN;
+        #   * the disagreeing-stamps row refused via an arbitrary `set` pick, so it stayed GREEN or
+        #     went RED depending on hash order.
+        # Both are the B1 disease inside the kill table itself. Asserting the code fixes both.
+        ("masthead matches the year asked for but the footer stamp contradicts it",
+         (2026, "25.2pt", Counter({("1040", 2025): 3}), 2026), (False, "masthead-vs-footer")),
+        ("masthead disagrees with footer stamp",
+         (2025, "25.2pt", Counter({("1040", 2026): 3}), 2026), (False, "masthead-vs-footer")),
+        ("masthead right, stamp right, year right",
+         (2026, "25.2pt", S, 2026), (True, "ok")),
+        ("masthead and stamp agree but on the wrong year",
+         (2025, "25.2pt", Counter({("1040", 2025): 3}), 2026), (False, "wrong-year")),
+        ("no masthead year at all",
+         (None, "no-masthead-year-box", S, 2026), (False, "no-masthead")),
+        ("ambiguous masthead (two years tied)",
+         (None, "ambiguous-masthead ['2025', '2026']", S, 2026), (False, "no-masthead")),
+        ("footer stamps disagree with each other",
+         (2026, "25.2pt", Counter({("1040", 2026): 2, ("1040", 2025): 1}), 2026),
+         (False, "stamps-disagree")),
+        ("no footer stamp at all",
+         (2026, "25.2pt", Counter(), 2026), (False, "no-stamp")),
+    ]
+    fails = []
+    for name, args, expect in cases:
+        try:
+            ok, code, why = adjudicate(*args)
+        except Exception as e:  # a kill row that EXPLODES is red, never green
+            fails.append(f"decision kill '{name}': raised {e!r}")
+            continue
+        if (ok, code) != expect:
+            fails.append(f"decision kill '{name}': expected {expect}, got {(ok, code)} ({why})")
+    return fails
+
+
+def _reader_kills() -> list[str]:
+    """`pick_masthead`'s kill table — one row per conjunct, so no guard is unwitnessed.
+
+    Heights and positions are the MEASURED ones: a Form 1040 masthead is 25.2pt against a 9.3pt
+    median at y=23, its body text is 8.2pt, and a `(Rev. October 2024)` token sits at 8.2pt/y=67.
+    """
+    body93 = [(9.3, "word", 300.0)] * 40
+    body105 = [(10.5, "word", 300.0)] * 40
+    cases = [
+        ("a real masthead is read",
+         body93 + [(25.2, "2026", 45.0)], 2026),
+        ("BARE-year guard: display-size prose keeps its punctuation and is not a masthead",
+         body93 + [(25.2, "2025,", 45.0)], None),
+        ("TOP-OF-PAGE guard: a large bare year down the page is not a masthead",
+         body93 + [(25.2, "2019", 600.0)], None),
+        ("SIZE guard: a body-sized bare year at the top is not a year box",
+         body105 + [(8.2, "2024", 67.0)], None),
+        ("the tallest candidate wins over a smaller one",
+         body93 + [(25.2, "2026", 45.0), (10.0, "2025", 100.0)], 2026),
+        ("two different years tied at the top size REFUSE rather than pick",
+         body93 + [(25.2, "2026", 45.0), (25.2, "2025", 45.0)], None),
+        ("a page with no text at all refuses",
+         [], None),
+    ]
+    fails = []
+    for name, words, expect in cases:
+        try:
+            got, note = pick_masthead(words, 792.0)
+        except Exception as e:  # e.g. dropping the BARE-year anchor makes int("2025,") explode
+            fails.append(f"reader kill '{name}': raised {e!r}")
+            continue
+        if got != expect:
+            fails.append(f"reader kill '{name}': expected {expect}, got {got} ({note})")
+    return fails
+
+
+def _end_to_end_kill() -> list[str]:
+    """The whole stack — page selection, masthead, footer stamp, adjudication — over a REAL PDF.
+
+    A committed form must be ACCEPTED for the year it declares and REFUSED for the next one. The
+    second half is the kill: it is the archiver's actual failure mode (a document offered as a year
+    it does not declare), run against bytes on disk rather than a synthetic tuple.
+    """
+    pdfs = sorted(ROOT.glob("design/forms/[0-9][0-9][0-9][0-9]/f1040s?--*.pdf"))
+    if not pdfs:
+        return ["end-to-end kill: no witness PDF found — the check cannot run, so it FAILS"]
+    p = pdfs[0]
+    want = int(re.search(r"--(\d{4})", p.name).group(1))
+    fails = []
+    ok, _, why = declared_year(p, want)
+    if not ok:
+        fails.append(f"end-to-end: {p.name} should be accepted for {want} but was refused ({why})")
+    ok, _, why = declared_year(p, want + 1)
+    if ok:
+        fails.append(f"end-to-end KILL FAILED: {p.name} was accepted as {want + 1} ({why})")
+    return fails
+
+
+def self_test() -> int:
+    print("  reader kills ...")
+    fails = _reader_kills()
+    print(f"    {'FAIL' if fails else 'ok'} — 7 rows")
+    print("  decision kills ...")
+    d = _decision_kills()
+    print(f"    {'FAIL' if d else 'ok'} — 8 rows")
+    fails += d
+    print("  end-to-end kill on a real document ...")
+    e2e = _end_to_end_kill()
+    print(f"    {'FAIL' if e2e else 'ok'} — 2 rows")
+    fails += e2e
+    print("  negative fixtures (temp dir, never the archive) ...")
+    nf = _negative_fixture_kill()
+    print(f"    {'FAIL' if nf else 'ok'} — 3 rows")
+    fails += nf
+    print("  corpus audit (design/forms/*/f*.pdf) ...")
+    corpus, excused, checked = _corpus_audit()
+    print(f"    {'FAIL' if corpus else 'ok'} — {len(checked)} declared their own year, "
+          f"{len(excused)} excused as revision-dated: {', '.join(sorted(excused)) or 'none'}")
+    fails += corpus
+    if fails:
+        print("\n  SELF-TEST FAILED:")
+        for f in fails:
+            print(f"    {f}")
+        return 1
+    print("\n  self-test PASSED")
+    return 0
 
 
 def main() -> int:
+    if "--self-test" in sys.argv:
+        return self_test()
     if len(sys.argv) < 2 or not sys.argv[1].isdigit():
         print(__doc__)
         return 2
@@ -95,7 +497,7 @@ def main() -> int:
     outdir = ROOT / "design" / "forms" / str(year)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    got, wrong_year, absent, not_a_draft = [], [], [], []
+    got, refused, absent, not_a_draft = [], [], [], []
     for stem in STEMS:
         url = f"https://www.irs.gov/pub/irs-dft/{stem}--dft.pdf"
         body = fetch(url)
@@ -112,29 +514,29 @@ def main() -> int:
             print(f"  {stem:10} ** REFUSED — no DRAFT cover sheet; this is a FINAL served from the "
                   f"draft path, and archiving it as a draft would mislabel it **")
             continue
-        found = printed_year(tmp)
-        if found != year:
+        ok, found, why = declared_year(tmp, year)
+        if not ok:
             tmp.unlink(missing_ok=True)
-            wrong_year.append((stem, found))
-            print(f"  {stem:10} ** REFUSED — the draft at that URL prints {found}, not {year} **")
+            refused.append((stem, why))
+            print(f"  {stem:10} ** REFUSED — {why} **")
             continue
         if dry:
             tmp.unlink(missing_ok=True)
-            print(f"  {stem:10} ok (dry-run) — prints {found}, {len(body):,} bytes")
+            print(f"  {stem:10} ok (dry-run) — {why}, {len(body):,} bytes")
             got.append(stem)
             continue
         tmp.replace(dest)
         subprocess.run(["pdftotext", "-layout", str(dest), str(dest) + ".txt"], check=False)
         got.append(stem)
-        print(f"  {stem:10} archived — prints {found}, {len(body):,} bytes, "
+        print(f"  {stem:10} archived — {why}, {len(body):,} bytes, "
               f"sha256:{hashlib.sha256(body).hexdigest()[:8]}")
 
-    print(f"\n  archived {len(got)}  ·  refused-wrong-year {len(wrong_year)}  ·  "
+    print(f"\n  archived {len(got)}  ·  refused {len(refused)}  ·  "
           f"refused-not-a-draft {len(not_a_draft)}  ·  absent {len(absent)}")
-    if wrong_year:
-        print("  REFUSED (the URL served a different year — this is the check working):")
-        for stem, found in wrong_year:
-            print(f"    {stem}: prints {found}")
+    if refused:
+        print("  REFUSED (the document did not declare the year asked for — the check working):")
+        for stem, why in refused:
+            print(f"    {stem}: {why}")
     if not_a_draft:
         print(f"  served a FINAL from the draft path (refused): {', '.join(not_a_draft)}")
     if absent:
