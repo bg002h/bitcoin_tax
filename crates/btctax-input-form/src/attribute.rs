@@ -63,7 +63,17 @@ pub fn attribute(r: &RefuseReason) -> Vec<Anchor> {
         R::IncomeExclusionUnanswered => vec![decl(QuestionId::HasIncomeExclusion)],
         // ★ spec 1099-DA T6 — the per-(provider, cohort) answers live in the `BrokerReporting` block,
         //   one row per provider, one field per cohort: every broker refusal points at the slot of
-        //   its cohort (the row is the provider named in the refusal's own text).
+        //   its cohort (the row is the provider, resolved by the TUI via `broker_row_provider`).
+        //
+        // ★★ r3 M-4 — THESE FOUR ANCHORS ARE FORWARD-LOOKING, and that is recorded here rather than
+        //    left to be re-discovered. The TUI's commit gate runs `screen_inputs`, and
+        //    `screen_broker_reporting` is reached only from `screen_absolute` — which runs only on a
+        //    year that COMPUTES (`full_return_for(year)`), and no such year is live today. So no
+        //    `CommitOutcome::Refused` can currently carry a broker `RefuseReason`, and
+        //    `edit/tax_inputs.rs::focus_refusal` has never been watched moving on one in production.
+        //    `attribute()`'s own tests below exercise the mapping in isolation, which cannot see
+        //    that; the TUI-side row resolution has its own test. When a live full-return year lands,
+        //    the commit gate is the thing to re-check — not these arms.
         R::BrokerReportingUnanswered { cohort, .. }
         | R::BrokerReportingMixed { cohort, .. }
         | R::BrokerBasisDiffers { cohort, .. }

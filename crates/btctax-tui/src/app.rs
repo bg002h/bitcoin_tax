@@ -127,6 +127,17 @@ pub struct Snapshot {
     /// session's own `default_prices()` (session.rs), so the panel's baseline matches the Tax tab.
     /// Read-only: a `PriceProvider` is a pure lookup; it never writes.
     pub prices: btctax_adapters::LayeredPrices,
+    /// ★★ spec 1099-DA (r3 I-1) — the filer's stored Form 1099-DA answers, per tax year
+    /// (`ReturnInputs.broker_reporting` for every year the vault has stored inputs for; a year with
+    /// none is simply absent).
+    ///
+    /// **Why the viewer needs them.** The Forms tab prints a Form 8949 **Box** column, and on a live
+    /// year (a regime that reports basis, ≥1 exchange row) the box is CHOSEN from these answers —
+    /// `route_8949_boxes`, spec R2. Without them the tab printed the pre-route I/L under a footnote
+    /// telling the filer to compare *"column (e) of every G/J row"*: a screen asserting a box the
+    /// return would not carry, on a table showing no G/J rows at all. The viewer holds a `Snapshot`,
+    /// not a live `Session`, so the answers must be projected here at unlock like everything else.
+    pub broker_answers: BTreeMap<i32, btctax_core::BrokerReporting>,
 }
 
 /// Top-level application state.

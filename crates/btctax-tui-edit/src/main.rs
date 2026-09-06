@@ -814,16 +814,16 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
         edit::persist::form_active_source(app.session.as_ref().unwrap(), year)
             .map(|a| crate::edit::form::active_source_label(&a))
             .unwrap_or("(none)");
-    // ★ spec 1099-DA T6 — the ledger's exchange keys and their row counts, read ONCE at open from the
-    //   snapshot; the row list enumerates them beside each answer. `None` snapshot → nothing to seed.
+    // ★ spec 1099-DA T6/R1 (r3 I-2) — the ledger's exchange keys AND THEIR ROWS, read ONCE at open
+    //   from the snapshot: the row list prints the counts, the row pane enumerates the rows
+    //   themselves (date sold · amount · (d) · (e)) so the filer can perform the comparison
+    //   `basis_matches` asserts. `None` snapshot → nothing to seed.
     let broker_census = app
         .snapshot
         .as_ref()
         .map(|snap| {
             let rows = btctax_core::form_8949(&snap.state, year);
-            crate::edit::form::broker_census_by_provider(&btctax_core::forms::broker_key_census(
-                &rows,
-            ))
+            crate::edit::form::broker_census_by_provider(&rows)
         })
         .unwrap_or_default();
     let regime = btctax_cli::year_readiness::regime_for(year);
@@ -847,6 +847,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
             modal: None,
             refused_section: None,
             broker_census: broker_census.clone(),
+            broker_regime: regime,
         },
         Ok((btctax_cli::input_form_store::Loaded::Committed(ri), stale_note)) => {
             TaxInputsFormState {
@@ -868,6 +869,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 modal: None,
                 refused_section: None,
                 broker_census: broker_census.clone(),
+                broker_regime: regime,
             }
         }
         Ok((btctax_cli::input_form_store::Loaded::Draft { ri, parked }, stale_note)) => {
@@ -890,6 +892,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 modal: None,
                 refused_section: None,
                 broker_census: broker_census.clone(),
+                broker_regime: regime,
             }
         }
         Err(e @ btctax_cli::CliError::StaleParkedDraft { .. }) => {
@@ -915,6 +918,7 @@ fn open_tax_inputs_form(app: &mut EditorApp) {
                 modal: None,
                 refused_section: None,
                 broker_census: broker_census.clone(),
+                broker_regime: regime,
             }
         }
         Err(e) => {
@@ -12267,6 +12271,7 @@ mod tests {
             donation_details: BTreeMap::new(),
             bulk_estimated: BTreeMap::new(),
             prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
+            broker_answers: Default::default(),
         };
 
         let mut app = EditorApp::new(PathBuf::from("/smoke/vault.pgp"));
@@ -12320,6 +12325,7 @@ mod tests {
                 donation_details: BTreeMap::new(),
                 bulk_estimated: BTreeMap::new(),
                 prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
+                broker_answers: Default::default(),
             };
             let mut app = EditorApp::new(PathBuf::from("/smoke/vault.pgp"));
             app.screen = EditorScreen::Browse;
@@ -12402,6 +12408,7 @@ mod tests {
             donation_details: BTreeMap::new(),
             bulk_estimated: BTreeMap::new(),
             prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
+            broker_answers: Default::default(),
         };
 
         let mut app = EditorApp::new(PathBuf::from("/inherit/vault.pgp"));
@@ -12526,6 +12533,7 @@ mod tests {
             donation_details: BTreeMap::new(),
             bulk_estimated: BTreeMap::new(),
             prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
+            broker_answers: Default::default(),
         };
         let mut app = EditorApp::new(PathBuf::from("/help/vault.pgp"));
         app.screen = EditorScreen::Browse;
@@ -12685,6 +12693,7 @@ mod tests {
             donation_details: BTreeMap::new(),
             bulk_estimated: BTreeMap::new(),
             prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
+            broker_answers: Default::default(),
         };
         let mut app = EditorApp::new(PathBuf::from("/edit/vault.pgp"));
         app.screen = EditorScreen::Browse;
@@ -12709,6 +12718,7 @@ mod tests {
             donation_details: std::collections::BTreeMap::new(),
             bulk_estimated: std::collections::BTreeMap::new(),
             prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
+            broker_answers: Default::default(),
         }
     }
 
@@ -17530,6 +17540,7 @@ mod tests {
             donation_details: BTreeMap::new(),
             bulk_estimated: BTreeMap::new(),
             prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
+            broker_answers: Default::default(),
         }
     }
 
@@ -17557,6 +17568,7 @@ mod tests {
             donation_details: BTreeMap::new(),
             bulk_estimated: BTreeMap::new(),
             prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
+            broker_answers: Default::default(),
         }
     }
 

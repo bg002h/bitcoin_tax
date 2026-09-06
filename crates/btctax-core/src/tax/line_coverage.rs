@@ -2103,14 +2103,28 @@ pub fn cover_scheduledlines(l: &crate::tax::printed::ScheduleDLines) -> Coverage
     c.line(*line8a_d, f, "8a(d)", "line8a_d", Production::Collected, "Totals for all long-term transactions reported on Form 1099-B for which basis was reported to the IRS and for which you have no adjustments (see instructions). However, if you choose to report all these transactions on Form 8949, leave this line blank and go to line 8b");
     c.line(*line8a_e, f, "8a(e)", "line8a_e", Production::Collected, "Totals for all long-term transactions reported on Form 1099-B for which basis was reported to the IRS and for which you have no adjustments (see instructions). However, if you choose to report all these transactions on Form 8949, leave this line blank and go to line 8b");
     c.line(*line8a_h, f, "8a(h)", "line8a_h", Production::Combine, "Totals for all long-term transactions reported on Form 1099-B for which basis was reported to the IRS and for which you have no adjustments (see instructions). However, if you choose to report all these transactions on Form 8949, leave this line blank and go to line 8b");
-    // ★ spec 1099-DA T4 — the per-box rows (the 2025 revision adds "or Box G/H/D/E" on the same lines)
+    // ★★ spec 1099-DA T4 / r3 N-2 — THE FOUR PER-BOX ROWS ARE QUOTED FROM THE **2025** REVISION,
+    //    because that is the revision whose routing the code implements.
+    //
+    //    `schedule_d_lines` sends the G total to line 1b, H to 2, J to 8b and K to 9 — the 2025
+    //    form's own pairing ("Totals for all transactions reported on Form(s) 8949 with Box A or Box
+    //    G checked", f1040sd--2025.txt:32-37, 57-62). The rows carried the TY2024 sentences ("with
+    //    Box A checked"), which are verbatim on THAT booklet and say nothing about where a G total
+    //    goes. A citation that is true of a different revision than the one the code follows is the
+    //    Form 6251 line-33 shape in miniature: correct-looking, and about another document.
+    //
+    //    ★ The year is PER ROW (`quoting_year`), so this sends exactly these twelve quotes at
+    //    `f1040sd--2025.txt` and leaves the rest of the collector on 2024; it is restored below.
+    //    Lines 3 and 10 stay on 2024 by the pre-existing convention (they are quoted "Box C/F
+    //    checked" while the code puts I/L there) — out of scope for this fold, and unchanged.
+    c.quoting_year("2025");
     c.line(
         *line1b_d,
         f,
         "1b(d)",
         "line1b_d",
         Production::Carry,
-        "Totals for all transactions reported on Form(s) 8949 with Box A checked",
+        "Totals for all transactions reported on Form(s) 8949 with Box A or Box G checked",
     );
     c.line(
         *line1b_e,
@@ -2118,7 +2132,7 @@ pub fn cover_scheduledlines(l: &crate::tax::printed::ScheduleDLines) -> Coverage
         "1b(e)",
         "line1b_e",
         Production::Carry,
-        "Totals for all transactions reported on Form(s) 8949 with Box A checked",
+        "Totals for all transactions reported on Form(s) 8949 with Box A or Box G checked",
     );
     c.line(
         *line1b_h,
@@ -2126,7 +2140,7 @@ pub fn cover_scheduledlines(l: &crate::tax::printed::ScheduleDLines) -> Coverage
         "1b(h)",
         "line1b_h",
         Production::Carry,
-        "Totals for all transactions reported on Form(s) 8949 with Box A checked",
+        "Totals for all transactions reported on Form(s) 8949 with Box A or Box G checked",
     );
     c.line(
         *line2_d,
@@ -2134,7 +2148,7 @@ pub fn cover_scheduledlines(l: &crate::tax::printed::ScheduleDLines) -> Coverage
         "2(d)",
         "line2_d",
         Production::Carry,
-        "Totals for all transactions reported on Form(s) 8949 with Box B checked",
+        "Totals for all transactions reported on Form(s) 8949 with Box B or Box H checked",
     );
     c.line(
         *line2_e,
@@ -2142,7 +2156,7 @@ pub fn cover_scheduledlines(l: &crate::tax::printed::ScheduleDLines) -> Coverage
         "2(e)",
         "line2_e",
         Production::Carry,
-        "Totals for all transactions reported on Form(s) 8949 with Box B checked",
+        "Totals for all transactions reported on Form(s) 8949 with Box B or Box H checked",
     );
     c.line(
         *line2_h,
@@ -2150,7 +2164,7 @@ pub fn cover_scheduledlines(l: &crate::tax::printed::ScheduleDLines) -> Coverage
         "2(h)",
         "line2_h",
         Production::Carry,
-        "Totals for all transactions reported on Form(s) 8949 with Box B checked",
+        "Totals for all transactions reported on Form(s) 8949 with Box B or Box H checked",
     );
     c.line(
         *line8b_d,
@@ -2158,7 +2172,7 @@ pub fn cover_scheduledlines(l: &crate::tax::printed::ScheduleDLines) -> Coverage
         "8b(d)",
         "line8b_d",
         Production::Carry,
-        "Totals for all transactions reported on Form(s) 8949 with Box D checked",
+        "Totals for all transactions reported on Form(s) 8949 with Box D or Box J checked",
     );
     c.line(
         *line8b_e,
@@ -2166,7 +2180,7 @@ pub fn cover_scheduledlines(l: &crate::tax::printed::ScheduleDLines) -> Coverage
         "8b(e)",
         "line8b_e",
         Production::Carry,
-        "Totals for all transactions reported on Form(s) 8949 with Box D checked",
+        "Totals for all transactions reported on Form(s) 8949 with Box D or Box J checked",
     );
     c.line(
         *line8b_h,
@@ -2174,7 +2188,7 @@ pub fn cover_scheduledlines(l: &crate::tax::printed::ScheduleDLines) -> Coverage
         "8b(h)",
         "line8b_h",
         Production::Carry,
-        "Totals for all transactions reported on Form(s) 8949 with Box D checked",
+        "Totals for all transactions reported on Form(s) 8949 with Box D or Box J checked",
     );
     c.line(
         *line9_d,
@@ -2182,7 +2196,7 @@ pub fn cover_scheduledlines(l: &crate::tax::printed::ScheduleDLines) -> Coverage
         "9(d)",
         "line9_d",
         Production::Carry,
-        "Totals for all transactions reported on Form(s) 8949 with Box E checked",
+        "Totals for all transactions reported on Form(s) 8949 with Box E or Box K checked",
     );
     c.line(
         *line9_e,
@@ -2190,7 +2204,7 @@ pub fn cover_scheduledlines(l: &crate::tax::printed::ScheduleDLines) -> Coverage
         "9(e)",
         "line9_e",
         Production::Carry,
-        "Totals for all transactions reported on Form(s) 8949 with Box E checked",
+        "Totals for all transactions reported on Form(s) 8949 with Box E or Box K checked",
     );
     c.line(
         *line9_h,
@@ -2198,8 +2212,10 @@ pub fn cover_scheduledlines(l: &crate::tax::printed::ScheduleDLines) -> Coverage
         "9(h)",
         "line9_h",
         Production::Carry,
-        "Totals for all transactions reported on Form(s) 8949 with Box E checked",
+        "Totals for all transactions reported on Form(s) 8949 with Box E or Box K checked",
     );
+    // ★ back to the 2024 booklet for the remaining rows (see the block comment above).
+    c.quoting_year("2024");
     c.line(
         *line3_d,
         f,

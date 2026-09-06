@@ -203,6 +203,10 @@ pub fn build_snapshot(session: &Session) -> Result<(Snapshot, i32), CliError> {
     let prices = btctax_adapters::LayeredPrices::load_with_cache(
         btctax_cli::price_cache::default_cache_path().as_deref(),
     )?;
+    // ★ spec 1099-DA (r3 I-1) — the stored Form 1099-DA answers, via the TYPED accessor (never
+    //   `conn()` [R0-I1]). The Forms tab routes its Box column from these; without them it printed
+    //   the pre-route I/L under a footnote about G/J rows.
+    let broker_answers = session.broker_reporting_answers()?;
     let year = latest_year(&state);
     let snapshot = Snapshot {
         events,
@@ -214,6 +218,7 @@ pub fn build_snapshot(session: &Session) -> Result<(Snapshot, i32), CliError> {
         donation_details,
         bulk_estimated,
         prices,
+        broker_answers,
     };
     Ok((snapshot, year))
 }

@@ -579,6 +579,30 @@ impl Session {
         Ok(out)
     }
 
+    /// ★★ spec 1099-DA (r3 I-1) — every stored year's Form 1099-DA answers
+    /// (`ReturnInputs.broker_reporting`), keyed by year (NFR4-stable `BTreeMap`). A year with no
+    /// stored inputs is absent; so is a year whose stored blob will not deserialize.
+    ///
+    /// **The typed accessor exists so `build_snapshot` never touches `conn()` [R0-I1].** The viewer
+    /// holds a `Snapshot`, not a live `Session`, and its Forms tab must ROUTE the Form 8949 box
+    /// column from these answers rather than print the pre-route default.
+    ///
+    /// ★ A corrupt blob for ONE year is SKIPPED rather than propagated: the same fail-closed
+    /// availability rule as [`Self::resolve_all_screened`]'s per-year `Uncomputable`. The
+    /// consequence of an absent entry is honest — the routing then cannot settle the year's keys and
+    /// the tab prints `—` with its caption, never a guessed box.
+    pub fn broker_reporting_answers(
+        &self,
+    ) -> Result<BTreeMap<i32, btctax_core::BrokerReporting>, CliError> {
+        let mut out = BTreeMap::new();
+        for year in return_inputs::years(self.conn())? {
+            if let Ok(Some(ri)) = return_inputs::get(self.conn(), year) {
+                out.insert(year, ri.broker_reporting);
+            }
+        }
+        Ok(out)
+    }
+
     /// All stored `TaxProfile`s, sorted by year ascending.
     pub fn all_tax_profiles(
         &self,

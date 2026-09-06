@@ -1180,6 +1180,7 @@ mod tests {
             donation_details: BTreeMap::new(),
             bulk_estimated: BTreeMap::new(),
             prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
+            broker_answers: Default::default(),
         };
 
         let mut test_app = App::new(vault_path);
@@ -1290,6 +1291,7 @@ mod tests {
             donation_details: BTreeMap::new(),
             bulk_estimated: BTreeMap::new(),
             prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
+            broker_answers: Default::default(),
         };
 
         let mut test_app = App::new(vault);
@@ -1386,6 +1388,7 @@ mod tests {
             donation_details: BTreeMap::new(),
             bulk_estimated: BTreeMap::new(),
             prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
+            broker_answers: Default::default(),
         };
         let mut a = App::new(vault);
         a.screen = Screen::Viewer;

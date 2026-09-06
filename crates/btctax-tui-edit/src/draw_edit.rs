@@ -2447,6 +2447,21 @@ fn field_pane_lines(
                 format!("  {} #{}{}", section.title, row + 1, preview),
                 dark,
             )));
+            // ★★ spec 1099-DA R1 (r3 I-2) — ENUMERATE the key's rows before the answer is taken.
+            //    `basis_matches` is "box 1g equals btctax's column (e) on EACH" of these rows, so the
+            //    filer must see each one's (e) while answering; the row LIST keeps the count line.
+            //    The lines are pre-rendered on the form state (the renderer may not read a
+            //    `ReturnInputs` field or a ledger row — §9A/§13); the provider comes from the seam.
+            if section.id == SectionId::BrokerReporting {
+                if let Some(provider) = btctax_input_form::broker_row_provider(ri, *row) {
+                    for l in
+                        crate::edit::form::broker_row_detail_lines(&form.broker_census, &provider)
+                    {
+                        lines.push(Line::from(Span::styled(l, dark)));
+                    }
+                    lines.push(Line::from(""));
+                }
+            }
         }
         push_field_lines(&mut lines, section, ri, addr, field_focus, editing, buf);
         push_nested_drill_entry(&mut lines, form, section, ri);
@@ -2598,7 +2613,10 @@ fn broker_row_preview(form: &TaxInputsFormState, ri: &ReturnInputs, i: usize) ->
         return String::new();
     };
     match form.broker_census.get(&provider) {
-        Some((c, n)) => format!("  — {provider}   covered: {c} row(s) · noncovered: {n} row(s)"),
+        Some(rows) => {
+            let (c, n) = rows.counts();
+            format!("  — {provider}   covered: {c} row(s) · noncovered: {n} row(s)")
+        }
         None => {
             format!("  — {provider}   (no Form 8949 row this year — answers here would be unread)")
         }
@@ -6981,6 +6999,7 @@ mod tests {
             donation_details: BTreeMap::new(),
             bulk_estimated: BTreeMap::new(),
             prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
+            broker_answers: Default::default(),
         };
 
         let mut app = EditorApp::new(PathBuf::from("/test/vault.pgp"));
@@ -7056,6 +7075,7 @@ mod tests {
             donation_details: BTreeMap::new(),
             bulk_estimated: BTreeMap::new(),
             prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
+            broker_answers: Default::default(),
         };
 
         let mut app = EditorApp::new(PathBuf::from("/test/vault.pgp"));
@@ -7236,6 +7256,7 @@ mod tests {
             donation_details: BTreeMap::new(),
             bulk_estimated: BTreeMap::new(),
             prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
+            broker_answers: Default::default(),
         };
         let mut app = EditorApp::new(PathBuf::from("/test/vault.pgp"));
         app.screen = EditorScreen::Browse;

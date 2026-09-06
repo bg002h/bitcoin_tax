@@ -217,7 +217,21 @@ pub struct TaxInputsFormState {
     /// ★ spec 1099-DA T6 — per provider, how many of the year's Form 8949 rows fall under each
     /// cohort (covered, noncovered), read from the LEDGER at open. The seam cannot see the ledger,
     /// so this is what lets the row list ENUMERATE each key's rows before the answer is taken.
-    pub broker_census: std::collections::BTreeMap<String, (usize, usize)>,
+    pub broker_census: std::collections::BTreeMap<String, BrokerProviderRows>,
+    /// ★★ spec 1099-DA (r3 I-3) — the YEAR's Form 1099-DA regime, cached at open
+    /// (`year_readiness::regime_for(year)`), so the seed can run again after NI-2 materialization
+    /// without reaching the year record from inside the edit loop.
+    ///
+    /// **Why a re-seed is needed at all.** `seed_broker_rows` ran only in `open_tax_inputs_form`,
+    /// guarded by `if let Some(ri) = form.working.as_mut()` — and a year with no committed inputs
+    /// and no draft opens as `Loaded::Fresh` ⇒ `working: None` ⇒ no seed. The filer then chooses a
+    /// filing status (NI-2), which materializes a `ReturnInputs` whose `broker_reporting` map is
+    /// empty, so `section_is_live` hid the block for the rest of that session and `add` refuses:
+    /// there was no in-session way to create the row. That is the FIRST authoring session, and it is
+    /// the exit both the slice refusal and the full-return screen name — the slice arm runs
+    /// *precisely because* no `ReturnInputs` is stored, so the refusal and the skipped seed are
+    /// guaranteed to co-occur.
+    pub broker_regime: Option<btctax_core::InformationReturnRegime>,
     /// ★ Task 5: a staged `RemoveRow` awaiting the payload-confirm ("remove W-2 #2?"). `Some` while the
     /// confirm modal is open — Enter applies it, Esc clears it. It carries the VALIDATED row address (never
     /// a raw cursor), so a later cursor move cannot re-target the delete.
@@ -316,22 +330,105 @@ impl TaxInputsFormState {
             modal: None,
             refused_section: None,
             broker_census: Default::default(),
+            broker_regime: None,
         }
     }
 }
 
-/// ★ spec 1099-DA T6 — the ledger's (provider, cohort) census folded per provider as
-/// `(covered rows, noncovered rows)`, the shape the row list prints.
+/// ★★ spec 1099-DA R1 (r3 I-2) — one provider's ledger rows, per cohort, ALREADY RENDERED as the
+/// lines the input form prints.
+///
+/// Spec R1 is a MUST: *"`report` and the TUI prompt **enumerate each key's rows (date sold, amount,
+/// proceeds, btctax's column (e))** before the answer is taken."* T6 delivered the COUNT on both
+/// surfaces. It is load-bearing, not cosmetic: `BasisMatches` is defined as *"box 1g equals btctax's
+/// column (e) on each"*, so the filer was asked to swear to a per-row equality against a column the
+/// tool never showed them.
+///
+/// ★ The rows are rendered HERE, in the ledger-facing layer, because `draw_edit.rs` may not read a
+/// `ReturnInputs` field or a `Form8949Row` (§9A/§13 — the renderer names nothing but `form_spec()`
+/// accessors and this cached view; the `tax_inputs_render_never_reads_a_bare_return_inputs_field`
+/// lint holds the first half). The seam cannot see the ledger, so this IS the seam.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BrokerProviderRows {
+    /// One line per COVERED row, in the ledger's order: `date sold · amount · (d) · (e)`.
+    pub covered: Vec<String>,
+    /// The same for the NONCOVERED cohort.
+    pub noncovered: Vec<String>,
+}
+
+impl BrokerProviderRows {
+    /// `(covered rows, noncovered rows)` — the counts the row LIST prints beside each provider.
+    pub fn counts(&self) -> (usize, usize) {
+        (self.covered.len(), self.noncovered.len())
+    }
+
+    /// The lines for one cohort.
+    pub fn lines(&self, cohort: btctax_core::forms::Cohort) -> &[String] {
+        match cohort {
+            btctax_core::forms::Cohort::Covered => &self.covered,
+            btctax_core::forms::Cohort::Noncovered => &self.noncovered,
+        }
+    }
+}
+
+/// ★ spec 1099-DA T6/R1 — the ledger's Form 8949 rows folded per provider, each cohort's rows
+/// rendered for display. The row LIST prints [`BrokerProviderRows::counts`]; the row PANE prints the
+/// lines themselves, under the header, before the two answer fields.
+///
+/// ★★ It takes the ROWS, not a `(provider, cohort) → count` census: a count and the rows it counts
+/// are two derivations of one fact, and the enumeration exists precisely so the filer can check the
+/// figures. Deriving both from the same slice here means they cannot disagree.
 pub fn broker_census_by_provider(
-    census: &std::collections::BTreeMap<(String, btctax_core::forms::Cohort), usize>,
-) -> std::collections::BTreeMap<String, (usize, usize)> {
+    rows: &[btctax_core::Form8949Row],
+) -> std::collections::BTreeMap<String, BrokerProviderRows> {
+    use btctax_core::forms::{broker_key, Cohort};
+    let mut out: std::collections::BTreeMap<String, BrokerProviderRows> = Default::default();
+    for r in rows {
+        let Some((provider, cohort)) = broker_key(r) else {
+            continue; // self-custody: no broker, no 1099-DA key
+        };
+        // date sold · column (a) amount · column (d) proceeds · column (e) btctax's basis
+        let line = format!(
+            "{}  {}   (d) {:.2}   (e) {:.2}",
+            r.date_sold, r.description, r.proceeds, r.cost_basis
+        );
+        let e = out.entry(provider).or_default();
+        match cohort {
+            Cohort::Covered => e.covered.push(line),
+            Cohort::Noncovered => e.noncovered.push(line),
+        }
+    }
+    out
+}
+
+/// ★ spec 1099-DA R1 (r3 I-2) — the row PANE's enumeration for one provider: a heading per cohort
+/// with its row count, then one line per row. A cohort with no rows says so — an answer given there
+/// would be discarded as unread, and that is exactly what the filer needs to know before typing one.
+/// A provider absent from the census (its rows vanished since the answers were stored) yields the
+/// single explanatory line.
+pub fn broker_row_detail_lines(
+    census: &std::collections::BTreeMap<String, BrokerProviderRows>,
+    provider: &str,
+) -> Vec<String> {
     use btctax_core::forms::Cohort;
-    let mut out: std::collections::BTreeMap<String, (usize, usize)> = Default::default();
-    for ((p, c), n) in census {
-        let e = out.entry(p.clone()).or_insert((0, 0));
-        match c {
-            Cohort::Covered => e.0 += n,
-            Cohort::Noncovered => e.1 += n,
+    let Some(rows) = census.get(provider) else {
+        return vec![
+            "    (no Form 8949 row this year — an answer here would be unread)".to_string(),
+        ];
+    };
+    let mut out = Vec::new();
+    for cohort in [Cohort::Covered, Cohort::Noncovered] {
+        let lines = rows.lines(cohort);
+        out.push(format!(
+            "    {} — {} row(s):",
+            cohort.slot_name(),
+            lines.len()
+        ));
+        if lines.is_empty() {
+            out.push("      (none — an answer in this slot would be unread)".to_string());
+        }
+        for l in lines {
+            out.push(format!("      {l}"));
         }
     }
     out
@@ -343,7 +440,7 @@ pub fn broker_census_by_provider(
 /// stored, which `report` shows as unread). Returns the number of rows added.
 pub fn seed_broker_rows(
     ri: &mut btctax_core::tax::return_inputs::ReturnInputs,
-    by_provider: &std::collections::BTreeMap<String, (usize, usize)>,
+    by_provider: &std::collections::BTreeMap<String, BrokerProviderRows>,
     regime: Option<btctax_core::InformationReturnRegime>,
 ) -> usize {
     if !regime.is_some_and(|r| r.basis) {
@@ -361,31 +458,72 @@ pub fn seed_broker_rows(
     added
 }
 
+/// ★ Test-only ledger fixture, shared by this module's tests and `edit::tax_inputs`'s: `count` Form
+/// 8949 rows under each `(provider, cohort)` key, every row carrying a DISTINCT date sold, amount,
+/// (d) and (e) — the enumeration exists so two rows under one key are separately visible, and a
+/// fixture of identical rows could not tell a correct render from one that printed the first twice.
+#[cfg(test)]
+pub(crate) fn broker_test_rows(
+    entries: &[(&str, btctax_core::forms::Cohort, usize)],
+) -> Vec<btctax_core::Form8949Row> {
+    use btctax_core::{DisposeKind, Form8949Box, Form8949Part, Form8949Row, Usd, WalletId};
+    let mut out = Vec::new();
+    let mut n = 0u32;
+    for (provider, cohort, count) in entries {
+        for _ in 0..*count {
+            n += 1;
+            out.push(Form8949Row {
+                part: Form8949Part::ShortTerm,
+                box_: Form8949Box::I,
+                box_needs_review: true,
+                cohort: *cohort,
+                description: format!("0.{n:08} BTC"),
+                date_acquired: time::macros::date!(2025 - 12 - 01),
+                date_sold: time::macros::date!(2026 - 01 - 01)
+                    .replace_day(n as u8)
+                    .expect("a day in January"),
+                proceeds: Usd::from(1000 * n),
+                cost_basis: Usd::from(100 * n),
+                adjustment_code: String::new(),
+                adjustment_amount: Usd::ZERO,
+                gain: Usd::from(900 * n),
+                wallet: WalletId::Exchange {
+                    provider: provider.to_string(),
+                    account: "main".to_string(),
+                },
+                disposition_kind: DisposeKind::Sell,
+            });
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod broker_seed_tests {
-    use super::{broker_census_by_provider, seed_broker_rows};
+    use super::{
+        broker_census_by_provider, broker_row_detail_lines, broker_test_rows, seed_broker_rows,
+        BrokerProviderRows,
+    };
     use btctax_core::forms::{BrokerReported, Cohort, CohortAnswers};
     use btctax_core::tax::return_inputs::ReturnInputs;
     use btctax_core::InformationReturnRegime as R;
     use std::collections::BTreeMap;
 
-    fn census() -> BTreeMap<(String, Cohort), usize> {
-        [
-            (("coinbase".to_string(), Cohort::Covered), 3usize),
-            (("coinbase".to_string(), Cohort::Noncovered), 1),
-            (("gemini".to_string(), Cohort::Noncovered), 2),
-        ]
-        .into_iter()
-        .collect()
+    fn census() -> BTreeMap<String, BrokerProviderRows> {
+        broker_census_by_provider(&broker_test_rows(&[
+            ("coinbase", Cohort::Covered, 3),
+            ("coinbase", Cohort::Noncovered, 1),
+            ("gemini", Cohort::Noncovered, 2),
+        ]))
     }
 
     /// The rows are the ledger's keys: seeded on a basis year, untouched where an answer exists,
     /// never seeded on a proceeds-only year or a year with no record.
     #[test]
     fn rows_are_seeded_from_the_ledger_on_a_basis_year_only() {
-        let by = broker_census_by_provider(&census());
-        assert_eq!(by["coinbase"], (3, 1));
-        assert_eq!(by["gemini"], (0, 2));
+        let by = census();
+        assert_eq!(by["coinbase"].counts(), (3, 1));
+        assert_eq!(by["gemini"].counts(), (0, 2));
         let mut ri = ReturnInputs::default();
         ri.broker_reporting.0.insert(
             "coinbase".into(),
@@ -414,6 +552,54 @@ mod broker_seed_tests {
         assert_eq!(seed_broker_rows(&mut fresh, &by, Some(R::PROCEEDS_ONLY)), 0);
         assert_eq!(seed_broker_rows(&mut fresh, &by, None), 0);
         assert!(fresh.broker_reporting.0.is_empty());
+    }
+
+    /// ★★★ spec 1099-DA R1 (r3 I-2) KILL — TWO rows under ONE key render as TWO lines, each with its
+    /// own date sold and its own column (e).
+    ///
+    /// The TUI's row pane printed `"— coinbase   covered: 3 row(s) · noncovered: 1 row(s)"` — a
+    /// COUNT — while the field the filer was about to answer, `basis_matches`, is defined as *"box
+    /// 1g equals btctax's column (e) on each"*. The tool solicited a declaration it had made
+    /// unverifiable. Cut [`broker_row_detail_lines`]'s per-row loop (or truncate it to one row) and
+    /// the second row's assertions below red.
+    #[test]
+    fn a_keys_rows_are_enumerated_with_their_dates_and_column_e() {
+        let rows = broker_test_rows(&[("coinbase", Cohort::Covered, 2)]);
+        let by = broker_census_by_provider(&rows);
+        let lines = broker_row_detail_lines(&by, "coinbase");
+        for r in &rows {
+            let want_date = r.date_sold.to_string();
+            let l = lines
+                .iter()
+                .find(|l| l.contains(&want_date))
+                .unwrap_or_else(|| panic!("no line for {want_date}:\n{lines:#?}"));
+            assert!(
+                l.contains(&r.description)
+                    && l.contains(&format!("{:.2}", r.cost_basis))
+                    && l.contains(&format!("{:.2}", r.proceeds)),
+                "the row line must carry the amount, (d) and (e): {l}"
+            );
+        }
+        // the two rows are genuinely distinct, so a render that printed one twice cannot pass above
+        assert_ne!(rows[0].date_sold, rows[1].date_sold);
+        assert_ne!(rows[0].cost_basis, rows[1].cost_basis);
+        // both cohorts are headed, and the empty one says an answer there would be unread
+        assert!(
+            lines.iter().any(|l| l.contains("covered — 2 row(s)")),
+            "{lines:#?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("noncovered — 0 row(s)")),
+            "{lines:#?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("would be unread")),
+            "an empty cohort must say so BEFORE the filer answers it: {lines:#?}"
+        );
+        // a provider whose rows are gone entirely
+        let gone = broker_row_detail_lines(&by, "gemini");
+        assert_eq!(gone.len(), 1);
+        assert!(gone[0].contains("no Form 8949 row this year"), "{gone:#?}");
     }
 }
 

@@ -74,6 +74,34 @@ pub enum BrokerRouteError {
     BasisDiffers { provider: String, cohort: Cohort },
 }
 
+/// ★ Prose, not `{:?}` — a routing failure reaches the filer in a `report`/export refusal, and every
+/// other broker refusal in the tree composes a sentence. A `Debug` render leaked the Rust variant
+/// spelling (`Unanswered { provider: "coinbase", cohort: Covered }`) into a user-facing message
+/// (r3 N-1); this names the key the way the filer types it back into
+/// `[broker_reporting.<provider>]`.
+impl std::fmt::Display for BrokerRouteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (provider, cohort, what) = match self {
+            BrokerRouteError::Unanswered { provider, cohort } => (
+                provider,
+                cohort,
+                "is unanswered — the tool never chooses a box for you",
+            ),
+            BrokerRouteError::Mixed { provider, cohort } => (
+                provider,
+                cohort,
+                "was answered `mixed`, and no single Form 8949 box is true of its rows — split the key by the form you received",
+            ),
+            BrokerRouteError::BasisDiffers { provider, cohort } => (
+                provider,
+                cohort,
+                "was answered `basis_differs`, which needs the broker's figure in column (e) and the correction in column (g) — only a per-lot Form 1099-DA import can supply that",
+            ),
+        };
+        write!(f, "{provider} / {} {what}", cohort.slot_name())
+    }
+}
+
 /// The (provider, cohort) key a row answers under — `None` for a non-`Exchange` wallet, for which
 /// no Form 1099-DA can exist (btctax models a non-`Exchange` wallet as non-custodial; a custodial
 /// venue must be recorded as `exchange:PROVIDER:ACCOUNT`, spec 1099-DA R2).

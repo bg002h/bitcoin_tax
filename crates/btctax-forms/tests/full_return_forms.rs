@@ -3862,3 +3862,249 @@ fn schedule_d_line20_prints_the_filers_form_4952_answer_in_both_directions() {
         );
     }
 }
+
+// ── spec 1099-DA T4 / r3 M-3 — the four PER-BOX Schedule D rows ────────────────────────────────────
+//
+// ★★★ The bindings had EXISTENCE checks only. `map_pdf_conformance.rs::every_committed_map_field_
+// exists_in_its_own_pdf` proves the FQN is in the PDF and `kats.rs` proves it is in the fill's field
+// set — neither distinguishes `Row1b.f1_7` from `Row2.f1_11`, nor `proceeds_d` from `cost_e` WITHIN a
+// row. And no test wrote a non-zero 1b/2/8b/9 and read the value back: the only `ScheduleDLines`
+// fixture zeroes all twelve (so `box_row` returns `None` and nothing is written at all), the
+// oracle-sweep corpus is TY2024 where a G/J row cannot exist, and `the_g_total_lands_on_line_1b_not_3`
+// stops at `ScheduleDLines`. `box_row`'s REFUSAL path was likewise never executed. Exactly the §G-31
+// shape one screen above: making an emitter correctly skip a cell retires the verification of the
+// branch that writes it.
+
+/// The four per-box rows' figures, deliberately DISTINCT in every cell so that neither a row swap
+/// (1b ↔ 2) nor a column transposition (d ↔ e) can hide behind an equal value.
+fn per_box_lines() -> ScheduleDLines {
+    let mut lines = sd(
+        dec!(1000),
+        dec!(15000),
+        dec!(2000),
+        dec!(500),
+        dec!(3000),
+        ScheduleDRouting::BothGains { line20_yes: true },
+    );
+    lines.line1b_d = dec!(110000);
+    lines.line1b_e = dec!(100000);
+    lines.line1b_h = dec!(10000);
+    lines.line2_d = dec!(220000);
+    lines.line2_e = dec!(200000);
+    lines.line2_h = dec!(20000);
+    lines.line8b_d = dec!(330000);
+    lines.line8b_e = dec!(300000);
+    lines.line8b_h = dec!(30000);
+    lines.line9_d = dec!(440000);
+    lines.line9_e = dec!(400000);
+    lines.line9_h = dec!(40000);
+    lines
+}
+
+/// ★★★ r3 M-3 — a non-zero 1b/2/8b/9 total is WRITTEN, and lands in the cell the row's own name says.
+///
+/// The FQNs below are typed out rather than read from `ScheduleDMap`, exactly as the 1a/8a KAT above
+/// does, and that is the whole point: a test that read the map back would be satisfied by any map,
+/// including one with `Row1b` and `Row2` swapped. A hand-typed FQN is an INDEPENDENT witness —
+/// re-bind `line1b.proceeds_d` to `Row2[0].f1_11[0]` in the map and this reds.
+#[test]
+fn schedule_d_per_box_rows_write_the_right_figure_to_the_right_cell() {
+    let lines = per_box_lines();
+    let pdf = btctax_forms::fill_schedule_d_full(&lines, &kitchen_sink_header(), 2024)
+        .expect("a Schedule D carrying per-box 8949 totals must fill and pass the verifier");
+    for (fqn, want, what) in [
+        (
+            "topmostSubform[0].Page1[0].Table_PartI[0].Row1b[0].f1_07[0]",
+            "110000",
+            "1b(d) proceeds",
+        ),
+        (
+            "topmostSubform[0].Page1[0].Table_PartI[0].Row1b[0].f1_08[0]",
+            "100000",
+            "1b(e) cost",
+        ),
+        (
+            "topmostSubform[0].Page1[0].Table_PartI[0].Row1b[0].f1_10[0]",
+            "10000",
+            "1b(h) gain",
+        ),
+        (
+            "topmostSubform[0].Page1[0].Table_PartI[0].Row2[0].f1_11[0]",
+            "220000",
+            "2(d) proceeds",
+        ),
+        (
+            "topmostSubform[0].Page1[0].Table_PartI[0].Row2[0].f1_12[0]",
+            "200000",
+            "2(e) cost",
+        ),
+        (
+            "topmostSubform[0].Page1[0].Table_PartI[0].Row2[0].f1_14[0]",
+            "20000",
+            "2(h) gain",
+        ),
+        (
+            "topmostSubform[0].Page1[0].Table_PartII[0].Row8b[0].f1_27[0]",
+            "330000",
+            "8b(d) proceeds",
+        ),
+        (
+            "topmostSubform[0].Page1[0].Table_PartII[0].Row8b[0].f1_28[0]",
+            "300000",
+            "8b(e) cost",
+        ),
+        (
+            "topmostSubform[0].Page1[0].Table_PartII[0].Row8b[0].f1_30[0]",
+            "30000",
+            "8b(h) gain",
+        ),
+        (
+            "topmostSubform[0].Page1[0].Table_PartII[0].Row9[0].f1_31[0]",
+            "440000",
+            "9(d) proceeds",
+        ),
+        (
+            "topmostSubform[0].Page1[0].Table_PartII[0].Row9[0].f1_32[0]",
+            "400000",
+            "9(e) cost",
+        ),
+        (
+            "topmostSubform[0].Page1[0].Table_PartII[0].Row9[0].f1_34[0]",
+            "40000",
+            "9(h) gain",
+        ),
+    ] {
+        assert_eq!(
+            tv(&pdf, fqn).as_deref(),
+            Some(want),
+            "{what} must read {want} — a swapped row binding or a proceeds/cost transposition is \
+             invisible to every arithmetic test and lands a real figure in the wrong box on a \
+             return signed under §6065"
+        );
+    }
+    // ★ column (g) stays BLANK on these rows (spec R4): btctax models no §1091 adjustment, and a
+    //   printed 0 there would swear to an adjustment that was never made.
+    for fqn in [
+        "topmostSubform[0].Page1[0].Table_PartI[0].Row1b[0].f1_09[0]",
+        "topmostSubform[0].Page1[0].Table_PartI[0].Row2[0].f1_13[0]",
+        "topmostSubform[0].Page1[0].Table_PartII[0].Row8b[0].f1_29[0]",
+        "topmostSubform[0].Page1[0].Table_PartII[0].Row9[0].f1_33[0]",
+    ] {
+        assert_eq!(tv(&pdf, fqn), None, "column (g) is never written: {fqn}");
+    }
+}
+
+/// ★★★ r3 M-3, the half the TY2024 fill cannot reach: **the TY2025 revision's own bindings**.
+///
+/// `fill_schedule_d_full` REFUSES on TY2025 — the crypto-slice map carries no `line6`/`line13`/
+/// `line14`, so `need` fails before any per-box cell is written ("the TY2025 Schedule D map has no
+/// `line6` — the full-return fill needs it. Full-return v1 is TY2024-only."). Measured, not assumed.
+/// So the 2025 revision gets the same discrimination GEOMETRICALLY, off the bundled PDF's own widget
+/// rectangles — the fact the reviewer established by hand with `xtask dump-fields`, made permanent:
+///
+/// - each per-box row's four cells sit at the SAME four x positions as the known-good line 3 / line
+///   10 rows, in the printed column order (d) < (e) < (g) < (h) — so `proceeds_d` bound to the cost
+///   column reds;
+/// - the rows descend the page in their printed order (1b above 2 above 3; 8b above 9 above 10) — so
+///   `Row1b` bound to `Row2`'s widgets reds.
+///
+/// Both revisions are checked, so the 2024 half is a second, independent witness to the KAT above.
+#[test]
+fn schedule_d_per_box_row_bindings_are_geometrically_distinct_on_both_revisions() {
+    for year in [2024, 2025] {
+        let map = ScheduleDMap::for_year(year).expect("a bundled Schedule D map");
+        let blank = btctax_forms::bundled::template(btctax_forms::bundled::Stem::ScheduleD, year)
+            .expect("a bundled Schedule D template");
+        let doc = load(blank).unwrap();
+        let fields = collect_fields(&doc).unwrap();
+        let at = |fqn: &str| -> (f32, f32) {
+            let f = fields
+                .iter()
+                .find(|f| f.fqn == fqn)
+                .unwrap_or_else(|| panic!("TY{year}: no widget for {fqn}"));
+            (
+                f.cx()
+                    .unwrap_or_else(|| panic!("TY{year}: no rect for {fqn}")),
+                f.cy().unwrap(),
+            )
+        };
+        let cols = |c: &AmountCols| {
+            [
+                at(&c.proceeds_d),
+                at(&c.cost_e),
+                at(&c.adj_g),
+                at(&c.gain_h),
+            ]
+        };
+        let line3 = cols(&map.line3);
+        let line10 = cols(&map.line10);
+        // Part I: 1b and 2 against the known-good line 3; Part II: 8b and 9 against line 10.
+        for (name, row, reference) in [
+            ("line1b", map.line1b.as_ref(), line3),
+            ("line2", map.line2.as_ref(), line3),
+            ("line8b", map.line8b.as_ref(), line10),
+            ("line9", map.line9.as_ref(), line10),
+        ] {
+            let row = row.unwrap_or_else(|| panic!("TY{year}: {name} must be bound"));
+            let got = cols(row);
+            for (i, col) in ["(d)", "(e)", "(g)", "(h)"].iter().enumerate() {
+                assert!(
+                    (got[i].0 - reference[i].0).abs() < 1.0,
+                    "TY{year} {name} {col} sits at x={} but the reference row's {col} is at x={} — \
+                     the cell is bound to the wrong COLUMN",
+                    got[i].0,
+                    reference[i].0
+                );
+            }
+            // and the four columns are in the printed left-to-right order
+            for i in 0..3 {
+                assert!(
+                    got[i].0 < got[i + 1].0,
+                    "TY{year} {name}: columns must run (d) < (e) < (g) < (h): {got:?}"
+                );
+            }
+        }
+        // The rows descend the page in the order the form prints them.
+        let y = |c: &AmountCols| cols(c)[0].1;
+        assert!(
+            y(map.line1b.as_ref().unwrap()) > y(map.line2.as_ref().unwrap())
+                && y(map.line2.as_ref().unwrap()) > y(&map.line3),
+            "TY{year} Part I prints 1b above 2 above 3 — a Row1b/Row2 swap inverts this"
+        );
+        assert!(
+            y(map.line8b.as_ref().unwrap()) > y(map.line9.as_ref().unwrap())
+                && y(map.line9.as_ref().unwrap()) > y(&map.line10),
+            "TY{year} Part II prints 8b above 9 above 10"
+        );
+    }
+}
+
+/// ★★★ r3 M-3 — `box_row`'s REFUSAL: a non-zero per-box total on a revision whose map leaves that row
+/// UNBOUND fails closed, and never silently drops the figure off the return.
+///
+/// The branch existed and no test executed it — `need(...)` is only reached when the total is
+/// non-zero AND the cell is `None`, and every fixture zeroed the totals. The plant is the state a
+/// future revision will actually produce: a map that has not yet bound line 1b, on a return that has
+/// a G-box total to print.
+#[test]
+fn schedule_d_refuses_a_non_zero_per_box_total_on_an_unbound_row() {
+    let lines = per_box_lines();
+    let mut map = ScheduleDMap::ty2024();
+    map.line1b = None;
+    let err =
+        btctax_forms::testonly::fill_schedule_d_full_with_map(&lines, &kitchen_sink_header(), &map)
+            .expect_err("a non-zero line 1b with no cell to write it to must REFUSE");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("line1b"),
+        "the refusal must name the missing row: {msg}"
+    );
+    // …and with the 1b total back to zero the SAME unbound map fills cleanly — the refusal is about
+    // the figure, not about the binding's absence (a pure-crypto year must still be able to file).
+    let mut zeroed = lines;
+    zeroed.line1b_d = Usd::ZERO;
+    zeroed.line1b_e = Usd::ZERO;
+    zeroed.line1b_h = Usd::ZERO;
+    btctax_forms::testonly::fill_schedule_d_full_with_map(&zeroed, &kitchen_sink_header(), &map)
+        .expect("an unbound row with nothing to print is not an error");
+}

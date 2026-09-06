@@ -479,7 +479,11 @@ fn hand_marks_block(marks: &[String]) -> String {
 /// - **proceeds only** (TY2025): it is the **1099-DA**, **Box G/H/J/K**, and every row files under
 ///   **Box I/L** — the question is not asked on that year (R1);
 /// - **proceeds and basis** (live, TY2026 on): the rows were ROUTED by the filer's answers, and the
-///   advisory is R4's: compare column (e) of every G/J row with **box 1g** and column (d) of every
+///   advisory is R4's. ★ r3 M-1 — the parenthetical names **all three** pairs an answer can choose
+///   (I/L not reported, H/K proceeds only, G/J basis reported), because this line reads only the row
+///   COUNT and never the answers: a filer who answered `not_reported` for every key has every row on
+///   I/L and no Form 1099-DA lists any of them, and naming only G/H/J/K asserted a form they never
+///   received. Then: compare column (e) of every G/J row with **box 1g** and column (d) of every
 ///   listed row with **box 1f**; a difference needs the broker's figure in that column and the
 ///   correction in (g) — "Note: If you checked Box A or Box G above but the basis reported to the IRS
 ///   was incorrect, enter in column (e) the basis as reported to the IRS, and enter an adjustment in
@@ -500,7 +504,7 @@ pub fn broker_reporting_advisory(
     }
     if regime.basis {
         return Some(format!(
-            "⚠ [I5] {broker_reported_rows} disposition(s) occurred on a venue that issues Form 1099-DA for TY{tax_year}; each was filed under the Form 8949 box your answer chose (G/H short-term, J/K long-term), with columns (f) and (g) left blank. Compare column (e) of every G/J row with box 1g of the 1099-DA, and column (d) of every listed row with box 1f; if any differs, the return needs the broker's figure in that column and the correction in column (g) — see the Note on Form 8949. A custodial venue outside the built-in adapters must be recorded as `exchange:PROVIDER:ACCOUNT` to get a 1099-DA key."
+            "⚠ [I5] {broker_reported_rows} disposition(s) occurred on a venue that issues Form 1099-DA for TY{tax_year}; each was filed under the Form 8949 box your answer chose (I/L where you answered that nothing was reported, H/K where only proceeds were, G/J where basis was), with columns (f) and (g) left blank. Compare column (e) of every G/J row with box 1g of the 1099-DA, and column (d) of every listed row with box 1f; if any differs, the return needs the broker's figure in that column and the correction in column (g) — see the Note on Form 8949. A custodial venue outside the built-in adapters must be recorded as `exchange:PROVIDER:ACCOUNT` to get a 1099-DA key."
         ));
     }
     let (broker_form, separate_boxes, filed_boxes) = if regime.proceeds {
@@ -1401,14 +1405,29 @@ mod tests {
             !msg.contains("reclassify by hand"),
             "the live year ROUTED, it does not ask for a hand reclassification:\n{msg}"
         );
+        // ★ r3 M-1 — the parenthetical says what ACTUALLY happened, so it names all THREE box
+        //   pairs the answers can choose; a filer who answered `not_reported` everywhere has every
+        //   row on I/L and no 1099-DA lists any of them. The old needle here was `!contains("Box
+        //   I/L")`, which the honest wording would have red for the wrong reason.
+        for pair in ["I/L", "H/K", "G/J"] {
+            assert!(
+                msg.contains(pair),
+                "the live advisory must name the box pair {pair:?} your answer can choose:\n{msg}"
+            );
+        }
+        // …and the NOT-LIVE blanket-filing sentence stays absent — the guarantee the old needle held,
+        // pinned on the sentence itself rather than on a letter pair the live wording now shares.
         assert!(
-            !msg.contains("Box I/L"),
-            "no blanket I/L filing on a live year:\n{msg}"
+            !msg.contains("This export files EVERY"),
+            "no blanket single-box filing claim on a live year:\n{msg}"
         );
         // and the not-live wordings never say 1g/1f — they have nothing to compare against
         for (y, r) in [(2025, Regime::PROCEEDS_ONLY), (2024, Regime::NONE)] {
             let m = broker_reporting_advisory(y, r, 1).unwrap();
             assert!(!m.contains("box 1g") && !m.contains("box 1f"), "TY{y}: {m}");
+            // ★ the needle the live assertion above is keyed to must actually exist here, or that
+            //   assertion is green because the sentence was renamed rather than because it is absent.
+            assert!(m.contains("This export files EVERY"), "TY{y}: {m}");
         }
     }
 

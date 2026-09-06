@@ -637,3 +637,64 @@ fn the_key_census_counts_every_keyed_row_and_no_self_custody_row() {
         assert_eq!(json, format!("\"{}\"", a.toml_name()));
     }
 }
+
+/// ★ r3 N-1 KILL — a routing failure reaches the filer as PROSE, never as a `Debug` render.
+///
+/// `render.rs::routed_8949_rows` used `{e:?}`, so an unanswered key printed the Rust variant
+/// spelling — `Unanswered { provider: "coinbase", cohort: Covered }` — inside a sentence otherwise
+/// composed for a human. The kill: every variant's `Display` must name the provider and the slot the
+/// filer types back into `[broker_reporting.<provider>]`, and must NOT contain the variant name or
+/// the struct-literal punctuation a `Debug` render emits. Revert the `impl Display` (deriving it
+/// through `{:?}`) and all three assertions below red.
+#[test]
+fn a_route_error_renders_as_prose_naming_the_key() {
+    for (e, needle) in [
+        (
+            BrokerRouteError::Unanswered {
+                provider: "coinbase".into(),
+                cohort: Cohort::Covered,
+            },
+            "unanswered",
+        ),
+        (
+            BrokerRouteError::Mixed {
+                provider: "gemini".into(),
+                cohort: Cohort::Noncovered,
+            },
+            "mixed",
+        ),
+        (
+            BrokerRouteError::BasisDiffers {
+                provider: "river".into(),
+                cohort: Cohort::Covered,
+            },
+            "basis_differs",
+        ),
+    ] {
+        let s = e.to_string();
+        assert!(s.contains(needle), "{s}");
+        // the key, spelled as the TOML the filer edits
+        let (provider, cohort) = match &e {
+            BrokerRouteError::Unanswered { provider, cohort }
+            | BrokerRouteError::Mixed { provider, cohort }
+            | BrokerRouteError::BasisDiffers { provider, cohort } => (provider, cohort),
+        };
+        assert!(
+            s.contains(provider.as_str()) && s.contains(cohort.slot_name()),
+            "the message must name the (provider, cohort) key: {s}"
+        );
+        // ★ the Debug shape, which is what was leaking
+        for banned in [
+            "Unanswered",
+            "Mixed {",
+            "BasisDiffers",
+            "cohort:",
+            "provider:",
+        ] {
+            assert!(
+                !s.contains(banned),
+                "a Debug render leaked into a user-facing message ({banned:?}): {s}"
+            );
+        }
+    }
+}

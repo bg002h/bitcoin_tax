@@ -51,6 +51,7 @@ fn make_snapshot(state: LedgerState) -> Snapshot {
         donation_details: BTreeMap::new(),
         bulk_estimated: BTreeMap::new(),
         prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
+        broker_answers: Default::default(),
     }
 }
 
@@ -1384,6 +1385,7 @@ fn make_snapshot_with_profile(state: LedgerState) -> Snapshot {
         donation_details: BTreeMap::new(),
         bulk_estimated: BTreeMap::new(),
         prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
+        broker_answers: Default::default(),
     }
 }
 
@@ -2029,6 +2031,7 @@ fn make_se_snapshot(
         donation_details: BTreeMap::new(),
         bulk_estimated: BTreeMap::new(),
         prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
+        broker_answers: Default::default(),
     }
 }
 
@@ -2253,6 +2256,7 @@ fn e7e_not_computable_year_with_profile_shows_se_section() {
         donation_details: BTreeMap::new(),
         bulk_estimated: BTreeMap::new(),
         prices: btctax_adapters::LayeredPrices::load_with_cache(None).unwrap(),
+        broker_answers: Default::default(),
     };
 
     let content = super::tax::render_tax_content(&snap, 2025);

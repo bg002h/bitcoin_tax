@@ -522,13 +522,14 @@ pub fn report_tax_year(
     //   render over the census and the stored map; the regime is the year's record (None → no block
     //   unless an unread answer is stored, which the block then explains).
     let broker_answers = {
+        // ★ r3 I-2 — the ROWS go in (the census is derived inside), so the block can ENUMERATE each
+        //   key's rows with their column (e) — the per-row figure `basis_matches` swears to.
         let rows = btctax_core::form_8949(&state, year);
-        let census = btctax_core::forms::broker_key_census(&rows);
         let stored = crate::return_inputs::get(s.conn(), year)?;
         crate::render::render_broker_answers(
             year,
             crate::year_readiness::regime_for(year),
-            &census,
+            &rows,
             stored.as_ref().map(|ri| &ri.broker_reporting),
         )
     };

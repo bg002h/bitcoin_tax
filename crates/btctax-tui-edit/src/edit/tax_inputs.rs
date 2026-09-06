@@ -550,9 +550,28 @@ fn remove_label(section: SectionId, row: usize) -> String {
 /// materialization or a section create/delete changes the live set). On `Err`: surface it in `form.error`
 /// and mutate nothing (never a panic — a bad `RowAddr`/`WrongKind`/`Immutable` is a clean error).
 fn apply_edit(form: &mut TaxInputsFormState, edit: Edit) -> bool {
+    // ★★ spec 1099-DA (r3 I-3) — was there a working return BEFORE this edit? A `false→true`
+    //    transition is the NI-2 materialization, and it is the one moment the open-time seed cannot
+    //    reach (a `Loaded::Fresh` open has `working: None`, so `seed_broker_rows` was skipped).
+    let was_unmaterialized = form.working.is_none();
     match apply(&mut form.working, edit) {
         Ok(()) => {
             form.error = None;
+            // ★★ Re-seed the Form 1099-DA block the moment the return exists. Gated on the
+            //    TRANSITION, not merely on `working.is_some()`: seeding on every apply would
+            //    resurrect a provider row the filer removed with `[d]`, making removal impossible.
+            //    `seed_broker_rows` is a VIEW of the ledger — it adds an all-`None` entry per
+            //    provider and is inert at every consumer except `section_is_live`, which is its
+            //    purpose — and it no-ops on a regime that does not report basis.
+            if was_unmaterialized {
+                if let Some(ri) = form.working.as_mut() {
+                    crate::edit::form::seed_broker_rows(
+                        ri,
+                        &form.broker_census,
+                        form.broker_regime,
+                    );
+                }
+            }
             // ★ I-4: a successful mutating apply changes the model — any recorded screen refusal is now
             // stale, so clear the `!` attribution (it re-arms only on the next refused commit).
             form.refused_section = None;
@@ -770,6 +789,28 @@ fn resolve_field_anchor(ri: &ReturnInputs, id: FieldId) -> Option<(usize, usize)
     Some((sidx, fidx))
 }
 
+/// ★★ spec 1099-DA (r3 M-4) — the ROW a broker refusal is about: the `BrokerReporting` index whose
+/// provider is the one the refusal names, via the `broker_row_provider` seam (this module never
+/// names a `ReturnInputs` field). `None` for every non-broker reason.
+///
+/// **Why it is needed.** `BrokerReporting` is the first repeating section whose ROW IDENTITY is the
+/// whole content of the refusal — the provider — and [`focus_refusal`] reset `form.addr` to
+/// `RowAddr::default()`, so a refusal about `gemini` focused row 0, `coinbase`. The refusal's detail
+/// text names the provider, so it was recoverable; the jump was simply wrong, and on a many-venue
+/// return it points the filer at the wrong venue's answers.
+fn broker_refusal_row(ri: &ReturnInputs, reason: &RefuseReason) -> Option<usize> {
+    let provider = match reason {
+        RefuseReason::BrokerReportingUnanswered { provider, .. }
+        | RefuseReason::BrokerReportingMixed { provider, .. }
+        | RefuseReason::BrokerBasisDiffers { provider, .. }
+        | RefuseReason::BrokerAnswerUnread { provider, .. } => provider,
+        _ => return None,
+    };
+    (0usize..)
+        .map_while(|i| btctax_input_form::broker_row_provider(ri, i))
+        .position(|p| p == *provider)
+}
+
 /// ★ Task 7: jump focus to the FIRST in-form anchor `attribute(reason)` names — the refused-commit remedy
 /// (SPEC §7). Sets `section_idx` + `field_focus` (clearing the row path + nested `descent`) to the first
 /// `Field`/`Section` anchor that maps to a LIVE section/field. A `NotInForm` anchor moves nothing; its note
@@ -779,7 +820,7 @@ pub fn focus_refusal(form: &mut TaxInputsFormState, reason: &RefuseReason) -> Re
     // Compute the target under an immutable borrow of `working`, THEN mutate `form` (disjoint borrows).
     // ★ I-4: alongside the focus target, capture the LIVE top-level section it lands on (a `SectionId`,
     // never a leaf) so the `!` glyph + `1 issue: <section>` status can attribute the refusal.
-    let (target, section_id, not_in_form) = {
+    let (target, section_id, not_in_form, broker_row) = {
         let Some(ri) = form.working.as_ref() else {
             return RefusalFocus::None;
         };
@@ -805,13 +846,22 @@ pub fn focus_refusal(form: &mut TaxInputsFormState, reason: &RefuseReason) -> Re
             }
         }
         let section_id = target.map(|(sidx, _)| live_sections(ri)[sidx].id);
-        (target, section_id, note)
+        // ★ r3 M-4 — a broker refusal names a PROVIDER, and the provider IS the row. Resolved under
+        //   the same immutable borrow as the anchor, and only when the jump actually lands on the
+        //   block, so no other section's `RowAddr::default()` behaviour changes.
+        let broker_row = (section_id == Some(SectionId::BrokerReporting))
+            .then(|| broker_refusal_row(ri, reason))
+            .flatten();
+        (target, section_id, note, broker_row)
     };
     match target {
         Some((sidx, fidx)) => {
             form.section_idx = sidx;
             form.field_focus = fidx;
-            form.addr = RowAddr::default();
+            form.addr = match broker_row {
+                Some(i) => RowAddr(vec![i]),
+                None => RowAddr::default(),
+            };
             form.descent = None;
             // ★ I-4: attribute the `!` glyph to the section the focus jumped to.
             form.refused_section = section_id;
@@ -1216,5 +1266,209 @@ mod tests {
             Some(FieldValue::Secret(SecretView::Empty)),
             "the bad entry did not set the field"
         );
+    }
+
+    /// ★★★ spec 1099-DA (r3 I-3) KILL — the Form 1099-DA block appears on a FIRST authoring session.
+    ///
+    /// **The journey this restores.** A TY2026 vault with exchange dispositions and no stored return
+    /// inputs: `export-irs-pdf` hits the crypto-slice arm, whose refusal names *"the TUI input
+    /// form"* as the exit. The filer opens it — `Loaded::Fresh`, so `working: None` and
+    /// `open_tax_inputs_form`'s seed is SKIPPED — chooses a filing status, and the "Form 1099-DA
+    /// answers" section is not in the left pane. `add` refuses (`SetError::Immutable`, by design:
+    /// rows are the ledger's keys, never hand-typed), so there is no in-session way to create it.
+    /// The block appeared only after the draft was flushed and the form RE-OPENED. The slice arm
+    /// runs *precisely because* nothing is stored, so the refusal and the skipped seed always
+    /// co-occur.
+    ///
+    /// **The kill.** Revert the `was_unmaterialized` re-seed in [`apply_edit`] and the
+    /// `live_sections` assertion below reds — the review measured that deleting the open-time seed
+    /// outright red NOTHING, because no test ever drove the wiring.
+    #[test]
+    fn the_broker_block_appears_after_materializing_on_a_first_session() {
+        use btctax_core::InformationReturnRegime as R;
+        let mut form = TaxInputsFormState::fresh(2026);
+        // the ledger's exchange keys, as `open_tax_inputs_form` reads them from the snapshot
+        form.broker_census =
+            crate::edit::form::broker_census_by_provider(&crate::edit::form::broker_test_rows(&[
+                ("coinbase", btctax_core::forms::Cohort::Covered, 3),
+                ("coinbase", btctax_core::forms::Cohort::Noncovered, 1),
+                ("gemini", btctax_core::forms::Cohort::Noncovered, 2),
+            ]));
+        form.broker_regime = Some(R::PROCEEDS_AND_BASIS);
+        assert!(
+            form.working.is_none(),
+            "Loaded::Fresh — this is the state the open-time seed cannot reach"
+        );
+
+        // the filer's first act: choose a filing status (NI-2 materialization)
+        assert!(tax_inputs_apply_edit(&mut form, "Single"));
+        let ri = form.working.as_ref().expect("materialized");
+        assert!(
+            live_sections(ri)
+                .iter()
+                .any(|s| s.id == SectionId::BrokerReporting),
+            "the exit both refusals name must contain the block on the FIRST session"
+        );
+        assert_eq!(
+            btctax_input_form::broker_row_provider(ri, 0).as_deref(),
+            Some("coinbase"),
+            "row 0 is the ledger's first provider"
+        );
+        assert_eq!(
+            btctax_input_form::broker_row_provider(ri, 1).as_deref(),
+            Some("gemini")
+        );
+        assert!(btctax_input_form::broker_row_provider(ri, 2).is_none());
+    }
+
+    /// ★★ …and the re-seed follows the REGIME, not the census. A year that reports proceeds only
+    /// (TY2025) does not ask the question, so seeding a row there would create a section whose every
+    /// answer `screen_broker_reporting` discards as unread. Same for a year with no record.
+    #[test]
+    fn the_broker_block_is_not_seeded_on_a_year_that_does_not_ask() {
+        use btctax_core::InformationReturnRegime as R;
+        for regime in [None, Some(R::NONE), Some(R::PROCEEDS_ONLY)] {
+            let mut form = TaxInputsFormState::fresh(2025);
+            form.broker_census =
+                crate::edit::form::broker_census_by_provider(&crate::edit::form::broker_test_rows(
+                    &[("coinbase", btctax_core::forms::Cohort::Covered, 3)],
+                ));
+            form.broker_regime = regime;
+            assert!(tax_inputs_apply_edit(&mut form, "Single"));
+            let ri = form.working.as_ref().unwrap();
+            assert!(
+                !live_sections(ri)
+                    .iter()
+                    .any(|s| s.id == SectionId::BrokerReporting),
+                "{regime:?} does not ask the 1099-DA question"
+            );
+            assert!(btctax_input_form::broker_row_provider(ri, 0).is_none());
+        }
+    }
+
+    /// ★★ The re-seed is gated on the MATERIALIZATION transition, not on `working.is_some()`.
+    ///
+    /// Rows are removable (`[d]`) — the block's only mutation besides answering — and a seed that
+    /// ran on every successful apply would resurrect the removed provider on the filer's next
+    /// keystroke, making removal impossible. This is the one thing the narrower gate buys, so it is
+    /// the one thing tested: remove row 0, edit something else, and it stays gone.
+    #[test]
+    fn a_removed_broker_row_is_not_resurrected_by_the_next_edit() {
+        use btctax_core::InformationReturnRegime as R;
+        let mut form = TaxInputsFormState::fresh(2026);
+        form.broker_census =
+            crate::edit::form::broker_census_by_provider(&crate::edit::form::broker_test_rows(&[
+                ("coinbase", btctax_core::forms::Cohort::Covered, 3),
+                ("coinbase", btctax_core::forms::Cohort::Noncovered, 1),
+                ("gemini", btctax_core::forms::Cohort::Noncovered, 2),
+            ]));
+        form.broker_regime = Some(R::PROCEEDS_AND_BASIS);
+        assert!(tax_inputs_apply_edit(&mut form, "Single"));
+
+        focus_section(&mut form, SectionId::BrokerReporting);
+        form.field_focus = 0;
+        stage_remove_selected(&mut form);
+        assert!(confirm_remove(&mut form), "row 0 (coinbase) is removable");
+        assert_eq!(
+            btctax_input_form::broker_row_provider(form.working.as_ref().unwrap(), 0).as_deref(),
+            Some("gemini"),
+            "the survivor shifts up"
+        );
+
+        // any further edit must NOT bring coinbase back
+        focus_field(&mut form, SectionId::Payments, FieldId::PayEstimated);
+        assert!(tax_inputs_apply_edit(&mut form, "1234.00"));
+        assert_eq!(
+            btctax_input_form::broker_row_provider(form.working.as_ref().unwrap(), 0).as_deref(),
+            Some("gemini"),
+            "a re-seed on every apply would resurrect a row the filer removed"
+        );
+        assert!(
+            btctax_input_form::broker_row_provider(form.working.as_ref().unwrap(), 1).is_none()
+        );
+    }
+
+    /// ★★ spec 1099-DA (r3 M-4) KILL — a broker refusal focuses the PROVIDER's row, not row 0.
+    ///
+    /// `focus_refusal` reset `form.addr = RowAddr::default()`, and `BrokerReporting` is the first
+    /// repeating section whose row identity is the whole content of the refusal. A refusal about
+    /// `gemini` therefore focused `coinbase`. Revert the `broker_row` arm in [`focus_refusal`] and
+    /// the `RowAddr(vec![1])` assertion reds with `RowAddr(vec![])`.
+    ///
+    /// ★ Non-broker refusals keep `RowAddr::default()` — asserted here so the change cannot quietly
+    /// generalise to every repeating section.
+    #[test]
+    fn a_broker_refusal_focuses_the_named_providers_row() {
+        use btctax_core::forms::Cohort;
+        use btctax_core::InformationReturnRegime as R;
+        let mut form = TaxInputsFormState::fresh(2026);
+        form.broker_census =
+            crate::edit::form::broker_census_by_provider(&crate::edit::form::broker_test_rows(&[
+                ("coinbase", Cohort::Covered, 1),
+                ("gemini", Cohort::Covered, 2),
+            ]));
+        form.broker_regime = Some(R::PROCEEDS_AND_BASIS);
+        assert!(tax_inputs_apply_edit(&mut form, "Single"));
+        assert_eq!(
+            btctax_input_form::broker_row_provider(form.working.as_ref().unwrap(), 1).as_deref(),
+            Some("gemini"),
+            "gemini is row 1 — row 0 is coinbase, which is what the old jump landed on"
+        );
+
+        let reason = RefuseReason::BrokerReportingUnanswered {
+            provider: "gemini".to_string(),
+            cohort: Cohort::Covered,
+            year: 2026,
+        };
+        assert!(matches!(
+            focus_refusal(&mut form, &reason),
+            RefusalFocus::Moved
+        ));
+        assert_eq!(form.refused_section, Some(SectionId::BrokerReporting));
+        assert_eq!(
+            form.addr,
+            RowAddr(vec![1]),
+            "the refusal names gemini; focusing row 0 points the filer at another venue's answers"
+        );
+        // …and the focused FIELD is the cohort's own slot.
+        let f = focused_field(&form).expect("a field is focused inside the row");
+        assert_eq!(f.id, FieldId::BrokerCovered);
+
+        // the other three broker reasons resolve the same way
+        for reason in [
+            RefuseReason::BrokerReportingMixed {
+                provider: "gemini".to_string(),
+                cohort: Cohort::Covered,
+            },
+            RefuseReason::BrokerBasisDiffers {
+                provider: "gemini".to_string(),
+                cohort: Cohort::Covered,
+            },
+            RefuseReason::BrokerAnswerUnread {
+                provider: "gemini".to_string(),
+                cohort: Cohort::Covered,
+                year: 2026,
+            },
+        ] {
+            form.addr = RowAddr::default();
+            assert!(matches!(
+                focus_refusal(&mut form, &reason),
+                RefusalFocus::Moved
+            ));
+            assert_eq!(form.addr, RowAddr(vec![1]), "{reason:?}");
+        }
+
+        // an UNKNOWN provider cannot be resolved to a row — fall back to the section, not to a wrong row
+        let orphan = RefuseReason::BrokerAnswerUnread {
+            provider: "river".to_string(),
+            cohort: Cohort::Covered,
+            year: 2026,
+        };
+        form.addr = RowAddr(vec![1]);
+        assert!(matches!(
+            focus_refusal(&mut form, &orphan),
+            RefusalFocus::Moved
+        ));
+        assert_eq!(form.addr, RowAddr::default());
     }
 }

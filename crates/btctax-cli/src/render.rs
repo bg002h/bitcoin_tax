@@ -1217,9 +1217,12 @@ pub fn routed_8949_rows(
         return Err(crate::cmd::admin::slice_broker_refusal(year, regime, &rows)
             .expect("live ⇒ the slice refusal"));
     };
+    // ★ r3 N-1 — `{e}`, never `{e:?}`: this string reaches the filer, and a `Debug` render printed
+    //   the Rust variant spelling. `BrokerRouteError: Display` names the key the way the filer types
+    //   it back into `[broker_reporting.<provider>]`.
     btctax_core::route_8949_boxes(&mut rows, regime, answers).map_err(|e| {
         crate::CliError::Usage(format!(
-            "TY{year} Form 8949: the Form 1099-DA answers on the return inputs do not settle every row ({e:?}) — answer them (`income import`, the `[broker_reporting.<provider>]` table) or run the full return, whose screen names the exit; no form8949.csv was written"
+            "TY{year} Form 8949: the Form 1099-DA answers on the return inputs do not settle every row ({e}) — answer them (`income import`, the `[broker_reporting.<provider>]` table) or run the full return, whose screen names the exit; no form8949.csv was written"
         ))
     })?;
     Ok(rows)
@@ -1859,18 +1862,31 @@ pub fn render_charitable_carryover_out(
 }
 
 /// ★ spec 1099-DA T6 — the `report` block that lists every (provider, cohort) key the ledger's
-/// Form 8949 rows carry, the rows under each, and the answer on file with the box it chooses.
+/// Form 8949 rows carry, **the rows under each**, and the answer on file with the box it chooses.
 /// `None` unless the question is LIVE (a basis regime and ≥1 keyed row) or an answer is stored that
-/// no row reads (which refuses as unread, and the filer should see why). The census and the answers
+/// no row reads (which refuses as unread, and the filer should see why). The rows and the answers
 /// are passed in, so this is a pure render.
+///
+/// ★★ r3 I-2 — it takes the ROWS, not a census, and the census is derived here.
+///
+/// Spec R1 is a MUST: *"The answer quantifies over a row set the engine derived, so the tool MUST
+/// show it: `report` and the TUI prompt **enumerate each key's rows (date sold, amount, proceeds,
+/// btctax's column (e))** before the answer is taken."* T6 shipped the COUNT. `BasisMatches` is
+/// defined as *"box 1g equals btctax's column (e) on each"* — a per-row equality the filer was asked
+/// to swear to against a column no surface printed, and on a live year there was no fallback: the
+/// disposal listing carries no wallet, the `form8949.csv` refuses until every key is already
+/// answered, and the TUI table has no wallet column. Deriving the census from the same slice the
+/// enumeration walks also removes the seam where a count and its rows could disagree.
 pub fn render_broker_answers(
     year: i32,
     regime: Option<btctax_core::InformationReturnRegime>,
-    census: &std::collections::BTreeMap<(String, btctax_core::forms::Cohort), usize>,
+    rows: &[btctax_core::Form8949Row],
     answers: Option<&btctax_core::forms::BrokerReporting>,
 ) -> Option<String> {
-    use btctax_core::forms::{BrokerReported, Cohort};
+    use btctax_core::forms::{broker_key, BrokerReported, Cohort};
     use std::collections::BTreeSet;
+    let census = btctax_core::forms::broker_key_census(rows);
+    let census = &census;
     let live = regime.is_some_and(|r| r.basis) && !census.is_empty();
     // every key the ledger lists, plus every key an answer is stored for
     let mut keys: BTreeSet<(String, Cohort)> = census.keys().cloned().collect();
@@ -1884,7 +1900,15 @@ pub fn render_broker_answers(
             }
         }
     }
-    let stored_unread = keys.iter().any(|k| !census.contains_key(k));
+    // ★ r3 M-2 — BOTH halves of "an answer no row reads".
+    //
+    // `screen_broker_reporting` refuses `BrokerAnswerUnread` on `!live || !has_rows`, so a stored
+    // answer on a year whose regime lacks `basis` is unread EVEN WHEN its key has rows — and the
+    // first clause below only sees the no-rows half. In that state the block returned `None` while
+    // `screen_absolute` refused, and an existing assertion pinned exactly that silence. The second
+    // clause is the `!live` half: any stored answer on a not-live year is unread.
+    let stored_unread = keys.iter().any(|k| !census.contains_key(k))
+        || (!live && answers.is_some_and(|a| !a.0.is_empty()));
     if !live && !stored_unread {
         return None;
     }
@@ -1899,19 +1923,30 @@ pub fn render_broker_answers(
          Each (provider, cohort) key below needs ONE answer in `income import`'s \
          `[broker_reporting.<provider>]` table (covered / noncovered = not_reported | proceeds_only | \
          basis_matches | basis_differs | mixed); the answer chooses the Form 8949 box.\n  \
+         Indented under each key are the ROWS it answers for — date sold, amount, (d) proceeds, \
+         (e) btctax's basis. `basis_matches` asserts box 1g of the 1099-DA equals column (e) on \
+         EACH of them.\n  \
          {:<14}{:<12}{:>5}  {:<16}{}\n",
         "provider", "cohort", "rows", "answer", "box"
     );
     for (provider, cohort) in &keys {
-        let rows = census
+        let n_rows = census
             .get(&(provider.clone(), *cohort))
             .copied()
             .unwrap_or(0);
         let answer = answers.and_then(|a| a.answer(provider, *cohort));
-        let (answer_word, box_word) = match (rows, answer) {
+        let (answer_word, box_word) = match (n_rows, answer) {
             (0, Some(a)) => (
                 a.toml_name().to_string(),
                 "— no row carries this key: REFUSES as unread (delete the answer)".to_string(),
+            ),
+            // ★ r3 M-2 — the key HAS rows, but the year's regime does not report basis, so
+            //   `screen_broker_reporting` discards this answer too ("testimony it would discard is
+            //   not kept"). Saying "G / J" here would name a box the return will not carry.
+            (_, Some(a)) if !live => (
+                a.toml_name().to_string(),
+                "— TY does not ask the 1099-DA question: REFUSES as unread (delete the answer)"
+                    .to_string(),
             ),
             (_, None) => (
                 "(unanswered)".to_string(),
@@ -1935,10 +1970,26 @@ pub fn render_broker_answers(
             "  {:<14}{:<12}{:>5}  {:<16}{}",
             provider,
             cohort.slot_name(),
-            rows,
+            n_rows,
             answer_word,
             box_word
         );
+        // ★★ r3 I-2 (spec R1 MUST) — ENUMERATE the key's rows: date sold, column (a) description,
+        //    column (d) proceeds, column (e) cost basis. `BasisMatches` asserts box 1g equals
+        //    column (e) on EACH of these, so the filer must be able to see each one.
+        for r in rows
+            .iter()
+            .filter(|r| broker_key(r).is_some_and(|(p, c)| &p == provider && c == *cohort))
+        {
+            let _ = writeln!(
+                s,
+                "      {}  {:<16}(d) {:>14}  (e) {:>14}",
+                r.date_sold,
+                r.description,
+                fmt_money(r.proceeds),
+                fmt_money(r.cost_basis)
+            );
+        }
     }
     Some(s)
 }
@@ -4922,14 +4973,45 @@ mod cwa_carryover_warning_tests {
 mod broker_answers_tests {
     use super::render_broker_answers;
     use btctax_core::forms::{BrokerReported, BrokerReporting, Cohort, CohortAnswers};
-    use btctax_core::InformationReturnRegime as R;
-    use std::collections::BTreeMap;
+    use btctax_core::{
+        DisposeKind, Form8949Box, Form8949Part, Form8949Row, InformationReturnRegime as R, Usd,
+        WalletId,
+    };
+    use time::macros::date;
 
-    fn census(entries: &[(&str, Cohort, usize)]) -> BTreeMap<(String, Cohort), usize> {
-        entries
-            .iter()
-            .map(|(p, c, n)| ((p.to_string(), *c), *n))
-            .collect()
+    /// ★ r3 I-2 — the block now takes the ROWS and derives its own census, so the fixture builds
+    /// rows. Each row carries a DISTINCT date sold / amount / (d) / (e), because the enumeration's
+    /// whole point is that two rows under one key are separately visible.
+    fn rows(entries: &[(&str, Cohort, usize)]) -> Vec<Form8949Row> {
+        let mut out = Vec::new();
+        let mut n = 0u32;
+        for (provider, cohort, count) in entries {
+            for _ in 0..*count {
+                n += 1;
+                out.push(Form8949Row {
+                    part: Form8949Part::ShortTerm,
+                    box_: Form8949Box::I,
+                    box_needs_review: true,
+                    cohort: *cohort,
+                    description: format!("0.{:08} BTC", n),
+                    date_acquired: date!(2025 - 12 - 01),
+                    date_sold: date!(2026 - 01 - 01)
+                        .replace_day(n as u8)
+                        .expect("a day in January"),
+                    proceeds: Usd::from(1000 * n),
+                    cost_basis: Usd::from(100 * n),
+                    adjustment_code: String::new(),
+                    adjustment_amount: Usd::ZERO,
+                    gain: Usd::from(900 * n),
+                    wallet: WalletId::Exchange {
+                        provider: provider.to_string(),
+                        account: "main".to_string(),
+                    },
+                    disposition_kind: DisposeKind::Sell,
+                });
+            }
+        }
+        out
     }
 
     fn answers(entries: &[(&str, Cohort, BrokerReported)]) -> BrokerReporting {
@@ -4948,10 +5030,10 @@ mod broker_answers_tests {
 
     /// spec 1099-DA T6 — every key the ledger lists is printed with its row count, the answer on
     /// file and the box it chooses; an unanswered key says it refuses; the block is absent when the
-    /// question is not live.
+    /// question is not live and nothing is stored.
     #[test]
     fn the_block_lists_keys_rows_answers_and_boxes() {
-        let c = census(&[
+        let c = rows(&[
             ("coinbase", Cohort::Covered, 3),
             ("coinbase", Cohort::Noncovered, 1),
             ("gemini", Cohort::Noncovered, 2),
@@ -4985,11 +5067,41 @@ mod broker_answers_tests {
             r.contains("    2  proceeds_only") && r.contains("H / K"),
             "{r}"
         );
-        // not live: proceeds-only year, or a live year with no keyed rows and nothing stored
-        assert!(render_broker_answers(2025, Some(R::PROCEEDS_ONLY), &c, Some(&a)).is_none());
-        assert!(
-            render_broker_answers(2026, Some(R::PROCEEDS_AND_BASIS), &census(&[]), None).is_none()
-        );
+        // a live year with no keyed rows and nothing stored says nothing
+        assert!(render_broker_answers(2026, Some(R::PROCEEDS_AND_BASIS), &[], None).is_none());
+        assert!(render_broker_answers(2025, Some(R::PROCEEDS_ONLY), &[], None).is_none());
+    }
+
+    /// ★★ r3 I-2 KILL (spec R1 MUST) — two rows under ONE key render as TWO lines, each carrying its
+    /// own date sold and its own column (e).
+    ///
+    /// `basis_matches` is defined as *"box 1g equals btctax's column (e) on EACH"* of the key's rows,
+    /// and before this the block printed only the COUNT — the filer was asked to swear to a per-row
+    /// equality against a column no surface printed. Delete the enumeration loop in
+    /// `render_broker_answers` and both `date_sold` assertions below red; keep the loop but print
+    /// only the first row and the second pair reds.
+    #[test]
+    fn each_keys_rows_are_enumerated_with_their_dates_and_column_e() {
+        let c = rows(&[("coinbase", Cohort::Covered, 2)]);
+        let a = answers(&[("coinbase", Cohort::Covered, BrokerReported::BasisMatches)]);
+        let s = render_broker_answers(2026, Some(R::PROCEEDS_AND_BASIS), &c, Some(&a)).unwrap();
+        for r in &c {
+            let want_date = r.date_sold.to_string();
+            let want_e = format!("{:.2}", r.cost_basis);
+            let want_d = format!("{:.2}", r.proceeds);
+            let line = s
+                .lines()
+                .find(|l| l.contains(&want_date))
+                .unwrap_or_else(|| panic!("no enumerated line for {want_date}:\n{s}"));
+            assert!(
+                line.contains(&r.description) && line.contains(&want_e) && line.contains(&want_d),
+                "the row line must carry the amount, (d) and (e): {line}"
+            );
+        }
+        // …and the two lines are DISTINCT (a loop that printed the first row twice would pass the
+        // per-row scan above only if the dates collided; assert they do not).
+        assert_ne!(c[0].date_sold, c[1].date_sold);
+        assert_ne!(c[0].cost_basis, c[1].cost_basis);
     }
 
     /// An answer stored for a key no row carries is shown as the unread refusal it will cause —
@@ -4997,14 +5109,45 @@ mod broker_answers_tests {
     #[test]
     fn a_stored_answer_no_row_reads_is_shown_as_unread() {
         let a = answers(&[("river", Cohort::Covered, BrokerReported::NotReported)]);
-        let s = render_broker_answers(2026, Some(R::PROCEEDS_AND_BASIS), &census(&[]), Some(&a))
-            .expect("shown");
+        let s =
+            render_broker_answers(2026, Some(R::PROCEEDS_AND_BASIS), &[], Some(&a)).expect("shown");
         assert!(
             s.contains("river") && s.contains("REFUSES as unread"),
             "{s}"
         );
-        let s25 = render_broker_answers(2025, Some(R::PROCEEDS_ONLY), &census(&[]), Some(&a))
+        let s25 = render_broker_answers(2025, Some(R::PROCEEDS_ONLY), &[], Some(&a))
             .expect("shown on 2025 too — the refusal fires there as well");
         assert!(s25.contains("REFUSES as unread"), "{s25}");
+    }
+
+    /// ★★ r3 M-2 KILL — a stored answer on a NOT-LIVE year whose key HAS rows is shown, with the
+    /// unread wording.
+    ///
+    /// `screen_broker_reporting` refuses `BrokerAnswerUnread` on `!live || !has_rows`, so this state
+    /// refuses — and the block returned `None`, with an assertion in this very module PINNING the
+    /// silence (`assert!(render_broker_answers(2025, PROCEEDS_ONLY, &c, Some(&a)).is_none())`). The
+    /// guarantee its own doc comment states had no kill; the test asserted its negation. Revert
+    /// `stored_unread`'s second clause and this test reds on the `expect`.
+    #[test]
+    fn a_stored_answer_on_a_not_live_year_with_rows_is_shown_as_unread() {
+        let c = rows(&[("coinbase", Cohort::Covered, 3)]);
+        let a = answers(&[("coinbase", Cohort::Covered, BrokerReported::BasisMatches)]);
+        let s = render_broker_answers(2025, Some(R::PROCEEDS_ONLY), &c, Some(&a)).expect(
+            "TY2025 stores an answer the screen REFUSES as unread — the filer must see why, not \
+             a blank",
+        );
+        assert!(
+            s.contains("coinbase") && s.contains("REFUSES as unread"),
+            "{s}"
+        );
+        assert!(
+            !s.contains("G / J"),
+            "the answer chooses no box on a year that does not ask: {s}"
+        );
+        // TY2024 (no 1099-DA at all) is the same state.
+        let s24 = render_broker_answers(2024, Some(R::NONE), &c, Some(&a)).expect("shown");
+        assert!(s24.contains("REFUSES as unread"), "{s24}");
+        // and with NOTHING stored, a not-live year stays silent (the block is not a nag)
+        assert!(render_broker_answers(2025, Some(R::PROCEEDS_ONLY), &c, None).is_none());
     }
 }

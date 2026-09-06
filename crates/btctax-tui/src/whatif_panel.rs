@@ -525,6 +525,7 @@ mod tests {
             donation_details: BTreeMap::new(),
             bulk_estimated: BTreeMap::new(),
             prices,
+            broker_answers: Default::default(),
         }
     }
 
@@ -539,6 +540,7 @@ mod tests {
             donation_details: BTreeMap::new(),
             bulk_estimated: BTreeMap::new(),
             prices: LayeredPrices::load_with_cache(None).unwrap(),
+            broker_answers: Default::default(),
         }
     }
 
