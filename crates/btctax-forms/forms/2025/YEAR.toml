@@ -1,0 +1,41 @@
+# ★ Design r2 §6 — the YEAR RECORD: what the TY2025 package INTENDS. A declaration, written by a human,
+#   bound by build.rs, held to the build by `tests/year_record.rs` and `btctax-cli`'s YearReadiness.
+#   `forms_expected` ∪ keys(forms_absent) must partition every form the crate can fill (Stem::ALL);
+#   `forms_expected` must equal the stems on disk. Written 2026-09-05; expected set COMPUTED from disk.
+
+year           = 2025
+status         = "preparing"
+return_due     = 2026-04-15
+tables         = "Rev. Proc. 2024-40 (TaxTable); FullReturnParams TY2025 NOT bundled (the year is PAUSED — ROADMAP_STATUS §0a); Pub. L. 119-21 for the OBBBA figures"
+prices_through = 2025-12-31
+
+forms_expected = [
+    "f1040",
+    "f1040s1a",
+    "f1040s2",
+    "f1040s3",
+    "f1040sa",
+    "f1040sb",
+    "f1040sc",
+    "f6251",
+    "f8283",
+    "f8949",
+    "f8959",
+    "f8960",
+    "f8995",
+    "schedule_d",
+    "schedule_se",
+]
+
+[forms_absent]
+f1040s1      = "Schedule 1 is bundled for 2024 only; the TY2025 revision has no map yet (NO PRIOR SIDE in the TY2026 work list — archive f1040s1--2025, then port)"
+f8275        = "periodic (Rev. 10-2024) — served by hash from forms/2024/, licensed in Form8275Map::alias_is_licensed_by"
+f8995a       = "not ported to TY2025 (Form 8995-A Rev. 2025 map not yet transcribed); the simplified Form 8995 is bundled"
+
+[oracles]
+ots     = "OTS_2025 — archived? no; expected as the TY2026 baseline's prior side"
+taxcalc = ">= 6.8.2"
+
+[information_returns.f1099da]
+proceeds = true
+basis    = false

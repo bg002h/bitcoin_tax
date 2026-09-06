@@ -1,0 +1,41 @@
+# ★ Design r2 §6 — the YEAR RECORD: what the TY2017 package INTENDS. A declaration, written by a human,
+#   bound by build.rs, held to the build by `tests/year_record.rs` and `btctax-cli`'s YearReadiness.
+#   `forms_expected` ∪ keys(forms_absent) must partition every form the crate can fill (Stem::ALL);
+#   `forms_expected` must equal the stems on disk. Written 2026-09-05; expected set COMPUTED from disk.
+
+year           = 2017
+status         = "slice"
+return_due     = 2018-04-17
+tables         = "Rev. Proc. 2016-55 §3.01 (brackets), §3.35/§3.37; SSA 2016 COLA determination (wage base) — the crypto slice needs the wage base for Schedule SE only"
+prices_through = 2017-12-31
+
+forms_expected = [
+    "f1040",
+    "f8283",
+    "f8949",
+    "schedule_d",
+    "schedule_se",
+]
+
+[forms_absent]
+f1040s1      = "pre-TCJA Form 1040 carried no Schedule 1 (the 2017 1040 had lines 7–37 on its face); the crypto slice prints its figures on the 1040 itself"
+f1040s1a     = "Schedule 1-A is TY2025+ (OBBBA)"
+f1040s2      = "no Schedule 2 in 2017 — the crypto slice fills the 1040 cap-gains figures only"
+f1040s3      = "no Schedule 3 in 2017 — the crypto slice fills the 1040 cap-gains figures only"
+f1040sa      = "the TY2017 package is the crypto SLICE (8949 / Schedule D / Schedule SE / 8283 / 1040 cap-gains); no full return"
+f1040sb      = "crypto slice only; no full return"
+f1040sc      = "crypto slice only; no full return"
+f6251        = "crypto slice only; no full return (and the 2017 Form 6251 was never transcribed)"
+f8275        = "periodic (Rev. 10-2024) — served by hash from forms/2024/ when a 2017 disclosure is printed"
+f8959        = "crypto slice only; no full return"
+f8960        = "crypto slice only; no full return"
+f8995        = "§199A did not exist for TY2017 (TCJA, TY2018+)"
+f8995a       = "§199A did not exist for TY2017 (TCJA, TY2018+)"
+
+[oracles]
+ots     = "none — OTS 2017 is not archived; the TY2017 slice has no oracle (owner decision open: strategy review S9)"
+taxcalc = "none"
+
+[information_returns.f1099da]
+proceeds = false
+basis    = false

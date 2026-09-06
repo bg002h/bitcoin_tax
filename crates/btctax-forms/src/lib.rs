@@ -35,6 +35,7 @@ pub mod line_set;
 mod map;
 mod overflow;
 mod packet;
+pub mod year_record;
 pub use packet::attachment_sequence;
 mod pdf;
 mod schedule23;

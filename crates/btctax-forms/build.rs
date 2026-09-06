@@ -40,6 +40,7 @@ fn main() {
 
     // year → stem → (has_pdf, has_map)
     let mut found: BTreeMap<i32, BTreeMap<String, (bool, bool)>> = BTreeMap::new();
+    let mut year_records: Vec<(i32, PathBuf)> = Vec::new();
     let mut year_dirs: Vec<PathBuf> = std::fs::read_dir(&forms)
         .unwrap_or_else(|e| panic!("build.rs: cannot read {}: {e}", forms.display()))
         .filter_map(|e| e.ok())
@@ -57,6 +58,17 @@ fn main() {
             ),
         };
         println!("cargo:rerun-if-changed={}", dir.display());
+        // ★ Design r2 §6 — the YEAR RECORD. A year directory without one is a year with no declared
+        //   intent (no expected form set, no due date, no oracle, no regime) — refused at build.
+        let record = dir.join("YEAR.toml");
+        if !record.is_file() {
+            panic!(
+                "build.rs: forms/{name}/ has no YEAR.toml — every bundled year declares itself (design r2 §6: \
+                 status, return_due, forms_expected, forms_absent, tables, oracles, prices_through, \
+                 information_returns). Location is status; a year without a record is a form outside every gate."
+            );
+        }
+        year_records.push((year, record));
         let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
             .unwrap()
             .filter_map(|e| e.ok())
@@ -163,6 +175,24 @@ fn main() {
         writeln!(out, "    (Stem::{}, {year}),", variant_name(stem)).unwrap();
     }
     writeln!(out, "];").unwrap();
+
+    // year_record_text()
+    writeln!(out, "\n/// The committed `forms/<year>/YEAR.toml` text — the year's DECLARATION (design r2 §6).").unwrap();
+    writeln!(
+        out,
+        "pub fn year_record_text(year: i32) -> Option<&'static str> {{"
+    )
+    .unwrap();
+    writeln!(out, "    match year {{").unwrap();
+    for (year, path) in &year_records {
+        writeln!(
+            out,
+            "        {year} => Some(include_str!({:?})),",
+            path.display().to_string()
+        )
+        .unwrap();
+    }
+    writeln!(out, "        _ => None,\n    }}\n}}").unwrap();
 
     let dest = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR")).join("bundled.rs");
     std::fs::write(&dest, out)

@@ -1,0 +1,41 @@
+# ★ Design r2 §6 — the YEAR RECORD: what the TY2024 package INTENDS. A declaration, written by a human,
+#   bound by build.rs, held to the build by `tests/year_record.rs` and `btctax-cli`'s YearReadiness.
+#   `forms_expected` ∪ keys(forms_absent) must partition every form the crate can fill (Stem::ALL);
+#   `forms_expected` must equal the stems on disk. Written 2026-09-05; expected set COMPUTED from disk.
+
+year           = 2024
+status         = "filable"
+return_due     = 2025-04-15
+tables         = "Rev. Proc. 2023-34 (TaxTable + FullReturnParams); SSA 2023 COLA determination (wage base)"
+prices_through = 2024-12-31
+
+forms_expected = [
+    "f1040",
+    "f1040s1",
+    "f1040s2",
+    "f1040s3",
+    "f1040sa",
+    "f1040sb",
+    "f1040sc",
+    "f6251",
+    "f8275",
+    "f8283",
+    "f8949",
+    "f8959",
+    "f8960",
+    "f8995",
+    "f8995a",
+    "schedule_d",
+    "schedule_se",
+]
+
+[forms_absent]
+f1040s1a     = "Schedule 1-A is TY2025+ (OBBBA); TY2024 has no such schedule"
+
+[oracles]
+ots     = "OpenTaxSolver 2024 (OpenTaxSolver2024_22.07_linux64)"
+taxcalc = ">= 6.8.2"
+
+[information_returns.f1099da]
+proceeds = false
+basis    = false

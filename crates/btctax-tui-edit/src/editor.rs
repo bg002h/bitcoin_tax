@@ -295,7 +295,9 @@ impl EditorApp {
             help_open: false,
             session: None,
             snapshot: None,
-            selected_year: 2025,
+            // ★ Derived from the glob (design r2 §10 step 4), never a literal: the year the
+            //   build bundles most recently. Was `2025` typed here — the §2.5 stale-literal row.
+            selected_year: btctax_cli::year_readiness::default_year(),
             holdings_state: TableState::default(),
             disposals_state: TableState::default(),
             income_state: TableState::default(),

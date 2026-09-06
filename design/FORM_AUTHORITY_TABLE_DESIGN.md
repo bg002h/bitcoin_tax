@@ -141,8 +141,8 @@ binds every file on disk (tautological under this layer — that is what a witne
 
 ```toml
 year                = 2026
-status              = "preparing"         # preparing | filable — a DECLARATION; full_return_for(year) stays the compute gate
-return_due          = 2027-04-15          # replaces TY2025_RETURN_DUE / TRANSITION_DATE
+status              = "preparing"         # preparing | slice | filable — a DECLARATION; full_return_for(year) stays the compute gate. `slice` = the crypto-slice packet only (TY2017)
+return_due          = 2027-04-15          # replaces TY2025_RETURN_DUE. ★ NOT TRANSITION_DATE (step-4 amendment): that is the Rev. Proc. 2024-28 per-wallet snapshot date (§7.4), regulatory and one-time, ~90 readers in core's funds-safety logic — it stays in `conventions`
 forms_expected      = ["f1040", "f1040s1", "f1040s1a", "f1040s2", "…"]     # runbook step 1's OUTPUT, committed
 forms_absent        = { f8275 = "Rev. 10-2024 aliased by hash from 2024" }   # FORMS_ABSENT_FROM_YEAR moves here
 tables              = "Rev. Proc. 2025-32; Pub. L. 119-21"                   # citation of record for TaxTable + FullReturnParams
@@ -204,7 +204,8 @@ witness) · `forms_expected` == present ∪ absent-with-reason · every `Stem` h
 | `CENSUS_KEYS` | the glob — and it gains `f1040s1a`, which the hand-list lost |
 | `STEM_ALIASES` (2 rows) | the `irs_stem` header field |
 | `FORMS_ABSENT_FROM_YEAR` | `YEAR.toml` `forms_absent` |
-| `TY2025_RETURN_DUE`, `TRANSITION_DATE` | `YEAR.toml` `return_due` |
+| `TY2025_RETURN_DUE` | `YEAR.toml` `return_due` — DECLARED there; its one code reader (`btctax_core::project::resolve`) cannot see the forms crate, so `tests/year_record.rs` holds the declaration equal to the constant until the reader relocates |
+| `TRANSITION_DATE` | **stays in `conventions`** — not a year fact (the Rev. Proc. 2024-28 snapshot date, §7.4); listed here so the omission is deliberate, not forgotten |
 | `selected_year: 2025` × 2 | derived from `YearReadiness` |
 | 16 attachment-sequence literals | the header field, checked against the extract (the 1040 has none). Step 1 collapsed the literals into one `packet::attachment_sequence(stem, year)` held to every row by test; it retires into the row at step 3 |
 | `cite_check.rs::FORMS` (`FormAuthority { form, year, instructions, instr_pages, extract_stem }`, one row) | `instructions` / `instr_pages` header fields. ★ Its `extract_stem` points at a SECOND extract root, `crates/btctax-core/src/tax/fixtures/` (`schedule_1a_2025_form.txt`, `schedule_1a_2025_instructions.txt`), which §4's derive-by-convention rule cannot express. Decision (corrected, fold review r2 G3): the two fixtures are a SECOND EXTRACTION of files already under the convention — `f1040s1a--2025.txt` (11,153 B vs the fixture's 11,443 B) and pages 101–110 of `i1040gi--2025.txt` (the fixture is a 52,672 B slice; the booklet extract is 616,274 B). **Nothing moves**: a `mv` would clobber the booklet extract every other i1040gi-hosted schedule's gate reads, and pointing `tables.rs:1351,1365` at `design/` would make two escaping `include_str!`s — §5's publishing trap. The instructions fixture is regenerated at test time from the booklet extract using the header's `instr_pages`; the form fixture is replaced by `f1040s1a--2025.txt` **once a test asserts every `FORMS` quotation still resolves against it** (the two extractions differ by 290 B). Both are then deleted; until then the header carries `extract_override = "…"` and the ratchet below keeps its row (fold review F2) |
@@ -248,7 +249,13 @@ witness) · `forms_expected` == present ∪ absent-with-reason · every `Stem` h
    **`Unwired`** arm for the ten TY2025 maps named in step 1 — the fifth kill is "a `line_set` that is
    neither a schema nor `Unwired`", so wiring one at step 5 is a deletion from that arm and forgetting
    one still cannot compile (fold review r2 G2).
-4. **`YEAR.toml` for 2017/2024/2025** with `YearReadiness` and its kills; move the four literals in.
+4. ✅ **DONE (2026-09-05)** — `forms/<year>/YEAR.toml` ×3 (expected sets computed from disk; absences
+   with reasons), bound by `build.rs` (a year directory without one is a build error), `YearRecord`
+   with `partition_problems` (expected ∪ absent == `Stem::ALL`) and `glob_problems` (expected == on
+   disk), `YearReadiness` in `btctax-cli` (declared vs table/params/forms/prices, with the
+   filable-without-params and prices-short kills), `default_year()` from the glob for both TUIs,
+   `FORMS_ABSENT_FROM_YEAR` and `CENSUS_KEYS` retired into the record and `Stem::ALL`.
+   **`YEAR.toml` for 2017/2024/2025** with `YearReadiness` and its kills; move the four literals in.
 5. **`line_set`: add `f6251/2025`** (the 1a/1b struct) and wire the ten orphaned TY2025 maps. **This is
    where the TY2025 6251 map first parses.**
 6. Only then TY2026 rows — `forms-provisional/2026/` today, promoted file-by-file as finals land.

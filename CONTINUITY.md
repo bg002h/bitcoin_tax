@@ -56,6 +56,13 @@ _Last updated: **2026-09-04**. Written at a deliberate pause; safe to exit. **Re
 >   template prints 36, the literal said 155). An independent phase review of `6267b6b1` is
 >   RUNNING → `design/agent-reports/2026-09-05-r2-step1-review.md`; persist, ledger, fold.
 > - **Step 2 DONE — `68b86b8e`** (build.rs + `Stem` + generated bindings + the tarball gate; 3022 tests).
+> - **Step 4 DONE** (the commit after 98e279c9): `forms/<year>/YEAR.toml` ×3 bound by build.rs, `YearRecord`
+>   + `YearReadiness` (btctax-cli) with their kills, TUI default year derived, the census reads the
+>   record and `Stem::ALL`. `TRANSITION_DATE` deliberately stays in `conventions` (not a year fact).
+>   **NEXT: step 5** — wire the ten TY2025 maps: each is a deletion from `line_set::Schema::Unwired`;
+>   `f6251/2025` needs the 1a/1b transcription struct (a rebuild, code); the rest may parse into their
+>   2024 structs (check each — a map that parses is a one-line arm change; one that does not is a
+>   renumber and a new struct). Then the steps-2/3 review's fold; then FR-46's spec.
 > - **Step 3 DONE — `bc6dce35`** (LineSet/Schema/Unwired; 54 consts + the SUPPORTED_YEARS hand-list gone;
 >   periodic alias by hash; 3023 tests). The step-1 phase review (`2c3044e3`, 0C/2I/6M, all 37 rows
 >   machine-verified) is FOLDED in the commit after: P1 kill 4 keyed on extract existence with the five

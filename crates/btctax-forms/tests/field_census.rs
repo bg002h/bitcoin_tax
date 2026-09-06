@@ -90,28 +90,10 @@ const UNCENSUSED: &[(i32, &str, usize)] = &[
 const UNCENSUSED_ENTRIES: usize = 10;
 const UNCENSUSED_FIELDS: usize = 733;
 
-/// ★ `(year, stem)` pairs in [`common::CENSUS_KEYS`] — the forms `fill_full_return` can emit — that
-/// have **no committed map in that year at all**. The gate cannot check a form that does not exist, so
-/// rather than counting that as fine, the absences are named here and pinned.
-///
-/// This replaces the old `the_two_lists_partition_every_form`, whose two hand-typed stem lists were
-/// year-blind: they could say "every emittable form is classified" while a year directory was missing
-/// twelve of them.
-const FORMS_ABSENT_FROM_YEAR: &[(i32, &[&str])] = &[
-    // TY2017 ships the crypto slice only — five forms of the seventeen.
-    (
-        2017,
-        &[
-            "f1040s1", "f1040s2", "f1040s3", "f1040sa", "f1040sb", "f1040sc", "f6251", "f8275",
-            "f8959", "f8960", "f8995", "f8995a",
-        ],
-    ),
-    // TY2024 is the complete, fully censused reference year: nothing absent.
-    (2024, &[]),
-    // ★ TY2025 replaces Schedule 1 with Schedule 1-A (`f1040s1a`, present and 100% mapped); `f8275`
-    // reuses the single bundled Rev. 10-2024 asset (`form8275.rs`); `f8995a` was not ported.
-    (2025, &["f1040s1", "f8275", "f8995a"]),
-];
+// ★ Design r2 §10 step 4: the per-year ABSENT list is no longer a hand-list here — it is each year's
+//   `forms/<year>/YEAR.toml` `[forms_absent]` (with the reason beside each), read through
+//   `btctax_forms::year_record::YearRecord`. This gate reads the declaration; `tests/year_record.rs`
+//   holds the declaration to the glob and to `Stem::ALL`.
 
 fn forms_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("forms")
@@ -585,22 +567,28 @@ fn the_uncensused_register_may_only_shrink() {
 /// ★★ **No emittable form escapes the gate — and a form that is ABSENT from a year is NAMED, never
 /// silently counted as clean.**
 ///
-/// `common::CENSUS_KEYS` is the one authority for the set of forms `fill_full_return` can emit. The
+/// `Stem::ALL` (the closed set of forms this crate can fill) is the one authority for the set of forms `fill_full_return` can emit. The
 /// gate walks the filesystem, so a form with no committed map for a year is simply not walked —
-/// exactly the "skipping is not passing" shape. [`FORMS_ABSENT_FROM_YEAR`] records those absences per
+/// exactly the "skipping is not passing" shape. each year's `YEAR.toml` `[forms_absent]` records those absences per
 /// year, derived-against and pinned, so deleting a committed map reds here instead of quietly
 /// shrinking the gate's field of view.
 #[test]
 fn every_emittable_form_is_reached_by_the_gate_or_named_absent() {
-    use common::CENSUS_KEYS as EMITTABLE;
+    use btctax_forms::bundled::Stem;
+    use btctax_forms::year_record::YearRecord;
+    let emittable: Vec<&str> = Stem::ALL.iter().map(|s| s.file_stem()).collect();
     let years = every_bundled_year();
 
     // The register must cover every year on disk — a new forms/<year>/ has no row, and reds.
-    let registered: BTreeSet<i32> = FORMS_ABSENT_FROM_YEAR.iter().map(|(y, _)| *y).collect();
+    let registered: BTreeSet<i32> = years
+        .iter()
+        .copied()
+        .filter(|y| YearRecord::for_year(*y).is_some())
+        .collect();
     let unregistered: Vec<&i32> = years.iter().filter(|y| !registered.contains(y)).collect();
     assert!(
         unregistered.is_empty(),
-        "years {unregistered:?} are on disk but have no row in FORMS_ABSENT_FROM_YEAR — the gate \
+        "years {unregistered:?} are on disk but have no forms/<year>/YEAR.toml — the gate \
          would walk whatever maps happen to exist and say nothing about the forms that do not"
     );
 
@@ -608,22 +596,22 @@ fn every_emittable_form_is_reached_by_the_gate_or_named_absent() {
     let mut complete_years: Vec<i32> = Vec::new();
     for year in &years {
         let present: BTreeSet<String> = stems_for(*year).into_iter().collect();
-        let measured: BTreeSet<&str> = EMITTABLE
+        let measured: BTreeSet<&str> = emittable
             .iter()
             .copied()
             .filter(|k| !present.contains(*k))
             .collect();
-        let recorded: BTreeSet<&str> = FORMS_ABSENT_FROM_YEAR
-            .iter()
-            .find(|(y, _)| y == year)
-            .map(|(_, f)| f.iter().copied().collect())
-            .unwrap_or_default();
+        let record = YearRecord::for_year(*year).expect("registered above");
+        let recorded: BTreeSet<&str> = record.forms_absent.keys().map(String::as_str).collect();
         if measured != recorded {
             wrong.push(format!(
                 "{year}: recorded absent {recorded:?}, measured absent {measured:?}"
             ));
         }
-        if measured.is_empty() {
+        // "Complete" is the year's DECLARATION (`status = "filable"`), held above to what is on disk —
+        // not "every one of the 18 forms present": Schedule 1-A exists for TY2025+ only, so no year
+        // can bundle all of `Stem::ALL`, and each absence carries its reason in the record.
+        if record.status == btctax_forms::year_record::YearStatus::Filable {
             complete_years.push(*year);
         }
     }

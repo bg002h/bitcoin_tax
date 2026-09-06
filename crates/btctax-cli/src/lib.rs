@@ -18,6 +18,7 @@ pub mod return_inputs;
 pub mod session;
 pub mod tax_profile;
 pub mod testonly;
+pub mod year_readiness;
 
 pub use cli::Cli;
 // Re-exported at the crate root so the TUI editor (`btctax-tui-edit`) can call it WITHOUT the `cmd::`
