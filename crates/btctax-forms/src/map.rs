@@ -2789,3 +2789,39 @@ impl ScheduleSeMap {
         self.lines().iter().flat_map(|c| c.fields()).collect()
     }
 }
+
+/// ★ Transitional witness for design r2 §10 step 2: every `include_str!` const the old arms read,
+/// as `(stem, year, bytes)`, so `bundled::tests::generated_bindings_agree_with_every_old_const` can
+/// hold the generated bindings to them byte-for-byte. Deleted with the consts at step 3.
+#[cfg(test)]
+pub mod testonly_old_consts {
+    pub const OLD_MAP_CONSTS: &[(&str, i32, &str)] = &[
+        ("f1040", 2017, super::F1040_MAP_2017),
+        ("f8283", 2017, super::F8283_MAP_2017),
+        ("f8949", 2017, super::F8949_MAP_2017),
+        ("schedule_d", 2017, super::SCHEDULE_D_MAP_2017),
+        ("schedule_se", 2017, super::SCHEDULE_SE_MAP_2017),
+        ("f1040", 2024, super::F1040_MAP_2024),
+        ("f1040s1", 2024, super::SCHEDULE_1_MAP_2024),
+        ("f1040s2", 2024, super::SCHEDULE_2_MAP_2024),
+        ("f1040s3", 2024, super::SCHEDULE_3_MAP_2024),
+        ("f1040sa", 2024, super::SCHEDULE_A_MAP_2024),
+        ("f1040sb", 2024, super::SCHEDULE_B_MAP_2024),
+        ("f1040sc", 2024, super::SCHEDULE_C_MAP_2024),
+        ("f6251", 2024, super::F6251_MAP_2024),
+        ("f8275", 2024, super::F8275_MAP_2024),
+        ("f8283", 2024, super::F8283_MAP_2024),
+        ("f8949", 2024, super::F8949_MAP_2024),
+        ("f8959", 2024, super::F8959_MAP_2024),
+        ("f8960", 2024, super::F8960_MAP_2024),
+        ("f8995", 2024, super::F8995_MAP_2024),
+        ("f8995a", 2024, super::F8995A_MAP_2024),
+        ("schedule_d", 2024, super::SCHEDULE_D_MAP_2024),
+        ("schedule_se", 2024, super::SCHEDULE_SE_MAP_2024),
+        ("f1040", 2025, super::F1040_MAP_2025),
+        ("f8283", 2025, super::F8283_MAP_2025),
+        ("f8949", 2025, super::F8949_MAP_2025),
+        ("schedule_d", 2025, super::SCHEDULE_D_MAP_2025),
+        ("schedule_se", 2025, super::SCHEDULE_SE_MAP_2025),
+    ];
+}

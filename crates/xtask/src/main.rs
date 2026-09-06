@@ -28,6 +28,7 @@ mod form_geometry;
 mod harness_check;
 mod label_reader;
 mod line_coverage_check;
+mod package_check;
 mod prompt_check;
 /// Half 1a of the Schedule 1-A conformance KAT — the 48 entry labels, adjudicated by `label_reader`'s
 /// two witnesses over the committed geometry and compared to `Schedule1A`'s own leaves.

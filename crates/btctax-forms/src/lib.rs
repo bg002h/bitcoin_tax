@@ -17,6 +17,7 @@
 //! The tax data is REUSED verbatim from the projection (`btctax_core::form_8949` /
 //! `btctax_core::schedule_d`) — this crate never recomputes gains.
 
+pub mod bundled;
 mod cells;
 mod error;
 mod fill8949;
