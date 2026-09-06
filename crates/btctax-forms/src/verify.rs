@@ -528,7 +528,9 @@ mod tests {
     fn a_value_over_its_maxlen_comb_cell_fails_closed() {
         const SSN_CELL: &str = "topmostSubform[0].Page1[0].f1_06[0]";
         let fill = |value: &str| -> Result<(), FormsError> {
-            let mut doc = pdf::load(pdf::F1040_PDF_2024).unwrap();
+            let mut doc =
+                pdf::load(crate::bundled::template(crate::bundled::Stem::F1040, 2024).unwrap())
+                    .unwrap();
             let index = pdf::index(&pdf::collect_fields(&doc).unwrap());
             pdf::apply_writes(
                 &mut doc,

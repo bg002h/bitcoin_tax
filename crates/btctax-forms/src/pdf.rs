@@ -9,192 +9,94 @@ use crate::error::FormsError;
 use lopdf::{Document, Object, ObjectId, StringFormat};
 use std::collections::HashMap;
 
-/// The bundled TY2025 Form 8949 (official IRS fillable PDF, US-gov public domain).
-pub const F8949_PDF_2025: &[u8] = include_bytes!("../forms/2025/f8949.pdf");
-/// The bundled TY2025 Schedule D (official IRS fillable PDF, US-gov public domain).
-pub const SCHEDULE_D_PDF_2025: &[u8] = include_bytes!("../forms/2025/schedule_d.pdf");
-/// The bundled TY2025 Schedule SE (official IRS fillable PDF, US-gov public domain).
-pub const SCHEDULE_SE_PDF_2025: &[u8] = include_bytes!("../forms/2025/schedule_se.pdf");
-/// The bundled Form 8283, Rev. 12-2025 (official IRS fillable PDF, US-gov public domain).
-pub const F8283_PDF_2025: &[u8] = include_bytes!("../forms/2025/f8283.pdf");
-/// The bundled TY2025 Form 1040 (official IRS fillable PDF, US-gov public domain).
-pub const F1040_PDF_2025: &[u8] = include_bytes!("../forms/2025/f1040.pdf");
-
-/// The bundled TY2024 Form 8949 (official IRS fillable PDF, US-gov public domain).
-pub const F8949_PDF_2024: &[u8] = include_bytes!("../forms/2024/f8949.pdf");
-/// The bundled TY2024 Schedule D (official IRS fillable PDF, US-gov public domain).
-pub const SCHEDULE_D_PDF_2024: &[u8] = include_bytes!("../forms/2024/schedule_d.pdf");
-/// The bundled TY2024 Schedule SE (official IRS fillable PDF, US-gov public domain).
-pub const SCHEDULE_SE_PDF_2024: &[u8] = include_bytes!("../forms/2024/schedule_se.pdf");
-/// The bundled Form 8283, Rev. 12-2023 (TY2024; official IRS fillable PDF, US-gov public domain).
-pub const F8283_PDF_2024: &[u8] = include_bytes!("../forms/2024/f8283.pdf");
-/// The bundled Form 8275, Rev. 10-2024 (official IRS fillable PDF, US-gov public domain). ★ Form 8275
-/// is REVISION-versioned, not tax-year-versioned: this ONE asset is aliased to EVERY `SUPPORTED_YEAR`
-/// by [`f8275_pdf`] — there is no separate `F8275_PDF_2017` / `F8275_PDF_2025`.
-pub const F8275_PDF_2024: &[u8] = include_bytes!("../forms/2024/f8275.pdf");
-/// The bundled TY2024 Form 1040 (official IRS fillable PDF, US-gov public domain).
-pub const F1040_PDF_2024: &[u8] = include_bytes!("../forms/2024/f1040.pdf");
-/// The bundled TY2024 Form 8959, Additional Medicare Tax (official IRS fillable PDF, public domain).
-pub const F8959_PDF_2024: &[u8] = include_bytes!("../forms/2024/f8959.pdf");
-/// The bundled TY2024 Form 8960, Net Investment Income Tax (official IRS fillable PDF, public domain).
-pub const F8960_PDF_2024: &[u8] = include_bytes!("../forms/2024/f8960.pdf");
-/// The bundled TY2024 Form 8995, QBI deduction — simplified (official IRS fillable PDF, public domain).
-pub const F8995_PDF_2024: &[u8] = include_bytes!("../forms/2024/f8995.pdf");
-/// Form 8995-A — the FULL §199A form, required above the §199A(e)(2) threshold where the simplified
-/// Form 8995 no longer applies (§G-28/B1).
-pub const F8995A_PDF_2024: &[u8] = include_bytes!("../forms/2024/f8995a.pdf");
-/// §G-6 — the bundled TY2024 Form 6251.
-static F6251_PDF_2024: &[u8] = include_bytes!("../forms/2024/f6251.pdf");
-/// The bundled TY2024 Schedule 2, Additional Taxes (official IRS fillable PDF, public domain).
-pub const SCHEDULE_2_PDF_2024: &[u8] = include_bytes!("../forms/2024/f1040s2.pdf");
-/// The bundled TY2024 Schedule 3, Additional Credits and Payments (official IRS fillable PDF, public domain).
-pub const SCHEDULE_3_PDF_2024: &[u8] = include_bytes!("../forms/2024/f1040s3.pdf");
-/// The bundled TY2024 Schedule A, Itemized Deductions (official IRS fillable PDF, public domain).
-pub const SCHEDULE_A_PDF_2024: &[u8] = include_bytes!("../forms/2024/f1040sa.pdf");
-/// The bundled TY2024 Schedule 1, Additional Income and Adjustments (official IRS fillable PDF, public domain).
-pub const SCHEDULE_1_PDF_2024: &[u8] = include_bytes!("../forms/2024/f1040s1.pdf");
-/// The bundled TY2024 Schedule C, Profit or Loss From Business (official IRS fillable PDF, public domain).
-pub const SCHEDULE_C_PDF_2024: &[u8] = include_bytes!("../forms/2024/f1040sc.pdf");
-/// The bundled TY2024 Schedule B, Interest and Ordinary Dividends (official IRS fillable PDF, public domain).
-pub const SCHEDULE_B_PDF_2024: &[u8] = include_bytes!("../forms/2024/f1040sb.pdf");
-
-/// The bundled TY2017 Form 8949 (official IRS fillable PDF, US-gov public domain).
-pub const F8949_PDF_2017: &[u8] = include_bytes!("../forms/2017/f8949.pdf");
-/// The bundled TY2017 Schedule D (official IRS fillable PDF, US-gov public domain).
-pub const SCHEDULE_D_PDF_2017: &[u8] = include_bytes!("../forms/2017/schedule_d.pdf");
-/// The bundled TY2017 Schedule SE (official IRS fillable PDF, US-gov public domain).
-pub const SCHEDULE_SE_PDF_2017: &[u8] = include_bytes!("../forms/2017/schedule_se.pdf");
-/// The bundled Form 8283, Rev. 12-2014 (TY2017; official IRS fillable PDF, US-gov public domain).
-pub const F8283_PDF_2017: &[u8] = include_bytes!("../forms/2017/f8283.pdf");
-/// The bundled TY2017 Form 1040 (official IRS fillable PDF, US-gov public domain).
-pub const F1040_PDF_2017: &[u8] = include_bytes!("../forms/2017/f1040.pdf");
-
 /// The bundled Form 8949 PDF bytes for a supported tax year (the asset bound to the year's map).
 pub fn f8949_pdf(year: i32) -> Result<&'static [u8], FormsError> {
-    match year {
-        2017 => Ok(F8949_PDF_2017),
-        2024 => Ok(F8949_PDF_2024),
-        2025 => Ok(F8949_PDF_2025),
-        _ => Err(FormsError::UnsupportedYear(year)),
-    }
+    crate::bundled::template(crate::bundled::Stem::F8949, year)
+        .ok_or(FormsError::UnsupportedYear(year))
 }
 
 /// The bundled Schedule D PDF bytes for a supported tax year.
 pub fn schedule_d_pdf(year: i32) -> Result<&'static [u8], FormsError> {
-    match year {
-        2017 => Ok(SCHEDULE_D_PDF_2017),
-        2024 => Ok(SCHEDULE_D_PDF_2024),
-        2025 => Ok(SCHEDULE_D_PDF_2025),
-        _ => Err(FormsError::UnsupportedYear(year)),
-    }
+    crate::bundled::template(crate::bundled::Stem::ScheduleD, year)
+        .ok_or(FormsError::UnsupportedYear(year))
 }
 
 /// The bundled Schedule SE PDF bytes for a supported tax year.
 pub fn schedule_se_pdf(year: i32) -> Result<&'static [u8], FormsError> {
-    match year {
-        2017 => Ok(SCHEDULE_SE_PDF_2017),
-        2024 => Ok(SCHEDULE_SE_PDF_2024),
-        2025 => Ok(SCHEDULE_SE_PDF_2025),
-        _ => Err(FormsError::UnsupportedYear(year)),
-    }
+    crate::bundled::template(crate::bundled::Stem::ScheduleSe, year)
+        .ok_or(FormsError::UnsupportedYear(year))
 }
 
 /// The bundled Form 8959 PDF bytes for a supported tax year. Full-return v1 is TY2024-only.
 pub fn f8959_pdf(year: i32) -> Result<&'static [u8], FormsError> {
-    match year {
-        2024 => Ok(F8959_PDF_2024),
-        _ => Err(FormsError::UnsupportedYear(year)),
-    }
+    crate::bundled::template(crate::bundled::Stem::F8959, year)
+        .ok_or(FormsError::UnsupportedYear(year))
 }
 
 /// The bundled Form 8960 PDF bytes for a supported tax year. Full-return v1 is TY2024-only.
 pub fn f8960_pdf(year: i32) -> Result<&'static [u8], FormsError> {
-    match year {
-        2024 => Ok(F8960_PDF_2024),
-        _ => Err(FormsError::UnsupportedYear(year)),
-    }
+    crate::bundled::template(crate::bundled::Stem::F8960, year)
+        .ok_or(FormsError::UnsupportedYear(year))
 }
 
 /// The bundled Form 8995 PDF bytes for a supported tax year. Full-return v1 is TY2024-only.
 pub fn f8995_pdf(year: i32) -> Result<&'static [u8], FormsError> {
-    match year {
-        2024 => Ok(F8995_PDF_2024),
-        _ => Err(FormsError::UnsupportedYear(year)),
-    }
+    crate::bundled::template(crate::bundled::Stem::F8995, year)
+        .ok_or(FormsError::UnsupportedYear(year))
 }
 
 /// The bundled Form 8995-A PDF bytes. Full-return v1 is TY2024-only.
 /// §G-6 — the bundled Form 6251 PDF bytes. Full-return v1 is TY2024-only.
 pub fn f6251_pdf(year: i32) -> Result<&'static [u8], FormsError> {
-    match year {
-        2024 => Ok(F6251_PDF_2024),
-        _ => Err(FormsError::UnsupportedYear(year)),
-    }
+    crate::bundled::template(crate::bundled::Stem::F6251, year)
+        .ok_or(FormsError::UnsupportedYear(year))
 }
 
 pub fn f8995a_pdf(year: i32) -> Result<&'static [u8], FormsError> {
-    match year {
-        2024 => Ok(F8995A_PDF_2024),
-        _ => Err(FormsError::UnsupportedYear(year)),
-    }
+    crate::bundled::template(crate::bundled::Stem::F8995a, year)
+        .ok_or(FormsError::UnsupportedYear(year))
 }
 
 /// The bundled Schedule 2 PDF bytes for a supported tax year. Full-return v1 is TY2024-only.
 pub fn schedule_2_pdf(year: i32) -> Result<&'static [u8], FormsError> {
-    match year {
-        2024 => Ok(SCHEDULE_2_PDF_2024),
-        _ => Err(FormsError::UnsupportedYear(year)),
-    }
+    crate::bundled::template(crate::bundled::Stem::F1040s2, year)
+        .ok_or(FormsError::UnsupportedYear(year))
 }
 
 /// The bundled Schedule 3 PDF bytes for a supported tax year. Full-return v1 is TY2024-only.
 pub fn schedule_3_pdf(year: i32) -> Result<&'static [u8], FormsError> {
-    match year {
-        2024 => Ok(SCHEDULE_3_PDF_2024),
-        _ => Err(FormsError::UnsupportedYear(year)),
-    }
+    crate::bundled::template(crate::bundled::Stem::F1040s3, year)
+        .ok_or(FormsError::UnsupportedYear(year))
 }
 
 /// The bundled Schedule B PDF bytes for a supported tax year. Full-return v1 is TY2024-only.
 pub fn schedule_b_pdf(year: i32) -> Result<&'static [u8], FormsError> {
-    match year {
-        2024 => Ok(SCHEDULE_B_PDF_2024),
-        _ => Err(FormsError::UnsupportedYear(year)),
-    }
+    crate::bundled::template(crate::bundled::Stem::F1040sb, year)
+        .ok_or(FormsError::UnsupportedYear(year))
 }
 
 /// The bundled Schedule C PDF bytes for a supported tax year. Full-return v1 is TY2024-only.
 pub fn schedule_c_pdf(year: i32) -> Result<&'static [u8], FormsError> {
-    match year {
-        2024 => Ok(SCHEDULE_C_PDF_2024),
-        _ => Err(FormsError::UnsupportedYear(year)),
-    }
+    crate::bundled::template(crate::bundled::Stem::F1040sc, year)
+        .ok_or(FormsError::UnsupportedYear(year))
 }
 
 /// The bundled Schedule 1 PDF bytes for a supported tax year. Full-return v1 is TY2024-only.
 pub fn schedule_1_pdf(year: i32) -> Result<&'static [u8], FormsError> {
-    match year {
-        2024 => Ok(SCHEDULE_1_PDF_2024),
-        _ => Err(FormsError::UnsupportedYear(year)),
-    }
+    crate::bundled::template(crate::bundled::Stem::F1040s1, year)
+        .ok_or(FormsError::UnsupportedYear(year))
 }
 
 /// The bundled Schedule A PDF bytes for a supported tax year. Full-return v1 is TY2024-only.
 pub fn schedule_a_pdf(year: i32) -> Result<&'static [u8], FormsError> {
-    match year {
-        2024 => Ok(SCHEDULE_A_PDF_2024),
-        _ => Err(FormsError::UnsupportedYear(year)),
-    }
+    crate::bundled::template(crate::bundled::Stem::F1040sa, year)
+        .ok_or(FormsError::UnsupportedYear(year))
 }
 
 /// The bundled Form 8283 PDF bytes for a supported tax year (bound by filing-year → revision).
 pub fn f8283_pdf(year: i32) -> Result<&'static [u8], FormsError> {
-    match year {
-        2017 => Ok(F8283_PDF_2017),
-        2024 => Ok(F8283_PDF_2024),
-        2025 => Ok(F8283_PDF_2025),
-        _ => Err(FormsError::UnsupportedYear(year)),
-    }
+    crate::bundled::template(crate::bundled::Stem::F8283, year)
+        .ok_or(FormsError::UnsupportedYear(year))
 }
 
 /// The bundled Form 8275 PDF bytes for a supported tax year. ★ Form 8275 is REVISION-versioned, not
@@ -203,20 +105,17 @@ pub fn f8283_pdf(year: i32) -> Result<&'static [u8], FormsError> {
 /// bundles a distinct PDF per year. This is what lets a promoted 2025 (or 2017) disposal attach a real
 /// Form 8275 rather than being permanently refused for want of a "2025 revision" that does not exist.
 pub fn f8275_pdf(year: i32) -> Result<&'static [u8], FormsError> {
-    match year {
-        2017 | 2024 | 2025 => Ok(F8275_PDF_2024),
-        _ => Err(FormsError::UnsupportedYear(year)),
-    }
+    // Periodic (Rev. 10-2024): a year with no file of its own is served by the newest bundled
+    // revision, licensed by hash in `Form8275Map::alias_is_licensed_by` — never by a year list.
+    crate::bundled::periodic_template(crate::bundled::Stem::F8275, year)
+        .map(|(bytes, _)| bytes)
+        .ok_or(FormsError::UnsupportedYear(year))
 }
 
 /// The bundled Form 1040 PDF bytes for a supported tax year.
 pub fn f1040_pdf(year: i32) -> Result<&'static [u8], FormsError> {
-    match year {
-        2017 => Ok(F1040_PDF_2017),
-        2024 => Ok(F1040_PDF_2024),
-        2025 => Ok(F1040_PDF_2025),
-        _ => Err(FormsError::UnsupportedYear(year)),
-    }
+    crate::bundled::template(crate::bundled::Stem::F1040, year)
+        .ok_or(FormsError::UnsupportedYear(year))
 }
 
 /// One terminal (leaf) AcroForm field: its object id, fully-qualified name, widget rectangle, and
@@ -549,40 +448,4 @@ pub fn button_on_states(doc: &Document, id: ObjectId) -> Vec<String> {
     }
     out.sort();
     out
-}
-
-/// ★ Transitional witness for design r2 §10 step 2: every `include_bytes!` const the old arms read,
-/// as `(stem, year, bytes)`, so `bundled::tests::generated_bindings_agree_with_every_old_const` can
-/// hold the generated bindings to them byte-for-byte. Deleted with the consts at step 3.
-#[cfg(test)]
-pub mod testonly_old_consts {
-    pub const OLD_PDF_CONSTS: &[(&str, i32, &[u8])] = &[
-        ("f1040", 2017, super::F1040_PDF_2017),
-        ("f8283", 2017, super::F8283_PDF_2017),
-        ("f8949", 2017, super::F8949_PDF_2017),
-        ("schedule_d", 2017, super::SCHEDULE_D_PDF_2017),
-        ("schedule_se", 2017, super::SCHEDULE_SE_PDF_2017),
-        ("f1040", 2024, super::F1040_PDF_2024),
-        ("f1040s1", 2024, super::SCHEDULE_1_PDF_2024),
-        ("f1040s2", 2024, super::SCHEDULE_2_PDF_2024),
-        ("f1040s3", 2024, super::SCHEDULE_3_PDF_2024),
-        ("f1040sa", 2024, super::SCHEDULE_A_PDF_2024),
-        ("f1040sb", 2024, super::SCHEDULE_B_PDF_2024),
-        ("f1040sc", 2024, super::SCHEDULE_C_PDF_2024),
-        ("f6251", 2024, super::F6251_PDF_2024),
-        ("f8275", 2024, super::F8275_PDF_2024),
-        ("f8283", 2024, super::F8283_PDF_2024),
-        ("f8949", 2024, super::F8949_PDF_2024),
-        ("f8959", 2024, super::F8959_PDF_2024),
-        ("f8960", 2024, super::F8960_PDF_2024),
-        ("f8995", 2024, super::F8995_PDF_2024),
-        ("f8995a", 2024, super::F8995A_PDF_2024),
-        ("schedule_d", 2024, super::SCHEDULE_D_PDF_2024),
-        ("schedule_se", 2024, super::SCHEDULE_SE_PDF_2024),
-        ("f1040", 2025, super::F1040_PDF_2025),
-        ("f8283", 2025, super::F8283_PDF_2025),
-        ("f8949", 2025, super::F8949_PDF_2025),
-        ("schedule_d", 2025, super::SCHEDULE_D_PDF_2025),
-        ("schedule_se", 2025, super::SCHEDULE_SE_PDF_2025),
-    ];
 }

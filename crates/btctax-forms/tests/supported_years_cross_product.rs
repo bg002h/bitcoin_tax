@@ -63,7 +63,7 @@ use std::path::PathBuf;
 /// | obligation | what it means | who reads it |
 /// |---|---|---|
 /// | `map` | `forms/<y>/<stem>.map.toml` sits beside the PDF | every filler |
-/// | `wired` | both files are `include_bytes!`/`include_str!`'d into the crate | the build |
+/// | `wired` | the build script bound both files — `bundled::template` and `bundled::map_text` are `Some` (design r2 §5; before step 3 this was a grep of `src/` for the `include_*!` lines) | the build |
 /// | `dispatch` | the form's `Map::for_year(<y>)` returns `Ok` | every caller |
 /// | `note` | a committed `design/forms/<y>/…pdf.txt` whose `# sha256` IS this asset's | re-derivation |
 /// | `manifest` | that sha256 appears in `design/forms/MANIFEST.json` | the provenance record |
@@ -112,20 +112,22 @@ const KNOWN_GAPS: &[(i32, &str, &[&str])] = &[
     ),
     // ── TY2024 — the reference year; one asset stands outside the archive. ──────────────────────
     (2024, "f8283", &["note", "manifest", "extract", "geometry"]),
-    // ── TY2025 — ten forms committed but not wired, five wired but not censused. ────────────────
+    // ── TY2025 — ten forms bound by the build but not DISPATCHED (their line-set revision has no
+    //    struct yet — design r2 §10 step 5), five dispatched but not censused. "wired" left this
+    //    record at step 3: the glob binds every file, so it can no longer be missing. ────────────────
     (2025, "f1040", &["census"]),
-    (2025, "f1040s1a", &["wired", "dispatch"]),
-    (2025, "f1040s2", &["wired", "dispatch"]),
-    (2025, "f1040s3", &["wired", "dispatch"]),
-    (2025, "f1040sa", &["wired", "dispatch"]),
-    (2025, "f1040sb", &["wired", "dispatch"]),
-    (2025, "f1040sc", &["wired", "dispatch"]),
-    (2025, "f6251", &["wired", "dispatch"]),
+    (2025, "f1040s1a", &["dispatch"]),
+    (2025, "f1040s2", &["dispatch"]),
+    (2025, "f1040s3", &["dispatch"]),
+    (2025, "f1040sa", &["dispatch"]),
+    (2025, "f1040sb", &["dispatch"]),
+    (2025, "f1040sc", &["dispatch"]),
+    (2025, "f6251", &["dispatch"]),
     (2025, "f8283", &["census"]),
     (2025, "f8949", &["census"]),
-    (2025, "f8959", &["wired", "dispatch"]),
-    (2025, "f8960", &["wired", "dispatch"]),
-    (2025, "f8995", &["wired", "dispatch"]),
+    (2025, "f8959", &["dispatch"]),
+    (2025, "f8960", &["dispatch"]),
+    (2025, "f8995", &["dispatch"]),
     (2025, "schedule_d", &["census"]),
     (2025, "schedule_se", &["census"]),
 ];
@@ -295,21 +297,6 @@ fn manifest_text() -> String {
     text
 }
 
-/// Every `include_bytes!`/`include_str!` path under `src/`, as one blob to search.
-fn src_text() -> String {
-    let mut blob = String::new();
-    for entry in std::fs::read_dir(crate_root().join("src"))
-        .expect("src/ reads")
-        .filter_map(Result::ok)
-    {
-        if entry.path().extension().and_then(|e| e.to_str()) == Some("rs") {
-            blob.push_str(&std::fs::read_to_string(entry.path()).expect("source file reads"));
-        }
-    }
-    assert!(blob.contains("include_bytes!"), "no includes found in src/");
-    blob
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum CellState {
     /// No asset of its own, and the crate refuses the year. The honest fail-closed state.
@@ -324,7 +311,6 @@ enum CellState {
 fn measure() -> BTreeMap<(i32, String), CellState> {
     let notes = note_index();
     let manifest = manifest_text();
-    let src = src_text();
     let mut matrix = BTreeMap::new();
 
     for &year in SUPPORTED_YEARS {
@@ -350,12 +336,15 @@ fn measure() -> BTreeMap<(i32, String), CellState> {
 
             let mut have: BTreeMap<&'static str, bool> = BTreeMap::new();
             have.insert("map", map_toml.exists());
+            // ★ Since design r2 step 3 the binding IS the glob: a file on disk is bound by build.rs
+            //   or the build fails. `wired` is therefore measured from the generated bindings, and
+            //   the interesting obligation a bundled-but-unparsed map still lacks is `dispatch`.
             have.insert(
                 "wired",
-                src.contains(&format!("include_bytes!(\"../forms/{year}/{stem}.pdf\")"))
-                    && src.contains(&format!(
-                        "include_str!(\"../forms/{year}/{stem}.map.toml\")"
-                    )),
+                btctax_forms::bundled::Stem::from_file_stem(&stem).is_some_and(|st| {
+                    btctax_forms::bundled::template(st, year).is_some()
+                        && btctax_forms::bundled::map_text(st, year).is_some()
+                }),
             );
             have.insert("dispatch", dispatch);
             have.insert("note", archive_stem.is_some());

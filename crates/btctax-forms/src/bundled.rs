@@ -126,6 +126,48 @@ pub fn bundled_years() -> &'static [i32] {
     BUNDLED_YEARS
 }
 
+/// The bundled years as English for a refusal message — `"2017, 2024 and 2025"` — so no message
+/// ever carries a year literal again.
+pub fn years_sentence() -> String {
+    let ys: Vec<String> = BUNDLED_YEARS.iter().map(|y| y.to_string()).collect();
+    match ys.len() {
+        0 => "no tax year".to_string(),
+        1 => ys[0].clone(),
+        n => format!("{} and {}", ys[..n - 1].join(", "), ys[n - 1]),
+    }
+}
+
+/// ★ A PERIODIC form's template for a year that has no file of its own (design r2 §4 `versioning`).
+///
+/// An annual form exists per year or not at all. A periodic form (Form 8275 Rev. 10-2024, Form 8283
+/// Rev. 12-2025) is revised on its own calendar, and the IRS's instruction is to file the CURRENT
+/// revision — so a tax year with no `forms/<year>/<stem>.pdf` of its own is served by the **newest
+/// bundled revision**, and only when that file's own row says `versioning = { periodic = … }`. An
+/// annual form never aliases: `None`.
+///
+/// Returns the bytes and the year directory they came from, so the caller can license the alias by
+/// hash (`Form8275Map::alias_is_licensed_by`) and restamp the map's `year`.
+pub fn periodic_template(stem: Stem, year: i32) -> Option<(&'static [u8], i32)> {
+    if let Some(own) = template(stem, year) {
+        return Some((own, year));
+    }
+    // A tax year this build bundles nothing for is refused everywhere — a periodic alias serves the
+    // BUNDLED years that lack their own file, never a year outside the package.
+    if !BUNDLED_YEARS.contains(&year) {
+        return None;
+    }
+    let newest = BUNDLED
+        .iter()
+        .filter(|(s, _)| *s == stem)
+        .map(|(_, y)| *y)
+        .max()?;
+    let row = crate::map::MapRow::read(map_text(stem, newest)?).ok()?;
+    match row.versioning {
+        crate::map::Versioning::Periodic { .. } => Some((template(stem, newest)?, newest)),
+        crate::map::Versioning::Annual(_) => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,31 +275,5 @@ mod tests {
             Stem::ALL.len(),
             "two variants share a file stem"
         );
-    }
-
-    /// ★ Step 2's contract (design r2 §10): the generated bindings agree byte-for-byte with EVERY
-    /// existing `include_*!` const the old arms read. Transitional — deleted with the arms at step 3.
-    #[test]
-    fn generated_bindings_agree_with_every_old_const() {
-        use crate::map::testonly_old_consts::OLD_MAP_CONSTS;
-        use crate::pdf::testonly_old_consts::OLD_PDF_CONSTS;
-        assert_eq!(OLD_PDF_CONSTS.len(), 27);
-        assert_eq!(OLD_MAP_CONSTS.len(), 27);
-        for (stem_s, year, bytes) in OLD_PDF_CONSTS {
-            let stem = Stem::from_file_stem(stem_s).unwrap();
-            assert_eq!(
-                template(stem, *year),
-                Some(*bytes),
-                "PDF const {year}/{stem_s}"
-            );
-        }
-        for (stem_s, year, text) in OLD_MAP_CONSTS {
-            let stem = Stem::from_file_stem(stem_s).unwrap();
-            assert_eq!(
-                map_text(stem, *year),
-                Some(*text),
-                "MAP const {year}/{stem_s}"
-            );
-        }
     }
 }

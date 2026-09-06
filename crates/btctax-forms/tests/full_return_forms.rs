@@ -521,9 +521,12 @@ fn full_return_forms_refuse_unsupported_years() {
     )
     .unwrap();
     for year in [2017, 2023, 2025] {
+        // 2017 and 2023 bundle no Form 8995 at all (`UnsupportedYear`); 2025 bundles the map but its
+        // line-set revision has no struct yet (`UnwiredLineSet`, design r2 §10 step 3) — both are
+        // refusals, and the second names the more precise fact.
         assert!(matches!(
             btctax_forms::fill_form_8995(&l95, &kitchen_sink_header(), year),
-            Err(FormsError::UnsupportedYear(_))
+            Err(FormsError::UnsupportedYear(_) | FormsError::UnwiredLineSet { .. })
         ));
     }
 }

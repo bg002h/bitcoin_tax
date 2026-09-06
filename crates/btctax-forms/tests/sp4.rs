@@ -408,7 +408,7 @@ fn map_year_matches_bundled_pdf_fieldset_for_every_supported_year() {
     // ★ Each year against THAT YEAR'S OWN asset (`Form8275Map::bundled_pdf`), never against the 2024
     // literal. Form 8275 aliases one Rev. 10-2024 document to every supported year TODAY, so the two
     // spellings agree today — and they stop agreeing the moment a year bundles a different revision,
-    // which is precisely the case this test exists to see. Written against `F8275_PDF_2024` it could
+    // which is precisely the case this test exists to see. Written against `btctax_forms::bundled::template(btctax_forms::bundled::Stem::F8275, 2024).unwrap()` it could
     // not: it read as year-general and was a 2024 re-check wearing a loop.
     let mut checked = Vec::new();
     for &year in btctax_forms::SUPPORTED_YEARS {
@@ -438,7 +438,10 @@ fn map_year_matches_bundled_pdf_fieldset_for_every_supported_year() {
 #[test]
 fn the_fieldset_check_can_fail_when_the_pdf_is_not_this_form() {
     let map = Form8275Map::ty2024();
-    let absent = map_fields_absent_from(F8283_PDF_2024, &map);
+    let absent = map_fields_absent_from(
+        btctax_forms::bundled::template(btctax_forms::bundled::Stem::F8283, 2024).unwrap(),
+        &map,
+    );
     assert!(
         !absent.is_empty(),
         "the map-vs-PDF check found every Form 8275 field name inside Form 8283's AcroForm — it is \
@@ -824,12 +827,14 @@ fn fault_injected_8275_part_iv_reordered_fields_breaks_descent_and_is_red() {
 /// The nearest miss: the same document, one byte different — a stand-in for a new IRS revision, which
 /// is the event no test can wait for.
 fn one_byte_different_8275() -> Vec<u8> {
-    let mut v = F8275_PDF_2024.to_vec();
+    let mut v = btctax_forms::bundled::template(btctax_forms::bundled::Stem::F8275, 2024)
+        .unwrap()
+        .to_vec();
     let i = v.len() / 2;
     v[i] ^= 0xff;
     assert_ne!(
         v.as_slice(),
-        F8275_PDF_2024,
+        btctax_forms::bundled::template(btctax_forms::bundled::Stem::F8275, 2024).unwrap(),
         "the plant did not change the bytes"
     );
     v
@@ -839,12 +844,18 @@ fn one_byte_different_8275() -> Vec<u8> {
 fn the_8275_alias_is_licensed_by_the_asset_not_by_the_calendar() {
     // Positive control: the revision the map WAS transcribed from licenses the alias — for a year the
     // build has never heard of, because the licence is about the document, not the year.
-    Form8275Map::alias_is_licensed_by(2026, F8275_PDF_2024)
-        .expect("the Rev. 10-2024 asset must license the map that was transcribed from it");
+    Form8275Map::alias_is_licensed_by(
+        2026,
+        btctax_forms::bundled::template(btctax_forms::bundled::Stem::F8275, 2024).unwrap(),
+    )
+    .expect("the Rev. 10-2024 asset must license the map that was transcribed from it");
 
     // Planted defect 1 — a DIFFERENT IRS form in the 8275 slot.
-    let err = Form8275Map::alias_is_licensed_by(2026, F8283_PDF_2024)
-        .expect_err("a different document must NOT license the 8275 map");
+    let err = Form8275Map::alias_is_licensed_by(
+        2026,
+        btctax_forms::bundled::template(btctax_forms::bundled::Stem::F8283, 2024).unwrap(),
+    )
+    .expect_err("a different document must NOT license the 8275 map");
     let msg = err.to_string();
     assert!(
         matches!(err, FormsError::Structure(_)) && msg.contains("2026") && msg.contains("8275"),
@@ -905,15 +916,24 @@ fn for_year_answers_exactly_what_the_bundled_asset_registry_answers() {
 #[test]
 fn an_unknown_key_in_a_map_is_a_parse_error_not_a_silent_drop() {
     // Positive control — the committed map still parses.
-    Form8275Map::parse(F8275_MAP_2024).expect("the committed Rev. 10-2024 map parses");
+    Form8275Map::parse(
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8275, 2024).unwrap(),
+    )
+    .expect("the committed Rev. 10-2024 map parses");
 
     // Planted defect: a line ADDED under a name the struct does not model (the silent half of a
     // rename). Anchored after `year = 2024` so it lands at the top level, not inside a table.
-    let added = F8275_MAP_2024.replace(
-        "\nyear = 2024\n",
-        "\nyear = 2024\npart_ii_line7 = \"topmostSubform[0].Page1[0].p1-t86[0]\"\n",
+    let added = btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8275, 2024)
+        .unwrap()
+        .replace(
+            "\nyear = 2024\n",
+            "\nyear = 2024\npart_ii_line7 = \"topmostSubform[0].Page1[0].p1-t86[0]\"\n",
+        );
+    assert_ne!(
+        added,
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8275, 2024).unwrap(),
+        "the plant did not apply"
     );
-    assert_ne!(added, F8275_MAP_2024, "the plant did not apply");
     let msg = Form8275Map::parse(&added)
         .expect_err("an unmodelled key must be refused, not dropped")
         .to_string();
@@ -924,8 +944,14 @@ fn an_unknown_key_in_a_map_is_a_parse_error_not_a_silent_drop() {
 
     // Planted defect: the full rename shape — old key gone, new key present. The failure must name the
     // NEW key (the half that used to be invisible), not merely report the old one missing.
-    let renamed = F8275_MAP_2024.replace("\npart_ii_narrative =", "\npart_ii_line1 =");
-    assert_ne!(renamed, F8275_MAP_2024, "the rename plant did not apply");
+    let renamed = btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8275, 2024)
+        .unwrap()
+        .replace("\npart_ii_narrative =", "\npart_ii_line1 =");
+    assert_ne!(
+        renamed,
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8275, 2024).unwrap(),
+        "the rename plant did not apply"
+    );
     let msg = Form8275Map::parse(&renamed)
         .expect_err("a renamed line must be refused")
         .to_string();
@@ -940,7 +966,8 @@ fn the_census_block_is_parsed_not_ignored() {
     // `deny_unknown_fields` must not have been bought by teaching the struct to swallow `[census]`:
     // the block is modelled, so every entry is really deserialized. The expected count is DERIVED from
     // the committed file's own text (the `[census]` section's FQN-keyed lines), never hand-counted.
-    let in_census = F8275_MAP_2024
+    let in_census = btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8275, 2024)
+        .unwrap()
         .lines()
         .skip_while(|l| l.trim() != "[census]")
         .filter(|l| l.trim_start().starts_with('"'))
@@ -965,8 +992,14 @@ fn the_census_block_is_parsed_not_ignored() {
 
     // Planted defect: a fourth key inside a census entry — a decision the model does not understand
     // must be loud too, for the same reason a map line must.
-    let doctored = F8275_MAP_2024.replace("{ line = ", "{ evidence = \"see the PDF\", line = ");
-    assert_ne!(doctored, F8275_MAP_2024, "the census plant did not apply");
+    let doctored = btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8275, 2024)
+        .unwrap()
+        .replace("{ line = ", "{ evidence = \"see the PDF\", line = ");
+    assert_ne!(
+        doctored,
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8275, 2024).unwrap(),
+        "the census plant did not apply"
+    );
     let msg = Form8275Map::parse(&doctored)
         .expect_err("an unmodelled census key must be refused")
         .to_string();

@@ -57,10 +57,7 @@ use btctax_core::tax::testonly::{
     GoldenInputs,
 };
 use btctax_core::tax::FilingStatus;
-use btctax_forms::testonly::{
-    extract_lines, F1040_MAP_2024, F8959_MAP_2024, F8960_MAP_2024, F8995_MAP_2024,
-    SCHEDULE_A_MAP_2024, SCHEDULE_C_MAP_2024, SCHEDULE_SE_MAP_2024,
-};
+use btctax_forms::testonly::extract_lines;
 use std::collections::{BTreeMap, BTreeSet};
 
 // The `full_return`/`packet`/`form` builders and the §6.3 read-back (`on_paper_signed`/`cell_or_zero`)
@@ -272,13 +269,35 @@ fn diff_household(h: &GoldenHousehold, wrong: &mut Vec<String>) {
             })
         })
     };
-    let f1040 = read("f1040", F1040_MAP_2024).expect("every return has a 1040");
-    let sch_se = read("schedule_se", SCHEDULE_SE_MAP_2024);
-    let f8959 = read("f8959", F8959_MAP_2024);
-    let f8960 = read("f8960", F8960_MAP_2024);
-    let sch_a = read("f1040sa", SCHEDULE_A_MAP_2024);
-    let f8995 = read("f8995", F8995_MAP_2024);
-    let sch_c = read("f1040sc", SCHEDULE_C_MAP_2024);
+    let f1040 = read(
+        "f1040",
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, 2024).unwrap(),
+    )
+    .expect("every return has a 1040");
+    let sch_se = read(
+        "schedule_se",
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::ScheduleSe, 2024).unwrap(),
+    );
+    let f8959 = read(
+        "f8959",
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8959, 2024).unwrap(),
+    );
+    let f8960 = read(
+        "f8960",
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8960, 2024).unwrap(),
+    );
+    let sch_a = read(
+        "f1040sa",
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040sa, 2024).unwrap(),
+    );
+    let f8995 = read(
+        "f8995",
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8995, 2024).unwrap(),
+    );
+    let sch_c = read(
+        "f1040sc",
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040sc, 2024).unwrap(),
+    );
 
     // ── AGI L11 / taxable income L15 / QBI deduction L13 — held against BOTH oracles ─────────────────
     //
@@ -1235,19 +1254,58 @@ fn a_w2_only_household_gets_no_schedule_se_and_no_schedule_c() {
 fn assert_every_form_carries_the_filers_identity(households: &[GoldenHousehold]) {
     // The map key under which each form carries its identity block, and the map to read it with.
     let maps: BTreeMap<&str, &str> = BTreeMap::from([
-        ("f1040", F1040_MAP_2024),
-        ("f1040s1", btctax_forms::testonly::SCHEDULE_1_MAP_2024),
-        ("f1040s2", btctax_forms::testonly::SCHEDULE_2_MAP_2024),
-        ("f1040s3", btctax_forms::testonly::SCHEDULE_3_MAP_2024),
-        ("f1040sa", SCHEDULE_A_MAP_2024),
-        ("f1040sb", btctax_forms::testonly::SCHEDULE_B_MAP_2024),
-        ("f1040sc", SCHEDULE_C_MAP_2024),
-        ("schedule_d", btctax_forms::testonly::SCHEDULE_D_MAP_2024),
-        ("schedule_se", SCHEDULE_SE_MAP_2024),
-        ("f8959", F8959_MAP_2024),
-        ("f8960", btctax_forms::testonly::F8960_MAP_2024),
-        ("f8995", F8995_MAP_2024),
-        ("f8949", btctax_forms::testonly::F8949_MAP_2024),
+        (
+            "f1040",
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, 2024).unwrap(),
+        ),
+        (
+            "f1040s1",
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040s1, 2024).unwrap(),
+        ),
+        (
+            "f1040s2",
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040s2, 2024).unwrap(),
+        ),
+        (
+            "f1040s3",
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040s3, 2024).unwrap(),
+        ),
+        (
+            "f1040sa",
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040sa, 2024).unwrap(),
+        ),
+        (
+            "f1040sb",
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040sb, 2024).unwrap(),
+        ),
+        (
+            "f1040sc",
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040sc, 2024).unwrap(),
+        ),
+        (
+            "schedule_d",
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::ScheduleD, 2024).unwrap(),
+        ),
+        (
+            "schedule_se",
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::ScheduleSe, 2024).unwrap(),
+        ),
+        (
+            "f8959",
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8959, 2024).unwrap(),
+        ),
+        (
+            "f8960",
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8960, 2024).unwrap(),
+        ),
+        (
+            "f8995",
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8995, 2024).unwrap(),
+        ),
+        (
+            "f8949",
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8949, 2024).unwrap(),
+        ),
     ]);
 
     let mut naked: Vec<String> = Vec::new();
@@ -1383,7 +1441,11 @@ fn the_salt_cap_is_printed_onto_schedule_a() {
         .expect("the SALT-cap household is in the matrix");
 
     let pkt = packet(h);
-    let got = extract_lines(&form(&pkt, "f1040sa").bytes, SCHEDULE_A_MAP_2024).unwrap();
+    let got = extract_lines(
+        &form(&pkt, "f1040sa").bytes,
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040sa, 2024).unwrap(),
+    )
+    .unwrap();
 
     let cell = |k: &str| got.get(k).map(String::as_str).unwrap_or("<BLANK>");
 
@@ -1574,7 +1636,11 @@ fn readback_reads_the_pdf_not_the_struct() {
 
     // CONTROL — with the HONEST map the on-paper L16 matches the oracle (a clean witness). This is what
     // makes the injection meaningful: only a real PDF read can tell the two maps apart.
-    let honest = extract_lines(bytes, F1040_MAP_2024).expect("the filled 1040 must transcribe");
+    let honest = extract_lines(
+        bytes,
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, 2024).unwrap(),
+    )
+    .expect("the filled 1040 must transcribe");
     let honest_l16 = paper_money(&honest, "line16");
     assert_eq!(
         honest_l16, oracle_l16,
@@ -1585,9 +1651,12 @@ fn readback_reads_the_pdf_not_the_struct() {
     // `line16` key now resolves (through `extract_lines`) to line 15's PRINTED value on the SAME bytes.
     let l16_field = "topmostSubform[0].Page2[0].f2_02[0]"; // 1040 line 16 widget
     let l15_field = "topmostSubform[0].Page1[0].f1_60[0]"; // 1040 line 15 widget
-    let swapped_map = F1040_MAP_2024.replace(l16_field, l15_field);
+    let swapped_map = btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, 2024)
+        .unwrap()
+        .replace(l16_field, l15_field);
     assert_ne!(
-        swapped_map, F1040_MAP_2024,
+        swapped_map,
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, 2024).unwrap(),
         "the swap must actually rewrite the map — else the L16 field name drifted"
     );
     let injected =

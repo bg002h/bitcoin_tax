@@ -31,6 +31,7 @@ mod form8959;
 mod form8960;
 mod form8995;
 mod form8995a;
+pub mod line_set;
 mod map;
 mod overflow;
 mod packet;
@@ -85,7 +86,7 @@ use time::macros::format_description;
 /// - **Adding a year here is not the last edit.** The list is one of four year-sets that govern four
 ///   entry points (`BundledTaxTables`, this constant, the maps on disk, `full_return_for`), and the
 ///   only one whose refusal message repeats it in prose.
-pub const SUPPORTED_YEARS: &[i32] = &[2017, 2024, 2025];
+pub const SUPPORTED_YEARS: &[i32] = bundled::BUNDLED_YEARS; // ★ DERIVED from the glob by build.rs (design r2 §10 step 3) — the name stays for its ~20 readers, the hand-list is gone
 
 /// Format a date as **MM/DD/YYYY** — Form 8949's native date format for columns (b)/(c).
 pub(crate) fn fmt_date(d: TaxDate) -> Result<String, FormsError> {
@@ -474,18 +475,9 @@ pub mod testonly {
         MoneyPair, PartMap, Schedule1Map, Schedule2Map, Schedule3Map, ScheduleAMap, ScheduleBMap,
         ScheduleCMap, ScheduleDMap, ScheduleSeMap,
     };
-    pub use crate::map::{
-        F1040_MAP_2024, F6251_MAP_2024, F8275_MAP_2024, F8283_MAP_2024, F8949_MAP_2024,
-        F8959_MAP_2024, F8960_MAP_2024, F8995_MAP_2024, SCHEDULE_1_MAP_2024, SCHEDULE_2_MAP_2024,
-        SCHEDULE_3_MAP_2024, SCHEDULE_A_MAP_2024, SCHEDULE_B_MAP_2024, SCHEDULE_C_MAP_2024,
-        SCHEDULE_D_MAP_2024, SCHEDULE_SE_MAP_2024,
-    };
     pub use crate::pdf::{
         button_on_states, checkbox_on, collect_fields, f6251_pdf, f8995a_pdf, index, load,
-        text_value, Field, F1040_PDF_2017, F1040_PDF_2024, F1040_PDF_2025, F8275_PDF_2024,
-        F8283_PDF_2017, F8283_PDF_2024, F8283_PDF_2025, F8949_PDF_2017, F8949_PDF_2024,
-        F8949_PDF_2025, F8959_PDF_2024, SCHEDULE_D_PDF_2017, SCHEDULE_D_PDF_2024,
-        SCHEDULE_D_PDF_2025, SCHEDULE_SE_PDF_2017, SCHEDULE_SE_PDF_2024, SCHEDULE_SE_PDF_2025,
+        text_value, Field,
     };
     pub use crate::schedule23::{
         fill_schedule_1_with_map, fill_schedule_2_with_map, fill_schedule_3_with_map,

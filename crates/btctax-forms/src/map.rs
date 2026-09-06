@@ -58,66 +58,6 @@ pub struct CensusDecision {
     pub reason: String,
 }
 
-/// The TY2025 Form 8949 map (embedded at compile time).
-pub const F8949_MAP_2025: &str = include_str!("../forms/2025/f8949.map.toml");
-/// The TY2025 Schedule D map (embedded at compile time).
-pub const SCHEDULE_D_MAP_2025: &str = include_str!("../forms/2025/schedule_d.map.toml");
-/// The TY2025 Schedule SE map (embedded at compile time).
-pub const SCHEDULE_SE_MAP_2025: &str = include_str!("../forms/2025/schedule_se.map.toml");
-/// The TY2025 Form 8283 map (embedded at compile time).
-pub const F8283_MAP_2025: &str = include_str!("../forms/2025/f8283.map.toml");
-/// The TY2025 Form 1040 map (embedded at compile time).
-pub const F1040_MAP_2025: &str = include_str!("../forms/2025/f1040.map.toml");
-
-/// The TY2024 Form 8949 map (embedded at compile time).
-pub const F8949_MAP_2024: &str = include_str!("../forms/2024/f8949.map.toml");
-/// The TY2024 Schedule D map (embedded at compile time).
-pub const SCHEDULE_D_MAP_2024: &str = include_str!("../forms/2024/schedule_d.map.toml");
-/// The TY2024 Schedule SE map (embedded at compile time).
-pub const SCHEDULE_SE_MAP_2024: &str = include_str!("../forms/2024/schedule_se.map.toml");
-/// The TY2024 Form 8283 map (Rev. 12-2023, embedded at compile time).
-pub const F8283_MAP_2024: &str = include_str!("../forms/2024/f8283.map.toml");
-/// The Form 8275 map (Rev. 10-2024, embedded at compile time). ★ Form 8275 is REVISION-versioned, not
-/// tax-year-versioned: this ONE map + its bundled PDF are aliased to EVERY `SUPPORTED_YEAR` — there is
-/// no `F8275_MAP_2017` / `F8275_MAP_2025` (`Form8275Map::for_year` reuses this same parsed map,
-/// re-stamping only the `year` field).
-pub const F8275_MAP_2024: &str = include_str!("../forms/2024/f8275.map.toml");
-/// The TY2024 Form 1040 map (embedded at compile time).
-pub const F1040_MAP_2024: &str = include_str!("../forms/2024/f1040.map.toml");
-/// The TY2024 Form 8959 (Additional Medicare Tax) map (embedded at compile time).
-pub const F8959_MAP_2024: &str = include_str!("../forms/2024/f8959.map.toml");
-/// The TY2024 Form 8960 (Net Investment Income Tax) map (embedded at compile time).
-pub const F8960_MAP_2024: &str = include_str!("../forms/2024/f8960.map.toml");
-/// The TY2024 Form 8995 (QBI deduction, simplified) map (embedded at compile time).
-pub const F8995_MAP_2024: &str = include_str!("../forms/2024/f8995.map.toml");
-/// Form 8995-A (§G-28/B1a) — Part IV only; see the map's own header for why.
-pub const F8995A_MAP_2024: &str = include_str!("../forms/2024/f8995a.map.toml");
-/// §G-6 — the bundled TY2024 Form 6251 map.
-pub const F6251_MAP_2024: &str = include_str!("../forms/2024/f6251.map.toml");
-/// The TY2024 Schedule 2 (Additional Taxes) map (embedded at compile time).
-pub const SCHEDULE_2_MAP_2024: &str = include_str!("../forms/2024/f1040s2.map.toml");
-/// The TY2024 Schedule 3 (Additional Credits and Payments) map (embedded at compile time).
-pub const SCHEDULE_3_MAP_2024: &str = include_str!("../forms/2024/f1040s3.map.toml");
-/// The TY2024 Schedule A (Itemized Deductions) map (embedded at compile time).
-pub const SCHEDULE_A_MAP_2024: &str = include_str!("../forms/2024/f1040sa.map.toml");
-/// The TY2024 Schedule 1 (Additional Income and Adjustments) map (embedded at compile time).
-pub const SCHEDULE_1_MAP_2024: &str = include_str!("../forms/2024/f1040s1.map.toml");
-/// The TY2024 Schedule C (Profit or Loss From Business) map (embedded at compile time).
-pub const SCHEDULE_C_MAP_2024: &str = include_str!("../forms/2024/f1040sc.map.toml");
-/// The TY2024 Schedule B (Interest and Ordinary Dividends) map (embedded at compile time).
-pub const SCHEDULE_B_MAP_2024: &str = include_str!("../forms/2024/f1040sb.map.toml");
-
-/// The TY2017 Form 8949 map (embedded at compile time).
-pub const F8949_MAP_2017: &str = include_str!("../forms/2017/f8949.map.toml");
-/// The TY2017 Schedule D map (embedded at compile time).
-pub const SCHEDULE_D_MAP_2017: &str = include_str!("../forms/2017/schedule_d.map.toml");
-/// The TY2017 Schedule SE map (OLD short+long form; btctax fills §B long — embedded at compile time).
-pub const SCHEDULE_SE_MAP_2017: &str = include_str!("../forms/2017/schedule_se.map.toml");
-/// The TY2017 Form 8283 map (Rev. 12-2014, "j Other" — embedded at compile time).
-pub const F8283_MAP_2017: &str = include_str!("../forms/2017/f8283.map.toml");
-/// The TY2017 Form 1040 map (line 13, no DA question — embedded at compile time).
-pub const F1040_MAP_2017: &str = include_str!("../forms/2017/f1040.map.toml");
-
 /// The 4 monetary "amount" columns of a Form 8949 / Schedule D totals row: (d) proceeds, (e) cost,
 /// (g) adjustment, (h) gain. Column (f) — the code column — has no total (a spacer), so it is absent.
 #[derive(Debug, Clone, Deserialize)]
@@ -316,7 +256,7 @@ pub struct Form6251Map {
 impl Form6251Map {
     /// The bundled TY2024 map.
     pub fn ty2024() -> Self {
-        Self::parse(F6251_MAP_2024).expect("bundled f6251 2024 map parses")
+        Self::for_year(2024).expect("the bundled TY2024 map is wired and parses")
     }
 
     /// ★★★ Select the map by YEAR, refusing a year this build has no map for.
@@ -333,10 +273,38 @@ impl Form6251Map {
     /// ★ TY2025's map file is committed and field-verified but deliberately NOT wired here — its
     /// 1a/1b split needs `Form6251Map` and the fill logic to change together, which is a build task
     /// and not a review fold. Until then 2025 refuses, which is the honest state.
+    /// The map for a tax year — design r2 §10 step 3: the file comes from the glob
+    /// (`bundled::map_text`), the revision from its ROW, and the ONE exhaustive
+    /// `line_set → schema` match (`line_set::schema`) decides whether THIS struct parses it.
     pub fn for_year(year: i32) -> Result<Self, crate::FormsError> {
-        match year {
-            2024 => Ok(Self::ty2024()),
-            other => Err(crate::FormsError::UnsupportedYear(other)),
+        let text = crate::bundled::map_text(crate::bundled::Stem::F6251, year)
+            .ok_or(crate::FormsError::UnsupportedYear(year))?;
+        let row = MapRow::read(text).map_err(|e| {
+            crate::FormsError::Structure(format!(
+                "F6251 TY{year}: the map's row does not parse: {e}"
+            ))
+        })?;
+        let ls = crate::line_set::LineSet::parse(&row.line_set).ok_or_else(|| {
+            crate::FormsError::Structure(format!(
+                "F6251 TY{year}: line_set {:?} is not a revision this build knows",
+                row.line_set
+            ))
+        })?;
+        match crate::line_set::schema(ls) {
+            crate::line_set::Schema::Form6251Map => Self::parse(text).map_err(|e| {
+                crate::FormsError::Structure(format!(
+                    "F6251 TY{year}: the bundled map does not parse: {e}"
+                ))
+            }),
+            crate::line_set::Schema::Unwired => Err(crate::FormsError::UnwiredLineSet {
+                stem: "F6251",
+                year,
+                line_set: ls.as_str(),
+            }),
+            other => Err(crate::FormsError::Structure(format!(
+                "F6251 TY{year}: line_set {} parses into {other:?}, not Form6251Map",
+                ls.as_str()
+            ))),
         }
     }
     fn parse(s: &str) -> Result<Self, toml::de::Error> {
@@ -555,26 +523,50 @@ impl Form8949Map {
 
     /// The TY2025 map.
     pub fn ty2025() -> Self {
-        Self::parse(F8949_MAP_2025).expect("bundled f8949 2025 map parses")
+        Self::for_year(2025).expect("the bundled TY2025 map is wired and parses")
     }
 
     /// The TY2024 map.
     pub fn ty2024() -> Self {
-        Self::parse(F8949_MAP_2024).expect("bundled f8949 2024 map parses")
+        Self::for_year(2024).expect("the bundled TY2024 map is wired and parses")
     }
 
     /// The TY2017 map (pre-1099-DA: Box C/F, `/3`; field-identical grid to 2024).
     pub fn ty2017() -> Self {
-        Self::parse(F8949_MAP_2017).expect("bundled f8949 2017 map parses")
+        Self::for_year(2017).expect("the bundled TY2017 map is wired and parses")
     }
 
     /// The map for a supported tax year.
+    /// The map for a tax year — design r2 §10 step 3: the file comes from the glob
+    /// (`bundled::map_text`), the revision from its ROW, and the ONE exhaustive
+    /// `line_set → schema` match (`line_set::schema`) decides whether THIS struct parses it.
     pub fn for_year(year: i32) -> Result<Self, FormsError> {
-        match year {
-            2017 => Ok(Self::ty2017()),
-            2024 => Ok(Self::ty2024()),
-            2025 => Ok(Self::ty2025()),
-            _ => Err(FormsError::UnsupportedYear(year)),
+        let text = crate::bundled::map_text(crate::bundled::Stem::F8949, year)
+            .ok_or(FormsError::UnsupportedYear(year))?;
+        let row = MapRow::read(text).map_err(|e| {
+            FormsError::Structure(format!("F8949 TY{year}: the map's row does not parse: {e}"))
+        })?;
+        let ls = crate::line_set::LineSet::parse(&row.line_set).ok_or_else(|| {
+            FormsError::Structure(format!(
+                "F8949 TY{year}: line_set {:?} is not a revision this build knows",
+                row.line_set
+            ))
+        })?;
+        match crate::line_set::schema(ls) {
+            crate::line_set::Schema::Form8949Map => Self::parse(text).map_err(|e| {
+                FormsError::Structure(format!(
+                    "F8949 TY{year}: the bundled map does not parse: {e}"
+                ))
+            }),
+            crate::line_set::Schema::Unwired => Err(FormsError::UnwiredLineSet {
+                stem: "F8949",
+                year,
+                line_set: ls.as_str(),
+            }),
+            other => Err(FormsError::Structure(format!(
+                "F8949 TY{year}: line_set {} parses into {other:?}, not Form8949Map",
+                ls.as_str()
+            ))),
         }
     }
 
@@ -923,26 +915,50 @@ impl Form1040Map {
 
     /// The TY2025 map.
     pub fn ty2025() -> Self {
-        Self::parse(F1040_MAP_2025).expect("bundled f1040 2025 map parses")
+        Self::for_year(2025).expect("the bundled TY2025 map is wired and parses")
     }
 
     /// The TY2024 map.
     pub fn ty2024() -> Self {
-        Self::parse(F1040_MAP_2024).expect("bundled f1040 2024 map parses")
+        Self::for_year(2024).expect("the bundled TY2024 map is wired and parses")
     }
 
     /// The TY2017 map (capital gain on line 13; NO Digital-Asset question).
     pub fn ty2017() -> Self {
-        Self::parse(F1040_MAP_2017).expect("bundled f1040 2017 map parses")
+        Self::for_year(2017).expect("the bundled TY2017 map is wired and parses")
     }
 
     /// The map for a supported tax year.
+    /// The map for a tax year — design r2 §10 step 3: the file comes from the glob
+    /// (`bundled::map_text`), the revision from its ROW, and the ONE exhaustive
+    /// `line_set → schema` match (`line_set::schema`) decides whether THIS struct parses it.
     pub fn for_year(year: i32) -> Result<Self, FormsError> {
-        match year {
-            2017 => Ok(Self::ty2017()),
-            2024 => Ok(Self::ty2024()),
-            2025 => Ok(Self::ty2025()),
-            _ => Err(FormsError::UnsupportedYear(year)),
+        let text = crate::bundled::map_text(crate::bundled::Stem::F1040, year)
+            .ok_or(FormsError::UnsupportedYear(year))?;
+        let row = MapRow::read(text).map_err(|e| {
+            FormsError::Structure(format!("F1040 TY{year}: the map's row does not parse: {e}"))
+        })?;
+        let ls = crate::line_set::LineSet::parse(&row.line_set).ok_or_else(|| {
+            FormsError::Structure(format!(
+                "F1040 TY{year}: line_set {:?} is not a revision this build knows",
+                row.line_set
+            ))
+        })?;
+        match crate::line_set::schema(ls) {
+            crate::line_set::Schema::Form1040Map => Self::parse(text).map_err(|e| {
+                FormsError::Structure(format!(
+                    "F1040 TY{year}: the bundled map does not parse: {e}"
+                ))
+            }),
+            crate::line_set::Schema::Unwired => Err(FormsError::UnwiredLineSet {
+                stem: "F1040",
+                year,
+                line_set: ls.as_str(),
+            }),
+            other => Err(FormsError::Structure(format!(
+                "F1040 TY{year}: line_set {} parses into {other:?}, not Form1040Map",
+                ls.as_str()
+            ))),
         }
     }
 }
@@ -1122,26 +1138,50 @@ impl Form8283Map {
 
     /// The TY2025 map.
     pub fn ty2025() -> Self {
-        Self::parse(F8283_MAP_2025).expect("bundled f8283 2025 map parses")
+        Self::for_year(2025).expect("the bundled TY2025 map is wired and parses")
     }
 
     /// The TY2024 map (Form 8283 Rev. 12-2023).
     pub fn ty2024() -> Self {
-        Self::parse(F8283_MAP_2024).expect("bundled f8283 2024 map parses")
+        Self::for_year(2024).expect("the bundled TY2024 map is wired and parses")
     }
 
     /// The TY2017 map (Form 8283 Rev. 12-2014 — "j Other", no DA box, 5/4 rows, ¢-pairs).
     pub fn ty2017() -> Self {
-        Self::parse(F8283_MAP_2017).expect("bundled f8283 2017 map parses")
+        Self::for_year(2017).expect("the bundled TY2017 map is wired and parses")
     }
 
     /// The map for a supported tax year.
+    /// The map for a tax year — design r2 §10 step 3: the file comes from the glob
+    /// (`bundled::map_text`), the revision from its ROW, and the ONE exhaustive
+    /// `line_set → schema` match (`line_set::schema`) decides whether THIS struct parses it.
     pub fn for_year(year: i32) -> Result<Self, FormsError> {
-        match year {
-            2017 => Ok(Self::ty2017()),
-            2024 => Ok(Self::ty2024()),
-            2025 => Ok(Self::ty2025()),
-            _ => Err(FormsError::UnsupportedYear(year)),
+        let text = crate::bundled::map_text(crate::bundled::Stem::F8283, year)
+            .ok_or(FormsError::UnsupportedYear(year))?;
+        let row = MapRow::read(text).map_err(|e| {
+            FormsError::Structure(format!("F8283 TY{year}: the map's row does not parse: {e}"))
+        })?;
+        let ls = crate::line_set::LineSet::parse(&row.line_set).ok_or_else(|| {
+            FormsError::Structure(format!(
+                "F8283 TY{year}: line_set {:?} is not a revision this build knows",
+                row.line_set
+            ))
+        })?;
+        match crate::line_set::schema(ls) {
+            crate::line_set::Schema::Form8283Map => Self::parse(text).map_err(|e| {
+                FormsError::Structure(format!(
+                    "F8283 TY{year}: the bundled map does not parse: {e}"
+                ))
+            }),
+            crate::line_set::Schema::Unwired => Err(FormsError::UnwiredLineSet {
+                stem: "F8283",
+                year,
+                line_set: ls.as_str(),
+            }),
+            other => Err(FormsError::Structure(format!(
+                "F8283 TY{year}: line_set {} parses into {other:?}, not Form8283Map",
+                ls.as_str()
+            ))),
         }
     }
 
@@ -1209,7 +1249,9 @@ pub struct Form8275Row {
 }
 
 /// The Form 8275 (Disclosure Statement, Rev. 10-2024) field map. **One revision, aliased to every
-/// `SUPPORTED_YEAR`** — see [`F8275_MAP_2024`].
+/// bundled year** that has no `forms/<year>/f8275.*` of its own — `versioning = { periodic = "Rev.
+/// 10-2024" }` in the row; the alias is licensed BY HASH in [`Form8275Map::alias_is_licensed_by`] and
+/// served by `bundled::periodic_template` (design r2 §4).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Form8275Map {
@@ -1283,7 +1325,7 @@ impl Form8275Map {
 
     /// The bundled Rev. 10-2024 map, as committed (`year` field reads 2024).
     pub fn ty2024() -> Self {
-        Self::parse(F8275_MAP_2024).expect("bundled f8275 map parses")
+        Self::for_year(2024).expect("the bundled TY2024 map is wired and parses")
     }
 
     /// The bundled Form 8275 asset for `year` — the ONE authority for "does this build ship a Form
@@ -1313,7 +1355,9 @@ impl Form8275Map {
     /// needed to plant the defect this exists to catch (see `sp4.rs`,
     /// `alias_refuses_a_year_whose_bundled_8275_is_a_different_document`).
     pub fn alias_is_licensed_by(year: i32, bundled: &[u8]) -> Result<(), FormsError> {
-        if bundled == crate::pdf::F8275_PDF_2024 {
+        let rev_10_2024 = crate::bundled::template(crate::bundled::Stem::F8275, 2024)
+            .expect("the Rev. 10-2024 Form 8275 is bundled");
+        if bundled == rev_10_2024 {
             return Ok(());
         }
         Err(FormsError::Structure(format!(
@@ -1322,7 +1366,7 @@ impl Form8275Map {
              be aliased to TY{year}: transcribe `forms/{year}/f8275.map.toml` against the revision \
              this build actually ships for TY{year}",
             bundled.len(),
-            crate::pdf::F8275_PDF_2024.len(),
+            rev_10_2024.len(),
         )))
     }
 
@@ -1334,10 +1378,21 @@ impl Form8275Map {
     /// ([`Self::bundled_pdf`]) and the revision question of the bytes it returns
     /// ([`Self::alias_is_licensed_by`]) — so the two answers cannot drift apart, and neither can be
     /// widened from inside this file.
+    /// Periodic (design r2 §4 `versioning`): a year with no `forms/<year>/f8275.*` of its own is
+    /// served by the newest bundled revision — `bundled::periodic_template` finds it and its year,
+    /// the alias is licensed BY HASH, and the map is that year's map with `year` restamped.
     pub fn for_year(year: i32) -> Result<Self, FormsError> {
-        let bundled = Self::bundled_pdf(year)?;
+        let (bundled, from_year) =
+            crate::bundled::periodic_template(crate::bundled::Stem::F8275, year)
+                .ok_or(FormsError::UnsupportedYear(year))?;
         Self::alias_is_licensed_by(year, bundled)?;
-        let mut m = Self::ty2024();
+        let text = crate::bundled::map_text(crate::bundled::Stem::F8275, from_year)
+            .ok_or(FormsError::UnsupportedYear(year))?;
+        let mut m = Self::parse(text).map_err(|e| {
+            FormsError::Structure(format!(
+                "f8275 TY{from_year}: the bundled map does not parse: {e}"
+            ))
+        })?;
         m.year = year;
         Ok(m)
     }
@@ -1490,26 +1545,52 @@ impl ScheduleDMap {
 
     /// The TY2025 map.
     pub fn ty2025() -> Self {
-        Self::parse(SCHEDULE_D_MAP_2025).expect("bundled schedule_d 2025 map parses")
+        Self::for_year(2025).expect("the bundled TY2025 map is wired and parses")
     }
 
     /// The TY2024 map.
     pub fn ty2024() -> Self {
-        Self::parse(SCHEDULE_D_MAP_2024).expect("bundled schedule_d 2024 map parses")
+        Self::for_year(2024).expect("the bundled TY2024 map is wired and parses")
     }
 
     /// The TY2017 map (grid token `TablePartI`; NO QOF question).
     pub fn ty2017() -> Self {
-        Self::parse(SCHEDULE_D_MAP_2017).expect("bundled schedule_d 2017 map parses")
+        Self::for_year(2017).expect("the bundled TY2017 map is wired and parses")
     }
 
     /// The map for a supported tax year.
+    /// The map for a tax year — design r2 §10 step 3: the file comes from the glob
+    /// (`bundled::map_text`), the revision from its ROW, and the ONE exhaustive
+    /// `line_set → schema` match (`line_set::schema`) decides whether THIS struct parses it.
     pub fn for_year(year: i32) -> Result<Self, FormsError> {
-        match year {
-            2017 => Ok(Self::ty2017()),
-            2024 => Ok(Self::ty2024()),
-            2025 => Ok(Self::ty2025()),
-            _ => Err(FormsError::UnsupportedYear(year)),
+        let text = crate::bundled::map_text(crate::bundled::Stem::ScheduleD, year)
+            .ok_or(FormsError::UnsupportedYear(year))?;
+        let row = MapRow::read(text).map_err(|e| {
+            FormsError::Structure(format!(
+                "ScheduleD TY{year}: the map's row does not parse: {e}"
+            ))
+        })?;
+        let ls = crate::line_set::LineSet::parse(&row.line_set).ok_or_else(|| {
+            FormsError::Structure(format!(
+                "ScheduleD TY{year}: line_set {:?} is not a revision this build knows",
+                row.line_set
+            ))
+        })?;
+        match crate::line_set::schema(ls) {
+            crate::line_set::Schema::ScheduleDMap => Self::parse(text).map_err(|e| {
+                FormsError::Structure(format!(
+                    "ScheduleD TY{year}: the bundled map does not parse: {e}"
+                ))
+            }),
+            crate::line_set::Schema::Unwired => Err(FormsError::UnwiredLineSet {
+                stem: "ScheduleD",
+                year,
+                line_set: ls.as_str(),
+            }),
+            other => Err(FormsError::Structure(format!(
+                "ScheduleD TY{year}: line_set {} parses into {other:?}, not ScheduleDMap",
+                ls.as_str()
+            ))),
         }
     }
 }
@@ -1601,15 +1682,41 @@ impl Form8959Map {
 
     /// The TY2024 map.
     pub fn ty2024() -> Self {
-        Self::parse(F8959_MAP_2024).expect("bundled f8959 2024 map parses")
+        Self::for_year(2024).expect("the bundled TY2024 map is wired and parses")
     }
 
     /// The map for a supported tax year. Full-return v1 is **TY2024-only**: Form 8959 is reachable
     /// only from the absolute return, which itself has tables for 2024 alone.
+    /// The map for a tax year — design r2 §10 step 3: the file comes from the glob
+    /// (`bundled::map_text`), the revision from its ROW, and the ONE exhaustive
+    /// `line_set → schema` match (`line_set::schema`) decides whether THIS struct parses it.
     pub fn for_year(year: i32) -> Result<Self, FormsError> {
-        match year {
-            2024 => Ok(Self::ty2024()),
-            _ => Err(FormsError::UnsupportedYear(year)),
+        let text = crate::bundled::map_text(crate::bundled::Stem::F8959, year)
+            .ok_or(FormsError::UnsupportedYear(year))?;
+        let row = MapRow::read(text).map_err(|e| {
+            FormsError::Structure(format!("F8959 TY{year}: the map's row does not parse: {e}"))
+        })?;
+        let ls = crate::line_set::LineSet::parse(&row.line_set).ok_or_else(|| {
+            FormsError::Structure(format!(
+                "F8959 TY{year}: line_set {:?} is not a revision this build knows",
+                row.line_set
+            ))
+        })?;
+        match crate::line_set::schema(ls) {
+            crate::line_set::Schema::Form8959Map => Self::parse(text).map_err(|e| {
+                FormsError::Structure(format!(
+                    "F8959 TY{year}: the bundled map does not parse: {e}"
+                ))
+            }),
+            crate::line_set::Schema::Unwired => Err(FormsError::UnwiredLineSet {
+                stem: "F8959",
+                year,
+                line_set: ls.as_str(),
+            }),
+            other => Err(FormsError::Structure(format!(
+                "F8959 TY{year}: line_set {} parses into {other:?}, not Form8959Map",
+                ls.as_str()
+            ))),
         }
     }
 
@@ -1721,13 +1828,39 @@ impl Form8960Map {
     }
     /// The TY2024 map.
     pub fn ty2024() -> Self {
-        Self::parse(F8960_MAP_2024).expect("bundled f8960 2024 map parses")
+        Self::for_year(2024).expect("the bundled TY2024 map is wired and parses")
     }
     /// The map for a supported tax year. Full-return v1 is TY2024-only.
+    /// The map for a tax year — design r2 §10 step 3: the file comes from the glob
+    /// (`bundled::map_text`), the revision from its ROW, and the ONE exhaustive
+    /// `line_set → schema` match (`line_set::schema`) decides whether THIS struct parses it.
     pub fn for_year(year: i32) -> Result<Self, FormsError> {
-        match year {
-            2024 => Ok(Self::ty2024()),
-            _ => Err(FormsError::UnsupportedYear(year)),
+        let text = crate::bundled::map_text(crate::bundled::Stem::F8960, year)
+            .ok_or(FormsError::UnsupportedYear(year))?;
+        let row = MapRow::read(text).map_err(|e| {
+            FormsError::Structure(format!("F8960 TY{year}: the map's row does not parse: {e}"))
+        })?;
+        let ls = crate::line_set::LineSet::parse(&row.line_set).ok_or_else(|| {
+            FormsError::Structure(format!(
+                "F8960 TY{year}: line_set {:?} is not a revision this build knows",
+                row.line_set
+            ))
+        })?;
+        match crate::line_set::schema(ls) {
+            crate::line_set::Schema::Form8960Map => Self::parse(text).map_err(|e| {
+                FormsError::Structure(format!(
+                    "F8960 TY{year}: the bundled map does not parse: {e}"
+                ))
+            }),
+            crate::line_set::Schema::Unwired => Err(FormsError::UnwiredLineSet {
+                stem: "F8960",
+                year,
+                line_set: ls.as_str(),
+            }),
+            other => Err(FormsError::Structure(format!(
+                "F8960 TY{year}: line_set {} parses into {other:?}, not Form8960Map",
+                ls.as_str()
+            ))),
         }
     }
     /// The 15 fillable cells in printed reading order (strictly descending y on page 1). ★ 9b is
@@ -1894,16 +2027,44 @@ pub struct Form8995APartIiiCells {
 impl Form8995AMap {
     /// ★ Year dispatch, for the same reason as [`Form6251Map::for_year`] — `packet.rs` hardcoded
     /// `ty2024()` here too, with `year` in scope. Fails closed on an unmapped year.
+    /// The map for a tax year — design r2 §10 step 3: the file comes from the glob
+    /// (`bundled::map_text`), the revision from its ROW, and the ONE exhaustive
+    /// `line_set → schema` match (`line_set::schema`) decides whether THIS struct parses it.
     pub fn for_year(year: i32) -> Result<Self, crate::FormsError> {
-        match year {
-            2024 => Ok(Self::ty2024()),
-            other => Err(crate::FormsError::UnsupportedYear(other)),
+        let text = crate::bundled::map_text(crate::bundled::Stem::F8995a, year)
+            .ok_or(crate::FormsError::UnsupportedYear(year))?;
+        let row = MapRow::read(text).map_err(|e| {
+            crate::FormsError::Structure(format!(
+                "F8995a TY{year}: the map's row does not parse: {e}"
+            ))
+        })?;
+        let ls = crate::line_set::LineSet::parse(&row.line_set).ok_or_else(|| {
+            crate::FormsError::Structure(format!(
+                "F8995a TY{year}: line_set {:?} is not a revision this build knows",
+                row.line_set
+            ))
+        })?;
+        match crate::line_set::schema(ls) {
+            crate::line_set::Schema::Form8995AMap => Self::parse(text).map_err(|e| {
+                crate::FormsError::Structure(format!(
+                    "F8995a TY{year}: the bundled map does not parse: {e}"
+                ))
+            }),
+            crate::line_set::Schema::Unwired => Err(crate::FormsError::UnwiredLineSet {
+                stem: "F8995a",
+                year,
+                line_set: ls.as_str(),
+            }),
+            other => Err(crate::FormsError::Structure(format!(
+                "F8995a TY{year}: line_set {} parses into {other:?}, not Form8995AMap",
+                ls.as_str()
+            ))),
         }
     }
 
     /// The bundled TY2024 map.
     pub fn ty2024() -> Self {
-        Self::parse(F8995A_MAP_2024).expect("bundled f8995a 2024 map parses")
+        Self::for_year(2024).expect("the bundled TY2024 map is wired and parses")
     }
     fn parse(s: &str) -> Result<Self, toml::de::Error> {
         toml::from_str(s)
@@ -1996,13 +2157,39 @@ impl Form8995Map {
     }
     /// The TY2024 map.
     pub fn ty2024() -> Self {
-        Self::parse(F8995_MAP_2024).expect("bundled f8995 2024 map parses")
+        Self::for_year(2024).expect("the bundled TY2024 map is wired and parses")
     }
     /// The map for a supported tax year. Full-return v1 is TY2024-only.
+    /// The map for a tax year — design r2 §10 step 3: the file comes from the glob
+    /// (`bundled::map_text`), the revision from its ROW, and the ONE exhaustive
+    /// `line_set → schema` match (`line_set::schema`) decides whether THIS struct parses it.
     pub fn for_year(year: i32) -> Result<Self, FormsError> {
-        match year {
-            2024 => Ok(Self::ty2024()),
-            _ => Err(FormsError::UnsupportedYear(year)),
+        let text = crate::bundled::map_text(crate::bundled::Stem::F8995, year)
+            .ok_or(FormsError::UnsupportedYear(year))?;
+        let row = MapRow::read(text).map_err(|e| {
+            FormsError::Structure(format!("F8995 TY{year}: the map's row does not parse: {e}"))
+        })?;
+        let ls = crate::line_set::LineSet::parse(&row.line_set).ok_or_else(|| {
+            FormsError::Structure(format!(
+                "F8995 TY{year}: line_set {:?} is not a revision this build knows",
+                row.line_set
+            ))
+        })?;
+        match crate::line_set::schema(ls) {
+            crate::line_set::Schema::Form8995Map => Self::parse(text).map_err(|e| {
+                FormsError::Structure(format!(
+                    "F8995 TY{year}: the bundled map does not parse: {e}"
+                ))
+            }),
+            crate::line_set::Schema::Unwired => Err(FormsError::UnwiredLineSet {
+                stem: "F8995",
+                year,
+                line_set: ls.as_str(),
+            }),
+            other => Err(FormsError::Structure(format!(
+                "F8995 TY{year}: line_set {} parses into {other:?}, not Form8995Map",
+                ls.as_str()
+            ))),
         }
     }
     /// The 15 filled cells in printed reading order (strictly descending y on page 1).
@@ -2095,13 +2282,41 @@ impl Schedule2Map {
     }
     /// The TY2024 map.
     pub fn ty2024() -> Self {
-        Self::parse(SCHEDULE_2_MAP_2024).expect("bundled schedule 2 2024 map parses")
+        Self::for_year(2024).expect("the bundled TY2024 map is wired and parses")
     }
     /// The map for a supported tax year. Full-return v1 is TY2024-only.
+    /// The map for a tax year — design r2 §10 step 3: the file comes from the glob
+    /// (`bundled::map_text`), the revision from its ROW, and the ONE exhaustive
+    /// `line_set → schema` match (`line_set::schema`) decides whether THIS struct parses it.
     pub fn for_year(year: i32) -> Result<Self, FormsError> {
-        match year {
-            2024 => Ok(Self::ty2024()),
-            _ => Err(FormsError::UnsupportedYear(year)),
+        let text = crate::bundled::map_text(crate::bundled::Stem::F1040s2, year)
+            .ok_or(FormsError::UnsupportedYear(year))?;
+        let row = MapRow::read(text).map_err(|e| {
+            FormsError::Structure(format!(
+                "F1040s2 TY{year}: the map's row does not parse: {e}"
+            ))
+        })?;
+        let ls = crate::line_set::LineSet::parse(&row.line_set).ok_or_else(|| {
+            FormsError::Structure(format!(
+                "F1040s2 TY{year}: line_set {:?} is not a revision this build knows",
+                row.line_set
+            ))
+        })?;
+        match crate::line_set::schema(ls) {
+            crate::line_set::Schema::Schedule2Map => Self::parse(text).map_err(|e| {
+                FormsError::Structure(format!(
+                    "F1040s2 TY{year}: the bundled map does not parse: {e}"
+                ))
+            }),
+            crate::line_set::Schema::Unwired => Err(FormsError::UnwiredLineSet {
+                stem: "F1040s2",
+                year,
+                line_set: ls.as_str(),
+            }),
+            other => Err(FormsError::Structure(format!(
+                "F1040s2 TY{year}: line_set {} parses into {other:?}, not Schedule2Map",
+                ls.as_str()
+            ))),
         }
     }
     /// The 6 filled cells in printed reading order. **Descent is grouped by PAGE** — line 21 sits on
@@ -2181,13 +2396,41 @@ impl Schedule3Map {
     }
     /// The TY2024 map.
     pub fn ty2024() -> Self {
-        Self::parse(SCHEDULE_3_MAP_2024).expect("bundled schedule 3 2024 map parses")
+        Self::for_year(2024).expect("the bundled TY2024 map is wired and parses")
     }
     /// The map for a supported tax year. Full-return v1 is TY2024-only.
+    /// The map for a tax year — design r2 §10 step 3: the file comes from the glob
+    /// (`bundled::map_text`), the revision from its ROW, and the ONE exhaustive
+    /// `line_set → schema` match (`line_set::schema`) decides whether THIS struct parses it.
     pub fn for_year(year: i32) -> Result<Self, FormsError> {
-        match year {
-            2024 => Ok(Self::ty2024()),
-            _ => Err(FormsError::UnsupportedYear(year)),
+        let text = crate::bundled::map_text(crate::bundled::Stem::F1040s3, year)
+            .ok_or(FormsError::UnsupportedYear(year))?;
+        let row = MapRow::read(text).map_err(|e| {
+            FormsError::Structure(format!(
+                "F1040s3 TY{year}: the map's row does not parse: {e}"
+            ))
+        })?;
+        let ls = crate::line_set::LineSet::parse(&row.line_set).ok_or_else(|| {
+            FormsError::Structure(format!(
+                "F1040s3 TY{year}: line_set {:?} is not a revision this build knows",
+                row.line_set
+            ))
+        })?;
+        match crate::line_set::schema(ls) {
+            crate::line_set::Schema::Schedule3Map => Self::parse(text).map_err(|e| {
+                FormsError::Structure(format!(
+                    "F1040s3 TY{year}: the bundled map does not parse: {e}"
+                ))
+            }),
+            crate::line_set::Schema::Unwired => Err(FormsError::UnwiredLineSet {
+                stem: "F1040s3",
+                year,
+                line_set: ls.as_str(),
+            }),
+            other => Err(FormsError::Structure(format!(
+                "F1040s3 TY{year}: line_set {} parses into {other:?}, not Schedule3Map",
+                ls.as_str()
+            ))),
         }
     }
     /// The 4 filled cells in printed reading order (strictly descending y on page 1).
@@ -2305,13 +2548,41 @@ impl ScheduleAMap {
     }
     /// The TY2024 map.
     pub fn ty2024() -> Self {
-        Self::parse(SCHEDULE_A_MAP_2024).expect("bundled schedule A 2024 map parses")
+        Self::for_year(2024).expect("the bundled TY2024 map is wired and parses")
     }
     /// The map for a supported tax year. Full-return v1 is TY2024-only.
+    /// The map for a tax year — design r2 §10 step 3: the file comes from the glob
+    /// (`bundled::map_text`), the revision from its ROW, and the ONE exhaustive
+    /// `line_set → schema` match (`line_set::schema`) decides whether THIS struct parses it.
     pub fn for_year(year: i32) -> Result<Self, FormsError> {
-        match year {
-            2024 => Ok(Self::ty2024()),
-            _ => Err(FormsError::UnsupportedYear(year)),
+        let text = crate::bundled::map_text(crate::bundled::Stem::F1040sa, year)
+            .ok_or(FormsError::UnsupportedYear(year))?;
+        let row = MapRow::read(text).map_err(|e| {
+            FormsError::Structure(format!(
+                "F1040sa TY{year}: the map's row does not parse: {e}"
+            ))
+        })?;
+        let ls = crate::line_set::LineSet::parse(&row.line_set).ok_or_else(|| {
+            FormsError::Structure(format!(
+                "F1040sa TY{year}: line_set {:?} is not a revision this build knows",
+                row.line_set
+            ))
+        })?;
+        match crate::line_set::schema(ls) {
+            crate::line_set::Schema::ScheduleAMap => Self::parse(text).map_err(|e| {
+                FormsError::Structure(format!(
+                    "F1040sa TY{year}: the bundled map does not parse: {e}"
+                ))
+            }),
+            crate::line_set::Schema::Unwired => Err(FormsError::UnwiredLineSet {
+                stem: "F1040sa",
+                year,
+                line_set: ls.as_str(),
+            }),
+            other => Err(FormsError::Structure(format!(
+                "F1040sa TY{year}: line_set {} parses into {other:?}, not ScheduleAMap",
+                ls.as_str()
+            ))),
         }
     }
     /// The 19 filled cells in printed reading order (strictly descending y on page 1).
@@ -2415,13 +2686,41 @@ impl Schedule1Map {
     }
     /// The TY2024 map.
     pub fn ty2024() -> Self {
-        Self::parse(SCHEDULE_1_MAP_2024).expect("bundled schedule 1 2024 map parses")
+        Self::for_year(2024).expect("the bundled TY2024 map is wired and parses")
     }
     /// The map for a supported tax year. Full-return v1 is TY2024-only.
+    /// The map for a tax year — design r2 §10 step 3: the file comes from the glob
+    /// (`bundled::map_text`), the revision from its ROW, and the ONE exhaustive
+    /// `line_set → schema` match (`line_set::schema`) decides whether THIS struct parses it.
     pub fn for_year(year: i32) -> Result<Self, FormsError> {
-        match year {
-            2024 => Ok(Self::ty2024()),
-            _ => Err(FormsError::UnsupportedYear(year)),
+        let text = crate::bundled::map_text(crate::bundled::Stem::F1040s1, year)
+            .ok_or(FormsError::UnsupportedYear(year))?;
+        let row = MapRow::read(text).map_err(|e| {
+            FormsError::Structure(format!(
+                "F1040s1 TY{year}: the map's row does not parse: {e}"
+            ))
+        })?;
+        let ls = crate::line_set::LineSet::parse(&row.line_set).ok_or_else(|| {
+            FormsError::Structure(format!(
+                "F1040s1 TY{year}: line_set {:?} is not a revision this build knows",
+                row.line_set
+            ))
+        })?;
+        match crate::line_set::schema(ls) {
+            crate::line_set::Schema::Schedule1Map => Self::parse(text).map_err(|e| {
+                FormsError::Structure(format!(
+                    "F1040s1 TY{year}: the bundled map does not parse: {e}"
+                ))
+            }),
+            crate::line_set::Schema::Unwired => Err(FormsError::UnwiredLineSet {
+                stem: "F1040s1",
+                year,
+                line_set: ls.as_str(),
+            }),
+            other => Err(FormsError::Structure(format!(
+                "F1040s1 TY{year}: line_set {} parses into {other:?}, not Schedule1Map",
+                ls.as_str()
+            ))),
         }
     }
     /// The 10 filled cells in printed reading order. **Descent is grouped by PAGE.**
@@ -2530,13 +2829,41 @@ impl ScheduleCMap {
     }
     /// The TY2024 map.
     pub fn ty2024() -> Self {
-        Self::parse(SCHEDULE_C_MAP_2024).expect("bundled schedule C 2024 map parses")
+        Self::for_year(2024).expect("the bundled TY2024 map is wired and parses")
     }
     /// The map for a supported tax year. Full-return v1 is TY2024-only.
+    /// The map for a tax year — design r2 §10 step 3: the file comes from the glob
+    /// (`bundled::map_text`), the revision from its ROW, and the ONE exhaustive
+    /// `line_set → schema` match (`line_set::schema`) decides whether THIS struct parses it.
     pub fn for_year(year: i32) -> Result<Self, FormsError> {
-        match year {
-            2024 => Ok(Self::ty2024()),
-            _ => Err(FormsError::UnsupportedYear(year)),
+        let text = crate::bundled::map_text(crate::bundled::Stem::F1040sc, year)
+            .ok_or(FormsError::UnsupportedYear(year))?;
+        let row = MapRow::read(text).map_err(|e| {
+            FormsError::Structure(format!(
+                "F1040sc TY{year}: the map's row does not parse: {e}"
+            ))
+        })?;
+        let ls = crate::line_set::LineSet::parse(&row.line_set).ok_or_else(|| {
+            FormsError::Structure(format!(
+                "F1040sc TY{year}: line_set {:?} is not a revision this build knows",
+                row.line_set
+            ))
+        })?;
+        match crate::line_set::schema(ls) {
+            crate::line_set::Schema::ScheduleCMap => Self::parse(text).map_err(|e| {
+                FormsError::Structure(format!(
+                    "F1040sc TY{year}: the bundled map does not parse: {e}"
+                ))
+            }),
+            crate::line_set::Schema::Unwired => Err(FormsError::UnwiredLineSet {
+                stem: "F1040sc",
+                year,
+                line_set: ls.as_str(),
+            }),
+            other => Err(FormsError::Structure(format!(
+                "F1040sc TY{year}: line_set {} parses into {other:?}, not ScheduleCMap",
+                ls.as_str()
+            ))),
         }
     }
     /// The 7 filled cells in printed reading order (strictly descending y on page 1).
@@ -2650,13 +2977,41 @@ impl ScheduleBMap {
     }
     /// The TY2024 map.
     pub fn ty2024() -> Self {
-        Self::parse(SCHEDULE_B_MAP_2024).expect("bundled schedule B 2024 map parses")
+        Self::for_year(2024).expect("the bundled TY2024 map is wired and parses")
     }
     /// The map for a supported tax year. Full-return v1 is TY2024-only.
+    /// The map for a tax year — design r2 §10 step 3: the file comes from the glob
+    /// (`bundled::map_text`), the revision from its ROW, and the ONE exhaustive
+    /// `line_set → schema` match (`line_set::schema`) decides whether THIS struct parses it.
     pub fn for_year(year: i32) -> Result<Self, FormsError> {
-        match year {
-            2024 => Ok(Self::ty2024()),
-            _ => Err(FormsError::UnsupportedYear(year)),
+        let text = crate::bundled::map_text(crate::bundled::Stem::F1040sb, year)
+            .ok_or(FormsError::UnsupportedYear(year))?;
+        let row = MapRow::read(text).map_err(|e| {
+            FormsError::Structure(format!(
+                "F1040sb TY{year}: the map's row does not parse: {e}"
+            ))
+        })?;
+        let ls = crate::line_set::LineSet::parse(&row.line_set).ok_or_else(|| {
+            FormsError::Structure(format!(
+                "F1040sb TY{year}: line_set {:?} is not a revision this build knows",
+                row.line_set
+            ))
+        })?;
+        match crate::line_set::schema(ls) {
+            crate::line_set::Schema::ScheduleBMap => Self::parse(text).map_err(|e| {
+                FormsError::Structure(format!(
+                    "F1040sb TY{year}: the bundled map does not parse: {e}"
+                ))
+            }),
+            crate::line_set::Schema::Unwired => Err(FormsError::UnwiredLineSet {
+                stem: "F1040sb",
+                year,
+                line_set: ls.as_str(),
+            }),
+            other => Err(FormsError::Structure(format!(
+                "F1040sb TY{year}: line_set {} parses into {other:?}, not ScheduleBMap",
+                ls.as_str()
+            ))),
         }
     }
 }
@@ -2742,26 +3097,52 @@ impl ScheduleSeMap {
 
     /// The TY2025 map.
     pub fn ty2025() -> Self {
-        Self::parse(SCHEDULE_SE_MAP_2025).expect("bundled schedule_se 2025 map parses")
+        Self::for_year(2025).expect("the bundled TY2025 map is wired and parses")
     }
 
     /// The TY2024 map (field-name-identical to 2025; only the wage base differs).
     pub fn ty2024() -> Self {
-        Self::parse(SCHEDULE_SE_MAP_2024).expect("bundled schedule_se 2024 map parses")
+        Self::for_year(2024).expect("the bundled TY2024 map is wired and parses")
     }
 
     /// The TY2017 map (OLD §B long form: dollars+cents pairs; pre-filled line 7/14 exempt).
     pub fn ty2017() -> Self {
-        Self::parse(SCHEDULE_SE_MAP_2017).expect("bundled schedule_se 2017 map parses")
+        Self::for_year(2017).expect("the bundled TY2017 map is wired and parses")
     }
 
     /// The map for a supported tax year.
+    /// The map for a tax year — design r2 §10 step 3: the file comes from the glob
+    /// (`bundled::map_text`), the revision from its ROW, and the ONE exhaustive
+    /// `line_set → schema` match (`line_set::schema`) decides whether THIS struct parses it.
     pub fn for_year(year: i32) -> Result<Self, FormsError> {
-        match year {
-            2017 => Ok(Self::ty2017()),
-            2024 => Ok(Self::ty2024()),
-            2025 => Ok(Self::ty2025()),
-            _ => Err(FormsError::UnsupportedYear(year)),
+        let text = crate::bundled::map_text(crate::bundled::Stem::ScheduleSe, year)
+            .ok_or(FormsError::UnsupportedYear(year))?;
+        let row = MapRow::read(text).map_err(|e| {
+            FormsError::Structure(format!(
+                "ScheduleSe TY{year}: the map's row does not parse: {e}"
+            ))
+        })?;
+        let ls = crate::line_set::LineSet::parse(&row.line_set).ok_or_else(|| {
+            FormsError::Structure(format!(
+                "ScheduleSe TY{year}: line_set {:?} is not a revision this build knows",
+                row.line_set
+            ))
+        })?;
+        match crate::line_set::schema(ls) {
+            crate::line_set::Schema::ScheduleSeMap => Self::parse(text).map_err(|e| {
+                FormsError::Structure(format!(
+                    "ScheduleSe TY{year}: the bundled map does not parse: {e}"
+                ))
+            }),
+            crate::line_set::Schema::Unwired => Err(FormsError::UnwiredLineSet {
+                stem: "ScheduleSe",
+                year,
+                line_set: ls.as_str(),
+            }),
+            other => Err(FormsError::Structure(format!(
+                "ScheduleSe TY{year}: line_set {} parses into {other:?}, not ScheduleSeMap",
+                ls.as_str()
+            ))),
         }
     }
 
@@ -2788,40 +3169,4 @@ impl ScheduleSeMap {
     pub fn field_names(&self) -> Vec<&str> {
         self.lines().iter().flat_map(|c| c.fields()).collect()
     }
-}
-
-/// ★ Transitional witness for design r2 §10 step 2: every `include_str!` const the old arms read,
-/// as `(stem, year, bytes)`, so `bundled::tests::generated_bindings_agree_with_every_old_const` can
-/// hold the generated bindings to them byte-for-byte. Deleted with the consts at step 3.
-#[cfg(test)]
-pub mod testonly_old_consts {
-    pub const OLD_MAP_CONSTS: &[(&str, i32, &str)] = &[
-        ("f1040", 2017, super::F1040_MAP_2017),
-        ("f8283", 2017, super::F8283_MAP_2017),
-        ("f8949", 2017, super::F8949_MAP_2017),
-        ("schedule_d", 2017, super::SCHEDULE_D_MAP_2017),
-        ("schedule_se", 2017, super::SCHEDULE_SE_MAP_2017),
-        ("f1040", 2024, super::F1040_MAP_2024),
-        ("f1040s1", 2024, super::SCHEDULE_1_MAP_2024),
-        ("f1040s2", 2024, super::SCHEDULE_2_MAP_2024),
-        ("f1040s3", 2024, super::SCHEDULE_3_MAP_2024),
-        ("f1040sa", 2024, super::SCHEDULE_A_MAP_2024),
-        ("f1040sb", 2024, super::SCHEDULE_B_MAP_2024),
-        ("f1040sc", 2024, super::SCHEDULE_C_MAP_2024),
-        ("f6251", 2024, super::F6251_MAP_2024),
-        ("f8275", 2024, super::F8275_MAP_2024),
-        ("f8283", 2024, super::F8283_MAP_2024),
-        ("f8949", 2024, super::F8949_MAP_2024),
-        ("f8959", 2024, super::F8959_MAP_2024),
-        ("f8960", 2024, super::F8960_MAP_2024),
-        ("f8995", 2024, super::F8995_MAP_2024),
-        ("f8995a", 2024, super::F8995A_MAP_2024),
-        ("schedule_d", 2024, super::SCHEDULE_D_MAP_2024),
-        ("schedule_se", 2024, super::SCHEDULE_SE_MAP_2024),
-        ("f1040", 2025, super::F1040_MAP_2025),
-        ("f8283", 2025, super::F8283_MAP_2025),
-        ("f8949", 2025, super::F8949_MAP_2025),
-        ("schedule_d", 2025, super::SCHEDULE_D_MAP_2025),
-        ("schedule_se", 2025, super::SCHEDULE_SE_MAP_2025),
-    ];
 }

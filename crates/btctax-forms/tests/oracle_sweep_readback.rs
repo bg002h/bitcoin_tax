@@ -17,7 +17,7 @@ mod common;
 use common::{cell_or_zero, form, on_paper_signed, packet, Blank, Sign};
 
 use btctax_core::tax::testonly::golden_households;
-use btctax_forms::testonly::{extract_lines, F1040_MAP_2024, SCHEDULE_D_MAP_2024};
+use btctax_forms::testonly::extract_lines;
 use std::collections::BTreeMap;
 
 /// ★ The anchor: a capped capital loss is −3000 on the 1040 (leading minus) AND on Schedule D
@@ -30,7 +30,11 @@ fn line7_is_signed_and_schedule_d_is_parenthesized_magnitude() {
         .unwrap();
     let pkt = packet(&h);
 
-    let f1040 = extract_lines(&form(&pkt, "f1040").bytes, F1040_MAP_2024).unwrap();
+    let f1040 = extract_lines(
+        &form(&pkt, "f1040").bytes,
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, 2024).unwrap(),
+    )
+    .unwrap();
     // 1040 line 7 is on paper as the literal string "-3000" — a leading minus (SPEC §3.2).
     assert_eq!(
         on_paper_signed(&f1040, "line7a", Sign::Leading),
@@ -38,7 +42,11 @@ fn line7_is_signed_and_schedule_d_is_parenthesized_magnitude() {
         "1040 line 7 signs a capital loss with a LEADING MINUS; it must read back as −3000"
     );
 
-    let sd = extract_lines(&form(&pkt, "schedule_d").bytes, SCHEDULE_D_MAP_2024).unwrap();
+    let sd = extract_lines(
+        &form(&pkt, "schedule_d").bytes,
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::ScheduleD, 2024).unwrap(),
+    )
+    .unwrap();
     // Schedule D line 21 is on paper as the bare magnitude "3000" inside a pre-printed paren box.
     assert_eq!(
         on_paper_signed(&sd, "line21", Sign::ParenMagnitude),

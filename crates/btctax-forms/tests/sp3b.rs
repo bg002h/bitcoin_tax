@@ -460,15 +460,21 @@ fn ty2017_8283_section_a_five_rows_and_overflow() {
 
 #[test]
 fn map_2017_matches_bundled_pdf_fieldset() {
-    let s = fieldset(F8949_PDF_2017);
+    let s = fieldset(
+        btctax_forms::bundled::template(btctax_forms::bundled::Stem::F8949, 2017).unwrap(),
+    );
     for n in f8949_2017_field_names() {
         assert!(s.contains(&n), "8949 map field absent: {n}");
     }
-    let s = fieldset(SCHEDULE_D_PDF_2017);
+    let s = fieldset(
+        btctax_forms::bundled::template(btctax_forms::bundled::Stem::ScheduleD, 2017).unwrap(),
+    );
     for n in schedule_d_2017_field_names() {
         assert!(s.contains(&n), "schedule_d map field absent: {n}");
     }
-    let s = fieldset(SCHEDULE_SE_PDF_2017);
+    let s = fieldset(
+        btctax_forms::bundled::template(btctax_forms::bundled::Stem::ScheduleSe, 2017).unwrap(),
+    );
     let m = ScheduleSeMap::ty2017();
     for n in m
         .field_names()
@@ -477,12 +483,16 @@ fn map_2017_matches_bundled_pdf_fieldset() {
     {
         assert!(s.contains(n), "SE map field absent: {n}");
     }
-    let s = fieldset(F8283_PDF_2017);
+    let s = fieldset(
+        btctax_forms::bundled::template(btctax_forms::bundled::Stem::F8283, 2017).unwrap(),
+    );
     for n in Form8283Map::ty2017().field_names() {
         assert!(s.contains(n), "8283 map field absent: {n}");
     }
     let m = Form1040Map::ty2017();
-    let s = fieldset(F1040_PDF_2017);
+    let s = fieldset(
+        btctax_forms::bundled::template(btctax_forms::bundled::Stem::F1040, 2017).unwrap(),
+    );
     for n in match &m.line7a {
         MoneyCell::Single(f) => vec![f.clone()],
         MoneyCell::Pair(p) => vec![p.dollars_field.clone(), p.cents_field.clone()],

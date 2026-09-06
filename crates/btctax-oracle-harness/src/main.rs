@@ -61,12 +61,7 @@ use btctax_core::tax::testonly::{
     build_golden_return, ty2024_params, ty2024_table, GoldenHousehold, GoldenInputs,
 };
 use btctax_core::tax::FilingStatus;
-use btctax_forms::testonly::{
-    extract_lines, F1040_MAP_2024, F8283_MAP_2024, F8949_MAP_2024, F8959_MAP_2024, F8960_MAP_2024,
-    F8995_MAP_2024, SCHEDULE_1_MAP_2024, SCHEDULE_2_MAP_2024, SCHEDULE_3_MAP_2024,
-    SCHEDULE_A_MAP_2024, SCHEDULE_B_MAP_2024, SCHEDULE_C_MAP_2024, SCHEDULE_D_MAP_2024,
-    SCHEDULE_SE_MAP_2024,
-};
+use btctax_forms::testonly::extract_lines;
 use btctax_forms::{fill_full_return, NamedForm};
 use serde_json::{json, Map, Value};
 
@@ -800,20 +795,48 @@ fn form_segment(name: &str) -> &str {
 /// The committed 2024 line-map for a packet form (every name [`fill_full_return`] can emit).
 fn map_for(name: &str) -> Option<&'static str> {
     Some(match name {
-        "f1040" => F1040_MAP_2024,
-        "f1040s1" => SCHEDULE_1_MAP_2024,
-        "f1040s2" => SCHEDULE_2_MAP_2024,
-        "f1040s3" => SCHEDULE_3_MAP_2024,
-        "f1040sa" => SCHEDULE_A_MAP_2024,
-        "f1040sb" => SCHEDULE_B_MAP_2024,
-        "f1040sc" => SCHEDULE_C_MAP_2024,
-        "schedule_d" => SCHEDULE_D_MAP_2024,
-        "f8949" => F8949_MAP_2024,
-        "schedule_se" => SCHEDULE_SE_MAP_2024,
-        "f8959" => F8959_MAP_2024,
-        "f8960" => F8960_MAP_2024,
-        "f8995" => F8995_MAP_2024,
-        "f8283" => F8283_MAP_2024,
+        "f1040" => {
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, 2024).unwrap()
+        }
+        "f1040s1" => {
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040s1, 2024).unwrap()
+        }
+        "f1040s2" => {
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040s2, 2024).unwrap()
+        }
+        "f1040s3" => {
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040s3, 2024).unwrap()
+        }
+        "f1040sa" => {
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040sa, 2024).unwrap()
+        }
+        "f1040sb" => {
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040sb, 2024).unwrap()
+        }
+        "f1040sc" => {
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040sc, 2024).unwrap()
+        }
+        "schedule_d" => {
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::ScheduleD, 2024).unwrap()
+        }
+        "f8949" => {
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8949, 2024).unwrap()
+        }
+        "schedule_se" => {
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::ScheduleSe, 2024).unwrap()
+        }
+        "f8959" => {
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8959, 2024).unwrap()
+        }
+        "f8960" => {
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8960, 2024).unwrap()
+        }
+        "f8995" => {
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8995, 2024).unwrap()
+        }
+        "f8283" => {
+            btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8283, 2024).unwrap()
+        }
         _ => return None,
     })
 }

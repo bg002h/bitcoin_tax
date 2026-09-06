@@ -20,7 +20,7 @@ use btctax_core::tax::se::SeTaxResult;
 use btctax_core::tax::testonly::kitchen_sink_header;
 use btctax_core::tax::types::FilingStatus;
 use btctax_core::Usd;
-use btctax_forms::testonly::{extract_lines, F1040_MAP_2024, F8959_MAP_2024, SCHEDULE_B_MAP_2024};
+use btctax_forms::testonly::extract_lines;
 use rust_decimal_macros::dec;
 
 /// The deep/02 example-2 household: MFJ, $280,000 W-2 Medicare wages, $60,000 of mining — the same
@@ -46,7 +46,11 @@ fn extract_lines_reads_a_filled_form_back_by_line_number() {
         .unwrap()
         .expect("this household owes Additional Medicare Tax");
 
-    let got = extract_lines(&pdf, F8959_MAP_2024).expect("the filled 8959 transcribes");
+    let got = extract_lines(
+        &pdf,
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8959, 2024).unwrap(),
+    )
+    .expect("the filled 8959 transcribes");
 
     // The same figures full_return_forms.rs pins by leaf name — but said in the form's own language.
     assert_eq!(got.get("line1").map(String::as_str), Some("280000"));
@@ -67,7 +71,11 @@ fn extract_lines_descends_into_nested_groups() {
         .unwrap()
         .unwrap();
 
-    let got = extract_lines(&pdf, F8959_MAP_2024).unwrap();
+    let got = extract_lines(
+        &pdf,
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8959, 2024).unwrap(),
+    )
+    .unwrap();
     assert!(
         got.contains_key("identity.name"),
         "the identity group must transcribe as `identity.name`, got keys: {:?}",
@@ -92,7 +100,11 @@ fn extract_lines_omits_the_off_half_of_a_checkbox_pair() {
     )
     .unwrap();
 
-    let got = extract_lines(&pdf, F1040_MAP_2024).unwrap();
+    let got = extract_lines(
+        &pdf,
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, 2024).unwrap(),
+    )
+    .unwrap();
     assert_eq!(
         got.get("da_yes").map(String::as_str),
         Some("1"),
@@ -126,7 +138,11 @@ fn extract_lines_indexes_table_rows_and_omits_the_unused_ones() {
     );
     let pdf = btctax_forms::fill_schedule_b(&lines, &kitchen_sink_header(), 2024).unwrap();
 
-    let got = extract_lines(&pdf, SCHEDULE_B_MAP_2024).unwrap();
+    let got = extract_lines(
+        &pdf,
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040sb, 2024).unwrap(),
+    )
+    .unwrap();
 
     assert_eq!(
         got.get("part1_rows[0].payer").map(String::as_str),
@@ -162,7 +178,11 @@ fn extract_lines_ignores_map_metadata() {
         .unwrap()
         .unwrap();
 
-    let got = extract_lines(&pdf, F8959_MAP_2024).unwrap();
+    let got = extract_lines(
+        &pdf,
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8959, 2024).unwrap(),
+    )
+    .unwrap();
     assert!(!got.contains_key("form"), "`form` is metadata, not a cell");
     assert!(!got.contains_key("year"), "`year` is metadata, not a cell");
 }
@@ -287,7 +307,11 @@ fn form_8995_row_1i_carries_the_proprietors_tin_not_the_taxpayers() {
     )
     .expect("there is QBI");
     let pdf = btctax_forms::fill_form_8995(&lines, &header, 2024).unwrap();
-    let got = extract_lines(&pdf, btctax_forms::testonly::F8995_MAP_2024).unwrap();
+    let got = extract_lines(
+        &pdf,
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8995, 2024).unwrap(),
+    )
+    .unwrap();
 
     assert_eq!(
         got.get("row1_tin").map(String::as_str),
@@ -356,7 +380,11 @@ fn form_8995_with_only_reit_dividends_leaves_part_i_blank() {
 
     assert_eq!(lines.line2, Usd::ZERO, "no business ⇒ line 2 is zero");
     let pdf = btctax_forms::fill_form_8995(&lines, &kitchen_sink_header(), 2024).unwrap();
-    let got = extract_lines(&pdf, btctax_forms::testonly::F8995_MAP_2024).unwrap();
+    let got = extract_lines(
+        &pdf,
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8995, 2024).unwrap(),
+    )
+    .unwrap();
 
     for cell in ["row1_business", "row1_tin", "row1_qbi"] {
         assert!(

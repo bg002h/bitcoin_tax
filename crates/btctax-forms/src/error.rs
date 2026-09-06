@@ -7,9 +7,24 @@
 /// CLOSED (no PDF bytes are returned), so a mis-mapped form is never handed to a filer.
 #[derive(Debug, thiserror::Error)]
 pub enum FormsError {
-    /// The requested tax year has no bundled form set / map (this build ships TY2017, 2024 + 2025).
-    #[error("unsupported tax year {0}: this build bundles IRS forms for 2017, 2024 and 2025 only")]
+    /// The requested tax year has no bundled form set / map. The years named in the message are
+    /// DERIVED from the glob (`bundled::BUNDLED_YEARS`), never a literal — the literal this used to
+    /// carry ("2017, 2024 and 2025 only") is the stale-string class design r2 retires.
+    #[error(
+        "unsupported tax year {0}: this build bundles IRS forms for {} only",
+        crate::bundled::years_sentence()
+    )]
     UnsupportedYear(i32),
+
+    /// The year's map is bundled and listed, but its `line_set` revision has no struct that parses it
+    /// yet (design r2 §10 step 3 → step 5). Distinct from `UnsupportedYear`: the file is THERE; the
+    /// transcription is not.
+    #[error("{stem} for tax year {year} is bundled but not wired: its line-set revision {line_set:?} has no transcription struct yet")]
+    UnwiredLineSet {
+        stem: &'static str,
+        year: i32,
+        line_set: &'static str,
+    },
 
     /// A field named by the map does not exist in the bundled PDF's AcroForm.
     #[error("map references field {0:?} which is absent from the bundled PDF field set")]

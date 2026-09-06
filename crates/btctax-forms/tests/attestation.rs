@@ -141,8 +141,16 @@ fn the_1211b_cap_and_the_1212b_carryforward_print_and_pair() {
     i.long_term_capital_gains = -20_000.0;
     let (ri, state) = build_golden_return(&i);
     let filed = file(&ri, &state);
-    let f1040 = cells(&filed.forms, "f1040", F1040_MAP_2024);
-    let schd = cells(&filed.forms, "schedule_d", SCHEDULE_D_MAP_2024);
+    let f1040 = cells(
+        &filed.forms,
+        "f1040",
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, 2024).unwrap(),
+    );
+    let schd = cells(
+        &filed.forms,
+        "schedule_d",
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::ScheduleD, 2024).unwrap(),
+    );
 
     assert_eq!(
         on_paper_signed(&f1040, "line7a", Sign::Leading),
@@ -200,7 +208,11 @@ fn the_1211b_cap_and_the_1212b_carryforward_print_and_pair() {
     i.long_term_capital_gains = -20_000.0;
     let (ri, state) = build_golden_return(&i);
     let filed = file(&ri, &state);
-    let f1040 = cells(&filed.forms, "f1040", F1040_MAP_2024);
+    let f1040 = cells(
+        &filed.forms,
+        "f1040",
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, 2024).unwrap(),
+    );
     assert_eq!(
         on_paper_signed(&f1040, "line7a", Sign::Leading),
         Some(-3000),
@@ -385,7 +397,11 @@ fn a_five_thousand_dollar_gift_under_the_standard_deduction_files_no_schedule_a_
         "the ITEMIZING twin must carry both forms — otherwise their absence above proves nothing \
          about the election. Packet: {twin_names:?}"
     );
-    let sch_a = cells(&twin.forms, "f1040sa", SCHEDULE_A_MAP_2024);
+    let sch_a = cells(
+        &twin.forms,
+        "f1040sa",
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040sa, 2024).unwrap(),
+    );
     assert_eq!(
         sch_a.get("line12").map(String::as_str),
         Some("5000"),
@@ -527,7 +543,11 @@ fn the_all_zero_return_files_one_form_whose_every_money_line_is_zero_or_blank() 
     assert_eq!(filed.ar.taxable_income, Usd::ZERO);
     assert_eq!(filed.ar.total_tax, Usd::ZERO);
 
-    let f1040 = cells(&filed.forms, "f1040", F1040_MAP_2024);
+    let f1040 = cells(
+        &filed.forms,
+        "f1040",
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, 2024).unwrap(),
+    );
 
     // The money map: every `lineN*` key on the paper. Identity cells (name, SSN) and the filing-status
     // checkbox are not money and are separately covered by the packet identity sweep.
@@ -699,7 +719,11 @@ fn form_1040_line_19_is_blank_unless_schedule_8812_provably_says_minus_zero() {
         ..zero_inputs("Single")
     });
     let filed = file(&with_dependents(ri, 2), &state);
-    let paper = cells(&filed.forms, "f1040", F1040_MAP_2024);
+    let paper = cells(
+        &filed.forms,
+        "f1040",
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, 2024).unwrap(),
+    );
     assert!(
         !paper.contains_key("line19"),
         "1040 line 19 must be BLANK for a family whose child tax credit btctax never figured. A `0` \
@@ -717,7 +741,11 @@ fn form_1040_line_19_is_blank_unless_schedule_8812_provably_says_minus_zero() {
         ..zero_inputs("Married/Joint")
     });
     let filed = file(&with_dependents(ri, 9), &state);
-    let paper = cells(&filed.forms, "f1040", F1040_MAP_2024);
+    let paper = cells(
+        &filed.forms,
+        "f1040",
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, 2024).unwrap(),
+    );
     assert_eq!(
         paper.get("line19").map(String::as_str),
         Some("0"),
@@ -828,7 +856,11 @@ fn every_form_6251_cell_carries_the_value_the_struct_computed() {
     let map = Form6251Map::ty2024();
     let pdf = fill_form_6251_with_map(&ar.amt, &kitchen_sink_header(), &map)
         .expect("the AMT household's Form 6251 must fill");
-    let paper = extract_lines(&pdf, F6251_MAP_2024).expect("the filled 6251 transcribes");
+    let paper = extract_lines(
+        &pdf,
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F6251, 2024).unwrap(),
+    )
+    .expect("the filled 6251 transcribes");
     let printed = ar.amt.printed();
 
     let expected = expected_cells(&printed);
@@ -887,9 +919,21 @@ fn the_amt_is_the_same_figure_on_form_6251_schedule_2_and_the_1040() {
         names.contains("f6251") && names.contains("f1040s2"),
         "an AMT-owing return attaches Form 6251 AND Schedule 2. Packet: {names:?}"
     );
-    let f6251 = cells(&filed.forms, "f6251", F6251_MAP_2024);
-    let sch2 = cells(&filed.forms, "f1040s2", SCHEDULE_2_MAP_2024);
-    let f1040 = cells(&filed.forms, "f1040", F1040_MAP_2024);
+    let f6251 = cells(
+        &filed.forms,
+        "f6251",
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F6251, 2024).unwrap(),
+    );
+    let sch2 = cells(
+        &filed.forms,
+        "f1040s2",
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040s2, 2024).unwrap(),
+    );
+    let f1040 = cells(
+        &filed.forms,
+        "f1040",
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, 2024).unwrap(),
+    );
 
     let l11 = f6251.get("line11").expect("Form 6251 line 11 is the AMT");
     assert_eq!(
@@ -968,7 +1012,11 @@ fn a_line_9b_that_zeroes_the_niit_keeps_form_8960_in_the_packet() {
     );
 
     // ── …AND IT CARRIES THE ALLOCATION, read back off the filled PDF. ─────────────────────────────
-    let f8960_cells = cells(&filed.forms, "f8960", F8960_MAP_2024);
+    let f8960_cells = cells(
+        &filed.forms,
+        "f8960",
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8960, 2024).unwrap(),
+    );
     assert_eq!(
         f8960_cells.get("line9b").map(String::as_str),
         Some("7000"),
@@ -999,7 +1047,11 @@ fn a_line_9b_that_zeroes_the_niit_keeps_form_8960_in_the_packet() {
         form_names(&twin.forms).contains("f8960"),
         "the twin files the form too — the two differ in the FIGURES, not in whether the form exists"
     );
-    let twin_cells = cells(&twin.forms, "f8960", F8960_MAP_2024);
+    let twin_cells = cells(
+        &twin.forms,
+        "f8960",
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8960, 2024).unwrap(),
+    );
     assert_eq!(
         twin_cells.get("line9b").map(String::as_str),
         None,
@@ -1052,7 +1104,11 @@ fn form_8960_line_9d_is_blank_unless_the_filer_allocated_something_to_part_ii() 
     ri.form_8960_line9b = None;
     answer_all_live_declarations(&mut ri);
     let filed = file(&ri, &state);
-    let paper = cells(&filed.forms, "f8960", F8960_MAP_2024);
+    let paper = cells(
+        &filed.forms,
+        "f8960",
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8960, 2024).unwrap(),
+    );
     assert_eq!(
         paper.get("line9b").map(String::as_str),
         None,
@@ -1072,7 +1128,11 @@ fn form_8960_line_9d_is_blank_unless_the_filer_allocated_something_to_part_ii() 
     ri.form_8960_line9b = Some(dec!(7000));
     answer_all_live_declarations(&mut ri);
     let filed = file(&ri, &state);
-    let paper = cells(&filed.forms, "f8960", F8960_MAP_2024);
+    let paper = cells(
+        &filed.forms,
+        "f8960",
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F8960, 2024).unwrap(),
+    );
     assert_eq!(
         paper.get("line9d").map(String::as_str),
         Some("7000"),
@@ -1126,7 +1186,11 @@ fn form_1040_line_20_is_blank_unless_a_schedule_3_was_actually_filed() {
         !names.contains("f1040s3"),
         "premise: this household files NO Schedule 3. Packet: {names:?}"
     );
-    let paper = cells(&filed.forms, "f1040", F1040_MAP_2024);
+    let paper = cells(
+        &filed.forms,
+        "f1040",
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, 2024).unwrap(),
+    );
     assert!(
         !paper.contains_key("line20"),
         "1040 line 20 must be BLANK when no Schedule 3 was filed. It reads \"Amount from Schedule 3, \
@@ -1151,13 +1215,21 @@ fn form_1040_line_20_is_blank_unless_a_schedule_3_was_actually_filed() {
         "premise: an extension payment files Schedule 3 for Part II alone. Packet: {:?}",
         form_names(&filed.forms)
     );
-    let sch3 = cells(&filed.forms, "f1040s3", SCHEDULE_3_MAP_2024);
+    let sch3 = cells(
+        &filed.forms,
+        "f1040s3",
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040s3, 2024).unwrap(),
+    );
     assert_eq!(
         sch3.get("line8").map(String::as_str),
         Some("0"),
         "the SOURCE cell: Schedule 3 line 8 is on this filer's paper and reads 0. Cells: {sch3:?}"
     );
-    let paper = cells(&filed.forms, "f1040", F1040_MAP_2024);
+    let paper = cells(
+        &filed.forms,
+        "f1040",
+        btctax_forms::bundled::map_text(btctax_forms::bundled::Stem::F1040, 2024).unwrap(),
+    );
     assert_eq!(
         paper.get("line20").map(String::as_str),
         sch3.get("line8").map(String::as_str),

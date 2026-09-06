@@ -1260,14 +1260,18 @@ fn sp2_watermark_stamps_every_form() {
 
 #[test]
 fn map_2025_matches_bundled_pdf_fieldset() {
-    let se_set = fieldset(SCHEDULE_SE_PDF_2025);
+    let se_set = fieldset(
+        btctax_forms::bundled::template(btctax_forms::bundled::Stem::ScheduleSe, 2025).unwrap(),
+    );
     for name in ScheduleSeMap::ty2025().field_names() {
         assert!(
             se_set.contains(name),
             "SE map field absent from PDF: {name}"
         );
     }
-    let f8283_set = fieldset(F8283_PDF_2025);
+    let f8283_set = fieldset(
+        btctax_forms::bundled::template(btctax_forms::bundled::Stem::F8283, 2025).unwrap(),
+    );
     for name in Form8283Map::ty2025().field_names() {
         assert!(
             f8283_set.contains(name),
@@ -1275,7 +1279,9 @@ fn map_2025_matches_bundled_pdf_fieldset() {
         );
     }
     let m = Form1040Map::ty2025();
-    let f1040_set = fieldset(F1040_PDF_2025);
+    let f1040_set = fieldset(
+        btctax_forms::bundled::template(btctax_forms::bundled::Stem::F1040, 2025).unwrap(),
+    );
     let mut f1040_names: Vec<String> = m.line7a.fields().iter().map(|s| s.to_string()).collect();
     f1040_names.push(m.da_yes.as_ref().unwrap().field.clone());
     f1040_names.push(m.da_no.as_ref().unwrap().field.clone());

@@ -123,7 +123,9 @@ fn da_pair_selected_by_adjacency_not_topmost() {
     // ★ On the 2024 1040 the TOP-MOST same-y {/1,/2} /Btn row is the FILING-STATUS row
     // (Single c1_3[0] @ x≈107 vs MFJ c1_3[0] @ x≈373, ~266pt apart) — NOT the DA pair. The adjacency
     // oracle must skip it and return the DA pair (c1_5[0]/c1_5[1], ~36pt apart).
-    let (doc, fields) = fields_of(F1040_PDF_2024);
+    let (doc, fields) = fields_of(
+        btctax_forms::bundled::template(btctax_forms::bundled::Stem::F1040, 2024).unwrap(),
+    );
     let (yes, no) = topmost_yes_no_pair(&doc, &fields, 0).unwrap();
     assert_eq!(
         yes, "topmostSubform[0].Page1[0].c1_5[0]",
@@ -142,7 +144,9 @@ fn da_pair_selected_by_adjacency_not_topmost() {
 fn ty2025_da_still_correct() {
     // Regression: on the 2025 1040 the DA pair (c1_10) is BOTH the top-most {/1,/2} 2-widget row AND
     // adjacent — so the adjacency change picks the same boxes as before.
-    let (doc, fields) = fields_of(F1040_PDF_2025);
+    let (doc, fields) = fields_of(
+        btctax_forms::bundled::template(btctax_forms::bundled::Stem::F1040, 2025).unwrap(),
+    );
     let (yes, no) = topmost_yes_no_pair(&doc, &fields, 0).unwrap();
     assert_eq!(yes, "topmostSubform[0].Page1[0].c1_10[0]");
     assert_eq!(no, "topmostSubform[0].Page1[0].c1_10[1]");
@@ -447,24 +451,34 @@ fn ty2024_no_unmapped_filled() {
 #[test]
 fn map_2024_matches_bundled_pdf_fieldset() {
     // Every field the 2024 maps target must exist in the corresponding bundled 2024 PDF.
-    let s = fieldset(F8949_PDF_2024);
+    let s = fieldset(
+        btctax_forms::bundled::template(btctax_forms::bundled::Stem::F8949, 2024).unwrap(),
+    );
     for n in f8949_2024_field_names() {
         assert!(s.contains(&n), "8949 map field absent: {n}");
     }
-    let s = fieldset(SCHEDULE_D_PDF_2024);
+    let s = fieldset(
+        btctax_forms::bundled::template(btctax_forms::bundled::Stem::ScheduleD, 2024).unwrap(),
+    );
     for n in schedule_d_2024_field_names() {
         assert!(s.contains(&n), "schedule_d map field absent: {n}");
     }
-    let s = fieldset(SCHEDULE_SE_PDF_2024);
+    let s = fieldset(
+        btctax_forms::bundled::template(btctax_forms::bundled::Stem::ScheduleSe, 2024).unwrap(),
+    );
     for n in ScheduleSeMap::ty2024().field_names() {
         assert!(s.contains(n), "SE map field absent: {n}");
     }
-    let s = fieldset(F8283_PDF_2024);
+    let s = fieldset(
+        btctax_forms::bundled::template(btctax_forms::bundled::Stem::F8283, 2024).unwrap(),
+    );
     for n in Form8283Map::ty2024().field_names() {
         assert!(s.contains(n), "8283 map field absent: {n}");
     }
     let m = Form1040Map::ty2024();
-    let fs = fieldset(F1040_PDF_2024);
+    let fs = fieldset(
+        btctax_forms::bundled::template(btctax_forms::bundled::Stem::F1040, 2024).unwrap(),
+    );
     let mut names: Vec<String> = m.line7a.fields().iter().map(|s| s.to_string()).collect();
     names.push(m.da_yes.as_ref().unwrap().field.clone());
     names.push(m.da_no.as_ref().unwrap().field.clone());

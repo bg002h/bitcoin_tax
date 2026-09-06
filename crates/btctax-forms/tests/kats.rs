@@ -194,14 +194,18 @@ fn no_unmapped_field_filled() {
 
 #[test]
 fn map_2025_matches_bundled_pdf_fieldset() {
-    let set = fieldset(F8949_PDF_2025);
+    let set = fieldset(
+        btctax_forms::bundled::template(btctax_forms::bundled::Stem::F8949, 2025).unwrap(),
+    );
     for name in f8949_map_field_names() {
         assert!(
             set.contains(&name),
             "8949 map field absent from PDF: {name}"
         );
     }
-    let sd_set = fieldset(SCHEDULE_D_PDF_2025);
+    let sd_set = fieldset(
+        btctax_forms::bundled::template(btctax_forms::bundled::Stem::ScheduleD, 2025).unwrap(),
+    );
     for name in schedule_d_map_field_names() {
         assert!(
             sd_set.contains(&name),
