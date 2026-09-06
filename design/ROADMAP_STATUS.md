@@ -77,9 +77,42 @@ FR-49) are folded into §3's NOW bucket below and re-owned in `FOLLOWUPS.md`.
   (`income import` → the full return). Reversing this means a `broker_reporting` vault table both
   arms read. Default if unanswered: closed (no users; the full return is the product).
   ★ The spec (`design/SPEC_1099da_broker_reporting.md`) is **GREEN r6** (five review rounds, 0C/0I at
-  r5); the build T0–T7 starts 2026-09-06.
+  r5). **Build T0–T6 LANDED 2026-09-06** (`e4b80fda` T0 … `249d37ad` C … `d9863909` T3 … `2feb53d0`
+  T4 … `ab0c98f8` T5 … `17753789`/`bb6d140d` T6; the T0–C build review 0C/3I/3M/3N folded `18d1332b`,
+  its re-verification 0C/0I/3M/1N folded `820b6d9b`). T7 is the owner item below; an independent
+  build review of T3–T6 is the next gate.
   ★ The spec `design/SPEC_form_4868_1040v.md` (FR-49, S8) is **GREEN r6** (five review rounds, 0C/0I at
   r5); its build T1–T6 follows the 1099-DA build.
+
+- **T7 (spec 1099-DA, recorded 2026-09-06) — the OWNER ACTION under Notice 2026-20 §4.02(2). Dated:
+  before the next 2026 sale on a custodial venue, and no later than 2026-09-30 (strategy S3's month).**
+  `legal/text/irs-guidance/Notice_2026-20.txt`: the relief period is 2025-01-01 through 2026-12-31
+  (§3.03), and during it a taxpayer makes an adequate identification of units held with a broker by
+  *"(2) Recording a standing order on the taxpayer's books and records, provided that the recorded
+  standing order includes sufficient information to identify any digital asset units sold, disposed
+  of, or transferred and is entered into the taxpayer's books and records before the units covered
+  by the order are sold, disposed of, or transferred"* (§4.02). Two things, both yours:
+  1. **Record the standing order on your own books, per venue account:**
+     `btctax config --set-forward-method hifo --exchange exchange:PROVIDER:ACCOUNT --effective-from
+     YYYY-MM-DD` appends a `MethodElection` ledger event (method, scope, effective-from) under an
+     RFC 3339 `utc_timestamp` in the vault; the engine applies an election only to disposals on or
+     after its effective date, so the record cannot back-date itself. Keep a dated plain-text copy
+     of the order (command, date, account) with your records too — the vault copy is encrypted, and
+     a record only you can decrypt is a weak exhibit.
+  2. **Instruct each exchange** (Coinbase, Gemini, River, Swan) with the same standing
+     specific-identification order, and ask what each will put in **box 1g** (Cost or other basis)
+     and whether **box 2** will be checked on 2026 sales. The input form's covered/noncovered slots
+     are answered from those replies; a venue that will not honour the order means every G/J row
+     needs the per-lot import (`basis_differs` refuses) rather than an answer.
+
+  **Does the per-year method-election record qualify as the written standing order (the question
+  spec T6/T7 asked to be stated)?** In part. It carries what §4.02(2) requires — enough to identify
+  the units (method + account scope + effective date) and entry BEFORE the covered sales (the
+  timestamp and the effective-from rule) — but a `MethodElection` without `--exchange` is GLOBAL,
+  and the relief is per units "held in the custody of a broker", so record it PER ACCOUNT; and the
+  vault is not a plain-language book, so pair it with the clear-text copy above. Whether an
+  encrypted, self-kept event satisfies "books and records" is not a question software answers —
+  that is why this is an owner item with a date, not a code task.
 
 ## 0b. The one-line answer (TY2025 context, retained)
 

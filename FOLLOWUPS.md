@@ -6170,6 +6170,15 @@ build, each with an owning phase.
   Other Basis — box 1e is Date Sold; the strategy review's "1e" is a slip, corrected by the spec r1 review S3).
   ★ TY2025 stays I/L under the spec (r2 R1): a proceeds-only 1099-DA row belongs in H/K, and that gap is owned
   by the owner's S1 decision (the TY2025 rehearsal) — flipping it is the one-flag liveness change `proceeds`.
+  **★ (a)(b)(c) DONE 2026-09-06** — spec `SPEC_1099da_broker_reporting.md` GREEN r6; build T0–T6 landed
+  (`e4b80fda` the record's regime as a core value; `36d83f13` the answers on `ReturnInputs`; `ee02e503` the
+  cohort by mechanism; `249d37ad` the screen + router, slice closed on a live year; `d9863909` one 8949
+  page-set per (part, box); `2feb53d0` Schedule D per-box lines; `ab0c98f8` (f)/(g) blank + the regime-aware
+  advisory; `17753789` + `bb6d140d` the surfaces: `report`'s answers block, the input-form block, the
+  readiness sentence, the forms-tab note, the import doc). The grain became per (provider, cohort) with
+  five answers, not the three-valued `broker_reported` first sketched here — spec R1/R2. **T7 (the owner
+  action) is recorded in `ROADMAP_STATUS.md` §0a with its date.** Remaining: the independent build review
+  of T3–T6 (next gate), then the 4868/1040-V build.
 - **FR-47 — `AmtParams` / `FullReturnParams` TY2026 is a NOW item, not a post-finals one.**
   Transcribe from Rev. Proc. 2025-32 §2.10: exemptions (MFJ $140,200 / single $90,100 / MFS
   $70,100 / trusts $31,400), 28% breakpoints ($122,250 MFS / $244,500 others), and per status BOTH

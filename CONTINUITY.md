@@ -6,6 +6,42 @@ _Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Re
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
 
+> ## ★★★ RESUME 2026-09-06 (night) — the 1099-DA build is COMPLETE through T6, T7 recorded; next is its independent build review, then the 4868/1040-V build. Read this block first.
+>
+> **Owner resumed the session with "Resume"; autonomous again.** Tree clean, `main` not pushed.
+> Owner decisions S1/S2/S6/S7/S9/S10 and the new **T7** (`ROADMAP_STATUS.md` §0a) NOT actioned.
+> The overnight progress page is published (private):
+> https://claude.ai/code/artifact/ff1208a5-0353-4b33-9810-96e0bca8b59b
+>
+> **Since the evening block:** T6-a `17753789` (`report`'s Form 1099-DA answers block via
+> `render_broker_answers` + `broker_key_census`; `YearReadiness::sentence` names the regime — the
+> examples golden moved on exactly its four readiness lines; the TUI forms-tab note is
+> `broker_box_note(year, regime_for(year))`; `income import`'s doc + man page document the TOML
+> shape). T6-b `bb6d140d` (the input-form block: `SectionId::BrokerReporting`, Repeating over the
+> map, `FieldId::BrokerCovered/BrokerNoncovered` Enum slots with `Unanswered` as the clear; `add`
+> refuses, rows are SEEDED from the ledger at open on a basis year (`seed_broker_rows`), the row list
+> enumerates each provider's covered/noncovered row counts (`broker_census` on the form state,
+> `broker_row_provider` in the seam so the renderer lint holds); the four broker refusals anchor the
+> block's slot by cohort; coverage KAT pins 96→98 + the two leaves). T7 written into `ROADMAP_STATUS.md`
+> §0a with the Notice 2026-20 §4.02(2) text, the exact `btctax config --set-forward-method` command
+> and the "does the election record qualify" answer. FR-46 (a)(b)(c) closed in `FOLLOWUPS.md`.
+> Full suite 3091/3091 at `bb6d140d`.
+>
+> **NEXT:** (1) the independent BUILD REVIEW of T3–T6 (opus, worktree at HEAD, report to
+> `design/agent-reports/2026-09-06-build-1099da-T3-T6-review.md`), scoped per B3 to the SEAMS the
+> T0–C review could not see: T3's page-sets ↔ T4's per-box totals ↔ T5's blank (f)/(g) ↔ T6's
+> surfaces, and the answers' whole path import → screen → route → print → report; persist → ledger →
+> fold → re-verify. (2) The 4868/1040-V build T1–T6 (`design/SPEC_form_4868_1040v.md` "Plan"): T1
+> archives `f4868--2024` / `f1040v--2024` (irs-prior, notes + extracts + geometry) — check the
+> `design/forms/2025/` f4868/f1040v archives from `bc88583c` first; T2 `Form4868Map` +
+> `fill_form_4868(&PrintedReturn, year, choices)`; T3 `btctax extension`; T4 `Form1040VMap` + the
+> export hook; T5 the reader's `#[cfg(test)]` walk learns the grid case BEFORE the label join; T6 the
+> surfaces. (3) Then the calendar: the 09-15 real-data run needs the owner's 2026 exports (S5).
+>
+> **Traps (new):** three coverage-KAT pins bite on a new Field (the Field count, the covered-leaf
+> count, the pinned leaf→field map — tuple order is (FieldId, "path")); the tui-edit renderer lint
+> forbids any `ri.<field>` text in draw_edit.rs — route reads through a seam fn.
+
 > ## ★★★ RESUME 2026-09-06 (evening) — the 1099-DA build is through T5; T6 (the surfaces) is MAPPED, not started. Read this block first.
 >
 > **Paused at the owner's "Find a place to pause".** Tree clean, everything on `main` (not pushed),
