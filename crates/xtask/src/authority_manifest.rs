@@ -285,6 +285,33 @@ pub fn verify(root: &Path, entries: &[Entry]) -> Vec<Problem> {
                 if !note.is_file() {
                     out.push(Problem::MissingNote(e.path.clone()));
                 }
+                // ★★★ **AND HASH THE BINARY WHENEVER IT IS ACTUALLY THERE.**
+                //
+                //     This arm used to check only that the note existed. The test that calls it is
+                //     named `every_manifest_entry_resolves_and_hashes_true`, and for note-storage
+                //     entries the second half of that name was FALSE: it could not fail on hash
+                //     grounds at all. Measured when found: 78 of 120 entries are note-storage and
+                //     ALL 78 were present on disk and hashable — so the check was blind on 78 files
+                //     it could have verified that instant. A name asserting what the code does not
+                //     do is worse than no check, because it stops anyone writing the real one.
+                //
+                //     ★ Absence stays fine: note-storage means gitignored, so a fresh clone or CI
+                //       legitimately has no binary and the note carries provenance. What is NOT
+                //       fine is a binary sitting right there whose bytes nobody compares — a
+                //       re-fetch that silently returned a different document, or a form the IRS
+                //       replaced in place, would pass unnoticed. That is not hypothetical here:
+                //       drafts ARE replaced in place, which is why this repo archives their hashes.
+                if abs.is_file() {
+                    if let Ok((sha, _)) = sha256_of(&abs) {
+                        if sha != e.sha256 {
+                            out.push(Problem::HashMismatch {
+                                path: e.path.clone(),
+                                manifest: e.sha256.clone(),
+                                actual: sha,
+                            });
+                        }
+                    }
+                }
             }
         }
         if !e.extract.is_empty() && !root.join(&e.extract).is_file() {
@@ -996,6 +1023,57 @@ mod tests {
                 .iter()
                 .any(|p| matches!(p, Problem::NotInManifest(s) if s.contains("26USC_s1"))),
             "an unlisted primary source must be caught, got {problems:?}"
+        );
+    }
+
+    /// ★★★ **The same kill, on the NOTE path — which is where the hole was.**
+    ///
+    /// The B1 kill above plants its tampered byte on a `Storage::Committed` entry, and the
+    /// `Storage::Note` arm used to check only that the `.txt` note existed. So the test named
+    /// `every_manifest_entry_resolves_and_hashes_true` could not fail on hash grounds for the note
+    /// entries — **78 of 120, every one of them present on disk and hashable at the time**. The kill
+    /// test could not see the hole either, because it only ever planted on the arm that worked.
+    ///
+    /// A checker's kill test has to plant on EVERY path the checker claims to cover, or it certifies
+    /// the paths it happens to visit.
+    #[test]
+    fn a_tampered_note_storage_binary_is_caught_not_only_a_committed_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = dir.path();
+        std::fs::create_dir_all(r.join("design/forms/2025")).unwrap();
+        let rel = "design/forms/2025/f9999--2025.pdf";
+        std::fs::write(r.join(rel), b"%PDF-1.7 original").unwrap();
+        std::fs::write(
+            r.join(format!("{rel}.txt")),
+            "https://example.invalid/f9999\n# sha256: x\n",
+        )
+        .unwrap();
+        let (sha, bytes) = sha256_of(&r.join(rel)).unwrap();
+
+        let good = Entry {
+            path: rel.into(),
+            kind: Kind::Form,
+            storage: Storage::Note,
+            sha256: sha,
+            bytes,
+            url: "https://example.invalid/f9999".into(),
+            extract: String::new(),
+        };
+        assert!(
+            verify(r, std::slice::from_ref(&good))
+                .iter()
+                .all(|p| !matches!(p, Problem::HashMismatch { .. })),
+            "the untampered note entry must not report a hash mismatch, or the red below is noise"
+        );
+
+        // The binary is REPLACED IN PLACE — exactly what the IRS does to a draft.
+        std::fs::write(r.join(rel), b"%PDF-1.7 REVISED").unwrap();
+        assert!(
+            verify(r, &[good])
+                .iter()
+                .any(|p| matches!(p, Problem::HashMismatch { .. })),
+            "a note-storage binary whose bytes no longer match the manifest MUST be caught — it is \
+             the shape of a document the IRS replaced under the same URL"
         );
     }
 
