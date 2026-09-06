@@ -135,11 +135,20 @@ fn stems_for(year: i32) -> Vec<String> {
         })
         .collect();
     stems.sort();
-    assert!(
-        !stems.is_empty(),
-        "forms/{year}/ contains no .map.toml — a year directory the gate cannot see into must not \
-         be silently counted as clean"
-    );
+    if stems.is_empty() {
+        // ★ A year directory with no map is lawful ONLY while its record says `preparing` with an
+        //   empty `forms_expected` (TY2026 since spec 1099-DA T0): the record then accounts for every
+        //   stem as absent-with-reason, which is what "the gate can see into it" means. Any other
+        //   status with no map is the silent-clean shape this assert exists for.
+        let record = btctax_forms::year_record::YearRecord::for_year(year)
+            .unwrap_or_else(|| panic!("forms/{year}/ contains no .map.toml and no YEAR.toml"));
+        assert!(
+            record.status == btctax_forms::year_record::YearStatus::Preparing
+                && record.forms_expected.is_empty(),
+            "forms/{year}/ contains no .map.toml — a year directory the gate cannot see into must not \
+             be silently counted as clean (only a `preparing` record with forms_expected = [] may)"
+        );
+    }
     stems
 }
 

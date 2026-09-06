@@ -44,6 +44,7 @@ fn every_bundled_year_has_a_record_that_partitions_the_closed_set_and_matches_th
             2017 => 5,
             2024 => 17,
             2025 => 15,
+            2026 => 0, // preparing: the record exists, no TY2026 revision is released (spec 1099-DA T0)
             other => panic!("TY{other}: record the expected form count here — a new year does not arrive silently"),
         };
         assert_eq!(
@@ -52,7 +53,7 @@ fn every_bundled_year_has_a_record_that_partitions_the_closed_set_and_matches_th
             "TY{year}: the expected set shrank or grew"
         );
     }
-    assert_eq!(bundled_years(), &[2017, 2024, 2025]);
+    assert_eq!(bundled_years(), &[2017, 2024, 2025, 2026]);
 }
 
 /// The declared status against what the build bundles: only a year whose declaration is `filable`
@@ -98,6 +99,7 @@ fn the_information_return_regime_is_declared_per_year() {
     assert!(!da(2017).proceeds && !da(2017).basis);
     assert!(!da(2024).proceeds && !da(2024).basis);
     assert!(da(2025).proceeds && !da(2025).basis);
+    assert!(da(2026).proceeds && da(2026).basis); // the year the question goes live
 }
 
 fn plant(year: i32, edit: impl Fn(String) -> String) -> YearRecord {

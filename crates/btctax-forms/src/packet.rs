@@ -367,6 +367,17 @@ mod sequence_order_tests {
                     .tap_check(&row)
                 })
                 .collect();
+            if forms.is_empty() {
+                // ★ a year with NOTHING to staple is lawful only while its record says `preparing`
+                //   (TY2026 since spec 1099-DA T0); any other status with zero forms is a red
+                let record = crate::year_record::YearRecord::for_year(year).expect("bundled year");
+                assert_eq!(
+                    record.status,
+                    crate::year_record::YearStatus::Preparing,
+                    "TY{year}: zero bundled forms is only lawful while preparing"
+                );
+                continue;
+            }
             forms.reverse(); // worst case: descending
             sort_by_attachment_sequence(&mut forms);
             assert_eq!(

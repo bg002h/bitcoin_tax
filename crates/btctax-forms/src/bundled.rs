@@ -126,10 +126,12 @@ pub fn bundled_years() -> &'static [i32] {
     BUNDLED_YEARS
 }
 
-/// The bundled years as English for a refusal message — `"2017, 2024 and 2025"` — so no message
-/// ever carries a year literal again.
+/// The years a form can be FILLED, as English for a refusal message — `"2017, 2024 and 2025"` — so
+/// no message ever carries a year literal again. Built from `TEMPLATE_YEARS`, not `BUNDLED_YEARS`:
+/// a `preparing` year with only its record (TY2026 since spec 1099-DA T0) is bundled but cannot fill
+/// anything, and a refusal that named it would send the filer to a year with zero forms.
 pub fn years_sentence() -> String {
-    let ys: Vec<String> = BUNDLED_YEARS.iter().map(|y| y.to_string()).collect();
+    let ys: Vec<String> = TEMPLATE_YEARS.iter().map(|y| y.to_string()).collect();
     match ys.len() {
         0 => "no tax year".to_string(),
         1 => ys[0].clone(),
@@ -255,7 +257,7 @@ mod tests {
         assert_eq!(bundled_years(), dirs.as_slice());
         assert_eq!(
             bundled_years(),
-            &[2017, 2024, 2025],
+            &[2017, 2024, 2025, 2026],
             "three years on disk today"
         );
     }

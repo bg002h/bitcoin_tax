@@ -3,7 +3,8 @@
 //! glob; the adapters crate holds the tables, the full-return params and the price dataset; only this
 //! crate can see all of them — so this is where "is TY2026 ready?" gets one answer, rendered on every
 //! number-bearing surface and used to build every refusal string, instead of five literals that drift
-//! (`selected_year: 2025`, "2017, 2024 and 2025 only", …).
+//! (`selected_year: 2025`, "2017, 2024 and 2025 only", …). The default year is the NEWEST bundled
+//! record, which since spec 1099-DA T0 is a `preparing` TY2026 with zero forms — deliberately.
 //!
 //! The compute gate stays `full_return_for(year)`; this type never makes a year computable. What it
 //! adds is the declared/actual COMPARISON, with kills: a year declared `filable` whose params are not
@@ -200,6 +201,16 @@ pub fn export_stamp(year: i32) -> String {
 
 /// The year a fresh interactive surface opens on: the NEWEST bundled year — derived from the glob,
 /// never a literal. (The TUIs edit any bundled year; "newest" is where a new return starts.)
+/// ★ The Form 1099-DA regime for a year, JOINED from the year record (spec 1099-DA T0). `None` for a
+/// year with no bundled record — the caller refuses, never assumes.
+pub fn regime_for(year: i32) -> Option<btctax_core::InformationReturnRegime> {
+    let r = YearRecord::for_year(year)?;
+    Some(btctax_core::InformationReturnRegime {
+        proceeds: r.information_returns.f1099da.proceeds,
+        basis: r.information_returns.f1099da.basis,
+    })
+}
+
 pub fn default_year() -> i32 {
     *bundled_years()
         .iter()
@@ -312,9 +323,68 @@ mod tests {
         assert!(s.starts_with("TY2020 — not bundled"), "{s}");
     }
 
+    /// ★ spec 1099-DA T0 — the join, per bundled year, and the value type's two flags.
+    #[test]
+    fn the_regime_is_joined_from_the_year_record() {
+        use btctax_core::InformationReturnRegime;
+        let r = |y| regime_for(y).unwrap();
+        assert_eq!(
+            r(2017),
+            InformationReturnRegime {
+                proceeds: false,
+                basis: false
+            }
+        );
+        assert_eq!(
+            r(2024),
+            InformationReturnRegime {
+                proceeds: false,
+                basis: false
+            }
+        );
+        assert_eq!(
+            r(2025),
+            InformationReturnRegime {
+                proceeds: true,
+                basis: false
+            }
+        );
+        assert_eq!(
+            r(2026),
+            InformationReturnRegime {
+                proceeds: true,
+                basis: true
+            }
+        );
+        assert!(
+            regime_for(2023).is_none(),
+            "a year with no record has no regime — refuse, never assume"
+        );
+    }
+
+    /// ★ spec 1099-DA T0 — the box-revision constant and the record cannot drift: proceeds reporting
+    /// begins exactly with the digital-asset box revision, for every bundled year.
+    #[test]
+    fn the_constant_and_the_regime_agree_on_every_bundled_year() {
+        for &y in bundled_years() {
+            let r = regime_for(y).expect("every bundled year has a record");
+            assert_eq!(
+                r.proceeds,
+                y >= btctax_core::DIGITAL_ASSET_8949_FIRST_YEAR,
+                "TY{y}: YEAR.toml says proceeds={} but DIGITAL_ASSET_8949_FIRST_YEAR says {}",
+                r.proceeds,
+                y >= btctax_core::DIGITAL_ASSET_8949_FIRST_YEAR
+            );
+            assert!(
+                !r.basis || r.proceeds,
+                "TY{y}: basis reporting implies proceeds reporting"
+            );
+        }
+    }
+
     #[test]
     fn the_default_year_is_the_newest_bundled_one() {
-        assert_eq!(default_year(), 2025);
+        assert_eq!(default_year(), 2026); // TY2026's record is bundled (preparing) — the year being filed
         assert_eq!(default_year(), *bundled_years().last().unwrap());
     }
 }

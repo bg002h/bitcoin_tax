@@ -137,15 +137,16 @@ const KNOWN_GAPS: &[(i32, &str, &[&str])] = &[
 /// bundled year with no 8275 of its own will appear here, loudly, the day it is added.
 const KNOWN_ALIASES: &[(i32, &str)] = &[(2017, "f8275"), (2025, "f8275")];
 
-/// Bundled year directories that `SUPPORTED_YEARS` does not list. **Empty today** — and, since
-/// design r2 step 3, empty BY CONSTRUCTION: `SUPPORTED_YEARS` is `bundled::BUNDLED_YEARS`, derived
-/// by `build.rs` from the same `forms/<year>/` glob this file walks, so a bundled-but-unlisted year
-/// cannot exist and this ratchet cannot fire (steps-2/3 review Q5). What makes a new year loud now:
+/// Bundled year directories that `SUPPORTED_YEARS` does not list. Since spec 1099-DA T0 this is
+/// exactly the `preparing` years with a record and no template (TY2026): `SUPPORTED_YEARS` is
+/// `bundled::TEMPLATE_YEARS`, `BUNDLED_YEARS` also carries record-only years, and a year in the
+/// second but not the first must be a `preparing` record with `forms_expected = []` — held by
+/// `tests/year_record.rs` and `field_census.rs`, so this ratchet stays informational. What makes a new year loud now:
 /// `build.rs` refuses a year directory without `YEAR.toml`; `bundled::tests::
 /// bundled_years_are_the_year_directories` pins the year list to the directories; and
 /// `tests/year_record.rs` holds the new year's declaration to its glob. Kept as the record of the
 /// old rule and as the place a deliberately-unshipped year would be named.
-const BUNDLED_BUT_NOT_SUPPORTED: &[i32] = &[];
+const BUNDLED_BUT_NOT_SUPPORTED: &[i32] = &[2026]; // TY2026: a `preparing` record with forms_expected = [] (spec 1099-DA T0) — bundled, nothing to fill
 
 /// How many forms each supported year bundles. Pinned so that **deleting** an asset is as loud as
 /// adding one — a cell with no recorded gap vanishing from the matrix would otherwise be silent.

@@ -54,6 +54,22 @@ pub enum Form8949Box {
 /// boxes (A–F) are used. Transactions in TY2025 are filed on the 2025 form.
 pub const DIGITAL_ASSET_8949_FIRST_YEAR: i32 = 2025;
 
+/// ★ The Form 1099-DA REGIME for a tax year, as a VALUE (spec 1099-DA R1, T0): brokers report
+/// gross proceeds from TY2025 and basis on covered digital assets acquired on/after 2026-01-01
+/// (Treas. Reg. §1.6045-1(a)(15)(i)(J)). Declared per year in `forms/<year>/YEAR.toml`
+/// (`information_returns.f1099da`) and passed INTO core by the CLI/TUI — `btctax-forms` depends on
+/// `btctax-core`, so core never reads the record. `DIGITAL_ASSET_8949_FIRST_YEAR` above is the same
+/// fact for the box revision; a CLI kill holds `regime.proceeds == (year >= that constant)` for every
+/// bundled year so the two cannot drift.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InformationReturnRegime {
+    /// Box 1f (proceeds) is reported for dispositions in this year.
+    pub proceeds: bool,
+    /// Box 1g / box 2 (basis, "basis reported to IRS") is reported for covered assets this year —
+    /// the year the broker-reporting question goes LIVE.
+    pub basis: bool,
+}
+
 /// One Form 8949 row = one `DisposalLeg` disposed in the tax year. A pure projection of the leg;
 /// no gain/basis/term math is performed here (all of it is already on the leg from the fold).
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -165,6 +165,23 @@ fn main() {
         years.join(", ")
     )
     .unwrap();
+    // ★ A `preparing` year may bundle its RECORD and no template at all (TY2026 since spec 1099-DA
+    //   T0). Everything that means "a year btctax can FILL" — the cluster guards, the cross-product
+    //   matrix, cite-check's template obligations, the era preset — keys on this list, not on
+    //   BUNDLED_YEARS: a year with zero templates has zero obligations of that kind.
+    let template_years: Vec<String> = found
+        .iter()
+        .filter(|(_, stems)| stems.values().any(|(pdf, map)| *pdf || *map))
+        .map(|(y, _)| y.to_string())
+        .collect();
+    writeln!(out, "\n/// Every tax year with at least one bundled TEMPLATE — the years the crate can fill. A `preparing` year with only a `YEAR.toml` is in `BUNDLED_YEARS` and not here.")
+        .unwrap();
+    writeln!(
+        out,
+        "pub const TEMPLATE_YEARS: &[i32] = &[{}];",
+        template_years.join(", ")
+    )
+    .unwrap();
     writeln!(
         out,
         "\n/// Every `(Stem, year)` this build binds — the row SET, as the glob found it."

@@ -1,0 +1,47 @@
+# ★ Design r2 §6 — the YEAR RECORD: what the TY2026 package INTENDS. A declaration, written by a human,
+#   bound by build.rs, held to the build by `tests/year_record.rs` and `btctax-cli`'s YearReadiness.
+#   `forms_expected` ∪ keys(forms_absent) must partition every form the crate can fill (Stem::ALL);
+#   `forms_expected` must equal the stems on disk. Written 2026-09-06 (spec 1099-DA T0): TY2026 is the
+#   FIRST FILED YEAR (owner ruling 2026-09-05); no TY2026 revision has been released — the package
+#   fills in with the January 2027 finals (design/TY2026_PORT_REPORT.md, design/TY2026_WORK_LIST.md).
+#   ★ Bundling this record makes 2026 the newest bundled year, so `default_year()` → 2026: both TUIs
+#   open on a year with zero bundled forms, and the readiness sentence says so on the unlock screen.
+
+year           = 2026
+status         = "preparing"
+return_due     = 2027-04-15
+tables         = "Rev. Proc. 2025-32 §2.10 + Pub. L. 119-21 (TaxTable TY2026 bundled; FullReturnParams TY2026 transcribed as `ty2026_full_return()` but deliberately NOT inserted into by_year — gate reasons 2 and 3 in tax_tables.rs, FR-47); the record flips to `filable` in the same commit that inserts the params"
+prices_through = 2026-12-31
+
+forms_expected = []
+
+[forms_absent]
+f1040       = "TY2026 revision not released (the file archived as f1040--2026-DRAFT was the TY2025 form); January 2027 package"
+f1040s1     = "TY2026 revision not released; draft archived (its label set cannot be read, FR-58); January 2027 package"
+f1040s1a    = "TY2026 revision not released; draft archived (REBUILT: 175 added fields); January 2027 package"
+f1040s2     = "TY2026 revision not released; draft archived; January 2027 package"
+f1040s3     = "TY2026 revision not released; draft archived; January 2027 package"
+f1040sa     = "TY2026 revision not released; draft archived (REBUILT); January 2027 package"
+f1040sb     = "TY2026 revision not released; draft archived; January 2027 package"
+f1040sc     = "TY2026 revision not released; draft archived (REBUILT); January 2027 package"
+f6251       = "TY2026 revision not released; draft archived (line 1 → 1a/1b restructure expected); January 2027 package"
+f8275       = "periodic (Rev. 10-2024) — served from forms/2024/ by bundled::periodic_template until a later revision is archived"
+f8283       = "periodic (Rev. 12-2025) — served from forms/2025/ by bundled::periodic_template until a later revision is archived"
+f8949       = "TY2026 revision not released; draft archived; January 2027 package"
+f8959       = "TY2026 revision not released; draft archived; January 2027 package"
+f8960       = "TY2026 revision not released; draft archived; January 2027 package"
+f8995       = "TY2026 revision not released; draft archived (REBUILT); January 2027 package"
+f8995a      = "TY2026 revision not released; draft archived; January 2027 package"
+schedule_d  = "TY2026 revision not released; draft archived; January 2027 package"
+schedule_se = "TY2026 revision not released; draft archived; January 2027 package"
+
+[oracles]
+ots     = "none — OpenTaxSolver 2026 does not exist yet (the AFTER OTS 2026 bucket, ROADMAP_STATUS §3)"
+taxcalc = ">= 6.8.2 once TY2026 parameters are validated (currently nothing to validate against)"
+
+# ★ Form 1099-DA regime (spec 1099-DA): brokers report PROCEEDS from TY2025 and BASIS on covered
+#   digital assets acquired on/after 2026-01-01 (Treas. Reg. §1.6045-1(a)(15)(i)(J)). This is the year
+#   the broker-reporting question goes LIVE (liveness = basis AND ≥1 exchange disposition).
+[information_returns.f1099da]
+proceeds = true
+basis    = true

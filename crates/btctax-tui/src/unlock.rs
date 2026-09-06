@@ -219,17 +219,22 @@ pub fn build_snapshot(session: &Session) -> Result<(Snapshot, i32), CliError> {
 }
 
 /// Derive the default display year: the latest year with a disposal or income event,
-/// or 2025 when the ledger is empty.
+/// or the newest bundled year (`default_year`) when the ledger is empty.
 pub fn latest_year(state: &LedgerState) -> i32 {
     let from_disposals = state.disposals.iter().map(|d| d.disposed_at.year());
     let from_income = state
         .income_recognized
         .iter()
         .map(|r| r.recognized_at.year());
+    // ★ A removal (a donation, a gift given) is a year's activity too: a donation-only vault used to
+    //   fall through to the default year — invisible while the default was 2025, visible the day the
+    //   default became a `preparing` TY2026 with nothing to show (spec 1099-DA T0).
+    let from_removals = state.removals.iter().map(|r| r.removed_at.year());
     // ★ Derived, not a literal (FR-48 / port report §2.5 #27): an empty vault opens on the newest
     //   bundled year, whatever this build bundles.
     from_disposals
         .chain(from_income)
+        .chain(from_removals)
         .max()
         .unwrap_or_else(btctax_cli::year_readiness::default_year)
 }

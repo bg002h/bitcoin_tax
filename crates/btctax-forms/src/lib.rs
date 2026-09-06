@@ -90,7 +90,7 @@ use time::macros::format_description;
 ///   so adding a year here is not an edit at all. The four year-sets that used to drift
 ///   (`BundledTaxTables`, this constant, the maps on disk, `full_return_for`) are now compared by
 ///   `btctax_cli::year_readiness::YearReadiness` against each year's `YEAR.toml` declaration.
-pub const SUPPORTED_YEARS: &[i32] = bundled::BUNDLED_YEARS; // ★ DERIVED from the glob by build.rs (design r2 §10 step 3) — the name stays for its ~20 readers, the hand-list is gone
+pub const SUPPORTED_YEARS: &[i32] = bundled::TEMPLATE_YEARS; // ★ DERIVED from the glob by build.rs: the years with at least one bundled TEMPLATE (a `preparing` year with only its record — TY2026 since spec 1099-DA T0 — is bundled but not supported for filling)
 
 /// Format a date as **MM/DD/YYYY** — Form 8949's native date format for columns (b)/(c).
 pub(crate) fn fmt_date(d: TaxDate) -> Result<String, FormsError> {

@@ -147,7 +147,8 @@ pub(crate) struct App {
     /// Populated after a successful `Session::open` + `build_snapshot`.
     pub snapshot: Option<Snapshot>,
     /// Tax year currently displayed in year-scoped tabs (Disposals/Income/Tax/Forms).
-    /// Set to the latest year present in disposals/income after unlock; defaults to 2025.
+    /// Set to the latest year present in disposals/income after unlock; defaults to the newest bundled
+    /// year (`year_readiness::default_year`).
     pub selected_year: i32,
     /// Per-tab table scroll states (mutated by scroll helpers in main.rs).
     pub holdings_state: TableState,

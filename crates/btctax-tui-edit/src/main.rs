@@ -13373,7 +13373,7 @@ mod tests {
             .session
             .as_ref()
             .unwrap()
-            .tax_profile(2025)
+            .tax_profile(app.selected_year) // the editor saved it under the selected year (default_year → TY2026 since T0)
             .unwrap()
             .unwrap();
         use btctax_core::FilingStatus;
@@ -13447,7 +13447,7 @@ mod tests {
             .session
             .as_ref()
             .unwrap()
-            .tax_profile(2025)
+            .tax_profile(app.selected_year) // the editor saved it under the selected year (default_year → TY2026 since T0)
             .unwrap()
             .expect("KAT-F3: profile must be stored");
         use btctax_core::FilingStatus;
@@ -13463,7 +13463,7 @@ mod tests {
             .as_ref()
             .unwrap()
             .profiles
-            .get(&2025)
+            .get(&app.selected_year)
             .expect("KAT-F3: snapshot.profiles must include the stored profile");
         assert_eq!(
             snap_profile, &stored,
@@ -15456,7 +15456,11 @@ mod tests {
         }
         app.do_unlock();
         assert_eq!(app.screen, EditorScreen::Browse);
-        assert_eq!(app.selected_year, 2025, "empty ledger defaults to 2025");
+        assert_eq!(
+            app.selected_year,
+            2026,
+            "empty ledger defaults to the newest bundled year — TY2026, preparing (spec 1099-DA T0)"
+        );
 
         let backend = TestBackend::new(100, 40);
         let mut terminal = Terminal::new(backend).unwrap();
