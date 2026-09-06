@@ -723,6 +723,15 @@ pub fn regen(root: &Path) -> Result<usize, String> {
         ));
     }
 
+    // The URLs the committed manifest already records, as the last fallback below. Read AFTER the
+    // drop refusal above, so a corrupt manifest still fails closed rather than silently supplying
+    // an empty map here.
+    let previous_urls: BTreeMap<String, String> = load(root)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|e| (e.path, e.url))
+        .collect();
+
     let mut entries = Vec::new();
     for rel in sources {
         let abs = root.join(&rel);
@@ -775,10 +784,31 @@ pub fn regen(root: &Path) -> Result<usize, String> {
             Err(_) => (note_sha, 0), // gitignored and absent locally — trust the note
         };
 
+        // ★★★ **A REGEN MAY NOT BLANK A URL IT CANNOT RE-DERIVE.**
+        //
+        //     Measured 2026-09-05: archiving the TY2026 draft set and regenerating blanked the URL
+        //     on **every** draft — including `f6251--2026-DRAFT.pdf`, whose URL had been recorded
+        //     for some time. The entry SURVIVED, so `regen_would_drop` saw nothing: that guard is
+        //     keyed on PATHS and is structurally blind to an entry losing a FIELD. Only the
+        //     `url_coverage_may_only_improve` ratchet caught it.
+        //
+        //     A URL is provenance a regen cannot re-derive — it comes from a fetch script, a note,
+        //     or a human. Everything else here (sha, bytes, storage, extract) is read back off the
+        //     tree. So the existing manifest is the LAST fallback rather than no fallback, and the
+        //     only way a URL now leaves the manifest is a human deleting it.
         let url = if note_url.starts_with("http") {
             note_url
         } else {
-            urls.get(&rel).cloned().unwrap_or_default()
+            urls.get(&rel)
+                .cloned()
+                .filter(|u| !u.is_empty())
+                .or_else(|| {
+                    previous_urls
+                        .get(&rel)
+                        .cloned()
+                        .filter(|u: &String| !u.is_empty())
+                })
+                .unwrap_or_default()
         };
 
         entries.push(Entry {
@@ -882,7 +912,7 @@ mod tests {
     /// ★★ **THE LIVE GATE, direction 1.** Every entry resolves; every committed file hashes true.
     #[test]
     fn every_manifest_entry_resolves_and_hashes_true() {
-        let entries = load(&root()).expect("manifest loads");
+        let entries = load(&crate::form_geometry::repo_root()).expect("manifest loads");
         let problems = verify(&root(), &entries);
         assert!(problems.is_empty(), "{}", report(&problems));
     }
@@ -890,7 +920,7 @@ mod tests {
     /// ★★ **THE LIVE GATE, direction 2.** Every primary source in an accounted-for tree is listed.
     #[test]
     fn every_primary_source_is_in_the_manifest() {
-        let entries = load(&root()).expect("manifest loads");
+        let entries = load(&crate::form_geometry::repo_root()).expect("manifest loads");
         let problems = census(&root(), &entries);
         assert!(problems.is_empty(), "{}", report(&problems));
     }
@@ -1257,7 +1287,7 @@ mod tests {
     ///
     #[test]
     fn duplicate_source_groups_may_only_shrink() {
-        let entries = load(&root()).expect("manifest loads");
+        let entries = load(&crate::form_geometry::repo_root()).expect("manifest loads");
         let dups = duplicates(&entries);
         // ★ One assertion carrying both directions. A rise is a new duplicate; a fall the pin has
         // not tracked is progress the ratchet cannot see, which is how a pin rots into a number
@@ -1286,7 +1316,7 @@ mod tests {
     /// shrink-only, never a silent blank.
     #[test]
     fn url_coverage_may_only_improve() {
-        let entries = load(&root()).expect("manifest loads");
+        let entries = load(&crate::form_geometry::repo_root()).expect("manifest loads");
         let excused: BTreeSet<&str> = URL_NOT_RECOVERABLE.iter().copied().collect();
 
         let unexcused: Vec<&str> = entries
@@ -1323,7 +1353,7 @@ mod tests {
     /// rung 4 is the only rung that is law, and an archive without it is not an authority archive.
     #[test]
     fn the_manifest_covers_the_law_itself() {
-        let entries = load(&root()).expect("manifest loads");
+        let entries = load(&crate::form_geometry::repo_root()).expect("manifest loads");
         for (kind, least) in [(Kind::Statute, 16), (Kind::Regulation, 6)] {
             let n = entries.iter().filter(|e| e.kind == kind).count();
             assert!(
@@ -1426,5 +1456,51 @@ mod draft_discriminator_tests {
             "the TY2026 Form 6251 draft is archived, so at least one draft must be recognised — if \
              this is empty the discriminator has gone blind, which is worse than not having one"
         );
+    }
+}
+
+#[cfg(test)]
+mod regen_preserves_provenance_tests {
+    use super::*;
+
+    /// ★★★ **A regen may not blank a URL it cannot re-derive.**
+    ///
+    /// Measured 2026-09-05: archiving the TY2026 draft set and regenerating blanked the URL on
+    /// EVERY draft, including one that had been recorded for some time. The entries SURVIVED, so
+    /// `regen_would_drop` — which is keyed on PATHS — saw nothing. A guard against losing rows is
+    /// structurally blind to a row losing a FIELD, and only the `url_coverage_may_only_improve`
+    /// ratchet caught it.
+    ///
+    /// Everything else in an entry (sha256, bytes, storage, extract) is read back off the tree. A
+    /// URL is not: it comes from a fetch script, a note, or a human. So it must survive a regen,
+    /// and the only way one leaves the manifest is a human deleting it.
+    #[test]
+    fn a_regen_preserves_urls_it_cannot_rederive() {
+        let entries = load(&crate::form_geometry::repo_root()).expect("manifest loads");
+        let drafts: Vec<&Entry> = entries.iter().filter(|e| e.is_draft()).collect();
+        assert!(
+            !drafts.is_empty(),
+            "no drafts in the manifest — this test would pass vacuously"
+        );
+        let blank: Vec<&str> = drafts
+            .iter()
+            .filter(|e| e.url.is_empty())
+            .map(|e| e.path.as_str())
+            .collect();
+        assert!(
+            blank.is_empty(),
+            "these drafts have no URL: {blank:?}. A draft is fetched from ONE unversioned IRS path \
+             and replaced in place, so its URL is the only way to re-fetch and compare it against \
+             the final — losing it is losing the draft->final diff."
+        );
+        // Every draft URL must be an irs-dft one, which is also the second signal `is_draft` reads.
+        for d in &drafts {
+            assert!(
+                d.url.contains("/irs-dft/"),
+                "{} is a draft but its URL is not an irs-dft path: {}",
+                d.path,
+                d.url
+            );
+        }
     }
 }
