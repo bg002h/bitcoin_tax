@@ -195,7 +195,7 @@ pub struct BrokerReporting(pub BTreeMap<String, CohortAnswers>); // TOML: [broke
   subsumed by the first while liveness is gated on `basis`; both are kept deliberately (belt and
   braces), so the two kills are not duplicates by accident but by design (r3 M-6).
 - **The crypto slice is CLOSED on a LIVE year (N-3).** `export_irs_pdf_from_session`
-  (`admin.rs:594`) runs the crypto slice iff no `ReturnInputs` is stored, and the answers live on
+  (`admin.rs:642`, THE DISPATCH at `:670`) runs the crypto slice iff no `ReturnInputs` is stored, and the answers live on
   `ReturnInputs`; so for a LIVE year (basis regime AND ≥1 exchange disposition — a TY2026 vault with only
   self-custody dispositions still fills) the slice arm refuses **before any byte**, unconditionally,
   and the refusal names the exit: *"TY2026 Form 8949 needs the Form 1099-DA answers, which live on the
@@ -274,46 +274,87 @@ TY2025 only I/L are USED (R1); the **2026** map inherits the six-box table at po
 runbook gains the row). TY2024's map keeps C/F only.
 
 **R6 — the crypto slice files a LIVE year from the stored answers when the year's full return cannot
-compute (owner ruling 2026-09-06, reversing S10).** THE DISPATCH in `export_irs_pdf_from_session`
-(`crates/btctax-cli/src/cmd/admin.rs`, the block headed "THE DISPATCH (P6.5)") becomes three-way:
+compute (owner ruling 2026-09-06, reversing S10; r1 review 2C/5I/6M/2N folded here).** THE DISPATCH
+in `export_irs_pdf_from_session` (`crates/btctax-cli/src/cmd/admin.rs`, the block headed "THE
+DISPATCH (P6.5)") becomes three-way. The predicate is a function call, never a declared status:
+`BundledFullReturnTables::load().full_return_for(year).is_none()` (N-2).
 
-1. **inputs stored AND `full_return_for(year)` is `Some`** → the full-return packet, unchanged.
-2. **inputs stored AND no full-return parameters bundled** → the CRYPTO SLICE, with the Form 8949 boxes
-   ROUTED from `ri.broker_reporting` through exactly the screen and router the full return uses
-   (`screen_broker_reporting` then `route_8949_boxes`): an unanswered, `mixed` or `basis_differs` key,
-   or a stored answer no row reads, refuses BEFORE any byte with the same refusal text the full return
-   prints. The slice's Schedule D carries the per-box lines (1b/2/8b/9) exactly as T4 prints them. The
-   export report carries one note, printed after the file list: *"TY{y}: full-return parameters are not
-   bundled in this build — this is the crypto slice (Form 8949, Schedule D, …) with the boxes routed
-   from your Form 1099-DA answers; the full return follows when the year's package is bundled."* The
-   `--forms full-return` and `--pay-by-check` refusals stand on this arm (there is no Form 1040 line 37).
+1. **inputs stored AND `full_return_for(year)` is `Some`** → the full-return packet, unchanged. The
+   `exists` branch keeps its early `return` ONLY in this case (M-2).
+2. **inputs stored AND `full_return_for(year).is_none()`** → the CRYPTO SLICE, reached by NOT returning
+   early, with the Form 8949 boxes ROUTED from `ri.broker_reporting` through exactly the screen and
+   router the full return uses (`screen_broker_reporting` then `route_8949_boxes`). Before any byte,
+   in this order (I-5): the promote gate; the form-level gate (I-1) — `Form8949Map::for_year(y)` AND
+   `ScheduleDMap::for_year(y)` must resolve, so a partially ported year names the missing stem and
+   writes nothing (`SUPPORTED_YEARS` is a year-level answer and is not this gate); the pseudo-
+   attestation gate; `screen_broker_reporting` (an unanswered, `mixed` or `basis_differs` key, or a
+   stored answer no row reads, refuses with the SAME `Refusal` reason/detail in the SLICE's own
+   sentence — never "the return is not computable", which is false here (M-1)); and the Form 8283
+   restriction row in its slice form — `ri.donations_had_restrictions == Some(true)` AND the year
+   emits an 8283 → refuse, no `form_8283.pdf`. It does NOT run `screen_inputs` or
+   `screen_compute_dependent`: neither reaches a figure the slice prints. The `--forms full-return`
+   and `--pay-by-check` refusals stand on this arm (there is no Form 1040 line 37).
+   **The slice's Schedule D carries the per-box lines from the ROUTED rows (T8, below).** The export
+   report carries one note, printed after the file list (M-6): *"TY{y}: full-return parameters are not
+   bundled in this build — this is the crypto slice, an ATTACHMENT SET (Form 8949, Schedule D, …) with
+   the boxes routed from your Form 1099-DA answers; your own Form 1040 carries it, and
+   `form_1040_capgains.pdf` is a worksheet, not a return. The full return follows when the year's
+   package is bundled."*
 3. **no inputs stored** → the slice as today: a live year with ≥1 exchange disposition refuses before
    any byte and names the exit; the exit sentence becomes *"… answer them in the TUI input form (the
    Form 1099-DA block lists your venues) or via `income import`, then export again — the crypto slice
    fills from the answers; a full return is not required."*
 
-`report --tax-year Y` in state (2) keeps its outcome (uncomputable; the inputs are kept) and
-`uncomputable_sentence` gains one clause: *"`export-irs-pdf --tax-year {y}` still prints the crypto
-slice from these inputs."* The TUI's export (`crates/btctax-tui/src/export.rs`) takes the same
-three-way dispatch, reading the stored answers the way the T3–T6 fold gave the viewer Snapshot the
-answers (`c25f7489`). No new vault table: the answers stay on `ReturnInputs` (one source of truth),
-authored through the TUI input form — whose Form 1099-DA block is seeded from the ledger's keys on a
-basis year — or `income import`.
+**`report` in state (2) (I-3).** `report --tax-year Y` renders the crypto-delta report AND the Form
+1099-DA answers block (the row enumeration R1 mandates), and prints `uncomputable_sentence` as a
+NOTE in place of the dual/absolute section, exiting 0; a `screen_inputs`-refusing field is still a
+hard refusal. `uncomputable_sentence` AND `import_note` (I-4) gain the clause *"`export-irs-pdf
+--tax-year {y}` still prints the crypto slice from these inputs"*, and `import_note` stops saying
+`report` will refuse.
+
+**The TUI export (I-2).** It is CSV-only and has no full-return arm: it passes
+`snap.broker_answers.get(&year)` into `write_form_csvs`, and the 1099-DA screen + route runs BEFORE
+`mkdir_owner_only_exclusive`, so a refusal leaves no directory.
+
+**Price coverage (M-5).** `YearReadiness::problems` checks `prices_max_date >= prices_through` only
+in the `Filable` arm; any year EXPORTED through arm (2) or (3) gets the same check at export time
+(the `Slice`/`Preparing` arm gains it when the year is exported), refusing before any byte.
 
 **What R6 does not change.** TY2026 prints nothing until its Form 8949 and Schedule D FINAL revisions
-are bundled (`SUPPORTED_YEARS` is the template years; both forms are "unchanged" in shape on the 2026
-drafts per `TY2026_WORK_LIST.md`, so the port is two rows); that lands Nov 2026 – Jan 2027, earlier
-than and independent of `FullReturnParams` TY2026, the i1040gi worksheets and the OTS-2026 census. A
-year with inputs AND parameters is the full return, always — R6 never lets a slice print where the
-full packet can.
+are bundled (both forms are "unchanged" in shape on the 2026 drafts per `TY2026_WORK_LIST.md`, so
+the port is two rows), Nov 2026 – Jan 2027 — earlier than and independent of `FullReturnParams`
+TY2026, the i1040gi worksheets and the OTS-2026 census. A year with inputs AND parameters is the
+full return, always. TY2025 + stored inputs now PRINTS on arm (2) under the proceeds-only regime
+with the I/L boxes — that inherits R1's recorded I/L gap (H/K belongs to the S1 rehearsal decision)
+and is not evidence the gap is closed (M-4). No new vault table: the answers stay on `ReturnInputs`.
+
+**New build tasks (from the r1 review's Criticals).**
+- **T8 — the slice's Schedule D, per box.** `btctax_core::forms::schedule_d_by_box(rows: &[Form8949Row])`
+  aggregated from the ROUTED rows (never re-derived from `state`, so the page-set and the schedule
+  cannot disagree); `fill_schedule_d_totals` writes `line1b`/`line2`/`line8b`/`line9` from it and
+  leaves `line3`/`line10` to the I/L residue ONLY; a box group with no rows writes nothing. Kill: a
+  live-regime `basis_matches` slice → `f8949.pdf` carries a G page-set, Schedule D line 1b carries the
+  G total AND line 3 is BLANK; on a G+I mix each total lands on its own line and `1b_d + 3_d` cross-
+  foots to the part total (M-3).
+- **T9 — commit the answers on a params-less year.** `input_form_store::commit_broker_answers_only(year,
+  &BrokerReporting)` writes/merges JUST `broker_reporting` onto the committed `return_inputs` row
+  (creating it from `ReturnInputs::default()` with the year when absent), leaving the I-11 finalize
+  guard on the full return untouched; the TUI's commit modal offers it on a live year whose params
+  are absent and says which of the two it did; `income import` of a file carrying only
+  `tax_year` + `[broker_reporting.*]` reaches the same row. Kills: TY2026 + a TUI-committed answer →
+  `return_inputs::exists(2026)` is TRUE and `export-irs-pdf` reaches arm (2); TY2026 + a params-less
+  commit of the FULL return → still `NoTables` + draft (I-11 unmoved).
 
 **Kills (the build lands each with its own):** TY2025 (templates, no params) + stored inputs → the
 slice PRINTS (today it refuses "no full-return tables for 2025"); the LIVE regime injected on the
-TY2025 templates (the T-tests' pattern) + inputs with `basis_matches` → `f8949.pdf` carries a G
-page-set and Schedule D line 1b carries the G total; same with one key unanswered → refusal, no byte
-(`wrote_nothing`); a stored answer no row reads → the unread refusal; TY2024 + inputs → the full
-packet still (unchanged); `--pay-by-check` on arm (2) → the I-7 refusal; the TUI export on the same
-three states; the report note present on arm (2) only; the two exit sentences.
+TY2025 templates (the T-tests' pattern) + inputs with `basis_matches` → the T8 kill; same with one key
+unanswered → refusal in the slice's sentence, no byte (`wrote_nothing`); a stored answer no row reads
+→ the unread refusal; TY2024 + inputs → the full packet still; `--pay-by-check` on arm (2) → the I-7
+refusal; the partially-ported-year refusal (a fixture year with one bundled template and no f8949
+map → refusal, `out_dir` absent; the f8949 map alone → still refused, naming `schedule_d`); the 8283
+restriction refusal and its `false` twin; the TUI export's two states (refusal → no directory;
+answered → `form8949.csv` box G); `report` in state (2) exits 0 with the answers block and the note;
+the two exit sentences; the price-coverage refusal on an exported year whose dataset ends early.
 
 ## Current state — hook points (recon @ c76adf6b, cites re-resolved @ 2aa4ea98)
 
