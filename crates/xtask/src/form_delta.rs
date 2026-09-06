@@ -509,7 +509,17 @@ mod tests {
         assert_eq!(
             wrong.len(),
             1,
-            "a NO DRAFT claim with the draft fixture on disk: {wrong:?}"
+            "an excused row whose pair EXISTS: {wrong:?}"
+        );
+        // ★ isolates the `claims_no_draft` conjunct (r3 R2): the pair does not compute (no prior
+        //   PDF), the prior claim is true, and ONLY the draft-on-disk conjunct can red it.
+        let (_, _, wrong) = check_work_list(
+            "| `f8995a` | yes | **NO PRIOR SIDE** | **NO DRAFT** — planted | — |\n",
+        );
+        assert_eq!(
+            wrong.len(),
+            1,
+            "a NO DRAFT claim with the draft archived on disk: {wrong:?}"
         );
         let (_, _, wrong) = check_work_list(
             "| `f1040` | yes | **NO PRIOR SIDE** — planted | no draft either | — |\n",
@@ -526,11 +536,13 @@ mod tests {
             1,
             "a row that claims neither side is not an excuse: {wrong:?}"
         );
+        // the control tests the PREDICATE on a stem that can never be archived (r3 R5) — the
+        // inventory coupling belongs to the_committed_work_list_matches_form_delta_at_head
         let (_, excused, wrong) = check_work_list(
-            "| `f1040` | yes | `f1040--2025` | **NO DRAFT** — the draft was the TY2025 form | **NO DRAFT** |\n",
+            "| `zzz-not-a-form` | yes | **NO PRIOR SIDE** | **NO DRAFT** — synthetic | — |\n",
         );
         assert!(
-            wrong.is_empty() && excused == ["f1040"],
+            wrong.is_empty() && excused == ["zzz-not-a-form"],
             "a true excuse: {wrong:?}"
         );
     }
@@ -538,10 +550,10 @@ mod tests {
     /// `(compared, excused, wrong)` over every table row of a work-list document.
     fn check_work_list(doc: &str) -> (Vec<String>, Vec<String>, Vec<String>) {
         let root = crate::form_geometry::repo_root();
-        let fixture = |stem: &str| {
-            root.join(format!("design/forms/geometry/{stem}.json"))
-                .exists()
-        };
+        // ★ The claim is about the ARCHIVE (the PDF), and `compute` enters this arm on a missing PDF —
+        //   so the check reads the PDF too (r3 R3), never the geometry fixture, a different artifact.
+        let _ = &root;
+        let archived = |stem: &str| super::pdf_for(stem).is_some();
         let mut compared = Vec::new();
         let mut excused = Vec::new();
         let mut wrong = Vec::new();
@@ -593,8 +605,8 @@ mod tests {
                 // NO DRAFT means no `<form>--2026-DRAFT` fixture. Every claim made is checked, and
                 // a row that makes neither is not an excuse.
                 (None, Err(_)) => {
-                    let draft = fixture(&format!("{form}--2026-DRAFT"));
-                    let prior = fixture(&format!("{form}--2025"));
+                    let draft = archived(&format!("{form}--2026-DRAFT"));
+                    let prior = archived(&format!("{form}--2025"));
                     let claims_no_prior = prior_cell.contains("NO PRIOR SIDE");
                     let claims_no_draft = ty2026_cell.contains("NO DRAFT");
                     let ok = (claims_no_prior || claims_no_draft)

@@ -1112,11 +1112,14 @@ mod map_label_join_tests {
             .map(str::trim)
             .filter(|l| !l.starts_with('#'))
             .filter(|l| {
+                // `[line7a]` and `[[line5_rows]]` (an ARRAY of tables, r3 R6) both name a numbered
+                // line; `[[part1_rows]]` names a positional grid row and is not one
                 let key = if let Some(rest) = l.strip_prefix('[') {
-                    if rest.starts_with('[') {
-                        return false; // `[[part1_rows]]` — a positional grid row
-                    }
-                    rest.split(']').next().unwrap_or("").trim()
+                    rest.trim_start_matches('[')
+                        .split(']')
+                        .next()
+                        .unwrap_or("")
+                        .trim()
                 } else if let Some((k, _)) = l.split_once('=') {
                     k.trim()
                 } else {
@@ -1152,6 +1155,11 @@ mod map_label_join_tests {
             "2024",
             "f8275",
             "Form 8275's disclosure items are positional rows; no numbered line",
+        ),
+        (
+            "2017",
+            "f8283",
+            "positional property rows; the Rev. 12-2014 map binds no Section B question line (unreachable: no TY2017 geometry; listed so the ledger is total, r3 R1)",
         ),
         (
             "2025",
@@ -1206,7 +1214,9 @@ mod map_label_join_tests {
     ///
     /// Named cells (`line_a_business`) still carry no label and are skipped. The quote split assumes
     /// quotes alternate open/close on a line — no committed map has `\"` or a quoted trailing
-    /// comment in a `lineN` value; if one appears, the failure is a phantom binding → a false FAIL.
+    /// comment in a `lineN` value, and inside a section EVERY quoted FQN on every non-comment line
+    /// is attributed to the line (a comment quoting a superseded FQN would be a phantom binding);
+    /// if one appears, the failure is a phantom binding → a false FAIL, never a false PASS.
     fn line_bindings(path: &std::path::Path) -> Vec<(String, String)> {
         let text = std::fs::read_to_string(path).unwrap();
         let mut out = Vec::new();
@@ -1232,11 +1242,15 @@ mod map_label_join_tests {
                 continue;
             }
             if let Some(rest) = l.strip_prefix('[') {
-                section = if rest.starts_with('[') {
-                    None
-                } else {
-                    numbered(rest.split(']').next().unwrap_or("").trim())
-                };
+                // a `[lineN]` section or a `[[lineN_rows]]` array element: every quoted FQN on the
+                // following lines belongs to that line; any other header ends the section
+                section = numbered(
+                    rest.trim_start_matches('[')
+                        .split(']')
+                        .next()
+                        .unwrap_or("")
+                        .trim(),
+                );
                 continue;
             }
             if let Some(line) = &section {
@@ -1470,8 +1484,11 @@ mod map_label_join_tests {
             // joined (fold review r2 N1). Measured, not estimated.
             min_joins: 261,
             max_unwitnessed: 1,
-            why: "f8283 — design/forms/ holds i8283--2024 (the instructions) but not the form, so \
-                  there is no PDF to extract geometry from.",
+            why: "f8283 — design/forms/2024/ holds only i8283--2024 (the instructions); the form \
+                  AUTHORITY was never archived, so `xtask extract-geometry f8283--2024` has no \
+                  input. The bundled crates/btctax-forms/forms/2024/f8283.pdf is not an extraction \
+                  source. Archiving the authority would join 3 lines / 6 section-bound bindings \
+                  (r3 R4).",
         },
         YearFloor {
             year: "2025",
@@ -1933,9 +1950,16 @@ mod map_label_join_tests {
     /// all three, so a section-bound line can no longer vanish from both at once.
     #[test]
     fn every_binding_shape_is_parsed_and_counted() {
-        let dir = std::env::temp_dir().join(format!("btctax-shapes-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let p = dir.join("shapes.map.toml");
+        struct Scratch(std::path::PathBuf);
+        impl Drop for Scratch {
+            fn drop(&mut self) {
+                std::fs::remove_dir_all(&self.0).ok(); // also on an unwinding assertion (r3 R7)
+            }
+        }
+        let dir =
+            Scratch(std::env::temp_dir().join(format!("btctax-shapes-{}", std::process::id())));
+        std::fs::create_dir_all(&dir.0).unwrap();
+        let p = dir.0.join("shapes.map.toml");
         let text = r#"
 line1 = "a[0].b[0].f1_1[0]" # a trailing comment
 line3 = { proceeds_d = "a[0].b[0].f1_3[0]", cost_e = "a[0].b[0].f1_4[0]" }
@@ -1943,6 +1967,8 @@ line_a_business = "a[0].b[0].f1_9[0]"
 [line7a]
 yes = { field = "a[0].b[0].c1_1[0]", on = "1" }
 no  = { field = "a[0].b[0].c1_1[1]", on = "2" }
+[[line5_rows]]
+cell = "a[0].b[0].f1_30[0]"
 [[part1_rows]]
 cells = ["a[0].b[0].f1_20[0]"]
 "#;
@@ -1951,11 +1977,14 @@ cells = ["a[0].b[0].f1_20[0]"]
         let lines: Vec<&str> = b.iter().map(|(l, _)| l.as_str()).collect();
         assert_eq!(
             lines,
-            ["1", "3", "3", "7a", "7a"],
-            "scalar, inline table x2, section x2 — nothing from the grid row or the named cell"
+            ["1", "3", "3", "7a", "7a", "5_rows"],
+            "scalar, inline table x2, section x2, array-of-tables x1 — nothing from the grid row or the named cell"
         );
-        assert_eq!(numbered_line_keys(text), 3, "line1, line3, [line7a]");
-        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(
+            numbered_line_keys(text),
+            4,
+            "line1, line3, [line7a], [[line5_rows]]"
+        );
     }
 }
 
