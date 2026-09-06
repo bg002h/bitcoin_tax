@@ -1523,7 +1523,13 @@ fn characterization_full_return_export_pins_the_shipped_file_set_and_report() {
     assert_eq!(report.schedule_d_path, None);
     assert_eq!(report.tax_year, T14_YEAR);
     assert_eq!(report.unresolved_hard, 0);
-    assert_eq!(report.broker_reported_rows, 0);
+    // ★ C1 kill: this fixture's disposal is on an EXCHANGE wallet, and the crypto-slice arm above
+    // counts it (`broker_reported_rows == 1`). This assertion pinned `0` on the same vault for
+    // months — the characterization of a defect. The full-return arm must count the same row.
+    assert_eq!(
+        report.broker_reported_rows, 1,
+        "the full-return arm reads the broker-review count from the printed 8949, not a literal"
+    );
     assert!(
         !report.watermarked,
         "a real (non-pseudo) ledger exports CLEAN"

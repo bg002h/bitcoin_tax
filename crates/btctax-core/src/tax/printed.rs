@@ -68,6 +68,12 @@ pub struct Printed8949 {
     pub long_term: Vec<Printed8949Row>,
     pub st_totals: Printed8949Totals,
     pub lt_totals: Printed8949Totals,
+    /// **C1** — how many of the rows this 8949 was printed from are exchange dispositions that MAY
+    /// carry broker reporting (`box_needs_review`). Carried HERE, derived from the same rows the
+    /// packet printed, so the full-return export's [I5] advisory reads the figure the return
+    /// produced instead of a literal. From TY2026 brokers report BASIS on Form 1099-DA (TD 10000),
+    /// so a non-zero count on an I/L-boxed 8949 is the filer's only prompt to reconsider the box.
+    pub possibly_broker_reported: usize,
 }
 
 /// Derive the printed Form 8949 from the ledger's rows. `None` when the year has no disposals — a
@@ -112,6 +118,7 @@ pub fn form_8949_printed(rows: &[crate::forms::Form8949Row]) -> Option<Printed89
         lt_totals: total(&long_term),
         short_term,
         long_term,
+        possibly_broker_reported: crate::forms::possibly_broker_reported(rows),
     })
 }
 
@@ -2724,6 +2731,7 @@ mod tests {
         Printed8949 {
             short_term: Vec::new(),
             long_term: Vec::new(),
+            possibly_broker_reported: 0,
             st_totals: Printed8949Totals {
                 proceeds_d: round_dollar(p.st_proceeds_3d),
                 cost_e: round_dollar(p.st_cost_3e),

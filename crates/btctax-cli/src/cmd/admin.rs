@@ -1217,7 +1217,14 @@ fn export_full_return(
         watermarked,
         tax_year,
         unresolved_hard,
-        broker_reported_rows: 0,
+        // ★ C1 (Fable plan review, 2026-09-05): this was a literal `0`, so the [I5] advisory NEVER
+        // fired on the one path that hands the filer a packet to sign — while the slice arm counted
+        // the same rows correctly. Read from the SAME `Printed8949` the packet was printed from.
+        broker_reported_rows: printed
+            .forms
+            .f8949
+            .as_ref()
+            .map_or(0, |f| f.possibly_broker_reported),
         full_return_paths: paths,
         full_return_manifest: Some(manifest_path),
         forms_ignored_full_return: false, // set by the dispatch (which has `forms`), not here

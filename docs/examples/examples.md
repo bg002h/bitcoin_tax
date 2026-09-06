@@ -806,6 +806,7 @@ Check what this feature actually produced: open the Form 8275 PDF and confirm th
     the ratio of Form 8960 line 8 (gross investment income) to your AGI. Work out your own
     figure and enter it, or leave the line blank and claim nothing.
   (Advisories never change a number and never fail the command. See `btctax limitations`.)
+⚠ [I5] 2 disposition(s) occurred on an exchange that MAY have issued 1099-B broker basis reporting — those would belong on a SEPARATE Form 8949 under Box A/B (ST) / D/E (LT). This export files EVERY Bitcoin row under Box C/F (not-reported default) and says so; reclassify by hand if you received a 1099-B.
 ```
 
 ## J7 — income received off-exchange, valued by hand (`--fmv`)

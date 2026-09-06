@@ -197,6 +197,15 @@ pub struct ScheduleDTotals {
 /// all-gains fixture with zero carryforward-in + zero other-net-capital-gain (the R0-M3
 /// reconciliation KAT) — `schedule_d` and `compute_tax_year` are separate functions reading the same
 /// `state.disposals`, so the equality is a genuine cross-check, not a tautology.
+/// **[I5]/C1** How many of these rows MIGHT belong on a separate broker-reported Form 8949 — the
+/// count of `box_needs_review` rows. This is the ONE predicate behind the broker-reporting advisory
+/// on BOTH export arms: the crypto slice counts it over its own rows, and the full return carries it
+/// on `Printed8949` from the same rows the packet was printed from. Two computations of this
+/// predicate is how the full-return arm came to hardcode `0` (Fable plan review C1, 2026-09-05).
+pub fn possibly_broker_reported(rows: &[Form8949Row]) -> usize {
+    rows.iter().filter(|r| r.box_needs_review).count()
+}
+
 pub fn schedule_d(state: &LedgerState, year: i32) -> ScheduleDTotals {
     let mut totals = ScheduleDTotals::default();
     for d in state

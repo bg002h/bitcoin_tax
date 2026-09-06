@@ -433,7 +433,7 @@ pub fn fill_form_1040_capgains(
 /// under C/F pre-TY2025; a 1099-DA / Box G/H/J/K, filed under I/L from TY2025. A non-zero count is a
 /// loud advisory, not a refusal.
 pub fn rows_possibly_broker_reported(rows: &[Form8949Row]) -> usize {
-    rows.iter().filter(|r| r.box_needs_review).count()
+    btctax_core::forms::possibly_broker_reported(rows)
 }
 
 // ── Internals exposed for the KATs (fault injection needs a corruptible map + the verifier). ──────
