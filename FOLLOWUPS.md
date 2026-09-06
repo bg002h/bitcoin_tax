@@ -6245,8 +6245,10 @@ build, each with an owning phase.
   TY2026 return valuing a December-2026 card reward has no bundled close. `YEAR.toml prices_through
   = 2026-12-31` + a `YearReadiness` kill (`status = "filable"` with `max_date() < prices_through` →
   red) + a runbook step "refresh the dataset through 12-31 before declaring the year filable".
-  **Owning phase: `YEAR.toml` (table build step 4) for the field; the pre-season checklist for the
-  refresh.**
+  ✅ **DONE 2026-09-06:** `prices_through` is on every `YEAR.toml` (2024-12-31, 2025-12-31), the
+  `YearReadiness` kill reds a filable year whose dataset ends before it (`year_readiness.rs:78-82`), and
+  the calendar (`ROADMAP_STATUS.md` §3) carries the pre-season row "refresh through 12-31 BEFORE
+  `filable`". Owning phase discharged.
 - **FR-54 — M1's three remaining "partly mechanical" H steps**, un-recorded by the first fold (fold
   review F12): step **5** (instructions stem + pages: `fNNNN`→`iNNNN` plus the two-row alias
   `f1040sa`→`i1040sca` / Schedules 1-A/2/3 → `i1040gi`, then a `pdftotext` header search for the
