@@ -47,6 +47,21 @@ _Last updated: **2026-09-04**. Written at a deliberate pause; safe to exit. **Re
 > 7. The Fable reminder in `ROADMAP_STATUS.md` §5 and the memory file: DISCHARGED — the switch
 >    happened and the review ran.
 >
+> ## ★★★ STATE AT 6267b6b1 (2026-09-05, latest) — design GREEN; STEP 1 LANDED; phase review running
+>
+> - Re-review r3 was **0C/0I/3M** (`53ca5b61`; Minors folded `fc6dea70`) → the design is green.
+> - **Step 1 DONE — `6267b6b1`**: the ROW on all 37 maps (computed by script), `MapRow`/`Versioning`,
+>   nine fields on 17 structs, four kills observed red on planted copies, the two-way join through
+>   `irs_stem` in xtask, 3016 tests. Found and fixed FR-55 (Form 8283 stapled last for TY2025: the
+>   template prints 36, the literal said 155). An independent phase review of `6267b6b1` is
+>   RUNNING → `design/agent-reports/2026-09-05-r2-step1-review.md`; persist, ledger, fold.
+> - **NEXT: step 2** — `build.rs` beside the old arms (globs `forms/<year>/`, emits `bundled.rs` with
+>   `Stem`, `template()`, `map_text()`, `bundled_years()`), a test that `template`/`map_text` agree
+>   byte-for-byte with every existing `include_*` const, and the `cargo package --list` gate that
+>   every globbed file is in the tarball (design r2 §5). Then step 3 (switch fills; `Unwired` arm).
+> - Also landed today: FR-49 authorities archived (`bc88583c`: f4868/f1040v 2025), the 270 GB
+>   worktree cleanup (`c46e9e1a`).
+>
 > ## ★★★ STATE AT de1fa8a3 (2026-09-05, latest) — FR-47 landed; fold C landed; re-review r3 RUNNING
 >
 > - **FR-47 DONE — `8b36aba0`**: `pub fn ty2026_full_return()` in `tax_tables.rs`, every cell from a

@@ -6230,5 +6230,13 @@ build, each with an owning phase.
   comment — that is what transcription is — and the human confirms); step **21** (the census
   `artifact` rule — header boxes, "Reserved for future use", page-2 repeats — is mechanical by shape
   and should be pre-filled; engine claims stay human). **Owning phase: the port machine.**
+- **FR-55 — ✅ CLOSED in `6267b6b1`: the TY2025 packet stapled Form 8283 in the wrong order.**
+  Rev. 12-2025 (the TY2025 template) prints Attachment Sequence No. **36**; `packet.rs` pushed
+  `"155"` (Rev. 12-2014 / 12-2023) for every year, and *"the prefix IS the stapling order"*
+  (`admin.rs`). Found by design r2 step 1's `attachment_sequence` kill BEFORE a single row had been
+  typed — the kill's value is read off the printed form, the literal was typed from memory. Fixed as
+  one `attachment_sequence(stem, year)`; `packet_sequences_agree_with_every_map_row` holds every
+  literal to the form. ★ Lesson for the port runbook: a form's sequence number is a property of the
+  REVISION, and periodic forms change it (`f8275r--2025` prints 92A).
 - **Owner decision, unchanged and still open:** whether TY2017 ships at all (five wired forms, zero
   evidence behind them). Not an implementer's call.

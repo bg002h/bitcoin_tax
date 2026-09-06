@@ -206,14 +206,20 @@ witness) · `forms_expected` == present ∪ absent-with-reason · every `Stem` h
 | `FORMS_ABSENT_FROM_YEAR` | `YEAR.toml` `forms_absent` |
 | `TY2025_RETURN_DUE`, `TRANSITION_DATE` | `YEAR.toml` `return_due` |
 | `selected_year: 2025` × 2 | derived from `YearReadiness` |
-| 16 attachment-sequence literals | the header field, checked against the extract (the 1040 has none) |
+| 16 attachment-sequence literals | the header field, checked against the extract (the 1040 has none). Step 1 collapsed the literals into one `packet::attachment_sequence(stem, year)` held to every row by test; it retires into the row at step 3 |
 | `cite_check.rs::FORMS` (`FormAuthority { form, year, instructions, instr_pages, extract_stem }`, one row) | `instructions` / `instr_pages` header fields. ★ Its `extract_stem` points at a SECOND extract root, `crates/btctax-core/src/tax/fixtures/` (`schedule_1a_2025_form.txt`, `schedule_1a_2025_instructions.txt`), which §4's derive-by-convention rule cannot express. Decision (corrected, fold review r2 G3): the two fixtures are a SECOND EXTRACTION of files already under the convention — `f1040s1a--2025.txt` (11,153 B vs the fixture's 11,443 B) and pages 101–110 of `i1040gi--2025.txt` (the fixture is a 52,672 B slice; the booklet extract is 616,274 B). **Nothing moves**: a `mv` would clobber the booklet extract every other i1040gi-hosted schedule's gate reads, and pointing `tables.rs:1351,1365` at `design/` would make two escaping `include_str!`s — §5's publishing trap. The instructions fixture is regenerated at test time from the booklet extract using the header's `instr_pages`; the form fixture is replaced by `f1040s1a--2025.txt` **once a test asserts every `FORMS` quotation still resolves against it** (the two extractions differ by 290 B). Both are then deleted; until then the header carries `extract_override = "…"` and the ratchet below keeps its row (fold review F2) |
 | `cite_check.rs::AUTHORITY_NOT_YET_ARCHIVED` (shrink-only, `(form, years)`, 36 of 37 pairs excused today) | This is a DIFFERENT "archived" from the manifest join: it means "no `FormAuthority` row + extract for cite-check", and it retires as map headers gain `instructions`/extract coverage. The MANIFEST join (`template_sha256`) is the other notion and reds today on exactly **6 of 37** templates — all five TY2017 and `forms/2024/f8283.pdf` (measured by sha256 join, fold review F7) — so the header gets `authority = "not-yet-archived: <reason>"` for those six, and the join kill treats that field as the excuse. Two of the six ride on the open TY2017 decision |
 | `BundledFullReturnTables` 2024-only | **untouched** — it is the compute gate; `YEAR.toml` `status` declares, it decides |
 
 ## 10. Sequencing — proof before switch
 
-1. **Header parse + glob-derived row set + the two-way test**, consuming nothing. Add the header fields
+1. ✅ **DONE `6267b6b1` (2026-09-05)** — 37 rows written by script (values computed, never typed);
+   `MapRow` + `Versioning`; nine fields on all 17 structs; the four kills each observed red on a
+   planted tempdir copy; the two-way test through `irs_stem` in xtask; 3016 tests. **The first kill
+   found a live defect before it existed:** Form 8283 Rev. 12-2025 prints Attachment Sequence No.
+   **36**, `packet.rs` pushed `"155"` for every year — the TY2025 packet stapled it last. Fixed as
+   one `attachment_sequence(stem, year)` held to every row. Independent phase review: pending.
+   **Header parse + glob-derived row set + the two-way test**, consuming nothing. Add the header fields
    to the 37 existing maps (`attachment_sequence` absent on the three `f1040` maps; per-year
    `line_set`s on the 15 maps served by the five shared structs, §4; the ten unwired TY2025 maps — `f6251`, `f8959`, `f8960`, `f8995`, `f1040s1a`, `f1040s2`, `f1040s3`, `f1040sa`, `f1040sb`, `f1040sc` — carry a `line_set` with no schema behind it until step 5); parse them with required
    fields; assert **`{ (irs_stem, year) from the glob's headers } == emitted_form_years()`** both ways
