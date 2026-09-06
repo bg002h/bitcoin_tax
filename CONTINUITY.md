@@ -55,7 +55,12 @@ _Last updated: **2026-09-04**. Written at a deliberate pause; safe to exit. **Re
 >   `irs_stem` in xtask, 3016 tests. Found and fixed FR-55 (Form 8283 stapled last for TY2025: the
 >   template prints 36, the literal said 155). An independent phase review of `6267b6b1` is
 >   RUNNING → `design/agent-reports/2026-09-05-r2-step1-review.md`; persist, ledger, fold.
-> - **NEXT: step 2** — `build.rs` beside the old arms (globs `forms/<year>/`, emits `bundled.rs` with
+> - **Step 2 DONE — `68b86b8e`** (build.rs + `Stem` + generated bindings + the tarball gate; 3022 tests).
+> - **NEXT: step 3** — switch the fillers over (`map_text(Stem::X, y)` → row → `LineSet` → the exhaustive
+>   `line_set → schema` match with an explicit `Unwired` arm for the ten TY2025 maps), delete the 18 + 17
+>   arms, the 54 consts and `SUPPORTED_YEARS` (error message built from `bundled_years()`). Wait for the
+>   step-1 phase review to land first (it audits the 37 row values step 3 would bake in).
+> - (was) **step 2** — `build.rs` beside the old arms (globs `forms/<year>/`, emits `bundled.rs` with
 >   `Stem`, `template()`, `map_text()`, `bundled_years()`), a test that `template`/`map_text` agree
 >   byte-for-byte with every existing `include_*` const, and the `cargo package --list` gate that
 >   every globbed file is in the tarball (design r2 §5). Then step 3 (switch fills; `Unwired` arm).

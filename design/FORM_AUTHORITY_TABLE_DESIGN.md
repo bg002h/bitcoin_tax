@@ -232,7 +232,11 @@ witness) · `forms_expected` == present ∪ absent-with-reason · every `Stem` h
    "Attachment Sequence No." (tolerating the 1040, F8). The fifth kill — `line_set` naming neither a schema nor
    `Unwired` → compile error — needs §5's match and is planted at step 3 (F6). **Red on any disagreement is the
    deliverable.**
-2. **`build.rs` beside the old arms**, with a test that `template`/`map_text` agree byte-for-byte with
+2. ✅ **DONE `68b86b8e` (2026-09-05)** — `build.rs` (binds only; refuses a non-year directory and an
+   unpaired file, both observed red), `bundled.rs` with the hand-written `Stem` (18, incl. `F1040s1a`
+   with no filler yet), `template`/`map_text`/`BUNDLED_YEARS`/`BUNDLED`; byte-agreement with all 54
+   old consts; the `cargo package --list` gate in xtask with its kill. 3022 tests.
+   **`build.rs` beside the old arms**, with a test that `template`/`map_text` agree byte-for-byte with
    every existing `include_*` const, and the `cargo package --list` gate.
 3. **Switch `packet.rs` fills over one at a time**; delete the 18 + 17 arms and `SUPPORTED_YEARS`. The
    compiler names every remaining reader. The `line_set → struct` match lands here with an explicit
