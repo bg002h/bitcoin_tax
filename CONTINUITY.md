@@ -47,6 +47,30 @@ _Last updated: **2026-09-04**. Written at a deliberate pause; safe to exit. **Re
 > 7. The Fable reminder in `ROADMAP_STATUS.md` §5 and the memory file: DISCHARGED — the switch
 >    happened and the review ran.
 >
+> ## ★★★ TWO MORE REVIEWS LANDED AND ARE PERSISTED (2026-09-05, late) — read before building
+>
+> 1. **The r2 FOLD review** — `design/agent-reports/2026-09-05-fable-plan-review.r2-fold-review.md`
+>    (opus, independent; persisted `d32f7246`): **0C / 7I / 5M**. The fold was faithful; what it missed
+>    is the SIBLING DOCUMENT (I1/I2/M2 folded into r2/CLAUDE.md/ROADMAP while the quoted sentences
+>    still stand in `TY2026_PORT_REPORT.md:257,300,274` and `LONG_RANGE_PLAN_filing.md:467,489`), and
+>    **design r2 §10 step 1 is NOT executable as written** (F4 namespace mismatch with
+>    `emitted_form_years()`; F5 `line_set` has two definitions that disagree for ~13 maps; F6 one kill
+>    needs step 3; F7 the manifest join reds on 6/37 rows — all five TY2017 + `forms/2024/f8283.pdf` —
+>    with no excuse slot; F8 the 1040 has no attachment sequence). F9 (statute location) is already
+>    fixed in `58200a59`. **Fold this BEFORE typing the first header.**
+> 2. **The STRATEGY review** — `design/agent-reports/2026-09-05-fable-strategy-review.md` (Fable,
+>    owner-requested; persisted `297ab7db`). Verdict: files TY2026 on the EXTENSION, not April, and
+>    only if the Sep–Dec slack goes to the owner's real data rather than the port generator. The
+>    single most likely failure: **the lived journey is scheduled last** — the owner's exchanges
+>    report BASIS on 1099-DA for the first time (~2027-02-16) and the tool has nowhere to put it.
+>    Nine ranked improvements S1–S9 and a month-by-month calendar. **Several are OWNER decisions**,
+>    not implementer calls: S1 (un-pause a TY2025 REHEARSAL slice — diff against the return filed
+>    outside, never mailed), S2 (two questions: the real 2026 income/venue/deduction set, and state of
+>    residence), S6 (cut document-review rounds to one; fan-outs ≤ 6), S7 (pre-rule the oracle
+>    fallback), S9 (drop TY2017). Non-owner items (S3 1099-DA input, S4 machinery hard stop 10-31,
+>    S5 real-data runs at the estimate dates, S8 physical print rehearsal) are folded into
+>    `ROADMAP_STATUS.md` §3 and `FOLLOWUPS.md` as they are actioned.
+>
 > **NEXT: the build starts at design r2 §10 step 1** — header fields on the 37 existing maps,
 > required-field parse, `glob == emitted_form_years()` both ways, each §4 kill planted first;
 > nothing consumes it yet. Red on any disagreement is the deliverable. In parallel (NOW bucket):
