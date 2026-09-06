@@ -422,49 +422,19 @@ mod tests {
     /// and it decayed silently when the reader behind the "lines that moved" column changed (four
     /// cells, including the only claim that Form 6251 moves a line). Every numeric row of the
     /// committed table is recomputed here at HEAD; every excused row ("Not listed") must be excused
-    /// for a REAL reason (no pair at HEAD); and every stem with a map in any bundled year must
-    /// appear in one table or the other — the doc's own "wrong denominator" warning, made a check.
+    /// for the reason its own cell prints (fold review r2 N6: "no pair" alone would accept an
+    /// accidentally deleted fixture); and every stem with a map in any bundled year must appear in
+    /// one table or the other — the doc's own "wrong denominator" warning, made a check.
     #[test]
     fn the_committed_work_list_matches_form_delta_at_head() {
-        let doc = std::fs::read_to_string(
-            crate::form_geometry::repo_root().join("design/TY2026_WORK_LIST.md"),
-        )
-        .unwrap();
-        let mut compared: Vec<String> = Vec::new();
-        let mut excused: Vec<String> = Vec::new();
-        let mut wrong: Vec<String> = Vec::new();
-        for l in doc.lines() {
-            let Some((form, cells)) = parse_work_list_row(l) else {
-                continue;
-            };
-            let pair = super::compute(&format!("{form}--2025"), &format!("{form}--2026-DRAFT"));
-            match (cells, pair) {
-                (Some(cells), Ok(d)) => {
-                    compared.push(form.clone());
-                    let got = (
-                        d.common.len(),
-                        d.added.len(),
-                        d.removed.len(),
-                        d.label_moved.len(),
-                    );
-                    if got != cells {
-                        wrong.push(format!(
-                            "{form}: table says {cells:?}, form-delta at HEAD says {got:?}"
-                        ));
-                    }
-                }
-                (Some(_), Err(e)) => {
-                    wrong.push(format!("{form}: a numeric row, but no pair at HEAD ({e})"))
-                }
-                (None, Err(_)) => excused.push(form.clone()),
-                (None, Ok(_)) => wrong.push(format!(
-                    "{form}: excused as having no pair, but form-delta computes one"
-                )),
-            }
-        }
+        let root = crate::form_geometry::repo_root();
+        let doc = std::fs::read_to_string(root.join("design/TY2026_WORK_LIST.md")).unwrap();
+        let (compared, excused, wrong) = check_work_list(&doc);
         let mut stems: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-        let forms = crate::form_geometry::repo_root().join("crates/btctax-forms/forms");
-        for year in std::fs::read_dir(&forms).unwrap().flatten() {
+        for year in std::fs::read_dir(root.join("crates/btctax-forms/forms"))
+            .unwrap()
+            .flatten()
+        {
             let Ok(maps) = std::fs::read_dir(year.path()) else {
                 continue;
             };
@@ -507,25 +477,120 @@ mod tests {
             "work list rows that no longer match the tool:\n  {}",
             wrong.join("\n  ")
         );
-        // the plant: a cell off by one is a disagreement, so the comparison above can fail
-        let (f, c) = parse_work_list_row("| `f6251` | 62 | 0 | 0 | 1 | port |").unwrap();
-        let d = super::compute("f6251--2025", "f6251--2026-DRAFT").unwrap();
-        assert_eq!(f, "f6251");
-        assert_ne!(
-            Some((
-                d.common.len(),
-                d.added.len(),
-                d.removed.len(),
-                d.label_moved.len()
-            )),
-            c
+    }
+
+    /// The plants (fold review r2 N6): the SAME checker over a synthetic document must red on a
+    /// wrong cell, on a numeric row with no pair, and on an excuse whose cell names the wrong side.
+    #[test]
+    fn the_work_list_checker_reds_on_every_planted_row() {
+        let (_, _, wrong) = check_work_list("| `f6251` | 62 | 0 | 0 | 1 | port |\n");
+        assert_eq!(wrong.len(), 1, "a cell off by one: {wrong:?}");
+        let (_, _, wrong) = check_work_list("| `f1040` | 199 | 0 | 0 | 0 | unchanged |\n");
+        assert_eq!(
+            wrong.len(),
+            1,
+            "a numeric row whose pair does not exist: {wrong:?}"
+        );
+        let (_, _, wrong) = check_work_list(
+            "| `f6251` | yes | `f6251--2025` | **NO DRAFT** — planted | **NO DRAFT** |\n",
+        );
+        assert_eq!(
+            wrong.len(),
+            1,
+            "a NO DRAFT claim with the draft fixture on disk: {wrong:?}"
+        );
+        let (_, _, wrong) = check_work_list(
+            "| `f1040` | yes | **NO PRIOR SIDE** — planted | no draft either | — |\n",
+        );
+        assert_eq!(
+            wrong.len(),
+            1,
+            "a NO PRIOR SIDE claim with the 2025 fixture on disk: {wrong:?}"
+        );
+        let (_, _, wrong) =
+            check_work_list("| `f1040` | yes | `f1040--2025` | nothing claimed | — |\n");
+        assert_eq!(
+            wrong.len(),
+            1,
+            "a row that claims neither side is not an excuse: {wrong:?}"
+        );
+        let (_, excused, wrong) = check_work_list(
+            "| `f1040` | yes | `f1040--2025` | **NO DRAFT** — the draft was the TY2025 form | **NO DRAFT** |\n",
+        );
+        assert!(
+            wrong.is_empty() && excused == ["f1040"],
+            "a true excuse: {wrong:?}"
         );
     }
 
+    /// `(compared, excused, wrong)` over every table row of a work-list document.
+    fn check_work_list(doc: &str) -> (Vec<String>, Vec<String>, Vec<String>) {
+        let root = crate::form_geometry::repo_root();
+        let fixture = |stem: &str| {
+            root.join(format!("design/forms/geometry/{stem}.json"))
+                .exists()
+        };
+        let mut compared = Vec::new();
+        let mut excused = Vec::new();
+        let mut wrong = Vec::new();
+        for l in doc.lines() {
+            let Some((form, cells, prior_cell, ty2026_cell)) = parse_work_list_row(l) else {
+                continue;
+            };
+            let pair = super::compute(&format!("{form}--2025"), &format!("{form}--2026-DRAFT"));
+            match (cells, pair) {
+                (Some(cells), Ok(d)) => {
+                    compared.push(form.clone());
+                    let got = (
+                        d.common.len(),
+                        d.added.len(),
+                        d.removed.len(),
+                        d.label_moved.len(),
+                    );
+                    if got != cells {
+                        wrong.push(format!(
+                            "{form}: table says {cells:?}, form-delta at HEAD says {got:?}"
+                        ));
+                    }
+                }
+                (Some(_), Err(e)) => {
+                    wrong.push(format!("{form}: a numeric row, but no pair at HEAD ({e})"))
+                }
+                (None, Ok(_)) => wrong.push(format!(
+                    "{form}: excused as having no pair, but form-delta computes one"
+                )),
+                // an excused row must be excused for the reason its own cells print: a prior-side
+                // cell saying NO PRIOR SIDE means no `<form>--2025` fixture; a TY2026 cell saying
+                // NO DRAFT means no `<form>--2026-DRAFT` fixture. Every claim made is checked, and
+                // a row that makes neither is not an excuse.
+                (None, Err(_)) => {
+                    let draft = fixture(&format!("{form}--2026-DRAFT"));
+                    let prior = fixture(&format!("{form}--2025"));
+                    let claims_no_prior = prior_cell.contains("NO PRIOR SIDE");
+                    let claims_no_draft = ty2026_cell.contains("NO DRAFT");
+                    let ok = (claims_no_prior || claims_no_draft)
+                        && (!claims_no_prior || !prior)
+                        && (!claims_no_draft || !draft);
+                    if ok {
+                        excused.push(form.clone());
+                    } else {
+                        wrong.push(format!(
+                            "{form}: excused as prior={prior_cell:?} / TY2026={ty2026_cell:?}, but on disk prior={prior} draft={draft}"
+                        ));
+                    }
+                }
+            }
+        }
+        (compared, excused, wrong)
+    }
+
     /// A row of either work-list table: `| \`form\` | common | added | removed | moved | shape |`
-    /// → `(form, Some(cells))`; a "Not listed" row (`| \`form\` | emitted? | … |`) → `(form, None)`.
+    /// → `(form, Some(cells), _, _)`; a "Not listed" row (`| \`form\` | emitted? | prior | TY2026
+    /// side | cell |`) → `(form, None, the prior-side cell, the TY2026-side cell)`.
     #[allow(clippy::type_complexity)]
-    fn parse_work_list_row(l: &str) -> Option<(String, Option<(usize, usize, usize, usize)>)> {
+    fn parse_work_list_row(
+        l: &str,
+    ) -> Option<(String, Option<(usize, usize, usize, usize)>, String, String)> {
         let cells: Vec<&str> = l.split('|').map(str::trim).collect();
         if cells.len() < 6 || !cells[1].starts_with('`') {
             return None;
@@ -536,7 +601,12 @@ mod tests {
             (Some(a), Some(b), Some(c), Some(d)) => Some((a, b, c, d)),
             _ => None,
         };
-        Some((form, numeric))
+        Some((
+            form,
+            numeric,
+            cells.get(3).unwrap_or(&"").to_string(),
+            cells.get(4).unwrap_or(&"").to_string(),
+        ))
     }
 
     use super::*;

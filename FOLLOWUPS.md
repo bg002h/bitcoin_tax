@@ -6260,3 +6260,17 @@ build, each with an owning phase.
   REVISION, and periodic forms change it (`f8275r--2025` prints 92A).
 - **Owner decision, unchanged and still open:** whether TY2017 ships at all (five wired forms, zero
   evidence behind them). Not an implementer's call.
+
+- **FR-56 — `first_bundled_year(stem) > year` fails open once a later year bundles a form an earlier year lost**
+  (label-join fold review r2 N8). `tests/field_census.rs`'s filable-year absence rule takes the stem's first
+  bundled year from the years ON DISK: if TY2026 lands and `f1040s1a` were then dropped from `forms/2025/`,
+  its first bundled year becomes 2026 > 2025 and the absence is excused on a filable TY2025. Not live (only
+  TY2024 is filable; `measured != recorded` still reds unless `YEAR.toml` is edited too). The structural
+  statement is a `first_year` on `Stem` itself — the form's first tax year is an IRS fact, not a bundle
+  fact — a per-stem constant that must land with its source cited per stem. **Owning phase: the TY2026
+  package (when a second filable year exists).**
+- **FR-57 — `FiledPacket`'s `pub` fields still allow an unsorted packet from outside the crate** (r2 N9).
+  `stapled(…)` sorts; `p.forms.push(…)` afterwards does not. `Default` is gone (fold review L7); the
+  remaining path is a `pub` field on a `#[non_exhaustive]` struct. Make the fields private behind
+  `forms()`/`statements()` readers when the next packet change touches the type. **Owning phase: the next
+  `packet.rs` change (Form 4868/1040-V lands two non-members and a `stapled` kill).**

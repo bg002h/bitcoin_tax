@@ -1105,94 +1105,167 @@ mod map_label_join_tests {
     /// How many NUMBERED `lineN…` keys a map's text holds, counted on the raw text with no parsing
     /// of the right-hand side — so a parser that drops a binding cannot also hide the key it dropped
     /// (fold review L2: the R2 parser produced EMPTY maps, and an emptiness guard is silent on empty).
+    /// Counts all THREE shapes: `line7a = …` scalar, `line3 = { … }` inline table, and a `[line7a]`
+    /// table section — the third was invisible to a `split_once('=')` counter (fold review r2 N1).
     fn numbered_line_keys(text: &str) -> usize {
         text.lines()
             .map(str::trim)
             .filter(|l| !l.starts_with('#'))
-            .filter_map(|l| l.split_once('=').map(|(k, _)| k.trim()))
-            .filter(|k| {
-                k.strip_prefix("line")
+            .filter(|l| {
+                let key = if let Some(rest) = l.strip_prefix('[') {
+                    if rest.starts_with('[') {
+                        return false; // `[[part1_rows]]` — a positional grid row
+                    }
+                    rest.split(']').next().unwrap_or("").trim()
+                } else if let Some((k, _)) = l.split_once('=') {
+                    k.trim()
+                } else {
+                    return false;
+                };
+                key.strip_prefix("line")
                     .is_some_and(|rest| rest.chars().next().is_some_and(|c| c.is_ascii_digit()))
             })
             .count()
     }
 
-    /// Maps that hold NO numbered line key BY DESIGN — repeating grids whose rows are addressed
-    /// positionally and carry no single printed label: Form 8949's transaction rows, Form 8283's
-    /// property rows, Form 8275's disclosure-item rows (measured 2026-09-06: 0 numbered keys each). A map here with a numbered key,
-    /// or a map NOT here without one, is a red: the two blanks must never look alike (L5).
-    const GRID_MAPS: &[&str] = &["f8949", "f8283", "f8275"];
+    /// Maps that hold NO numbered line key, each with its MEASURED reason (fold review r2 N2: a
+    /// reason recorded for a whole stem was false for one of its years — `2024/f8283` binds
+    /// `[line5a]`/`[line5b]`/`[line5c]`, the 2025 map does not). A map here with a numbered key, or
+    /// a map NOT here without one, is a red: the two blanks must never look alike (L5).
+    const GRID_MAPS: &[(&str, &str, &str)] = &[
+        (
+            "2017",
+            "f8949",
+            "positional transaction rows (`[[part1_rows]]`); no numbered line",
+        ),
+        (
+            "2024",
+            "f8949",
+            "positional transaction rows; no numbered line",
+        ),
+        (
+            "2025",
+            "f8949",
+            "positional transaction rows; no numbered line",
+        ),
+        (
+            "2024",
+            "f8275",
+            "Form 8275's disclosure items are positional rows; no numbered line",
+        ),
+        (
+            "2025",
+            "f8283",
+            "the Rev. 12-2025 map binds property rows positionally and no Section B question line",
+        ),
+    ];
 
     /// The one predicate behind the per-map reach line — pure, so it can be planted red without
     /// touching the tree. `keys` is [`numbered_line_keys`] (raw text), `extracted` what
     /// [`line_bindings`] parsed, `joined` how many of those landed on a geometry box.
     fn map_reach_problem(
+        year: &str,
         form: &str,
         keys: usize,
         extracted: usize,
         joined: usize,
     ) -> Option<String> {
-        let grid = GRID_MAPS.contains(&form);
+        let grid = GRID_MAPS.iter().any(|(y, f, _)| *y == year && *f == form);
         match (grid, keys, extracted, joined) {
             (true, 0, _, _) => None,
             (true, k, _, _) => Some(format!(
-                "{form}: listed in GRID_MAPS but holds {k} numbered line key(s) — remove it from the list or the keys"
+                "{form}: listed in GRID_MAPS for {year} but holds {k} numbered line key(s) — remove it from the list or the keys"
             )),
             (false, 0, _, _) => Some(format!(
-                "{form}: NO numbered line key — a grid map must be named in GRID_MAPS; anything else must bind its lines"
+                "{form}: NO numbered line key — a grid map must be named in GRID_MAPS with its reason; anything else must bind its lines"
             )),
             (false, k, 0, _) => Some(format!(
                 "{form}: {k} numbered line key(s), 0 extracted — the parser dropped every binding (the R2 shape)"
             )),
-            (false, _, e, 0) => Some(format!("{form}: {e} binding(s) extracted, 0 joined — the join never examined them")),
+            // every numbered key yields at least one FQN, so fewer extracted than keys is a PARTIAL
+            // silent drop (fold review r2 N5)
+            (false, k, e, _) if e < k => Some(format!(
+                "{form}: {k} numbered line key(s) but only {e} extracted — a partial silent drop"
+            )),
+            (false, _, e, 0) => Some(format!(
+                "{form}: {e} binding(s) extracted, 0 joined — the join never examined them"
+            )),
             _ => None,
         }
     }
 
-    /// `lineN = "<FQN>"` bindings from a committed map, one entry per (line, FQN). A line bound as
-    /// an inline table (`line3 = { proceeds_d = "…", cost_e = "…", gain_h = "…" }` — Schedule D's
-    /// single named rows with several columns) yields one entry per column: each of those cells sits
-    /// beside the same printed label, and dropping them was a second silent drop (fold review L4,
-    /// 22 free joins). Named cells (`line_a_business`) still carry no label and are skipped.
+    /// `lineN = "<FQN>"` bindings from a committed map, one entry per (line, FQN). THREE shapes bind
+    /// a numbered line, and every one yields its FQNs here:
+    /// - `line7a = "…"` — the plain scalar (a trailing `# comment` is fine: first quoted token);
+    /// - `line3 = { proceeds_d = "…", cost_e = "…" }` — an inline table (Schedule D's single named
+    ///   rows with several columns; dropping them was a second silent drop, fold review L4);
+    /// - `[line7a]` … `yes = { field = "…", on = "1" }` — a TABLE SECTION, the shape every Yes/No
+    ///   checkbox pair and sub-row table in this tree uses (Schedule B 7a/8, Schedule 1-A 22a/22b,
+    ///   Schedule D 17/20/22, Form 8283 5a–5c); dropping it was the third (fold review r2 N1). A
+    ///   section runs until the next `[…]` or `[[…]]` header.
+    ///
+    /// Named cells (`line_a_business`) still carry no label and are skipped. The quote split assumes
+    /// quotes alternate open/close on a line — no committed map has `\"` or a quoted trailing
+    /// comment in a `lineN` value; if one appears, the failure is a phantom binding → a false FAIL.
     fn line_bindings(path: &std::path::Path) -> Vec<(String, String)> {
         let text = std::fs::read_to_string(path).unwrap();
         let mut out = Vec::new();
+        let numbered = |key: &str| -> Option<String> {
+            let line = key.strip_prefix("line")?;
+            line.chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_digit())
+                .then(|| line.to_string())
+        };
+        let fqns = |l: &str| -> Vec<String> {
+            l.split('"')
+                .skip(1)
+                .step_by(2)
+                .filter(|v| v.contains('[') && v.contains('.'))
+                .map(str::to_string)
+                .collect()
+        };
+        let mut section: Option<String> = None;
         for l in text.lines() {
             let l = l.trim();
             if l.starts_with('#') {
                 continue;
             }
-            if let Some((lhs, rhs)) = l.split_once('=') {
-                let key = lhs.trim();
-                if !key.starts_with("line") {
-                    continue;
-                }
-                let line = &key["line".len()..];
-                // Only NUMBERED lines carry a printed label (`line7a`, `line22b`); a named cell
-                // (`line_a_business`, Schedule C's `line_b_naics`) is not a line on the page and
-                // `label_matches` would compare its empty first token to nothing.
-                if !line.chars().next().is_some_and(|c| c.is_ascii_digit()) {
-                    continue;
-                }
-                // ★ The FIRST quoted token on the right-hand side — not "the whole RHS is one quoted
-                //   string". Every binding that carried a trailing `# comment` used to be dropped
-                //   SILENTLY here: TY2025's Schedule A contributed ZERO of its nineteen bindings to
-                //   the join while the year's floor stayed green (steps-4/5 review R2).
-                let rhs = rhs.trim();
-                let quoted: Vec<&str> = if rhs.starts_with('{') {
-                    // every `"…"` value in the inline table, in order
-                    rhs.split('"').skip(1).step_by(2).collect()
+            if let Some(rest) = l.strip_prefix('[') {
+                section = if rest.starts_with('[') {
+                    None
                 } else {
+                    numbered(rest.split(']').next().unwrap_or("").trim())
+                };
+                continue;
+            }
+            if let Some(line) = &section {
+                for v in fqns(l) {
+                    out.push((line.clone(), v));
+                }
+                continue;
+            }
+            if let Some((lhs, rhs)) = l.split_once('=') {
+                let Some(line) = numbered(lhs.trim()) else {
+                    continue;
+                };
+                let rhs = rhs.trim();
+                let vals: Vec<String> = if rhs.starts_with('{') {
+                    fqns(rhs)
+                } else {
+                    // ★ The FIRST quoted token on the right-hand side — not "the whole RHS is one
+                    //   quoted string". Every binding that carried a trailing `# comment` used to be
+                    //   dropped SILENTLY here (steps-4/5 review R2).
                     rhs.strip_prefix('"')
                         .and_then(|s| s.split_once('"'))
                         .map(|(v, _)| v)
+                        .filter(|v| v.contains('[') && v.contains('.'))
+                        .map(str::to_string)
                         .into_iter()
                         .collect()
                 };
-                for v in quoted {
-                    if v.contains('[') && v.contains('.') {
-                        out.push((line.to_string(), v.to_string()));
-                    }
+                for v in vals {
+                    out.push((line.clone(), v));
                 }
             }
         }
@@ -1392,19 +1465,22 @@ mod map_label_join_tests {
         YearFloor {
             year: "2024",
             // 99 → 235 on 2026-09-06: the binding parser dropped every `line = "…" # comment` (R2),
-            // and the join gained the x-aware in-row rule. Measured, not estimated.
-            min_joins: 249,
+            // and the join gained the x-aware in-row rule; 235 → 249 when Schedule D's inline-table
+            // rows joined (fold review L4); 249 → the value below when `[lineN]` table sections
+            // joined (fold review r2 N1). Measured, not estimated.
+            min_joins: 261,
             max_unwitnessed: 1,
             why: "f8283 — design/forms/ holds i8283--2024 (the instructions) but not the form, so \
                   there is no PDF to extract geometry from.",
         },
         YearFloor {
             year: "2025",
-            // 82 → 193 on 2026-09-06 (same fix as 2024); then 193 → the value below when Schedule
-            // D's inline-table rows joined (fold review L4). Thirteen of fifteen TY2025 maps
+            // 82 → 193 on 2026-09-06 (same fix as 2024); 193 → 201 when Schedule D's inline-table
+            // rows joined (fold review L4); 201 → the value below when `[lineN]` table sections
+            // joined (fold review r2 N1). Thirteen of fifteen TY2025 maps
             // contribute; `f8949` and `f8283` are positional grids with no numbered key, named in
             // `GRID_MAPS` so that blank is recorded rather than silent (L5).
-            min_joins: 201,
+            min_joins: 215,
             max_unwitnessed: 0,
             why: "every TY2025 form is archived with geometry; nothing is unreachable",
         },
@@ -1545,7 +1621,7 @@ mod map_label_join_tests {
                 map_joined,
                 map_unboxed
             );
-            if let Some(p) = map_reach_problem(&m.form, keys, bindings.len(), map_joined) {
+            if let Some(p) = map_reach_problem(&m.year, &m.form, keys, bindings.len(), map_joined) {
                 per_map_zero.push(format!("{}/{p}", m.year));
             }
         }
@@ -1813,30 +1889,73 @@ mod map_label_join_tests {
     /// the first cut's `!bindings.is_empty()` guard was silent on the exact map R2 found).
     #[test]
     fn map_reach_problem_reds_on_every_planted_shape() {
+        let p = map_reach_problem;
         assert!(
-            map_reach_problem("f1040sa", 19, 0, 0).is_some(),
+            p("2025", "f1040sa", 19, 0, 0).is_some(),
             "keys but nothing extracted (R2)"
         );
         assert!(
-            map_reach_problem("f1040sa", 5, 5, 0).is_some(),
+            p("2025", "f1040sa", 5, 5, 0).is_some(),
             "extracted but nothing joined"
         );
         assert!(
-            map_reach_problem("f1040", 0, 0, 0).is_some(),
+            p("2025", "f1040sa", 19, 1, 1).is_some(),
+            "a PARTIAL silent drop (r2 N5)"
+        );
+        assert!(
+            p("2025", "f1040", 0, 0, 0).is_some(),
             "no numbered key on a non-grid map"
         );
         assert!(
-            map_reach_problem("f8949", 1, 1, 1).is_some(),
+            p("2025", "f8949", 1, 1, 1).is_some(),
             "a grid map grew a numbered key"
         );
         assert!(
-            map_reach_problem("f8949", 0, 0, 0).is_none(),
-            "a grid map with no key is the recorded blank"
+            p("2024", "f8283", 0, 0, 0).is_some(),
+            "2024/f8283 binds 5a–5c: NOT a grid that year (r2 N2)"
         );
         assert!(
-            map_reach_problem("f1040", 5, 5, 3).is_none(),
-            "a healthy map"
+            p("2025", "f8283", 0, 0, 0).is_none(),
+            "2025/f8283 is the recorded blank"
         );
+        assert!(
+            p("2025", "f8949", 0, 0, 0).is_none(),
+            "a grid map with no key is the recorded blank"
+        );
+        assert!(p("2025", "f1040", 5, 5, 3).is_none(), "a healthy map");
+        assert!(
+            p("2025", "schedule_d", 5, 11, 11).is_none(),
+            "inline tables extract MORE FQNs than keys"
+        );
+    }
+
+    /// ★ B1 for fold review r2 N1 — all three binding shapes are parsed, and the key counter counts
+    /// all three, so a section-bound line can no longer vanish from both at once.
+    #[test]
+    fn every_binding_shape_is_parsed_and_counted() {
+        let dir = std::env::temp_dir().join(format!("btctax-shapes-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("shapes.map.toml");
+        let text = r#"
+line1 = "a[0].b[0].f1_1[0]" # a trailing comment
+line3 = { proceeds_d = "a[0].b[0].f1_3[0]", cost_e = "a[0].b[0].f1_4[0]" }
+line_a_business = "a[0].b[0].f1_9[0]"
+[line7a]
+yes = { field = "a[0].b[0].c1_1[0]", on = "1" }
+no  = { field = "a[0].b[0].c1_1[1]", on = "2" }
+[[part1_rows]]
+cells = ["a[0].b[0].f1_20[0]"]
+"#;
+        std::fs::write(&p, text).unwrap();
+        let b = line_bindings(&p);
+        let lines: Vec<&str> = b.iter().map(|(l, _)| l.as_str()).collect();
+        assert_eq!(
+            lines,
+            ["1", "3", "3", "7a", "7a"],
+            "scalar, inline table x2, section x2 — nothing from the grid row or the named cell"
+        );
+        assert_eq!(numbered_line_keys(text), 3, "line1, line3, [line7a]");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
 
