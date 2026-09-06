@@ -1,10 +1,39 @@
 # CONTINUITY — bitcoin_tax (TaxApp)
 
-_Last updated: **2026-09-04**. Written at a deliberate pause; safe to exit. **Read this file first.**_
+_Last updated: **2026-09-06**. Written at a deliberate pause; safe to exit. **Read this file first.**_
 
 ---
 
 # ★★★ RESUME POINT — the TY2025 push. Owner asleep; assistant proceeding autonomously (2026-09-04).
+
+> ## ★★★ RESUME 2026-09-06 (early morning) — three reviews in flight; nothing is gating. Read this block first.
+>
+> **Owner asleep; autonomous.** Everything below is committed on `main` (not pushed). Owner decisions
+> S1/S2/S6/S7/S9 and now **S10** (`ROADMAP_STATUS.md` §0a) are NOT actioned.
+>
+> **Done today, in commit order:** the TY2024 goldens regenerated under taxcalc 6.8.2 with every moved
+> field explained (`22a4c0c4`; FOLLOWUPS FR-47 residue (c) DONE); `ROADMAP_STATUS.md` §2 lists the
+> year-package table's instruments (`370b8e80`); spec **1099-DA** r1→r2→r3 through two Opus reviews
+> (r1 4C/3I/8M `2aa4ea98`, ledger `0e53d6b1`, fold `3b0a35a2`; r2 1C/5I/8M `323ceadd`, ledger
+> `98bb056f`, fold `64676905`, S10 `2a383dc3`); the **label-join fold review** (0C/4I/4M `16584a2d`,
+> ledger, fold `91070215`: `Word::y2` bottom edge, inline-table bindings, `map_reach_problem` planted,
+> work list re-derived + held by `the_committed_work_list_matches_form_delta_at_head`, floors 249/201,
+> `FiledPacket` no `Default`, census rule structural); spec **4868/1040-V** DRAFT r1 (`b212e1e6`).
+>
+> **IN FLIGHT (agents write their own reports; persist VERBATIM in its own commit, ledger, fold):**
+> 1. label-join fold re-review → `design/agent-reports/2026-09-06-label-join-fold-review-r2.md`
+> 2. spec 4868/1040-V review → `design/agent-reports/2026-09-06-spec-4868-1040v-review.md`
+> 3. spec 1099-DA r3 re-review → `design/agent-reports/2026-09-06-spec-1099da-review-r3.md`
+>
+> **NEXT, in order:** fold whichever lands (persist → VERIFICATION ledger → fold → re-dispatch until
+> 0C/0I); when 1099-DA is green, build T0–T7 per its plan (T0 = `forms/2026/YEAR.toml` + the regime
+> value; note `default_year()` → 2026 moves both TUIs); when 4868/1040-V is green, build T1–T6. Then
+> the remaining design r2 holes: Schedule 1-A emitter (f1040s1a/2025, NOW for TY2026), f6251/2025
+> (1a/1b, do once for TY2026), FR-53 prices runbook, FR-50 `forms port-status`, FR-51/52/54.
+>
+> **Traps hit today:** `git commit -m "…`x`…"` in a Bash call executes the backticks — use `-F -`
+> with a quoted heredoc (memory `commit-messages-via-dash-f`); `xtask cite-check` does NOT cover
+> `design/SPEC_*.md` — reviewers check `*"…"*` spans by hand; ugrep chokes on `[^<]{0,n}` — use python.
 
 > ## ★★★ RESUME 2026-09-05 (late) — the Fable plan review is being FOLDED. Read this block first.
 >
