@@ -477,8 +477,10 @@ LIVE · **MOOT** (the risk was real and is retired by the pause — recorded, no
    Schedule 1-A amounts. The rule as first written conflated "never from a draft" (right) with
    "never before the final form" (wrong), and would have put every TY2026 `FullReturnParams` cell on
    the post-finals critical path for no reason (Fable plan review I4). The genuinely open cell is
-   D8's: the MFS §55(d)(3) kicker's cap in the 2026 instructions — and the statute text itself is
-   NOT yet archived under `legal/text/`, which is its own NOW item (`FOLLOWUPS.md`).
+   D8's: the MFS §55(d)(3) kicker's cap in the 2026 instructions. The statute is archived
+   (2026-09-05): `legal/primary-sources/statute-irc/PLAW-119publ21_OBBBA.pdf` §70107(c) is the
+   authority for the rate; `26USC_s55.html` (USCODE-2024, pre-amendment) and
+   `26USC_s55_OLRC-prelim.html` (consolidated) sit beside it (`FOLLOWUPS.md` FR-47).
 2. **Do NOT build a port machine that emits only `.map.toml`.** That reproduces exactly today's
    state — ten committed, correct, and loaded by nothing. The five wiring edits per `(stem, year)`
    are a pure function of the pair; generate them, and ship `forms wire --check` first.

@@ -6164,11 +6164,16 @@ build, each with an owning phase.
   the phase-out threshold and the complete-phaseout amount; KAT the identity `(complete − threshold)
   × 0.50 == exemption` for all three statuses as the equivalence proof `CLAUDE.md` requires for a
   derived rate. Two-oracle-check against taxcalc's `AMT_em_*` now; OTS 2026 later. The one open
-  cell stays open (D8: MFS §55(d)(3) kicker cap). **Prerequisite in parallel: archive the statute**
-  — nothing under `legal/text/` is a statute today (four dirs: federal-register, irs-forms,
-  irs-guidance, irs-publications). Fetch 26 USC §55(d) as amended and Pub. L. 119-21 §70107 into
-  `legal/text/statute/` via a `legal/_scripts/fetch_statute_*.sh` sibling of
-  `fetch_inflation_revprocs.sh`, so the 0.50 rate is a transcription, not only a derivation.
+  cell stays open (D8: MFS §55(d)(3) kicker cap). **Prerequisite — DONE 2026-09-05: the statute is archived.**
+  (My first wording here said "nothing under `legal/text/` is a statute" — true of the text layer,
+  but `legal/primary-sources/statute-irc/` already held sixteen IRC sections; what was missing was
+  **§55 itself**, and the 2024 edition is pre-OBBBA.) Now archived by
+  `legal/_scripts/fetch_statute_55d_obbba.sh`: `26USC_s55.html` (USCODE-2024 base),
+  `PLAW-119publ21_OBBBA.pdf` (+ text layer; §70107(c) "substituting '50 percent' for '25 percent'",
+  effective TY beginning after 2025-12-31) and `26USC_s55_OLRC-prelim.html` (consolidated). A
+  `public-law` archive shape landed with it, plus the class-closing guard
+  `every_document_under_primary_sources_has_a_shape`. So the 0.50 rate is now a TRANSCRIPTION from
+  Pub. L. 119-21 §70107(c), corroborated by the Rev. Proc. identity.
   **Owning phase: NOW (ROADMAP_STATUS §3).** Rewrite `ty2026_full_return_must_stay_fail_closed`'s
   doc to reasons 2 and 3 only when the params land (reason 1 is struck through today).
 - **FR-48 — `YearReadiness` + the three LIVE refusal-surface defects** (port report §2.5, D7):

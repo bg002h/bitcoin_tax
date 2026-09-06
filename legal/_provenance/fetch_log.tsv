@@ -53,3 +53,7 @@ status	bytes	sha256	content_type	path	url
 200	253361	991b36b735bfbc621b8f0c5e65b2d63524fa242f8d9e6ca4b9bfcadcc4177986	application/pdf	design/forms/2024/i8995a--2024.pdf	https://www.irs.gov/pub/irs-prior/i8995a--2024.pdf
 200	101825	8b5143ca127b754b2e65904f6be14712b5be612056989bdf06e096ecc500f977	application/pdf	design/forms/2024/f1040s8--2024.pdf	https://www.irs.gov/pub/irs-prior/f1040s8--2024.pdf
 200	326617	90a5507b485f6e8c5ebb7aaaca0d9f999a0ad709269ac22c48320992d25f8d60	application/pdf	design/forms/2024/i1040s8--2024.pdf	https://www.irs.gov/pub/irs-prior/i1040s8--2024.pdf
+# --- §55(d) + OBBBA §70107 fetched 2026-09-06T04:58:10Z ---
+200	71057	c17459905d8964ec3bfd75074877bd8392306b4619f4b81875f276a2a2d9b762	text/html	statute-irc/26USC_s55.html	https://www.govinfo.gov/content/pkg/USCODE-2024-title26/html/USCODE-2024-title26-subtitleA-chap1-subchapA-partVI-sec55.htm
+200	968588	42f86c3d408bccb1a663c11a51a90d207b3dbc25e689240da51726154be51c8b	application/pdf	statute-irc/PLAW-119publ21_OBBBA.pdf	https://www.govinfo.gov/content/pkg/PLAW-119publ21/pdf/PLAW-119publ21.pdf
+200	271787	bddb1231ebb70afd2703ce1632f9020e5574e3593548e709f1d9043e394a441d	text/html;charset=UTF-8	statute-irc/26USC_s55_OLRC-prelim.html	https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title26-section55&num=0&edition=prelim

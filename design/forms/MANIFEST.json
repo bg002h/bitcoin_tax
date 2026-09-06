@@ -1143,6 +1143,24 @@
     "extract": ""
   },
   {
+    "path": "legal/primary-sources/statute-irc/26USC_s55.html",
+    "kind": "statute",
+    "storage": "committed",
+    "sha256": "c17459905d8964ec3bfd75074877bd8392306b4619f4b81875f276a2a2d9b762",
+    "bytes": 71057,
+    "url": "https://www.govinfo.gov/content/pkg/USCODE-2024-title26/html/USCODE-2024-title26-subtitleA-chap1-subchapA-partVI-sec55.htm",
+    "extract": ""
+  },
+  {
+    "path": "legal/primary-sources/statute-irc/26USC_s55_OLRC-prelim.html",
+    "kind": "statute",
+    "storage": "committed",
+    "sha256": "bddb1231ebb70afd2703ce1632f9020e5574e3593548e709f1d9043e394a441d",
+    "bytes": 271787,
+    "url": "https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title26-section55&num=0&edition=prelim",
+    "extract": ""
+  },
+  {
     "path": "legal/primary-sources/statute-irc/26USC_s61.html",
     "kind": "statute",
     "storage": "committed",
@@ -1150,5 +1168,14 @@
     "bytes": 22981,
     "url": "https://www.govinfo.gov/content/pkg/USCODE-2024-title26/html/USCODE-2024-title26-subtitleA-chap1-subchapB-partI-sec61.htm",
     "extract": ""
+  },
+  {
+    "path": "legal/primary-sources/statute-irc/PLAW-119publ21_OBBBA.pdf",
+    "kind": "statute",
+    "storage": "committed",
+    "sha256": "42f86c3d408bccb1a663c11a51a90d207b3dbc25e689240da51726154be51c8b",
+    "bytes": 968588,
+    "url": "https://www.govinfo.gov/content/pkg/PLAW-119publ21/pdf/PLAW-119publ21.pdf",
+    "extract": "legal/text/statute-irc/PLAW-119publ21_OBBBA.txt"
   }
 ]

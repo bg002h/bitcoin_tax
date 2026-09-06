@@ -103,6 +103,22 @@ fn ssa_determination(name: &str) -> bool {
     ext_is_document(name) && name.to_ascii_uppercase().starts_with("SSA_")
 }
 
+/// `PLAW-119publ21_OBBBA.pdf` — a **Public Law** (session law) from govinfo's `PLAW-` package
+/// series: the AMENDING text of a statute, as distinct from the codified section it amends.
+///
+/// ★★ Its own shape, not a third keyword on `usc_or_cfr`, because a Public Law is not a codified
+/// section: it is what CHANGED the section, and a reader who only held the USCODE-2024 granule of
+/// §55 would read a pre-OBBBA phase-out rate as current law. The two documents answer different
+/// questions ("what does §55 say?" vs "what did Pub. L. 119-21 do to it, and from when?").
+///
+/// ★ Added 2026-09-05 with the first one (FR-47). Before this shape, `classify` returned `None`
+/// for it and `authority_manifest`'s walker would have skipped it SILENTLY — the same gap the
+/// `ssa-determination` shape closed for one document class. `every_document_under_primary_sources_has_a_shape`
+/// now closes the CLASS: a new kind of document cannot be archived unshaped.
+fn public_law(name: &str) -> bool {
+    ext_is_document(name) && name.to_ascii_uppercase().starts_with("PLAW-")
+}
+
 /// `Form_1099-DA.pdf`, `Instructions_1099-DA.pdf` — the human-readable convention
 /// `legal/primary-sources/` uses, which is exactly why shape-matching needs more than the IRS stem:
 /// the two archives name the SAME documents differently, and a detector that knew only one
@@ -147,6 +163,11 @@ pub const SHAPES: &[Shape] = &[
         witness: "SSA_COLA_Determinations_2026.pdf",
     },
     Shape {
+        name: "public-law",
+        matches: public_law,
+        witness: "PLAW-119publ21_OBBBA.pdf",
+    },
+    Shape {
         name: "human-readable-form",
         matches: human_readable_form,
         // ★ Must be a file the repo still HOLDS — see the shape's doc comment. `Form_8949.pdf`
@@ -189,8 +210,8 @@ pub const KNOWN_ARCHIVES: &[(&str, &str)] = &[
     (
         "legal/primary-sources",
         "Convention (B): 42 binaries COMMITTED (not gitignored), no manifest, no hashes, fetched by \
-         legal/_scripts/. Holds the rungs design/forms lacks — 16 × 26 USC (rung 4, THE LAW) and \
-         6 × 26 CFR (rung 3) — so it CANNOT simply be deleted.",
+         legal/_scripts/. Holds the rungs design/forms lacks — 17 × 26 USC + 1 Public Law + 1 OLRC prelim (rung 4, THE \
+         LAW) and 6 × 26 CFR (rung 3) — so it CANNOT simply be deleted.",
     ),
     (
         "legal/text",
@@ -312,6 +333,31 @@ fn walk(dir: &Path, root: &Path, out: &mut Vec<Stray>) {
             });
         }
     }
+}
+
+/// Every DOCUMENT-extension file under `tree` that no shape claims — the files the manifest walker
+/// would drop on the floor. Extract layers are not documents in this sense and are not walked here.
+pub fn unshaped(tree: &Path) -> Vec<PathBuf> {
+    fn go(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                go(&p, out);
+                continue;
+            }
+            let name = e.file_name().to_string_lossy().to_string();
+            if ext_is_document(&name) && classify(&name).is_none() {
+                out.push(p);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    go(tree, &mut out);
+    out.sort();
+    out
 }
 
 /// Every primary-source-shaped file outside every accounted-for tree.
@@ -441,6 +487,40 @@ mod tests {
                 s.witness
             );
         }
+    }
+
+    /// ★★ **The class-closing guard: nothing under `legal/primary-sources/` may be unshaped.** The
+    /// manifest walker (`authority_manifest.rs`) keeps only files `classify` claims, so an archived
+    /// document no shape matches is not "unclassified" — it is ABSENT from the manifest, unhashed,
+    /// unrecorded, and the entry count simply does not move. That happened once (four SSA notices,
+    /// 2026-09-05) and was fixed by adding a shape; this test is what makes the NEXT new document
+    /// class red instead of vanish.
+    #[test]
+    fn every_document_under_primary_sources_has_a_shape() {
+        let found = unshaped(&repo_root().join("legal/primary-sources"));
+        assert!(
+            found.is_empty(),
+            "archived documents that NO shape claims — the manifest walker would skip these silently; \
+             add a `Shape` (with a witness) rather than renaming the file to fit one: {found:?}"
+        );
+    }
+
+    /// B1 — the guard above observed RED on a planted defect: a document-extension file whose name
+    /// fits no shape, inside an accounted-for tree.
+    #[test]
+    fn an_unshaped_document_in_an_accounted_tree_is_reported() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let tree = dir.path().join("legal/primary-sources/statute-irc");
+        fs::create_dir_all(&tree).expect("mkdir");
+        fs::write(tree.join("26USC_s55.html"), "x").expect("write"); // shaped: usc-or-cfr
+        fs::write(tree.join("Session_Law_2025.pdf"), "x").expect("write"); // unshaped
+        let found = unshaped(&dir.path().join("legal/primary-sources"));
+        assert_eq!(
+            found.len(),
+            1,
+            "exactly the unshaped document must be reported, not its shaped neighbour: {found:?}"
+        );
+        assert!(found[0].ends_with("Session_Law_2025.pdf"));
     }
 
     /// The negative half. Without it a `classify` returning `Some` unconditionally would pass the test

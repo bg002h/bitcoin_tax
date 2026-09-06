@@ -263,6 +263,11 @@ pub enum Problem {
     NoteIsNotAProvenanceNote { path: String, first_line: String },
     /// A primary source exists in an accounted-for tree but no manifest entry names it.
     NotInManifest(String),
+    /// ★ A document-extension file under `legal/primary-sources/` that NO archive shape claims. The
+    /// walker keeps only files `classify` claims, so without this class such a file is not
+    /// "unclassified" — it is absent from the manifest with every instrument green (the four SSA
+    /// notices, 2026-09-05). Fix by adding a `Shape` with a witness, never by renaming the file.
+    Unshaped(String),
     /// Listed as unrecoverable, but a URL is present after all — stale excuse.
     StaleUrlExcuse(String),
 }
@@ -301,6 +306,12 @@ impl Problem {
             ),
             Problem::NotInManifest(p) => {
                 format!("{p} — a primary source in an accounted-for tree with NO manifest entry")
+            }
+            Problem::Unshaped(p) => {
+                format!(
+                    "{p} — an archived document NO archive shape claims; the manifest walker skips \
+                     it silently. Add a `Shape` (with a witness) in archive_check.rs"
+                )
             }
             Problem::StaleUrlExcuse(p) => {
                 format!("{p} — in URL_NOT_RECOVERABLE but a URL is recorded; remove the excuse")
@@ -431,6 +442,16 @@ pub fn census(root: &Path, entries: &[Entry]) -> Vec<Problem> {
                 out.push(Problem::NotInManifest(rel));
             }
         }
+    }
+    // ★ The class the walker above cannot see: `collect_sources` keeps only shaped files, so an
+    //   unshaped document never reaches `NotInManifest`. Ask the other question explicitly.
+    for p in crate::archive_check::unshaped(&root.join("legal/primary-sources")) {
+        let rel = p
+            .strip_prefix(root)
+            .unwrap_or(&p)
+            .to_string_lossy()
+            .replace('\\', "/");
+        out.push(Problem::Unshaped(rel));
     }
     out.sort_by_key(|p| format!("{p:?}"));
     out
@@ -799,6 +820,19 @@ pub fn regen(root: &Path) -> Result<usize, String> {
     }
     sources.sort();
     sources.dedup();
+
+    // ★ REFUSE to regenerate over an unshaped document — the regen would silently omit it, and
+    //   "regenerated N entries" would read as complete. Precedes the write, like the drop guard.
+    let unshaped = crate::archive_check::unshaped(&root.join("legal/primary-sources"));
+    if !unshaped.is_empty() {
+        return Err(format!(
+            "REFUSING to regenerate: {} archived document(s) under legal/primary-sources/ match NO \
+             archive shape and would be silently omitted: {:?}. Add a `Shape` (with a witness) in \
+             archive_check.rs — do not rename the file to fit an existing one.",
+            unshaped.len(),
+            unshaped
+        ));
+    }
 
     let dropped = regen_would_drop(root, &sources)?;
     if !dropped.is_empty() {
@@ -1728,7 +1762,8 @@ mod tests {
     #[test]
     fn the_manifest_covers_the_law_itself() {
         let entries = load(&crate::form_geometry::repo_root()).expect("manifest loads");
-        for (kind, least) in [(Kind::Statute, 16), (Kind::Regulation, 6)] {
+        // ★ Ratchet: 16 → 19 on 2026-09-05 (§55 base + Pub. L. 119-21 + OLRC prelim, FR-47).
+        for (kind, least) in [(Kind::Statute, 19), (Kind::Regulation, 6)] {
             let n = entries.iter().filter(|e| e.kind == kind).count();
             assert!(
                 n >= least,
