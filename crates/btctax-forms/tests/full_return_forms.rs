@@ -520,15 +520,19 @@ fn full_return_forms_refuse_unsupported_years() {
         dec!(20000),
     )
     .unwrap();
-    for year in [2017, 2023, 2025] {
-        // 2017 and 2023 bundle no Form 8995 at all (`UnsupportedYear`); 2025 bundles the map but its
-        // line-set revision has no struct yet (`UnwiredLineSet`, design r2 §10 step 3) — both are
-        // refusals, and the second names the more precise fact.
+    for year in [2017, 2023] {
+        // Neither year bundles a Form 8995 at all (`UnsupportedYear`).
         assert!(matches!(
             btctax_forms::fill_form_8995(&l95, &kitchen_sink_header(), year),
-            Err(FormsError::UnsupportedYear(_) | FormsError::UnwiredLineSet { .. })
+            Err(FormsError::UnsupportedYear(_))
         ));
     }
+    // TY2025's map was wired at design r2 step 5 (2026-09-05): the same line set as 2024, so the
+    // fill resolves — a refusal here would be the OLD `UnwiredLineSet` state coming back.
+    assert!(
+        btctax_forms::fill_form_8995(&l95, &kitchen_sink_header(), 2025).is_ok(),
+        "TY2025 Form 8995 is wired"
+    );
 }
 
 // ────────────────────────────── Schedule 2 / Schedule 3 ───────────────────────────────────────

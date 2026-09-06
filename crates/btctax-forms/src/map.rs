@@ -309,7 +309,7 @@ impl Form6251Map {
             ))),
         }
     }
-    fn parse(s: &str) -> Result<Self, toml::de::Error> {
+    pub fn parse(s: &str) -> Result<Self, toml::de::Error> {
         toml::from_str(s)
     }
 
@@ -2078,7 +2078,7 @@ impl Form8995AMap {
     pub fn ty2024() -> Self {
         Self::for_year(2024).expect("the bundled TY2024 map is wired and parses")
     }
-    fn parse(s: &str) -> Result<Self, toml::de::Error> {
+    pub fn parse(s: &str) -> Result<Self, toml::de::Error> {
         toml::from_str(s)
     }
 }

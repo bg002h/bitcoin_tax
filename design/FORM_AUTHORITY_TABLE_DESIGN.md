@@ -256,7 +256,16 @@ witness) · `forms_expected` == present ∪ absent-with-reason · every `Stem` h
    filable-without-params and prices-short kills), `default_year()` from the glob for both TUIs,
    `FORMS_ABSENT_FROM_YEAR` and `CENSUS_KEYS` retired into the record and `Stem::ALL`.
    **`YEAR.toml` for 2017/2024/2025** with `YearReadiness` and its kills; move the four literals in.
-5. **`line_set`: add `f6251/2025`** (the 1a/1b struct) and wire the ten orphaned TY2025 maps. **This is
+5. ◐ **EIGHT OF TEN WIRED (2026-09-05)** — `f1040s2/s3/sa/sb/sc`, `f8959`, `f8960`, `f8995` for
+   TY2025: each verified (map ⊆ PDF fields; the line→printed-label join, derived over every map;
+   `[census]` present; 2024→2025 deltas were field renames with no line moved) and measured to parse
+   into its 2024 struct — a constants-only revision of the same line set, so the arm is the 2024
+   struct and NO new Rust. `tests/line_set_wiring.rs` pins wired ⇔ parses over the ten (plant: un-wire
+   one → two tests red). **Two remain `Unwired`, deliberately:** `f6251/2025` (line 1 → 1a/1b, a
+   REBUILD: a new transcription struct, to be written once for TY2026 which shares the layout —
+   TY2025 is paused) and `f1040s1a/2025` (no struct exists: the Schedule 1-A emitter is P2's missing
+   17th form, a NOW item for TY2026).
+   **`line_set`: add `f6251/2025`** (the 1a/1b struct) and wire the ten orphaned TY2025 maps. **This is
    where the TY2025 6251 map first parses.**
 6. Only then TY2026 rows — `forms-provisional/2026/` today, promoted file-by-file as finals land.
 

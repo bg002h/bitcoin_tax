@@ -112,22 +112,14 @@ const KNOWN_GAPS: &[(i32, &str, &[&str])] = &[
     ),
     // ── TY2024 — the reference year; one asset stands outside the archive. ──────────────────────
     (2024, "f8283", &["note", "manifest", "extract", "geometry"]),
-    // ── TY2025 — ten forms bound by the build but not DISPATCHED (their line-set revision has no
-    //    struct yet — design r2 §10 step 5), five dispatched but not censused. "wired" left this
+    // ── TY2025 — step 5 (2026-09-05) wired eight of the ten; two remain bound but not DISPATCHED
+    //    (f6251/2025 is a rebuild, f1040s1a has no struct — design r2 §10 step 5), five dispatched but not censused. "wired" left this
     //    record at step 3: the glob binds every file, so it can no longer be missing. ────────────────
     (2025, "f1040", &["census"]),
     (2025, "f1040s1a", &["dispatch"]),
-    (2025, "f1040s2", &["dispatch"]),
-    (2025, "f1040s3", &["dispatch"]),
-    (2025, "f1040sa", &["dispatch"]),
-    (2025, "f1040sb", &["dispatch"]),
-    (2025, "f1040sc", &["dispatch"]),
     (2025, "f6251", &["dispatch"]),
     (2025, "f8283", &["census"]),
     (2025, "f8949", &["census"]),
-    (2025, "f8959", &["dispatch"]),
-    (2025, "f8960", &["dispatch"]),
-    (2025, "f8995", &["dispatch"]),
     (2025, "schedule_d", &["census"]),
     (2025, "schedule_se", &["census"]),
 ];

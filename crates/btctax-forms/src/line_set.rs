@@ -7,8 +7,11 @@
 //! in a row is a **parse refusal** ([`LineSet::parse`] → `None`, held by `tests/map_rows.rs`), and
 //! [`schema`] is the ONE match from a revision to the struct that parses it — **exhaustive**, so a
 //! revision added without an arm does not compile, with an explicit [`Schema::Unwired`] arm for the
-//! ten TY2025 maps whose revision has not been VERIFIED against a struct yet (step 5 wires them:
-//! each is a deletion from that arm, and forgetting one still cannot compile).
+//! TY2025 maps whose revision has not been VERIFIED against a struct yet (step 5 wires them: each is
+//! a deletion from that arm, and forgetting one still cannot compile). **Step 5 (2026-09-05) wired
+//! eight**; two remain: `f6251/2025` (line 1 split into 1a/1b — a rebuild, a new struct, done once
+//! for TY2026 which shares the layout; TY2025 is paused) and `f1040s1a/2025` (no filler exists yet —
+//! the Schedule 1-A emitter is the missing 17th form).
 //!
 //! ★ "Unwired" means unverified, not unparseable (steps-2/3 review Q3). Measured 2026-09-05 on the
 //! ten: **eight** (`f1040s2`, `f1040s3`, `f1040sa`, `f1040sb`, `f1040sc`, `f8959`, `f8960`,
@@ -72,15 +75,15 @@ pub enum LineSet {
     F1040_2025,
     /// `"f1040s1a/2025"` — UNWIRED: not yet verified against a struct (design r2 §10 step 5).
     F1040s1a_2025,
-    /// `"f1040s2/2025"` — UNWIRED: not yet verified against a struct (design r2 §10 step 5).
+    /// `"f1040s2/2025"` — wired at step 5 (2026-09-05): map ⊆ PDF fields, the label join and `[census]` all green; parses into the 2024 struct (a constants-only revision of the same line set).
     F1040s2_2025,
-    /// `"f1040s3/2025"` — UNWIRED: not yet verified against a struct (design r2 §10 step 5).
+    /// `"f1040s3/2025"` — wired at step 5 (2026-09-05): map ⊆ PDF fields, the label join and `[census]` all green; parses into the 2024 struct (a constants-only revision of the same line set).
     F1040s3_2025,
-    /// `"f1040sa/2025"` — UNWIRED: not yet verified against a struct (design r2 §10 step 5).
+    /// `"f1040sa/2025"` — wired at step 5 (2026-09-05): map ⊆ PDF fields, the label join and `[census]` all green; parses into the 2024 struct (a constants-only revision of the same line set).
     F1040sa_2025,
-    /// `"f1040sb/2025"` — UNWIRED: not yet verified against a struct (design r2 §10 step 5).
+    /// `"f1040sb/2025"` — wired at step 5 (2026-09-05): map ⊆ PDF fields, the label join and `[census]` all green; parses into the 2024 struct (a constants-only revision of the same line set).
     F1040sb_2025,
-    /// `"f1040sc/2025"` — UNWIRED: not yet verified against a struct (design r2 §10 step 5).
+    /// `"f1040sc/2025"` — wired at step 5 (2026-09-05): map ⊆ PDF fields, the label join and `[census]` all green; parses into the 2024 struct (a constants-only revision of the same line set).
     F1040sc_2025,
     /// `"f6251/2025"` — UNWIRED: not yet verified against a struct (design r2 §10 step 5).
     F6251_2025,
@@ -88,11 +91,11 @@ pub enum LineSet {
     F8283_2025,
     /// `"f8949/2025"`.
     F8949_2025,
-    /// `"f8959/2025"` — UNWIRED: not yet verified against a struct (design r2 §10 step 5).
+    /// `"f8959/2025"` — wired at step 5 (2026-09-05): map ⊆ PDF fields, the label join and `[census]` all green; parses into the 2024 struct (a constants-only revision of the same line set).
     F8959_2025,
-    /// `"f8960/2025"` — UNWIRED: not yet verified against a struct (design r2 §10 step 5).
+    /// `"f8960/2025"` — wired at step 5 (2026-09-05): map ⊆ PDF fields, the label join and `[census]` all green; parses into the 2024 struct (a constants-only revision of the same line set).
     F8960_2025,
-    /// `"f8995/2025"` — UNWIRED: not yet verified against a struct (design r2 §10 step 5).
+    /// `"f8995/2025"` — wired at step 5 (2026-09-05): map ⊆ PDF fields, the label join and `[census]` all green; parses into the 2024 struct (a constants-only revision of the same line set).
     F8995_2025,
     /// `"schedule_d/2025"`.
     ScheduleD_2025,
@@ -300,17 +303,17 @@ pub fn schema(ls: LineSet) -> Schema {
         LineSet::ScheduleSe_2024 => Schema::ScheduleSeMap,
         LineSet::F1040_2025 => Schema::Form1040Map,
         LineSet::F1040s1a_2025 => Schema::Unwired,
-        LineSet::F1040s2_2025 => Schema::Unwired,
-        LineSet::F1040s3_2025 => Schema::Unwired,
-        LineSet::F1040sa_2025 => Schema::Unwired,
-        LineSet::F1040sb_2025 => Schema::Unwired,
-        LineSet::F1040sc_2025 => Schema::Unwired,
+        LineSet::F1040s2_2025 => Schema::Schedule2Map,
+        LineSet::F1040s3_2025 => Schema::Schedule3Map,
+        LineSet::F1040sa_2025 => Schema::ScheduleAMap,
+        LineSet::F1040sb_2025 => Schema::ScheduleBMap,
+        LineSet::F1040sc_2025 => Schema::ScheduleCMap,
         LineSet::F6251_2025 => Schema::Unwired,
         LineSet::F8283_2025 => Schema::Form8283Map,
         LineSet::F8949_2025 => Schema::Form8949Map,
-        LineSet::F8959_2025 => Schema::Unwired,
-        LineSet::F8960_2025 => Schema::Unwired,
-        LineSet::F8995_2025 => Schema::Unwired,
+        LineSet::F8959_2025 => Schema::Form8959Map,
+        LineSet::F8960_2025 => Schema::Form8960Map,
+        LineSet::F8995_2025 => Schema::Form8995Map,
         LineSet::ScheduleD_2025 => Schema::ScheduleDMap,
         LineSet::ScheduleSe_2025 => Schema::ScheduleSeMap,
     }
@@ -329,29 +332,15 @@ mod tests {
         assert_eq!(LineSet::ALL.len(), 37);
     }
 
-    /// The Unwired set is EXACTLY the ten design r2 §10 names — a shrink-only pin: wiring one at
-    /// step 5 edits this list down; a new unwired revision cannot appear without editing it up.
+    /// The Unwired set is EXACTLY the two that step 5 could not wire — a shrink-only pin: wiring
+    /// one edits this list down; a new unwired revision cannot appear without editing it up.
     #[test]
-    fn the_unwired_set_is_exactly_the_ten_ty2025_maps() {
+    fn the_unwired_set_is_exactly_the_two_ty2025_maps_step_5_could_not_wire() {
         let unwired: Vec<&str> = LineSet::ALL
             .iter()
             .filter(|ls| schema(**ls) == Schema::Unwired)
             .map(|ls| ls.as_str())
             .collect();
-        assert_eq!(
-            unwired,
-            [
-                "f1040s1a/2025",
-                "f1040s2/2025",
-                "f1040s3/2025",
-                "f1040sa/2025",
-                "f1040sb/2025",
-                "f1040sc/2025",
-                "f6251/2025",
-                "f8959/2025",
-                "f8960/2025",
-                "f8995/2025",
-            ]
-        );
+        assert_eq!(unwired, ["f1040s1a/2025", "f6251/2025"]);
     }
 }
